@@ -3752,7 +3752,7 @@ class CharacterSheetLevelUp {
 			});
 		};
 
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: "📚 Add New Class (Multiclass)",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -3853,7 +3853,7 @@ class CharacterSheetLevelUp {
 		search.addEventListener("input", (e) => renderList(e.target.value));
 		renderList();
 
-		ee`<div class="charsheet__multiclass-body">
+		const mainContent = ee`<div class="charsheet__multiclass-body">
 			<div class="charsheet__modal-info-banner charsheet__modal-info-banner--info">
 				<div class="charsheet__modal-info-banner-icon">📚</div>
 				<div class="charsheet__modal-info-banner-content">
@@ -3962,7 +3962,7 @@ class CharacterSheetLevelUp {
 		}
 
 		// Show choices modal
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: `${selectedClass.name} - Level 1 Choices`,
 			isMinHeight0: true,
 			isWidth100: true,

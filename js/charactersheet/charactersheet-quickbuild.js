@@ -987,8 +987,7 @@ class CharacterSheetQuickBuild {
 		};
 
 		const renderSummary = () => {
-			const summaryEl = this._overlay.querySelector("#quickbuild-target-summary");
-			summaryEl.innerHTML = "";
+			summary.innerHTML = "";
 
 			const totalAllocated = this._classAllocations.reduce((sum, a) => sum + a.targetLevel, 0);
 			const totalNew = totalAllocated - this._fromLevel;
@@ -1003,7 +1002,7 @@ class CharacterSheetQuickBuild {
 					${!isValid ? `<br><span class="text-danger ve-small">Level allocation must equal target level (${this._targetLevel})</span>` : ""}
 				</div>
 			`});
-			summaryEl.append(summaryContent);
+			summary.append(summaryContent);
 		};
 
 		renderAllocations();
