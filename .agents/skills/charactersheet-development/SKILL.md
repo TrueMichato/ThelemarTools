@@ -1,22 +1,23 @@
 ---
 name: charactersheet-development
-description: "Develop, debug, test, and extend the 5etools Character Sheet system. Use when: editing any js/charactersheet/*.js module, writing or fixing character sheet tests, adding class/subclass features to getFeatureCalculations(), working with toggle abilities or active states, implementing combat mechanics (attacks/conditions/death saves/concentration), modifying the character builder or level-up wizard, working with spell slot calculations or spell management, inventory/equipment/attunement logic, NPC export, rest mechanics, working on XPHB 2024 feature parity, TGTT/Thelemar homebrew content, custom abilities, or any file under test/jest/charactersheet/. Also use for understanding how modules interact, resolving state management issues, fixing serialization/migration bugs, or reviewing the active refactoring efforts (LevelUp→ClassUtils extraction, state file modularization). If someone mentions 'character sheet', 'charsheet', 'feature calculations', 'toggle abilities', 'level up', 'quick build', 'active states', 'spell slots', 'combat tracker', 'rest mechanics', 'NPC exporter', or any D&D class/subclass feature implementation — this is the right skill."
+description: "Develop, debug, test, and extend the 5etools Character Sheet system (js/charactersheet/, test/jest/charactersheet/). Covers class/subclass feature calculations, toggle abilities and active states, combat mechanics, spell slot management, character builder, level-up wizard, quick build, inventory/attunement, NPC export, rest mechanics, save/load migrations, and XPHB 2024 parity. Includes TGTT/Thelemar homebrew integration. Use for understanding module interactions, resolving state management issues, reviewing active refactors (LevelUp to ClassUtils extraction, state modularization), or any task mentioning character sheet, charsheet, feature calculations, toggle abilities, active states, spell slots, combat tracker, rest mechanics, or D&D class/subclass implementation."
 ---
 
 # Character Sheet Development
 
 ## System Overview
 
-The Character Sheet is a D&D 5e character management tool built within the 5etools ecosystem. It is **actively under development** — some subsystems are mature (class mechanics, combat), while others are in flux (LevelUp refactoring, XPHB 2024 parity, state file modularization). Understanding what's stable vs. WIP is critical before making changes.
+The character sheet is **actively under development** — some subsystems are mature (class mechanics, combat), while others are in flux (LevelUp refactoring, XPHB 2024 parity, state file modularization). Understanding what's stable vs. WIP is critical before making changes.
 
 ### Key Facts
 
-- **18 modules** in `js/charactersheet/`, orchestrated by `CharacterSheetPage`
-- **Central state**: `CharacterSheetState` (~23,400 lines) in `charactersheet-state.js` is the single source of truth
-- **65+ test files** in `test/jest/charactersheet/` with 4,175+ tests
-- **Homebrew**: TGTT (Thelemar) content is deeply integrated (737 dedicated tests)
-- **Editions**: Supports PHB 2014 ("classic") and XPHB 2024 ("one"), detected via source code
-- Browser globals architecture — modules assign to `globalThis`, tests import via `import` then grab from `globalThis`
+- 18 modules in `js/charactersheet/`, orchestrated by `CharacterSheetPage`
+- Central state: `CharacterSheetState` (large file) in `charactersheet-state.js` — single source of truth
+- 65+ test files in `test/jest/charactersheet/`
+- TGTT (Thelemar) homebrew deeply integrated with dedicated tests
+- Supports PHB 2014 ("classic") and XPHB 2024 ("one"), detected via source code
+- Browser globals architecture — modules assign to `globalThis`, tests import then grab from `globalThis`
+- `.github/instructions/charactersheet.instructions.md` auto-loads with charsheet files and provides coding standards
 
 ### Critical Data Model Fact
 
@@ -34,76 +35,30 @@ Read the reference that matches your task:
 | Current WIP areas, known limitations, ongoing refactors | [Development Status](./references/development-status.md) |
 | Active states, combat mechanics, NPC export, rest, spell/item data shapes | [Subsystem Details](./references/subsystem-details.md) |
 
-Also consult the project's own docs (read before modifying): `docs/charactersheet/` — especially `10-known-limitations.md` and `11-future-roadmap.md`.
+Also consult the project's own workspace docs in `docs/charactersheet/` (not part of this skill) — especially `10-known-limitations.md` and `11-future-roadmap.md`.
 
 ## Procedure
 
 ### 1. Identify the Layer
 
-Character sheet work falls into one of these layers:
-
-| Layer | Files | Examples |
-|-------|-------|---------|
-| **State / Model** | `charactersheet-state.js` | Adding feature calculations, fixing stat derivation, serialization |
-| **Module / Controller** | `charactersheet-{combat,spells,inventory,...}.js` | UI behavior, event handling, render logic |
-| **Utility** | `charactersheet-class-utils.js`, `charactersheet-spell-picker.js` | Shared helpers, data queries |
-| **Orchestrator** | `charactersheet.js` | Data loading, module wiring, save/load |
-| **Tests** | `test/jest/charactersheet/*.test.js` | Verification, regression |
+Work falls into State/Model (`charactersheet-state.js`), Module/Controller (`charactersheet-{combat,spells,...}.js`), Utility (`charactersheet-class-utils.js`), Orchestrator (`charactersheet.js`), or Tests. See [Architecture](./references/architecture.md) for the full module map and data flow.
 
 ### 2. Understand the State Model
 
-All character data flows through `CharacterSheetState._data`. Key computed values:
-- **Ability modifiers**: `getAbilityMod(ability)` — `Math.floor((score - 10) / 2)`
-- **Proficiency bonus**: `getProficiencyBonus()` — based on total character level
-- **AC**: Complex multi-source calculation (armor, unarmored, formula, shields, items, active states)
-- **Feature calculations**: `getFeatureCalculations()` — the core method for all class/subclass mechanics
-
-When modifying state: changes to `_data` happen through setter methods, derived values are recomputed via getter methods. There is no reactive/observer pattern — modules explicitly call `render()` after state changes.
+All data flows through `CharacterSheetState._data`. Key computed methods: `getAbilityMod()`, `getProficiencyBonus()`, AC calculation, and `getFeatureCalculations()` (the core method for all class/subclass mechanics). No reactive pattern — modules must call `render()` after state changes. See [Architecture](./references/architecture.md) and [Feature Calculations](./references/feature-calculations.md) for details.
 
 ### 3. Follow the Test Pattern
 
-Tests use a specific setup that mocks browser globals. The critical import pattern:
+Tests mock browser globals via `setup.js`. Critical import pattern:
 
 ```javascript
 import "../../../js/charactersheet/charactersheet-state.js";
 const CharacterSheetState = globalThis.CharacterSheetState;
-
-describe("Feature Name", () => {
-    let state;
-    beforeEach(() => { state = new CharacterSheetState(); });
-
-    it("should compute X at level Y", () => {
-        state.addClass({name: "Fighter", source: "PHB", level: 5});
-        const calc = state.getFeatureCalculations();
-        expect(calc.hasExtraAttack).toBe(true);
-    });
-});
 ```
 
-**Anti-pattern to avoid**:
-```javascript
-// BAD — tests nothing meaningful
-expect(state.getTotalLevel()).toBe(3); // Always passes!
-```
+If state calls another module (e.g., `CharacterSheetClassUtils`), import it BEFORE the module under test or get `ReferenceError`. See [Testing Guide](./references/testing-guide.md) for full patterns and anti-patterns.
 
-**Correct pattern**:
-```javascript
-// GOOD — tests actual calculated mechanic
-const calc = state.getFeatureCalculations();
-expect(calc.experimentalElixirCount).toBe(2);
-```
-
-### 4. Handle Module Dependencies
-
-If your change in `charactersheet-state.js` calls methods from another module (e.g., `CharacterSheetClassUtils`), you must explicitly import it in tests or they'll throw `ReferenceError`. The browser bundles all scripts together, but Jest isolates modules.
-
-```javascript
-// In test file — import dependencies BEFORE the module under test
-import "../../../js/charactersheet/charactersheet-class-utils.js";
-import "../../../js/charactersheet/charactersheet-state.js";
-```
-
-### 5. Run Tests
+### 4. Run Tests
 
 ```bash
 # Specific suite
@@ -116,7 +71,7 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetToggleAbilities 
 NODE_OPTIONS='--experimental-vm-modules' npx jest test/jest/charactersheet/ --no-coverage --forceExit
 ```
 
-### 6. Check for Ripple Effects
+### 5. Check for Ripple Effects
 
 Changes to these files can affect many other modules:
 - `charactersheet-state.js` → literally everything
@@ -176,16 +131,14 @@ When touching these areas: check if the method already exists in ClassUtils or i
 
 ## Pitfalls
 
-- **The state file is 23,400+ lines.** Use grep/search to find the right section. Key landmarks: `getFeatureCalculations()` (~line 9894+), `ACTIVE_STATE_TYPES` (~line 3386+), default state schema (~line 3397), parsers (~line 7).
-- **Ability scores ≠ ability bonuses.** Base scores live in `_data.abilities`, racial/item bonuses in `_data.abilityBonuses`. These are summed at read time. Always use `getAbilityScore()` (returns base + bonus) and `getAbilityMod()`, never read `_data.abilities` directly for the "total".
-- **Multiclass spell slot math is tricky.** Full casters count full levels, half casters half (rounded down), third casters third (rounded down), Artificer rounds up. The combined caster level determines slot table index. Warlock Pact Magic is tracked separately.
-- **TGTT/Thelemar content is everywhere.** Don't remove or break Thelemar features (combat traditions, dreamwalker, custom subclasses). They're gated by settings flags.
-- **Edition detection matters.** PHB features and XPHB features can differ for the same class. Check source: `source === "XPHB"` or `edition === "one"` for 2024. Blade Ward is concentration in XPHB but not PHB 2014 — save migration must match BOTH name AND source.
-- **The `setup.js` mocks are minimal.** If you need Parser, Renderer, or DataUtil methods not already mocked, add them to `test/jest/charactersheet/setup.js`. But keep mocks minimal — don't pull in the full library.
-- **Save/load migration.** If you add new state fields, handle backward compatibility in `loadFromJson()` for characters saved without those fields. Provide sensible defaults. Three migrations run automatically: `_migrateFeatures()`, `_migrateModifiers()`, `_migrateSpells()`.
-- **Module init order matters.** Builder initializes first, Spells third (needs DataUtil), Features fifth (needs class data loaded). Each module is try/catch isolated — one failing doesn't break others.
-- **No reactive UI.** There is no binding framework. All DOM updates are manual. After `state.setX()`, the module must call `this.render()` or `this._renderXxx()`. Forgetting to re-render is a common bug.
-- **jQuery everywhere.** Event binding is `$(document).on("click", "#id", handler)`. HTML is generated as template literal strings wrapped in `$()`. CSS classes follow a BEM-like pattern: `.charsheet__element--modifier`.
-- **Console logging convention.** All modules prefix: `[CharSheet State]`, `[LevelUp]`, `[Combat]`, etc. Use `console.warn()` for non-fatal, `console.error()` for module-breaking failures.
-- **Respec editing is partially implemented.** ASI, feat, subclass, feature choices, combat traditions, and weapon masteries can be edited. Skills, expertise, and spells cannot — the respec UI has buttons disabled for those with comment: "would require extensive recalculation".
-- **Steady Aim has a two-phase consumption pattern.** It grants both advantage + zero speed; after the attack, only the advantage effect is consumed (via `_consumeOnAttackStates()`), leaving zero speed until turn ends.
+- **The state file is very large.** Search for landmarks: `getFeatureCalculations()` method definition, `ACTIVE_STATE_TYPES` constant, default `_data` initialization, `class Feature.*Parser` pattern.
+- **Ability scores ≠ ability bonuses.** Base scores live in `_data.abilities`, racial/item bonuses in `_data.abilityBonuses`. Always use `getAbilityScore()` (returns base + bonus) and `getAbilityMod()`, never read `_data.abilities` directly for the "total".
+- **Multiclass spell slot math is tricky.** Full casters count full levels, half casters half (rounded down), third casters third (rounded down), Artificer rounds up. Combined caster level determines slot table index. Warlock Pact Magic is separate.
+- **TGTT/Thelemar content is everywhere.** Don't remove or break Thelemar features (combat traditions, dreamwalker, custom subclasses). Gated by settings flags.
+- **Edition detection matters.** PHB and XPHB features can differ for the same class. Check `source === "XPHB"` or `edition === "one"` for 2024. Blade Ward is concentration in XPHB but not PHB 2014 — migration must match BOTH name AND source.
+- **The `setup.js` mocks are minimal.** If you need Parser, Renderer, or DataUtil methods not already mocked, add them to `test/jest/charactersheet/setup.js`. Keep mocks minimal.
+- **Save/load migration.** New state fields need backward-compatible defaults in `loadFromJson()`. Three migrations run automatically: `_migrateFeatures()`, `_migrateModifiers()`, `_migrateSpells()`.
+- **Module init order matters.** Builder first, Spells third (needs DataUtil), Features fifth (needs class data). Each module is try/catch isolated.
+- **No reactive UI.** After `state.setX()`, the module must call `render()`. Forgetting to re-render is a common bug.
+- **Respec editing is partial.** ASI, feat, subclass, feature choices, combat traditions, and weapon masteries can be edited. Skills, expertise, and spells cannot.
+- **Steady Aim two-phase pattern.** Grants advantage + zero speed; after the attack, only advantage is consumed (via `_consumeOnAttackStates()`), zero speed survives until turn end.

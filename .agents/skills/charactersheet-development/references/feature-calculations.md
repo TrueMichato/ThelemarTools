@@ -1,5 +1,14 @@
 # Feature Calculations Reference
 
+## Contents
+- Overview and How It Works
+- Naming Conventions (has/Damage/Dc/Uses/Bonus/Range/Count/Die)
+- Adding a New Subclass (key principles)
+- Common DC Formulas
+- Interaction with Other Systems (Active States, Conditions, FeatureEffectRegistry, Items)
+- Implemented Classes
+- Performance Note
+
 ## Overview
 
 `getFeatureCalculations()` in `charactersheet-state.js` is the central method that computes all class-specific mechanics. It returns a flat object with boolean flags and computed values, traversing every class the character has and computing level-gated features.

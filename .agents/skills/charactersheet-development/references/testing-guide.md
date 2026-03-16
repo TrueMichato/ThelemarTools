@@ -1,5 +1,12 @@
 # Testing Guide
 
+## Contents
+- Test Infrastructure (directory, setup, running tests, import pattern, setup.js mocks)
+- Test Categories (state, class-specific, combat, spells, parsers, toggle, TGTT, integration, builder, levelup, misc)
+- Writing Tests: Patterns (standard feature, toggle ability, multiclass, spells, inventory, active states)
+- Anti-Patterns to Avoid
+- Test File Conventions
+
 ## Test Infrastructure
 
 ### Directory & Setup

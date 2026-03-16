@@ -2,6 +2,16 @@
 
 Current state of the character sheet system — what's stable, what's in progress, what's known-broken.
 
+## Contents
+- Active Refactoring Efforts (LevelUp→ClassUtils, Builder/LevelUp/QuickBuild, Respec, State Modularization)
+- XPHB 2024 Coverage (implemented, partial, not implemented)
+- Save/Load Migrations
+- Known Bugs
+- Test Audit Status
+- Missing Features (core, combat, resources)
+- Homebrew Integration Points
+- Code Style Notes
+
 ## Active Refactoring Efforts
 
 ### LevelUp → ClassUtils Extraction

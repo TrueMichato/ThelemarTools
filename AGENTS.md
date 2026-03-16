@@ -122,7 +122,7 @@ The character sheet (`charactersheet.html`) is a full D&D 5e character manager *
 
 ### Architecture (Compressed)
 
-18 modules in `js/charactersheet/` | MVC pattern, no reactive framework — all renders manual via jQuery
+18 modules in `js/charactersheet/` | MVC pattern, no reactive framework — all renders manual via vanilla DOM (`e_()`, `ee` tagged templates, `querySelector`, `addEventListener`)
 Central state: `CharacterSheetState` (~23,400 lines) in `charactersheet-state.js` — single source of truth
 65+ test files in `test/jest/charactersheet/` | 4,175+ tests | TGTT/Thelemar homebrew: 737 tests
 Modules assign to `globalThis` | Tests use ES `import` then `globalThis.ClassName`
@@ -162,7 +162,7 @@ Root: `.agents/skills/charactersheet-development/references/`
 
 |When to read|File|
 |---|---|
-|Module roles, data flow, event patterns, jQuery, CSS, init order|[architecture.md](.agents/skills/charactersheet-development/references/architecture.md)|
+|Module roles, data flow, event patterns, vanilla DOM API, CSS, init order|[architecture.md](.agents/skills/charactersheet-development/references/architecture.md)|
 |Adding class/subclass features, `getFeatureCalculations()` patterns|[feature-calculations.md](.agents/skills/charactersheet-development/references/feature-calculations.md)|
 |Writing tests, setup.js mocks, import patterns, anti-patterns|[testing-guide.md](.agents/skills/charactersheet-development/references/testing-guide.md)|
 |WIP status, refactors, XPHB gaps, known bugs, Builder vs LevelUp vs QuickBuild|[development-status.md](.agents/skills/charactersheet-development/references/development-status.md)|

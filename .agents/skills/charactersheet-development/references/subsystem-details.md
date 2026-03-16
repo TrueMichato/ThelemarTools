@@ -2,6 +2,16 @@
 
 Detailed reference for combat, active states, spells, items, NPC export, rest, and custom abilities.
 
+## Contents
+- Active States / Toggle Abilities (ACTIVE_STATE_TYPES, storage, mutual exclusivity, bonus aggregation, concentration cascade, Steady Aim)
+- Combat System (attack bonus, sneak attack, action economy, weapon mastery)
+- Spell Data Format (known/prepared, innate, spell slots)
+- Inventory Item Format (items, item bonuses, weapon bonus fields)
+- NPC Exporter (convertStateToMonster, CR estimation, custom source)
+- Rest Mechanics (short rest, long rest, item charges)
+- Combat Action Effects Pipeline (parsing, classification, effect schema, modals, subclass grants)
+- Custom Abilities (data structure, effect routing, reapply on load)
+
 ## Active States / Toggle Abilities
 
 ### ACTIVE_STATE_TYPES (24 types defined)

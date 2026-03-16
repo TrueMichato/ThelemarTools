@@ -1,5 +1,17 @@
 # Architecture Reference
 
+## Contents
+- Module Map
+- Data Flow (Initialization, Update Cycle, Event Communication, Module Init Order)
+- CSS Conventions
+- Data Validation Patterns
+- State Serialization
+- Key Integration Points
+- Parsers
+- FeatureEffectRegistry
+- Global Dependencies
+- Console Logging Convention
+
 ## Module Map
 
 ```
@@ -94,11 +106,11 @@ No reactive system — renders are explicit. Related modules re-render together 
 
 ### Event Communication
 
-- **jQuery document events**: All handlers bound via `$(document).on("click", "#charsheet-element-id", handler)`
+- **Vanilla DOM events**: Handlers bound via `element.addEventListener("click", handler)`. Event delegation uses `e.target.closest(".selector")` pattern.
 - **No pub-sub or custom events**: State changes are direct method calls (`this._state.setName(x)`)
 - **Manual re-renders**: Modules call `_renderXxx()` — forgetting is a common source of stale UI bugs
-- **Toast notifications**: `JqueryUtil.doToast({type: "success", content: "..."})` for user feedback
-- **HTML generation**: Template literal strings wrapped in `$()` — e.g., `` const $btn = $(`<button class="btn">...</button>`) ``
+- **Toast notifications**: `JqueryUtil.doToast({type: "success", content: "..."})` for user feedback (site-wide utility, not jQuery-dependent despite the name)
+- **HTML generation**: `e_({outer: \`<button class="btn">...</button>\`})` for single elements, `ee\`<div>...</div>\`` tagged template for complex HTML. `insertAdjacentHTML()` for appending HTML strings.
 
 ### Module Init Order
 
@@ -179,8 +191,8 @@ The character sheet modules depend on these 5etools globals (mocked in tests):
 - `StorageUtil` — local storage access
 - `UrlUtil` — URL construction
 - `RollerUtil` — crypto detection
-- `$` (jQuery) — all DOM manipulation and event binding
-- `JqueryUtil` — toast notifications (`doToast`)
+- `e_()` / `ee` / `es()` / `em()` — vanilla DOM helpers from `js/utils.js` (element creation, querySelector wrappers)
+- `JqueryUtil` — toast notifications (`doToast`) — site-wide utility, not jQuery-dependent despite the name
 - `DataUtil` — async data loading for spells, items, races, classes
 
 ## Console Logging Convention
