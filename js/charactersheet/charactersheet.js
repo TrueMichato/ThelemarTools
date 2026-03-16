@@ -6784,7 +6784,7 @@ class CharacterSheetPage {
 				</label>
 			`});
 			
-			item.querySelector("input").addEventListener("change", function() {
+			itemEl.querySelector("input").addEventListener("change", function() {
 				if (this.checked) {
 					selectedSources.add(src);
 					this.parentElement.querySelector(".charsheet__source-multiselect-check").textContent = "✓";
