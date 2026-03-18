@@ -4849,7 +4849,7 @@ class CharacterSheetSpells {
 			// Show "Manage Prepared" button
 			let manageBtn = document.getElementById("charsheet-gambler-manage-prepared-btn");
 			if (!manageBtn) {
-				manageBtn = e_({outer: `<button id="charsheet-gambler-manage-prepared-btn" class="btn btn-sm btn-outline-primary mt-2">📜 Manage Prepared Spells</button>`});
+				manageBtn = e_({outer: `<button id="charsheet-gambler-manage-prepared-btn" class="btn btn-sm btn-outline-primary mt-2">📜 Manage Spells & Cantrips</button>`});
 				rollBtn.after(manageBtn);
 			}
 			manageBtn.style.display = "";
@@ -4912,23 +4912,30 @@ class CharacterSheetSpells {
 	}
 
 	/**
-	 * Open a spell picker for Gambler to select prepared spells.
-	 * Filters to Warlock spell list only and enforces rolled maximum.
+	 * Open a spell picker for Gambler to select prepared spells and cantrips.
+	 * Filters to Warlock spell list only and enforces rolled maximum for leveled spells
+	 * and gamblerCantripsKnown cap for cantrips.
 	 * @param {object} calcs - Feature calculations
-	 * @param {number} maxPrepared - Maximum number of spells to prepare (rolled value)
+	 * @param {number} maxPrepared - Maximum number of leveled spells to prepare (rolled value)
 	 */
 	async _openGamblerSpellPicker (calcs, maxPrepared) {
 		// Get Gambler's max spell level based on 1/3 caster progression
 		const gamblerLevel = this._state.getClasses().find(c => c.subclass?.name === "Gambler")?.level || 3;
 		const thirdCasterLevel = Math.floor(gamblerLevel / 3);
 		const maxSpellLevel = thirdCasterLevel >= 10 ? 4 : (thirdCasterLevel >= 7 ? 3 : (thirdCasterLevel >= 4 ? 2 : 1));
+		const maxCantrips = calcs.gamblerCantripsKnown || 3;
 
-		// Get currently prepared Gambler spells
+		// Get currently prepared Gambler spells (leveled only)
 		const currentPrepared = this._state.getSpells()
 			.filter(s => (s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler") && s.prepared && s.level > 0)
 			.map(s => ({name: s.name, source: s.source}));
 
-		// Filter spells to Warlock list
+		// Get currently known Gambler cantrips
+		const currentCantrips = this._state.getCantripsKnown()
+			.filter(c => c.sourceClass === "Gambler" || c.sourceSubclass === "Gambler")
+			.map(c => ({name: c.name, source: c.source}));
+
+		// Filter spells to Warlock list (cantrips + leveled spells)
 		const allSpells = this._allSpells || await this._pLoadAllSpells();
 		const warlockSpells = allSpells.filter(spell => {
 			// Must be on Warlock spell list
@@ -4936,15 +4943,15 @@ class CharacterSheetSpells {
 			const isWarlockSpell = fromClassList?.some(c => c.name === "Warlock");
 			if (!isWarlockSpell) return false;
 
-			// Must be within Gambler's spell level limit
-			if (spell.level < 1 || spell.level > maxSpellLevel) return false;
+			// Must be within Gambler's spell level limit (allow cantrips)
+			if (spell.level > maxSpellLevel) return false;
 
 			return true;
 		});
 
 		// Build modal content
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: `Gambler: Select Prepared Spells (${maxPrepared} max)`,
+			title: `Gambler: Select Spells & Cantrips`,
 			isWidth100: true,
 			isHeight100: true,
 			isUncappedHeight: true,
@@ -4954,17 +4961,23 @@ class CharacterSheetSpells {
 			},
 		});
 
-		// Track selected spells
+		// Track selected spells and cantrips separately
 		let selectedSpells = [...currentPrepared];
+		let selectedCantrips = [...currentCantrips];
 
 		// Progress header
 		const header = e_({outer: `
 			<div class="charsheet__spell-picker-header mb-3">
 				<div class="charsheet__spell-picker-counter">
 					<span class="charsheet__spell-picker-counter-icon">🎲</span>
-					<span class="charsheet__spell-picker-counter-label">Gambler Spells:</span>
+					<span class="charsheet__spell-picker-counter-label">Spells:</span>
 					<span class="charsheet__spell-picker-counter-value spell-counter-value">
 						<span class="spell-count-current">${selectedSpells.length}</span>/<span class="spell-count-max">${maxPrepared}</span>
+					</span>
+					<span class="mx-2">|</span>
+					<span class="charsheet__spell-picker-counter-label">Cantrips:</span>
+					<span class="charsheet__spell-picker-counter-value cantrip-counter-value">
+						<span class="cantrip-count-current">${selectedCantrips.length}</span>/<span class="cantrip-count-max">${maxCantrips}</span>
 					</span>
 				</div>
 				<div class="ve-muted ve-small ml-auto">Warlock spell list only • Max level ${maxSpellLevel}</div>
@@ -4974,12 +4987,21 @@ class CharacterSheetSpells {
 
 		const updateHeader = () => {
 			header.querySelector(".spell-count-current").textContent = selectedSpells.length;
-			const valueEl = header.querySelector(".spell-counter-value");
-			valueEl.classList.remove("charsheet__spell-picker-counter-value--complete", "charsheet__spell-picker-counter-value--over");
+			const spellValueEl = header.querySelector(".spell-counter-value");
+			spellValueEl.classList.remove("charsheet__spell-picker-counter-value--complete", "charsheet__spell-picker-counter-value--over");
 			if (selectedSpells.length === maxPrepared) {
-				valueEl.classList.add("charsheet__spell-picker-counter-value--complete");
+				spellValueEl.classList.add("charsheet__spell-picker-counter-value--complete");
 			} else if (selectedSpells.length > maxPrepared) {
-				valueEl.classList.add("charsheet__spell-picker-counter-value--over");
+				spellValueEl.classList.add("charsheet__spell-picker-counter-value--over");
+			}
+
+			header.querySelector(".cantrip-count-current").textContent = selectedCantrips.length;
+			const cantripValueEl = header.querySelector(".cantrip-counter-value");
+			cantripValueEl.classList.remove("charsheet__spell-picker-counter-value--complete", "charsheet__spell-picker-counter-value--over");
+			if (selectedCantrips.length === maxCantrips) {
+				cantripValueEl.classList.add("charsheet__spell-picker-counter-value--complete");
+			} else if (selectedCantrips.length > maxCantrips) {
+				cantripValueEl.classList.add("charsheet__spell-picker-counter-value--over");
 			}
 		};
 
@@ -4988,13 +5010,14 @@ class CharacterSheetSpells {
 		modalInner.append(filterRow);
 
 		// Level filter
-		const levelFilter = e_({outer: `
+		const levelFilterEl = e_({outer: `
 			<select class="form-control form-control-sm" style="width: auto;">
 				<option value="">All Levels</option>
+				<option value="0">Cantrips</option>
 				${Array.from({length: maxSpellLevel}, (_, i) => `<option value="${i + 1}">Level ${i + 1}</option>`).join("")}
 			</select>
 		`});
-		filterRow.append(levelFilter);
+		filterRow.append(levelFilterEl);
 
 		// Search filter
 		const searchInput = e_({outer: `<input type="text" class="form-control form-control-sm" placeholder="Search spells..." style="flex: 1; min-width: 150px;">`});
@@ -5007,16 +5030,16 @@ class CharacterSheetSpells {
 		// Render spell list
 		const renderSpells = () => {
 			spellList.innerHTML = "";
-			const levelFilter = levelFilter.value ? parseInt(levelFilter.value) : null;
+			const levelFilterVal = levelFilterEl.value !== "" ? parseInt(levelFilterEl.value) : null;
 			const searchFilter = searchInput.value.toLowerCase().trim();
 
 			const filteredSpells = warlockSpells.filter(spell => {
-				if (levelFilter && spell.level !== levelFilter) return false;
+				if (levelFilterVal !== null && spell.level !== levelFilterVal) return false;
 				if (searchFilter && !spell.name.toLowerCase().includes(searchFilter)) return false;
 				return true;
 			}).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
 
-			if (!filteredSpells) {
+			if (!filteredSpells.length) {
 				spellList.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center py-3">No spells match your filters</p>`);
 				return;
 			}
@@ -5029,11 +5052,15 @@ class CharacterSheetSpells {
 			});
 
 			Object.keys(byLevel).sort((a, b) => a - b).forEach(level => {
-				spellList.insertAdjacentHTML("beforeend", `<h6 class="charsheet__spell-group-header--small mt-2 mb-1">Level ${level}</h6>`);
+				const levelNum = parseInt(level);
+				const isCantrip = levelNum === 0;
+				spellList.insertAdjacentHTML("beforeend", `<h6 class="charsheet__spell-group-header--small mt-2 mb-1">${isCantrip ? "Cantrips" : `Level ${level}`}</h6>`);
 
 				byLevel[level].forEach(spell => {
-					const isSelected = selectedSpells.some(s => s.name === spell.name && s.source === spell.source);
-					const canSelect = selectedSpells.length < maxPrepared || isSelected;
+					const trackingArr = isCantrip ? selectedCantrips : selectedSpells;
+					const cap = isCantrip ? maxCantrips : maxPrepared;
+					const isSelected = trackingArr.some(s => s.name === spell.name && s.source === spell.source);
+					const canSelect = trackingArr.length < cap || isSelected;
 
 					const row = e_({outer: `
 						<div class="charsheet__spell-picker-row ${isSelected ? "charsheet__spell-picker-row--selected" : ""} ${!canSelect ? "charsheet__spell-picker-row--disabled" : ""}">
@@ -5052,18 +5079,21 @@ class CharacterSheetSpells {
 					row.querySelector("input").addEventListener("change", function () {
 						const isNowSelected = this.checked;
 						if (isNowSelected) {
-							if (selectedSpells.length >= maxPrepared) {
+							if (trackingArr.length >= cap) {
 								this.checked = false;
 								JqueryUtil.doToast({
-									content: `Cannot prepare more than ${maxPrepared} spells (rolled limit)`,
+									content: isCantrip
+										? `Cannot know more than ${cap} Gambler cantrips`
+										: `Cannot prepare more than ${cap} spells (rolled limit)`,
 									type: "warning",
 								});
 								return;
 							}
-							selectedSpells.push({name: spell.name, source: spell.source});
+							trackingArr.push({name: spell.name, source: spell.source});
 							row.classList.add("charsheet__spell-picker-row--selected");
 						} else {
-							selectedSpells = selectedSpells.filter(s => !(s.name === spell.name && s.source === spell.source));
+							const idx = trackingArr.findIndex(s => s.name === spell.name && s.source === spell.source);
+							if (idx !== -1) trackingArr.splice(idx, 1);
 							row.classList.remove("charsheet__spell-picker-row--selected");
 						}
 						updateHeader();
@@ -5082,7 +5112,7 @@ class CharacterSheetSpells {
 			});
 		};
 
-		levelFilter.addEventListener("change", renderSpells);
+		levelFilterEl.addEventListener("change", renderSpells);
 		searchInput.addEventListener("input", renderSpells);
 		renderSpells();
 
@@ -5090,21 +5120,19 @@ class CharacterSheetSpells {
 		const btnConfirm = e_({outer: `<button class="btn btn-primary mt-3">Confirm Selection</button>`});
 		modalInner.append(btnConfirm);
 		btnConfirm.addEventListener("click", () => {
-			// Clear old Gambler prepared spells
+			// Clear old Gambler prepared spells (leveled)
 			this._state.getSpells()
 				.filter(s => (s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler") && s.level > 0)
 				.forEach(s => {
 					this._state.setSpellPrepared(s.name, s.source, false);
 				});
 
-			// Set new selections as prepared
+			// Set new leveled spell selections as prepared
 			selectedSpells.forEach(s => {
-				// Find if spell already exists in known list
 				const existing = this._state.getSpells().find(sp => sp.name === s.name && sp.source === s.source);
 				if (existing) {
 					this._state.setSpellPrepared(s.name, s.source, true);
 				} else {
-					// Add spell to known list with Gambler source
 					const spellData = warlockSpells.find(sp => sp.name === s.name && sp.source === s.source);
 					if (spellData) {
 						this._state.addSpell({
@@ -5120,8 +5148,33 @@ class CharacterSheetSpells {
 				}
 			});
 
+			// Clear old Gambler cantrips
+			this._state.getCantripsKnown()
+				.filter(c => c.sourceClass === "Gambler" || c.sourceSubclass === "Gambler")
+				.forEach(c => {
+					this._state.removeSpell(c.name, c.source);
+				});
+
+			// Add selected cantrips
+			selectedCantrips.forEach(s => {
+				const spellData = warlockSpells.find(sp => sp.name === s.name && sp.source === s.source);
+				if (spellData) {
+					this._state.addSpell({
+						name: spellData.name,
+						source: spellData.source,
+						level: 0,
+						school: spellData.school,
+						sourceClass: "Gambler",
+						sourceSubclass: "Gambler",
+					});
+				}
+			});
+
+			const parts = [];
+			if (selectedSpells.length) parts.push(`${selectedSpells.length} spell${selectedSpells.length !== 1 ? "s" : ""}`);
+			if (selectedCantrips.length) parts.push(`${selectedCantrips.length} cantrip${selectedCantrips.length !== 1 ? "s" : ""}`);
 			JqueryUtil.doToast({
-				content: `Prepared ${selectedSpells.length} Gambler spell${selectedSpells.length !== 1 ? "s" : ""}`,
+				content: `Prepared ${parts.join(" and ")} for Gambler`,
 				type: "success",
 			});
 

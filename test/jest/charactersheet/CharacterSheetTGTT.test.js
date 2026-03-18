@@ -6275,6 +6275,129 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						expect(state.getGamblerPreparedCount()).toBe(5);
 					});
 				});
+
+				describe("Gambler Cantrip Management", () => {
+					it("should add cantrips with Gambler sourceClass via addSpell (level 0)", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"}
+						});
+
+						state.addSpell({
+							name: "Eldritch Blast", source: "PHB", level: 0,
+							school: "V",
+							sourceClass: "Gambler",
+							sourceSubclass: "Gambler",
+						});
+
+						const cantrips = state.getCantripsKnown();
+						const gamblerCantrips = cantrips.filter(c => c.sourceClass === "Gambler");
+						expect(gamblerCantrips).toHaveLength(1);
+						expect(gamblerCantrips[0].name).toBe("Eldritch Blast");
+					});
+
+					it("should track multiple Gambler cantrips up to cap", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"}
+						});
+
+						const calcs = state.getFeatureCalculations();
+						expect(calcs.gamblerCantripsKnown).toBe(3);
+
+						// Add 3 cantrips
+						state.addSpell({name: "Eldritch Blast", source: "PHB", level: 0, school: "V", sourceClass: "Gambler"});
+						state.addSpell({name: "Minor Illusion", source: "PHB", level: 0, school: "I", sourceClass: "Gambler"});
+						state.addSpell({name: "Mage Hand", source: "PHB", level: 0, school: "C", sourceClass: "Gambler"});
+
+						const gamblerCantrips = state.getCantripsKnown().filter(c => c.sourceClass === "Gambler");
+						expect(gamblerCantrips).toHaveLength(3);
+					});
+
+					it("should remove Gambler cantrips via removeSpell", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"}
+						});
+
+						state.addSpell({name: "Eldritch Blast", source: "PHB", level: 0, school: "V", sourceClass: "Gambler"});
+						state.addSpell({name: "Minor Illusion", source: "PHB", level: 0, school: "I", sourceClass: "Gambler"});
+
+						expect(state.getCantripsKnown().filter(c => c.sourceClass === "Gambler")).toHaveLength(2);
+
+						state.removeSpell("Eldritch Blast", "PHB");
+
+						expect(state.getCantripsKnown().filter(c => c.sourceClass === "Gambler")).toHaveLength(1);
+						expect(state.getCantripsKnown().find(c => c.name === "Eldritch Blast")).toBeUndefined();
+					});
+
+					it("should not mix Gambler cantrips with other class cantrips", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"}
+						});
+
+						// Add a Gambler cantrip
+						state.addSpell({name: "Eldritch Blast", source: "PHB", level: 0, school: "V", sourceClass: "Gambler"});
+						// Add a non-Gambler cantrip
+						state.addSpell({name: "Fire Bolt", source: "PHB", level: 0, school: "V", sourceClass: "Wizard"});
+
+						const allCantrips = state.getCantripsKnown();
+						expect(allCantrips).toHaveLength(2);
+
+						const gamblerCantrips = allCantrips.filter(c => c.sourceClass === "Gambler");
+						expect(gamblerCantrips).toHaveLength(1);
+						expect(gamblerCantrips[0].name).toBe("Eldritch Blast");
+					});
+
+					it("should increase cantrips known to 4 at level 10", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 10,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"}
+						});
+
+						const calcs = state.getFeatureCalculations();
+						expect(calcs.gamblerCantripsKnown).toBe(4);
+
+						// Can add 4 cantrips at this level
+						state.addSpell({name: "Eldritch Blast", source: "PHB", level: 0, school: "V", sourceClass: "Gambler"});
+						state.addSpell({name: "Minor Illusion", source: "PHB", level: 0, school: "I", sourceClass: "Gambler"});
+						state.addSpell({name: "Mage Hand", source: "PHB", level: 0, school: "C", sourceClass: "Gambler"});
+						state.addSpell({name: "Prestidigitation", source: "PHB", level: 0, school: "T", sourceClass: "Gambler"});
+
+						expect(state.getCantripsKnown().filter(c => c.sourceClass === "Gambler")).toHaveLength(4);
+					});
+
+					it("should clear and re-add Gambler cantrips without affecting other cantrips", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"}
+						});
+
+						// Add cantrips from different sources
+						state.addSpell({name: "Eldritch Blast", source: "PHB", level: 0, school: "V", sourceClass: "Gambler"});
+						state.addSpell({name: "Fire Bolt", source: "PHB", level: 0, school: "V", sourceClass: "Wizard"});
+
+						// Clear only Gambler cantrips (simulating picker confirm flow)
+						state.getCantripsKnown()
+							.filter(c => c.sourceClass === "Gambler")
+							.forEach(c => state.removeSpell(c.name, c.source));
+
+						// Wizard cantrip should remain
+						const remaining = state.getCantripsKnown();
+						expect(remaining).toHaveLength(1);
+						expect(remaining[0].name).toBe("Fire Bolt");
+						expect(remaining[0].sourceClass).toBe("Wizard");
+
+						// Re-add different Gambler cantrips
+						state.addSpell({name: "Minor Illusion", source: "PHB", level: 0, school: "I", sourceClass: "Gambler"});
+						state.addSpell({name: "Mage Hand", source: "PHB", level: 0, school: "C", sourceClass: "Gambler"});
+
+						const allCantrips = state.getCantripsKnown();
+						expect(allCantrips).toHaveLength(3);
+						expect(allCantrips.filter(c => c.sourceClass === "Gambler")).toHaveLength(2);
+					});
+				});
 			});
 			
 			describe("Trickster", () => {

@@ -18,6 +18,7 @@ Right now, even when using it, it doesn't actually add the focus points back to 
 - [] Wounding strike doesn't work as it should - appears as an activatable state, but needs to be an action to choose a weapon attack and apply the effect to it. Right now it doesn't do anything when activated, which is not how it should work.
 - [] On levelup, if I choose combat traditions, then choose methods, then change my traditions choice - methods choice disappear even for the tradition I haven't changed. I think this is a UI bug, not a data bug. 
 - [] need to verify the flow of choosing traditions in general, some bugs reported by players that are hard to pinpoint.
+- [] quickbuild doesn't take into account the subclass extra traditions feature which is implemented in the levelup, need this logic to also apply in quickbuild.
 
 ### General
 - [x] ~~In levelup, ASI and Feat selections show [object HTMLHeadingElement],[object HTMLDivElement],[object HTMLDivElement],[object HTMLDivElement].~~ **Fixed:** `_renderAsiSelectionCompact()` was returning an array of DOM elements instead of a wrapper element; `.append(array)` stringified them. Now wraps children in a container div, matching other compact render methods.
@@ -33,8 +34,8 @@ Right now, even when using it, it doesn't actually add the focus points back to 
  - [x] ~~Need to implement some form of memory for rolls that have been made - maybe a side panel that can be opened to show the history of rolls made, or a log that can be scrolled through. This would be especially useful for keeping track of things like death saves, initiative rolls, skills rolls, attacks and damage rolls, spellcasting etc. It would also be useful for being able to reference previous rolls when making new ones, and for being able to see the history of rolls for a character over time.~~ **Fixed:** Added `CharacterSheetRollHistory` module with a sliding side panel (📜 Roll Log button in toolbar). Captures all rolls via two interception strategies: (1) `showDiceResult()` hook for weapon attacks, ability checks, saving throws, skill checks, initiative, death saves, damage (15 call sites), (2) explicit `addRoll()` calls in spells module (spell attack, spell save DC, spell damage, spell healing, Gambler modifier rolls) and rest module (hit dice). In-memory session-only log, 200-entry FIFO cap, color-coded entries by roll type (14 types), relative timestamps, crit/fumble highlighting. 36 new tests (6,767 total).
 
 ### Gambler Rogue
-- [] No cantrips for some reason
-- [] Gambler spellcasting in general is still not functional as described - Needs extensive implementations since its so unique in mechanics - need to implement the number of prepared spells being 2d4 after long rest, the spellcasting bonus being rolled, etc. 
+- [x] No cantrips for some reason — Fixed: spell picker filter rejected level 0 (`spell.level < 1`). Removed filter, added separate cantrip tracking with `gamblerCantripsKnown` cap (3/4), cantrip group in picker UI, confirm saves/clears cantrips independently.
+- [x] Gambler spellcasting in general is still not functional as described — Most mechanics were already implemented: rolled DC/attack (1d6/2d4), rolled prepared spells (2d4/3d6), Gambler's Folly betting, d100 gambling table, long rest reset. The "not functional" was primarily the cantrip bug above.
 
 ## Unverified bugs:
 

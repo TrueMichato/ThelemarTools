@@ -157,6 +157,70 @@ describe("Monk Core Class Features (PHB)", () => {
 	});
 
 	// -------------------------------------------------------------------------
+	// Speed Integration (Unarmored Movement + Adept Speed)
+	// -------------------------------------------------------------------------
+	describe("Speed Integration", () => {
+		it("should add +10 ft walk speed at level 2 (Unarmored Movement)", () => {
+			state.addClass({name: "Monk", source: "PHB", level: 2});
+			expect(state.getWalkSpeed()).toBe(40); // 30 base + 10 UM
+		});
+
+		it("should add +15 ft walk speed at level 6", () => {
+			state.addClass({name: "Monk", source: "PHB", level: 6});
+			expect(state.getWalkSpeed()).toBe(45); // 30 base + 15 UM
+		});
+
+		it("should not double-count Unarmored Movement via named modifiers", () => {
+			state.addClass({name: "Monk", source: "PHB", level: 2});
+			const speedMods = state._data.customModifiers.speed || {walk: 0};
+			// UM should NOT appear as a named modifier — it's handled directly
+			expect(speedMods.walk || 0).toBe(0);
+			expect(state.getWalkSpeed()).toBe(40);
+		});
+
+		it("should not create speed named modifier when Unarmored Movement feature is added", () => {
+			state.addClass({name: "Monk", source: "PHB", level: 2});
+			state.addFeature({
+				name: "Unarmored Movement",
+				className: "Monk",
+				source: "PHB",
+				level: 2,
+				description: "Your speed increases by 10 feet while you are not wearing armor or wielding a shield.",
+			});
+			// No speed:walk named modifier should exist — UM is handled by getUnarmoredMovementBonus()
+			const speedModifiers = state.getNamedModifiers().filter(m => m.type === "speed:walk");
+			expect(speedModifiers.length).toBe(0);
+			expect(state.getWalkSpeed()).toBe(40);
+		});
+	});
+
+	// Adept Speed tests need isolated state (no pre-existing PHB Monk from beforeEach)
+	describe("Adept Speed Integration", () => {
+		let tgttState;
+
+		beforeEach(() => {
+			tgttState = new CharacterSheetState();
+			tgttState.setRace({name: "Human", source: "PHB"});
+			tgttState.setAbilityBase("dex", 16);
+		});
+
+		it("should stack Adept Speed with Unarmored Movement correctly", () => {
+			tgttState.addClass({name: "Monk", source: "TGTT", level: 2});
+			tgttState.addFeature({name: "Adept Speed", className: "Monk", source: "TGTT", level: 2});
+			// 30 base + 10 UM + 10 AS = 50, NOT 60
+			expect(tgttState.getWalkSpeed()).toBe(50);
+		});
+
+		it("should stack multiple Adept Speed features", () => {
+			tgttState.addClass({name: "Monk", source: "TGTT", level: 6});
+			tgttState.addFeature({name: "Adept Speed", className: "Monk", source: "TGTT", level: 2});
+			tgttState.addFeature({name: "Adept Speed", className: "Monk", source: "TGTT", level: 6});
+			// 30 base + 15 UM + 20 AS = 65
+			expect(tgttState.getWalkSpeed()).toBe(65);
+		});
+	});
+
+	// -------------------------------------------------------------------------
 	// Deflect Missiles (Level 3)
 	// -------------------------------------------------------------------------
 	describe("Deflect Missiles", () => {

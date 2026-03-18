@@ -15386,16 +15386,9 @@ class CharacterSheetState {
 			effects.push({ type: "language", language: "All (spoken)", source: "Tongue of the Sun and Moon" });
 		}
 
-		// Unarmored Movement (Monk 2+)
-		if (calculations.unarmoredMovement) {
-			effects.push({
-				type: "speed",
-				speedType: "walk",
-				value: calculations.unarmoredMovement,
-				source: "Unarmored Movement",
-				conditional: "while unarmored",
-			});
-		}
+		// NOTE: Unarmored Movement is NOT pushed as an effect here because it is already
+		// handled directly in getSpeed()/getWalkSpeed()/getSpeedByType() via getUnarmoredMovementBonus().
+		// Pushing it here would double-count it (once via the named modifier pipeline, once via the direct helper).
 
 		// Ki-Empowered Strikes / Empowered Strikes (Monk 6)
 		if ((calculations.hasKiEmpoweredStrikes || calculations.hasEmpoweredStrikes)
@@ -20450,6 +20443,12 @@ class CharacterSheetState {
 			// Adept Speed (TGTT Monk): all-speeds bonus handled by getAdeptSpeedBonus()
 			// Skip creating the walk-only named modifier to avoid double-counting
 			if (feature.name === "Adept Speed" && mod.type.startsWith("speed:")) {
+				return;
+			}
+
+			// Unarmored Movement (Monk): handled directly by getUnarmoredMovementBonus()
+			// Skip creating a named modifier to avoid double-counting
+			if (feature.name === "Unarmored Movement" && mod.type.startsWith("speed:")) {
 				return;
 			}
 

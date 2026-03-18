@@ -2377,10 +2377,10 @@ class CharacterSheetQuickBuild {
 				classFeatures,
 			);
 
-			tradContainer.append(e_({outer: `
+			tradContainer.append(e_({outer: `<div>
 				<p class="ve-small ve-muted mb-1">Choose ${traditionCount} Combat Traditions:</p>
 				<div class="ve-small ve-muted mb-1">Selected: <span class="qb-trad-count">${this._selections._combatTraditions.length}</span>/${traditionCount}</div>
-			`}));
+			</div>`}));
 
 			const tradList = e_({outer: `<div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--cs-border, #ddd); border-radius: 8px; padding: 4px; margin-bottom: 8px;"></div>`});
 
