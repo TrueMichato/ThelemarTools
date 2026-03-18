@@ -1210,6 +1210,11 @@ class CharacterSheetFeatures {
 		];
 
 		const isImportantFeature = (feature) => {
+			// Exclude features classified as passive — they are not user-activatable
+			const nameLowerCheck = feature.name?.toLowerCase() || "";
+			const classification = CharacterSheetState?.FEATURE_CLASSIFICATION_OVERRIDES?.[nameLowerCheck];
+			if (classification === "passive") return false;
+
 			// Features with limited uses are important
 			if (feature.uses && feature.uses.max > 0) return true;
 			// Explicitly marked important

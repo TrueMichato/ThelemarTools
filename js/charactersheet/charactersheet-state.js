@@ -2126,6 +2126,12 @@ const FeatureEffectRegistry = {
 		this.register("Empowered Strikes", [ // 2024 version
 			{type: "weaponProperty", property: "magical", weaponType: "unarmed"},
 		]);
+		// Way of Mercy
+		this.register("Implements of Mercy", [
+			{type: "skillProficiency", skill: "insight", level: 1},
+			{type: "skillProficiency", skill: "medicine", level: 1},
+			{type: "toolProficiency", tool: "Herbalism Kit"},
+		]);
 
 		// ======= PALADIN =======
 		this.register("Divine Health", [
@@ -3587,6 +3593,9 @@ class CharacterSheetState {
 		// Migrate old ki backing store into the resource system
 		this._migrateKiToResource();
 
+		// Migrate: backfill levelHistory with race/background data from state
+		this._migrateRaceBackgroundToHistory();
+
 		// Reapply history-backed optional features for saves which persisted history
 		// but did not fully reconstruct runtime feature state.
 		this._reapplyHistoryOptionalFeatures();
@@ -3594,6 +3603,10 @@ class CharacterSheetState {
 
 		// Ensure unarmed strike exists for all characters
 		this.ensureUnarmedStrike();
+
+		// Re-apply class feature effects (proficiencies, resistances, etc.)
+		// so that saved characters get all calculation-based effects on load
+		this.applyClassFeatureEffects();
 	}
 
 	/**
@@ -3830,6 +3843,36 @@ class CharacterSheetState {
 
 			return f;
 		});
+	}
+
+	_migrateRaceBackgroundToHistory () {
+		if (!this._data.levelHistory?.length) return;
+		const entry = this._data.levelHistory.find(h => h.level === 1);
+		if (!entry) return;
+		// Already has race data in history
+		if (entry.choices?.race) return;
+
+		entry.choices = entry.choices || {};
+
+		if (this._data.race) {
+			entry.choices.race = {
+				name: this._data.race.name,
+				source: this._data.race.source,
+			};
+			if (this._data.subrace) {
+				entry.choices.race.subrace = {
+					name: this._data.subrace.name,
+					source: this._data.subrace.source,
+				};
+			}
+		}
+
+		if (this._data.background) {
+			entry.choices.background = {
+				name: this._data.background.name,
+				source: this._data.background.source,
+			};
+		}
 	}
 
 	// Alias for compatibility with export module
@@ -9151,7 +9194,9 @@ class CharacterSheetState {
 						const isMercyFromTGTT = cls.source === "TGTT" || cls.subclass?.source === "TGTT";
 
 						// Implements of Mercy (level 3) - Insight, Medicine, Herbalism Kit proficiency
-						calculations.hasImplementsOfMercy = true;
+						if (level >= 3) {
+							calculations.hasImplementsOfMercy = true;
+						}
 
 						// TGTT Mercy Monk: Combat Methods — auto-grant Sanguine Knot tradition
 						if (isMercyFromTGTT) {
@@ -9163,12 +9208,16 @@ class CharacterSheetState {
 						}
 
 						// Hand of Healing (level 3) - heal with ki
-						calculations.hasHandOfHealing = true;
-						calculations.handOfHealingAmount = `${martialArtsDice}+${this.getAbilityMod("wis")}`;
+						if (level >= 3) {
+							calculations.hasHandOfHealing = true;
+							calculations.handOfHealingAmount = `${martialArtsDice}+${this.getAbilityMod("wis")}`;
+						}
 
 						// Hand of Harm (level 3) - extra necrotic damage
-						calculations.hasHandOfHarm = true;
-						calculations.handOfHarmDamage = `${martialArtsDice}+${this.getAbilityMod("wis")}`;
+						if (level >= 3) {
+							calculations.hasHandOfHarm = true;
+							calculations.handOfHarmDamage = `${martialArtsDice}+${this.getAbilityMod("wis")}`;
+						}
 
 						// Physician's Touch (level 6) - cure conditions with Hand of Healing
 						if (level >= 6) {
@@ -23151,6 +23200,11 @@ class CharacterSheetState {
 		if (!this._data.resistances.includes(type)) {
 			this._data.resistances.push(type);
 		}
+	}
+
+	removeResistance (type) {
+		const idx = this._data.resistances.indexOf(type);
+		if (idx >= 0) this._data.resistances.splice(idx, 1);
 	}
 
 	addImmunity (type) {

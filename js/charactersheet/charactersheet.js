@@ -656,9 +656,10 @@ class CharacterSheetPage {
 
 		// Header buttons
 		document.getElementById("charsheet-btn-new").addEventListener("click", () => this._onNewCharacter());
-		document.getElementById("charsheet-btn-random").addEventListener("click", () => this._onRandomCharacter());
+		document.getElementById("charsheet-btn-new").addEventListener("contextmenu", (e) => { e.preventDefault(); this._onRandomCharacter(); });
 		document.getElementById("charsheet-btn-duplicate").addEventListener("click", () => this._onDuplicateCharacter());
 		document.getElementById("charsheet-btn-delete").addEventListener("click", () => this._onDeleteCharacter());
+		document.getElementById("charsheet-btn-delete").addEventListener("contextmenu", (e) => { e.preventDefault(); this._onManageCharacters(); });
 		document.getElementById("charsheet-btn-modifiers").addEventListener("click", () => this._showCustomModifiersModal());
 		document.getElementById("charsheet-btn-settings").addEventListener("click", () => this._showSettingsModal());
 		// Import/Export/Print handled by CharacterSheetExport module
@@ -1010,6 +1011,9 @@ class CharacterSheetPage {
 			if (race.resist) {
 				race.resist.forEach(r => { if (typeof r === "string") this._state.addResistance(r); });
 			}
+
+			// Racial features (traits)
+			if (race.entries) this._addRandomFeatureEntries(race.entries, race.source, "Species");
 		}
 
 		// ── 2. Background ──
@@ -1050,6 +1054,9 @@ class CharacterSheetPage {
 					});
 				});
 			}
+
+			// Background features
+			if (bg.entries) this._addRandomFeatureEntries(bg.entries, bg.source, "Background");
 		}
 
 		// ── 3. Ability scores (standard array, priority-shuffled) ──
@@ -1128,6 +1135,9 @@ class CharacterSheetPage {
 			});
 		}
 
+		// ── 4b. Class features ──
+		this._addRandomClassFeatures(cls);
+
 		// ── 5. Spellcasting ──
 		if (cls.spellcastingAbility) {
 			this._state.setSpellcastingAbility(cls.spellcastingAbility);
@@ -1150,6 +1160,91 @@ class CharacterSheetPage {
 
 		this._renderCharacter();
 		this._updateTabVisibility();
+	}
+
+	_addRandomFeatureEntries (entries, source, featureType) {
+		entries.forEach(entry => {
+			if (typeof entry === "object" && entry.name) {
+				this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
+					{
+						...entry,
+						source: entry.source || source,
+					},
+					{featureType},
+				));
+			}
+		});
+	}
+
+	_addRandomClassFeatures (cls) {
+		if (!cls.classFeatures?.length) return;
+
+		// classFeatures[0] is level 1 features (array-of-arrays format) or flat array
+		let level1Features = cls.classFeatures[0];
+		if (level1Features && !Array.isArray(level1Features)) {
+			level1Features = cls.classFeatures.filter(f => {
+				if (typeof f === "string") {
+					const parts = f.split("|");
+					return parts[3] === "1" || parts.length < 4;
+				} else if (typeof f === "object" && f.classFeature) {
+					const parts = f.classFeature.split("|");
+					return parts[3] === "1" || parts.length < 4;
+				} else if (typeof f === "object" && f.level !== undefined) {
+					return f.level === 1;
+				}
+				return true;
+			});
+		}
+
+		(level1Features || []).forEach(f => {
+			let featureName, featureSource, classSource;
+
+			if (typeof f === "string") {
+				const parts = f.split("|");
+				featureName = parts[0];
+				classSource = parts[2] || cls.source;
+				featureSource = parts[4] || classSource;
+			} else if (typeof f === "object" && f.classFeature) {
+				const parts = f.classFeature.split("|");
+				featureName = parts[0];
+				classSource = parts[2] || cls.source;
+				featureSource = parts[4] || classSource;
+			} else if (typeof f === "object" && f.name) {
+				featureName = f.name;
+				classSource = f.classSource || cls.source;
+				featureSource = f.source || classSource;
+			} else {
+				return;
+			}
+
+			const fullFeatureData = this._getRandomClassFeatureData(featureName, cls.name, classSource, 1);
+			const description = fullFeatureData?.entries
+				? Renderer.get().render({entries: fullFeatureData.entries})
+				: "";
+
+			this._state.addFeature({
+				name: featureName,
+				source: featureSource,
+				level: 1,
+				className: cls.name,
+				classSource: classSource,
+				featureType: "Class",
+				description,
+			});
+		});
+	}
+
+	_getRandomClassFeatureData (featureName, className, source, level) {
+		if (!this._classFeatures?.length) return null;
+
+		return this._classFeatures.find(f => {
+			if (f.name !== featureName || f.className !== className || f.level !== level) return false;
+			if (source && f.source && f.source !== source) {
+				const flexible = [Parser.SRC_PHB, Parser.SRC_XPHB, "SRD"];
+				return flexible.includes(source) && flexible.includes(f.source);
+			}
+			return true;
+		}) || null;
 	}
 
 	_getAbilityPriority (cls) {
@@ -1323,6 +1418,88 @@ class CharacterSheetPage {
 		this._createNewCharacter();
 		await this._pLoadCharacters();
 		this._selCharacter.value = "";
+	}
+
+	async _onManageCharacters () {
+		const characters = await StorageUtil.pGet("charsheet-characters") || [];
+
+		if (characters.length === 0) {
+			JqueryUtil.doToast({type: "warning", content: "No saved characters to manage."});
+			return;
+		}
+
+		// Stage 1: Character selection via checkbox list
+		const fnGetLabel = (char) => {
+			const name = char.name || "Unnamed Character";
+			const totalLevel = char.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 0;
+			const classNames = char.classes?.map(c => c.name).join("/") || "";
+			const classInfo = classNames ? `${classNames} ${totalLevel}` : "";
+			return classInfo ? `${name} — ${classInfo}` : name;
+		};
+
+		const selected = await InputUiUtil.pGetUserMultipleChoice({
+			title: "Bulk Delete Characters",
+			values: characters,
+			fnDisplay: (char) => fnGetLabel(char),
+			isResolveItems: true,
+			min: 1,
+			max: characters.length,
+			htmlDescription: `<div class="ve-flex-col"><p><b class="veapp__msg-warning">Select characters to permanently delete.</b></p><p>This action <b>cannot be undone</b>.</p></div>`,
+		});
+
+		if (!selected?.length) return;
+
+		// Stage 2: Confirmation listing selected characters
+		const selectedNames = selected.map(c => `<li>${fnGetLabel(c).escapeQuotes()}</li>`).join("");
+		const countText = selected.length === 1 ? "1 character" : `${selected.length} characters`;
+
+		const isConfirmed = await InputUiUtil.pGetUserBoolean({
+			title: "Confirm Bulk Delete",
+			htmlDescription: `<div class="ve-flex-col">
+				<div class="alert alert-danger mb-3">
+					<b>You are about to permanently delete ${countText}:</b>
+					<ul class="mt-2 mb-0">${selectedNames}</ul>
+				</div>
+				<p><b>This action cannot be undone.</b></p>
+			</div>`,
+			textYes: `Delete ${countText}`,
+			textNo: "Cancel",
+		});
+
+		if (!isConfirmed) return;
+
+		// Stage 3: Type-to-confirm for 3+ characters
+		if (selected.length >= 3) {
+			const typed = await InputUiUtil.pGetUserString({
+				title: "Final Confirmation",
+				htmlDescription: `<div class="ve-flex-col">
+					<div class="alert alert-danger mb-2">
+						<b>You are about to permanently delete ${countText}.</b>
+					</div>
+					<p>Type <b>DELETE</b> to confirm.</p>
+				</div>`,
+				fnIsValid: (val) => val?.trim() === "DELETE",
+			});
+
+			if (typed?.trim() !== "DELETE") return;
+		}
+
+		// Execute deletion
+		const selectedIds = new Set(selected.map(c => c.id));
+		const remaining = characters.filter(c => !selectedIds.has(c.id));
+		await StorageUtil.pSet("charsheet-characters", remaining);
+
+		// If the currently loaded character was deleted, switch to a new blank character
+		if (this._currentCharacterId && selectedIds.has(this._currentCharacterId)) {
+			this._createNewCharacter();
+		}
+
+		await this._pLoadCharacters();
+		if (!this._currentCharacterId || selectedIds.has(this._currentCharacterId)) {
+			this._selCharacter.value = "";
+		}
+
+		JqueryUtil.doToast({type: "success", content: `Deleted ${countText}.`});
 	}
 
 	async _onSummonFamiliar () {
@@ -5081,9 +5258,11 @@ class CharacterSheetPage {
 		const customAbilities = this._state.getCustomAbilities?.() || [];
 		const limitedAbilities = customAbilities.filter(a => a.mode === "limited");
 
-		// Get class resources (Channel Divinity, Ki Points, Rage, etc.)
+		// Get class resources (Channel Divinity, Rage, etc.)
+		// Exclude Focus/Ki Points — they already have a dedicated display in the resource bar
+		const META_RESOURCE_NAMES = new Set(["Focus Points", "Ki Points"]);
 		const resources = this._state.getResources?.() || [];
-		const classResources = resources.filter(r => r.max > 0);
+		const classResources = resources.filter(r => r.max > 0 && !META_RESOURCE_NAMES.has(r.name));
 
 		if (!limitedAbilities.length && !classResources.length) {
 			container.innerHTML = `
@@ -7940,7 +8119,7 @@ class CharacterSheetPage {
 		setTimeout(() => document.addEventListener("click", closeMenu), 10);
 	}
 
-	_rollInitiative (event) {
+	async _rollInitiative (event) {
 		const mod = this._state.getInitiative();
 		const exhaustionPenalty = this._getExhaustionPenalty();
 		const rollResult = this._rollD20({event});
@@ -7965,6 +8144,15 @@ class CharacterSheetPage {
 			resultClass,
 			resultNote,
 		);
+
+		// Trigger initiative-based recovery features (Uncanny Metabolism, Perfect Focus/Self)
+		if (this._combat) {
+			await this._combat._triggerInitiativeRecovery();
+			this._renderHp();
+			this._renderResources();
+			this._renderOverviewAbilities();
+			if (this._features) this._features._renderResources();
+		}
 	}
 
 	_rollAttack (attack, event) {
@@ -10083,6 +10271,7 @@ class CharacterSheetPage {
 	 */
 	getLanguageNamesSorted () {
 		const prioritySources = this._state.getPrioritySources() || [];
+		const isTgtt = prioritySources.includes("TGTT");
 		const langMap = new Map();
 
 		// Build map of languages, tracking source for each
@@ -10097,6 +10286,14 @@ class CharacterSheetPage {
 				langMap.set(lang.name, {name: lang.name, source: lang.source});
 			}
 		});
+
+		// When TGTT is priority, exclude non-Common standard D&D languages
+		if (isTgtt) {
+			const standardSet = new Set(Parser.LANGUAGES_STANDARD);
+			for (const [name] of langMap) {
+				if (standardSet.has(name) && name !== "Common") langMap.delete(name);
+			}
+		}
 
 		// Convert to array and sort: priority sources first, then alphabetically
 		const languages = Array.from(langMap.values());
@@ -10116,11 +10313,22 @@ class CharacterSheetPage {
 	 */
 	getLanguageOptionsGrouped () {
 		const prioritySources = this._state.getPrioritySources() || [];
+		const isTgtt = prioritySources.includes("TGTT");
 
 		// Standard D&D language categories
 		const standardSet = new Set(Parser.LANGUAGES_STANDARD);
 		const exoticSet = new Set(Parser.LANGUAGES_EXOTIC);
 		const secretSet = new Set(Parser.LANGUAGES_SECRET);
+
+		// Build a lookup of TGTT language type by name for categorization
+		const tgttTypeMap = new Map();
+		if (isTgtt) {
+			this._languagesData.forEach(lang => {
+				if (prioritySources.includes(lang.source) && lang.type) {
+					tgttTypeMap.set(lang.name, lang.type);
+				}
+			});
+		}
 
 		// Collect all loaded language names, preferring priority sources
 		const langMap = new Map();
@@ -10154,6 +10362,15 @@ class CharacterSheetPage {
 
 		// Add languages from loaded data
 		for (const [name] of langMap) {
+			// When TGTT is priority, use the TGTT type field to categorize homebrew languages
+			// and exclude non-Common standard D&D languages
+			if (isTgtt) {
+				if (standardSet.has(name) && name !== "Common") continue;
+				const tgttType = tgttTypeMap.get(name);
+				if (tgttType === "standard") { standard.push(name); continue; }
+				if (tgttType === "exotic") { exotic.push(name); continue; }
+			}
+
 			if (standardSet.has(name)) {
 				standard.push(name);
 			} else if (exoticSet.has(name)) {
@@ -10166,8 +10383,11 @@ class CharacterSheetPage {
 		}
 
 		// Add any standard/exotic/secret languages not in loaded data (fallback)
+		// When TGTT is priority, skip non-Common standard fallbacks
 		Parser.LANGUAGES_STANDARD.forEach(l => {
-			if (!langMap.has(l)) standard.push(l);
+			if (langMap.has(l)) return;
+			if (isTgtt && l !== "Common") return;
+			standard.push(l);
 		});
 		Parser.LANGUAGES_EXOTIC.forEach(l => {
 			if (!langMap.has(l)) exotic.push(l);

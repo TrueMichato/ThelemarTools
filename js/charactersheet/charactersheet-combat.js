@@ -1347,17 +1347,43 @@ class CharacterSheetCombat {
 	 * Perfect Focus (XPHB Monk 15+): If UM not used and focus <= 3, regain up to 4.
 	 * Perfect Self (PHB Monk 20): If ki = 0, regain 4.
 	 */
-	_triggerInitiativeRecovery () {
+	async _triggerInitiativeRecovery () {
 		const calc = this._state.getFeatureCalculations?.() || {};
 		const kiMax = this._state.getKiPoints?.() || 0;
 		const kiCurrent = this._state.getKiPointsCurrent?.() || 0;
 
-		// Uncanny Metabolism (1/long rest, optional)
+		// Uncanny Metabolism (1/long rest, optional — player chooses)
 		if (calc.hasUncannyMetabolism && kiCurrent < kiMax) {
 			const feature = this._state.getFeature("Uncanny Metabolism");
-			const hasUsesLeft = !feature?.uses || feature.uses.current > 0;
+
+			// Backfill uses for existing saves that have the feature but no .uses tracking
+			if (feature && !feature.uses) {
+				feature.uses = {max: 1, current: 1, recharge: "long"};
+			}
+			// Feature may not be in _data.features for old saves — trust getFeatureCalculations
+			const hasUsesLeft = feature ? feature.uses.current > 0 : true;
 
 			if (hasUsesLeft) {
+				const pointName = calc.focusPoints ? "Focus" : "Ki";
+				const chosen = await this._showCombatActionChoiceModal(
+					{name: "Uncanny Metabolism"},
+					[
+						{
+							id: "use",
+							name: `Use Uncanny Metabolism`,
+							description: `Regain all ${pointName} Points (${kiMax}) and heal ${calc.uncannyMetabolismHealing || "1d6+level"} HP. (1/Long Rest)`,
+						},
+						{
+							id: "skip",
+							name: "Skip",
+							description: "Don't use Uncanny Metabolism this time.",
+						},
+					],
+					() => {},
+				);
+
+				if (!chosen || chosen.id !== "use") return;
+
 				// Restore all focus/ki points
 				this._state.setKiPointsCurrent(kiMax);
 
@@ -1379,18 +1405,21 @@ class CharacterSheetCombat {
 				const maxHp = this._state.getMaxHp();
 				this._state.setCurrentHp(Math.min(maxHp, currentHp + totalHeal));
 
-				// Consume the use
-				if (feature?.uses) {
+				// Consume the use via proper state method
+				if (feature?.uses && feature.id) {
+					this._state.setFeatureUses(feature.id, Math.max(0, feature.uses.current - 1));
+				} else if (feature?.uses) {
 					feature.uses.current = Math.max(0, feature.uses.current - 1);
 				}
 
-				const pointName = calc.focusPoints ? "Focus" : "Ki";
 				JqueryUtil.doToast({
 					type: "success",
 					content: `Uncanny Metabolism: Regained all ${pointName} Points (${kiMax}) and healed ${totalHeal} HP (${martialArtsDice}+${monkLevel})`,
 				});
 
 				this.renderCombatActions();
+				if (this._page._features) this._page._features.render();
+				this._page.saveCharacter?.();
 				return;
 			}
 		}

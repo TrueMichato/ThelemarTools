@@ -554,6 +554,64 @@ class CharacterSheetBuilder {
 						level1History.choices.combatTraditions = [...this._selectedCombatTraditions];
 					}
 
+					// Record race/background selections for respec support
+					if (this._selectedRace) {
+						level1History.choices.race = {
+							name: this._selectedRace.name,
+							source: this._selectedRace.source,
+						};
+						if (this._selectedSubrace) {
+							level1History.choices.race.subrace = {
+								name: this._selectedSubrace.name,
+								source: this._selectedSubrace.source,
+							};
+						}
+						level1History.choices.raceUserChoices = {};
+						if (Object.keys(this._selectedRacialLanguages).length) {
+							level1History.choices.raceUserChoices.selectedLanguages = {};
+							for (const [k, v] of Object.entries(this._selectedRacialLanguages)) {
+								if (Array.isArray(v)) level1History.choices.raceUserChoices.selectedLanguages[k] = [...v];
+							}
+						}
+						if (this._selectedSubraceLanguages.length) {
+							level1History.choices.raceUserChoices.selectedSubraceLanguages = [...this._selectedSubraceLanguages];
+						}
+						if (this._selectedRacialSkills.length) {
+							level1History.choices.raceUserChoices.selectedSkills = [...this._selectedRacialSkills];
+						}
+						if (this._selectedRacialTools.length) {
+							level1History.choices.raceUserChoices.selectedTools = [...this._selectedRacialTools];
+						}
+						if (Object.keys(this._selectedRacialAbilityChoices).length) {
+							level1History.choices.raceUserChoices.selectedAbilityChoices = {};
+							for (const [k, v] of Object.entries(this._selectedRacialAbilityChoices)) {
+								level1History.choices.raceUserChoices.selectedAbilityChoices[k] = typeof v === "object" && v !== null ? {...v} : v;
+							}
+						}
+						if (this._useTashasRules) {
+							level1History.choices.raceUserChoices.useTashasRules = true;
+							level1History.choices.raceUserChoices.tashasAbilityBonuses = {...this._tashasAbilityBonuses};
+							level1History.choices.raceUserChoices.tashasSkillReplacements = [...this._tashasSkillReplacements];
+							level1History.choices.raceUserChoices.tashasLanguageReplacements = [...this._tashasLanguageReplacements];
+						}
+					}
+					if (this._selectedBackground) {
+						level1History.choices.background = {
+							name: this._selectedBackground.name,
+							source: this._selectedBackground.source,
+						};
+						level1History.choices.backgroundUserChoices = {};
+						if (this._selectedToolProficiencies?.length) {
+							level1History.choices.backgroundUserChoices.selectedTools = this._selectedToolProficiencies.map(c => ({...c}));
+						}
+						if (this._selectedLanguages?.length) {
+							level1History.choices.backgroundUserChoices.selectedLanguages = this._selectedLanguages.map(c => ({...c}));
+						}
+						if (this._selectedAbilityBonuses && Object.keys(this._selectedAbilityBonuses).length) {
+							level1History.choices.backgroundUserChoices.selectedAbilityBonuses = {...this._selectedAbilityBonuses};
+						}
+					}
+
 					this._state.recordLevelChoice(level1History);
 				}
 				break;

@@ -122,7 +122,7 @@ class CharacterSheetRespec {
 
 		// Show race/background grants at level 1
 		if (level === 1) {
-			const grants = this._renderRaceBackgroundGrants();
+			const grants = this._renderRaceBackgroundGrants(history);
 			if (grants) card.append(grants);
 		}
 
@@ -306,13 +306,15 @@ class CharacterSheetRespec {
 	 * Render a read-only summary of race and background grants for the level 1 card.
 	 * @returns {HTMLElement|null} The grants element, or null if no race/background set
 	 */
-	_renderRaceBackgroundGrants () {
+	_renderRaceBackgroundGrants (history) {
 		const race = this._state.getRace();
 		const background = this._state.getBackground();
 
 		if (!race && !background) return null;
 
 		const grants = e_({tag: "div", clazz: "charsheet__level-entry-grants mt-1 mb-1"});
+		const raceUserChoices = history?.choices?.raceUserChoices || {};
+		const bgUserChoices = history?.choices?.backgroundUserChoices || {};
 
 		// Race grants
 		if (race) {
@@ -348,27 +350,61 @@ class CharacterSheetRespec {
 				if (resists.length) items.push(`Resist: ${resists.join(", ")}`);
 			}
 
-			// Skill proficiencies
+			// Skill proficiencies — fixed + user-chosen
+			const raceSkills = [];
 			if (race.skillProficiencies?.length) {
-				const skills = [];
 				race.skillProficiencies.forEach(sp => {
 					Object.keys(sp).forEach(s => {
-						if (s !== "any" && s !== "choose") skills.push(s.toTitleCase());
+						if (s !== "any" && s !== "choose") raceSkills.push(s.toTitleCase());
 					});
 				});
-				if (skills.length) items.push(`Skills: ${skills.join(", ")}`);
 			}
+			if (raceUserChoices.selectedSkills?.length) {
+				raceUserChoices.selectedSkills.forEach(s => raceSkills.push(s));
+			}
+			if (raceSkills.length) items.push(`Skills: ${raceSkills.join(", ")}`);
 
-			// Language proficiencies
+			// Language proficiencies — fixed + user-chosen
+			const raceLangs = [];
 			if (race.languageProficiencies?.length) {
-				const langs = [];
 				race.languageProficiencies.forEach(lp => {
 					Object.keys(lp).forEach(l => {
-						if (l !== "anyStandard" && l !== "any") langs.push(l.toTitleCase());
+						if (l !== "anyStandard" && l !== "any" && l !== "choose") raceLangs.push(l.toTitleCase());
 					});
 				});
-				if (langs.length) items.push(`Languages: ${langs.join(", ")}`);
 			}
+			if (raceUserChoices.selectedLanguages) {
+				Object.values(raceUserChoices.selectedLanguages).forEach(arr => {
+					if (Array.isArray(arr)) arr.forEach(l => raceLangs.push(l));
+				});
+			}
+			if (raceLangs.length) items.push(`Languages: ${raceLangs.join(", ")}`);
+
+			// Tool proficiencies — user-chosen
+			if (raceUserChoices.selectedTools?.length) {
+				items.push(`Tools: ${raceUserChoices.selectedTools.join(", ")}`);
+			}
+
+			// Ability bonuses — fixed + user-chosen
+			const raceBonusParts = [];
+			if (race.ability) {
+				race.ability.forEach(abiSet => {
+					Object.entries(abiSet).forEach(([abi, bonus]) => {
+						if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
+							raceBonusParts.push(`${Parser.attAbvToFull(abi)} +${bonus}`);
+						}
+					});
+				});
+			}
+			if (raceUserChoices.selectedAbilityChoices) {
+				Object.entries(raceUserChoices.selectedAbilityChoices).forEach(([key, value]) => {
+					if (!key.includes("_weight") && value && Parser.ABIL_ABVS.includes(value)) {
+						const bonus = raceUserChoices.selectedAbilityChoices[`${key}_weight`] || 0;
+						if (bonus) raceBonusParts.push(`${Parser.attAbvToFull(value)} +${bonus}`);
+					}
+				});
+			}
+			if (raceBonusParts.length) items.push(`ASI: ${raceBonusParts.join(", ")}`);
 
 			if (items.length) {
 				raceGrants.append(e_({outer: `<div class="ve-small ve-muted ml-2">${items.join(" · ")}</div>`}));
@@ -395,27 +431,60 @@ class CharacterSheetRespec {
 				if (skills.length) items.push(`Skills: ${skills.join(", ")}`);
 			}
 
-			// Tool proficiencies
+			// Tool proficiencies — fixed + user-chosen
+			const bgTools = [];
 			if (background.toolProficiencies?.length) {
-				const tools = [];
 				background.toolProficiencies.forEach(tp => {
 					Object.keys(tp).forEach(t => {
-						if (t !== "any" && t !== "choose" && t !== "anyArtisansTool" && t !== "anyMusicalInstrument") tools.push(t.toTitleCase());
+						if (t !== "any" && t !== "choose" && t !== "anyArtisansTool" && t !== "anyMusicalInstrument") bgTools.push(t.toTitleCase());
 					});
 				});
-				if (tools.length) items.push(`Tools: ${tools.join(", ")}`);
 			}
+			if (bgUserChoices.selectedTools?.length) {
+				bgUserChoices.selectedTools.forEach(c => {
+					if (typeof c === "string") bgTools.push(c);
+					else if (c.tool) bgTools.push(c.tool);
+				});
+			}
+			if (bgTools.length) items.push(`Tools: ${bgTools.join(", ")}`);
 
-			// Language proficiencies
+			// Language proficiencies — fixed + user-chosen
+			const bgLangs = [];
 			if (background.languageProficiencies?.length) {
-				const langs = [];
 				background.languageProficiencies.forEach(lp => {
 					Object.keys(lp).forEach(l => {
-						if (l !== "anyStandard" && l !== "any") langs.push(l.toTitleCase());
+						if (l !== "anyStandard" && l !== "any" && l !== "choose") bgLangs.push(l.toTitleCase());
 					});
 				});
-				if (langs.length) items.push(`Languages: ${langs.join(", ")}`);
 			}
+			if (bgUserChoices.selectedLanguages?.length) {
+				bgUserChoices.selectedLanguages.forEach(c => {
+					if (typeof c === "string") bgLangs.push(c);
+					else if (c.language) bgLangs.push(c.language);
+				});
+			}
+			if (bgLangs.length) items.push(`Languages: ${bgLangs.join(", ")}`);
+
+			// Ability bonuses — fixed + user-chosen
+			const bgBonusParts = [];
+			if (background.ability) {
+				background.ability.forEach(abiSet => {
+					Object.entries(abiSet).forEach(([abi, bonus]) => {
+						if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
+							bgBonusParts.push(`${Parser.attAbvToFull(abi)} +${bonus}`);
+						}
+					});
+				});
+			}
+			if (bgUserChoices.selectedAbilityBonuses) {
+				Object.entries(bgUserChoices.selectedAbilityBonuses).forEach(([key, value]) => {
+					if (!key.includes("_weight") && value && Parser.ABIL_ABVS.includes(value)) {
+						const bonus = bgUserChoices.selectedAbilityBonuses[`${key}_weight`] || 0;
+						if (bonus) bgBonusParts.push(`${Parser.attAbvToFull(value)} +${bonus}`);
+					}
+				});
+			}
+			if (bgBonusParts.length) items.push(`ASI: ${bgBonusParts.join(", ")}`);
 
 			// Starting equipment
 			if (background.startingEquipment?.length) {
@@ -440,6 +509,27 @@ class CharacterSheetRespec {
 	 */
 	_getEditableChoices (level, history) {
 		const editable = [];
+
+		// Race is editable at level 1 (with cascade warning)
+		if (level === 1 && history.choices?.race) {
+			const raceName = this._state.getRaceName() || history.choices.race.name;
+			editable.push({
+				type: "race",
+				label: "Species",
+				current: raceName,
+				hasCascade: true,
+			});
+		}
+
+		// Background is editable at level 1 (with cascade warning)
+		if (level === 1 && history.choices?.background) {
+			editable.push({
+				type: "background",
+				label: "Background",
+				current: history.choices.background.name,
+				hasCascade: true,
+			});
+		}
 
 		// ASI is editable (separate from feat for Thelemar rule support)
 		if (history.choices?.asi) {
@@ -586,6 +676,12 @@ class CharacterSheetRespec {
 	 */
 	async _editChoice (level, history, choice, closeParentModal) {
 		switch (choice.type) {
+			case "race":
+				await this._editRace(level, history, closeParentModal);
+				break;
+			case "background":
+				await this._editBackground(level, history, closeParentModal);
+				break;
 			case "asi":
 				await this._editAsi(level, history, closeParentModal);
 				break;
@@ -1759,6 +1855,1196 @@ class CharacterSheetRespec {
 			}
 		});
 	}
+
+	// region Race/Background Respec
+
+	async _editRace (level, history, closeParentModal) {
+		const races = this._page.filterByAllowedSources(this._page.getRaces());
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Change Species",
+			isMinHeight0: true,
+			isWidth100: true,
+			isUncappedWidth: true,
+			cbClose: () => {},
+		});
+
+		const content = e_({tag: "div", clazz: "charsheet__respec-subclass-modal"});
+
+		const currentRaceName = this._state.getRaceName();
+		content.append(e_({outer: `<p class="text-muted mb-2">Current Species: <strong>${Renderer.stripTags(currentRaceName || "Unknown")}</strong></p>`}));
+
+		content.append(e_({outer: `
+			<div class="charsheet__respec-cascade-warning">
+				<h5><span class="text-warning">\u26a0\ufe0f</span> Species Change Impact</h5>
+				<p class="ve-small">Changing species will replace all racial traits (speed, darkvision, resistances, languages, skills, proficiencies) and recalculate ability score bonuses.</p>
+			</div>
+		`}));
+
+		content.append(e_({outer: `<h5>Select New Species</h5>`}));
+
+		const searchRow = e_({tag: "div", clazz: "charsheet__respec-search-row mb-2"});
+		const searchInput = e_({tag: "input", clazz: "form-control"});
+		searchInput.type = "text";
+		searchInput.placeholder = "Search species...";
+		searchRow.append(searchInput);
+		content.append(searchRow);
+
+		const raceList = e_({tag: "div", clazz: "charsheet__respec-feat-list"});
+		let selectedRace = null;
+		let currentPickers = [];
+		let choicesPanel;
+		let fnUpdateApplyState;
+
+		const renderRaces = (filter = "") => {
+			raceList.innerHTML = "";
+			const filterLower = filter.toLowerCase();
+			const filtered = races
+				.filter(r => !r._isBaseRace)
+				.filter(r => !filter || r.name.toLowerCase().includes(filterLower))
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.slice(0, 50);
+
+			if (filtered.length === 0) {
+				raceList.append(e_({outer: `<p class="text-muted">No species found.</p>`}));
+				return;
+			}
+
+			const currentRace = this._state.getRace();
+			filtered.forEach(race => {
+				const isCurrent = race.name === currentRace?.name && race.source === currentRace?.source;
+				const isSelected = selectedRace?.name === race.name && selectedRace?.source === race.source;
+				const displayName = Renderer.stripTags(race.name);
+				const item = e_({outer: `
+					<div class="charsheet__respec-feat-item ${isCurrent ? "charsheet__respec-feat-current" : ""} ${isSelected ? "charsheet__respec-feat-selected" : ""}">
+						<strong>${displayName}</strong>
+						<span class="text-muted">${Parser.sourceJsonToAbv(race.source)}</span>
+					</div>
+				`});
+				item.addEventListener("click", () => {
+					selectedRace = race;
+					raceList.querySelectorAll(".charsheet__respec-feat-selected").forEach(el => el.classList.remove("charsheet__respec-feat-selected"));
+					item.classList.add("charsheet__respec-feat-selected");
+
+					// Render choice pickers for the selected race
+					if (choicesPanel) {
+						choicesPanel.innerHTML = "";
+						currentPickers = [];
+						const langPicker = this._renderLanguageChoicePickers(choicesPanel, race, () => fnUpdateApplyState?.());
+						if (langPicker) currentPickers.push(langPicker);
+						const skillPicker = this._renderSkillChoicePickers(choicesPanel, race, () => fnUpdateApplyState?.());
+						if (skillPicker) currentPickers.push(skillPicker);
+						const toolPicker = this._renderToolChoicePickers(choicesPanel, race, () => fnUpdateApplyState?.());
+						if (toolPicker) currentPickers.push(toolPicker);
+						const abiPicker = this._renderAbilityChoicePickers(choicesPanel, race, "rc", () => fnUpdateApplyState?.());
+						if (abiPicker) currentPickers.push(abiPicker);
+					}
+					fnUpdateApplyState?.();
+				});
+				raceList.append(item);
+			});
+		};
+
+		renderRaces();
+		searchInput.addEventListener("input", () => renderRaces(searchInput.value));
+		content.append(raceList);
+
+		choicesPanel = e_({tag: "div", clazz: "charsheet__respec-choices-panel mt-2"});
+		content.append(choicesPanel);
+
+		const btnRow = e_({tag: "div", clazz: "charsheet__respec-btn-row mt-3"});
+		const cancelBtn = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		cancelBtn.addEventListener("click", () => doClose());
+
+		const applyBtn = e_({tag: "button", clazz: "ve-btn ve-btn-danger", txt: "Change Species"});
+
+		fnUpdateApplyState = () => {
+			applyBtn.disabled = !selectedRace || currentPickers.some(p => !p.isComplete());
+		};
+
+		applyBtn.addEventListener("click", async () => {
+			if (!selectedRace) {
+				JqueryUtil.doToast({type: "warning", content: "Please select a species."});
+				return;
+			}
+
+			if (currentPickers.some(p => !p.isComplete())) {
+				JqueryUtil.doToast({type: "warning", content: "Please complete all choices."});
+				return;
+			}
+
+			const currentRace = this._state.getRace();
+			if (selectedRace.name === currentRace?.name && selectedRace.source === currentRace?.source) {
+				JqueryUtil.doToast({type: "info", content: "No changes made."});
+				doClose();
+				return;
+			}
+
+			const confirmed = await InputUiUtil.pGetUserBoolean({
+				title: "Confirm Species Change",
+				htmlDescription: `<p>This will replace all racial traits from <strong>${Renderer.stripTags(currentRaceName)}</strong> with traits from <strong>${Renderer.stripTags(selectedRace.name)}</strong>.</p><p>Are you sure?</p>`,
+				textYes: "Change Species",
+				textNo: "Cancel",
+			});
+
+			if (!confirmed) return;
+
+			const userChoices = {};
+			currentPickers.forEach(p => {
+				if (p.type === "language") userChoices.selectedLanguages = p.getSelections();
+				else if (p.type === "skill") userChoices.selectedSkills = p.getSelections();
+				else if (p.type === "tool") userChoices.selectedTools = p.getSelections();
+				else if (p.type === "ability") userChoices.selectedAbilityChoices = p.getSelections();
+			});
+
+			this._applyRaceChange(history, selectedRace, userChoices);
+
+			doClose();
+			closeParentModal();
+			this.render();
+			this._page.renderCharacter();
+			await this._page.saveCharacter();
+			JqueryUtil.doToast({type: "success", content: `Changed species to ${Renderer.stripTags(selectedRace.name)}.`});
+		});
+
+		btnRow.append(cancelBtn, applyBtn);
+		content.append(btnRow);
+		modalInner.append(content);
+	}
+
+	async _editBackground (level, history, closeParentModal) {
+		const backgrounds = this._page.filterByAllowedSources(this._page.getBackgrounds());
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Change Background",
+			isMinHeight0: true,
+			isWidth100: true,
+			isUncappedWidth: true,
+			cbClose: () => {},
+		});
+
+		const content = e_({tag: "div", clazz: "charsheet__respec-subclass-modal"});
+
+		const currentBgName = this._state.getBackgroundName() || "Unknown";
+		content.append(e_({outer: `<p class="text-muted mb-2">Current Background: <strong>${Renderer.stripTags(currentBgName)}</strong></p>`}));
+
+		content.append(e_({outer: `
+			<div class="charsheet__respec-cascade-warning">
+				<h5><span class="text-warning">\u26a0\ufe0f</span> Background Change Impact</h5>
+				<p class="ve-small">Changing background will replace background skills, tools, languages, features, and may recalculate ability score bonuses.</p>
+			</div>
+		`}));
+
+		content.append(e_({outer: `<h5>Select New Background</h5>`}));
+
+		const searchRow = e_({tag: "div", clazz: "charsheet__respec-search-row mb-2"});
+		const searchInput = e_({tag: "input", clazz: "form-control"});
+		searchInput.type = "text";
+		searchInput.placeholder = "Search backgrounds...";
+		searchRow.append(searchInput);
+		content.append(searchRow);
+
+		const bgList = e_({tag: "div", clazz: "charsheet__respec-feat-list"});
+		let selectedBg = null;
+		let currentPickers = [];
+		let choicesPanel;
+		let fnUpdateApplyState;
+
+		const renderBgs = (filter = "") => {
+			bgList.innerHTML = "";
+			const filterLower = filter.toLowerCase();
+			const filtered = backgrounds
+				.filter(bg => !filter || bg.name.toLowerCase().includes(filterLower))
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.slice(0, 50);
+
+			if (filtered.length === 0) {
+				bgList.append(e_({outer: `<p class="text-muted">No backgrounds found.</p>`}));
+				return;
+			}
+
+			const currentBg = this._state.getBackground();
+			filtered.forEach(bg => {
+				const isCurrent = bg.name === currentBg?.name && bg.source === currentBg?.source;
+				const isSelected = selectedBg?.name === bg.name && selectedBg?.source === bg.source;
+				const displayName = Renderer.stripTags(bg.name);
+				const item = e_({outer: `
+					<div class="charsheet__respec-feat-item ${isCurrent ? "charsheet__respec-feat-current" : ""} ${isSelected ? "charsheet__respec-feat-selected" : ""}">
+						<strong>${displayName}</strong>
+						<span class="text-muted">${Parser.sourceJsonToAbv(bg.source)}</span>
+					</div>
+				`});
+				item.addEventListener("click", () => {
+					selectedBg = bg;
+					bgList.querySelectorAll(".charsheet__respec-feat-selected").forEach(el => el.classList.remove("charsheet__respec-feat-selected"));
+					item.classList.add("charsheet__respec-feat-selected");
+
+					// Render choice pickers for the selected background
+					if (choicesPanel) {
+						choicesPanel.innerHTML = "";
+						currentPickers = [];
+						const langPicker = this._renderLanguageChoicePickers(choicesPanel, bg, () => fnUpdateApplyState?.());
+						if (langPicker) currentPickers.push(langPicker);
+						const toolPicker = this._renderToolChoicePickers(choicesPanel, bg, () => fnUpdateApplyState?.());
+						if (toolPicker) currentPickers.push(toolPicker);
+						const abiPicker = this._renderAbilityChoicePickers(choicesPanel, bg, "bg", () => fnUpdateApplyState?.());
+						if (abiPicker) currentPickers.push(abiPicker);
+					}
+					fnUpdateApplyState?.();
+				});
+				bgList.append(item);
+			});
+		};
+
+		renderBgs();
+		searchInput.addEventListener("input", () => renderBgs(searchInput.value));
+		content.append(bgList);
+
+		choicesPanel = e_({tag: "div", clazz: "charsheet__respec-choices-panel mt-2"});
+		content.append(choicesPanel);
+
+		const btnRow = e_({tag: "div", clazz: "charsheet__respec-btn-row mt-3"});
+		const cancelBtn = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		cancelBtn.addEventListener("click", () => doClose());
+
+		const applyBtn = e_({tag: "button", clazz: "ve-btn ve-btn-danger", txt: "Change Background"});
+
+		fnUpdateApplyState = () => {
+			applyBtn.disabled = !selectedBg || currentPickers.some(p => !p.isComplete());
+		};
+
+		applyBtn.addEventListener("click", async () => {
+			if (!selectedBg) {
+				JqueryUtil.doToast({type: "warning", content: "Please select a background."});
+				return;
+			}
+
+			if (currentPickers.some(p => !p.isComplete())) {
+				JqueryUtil.doToast({type: "warning", content: "Please complete all choices."});
+				return;
+			}
+
+			const currentBg = this._state.getBackground();
+			if (selectedBg.name === currentBg?.name && selectedBg.source === currentBg?.source) {
+				JqueryUtil.doToast({type: "info", content: "No changes made."});
+				doClose();
+				return;
+			}
+
+			const confirmed = await InputUiUtil.pGetUserBoolean({
+				title: "Confirm Background Change",
+				htmlDescription: `<p>This will replace all background traits from <strong>${Renderer.stripTags(currentBgName)}</strong> with traits from <strong>${Renderer.stripTags(selectedBg.name)}</strong>.</p><p>Are you sure?</p>`,
+				textYes: "Change Background",
+				textNo: "Cancel",
+			});
+
+			if (!confirmed) return;
+
+			const userChoices = {};
+			currentPickers.forEach(p => {
+				if (p.type === "language") userChoices.selectedLanguages = p.getSelections();
+				else if (p.type === "tool") userChoices.selectedTools = p.getSelections();
+				else if (p.type === "ability") userChoices.selectedAbilityBonuses = p.getSelections();
+			});
+
+			this._applyBackgroundChange(history, selectedBg, userChoices);
+
+			doClose();
+			closeParentModal();
+			this.render();
+			this._page.renderCharacter();
+			await this._page.saveCharacter();
+			JqueryUtil.doToast({type: "success", content: `Changed background to ${Renderer.stripTags(selectedBg.name)}.`});
+		});
+
+		btnRow.append(cancelBtn, applyBtn);
+		content.append(btnRow);
+		modalInner.append(content);
+	}
+
+	/**
+	 * Clear old race grants and apply new race traits.
+	 * Mirrors the builder's _applyRacialTraits pattern.
+	 */
+	_applyRaceChange (history, newRace, userChoices = {}) {
+		const oldRace = this._state.getRace();
+		const oldSubrace = this._state.getSubrace();
+		const oldUserChoices = history.choices?.raceUserChoices || {};
+
+		// --- CLEAR OLD RACE GRANTS ---
+
+		// Remove race/subrace features
+		const features = this._state.getFeatures();
+		features
+			.filter(f => f.featureType === "Species" || f.featureType === "Subrace" || f.featureType === "Race")
+			.forEach(f => this._state.removeFeature(f.id));
+
+		// Reset speed
+		this._state.setSpeed("walk", 30);
+		["fly", "swim", "climb", "burrow"].forEach(t => this._state.setSpeed(t, 0));
+
+		// Remove race-sourced named modifiers (e.g., equalToWalk speeds)
+		const namedMods = this._state.getNamedModifiers();
+		namedMods.filter(m => m.sourceType === "race").forEach(m => this._state.removeNamedModifier(m.id));
+
+		// Reset senses
+		this._state.setSense("darkvision", 0);
+
+		// Clear ability bonuses (will be reapplied for both race and background)
+		Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
+
+		// Clear old racial languages
+		this._clearLanguagesFromData(oldRace);
+		this._clearLanguagesFromData(oldSubrace);
+		this._clearUserChosenLanguages(oldUserChoices);
+
+		// Clear old racial skills
+		this._clearSkillsFromData(oldRace);
+		this._clearSkillsFromData(oldSubrace);
+		this._clearUserChosenSkills(oldUserChoices);
+
+		// Clear old racial resistances
+		this._clearResistancesFromData(oldRace);
+		this._clearResistancesFromData(oldSubrace);
+
+		// Clear old racial proficiencies
+		this._clearProficienciesFromData(oldRace, oldSubrace);
+		if (oldUserChoices.selectedTools?.length) {
+			oldUserChoices.selectedTools.forEach(tool => this._state.removeToolProficiency(tool.toTitleCase()));
+		}
+
+		// --- APPLY NEW RACE GRANTS ---
+
+		// Determine subrace from merged race data
+		const newSubrace = newRace._baseName ? null : null;
+		this._state.setRace(newRace, newSubrace);
+
+		// Speed
+		this._applySpeedFromRaceData(newRace);
+
+		// Senses
+		if (newRace.darkvision) this._state.setSense("darkvision", newRace.darkvision);
+
+		// Fixed languages
+		this._applyFixedLanguages(newRace);
+
+		// Fixed skills
+		this._applyFixedSkills(newRace);
+
+		// Resistances
+		if (newRace.resist) {
+			newRace.resist.forEach(r => {
+				if (typeof r === "string") this._state.addResistance(r);
+			});
+		}
+
+		// Fixed ability bonuses
+		if (newRace.ability) {
+			newRace.ability.forEach(abiSet => {
+				Object.entries(abiSet).forEach(([abi, bonus]) => {
+					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
+						const current = this._state.getAbilityBonus(abi) || 0;
+						this._state.setAbilityBonus(abi, current + bonus);
+					}
+				});
+			});
+		}
+
+		// Armor, weapon, tool proficiencies
+		this._applyProficienciesFromData(newRace);
+
+		// Race features (entries)
+		if (newRace.entries) {
+			newRace.entries.forEach(entry => {
+				if (typeof entry === "object" && entry.name) {
+					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
+						{...entry, source: entry.source || newRace.source},
+						{featureType: "Species"},
+					));
+				}
+			});
+		}
+
+		// Reapply background ability bonuses (since we reset all to 0)
+		this._reapplyBackgroundAbilityBonuses(history);
+
+		// Apply user-chosen languages
+		if (userChoices.selectedLanguages) {
+			Object.values(userChoices.selectedLanguages).forEach(langs => {
+				if (Array.isArray(langs)) langs.forEach(lang => this._state.addLanguage(lang));
+			});
+		}
+
+		// Apply user-chosen skills
+		if (userChoices.selectedSkills?.length) {
+			userChoices.selectedSkills.forEach(skill => {
+				this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
+			});
+		}
+
+		// Apply user-chosen tools
+		if (userChoices.selectedTools?.length) {
+			userChoices.selectedTools.forEach(tool => {
+				this._state.addToolProficiency(tool);
+			});
+		}
+
+		// Apply user-chosen ability bonuses
+		if (userChoices.selectedAbilityChoices) {
+			Object.entries(userChoices.selectedAbilityChoices).forEach(([key, value]) => {
+				if (!key.includes("_weight") && value) {
+					const weightKey = `${key}_weight`;
+					const bonus = userChoices.selectedAbilityChoices[weightKey] || 0;
+					if (bonus && Parser.ABIL_ABVS.includes(value)) {
+						const current = this._state.getAbilityBonus(value) || 0;
+						this._state.setAbilityBonus(value, current + bonus);
+					}
+				}
+			});
+		}
+
+		// Update level history
+		this._state.updateLevelChoice(1, {
+			race: {
+				name: newRace.name,
+				source: newRace.source,
+			},
+			raceUserChoices: userChoices,
+		});
+	}
+
+	/**
+	 * Clear old background grants and apply new background traits.
+	 * Mirrors the builder's _applyBackgroundFeatures pattern.
+	 */
+	_applyBackgroundChange (history, newBg, userChoices = {}) {
+		const oldBg = this._state.getBackground();
+		const oldUserChoices = history.choices?.backgroundUserChoices || {};
+
+		// --- CLEAR OLD BACKGROUND GRANTS ---
+
+		// Remove background features
+		const features = this._state.getFeatures();
+		features
+			.filter(f => f.featureType === "Background")
+			.forEach(f => this._state.removeFeature(f.id));
+
+		// Clear old background ability bonuses (reset all, will reapply race + new bg)
+		Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
+
+		// Clear old background skills
+		this._clearSkillsFromData(oldBg);
+
+		// Clear old background tools
+		this._clearToolsFromData(oldBg);
+		if (oldUserChoices.selectedTools?.length) {
+			oldUserChoices.selectedTools.forEach(c => {
+				if (c.tool) this._state.removeToolProficiency(c.tool.toTitleCase());
+			});
+		}
+
+		// Clear old background languages
+		this._clearLanguagesFromData(oldBg);
+		if (oldUserChoices.selectedLanguages?.length) {
+			oldUserChoices.selectedLanguages.forEach(c => {
+				if (c.language) this._state.removeLanguage(c.language);
+			});
+		}
+
+		// --- APPLY NEW BACKGROUND GRANTS ---
+
+		this._state.setBackground(newBg);
+
+		// Skills
+		this._applyFixedSkills(newBg);
+
+		// Tools
+		this._applyFixedTools(newBg);
+
+		// Languages
+		this._applyFixedLanguages(newBg);
+
+		// Features
+		if (newBg.entries) {
+			newBg.entries.forEach(entry => {
+				if (typeof entry === "object" && entry.name) {
+					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
+						{...entry, source: entry.source || newBg.source},
+						{featureType: "Background"},
+					));
+				}
+			});
+		}
+
+		// Reapply racial ability bonuses (since we reset all to 0)
+		this._reapplyRacialAbilityBonuses(history);
+
+		// Reapply newly-selected background ability bonuses
+		// For 2024 backgrounds with ability choices, apply fixed bonuses only
+		if (newBg.ability) {
+			newBg.ability.forEach(abiSet => {
+				Object.entries(abiSet).forEach(([abi, bonus]) => {
+					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
+						const current = this._state.getAbilityBonus(abi) || 0;
+						this._state.setAbilityBonus(abi, current + bonus);
+					}
+				});
+			});
+		}
+
+		// Apply user-chosen languages
+		if (userChoices.selectedLanguages?.length) {
+			userChoices.selectedLanguages.forEach(lang => {
+				this._state.addLanguage(lang);
+			});
+		}
+
+		// Apply user-chosen tools
+		if (userChoices.selectedTools?.length) {
+			userChoices.selectedTools.forEach(tool => {
+				this._state.addToolProficiency(tool);
+			});
+		}
+
+		// Apply user-chosen ability bonuses
+		if (userChoices.selectedAbilityBonuses) {
+			Object.entries(userChoices.selectedAbilityBonuses).forEach(([key, value]) => {
+				if (!key.includes("_weight") && value) {
+					const weightKey = `${key}_weight`;
+					const bonus = userChoices.selectedAbilityBonuses[weightKey] || 0;
+					if (bonus && Parser.ABIL_ABVS.includes(value)) {
+						const current = this._state.getAbilityBonus(value) || 0;
+						this._state.setAbilityBonus(value, current + bonus);
+					}
+				}
+			});
+		}
+
+		// Update level history — convert to storage format
+		const storedUserChoices = {};
+		if (userChoices.selectedLanguages?.length) {
+			storedUserChoices.selectedLanguages = userChoices.selectedLanguages.map(l => ({language: l}));
+		}
+		if (userChoices.selectedTools?.length) {
+			storedUserChoices.selectedTools = userChoices.selectedTools.map(t => ({tool: t}));
+		}
+		if (userChoices.selectedAbilityBonuses) {
+			storedUserChoices.selectedAbilityBonuses = userChoices.selectedAbilityBonuses;
+		}
+
+		this._state.updateLevelChoice(1, {
+			background: {
+				name: newBg.name,
+				source: newBg.source,
+			},
+			backgroundUserChoices: storedUserChoices,
+		});
+	}
+
+	// region Choice Picker Helpers
+
+	/**
+	 * Render language choice pickers for "anyStandard", "any", or "choose" entries.
+	 * @returns {{type: string, getSelections: Function, isComplete: Function}|null}
+	 */
+	_renderLanguageChoicePickers (container, data, onUpdate) {
+		if (!data?.languageProficiencies) return null;
+
+		const langGroups = this._page.getLanguageOptionsGrouped();
+		const standardLangs = langGroups.standard || [];
+		const allLangs = [
+			...(langGroups.standard || []),
+			...(langGroups.exotic || []),
+			...(langGroups.secret || []),
+			...(langGroups.homebrew || []),
+		];
+
+		const selections = {}; // {profIdx: [lang|null, ...]}
+		let totalRequired = 0;
+		let hasAny = false;
+
+		data.languageProficiencies.forEach((langProf, profIdx) => {
+			if (!selections[profIdx]) selections[profIdx] = [];
+
+			const addDropdowns = (count, options, noun) => {
+				hasAny = true;
+				totalRequired += count;
+				container.append(e_({outer: `<p class="ve-small mb-1"><strong>Language:</strong> Choose ${count} ${noun}${count > 1 ? "s" : ""}:</p>`}));
+				for (let i = 0; i < count; i++) {
+					const idx = selections[profIdx].length;
+					selections[profIdx].push(null);
+					const selectEl = e_({outer: `<select class="form-control form-control--minimal mb-1"><option value="">-- Select Language --</option></select>`});
+					options.forEach(lang => selectEl.append(e_({outer: `<option value="${lang}">${lang}</option>`})));
+					selectEl.addEventListener("change", () => {
+						selections[profIdx][idx] = selectEl.value || null;
+						onUpdate();
+					});
+					container.append(selectEl);
+				}
+			};
+
+			if (langProf.anyStandard) {
+				addDropdowns(typeof langProf.anyStandard === "number" ? langProf.anyStandard : 1, standardLangs, "standard language");
+			}
+			if (langProf.any) {
+				addDropdowns(typeof langProf.any === "number" ? langProf.any : 1, allLangs, "language");
+			}
+			if (langProf.choose) {
+				const from = (langProf.choose.from || []).map(l => l.split("|")[0].toTitleCase());
+				addDropdowns(langProf.choose.count || 1, from, "language");
+			}
+		});
+
+		if (!hasAny) return null;
+
+		return {
+			type: "language",
+			getSelections: () => {
+				const result = {};
+				Object.entries(selections).forEach(([profIdx, langs]) => {
+					result[profIdx] = langs.filter(l => l);
+				});
+				return result;
+			},
+			isComplete: () => {
+				let filled = 0;
+				Object.values(selections).forEach(arr => arr.forEach(v => { if (v) filled++; }));
+				return filled >= totalRequired;
+			},
+		};
+	}
+
+	/**
+	 * Render skill choice pickers for "any" or "choose" entries.
+	 * @returns {{type: string, getSelections: Function, isComplete: Function}|null}
+	 */
+	_renderSkillChoicePickers (container, data, onUpdate) {
+		if (!data?.skillProficiencies) return null;
+
+		const allSkillNames = Parser.SKILL_TO_ATB_ABV
+			? Object.keys(Parser.SKILL_TO_ATB_ABV).map(s => s.toTitleCase())
+			: [];
+
+		const selected = [];
+		let totalRequired = 0;
+		let hasAny = false;
+
+		data.skillProficiencies.forEach(skillProf => {
+			const addCheckboxes = (count, options, label) => {
+				hasAny = true;
+				totalRequired += count;
+				container.append(e_({outer: `<p class="ve-small mb-1"><strong>Skills:</strong> ${label}</p>`}));
+				const checkboxContainer = e_({tag: "div", clazz: "charsheet__respec-skill-checkboxes mb-1"});
+				options.forEach(skill => {
+					const lbl = e_({outer: `<label class="mr-3 mb-1"><input type="checkbox" value="${skill}"> ${skill}</label>`});
+					lbl.querySelector("input").addEventListener("change", (evt) => {
+						if (evt.target.checked) {
+							if (selected.length < totalRequired) {
+								selected.push(skill);
+							} else {
+								evt.target.checked = false;
+								JqueryUtil.doToast({type: "warning", content: `You can only choose ${totalRequired} skill${totalRequired > 1 ? "s" : ""}.`});
+							}
+						} else {
+							const idx = selected.indexOf(skill);
+							if (idx >= 0) selected.splice(idx, 1);
+						}
+						onUpdate();
+					});
+					checkboxContainer.append(lbl);
+				});
+				container.append(checkboxContainer);
+			};
+
+			if (skillProf.any) {
+				const count = typeof skillProf.any === "number" ? skillProf.any : 1;
+				addCheckboxes(count, allSkillNames, `Choose any ${count} skill${count > 1 ? "s" : ""}:`);
+			}
+			if (skillProf.choose) {
+				const count = skillProf.choose.count || 1;
+				const from = (skillProf.choose.from || []).map(s => s.split("|")[0].toTitleCase());
+				addCheckboxes(count, from, `Choose ${count} skill${count > 1 ? "s" : ""}:`);
+			}
+		});
+
+		if (!hasAny) return null;
+
+		return {
+			type: "skill",
+			getSelections: () => [...selected],
+			isComplete: () => selected.length >= totalRequired,
+		};
+	}
+
+	/**
+	 * Render tool choice pickers for "any", "choose", "anyArtisansTool", "anyMusicalInstrument" entries.
+	 * @returns {{type: string, getSelections: Function, isComplete: Function}|null}
+	 */
+	_renderToolChoicePickers (container, data, onUpdate) {
+		if (!data?.toolProficiencies) return null;
+
+		const artisanTools = [
+			"Alchemist's Supplies", "Brewer's Supplies", "Calligrapher's Supplies",
+			"Carpenter's Tools", "Cartographer's Tools", "Cobbler's Tools",
+			"Cook's Utensils", "Glassblower's Tools", "Jeweler's Tools",
+			"Leatherworker's Tools", "Mason's Tools", "Painter's Supplies",
+			"Potter's Tools", "Smith's Tools", "Tinker's Tools",
+			"Weaver's Tools", "Woodcarver's Tools",
+		];
+		const musicalInstruments = [
+			"Bagpipes", "Drum", "Dulcimer", "Flute", "Horn",
+			"Lute", "Lyre", "Pan Flute", "Shawm", "Viol",
+		];
+		const allTools = [
+			...artisanTools, "Disguise Kit", "Forgery Kit", "Herbalism Kit",
+			...musicalInstruments, "Navigator's Tools", "Poisoner's Kit", "Thieves' Tools",
+		].sort();
+
+		const selected = [];
+		let totalRequired = 0;
+		let hasAny = false;
+
+		data.toolProficiencies.forEach(toolProf => {
+			const addDropdowns = (count, options, label) => {
+				hasAny = true;
+				totalRequired += count;
+				container.append(e_({outer: `<p class="ve-small mb-1"><strong>Tools:</strong> ${label}</p>`}));
+				for (let i = 0; i < count; i++) {
+					const idx = selected.length;
+					selected.push(null);
+					const selectEl = e_({outer: `<select class="form-control form-control--minimal mb-1"><option value="">-- Select Tool --</option></select>`});
+					options.forEach(tool => selectEl.append(e_({outer: `<option value="${tool}">${tool}</option>`})));
+					selectEl.addEventListener("change", () => {
+						selected[idx] = selectEl.value || null;
+						onUpdate();
+					});
+					container.append(selectEl);
+				}
+			};
+
+			if (toolProf.any) {
+				const count = typeof toolProf.any === "number" ? toolProf.any : 1;
+				addDropdowns(count, allTools, `Choose ${count} tool${count > 1 ? "s" : ""}:`);
+			}
+			if (toolProf.anyArtisansTool) {
+				const count = typeof toolProf.anyArtisansTool === "number" ? toolProf.anyArtisansTool : 1;
+				addDropdowns(count, artisanTools, `Choose ${count} artisan's tool${count > 1 ? "s" : ""}:`);
+			}
+			if (toolProf.anyMusicalInstrument) {
+				const count = typeof toolProf.anyMusicalInstrument === "number" ? toolProf.anyMusicalInstrument : 1;
+				addDropdowns(count, musicalInstruments, `Choose ${count} musical instrument${count > 1 ? "s" : ""}:`);
+			}
+			if (toolProf.choose) {
+				const from = (toolProf.choose.from || []).map(t => t.toTitleCase());
+				addDropdowns(toolProf.choose.count || 1, from, `Choose ${toolProf.choose.count || 1} tool${(toolProf.choose.count || 1) > 1 ? "s" : ""}:`);
+			}
+		});
+
+		if (!hasAny) return null;
+
+		return {
+			type: "tool",
+			getSelections: () => selected.filter(t => t),
+			isComplete: () => selected.filter(t => t).length >= totalRequired,
+		};
+	}
+
+	/**
+	 * Render ability score choice pickers for "choose" entries in ability data.
+	 * @param {string} prefix - "rc" for race choices, "bg" for background choices
+	 * @returns {{type: string, getSelections: Function, isComplete: Function}|null}
+	 */
+	_renderAbilityChoicePickers (container, data, prefix, onUpdate) {
+		if (!data?.ability) return null;
+
+		// Collect ability sets that require choices
+		const chooseSets = data.ability.filter(abiSet => abiSet.choose);
+		if (!chooseSets.length) return null;
+
+		const selections = {};
+		let activeSetIdx = 0;
+
+		// Helper: render pickers for a single ability set
+		const renderAbiSet = (choose, pickersContainer) => {
+			pickersContainer.innerHTML = "";
+			// Clear previous selections
+			Object.keys(selections).forEach(k => delete selections[k]);
+
+			const abilities = choose.from || choose.weighted?.from || Parser.ABIL_ABVS;
+
+			if (choose.weighted) {
+				const weights = choose.weighted.weights || [2, 1];
+				const asiContainer = e_({tag: "div", clazz: "charsheet__respec-asi-choices mb-1"});
+
+				weights.forEach((weight, idx) => {
+					const key = `${prefix}_${idx}`;
+					selections[key] = null;
+					selections[`${key}_weight`] = weight;
+
+					const row = e_({tag: "div", clazz: "ve-flex-v-center mb-1"});
+					row.append(e_({outer: `<span class="mr-2">+${weight}:</span>`}));
+
+					const selectEl = e_({outer: `<select class="form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${idx}"><option value="">-- Select --</option></select>`});
+					abilities.forEach(ab => {
+						selectEl.append(e_({outer: `<option value="${ab}">${Parser.attAbvToFull(ab)}</option>`}));
+					});
+
+					selectEl.addEventListener("change", () => {
+						selections[key] = selectEl.value || null;
+						// Cross-disable: prevent same ability in multiple dropdowns
+						[...asiContainer.querySelectorAll("select")].forEach(sel => {
+							const selIdx = parseInt(sel.dataset.asiIdx);
+							if (selIdx !== idx) {
+								[...sel.querySelectorAll("option")].forEach(opt => {
+									if (!opt.value) return;
+									const isUsedElsewhere = Object.entries(selections)
+										.some(([k, v]) => !k.includes("_weight") && k !== `${prefix}_${selIdx}` && v === opt.value);
+									opt.disabled = isUsedElsewhere;
+								});
+							}
+						});
+						onUpdate();
+					});
+
+					row.append(selectEl);
+					asiContainer.append(row);
+				});
+
+				pickersContainer.append(asiContainer);
+			} else if (choose.count) {
+				const amount = choose.amount || 1;
+				const count = choose.count;
+				const asiContainer = e_({tag: "div", clazz: "charsheet__respec-asi-choices mb-1"});
+
+				for (let i = 0; i < count; i++) {
+					const key = `${prefix}_${i}`;
+					selections[key] = null;
+					selections[`${key}_weight`] = amount;
+
+					const row = e_({tag: "div", clazz: "ve-flex-v-center mb-1"});
+					row.append(e_({outer: `<span class="mr-2">+${amount}:</span>`}));
+
+					const selectEl = e_({outer: `<select class="form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${i}"><option value="">-- Select --</option></select>`});
+					abilities.forEach(ab => {
+						selectEl.append(e_({outer: `<option value="${ab}">${Parser.attAbvToFull(ab)}</option>`}));
+					});
+
+					selectEl.addEventListener("change", () => {
+						selections[key] = selectEl.value || null;
+						// Cross-disable
+						[...asiContainer.querySelectorAll("select")].forEach(sel => {
+							const selIdx = parseInt(sel.dataset.asiIdx);
+							if (selIdx !== i) {
+								[...sel.querySelectorAll("option")].forEach(opt => {
+									if (!opt.value) return;
+									const isUsedElsewhere = Object.entries(selections)
+										.some(([k, v]) => !k.includes("_weight") && k !== `${prefix}_${selIdx}` && v === opt.value);
+									opt.disabled = isUsedElsewhere;
+								});
+							}
+						});
+						onUpdate();
+					});
+
+					row.append(selectEl);
+					asiContainer.append(row);
+				}
+
+				pickersContainer.append(asiContainer);
+			}
+		};
+
+		// Build the label describing what the set gives
+		const describeSet = (choose) => {
+			if (choose.weighted) {
+				const weights = choose.weighted.weights || [2, 1];
+				return weights.map(w => `+${w}`).join("/");
+			}
+			if (choose.count) {
+				const amount = choose.amount || 1;
+				return Array(choose.count).fill(`+${amount}`).join("/");
+			}
+			return "Choose";
+		};
+
+		container.append(e_({outer: `<p class="ve-small mb-1"><strong>Ability Scores:</strong></p>`}));
+
+		const pickersContainer = e_({tag: "div"});
+
+		// Single set: render directly
+		if (chooseSets.length === 1) {
+			renderAbiSet(chooseSets[0].choose, pickersContainer);
+		} else {
+			// Multiple sets are alternatives — let user pick which option
+			const optionRow = e_({tag: "div", clazz: "mb-1"});
+			chooseSets.forEach((abiSet, setIdx) => {
+				const label = describeSet(abiSet.choose);
+				const radioLbl = e_({outer: `<label class="mr-3"><input type="radio" name="${prefix}-asi-option" value="${setIdx}" ${setIdx === 0 ? "checked" : ""}> Option ${setIdx + 1}: ${label}</label>`});
+				radioLbl.querySelector("input").addEventListener("change", () => {
+					activeSetIdx = setIdx;
+					renderAbiSet(chooseSets[setIdx].choose, pickersContainer);
+					onUpdate();
+				});
+				optionRow.append(radioLbl);
+			});
+			container.append(optionRow);
+
+			// Render the first option by default
+			renderAbiSet(chooseSets[0].choose, pickersContainer);
+		}
+
+		container.append(pickersContainer);
+
+		return {
+			type: "ability",
+			getSelections: () => ({...selections}),
+			isComplete: () => {
+				const totalRequired = Object.keys(selections).filter(k => !k.includes("_weight")).length;
+				let filled = 0;
+				Object.entries(selections).forEach(([key, val]) => {
+					if (!key.includes("_weight") && val) filled++;
+				});
+				return totalRequired > 0 && filled >= totalRequired;
+			},
+		};
+	}
+
+	// endregion
+
+	// region Clear/Apply Helpers
+
+	_clearLanguagesFromData (data) {
+		if (!data?.languageProficiencies) return;
+		data.languageProficiencies.forEach(lp => {
+			Object.keys(lp).forEach(lang => {
+				if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
+				this._state.removeLanguage(lang.toTitleCase());
+			});
+		});
+	}
+
+	_clearUserChosenLanguages (userChoices) {
+		if (userChoices.selectedLanguages) {
+			Object.values(userChoices.selectedLanguages).forEach(langArray => {
+				if (Array.isArray(langArray)) langArray.forEach(l => this._state.removeLanguage(l.toTitleCase()));
+			});
+		}
+		if (userChoices.selectedSubraceLanguages?.length) {
+			userChoices.selectedSubraceLanguages.forEach(l => this._state.removeLanguage(l.toTitleCase()));
+		}
+		if (userChoices.tashasLanguageReplacements?.length) {
+			userChoices.tashasLanguageReplacements.forEach(l => {
+				if (l) this._state.removeLanguage(l.toTitleCase());
+			});
+		}
+	}
+
+	_clearSkillsFromData (data) {
+		if (!data?.skillProficiencies) return;
+		data.skillProficiencies.forEach(sp => {
+			Object.keys(sp).forEach(skill => {
+				if (skill !== "any" && skill !== "choose") {
+					this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 0);
+				}
+			});
+		});
+	}
+
+	_clearUserChosenSkills (userChoices) {
+		if (userChoices.selectedSkills?.length) {
+			userChoices.selectedSkills.forEach(skill => {
+				this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 0);
+			});
+		}
+		if (userChoices.tashasSkillReplacements?.length) {
+			userChoices.tashasSkillReplacements.forEach(skill => {
+				if (skill) this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 0);
+			});
+		}
+	}
+
+	_clearResistancesFromData (data) {
+		if (!data?.resist) return;
+		data.resist.forEach(r => {
+			if (typeof r === "string") this._state.removeResistance(r);
+		});
+	}
+
+	_clearProficienciesFromData (race, subrace) {
+		for (const data of [race, subrace]) {
+			if (!data) continue;
+			if (data.armorProficiencies) {
+				data.armorProficiencies.forEach(ap => {
+					Object.keys(ap).forEach(a => this._state.removeArmorProficiency(a.toTitleCase()));
+				});
+			}
+			if (data.weaponProficiencies) {
+				data.weaponProficiencies.forEach(wp => {
+					Object.keys(wp).forEach(w => this._state.removeWeaponProficiency(w.toTitleCase()));
+				});
+			}
+			if (data.toolProficiencies) {
+				data.toolProficiencies.forEach(tp => {
+					Object.keys(tp).forEach(t => {
+						if (t !== "any" && t !== "choose") this._state.removeToolProficiency(t.toTitleCase());
+					});
+				});
+			}
+		}
+	}
+
+	_clearToolsFromData (data) {
+		if (!data?.toolProficiencies) return;
+		data.toolProficiencies.forEach(tp => {
+			Object.entries(tp).forEach(([key, value]) => {
+				if (key !== "choose" && key !== "any" && key !== "anyArtisansTool" && key !== "anyMusicalInstrument" && value === true) {
+					this._state.removeToolProficiency(key.toTitleCase());
+				}
+			});
+		});
+	}
+
+	_applySpeedFromRaceData (race) {
+		if (!race.speed) return;
+		if (typeof race.speed === "number") {
+			this._state.setSpeed("walk", race.speed);
+		} else {
+			if (race.speed.walk) this._state.setSpeed("walk", race.speed.walk);
+			["fly", "swim", "climb", "burrow"].forEach(speedType => {
+				const speedValue = race.speed[speedType];
+				if (speedValue === true) {
+					this._state.addNamedModifier({
+						name: `${race.name} ${speedType.charAt(0).toUpperCase() + speedType.slice(1)} Speed`,
+						type: `speed:${speedType}`,
+						value: 0,
+						equalToWalk: true,
+						sourceType: "race",
+						enabled: true,
+					});
+				} else if (typeof speedValue === "number" && speedValue > 0) {
+					this._state.setSpeed(speedType, speedValue);
+				}
+			});
+		}
+	}
+
+	_applyFixedLanguages (data) {
+		if (!data?.languageProficiencies) return;
+		data.languageProficiencies.forEach(langProf => {
+			Object.keys(langProf).forEach(lang => {
+				if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
+				this._state.addLanguage(lang.toTitleCase());
+			});
+		});
+	}
+
+	_applyFixedSkills (data) {
+		if (!data?.skillProficiencies) return;
+		data.skillProficiencies.forEach(skillProf => {
+			Object.keys(skillProf).forEach(skill => {
+				if (skill !== "any" && skill !== "choose") {
+					this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
+				}
+			});
+		});
+	}
+
+	_applyFixedTools (data) {
+		if (!data?.toolProficiencies) return;
+		data.toolProficiencies.forEach(toolSet => {
+			Object.entries(toolSet).forEach(([key, value]) => {
+				if (key !== "choose" && key !== "any" && key !== "anyArtisansTool" && key !== "anyMusicalInstrument" && value === true) {
+					this._state.addToolProficiency(key.toTitleCase());
+				}
+			});
+		});
+	}
+
+	_applyProficienciesFromData (data) {
+		if (data.armorProficiencies) {
+			data.armorProficiencies.forEach(ap => {
+				Object.keys(ap).forEach(a => this._state.addArmorProficiency(a.toTitleCase()));
+			});
+		}
+		if (data.weaponProficiencies) {
+			data.weaponProficiencies.forEach(wp => {
+				Object.keys(wp).forEach(w => this._state.addWeaponProficiency(w.toTitleCase()));
+			});
+		}
+		if (data.toolProficiencies) {
+			data.toolProficiencies.forEach(tp => {
+				Object.keys(tp).forEach(t => {
+					if (t !== "any" && t !== "choose") this._state.addToolProficiency(t.toTitleCase());
+				});
+			});
+		}
+	}
+
+	/**
+	 * Reapply racial ability bonuses after they were cleared (e.g., when background changes).
+	 * Uses the race data stored on state to derive fixed bonuses.
+	 */
+	_reapplyRacialAbilityBonuses (history) {
+		const race = this._state.getRace();
+		if (race?.ability) {
+			race.ability.forEach(abiSet => {
+				Object.entries(abiSet).forEach(([abi, bonus]) => {
+					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
+						const current = this._state.getAbilityBonus(abi) || 0;
+						this._state.setAbilityBonus(abi, current + bonus);
+					}
+				});
+			});
+		}
+
+		// Also reapply user-chosen racial ability bonuses from history
+		const raceUserChoices = history?.choices?.raceUserChoices;
+		if (raceUserChoices?.selectedAbilityChoices) {
+			Object.entries(raceUserChoices.selectedAbilityChoices).forEach(([key, value]) => {
+				if (!key.includes("_weight") && value) {
+					const weightKey = `${key}_weight`;
+					const bonus = raceUserChoices.selectedAbilityChoices[weightKey] || 0;
+					if (bonus && Parser.ABIL_ABVS.includes(value)) {
+						const current = this._state.getAbilityBonus(value) || 0;
+						this._state.setAbilityBonus(value, current + bonus);
+					}
+				}
+			});
+		}
+	}
+
+	/**
+	 * Reapply background ability bonuses after they were cleared (e.g., when race changes).
+	 * Uses stored user choices from level history.
+	 */
+	_reapplyBackgroundAbilityBonuses (history) {
+		const bgUserChoices = history.choices?.backgroundUserChoices;
+		if (!bgUserChoices?.selectedAbilityBonuses) return;
+		Object.entries(bgUserChoices.selectedAbilityBonuses).forEach(([key, value]) => {
+			if (key.startsWith("bg_") && !key.includes("weight") && value) {
+				const weightKey = `${key}_weight`;
+				const bonus = bgUserChoices.selectedAbilityBonuses[weightKey] || 0;
+				if (bonus && Parser.ABIL_ABVS.includes(value)) {
+					const current = this._state.getAbilityBonus(value) || 0;
+					this._state.setAbilityBonus(value, current + bonus);
+				}
+			}
+		});
+		// Also apply fixed background ability bonuses from the background data itself
+		const bg = this._state.getBackground();
+		if (bg?.ability) {
+			bg.ability.forEach(abiSet => {
+				Object.entries(abiSet).forEach(([abi, bonus]) => {
+					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
+						const current = this._state.getAbilityBonus(abi) || 0;
+						this._state.setAbilityBonus(abi, current + bonus);
+					}
+				});
+			});
+		}
+	}
+
+	// endregion
 }
 
 // Export for use in charactersheet.js

@@ -465,4 +465,81 @@ describe("CharacterSheetLevelHistory", () => {
 			expect(entry.choices.expertise.length).toBe(2);
 		});
 	});
+
+	describe("Race/Background History Migration", () => {
+		it("should backfill race data into levelHistory on load", () => {
+			const json = {
+				race: {name: "Elf", source: "PHB"},
+				background: {name: "Sage", source: "PHB"},
+				classes: [{name: "Wizard", source: "PHB", level: 3}],
+				levelHistory: [
+					{level: 1, class: {name: "Wizard", source: "PHB"}, choices: {skills: ["arcana"]}},
+					{level: 2, class: {name: "Wizard", source: "PHB"}, choices: {}},
+				],
+			};
+			state.loadFromJson(json);
+
+			const entry = state.getLevelHistoryEntry(1);
+			expect(entry.choices.race).toBeDefined();
+			expect(entry.choices.race.name).toBe("Elf");
+			expect(entry.choices.race.source).toBe("PHB");
+			expect(entry.choices.background).toBeDefined();
+			expect(entry.choices.background.name).toBe("Sage");
+		});
+
+		it("should backfill subrace data", () => {
+			const json = {
+				race: {name: "High Elf", source: "PHB"},
+				subrace: {name: "High Elf", source: "PHB"},
+				classes: [{name: "Wizard", source: "PHB", level: 1}],
+				levelHistory: [
+					{level: 1, class: {name: "Wizard", source: "PHB"}, choices: {}},
+				],
+			};
+			state.loadFromJson(json);
+
+			const entry = state.getLevelHistoryEntry(1);
+			expect(entry.choices.race.subrace).toBeDefined();
+			expect(entry.choices.race.subrace.name).toBe("High Elf");
+		});
+
+		it("should not overwrite existing race data in history", () => {
+			const json = {
+				race: {name: "Elf", source: "PHB"},
+				classes: [{name: "Wizard", source: "PHB", level: 1}],
+				levelHistory: [
+					{level: 1, class: {name: "Wizard", source: "PHB"}, choices: {race: {name: "Dwarf", source: "PHB"}}},
+				],
+			};
+			state.loadFromJson(json);
+
+			const entry = state.getLevelHistoryEntry(1);
+			// Should keep the existing (already-stored) race, not overwrite
+			expect(entry.choices.race.name).toBe("Dwarf");
+		});
+
+		it("should handle missing levelHistory gracefully", () => {
+			const json = {
+				race: {name: "Elf", source: "PHB"},
+				classes: [{name: "Wizard", source: "PHB", level: 1}],
+			};
+			state.loadFromJson(json);
+
+			// Should not crash — no level 1 entry to backfill into
+			expect(state.getLevelHistory()).toEqual([]);
+		});
+
+		it("should handle missing race gracefully", () => {
+			const json = {
+				classes: [{name: "Wizard", source: "PHB", level: 1}],
+				levelHistory: [
+					{level: 1, class: {name: "Wizard", source: "PHB"}, choices: {}},
+				],
+			};
+			state.loadFromJson(json);
+
+			const entry = state.getLevelHistoryEntry(1);
+			expect(entry.choices.race).toBeUndefined();
+		});
+	});
 });
