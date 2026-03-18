@@ -44,7 +44,7 @@ describe("CharacterSheetCombat action economy gating", () => {
 		combat._resetTurnActionUsage();
 	});
 
-	it("tracks Cunning Action as bonus action usage even without limited uses", () => {
+	it("tracks Cunning Action as bonus action usage even without limited uses", async () => {
 		const feature = {
 			name: "Cunning Action",
 			source: "PHB",
@@ -52,12 +52,12 @@ describe("CharacterSheetCombat action economy gating", () => {
 		};
 		featureList.push(feature);
 
-		combat._useCombatAction(feature);
+		await combat._useCombatAction(feature);
 		expect(combat._turnActionUsage.bonus).toBe(true);
 		expect(toasts.some(t => t.type === "success")).toBe(true);
 	});
 
-	it("blocks reusing the same bonus action in the same combat round", () => {
+	it("blocks reusing the same bonus action in the same combat round", async () => {
 		const feature = {
 			name: "Cunning Action",
 			source: "PHB",
@@ -65,8 +65,8 @@ describe("CharacterSheetCombat action economy gating", () => {
 		};
 		featureList.push(feature);
 
-		combat._useCombatAction(feature);
-		combat._useCombatAction(feature);
+		await combat._useCombatAction(feature);
+		await combat._useCombatAction(feature);
 
 		const warningToasts = toasts.filter(t => t.type === "warning");
 		expect(warningToasts.some(t => /bonus action/i.test(t.content))).toBe(true);
@@ -78,6 +78,16 @@ describe("CharacterSheetCombat action economy gating", () => {
 
 		combat._resetTurnActionUsage();
 		expect(combat._isActionTypeAvailable("bonus")).toBe(true);
+	});
+
+	it("initializes _handOfHarmUsedThisTurn as false", () => {
+		expect(combat._handOfHarmUsedThisTurn).toBe(false);
+	});
+
+	it("resets _handOfHarmUsedThisTurn on turn reset", () => {
+		combat._handOfHarmUsedThisTurn = true;
+		combat._resetTurnActionUsage();
+		expect(combat._handOfHarmUsedThisTurn).toBe(false);
 	});
 
 	it("gates limited custom abilities by action economy", () => {
@@ -226,12 +236,22 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 			expect(combat._parseResourceCost({}, "ki")).toBe(0);
 			expect(combat._parseResourceCost({description: ""}, "ki")).toBe(0);
 		});
+
+		it("should parse focus cost from HTML-rendered descriptions", () => {
+			const feature = {description: 'Once per turn when you hit a creature with an <a href="variantrules.html#unarmed%20strike_xphb" class="help-subtle">Unarmed Strike</a> and deal damage, you can expend 1 Focus Point to deal extra Necrotic damage.'};
+			expect(combat._parseResourceCost(feature, "focus")).toBe(1);
+		});
+
+		it("should parse ki cost from description with HTML tags around other words", () => {
+			const feature = {description: 'As a <a href="actions.html#magic_xphb">Magic</a> action, you can spend 1 ki point to touch a creature.'};
+			expect(combat._parseResourceCost(feature, "ki")).toBe(1);
+		});
 	});
 
 	// --- _useCombatAction with ki deduction ---
 
 	describe("_useCombatAction with ki deduction", () => {
-		it("should deduct ki points when using Stunning Strike", () => {
+		it("should deduct ki points when using Stunning Strike", async () => {
 			const feature = {
 				name: "Stunning Strike",
 				source: "XPHB",
@@ -239,14 +259,14 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 			};
 			featureList.push(feature);
 
-			combat._useCombatAction(feature);
+			await combat._useCombatAction(feature);
 
 			expect(kiUsed).toBe(1);
 			expect(kiPoints.current).toBe(4);
 			expect(toasts.some(t => t.type === "success" && t.content.includes("ki"))).toBe(true);
 		});
 
-		it("should block use when not enough ki points", () => {
+		it("should block use when not enough ki points", async () => {
 			kiPoints.current = 0;
 			const feature = {
 				name: "Stunning Strike",
@@ -254,13 +274,13 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 				description: "When you hit, you can spend 1 ki point to attempt a stunning strike.",
 			};
 
-			combat._useCombatAction(feature);
+			await combat._useCombatAction(feature);
 
 			expect(kiUsed).toBe(0);
 			expect(toasts.some(t => t.type === "warning" && t.content.includes("Not enough"))).toBe(true);
 		});
 
-		it("should deduct exertion via focus for monks", () => {
+		it("should deduct exertion via focus for monks", async () => {
 			const feature = {
 				name: "Instant Strike",
 				source: "TGTT",
@@ -268,13 +288,13 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 			};
 			featureList.push(feature);
 
-			combat._useCombatAction(feature);
+			await combat._useCombatAction(feature);
 
 			expect(kiUsed).toBe(1);
 			expect(toasts.some(t => t.type === "success")).toBe(true);
 		});
 
-		it("should still consume action economy when deducting resources", () => {
+		it("should still consume action economy when deducting resources", async () => {
 			const feature = {
 				name: "Stunning Strike",
 				source: "XPHB",
@@ -282,11 +302,11 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 			};
 			featureList.push(feature);
 
-			combat._useCombatAction(feature);
+			await combat._useCombatAction(feature);
 			expect(combat._turnActionUsage.action).toBe(true);
 		});
 
-		it("should not deduct resources when feature has no resource cost", () => {
+		it("should not deduct resources when feature has no resource cost", async () => {
 			const feature = {
 				name: "Cunning Action",
 				source: "PHB",
@@ -294,23 +314,23 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 			};
 			featureList.push(feature);
 
-			combat._useCombatAction(feature);
+			await combat._useCombatAction(feature);
 
 			expect(kiUsed).toBe(0);
 			expect(kiPoints.current).toBe(5);
 			expect(toasts.some(t => t.type === "success")).toBe(true);
 		});
 
-		it("should decrement feature uses AND deduct ki if both apply", () => {
+		it("should decrement feature uses AND deduct ki if both apply", async () => {
 			const feature = {
-				name: "Hand of Healing",
+				name: "Stunning Strike",
 				source: "XPHB",
-				description: "As a bonus action, spend 1 ki point to touch a creature and restore hit points.",
+				description: "As an action, spend 1 ki point to attempt to stun a creature you hit.",
 				uses: {current: 3, max: 3, recharge: "long"},
 			};
 			featureList.push(feature);
 
-			combat._useCombatAction(feature);
+			await combat._useCombatAction(feature);
 
 			expect(kiUsed).toBe(1);
 			expect(feature.uses.current).toBe(2);

@@ -2182,8 +2182,7 @@ class CharacterSheetClassUtils {
 		classResourceDefs.forEach(resourceDef => {
 			let resourceName = resourceDef.name;
 			if (resourceName === "__MONK_RESOURCE__") {
-				const is2024 = classEntry.source === "XPHB" || classData.source === "XPHB";
-				resourceName = is2024 ? "Focus Points" : "Ki Points";
+				resourceName = "Focus Points";
 			}
 
 			let newMax;
@@ -2218,19 +2217,6 @@ class CharacterSheetClassUtils {
 				});
 			}
 
-			// Sync monk ki/focus resource to the backing _data.kiPoints store
-			// so that useKiPoint() / getKiPointsCurrent() work correctly
-			if (isMonkResource && newMax > 0) {
-				const currentKiMax = state.getKiPoints();
-				state.setKiPoints(newMax);
-				if (currentKiMax === 0) {
-					// First initialization — fill to max
-					state.setKiPointsCurrent(newMax);
-				} else if (newMax > currentKiMax) {
-					// Level up — add the difference
-					state.setKiPointsCurrent(state.getKiPointsCurrent() + (newMax - currentKiMax));
-				}
-			}
 		});
 
 		state.recalculateResourceMaximums();

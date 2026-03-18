@@ -105,7 +105,10 @@ class CharacterSheetLevelUp {
 			isWidth100: true,
 			isUncappedWidth: true,
 			isUncappedHeight: true,
+			cbClose: () => document.body.classList.remove("has-levelup-wizard"),
 		});
+
+		document.body.classList.add("has-levelup-wizard");
 
 		// ========== STATE TRACKING ==========
 		let asiChoices = {str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0};
@@ -1285,10 +1288,10 @@ class CharacterSheetLevelUp {
 	 * Render compact ASI selection for wizard layout
 	 */
 	_renderAsiSelectionCompact (onAsiChange, onFeatSelect, isBothAsiAndFeat, isEpicBoonLevel) {
-		// Get the full section and extract just the contents
 		const fullSection = this._renderAsiSelection(onAsiChange, onFeatSelect, isBothAsiAndFeat, isEpicBoonLevel);
-		// Return all children without the wrapper div
-		return [...fullSection.children];
+		const wrapper = e_({outer: `<div class="charsheet__levelup-asi-compact"></div>`});
+		[...fullSection.children].forEach(child => wrapper.append(child));
+		return wrapper;
 	}
 
 	/**
@@ -1569,7 +1572,10 @@ class CharacterSheetLevelUp {
 
 					// Add hoverable name link (same pattern as regular feats)
 					const boonLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_FEATS, boon.name, boon.source);
-					boonEl.querySelector("input").after(e_({outer: `<strong></strong>`}).append(boonLink));
+					const boonNameEl = e_({outer: `<strong></strong>`});
+					if (typeof boonLink === "string") boonNameEl.innerHTML = boonLink;
+					else boonNameEl.append(boonLink);
+					boonEl.querySelector("input").after(boonNameEl);
 
 					boonEl.addEventListener("click", () => {
 						// Deselect from both lists
@@ -1583,7 +1589,11 @@ class CharacterSheetLevelUp {
 
 						// Show additional choices UI if boon has skill/spell/tool choices
 						if (hasChoices) {
+							if (!boon._featChoices) {
+								boon._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: []};
+							}
 							this._renderFeatChoicesUI(boon, boonChoices, featChoicesContainer);
+							if (featChoicesContainer.children.length) featChoicesContainer.scrollIntoView({behavior: "smooth", block: "nearest"});
 						}
 					});
 
@@ -1758,7 +1768,10 @@ class CharacterSheetLevelUp {
 				const featEl = e_({outer: `<div class="charsheet__levelup-feat-option" data-feat="${feat.name}"></div>`});
 				featEl.insertAdjacentHTML("beforeend", `<input type="radio" name="feat-choice" value="${feat.name}">`);
 				const featLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_FEATS, feat.name, feat.source);
-				featEl.append(e_({outer: `<strong></strong>`}).append(featLink));
+				const featNameEl = e_({outer: `<strong></strong>`});
+				if (typeof featLink === "string") featNameEl.innerHTML = featLink;
+				else featNameEl.append(featLink);
+				featEl.append(featNameEl);
 				featEl.insertAdjacentHTML("beforeend", ` <span class="ve-muted">(${Parser.sourceJsonToAbv(feat.source)})</span>`);
 				if (feat.category) {
 					const categoryFull = Parser.featCategoryToFull?.(feat.category) || feat.category;
@@ -1773,12 +1786,13 @@ class CharacterSheetLevelUp {
 					featEl.querySelector("input").checked = true;
 
 					// Initialize feat choices storage
-					if (!featEl._featChoices) {
-						featEl._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: []};
+					if (!feat._featChoices) {
+						feat._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: []};
 					}
 
 					// Render feat choices UI if needed
 					this._renderFeatChoicesUI(feat, choices, featChoicesContainer);
+					if (featChoicesContainer.children.length) featChoicesContainer.scrollIntoView({behavior: "smooth", block: "nearest"});
 
 					onFeatSelect(feat);
 				});

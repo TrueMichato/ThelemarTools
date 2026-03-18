@@ -498,12 +498,13 @@ class CharacterSheetFeatures {
 				categoryFeats.forEach(feat => {
 					const isKnown = knownFeatNames.includes(feat.name.toLowerCase());
 					const prereqStr = feat.prerequisite ? this._formatPrerequisite(feat.prerequisite) : "";
+					const featLink = this._page?.getHoverLink ? this._page.getHoverLink(UrlUtil.PG_FEATS, feat.name, feat.source) : feat.name;
 
 					const item = e_({outer: `
 						<div class="charsheet__modal-list-item ${isKnown ? "ve-muted" : ""}">
 							<div class="charsheet__modal-list-item-icon">🎖️</div>
 							<div class="charsheet__modal-list-item-content">
-								<div class="charsheet__modal-list-item-title">${feat.name}</div>
+								<div class="charsheet__modal-list-item-title">${featLink}</div>
 								<div class="charsheet__modal-list-item-subtitle">${prereqStr ? `Prereq: ${prereqStr} • ` : ""}${Parser.sourceJsonToAbv(feat.source)}</div>
 							</div>
 							${isKnown
@@ -543,7 +544,7 @@ class CharacterSheetFeatures {
 			renderList();
 		});
 
-		search.addEventListener("input", () => renderList());
+		search.addEventListener("input", MiscUtil.debounce(() => renderList(), 150));
 		renderList();
 
 		// Close button

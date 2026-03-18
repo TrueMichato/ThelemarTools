@@ -14,6 +14,7 @@ class CharacterSheetCombat {
 		this._sneakAttackHasAdjacentAlly = false;
 		this._selectedCunningStrikes = []; // Active CS option selections for current attack
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
+		this._handOfHarmUsedThisTurn = false;
 
 		this._init();
 	}
@@ -246,6 +247,7 @@ class CharacterSheetCombat {
 		content.append(combatSection);
 
 		// Properties Section
+		const hasMonkLevels = (this._state.getClassLevel("Monk") || 0) > 0;
 		const propsSection = e_({outer: `
 			<div class="charsheet__attack-section">
 				<div class="charsheet__attack-section-header">
@@ -257,6 +259,14 @@ class CharacterSheetCombat {
 					<input type="text" class="charsheet__attack-input charsheet__attack-input--properties" value="${(attack.properties || []).join(", ")}" placeholder="e.g., versatile, finesse, light, two-handed">
 					<div class="charsheet__attack-properties-hint">Common: finesse, light, heavy, reach, thrown, two-handed, versatile</div>
 				</div>
+				${hasMonkLevels ? `
+				<div class="charsheet__attack-field">
+					<label class="charsheet__attack-label charsheet__attack-label--checkbox">
+						<input type="checkbox" class="charsheet__attack-checkbox--monk-weapon" ${attack.isMonkWeapon ? "checked" : ""}>
+						\u{1F94B} Monk Weapon
+					</label>
+				</div>
+				` : ""}
 			</div>
 		`});
 		content.append(propsSection);
@@ -353,6 +363,7 @@ class CharacterSheetCombat {
 					bonusInput.value = attackBonusVal;
 					dmgBonusInput.value = damageBonusVal;
 					weaponSelect.value = "";
+					if (monkWeaponCheckbox) monkWeaponCheckbox.checked = !!this._state.isMonkWeapon?.(weapon);
 				}
 			});
 		}
@@ -377,6 +388,7 @@ class CharacterSheetCombat {
 				bonusInput.value = attackBonusVal;
 				dmgBonusInput.value = damageBonusVal;
 				if (inventorySelect) inventorySelect.value = "";
+				if (monkWeaponCheckbox) monkWeaponCheckbox.checked = !!this._state.isMonkWeapon?.(weapon);
 			}
 		});
 
@@ -607,6 +619,7 @@ class CharacterSheetCombat {
 		content.append(combatSection);
 
 		// Properties Section
+		const hasMonkLevels2 = (this._state.getClassLevel("Monk") || 0) > 0;
 		const propsSection = e_({outer: `
 			<div class="charsheet__attack-section">
 				<div class="charsheet__attack-section-header">
@@ -618,6 +631,14 @@ class CharacterSheetCombat {
 					<input type="text" class="charsheet__attack-input charsheet__attack-input--properties" value="${(attack.properties || []).join(", ")}" placeholder="e.g., versatile, finesse, light, two-handed">
 					<div class="charsheet__attack-properties-hint">Common: finesse, light, heavy, reach, thrown, two-handed, versatile</div>
 				</div>
+				${hasMonkLevels2 ? `
+				<div class="charsheet__attack-field">
+					<label class="charsheet__attack-label charsheet__attack-label--checkbox">
+						<input type="checkbox" class="charsheet__attack-checkbox--monk-weapon" ${this._state.isMonkWeapon?.(weapon) ? "checked" : ""}>
+						\u{1F94B} Monk Weapon
+					</label>
+				</div>
+				` : ""}
 			</div>
 		`});
 		content.append(propsSection);
@@ -802,7 +823,7 @@ class CharacterSheetCombat {
 			if (invItem) {
 				const weaponName = invItem.item?.name || invItem.name || "item";
 				this._state.unequip(weaponId);
-				this._page._inventory?.renderInventory?.();
+				this._page._inventory?.render?.();
 				this.renderAttacks();
 				this._page._saveCurrentCharacter?.();
 				JqueryUtil.doToast({type: "success", content: `Unequipped ${weaponName}.`});
@@ -965,13 +986,31 @@ class CharacterSheetCombat {
 		return "";
 	}
 
-	_rollDamage (attackId, isCrit = false) {
+	async _rollDamage (attackId, isCrit = false) {
 		const attacks = this._state.getAttacks();
 		let attack = attacks.find(a => a.id === attackId);
 		if (!attack && this._cachedAttacks?.length) {
 			attack = this._cachedAttacks.find(a => a.id === attackId);
 		}
 		if (!attack || !attack.damage) return;
+
+		// Monk: Hand of Harm — prompt BEFORE rolling damage for unarmed strikes
+		// Per-turn limit only applies during active combat; outside combat always allow
+		let handOfHarmDamage = 0;
+		let handOfHarmFormula = null;
+		if (attack.isUnarmedStrike) {
+			const harmCalc = this._state.getFeatureCalculations?.() || {};
+			const inCombat = this._state.isInCombat?.();
+			const harmBlocked = inCombat && this._handOfHarmUsedThisTurn;
+			if (harmCalc.hasHandOfHarm && !harmBlocked) {
+				const accepted = await this._promptHandOfHarm(harmCalc);
+				if (accepted) {
+					handOfHarmFormula = harmCalc.handOfHarmDamage;
+					const harmRoll = this._parseDamage(handOfHarmFormula);
+					handOfHarmDamage = harmRoll.total;
+				}
+			}
+		}
 
 		// Parse damage dice
 		const damageRoll = this._parseDamage(attack.damage, isCrit);
@@ -1052,7 +1091,8 @@ class CharacterSheetCombat {
 			extraDamageParts.push({dice: entry.dice, total: extraRoll.total, type: entry.damageType, source: entry.source});
 		}
 
-		const total = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal;
+		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal;
+		const total = baseDamageTotal + handOfHarmDamage;
 
 		// Build subtitle with breakdown
 		let subtitle = `${attack.damage}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
@@ -1067,6 +1107,7 @@ class CharacterSheetCombat {
 			subtitle += ` + ${ep.total} (${ep.source}${ep.type ? " " + ep.type : ""})`;
 		}
 		subtitle += ` ${attack.damageType}`;
+		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 
 		// Append Cunning Strike effects to subtitle
 		if (cunningStrikeEffects.length) {
@@ -1077,12 +1118,15 @@ class CharacterSheetCombat {
 			subtitle += ` | Cunning Strike: ${csDesc}`;
 		}
 
-		// Show result
+		// Show result — separate damage types in title when Hand of Harm is active
+		const totalTitle = handOfHarmDamage
+			? `${baseDamageTotal} ${attack.damageType} + ${handOfHarmDamage} necrotic = ${total}`
+			: undefined;
 		this._page.showDiceResult({
 			title: `${attack.name} Damage`,
 			roll: damageRoll.total + sneakAttackDamage,
 			modifier: totalBonus,
-			total,
+			total: totalTitle || total,
 			subtitle,
 		});
 
@@ -1158,6 +1202,7 @@ class CharacterSheetCombat {
 
 	_resetTurnActionUsage () {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
+		this._handOfHarmUsedThisTurn = false;
 	}
 
 	_isActionTypeAvailable (actionType) {
@@ -1726,13 +1771,12 @@ class CharacterSheetCombat {
 				const rerollCost = calc.disciplinedSurvivorRerollCost || 1;
 				const btn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-primary" title="Spend ${rerollCost} Focus Point to reroll a failed death save">Reroll (${rerollCost} Focus)</button>`});
 				btn.addEventListener("click", () => {
-					const focusPoints = this._state.getResource?.("focusPoints") || this._state.getFocusPoints?.() || 0;
+					const focusPoints = this._state.getKiPointsCurrent?.() || 0;
 					if (focusPoints < rerollCost) {
 						JqueryUtil.doToast({type: "warning", content: "Not enough Focus Points to reroll!"});
 						return;
 					}
-					if (this._state.spendResource) this._state.spendResource("focusPoints", rerollCost);
-					else if (this._state.spendFocusPoints) this._state.spendFocusPoints(rerollCost);
+					this._state.useKiPoint(rerollCost);
 					this._rollDeathSave();
 					JqueryUtil.doToast({type: "info", content: `Spent ${rerollCost} Focus Point to reroll death save`});
 				});
@@ -2382,95 +2426,145 @@ class CharacterSheetCombat {
 	/**
 	 * Use a combat action (spend a use if applicable, deduct ki/focus/exertion)
 	 */
-	_useCombatAction (feature) {
-		const actionType = this._getFeatureActionType(feature);
-		if (!this._isActionTypeAvailable(actionType)) {
-			const actionName = actionType === "bonus" ? "Bonus Action" : actionType === "reaction" ? "Reaction" : "Action";
-			JqueryUtil.doToast({type: "warning", content: `${actionName} already used this round.`});
-			return;
-		}
+	async _useCombatAction (feature) {
+		try {
+			const actionType = this._getFeatureActionType(feature);
+			if (!this._isActionTypeAvailable(actionType)) {
+				const actionName = actionType === "bonus" ? "Bonus Action" : actionType === "reaction" ? "Reaction" : "Action";
+				JqueryUtil.doToast({type: "warning", content: `${actionName} already used this round.`});
+				return;
+			}
 
-		if (feature.uses && feature.uses.current <= 0) {
-			JqueryUtil.doToast({type: "warning", content: `No uses remaining for ${feature.name}!`});
-			return;
-		}
+			if (feature.uses && feature.uses.current <= 0) {
+				JqueryUtil.doToast({type: "warning", content: `No uses remaining for ${feature.name}!`});
+				return;
+			}
 
-		// Check and deduct ki/focus cost from description
-		const kiCost = this._parseResourceCost(feature, "ki");
-		const focusCost = this._parseResourceCost(feature, "focus");
-		const exertionCost = this._parseResourceCost(feature, "exertion");
-		const resourceCost = kiCost || focusCost || exertionCost;
+			// Check and deduct ki/focus cost from description
+			const calc = this._state.getFeatureCalculations?.() || {};
+			const nameLower = feature.name?.toLowerCase() || "";
 
-		if (resourceCost > 0) {
-			if (kiCost > 0 || focusCost > 0) {
-				const amount = kiCost || focusCost;
-				if (!this._state.useKiPoint(amount)) {
-					const pointName = focusCost > 0 ? "focus" : "ki";
-					JqueryUtil.doToast({type: "warning", content: `Not enough ${pointName} points for ${feature.name}!`});
-					return;
-				}
-			} else if (exertionCost > 0) {
-				if (this._state.canUseFocusForExertion?.()) {
-					if (!this._state.useFocusForExertion(exertionCost)) {
-						JqueryUtil.doToast({type: "warning", content: `Not enough focus/exertion for ${feature.name}!`});
+			// Hand of Healing/Harm manage their own focus cost inside their handlers
+			const selfManagedCost = nameLower === "hand of healing" || nameLower === "hand of harm";
+
+			const kiCost = selfManagedCost ? 0 : this._parseResourceCost(feature, "ki");
+			const focusCost = selfManagedCost ? 0 : this._parseResourceCost(feature, "focus");
+			const exertionCost = selfManagedCost ? 0 : this._parseResourceCost(feature, "exertion");
+			let resourceCost = kiCost || focusCost || exertionCost;
+
+			// Unhindered Flurry (TGTT level 8+): Flurry of Blows costs 0 focus
+			if (nameLower === "flurry of blows" && calc.hasUnhinderedFlurry) {
+				resourceCost = 0;
+			}
+
+			if (resourceCost > 0) {
+				if (kiCost > 0 || focusCost > 0) {
+					const amount = kiCost || focusCost;
+					if (!this._state.useKiPoint(amount)) {
+						const pointName = focusCost > 0 ? "focus" : "ki";
+						JqueryUtil.doToast({type: "warning", content: `Not enough ${pointName} points for ${feature.name}!`});
 						return;
 					}
-				} else {
-					JqueryUtil.doToast({type: "warning", content: `No exertion resource available for ${feature.name}!`});
+				} else if (exertionCost > 0) {
+					if (this._state.canUseFocusForExertion?.()) {
+						if (!this._state.useFocusForExertion(exertionCost)) {
+							JqueryUtil.doToast({type: "warning", content: `Not enough focus/exertion for ${feature.name}!`});
+							return;
+						}
+					} else {
+						JqueryUtil.doToast({type: "warning", content: `No exertion resource available for ${feature.name}!`});
+						return;
+					}
+				}
+			}
+
+			// Spend a use if this feature has uses
+			if (feature.uses) {
+				feature.uses.current--;
+			}
+
+			this._consumeActionType(actionType);
+
+			// Update state
+			const features = this._state.getFeatures();
+			const idx = features.findIndex(f => f.name === feature.name && f.source === feature.source);
+			if (idx >= 0 && feature.uses) {
+				features[idx].uses = feature.uses;
+			}
+
+			// Apply combat action effects (conditions, temp HP, state activation)
+			const effects = feature.combatActionEffects;
+			if (effects) {
+				this._applyCombatActionEffects(feature, effects);
+			}
+
+			// Monk: Patient Defense — activate toggle state (disadvantage on attacks, advantage on DEX saves)
+			if (nameLower === "patient defense") {
+				this._state.activateState("patientDefense");
+				this._page._renderActiveStates?.();
+			}
+
+			// Monk: Flurry of Blows — roll unarmed strike attacks
+			// Await so Hand of Harm prompt completes before re-render/toast
+			if (nameLower === "flurry of blows") {
+				const flurryOk = await this._executeFlurryOfBlows(feature, calc);
+				if (flurryOk === false) {
+					// User cancelled the choice modal — refund resources
+					if (resourceCost > 0) this._state.setKiPointsCurrent(this._state.getKiPointsCurrent() + resourceCost);
+					if (feature.uses) feature.uses.current++;
+					if (this._state.isInCombat?.() && actionType && this._turnActionUsage) {
+						this._turnActionUsage[actionType] = false;
+					}
+					this.renderCombatActions();
+					this.renderCombatResources();
+					this._page._renderResources?.();
 					return;
 				}
 			}
+
+			// Monk: Step of the Wind — activate speed-doubling state
+			if (nameLower === "step of the wind") {
+				this._state.activateState("stepOfTheWind");
+				this._page._renderActiveStates?.();
+				this._page._renderCombatStats?.();
+			}
+
+			// Monk: Hand of Healing — handler manages its own focus cost
+			if (nameLower === "hand of healing") {
+				await this._executeHandOfHealing(calc);
+			}
+
+			// Monk: Hand of Harm — handler manages its own focus cost
+			if (nameLower === "hand of harm") {
+				this._executeHandOfHarm(calc);
+			}
+
+			// C11: Whirlpool Strike — show multi-target workflow
+			if (nameLower === "whirlpool strike") {
+				await this._showWhirlpoolStrikeModal(feature);
+			}
+
+			// Re-render
+			this.renderCombatActions();
+			this.renderCombatResources();
+			this._page._renderFeatures?.();
+			this._page._renderResources?.();
+			this._page._saveCurrentCharacter?.();
+
+			// Toast notification
+			const remaining = feature.uses?.current;
+			const remainingText = feature.uses ? ` (${remaining}/${feature.uses.max} remaining)` : "";
+			const costText = resourceCost > 0
+				? ` (${resourceCost} ${kiCost ? "ki" : focusCost ? "focus" : "exertion"} spent)`
+				: "";
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Used ${feature.name}!${remainingText}${costText}`,
+			});
+		} catch (ex) {
+			console.error(`[CharSheet] Error using combat action "${feature?.name}":`, ex);
+			JqueryUtil.doToast({type: "danger", content: `Error using ${feature?.name}: ${ex.message}`});
 		}
-
-		// Spend a use if this feature has uses
-		if (feature.uses) {
-			feature.uses.current--;
-		}
-
-		this._consumeActionType(actionType);
-
-		// Update state
-		const features = this._state.getFeatures();
-		const idx = features.findIndex(f => f.name === feature.name && f.source === feature.source);
-		if (idx >= 0 && feature.uses) {
-			features[idx].uses = feature.uses;
-		}
-
-		// Apply combat action effects (conditions, temp HP, state activation)
-		const effects = feature.combatActionEffects;
-		if (effects) {
-			this._applyCombatActionEffects(feature, effects);
-		}
-
-		// C6: Flurry of Healing and Harm — show choice modal when using Flurry of Blows
-		const nameLower = feature.name?.toLowerCase() || "";
-		const calc = this._state.getFeatureCalculations?.() || {};
-		if (nameLower === "flurry of blows" && calc.hasFlurryOfHealingAndHarm) {
-			this._showFlurryChoiceModal(feature, calc);
-		}
-
-		// C11: Whirlpool Strike — show multi-target workflow
-		if (nameLower === "whirlpool strike") {
-			this._showWhirlpoolStrikeModal(feature);
-		}
-
-		// Re-render
-		this.renderCombatActions();
-		this.renderCombatResources();
-		this._page._renderFeatures?.();
-		this._page._renderResources?.();
-		this._page._saveCurrentCharacter?.();
-
-		// Toast notification
-		const remaining = feature.uses?.current;
-		const remainingText = feature.uses ? ` (${remaining}/${feature.uses.max} remaining)` : "";
-		const costText = resourceCost > 0
-			? ` (${resourceCost} ${kiCost ? "ki" : focusCost ? "focus" : "exertion"} spent)`
-			: "";
-		JqueryUtil.doToast({
-			type: "success",
-			content: `Used ${feature.name}!${remainingText}${costText}`,
-		});
 	}
 
 	// region Combat Action Effects Pipeline
@@ -2674,13 +2768,350 @@ class CharacterSheetCombat {
 		cancelBtn.addEventListener("click", () => doClose(false));
 		modalInner.append(cancelBtn);
 
-		await pGetResolved;
+		await pGetResolved();
 		return resolved;
 	}
 
 	// endregion
 
 	// region Feature-Specific Modal Flows (Phase C)
+
+	/**
+	 * Execute Flurry of Blows: roll unarmed strike attacks.
+	 * 2 strikes normally, 3 with Heightened Focus (level 10+).
+	 * If the monk has Flurry of Healing and Harm, shows a choice modal
+	 * to replace one strike with Hand of Healing or Hand of Harm.
+	 * If Hand of Harm is available, prompts after hits.
+	 */
+	async _executeFlurryOfBlows (feature, calc) {
+		const unarmedStrike = this._state.getUnarmedStrike?.();
+		if (!unarmedStrike) return;
+
+		let strikes = calc.heightenedFlurryAttacks || 2;
+
+		// Mercy Monk: unified choice modal before rolling
+		// Level 3+: Hand of Healing replaces 1 strike (free); Hand of Harm adds necrotic (1 focus)
+		// Level 11+: Hand of Healing can replace ALL strikes (free); Both option available
+		let useHarm = false;
+		let healingStrikes = 0; // number of strikes replaced by Hand of Healing
+		const inCombat = this._state.isInCombat?.();
+		const canHarm = calc.hasHandOfHarm && !(inCombat && this._handOfHarmUsedThisTurn);
+		const canHeal = calc.hasHandOfHealing;
+		const canHealAll = calc.hasFlurryOfHealingAndHarm; // level 11+
+
+		if (canHeal || canHarm) {
+			const harmFormula = calc.handOfHarmDamage || "?";
+			const healFormula = calc.handOfHealingAmount || "?";
+			const choices = [];
+			if (canHealAll && canHarm) {
+				choices.push({name: "Both", key: "both", description: `Healing (${healFormula} HP, free) + Harm (${harmFormula} necrotic, 1 Focus)`});
+			}
+			if (canHarm) {
+				choices.push({name: "Hand of Harm", key: "harm", description: `Add ${harmFormula} necrotic to one strike (1 Focus Point)`});
+			}
+			if (canHealAll) {
+				choices.push({name: "All Healing", key: "healall", description: `Replace all ${strikes} strikes with ${healFormula} HP healing each (free)`});
+			}
+			if (canHeal) {
+				choices.push({name: "Hand of Healing", key: "healing", description: `Replace one strike with ${healFormula} HP healing (free)`});
+			}
+			choices.push({name: "Normal Strikes", key: "skip", description: `${strikes} unarmed strikes only`});
+
+			const chosen = await this._showCombatActionChoiceModal(feature, choices, () => {});
+			if (!chosen) return false; // Cancel — abort Flurry entirely
+			const key = chosen.key;
+			useHarm = key === "harm" || key === "both";
+			if (key === "healall") {
+				healingStrikes = strikes;
+			} else if (key === "healing" || key === "both") {
+				healingStrikes = 1;
+			}
+		}
+
+		// Handle Hand of Harm: deduct focus, calculate bonus damage
+		let handOfHarmDamage = 0;
+		if (useHarm) {
+			if (!this._state.useKiPoint(1)) {
+				JqueryUtil.doToast({type: "warning", content: "Not enough focus points for Hand of Harm!"});
+				useHarm = false;
+			} else {
+				const harmRoll = this._parseDamage(calc.handOfHarmDamage);
+				handOfHarmDamage = harmRoll.total;
+				this._handOfHarmUsedThisTurn = true;
+				if (calc.hasPhysiciansTouch) {
+					JqueryUtil.doToast({type: "info", content: "Physician's Touch: target is also poisoned until end of your next turn"});
+				}
+				this.renderCombatResources();
+				this._page._renderResources?.();
+			}
+		}
+
+		// Handle Hand of Healing: replace strikes with healing rolls (suppress individual dice results)
+		const healResults = [];
+		for (let h = 0; h < healingStrikes; h++) {
+			strikes--;
+			const result = await this._executeHandOfHealing(calc, {free: true, showResult: false});
+			if (result) healResults.push(result);
+		}
+
+		// If all strikes were replaced by healing, show consolidated healing display
+		if (strikes <= 0) {
+			if (healResults.length) {
+				const healLines = healResults.map((r, i) => {
+					const label = r.isSelf ? "Self" : "Other";
+					return `<div style="margin:3px 0"><strong style="color:#28a745">Heal ${i + 1} (${label}):</strong> [${r.rolls.join(", ")}]${r.modifier ? ` + ${r.modifier}` : ""} = <strong style="color:#28a745">${r.total} HP</strong>${r.conditionNote}</div>`;
+				});
+				const totalHealing = healResults.reduce((sum, r) => sum + r.total, 0);
+				this._page._showDiceResult?.(
+					"Flurry of Blows — Healing",
+					`${totalHealing} total HP`,
+					healLines.join(""),
+					"", "", {duration: 12000},
+				);
+			}
+			return true;
+		}
+
+		// Resolve attack parameters once
+		const abilityMod = this._resolveAbilityMod(unarmedStrike.abilityMod || "str");
+		const profBonus = this._state.getProficiencyBonus();
+		const attackModifiers = this._state.getNamedModifiersByType("attack");
+		const featureAttackBonus = attackModifiers.reduce((sum, mod) => sum + (mod.value || 0), 0);
+		const stateAttackBonus = this._state.getBonusFromStates?.("attack") || 0;
+		const totalBonus = abilityMod + profBonus + (unarmedStrike.attackBonus || 0) + featureAttackBonus + stateAttackBonus;
+
+		// Resolve damage parameters once
+		const damageModifiers = this._state.getNamedModifiersByType("damage");
+		const featureDamageBonus = damageModifiers.reduce((sum, mod) => sum + (mod.value || 0), 0);
+		const stateDamageBonus = this._state.getBonusFromStates?.("damage") || 0;
+		const totalDamageBonus = abilityMod + (unarmedStrike.damageBonus || 0) + featureDamageBonus + stateDamageBonus;
+
+		// Check advantage/disadvantage
+		const hasAdvantage = this._state.hasAdvantageFromStates?.("attack:melee:str")
+			|| this._state.hasAdvantageFromStates?.("attack");
+		const hasDisadvantage = this._state.hasDisadvantageFromStates?.("attack:melee:str")
+			|| this._state.hasDisadvantageFromStates?.("attack");
+		let rollMode;
+		if (hasAdvantage && !hasDisadvantage) rollMode = "advantage";
+		else if (hasDisadvantage && !hasAdvantage) rollMode = "disadvantage";
+
+		// Roll all strikes and collect results
+		const results = [];
+		const critRange = this._state.getCriticalRange?.() || 20;
+		let handOfHarmApplied = false;
+		const dmgType = unarmedStrike.damageType || "bludgeoning";
+		for (let i = 0; i < strikes; i++) {
+			const rollResult = this._page.rollD20?.({mode: rollMode}) || {roll: 10, mode: "normal"};
+			const attackTotal = rollResult.roll + totalBonus;
+			const isCrit = rollResult.roll >= critRange;
+			const isFumble = rollResult.roll === 1;
+
+			// Roll damage
+			const damageRoll = this._parseDamage(unarmedStrike.damage || "1d6", isCrit);
+			const baseDamage = damageRoll.total + totalDamageBonus;
+
+			// Apply Hand of Harm to the first non-fumble strike
+			let harmOnThisStrike = 0;
+			if (handOfHarmDamage > 0 && !handOfHarmApplied && !isFumble) {
+				harmOnThisStrike = handOfHarmDamage;
+				handOfHarmApplied = true;
+			}
+
+			results.push({roll: rollResult.roll, attackTotal, isCrit, isFumble, baseDamage, harmDamage: harmOnThisStrike, damageRolls: damageRoll.rolls});
+		}
+
+		// Build consolidated display with separated damage types
+		const stateEffectLabel = this._getStateEffectLabel?.(hasAdvantage, hasDisadvantage) || "";
+		const modeLabel = this._page.getModeLabel?.(rollMode || "normal") || "";
+		const attackBonusStr = totalBonus >= 0 ? `+${totalBonus}` : `${totalBonus}`;
+
+		const strikeLines = results.map((r, i) => {
+			const num = i + 1;
+			if (r.isFumble) {
+				return `<div style="margin:3px 0"><strong>Strike ${num}:</strong> <span style="color:#dc3545">💀 Miss! (nat 1)</span></div>`;
+			}
+			const totalStrikeDmg = r.baseDamage + r.harmDamage;
+			const harmNote = r.harmDamage ? ` + <strong style="color:#9b59b6">${r.harmDamage} necrotic</strong> = <strong>${totalStrikeDmg}</strong>` : "";
+			if (r.isCrit) {
+				const critDice = `[${r.damageRolls.join(", ")}]`;
+				return `<div style="margin:3px 0"><strong>Strike ${num}:</strong> <span style="color:#e5c100">⚡ CRIT! ${r.attackTotal} to hit</span> — <strong style="color:#e5c100">${r.baseDamage}</strong> ${dmgType}${harmNote} <span style="opacity:0.7">(${critDice} double dice)</span></div>`;
+			}
+			return `<div style="margin:3px 0"><strong>Strike ${num}:</strong> ${r.attackTotal} to hit — <strong>${r.baseDamage}</strong> ${dmgType}${harmNote}</div>`;
+		});
+
+		const totalBaseDamage = results.reduce((sum, r) => sum + r.baseDamage, 0);
+		const totalHarmDamage = results.reduce((sum, r) => sum + r.harmDamage, 0);
+		const grandTotal = totalBaseDamage + totalHarmDamage;
+
+		// Add healing lines if any strikes were replaced
+		const healLines = healResults.map((r, i) => {
+			const label = r.isSelf ? "Self" : "Other";
+			return `<div style="margin:3px 0"><strong style="color:#28a745">Heal (${label}):</strong> [${r.rolls.join(", ")}]${r.modifier ? ` + ${r.modifier}` : ""} = <strong style="color:#28a745">${r.total} HP</strong>${r.conditionNote}</div>`;
+		});
+
+		const totalLine = totalHarmDamage
+			? `${totalBaseDamage} ${dmgType} + ${totalHarmDamage} necrotic = ${grandTotal} total`
+			: `${grandTotal} total damage`;
+		const formulaLine = `<div style="margin-bottom:4px;opacity:0.7"><em>Attack ${attackBonusStr} to hit, ${unarmedStrike.damage}${totalDamageBonus >= 0 ? "+" : ""}${totalDamageBonus} damage per strike</em></div>`;
+		const breakdown = formulaLine + strikeLines.join("") + healLines.join("");
+
+		this._page._showDiceResult?.(
+			`Flurry of Blows${modeLabel}${stateEffectLabel}`,
+			totalLine,
+			breakdown,
+			"", "", {duration: 12000},
+		);
+
+		return true;
+	}
+
+	/**
+	 * Show an interactive confirmation modal prompting to use Hand of Harm.
+	 * Deducts 1 focus point on accept, marks used this turn.
+	 * @returns {boolean} True if the user accepted and focus was deducted.
+	 */
+	async _promptHandOfHarm (calc) {
+		const formula = calc.handOfHarmDamage;
+		if (!formula) return false;
+
+		const choices = [
+			{name: "Yes", description: `Spend 1 Focus Point to deal ${formula} necrotic damage`},
+			{name: "No", description: "Skip Hand of Harm this time"},
+		];
+
+		const fakeFeature = {name: "Hand of Harm"};
+		const chosen = await this._showCombatActionChoiceModal(fakeFeature, choices, () => {});
+		if (!chosen || chosen.name !== "Yes") return false;
+
+		// Deduct focus point
+		if (!this._state.useKiPoint(1)) {
+			JqueryUtil.doToast({type: "warning", content: "Not enough focus points for Hand of Harm!"});
+			return false;
+		}
+
+		this._handOfHarmUsedThisTurn = true;
+
+		// Physician's Touch condition note
+		if (calc.hasPhysiciansTouch) {
+			JqueryUtil.doToast({type: "info", content: "Physician's Touch: target is also poisoned until end of your next turn"});
+		}
+
+		this.renderCombatResources();
+		this._page._renderResources?.();
+		this._page._saveCurrentCharacter?.();
+		return true;
+	}
+
+	/**
+	 * Execute Hand of Healing: roll healing dice and optionally apply to self.
+	 * Shows Self/Other choice. Self applies heal; Other shows roll only.
+	 * @param {object} calc - Feature calculations from getFeatureCalculations()
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.free=false] - If true, skip focus point cost (e.g. from Flurry)
+	 */
+	async _executeHandOfHealing (calc, {free = false, showResult = true} = {}) {
+		const formula = calc.handOfHealingAmount;
+		if (!formula) return null;
+
+		// Show Self/Other choice
+		const choices = [
+			{name: "Self", description: "Heal yourself"},
+			{name: "Another Creature", description: "Heal a creature you touch (roll only)"},
+		];
+
+		let chosen = null;
+		const fakeFeature = {name: "Hand of Healing"};
+		chosen = await this._showCombatActionChoiceModal(fakeFeature, choices, () => {});
+		if (!chosen) return null;
+
+		// Deduct focus point if not free
+		if (!free) {
+			if (!this._state.useKiPoint(1)) {
+				JqueryUtil.doToast({type: "warning", content: "Not enough focus points for Hand of Healing!"});
+				return null;
+			}
+			this.renderCombatResources();
+			this._page._renderResources?.();
+		}
+
+		// Roll healing
+		const healRoll = this._parseDamage(formula);
+		const total = healRoll.total;
+
+		// Physician's Touch condition note
+		let conditionNote = "";
+		if (calc.hasPhysiciansTouch && calc.physiciansTouchConditions?.length) {
+			conditionNote = `<div style="margin-top:4px;opacity:0.85">✨ Physician's Touch: also end one of <strong>${calc.physiciansTouchConditions.join(", ")}</strong></div>`;
+		}
+
+		const isSelf = chosen.name === "Self";
+		if (isSelf) {
+			this._state.heal(total);
+			this._page._renderHp?.();
+			this._page._renderCombatStats?.();
+		}
+
+		if (showResult) {
+			if (isSelf) {
+				this._page._showDiceResult?.(
+					"Hand of Healing (Self)",
+					`+${total} HP`,
+					`[${healRoll.rolls.join(", ")}]${healRoll.modifier ? ` + ${healRoll.modifier}` : ""} = ${total} HP restored${conditionNote}`,
+				);
+			} else {
+				this._page._showDiceResult?.(
+					"Hand of Healing",
+					`${total} HP`,
+					`[${healRoll.rolls.join(", ")}]${healRoll.modifier ? ` + ${healRoll.modifier}` : ""} = heal ${total} HP${conditionNote}`,
+				);
+			}
+		}
+
+		this._page._saveCurrentCharacter?.();
+		return {total, rolls: healRoll.rolls, modifier: healRoll.modifier, isSelf, conditionNote};
+	}
+
+	/**
+	 * Execute Hand of Harm: roll necrotic damage dice.
+	 * @param {object} calc - Feature calculations from getFeatureCalculations()
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.free=false] - If true, skip focus point cost (e.g. from Flurry)
+	 */
+	_executeHandOfHarm (calc, {free = false} = {}) {
+		const formula = calc.handOfHarmDamage;
+		if (!formula) return;
+
+		// Deduct focus point if not free
+		if (!free) {
+			if (!this._state.useKiPoint(1)) {
+				JqueryUtil.doToast({type: "warning", content: "Not enough focus points for Hand of Harm!"});
+				return;
+			}
+			this.renderCombatResources();
+			this._page._renderResources?.();
+		}
+
+		// Roll necrotic damage
+		const damageRoll = this._parseDamage(formula);
+		const total = damageRoll.total;
+
+		// Mark used this turn
+		this._handOfHarmUsedThisTurn = true;
+
+		// Physician's Touch condition note
+		let conditionNote = "";
+		if (calc.hasPhysiciansTouch && calc.physiciansTouchConditions?.length) {
+			conditionNote = `<div style="margin-top:4px;opacity:0.85">✨ Physician's Touch: also inflict <strong>poisoned</strong> until end of your next turn</div>`;
+		}
+
+		this._page._showDiceResult?.(
+			"Hand of Harm",
+			`${total} necrotic`,
+			`[${damageRoll.rolls.join(", ")}]${damageRoll.modifier ? ` + ${damageRoll.modifier}` : ""} = ${total} necrotic damage${conditionNote}`,
+		);
+
+		this._page._saveCurrentCharacter?.();
+	}
 
 	/**
 	 * C6: Show choice modal for Flurry of Healing and Harm.
@@ -2695,22 +3126,25 @@ class CharacterSheetCombat {
 			{
 				name: "Hand of Healing",
 				description: `Restore ${martialArtsDie}+${wisMod} HP to a creature you touch`,
-				effects: {rollDice: {type: "healing", formula: `${martialArtsDie}+${wisMod}`, label: "Healing"}},
 			},
 			{
 				name: "Hand of Harm",
 				description: `Deal ${martialArtsDie}+${wisMod} necrotic damage (on unarmed hit)`,
-				effects: {rollDice: {type: "damage", formula: `${martialArtsDie}+${wisMod}`, label: "necrotic damage"}},
 			},
 		];
 
-		const chosen = await this._showCombatActionChoiceModal(feature, choices, (choice) => {
-			if (choice.effects) {
-				this._applyCombatActionEffects(feature, choice.effects);
-			}
-		});
+		// Use onChoice as a no-op; handle the async work AFTER the modal resolves
+		const chosen = await this._showCombatActionChoiceModal(feature, choices, () => {});
 
 		if (chosen) {
+			if (chosen.name === "Hand of Healing") {
+				// Flurry healing: show Self/Other choice then roll
+				await this._executeHandOfHealing(calc, {free: true});
+			} else if (chosen.name === "Hand of Harm") {
+				// Flurry harm: rolls directly (sync)
+				this._executeHandOfHarm(calc, {free: true});
+			}
+
 			JqueryUtil.doToast({
 				type: "info",
 				content: `${feature.name}: Chose ${chosen.name}`,
@@ -2741,7 +3175,7 @@ class CharacterSheetCombat {
 			const closeBtn = e_({outer: `<button class="ve-btn ve-btn-default w-100 mt-2">Close</button>`});
 			closeBtn.addEventListener("click", () => doClose(false));
 			modalInner.append(closeBtn);
-			await pGetResolved;
+			await pGetResolved();
 			return;
 		}
 
@@ -2802,7 +3236,7 @@ class CharacterSheetCombat {
 		closeBtn.addEventListener("click", () => doClose(false));
 		modalInner.append(closeBtn);
 
-		await pGetResolved;
+		await pGetResolved();
 	}
 
 	// endregion
@@ -2814,7 +3248,7 @@ class CharacterSheetCombat {
 	 * @returns {number} Cost amount, or 0 if not found
 	 */
 	_parseResourceCost (feature, resourceType) {
-		const desc = feature?.description?.toLowerCase() || "";
+		const desc = (feature?.description || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const patterns = {
 			ki: /(\d+)\s*ki\s*point/i,
 			focus: /(\d+)\s*focus\s*point/i,
@@ -2924,9 +3358,13 @@ class CharacterSheetCombat {
 			<button class="ve-btn ve-btn-default charsheet__action-modal-close">Close</button>
 		</div>`;
 		modalInner.append(btnBar);
-		btnBar.querySelector(".charsheet__action-modal-use")?.addEventListener("click", () => {
-			this._useCombatAction(feature);
+		btnBar.querySelector(".charsheet__action-modal-use")?.addEventListener("click", async () => {
 			doClose(false);
+			try {
+				await this._useCombatAction(feature);
+			} catch (ex) {
+				console.error(`[CharSheet] Error using combat action from modal:`, ex);
+			}
 		});
 		btnBar.querySelector(".charsheet__action-modal-close")?.addEventListener("click", () => doClose(false));
 	}
@@ -3179,6 +3617,26 @@ class CharacterSheetCombat {
 			lines.push(`<span class="mr-1">🕷️</span> Cast <strong>Spider Climb</strong> on self as a bonus action`);
 			lines.push(`<span class="mr-1">💎</span> Cost: <strong>1 exertion</strong>`);
 			lines.push(`<span class="mr-1">🔮</span> Duration: concentration, up to <strong>10 minutes</strong>`);
+		}
+
+		// --- Hand of Healing ---
+		if (nameLower === "hand of healing") {
+			const formula = calc.handOfHealingAmount || "?";
+			lines.push(`<span class="mr-1">💚</span> Heal <strong>${formula}</strong> HP to a creature you touch`);
+			lines.push(`<span class="mr-1">🎯</span> Choose <strong>Self</strong> (apply) or <strong>Other</strong> (roll only)`);
+			if (calc.hasPhysiciansTouch) {
+				lines.push(`<span class="mr-1">✨</span> <span class="ve-muted">Physician's Touch: also end one condition (${calc.physiciansTouchConditions?.join(", ")})</span>`);
+			}
+		}
+
+		// --- Hand of Harm ---
+		if (nameLower === "hand of harm") {
+			const formula = calc.handOfHarmDamage || "?";
+			lines.push(`<span class="mr-1">💀</span> Deal <strong>${formula}</strong> necrotic damage on unarmed strike hit`);
+			lines.push(`<span class="mr-1">⚡</span> Once per turn`);
+			if (calc.hasPhysiciansTouch) {
+				lines.push(`<span class="mr-1">✨</span> <span class="ve-muted">Physician's Touch: also inflict <strong>poisoned</strong> until end of your next turn</span>`);
+			}
 		}
 
 		if (!lines.length) return null;
@@ -4716,6 +5174,7 @@ class CharacterSheetCombat {
 				this._sneakAttackEnabled = false;
 				this._sneakAttackHasAdjacentAlly = false;
 				this._lastAttackContext = null;
+				this._handOfHarmUsedThisTurn = false;
 				this._resetTurnActionUsage();
 				this._resetCunningStrikeSelections();
 				JqueryUtil.doToast({type: "info", content: "Combat ended."});
@@ -4725,6 +5184,7 @@ class CharacterSheetCombat {
 				this._sneakAttackEnabled = false;
 				this._sneakAttackHasAdjacentAlly = false;
 				this._lastAttackContext = null;
+				this._handOfHarmUsedThisTurn = false;
 				this._resetTurnActionUsage();
 				this._resetCunningStrikeSelections();
 				JqueryUtil.doToast({type: "success", content: "Combat started — Round 1!"});
@@ -5129,10 +5589,12 @@ class CharacterSheetCombat {
 			isWidth100: true,
 			isMaxWidth640p: true,
 			zIndex: 1500, // Higher z-index to ensure hover popups work
+			cbClose: () => document.body.classList.remove("has-method-picker"),
 		});
 
 		// Add class for styling and make sure hovers appear above
 		modalInner.classList.add("charsheet__method-picker");
+		document.body.classList.add("has-method-picker");
 		modalInner.closest(".ui-modal__inner").style.zIndex = "1500";
 
 		// Create content container
@@ -5268,10 +5730,10 @@ class CharacterSheetCombat {
 		this._renderMethodList(methodList, allMethods, selectedTraditions, maxDegree, knownMethodNames, filterTrad, filterDegree, filterStatus, searchQuery);
 
 		// Filter event listeners
-		filterSection.querySelector("#method-picker-search")?.addEventListener("input", (e) => {
+		filterSection.querySelector("#method-picker-search")?.addEventListener("input", MiscUtil.debounce((e) => {
 			searchQuery = e.target.value.toLowerCase();
 			this._renderMethodList(methodList, allMethods, selectedTraditions, maxDegree, knownMethodNames, filterTrad, filterDegree, filterStatus, searchQuery);
-		});
+		}, 150));
 
 		filterSection.querySelector("#method-picker-trad-filter")?.addEventListener("change", (e) => {
 			filterTrad = e.target.value;

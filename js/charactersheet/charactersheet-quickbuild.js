@@ -754,6 +754,7 @@ class CharacterSheetQuickBuild {
 		`});
 
 		document.body.append(this._overlay);
+		document.body.classList.add("has-quickbuild-overlay");
 
 		// Wire events
 		this._overlay.querySelector(".charsheet__quickbuild-close").addEventListener("click", () => this._closeWizard());
@@ -770,6 +771,7 @@ class CharacterSheetQuickBuild {
 			this._overlay.remove();
 			this._overlay = null;
 		}
+		document.body.classList.remove("has-quickbuild-overlay");
 		this._isActive = false;
 	}
 

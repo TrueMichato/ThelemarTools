@@ -482,12 +482,14 @@ class CharacterSheetPage {
 	}
 
 	_initUi () {
+		document.body.classList.add("is-charsheet-page");
 		this._selCharacter = document.getElementById("charsheet-sel-character");
 		this._renderAbilities();
 		this._renderSavingThrows();
 		this._renderSkills();
 		this._initTabs();
 		this._initHoverLinkSafetyNet();
+		CharacterSheetPage._initModalHoverCleanup();
 	}
 
 	/**
@@ -518,6 +520,35 @@ class CharacterSheetPage {
 	 * opens in a new tab instead of navigating away from the character sheet.
 	 * This catches direct usages that don't go through getHoverLink/getSubclassHoverLink.
 	 */
+	static _isModalHoverCleanupInit = false;
+
+	static _initModalHoverCleanup () {
+		if (CharacterSheetPage._isModalHoverCleanupInit) return;
+		CharacterSheetPage._isModalHoverCleanupInit = true;
+
+		const scheduleCleanup = typeof requestIdleCallback === "function"
+			? (fn) => requestIdleCallback(fn, {timeout: 2000})
+			: (fn) => setTimeout(fn, 100);
+
+		new MutationObserver(() => {
+			if (document.body.classList.contains("ui-modal__body-active")) return;
+
+			scheduleCleanup(() => {
+				if (typeof Renderer?.hover?._eleCache?.entries !== "function") return;
+
+				for (const [key, meta] of Renderer.hover._eleCache.entries()) {
+					if (!(key instanceof Element)) continue;
+					if (document.body.contains(key)) continue;
+
+					if (meta?.windowMeta?.doClose) {
+						try { meta.windowMeta.doClose(); } catch { /* best-effort */ }
+					}
+					Renderer.hover._eleCache.delete(key);
+				}
+			});
+		}).observe(document.body, {attributes: true, attributeFilter: ["class"]});
+	}
+
 	_initHoverLinkSafetyNet () {
 		// Click handler: ensure hover links open in new tab
 		document.addEventListener("click", (e) => {
@@ -625,6 +656,7 @@ class CharacterSheetPage {
 
 		// Header buttons
 		document.getElementById("charsheet-btn-new").addEventListener("click", () => this._onNewCharacter());
+		document.getElementById("charsheet-btn-random").addEventListener("click", () => this._onRandomCharacter());
 		document.getElementById("charsheet-btn-duplicate").addEventListener("click", () => this._onDuplicateCharacter());
 		document.getElementById("charsheet-btn-delete").addEventListener("click", () => this._onDeleteCharacter());
 		document.getElementById("charsheet-btn-modifiers").addEventListener("click", () => this._showCustomModifiersModal());
@@ -858,6 +890,356 @@ class CharacterSheetPage {
 		// Switch to builder tab
 		this.switchToTab("#charsheet-tab-builder");
 	}
+
+	// #region Random Character Generation
+
+	async _onRandomCharacter () {
+		const classes = this.filterByAllowedSources(this._classes);
+		if (!classes.length) {
+			JqueryUtil.doToast({type: "warning", content: "No classes available. Data may still be loading."});
+			return;
+		}
+
+		const classNames = classes.map(c => c.name).sort();
+		const chosenName = await InputUiUtil.pGetUserEnum({
+			title: "Random Character — Pick a Class",
+			htmlDescription: `<div>Select a class. Race, background, ability scores, proficiencies, and spells will be randomised.</div>`,
+			values: classNames,
+			isResolveItem: true,
+		});
+		if (!chosenName) return;
+
+		const chosenClass = classes.find(c => c.name === chosenName);
+		if (!chosenClass) return;
+
+		// Save current character before creating the random one
+		if (this._currentCharacterId) {
+			await this._saveCurrentCharacter();
+		}
+
+		this._createNewCharacter();
+		this._selCharacter.value = "";
+
+		this._buildRandomCharacter(chosenClass);
+
+		await this._saveCurrentCharacter();
+		await this._pLoadCharacters();
+		this._selCharacter.value = this._currentCharacterId;
+
+		JqueryUtil.doToast({type: "success", content: `Created random ${chosenName}: ${this._state.getName()}`});
+	}
+
+	_buildRandomCharacter (cls) {
+		const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+		const pickN = (arr, n) => {
+			const shuffled = [...arr].sort(() => Math.random() - 0.5);
+			return shuffled.slice(0, Math.min(n, arr.length));
+		};
+
+		// ── 1. Race ──
+		const races = this.filterByAllowedSources(this._races);
+		if (races.length) {
+			const race = pick(races);
+			this._state.setRace({name: race.name, source: race.source}, race._subraceName ? {name: race._subraceName, source: race.source} : null);
+			const sizeAbv = Array.isArray(race.size) ? pick(race.size) : race.size;
+			this._state.setSize(sizeAbv ? (Parser.sizeAbvToFull?.(sizeAbv) || sizeAbv) : "medium");
+
+			// Speed
+			if (race.speed) {
+				if (typeof race.speed === "number") {
+					this._state.setSpeed("walk", race.speed);
+				} else if (race.speed.walk) {
+					this._state.setSpeed("walk", race.speed.walk);
+				}
+			}
+
+			// Ability bonuses
+			if (race.ability?.length) {
+				const abilityBlock = pick(race.ability);
+				for (const [ab, bonus] of Object.entries(abilityBlock)) {
+					if (ab === "choose") {
+						// Random choice: pick `count` abilities from `from` and give each +`amount`
+						const count = abilityBlock.choose.count || 1;
+						const amount = abilityBlock.choose.amount || 1;
+						const from = abilityBlock.choose.from || Parser.ABIL_ABVS;
+						const chosen = pickN(from, count);
+						for (const a of chosen) this._state.setAbilityBonus(a, (this._state._data.abilityBonuses[a] || 0) + amount);
+					} else if (Parser.ABIL_ABVS.includes(ab)) {
+						this._state.setAbilityBonus(ab, (this._state._data.abilityBonuses[ab] || 0) + bonus);
+					}
+				}
+			}
+
+			// Darkvision
+			if (race.darkvision) this._state.setSense("darkvision", race.darkvision);
+
+			// Languages
+			if (race.languageProficiencies) {
+				race.languageProficiencies.forEach(lp => {
+					Object.keys(lp).forEach(lang => {
+						if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
+						this._state.addLanguage(lang.toTitleCase());
+					});
+					// Random extra language choices
+					if (lp.anyStandard || lp.any) {
+						const count = lp.anyStandard || lp.any;
+						const available = this._getAvailableLanguages();
+						const chosen = pickN(available, typeof count === "number" ? count : 1);
+						for (const lang of chosen) this._state.addLanguage(lang);
+					}
+				});
+			}
+
+			// Skill proficiencies from race
+			if (race.skillProficiencies) {
+				race.skillProficiencies.forEach(sp => {
+					Object.keys(sp).forEach(skill => {
+						if (skill === "choose" || skill === "any") return;
+						this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
+					});
+					if (sp.choose) {
+						const from = sp.choose.from || [];
+						const count = sp.choose.count || 1;
+						const chosen = pickN(from.map(s => s.toLowerCase().replace(/\s+/g, "")), count);
+						for (const s of chosen) this._state.setSkillProficiency(s, 1);
+					}
+				});
+			}
+
+			// Resistances
+			if (race.resist) {
+				race.resist.forEach(r => { if (typeof r === "string") this._state.addResistance(r); });
+			}
+		}
+
+		// ── 2. Background ──
+		const backgrounds = this.filterByAllowedSources(this._backgrounds);
+		if (backgrounds.length) {
+			const bg = pick(backgrounds);
+			this._state.setBackground({name: bg.name, source: bg.source});
+
+			if (bg.skillProficiencies) {
+				bg.skillProficiencies.forEach(sp => {
+					Object.keys(sp).forEach(skill => {
+						if (skill === "choose" || skill === "any") return;
+						this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
+					});
+				});
+			}
+
+			if (bg.toolProficiencies) {
+				bg.toolProficiencies.forEach(tp => {
+					Object.entries(tp).forEach(([key, val]) => {
+						if (key === "choose" || key === "any" || key === "anyArtisansTool" || key === "anyMusicalInstrument") return;
+						if (val === true) this._state.addToolProficiency(key.toTitleCase());
+					});
+				});
+			}
+
+			if (bg.languageProficiencies) {
+				bg.languageProficiencies.forEach(lp => {
+					Object.entries(lp).forEach(([key, val]) => {
+						if (key === "anyStandard" || key === "any") {
+							const count = typeof val === "number" ? val : 1;
+							const available = this._getAvailableLanguages();
+							const chosen = pickN(available, count);
+							for (const lang of chosen) this._state.addLanguage(lang);
+						} else if (val === true) {
+							this._state.addLanguage(key.toTitleCase());
+						}
+					});
+				});
+			}
+		}
+
+		// ── 3. Ability scores (standard array, priority-shuffled) ──
+		const standardArray = [15, 14, 13, 12, 10, 8];
+		const priority = this._getAbilityPriority(cls);
+		// Minor shuffle for variety: swap 0-2 random pairs
+		const swaps = Math.floor(Math.random() * 3);
+		for (let i = 0; i < swaps; i++) {
+			const a = Math.floor(Math.random() * 6);
+			const b = Math.floor(Math.random() * 6);
+			[priority[a], priority[b]] = [priority[b], priority[a]];
+		}
+		for (let i = 0; i < 6; i++) {
+			this._state.setAbilityBase(priority[i], standardArray[i]);
+		}
+
+		// ── 4. Class (triggers spell slot / HP recalc internally) ──
+		this._state.addClass({name: cls.name, source: cls.source, level: 1});
+
+		// Save proficiencies
+		if (cls.proficiency) {
+			cls.proficiency.forEach(prof => {
+				if (Parser.ABIL_ABVS.includes(prof)) this._state.addSaveProficiency(prof);
+			});
+		}
+
+		// Armor / weapon / tool proficiencies
+		if (cls.startingProficiencies?.armor) {
+			cls.startingProficiencies.armor.forEach(a => {
+				this._state.addArmorProficiency(typeof a === "string" ? a : a.full || String(a));
+			});
+		}
+		if (cls.startingProficiencies?.weapons) {
+			cls.startingProficiencies.weapons.forEach(w => {
+				this._state.addWeaponProficiency(typeof w === "string" ? w : w.full || String(w));
+			});
+		}
+		if (cls.startingProficiencies?.tools) {
+			cls.startingProficiencies.tools.forEach(t => {
+				if (typeof t === "string" && !/\bany\b.*\bchoice\b|\bchoose\b/i.test(t)) {
+					const toolName = t.replace(/{@item\s+([^|}]+)[^}]*}/gi, "$1").toTitleCase();
+					this._state.addToolProficiency(toolName);
+				}
+			});
+		}
+
+		// Class skill proficiencies (random from class list)
+		if (cls.startingProficiencies?.skills) {
+			const alreadyProficient = new Set(
+				Object.keys(this._state._data.skillProficiencies).filter(s => this._state._data.skillProficiencies[s] >= 1),
+			);
+			cls.startingProficiencies.skills.forEach(skillSet => {
+				if (skillSet.choose) {
+					const count = skillSet.choose.count || 2;
+					const from = (skillSet.choose.from || []).map(s => s.toLowerCase().replace(/\s+/g, ""));
+					const available = from.filter(s => !alreadyProficient.has(s));
+					const chosen = pickN(available, count);
+					for (const s of chosen) {
+						this._state.setSkillProficiency(s, 1);
+						alreadyProficient.add(s);
+					}
+				} else if (skillSet.any) {
+					const allSkills = [
+						"acrobatics", "animalhandling", "arcana", "athletics", "deception",
+						"history", "insight", "intimidation", "investigation", "medicine",
+						"nature", "perception", "performance", "persuasion", "religion",
+						"sleightofhand", "stealth", "survival",
+					];
+					const available = allSkills.filter(s => !alreadyProficient.has(s));
+					const chosen = pickN(available, skillSet.any);
+					for (const s of chosen) {
+						this._state.setSkillProficiency(s, 1);
+						alreadyProficient.add(s);
+					}
+				}
+			});
+		}
+
+		// ── 5. Spellcasting ──
+		if (cls.spellcastingAbility) {
+			this._state.setSpellcastingAbility(cls.spellcastingAbility);
+			this._applyRandomSpells(cls, pickN);
+		}
+
+		// ── 6. Level history ──
+		this._state.recordLevelChoice({
+			level: 1,
+			class: {name: cls.name, source: cls.source},
+			choices: {},
+			complete: true,
+		});
+
+		// ── 7. Name & HP ──
+		const raceName = this._state.getRaceName() || "Adventurer";
+		this._state.setName(`${raceName} ${cls.name}`);
+		const maxHp = this._state.getMaxHp?.() ?? this._state._data.hp.max;
+		this._state._data.hp.current = maxHp;
+
+		this._renderCharacter();
+		this._updateTabVisibility();
+	}
+
+	_getAbilityPriority (cls) {
+		const priorities = {
+			"Barbarian": ["str", "con", "dex", "wis", "cha", "int"],
+			"Bard": ["cha", "dex", "con", "wis", "int", "str"],
+			"Cleric": ["wis", "con", "str", "cha", "dex", "int"],
+			"Druid": ["wis", "con", "dex", "int", "cha", "str"],
+			"Fighter": ["str", "con", "dex", "wis", "cha", "int"],
+			"Monk": ["dex", "wis", "con", "str", "cha", "int"],
+			"Paladin": ["str", "cha", "con", "wis", "dex", "int"],
+			"Ranger": ["dex", "wis", "con", "str", "int", "cha"],
+			"Rogue": ["dex", "con", "cha", "int", "wis", "str"],
+			"Sorcerer": ["cha", "con", "dex", "wis", "int", "str"],
+			"Warlock": ["cha", "con", "dex", "wis", "int", "str"],
+			"Wizard": ["int", "con", "dex", "wis", "cha", "str"],
+			"Artificer": ["int", "con", "dex", "wis", "cha", "str"],
+		};
+		return [...(priorities[cls.name] || Parser.ABIL_ABVS)];
+	}
+
+	_getAvailableLanguages () {
+		try {
+			return this.getLanguageNamesSorted?.() || ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"];
+		} catch {
+			return ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"];
+		}
+	}
+
+	_applyRandomSpells (cls, pickN) {
+		const allSpells = this._spellsData || [];
+		if (!allSpells.length) return;
+
+		// Filter spells available to this class at level 1
+		const classSpells = allSpells.filter(sp => {
+			if (!sp.classes?.fromClassList?.length) return false;
+			return sp.classes.fromClassList.some(c => c.name === cls.name && c.source === cls.source);
+		});
+
+		const cantrips = classSpells.filter(sp => sp.level === 0);
+		const level1Spells = classSpells.filter(sp => sp.level === 1);
+
+		// Determine cantrip and known spell counts from class data tables
+		const cantripCount = CharacterSheetClassUtils.getCantripsAtLevel?.(cls, cls.name, 1)
+			?? this._getDefaultCantripCount(cls.name);
+		const knownCount = CharacterSheetClassUtils.getKnownSpellsAtLevel?.(cls, cls.name, 1)
+			?? this._getDefaultKnownSpellCount(cls.name);
+
+		// Add cantrips
+		if (cantripCount > 0 && cantrips.length) {
+			const chosen = pickN(cantrips, cantripCount);
+			for (const sp of chosen) {
+				this._state.addCantrip({
+					name: sp.name,
+					source: sp.source,
+					school: sp.school,
+					sourceClass: cls.name,
+				});
+			}
+		}
+
+		// Add known spells (for known casters, not prepared casters)
+		const preparedCasters = ["Cleric", "Druid", "Paladin"];
+		if (knownCount > 0 && !preparedCasters.includes(cls.name) && level1Spells.length) {
+			const chosen = pickN(level1Spells, knownCount);
+			for (const sp of chosen) {
+				this._state.addSpell({
+					name: sp.name,
+					source: sp.source,
+					level: sp.level,
+					school: sp.school,
+					ritual: sp.meta?.ritual || false,
+					concentration: sp.duration?.some?.(d => d.concentration) || false,
+					sourceClass: cls.name,
+				}, false);
+			}
+		}
+	}
+
+	_getDefaultCantripCount (className) {
+		const defaults = {Bard: 2, Cleric: 3, Druid: 2, Sorcerer: 4, Warlock: 2, Wizard: 3, Artificer: 2};
+		return defaults[className] || 0;
+	}
+
+	_getDefaultKnownSpellCount (className) {
+		const defaults = {Bard: 4, Sorcerer: 2, Warlock: 2, Wizard: 6, Ranger: 0};
+		return defaults[className] || 0;
+	}
+
+	// #endregion
 
 	async _onDuplicateCharacter () {
 		if (!this._currentCharacterId) return;
@@ -2206,6 +2588,11 @@ class CharacterSheetPage {
 			highJumpRunning = 3 + strMod; // High jump = 3 + Str mod in feet
 		}
 		
+		// Apply jump multiplier from active states (e.g. Step of the Wind)
+		const jumpMultiplier = this._state.getJumpMultiplierFromStates?.() || 1;
+		longJumpRunning = Math.floor(longJumpRunning * jumpMultiplier);
+		highJumpRunning = Math.floor(highJumpRunning * jumpMultiplier);
+
 		const longJumpStanding = Math.floor(longJumpRunning / 2); // Standing = half of running
 		const highJumpStanding = Math.floor(Math.max(0, highJumpRunning) / 2); // Standing = half of running
 
@@ -5628,14 +6015,37 @@ class CharacterSheetPage {
 			const existingAttack = attacks.find(a => a.name === weapon.name);
 			if (!existingAttack) {
 				// Auto-generate attack from weapon
-				const isRanged = weapon.properties?.some(p => p === "A" || p === "T" || p.startsWith("A|") || p.startsWith("T|"));
-				const hasFinesse = weapon.properties?.some(p => p === "F" || p.startsWith("F|"));
+				// Use property (5etools format) or properties (normalized format)
+				const props = weapon.property || weapon.properties || [];
+				const isRanged = props.some(p => p === "A" || p === "T" || p.startsWith("A|") || p.startsWith("T|"));
+				const hasFinesse = props.some(p => p === "F" || p.startsWith("F|"));
 				const isMonkWeapon = this._state.isMonkWeapon?.(weapon);
 				const abilityMod = isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? (this._state.getAbilityMod("dex") >= this._state.getAbilityMod("str") ? "dex" : "str") : "str");
 
 				// Calculate magic bonuses
 				const attackBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0);
 				const damageBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0);
+
+				// Extract raw damage die — prefer dmg1 (raw), fall back to parsing from formatted damage string
+				let baseDamageDie = weapon.dmg1 || (weapon.damage ? weapon.damage.split(" ")[0] : null) || "1d6";
+				let baseDamageType = weapon.dmgType
+					? Parser.dmgTypeToFull(weapon.dmgType)
+					: (weapon.damageType || (weapon.damage ? weapon.damage.split(" ").slice(1).join(" ") : null) || "slashing");
+
+				// Monk weapon damage: use martial arts die if higher than weapon die
+				if (isMonkWeapon) {
+					const calc = this._state.getFeatureCalculations();
+					if (calc.martialArtsDie) {
+						const dieMatch = (d) => (d || "").match(/(\d+)d(\d+)/);
+						const weaponMatch = dieMatch(baseDamageDie);
+						const monkMatch = dieMatch(calc.martialArtsDie);
+						if (weaponMatch && monkMatch) {
+							const weaponMax = parseInt(weaponMatch[1]) * parseInt(weaponMatch[2]);
+							const monkMax = parseInt(monkMatch[1]) * parseInt(monkMatch[2]);
+							if (monkMax > weaponMax) baseDamageDie = calc.martialArtsDie;
+						}
+					}
+				}
 
 				const autoAttack = {
 					id: `auto_${weapon.id}`,
@@ -5644,12 +6054,13 @@ class CharacterSheetPage {
 					isMelee: !isRanged,
 					abilityMod,
 					attackBonus: attackBonus,
-					damage: weapon.damage || "1d6",
-					damageType: weapon.damageType || "slashing",
+					damage: baseDamageDie,
+					damageType: baseDamageType,
 					damageBonus: damageBonus,
 					range: weapon.range || (isRanged ? "80/320 ft." : "5 ft."),
-					properties: weapon.properties || [],
+					properties: props,
 					mastery: weapon.mastery || [],
+					isMonkWeapon: !!isMonkWeapon,
 				};
 				attacks.push(autoAttack);
 			}
@@ -5697,10 +6108,12 @@ class CharacterSheetPage {
 				}
 			}
 
+			const monkBadge = attack.isMonkWeapon ? ` <span class="badge badge-warning" title="Monk Weapon">Monk</span>` : "";
+
 			const row = e_({outer: `
 				<div class="charsheet__attack-row">
 					<div class="charsheet__attack-info">
-						<span class="charsheet__attack-name">${attackNameHtml}</span>
+						<span class="charsheet__attack-name">${attackNameHtml}${monkBadge}</span>
 						<span class="charsheet__attack-range ve-small ve-muted">${rangeStr} ${propsStr}</span>
 					</div>
 					<div class="charsheet__attack-stats">
@@ -6982,11 +7395,13 @@ class CharacterSheetPage {
 				const isImmune = this._state.isImmuneToCondition(cond.name);
 				const immuneBadge = isImmune ? `<span class="charsheet__condition-item-immune">🛡️ Immune</span>` : "";
 
+				const condLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_CONDITIONS_DISEASES, cond.name, cond.source);
+
 				const itemEl = e_({outer: `
 					<div class="charsheet__condition-item ${isImmune ? "charsheet__condition-item--immune" : ""}" data-condition-name="${cond.name}" data-condition-source="${cond.source}">
 						<div class="charsheet__condition-item-header">
 							<span class="charsheet__condition-item-icon">${icon}</span>
-							<strong class="charsheet__condition-item-name">${cond.name}</strong>
+							<strong class="charsheet__condition-item-name">${condLink}</strong>
 							${sourceBadge}
 							${immuneBadge}
 						</div>
@@ -7015,7 +7430,7 @@ class CharacterSheetPage {
 			});
 		};
 
-		search.addEventListener("input", (e) => renderList(e.target.value));
+		search.addEventListener("input", MiscUtil.debounce((e) => renderList(e.target.value), 150));
 		renderList();
 
 		const applyCondition = () => {
@@ -7826,7 +8241,7 @@ class CharacterSheetPage {
 		});
 	}
 
-	_showDiceResult (title, total, breakdown, resultClass = "", resultNote = "") {
+	_showDiceResult (title, total, breakdown, resultClass = "", resultNote = "", {duration = 5000} = {}) {
 		// Remove existing result
 		document.querySelector(".charsheet__dice-result")?.remove();
 
@@ -7846,8 +8261,7 @@ class CharacterSheetPage {
 		resultEl.querySelector(".charsheet__dice-result-close").addEventListener("click", () => resultEl.remove());
 		document.body.append(resultEl);
 
-		// Auto-remove after 5 seconds
-		setTimeout(() => setTimeout(() => resultEl.remove(), 300), 5000);
+		setTimeout(() => setTimeout(() => resultEl.remove(), 300), duration);
 	}
 	// #endregion
 

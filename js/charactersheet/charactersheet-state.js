@@ -3583,6 +3583,10 @@ class CharacterSheetState {
 
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
+
+		// Migrate old ki backing store into the resource system
+		this._migrateKiToResource();
+
 		// Reapply history-backed optional features for saves which persisted history
 		// but did not fully reconstruct runtime feature state.
 		this._reapplyHistoryOptionalFeatures();
@@ -3711,6 +3715,40 @@ class CharacterSheetState {
 
 		if (migratedCount > 0) {
 		}
+	}
+
+	/**
+	 * Migrate old saves that stored ki/focus in a separate _data.kiPoints object
+	 * instead of the resource system. Creates a resource entry from the old data
+	 * if no monk resource already exists.
+	 */
+	_migrateKiToResource () {
+		// Rename any existing "Ki Points" resource to "Focus Points"
+		const kiResource = this._data.resources.find(r => r.name === "Ki Points");
+		if (kiResource) {
+			kiResource.name = "Focus Points";
+		}
+
+		if (!this._data.kiPoints || !this._data.kiPoints.max) return;
+
+		// Skip if a monk resource already exists
+		const existing = this._data.resources.find(r => r.name === "Focus Points");
+		if (existing) {
+			// Remove the old backing store — resource system is the source of truth now
+			delete this._data.kiPoints;
+			return;
+		}
+
+		const resourceName = "Focus Points";
+
+		this.addResource({
+			name: resourceName,
+			max: this._data.kiPoints.max,
+			current: this._data.kiPoints.current || 0,
+			recharge: "short",
+		});
+
+		delete this._data.kiPoints;
 	}
 
 	/**
@@ -19466,6 +19504,19 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Get jump distance multiplier from active states (e.g. Step of the Wind doubles jump distance)
+	 * @returns {number} Jump distance multiplier (default 1)
+	 */
+	getJumpMultiplierFromStates () {
+		const effects = this.getActiveStateEffects();
+		let multiplier = 1;
+		effects.filter(e => e.type === "jumpMultiplier").forEach(e => {
+			multiplier *= e.value;
+		});
+		return multiplier;
+	}
+
+	/**
 	 * Get flat speed bonus from active states (like combat stances, Bladesong).
 	 * Matches both generic "speed" effects and typed "speed:walk"/"speed:fly"/etc. effects.
 	 * @param {string} [speedType="walk"] - The speed type ("walk", "fly", "swim", "climb", "burrow")
@@ -26374,9 +26425,24 @@ class CharacterSheetState {
 				{type: "advantage", target: "save:dex"},
 			],
 			duration: "Until start of next turn",
-			resourceName: "Ki Points",
+			resourceName: "Focus Points",
 			resourceCost: 1,
 			detectPatterns: ["patient defense"],
+			activationAction: "bonus",
+		},
+		stepOfTheWind: {
+			id: "stepOfTheWind",
+			name: "Step of the Wind",
+			icon: "💨",
+			description: "Dash or Disengage as a bonus action; movement speed and jump distance doubled",
+			effects: [
+				{type: "speedMultiplier", value: 2},
+				{type: "jumpMultiplier", value: 2},
+			],
+			duration: "Until end of turn",
+			resourceName: "Focus Points",
+			resourceCost: 1,
+			detectPatterns: ["step of the wind"],
 			activationAction: "bonus",
 		},
 		recklessAttack: {
@@ -27581,7 +27647,7 @@ class CharacterSheetState {
 			// Monk abilities
 			{pattern: /patient defense/i, stateTypeId: "patientDefense"},
 			{pattern: /flurry of blows/i, stateTypeId: "custom", isInstant: true},
-			{pattern: /step of the wind/i, stateTypeId: "custom", isInstant: true},
+			{pattern: /step of the wind/i, stateTypeId: "stepOfTheWind"},
 
 			// Fighter abilities
 			{pattern: /action surge/i, stateTypeId: "custom", isInstant: true},
@@ -31013,17 +31079,12 @@ class CharacterSheetState {
 		// Clear active states that end on rest
 		this.clearStatesOnRest("short");
 
-		// Recover short rest resources
+		// Recover short rest resources (includes Ki/Focus Points)
 		this.recoverResources("short");
 
 		// Warlock pact slots
 		if (this._data.spellcasting.pactSlots.max > 0) {
 			this._data.spellcasting.pactSlots.current = this._data.spellcasting.pactSlots.max;
-		}
-
-		// Recover Ki points (Monk: recovers all on short rest)
-		if (this._data.kiPoints?.max > 0) {
-			this._data.kiPoints.current = this._data.kiPoints.max;
 		}
 
 		// Recover short rest innate spells
@@ -31897,49 +31958,74 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Ki Points (Monk resource)
+	// All ki/focus methods proxy through the resource system so that
+	// useKiPoint(), the UI resource counter, and rest recovery stay in sync.
+
 	/**
-	 * Get Ki points maximum
-	 * @returns {number} Max Ki points
+	 * Find the monk resource ("Focus Points" or "Ki Points") in _data.resources.
+	 * @returns {object|null} The resource entry, or null.
+	 */
+	_getMonkResource () {
+		return this._data.resources.find(r => r.name === "Focus Points" || r.name === "Ki Points") || null;
+	}
+
+	/**
+	 * Get Ki/Focus points maximum
+	 * @returns {number} Max Ki/Focus points
 	 */
 	getKiPoints () {
-		return this._data.kiPoints?.max || 0;
+		return this._getMonkResource()?.max || 0;
 	}
 
 	/**
-	 * Set Ki points maximum
-	 * @param {number} points - Max Ki points
+	 * Set Ki/Focus points maximum. Creates the resource if it doesn't exist.
+	 * @param {number} points - Max Ki/Focus points
 	 */
 	setKiPoints (points) {
-		if (!this._data.kiPoints) this._data.kiPoints = {current: 0, max: 0};
-		this._data.kiPoints.max = points;
+		let resource = this._getMonkResource();
+		if (resource) {
+			resource.max = points;
+			return;
+		}
+		// Auto-create when no resource exists (e.g. direct API use without updateClassResources)
+		const resourceName = "Focus Points";
+		this.addResource({
+			name: resourceName,
+			max: points,
+			current: points,
+			recharge: "short",
+		});
 	}
 
 	/**
-	 * Get current Ki points
-	 * @returns {number} Current Ki points
+	 * Get current Ki/Focus points
+	 * @returns {number} Current Ki/Focus points
 	 */
 	getKiPointsCurrent () {
-		return this._data.kiPoints?.current || 0;
+		return this._getMonkResource()?.current || 0;
 	}
 
 	/**
-	 * Set current Ki points
-	 * @param {number} points - Current Ki points
+	 * Set current Ki/Focus points
+	 * @param {number} points - Current Ki/Focus points
 	 */
 	setKiPointsCurrent (points) {
-		if (!this._data.kiPoints) this._data.kiPoints = {current: 0, max: 0};
-		this._data.kiPoints.current = Math.max(0, Math.min(points, this._data.kiPoints.max));
+		const resource = this._getMonkResource();
+		if (resource) {
+			resource.current = Math.max(0, Math.min(points, resource.max));
+		}
 	}
 
 	/**
-	 * Use Ki points
+	 * Use Ki/Focus points
 	 * @param {number} amount - Number of points to use
 	 * @returns {boolean} True if successful
 	 */
 	useKiPoint (amount = 1) {
-		if (!this._data.kiPoints) return false;
-		if (this._data.kiPoints.current < amount) return false;
-		this._data.kiPoints.current -= amount;
+		const resource = this._getMonkResource();
+		if (!resource) return false;
+		if (resource.current < amount) return false;
+		resource.current -= amount;
 		return true;
 	}
 	// #endregion

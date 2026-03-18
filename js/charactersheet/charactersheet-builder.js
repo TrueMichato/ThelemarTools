@@ -1980,9 +1980,7 @@ class CharacterSheetBuilder {
 				// Resolve special placeholder for monk Ki/Focus Points
 				let resourceName = resource.name;
 				if (resourceName === "__MONK_RESOURCE__") {
-					// Use "Focus Points" for 2024 (XPHB) monks, "Ki Points" for 2014 monks
-					const is2024 = cls.source === "XPHB" || this._selectedClass?.source === "XPHB";
-					resourceName = is2024 ? "Focus Points" : "Ki Points";
+					resourceName = "Focus Points";
 				}
 
 				// Skip if resource was already auto-added (check both Ki and Focus for monks)
@@ -2770,29 +2768,37 @@ class CharacterSheetBuilder {
 		`});
 
 		const checkboxes = section.querySelector(".charsheet__builder-skill-checkboxes");
+		const takenByOthers = this._getSkillsFromOtherSources("race");
+
+		// Remove any prior racial selections now taken by another source
+		this._selectedRacialSkills = this._selectedRacialSkills.filter(s => !takenByOthers.has(s));
+		section.querySelector(".racial-skill-count").textContent = this._selectedRacialSkills.length;
 
 		availableSkills.forEach(skill => {
 			const isSelected = this._selectedRacialSkills.includes(skill);
+			const takenSource = takenByOthers.get(skill);
 			const lbl = e_({outer: `
-				<label class="charsheet__builder-skill-checkbox mr-3 mb-1">
-					<input type="checkbox" value="${skill}" ${isSelected ? "checked" : ""}>
-					${skill}
+				<label class="charsheet__builder-skill-checkbox mr-3 mb-1${takenSource ? " ve-muted" : ""}">
+					<input type="checkbox" value="${skill}" ${isSelected ? "checked" : ""}${takenSource ? " disabled" : ""}>
+					${skill}${takenSource ? ` <span class="ve-small">(${takenSource})</span>` : ""}
 				</label>
 			`});
 
-			lbl.querySelector("input").addEventListener("change", (e) => {
-				if (e.target.checked) {
-					if (this._selectedRacialSkills.length < count) {
-						this._selectedRacialSkills.push(skill);
+			if (!takenSource) {
+				lbl.querySelector("input").addEventListener("change", (e) => {
+					if (e.target.checked) {
+						if (this._selectedRacialSkills.length < count) {
+							this._selectedRacialSkills.push(skill);
+						} else {
+							e.target.checked = false;
+							JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} skill${count > 1 ? "s" : ""}.`});
+						}
 					} else {
-						e.target.checked = false;
-						JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} skill${count > 1 ? "s" : ""}.`});
+						this._selectedRacialSkills = this._selectedRacialSkills.filter(s => s !== skill);
 					}
-				} else {
-					this._selectedRacialSkills = this._selectedRacialSkills.filter(s => s !== skill);
-				}
-				section.querySelector(".racial-skill-count").textContent = this._selectedRacialSkills.length;
-			});
+					section.querySelector(".racial-skill-count").textContent = this._selectedRacialSkills.length;
+				});
+			}
 
 			checkboxes.append(lbl);
 		});
@@ -3870,33 +3876,41 @@ class CharacterSheetBuilder {
 		`});
 
 		const checkboxes = section.querySelector(".charsheet__builder-skill-checkboxes");
+		const takenByOthers = this._getSkillsFromOtherSources("class");
+
+		// Remove any prior class selections now taken by another source
+		this._selectedSkills = this._selectedSkills.filter(s => !takenByOthers.has(s));
+		section.querySelector(".skill-count").textContent = this._selectedSkills.length;
 
 		formattedSkills.forEach(skill => {
 			const isSelected = this._selectedSkills.includes(skill);
+			const takenSource = takenByOthers.get(skill);
 			const lbl = e_({outer: `
-				<label class="charsheet__builder-skill-checkbox mr-3 mb-1">
-					<input type="checkbox" value="${skill}" ${isSelected ? "checked" : ""}>
-					${skill}
+				<label class="charsheet__builder-skill-checkbox mr-3 mb-1${takenSource ? " ve-muted" : ""}">
+					<input type="checkbox" value="${skill}" ${isSelected ? "checked" : ""}${takenSource ? " disabled" : ""}>
+					${skill}${takenSource ? ` <span class="ve-small">(${takenSource})</span>` : ""}
 				</label>
 			`});
 
-			lbl.querySelector("input").addEventListener("change", (e) => {
-				if (e.target.checked) {
-					if (this._selectedSkills.length < chooseCount) {
-						this._selectedSkills.push(skill);
+			if (!takenSource) {
+				lbl.querySelector("input").addEventListener("change", (e) => {
+					if (e.target.checked) {
+						if (this._selectedSkills.length < chooseCount) {
+							this._selectedSkills.push(skill);
+						} else {
+							e.target.checked = false;
+							JqueryUtil.doToast({type: "warning", content: `You can only choose ${chooseCount} skills.`});
+						}
 					} else {
-						e.target.checked = false;
-						JqueryUtil.doToast({type: "warning", content: `You can only choose ${chooseCount} skills.`});
+						this._selectedSkills = this._selectedSkills.filter(s => s !== skill);
+						// Also remove from expertise if it was selected
+						this._selectedExpertise = this._selectedExpertise.filter(s => s !== skill);
 					}
-				} else {
-					this._selectedSkills = this._selectedSkills.filter(s => s !== skill);
-					// Also remove from expertise if it was selected
-					this._selectedExpertise = this._selectedExpertise.filter(s => s !== skill);
-				}
-				section.querySelector(".skill-count").textContent = this._selectedSkills.length;
-				// Update expertise section to reflect new available skills
-				this._updateExpertiseSection(cls);
-			});
+					section.querySelector(".skill-count").textContent = this._selectedSkills.length;
+					// Update expertise section to reflect new available skills
+					this._updateExpertiseSection(cls);
+				});
+			}
 
 			checkboxes.append(lbl);
 		});
@@ -5815,6 +5829,44 @@ class CharacterSheetBuilder {
 	}
 
 	/**
+	 * Get skills already chosen by other builder steps, mapped to their source label.
+	 * Used to disable duplicate skill selections across race, background, and class pickers.
+	 * @param {"race"|"background"|"class"} excludeSource - The calling step's source (excluded from results)
+	 * @returns {Map<string, string>} Map of TitleCase skill name → source label (e.g. "Race", "Background")
+	 */
+	_getSkillsFromOtherSources (excludeSource) {
+		const skills = new Map();
+
+		if (excludeSource !== "race") {
+			const fixedRacial = this._getFixedRacialSkills();
+			if (this._useTashasRules && this._tashasSkillReplacements.length) {
+				this._tashasSkillReplacements.forEach(skill => {
+					if (skill) skills.set(skill.toTitleCase(), "Race");
+				});
+			} else {
+				fixedRacial.forEach(skill => skills.set(skill.toTitleCase(), "Race"));
+			}
+			this._selectedRacialSkills.forEach(skill => skills.set(skill, "Race"));
+		}
+
+		if (excludeSource !== "background" && this._selectedBackground?.skillProficiencies) {
+			this._selectedBackground.skillProficiencies.forEach(skillSet => {
+				Object.keys(skillSet).forEach(skill => {
+					if (skill !== "choose" && skill !== "any") {
+						skills.set(skill.toTitleCase(), "Background");
+					}
+				});
+			});
+		}
+
+		if (excludeSource !== "class") {
+			this._selectedSkills.forEach(skill => skills.set(skill, "Class"));
+		}
+
+		return skills;
+	}
+
+	/**
 	 * Get fixed racial languages (non-choice, excluding Common) from race and subrace.
 	 * @returns {string[]} Array of language names
 	 */
@@ -6850,8 +6902,22 @@ class CharacterSheetBuilder {
 			content.append(asiSection);
 		}
 
-		// Skills - use the built-in summary renderer
+		// Skills - show summary with overlap warnings for skills already chosen elsewhere
 		if (bg.skillProficiencies) {
+			const takenByOthers = this._getSkillsFromOtherSources("background");
+
+			// Collect fixed skill names from this background
+			const bgFixedSkills = [];
+			bg.skillProficiencies.forEach(skillSet => {
+				Object.keys(skillSet).forEach(skill => {
+					if (skill !== "choose" && skill !== "any") {
+						bgFixedSkills.push(skill.toTitleCase());
+					}
+				});
+			});
+
+			const overlaps = bgFixedSkills.filter(s => takenByOthers.has(s));
+
 			const {summary: skillSummary} = Renderer.generic.getSkillSummary({
 				skillProfs: bg.skillProficiencies,
 				skillToolLanguageProfs: bg.skillToolLanguageProficiencies,
@@ -6859,6 +6925,15 @@ class CharacterSheetBuilder {
 			});
 			if (skillSummary) {
 				content.append(e_({outer: `<p><strong>Skills:</strong> ${Renderer.get().render(skillSummary)}</p>`}));
+			}
+
+			if (overlaps.length) {
+				const overlapList = overlaps.map(s => `<strong>${s}</strong> (${takenByOthers.get(s)})`).join(", ");
+				content.append(e_({outer: `
+					<div class="alert alert-warning ve-small mb-2">
+						⚠️ <strong>Skill overlap:</strong> ${overlapList} ${overlaps.length === 1 ? "is" : "are"} already chosen — picking this background wastes ${overlaps.length === 1 ? "a skill" : `${overlaps.length} skills`}. You can go back to the race step and choose a different skill to accommodate, if possible, or talk with your DM.
+					</div>
+				`}));
 			}
 		}
 

@@ -1244,8 +1244,12 @@ class CharacterSheetSpells {
 				return true;
 			});
 
+			const totalCount = filtered.length;
+			const renderCap = 100;
+			const capped = filtered.slice(0, renderCap);
+
 			const knownCount = filtered.filter(s => knownSpellIds.includes(`${s.name}|${s.source}`)).length;
-			resultsCount.innerHTML = `<span>${filtered.length} spell${filtered.length !== 1 ? "s" : ""} found</span>${knownCount > 0 ? `<span class="ml-2" style="color: var(--cs-success);">(${knownCount} already known)</span>` : ""}`;
+			resultsCount.innerHTML = `<span>${totalCount} spell${totalCount !== 1 ? "s" : ""} found</span>${totalCount > renderCap ? `<span class="ml-2" style="opacity: 0.7;">(showing first ${renderCap})</span>` : ""}${knownCount > 0 ? `<span class="ml-2" style="color: var(--cs-success);">(${knownCount} already known)</span>` : ""}`;
 
 			if (!filtered) {
 				list.innerHTML = `
@@ -1259,7 +1263,7 @@ class CharacterSheetSpells {
 
 			// Group by level
 			const grouped = {};
-			filtered.forEach(spell => {
+			capped.forEach(spell => {
 				const level = spell.level === 0 ? "Cantrips" : `Level ${spell.level}`;
 				if (!grouped[level]) grouped[level] = [];
 				grouped[level].push(spell);
@@ -1306,11 +1310,13 @@ class CharacterSheetSpells {
 						subschoolStr = ` • 🏷️ ${spell.subschools.map(formatSubschool).join(", ")}`;
 					}
 
+					const spellLink = this._page?.getHoverLink ? this._page.getHoverLink(UrlUtil.PG_SPELLS, spell.name, spell.source) : spell.name;
+
 					const item = e_({outer: `
 						<div class="charsheet__modal-list-item ${isKnown ? "ve-muted" : ""}">
 							<div class="charsheet__modal-list-item-icon">${this._getSchoolEmoji(spell.school)}</div>
 							<div class="charsheet__modal-list-item-content">
-								<div class="charsheet__modal-list-item-title">${spell.name}${tagsStr}</div>
+								<div class="charsheet__modal-list-item-title">${spellLink}${tagsStr}</div>
 								<div class="charsheet__modal-list-item-subtitle">${school} • ${componentStr || "No components"} • ${Parser.sourceJsonToAbv(spell.source)}${subschoolStr}</div>
 							</div>
 							${isKnown
@@ -1340,7 +1346,7 @@ class CharacterSheetSpells {
 			});
 		};
 
-		search.addEventListener("input", renderList);
+		search.addEventListener("input", MiscUtil.debounce(renderList, 150));
 		// Level, school, and source filters are handled by checkbox change events above
 
 		// Initial render

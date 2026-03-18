@@ -1433,7 +1433,7 @@ describe("Patient Defense — Effects & Summary", () => {
 
 	it("Patient Defense has correct resource cost and activation action", () => {
 		const pd = CharacterSheetState.ACTIVE_STATE_TYPES.patientDefense;
-		expect(pd.resourceName).toBe("Ki Points");
+		expect(pd.resourceName).toBe("Focus Points");
 		expect(pd.resourceCost).toBe(1);
 		expect(pd.activationAction).toBe("bonus");
 		expect(pd.duration).toBe("Until start of next turn");

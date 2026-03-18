@@ -700,7 +700,7 @@ class CharacterSheetInventory {
 		mundaneBtn.addEventListener("click", () => toggleBtn(mundaneBtn, "mundane"));
 		consumeBtn.addEventListener("click", () => toggleBtn(consumeBtn, "consumable"));
 
-		search.addEventListener("input", renderList);
+		search.addEventListener("input", MiscUtil.debounce(renderList, 150));
 		// Type, rarity, and source filters are handled by checkbox change events above
 
 		// Initial render
