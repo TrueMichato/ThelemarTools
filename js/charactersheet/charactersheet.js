@@ -519,12 +519,40 @@ class CharacterSheetPage {
 	 * This catches direct usages that don't go through getHoverLink/getSubclassHoverLink.
 	 */
 	_initHoverLinkSafetyNet () {
+		// Click handler: ensure hover links open in new tab
 		document.addEventListener("click", (e) => {
 			const target = e.target.closest("a[data-vet-page]");
 			if (!target) return;
 			if (!target.target) {
 				target.target = "_blank";
 				target.rel = "noopener noreferrer";
+			}
+		});
+
+		// Event delegation for hover links — handles dynamically added elements
+		// that may not have working inline onmouseover handlers (e.g. elements
+		// added via template.innerHTML in e_({outer:...}))
+		const hoverBound = new WeakSet();
+		document.addEventListener("mouseover", (e) => {
+			const target = e.target.closest("a[data-vet-page]");
+			if (!target || hoverBound.has(target)) return;
+			hoverBound.add(target);
+
+			// Bind per-element handlers once so mouseleave/mousemove work
+			target.addEventListener("mouseleave", (evt) => {
+				if (typeof Renderer?.hover?.handleLinkMouseLeave === "function") {
+					Renderer.hover.handleLinkMouseLeave(evt, target);
+				}
+			});
+			target.addEventListener("mousemove", (evt) => {
+				if (typeof Renderer?.hover?.handleLinkMouseMove === "function") {
+					Renderer.hover.handleLinkMouseMove(evt, target);
+				}
+			});
+
+			// Trigger the initial mouseover
+			if (typeof Renderer?.hover?.pHandleLinkMouseOver === "function") {
+				Renderer.hover.pHandleLinkMouseOver(e, target);
 			}
 		});
 	}
@@ -9368,7 +9396,8 @@ class CharacterSheetPage {
 		modalInner.querySelector("#charsheet-btn-add-modifier").addEventListener("click", () => showEditForm());
 
 		// Bind type change to show/hide custom skill fields
-		modalInner.addEventListener("change", "#mod-type", function () {
+		modalInner.addEventListener("change", function (e) {
+			if (e.target.id !== "mod-type") return;
 			updateCustomSkillVisibility(modalInner.querySelector("#charsheet-modifier-form"));
 		});
 

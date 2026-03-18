@@ -1596,6 +1596,27 @@ describe("Monk Core Class Features (XPHB 2024)", () => {
 			const calculations = state.getFeatureCalculations();
 			expect(calculations.hasUncannyMetabolism).toBe(true);
 		});
+
+		it("should compute healing formula as martial arts die + monk level", () => {
+			state.addClass({name: "Monk", source: "XPHB", level: 5});
+			const calculations = state.getFeatureCalculations();
+			// Level 5 XPHB: martial arts die = 1d8, monk level = 5
+			expect(calculations.uncannyMetabolismHealing).toBe("1d8+5");
+		});
+
+		it("should be classified as passive (not an active state)", () => {
+			const result = CharacterSheetState.detectActivatableFeature({
+				name: "Uncanny Metabolism",
+				description: "When you roll Initiative, you can regain all expended Focus Points. When you do so, roll your Martial Arts die, and regain a number of Hit Points equal to your Monk level plus the number rolled. Once you use this feature, you can't use it again until you finish a Long Rest.",
+			});
+			expect(result).toBeNull();
+		});
+
+		it("should not be present for PHB monks", () => {
+			state.addClass({name: "Monk", source: "PHB", level: 5});
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasUncannyMetabolism).toBeFalsy();
+		});
 	});
 
 	// -------------------------------------------------------------------------
@@ -2312,12 +2333,14 @@ describe("Phase 3 — Monk Core Feature Fixes", () => {
 			state.addClass({name: "Monk", source: "PHB", level: 1});
 			const calc = state.getFeatureCalculations();
 			expect(calc.kiPoints).toBeUndefined();
+			expect(calc.focusPoints).toBeUndefined();
 		});
 
 		it("should NOT have ki save DC at level 1 (PHB)", () => {
 			state.addClass({name: "Monk", source: "PHB", level: 1});
 			const calc = state.getFeatureCalculations();
 			expect(calc.kiSaveDc).toBeUndefined();
+			expect(calc.focusSaveDc).toBeUndefined();
 		});
 
 		it("should NOT have focus points at level 1 (XPHB)", () => {
@@ -2336,6 +2359,7 @@ describe("Phase 3 — Monk Core Feature Fixes", () => {
 			state.addClass({name: "Monk", source: "PHB", level: 2});
 			const calc = state.getFeatureCalculations();
 			expect(calc.kiPoints).toBe(2);
+			expect(calc.focusPoints).toBeUndefined();
 		});
 
 		it("should have ki save DC at level 2 (PHB)", () => {
@@ -2343,12 +2367,14 @@ describe("Phase 3 — Monk Core Feature Fixes", () => {
 			const calc = state.getFeatureCalculations();
 			// 8 + 2 (prof) + 3 (WIS) = 13
 			expect(calc.kiSaveDc).toBe(13);
+			expect(calc.focusSaveDc).toBeUndefined();
 		});
 
 		it("should have focus points at level 2 (XPHB)", () => {
 			state.addClass({name: "Monk", source: "XPHB", level: 2});
 			const calc = state.getFeatureCalculations();
 			expect(calc.focusPoints).toBe(2);
+			expect(calc.kiPoints).toBeUndefined();
 		});
 
 		it("should have focus save DC at level 2 (XPHB)", () => {
@@ -2356,6 +2382,7 @@ describe("Phase 3 — Monk Core Feature Fixes", () => {
 			const calc = state.getFeatureCalculations();
 			// 8 + 2 (prof) + 3 (WIS) = 13
 			expect(calc.focusSaveDc).toBe(13);
+			expect(calc.kiSaveDc).toBeUndefined();
 		});
 
 		it("should NOT have focus points for TGTT monk at level 1", () => {
@@ -2425,16 +2452,38 @@ describe("Phase 3 — Monk Core Feature Fixes", () => {
 			expect(result.interactionMode).toBe("combat");
 		});
 
+		test("Patient Defense should be classified as combat", () => {
+			const result = CharacterSheetState.detectActivatableFeature({
+				name: "Patient Defense",
+				description: "You can take the Disengage action as a Bonus Action. Alternatively, you can expend 1 Focus Point to take both the Disengage and the Dodge actions as a Bonus Action.",
+			});
+			expect(result).not.toBeNull();
+			expect(result.interactionMode).toBe("combat");
+			expect(result.matchedBy).toBe("classificationOverride");
+			expect(result.isToggle).toBe(false);
+		});
+
+		test("Patient Defense should parse focus cost from description", () => {
+			const result = CharacterSheetState.detectActivatableFeature({
+				name: "Patient Defense",
+				description: "You can expend 1 Focus Point to take both the Disengage and the Dodge actions as a Bonus Action.",
+			});
+			expect(result.kiCost).toBe(1);
+			expect(result.activationAction).toBe("bonus");
+		});
+
 		test("Flurry of Blows should NOT appear in activatable features", () => {
 			state.addClass({name: "Monk", source: "XPHB", level: 5});
 			state._data.features = [
 				{id: "f1", name: "Flurry of Blows", description: "You can expend 1 Focus Point to make two Unarmed Strikes as a Bonus Action."},
 				{id: "f2", name: "Step of the Wind", description: "You can take the Dash action as a Bonus Action."},
+				{id: "f3", name: "Patient Defense", description: "You can take the Disengage action as a Bonus Action."},
 			];
 			const activatables = state.getActivatableFeatures();
 			const names = activatables.map(a => a.feature.name);
 			expect(names).not.toContain("Flurry of Blows");
 			expect(names).not.toContain("Step of the Wind");
+			expect(names).not.toContain("Patient Defense");
 		});
 	});
 
@@ -2592,5 +2641,244 @@ describe("Phase 3 — Monk Core Feature Fixes", () => {
 			const calc = state.getFeatureCalculations();
 			expect(calc.slowFallReduction).toBe(50); // 5 × 10
 		});
+	});
+
+	// -------------------------------------------------------------------------
+	// Monk Weapon Flag on Attacks
+	// -------------------------------------------------------------------------
+	describe("Monk Weapon flag on attacks", () => {
+		beforeEach(() => {
+			state.addClass({name: "Monk", source: "PHB", level: 5});
+		});
+
+		it("should set isMonkWeapon on attack generated from shortsword", () => {
+			const result = state.updateAttackFromWeapon({
+				name: "Shortsword",
+				type: "M",
+				weaponCategory: "martial",
+				property: ["F", "L"],
+				dmg1: "1d6",
+				dmgType: "piercing",
+			});
+			expect(result.isMonkWeapon).toBe(true);
+		});
+
+		it("should set isMonkWeapon on attack generated from simple melee weapon", () => {
+			const result = state.updateAttackFromWeapon({
+				name: "Quarterstaff",
+				type: "M",
+				weaponCategory: "simple",
+				property: ["V"],
+				dmg1: "1d6",
+				dmgType: "bludgeoning",
+			});
+			expect(result.isMonkWeapon).toBe(true);
+		});
+
+		it("should NOT set isMonkWeapon on attack generated from martial weapon", () => {
+			const result = state.updateAttackFromWeapon({
+				name: "Longsword",
+				type: "M",
+				weaponCategory: "martial",
+				property: ["V"],
+				dmg1: "1d8",
+				dmgType: "slashing",
+			});
+			expect(result.isMonkWeapon).toBe(false);
+		});
+
+		it("should NOT set isMonkWeapon on attack generated from heavy weapon", () => {
+			const result = state.updateAttackFromWeapon({
+				name: "Greataxe",
+				type: "M",
+				weaponCategory: "martial",
+				property: ["H", "2H"],
+				dmg1: "1d12",
+				dmgType: "slashing",
+			});
+			expect(result.isMonkWeapon).toBe(false);
+		});
+
+		it("should preserve isMonkWeapon flag when adding custom attack", () => {
+			state.addAttack({
+				id: "custom_test",
+				name: "Custom Monk Strike",
+				isMelee: true,
+				abilityMod: "finesse",
+				damage: "1d6",
+				damageType: "bludgeoning",
+				isMonkWeapon: true,
+			});
+			const attacks = state.getAttacks();
+			const custom = attacks.find(a => a.id === "custom_test");
+			expect(custom).toBeDefined();
+			expect(custom.isMonkWeapon).toBe(true);
+		});
+
+		it("should preserve isMonkWeapon=false on non-monk custom attack", () => {
+			state.addAttack({
+				id: "custom_normal",
+				name: "Custom Slash",
+				isMelee: true,
+				abilityMod: "str",
+				damage: "1d8",
+				damageType: "slashing",
+				isMonkWeapon: false,
+			});
+			const attacks = state.getAttacks();
+			const custom = attacks.find(a => a.id === "custom_normal");
+			expect(custom).toBeDefined();
+			expect(custom.isMonkWeapon).toBe(false);
+		});
+
+		it("should use DEX for monk weapon attack from shortsword", () => {
+			const result = state.updateAttackFromWeapon({
+				name: "Shortsword",
+				type: "M",
+				weaponCategory: "martial",
+				property: ["F", "L"],
+				dmg1: "1d6",
+				dmgType: "piercing",
+			});
+			// DEX (16, +3) > STR (10, +0), so should use dex
+			expect(result.abilityMod).toBe("dex");
+		});
+
+		// --- Inventory-normalized items (properties plural, type="weapon") ---
+		it("should detect monk weapon on inventory-normalized quarterstaff", () => {
+			// This matches the format from _addItem() in charactersheet-inventory.js
+			expect(state.isMonkWeapon({
+				name: "Quarterstaff",
+				type: "weapon",
+				weapon: true,
+				weaponCategory: "simple",
+				properties: ["V"],
+				damage: "1d6 bludgeoning",
+				dmg1: "1d6",
+				dmgType: "bludgeoning",
+			})).toBe(true);
+		});
+
+		it("should detect monk weapon on inventory-normalized shortsword", () => {
+			expect(state.isMonkWeapon({
+				name: "Shortsword",
+				type: "weapon",
+				weapon: true,
+				weaponCategory: "martial",
+				properties: ["F", "L"],
+			})).toBe(true);
+		});
+
+		it("should NOT detect monk weapon on inventory-normalized longsword", () => {
+			expect(state.isMonkWeapon({
+				name: "Longsword",
+				type: "weapon",
+				weapon: true,
+				weaponCategory: "martial",
+				properties: ["V"],
+			})).toBe(false);
+		});
+
+		it("should NOT detect monk weapon on inventory-normalized heavy weapon", () => {
+			expect(state.isMonkWeapon({
+				name: "Greataxe",
+				type: "weapon",
+				weapon: true,
+				weaponCategory: "martial",
+				properties: ["H", "2H"],
+			})).toBe(false);
+		});
+
+		it("should handle magic weapon with inventory format (+1 Quarterstaff)", () => {
+			expect(state.isMonkWeapon({
+				name: "Quarterstaff, +1",
+				type: "weapon",
+				weapon: true,
+				weaponCategory: "simple",
+				properties: ["V"],
+				bonusWeapon: 1,
+			})).toBe(true);
+		});
+
+		it("should parse damage from formatted string in updateAttackFromWeapon", () => {
+			// Inventory items have damage as "1d6 bludgeoning" not separate dmg1/dmgType
+			const result = state.updateAttackFromWeapon({
+				name: "Quarterstaff",
+				type: "weapon",
+				weapon: true,
+				weaponCategory: "simple",
+				properties: ["V"],
+				damage: "1d6 bludgeoning",
+			});
+			expect(result.isMonkWeapon).toBe(true);
+			expect(result.damage).toContain("1d6");
+		});
+	});
+});
+
+// ==========================================================================
+// PART 7: Ki/Focus Point Backing Store Sync
+// ==========================================================================
+describe("Ki/Focus Point Sync via updateClassResources", () => {
+	const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+
+	let state;
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		state.setRace({name: "Human", source: "PHB"});
+	});
+
+	test("updateClassResources should sync ki max to backing store for PHB monk", () => {
+		state.addClass({name: "Monk", source: "PHB", level: 5});
+		const classEntry = state.getClasses()[0];
+		const classData = {name: "Monk", source: "PHB"};
+		CharacterSheetClassUtils.updateClassResources(state, classEntry, 5, classData);
+
+		expect(state.getKiPoints()).toBe(5);
+		expect(state.getKiPointsCurrent()).toBe(5);
+	});
+
+	test("updateClassResources should sync focus max to backing store for XPHB monk", () => {
+		state.addClass({name: "Monk", source: "XPHB", level: 3});
+		const classEntry = state.getClasses()[0];
+		const classData = {name: "Monk", source: "XPHB"};
+		CharacterSheetClassUtils.updateClassResources(state, classEntry, 3, classData);
+
+		expect(state.getKiPoints()).toBe(3);
+		expect(state.getKiPointsCurrent()).toBe(3);
+	});
+
+	test("useKiPoint should succeed after updateClassResources syncs ki", () => {
+		state.addClass({name: "Monk", source: "XPHB", level: 5});
+		const classEntry = state.getClasses()[0];
+		const classData = {name: "Monk", source: "XPHB"};
+		CharacterSheetClassUtils.updateClassResources(state, classEntry, 5, classData);
+
+		// Should have 5 focus/ki points
+		expect(state.getKiPoints()).toBe(5);
+		expect(state.useKiPoint(1)).toBe(true);
+		expect(state.getKiPointsCurrent()).toBe(4);
+	});
+
+	test("useKiPoint should fail when no ki sync has occurred", () => {
+		state.addClass({name: "Monk", source: "XPHB", level: 5});
+		// Without calling updateClassResources, ki store is uninitialized
+		expect(state.useKiPoint(1)).toBe(false);
+	});
+
+	test("level up should add difference to current ki", () => {
+		state.addClass({name: "Monk", source: "XPHB", level: 3});
+		const classEntry = state.getClasses()[0];
+		const classData = {name: "Monk", source: "XPHB"};
+		CharacterSheetClassUtils.updateClassResources(state, classEntry, 3, classData);
+
+		// Spend 1 point
+		state.useKiPoint(1);
+		expect(state.getKiPointsCurrent()).toBe(2);
+
+		// Level up to 4 — adds 1 to current
+		CharacterSheetClassUtils.updateClassResources(state, classEntry, 4, classData);
+		expect(state.getKiPoints()).toBe(4);
+		expect(state.getKiPointsCurrent()).toBe(3);
 	});
 });

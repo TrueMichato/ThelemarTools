@@ -3417,7 +3417,7 @@ class CharacterSheetBuilder {
 			const traits = e_({outer: `<div class="mt-2"><strong>Traits:</strong></div>`});
 			race.entries.forEach(entry => {
 				if (typeof entry === "object" && entry.name) {
-					traits.append(e_({outer: `<p><em>${entry.name}.</em> ${Renderer.get().render({entries: entry.entries || []})}</p>`}));
+					traits.append(e_({outer: `<div class="mb-1"><em>${entry.name}.</em> ${Renderer.get().render({entries: entry.entries || []})}</div>`}));
 				}
 			});
 			content.append(traits);
@@ -6317,6 +6317,7 @@ class CharacterSheetBuilder {
 
 	_updateAbilitySummary () {
 		const summary = document.getElementById("builder-abilities-summary");
+		if (!summary) return;
 		summary.innerHTML = "";
 
 		let allAssigned = true;
@@ -6327,7 +6328,7 @@ class CharacterSheetBuilder {
 			// Handle unassigned scores (null in standard array mode)
 			if (base == null) {
 				allAssigned = false;
-				summary.append(`
+				summary.insertAdjacentHTML("beforeend", `
 					<div class="ve-flex-v-center">
 						<strong class="mr-2" style="width: 80px;">${Parser.attAbvToFull(abl)}:</strong>
 						<span class="ve-muted">—${racial ? ` (+${racial})` : ""}</span>
@@ -6339,7 +6340,7 @@ class CharacterSheetBuilder {
 			const total = base + racial;
 			const mod = Math.floor((total - 10) / 2);
 
-			summary.append(`
+			summary.insertAdjacentHTML("beforeend", `
 				<div class="ve-flex-v-center">
 					<strong class="mr-2" style="width: 80px;">${Parser.attAbvToFull(abl)}:</strong>
 					<span>${total} (${mod >= 0 ? "+" : ""}${mod})</span>
@@ -6570,28 +6571,19 @@ class CharacterSheetBuilder {
 		};
 
 		const langSelectEl = document.getElementById("custom-bg-lang1");
+		const addCustomBgLangOptgroup = (selectEl, label, langs, valueFn, selectedFn) => {
+			const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
+			langs.forEach(lang => grp.append(e_({outer: `<option value="${valueFn(lang)}" ${selectedFn(lang) ? "selected" : ""}>${lang}</option>`})));
+			selectEl.append(grp);
+		};
+		const langSelectedFn = lang => this._customBackgroundData.languages[0] === lang;
+		const langValueFn = lang => lang;
 		if (langOptions.homebrew.length) {
-			langSelectEl.append(e_({outer: `<optgroup label="──── Homebrew Languages ────">`}));
-			langOptions.homebrew.forEach(lang => {
-				langSelectEl.append(e_({outer: `<option value="${lang}" ${this._customBackgroundData.languages[0] === lang ? "selected" : ""}>${lang}</option>`}));
-			});
-			langSelectEl.append(e_({outer: `</optgroup>`}));
+			addCustomBgLangOptgroup(langSelectEl, "──── Homebrew Languages ────", langOptions.homebrew, langValueFn, langSelectedFn);
 		}
-		langSelectEl.append(e_({outer: `<optgroup label="──── Standard Languages ────">`}));
-		langOptions.standard.forEach(lang => {
-			langSelectEl.append(e_({outer: `<option value="${lang}" ${this._customBackgroundData.languages[0] === lang ? "selected" : ""}>${lang}</option>`}));
-		});
-		langSelectEl.append(e_({outer: `</optgroup>`}));
-		langSelectEl.append(e_({outer: `<optgroup label="──── Exotic/Rare Languages ────">`}));
-		langOptions.exotic.forEach(lang => {
-			langSelectEl.append(e_({outer: `<option value="${lang}" ${this._customBackgroundData.languages[0] === lang ? "selected" : ""}>${lang}</option>`}));
-		});
-		langSelectEl.append(e_({outer: `</optgroup>`}));
-		langSelectEl.append(e_({outer: `<optgroup label="──── Secret Languages ────">`}));
-		langOptions.secret.forEach(lang => {
-			langSelectEl.append(e_({outer: `<option value="${lang}" ${this._customBackgroundData.languages[0] === lang ? "selected" : ""}>${lang}</option>`}));
-		});
-		langSelectEl.append(e_({outer: `</optgroup>`}));
+		addCustomBgLangOptgroup(langSelectEl, "──── Standard Languages ────", langOptions.standard, langValueFn, langSelectedFn);
+		addCustomBgLangOptgroup(langSelectEl, "──── Exotic/Rare Languages ────", langOptions.exotic, langValueFn, langSelectedFn);
+		addCustomBgLangOptgroup(langSelectEl, "──── Secret Languages ────", langOptions.secret, langValueFn, langSelectedFn);
 
 		// Populate extra dropdown (combined tools and languages)
 		const extraToolsGroup = document.getElementById("custom-bg-extra-tools");
@@ -6600,28 +6592,17 @@ class CharacterSheetBuilder {
 			extraToolsGroup.append(e_({outer: `<option value="tool:${tool}">${tool}</option>`}));
 		});
 		// Add grouped languages to extra dropdown
+		const addExtraLangOptgroup = (label, langs) => {
+			const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
+			langs.forEach(lang => grp.append(e_({outer: `<option value="lang:${lang}">${lang}</option>`})));
+			extraLangsGroup.append(grp);
+		};
 		if (langOptions.homebrew.length) {
-			extraLangsGroup.append(e_({outer: `<optgroup label="Homebrew">`}));
-			langOptions.homebrew.forEach(lang => {
-				extraLangsGroup.append(e_({outer: `<option value="lang:${lang}">${lang}</option>`}));
-			});
-			extraLangsGroup.append(e_({outer: `</optgroup>`}));
+			addExtraLangOptgroup("Homebrew", langOptions.homebrew);
 		}
-		extraLangsGroup.append(e_({outer: `<optgroup label="Standard">`}));
-		langOptions.standard.forEach(lang => {
-			extraLangsGroup.append(e_({outer: `<option value="lang:${lang}">${lang}</option>`}));
-		});
-		extraLangsGroup.append(e_({outer: `</optgroup>`}));
-		extraLangsGroup.append(e_({outer: `<optgroup label="Exotic/Rare">`}));
-		langOptions.exotic.forEach(lang => {
-			extraLangsGroup.append(e_({outer: `<option value="lang:${lang}">${lang}</option>`}));
-		});
-		extraLangsGroup.append(e_({outer: `</optgroup>`}));
-		extraLangsGroup.append(e_({outer: `<optgroup label="Secret">`}));
-		langOptions.secret.forEach(lang => {
-			extraLangsGroup.append(e_({outer: `<option value="lang:${lang}">${lang}</option>`}));
-		});
-		extraLangsGroup.append(e_({outer: `</optgroup>`}));
+		addExtraLangOptgroup("Standard", langOptions.standard);
+		addExtraLangOptgroup("Exotic/Rare", langOptions.exotic);
+		addExtraLangOptgroup("Secret", langOptions.secret);
 
 		// Event handlers
 		document.getElementById("custom-bg-name").addEventListener("input", (e) => {
@@ -6827,7 +6808,7 @@ class CharacterSheetBuilder {
 		if (this._selectedRace) {
 			if (!raceIs2024 && bgIs2024) {
 				// 2014 race + 2024 background: warn that ASI from background shouldn't apply
-				content.append(`
+				content.insertAdjacentHTML("beforeend", `
 					<div class="alert alert-warning ve-small mb-2">
 						<strong>Edition Mixing:</strong> You've selected a 2014 race that provides its own ability score bonuses. 
 						The ASI options from this 2024 background will be ignored. Consider using a 2014 background instead.
@@ -6835,7 +6816,7 @@ class CharacterSheetBuilder {
 				`);
 			} else if (raceIs2024 && !bgHasASI && !bgIs2024) {
 				// 2024 species + 2014 background (no ASI): offer free ASI choice
-				content.append(`
+				content.insertAdjacentHTML("beforeend", `
 					<div class="alert alert-info ve-small mb-2">
 						<strong>Note:</strong> You've selected a 2024 species that expects ability score bonuses from your background. 
 						Since this is a 2014 background without ASI, you can choose +2 to one ability and +1 to another below.
@@ -6889,7 +6870,7 @@ class CharacterSheetBuilder {
 
 		// Equipment
 		if (bg.startingEquipment) {
-			content.append(e_({outer: `<p><strong>Equipment:</strong> ${Renderer.get().render({entries: bg.startingEquipment})}</p>`}));
+			content.append(e_({outer: `<div class="mb-1"><strong>Equipment:</strong> ${Renderer.get().render({entries: bg.startingEquipment})}</div>`}));
 		}
 
 		// Features
@@ -6897,7 +6878,7 @@ class CharacterSheetBuilder {
 			const features = e_({outer: `<div class="mt-2"></div>`});
 			bg.entries.forEach(entry => {
 				if (typeof entry === "object" && entry.name) {
-					features.append(e_({outer: `<p><strong>${entry.name}.</strong> ${Renderer.get().render({entries: entry.entries || []})}</p>`}));
+					features.append(e_({outer: `<div class="mb-1"><strong>${entry.name}.</strong> ${Renderer.get().render({entries: entry.entries || []})}</div>`}));
 				}
 			});
 			content.append(features);
@@ -7255,32 +7236,21 @@ class CharacterSheetBuilder {
 				`});
 
 				// Add language options grouped by type - homebrew first if available
+				const addLangOptgroup = (label, langs) => {
+					const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
+					langs.forEach(lang => grp.append(e_({outer: `<option value="${lang}">${lang}</option>`})));
+					selectEl.append(grp);
+				};
+
 				if (langOptions.homebrew.length) {
-					selectEl.append(e_({outer: `<optgroup label="──── Homebrew Languages ────">`}));
-					langOptions.homebrew.forEach(lang => {
-						selectEl.append(e_({outer: `<option value="${lang}">${lang}</option>`}));
-					});
-					selectEl.append(e_({outer: `</optgroup>`}));
+					addLangOptgroup("──── Homebrew Languages ────", langOptions.homebrew);
 				}
 
-				selectEl.append(e_({outer: `<optgroup label="──── Standard Languages ────">`}));
-				langOptions.standard.forEach(lang => {
-					selectEl.append(e_({outer: `<option value="${lang}">${lang}</option>`}));
-				});
-				selectEl.append(e_({outer: `</optgroup>`}));
+				addLangOptgroup("──── Standard Languages ────", langOptions.standard);
 
 				if (allowAllLanguages) {
-					selectEl.append(e_({outer: `<optgroup label="──── Exotic/Rare Languages ────">`}));
-					langOptions.exotic.forEach(lang => {
-						selectEl.append(e_({outer: `<option value="${lang}">${lang}</option>`}));
-					});
-					selectEl.append(e_({outer: `</optgroup>`}));
-
-					selectEl.append(e_({outer: `<optgroup label="──── Secret Languages ────">`}));
-					langOptions.secret.forEach(lang => {
-						selectEl.append(e_({outer: `<option value="${lang}">${lang}</option>`}));
-					});
-					selectEl.append(e_({outer: `</optgroup>`}));
+					addLangOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
+					addLangOptgroup("──── Secret Languages ────", langOptions.secret);
 				}
 
 				const existingChoice = this._selectedLanguages.find(l => l.selectIdx === i);

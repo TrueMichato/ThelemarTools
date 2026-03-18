@@ -6053,6 +6053,9 @@ class CharacterSheetState {
 			if (armorPenalty !== 0) components.push({type: "penalty", name: "Armor STR Penalty", value: armorPenalty, icon: "⚠️"});
 		}
 
+		const adeptSpeedBonus = this.getAdeptSpeedBonus();
+		if (adeptSpeedBonus !== 0) components.push({type: "feature", name: "Adept Speed", value: adeptSpeedBonus, icon: "💨"});
+
 		const itemSpeedBonus = this._data.itemBonuses?.speedBonus || {};
 		const typeItemBonus = (itemSpeedBonus[type] || 0) + (itemSpeedBonus["*"] || 0);
 		if (typeItemBonus !== 0) components.push({type: "item", name: "Magic Items", value: typeItemBonus, icon: "💎"});
@@ -6362,6 +6365,13 @@ class CharacterSheetState {
 		return level >= 18 ? 30 : level >= 14 ? 25 : level >= 10 ? 20 : level >= 6 ? 15 : 10;
 	}
 
+	getAdeptSpeedBonus () {
+		const adeptSpeedFeatures = this._data.features?.filter(f =>
+			f.name === "Adept Speed" && f.className === "Monk" && f.source === "TGTT",
+		) || [];
+		return adeptSpeedFeatures.length * 10;
+	}
+
 	getSpeed (type) {
 		// If a type is specified, return just that speed value as a number
 		if (type) {
@@ -6381,7 +6391,8 @@ class CharacterSheetState {
 		const speedMods = this._data.customModifiers.speed || {walk: 0, fly: 0, swim: 0, climb: 0, burrow: 0};
 		const stateBonus = this.getSpeedBonusFromStates();
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
-		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
+		const adeptSpeedBonus = this.getAdeptSpeedBonus();
+		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
 		const walkMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
 		const exhaustionSpeedPenalty = this._getExhaustionSpeedPenalty();
 		const walk = Math.max(0, Math.floor(rawWalk * walkMultiplier * speedMultiplier) - exhaustionSpeedPenalty);
@@ -6430,10 +6441,10 @@ class CharacterSheetState {
 		// Compute each movement type with per-type multipliers
 		const getTypeMultiplier = (speedType) => (itemSpeedMultiply[speedType] || 1) * (itemSpeedMultiply["*"] || 1);
 
-		const fly = effectiveFly > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("fly", effectiveFly, (speedMods.fly || 0) + this.getSpeedBonusFromStates("fly") + (itemSpeedBonus.fly || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("fly") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const swim = effectiveSwim > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("swim", effectiveSwim, (speedMods.swim || 0) + this.getSpeedBonusFromStates("swim") + (itemSpeedBonus.swim || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("swim") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const climb = effectiveClimb > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("climb", effectiveClimb, (speedMods.climb || 0) + this.getSpeedBonusFromStates("climb") + (itemSpeedBonus.climb || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("climb") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const burrow = effectiveBurrow > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("burrow", effectiveBurrow, (speedMods.burrow || 0) + this.getSpeedBonusFromStates("burrow") + (itemSpeedBonus.burrow || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("burrow") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const fly = effectiveFly > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("fly", effectiveFly, (speedMods.fly || 0) + this.getSpeedBonusFromStates("fly") + adeptSpeedBonus + (itemSpeedBonus.fly || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("fly") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const swim = effectiveSwim > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("swim", effectiveSwim, (speedMods.swim || 0) + this.getSpeedBonusFromStates("swim") + adeptSpeedBonus + (itemSpeedBonus.swim || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("swim") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const climb = effectiveClimb > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("climb", effectiveClimb, (speedMods.climb || 0) + this.getSpeedBonusFromStates("climb") + adeptSpeedBonus + (itemSpeedBonus.climb || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("climb") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const burrow = effectiveBurrow > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("burrow", effectiveBurrow, (speedMods.burrow || 0) + this.getSpeedBonusFromStates("burrow") + adeptSpeedBonus + (itemSpeedBonus.burrow || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("burrow") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
 
 		if (fly > 0) parts.push(`fly ${fly} ft.`);
 		if (swim > 0) parts.push(`swim ${swim} ft.`);
@@ -6451,8 +6462,9 @@ class CharacterSheetState {
 		const speedMods = this._data.customModifiers.speed || {walk: 0};
 		const stateBonus = this.getSpeedBonusFromStates();
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
+		const adeptSpeedBonus = this.getAdeptSpeedBonus();
 		const armorPenalty = this.getArmorStrengthPenalty(); // -10 if STR requirement not met
-		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + armorPenalty;
+		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + armorPenalty;
 		return Math.max(0, Math.floor(raw * this.getSpeedMultiplierFromConditions()) - this._getExhaustionSpeedPenalty());
 	}
 
@@ -6475,7 +6487,7 @@ class CharacterSheetState {
 			base = Math.max(base, equalToSpeed);
 		}
 
-		const bonus = (speedMods[type] || 0) + this.getSpeedBonusFromStates(type) + (itemSpeedBonus[type] || 0) + (itemSpeedBonus["*"] || 0);
+		const bonus = (speedMods[type] || 0) + this.getSpeedBonusFromStates(type) + this.getAdeptSpeedBonus() + (itemSpeedBonus[type] || 0) + (itemSpeedBonus["*"] || 0);
 
 		// Check for "equal to walk" modifiers (e.g., "swimming speed equal to your walking speed")
 		const equalToWalkMod = this._data.namedModifiers?.find(m =>
@@ -8703,11 +8715,16 @@ class CharacterSheetState {
 					const kiDc = 8 + profBonus + this.getAbilityMod("wis") + kiItemBonus - exhaustionPenalty;
 
 					// Ki/Focus points = monk level (available at level 2+)
+					// PHB (2014) uses "Ki Points" / "Ki Save DC"
+					// XPHB/TGTT (2024) uses "Focus Points" / "Focus Save DC"
 					if (level >= 2) {
-						calculations.kiPoints = level;
-						calculations.focusPoints = level; // XPHB name
-						calculations.kiSaveDc = kiDc;
-						calculations.focusSaveDc = kiDc; // 2024 PHB name
+						if (is2024) {
+							calculations.focusPoints = level;
+							calculations.focusSaveDc = kiDc;
+						} else {
+							calculations.kiPoints = level;
+							calculations.kiSaveDc = kiDc;
+						}
 					}
 
 					// Martial Arts die progression
@@ -8863,9 +8880,10 @@ class CharacterSheetState {
 						calculations.bodyAndMindMaxScore = 25;
 					}
 
-					// Uncanny Metabolism (XPHB level 2) - regain ki on short rest roll
+					// Uncanny Metabolism (XPHB level 2) - on initiative roll, regain all focus points + heal
 					if (is2024 && level >= 2) {
 						calculations.hasUncannyMetabolism = true;
+						calculations.uncannyMetabolismHealing = `${martialArtsDice}+${level}`;
 					}
 
 					// =========================================================
@@ -19143,8 +19161,11 @@ class CharacterSheetState {
 
 	updateAttackFromWeapon (item) {
 		// Calculate attack bonus and damage for a weapon
-		const isFinesse = item.property?.includes("F");
-		const isRanged = item.type === "R" || item.property?.includes("T");
+		// Handle both raw 5etools items (property) and normalized inventory items (properties)
+		const props = item.property || item.properties || [];
+		const isFinesse = props.some(p => p === "F" || p.startsWith("F|"));
+		const rawType = (item.type || "").split("|")[0];
+		const isRanged = rawType === "R" || props.some(p => p === "T" || p.startsWith("T|") || p === "A" || p.startsWith("A|")) || (item.isMelee === false);
 		const isMonkWeapon = this.isMonkWeapon?.(item) || item.isMonkWeapon;
 
 		let abilityUsed;
@@ -19160,18 +19181,22 @@ class CharacterSheetState {
 		const profBonus = this._isWeaponProficient(item) ? this.getProficiencyBonus() : 0;
 		const attackBonus = abilityMod + profBonus + (this._data.customModifiers.attackBonus || 0);
 
-		const damageDie = item.dmg1 || "1d4";
+		const damageDie = item.dmg1 || (item.damage ? item.damage.split(" ")[0] : null) || "1d4";
 		const damageBonus = abilityMod + (this._data.customModifiers.damageBonus || 0);
 		const damage = `${damageDie}${damageBonus >= 0 ? "+" : ""}${damageBonus}`;
+
+		const dmgTypeFull = item.dmgType
+			? (typeof Parser !== "undefined" && Parser.dmgTypeToFull ? Parser.dmgTypeToFull(item.dmgType) : item.dmgType)
+			: null;
 
 		return {
 			name: item.name,
 			abilityMod: abilityUsed,
 			attackBonus,
 			damage,
-			damageType: item.dmgType || "bludgeoning",
+			damageType: dmgTypeFull || item.damageType || "bludgeoning",
 			range: item.range || (isRanged ? "80/320 ft." : "5 ft."),
-			properties: item.property || [],
+			properties: props,
 			isMonkWeapon: !!isMonkWeapon,
 		};
 	}
@@ -19179,14 +19204,17 @@ class CharacterSheetState {
 	isMonkWeapon (item) {
 		const monkLevel = this.getClassLevel("Monk") || 0;
 		if (!monkLevel || !item) return false;
-		// Shortsword or simple melee weapon without heavy/two-handed/special
-		const props = item.property || [];
+		// Handle both raw 5etools items (property) and normalized inventory items (properties)
+		const props = item.property || item.properties || [];
 		const hasHeavy = props.some(p => p === "H" || p.startsWith("H|"));
 		const hasTwoHanded = props.some(p => p === "2H" || p.startsWith("2H|"));
 		const hasSpecial = props.some(p => p === "S" || p.startsWith("S|"));
 		// Strip source suffix from type (e.g. "M|XPHB" → "M")
+		// Inventory items have type="weapon", so also check weapon flag + isMelee
 		const itemType = (item.type || "").split("|")[0];
-		const isSimpleMelee = item.weaponCategory === "simple" && (itemType === "M" || itemType === "MW");
+		const isRawMelee = itemType === "M" || itemType === "MW";
+		const isInventoryMelee = item.weapon && (item.isMelee !== false);
+		const isSimpleMelee = item.weaponCategory === "simple" && (isRawMelee || isInventoryMelee);
 		const isShortsword = (item.name || "").toLowerCase() === "shortsword";
 		return (isShortsword || isSimpleMelee) && !(hasHeavy || hasTwoHanded || hasSpecial);
 	}
@@ -20310,6 +20338,12 @@ class CharacterSheetState {
 				const speedType = mod.type.split(":")[1];
 				this.setSpeed(speedType, mod.value);
 				return; // Don't create a named modifier for racial base speed
+			}
+
+			// Adept Speed (TGTT Monk): all-speeds bonus handled by getAdeptSpeedBonus()
+			// Skip creating the walk-only named modifier to avoid double-counting
+			if (feature.name === "Adept Speed" && mod.type.startsWith("speed:")) {
+				return;
 			}
 
 			// Special handling: Speed equal to walking speed (e.g., "swimming speed equal to your walking speed")
@@ -27254,6 +27288,7 @@ class CharacterSheetState {
 		"warrior's awareness": "passive",
 		"water walk": "passive",
 		"focus speech": "passive",
+		"uncanny metabolism": "passive",
 
 		// === Combat actions wrongly detected as activatable toggle states ===
 		"hand of healing": "combat",
@@ -27268,6 +27303,7 @@ class CharacterSheetState {
 		"whirlwind strike": "combat",
 		"wind strike": "combat",
 		"flurry of blows": "combat",
+		"patient defense": "combat",
 		"step of the wind": "combat",
 		"slow fall": "combat",
 
@@ -28671,6 +28707,15 @@ class CharacterSheetState {
 				);
 				if (kiResource) {
 					resource = {...kiResource, cost: activationInfo.kiCost};
+				}
+			}
+			// Check for Focus Point cost (2024 XPHB/TGTT monks use "Focus Points" instead of "Ki Points")
+			else if (activationInfo.focusPointCost) {
+				const focusResource = resources.find(r =>
+					r.name.toLowerCase().includes("focus") || r.name.toLowerCase().includes("ki"),
+				);
+				if (focusResource) {
+					resource = {...focusResource, cost: activationInfo.focusPointCost};
 				}
 			}
 			// Check for Sorcery Point cost

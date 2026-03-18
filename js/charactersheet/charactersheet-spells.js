@@ -1370,7 +1370,7 @@ class CharacterSheetSpells {
 	}
 
 	async _showSpellInfoFromData (spell) {
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: spell.name,
 			isMinHeight0: true,
 			zIndex: 10002, // Above Quick Build overlay (9999) and toasts (10001)
@@ -1403,10 +1403,10 @@ class CharacterSheetSpells {
 					<div><strong>Duration:</strong> ${this._getDuration(spell)}</div>
 				</div>
 				<hr>
-				<div class="rd__b">${Renderer.render({entries: spell.entries || []})}</div>
+				<div class="rd__b">${Renderer.get().render({entries: spell.entries || []})}</div>
 				${spell.entriesHigherLevel ? `
 					<hr>
-					<div class="rd__b"><strong>At Higher Levels.</strong> ${Renderer.render({entries: spell.entriesHigherLevel})}</div>
+					<div class="rd__b"><strong>At Higher Levels.</strong> ${Renderer.get().render({entries: spell.entriesHigherLevel})}</div>
 				` : ""}
 			</div>
 		`});
@@ -2270,7 +2270,7 @@ class CharacterSheetSpells {
 		const table = CharacterSheetState.GAMBLER_GAMBLING_TABLE;
 		if (!table || !table.length) return;
 
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: "🎰 Gambling Table",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -2664,7 +2664,7 @@ class CharacterSheetSpells {
 			return a.name.localeCompare(b.name);
 		});
 
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: `✨ ${spell.name} - Choose Creature`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -2673,7 +2673,7 @@ class CharacterSheetSpells {
 		const typeLabel = types.join("/");
 		const crLabel = maxCR === 0.25 ? "¼" : maxCR === 0.5 ? "½" : maxCR;
 
-		modalInner.append(`
+		modalInner.insertAdjacentHTML("beforeend", `
 			<div class="charsheet__conjure-picker-header mb-3" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1)); border-radius: 8px; padding: 12px;">
 				<div class="ve-flex ve-flex-v-center" style="gap: 10px;">
 					<span style="font-size: 2em;">✨</span>
@@ -2962,13 +2962,13 @@ class CharacterSheetSpells {
 			? "Select a form for your Fey familiar. Cost: 1 Wild Shape use or spell slot."
 			: "Select a beast to serve you. Your familiar appears within 10 feet.";
 
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: modalTitle,
 			isMinHeight0: true,
 			isWidth100: true,
 		});
 
-		modalInner.append(`
+		modalInner.insertAdjacentHTML("beforeend", `
 			<div class="charsheet__familiar-picker-header mb-3" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.1)); border-radius: 8px; padding: 12px;">
 				<div class="ve-flex ve-flex-v-center" style="gap: 10px;">
 					<span style="font-size: 2em;">${headerEmoji}</span>
@@ -3791,14 +3791,14 @@ class CharacterSheetSpells {
 		if (!spellData) return;
 
 		// Show spell details using UiUtil modal
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: spellData.name,
 			isMinHeight0: true,
 		});
 
-		const content = Renderer.render({type: "entries", entries: spellData.entries || []});
+		const content = Renderer.get().render({type: "entries", entries: spellData.entries || []});
 		const higherLevel = spellData.entriesHigherLevel
-			? `<p><strong>At Higher Levels.</strong> ${Renderer.render({type: "entries", entries: spellData.entriesHigherLevel})}</p>`
+			? `<p><strong>At Higher Levels.</strong> ${Renderer.get().render({type: "entries", entries: spellData.entriesHigherLevel})}</p>`
 			: "";
 
 		modalInner.insertAdjacentHTML("beforeend", `<div class="rd__b">${content}${higherLevel}</div>`);
@@ -4408,7 +4408,7 @@ class CharacterSheetSpells {
 	 */
 	_renderMulticlassStatusBar (statusBar, info, manualLeveledSpells, preparedSpells) {
 		// Add a multiclass indicator
-		statusBar.append(`
+		statusBar.insertAdjacentHTML("beforeend", `
 			<div style="display: flex; align-items: center; gap: 6px; padding-right: 8px; border-right: 1px solid rgba(var(--rgb-bg-text), 0.2);">
 				<span class="ve-muted ve-small">⚔️ Multiclass</span>
 			</div>
@@ -4423,7 +4423,7 @@ class CharacterSheetSpells {
 				// Note: In a real implementation, we'd need to track which spells belong to which class
 				// For now, show the limit per class
 				const icon = "📖 ";
-				statusBar.append(`
+				statusBar.insertAdjacentHTML("beforeend", `
 					<div style="display: flex; align-items: center; gap: 4px;" title="${classInfo.className}: Spells known are permanent. Can swap 1 on level up.">
 						<span style="color: #60a5fa;">${icon}${classInfo.className}:</span>
 						<span class="ve-muted ve-small">max ${maxKnown} known</span>
@@ -4433,7 +4433,7 @@ class CharacterSheetSpells {
 				const maxPrepared = classInfo.preparedMax || classInfo.max;
 				const icon = classInfo.is2024 ? "✨ " : "📚 ";
 				const color = classInfo.is2024 ? "#fbbf24" : "#a78bfa";
-				statusBar.append(`
+				statusBar.insertAdjacentHTML("beforeend", `
 					<div style="display: flex; align-items: center; gap: 4px;" title="${classInfo.className}: Can prepare from full class spell list after long rest.">
 						<span style="color: ${color};">${icon}${classInfo.className}:</span>
 						<span class="ve-muted ve-small">max ${maxPrepared} prepared</span>
@@ -4447,7 +4447,7 @@ class CharacterSheetSpells {
 		const totalPrepared = preparedSpells.length;
 		const totalMax = info.max;
 
-		statusBar.append(`
+		statusBar.insertAdjacentHTML("beforeend", `
 			<div style="display: flex; align-items: center; gap: 6px; padding-left: 8px; border-left: 1px solid rgba(var(--rgb-bg-text), 0.2);">
 				<span class="ve-muted">Total:</span>
 				<span class="bold">${totalManual} spells</span>
@@ -4917,7 +4917,7 @@ class CharacterSheetSpells {
 		});
 
 		// Build modal content
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: `Gambler: Select Prepared Spells (${maxPrepared} max)`,
 			isWidth100: true,
 			isHeight100: true,
@@ -5234,7 +5234,7 @@ class CharacterSheetSpells {
 			...this._state.getInnateSpells().map(s => `${s.name}|${s.source}`),
 		];
 
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: `Choose Spell: ${choice.featureName}`,
 			isMinHeight0: true,
 			zIndex: 10002, // Above QuickBuild/LevelUp modals
@@ -5269,7 +5269,7 @@ class CharacterSheetSpells {
 				const school = Parser.spSchoolAbvToFull(spell.school);
 
 				// Render spell name with hover capability
-				const spellNameRendered = Renderer.render(`{@spell ${spell.name}|${spell.source}}`);
+				const spellNameRendered = Renderer.get().render(`{@spell ${spell.name}|${spell.source}}`);
 
 				const item = e_({outer: `
 					<div class="ve-flex-v-center p-2 clickable spell-choice-item ${isKnown ? "ve-muted" : ""}" 
@@ -5317,7 +5317,7 @@ class CharacterSheetSpells {
 	 * Show spell info in a modal
 	 */
 	async _showSpellInfoModal (spell) {
-		const {modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: spell.name,
 			isMinHeight0: true,
 			zIndex: 10003, // Above spell picker modal (10002)
@@ -5368,7 +5368,7 @@ class CharacterSheetSpells {
 
 		// Spell description
 		if (spell.entries) {
-			modalInner.insertAdjacentHTML("beforeend", `<div class="rd__b">${Renderer.render({type: "entries", entries: spell.entries})}</div>`);
+			modalInner.insertAdjacentHTML("beforeend", `<div class="rd__b">${Renderer.get().render({type: "entries", entries: spell.entries})}</div>`);
 		}
 
 		{ const _cl = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">

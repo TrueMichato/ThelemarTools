@@ -125,6 +125,8 @@ class CharacterSheetLevelUp {
 		let languageGrants = CharacterSheetClassUtils.getLanguageGrantsForLevel(currentFeatures);
 		let selectedScholarSkill = null;
 		let selectedSpellbookSpells = [];
+		// Subclass-granted combat traditions (pre-seeded during subclass selection)
+		let subclassGrantedTraditionCodes = [];
 
 		// ========== DETERMINE WHAT SECTIONS ARE NEEDED ==========
 		const thelemar_asiFeat = this._state.getSettings()?.thelemar_asiFeat || false;
@@ -428,6 +430,75 @@ class CharacterSheetLevelUp {
 				expertiseGrants = CharacterSheetClassUtils.getExpertiseGrantsForLevel(currentFeatures);
 				languageGrants = CharacterSheetClassUtils.getLanguageGrantsForLevel(currentFeatures);
 
+				// Detect subclass-granted combat traditions (e.g. Mercy → Sanguine Knot)
+				const grantedTraditions = CharacterSheetClassUtils.getSubclassGrantedTraditions(subclass, classEntry.source);
+				// Only pre-seed fixed traditions (skip choice-based ones without a code)
+				subclassGrantedTraditionCodes = grantedTraditions
+					.filter(t => t.code && !t.choice)
+					.map(t => t.code);
+				if (subclassGrantedTraditionCodes.length > 0) {
+					// Pre-seed traditions in selectedCombatTraditions
+					const existing = selectedCombatTraditions || [];
+					const merged = [...new Set([...existing, ...subclassGrantedTraditionCodes])];
+					selectedCombatTraditions = merged;
+				}
+
+				// Augment optionalFeatureGains with bonus methods from the subclass
+				const bonusMethodCount = CharacterSheetClassUtils.getSubclassBonusMethodCount(subclass, classEntry.source);
+				if (bonusMethodCount > 0) {
+					const ctmGainIdx = optionalFeatureGains.findIndex(g => g.featureTypes?.some(ft => ft.startsWith("CTM:")));
+					if (ctmGainIdx >= 0) {
+						// Existing combat methods gain — add the bonus
+						optionalFeatureGains[ctmGainIdx] = {
+							...optionalFeatureGains[ctmGainIdx],
+							newCount: optionalFeatureGains[ctmGainIdx].newCount + bonusMethodCount,
+							totalCount: optionalFeatureGains[ctmGainIdx].totalCount + bonusMethodCount,
+							_subclassBonus: bonusMethodCount,
+						};
+					} else {
+						// No base gain at this level — create one for the subclass bonus
+						const ctmProg = classData.optionalfeatureProgression?.find(
+							p => p.featureType?.some(ft => ft.startsWith("CTM:")),
+						);
+						if (ctmProg) {
+							optionalFeatureGains.push({
+								featureTypes: ctmProg.featureType,
+								name: ctmProg.name || "Combat Methods",
+								currentCount: 0,
+								totalCount: bonusMethodCount,
+								newCount: bonusMethodCount,
+								required: false,
+								_subclassBonus: bonusMethodCount,
+							});
+						}
+					}
+				}
+
+				// Re-render optional features section if it exists, or create it
+				// dynamically if subclass grants bonus methods
+				if (optionalFeatureGains.length > 0) {
+					selectedOptionalFeatures = {};
+					if (accordions.optfeatures) {
+						// Re-render existing accordion body
+						const body = accordions.optfeatures.el.querySelector(".charsheet__levelup-accordion-body");
+						body.innerHTML = "";
+						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes});
+						body.append(optContent);
+					} else {
+						// Create the accordion dynamically (wasn't needed before subclass selection)
+						summaryItems.append(createSummaryItem("optfeatures", "✨", "Class Options", {required: true}));
+						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes});
+						// Insert after subclass accordion
+						const subclassAccordion = accordions.subclass?.el;
+						const optAccordion = createAccordion("optfeatures", "✨", "Class Options", optContent, {required: true});
+						if (subclassAccordion?.nextSibling) {
+							main.insertBefore(optAccordion, subclassAccordion.nextSibling);
+						} else {
+							main.append(optAccordion);
+						}
+					}
+				}
+
 				// Update summary & accordion
 				summaryItemEls.subclass.setStatus(true, subclass.name);
 				accordions.subclass.setComplete(true, subclass.shortName || subclass.name);
@@ -498,32 +569,35 @@ class CharacterSheetLevelUp {
 		}
 
 		// ========== 3. OPTIONAL FEATURES (Metamagic, Invocations, etc.) ==========
+		const updateOptFeaturesStatus = () => {
+			if (!summaryItemEls.optfeatures || !accordions.optfeatures) return;
+			let allComplete = true;
+			const summaries = [];
+
+			for (const gain of optionalFeatureGains) {
+				const featureKey = gain.featureTypes.join("_");
+				const selected = selectedOptionalFeatures[featureKey] || [];
+				if (selected.length < gain.newCount) {
+					allComplete = false;
+				} else {
+					summaries.push(`${selected.length} ${gain.name}`);
+				}
+			}
+
+			summaryItemEls.optfeatures.setStatus(allComplete, summaries.join(", ") || "Select options");
+			accordions.optfeatures.setComplete(allComplete, summaries.join(", "));
+		};
+
+		const createOptFeaturesOnSelect = (featureType, features, meta = null) => {
+			selectedOptionalFeatures[featureType] = features;
+			if (meta?.combatTraditions?.length) selectedCombatTraditions = [...meta.combatTraditions];
+			updateOptFeaturesStatus();
+		};
+
 		if (optionalFeatureGains.length) {
 			summaryItems.append(createSummaryItem("optfeatures", "✨", "Class Options", {required: true}));
 
-			const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, (featureType, features, meta = null) => {
-				selectedOptionalFeatures[featureType] = features;
-				if (meta?.combatTraditions?.length) selectedCombatTraditions = [...meta.combatTraditions];
-				updateOptFeaturesStatus();
-			}, newLevel);
-
-			const updateOptFeaturesStatus = () => {
-				let allComplete = true;
-				const summaries = [];
-
-				for (const gain of optionalFeatureGains) {
-					const featureKey = gain.featureTypes.join("_");
-					const selected = selectedOptionalFeatures[featureKey] || [];
-					if (selected.length < gain.newCount) {
-						allComplete = false;
-					} else {
-						summaries.push(`${selected.length} ${gain.name}`);
-					}
-				}
-
-				summaryItemEls.optfeatures.setStatus(allComplete, summaries.join(", ") || "Select options");
-				accordions.optfeatures.setComplete(allComplete, summaries.join(", "));
-			};
+			const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel);
 
 			main.append(createAccordion("optfeatures", "✨", "Class Options", optContent, {required: true}));
 		}
@@ -1685,12 +1759,12 @@ class CharacterSheetLevelUp {
 				featEl.insertAdjacentHTML("beforeend", `<input type="radio" name="feat-choice" value="${feat.name}">`);
 				const featLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_FEATS, feat.name, feat.source);
 				featEl.append(e_({outer: `<strong></strong>`}).append(featLink));
-				featEl.append(` <span class="ve-muted">(${Parser.sourceJsonToAbv(feat.source)})</span>`);
+				featEl.insertAdjacentHTML("beforeend", ` <span class="ve-muted">(${Parser.sourceJsonToAbv(feat.source)})</span>`);
 				if (feat.category) {
 					const categoryFull = Parser.featCategoryToFull?.(feat.category) || feat.category;
-					featEl.append(` <span class="badge badge-secondary ml-1" style="font-size: 0.6rem;">${categoryFull}</span>`);
+					featEl.insertAdjacentHTML("beforeend", ` <span class="badge badge-secondary ml-1" style="font-size: 0.6rem;">${categoryFull}</span>`);
 				}
-				if (hasChoices) featEl.append(` <span class="badge badge-info ml-1" style="font-size: 0.65rem;">has choices</span>`);
+				if (hasChoices) featEl.insertAdjacentHTML("beforeend", ` <span class="badge badge-info ml-1" style="font-size: 0.65rem;">has choices</span>`);
 
 				featEl.addEventListener("click", () => {
 					// Deselect from all feat lists (including epic boons)
@@ -2209,7 +2283,7 @@ class CharacterSheetLevelUp {
 	 * @param {Function} onSelect - Callback(featureType, selectedFeatures)
 	 * @param {number} newLevel - The new level for filtering by max degree
 	 */
-	_renderOptionalFeaturesSelection (classData, gains, onSelect, newLevel) {
+	_renderOptionalFeaturesSelection (classData, gains, onSelect, newLevel, {subclassGrantedTraditionCodes = []} = {}) {
 		// Filter optional features by allowed sources and edition
 		const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
 		const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesByEdition(allOptFeaturesRaw, classData.source);
@@ -2232,7 +2306,7 @@ class CharacterSheetLevelUp {
 
 			if (isCombatMethods) {
 				// Use special Combat Methods rendering with tradition filtering
-				this._renderCombatMethodsLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey);
+				this._renderCombatMethodsLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes});
 			} else {
 				// Standard optional feature rendering
 				this._renderStandardOptionalFeaturesLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey);
@@ -2245,11 +2319,17 @@ class CharacterSheetLevelUp {
 	/**
 	 * Render Combat Methods selection during level-up with tradition filtering
 	 */
-	_renderCombatMethodsLevelUp (container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey) {
+	_renderCombatMethodsLevelUp (container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes = []} = {}) {
 		const selectedForType = [];
 
 		// Get character's known traditions from existing Combat Methods or state
 		let knownTraditions = CharacterSheetClassUtils.getKnownCombatTraditions(existingOptFeatures, this._state);
+
+		// Merge subclass-granted traditions (e.g. Mercy → Sanguine Knot) into known
+		if (subclassGrantedTraditionCodes.length > 0) {
+			const merged = new Set([...knownTraditions, ...subclassGrantedTraditionCodes]);
+			knownTraditions = Array.from(merged);
+		}
 
 		// Get max degree for the new level
 		const maxDegree = CharacterSheetClassUtils.getMaxMethodDegree(classData, newLevel);
@@ -2303,6 +2383,13 @@ class CharacterSheetLevelUp {
 						}
 					} else {
 						tempSelectedTraditions = tempSelectedTraditions.filter(t => t !== trad.code);
+						// Remove any selected methods that belonged to the removed tradition
+						const removedTrad = trad.code;
+						for (let i = selectedForType.length - 1; i >= 0; i--) {
+							if (CharacterSheetClassUtils.getMethodTradition(selectedForType[i]) === removedTrad) {
+								selectedForType.splice(i, 1);
+							}
+						}
 					}
 					section.querySelector(".tradition-count").textContent = tempSelectedTraditions.length;
 					onSelect(featureKey, [...selectedForType], {combatTraditions: [...tempSelectedTraditions]});
@@ -2536,7 +2623,7 @@ class CharacterSheetLevelUp {
 			// Add legend for badges
 			const hasKnownOptions = availableOptions.some(opt => opt._alreadyKnown);
 			if (hasKnownOptions) {
-				list.prepend(`
+				list.insertAdjacentHTML("afterbegin", `
 					<div class="ve-small ve-muted mb-2 pb-2" style="border-bottom: 1px solid var(--rgb-border-grey);">
 						<span class="badge badge-success mr-1">✓ Known</span> = Already selected
 						<span class="badge badge-info ml-2 mr-1">↺ Repeatable</span> = Can be taken again
@@ -3986,7 +4073,7 @@ class CharacterSheetLevelUp {
 			choicesList.push(`${skillGrant.count} skill proficiency`);
 		}
 
-		content.append(`
+		content.insertAdjacentHTML("beforeend", `
 			<div class="alert alert-info mb-3">
 				<strong>🎯 Make Your Choices</strong><br>
 				<span class="ve-small">As a level 1 ${selectedClass.name}, you need to select: ${choicesList.join(", ")}</span>

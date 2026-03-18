@@ -3291,6 +3291,33 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				// Note: Monk Unarmored Movement at level 11 is +20, plus Adept Speed +10
 				expect(walkSpeed).toBeGreaterThanOrEqual(40);
 			});
+
+			it("should apply Adept Speed bonus to all speed types (fly, swim, climb, burrow)", () => {
+				state.setSpeed("fly", 30);
+				state.setSpeed("swim", 20);
+				state.setSpeed("climb", 15);
+				state.addFeature({
+					name: "Adept Speed",
+					source: "TGTT",
+					featureType: "Class",
+					className: "Monk",
+					level: 2,
+					description: "Your speed increases by 10 feet.",
+				});
+				state.applyClassFeatureEffects();
+
+				// Adept Speed bonus should apply to ALL speed types, not just walk
+				const flySpeed = state.getSpeedByType("fly");
+				const swimSpeed = state.getSpeedByType("swim");
+				const climbSpeed = state.getSpeedByType("climb");
+				expect(flySpeed).toBeGreaterThanOrEqual(40); // 30 base + 10 adept
+				expect(swimSpeed).toBeGreaterThanOrEqual(30); // 20 base + 10 adept
+				expect(climbSpeed).toBeGreaterThanOrEqual(25); // 15 base + 10 adept
+
+				// Breakdown should show Adept Speed component for non-walk types
+				const flyBreakdown = state.getSpeedBreakdown("fly");
+				expect(flyBreakdown.components.some(c => c.name === "Adept Speed")).toBe(true);
+			});
 			
 			it("should grant blindsight at 11th level (Sixth Sense)", () => {
 				state.addFeature({
@@ -7153,8 +7180,8 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						
 						const calcs = state.getFeatureCalculations();
 						// Ki DC = 8 + prof(3) + WIS(2) = 13
-						expect(calcs.kiSaveDc).toBe(13);
 						expect(calcs.focusSaveDc).toBe(13);
+						expect(calcs.kiSaveDc).toBeUndefined();
 					}
 				});
 				
@@ -7165,8 +7192,8 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					});
 					
 					const calcs = state.getFeatureCalculations();
-					expect(calcs.kiPoints).toBe(5);
 					expect(calcs.focusPoints).toBe(5);
+					expect(calcs.kiPoints).toBeUndefined();
 				});
 				
 				it("should have TGTT-style Deflect Attacks (not just Missiles) for all subclasses", () => {
@@ -11597,15 +11624,19 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				const features = state.getFeatures().filter(f => f.name === "Adept Speed");
 				expect(features.length).toBe(2);
 
-				// Two separate speed:walk modifiers should exist
+				// Adept Speed uses getAdeptSpeedBonus() for all-speeds bonus
+				// (no named speed:walk modifiers — handled explicitly)
 				const speedMods = state.getNamedModifiers().filter(m =>
 					m.type === "speed:walk" && m.name === "Adept Speed",
 				);
-				expect(speedMods.length).toBe(2);
+				expect(speedMods.length).toBe(0);
 
 				// Walk speed: base 30 + Unarmored Movement 20 (lvl 11) + 10 + 10 = 70
 				const walkSpeed = state.getWalkSpeed();
 				expect(walkSpeed).toBe(70);
+
+				// Adept Speed applies to ALL speed types (not just walk)
+				expect(state.getAdeptSpeedBonus()).toBe(20);
 			});
 
 			it("should set correct calculation flags for multiple Adept Speed selections", () => {

@@ -625,6 +625,7 @@ class CharacterSheetInventory {
 					const tagParts = [];
 					if (item.reqAttune) tagParts.push("🔗");
 					if (isMagic) tagParts.push("✨");
+					if (this._state.isMonkWeapon?.(item)) tagParts.push("🥋");
 					const tagsStr = tagParts.length ? ` ${tagParts.join(" ")}` : "";
 
 					// Get rarity color
@@ -815,6 +816,7 @@ class CharacterSheetInventory {
 					${typeTag ? `<span class="charsheet__modal-list-item-badge">${typeTag}</span>` : ""}
 					${rarity ? `<span class="charsheet__modal-list-item-badge">${rarity}</span>` : ""}
 					${item.reqAttune ? `<span class="charsheet__modal-list-item-badge">🔗 Attunement</span>` : ""}
+					${this._state.isMonkWeapon?.(item) ? `<span class="charsheet__modal-list-item-badge">🥋 Monk Weapon</span>` : ""}
 				</div>
 				<div class="ve-small mb-3">
 					${item.value ? `<div><strong>Value:</strong> ${this._formatValue(item.value)}</div>` : ""}
@@ -949,6 +951,8 @@ class CharacterSheetInventory {
 			weapon: item.weapon || false,
 			weaponCategory: item.weaponCategory,
 			damage: item.dmg1 ? `${item.dmg1} ${Parser.dmgTypeToFull(item.dmgType)}` : null,
+			dmg1: item.dmg1 || null,
+			dmgType: item.dmgType || null,
 			properties: item.property || [],
 			mastery: item.mastery || [],
 			range: item.range ? `${item.range}` : null,

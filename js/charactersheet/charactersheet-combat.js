@@ -314,6 +314,7 @@ class CharacterSheetCombat {
 		const damageTypeSelect = content.querySelector(".charsheet__attack-select--dmgtype");
 		const dmgBonusInput = content.querySelector(".charsheet__attack-input--dmgbonus");
 		const propertiesInput = content.querySelector(".charsheet__attack-input--properties");
+		const monkWeaponCheckbox = content.querySelector(".charsheet__attack-checkbox--monk-weapon");
 		const inventorySelect = content.querySelector(".charsheet__attack-select--inventory");
 		const weaponSelect = content.querySelector(".charsheet__attack-select--catalog");
 
@@ -401,6 +402,7 @@ class CharacterSheetCombat {
 				damageType: damageTypeSelect.value,
 				damageBonus: parseInt(dmgBonusInput.value) || 0,
 				properties: propertiesInput.value.split(",").map(p => p.trim()).filter(Boolean),
+				isMonkWeapon: monkWeaponCheckbox?.checked || false,
 			};
 
 			if (!newAttack.name) {
@@ -475,22 +477,30 @@ class CharacterSheetCombat {
 	 */
 	async _pShowWeaponAttackModal (weapon) {
 		// Build the current attack stats from weapon data + any existing overrides
-		const isRanged = weapon.property?.some(p => p.includes?.("A") || String(p).toLowerCase().includes("ammunition")) || weapon.range;
-		const hasFinesse = weapon.property?.some(p => p.includes?.("F") || String(p).toLowerCase().includes("finesse"));
+		// Handle both raw 5etools items (property) and normalized inventory items (properties)
+		const props = weapon.property || weapon.properties || [];
+		const isRanged = props.some(p => p === "A" || p === "T" || p.startsWith("A|") || p.startsWith("T|")) || weapon.range;
+		const hasFinesse = props.some(p => p === "F" || p.startsWith("F|"));
 
 		// Get weapon's base stats with overrides
 		const overrides = weapon.attackOverrides || {};
 		const magicBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0);
 		const magicDmgBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0);
 
+		// Extract raw damage die — prefer dmg1 (raw), fall back to parsing from formatted damage string
+		const rawDamageDie = weapon.dmg1 || (weapon.damage ? weapon.damage.split(" ")[0] : null) || "1d6";
+		const rawDamageType = weapon.dmgType
+			? Parser.dmgTypeToFull(weapon.dmgType).toLowerCase()
+			: (weapon.damageType || (weapon.damage ? weapon.damage.split(" ").slice(1).join(" ").toLowerCase() : null) || "slashing");
+
 		const attack = {
 			name: overrides.name ?? weapon.name,
 			attackBonus: overrides.attackBonus ?? (weapon.customAttackBonus || 0),
-			damage: overrides.damage ?? weapon.dmg1 ?? "1d6",
-			damageType: overrides.damageType ?? (weapon.dmgType ? Parser.dmgTypeToFull(weapon.dmgType).toLowerCase() : "slashing"),
+			damage: overrides.damage ?? rawDamageDie,
+			damageType: overrides.damageType ?? rawDamageType,
 			damageBonus: overrides.damageBonus ?? (weapon.customDamageBonus || 0),
 			range: overrides.range ?? (weapon.range || ""),
-			properties: overrides.properties ?? (weapon.property?.map(p => this._formatProperty(p)) || []),
+			properties: overrides.properties ?? (props.map(p => this._formatProperty(p)) || []),
 			isMelee: overrides.isMelee ?? !isRanged,
 			abilityMod: overrides.abilityMod ?? (isRanged ? "dex" : (hasFinesse ? "finesse" : "str")),
 		};
@@ -788,13 +798,14 @@ class CharacterSheetCombat {
 		if (attackId?.startsWith?.("auto_")) {
 			// Extract the weapon ID and unequip it
 			const weaponId = attackId.substring(5);
-			const weapon = this._state.getInventory().find(item => item.id === weaponId);
-			if (weapon) {
-				weapon.equipped = false;
+			const invItem = this._state.getInventory().find(item => item.id === weaponId);
+			if (invItem) {
+				const weaponName = invItem.item?.name || invItem.name || "item";
+				this._state.unequip(weaponId);
 				this._page._inventory?.renderInventory?.();
 				this.renderAttacks();
 				this._page._saveCurrentCharacter?.();
-				JqueryUtil.doToast({type: "success", content: `Unequipped ${weapon.name}.`});
+				JqueryUtil.doToast({type: "success", content: `Unequipped ${weaponName}.`});
 			}
 			return;
 		}
@@ -1257,6 +1268,13 @@ class CharacterSheetCombat {
 		return isNaN(parsed) ? 0 : parsed;
 	}
 
+	_parseDieMax (dieStr) {
+		// Parse "1d6" → 6, "2d8" → 16, "1d10" → 10
+		const match = (dieStr || "").match(/(\d+)d(\d+)/);
+		if (!match) return 0;
+		return parseInt(match[1]) * parseInt(match[2]);
+	}
+
 	_rollInitiative (event) {
 		const mod = this._state.getInitiative();
 		const rollResult = this._page.rollD20({event});
@@ -1273,6 +1291,89 @@ class CharacterSheetCombat {
 
 		// Update initiative display
 		document.getElementById("charsheet-initiative-value").textContent = total;
+
+		// Trigger initiative-based focus/ki recovery features
+		this._triggerInitiativeRecovery();
+	}
+
+	/**
+	 * Trigger recovery features that activate on initiative rolls (Uncanny Metabolism, Perfect Focus/Self).
+	 * Uncanny Metabolism (XPHB Monk 2+): Regain all focus points + heal (Martial Arts die + Monk level). 1/long rest.
+	 * Perfect Focus (XPHB Monk 15+): If UM not used and focus <= 3, regain up to 4.
+	 * Perfect Self (PHB Monk 20): If ki = 0, regain 4.
+	 */
+	_triggerInitiativeRecovery () {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		const kiMax = this._state.getKiPoints?.() || 0;
+		const kiCurrent = this._state.getKiPointsCurrent?.() || 0;
+
+		// Uncanny Metabolism (1/long rest, optional)
+		if (calc.hasUncannyMetabolism && kiCurrent < kiMax) {
+			const feature = this._state.getFeature("Uncanny Metabolism");
+			const hasUsesLeft = !feature?.uses || feature.uses.current > 0;
+
+			if (hasUsesLeft) {
+				// Restore all focus/ki points
+				this._state.setKiPointsCurrent(kiMax);
+
+				// Roll martial arts die for healing
+				const martialArtsDice = calc.martialArtsDie || "1d6";
+				const dieMatch = martialArtsDice.match(/(\d+)d(\d+)/);
+				const dieCount = dieMatch ? parseInt(dieMatch[1]) : 1;
+				const dieSize = dieMatch ? parseInt(dieMatch[2]) : 6;
+				let healRoll = 0;
+				for (let i = 0; i < dieCount; i++) {
+					healRoll += this._page.rollDice(1, dieSize);
+				}
+
+				const monkLevel = this._state.getClassLevel?.("Monk") || 0;
+				const totalHeal = healRoll + monkLevel;
+
+				// Apply healing
+				const currentHp = this._state.getCurrentHp();
+				const maxHp = this._state.getMaxHp();
+				this._state.setCurrentHp(Math.min(maxHp, currentHp + totalHeal));
+
+				// Consume the use
+				if (feature?.uses) {
+					feature.uses.current = Math.max(0, feature.uses.current - 1);
+				}
+
+				const pointName = calc.focusPoints ? "Focus" : "Ki";
+				JqueryUtil.doToast({
+					type: "success",
+					content: `Uncanny Metabolism: Regained all ${pointName} Points (${kiMax}) and healed ${totalHeal} HP (${martialArtsDice}+${monkLevel})`,
+				});
+
+				this.renderCombatActions();
+				return;
+			}
+		}
+
+		// Perfect Focus (XPHB Monk 15+): regain focus up to 4 if at 3 or fewer
+		if (calc.hasPerfectFocus && kiCurrent <= 3 && kiMax > 0) {
+			const newKi = Math.min(kiMax, calc.perfectFocusRecovery || 4);
+			if (newKi > kiCurrent) {
+				this._state.setKiPointsCurrent(newKi);
+				JqueryUtil.doToast({
+					type: "info",
+					content: `Perfect Focus: Regained Focus Points (now ${newKi}/${kiMax})`,
+				});
+				this.renderCombatActions();
+				return;
+			}
+		}
+
+		// Perfect Self (PHB Monk 20): regain 4 ki if at 0
+		if (calc.hasPerfectSelf && kiCurrent === 0 && kiMax > 0) {
+			const recovery = Math.min(kiMax, calc.perfectSelfRecovery || 4);
+			this._state.setKiPointsCurrent(recovery);
+			JqueryUtil.doToast({
+				type: "info",
+				content: `Perfect Self: Regained ${recovery} Ki Points`,
+			});
+			this.renderCombatActions();
+		}
 	}
 
 	_rollDeathSave (isManualSuccess = null) {
@@ -1388,6 +1489,22 @@ class CharacterSheetCombat {
 				const customAttackBonus = weapon.customAttackBonus || 0;
 				const customDamageBonus = weapon.customDamageBonus || 0;
 
+				// Extract raw damage die — prefer dmg1 (raw), fall back to parsing from formatted damage string
+				let baseDamageDie = weapon.dmg1 || (weapon.damage ? weapon.damage.split(" ")[0] : null) || "1d6";
+				let baseDamageType = weapon.dmgType
+					? Parser.dmgTypeToFull(weapon.dmgType)
+					: (weapon.damageType || (weapon.damage ? weapon.damage.split(" ").slice(1).join(" ") : null) || "slashing");
+
+				// Monk weapon damage: use martial arts die if higher than weapon die
+				if (isMonkWeapon) {
+					const calc = this._state.getFeatureCalculations();
+					if (calc.martialArtsDie) {
+						const weaponMax = this._parseDieMax(baseDamageDie);
+						const monkMax = this._parseDieMax(calc.martialArtsDie);
+						if (monkMax > weaponMax) baseDamageDie = calc.martialArtsDie;
+					}
+				}
+
 				const autoAttack = {
 					id: `auto_${weapon.id}`,
 					// Use overrides if present, otherwise use weapon defaults
@@ -1396,8 +1513,8 @@ class CharacterSheetCombat {
 					abilityMod: overrides.abilityMod ?? defaultAbility,
 					attackBonus: magicAttackBonus + customAttackBonus,
 					range: overrides.range ?? (weapon.range || (isRanged ? "80/320 ft." : "5 ft.")),
-					damage: overrides.damage ?? (weapon.damage || "1d6"),
-					damageType: overrides.damageType ?? (weapon.damageType || "slashing"),
+					damage: overrides.damage ?? baseDamageDie,
+					damageType: overrides.damageType ?? baseDamageType,
 					damageBonus: magicDamageBonus + customDamageBonus,
 					properties: overrides.properties ?? props,
 					mastery: weapon.mastery || [],
@@ -1493,11 +1610,9 @@ class CharacterSheetCombat {
 
 		// Determine badge type
 		let badgeHtml = "";
-		if (attack.isUnarmedStrike) {
-			if (attack.isMonkWeapon) {
-				badgeHtml = " <span class=\"badge badge-warning\" title=\"Monk Unarmed Strike with Martial Arts\">Monk</span>";
-			}
-			// No badge for regular unarmed strike - it's just normal
+		if (attack.isMonkWeapon) {
+			const title = attack.isUnarmedStrike ? "Monk Unarmed Strike with Martial Arts" : "Monk Weapon \u2014 uses Martial Arts die and DEX";
+			badgeHtml = ` <span class="badge badge-warning" title="${title}">Monk</span>`;
 		} else if (isNaturalWeapon) {
 			badgeHtml = " <span class=\"badge badge-info\" title=\"Natural Weapon from feature\">Natural</span>";
 		} else if (isAutoGenerated) {
@@ -2290,7 +2405,7 @@ class CharacterSheetCombat {
 			if (kiCost > 0 || focusCost > 0) {
 				const amount = kiCost || focusCost;
 				if (!this._state.useKiPoint(amount)) {
-					const pointName = this._state.getKiPointsCurrent?.() !== undefined ? "ki" : "focus";
+					const pointName = focusCost > 0 ? "focus" : "ki";
 					JqueryUtil.doToast({type: "warning", content: `Not enough ${pointName} points for ${feature.name}!`});
 					return;
 				}
@@ -3009,6 +3124,14 @@ class CharacterSheetCombat {
 			}
 			if (calc.hasFlurryOfHealingAndHarm) {
 				lines.push(`<span class="mr-1">🔄</span> You may replace one strike with <strong>Hand of Healing</strong> or <strong>Hand of Harm</strong>`);
+			}
+		}
+
+		// --- C2: Patient Defense ---
+		if (nameLower === "patient defense") {
+			lines.push(`<span class="mr-1">🧘</span> Take the <strong>Dodge</strong> action as a <strong>bonus action</strong>`);
+			if (calc.hasHeightenedFocus) {
+				lines.push(`<span class="mr-1">✨</span> <span class="ve-muted">Heightened Focus: also take the <strong>Disengage</strong> action</span>`);
 			}
 		}
 
@@ -4813,6 +4936,19 @@ class CharacterSheetCombat {
 		const currentExertion = this._state.getExertionCurrent();
 
 		if (currentExertion < cost) {
+			// Try ki/focus-to-exertion conversion for Monks with the combat system
+			if (this._state.canUseFocusForExertion?.()) {
+				const kiCurrent = this._state.getKiPointsCurrent?.() ?? 0;
+				if (kiCurrent >= cost) {
+					if (!this._state.useFocusForExertion(cost)) {
+						JqueryUtil.doToast({type: "warning", content: `Not enough ki/focus points to fuel this method!`});
+						return;
+					}
+					// Ki was spent — continue to activation (skip exertion deduction below)
+					this._activateMethodAfterPayment(btn, methodId, cost, "ki/focus");
+					return;
+				}
+			}
 			JqueryUtil.doToast({type: "warning", content: `Not enough exertion! You have ${currentExertion}, but this method costs ${cost}.`});
 			return;
 		}
@@ -4828,7 +4964,27 @@ class CharacterSheetCombat {
 			this._page._features._renderResources();
 		}
 
-		// Activate this method as an active state (combat stance)
+		this._activateMethodEffect(btn, methodId, method, cost, "exertion");
+	}
+
+	/**
+	 * Activate a combat method after paying with ki/focus points
+	 */
+	_activateMethodAfterPayment (btn, methodId, cost, resourceName) {
+		const method = btn.closest(".charsheet__method-item")?._methodData;
+
+		// Also update resources section (ki display)
+		if (this._page?._features) {
+			this._page._features._renderResources();
+		}
+
+		this._activateMethodEffect(btn, methodId, method, cost, resourceName);
+	}
+
+	/**
+	 * Apply the method's effect after payment has been deducted
+	 */
+	_activateMethodEffect (btn, methodId, method, cost, resourceName) {
 		if (method) {
 			// Check if this is a stance (typically has duration) vs instant effect
 			const isStance = this._isMethodStance(method);
@@ -4853,15 +5009,15 @@ class CharacterSheetCombat {
 				this._page._saveCurrentCharacter?.();
 				this._page._renderCharacter?.(); // Re-render character to apply effects
 
-				JqueryUtil.doToast({type: "success", content: `Activated ${method.name}! (−${cost} exertion)`});
+				JqueryUtil.doToast({type: "success", content: `Activated ${method.name}! (−${cost} ${resourceName})`});
 			} else {
 				// Instant effect - just show feedback
-				JqueryUtil.doToast({type: "success", content: `Used ${method.name}! (−${cost} exertion)`});
+				JqueryUtil.doToast({type: "success", content: `Used ${method.name}! (−${cost} ${resourceName})`});
 			}
 		} else {
 			// Fallback: find method name for feedback
 			const methodName = methodId.split("-").slice(0, -1).join(" ").replace(/\b\w/g, c => c.toUpperCase());
-			JqueryUtil.doToast({type: "success", content: `Used ${methodName}! (−${cost} exertion)`});
+			JqueryUtil.doToast({type: "success", content: `Used ${methodName}! (−${cost} ${resourceName})`});
 		}
 
 		// Flash the button to indicate use

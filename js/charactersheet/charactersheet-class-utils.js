@@ -960,6 +960,42 @@ class CharacterSheetClassUtils {
 					});
 				}
 			});
+
+			// Extract refClassFeature sub-entries from parent features.
+			// Some features (e.g. "Ki", "Monk's Focus") contain refClassFeature entries
+			// pointing to standalone sub-features (e.g. "Flurry of Blows") that exist as
+			// full classFeature objects but aren't listed in the top-level classFeatures array.
+			// IMPORTANT: Skip "options" type entries — those are player choices (Specialties, etc.)
+			// handled by findFeatureOptions/getFeatureOptionsForLevel, not automatic grants.
+			const featureNames = new Set(features.map(f => f.name));
+			const extracted = [];
+			for (const feature of features) {
+				if (!feature.entries) continue;
+				for (const entry of feature.entries) {
+					if (typeof entry !== "object" || !Array.isArray(entry.entries)) continue;
+					if (entry.type === "options") continue;
+					for (const sub of entry.entries) {
+						if (sub?.type !== "refClassFeature" || !sub.classFeature) continue;
+						const refParts = sub.classFeature.split("|");
+						const refName = refParts[0];
+						if (featureNames.has(refName)) continue;
+						const refData = CharacterSheetClassUtils.getClassFeatureDataFromRef(classFeatures, sub.classFeature);
+						if (!refData) continue;
+						featureNames.add(refName);
+						extracted.push({
+							name: refName,
+							className: refParts[1] || classData.name,
+							classSource: refParts[2] || classData.source,
+							source: refData.source || refParts[2] || classData.source,
+							level: parseInt(refParts[3]) || level,
+							gainSubclassFeature: false,
+							entries: refData.entries,
+							parentFeature: feature.name,
+						});
+					}
+				}
+			}
+			if (extracted.length) features.push(...extracted);
 		}
 
 		// Subclass features
@@ -1388,6 +1424,61 @@ class CharacterSheetClassUtils {
 	// ==========================================
 
 	/**
+	 * Get combat traditions auto-granted by a subclass feature (e.g. "Combat Methods (Mercy)").
+	 * Used during level-up to pre-seed traditions before the effect pipeline runs.
+	 * @param {Object} subclass - The subclass object ({ shortName, source, ... })
+	 * @param {string} classSource - The class source (e.g. "TGTT")
+	 * @returns {Array<{tradition: string, code: string}>} Granted traditions
+	 */
+	static getSubclassGrantedTraditions (subclass, classSource) {
+		if (!subclass?.shortName) return [];
+		const isTGTT = classSource === "TGTT" || subclass.source === "TGTT";
+		if (!isTGTT) return [];
+
+		// Subclass → granted tradition(s) + bonus method count
+		// "choice" entries mean the user picks from the listed options during level-up
+		const GRANTS = {
+			// --- Monk subclasses ---
+			"Mercy": [{tradition: "Sanguine Knot", code: "SK", bonusMethods: 1}],
+			"Shadow": [{tradition: "Mist and Shade", code: "MS", bonusMethods: 1}],
+			"Shackled": [{tradition: "Unending Wheel", code: "UW", bonusMethods: 1}],
+			"Five Animals": [{tradition: "Tooth and Claw", code: "TC", bonusMethods: 1}],
+			"Elements": [{tradition: "Biting Zephyr", code: "BZ", bonusMethods: 1}],
+			"Long Death": [{tradition: "Mist and Shade", code: "MS", bonusMethods: 1}],
+			"Drunken Master": [{tradition: "Rapid Current", code: "RC", bonusMethods: 1}],
+			"Sun Soul": [{tradition: "Biting Zephyr", code: "BZ", bonusMethods: 1}],
+			"Astral Self": [{tradition: "Mirror's Glint", code: "MG", bonusMethods: 1}],
+			"Ascendant Dragon": [{tradition: "Biting Zephyr", code: "BZ", bonusMethods: 1}],
+			"Cobalt Soul": [{tradition: "Razor's Edge", code: "RE", bonusMethods: 1}],
+			// Choice-based: user picks from listed traditions
+			"Open Hand": [{tradition: "Adamant Mountain", code: "AM", bonusMethods: 1, choice: true}, {tradition: "Tempered Iron", code: "TI", bonusMethods: 0, choice: true}],
+			"Debilitation": [{tradition: "Adamant Mountain", code: "AM", bonusMethods: 1, choice: true}, {tradition: "Tempered Iron", code: "TI", bonusMethods: 0, choice: true}],
+			"Kensei": [{tradition: null, code: null, bonusMethods: 1, choice: true}], // any tradition
+			// --- Fighter subclasses ---
+			"Eldritch Knight": [{tradition: "Arcane Knight", code: "AK", bonusMethods: 1}, {tradition: "Eldritch Blackguard", code: "EB", bonusMethods: 1}],
+			"Battle Master": [{tradition: null, code: null, bonusMethods: 1, choice: true}, {tradition: null, code: null, bonusMethods: 0, choice: true}],
+			"Arcane Archer": [{tradition: "Biting Zephyr", code: "BZ", bonusMethods: 1, choice: true}, {tradition: "Razor's Edge", code: "RE", bonusMethods: 0, choice: true}, {tradition: "Unending Wheel", code: "UW", bonusMethods: 0, choice: true}],
+			"Champion": [{tradition: "Adamant Mountain", code: "AM", bonusMethods: 1, choice: true}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0, choice: true}, {tradition: "Tempered Iron", code: "TI", bonusMethods: 0, choice: true}],
+			// --- Rogue subclasses ---
+			"Swashbuckler": [{tradition: "Comedic Jabs", code: "CJ", bonusMethods: 1}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0}],
+			// --- Warder (special: grants 2 fixed traditions) ---
+			"Warder": [{tradition: "Tempered Iron", code: "TI", bonusMethods: 1}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0}],
+		};
+		return GRANTS[subclass.shortName] || [];
+	}
+
+	/**
+	 * Get the total bonus methods a subclass grants.
+	 * @param {Object} subclass
+	 * @param {string} classSource
+	 * @returns {number}
+	 */
+	static getSubclassBonusMethodCount (subclass, classSource) {
+		const granted = this.getSubclassGrantedTraditions(subclass, classSource);
+		return granted.reduce((sum, t) => sum + (t.bonusMethods || 0), 0);
+	}
+
+	/**
 	 * Map a tradition code to its full name.
 	 * @param {string} tradCode - Two-letter code
 	 * @returns {string}
@@ -1727,7 +1818,11 @@ class CharacterSheetClassUtils {
 		const entries = outFeature.entries;
 		let description = outFeature.description;
 		if (!description && entries) {
-			try { description = Renderer.get().render({entries}); } catch (e) { description = ""; }
+			// Strip "options" entries before rendering — their children are player choices
+			// (e.g. Specialties), not automatic grants, and would pollute the description
+			// with modifier text from ALL options (causing false auto-modifier detection).
+			const entriesToRender = CharacterSheetClassUtils._stripOptionsEntries(entries);
+			try { description = Renderer.get().render({entries: entriesToRender}); } catch (e) { description = ""; }
 		}
 
 		const explicitFeatureType = typeof outFeature.featureType === "string"
@@ -1798,6 +1893,26 @@ class CharacterSheetClassUtils {
 		}
 
 		return CharacterSheetClassUtils._filterUndefinedKeys(snapshot);
+	}
+
+	/**
+	 * Remove `type: "options"` entries from an entries array (shallow).
+	 * Used to prevent player-choice option lists (Specialties, etc.) from being
+	 * rendered into feature descriptions, which would cause false modifier
+	 * detection from ALL option texts.
+	 * @param {Array} entries
+	 * @returns {Array} filtered copy (original not mutated)
+	 */
+	static _stripOptionsEntries (entries) {
+		if (!Array.isArray(entries)) return entries;
+		return entries
+			.filter(e => !(typeof e === "object" && e?.type === "options"))
+			.map(e => {
+				if (typeof e === "object" && Array.isArray(e?.entries)) {
+					return {...e, entries: CharacterSheetClassUtils._stripOptionsEntries(e.entries)};
+				}
+				return e;
+			});
 	}
 
 	/**
@@ -2101,6 +2216,20 @@ class CharacterSheetClassUtils {
 					current: newMax,
 					recharge: resourceDef.recharge,
 				});
+			}
+
+			// Sync monk ki/focus resource to the backing _data.kiPoints store
+			// so that useKiPoint() / getKiPointsCurrent() work correctly
+			if (isMonkResource && newMax > 0) {
+				const currentKiMax = state.getKiPoints();
+				state.setKiPoints(newMax);
+				if (currentKiMax === 0) {
+					// First initialization — fill to max
+					state.setKiPointsCurrent(newMax);
+				} else if (newMax > currentKiMax) {
+					// Level up — add the difference
+					state.setKiPointsCurrent(state.getKiPointsCurrent() + (newMax - currentKiMax));
+				}
 			}
 		});
 
