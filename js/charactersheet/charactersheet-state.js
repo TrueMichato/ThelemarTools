@@ -4233,6 +4233,228 @@ class CharacterSheetState {
 		this.applyClassFeatureEffects();
 	}
 
+	/**
+	 * Preview what removeLastLevel() would remove, without modifying state.
+	 * Used by the confirmation modal to show the user what will be lost.
+	 * @returns {object|null} Preview object, or null if removal is not possible
+	 */
+	getRemoveLastLevelPreview () {
+		const totalLevel = this.getTotalLevel();
+		if (totalLevel <= 1) return null;
+		if (this.isLegacyCharacter()) return null;
+
+		const history = this.getLevelHistoryEntry(totalLevel);
+		if (!history) return null;
+
+		const className = history.class?.name;
+		const classSource = history.class?.source;
+		const classEntry = this._data.classes.find(c => c.name === className && c.source === classSource);
+		if (!classEntry) return null;
+
+		const classLevel = classEntry.level || 1;
+		const willRemoveClass = classLevel <= 1;
+
+		// Determine subclass removal: if the class is being removed entirely,
+		// or if the class level drops below the subclass selection level (typically 3)
+		const subclassLevel = this._getSubclassSelectionLevel(className, classSource);
+		const willRemoveSubclass = !!classEntry.subclass && (willRemoveClass || (classLevel - 1) < subclassLevel);
+
+		// Features at this level
+		const features = this._data.features
+			.filter(f => f.level === totalLevel)
+			.map(f => ({name: f.name, source: f.source}));
+
+		const choices = history.choices || {};
+
+		return {
+			level: totalLevel,
+			className,
+			classSource,
+			classLevel,
+			willRemoveClass,
+			willRemoveSubclass,
+			subclassName: classEntry.subclass?.name || null,
+			features,
+			feat: choices.feat || null,
+			asi: choices.asi || null,
+			optionalFeatures: (choices.optionalFeatures || []).map(of => ({name: of.name})),
+			spells: (choices.spellbookSpells || []).map(s => ({name: s.name})),
+			expertise: choices.expertise || [],
+			languages: (choices.languages || []).map(l => typeof l === "string" ? l : l.language),
+			combatTraditions: choices.combatTraditions || [],
+			weaponMasteries: choices.weaponMasteries || [],
+		};
+	}
+
+	/**
+	 * Remove the character's most recent level, reversing all choices recorded in level history.
+	 * Only works for non-legacy characters with a complete level history. Minimum level is 1.
+	 * @returns {{success: boolean, reason?: string, removed?: object}}
+	 */
+	removeLastLevel () {
+		const totalLevel = this.getTotalLevel();
+
+		// Guard: can't go below level 1
+		if (totalLevel <= 1) {
+			return {success: false, reason: "Cannot remove level 1. Delete the character instead."};
+		}
+
+		// Guard: legacy character
+		if (this.isLegacyCharacter()) {
+			return {success: false, reason: "Cannot remove levels from a legacy character without complete level history."};
+		}
+
+		// Guard: no history entry
+		const history = this.getLevelHistoryEntry(totalLevel);
+		if (!history) {
+			return {success: false, reason: `No level history entry found for level ${totalLevel}.`};
+		}
+
+		const className = history.class?.name;
+		const classSource = history.class?.source;
+		const classEntry = this._data.classes.find(c => c.name === className && c.source === classSource);
+		if (!classEntry) {
+			return {success: false, reason: `Class ${className} not found on character.`};
+		}
+
+		const choices = history.choices || {};
+		const removedInfo = {
+			level: totalLevel,
+			className,
+			classSource,
+			classLevel: classEntry.level,
+			features: [],
+			feat: null,
+			asi: null,
+			subclass: null,
+		};
+
+		// 1. Remove features gained at this level
+		const featuresAtLevel = this._data.features.filter(f => f.level === totalLevel);
+		for (const feature of featuresAtLevel) {
+			this.removeFeature(feature.name, feature.source);
+			removedInfo.features.push({name: feature.name, source: feature.source});
+		}
+
+		// 2. Remove feat if chosen at this level
+		if (choices.feat) {
+			this.removeFeat(choices.feat.name, choices.feat.source);
+			removedInfo.feat = choices.feat;
+		}
+
+		// 3. Reverse ASI if applied at this level
+		if (choices.asi) {
+			for (const [ability, amount] of Object.entries(choices.asi)) {
+				this.removeAbilityBonus(ability, amount);
+			}
+			removedInfo.asi = choices.asi;
+		}
+
+		// 4. Handle subclass: remove if class is being removed entirely or level drops below subclass level
+		const subclassLevel = this._getSubclassSelectionLevel(className, classSource);
+		if (classEntry.subclass && (classEntry.level <= 1 || (classEntry.level - 1) < subclassLevel)) {
+			removedInfo.subclass = classEntry.subclass;
+			// Remove subclass features (features associated with this subclass)
+			const subclassFeatures = this._data.features.filter(f =>
+				f.subclassShortName === classEntry.subclass.name
+				|| f.subclassShortName === classEntry.subclass.shortName,
+			);
+			for (const feature of subclassFeatures) {
+				this.removeFeature(feature.name, feature.source);
+			}
+			classEntry.subclass = null;
+		}
+
+		// 5. Remove optional features (invocations, metamagic, etc.)
+		if (choices.optionalFeatures?.length) {
+			for (const of_ of choices.optionalFeatures) {
+				this.removeFeature(of_.name, of_.source);
+			}
+		}
+
+		// 6. Remove combat traditions
+		if (choices.combatTraditions?.length) {
+			for (const trad of choices.combatTraditions) {
+				this.removeCombatTradition(trad);
+			}
+		}
+
+		// 7. Remove weapon masteries
+		if (choices.weaponMasteries?.length) {
+			for (const mastery of choices.weaponMasteries) {
+				this.removeWeaponMastery(mastery);
+			}
+		}
+
+		// 8. Remove expertise (downgrade from expertise to proficiency)
+		if (choices.expertise?.length) {
+			for (const skill of choices.expertise) {
+				if (this._data.skillProficiencies[skill] === 2) {
+					this._data.skillProficiencies[skill] = 1;
+				}
+			}
+		}
+
+		// 9. Remove languages
+		if (choices.languages?.length) {
+			for (const lang of choices.languages) {
+				const langName = typeof lang === "string" ? lang : lang.language;
+				if (langName) this.removeLanguage(langName);
+			}
+		}
+
+		// 10. Remove scholar expertise
+		if (choices.scholarSkill) {
+			this._data.scholarExpertise = null;
+		}
+
+		// 11. Remove spellbook spells
+		if (choices.spellbookSpells?.length) {
+			for (const spell of choices.spellbookSpells) {
+				this.removeSpell(spell.name, spell.source);
+			}
+		}
+
+		// 12. Decrement class level or remove class entirely
+		if (classEntry.level <= 1) {
+			this._data.classes = this._data.classes.filter(c => !(c.name === className && c.source === classSource));
+		} else {
+			classEntry.level -= 1;
+		}
+
+		// 13. Remove history entry
+		this.removeLevelHistoryEntry(totalLevel);
+
+		// 14. Recalculate derived values
+		this._recalculateMaxHp();
+		this._recalculateHitDice();
+		this.calculateSpellSlots();
+		this.applyClassFeatureEffects();
+		this.ensureUnarmedStrike();
+		this.ensureXpMatchesLevel();
+
+		// 15. Cap current HP if it exceeds new max
+		if (this._data.hp.current > this._data.hp.max) {
+			this._data.hp.current = this._data.hp.max;
+		}
+
+		return {success: true, removed: removedInfo};
+	}
+
+	/**
+	 * Get the level at which a class selects its subclass.
+	 * Most classes get subclass at 3, but some (Cleric, Sorcerer, Warlock, Wizard) get it at 1.
+	 * @param {string} className
+	 * @param {string} source
+	 * @returns {number}
+	 */
+	_getSubclassSelectionLevel (className, source) {
+		const earlySubclassClasses = ["Cleric", "Sorcerer", "Warlock", "Wizard"];
+		// XPHB 2024 classes all get subclass at level 3
+		if (source === "XPHB") return 3;
+		return earlySubclassClasses.includes(className) ? 1 : 3;
+	}
+
 	getClasses () { return this._data.classes; }
 
 	/**
@@ -4581,6 +4803,14 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Remove the level history entry for a specific level
+	 * @param {number} level - The character level to remove
+	 */
+	removeLevelHistoryEntry (level) {
+		this._data.levelHistory = this._data.levelHistory.filter(h => h.level !== level);
+	}
+
+	/**
 	 * Get summary of what was gained at a specific level
 	 * @param {number} level - The character level
 	 * @returns {object|null} Summary with class, choices, and features
@@ -4810,6 +5040,17 @@ class CharacterSheetState {
 		}
 		this._data.directAbilityBonuses[ability] =
 			(this._data.directAbilityBonuses[ability] || 0) + bonus;
+	}
+
+	/**
+	 * Remove a bonus from an ability score, clamping at 0
+	 * @param {string} ability - The ability name (str, dex, con, int, wis, cha)
+	 * @param {number} bonus - The bonus to remove
+	 */
+	removeAbilityBonus (ability, bonus) {
+		if (!this._data.directAbilityBonuses) return;
+		this._data.directAbilityBonuses[ability] =
+			Math.max(0, (this._data.directAbilityBonuses[ability] || 0) - bonus);
 	}
 
 	/**

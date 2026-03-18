@@ -117,7 +117,21 @@ class CharacterSheetRespec {
 			editBtn.addEventListener("click", () => this._onEditLevel(level, history));
 		}
 
-		header.append(classInfo, editBtn);
+		const headerActions = e_({tag: "div", clazz: "charsheet__level-entry-actions"});
+		headerActions.append(editBtn);
+
+		// Remove button - only on current (last) level, non-legacy, and level > 1
+		if (isCurrent && !isLegacy && level > 1) {
+			const removeBtn = e_({outer: `
+				<button class="charsheet__level-entry-remove" title="Remove this level">
+					<span class="glyphicon glyphicon-minus"></span>
+				</button>
+			`});
+			removeBtn.addEventListener("click", () => this._onRemoveLevel(level, history));
+			headerActions.append(removeBtn);
+		}
+
+		header.append(classInfo, headerActions);
 		card.append(header);
 
 		// Show race/background grants at level 1
@@ -280,6 +294,111 @@ class CharacterSheetRespec {
 		entry.append(card);
 
 		return entry;
+	}
+
+	/**
+	 * Handle remove button click for the last level
+	 * @param {number} level - The level to remove
+	 * @param {object} history - The history entry
+	 */
+	async _onRemoveLevel (level, history) {
+		const preview = this._state.getRemoveLastLevelPreview();
+		if (!preview) {
+			JqueryUtil.doToast({type: "warning", content: "Cannot remove this level."});
+			return;
+		}
+		await this._showRemoveLevelModal(preview);
+	}
+
+	/**
+	 * Show a confirmation modal for removing the last level
+	 * @param {object} preview - The preview object from getRemoveLastLevelPreview()
+	 */
+	async _showRemoveLevelModal (preview) {
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: `Remove Level ${preview.level}?`,
+			isMinHeight0: true,
+			cbClose: () => {},
+		});
+
+		const content = e_({tag: "div", clazz: "charsheet__respec-modal"});
+
+		content.append(e_({outer: `<p>This will remove <b>${preview.className}</b> level ${preview.classLevel} and the following:</p>`}));
+
+		// Build removal summary
+		const items = [];
+
+		if (preview.features.length) {
+			items.push(`Features: ${preview.features.map(f => f.name).join(", ")}`);
+		}
+		if (preview.feat) {
+			items.push(`Feat: ${preview.feat.name}`);
+		}
+		if (preview.asi) {
+			const asiParts = Object.entries(preview.asi)
+				.filter(([, v]) => v)
+				.map(([abl, val]) => `${Parser.attAbvToFull(abl)} +${val}`);
+			if (asiParts.length) items.push(`ASI: ${asiParts.join(", ")}`);
+		}
+		if (preview.optionalFeatures.length) {
+			items.push(`Optional Features: ${preview.optionalFeatures.map(f => f.name).join(", ")}`);
+		}
+		if (preview.spells.length) {
+			items.push(`Spells: ${preview.spells.map(s => s.name).join(", ")}`);
+		}
+		if (preview.expertise.length) {
+			items.push(`Expertise: ${preview.expertise.map(s => s.toTitleCase()).join(", ")}`);
+		}
+		if (preview.languages.length) {
+			items.push(`Languages: ${preview.languages.join(", ")}`);
+		}
+		if (preview.combatTraditions.length) {
+			items.push(`Combat Traditions: ${preview.combatTraditions.join(", ")}`);
+		}
+		if (preview.weaponMasteries.length) {
+			items.push(`Weapon Masteries: ${preview.weaponMasteries.map(m => m.split("|")[0]).join(", ")}`);
+		}
+
+		if (items.length) {
+			const list = e_({tag: "ul", clazz: "mb-2"});
+			items.forEach(item => list.append(e_({tag: "li", html: item})));
+			content.append(list);
+		} else {
+			content.append(e_({outer: `<p class="ve-muted ve-small">No tracked choices to remove.</p>`}));
+		}
+
+		if (preview.willRemoveSubclass) {
+			content.append(e_({outer: `<div class="ve-alert ve-alert--warning mb-2"><b>\u26a0 Warning:</b> Your <b>${preview.subclassName}</b> subclass will be removed along with all its features.</div>`}));
+		}
+
+		if (preview.willRemoveClass) {
+			content.append(e_({outer: `<div class="ve-alert ve-alert--warning mb-2"><b>\u26a0 Warning:</b> Your <b>${preview.className}</b> class will be removed entirely.</div>`}));
+		}
+
+		// Buttons
+		const btnRow = e_({tag: "div", clazz: "ve-flex-v-center ve-flex-h-right mt-3"});
+
+		const btnRemove = e_({tag: "button", clazz: "ve-btn ve-btn-danger mr-2", txt: "Remove Level"});
+		btnRemove.addEventListener("click", () => {
+			const result = this._state.removeLastLevel();
+			if (result.success) {
+				doClose();
+				this._page.renderCharacter();
+				this._page.saveCharacter();
+				this.render();
+				JqueryUtil.doToast({type: "success", content: `Removed ${preview.className} level ${preview.classLevel}.`});
+			} else {
+				JqueryUtil.doToast({type: "danger", content: result.reason});
+			}
+		});
+
+		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		btnCancel.addEventListener("click", () => doClose());
+
+		btnRow.append(btnRemove, btnCancel);
+		content.append(btnRow);
+
+		modalInner.append(content);
 	}
 
 	/**

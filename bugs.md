@@ -17,7 +17,7 @@ Right now, even when using it, it doesn't actually add the focus points back to 
 - [] Wary Stance doesn't give any benefit. Might be a general issue with combat stances, but it needs to be fixed so that it correctly applies the benefits of the stance when it's active.
 - [] Wounding strike doesn't work as it should - appears as an activatable state, but needs to be an action to choose a weapon attack and apply the effect to it. Right now it doesn't do anything when activated, which is not how it should work.
 - [] On levelup, if I choose combat traditions, then choose methods, then change my traditions choice - methods choice disappear even for the tradition I haven't changed. I think this is a UI bug, not a data bug. 
-- [] need to verify the flow of choosing traditions in general, some bugs reported by players that are hard to pinpoint.
+- [] related to previous bug, if I choose a tradition, then a method, then another tradition - my chosen method becomes unchosen in the UI, but is chosen in the data.
 - [] quickbuild doesn't take into account the subclass extra traditions feature which is implemented in the levelup, need this logic to also apply in quickbuild.
 
 ### General
