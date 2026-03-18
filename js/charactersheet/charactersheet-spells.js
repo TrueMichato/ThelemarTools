@@ -2036,6 +2036,9 @@ class CharacterSheetSpells {
 		let metamagicNotes = [];
 		let deliveredViaFamiliar = false;
 
+		// Roll history tracking for spell components
+		const _rollMeta = {attack: null, dc: null};
+
 		// Check for touch spell delivery via familiar
 		if (spellData) {
 			metamagicNotes = this._getCastMetamagicNotes({spellData, castMeta: normalizedCastMeta});
@@ -2098,6 +2101,7 @@ class CharacterSheetSpells {
 					? ` <span class="ve-muted">(rerolled from ${normalizedCastMeta.attackMeta.originalRoll})</span>`
 					: "";
 				attackInfo = `<br>Spell Attack: ${finalRoll} + ${attackBonus}${aimedText} = <strong>${finalRoll + totalAttackBonus}</strong>${seekingText}`;
+				_rollMeta.attack = {total: finalRoll + totalAttackBonus, breakdown: `1d20 (${finalRoll}) + ${attackBonus}${aimedText}`};
 			}
 
 			// Check for save DC
@@ -2107,6 +2111,7 @@ class CharacterSheetSpells {
 					? "; first target rolls at disadvantage"
 					: "";
 				attackInfo += `<br>Save DC: <strong>${saveDC}</strong> (${spellData.savingThrow.join("/")} save${saveNote})`;
+				_rollMeta.dc = {total: saveDC, breakdown: `8 + ${spellcastingMod} + ${profBonus}${exhaustionDcPenalty ? ` - ${exhaustionDcPenalty}` : ""} (${spellData.savingThrow.join("/")})`};
 			}
 
 			// Parse spell effects to determine what the spell does
@@ -2209,6 +2214,17 @@ class CharacterSheetSpells {
 		const gamblerFollyResult = await this._handleGamblerFolly(spell, slotLevel);
 		if (gamblerFollyResult) {
 			toastContent += gamblerFollyResult;
+		}
+
+		// Log spell roll components to roll history
+		if (this._page._rollHistory) {
+			if (_rollMeta.attack) this._page._rollHistory.addRoll({title: `Spell Attack: ${spell.name}`, total: _rollMeta.attack.total, breakdown: _rollMeta.attack.breakdown});
+			if (_rollMeta.dc) this._page._rollHistory.addRoll({title: `Spell Save DC: ${spell.name}`, total: _rollMeta.dc.total, breakdown: _rollMeta.dc.breakdown});
+			if (damageResult?.total != null) this._page._rollHistory.addRoll({title: `Spell Damage: ${spell.name}`, total: damageResult.total, breakdown: `${damageResult.dice} ${damageResult.damageType || ""}`});
+			if (damageInfo && !damageResult && damageInfo.includes("Healing")) {
+				const healMatch = damageInfo.match(/<strong>(\d+)<\/strong>/);
+				if (healMatch) this._page._rollHistory.addRoll({title: `Spell Healing: ${spell.name}`, total: parseInt(healMatch[1]), breakdown: damageInfo.replace(/<[^>]*>/g, "").replace(/^\s*Healing:\s*/, "").trim()});
+			}
 		}
 
 		JqueryUtil.doToast({
@@ -4616,6 +4632,10 @@ class CharacterSheetSpells {
 		const message = type === "DC"
 			? `🎲 Spell Save DC: ${baseValue} + (${rollsDisplay}) = <strong>${total}</strong>`
 			: `🎲 Spell Attack: +${baseValue} + (${rollsDisplay}) = <strong>+${total}</strong>`;
+
+		// Log to roll history
+		const rollTitle = type === "DC" ? `Gambler Spell DC` : `Gambler Spell Attack`;
+		this._page._rollHistory?.addRoll({title: rollTitle, total, breakdown: `${baseValue} + (${rollsDisplay})`});
 
 		// Show as toast notification
 		JqueryUtil.doToast({

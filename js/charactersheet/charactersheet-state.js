@@ -19813,6 +19813,13 @@ class CharacterSheetState {
 		const resource = this._data.resources.find(r => r.id === resourceId);
 		if (resource) {
 			resource.current = Math.max(0, Math.min(current, resource.max));
+			// Sync back to the linked feature if one exists
+			if (resource.featureId) {
+				const feature = this._data.features.find(f => f.id === resource.featureId);
+				if (feature?.uses) {
+					feature.uses.current = resource.current;
+				}
+			}
 		}
 	}
 
@@ -20626,6 +20633,11 @@ class CharacterSheetState {
 		const feature = this._data.features.find(f => f.id === featureId);
 		if (feature?.uses) {
 			feature.uses.current = current;
+		}
+		// Sync the mirrored resource (addFeature creates a resource copy)
+		const resource = this._data.resources.find(r => r.featureId === featureId);
+		if (resource) {
+			resource.current = Math.max(0, Math.min(current, resource.max));
 		}
 	}
 

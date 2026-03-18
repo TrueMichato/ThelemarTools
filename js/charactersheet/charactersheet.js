@@ -10,6 +10,7 @@ import {CharacterSheetExport} from "./charactersheet-export.js";
 import {CharacterSheetLevelUp} from "./charactersheet-levelup.js";
 import {CharacterSheetLayout} from "./charactersheet-layout.js";
 import {CharacterSheetNotes} from "./charactersheet-notes.js";
+import {CharacterSheetRollHistory} from "./charactersheet-rollhistory.js";
 import {CharacterSheetCustomAbilities} from "./charactersheet-customabilities.js";
 import {CharacterSheetQuickBuild} from "./charactersheet-quickbuild.js";
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
@@ -102,6 +103,10 @@ class CharacterSheetPage {
 		try {
 			this._notes = new CharacterSheetNotes(this);
 		} catch (e) { console.error("Failed to init notes:", e); }
+
+		try {
+			this._rollHistory = new CharacterSheetRollHistory(this);
+		} catch (e) { console.error("Failed to init rollHistory:", e); }
 
 		try {
 			this._customAbilities = new CharacterSheetCustomAbilities(this);
@@ -713,6 +718,9 @@ class CharacterSheetPage {
 
 		// Help toggle
 		document.getElementById("charsheet-help-toggle").addEventListener("click", () => this._toggleHelpTips());
+
+		// Roll history toggle
+		document.getElementById("charsheet-btn-rolllog")?.addEventListener("click", () => this._rollHistory?.toggle());
 
 		// Layout editing
 		document.getElementById("charsheet-btn-layout").addEventListener("click", () => this._toggleLayoutEditMode());
@@ -8260,7 +8268,7 @@ class CharacterSheetPage {
 		} else {
 			// New object format
 			const breakdown = opts.subtitle || `1d20 (${opts.roll}) ${opts.modifier >= 0 ? "+" : ""}${opts.modifier}`;
-			
+
 			// Check if animated dice is enabled and we have dice info
 			if (this._state.getSettings()?.animatedDice && opts.roll !== undefined) {
 				this._showAnimatedDice(opts.diceType || 20, opts.roll, opts.isAdvantage, opts.isDisadvantage)
@@ -8430,6 +8438,9 @@ class CharacterSheetPage {
 	}
 
 	_showDiceResult (title, total, breakdown, resultClass = "", resultNote = "", {duration = 5000} = {}) {
+		// Log to roll history
+		this._rollHistory?.addRoll({title, total, breakdown, resultClass, resultNote});
+
 		// Remove existing result
 		document.querySelector(".charsheet__dice-result")?.remove();
 

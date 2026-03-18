@@ -129,7 +129,7 @@ Many classes have PHB tests but missing XPHB 2024 feature tests.
 | CharacterSheetCleric.test.js | 147 | ✅ 100% | Domain impl |
 | CharacterSheetDruid.test.js | ~180 | ✅ 100% | Circle impl |
 | CharacterSheetFighter.test.js | 186 | ✅ 100% | Archetype impl |
-| CharacterSheetMonk.test.js | 176 | ✅ 100% | Minor |
+| CharacterSheetMonk.test.js | 339 | ✅ 100% | Minor |
 | CharacterSheetPaladin.test.js | 140 | ✅ 100% | Oath impl |
 | CharacterSheetRanger.test.js | 144 | ✅ 100% | Conclave impl |
 | CharacterSheetRogue.test.js | 177 | ✅ 100% | Archetype impl |

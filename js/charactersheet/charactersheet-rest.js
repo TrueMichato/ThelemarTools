@@ -146,6 +146,8 @@ class CharacterSheetRest {
 						type: "success",
 						content: `🎲 Rolled d${hd.die} (${roll}) + CON (${conMod >= 0 ? "+" : ""}${conMod}) = ${healing} HP`,
 					});
+
+					this._page._rollHistory?.addRoll({title: `Hit Die: ${hd.className}`, total: healing, breakdown: `d${hd.die} (${roll}) + CON (${conMod >= 0 ? "+" : ""}${conMod})`});
 				});
 
 				ee`<div class="charsheet__hit-die-row">

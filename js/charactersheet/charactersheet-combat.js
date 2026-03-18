@@ -1418,6 +1418,8 @@ class CharacterSheetCombat {
 				});
 
 				this.renderCombatActions();
+				this.renderCombatResources();
+				this._page._renderResources?.();
 				if (this._page._features) this._page._features.render();
 				this._page.saveCharacter?.();
 				return;
