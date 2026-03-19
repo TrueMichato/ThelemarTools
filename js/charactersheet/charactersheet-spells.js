@@ -201,20 +201,7 @@ class CharacterSheetSpells {
 			);
 		});
 
-		// Gambler's Folly - manual d100 roll button in toast
-		document.addEventListener("click", (e) => {
-			const btn = e.target.closest(".btn-gambler-table-roll");
-			if (!btn) return;
-			btn.disabled = true;
-			const tableResult = this._state.rollGamblingTable();
-			if (tableResult) {
-				const result = e_({outer: `<span class="text-info"><br>🎰 <b>d100:</b> ${tableResult.roll}<br>${tableResult.effect}</span>`});
-				btn.after(result);
-				btn.remove();
-			}
-		});
-
-		// Open Gambling Table modal (can be triggered from features panel or spell UI)
+		// Open Gambling Table modal (can be triggered from features panel, spell UI, or toast button)
 		document.addEventListener("click", (e) => {
 			if (e.target.closest(".btn-open-gambling-table")) this._openGamblingTableModal();
 		});
@@ -255,8 +242,13 @@ class CharacterSheetSpells {
 
 		// Get class spell list, filtered by allowed sources
 		const characterClass = classes[0];
-		const className = characterClass.name;
+		let className = characterClass.name;
 		const classSource = characterClass.source;
+
+		// Gambler uses the Warlock spell list
+		const isGambler = characterClass.subclass?.name === "Gambler";
+		const spellListClassName = isGambler ? "Warlock" : className;
+
 		const filteredSpells = this._page.filterByAllowedSources(this._allSpells);
 
 		// Check if we should include core spell lists for homebrew classes
@@ -271,8 +263,8 @@ class CharacterSheetSpells {
 			const fromClassList = Renderer.spell.getCombinedClasses(spell, "fromClassList");
 			if (!fromClassList?.length) return false;
 
-			// Check if spell is on this class's list
-			const matchesExact = fromClassList.some(c => c.name.toLowerCase() === className.toLowerCase());
+			// Check if spell is on this class's list (using spellListClassName for Gambler→Warlock mapping)
+			const matchesExact = fromClassList.some(c => c.name.toLowerCase() === spellListClassName.toLowerCase());
 			if (matchesExact) return true;
 
 			// For homebrew/third-party classes: also include spells from the equivalent core class
@@ -310,7 +302,7 @@ class CharacterSheetSpells {
 		// Half casters
 		const halfCasters = ["Paladin", "Ranger", "Artificer"];
 		// Third casters
-		const thirdCasters = ["Eldritch Knight", "Arcane Trickster"];
+		const thirdCasters = ["Eldritch Knight", "Arcane Trickster", "Gambler"];
 
 		const className = classInfo.name;
 		const subclassName = classInfo.subclass?.name;
@@ -423,17 +415,64 @@ class CharacterSheetSpells {
 			} else if (info.type === "prepared") {
 				const currentPrepared = preparedSpells.length;
 				const maxPrepared = info.preparedMax || info.max;
-				const colorClass = currentPrepared > maxPrepared ? "text-danger" : (currentPrepared === maxPrepared ? "text-success" : "");
-				const icon = currentPrepared > maxPrepared ? `<span class="glyphicon glyphicon-alert mr-1"></span>` : (info.is2024 ? "✨ " : "📚 ");
-				const editionLabel = info.is2024 ? "2024" : "2014";
 
-				statusBar.append(e_({outer: `
-					<div style="display: flex; align-items: center; gap: 6px;">
-						<span style="color: ${info.is2024 ? "#fbbf24" : "#a78bfa"};">${icon}Prepared:</span>
-						<span class="bold ${colorClass}">${currentPrepared}/${maxPrepared}</span>
-						<span class="ve-muted ve-small" title="Prepared spells can be changed after a long rest.">(${editionLabel} rules)</span>
-					</div>
-				`}));
+				// Gambler: rolled prepared count with special display
+				if (info.isRolledPrepared) {
+					const rolledMax = this._state.getGamblerPreparedCount();
+					const gamblerPrepared = this._state.getSpells()
+						.filter(s => (s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler") && s.prepared && s.level > 0)
+						.length;
+					if (rolledMax != null) {
+						const colorClass = gamblerPrepared > rolledMax ? "text-danger" : (gamblerPrepared === rolledMax ? "text-success" : "");
+						statusBar.append(e_({outer: `
+							<div style="display: flex; align-items: center; gap: 6px;">
+								<span style="color: #c084fc;">\u{1F3B2} Prepared:</span>
+								<span class="bold ${colorClass}">${gamblerPrepared}/${rolledMax}</span>
+								<span class="ve-muted ve-small" title="Gambler prepares spells by rolling ${info.preparedDice || "dice"} each day.">(rolled for today)</span>
+							</div>
+						`}));
+					} else {
+						const dice = info.preparedDice || "2d4";
+						const wrapper = e_({outer: `
+							<div style="display: flex; align-items: center; gap: 6px;">
+								<span style="color: #c084fc;">\u{1F3B2} Prepared:</span>
+								<span class="bold">?</span>
+								<button class="btn btn-xs btn-outline-primary charsheet__gambler-roll-btn-inline">Roll ${dice}</button>
+								<span class="ve-muted ve-small">(not yet rolled)</span>
+							</div>
+						`});
+						statusBar.append(wrapper);
+						wrapper.querySelector(".charsheet__gambler-roll-btn-inline").addEventListener("click", () => {
+							if (this._state.getGamblerPreparedCount() != null) {
+								JqueryUtil.doToast({content: "Already rolled for today \u2014 take a long rest to roll again.", type: "warning"});
+								return;
+							}
+							const rollDetails = this._state.rollGamblerPreparedSpells();
+							if (rollDetails) {
+								JqueryUtil.doToast({
+									content: `\u{1F3B2} Gambler: Rolled ${rollDetails.dice} = (${rollDetails.rolls.join(" + ")}) = ${rollDetails.total} spells prepared`,
+									type: "success",
+									autoHideTime: 5000,
+								});
+								updateStatusBar();
+								this._renderSpellTrackingUI();
+								this._page.saveCharacter();
+							}
+						});
+					}
+				} else {
+					const colorClass = currentPrepared > maxPrepared ? "text-danger" : (currentPrepared === maxPrepared ? "text-success" : "");
+					const icon = currentPrepared > maxPrepared ? `<span class="glyphicon glyphicon-alert mr-1"></span>` : (info.is2024 ? "✨ " : "📚 ");
+					const editionLabel = info.is2024 ? "2024" : "2014";
+
+					statusBar.append(e_({outer: `
+						<div style="display: flex; align-items: center; gap: 6px;">
+							<span style="color: ${info.is2024 ? "#fbbf24" : "#a78bfa"};">${icon}Prepared:</span>
+							<span class="bold ${colorClass}">${currentPrepared}/${maxPrepared}</span>
+							<span class="ve-muted ve-small" title="Prepared spells can be changed after a long rest.">(${editionLabel} rules)</span>
+						</div>
+					`}));
+				}
 			}
 
 			statusBar.style.display = "";
@@ -530,7 +569,11 @@ class CharacterSheetSpells {
 
 		// Get character's classes and subclasses for default filtering
 		const characterClasses = this._state.getClasses();
-		const characterClassNames = characterClasses.map(c => c.name);
+		// Map class names, substituting the spell list class for Gambler (Rogue→Warlock)
+		const characterClassNames = characterClasses.map(c => {
+			if (c.subclass?.name === "Gambler") return "Warlock";
+			return c.name;
+		});
 		const characterSubclassNames = characterClasses
 			.filter(c => c.subclass)
 			.map(c => `${c.name}: ${c.subclass}`);
@@ -1445,6 +1488,17 @@ class CharacterSheetSpells {
 			}
 		}
 
+		// Check Gambler rolled prepared limit (soft limit — adding to spell list, not preparing)
+		if (!isCantrip && info.isRolledPrepared) {
+			const rolledMax = this._state.getGamblerPreparedCount();
+			if (rolledMax == null) {
+				return {
+					canAdd: true,
+					warning: `\u{1F3B2} You haven't rolled for prepared spells yet. Roll in the Spells tab or take a long rest. The spell will be added unprepared.`,
+				};
+			}
+		}
+
 		// Check spells known limits for known casters
 		if (!isCantrip && info.type === "known") {
 			const spells = this._state.getSpells();
@@ -1494,6 +1548,10 @@ class CharacterSheetSpells {
 		// Detect ritual from meta object (raw spell data format)
 		const isRitual = spell.ritual || spell.meta?.ritual || false;
 
+		// Determine source class — Gambler spells are tagged for tracking
+		const classes = this._state.getClasses();
+		const isGambler = classes?.some(c => c.subclass?.name === "Gambler");
+
 		this._state.addSpell({
 			name: spell.name,
 			source: spell.source,
@@ -1507,6 +1565,7 @@ class CharacterSheetSpells {
 			components: this._getComponents(spell),
 			duration: this._getDuration(spell),
 			subschools: spell.subschools || [], // Include rarity/legality tags
+			...(isGambler ? {sourceClass: "Gambler", sourceSubclass: "Gambler"} : {}),
 		});
 
 
@@ -1741,13 +1800,24 @@ class CharacterSheetSpells {
 			this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current - 1);
 		}
 
-		await this._showCastResult(
+		const castResult = await this._showCastResult(
 			spell,
 			selectedSlot.level,
 			selectedSlot.isPact,
 			false,
 			castMeta,
 		);
+
+		// If user cancelled (e.g. target selection), refund the slot
+		if (castResult?.cancelled) {
+			if (selectedSlot.isPact) {
+				this._state.setPactSlotsCurrent(pactSlots.current);
+			} else {
+				const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
+				this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current + 1);
+			}
+			return;
+		}
 
 		// Set concentration if spell requires it
 		if (requiresConcentration) {
@@ -1882,7 +1952,7 @@ class CharacterSheetSpells {
 
 	async _showCastResult (spell, slotLevel = null, isPactSlot = false, isRitual = false, castMeta = null) {
 		// Delegate to the enhanced spell effects handler
-		await this._handleSpellEffects(spell, slotLevel, isPactSlot, isRitual, castMeta);
+		return this._handleSpellEffects(spell, slotLevel, isPactSlot, isRitual, castMeta);
 	}
 
 	async _pChooseActiveMetamagic ({spell, spellData, slotLevel}) {
@@ -2069,9 +2139,21 @@ class CharacterSheetSpells {
 		}
 
 		if (spellData) {
-			const spellcastingMod = this._state.getAbilityMod(this._state.getSpellcastingAbility() || "int");
 			const profBonus = this._state.getProficiencyBonus();
 			const exhaustionDcPenalty = this._state._getExhaustionDcPenalty?.() || 0;
+
+			// Gambler spellcasting: roll modifier dice fresh each cast instead of static ability mod
+			const calcs = this._state.getFeatureCalculations?.();
+			const isGamblerCast = calcs?.hasGamblerSpellcasting;
+			let spellcastingMod;
+			let gamblerModRoll = null;
+			if (isGamblerCast && calcs.gamblerModifierDice) {
+				const rollTotal = Renderer.dice.parseRandomise2(calcs.gamblerModifierDice);
+				gamblerModRoll = {total: rollTotal, dice: calcs.gamblerModifierDice};
+				spellcastingMod = rollTotal;
+			} else {
+				spellcastingMod = this._state.getAbilityMod(this._state.getSpellcastingAbility() || "int");
+			}
 
 			// Check if spell attack
 			if (spellData.entries?.some(e => typeof e === "string" && e.toLowerCase().includes("spell attack"))) {
@@ -2100,7 +2182,8 @@ class CharacterSheetSpells {
 				const seekingText = normalizedCastMeta.attackMeta?.seekingRerollUsed
 					? ` <span class="ve-muted">(rerolled from ${normalizedCastMeta.attackMeta.originalRoll})</span>`
 					: "";
-				attackInfo = `<br>Spell Attack: ${finalRoll} + ${attackBonus}${aimedText} = <strong>${finalRoll + totalAttackBonus}</strong>${seekingText}`;
+				const gamblerAttackNote = gamblerModRoll ? ` <span class="ve-muted">(🎲 ${gamblerModRoll.dice}: ${gamblerModRoll.total})</span>` : "";
+				attackInfo = `<br>Spell Attack: ${finalRoll} + ${attackBonus}${aimedText} = <strong>${finalRoll + totalAttackBonus}</strong>${seekingText}${gamblerAttackNote}`;
 				_rollMeta.attack = {total: finalRoll + totalAttackBonus, breakdown: `1d20 (${finalRoll}) + ${attackBonus}${aimedText}`};
 			}
 
@@ -2110,7 +2193,8 @@ class CharacterSheetSpells {
 				const saveNote = normalizedCastMeta.saveMeta?.firstTargetDisadvantage
 					? "; first target rolls at disadvantage"
 					: "";
-				attackInfo += `<br>Save DC: <strong>${saveDC}</strong> (${spellData.savingThrow.join("/")} save${saveNote})`;
+				const gamblerDcNote = gamblerModRoll ? ` <span class="ve-muted">(🎲 ${gamblerModRoll.dice}: ${gamblerModRoll.total})</span>` : "";
+				attackInfo += `<br>Save DC: <strong>${saveDC}</strong> (${spellData.savingThrow.join("/")} save${saveNote})${gamblerDcNote}`;
 				_rollMeta.dc = {total: saveDC, breakdown: `8 + ${spellcastingMod} + ${profBonus}${exhaustionDcPenalty ? ` - ${exhaustionDcPenalty}` : ""} (${spellData.savingThrow.join("/")})`};
 			}
 
@@ -2134,14 +2218,16 @@ class CharacterSheetSpells {
 			if (needsTargetSelection) {
 				const targetChoice = await this._promptSpellTarget(spell, spellData, effects, targetInfo);
 
-				if (targetChoice === "self") {
+				if (targetChoice == null) {
+					// User cancelled target selection — abort the cast
+					return {cancelled: true};
+				} else if (targetChoice === "self") {
 					effectsApplied = await this._applySpellEffectsToSelf(spell, spellData, effects, slotLevel);
 				} else if (targetChoice === "other") {
 					// For others, just show the roll results - we can't track their HP
 					damageInfo = this._rollSpellHealing(spellData, slotLevel, spell.level)
 						|| ((damageResult = this._rollSpellDamage(spellData, slotLevel, spell.level, appliedMetamagic))?.text || "");
 				}
-				// If cancelled, still show the basic cast info
 			} else if (targetInfo.selfOnly) {
 				// Self-only spells automatically target self
 				effectsApplied = await this._applySpellEffectsToSelf(spell, spellData, effects, slotLevel);
@@ -2212,8 +2298,10 @@ class CharacterSheetSpells {
 
 		// Gambler's Folly - automatic bet roll on spell cast (TGTT Gambler subclass)
 		const gamblerFollyResult = await this._handleGamblerFolly(spell, slotLevel);
+		let hasGamblerFolly = false;
 		if (gamblerFollyResult) {
-			toastContent += gamblerFollyResult;
+			toastContent += gamblerFollyResult.html;
+			hasGamblerFolly = true;
 		}
 
 		// Log spell roll components to roll history
@@ -2225,11 +2313,26 @@ class CharacterSheetSpells {
 				const healMatch = damageInfo.match(/<strong>(\d+)<\/strong>/);
 				if (healMatch) this._page._rollHistory.addRoll({title: `Spell Healing: ${spell.name}`, total: parseInt(healMatch[1]), breakdown: damageInfo.replace(/<[^>]*>/g, "").replace(/^\s*Healing:\s*/, "").trim()});
 			}
+			if (gamblerFollyResult) {
+				this._page._rollHistory.addRoll({title: `Gambler's Folly: ${spell.name}`, total: gamblerFollyResult.roll, breakdown: `d${gamblerFollyResult.die}: ${gamblerFollyResult.roll} \u2014 ${gamblerFollyResult.won ? "Won" : "Lost"}`});
+			}
+		}
+
+		const toastEl = e_({tag: "span", html: toastContent});
+
+		// Attach direct click handler for Gambling Table button (stopPropagation prevents toast close)
+		const gamblerBtn = toastEl.querySelector(".btn-open-gambling-table");
+		if (gamblerBtn) {
+			gamblerBtn.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this._openGamblingTableModal();
+			});
 		}
 
 		JqueryUtil.doToast({
 			type: "success",
-			content: toastContent,
+			content: toastEl,
+			...(hasGamblerFolly ? {autoHideTime: 10000} : {}),
 		});
 
 		// Update UI to show new active states
@@ -2259,29 +2362,29 @@ class CharacterSheetSpells {
 		const result = this._state.rollGamblerBet(slotLevel);
 		if (!result) return null;
 
-		let html = `<br><hr class="hr-1"><span class="text-warning">🎲 <b>Gambler's Folly:</b></span>`;
+		let html = `<br><hr class="hr-1"><span class="text-warning">\u{1F3B2} <b>Gambler's Folly:</b></span>`;
 		html += `<br>Bet Roll: <b>${result.roll}</b> on d${result.die}`;
 
 		if (result.won) {
-			html += ` — <span class="text-success"><b>Won!</b> ✓</span>`;
+			html += ` \u2014 <span class="text-success"><b>Won!</b> \u2713</span>`;
 		} else {
-			html += ` — <span class="text-danger"><b>Lost!</b> Roll d100 on Gambling Table</span>`;
+			html += ` \u2014 <span class="text-danger"><b>Lost!</b> Roll d100 on Gambling Table</span>`;
 
 			// Check if auto-roll is enabled
 			const autoRoll = this._state.getGamblerAutoRollTable?.();
 			if (autoRoll) {
 				const tableResult = this._state.rollGamblingTable();
 				if (tableResult) {
-					html += `<br><span class="text-info">🎰 <b>d100:</b> ${tableResult.roll}</span>`;
+					html += `<br><span class="text-info">\u{1F3B0} <b>d100:</b> ${tableResult.roll}</span>`;
 					html += `<br>${tableResult.effect}`;
 				}
 			} else {
-				// Show button to roll manually
-				html += `<br><button class="btn btn-xs btn-warning mt-1 btn-gambler-table-roll">🎰 Roll d100</button>`;
+				// Button opens gambling table modal — handler attached after element creation (not inline)
+				html += `<br><button class="btn btn-xs btn-outline-info mt-1 btn-open-gambling-table" style="font-weight: 600;">\u{1F3B0} Open Gambling Table</button>`;
 			}
 		}
 
-		return html;
+		return {html, roll: result.roll, die: result.die, won: result.won};
 	}
 
 	/**
@@ -3793,6 +3896,29 @@ class CharacterSheetSpells {
 		const spell = spells.find(s => s.id === spellId);
 		if (!spell || spell.level === 0) return; // Can't unprepare cantrips
 
+		// When preparing (not unpreparing), check Gambler's rolled limit
+		if (!spell.prepared) {
+			const info = this._state.getSpellcastingInfo();
+			if (info?.isRolledPrepared) {
+				const rolledMax = this._state.getGamblerPreparedCount();
+				if (rolledMax == null) {
+					JqueryUtil.doToast({
+						type: "warning",
+						content: "\u{1F3B2} Roll for prepared spells first! Use the Roll button in the spell tracking box, or take a long rest.",
+					});
+					return;
+				}
+				const currentPrepared = this._state.getGamblerCurrentPreparedCount();
+				if (currentPrepared >= rolledMax) {
+					JqueryUtil.doToast({
+						type: "warning",
+						content: `\u{1F3B2} Gambler limit reached: ${currentPrepared}/${rolledMax} spells prepared (rolled ${rolledMax} for today). Unprepare a spell first, or take a long rest to roll again.`,
+					});
+					return;
+				}
+			}
+		}
+
 		// Use state method to persist the change
 		this._state.setSpellPrepared(spellId, !spell.prepared);
 		this._renderSpellList();
@@ -4523,6 +4649,8 @@ class CharacterSheetSpells {
 				break;
 			}
 		}
+		// Gambler uses CHA (not in spellcastingAbilityMap since Rogue isn't a base caster)
+		if (!ability && hasGamblerSpellcasting) ability = "cha";
 
 		if (!ability) {
 			document.getElementById("charsheet-spell-ability").textContent = "—";
@@ -4554,48 +4682,17 @@ class CharacterSheetSpells {
 			"cha": "Charisma",
 		}[ability] || ability.toUpperCase();
 
-		// Gambler spellcasting: show formula with roll buttons instead of static values
+		// Gambler spellcasting: show formula (rolled per cast, not pre-rolled)
 		if (hasGamblerSpellcasting) {
-			document.getElementById("charsheet-spell-ability").textContent = "Gambler (Cha)";
-			
+			document.getElementById("charsheet-spell-ability").textContent = "Charisma (Gambler)";
+
 			// Build formula strings with item/exhaustion bonuses
 			const dcBase = 8 + prof;
 			const dcBonusStr = spellDcBonus > 0 ? ` + ${spellDcBonus}` : (spellDcBonus < 0 ? ` - ${Math.abs(spellDcBonus)}` : "");
 			const dcPenaltyStr = exhaustionDcPenalty > 0 ? ` - ${exhaustionDcPenalty}` : "";
-			const gamblerDcFormula = `${dcBase} + ${calcs.gamblerModifierDice}${dcBonusStr}${dcPenaltyStr}`;
-			
-			const attackBonusStr = spellAttackBonus > 0 ? ` + ${spellAttackBonus}` : (spellAttackBonus < 0 ? ` - ${Math.abs(spellAttackBonus)}` : "");
-			const gamblerAttackFormula = `+${prof} + ${calcs.gamblerModifierDice}${attackBonusStr}`;
 
-			// Create clickable DC display with roll button
-			const dcElement = document.getElementById("charsheet-spell-dc");
-			dcElement.innerHTML = `
-				<span class="charsheet__gambler-formula" title="Roll ${calcs.gamblerModifierDice} per cast">
-					${gamblerDcFormula}
-					<button class="charsheet__gambler-roll-btn btn btn-xs btn-default ml-1" type="button" title="Roll DC">
-						🎲
-					</button>
-				</span>
-			`;
-			dcElement.querySelector(".charsheet__gambler-roll-btn").addEventListener("click", (evt) => {
-				evt.stopPropagation();
-				this._rollGamblerModifier("DC", dcBase + spellDcBonus - exhaustionDcPenalty, calcs.gamblerModifierDice);
-			});
-
-			// Create clickable attack display with roll button
-			const attackElement = document.getElementById("charsheet-spell-attack");
-			attackElement.innerHTML = `
-				<span class="charsheet__gambler-formula" title="Roll ${calcs.gamblerModifierDice} per cast">
-					${gamblerAttackFormula}
-					<button class="charsheet__gambler-roll-btn btn btn-xs btn-default ml-1" type="button" title="Roll Attack">
-						🎲
-					</button>
-				</span>
-			`;
-			attackElement.querySelector(".charsheet__gambler-roll-btn").addEventListener("click", (evt) => {
-				evt.stopPropagation();
-				this._rollGamblerModifier("Attack", prof + spellAttackBonus, calcs.gamblerModifierDice);
-			});
+			document.getElementById("charsheet-spell-dc").textContent = `${dcBase} + ${calcs.gamblerModifierDice}${dcBonusStr}${dcPenaltyStr}`;
+			document.getElementById("charsheet-spell-attack").textContent = `+${prof} + ${calcs.gamblerModifierDice}${spellAttackBonus > 0 ? ` + ${spellAttackBonus}` : (spellAttackBonus < 0 ? ` - ${Math.abs(spellAttackBonus)}` : "")}`;
 		} else {
 			document.getElementById("charsheet-spell-ability").textContent = abilityFull;
 			document.getElementById("charsheet-spell-dc").textContent = saveDC;
@@ -4607,45 +4704,6 @@ class CharacterSheetSpells {
 	}
 
 	/**
-	 * Roll Gambler modifier dice and display result in toast
-	 * @param {string} type - "DC" or "Attack"
-	 * @param {number} baseValue - Base value (DC base or attack bonus)
-	 * @param {string} diceStr - Dice string like "1d6" or "2d4"
-	 */
-	_rollGamblerModifier (type, baseValue, diceStr) {
-		const match = diceStr.match(/(\d+)d(\d+)/);
-		if (!match) return;
-
-		const count = parseInt(match[1]);
-		const sides = parseInt(match[2]);
-
-		// Roll each die
-		const rolls = [];
-		for (let i = 0; i < count; i++) {
-			rolls.push(Math.floor(Math.random() * sides) + 1);
-		}
-		const rollTotal = rolls.reduce((sum, r) => sum + r, 0);
-		const total = baseValue + rollTotal;
-
-		// Build display text
-		const rollsDisplay = rolls.join(" + ");
-		const message = type === "DC"
-			? `🎲 Spell Save DC: ${baseValue} + (${rollsDisplay}) = <strong>${total}</strong>`
-			: `🎲 Spell Attack: +${baseValue} + (${rollsDisplay}) = <strong>+${total}</strong>`;
-
-		// Log to roll history
-		const rollTitle = type === "DC" ? `Gambler Spell DC` : `Gambler Spell Attack`;
-		this._page._rollHistory?.addRoll({title: rollTitle, total, breakdown: `${baseValue} + (${rollsDisplay})`});
-
-		// Show as toast notification
-		JqueryUtil.doToast({
-			content: message,
-			type: "info",
-			autoHideTime: 5000,
-		});
-	}
-
-	/**
 	 * Render the spell tracking UI based on caster type (known vs prepared, 2014 vs 2024)
 	 */
 	_renderSpellTrackingUI () {
@@ -4653,16 +4711,9 @@ class CharacterSheetSpells {
 		const trackingContainer = document.getElementById("charsheet-spell-tracking");
 
 		// Hide all tracking boxes by default
-		for (const id of ["charsheet-known-caster-info", "charsheet-prepared-caster-info-2014", "charsheet-prepared-caster-info-2024", "charsheet-cantrips-info", "charsheet-gambler-caster-info"]) {
+		for (const id of ["charsheet-known-caster-info", "charsheet-prepared-caster-info-2014", "charsheet-prepared-caster-info-2024", "charsheet-cantrips-info"]) {
 			const el = document.getElementById(id);
 			if (el) el.style.display = "none";
-		}
-
-		// Check for Gambler spellcasting (TGTT Rogue subclass)
-		const calcs = this._state.getFeatureCalculations();
-		if (calcs.hasGamblerSpellcasting) {
-			this._renderGamblerSpellTrackingUI(calcs);
-			return;
 		}
 
 		if (!spellcastingInfo) {
@@ -4721,12 +4772,12 @@ class CharacterSheetSpells {
 				knownInfo.classList.remove("charsheet__spell-tracking-box--over");
 			}
 		} else if (spellcastingInfo.type === "prepared") {
-			// Prepared caster - check if 2024 or 2014
-			const is2024 = spellcastingInfo.is2024;
-			const currentPrepared = preparedSpells.length;
-			const maxPrepared = spellcastingInfo.preparedMax || spellcastingInfo.max;
-
-			if (is2024) {
+			// Gambler: rolled prepared count with roll button
+			if (spellcastingInfo.isRolledPrepared) {
+				this._renderGamblerPreparedTracking(spellcastingInfo);
+			} else if (spellcastingInfo.is2024) {
+				const currentPrepared = preparedSpells.length;
+				const maxPrepared = spellcastingInfo.preparedMax || spellcastingInfo.max;
 				const preparedInfo = document.getElementById("charsheet-prepared-caster-info-2024"); preparedInfo.style.display = "";
 				document.getElementById("charsheet-spells-prepared-current-2024").textContent = currentPrepared;
 				document.getElementById("charsheet-spells-prepared-max-2024").textContent = maxPrepared;
@@ -4740,6 +4791,8 @@ class CharacterSheetSpells {
 					preparedInfo.classList.remove("charsheet__spell-tracking-box--over");
 				}
 			} else {
+				const currentPrepared = preparedSpells.length;
+				const maxPrepared = spellcastingInfo.preparedMax || spellcastingInfo.max;
 				const preparedInfo = document.getElementById("charsheet-prepared-caster-info-2014"); preparedInfo.style.display = "";
 				document.getElementById("charsheet-spells-prepared-current-2014").textContent = currentPrepared;
 				document.getElementById("charsheet-spells-prepared-max-2014").textContent = maxPrepared;
@@ -4787,401 +4840,77 @@ class CharacterSheetSpells {
 	}
 
 	/**
-	 * Render Gambler-specific spell tracking UI with rolled prepared count.
-	 * Gambler prepares spells by rolling 2d4 (3d6 at L13) each day.
-	 * @param {object} calcs - Feature calculations from state
+	 * Render Gambler prepared spell tracking in the normal tracking area.
+	 * Shows rolled prepared count with roll button, reusing the 2014 prepared box.
 	 */
-	_renderGamblerSpellTrackingUI (calcs) {
-		const trackingContainer = document.getElementById("charsheet-spell-tracking"); trackingContainer.style.display = "";
-		
-		// Get or create Gambler-specific tracking box
-		let gamblerInfo = document.getElementById("charsheet-gambler-caster-info");
-		if (!gamblerInfo) {
-			// Create the Gambler tracking box dynamically if not in HTML
-			gamblerInfo = e_({outer: `
-				<div id="charsheet-gambler-caster-info" class="charsheet__spell-tracking-box charsheet__spell-tracking-box--gambler">
-					<div class="charsheet__spell-tracking-header">
-						<span class="charsheet__spell-tracking-icon">🎲</span>
-						<span class="charsheet__spell-tracking-title">Gambler Spells</span>
-						<span class="charsheet__spell-tracking-badge" title="Gambler (TGTT) - Roll for prepared spells each day">TGTT</span>
-					</div>
-					<div class="charsheet__spell-tracking-body">
-						<div class="charsheet__spell-tracking-count charsheet__gambler-prepared-display">
-							<span id="charsheet-gambler-prepared-current">0</span>
-							<span class="charsheet__spell-tracking-separator">/</span>
-							<span id="charsheet-gambler-prepared-max">—</span>
-						</div>
-						<div class="charsheet__spell-tracking-hint" id="charsheet-gambler-hint">Roll for spells after long rest</div>
-						<button id="charsheet-gambler-roll-prepared-btn" class="btn btn-sm btn-primary mt-2" style="display: none;">
-							🎲 Roll ${calcs.gamblerSpellsPreparedDice}
-						</button>
-					</div>
-				</div>
-			`});
-			trackingContainer.append(gamblerInfo);
-		}
+	_renderGamblerPreparedTracking (spellcastingInfo) {
+		const preparedInfo = document.getElementById("charsheet-prepared-caster-info-2014");
+		preparedInfo.style.display = "";
 
-		gamblerInfo.style.display = "";
+		// Override header to show Gambler-specific labels
+		const titleEl = preparedInfo.querySelector(".charsheet__spell-tracking-title");
+		if (titleEl) titleEl.textContent = "Gambler Spells";
+		const badgeEl = preparedInfo.querySelector(".charsheet__spell-tracking-badge");
+		if (badgeEl) { badgeEl.textContent = "\u{1F3B2}"; badgeEl.title = "Gambler (TGTT) \u2014 Roll for prepared count after each long rest"; }
 
-		// Get Gambler prepared spell state
-		const currentPrepared = this._state.getGamblerCurrentPreparedCount();
 		const rolledMax = this._state.getGamblerPreparedCount();
-		const rollDetails = this._state.getGamblerPreparedRollDetails();
+		const gamblerPrepared = this._state.getSpells()
+			.filter(s => (s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler") && s.prepared && s.level > 0)
+			.length;
 
-		// Update current count
-		document.getElementById("charsheet-gambler-prepared-current").textContent = currentPrepared;
+		if (rolledMax != null) {
+			// Already rolled — show result clearly
+			document.getElementById("charsheet-spells-prepared-current-2014").textContent = gamblerPrepared;
+			document.getElementById("charsheet-spells-prepared-max-2014").textContent = rolledMax;
 
-		// Update max display and hint based on rolled state
-		const maxDisplay = document.getElementById("charsheet-gambler-prepared-max");
-		const hint = document.getElementById("charsheet-gambler-hint");
-		const rollBtn = document.getElementById("charsheet-gambler-roll-prepared-btn");
-
-		if (rolledMax !== null) {
-			// Already rolled - show the rolled value
-			maxDisplay.textContent = rolledMax;
-			if (rollDetails) {
-				hint.innerHTML = `Rolled <strong>${rollDetails.dice}</strong>: (${rollDetails.rolls.join(" + ")}) = ${rollDetails.total}`;
-			} else {
-				hint.textContent = `Rolled ${rolledMax} for today`;
-			}
-			rollBtn.style.display = "none";
-
-			// Show "Manage Prepared" button
-			let manageBtn = document.getElementById("charsheet-gambler-manage-prepared-btn");
-			if (!manageBtn) {
-				manageBtn = e_({outer: `<button id="charsheet-gambler-manage-prepared-btn" class="btn btn-sm btn-outline-primary mt-2">📜 Manage Spells & Cantrips</button>`});
-				rollBtn.after(manageBtn);
-			}
-			manageBtn.style.display = "";
-			manageBtn.addEventListener("click", () => this._openGamblerSpellPicker(calcs, rolledMax));
-
-			// Check for over-limit
-			const countEl = gamblerInfo.querySelector(".charsheet__spell-tracking-count");
-			if (currentPrepared > rolledMax) {
+			const countEl = preparedInfo.querySelector(".charsheet__spell-tracking-count");
+			if (gamblerPrepared > rolledMax) {
 				countEl.classList.add("charsheet__spell-tracking-count--over");
-				gamblerInfo.classList.add("charsheet__spell-tracking-box--over");
+				preparedInfo.classList.add("charsheet__spell-tracking-box--over");
 			} else {
 				countEl.classList.remove("charsheet__spell-tracking-count--over");
-				gamblerInfo.classList.remove("charsheet__spell-tracking-box--over");
+				preparedInfo.classList.remove("charsheet__spell-tracking-box--over");
+			}
+
+			const hintEl = preparedInfo.querySelector(".charsheet__spell-tracking-hint");
+			if (hintEl) {
+				const rollDetails = this._state.getGamblerPreparedRollDetails();
+				hintEl.textContent = rollDetails
+					? `\u{1F3B2} Rolled ${rollDetails.dice}: (${rollDetails.rolls.join(" + ")}) = ${rollDetails.total} for today`
+					: `\u{1F3B2} Rolled ${rolledMax} for today`;
 			}
 		} else {
-			// Not rolled yet - show dice formula and roll button
-			maxDisplay.innerHTML = `<span class="ve-muted">${calcs.gamblerSpellsPreparedDice}</span>`;
-			hint.textContent = "Roll for prepared spells after long rest";
-			rollBtn.textContent = `🎲 Roll ${calcs.gamblerSpellsPreparedDice}`;
-			rollBtn.style.display = "";
-			rollBtn.addEventListener("click", () => this._onGamblerRollPrepared(calcs));
-			
-			// Hide manage button if present
-			document.getElementById("charsheet-gambler-manage-prepared-btn").style.display = "none";
-		}
+			// Not yet rolled — show prompt
+			document.getElementById("charsheet-spells-prepared-current-2014").textContent = gamblerPrepared;
+			document.getElementById("charsheet-spells-prepared-max-2014").textContent = "?";
 
-		// Also show cantrips for Gambler
-		const allCantrips = this._state.getCantripsKnown();
-		const gamblerCantrips = allCantrips.filter(c => c.sourceClass === "Gambler" || c.sourceSubclass === "Gambler");
-		if (calcs.gamblerCantripsKnown > 0) {
-			const cantripsInfo = document.getElementById("charsheet-cantrips-info"); cantripsInfo.style.display = "";
-			document.getElementById("charsheet-cantrips-current").textContent = gamblerCantrips.length;
-			document.getElementById("charsheet-cantrips-max").textContent = calcs.gamblerCantripsKnown;
-		}
-	}
-
-	/**
-	 * Handle click on Gambler "Roll Prepared Spells" button
-	 * @param {object} calcs - Feature calculations
-	 */
-	_onGamblerRollPrepared (calcs) {
-		const rollDetails = this._state.rollGamblerPreparedSpells();
-		if (!rollDetails) return;
-
-		// Show toast with roll result
-		JqueryUtil.doToast({
-			content: `🎲 Gambler Prepared Spells: Rolled ${rollDetails.dice} = (${rollDetails.rolls.join(" + ")}) = <strong>${rollDetails.total}</strong> spells`,
-			type: "success",
-			autoHideTime: 5000,
-		});
-
-		// Re-render the tracking UI to reflect the new state
-		this._renderGamblerSpellTrackingUI(calcs);
-
-		// Open spell picker immediately after rolling
-		const rolledMax = this._state.getGamblerPreparedCount();
-		if (rolledMax > 0) {
-			this._openGamblerSpellPicker(calcs, rolledMax);
-		}
-	}
-
-	/**
-	 * Open a spell picker for Gambler to select prepared spells and cantrips.
-	 * Filters to Warlock spell list only and enforces rolled maximum for leveled spells
-	 * and gamblerCantripsKnown cap for cantrips.
-	 * @param {object} calcs - Feature calculations
-	 * @param {number} maxPrepared - Maximum number of leveled spells to prepare (rolled value)
-	 */
-	async _openGamblerSpellPicker (calcs, maxPrepared) {
-		// Get Gambler's max spell level based on 1/3 caster progression
-		const gamblerLevel = this._state.getClasses().find(c => c.subclass?.name === "Gambler")?.level || 3;
-		const thirdCasterLevel = Math.floor(gamblerLevel / 3);
-		const maxSpellLevel = thirdCasterLevel >= 10 ? 4 : (thirdCasterLevel >= 7 ? 3 : (thirdCasterLevel >= 4 ? 2 : 1));
-		const maxCantrips = calcs.gamblerCantripsKnown || 3;
-
-		// Get currently prepared Gambler spells (leveled only)
-		const currentPrepared = this._state.getSpells()
-			.filter(s => (s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler") && s.prepared && s.level > 0)
-			.map(s => ({name: s.name, source: s.source}));
-
-		// Get currently known Gambler cantrips
-		const currentCantrips = this._state.getCantripsKnown()
-			.filter(c => c.sourceClass === "Gambler" || c.sourceSubclass === "Gambler")
-			.map(c => ({name: c.name, source: c.source}));
-
-		// Filter spells to Warlock list (cantrips + leveled spells)
-		const allSpells = this._allSpells || await this._pLoadAllSpells();
-		const warlockSpells = allSpells.filter(spell => {
-			// Must be on Warlock spell list
-			const fromClassList = Renderer.spell.getCombinedClasses(spell, "fromClassList");
-			const isWarlockSpell = fromClassList?.some(c => c.name === "Warlock");
-			if (!isWarlockSpell) return false;
-
-			// Must be within Gambler's spell level limit (allow cantrips)
-			if (spell.level > maxSpellLevel) return false;
-
-			return true;
-		});
-
-		// Build modal content
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: `Gambler: Select Spells & Cantrips`,
-			isWidth100: true,
-			isHeight100: true,
-			isUncappedHeight: true,
-			cbClose: () => {
-				// Re-render tracking UI when modal closes
-				this._renderGamblerSpellTrackingUI(calcs);
-			},
-		});
-
-		// Track selected spells and cantrips separately
-		let selectedSpells = [...currentPrepared];
-		let selectedCantrips = [...currentCantrips];
-
-		// Progress header
-		const header = e_({outer: `
-			<div class="charsheet__spell-picker-header mb-3">
-				<div class="charsheet__spell-picker-counter">
-					<span class="charsheet__spell-picker-counter-icon">🎲</span>
-					<span class="charsheet__spell-picker-counter-label">Spells:</span>
-					<span class="charsheet__spell-picker-counter-value spell-counter-value">
-						<span class="spell-count-current">${selectedSpells.length}</span>/<span class="spell-count-max">${maxPrepared}</span>
-					</span>
-					<span class="mx-2">|</span>
-					<span class="charsheet__spell-picker-counter-label">Cantrips:</span>
-					<span class="charsheet__spell-picker-counter-value cantrip-counter-value">
-						<span class="cantrip-count-current">${selectedCantrips.length}</span>/<span class="cantrip-count-max">${maxCantrips}</span>
-					</span>
-				</div>
-				<div class="ve-muted ve-small ml-auto">Warlock spell list only • Max level ${maxSpellLevel}</div>
-			</div>
-		`});
-		modalInner.append(header);
-
-		const updateHeader = () => {
-			header.querySelector(".spell-count-current").textContent = selectedSpells.length;
-			const spellValueEl = header.querySelector(".spell-counter-value");
-			spellValueEl.classList.remove("charsheet__spell-picker-counter-value--complete", "charsheet__spell-picker-counter-value--over");
-			if (selectedSpells.length === maxPrepared) {
-				spellValueEl.classList.add("charsheet__spell-picker-counter-value--complete");
-			} else if (selectedSpells.length > maxPrepared) {
-				spellValueEl.classList.add("charsheet__spell-picker-counter-value--over");
-			}
-
-			header.querySelector(".cantrip-count-current").textContent = selectedCantrips.length;
-			const cantripValueEl = header.querySelector(".cantrip-counter-value");
-			cantripValueEl.classList.remove("charsheet__spell-picker-counter-value--complete", "charsheet__spell-picker-counter-value--over");
-			if (selectedCantrips.length === maxCantrips) {
-				cantripValueEl.classList.add("charsheet__spell-picker-counter-value--complete");
-			} else if (selectedCantrips.length > maxCantrips) {
-				cantripValueEl.classList.add("charsheet__spell-picker-counter-value--over");
-			}
-		};
-
-		// Filter controls
-		const filterRow = e_({outer: `<div class="ve-flex ve-flex-wrap gap-2 mb-3"></div>`});
-		modalInner.append(filterRow);
-
-		// Level filter
-		const levelFilterEl = e_({outer: `
-			<select class="form-control form-control-sm" style="width: auto;">
-				<option value="">All Levels</option>
-				<option value="0">Cantrips</option>
-				${Array.from({length: maxSpellLevel}, (_, i) => `<option value="${i + 1}">Level ${i + 1}</option>`).join("")}
-			</select>
-		`});
-		filterRow.append(levelFilterEl);
-
-		// Search filter
-		const searchInput = e_({outer: `<input type="text" class="form-control form-control-sm" placeholder="Search spells..." style="flex: 1; min-width: 150px;">`});
-		filterRow.append(searchInput);
-
-		// Spell list container
-		const spellList = e_({outer: `<div class="charsheet__spell-picker-list" style="max-height: 400px; overflow-y: auto;"></div>`});
-		modalInner.append(spellList);
-
-		// Render spell list
-		const renderSpells = () => {
-			spellList.innerHTML = "";
-			const levelFilterVal = levelFilterEl.value !== "" ? parseInt(levelFilterEl.value) : null;
-			const searchFilter = searchInput.value.toLowerCase().trim();
-
-			const filteredSpells = warlockSpells.filter(spell => {
-				if (levelFilterVal !== null && spell.level !== levelFilterVal) return false;
-				if (searchFilter && !spell.name.toLowerCase().includes(searchFilter)) return false;
-				return true;
-			}).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
-
-			if (!filteredSpells.length) {
-				spellList.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center py-3">No spells match your filters</p>`);
-				return;
-			}
-
-			// Group by level
-			const byLevel = {};
-			filteredSpells.forEach(spell => {
-				if (!byLevel[spell.level]) byLevel[spell.level] = [];
-				byLevel[spell.level].push(spell);
-			});
-
-			Object.keys(byLevel).sort((a, b) => a - b).forEach(level => {
-				const levelNum = parseInt(level);
-				const isCantrip = levelNum === 0;
-				spellList.insertAdjacentHTML("beforeend", `<h6 class="charsheet__spell-group-header--small mt-2 mb-1">${isCantrip ? "Cantrips" : `Level ${level}`}</h6>`);
-
-				byLevel[level].forEach(spell => {
-					const trackingArr = isCantrip ? selectedCantrips : selectedSpells;
-					const cap = isCantrip ? maxCantrips : maxPrepared;
-					const isSelected = trackingArr.some(s => s.name === spell.name && s.source === spell.source);
-					const canSelect = trackingArr.length < cap || isSelected;
-
-					const row = e_({outer: `
-						<div class="charsheet__spell-picker-row ${isSelected ? "charsheet__spell-picker-row--selected" : ""} ${!canSelect ? "charsheet__spell-picker-row--disabled" : ""}">
-							<div class="charsheet__spell-picker-checkbox">
-								<input type="checkbox" ${isSelected ? "checked" : ""} ${!canSelect ? "disabled" : ""}>
-							</div>
-							<div class="charsheet__spell-picker-info">
-								<span class="charsheet__spell-picker-name">${spell.name}</span>
-								<span class="charsheet__spell-picker-meta ve-muted ve-small">${Parser.spSchoolAbvToFull(spell.school)} • ${spell.source}</span>
-							</div>
-						</div>
-					`});
-
-					spellList.append(row);
-
-					row.querySelector("input").addEventListener("change", function () {
-						const isNowSelected = this.checked;
-						if (isNowSelected) {
-							if (trackingArr.length >= cap) {
-								this.checked = false;
-								JqueryUtil.doToast({
-									content: isCantrip
-										? `Cannot know more than ${cap} Gambler cantrips`
-										: `Cannot prepare more than ${cap} spells (rolled limit)`,
-									type: "warning",
-								});
-								return;
-							}
-							trackingArr.push({name: spell.name, source: spell.source});
-							row.classList.add("charsheet__spell-picker-row--selected");
-						} else {
-							const idx = trackingArr.findIndex(s => s.name === spell.name && s.source === spell.source);
-							if (idx !== -1) trackingArr.splice(idx, 1);
-							row.classList.remove("charsheet__spell-picker-row--selected");
-						}
-						updateHeader();
-						renderSpells(); // Re-render to update disabled states
-					});
-
-					row.addEventListener("click", (evt) => {
-						if (evt.target.matches("input")) return;
-						const checkbox = row.querySelector("input");
-						if (!checkbox.disabled) {
-							checkbox.checked = !checkbox.checked;
-							checkbox.dispatchEvent(new Event("change"));
-						}
-					});
-				});
-			});
-		};
-
-		levelFilterEl.addEventListener("change", renderSpells);
-		searchInput.addEventListener("input", renderSpells);
-		renderSpells();
-
-		// Confirm button
-		const btnConfirm = e_({outer: `<button class="btn btn-primary mt-3">Confirm Selection</button>`});
-		modalInner.append(btnConfirm);
-		btnConfirm.addEventListener("click", () => {
-			// Clear old Gambler prepared spells (leveled)
-			this._state.getSpells()
-				.filter(s => (s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler") && s.level > 0)
-				.forEach(s => {
-					this._state.setSpellPrepared(s.name, s.source, false);
-				});
-
-			// Set new leveled spell selections as prepared
-			selectedSpells.forEach(s => {
-				const existing = this._state.getSpells().find(sp => sp.name === s.name && sp.source === s.source);
-				if (existing) {
-					this._state.setSpellPrepared(s.name, s.source, true);
-				} else {
-					const spellData = warlockSpells.find(sp => sp.name === s.name && sp.source === s.source);
-					if (spellData) {
-						this._state.addSpell({
-							name: spellData.name,
-							source: spellData.source,
-							level: spellData.level,
-							school: spellData.school,
-							prepared: true,
-							sourceClass: "Gambler",
-							sourceSubclass: "Gambler",
-						});
+			const hintEl = preparedInfo.querySelector(".charsheet__spell-tracking-hint");
+			if (hintEl) {
+				hintEl.innerHTML = "";
+				const dice = spellcastingInfo.preparedDice || "2d4";
+				const rollBtn = e_({outer: `<button class="btn btn-xs btn-outline-primary">\u{1F3B2} Roll ${dice}</button>`});
+				hintEl.append(rollBtn);
+				hintEl.append(document.createTextNode(" Not yet rolled \u2014 roll after long rest"));
+				rollBtn.addEventListener("click", () => {
+					if (this._state.getGamblerPreparedCount() != null) {
+						JqueryUtil.doToast({content: "Already rolled for today \u2014 take a long rest to roll again.", type: "warning"});
+						return;
 					}
-				}
-			});
-
-			// Clear old Gambler cantrips
-			this._state.getCantripsKnown()
-				.filter(c => c.sourceClass === "Gambler" || c.sourceSubclass === "Gambler")
-				.forEach(c => {
-					this._state.removeSpell(c.name, c.source);
+					const rollDetails = this._state.rollGamblerPreparedSpells();
+					if (rollDetails) {
+						JqueryUtil.doToast({
+							content: `\u{1F3B2} Gambler: Rolled ${rollDetails.dice} = (${rollDetails.rolls.join(" + ")}) = ${rollDetails.total} spells prepared`,
+							type: "success",
+							autoHideTime: 5000,
+						});
+						this._renderSpellTrackingUI();
+						this._page.saveCharacter();
+					}
 				});
-
-			// Add selected cantrips
-			selectedCantrips.forEach(s => {
-				const spellData = warlockSpells.find(sp => sp.name === s.name && sp.source === s.source);
-				if (spellData) {
-					this._state.addSpell({
-						name: spellData.name,
-						source: spellData.source,
-						level: 0,
-						school: spellData.school,
-						sourceClass: "Gambler",
-						sourceSubclass: "Gambler",
-					});
-				}
-			});
-
-			const parts = [];
-			if (selectedSpells.length) parts.push(`${selectedSpells.length} spell${selectedSpells.length !== 1 ? "s" : ""}`);
-			if (selectedCantrips.length) parts.push(`${selectedCantrips.length} cantrip${selectedCantrips.length !== 1 ? "s" : ""}`);
-			JqueryUtil.doToast({
-				content: `Prepared ${parts.join(" and ")} for Gambler`,
-				type: "success",
-			});
-
-			doClose();
-			this._renderSpellList();
-		});
+			}
+		}
 	}
+
 	// #endregion
 
 	// #region Filtered Spell Picker (for feat/feature spell choices)

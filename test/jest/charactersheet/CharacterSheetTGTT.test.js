@@ -6398,6 +6398,105 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						expect(allCantrips.filter(c => c.sourceClass === "Gambler")).toHaveLength(2);
 					});
 				});
+
+				describe("Gambler Spellcasting Integration (getSpellcastingInfo)", () => {
+					it("should return spellcasting info with type=prepared and isRolledPrepared=true", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+						});
+
+						const info = state.getSpellcastingInfo();
+						expect(info).not.toBeNull();
+						expect(info.type).toBe("prepared");
+						expect(info.isRolledPrepared).toBe(true);
+						expect(info.spellListClass).toBe("Warlock");
+					});
+
+					it("should report cantripsKnown from Gambler progression", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+						});
+						const info = state.getSpellcastingInfo();
+						expect(info.cantripsKnown).toBe(3);
+
+						state.addClass({name: "Rogue", source: "TGTT", level: 10});
+						const info10 = state.getSpellcastingInfo();
+						expect(info10.cantripsKnown).toBe(4);
+					});
+
+					it("should report preparedMax as rolled total if already rolled", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+						});
+
+						state.rollGamblerPreparedSpells();
+						const info = state.getSpellcastingInfo();
+						const rolled = state.getGamblerPreparedCount();
+						expect(info.preparedMax).toBe(rolled);
+					});
+
+					it("should report preparedDice formula if not yet rolled", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+						});
+
+						const info = state.getSpellcastingInfo();
+						expect(info.preparedDice).toBe("2d4");
+					});
+
+					it("should return null before Gambler subclass (pure Rogue)", () => {
+						state.addClass({name: "Rogue", source: "PHB", level: 2});
+
+						const info = state.getSpellcastingInfo();
+						expect(info).toBeNull();
+					});
+				});
+
+				describe("Gambler calculateSpellSlots Integration", () => {
+					it("should grant 1/3 caster spell slots at level 3", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+						});
+
+						state.calculateSpellSlots();
+						const slots = state.getSpellSlots();
+						// 1/3 of 3 = 1 → 2 first-level slots
+						expect(slots[1]?.max).toBe(2);
+					});
+
+					it("should grant higher spell slots at higher levels", () => {
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 12,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+						});
+
+						state.calculateSpellSlots();
+						const slots = state.getSpellSlots();
+						// 1/3 of 12 = 4 → should have 2nd-level slots
+						expect(slots[2]?.max).toBeGreaterThanOrEqual(2);
+					});
+
+					it("should contribute 1/3 to multiclass spell slots", () => {
+						// Gambler 3 = 1/3 → 1 effective caster level
+						state.addClass({
+							name: "Rogue", source: "TGTT", level: 3,
+							subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+						});
+						// Wizard 5 = 5 effective caster levels
+						state.addClass({name: "Wizard", source: "PHB", level: 5});
+
+						state.calculateSpellSlots();
+						const slots = state.getSpellSlots();
+						// Combined: 5 + 1 = 6 → multiclass table for caster level 6
+						// Caster level 6 has 3rd-level slots
+						expect(slots[3]?.max).toBeGreaterThanOrEqual(2);
+					});
+				});
 			});
 			
 			describe("Trickster", () => {

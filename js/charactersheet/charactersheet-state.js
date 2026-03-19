@@ -3368,6 +3368,14 @@ class CharacterSheetState {
 			// grants: {spells: [{name, source, level, atWill, uses, recharge}], proficiencies: {skills:[], tools:[], weapons:[], armor:[], languages:[]}, features: [{name, source, featureType}]}
 			customAbilities: [],
 
+			// Active combat method effects (ongoing damage, weapon modifiers, etc.)
+			// Each effect: {id, name, weaponId, weaponName, ongoingDamage, ongoingSaveType, saveDc, alternativeEndCheck, description}
+			activeCombatMethodEffects: [],
+
+			// Remembered weapon choices for weapon-modifier combat methods
+			// Maps method name → {weaponId, weaponName}
+			combatMethodWeaponChoices: {},
+
 			// Granted proficiencies tracking - maps proficiency to source custom ability IDs
 			// Allows cleanup when custom abilities are removed
 			// Structure: {skills: {[skill]: [abilityId, ...]}, tools: {...}, weapons: {...}, armor: {...}, languages: {...}}
@@ -3565,6 +3573,11 @@ class CharacterSheetState {
 		// Ensure customAbilities array exists
 		if (!Array.isArray(this._data.customAbilities)) {
 			this._data.customAbilities = [];
+		}
+
+		// Ensure activeCombatMethodEffects array exists
+		if (!Array.isArray(this._data.activeCombatMethodEffects)) {
+			this._data.activeCombatMethodEffects = [];
 		}
 
 		// Ensure combat traditions are normalized to canonical entries
@@ -7126,6 +7139,10 @@ class CharacterSheetState {
 				is2024: info.is2024,
 				isMulticlass: false,
 				byClass: spellcastingByClass,
+				// Gambler-specific fields
+				...(info.isRolledPrepared ? {isRolledPrepared: true} : {}),
+				...(info.spellListClass ? {spellListClass: info.spellListClass} : {}),
+				...(info.preparedDice ? {preparedDice: info.preparedDice} : {}),
 			};
 		}
 
@@ -7295,6 +7312,24 @@ class CharacterSheetState {
 			};
 		}
 
+		// Gambler (TGTT Rogue subclass) — 1/3 caster using Warlock spell list with rolled prepared count
+		if (subclassName === "Gambler") {
+			if (level < 3) return null; // Gambler spellcasting starts at level 3
+			const calcs = this.getFeatureCalculations();
+			const rolledMax = this.getGamblerPreparedCount();
+			return {
+				type: "prepared",
+				max: rolledMax || 0,
+				cantripsKnown: calcs.gamblerCantripsKnown || (level >= 10 ? 4 : 3),
+				preparedMax: rolledMax || 0,
+				preparedDice: calcs.gamblerSpellsPreparedDice || (level >= 13 ? "3d6" : "2d4"),
+				hasFullAccess: false,
+				is2024: false,
+				isRolledPrepared: true,
+				spellListClass: "Warlock",
+			};
+		}
+
 		return null;
 	}
 
@@ -7382,6 +7417,7 @@ class CharacterSheetState {
 		const subclassProgressionFallback = {
 			"Eldritch Knight": "1/3",
 			"Arcane Trickster": "1/3",
+			"Gambler": "1/3",
 		};
 
 		// Calculate total caster level (for multiclassing)
@@ -14940,6 +14976,11 @@ class CharacterSheetState {
 				if (stanceEffects.saveBonuses && Object.keys(stanceEffects.saveBonuses).length > 0) {
 					calculations.stanceSaveBonuses = stanceEffects.saveBonuses;
 				}
+
+				// Apply passive score bonuses from stance (only if non-empty)
+				if (stanceEffects.passiveBonuses && Object.keys(stanceEffects.passiveBonuses).length > 0) {
+					calculations.stancePassiveBonuses = stanceEffects.passiveBonuses;
+				}
 			}
 		}
 
@@ -21503,8 +21544,10 @@ class CharacterSheetState {
 			}
 		}
 
-		// Parse from description text
-		const text = feature.description || "";
+		// Parse from description text — strip HTML tags for reliable regex matching
+		// Fall back to JSON-stringified entries when description is empty (raw feature objects from getFeatures())
+		const rawText = feature.description || (feature.entries ? JSON.stringify(feature.entries) : "");
+		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1").replace(/\s+/g, " ");
 
 		// Parse exertion cost: "(1 Exertion Point)", "(3 Exertion Points)"
 		const exertionMatch = text.match(/\((\d+)\s*Exertion\s*Points?\)/i);
@@ -21576,6 +21619,38 @@ class CharacterSheetState {
 			effects.bonusDamage = {die: "weapon", condition};
 		}
 
+		// Method category classification
+		if (effects.isStance) {
+			effects.methodCategory = "stance";
+		} else if (/(?:next\s+attack\s+roll|if\s+you\s+hit\s+with\s+your\s+next\s+attack|your\s+next\s+attack|hit\s+with\s+(?:the|your)\s+(?:chosen\s+)?weapon)/i.test(text)) {
+			effects.methodCategory = "weaponModifier";
+		} else if (/(?:regain\s+hit\s+points|healing\s+equal)/i.test(text)) {
+			effects.methodCategory = "selfHeal";
+		} else if (/\bReaction\b/i.test(text.split(".")[0] || "")) {
+			effects.methodCategory = "reaction";
+		} else if (/(?:AC\s+increases?\s+by|\+\d+\s+(?:to\s+)?(?:your\s+)?AC|bonus\s+to\s+(?:your\s+)?AC)/i.test(text)) {
+			effects.methodCategory = "acBuff";
+		} else {
+			effects.methodCategory = "instant";
+		}
+
+		// Weapon modifier details: ongoing damage, save info, alternative end conditions
+		if (effects.methodCategory === "weaponModifier") {
+			const ongoingMatch = text.match(/(?:deals?\s+)?(\d+d\d+)\s+ongoing\s+damage/i);
+			if (ongoingMatch) {
+				effects.ongoingDamage = ongoingMatch[1];
+			}
+			const ongoingSaveMatch = text.match(/(Strength|Dexterity|Constitution|Wisdom|Intelligence|Charisma)\s+saving\s+throw.*?ending\s+the\s+effect/i);
+			if (ongoingSaveMatch) {
+				effects.ongoingSaveType = ongoingSaveMatch[1].toLowerCase();
+			}
+			// Alternative end: "Medicine check against your method DC"
+			const altEndMatch = text.match(/(Medicine|Athletics|Acrobatics)\s+check\s+(?:against\s+)?(?:your\s+)?(?:method\s+)?DC/i);
+			if (altEndMatch) {
+				effects.alternativeEndCheck = altEndMatch[1].toLowerCase();
+			}
+		}
+
 		return effects;
 	}
 
@@ -21589,6 +21664,7 @@ class CharacterSheetState {
 			speedBonus: 0,
 			skillBonuses: {},
 			saveBonuses: {},
+			passiveBonuses: {},
 			otherEffects: [],
 		};
 
@@ -21601,10 +21677,13 @@ class CharacterSheetState {
 		}
 
 		// Skill bonuses: "bonus to Strength (Athletics) checks equal to your proficiency bonus"
-		const skillBonusMatch = text.match(/bonus\s+to\s+(\w+)\s*\(([\w\s]+)\)\s+checks?\s+equal\s+to\s+your\s+proficiency\s+bonus/i);
-		if (skillBonusMatch) {
-			const skill = skillBonusMatch[2].toLowerCase().trim();
-			effects.skillBonuses[skill] = "proficiency"; // Will be resolved to actual value at calculation time
+		// Also handles multiple skills: "bonus to X (Skill1) and Y (Skill2) checks equal to..."
+		const skillBonusSegment = text.match(/bonus\s+to\s+([\w\s()]+?)\s+checks?\s+equal\s+to\s+your\s+proficiency\s+bonus/i);
+		if (skillBonusSegment) {
+			for (const pairMatch of skillBonusSegment[1].matchAll(/(\w+)\s*\(([\w\s]+)\)/gi)) {
+				const skill = pairMatch[2].toLowerCase().replace(/\s+/g, "");
+				effects.skillBonuses[skill] = "proficiency";
+			}
 		}
 
 		// Save bonuses: "bonus equal to your proficiency bonus on saving throws made to resist being moved"
@@ -21620,6 +21699,13 @@ class CharacterSheetState {
 				type: "ignoreDifficultTerrain",
 				amount: parseInt(terrainMatch[1], 10),
 			});
+		}
+
+		// Passive score bonuses: "passive Wisdom (Insight) score increases by 3"
+		const passiveBonusMatch = text.match(/passive\s+(\w+)\s*\(([\w\s]+)\)\s+(?:score\s+)?increases?\s+by\s+(\d+)/i);
+		if (passiveBonusMatch) {
+			const skill = passiveBonusMatch[2].toLowerCase().replace(/\s+/g, "");
+			effects.passiveBonuses[skill] = parseInt(passiveBonusMatch[3], 10);
 		}
 
 		return effects;
@@ -21663,6 +21749,11 @@ class CharacterSheetState {
 				resolved[save] = value === "proficiency" ? profBonus : value;
 			}
 			resolvedEffects.saveBonuses = resolved;
+		}
+
+		// Passive bonuses are numeric — pass through unchanged
+		if (parsed.stanceEffects.passiveBonuses) {
+			resolvedEffects.passiveBonuses = { ...parsed.stanceEffects.passiveBonuses };
 		}
 
 		return resolvedEffects;
@@ -21817,6 +21908,72 @@ class CharacterSheetState {
 	hasActiveStance () {
 		return this._data.activeStance != null;
 	}
+
+	// #region Active Combat Method Effects
+	/**
+	 * Activate a combat method effect (e.g. Wounding Strike's ongoing damage).
+	 * @param {object} effectData - {name, weaponId, weaponName, ongoingDamage, ongoingSaveType, saveDc, alternativeEndCheck, description}
+	 */
+	activateCombatMethodEffect (effectData) {
+		if (!Array.isArray(this._data.activeCombatMethodEffects)) {
+			this._data.activeCombatMethodEffects = [];
+		}
+		// Replace existing effect on same weapon
+		this._data.activeCombatMethodEffects = this._data.activeCombatMethodEffects.filter(
+			e => e.weaponId !== effectData.weaponId,
+		);
+		this._data.activeCombatMethodEffects.push({
+			id: `cme-${Date.now()}`,
+			...effectData,
+		});
+	}
+
+	/**
+	 * Deactivate a combat method effect by its id.
+	 * @param {string} effectId
+	 */
+	deactivateCombatMethodEffect (effectId) {
+		if (!Array.isArray(this._data.activeCombatMethodEffects)) return;
+		this._data.activeCombatMethodEffects = this._data.activeCombatMethodEffects.filter(
+			e => e.id !== effectId,
+		);
+	}
+
+	/**
+	 * Get all active combat method effects.
+	 * @returns {Array}
+	 */
+	getActiveCombatMethodEffects () {
+		return [...(this._data.activeCombatMethodEffects || [])];
+	}
+
+	/**
+	 * Clear all active combat method effects.
+	 */
+	clearCombatMethodEffects () {
+		this._data.activeCombatMethodEffects = [];
+	}
+
+	/**
+	 * Remember a weapon choice for a combat method.
+	 * @param {string} methodName
+	 * @param {string} weaponId
+	 * @param {string} weaponName
+	 */
+	setCombatMethodWeapon (methodName, weaponId, weaponName) {
+		if (!this._data.combatMethodWeaponChoices) this._data.combatMethodWeaponChoices = {};
+		this._data.combatMethodWeaponChoices[methodName] = {weaponId, weaponName};
+	}
+
+	/**
+	 * Get the remembered weapon choice for a combat method.
+	 * @param {string} methodName
+	 * @returns {{weaponId: string, weaponName: string}|null}
+	 */
+	getCombatMethodWeapon (methodName) {
+		return this._data.combatMethodWeaponChoices?.[methodName] || null;
+	}
+	// #endregion
 
 	/**
 	 * Use a combat method, spending the required exertion
@@ -26268,7 +26425,12 @@ class CharacterSheetState {
 		if (advState.advantage) advBonus = 5;
 		else if (advState.disadvantage) advBonus = -5;
 
-		return 10 + skillMod + passiveAgg.bonus + advBonus;
+		// Combat stance passive bonuses (Thelemar homebrew)
+		const calculations = this.getFeatureCalculations();
+		const normalizedSkill = skill?.toLowerCase().replace(/\s+/g, "") || skill;
+		const stancePassive = calculations.stancePassiveBonuses?.[normalizedSkill] || 0;
+
+		return 10 + skillMod + passiveAgg.bonus + advBonus + stancePassive;
 	}
 	// #endregion
 
@@ -29702,6 +29864,7 @@ class CharacterSheetState {
 					stateId: state.id,
 					stateName: state.name,
 					stateIcon: state.icon,
+					stateTypeId: state.stateTypeId,
 				});
 			}
 		}
@@ -29811,7 +29974,8 @@ class CharacterSheetState {
 		const effects = this.getActiveStateEffects();
 		let bonus = 0;
 
-		effects.filter(e => e.type === "bonus").forEach(e => {
+		// Skip combatStance effects — the stance-specific system (_getStanceSkillBonus) is authoritative
+		effects.filter(e => e.type === "bonus" && e.stateTypeId !== "combatStance").forEach(e => {
 			// Check for exact skill match: "check:str:athletics"
 			const exactTarget = `check:${ability}:${skill}`;
 			// Check for ability match: "check:str" applies to all STR checks
@@ -29840,7 +30004,8 @@ class CharacterSheetState {
 		const effects = this.getActiveStateEffects();
 		let bonus = 0;
 
-		effects.filter(e => e.type === "bonus").forEach(e => {
+		// Skip combatStance effects — the stance-specific system (_getStanceSaveBonus) is authoritative
+		effects.filter(e => e.type === "bonus" && e.stateTypeId !== "combatStance").forEach(e => {
 			// Check for exact save match: "save:str"
 			const exactTarget = `save:${ability}`;
 			// Check for generic save match: "save" applies to all saves

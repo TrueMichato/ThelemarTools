@@ -7,6 +7,12 @@ import "../../../js/charactersheet/charactersheet-combat.js";
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 
+/** Extract toast content string from doToast mock (content may be a string or an element with innerHTML) */
+const getLastToastContent = () => {
+	const content = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+	return typeof content === "string" ? content : (content.innerHTML || content._html || "");
+};
+
 const SAMPLE_SPELLS = {
 	fireball: {
 		name: "Fireball",
@@ -152,7 +158,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 
 		expect(page.rollD20).toHaveBeenCalledWith({isAttack: true});
 		expect(parseRandomise2Mock).toHaveBeenCalledWith("1d6");
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Spell Attack: 11 + 6 + 4 aimed = <strong>21</strong>");
 	});
 
@@ -168,7 +174,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		);
 
 		expect(state.getHp().current).toBe(20);
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Vampiric Spell healed 2 HP");
 	});
 
@@ -181,7 +187,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			{appliedMetamagic: {key: "quickened", name: "Quickened Spell", cost: 2}},
 		);
 
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Quickened Spell cast this spell as a bonus action");
 	});
 
@@ -200,7 +206,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			{appliedMetamagic: {key: "subtle", name: "Subtle Spell", cost: 1}},
 		);
 
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Subtle Spell removed verbal and somatic components");
 	});
 
@@ -250,7 +256,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			{appliedMetamagic: {key: "bestowed", name: "Bestowed Spell", cost: 1}},
 		);
 
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Bestowed Spell changed range from Self to Touch for this cast");
 	});
 
@@ -281,7 +287,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 
 		expect(globalThis.InputUiUtil.pGetUserEnum).toHaveBeenCalled();
 		expect(state.getHp().current).toBe(10);
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Cast Renewing Ward");
 		expect(toast).toContain("Bestowed Spell changed range from Self to Touch for this cast");
 	});
@@ -295,7 +301,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			{appliedMetamagic: {key: "heightened", name: "Heightened Spell", cost: 3}},
 		);
 
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Save DC: <strong>14</strong> (dexterity save; first target rolls at disadvantage)");
 		expect(toast).toContain("Heightened Spell gives the first target disadvantage on its initial save");
 	});
@@ -318,7 +324,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 
 		expect(globalThis.InputUiUtil.pGetUserBoolean).toHaveBeenCalled();
 		expect(page.rollD20).toHaveBeenCalledTimes(2);
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Spell Attack: 17 + 6 = <strong>23</strong>");
 		expect(toast).toContain("rerolled from 5");
 		expect(toast).toContain("Seeking Spell rerolled the missed spell attack from 5 to 17");
@@ -430,7 +436,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 
 		expect(state.isConcentrating()).toBe(true);
 		expect(state.canUseFocusedConcentrationReroll()).toBe(false);
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Focused Spell rerolled the concentration die");
 		expect(toast).toContain("SUCCESS - Concentration maintained");
 	});
@@ -458,7 +464,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		expect(enumCall.values).toContain("Cold");
 		expect(enumCall.values).not.toContain("Fire"); // current type excluded
 
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("cold");
 		expect(toast).toContain("Transmuted Spell changed fire → cold damage");
 	});
@@ -480,7 +486,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			null,
 		);
 
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("fire");
 		expect(toast).not.toContain("Transmuted Spell changed");
 	});
@@ -523,7 +529,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			null,
 		);
 
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("lightning");
 		expect(toast).toContain("Transmuted Spell changed fire → lightning damage");
 	});
@@ -537,7 +543,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			{appliedMetamagic: {key: "aimed", name: "Aimed Spell", cost: 2}},
 		);
 
-		const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+		const toast = getLastToastContent();
 		expect(toast).toContain("Aimed Spell added 1d6 to the spell attack roll");
 	});
 
@@ -559,7 +565,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).toContain("Careful Spell");
 			expect(toast).toContain("auto-succeed");
 			expect(toast).toContain("dexterity");
@@ -576,7 +582,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).not.toContain("Careful Spell");
 		});
 
@@ -591,7 +597,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).toContain("Distant Spell");
 			expect(toast).toContain("300 feet");
 		});
@@ -617,7 +623,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).toContain("Distant Spell");
 			expect(toast).toContain("Touch to 30 feet");
 		});
@@ -642,7 +648,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).toContain("Extended Spell");
 			expect(toast).toContain("20 minutes");
 		});
@@ -667,7 +673,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).toContain("Extended Spell");
 			expect(toast).toContain("24h cap");
 		});
@@ -683,7 +689,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).toContain("Resonant Spell");
 			expect(toast).toContain("disadvantage");
 		});
@@ -699,7 +705,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).toContain("Split Spell");
 			expect(toast).toContain("two points");
 		});
@@ -715,7 +721,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).not.toContain("Split Spell");
 		});
 
@@ -730,7 +736,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).toContain("Supple Spell");
 			expect(toast).toContain("±10 feet");
 			expect(toast).toContain("10ft to 30ft");
@@ -768,7 +774,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			expect(enumCall[0].values).toContain("Reroll 2 dice");
 			expect(enumCall[0].values).toContain("Reroll 3 dice");
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).toContain("Empowered Spell rerolled 2 damage dice");
 		});
 
@@ -786,7 +792,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 				null,
 			);
 
-			const toast = globalThis.JqueryUtil.doToast.mock.calls.at(-1)[0].content;
+			const toast = getLastToastContent();
 			expect(toast).not.toContain("Empowered Spell rerolled");
 		});
 

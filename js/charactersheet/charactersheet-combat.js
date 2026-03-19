@@ -104,6 +104,14 @@ class CharacterSheetCombat {
 			this._useMethod(methodId);
 		});
 
+		// Combat Methods: choose weapon for weapon-modifier methods
+		document.addEventListener("click", (e) => {
+			const target = e.target.closest(".charsheet__method-choose-weapon");
+			if (!target) return;
+			const methodId = target.dataset.methodId;
+			this._chooseWeaponForMethod(methodId);
+		});
+
 		// Exertion controls
 		document.getElementById("charsheet-exertion-add")?.addEventListener("click", () => this._modifyExertion(1));
 		document.getElementById("charsheet-exertion-remove")?.addEventListener("click", () => this._modifyExertion(-1));
@@ -1012,6 +1020,19 @@ class CharacterSheetCombat {
 			}
 		}
 
+		// Combat method effects (e.g. Wounding Strike) — prompt if weapon has active effect
+		let methodEffectApplied = null;
+		const activeMethodEffect = (this._state.getActiveCombatMethodEffects?.() || []).find(e => e.weaponId === attack.id);
+		if (activeMethodEffect) {
+			const accepted = await this._promptApplyMethodEffect(activeMethodEffect);
+			if (accepted) {
+				methodEffectApplied = activeMethodEffect;
+			}
+		} else {
+			// No active effect yet — check for weapon-modifier methods targeting this weapon
+			methodEffectApplied = await this._promptUseCombatMethod(attack);
+		}
+
 		// Parse damage dice
 		const damageRoll = this._parseDamage(attack.damage, isCrit);
 		const abilityMod = this._resolveAbilityMod(attack.abilityMod || "str");
@@ -1091,8 +1112,17 @@ class CharacterSheetCombat {
 			extraDamageParts.push({dice: entry.dice, total: extraRoll.total, type: entry.damageType, source: entry.source});
 		}
 
+		// Roll ongoing damage from combat method effect (e.g. Wounding Strike 1d4)
+		let methodEffectDamage = 0;
+		let methodEffectFormula = null;
+		if (methodEffectApplied?.ongoingDamage) {
+			methodEffectFormula = methodEffectApplied.ongoingDamage;
+			const methodRoll = this._parseDamage(methodEffectFormula);
+			methodEffectDamage = methodRoll.total;
+		}
+
 		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal;
-		const total = baseDamageTotal + handOfHarmDamage;
+		const total = baseDamageTotal + handOfHarmDamage + methodEffectDamage;
 
 		// Build subtitle with breakdown
 		let subtitle = `${attack.damage}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
@@ -1108,6 +1138,7 @@ class CharacterSheetCombat {
 		}
 		subtitle += ` ${attack.damageType}`;
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
+		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
 
 		// Append Cunning Strike effects to subtitle
 		if (cunningStrikeEffects.length) {
@@ -1118,10 +1149,15 @@ class CharacterSheetCombat {
 			subtitle += ` | Cunning Strike: ${csDesc}`;
 		}
 
-		// Show result — separate damage types in title when Hand of Harm is active
-		const totalTitle = handOfHarmDamage
-			? `${baseDamageTotal} ${attack.damageType} + ${handOfHarmDamage} necrotic = ${total}`
-			: undefined;
+		// Show result — separate damage types in title when multi-type damage is present
+		let totalTitle;
+		if (handOfHarmDamage && methodEffectDamage) {
+			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${handOfHarmDamage} necrotic + ${methodEffectDamage} ongoing = ${total}`;
+		} else if (handOfHarmDamage) {
+			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${handOfHarmDamage} necrotic = ${total}`;
+		} else if (methodEffectDamage) {
+			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${methodEffectDamage} ongoing = ${total}`;
+		}
 		this._page.showDiceResult({
 			title: `${attack.name} Damage`,
 			roll: damageRoll.total + sneakAttackDamage,
@@ -1695,6 +1731,14 @@ class CharacterSheetCombat {
 			badgeHtml = " <span class=\"badge badge-secondary\">Auto</span>";
 		}
 
+		// Show active combat method effect badge
+		const methodEffects = this._state.getActiveCombatMethodEffects?.() || [];
+		const activeMethod = methodEffects.find(e => e.weaponId === attack.id);
+		if (activeMethod) {
+			const methodTitle = `${activeMethod.name}${activeMethod.ongoingDamage ? `: ${activeMethod.ongoingDamage} ongoing damage` : ""}`;
+			badgeHtml += ` <span class="badge badge-danger" title="${methodTitle}">🩸 ${activeMethod.name}</span>`;
+		}
+
 		return e_({outer: `
 			<div class="charsheet__attack-item" data-attack-id="${attack.id}">
 				<div class="charsheet__attack-info">
@@ -1833,14 +1877,21 @@ class CharacterSheetCombat {
 		}
 		if (section) section.style.display = "";
 
-		// Get spell attack and save DC
-		const spellAttack = this._state.getSpellAttackBonus?.() || 0;
-		const spellDC = this._state.getSpellSaveDc?.() || 10;
+		// Get spell attack and save DC — Gambler uses dice formula instead of static value
+		const calcs = this._state.getFeatureCalculations?.();
+		const isGambler = calcs?.hasGamblerSpellcasting;
 
 		const elSpellAttack = document.getElementById("charsheet-combat-spell-attack");
-		if (elSpellAttack) elSpellAttack.textContent = `+${spellAttack}`;
 		const elSpellDc = document.getElementById("charsheet-combat-spell-dc");
-		if (elSpellDc) elSpellDc.textContent = spellDC;
+		if (isGambler) {
+			if (elSpellAttack) elSpellAttack.textContent = calcs.gamblerSpellAttackFormula;
+			if (elSpellDc) elSpellDc.textContent = calcs.gamblerSpellDcFormula;
+		} else {
+			const spellAttack = this._state.getSpellAttackBonus?.() || 0;
+			const spellDC = this._state.getSpellSaveDc?.() || 10;
+			if (elSpellAttack) elSpellAttack.textContent = `+${spellAttack}`;
+			if (elSpellDc) elSpellDc.textContent = spellDC;
+		}
 
 		// Filter to combat-relevant spells: cantrips + prepared leveled spells
 		const combatSpells = spells.filter(spell => {
@@ -3001,6 +3052,96 @@ class CharacterSheetCombat {
 	 * Deducts 1 focus point on accept, marks used this turn.
 	 * @returns {boolean} True if the user accepted and focus was deducted.
 	 */
+	/**
+	 * Check if any weapon-modifier combat methods are configured for this weapon
+	 * and prompt the user to activate one during the damage roll.
+	 * Spends exertion on acceptance and creates the effect.
+	 * @param {object} attack - The attack being rolled
+	 * @returns {object|null} The activated effect, or null
+	 */
+	async _promptUseCombatMethod (attack) {
+		const methods = this._state.getCombatMethods?.() || [];
+		const matchingMethods = methods.filter(m => {
+			if (m.methodCategory !== "weaponModifier") return false;
+			const remembered = this._state.getCombatMethodWeapon(m.name);
+			return remembered?.weaponId === attack.id;
+		});
+
+		if (!matchingMethods.length) return null;
+
+		for (const method of matchingMethods) {
+			const cost = this._getMethodExertionCost(method);
+			const currentExertion = this._state.getExertionCurrent();
+			const dmgDesc = method.ongoingDamage || "effect";
+			const saveDesc = method.ongoingSaveType
+				? ` (${method.ongoingSaveType.charAt(0).toUpperCase() + method.ongoingSaveType.slice(1)} save to end)`
+				: "";
+
+			const canPayWithKi = this._state.canUseFocusForExertion?.() && (this._state.getKiPointsCurrent?.() ?? 0) >= cost;
+			if (currentExertion < cost && !canPayWithKi) continue;
+
+			const costLabel = currentExertion >= cost ? `${cost} EP` : `${cost} ki/focus`;
+			const choices = [
+				{name: "Yes", description: `Use ${method.name}: ${dmgDesc}${saveDesc} (costs ${costLabel})`},
+				{name: "No", description: `Attack normally`},
+			];
+
+			const chosen = await this._showCombatActionChoiceModal({name: `⚔️ ${method.name}`}, choices);
+			if (!chosen || chosen.name !== "Yes") continue;
+
+			// Spend exertion (or ki)
+			if (currentExertion >= cost) {
+				this._state.setExertionCurrent(currentExertion - cost);
+			} else if (canPayWithKi) {
+				if (!this._state.useFocusForExertion(cost)) continue;
+			}
+			this._updateExertionDisplay();
+			if (this._page?._features) this._page._features._renderResources();
+
+			const calcs = this._state.getFeatureCalculations?.() || {};
+			const saveDc = calcs.combatMethodDc || 10;
+
+			const effect = {
+				name: method.name,
+				weaponId: attack.id,
+				weaponName: attack.name,
+				ongoingDamage: method.ongoingDamage || null,
+				ongoingSaveType: method.ongoingSaveType || method.saveType || null,
+				saveDc,
+				alternativeEndCheck: method.alternativeEndCheck || null,
+				description: method.entries ? JSON.stringify(method.entries) : "",
+			};
+
+			this._state.activateCombatMethodEffect(effect);
+			this.renderCombatEffects();
+			this._page._saveCurrentCharacter?.();
+
+			JqueryUtil.doToast({type: "success", content: `${method.name} applied to ${attack.name}!`});
+			return effect;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Prompt player to apply an active combat method effect (e.g. Wounding Strike) during a damage roll.
+	 */
+	async _promptApplyMethodEffect (effect) {
+		const dmgDesc = effect.ongoingDamage ? `${effect.ongoingDamage} ongoing damage` : "effect";
+		const saveDesc = effect.ongoingSaveType
+			? ` (${effect.ongoingSaveType.charAt(0).toUpperCase() + effect.ongoingSaveType.slice(1)} save DC ${effect.saveDc} to end)`
+			: "";
+
+		const choices = [
+			{name: "Yes", description: `Apply ${effect.name}: ${dmgDesc}${saveDesc}`},
+			{name: "No", description: `Skip ${effect.name} this time`},
+		];
+
+		const fakeFeature = {name: effect.name};
+		const chosen = await this._showCombatActionChoiceModal(fakeFeature, choices, () => {});
+		return chosen?.name === "Yes";
+	}
+
 	async _promptHandOfHarm (calc) {
 		const formula = calc.handOfHarmDamage;
 		if (!formula) return false;
@@ -4211,10 +4352,57 @@ class CharacterSheetCombat {
 			container.append(defSection);
 		}
 
+		// Active combat method effects (Wounding Strike, etc.)
+		const methodEffects = this._state.getActiveCombatMethodEffects?.() || [];
+		if (methodEffects.length > 0) {
+			const methodSection = e_({outer: `<div class="charsheet__effect-group mb-2"></div>`});
+			methodSection.insertAdjacentHTML("beforeend", `<div class="ve-small ve-bold mb-1" style="color: #c44;">🩸 Active Method Effects:</div>`);
+
+			for (const effect of methodEffects) {
+				const card = e_({outer: `
+					<div class="charsheet__method-effect-card p-2 mb-1" style="border: 1px solid #c44; border-radius: 6px; background: rgba(204,68,68,0.08);">
+						<div class="ve-flex ve-flex-v-center ve-flex-h-space-between mb-1">
+							<span style="font-weight: bold;">⚔️ ${effect.name} → ${effect.weaponName || "weapon"}</span>
+							<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__method-effect-end" data-effect-id="${effect.id}" title="End this effect">✕</button>
+						</div>
+						<div class="ve-small ve-muted mb-1">
+							${effect.ongoingDamage ? `${effect.ongoingDamage} ongoing damage` : ""}${effect.ongoingSaveType ? ` · ${effect.ongoingSaveType.charAt(0).toUpperCase() + effect.ongoingSaveType.slice(1)} save DC ${effect.saveDc} to end` : ""}${effect.alternativeEndCheck ? ` · or ${effect.alternativeEndCheck.charAt(0).toUpperCase() + effect.alternativeEndCheck.slice(1)} check DC ${effect.saveDc}` : ""}
+						</div>
+						<div class="ve-flex gap-1">
+							${effect.ongoingDamage ? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__method-effect-roll-damage" data-dice="${effect.ongoingDamage}" data-name="${effect.name}">🎲 Roll ${effect.ongoingDamage}</button>` : ""}
+						</div>
+					</div>
+				`});
+
+				// End effect button handler
+				card.querySelector(".charsheet__method-effect-end")?.addEventListener("click", () => {
+					this._state.deactivateCombatMethodEffect(effect.id);
+					this.renderCombatEffects();
+					this._page._saveCurrentCharacter?.();
+					JqueryUtil.doToast({content: `${effect.name} ended.`});
+				});
+
+				// Roll ongoing damage button
+				card.querySelector(".charsheet__method-effect-roll-damage")?.addEventListener("click", () => {
+					const roll = this._parseDamage(effect.ongoingDamage);
+					const rollBreakdown = roll.rolls.join(" + ") + (roll.modifier ? ` ${roll.modifier >= 0 ? "+" : ""}${roll.modifier}` : "");
+					this._page.showDiceResult({
+						title: `${effect.name} — Ongoing Damage (${effect.weaponName || "weapon"})`,
+						total: roll.total,
+						subtitle: `${effect.ongoingDamage} → [${rollBreakdown}] = ${roll.total}`,
+					});
+				});
+
+				methodSection.append(card);
+			}
+			container.append(methodSection);
+		}
+
 		// If no effects, show placeholder
 		const hasTempHpDisplay = tempHp > 0 && tempHpSource;
 		const hasConditionals = allConditionals.length > 0;
-		const hasAnyEffects = advantageTypes.size > 0 || disadvantageTypes.size > 0 || bonusEffects.length > 0 || otherEffects.length > 0 || enemyAdvantageAgainst.size > 0 || enemyDisadvantageAgainst.size > 0 || critRange < 20 || hasTempHpDisplay || hasConditionals || hasItemDefenses;
+		const hasMethodEffects = methodEffects.length > 0;
+		const hasAnyEffects = advantageTypes.size > 0 || disadvantageTypes.size > 0 || bonusEffects.length > 0 || otherEffects.length > 0 || enemyAdvantageAgainst.size > 0 || enemyDisadvantageAgainst.size > 0 || critRange < 20 || hasTempHpDisplay || hasConditionals || hasItemDefenses || hasMethodEffects;
 		if (!hasAnyEffects) {
 			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No active effects</div>`;
 		}
@@ -4673,6 +4861,10 @@ class CharacterSheetCombat {
 							this._page._customAbilitiesPanel?.render?.();
 						} else {
 							this._state.deactivateState(state.stateTypeId);
+							// Bridge combat stance deactivation to the stance-specific system
+							if (state.stateTypeId === "combatStance") {
+								this._state.deactivateStance();
+							}
 						}
 						this.renderCombatStates();
 						this.renderCombatDefenses();
@@ -5383,6 +5575,10 @@ class CharacterSheetCombat {
 					extraBadges.push(`<span class="badge badge-outline-secondary ml-1">${actionIcon} ${parsed.actionType}</span>`);
 				}
 
+				const isWeaponModifier = parsed.methodCategory === "weaponModifier";
+				const rememberedWeapon = isWeaponModifier ? this._state.getCombatMethodWeapon(method.name) : null;
+				const weaponLabel = rememberedWeapon ? `<span class="ve-muted ve-small ml-1" title="Remembered weapon: ${rememberedWeapon.weaponName}">🗡️ ${rememberedWeapon.weaponName}</span>` : "";
+
 				const methodEl = e_({outer: `
 					<div class="charsheet__method-item mb-1 p-1 ve-flex ve-flex-v-center ve-flex-h-space-between" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
 						<div class="ve-flex ve-flex-v-center ve-flex-wrap">
@@ -5390,8 +5586,12 @@ class CharacterSheetCombat {
 							<span class="ve-muted ve-small ml-2">(${degree}${this._getOrdinalSuffix(degree)})</span>
 							${exertionCost > 0 ? `<span class="badge badge-secondary ml-2" title="Exertion cost">${exertionCost} EP</span>` : ""}
 							${extraBadges.join("")}
+							${weaponLabel}
 						</div>
-						${showUseButton ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use ml-2" data-method-id="${methodId}" data-cost="${exertionCost}" title="Use this method (costs ${exertionCost} exertion)">Use</button>` : ""}
+						${showUseButton ? `<div class="ve-flex ve-flex-v-center ml-2">
+							<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${exertionCost}" title="Use this method (costs ${exertionCost} exertion)">Use</button>
+							${isWeaponModifier ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__method-choose-weapon ml-1" data-method-id="${methodId}" title="Choose which weapon to use">🗡️</button>` : ""}
+						</div>` : ""}
 					</div>
 				`});
 
@@ -5495,15 +5695,26 @@ class CharacterSheetCombat {
 				});
 
 				this.renderCombatStates();
-				this.renderCombatEffects(); // Show stance effects
+				this.renderCombatEffects();
 				this._page._renderActiveStates?.();
 				this._page._saveCurrentCharacter?.();
-				this._page._renderCharacter?.(); // Re-render character to apply effects
+				this._page._renderCharacter?.();
 
 				JqueryUtil.doToast({type: "success", content: `Activated ${method.name}! (−${cost} ${resourceName})`});
 			} else {
-				// Instant effect - just show feedback
-				JqueryUtil.doToast({type: "success", content: `Used ${method.name}! (−${cost} ${resourceName})`});
+				// Non-stance method — handle by category
+				// Use pre-parsed fields from getCombatMethods() if available, otherwise re-parse
+				const parsedEffects = method.methodCategory
+					? method
+					: (this._state._parseCombatMethodEffects?.(method) || {});
+				const category = parsedEffects.methodCategory || "instant";
+
+				if (category === "weaponModifier") {
+					this._activateWeaponModifierMethod(method, parsedEffects, cost, resourceName);
+				} else {
+					// selfHeal, acBuff, reaction, instant — toast for now
+					JqueryUtil.doToast({type: "success", content: `Used ${method.name}! (−${cost} ${resourceName})`});
+				}
 			}
 		} else {
 			// Fallback: find method name for feedback
@@ -5514,6 +5725,119 @@ class CharacterSheetCombat {
 		// Flash the button to indicate use
 		btn.classList.add("ve-btn-success");
 		setTimeout(() => btn.classList.remove("ve-btn-success"), 200);
+	}
+
+	/**
+	 * Choose (or re-choose) a weapon for a weapon-modifier method without spending exertion.
+	 */
+	async _chooseWeaponForMethod (methodId) {
+		const methodEl = document.querySelector(`.charsheet__method-choose-weapon[data-method-id="${methodId}"]`)?.closest(".charsheet__method-item");
+		const method = methodEl?._methodData;
+		if (!method) return;
+
+		const attacks = this._cachedAttacks?.length ? this._cachedAttacks : (this._state.getAttacks?.() || []);
+		const weaponAttacks = attacks.filter(a => !a.isSpell && !a.isUnarmedStrike);
+
+		if (weaponAttacks.length === 0) {
+			JqueryUtil.doToast({type: "warning", content: `No weapon attacks available!`});
+			return;
+		}
+
+		const choices = weaponAttacks.map(atk => ({
+			name: `${atk.name} (${atk.damage} ${atk.damageType || ""})`,
+			attack: atk,
+		}));
+
+		const chosen = await this._showCombatActionChoiceModal(
+			{name: `🗡️ ${method.name} — Choose Weapon`},
+			choices,
+		);
+
+		if (!chosen) return;
+
+		this._state.setCombatMethodWeapon(method.name, chosen.attack.id, chosen.attack.name);
+		this._page._saveCurrentCharacter?.();
+		this.renderCombatMethods();
+		JqueryUtil.doToast({type: "info", content: `${method.name} will now target ${chosen.attack.name}`});
+	}
+
+	/**
+	 * Handle a weapon-modifier combat method (e.g. Wounding Strike).
+	 * Shows weapon picker, then activates ongoing effect card.
+	 */
+	_activateWeaponModifierMethod (method, parsedEffects, cost, resourceName) {
+		// Use cachedAttacks (includes auto-generated from equipped weapons), fall back to state attacks
+		const attacks = this._cachedAttacks?.length ? this._cachedAttacks : (this._state.getAttacks?.() || []);
+		// Filter to real weapons only — exclude unarmed strikes and spell attacks
+		const weaponAttacks = attacks.filter(a => !a.isSpell && !a.isUnarmedStrike);
+
+		if (weaponAttacks.length === 0) {
+			JqueryUtil.doToast({type: "warning", content: `No weapon attacks available for ${method.name}!`});
+			return;
+		}
+
+		// Check for a remembered weapon choice
+		const remembered = this._state.getCombatMethodWeapon(method.name);
+		if (remembered) {
+			const rememberedAttack = weaponAttacks.find(a => a.id === remembered.weaponId);
+			if (rememberedAttack) {
+				this._applyWeaponModifierEffect(method, parsedEffects, rememberedAttack, cost, resourceName);
+				return;
+			}
+		}
+
+		// No remembered weapon (or it's no longer available) — show picker
+		this._showWeaponPicker(method, parsedEffects, weaponAttacks, cost, resourceName);
+	}
+
+	/**
+	 * Show a weapon picker modal for weapon-modifier combat methods.
+	 */
+	async _showWeaponPicker (method, parsedEffects, weaponAttacks, cost, resourceName) {
+		const choices = weaponAttacks.map(atk => ({
+			name: `${atk.name} (${atk.damage} ${atk.damageType || ""})`,
+			attack: atk,
+		}));
+
+		const chosen = await this._showCombatActionChoiceModal(
+			{name: `⚔️ ${method.name} — Choose Weapon`},
+			choices,
+		);
+
+		if (!chosen) return;
+
+		// Remember this weapon choice
+		this._state.setCombatMethodWeapon(method.name, chosen.attack.id, chosen.attack.name);
+
+		this._applyWeaponModifierEffect(method, parsedEffects, chosen.attack, cost, resourceName);
+
+		// Re-render methods to show remembered weapon label
+		this.renderCombatMethods();
+	}
+
+	/**
+	 * Apply a weapon modifier effect to a chosen weapon attack.
+	 */
+	_applyWeaponModifierEffect (method, parsedEffects, attack, cost, resourceName) {
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const saveDc = calcs.combatMethodDc || 10;
+
+		this._state.activateCombatMethodEffect({
+			name: method.name,
+			weaponId: attack.id,
+			weaponName: attack.name,
+			ongoingDamage: parsedEffects.ongoingDamage || null,
+			ongoingSaveType: parsedEffects.ongoingSaveType || parsedEffects.saveType || null,
+			saveDc,
+			alternativeEndCheck: parsedEffects.alternativeEndCheck || null,
+			description: method.entries ? JSON.stringify(method.entries) : "",
+		});
+
+		this.renderCombatEffects();
+		this._page._saveCurrentCharacter?.();
+
+		const dmgText = parsedEffects.ongoingDamage ? ` (${parsedEffects.ongoingDamage} ongoing damage)` : "";
+		JqueryUtil.doToast({type: "success", content: `${method.name} applied to ${attack.name}${dmgText}! (−${cost} ${resourceName})`});
 	}
 
 	/**

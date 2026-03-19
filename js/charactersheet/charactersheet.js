@@ -2536,14 +2536,9 @@ class CharacterSheetPage {
 	}
 
 	_renderPassiveScores () {
-		// Calculate passive scores for key skills (10 + skill modifier)
-		const perceptionMod = this._state.getSkillMod("perception");
-		const investigationMod = this._state.getSkillMod("investigation");
-		const insightMod = this._state.getSkillMod("insight");
-
-		document.getElementById("charsheet-passive-perception").textContent = 10 + perceptionMod;
-		document.getElementById("charsheet-passive-investigation").textContent = 10 + investigationMod;
-		document.getElementById("charsheet-passive-insight").textContent = 10 + insightMod;
+		document.getElementById("charsheet-passive-perception").textContent = this._state.getPassiveScore("perception");
+		document.getElementById("charsheet-passive-investigation").textContent = this._state.getPassiveScore("investigation");
+		document.getElementById("charsheet-passive-insight").textContent = this._state.getPassiveScore("insight");
 	}
 
 	_renderSavingThrows () {
@@ -2612,8 +2607,8 @@ class CharacterSheetPage {
 				profTitle = "Half proficiency (Jack of All Trades) - Click to toggle";
 			}
 
-			// Calculate passive score (10 + modifier) for ALL skills
-			const passiveScore = 10 + mod;
+			// Calculate passive score using centralized method (includes modifiers, advantage, stances)
+			const passiveScore = this._state.getPassiveScore(skillKey);
 
 			// Handle skills without ability (custom skills with no ability set)
 			const abilityDisplay = skill.ability ? skill.ability.toUpperCase() : "—";
@@ -2631,7 +2626,7 @@ class CharacterSheetPage {
 					<span class="charsheet__skill-name">${skill.name}${skill.isCustom ? " ✦" : ""}</span>
 					<span class="charsheet__skill-ability">(${abilityDisplay})</span>
 					<span class="charsheet__skill-mod">${modStr}</span>
-					<span class="charsheet__skill-passive" title="Passive ${skill.name}: 10 + modifier = ${passiveScore}">${passiveScore}</span>
+					<span class="charsheet__skill-passive" title="Passive ${skill.name}: ${passiveScore}">${passiveScore}</span>
 					${skill.isCustom ? `<span class="charsheet__skill-delete" title="Remove custom skill">×</span>` : ""}
 				</div>
 			`});
@@ -4975,7 +4970,7 @@ class CharacterSheetPage {
 		const passivesGrid = passivesSection.querySelector(".charsheet__passives-hero-grid");
 		passiveSkills.forEach(passive => {
 			const skillMod = this._state.getSkillMod(passive.key);
-			const passiveScore = 10 + skillMod;
+			const passiveScore = this._state.getPassiveScore(passive.key);
 			const profLevel = this._state.getSkillProficiency(passive.key);
 			let profIcon = "○";
 			if (profLevel === 2) profIcon = "◉";
@@ -6026,6 +6021,10 @@ class CharacterSheetPage {
 						this._customAbilitiesPanel?.render?.();
 					} else {
 						this._state.deactivateState(state.stateTypeId);
+						// Bridge combat stance deactivation to the stance-specific system
+						if (state.stateTypeId === "combatStance") {
+							this._state.deactivateStance();
+						}
 					}
 				}
 				this._saveCurrentCharacter();
@@ -6178,6 +6177,11 @@ class CharacterSheetPage {
 				customEffects: shouldParseEffects && parsedEffects?.length > 0 ? parsedEffects : null,
 			};
 			this._state.activateState(stateTypeId, customData);
+		}
+
+		// Bridge combat stance activation to the stance-specific system
+		if (stateTypeId === "combatStance") {
+			this._state.activateStance(feature.name);
 		}
 		
 		this._saveCurrentCharacter();
@@ -6342,20 +6346,32 @@ class CharacterSheetPage {
 		const displayCantrips = cantrips.slice(0, 3);
 		const displayPrepared = preparedSpells.slice(0, 4);
 
-		// Show spell stats and slots summary
-		const spellcastingAbility = this._state.getSpellcastingAbility();
+		// Show spell stats and slots summary — Gambler uses dice formula
+		const calcs = this._state.getFeatureCalculations?.();
+		const isGambler = calcs?.hasGamblerSpellcasting;
+		const spellcastingAbility = this._state.getSpellcastingAbility() || (isGambler ? "cha" : null);
 		if (spellcastingAbility) {
-			const spellMod = this._state.getAbilityMod(spellcastingAbility);
-			const profBonus = this._state.getProficiencyBonus();
-			const dcPenalty = this._getExhaustionDcPenalty();
-			const saveDC = 8 + spellMod + profBonus - dcPenalty;
-			const attackBonus = spellMod + profBonus;
-			const dcPenaltyText = dcPenalty > 0 ? ` <span class="ve-muted ve-small">(−${dcPenalty} exhaustion)</span>` : "";
+			let saveDCText, attackText, abilityText;
+			if (isGambler) {
+				saveDCText = calcs.gamblerSpellDcFormula;
+				attackText = `+${calcs.gamblerSpellAttackFormula}`;
+				abilityText = "CHA (Gambler)";
+			} else {
+				const spellMod = this._state.getAbilityMod(spellcastingAbility);
+				const profBonus = this._state.getProficiencyBonus();
+				const dcPenalty = this._getExhaustionDcPenalty();
+				const saveDC = 8 + spellMod + profBonus - dcPenalty;
+				const attackBonus = spellMod + profBonus;
+				const dcPenaltyStr = dcPenalty > 0 ? ` <span class="ve-muted ve-small">(−${dcPenalty} exhaustion)</span>` : "";
+				saveDCText = `${saveDC}${dcPenaltyStr}`;
+				attackText = this._formatMod(attackBonus);
+				abilityText = spellcastingAbility.toUpperCase();
+			}
 			container.insertAdjacentHTML("beforeend", `
 				<div class="charsheet__spell-stats ve-flex ve-flex-wrap mb-2">
-					<span class="ve-small mr-3"><strong>Save DC:</strong> ${saveDC}${dcPenaltyText}</span>
-					<span class="ve-small mr-3"><strong>Attack:</strong> ${this._formatMod(attackBonus)}</span>
-					<span class="ve-small"><strong>Ability:</strong> ${spellcastingAbility.toUpperCase()}</span>
+					<span class="ve-small mr-3"><strong>Save DC:</strong> ${saveDCText}</span>
+					<span class="ve-small mr-3"><strong>Attack:</strong> ${attackText}</span>
+					<span class="ve-small"><strong>Ability:</strong> ${abilityText}</span>
 				</div>
 			`);
 		}

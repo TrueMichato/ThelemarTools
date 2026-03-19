@@ -701,3 +701,433 @@ describe("Combat Methods Survey — Exertion Pool", () => {
 		expect(state.getActiveStance()).toBe("Heavy Stance");
 	});
 });
+
+// =========================================================================
+// STANCE ACTIVATION BRIDGE — activateStance/deactivateStance ↔ activeStates
+// =========================================================================
+
+describe("Combat Methods Survey — Stance Activation Bridge", () => {
+
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		makeTGTTFighter(5);
+		state.addCombatTradition("Mirror's Glint");
+		state.addCombatTradition("Mist and Shade");
+	});
+
+	it("should apply stance skill bonus when activated via activateStance()", () => {
+		addMethod("Wary Stance", "MG", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus. This stance lasts until you end it.");
+
+		state.activateStance("Wary Stance");
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.stanceSkillBonuses?.insight).toBe(3); // prof bonus at level 5
+	});
+
+	it("should clear stance skill bonus on deactivateStance()", () => {
+		addMethod("Wary Stance", "MG", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus. This stance lasts until you end it.");
+
+		state.activateStance("Wary Stance");
+		expect(state.getFeatureCalculations().stanceSkillBonuses?.insight).toBe(3);
+
+		state.deactivateStance();
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.stanceSkillBonuses).toBeUndefined();
+	});
+
+	it("should NOT double-count stance skill bonus via getSkillBonusFromStates()", () => {
+		addMethod("Iron Stance", "TI", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it.");
+
+		// Activate stance — this sets _data.activeStance
+		state.activateStance("Iron Stance");
+
+		// Also simulate what the UI does — add as active state with parsed effects
+		state.addActiveState("combatStance", {
+			name: "Iron Stance",
+			description: "Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it.",
+			customEffects: [{type: "bonus", target: "check:str:athletics", useProficiency: true}],
+		});
+
+		// getSkillBonusFromStates should skip combatStance effects
+		const stateBonus = state.getSkillBonusFromStates("athletics", "str");
+		expect(stateBonus).toBe(0); // filtered out — stance system is authoritative
+
+		// But the stance system itself should provide the bonus
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.stanceSkillBonuses?.athletics).toBe(3);
+	});
+
+	it("should NOT double-count stance save bonus via getSaveBonusFromStates()", () => {
+		addMethod("Guard Stance", "TI", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus equal to your proficiency bonus on saving throws made to resist being moved. This stance lasts until you end it.");
+
+		state.activateStance("Guard Stance");
+
+		// Simulate UI adding as active state
+		state.addActiveState("combatStance", {
+			name: "Guard Stance",
+			customEffects: [{type: "bonus", target: "save:resist-movement", useProficiency: true}],
+		});
+
+		// getSaveBonusFromStates should skip combatStance effects
+		const stateBonus = state.getSaveBonusFromStates("str");
+		expect(stateBonus).toBe(0);
+	});
+});
+
+// =========================================================================
+// PASSIVE BONUS PARSING & APPLICATION
+// =========================================================================
+
+describe("Combat Methods Survey — Passive Bonus Parsing", () => {
+
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		makeTGTTFighter(5);
+		state.addCombatTradition("Mirror's Glint");
+	});
+
+	it("should parse passive bonus from stance description", () => {
+		addMethod("Wary Stance", "MG", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+
+		const methods = state.getCombatMethods();
+		const wary = methods.find(m => m.name === "Wary Stance");
+		expect(wary.stanceEffects.passiveBonuses).toEqual({insight: 3});
+	});
+
+	it("should parse passive bonus alongside skill bonus", () => {
+		addMethod("Wary Stance", "MG", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+
+		const methods = state.getCombatMethods();
+		const wary = methods.find(m => m.name === "Wary Stance");
+		expect(wary.stanceEffects.skillBonuses).toEqual({insight: "proficiency"});
+		expect(wary.stanceEffects.passiveBonuses).toEqual({insight: 3});
+	});
+
+	it("should apply passive bonus to getPassiveScore() when stance is active", () => {
+		addMethod("Wary Stance", "MG", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+
+		const basePassive = state.getPassiveScore("insight");
+
+		state.activateStance("Wary Stance");
+		const activePassive = state.getPassiveScore("insight");
+
+		// Should include: +3 passive bonus + proficiency bonus (3) from skill
+		expect(activePassive).toBe(basePassive + 3 + 3);
+	});
+
+	it("should remove passive bonus from getPassiveScore() when stance deactivated", () => {
+		addMethod("Wary Stance", "MG", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+
+		const basePassive = state.getPassiveScore("insight");
+
+		state.activateStance("Wary Stance");
+		expect(state.getPassiveScore("insight")).toBe(basePassive + 3 + 3);
+
+		state.deactivateStance();
+		expect(state.getPassiveScore("insight")).toBe(basePassive);
+	});
+
+	it("should include stancePassiveBonuses in feature calculations", () => {
+		addMethod("Wary Stance", "MG", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+
+		state.activateStance("Wary Stance");
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.stancePassiveBonuses).toEqual({insight: 3});
+	});
+
+	it("should NOT include stancePassiveBonuses when no stance is active", () => {
+		addMethod("Wary Stance", "MG", 1,
+			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.stancePassiveBonuses).toBeUndefined();
+	});
+
+	it("should handle stance with no passive bonus", () => {
+		addMethod("Shadow Stance", "MS", 1,
+			"Bonus Action (1 Exertion Point). You enter a shadowy stance. You gain a bonus to Dexterity (Stealth) checks equal to your proficiency bonus. This stance lasts until you end it.");
+
+		state.activateStance("Shadow Stance");
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.stancePassiveBonuses).toBeUndefined();
+		expect(calcs.stanceSkillBonuses?.stealth).toBe(3);
+	});
+
+	it("should parse multiple skill bonuses from a single stance (Deceptive Stance)", () => {
+		addMethod("Deceptive Stance", "CJ", 1,
+			"Bonus Action (1 Exertion Point). You adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (Sleight of Hand) and Charisma (Deception) checks equal to your proficiency bonus. This stance lasts until you end it.");
+
+		const methods = state.getCombatMethods();
+		const deceptive = methods.find(m => m.name === "Deceptive Stance");
+		expect(deceptive.isStance).toBe(true);
+		expect(deceptive.stanceEffects.skillBonuses).toEqual({
+			sleightofhand: "proficiency",
+			deception: "proficiency",
+		});
+	});
+
+	it("should apply both skill bonuses when Deceptive Stance is active", () => {
+		addMethod("Deceptive Stance", "CJ", 1,
+			"Bonus Action (1 Exertion Point). You adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (Sleight of Hand) and Charisma (Deception) checks equal to your proficiency bonus. This stance lasts until you end it.");
+
+		state.activateStance("Deceptive Stance");
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.stanceSkillBonuses?.sleightofhand).toBe(3);
+		expect(calcs.stanceSkillBonuses?.deception).toBe(3);
+	});
+
+	it("should parse stance effects from HTML-rendered descriptions", () => {
+		// Simulate production: description contains rendered HTML from Renderer.get().render()
+		state.addFeature({
+			name: "Wary Stance",
+			source: "TGTT",
+			featureType: "Optional Feature",
+			optionalFeatureTypes: ["CTM:1MG", "CTM:MG", "CTM"],
+			description: '<b>Bonus Action (1 Exertion Point)</b>. As a bonus action, you adopt a keenly observant stance. While in this stance, you gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you are <a href="#">incapacitated</a> or use a bonus action to end it.',
+		});
+
+		state.activateStance("Wary Stance");
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.stanceSkillBonuses?.insight).toBe(3);
+		expect(calcs.stancePassiveBonuses?.insight).toBe(3);
+	});
+
+	it("should parse multi-skill stance from HTML-rendered descriptions", () => {
+		state.addFeature({
+			name: "Deceptive Stance",
+			source: "TGTT",
+			featureType: "Optional Feature",
+			optionalFeatureTypes: ["CTM:1CJ", "CTM:CJ", "CTM"],
+			description: '<b>Bonus Action (1 Exertion Point)</b>. As a bonus action, you adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (<span class="skill-link">Sleight of Hand</span>) and Charisma (<span class="skill-link">Deception</span>) checks equal to your proficiency bonus. This stance lasts until you are <a href="#">incapacitated</a> or use a bonus action to end it.',
+		});
+
+		state.activateStance("Deceptive Stance");
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.stanceSkillBonuses?.sleightofhand).toBe(3);
+		expect(calcs.stanceSkillBonuses?.deception).toBe(3);
+	});
+});
+
+// =========================================================================
+// METHOD CATEGORY CLASSIFICATION
+// =========================================================================
+
+describe("Combat Methods Survey — Method Category Classification", () => {
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		makeTGTTFighter(5);
+		state.addCombatTradition("Unending Wheel");
+	});
+
+	it("should classify Wounding Strike as weaponModifier", () => {
+		addMethod("Wounding Strike", "UW", 1,
+			"Bonus Action (2 Exertion Points). Choose a weapon. If you hit with your next attack roll using the chosen weapon against a living creature, you deliver a wound that deals 1d4 ongoing damage.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Wounding Strike");
+		expect(m.methodCategory).toBe("weaponModifier");
+	});
+
+	it("should classify stances as stance category", () => {
+		addMethod("Wary Stance", "MG", 1,
+			"Bonus Action (1 Exertion Point). You adopt a keenly observant stance. While in this stance, you gain a bonus. This stance lasts until you end it.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Wary Stance");
+		expect(m.methodCategory).toBe("stance");
+	});
+
+	it("should classify healing methods as selfHeal", () => {
+		addMethod("Catch Your Breath", "AM", 1,
+			"Bonus Action (1 Exertion Point). You regain hit points equal to 1d6 + your proficiency bonus + your Constitution modifier.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Catch Your Breath");
+		expect(m.methodCategory).toBe("selfHeal");
+	});
+
+	it("should classify reaction methods as reaction", () => {
+		addMethod("Deflect Strike", "UW", 2,
+			"Reaction (1 Exertion Point). When hit by a melee attack, reduce the damage by your proficiency bonus d6.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Deflect Strike");
+		expect(m.methodCategory).toBe("reaction");
+	});
+
+	it("should classify AC buff methods as acBuff", () => {
+		addMethod("Warding Wield", "AM", 2,
+			"Bonus Action (1 Exertion Point). Your AC increases by 2 until the start of your next turn.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Warding Wield");
+		expect(m.methodCategory).toBe("acBuff");
+	});
+
+	it("should default unknown methods to instant", () => {
+		addMethod("Unknown Method", "AM", 1,
+			"Action (1 Exertion Point). You do something mysterious.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Unknown Method");
+		expect(m.methodCategory).toBe("instant");
+	});
+});
+
+// =========================================================================
+// WEAPON MODIFIER PARSING
+// =========================================================================
+
+describe("Combat Methods Survey — Weapon Modifier Parsing", () => {
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		makeTGTTFighter(5);
+		state.addCombatTradition("Unending Wheel");
+	});
+
+	it("should parse ongoing damage dice from Wounding Strike", () => {
+		addMethod("Wounding Strike", "UW", 1,
+			"Bonus Action (2 Exertion Points). Choose a weapon. If you hit with your next attack roll using the chosen weapon against a living creature, you deliver a wound that deals 1d4 ongoing damage.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Wounding Strike");
+		expect(m.ongoingDamage).toBe("1d4");
+	});
+
+	it("should parse ongoing save type from Wounding Strike description", () => {
+		addMethod("Wounding Strike", "UW", 1,
+			"Bonus Action (2 Exertion Points). Choose a weapon. If you hit with your next attack roll, you deliver a wound that deals 1d4 ongoing damage. At the start of each of the wounded creature's turns, it makes a Constitution saving throw, ending the effect on itself on a success.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Wounding Strike");
+		expect(m.ongoingSaveType).toBe("constitution");
+	});
+
+	it("should parse alternative end condition (Medicine check)", () => {
+		addMethod("Wounding Strike", "UW", 1,
+			"Bonus Action (2 Exertion Points). If you hit with your next attack roll, it deals 1d4 ongoing damage. A creature within 5 feet can use an action to make a Medicine check against your method DC, ending the ongoing damage on a success.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Wounding Strike");
+		expect(m.alternativeEndCheck).toBe("medicine");
+	});
+
+	it("should not parse ongoing damage for non-weapon-modifier methods", () => {
+		addMethod("Power Strike", "AM", 1,
+			"Action (1 Exertion Point). Make a melee weapon attack against a creature within reach.");
+		const methods = state.getCombatMethods();
+		const m = methods.find(x => x.name === "Power Strike");
+		expect(m.ongoingDamage).toBeUndefined();
+	});
+});
+
+// =========================================================================
+// ACTIVE COMBAT METHOD EFFECTS — STATE MANAGEMENT
+// =========================================================================
+
+describe("Combat Methods Survey — Active Method Effects State", () => {
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		makeTGTTFighter(5);
+	});
+
+	it("should activate a combat method effect", () => {
+		state.activateCombatMethodEffect({
+			name: "Wounding Strike",
+			weaponId: "atk-1",
+			weaponName: "Longsword",
+			ongoingDamage: "1d4",
+			ongoingSaveType: "constitution",
+			saveDc: 14,
+		});
+		const effects = state.getActiveCombatMethodEffects();
+		expect(effects).toHaveLength(1);
+		expect(effects[0].name).toBe("Wounding Strike");
+		expect(effects[0].weaponName).toBe("Longsword");
+		expect(effects[0].ongoingDamage).toBe("1d4");
+		expect(effects[0].saveDc).toBe(14);
+	});
+
+	it("should deactivate a combat method effect by id", () => {
+		state.activateCombatMethodEffect({
+			name: "Wounding Strike",
+			weaponId: "atk-1",
+			weaponName: "Longsword",
+			ongoingDamage: "1d4",
+			ongoingSaveType: "constitution",
+			saveDc: 14,
+		});
+		const effects = state.getActiveCombatMethodEffects();
+		expect(effects).toHaveLength(1);
+		state.deactivateCombatMethodEffect(effects[0].id);
+		expect(state.getActiveCombatMethodEffects()).toHaveLength(0);
+	});
+
+	it("should replace existing effect on same weapon", () => {
+		state.activateCombatMethodEffect({
+			name: "Wounding Strike",
+			weaponId: "atk-1",
+			weaponName: "Longsword",
+			ongoingDamage: "1d4",
+			ongoingSaveType: "constitution",
+			saveDc: 14,
+		});
+		state.activateCombatMethodEffect({
+			name: "Greater Wound",
+			weaponId: "atk-1",
+			weaponName: "Longsword",
+			ongoingDamage: "2d4",
+			ongoingSaveType: "constitution",
+			saveDc: 16,
+		});
+		const effects = state.getActiveCombatMethodEffects();
+		expect(effects).toHaveLength(1);
+		expect(effects[0].name).toBe("Greater Wound");
+		expect(effects[0].ongoingDamage).toBe("2d4");
+	});
+
+	it("should allow effects on different weapons simultaneously", () => {
+		state.activateCombatMethodEffect({
+			name: "Wounding Strike",
+			weaponId: "atk-1",
+			weaponName: "Longsword",
+			ongoingDamage: "1d4",
+			ongoingSaveType: "constitution",
+			saveDc: 14,
+		});
+		state.activateCombatMethodEffect({
+			name: "Wounding Strike",
+			weaponId: "atk-2",
+			weaponName: "Shortsword",
+			ongoingDamage: "1d4",
+			ongoingSaveType: "constitution",
+			saveDc: 14,
+		});
+		expect(state.getActiveCombatMethodEffects()).toHaveLength(2);
+	});
+
+	it("should clear all combat method effects", () => {
+		state.activateCombatMethodEffect({name: "A", weaponId: "1", weaponName: "W1", ongoingDamage: "1d4", saveDc: 14});
+		state.activateCombatMethodEffect({name: "B", weaponId: "2", weaponName: "W2", ongoingDamage: "1d6", saveDc: 14});
+		expect(state.getActiveCombatMethodEffects()).toHaveLength(2);
+		state.clearCombatMethodEffects();
+		expect(state.getActiveCombatMethodEffects()).toHaveLength(0);
+	});
+
+	it("should persist effects through save/load cycle", () => {
+		state.activateCombatMethodEffect({
+			name: "Wounding Strike",
+			weaponId: "atk-1",
+			weaponName: "Longsword",
+			ongoingDamage: "1d4",
+			ongoingSaveType: "constitution",
+			saveDc: 14,
+		});
+		const json = state.toJson();
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(json);
+		const effects = loaded.getActiveCombatMethodEffects();
+		expect(effects).toHaveLength(1);
+		expect(effects[0].name).toBe("Wounding Strike");
+		expect(effects[0].ongoingDamage).toBe("1d4");
+	});
+});

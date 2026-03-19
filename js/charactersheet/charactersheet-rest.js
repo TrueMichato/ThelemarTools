@@ -532,12 +532,16 @@ class CharacterSheetRest {
 				let message = "🌙 Long rest complete! All resources restored.";
 				if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 				if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
-				if (calcs.hasGamblerSpellcasting) message += ` 🎲 Roll for new Gambler spells in Spells tab.`;
 
 				JqueryUtil.doToast({
 					type: "success",
 					content: message,
 				});
+
+				// Auto-popup Gambler prepared roll modal after long rest
+				if (calcs.hasGamblerSpellcasting) {
+					this._showGamblerPreparedRollModal();
+				}
 		});
 
 		ee`<div class="charsheet__modal-footer">
@@ -647,6 +651,55 @@ class CharacterSheetRest {
 				content: `Item charges restored: ${itemList}`,
 			});
 		}
+	}
+
+	/**
+	 * Show a modal after long rest prompting the Gambler to roll for prepared spell count.
+	 */
+	async _showGamblerPreparedRollModal () {
+		const calcs = this._state.getFeatureCalculations();
+		if (!calcs.hasGamblerSpellcasting) return;
+
+		const dice = calcs.gamblerSpellsPreparedDice || "2d4";
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "\u{1F3B2} Gambler: Roll for Prepared Spells",
+			isMinHeight0: true,
+		});
+
+		const resultArea = e_({tag: "div", clazz: "ve-text-center", style: "min-height: 40px;"});
+
+		const btnRoll = e_({outer: `<button class="btn btn-sm btn-warning" style="font-weight: 600;">\u{1F3B2} Roll ${dice}</button>`});
+		const btnClose = e_({outer: `<button class="btn btn-sm btn-default mt-2" style="display: none;">OK</button>`});
+
+		ee`<div class="ve-text-center">
+			<p class="mb-2 ve-muted ve-small">Dice: <strong>${dice}</strong></p>
+			${btnRoll}
+			${resultArea}
+			${btnClose}
+		</div>`.appendTo(modalInner);
+
+		btnRoll.addEventListener("click", () => {
+			const rollDetails = this._state.rollGamblerPreparedSpells();
+			if (!rollDetails) return;
+
+			btnRoll.style.display = "none";
+			resultArea.innerHTML = "";
+
+			const rollsStr = rollDetails.rolls.join(" + ");
+			ee`<div class="ve-text-center mt-2">
+				<p class="mb-0 ve-muted ve-small">${rollDetails.dice}: (${rollsStr})</p>
+				<p class="mb-0" style="font-size: 1.8rem; font-weight: bold; color: #f59e0b;">${rollDetails.total}</p>
+				<p class="ve-muted ve-small mb-0">spells prepared for today</p>
+			</div>`.appendTo(resultArea);
+
+			btnClose.style.display = "";
+
+			this._page.saveCharacter();
+			this._page.renderCharacter();
+		});
+
+		btnClose.addEventListener("click", () => doClose(true));
 	}
 }
 
