@@ -480,17 +480,22 @@ class CharacterSheetLevelUp {
 				// Re-render optional features section if it exists, or create it
 				// dynamically if subclass grants bonus methods
 				if (optionalFeatureGains.length > 0) {
-					selectedOptionalFeatures = {};
+					// Preserve CTM (combat method) selections across subclass re-renders
+					const savedCTM = {};
+					for (const [k, v] of Object.entries(selectedOptionalFeatures)) {
+						if (k.includes("CTM:")) savedCTM[k] = v;
+					}
+					selectedOptionalFeatures = {...savedCTM};
 					if (accordions.optfeatures) {
 						// Re-render existing accordion body
 						const body = accordions.optfeatures.el.querySelector(".charsheet__levelup-accordion-body");
 						body.innerHTML = "";
-						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes});
+						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures});
 						body.append(optContent);
 					} else {
 						// Create the accordion dynamically (wasn't needed before subclass selection)
 						summaryItems.append(createSummaryItem("optfeatures", "✨", "Class Options", {required: true}));
-						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes});
+						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures});
 						// Insert after subclass accordion
 						const subclassAccordion = accordions.subclass?.el;
 						const optAccordion = createAccordion("optfeatures", "✨", "Class Options", optContent, {required: true});
@@ -2297,7 +2302,7 @@ class CharacterSheetLevelUp {
 	 * @param {Function} onSelect - Callback(featureType, selectedFeatures)
 	 * @param {number} newLevel - The new level for filtering by max degree
 	 */
-	_renderOptionalFeaturesSelection (classData, gains, onSelect, newLevel, {subclassGrantedTraditionCodes = []} = {}) {
+	_renderOptionalFeaturesSelection (classData, gains, onSelect, newLevel, {subclassGrantedTraditionCodes = [], existingSelections = {}} = {}) {
 		// Filter optional features by allowed sources and edition
 		const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
 		const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesByEdition(allOptFeaturesRaw, classData.source);
@@ -2320,7 +2325,7 @@ class CharacterSheetLevelUp {
 
 			if (isCombatMethods) {
 				// Use special Combat Methods rendering with tradition filtering
-				this._renderCombatMethodsLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes});
+				this._renderCombatMethodsLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes, existingSelections: existingSelections[featureKey] || []});
 			} else {
 				// Standard optional feature rendering
 				this._renderStandardOptionalFeaturesLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey);
@@ -2333,8 +2338,8 @@ class CharacterSheetLevelUp {
 	/**
 	 * Render Combat Methods selection during level-up with tradition filtering
 	 */
-	_renderCombatMethodsLevelUp (container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes = []} = {}) {
-		const selectedForType = [];
+	_renderCombatMethodsLevelUp (container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes = [], existingSelections = []} = {}) {
+		const selectedForType = [...existingSelections];
 
 		// Get character's known traditions from existing Combat Methods or state
 		let knownTraditions = CharacterSheetClassUtils.getKnownCombatTraditions(existingOptFeatures, this._state);
@@ -2467,7 +2472,7 @@ class CharacterSheetLevelUp {
 				<p><strong>${gain.name}:</strong> Choose ${gain.newCount} new method${gain.newCount > 1 ? "s" : ""}</p>
 				<p class="ve-small ve-muted">Max degree available: ${maxDegree}${CharacterSheetClassUtils.getOrdinalSuffix(maxDegree)} | Traditions: ${knownTraditions.map(t => CharacterSheetClassUtils.getTraditionName(t)).join(", ")}</p>
 				<div class="charsheet__levelup-opt-list" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--rgb-border-grey); border-radius: 4px; padding: 0.5rem;"></div>
-				<div class="ve-small ve-muted mt-1">Selected: <span class="opt-count">0</span>/${gain.newCount}</div>
+				<div class="ve-small ve-muted mt-1">Selected: <span class="opt-count">${selectedForType.length}</span>/${gain.newCount}</div>
 			</div>
 		`});
 
@@ -2497,10 +2502,11 @@ class CharacterSheetLevelUp {
 			methods.sort((a, b) => a._degree - b._degree || a.name.localeCompare(b.name)).forEach(method => {
 				const isDisabled = !method._selectable;
 				const knownBadge = method._alreadyKnown ? `<span class="badge badge-secondary ml-1">Known</span>` : "";
+				const isSelected = selectedForType.some(s => s.name === method.name && s.source === method.source);
 
 				const item = e_({outer: `
-					<label class="charsheet__levelup-opt-item d-block mb-1 ml-2${isDisabled ? " charsheet__levelup-opt-item--disabled" : ""}" style="cursor: ${isDisabled ? "not-allowed" : "pointer"}; padding: 0.25rem; border-radius: 4px;${isDisabled ? " opacity: 0.6;" : ""}">
-						<input type="checkbox" class="mr-2"${isDisabled ? " disabled" : ""}>
+					<label class="charsheet__levelup-opt-item d-block mb-1 ml-2${isDisabled ? " charsheet__levelup-opt-item--disabled" : ""}" style="cursor: ${isDisabled ? "not-allowed" : "pointer"}; padding: 0.25rem; border-radius: 4px;${isDisabled ? " opacity: 0.6;" : ""}${isSelected ? " background: var(--rgb-link-opacity-10);" : ""}">
+						<input type="checkbox" class="mr-2"${isDisabled ? " disabled" : ""}${isSelected ? " checked" : ""}>
 						<span class="opt-name"></span>
 						${knownBadge}
 						<span class="ve-muted ve-small ml-1">(${method._degree}${CharacterSheetClassUtils.getOrdinalSuffix(method._degree)} degree)</span>

@@ -7183,6 +7183,30 @@ class CharacterSheetState {
 		const source = cls.source || "PHB";
 		const is2024 = source === "XPHB" || source === "xphb" || source === "TGTT";
 
+		// Subclass-specific spellcasting overrides MUST be checked first.
+		// These subclasses have their own spellcasting model that overrides
+		// the parent class progression arrays (e.g., XPHB Rogue has
+		// preparedSpellsProgression, but Gambler uses rolled prepared count).
+		const subclassName = cls.subclass?.name;
+
+		// Gambler (TGTT Rogue subclass) — 1/3 caster using Warlock spell list with rolled prepared count
+		if (subclassName === "Gambler") {
+			if (level < 3) return null;
+			const calcs = this.getFeatureCalculations();
+			const rolledMax = this.getGamblerPreparedCount();
+			return {
+				type: "prepared",
+				max: rolledMax || 0,
+				cantripsKnown: calcs.gamblerCantripsKnown || (level >= 10 ? 4 : 3),
+				preparedMax: rolledMax || 0,
+				preparedDice: calcs.gamblerSpellsPreparedDice || (level >= 13 ? "3d6" : "2d4"),
+				hasFullAccess: false,
+				is2024: false,
+				isRolledPrepared: true,
+				spellListClass: "Warlock",
+			};
+		}
+
 		// Try to get progression from class data first (supports 2024 and homebrew)
 		if (classData) {
 			const cantripsKnown = classData.cantripProgression?.[levelIndex] || 0;
@@ -7298,7 +7322,6 @@ class CharacterSheetState {
 		}
 
 		// Check for third-caster subclasses
-		const subclassName = cls.subclass?.name;
 		if (subclassName === "Eldritch Knight" || subclassName === "Arcane Trickster") {
 			const ekAtSpellsKnown = [0, 0, 3, 4, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10, 10, 11, 11, 11, 12, 13];
 			const knownMax = ekAtSpellsKnown[levelIndex];
@@ -7309,24 +7332,6 @@ class CharacterSheetState {
 				spellsKnownMax: knownMax,
 				hasFullAccess: false, // Known casters can only cast what they know
 				is2024: false,
-			};
-		}
-
-		// Gambler (TGTT Rogue subclass) — 1/3 caster using Warlock spell list with rolled prepared count
-		if (subclassName === "Gambler") {
-			if (level < 3) return null; // Gambler spellcasting starts at level 3
-			const calcs = this.getFeatureCalculations();
-			const rolledMax = this.getGamblerPreparedCount();
-			return {
-				type: "prepared",
-				max: rolledMax || 0,
-				cantripsKnown: calcs.gamblerCantripsKnown || (level >= 10 ? 4 : 3),
-				preparedMax: rolledMax || 0,
-				preparedDice: calcs.gamblerSpellsPreparedDice || (level >= 13 ? "3d6" : "2d4"),
-				hasFullAccess: false,
-				is2024: false,
-				isRolledPrepared: true,
-				spellListClass: "Warlock",
 			};
 		}
 

@@ -2396,16 +2396,16 @@ class CharacterSheetSpells {
 		if (!table || !table.length) return;
 
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: "🎰 Gambling Table",
+			title: "\u{1F3B0} Gambling Table",
 			isMinHeight0: true,
 			isWidth100: true,
 		});
 
 		// Roll button and result display
 		const rollSection = e_({outer: `
-			<div class="flex-v-center mb-3" style="gap: 12px;">
-				<button class="btn btn-primary btn-gambler-modal-roll">🎲 Roll d100</button>
-				<div class="gambler-roll-result" style="font-size: 1.1em;"></div>
+			<div class="ve-flex-v-center mb-3 p-2" style="gap: 12px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px;">
+				<button class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px;">\u{1F3B2} Roll d100</button>
+				<div class="gambler-roll-result" style="font-size: 1.05em; line-height: 1.4;"></div>
 			</div>
 		`});
 		modalInner.append(rollSection);
@@ -2419,24 +2419,29 @@ class CharacterSheetSpells {
 		rollSection.querySelector(".btn-gambler-modal-roll").addEventListener("click", () => {
 			const result = this._state.rollGamblingTable();
 			if (result) {
-				let resultHtml = `<b>d100:</b> ${result.roll}`;
+				let resultHtml = `<span style="font-size: 1.3em; font-weight: 700; color: var(--rgb-name--accent);">d100: ${result.roll}</span>`;
 				if (hasMasterOfFortune && result.secondRoll) {
-					resultHtml += ` / ${result.secondRoll}`;
-					resultHtml += `<br><span class="text-info">Master of Fortune: Choose which result to use</span>`;
+					resultHtml += ` <span style="font-size: 1.1em;">/ ${result.secondRoll}</span>`;
+					resultHtml += `<br><span class="text-info ve-small">\u{1F3B2} Master of Fortune: Choose which result to use</span>`;
 				}
-				resultHtml += `<br><span class="text-warning">${result.effect}</span>`;
+				resultHtml += `<br><span class="text-warning" style="font-style: italic;">${result.effect}</span>`;
 				resultDisplay.innerHTML = resultHtml;
 
-				// Highlight the result row in the table
-				tableBody.querySelectorAll("tr.table-warning").forEach(el => el.classList.remove("table-warning"));
-				tableBody.querySelector(`tr[data-roll="${result.roll}"]`)?.classList.add("table-warning");
+				// Highlight the result row in the table and scroll to it
+				tableBody.querySelectorAll("tr.table-warning").forEach(el => { el.classList.remove("table-warning"); el.style.removeProperty("background"); });
+				const matchRow = tableBody.querySelector(`tr[data-roll="${result.roll}"]`);
+				if (matchRow) {
+					matchRow.classList.add("table-warning");
+					matchRow.style.background = "rgba(245, 158, 11, 0.2)";
+					matchRow.scrollIntoView({behavior: "smooth", block: "center"});
+				}
 			}
 		});
 
 		// Last roll display
 		const lastRoll = this._state.getGamblerLastTableRoll?.();
 		if (lastRoll) {
-			resultDisplay.innerHTML = `<span class="text-muted">Last roll: ${lastRoll.roll} — ${lastRoll.effect}</span>`;
+			resultDisplay.innerHTML = `<span class="text-muted">Last roll: ${lastRoll.roll} \u2014 ${lastRoll.effect}</span>`;
 		}
 
 		// Search filter
@@ -2451,12 +2456,12 @@ class CharacterSheetSpells {
 
 		// Table
 		const tableContainer = e_({outer: `
-			<div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--rgb-border-grey); border-radius: 4px;">
-				<table class="table table-striped table-hover table-sm mb-0" style="font-size: 0.85em;">
-					<thead style="position: sticky; top: 0; background: var(--rgb-bg); z-index: 1;">
+			<div style="max-height: 450px; overflow-y: auto; border: 1px solid var(--rgb-border-grey); border-radius: 6px;">
+				<table class="table table-striped table-hover table-sm mb-0" style="font-size: 0.85em; line-height: 1.4;">
+					<thead style="position: sticky; top: 0; background: var(--rgb-bg); z-index: 1; border-bottom: 2px solid var(--rgb-border-grey);">
 						<tr>
-							<th style="width: 60px;">d100</th>
-							<th>Effect</th>
+							<th class="text-center" style="width: 55px; padding: 6px 4px; font-weight: 700;">d100</th>
+							<th style="padding: 6px 8px; font-weight: 700;">Effect</th>
 						</tr>
 					</thead>
 					<tbody></tbody>
@@ -2476,7 +2481,7 @@ class CharacterSheetSpells {
 				if (filter && !effect.toLowerCase().includes(filterLower) && !String(roll).includes(filter)) {
 					return;
 				}
-				const row = e_({outer: `<tr data-roll="${roll}"><td class="text-center"><b>${roll}</b></td><td>${effect}</td></tr>`});
+				const row = e_({outer: `<tr data-roll="${roll}" style="cursor: default;"><td class="text-center" style="padding: 4px; vertical-align: top; color: var(--rgb-name--accent); font-weight: 600;">${roll}</td><td style="padding: 4px 8px;">${effect}</td></tr>`});
 				tableBody.append(row);
 			});
 		};
@@ -2490,10 +2495,10 @@ class CharacterSheetSpells {
 		// Auto-roll setting toggle
 		const autoRollEnabled = this._state.getGamblerAutoRollTable?.();
 		const settingRow = e_({outer: `
-			<div class="mt-3 text-muted" style="font-size: 0.85em;">
-				<label class="flex-v-center" style="gap: 6px; cursor: pointer;">
+			<div class="mt-3 p-2" style="font-size: 0.85em; border-top: 1px solid var(--rgb-border-grey);">
+				<label class="ve-flex-v-center" style="gap: 6px; cursor: pointer;">
 					<input type="checkbox" ${autoRollEnabled ? "checked" : ""}>
-					<span>Auto-roll d100 when bet is lost</span>
+					<span class="ve-muted">Auto-roll d100 when bet is lost (shows result in spell cast toast)</span>
 				</label>
 			</div>
 		`});
