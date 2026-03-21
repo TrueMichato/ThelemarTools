@@ -5626,6 +5626,74 @@
           }
         ]
       }
+    },
+    {
+      "name": "Annabel's Supervised Spacetime Fracture",
+      "source": "TGTT",
+      "page": 0,
+      "level": 3,
+      "school": "C",
+      "time": [
+        {
+          "number": 1,
+          "unit": "action"
+        }
+      ],
+      "range": {
+        "type": "point",
+        "distance": {
+          "type": "feet",
+          "amount": 60
+        }
+      },
+      "components": {
+        "s": true,
+        "m": "A slipping rope"
+      },
+      "duration": [
+        {
+          "type": "timed",
+          "duration": {
+            "type": "minute",
+            "amount": 1
+          },
+          "concentration": true
+        }
+      ],
+      "entries": [
+        "You tear a minute rift in the fabric of spacetime at a point you can see within range. The rift is a transparent, shifting orb 5 feet in diameter. The area within 10 feet of the orb is {@variantrule Difficult Terrain|XPHB}, as space warps and stretches around the fracture.",
+        "Place the orb within range. On subsequent turns, you can use your bonus action to teleport it to another space within range.",
+        "When the orb enters a creature's space, or a creature enters the orb's space, the creature immediately disappears, as it is sent into the near future. It must make a Charisma saving throw (which it can choose to fail).",
+        "On a successful save, the creature reappears immediately. On a failed save, the creature reappears 1 round later. During that time, the creature is considered {@condition incapacitated|TGTT}, as it momentarily ceases to exist. Ongoing effects affecting the creature that do not require concentration extend their duration by 1 round. If the creature failed its saving throw during its own turn, it continues its turn once it reappears.",
+        "When the creature reappears, it appears in a random unoccupied space within 10 feet of its original location. If no unoccupied space is available within that range, it appears in one of the nearest unoccupied spaces, chosen at random if there is more than one."
+      ],
+      "entriesHigherLevel": [
+        {
+          "type": "entries",
+          "name": "At Higher Levels",
+          "entries": [
+            "Casting the spell with a spell slot of 5th or 6th level sends creatures 1 minute into the future on a failed save, instead of 1 round. With a 7th or 8th level slot, they are sent 1 hour into the future. With a 9th level slot, they are sent 1 day into the future."
+          ]
+        }
+      ],
+      "savingThrow": [
+        "charisma"
+      ],
+      "conditionInflict": [
+        "incapacitated"
+      ],
+      "subschools": [
+        "chronomancy",
+        "rarity:rare"
+      ],
+      "classes": {
+        "fromClassList": [
+          {
+            "name": "Wizard",
+            "source": "TGTT"
+          }
+        ]
+      }
     }
   ],
   "class": [
