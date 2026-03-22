@@ -2139,6 +2139,15 @@ class CharacterSheetQuickBuild {
 		Object.entries(aggregatedGains).forEach(([typeKey, gain]) => {
 			const isCombatMethods = gain.featureTypes.some(ft => ft.startsWith("CTM:"));
 
+			// Add subclass bonus method count for combat methods
+			if (isCombatMethods) {
+				const subclass = this._getSubclassForClass(gain.className, gain.classSource, 0);
+				if (subclass) {
+					const bonusCount = CharacterSheetClassUtils.getSubclassBonusMethodCount(subclass, gain.classSource);
+					gain.totalNeeded += bonusCount;
+				}
+			}
+
 			if (isCombatMethods) {
 				this._renderCombatMethodsOptFeature(step, typeKey, gain);
 			} else {
@@ -2163,6 +2172,18 @@ class CharacterSheetQuickBuild {
 		});
 
 		for (const [key, gain] of Object.entries(aggregatedGains)) {
+			// Add subclass bonus method count for combat methods
+			const isCTM = key.includes("CTM:");
+			if (isCTM) {
+				const analysis = optFeatLevels[0];
+				if (analysis) {
+					const subclass = this._getSubclassForClass(analysis.className, analysis.classSource, 0);
+					if (subclass) {
+						gain.totalNeeded += CharacterSheetClassUtils.getSubclassBonusMethodCount(subclass, analysis.classSource);
+					}
+				}
+			}
+
 			const selected = this._selections.optionalFeatures[key] || [];
 			if (selected.length < gain.totalNeeded) {
 				JqueryUtil.doToast({type: "warning", content: `Please select ${gain.totalNeeded} ${gain.name} (currently ${selected.length}).`});
@@ -2355,9 +2376,22 @@ class CharacterSheetQuickBuild {
 			classFeatures,
 		});
 
-		if (!this._selections._combatTraditions) {
-			this._selections._combatTraditions = [...knownTraditions];
+		// Identify subclass-granted traditions (e.g. Mercy → Sanguine Knot)
+		let subclassGrantedCodes = [];
+		const subclass = this._getSubclassForClass(gain.className, gain.classSource, 0);
+		if (subclass) {
+			const grantedTraditions = CharacterSheetClassUtils.getSubclassGrantedTraditions(subclass, gain.classSource);
+			subclassGrantedCodes = grantedTraditions.filter(t => t.code && !t.choice).map(t => t.code);
 		}
+
+		// _combatTraditions tracks only user-chosen traditions (not subclass grants)
+		if (!this._selections._combatTraditions) {
+			this._selections._combatTraditions = knownTraditions.filter(t => !subclassGrantedCodes.includes(t));
+		}
+
+		// Combined set for method filtering; user count for picker limit
+		const getAllTraditions = () => [...new Set([...this._selections._combatTraditions, ...subclassGrantedCodes])];
+		const getUserChosenCount = () => this._selections._combatTraditions.length;
 
 		const section = e_({outer: `
 			<div class="charsheet__quickbuild-section mb-3">
@@ -2369,7 +2403,7 @@ class CharacterSheetQuickBuild {
 		const tradContainer = e_({outer: `<div class="mb-2"></div>`});
 		const methodsContainer = e_({outer: `<div></div>`});
 
-		if (knownTraditions.length < traditionCount) {
+		if (getUserChosenCount() < traditionCount) {
 			const availableTraditions = CharacterSheetClassUtils.getAvailableTraditionsForClass(
 				allOptFeatures,
 				gain.featureTypes || [],
@@ -2379,12 +2413,18 @@ class CharacterSheetQuickBuild {
 
 			tradContainer.append(e_({outer: `<div>
 				<p class="ve-small ve-muted mb-1">Choose ${traditionCount} Combat Traditions:</p>
-				<div class="ve-small ve-muted mb-1">Selected: <span class="qb-trad-count">${this._selections._combatTraditions.length}</span>/${traditionCount}</div>
+				<div class="ve-small ve-muted mb-1">Selected: <span class="qb-trad-count">${getUserChosenCount()}</span>/${traditionCount}</div>
 			</div>`}));
+
+			// Show subclass-granted traditions as non-interactive badges
+			if (subclassGrantedCodes.length > 0) {
+				const grantedNames = subclassGrantedCodes.map(c => CharacterSheetClassUtils.getTraditionName(c)).join(", ");
+				tradContainer.append(e_({outer: `<div class="ve-small ve-muted mb-1" style="padding: 4px 6px;">Free from subclass: <strong>${grantedNames}</strong></div>`}));
+			}
 
 			const tradList = e_({outer: `<div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--cs-border, #ddd); border-radius: 8px; padding: 4px; margin-bottom: 8px;"></div>`});
 
-			availableTraditions.forEach(trad => {
+			availableTraditions.filter(trad => !subclassGrantedCodes.includes(trad.code)).forEach(trad => {
 				const isChecked = this._selections._combatTraditions.includes(trad.code);
 				const item = e_({outer: `
 					<label class="d-block ve-small mb-1" style="cursor: pointer; padding: 4px 6px;">
@@ -2396,7 +2436,7 @@ class CharacterSheetQuickBuild {
 
 				item.querySelector("input").addEventListener("change", (e) => {
 					if (e.target.checked) {
-						if (this._selections._combatTraditions.length < traditionCount) {
+						if (getUserChosenCount() < traditionCount) {
 							this._selections._combatTraditions.push(trad.code);
 						} else {
 							e.target.checked = false;
@@ -2405,16 +2445,17 @@ class CharacterSheetQuickBuild {
 						}
 					} else {
 						this._selections._combatTraditions = this._selections._combatTraditions.filter(t => t !== trad.code);
+						const allTraditions = getAllTraditions();
 						const remaining = selectedList.filter(s => {
 							const ft = (s.featureType || []).find(t => t.startsWith("CTM:"));
 							if (!ft) return true;
 							const match = ft.match(/^CTM:\d([A-Z]{2})$/);
-							return !match || this._selections._combatTraditions.includes(match[1]);
+							return !match || allTraditions.includes(match[1]);
 						});
 						selectedList.length = 0;
 						remaining.forEach(s => selectedList.push(s));
 					}
-					tradContainer.querySelector(".qb-trad-count").textContent = this._selections._combatTraditions.length;
+					tradContainer.querySelector(".qb-trad-count").textContent = getUserChosenCount();
 					renderMethods();
 					section.querySelector(".badge").textContent = `${selectedList.length}/${gain.totalNeeded}`;
 				});
@@ -2424,13 +2465,14 @@ class CharacterSheetQuickBuild {
 
 			tradContainer.append(tradList);
 		} else {
-			const tradNames = knownTraditions.map(t => CharacterSheetClassUtils.getTraditionName(t)).join(", ");
+			const allTraditions = getAllTraditions();
+			const tradNames = allTraditions.map(t => CharacterSheetClassUtils.getTraditionName(t)).join(", ");
 			tradContainer.append(e_({outer: `<p class="ve-small ve-muted">Traditions: ${tradNames}</p>`}));
 		}
 
 		const renderMethods = () => {
 			methodsContainer.innerHTML = "";
-			const activeTraditions = knownTraditions.length > 0 ? knownTraditions : this._selections._combatTraditions;
+			const activeTraditions = getAllTraditions();
 
 			if (activeTraditions.length === 0) {
 				methodsContainer.append(e_({outer: `<p class="ve-muted ve-small">Select traditions above to see available methods.</p>`}));
