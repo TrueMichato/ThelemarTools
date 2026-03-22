@@ -15924,11 +15924,11 @@ Renderer.hover = class {
 					<!-- Chrome Web App Icons -->
 					<link rel="manifest" href="manifest.webmanifest">
 					<meta name="application-name" content="5etools">
-					<meta name="theme-color" content="#006bc4">
+					<meta name="theme-color" content="#005e66">
 
 					<!-- Windows Start Menu tiles -->
 					<meta name="msapplication-config" content="browserconfig.xml"/>
-					<meta name="msapplication-TileColor" content="#006bc4">
+					<meta name="msapplication-TileColor" content="#005e66">
 
 					<!-- Apple Touch Icons -->
 					<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon-180x180.png">
@@ -15939,7 +15939,7 @@ Renderer.hover = class {
 					<meta name="apple-mobile-web-app-title" content="5etools">
 
 					<!-- macOS Safari Pinned Tab and Touch Bar -->
-					<link rel="mask-icon" href="safari-pinned-tab.svg" color="#006bc4">
+					<link rel="mask-icon" href="safari-pinned-tab.svg" color="#005e66">
 
 					${PrereleaseUtil.getPopoutStyleElementHtml()}
 					${BrewUtil2.getPopoutStyleElementHtml()}
