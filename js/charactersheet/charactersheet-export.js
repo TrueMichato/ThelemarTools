@@ -3,6 +3,7 @@
  * Handles saving, loading, exporting, and importing character data
  */
 import {CharacterSheetNpcExporter} from "./charactersheet-npc-exporter.js";
+import {CharacterSheetPdf} from "./charactersheet-pdf.js";
 
 class CharacterSheetExport {
 	static _STORAGE_KEY_NPC_SOURCE_CONFIG = "charsheet-npc-export-source-config";
@@ -22,7 +23,7 @@ class CharacterSheetExport {
 	_initEventListeners () {
 		document.getElementById("charsheet-btn-export")?.addEventListener("click", () => this._showExportDialog());
 		document.getElementById("charsheet-btn-import")?.addEventListener("click", () => this._showImportDialog());
-		document.getElementById("charsheet-btn-print")?.addEventListener("click", () => this._printCharacter());
+		document.getElementById("charsheet-btn-print")?.addEventListener("click", () => this._openPdfPrintView());
 		document.getElementById("charsheet-btn-export-npc")?.addEventListener("click", () => this._showNpcExportDialog());
 		document.getElementById("charsheet-btn-save")?.addEventListener("click", () => this._saveCharacter());
 	}
@@ -40,21 +41,27 @@ class CharacterSheetExport {
 
 		let isPdfFormat = false;
 
-		const btnJson = e_({tag: "button", clazz: "ve-btn ve-btn-default active", txt: "JSON File", click: () => {
-			isPdfFormat = false;
-			btnJson.classList.add("active");
-			btnPdf.classList.remove("active");
-			jsonSection.style.display = "";
-			pdfSection.style.display = "none";
-		}});
+		const btnJson = e_({tag: "button",
+			clazz: "ve-btn ve-btn-default active",
+			txt: "JSON File",
+			click: () => {
+				isPdfFormat = false;
+				btnJson.classList.add("active");
+				btnPdf.classList.remove("active");
+				jsonSection.style.display = "";
+				pdfSection.style.display = "none";
+			}});
 
-		const btnPdf = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Print / PDF", click: () => {
-			isPdfFormat = true;
-			btnPdf.classList.add("active");
-			btnJson.classList.remove("active");
-			pdfSection.style.display = "";
-			jsonSection.style.display = "none";
-		}});
+		const btnPdf = e_({tag: "button",
+			clazz: "ve-btn ve-btn-default",
+			txt: "Print / PDF",
+			click: () => {
+				isPdfFormat = true;
+				btnPdf.classList.add("active");
+				btnJson.classList.remove("active");
+				pdfSection.style.display = "";
+				jsonSection.style.display = "none";
+			}});
 
 		const jsonSection = ee`<div>
 			<div class="charsheet__export-info mb-3">
@@ -71,13 +78,34 @@ class CharacterSheetExport {
 			</div>
 		</div>`;
 
+		const btnOpenPrintView = e_({tag: "button",
+			clazz: "ve-btn ve-btn-primary mt-2",
+			click: () => {
+				this._openPdfPrintView();
+			}});
+		btnOpenPrintView.innerHTML = `📄 Open Print View`;
+
+		const btnQuickPrint = e_({tag: "button",
+			clazz: "ve-btn ve-btn-default mt-2 ml-2",
+			click: () => {
+				this._printCharacter();
+			}});
+		btnQuickPrint.innerHTML = `🖨️ Quick Print (Current View)`;
+
 		const pdfSection = ee`<div style="display: none;">
 			<div class="charsheet__export-info">
-				<p class="ve-muted mb-1"><strong>🖨️ Print / PDF</strong> - Opens print dialog to:</p>
-				<ul class="ve-muted" style="margin: 0; padding-left: 1.5rem;">
-					<li>Print a physical character sheet</li>
-					<li>Save as PDF (choose "Save as PDF" in print dialog)</li>
+				<p class="ve-muted mb-1"><strong>📄 Print-Ready Character Sheet</strong></p>
+				<p class="ve-muted" style="font-size: 0.85rem;">Opens a clean, print-optimized character sheet in a new window. Use your browser's print dialog to save as PDF or print a physical copy.</p>
+				<ul class="ve-muted" style="margin: 0.5rem 0 0; padding-left: 1.5rem; font-size: 0.85rem;">
+					<li>Classic D&amp;D-inspired parchment layout</li>
+					<li>All stats, features, spells, and equipment</li>
+					<li>Thelemar homebrew sections (if applicable)</li>
+					<li>Companion statblocks on a dedicated page</li>
 				</ul>
+			</div>
+			<div>
+				${btnOpenPrintView}
+				${btnQuickPrint}
 			</div>
 		</div>`;
 
@@ -95,25 +123,29 @@ class CharacterSheetExport {
 
 		// Footer buttons
 		const btnClose = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Close", click: () => doClose(false)});
-		const btnCopy = e_({tag: "button", clazz: "ve-btn ve-btn-default", click: async () => {
-			if (isPdfFormat) {
-				this._printCharacter();
-			} else {
-				await MiscUtil.pCopyTextToClipboard(jsonStr);
-				JqueryUtil.doToast({type: "success", content: "Character data copied to clipboard!"});
-			}
-		}});
+		const btnCopy = e_({tag: "button",
+			clazz: "ve-btn ve-btn-default",
+			click: async () => {
+				if (isPdfFormat) {
+					this._openPdfPrintView();
+				} else {
+					await MiscUtil.pCopyTextToClipboard(jsonStr);
+					JqueryUtil.doToast({type: "success", content: "Character data copied to clipboard!"});
+				}
+			}});
 		btnCopy.innerHTML = `<span class="glyphicon glyphicon-copy"></span> Copy to Clipboard`;
 
-		const btnDownload = e_({tag: "button", clazz: "ve-btn ve-btn-primary", click: () => {
-			if (isPdfFormat) {
-				this._printCharacter();
-			} else {
-				const filename = `${characterName.replace(/[^a-zA-Z0-9]/g, "_")}.json`;
-				DataUtil.userDownload(filename, characterData, {fileType: "character"});
-				JqueryUtil.doToast({type: "success", content: `Downloaded ${filename}`});
-			}
-		}});
+		const btnDownload = e_({tag: "button",
+			clazz: "ve-btn ve-btn-primary",
+			click: () => {
+				if (isPdfFormat) {
+					this._openPdfPrintView();
+				} else {
+					const filename = `${characterName.replace(/[^a-zA-Z0-9]/g, "_")}.json`;
+					DataUtil.userDownload(filename, characterData, {fileType: "character"});
+					JqueryUtil.doToast({type: "success", content: `Downloaded ${filename}`});
+				}
+			}});
 		btnDownload.innerHTML = `<span class="glyphicon glyphicon-download"></span> Download`;
 
 		ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
@@ -186,42 +218,44 @@ class CharacterSheetExport {
 
 		// Footer buttons
 		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel", click: () => doClose(false)});
-		const btnImport = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Import", click: async () => {
-			const jsonStr = jsonTextarea.value.trim();
-			const replaceExisting = cbReplace.checked;
+		const btnImport = e_({tag: "button",
+			clazz: "ve-btn ve-btn-primary",
+			txt: "Import",
+			click: async () => {
+				const jsonStr = jsonTextarea.value.trim();
+				const replaceExisting = cbReplace.checked;
 
-			if (!jsonStr) {
-				JqueryUtil.doToast({type: "warning", content: "Please provide character data to import."});
-				return;
-			}
-
-			try {
-				const data = JSON.parse(jsonStr);
-
-				// Validate basic structure
-				if (!data.name && !data.classes && !data.race) {
-					throw new Error("Invalid character data structure");
+				if (!jsonStr) {
+					JqueryUtil.doToast({type: "warning", content: "Please provide character data to import."});
+					return;
 				}
 
-				if (replaceExisting) {
-					this._state.fromJSON(data);
-				} else {
-					const newState = new CharacterSheetState();
-					newState.fromJSON(data);
-					await this._page.addCharacter(newState);
+				try {
+					const data = JSON.parse(jsonStr);
+
+					// Validate basic structure
+					if (!data.name && !data.classes && !data.race) {
+						throw new Error("Invalid character data structure");
+					}
+
+					if (replaceExisting) {
+						this._state.fromJSON(data);
+					} else {
+						const newState = new CharacterSheetState();
+						newState.fromJSON(data);
+						await this._page.addCharacter(newState);
+					}
+
+					this._page.renderCharacter();
+					await this._page.saveCharacter();
+
+					doClose(true);
+					JqueryUtil.doToast({type: "success", content: `Imported ${data.name || "character"} successfully!`});
+				} catch (err) {
+					console.error("Import error:", err);
+					JqueryUtil.doToast({type: "danger", content: "Failed to import: Invalid JSON data."});
 				}
-
-				this._page.renderCharacter();
-				await this._page.saveCharacter();
-
-				doClose(true);
-				JqueryUtil.doToast({type: "success", content: `Imported ${data.name || "character"} successfully!`});
-
-			} catch (err) {
-				console.error("Import error:", err);
-				JqueryUtil.doToast({type: "danger", content: "Failed to import: Invalid JSON data."});
-			}
-		}});
+			}});
 
 		ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			${btnCancel}
@@ -345,37 +379,43 @@ class CharacterSheetExport {
 
 			const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Close", click: () => doClose(false)});
 
-			const btnRefresh = e_({tag: "button", clazz: "ve-btn ve-btn-default", click: async () => {
-				await pApplySourceConfig();
-			}});
+			const btnRefresh = e_({tag: "button",
+				clazz: "ve-btn ve-btn-default",
+				click: async () => {
+					await pApplySourceConfig();
+				}});
 			btnRefresh.innerHTML = `<span class="glyphicon glyphicon-refresh"></span> Refresh Preview`;
 
-			const btnDownload = e_({tag: "button", clazz: "ve-btn ve-btn-default", click: async () => {
-				await pApplySourceConfig();
+			const btnDownload = e_({tag: "button",
+				clazz: "ve-btn ve-btn-default",
+				click: async () => {
+					await pApplySourceConfig();
 
-				const validation = CharacterSheetNpcExporter.getValidationIssues(monster);
-				if (validation.errors.length || validation.warnings.length) {
-					const details = this._getValidationIssueSummary(validation, {maxErrors: 2, maxWarnings: 2});
-					JqueryUtil.doToast({
-						type: "warning",
-						content: `Downloaded with validation warnings (${validation.errors.length} error(s), ${validation.warnings.length} warning(s)). ${details}`.trim(),
-					});
-				}
+					const validation = CharacterSheetNpcExporter.getValidationIssues(monster);
+					if (validation.errors.length || validation.warnings.length) {
+						const details = this._getValidationIssueSummary(validation, {maxErrors: 2, maxWarnings: 2});
+						JqueryUtil.doToast({
+							type: "warning",
+							content: `Downloaded with validation warnings (${validation.errors.length} error(s), ${validation.warnings.length} warning(s)). ${details}`.trim(),
+						});
+					}
 
-				const filename = `${(monster.name || "npc").replace(/[^a-zA-Z0-9]/g, "_")}.json`;
-				DataUtil.userDownload(
-					filename,
-					{_meta: {sources: [sourceMeta]}, monster: [monster]},
-					{fileType: "homebrew"},
-				);
-				JqueryUtil.doToast({type: "success", content: `Downloaded ${filename}`});
-			}});
+					const filename = `${(monster.name || "npc").replace(/[^a-zA-Z0-9]/g, "_")}.json`;
+					DataUtil.userDownload(
+						filename,
+						{_meta: {sources: [sourceMeta]}, monster: [monster]},
+						{fileType: "homebrew"},
+					);
+					JqueryUtil.doToast({type: "success", content: `Downloaded ${filename}`});
+				}});
 			btnDownload.innerHTML = `<span class="glyphicon glyphicon-download"></span> Download JSON`;
 
-			const btnSave = e_({tag: "button", clazz: "ve-btn ve-btn-primary", click: async () => {
-				await pApplySourceConfig();
-				await this._pSaveNpcToEditableBrew(monster, {sourceMeta});
-			}});
+			const btnSave = e_({tag: "button",
+				clazz: "ve-btn ve-btn-primary",
+				click: async () => {
+					await pApplySourceConfig();
+					await this._pSaveNpcToEditableBrew(monster, {sourceMeta});
+				}});
 			btnSave.innerHTML = `<span class="glyphicon glyphicon-floppy-disk"></span> Save to Homebrew`;
 
 			ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
@@ -530,6 +570,18 @@ class CharacterSheetExport {
 			console.error("Failed to save NPC to homebrew:", e);
 			JqueryUtil.doToast({type: "danger", content: "Failed to save NPC to editable homebrew."});
 		}
+	}
+
+	_openPdfPrintView () {
+		const pdf = new CharacterSheetPdf(this._state, {skillsList: this._page.getSkillsList?.() || []});
+		const html = pdf.generate();
+		const printWindow = window.open("", "_blank");
+		if (!printWindow) {
+			JqueryUtil.doToast({type: "warning", content: "Pop-up blocked! Please allow pop-ups for this site to open the print view."});
+			return;
+		}
+		printWindow.document.write(html);
+		printWindow.document.close();
 	}
 
 	_printCharacter () {
