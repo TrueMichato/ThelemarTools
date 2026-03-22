@@ -136,6 +136,7 @@ Many classes have PHB tests but missing XPHB 2024 feature tests.
 | CharacterSheetSorcerer.test.js | 146 | ✅ 100% | Origin impl |
 | CharacterSheetWarlock.test.js | 153 | ✅ 100% | Patron impl |
 | CharacterSheetWizard.test.js | 92 | ✅ 100% | School impl |
+| CharacterSheetPdf.test.js | 108 | ✅ 100% | Visual overhaul + actions section |
 
 ## Implementation Pattern
 

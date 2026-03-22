@@ -108,7 +108,8 @@ describe("CharacterSheetPdf", () => {
 	describe("Combat Stats", () => {
 		test("should render AC", () => {
 			const html = new CharacterSheetPdf(state).generate();
-			expect(html).toContain("Armor Class");
+			expect(html).toContain("pdf-ac-shield");
+			expect(html).toContain(">AC<");
 		});
 
 		test("should render HP", () => {
@@ -259,7 +260,7 @@ describe("CharacterSheetPdf", () => {
 		test("should render resistances when present", () => {
 			state._data.resistances = ["fire", "cold"];
 			const html = new CharacterSheetPdf(state).generate();
-			expect(html).toContain("Resistances");
+			expect(html).toContain("Resist");
 			expect(html).toContain("fire");
 			expect(html).toContain("cold");
 		});
@@ -330,8 +331,8 @@ describe("CharacterSheetPdf", () => {
 	describe("Spellcasting", () => {
 		test("should not render spellcasting section header when no spells", () => {
 			const html = new CharacterSheetPdf(state).generate();
-			// Should not have the spellcasting section title in the body
-			expect(html).not.toContain("pdf-section--spells");
+			// Section title should not appear in the rendered body
+			expect(html).not.toContain(">Spellcasting<");
 		});
 
 		test("should render spellcasting with cantrips and spell list", () => {
@@ -366,7 +367,7 @@ describe("CharacterSheetPdf", () => {
 			};
 			const html = new CharacterSheetPdf(state).generate();
 			expect(html).toContain("Spell Slots");
-			expect(html).toContain("●●○○"); // 2 used out of 4
+			expect(html).toContain("■■□□"); // 2 used out of 4 (slot pips use squares)
 		});
 	});
 
@@ -463,7 +464,8 @@ describe("CharacterSheetPdf", () => {
 	describe("Companions", () => {
 		test("should not render companions when none exist", () => {
 			const html = new CharacterSheetPdf(state).generate();
-			expect(html).not.toContain("pdf-section--companions");
+			// No companion section title in the rendered body
+			expect(html).not.toContain(">Companions<");
 		});
 
 		test("should render companion statblock when present", () => {
@@ -660,6 +662,492 @@ describe("CharacterSheetPdf", () => {
 			state._data.name = "";
 			const html = new CharacterSheetPdf(state).generate();
 			expect(html).toContain("Unnamed Character");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Shield AC
+	// ===================================================================
+	describe("Shield AC", () => {
+		test("should render AC inside shield-shaped element", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-ac-shield");
+			expect(html).toContain("pdf-ac-shield__value");
+			expect(html).toContain("pdf-ac-shield__label");
+		});
+
+		test("should include shield clip-path in CSS", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("clip-path");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Ability Abbreviations & Score Circle
+	// ===================================================================
+	describe("Ability Score Circles", () => {
+		test("should render abbreviations (STR, DEX, etc.)", () => {
+			state._data.abilities = {str: 14, dex: 12, con: 10, int: 18, wis: 16, cha: 8};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain(">STR<");
+			expect(html).toContain(">DEX<");
+			expect(html).toContain(">CON<");
+			expect(html).toContain(">INT<");
+			expect(html).toContain(">WIS<");
+			expect(html).toContain(">CHA<");
+		});
+
+		test("should render score in a circle element", () => {
+			state._data.abilities = {str: 14, dex: 10, con: 10, int: 10, wis: 10, cha: 10};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-ability__score-circle");
+			expect(html).toContain(">14<");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Proficiency Bonus Box
+	// ===================================================================
+	describe("Proficiency Bonus Box", () => {
+		test("should render proficiency bonus in a styled box", () => {
+			state._data.classes = [{name: "Fighter", source: "PHB", level: 9}];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-prof-box");
+			expect(html).toContain("Proficiency Bonus");
+			expect(html).toContain("+4");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Death Saves
+	// ===================================================================
+	describe("Death Saves", () => {
+		test("should render death save circles", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Death Saves");
+			expect(html).toContain("pdf-death-saves");
+			// Default: 0 successes, 0 failures — all empty circles
+			expect(html).toContain("○○○");
+		});
+
+		test("should render filled circles for death save progress", () => {
+			state._data.deathSaves = {successes: 2, failures: 1};
+			const html = new CharacterSheetPdf(state).generate();
+			// 2 filled + 1 empty for successes
+			expect(html).toContain("●●○");
+			// 1 filled + 2 empty for failures
+			expect(html).toContain("●○○");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Inspiration Diamond
+	// ===================================================================
+	describe("Inspiration", () => {
+		test("should not render inspiration diamond without inspiration", () => {
+			state._data.inspiration = false;
+			const html = new CharacterSheetPdf(state).generate();
+			const bodyContent = html.split("<body>")[1] || html;
+			expect(bodyContent).not.toContain("pdf-header__inspiration");
+		});
+
+		test("should render inspiration star when active", () => {
+			state._data.inspiration = true;
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-header__inspiration");
+			expect(html).toContain("\u2605"); // ★
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Active Conditions
+	// ===================================================================
+	describe("Active Conditions", () => {
+		test("should not render conditions when none exist", () => {
+			state._data.conditions = [];
+			const html = new CharacterSheetPdf(state).generate();
+			const bodyContent = html.split("<body>")[1] || html;
+			expect(bodyContent).not.toContain("pdf-condition-chip");
+		});
+
+		test("should render condition chips", () => {
+			state._data.conditions = [{name: "Poisoned", source: "PHB"}, {name: "Blinded", source: "PHB"}];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-condition-chip");
+			expect(html).toContain("Poisoned");
+			expect(html).toContain("Blinded");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Header Labeled Fields
+	// ===================================================================
+	describe("Header Labeled Fields", () => {
+		test("should render labeled field boxes in header", () => {
+			state._data.classes = [{name: "Wizard", source: "PHB", level: 5}];
+			state._data.race = {name: "Elf", source: "PHB"};
+			state._data.background = {name: "Sage", source: "PHB"};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Character Name");
+			expect(html).toContain("Class & Level");
+			expect(html).toContain("Race");
+			expect(html).toContain("Background");
+			expect(html).toContain("Alignment");
+			expect(html).toContain(">Level<");
+			expect(html).toContain(">XP<");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Compact Features + Detailed Appendix
+	// ===================================================================
+	describe("Feature Dual Mode", () => {
+		test("should render compact feature summary with first sentence", () => {
+			state._data.features = [
+				{name: "Action Surge", featureType: "Class", className: "Fighter", level: 2, description: "You can take one additional action on your turn. This feature resets on a short rest."},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			// Compact summary should contain first sentence
+			expect(html).toContain("pdf-feature__summary");
+			expect(html).toContain("You can take one additional action on your turn.");
+		});
+
+		test("should render detailed appendix with full descriptions", () => {
+			state._data.features = [
+				{name: "Action Surge", featureType: "Class", className: "Fighter", level: 2, description: "You can take one additional action on your turn. This feature resets on a short rest."},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain(">Feature Details<");
+			expect(html).toContain("pdf-section--details");
+			// Full description should appear in the details section
+			const detailsSection = html.split(">Feature Details<")[1] || "";
+			expect(detailsSection).toContain("This feature resets on a short rest");
+		});
+
+		test("should not render details appendix when no features have descriptions", () => {
+			state._data.features = [
+				{name: "Darkvision", featureType: "Race"},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).not.toContain(">Feature Details<");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Attack Properties Column
+	// ===================================================================
+	describe("Attack Properties", () => {
+		test("should render properties column in attack table", () => {
+			state._data.attacks = [
+				{id: "a1", name: "Greatsword", bonus: 7, damage: "2d6+4", damageType: "slashing", range: "5 ft.", properties: ["Heavy", "Two-Handed"]},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Properties");
+			expect(html).toContain("Heavy");
+			expect(html).toContain("Two-Handed");
+		});
+
+		test("should use attackBonus field when available", () => {
+			state._data.attacks = [
+				{id: "a1", name: "Rapier", attackBonus: 8, bonus: 5, damage: "1d8+5", damageType: "piercing"},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("+8"); // attackBonus takes precedence
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Spell Duration & castingTime
+	// ===================================================================
+	describe("Spell Duration Column", () => {
+		test("should render duration column in spell table", () => {
+			state._data.spellcasting = {
+				ability: "int",
+				spellSlots: {1: {current: 3, max: 3}},
+				cantripsKnown: [],
+				spellsKnown: [
+					{name: "Mage Armor", level: 1, school: "A", time: "1 action", duration: "8 hours", range: "Touch"},
+				],
+				innateSpells: [],
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain(">Duration<");
+			expect(html).toContain("8 hours");
+		});
+
+		test("should use castingTime field when time is missing", () => {
+			state._data.spellcasting = {
+				ability: "wis",
+				spellSlots: {1: {current: 2, max: 2}},
+				cantripsKnown: [],
+				spellsKnown: [
+					{name: "Healing Word", level: 1, school: "V", castingTime: "1 bonus action", range: "60 ft."},
+				],
+				innateSpells: [],
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("1 bonus action");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Spell Count Summary
+	// ===================================================================
+	describe("Spell Count Summary", () => {
+		test("should render spell count summary line", () => {
+			state._data.spellcasting = {
+				ability: "cha",
+				spellSlots: {1: {current: 4, max: 4}},
+				cantripsKnown: [
+					{name: "Eldritch Blast", school: "V"},
+					{name: "Minor Illusion", school: "I"},
+				],
+				spellsKnown: [
+					{name: "Hex", level: 1, school: "E"},
+					{name: "Armor of Agathys", level: 1, school: "A"},
+					{name: "Charm Person", level: 1, school: "E"},
+				],
+				innateSpells: [{name: "Faerie Fire", level: 1}],
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("2 cantrips");
+			expect(html).toContain("3 prepared");
+			expect(html).toContain("3 known");
+			expect(html).toContain("1 innate");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Gold Divider Ornaments
+	// ===================================================================
+	describe("Gold Divider Ornaments", () => {
+		test("should include gold divider styles in CSS", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("#c9ad6a"); // Gold color
+			expect(html).toContain("linear-gradient");
+		});
+	});
+
+	// ===================================================================
+	// Visual Upgrade — Page Footer
+	// ===================================================================
+	describe("Page One Footer", () => {
+		test("should render footer with defenses when present", () => {
+			state._data.resistances = ["fire"];
+			state._data.immunities = ["poison"];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-page-footer");
+			expect(html).toContain("Resist");
+			expect(html).toContain("Immune");
+		});
+
+		test("should render carry info in footer", () => {
+			state._data.abilities = {str: 15, dex: 10, con: 10, int: 10, wis: 10, cha: 10};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Carry");
+		});
+	});
+
+	// ===================================================================
+	// Visual Overhaul — Official 5e Aesthetic
+	// ===================================================================
+	describe("Visual Overhaul", () => {
+		test("should render diamond ornaments in section titles (not circles)", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("transform: rotate(45deg)");
+			expect(html).not.toContain("border-radius: 50%;\n\tmargin-right: 6px");
+		});
+
+		test("should render boxed sections for Saving Throws and Skills", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-section--boxed");
+			// Both saving throws and skills should be boxed
+			const boxedMatches = html.match(/pdf-section--boxed/g) || [];
+			expect(boxedMatches.length).toBeGreaterThanOrEqual(2);
+		});
+
+		test("should use tabular-nums for number alignment", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("font-variant-numeric: tabular-nums");
+		});
+
+		test("should render ability boxes with depth effects", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("box-shadow: inset"); // inner shadow on ability boxes
+		});
+
+		test("should render ability score circle with double-ring", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			// Score circle has outer glow ring via box-shadow
+			expect(html).toContain("0 0 0 1.5px #fdf1dc");
+		});
+
+		test("should render alternating table row striping", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("tr:nth-child(even)");
+		});
+
+		test("should use 4-column spell table without School and Components", () => {
+			state._data.spellcasting = {
+				ability: "int",
+				spellSlots: {1: {current: 3, max: 3}},
+				cantripsKnown: [{name: "Fire Bolt", school: "V", time: "1 action", range: "120 ft.", components: "V, S"}],
+				spellsKnown: [{name: "Shield", level: 1, school: "A", time: "1 reaction", range: "Self", components: "V, S", duration: "1 round"}],
+				innateSpells: [],
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			// Should have 4 column headers
+			expect(html).toContain("<th>Spell</th><th>Time</th><th>Range</th><th>Duration</th>");
+			// Should NOT have School or Components columns
+			expect(html).not.toContain("<th>School</th>");
+			expect(html).not.toContain("<th>Comp.</th>");
+		});
+
+		test("should apply dimmed styling to unprepared spells", () => {
+			state._data.spellcasting = {
+				ability: "wis",
+				spellSlots: {1: {current: 2, max: 2}},
+				cantripsKnown: [],
+				spellsKnown: [
+					{name: "Bless", level: 1, prepared: true},
+					{name: "Command", level: 1, prepared: false},
+				],
+				innateSpells: [],
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-spell-row--unprepared");
+		});
+
+		test("should use inspiration star instead of diamond", () => {
+			state._data.inspiration = true;
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("\u2605");
+			expect(html).not.toContain("\u2666");
+		});
+
+		test("should use wider print margins", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("margin: 0.5in");
+		});
+
+		test("should include orphan/widow control for descriptions", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("orphans: 2");
+			expect(html).toContain("widows: 2");
+		});
+
+		test("should render HP block with maroon border", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("border: 2px solid #58180d");
+		});
+	});
+
+	// ===================================================================
+	// Actions Section (3-column: Actions | Bonus Actions | Reactions)
+	// ===================================================================
+	describe("Actions Section", () => {
+		test("should always render standard D&D actions", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain(">Actions<");
+			expect(html).toContain("Attack");
+			expect(html).toContain("Cast a Spell");
+			expect(html).toContain("Dash");
+			expect(html).toContain("Disengage");
+			expect(html).toContain("Dodge");
+			expect(html).toContain("Help");
+			expect(html).toContain("Hide");
+			expect(html).toContain("Ready");
+			expect(html).toContain("Search");
+			expect(html).toContain("Use an Object");
+		});
+
+		test("should render standard actions with dimmed styling", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-action-item--standard");
+		});
+
+		test("should render 3-column grid layout", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-actions-grid");
+			expect(html).toContain("Bonus Actions");
+			expect(html).toContain("Reactions");
+		});
+
+		test("should categorize bonus action features correctly", () => {
+			state._data.features = [
+				{name: "Cunning Action", featureType: "Class", className: "Rogue", level: 2, description: "You can take a bonus action to Dash, Disengage, or Hide."},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			// Should appear in the Bonus Actions column
+			const bonusCol = html.split("Bonus Actions")[1]?.split("Reactions")[0] || "";
+			expect(bonusCol).toContain("Cunning Action");
+		});
+
+		test("should categorize reaction features correctly", () => {
+			state._data.features = [
+				{name: "Uncanny Dodge", featureType: "Class", className: "Rogue", level: 5, description: "When an attacker hits you, you can use your reaction to halve the damage."},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			// Should appear in the Reactions column
+			const reactCol = html.split("Reactions")[1] || "";
+			expect(reactCol).toContain("Uncanny Dodge");
+		});
+
+		test("should show feature uses inline", () => {
+			state._data.features = [
+				{name: "Second Wind", featureType: "Class", className: "Fighter", level: 1, uses: {current: 1, max: 1, recharge: "short rest"}, description: "You can use a bonus action to regain hit points."},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("1/1");
+			expect(html).toContain("SR");
+		});
+
+		test("should include bonus action spells from spellcasting", () => {
+			state._data.spellcasting = {
+				ability: "wis",
+				spellSlots: {1: {current: 3, max: 3}},
+				cantripsKnown: [],
+				spellsKnown: [
+					{name: "Healing Word", level: 1, school: "V", castingTime: "1 bonus action", range: "60 ft."},
+					{name: "Cure Wounds", level: 1, school: "V", castingTime: "1 action", range: "Touch"},
+				],
+				innateSpells: [],
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			// Healing Word (bonus action) should appear in bonus actions column
+			const bonusCol = html.split("Bonus Actions")[1]?.split("Reactions")[0] || "";
+			expect(bonusCol).toContain("Healing Word");
+			// Cure Wounds (action) should NOT appear in bonus actions column
+			expect(bonusCol).not.toContain("Cure Wounds");
+		});
+
+		test("should include reaction spells from spellcasting", () => {
+			state._data.spellcasting = {
+				ability: "int",
+				spellSlots: {1: {current: 4, max: 4}},
+				cantripsKnown: [],
+				spellsKnown: [
+					{name: "Shield", level: 1, school: "A", castingTime: "1 reaction", range: "Self"},
+				],
+				innateSpells: [],
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			const reactCol = html.split("Reactions")[1] || "";
+			expect(reactCol).toContain("Shield");
+		});
+
+		test("should mark spells with dagger suffix", () => {
+			state._data.spellcasting = {
+				ability: "wis",
+				spellSlots: {1: {current: 2, max: 2}},
+				cantripsKnown: [],
+				spellsKnown: [
+					{name: "Healing Word", level: 1, school: "V", castingTime: "1 bonus action", range: "60 ft."},
+				],
+				innateSpells: [],
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("\u2020"); // † dagger suffix for spells
 		});
 	});
 });
