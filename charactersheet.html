@@ -111,14 +111,21 @@
 						<span class="charsheet__save-icon">✓</span>
 					</span>
 					<span class="charsheet__tool-separator"></span>
-					<button class="charsheet__tool-btn" id="charsheet-btn-modifiers" title="Custom Modifiers">🎯 Modifiers</button>
-					<button class="charsheet__tool-btn" id="charsheet-btn-settings" title="Sheet Settings">⚙️ Settings</button>
-					<button class="charsheet__tool-btn charsheet__tool-btn--note" id="charsheet-add-sticky-note" title="Add a Sticky Note">📌 Note</button>
-					<span class="charsheet__tool-separator"></span>
 					<button class="charsheet__tool-btn" id="charsheet-btn-import" title="Import character from a JSON file">📥</button>
 					<button class="charsheet__tool-btn" id="charsheet-btn-export" title="Export character to JSON file">📤</button>
-					<button class="charsheet__tool-btn" id="charsheet-btn-export-npc" title="Export character as an NPC statblock">👹</button>
 					<button class="charsheet__tool-btn" id="charsheet-btn-print" title="Print Character Sheet">🖨️</button>
+					<span class="charsheet__tool-separator"></span>
+					<button class="charsheet__rolllog-toggle" id="charsheet-btn-rolllog" title="Roll History">
+						<span class="charsheet__rolllog-toggle-icon">📜</span>
+						<span class="charsheet__rolllog-toggle-text">Roll Log</span>
+						<span class="charsheet__rolllog-badge" id="charsheet-rolllog-badge" style="display: none"></span>
+					</button>
+					<button class="charsheet__tool-btn charsheet__tool-btn--note" id="charsheet-add-sticky-note" title="Add a Sticky Note">📌 Note</button>
+					<span class="charsheet__tool-separator"></span>
+					<button class="charsheet__more-toggle" id="charsheet-btn-more" title="Toggle settings panel">
+						<span class="charsheet__more-toggle-icon">🔧</span>
+						<span class="charsheet__more-toggle-text">More</span>
+					</button>
 				</div>
 			</div>
 
@@ -138,7 +145,7 @@
 				<span>Editing Layout — Drag sections to reorder</span>
 			</div>
 
-			<div class="charsheet__header-row charsheet__header-row--secondary">
+			<div class="charsheet__header-row charsheet__header-row--secondary" id="charsheet-header-secondary">
 				<div class="charsheet__help-tips" id="charsheet-help-bar">
 					<div class="charsheet__help-tip">
 						<kbd>Shift</kbd><span>+click = Adv.</span>
@@ -261,16 +268,11 @@
 					</div>
 				</div>
 
-				<button class="charsheet__rolllog-toggle" id="charsheet-btn-rolllog" title="Roll History">
-					<span class="charsheet__rolllog-toggle-icon">📜</span>
-					<span class="charsheet__rolllog-toggle-text">Roll Log</span>
-					<span class="charsheet__rolllog-badge" id="charsheet-rolllog-badge" style="display: none"></span>
-				</button>
+				<span class="charsheet__tool-separator"></span>
 
-				<button class="charsheet__help-toggle" id="charsheet-help-toggle" title="Toggle help tips">
-					<span class="charsheet__help-toggle-icon">❓</span>
-					<span class="charsheet__help-toggle-text">Tips</span>
-				</button>
+				<button class="charsheet__tool-btn" id="charsheet-btn-modifiers" title="Custom Modifiers">🎯 Modifiers</button>
+				<button class="charsheet__tool-btn" id="charsheet-btn-settings" title="Sheet Settings">⚙️ Settings</button>
+				<button class="charsheet__tool-btn" id="charsheet-btn-export-npc" title="Export character as an NPC statblock">👹 NPC Export</button>
 				</div>
 			</div>
 		</div>

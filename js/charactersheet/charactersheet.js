@@ -723,8 +723,8 @@ class CharacterSheetPage {
 		// Inspiration
 		document.getElementById("charsheet-box-inspiration").addEventListener("click", () => this._toggleInspiration());
 
-		// Help toggle
-		document.getElementById("charsheet-help-toggle").addEventListener("click", () => this._toggleHelpTips());
+		// Secondary header toggle
+		document.getElementById("charsheet-btn-more").addEventListener("click", () => this._toggleSecondaryHeader());
 
 		// Roll history toggle
 		document.getElementById("charsheet-btn-rolllog")?.addEventListener("click", () => this._rollHistory?.toggle());
@@ -745,6 +745,9 @@ class CharacterSheetPage {
 
 		// Dice settings picker
 		this._initDicePicker();
+
+		// Secondary header collapse state
+		this._initSecondaryHeader();
 
 		// Conditions
 		document.getElementById("charsheet-btn-add-condition").addEventListener("click", () => this._onAddCondition());
@@ -6821,26 +6824,66 @@ class CharacterSheetPage {
 		this._renderInspiration();
 	}
 
-	_toggleHelpTips () {
-		const helpTips = document.querySelector(".charsheet__help-tips");
-		const toggle = document.getElementById("charsheet-help-toggle");
-		const toggleText = toggle.querySelector(".charsheet__help-toggle-text");
-		const isVisible = (getComputedStyle(helpTips).display !== "none");
-		
-		if (isVisible) {
-			helpTips.style.display = "none";
-			toggleText.textContent = "Show";
-			toggle.setAttribute("title", "Show help tips");
-			toggle.classList.remove("active");
+	_toggleSecondaryHeader ({force} = {}) {
+		const secondaryRow = document.getElementById("charsheet-header-secondary");
+		const btn = document.getElementById("charsheet-btn-more");
+		if (!secondaryRow || !btn) return;
+
+		const shouldCollapse = force != null ? force : !secondaryRow.classList.contains("charsheet__header-row--collapsed");
+
+		if (shouldCollapse) {
+			// Close any open dropdowns before collapsing
+			this._closeAllHeaderDropdowns();
+			secondaryRow.classList.add("charsheet__header-row--collapsed");
+			btn.classList.remove("active");
 		} else {
-			helpTips.style.display = "";
-			toggleText.textContent = "Hide";
-			toggle.setAttribute("title", "Hide help tips");
-			toggle.classList.add("active");
+			secondaryRow.classList.remove("charsheet__header-row--collapsed");
+			btn.classList.add("active");
 		}
-		
-		// Save preference
-		StorageUtil.pSet("charsheet-help-visible", !isVisible);
+
+		StorageUtil.pSet("charsheet-secondary-header-collapsed", shouldCollapse);
+	}
+
+	_initSecondaryHeader () {
+		const secondaryRow = document.getElementById("charsheet-header-secondary");
+		const btn = document.getElementById("charsheet-btn-more");
+		if (!secondaryRow || !btn) return;
+
+		StorageUtil.pGet("charsheet-secondary-header-collapsed").then(isCollapsed => {
+			if (isCollapsed) {
+				secondaryRow.classList.add("charsheet__header-row--collapsed");
+				btn.classList.remove("active");
+			} else {
+				secondaryRow.classList.remove("charsheet__header-row--collapsed");
+				btn.classList.add("active");
+			}
+		});
+	}
+
+	_closeAllHeaderDropdowns () {
+		const dropdownSelectors = [
+			".charsheet__theme-dropdown",
+			".charsheet__textsize-dropdown",
+			".charsheet__font-dropdown",
+			".charsheet__dice-dropdown",
+		];
+		const toggleSelectors = [
+			".charsheet__theme-toggle",
+			".charsheet__textsize-toggle",
+			".charsheet__font-toggle",
+			".charsheet__dice-toggle",
+		];
+
+		for (const sel of dropdownSelectors) {
+			const el = document.querySelector(sel);
+			if (el) {
+				el.classList.remove("active");
+				el.style.display = "";
+			}
+		}
+		for (const sel of toggleSelectors) {
+			document.querySelector(sel)?.classList.remove("active");
+		}
 	}
 
 	/**
@@ -6855,6 +6898,8 @@ class CharacterSheetPage {
 		const btnText = btn.querySelector(".charsheet__layout-toggle-text");
 		
 		if (isNowEditing) {
+			// Auto-expand secondary header so layout controls are visible
+			this._toggleSecondaryHeader({force: false});
 			btn.classList.add("active");
 			btnText.textContent = "Done";
 			btn.setAttribute("title", "Finish editing layout");
