@@ -1542,6 +1542,19 @@ body[data-theme] {
    Additional Animations & Effects
    ======================================================================== */
 
+/* Loading overlay — covers sheet until init completes */
+.charsheet__overlay-loading {
+	position: absolute;
+	inset: 0;
+	z-index: 1000;
+	background: var(--cs-bg-surface, #fff);
+	transition: opacity 0.3s ease;
+}
+
+.ve-night-mode .charsheet__overlay-loading {
+	background: var(--cs-bg-surface, #222);
+}
+
 /* Shimmer effect for loading states */
 @keyframes shimmer {
 	0% { background-position: -200% 0; }

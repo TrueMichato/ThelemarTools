@@ -138,6 +138,13 @@ class CharacterSheetPage {
 		// Apply background theme (will use default if no character loaded)
 		this._applyBackgroundTheme(this._state.getBackgroundTheme());
 
+		// Remove loading overlay now that init is complete
+		const elOverlay = document.querySelector("#charsheet-loading-overlay");
+		if (elOverlay) {
+			elOverlay.style.opacity = "0";
+			setTimeout(() => elOverlay.remove(), 300);
+		}
+
 		// Add page unload protection - save current character before leaving
 		window.addEventListener("beforeunload", () => {
 			if (this._currentCharacterId) {
@@ -11102,12 +11109,10 @@ window.addEventListener("load", async () => {
 
 		window.charSheet = charSheet; // For debugging
 
-		// Show a success toast to confirm initialization worked
-		JqueryUtil.doToast({type: "success", content: "Character sheet loaded successfully!"});
-
 		window.dispatchEvent(new Event("toolsLoaded"));
 	} catch (e) {
 		console.error("Failed to initialize character sheet:", e);
+		document.querySelector("#charsheet-loading-overlay")?.remove();
 		JqueryUtil.doToast({type: "danger", content: `Failed to initialize: ${e.message}`});
 	}
 });

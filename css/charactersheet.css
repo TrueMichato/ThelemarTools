@@ -1278,6 +1278,7 @@
 /* Text Size Scaling - Applied via CSS custom property */
 .charsheet-page {
 	--cs-text-scale: 1;
+	position: relative;
 }
 
 .charsheet-page[data-textsize] {
