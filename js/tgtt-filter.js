@@ -75,6 +75,8 @@ class TgttFilter {
 		this._loadFilterState();
 		this._injectStyles();
 
+		this._initHoverInterceptor();
+
 		if (enableButton) {
 			this._createButton();
 		}
@@ -107,6 +109,9 @@ class TgttFilter {
 		if (this._button) {
 			this._button.classList.toggle("active", this._isActive);
 		}
+
+		// Reset hover source overrides so they re-evaluate on next hover
+		this._resetHoverSources();
 
 		this._updateButtonText();
 	}
@@ -190,6 +195,97 @@ class TgttFilter {
 
 	_isSpellsPage () {
 		return window.location.href.includes("spells.html");
+	}
+
+	// ==================== Hover Source Priority ====================
+
+	/**
+	 * Monkey-patch Renderer.hover.pHandleLinkMouseOver to prefer TGTT entities.
+	 * On first hover of each link, checks if TGTT has the entity and, if so,
+	 * rewrites the element's data-vet-* attributes to point to the TGTT version.
+	 * Falls back to the original source (or XPHB via existing redirect) when
+	 * TGTT does not provide the entity.
+	 */
+	_initHoverInterceptor () {
+		if (typeof Renderer === "undefined" || !Renderer?.hover?.pHandleLinkMouseOver) return;
+
+		const self = this;
+		const origFn = Renderer.hover.pHandleLinkMouseOver.bind(Renderer.hover);
+
+		Renderer.hover.pHandleLinkMouseOver = async function (evt, ele, opts) {
+			if (self._isActive && !opts?.isSpecifiedLinkData) {
+				await self._pTryRewriteToTgtt(ele);
+			}
+			return origFn(evt, ele, opts);
+		};
+	}
+
+	/**
+	 * For a single link element, check whether TGTT provides the entity and,
+	 * if so, rewrite its data-vet-* attributes (and href) to point there.
+	 */
+	async _pTryRewriteToTgtt (ele) {
+		// Already checked this element
+		if (ele.hasAttribute("data-tgtt-hover-checked")) return;
+
+		const page = ele.getAttribute("data-vet-page");
+		const source = ele.getAttribute("data-vet-source");
+		const hash = ele.getAttribute("data-vet-hash");
+
+		// Nothing to do if already TGTT, or if the element is a special case
+		if (!page || !source || !hash) return;
+		if (source.toUpperCase() === TgttFilter.PRIORITY_SOURCE) { ele.setAttribute("data-tgtt-hover-checked", "true"); return; }
+		if (ele.hasAttribute("data-vet-preload-id") || ele.hasAttribute("data-vet-is-faux-page")) return;
+
+		ele.setAttribute("data-tgtt-hover-checked", "true");
+
+		// Reconstruct a TGTT hash: hashes are "urlified(name)_urlified(source)"
+		const parts = UrlUtil.decodeHash(hash);
+		if (parts.length < 2) return;
+
+		const tgttHash = UrlUtil.encodeArrayForHash(parts[0], TgttFilter.PRIORITY_SOURCE);
+
+		try {
+			const tgttEntity = await DataLoader.pCacheAndGet(page, TgttFilter.PRIORITY_SOURCE, tgttHash);
+			if (!tgttEntity) return; // TGTT doesn't have it — keep original
+
+			// Stash originals for restoration on toggle-off
+			ele.setAttribute("data-vet-source-original", source);
+			ele.setAttribute("data-vet-hash-original", hash);
+
+			// Rewrite to TGTT
+			ele.setAttribute("data-vet-source", TgttFilter.PRIORITY_SOURCE);
+			ele.setAttribute("data-vet-hash", tgttHash);
+
+			// Also update href so clicking navigates to the TGTT version
+			const href = ele.getAttribute("href");
+			if (href) {
+				const [pagePart] = href.split("#");
+				ele.setAttribute("href", `${pagePart}#${tgttHash}`);
+				ele.setAttribute("data-vet-href-original", href);
+			}
+		} catch { /* Silently fall back to original source */ }
+	}
+
+	/**
+	 * Restore all hover-overridden elements to their original source/hash.
+	 * Called on toggle to reset state.
+	 */
+	_resetHoverSources () {
+		document.querySelectorAll("[data-tgtt-hover-checked]").forEach(ele => {
+			const origSource = ele.getAttribute("data-vet-source-original");
+			const origHash = ele.getAttribute("data-vet-hash-original");
+			const origHref = ele.getAttribute("data-vet-href-original");
+
+			if (origSource) ele.setAttribute("data-vet-source", origSource);
+			if (origHash) ele.setAttribute("data-vet-hash", origHash);
+			if (origHref) ele.setAttribute("href", origHref);
+
+			ele.removeAttribute("data-tgtt-hover-checked");
+			ele.removeAttribute("data-vet-source-original");
+			ele.removeAttribute("data-vet-hash-original");
+			ele.removeAttribute("data-vet-href-original");
+		});
 	}
 
 	_loadFilterState () {
