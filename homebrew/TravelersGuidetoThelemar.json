@@ -200,7 +200,7 @@
       "DW:S": "Dreamwalker Special Ability"
     },
     "dateAdded": 1649140894,
-    "dateLastModified": 1757944815,
+    "dateLastModified": 1774699200,
     "edition": "classic"
   },
   "variantrule": [
@@ -1958,12 +1958,42 @@
           }
         }
       ],
+      "optionalfeatureProgression": [
+        {
+          "name": "Dreamwalker Abilities",
+          "featureType": [
+            "DW:C",
+            "DW:S"
+          ],
+          "progression": {
+            "*": 2
+          }
+        }
+      ],
       "entries": [
         "You have an innate connection to the Dreamtime. You gain the following benefits:",
         {
           "type": "list",
           "items": [
-            "You can gain up to 2 abilities from the {@filter Dreamwalker Abilities list|optionalfeatures|feature type=DW:C;DW:S}."
+            "Increase one ability score of your choice by 1, to a maximum of 20.",
+            "You learn two Dreamwalker abilities of your choice from the {@classFeature Dreamwalker Abilities|Dreamwalker|TGTT|1} list below."
+          ]
+        },
+        {
+          "type": "list",
+          "style": "list-hang-notitle",
+          "items": [
+            "{@optfeature Dreamwalk|TGTT}",
+            "{@optfeature Dreamwatch|TGTT}",
+            "{@optfeature Dreambend|TGTT}",
+            "{@optfeature Dreamjump|TGTT} ({@i Prerequisite:} {@optfeature Dreamwalk|TGTT} ability)",
+            "{@optfeature Dreamorph|TGTT} ({@i Prerequisite:} {@optfeature Dreambend|TGTT} ability)",
+            "{@optfeature Dreamforge|TGTT} ({@i Prerequisite:} {@optfeature Dreambend|TGTT} ability)",
+            "{@optfeature Dreamake|TGTT} ({@i Prerequisite:} {@optfeature Dreambend|TGTT} ability, {@optfeature Dreamforge|TGTT} ability)",
+            "{@optfeature Dreamsnatch|TGTT} ({@i Prerequisite:} {@optfeature Dreamwatch|TGTT} ability)",
+            "{@optfeature Dreamshare|TGTT} ({@i Prerequisite:} {@optfeature Dreamwatch|TGTT} ability)",
+            "{@optfeature Dreamveil|TGTT} ({@i Prerequisite:} {@optfeature Dreamwatch|TGTT} ability, {@optfeature Dreamwalk|TGTT} ability)",
+            "{@optfeature Daydream|TGTT} ({@i Prerequisite:} {@optfeature Dreamwalk|TGTT} ability)"
           ]
         },
         "This feat can be retaken multiple times, but different Dreamwalker abilities must be chosen each time."
@@ -2155,9 +2185,9 @@
         "source": "XPHB"
       },
       "entries": [
-				"Ten berries appear in your hand and are infused with magic for the duration. A creature can take a {@variantrule Bonus Action|XPHB} to eat one berry. Eating a berry restores 1 {@variantrule Hit Points|XPHB|Hit Point}, and the berry provides enough nourishment to sustain a creature for one day.",
+        "Ten berries appear in your hand and are infused with magic for the duration. A creature can take a {@variantrule Bonus Action|XPHB} to eat one berry. Eating a berry restores 1 {@variantrule Hit Points|XPHB|Hit Point}, and the berry provides enough nourishment to sustain a creature for one day.",
         "When a creature consumes their first berry in 24 hours, their Constitution is reduced by 2, and your max hit points are reduced by an amount equal to your level. This reduction cannot be removed before the creature eats their required food amount for a day.",
-				"Uneaten berries disappear when the spell ends."			
+        "Uneaten berries disappear when the spell ends."
       ],
       "entriesHigherLevel": [
         {
@@ -2172,7 +2202,7 @@
         "rarity:common"
       ]
     },
-        {
+    {
       "name": "Enhance Ability",
       "source": "TGTT",
       "_copy": {
@@ -2183,7 +2213,7 @@
         "rarity:common"
       ]
     },
-     {
+    {
       "name": "Spiritual Weapon",
       "source": "TGTT",
       "_copy": {
@@ -2194,7 +2224,7 @@
         "rarity:common"
       ]
     },
-     {
+    {
       "name": "Conjure Animals",
       "source": "TGTT",
       "_copy": {
@@ -12604,14 +12634,27 @@
         "defaultData": [
           {
             "A": [
-              { "item": "dagger|XPHB", "quantity": 2 },
-              { "item": "quarterstaff|XPHB" },
-              { "item": "robe|XPHB" },
-              { "item": "spellbook|XPHB" },
-              { "item": "scholar's pack|XPHB" }
+              {
+                "item": "dagger|XPHB",
+                "quantity": 2
+              },
+              {
+                "item": "quarterstaff|XPHB"
+              },
+              {
+                "item": "robe|XPHB"
+              },
+              {
+                "item": "spellbook|XPHB"
+              },
+              {
+                "item": "scholar's pack|XPHB"
+              }
             ],
             "B": [
-              { "value": 5500 }
+              {
+                "value": 5500
+              }
             ]
           }
         ],
@@ -13065,12 +13108,17 @@
       "startingEquipment": {
         "default": []
       },
+      "multiclassing": {
+        "requirements": {
+          "con": 15
+        }
+      },
       "requirements": {
         "con": 15,
         "entries": [
           "Character level 4 or higher",
           "Must be able to sleep and dream",
-          "Possess at least two abilities from the {@filter Dreamwalker Abilities list|optionalfeatures|feature type=DW:C;DW:S}, one of which must be {@optfeature Dreamwalk|TGTT}"
+          "Possess at least two abilities from the {@classFeature Dreamwalker Abilities|Dreamwalker|TGTT|1} list, one of which must be {@optfeature Dreamwalk|TGTT}"
         ]
       },
       "classTableGroups": [
@@ -13115,6 +13163,7 @@
       "classFeatures": [
         "Focus|Dreamwalker|TGTT|1",
         "Dreamer (Dreamwalker)|Dreamwalker|TGTT|1",
+        "Dreamwalker Abilities|Dreamwalker|TGTT|1",
         "Lucid Focus|Dreamwalker|TGTT|1",
         "Intuition|Dreamwalker|TGTT|2",
         "Control|Dreamwalker|TGTT|2",
@@ -13129,21 +13178,6 @@
         "Focus Improvement|Dreamwalker|TGTT|9",
         "Dreamer (Dreamwalker)|Dreamwalker|TGTT|9",
         "Just a Weave|Dreamwalker|TGTT|10"
-      ],
-      "optionalfeatureProgression": [
-        {
-          "name": "Dreamwalker Abilities",
-          "featureType": [
-            "DW:C",
-            "DW:S"
-          ],
-          "progression": {
-            "1": 2,
-            "4": 2,
-            "7": 2,
-            "9": 2
-          }
-        }
       ],
       "featProgression": [
         {
@@ -13163,113 +13197,113 @@
     }
   ],
   "subclass": [
-      {
-          "source": "TGTT-2024",
-          "className": "Ranger",
-          "classSource": "TGTT",
-          "_copy": {
-                "name": "Beast Master",
-                "source": "XPHB",
-                "shortName": "Beast Master",
-                "className": "Ranger",
-                "classSource": "XPHB"
-          }
+    {
+      "source": "TGTT-2024",
+      "className": "Ranger",
+      "classSource": "TGTT",
+      "_copy": {
+        "name": "Beast Master",
+        "source": "XPHB",
+        "shortName": "Beast Master",
+        "className": "Ranger",
+        "classSource": "XPHB"
+      }
     },
     {
-          "source": "TGTT-2024",
-          "className": "Ranger",
-          "classSource": "TGTT",
-          "_copy": {
-                "name": "Hunter",
-                "source": "XPHB",
-                "shortName": "Hunter",
-                "className": "Ranger",
-                "classSource": "XPHB"
-          }
+      "source": "TGTT-2024",
+      "className": "Ranger",
+      "classSource": "TGTT",
+      "_copy": {
+        "name": "Hunter",
+        "source": "XPHB",
+        "shortName": "Hunter",
+        "className": "Ranger",
+        "classSource": "XPHB"
+      }
     },
     {
-          "source": "TGTT-2024",
-          "className": "Ranger",
-          "classSource": "TGTT",
-          "_copy": {
-                "name": "Gloom Stalker",
-                "source": "XPHB",
-                "shortName": "Gloom Stalker",
-                "className": "Ranger",
-                "classSource": "XPHB"
-          }
+      "source": "TGTT-2024",
+      "className": "Ranger",
+      "classSource": "TGTT",
+      "_copy": {
+        "name": "Gloom Stalker",
+        "source": "XPHB",
+        "shortName": "Gloom Stalker",
+        "className": "Ranger",
+        "classSource": "XPHB"
+      }
     },
     {
-          "source": "TGTT-2014",
-          "className": "Ranger",
-          "classSource": "TGTT",
-          "_copy": {
-                "name": "Horizon Walker",
-                "source": "XGE",
-                "shortName": "Horizon Walker",
-                "className": "Ranger",
-                "classSource": "XPHB"
-          }
+      "source": "TGTT-2014",
+      "className": "Ranger",
+      "classSource": "TGTT",
+      "_copy": {
+        "name": "Horizon Walker",
+        "source": "XGE",
+        "shortName": "Horizon Walker",
+        "className": "Ranger",
+        "classSource": "XPHB"
+      }
     },
     {
-          "source": "TGTT-2014",
-          "className": "Ranger",
-          "classSource": "TGTT",
-          "_copy": {
-                "name": "Monster Slayer",
-                "source": "XGE",
-                "shortName": "Monster Slayer",
-                "className": "Ranger",
-                "classSource": "XPHB"
-          }
+      "source": "TGTT-2014",
+      "className": "Ranger",
+      "classSource": "TGTT",
+      "_copy": {
+        "name": "Monster Slayer",
+        "source": "XGE",
+        "shortName": "Monster Slayer",
+        "className": "Ranger",
+        "classSource": "XPHB"
+      }
     },
     {
-          "source": "TGTT-2024",
-          "className": "Ranger",
-          "classSource": "TGTT",
-          "_copy": {
-                "name": "Fey Wanderer",
-                "source": "XPHB",
-                "shortName": "Fey Wanderer",
-                "className": "Ranger",
-                "classSource": "XPHB"
-          }
+      "source": "TGTT-2024",
+      "className": "Ranger",
+      "classSource": "TGTT",
+      "_copy": {
+        "name": "Fey Wanderer",
+        "source": "XPHB",
+        "shortName": "Fey Wanderer",
+        "className": "Ranger",
+        "classSource": "XPHB"
+      }
     },
     {
-          "source": "TGTT-2014",
-          "className": "Ranger",
-          "classSource": "TGTT",
-          "_copy": {
-                "name": "Swarmkeeper",
-                "source": "TCE",
-                "shortName": "Swarmkeeper",
-                "className": "Ranger",
-                "classSource": "XPHB"
-          }
+      "source": "TGTT-2014",
+      "className": "Ranger",
+      "classSource": "TGTT",
+      "_copy": {
+        "name": "Swarmkeeper",
+        "source": "TCE",
+        "shortName": "Swarmkeeper",
+        "className": "Ranger",
+        "classSource": "XPHB"
+      }
     },
     {
-          "source": "TGTT-2014",
-          "className": "Ranger",
-          "classSource": "TGTT",
-          "_copy": {
-                "name": "Drakewarden",
-                "source": "FTD",
-                "shortName": "Drakewarden",
-                "className": "Ranger",
-                "classSource": "XPHB"
-          }
+      "source": "TGTT-2014",
+      "className": "Ranger",
+      "classSource": "TGTT",
+      "_copy": {
+        "name": "Drakewarden",
+        "source": "FTD",
+        "shortName": "Drakewarden",
+        "className": "Ranger",
+        "classSource": "XPHB"
+      }
     },
     {
-          "source": "TGTT-2024",
-          "className": "Ranger",
-          "classSource": "TGTT",
-          "_copy": {
-                "name": "Winter Walker",
-                "source": "FRHoF",
-                "shortName": "Winter Walker",
-                "className": "Ranger",
-                "classSource": "XPHB"
-          }
+      "source": "TGTT-2024",
+      "className": "Ranger",
+      "classSource": "TGTT",
+      "_copy": {
+        "name": "Winter Walker",
+        "source": "FRHoF",
+        "shortName": "Winter Walker",
+        "className": "Ranger",
+        "classSource": "XPHB"
+      }
     },
     {
       "name": "Way of The Shackled",
@@ -22387,38 +22421,135 @@
       "level": 1,
       "entries": [
         "Also at 1st level, you learn more ways to manipulate the Dreamtime and your actions within it. You gain the {@feat Dreamer|TGTT} feat.",
+        "That feat grants you two Dreamwalker abilities from the {@classFeature Dreamwalker Abilities|Dreamwalker|TGTT|1} list below.",
         "You gain this feat again at 4th, 7th, and 9th level. At 4th level, one of the abilities you gain must be {@optfeature Dreamjump|TGTT}, assuming you don't have it already."
       ]
     },
-       {
+    {
       "name": "Dreamer (Dreamwalker)",
       "source": "TGTT",
       "className": "Dreamwalker",
       "classSource": "TGTT",
       "level": 4,
       "entries": [
-        "You gain the {@feat Dreamer|TGTT} feat.",
+        "At 4th level, you gain the {@feat Dreamer|TGTT} feat again.",
+        "That feat grants you two Dreamwalker abilities from the {@classFeature Dreamwalker Abilities|Dreamwalker|TGTT|1} list below.",
         "One of the abilities you gain must be {@optfeature Dreamjump|TGTT}, assuming you don't have it already."
       ]
     },
-       {
+    {
       "name": "Dreamer (Dreamwalker)",
       "source": "TGTT",
       "className": "Dreamwalker",
       "classSource": "TGTT",
       "level": 7,
       "entries": [
-        "You gain the {@feat Dreamer|TGTT} feat."
+        "At 7th level, you gain the {@feat Dreamer|TGTT} feat again.",
+        "That feat grants you two Dreamwalker abilities from the {@classFeature Dreamwalker Abilities|Dreamwalker|TGTT|1} list below."
       ]
     },
-       {
+    {
       "name": "Dreamer (Dreamwalker)",
       "source": "TGTT",
       "className": "Dreamwalker",
       "classSource": "TGTT",
       "level": 9,
       "entries": [
-        "You gain the {@feat Dreamer|TGTT} feat."
+        "At 9th level, you gain the {@feat Dreamer|TGTT} feat again.",
+        "That feat grants you two Dreamwalker abilities from the {@classFeature Dreamwalker Abilities|Dreamwalker|TGTT|1} list below."
+      ]
+    },
+    {
+      "name": "Dreamwalker Abilities",
+      "source": "TGTT",
+      "className": "Dreamwalker",
+      "classSource": "TGTT",
+      "level": 1,
+      "entries": [
+        "The following Dreamwalker abilities are available to you whenever a feature allows you to learn Dreamwalker abilities. You must meet an ability's prerequisites to learn it.",
+        {
+          "type": "options",
+          "count": 2,
+          "entries": [
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreamwalk|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreamwatch|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreambend|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreamjump|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreamorph|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreamforge|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreamake|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreamsnatch|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreamshare|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Dreamveil|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            },
+            {
+              "type": "refOptionalfeature",
+              "optionalfeature": "Daydream|TGTT",
+              "preserve": {
+                "prerequisite": true
+              }
+            }
+          ]
+        }
       ]
     },
     {
@@ -34921,98 +35052,134 @@
       "source": "TGTT",
       "type": "standard",
       "script": "common",
-      "typicalSpeakers": ["Children of the Empire (Lexalia)"]
+      "typicalSpeakers": [
+        "Children of the Empire (Lexalia)"
+      ]
     },
     {
       "name": "Olympian",
       "source": "TGTT",
       "type": "standard",
       "script": "common",
-      "typicalSpeakers": ["Children of the Empire (Theocracy)"]
+      "typicalSpeakers": [
+        "Children of the Empire (Theocracy)"
+      ]
     },
     {
       "name": "Jaknian",
       "source": "TGTT",
       "type": "standard",
       "script": "common",
-      "typicalSpeakers": ["Children of the Empire (Jaknia)"]
+      "typicalSpeakers": [
+        "Children of the Empire (Jaknia)"
+      ]
     },
     {
       "name": "Clairnian",
       "source": "TGTT",
       "type": "standard",
       "script": "common",
-      "typicalSpeakers": ["Children of the Empire (Clairnia)"]
+      "typicalSpeakers": [
+        "Children of the Empire (Clairnia)"
+      ]
     },
     {
       "name": "Hubian",
       "source": "TGTT",
       "type": "standard",
       "script": "common",
-      "typicalSpeakers": ["Children of the Empire (Hub)"]
+      "typicalSpeakers": [
+        "Children of the Empire (Hub)"
+      ]
     },
     {
       "name": "Old Common",
       "source": "TGTT",
       "type": "ancient",
       "script": "common",
-      "typicalSpeakers": ["Monks"]
+      "typicalSpeakers": [
+        "Monks"
+      ]
     },
     {
       "name": "Stygian",
       "source": "TGTT",
       "type": "exotic",
       "script": "sylvan",
-      "typicalSpeakers": ["Descathi", "Shadowfell denizens"]
+      "typicalSpeakers": [
+        "Descathi",
+        "Shadowfell denizens"
+      ]
     },
     {
       "name": "Mictlanian",
       "source": "TGTT",
       "type": "exotic",
       "script": "infernal",
-      "typicalSpeakers": ["Fiends of Mictlān", "Tieflings", "Gnolls"]
+      "typicalSpeakers": [
+        "Fiends of Mictlān",
+        "Tieflings",
+        "Gnolls"
+      ]
     },
     {
       "name": "Jotunn",
       "source": "TGTT",
       "type": "exotic",
       "script": "giant",
-      "typicalSpeakers": ["Ogres", "Goliaths", "Giants"]
+      "typicalSpeakers": [
+        "Ogres",
+        "Goliaths",
+        "Giants"
+      ]
     },
     {
       "name": "Avian",
       "source": "TGTT",
       "type": "exotic",
       "script": "auran",
-      "typicalSpeakers": ["Tengu", "Kenku"]
+      "typicalSpeakers": [
+        "Tengu",
+        "Kenku"
+      ]
     },
     {
       "name": "Gob",
       "source": "TGTT",
       "type": "exotic",
       "script": "goblin",
-      "typicalSpeakers": ["Goblins", "Hobgoblins", "Bugbears"]
+      "typicalSpeakers": [
+        "Goblins",
+        "Hobgoblins",
+        "Bugbears"
+      ]
     },
     {
       "name": "Loxodon",
       "source": "TGTT",
       "type": "exotic",
       "script": "common",
-      "typicalSpeakers": ["Loxodons"]
+      "typicalSpeakers": [
+        "Loxodons"
+      ]
     },
     {
       "name": "Tabaxi",
       "source": "TGTT",
       "type": "exotic",
       "script": "common",
-      "typicalSpeakers": ["Tabaxi"]
+      "typicalSpeakers": [
+        "Tabaxi"
+      ]
     },
     {
       "name": "Minotaur",
       "source": "TGTT",
       "type": "exotic",
       "script": "common",
-      "typicalSpeakers": ["Minotaurs"]
+      "typicalSpeakers": [
+        "Minotaurs"
+      ]
     }
   ],
   "race": [
@@ -35025,7 +35192,8 @@
       ],
       "speed": 30,
       "ability": [
-        {"int": 2,
+        {
+          "int": 2,
           "wis": 1
         }
       ],
@@ -35072,7 +35240,24 @@
           "name": "Dreamers",
           "entries": [
             "Nyuidj always dream lucid dreams, and possess an affinity to The Dreamtime.",
-            "You gain the {@optfeature Dreamwalk|TGTT} ability. In addition, you can choose 1 other ability from the {@filter Dreamwalker Abilities list|optionalfeatures|feature type=DW:C;DW:S} and gain it."
+            "You gain the {@optfeature Dreamwalk|TGTT} ability.",
+            "You then learn one other Dreamwalker ability of your choice from the list below. You must meet any prerequisites.",
+            {
+              "type": "list",
+              "style": "list-hang-notitle",
+              "items": [
+                "{@optfeature Dreamwatch|TGTT}",
+                "{@optfeature Dreambend|TGTT}",
+                "{@optfeature Dreamjump|TGTT} ({@i Prerequisite:} {@optfeature Dreamwalk|TGTT} ability)",
+                "{@optfeature Dreamorph|TGTT} ({@i Prerequisite:} {@optfeature Dreambend|TGTT} ability)",
+                "{@optfeature Dreamforge|TGTT} ({@i Prerequisite:} {@optfeature Dreambend|TGTT} ability)",
+                "{@optfeature Dreamake|TGTT} ({@i Prerequisite:} {@optfeature Dreambend|TGTT} ability, {@optfeature Dreamforge|TGTT} ability)",
+                "{@optfeature Dreamsnatch|TGTT} ({@i Prerequisite:} {@optfeature Dreamwatch|TGTT} ability)",
+                "{@optfeature Dreamshare|TGTT} ({@i Prerequisite:} {@optfeature Dreamwatch|TGTT} ability)",
+                "{@optfeature Dreamveil|TGTT} ({@i Prerequisite:} {@optfeature Dreamwatch|TGTT} ability, {@optfeature Dreamwalk|TGTT} ability)",
+                "{@optfeature Daydream|TGTT} ({@i Prerequisite:} {@optfeature Dreamwalk|TGTT} ability)"
+              ]
+            }
           ]
         },
         {
@@ -35098,21 +35283,51 @@
       "source": "TGTT",
       "page": 0,
       "lineage": "VRGR",
-      "size": ["M"],
+      "size": [
+        "M"
+      ],
       "speed": 30,
       "ability": [
         {
-          "choose": {"from": ["str", "dex", "con", "int", "wis", "cha"], "count": 1, "amount": 2}
+          "choose": {
+            "from": [
+              "str",
+              "dex",
+              "con",
+              "int",
+              "wis",
+              "cha"
+            ],
+            "count": 1,
+            "amount": 2
+          }
         },
         {
-          "choose": {"from": ["str", "dex", "con", "int", "wis", "cha"], "count": 2, "amount": 1}
+          "choose": {
+            "from": [
+              "str",
+              "dex",
+              "con",
+              "int",
+              "wis",
+              "cha"
+            ],
+            "count": 2,
+            "amount": 1
+          }
         }
       ],
       "languageProficiencies": [
         {
           "common": true,
           "choose": {
-            "from": ["lexalian|TGTT", "olympian|TGTT", "jaknian|TGTT", "clairnian|TGTT", "hubian|TGTT"],
+            "from": [
+              "lexalian|TGTT",
+              "olympian|TGTT",
+              "jaknian|TGTT",
+              "clairnian|TGTT",
+              "hubian|TGTT"
+            ],
             "count": 1
           }
         }
@@ -35120,18 +35335,22 @@
       "additionalSpells": [
         {
           "ability": {
-            "choose": ["int", "wis", "cha"]
+            "choose": [
+              "int",
+              "wis",
+              "cha"
+            ]
           },
           "known": {
             "1": {
-                "_": [
-                      {
-                        "choose": "level=0|exclude=eldritch blast;shillelagh;vicious mockery;guidance"
-                      }
-             ]
+              "_": [
+                {
+                  "choose": "level=0|exclude=eldritch blast;shillelagh;vicious mockery;guidance"
+                }
+              ]
+            }
           }
         }
-      }
       ],
       "traitTags": [],
       "entries": [
@@ -35156,16 +35375,29 @@
       "source": "TGTT",
       "page": 0,
       "lineage": "VRGR",
-      "size": ["M"],
+      "size": [
+        "M"
+      ],
       "speed": 30,
       "darkvision": 60,
       "ability": [
-        {"cha": 2},
         {
-          "choose": {"from": ["wis", "dex"], "count": 1, "amount": 1}
+          "cha": 2
+        },
+        {
+          "choose": {
+            "from": [
+              "wis",
+              "dex"
+            ],
+            "count": 1,
+            "amount": 1
+          }
         }
       ],
-      "traitTags": ["Improved Resting"],
+      "traitTags": [
+        "Improved Resting"
+      ],
       "languageProficiencies": [
         {
           "common": true,
@@ -35175,8 +35407,12 @@
       "additionalSpells": [
         {
           "innate": {
-            "0": ["druidcraft"],
-            "3": ["entangle"]
+            "0": [
+              "druidcraft"
+            ],
+            "3": [
+              "entangle"
+            ]
           },
           "ability": "cha"
         }
@@ -35211,23 +35447,39 @@
       "source": "TGTT",
       "page": 0,
       "lineage": "VRGR",
-      "size": ["M"],
+      "size": [
+        "M"
+      ],
       "speed": 30,
       "darkvision": 60,
       "ability": [
-        {"int": 2},
         {
-          "choose": {"from": ["wis", "dex"], "count": 1, "amount": 1}
+          "int": 2
+        },
+        {
+          "choose": {
+            "from": [
+              "wis",
+              "dex"
+            ],
+            "count": 1,
+            "amount": 1
+          }
         }
       ],
-      "traitTags": ["Improved Resting", "Damage Resistance"],
+      "traitTags": [
+        "Improved Resting",
+        "Damage Resistance"
+      ],
       "languageProficiencies": [
         {
           "common": true,
           "stygian|TGTT": true
         }
       ],
-      "resist": ["necrotic"],
+      "resist": [
+        "necrotic"
+      ],
       "entries": [
         {
           "type": "entries",
@@ -35264,14 +35516,23 @@
       "name": "Genasi",
       "source": "TGTT",
       "page": 0,
-      "size": ["M"],
+      "size": [
+        "M"
+      ],
       "speed": 30,
       "ability": [
-        {"con": 2}
+        {
+          "con": 2
+        }
       ],
-      "traitTags": ["Damage Resistance"],
+      "traitTags": [
+        "Damage Resistance"
+      ],
       "languageProficiencies": [
-        {"common": true, "primordial": true}
+        {
+          "common": true,
+          "primordial": true
+        }
       ],
       "entries": [
         {
@@ -35288,12 +35549,19 @@
       "name": "Tiefling",
       "source": "TGTT",
       "page": 0,
-      "size": ["M"],
+      "size": [
+        "M"
+      ],
       "speed": 30,
       "darkvision": 60,
-      "traitTags": ["Damage Resistance"],
+      "traitTags": [
+        "Damage Resistance"
+      ],
       "languageProficiencies": [
-        {"common": true, "mictlanian|TGTT": true}
+        {
+          "common": true,
+          "mictlanian|TGTT": true
+        }
       ],
       "entries": [
         {
@@ -35309,15 +35577,36 @@
       "name": "Thelemerian Dragonborn",
       "source": "TGTT",
       "page": 0,
-      "size": ["M"],
+      "size": [
+        "M"
+      ],
       "speed": 30,
       "darkvision": 60,
-      "traitTags": ["Natural Armor", "Damage Resistance"],
+      "traitTags": [
+        "Natural Armor",
+        "Damage Resistance"
+      ],
       "languageProficiencies": [
-        {"common": true, "draconic": true}
+        {
+          "common": true,
+          "draconic": true
+        }
       ],
       "ability": [
-        {"choose": {"from": ["str", "dex", "con", "int", "wis", "cha"], "count": 2, "amount": 2}}
+        {
+          "choose": {
+            "from": [
+              "str",
+              "dex",
+              "con",
+              "int",
+              "wis",
+              "cha"
+            ],
+            "count": 2,
+            "amount": 2
+          }
+        }
       ],
       "entries": [
         {
@@ -35344,17 +35633,18 @@
         "name": "Centaur",
         "source": "MOT",
         "_mod": {
-					"entries": [
-						{
-							"mode": "appendArr",
+          "entries": [
+            {
+              "mode": "appendArr",
               "items": {
                 "name": "Fey Ancestry",
                 "entries": [
-                   "You have advantage on saving throws against being charmed, and magic can't put you to sleep."
+                  "You have advantage on saving throws against being charmed, and magic can't put you to sleep."
                 ]
               }
-            }]
-          }
+            }
+          ]
+        }
       },
       "languageProficiencies": [
         {
@@ -35367,16 +35657,37 @@
       "name": "Gnoll",
       "source": "TGTT",
       "page": 0,
-      "size": ["M"],
+      "size": [
+        "M"
+      ],
       "speed": 30,
       "darkvision": 60,
       "ability": [
-        {"str": 2},
-        {"choose": {"from": ["dex", "con", "int", "wis", "cha"], "count": 1, "amount": 1}}
+        {
+          "str": 2
+        },
+        {
+          "choose": {
+            "from": [
+              "dex",
+              "con",
+              "int",
+              "wis",
+              "cha"
+            ],
+            "count": 1,
+            "amount": 1
+          }
+        }
       ],
-      "traitTags": ["Natural Weapon"],
+      "traitTags": [
+        "Natural Weapon"
+      ],
       "languageProficiencies": [
-        {"common": true, "mictlanian|TGTT": true}
+        {
+          "common": true,
+          "mictlanian|TGTT": true
+        }
       ],
       "entries": [
         {
@@ -35413,15 +35724,25 @@
       "name": "Half-Ogre",
       "source": "TGTT",
       "page": 0,
-      "size": ["M"],
+      "size": [
+        "M"
+      ],
       "speed": 30,
       "darkvision": 60,
       "ability": [
-        {"str": 2, "con": 2}
+        {
+          "str": 2,
+          "con": 2
+        }
       ],
-      "traitTags": ["Powerful Build"],
+      "traitTags": [
+        "Powerful Build"
+      ],
       "languageProficiencies": [
-        {"common": true, "jotunn|TGTT": true}
+        {
+          "common": true,
+          "jotunn|TGTT": true
+        }
       ],
       "entries": [
         {
@@ -35446,25 +35767,33 @@
           ]
         }
       ]
-    }
-    ,
+    },
     {
       "name": "Kobold",
       "source": "TGTT",
       "page": 0,
-      "size": ["S"],
+      "size": [
+        "S"
+      ],
       "speed": {
         "walk": 25,
         "burrow": 15
       },
       "ability": [
-        {"dex": 2},
-        {"cha": 1}
+        {
+          "dex": 2
+        },
+        {
+          "cha": 1
+        }
       ],
       "darkvision": 60,
       "traitTags": [],
       "languageProficiencies": [
-        {"common": true, "draconic": true}
+        {
+          "common": true,
+          "draconic": true
+        }
       ],
       "entries": [
         {
@@ -35496,96 +35825,163 @@
           ]
         }
       ]
-    }
-    ,
+    },
     {
       "name": "Hochling",
       "source": "TGTT",
-      "alias": ["Hochling"],
-      "_copy": {"name": "Aasimar", "source": "MPMM"}
+      "alias": [
+        "Hochling"
+      ],
+      "_copy": {
+        "name": "Aasimar",
+        "source": "MPMM"
+      }
     },
     {
       "name": "Tengu",
       "source": "TGTT",
-      "alias": ["Aarakocra"],
-      "_copy": {"name": "Aarakocra", "source": "MPMM"},
+      "alias": [
+        "Aarakocra"
+      ],
+      "_copy": {
+        "name": "Aarakocra",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
-        {"common": true, "avian|TGTT": true}
+        {
+          "common": true,
+          "avian|TGTT": true
+        }
       ]
     },
     {
       "name": "Changeling",
       "source": "TGTT",
-      "_copy": {"name": "Changeling", "source": "MPMM"}
+      "_copy": {
+        "name": "Changeling",
+        "source": "MPMM"
+      }
     },
     {
       "name": "Firbolg",
       "source": "TGTT",
-      "_copy": {"name": "Firbolg", "source": "MPMM"},
+      "_copy": {
+        "name": "Firbolg",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
-        {"common": true, "sylvan": true, "jotunn|TGTT": true}
+        {
+          "common": true,
+          "sylvan": true,
+          "jotunn|TGTT": true
+        }
       ]
     },
     {
       "name": "Goblin",
       "source": "TGTT",
-      "_copy": {"name": "Goblin", "source": "MPMM"},
+      "_copy": {
+        "name": "Goblin",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
-        {"common": true, "gob|TGTT": true}
+        {
+          "common": true,
+          "gob|TGTT": true
+        }
       ]
     },
     {
       "name": "Hobgoblin",
       "source": "TGTT",
-      "_copy": {"name": "Hobgoblin", "source": "MPMM"},
+      "_copy": {
+        "name": "Hobgoblin",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
-        {"common": true, "gob|TGTT": true}
+        {
+          "common": true,
+          "gob|TGTT": true
+        }
       ]
     },
     {
       "name": "Goliath",
       "source": "TGTT",
-      "_copy": {"name": "Goliath", "source": "MPMM"},
+      "_copy": {
+        "name": "Goliath",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
-        {"common": true, "jotunn|TGTT": true}
+        {
+          "common": true,
+          "jotunn|TGTT": true
+        }
       ]
     },
     {
       "name": "Kenku",
       "source": "TGTT",
-      "_copy": {"name": "Kenku", "source": "MPMM"},
+      "_copy": {
+        "name": "Kenku",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
-        {"common": true, "avian|TGTT": true}
+        {
+          "common": true,
+          "avian|TGTT": true
+        }
       ]
     },
     {
       "name": "Bugbear",
       "source": "TGTT",
-      "_copy": {"name": "Bugbear", "source": "MPMM"},
+      "_copy": {
+        "name": "Bugbear",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
-        {"common": true, "gob|TGTT": true}
+        {
+          "common": true,
+          "gob|TGTT": true
+        }
       ]
     },
     {
       "name": "Minotaur",
       "source": "TGTT",
-      "_copy": {"name": "Minotaur", "source": "MPMM"},
+      "_copy": {
+        "name": "Minotaur",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
-        {"common": true, "minotaur|TGTT": true}
+        {
+          "common": true,
+          "minotaur|TGTT": true
+        }
       ]
     },
     {
       "name": "Loxodon",
       "source": "TGTT",
-      "_copy": {"name": "Loxodon", "source": "GGR"},
+      "_copy": {
+        "name": "Loxodon",
+        "source": "GGR"
+      },
       "languageProficiencies": [
-        {"common": true, "loxodon|TGTT": true}
+        {
+          "common": true,
+          "loxodon|TGTT": true
+        }
       ]
     },
     {
       "name": "Satyr",
       "source": "TGTT",
-      "_copy": {"name": "Satyr", "source": "MPMM"},
+      "_copy": {
+        "name": "Satyr",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
         {
           "common": true,
@@ -35596,34 +35992,48 @@
     {
       "name": "Tabaxi",
       "source": "TGTT",
-      "_copy": {"name": "Tabaxi", "source": "MPMM"},
+      "_copy": {
+        "name": "Tabaxi",
+        "source": "MPMM"
+      },
       "languageProficiencies": [
-        {"common": true, "tabaxi|TGTT": true}
+        {
+          "common": true,
+          "tabaxi|TGTT": true
+        }
       ]
     },
     {
       "name": "Tortle",
       "source": "TGTT",
-      "_copy": {"name": "Tortle", 
-      "source": "TTP",
-      "_mod": {
-					"entries": [
-						{
-							"mode": "appendArr",
+      "_copy": {
+        "name": "Tortle",
+        "source": "TTP",
+        "_mod": {
+          "entries": [
+            {
+              "mode": "appendArr",
               "items": {
                 "name": "Powerful Build",
                 "entries": [
-                   "You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift."
+                  "You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift."
                 ]
               }
-            }]
-          }},
-      "traitTags": ["Powerful Build"]
+            }
+          ]
+        }
+      },
+      "traitTags": [
+        "Powerful Build"
+      ]
     },
     {
       "name": "Yuan-Ti",
       "source": "TGTT",
-      "_copy": {"name": "Yuan-Ti", "source": "MPMM"}
+      "_copy": {
+        "name": "Yuan-Ti",
+        "source": "MPMM"
+      }
     }
   ],
   "subrace": [
@@ -35632,7 +36042,10 @@
       "source": "TGTT",
       "raceName": "Child of the Empire",
       "raceSource": "TGTT",
-      "traitTags": ["Armor Proficiency", "Weapon Proficiency"],
+      "traitTags": [
+        "Armor Proficiency",
+        "Weapon Proficiency"
+      ],
       "entries": [
         {
           "type": "entries",
@@ -35648,7 +36061,10 @@
       "source": "TGTT",
       "raceName": "Child of the Empire",
       "raceSource": "TGTT",
-      "traitTags": ["Skill Proficiency", "Language Proficiency"],
+      "traitTags": [
+        "Skill Proficiency",
+        "Language Proficiency"
+      ],
       "entries": [
         {
           "type": "entries",
@@ -35671,7 +36087,10 @@
       "source": "TGTT",
       "raceName": "Child of the Empire",
       "raceSource": "TGTT",
-      "traitTags": ["Skill Proficiency", "Tool Proficiency"],
+      "traitTags": [
+        "Skill Proficiency",
+        "Tool Proficiency"
+      ],
       "entries": [
         {
           "type": "entries",
@@ -35694,7 +36113,10 @@
       "source": "TGTT",
       "raceName": "Child of the Empire",
       "raceSource": "TGTT",
-      "traitTags": ["Skill Proficiency", "Tool Proficiency"],
+      "traitTags": [
+        "Skill Proficiency",
+        "Tool Proficiency"
+      ],
       "entries": [
         {
           "type": "entries",
@@ -35717,7 +36139,10 @@
       "source": "TGTT",
       "raceName": "Child of the Empire",
       "raceSource": "TGTT",
-      "traitTags": ["Skill Proficiency", "Language Proficiency"],
+      "traitTags": [
+        "Skill Proficiency",
+        "Language Proficiency"
+      ],
       "entries": [
         {
           "type": "entries",
@@ -35735,7 +36160,19 @@
         }
       ],
       "languageProficiencies": [
-        {"choose": {"from": ["avian|TGTT", "jotunn|TGTT", "gob|TGTT", "loxodon|TGTT", "tabaxi|TGTT", "minotaur|TGTT"], "count": 2}}
+        {
+          "choose": {
+            "from": [
+              "avian|TGTT",
+              "jotunn|TGTT",
+              "gob|TGTT",
+              "loxodon|TGTT",
+              "tabaxi|TGTT",
+              "minotaur|TGTT"
+            ],
+            "count": 2
+          }
+        }
       ]
     },
     {
@@ -35759,16 +36196,34 @@
       "source": "TGTT",
       "raceName": "Genasi",
       "raceSource": "TGTT",
-      "ability": [{"dex": 1}],
-      "resist": ["lightning"],
-      "languageProficiencies": [{"auran": true}],
-      "traitTags": ["Damage Resistance"],
+      "ability": [
+        {
+          "dex": 1
+        }
+      ],
+      "resist": [
+        "lightning"
+      ],
+      "languageProficiencies": [
+        {
+          "auran": true
+        }
+      ],
+      "traitTags": [
+        "Damage Resistance"
+      ],
       "additionalSpells": [
         {
           "innate": {
-            "0": ["gust"],
-            "3": ["feather fall"],
-            "5": ["gust of wind"]
+            "0": [
+              "gust"
+            ],
+            "3": [
+              "feather fall"
+            ],
+            "5": [
+              "gust of wind"
+            ]
           },
           "ability": "con"
         }
@@ -35788,16 +36243,34 @@
       "source": "TGTT",
       "raceName": "Genasi",
       "raceSource": "TGTT",
-      "ability": [{"str": 1}],
-      "resist": ["acid"],
-      "languageProficiencies": [{"terran": true}],
-      "traitTags": ["Damage Resistance"],
+      "ability": [
+        {
+          "str": 1
+        }
+      ],
+      "resist": [
+        "acid"
+      ],
+      "languageProficiencies": [
+        {
+          "terran": true
+        }
+      ],
+      "traitTags": [
+        "Damage Resistance"
+      ],
       "additionalSpells": [
         {
           "innate": {
-            "0": ["mold earth"],
-            "3": ["earth tremor"],
-            "5": ["earthbind"]
+            "0": [
+              "mold earth"
+            ],
+            "3": [
+              "earth tremor"
+            ],
+            "5": [
+              "earthbind"
+            ]
           },
           "ability": "con"
         }
@@ -35817,17 +36290,35 @@
       "source": "TGTT",
       "raceName": "Genasi",
       "raceSource": "TGTT",
-      "ability": [{"int": 1}],
-      "resist": ["fire"],
-      "languageProficiencies": [{"ignan": true}],
-      "traitTags": ["Damage Resistance"],
+      "ability": [
+        {
+          "int": 1
+        }
+      ],
+      "resist": [
+        "fire"
+      ],
+      "languageProficiencies": [
+        {
+          "ignan": true
+        }
+      ],
+      "traitTags": [
+        "Damage Resistance"
+      ],
       "darkvision": 60,
       "additionalSpells": [
         {
           "innate": {
-            "0": ["produce flame"],
-            "3": ["burning hands"],
-            "5": ["pyrotechnics"]
+            "0": [
+              "produce flame"
+            ],
+            "3": [
+              "burning hands"
+            ],
+            "5": [
+              "pyrotechnics"
+            ]
           },
           "ability": "con"
         }
@@ -35838,16 +36329,34 @@
       "source": "TGTT",
       "raceName": "Genasi",
       "raceSource": "TGTT",
-      "ability": [{"wis": 1}],
-      "resist": ["cold"],
-      "languageProficiencies": [{"aquan": true}],
-      "traitTags": ["Damage Resistance"],
+      "ability": [
+        {
+          "wis": 1
+        }
+      ],
+      "resist": [
+        "cold"
+      ],
+      "languageProficiencies": [
+        {
+          "aquan": true
+        }
+      ],
+      "traitTags": [
+        "Damage Resistance"
+      ],
       "additionalSpells": [
         {
           "innate": {
-            "0": ["shape water"],
-            "3": ["create or destroy water"],
-            "5": ["snilloc's snowball swarm"]
+            "0": [
+              "shape water"
+            ],
+            "3": [
+              "create or destroy water"
+            ],
+            "5": [
+              "snilloc's snowball swarm"
+            ]
           },
           "ability": "con"
         }
@@ -35867,15 +36376,30 @@
       "source": "TGTT",
       "raceName": "Tiefling",
       "raceSource": "TGTT",
-      "ability": [{"wis": 2, "cha": 1}],
-      "resist": ["psychic"],
-      "traitTags": ["Damage Resistance"],
+      "ability": [
+        {
+          "wis": 2,
+          "cha": 1
+        }
+      ],
+      "resist": [
+        "psychic"
+      ],
+      "traitTags": [
+        "Damage Resistance"
+      ],
       "additionalSpells": [
         {
           "innate": {
-            "0": ["mind sliver"],
-            "3": ["tasha's caustic brew"],
-            "5": ["tasha's mind whip"]
+            "0": [
+              "mind sliver"
+            ],
+            "3": [
+              "tasha's caustic brew"
+            ],
+            "5": [
+              "tasha's mind whip"
+            ]
           },
           "ability": "wis"
         }
@@ -35884,12 +36408,16 @@
         {
           "type": "entries",
           "name": "Mental Fortitude",
-          "entries": ["You have resistance to psychic damage."]
+          "entries": [
+            "You have resistance to psychic damage."
+          ]
         },
         {
           "type": "entries",
           "name": "Dark Queen's Blessing",
-          "entries": ["You have advantage on Intelligence, Wisdom, and Charisma saving throws against magic."]
+          "entries": [
+            "You have advantage on Intelligence, Wisdom, and Charisma saving throws against magic."
+          ]
         }
       ]
     },
@@ -35898,32 +36426,54 @@
       "source": "TGTT",
       "raceName": "Tiefling",
       "raceSource": "TGTT",
-      "ability": [{"cha": 2, "dex": 1}],
-      "resist": ["cold"],
-      "traitTags": ["Damage Resistance", "Skill Proficiency"],
+      "ability": [
+        {
+          "cha": 2,
+          "dex": 1
+        }
+      ],
+      "resist": [
+        "cold"
+      ],
+      "traitTags": [
+        "Damage Resistance",
+        "Skill Proficiency"
+      ],
       "additionalSpells": [
         {
           "innate": {
-            "0": ["friends"],
-            "3": ["charm person"],
-            "5": ["suggestion"]
+            "0": [
+              "friends"
+            ],
+            "3": [
+              "charm person"
+            ],
+            "5": [
+              "suggestion"
+            ]
           },
           "ability": "cha"
         }
       ],
       "skillProficiencies": [
-        {"persuasion": true}
+        {
+          "persuasion": true
+        }
       ],
       "entries": [
         {
           "type": "entries",
           "name": "Warm Embrace",
-          "entries": ["You have resistance to cold damage."]
+          "entries": [
+            "You have resistance to cold damage."
+          ]
         },
         {
           "type": "entries",
           "name": "Temptation's Guidance",
-          "entries": ["You gain proficiency in Persuasion, and you can add double your proficiency bonus when using it."]
+          "entries": [
+            "You gain proficiency in Persuasion, and you can add double your proficiency bonus when using it."
+          ]
         }
       ]
     },
@@ -35932,15 +36482,30 @@
       "source": "TGTT",
       "raceName": "Tiefling",
       "raceSource": "TGTT",
-      "ability": [{"int": 2, "cha": 1}],
-      "resist": ["fire"],
-      "traitTags": ["Damage Resistance"],
+      "ability": [
+        {
+          "int": 2,
+          "cha": 1
+        }
+      ],
+      "resist": [
+        "fire"
+      ],
+      "traitTags": [
+        "Damage Resistance"
+      ],
       "additionalSpells": [
         {
           "innate": {
-            "0": ["thaumaturgy"],
-            "3": ["hellish rebuke"],
-            "5": ["blindness/deafness"]
+            "0": [
+              "thaumaturgy"
+            ],
+            "3": [
+              "hellish rebuke"
+            ],
+            "5": [
+              "blindness/deafness"
+            ]
           },
           "ability": "int"
         }
@@ -35949,12 +36514,16 @@
         {
           "type": "entries",
           "name": "Hellish Resistance",
-          "entries": ["You have resistance to fire damage."]
+          "entries": [
+            "You have resistance to fire damage."
+          ]
         },
         {
           "type": "entries",
           "name": "Infernal Luck",
-          "entries": ["You can reroll one ability check or attack roll you make. You must use the new roll. Once you use this trait, you can't use it again until you finish a long rest."]
+          "entries": [
+            "You can reroll one ability check or attack roll you make. You must use the new roll. Once you use this trait, you can't use it again until you finish a long rest."
+          ]
         }
       ]
     },
