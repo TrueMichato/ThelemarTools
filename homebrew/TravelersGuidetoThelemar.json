@@ -1551,6 +1551,189 @@
       ]
     }
   ],
+  "disease": [
+    {
+      "name": "Chameleon's Lament",
+      "source": "TGTT",
+      "page": 38,
+      "entries": [
+        "Chameleon's Lament, also called the Changeling Disease, is a rare autoimmune condition that affects Changelings exclusively. It manifests when a Changeling maintains the same appearance for an extended period without regularly changing shape. As the body adapts to that fixed form, the immune system begins treating the changeling's own tissues as foreign, causing chronic inflammation, morphic instability, and eventual organ failure.",
+        "The disease is biological and planar in character rather than magical. Effects that remove curses do not end it, and ordinary disease-curing magic does not cure it unless a feature says otherwise.",
+        {
+          "type": "entries",
+          "name": "Contraction and Course",
+          "entries": [
+            "Chameleon's Lament is associated with identity stasis in areas where Changelings live integrated among other peoples and feel pressure to hold one form for months or years at a time. Its incubation period varies, but symptoms rarely appear before a few months of uninterrupted stasis. Once active, the disease is chronic until it is brought into remission."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Progression",
+          "entries": [
+            "Chameleon's Lament progresses through five stages, Stage I through Stage V.",
+            {
+              "type": "list",
+              "items": [
+                "{@b Check Frequency.} At the end of each Long Rest, the infected creature makes a Constitution saving throw against the disease.",
+                "{@b Save DC.} The save DC equals 10 + twice the disease's current stage.",
+                "{@b Failure.} Each failed save counts as 1 failure. After 3 accumulated failures, the disease advances to the next stage. A natural 1 counts as 2 failures.",
+                "{@b Success.} Each successful save counts as 1 success. After 3 accumulated successes, all accumulated successes and failures are removed. A natural 20 counts as 2 successes."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "CL Points",
+          "entries": [
+            "Some stages of the disease grant CL points. CL points function like levels of {@condition Exhaustion|TGTT}, but they don't count toward the normal exhaustion cap, don't affect Constitution Saving Throws, and aren't removed by rest unless Chameleon's Lament says otherwise."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Meaningful Shapechange",
+          "entries": [
+            "To count as meaningful for treating Chameleon's Lament, a new form must differ from the previous form in at least two of the following categories:",
+            {
+              "type": "list",
+              "items": [
+                "Apparent species or race",
+                "Size category",
+                "Limb configuration or biological sex",
+                "Vocal structure and musculature",
+                "Facial structure"
+              ]
+            },
+            "Cosmetic changes such as hair color, eye color, or scars don't count."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Stages of Infection",
+          "entries": [
+            {
+              "type": "entries",
+              "name": "Stage I: Cellular Fatigue",
+              "entries": [
+                "The body begins to break down, slowly but steadily. Joint pain, fatigue, and temporary bouts of weakness set in.",
+                "The infected creature gains 1 CL point."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Stage II: Morphic Instability",
+              "entries": [
+                "Internal organs begin to subtly reshape themselves and no longer fully match any one stable form. Weakness becomes more pronounced, often accompanied by short coughing fits.",
+                "The infected creature gains 1 additional CL point."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Stage III: Systemic Rejection",
+              "entries": [
+                "The immune system actively attacks the body's own tissues, causing respiratory distress, locking joints, nausea, and pain while digesting food.",
+                "The infected creature's Constitution score becomes 10, and it gains 1 additional CL point.",
+                "If the creature fails the Constitution saving throw required to assume a meaningful shapechange, it takes 16 ({@damage 3d10}) poison damage."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Stage IV: Organ Morphosis",
+              "entries": [
+                "The ability to hold a form fractures. Organs twitch and microchange uncontrollably, bloody coughing becomes common, eating is difficult, skin flakes away aggressively, and the joints swell.",
+                "The infected creature's Constitution score becomes 6.",
+                "Whenever the creature regains hit points, roll on the Organ Failure table."
+              ]
+            },
+            {
+              "type": "table",
+              "caption": "Organ Failure",
+              "colLabels": [
+                "d8",
+                "System",
+                "Effect"
+              ],
+              "colStyles": [
+                "col-1 text-center",
+                "col-2",
+                "col-9"
+              ],
+              "rows": [
+                [
+                  "1",
+                  "Ocular",
+                  "The creature is {@condition blinded} for {@dice 1d4} hours."
+                ],
+                [
+                  "2",
+                  "Respiratory",
+                  "The creature has Disadvantage on Constitution checks and saving throws and is {@condition Choked|TGTT}."
+                ],
+                [
+                  "3",
+                  "Epidermal",
+                  "The creature gains the Sunlight Sensitivity trait for {@dice 1d4} hours."
+                ],
+                [
+                  "4",
+                  "Muscular",
+                  "The creature's Speed is halved, and it has Disadvantage on Dexterity saving throws."
+                ],
+                [
+                  "5",
+                  "Neural",
+                  "The creature can't maintain Concentration on spells and has Disadvantage on Wisdom checks and saving throws."
+                ],
+                [
+                  "6",
+                  "Hands",
+                  "The creature has Disadvantage on attack rolls because of spasms."
+                ],
+                [
+                  "7",
+                  "Ears",
+                  "The creature is {@condition deafened} for {@dice 1d4} hours and has Disadvantage on Charisma checks and saving throws."
+                ],
+                [
+                  "8",
+                  "Pain",
+                  "The creature has Disadvantage on Intelligence checks and saving throws because of intense pain."
+                ]
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Stage V: Terminal Identity Collapse",
+              "entries": [
+                "The body no longer recognizes itself. Total biological collapse is underway.",
+                "The infected creature's hit point maximum is halved.",
+                "At dawn each day, the creature makes a Constitution saving throw against the disease. On a failed save, it gains 1 level of {@condition Exhaustion|TGTT}. This exhaustion can't be removed by rest or magic while the creature remains at Stage V.",
+                "If the creature reaches 10 levels of exhaustion, its organs fail catastrophically and it dies."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Treatment and Remission",
+          "entries": [
+            "This condition can't be cured by {@spell lesser restoration|PHB}. {@spell greater restoration|PHB} reduces the disease by one stage, but it can't remove the disease entirely if the creature remains in the same form.",
+            "Spending 7 consecutive days performing a meaningful shapechange each day, with each new form held for at least 1 hour, reduces the disease by one stage.",
+            "At any stage above Stage 0, assuming a meaningful shapechange requires a Constitution saving throw against the disease's current DC. On a failure, the shapechange fails. At Stage III or higher, that failure also deals the damage described in that stage.",
+            "If the disease is reduced to Stage 0, its active symptoms end. The creature remains susceptible to recurrence if it returns to identity stasis."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Feywild Resonance",
+          "entries": [
+            "The mutable nature of the Feywild soothes Chameleon's Lament. While in the Feywild, the infected creature makes progression checks with Advantage.",
+            "Each day spent in the Feywild counts as 2 days for the purpose of therapeutic regression."
+          ]
+        }
+      ]
+    }
+  ],
   "skill": [
     {
       "name": "Linguistics",
