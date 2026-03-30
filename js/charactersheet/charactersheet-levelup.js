@@ -746,6 +746,8 @@ class CharacterSheetLevelUp {
 				maxSpellLevel,
 				allSpells,
 				knownSpellIds,
+				className: classEntry.name,
+				subclass: selectedSubclass || classEntry.subclass,
 				getHoverLink: (...args) => CharacterSheetPage.getHoverLink(...args),
 				onSelect: (spells) => {
 					selectedSpellbookSpells = spells;
@@ -779,6 +781,7 @@ class CharacterSheetLevelUp {
 				allSpells: knownAllSpells,
 				knownSpellIds: knownExistingIds,
 				getHoverLink: (...args) => CharacterSheetPage.getHoverLink(...args),
+				subclass: selectedSubclass || classEntry.subclass,
 				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
 					className: classEntry.name,
 					subclass: selectedSubclass || classEntry.subclass,
@@ -827,6 +830,7 @@ class CharacterSheetLevelUp {
 				allSpells: prepAllSpells,
 				knownSpellIds: prepExistingIds,
 				getHoverLink: (...args) => CharacterSheetPage.getHoverLink(...args),
+				subclass: selectedSubclass || classEntry.subclass,
 				onSelect: (spells, cantrips) => {
 					selectedPreparedSpells = spells;
 					selectedPreparedCantrips = cantrips;
@@ -1819,7 +1823,7 @@ class CharacterSheetLevelUp {
 	 */
 	_renderEpicBoonAbilityChoice (boon, parentSection) {
 		// Remove any existing ability choice UI
-		parentSection.querySelector(".charsheet__epic-boon-ability-choice").remove();
+		parentSection.querySelector(".charsheet__epic-boon-ability-choice")?.remove();
 
 		if (!boon.ability?.length) return;
 

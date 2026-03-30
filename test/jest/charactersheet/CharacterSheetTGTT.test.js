@@ -12181,4 +12181,124 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 			});
 		});
 	});
+
+        // =========================================================================
+        // NYUIDJ RACE TESTS
+        // A TGTT homebrew race that auto-grants Dreamwalk and lets players pick
+        // one additional Dreamwalker Ability from the DW:C/DW:S pool.
+        // =========================================================================
+        describe("Nyuidj Race (TGTT)", () => {
+                describe("Auto-granted Dreamwalk feature", () => {
+                        it("should detect dreamwalker abilities when Dreamwalk is added via raceSource", () => {
+                                state.addFeature({
+                                        name: "Dreamwalk",
+                                        source: "TGTT",
+                                        featureType: "Optional Feature",
+                                        raceSource: "TGTT",
+                                        level: 1,
+                                        optionalFeatureTypes: ["DW:C"],
+                                        description: "The most basic ability of all dreamers.",
+                                });
+
+                                expect(state.hasDreamwalkerAbilities()).toBe(true);
+                        });
+
+                        it("should include the auto-granted Dreamwalk in getDreamwalkerAbilities()", () => {
+                                state.addFeature({
+                                        name: "Dreamwalk",
+                                        source: "TGTT",
+                                        featureType: "Optional Feature",
+                                        raceSource: "TGTT",
+                                        level: 1,
+                                        optionalFeatureTypes: ["DW:C"],
+                                        description: "The most basic ability of all dreamers.",
+                                });
+
+                                const abilities = state.getDreamwalkerAbilities();
+                                expect(abilities.length).toBe(1);
+                                expect(abilities[0].name).toBe("Dreamwalk");
+                        });
+                });
+
+                describe("Chosen Dreamwalker Ability (DW:C/DW:S pool)", () => {
+                        it("should detect two dreamwalker abilities with Dreamwalk auto-grant + one choice", () => {
+                                // Auto-granted
+                                state.addFeature({
+                                        name: "Dreamwalk",
+                                        source: "TGTT",
+                                        featureType: "Optional Feature",
+                                        raceSource: "TGTT",
+                                        level: 1,
+                                        optionalFeatureTypes: ["DW:C"],
+                                        description: "The most basic ability of all dreamers.",
+                                });
+                                // Player-chosen (no prereq)
+                                state.addFeature({
+                                        name: "Dreambend",
+                                        source: "TGTT",
+                                        featureType: "Optional Feature",
+                                        raceSource: "TGTT",
+                                        level: 1,
+                                        optionalFeatureTypes: ["DW:C"],
+                                        description: "You learn to alter the fabric of dreams.",
+                                });
+
+                                const abilities = state.getDreamwalkerAbilities();
+                                expect(abilities.length).toBe(2);
+                                expect(abilities.some(a => a.name === "Dreamwalk")).toBe(true);
+                                expect(abilities.some(a => a.name === "Dreambend")).toBe(true);
+                        });
+
+                        it("should allow choosing Dreamjump (prereq Dreamwalk satisfied by auto-grant)", () => {
+                                // Auto-granted
+                                state.addFeature({
+                                        name: "Dreamwalk",
+                                        source: "TGTT",
+                                        featureType: "Optional Feature",
+                                        raceSource: "TGTT",
+                                        level: 1,
+                                        optionalFeatureTypes: ["DW:C"],
+                                        description: "The most basic ability of all dreamers.",
+                                });
+                                // Dreamjump requires Dreamwalk, which is granted
+                                state.addFeature({
+                                        name: "Dreamjump",
+                                        source: "TGTT",
+                                        featureType: "Optional Feature",
+                                        raceSource: "TGTT",
+                                        level: 1,
+                                        optionalFeatureTypes: ["DW:S"],
+                                        description: "You can travel to any point in The Dreamtime.",
+                                });
+
+                                const abilities = state.getDreamwalkerAbilities();
+                                expect(abilities.some(a => a.name === "Dreamjump")).toBe(true);
+                        });
+
+                        it("should allow choosing Daydream (prereq Dreamwalk satisfied by auto-grant)", () => {
+                                // Auto-granted
+                                state.addFeature({
+                                        name: "Dreamwalk",
+                                        source: "TGTT",
+                                        featureType: "Optional Feature",
+                                        raceSource: "TGTT",
+                                        level: 1,
+                                        optionalFeatureTypes: ["DW:C"],
+                                        description: "The most basic ability of all dreamers.",
+                                });
+                                state.addFeature({
+                                        name: "Daydream",
+                                        source: "TGTT",
+                                        featureType: "Optional Feature",
+                                        raceSource: "TGTT",
+                                        level: 1,
+                                        optionalFeatureTypes: ["DW:S"],
+                                        description: "You can enter a meditative trance.",
+                                });
+
+                                const abilities = state.getDreamwalkerAbilities();
+                                expect(abilities.some(a => a.name === "Daydream")).toBe(true);
+                        });
+                });
+        });
 });

@@ -216,12 +216,38 @@ class CharacterSheetClassUtils {
 	 * @param {string} className - Class name to check
 	 * @returns {boolean}
 	 */
-	static spellIsForClass (spell, className) {
+	/**
+	 * @param {Object} spell - Spell data object
+	 * @param {string} className - Class name to check
+	 * @param {Object} [opts] - Options
+	 * @param {Object} [opts.subclass] - Subclass object with name/shortName to also check fromSubclass lists
+	 * @returns {boolean}
+	 */
+	static spellIsForClass (spell, className, opts = {}) {
 		try {
 			const classList = Renderer.spell.getCombinedClasses(spell, "fromClassList");
 			if (classList?.some(c => c.name === className)) return true;
 		} catch (e) { /* fall through */ }
-		return spell.classes?.fromClassList?.some(c => c.name === className) || false;
+		if (spell.classes?.fromClassList?.some(c => c.name === className)) return true;
+
+		// Check subclass spell lists if subclass is provided
+		if (opts.subclass) {
+			const subName = (opts.subclass.name || "").toLowerCase();
+			const subShort = (opts.subclass.shortName || "").toLowerCase();
+			const matchesSub = (entry) => {
+				if (entry.class?.name !== className) return false;
+				const eName = (entry.subclass?.name || "").toLowerCase();
+				const eShort = (entry.subclass?.shortName || "").toLowerCase();
+				return (subName && eName === subName) || (subShort && eShort === subShort);
+			};
+			try {
+				const subList = Renderer.spell.getCombinedClasses(spell, "fromSubclass");
+				if (subList?.some(matchesSub)) return true;
+			} catch (e) { /* fall through */ }
+			if (spell.classes?.fromSubclass?.some(matchesSub)) return true;
+		}
+
+		return false;
 	}
 
 	static isDivineSoulSubclass (subclass) {

@@ -97,6 +97,7 @@
 	opacity: 0;
 	overflow: hidden;
 	border-top: none;
+	pointer-events: none;
 }
 
 /* Header Groups - Logical Sections */
@@ -11554,6 +11555,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	transform: translateY(-8px);
 	transition: all var(--cs-transition-normal, 0.2s ease);
 	z-index: 9999;
+	pointer-events: none;
 }
 
 /* Default: open to left (right-aligned) */
@@ -11573,6 +11575,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	opacity: 1;
 	transform: translateY(0);
 	overflow: visible;
+	pointer-events: auto;
 }
 
 .charsheet__source-multiselect-actions {
@@ -16105,4 +16108,40 @@ body.has-method-picker .hwin .hoverborder {
 	.charsheet__rolllog-toggle-text {
 		display: none;
 	}
+}
+/* ========== Builder: grouped language checkbox lists ========== */
+.charsheet__builder-lang-group {
+	margin-bottom: 10px;
+}
+
+.charsheet__builder-lang-group-header {
+	font-size: 0.7em;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--col-muted, #888);
+	margin-bottom: 4px;
+}
+
+.charsheet__builder-lang-group-items {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 14px;
+	align-items: center;
+}
+
+.charsheet__builder-lang-checkbox {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+	cursor: pointer;
+	white-space: nowrap;
+	margin: 0;
+	font-weight: 400;
+}
+
+.charsheet__builder-lang-source {
+	font-size: 0.8em;
+	color: var(--col-muted, #888);
+	font-weight: 400;
 }

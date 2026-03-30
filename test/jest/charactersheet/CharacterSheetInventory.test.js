@@ -80,6 +80,60 @@ describe("Inventory Management", () => {
 	});
 
 	// ==========================================================================
+	// Type-Code Enrichment (builder path uses raw data-file items with type codes)
+	// ==========================================================================
+	describe("Type-Code Enrichment via addItem()", () => {
+		it("should set shield flag for raw item with type 'S'", () => {
+			state.addItem({name: "Shield", source: "PHB", type: "S"});
+			const inv = state.getInventory();
+			expect(inv[0].item.shield).toBe(true);
+			expect(inv[0].item.armor).toBe(false);
+		});
+
+		it("should set armor flag and armorType for heavy armor type 'HA'", () => {
+			state.addItem({name: "Chain Mail", source: "PHB", type: "HA", ac: 16});
+			const inv = state.getInventory();
+			expect(inv[0].item.armor).toBe(true);
+			expect(inv[0].item.armorType).toBe("heavy");
+			expect(inv[0].item.shield).toBe(false);
+		});
+
+		it("should set armor flag and armorType for medium armor type 'MA'", () => {
+			state.addItem({name: "Scale Mail", source: "PHB", type: "MA", ac: 14});
+			const inv = state.getInventory();
+			expect(inv[0].item.armor).toBe(true);
+			expect(inv[0].item.armorType).toBe("medium");
+		});
+
+		it("should set armor flag and armorType for light armor type 'LA'", () => {
+			state.addItem({name: "Leather Armor", source: "PHB", type: "LA", ac: 11});
+			const inv = state.getInventory();
+			expect(inv[0].item.armor).toBe(true);
+			expect(inv[0].item.armorType).toBe("light");
+		});
+
+		it("should not overwrite shield flag already set by inventory enrichment", () => {
+			state.addItem({name: "Shield", source: "PHB", type: "S", shield: true});
+			const inv = state.getInventory();
+			expect(inv[0].item.shield).toBe(true);
+		});
+
+		it("should not overwrite armor flag already set by inventory enrichment", () => {
+			state.addItem({name: "Breastplate", source: "PHB", type: "MA", armor: true, armorType: "medium", ac: 14});
+			const inv = state.getInventory();
+			expect(inv[0].item.armor).toBe(true);
+			expect(inv[0].item.armorType).toBe("medium");
+		});
+
+		it("should not set shield or armor flag for non-armor types", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true});
+			const inv = state.getInventory();
+			expect(inv[0].item.shield).toBe(false);
+			expect(inv[0].item.armor).toBe(false);
+		});
+	});
+
+	// ==========================================================================
 	// Equipment (Equip/Unequip)
 	// ==========================================================================
 	describe("Equipment", () => {

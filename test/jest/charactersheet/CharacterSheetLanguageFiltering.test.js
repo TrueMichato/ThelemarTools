@@ -440,3 +440,99 @@ describe("CharacterSheet Language Filtering", () => {
 		});
 	});
 });
+
+// ==========================================================================
+// groupLanguagesByType — mirrors _groupLanguagesByType() from builder
+// ==========================================================================
+
+function groupLanguagesByType (names, page) {
+	const grouped = getLanguageOptionsGrouped(page);
+	const standardSet = new Set(grouped.standard);
+	const exoticSet = new Set(grouped.exotic);
+	const secretSet = new Set(grouped.secret);
+
+	const homebrew = [];
+	const standard = [];
+	const exotic = [];
+	const secret = [];
+
+	for (const name of names) {
+		if (standardSet.has(name)) standard.push(name);
+		else if (exoticSet.has(name)) exotic.push(name);
+		else if (secretSet.has(name)) secret.push(name);
+		else homebrew.push(name);
+	}
+
+	const reorder = (arr, reference) =>
+		[...reference.filter(l => arr.includes(l)), ...arr.filter(l => !reference.includes(l)).sort()];
+
+	return {
+		homebrew: homebrew.sort(),
+		standard: reorder(standard, grouped.standard),
+		exotic: reorder(exotic, grouped.exotic),
+		secret: reorder(secret, grouped.secret),
+	};
+}
+
+describe("groupLanguagesByType (builder _groupLanguagesByType mirror)", () => {
+	test("common D&D languages are split into correct buckets", () => {
+		const page = makePage({languagesData: PHB_LANGUAGES});
+		const names = ["Common", "Dwarvish", "Abyssal", "Druidic"];
+		const result = groupLanguagesByType(names, page);
+
+		expect(result.standard).toContain("Common");
+		expect(result.standard).toContain("Dwarvish");
+		expect(result.exotic).toContain("Abyssal");
+		expect(result.secret).toContain("Druidic");
+		expect(result.homebrew).toEqual([]);
+	});
+
+	test("unlisted language falls into homebrew bucket", () => {
+		const page = makePage({languagesData: PHB_LANGUAGES});
+		const result = groupLanguagesByType(["Krakenspeak", "Common"], page);
+
+		expect(result.homebrew).toContain("Krakenspeak");
+		expect(result.homebrew).not.toContain("Common");
+		expect(result.standard).toContain("Common");
+	});
+
+	test("each group is empty when no names match it", () => {
+		const page = makePage({languagesData: PHB_LANGUAGES});
+		const result = groupLanguagesByType(["Common", "Dwarvish"], page);
+
+		expect(result.exotic).toEqual([]);
+		expect(result.secret).toEqual([]);
+		expect(result.homebrew).toEqual([]);
+	});
+
+	test("with TGTT priority, TGTT standard-type language appears in standard bucket", () => {
+		const page = makePage({
+			prioritySources: ["TGTT"],
+			languagesData: [...PHB_LANGUAGES, ...TGTT_LANGUAGES],
+		});
+		const result = groupLanguagesByType(["Lexalian", "Common", "Jotunn"], page);
+
+		expect(result.standard).toContain("Lexalian");
+		expect(result.standard).toContain("Common");
+		expect(result.exotic).toContain("Jotunn");
+	});
+
+	test("ordering within a group follows grouped reference order (priority-sources first)", () => {
+		const page = makePage({
+			prioritySources: ["TGTT"],
+			languagesData: [...PHB_LANGUAGES, ...TGTT_LANGUAGES],
+		});
+		// Avian (TGTT/priority) should sort before Abyssal (PHB) in exotic
+		const result = groupLanguagesByType(["Abyssal", "Avian"], page);
+		const avianIdx = result.exotic.indexOf("Avian");
+		const abyssalIdx = result.exotic.indexOf("Abyssal");
+		expect(avianIdx).toBeLessThan(abyssalIdx);
+	});
+
+	test("homebrew bucket is sorted alphabetically", () => {
+		const page = makePage({languagesData: PHB_LANGUAGES});
+		const result = groupLanguagesByType(["Zyrax", "Aurobec", "Mellishian"], page);
+
+		expect(result.homebrew).toEqual(["Aurobec", "Mellishian", "Zyrax"]);
+	});
+});

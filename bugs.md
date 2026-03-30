@@ -1,7 +1,7 @@
 ## Open bugs:
 
 ### Builder:
-- [] When picking the Firbolg race and clicking next, I get the following bug (might be related to jquery removal):
+- [X] When picking the Firbolg race and clicking next, I get the following bug (might be related to jquery removal):
 charactersheet-spells.js:4367 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'addEventListener')
     at CharacterSheetSpells._renderInnateSpellItem (charactersheet-spells.js:4367:48)
     at charactersheet-spells.js:4301:22
@@ -23,10 +23,11 @@ renderCharacter	@	charactersheet.js:10732
 _applyCurrentStep	@	charactersheet-builder.js:646
 _nextStep	@	charactersheet-builder.js:269
 (anonymous)	@	charactersheet-builder.js:225
-- [] shields added from the builder are not equipable.
-- [] when a race gives choice of languages, we want the list to be sorted both by language type (common, exotic, secret etc.), name, and source. We also want this list to be aligned and better lookking overall.
-- [] nyuidj race let's you choose a dreamwalker ability, but no choice is presented in the builder. This should be fixed to allow players to choose their dreamwalker ability when picking.
-- [] Wizard cannot choose starting spells or cantrips for some reason.
+- [X] shields added from the builder are not equipable.
+- [X] when a race gives choice of languages, we want the list to be sorted both by language type (common, exotic, secret etc.), name, and source. We also want this list to be aligned and better lookking overall.
+- [X] nyuidj race let's you choose a dreamwalker ability, but no choice is presented in the builder. This should be fixed to allow players to choose their dreamwalker ability when picking, and also actually give the dreamwalk ability in addition.
+- [] Wizard cannot choose starting spells or cantrips for some reason. This might be a more broad issue with spell selection in the builder, since cleric also suffers from it. It needs to be investigated and fixed to ensure that all classes can properly select their starting spells and cantrips.
+- [] if I choose a class, move on, and then go back and change the class, I don't change my selection, I add another class - making my character a multicalss even if I didn't want to. This should be fixed to ensure that changing the class selection mid build properly updates the character's class and doesn't just add another class to the character sheet.
 
 ### Levelup / Quickbuild:
 - [] when levelin up and coming to the ASI and Feat step, there is asyncrhonity between the scores in the ASI selection and the feat seleciton. if I had a 16 in str and used ASI to increase it to 18, the feat selection still shows the 16 str if the feat allows me to increase a score of my choosing. This should be fixed to ensure that the feat selection is aware of the ASI increases and shows the correct scores, and vice versa (if I pick a feat that increases my str, the ASI selection should show the increased str score as well).
@@ -44,15 +45,16 @@ _nextStep	@	charactersheet-builder.js:269
     at charactersheet-quickbuild.js:1643:10
 
 ### General:
-- [] when rightcliking a skill check, I get the following error (might be related to jquery removal):
+- [X] when rightcliking a skill check, I get the following error (might be related to jquery removal):
 charactersheet.js:8146 Uncaught TypeError: Cannot read properties of null (reading 'remove')
     at CharacterSheetPage._showSkillAbilityMenu (charactersheet.js:8146:53)
     at HTMLDivElement.<anonymous> (charactersheet.js:2656:52)
 _showSkillAbilityMenu	@	charactersheet.js:8146
 (anonymous)	@	charactersheet.js:2656
-- [] shields always give a +2 AC bonus, but some homebrew shields (e.g. Buckler, Tower Shield) should give different bonuses. The code should be updated to check for specific shield types and apply the correct AC bonus.
-- [] There is some unidentified bug in the way spell lists are handled. Some players don't see spells that they definitely should have access to (e.g. a wizard not seeing Gift of Alacrity). This should be investigated and fixed to ensure that all spells are properly displayed based on class, level, and other factors. Notice that TGTT classe should have access to the spell list of both TGTT class and the XPHB class.
-- [] when using the spell picker, there is no way to filter by legality and rarity. This should be added to allow players to easily find spells that are legal for their character and of the desired rarity. This also needs to be fixed in the level up / quickbuild spell selection step.
+- [X] shields always give a +2 AC bonus, but some homebrew shields (e.g. Buckler, Tower Shield) should give different bonuses. The code should be updated to check for specific shield types and apply the correct AC bonus.
+- [X] There is some unidentified bug in the way spell lists are handled. Some players don't see spells that they definitely should have access to (e.g. a wizard not seeing Gift of Alacrity). This should be investigated and fixed to ensure that all spells are properly displayed based on class, level, and other factors. Notice that TGTT classe should have access to the spell list of both TGTT class and the XPHB class.
+- [X] when using the spell picker, or when choosing spells in levelup, builder, quickbuild, there is no way to filter by legality and rarity. This should be added to allow players to easily find spells that are legal for their character and of the desired rarity. This also needs to be fixed in the level up / quickbuild spell selection step.
+- [X] in the spell picker, you can click the area where certain dropdowns are supposed to open and choose an option even when that dropdown is not visible. One specific dropdown I know this happens for is the clas filter dropdown.
 - [] sometimes there is a bug that does not let you exit the modifiers menu, and you have to refresh the page to get out of it. here is an example error that I get when this happens (might be related to jquery removal):
 charactersheet.js:3988 Uncaught (in promise) TypeError: Cannot set properties of undefined (setting 'display')
     at CharacterSheetPage._renderCompanionsOverviewIndicator (charactersheet.js:3988:42)

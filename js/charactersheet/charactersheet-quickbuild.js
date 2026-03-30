@@ -3197,6 +3197,8 @@ class CharacterSheetQuickBuild {
 				maxSpellLevel,
 				allSpells: sourceFiltered,
 				knownSpellIds,
+				className: "Wizard",
+				subclass: this._state.getClasses()?.[0]?.subclass,
 				onSelect: (spells) => {
 					this._selections.spellbookSpells = spells;
 				},
@@ -3259,6 +3261,7 @@ class CharacterSheetQuickBuild {
 			maxSpellLevel,
 			allSpells: sourceFiltered,
 			knownSpellIds,
+			subclass: knownCasterInfo.subclass,
 			additionalClassNames,
 			onSelect: (spells, cantrips) => {
 				this._selections.knownSpells = spells;
@@ -3348,6 +3351,7 @@ class CharacterSheetQuickBuild {
 			maxSpellLevel,
 			allSpells: sourceFiltered,
 			knownSpellIds,
+			subclass: preparedCasterInfo.subclass,
 			onSelect: (spells, cantrips) => {
 				this._selections.preparedSpells = spells;
 				this._selections.preparedCantrips = cantrips;

@@ -159,6 +159,14 @@ globalThis.Renderer = globalThis.Renderer || {
 		recursiveRender: (entry) => typeof entry === "string" ? entry : JSON.stringify(entry),
 	}),
 };
+// Ensure Renderer.spell.getCombinedClasses exists for spell filtering tests
+if (!globalThis.Renderer.spell) {
+	globalThis.Renderer.spell = {
+		getCombinedClasses: (sp, prop) => (sp.classes || {})[prop] || [],
+	};
+} else if (!globalThis.Renderer.spell.getCombinedClasses) {
+	globalThis.Renderer.spell.getCombinedClasses = (sp, prop) => (sp.classes || {})[prop] || [];
+}
 
 // Mock UrlUtil if needed
 globalThis.UrlUtil = globalThis.UrlUtil || {

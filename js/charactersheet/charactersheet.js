@@ -8143,7 +8143,7 @@ class CharacterSheetPage {
 		event.stopPropagation();
 
 		// Remove any existing menu
-		document.querySelector(".charsheet__ability-menu").remove();
+		document.querySelector(".charsheet__ability-menu")?.remove();
 
 		const abilities = ["str", "dex", "con", "int", "wis", "cha"];
 		const abilityNames = {
@@ -8444,8 +8444,8 @@ class CharacterSheetPage {
 		// Helper to update dice face
 		const updateFace = (value) => {
 			if (diceType === 6) {
-				dice.querySelector(".charsheet__dice-face").remove();
-				dice.querySelector(".charsheet__dice-value").remove();
+				dice.querySelector(".charsheet__dice-face")?.remove();
+				dice.querySelector(".charsheet__dice-value")?.remove();
 				dice.insertAdjacentHTML("afterbegin", createFaceContent(value));
 			} else {
 				let value = dice.querySelector(".charsheet__dice-value");

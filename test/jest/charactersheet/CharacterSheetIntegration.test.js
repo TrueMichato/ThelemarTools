@@ -49,7 +49,7 @@ describe("Integration Tests", () => {
 			// Equipment
 			state.addItem({name: "Chain Mail", type: "armor", ac: 16, equipped: true});
 			state.addItem({name: "Longsword", type: "weapon", damage: "1d8", damageType: "slashing"});
-			state.addItem({name: "Shield", type: "armor", acBonus: 2, equipped: true});
+			state.addItem({name: "Shield", type: "armor", ac: 2, acBonus: 0, equipped: true});
 
 			// Calculate derived values
 			state.setMaxHp(12 + state.getAbilityModifier("con")); // d10 + CON

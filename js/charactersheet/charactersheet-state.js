@@ -5956,12 +5956,11 @@ class CharacterSheetState {
 				&& bestAcFormula.ac > (10 + dexMod); // Only matters if we're using the formula
 
 			if (!isMonkUnarmored && !formulaForbidsShield) {
-				// Shield bonus: if explicit bonus set, use it; otherwise default to 2
-				// For magic shields, bonus includes the magic enhancement (e.g., Shield +1 = bonus of 3)
-				const shieldBonus = (typeof this._data.ac.shield === "object" && this._data.ac.shield.bonus !== undefined)
-					? this._data.ac.shield.bonus
-					: 2;
-				ac += shieldBonus;
+				// Shield AC = base AC from item (default 2) + magic enhancement bonus
+				const shield = this._data.ac.shield;
+				const baseAc = (typeof shield === "object" ? (shield.ac ?? 2) : 2);
+				const magicBonus = (typeof shield === "object" ? (shield.bonus ?? 0) : 0);
+				ac += baseAc + magicBonus;
 			}
 		}
 
@@ -6193,9 +6192,10 @@ class CharacterSheetState {
 				&& (usedFormula.base || 10) + (usedFormula.addDex ? dexMod : 0) > (10 + dexMod);
 
 			if (!isMonkUnarmored && !formulaForbidsShield) {
-				const baseShieldBonus = 2;
-				const magicBonus = (typeof this._data.ac.shield === "object") ? (this._data.ac.shield.bonus || 0) : 0;
-				const shieldName = (typeof this._data.ac.shield === "object") ? (this._data.ac.shield.name || "Shield") : "Shield";
+				const shield = this._data.ac.shield;
+				const baseShieldBonus = (typeof shield === "object") ? (shield.ac ?? 2) : 2;
+				const magicBonus = (typeof shield === "object") ? (shield.bonus ?? 0) : 0;
+				const shieldName = (typeof shield === "object") ? (shield.name || "Shield") : "Shield";
 
 				if (magicBonus > 0) {
 					components.push({type: "shield", name: shieldName, value: baseShieldBonus, icon: "🛡️"});
@@ -17695,6 +17695,24 @@ class CharacterSheetState {
 				itemProps.artifactProperties = this._detectArtifactPropertyRequirements(itemProps);
 			}
 
+			// Derive shield/armor/armorType flags from raw type codes when not already set.
+			// Needed because the builder calls addItem() directly with raw data-file items
+			// (which carry `type: "S"` / `"LA"` / `"MA"` / `"HA"` but no boolean flags),
+			// bypassing the inventory module's enrichment step.
+			const _typeBase = itemProps.type?.split("|")[0];
+			if (itemProps.shield === undefined) {
+				itemProps.shield = _typeBase === "S";
+			}
+			if (itemProps.armor === undefined) {
+				itemProps.armor = ["LA", "MA", "HA"].includes(_typeBase);
+			}
+			if (itemProps.armorType === undefined && itemProps.armor) {
+				if (_typeBase === "HA") itemProps.armorType = "heavy";
+				else if (_typeBase === "MA") itemProps.armorType = "medium";
+				else if (_typeBase === "LA") itemProps.armorType = "light";
+				else itemProps.armorType = null;
+			}
+
 			// Initialize arrays for complex item features
 			if (!itemProps.containedItems) itemProps.containedItems = [];
 			if (!itemProps.storedSpells) itemProps.storedSpells = [];
@@ -17714,7 +17732,7 @@ class CharacterSheetState {
 			if (equipped && item.type === "armor") {
 				if (item.acBonus !== undefined) {
 					// Shield-type item (has bonus instead of base AC)
-					this._data.ac.shield = {bonus: item.acBonus};
+					this._data.ac.shield = {ac: item.ac ?? 2, bonus: item.acBonus, name: item.name};
 				} else if (item.ac !== undefined) {
 					// Body armor
 					const armorType = item.armorType || this._inferArmorType(item);
@@ -18248,7 +18266,7 @@ class CharacterSheetState {
 			if (item?.type === "armor" || item?.type === "M" || item?.type === "R" || item?.ac !== undefined || item?.acBonus !== undefined) {
 				if (item.acBonus !== undefined) {
 					// Shield
-					this._data.ac.shield = {bonus: item.acBonus};
+					this._data.ac.shield = {ac: item.ac ?? 2, bonus: item.acBonus, name: item.name};
 				} else if (item.ac !== undefined) {
 					// Body armor
 					const armorType = item.armorType || this._inferArmorType(item);

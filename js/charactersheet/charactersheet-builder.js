@@ -29,6 +29,7 @@ class CharacterSheetBuilder {
 		this._selectedClassFeatureLanguages = []; // For class feature language choices (like Deft Explorer)
 		this._selectedFeatureOptions = {}; // For class/subclass features with embedded options (like Specialties)
 		this._selectedFeatureSkillChoices = {}; // For specialty features that require skill/expertise choices
+		this._selectedRaceOptionalFeatures = {}; // For race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
 		this._selectedCombatTraditions = []; // For combat tradition proficiency choices (Thelemar homebrew)
 		this._selectedClassToolProficiencies = []; // For class tool proficiency choices (e.g., Monk artisan/instrument)
 		this._selectedRacialSkills = []; // For racial skill proficiency choices (e.g., Elf)
@@ -1017,6 +1018,9 @@ class CharacterSheetBuilder {
 		// Racial spells (like High Elf cantrip, Tiefling spells, etc.)
 		this._applyRacialSpells();
 
+		// Auto-granted optional features (e.g., Nyuidj Dreamwalk)
+		this._applyRaceFeatureGrants();
+
 		// Add racial features
 		if (this._selectedRace.entries) {
 			this._addFeatureEntries(this._selectedRace.entries, this._selectedRace.source, "Species");
@@ -1025,6 +1029,28 @@ class CharacterSheetBuilder {
 		if (this._selectedSubrace?.entries) {
 			this._addFeatureEntries(this._selectedSubrace.entries, this._selectedSubrace.source, "Subrace");
 		}
+	}
+
+	/**
+	 * Apply auto-granted optional features from a race's featureGrants array.
+	 * E.g., the Nyuidj race automatically grants the Dreamwalk ability.
+	 */
+	_applyRaceFeatureGrants () {
+		const grants = this._selectedRace?.featureGrants;
+		if (!grants?.length) return;
+
+		const allOptFeatures = this._page.getOptionalFeatures?.() || [];
+		grants.forEach(grant => {
+			const opt = allOptFeatures.find(f => f.name === grant.name && f.source === grant.source)
+				|| allOptFeatures.find(f => f.name === grant.name);
+			if (!opt) return;
+			this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(opt, {
+				raceSource: this._selectedRace.source,
+				level: 1,
+				featureType: "Optional Feature",
+				optionalFeatureTypes: opt.featureType,
+			}));
+		});
 	}
 
 	/**
@@ -1673,6 +1699,20 @@ class CharacterSheetBuilder {
 		// Store selected combat traditions on the character for level-up reference
 		if (this._selectedCombatTraditions?.length) {
 			this._state.setCombatTraditions([...this._selectedCombatTraditions]);
+		}
+
+		// Apply race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
+		if (this._selectedRaceOptionalFeatures) {
+			Object.entries(this._selectedRaceOptionalFeatures).forEach(([featureKey, features]) => {
+				features.forEach(opt => {
+					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(opt, {
+						raceSource: this._selectedRace?.source,
+						level: 1,
+						featureType: "Optional Feature",
+						optionalFeatureTypes: opt.featureType,
+					}));
+				});
+			});
 		}
 	}
 
@@ -2508,6 +2548,12 @@ class CharacterSheetBuilder {
 			details.append(spellChoices);
 		}
 
+		// Race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
+		const optFeatureChoices = this._renderRaceOptionalFeatureChoices(race);
+		if (optFeatureChoices) {
+			details.append(optFeatureChoices);
+		}
+
 		container.append(details);
 	}
 
@@ -2958,6 +3004,121 @@ class CharacterSheetBuilder {
 	}
 
 	/**
+	 * Classify a list of language names into {homebrew, standard, exotic, secret} groups,
+	 * sorted priority-sources-first then alphabetically within each group.
+	 * @param {string[]} names - Language names to group
+	 * @returns {{homebrew: string[], standard: string[], exotic: string[], secret: string[]}}
+	 */
+	_groupLanguagesByType (names) {
+		// Use the page's grouped result to know each language's category
+		const grouped = this._page.getLanguageOptionsGrouped();
+		const standardSet = new Set(grouped.standard);
+		const exoticSet = new Set(grouped.exotic);
+		const secretSet = new Set(grouped.secret);
+
+		const homebrew = [];
+		const standard = [];
+		const exotic = [];
+		const secret = [];
+
+		for (const name of names) {
+			if (standardSet.has(name)) standard.push(name);
+			else if (exoticSet.has(name)) exotic.push(name);
+			else if (secretSet.has(name)) secret.push(name);
+			else homebrew.push(name);
+		}
+
+		// Ordering within each group matches the page's already-sorted lists
+		const reorder = (arr, reference) =>
+			[...reference.filter(l => arr.includes(l)), ...arr.filter(l => !reference.includes(l)).sort()];
+
+		// Build name → source lookup (prefer priority sources)
+		const prioritySources = this._state.getPrioritySources() || [];
+		const sourceLookup = new Map();
+		for (const lang of (this._page._languagesData || [])) {
+			const existing = sourceLookup.get(lang.name);
+			if (!existing) {
+				sourceLookup.set(lang.name, lang.source);
+			} else if (prioritySources.includes(lang.source) && !prioritySources.includes(existing)) {
+				sourceLookup.set(lang.name, lang.source);
+			}
+		}
+
+		return {
+			homebrew: homebrew.sort(),
+			standard: reorder(standard, grouped.standard),
+			exotic: reorder(exotic, grouped.exotic),
+			secret: reorder(secret, grouped.secret),
+			sourceLookup,
+		};
+	}
+
+	/**
+	 * Render grouped language checkboxes into a container element.
+	 * @param {{homebrew: string[], standard: string[], exotic: string[], secret: string[], sourceLookup: Map}} groupedLangs
+	 * @param {string[]} selectedArr - Mutable array of currently-selected language names
+	 * @param {number} maxCount - Maximum number of selections allowed
+	 * @param {HTMLElement} countEl - Span element showing the current selection count
+	 * @param {HTMLElement} container - Container to append groups into
+	 * @param {function} [onChange] - Called after every selection change
+	 * @param {{excludeGroups?: string[]}} [options]
+	 */
+	_renderLanguageCheckboxGroup (groupedLangs, selectedArr, maxCount, countEl, container, onChange, options = {}) {
+		const { excludeGroups = [] } = options;
+		const sourceLookup = groupedLangs.sourceLookup;
+
+		const GROUP_LABELS = {
+			homebrew: "Homebrew",
+			standard: "Standard",
+			exotic: "Exotic",
+			secret: "Secret",
+		};
+
+		for (const key of ["homebrew", "standard", "exotic", "secret"]) {
+			if (excludeGroups.includes(key)) continue;
+			const langs = groupedLangs[key];
+			if (!langs?.length) continue;
+
+			const group = e_({outer: `
+				<div class="charsheet__builder-lang-group">
+					<div class="charsheet__builder-lang-group-header">${GROUP_LABELS[key]}</div>
+					<div class="charsheet__builder-lang-group-items"></div>
+				</div>
+			`});
+			const items = group.querySelector(".charsheet__builder-lang-group-items");
+
+			for (const lang of langs) {
+				const source = sourceLookup?.get(lang);
+				const sourceSpan = source ? ` <span class="charsheet__builder-lang-source">(${source})</span>` : "";
+				const isSelected = selectedArr.includes(lang);
+				const lbl = e_({outer: `
+					<label class="charsheet__builder-lang-checkbox">
+						<input type="checkbox" value="${lang}" ${isSelected ? "checked" : ""}>
+						${lang}${sourceSpan}
+					</label>
+				`});
+				lbl.querySelector("input").addEventListener("change", (e) => {
+					if (e.target.checked) {
+						if (selectedArr.length < maxCount) {
+							selectedArr.push(lang);
+						} else {
+							e.target.checked = false;
+							JqueryUtil.doToast({type: "warning", content: `You can only choose ${maxCount} language${maxCount > 1 ? "s" : ""}.`});
+						}
+					} else {
+						const idx = selectedArr.indexOf(lang);
+						if (idx !== -1) selectedArr.splice(idx, 1);
+					}
+					countEl.textContent = selectedArr.length;
+					if (onChange) onChange();
+				});
+				items.append(lbl);
+			}
+			container.append(group);
+		}
+	}
+
+	/**
 	 * Render language choice UI for racial language proficiencies
 	 * @param {string[]|null} languages - Array of language names to choose from (may include source suffix like "lexalian|TGTT"), or null for any standard language
 	 * @param {number} count - Number of languages to choose
@@ -3020,31 +3181,17 @@ class CharacterSheetBuilder {
 			this._selectedRacialLanguages[profIdx] = [];
 		}
 
-		availableLanguages.forEach(lang => {
-			const isSelected = this._selectedRacialLanguages[profIdx].includes(lang);
-			const lbl = e_({outer: `
-				<label class="charsheet__builder-lang-checkbox mr-3 mb-1">
-					<input type="checkbox" value="${lang}" ${isSelected ? "checked" : ""}>
-					${lang}
-				</label>
-			`});
-
-			lbl.querySelector("input").addEventListener("change", (e) => {
-				if (e.target.checked) {
-					if (this._selectedRacialLanguages[profIdx].length < count) {
-						this._selectedRacialLanguages[profIdx].push(lang);
-					} else {
-						e.target.checked = false;
-						JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} language${count > 1 ? "s" : ""}.`});
-					}
-				} else {
-					this._selectedRacialLanguages[profIdx] = this._selectedRacialLanguages[profIdx].filter(l => l !== lang);
-				}
-				section.querySelector(".racial-lang-count").textContent = this._selectedRacialLanguages[profIdx].length;
-			});
-
-			checkboxes.append(lbl);
-		});
+		const countEl = section.querySelector(".racial-lang-count");
+		const grouped = this._groupLanguagesByType(availableLanguages);
+		this._renderLanguageCheckboxGroup(
+			grouped,
+			this._selectedRacialLanguages[profIdx],
+			count,
+			countEl,
+			checkboxes,
+			null,
+			{excludeGroups: ["secret"]},
+		);
 
 		return section;
 	}
@@ -3162,31 +3309,17 @@ class CharacterSheetBuilder {
 
 		const checkboxes = section.querySelector(".charsheet__builder-lang-checkboxes");
 
-		availableLanguages.forEach(lang => {
-			const isSelected = this._selectedSubraceLanguages.includes(lang);
-			const lbl = e_({outer: `
-				<label class="charsheet__builder-lang-checkbox mr-3 mb-1">
-					<input type="checkbox" value="${lang}" ${isSelected ? "checked" : ""}>
-					${lang}
-				</label>
-			`});
-
-			lbl.querySelector("input").addEventListener("change", (e) => {
-				if (e.target.checked) {
-					if (this._selectedSubraceLanguages.length < count) {
-						this._selectedSubraceLanguages.push(lang);
-					} else {
-						e.target.checked = false;
-						JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} language${count > 1 ? "s" : ""}.`});
-					}
-				} else {
-					this._selectedSubraceLanguages = this._selectedSubraceLanguages.filter(l => l !== lang);
-				}
-				section.querySelector(".subrace-lang-count").textContent = this._selectedSubraceLanguages.length;
-			});
-
-			checkboxes.append(lbl);
-		});
+		const countEl = section.querySelector(".subrace-lang-count");
+		const grouped = this._groupLanguagesByType(availableLanguages);
+		this._renderLanguageCheckboxGroup(
+			grouped,
+			this._selectedSubraceLanguages,
+			count,
+			countEl,
+			checkboxes,
+			null,
+			{excludeGroups: ["secret"]},
+		);
 
 		return section;
 	}
@@ -3417,6 +3550,136 @@ class CharacterSheetBuilder {
 		});
 	}
 
+	/**
+	 * Return the list of choosable optional features for a race's optionalfeatureProgression.
+	 * Excludes auto-granted features and filters by prerequisites (otherSummary pattern).
+	 * @param {Object} race
+	 * @param {string[]} featureTypes - e.g. ["DW:C", "DW:S"]
+	 * @param {Object} alreadyChosen - map of featureKey → [featObj] for previously made choices
+	 * @returns {Object[]} Sorted/filtered list of available optional feature objects
+	 */
+	_getRaceOptFeatAvailableOptions (race, featureTypes, alreadyChosen) {
+		const allOptFeatures = this._page.getOptionalFeatures?.() || [];
+		const grantedNames = new Set((race.featureGrants || []).map(g => g.name));
+		const chosenNames = new Set(Object.values(alreadyChosen).flat().map(f => f.name));
+		const ownedNames = new Set([...grantedNames, ...chosenNames]);
+
+		const matchesType = (optFeatTypes) => optFeatTypes?.some(ft => featureTypes.some(pt => ft === pt || ft.startsWith(pt)));
+
+		return allOptFeatures.filter(opt => {
+			if (!matchesType(opt.featureType)) return false;
+			if (grantedNames.has(opt.name)) return false;
+			if (opt.prerequisite) {
+				for (const prereq of opt.prerequisite) {
+					if (prereq.level) {
+						const reqLevel = prereq.level.level || prereq.level;
+						if (reqLevel > 1) return false;
+					}
+					if (prereq.otherSummary?.entrySummary) {
+						if (!ownedNames.has(prereq.otherSummary.entrySummary)) return false;
+					}
+				}
+			}
+			return true;
+		}).sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	/**
+	 * Render optional feature choice UI for races that have optionalfeatureProgression.
+	 * E.g., the Nyuidj race lets the player pick 1 Dreamwalker Ability (beyond the auto-granted Dreamwalk).
+	 * Prerequisites using otherSummary are evaluated against featureGrants + already-chosen race features.
+	 * @param {Object} race
+	 * @returns {HTMLElement|null}
+	 */
+	_renderRaceOptionalFeatureChoices (race) {
+		const progression = race.optionalfeatureProgression;
+		if (!progression?.length) return null;
+
+		const container = e_({outer: `<div class="charsheet__builder-race-opt-feats mt-3"></div>`});
+
+		progression.forEach(optFeatProg => {
+			// Determine how many choices at level 1
+			let count = 0;
+			if (Array.isArray(optFeatProg.progression)) {
+				count = optFeatProg.progression[0] || 0;
+			} else if (typeof optFeatProg.progression === "object") {
+				count = optFeatProg.progression["1"] || optFeatProg.progression["*"] || 0;
+			}
+			if (count === 0) return;
+
+			const featureTypes = optFeatProg.featureType || [];
+			const name = optFeatProg.name || featureTypes.join(", ");
+			const featureKey = `race_${featureTypes.join("_")}`;
+
+			// Initialize storage
+			if (!this._selectedRaceOptionalFeatures[featureKey]) {
+				this._selectedRaceOptionalFeatures[featureKey] = [];
+			}
+
+			// Get available options using the extracted helper (also used for testing)
+			const availableOptions = this._getRaceOptFeatAvailableOptions(race, featureTypes, this._selectedRaceOptionalFeatures);
+
+			const section = e_({outer: `
+				<div class="charsheet__builder-opt-feat-section mb-3">
+					<p><strong>${name}:</strong> Choose ${count}</p>
+					<div class="charsheet__builder-opt-feat-list" style="max-height: 200px; overflow-y: auto;"></div>
+					<div class="ve-small ve-muted mt-1">Selected: <span class="opt-feat-count">${this._selectedRaceOptionalFeatures[featureKey].length}</span>/${count}</div>
+				</div>
+			`});
+
+			const list = section.querySelector(".charsheet__builder-opt-feat-list");
+
+			availableOptions.sort((a, b) => a.name.localeCompare(b.name)).forEach(opt => {
+				const isSelected = this._selectedRaceOptionalFeatures[featureKey].some(
+					s => s.name === opt.name && s.source === opt.source,
+				);
+				const item = e_({outer: `
+					<label class="charsheet__builder-opt-feat-item d-block mb-1" style="cursor: pointer;">
+						<input type="checkbox" class="mr-2" ${isSelected ? "checked" : ""}>
+						<span class="opt-feat-name"></span>
+						<span class="ve-muted ve-small ml-1">(${Parser.sourceJsonToAbv(opt.source)})</span>
+					</label>
+				`});
+
+				const optName = item.querySelector(".opt-feat-name");
+				if (optName) {
+					try {
+						const resolvedSource = this._page.resolveOptionalFeatureSource?.(opt.name, [opt.source]) || opt.source;
+						optName.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, opt.name, resolvedSource);
+					} catch (e) {
+						optName.textContent = opt.name;
+					}
+				}
+
+				const cbInput = item.querySelector("input");
+				if (cbInput) {
+					cbInput.addEventListener("change", (ev) => {
+						if (ev.target.checked) {
+							if (this._selectedRaceOptionalFeatures[featureKey].length < count) {
+								this._selectedRaceOptionalFeatures[featureKey].push(opt);
+							} else {
+								ev.target.checked = false;
+								JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} ${name}.`});
+							}
+						} else {
+							this._selectedRaceOptionalFeatures[featureKey] = this._selectedRaceOptionalFeatures[featureKey].filter(
+								s => !(s.name === opt.name && s.source === opt.source),
+							);
+						}
+						const countEl = section.querySelector(".opt-feat-count");
+						if (countEl) countEl.textContent = this._selectedRaceOptionalFeatures[featureKey].length;
+					});
+				}
+
+				if (list) list.append(item);
+			});
+
+			container.append(section);
+		});
+
+		return container.children.length > 0 ? container : null;
+	}
+
 	_renderRacePreview (preview, race) {
 		preview.innerHTML = "";
 
@@ -3497,6 +3760,12 @@ class CharacterSheetBuilder {
 		const spellChoices = this._renderRacialSpellChoices(race);
 		if (spellChoices) {
 			content.append(spellChoices);
+		}
+
+		// Race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
+		const optFeatureChoices = this._renderRaceOptionalFeatureChoices(race);
+		if (optFeatureChoices) {
+			content.append(optFeatureChoices);
 		}
 
 		// Subraces
@@ -7368,10 +7637,27 @@ class CharacterSheetBuilder {
 					</select>
 				`});
 
+				// Build source lookup for display (priority sources preferred)
+				const bgPrioritySources = this._state.getPrioritySources() || [];
+				const bgSourceLookup = new Map();
+				for (const lang of (this._page._languagesData || [])) {
+					const existing = bgSourceLookup.get(lang.name);
+					if (!existing) {
+						bgSourceLookup.set(lang.name, lang.source);
+					} else if (bgPrioritySources.includes(lang.source) && !bgPrioritySources.includes(existing)) {
+						bgSourceLookup.set(lang.name, lang.source);
+					}
+				}
+
 				// Add language options grouped by type - homebrew first if available
+				// Secret languages are never offered as racial or background choices
 				const addLangOptgroup = (label, langs) => {
 					const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
-					langs.forEach(lang => grp.append(e_({outer: `<option value="${lang}">${lang}</option>`})));
+					langs.forEach(lang => {
+						const src = bgSourceLookup.get(lang);
+						const display = src ? `${lang} (${src})` : lang;
+						grp.append(e_({outer: `<option value="${lang}">${display}</option>`}));
+					});
 					selectEl.append(grp);
 				};
 
@@ -7383,7 +7669,6 @@ class CharacterSheetBuilder {
 
 				if (allowAllLanguages) {
 					addLangOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
-					addLangOptgroup("──── Secret Languages ────", langOptions.secret);
 				}
 
 				const existingChoice = this._selectedLanguages.find(l => l.selectIdx === i);

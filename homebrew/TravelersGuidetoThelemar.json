@@ -35276,6 +35276,16 @@
       ],
       "resist": [
         "psychic"
+      ],
+      "featureGrants": [
+        {"name": "Dreamwalk", "source": "TGTT"}
+      ],
+      "optionalfeatureProgression": [
+        {
+          "name": "Dreamwalker Ability",
+          "featureType": ["DW:C", "DW:S"],
+          "progression": {"1": 1}
+        }
       ]
     },
     {

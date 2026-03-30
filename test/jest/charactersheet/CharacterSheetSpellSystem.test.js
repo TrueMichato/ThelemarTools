@@ -60,6 +60,21 @@ describe("Spell System Improvements", () => {
 			expect(innate[0].sourceClass).toBeNull();
 		});
 
+		test("addInnateSpell at-will should not have uses property", () => {
+			state.addInnateSpell({name: "Detect Magic", source: "PHB", level: 1, atWill: true, sourceFeature: "Firbolg Magic"});
+			const innate = state._data.spellcasting.innateSpells[0];
+			expect(innate.atWill).toBe(true);
+			expect(innate.uses).toBeUndefined();
+		});
+
+		test("addInnateSpell with uses should have correct uses tracking", () => {
+			state.addInnateSpell({name: "Disguise Self", source: "PHB", level: 1, atWill: false, uses: 2, recharge: "long", sourceFeature: "Firbolg Magic"});
+			const innate = state._data.spellcasting.innateSpells[0];
+			expect(innate.atWill).toBe(false);
+			expect(innate.uses).toEqual({current: 2, max: 2});
+			expect(innate.recharge).toBe("long");
+		});
+
 		test("addSpell should preserve sourceClass when merging existing spell", () => {
 			state.addSpell({name: "Cure Wounds", source: "PHB", level: 1, sourceClass: "Cleric"});
 			// Add same spell again from a feature — sourceClass should be preserved

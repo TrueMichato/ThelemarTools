@@ -679,6 +679,36 @@ describe("CharacterSheetState", () => {
 			state.setShield(true);
 			expect(state.getAc()).toBe(18); // 16 + 2 shield
 		});
+
+		it("should use shield base AC from item data instead of hardcoded +2", () => {
+			// Buckler-style shield with AC 1
+			state.setShield({equipped: true, ac: 1, bonus: 0, name: "Buckler"});
+			expect(state.getAc()).toBe(13); // 10 + 2 DEX + 1 shield
+		});
+
+		it("should support tower shield with higher base AC", () => {
+			// Tower Shield with AC 3
+			state.setShield({equipped: true, ac: 3, bonus: 0, name: "Tower Shield"});
+			expect(state.getAc()).toBe(15); // 10 + 2 DEX + 3 shield
+		});
+
+		it("should combine non-standard shield AC with magic bonus", () => {
+			// +1 Buckler: base 1 + magic 1 = 2 total shield contribution
+			state.setShield({equipped: true, ac: 1, bonus: 1, name: "+1 Buckler"});
+			expect(state.getAc()).toBe(14); // 10 + 2 DEX + 1 base + 1 magic
+		});
+
+		it("should default shield base AC to 2 when not specified", () => {
+			// Backward compat: {equipped, bonus} without ac field
+			state.setShield({equipped: true, bonus: 0});
+			expect(state.getAc()).toBe(14); // 10 + 2 DEX + 2 default shield
+		});
+
+		it("should stack non-standard shield with armor", () => {
+			state.setArmor({name: "Chain Mail", ac: 16, type: "heavy"});
+			state.setShield({equipped: true, ac: 1, bonus: 0, name: "Buckler"});
+			expect(state.getAc()).toBe(17); // 16 + 1 buckler
+		});
 	});
 
 	// ==========================================================================

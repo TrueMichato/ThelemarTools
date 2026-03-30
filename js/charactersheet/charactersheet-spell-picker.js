@@ -215,6 +215,7 @@ class CharacterSheetSpellPicker {
 			preSelectedSpells = [],
 			preSelectedCantrips = [],
 			additionalClassNames = [],
+			subclass,
 		} = opts;
 
 		const totalCount = spellCount + cantripCount;
@@ -278,7 +279,7 @@ class CharacterSheetSpellPicker {
 			} else {
 				if (spell.level < 1 || spell.level > maxSpellLevel) return false;
 			}
-			if (CharacterSheetClassUtils.spellIsForClass(spell, className)) return true;
+			if (CharacterSheetClassUtils.spellIsForClass(spell, className, {subclass})) return true;
 			if (additionalClassNames.some(cls => CharacterSheetClassUtils.spellIsForClass(spell, cls))) return true;
 			return false;
 		}).sort((a, b) => {
@@ -319,6 +320,31 @@ class CharacterSheetSpellPicker {
 		`});
 		filterRow.append(schoolFilter);
 
+		const rarities = CharacterSheetSpellPicker._extractSubschoolTagValues(classSpells, "rarity");
+		const legalities = CharacterSheetSpellPicker._extractSubschoolTagValues(classSpells, "legality");
+
+		let rarityFilter = null;
+		if (rarities.length) {
+			rarityFilter = e_({outer: `
+				<select class="form-control form-control-sm" style="width: auto; min-width: 110px;">
+					<option value="">All Rarities</option>
+					${rarities.map(r => `<option value="${r}">${r.toTitleCase()}</option>`).join("")}
+				</select>
+			`});
+			filterRow.append(rarityFilter);
+		}
+
+		let legalityFilter = null;
+		if (legalities.length) {
+			legalityFilter = e_({outer: `
+				<select class="form-control form-control-sm" style="width: auto; min-width: 110px;">
+					<option value="">All Legalities</option>
+					${legalities.map(l => `<option value="${l}">${l.toTitleCase()}</option>`).join("")}
+				</select>
+			`});
+			filterRow.append(legalityFilter);
+		}
+
 		const ritualFilter = e_({outer: `<label class="ve-flex-v-center ve-small" style="cursor: pointer; white-space: nowrap;"><input type="checkbox" class="mr-1"> 🔮 Ritual</label>`});
 		const concFilter = e_({outer: `<label class="ve-flex-v-center ve-small" style="cursor: pointer; white-space: nowrap;"><input type="checkbox" class="mr-1"> ⏳ Conc.</label>`});
 		filterRow.append(ritualFilter, concFilter);
@@ -353,6 +379,8 @@ class CharacterSheetSpellPicker {
 			const schoolVal = schoolFilter.value;
 			const onlyRitual = ritualFilter.querySelector("input").checked;
 			const onlyConc = concFilter.querySelector("input").checked;
+			const rarityVal = rarityFilter?.value || "";
+			const legalityVal = legalityFilter?.value || "";
 
 			const filtered = classSpells.filter(spell => {
 				if (searchText && !spell.name.toLowerCase().includes(searchText)) return false;
@@ -360,6 +388,8 @@ class CharacterSheetSpellPicker {
 				if (schoolVal && spell.school !== schoolVal) return false;
 				if (onlyRitual && !CharacterSheetClassUtils.spellIsRitual(spell)) return false;
 				if (onlyConc && !CharacterSheetClassUtils.spellIsConcentration(spell)) return false;
+				if (rarityVal && !(spell.subschools || []).includes(`rarity:${rarityVal}`)) return false;
+				if (legalityVal && !(spell.subschools || []).includes(`legality:${legalityVal}`)) return false;
 				return true;
 			});
 
@@ -403,6 +433,8 @@ class CharacterSheetSpellPicker {
 		search.addEventListener("input", renderSpellList);
 		levelFilter.addEventListener("change", renderSpellList);
 		schoolFilter.addEventListener("change", renderSpellList);
+		if (rarityFilter) rarityFilter.addEventListener("change", renderSpellList);
+		if (legalityFilter) legalityFilter.addEventListener("change", renderSpellList);
 		ritualFilter.querySelector("input").addEventListener("change", renderSpellList);
 		concFilter.querySelector("input").addEventListener("change", renderSpellList);
 
@@ -452,6 +484,8 @@ class CharacterSheetSpellPicker {
 			onSelect,
 			getHoverLink,
 			preSelectedSpells = [],
+			className,
+			subclass,
 		} = opts;
 
 		const section = e_({outer: `
@@ -498,14 +532,8 @@ class CharacterSheetSpellPicker {
 		progressArea.append(summaryPanel);
 
 		const wizardSpells = allSpells.filter(spell => {
-			let isWizardSpell = false;
-			try {
-				const classList = Renderer.spell.getCombinedClasses(spell, "fromClassList");
-				isWizardSpell = classList?.some(c => c.name === "Wizard");
-			} catch (e) {
-				isWizardSpell = spell.classes?.fromClassList?.some(c => c.name === "Wizard");
-			}
-			return isWizardSpell && spell.level >= 1 && spell.level <= maxSpellLevel;
+			const isClassSpell = CharacterSheetClassUtils.spellIsForClass(spell, className || "Wizard", {subclass});
+			return isClassSpell && spell.level >= 1 && spell.level <= maxSpellLevel;
 		}).sort((a, b) => {
 			if (a.level !== b.level) return a.level - b.level;
 			return a.name.localeCompare(b.name);
@@ -541,6 +569,31 @@ class CharacterSheetSpellPicker {
 		`});
 		filterRow.append(schoolFilter);
 
+		const rarities = CharacterSheetSpellPicker._extractSubschoolTagValues(wizardSpells, "rarity");
+		const legalities = CharacterSheetSpellPicker._extractSubschoolTagValues(wizardSpells, "legality");
+
+		let rarityFilter = null;
+		if (rarities.length) {
+			rarityFilter = e_({outer: `
+				<select class="form-control form-control-sm" style="width: auto; min-width: 110px;">
+					<option value="">All Rarities</option>
+					${rarities.map(r => `<option value="${r}">${r.toTitleCase()}</option>`).join("")}
+				</select>
+			`});
+			filterRow.append(rarityFilter);
+		}
+
+		let legalityFilter = null;
+		if (legalities.length) {
+			legalityFilter = e_({outer: `
+				<select class="form-control form-control-sm" style="width: auto; min-width: 110px;">
+					<option value="">All Legalities</option>
+					${legalities.map(l => `<option value="${l}">${l.toTitleCase()}</option>`).join("")}
+				</select>
+			`});
+			filterRow.append(legalityFilter);
+		}
+
 		const ritualFilter = e_({outer: `<label class="ve-flex-v-center ve-small" style="cursor: pointer; white-space: nowrap;"><input type="checkbox" class="mr-1"> 🔮 Ritual</label>`});
 		const concFilter = e_({outer: `<label class="ve-flex-v-center ve-small" style="cursor: pointer; white-space: nowrap;"><input type="checkbox" class="mr-1"> ⏳ Conc.</label>`});
 		filterRow.append(ritualFilter, concFilter);
@@ -575,6 +628,8 @@ class CharacterSheetSpellPicker {
 			const schoolVal = schoolFilter.value;
 			const onlyRitual = ritualFilter.querySelector("input").checked;
 			const onlyConc = concFilter.querySelector("input").checked;
+			const rarityVal = rarityFilter?.value || "";
+			const legalityVal = legalityFilter?.value || "";
 
 			const filtered = wizardSpells.filter(spell => {
 				if (searchText && !spell.name.toLowerCase().includes(searchText)) return false;
@@ -582,6 +637,8 @@ class CharacterSheetSpellPicker {
 				if (schoolVal && spell.school !== schoolVal) return false;
 				if (onlyRitual && !CharacterSheetClassUtils.spellIsRitual(spell)) return false;
 				if (onlyConc && !CharacterSheetClassUtils.spellIsConcentration(spell)) return false;
+				if (rarityVal && !(spell.subschools || []).includes(`rarity:${rarityVal}`)) return false;
+				if (legalityVal && !(spell.subschools || []).includes(`legality:${legalityVal}`)) return false;
 				return true;
 			});
 
@@ -621,6 +678,8 @@ class CharacterSheetSpellPicker {
 		search.addEventListener("input", renderSpellList);
 		levelFilter.addEventListener("change", renderSpellList);
 		schoolFilter.addEventListener("change", renderSpellList);
+		if (rarityFilter) rarityFilter.addEventListener("change", renderSpellList);
+		if (legalityFilter) legalityFilter.addEventListener("change", renderSpellList);
 		ritualFilter.querySelector("input").addEventListener("change", renderSpellList);
 		concFilter.querySelector("input").addEventListener("change", renderSpellList);
 
@@ -721,6 +780,27 @@ class CharacterSheetSpellPicker {
 	// ==========================================
 	// Private Render Helpers
 	// ==========================================
+
+	/**
+	 * Extract unique tag values from spell subschools matching a given prefix.
+	 * E.g. prefix "rarity" extracts ["common", "uncommon"] from subschools ["rarity:common", "rarity:uncommon"].
+	 * @param {Array} spells - Array of spell objects
+	 * @param {string} prefix - Tag prefix to match (e.g. "rarity", "legality")
+	 * @returns {string[]} Sorted unique tag values
+	 * @private
+	 */
+	static _extractSubschoolTagValues (spells, prefix) {
+		const values = new Set();
+		for (const spell of spells) {
+			if (!spell.subschools?.length) continue;
+			for (const sub of spell.subschools) {
+				if (sub.startsWith(`${prefix}:`)) {
+					values.add(sub.slice(prefix.length + 1));
+				}
+			}
+		}
+		return [...values].sort();
+	}
 
 	/**
 	 * Render a grouped-by-level spell list into a container.

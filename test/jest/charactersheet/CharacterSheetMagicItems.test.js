@@ -91,9 +91,9 @@ describe("Magic Item Bonuses", () => {
 
 		it("should stack armor + shield + ring correctly without double-counting", () => {
 			state.setArmor({ac: 17, type: "heavy", name: "+1 Chain Mail", magicBonus: 1});
-			state.setShield({equipped: true, bonus: 1});
+			state.setShield({equipped: true, ac: 2, bonus: 1});
 			state.setItemAcBonus(1);
-			expect(state.getAc()).toBe(19); // 17 + 1(shield) + 1(ring)
+			expect(state.getAc()).toBe(21); // 17 + 2(shield base) + 1(shield magic) + 1(ring)
 		});
 
 		it("should NOT double-count when itemBonuses has no ac field", () => {

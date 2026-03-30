@@ -3149,9 +3149,10 @@ class CharacterSheetInventory {
 			this._state.setArmor(null);
 		}
 
-		// Update shield state - also track magic shield bonus
-		const shieldBonus = equippedShield?.bonusAc || 0;
-		this._state.setShield(equippedShield ? {equipped: true, bonus: shieldBonus} : false);
+		// Update shield state - track base AC and magic bonus separately
+		const shieldBaseAc = equippedShield?.ac ?? 2;
+		const shieldMagicBonus = equippedShield?.bonusAc || 0;
+		this._state.setShield(equippedShield ? {equipped: true, ac: shieldBaseAc, bonus: shieldMagicBonus, name: equippedShield.name || "Shield"} : false);
 
 		// Calculate AC bonuses from other equipped/attuned items (like Cloak of Protection, Ring of Protection)
 		const otherAcBonus = this._calculateItemBonuses("bonusAc", items, [equippedArmor, equippedShield]);
@@ -4294,9 +4295,10 @@ class CharacterSheetInventory {
 			this._state.setArmor(null);
 		}
 
-		// Include magic shield bonus
-		const shieldBonus = equippedShield?.bonusAc || 0;
-		this._state.setShield(equippedShield ? {equipped: true, bonus: shieldBonus} : false);
+		// Update shield state - track base AC and magic bonus separately
+		const shieldBaseAc = equippedShield?.ac ?? 2;
+		const shieldMagicBonus = equippedShield?.bonusAc || 0;
+		this._state.setShield(equippedShield ? {equipped: true, ac: shieldBaseAc, bonus: shieldMagicBonus, name: equippedShield.name || "Shield"} : false);
 
 		// Calculate AC bonuses from other equipped/attuned items
 		const otherAcBonus = this._calculateItemBonuses("bonusAc", items, [equippedArmor, equippedShield]);

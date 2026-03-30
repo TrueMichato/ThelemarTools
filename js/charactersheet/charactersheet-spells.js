@@ -258,24 +258,17 @@ class CharacterSheetSpells {
 		// Determine if this is a non-standard source (homebrew/third-party)
 		const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE"].includes(classSource);
 
-		const classSpells = filteredSpells.filter(spell => {
-			// Use Renderer.spell.getCombinedClasses to get properly merged class data
-			const fromClassList = Renderer.spell.getCombinedClasses(spell, "fromClassList");
-			if (!fromClassList?.length) return false;
+		// Get character's subclass for subclass spell list checking
+		const characterSubclass = characterClass.subclass;
 
-			// Check if spell is on this class's list (using spellListClassName for Gambler→Warlock mapping)
-			const matchesExact = fromClassList.some(c => c.name.toLowerCase() === spellListClassName.toLowerCase());
-			if (matchesExact) return true;
+		const classSpells = filteredSpells.filter(spell => {
+			// Check base class spell list + subclass spell list via shared utility
+			if (CharacterSheetClassUtils.spellIsForClass(spell, spellListClassName, {subclass: characterSubclass})) return true;
 
 			// For homebrew/third-party classes: also include spells from the equivalent core class
-			// if the setting is enabled
+			// (both base class and subclass spell lists) if the setting is enabled
 			if (includeCoreSpells && isNonStandardSource) {
-				// Check if any PHB/XPHB class with the same name has this spell
-				const matchesCore = fromClassList.some(c =>
-					c.name.toLowerCase() === className.toLowerCase()
-					&& ["PHB", "XPHB"].includes(c.source),
-				);
-				if (matchesCore) return true;
+				if (CharacterSheetClassUtils.spellIsForClass(spell, className, {subclass: characterSubclass})) return true;
 			}
 
 			return false;
@@ -656,6 +649,8 @@ class CharacterSheetSpells {
 			levelDropdownMenu?.classList.remove("open");
 			schoolDropdownMenu?.classList.remove("open");
 			sourceDropdownMenu?.classList.remove("open");
+			rarityDropdownMenu?.classList.remove("open");
+			legalityDropdownMenu?.classList.remove("open");
 			subschoolDropdownMenu?.classList.remove("open");
 			subclassDropdownMenu?.classList.remove("open");
 		});
@@ -772,6 +767,8 @@ class CharacterSheetSpells {
 				levelDropdownMenu?.classList.remove("open");
 				schoolDropdownMenu?.classList.remove("open");
 				sourceDropdownMenu?.classList.remove("open");
+				rarityDropdownMenu?.classList.remove("open");
+				legalityDropdownMenu?.classList.remove("open");
 				subschoolDropdownMenu?.classList.remove("open");
 			});
 
@@ -870,6 +867,9 @@ class CharacterSheetSpells {
 			classDropdownMenu.classList.remove("open");
 			schoolDropdownMenu.classList.remove("open");
 			sourceDropdownMenu.classList.remove("open");
+			rarityDropdownMenu?.classList.remove("open");
+			legalityDropdownMenu?.classList.remove("open");
+			subschoolDropdownMenu?.classList.remove("open");
 		});
 
 		const updateLevelText = () => {
@@ -942,6 +942,9 @@ class CharacterSheetSpells {
 			classDropdownMenu.classList.remove("open");
 			levelDropdownMenu.classList.remove("open");
 			sourceDropdownMenu.classList.remove("open");
+			rarityDropdownMenu?.classList.remove("open");
+			legalityDropdownMenu?.classList.remove("open");
+			subschoolDropdownMenu?.classList.remove("open");
 		});
 
 		const updateSchoolText = () => {
@@ -972,15 +975,176 @@ class CharacterSheetSpells {
 			updateSchoolText();
 		});
 
-		// Collect unique subschools from spells
+		// Collect unique subschools from spells, split into rarity/legality/other
 		const allSubschools = [...new Set(spells.flatMap(s => s.subschools || []))].sort();
+		const rarityValues = allSubschools.filter(s => s.startsWith("rarity:")).map(s => s.slice(7));
+		const legalityValues = allSubschools.filter(s => s.startsWith("legality:")).map(s => s.slice(9));
+		const otherSubschools = allSubschools.filter(s => !s.startsWith("rarity:") && !s.startsWith("legality:"));
 
-		// Multi-select subschool filter (only show if there are subschools)
+		// Rarity multi-select filter
+		let selectedRarities = new Set();
+		let rarityDropdown = null;
+		let rarityDropdownMenu = null;
+
+		if (rarityValues.length > 0) {
+			rarityDropdown = e_({outer: `
+				<div class="charsheet__source-multiselect charsheet__subschool-multiselect">
+					<button class="charsheet__source-multiselect-btn">
+						<span class="charsheet__source-multiselect-icon">💎</span>
+						<span class="charsheet__source-multiselect-text">All Rarities</span>
+						<span class="charsheet__source-multiselect-arrow">▼</span>
+					</button>
+					<div class="charsheet__source-multiselect-dropdown charsheet__subschool-dropdown">
+						<div class="charsheet__source-multiselect-actions">
+							<button class="charsheet__source-action-btn" data-action="all">Select All</button>
+							<button class="charsheet__source-action-btn" data-action="none">Clear All</button>
+						</div>
+						<div class="charsheet__source-multiselect-list">
+							${rarityValues.map(r => `
+								<label class="charsheet__source-multiselect-item">
+									<input type="checkbox" value="rarity:${r}" checked>
+									<span class="charsheet__source-multiselect-check">✓</span>
+									<span class="charsheet__source-multiselect-label">${r.toTitleCase()}</span>
+								</label>
+							`).join("")}
+						</div>
+					</div>
+				</div>
+			`});
+			filterRow.append(rarityDropdown);
+
+			rarityDropdownMenu = rarityDropdown.querySelector(".charsheet__source-multiselect-dropdown");
+			const rarityBtn = rarityDropdown.querySelector(".charsheet__source-multiselect-btn");
+			const rarityText = rarityDropdown.querySelector(".charsheet__source-multiselect-text");
+
+			rarityBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				positionDropdown(rarityDropdownMenu, rarityBtn);
+				rarityDropdownMenu.classList.toggle("open");
+				classDropdownMenu.classList.remove("open");
+				levelDropdownMenu.classList.remove("open");
+				schoolDropdownMenu.classList.remove("open");
+				legalityDropdownMenu?.classList.remove("open");
+				subschoolDropdownMenu?.classList.remove("open");
+				sourceDropdownMenu.classList.remove("open");
+			});
+
+			const updateRarityText = () => {
+				const checked = rarityDropdown.querySelectorAll("input:checked");
+				if (checked.length === 0) {
+					rarityText.textContent = "No Rarities";
+					selectedRarities = new Set(["__NONE__"]);
+				} else if (checked.length === rarityValues.length) {
+					rarityText.textContent = "All Rarities";
+					selectedRarities = new Set();
+				} else if (checked.length === 1) {
+					rarityText.textContent = checked[0]?.value.split(":")[1]?.toTitleCase();
+					selectedRarities = new Set(Array.from(checked).map(el => el.value));
+				} else {
+					rarityText.textContent = `${checked.length} Rarities`;
+					selectedRarities = new Set(Array.from(checked).map(el => el.value));
+				}
+				renderList();
+			};
+
+			rarityDropdown.querySelectorAll("input[type=checkbox]").forEach(el => el.addEventListener("change", updateRarityText));
+			rarityDropdown.querySelector("[data-action=all]").addEventListener("click", () => {
+				rarityDropdown.querySelectorAll("input").forEach(el => { el.checked = true; });
+				updateRarityText();
+			});
+			rarityDropdown.querySelector("[data-action=none]").addEventListener("click", () => {
+				rarityDropdown.querySelectorAll("input").forEach(el => { el.checked = false; });
+				updateRarityText();
+			});
+
+			rarityDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
+		}
+
+		// Legality multi-select filter
+		let selectedLegalities = new Set();
+		let legalityDropdown = null;
+		let legalityDropdownMenu = null;
+
+		if (legalityValues.length > 0) {
+			legalityDropdown = e_({outer: `
+				<div class="charsheet__source-multiselect charsheet__subschool-multiselect">
+					<button class="charsheet__source-multiselect-btn">
+						<span class="charsheet__source-multiselect-icon">⚖️</span>
+						<span class="charsheet__source-multiselect-text">All Legalities</span>
+						<span class="charsheet__source-multiselect-arrow">▼</span>
+					</button>
+					<div class="charsheet__source-multiselect-dropdown charsheet__subschool-dropdown">
+						<div class="charsheet__source-multiselect-actions">
+							<button class="charsheet__source-action-btn" data-action="all">Select All</button>
+							<button class="charsheet__source-action-btn" data-action="none">Clear All</button>
+						</div>
+						<div class="charsheet__source-multiselect-list">
+							${legalityValues.map(l => `
+								<label class="charsheet__source-multiselect-item">
+									<input type="checkbox" value="legality:${l}" checked>
+									<span class="charsheet__source-multiselect-check">✓</span>
+									<span class="charsheet__source-multiselect-label">${l.toTitleCase()}</span>
+								</label>
+							`).join("")}
+						</div>
+					</div>
+				</div>
+			`});
+			filterRow.append(legalityDropdown);
+
+			legalityDropdownMenu = legalityDropdown.querySelector(".charsheet__source-multiselect-dropdown");
+			const legalityBtn = legalityDropdown.querySelector(".charsheet__source-multiselect-btn");
+			const legalityText = legalityDropdown.querySelector(".charsheet__source-multiselect-text");
+
+			legalityBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				positionDropdown(legalityDropdownMenu, legalityBtn);
+				legalityDropdownMenu.classList.toggle("open");
+				classDropdownMenu.classList.remove("open");
+				levelDropdownMenu.classList.remove("open");
+				schoolDropdownMenu.classList.remove("open");
+				rarityDropdownMenu?.classList.remove("open");
+				subschoolDropdownMenu?.classList.remove("open");
+				sourceDropdownMenu.classList.remove("open");
+			});
+
+			const updateLegalityText = () => {
+				const checked = legalityDropdown.querySelectorAll("input:checked");
+				if (checked.length === 0) {
+					legalityText.textContent = "No Legalities";
+					selectedLegalities = new Set(["__NONE__"]);
+				} else if (checked.length === legalityValues.length) {
+					legalityText.textContent = "All Legalities";
+					selectedLegalities = new Set();
+				} else if (checked.length === 1) {
+					legalityText.textContent = checked[0]?.value.split(":")[1]?.toTitleCase();
+					selectedLegalities = new Set(Array.from(checked).map(el => el.value));
+				} else {
+					legalityText.textContent = `${checked.length} Legalities`;
+					selectedLegalities = new Set(Array.from(checked).map(el => el.value));
+				}
+				renderList();
+			};
+
+			legalityDropdown.querySelectorAll("input[type=checkbox]").forEach(el => el.addEventListener("change", updateLegalityText));
+			legalityDropdown.querySelector("[data-action=all]").addEventListener("click", () => {
+				legalityDropdown.querySelectorAll("input").forEach(el => { el.checked = true; });
+				updateLegalityText();
+			});
+			legalityDropdown.querySelector("[data-action=none]").addEventListener("click", () => {
+				legalityDropdown.querySelectorAll("input").forEach(el => { el.checked = false; });
+				updateLegalityText();
+			});
+
+			legalityDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
+		}
+
+		// Multi-select subschool/tags filter (only for non-rarity/non-legality subschools)
 		let selectedSubschools = new Set(); // Empty = all (no filter)
 		let subschoolDropdown = null;
 		let subschoolDropdownMenu = null;
 
-		if (allSubschools.length > 0) {
+		if (otherSubschools.length > 0) {
 			// Parse subschool into display name
 			const formatSubschool = (sub) => {
 				// Subschools are in format "category:value" like "rarity:common" or "legality:illegal-I"
@@ -1004,7 +1168,7 @@ class CharacterSheetSpells {
 							<button class="charsheet__source-action-btn" data-action="none">Clear All</button>
 						</div>
 						<div class="charsheet__source-multiselect-list">
-							${allSubschools.map(sub => `
+							${otherSubschools.map(sub => `
 								<label class="charsheet__source-multiselect-item">
 									<input type="checkbox" value="${sub}" checked>
 									<span class="charsheet__source-multiselect-check">✓</span>
@@ -1029,6 +1193,8 @@ class CharacterSheetSpells {
 				classDropdownMenu.classList.remove("open");
 				levelDropdownMenu.classList.remove("open");
 				schoolDropdownMenu.classList.remove("open");
+				rarityDropdownMenu?.classList.remove("open");
+				legalityDropdownMenu?.classList.remove("open");
 				sourceDropdownMenu.classList.remove("open");
 			});
 
@@ -1037,7 +1203,7 @@ class CharacterSheetSpells {
 				if (checked.length === 0) {
 					subschoolText.textContent = "No Tags";
 					selectedSubschools = new Set(["__NONE__"]);
-				} else if (checked.length === allSubschools.length) {
+				} else if (checked.length === otherSubschools.length) {
 					subschoolText.textContent = "All Tags";
 					selectedSubschools = new Set();
 				} else if (checked.length === 1) {
@@ -1106,6 +1272,8 @@ class CharacterSheetSpells {
 			classDropdownMenu.classList.remove("open");
 			levelDropdownMenu.classList.remove("open");
 			schoolDropdownMenu.classList.remove("open");
+			rarityDropdownMenu?.classList.remove("open");
+			legalityDropdownMenu?.classList.remove("open");
 			subschoolDropdownMenu?.classList.remove("open");
 		});
 
@@ -1115,6 +1283,8 @@ class CharacterSheetSpells {
 			sourceDropdownMenu.classList.remove("open");
 			levelDropdownMenu.classList.remove("open");
 			schoolDropdownMenu.classList.remove("open");
+			rarityDropdownMenu?.classList.remove("open");
+			legalityDropdownMenu?.classList.remove("open");
 			subschoolDropdownMenu?.classList.remove("open");
 		});
 		sourceDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
@@ -1267,10 +1437,21 @@ class CharacterSheetSpells {
 				// Multi-select school filter
 				if (selectedSchools.has("__NONE__")) return false;
 				if (selectedSchools.size > 0 && !selectedSchools.has(spell.school)) return false;
-				// Multi-select subschool filter
+				// Rarity filter
+				if (selectedRarities.has("__NONE__")) return false;
+				if (selectedRarities.size > 0) {
+					const spellSubs = spell.subschools || [];
+					if (!spellSubs.some(sub => selectedRarities.has(sub))) return false;
+				}
+				// Legality filter
+				if (selectedLegalities.has("__NONE__")) return false;
+				if (selectedLegalities.size > 0) {
+					const spellSubs = spell.subschools || [];
+					if (!spellSubs.some(sub => selectedLegalities.has(sub))) return false;
+				}
+				// Multi-select subschool/tags filter (other tags)
 				if (selectedSubschools.has("__NONE__")) return false;
 				if (selectedSubschools.size > 0) {
-					// Spell must have at least one of the selected subschools
 					const spellSubschools = spell.subschools || [];
 					if (spellSubschools.length === 0 || !spellSubschools.some(sub => selectedSubschools.has(sub))) return false;
 				}
@@ -4363,20 +4544,26 @@ class CharacterSheetSpells {
 			</div>
 		`});
 
-		// Bind cast button
-		item.querySelector(".charsheet__innate-cast").addEventListener("click", () => {
-			this._castInnateSpell(spellId);
-		});
+		// Bind cast button (only present for non-at-will spells)
+		const btnCast = item.querySelector(".charsheet__innate-cast");
+		if (btnCast) {
+			btnCast.addEventListener("click", () => {
+				this._castInnateSpell(spellId);
+			});
+		}
 
-		// Bind pip clicks to restore uses
-		item.querySelector(".charsheet__innate-pip").addEventListener("click", (e) => {
-			const pip = e.currentTarget;
-			if (pip.classList.contains("used")) {
-				// Restore one use
-				spell.uses.current = Math.min(spell.uses.current + 1, spell.uses.max);
-				this._renderSpellList();
-			}
-		});
+		// Bind pip clicks to restore uses (only present for spells with usage tracking)
+		const elPip = item.querySelector(".charsheet__innate-pip");
+		if (elPip) {
+			elPip.addEventListener("click", (e) => {
+				const pip = e.currentTarget;
+				if (pip.classList.contains("used")) {
+					// Restore one use
+					spell.uses.current = Math.min(spell.uses.current + 1, spell.uses.max);
+					this._renderSpellList();
+				}
+			});
+		}
 
 		return item;
 	}
