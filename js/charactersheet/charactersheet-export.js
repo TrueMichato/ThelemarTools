@@ -42,12 +42,12 @@ class CharacterSheetExport {
 		let isPdfFormat = false;
 
 		const btnJson = e_({tag: "button",
-			clazz: "ve-btn ve-btn-default active",
+			clazz: "ve-btn ve-btn-default ve-active",
 			txt: "JSON File",
 			click: () => {
 				isPdfFormat = false;
-				btnJson.classList.add("active");
-				btnPdf.classList.remove("active");
+				btnJson.classList.add("ve-active");
+				btnPdf.classList.remove("ve-active");
 				jsonSection.style.display = "";
 				pdfSection.style.display = "none";
 			}});
@@ -57,8 +57,8 @@ class CharacterSheetExport {
 			txt: "Print / PDF",
 			click: () => {
 				isPdfFormat = true;
-				btnPdf.classList.add("active");
-				btnJson.classList.remove("active");
+				btnPdf.classList.add("ve-active");
+				btnJson.classList.remove("ve-active");
 				pdfSection.style.display = "";
 				jsonSection.style.display = "none";
 			}});

@@ -1355,27 +1355,27 @@ class CharacterSheetSpells {
 		// Set up click handlers immediately after creation
 		ritualBtn.addEventListener("click", function () {
 			filterRitual = !filterRitual;
-			this.classList.toggle("active");
+			this.classList.toggle("ve-active");
 			renderList();
 		});
 		concBtn.addEventListener("click", function () {
 			filterConcentration = !filterConcentration;
-			this.classList.toggle("active");
+			this.classList.toggle("ve-active");
 			renderList();
 		});
 		verbalBtn.addEventListener("click", function () {
 			filterVerbal = !filterVerbal;
-			this.classList.toggle("active");
+			this.classList.toggle("ve-active");
 			renderList();
 		});
 		somaticBtn.addEventListener("click", function () {
 			filterSomatic = !filterSomatic;
-			this.classList.toggle("active");
+			this.classList.toggle("ve-active");
 			renderList();
 		});
 		materialBtn.addEventListener("click", function () {
 			filterMaterial = !filterMaterial;
-			this.classList.toggle("active");
+			this.classList.toggle("ve-active");
 			renderList();
 		});
 

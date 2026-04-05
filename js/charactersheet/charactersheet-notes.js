@@ -75,7 +75,7 @@ export class CharacterSheetNotes {
 	 */
 	_detectCurrentTab () {
 		// Try to get active tab from visible tab pane
-		const activePane = document.querySelector(".tab-pane.active") || document.querySelector(".tab-pane.in");
+		const activePane = document.querySelector(".tab-pane.ve-active") || document.querySelector(".tab-pane.in");
 		if (activePane) {
 			const tabId = activePane.id;
 			this._activeTab = this._tabMap[tabId] || null;
@@ -83,7 +83,7 @@ export class CharacterSheetNotes {
 		}
 
 		// Fallback: check active tab link
-		const activeTab = document.querySelector(".ve-nav-tabs li.active a[data-toggle='tab']");
+		const activeTab = document.querySelector(".ve-nav-tabs li.ve-active a[data-toggle='tab']");
 		if (activeTab) {
 			const href = activeTab.getAttribute("href");
 			if (href) {
@@ -136,7 +136,7 @@ export class CharacterSheetNotes {
 	 */
 	_getOrCreateStickyNoteContainer () {
 		// Find the currently active tab pane
-		let tabPane = document.querySelector(".tab-pane.active")
+		let tabPane = document.querySelector(".tab-pane.ve-active")
 			|| document.querySelector(".tab-pane.in")
 			|| document.querySelector(".tab-pane:not([style*='display: none'])")
 			|| document.getElementById("charsheet-tab-overview");

@@ -33,14 +33,14 @@ class CharacterSheetInventory {
 			// Inventory view toggle buttons
 			if (e.target.closest("#charsheet-btn-view-list")) {
 				document.querySelector(".charsheet__inventory-list")?.classList.remove("charsheet__inventory-list--compact");
-				document.getElementById("charsheet-btn-view-list")?.classList.add("active");
-				document.getElementById("charsheet-btn-view-compact")?.classList.remove("active");
+				document.getElementById("charsheet-btn-view-list")?.classList.add("ve-active");
+				document.getElementById("charsheet-btn-view-compact")?.classList.remove("ve-active");
 				return;
 			}
 			if (e.target.closest("#charsheet-btn-view-compact")) {
 				document.querySelector(".charsheet__inventory-list")?.classList.add("charsheet__inventory-list--compact");
-				document.getElementById("charsheet-btn-view-compact")?.classList.add("active");
-				document.getElementById("charsheet-btn-view-list")?.classList.remove("active");
+				document.getElementById("charsheet-btn-view-compact")?.classList.add("ve-active");
+				document.getElementById("charsheet-btn-view-list")?.classList.remove("ve-active");
 				return;
 			}
 
@@ -680,18 +680,18 @@ class CharacterSheetInventory {
 				filterMagic = !filterMagic;
 				if (filterMagic && filterMundane) {
 					filterMundane = false;
-					mundaneBtn.classList.remove("active");
+					mundaneBtn.classList.remove("ve-active");
 				}
 			}
 			if (prop === "mundane") {
 				filterMundane = !filterMundane;
 				if (filterMundane && filterMagic) {
 					filterMagic = false;
-					magicBtn.classList.remove("active");
+					magicBtn.classList.remove("ve-active");
 				}
 			}
 			if (prop === "consumable") filterConsumable = !filterConsumable;
-			btn.classList.toggle("active");
+			btn.classList.toggle("ve-active");
 			renderList();
 		};
 

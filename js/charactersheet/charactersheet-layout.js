@@ -575,7 +575,7 @@ class CharacterSheetLayout {
 			JqueryUtil.doToast({type: "success", content: "All layouts reset to default."});
 		} else {
 			// Reset current tab only
-			const activeTab = document.querySelector(".tab-pane.active, .tab-pane.in");
+			const activeTab = document.querySelector(".tab-pane.ve-active, .tab-pane.in");
 			if (!activeTab) return;
 
 			const tabId = activeTab.id.replace("charsheet-tab-", "");

@@ -517,12 +517,12 @@ class CharacterSheetPage {
 				const targetId = e.currentTarget.getAttribute("href");
 
 				// Update tab nav
-				for (const li of tabs.querySelectorAll("li")) li.classList.remove("active");
-				e.currentTarget.parentElement.classList.add("active");
+				for (const li of tabs.querySelectorAll("li")) li.classList.remove("ve-active");
+				e.currentTarget.parentElement.classList.add("ve-active");
 
 				// Update tab content
-				for (const pane of tabContent.querySelectorAll(".tab-pane")) pane.classList.remove("active", "in");
-				document.querySelector(targetId).classList.add("active", "in");
+				for (const pane of tabContent.querySelectorAll(".tab-pane")) pane.classList.remove("ve-active", "in");
+				document.querySelector(targetId).classList.add("ve-active", "in");
 			});
 		}
 	}
@@ -612,12 +612,12 @@ class CharacterSheetPage {
 		if (!link) return;
 
 		// Update tab nav
-		for (const li of tabs.querySelectorAll("li")) li.classList.remove("active");
-		link.parentElement.classList.add("active");
+		for (const li of tabs.querySelectorAll("li")) li.classList.remove("ve-active");
+		link.parentElement.classList.add("ve-active");
 
 		// Update tab content
-		for (const pane of tabContent.querySelectorAll(".tab-pane")) pane.classList.remove("active", "in");
-		document.querySelector(tabId).classList.add("active", "in");
+		for (const pane of tabContent.querySelectorAll(".tab-pane")) pane.classList.remove("ve-active", "in");
+		document.querySelector(tabId).classList.add("ve-active", "in");
 	}
 
 	/**

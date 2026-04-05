@@ -5986,7 +5986,7 @@
 	gap: 2px;
 }
 
-.charsheet__inventory-view-toggle .ve-btn.active {
+.charsheet__inventory-view-toggle .ve-btn.ve-active {
 	background: var(--cs-primary, #6366f1);
 	color: white;
 	border-color: var(--cs-primary, #6366f1);
@@ -10959,7 +10959,7 @@ body.has-quickbuild-overlay .toast__container {
 	color: #ff6b6b;
 }
 
-.charsheet__quick-states .ve-btn.active {
+.charsheet__quick-states .ve-btn.ve-active {
 	box-shadow: 0 0 8px currentColor;
 	opacity: 0.9;
 }
@@ -11006,9 +11006,9 @@ body.has-quickbuild-overlay .toast__container {
 	border-bottom-color: rgba(99, 102, 241, 0.3);
 }
 
-#charsheet-tabs > li.active > a,
-#charsheet-tabs > li.active > a:hover,
-#charsheet-tabs > li.active > a:focus {
+#charsheet-tabs > li.ve-active > a,
+#charsheet-tabs > li.ve-active > a:hover,
+#charsheet-tabs > li.ve-active > a:focus {
 	color: var(--cs-primary, #6366f1);
 	background: rgba(99, 102, 241, 0.1);
 	border-bottom: 3px solid var(--cs-primary, #6366f1);
