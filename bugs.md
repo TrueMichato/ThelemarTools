@@ -94,7 +94,7 @@ _selectFamiliar	@	charactersheet-spells.js:3300
 (anonymous)	@	charactersheet-spells.js:3227
 
 ### Feats:
-- [] The Telekenetic feat adds the mage hand spell as a level 1 spell instead of a cantrip, and it also adds it without most of its information, meaning there is a bug in the way feats in general add spells to the character sheet. This should be fixed to ensure that spells added by feats are added at the correct level and with all relevant information (e.g. spell level, casting time, range, components, etc.).
+- [X] The Telekenetic feat adds the mage hand spell as a level 1 spell instead of a cantrip, and it also adds it without most of its information, meaning there is a bug in the way feats in general add spells to the character sheet. This should be fixed to ensure that spells added by feats are added at the correct level and with all relevant information (e.g. spell level, casting time, range, components, etc.).
 
 
 

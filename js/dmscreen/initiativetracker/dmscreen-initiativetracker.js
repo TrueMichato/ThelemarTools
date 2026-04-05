@@ -20,6 +20,7 @@ import {
 import {InitiativeTrackerSort} from "./dmscreen-initiativetracker-sort.js";
 import {InitiativeTrackerUtil} from "../../initiativetracker/initiativetracker-utils.js";
 import {DmScreenUtil} from "../dmscreen-util.js";
+import {PANEL_TYP_PARTY_TRACKER} from "../dmscreen-consts.js";
 import {
 	InitiativeTrackerRowStateBuilderActive,
 	InitiativeTrackerRowStateBuilderDefaultParty,
@@ -222,6 +223,42 @@ export class InitiativeTracker extends BaseComponent {
 				this._state.rows = rowsNxt;
 			});
 
+		const btnImportParty = ee`<button class="ve-btn ve-btn-info ve-btn-xs dm-init-lockable" title="Import from Party Tracker"><span class="glyphicon glyphicon-transfer"></span></button>`
+			.onn("click", async () => {
+				if (this._state.isLocked) return;
+
+				const partyCharacters = DmScreenUtil.getPartyTrackerCharacters({board: this._board});
+				if (!partyCharacters?.length) {
+					JqueryUtil.doToast({content: "No characters found in Party Tracker.", type: "warning"});
+					return;
+				}
+
+				const existingNames = new Set(
+					this._state.rows
+						.map(r => (r.entity?.customName || r.entity?.name || "").toLowerCase())
+						.filter(Boolean),
+				);
+
+				const rowsNxt = [...this._state.rows];
+				let addedCount = 0;
+
+				for (const char of partyCharacters) {
+					if (!char.name || existingNames.has(char.name.toLowerCase())) continue;
+
+					const rowNxt = await this._rowStateBuilderActive.pGetNewRowState({
+						name: char.name,
+						isPlayerVisible: true,
+					});
+					if (!rowNxt) continue;
+					rowsNxt.push(rowNxt);
+					existingNames.add(char.name.toLowerCase());
+					addedCount++;
+				}
+
+				this._state.rows = rowsNxt;
+				JqueryUtil.doToast({content: `Imported ${addedCount} character${addedCount !== 1 ? "s" : ""} from Party Tracker.`});
+			});
+
 		const btnSetPrevActive = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="Previous Turn"><span class="glyphicon glyphicon-step-backward"></span></button>`
 			.onn("click", () => this._viewRowsActive.pDoShiftActiveRow({direction: InitiativeTrackerConst.DIR_BACKWARDS}));
 		const btnSetNextActive = ee`<button class="ve-btn ve-btn-default ve-btn-xs ve-mr-2" title="Next Turn"><span class="glyphicon glyphicon-step-forward"></span></button>`
@@ -332,6 +369,7 @@ export class InitiativeTracker extends BaseComponent {
 			<div class="ve-flex">
 				<div class="ve-btn-group ve-flex">
 					${btnAdd}
+					${btnImportParty}
 					${btnAddMonster}
 				</div>
 				<div class="ve-btn-group">${btnSetPrevActive}${btnSetNextActive}</div>

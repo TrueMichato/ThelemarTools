@@ -1,7 +1,14 @@
+import {PANEL_TYP_PARTY_TRACKER} from "./dmscreen-consts.js";
+
 export class DmScreenUtil {
 	static getPanelApps ({board, type}) {
 		return board.getPanelsByType(type)
 			.flatMap(it => it.tabDatas.filter(td => td.type === type).map(td => td.panelApp));
+	}
+
+	static getPartyTrackerCharacters ({board}) {
+		return this.getPanelApps({board, type: PANEL_TYP_PARTY_TRACKER})
+			.flatMap(app => app.getCharacters?.() || []);
 	}
 
 	/* -------------------------------------------- */

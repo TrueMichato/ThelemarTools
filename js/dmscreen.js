@@ -25,7 +25,7 @@ import {
 	PanelContentManager_InitiativeTrackerPlayerViewV0,
 	PanelContentManager_InitiativeTrackerPlayerViewV1,
 	PanelContentManager_MoneyConverter,
-	PanelContentManager_NoteBox, PanelContentManager_TimeTracker,
+	PanelContentManager_NoteBox, PanelContentManager_PartyTracker, PanelContentManager_TimeTracker,
 	PanelContentManager_UnitConverter,
 	PanelContentManagerFactory,
 } from "./dmscreen/dmscreen-panels.js";
@@ -2917,6 +2917,18 @@ class AddMenuSpecialTab extends AddMenuTab {
 			ee`<div class="ve-ui-modal__row">
 			<span>Initiative Tracker Player View (Manual/Legacy)</span>
 			${btnPlayerTrackerV0}
+			</div>`.appendTo(eleTab);
+
+			const btnPartyTracker = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`
+				.onn("click", async () => {
+					const pcm = new PanelContentManager_PartyTracker({board: this._board, panel: this.menu.pnl});
+					await pcm.pDoPopulate();
+					this.menu.doClose();
+				});
+
+			ee`<div class="ve-ui-modal__row">
+			<span>Party Tracker</span>
+			${btnPartyTracker}
 			</div>`.appendTo(eleTab);
 
 			ee`<hr class="ve-hr-2">`.appendTo(eleTab);

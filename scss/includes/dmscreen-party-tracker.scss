@@ -1,0 +1,586 @@
+@use "../vars/vars";
+@use "../vars/vars-night";
+
+@layer vetools {
+	/* ================================ */
+	/*  Party Tracker — root & toolbar  */
+	/* ================================ */
+
+	.dm-party__root {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.dm-party__toolbar {
+		display: flex;
+		align-items: center;
+		padding: 6px 8px;
+		padding-right: 44px; /* clear panel-control-bar overlay */
+		border-bottom: 1px solid vars.$rgb-border-grey;
+		gap: 6px;
+		flex: none;
+	}
+
+	.dm-party__summary {
+		font-size: 0.85rem;
+		color: vars.$rgb-off-black;
+		opacity: 0.75;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.dm-party__body {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		overflow-y: auto;
+		padding: 4px 6px;
+		gap: 2px;
+	}
+
+	/* ================================ */
+	/*  Character — collapsed row       */
+	/* ================================ */
+
+	.dm-party__char-row {
+		display: flex;
+		align-items: center;
+		padding: 5px 8px;
+		border-radius: 4px;
+		gap: 8px;
+		min-height: 32px;
+		transition: background 0.1s;
+
+		&:hover {
+			background: rgba(0, 0, 0, 0.03);
+		}
+	}
+
+	.dm-party__char-name {
+		font-weight: 600;
+		white-space: nowrap;
+		min-width: 60px;
+		max-width: 120px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.dm-party__char-meta {
+		font-size: 0.84rem;
+		color: vars.$rgb-off-black;
+		opacity: 0.75;
+		white-space: nowrap;
+	}
+
+	.dm-party__char-stat {
+		display: inline-flex;
+		align-items: center;
+		font-size: 0.84rem;
+		gap: 3px;
+		white-space: nowrap;
+		padding: 1px 4px;
+		border-radius: 3px;
+		background: rgba(0, 0, 0, 0.04);
+	}
+
+	.dm-party__char-tgtt-stat {
+		display: inline-flex;
+		align-items: center;
+		font-size: 0.82rem;
+		gap: 3px;
+		white-space: nowrap;
+		padding: 1px 4px;
+		border-radius: 3px;
+		background: rgba(123, 109, 170, 0.1);
+		color: #5b4f8a;
+	}
+
+	/* ================================ */
+	/*  Character — expanded card       */
+	/* ================================ */
+
+	.dm-party__card {
+		border: 1px solid vars.$rgb-border-grey;
+		border-radius: 6px;
+		padding: 10px;
+		background: #fff;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.dm-party__card-header {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding-bottom: 6px;
+		border-bottom: 1px solid vars.$rgb-border-grey;
+	}
+
+	.dm-party__section {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.dm-party__section-title {
+		font-size: 0.84rem;
+		font-weight: 700;
+		color: vars.$rgb-off-black;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		padding-bottom: 3px;
+		border-bottom: 1px solid #eee;
+	}
+
+	.dm-party__abilities-grid {
+		display: grid;
+		grid-template-columns: repeat(6, 1fr);
+		gap: 4px;
+		text-align: center;
+	}
+
+	.dm-party__ability-cell {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		padding: 3px 0;
+		border-radius: 4px;
+		background: rgba(0, 0, 0, 0.02);
+
+		.dm-party__ability-label {
+			font-size: 0.78rem;
+			font-weight: 700;
+			text-transform: uppercase;
+			color: vars.$rgb-off-black;
+			opacity: 0.8;
+		}
+
+		.dm-party__ability-mod {
+			font-size: 0.78rem;
+			opacity: 0.65;
+		}
+	}
+
+	.dm-party__stats-bar {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+
+	.dm-party__stat-group {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 0.85rem;
+
+		.dm-party__stat-label {
+			font-weight: 600;
+			font-size: 0.82rem;
+		}
+	}
+
+	.dm-party__speed-grid,
+	.dm-party__senses-grid {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+
+	.dm-party__speed-item,
+	.dm-party__sense-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		font-size: 0.84rem;
+
+		.dm-party__field-label {
+			color: vars.$rgb-off-black;
+			opacity: 0.75;
+			text-transform: capitalize;
+		}
+	}
+
+	.dm-party__saves-grid {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 12px;
+	}
+
+	.dm-party__save-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		font-size: 0.84rem;
+	}
+
+	.dm-party__skills-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1px 12px;
+	}
+
+	.dm-party__skill-row {
+		display: flex;
+		align-items: center;
+		min-height: 22px;
+		gap: 4px;
+	}
+
+	.dm-party__skill-name {
+		font-size: 0.84rem;
+		width: 110px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.dm-party__skill-name--tgtt {
+		font-style: italic;
+		color: #5b4f8a;
+	}
+
+	.dm-party__skill-bonus {
+		font-size: 0.84rem;
+		width: 28px;
+		text-align: right;
+	}
+
+	.dm-party__skill-bonus--negative {
+		color: #dc3545;
+	}
+
+	/* TGTT combat section */
+	.dm-party__tgtt-section {
+		border-left: 3px solid #7b6daa;
+		padding-left: 8px;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.dm-party__tgtt-title {
+		font-size: 0.84rem;
+		font-weight: 700;
+		color: #7b6daa;
+	}
+
+	.dm-party__tgtt-traditions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 3px;
+	}
+
+	/* Derived stats bar */
+	.dm-party__derived-bar {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 14px;
+		font-size: 0.82rem;
+		color: vars.$rgb-off-black;
+		opacity: 0.8;
+		padding: 4px 6px;
+		background: rgba(0, 0, 0, 0.02);
+		border-radius: 4px;
+	}
+
+	/* ================================= */
+	/*  DC Calculator                    */
+	/* ================================= */
+
+	.dm-party__dc-calc {
+		border-top: 2px solid vars.$rgb-border-grey;
+		padding-top: 8px;
+		margin-top: 4px;
+		flex: none;
+	}
+
+	.dm-party__dc-title {
+		font-size: 0.88rem;
+		font-weight: 700;
+		margin-bottom: 6px;
+	}
+
+	.dm-party__dc-controls {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-bottom: 8px;
+	}
+
+	.dm-party__dc-control-group {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 0.84rem;
+
+		.dm-party__dc-label {
+			font-weight: 600;
+			font-size: 0.8rem;
+			text-transform: uppercase;
+			letter-spacing: 0.03em;
+		}
+	}
+
+	.dm-party__dc-results {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.dm-party__dc-row-header {
+		display: flex;
+		align-items: center;
+		font-size: 0.82rem;
+		font-weight: 700;
+		padding: 3px 0;
+		border-bottom: 2px solid vars.$rgb-border-grey;
+		gap: 4px;
+	}
+
+	.dm-party__dc-row {
+		display: flex;
+		align-items: center;
+		font-size: 0.84rem;
+		padding: 3px 0;
+		border-bottom: 1px solid #f0f0f0;
+		gap: 4px;
+		transition: background 0.1s;
+
+		&:hover {
+			background: rgba(0, 0, 0, 0.02);
+		}
+	}
+
+	.dm-party__dc-row-summary {
+		display: flex;
+		align-items: center;
+		font-size: 0.84rem;
+		font-weight: 700;
+		padding: 4px 0;
+		border-top: 2px solid #999;
+		gap: 4px;
+	}
+
+	.dm-party__dc-col-name {
+		width: 90px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.dm-party__dc-col-bonus {
+		width: 38px;
+		text-align: center;
+	}
+
+	.dm-party__dc-col-pct {
+		width: 42px;
+		text-align: center;
+		font-weight: 600;
+	}
+
+	.dm-party__dc-bar-wrap {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.dm-party__dc-bar {
+		height: 10px;
+		border-radius: 3px;
+		min-width: 2px;
+		max-width: 100%;
+		transition: width 0.2s;
+	}
+
+	.dm-party__dc-bar--success-high {
+		background: #28a745;
+	}
+
+	.dm-party__dc-bar--success-med {
+		background: #ffc107;
+	}
+
+	.dm-party__dc-bar--success-low {
+		background: #fd7e14;
+	}
+
+	.dm-party__dc-bar--success-fail {
+		background: #dc3545;
+	}
+
+	/* ================================= */
+	/*  Settings menu                    */
+	/* ================================= */
+
+	.dm-party__settings {
+		background: #fff;
+		border: 1px solid vars.$rgb-border-grey;
+		border-radius: 6px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+		min-width: 240px;
+		padding: 10px 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.dm-party__settings-title {
+		font-size: 0.88rem;
+		font-weight: 700;
+		padding-bottom: 4px;
+		border-bottom: 1px solid #eee;
+	}
+
+	.dm-party__settings-group {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		padding-left: 10px;
+		border-left: 3px solid #7b6daa;
+	}
+
+	.dm-party__settings-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 0.86rem;
+	}
+
+	/* ================================= */
+	/*  Night mode                       */
+	/* ================================= */
+
+	.ve-night-mode {
+		.dm-party__summary {
+			color: #ccc;
+		}
+
+		.dm-party__card {
+			background: vars-night.$rgb-bg--night;
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		.dm-party__char-row:hover {
+			background: rgba(255, 255, 255, 0.06);
+		}
+
+		.dm-party__char-meta {
+			color: #aaa;
+		}
+
+		.dm-party__char-stat {
+			background: rgba(255, 255, 255, 0.08);
+			color: #ddd;
+		}
+
+		.dm-party__char-tgtt-stat {
+			background: rgba(160, 140, 220, 0.2);
+			color: #c8b8f0;
+		}
+
+		.dm-party__section-title {
+			color: #bbb;
+			border-bottom-color: rgba(255, 255, 255, 0.12);
+		}
+
+		.dm-party__ability-cell {
+			background: rgba(255, 255, 255, 0.06);
+
+			.dm-party__ability-label {
+				color: #bbb;
+			}
+
+			.dm-party__ability-mod {
+				color: #999;
+			}
+		}
+
+		.dm-party__stat-label {
+			color: #bbb;
+		}
+
+		.dm-party__field-label {
+			color: #aaa !important;
+		}
+
+		.dm-party__skill-name {
+			color: #ccc;
+		}
+
+		.dm-party__skill-name--tgtt {
+			color: #c8b8f0;
+		}
+
+		.dm-party__skill-bonus {
+			color: #ddd;
+		}
+
+		.dm-party__tgtt-title {
+			color: #c8b8f0;
+		}
+
+		.dm-party__tgtt-section {
+			border-left-color: #9b8dca;
+		}
+
+		.dm-party__derived-bar {
+			background: rgba(255, 255, 255, 0.06);
+			color: #bbb;
+		}
+
+		.dm-party__dc-title {
+			color: #ddd;
+		}
+
+		.dm-party__dc-label {
+			color: #bbb;
+		}
+
+		.dm-party__dc-row-header {
+			color: #bbb;
+			border-bottom-color: rgba(255, 255, 255, 0.15);
+		}
+
+		.dm-party__dc-row {
+			color: #ccc;
+			border-bottom-color: rgba(255, 255, 255, 0.06);
+
+			&:hover {
+				background: rgba(255, 255, 255, 0.05);
+			}
+		}
+
+		.dm-party__dc-row-summary {
+			color: #ddd;
+			border-top-color: #777;
+		}
+
+		.dm-party__dc-col-pct {
+			color: #ddd;
+		}
+
+		.dm-party__settings {
+			background: vars-night.$rgb-bg--night;
+			border-color: vars-night.$rgb-border-grey--night;
+			color: #ccc;
+		}
+
+		.dm-party__settings-title {
+			color: #ddd;
+			border-bottom-color: rgba(255, 255, 255, 0.12);
+		}
+
+		.dm-party__settings-group {
+			border-left-color: #9b8dca;
+		}
+
+		.dm-party__toolbar {
+			border-bottom-color: rgba(255, 255, 255, 0.12);
+		}
+	}
+}
