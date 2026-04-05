@@ -24,6 +24,7 @@ import {
 	PanelContentManager_InitiativeTrackerCreatureViewer,
 	PanelContentManager_InitiativeTrackerPlayerViewV0,
 	PanelContentManager_InitiativeTrackerPlayerViewV1,
+	PanelContentManager_JourneyTracker,
 	PanelContentManager_MoneyConverter,
 	PanelContentManager_NoteBox, PanelContentManager_PartyTracker, PanelContentManager_TimeTracker,
 	PanelContentManager_UnitConverter,
@@ -2990,6 +2991,14 @@ class AddMenuSpecialTab extends AddMenuTab {
 			const btnTimeTracker = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`.appendTo(wrpTimeTracker);
 			btnTimeTracker.onn("click", async () => {
 				const pcm = new PanelContentManager_TimeTracker({board: this._board, panel: this.menu.pnl});
+				await pcm.pDoPopulate();
+				this.menu.doClose();
+			});
+
+			const wrpJourneyTracker = ee`<div class="ve-ui-modal__row"><span>Journey & Camp Tracker</span></div>`.appendTo(eleTab);
+			const btnJourneyTracker = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`.appendTo(wrpJourneyTracker);
+			btnJourneyTracker.onn("click", async () => {
+				const pcm = new PanelContentManager_JourneyTracker({board: this._board, panel: this.menu.pnl});
 				await pcm.pDoPopulate();
 				this.menu.doClose();
 			});

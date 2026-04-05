@@ -1635,4 +1635,395 @@
   }
 }
 
+/* ====================================== */
+/*  Journey & Camp Tracker                */
+/* ====================================== */
+@layer vetools {
+  .dm-journey__root {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.9rem;
+  }
+
+  /* --- Header --- */
+  .dm-journey__header {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    padding-right: 44px;
+    border-bottom: 1px solid #ccc;
+    gap: 10px;
+    flex: none;
+    flex-wrap: wrap;
+  }
+  .dm-journey__rm-section {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .dm-journey__rm-label {
+    font-weight: 700;
+    font-size: 0.85rem;
+  }
+  .dm-journey__rm-input {
+    width: 52px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    border: 1px solid #aaa;
+    border-radius: 3px;
+    padding: 1px 4px;
+  }
+  .dm-journey__rm-btn {
+    min-width: 24px;
+  }
+  .dm-journey__rm-badge {
+    display: inline-block;
+    font-weight: 700;
+    font-size: 0.85rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    min-width: 30px;
+    text-align: center;
+  }
+  .dm-journey__rm-badge--low {
+    background: #d4edda;
+    color: #155724;
+  }
+  .dm-journey__rm-badge--mid {
+    background: #fff3cd;
+    color: #856404;
+  }
+  .dm-journey__rm-badge--high {
+    background: #f8d7da;
+    color: #721c24;
+  }
+  .dm-journey__pace-section {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .dm-journey__pace-label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.82rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.1s;
+  }
+  .dm-journey__pace-label:hover {
+    background: rgba(0, 0, 0, 0.05);
+  }
+  .dm-journey__sync-section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .dm-journey__sync-status {
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .dm-journey__sync-status--active {
+    color: #28a745;
+  }
+  .dm-journey__sync-status--manual {
+    color: #6c757d;
+  }
+
+  /* --- Tab bar --- */
+  .dm-journey__tab-bar {
+    display: flex;
+    border-bottom: 1px solid #ddd;
+    padding: 0 6px;
+    gap: 2px;
+    flex: none;
+  }
+  .dm-journey__tab-btn {
+    border-bottom: 2px solid transparent;
+    border-radius: 3px 3px 0 0;
+    padding: 4px 10px;
+    font-size: 0.82rem;
+  }
+  .dm-journey__tab-btn.ve-active {
+    border-bottom-color: #337ab7;
+    font-weight: 600;
+  }
+
+  /* --- Body & tab content --- */
+  .dm-journey__body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+  }
+  .dm-journey__tab-content {
+    /* shown/hidden via JS */
+  }
+
+  /* --- Segment cards --- */
+  .dm-journey__segment-card {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    overflow: hidden;
+  }
+  .dm-journey__segment-header {
+    display: flex;
+    align-items: center;
+    padding: 5px 8px;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.03);
+    border-bottom: 1px solid #eee;
+  }
+  .dm-journey__segment-name {
+    font-weight: 600;
+    font-size: 0.88rem;
+  }
+  .dm-journey__collapse-btn {
+    min-width: 22px;
+    padding: 0 4px;
+    font-size: 0.75rem;
+  }
+
+  /* --- Activity table --- */
+  .dm-journey__activity-table {
+    padding: 4px 8px;
+  }
+  .dm-journey__activity-row {
+    display: grid;
+    grid-template-columns: 100px 1fr 40px 60px auto;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .dm-journey__activity-row--header {
+    font-weight: 600;
+    font-size: 0.78rem;
+    color: #666;
+    text-transform: uppercase;
+    border-bottom: 1px solid #ddd;
+  }
+  .dm-journey__player-name {
+    font-weight: 500;
+    font-size: 0.84rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dm-journey__activity-sel {
+    max-width: 120px;
+  }
+  .dm-journey__player-sel {
+    max-width: 100px;
+  }
+  .dm-journey__skill-bonus {
+    font-size: 0.82rem;
+    color: #337ab7;
+    font-weight: 600;
+    text-align: center;
+  }
+  .dm-journey__roll-input {
+    max-width: 60px;
+  }
+  .dm-journey__custom-input {
+    max-width: 100px;
+  }
+  .dm-journey__quick-rm {
+    display: flex;
+    gap: 2px;
+  }
+  .dm-journey__override-input {
+    width: 55px;
+    font-size: 0.82rem;
+    text-align: center;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 1px 3px;
+  }
+
+  /* --- Risk badges --- */
+  .dm-journey__badge {
+    display: inline-block;
+    font-weight: 600;
+    font-size: 0.82rem;
+    padding: 2px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .dm-journey__badge--none {
+    background: #f0f0f0;
+    color: #999;
+  }
+  .dm-journey__badge--empty {
+    background: #e9ecef;
+    color: #6c757d;
+  }
+  .dm-journey__badge--mild {
+    background: #d4edda;
+    color: #155724;
+  }
+  .dm-journey__badge--moderate {
+    background: #fff3cd;
+    color: #856404;
+  }
+  .dm-journey__badge--intense {
+    background: #f8d7da;
+    color: #721c24;
+  }
+
+  /* --- Camp --- */
+  .dm-journey__campfire-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    cursor: pointer;
+  }
+  .dm-journey__risk-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+  }
+  .dm-journey__guard-section {
+    padding: 4px 0;
+  }
+
+  /* --- Area config --- */
+  .dm-journey__area-name-input {
+    max-width: 250px;
+  }
+  .dm-journey__label {
+    font-size: 0.84rem;
+    min-width: 70px;
+    white-space: nowrap;
+  }
+  .dm-journey__range-label {
+    display: inline-block;
+    font-weight: 600;
+    font-size: 0.82rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+
+  /* --- Log --- */
+  .dm-journey__log-entries {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .dm-journey__log-entry {
+    display: flex;
+    gap: 8px;
+    padding: 3px 4px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 0.82rem;
+  }
+  .dm-journey__log-time {
+    color: #999;
+    white-space: nowrap;
+    min-width: 60px;
+    font-size: 0.78rem;
+  }
+  .dm-journey__log-msg {
+    flex: 1;
+  }
+  .dm-journey__log-entry--rm-change .dm-journey__log-msg {
+    color: #337ab7;
+  }
+  .dm-journey__log-entry--risk-roll .dm-journey__log-msg {
+    font-weight: 600;
+  }
+  .dm-journey__log-entry--reset .dm-journey__log-msg {
+    color: #6c757d;
+  }
+  .dm-journey__log-entry--note .dm-journey__log-msg {
+    font-style: italic;
+  }
+  .dm-journey__log-entry--party-sync .dm-journey__log-msg {
+    color: #6f42c1;
+  }
+
+  /* --- Misc --- */
+  .dm-journey__note {
+    font-size: 0.78rem;
+    color: #999;
+  }
+  .dm-journey__empty-msg {
+    padding: 8px;
+    color: #999;
+    font-size: 0.84rem;
+  }
+
+  /* --- Night mode overrides --- */
+  .ve-night-mode .dm-journey__header {
+    border-bottom-color: #444;
+  }
+  .ve-night-mode .dm-journey__tab-bar {
+    border-bottom-color: #444;
+  }
+  .ve-night-mode .dm-journey__segment-card {
+    border-color: #444;
+  }
+  .ve-night-mode .dm-journey__segment-header {
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom-color: #444;
+  }
+  .ve-night-mode .dm-journey__activity-row {
+    border-bottom-color: #333;
+  }
+  .ve-night-mode .dm-journey__activity-row--header {
+    border-bottom-color: #444;
+    color: #aaa;
+  }
+  .ve-night-mode .dm-journey__log-entry {
+    border-bottom-color: #333;
+  }
+  .ve-night-mode .dm-journey__rm-input {
+    background: #333;
+    color: #eee;
+    border-color: #555;
+  }
+  .ve-night-mode .dm-journey__override-input {
+    background: #333;
+    color: #eee;
+    border-color: #555;
+  }
+  .ve-night-mode .dm-journey__badge--none {
+    background: #333;
+    color: #888;
+  }
+  .ve-night-mode .dm-journey__badge--empty {
+    background: #3a3a3a;
+    color: #999;
+  }
+  .ve-night-mode .dm-journey__rm-badge--low {
+    background: #1c3d2a;
+    color: #7dcea0;
+  }
+  .ve-night-mode .dm-journey__rm-badge--mid {
+    background: #3d3520;
+    color: #e6c97a;
+  }
+  .ve-night-mode .dm-journey__rm-badge--high {
+    background: #3d1f22;
+    color: #e68a8a;
+  }
+  .ve-night-mode .dm-journey__badge--mild {
+    background: #1c3d2a;
+    color: #7dcea0;
+  }
+  .ve-night-mode .dm-journey__badge--moderate {
+    background: #3d3520;
+    color: #e6c97a;
+  }
+  .ve-night-mode .dm-journey__badge--intense {
+    background: #3d1f22;
+    color: #e68a8a;
+  }
+}
+
 /*# sourceMappingURL=dmscreen.css.map */

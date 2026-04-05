@@ -22,6 +22,7 @@ export const PANEL_TYP_COUNTER = 16;
 export const PANEL_TYP_IMAGE = 20;
 export const PANEL_TYP_ADVENTURE_DYNAMIC_MAP = 21;
 export const PANEL_TYP_PARTY_TRACKER = 22;
+export const PANEL_TYP_JOURNEY_TRACKER = 23;
 export const PANEL_TYP_GENERIC_EMBED = 90;
 export const PANEL_TYP_ERROR = 98;
 export const PANEL_TYP_BLANK = 99;
