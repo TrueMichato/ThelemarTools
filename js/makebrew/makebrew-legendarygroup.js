@@ -6,20 +6,17 @@ import {RenderBestiary} from "../render-bestiary.js";
 export class LegendaryGroupBuilder extends BuilderBase {
 	constructor () {
 		super({
-			titleSidebarLoadExisting: "Copy Existing Legendary Group",
-			titleSidebarDownloadJson: "Download Legendary Groups as JSON",
 			prop: "legendaryGroup",
-			titleSelectDefaultSource: "(Same as Legendary Group)",
 		});
 
 		this._renderOutputDebounced = MiscUtil.debounce(() => this._renderOutput(), 50);
 	}
 
-	async pHandleSidebarLoadExistingClick () {
+	async pHandleClickLoadExisting () {
 		const result = await SearchWidget.pGetUserLegendaryGroupSearch();
 		if (result) {
 			const legGroup = MiscUtil.copy(await DataLoader.pCacheAndGet(result.page, result.source, result.hash));
-			return this.pHandleSidebarLoadExistingData(legGroup);
+			return this.pHandleLoadExistingData(legGroup);
 		}
 	}
 
@@ -28,7 +25,7 @@ export class LegendaryGroupBuilder extends BuilderBase {
 	 * @param [opts]
 	 * @param [opts.meta]
 	 */
-	async pHandleSidebarLoadExistingData (legGroup, opts) {
+	async pHandleLoadExistingData (legGroup, opts) {
 		opts = opts || {};
 
 		legGroup.source = this._ui.source;
@@ -107,11 +104,11 @@ export class LegendaryGroupBuilder extends BuilderBase {
 			},
 		);
 		const [infoTab, lairActionsTab, regionalEffectsTab, mythicEncounterTab] = tabs;
-		ee`<div class="ve-flex-v-center w-100 no-shrink ui-tab__wrp-tab-heads--border">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
+		ee`<div class="ve-flex-v-center ve-w-100 ve-no-shrink ve-ui-tab__wrp-tab-heads--border">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
 		tabs.forEach(it => it.wrpTab.appendTo(wrp));
 
 		// INFO
-		BuilderUi.getStateIptString("Name", cb, this._state, {nullable: false, callback: () => this.pRenderSideMenu()}, "name").appendTo(infoTab.wrpTab);
+		BuilderUi.getStateIptString("Name", cb, this._state, {nullable: false, callback: () => this.pRenderEntityList()}, "name").appendTo(infoTab.wrpTab);
 		this._selSource = this.getSourceInput(cb).appendTo(infoTab.wrpTab);
 
 		// LAIR ACTIONS
@@ -156,11 +153,11 @@ export class LegendaryGroupBuilder extends BuilderBase {
 			},
 		);
 		const [legGroupTab, dataTab] = tabs;
-		ee`<div class="ve-flex-v-center w-100 no-shrink">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
+		ee`<div class="ve-flex-v-center ve-w-100 ve-no-shrink">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
 		tabs.forEach(it => it.wrpTab.appendTo(wrp));
 
 		// Legendary Group
-		const tblLegGroup = ee`<table class="w-100 stats"></table>`.appendTo(legGroupTab.wrpTab);
+		const tblLegGroup = ee`<table class="ve-w-100 ve-stats"></table>`.appendTo(legGroupTab.wrpTab);
 		tblLegGroup.appends(RenderBestiary.getRenderedLegendaryGroup(this._state));
 
 		// Data
@@ -174,7 +171,7 @@ export class LegendaryGroupBuilder extends BuilderBase {
 				},
 			],
 		});
-		ee`<table class="stats stats--book mkbru__wrp-output-tab-data">
+		ee`<table class="ve-stats ve-stats--book mkbru__wrp-output-tab-data">
 			${Renderer.utils.getBorderTr()}
 			<tr><td colspan="6">${asCode}</td></tr>
 			${Renderer.utils.getBorderTr()}

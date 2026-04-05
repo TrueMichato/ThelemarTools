@@ -180,7 +180,7 @@ class _RenderSpellsImplBase extends RenderPageImplBase {
 	/* ----- */
 
 	_getCommonHtmlParts_castingTime ({ent}) {
-		return `<tr><td colspan="6" ${this._style === "classic" ? "" : `class="pt-2"`}>${Renderer.spell.getHtmlPtCastingTime(ent, {styleHint: this._style})}</td></tr>`;
+		return `<tr><td colspan="6" ${this._style === "classic" ? "" : `class="ve-pt-2"`}>${Renderer.spell.getHtmlPtCastingTime(ent, {styleHint: this._style})}</td></tr>`;
 	}
 
 	_getCommonHtmlParts_range ({ent}) {
@@ -192,7 +192,7 @@ class _RenderSpellsImplBase extends RenderPageImplBase {
 	}
 
 	_getCommonHtmlParts_duration ({ent}) {
-		return `<tr><td colspan="6" ${this._style === "classic" ? "" : `class="pb-2"`}>${Renderer.spell.getHtmlPtDuration(ent, {styleHint: this._style})}</td></tr>`;
+		return `<tr><td colspan="6" ${this._style === "classic" ? "" : `class="ve-pb-2"`}>${Renderer.spell.getHtmlPtDuration(ent, {styleHint: this._style})}</td></tr>`;
 	}
 
 	/* ----- */
@@ -221,10 +221,10 @@ class _RenderSpellsImplBase extends RenderPageImplBase {
 		if (fromClassList.length) {
 			const [current, legacy] = Parser.spClassesToCurrentAndLegacy(fromClassList);
 			if (settings.isDisplayClasses) {
-				stackFroms.push(`<div><span class="bold">Classes: </span>${Parser.spMainClassesToFull(current)}</div>`);
+				stackFroms.push(`<div><span class="ve-bold">Classes: </span>${Parser.spMainClassesToFull(current)}</div>`);
 			}
 			if (settings.isDisplayClassesLegacy && legacy.length) {
-				stackFroms.push(`<div class="ve-muted"><span class="bold">Classes (legacy): </span>${Parser.spMainClassesToFull(legacy)}</div>`);
+				stackFroms.push(`<div class="ve-muted"><span class="ve-bold">Classes (legacy): </span>${Parser.spMainClassesToFull(legacy)}</div>`);
 			}
 		}
 
@@ -232,10 +232,10 @@ class _RenderSpellsImplBase extends RenderPageImplBase {
 		if (fromSubclass.length) {
 			const [current, legacy] = Parser.spSubclassesToCurrentAndLegacyFull(ent, subclassLookup);
 			if (settings.isDisplaySubclasses) {
-				stackFroms.push(`<div><span class="bold">Subclasses: </span>${current}</div>`);
+				stackFroms.push(`<div><span class="ve-bold">Subclasses: </span>${current}</div>`);
 			}
 			if (settings.isDisplaySubclassesLegacy && legacy.length) {
-				stackFroms.push(`<div class="ve-muted"><span class="bold">Subclasses (legacy): </span>${legacy}</div>`);
+				stackFroms.push(`<div class="ve-muted"><span class="ve-bold">Subclasses (legacy): </span>${legacy}</div>`);
 			}
 		}
 
@@ -243,10 +243,10 @@ class _RenderSpellsImplBase extends RenderPageImplBase {
 		if (fromClassListVariant.length) {
 			const [current, legacy] = Parser.spVariantClassesToCurrentAndLegacy(fromClassListVariant);
 			if (settings.isDisplayVariantClasses && current.length) {
-				stackFroms.push(`<div><span class="bold" title="&quot;Optional&quot; spells may be added to a campaign by the DM. &quot;Variant&quot; spells are generally available, but may be made available to a class by the DM.">Optional/Variant Classes: </span>${Parser.spMainClassesToFull(current)}</div>`);
+				stackFroms.push(`<div><span class="ve-bold" title="&quot;Optional&quot; spells may be added to a campaign by the DM. &quot;Variant&quot; spells are generally available, but may be made available to a class by the DM.">Optional/Variant Classes: </span>${Parser.spMainClassesToFull(current)}</div>`);
 			}
 			if (settings.isDisplayVariantClassesLegacy && legacy.length) {
-				stackFroms.push(`<div class="ve-muted"><span class="bold" title="&quot;Optional&quot; spells may be added to a campaign by the DM. &quot;Variant&quot; spells are generally available, but may be made available to a class by the DM.">Optional/Variant Classes (legacy): </span>${Parser.spMainClassesToFull(legacy)}</div>`);
+				stackFroms.push(`<div class="ve-muted"><span class="ve-bold" title="&quot;Optional&quot; spells may be added to a campaign by the DM. &quot;Variant&quot; spells are generally available, but may be made available to a class by the DM.">Optional/Variant Classes (legacy): </span>${Parser.spMainClassesToFull(legacy)}</div>`);
 			}
 		}
 
@@ -259,7 +259,7 @@ class _RenderSpellsImplBase extends RenderPageImplBase {
 			ent.level >= 5
 			&& fromClassList?.some(it => it.name === "Wizard" && it?.source === Parser.SRC_PHB)
 		) {
-			stackFroms.push(`<section class="ve-muted mt-2">`);
+			stackFroms.push(`<section class="ve-muted ve-mt-2">`);
 			renderer.recursiveRender(`{@italic Note: Both the {@class fighter||Fighter (Eldritch Knight)|eldritch knight} and the {@class rogue||Rogue (Arcane Trickster)|arcane trickster} spell lists include all {@class Wizard} spells. Spells of 5th level or higher may be cast with the aid of a spell scroll or similar.}`, stackFroms, {depth: 2});
 			stackFroms.push(`</section>`);
 		}
@@ -273,12 +273,12 @@ class _RenderSpellsImplBase extends RenderPageImplBase {
 
 		const ptFroms = froms
 			.map(it => {
-				const pt = tag ? renderer.render(`{@${tag} ${it.name}|${it.source}}`) : `<span class="help-subtle" title="Source: ${(Parser.sourceJsonToFull(it.source)).qq()}">${it.name}</span>`;
+				const pt = tag ? renderer.render(`{@${tag} ${it.name}|${it.source}}`) : `<span class="ve-help-subtle" title="Source: ${(Parser.sourceJsonToFull(it.source)).qq()}">${it.name}</span>`;
 				return `${SourceUtil.isNonstandardSource(it.source) ? `<span class="ve-muted">` : ``}${pt}${SourceUtil.isNonstandardSource(it.source) ? `</span>` : ``}`;
 			})
 			.join(", ");
 
-		stackFroms.push(`<div><span class="bold">${title}: </span>${ptFroms}</div>`);
+		stackFroms.push(`<div><span class="ve-bold">${title}: </span>${ptFroms}</div>`);
 	}
 }
 
