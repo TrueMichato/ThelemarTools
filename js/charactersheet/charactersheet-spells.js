@@ -2698,9 +2698,12 @@ class CharacterSheetSpells {
 	async _handleSpecialSpellTriggers (spell) {
 		const spellNameLower = spell.name.toLowerCase();
 
-		// Find Familiar - show familiar picker
+		// Find Familiar - show familiar picker (with Pact of the Chain expansion if applicable)
 		if (spellNameLower === "find familiar") {
-			await this._pShowFamiliarPicker();
+			const calculations = this._state?.getFeatureCalculations?.() || {};
+			await this._pShowFamiliarPicker({
+				pactCreatureNames: calculations.pactOfTheChainCreatures || [],
+			});
 			return;
 		}
 
@@ -2981,6 +2984,7 @@ class CharacterSheetSpells {
 			title: `✨ ${spell.name} - Choose Creature`,
 			isMinHeight0: true,
 			isWidth100: true,
+			zIndex: 100,
 		});
 
 		const typeLabel = types.join("/");
@@ -3054,7 +3058,7 @@ class CharacterSheetSpells {
 							${creatureIconHtml}
 							<div class="ve-flex-col" style="flex: 1;">
 								<div class="bold" style="font-size: 1.05em;">${nameDisplay}</div>
-								<span class="ve-muted ve-small">CR ${crDisplay}</span>
+								<span class="ve-muted ve-small">CR ${crDisplay} · ${Parser.sourceJsonToAbv(creature.source)}</span>
 							</div>
 						</div>
 						<div class="charsheet__conjure-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 0.85em;">
@@ -3216,9 +3220,10 @@ class CharacterSheetSpells {
 	 * Show familiar picker modal for Find Familiar spell
 	 * @param {Object} opts - Options
 	 * @param {boolean} opts.isWildCompanion - If true, familiar is summoned as Fey (Wild Companion)
+	 * @param {string[]} opts.pactCreatureNames - Additional creature names from Pact of the Chain
 	 */
 	async _pShowFamiliarPicker (opts = {}) {
-		const {isWildCompanion = false} = opts;
+		const {isWildCompanion = false, pactCreatureNames = []} = opts;
 
 		// Load bestiary data
 		const bestiaryData = await DataLoader.pCacheAndGetAllSite(UrlUtil.PG_BESTIARY);
@@ -3245,8 +3250,18 @@ class CharacterSheetSpells {
 			return creature.familiar || standardFamiliarNames.has(creature.name.toLowerCase());
 		});
 
+		// Pact of the Chain — additional creatures (any type/CR/size)
+		const pactCreatureNamesLower = new Set(pactCreatureNames.map(n => n.toLowerCase()));
+		const pactFamiliars = pactCreatureNamesLower.size > 0
+			? bestiaryData.filter(creature => pactCreatureNamesLower.has(creature.name.toLowerCase()))
+			: [];
+		pactFamiliars.sort((a, b) => a.name.localeCompare(b.name));
+
 		// Sort alphabetically
 		familiars.sort((a, b) => a.name.localeCompare(b.name));
+
+		// Check for Animal Accomplice improved familiar info
+		const calculations = this._state?.getFeatureCalculations?.() || {};
 
 		const modalTitle = isWildCompanion ? "🧚 Wild Companion" : "🐾 Choose Your Familiar";
 		const headerEmoji = isWildCompanion ? "🧚" : "🦉";
@@ -3259,6 +3274,7 @@ class CharacterSheetSpells {
 			title: modalTitle,
 			isMinHeight0: true,
 			isWidth100: true,
+			zIndex: 100,
 		});
 
 		modalInner.insertAdjacentHTML("beforeend", `
@@ -3280,33 +3296,324 @@ class CharacterSheetSpells {
 		const search = e_({outer: `<input type="text" class="ve-form-control" placeholder="Search familiars..." style="flex: 1;">`});
 		searchContainer.append(search);
 
+		// Animal Accomplice improved familiar banner
+		if (calculations.hasImprovedFamiliar) {
+			modalInner.insertAdjacentHTML("beforeend", `
+				<div style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;">
+					<div class="ve-flex ve-flex-v-center" style="gap: 8px;">
+						<span style="font-size: 1.3em;">✨</span>
+						<div>
+							<div class="bold ve-small">Improved Familiar</div>
+							<div class="ve-muted ve-small">Your familiar gains enhanced stats: HP = ${calculations.familiarMaxHp}, INT = ${calculations.familiarIntelligence}, Prof Bonus = +${calculations.familiarProfBonus}</div>
+						</div>
+					</div>
+				</div>
+			`);
+		}
+
+		// Custom familiar form (hidden initially)
+		const customFormWrap = e_({outer: `<div style="display: none;"></div>`});
+		modalInner.append(customFormWrap);
+
+		const SKILL_LIST = [
+			"Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception",
+			"History", "Insight", "Intimidation", "Investigation", "Medicine",
+			"Nature", "Perception", "Performance", "Persuasion", "Religion",
+			"Sleight of Hand", "Stealth", "Survival",
+		];
+
+		customFormWrap.innerHTML = `
+			<div style="margin-bottom: 12px;">
+				<button class="ve-btn ve-btn-xs ve-btn-default btn-back-to-list" style="gap: 4px;">← Back to list</button>
+			</div>
+			<div style="display: flex; flex-direction: column; gap: 14px;">
+				<!-- Template selector -->
+				<div style="background: rgba(var(--rgb-bg-text), 0.04); border-radius: 8px; padding: 10px 12px;">
+					<label class="ve-small ve-muted mb-1" style="display: block;">Base on existing creature (optional)</label>
+					<div class="ve-flex ve-flex-v-center" style="gap: 8px;">
+						<select class="ve-form-control custom-fam-template" style="flex: 1;">
+							<option value="">— Start from scratch —</option>
+							${familiars.map(f => `<option value="${f.name}|${f.source}">${f.name} (${Parser.sourceJsonToAbv(f.source)})</option>`).join("")}
+						</select>
+						<button class="ve-btn ve-btn-xs ve-btn-primary btn-apply-template" title="Apply template">Apply</button>
+					</div>
+				</div>
+
+				<!-- Basic info -->
+				<div style="display: flex; gap: 12px; align-items: end;">
+					<div style="flex: 2;">
+						<label class="ve-small ve-muted">Name *</label>
+						<input type="text" class="ve-form-control custom-fam-name" placeholder="e.g. Whiskers, Shadow, Archimedes...">
+					</div>
+					<div style="flex: 1;">
+						<label class="ve-small ve-muted">Creature Type</label>
+						<select class="ve-form-control custom-fam-type">
+							<option value="beast">Beast</option>
+							<option value="celestial">Celestial</option>
+							<option value="fey">Fey</option>
+							<option value="fiend">Fiend</option>
+						</select>
+					</div>
+				</div>
+
+				<!-- Combat stats -->
+				<div>
+					<div class="ve-small bold ve-muted mb-1">Combat Stats</div>
+					<div style="display: flex; gap: 12px;">
+						<div style="flex: 1;">
+							<label class="ve-small ve-muted">HP</label>
+							<input type="number" class="ve-form-control custom-fam-hp" value="1" min="1">
+						</div>
+						<div style="flex: 1;">
+							<label class="ve-small ve-muted">AC</label>
+							<input type="number" class="ve-form-control custom-fam-ac" value="10" min="1">
+						</div>
+						<div style="flex: 1;">
+							<label class="ve-small ve-muted">Walk (ft)</label>
+							<input type="number" class="ve-form-control custom-fam-speed" value="30" min="0" step="5">
+						</div>
+						<div style="flex: 1;">
+							<label class="ve-small ve-muted">Fly (ft)</label>
+							<input type="number" class="ve-form-control custom-fam-fly" value="0" min="0" step="5">
+						</div>
+						<div style="flex: 1;">
+							<label class="ve-small ve-muted">Swim (ft)</label>
+							<input type="number" class="ve-form-control custom-fam-swim" value="0" min="0" step="5">
+						</div>
+					</div>
+				</div>
+
+				<!-- Advanced stats (collapsible) -->
+				<details class="custom-fam-advanced">
+					<summary class="ve-small bold ve-muted" style="cursor: pointer; user-select: none; padding: 4px 0;">
+						▶ Advanced Stats (Ability Scores & Skills)
+					</summary>
+					<div style="display: flex; flex-direction: column; gap: 12px; margin-top: 10px;">
+						<!-- Ability Scores -->
+						<div>
+							<div class="ve-small ve-muted mb-1">Ability Scores</div>
+							<div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;">
+								${Parser.ABIL_ABVS.map(abv => `
+									<div class="ve-flex-col ve-text-center">
+										<label class="ve-small bold" style="text-transform: uppercase;">${abv}</label>
+										<input type="number" class="ve-form-control custom-fam-abil-${abv}" value="10" min="1" max="30" style="text-align: center;">
+									</div>
+								`).join("")}
+							</div>
+						</div>
+
+						<!-- Skill Proficiencies -->
+						<div>
+							<div class="ve-small ve-muted mb-1">Skill Proficiencies <span class="ve-muted">(check to grant proficiency)</span></div>
+							<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; font-size: 0.9em;">
+								${SKILL_LIST.map(skill => {
+									const key = skill.toLowerCase().replace(/\s+/g, "");
+									return `<label class="ve-flex ve-flex-v-center" style="gap: 6px; cursor: pointer;">
+										<input type="checkbox" class="custom-fam-skill" data-skill="${key}">
+										<span>${skill}</span>
+									</label>`;
+								}).join("")}
+							</div>
+						</div>
+					</div>
+				</details>
+
+				<div class="ve-flex-h-right" style="gap: 8px; margin-top: 4px;">
+					<button class="ve-btn ve-btn-default btn-custom-fam-cancel">Cancel</button>
+					<button class="ve-btn ve-btn-primary btn-custom-fam-create">
+						🐾 Summon Custom Familiar
+					</button>
+				</div>
+			</div>
+		`;
+
 		// Familiars grid
 		const list = e_({outer: `<div class="charsheet__familiar-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; max-height: 450px; overflow-y: auto; padding: 4px;"></div>`});
 		modalInner.append(list);
 
+		// --- Helper: populate form from a bestiary creature ---
+		const populateFormFromCreature = (creature) => {
+			const form = customFormWrap;
+			form.querySelector(".custom-fam-name").value = creature.name || "";
+
+			// HP
+			const hp = creature.hp?.average || (typeof creature.hp === "number" ? creature.hp : 1);
+			form.querySelector(".custom-fam-hp").value = hp;
+
+			// AC
+			const ac = Array.isArray(creature.ac) ? (creature.ac[0]?.ac ?? creature.ac[0]) : (creature.ac || 10);
+			form.querySelector(".custom-fam-ac").value = ac;
+
+			// Speeds
+			const spd = creature.speed || {};
+			form.querySelector(".custom-fam-speed").value = (typeof spd === "number" ? spd : spd.walk) || 0;
+			form.querySelector(".custom-fam-fly").value = spd.fly || 0;
+			form.querySelector(".custom-fam-swim").value = spd.swim || 0;
+
+			// Creature type
+			const cType = typeof creature.type === "string" ? creature.type : creature.type?.type || "beast";
+			const typeSelect = form.querySelector(".custom-fam-type");
+			if ([...typeSelect.options].some(o => o.value === cType)) typeSelect.value = cType;
+
+			// Ability scores
+			for (const abv of Parser.ABIL_ABVS) {
+				form.querySelector(`.custom-fam-abil-${abv}`).value = creature[abv] || 10;
+			}
+
+			// Skill proficiencies
+			form.querySelectorAll(".custom-fam-skill").forEach(cb => { cb.checked = false; });
+			if (creature.skill) {
+				for (const skill of Object.keys(creature.skill)) {
+					const key = skill.toLowerCase().replace(/\s+/g, "");
+					const cb = form.querySelector(`.custom-fam-skill[data-skill="${key}"]`);
+					if (cb) cb.checked = true;
+				}
+			}
+
+			// Auto-open advanced section if creature has non-default abilities or skills
+			const hasNonDefaultAbilities = Parser.ABIL_ABVS.some(abv => (creature[abv] || 10) !== 10);
+			const hasSkills = creature.skill && Object.keys(creature.skill).length > 0;
+			if (hasNonDefaultAbilities || hasSkills) {
+				form.querySelector(".custom-fam-advanced").open = true;
+			}
+		};
+
+		// Wire up template selector
+		customFormWrap.querySelector(".btn-apply-template").addEventListener("click", () => {
+			const val = customFormWrap.querySelector(".custom-fam-template").value;
+			if (!val) {
+				// Reset to defaults
+				customFormWrap.querySelector(".custom-fam-name").value = "";
+				customFormWrap.querySelector(".custom-fam-hp").value = "1";
+				customFormWrap.querySelector(".custom-fam-ac").value = "10";
+				customFormWrap.querySelector(".custom-fam-speed").value = "30";
+				customFormWrap.querySelector(".custom-fam-fly").value = "0";
+				customFormWrap.querySelector(".custom-fam-swim").value = "0";
+				customFormWrap.querySelector(".custom-fam-type").value = "beast";
+				for (const abv of Parser.ABIL_ABVS) customFormWrap.querySelector(`.custom-fam-abil-${abv}`).value = "10";
+				customFormWrap.querySelectorAll(".custom-fam-skill").forEach(cb => { cb.checked = false; });
+				return;
+			}
+			const [name, source] = val.split("|");
+			const creature = familiars.find(f => f.name === name && f.source === source);
+			if (creature) populateFormFromCreature(creature);
+		});
+
+		// Wire up custom form toggle
+		const showCustomForm = (templateCreature) => {
+			customFormWrap.style.display = "";
+			searchContainer.style.display = "none";
+			list.style.display = "none";
+			if (templateCreature) populateFormFromCreature(templateCreature);
+			customFormWrap.querySelector(".custom-fam-name").focus();
+		};
+		const hideCustomForm = () => {
+			customFormWrap.style.display = "none";
+			searchContainer.style.display = "";
+			list.style.display = "";
+		};
+
+		customFormWrap.querySelector(".btn-back-to-list").addEventListener("click", hideCustomForm);
+		customFormWrap.querySelector(".btn-custom-fam-cancel").addEventListener("click", doClose);
+		customFormWrap.querySelector(".btn-custom-fam-create").addEventListener("click", async () => {
+			const name = customFormWrap.querySelector(".custom-fam-name").value?.trim();
+			if (!name) {
+				JqueryUtil.doToast({type: "warning", content: "Please enter a name for your familiar."});
+				return;
+			}
+			const hp = parseInt(customFormWrap.querySelector(".custom-fam-hp").value) || 1;
+			const ac = parseInt(customFormWrap.querySelector(".custom-fam-ac").value) || 10;
+			const walkSpeed = parseInt(customFormWrap.querySelector(".custom-fam-speed").value) || 0;
+			const flySpeed = parseInt(customFormWrap.querySelector(".custom-fam-fly").value) || 0;
+			const swimSpeed = parseInt(customFormWrap.querySelector(".custom-fam-swim").value) || 0;
+			const creatureType = customFormWrap.querySelector(".custom-fam-type").value || "beast";
+
+			// Ability scores
+			const abilities = {};
+			for (const abv of Parser.ABIL_ABVS) {
+				abilities[abv] = parseInt(customFormWrap.querySelector(`.custom-fam-abil-${abv}`).value) || 10;
+			}
+
+			// Skill proficiencies
+			const skillProficiencies = {};
+			customFormWrap.querySelectorAll(".custom-fam-skill:checked").forEach(cb => {
+				skillProficiencies[cb.dataset.skill] = 1;
+			});
+
+			await this._selectFamiliar(
+				{name, isCustom: true, hp, ac, speed: {walk: walkSpeed, fly: flySpeed, swim: swimSpeed}, creatureType, abilities, skillProficiencies},
+				{isWildCompanion},
+			);
+			doClose();
+		});
+
 		const renderList = (filter = "") => {
 			list.innerHTML = "";
+
+			// "Create Custom" card at the top
+			const customCard = e_({outer: `
+				<div class="charsheet__familiar-card" style="
+					border: 2px dashed var(--rgb-border-grey-muted);
+					border-radius: 10px;
+					padding: 12px;
+					cursor: pointer;
+					transition: all 0.2s ease;
+					background: rgba(var(--rgb-bg-text), 0.02);
+					display: flex;
+					flex-direction: column;
+					align-items: center;
+					justify-content: center;
+					min-height: 100px;
+					gap: 8px;
+				">
+					<span style="font-size: 2em; opacity: 0.6;">➕</span>
+					<div class="bold" style="font-size: 0.95em; opacity: 0.8;">Create Custom Familiar</div>
+					<div class="ve-muted ve-small ve-text-center">Define your own familiar with custom stats</div>
+				</div>
+			`});
+			list.append(customCard);
+			customCard.addEventListener("click", () => showCustomForm());
+			customCard.addEventListener("mouseenter", function () {
+				Object.assign(this.style, {
+					borderColor: "var(--rgb-link)",
+					background: "rgba(var(--rgb-link-rgb), 0.08)",
+					transform: "translateY(-2px)",
+					boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+				});
+			});
+			customCard.addEventListener("mouseleave", function () {
+				Object.assign(this.style, {
+					borderColor: "var(--rgb-border-grey-muted)",
+					background: "rgba(var(--rgb-bg-text), 0.02)",
+					transform: "translateY(0)",
+					boxShadow: "none",
+				});
+			});
+
 			const filteredFamiliars = familiars.filter(f =>
 				f.name.toLowerCase().includes(filter.toLowerCase()),
 			);
 
-			if (filteredFamiliars.length === 0) {
+			// Pact of the Chain creatures
+			const filteredPactFamiliars = pactFamiliars.filter(f =>
+				f.name.toLowerCase().includes(filter.toLowerCase()),
+			);
+
+			if (filteredFamiliars.length === 0 && filteredPactFamiliars.length === 0) {
 				list.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-text-center py-3" style="grid-column: 1 / -1;">No familiars match your search</div>`);
 				return;
 			}
 
-			filteredFamiliars.forEach(creature => {
+			// Helper: build a creature card element
+			const buildCreatureCard = (creature) => {
 				const hp = creature.hp?.average || creature.hp || "?";
 				const ac = Array.isArray(creature.ac) ? creature.ac[0]?.ac || creature.ac[0] : creature.ac;
 				const speeds = this._formatCreatureSpeeds(creature.speed);
-				
-				// Get icon for this creature (token image with emoji fallback)
 				const creatureIconHtml = CharacterSheetClassUtils.getCompanionIconHtml(creature, "lg");
-				
-				// Get primary sense
 				const primarySense = creature.senses?.[0] || "Normal vision";
+				const crStr = creature.cr?.cr ?? creature.cr ?? "?";
+				const creatureTypeStr = typeof creature.type === "string" ? creature.type : creature.type?.type || "beast";
 
-				// Build hover link for the creature
 				let nameDisplay;
 				try {
 					const hash = UrlUtil.encodeForHash([creature.name, creature.source].join(HASH_LIST_SEP));
@@ -3328,23 +3635,26 @@ class CharacterSheetSpells {
 					">
 						<div class="ve-flex ve-flex-v-center mb-2" style="gap: 8px;">
 							${creatureIconHtml}
-							<div class="bold" style="font-size: 1.05em;">${nameDisplay}</div>
+							<div class="ve-flex-col" style="flex: 1;">
+								<div class="bold" style="font-size: 1.05em;">${nameDisplay}</div>
+								<span class="ve-muted ve-small">${Parser.sourceJsonToAbv(creature.source)} · CR ${crStr} · ${creatureTypeStr}</span>
+							</div>
 						</div>
 						<div class="charsheet__familiar-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 0.85em;">
 							<div class="ve-flex ve-flex-v-center" style="gap: 4px;">
-								<span style="opacity: 0.7;">🛡️</span>
+								<span style="opacity: 0.7;">\ud83d\udee1\ufe0f</span>
 								<span>AC ${ac}</span>
 							</div>
 							<div class="ve-flex ve-flex-v-center" style="gap: 4px;">
-								<span style="opacity: 0.7;">❤️</span>
+								<span style="opacity: 0.7;">\u2764\ufe0f</span>
 								<span>${hp} HP</span>
 							</div>
 							<div class="ve-flex ve-flex-v-center" style="gap: 4px; grid-column: 1 / -1;">
-								<span style="opacity: 0.7;">👟</span>
+								<span style="opacity: 0.7;">\ud83d\udc5f</span>
 								<span class="ve-small">${speeds}</span>
 							</div>
 							<div class="ve-flex ve-flex-v-center" style="gap: 4px; grid-column: 1 / -1;">
-								<span style="opacity: 0.7;">👁️</span>
+								<span style="opacity: 0.7;">\ud83d\udc41\ufe0f</span>
 								<span class="ve-small ve-muted">${primarySense}</span>
 							</div>
 						</div>
@@ -3358,9 +3668,6 @@ class CharacterSheetSpells {
 					</div>
 				`});
 
-				list.append(card);
-
-				// Hover effects
 				card.addEventListener("mouseenter", function () {
 					Object.assign(this.style, {
 						borderColor: "var(--rgb-link)",
@@ -3386,13 +3693,30 @@ class CharacterSheetSpells {
 					doClose();
 				});
 
-				// Clicking the card also selects
 				card.addEventListener("click", async (evt) => {
-					if (evt.target.closest("a").length) return; // Don't select if clicking hover link
+					if (evt.target.closest("a")?.length) return;
 					await this._selectFamiliar(creature, {isWildCompanion});
 					doClose();
 				});
-			});
+
+				return card;
+			};
+
+			// Render standard familiars
+			filteredFamiliars.forEach(creature => list.append(buildCreatureCard(creature)));
+
+			// Render Pact of the Chain section
+			if (filteredPactFamiliars.length > 0) {
+				list.insertAdjacentHTML("beforeend", `
+					<div style="grid-column: 1 / -1; border-top: 1px solid var(--rgb-border-grey-muted); margin: 8px 0; padding-top: 8px;">
+						<div class="ve-flex ve-flex-v-center" style="gap: 6px;">
+							<span style="font-size: 1.1em;">\ud83d\udd17</span>
+							<span class="bold ve-small" style="text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7;">Pact of the Chain</span>
+						</div>
+					</div>
+				`);
+				filteredPactFamiliars.forEach(creature => list.append(buildCreatureCard(creature)));
+			}
 		};
 
 		search.addEventListener("input", () => renderList(search.value));
@@ -3414,8 +3738,9 @@ class CharacterSheetSpells {
 	}
 
 	/**
-	 * Select a familiar and add it to companions
-	 * @param {Object} creature - The bestiary creature data
+	 * Select a familiar and add it to companions.
+	 * Accepts a bestiary creature object, or a custom familiar object with `isCustom: true`.
+	 * @param {Object} creature - The bestiary creature data, or custom familiar data
 	 * @param {Object} opts - Options
 	 * @param {boolean} opts.isWildCompanion - If true, familiar is summoned as Fey (Wild Companion)
 	 */
@@ -3427,16 +3752,43 @@ class CharacterSheetSpells {
 		existingFamiliars.forEach(f => this._state.removeCompanion?.(f.id));
 
 		// Determine origin and creature type
-		const origin = isWildCompanion ? "Wild Companion" : "Find Familiar";
-		const creatureType = isWildCompanion ? "fey" : "beast";
-
-		// Add the new familiar
-		const companionId = this._state.addCompanionFromBestiary?.(
-			creature,
-			CharacterSheetState.COMPANION_TYPES.FAMILIAR,
-			origin,
-			{creatureTypeOverride: creatureType}, // Pass type override
+		const calculations = this._state?.getFeatureCalculations?.() || {};
+		const isPactCreature = calculations.hasPactOfTheChain && calculations.pactOfTheChainCreatures?.some(
+			n => n.toLowerCase() === creature.name?.toLowerCase(),
 		);
+		let origin;
+		if (isWildCompanion) origin = "Wild Companion";
+		else if (isPactCreature) origin = "Pact of the Chain";
+		else origin = "Find Familiar";
+		const creatureType = isWildCompanion ? "fey" : (creature.creatureType || "beast");
+
+		let companionId;
+		if (creature.isCustom) {
+			// Custom familiar — use addCompanion directly
+			const speed = creature.speed && typeof creature.speed === "object"
+				? creature.speed
+				: {walk: creature.speed || 30};
+			const abilities = creature.abilities || {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10};
+			companionId = this._state.addCompanion?.({
+				name: creature.name,
+				type: CharacterSheetState.COMPANION_TYPES.FAMILIAR,
+				origin: `${origin} (Custom)`,
+				creatureType,
+				ac: creature.ac,
+				hp: {max: creature.hp, current: creature.hp},
+				speed,
+				abilities,
+				skillProficiencies: creature.skillProficiencies || {},
+			});
+		} else {
+			// Bestiary creature — use addCompanionFromBestiary
+			companionId = this._state.addCompanionFromBestiary?.(
+				creature,
+				CharacterSheetState.COMPANION_TYPES.FAMILIAR,
+				origin,
+				{creatureTypeOverride: creatureType},
+			);
+		}
 
 		// Update the creature type if Wild Companion
 		if (companionId && isWildCompanion) {

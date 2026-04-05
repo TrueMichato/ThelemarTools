@@ -516,13 +516,16 @@ class SpellGrantParser {
 	static _parseSpellRef (spellRef, additionalProps = {}) {
 		if (!spellRef || typeof spellRef !== "string") return null;
 
-		// Strip cantrip suffix (#c) if present - matches builder pattern
+		// Detect cantrip suffix (#c) before stripping — sets level: 0
+		const isCantrip = spellRef.endsWith("#c");
 		const cleanRef = spellRef.replace(/#c$/, "");
 		const [name, source] = cleanRef.split("|");
 		return {
 			name: name.toTitleCase(),
 			source: source?.toUpperCase() || Parser.SRC_PHB,
 			...additionalProps,
+			// Place after spread so cantrip suffix always wins over additionalProps
+			...(isCantrip ? {level: 0} : {}),
 		};
 	}
 
@@ -3740,6 +3743,61 @@ class CharacterSheetState {
 		}
 
 		if (migratedCount > 0) {
+		}
+
+		// Migrate cantrips incorrectly stored in spellsKnown (level 0 or level 1 with feat source)
+		// This fixes a bug where feat-granted cantrips (e.g. Telekinetic → Mage Hand) were stored
+		// in spellsKnown instead of cantripsKnown because the #c suffix wasn't setting level: 0
+		const knownCantrips = new Set([
+			"mage hand", "light", "sacred flame", "eldritch blast", "fire bolt",
+			"minor illusion", "prestidigitation", "thaumaturgy", "druidcraft",
+			"message", "ray of frost", "shocking grasp", "chill touch",
+			"guidance", "resistance", "spare the dying", "true strike",
+			"blade ward", "friends", "dancing lights", "vicious mockery",
+			"produce flame", "shillelagh", "thorn whip", "poison spray",
+			"mending", "shape water", "control flames", "gust", "mold earth",
+			"thunderclap", "booming blade", "green-flame blade", "sword burst",
+			"word of radiance", "toll the dead", "infestation", "primal savagery",
+			"encode thoughts", "sapping sting", "mind sliver",
+			"create bonfire", "frostbite", "magic stone", "lightning lure",
+			"starry wisp", "elementalism",
+		]);
+
+		if (this._data.spellcasting?.spellsKnown?.length) {
+			const toMigrate = [];
+			this._data.spellcasting.spellsKnown = this._data.spellcasting.spellsKnown.filter(spell => {
+				// Spell is level 0 OR spell is level 1 from a feat source and is a known cantrip name
+				const isLevel0 = spell.level === 0;
+				const isMisplacedCantrip = spell.level === 1
+					&& spell.sourceFeature
+					&& knownCantrips.has(spell.name?.toLowerCase());
+				if (isLevel0 || isMisplacedCantrip) {
+					toMigrate.push(spell);
+					return false; // remove from spellsKnown
+				}
+				return true;
+			});
+
+			toMigrate.forEach(spell => {
+				// Only add if not already in cantripsKnown
+				const alreadyExists = this._data.spellcasting.cantripsKnown?.some(
+					c => c.name === spell.name && c.source === spell.source,
+				);
+				if (!alreadyExists) {
+					this.addCantrip({
+						name: spell.name,
+						source: spell.source,
+						school: spell.school,
+						sourceFeature: spell.sourceFeature,
+						sourceClass: spell.sourceClass,
+						castingTime: spell.castingTime,
+						range: spell.range,
+						duration: spell.duration,
+						components: spell.components,
+						concentration: spell.concentration,
+					});
+				}
+			});
 		}
 	}
 
@@ -8049,10 +8107,17 @@ class CharacterSheetState {
 			name: spell.name,
 			source: spell.source || Parser.SRC_PHB,
 			level: spell.level,
+			school: spell.school,
 			atWill: spell.atWill || false,
 			sourceFeature: spell.sourceFeature,
 			sourceClass: spell.sourceClass || null,
 			subschools: spell.subschools || [],
+			castingTime: spell.castingTime || "",
+			range: spell.range || "",
+			duration: spell.duration || "",
+			components: spell.components || "",
+			concentration: spell.concentration || false,
+			ritual: spell.ritual || false,
 		};
 
 		// Add uses tracking if not at-will
@@ -11222,6 +11287,19 @@ class CharacterSheetState {
 					// Pact Boon (PHB level 3)
 					if (!is2024 && level >= 3) {
 						calculations.hasPactBoon = true;
+					}
+
+					// Pact of the Chain — detect from features (PHB featureType "PB", XPHB featureType "EI")
+					const hasPactOfTheChain = this._data.features?.some(f =>
+						f.name?.toLowerCase() === "pact of the chain"
+					);
+					if (hasPactOfTheChain) {
+						calculations.hasPactOfTheChain = true;
+						// PHB: Imp, Pseudodragon, Quasit, Sprite
+						// XPHB: expanded list including Skeleton, Slaad Tadpole, Sphinx of Wonder, Venomous Snake
+						calculations.pactOfTheChainCreatures = is2024
+							? ["Imp", "Pseudodragon", "Quasit", "Skeleton", "Slaad Tadpole", "Sphinx of Wonder", "Sprite", "Venomous Snake"]
+							: ["Imp", "Pseudodragon", "Quasit", "Sprite"];
 					}
 
 					// TGTT: Pact of Transformation (level 3)
@@ -14595,6 +14673,7 @@ class CharacterSheetState {
 
 								// Improved Familiar (level 3) - Free Find Familiar, enhanced stats
 								calculations.hasImprovedFamiliar = true;
+								calculations.hasAnimalAccomplice = true;
 								calculations.familiarIntelligence = 8 + profBonus;
 								calculations.familiarMaxHp = 3 * level;
 								// Familiar gains prof bonus to AC, saves, and skills when proficient
@@ -20277,7 +20356,7 @@ class CharacterSheetState {
 		});
 	}
 
-	addFeature (feature) {
+	addFeature (feature, opts = {}) {
 		// Deduplicate: don't add if feature with same name, source, and className/level combo exists
 		const isDuplicate = this._data.features.some(f => {
 			if (f.name !== feature.name) return false;
@@ -20368,7 +20447,7 @@ class CharacterSheetState {
 		}
 
 		// Check if this feature grants spells (innate or known)
-		this._processFeatureSpells(feature, featureData.id);
+		this._processFeatureSpells(feature, featureData.id, {allSpells: opts?.allSpells});
 
 		// Check if this feature grants modifiers to rolls, AC, etc.
 		this._processFeatureModifiers(feature, featureData.id);
@@ -20847,9 +20926,12 @@ class CharacterSheetState {
 	 * Process spells granted by a feature
 	 * @param {object} feature - Feature data (may have additionalSpells property or description)
 	 * @param {string} featureId - ID of the feature in state
+	 * @param {object} [opts] - Options
+	 * @param {Array} [opts.allSpells] - Full spell database for metadata enrichment
 	 * @returns {boolean} True if there are pending spell choices that need UI interaction
 	 */
-	_processFeatureSpells (feature, featureId) {
+	_processFeatureSpells (feature, featureId, opts = {}) {
+		const {allSpells} = opts;
 		let spells = [];
 		let hasPendingChoices = false;
 
@@ -20881,27 +20963,64 @@ class CharacterSheetState {
 				return;
 			}
 
+			// Try to resolve the full spell object for metadata enrichment
+			const fullSpell = allSpells?.length
+				? CharacterSheetClassUtils._resolveSpellReference(`${spell.name}|${spell.source}`, allSpells)
+				: null;
+
 			// Add as innate spell if marked as such
 			if (spell.innate) {
-				this.addInnateSpell({
-					name: spell.name,
-					source: spell.source,
-					level: spell.level,
-					atWill: spell.atWill,
-					uses: spell.uses,
-					recharge: spell.recharge || "long",
-					sourceFeature: feature.name,
-				});
+				if (fullSpell) {
+					this.addInnateSpell(CharacterSheetClassUtils.buildInnateSpellStateObject(fullSpell, {
+						sourceFeature: feature.name,
+						atWill: spell.atWill,
+						uses: spell.uses,
+						recharge: spell.recharge || "long",
+					}));
+				} else {
+					this.addInnateSpell({
+						name: spell.name,
+						source: spell.source,
+						level: spell.level,
+						atWill: spell.atWill,
+						uses: spell.uses,
+						recharge: spell.recharge || "long",
+						sourceFeature: feature.name,
+					});
+				}
+			}
+			// Add as cantrip
+			else if (spell.level === 0) {
+				if (fullSpell) {
+					this.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(fullSpell, {
+						sourceFeature: feature.name,
+						sourceClass: null,
+					}));
+				} else {
+					this.addCantrip({
+						name: spell.name,
+						source: spell.source,
+						sourceFeature: feature.name,
+					});
+				}
 			}
 			// Otherwise add as known spell
 			else {
-				this.addSpell({
-					name: spell.name,
-					source: spell.source,
-					level: spell.level || 1,
-					prepared: spell.prepared,
-					sourceFeature: feature.name,
-				});
+				if (fullSpell) {
+					this.addSpell(CharacterSheetClassUtils.buildSpellStateObject(fullSpell, {
+						sourceFeature: feature.name,
+						sourceClass: null,
+						prepared: spell.prepared,
+					}));
+				} else {
+					this.addSpell({
+						name: spell.name,
+						source: spell.source,
+						level: spell.level || 1,
+						prepared: spell.prepared,
+						sourceFeature: feature.name,
+					});
+				}
 			}
 		});
 
@@ -21008,7 +21127,7 @@ class CharacterSheetState {
 		return this.getFeature(featureName) !== null;
 	}
 
-	addFeat (feat) {
+	addFeat (feat, opts = {}) {
 		// Check for duplicates
 		if (this._data.feats.find(f => f.name === feat.name && f.source === feat.source)) {
 			return false;
@@ -21064,7 +21183,7 @@ class CharacterSheetState {
 		}
 
 		// Process spells granted by this feat
-		this._processFeatureSpells(featData, featData.id);
+		this._processFeatureSpells(featData, featData.id, {allSpells: opts.allSpells});
 
 		// Process modifiers granted by this feat
 		this._processFeatureModifiers(featData, featData.id);

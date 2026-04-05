@@ -609,7 +609,7 @@ class CharacterSheetFeatures {
 			});
 		}
 
-		this._state.addFeat(newFeat);
+		this._state.addFeat(newFeat, {allSpells: this._page.getSpells()});
 		this.render();
 		this._page.saveCharacter();
 

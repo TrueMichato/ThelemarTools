@@ -1523,7 +1523,10 @@ class CharacterSheetPage {
 	async _onSummonFamiliar () {
 		// Delegate to the spells module's familiar picker
 		if (this._spells?._pShowFamiliarPicker) {
-			await this._spells._pShowFamiliarPicker();
+			const calculations = this._state.getFeatureCalculations?.() || {};
+			await this._spells._pShowFamiliarPicker({
+				pactCreatureNames: calculations.pactOfTheChainCreatures || [],
+			});
 		} else {
 			JqueryUtil.doToast({type: "warning", content: "Familiar picker not available."});
 		}
@@ -1542,14 +1545,14 @@ class CharacterSheetPage {
 		const spells = this._state.getSpells?.() || [];
 		const cantrips = this._state.getCantrips?.() || [];
 
-		// Check if character has Find Familiar spell or is a warlock (Pact of Chain)
+		// Check if character has Find Familiar spell, Pact of the Chain, or Animal Accomplice
 		const hasFindFamiliar = spells.some(s => s.name?.toLowerCase() === "find familiar") ||
 			cantrips.some(c => c.name?.toLowerCase() === "find familiar");
-		const isWarlock = this._state.getClassLevel?.("warlock") > 0;
-		const hasAnimalAccomplice = calculations.hasAnimalAccomplice; // Wizard School of Illusion
+		const hasPactOfTheChain = calculations.hasPactOfTheChain;
+		const hasAnimalAccomplice = calculations.hasAnimalAccomplice || calculations.hasImprovedFamiliar;
 
-		// Always show summon familiar if they have the spell, are a warlock, or have animal accomplice
-		if (hasFindFamiliar || isWarlock || hasAnimalAccomplice) {
+		// Show summon familiar if they have the spell, Pact of the Chain, or Animal Accomplice
+		if (hasFindFamiliar || hasPactOfTheChain || hasAnimalAccomplice) {
 			const btn = e_({outer: `<button class="ve-btn ve-btn-primary" style="white-space: nowrap;">
 				<span class="glyphicon glyphicon-plus mr-1"></span>🦉 Summon Familiar
 			</button>`});

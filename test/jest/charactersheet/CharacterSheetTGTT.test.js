@@ -8146,6 +8146,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					
 					const calcs = state.getFeatureCalculations();
 					expect(calcs.hasImprovedFamiliar).toBe(true);
+					expect(calcs.hasAnimalAccomplice).toBe(true);
 					expect(calcs.familiarIntelligence).toBe(8 + 2); // 8 + prof(2)
 					expect(calcs.familiarMaxHp).toBe(3 * 3); // 3 × level
 					expect(calcs.familiarProfBonus).toBe(2); // Prof bonus at level 3

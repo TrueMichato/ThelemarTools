@@ -292,4 +292,52 @@ describe("CharacterSheetQuickBuild Feat Ability Score Stacking", () => {
 			expect(computeRunningScores(2).str).toBe(17);
 		});
 	});
+
+	describe("_computeRunningScoresWithCurrentASI (within-level sync for isBoth mode)", () => {
+		let qb;
+
+		beforeEach(() => {
+			qb = Object.create(CharacterSheetQuickBuild.prototype);
+		});
+
+		test("adds current level ASI choices to running scores", () => {
+			const runningScores = {str: 12, dex: 10, con: 14, int: 10, wis: 10, cha: 10};
+			const sel = {
+				abilityChoices: {str: 2},
+			};
+
+			const result = qb._computeRunningScoresWithCurrentASI(runningScores, sel);
+			expect(result.str).toBe(14); // 12 + 2 from ASI
+			expect(result.con).toBe(14); // Unchanged
+			expect(result.dex).toBe(10); // Unchanged
+		});
+
+		test("returns copy of running scores when no ASI choices", () => {
+			const runningScores = {str: 12, dex: 10, con: 14, int: 10, wis: 10, cha: 10};
+			const sel = {abilityChoices: {}};
+
+			const result = qb._computeRunningScoresWithCurrentASI(runningScores, sel);
+			expect(result.str).toBe(12);
+			expect(result).not.toBe(runningScores); // Should be a new object
+		});
+
+		test("handles split ASI (+1/+1) correctly", () => {
+			const runningScores = {str: 12, dex: 10, con: 14, int: 10, wis: 10, cha: 10};
+			const sel = {
+				abilityChoices: {str: 1, dex: 1},
+			};
+
+			const result = qb._computeRunningScoresWithCurrentASI(runningScores, sel);
+			expect(result.str).toBe(13);
+			expect(result.dex).toBe(11);
+		});
+
+		test("handles undefined abilityChoices gracefully", () => {
+			const runningScores = {str: 12, dex: 10, con: 14, int: 10, wis: 10, cha: 10};
+			const sel = {};
+
+			const result = qb._computeRunningScoresWithCurrentASI(runningScores, sel);
+			expect(result.str).toBe(12);
+		});
+	});
 });

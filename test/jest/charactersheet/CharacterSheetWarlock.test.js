@@ -221,6 +221,85 @@ describe("Warlock Core Class Features (PHB)", () => {
 	});
 
 	// -------------------------------------------------------------------------
+	// Pact of the Chain Detection
+	// -------------------------------------------------------------------------
+	describe("Pact of the Chain", () => {
+		it("should detect Pact of the Chain when feature is added (PHB)", () => {
+			state.addClass({name: "Warlock", source: "PHB", level: 3});
+			state.addFeature({
+				name: "Pact of the Chain",
+				source: "PHB",
+				className: "Warlock",
+				classSource: "PHB",
+				level: 3,
+				featureType: "Optional Feature",
+				optionalFeatureTypes: ["PB"],
+			});
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasPactOfTheChain).toBe(true);
+		});
+
+		it("should provide PHB creature list for PHB warlock", () => {
+			state.addClass({name: "Warlock", source: "PHB", level: 3});
+			state.addFeature({
+				name: "Pact of the Chain",
+				source: "PHB",
+				className: "Warlock",
+				classSource: "PHB",
+				level: 3,
+				featureType: "Optional Feature",
+				optionalFeatureTypes: ["PB"],
+			});
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.pactOfTheChainCreatures).toEqual(["Imp", "Pseudodragon", "Quasit", "Sprite"]);
+		});
+
+		it("should provide XPHB expanded creature list for XPHB warlock", () => {
+			state = new CharacterSheetState();
+			state.setRace({name: "Human", source: "XPHB"});
+			state.addClass({name: "Warlock", source: "XPHB", level: 1});
+			state.setAbilityBase("cha", 16);
+			state.addFeature({
+				name: "Pact of the Chain",
+				source: "XPHB",
+				className: "Warlock",
+				classSource: "XPHB",
+				level: 1,
+				featureType: "Optional Feature",
+				optionalFeatureTypes: ["EI"],
+			});
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasPactOfTheChain).toBe(true);
+			expect(calculations.pactOfTheChainCreatures).toContain("Imp");
+			expect(calculations.pactOfTheChainCreatures).toContain("Skeleton");
+			expect(calculations.pactOfTheChainCreatures).toContain("Sphinx of Wonder");
+			expect(calculations.pactOfTheChainCreatures).toContain("Venomous Snake");
+			expect(calculations.pactOfTheChainCreatures.length).toBe(8);
+		});
+
+		it("should NOT have hasPactOfTheChain without the feature", () => {
+			state.addClass({name: "Warlock", source: "PHB", level: 3});
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasPactOfTheChain).toBeFalsy();
+		});
+
+		it("should NOT have hasPactOfTheChain with a different pact boon", () => {
+			state.addClass({name: "Warlock", source: "PHB", level: 3});
+			state.addFeature({
+				name: "Pact of the Blade",
+				source: "PHB",
+				className: "Warlock",
+				classSource: "PHB",
+				level: 3,
+				featureType: "Optional Feature",
+				optionalFeatureTypes: ["PB"],
+			});
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasPactOfTheChain).toBeFalsy();
+		});
+	});
+
+	// -------------------------------------------------------------------------
 	// Mystic Arcanum
 	// -------------------------------------------------------------------------
 	describe("Mystic Arcanum", () => {

@@ -1487,6 +1487,69 @@ class CharacterSheetLevelUp {
 		let pointsRemaining = 2;
 		const asiValues = {str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0};
 
+		// Shared state for ASI↔Feat score synchronization (isBothAsiAndFeat mode)
+		let _currentSelectedFeat = null;
+		let _currentFeatChoices = null; // reference to getFeatChoices() result for current feat
+
+		/**
+		 * Compute effective scores including pending ASI and feat ability choices at this level.
+		 * Used to keep both sections in sync when isBothAsiAndFeat is true.
+		 */
+		const _computePendingScores = () => {
+			const scores = {};
+			Parser.ABIL_ABVS.forEach(abl => {
+				let score = this._state.getAbilityScore(abl) + (asiValues[abl] || 0);
+				if (_currentSelectedFeat?._featChoices?.ability === abl && _currentFeatChoices?.ability) {
+					score += _currentFeatChoices.ability.amount || 1;
+				}
+				scores[abl] = Math.min(20, score);
+			});
+			return scores;
+		};
+
+		/**
+		 * Update ASI grid "new score" displays to reflect feat ability choice contributions.
+		 */
+		const _refreshAsiDisplays = () => {
+			if (!isBothAsiAndFeat) return;
+			Parser.ABIL_ABVS.forEach(abl => {
+				const baseScore = this._state.getAbilityScore(abl);
+				let featBonus = 0;
+				if (_currentSelectedFeat?._featChoices?.ability === abl && _currentFeatChoices?.ability) {
+					featBonus = _currentFeatChoices.ability.amount || 1;
+				}
+				const newScore = Math.min(20, baseScore + (asiValues[abl] || 0) + featBonus);
+				const newEl = abilitiesContainer.querySelector(`#asi-new-${abl}`);
+				if (newEl) newEl.textContent = newScore;
+			});
+		};
+
+		/**
+		 * Re-render feat ability choice buttons with current pending scores.
+		 * Called when ASI values change to update the score display in feat ability buttons.
+		 */
+		const _refreshFeatAbilityChoices = () => {
+			if (!isBothAsiAndFeat) return;
+			if (!_currentSelectedFeat || !_currentFeatChoices?.ability) return;
+
+			const abilityContainer = featsContainer.querySelector(".charsheet__levelup-feat-ability-choices");
+			if (!abilityContainer) return;
+
+			// Compute scores with ASI pending (but not feat choice, since we're showing "before feat" scores)
+			const pendingScores = {};
+			Parser.ABIL_ABVS.forEach(abl => {
+				pendingScores[abl] = this._state.getAbilityScore(abl) + (asiValues[abl] || 0);
+			});
+
+			this._renderFeatAbilityButtons(
+				_currentSelectedFeat,
+				_currentFeatChoices.ability,
+				abilityContainer,
+				() => { _refreshAsiDisplays(); },
+				pendingScores,
+			);
+		};
+
 		const updatePointsDisplay = () => {
 			abilitiesContainer.querySelector(".asi-points-remaining").textContent = pointsRemaining;
 		};
@@ -1519,6 +1582,8 @@ class CharacterSheetLevelUp {
 				row.querySelector(`#asi-new-${abl}`).textContent = currentScore + asiValues[abl];
 				updatePointsDisplay();
 				onAsiChange(abl, -1);
+				_refreshFeatAbilityChoices();
+				_refreshAsiDisplays();
 			});
 
 			row.querySelector(".asi-plus").addEventListener("click", () => {
@@ -1531,6 +1596,8 @@ class CharacterSheetLevelUp {
 				row.querySelector(`#asi-new-${abl}`).textContent = currentScore + asiValues[abl];
 				updatePointsDisplay();
 				onAsiChange(abl, 1);
+				_refreshFeatAbilityChoices();
+				_refreshAsiDisplays();
 			});
 
 			abilitiesGrid.append(row);
@@ -1591,6 +1658,11 @@ class CharacterSheetLevelUp {
 						featsContainer.querySelectorAll(".charsheet__levelup-feat-option").forEach(el => el.classList.remove("selected"));
 						boonEl.classList.add("selected");
 						boonEl.querySelector("input").checked = true;
+
+						// Track current feat for ASI↔Feat sync
+						_currentSelectedFeat = boon;
+						_currentFeatChoices = boonChoices;
+
 						onFeatSelect(boon);
 
 						// Show ability choice UI if boon has choose
@@ -1601,9 +1673,10 @@ class CharacterSheetLevelUp {
 							if (!boon._featChoices) {
 								boon._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: []};
 							}
-							this._renderFeatChoicesUI(boon, boonChoices, featChoicesContainer);
+							this._renderFeatChoicesUI(boon, boonChoices, featChoicesContainer, () => { _refreshAsiDisplays(); });
 							if (featChoicesContainer.children.length) featChoicesContainer.scrollIntoView({behavior: "smooth", block: "nearest"});
 						}
+						_refreshAsiDisplays();
 					});
 
 					epicList.append(boonEl);
@@ -1729,7 +1802,7 @@ class CharacterSheetLevelUp {
 								const spells = key === "_" ? val : (val["1e"] || val["1"] || Object.values(val)[0] || []);
 								if (Array.isArray(spells)) {
 									for (const spell of spells) {
-										if (typeof spell === "object" && spell.choose) {
+										if (typeof spell === "object" && spell.choose && typeof spell.choose === "string") {
 											const filter = spell.choose;
 											const count = spell.count || 1;
 											const maxLevel = filter.match(/level=(\d+)/)?.[1];
@@ -1799,11 +1872,16 @@ class CharacterSheetLevelUp {
 						feat._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: []};
 					}
 
+					// Track current feat for ASI↔Feat sync
+					_currentSelectedFeat = feat;
+					_currentFeatChoices = choices;
+
 					// Render feat choices UI if needed
-					this._renderFeatChoicesUI(feat, choices, featChoicesContainer);
+					this._renderFeatChoicesUI(feat, choices, featChoicesContainer, () => { _refreshAsiDisplays(); });
 					if (featChoicesContainer.children.length) featChoicesContainer.scrollIntoView({behavior: "smooth", block: "nearest"});
 
 					onFeatSelect(feat);
+					_refreshAsiDisplays();
 				});
 
 				featList.append(featEl);
@@ -1855,9 +1933,50 @@ class CharacterSheetLevelUp {
 	}
 
 	/**
-	 * Render feat choices UI for feats with skill/language/ability/tool/expertise/spell selections.
+	 * Render (or re-render) the feat ability choice buttons into a container.
+	 * Extracted to allow ASI↔Feat score synchronization — when ASI values change,
+	 * this is called again to update the displayed scores in the buttons.
+	 * @param {object} feat - The feat object (must have _featChoices initialized)
+	 * @param {object} abilityChoiceSpec - {count, amount, from} from getFeatChoices()
+	 * @param {HTMLElement} container - The container element (will have buttons replaced, label preserved)
+	 * @param {Function} [onAbilityChange] - Callback fired when selection changes
+	 * @param {object} [pendingScores] - Optional pre-computed scores (for QuickBuild running scores)
 	 */
-	_renderFeatChoicesUI (feat, choices, container) {
+	_renderFeatAbilityButtons (feat, abilityChoiceSpec, container, onAbilityChange = null, pendingScores = null) {
+		// Remove existing button grid if re-rendering, but preserve the label
+		container.querySelector(".charsheet__feat-ability-grid")?.remove();
+
+		const abilityGrid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1 charsheet__feat-ability-grid"></div>`});
+
+		abilityChoiceSpec.from.forEach(abl => {
+			const isSelected = feat._featChoices.ability === abl;
+			const currentScore = pendingScores ? pendingScores[abl] : this._state.getAbilityScore(abl);
+			const newScore = Math.min(20, currentScore + (abilityChoiceSpec.amount || 1));
+
+			const btn = e_({outer: `
+				<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}">
+					${Parser.attAbvToFull(abl)} (${currentScore} → ${newScore})
+				</button>
+			`});
+
+			btn.addEventListener("click", () => {
+				feat._featChoices.ability = isSelected ? null : abl;
+				abilityGrid.querySelectorAll(".ve-btn").forEach(el => { el.classList.remove("ve-btn-primary"); el.classList.add("ve-btn-default"); });
+				if (!isSelected) { btn.classList.remove("ve-btn-default"); btn.classList.add("ve-btn-primary"); }
+				if (onAbilityChange) onAbilityChange();
+			});
+			abilityGrid.append(btn);
+		});
+
+		container.append(abilityGrid);
+	}
+
+	/**
+	 * Render feat choices UI for feats with skill/language/ability/tool/expertise/spell selections.
+	 * @param {Function} [onAbilityChange] - Optional callback fired when a feat ability score choice changes.
+	 *   Used by ASI↔Feat sync to update the ASI grid display.
+	 */
+	_renderFeatChoicesUI (feat, choices, container, onAbilityChange = null) {
 		container.innerHTML = "";
 
 		const hasChoices = choices.skills || choices.languages || choices.ability || choices.tools || choices.expertise || choices.spells;
@@ -2107,29 +2226,11 @@ class CharacterSheetLevelUp {
 
 		// Ability score choices
 		if (choices.ability) {
-			const abilitySection = e_({outer: `<div class="mb-2"></div>`});
+			const abilitySection = e_({outer: `<div class="mb-2 charsheet__levelup-feat-ability-choices"></div>`});
 			abilitySection.insertAdjacentHTML("beforeend", `<label class="ve-small">Choose ability to increase by ${choices.ability.amount}:</label>`);
-			const abilityGrid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
 
-			choices.ability.from.forEach(abl => {
-				const isSelected = feat._featChoices.ability === abl;
-				const currentScore = this._state.getAbilityScore(abl);
+			this._renderFeatAbilityButtons(feat, choices.ability, abilitySection, onAbilityChange);
 
-				const btn = e_({outer: `
-					<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}">
-						${Parser.attAbvToFull(abl)} (${currentScore} → ${currentScore + choices.ability.amount})
-					</button>
-				`});
-
-				btn.addEventListener("click", () => {
-					feat._featChoices.ability = isSelected ? null : abl;
-					abilityGrid.querySelectorAll(".ve-btn").forEach(el => { el.classList.remove("ve-btn-primary"); el.classList.add("ve-btn-default"); });
-					if (!isSelected) { btn.classList.remove("ve-btn-default"); btn.classList.add("ve-btn-primary"); }
-				});
-				abilityGrid.append(btn);
-			});
-
-			abilitySection.append(abilityGrid);
 			container.append(abilitySection);
 		}
 
@@ -3285,13 +3386,13 @@ class CharacterSheetLevelUp {
 
 			// Also apply the feat
 			if (selectedFeat) {
-				this._state.addFeat(selectedFeat);
+				this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells()});
 				CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
 				await this._processFeatSpellChoices();
 			}
 		} else if (selectedFeat) {
 			// Normal rules: Feat chosen instead of ASI
-			this._state.addFeat(selectedFeat);
+			this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells()});
 			// Apply feat bonuses if any
 			CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
 			// Process pending spell choices from the feat

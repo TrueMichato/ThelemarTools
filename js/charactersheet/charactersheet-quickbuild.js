@@ -1407,12 +1407,23 @@ class CharacterSheetQuickBuild {
 				const runningScores = computeRunningScores(idx);
 
 				if (isBoth || sel.mode === "asi") {
-					const asiControls = this._renderAsiControls(levelKey, sel, runningScores, () => reRenderFrom(idx + 1));
+					// For isBoth mode: ASI changes should re-render the feat section within
+					// the same level (so feat ability buttons show updated scores), then cascade
+					const onAsiChanged = isBoth
+						? () => { renderAsiContent(); reRenderFrom(idx + 1); }
+						: () => reRenderFrom(idx + 1);
+					const asiControls = this._renderAsiControls(levelKey, sel, runningScores, onAsiChanged);
 					asiContent.append(asiControls);
 				}
 
 				if (isBoth || sel.mode === "feat") {
-					const featSelect = this._renderFeatSelector(levelKey, sel, isEpicBoon, runningScores);
+					// For isBoth mode: pass running scores that include current level's ASI choices,
+					// so feat ability buttons reflect ASI increases at this level
+					const featScores = isBoth ? this._computeRunningScoresWithCurrentASI(runningScores, sel) : runningScores;
+					const onFeatAbilityChanged = isBoth
+						? () => { renderAsiContent(); reRenderFrom(idx + 1); }
+						: null;
+					const featSelect = this._renderFeatSelector(levelKey, sel, isEpicBoon, featScores, onFeatAbilityChanged);
 					asiContent.append(featSelect);
 				}
 			};
@@ -1423,6 +1434,20 @@ class CharacterSheetQuickBuild {
 		});
 
 		content.append(step);
+	}
+
+	/**
+	 * Compute running scores that include the current level's ASI choices.
+	 * Used in isBoth mode so the feat ability buttons reflect ASI increases at this level.
+	 */
+	_computeRunningScoresWithCurrentASI (runningScores, sel) {
+		const scores = {...runningScores};
+		if (sel.abilityChoices) {
+			for (const [abl, inc] of Object.entries(sel.abilityChoices)) {
+				scores[abl] = (scores[abl] || 0) + inc;
+			}
+		}
+		return scores;
 	}
 
 	_renderAsiControls (levelKey, sel, runningScores, onChanged) {
@@ -1484,7 +1509,7 @@ class CharacterSheetQuickBuild {
 		return container;
 	}
 
-	_renderFeatSelector (levelKey, sel, isEpicBoon, runningScores = null) {
+	_renderFeatSelector (levelKey, sel, isEpicBoon, runningScores = null, onFeatAbilityChanged = null) {
 		const container = e_({outer: `<div class="charsheet__quickbuild-feat-select mb-2"></div>`});
 		container.append(e_({outer: `<label class="ve-bold ve-small">${isEpicBoon ? "Epic Boon" : "Feat"} Selection</label>`}));
 
@@ -1613,7 +1638,7 @@ class CharacterSheetQuickBuild {
 						const spellsAtLevel = levelKey ? spellList.known[levelKey] : null;
 						if (Array.isArray(spellsAtLevel)) {
 							spellsAtLevel.forEach(sp => {
-								if (typeof sp === "object" && sp.choose) {
+								if (typeof sp === "object" && sp.choose && typeof sp.choose === "string") {
 									const filter = sp.choose;
 									if (filter.includes("level=0") || filter.includes("level=cantrip")) {
 										choices.spells.cantrips = {count: sp.count || 1, filter};
@@ -1629,7 +1654,7 @@ class CharacterSheetQuickBuild {
 						const parseInnateSpellChoices = (block, isDaily = false) => {
 							if (Array.isArray(block)) {
 								block.forEach(sp => {
-									if (typeof sp === "object" && sp.choose) {
+									if (typeof sp === "object" && sp.choose && typeof sp.choose === "string") {
 										const filter = sp.choose;
 										if (filter.includes("level=0") || filter.includes("level=cantrip")) {
 											choices.spells.cantrips = {count: sp.count || 1, filter};
@@ -1651,7 +1676,7 @@ class CharacterSheetQuickBuild {
 						const parseSpellChoicesFromBlock = (block) => {
 							if (Array.isArray(block)) {
 								block.forEach(sp => {
-									if (typeof sp === "object" && sp.choose) {
+									if (typeof sp === "object" && sp.choose && typeof sp.choose === "string") {
 										const filter = sp.choose;
 										if (filter.includes("level=0") || filter.includes("level=cantrip")) {
 											choices.spells.cantrips = {count: sp.count || 1, filter};
@@ -1717,16 +1742,21 @@ class CharacterSheetQuickBuild {
 				choices.ability.from.forEach(abl => {
 					const isSelected = sel.featChoices.ability === abl;
 					const currentScore = runningScores ? runningScores[abl] : this._state.getAbilityScore(abl);
+					const newScore = Math.min(20, currentScore + (choices.ability.amount || 1));
 
 					const btn = e_({outer: `
 						<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}">
-							${Parser.attAbvToFull(abl)} (${currentScore} → ${currentScore + choices.ability.amount})
+							${Parser.attAbvToFull(abl)} (${currentScore} → ${newScore})
 						</button>
 					`});
 
 					btn.addEventListener("click", () => {
 						sel.featChoices.ability = isSelected ? null : abl;
-						renderFeatChoices();
+						if (onFeatAbilityChanged) {
+							onFeatAbilityChanged();
+						} else {
+							renderFeatChoices();
+						}
 					});
 					abilityGrid.append(btn);
 				});
@@ -4220,11 +4250,11 @@ class CharacterSheetQuickBuild {
 			}
 			// Apply feat
 			if (asiSel.feat) {
-				this._state.addFeat(asiSel.feat);
+				this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells()});
 				CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
 			}
 		} else if (asiSel.mode === "feat" && asiSel.feat) {
-			this._state.addFeat(asiSel.feat);
+			this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells()});
 			CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
 		} else if (asiSel.mode === "asi") {
 			const increases = [];

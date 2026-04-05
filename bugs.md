@@ -30,8 +30,8 @@ _nextStep	@	charactersheet-builder.js:269
 - [X] if I choose a class, move on, and then go back and change the class, I don't change my selection, I add another class - making my character a multicalss even if I didn't want to. This should be fixed to ensure that changing the class selection mid build properly updates the character's class and doesn't just add another class to the character sheet.
 
 ### Levelup / Quickbuild:
-- [] when levelin up and coming to the ASI and Feat step, there is asyncrhonity between the scores in the ASI selection and the feat seleciton. if I had a 16 in str and used ASI to increase it to 18, the feat selection still shows the 16 str if the feat allows me to increase a score of my choosing. This should be fixed to ensure that the feat selection is aware of the ASI increases and shows the correct scores, and vice versa (if I pick a feat that increases my str, the ASI selection should show the increased str score as well).
-- [] when filtering feats in the feat selection step, I get the following error (might be related to jquery removal):
+- [X] when leveling up and coming to the ASI and Feat step, there is asyncrhonity between the scores in the ASI selection and the feat seleciton. if I had a 16 in str and used ASI to increase it to 18, the feat selection still shows the 16 str if the feat allows me to increase a score of my choosing. This should be fixed to ensure that the feat selection is aware of the ASI increases and shows the correct scores, and vice versa (if I pick a feat that increases my str, the ASI selection should show the increased str score as well).
+- [X] when filtering feats in the feat selection step, I get the following error (might be related to jquery removal):
 3charactersheet-quickbuild.js:1634 Uncaught TypeError: filter.includes is not a function
     at charactersheet-quickbuild.js:1634:22
     at Array.forEach (<anonymous>)
@@ -78,8 +78,10 @@ Aberrant%20Spirit.webp:1
 
 
 ### Spells
-- [] when summoning a familiar, the icons are not always correct for the animal, and very repetitive (all birds have the same icon). This should be fixed to show the correct icon for each familiar type.
-- [] when summoning a familiar, there should be a way to create a custom familiar with a custom name and icon, rather than being limited to the predefined options. This would allow for more personalization and creativity in character creation.
+- [X] when summoning a familiar, the icons are not always correct for the animal, and very repetitive (all birds have the same icon). This should be fixed to show the correct icon for each familiar type.
+- [X] Hovering a familiar name in the selection menu shows the hover behind the choice modal.
+- [X] Familiars always retrive both 2014 and 2024 version but don't list which is which.
+- [x] when summoning a familiar, there should be a way to create a custom familiar with a custom name and icon, rather than being limited to the predefined options. This would allow for more personalization and creativity in character creation.
 - [X] when choosing a familiar in the familiar selection menu, I get the following error (might be related to jquery removal):
 charactersheet.js:3988 Uncaught (in promise) TypeError: Cannot set properties of undefined (setting 'display')
     at CharacterSheetPage._renderCompanionsOverviewIndicator (charactersheet.js:3988:42)
@@ -90,7 +92,6 @@ _renderCompanionsOverviewIndicator	@	charactersheet.js:3988
 _renderCompanions	@	charactersheet.js:3593
 _selectFamiliar	@	charactersheet-spells.js:3300
 (anonymous)	@	charactersheet-spells.js:3227
-- [] Find Greater Familiar spell is currently not implemented.
 
 ### Feats:
 - [] The Telekenetic feat adds the mage hand spell as a level 1 spell instead of a cantrip, and it also adds it without most of its information, meaning there is a bug in the way feats in general add spells to the character sheet. This should be fixed to ensure that spells added by feats are added at the correct level and with all relevant information (e.g. spell level, casting time, range, components, etc.).

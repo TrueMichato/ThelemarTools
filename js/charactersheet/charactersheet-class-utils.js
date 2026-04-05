@@ -1806,6 +1806,36 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Build an innate spell state object ready for state.addInnateSpell().
+	 * @param {Object} spell - Raw spell data (full spell object from data)
+	 * @param {Object} opts
+	 * @param {string} opts.sourceFeature
+	 * @param {boolean} [opts.atWill=false]
+	 * @param {number} [opts.uses]
+	 * @param {string} [opts.recharge="long"]
+	 * @returns {Object} Innate spell state object
+	 */
+	static buildInnateSpellStateObject (spell, {sourceFeature, atWill = false, uses, recharge = "long"}) {
+		return {
+			name: spell.name,
+			source: spell.source,
+			level: spell.level,
+			school: spell.school,
+			atWill,
+			uses,
+			recharge,
+			sourceFeature,
+			castingTime: CharacterSheetClassUtils.getSpellCastingTime(spell),
+			range: CharacterSheetClassUtils.getSpellRange(spell),
+			components: CharacterSheetClassUtils.getSpellComponents(spell),
+			duration: CharacterSheetClassUtils.getSpellDuration(spell),
+			concentration: CharacterSheetClassUtils.spellIsConcentration(spell),
+			ritual: CharacterSheetClassUtils.spellIsRitual(spell),
+			subschools: spell.subschools || [],
+		};
+	}
+
+	/**
 	 * Build a normalized feature object ready for state.addFeature(), preserving
 	 * metadata-first fields while applying canonical class/level/source defaults.
 	 * @param {Object} feature - Raw feature payload
