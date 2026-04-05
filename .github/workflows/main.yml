@@ -68,9 +68,10 @@ jobs:
                echo "IMAGE_ID_SRC=$(echo ghcr.io/${{ github.repository_owner }}/$IMAGE_NAME-src | tr '[A-Z]' '[a-z]')" >> $GITHUB_ENV
                echo "IMAGE_ID_IMG=$(echo ghcr.io/${{ github.repository_owner }}/$IMAGE_NAME-img | tr '[A-Z]' '[a-z]')" >> $GITHUB_ENV
 
-         -  name: Set Deployed Flag
+         -  name: Set Deployed Flag and Image Root
             run: |
                bash ./.github/set-deployed-flag.sh ${{ github.ref_name }}
+               bash ./.github/set-img-root.sh ${{ github.repository_owner }}
 
          # Remove entries from the `.gitignore` so the gh-pages action can correctly add+commit them to the pages branch
          -  name: Build Service Worker

@@ -273,7 +273,7 @@ class CharacterSheetFeatures {
 		// Search input with icon
 		const searchWrapper = e_({tag: "div", clazz: "charsheet__modal-search"});
 		filterContainer.append(searchWrapper);
-		const search = e_({tag: "input", clazz: "form-control"});
+		const search = e_({tag: "input", clazz: "ve-form-control"});
 		search.type = "text";
 		search.placeholder = "🔍 Search feats by name...";
 		searchWrapper.append(search);
@@ -1483,6 +1483,8 @@ class CharacterSheetFeatures {
 			"FS:B": "Bard Fighting Styles",
 			"RN": "Rune Knight Runes",
 			"AF": "Alchemist Formulas",
+			"DW:C": "Dreamwalker Core Abilities",
+			"DW:S": "Dreamwalker Special Abilities",
 		};
 
 		// Combat tradition names (Thelemar homebrew)

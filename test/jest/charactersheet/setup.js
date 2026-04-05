@@ -112,6 +112,7 @@ globalThis.Parser = globalThis.Parser || {
 	},
 	sourceJsonToAbv: (source) => source,
 	sourceJsonToFull: (source) => source,
+	nameToTokenName: (name) => (name || "").replace(/"/g, ""),
 	getOrdinalForm: (n) => {
 		const suffixes = ["th", "st", "nd", "rd"];
 		const v = n % 100;
@@ -157,8 +158,32 @@ globalThis.Renderer = globalThis.Renderer || {
 	get: () => ({
 		render: (entry) => typeof entry === "string" ? entry : JSON.stringify(entry),
 		recursiveRender: (entry) => typeof entry === "string" ? entry : JSON.stringify(entry),
+		getMediaUrl: (type, path) => `${type}/${path}`,
+		baseUrl: "",
 	}),
 };
+// Ensure Renderer.monster exists for companion icon token URLs
+if (!globalThis.Renderer.monster) {
+	globalThis.Renderer.monster = {
+		getTokenUrl: (mon) => {
+			if (!mon?.name || !mon?.source) return null;
+			const tokenName = (globalThis.Parser?.nameToTokenName || ((n) => n))(mon.name);
+			return `img/bestiary/tokens/${mon.source}/${tokenName}.webp`;
+		},
+		hasToken: (mon) => !!mon?.hasToken,
+	};
+}
+// Ensure Renderer.generic exists
+if (!globalThis.Renderer.generic) {
+	globalThis.Renderer.generic = {
+		getTokenUrl: (ent, mediaDir) => {
+			if (!ent?.name || !ent?.source) return null;
+			const tokenName = (globalThis.Parser?.nameToTokenName || ((n) => n))(ent.name);
+			return `img/${mediaDir}/${ent.source}/${tokenName}.webp`;
+		},
+		hasToken: (ent) => !!ent?.hasToken,
+	};
+}
 // Ensure Renderer.spell.getCombinedClasses exists for spell filtering tests
 if (!globalThis.Renderer.spell) {
 	globalThis.Renderer.spell = {

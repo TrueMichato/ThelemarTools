@@ -3353,12 +3353,12 @@ class CharacterSheetCombat {
 
 		// Step 1: Choose number of creatures
 		modalInner.append(e_({outer: `<div class="mb-2 ve-small"><strong>How many creatures?</strong> (each in reach)</div>`}));
-		const numInput = e_({outer: `<input type="number" class="form-control form-control-sm mb-3" min="1" max="10" value="2" style="width: 80px;">`});
+		const numInput = e_({outer: `<input type="number" class="ve-form-control ve-input-sm mb-3" min="1" max="10" value="2" style="width: 80px;">`});
 		modalInner.append(numInput);
 
 		// Step 2: Choose weapon
 		modalInner.append(e_({outer: `<div class="mb-2 ve-small"><strong>Choose weapon attack:</strong></div>`}));
-		const select = e_({tag: "select", clazz: "form-control form-control-sm mb-3"});
+		const select = e_({tag: "select", clazz: "ve-form-control ve-input-sm mb-3"});
 		for (const atk of attacks) {
 			select.append(e_({outer: `<option value="${atk.id}">${atk.name} (+${atk.attackBonus || 0})</option>`}));
 		}
@@ -6047,18 +6047,18 @@ class CharacterSheetCombat {
 		const filterSection = e_({outer: `
 			<div class="charsheet__method-picker-filters">
 				<div class="charsheet__method-picker-search">
-					<input type="text" class="form-control form-control-sm" id="method-picker-search" placeholder="🔍 Search methods...">
+					<input type="text" class="ve-form-control ve-input-sm" id="method-picker-search" placeholder="🔍 Search methods...">
 				</div>
-				<select class="form-control form-control-sm charsheet__method-picker-filter-select" id="method-picker-trad-filter" style="min-width: 130px;">
+				<select class="ve-form-control ve-input-sm charsheet__method-picker-filter-select" id="method-picker-trad-filter" style="min-width: 130px;">
 					<option value="all">All Traditions</option>
 				</select>
-				<select class="form-control form-control-sm charsheet__method-picker-filter-select" id="method-picker-degree" style="min-width: 100px;">
+				<select class="ve-form-control ve-input-sm charsheet__method-picker-filter-select" id="method-picker-degree" style="min-width: 100px;">
 					<option value="all">All Degrees</option>
 					${[1, 2, 3, 4, 5].filter(d => d <= maxDegree).map(d =>
 		`<option value="${d}">${d}${this._getOrdinalSuffix(d)} Degree</option>`,
 	).join("")}
 				</select>
-				<select class="form-control form-control-sm charsheet__method-picker-filter-select" id="method-picker-filter" style="min-width: 90px;">
+				<select class="ve-form-control ve-input-sm charsheet__method-picker-filter-select" id="method-picker-filter" style="min-width: 90px;">
 					<option value="all">All</option>
 					<option value="known">Known</option>
 					<option value="available">Available</option>

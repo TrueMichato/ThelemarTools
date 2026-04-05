@@ -469,7 +469,7 @@ export class CharacterSheetNotes {
 		const form = e_({tag: "div", clazz: "charsheet__note-edit-form"});
 
 		// Title
-		const titleInput = e_({tag: "input", clazz: "form-control mb-2"});
+		const titleInput = e_({tag: "input", clazz: "ve-form-control mb-2"});
 		titleInput.type = "text";
 		titleInput.placeholder = "Note title...";
 		titleInput.value = existingNote?.title || "";
@@ -477,7 +477,7 @@ export class CharacterSheetNotes {
 		form.append(titleInput);
 
 		// Content with markdown hint
-		const contentArea = e_({tag: "textarea", clazz: "form-control mb-2"});
+		const contentArea = e_({tag: "textarea", clazz: "ve-form-control mb-2"});
 		contentArea.rows = 6;
 		contentArea.placeholder = "Note content...\n\nSupports: **bold**, *italic*, `code`, and 5etools tags like {@spell fireball}";
 		contentArea.value = existingNote?.content || "";
@@ -486,7 +486,7 @@ export class CharacterSheetNotes {
 
 		// Tab selection - default to current tab for new notes
 		const defaultTab = isNew ? (this._activeTab || "") : (existingNote?.tab || "");
-		const tabSelect = e_({tag: "select", clazz: "form-control mb-2"});
+		const tabSelect = e_({tag: "select", clazz: "ve-form-control mb-2"});
 		tabOptions.forEach(opt => {
 			const option = e_({tag: "option", txt: opt.label});
 			option.value = opt.value;
@@ -599,7 +599,7 @@ export class CharacterSheetNotes {
 
 		const editor = e_({outer: `
 			<div class="charsheet__inline-note-editor">
-				<textarea class="form-control form-control-sm" rows="2" placeholder="Add a note...">${currentNote}</textarea>
+				<textarea class="ve-form-control ve-input-sm" rows="2" placeholder="Add a note...">${currentNote}</textarea>
 				<div class="ve-flex ve-flex-h-right mt-1" style="gap: 4px;">
 					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__inline-note-cancel">Cancel</button>
 					<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__inline-note-save">Save</button>
@@ -641,7 +641,7 @@ export class CharacterSheetNotes {
 			isMinHeight0: true,
 		});
 
-		const textarea = e_({tag: "textarea", clazz: "form-control"});
+		const textarea = e_({tag: "textarea", clazz: "ve-form-control"});
 		textarea.rows = 6;
 		textarea.placeholder = `Add notes about this ${entityType}...`;
 		textarea.value = currentNote;

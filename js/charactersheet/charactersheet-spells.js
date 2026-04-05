@@ -532,7 +532,7 @@ class CharacterSheetSpells {
 		// Search input with icon
 		const searchWrapper = e_({tag: "div", clazz: "charsheet__modal-search"});
 		filterRow.append(searchWrapper);
-		const search = e_({tag: "input", attr: {type: "text", placeholder: "🔍 Search spells by name..."}, clazz: "form-control"});
+		const search = e_({tag: "input", attr: {type: "text", placeholder: "🔍 Search spells by name..."}, clazz: "ve-form-control"});
 		searchWrapper.append(search);
 
 		// Get all unique classes and subclasses from spells for the filters
@@ -1732,6 +1732,7 @@ class CharacterSheetSpells {
 		// Determine source class — Gambler spells are tagged for tracking
 		const classes = this._state.getClasses();
 		const isGambler = classes?.some(c => c.subclass?.name === "Gambler");
+		const hasSpellbook = classes?.some(c => c.name === "Wizard");
 
 		this._state.addSpell({
 			name: spell.name,
@@ -1741,6 +1742,7 @@ class CharacterSheetSpells {
 			prepared: spell.level === 0, // Cantrips are always prepared
 			ritual: isRitual,
 			concentration: isConcentration,
+			inSpellbook: hasSpellbook && spell.level > 0,
 			castingTime: this._getCastingTime(spell),
 			range: this._getRange(spell),
 			components: this._getComponents(spell),
@@ -2628,7 +2630,7 @@ class CharacterSheetSpells {
 		// Search filter
 		const searchRow = e_({outer: `
 			<div class="mb-2">
-				<input type="text" class="form-control form-control-sm" placeholder="Filter table..." style="max-width: 300px;">
+				<input type="text" class="ve-form-control ve-input-sm" placeholder="Filter table..." style="max-width: 300px;">
 			</div>
 		`});
 		modalInner.append(searchRow);
@@ -3000,7 +3002,7 @@ class CharacterSheetSpells {
 		const searchContainer = e_({outer: `<div class="ve-flex ve-flex-v-center mb-3" style="gap: 8px;"></div>`});
 		modalInner.append(searchContainer);
 		searchContainer.insertAdjacentHTML("beforeend", `<span style="font-size: 1.2em;">🔍</span>`);
-		const search = e_({outer: `<input type="text" class="form-control" placeholder="Search creatures..." style="flex: 1;">`});
+		const search = e_({outer: `<input type="text" class="ve-form-control" placeholder="Search creatures..." style="flex: 1;">`});
 		searchContainer.append(search);
 
 		// Creatures grid
@@ -3025,8 +3027,8 @@ class CharacterSheetSpells {
 				const crDisplay = cr === 0.125 ? "⅛" : cr === 0.25 ? "¼" : cr === 0.5 ? "½" : cr;
 				const speeds = this._formatCreatureSpeeds(creature.speed);
 
-				// Get emoji based on creature type/name
-				const emoji = this._getCreatureEmoji(creature);
+				// Get icon for this creature (token image with emoji fallback)
+				const creatureIconHtml = CharacterSheetClassUtils.getCompanionIconHtml(creature, "lg");
 
 				// Build hover link
 				let nameDisplay;
@@ -3049,7 +3051,7 @@ class CharacterSheetSpells {
 						position: relative;
 					">
 						<div class="ve-flex ve-flex-v-center mb-2" style="gap: 8px;">
-							<span style="font-size: 1.8em;">${emoji}</span>
+							${creatureIconHtml}
 							<div class="ve-flex-col" style="flex: 1;">
 								<div class="bold" style="font-size: 1.05em;">${nameDisplay}</div>
 								<span class="ve-muted ve-small">CR ${crDisplay}</span>
@@ -3123,32 +3125,12 @@ class CharacterSheetSpells {
 	}
 
 	/**
-	 * Get emoji for a creature based on its type/name
+	 * Get emoji for a creature based on its type/name.
+	 * Delegates to the centralized utility in CharacterSheetClassUtils.
 	 */
 	_getCreatureEmoji (creature) {
-		const name = creature.name.toLowerCase();
 		const type = typeof creature.type === "string" ? creature.type : creature.type?.type;
-
-		const nameEmojis = {
-			wolf: "🐺", bear: "🐻", elk: "🦌", boar: "🐗", lion: "🦁", tiger: "🐅",
-			panther: "🐆", ape: "🦍", eagle: "🦅", hawk: "🦅", owl: "🦉", raven: "🐦‍⬛",
-			bat: "🦇", snake: "🐍", spider: "🕷️", scorpion: "🦂", rat: "🐀",
-			cat: "🐱", dog: "🐕", horse: "🐴", deer: "🦌", frog: "🐸", toad: "🐸",
-			crocodile: "🐊", shark: "🦈", octopus: "🐙", crab: "🦀", fish: "🐟",
-			pixie: "🧚", sprite: "🧚", dryad: "🌳", satyr: "🐐", unicorn: "🦄",
-			fire: "🔥", air: "💨", water: "💧", earth: "🗿", ice: "❄️", magma: "🌋",
-			angel: "👼", celestial: "✨", couatl: "🐍", pegasus: "🐴",
-		};
-
-		for (const [key, emoji] of Object.entries(nameEmojis)) {
-			if (name.includes(key)) return emoji;
-		}
-
-		// Fallback by type
-		const typeEmojis = {
-			beast: "🐾", fey: "🧚", elemental: "✨", celestial: "👼",
-		};
-		return typeEmojis[type] || "🐾";
+		return CharacterSheetClassUtils.getCreatureEmoji(creature.name, type);
 	}
 
 	/**
@@ -3295,7 +3277,7 @@ class CharacterSheetSpells {
 		const searchContainer = e_({outer: `<div class="ve-flex ve-flex-v-center mb-3" style="gap: 8px;"></div>`});
 		modalInner.append(searchContainer);
 		searchContainer.insertAdjacentHTML("beforeend", `<span style="font-size: 1.2em;">🔍</span>`);
-		const search = e_({outer: `<input type="text" class="form-control" placeholder="Search familiars..." style="flex: 1;">`});
+		const search = e_({outer: `<input type="text" class="ve-form-control" placeholder="Search familiars..." style="flex: 1;">`});
 		searchContainer.append(search);
 
 		// Familiars grid
@@ -3318,13 +3300,8 @@ class CharacterSheetSpells {
 				const ac = Array.isArray(creature.ac) ? creature.ac[0]?.ac || creature.ac[0] : creature.ac;
 				const speeds = this._formatCreatureSpeeds(creature.speed);
 				
-				// Get a fitting emoji for this creature
-				const creatureEmojis = {
-					bat: "🦇", cat: "🐱", frog: "🐸", hawk: "🦅", lizard: "🦎",
-					octopus: "🐙", owl: "🦉", rat: "🐀", raven: "🐦‍⬛", spider: "🕷️",
-					weasel: "🦨", snake: "🐍", crab: "🦀", fish: "🐟", seahorse: "🐴",
-				};
-				const emoji = creatureEmojis[creature.name.toLowerCase()] || "🐾";
+				// Get icon for this creature (token image with emoji fallback)
+				const creatureIconHtml = CharacterSheetClassUtils.getCompanionIconHtml(creature, "lg");
 				
 				// Get primary sense
 				const primarySense = creature.senses?.[0] || "Normal vision";
@@ -3350,7 +3327,7 @@ class CharacterSheetSpells {
 						position: relative;
 					">
 						<div class="ve-flex ve-flex-v-center mb-2" style="gap: 8px;">
-							<span style="font-size: 1.8em;">${emoji}</span>
+							${creatureIconHtml}
 							<div class="bold" style="font-size: 1.05em;">${nameDisplay}</div>
 						</div>
 						<div class="charsheet__familiar-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 0.85em;">
@@ -5244,7 +5221,7 @@ class CharacterSheetSpells {
 		modalInner.insertAdjacentHTML("beforeend", `<p class="mb-2">Select a <strong>${filterDescription}</strong> spell:</p>`);
 
 		// Search
-		const search = e_({outer: `<input type="text" class="form-control form-control--minimal mb-2" placeholder="Search spells...">`});
+		const search = e_({outer: `<input type="text" class="ve-form-control form-control--minimal mb-2" placeholder="Search spells...">`});
 		modalInner.append(search);
 
 		// Spell list

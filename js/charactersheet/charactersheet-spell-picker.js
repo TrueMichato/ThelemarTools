@@ -294,7 +294,7 @@ class CharacterSheetSpellPicker {
 		const filterRow = e_({tag: "div", clazz: "ve-flex-wrap gap-2 mb-2", style: "align-items: center;"});
 		container.append(filterRow);
 
-		const search = e_({tag: "input", clazz: "form-control form-control-sm"});
+		const search = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
 		search.type = "text";
 		search.placeholder = "🔍 Search...";
 		search.style.flex = "1";
@@ -305,7 +305,7 @@ class CharacterSheetSpellPicker {
 		if (cantripCount > 0) levelOptions.push({value: "0", label: "Cantrips"});
 		for (let i = 1; i <= maxSpellLevel; i++) levelOptions.push({value: i.toString(), label: `Level ${i}`});
 		const levelFilter = e_({outer: `
-			<select class="form-control form-control-sm" style="width: auto; min-width: 100px;">
+			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 				<option value="">All Levels</option>
 				${levelOptions.map(l => `<option value="${l.value}">${l.label}</option>`).join("")}
 			</select>
@@ -313,7 +313,7 @@ class CharacterSheetSpellPicker {
 		filterRow.append(levelFilter);
 
 		const schoolFilter = e_({outer: `
-			<select class="form-control form-control-sm" style="width: auto; min-width: 120px;">
+			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 120px;">
 				<option value="">All Schools</option>
 				${schools.map(s => `<option value="${s}">${CharacterSheetClassUtils.getSchoolEmoji(s)} ${Parser.spSchoolAbvToFull(s)}</option>`).join("")}
 			</select>
@@ -326,7 +326,7 @@ class CharacterSheetSpellPicker {
 		let rarityFilter = null;
 		if (rarities.length) {
 			rarityFilter = e_({outer: `
-				<select class="form-control form-control-sm" style="width: auto; min-width: 110px;">
+				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 110px;">
 					<option value="">All Rarities</option>
 					${rarities.map(r => `<option value="${r}">${r.toTitleCase()}</option>`).join("")}
 				</select>
@@ -337,7 +337,7 @@ class CharacterSheetSpellPicker {
 		let legalityFilter = null;
 		if (legalities.length) {
 			legalityFilter = e_({outer: `
-				<select class="form-control form-control-sm" style="width: auto; min-width: 110px;">
+				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 110px;">
 					<option value="">All Legalities</option>
 					${legalities.map(l => `<option value="${l}">${l.toTitleCase()}</option>`).join("")}
 				</select>
@@ -544,7 +544,7 @@ class CharacterSheetSpellPicker {
 		const filterRow = e_({tag: "div", clazz: "ve-flex-wrap gap-2 mb-2", style: "align-items: center;"});
 		container.append(filterRow);
 
-		const search = e_({tag: "input", clazz: "form-control form-control-sm"});
+		const search = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
 		search.type = "text";
 		search.placeholder = "🔍 Search...";
 		search.style.flex = "1";
@@ -554,7 +554,7 @@ class CharacterSheetSpellPicker {
 		const levelOptions = [];
 		for (let i = 1; i <= maxSpellLevel; i++) levelOptions.push({value: i.toString(), label: `Level ${i}`});
 		const levelFilter = e_({outer: `
-			<select class="form-control form-control-sm" style="width: auto; min-width: 100px;">
+			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 				<option value="">All Levels</option>
 				${levelOptions.map(l => `<option value="${l.value}">${l.label}</option>`).join("")}
 			</select>
@@ -562,7 +562,7 @@ class CharacterSheetSpellPicker {
 		filterRow.append(levelFilter);
 
 		const schoolFilter = e_({outer: `
-			<select class="form-control form-control-sm" style="width: auto; min-width: 120px;">
+			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 120px;">
 				<option value="">All Schools</option>
 				${schools.map(s => `<option value="${s}">${CharacterSheetClassUtils.getSchoolEmoji(s)} ${Parser.spSchoolAbvToFull(s)}</option>`).join("")}
 			</select>
@@ -575,7 +575,7 @@ class CharacterSheetSpellPicker {
 		let rarityFilter = null;
 		if (rarities.length) {
 			rarityFilter = e_({outer: `
-				<select class="form-control form-control-sm" style="width: auto; min-width: 110px;">
+				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 110px;">
 					<option value="">All Rarities</option>
 					${rarities.map(r => `<option value="${r}">${r.toTitleCase()}</option>`).join("")}
 				</select>
@@ -586,7 +586,7 @@ class CharacterSheetSpellPicker {
 		let legalityFilter = null;
 		if (legalities.length) {
 			legalityFilter = e_({outer: `
-				<select class="form-control form-control-sm" style="width: auto; min-width: 110px;">
+				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 110px;">
 					<option value="">All Legalities</option>
 					${legalities.map(l => `<option value="${l}">${l.toTitleCase()}</option>`).join("")}
 				</select>

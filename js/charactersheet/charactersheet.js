@@ -2119,25 +2119,25 @@ class CharacterSheetPage {
 			<div style="display: flex; flex-direction: column; gap: 12px;">
 				<div>
 					<label class="ve-small ve-muted">Name *</label>
-					<input type="text" class="form-control" id="custom-comp-name" placeholder="Companion name...">
+					<input type="text" class="ve-form-control" id="custom-comp-name" placeholder="Companion name...">
 				</div>
 				<div style="display: flex; gap: 12px;">
 					<div style="flex: 1;">
 						<label class="ve-small ve-muted">HP</label>
-						<input type="number" class="form-control" id="custom-comp-hp" value="10" min="1">
+						<input type="number" class="ve-form-control" id="custom-comp-hp" value="10" min="1">
 					</div>
 					<div style="flex: 1;">
 						<label class="ve-small ve-muted">AC</label>
-						<input type="number" class="form-control" id="custom-comp-ac" value="10" min="1">
+						<input type="number" class="ve-form-control" id="custom-comp-ac" value="10" min="1">
 					</div>
 					<div style="flex: 1;">
 						<label class="ve-small ve-muted">Speed (ft)</label>
-						<input type="number" class="form-control" id="custom-comp-speed" value="30" min="0">
+						<input type="number" class="ve-form-control" id="custom-comp-speed" value="30" min="0">
 					</div>
 				</div>
 				<div>
 					<label class="ve-small ve-muted">Creature Type</label>
-					<select class="form-control" id="custom-comp-type">
+					<select class="ve-form-control" id="custom-comp-type">
 						<option value="beast">Beast</option>
 						<option value="celestial">Celestial</option>
 						<option value="construct">Construct</option>
@@ -3639,13 +3639,8 @@ class CharacterSheetPage {
 			};
 			const info = typeInfo[companion.type] || typeInfo.custom;
 
-			// Get creature emoji
-			const creatureEmojis = {
-				bat: "🦇", cat: "🐱", frog: "🐸", hawk: "🦅", lizard: "🦎",
-				octopus: "🐙", owl: "🦉", rat: "🐀", raven: "🐦‍⬛", spider: "🕷️",
-				weasel: "🦨", snake: "🐍", crab: "🦀", wolf: "🐺", bear: "🐻",
-			};
-			const creatureEmoji = creatureEmojis[companion.name?.toLowerCase()] || info.icon;
+			// Get companion icon (token image with emoji fallback)
+			const companionIconHtml = CharacterSheetClassUtils.getCompanionIconHtml(companion, "lg");
 
 			// Build hoverable name link for the creature
 			let nameDisplay;
@@ -3728,7 +3723,7 @@ class CharacterSheetPage {
 
 					<!-- Header -->
 					<div class="ve-flex ve-flex-v-center mb-3" style="gap: 12px;">
-						<div style="font-size: 2.5em; line-height: 1;">${creatureEmoji}</div>
+						${companionIconHtml}
 						<div class="ve-flex-col" style="flex: 1;">
 							${nameDisplay}
 							<div class="ve-muted ve-small">from ${companion.origin || "Unknown origin"}</div>
@@ -3975,7 +3970,7 @@ class CharacterSheetPage {
 	_renderCompanionsOverviewIndicator () {
 		const container = document.getElementById("charsheet-companions-indicator");
 		const section = document.getElementById("charsheet-companions-section");
-		if (!container) return;
+		if (!container || !section) return;
 
 		const companions = this._state.getActiveCompanions?.() || [];
 
@@ -3985,7 +3980,8 @@ class CharacterSheetPage {
 			return;
 		}
 
-		container.innerHTML = "".style.display = "";
+		container.innerHTML = "";
+		container.style.display = "";
 		section.style.display = "";
 
 		companions.forEach(companion => {
@@ -3993,13 +3989,8 @@ class CharacterSheetPage {
 			const hpPercent = Math.round((hp.current / hp.max) * 100);
 			const hpColor = hpPercent > 50 ? "#22c55e" : hpPercent > 25 ? "#f59e0b" : "#ef4444";
 
-			// Get creature emoji
-			const creatureEmojis = {
-				bat: "🦇", cat: "🐱", frog: "🐸", hawk: "🦅", lizard: "🦎",
-				octopus: "🐙", owl: "🦉", rat: "🐀", raven: "🐦‍⬛", spider: "🕷️",
-				weasel: "🦨", snake: "🐍", wolf: "🐺", bear: "🐻",
-			};
-			const emoji = creatureEmojis[companion.name?.toLowerCase()] || "🐾";
+			// Get companion icon (token image with emoji fallback)
+			const companionIconHtml = CharacterSheetClassUtils.getCompanionIconHtml(companion, "sm");
 
 			// Build hoverable name
 			let nameHtml;
@@ -4027,7 +4018,7 @@ class CharacterSheetPage {
 					margin-right: 8px;
 					margin-bottom: 4px;
 				">
-					<span style="font-size: 1.2em;">${emoji}</span>
+					${companionIconHtml}
 					<span class="bold">${nameHtml}</span>
 					<span style="
 						display: inline-flex;
@@ -4250,13 +4241,8 @@ class CharacterSheetPage {
 		// Type info
 		const info = {label: "Conjured", icon: "✨", color: "#3b82f6"};
 
-		// Get creature emoji
-		const creatureEmojis = {
-			wolf: "🐺", bear: "🐻", panther: "🐆", elk: "🦌", boar: "🐗",
-			hawk: "🦅", eagle: "🦅", owl: "🦉", bat: "🦇", raven: "🐦‍⬛",
-			snake: "🐍", spider: "🕷️", rat: "🐀", lion: "🦁", tiger: "🐅",
-		};
-		const creatureEmoji = creatureEmojis[companion.name?.toLowerCase()] || "🐾";
+		// Get companion icon (token image with emoji fallback)
+		const companionIconHtml = CharacterSheetClassUtils.getCompanionIconHtml(companion, "lg");
 
 		// Build hoverable name link
 		let nameDisplay;
@@ -4328,7 +4314,7 @@ class CharacterSheetPage {
 
 				<!-- Header -->
 				<div class="ve-flex ve-flex-v-center mb-3" style="gap: 12px;">
-					<div style="font-size: 2.5em; line-height: 1;">${creatureEmoji}</div>
+					${companionIconHtml}
 					<div class="ve-flex-col" style="flex: 1;">
 						<div class="ve-flex ve-flex-v-center" style="gap: 8px;">
 							<span style="font-size: 1.5em; font-weight: bold; color: ${info.color};">${totalCount}×</span>
@@ -6571,7 +6557,7 @@ class CharacterSheetPage {
 			const rollResult = e_({outer: `<div class="charsheet__concentration-result ve-hidden"></div>`});
 			
 			// Editable DC input
-			const dcInput = e_({outer: `<input type="number" class="form-control form-control--minimal input-xs" style="width: 50px; text-align: center;" value="${dc}" min="1">`});
+			const dcInput = e_({outer: `<input type="number" class="ve-form-control form-control--minimal ve-input-xs" style="width: 50px; text-align: center;" value="${dc}" min="1">`});
 			const rollNeededDisplay = e_({outer: `<span>${rollNeeded}</span>`});
 			
 			// Update roll needed when DC changes
@@ -7436,7 +7422,7 @@ class CharacterSheetPage {
 			conditionSources.forEach(s => selectedSources.add(s));
 		}
 
-		const search = e_({outer: `<input type="text" class="form-control charsheet__modal-search" placeholder="🔍 Search conditions...">`});
+		const search = e_({outer: `<input type="text" class="ve-form-control charsheet__modal-search" placeholder="🔍 Search conditions...">`});
 		const list = e_({outer: `<div class="charsheet__conditions-list"></div>`});
 		const count = e_({outer: `<span class="charsheet__modal-search-count">${availableConditions.length} conditions</span>`});
 
@@ -8998,7 +8984,7 @@ class CharacterSheetPage {
 				<span class="charsheet__settings-option-icon">😫</span>
 				<span class="charsheet__settings-option-name">Exhaustion Rules</span>
 			</label>
-			<select class="form-control form-control--minimal input-sm charsheet__settings-select" id="settings-exhaustion-rules">
+			<select class="ve-form-control form-control--minimal ve-input-sm charsheet__settings-select" id="settings-exhaustion-rules">
 				<option value="2024" ${currentExhaustionRules === "2024" ? "selected" : ""}>2024 Rules (Stacking -2 to d20 tests)</option>
 				<option value="2014" ${currentExhaustionRules === "2014" ? "selected" : ""}>2014 Rules (Tiered effects)</option>
 				<option value="thelemar" ${currentExhaustionRules === "thelemar" ? "selected" : ""}>Thelemar Rules (-1 to rolls/DCs, max 10)</option>
@@ -9131,7 +9117,7 @@ class CharacterSheetPage {
 		let prioritySection = null;
 		if (homebrewSources.length) {
 			const priorityOptionsHtml = homebrewSources.map(src => `<option value="${src.json}" ${currentPriority.includes(src.json) ? "selected" : ""}>${src.full || src.abbr}</option>`).join("");
-			const prioritySelect = e_({outer: `<select class="form-control" id="settings-priority-source">
+			const prioritySelect = e_({outer: `<select class="ve-form-control" id="settings-priority-source">
 				<option value="">None (show all versions)</option>
 				${priorityOptionsHtml}
 			</select>`});;
@@ -9867,21 +9853,21 @@ class CharacterSheetPage {
 				<div class="charsheet__modifier-form-row">
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--name">
 						<label class="charsheet__modifier-form-label">Name</label>
-						<input type="text" class="form-control form-control--minimal" id="mod-name" placeholder="e.g., Bless, Shield of Faith, Cover">
+						<input type="text" class="ve-form-control form-control--minimal" id="mod-name" placeholder="e.g., Bless, Shield of Faith, Cover">
 					</div>
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--type">
 						<label class="charsheet__modifier-form-label">Type</label>
-						<select class="form-control form-control--minimal" id="mod-type">
+						<select class="ve-form-control form-control--minimal" id="mod-type">
 							${typeOptionsHtml}
 						</select>
 					</div>
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--value">
 						<label class="charsheet__modifier-form-label">Bonus</label>
-						<input type="number" class="form-control form-control--minimal" id="mod-value" value="0" placeholder="±0">
+						<input type="number" class="ve-form-control form-control--minimal" id="mod-value" value="0" placeholder="±0">
 					</div>
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--scaling">
 						<label class="charsheet__modifier-form-label">Scaling</label>
-						<select class="form-control form-control--minimal" id="mod-scaling">
+						<select class="ve-form-control form-control--minimal" id="mod-scaling">
 							<option value="">None</option>
 							<optgroup label="Proficiency">
 								<option value="proficiencyBonus">+ Proficiency</option>
@@ -9905,11 +9891,11 @@ class CharacterSheetPage {
 				<div class="charsheet__modifier-form-row charsheet__modifier-form-row--custom-skill" style="display: none;">
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--custom-skill-name">
 						<label class="charsheet__modifier-form-label">Custom Skill Name</label>
-						<input type="text" class="form-control form-control--minimal" id="mod-custom-skill" placeholder="e.g., Sleight of Hand">
+						<input type="text" class="ve-form-control form-control--minimal" id="mod-custom-skill" placeholder="e.g., Sleight of Hand">
 					</div>
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--custom-skill-ability">
 						<label class="charsheet__modifier-form-label">Ability (optional)</label>
-						<select class="form-control form-control--minimal" id="mod-custom-skill-ability">
+						<select class="ve-form-control form-control--minimal" id="mod-custom-skill-ability">
 							<option value="">Any / None</option>
 							<option value="str">Strength</option>
 							<option value="dex">Dexterity</option>
@@ -9923,7 +9909,7 @@ class CharacterSheetPage {
 				<div class="charsheet__modifier-form-row">
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--advantage">
 						<label class="charsheet__modifier-form-label">Advantage/Disadvantage</label>
-						<select class="form-control form-control--minimal" id="mod-advantage">
+						<select class="ve-form-control form-control--minimal" id="mod-advantage">
 							<option value="">None</option>
 							<option value="advantage">Advantage</option>
 							<option value="disadvantage">Disadvantage</option>
@@ -9931,13 +9917,13 @@ class CharacterSheetPage {
 					</div>
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--minimum">
 						<label class="charsheet__modifier-form-label">Minimum Roll</label>
-						<input type="number" class="form-control form-control--minimal" id="mod-minimum" value="" placeholder="e.g., 10">
+						<input type="number" class="ve-form-control form-control--minimal" id="mod-minimum" value="" placeholder="e.g., 10">
 					</div>
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--bonus-dice">
 						<label class="charsheet__modifier-form-label">Bonus Dice</label>
 						<div class="charsheet__modifier-form-dice-group">
-							<input type="number" class="form-control form-control--minimal charsheet__modifier-dice-count" id="mod-dice-count" min="1" max="20" placeholder="#" value="">
-							<select class="form-control form-control--minimal charsheet__modifier-dice-type" id="mod-dice-type">
+							<input type="number" class="ve-form-control form-control--minimal charsheet__modifier-dice-count" id="mod-dice-count" min="1" max="20" placeholder="#" value="">
+							<select class="ve-form-control form-control--minimal charsheet__modifier-dice-type" id="mod-dice-type">
 								<option value="">—</option>
 								<option value="d4">d4</option>
 								<option value="d6">d6</option>
@@ -9952,12 +9938,12 @@ class CharacterSheetPage {
 				<div class="charsheet__modifier-form-row">
 					<div class="charsheet__modifier-form-field charsheet__modifier-form-field--conditional">
 						<label class="charsheet__modifier-form-label">Conditional (optional)</label>
-						<input type="text" class="form-control form-control--minimal" id="mod-conditional" placeholder="e.g., against undead, while in dim light">
+						<input type="text" class="ve-form-control form-control--minimal" id="mod-conditional" placeholder="e.g., against undead, while in dim light">
 					</div>
 				</div>
 				<div class="charsheet__modifier-form-field charsheet__modifier-form-field--note">
 					<label class="charsheet__modifier-form-label">Note (optional)</label>
-					<input type="text" class="form-control form-control--minimal" id="mod-note" placeholder="e.g., Lasts 1 minute, Concentration">
+					<input type="text" class="ve-form-control form-control--minimal" id="mod-note" placeholder="e.g., Lasts 1 minute, Concentration">
 				</div>
 				<div class="charsheet__modifier-form-actions">
 					<button class="ve-btn ve-btn-primary ve-btn-sm" id="mod-save">💾 Save</button>
@@ -10534,7 +10520,7 @@ class CharacterSheetPage {
 			// Search filter
 			const searchContainer = e_({outer: `<div class="ve-flex ve-flex-v-center mb-3" style="gap: 8px;"></div>`}); modalInner.append(searchContainer);
 			searchContainer.insertAdjacentHTML("beforeend", `<span style="font-size: 1.2em;">🔍</span>`);
-			const searchEl = e_({outer: `<input type="text" class="form-control" placeholder="Search languages..." style="flex: 1;">`}); searchContainer.append(searchEl);
+			const searchEl = e_({outer: `<input type="text" class="ve-form-control" placeholder="Search languages..." style="flex: 1;">`}); searchContainer.append(searchEl);
 
 			// Selection status
 			const statusEl = e_({outer: `<div class="ve-flex ve-flex-v-center mb-2" style="gap: 8px;">
@@ -10754,11 +10740,11 @@ class CharacterSheetPage {
 		const formEl = ee`<div class="ve-flex-col">
 			<div class="ve-flex-v-center mb-2">
 				<label class="mr-2 w-100p">Skill Name:</label>
-				<input type="text" class="form-control" id="custom-skill-name" placeholder="e.g. Brewing, Sailing">
+				<input type="text" class="ve-form-control" id="custom-skill-name" placeholder="e.g. Brewing, Sailing">
 			</div>
 			<div class="ve-flex-v-center mb-3">
 				<label class="mr-2 w-100p">Ability:</label>
-				<select class="form-control" id="custom-skill-ability">
+				<select class="ve-form-control" id="custom-skill-ability">
 					${abilityOptions.map(a => `<option value="${a.value}">${a.label}</option>`).join("")}
 				</select>
 			</div>
@@ -10885,7 +10871,7 @@ class CharacterSheetPage {
 					<label class="ve-bold mb-1">${profType.label}</label>
 					<div class="charsheet__edit-prof-list mb-2" id="edit-prof-${profType.key}"></div>
 					<div class="ve-flex-v-center" style="position: relative;">
-						<input type="text" class="form-control form-control--minimal mr-2" id="edit-prof-${profType.key}-input" placeholder="Type to search or enter custom...">
+						<input type="text" class="ve-form-control form-control--minimal mr-2" id="edit-prof-${profType.key}-input" placeholder="Type to search or enter custom...">
 						<button class="ve-btn ve-btn-primary ve-btn-xs" id="edit-prof-${profType.key}-add">Add</button>
 					</div>
 					<div class="charsheet__autocomplete-dropdown" id="edit-prof-${profType.key}-dropdown" style="display: none;"></div>

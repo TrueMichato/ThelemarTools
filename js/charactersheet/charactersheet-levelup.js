@@ -1153,11 +1153,11 @@ class CharacterSheetLevelUp {
 
 		const filterRow = showFilters ? e_({tag: "div", clazz: "ve-flex gap-2 mb-2"}) : null;
 		const searchInput = showFilters
-			? e_({outer: `<input type="text" class="form-control form-control-sm ve-flex-grow" placeholder="Search ${subclassTitle.toLowerCase()}s...">`})
+			? e_({outer: `<input type="text" class="ve-form-control ve-input-sm ve-flex-grow" placeholder="Search ${subclassTitle.toLowerCase()}s...">`})
 			: null;
 		const sourceFilter = showFilters && availableSources.length > 1
 			? e_({outer: `
-				<select class="form-control form-control-sm" style="width: auto; min-width: 100px;">
+				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 					<option value="">All Sources</option>
 					${availableSources.map(src => `<option value="${src}">${Parser.sourceJsonToAbv(src)}</option>`).join("")}
 				</select>
@@ -1615,7 +1615,7 @@ class CharacterSheetLevelUp {
 			}
 		}
 
-		const featSearch = e_({outer: `<input type="text" class="form-control mb-2" placeholder="Search feats...">`});
+		const featSearch = e_({outer: `<input type="text" class="ve-form-control mb-2" placeholder="Search feats...">`});
 		const featList = e_({outer: `<div class="charsheet__levelup-feats-list"></div>`});
 		const featChoicesContainer = e_({outer: `<div class="charsheet__levelup-feat-choices"></div>`});
 
@@ -1838,7 +1838,7 @@ class CharacterSheetLevelUp {
 			<span class="ve-small ve-bold">Choose ability to increase by +${amount} (max ${max}):</span>
 		</div>`});
 
-		const select = e_({outer: `<select class="form-control form-control-sm mt-1" style="max-width: 200px;"></select>`});
+		const select = e_({outer: `<select class="ve-form-control ve-input-sm mt-1" style="max-width: 200px;"></select>`});
 		options.forEach(abl => {
 			const currentScore = this._state.getAbilityScore(abl);
 			select.insertAdjacentHTML("beforeend", `<option value="${abl}">${Parser.attAbvToFull(abl)} (currently ${currentScore})</option>`);
@@ -1869,7 +1869,7 @@ class CharacterSheetLevelUp {
 		if (choices.spells?.list) {
 			const listSection = e_({outer: `<div class="mb-2"></div>`});
 			listSection.insertAdjacentHTML("beforeend", `<label class="ve-small">Choose spell list:</label>`);
-			const select = e_({outer: `<select class="form-control form-control-sm mt-1"></select>`});
+			const select = e_({outer: `<select class="ve-form-control ve-input-sm mt-1"></select>`});
 			
 			const spellLists = ["Arcane", "Divine", "Primal"];
 			spellLists.forEach(list => {
@@ -3872,7 +3872,7 @@ class CharacterSheetLevelUp {
 		let selectedClass = null;
 		let updateConfirmButton = null; // Will be assigned after button is created
 
-		const search = e_({outer: `<input type="text" class="form-control charsheet__modal-search" placeholder="🔍 Search classes...">`});
+		const search = e_({outer: `<input type="text" class="ve-form-control charsheet__modal-search" placeholder="🔍 Search classes...">`});
 		const list = e_({outer: `<div class="charsheet__levelup-subclasses" style="max-height: 350px;"></div>`});
 
 		// Selection display showing which class is chosen

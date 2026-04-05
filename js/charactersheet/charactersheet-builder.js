@@ -32,6 +32,7 @@ class CharacterSheetBuilder {
 		this._selectedRaceOptionalFeatures = {}; // For race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
 		this._selectedCombatTraditions = []; // For combat tradition proficiency choices (Thelemar homebrew)
 		this._selectedClassToolProficiencies = []; // For class tool proficiency choices (e.g., Monk artisan/instrument)
+		this._lastAppliedClassSnapshot = null; // Snapshot of what case 3 applied; used to undo on class change
 		this._selectedRacialSkills = []; // For racial skill proficiency choices (e.g., Elf)
 		this._selectedRacialTools = []; // For racial tool proficiency choices (e.g., Dwarf)
 		this._selectedRacialLanguages = {}; // For racial language proficiency choices, keyed by profIdx
@@ -48,6 +49,7 @@ class CharacterSheetBuilder {
 		this._customBackgroundData = null; // Stores custom background form data
 		this._selectedKnownSpells = []; // For known-caster spell choices at level 1
 		this._selectedKnownCantrips = []; // For known-caster cantrip choices at level 1
+		this._selectedSpellbookSpells = []; // For Wizard spellbook spell choices at level 1
 		this._divineSoulAffinity = null; // Stored Divine Soul affinity choice for spell access and bonus spell
 		this._quickBuildTargetLevel = 1; // Target level for Quick Build integration
 
@@ -395,12 +397,18 @@ class CharacterSheetBuilder {
 
 			case 6: { // Spells
 				const knownInfo = this._getKnownCasterInfoForBuilder();
-				if (!knownInfo) return true; // Not a known-caster class — nothing to validate
+				if (!knownInfo) return true; // Not a caster class — nothing to validate
 				if (knownInfo.className === "Sorcerer" && CharacterSheetClassUtils.isDivineSoulSubclass(this._selectedSubclass) && !CharacterSheetClassUtils.normalizeDivineSoulAffinity(this._divineSoulAffinity)) {
 					JqueryUtil.doToast({type: "warning", content: "Please choose a Divine Soul affinity before finishing spell selection."});
 					return false;
 				}
-				if (knownInfo.spellCount > 0 && this._selectedKnownSpells.length < knownInfo.spellCount) {
+				// Spellbook casters (Wizard) must fill their spellbook
+				if (knownInfo.isSpellbookCaster && knownInfo.spellbookCount > 0 && this._selectedSpellbookSpells.length < knownInfo.spellbookCount) {
+					JqueryUtil.doToast({type: "warning", content: `Please select ${knownInfo.spellbookCount} spellbook spells (currently ${this._selectedSpellbookSpells.length}).`});
+					return false;
+				}
+				// Known-spell casters (Bard, Sorcerer, Warlock, Ranger)
+				if (!knownInfo.isSpellbookCaster && knownInfo.spellCount > 0 && this._selectedKnownSpells.length < knownInfo.spellCount) {
 					JqueryUtil.doToast({type: "warning", content: `Please select ${knownInfo.spellCount} spells (currently ${this._selectedKnownSpells.length}).`});
 					return false;
 				}
@@ -437,6 +445,10 @@ class CharacterSheetBuilder {
 				break;
 
 			case 3: // Class
+				// Clear any previously applied class data before reapplying
+				// (handles the "user goes back and picks a different class" scenario)
+				this._clearClassApplication(this._lastAppliedClassSnapshot);
+
 				// Determine caster progression - check subclass first (for Eldritch Knight, etc.)
 				const casterProgressionBuilder = this._selectedSubclass?.casterProgression || this._selectedClass.casterProgression || null;
 				const spellcastingAbilityBuilder = this._selectedSubclass?.spellcastingAbility || this._selectedClass.spellcastingAbility || null;
@@ -461,6 +473,32 @@ class CharacterSheetBuilder {
 					cantripProgression: this._selectedClass.cantripProgression,
 				});
 				this._applyClassFeatures();
+
+				// Snapshot what was just applied so it can be undone if the user changes class
+				this._lastAppliedClassSnapshot = {
+					className: this._selectedClass.name,
+					classSource: this._selectedClass.source,
+					saveProficiencies: [...(this._selectedClass.proficiency || [])],
+					skills: this._selectedSkills.map(s => s.toLowerCase().replace(/\s+/g, "")),
+					expertiseSkills: this._selectedExpertise
+						.filter(s => !s.toLowerCase().includes("tools"))
+						.map(s => s.toLowerCase().replace(/\s+/g, "")),
+					armorProficiencies: (this._selectedClass.startingProficiencies?.armor || [])
+						.map(a => typeof a === "string" ? a : a.full).filter(Boolean),
+					weaponProficiencies: (this._selectedClass.startingProficiencies?.weapons || [])
+						.map(w => typeof w === "string" ? w : w.full).filter(Boolean),
+					toolProficiencies: [
+						...this._selectedClassToolProficiencies.map(c => c.tool?.toTitleCase()).filter(Boolean),
+						...(this._selectedClass.startingProficiencies?.tools || [])
+							.filter(t => typeof t === "string" && !/\bany\b.*\bchoice\b|\bchoose\b/i.test(t))
+							.map(t => t.replace(/{@item\s+([^|}]+)[^}]*}/gi, "$1").toTitleCase()),
+					],
+					languages: [
+						...(this._getClassFeatureLanguageGrants(this._selectedClass)?.autoLanguages || []),
+						...this._selectedClassFeatureLanguages.filter(Boolean),
+					],
+					hadSpellcasting: !!this._selectedClass.spellcastingAbility,
+				};
 
 				// Record level 1 history entry
 				{
@@ -1952,6 +1990,63 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	/**
+	 * Undo everything that was applied by case 3 (_applyClassFeatures + addClass) so the user
+	 * can switch class without accumulating stale data.  Called at the top of case 3.
+	 * @param {object|null} snapshot - Built by case 3 after the previous class was applied
+	 */
+	_clearClassApplication (snapshot) {
+		if (!snapshot) return;
+
+		// Remove class entry from state (also recalculates HP, hit dice, spell slots)
+		this._state.removeClass(snapshot.className, snapshot.classSource);
+
+		// Remove save proficiencies granted by this class
+		(snapshot.saveProficiencies || []).forEach(p => this._state.removeSaveProficiency(p));
+
+		// Reset class skill proficiencies to 0
+		(snapshot.skills || []).forEach(s => this._state.setSkillProficiency(s, 0));
+
+		// Reset expertise-level skills to 0
+		(snapshot.expertiseSkills || []).forEach(s => this._state.setSkillProficiency(s, 0));
+
+		// Re-assert background skill proficiencies in case there was an overlap
+		// (e.g., background + class both granted Acrobatics)
+		if (this._selectedBackground?.skillProficiencies) {
+			this._selectedBackground.skillProficiencies.forEach(skillSet => {
+				Object.keys(skillSet).forEach(skill => {
+					if (skill !== "choose" && skill !== "any") {
+						this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
+					}
+				});
+			});
+		}
+
+		// Remove armor, weapon, and tool proficiencies
+		(snapshot.armorProficiencies || []).forEach(a => { if (a) this._state.removeArmorProficiency(a); });
+		(snapshot.weaponProficiencies || []).forEach(w => { if (w) this._state.removeWeaponProficiency(w); });
+		(snapshot.toolProficiencies || []).forEach(t => { if (t) this._state.removeToolProficiency(t); });
+
+		// Remove class feature languages
+		(snapshot.languages || []).forEach(l => { if (l) this._state.removeLanguage(l); });
+
+		// Remove all features belonging to this class
+		this._state.getFeatures()
+			.filter(f => f.className === snapshot.className)
+			.forEach(f => this._state.removeFeature(f.name, f.source));
+
+		// Clear weapon masteries (class-granted)
+		this._state.setWeaponMasteries([]);
+
+		// Clear spellcasting ability if it was provided by the removed class
+		if (snapshot.hadSpellcasting) {
+			this._state.setSpellcastingAbility(null);
+		}
+
+		// Remove level 1 history so it can be re-recorded with the new class
+		this._state.removeLevelHistoryEntry(1);
+	}
+
 	_addFeatureEntries (entries, source, featureType) {
 		entries.forEach(entry => {
 			if (typeof entry === "object" && entry.name) {
@@ -2269,7 +2364,7 @@ class CharacterSheetBuilder {
 			<div class="charsheet__builder-selection">
 				<div class="charsheet__builder-list">
 					<div class="charsheet__builder-list-header">
-						<input type="text" class="form-control form-control--minimal" placeholder="Search species..." id="builder-race-search">
+						<input type="text" class="ve-form-control form-control--minimal" placeholder="Search species..." id="builder-race-search">
 					</div>
 					<div class="charsheet__builder-list-content" id="builder-race-list"></div>
 				</div>
@@ -2384,7 +2479,7 @@ class CharacterSheetBuilder {
 		const subraceSection = e_({outer: `
 			<div class="mt-3">
 				<strong>Select Subrace:</strong>
-				<select class="form-control form-control--minimal mt-1" id="builder-subrace-select">
+				<select class="ve-form-control form-control--minimal mt-1" id="builder-subrace-select">
 					<option value="">-- Choose a subrace --</option>
 				</select>
 			</div>
@@ -2668,7 +2763,7 @@ class CharacterSheetBuilder {
 			const row = e_({tag: "div", clazz: "ve-flex-v-center mb-1"});
 			row.append(e_({tag: "span", clazz: "mr-2", txt: `+${amount}:`}));
 
-			const select = e_({tag: "select", clazz: "form-control form-control--minimal ve-inline-block w-auto", attrs: {"data-race-asi-key": choiceKey}});
+			const select = e_({tag: "select", clazz: "ve-form-control form-control--minimal ve-inline-block w-auto", attrs: {"data-race-asi-key": choiceKey}});
 			select.append(e_({tag: "option", val: "", txt: "-- Select --"}));
 
 			from.forEach(ab => {
@@ -3491,7 +3586,7 @@ class CharacterSheetBuilder {
 				<div class="charsheet__builder-spell-ability-choice mt-1">
 					<label class="ve-small">
 						Spellcasting Ability:
-						<select class="form-control form-control--minimal ve-inline-block w-auto ms-1">
+						<select class="ve-form-control form-control--minimal ve-inline-block w-auto ms-1">
 							${choice.ability.map(ab => `<option value="${ab}" ${ab === currentAbility ? "selected" : ""}>${ab.toUpperCase()}</option>`).join("")}
 						</select>
 					</label>
@@ -3773,7 +3868,7 @@ class CharacterSheetBuilder {
 			const subraces = e_({outer: `
 				<div class="mt-3">
 					<strong>Subrace:</strong>
-					<select class="form-control form-control--minimal mt-1" id="builder-subrace-select">
+					<select class="ve-form-control form-control--minimal mt-1" id="builder-subrace-select">
 						<option value="">-- Select Subrace --</option>
 					</select>
 				</div>
@@ -3828,7 +3923,7 @@ class CharacterSheetBuilder {
 			<div class="charsheet__builder-selection">
 				<div class="charsheet__builder-list">
 					<div class="charsheet__builder-list-header">
-						<input type="text" class="form-control form-control--minimal" placeholder="Search classes..." id="builder-class-search">
+						<input type="text" class="ve-form-control form-control--minimal" placeholder="Search classes..." id="builder-class-search">
 					</div>
 					<div class="charsheet__builder-list-content" id="builder-class-list"></div>
 				</div>
@@ -3883,6 +3978,12 @@ class CharacterSheetBuilder {
 						this._selectedFeatureOptions = {};
 						// Reset combat traditions when changing class
 						this._selectedCombatTraditions = [];
+						// Reset spell selections when changing class
+						this._selectedKnownSpells = [];
+						this._selectedKnownCantrips = [];
+						this._selectedSpellbookSpells = [];
+						this._selectedClassToolProficiencies = [];
+						this._divineSoulAffinity = null;
 						this._renderClassPreview(preview, cls);
 					});
 
@@ -4057,7 +4158,7 @@ class CharacterSheetBuilder {
 			const musicalInstruments = Renderer.generic.FEATURE__TOOLS_MUSICAL_INSTRUMENTS || [];
 
 			const categorySelect = e_({outer: `
-				<select class="form-control form-control--minimal mb-1">
+				<select class="ve-form-control form-control--minimal mb-1">
 					<option value="">-- Select Category --</option>
 					<option value="artisan">Artisan's Tools</option>
 					<option value="instrument">Musical Instrument</option>
@@ -4065,7 +4166,7 @@ class CharacterSheetBuilder {
 			`});
 
 			const toolSelect = e_({outer: `
-				<select class="form-control form-control--minimal mb-1" style="display: none;">
+				<select class="ve-form-control form-control--minimal mb-1" style="display: none;">
 					<option value="">-- Select Tool --</option>
 				</select>
 			`});
@@ -4121,7 +4222,7 @@ class CharacterSheetBuilder {
 
 			for (let i = 0; i < anyArtisanCount; i++) {
 				const tools = Renderer.generic.FEATURE__TOOLS_ARTISANS || [];
-				const select = e_({outer: `<select class="form-control form-control--minimal mb-1"><option value="">-- Select Artisan's Tool --</option></select>`});
+				const select = e_({outer: `<select class="ve-form-control form-control--minimal mb-1"><option value="">-- Select Artisan's Tool --</option></select>`});
 				tools.forEach(tool => select.append(e_({outer: `<option value="${tool}">${tool.toTitleCase()}</option>`})));
 
 				const existing = this._selectedClassToolProficiencies.find(t => t.isArtisan && t.idx === i);
@@ -4138,7 +4239,7 @@ class CharacterSheetBuilder {
 
 			for (let i = 0; i < anyMusicalCount; i++) {
 				const instruments = Renderer.generic.FEATURE__TOOLS_MUSICAL_INSTRUMENTS || [];
-				const select = e_({outer: `<select class="form-control form-control--minimal mb-1"><option value="">-- Select Musical Instrument --</option></select>`});
+				const select = e_({outer: `<select class="ve-form-control form-control--minimal mb-1"><option value="">-- Select Musical Instrument --</option></select>`});
 				instruments.forEach(tool => select.append(e_({outer: `<option value="${tool}">${tool.toTitleCase()}</option>`})));
 
 				const existing = this._selectedClassToolProficiencies.find(t => t.isMusicalInstrument && t.idx === i);
@@ -4731,7 +4832,7 @@ class CharacterSheetBuilder {
 		for (let i = 0; i < count; i++) {
 			const selectId = `class-lang-choice-${i}`;
 			const select = e_({outer: `
-				<select class="form-control form-control--minimal mb-1" id="${selectId}">
+				<select class="ve-form-control form-control--minimal mb-1" id="${selectId}">
 					<option value="">-- Select Language --</option>
 				</select>
 			`});
@@ -6231,7 +6332,7 @@ class CharacterSheetBuilder {
 
 		for (let i = 0; i < fixedSkills.length; i++) {
 			const selectEl = e_({outer: `
-				<select class="form-control form-control--minimal mb-1" id="tashas-skill-${i}">
+				<select class="ve-form-control form-control--minimal mb-1" id="tashas-skill-${i}">
 					<option value="">-- Select Skill --</option>
 				</select>
 			`});
@@ -6272,7 +6373,7 @@ class CharacterSheetBuilder {
 
 		for (let i = 0; i < fixedLanguages.length; i++) {
 			const selectEl = e_({outer: `
-				<select class="form-control form-control--minimal mb-1" id="tashas-lang-${i}">
+				<select class="ve-form-control form-control--minimal mb-1" id="tashas-lang-${i}">
 					<option value="">-- Select Language --</option>
 				</select>
 			`});
@@ -6390,7 +6491,7 @@ class CharacterSheetBuilder {
 			const row = e_({outer: `<div class="ve-flex-v-center mb-1"></div>`});
 			row.append(e_({outer: `<span class="mr-2">+${bonus.amount}:</span>`}));
 
-			const selectEl = e_({outer: `<select class="form-control form-control--minimal ve-inline-block w-auto" data-tasha-idx="${idx}"></select>`});
+			const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal ve-inline-block w-auto" data-tasha-idx="${idx}"></select>`});
 			selectEl.append(e_({outer: `<option value="">-- Select --</option>`}));
 
 			abilities.forEach(ab => {
@@ -6460,7 +6561,7 @@ class CharacterSheetBuilder {
 			const scoreDisplay = this._abilityMethod === "standard"
 				? `<span class="charsheet__builder-ability-score charsheet__builder-ability-dropzone" data-ability="${abl}" style="min-width: 2rem; text-align: center; border: 1px dashed #ccc; padding: 0.25rem 0.5rem; cursor: pointer;">${score ?? "—"}</span>`
 				: this._abilityMethod === "manual"
-					? `<input type="number" class="form-control form-control--minimal charsheet__builder-ability-score" value="${score}" min="3" max="18" title="Max starting score is 18 (before racial bonuses)">`
+					? `<input type="number" class="ve-form-control form-control--minimal charsheet__builder-ability-score" value="${score}" min="3" max="18" title="Max starting score is 18 (before racial bonuses)">`
 					: `<span class="charsheet__builder-ability-score">${score}</span>`;
 
 			const row = e_({outer: `
@@ -6743,7 +6844,7 @@ class CharacterSheetBuilder {
 			<div class="charsheet__builder-selection">
 				<div class="charsheet__builder-list">
 					<div class="charsheet__builder-list-header">
-						<input type="text" class="form-control form-control--minimal" placeholder="Search backgrounds..." id="builder-bg-search">
+						<input type="text" class="ve-form-control form-control--minimal" placeholder="Search backgrounds..." id="builder-bg-search">
 					</div>
 					<div class="charsheet__builder-list-content" id="builder-bg-list"></div>
 					<div class="charsheet__builder-list-footer p-2" style="border-top: 1px solid var(--rgb-border-grey);">
@@ -6865,7 +6966,7 @@ class CharacterSheetBuilder {
 				
 				<div class="charsheet__section mb-3">
 					<label class="ve-block mb-1"><strong>Background Name:</strong></label>
-					<input type="text" class="form-control form-control--minimal" id="custom-bg-name" 
+					<input type="text" class="ve-form-control form-control--minimal" id="custom-bg-name" 
 						value="${this._customBackgroundData.name}" placeholder="Enter background name">
 				</div>
 
@@ -6879,19 +6980,19 @@ class CharacterSheetBuilder {
 					<div class="ve-flex-col">
 						<div class="mb-2">
 							<label class="ve-muted ve-small">Tools:</label>
-							<select class="form-control form-control--minimal" id="custom-bg-tool1">
+							<select class="ve-form-control form-control--minimal" id="custom-bg-tool1">
 								<option value="">-- None --</option>
 							</select>
 						</div>
 						<div class="mb-2">
 							<label class="ve-muted ve-small">Languages:</label>
-							<select class="form-control form-control--minimal" id="custom-bg-lang1">
+							<select class="ve-form-control form-control--minimal" id="custom-bg-lang1">
 								<option value="">-- None --</option>
 							</select>
 						</div>
 						<div>
 							<label class="ve-muted ve-small">Additional (Tool or Language):</label>
-							<select class="form-control form-control--minimal" id="custom-bg-extra">
+							<select class="ve-form-control form-control--minimal" id="custom-bg-extra">
 								<option value="">-- None --</option>
 								<optgroup label="Tools" id="custom-bg-extra-tools"></optgroup>
 								<optgroup label="Languages" id="custom-bg-extra-langs"></optgroup>
@@ -6902,13 +7003,13 @@ class CharacterSheetBuilder {
 
 				<div class="charsheet__section mb-3">
 					<label class="ve-block mb-1"><strong>Equipment:</strong></label>
-					<textarea class="form-control form-control--minimal" id="custom-bg-equipment" rows="2" 
+					<textarea class="ve-form-control form-control--minimal" id="custom-bg-equipment" rows="2" 
 						placeholder="e.g., A set of common clothes, a trinket, 15 gp">${this._customBackgroundData.equipment || ""}</textarea>
 				</div>
 
 				<div class="charsheet__section mb-3">
 					<label class="ve-block mb-1"><strong>Feature Name:</strong></label>
-					<input type="text" class="form-control form-control--minimal" id="custom-bg-feature" 
+					<input type="text" class="ve-form-control form-control--minimal" id="custom-bg-feature" 
 						value="${this._customBackgroundData.feature || ""}" placeholder="e.g., Shelter of the Faithful">
 				</div>
 
@@ -7336,7 +7437,7 @@ class CharacterSheetBuilder {
 			for (let i = 0; i < choice.count; i++) {
 				const selectId = `bg-tool-choice-${choiceIdx}-${i}`;
 				const selectEl = e_({outer: `
-					<select class="form-control form-control--minimal mb-1" id="${selectId}">
+					<select class="ve-form-control form-control--minimal mb-1" id="${selectId}">
 						<option value="">-- Select Tool --</option>
 					</select>
 				`});
@@ -7380,7 +7481,7 @@ class CharacterSheetBuilder {
 			for (let i = 0; i < anyToolCount; i++) {
 				const selectId = `bg-tool-any-${i}`;
 				const selectEl = e_({outer: `
-					<select class="form-control form-control--minimal mb-1" id="${selectId}">
+					<select class="ve-form-control form-control--minimal mb-1" id="${selectId}">
 						<option value="">-- Select Tool --</option>
 					</select>
 				`});
@@ -7423,7 +7524,7 @@ class CharacterSheetBuilder {
 			const musicalInstruments = Renderer.generic.FEATURE__TOOLS_MUSICAL_INSTRUMENTS;
 
 			const categorySelect = e_({outer: `
-				<select class="form-control form-control--minimal mb-1" id="bg-tool-or-category">
+				<select class="ve-form-control form-control--minimal mb-1" id="bg-tool-or-category">
 					<option value="">-- Select Category --</option>
 					<option value="artisan">Artisan's Tools</option>
 					<option value="instrument">Musical Instrument</option>
@@ -7431,7 +7532,7 @@ class CharacterSheetBuilder {
 			`});
 
 			const toolSelectEl = e_({outer: `
-				<select class="form-control form-control--minimal mb-1" id="bg-tool-or-specific" style="display: none;">
+				<select class="ve-form-control form-control--minimal mb-1" id="bg-tool-or-specific" style="display: none;">
 					<option value="">-- Select Tool --</option>
 				</select>
 			`});
@@ -7498,7 +7599,7 @@ class CharacterSheetBuilder {
 			for (let i = 0; i < anyArtisanCount; i++) {
 				const selectId = `bg-tool-artisan-${i}`;
 				const selectEl = e_({outer: `
-					<select class="form-control form-control--minimal mb-1" id="${selectId}">
+					<select class="ve-form-control form-control--minimal mb-1" id="${selectId}">
 						<option value="">-- Select Artisan's Tool --</option>
 					</select>
 				`});
@@ -7539,7 +7640,7 @@ class CharacterSheetBuilder {
 			for (let i = 0; i < anyMusicalInstrumentCount; i++) {
 				const selectId = `bg-tool-instrument-${i}`;
 				const selectEl = e_({outer: `
-					<select class="form-control form-control--minimal mb-1" id="${selectId}">
+					<select class="ve-form-control form-control--minimal mb-1" id="${selectId}">
 						<option value="">-- Select Musical Instrument --</option>
 					</select>
 				`});
@@ -7632,7 +7733,7 @@ class CharacterSheetBuilder {
 
 				const selectId = `bg-lang-choice-${i}`;
 				const selectEl = e_({outer: `
-					<select class="form-control form-control--minimal mb-1" id="${selectId}">
+					<select class="ve-form-control form-control--minimal mb-1" id="${selectId}">
 						<option value="">-- Select Language --</option>
 					</select>
 				`});
@@ -7784,7 +7885,7 @@ class CharacterSheetBuilder {
 			const row = e_({outer: `<div class="ve-flex-v-center mb-1"></div>`});
 			row.append(e_({outer: `<span class="mr-2">+${weight}:</span>`}));
 
-			const selectEl = e_({outer: `<select class="form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${idx}"></select>`});
+			const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${idx}"></select>`});
 			selectEl.append(e_({outer: `<option value="">-- Select --</option>`}));
 
 			availableAbilities.forEach(ab => {
@@ -7827,7 +7928,7 @@ class CharacterSheetBuilder {
 			const row = e_({outer: `<div class="ve-flex-v-center mb-1"></div>`});
 			row.append(e_({outer: `<span class="mr-2">+${amount}:</span>`}));
 
-			const selectEl = e_({outer: `<select class="form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${i}"></select>`});
+			const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${i}"></select>`});
 			selectEl.append(e_({outer: `<option value="">-- Select --</option>`}));
 
 			availableAbilities.forEach(ab => {
@@ -8105,7 +8206,7 @@ class CharacterSheetBuilder {
 				const picker = e_({outer: `
 					<div class="charsheet__builder-equipment-type-picker mb-1">
 						<label class="ve-small ve-muted">Choose ${label}:</label>
-						<select class="form-control form-control--minimal" style="max-width: 300px;">
+						<select class="ve-form-control form-control--minimal" style="max-width: 300px;">
 							<option value="">-- Select --</option>
 						</select>
 					</div>
@@ -8234,18 +8335,27 @@ class CharacterSheetBuilder {
 		const cls = this._selectedClass;
 		const className = cls.name;
 
-		// Skip Wizard (uses spellbook, not known-spells) and prepared-spell casters
-		if (className === "Wizard") return null;
-		if (cls.preparedSpellsProgression) return null;
+		// Non-caster classes have no cantripProgression, spellsKnownProgression, or preparedSpellsProgression.
+		// Return null so step 6 shows the "no spells at level 1" message.
+		const cantripAtLevel1 = CharacterSheetClassUtils.getCantripsAtLevel(cls, className, 1);
+		const isSpellbookCaster = !!cls.spellsKnownProgressionFixed; // Wizard-family: permanent spellbook
+		const isPreparedCaster = !!cls.preparedSpellsProgression && !isSpellbookCaster; // Cleric/Druid/XPHB casters
+		const isKnownCaster = !isSpellbookCaster && !isPreparedCaster;
 
-		const knownAtLevel1 = CharacterSheetClassUtils.getKnownSpellsAtLevel(cls, className, 1);
-		const cantripsAtLevel1 = CharacterSheetClassUtils.getCantripsAtLevel(cls, className, 1);
+		const knownAtLevel1 = isKnownCaster
+			? CharacterSheetClassUtils.getKnownSpellsAtLevel(cls, className, 1)
+			: null;
 
-		if (!knownAtLevel1 && !cantripsAtLevel1) return null;
+		// Return null only if no spells AND no cantrips at all
+		if (!cantripAtLevel1 && !knownAtLevel1 && !isSpellbookCaster && !isPreparedCaster) return null;
 
 		const maxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(
 			cls.casterProgression || this._selectedSubclass?.casterProgression, 1,
 		);
+
+		const spellbookCount = isSpellbookCaster
+			? (cls.spellsKnownProgressionFixed?.[0] ?? 6)
+			: 0;
 
 		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
 			className,
@@ -8257,8 +8367,10 @@ class CharacterSheetBuilder {
 			className,
 			classSource: cls.source,
 			classLevel: 1,
+			isSpellbookCaster,
+			spellbookCount,
 			spellCount: knownAtLevel1 || 0,
-			cantripCount: cantripsAtLevel1 || 0,
+			cantripCount: cantripAtLevel1 || 0,
 			maxSpellLevel,
 			additionalClassNames,
 		};
@@ -8268,7 +8380,7 @@ class CharacterSheetBuilder {
 		const knownInfo = this._getKnownCasterInfoForBuilder();
 
 		if (!knownInfo) {
-			// Not a known-spell caster — show informational message
+			// Non-caster: no spell selection needed at level 1
 			const container = e_({outer: `<div>
 				<h4>Spells</h4>
 				<p class="ve-muted">Your class does not require spell selection at level 1. You may choose spells later via Level Up.</p>
@@ -8292,7 +8404,7 @@ class CharacterSheetBuilder {
 				<div class="charsheet__builder-feat-opt-section mb-3" style="padding: 0.75rem; background: var(--cs-bg-secondary, #f8f9fa); border-radius: 4px;">
 					<label class="ve-flex-col gap-2 mb-0">
 						<span class="ve-bold">Divine Soul Affinity</span>
-						<select class="form-control form-control-sm">
+						<select class="ve-form-control ve-input-sm">
 							<option value="">Choose an affinity</option>
 							${affinityOptions.map(opt => `<option value="${opt.key}" ${selectedAffinity?.key === opt.key ? "selected" : ""}>${opt.name}</option>`).join("")}
 						</select>
@@ -8301,46 +8413,87 @@ class CharacterSheetBuilder {
 				</div>
 			`});
 
-			affinitySection.querySelector("select").addEventListener("change", evt => {
-				this._divineSoulAffinity = affinityOptions.find(opt => opt.key === evt.target.value) || null;
-				this._state.setSubclassChoice(this._selectedClass?.name, this._divineSoulAffinity);
-				this._state.updateLevelChoice?.(1, {
-					subclassChoice: CharacterSheetClassUtils.normalizeDivineSoulAffinity(this._divineSoulAffinity),
+			const affinitySelect = affinitySection.querySelector("select");
+			if (affinitySelect) {
+				affinitySelect.addEventListener("change", evt => {
+					this._divineSoulAffinity = affinityOptions.find(opt => opt.key === evt.target.value) || null;
+					this._state.setSubclassChoice(this._selectedClass?.name, this._divineSoulAffinity);
+					this._state.updateLevelChoice?.(1, {
+						subclassChoice: CharacterSheetClassUtils.normalizeDivineSoulAffinity(this._divineSoulAffinity),
+					});
+					this._renderSpellsStep(content.innerHTML = "");
 				});
-				this._renderSpellsStep(content.innerHTML = "");
-			});
+			}
 
-			container.querySelector("#builder-spell-picker").before(affinitySection);
+			const pickerEl = container.querySelector("#builder-spell-picker");
+			if (pickerEl) pickerEl.before(affinitySection);
 		}
 
 		const allSpells = this._page.getSpells() || [];
 		const sourceFiltered = this._page.filterByAllowedSources(allSpells);
 
-		// Existing known spell IDs (empty for builder — first-time creation)
-		const knownSpellIds = new Set();
-
 		// Re-get knownInfo to reflect the current affinity selection
 		const updatedKnownInfo = this._getKnownCasterInfoForBuilder();
+		const pickerEl = container.querySelector("#builder-spell-picker");
+		if (!pickerEl) return;
 
-		const section = CharacterSheetSpellPicker.renderKnownSpellPicker({
-			className: updatedKnownInfo.className,
-			classSource: updatedKnownInfo.classSource,
-			spellCount: updatedKnownInfo.spellCount,
-			cantripCount: updatedKnownInfo.cantripCount,
-			maxSpellLevel: updatedKnownInfo.maxSpellLevel,
-			allSpells: sourceFiltered,
-			knownSpellIds,
-			additionalClassNames: updatedKnownInfo.additionalClassNames,
-			onSelect: (spells, cantrips) => {
-				this._selectedKnownSpells = spells;
-				this._selectedKnownCantrips = cantrips;
-			},
-			getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
-			preSelectedSpells: this._selectedKnownSpells,
-			preSelectedCantrips: this._selectedKnownCantrips,
-		});
-
-		document.getElementById("builder-spell-picker").append(section);
+		if (updatedKnownInfo.isSpellbookCaster) {
+			// --- Cantrips (Wizard picks cantrips too) ---
+			if (updatedKnownInfo.cantripCount > 0) {
+				const cantripSection = CharacterSheetSpellPicker.renderKnownSpellPicker({
+					className: updatedKnownInfo.className,
+					classSource: updatedKnownInfo.classSource,
+					spellCount: 0,
+					cantripCount: updatedKnownInfo.cantripCount,
+					maxSpellLevel: 0,
+					allSpells: sourceFiltered,
+					knownSpellIds: new Set(),
+					additionalClassNames: updatedKnownInfo.additionalClassNames,
+					onSelect: (spells, cantrips) => {
+						this._selectedKnownCantrips = cantrips;
+					},
+					getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+					preSelectedSpells: [],
+					preSelectedCantrips: this._selectedKnownCantrips,
+				});
+				pickerEl.append(cantripSection);
+			}
+			// --- Spellbook ---
+			const spellbookSection = CharacterSheetSpellPicker.renderWizardSpellbookPicker({
+				className: updatedKnownInfo.className,
+				spellCount: updatedKnownInfo.spellbookCount,
+				maxSpellLevel: updatedKnownInfo.maxSpellLevel,
+				allSpells: sourceFiltered,
+				knownSpellIds: new Set(),
+				onSelect: (spells) => {
+					this._selectedSpellbookSpells = spells;
+				},
+				getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+				preSelectedSpells: this._selectedSpellbookSpells,
+			});
+			pickerEl.append(spellbookSection);
+		} else {
+			// Known-caster (Bard, Sorcerer, Warlock, Ranger) or cantrip-only prepared caster
+			// (PHB Cleric/Druid: has cantripProgression but no preparedSpellsProgression field)
+			const section = CharacterSheetSpellPicker.renderKnownSpellPicker({
+				className: updatedKnownInfo.className,
+				classSource: updatedKnownInfo.classSource,
+				spellCount: updatedKnownInfo.spellCount,
+				cantripCount: updatedKnownInfo.cantripCount,
+				maxSpellLevel: updatedKnownInfo.maxSpellLevel,
+				allSpells: sourceFiltered,
+				knownSpellIds: new Set(),
+				additionalClassNames: updatedKnownInfo.additionalClassNames,
+				onSelect: (spells, cantrips) => {
+					this._selectedKnownSpells = spells;
+					this._selectedKnownCantrips = cantrips;
+				},
+				getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+				preSelectedSpells: this._selectedKnownSpells,
+				preSelectedCantrips: this._selectedKnownCantrips,
+			});
+			pickerEl.append(section);
+		}
 	}
 
 	_applyBuilderSpellChoices () {
@@ -8349,14 +8502,28 @@ class CharacterSheetBuilder {
 
 		this._state.setSubclassChoice(knownInfo.className, this._divineSoulAffinity);
 
-		// Add selected spells to character state
-		for (const spell of this._selectedKnownSpells) {
-			this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
-				sourceFeature: "Spells Known",
-				sourceClass: knownInfo.className,
-				prepared: true,
-			}));
+		if (knownInfo.isSpellbookCaster) {
+			// Wizard-family: add spellbook spells (inSpellbook: true) + cantrips
+			for (const spell of this._selectedSpellbookSpells) {
+				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
+					sourceFeature: "Wizard Spellbook",
+					sourceClass: knownInfo.className,
+					prepared: true,
+					inSpellbook: true,
+				}));
+			}
+		} else {
+			// Known-caster (Bard, Sorcerer, Warlock, Ranger)
+			for (const spell of this._selectedKnownSpells) {
+				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
+					sourceFeature: "Spells Known",
+					sourceClass: knownInfo.className,
+					prepared: true,
+				}));
+			}
 		}
+
+		// Cantrips apply for all caster types
 		for (const cantrip of this._selectedKnownCantrips) {
 			this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(cantrip, {
 				sourceFeature: "Cantrips Known",
@@ -8381,27 +8548,27 @@ class CharacterSheetBuilder {
 				<div class="ve-flex-col" style="flex: 1; padding-right: 1rem;">
 					<div class="charsheet__section">
 						<h5>Character Name</h5>
-						<input type="text" class="form-control" id="builder-name" placeholder="Enter character name" value="${this._state.getName()}">
+						<input type="text" class="ve-form-control" id="builder-name" placeholder="Enter character name" value="${this._state.getName()}">
 					</div>
 					
 					<div class="charsheet__section mt-3">
 						<h5>Personality Traits</h5>
-						<textarea class="form-control" id="builder-personality" rows="3" placeholder="Describe your character's personality...">${this._state.getNote("personality")}</textarea>
+						<textarea class="ve-form-control" id="builder-personality" rows="3" placeholder="Describe your character's personality...">${this._state.getNote("personality")}</textarea>
 					</div>
 					
 					<div class="charsheet__section mt-3">
 						<h5>Ideals</h5>
-						<textarea class="form-control" id="builder-ideals" rows="2" placeholder="What does your character believe in?">${this._state.getNote("ideals")}</textarea>
+						<textarea class="ve-form-control" id="builder-ideals" rows="2" placeholder="What does your character believe in?">${this._state.getNote("ideals")}</textarea>
 					</div>
 					
 					<div class="charsheet__section mt-3">
 						<h5>Bonds</h5>
-						<textarea class="form-control" id="builder-bonds" rows="2" placeholder="What connections does your character have?">${this._state.getNote("bonds")}</textarea>
+						<textarea class="ve-form-control" id="builder-bonds" rows="2" placeholder="What connections does your character have?">${this._state.getNote("bonds")}</textarea>
 					</div>
 					
 					<div class="charsheet__section mt-3">
 						<h5>Flaws</h5>
-						<textarea class="form-control" id="builder-flaws" rows="2" placeholder="What are your character's weaknesses?">${this._state.getNote("flaws")}</textarea>
+						<textarea class="ve-form-control" id="builder-flaws" rows="2" placeholder="What are your character's weaknesses?">${this._state.getNote("flaws")}</textarea>
 					</div>
 				</div>
 				
@@ -8411,36 +8578,36 @@ class CharacterSheetBuilder {
 						<div class="ve-flex mb-2">
 							<div class="ve-flex-col mr-2" style="flex: 1;">
 								<label class="ve-muted ve-small">Age</label>
-								<input type="number" min="0" class="form-control form-control--minimal" id="builder-age" value="${this._state.getAppearance("age")}" placeholder="Years">
+								<input type="number" min="0" class="ve-form-control form-control--minimal" id="builder-age" value="${this._state.getAppearance("age")}" placeholder="Years">
 							</div>
 							<div class="ve-flex-col mr-2" style="flex: 1;">
 								<label class="ve-muted ve-small">Height (ft)</label>
-								<input type="number" min="0" step="0.1" class="form-control form-control--minimal" id="builder-height" value="${this._state.getAppearance("height")}" placeholder="Feet">
+								<input type="number" min="0" step="0.1" class="ve-form-control form-control--minimal" id="builder-height" value="${this._state.getAppearance("height")}" placeholder="Feet">
 							</div>
 							<div class="ve-flex-col" style="flex: 1;">
 								<label class="ve-muted ve-small">Weight (lbs)</label>
-								<input type="number" min="0" class="form-control form-control--minimal" id="builder-weight" value="${this._state.getAppearance("weight")}" placeholder="Pounds">
+								<input type="number" min="0" class="ve-form-control form-control--minimal" id="builder-weight" value="${this._state.getAppearance("weight")}" placeholder="Pounds">
 							</div>
 						</div>
 						<div class="ve-flex">
 							<div class="ve-flex-col mr-2" style="flex: 1;">
 								<label class="ve-muted ve-small">Eyes</label>
-								<input type="text" class="form-control form-control--minimal" id="builder-eyes" value="${this._state.getAppearance("eyes")}">
+								<input type="text" class="ve-form-control form-control--minimal" id="builder-eyes" value="${this._state.getAppearance("eyes")}">
 							</div>
 							<div class="ve-flex-col mr-2" style="flex: 1;">
 								<label class="ve-muted ve-small">Skin</label>
-								<input type="text" class="form-control form-control--minimal" id="builder-skin" value="${this._state.getAppearance("skin")}">
+								<input type="text" class="ve-form-control form-control--minimal" id="builder-skin" value="${this._state.getAppearance("skin")}">
 							</div>
 							<div class="ve-flex-col" style="flex: 1;">
 								<label class="ve-muted ve-small">Hair</label>
-								<input type="text" class="form-control form-control--minimal" id="builder-hair" value="${this._state.getAppearance("hair")}">
+								<input type="text" class="ve-form-control form-control--minimal" id="builder-hair" value="${this._state.getAppearance("hair")}">
 							</div>
 						</div>
 					</div>
 					
 					<div class="charsheet__section mt-3">
 						<h5>Backstory</h5>
-						<textarea class="form-control" id="builder-backstory" rows="8" placeholder="Write your character's backstory...">${this._state.getNote("backstory")}</textarea>
+						<textarea class="ve-form-control" id="builder-backstory" rows="8" placeholder="Write your character's backstory...">${this._state.getNote("backstory")}</textarea>
 					</div>
 				</div>
 			</div>

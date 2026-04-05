@@ -74,7 +74,7 @@ class CharacterSheetExport {
 			</div>
 			<div class="charsheet__export-preview">
 				<label class="ve-muted mb-1">Character Data Preview:</label>
-				<textarea class="form-control" rows="12" readonly style="font-family: monospace; font-size: 0.8rem;">${jsonStr}</textarea>
+				<textarea class="ve-form-control" rows="12" readonly style="font-family: monospace; font-size: 0.8rem;">${jsonStr}</textarea>
 			</div>
 		</div>`;
 
@@ -161,11 +161,11 @@ class CharacterSheetExport {
 			isMinHeight0: true,
 		});
 
-		const fileInput = e_({tag: "input", clazz: "form-control"});
+		const fileInput = e_({tag: "input", clazz: "ve-form-control"});
 		fileInput.type = "file";
 		fileInput.accept = ".json";
 
-		const jsonTextarea = e_({tag: "textarea", clazz: "form-control"});
+		const jsonTextarea = e_({tag: "textarea", clazz: "ve-form-control"});
 		jsonTextarea.rows = 8;
 		jsonTextarea.placeholder = "Paste character JSON data here...";
 		jsonTextarea.style.fontFamily = "monospace";
@@ -279,23 +279,23 @@ class CharacterSheetExport {
 				isWidth100: true,
 			});
 
-			const iptSourceJson = e_({tag: "input", clazz: "form-control input-sm"});
+			const iptSourceJson = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
 			iptSourceJson.placeholder = "CSHEET";
 			iptSourceJson.value = sourceConfig.sourceJson;
 
-			const iptSourceAbv = e_({tag: "input", clazz: "form-control input-sm"});
+			const iptSourceAbv = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
 			iptSourceAbv.placeholder = "CSHEET";
 			iptSourceAbv.value = sourceConfig.abbreviation;
 
-			const iptSourceFull = e_({tag: "input", clazz: "form-control input-sm"});
+			const iptSourceFull = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
 			iptSourceFull.placeholder = "Character Sheet NPC Exports";
 			iptSourceFull.value = sourceConfig.full;
 
-			const iptSourceVersion = e_({tag: "input", clazz: "form-control input-sm"});
+			const iptSourceVersion = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
 			iptSourceVersion.placeholder = "1.0.0";
 			iptSourceVersion.value = sourceConfig.version;
 
-			const selDefenseMode = e_({outer: `<select class="form-control input-sm">
+			const selDefenseMode = e_({outer: `<select class="ve-form-control ve-input-sm">
 				<option value="persistent">Persistent Defenses (default)</option>
 				<option value="active">Include Active-State Defenses</option>
 			</select>`});

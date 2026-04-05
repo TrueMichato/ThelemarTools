@@ -90,13 +90,13 @@ class CharacterSheetCustomAbilities {
 		// Search input
 		const searchInput = document.createElement("input");
 		searchInput.type = "text";
-		searchInput.className = "form-control custom-abilities__search-input";
+		searchInput.className = "ve-form-control custom-abilities__search-input";
 		searchInput.placeholder = "🔍 Search abilities...";
 		searchInput.id = "custom-abilities-search";
 
 		// Category filter
 		const categorySelect = document.createElement("select");
-		categorySelect.className = "form-control custom-abilities__category-filter";
+		categorySelect.className = "ve-form-control custom-abilities__category-filter";
 		categorySelect.id = "custom-abilities-category-filter";
 
 		const categories = CharacterSheetState.CUSTOM_ABILITY_CATEGORIES;
@@ -833,7 +833,7 @@ class CharacterSheetCustomAbilities {
 							<div class="custom-abilities__form-row">
 								<div class="custom-abilities__form-field" style="flex: 2;">
 									<label>Name <span class="text-danger">*</span></label>
-									<input type="text" class="form-control" name="name" placeholder="e.g., Blessing of the Sun God" value="${existingAbility?.name || ""}">
+									<input type="text" class="ve-form-control" name="name" placeholder="e.g., Blessing of the Sun God" value="${existingAbility?.name || ""}">
 								</div>
 								<div class="custom-abilities__form-field custom-abilities__icon-field">
 									<label>Icon</label>
@@ -846,7 +846,7 @@ class CharacterSheetCustomAbilities {
 												${this._getIconOptions().map(icon => `<button type="button" class="custom-abilities__icon-option" data-icon="${icon}">${icon}</button>`).join("")}
 											</div>
 											<div class="custom-abilities__icon-custom">
-												<input type="text" class="form-control" placeholder="Or paste emoji..." maxlength="2">
+												<input type="text" class="ve-form-control" placeholder="Or paste emoji..." maxlength="2">
 											</div>
 										</div>
 									</div>
@@ -854,13 +854,13 @@ class CharacterSheetCustomAbilities {
 								</div>
 								<div class="custom-abilities__form-field">
 									<label>Category</label>
-									<select class="form-control" name="category">${categoryOptionsHtml}</select>
+									<select class="ve-form-control" name="category">${categoryOptionsHtml}</select>
 								</div>
 							</div>
 
 							<div class="custom-abilities__form-field">
 								<label>Description</label>
-								<textarea class="form-control" name="description" rows="3" placeholder="What does this ability do? (Supports 5etools tags like {@dice 2d6})">${existingAbility?.description || ""}</textarea>
+								<textarea class="ve-form-control" name="description" rows="3" placeholder="What does this ability do? (Supports 5etools tags like {@dice 2d6})">${existingAbility?.description || ""}</textarea>
 							</div>
 						</div>
 
@@ -893,7 +893,7 @@ class CharacterSheetCustomAbilities {
 							<div class="custom-abilities__limited-options" style="display: ${existingAbility?.mode === "limited" ? "flex" : "none"};">
 								<div class="custom-abilities__form-field custom-abilities__resource-source-field">
 									<label>Resource Source</label>
-									<select class="form-control" name="resourceSource">
+									<select class="ve-form-control" name="resourceSource">
 										<option value="self" ${!existingAbility?.resourceSource?.type || existingAbility?.resourceSource?.type === "self" ? "selected" : ""}>Self-contained Uses</option>
 										<option value="linked" ${existingAbility?.resourceSource?.type === "linked" ? "selected" : ""}>Link to Existing Resource</option>
 										<option value="new" ${existingAbility?.resourceSource?.type === "new" ? "selected" : ""}>Create New Resource Pool</option>
@@ -902,11 +902,11 @@ class CharacterSheetCustomAbilities {
 								<div class="custom-abilities__self-uses-options" style="display: ${!existingAbility?.resourceSource?.type || existingAbility?.resourceSource?.type === "self" ? "flex" : "none"};">
 									<div class="custom-abilities__form-field">
 										<label>Max Uses</label>
-										<input type="number" class="form-control" name="maxUses" min="1" value="${existingAbility?.uses?.max || 1}">
+										<input type="number" class="ve-form-control" name="maxUses" min="1" value="${existingAbility?.uses?.max || 1}">
 									</div>
 									<div class="custom-abilities__form-field">
 										<label>Recharges On</label>
-										<select class="form-control" name="recharge">
+										<select class="ve-form-control" name="recharge">
 											<option value="long" ${existingAbility?.uses?.recharge !== "short" ? "selected" : ""}>🌙 Long Rest</option>
 											<option value="short" ${existingAbility?.uses?.recharge === "short" ? "selected" : ""}>⚡ Short Rest</option>
 										</select>
@@ -915,27 +915,27 @@ class CharacterSheetCustomAbilities {
 								<div class="custom-abilities__linked-resource-options" style="display: ${existingAbility?.resourceSource?.type === "linked" ? "flex" : "none"};">
 									<div class="custom-abilities__form-field" style="flex: 2;">
 										<label>Resource Pool</label>
-										<select class="form-control" name="linkedResourceId">
+										<select class="ve-form-control" name="linkedResourceId">
 											${resourceOptionsHtml || '<option value="" disabled>No resources available</option>'}
 										</select>
 									</div>
 									<div class="custom-abilities__form-field">
 										<label>Cost</label>
-										<input type="number" class="form-control" name="linkedResourceCost" min="1" value="${existingAbility?.resourceSource?.cost || 1}">
+										<input type="number" class="ve-form-control" name="linkedResourceCost" min="1" value="${existingAbility?.resourceSource?.cost || 1}">
 									</div>
 								</div>
 								<div class="custom-abilities__new-resource-options" style="display: ${existingAbility?.resourceSource?.type === "new" ? "flex" : "none"};">
 									<div class="custom-abilities__form-field" style="flex: 2;">
 										<label>Resource Name</label>
-										<input type="text" class="form-control" name="newResourceName" placeholder="e.g., Divine Charges" value="${existingAbility?.resourceSource?.newResourceName || ""}">
+										<input type="text" class="ve-form-control" name="newResourceName" placeholder="e.g., Divine Charges" value="${existingAbility?.resourceSource?.newResourceName || ""}">
 									</div>
 									<div class="custom-abilities__form-field">
 										<label>Max</label>
-										<input type="number" class="form-control" name="newResourceMax" min="1" value="${existingAbility?.resourceSource?.newResourceMax || 3}">
+										<input type="number" class="ve-form-control" name="newResourceMax" min="1" value="${existingAbility?.resourceSource?.newResourceMax || 3}">
 									</div>
 									<div class="custom-abilities__form-field">
 										<label>Recharges</label>
-										<select class="form-control" name="newResourceRecharge">
+										<select class="ve-form-control" name="newResourceRecharge">
 											<option value="long" ${existingAbility?.resourceSource?.newResourceRecharge !== "short" ? "selected" : ""}>🌙 Long</option>
 											<option value="short" ${existingAbility?.resourceSource?.newResourceRecharge === "short" ? "selected" : ""}>⚡ Short</option>
 										</select>
@@ -945,7 +945,7 @@ class CharacterSheetCustomAbilities {
 							<div class="custom-abilities__activation-options" style="display: ${existingAbility?.mode && existingAbility.mode !== "passive" ? "flex" : "none"};">
 								<div class="custom-abilities__form-field">
 									<label>Activation</label>
-									<select class="form-control" name="activationAction">
+									<select class="ve-form-control" name="activationAction">
 										<option value="free" ${!existingAbility?.activationAction || existingAbility?.activationAction === "free" ? "selected" : ""}>Free (No Action)</option>
 										<option value="action" ${existingAbility?.activationAction === "action" ? "selected" : ""}>Action</option>
 										<option value="bonus" ${existingAbility?.activationAction === "bonus" ? "selected" : ""}>Bonus Action</option>
@@ -957,7 +957,7 @@ class CharacterSheetCustomAbilities {
 							<div class="custom-abilities__duration-options" style="display: ${existingAbility?.mode === "toggleable" ? "flex" : "none"};">
 								<div class="custom-abilities__form-field">
 									<label>Duration</label>
-									<select class="form-control" name="duration">
+									<select class="ve-form-control" name="duration">
 										<option value="" ${!existingAbility?.duration ? "selected" : ""}>Until Toggled Off</option>
 										<option value="1 round" ${existingAbility?.duration === "1 round" ? "selected" : ""}>1 Round</option>
 										<option value="1 minute" ${existingAbility?.duration === "1 minute" ? "selected" : ""}>1 Minute</option>
@@ -986,13 +986,13 @@ class CharacterSheetCustomAbilities {
 								<div class="custom-abilities__toggleable-resource-details" style="display: ${existingAbility?.resourceCost ? "flex" : "none"};">
 									<div class="custom-abilities__form-field" style="flex: 2;">
 										<label>Resource Pool</label>
-										<select class="form-control" name="toggleResourceId">
+										<select class="ve-form-control" name="toggleResourceId">
 											${resourceOptionsHtml || '<option value="" disabled>No resources available</option>'}
 										</select>
 									</div>
 									<div class="custom-abilities__form-field">
 										<label>Cost</label>
-										<input type="number" class="form-control" name="toggleResourceCost" min="1" value="${existingAbility?.resourceCost?.cost || 1}">
+										<input type="number" class="ve-form-control" name="toggleResourceCost" min="1" value="${existingAbility?.resourceCost?.cost || 1}">
 									</div>
 								</div>
 							</div>
@@ -1020,7 +1020,7 @@ class CharacterSheetCustomAbilities {
 								<div class="custom-abilities__grants-content">
 									<div class="custom-abilities__defensive-pills" id="defensive-resistances"></div>
 									<div class="custom-abilities__grants-prof-add mt-1">
-										<input type="text" class="form-control" placeholder="Custom damage type..." id="defensive-resistance-custom">
+										<input type="text" class="ve-form-control" placeholder="Custom damage type..." id="defensive-resistance-custom">
 										<button type="button" class="btn btn-xs btn-primary" id="defensive-resistance-add">+ Add</button>
 									</div>
 								</div>
@@ -1031,7 +1031,7 @@ class CharacterSheetCustomAbilities {
 								<div class="custom-abilities__grants-content">
 									<div class="custom-abilities__defensive-pills" id="defensive-immunities"></div>
 									<div class="custom-abilities__grants-prof-add mt-1">
-										<input type="text" class="form-control" placeholder="Custom damage type..." id="defensive-immunity-custom">
+										<input type="text" class="ve-form-control" placeholder="Custom damage type..." id="defensive-immunity-custom">
 										<button type="button" class="btn btn-xs btn-primary" id="defensive-immunity-add">+ Add</button>
 									</div>
 								</div>
@@ -1042,7 +1042,7 @@ class CharacterSheetCustomAbilities {
 								<div class="custom-abilities__grants-content">
 									<div class="custom-abilities__defensive-pills" id="defensive-vulnerabilities"></div>
 									<div class="custom-abilities__grants-prof-add mt-1">
-										<input type="text" class="form-control" placeholder="Custom damage type..." id="defensive-vulnerability-custom">
+										<input type="text" class="ve-form-control" placeholder="Custom damage type..." id="defensive-vulnerability-custom">
 										<button type="button" class="btn btn-xs btn-primary" id="defensive-vulnerability-add">+ Add</button>
 									</div>
 								</div>
@@ -1053,7 +1053,7 @@ class CharacterSheetCustomAbilities {
 								<div class="custom-abilities__grants-content">
 									<div class="custom-abilities__defensive-pills" id="defensive-conditions"></div>
 									<div class="custom-abilities__grants-prof-add mt-1">
-										<input type="text" class="form-control" placeholder="Custom condition..." id="defensive-condition-custom">
+										<input type="text" class="ve-form-control" placeholder="Custom condition..." id="defensive-condition-custom">
 										<button type="button" class="btn btn-xs btn-primary" id="defensive-condition-add">+ Add</button>
 									</div>
 								</div>
@@ -1112,13 +1112,13 @@ class CharacterSheetCustomAbilities {
 									
 									<div class="custom-abilities__temphp-value-row" id="temphp-static-row">
 										<span class="ve-small">Amount:</span>
-										<input type="number" class="form-control" id="temphp-static-value" min="1" value="5" style="width: 80px;">
+										<input type="number" class="ve-form-control" id="temphp-static-value" min="1" value="5" style="width: 80px;">
 										<span class="ve-muted ve-small">temp HP</span>
 									</div>
 									
 									<div class="custom-abilities__temphp-value-row" id="temphp-dice-row" style="display: none;">
 										<span class="ve-small">Roll:</span>
-										<input type="text" class="form-control" id="temphp-dice-value" placeholder="1d4+4" value="1d4+4" style="width: 100px;">
+										<input type="text" class="ve-form-control" id="temphp-dice-value" placeholder="1d4+4" value="1d4+4" style="width: 100px;">
 										<span class="ve-muted ve-small">(e.g., 1d4+4, 2d10, 5+level)</span>
 									</div>
 									
@@ -1184,7 +1184,7 @@ class CharacterSheetCustomAbilities {
 									
 									<div class="custom-abilities__critrange-value-row" id="critrange-set-row">
 										<span class="ve-small">Critical on:</span>
-										<select class="form-control" id="critrange-set-value" style="width: 100px;">
+										<select class="ve-form-control" id="critrange-set-value" style="width: 100px;">
 											<option value="19">19-20</option>
 											<option value="18">18-20</option>
 											<option value="17">17-20</option>
@@ -1203,7 +1203,7 @@ class CharacterSheetCustomAbilities {
 									
 									<div class="custom-abilities__critrange-value-row" id="critrange-expand-row" style="display: none;">
 										<span class="ve-small">Expand by:</span>
-										<input type="number" class="form-control" id="critrange-expand-value" min="1" max="19" value="1" style="width: 70px;">
+										<input type="number" class="ve-form-control" id="critrange-expand-value" min="1" max="19" value="1" style="width: 70px;">
 										<span class="ve-muted ve-small">→ Preview: <span id="critrange-expand-preview">19-20</span></span>
 									</div>
 								</div>
@@ -1220,8 +1220,8 @@ class CharacterSheetCustomAbilities {
 								<summary><span class="custom-abilities__grants-icon">✨</span> Spells <span class="custom-abilities__grants-count" id="grants-spell-count"></span></summary>
 								<div class="custom-abilities__grants-content">
 									<div class="custom-abilities__grants-filters">
-										<input type="text" class="form-control custom-abilities__grants-search" placeholder="Search spells..." id="grants-spell-search">
-										<select class="form-control custom-abilities__grants-filter" id="grants-spell-level-filter">
+										<input type="text" class="ve-form-control custom-abilities__grants-search" placeholder="Search spells..." id="grants-spell-search">
+										<select class="ve-form-control custom-abilities__grants-filter" id="grants-spell-level-filter">
 											<option value="">All Levels</option>
 											<option value="0">Cantrips</option>
 											<option value="1">1st Level</option>
@@ -1234,7 +1234,7 @@ class CharacterSheetCustomAbilities {
 											<option value="8">8th Level</option>
 											<option value="9">9th Level</option>
 										</select>
-										<select class="form-control custom-abilities__grants-filter" id="grants-spell-school-filter">
+										<select class="ve-form-control custom-abilities__grants-filter" id="grants-spell-school-filter">
 											<option value="">All Schools</option>
 											<option value="A">Abjuration</option>
 											<option value="C">Conjuration</option>
@@ -1270,7 +1270,7 @@ class CharacterSheetCustomAbilities {
 									<div class="custom-abilities__grants-prof-group">
 										<label class="custom-abilities__grants-prof-label">Tools</label>
 										<div class="custom-abilities__grants-prof-add">
-											<input type="text" class="form-control" placeholder="Tool name..." id="grants-tools-input" list="grants-tools-datalist">
+											<input type="text" class="ve-form-control" placeholder="Tool name..." id="grants-tools-input" list="grants-tools-datalist">
 											<datalist id="grants-tools-datalist">
 												<option value="Thieves' Tools">
 												<option value="Alchemist's Supplies">
@@ -1306,7 +1306,7 @@ class CharacterSheetCustomAbilities {
 									<div class="custom-abilities__grants-prof-group">
 										<label class="custom-abilities__grants-prof-label">Languages</label>
 										<div class="custom-abilities__grants-prof-add">
-											<input type="text" class="form-control" placeholder="Language name..." id="grants-languages-input" list="grants-languages-datalist">
+											<input type="text" class="ve-form-control" placeholder="Language name..." id="grants-languages-input" list="grants-languages-datalist">
 											<datalist id="grants-languages-datalist">
 												<option value="Common">
 												<option value="Dwarvish">
@@ -1340,7 +1340,7 @@ class CharacterSheetCustomAbilities {
 											<button type="button" class="custom-abilities__grants-pill" data-weapon="firearms">Firearms</button>
 										</div>
 										<div class="custom-abilities__grants-prof-add mt-1">
-											<input type="text" class="form-control" placeholder="Specific weapon..." id="grants-weapons-input">
+											<input type="text" class="ve-form-control" placeholder="Specific weapon..." id="grants-weapons-input">
 											<button type="button" class="btn btn-xs btn-primary" id="grants-weapons-add">+ Add</button>
 										</div>
 										<div class="custom-abilities__grants-selected-pills" id="grants-weapons-selected"></div>
@@ -1363,12 +1363,12 @@ class CharacterSheetCustomAbilities {
 								<summary><span class="custom-abilities__grants-icon">⚔️</span> Features <span class="custom-abilities__grants-count" id="grants-feature-count"></span></summary>
 								<div class="custom-abilities__grants-content">
 									<div class="custom-abilities__grants-filters">
-										<input type="text" class="form-control custom-abilities__grants-search" placeholder="Search features..." id="grants-feature-search">
-										<select class="form-control custom-abilities__grants-filter" id="grants-feature-type-filter">
+										<input type="text" class="ve-form-control custom-abilities__grants-search" placeholder="Search features..." id="grants-feature-search">
+										<select class="ve-form-control custom-abilities__grants-filter" id="grants-feature-type-filter">
 											<option value="">All Types</option>
 											<!-- Populated dynamically with homebrew types -->
 										</select>
-										<select class="form-control custom-abilities__grants-filter" id="grants-feature-source-filter">
+										<select class="ve-form-control custom-abilities__grants-filter" id="grants-feature-source-filter">
 											<option value="">All Sources</option>
 											<!-- Populated dynamically -->
 										</select>
@@ -1389,7 +1389,7 @@ class CharacterSheetCustomAbilities {
 						<div class="custom-abilities__advanced-intro">
 							<p>Edit the ability definition directly as JSON. This gives full control over all properties.</p>
 						</div>
-						<textarea class="form-control custom-abilities__json-editor" rows="20" id="ability-json-editor"></textarea>
+						<textarea class="ve-form-control custom-abilities__json-editor" rows="20" id="ability-json-editor"></textarea>
 						<div class="custom-abilities__advanced-docs">
 							<details>
 								<summary><strong>📚 JSON Documentation</strong></summary>
@@ -1602,8 +1602,8 @@ class CharacterSheetCustomAbilities {
 				const row = document.createElement("div");
 				row.className = "custom-abilities__bonus-damage-row";
 				row.innerHTML = `
-					<input type="text" class="form-control" placeholder="1d6" value="${dmg.dice || "1d6"}" style="width: 70px;">
-					<select class="form-control" style="flex: 1;">${damageTypeOptions}</select>
+					<input type="text" class="ve-form-control" placeholder="1d6" value="${dmg.dice || "1d6"}" style="width: 70px;">
+					<select class="ve-form-control" style="flex: 1;">${damageTypeOptions}</select>
 					<button type="button" class="btn btn-xs btn-danger">&times;</button>
 				`;
 				row.querySelector("select").value = dmg.type || "fire";
@@ -1633,13 +1633,13 @@ class CharacterSheetCustomAbilities {
 				
 				row.innerHTML = `
 					<span class="ve-small">Reroll</span>
-					<select class="form-control custom-abilities__reroll-trigger" style="width: 100px;">
+					<select class="ve-form-control custom-abilities__reroll-trigger" style="width: 100px;">
 						<option value="1" ${r.trigger === "1" ? "selected" : ""}>1s</option>
 						<option value="1or2" ${r.trigger === "1or2" ? "selected" : ""}>1s and 2s</option>
 						<option value="1to3" ${r.trigger === "1to3" ? "selected" : ""}>1s to 3s</option>
 					</select>
 					<span class="ve-small">on</span>
-					<select class="form-control custom-abilities__reroll-type" style="flex: 1;">
+					<select class="ve-form-control custom-abilities__reroll-type" style="flex: 1;">
 						<option value="attack" ${r.rollType === "attack" ? "selected" : ""}>Attack Rolls</option>
 						<option value="save" ${r.rollType === "save" ? "selected" : ""}>Saving Throws</option>
 						<option value="ability" ${r.rollType === "ability" ? "selected" : ""}>Ability Checks</option>
@@ -1647,7 +1647,7 @@ class CharacterSheetCustomAbilities {
 						<option value="damage" ${r.rollType === "damage" ? "selected" : ""}>Damage Dice</option>
 					</select>
 					${isDamage ? `
-						<select class="form-control custom-abilities__reroll-restrict" style="width: 120px;">
+						<select class="ve-form-control custom-abilities__reroll-restrict" style="width: 120px;">
 							<option value="" ${!r.restriction ? "selected" : ""}>All Damage</option>
 							<option value="melee" ${r.restriction === "melee" ? "selected" : ""}>Melee Only</option>
 							<option value="twoHanded" ${r.restriction === "twoHanded" ? "selected" : ""}>Two-Handed</option>
@@ -1767,13 +1767,13 @@ class CharacterSheetCustomAbilities {
 				row.className = "custom-abilities__effect-row";
 				row.innerHTML = `
 					<div class="custom-abilities__effect-row-main">
-						<select class="form-control custom-abilities__effect-type">${typeOptionsHtml}</select>
-						<select class="form-control custom-abilities__effect-mode" style="width: 85px; ${isAbilityType ? "" : "display: none;"}" title="Add to score or set score to value">
+						<select class="ve-form-control custom-abilities__effect-type">${typeOptionsHtml}</select>
+						<select class="ve-form-control custom-abilities__effect-mode" style="width: 85px; ${isAbilityType ? "" : "display: none;"}" title="Add to score or set score to value">
 							<option value="" ${!effect.mode ? "selected" : ""}>Add</option>
 							<option value="set" ${effect.mode === "set" ? "selected" : ""}>Set To</option>
 						</select>
-						<input type="number" class="form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? "19" : "±0"}" value="${effect.value || 0}" style="width: 70px;">
-						<select class="form-control custom-abilities__effect-scaling" style="width: 145px;" title="Add a stat-based bonus">
+						<input type="number" class="ve-form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? "19" : "±0"}" value="${effect.value || 0}" style="width: 70px;">
+						<select class="ve-form-control custom-abilities__effect-scaling" style="width: 145px;" title="Add a stat-based bonus">
 							<option value="">Fixed Only</option>
 							<optgroup label="Proficiency">
 								<option value="proficiencyBonus" ${effect.proficiencyBonus ? "selected" : ""}>+ Prof Bonus</option>
@@ -1793,17 +1793,17 @@ class CharacterSheetCustomAbilities {
 								<option value="perClassLevel" ${effect.perClassLevel ? "selected" : ""}>× Class Level...</option>
 							</optgroup>
 						</select>
-						${effect.perClassLevel ? `<select class="form-control custom-abilities__effect-class-level" style="width: 110px;">${this._getClassOptionsHtml(state, effect.perClassLevel)}</select>` : ""}
+						${effect.perClassLevel ? `<select class="ve-form-control custom-abilities__effect-class-level" style="width: 110px;">${this._getClassOptionsHtml(state, effect.perClassLevel)}</select>` : ""}
 					</div>
 					<div class="custom-abilities__effect-row-extra">
-						<select class="form-control custom-abilities__effect-advdis" style="width: 120px;">
+						<select class="ve-form-control custom-abilities__effect-advdis" style="width: 120px;">
 							<option value="">Normal</option>
 							<option value="advantage" ${effect.advantage ? "selected" : ""}>Advantage</option>
 							<option value="disadvantage" ${effect.disadvantage ? "selected" : ""}>Disadvantage</option>
 						</select>
-						<input type="number" class="form-control custom-abilities__effect-minimum" placeholder="Min" value="${effect.setMinimum ?? ""}" style="width: 65px;" title="Minimum roll (like Reliable Talent)">
-						<input type="text" class="form-control custom-abilities__effect-bonusdie" placeholder="e.g. 1d4" value="${effect.bonusDie || ""}" style="width: 75px;" title="Bonus dice">
-						<select class="form-control custom-abilities__effect-conditional" style="width: 140px;" title="When does this effect apply?">
+						<input type="number" class="ve-form-control custom-abilities__effect-minimum" placeholder="Min" value="${effect.setMinimum ?? ""}" style="width: 65px;" title="Minimum roll (like Reliable Talent)">
+						<input type="text" class="ve-form-control custom-abilities__effect-bonusdie" placeholder="e.g. 1d4" value="${effect.bonusDie || ""}" style="width: 75px;" title="Bonus dice">
+						<select class="ve-form-control custom-abilities__effect-conditional" style="width: 140px;" title="When does this effect apply?">
 							<option value="">Always</option>
 							<option value="against:undead" ${effect.conditional === "against:undead" ? "selected" : ""}>vs Undead</option>
 							<option value="against:fiend" ${effect.conditional === "against:fiend" ? "selected" : ""}>vs Fiends</option>
@@ -1824,7 +1824,7 @@ class CharacterSheetCustomAbilities {
 					</div>
 					${effect.conditional?.startsWith("custom:") ? `
 						<div class="custom-abilities__effect-row-conditional">
-							<input type="text" class="form-control custom-abilities__effect-conditional-text" placeholder="Custom condition..." value="${effect.conditional.replace("custom:", "")}" style="flex: 1;">
+							<input type="text" class="ve-form-control custom-abilities__effect-conditional-text" placeholder="Custom condition..." value="${effect.conditional.replace("custom:", "")}" style="flex: 1;">
 						</div>
 					` : ""}
 				`;
@@ -2613,9 +2613,9 @@ class CharacterSheetCustomAbilities {
 								${!isAtWill ? `
 									<label class="custom-abilities__grants-option">
 										<span>Uses:</span>
-										<input type="number" class="form-control spell-uses" value="${s.uses || 1}" min="1" max="10" style="width: 50px;">
+										<input type="number" class="ve-form-control spell-uses" value="${s.uses || 1}" min="1" max="10" style="width: 50px;">
 									</label>
-									<select class="form-control spell-recharge" style="width: 80px;">
+									<select class="ve-form-control spell-recharge" style="width: 80px;">
 										<option value="long" ${s.recharge !== "short" ? "selected" : ""}>Long</option>
 										<option value="short" ${s.recharge === "short" ? "selected" : ""}>Short</option>
 									</select>

@@ -886,7 +886,7 @@ class CharacterSheetQuickBuild {
 		const minLevel = this._fromLevel + 1;
 		const levelSlider = e_({outer: `<input type="range" class="form-control-range" min="${minLevel}" max="20" value="${this._targetLevel}" style="flex: 1;">`});
 		const levelDisplay = e_({outer: `<span class="charsheet__quickbuild-level-display">${this._targetLevel}</span>`});
-		const levelInput = e_({outer: `<input type="number" class="form-control form-control-sm" style="max-width: 70px;" min="${minLevel}" max="20" value="${this._targetLevel}">`});
+		const levelInput = e_({outer: `<input type="number" class="ve-form-control ve-input-sm" style="max-width: 70px;" min="${minLevel}" max="20" value="${this._targetLevel}">`});
 
 		levelSlider.addEventListener("input", () => {
 			const val = parseInt(levelSlider.value);
@@ -953,7 +953,7 @@ class CharacterSheetQuickBuild {
 						</div>
 						<div class="ve-flex-v-center gap-2">
 							<label class="ve-small ve-muted mb-0">Target Lv:</label>
-							<input type="number" class="form-control form-control-sm"
+							<input type="number" class="ve-form-control ve-input-sm"
 								style="max-width: 60px;"
 								min="${alloc.currentLevel || 1}" max="20"
 								value="${alloc.targetLevel}">
@@ -1034,7 +1034,7 @@ class CharacterSheetQuickBuild {
 			zIndex: 10001, // Above quickbuild overlay (z-index: 9999)
 		});
 
-		const search = e_({outer: `<input type="text" class="form-control mb-2" placeholder="Search classes...">`});
+		const search = e_({outer: `<input type="text" class="ve-form-control mb-2" placeholder="Search classes...">`});
 		const list = e_({outer: `<div style="max-height: 300px; overflow-y: auto;"></div>`});
 
 		const renderList = (filter = "") => {
@@ -1148,9 +1148,9 @@ class CharacterSheetQuickBuild {
 				// Build source filter options
 				const availableSources = [...new Set(allSubclasses.map(sc => sc.source))].sort();
 				const filterRow = e_({outer: `<div class="ve-flex gap-2 mb-2"></div>`});
-				const search = e_({outer: `<input type="text" class="form-control form-control-sm ve-flex-grow" placeholder="Search ${subclassTitle.toLowerCase()}s...">`});
+				const search = e_({outer: `<input type="text" class="ve-form-control ve-input-sm ve-flex-grow" placeholder="Search ${subclassTitle.toLowerCase()}s...">`});
 				const sourceFilter = e_({outer: `
-					<select class="form-control form-control-sm" style="width: auto; min-width: 100px;">
+					<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 						<option value="">All Sources</option>
 						${availableSources.map(src => `<option value="${src}">${Parser.sourceJsonToAbv(src)}</option>`).join("")}
 					</select>
@@ -1499,7 +1499,7 @@ class CharacterSheetQuickBuild {
 			sel.featChoices = {skills: [], languages: [], tools: [], ability: null, expertise: [], spellList: null, cantrips: [], spells: []};
 		}
 
-		const search = e_({outer: `<input type="text" class="form-control form-control-sm mb-1" placeholder="Search ${isEpicBoon ? "boons" : "feats"}...">`});
+		const search = e_({outer: `<input type="text" class="ve-form-control ve-input-sm mb-1" placeholder="Search ${isEpicBoon ? "boons" : "feats"}...">`});
 		const list = e_({outer: `<div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--cs-border, #ddd); border-radius: 8px;"></div>`});
 		const choicesContainer = e_({outer: `<div class="charsheet__quickbuild-feat-choices mt-2"></div>`});
 
@@ -1692,7 +1692,7 @@ class CharacterSheetQuickBuild {
 			if (choices.spells?.lists?.length > 1) {
 				const listSection = e_({outer: `<div class="mb-2"></div>`});
 				listSection.append(e_({outer: `<label class="ve-small">Choose spell list:</label>`}));
-				const select = e_({outer: `<select class="form-control form-control-sm mt-1"></select>`});
+				const select = e_({outer: `<select class="ve-form-control ve-input-sm mt-1"></select>`});
 				select.append(e_({outer: `<option value="">-- Select --</option>`}));
 				choices.spells.lists.forEach(spList => {
 					const isSelected = sel.featChoices.spellList === spList.name;
@@ -2257,7 +2257,7 @@ class CharacterSheetQuickBuild {
 
 		const hasKnownOptions = enrichedOptions.some(opt => opt._alreadyKnown);
 
-		const search = e_({outer: `<input type="text" class="form-control form-control-sm mb-1" placeholder="Search...">`});
+		const search = e_({outer: `<input type="text" class="ve-form-control ve-input-sm mb-1" placeholder="Search...">`});
 		const listEl = e_({outer: `<div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--cs-border, #ddd); border-radius: 8px;"></div>`});
 
 		const renderList = (filter = "") => {
@@ -2493,7 +2493,7 @@ class CharacterSheetQuickBuild {
 			const existingNames = new Set(existingOptFeatures.map(f => `${f.name}|${f.source}`));
 			const newMethods = availableMethods.filter(m => !existingNames.has(`${m.name}|${m.source}`));
 
-			const search = e_({outer: `<input type="text" class="form-control form-control-sm mb-1" placeholder="Search methods...">`});
+			const search = e_({outer: `<input type="text" class="ve-form-control ve-input-sm mb-1" placeholder="Search methods...">`});
 			const list = e_({outer: `<div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--cs-border, #ddd); border-radius: 8px;"></div>`});
 
 			const renderFiltered = (filter = "") => {

@@ -11216,7 +11216,6 @@ body.is-charsheet-page .ui-modal__scroller::-webkit-scrollbar-thumb:hover {
 }
 
 /* Modal Form Controls */
-body.is-charsheet-page .ui-modal__inner .form-control,
 body.is-charsheet-page .ui-modal__inner .ve-form-control {
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.3));
 	border: 2px solid var(--cs-border, rgba(99, 102, 241, 0.2));
@@ -11225,14 +11224,13 @@ body.is-charsheet-page .ui-modal__inner .ve-form-control {
 	transition: all var(--cs-transition-fast, 0.15s ease);
 }
 
-body.is-charsheet-page .ui-modal__inner .form-control:focus,
 body.is-charsheet-page .ui-modal__inner .ve-form-control:focus {
 	border-color: var(--cs-primary, #6366f1);
 	box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
 	outline: none;
 }
 
-body.is-charsheet-page .ui-modal__inner select.form-control {
+body.is-charsheet-page .ui-modal__inner select.ve-form-control {
 	appearance: none;
 	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236366f1' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
 	background-repeat: no-repeat;
@@ -11410,7 +11408,7 @@ body.is-charsheet-page .ui-modal__inner input[type="radio"]:focus {
 }
 
 /* Select Dropdowns in Modals */
-.charsheet__modal-filter select.form-control {
+.charsheet__modal-filter select.ve-form-control {
 	padding: 0.65rem 2rem 0.65rem 0.85rem;
 	font-size: 0.9rem;
 	font-weight: 500;
@@ -11426,11 +11424,11 @@ body.is-charsheet-page .ui-modal__inner input[type="radio"]:focus {
 	background-position: right 0.65rem center;
 }
 
-.charsheet__modal-filter select.form-control:hover {
+.charsheet__modal-filter select.ve-form-control:hover {
 	border-color: rgba(99, 102, 241, 0.5);
 }
 
-.charsheet__modal-filter select.form-control:focus {
+.charsheet__modal-filter select.ve-form-control:focus {
 	border-color: var(--cs-primary, #6366f1);
 	box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
 	outline: none;
@@ -12433,7 +12431,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	flex-wrap: wrap;
 }
 
-.charsheet__custom-item-spell-selected-options .form-control {
+.charsheet__custom-item-spell-selected-options .ve-form-control {
 	padding: 0.25rem 0.5rem;
 	font-size: var(--cs-text-xs, 0.75rem);
 }

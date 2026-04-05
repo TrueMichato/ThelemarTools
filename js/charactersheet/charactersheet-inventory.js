@@ -244,7 +244,7 @@ class CharacterSheetInventory {
 		// Search input with icon
 		const searchWrapper = e_({outer: `<div class="charsheet__modal-search"></div>`});
 		filterContainer.append(searchWrapper);
-		const search = e_({tag: "input", clazz: "form-control", attr: {type: "text", placeholder: "🔍 Search items by name..."}});
+		const search = e_({tag: "input", clazz: "ve-form-control", attr: {type: "text", placeholder: "🔍 Search items by name..."}});
 		searchWrapper.append(search);
 
 		// Type filter - Multi-select dropdown
@@ -717,11 +717,11 @@ class CharacterSheetInventory {
 
 		const customInputs = e_({outer: `<div class="charsheet__modal-custom-inputs"></div>`});
 		customSection.append(customInputs);
-		const customName = e_({tag: "input", clazz: "form-control", attr: {type: "text", placeholder: "Item name...", style: "flex: 1;"}});
+		const customName = e_({tag: "input", clazz: "ve-form-control", attr: {type: "text", placeholder: "Item name...", style: "flex: 1;"}});
 		customInputs.append(customName);
-		const customQty = e_({tag: "input", clazz: "form-control", attr: {type: "number", placeholder: "Qty", style: "width: 70px;", value: "1", min: "1"}});
+		const customQty = e_({tag: "input", clazz: "ve-form-control", attr: {type: "number", placeholder: "Qty", style: "width: 70px;", value: "1", min: "1"}});
 		customInputs.append(customQty);
-		const customWeight = e_({tag: "input", clazz: "form-control", attr: {type: "number", placeholder: "Weight", style: "width: 90px;", step: "0.1", min: "0"}});
+		const customWeight = e_({tag: "input", clazz: "ve-form-control", attr: {type: "number", placeholder: "Weight", style: "width: 90px;", step: "0.1", min: "0"}});
 		customInputs.append(customWeight);
 		const customAddBtn = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "+ Add Custom"});
 		customInputs.append(customAddBtn);
@@ -1358,23 +1358,23 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
 						<label>Name *</label>
-						<input type="text" id="custom-item-name" class="form-control" placeholder="e.g., Flaming Longsword">
+						<input type="text" id="custom-item-name" class="ve-form-control" placeholder="e.g., Flaming Longsword">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Quantity</label>
-						<input type="number" id="custom-item-qty" class="form-control" value="1" min="1">
+						<input type="number" id="custom-item-qty" class="ve-form-control" value="1" min="1">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Weight (lbs)</label>
-						<input type="number" id="custom-item-weight" class="form-control" value="0" min="0" step="0.1">
+						<input type="number" id="custom-item-weight" class="ve-form-control" value="0" min="0" step="0.1">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Value (gp)</label>
-						<input type="number" id="custom-item-value" class="form-control" value="0" min="0">
+						<input type="number" id="custom-item-value" class="ve-form-control" value="0" min="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Rarity</label>
-						<select id="custom-item-rarity" class="form-control">
+						<select id="custom-item-rarity" class="ve-form-control">
 							<option value="">None</option>
 							${rarities.map(r => `<option value="${r}">${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join("")}
 						</select>
@@ -1397,7 +1397,7 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field">
 						<label>Weapon Type</label>
-						<select id="custom-item-weapon-cat" class="form-control">
+						<select id="custom-item-weapon-cat" class="ve-form-control">
 							<option value="simple melee">Simple Melee</option>
 							<option value="simple ranged">Simple Ranged</option>
 							<option value="martial melee">Martial Melee</option>
@@ -1406,21 +1406,21 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Damage</label>
-						<input type="text" id="custom-item-damage" class="form-control" placeholder="e.g., 1d8">
+						<input type="text" id="custom-item-damage" class="ve-form-control" placeholder="e.g., 1d8">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Damage Type</label>
-						<select id="custom-item-dmg-type" class="form-control">
+						<select id="custom-item-dmg-type" class="ve-form-control">
 							${damageTypes.map(d => `<option value="${d}">${d.charAt(0).toUpperCase() + d.slice(1)}</option>`).join("")}
 						</select>
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Range (if ranged)</label>
-						<input type="text" id="custom-item-range" class="form-control" placeholder="e.g., 80/320">
+						<input type="text" id="custom-item-range" class="ve-form-control" placeholder="e.g., 80/320">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Magic Bonus (Attack & Damage)</label>
-						<select id="custom-item-weapon-bonus" class="form-control">
+						<select id="custom-item-weapon-bonus" class="ve-form-control">
 							<option value="0">None</option>
 							<option value="1">+1</option>
 							<option value="2">+2</option>
@@ -1429,15 +1429,15 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Attack Only Bonus</label>
-						<input type="number" id="custom-item-bonus-attack" class="form-control" value="0" min="-5" max="10">
+						<input type="number" id="custom-item-bonus-attack" class="ve-form-control" value="0" min="-5" max="10">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Damage Only Bonus</label>
-						<input type="number" id="custom-item-bonus-damage" class="form-control" value="0" min="-5" max="10">
+						<input type="number" id="custom-item-bonus-damage" class="ve-form-control" value="0" min="-5" max="10">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Bonus Crit Damage</label>
-						<input type="text" id="custom-item-crit-damage" class="form-control" placeholder="e.g., 2d6 or 1d8 fire">
+						<input type="text" id="custom-item-crit-damage" class="ve-form-control" placeholder="e.g., 2d6 or 1d8 fire">
 					</div>
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
 						<label>Weapon Masteries</label>
@@ -1473,7 +1473,7 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field">
 						<label>Armor Type</label>
-						<select id="custom-item-armor-type" class="form-control">
+						<select id="custom-item-armor-type" class="ve-form-control">
 							<option value="light">Light Armor</option>
 							<option value="medium">Medium Armor</option>
 							<option value="heavy">Heavy Armor</option>
@@ -1481,11 +1481,11 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Base AC</label>
-						<input type="number" id="custom-item-ac" class="form-control" value="10" min="0">
+						<input type="number" id="custom-item-ac" class="ve-form-control" value="10" min="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Magic Bonus</label>
-						<select id="custom-item-armor-bonus" class="form-control">
+						<select id="custom-item-armor-bonus" class="ve-form-control">
 							<option value="0">None</option>
 							<option value="1">+1</option>
 							<option value="2">+2</option>
@@ -1494,7 +1494,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>STR Requirement</label>
-						<input type="number" id="custom-item-str-req" class="form-control" value="0" min="0">
+						<input type="number" id="custom-item-str-req" class="ve-form-control" value="0" min="0">
 					</div>
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--checkbox">
 						<label>
@@ -1514,11 +1514,11 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field">
 						<label>AC Bonus</label>
-						<input type="number" id="custom-item-shield-ac" class="form-control" value="2" min="0">
+						<input type="number" id="custom-item-shield-ac" class="ve-form-control" value="2" min="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Magic Bonus</label>
-						<select id="custom-item-shield-bonus" class="form-control">
+						<select id="custom-item-shield-bonus" class="ve-form-control">
 							<option value="0">None</option>
 							<option value="1">+1</option>
 							<option value="2">+2</option>
@@ -1591,17 +1591,17 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field">
 						<label>Charges (0 = no charges)</label>
-						<input type="number" id="custom-item-charges" class="form-control" value="0" min="0">
+						<input type="number" id="custom-item-charges" class="ve-form-control" value="0" min="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Recharge</label>
-						<select id="custom-item-recharge" class="form-control">
+						<select id="custom-item-recharge" class="ve-form-control">
 							${rechargeOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join("")}
 						</select>
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Recharge Amount</label>
-						<input type="text" id="custom-item-recharge-amount" class="form-control" placeholder="e.g., 1d6+1 or 3" value="">
+						<input type="text" id="custom-item-recharge-amount" class="ve-form-control" placeholder="e.g., 1d6+1 or 3" value="">
 					</div>
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--checkbox">
 						<label>
@@ -1633,7 +1633,7 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field">
 						<label>Spell Attack</label>
-						<select id="custom-item-bonus-spell-attack" class="form-control">
+						<select id="custom-item-bonus-spell-attack" class="ve-form-control">
 							<option value="0">+0</option>
 							<option value="1">+1</option>
 							<option value="2">+2</option>
@@ -1642,7 +1642,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Spell Save DC</label>
-						<select id="custom-item-bonus-spell-dc" class="form-control">
+						<select id="custom-item-bonus-spell-dc" class="ve-form-control">
 							<option value="0">+0</option>
 							<option value="1">+1</option>
 							<option value="2">+2</option>
@@ -1651,7 +1651,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>All Saving Throws</label>
-						<select id="custom-item-bonus-save-all" class="form-control">
+						<select id="custom-item-bonus-save-all" class="ve-form-control">
 							<option value="0">+0</option>
 							<option value="1">+1</option>
 							<option value="2">+2</option>
@@ -1660,7 +1660,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Concentration Saves</label>
-						<select id="custom-item-bonus-concentration" class="form-control">
+						<select id="custom-item-bonus-concentration" class="ve-form-control">
 							<option value="0">+0</option>
 							<option value="1">+1</option>
 							<option value="2">+2</option>
@@ -1670,7 +1670,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>All Ability Checks</label>
-						<select id="custom-item-bonus-checks" class="form-control">
+						<select id="custom-item-bonus-checks" class="ve-form-control">
 							<option value="0">+0</option>
 							<option value="1">+1</option>
 							<option value="2">+2</option>
@@ -1679,7 +1679,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Crit on X or higher</label>
-						<input type="number" id="custom-item-crit-threshold" class="form-control" value="20" min="1" max="20" placeholder="20">
+						<input type="number" id="custom-item-crit-threshold" class="ve-form-control" value="20" min="1" max="20" placeholder="20">
 					</div>
 				</div>
 				<div class="charsheet__custom-item-subsection mt-2">
@@ -1687,27 +1687,27 @@ class CharacterSheetInventory {
 					<div class="charsheet__custom-item-fields">
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>STR</label>
-							<input type="number" id="custom-item-bonus-save-str" class="form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-str" class="ve-form-control" value="0" min="-5" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>DEX</label>
-							<input type="number" id="custom-item-bonus-save-dex" class="form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-dex" class="ve-form-control" value="0" min="-5" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>CON</label>
-							<input type="number" id="custom-item-bonus-save-con" class="form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-con" class="ve-form-control" value="0" min="-5" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>INT</label>
-							<input type="number" id="custom-item-bonus-save-int" class="form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-int" class="ve-form-control" value="0" min="-5" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>WIS</label>
-							<input type="number" id="custom-item-bonus-save-wis" class="form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-wis" class="ve-form-control" value="0" min="-5" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>CHA</label>
-							<input type="number" id="custom-item-bonus-save-cha" class="form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-cha" class="ve-form-control" value="0" min="-5" max="10">
 						</div>
 					</div>
 				</div>
@@ -1766,23 +1766,23 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field">
 						<label>Walking +/-</label>
-						<input type="number" id="custom-item-speed-walk" class="form-control" value="0" step="5">
+						<input type="number" id="custom-item-speed-walk" class="ve-form-control" value="0" step="5">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Flying +/-</label>
-						<input type="number" id="custom-item-speed-fly" class="form-control" value="0" step="5">
+						<input type="number" id="custom-item-speed-fly" class="ve-form-control" value="0" step="5">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Swimming +/-</label>
-						<input type="number" id="custom-item-speed-swim" class="form-control" value="0" step="5">
+						<input type="number" id="custom-item-speed-swim" class="ve-form-control" value="0" step="5">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Climbing +/-</label>
-						<input type="number" id="custom-item-speed-climb" class="form-control" value="0" step="5">
+						<input type="number" id="custom-item-speed-climb" class="ve-form-control" value="0" step="5">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Burrowing +/-</label>
-						<input type="number" id="custom-item-speed-burrow" class="form-control" value="0" step="5">
+						<input type="number" id="custom-item-speed-burrow" class="ve-form-control" value="0" step="5">
 					</div>
 				</div>
 				<div class="charsheet__custom-item-subsection mt-2">
@@ -1790,19 +1790,19 @@ class CharacterSheetInventory {
 					<div class="charsheet__custom-item-fields">
 						<div class="charsheet__custom-item-field">
 							<label>Grant Fly</label>
-							<input type="number" id="custom-item-grant-fly" class="form-control" value="0" min="0" step="5" placeholder="e.g., 60">
+							<input type="number" id="custom-item-grant-fly" class="ve-form-control" value="0" min="0" step="5" placeholder="e.g., 60">
 						</div>
 						<div class="charsheet__custom-item-field">
 							<label>Grant Swim</label>
-							<input type="number" id="custom-item-grant-swim" class="form-control" value="0" min="0" step="5" placeholder="e.g., 60">
+							<input type="number" id="custom-item-grant-swim" class="ve-form-control" value="0" min="0" step="5" placeholder="e.g., 60">
 						</div>
 						<div class="charsheet__custom-item-field">
 							<label>Grant Climb</label>
-							<input type="number" id="custom-item-grant-climb" class="form-control" value="0" min="0" step="5" placeholder="e.g., 30">
+							<input type="number" id="custom-item-grant-climb" class="ve-form-control" value="0" min="0" step="5" placeholder="e.g., 30">
 						</div>
 						<div class="charsheet__custom-item-field">
 							<label>Grant Burrow</label>
-							<input type="number" id="custom-item-grant-burrow" class="form-control" value="0" min="0" step="5" placeholder="e.g., 30">
+							<input type="number" id="custom-item-grant-burrow" class="ve-form-control" value="0" min="0" step="5" placeholder="e.g., 30">
 						</div>
 					</div>
 				</div>
@@ -1811,21 +1811,21 @@ class CharacterSheetInventory {
 					<div class="charsheet__custom-item-fields">
 						<div class="charsheet__custom-item-field">
 							<label>Fly = </label>
-							<select id="custom-item-equal-fly" class="form-control">
+							<select id="custom-item-equal-fly" class="ve-form-control">
 								<option value="">None</option>
 								<option value="walk">Walk Speed</option>
 							</select>
 						</div>
 						<div class="charsheet__custom-item-field">
 							<label>Swim = </label>
-							<select id="custom-item-equal-swim" class="form-control">
+							<select id="custom-item-equal-swim" class="ve-form-control">
 								<option value="">None</option>
 								<option value="walk">Walk Speed</option>
 							</select>
 						</div>
 						<div class="charsheet__custom-item-field">
 							<label>Climb = </label>
-							<select id="custom-item-equal-climb" class="form-control">
+							<select id="custom-item-equal-climb" class="ve-form-control">
 								<option value="">None</option>
 								<option value="walk">Walk Speed</option>
 							</select>
@@ -1837,7 +1837,7 @@ class CharacterSheetInventory {
 					<div class="charsheet__custom-item-fields">
 						<div class="charsheet__custom-item-field">
 							<label>Walk Speed</label>
-							<select id="custom-item-multiply-walk" class="form-control">
+							<select id="custom-item-multiply-walk" class="ve-form-control">
 								<option value="">Normal</option>
 								<option value="2">x2 (Double)</option>
 								<option value="0.5">x0.5 (Half)</option>
@@ -1858,27 +1858,27 @@ class CharacterSheetInventory {
 					<div class="charsheet__custom-item-fields">
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>STR =</label>
-							<input type="number" id="custom-item-ability-set-str" class="form-control" value="" min="1" max="30" placeholder="19">
+							<input type="number" id="custom-item-ability-set-str" class="ve-form-control" value="" min="1" max="30" placeholder="19">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>DEX =</label>
-							<input type="number" id="custom-item-ability-set-dex" class="form-control" value="" min="1" max="30" placeholder="19">
+							<input type="number" id="custom-item-ability-set-dex" class="ve-form-control" value="" min="1" max="30" placeholder="19">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>CON =</label>
-							<input type="number" id="custom-item-ability-set-con" class="form-control" value="" min="1" max="30" placeholder="19">
+							<input type="number" id="custom-item-ability-set-con" class="ve-form-control" value="" min="1" max="30" placeholder="19">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>INT =</label>
-							<input type="number" id="custom-item-ability-set-int" class="form-control" value="" min="1" max="30" placeholder="19">
+							<input type="number" id="custom-item-ability-set-int" class="ve-form-control" value="" min="1" max="30" placeholder="19">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>WIS =</label>
-							<input type="number" id="custom-item-ability-set-wis" class="form-control" value="" min="1" max="30" placeholder="19">
+							<input type="number" id="custom-item-ability-set-wis" class="ve-form-control" value="" min="1" max="30" placeholder="19">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>CHA =</label>
-							<input type="number" id="custom-item-ability-set-cha" class="form-control" value="" min="1" max="30" placeholder="19">
+							<input type="number" id="custom-item-ability-set-cha" class="ve-form-control" value="" min="1" max="30" placeholder="19">
 						</div>
 					</div>
 				</div>
@@ -1887,27 +1887,27 @@ class CharacterSheetInventory {
 					<div class="charsheet__custom-item-fields">
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>STR +/-</label>
-							<input type="number" id="custom-item-ability-bonus-str" class="form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-str" class="ve-form-control" value="0" min="-10" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>DEX +/-</label>
-							<input type="number" id="custom-item-ability-bonus-dex" class="form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-dex" class="ve-form-control" value="0" min="-10" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>CON +/-</label>
-							<input type="number" id="custom-item-ability-bonus-con" class="form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-con" class="ve-form-control" value="0" min="-10" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>INT +/-</label>
-							<input type="number" id="custom-item-ability-bonus-int" class="form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-int" class="ve-form-control" value="0" min="-10" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>WIS +/-</label>
-							<input type="number" id="custom-item-ability-bonus-wis" class="form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-wis" class="ve-form-control" value="0" min="-10" max="10">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>CHA +/-</label>
-							<input type="number" id="custom-item-ability-bonus-cha" class="form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-cha" class="ve-form-control" value="0" min="-10" max="10">
 						</div>
 					</div>
 				</div>
@@ -1922,19 +1922,19 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field">
 						<label>Darkvision (ft)</label>
-						<input type="number" id="custom-item-sense-darkvision" class="form-control" value="0" min="0" step="30" placeholder="e.g., 60">
+						<input type="number" id="custom-item-sense-darkvision" class="ve-form-control" value="0" min="0" step="30" placeholder="e.g., 60">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Blindsight (ft)</label>
-						<input type="number" id="custom-item-sense-blindsight" class="form-control" value="0" min="0" step="10" placeholder="e.g., 30">
+						<input type="number" id="custom-item-sense-blindsight" class="ve-form-control" value="0" min="0" step="10" placeholder="e.g., 30">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Tremorsense (ft)</label>
-						<input type="number" id="custom-item-sense-tremorsense" class="form-control" value="0" min="0" step="10" placeholder="e.g., 60">
+						<input type="number" id="custom-item-sense-tremorsense" class="ve-form-control" value="0" min="0" step="10" placeholder="e.g., 60">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Truesight (ft)</label>
-						<input type="number" id="custom-item-sense-truesight" class="form-control" value="0" min="0" step="10" placeholder="e.g., 120">
+						<input type="number" id="custom-item-sense-truesight" class="ve-form-control" value="0" min="0" step="10" placeholder="e.g., 120">
 					</div>
 				</div>
 			</div>
@@ -1951,8 +1951,8 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
 						<div class="charsheet__custom-item-spell-filters">
-							<input type="text" id="custom-item-spell-search" class="form-control" placeholder="Search spells...">
-							<select id="custom-item-spell-level-filter" class="form-control">
+							<input type="text" id="custom-item-spell-search" class="ve-form-control" placeholder="Search spells...">
+							<select id="custom-item-spell-level-filter" class="ve-form-control">
 								<option value="">All Levels</option>
 								<option value="0">Cantrips</option>
 								<option value="1">1st Level</option>
@@ -1965,7 +1965,7 @@ class CharacterSheetInventory {
 								<option value="8">8th Level</option>
 								<option value="9">9th Level</option>
 							</select>
-							<select id="custom-item-spell-school-filter" class="form-control">
+							<select id="custom-item-spell-school-filter" class="ve-form-control">
 								<option value="">All Schools</option>
 								<option value="A">Abjuration</option>
 								<option value="C">Conjuration</option>
@@ -2074,15 +2074,15 @@ class CharacterSheetInventory {
 						</div>
 						<div class="charsheet__custom-item-spell-selected-options">
 							${!isCantrip ? `
-								<select class="form-control spell-usage-type" style="width: 90px;">
+								<select class="ve-form-control spell-usage-type" style="width: 90px;">
 									<option value="will" ${s.usageType === "will" ? "selected" : ""}>At Will</option>
 									<option value="daily" ${s.usageType === "daily" ? "selected" : ""}>X/Day</option>
 									<option value="charges" ${s.usageType === "charges" ? "selected" : ""}>Charges</option>
 								</select>
 								${s.usageType !== "will" ? `
-									<input type="number" class="form-control spell-uses" value="${s.uses || 1}" min="1" max="20" style="width: 50px;" title="${s.usageType === "charges" ? "Charge cost" : "Uses per day"}">
+									<input type="number" class="ve-form-control spell-uses" value="${s.uses || 1}" min="1" max="20" style="width: 50px;" title="${s.usageType === "charges" ? "Charge cost" : "Uses per day"}">
 									${s.usageType === "daily" ? `
-										<select class="form-control spell-recharge" style="width: 70px;">
+										<select class="ve-form-control spell-recharge" style="width: 70px;">
 											<option value="long" ${s.recharge !== "short" ? "selected" : ""}>Long</option>
 											<option value="short" ${s.recharge === "short" ? "selected" : ""}>Short</option>
 										</select>
@@ -2151,7 +2151,7 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-section-title">📖 Description (Optional)</div>
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
-						<textarea id="custom-item-desc" class="form-control" rows="3" placeholder="Describe any special properties, abilities, or lore..."></textarea>
+						<textarea id="custom-item-desc" class="ve-form-control" rows="3" placeholder="Describe any special properties, abilities, or lore..."></textarea>
 					</div>
 				</div>
 			</div>
@@ -2841,7 +2841,7 @@ class CharacterSheetInventory {
 			{id: "majorDetrimental", label: "Major Detrimental", class: "ve-btn-danger"},
 		];
 
-		const typeSelect = e_({outer: `<select class="form-control form-control-sm mb-2" style="max-width: 200px;"></select>`});
+		const typeSelect = e_({outer: `<select class="ve-form-control ve-input-sm mb-2" style="max-width: 200px;"></select>`});
 		propertyTypes.forEach(type => {
 			typeSelect.append(e_({outer: `<option value="${type.id}">${type.label}</option>`}));
 		});
@@ -3740,7 +3740,7 @@ class CharacterSheetInventory {
 					</button>
 				</div>
 				<div class="charsheet__inventory-toolbar-right">
-					<select class="form-control form-control--minimal charsheet__inventory-sort-select" id="charsheet-inventory-sort" title="Sort by">
+					<select class="ve-form-control form-control--minimal charsheet__inventory-sort-select" id="charsheet-inventory-sort" title="Sort by">
 						<option value="name" ${this._sortBy === "name" ? "selected" : ""}>Name</option>
 						<option value="weight" ${this._sortBy === "weight" ? "selected" : ""}>Weight</option>
 						<option value="rarity" ${this._sortBy === "rarity" ? "selected" : ""}>Rarity</option>

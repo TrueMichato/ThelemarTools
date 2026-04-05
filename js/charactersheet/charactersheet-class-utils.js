@@ -2503,6 +2503,107 @@ class CharacterSheetClassUtils {
 
 		return gains;
 	}
+
+
+	// ==========================================
+	// Companion Icon Utilities
+	// ==========================================
+
+	/**
+	 * Consolidated creature-to-emoji map. Merged from all previous per-site maps.
+	 * Lookup uses `includes()` so "Giant Bat" matches "bat", "Dire Wolf" matches "wolf", etc.
+	 */
+	static _CREATURE_EMOJI_MAP = {
+		// Mammals
+		wolf: "🐺", bear: "🐻", lion: "🦁", tiger: "🐅", panther: "🐆",
+		ape: "🦍", boar: "🐗", elk: "🦌", deer: "🦌", dog: "🐕", horse: "🐴",
+		cat: "🐱", rat: "🐀", weasel: "🦨",
+		// Birds
+		eagle: "🦅", hawk: "🦅", owl: "🦉", raven: "🐦‍⬛",
+		// Flying
+		bat: "🦇",
+		// Reptiles & Amphibians
+		snake: "🐍", lizard: "🦎", crocodile: "🐊", frog: "🐸", toad: "🐸",
+		// Arachnids & Insects
+		spider: "🕷️", scorpion: "🦂",
+		// Aquatic
+		shark: "🦈", octopus: "🐙", crab: "🦀", fish: "🐟", seahorse: "🐴",
+		// Fey
+		pixie: "🧚", sprite: "🧚", dryad: "🌳", satyr: "🐐", unicorn: "🦄",
+		// Elemental
+		fire: "🔥", air: "💨", water: "💧", earth: "🗿", ice: "❄️", magma: "🌋",
+		// Celestial
+		angel: "👼", celestial: "✨", couatl: "🐍", pegasus: "🐴",
+	};
+
+	/**
+	 * Fallback emoji by creature type when no name match is found.
+	 */
+	static _CREATURE_TYPE_EMOJI_MAP = {
+		beast: "🐾", fey: "🧚", elemental: "✨", celestial: "👼",
+	};
+
+	/**
+	 * Resolve the best emoji for a creature by name (includes-match) then type fallback.
+	 * @param {string} name - Creature name
+	 * @param {string|object} [type] - Creature type string or {type: string}
+	 * @returns {string} emoji character
+	 */
+	static getCreatureEmoji (name, type) {
+		const nameLower = (name || "").toLowerCase();
+		const typeStr = typeof type === "string" ? type : type?.type;
+
+		for (const [key, emoji] of Object.entries(CharacterSheetClassUtils._CREATURE_EMOJI_MAP)) {
+			if (nameLower.includes(key)) return emoji;
+		}
+
+		return CharacterSheetClassUtils._CREATURE_TYPE_EMOJI_MAP[typeStr] || "🐾";
+	}
+
+	/**
+	 * Generate HTML for a companion icon — token image with emoji fallback.
+	 *
+	 * If the companion has a `source`, tries to build a token image URL via
+	 * `Renderer.monster.getTokenUrl()`. Returns an `<img>` with an `onerror`
+	 * handler that swaps in the emoji fallback. If no source or Renderer is
+	 * unavailable, returns the emoji directly in a `<span>`.
+	 *
+	 * @param {{name: string, source?: string, type?: string|object}} creature
+	 * @param {"sm"|"md"|"lg"} [size="md"] - Size preset for dimensions
+	 * @returns {string} HTML string — either an `<img>` or a `<span>` with emoji
+	 */
+	static getCompanionIconHtml (creature, size = "md") {
+		const sizes = {sm: 24, md: 36, lg: 48};
+		const px = sizes[size] || sizes.md;
+		const emoji = CharacterSheetClassUtils.getCreatureEmoji(creature.name, creature.type);
+		const emojiFontSize = size === "sm" ? "1.2em" : size === "lg" ? "2.2em" : "1.6em";
+
+		const emojiHtml = `<span class="charsheet__companion-icon charsheet__companion-icon--${size}" style="font-size: ${emojiFontSize}; display: inline-flex; align-items: center; justify-content: center; width: ${px}px; height: ${px}px; line-height: 1;">${emoji}</span>`;
+
+		if (!creature.source) return emojiHtml;
+
+		// Try to build a token image URL
+		try {
+			if (typeof Renderer === "undefined" || !Renderer?.monster?.getTokenUrl) return emojiHtml;
+
+			const tokenUrl = Renderer.monster.getTokenUrl({name: creature.name, source: creature.source, hasToken: true});
+			if (!tokenUrl) return emojiHtml;
+
+			// Escape emoji for use inside an onerror attribute
+			const escapedEmoji = emojiHtml.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+			return `<img
+				src="${tokenUrl}"
+				class="charsheet__companion-icon charsheet__companion-icon--${size}"
+				style="width: ${px}px; height: ${px}px; border-radius: 50%; object-fit: cover;"
+				alt="${(creature.name || "").replace(/"/g, "&quot;")}"
+				loading="lazy"
+				onerror="this.outerHTML='${escapedEmoji}'"
+			>`;
+		} catch (e) {
+			return emojiHtml;
+		}
+	}
 }
 
 // Export

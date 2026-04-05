@@ -1346,7 +1346,7 @@ class CharacterSheetRespec {
 
 		// Feat filter
 		const searchRow = e_({tag: "div", clazz: "charsheet__respec-search-row mb-2"});
-		const searchInput = e_({tag: "input", clazz: "form-control"});
+		const searchInput = e_({tag: "input", clazz: "ve-form-control"});
 		searchInput.type = "text";
 		searchInput.placeholder = "Search feats...";
 		searchRow.append(searchInput);
@@ -1789,7 +1789,7 @@ class CharacterSheetRespec {
 		content.append(e_({outer: `<h5>Select New Subclass</h5>`}));
 
 		const searchRow = e_({tag: "div", clazz: "charsheet__respec-search-row mb-2"});
-		const searchInput = e_({tag: "input", clazz: "form-control"});
+		const searchInput = e_({tag: "input", clazz: "ve-form-control"});
 		searchInput.type = "text";
 		searchInput.placeholder = "Search subclasses...";
 		searchRow.append(searchInput);
@@ -2003,7 +2003,7 @@ class CharacterSheetRespec {
 		content.append(e_({outer: `<h5>Select New Species</h5>`}));
 
 		const searchRow = e_({tag: "div", clazz: "charsheet__respec-search-row mb-2"});
-		const searchInput = e_({tag: "input", clazz: "form-control"});
+		const searchInput = e_({tag: "input", clazz: "ve-form-control"});
 		searchInput.type = "text";
 		searchInput.placeholder = "Search species...";
 		searchRow.append(searchInput);
@@ -2157,7 +2157,7 @@ class CharacterSheetRespec {
 		content.append(e_({outer: `<h5>Select New Background</h5>`}));
 
 		const searchRow = e_({tag: "div", clazz: "charsheet__respec-search-row mb-2"});
-		const searchInput = e_({tag: "input", clazz: "form-control"});
+		const searchInput = e_({tag: "input", clazz: "ve-form-control"});
 		searchInput.type = "text";
 		searchInput.placeholder = "Search backgrounds...";
 		searchRow.append(searchInput);
@@ -2592,7 +2592,7 @@ class CharacterSheetRespec {
 				for (let i = 0; i < count; i++) {
 					const idx = selections[profIdx].length;
 					selections[profIdx].push(null);
-					const selectEl = e_({outer: `<select class="form-control form-control--minimal mb-1"><option value="">-- Select Language --</option></select>`});
+					const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal mb-1"><option value="">-- Select Language --</option></select>`});
 					options.forEach(lang => selectEl.append(e_({outer: `<option value="${lang}">${lang}</option>`})));
 					selectEl.addEventListener("change", () => {
 						selections[profIdx][idx] = selectEl.value || null;
@@ -2731,7 +2731,7 @@ class CharacterSheetRespec {
 				for (let i = 0; i < count; i++) {
 					const idx = selected.length;
 					selected.push(null);
-					const selectEl = e_({outer: `<select class="form-control form-control--minimal mb-1"><option value="">-- Select Tool --</option></select>`});
+					const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal mb-1"><option value="">-- Select Tool --</option></select>`});
 					options.forEach(tool => selectEl.append(e_({outer: `<option value="${tool}">${tool}</option>`})));
 					selectEl.addEventListener("change", () => {
 						selected[idx] = selectEl.value || null;
@@ -2803,7 +2803,7 @@ class CharacterSheetRespec {
 					const row = e_({tag: "div", clazz: "ve-flex-v-center mb-1"});
 					row.append(e_({outer: `<span class="mr-2">+${weight}:</span>`}));
 
-					const selectEl = e_({outer: `<select class="form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${idx}"><option value="">-- Select --</option></select>`});
+					const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${idx}"><option value="">-- Select --</option></select>`});
 					abilities.forEach(ab => {
 						selectEl.append(e_({outer: `<option value="${ab}">${Parser.attAbvToFull(ab)}</option>`}));
 					});
@@ -2843,7 +2843,7 @@ class CharacterSheetRespec {
 					const row = e_({tag: "div", clazz: "ve-flex-v-center mb-1"});
 					row.append(e_({outer: `<span class="mr-2">+${amount}:</span>`}));
 
-					const selectEl = e_({outer: `<select class="form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${i}"><option value="">-- Select --</option></select>`});
+					const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${i}"><option value="">-- Select --</option></select>`});
 					abilities.forEach(ab => {
 						selectEl.append(e_({outer: `<option value="${ab}">${Parser.attAbvToFull(ab)}</option>`}));
 					});
