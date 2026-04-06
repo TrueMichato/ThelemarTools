@@ -219,19 +219,20 @@
 	.dm-party__skills-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 1px 12px;
+		gap: 1px 4px;
 	}
 
 	.dm-party__skill-row {
 		display: flex;
 		align-items: center;
-		min-height: 22px;
-		gap: 4px;
+		min-height: 24px;
+		gap: 2px;
 	}
 
 	.dm-party__skill-name {
-		font-size: 0.84rem;
-		width: 110px;
+		font-size: 0.8rem;
+		width: 72px;
+		min-width: 72px;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -243,13 +244,55 @@
 	}
 
 	.dm-party__skill-bonus {
-		font-size: 0.84rem;
-		width: 28px;
+		font-size: 0.82rem;
+		width: 24px;
 		text-align: right;
 	}
 
 	.dm-party__skill-bonus--negative {
 		color: #dc3545;
+	}
+
+	/* Manual bonus inputs (saves, skills, passives) */
+	.dm-party__bonus-input {
+		width: 30px;
+		font-size: 0.74rem;
+		opacity: 0.6;
+		transition: opacity 0.15s;
+
+		&:focus,
+		&:not([value="0"]) {
+			opacity: 1;
+		}
+	}
+
+	/* Passives section */
+	.dm-party__passives-grid {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 16px;
+	}
+
+	.dm-party__passive-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.dm-party__passive-icon {
+		font-size: 0.9rem;
+	}
+
+	.dm-party__passive-label {
+		font-size: 0.84rem;
+		font-weight: 600;
+	}
+
+	.dm-party__passive-value {
+		font-size: 0.88rem;
+		font-weight: 700;
+		min-width: 22px;
+		text-align: center;
 	}
 
 	/* TGTT combat section */
@@ -517,6 +560,14 @@
 		}
 
 		.dm-party__skill-bonus {
+			color: #ddd;
+		}
+
+		.dm-party__passive-label {
+			color: #bbb;
+		}
+
+		.dm-party__passive-value {
 			color: #ddd;
 		}
 

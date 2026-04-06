@@ -16,6 +16,7 @@ export class PartyTrackerCharacterSerializer {
 			ct: char.combatTraditions,
 			exh: char.exhaustionLevel,
 			ov: char.overrides,
+			bon: char.bonuses,
 			nt: char.notes,
 		};
 	}
@@ -62,6 +63,12 @@ export class PartyTrackerCharacterSerializer {
 				carryCapacity: null,
 				combatMethodDc: null,
 				...(raw.ov || {}),
+			},
+			bonuses: {
+				skills: {},
+				saves: {},
+				passives: {},
+				...(raw.bon || {}),
 			},
 			notes: raw.nt || "",
 		};

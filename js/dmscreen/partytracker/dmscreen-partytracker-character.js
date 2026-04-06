@@ -42,6 +42,7 @@ export class PartyTrackerCharacter {
 			bonus += this.getLinguisticsBonus();
 		}
 		bonus += this.getExhaustionD20Penalty();
+		bonus += this._data.bonuses?.skills?.[skill] || 0;
 		return bonus;
 	}
 
@@ -51,11 +52,12 @@ export class PartyTrackerCharacter {
 		const hasProficiency = this._data.saveProficiencies?.[ability] || false;
 		let bonus = mod + (hasProficiency ? this.getProficiencyBonus() : 0);
 		bonus += this.getExhaustionD20Penalty();
+		bonus += this._data.bonuses?.saves?.[ability] || 0;
 		return bonus;
 	}
 
 	getPassiveScore (skill) {
-		return 10 + this.getSkillBonus(skill);
+		return 10 + this.getSkillBonus(skill) + (this._data.bonuses?.passives?.[skill] || 0);
 	}
 
 	getLinguisticsBonus () {
@@ -187,6 +189,8 @@ export class PartyTrackerCharacter {
 			<span class="dm-party__char-meta">${classStr || "\u2014"}</span>
 			<span class="dm-party__char-stat" title="Armor Class">\u{1F6E1} ${this._data.ac}</span>
 			<span class="dm-party__char-stat" title="Passive Perception">\u{1F441} ${this.getPassiveScore("perception")}</span>
+			<span class="dm-party__char-stat" title="Passive Investigation">\u{1F50D} ${this.getPassiveScore("investigation")}</span>
+			<span class="dm-party__char-stat" title="Passive Insight">\u{1F4A1} ${this.getPassiveScore("insight")}</span>
 			${tgttInfo}
 			<div class="ve-ml-auto">${btnRemove}</div>
 		</div>`.appendTo(this._eleRow);
@@ -260,10 +264,22 @@ export class PartyTrackerCharacter {
 					this._renderExpandedForm();
 					this._doUpdate();
 				});
+
+			const manualVal = this._data.bonuses?.saves?.[ability] || 0;
+			const iptManual = ee`<input class="ve-form-control ve-input-xs ve-text-center dm-party__bonus-input" type="number" value="${manualVal}" title="Extra bonus to ${PartyTrackerCharacterSerializer.ABILITY_DISPLAY[ability]} save" aria-label="Extra ${PartyTrackerCharacterSerializer.ABILITY_DISPLAY[ability]} save bonus">`
+				.onn("change", (e) => {
+					if (!this._data.bonuses) this._data.bonuses = {skills: {}, saves: {}, passives: {}};
+					if (!this._data.bonuses.saves) this._data.bonuses.saves = {};
+					this._data.bonuses.saves[ability] = Number(e.target.value) || 0;
+					this._renderExpandedForm();
+					this._doUpdate();
+				});
+
 			ee`<label class="dm-party__save-item">
 				${cbx}
 				<span>${PartyTrackerCharacterSerializer.ABILITY_DISPLAY[ability]}</span>
 				<span class="ve-muted">${bonusStr}</span>
+				${iptManual}
 			</label>`.appendTo(wrpSaves);
 		}
 
@@ -302,6 +318,31 @@ export class PartyTrackerCharacter {
 		/* ----- Derived Stats ----- */
 		const carry = this.getCarryCapacity();
 		const jump = this.getJumpDistances();
+
+		/* ----- Passives with bonus inputs ----- */
+		const wrpPassives = ee`<div class="dm-party__passives-grid"></div>`;
+		for (const [skill, icon, label] of [
+			["perception", "\u{1F441}", "Perception"],
+			["investigation", "\u{1F50D}", "Investigation"],
+			["insight", "\u{1F4A1}", "Insight"],
+		]) {
+			const passive = this.getPassiveScore(skill);
+			const manualVal = this._data.bonuses?.passives?.[skill] || 0;
+			const iptManual = ee`<input class="ve-form-control ve-input-xs ve-text-center dm-party__bonus-input" type="number" value="${manualVal}" title="Extra bonus to passive ${label}" aria-label="Extra passive ${label} bonus">`
+				.onn("change", (e) => {
+					if (!this._data.bonuses) this._data.bonuses = {skills: {}, saves: {}, passives: {}};
+					if (!this._data.bonuses.passives) this._data.bonuses.passives = {};
+					this._data.bonuses.passives[skill] = Number(e.target.value) || 0;
+					this._renderExpandedForm();
+					this._doUpdate();
+				});
+			ee`<div class="dm-party__passive-item" title="Passive ${label}">
+				<span class="dm-party__passive-icon">${icon}</span>
+				<span class="dm-party__passive-label">${label}</span>
+				<span class="dm-party__passive-value">${passive}</span>
+				${iptManual}
+			</div>`.appendTo(wrpPassives);
+		}
 
 		ee`<div class="dm-party__card">
 			<div class="dm-party__card-header">
@@ -363,13 +404,15 @@ export class PartyTrackerCharacter {
 				${iptLanguages}
 			</div>
 
+			<div class="dm-party__section">
+				<div class="dm-party__section-title">Passives</div>
+				${wrpPassives}
+			</div>
+
 			<div class="dm-party__derived-bar">
 				<span title="Carrying Capacity">\u{1F3CB} Carry: ${carry} lb</span>
 				<span title="Long Jump (running / standing)">\u{27A1} L.Jump: ${jump.longRunning}/${jump.longStanding} ft</span>
 				<span title="High Jump (running / standing)">\u{2B06} H.Jump: ${jump.highRunning}/${jump.highStanding} ft</span>
-				<span title="Passive Perception">\u{1F441} Per: ${this.getPassiveScore("perception")}</span>
-				<span title="Passive Investigation">\u{1F50D} Inv: ${this.getPassiveScore("investigation")}</span>
-				<span title="Passive Insight">\u{1F4A1} Ins: ${this.getPassiveScore("insight")}</span>
 			</div>
 
 			<div class="dm-party__section">
@@ -449,7 +492,7 @@ export class PartyTrackerCharacter {
 			const ability = PartyTrackerCharacterSerializer.SKILL_TO_ABILITY[skill];
 			const isTgtt = PartyTrackerCharacterSerializer.TGTT_SKILLS.includes(skill);
 
-			const sel = ee`<select class="ve-form-control ve-input-xs" style="width: 55px;" aria-label="${displayName} proficiency">
+			const sel = ee`<select class="ve-form-control ve-input-xs" style="width: 44px;" aria-label="${displayName} proficiency">
 				<option value="0" ${this._data.skillProficiencies[skill] === 0 ? "selected" : ""}>\u2014</option>
 				<option value="1" ${this._data.skillProficiencies[skill] === 1 ? "selected" : ""}>Prof</option>
 				<option value="2" ${this._data.skillProficiencies[skill] === 2 ? "selected" : ""}>Exp</option>
@@ -457,10 +500,21 @@ export class PartyTrackerCharacter {
 				this._data.skillProficiencies[skill] = Number(e.target.value); this._renderExpandedForm(); this._doUpdate();
 			});
 
+			const manualVal = this._data.bonuses?.skills?.[skill] || 0;
+			const iptManual = ee`<input class="ve-form-control ve-input-xs ve-text-center dm-party__bonus-input" type="number" value="${manualVal}" title="Extra bonus to ${displayName}" aria-label="Extra ${displayName} bonus">`
+				.onn("change", (e) => {
+					if (!this._data.bonuses) this._data.bonuses = {skills: {}, saves: {}, passives: {}};
+					if (!this._data.bonuses.skills) this._data.bonuses.skills = {};
+					this._data.bonuses.skills[skill] = Number(e.target.value) || 0;
+					this._renderExpandedForm();
+					this._doUpdate();
+				});
+
 			ee`<div class="dm-party__skill-row">
 				<span class="dm-party__skill-name ${isTgtt ? "dm-party__skill-name--tgtt" : ""}" title="${displayName} (${ability.toUpperCase()})">${displayName}</span>
 				${sel}
 				<span class="dm-party__skill-bonus ${bonus < 0 ? "dm-party__skill-bonus--negative" : ""}">${bonusStr}</span>
+				${iptManual}
 			</div>`.appendTo(wrp);
 		}
 		return wrp;
