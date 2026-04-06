@@ -6,31 +6,31 @@ import {DmScreenUtil} from "./dmscreen-util.js";
 /* ============================================================================================== */
 
 const JOURNEY_ACTIVITIES = [
-	{id: "navigate", label: "Navigate", skill: "survival"},
-	{id: "scout", label: "Scout", skill: "perception"},
-	{id: "map", label: "Map", skill: "investigation"},
-	{id: "forage", label: "Forage", skill: "survival"},
-	{id: "hideTracks", label: "Hide Tracks", skill: "stealth"},
-	{id: "entertain", label: "Entertain", skill: "performance"},
-	{id: "banter", label: "Banter", skill: null},
-	{id: "stealth", label: "Stealth", skill: "stealth"},
-	{id: "track", label: "Track", skill: "survival"},
-	{id: "custom", label: "Custom\u2026", skill: null},
+	{id: "navigate", label: "Navigate", skill: "survival", rmOnSuccess: 0, rmAlways: 0},
+	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmAlways: 0},
+	{id: "map", label: "Map", skill: "investigation", rmOnSuccess: 0, rmAlways: 0},
+	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmAlways: 0},
+	{id: "hideTracks", label: "Hide Tracks", skill: "stealth", rmOnSuccess: -1, rmAlways: 0},
+	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmAlways: 1},
+	{id: "banter", label: "Banter", skill: null, rmOnSuccess: 0, rmAlways: 0},
+	{id: "stealth", label: "Stealth", skill: "stealth", rmOnSuccess: -1, rmAlways: 0},
+	{id: "track", label: "Track", skill: "survival", rmOnSuccess: 0, rmAlways: 0},
+	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmAlways: 0},
 ];
 
 const CAMP_ACTIVITIES = [
-	{id: "campfire", label: "Campfire", skill: "survival"},
-	{id: "forage", label: "Forage", skill: "survival"},
-	{id: "cook", label: "Cook", skill: null},
-	{id: "pray", label: "Pray", skill: "religion"},
-	{id: "tend", label: "Tend", skill: "medicine"},
-	{id: "entertain", label: "Entertain", skill: "performance"},
-	{id: "scout", label: "Scout", skill: "perception"},
-	{id: "research", label: "Research", skill: null},
-	{id: "hideCamp", label: "Hide Camp", skill: "stealth"},
-	{id: "banter", label: "Banter", skill: null},
-	{id: "guard", label: "Guard", skill: "perception"},
-	{id: "custom", label: "Custom\u2026", skill: null},
+	{id: "campfire", label: "Campfire", skill: "survival", rmOnSuccess: 0, rmAlways: 0},
+	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmAlways: 1},
+	{id: "cook", label: "Cook", skill: null, rmOnSuccess: 0, rmAlways: 0},
+	{id: "pray", label: "Pray", skill: "religion", rmOnSuccess: 0, rmAlways: 0},
+	{id: "tend", label: "Tend", skill: "medicine", rmOnSuccess: 0, rmAlways: 0},
+	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmAlways: 1},
+	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmAlways: 0},
+	{id: "research", label: "Research", skill: null, rmOnSuccess: 0, rmAlways: 0},
+	{id: "hideCamp", label: "Hide Camp", skill: "stealth", rmOnSuccess: -1, rmAlways: 0},
+	{id: "banter", label: "Banter", skill: null, rmOnSuccess: 0, rmAlways: 0},
+	{id: "guard", label: "Guard", skill: "perception", rmOnSuccess: 0, rmAlways: 0},
+	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmAlways: 0},
 ];
 
 const PACE_OPTIONS = [
@@ -76,6 +76,72 @@ const DEFAULT_STATE = () => ({
 	},
 	log: [],
 });
+
+/* ============================================================================================== */
+/*  Activity interaction analysis                                                                  */
+/* ============================================================================================== */
+
+function _getActivityInteractions (activities, allPlayers, activityList, pace) {
+	const notes = [];
+	const chosen = {};
+	for (const p of allPlayers) {
+		const act = activities[p.id];
+		if (!act?.activity) continue;
+		if (!chosen[act.activity]) chosen[act.activity] = [];
+		chosen[act.activity].push(p.name);
+	}
+
+	const scoutCount = (chosen.scout || []).length;
+	const forageCount = (chosen.forage || []).length;
+	const entertainCount = (chosen.entertain || []).length;
+
+	/* Hide Tracks / Hide Camp DC modifiers from loud activities */
+	if (chosen.hideTracks?.length || chosen.hideCamp?.length) {
+		const key = chosen.hideTracks?.length ? "hideTracks" : "hideCamp";
+		const label = key === "hideTracks" ? "Hide Tracks" : "Hide Camp";
+		const dcParts = [];
+		if (scoutCount) dcParts.push(`+${scoutCount * 2} (${scoutCount} Scout)`);
+		if (forageCount) dcParts.push(`+${forageCount * 2} (${forageCount} Forage)`);
+		if (entertainCount) dcParts.push(`+${entertainCount * 2} (${entertainCount} Entertain)`);
+		if (pace === "fast") dcParts.push("+2 (Fast Pace)");
+		if (pace === "slow") dcParts.push("\u22122 (Slow Pace)");
+		if (dcParts.length) notes.push(`${label} DC: ${dcParts.join(", ")}`);
+	}
+
+	/* Scout at fast pace — disadvantage */
+	if (chosen.scout?.length && pace === "fast") {
+		notes.push("Scout: Disadvantage (Fast Pace)");
+	}
+
+	/* Entertain always adds RM */
+	if (chosen.entertain?.length) {
+		notes.push(`Entertain: always +${chosen.entertain.length} RM (noise)`);
+	}
+
+	/* Camp Forage always adds RM */
+	if (chosen.forage?.length && activityList === CAMP_ACTIVITIES) {
+		notes.push(`Forage (Camp): +${chosen.forage.length} RM (leaving camp)`);
+	}
+
+	/* Fast pace restrictions */
+	if (pace === "fast") {
+		if (chosen.map?.length) notes.push("Map: NOT possible at Fast Pace!");
+		if (chosen.forage?.length && activityList === JOURNEY_ACTIVITIES) notes.push("Forage: NOT possible at Fast Pace!");
+	}
+
+	/* Stealth only at slow */
+	if (chosen.stealth?.length && pace !== "slow") {
+		notes.push("Stealth: only possible at Slow Pace!");
+	}
+
+	/* Navigate DC from pace */
+	if (chosen.navigate?.length) {
+		if (pace === "fast") notes.push("Navigate: DC +2 (Fast Pace)");
+		if (pace === "slow") notes.push("Navigate: DC \u22122 (Slow Pace)");
+	}
+
+	return notes;
+}
 
 /* ============================================================================================== */
 /*  Panel entry point                                                                              */
@@ -154,6 +220,9 @@ class JourneyTrackerRoot {
 		this._renderLog();
 		this._updateTabVisibility();
 
+		/* Sync party on initial render */
+		this._doInitialPartySync();
+
 		ee`<div class="ve-flex-col ve-w-100 ve-h-100">
 			${eleHeader}
 			${tabBar}
@@ -164,6 +233,25 @@ class JourneyTrackerRoot {
 				${this._wrpLog}
 			</div>
 		</div>`.appendTo(eleParent);
+	}
+
+	_doInitialPartySync () {
+		try {
+			const ptChars = this._getPartyTrackerCharacters();
+			if (!ptChars.length) return;
+			if (this._state.players.some(p => p.isFromPartyTracker)) return;
+
+			for (const ptChar of ptChars) {
+				this._state.players.push({
+					id: ptChar.data.id,
+					name: ptChar.data.name || "Unnamed",
+					isFromPartyTracker: true,
+				});
+			}
+			this._addLog("party-sync", `Initial sync: added ${ptChars.length} character(s) from Party Tracker`);
+			this._updateSyncStatus();
+			this._reRenderCurrentTab();
+		} catch { /* Party Tracker may not be loaded yet */ }
 	}
 
 	/* -------------------------------------------- */
@@ -224,6 +312,7 @@ class JourneyTrackerRoot {
 			const radio = ee`<input type="radio" name="dm-journey-pace" value="${pace.id}" ${this._state.travelPace === pace.id ? "checked" : ""}>`;
 			radio.onn("change", () => {
 				this._state.travelPace = pace.id;
+				this._reRenderCurrentTab();
 				this._doSave();
 			});
 			ee`<label class="dm-journey__pace-label" title="${pace.tips}">
@@ -477,7 +566,7 @@ class JourneyTrackerRoot {
 			${players.map(p => `<option value="${this._escAttr(p.id)}" ${slot.playerId === p.id ? "selected" : ""}>${this._escHtml(p.name || "Unnamed")}</option>`).join("")}
 		</select>`;
 		sel.onn("change", () => {
-			slot.playerId = sel.value;
+			slot.playerId = sel.val();
 			this._renderCamp();
 			this._doSave();
 		});
@@ -540,38 +629,50 @@ class JourneyTrackerRoot {
 			wrp.appendChild(row);
 		}
 
+		/* Activity interaction notes */
+		const notes = _getActivityInteractions(activities, players, activityList, this._state.travelPace);
+		if (notes.length) {
+			const wrpNotes = ee`<div class="dm-journey__interaction-notes"></div>`;
+			ee`<div class="dm-journey__interaction-header">Activity Interactions</div>`.appendTo(wrpNotes);
+			for (const note of notes) {
+				ee`<div class="dm-journey__interaction-note">${this._escHtml(note)}</div>`.appendTo(wrpNotes);
+			}
+			wrp.appendChild(wrpNotes);
+		}
+
 		return wrp;
 	}
 
 	_renderActivityRow (player, act, ptChar, activityList) {
-		/* Activity dropdown */
-		const sel = ee`<select class="ve-form-control ve-input-xs dm-journey__activity-sel" aria-label="Activity for ${this._escAttr(player.name)}">
-			<option value="">— None —</option>
-			${activityList.map(a => `<option value="${a.id}" ${act.activity === a.id ? "selected" : ""}>${a.label}</option>`).join("")}
-		</select>`;
+		/* Activity dropdown — build options as HTML string */
+		const optionsHtml = activityList.map(a => `<option value="${a.id}" ${act.activity === a.id ? "selected" : ""}>${a.label}</option>`).join("");
+		const sel = ee`<select class="ve-form-control ve-input-xs dm-journey__activity-sel" aria-label="Activity for ${this._escAttr(player.name)}"><option value="">\u2014 None \u2014</option>${optionsHtml}</select>`;
 		sel.onn("change", () => {
-			act.activity = sel.value;
+			act.activity = sel.val();
 			this._reRenderCurrentTab();
 			this._doSave();
 		});
 
-		/* Custom name input */
+		/* Custom name input (only when custom is selected) */
 		const isCustom = act.activity === "custom";
-		const iptCustom = isCustom
-			? ee`<input type="text" class="ve-form-control ve-input-xs dm-journey__custom-input" placeholder="Custom activity" value="${this._escAttr(act.customName || "")}">`
-			: null;
-		if (iptCustom) {
-			iptCustom.onn("change", () => {
-				act.customName = iptCustom.val();
-				this._doSave();
-			});
-		}
+		const iptCustom = ee`<input type="text" class="ve-form-control ve-input-xs dm-journey__custom-input" placeholder="Custom activity" value="${this._escAttr(act.customName || "")}">`;
+		iptCustom.toggleVe(isCustom);
+		iptCustom.onn("change", () => {
+			act.customName = iptCustom.val();
+			this._doSave();
+		});
 
-		/* Skill modifier */
+		/* Skill modifier + RM effect indicator */
 		const actDef = activityList.find(a => a.id === act.activity);
 		let bonusStr = "";
 		if (ptChar && actDef?.skill) {
 			bonusStr = this._fmtBonus(ptChar.getSkillBonus(actDef.skill));
+		}
+
+		let rmHint = "";
+		if (actDef) {
+			if (actDef.rmAlways > 0) rmHint = `(auto +${actDef.rmAlways})`;
+			else if (actDef.rmOnSuccess < 0) rmHint = "(\u22121 on success)";
 		}
 
 		/* Roll result */
@@ -584,21 +685,38 @@ class JourneyTrackerRoot {
 		/* Quick RM adjust buttons */
 		const wrpRm = ee`<span class="dm-journey__quick-rm"></span>`;
 		if (actDef && act.activity) {
-			const btnMinus = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="−1 RM">\u22121</button>`;
-			btnMinus.onn("click", () => this._setRm(this._state.riskModifier - 1, `${actDef.label} (${player.name}): −1`));
+			const btnMinus = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="\u22121 RM">\u22121</button>`;
+			btnMinus.onn("click", () => this._setRm(this._state.riskModifier - 1, `${actDef.label} (${player.name}): \u22121`));
 			const btnPlus = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="+1 RM">+1</button>`;
 			btnPlus.onn("click", () => this._setRm(this._state.riskModifier + 1, `${actDef.label} (${player.name}): +1`));
 			wrpRm.appendChild(btnMinus);
 			wrpRm.appendChild(btnPlus);
 		}
 
+		/* Player name cell + remove button for manual players */
+		const eleNameCell = ee`<span class="dm-journey__player-name" title="${this._escAttr(player.name)}">${this._escHtml(player.name || "Unnamed")}</span>`;
+		if (!player.isFromPartyTracker) {
+			const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs dm-journey__remove-player" title="Remove ${this._escAttr(player.name)}" aria-label="Remove ${this._escAttr(player.name)}">\u00d7</button>`;
+			btnRemove.onn("click", () => {
+				this._state.players = this._state.players.filter(p => p.id !== player.id);
+				this._addLog("party-sync", `Removed player: ${player.name}`);
+				this._updateSyncStatus();
+				this._reRenderCurrentTab();
+				this._doSave();
+			});
+			eleNameCell.appendChild(btnRemove);
+		}
+
+		/* Skill + RM hint cell */
+		const eleSkillCell = ee`<span class="dm-journey__skill-bonus" title="Skill modifier">${bonusStr}</span>`;
+		if (rmHint) {
+			ee`<span class="dm-journey__rm-hint">${rmHint}</span>`.appendTo(eleSkillCell);
+		}
+
 		return ee`<div class="dm-journey__activity-row">
-			<span class="dm-journey__player-name" title="${this._escAttr(player.name)}">${this._escHtml(player.name || "Unnamed")}</span>
-			<div class="ve-flex-v-center ve-gap-1">
-				${sel}
-				${iptCustom || ""}
-			</div>
-			<span class="dm-journey__skill-bonus" title="Skill modifier">${bonusStr}</span>
+			${eleNameCell}
+			<div class="ve-flex-v-center ve-gap-1">${sel}${iptCustom}</div>
+			${eleSkillCell}
 			${iptResult}
 			${wrpRm}
 		</div>`;
@@ -837,7 +955,7 @@ class JourneyTrackerRoot {
 
 	_updateRmDisplay () {
 		if (this._eleRmValue) {
-			this._eleRmValue.value = this._state.riskModifier;
+			this._eleRmValue.val(this._state.riskModifier);
 		}
 		this._updateRmBadge();
 	}
@@ -845,7 +963,7 @@ class JourneyTrackerRoot {
 	_updateRmBadge () {
 		if (!this._eleRmBadge) return;
 		const rm = this._state.riskModifier;
-		this._eleRmBadge.textContent = rm >= 0 ? `+${rm}` : `${rm}`;
+		this._eleRmBadge.txt(rm >= 0 ? `+${rm}` : `${rm}`);
 		this._eleRmBadge.className = "dm-journey__rm-badge";
 		if (rm <= 0) this._eleRmBadge.classList.add("dm-journey__rm-badge--low");
 		else if (rm <= 2) this._eleRmBadge.classList.add("dm-journey__rm-badge--mid");
@@ -918,10 +1036,10 @@ class JourneyTrackerRoot {
 		if (!this._eleSyncStatus) return;
 		const ptChars = this._getPartyTrackerCharacters();
 		if (ptChars.length) {
-			this._eleSyncStatus.textContent = `Synced (${ptChars.length} chars)`;
+			this._eleSyncStatus.txt(`Synced (${ptChars.length} chars)`);
 			this._eleSyncStatus.className = "dm-journey__sync-status dm-journey__sync-status--active";
 		} else {
-			this._eleSyncStatus.textContent = "Manual mode";
+			this._eleSyncStatus.txt("Manual mode");
 			this._eleSyncStatus.className = "dm-journey__sync-status dm-journey__sync-status--manual";
 		}
 	}
@@ -973,7 +1091,10 @@ class JourneyTrackerRoot {
 		};
 		this._ensureSegments();
 		this._addLog("reset", `New day started in ${areaName}`);
-		this.render(this._wrpPanel);
+		this._updateRmDisplay();
+		this._renderJourney();
+		this._renderCamp();
+		this._renderLog();
 		this._doSave();
 	}
 
@@ -1035,7 +1156,7 @@ class JourneyTrackerRoot {
 	}
 
 	_escHtml (str) {
-		if (!str) return "";
+		if (str == null) return "";
 		return `${str}`.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 	}
 
