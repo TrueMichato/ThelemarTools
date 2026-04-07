@@ -57,6 +57,13 @@ const DEFAULT_AREA = () => ({
 	},
 });
 
+const SKILL_TO_ABILITY = {
+	athletics: "str", acrobatics: "dex", sleightOfHand: "dex", stealth: "dex",
+	arcana: "int", history: "int", investigation: "int", nature: "int", religion: "int",
+	animalHandling: "wis", insight: "wis", medicine: "wis", perception: "wis", survival: "wis",
+	deception: "cha", intimidation: "cha", performance: "cha", persuasion: "cha",
+};
+
 const DEFAULT_STATE = () => ({
 	tab: 0,
 	riskModifier: 0,
@@ -243,8 +250,8 @@ class JourneyTrackerRoot {
 
 			for (const ptChar of ptChars) {
 				this._state.players.push({
-					id: ptChar.data.id,
-					name: ptChar.data.name || "Unnamed",
+					id: ptChar.id,
+					name: ptChar.name || "Unnamed",
 					isFromPartyTracker: true,
 				});
 			}
@@ -572,8 +579,8 @@ class JourneyTrackerRoot {
 		});
 
 		/* Show perception bonus */
-		const ptChar = ptChars.find(c => c.data.id === slot.playerId);
-		const bonus = ptChar ? this._fmtBonus(ptChar.getSkillBonus("perception")) : "";
+		const ptChar = ptChars.find(c => c.id === slot.playerId);
+		const bonus = ptChar ? this._fmtBonus(JourneyTrackerRoot._getSkillBonusFromData(ptChar, "perception")) : "";
 
 		const iptResult = ee`<input type="text" class="ve-form-control ve-input-xs dm-journey__roll-input" placeholder="Roll" value="${this._escAttr(slot.rollResult || "")}" aria-label="Guard roll result">`;
 		iptResult.onn("change", () => {
@@ -623,7 +630,7 @@ class JourneyTrackerRoot {
 		for (const player of players) {
 			if (!activities[player.id]) activities[player.id] = {activity: "", rollResult: "", customName: ""};
 			const act = activities[player.id];
-			const ptChar = ptChars.find(c => c.data.id === player.id);
+			const ptChar = ptChars.find(c => c.id === player.id);
 
 			const row = this._renderActivityRow(player, act, ptChar, activityList);
 			wrp.appendChild(row);
@@ -666,7 +673,7 @@ class JourneyTrackerRoot {
 		const actDef = activityList.find(a => a.id === act.activity);
 		let bonusStr = "";
 		if (ptChar && actDef?.skill) {
-			bonusStr = this._fmtBonus(ptChar.getSkillBonus(actDef.skill));
+			bonusStr = this._fmtBonus(JourneyTrackerRoot._getSkillBonusFromData(ptChar, actDef.skill));
 		}
 
 		let rmHint = "";
@@ -983,22 +990,23 @@ class JourneyTrackerRoot {
 		}
 
 		const existingIds = new Set(this._state.players.filter(p => p.isFromPartyTracker).map(p => p.id));
-		const ptIds = new Set(ptChars.map(c => c.data.id));
+		const ptIds = new Set(ptChars.map(c => c.id));
 
 		/* Add new PT characters */
 		const added = [];
 		for (const ptChar of ptChars) {
-			if (!existingIds.has(ptChar.data.id)) {
+			if (!ptChar?.id) continue;
+			if (!existingIds.has(ptChar.id)) {
 				this._state.players.push({
-					id: ptChar.data.id,
-					name: ptChar.data.name || "Unnamed",
+					id: ptChar.id,
+					name: ptChar.name || "Unnamed",
 					isFromPartyTracker: true,
 				});
-				added.push(ptChar.data.name || "Unnamed");
+				added.push(ptChar.name || "Unnamed");
 			} else {
 				/* Update name if changed */
-				const existing = this._state.players.find(p => p.id === ptChar.data.id);
-				if (existing) existing.name = ptChar.data.name || "Unnamed";
+				const existing = this._state.players.find(p => p.id === ptChar.id);
+				if (existing) existing.name = ptChar.name || "Unnamed";
 			}
 		}
 
@@ -1153,6 +1161,20 @@ class JourneyTrackerRoot {
 		} catch {
 			return isoStr;
 		}
+	}
+
+	static _getSkillBonusFromData (charData, skill) {
+		if (charData.overrides?.skillBonuses?.[skill] != null) return charData.overrides.skillBonuses[skill];
+		const ability = SKILL_TO_ABILITY[skill];
+		if (!ability) return 0;
+		const score = charData.abilities?.[ability] ?? 10;
+		const mod = Math.floor((score - 10) / 2);
+		const totalLevel = charData.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 1;
+		const profBonus = Math.floor((totalLevel - 1) / 4) + 2;
+		const profLevel = charData.skillProficiencies?.[skill] || 0;
+		let bonus = mod + (profLevel * profBonus);
+		bonus += charData.bonuses?.skills?.[skill] || 0;
+		return bonus;
 	}
 
 	_escHtml (str) {
