@@ -48,6 +48,7 @@ const RANGE_COLORS = {
 
 const DEFAULT_AREA = () => ({
 	areaName: "",
+	baseDc: 10,
 	numSegments: 3,
 	segmentNames: ["Morning", "Midday", "Afternoon"],
 	riskRanges: {
@@ -64,10 +65,23 @@ const SKILL_TO_ABILITY = {
 	deception: "cha", intimidation: "cha", performance: "cha", persuasion: "cha",
 };
 
+/** Maps activity IDs to tool-proficiency keyword fragments (case-insensitive match against toolProficiencies[]). */
+const ACTIVITY_TOOL_KEYWORDS = {
+	navigate: ["navigator"],
+	map: ["cartographer"],
+	cook: ["cook"],
+	forage: ["herbalism"],
+	tend: ["healer", "herbalism"],
+	track: ["navigator"],
+	campfire: ["tinker"],
+	research: ["calligrapher", "forgery"],
+};
+
 const DEFAULT_STATE = () => ({
 	tab: 0,
 	riskModifier: 0,
 	travelPace: "normal",
+	rollMode: "raw",
 	players: [],
 	area: DEFAULT_AREA(),
 	journey: {segments: []},
@@ -194,6 +208,7 @@ class JourneyTrackerRoot {
 		this._eleRmValue = null;
 		this._eleRmBadge = null;
 		this._eleSyncStatus = null;
+		this._eleHeader = null;
 		this._wrpTabs = null;
 		this._wrpJourney = null;
 		this._wrpCamp = null;
@@ -289,6 +304,16 @@ class JourneyTrackerRoot {
 		/* Pace */
 		const elePace = this._renderPaceSelector();
 
+		/* Roll mode toggle */
+		const isTotal = this._state.rollMode === "total";
+		const btnRollMode = ee`<button class="ve-btn ve-btn-xs ${isTotal ? "ve-btn-warning" : "ve-btn-default"}  dm-journey__roll-mode-btn" title="Toggle between entering raw d20 rolls (system adds bonus) or final totals (player already added bonus)">${isTotal ? "Rolls = Total" : "Rolls = d20"}</button>`;
+		btnRollMode.onn("click", () => {
+			this._state.rollMode = this._state.rollMode === "raw" ? "total" : "raw";
+			this._reRenderCurrentTab();
+			this._renderHeader_update();
+			this._doSave();
+		});
+
 		/* Party sync status */
 		this._eleSyncStatus = ee`<span class="dm-journey__sync-status"></span>`;
 		this._updateSyncStatus();
@@ -296,7 +321,7 @@ class JourneyTrackerRoot {
 		const btnAddPlayer = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" title="Add a player manually" aria-label="Add Player"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Player</button>`
 			.onn("click", () => this._addManualPlayer());
 
-		return ee`<div class="dm-journey__header">
+		this._eleHeader = ee`<div class="dm-journey__header">
 			<div class="dm-journey__rm-section">
 				<span class="dm-journey__rm-label">RM</span>
 				${this._eleRmBadge}
@@ -307,10 +332,21 @@ class JourneyTrackerRoot {
 			</div>
 			${elePace}
 			<div class="dm-journey__sync-section">
+				${btnRollMode}
 				${this._eleSyncStatus}
 				${btnAddPlayer}
 			</div>
 		</div>`;
+		return this._eleHeader;
+	}
+
+	_renderHeader_update () {
+		if (!this._eleHeader) return;
+		const btn = this._eleHeader.querySelector(".dm-journey__roll-mode-btn");
+		if (!btn) return;
+		const isTotal = this._state.rollMode === "total";
+		btn.textContent = isTotal ? "Rolls = Total" : "Rolls = d20";
+		btn.className = `ve-btn ve-btn-xs ${isTotal ? "ve-btn-warning" : "ve-btn-default"} dm-journey__roll-mode-btn`;
 	}
 
 	_renderPaceSelector () {
@@ -622,17 +658,18 @@ class JourneyTrackerRoot {
 		ee`<div class="dm-journey__activity-row dm-journey__activity-row--header">
 			<span>Player</span>
 			<span>Activity</span>
-			<span>Mod</span>
+			<span>Bonus</span>
+			<span>DC</span>
 			<span>Roll</span>
-			<span>RM</span>
+			<span>Result</span>
 		</div>`.appendTo(wrp);
 
 		for (const player of players) {
-			if (!activities[player.id]) activities[player.id] = {activity: "", rollResult: "", customName: ""};
+			if (!activities[player.id]) activities[player.id] = {activity: "", rollResult: "", customName: "", _rmAlwaysApplied: 0, _rmRollApplied: 0};
 			const act = activities[player.id];
 			const ptChar = ptChars.find(c => c.id === player.id);
 
-			const row = this._renderActivityRow(player, act, ptChar, activityList);
+			const row = this._renderActivityRow(player, act, ptChar, activityList, activities, players);
 			wrp.appendChild(row);
 		}
 
@@ -650,61 +687,144 @@ class JourneyTrackerRoot {
 		return wrp;
 	}
 
-	_renderActivityRow (player, act, ptChar, activityList) {
-		/* Activity dropdown — build options as HTML string */
+	_renderActivityRow (player, act, ptChar, activityList, activities, allPlayers) {
+		const actDef = activityList.find(a => a.id === act.activity);
+
+		/* ---- Activity dropdown ---- */
 		const optionsHtml = activityList.map(a => `<option value="${a.id}" ${act.activity === a.id ? "selected" : ""}>${a.label}</option>`).join("");
 		const sel = ee`<select class="ve-form-control ve-input-xs dm-journey__activity-sel" aria-label="Activity for ${this._escAttr(player.name)}"><option value="">\u2014 None \u2014</option>${optionsHtml}</select>`;
 		sel.onn("change", () => {
+			const oldDef = activityList.find(a => a.id === act.activity);
+			/* Undo all RM applied from this slot */
+			const totalUndo = (act._rmAlwaysApplied || 0) + (act._rmRollApplied || 0);
+			if (totalUndo) {
+				this._setRm(this._state.riskModifier - totalUndo, `Undo ${oldDef?.label || "activity"} (${player.name})`);
+			}
+
+			/* Switch to new activity */
 			act.activity = sel.val();
+			act.rollResult = "";
+			act._rmAlwaysApplied = 0;
+			act._rmRollApplied = 0;
+
+			/* Auto-apply rmAlways for the new activity */
+			const newDef = activityList.find(a => a.id === act.activity);
+			if (newDef?.rmAlways) {
+				act._rmAlwaysApplied = newDef.rmAlways;
+				this._setRm(this._state.riskModifier + newDef.rmAlways, `${newDef.label} (${player.name}): auto ${newDef.rmAlways > 0 ? "+" : ""}${newDef.rmAlways} RM`);
+			}
 			this._reRenderCurrentTab();
 			this._doSave();
 		});
 
-		/* Custom name input (only when custom is selected) */
+		/* Custom name (shown only when "Custom…" is picked) */
 		const isCustom = act.activity === "custom";
 		const iptCustom = ee`<input type="text" class="ve-form-control ve-input-xs dm-journey__custom-input" placeholder="Custom activity" value="${this._escAttr(act.customName || "")}">`;
 		iptCustom.toggleVe(isCustom);
-		iptCustom.onn("change", () => {
-			act.customName = iptCustom.val();
-			this._doSave();
-		});
+		iptCustom.onn("change", () => { act.customName = iptCustom.val(); this._doSave(); });
 
-		/* Skill modifier + RM effect indicator */
-		const actDef = activityList.find(a => a.id === act.activity);
+		/* ---- Bonus cell (skill + tool) ---- */
 		let bonusStr = "";
+		let bonusTitle = "";
+		let hasToolProf = false;
 		if (ptChar && actDef?.skill) {
-			bonusStr = this._fmtBonus(JourneyTrackerRoot._getSkillBonusFromData(ptChar, actDef.skill));
+			const info = JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill);
+			bonusStr = this._fmtBonus(info.total);
+			hasToolProf = info.hasToolProf;
+			const parts = [`Skill: ${this._fmtBonus(info.skillBonus)}`];
+			if (info.hasToolProf) parts.push(`Tool prof: ${info.toolBonus ? `+${info.toolBonus} (included)` : "has tools (already skill-proficient)"}`);
+			if (actDef.rmAlways > 0) parts.push(`Auto RM: +${actDef.rmAlways}`);
+			else if (actDef.rmOnSuccess < 0) parts.push(`On success: ${actDef.rmOnSuccess} RM`);
+			bonusTitle = parts.join(" \u2022 ");
 		}
 
-		let rmHint = "";
-		if (actDef) {
-			if (actDef.rmAlways > 0) rmHint = `(auto +${actDef.rmAlways})`;
-			else if (actDef.rmOnSuccess < 0) rmHint = "(\u22121 on success)";
+		const eleBonusCell = ee`<span class="dm-journey__skill-bonus" title="${this._escAttr(bonusTitle)}">${bonusStr}</span>`;
+		if (hasToolProf) {
+			ee`<span class="dm-journey__tool-indicator" title="Has relevant tool proficiency">\uD83D\uDD27</span>`.appendTo(eleBonusCell);
 		}
 
-		/* Roll result */
-		const iptResult = ee`<input type="text" class="ve-form-control ve-input-xs dm-journey__roll-input" placeholder="Roll" value="${this._escAttr(act.rollResult || "")}" aria-label="Roll result for ${this._escAttr(player.name)}">`;
+		/* ---- DC cell ---- */
+		const {dc, impossible, notes: dcNotes} = act.activity
+			? this._getEffectiveDc(act.activity, activityList, activities, allPlayers)
+			: {dc: null, impossible: false, notes: []};
+
+		let dcStr = "\u2014";
+		let dcCls = "dm-journey__dc-cell";
+		if (impossible) {
+			dcStr = "N/A";
+			dcCls += " dm-journey__dc-cell--impossible";
+		} else if (dc != null) {
+			dcStr = `${dc}`;
+			if (dcNotes.length) dcCls += " dm-journey__dc-cell--modified";
+		}
+		const dcTitle = impossible ? "Impossible at current pace" : dcNotes.length ? `Base ${this._state.area.baseDc ?? 10}: ${dcNotes.join(", ")}` : "";
+		const eleDcCell = ee`<span class="${dcCls}" title="${this._escAttr(dcTitle)}">${dcStr}</span>`;
+
+		/* ---- Roll input ---- */
+		const isTotalMode = this._state.rollMode === "total";
+		const iptResult = ee`<input type="number" class="ve-form-control ve-input-xs dm-journey__roll-input" placeholder="${isTotalMode ? "Total" : "d20"}" value="${act.rollResult || ""}" aria-label="Roll for ${this._escAttr(player.name)}">`;
 		iptResult.onn("change", () => {
-			act.rollResult = iptResult.val();
+			const rawVal = iptResult.val()?.trim();
+			act.rollResult = rawVal;
+
+			/* Undo previous roll-based RM */
+			if (act._rmRollApplied) {
+				this._setRm(this._state.riskModifier - act._rmRollApplied, `Undo roll ${actDef?.label || "?"} (${player.name})`);
+				act._rmRollApplied = 0;
+			}
+
+			const rollNum = parseInt(rawVal, 10);
+			if (!isNaN(rollNum) && actDef?.skill && dc != null && !impossible) {
+				const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
+				const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
+				const success = total >= dc;
+
+				const logStr = isTotalMode
+					? `${player.name} \u2014 ${actDef.label}: total ${total} vs DC ${dc}`
+					: `${player.name} \u2014 ${actDef.label}: d20(${rollNum}) ${this._fmtBonus(bonusInfo.total)} = ${total} vs DC ${dc}`;
+
+				if (success && actDef.rmOnSuccess) {
+					act._rmRollApplied = actDef.rmOnSuccess;
+					this._setRm(this._state.riskModifier + actDef.rmOnSuccess, `${actDef.label} success (${player.name}): ${actDef.rmOnSuccess > 0 ? "+" : ""}${actDef.rmOnSuccess} RM`);
+					this._addLog("activity", `${logStr} \u2192 Success (RM ${actDef.rmOnSuccess > 0 ? "+" : ""}${actDef.rmOnSuccess})`);
+				} else if (!success) {
+					this._addLog("activity", `${logStr} \u2192 Fail`);
+				} else {
+					this._addLog("activity", `${logStr} \u2192 Success`);
+				}
+			}
+			this._reRenderCurrentTab();
 			this._doSave();
 		});
 
-		/* Quick RM adjust buttons */
-		const wrpRm = ee`<span class="dm-journey__quick-rm"></span>`;
-		if (actDef && act.activity) {
-			const btnMinus = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="\u22121 RM">\u22121</button>`;
-			btnMinus.onn("click", () => this._setRm(this._state.riskModifier - 1, `${actDef.label} (${player.name}): \u22121`));
-			const btnPlus = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="+1 RM">+1</button>`;
-			btnPlus.onn("click", () => this._setRm(this._state.riskModifier + 1, `${actDef.label} (${player.name}): +1`));
-			wrpRm.appendChild(btnMinus);
-			wrpRm.appendChild(btnPlus);
+		/* ---- Result cell ---- */
+		const eleResultCell = ee`<span class="dm-journey__roll-result"></span>`;
+		if (act.rollResult !== "" && act.rollResult != null) {
+			const rollNum = parseInt(act.rollResult, 10);
+			if (!isNaN(rollNum) && actDef?.skill && dc != null) {
+				const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
+				const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
+				const success = total >= dc;
+				const icon = impossible ? "\u2718" : success ? "\u2714" : "\u2718";
+				const cls = impossible ? "dm-journey__roll-result--fail" : success ? "dm-journey__roll-result--pass" : "dm-journey__roll-result--fail";
+				eleResultCell.className = `dm-journey__roll-result ${cls}`;
+				const resultParts = [`${icon} ${total}`];
+				if (act._rmRollApplied) resultParts.push(`(RM ${act._rmRollApplied > 0 ? "+" : ""}${act._rmRollApplied})`);
+				if (act._rmAlwaysApplied) resultParts.push(`(auto RM ${act._rmAlwaysApplied > 0 ? "+" : ""}${act._rmAlwaysApplied})`);
+				eleResultCell.txt(resultParts.join(" "));
+			}
+		} else if (act._rmAlwaysApplied) {
+			eleResultCell.className = "dm-journey__roll-result dm-journey__rm-auto";
+			eleResultCell.txt(`auto RM ${act._rmAlwaysApplied > 0 ? "+" : ""}${act._rmAlwaysApplied}`);
 		}
 
-		/* Player name cell + remove button for manual players */
+		/* ---- Player name + remove button ---- */
 		const eleNameCell = ee`<span class="dm-journey__player-name" title="${this._escAttr(player.name)}">${this._escHtml(player.name || "Unnamed")}</span>`;
 		if (!player.isFromPartyTracker) {
 			const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs dm-journey__remove-player" title="Remove ${this._escAttr(player.name)}" aria-label="Remove ${this._escAttr(player.name)}">\u00d7</button>`;
 			btnRemove.onn("click", () => {
+				/* Undo all RM from this player across all activity tables */
+				this._undoPlayerRm(player);
 				this._state.players = this._state.players.filter(p => p.id !== player.id);
 				this._addLog("party-sync", `Removed player: ${player.name}`);
 				this._updateSyncStatus();
@@ -714,18 +834,16 @@ class JourneyTrackerRoot {
 			eleNameCell.appendChild(btnRemove);
 		}
 
-		/* Skill + RM hint cell */
-		const eleSkillCell = ee`<span class="dm-journey__skill-bonus" title="Skill modifier">${bonusStr}</span>`;
-		if (rmHint) {
-			ee`<span class="dm-journey__rm-hint">${rmHint}</span>`.appendTo(eleSkillCell);
-		}
+		/* Row class — add impossible highlight */
+		const rowCls = `dm-journey__activity-row${impossible ? " dm-journey__activity-row--impossible" : ""}`;
 
-		return ee`<div class="dm-journey__activity-row">
+		return ee`<div class="${rowCls}">
 			${eleNameCell}
 			<div class="ve-flex-v-center ve-gap-1">${sel}${iptCustom}</div>
-			${eleSkillCell}
+			${eleBonusCell}
+			${eleDcCell}
 			${iptResult}
-			${wrpRm}
+			${eleResultCell}
 		</div>`;
 	}
 
@@ -748,6 +866,16 @@ class JourneyTrackerRoot {
 
 		/* Number of segments */
 		const iptSegCount = ee`<input type="number" class="ve-form-control ve-input-xs" min="1" max="6" value="${area.numSegments}" style="width: 50px;" aria-label="Number of travel segments">`;
+
+		/* Base DC */
+		const iptBaseDc = ee`<input type="number" class="ve-form-control ve-input-xs" min="1" max="30" value="${area.baseDc ?? 10}" style="width: 50px;" aria-label="Base DC">`;
+		iptBaseDc.onn("change", () => {
+			const val = Math.max(1, Math.min(30, parseInt(iptBaseDc.val(), 10) || 10));
+			area.baseDc = val;
+			iptBaseDc.val(val);
+			this._reRenderCurrentTab();
+			this._doSave();
+		});
 		iptSegCount.onn("change", () => {
 			const val = Math.max(1, Math.min(6, parseInt(iptSegCount.val(), 10) || 3));
 			area.numSegments = val;
@@ -800,6 +928,13 @@ class JourneyTrackerRoot {
 			<div>
 				<label class="ve-bold">Area Name</label>
 				${iptName}
+			</div>
+			<div>
+				<label class="ve-bold">Base DC</label>
+				<div class="ve-flex-v-center ve-gap-1">
+					${iptBaseDc}
+					<span class="dm-journey__note">(modified by pace &amp; activity interactions)</span>
+				</div>
 			</div>
 			<div>
 				<label class="ve-bold">Travel Segments</label>
@@ -960,6 +1095,24 @@ class JourneyTrackerRoot {
 		this._doSave();
 	}
 
+	/**
+	 * Undo all RM contributions from a player's activity slots (journey segments + camp).
+	 */
+	_undoPlayerRm (player) {
+		let total = 0;
+		/* Journey segments */
+		for (const seg of this._state.journey.segments) {
+			const act = seg.activities?.[player.id];
+			if (!act) continue;
+			total += (act._rmAlwaysApplied || 0) + (act._rmRollApplied || 0);
+		}
+		/* Camp */
+		const campAct = this._state.camp.activities?.[player.id];
+		if (campAct) total += (campAct._rmAlwaysApplied || 0) + (campAct._rmRollApplied || 0);
+
+		if (total) this._setRm(this._state.riskModifier - total, `Undo all RM from ${player.name}`);
+	}
+
 	_updateRmDisplay () {
 		if (this._eleRmValue) {
 			this._eleRmValue.val(this._state.riskModifier);
@@ -1107,6 +1260,63 @@ class JourneyTrackerRoot {
 	}
 
 	/* -------------------------------------------- */
+	/*  Effective DC                                  */
+	/* -------------------------------------------- */
+
+	/**
+	 * Computes the effective DC for a given activity, factoring in pace and interaction modifiers.
+	 * @returns {{dc: number|null, impossible: boolean, notes: string[]}}
+	 *   dc=null means no standard DC (e.g. Banter, Custom).
+	 */
+	_getEffectiveDc (activityId, activityList, activities, allPlayers) {
+		const actDef = activityList.find(a => a.id === activityId);
+		if (!actDef?.skill) return {dc: null, impossible: false, notes: []};
+
+		const baseDc = this._state.area.baseDc ?? 10;
+		const pace = this._state.travelPace;
+
+		let dc = baseDc;
+		let impossible = false;
+		const notes = [];
+
+		/* Pace-based modifiers */
+		if (activityId === "navigate") {
+			if (pace === "fast") { dc += 2; notes.push("+2 fast pace"); }
+			if (pace === "slow") { dc -= 2; notes.push("\u22122 slow pace"); }
+		}
+
+		/* Hide Tracks / Hide Camp: other loud activities raise DC */
+		if (activityId === "hideTracks" || activityId === "hideCamp") {
+			let interactionMod = 0;
+			const counts = {};
+			for (const p of allPlayers) {
+				const a = activities[p.id]?.activity;
+				if (a === "scout" || a === "forage" || a === "entertain") {
+					counts[a] = (counts[a] || 0) + 1;
+					interactionMod += 2;
+				}
+			}
+			if (interactionMod) {
+				dc += interactionMod;
+				const parts = [];
+				if (counts.scout) parts.push(`+${counts.scout * 2} scout`);
+				if (counts.forage) parts.push(`+${counts.forage * 2} forage`);
+				if (counts.entertain) parts.push(`+${counts.entertain * 2} entertain`);
+				notes.push(...parts);
+			}
+			if (pace === "fast") { dc += 2; notes.push("+2 fast pace"); }
+			if (pace === "slow") { dc -= 2; notes.push("\u22122 slow pace"); }
+		}
+
+		/* Impossible checks */
+		if (activityId === "map" && pace === "fast") impossible = true;
+		if (activityId === "forage" && pace === "fast" && activityList === JOURNEY_ACTIVITIES) impossible = true;
+		if (activityId === "stealth" && pace !== "slow") impossible = true;
+
+		return {dc, impossible, notes};
+	}
+
+	/* -------------------------------------------- */
 	/*  Helpers                                      */
 	/* -------------------------------------------- */
 
@@ -1171,10 +1381,44 @@ class JourneyTrackerRoot {
 		const mod = Math.floor((score - 10) / 2);
 		const totalLevel = charData.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 1;
 		const profBonus = Math.floor((totalLevel - 1) / 4) + 2;
-		const profLevel = charData.skillProficiencies?.[skill] || 0;
+		const profLevel = Number(charData.skillProficiencies?.[skill]) || 0;
 		let bonus = mod + (profLevel * profBonus);
 		bonus += charData.bonuses?.skills?.[skill] || 0;
 		return bonus;
+	}
+
+	/**
+	 * Returns the proficiency bonus if the character has a tool proficiency relevant to the given activity.
+	 * Tool proficiencies are an array of free-text strings; we keyword-match against ACTIVITY_TOOL_KEYWORDS.
+	 * Returns 0 if no relevant tool proficiency.
+	 */
+	static _getToolProfBonusFromData (charData, activityId) {
+		const keywords = ACTIVITY_TOOL_KEYWORDS[activityId];
+		if (!keywords?.length) return 0;
+		const tools = charData.toolProficiencies;
+		if (!Array.isArray(tools) || !tools.length) return 0;
+		const hasMatch = tools.some(t => {
+			const lower = `${t}`.toLowerCase();
+			return keywords.some(kw => lower.includes(kw));
+		});
+		if (!hasMatch) return 0;
+		const totalLevel = charData.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 1;
+		return Math.floor((totalLevel - 1) / 4) + 2;
+	}
+
+	/**
+	 * Returns the effective bonus for a character performing a given activity.
+	 * Combines skill bonus + tool proficiency bonus (only when skill is not already proficient).
+	 */
+	static _getActivityBonusFromData (charData, activityId, skill) {
+		if (!skill) return {total: 0, skillBonus: 0, toolBonus: 0, hasToolProf: false};
+		const skillBonus = JourneyTrackerRoot._getSkillBonusFromData(charData, skill);
+		const toolProfBonus = JourneyTrackerRoot._getToolProfBonusFromData(charData, activityId);
+		const hasToolProf = toolProfBonus > 0;
+		const skillProfLevel = Number(charData.skillProficiencies?.[skill]) || 0;
+		/* Only add tool prof to the total if the character isn't already proficient in the skill */
+		const effectiveToolBonus = (hasToolProf && skillProfLevel === 0) ? toolProfBonus : 0;
+		return {total: skillBonus + effectiveToolBonus, skillBonus, toolBonus: effectiveToolBonus, hasToolProf};
 	}
 
 	_escHtml (str) {
@@ -1200,6 +1444,7 @@ class JourneyTrackerRoot {
 			tab: toLoad.tab ?? 0,
 			riskModifier: toLoad.riskModifier ?? 0,
 			travelPace: toLoad.travelPace || "normal",
+			rollMode: toLoad.rollMode || "raw",
 			players: (toLoad.players || []).map(p => ({
 				id: p.id || CryptUtil.uid(),
 				name: p.name || "",
@@ -1207,6 +1452,7 @@ class JourneyTrackerRoot {
 			})),
 			area: {
 				areaName: toLoad.area?.areaName || "",
+				baseDc: toLoad.area?.baseDc ?? 10,
 				numSegments: toLoad.area?.numSegments ?? 3,
 				segmentNames: toLoad.area?.segmentNames?.slice() || ["Morning", "Midday", "Afternoon"],
 				riskRanges: {
@@ -1244,9 +1490,11 @@ class JourneyTrackerRoot {
 			tab: this._state.tab,
 			riskModifier: this._state.riskModifier,
 			travelPace: this._state.travelPace,
+			rollMode: this._state.rollMode,
 			players: this._state.players.map(p => ({...p})),
 			area: {
 				areaName: this._state.area.areaName,
+				baseDc: this._state.area.baseDc ?? 10,
 				numSegments: this._state.area.numSegments,
 				segmentNames: [...this._state.area.segmentNames],
 				riskRanges: {

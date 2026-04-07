@@ -1856,7 +1856,7 @@
   }
   .dm-journey__activity-row {
     display: grid;
-    grid-template-columns: minmax(70px, 1fr) minmax(100px, 2fr) 50px minmax(45px, 60px) 60px;
+    grid-template-columns: minmax(70px, 1fr) minmax(90px, 2fr) 55px 40px minmax(40px, 55px) minmax(60px, 90px);
     gap: 4px;
     align-items: center;
     padding: 3px 4px;
@@ -2022,6 +2022,50 @@
   .dm-journey__log-msg {
     word-break: break-word;
   }
+  /* --- DC & result cells --- */
+  .dm-journey__dc-cell {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #495057;
+    text-align: center;
+  }
+  .dm-journey__dc-cell--modified {
+    color: #856404;
+  }
+  .dm-journey__dc-cell--impossible {
+    color: #dc3545;
+    font-weight: 700;
+    font-size: 0.72rem;
+    text-decoration: line-through;
+  }
+  .dm-journey__activity-row--impossible {
+    background: #fff5f5;
+    border-left: 3px solid #dc3545;
+  }
+  .dm-journey__roll-result {
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .dm-journey__roll-result--pass {
+    color: #28a745;
+  }
+  .dm-journey__roll-result--fail {
+    color: #dc3545;
+  }
+  .dm-journey__rm-auto {
+    color: #856404;
+    font-size: 0.75rem;
+    font-style: italic;
+  }
+  .dm-journey__tool-indicator {
+    font-size: 0.7rem;
+    margin-left: 1px;
+    cursor: help;
+  }
+  .dm-journey__log-entry--activity {
+    background: #f0f6ff;
+  }
   /* --- Night mode --- */
   .ve-night-mode .dm-journey__header {
     border-bottom-color: #444;
@@ -2134,8 +2178,33 @@
   .ve-night-mode .dm-journey__log-entry--party-sync {
     background: #1c3a2d;
   }
+  .ve-night-mode .dm-journey__log-entry--activity {
+    background: #1c2a3a;
+  }
   .ve-night-mode .dm-journey__log-time {
     color: #888;
+  }
+  .ve-night-mode .dm-journey__dc-cell {
+    color: #bbb;
+  }
+  .ve-night-mode .dm-journey__dc-cell--modified {
+    color: #e6c766;
+  }
+  .ve-night-mode .dm-journey__dc-cell--impossible {
+    color: #f66;
+  }
+  .ve-night-mode .dm-journey__activity-row--impossible {
+    background: #3a1c1c;
+    border-left-color: #f66;
+  }
+  .ve-night-mode .dm-journey__roll-result--pass {
+    color: #8fd19e;
+  }
+  .ve-night-mode .dm-journey__roll-result--fail {
+    color: #f66;
+  }
+  .ve-night-mode .dm-journey__rm-auto {
+    color: #e6c766;
   }
 }
 
