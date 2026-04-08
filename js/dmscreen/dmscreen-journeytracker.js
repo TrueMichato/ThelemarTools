@@ -6,31 +6,30 @@ import {DmScreenUtil} from "./dmscreen-util.js";
 /* ============================================================================================== */
 
 const JOURNEY_ACTIVITIES = [
-	{id: "navigate", label: "Navigate", skill: "survival", rmOnSuccess: 0, rmAlways: 0},
-	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmAlways: 0},
-	{id: "map", label: "Map", skill: "investigation", rmOnSuccess: 0, rmAlways: 0},
-	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmAlways: 0},
-	{id: "hideTracks", label: "Hide Tracks", skill: "stealth", rmOnSuccess: -1, rmAlways: 0},
-	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmAlways: 1},
-	{id: "banter", label: "Banter", skill: null, rmOnSuccess: 0, rmAlways: 0},
-	{id: "stealth", label: "Stealth", skill: "stealth", rmOnSuccess: -1, rmAlways: 0},
-	{id: "track", label: "Track", skill: "survival", rmOnSuccess: 0, rmAlways: 0},
-	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmAlways: 0},
+	{id: "navigate", label: "Navigate", skill: "survival", rmOnSuccess: 0, rmAlways: 0, desc: "Survival check vs DC. On success, the group won't get lost this segment. On failure, the group may wander off course or lose time."},
+	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmAlways: 0, desc: "Perception check vs DC. On success, −1 RM (you spot danger early). +2 DC to Hide Tracks per scout. Disadvantage at Fast Pace."},
+	{id: "map", label: "Map", skill: "investigation", rmOnSuccess: 0, rmAlways: 0, desc: "Investigation check vs DC. On success, you contribute to a useful map. Not possible at Fast Pace."},
+	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmAlways: 0, desc: "Survival check vs DC. On success, gather food/water/herbs. +2 DC to Hide Tracks per forager. Not possible at Fast Pace."},
+	{id: "hideTracks", label: "Hide Tracks", skill: "stealth", rmOnSuccess: -1, rmAlways: 0, desc: "Stealth check vs DC (raised by scouts, foragers, entertainers). On success, −1 RM. DC modified by pace."},
+	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmAlways: 1, desc: "Performance check. Automatically +1 RM (noise). On success, boost morale. +2 DC to Hide Tracks per entertainer."},
+	{id: "banter", label: "Banter", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "No roll needed. Casual conversation during travel — no mechanical effect."},
+	{id: "track", label: "Track", skill: "survival", rmOnSuccess: 0, rmAlways: 0, desc: "Survival check vs DC. On success, follow or find tracks of creatures in the area."},
+	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "A custom activity — set your own name and rules."},
 ];
 
 const CAMP_ACTIVITIES = [
-	{id: "campfire", label: "Campfire", skill: "survival", rmOnSuccess: 0, rmAlways: 0},
-	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmAlways: 1},
-	{id: "cook", label: "Cook", skill: null, rmOnSuccess: 0, rmAlways: 0},
-	{id: "pray", label: "Pray", skill: "religion", rmOnSuccess: 0, rmAlways: 0},
-	{id: "tend", label: "Tend", skill: "medicine", rmOnSuccess: 0, rmAlways: 0},
-	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmAlways: 1},
-	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmAlways: 0},
-	{id: "research", label: "Research", skill: null, rmOnSuccess: 0, rmAlways: 0},
-	{id: "hideCamp", label: "Hide Camp", skill: "stealth", rmOnSuccess: -1, rmAlways: 0},
-	{id: "banter", label: "Banter", skill: null, rmOnSuccess: 0, rmAlways: 0},
-	{id: "guard", label: "Guard", skill: "perception", rmOnSuccess: 0, rmAlways: 0},
-	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmAlways: 0},
+	{id: "campfire", label: "Campfire", skill: "survival", rmOnSuccess: 0, rmAlways: 0, desc: "Survival check. Build/maintain the campfire. Toggle the Campfire Active switch separately (+1 RM while lit)."},
+	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmAlways: 1, desc: "Survival check vs DC. Automatically +1 RM (leaving camp). On success, gather food/water/herbs near camp."},
+	{id: "cook", label: "Cook", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "Prepare a meal using rations or foraged ingredients. May require supplies or proficiency."},
+	{id: "pray", label: "Pray", skill: "religion", rmOnSuccess: 0, rmAlways: 0, desc: "Religion check. Commune with your deity for guidance, blessings, or spiritual clarity."},
+	{id: "tend", label: "Tend", skill: "medicine", rmOnSuccess: 0, rmAlways: 0, desc: "Medicine check. Treat wounds, stabilize injured, or care for the sick."},
+	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmAlways: 1, desc: "Performance check. Automatically +1 RM (noise). On success, boost camp morale."},
+	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmAlways: 0, desc: "Perception check vs DC. On success, −1 RM (early warning of threats near camp)."},
+	{id: "research", label: "Research", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "Study notes, books, or maps. No standard roll — DM may call for Investigation or Arcana."},
+	{id: "hideCamp", label: "Hide Camp", skill: "stealth", rmOnSuccess: -1, rmAlways: 0, desc: "Stealth check vs DC (raised by scouts, foragers, entertainers). On success, −1 RM. DC modified by pace."},
+	{id: "banter", label: "Banter", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "No roll needed. Socialize around camp — no mechanical effect."},
+	{id: "guard", label: "Guard", skill: "perception", rmOnSuccess: 0, rmAlways: 0, desc: "Perception check. Stand watch during a rest period. Use Guard Watches section for dedicated guard slots."},
+	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "A custom activity — set your own name and rules."},
 ];
 
 const PACE_OPTIONS = [
@@ -430,10 +429,11 @@ class JourneyTrackerRoot {
 
 	_renderSegmentCard (name, seg, ix) {
 		const isCollapsed = seg._collapsed || false;
+		if (!seg.stealthSlots) seg.stealthSlots = [];
 
 		const card = ee`<div class="dm-journey__segment-card"></div>`;
 
-		/* Header */
+		/* Header — just toggle + name */
 		const btnToggle = ee`<button class="ve-btn ve-btn-default ve-btn-xs dm-journey__collapse-btn" aria-label="Toggle segment">${isCollapsed ? "\u25B6" : "\u25BC"}</button>`;
 		btnToggle.onn("click", () => {
 			seg._collapsed = !seg._collapsed;
@@ -441,46 +441,250 @@ class JourneyTrackerRoot {
 			this._doSave();
 		});
 
-		const riskBadge = this._renderRiskBadge(seg);
-
-		const btnRoll = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" title="Roll d12 + RM">Roll Risk</button>`;
-		btnRoll.onn("click", () => {
-			const result = this._doRiskRoll();
-			seg.riskRoll = result.die;
-			seg.riskRollTotal = result.total;
-			seg.riskRollOverride = null;
-			seg.rmAtRoll = this._state.riskModifier;
-			this._renderJourney();
-			this._doSave();
-		});
-
-		const iptOverride = ee`<input type="number" class="dm-journey__override-input" placeholder="Override" title="Override total result" value="${seg.riskRollOverride ?? ""}">`;
-		iptOverride.onn("change", () => {
-			const v = iptOverride.val()?.trim();
-			seg.riskRollOverride = v === "" ? null : parseInt(v, 10);
-			this._renderJourney();
-			this._doSave();
-		});
-
 		const eleHeader = ee`<div class="dm-journey__segment-header">
 			${btnToggle}
 			<span class="dm-journey__segment-name">${name}</span>
-			<div class="ve-flex-v-center ve-gap-1 ve-ml-auto">
-				${riskBadge}
-				${btnRoll}
-				${iptOverride}
-			</div>
 		</div>`;
 
 		card.appendChild(eleHeader);
 
-		/* Body (collapsible) */
+		/* Body (collapsible): activities → stealth → RM summary → risk roll */
 		if (!isCollapsed) {
 			const body = this._renderActivityTable(seg.activities, JOURNEY_ACTIVITIES);
 			card.appendChild(body);
+
+			const eleStealth = this._renderStealthSlots(seg);
+			card.appendChild(eleStealth);
+
+			const eleRmSummary = this._renderRmSummary(seg.activities, seg.stealthSlots, JOURNEY_ACTIVITIES);
+			card.appendChild(eleRmSummary);
+
+			const eleRisk = this._renderRiskRollSection(seg, () => { this._renderJourney(); this._doSave(); });
+			card.appendChild(eleRisk);
 		}
 
 		return card;
+	}
+
+	/* -------------------------------------------- */
+	/*  Stealth Slots (Journey)                      */
+	/* -------------------------------------------- */
+
+	_renderStealthSlots (seg) {
+		const pace = this._state.travelPace;
+		const isDisabled = pace !== "slow";
+
+		const wrp = ee`<div class="dm-journey__stealth-section${isDisabled ? " dm-journey__stealth-section--disabled" : ""}">
+			<div class="ve-flex-v-center ve-gap-1 ve-mb-1">
+				<span class="ve-bold">Stealth</span>
+				<span class="dm-journey__note">(Slow Pace only — success: −1 RM vs DC)</span>
+			</div>
+		</div>`;
+
+		if (isDisabled) {
+			ee`<div class="dm-journey__note"><i>Requires Slow Pace.</i></div>`.appendTo(wrp);
+			return wrp;
+		}
+
+		const wrpRows = ee`<div class="ve-flex-col ve-gap-1"></div>`;
+
+		for (let i = 0; i < seg.stealthSlots.length; i++) {
+			const slot = seg.stealthSlots[i];
+			const row = this._renderStealthRow(slot, i, seg);
+			wrpRows.appendChild(row);
+		}
+
+		const btnAdd = ee`<button class="ve-btn ve-btn-default ve-btn-xs"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Add Stealth</button>`;
+		btnAdd.onn("click", () => {
+			seg.stealthSlots.push({playerId: "", rollResult: "", _rmApplied: 0});
+			this._renderJourney();
+			this._doSave();
+		});
+
+		wrp.appendChild(wrpRows);
+		wrp.appendChild(btnAdd);
+		return wrp;
+	}
+
+	_renderStealthRow (slot, ix, seg) {
+		const players = this._state.players;
+		const ptChars = this._getPartyTrackerCharacters();
+		const baseDc = this._state.area.baseDc ?? 10;
+		const isTotalMode = this._state.rollMode === "total";
+
+		const sel = ee`<select class="ve-form-control ve-input-xs dm-journey__player-sel" aria-label="Stealth player">
+			<option value="">— Select —</option>
+			${players.map(p => `<option value="${this._escAttr(p.id)}" ${slot.playerId === p.id ? "selected" : ""}>${this._escHtml(p.name || "Unnamed")}</option>`).join("")}
+		</select>`;
+		sel.onn("change", () => {
+			/* Undo RM from old slot */
+			if (slot._rmApplied) {
+				this._setRm(this._state.riskModifier - slot._rmApplied, `Undo stealth RM (slot ${ix + 1})`);
+				slot._rmApplied = 0;
+			}
+			slot.playerId = sel.val();
+			slot.rollResult = "";
+			this._renderJourney();
+			this._doSave();
+		});
+
+		/* Stealth bonus */
+		const ptChar = ptChars.find(c => c.id === slot.playerId);
+		const bonus = ptChar ? JourneyTrackerRoot._getSkillBonusFromData(ptChar, "stealth") : 0;
+		const bonusStr = ptChar ? this._fmtBonus(bonus) : "";
+
+		/* DC display */
+		const eleDc = ee`<span class="dm-journey__dc-cell" title="Base DC ${baseDc}">${baseDc}</span>`;
+
+		/* Roll input */
+		const iptResult = ee`<input type="number" class="ve-form-control ve-input-xs dm-journey__roll-input" placeholder="${isTotalMode ? "Total" : "d20"}" value="${slot.rollResult || ""}" aria-label="Stealth roll">`;
+		iptResult.onn("change", () => {
+			const rawVal = iptResult.val()?.trim();
+			slot.rollResult = rawVal;
+
+			/* Undo previous RM */
+			if (slot._rmApplied) {
+				this._setRm(this._state.riskModifier - slot._rmApplied, `Undo stealth roll (slot ${ix + 1})`);
+				slot._rmApplied = 0;
+			}
+
+			const rollNum = parseInt(rawVal, 10);
+			if (!isNaN(rollNum) && slot.playerId) {
+				const total = isTotalMode ? rollNum : rollNum + bonus;
+				const success = total >= baseDc;
+				const playerName = players.find(p => p.id === slot.playerId)?.name || "?";
+				const logStr = isTotalMode
+					? `${playerName} — Stealth: total ${total} vs DC ${baseDc}`
+					: `${playerName} — Stealth: d20(${rollNum}) ${this._fmtBonus(bonus)} = ${total} vs DC ${baseDc}`;
+
+				if (success) {
+					slot._rmApplied = -1;
+					this._setRm(this._state.riskModifier - 1, `Stealth success (${playerName}): −1 RM`);
+					this._addLog("activity", `${logStr} \u2192 Success (RM −1)`);
+				} else {
+					this._addLog("activity", `${logStr} \u2192 Fail`);
+				}
+			}
+			this._renderJourney();
+			this._doSave();
+		});
+
+		/* Result cell */
+		const eleResult = ee`<span class="dm-journey__roll-result"></span>`;
+		if (slot.rollResult !== "" && slot.rollResult != null) {
+			const rollNum = parseInt(slot.rollResult, 10);
+			if (!isNaN(rollNum) && slot.playerId) {
+				const total = isTotalMode ? rollNum : rollNum + bonus;
+				const success = total >= baseDc;
+				const icon = success ? "\u2714" : "\u2718";
+				const cls = success ? "dm-journey__roll-result--pass" : "dm-journey__roll-result--fail";
+				eleResult.className = `dm-journey__roll-result ${cls}`;
+				eleResult.txt(`${icon} ${total}${slot._rmApplied ? " (RM −1)" : ""}`);
+			}
+		}
+
+		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xs" title="Remove stealth slot" aria-label="Remove stealth slot">\u00d7</button>`;
+		btnRemove.onn("click", () => {
+			if (slot._rmApplied) {
+				this._setRm(this._state.riskModifier - slot._rmApplied, `Removed stealth slot ${ix + 1}`);
+			}
+			seg.stealthSlots.splice(ix, 1);
+			this._renderJourney();
+			this._doSave();
+		});
+
+		return ee`<div class="dm-journey__activity-row">
+			${sel}
+			<span class="dm-journey__skill-bonus" title="Stealth bonus">${bonusStr}</span>
+			${eleDc}
+			${iptResult}
+			${eleResult}
+			${btnRemove}
+		</div>`;
+	}
+
+	/* -------------------------------------------- */
+	/*  Risk Roll Section (shared)                   */
+	/* -------------------------------------------- */
+
+	_renderRiskRollSection (segOrCamp, onUpdate) {
+		const riskBadge = this._renderRiskBadge(segOrCamp);
+
+		const btnRoll = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" title="Roll d12 + RM">Roll Risk</button>`;
+		btnRoll.onn("click", () => {
+			const result = this._doRiskRoll();
+			segOrCamp.riskRoll = result.die;
+			segOrCamp.riskRollTotal = result.total;
+			segOrCamp.riskRollOverride = null;
+			segOrCamp.rmAtRoll = this._state.riskModifier;
+			onUpdate();
+		});
+
+		const iptOverride = ee`<input type="number" class="dm-journey__override-input" placeholder="Override" title="Override total result" value="${segOrCamp.riskRollOverride ?? ""}">`;
+		iptOverride.onn("change", () => {
+			const v = iptOverride.val()?.trim();
+			segOrCamp.riskRollOverride = v === "" ? null : parseInt(v, 10);
+			onUpdate();
+		});
+
+		return ee`<div class="dm-journey__risk-section">
+			<span class="ve-bold">Risk Roll:</span>
+			${riskBadge}
+			${btnRoll}
+			${iptOverride}
+		</div>`;
+	}
+
+	/* -------------------------------------------- */
+	/*  RM Summary (shared)                          */
+	/* -------------------------------------------- */
+
+	_renderRmSummary (activities, stealthSlots, activityList) {
+		const players = this._state.players;
+		const items = [];
+
+		/* Gather RM contributions from activity slots */
+		for (const player of players) {
+			const act = activities[player.id];
+			if (!act) continue;
+			const actDef = activityList.find(a => a.id === act.activity);
+			if (!actDef) continue;
+
+			if (act._rmAlwaysApplied) {
+				items.push({label: `${actDef.label} (${player.name})`, value: act._rmAlwaysApplied, type: "auto"});
+			}
+			if (act._rmRollApplied) {
+				items.push({label: `${actDef.label} roll (${player.name})`, value: act._rmRollApplied, type: "roll"});
+			}
+		}
+
+		/* Gather RM contributions from stealth slots */
+		if (stealthSlots) {
+			for (const slot of stealthSlots) {
+				if (slot._rmApplied) {
+					const playerName = players.find(p => p.id === slot.playerId)?.name || "?";
+					items.push({label: `Stealth (${playerName})`, value: slot._rmApplied, type: "roll"});
+				}
+			}
+		}
+
+		const totalRm = items.reduce((sum, it) => sum + it.value, 0);
+		const wrp = ee`<div class="dm-journey__rm-summary"></div>`;
+
+		if (!items.length) {
+			ee`<span class="dm-journey__note"><i>No RM changes from activities.</i></span>`.appendTo(wrp);
+			return wrp;
+		}
+
+		ee`<span class="ve-bold">Activity RM:</span>`.appendTo(wrp);
+		for (const item of items) {
+			const sign = item.value > 0 ? "+" : "";
+			const cls = item.type === "auto" ? "dm-journey__rm-auto" : (item.value < 0 ? "dm-journey__roll-result--pass" : "dm-journey__roll-result--fail");
+			ee`<span class="${cls}" title="${this._escAttr(item.label)}">${sign}${item.value} ${this._escHtml(item.label)}</span>`.appendTo(wrp);
+		}
+		ee`<span class="ve-bold">= ${totalRm >= 0 ? "+" : ""}${totalRm}</span>`.appendTo(wrp);
+
+		return wrp;
 	}
 
 	/* -------------------------------------------- */
@@ -524,40 +728,17 @@ class JourneyTrackerRoot {
 			this._doSave();
 		});
 
-		/* Risk Roll section */
-		const riskBadge = this._renderRiskBadge(camp);
-
-		const btnRoll = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" title="Roll d12 + RM for camp">Roll Risk</button>`;
-		btnRoll.onn("click", () => {
-			const result = this._doRiskRoll();
-			camp.riskRoll = result.die;
-			camp.riskRollTotal = result.total;
-			camp.riskRollOverride = null;
-			camp.rmAtRoll = this._state.riskModifier;
-			this._renderCamp();
-			this._doSave();
-		});
-
-		const iptOverride = ee`<input type="number" class="dm-journey__override-input" placeholder="Override" title="Override total result" value="${camp.riskRollOverride ?? ""}">`;
-		iptOverride.onn("change", () => {
-			const v = iptOverride.val()?.trim();
-			camp.riskRollOverride = v === "" ? null : parseInt(v, 10);
-			this._renderCamp();
-			this._doSave();
-		});
-
-		const eleRiskRow = ee`<div class="dm-journey__risk-row">
-			<span class="ve-bold">Camp Risk Roll:</span>
-			${riskBadge}
-			${btnRoll}
-			${iptOverride}
-		</div>`;
-
 		/* Activity table */
 		const body = this._renderActivityTable(camp.activities, CAMP_ACTIVITIES);
 
 		/* Guard slots */
 		const eleGuard = this._renderGuardSlots();
+
+		/* RM Summary */
+		const eleRmSummary = this._renderRmSummary(camp.activities, null, CAMP_ACTIVITIES);
+
+		/* Risk Roll section (shared) */
+		const eleRisk = this._renderRiskRollSection(camp, () => { this._renderCamp(); this._doSave(); });
 
 		this._wrpCamp.appendChild(eleCampfire);
 		this._wrpCamp.appendChild(btnHideCamp);
@@ -566,7 +747,9 @@ class JourneyTrackerRoot {
 		ee`<hr class="ve-hr-1">`.appendTo(this._wrpCamp);
 		this._wrpCamp.appendChild(eleGuard);
 		ee`<hr class="ve-hr-1">`.appendTo(this._wrpCamp);
-		this._wrpCamp.appendChild(eleRiskRow);
+		this._wrpCamp.appendChild(eleRmSummary);
+		ee`<hr class="ve-hr-1">`.appendTo(this._wrpCamp);
+		this._wrpCamp.appendChild(eleRisk);
 	}
 
 	_renderGuardSlots () {
@@ -691,8 +874,9 @@ class JourneyTrackerRoot {
 		const actDef = activityList.find(a => a.id === act.activity);
 
 		/* ---- Activity dropdown ---- */
-		const optionsHtml = activityList.map(a => `<option value="${a.id}" ${act.activity === a.id ? "selected" : ""}>${a.label}</option>`).join("");
-		const sel = ee`<select class="ve-form-control ve-input-xs dm-journey__activity-sel" aria-label="Activity for ${this._escAttr(player.name)}"><option value="">\u2014 None \u2014</option>${optionsHtml}</select>`;
+		const optionsHtml = activityList.map(a => `<option value="${a.id}" ${act.activity === a.id ? "selected" : ""} title="${this._escAttr(a.desc || "")}">${a.label}</option>`).join("");
+		const selTitle = actDef?.desc || "";
+		const sel = ee`<select class="ve-form-control ve-input-xs dm-journey__activity-sel" aria-label="Activity for ${this._escAttr(player.name)}" title="${this._escAttr(selTitle)}"><option value="">\u2014 None \u2014</option>${optionsHtml}</select>`;
 		sel.onn("change", () => {
 			const oldDef = activityList.find(a => a.id === act.activity);
 			/* Undo all RM applied from this slot */
@@ -837,9 +1021,19 @@ class JourneyTrackerRoot {
 		/* Row class — add impossible highlight */
 		const rowCls = `dm-journey__activity-row${impossible ? " dm-journey__activity-row--impossible" : ""}`;
 
+		/* Activity info line (shows desc on hover of row) */
+		const eleActivityInfo = actDef?.desc
+			? ee`<div class="dm-journey__activity-info" title="${this._escAttr(actDef.desc)}">${this._escHtml(actDef.desc)}</div>`
+			: null;
+
+		const eleActivityCell = ee`<div class="dm-journey__activity-cell">
+			<div class="ve-flex-v-center ve-gap-1">${sel}${iptCustom}</div>
+			${eleActivityInfo || ""}
+		</div>`;
+
 		return ee`<div class="${rowCls}">
 			${eleNameCell}
-			<div class="ve-flex-v-center ve-gap-1">${sel}${iptCustom}</div>
+			${eleActivityCell}
 			${eleBonusCell}
 			${eleDcCell}
 			${iptResult}
@@ -1061,9 +1255,10 @@ class JourneyTrackerRoot {
 
 	_classifyRoll (total) {
 		const ranges = this._state.area.riskRanges;
-		if (total >= ranges.intense.min && total <= ranges.intense.max) return "intense";
-		if (total >= ranges.moderate.min && total <= ranges.moderate.max) return "moderate";
-		if (total >= ranges.mild.min && total <= ranges.mild.max) return "mild";
+		/* Cascade from top: anything >= intense.min is intense (handles overflow above max) */
+		if (total >= ranges.intense.min) return "intense";
+		if (total >= ranges.moderate.min) return "moderate";
+		if (total >= ranges.mild.min) return "mild";
 		return "empty";
 	}
 
@@ -1105,6 +1300,10 @@ class JourneyTrackerRoot {
 			const act = seg.activities?.[player.id];
 			if (!act) continue;
 			total += (act._rmAlwaysApplied || 0) + (act._rmRollApplied || 0);
+			/* Stealth slots */
+			for (const slot of (seg.stealthSlots || [])) {
+				if (slot.playerId === player.id) total += (slot._rmApplied || 0);
+			}
 		}
 		/* Camp */
 		const campAct = this._state.camp.activities?.[player.id];
@@ -1311,7 +1510,6 @@ class JourneyTrackerRoot {
 		/* Impossible checks */
 		if (activityId === "map" && pace === "fast") impossible = true;
 		if (activityId === "forage" && pace === "fast" && activityList === JOURNEY_ACTIVITIES) impossible = true;
-		if (activityId === "stealth" && pace !== "slow") impossible = true;
 
 		return {dc, impossible, notes};
 	}
@@ -1331,6 +1529,7 @@ class JourneyTrackerRoot {
 	_makeEmptySegment () {
 		return {
 			activities: {},
+			stealthSlots: [],
 			riskRoll: null,
 			riskRollTotal: null,
 			riskRollOverride: null,
@@ -1464,6 +1663,7 @@ class JourneyTrackerRoot {
 			journey: {
 				segments: (toLoad.journey?.segments || []).map(seg => ({
 					activities: {...(seg.activities || {})},
+					stealthSlots: (seg.stealthSlots || []).map(s => ({...s})),
 					riskRoll: seg.riskRoll ?? null,
 					riskRollTotal: seg.riskRollTotal ?? null,
 					riskRollOverride: seg.riskRollOverride ?? null,
@@ -1506,6 +1706,7 @@ class JourneyTrackerRoot {
 			journey: {
 				segments: this._state.journey.segments.map(seg => ({
 					activities: {...seg.activities},
+					stealthSlots: (seg.stealthSlots || []).map(s => ({...s})),
 					riskRoll: seg.riskRoll,
 					riskRollTotal: seg.riskRollTotal,
 					riskRollOverride: seg.riskRollOverride,

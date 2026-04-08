@@ -2206,6 +2206,66 @@
   .ve-night-mode .dm-journey__rm-auto {
     color: #e6c766;
   }
+
+  /* --- Stealth section --- */
+  .dm-journey__stealth-section {
+    padding: 6px 4px;
+    border-top: 1px solid #e0e0e0;
+  }
+  .dm-journey__stealth-section--disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .ve-night-mode .dm-journey__stealth-section {
+    border-top-color: #555;
+  }
+
+  /* --- Risk roll section (bottom of segment / camp) --- */
+  .dm-journey__risk-section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 4px;
+    border-top: 1px solid #e0e0e0;
+    margin-top: 4px;
+  }
+  .ve-night-mode .dm-journey__risk-section {
+    border-top-color: #555;
+  }
+
+  /* --- RM Summary --- */
+  .dm-journey__rm-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 4px;
+    font-size: 0.85em;
+  }
+
+  /* --- Activity info line (tooltip / desc) --- */
+  .dm-journey__activity-info {
+    font-size: 0.75em;
+    color: #888;
+    line-height: 1.2;
+    max-height: 2.4em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    margin-top: 1px;
+  }
+  .ve-night-mode .dm-journey__activity-info {
+    color: #999;
+  }
+
+  /* --- Activity cell (wraps select + info) --- */
+  .dm-journey__activity-cell {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
 }
 
 /*# sourceMappingURL=dmscreen.css.map */
