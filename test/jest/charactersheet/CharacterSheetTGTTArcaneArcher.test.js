@@ -4,7 +4,7 @@
  * Covers:
  * - Core TGTT Fighter setup
  * - Fighter Specialties (TGTT schedule)
- * - Combat Methods at L1 (exertion pool, STR/DEX DC)
+ * - Combat Methods at L1 (stamina pool, STR/DEX DC)
  * - Battle Tactics at L3 (level-gated reactions)
  * - Arcane Shot (CON-based DC in TGTT, prof-bonus uses)
  * - Arcane Archer subclass features:
@@ -150,10 +150,10 @@ describe("TGTT Arcane Archer Fighter", () => {
 			expect(state.usesCombatSystem()).toBe(true);
 		});
 
-		it("should have exertion pool = 2 × prof", () => {
+		it("should have stamina pool = 2 × prof", () => {
 			state.addCombatTradition("Biting Zephyr");
-			state.ensureExertionInitialized();
-			expect(state.getExertionMax()).toBe(6); // prof 3 × 2
+			state.ensureStaminaInitialized();
+			expect(state.getStaminaMax()).toBe(6); // prof 3 × 2
 		});
 
 		it("should calculate combat method DC from DEX (higher)", () => {
@@ -164,16 +164,16 @@ describe("TGTT Arcane Archer Fighter", () => {
 			expect(calcs.combatMethodDc).toBe(15);
 		});
 
-		it("should spend and track exertion", () => {
+		it("should spend and track stamina", () => {
 			state.addCombatTradition("Biting Zephyr");
-			state.ensureExertionInitialized();
-			const max = state.getExertionMax();
+			state.ensureStaminaInitialized();
+			const max = state.getStaminaMax();
 
-			state.spendExertion(3);
-			expect(state.getExertionCurrent()).toBe(max - 3);
+			state.spendStamina(3);
+			expect(state.getStaminaCurrent()).toBe(max - 3);
 
-			state.restoreExertion();
-			expect(state.getExertionCurrent()).toBe(max);
+			state.restoreStamina();
+			expect(state.getStaminaCurrent()).toBe(max);
 		});
 	});
 

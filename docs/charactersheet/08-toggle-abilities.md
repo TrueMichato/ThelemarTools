@@ -192,7 +192,7 @@ heavyStance: {
         {type: "bonus", target: "save:resist-movement", useProficiency: true},
         {type: "note", value: "Ignore first 10 ft of difficult terrain each turn"},
     ],
-    resourceName: "Exertion",
+    resourceName: "Stamina",
     resourceCost: 1,
     activationAction: "bonus",
 }
@@ -205,7 +205,7 @@ standTallStance: {
         {type: "sizeIncrease", value: 1},
         {type: "note", value: "Creatures smaller than you have disadvantage on saves vs your combat methods"},
     ],
-    resourceName: "Exertion",
+    resourceName: "Stamina",
     resourceCost: 1,
 }
 ```

@@ -1594,11 +1594,11 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 	
 	// =========================================================================
 	// COMBAT METHODS / EXERTION SYSTEM (TGTT Feature)
-	// Tests for the Combat Traditions and Exertion pool system
+	// Tests for the Combat Traditions and Stamina pool system
 	// =========================================================================
-	describe("Combat Methods / Exertion System", () => {
+	describe("Combat Methods / Stamina System", () => {
 		
-		describe("Exertion Pool Basics", () => {
+		describe("Stamina Pool Basics", () => {
 			it("should detect combat system when character has combat traditions", () => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 1});
 				state.addCombatTradition("Unarmored Combat");
@@ -1606,87 +1606,87 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(state.usesCombatSystem()).toBe(true);
 			});
 			
-			it("should calculate exertion max as 2 × proficiency bonus", () => {
+			it("should calculate stamina max as 2 × proficiency bonus", () => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 1});
 				state.addCombatTradition("Unarmored Combat");
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				// Level 1 has +2 prof bonus, so exertion max = 4
-				expect(state.getExertionMax()).toBe(4);
+				// Level 1 has +2 prof bonus, so stamina max = 4
+				expect(state.getStaminaMax()).toBe(4);
 			});
 			
-			it("should scale exertion with proficiency bonus progression", () => {
+			it("should scale stamina with proficiency bonus progression", () => {
 				const testCases = [
-					{level: 1, expected: 4},   // +2 prof → 4 exertion
-					{level: 5, expected: 6},   // +3 prof → 6 exertion
-					{level: 9, expected: 8},   // +4 prof → 8 exertion
-					{level: 13, expected: 10}, // +5 prof → 10 exertion
-					{level: 17, expected: 12}, // +6 prof → 12 exertion
+					{level: 1, expected: 4},   // +2 prof → 4 stamina
+					{level: 5, expected: 6},   // +3 prof → 6 stamina
+					{level: 9, expected: 8},   // +4 prof → 8 stamina
+					{level: 13, expected: 10}, // +5 prof → 10 stamina
+					{level: 17, expected: 12}, // +6 prof → 12 stamina
 				];
 				
 				testCases.forEach(({level, expected}) => {
 					const testState = new CharacterSheetState();
 					testState.addClass({name: "Fighter", source: "TGTT", level});
 					testState.addCombatTradition("Unarmored Combat");
-					testState.ensureExertionInitialized();
+					testState.ensureStaminaInitialized();
 					
-					expect(testState.getExertionMax()).toBe(expected);
+					expect(testState.getStaminaMax()).toBe(expected);
 				});
 			});
 		});
 		
-		describe("Exertion Spending and Tracking", () => {
+		describe("Stamina Spending and Tracking", () => {
 			beforeEach(() => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 5});
 				state.addCombatTradition("Unarmored Combat");
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 			});
 			
-			it("should track current exertion", () => {
-				// Level 5 has 6 exertion
-				expect(state.getExertionCurrent()).toBe(6);
+			it("should track current stamina", () => {
+				// Level 5 has 6 stamina
+				expect(state.getStaminaCurrent()).toBe(6);
 			});
 			
-			it("should spend exertion successfully", () => {
-				const result = state.spendExertion(2);
+			it("should spend stamina successfully", () => {
+				const result = state.spendStamina(2);
 				
 				expect(result).toBe(true);
-				expect(state.getExertionCurrent()).toBe(4);
+				expect(state.getStaminaCurrent()).toBe(4);
 			});
 			
-			it("should prevent spending more exertion than available", () => {
-				state.setExertionCurrent(2);
+			it("should prevent spending more stamina than available", () => {
+				state.setStaminaCurrent(2);
 				
-				const result = state.spendExertion(5);
+				const result = state.spendStamina(5);
 				
 				expect(result).toBe(false);
-				expect(state.getExertionCurrent()).toBe(2); // Unchanged
+				expect(state.getStaminaCurrent()).toBe(2); // Unchanged
 			});
 			
-			it("should allow spending exactly the remaining exertion", () => {
-				state.setExertionCurrent(3);
+			it("should allow spending exactly the remaining stamina", () => {
+				state.setStaminaCurrent(3);
 				
-				const result = state.spendExertion(3);
+				const result = state.spendStamina(3);
 				
 				expect(result).toBe(true);
-				expect(state.getExertionCurrent()).toBe(0);
+				expect(state.getStaminaCurrent()).toBe(0);
 			});
 		});
 		
-		describe("Exertion Restoration (Rest)", () => {
+		describe("Stamina Restoration (Rest)", () => {
 			beforeEach(() => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 5});
 				state.addCombatTradition("Unarmored Combat");
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 			});
 			
-			it("should restore all exertion on rest", () => {
-				state.setExertionCurrent(1);
-				expect(state.getExertionCurrent()).toBe(1);
+			it("should restore all stamina on rest", () => {
+				state.setStaminaCurrent(1);
+				expect(state.getStaminaCurrent()).toBe(1);
 				
-				state.restoreExertion();
+				state.restoreStamina();
 				
-				expect(state.getExertionCurrent()).toBe(6);
+				expect(state.getStaminaCurrent()).toBe(6);
 			});
 		});
 		
@@ -1773,33 +1773,33 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 			});
 		});
 		
-		describe("Monk Focus Points for Exertion", () => {
-			it("should allow Monks with combat system to use Focus for Exertion", () => {
+		describe("Monk Focus Points for Stamina", () => {
+			it("should allow Monks with combat system to use Focus for Stamina", () => {
 				state.addClass({name: "Monk", source: "TGTT", level: 5});
 				state.addCombatTradition("Unarmored Combat");
 				state.setKiPoints(5); // Monk level 5 = 5 Ki/Focus points
 				state.setKiPointsCurrent(5);
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				expect(state.canUseFocusForExertion()).toBe(true);
+				expect(state.canUseFocusForStamina()).toBe(true);
 			});
 			
-			it("should not allow Monks without combat system to use Focus for Exertion", () => {
+			it("should not allow Monks without combat system to use Focus for Stamina", () => {
 				state.addClass({name: "Monk", source: "PHB", level: 5});
 				state.setKiPoints(5);
 				state.setKiPointsCurrent(5);
 				
-				expect(state.canUseFocusForExertion()).toBe(false);
+				expect(state.canUseFocusForStamina()).toBe(false);
 			});
 			
-			it("should spend Ki/Focus points when using for exertion", () => {
+			it("should spend Ki/Focus points when using for stamina", () => {
 				state.addClass({name: "Monk", source: "TGTT", level: 5});
 				state.addCombatTradition("Unarmored Combat");
 				state.setKiPoints(5);
 				state.setKiPointsCurrent(5);
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				const result = state.useFocusForExertion(2);
+				const result = state.useFocusForStamina(2);
 				
 				expect(result).toBe(true);
 				expect(state.getKiPointsCurrent()).toBe(3); // 5 - 2 = 3
@@ -1810,61 +1810,61 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				state.addCombatTradition("Unarmored Combat");
 				state.setKiPoints(5);
 				state.setKiPointsCurrent(1);
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				const result = state.useFocusForExertion(3);
+				const result = state.useFocusForStamina(3);
 				
 				expect(result).toBe(false);
 				expect(state.getKiPointsCurrent()).toBe(1); // Unchanged
 			});
 			
-			it("should not affect exertion pool when using Focus", () => {
+			it("should not affect stamina pool when using Focus", () => {
 				state.addClass({name: "Monk", source: "TGTT", level: 5});
 				state.addCombatTradition("Unarmored Combat");
 				state.setKiPoints(5);
 				state.setKiPointsCurrent(5);
-				state.ensureExertionInitialized();
-				const initialExertion = state.getExertionCurrent();
+				state.ensureStaminaInitialized();
+				const initialStamina = state.getStaminaCurrent();
 				
-				state.useFocusForExertion(2);
+				state.useFocusForStamina(2);
 				
-				expect(state.getExertionCurrent()).toBe(initialExertion); // Exertion unchanged
+				expect(state.getStaminaCurrent()).toBe(initialStamina); // Stamina unchanged
 			});
 		});
 		
-		describe("Paladin Spell Slot to Exertion Conversion", () => {
+		describe("Paladin Spell Slot to Stamina Conversion", () => {
 			it("should allow TGTT Paladins with combat system to convert spell slots", () => {
 				state.addClass({name: "Paladin", source: "TGTT", level: 5});
 				state.addCombatTradition("Sanguine Knot");
 				state.calculateSpellSlots();
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				expect(state.canConvertSpellSlotToExertion()).toBe(true);
+				expect(state.canConvertSpellSlotToStamina()).toBe(true);
 			});
 			
 			it("should not allow PHB Paladins to convert spell slots", () => {
 				state.addClass({name: "Paladin", source: "PHB", level: 5});
 				state.addCombatTradition("Sanguine Knot");
 				state.calculateSpellSlots();
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				expect(state.canConvertSpellSlotToExertion()).toBe(false);
+				expect(state.canConvertSpellSlotToStamina()).toBe(false);
 			});
 			
-			it("should convert spell slot to exertion (1 + slot level)", () => {
+			it("should convert spell slot to stamina (1 + slot level)", () => {
 				state.addClass({name: "Paladin", source: "TGTT", level: 5});
 				state.addCombatTradition("Sanguine Knot");
 				state.calculateSpellSlots();
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				// Spend all exertion first
-				state.setExertionCurrent(0);
+				// Spend all stamina first
+				state.setStaminaCurrent(0);
 				
-				// Level 2 slot should give 1 + 2 = 3 exertion
-				const result = state.convertSpellSlotToExertion(2);
+				// Level 2 slot should give 1 + 2 = 3 stamina
+				const result = state.convertSpellSlotToStamina(2);
 				
 				expect(result).toBe(true);
-				expect(state.getExertionCurrent()).toBe(3);
+				expect(state.getStaminaCurrent()).toBe(3);
 				// Slot 2 should be reduced
 				expect(state.getSpellSlotsCurrent(2)).toBe(state.getSpellSlotsMax(2) - 1);
 			});
@@ -1873,55 +1873,55 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				state.addClass({name: "Paladin", source: "TGTT", level: 5});
 				state.addCombatTradition("Sanguine Knot");
 				state.calculateSpellSlots();
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
 				// Use all level 2 slots
 				while (state.getSpellSlotsCurrent(2) > 0) {
 					state.useSpellSlot(2);
 				}
 				
-				const result = state.convertSpellSlotToExertion(2);
+				const result = state.convertSpellSlotToStamina(2);
 				
 				expect(result).toBe(false);
 			});
 			
-			it("should cap exertion at max when converting", () => {
+			it("should cap stamina at max when converting", () => {
 				state.addClass({name: "Paladin", source: "TGTT", level: 9}); // Higher level for 3rd level slots
 				state.addCombatTradition("Sanguine Knot");
 				state.calculateSpellSlots();
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				// Set current exertion to max - 1
-				const max = state.getExertionMax();
-				state.setExertionCurrent(max - 1);
+				// Set current stamina to max - 1
+				const max = state.getStaminaMax();
+				state.setStaminaCurrent(max - 1);
 				
-				// Convert a level 3 slot which would give 4 exertion
-				state.convertSpellSlotToExertion(3);
+				// Convert a level 3 slot which would give 4 stamina
+				state.convertSpellSlotToStamina(3);
 				
 				// Should be capped at max
-				expect(state.getExertionCurrent()).toBe(max);
+				expect(state.getStaminaCurrent()).toBe(max);
 			});
 			
-			it("should calculate correct exertion from spell slot", () => {
-				expect(state.getExertionFromSpellSlot(1)).toBe(2); // 1 + 1
-				expect(state.getExertionFromSpellSlot(2)).toBe(3); // 1 + 2
-				expect(state.getExertionFromSpellSlot(3)).toBe(4); // 1 + 3
-				expect(state.getExertionFromSpellSlot(5)).toBe(6); // 1 + 5
+			it("should calculate correct stamina from spell slot", () => {
+				expect(state.getStaminaFromSpellSlot(1)).toBe(2); // 1 + 1
+				expect(state.getStaminaFromSpellSlot(2)).toBe(3); // 1 + 2
+				expect(state.getStaminaFromSpellSlot(3)).toBe(4); // 1 + 3
+				expect(state.getStaminaFromSpellSlot(5)).toBe(6); // 1 + 5
 			});
 		});
 		
-		describe("Exertion Resources API", () => {
-			it("should return all exertion resources for UI", () => {
+		describe("Stamina Resources API", () => {
+			it("should return all stamina resources for UI", () => {
 				state.addClass({name: "Monk", source: "TGTT", level: 5});
 				state.addCombatTradition("Unarmored Combat");
 				state.setKiPoints(5);
 				state.setKiPointsCurrent(5);
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				const resources = state.getExertionResources();
+				const resources = state.getStaminaResources();
 				
-				expect(resources.exertion.available).toBe(true);
-				expect(resources.exertion.max).toBe(6); // 2 × prof bonus
+				expect(resources.stamina.available).toBe(true);
+				expect(resources.stamina.max).toBe(6); // 2 × prof bonus
 				expect(resources.focus.available).toBe(true);
 				expect(resources.focus.current).toBe(5);
 				expect(resources.spellSlots.available).toBe(false); // Monks can't convert
@@ -1931,13 +1931,13 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				state.addClass({name: "Paladin", source: "TGTT", level: 5});
 				state.addCombatTradition("Sanguine Knot");
 				state.calculateSpellSlots();
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				
-				const resources = state.getExertionResources();
+				const resources = state.getStaminaResources();
 				
 				expect(resources.spellSlots.available).toBe(true);
 				expect(resources.spellSlots.slots.length).toBeGreaterThan(0);
-				expect(resources.spellSlots.slots[0].exertionValue).toBeGreaterThan(0);
+				expect(resources.spellSlots.slots[0].staminaValue).toBeGreaterThan(0);
 			});
 		});
 		
@@ -1949,13 +1949,13 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(state.usesCombatSystem()).toBe(false);
 			});
 			
-			it("should not have exertion for non-TGTT characters", () => {
+			it("should not have stamina for non-TGTT characters", () => {
 				state.addClass({name: "Fighter", source: "XPHB", level: 5});
 				state.applyClassFeatureEffects();
 				
-				// Without combat traditions, ensureExertionInitialized should do nothing
-				state.ensureExertionInitialized();
-				expect(state.getExertionMax()).toBe(0);
+				// Without combat traditions, ensureStaminaInitialized should do nothing
+				state.ensureStaminaInitialized();
+				expect(state.getStaminaMax()).toBe(0);
 			});
 		});
 
@@ -2031,32 +2031,32 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				state.addCombatTradition("AM");
 			});
 
-			it("should parse exertion cost from 'Bonus Action (1 Exertion Point)'", () => {
+			it("should parse stamina cost from 'Bonus Action (1 Stamina Point)'", () => {
 				state.addFeature({
 					name: "Heavy Stance",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). As a bonus action, you enter a heavily-braced stance. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). As a bonus action, you enter a heavily-braced stance. This stance lasts until you end it."
 				});
 
 				const methods = state.getCombatMethods();
 				const heavy = methods.find(m => m.name === "Heavy Stance");
-				expect(heavy.exertionCost).toBe(1);
+				expect(heavy.staminaCost).toBe(1);
 			});
 
-			it("should parse exertion cost from 'Action (3 Exertion Points)'", () => {
+			it("should parse stamina cost from 'Action (3 Stamina Points)'", () => {
 				state.addFeature({
 					name: "Unbreakable",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:3AM", "CTM:AM", "CTM"],
-					description: "Reaction (3 Exertion Points). At the edge of death, you cling firmly to life."
+					description: "Reaction (3 Stamina Points). At the edge of death, you cling firmly to life."
 				});
 
 				const methods = state.getCombatMethods();
 				const unbreakable = methods.find(m => m.name === "Unbreakable");
-				expect(unbreakable.exertionCost).toBe(3);
+				expect(unbreakable.staminaCost).toBe(3);
 			});
 
 			it("should parse action type 'Bonus Action'", () => {
@@ -2065,7 +2065,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). You adopt a loose stance. Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). You adopt a loose stance. Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 
 				const methods = state.getCombatMethods();
@@ -2079,7 +2079,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:3AM", "CTM:AM", "CTM"],
-					description: "Reaction (3 Exertion Points). At the edge of death, you cling firmly to life."
+					description: "Reaction (3 Stamina Points). At the edge of death, you cling firmly to life."
 				});
 
 				const methods = state.getCombatMethods();
@@ -2093,7 +2093,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Action (2 Exertion Points). When you hit, the creature makes a Strength saving throw or is knocked prone."
+					description: "Action (2 Stamina Points). When you hit, the creature makes a Strength saving throw or is knocked prone."
 				});
 
 				const methods = state.getCombatMethods();
@@ -2107,7 +2107,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1EB", "CTM:EB", "CTM"],
-					description: "Bonus Action (1 Exertion Point). It must make a Wisdom save or be unable to gain advantage."
+					description: "Bonus Action (1 Stamina Point). It must make a Wisdom save or be unable to gain advantage."
 				});
 
 				const methods = state.getCombatMethods();
@@ -2121,7 +2121,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). You enter a heavily-braced stance. This stance lasts until you are incapacitated."
+					description: "Bonus Action (1 Stamina Point). You enter a heavily-braced stance. This stance lasts until you are incapacitated."
 				});
 
 				const methods = state.getCombatMethods();
@@ -2135,7 +2135,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:3AM", "CTM:AM", "CTM"],
-					description: "Reaction (3 Exertion Points). At the edge of death, you cling firmly to life."
+					description: "Reaction (3 Stamina Points). At the edge of death, you cling firmly to life."
 				});
 
 				const methods = state.getCombatMethods();
@@ -2157,13 +2157,13 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). This stance lasts until you end it."
 				});
 
 				const methods = state.getCombatMethods();
 				expect(methods.length).toBe(1);
 				expect(methods[0]).toHaveProperty("name", "Heavy Stance");
-				expect(methods[0]).toHaveProperty("exertionCost");
+				expect(methods[0]).toHaveProperty("staminaCost");
 				expect(methods[0]).toHaveProperty("actionType");
 				expect(methods[0]).toHaveProperty("isStance");
 				expect(methods[0]).toHaveProperty("degree");
@@ -2194,7 +2194,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). This stance lasts until you end it."
 				});
 
 				const methods = state.getCombatMethods();
@@ -2210,13 +2210,13 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 
 				const [method] = state.getCombatMethods();
 				expect(method.name).toBe("Swift Stance");
 				expect(method.source).toBe("TGTT");
-				expect(method.exertionCost).toBe(1);
+				expect(method.staminaCost).toBe(1);
 				expect(method.actionType).toBe("Bonus Action");
 				expect(method.isStance).toBe(true);
 				expect(method.degree).toBe(1);
@@ -2284,7 +2284,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 5});
 				state.setSpeed("walk", 30);
 				state.addCombatTradition("RC");
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 			});
 
 			it("should NOT apply stance effects when feature is added (only added, not activated)", () => {
@@ -2294,7 +2294,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 
 				const calcs = state.getFeatureCalculations();
@@ -2311,7 +2311,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 
 				// Before activation - no effects
@@ -2334,7 +2334,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 
 				// Activate
@@ -2355,7 +2355,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
 				});
 
 				// Before activation - no bonus
@@ -2377,7 +2377,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1TI", "CTM:TI", "CTM"],
-					description: "Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
 				});
 
 				// Combat method effects should NOT appear as named modifiers
@@ -2400,14 +2400,14 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 				state.addFeature({
 					name: "Heavy Stance",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
 				});
 
 				// Neither activated - no effects
@@ -2430,7 +2430,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 
 				state.activateStance("Swift Stance");
@@ -2455,7 +2455,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 5});
 				state.addCombatTradition("AM");
 				state.addCombatTradition("RC");
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 
 				// Add both stances
 				state.addFeature({
@@ -2463,14 +2463,14 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
 				});
 				state.addFeature({
 					name: "Swift Stance",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 			});
 
@@ -2523,7 +2523,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Action (2 Exertion Points). When you hit, the creature makes a Strength saving throw or is knocked prone."
+					description: "Action (2 Stamina Points). When you hit, the creature makes a Strength saving throw or is knocked prone."
 				});
 
 				const result = state.activateStance("Lean Into It");
@@ -2535,58 +2535,58 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 		// =====================================================================
 		// EXERTION DEDUCTION TESTS
 		// =====================================================================
-		describe("Exertion Deduction on Method Use", () => {
+		describe("Stamina Deduction on Method Use", () => {
 			beforeEach(() => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 5});
 				state.addCombatTradition("AM");
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 			});
 
-			it("should spend 1 exertion when using Heavy Stance", () => {
+			it("should spend 1 stamina when using Heavy Stance", () => {
 				state.addFeature({
 					name: "Heavy Stance",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). This stance lasts until you end it."
 				});
 
-				const initialExertion = state.getExertionCurrent();
+				const initialStamina = state.getStaminaCurrent();
 				state.useCombatMethod("Heavy Stance");
 
-				expect(state.getExertionCurrent()).toBe(initialExertion - 1);
+				expect(state.getStaminaCurrent()).toBe(initialStamina - 1);
 			});
 
-			it("should spend 2 exertion when using Lean Into It", () => {
+			it("should spend 2 stamina when using Lean Into It", () => {
 				state.addFeature({
 					name: "Lean Into It",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Action (2 Exertion Points). When you hit, knock prone."
+					description: "Action (2 Stamina Points). When you hit, knock prone."
 				});
 
-				const initialExertion = state.getExertionCurrent();
+				const initialStamina = state.getStaminaCurrent();
 				state.useCombatMethod("Lean Into It");
 
-				expect(state.getExertionCurrent()).toBe(initialExertion - 2);
+				expect(state.getStaminaCurrent()).toBe(initialStamina - 2);
 			});
 
-			it("should fail if insufficient exertion", () => {
+			it("should fail if insufficient stamina", () => {
 				state.addFeature({
 					name: "Unbreakable",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:3AM", "CTM:AM", "CTM"],
-					description: "Reaction (3 Exertion Points). Succeed on death save."
+					description: "Reaction (3 Stamina Points). Succeed on death save."
 				});
 
-				// Set exertion to 2 (need 3)
-				state.setExertionCurrent(2);
+				// Set stamina to 2 (need 3)
+				state.setStaminaCurrent(2);
 				const result = state.useCombatMethod("Unbreakable");
 
 				expect(result).toBe(false);
-				expect(state.getExertionCurrent()).toBe(2); // Unchanged
+				expect(state.getStaminaCurrent()).toBe(2); // Unchanged
 			});
 
 			it("should activate stance when using a stance method", () => {
@@ -2595,7 +2595,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). This stance lasts until you end it."
 				});
 
 				state.useCombatMethod("Heavy Stance");
@@ -2616,7 +2616,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				state.setAbilityBase("con", 14);
 				state.setSpeed("walk", 30);
 				state.addCombatTradition("AM");
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 
 				// Verify degree access
 				expect(state.getMethodDegreeAccess()).toBe(3); // L8 Fighter = 3rd degree
@@ -2627,7 +2627,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
 				});
 
 				// Before activation
@@ -2644,7 +2644,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(calcs.combatMethodDc).toBe(14); // 8 + 3 (prof) + 3 (STR)
 			});
 
-			it("should handle Monk using Focus instead of Exertion for method", () => {
+			it("should handle Monk using Focus instead of Stamina for method", () => {
 				state.addClass({name: "Monk", source: "TGTT", level: 5});
 				state.setAbilityBase("str", 10);
 				state.setAbilityBase("dex", 16);
@@ -2653,15 +2653,15 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				state.addCombatTradition("RC");
 				state.setKiPoints(5);
 				state.setKiPointsCurrent(5);
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 
 				// Verify Monk DC bonus
 				const calcs = state.getFeatureCalculations();
 				expect(calcs.combatMethodDc).toBe(16); // 9 + 3 (prof) + 4 (WIS)
 				expect(calcs.monkCombatMethodDcBonus).toBe(true);
 
-				// Monk can use Focus for Exertion
-				expect(state.canUseFocusForExertion()).toBe(true);
+				// Monk can use Focus for Stamina
+				expect(state.canUseFocusForStamina()).toBe(true);
 
 				// Add Swift Stance
 				state.addFeature({
@@ -2669,11 +2669,11 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 
 				// Use Focus to pay for stance
-				state.useFocusForExertion(1);
+				state.useFocusForStamina(1);
 				expect(state.getKiPointsCurrent()).toBe(4);
 			});
 
@@ -2681,21 +2681,21 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 5});
 				state.addCombatTradition("AM");
 				state.addCombatTradition("RC");
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 
 				state.addFeature({
 					name: "Heavy Stance",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it."
 				});
 				state.addFeature({
 					name: "Swift Stance",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (1 Exertion Point). Your Speed increases by 5 feet. This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). Your Speed increases by 5 feet. This stance lasts until you end it."
 				});
 
 				// Switch multiple times
@@ -2724,14 +2724,14 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Bonus Action (1 Exertion Point). This stance lasts until you end it."
+					description: "Bonus Action (1 Stamina Point). This stance lasts until you end it."
 				});
 				state.addFeature({
 					name: "Lean Into It",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Action (2 Exertion Points). Knock prone on hit."
+					description: "Action (2 Stamina Points). Knock prone on hit."
 				});
 
 				expect(state.isMethodStance("Heavy Stance")).toBe(true);
@@ -2767,7 +2767,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:2UW", "CTM:UW", "CTM"],
-					description: "Bonus Action (3 Exertion Points). You quickly draw and strike with a weapon in the blink of an eye. Choose a creature within your reach. You draw a melee weapon and use it to make an attack against that creature.",
+					description: "Bonus Action (3 Stamina Points). You quickly draw and strike with a weapon in the blink of an eye. Choose a creature within your reach. You draw a melee weapon and use it to make an attack against that creature.",
 				});
 
 				const activatables = state.getActivatableFeatures();
@@ -2778,27 +2778,27 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 			it("should route to combat action via detectActivatableFeature interactionMode", () => {
 				const result = CharacterSheetState.detectActivatableFeature({
 					name: "Instant Strike",
-					description: "Bonus Action (3 Exertion Points). You quickly draw and strike with a weapon.",
+					description: "Bonus Action (3 Stamina Points). You quickly draw and strike with a weapon.",
 				});
 				expect(result).toBeDefined();
 				expect(result.interactionMode).toBe("combat");
-				expect(result.exertionCost).toBe(3);
+				expect(result.staminaCost).toBe(3);
 			});
 
-			it("should parse as Bonus Action with 3 exertion via getCombatMethods", () => {
+			it("should parse as Bonus Action with 3 stamina via getCombatMethods", () => {
 				state.addFeature({
 					name: "Instant Strike",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:2UW", "CTM:UW", "CTM"],
-					description: "Bonus Action (3 Exertion Points). You quickly draw and strike with a weapon in the blink of an eye.",
+					description: "Bonus Action (3 Stamina Points). You quickly draw and strike with a weapon in the blink of an eye.",
 				});
 
 				const methods = state.getCombatMethods();
 				const instant = methods.find(m => m.name === "Instant Strike");
 				expect(instant).toBeDefined();
 				expect(instant.actionType).toBe("Bonus Action");
-				expect(instant.exertionCost).toBe(3);
+				expect(instant.staminaCost).toBe(3);
 				expect(instant.degree).toBe(2);
 				expect(instant.tradition).toBe("UW");
 			});
@@ -2824,7 +2824,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:4RC", "CTM:RC", "CTM"],
-					description: "Action (3 Exertion Points). You use your weapon to make a melee weapon attack against any number of creatures within 5 feet of you. On the first hit you deal normal damage. Each subsequent hit deals an additional 1d6 damage.",
+					description: "Action (3 Stamina Points). You use your weapon to make a melee weapon attack against any number of creatures within 5 feet of you. On the first hit you deal normal damage. Each subsequent hit deals an additional 1d6 damage.",
 				});
 
 				const attacks = state.getAttacks();
@@ -2841,7 +2841,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:4RC", "CTM:RC", "CTM"],
-					description: "Action (3 Exertion Points). You use your weapon to make a melee weapon attack against any number of creatures within 5 feet of you. Each subsequent hit after the first deals an additional 1d6 damage.",
+					description: "Action (3 Stamina Points). You use your weapon to make a melee weapon attack against any number of creatures within 5 feet of you. Each subsequent hit after the first deals an additional 1d6 damage.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -2857,7 +2857,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:4RC", "CTM:RC", "CTM"],
-					description: "Action (3 Exertion Points). You use your weapon to make a melee weapon attack against any number of creatures within 5 feet of you. Each subsequent hit after the first deals an additional 1d6 damage.",
+					description: "Action (3 Stamina Points). You use your weapon to make a melee weapon attack against any number of creatures within 5 feet of you. Each subsequent hit after the first deals an additional 1d6 damage.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -2867,13 +2867,13 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(whirlpool.bonusDamage.condition).toBe("per subsequent hit");
 			});
 
-			it("should parse as 4th degree Rapid Current with Action and 3 exertion", () => {
+			it("should parse as 4th degree Rapid Current with Action and 3 stamina", () => {
 				state.addFeature({
 					name: "Whirlpool Strike",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:4RC", "CTM:RC", "CTM"],
-					description: "Action (3 Exertion Points). You use your weapon to make a melee weapon attack against any number of creatures within 5 feet.",
+					description: "Action (3 Stamina Points). You use your weapon to make a melee weapon attack against any number of creatures within 5 feet.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -2881,7 +2881,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(whirlpool.degree).toBe(4);
 				expect(whirlpool.tradition).toBe("RC");
 				expect(whirlpool.actionType).toBe("Action");
-				expect(whirlpool.exertionCost).toBe(3);
+				expect(whirlpool.staminaCost).toBe(3);
 			});
 		});
 
@@ -2897,7 +2897,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:3RC", "CTM:RC", "CTM"],
-					description: "Bonus Action (2 Exertion Points). You make a melee attack against any number of creatures within 5 feet, up to your proficiency bonus.",
+					description: "Bonus Action (2 Stamina Points). You make a melee attack against any number of creatures within 5 feet, up to your proficiency bonus.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -2907,7 +2907,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(whirlwind.maxTargets).toBe("proficiency");
 				expect(whirlwind.degree).toBe(3);
 				expect(whirlwind.actionType).toBe("Bonus Action");
-				expect(whirlwind.exertionCost).toBe(2);
+				expect(whirlwind.staminaCost).toBe(2);
 			});
 
 			it("should classify Whirlwind Strike as 'combat' via override", () => {
@@ -2936,7 +2936,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:4UW", "CTM:UW", "CTM"],
-					description: "Action (3 Exertion Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet. You have advantage on attack rolls made using this method. If both attack rolls hit, you deal an additional weapon damage die.",
+					description: "Action (3 Stamina Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet. You have advantage on attack rolls made using this method. If both attack rolls hit, you deal an additional weapon damage die.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -2951,7 +2951,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:4UW", "CTM:UW", "CTM"],
-					description: "Action (3 Exertion Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet. You have advantage on attack rolls made using this method. If both attack rolls hit, you deal an additional weapon damage die.",
+					description: "Action (3 Stamina Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet. You have advantage on attack rolls made using this method. If both attack rolls hit, you deal an additional weapon damage die.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -2965,7 +2965,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:4UW", "CTM:UW", "CTM"],
-					description: "Action (3 Exertion Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet. You have advantage on attack rolls made using this method. If both attack rolls hit, you deal an additional weapon damage die.",
+					description: "Action (3 Stamina Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet. You have advantage on attack rolls made using this method. If both attack rolls hit, you deal an additional weapon damage die.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -2975,13 +2975,13 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(wind.bonusDamage.condition).toBe("both attacks hit");
 			});
 
-			it("should parse as 4th degree UW with Action and 3 exertion", () => {
+			it("should parse as 4th degree UW with Action and 3 stamina", () => {
 				state.addFeature({
 					name: "Wind Strike",
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:4UW", "CTM:UW", "CTM"],
-					description: "Action (3 Exertion Points). You strike a foe from a distance with a normal range of 20 feet and long range of 60 feet.",
+					description: "Action (3 Stamina Points). You strike a foe from a distance with a normal range of 20 feet and long range of 60 feet.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -2989,7 +2989,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(wind.degree).toBe(4);
 				expect(wind.tradition).toBe("UW");
 				expect(wind.actionType).toBe("Action");
-				expect(wind.exertionCost).toBe(3);
+				expect(wind.staminaCost).toBe(3);
 			});
 
 			it("should NOT be added as a natural weapon attack", () => {
@@ -2998,7 +2998,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:4UW", "CTM:UW", "CTM"],
-					description: "Action (3 Exertion Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet.",
+					description: "Action (3 Stamina Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet.",
 				});
 
 				const attacks = state.getAttacks();
@@ -3024,7 +3024,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:2AM", "CTM:AM", "CTM"],
-					description: "Action (2 Exertion Points). Make a melee weapon attack. On a hit deal 2d6 slashing damage.",
+					description: "Action (2 Stamina Points). Make a melee weapon attack. On a hit deal 2d6 slashing damage.",
 				});
 
 				const attacks = state.getAttacks();
@@ -3108,7 +3108,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:3AM", "CTM:AM", "CTM"],
-					description: "Action (2 Exertion Points). Make a melee attack against any number of creatures within 10 feet.",
+					description: "Action (2 Stamina Points). Make a melee attack against any number of creatures within 10 feet.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -3122,7 +3122,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Action (1 Exertion Point). Make a melee weapon attack against a creature within reach.",
+					description: "Action (1 Stamina Point). Make a melee weapon attack against a creature within reach.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -3135,7 +3135,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Action (1 Exertion Point). Make a melee weapon attack against a creature.",
+					description: "Action (1 Stamina Point). Make a melee weapon attack against a creature.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -3148,7 +3148,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Action (1 Exertion Point). Make a melee weapon attack against a creature.",
+					description: "Action (1 Stamina Point). Make a melee weapon attack against a creature.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -3161,7 +3161,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:1AM", "CTM:AM", "CTM"],
-					description: "Action (1 Exertion Point). Make a melee weapon attack against a creature.",
+					description: "Action (1 Stamina Point). Make a melee weapon attack against a creature.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -3174,7 +3174,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					source: "TGTT",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["CTM:3AM", "CTM:AM", "CTM"],
-					description: "Action (2 Exertion Points). Make a melee attack. On hit, deal an additional 2d8 damage.",
+					description: "Action (2 Stamina Points). Make a melee attack. On hit, deal an additional 2d8 damage.",
 				});
 
 				const methods = state.getCombatMethods();
@@ -3434,26 +3434,26 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				});
 			});
 			
-			describe("Exertion Pool Modifiers", () => {
-				it("should parse extra exertion points", () => {
+			describe("Stamina Pool Modifiers", () => {
+				it("should parse extra stamina points", () => {
 					state.addClass({name: "Fighter", source: "TGTT", level: 5});
 					state.addCombatTradition("Unarmored Combat");
 					
 					state.addFeature({
-						name: "Exertion Enthusiast",
+						name: "Stamina Enthusiast",
 						source: "TGTT",
 						featureType: "Optional Feature",
 						className: "Fighter",
 						level: 1,
-						description: "You gain an additional 2 exertion points."
+						description: "You gain an additional 2 stamina points."
 					});
 					state.applyClassFeatureEffects();
 					
 					// Check that the resource modifier was parsed
 					const modifiers = state.getNamedModifiers();
-					const exertionMod = modifiers.find(m => m.type === "resource:exertion");
-					expect(exertionMod).toBeDefined();
-					expect(exertionMod.value).toBe(2);
+					const staminaMod = modifiers.find(m => m.type === "resource:stamina");
+					expect(staminaMod).toBeDefined();
+					expect(staminaMod.value).toBe(2);
 				});
 			});
 			
@@ -12098,7 +12098,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					featureType: "Optional Feature",
 					className: "Monk",
 					level: 9,
-					description: "As an action, you can spend 4 exertion to teleport up to 500 feet.",
+					description: "As an action, you can spend 4 stamina to teleport up to 500 feet.",
 				});
 				state.applyClassFeatureEffects();
 

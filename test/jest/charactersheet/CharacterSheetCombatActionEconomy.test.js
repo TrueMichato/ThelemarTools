@@ -179,8 +179,8 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 				kiUsed += amount;
 				return true;
 			},
-			canUseFocusForExertion: () => true,
-			useFocusForExertion: (amount) => {
+			canUseFocusForStamina: () => true,
+			useFocusForStamina: (amount) => {
 				if (kiPoints.current < amount) return false;
 				kiPoints.current -= amount;
 				kiUsed += amount;
@@ -220,16 +220,16 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 			expect(combat._parseResourceCost(feature, "focus")).toBe(2);
 		});
 
-		it("should parse exertion cost", () => {
-			const feature = {description: "Spend 1 exertion point to make a weapon attack."};
-			expect(combat._parseResourceCost(feature, "exertion")).toBe(1);
+		it("should parse stamina cost", () => {
+			const feature = {description: "Spend 1 stamina point to make a weapon attack."};
+			expect(combat._parseResourceCost(feature, "stamina")).toBe(1);
 		});
 
 		it("should return 0 when no cost found", () => {
 			const feature = {description: "You gain proficiency in all saving throws."};
 			expect(combat._parseResourceCost(feature, "ki")).toBe(0);
 			expect(combat._parseResourceCost(feature, "focus")).toBe(0);
-			expect(combat._parseResourceCost(feature, "exertion")).toBe(0);
+			expect(combat._parseResourceCost(feature, "stamina")).toBe(0);
 		});
 
 		it("should return 0 for empty description", () => {
@@ -280,11 +280,11 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 			expect(toasts.some(t => t.type === "warning" && t.content.includes("Not enough"))).toBe(true);
 		});
 
-		it("should deduct exertion via focus for monks", async () => {
+		it("should deduct stamina via focus for monks", async () => {
 			const feature = {
 				name: "Instant Strike",
 				source: "TGTT",
-				description: "As a bonus action, spend 1 exertion point to make a melee weapon attack.",
+				description: "As a bonus action, spend 1 stamina point to make a melee weapon attack.",
 			};
 			featureList.push(feature);
 

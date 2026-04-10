@@ -3233,16 +3233,16 @@ describe("Ki/Focus Point — Unified Resource System", () => {
 		expect(resource.max).toBe(5);
 	});
 
-	// --- useFocusForExertion still delegates correctly ---
+	// --- useFocusForStamina still delegates correctly ---
 
-	test("useFocusForExertion delegates to useKiPoint which uses resource", () => {
+	test("useFocusForStamina delegates to useKiPoint which uses resource", () => {
 		state.addClass({name: "Monk", source: "XPHB", level: 5});
 		const classEntry = state.getClasses()[0];
 		CharacterSheetClassUtils.updateClassResources(state, classEntry, 5, {name: "Monk", source: "XPHB"});
 
-		// Need combat system enabled for canUseFocusForExertion
+		// Need combat system enabled for canUseFocusForStamina
 		if (state.usesCombatSystem && state.usesCombatSystem()) {
-			expect(state.useFocusForExertion(2)).toBe(true);
+			expect(state.useFocusForStamina(2)).toBe(true);
 			expect(state.getKiPointsCurrent()).toBe(3);
 
 			const resource = state.getResource("Focus Points");

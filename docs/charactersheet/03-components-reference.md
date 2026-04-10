@@ -376,9 +376,9 @@ _resetDeathSaves()
 _onAddCondition()
 renderCombatConditions()
 
-// Combat Methods (TGTT exertion system)
+// Combat Methods (TGTT stamina system)
 _useMethod(methodId)
-_modifyExertion(delta)
+_modifyStamina(delta)
 ```
 
 ### Attack Data Structure

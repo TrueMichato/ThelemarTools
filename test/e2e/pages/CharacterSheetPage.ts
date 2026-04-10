@@ -272,7 +272,7 @@ export class CharacterSheetPage {
 	// ========== TGTT — RESOURCE TRACKERS ==========
 
 	/**
-	 * Get the current/max value of a named resource (e.g. "Sorcery Points", "Exertion").
+	 * Get the current/max value of a named resource (e.g. "Sorcery Points", "Stamina").
 	 */
 	async getResource (resourceName: string): Promise<{current: number; max: number}> {
 		const container = this.page

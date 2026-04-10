@@ -871,7 +871,7 @@ class CharacterSheetNpcExporter {
 
 		const byCost = new Map();
 		methods.forEach(m => {
-			const key = Number(m.exertionCost) || 0;
+			const key = Number(m.staminaCost) || 0;
 			if (!byCost.has(key)) byCost.set(key, []);
 			byCost.get(key).push(m);
 		});
@@ -894,10 +894,10 @@ class CharacterSheetNpcExporter {
 			entries.push(`{@b Cost ${cost}:} ${methodsAtCost.join(", ")}.`);
 		});
 
-		const exertionMax = state.getExertionMax?.() || 0;
+		const staminaMax = state.getStaminaMax?.() || 0;
 		const degreeAccess = state.getMethodDegreeAccess?.() || 0;
 
-		entries.unshift(`${npcName} uses combat methods fueled by exertion (pool ${exertionMax}; method degree access ${degreeAccess}; save {@dc ${methodDc}}).`);
+		entries.unshift(`${npcName} uses combat methods fueled by stamina (pool ${staminaMax}; method degree access ${degreeAccess}; save {@dc ${methodDc}}).`);
 
 		return {
 			name: "Combat Methods",

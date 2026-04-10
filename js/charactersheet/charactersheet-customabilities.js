@@ -800,9 +800,9 @@ class CharacterSheetCustomAbilities {
 
 		// Build resource pool options for linking
 		const resources = state.getResources?.() || [];
-		const hasExertion = state.usesCombatSystem?.() && (state.getExertionMax?.() || 0) > 0;
+		const hasStamina = state.usesCombatSystem?.() && (state.getStaminaMax?.() || 0) > 0;
 		const resourceOptionsHtml = [
-			hasExertion ? `<option value="exertion" ${existingAbility?.resourceSource?.resourceId === "exertion" ? "selected" : ""}>Exertion</option>` : "",
+			hasStamina ? `<option value="stamina" ${existingAbility?.resourceSource?.resourceId === "stamina" ? "selected" : ""}>Stamina</option>` : "",
 			...resources.map(r => `<option value="${r.id}" ${existingAbility?.resourceSource?.resourceId === r.id ? "selected" : ""}>${r.name}</option>`),
 		].filter(Boolean).join("");
 

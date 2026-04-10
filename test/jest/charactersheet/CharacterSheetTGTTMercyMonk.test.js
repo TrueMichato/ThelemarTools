@@ -4,7 +4,7 @@
  * Covers:
  * - Monk Specialties at 2,4,6,8,10,12,14,16,18,20
  * - Combat Methods at L2 (2 traditions + Sanguine Knot from subclass at L3)
- * - Focus→Exertion conversion (Monk special rule)
+ * - Focus→Stamina conversion (Monk special rule)
  * - WIS-based method DC with +1 Monk bonus
  * - Unhindered Flurry at L8 (TGTT)
  * - Way of Mercy subclass features:
@@ -84,16 +84,16 @@ describe("TGTT Way of Mercy Monk", () => {
 			makeMercyMonk(5);
 			state.addCombatTradition("Unarmored Combat");
 			state.addCombatTradition("SK"); // Sanguine Knot (from Mercy subclass at L3)
-			state.ensureExertionInitialized();
+			state.ensureStaminaInitialized();
 		});
 
 		it("should use the combat system", () => {
 			expect(state.usesCombatSystem()).toBe(true);
 		});
 
-		it("should have exertion pool = 2 × proficiency bonus", () => {
-			// Level 5 → prof +3 → exertion = 6
-			expect(state.getExertionMax()).toBe(6);
+		it("should have stamina pool = 2 × proficiency bonus", () => {
+			// Level 5 → prof +3 → stamina = 6
+			expect(state.getStaminaMax()).toBe(6);
 		});
 
 		it("should track Sanguine Knot tradition from Mercy subclass", () => {
@@ -101,40 +101,40 @@ describe("TGTT Way of Mercy Monk", () => {
 			expect(traditions).toContain("SK");
 		});
 
-		it("should allow Focus→Exertion conversion for TGTT Monks", () => {
+		it("should allow Focus→Stamina conversion for TGTT Monks", () => {
 			state.setKiPoints(5);
 			state.setKiPointsCurrent(5);
-			expect(state.canUseFocusForExertion()).toBe(true);
+			expect(state.canUseFocusForStamina()).toBe(true);
 		});
 
-		it("should spend Ki when converting Focus to Exertion", () => {
+		it("should spend Ki when converting Focus to Stamina", () => {
 			state.setKiPoints(5);
 			state.setKiPointsCurrent(5);
 
-			const result = state.useFocusForExertion(2);
+			const result = state.useFocusForStamina(2);
 			expect(result).toBe(true);
 			expect(state.getKiPointsCurrent()).toBe(3);
 		});
 
-		it("should not affect exertion pool when using Focus for Exertion", () => {
+		it("should not affect stamina pool when using Focus for Stamina", () => {
 			state.setKiPoints(5);
 			state.setKiPointsCurrent(5);
-			const initialExertion = state.getExertionCurrent();
+			const initialStamina = state.getStaminaCurrent();
 
-			state.useFocusForExertion(2);
-			expect(state.getExertionCurrent()).toBe(initialExertion);
+			state.useFocusForStamina(2);
+			expect(state.getStaminaCurrent()).toBe(initialStamina);
 		});
 
-		it("should fail Focus→Exertion if insufficient Ki", () => {
+		it("should fail Focus→Stamina if insufficient Ki", () => {
 			state.setKiPoints(5);
 			state.setKiPointsCurrent(1);
 
-			const result = state.useFocusForExertion(3);
+			const result = state.useFocusForStamina(3);
 			expect(result).toBe(false);
 			expect(state.getKiPointsCurrent()).toBe(1);
 		});
 
-		it("should scale exertion across levels", () => {
+		it("should scale stamina across levels", () => {
 			const cases = [
 				{level: 2, expected: 4},   // prof +2
 				{level: 5, expected: 6},   // prof +3
@@ -147,8 +147,8 @@ describe("TGTT Way of Mercy Monk", () => {
 				const s = new CharacterSheetState();
 				s.addClass({name: "Monk", source: "TGTT", level});
 				s.addCombatTradition("SK");
-				s.ensureExertionInitialized();
-				expect(s.getExertionMax()).toBe(expected);
+				s.ensureStaminaInitialized();
+				expect(s.getStaminaMax()).toBe(expected);
 			}
 		});
 	});
@@ -531,33 +531,33 @@ describe("TGTT Way of Mercy Monk", () => {
 	// =========================================================================
 	// FOCUS→EXERTION CONVERSION (Phase 4 — Verification)
 	// =========================================================================
-	describe("Focus→Exertion Conversion", () => {
-		it("should allow Focus→Exertion for Monk", () => {
+	describe("Focus→Stamina Conversion", () => {
+		it("should allow Focus→Stamina for Monk", () => {
 			makeMercyMonk(5);
 			state.addCombatTradition("SK");
-			state.ensureExertionInitialized();
+			state.ensureStaminaInitialized();
 			state.setKiPoints(5);
 			state.setKiPointsCurrent(5);
-			expect(state.canUseFocusForExertion()).toBe(true);
+			expect(state.canUseFocusForStamina()).toBe(true);
 		});
 
-		it("should deduct ki when converting Focus→Exertion", () => {
+		it("should deduct ki when converting Focus→Stamina", () => {
 			makeMercyMonk(5);
 			state.addCombatTradition("SK");
-			state.ensureExertionInitialized();
+			state.ensureStaminaInitialized();
 			state.setKiPoints(5);
 			state.setKiPointsCurrent(5);
-			state.useFocusForExertion(2);
+			state.useFocusForStamina(2);
 			expect(state.getKiPointsCurrent()).toBe(3);
 		});
 
 		it("should fail conversion if no ki points remain", () => {
 			makeMercyMonk(5);
 			state.addCombatTradition("SK");
-			state.ensureExertionInitialized();
+			state.ensureStaminaInitialized();
 			state.setKiPoints(5);
 			state.setKiPointsCurrent(0);
-			expect(state.useFocusForExertion(1)).toBe(false);
+			expect(state.useFocusForStamina(1)).toBe(false);
 		});
 	});
 
@@ -593,17 +593,17 @@ describe("TGTT Way of Mercy Monk", () => {
 	// =========================================================================
 	// EXERTION RESOURCES API
 	// =========================================================================
-	describe("Exertion Resources API", () => {
+	describe("Stamina Resources API", () => {
 		it("should return correct resource summary for Mercy Monk", () => {
 			makeMercyMonk(5);
 			state.addCombatTradition("SK");
 			state.setKiPoints(5);
 			state.setKiPointsCurrent(5);
-			state.ensureExertionInitialized();
+			state.ensureStaminaInitialized();
 
-			const res = state.getExertionResources();
-			expect(res.exertion.available).toBe(true);
-			expect(res.exertion.max).toBe(6); // 2 × prof
+			const res = state.getStaminaResources();
+			expect(res.stamina.available).toBe(true);
+			expect(res.stamina.max).toBe(6); // 2 × prof
 			expect(res.focus.available).toBe(true);
 			expect(res.focus.current).toBe(5);
 			expect(res.spellSlots.available).toBe(false); // Monks can't convert

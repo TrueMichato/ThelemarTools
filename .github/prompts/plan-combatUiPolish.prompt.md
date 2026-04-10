@@ -80,7 +80,7 @@ Complete 11 partial bugs + 1 open bug from the character sheet plan. The back-en
 
 ### C4: Wall Walk *(medium)*
 - **Current**: Calculation flags exist, classified as passive
-- **Add**: Reclassify to dual — passive component (walk on walls/ceilings) + combat action component (cast Spider Climb as bonus action, 1 exertion). Add the combat action to overrides for the spider climb sub-ability. In getFeatureCalculations, populate `combatActionEffects: {applyCondition: {name: "Spider Climb (self)", duration: "concentration, up to 10 minutes"}}`.
+- **Add**: Reclassify to dual — passive component (walk on walls/ceilings) + combat action component (cast Spider Climb as bonus action, 1 stamina). Add the combat action to overrides for the spider climb sub-ability. In getFeatureCalculations, populate `combatActionEffects: {applyCondition: {name: "Spider Climb (self)", duration: "concentration, up to 10 minutes"}}`.
 - **Files**: charactersheet-state.js (overrides, feature calc), charactersheet-combat.js (renders via standard pipeline)
 
 ### C5: Agile Acrobat *(medium)*
@@ -94,13 +94,13 @@ Complete 11 partial bugs + 1 open bug from the character sheet plan. The back-en
 - **Files**: charactersheet-combat.js (wire choice modal into Flurry of Blows Use flow)
 
 ### C7: Instant Step *(medium)*
-- **Current**: Combat action classification + flags (hasInstantStep, instantStepRange=60, instantStepCost=4 exertion)
-- **Add**: Combat action modal shows "Teleport up to 60 ft to unoccupied space you can see. Invisible until start of next turn." Use button: deducts exertion, calls `state.addCondition({name: "invisible", duration: "start of next turn"})`, shows toast.
+- **Current**: Combat action classification + flags (hasInstantStep, instantStepRange=60, instantStepCost=4 stamina)
+- **Add**: Combat action modal shows "Teleport up to 60 ft to unoccupied space you can see. Invisible until start of next turn." Use button: deducts stamina, calls `state.addCondition({name: "invisible", duration: "start of next turn"})`, shows toast.
 - **Files**: charactersheet-combat.js (renders via standard pipeline), charactersheet-state.js (populate combatActionEffects)
 
 ### C8: Religious Training *(small-medium)*
 - **Current**: Combat action classification done
-- **Add**: Combat action modal shows exertion cost spinner (1-5 points), "Spend exertion to gain temporary divine favor" description. Use button deducts chosen amount.
+- **Add**: Combat action modal shows stamina cost spinner (1-5 points), "Spend stamina to gain temporary divine favor" description. Use button deducts chosen amount.
 - **Files**: charactersheet-combat.js (modal with spinner input)
 
 ### C9: Disciplined Survivor *(medium)*
@@ -135,7 +135,7 @@ Complete 11 partial bugs + 1 open bug from the character sheet plan. The back-en
 **Goal**: Read all 85 combat methods across 17 traditions, verify parsing correctness, fix gaps, add missing effects.
 
 **Steps**:
-1. **Data extraction**: Read all CTM optional feature data from TGTT source files. List every method with: name, degree, tradition, action type, exertion cost, save type, expected effects.
+1. **Data extraction**: Read all CTM optional feature data from TGTT source files. List every method with: name, degree, tradition, action type, stamina cost, save type, expected effects.
 2. **Parsing audit**: For each method, run through `_parseCombatMethodEffects()` and verify extracted data matches expected. Log discrepancies.
 3. **Fix parser gaps**: Update regex/parsing in `_parseCombatMethodEffects()` for any missed patterns (e.g., unusual cost wording, conditional triggers, multi-step effects).
 4. **Add stance effect application**: For stance methods, wire `_parseStanceEffects()` output into the active state system so stances actually apply their bonuses (AC, speed, skill bonuses).

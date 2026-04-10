@@ -424,12 +424,12 @@ describe("CharacterSheetPdf", () => {
 			expect(html).toContain("Gallant Heart");
 		});
 
-		test("should render exertion pool when traditions exist", () => {
+		test("should render stamina pool when traditions exist", () => {
 			state._data.combatTraditions = [{code: "TI", name: "Tempered Iron"}];
-			state._data.exertionMax = 6;
-			state._data.exertionCurrent = 4;
+			state._data.staminaMax = 6;
+			state._data.staminaCurrent = 4;
 			const html = new CharacterSheetPdf(state).generate();
-			expect(html).toContain("Exertion");
+			expect(html).toContain("Stamina");
 			// 4 filled, 2 empty
 			expect(html).toContain("●●●●○○");
 		});
@@ -525,10 +525,10 @@ describe("CharacterSheetPdf", () => {
 
 		test("should strip [-] and [\u2013] collapsible markers from descriptions", () => {
 			state._data.features = [
-				{name: "Combat Methods", description: "Exertion Pool[\u2013]\nYour exertion pool equals twice your proficiency bonus. Method DC[-]\nYour Method DC equals 8 + prof."},
+				{name: "Combat Methods", description: "Stamina Pool[\u2013]\nYour stamina pool equals twice your proficiency bonus. Method DC[-]\nYour Method DC equals 8 + prof."},
 			];
 			const html = new CharacterSheetPdf(state).generate();
-			expect(html).toContain("Exertion Pool");
+			expect(html).toContain("Stamina Pool");
 			expect(html).toContain("Method DC");
 			expect(html).not.toContain("[\u2013]");
 			expect(html).not.toContain("[-]");

@@ -9,7 +9,7 @@ The `CharacterSheetCombat` module handles all combat-related functionality:
 - Initiative rolling
 - Death saves
 - Condition tracking
-- Combat Methods (TGTT exertion system)
+- Combat Methods (TGTT stamina system)
 
 **File**: `js/charactersheet/charactersheet-combat.js`  
 **Lines**: ~3,028
@@ -584,15 +584,15 @@ _removeCondition(conditionKey) {
 
 ---
 
-## Combat Methods (TGTT Exertion System)
+## Combat Methods (TGTT Stamina System)
 
-The sheet supports the "Trials & Treasures" (TGTT) combat methods system, which uses exertion points.
+The sheet supports the "Trials & Treasures" (TGTT) combat methods system, which uses stamina points.
 
-### Exertion Pool
+### Stamina Pool
 
 ```javascript
 // In state
-_data.exertion = {
+_data.stamina = {
     current: 0,
     max: 0,  // Typically = proficiency bonus
 };
@@ -605,23 +605,23 @@ _useMethod(methodId) {
     const method = this._getMethodById(methodId);
     if (!method) return;
     
-    // Check exertion cost
-    if (method.exertionCost > this._state.getExertionCurrent()) {
+    // Check stamina cost
+    if (method.staminaCost > this._state.getStaminaCurrent()) {
         JqueryUtil.doToast({
             type: "warning",
-            content: `Not enough exertion! Need ${method.exertionCost}, have ${this._state.getExertionCurrent()}.`,
+            content: `Not enough stamina! Need ${method.staminaCost}, have ${this._state.getStaminaCurrent()}.`,
         });
         return;
     }
     
-    // Spend exertion
-    this._state.spendExertion(method.exertionCost);
+    // Spend stamina
+    this._state.spendStamina(method.staminaCost);
     
     // Apply method effect
     this._applyMethodEffect(method);
     
     // Update display
-    this._renderExertion();
+    this._renderStamina();
 }
 ```
 

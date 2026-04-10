@@ -111,7 +111,7 @@ export class PartyTrackerCharacter {
 		return 8 + this.getProficiencyBonus() + Math.max(strMod, dexMod) + this.getExhaustionDcPenalty();
 	}
 
-	getExertionMax () {
+	getStaminaMax () {
 		if (!this._settings?.enableTgtt) return 0;
 		return 2 * this.getProficiencyBonus();
 	}
@@ -186,7 +186,7 @@ export class PartyTrackerCharacter {
 			.onn("click", () => this._onRemove?.());
 
 		const tgttInfo = this._enableTgtt?.()
-			? ee`<span class="dm-party__char-tgtt-stat" title="Exertion Pool / Combat Method DC">Ex ${this.getExertionMax()} · DC ${this.getCombatMethodDc() ?? "—"}</span>`
+			? ee`<span class="dm-party__char-tgtt-stat" title="Stamina Pool / Combat Method DC">St ${this.getStaminaMax()} · DC ${this.getCombatMethodDc() ?? "—"}</span>`
 			: "";
 
 		const wrpCondPills = ee`<span class="dm-party__conditions-summary"></span>`;
@@ -559,7 +559,7 @@ export class PartyTrackerCharacter {
 		const dc = this.getCombatMethodDc();
 		ee`<div class="ve-flex-v-center ve-small ve-gap-3">
 			<span>Combat Method DC: <strong>${dc ?? "\u2014"}</strong></span>
-			<span class="ve-muted">Exertion Pool: <strong>${this.getExertionMax()}</strong></span>
+			<span class="ve-muted">Stamina Pool: <strong>${this.getStaminaMax()}</strong></span>
 		</div>`.appendTo(wrp);
 
 		/* Combat Traditions */

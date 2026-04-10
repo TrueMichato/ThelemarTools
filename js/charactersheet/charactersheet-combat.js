@@ -96,7 +96,7 @@ class CharacterSheetCombat {
 			this._castCombatSpell(spellId);
 		});
 
-		// Combat Methods: use method (spend exertion)
+		// Combat Methods: use method (spend stamina)
 		document.addEventListener("click", (e) => {
 			const target = e.target.closest(".charsheet__method-use");
 			if (!target) return;
@@ -112,9 +112,9 @@ class CharacterSheetCombat {
 			this._chooseWeaponForMethod(methodId);
 		});
 
-		// Exertion controls
-		document.getElementById("charsheet-exertion-add")?.addEventListener("click", () => this._modifyExertion(1));
-		document.getElementById("charsheet-exertion-remove")?.addEventListener("click", () => this._modifyExertion(-1));
+		// Stamina controls
+		document.getElementById("charsheet-stamina-add")?.addEventListener("click", () => this._modifyStamina(1));
+		document.getElementById("charsheet-stamina-remove")?.addEventListener("click", () => this._modifyStamina(-1));
 
 		// Combat Methods: add/manage methods
 		document.getElementById("charsheet-btn-add-method")?.addEventListener("click", () => this._showMethodPicker());
@@ -2506,7 +2506,7 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Use a combat action (spend a use if applicable, deduct ki/focus/exertion)
+	 * Use a combat action (spend a use if applicable, deduct ki/focus/stamina)
 	 */
 	async _useCombatAction (feature) {
 		try {
@@ -2531,8 +2531,8 @@ class CharacterSheetCombat {
 
 			const kiCost = selfManagedCost ? 0 : this._parseResourceCost(feature, "ki");
 			const focusCost = selfManagedCost ? 0 : this._parseResourceCost(feature, "focus");
-			const exertionCost = selfManagedCost ? 0 : this._parseResourceCost(feature, "exertion");
-			let resourceCost = kiCost || focusCost || exertionCost;
+			const staminaCost = selfManagedCost ? 0 : this._parseResourceCost(feature, "stamina");
+			let resourceCost = kiCost || focusCost || staminaCost;
 
 			// Unhindered Flurry (TGTT level 8+): Flurry of Blows costs 0 focus
 			if (nameLower === "flurry of blows" && calc.hasUnhinderedFlurry) {
@@ -2547,14 +2547,14 @@ class CharacterSheetCombat {
 						JqueryUtil.doToast({type: "warning", content: `Not enough ${pointName} points for ${feature.name}!`});
 						return;
 					}
-				} else if (exertionCost > 0) {
-					if (this._state.canUseFocusForExertion?.()) {
-						if (!this._state.useFocusForExertion(exertionCost)) {
-							JqueryUtil.doToast({type: "warning", content: `Not enough focus/exertion for ${feature.name}!`});
+				} else if (staminaCost > 0) {
+					if (this._state.canUseFocusForStamina?.()) {
+						if (!this._state.useFocusForStamina(staminaCost)) {
+							JqueryUtil.doToast({type: "warning", content: `Not enough focus/stamina for ${feature.name}!`});
 							return;
 						}
 					} else {
-						JqueryUtil.doToast({type: "warning", content: `No exertion resource available for ${feature.name}!`});
+						JqueryUtil.doToast({type: "warning", content: `No stamina resource available for ${feature.name}!`});
 						return;
 					}
 				}
@@ -2637,7 +2637,7 @@ class CharacterSheetCombat {
 			const remaining = feature.uses?.current;
 			const remainingText = feature.uses ? ` (${remaining}/${feature.uses.max} remaining)` : "";
 			const costText = resourceCost > 0
-				? ` (${resourceCost} ${kiCost ? "ki" : focusCost ? "focus" : "exertion"} spent)`
+				? ` (${resourceCost} ${kiCost ? "ki" : focusCost ? "focus" : "stamina"} spent)`
 				: "";
 			JqueryUtil.doToast({
 				type: "success",
@@ -3055,7 +3055,7 @@ class CharacterSheetCombat {
 	/**
 	 * Check if any weapon-modifier combat methods are configured for this weapon
 	 * and prompt the user to activate one during the damage roll.
-	 * Spends exertion on acceptance and creates the effect.
+	 * Spends stamina on acceptance and creates the effect.
 	 * @param {object} attack - The attack being rolled
 	 * @returns {object|null} The activated effect, or null
 	 */
@@ -3070,17 +3070,17 @@ class CharacterSheetCombat {
 		if (!matchingMethods.length) return null;
 
 		for (const method of matchingMethods) {
-			const cost = this._getMethodExertionCost(method);
-			const currentExertion = this._state.getExertionCurrent();
+			const cost = this._getMethodStaminaCost(method);
+			const currentStamina = this._state.getStaminaCurrent();
 			const dmgDesc = method.ongoingDamage || "effect";
 			const saveDesc = method.ongoingSaveType
 				? ` (${method.ongoingSaveType.charAt(0).toUpperCase() + method.ongoingSaveType.slice(1)} save to end)`
 				: "";
 
-			const canPayWithKi = this._state.canUseFocusForExertion?.() && (this._state.getKiPointsCurrent?.() ?? 0) >= cost;
-			if (currentExertion < cost && !canPayWithKi) continue;
+			const canPayWithKi = this._state.canUseFocusForStamina?.() && (this._state.getKiPointsCurrent?.() ?? 0) >= cost;
+			if (currentStamina < cost && !canPayWithKi) continue;
 
-			const costLabel = currentExertion >= cost ? `${cost} EP` : `${cost} ki/focus`;
+			const costLabel = currentStamina >= cost ? `${cost} EP` : `${cost} ki/focus`;
 			const choices = [
 				{name: "Yes", description: `Use ${method.name}: ${dmgDesc}${saveDesc} (costs ${costLabel})`},
 				{name: "No", description: `Attack normally`},
@@ -3089,13 +3089,13 @@ class CharacterSheetCombat {
 			const chosen = await this._showCombatActionChoiceModal({name: `⚔️ ${method.name}`}, choices);
 			if (!chosen || chosen.name !== "Yes") continue;
 
-			// Spend exertion (or ki)
-			if (currentExertion >= cost) {
-				this._state.setExertionCurrent(currentExertion - cost);
+			// Spend stamina (or ki)
+			if (currentStamina >= cost) {
+				this._state.setStaminaCurrent(currentStamina - cost);
 			} else if (canPayWithKi) {
-				if (!this._state.useFocusForExertion(cost)) continue;
+				if (!this._state.useFocusForStamina(cost)) continue;
 			}
-			this._updateExertionDisplay();
+			this._updateStaminaDisplay();
 			if (this._page?._features) this._page._features._renderResources();
 
 			const calcs = this._state.getFeatureCalculations?.() || {};
@@ -3414,9 +3414,9 @@ class CharacterSheetCombat {
 	// endregion
 
 	/**
-	 * Parse a resource cost (ki/focus/exertion) from a feature's description.
+	 * Parse a resource cost (ki/focus/stamina) from a feature's description.
 	 * @param {object} feature - Feature object
-	 * @param {"ki"|"focus"|"exertion"} resourceType - Resource type to parse
+	 * @param {"ki"|"focus"|"stamina"} resourceType - Resource type to parse
 	 * @returns {number} Cost amount, or 0 if not found
 	 */
 	_parseResourceCost (feature, resourceType) {
@@ -3424,7 +3424,7 @@ class CharacterSheetCombat {
 		const patterns = {
 			ki: /(\d+)\s*ki\s*point/i,
 			focus: /(\d+)\s*focus\s*point/i,
-			exertion: /(\d+)\s*exertion\s*point/i,
+			stamina: /(\d+)\s*stamina\s*point/i,
 		};
 		const match = desc.match(patterns[resourceType]);
 		return match ? parseInt(match[1]) : 0;
@@ -3467,11 +3467,11 @@ class CharacterSheetCombat {
 		// Resource cost line
 		const kiCost = this._parseResourceCost(feature, "ki");
 		const focusCost = this._parseResourceCost(feature, "focus");
-		const exertionCost = this._parseResourceCost(feature, "exertion");
+		const staminaCost = this._parseResourceCost(feature, "stamina");
 		const costParts = [];
 		if (kiCost) costParts.push(`${kiCost} Ki Point${kiCost > 1 ? "s" : ""}`);
 		if (focusCost) costParts.push(`${focusCost} Focus Point${focusCost > 1 ? "s" : ""}`);
-		if (exertionCost) costParts.push(`${exertionCost} Exertion`);
+		if (staminaCost) costParts.push(`${staminaCost} Stamina`);
 
 		if (costParts.length) {
 			const kiCurrent = this._state.getKiPointsCurrent?.() ?? 0;
@@ -3761,13 +3761,13 @@ class CharacterSheetCombat {
 			const cost = calc.instantStepCost || 4;
 			lines.push(`<span class="mr-1">⚡</span> Teleport up to <strong>${range} ft</strong> to an unoccupied space you can see`);
 			lines.push(`<span class="mr-1">👻</span> <strong>Invisible</strong> until the start of your next turn`);
-			lines.push(`<span class="mr-1">💎</span> Cost: <strong>${cost} exertion</strong>`);
+			lines.push(`<span class="mr-1">💎</span> Cost: <strong>${cost} stamina</strong>`);
 		}
 
 		// --- C8: Religious Training ---
 		if (nameLower === "religious training") {
-			lines.push(`<span class="mr-1">🙏</span> Spend exertion to gain temporary <strong>divine favor</strong>`);
-			lines.push(`<span class="mr-1">💎</span> Variable cost: choose exertion amount on use`);
+			lines.push(`<span class="mr-1">🙏</span> Spend stamina to gain temporary <strong>divine favor</strong>`);
+			lines.push(`<span class="mr-1">💎</span> Variable cost: choose stamina amount on use`);
 		}
 
 		// --- C10: Wind Strike ---
@@ -3787,7 +3787,7 @@ class CharacterSheetCombat {
 		// --- C4: Wall Walk (combat action aspect) ---
 		if (nameLower === "wall walk") {
 			lines.push(`<span class="mr-1">🕷️</span> Cast <strong>Spider Climb</strong> on self as a bonus action`);
-			lines.push(`<span class="mr-1">💎</span> Cost: <strong>1 exertion</strong>`);
+			lines.push(`<span class="mr-1">💎</span> Cost: <strong>1 stamina</strong>`);
 			lines.push(`<span class="mr-1">🔮</span> Duration: concentration, up to <strong>10 minutes</strong>`);
 		}
 
@@ -4489,7 +4489,7 @@ class CharacterSheetCombat {
 				|| name.includes("focus")
 				|| name.includes("sorcery")
 				|| name.includes("superiority")
-				|| name.includes("exertion")
+				|| name.includes("stamina")
 				|| name.includes("channel")
 				|| name.includes("wild shape")
 				|| name.includes("bardic")
@@ -4895,7 +4895,7 @@ class CharacterSheetCombat {
 				if (feature.isCustomAbility) {
 					icon = customAbility?.icon || this._getCustomAbilityIcon(feature.category);
 				}
-				const resourceCost = resource?.cost || activationInfo.exertionCost || stateType?.resourceCost || 1;
+				const resourceCost = resource?.cost || activationInfo.staminaCost || stateType?.resourceCost || 1;
 				const hasResourceAvailable = !resource || resource.current >= resourceCost;
 
 				const buttonText = this._getActivationButtonText({activationInfo, customAbility});
@@ -4914,9 +4914,9 @@ class CharacterSheetCombat {
 					const shortName = this._getShortResourceName(resource.name);
 					resourceInfo = `${resource.current}/${resource.max} ${shortName}`;
 					resourceTooltip = `Uses ${resourceCost} ${resource.name} (${resource.current}/${resource.max} remaining)`;
-				} else if (activationInfo.exertionCost) {
-					resourceInfo = `${resourceCost} Exertion`;
-					resourceTooltip = `Costs ${resourceCost} Exertion`;
+				} else if (activationInfo.staminaCost) {
+					resourceInfo = `${resourceCost} Stamina`;
+					resourceTooltip = `Costs ${resourceCost} Stamina`;
 				}
 
 				const row = e_({outer: `
@@ -5462,7 +5462,7 @@ class CharacterSheetCombat {
 		const section = document.getElementById("charsheet-combat-methods-section");
 		const container = document.getElementById("charsheet-combat-methods");
 		const dcDisplay = document.getElementById("charsheet-method-dc");
-		const exertionDisplay = document.getElementById("charsheet-exertion-pool");
+		const staminaDisplay = document.getElementById("charsheet-stamina-pool");
 
 		// Combat Tab section
 		const tabSection = document.getElementById("charsheet-combat-methods-tab-section");
@@ -5489,20 +5489,20 @@ class CharacterSheetCombat {
 		dcDisplay.textContent = methodDC;
 		tabDcDisplay.textContent = methodDC;
 
-		// Calculate Exertion Pool: 2 × proficiency bonus
-		const exertionMax = profBonus * 2;
-		exertionDisplay.textContent = exertionMax;
+		// Calculate Stamina Pool: 2 × proficiency bonus
+		const staminaMax = profBonus * 2;
+		staminaDisplay.textContent = staminaMax;
 
-		// Initialize exertion in state if not set
-		if (this._state.getExertionMax() !== exertionMax) {
-			this._state.setExertionMax(exertionMax);
+		// Initialize stamina in state if not set
+		if (this._state.getStaminaMax() !== staminaMax) {
+			this._state.setStaminaMax(staminaMax);
 		}
-		if (this._state.getExertionCurrent() === null || this._state.getExertionCurrent() === undefined) {
-			this._state.setExertionCurrent(exertionMax);
+		if (this._state.getStaminaCurrent() === null || this._state.getStaminaCurrent() === undefined) {
+			this._state.setStaminaCurrent(staminaMax);
 		}
 
-		// Update exertion display
-		this._updateExertionDisplay();
+		// Update stamina display
+		this._updateStaminaDisplay();
 
 		// Group methods by tradition
 		const methodsByTradition = new Map();
@@ -5536,7 +5536,7 @@ class CharacterSheetCombat {
 				return degreeA - degreeB || a.name.localeCompare(b.name);
 			}).forEach(method => {
 				const degree = this._getMethodDegree(method);
-				const exertionCost = this._getMethodExertionCost(method);
+				const staminaCost = this._getMethodStaminaCost(method);
 				const methodId = `${method.name}-${method.source || ""}`.replace(/\s+/g, "-").toLowerCase();
 
 				// Parse enhanced effects from state
@@ -5584,12 +5584,12 @@ class CharacterSheetCombat {
 						<div class="ve-flex ve-flex-v-center ve-flex-wrap">
 							<span class="charsheet__method-name" style="font-weight: bold;">${methodNameHtml}</span>
 							<span class="ve-muted ve-small ml-2">(${degree}${this._getOrdinalSuffix(degree)})</span>
-							${exertionCost > 0 ? `<span class="badge badge-secondary ml-2" title="Exertion cost">${exertionCost} EP</span>` : ""}
+							${staminaCost > 0 ? `<span class="badge badge-secondary ml-2" title="Stamina cost">${staminaCost} EP</span>` : ""}
 							${extraBadges.join("")}
 							${weaponLabel}
 						</div>
 						${showUseButton ? `<div class="ve-flex ve-flex-v-center ml-2">
-							<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${exertionCost}" title="Use this method (costs ${exertionCost} exertion)">Use</button>
+							<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" title="Use this method (costs ${staminaCost} stamina)">Use</button>
 							${isWeaponModifier ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__method-choose-weapon ml-1" data-method-id="${methodId}" title="Choose which weapon to use">🗡️</button>` : ""}
 						</div>` : ""}
 					</div>
@@ -5605,15 +5605,15 @@ class CharacterSheetCombat {
 		}
 	}
 
-	_getMethodExertionCost (method) {
-		// Try to extract exertion cost from method entries
-		// Usually formatted like "Cost: X exertion" or mentions exertion in the text
+	_getMethodStaminaCost (method) {
+		// Try to extract stamina cost from method entries
+		// Usually formatted like "Cost: X stamina" or mentions stamina in the text
 		if (!method.entries) return 1; // Default cost
 
 		const entriesStr = JSON.stringify(method.entries).toLowerCase();
 
-		// Look for patterns like "costs X exertion" or "X exertion points"
-		const costMatch = entriesStr.match(/costs?\s+(\d+)\s+exertion/i);
+		// Look for patterns like "costs X stamina" or "X stamina points"
+		const costMatch = entriesStr.match(/costs?\s+(\d+)\s+stamina/i);
 		if (costMatch) return parseInt(costMatch[1]);
 
 		// Also check for degree-based default costs (1st=1, 2nd=2, etc.)
@@ -5624,38 +5624,38 @@ class CharacterSheetCombat {
 	_useMethod (methodId) {
 		const btn = document.querySelector(`.charsheet__method-use[data-method-id="${methodId}"]`);
 		const cost = parseInt(btn.dataset.cost) || 1;
-		const currentExertion = this._state.getExertionCurrent();
+		const currentStamina = this._state.getStaminaCurrent();
 
-		if (currentExertion < cost) {
-			// Try ki/focus-to-exertion conversion for Monks with the combat system
-			if (this._state.canUseFocusForExertion?.()) {
+		if (currentStamina < cost) {
+			// Try ki/focus-to-stamina conversion for Monks with the combat system
+			if (this._state.canUseFocusForStamina?.()) {
 				const kiCurrent = this._state.getKiPointsCurrent?.() ?? 0;
 				if (kiCurrent >= cost) {
-					if (!this._state.useFocusForExertion(cost)) {
+					if (!this._state.useFocusForStamina(cost)) {
 						JqueryUtil.doToast({type: "warning", content: `Not enough ki/focus points to fuel this method!`});
 						return;
 					}
-					// Ki was spent — continue to activation (skip exertion deduction below)
+					// Ki was spent — continue to activation (skip stamina deduction below)
 					this._activateMethodAfterPayment(btn, methodId, cost, "ki/focus");
 					return;
 				}
 			}
-			JqueryUtil.doToast({type: "warning", content: `Not enough exertion! You have ${currentExertion}, but this method costs ${cost}.`});
+			JqueryUtil.doToast({type: "warning", content: `Not enough stamina! You have ${currentStamina}, but this method costs ${cost}.`});
 			return;
 		}
 
 		// Get the method data from the parent element
 		const method = btn.closest(".charsheet__method-item")?._methodData;
 
-		this._state.setExertionCurrent(currentExertion - cost);
-		this._updateExertionDisplay();
+		this._state.setStaminaCurrent(currentStamina - cost);
+		this._updateStaminaDisplay();
 
 		// Also update resources section
 		if (this._page?._features) {
 			this._page._features._renderResources();
 		}
 
-		this._activateMethodEffect(btn, methodId, method, cost, "exertion");
+		this._activateMethodEffect(btn, methodId, method, cost, "stamina");
 	}
 
 	/**
@@ -5728,7 +5728,7 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Choose (or re-choose) a weapon for a weapon-modifier method without spending exertion.
+	 * Choose (or re-choose) a weapon for a weapon-modifier method without spending stamina.
 	 */
 	async _chooseWeaponForMethod (methodId) {
 		const methodEl = document.querySelector(`.charsheet__method-choose-weapon[data-method-id="${methodId}"]`)?.closest(".charsheet__method-item");
@@ -5867,27 +5867,27 @@ class CharacterSheetCombat {
 		return stanceIndicators.some(indicator => entriesStr.includes(indicator));
 	}
 
-	_modifyExertion (delta) {
-		const current = this._state.getExertionCurrent() || 0;
-		const max = this._state.getExertionMax() || 0;
+	_modifyStamina (delta) {
+		const current = this._state.getStaminaCurrent() || 0;
+		const max = this._state.getStaminaMax() || 0;
 		const newValue = Math.max(0, Math.min(max, current + delta));
-		this._state.setExertionCurrent(newValue);
-		this._updateExertionDisplay();
+		this._state.setStaminaCurrent(newValue);
+		this._updateStaminaDisplay();
 		// Also update resources section
 		if (this._page?._features) {
 			this._page._features._renderResources();
 		}
 	}
 
-	_updateExertionDisplay () {
-		const current = this._state.getExertionCurrent() || 0;
-		const max = this._state.getExertionMax() || 0;
+	_updateStaminaDisplay () {
+		const current = this._state.getStaminaCurrent() || 0;
+		const max = this._state.getStaminaMax() || 0;
 
-		document.getElementById("charsheet-exertion-current").textContent = current;
-		document.getElementById("charsheet-exertion-max").textContent = max;
+		document.getElementById("charsheet-stamina-current").textContent = current;
+		document.getElementById("charsheet-stamina-max").textContent = max;
 
-		// Color-code based on remaining exertion
-		const display = document.getElementById("charsheet-exertion-display-tab");
+		// Color-code based on remaining stamina
+		const display = document.getElementById("charsheet-stamina-display-tab");
 		display.classList.remove("text-success", "text-warning", "text-danger");
 		if (current === 0) {
 			display.classList.add("text-danger");
@@ -5899,7 +5899,7 @@ class CharacterSheetCombat {
 
 		// Update resource pips in the resources section
 		// Filled = available, empty = used
-		const resourcePips = document.querySelectorAll("[data-resource-id=\"exertion\"] .charsheet__resource-pip--exertion");
+		const resourcePips = document.querySelectorAll("[data-resource-id=\"stamina\"] .charsheet__resource-pip--stamina");
 		if (resourcePips.length) {
 			resourcePips.forEach((pip, i) => {
 				pip.classList.toggle("used", i >= current); // Empty (used) if index >= current available
@@ -6387,7 +6387,7 @@ class CharacterSheetCombat {
 				const key = `${method.name}|${method.source || ""}`;
 				const isKnown = knownMethodNames.has(key);
 				const degree = this._getMethodDegreeFromOptFeature(method);
-				const cost = this._getMethodExertionCostFromOptFeature(method);
+				const cost = this._getMethodStaminaCostFromOptFeature(method);
 				const activation = this._getMethodActivationTime(method);
 				const isStance = this._isMethodStance(method);
 
@@ -6576,17 +6576,17 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Get method exertion cost from optional feature
+	 * Get method stamina cost from optional feature
 	 */
-	_getMethodExertionCostFromOptFeature (method) {
+	_getMethodStaminaCostFromOptFeature (method) {
 		// First check consumes.amount
 		if (method.consumes?.amount) return method.consumes.amount;
 
 		if (!method.entries) return 0;
 		const entriesStr = JSON.stringify(method.entries);
 
-		// Parse from entries like "{@b Action (2 Exertion Points)}"
-		const costMatch = entriesStr.match(/\((\d+)\s+exertion\s+points?\)/i);
+		// Parse from entries like "{@b Action (2 Stamina Points)}"
+		const costMatch = entriesStr.match(/\((\d+)\s+stamina\s+points?\)/i);
 		if (costMatch) return parseInt(costMatch[1]);
 
 		return 0;

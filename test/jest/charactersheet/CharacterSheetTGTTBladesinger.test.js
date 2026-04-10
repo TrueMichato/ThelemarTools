@@ -5,7 +5,7 @@
  * - Wizard Specialties at 4, 8, 12, 16
  * - Bladesong toggle (AC bonus, speed +10, resource tracking)
  * - Combat Methods (Arcane Knight tradition) with spellcasting DC
- * - Exertion pool (2 × prof) using spellcasting ability
+ * - Stamina pool (2 × prof) using spellcasting ability
  * - Subclass features: Extra Attack (6), Song of Defense (10),
  *   Song of Victory (14)
  * - Spell slot progression at milestone levels
@@ -209,19 +209,19 @@ describe("TGTT Bladesinger Wizard", () => {
 		beforeEach(() => {
 			makeBladesinger(6);
 			state.addCombatTradition("AK"); // Arcane Knight
-			state.ensureExertionInitialized();
+			state.ensureStaminaInitialized();
 		});
 
 		it("should use the combat method system", () => {
 			expect(state.usesCombatSystem()).toBe(true);
 		});
 
-		it("should have exertion pool = 2 × proficiency bonus", () => {
-			// Level 6 → prof +3 → exertion = 6
-			expect(state.getExertionMax()).toBe(6);
+		it("should have stamina pool = 2 × proficiency bonus", () => {
+			// Level 6 → prof +3 → stamina = 6
+			expect(state.getStaminaMax()).toBe(6);
 		});
 
-		it("should scale exertion pool with level", () => {
+		it("should scale stamina pool with level", () => {
 			const cases = [
 				{level: 3, expected: 4},   // prof +2
 				{level: 5, expected: 6},   // prof +3
@@ -237,8 +237,8 @@ describe("TGTT Bladesinger Wizard", () => {
 					subclass: {name: "Bladesinger", shortName: "Bladesinger", source: "TGTT"},
 				});
 				s.addCombatTradition("AK");
-				s.ensureExertionInitialized();
-				expect(s.getExertionMax()).toBe(expected);
+				s.ensureStaminaInitialized();
+				expect(s.getStaminaMax()).toBe(expected);
 			}
 		});
 
@@ -257,23 +257,23 @@ describe("TGTT Bladesinger Wizard", () => {
 			expect(traditions).toContain("AK");
 		});
 
-		it("should spend and restore exertion correctly", () => {
-			const max = state.getExertionMax();
-			expect(state.getExertionCurrent()).toBe(max);
+		it("should spend and restore stamina correctly", () => {
+			const max = state.getStaminaMax();
+			expect(state.getStaminaCurrent()).toBe(max);
 
-			const spent = state.spendExertion(2);
+			const spent = state.spendStamina(2);
 			expect(spent).toBe(true);
-			expect(state.getExertionCurrent()).toBe(max - 2);
+			expect(state.getStaminaCurrent()).toBe(max - 2);
 
-			state.restoreExertion();
-			expect(state.getExertionCurrent()).toBe(max);
+			state.restoreStamina();
+			expect(state.getStaminaCurrent()).toBe(max);
 		});
 
-		it("should refuse to spend more exertion than available", () => {
-			state.setExertionCurrent(1);
-			const result = state.spendExertion(5);
+		it("should refuse to spend more stamina than available", () => {
+			state.setStaminaCurrent(1);
+			const result = state.spendStamina(5);
 			expect(result).toBe(false);
-			expect(state.getExertionCurrent()).toBe(1);
+			expect(state.getStaminaCurrent()).toBe(1);
 		});
 	});
 

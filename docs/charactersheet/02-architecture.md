@@ -241,7 +241,7 @@ toJson(), loadFromJson()
 - Death save tracking
 - Condition management
 - Combat spell casting
-- Exertion point tracking (for TGTT)
+- Stamina point tracking (for TGTT)
 
 ### CharacterSheetSpells (`charactersheet-spells.js`)
 

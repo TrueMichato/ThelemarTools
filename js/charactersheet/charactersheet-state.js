@@ -1533,10 +1533,10 @@ class FeatureModifierParser {
 		// ===================
 		// GAIN X RESOURCE POINTS
 		// ===================
-		// "You gain an additional 2 exertion points"
+		// "You gain an additional 2 stamina points"
 		const resourcePatterns = [
-			{pattern: /(?:you\s+)?gain\s+(?:an?\s+)?(?:additional|extra)\s+(\d+)\s+(exertion|focus|ki|sorcery)\s+points?/gi, resource: true},
-			{pattern: /(?:additional|extra)\s+(\d+)\s+(exertion|focus|ki|sorcery)\s+points?/gi, resource: true},
+			{pattern: /(?:you\s+)?gain\s+(?:an?\s+)?(?:additional|extra)\s+(\d+)\s+(stamina|focus|ki|sorcery)\s+points?/gi, resource: true},
+			{pattern: /(?:additional|extra)\s+(\d+)\s+(stamina|focus|ki|sorcery)\s+points?/gi, resource: true},
 		];
 		resourcePatterns.forEach(({pattern}) => {
 			let match;
@@ -1555,7 +1555,7 @@ class FeatureModifierParser {
 		// GAIN FOCUS/RESOURCE ON INITIATIVE
 		// ===================
 		// "When you roll initiative, you gain 1 Focus Point"
-		const initResourceMatch = plainText.match(/when\s+you\s+roll\s+initiative,?\s+(?:you\s+)?gain\s+(\d+)\s+(focus|ki|exertion|sorcery)\s+points?/i);
+		const initResourceMatch = plainText.match(/when\s+you\s+roll\s+initiative,?\s+(?:you\s+)?gain\s+(\d+)\s+(focus|ki|stamina|sorcery)\s+points?/i);
 		if (initResourceMatch) {
 			modifiers.push({
 				type: `initiative:${initResourceMatch[2].toLowerCase()}`,
@@ -3315,9 +3315,9 @@ class CharacterSheetState {
 			// Combat Traditions (Thelemar homebrew) - tradition codes like ["AM", "RC"]
 			combatTraditions: [],
 
-			// Exertion pool (Thelemar homebrew) - resource for combat methods
-			exertionCurrent: 0, // Current exertion points
-			exertionMax: 0, // Max exertion = 2 × proficiency bonus
+			// Stamina pool (Thelemar homebrew) - resource for combat methods
+			staminaCurrent: 0, // Current stamina points
+			staminaMax: 0, // Max stamina = 2 × proficiency bonus
 
 			// Active Stance (Thelemar homebrew) - only one stance can be active at a time
 			// Effects only apply when stance is ACTIVATED, not just added to sheet
@@ -9778,7 +9778,7 @@ class CharacterSheetState {
 							calculations.sixthSenseSkills = ["arcana", "history", "investigation", "nature", "religion"];
 						}
 
-						// Instant Step: teleport 500 ft as action (4 exertion)
+						// Instant Step: teleport 500 ft as action (4 stamina)
 						if (monkFeatures.some(f => f.name === "Instant Step")) {
 							calculations.hasInstantStep = true;
 							calculations.instantStepRange = 500;
@@ -9794,7 +9794,7 @@ class CharacterSheetState {
 							calculations.shadowWalkRange = 60;
 						}
 
-						// Wall Walk: move on vertical surfaces + spider climb for 1 exertion
+						// Wall Walk: move on vertical surfaces + spider climb for 1 stamina
 						if (monkFeatures.some(f => f.name === "Wall Walk")) {
 							calculations.hasWallWalk = true;
 							calculations.wallWalkSpiderClimbEffects = {
@@ -20464,13 +20464,13 @@ class CharacterSheetState {
 	_isResourceSystemFeature (feature) {
 		const name = feature.name?.toLowerCase() || "";
 
-		// Features that describe resource systems (exertion, ki, etc.)
+		// Features that describe resource systems (stamina, ki, etc.)
 		// These mention "short rest" or "long rest" but the rest is for the resource, not the feature itself
 		const resourceSystemFeatures = [
-			"combat methods", // Thelemar homebrew - describes exertion system
+			"combat methods", // Thelemar homebrew - describes stamina system
 			"ki", // Monk - describes ki points
 			"focus points", // Some homebrew - describes focus point system
-			"exertion", // Thelemar homebrew - the exertion pool itself
+			"stamina", // Thelemar homebrew - the stamina pool itself
 			"sorcery points", // Sorcerer - describes sorcery point system
 			"superiority dice", // Battle Master - describes superiority dice
 			"psionic power", // Psi features - describes psionic power dice
@@ -20497,9 +20497,9 @@ class CharacterSheetState {
 		if (feature.description) {
 			const desc = feature.description.toLowerCase();
 
-			// If it talks about spending exertion, it's using the exertion system, not its own uses
-			if (/spend(?:ing)?\s+(?:\d+\s+)?exertion/i.test(desc)
-				&& /(?:recover|regain|refresh).*exertion.*(?:short|long)\s*rest/i.test(desc)) {
+			// If it talks about spending stamina, it's using the stamina system, not its own uses
+			if (/spend(?:ing)?\s+(?:\d+\s+)?stamina/i.test(desc)
+				&& /(?:recover|regain|refresh).*stamina.*(?:short|long)\s*rest/i.test(desc)) {
 				return true;
 			}
 
@@ -21450,50 +21450,50 @@ class CharacterSheetState {
 	}
 	// #endregion
 
-	// #region Exertion (Combat Methods resource)
+	// #region Stamina (Combat Methods resource)
 	/**
-	 * Get current exertion points
+	 * Get current stamina points
 	 * @returns {number}
 	 */
-	getExertionCurrent () {
-		return this._data.exertionCurrent;
+	getStaminaCurrent () {
+		return this._data.staminaCurrent;
 	}
 
 	/**
-	 * Set current exertion points
+	 * Set current stamina points
 	 * @param {number} value
 	 */
-	setExertionCurrent (value) {
-		this._data.exertionCurrent = Math.max(0, Math.min(value, this.getExertionMax() || Infinity));
+	setStaminaCurrent (value) {
+		this._data.staminaCurrent = Math.max(0, Math.min(value, this.getStaminaMax() || Infinity));
 	}
 
 	/**
-	 * Get maximum exertion points (2 × proficiency bonus)
+	 * Get maximum stamina points (2 × proficiency bonus)
 	 * @returns {number}
 	 */
-	getExertionMax () {
-		return this._data.exertionMax;
+	getStaminaMax () {
+		return this._data.staminaMax;
 	}
 
 	/**
-	 * Set maximum exertion points
+	 * Set maximum stamina points
 	 * @param {number} value
 	 */
-	setExertionMax (value) {
-		this._data.exertionMax = value;
+	setStaminaMax (value) {
+		this._data.staminaMax = value;
 		// Ensure current doesn't exceed new max
-		if (this._data.exertionCurrent > value) {
-			this._data.exertionCurrent = value;
+		if (this._data.staminaCurrent > value) {
+			this._data.staminaCurrent = value;
 		}
 	}
 
 	/**
-	 * Restore all exertion (e.g., on short/long rest)
+	 * Restore all stamina (e.g., on short/long rest)
 	 */
-	restoreExertion () {
-		// Initialize exertion max if not set and character uses combat system
-		this._ensureExertionInitialized();
-		this._data.exertionCurrent = this._data.exertionMax || 0;
+	restoreStamina () {
+		// Initialize stamina max if not set and character uses combat system
+		this._ensureStaminaInitialized();
+		this._data.staminaCurrent = this._data.staminaMax || 0;
 	}
 
 	/**
@@ -21649,11 +21649,11 @@ class CharacterSheetState {
 	/**
 	 * Parse mechanical effects from a combat method's entry text
 	 * @param {object} feature - The feature object
-	 * @returns {object} Parsed effects including exertionCost, actionType, saveType, isStance, degree, tradition
+	 * @returns {object} Parsed effects including staminaCost, actionType, saveType, isStance, degree, tradition
 	 */
 	_parseCombatMethodEffects (feature) {
 		const effects = {
-			exertionCost: 0,
+			staminaCost: 0,
 			actionType: null,
 			saveType: null,
 			isStance: false,
@@ -21691,10 +21691,10 @@ class CharacterSheetState {
 		const rawText = feature.description || (feature.entries ? JSON.stringify(feature.entries) : "");
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1").replace(/\s+/g, " ");
 
-		// Parse exertion cost: "(1 Exertion Point)", "(3 Exertion Points)"
-		const exertionMatch = text.match(/\((\d+)\s*Exertion\s*Points?\)/i);
-		if (exertionMatch) {
-			effects.exertionCost = parseInt(exertionMatch[1], 10);
+		// Parse stamina cost: "(1 Stamina Point)", "(3 Stamina Points)"
+		const staminaMatch = text.match(/\((\d+)\s*Stamina\s*Points?\)/i);
+		if (staminaMatch) {
+			effects.staminaCost = parseInt(staminaMatch[1], 10);
 		}
 
 		// Parse action type from entry prefix
@@ -21702,7 +21702,7 @@ class CharacterSheetState {
 			effects.actionType = "Bonus Action";
 		} else if (/\bReaction\b/i.test(text)) {
 			effects.actionType = "Reaction";
-		} else if (/\bAction\b.*Exertion/i.test(text) || /Exertion.*\bAction\b/i.test(text)) {
+		} else if (/\bAction\b.*Stamina/i.test(text) || /Stamina.*\bAction\b/i.test(text)) {
 			effects.actionType = "Action";
 		} else if (/as\s*part\s*of\s*an?\s*attack/i.test(text)) {
 			effects.actionType = "Attack";
@@ -22118,9 +22118,9 @@ class CharacterSheetState {
 	// #endregion
 
 	/**
-	 * Use a combat method, spending the required exertion
+	 * Use a combat method, spending the required stamina
 	 * @param {string} methodName - Name of the method to use
-	 * @returns {boolean} True if method used successfully, false if insufficient exertion or method not found
+	 * @returns {boolean} True if method used successfully, false if insufficient stamina or method not found
 	 */
 	useCombatMethod (methodName) {
 		// Find the method
@@ -22135,12 +22135,12 @@ class CharacterSheetState {
 		}
 
 		const parsed = this._parseCombatMethodEffects(method);
-		const cost = parsed.exertionCost || 0;
+		const cost = parsed.staminaCost || 0;
 
 		if (cost > 0) {
-			const success = this.spendExertion(cost);
+			const success = this.spendStamina(cost);
 			if (!success) {
-				console.warn(`[CharSheet State] Cannot use method: insufficient exertion (need ${cost}, have ${this.getExertionCurrent()})`);
+				console.warn(`[CharSheet State] Cannot use method: insufficient stamina (need ${cost}, have ${this.getStaminaCurrent()})`);
 				return false;
 			}
 		}
@@ -22998,10 +22998,10 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Ensure exertion pool is initialized based on proficiency bonus
+	 * Ensure stamina pool is initialized based on proficiency bonus
 	 * This is a public method that can be called from other modules
 	 */
-	ensureExertionInitialized () {
+	ensureStaminaInitialized () {
 		if (!this.usesCombatSystem()) {
 			return;
 		}
@@ -23010,34 +23010,34 @@ class CharacterSheetState {
 		const calculatedMax = profBonus * 2;
 
 
-		if (this._data.exertionMax !== calculatedMax) {
-			this._data.exertionMax = calculatedMax;
+		if (this._data.staminaMax !== calculatedMax) {
+			this._data.staminaMax = calculatedMax;
 			// If current exceeds new max, adjust it
-			if ((this._data.exertionCurrent || 0) > calculatedMax) {
-				this._data.exertionCurrent = calculatedMax;
+			if ((this._data.staminaCurrent || 0) > calculatedMax) {
+				this._data.staminaCurrent = calculatedMax;
 			}
 			// If current was 0 (never set), initialize to full
-			if (!this._data.exertionCurrent) {
-				this._data.exertionCurrent = calculatedMax;
+			if (!this._data.staminaCurrent) {
+				this._data.staminaCurrent = calculatedMax;
 			}
 		}
 	}
 
 	/**
-	 * @deprecated Use ensureExertionInitialized instead
+	 * @deprecated Use ensureStaminaInitialized instead
 	 */
-	_ensureExertionInitialized () {
-		return this.ensureExertionInitialized();
+	_ensureStaminaInitialized () {
+		return this.ensureStaminaInitialized();
 	}
 
 	/**
-	 * Spend exertion points
+	 * Spend stamina points
 	 * @param {number} amount - Amount to spend
-	 * @returns {boolean} - True if successful, false if not enough exertion
+	 * @returns {boolean} - True if successful, false if not enough stamina
 	 */
-	spendExertion (amount) {
-		if ((this._data.exertionCurrent || 0) < amount) return false;
-		this._data.exertionCurrent -= amount;
+	spendStamina (amount) {
+		if ((this._data.staminaCurrent || 0) < amount) return false;
+		this._data.staminaCurrent -= amount;
 		return true;
 	}
 
@@ -23546,47 +23546,47 @@ class CharacterSheetState {
 		return invalid;
 	}
 
-	// #region Alternative Exertion Resources (TGTT Combat Methods)
+	// #region Alternative Stamina Resources (TGTT Combat Methods)
 	/**
-	 * Check if character can use Ki/Focus Points to pay for Exertion costs
-	 * In TGTT, Monks can use their Focus Points instead of Exertion for Combat Methods
+	 * Check if character can use Ki/Focus Points to pay for Stamina costs
+	 * In TGTT, Monks can use their Focus Points instead of Stamina for Combat Methods
 	 * @returns {boolean}
 	 */
-	canUseFocusForExertion () {
-		// Monk from any source can use Ki/Focus for exertion if they have the combat system
+	canUseFocusForStamina () {
+		// Monk from any source can use Ki/Focus for stamina if they have the combat system
 		const monkClass = this._data.classes?.find(c => c.name === "Monk");
 		return !!monkClass && this.usesCombatSystem();
 	}
 
 	/**
-	 * Use Focus/Ki Points instead of Exertion to pay for a Combat Method
+	 * Use Focus/Ki Points instead of Stamina to pay for a Combat Method
 	 * @param {number} amount - Amount to spend
 	 * @returns {boolean} True if successful
 	 */
-	useFocusForExertion (amount) {
-		if (!this.canUseFocusForExertion()) return false;
+	useFocusForStamina (amount) {
+		if (!this.canUseFocusForStamina()) return false;
 		return this.useKiPoint(amount);
 	}
 
 	/**
-	 * Check if character can convert Spell Slots to Exertion points
+	 * Check if character can convert Spell Slots to Stamina points
 	 * In TGTT, Paladins can fuel Combat Methods by sacrificing spell slots
 	 * @returns {boolean}
 	 */
-	canConvertSpellSlotToExertion () {
-		// Paladin from TGTT source can convert spell slots to exertion
+	canConvertSpellSlotToStamina () {
+		// Paladin from TGTT source can convert spell slots to stamina
 		const paladinClass = this._data.classes?.find(c => c.name === "Paladin");
 		return paladinClass?.source === "TGTT" && this.usesCombatSystem();
 	}
 
 	/**
-	 * Convert a spell slot to Exertion points
-	 * In TGTT, converting a spell slot gives exertion = 1 + (slot level)
+	 * Convert a spell slot to Stamina points
+	 * In TGTT, converting a spell slot gives stamina = 1 + (slot level)
 	 * @param {number} slotLevel - The spell slot level to sacrifice (1-9)
 	 * @returns {boolean} True if successful, false if no slot available
 	 */
-	convertSpellSlotToExertion (slotLevel) {
-		if (!this.canConvertSpellSlotToExertion()) return false;
+	convertSpellSlotToStamina (slotLevel) {
+		if (!this.canConvertSpellSlotToStamina()) return false;
 		if (slotLevel < 1 || slotLevel > 9) return false;
 
 		// Check if we have a slot at this level
@@ -23596,50 +23596,50 @@ class CharacterSheetState {
 		// Use the spell slot
 		this._data.spellcasting.spellSlots[slotLevel].current--;
 
-		// Gain exertion = 1 + slot level
-		const exertionGained = 1 + slotLevel;
-		const newExertion = Math.min(
-			(this._data.exertionCurrent || 0) + exertionGained,
-			this._data.exertionMax || 0,
+		// Gain stamina = 1 + slot level
+		const staminaGained = 1 + slotLevel;
+		const newStamina = Math.min(
+			(this._data.staminaCurrent || 0) + staminaGained,
+			this._data.staminaMax || 0,
 		);
-		this._data.exertionCurrent = newExertion;
+		this._data.staminaCurrent = newStamina;
 
 		return true;
 	}
 
 	/**
-	 * Get the exertion gained from converting a spell slot
+	 * Get the stamina gained from converting a spell slot
 	 * @param {number} slotLevel - The spell slot level
-	 * @returns {number} Exertion points that would be gained
+	 * @returns {number} Stamina points that would be gained
 	 */
-	getExertionFromSpellSlot (slotLevel) {
+	getStaminaFromSpellSlot (slotLevel) {
 		return 1 + slotLevel;
 	}
 
 	/**
-	 * Get available resources that can be used for exertion (for UI display)
-	 * @returns {object} Object with available resources {exertion, focus, spellSlots}
+	 * Get available resources that can be used for stamina (for UI display)
+	 * @returns {object} Object with available resources {stamina, focus, spellSlots}
 	 */
-	getExertionResources () {
+	getStaminaResources () {
 		const resources = {
-			exertion: {
-				current: this._data.exertionCurrent || 0,
-				max: this._data.exertionMax || 0,
+			stamina: {
+				current: this._data.staminaCurrent || 0,
+				max: this._data.staminaMax || 0,
 				available: this.usesCombatSystem(),
 			},
 			focus: {
 				current: this.getKiPointsCurrent(),
 				max: this.getKiPoints(),
-				available: this.canUseFocusForExertion(),
+				available: this.canUseFocusForStamina(),
 			},
 			spellSlots: {
-				available: this.canConvertSpellSlotToExertion(),
+				available: this.canConvertSpellSlotToStamina(),
 				slots: Object.entries(this._data.spellcasting.spellSlots || {})
 					.filter(([_, slot]) => slot.current > 0)
 					.map(([level, slot]) => ({
 						level: parseInt(level),
 						current: slot.current,
-						exertionValue: this.getExertionFromSpellSlot(parseInt(level)),
+						staminaValue: this.getStaminaFromSpellSlot(parseInt(level)),
 					})),
 			},
 		};
@@ -24432,10 +24432,10 @@ class CharacterSheetState {
 		if (!ability.isActive && !skipResourceCost && ability.resourceCost) {
 			const { resourceId, cost } = ability.resourceCost;
 			
-			if (resourceId === "exertion") {
-				const current = this.getExertionCurrent() || 0;
+			if (resourceId === "stamina") {
+				const current = this.getStaminaCurrent() || 0;
 				if (current < cost) return null; // Can't afford
-				this.setExertionCurrent(current - cost);
+				this.setStaminaCurrent(current - cost);
 			} else {
 				const resource = this._data.resources.find(r => r.id === resourceId);
 				if (!resource || resource.current < cost) return null; // Can't afford
@@ -24496,8 +24496,8 @@ class CharacterSheetState {
 		if (ability.resourceCost) {
 			const { resourceId, cost } = ability.resourceCost;
 			
-			if (resourceId === "exertion") {
-				return (this.getExertionCurrent() || 0) >= cost;
+			if (resourceId === "stamina") {
+				return (this.getStaminaCurrent() || 0) >= cost;
 			}
 			
 			const resource = this._data.resources.find(r => r.id === resourceId);
@@ -24520,11 +24520,11 @@ class CharacterSheetState {
 		if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId) {
 			const cost = ability.resourceSource.cost || 1;
 			
-			// Handle exertion specially
-			if (ability.resourceSource.resourceId === "exertion") {
-				const current = this.getExertionCurrent() || 0;
+			// Handle stamina specially
+			if (ability.resourceSource.resourceId === "stamina") {
+				const current = this.getStaminaCurrent() || 0;
 				if (current < cost) return false;
-				this.setExertionCurrent(current - cost);
+				this.setStaminaCurrent(current - cost);
 				return true;
 			}
 			
@@ -24554,8 +24554,8 @@ class CharacterSheetState {
 		if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId) {
 			const cost = ability.resourceSource.cost || 1;
 			
-			if (ability.resourceSource.resourceId === "exertion") {
-				return (this.getExertionCurrent() || 0) >= cost;
+			if (ability.resourceSource.resourceId === "stamina") {
+				return (this.getStaminaCurrent() || 0) >= cost;
 			}
 			
 			const resource = this._data.resources.find(r => r.id === ability.resourceSource.resourceId);
@@ -24577,10 +24577,10 @@ class CharacterSheetState {
 
 		// Linked resource - show the resource's current/max
 		if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId) {
-			if (ability.resourceSource.resourceId === "exertion") {
+			if (ability.resourceSource.resourceId === "stamina") {
 				return {
-					current: this.getExertionCurrent() || 0,
-					max: this.getExertionMax() || 0,
+					current: this.getStaminaCurrent() || 0,
+					max: this.getStaminaMax() || 0,
 					recharge: "short",
 				};
 			}
@@ -24632,12 +24632,12 @@ class CharacterSheetState {
 
 		// Check if ability uses a linked resource pool
 		if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId) {
-			// Handle exertion specially
-			if (ability.resourceSource.resourceId === "exertion") {
-				const current = this.getExertionCurrent() || 0;
-				const max = this.getExertionMax() || 0;
+			// Handle stamina specially
+			if (ability.resourceSource.resourceId === "stamina") {
+				const current = this.getStaminaCurrent() || 0;
+				const max = this.getStaminaMax() || 0;
 				if (current >= max) return false;
-				this.setExertionCurrent(current + 1);
+				this.setStaminaCurrent(current + 1);
 				return true;
 			}
 			
@@ -27018,7 +27018,7 @@ class CharacterSheetState {
 			effects: [], // Effects depend on specific stance
 			duration: "Until ended or different stance activated",
 			endConditions: ["Use bonus action to end", "Activate different stance", "Incapacitated"],
-			resourceName: "Exertion",
+			resourceName: "Stamina",
 			resourceCost: 1,
 			detectPatterns: [], // Detection handled by specific patterns in detectActivatableFeature
 			isGeneric: true, // Will be customized per feature
@@ -27101,7 +27101,7 @@ class CharacterSheetState {
 			],
 			duration: "Until ended or incapacitated",
 			endConditions: ["Ended as bonus action", "Incapacitated", "Knocked unconscious"],
-			resourceName: "Exertion",
+			resourceName: "Stamina",
 			resourceCost: 1,
 			detectPatterns: ["heavy stance"],
 			activationAction: "bonus",
@@ -27118,7 +27118,7 @@ class CharacterSheetState {
 			],
 			duration: "Until ended or incapacitated",
 			endConditions: ["Ended as bonus action", "Incapacitated"],
-			resourceName: "Exertion",
+			resourceName: "Stamina",
 			resourceCost: 1,
 			detectPatterns: ["stand tall stance", "stand tall"],
 			activationAction: "bonus",
@@ -27355,7 +27355,7 @@ class CharacterSheetState {
 			{pattern: /for (?:the )?duration,? you/i, weight: 8},
 
 			// Resource-based toggles
-			{pattern: /(?:costs?|requires?|spend|expend) (\d+) exertion/i, weight: 5, extractExertion: true},
+			{pattern: /(?:costs?|requires?|spend|expend) (\d+) stamina/i, weight: 5, extractStamina: true},
 			{pattern: /(?:costs?|requires?|spend) (\d+) ki/i, weight: 5, extractKi: true},
 		];
 
@@ -27398,8 +27398,8 @@ class CharacterSheetState {
 					const num = match[1].match(/\d+/) ? parseInt(match[1]) : (match[1] === "one" ? 1 : 10);
 					result.duration = `${num} ${text.includes("minute") ? "minutes" : text.includes("hour") ? "hours" : "rounds"}`;
 				}
-				if (indicator.extractExertion && match[1]) {
-					result.resourceType = "exertion";
+				if (indicator.extractStamina && match[1]) {
+					result.resourceType = "stamina";
 					result.resourceCost = parseInt(match[1]);
 				}
 				if (indicator.extractKi && match[1]) {
@@ -28021,7 +28021,7 @@ class CharacterSheetState {
 					: this.ACTIVE_STATE_TYPES.homebrewToggle,
 				matchedBy: "data",
 				activationAction: act.activationAction || act.action || "bonus",
-				exertionCost: act.exertionCost || null,
+				staminaCost: act.staminaCost || null,
 				kiCost: act.kiCost || null,
 				sorceryPointCost: act.sorceryPointCost || null,
 				resourceCost: act.resourceCost || null,
@@ -28053,7 +28053,7 @@ class CharacterSheetState {
 
 			// Extract resource costs even for overridden features
 			const kiMatch = text.match(/(?:spend|use|costs?|expend)?\s*\(?(\d+)\s*(?:ki|focus)\s*(?:points?)?\)?/i);
-			const exertionMatch = text.match(/(?:spend|expend|use|costs?)?\s*\(?(\d+)\s*exertion\s*(?:points?)?\)?/i);
+			const staminaMatch = text.match(/(?:spend|expend|use|costs?)?\s*\(?(\d+)\s*stamina\s*(?:points?)?\)?/i);
 
 			let activationAction = "special";
 			if (/as a bonus action|bonus action[,:]|use (?:a |your )?bonus action/i.test(text)) {
@@ -28076,7 +28076,7 @@ class CharacterSheetState {
 				effects: parsedEffects,
 				combatActionEffects,
 				kiCost: kiMatch ? parseInt(kiMatch[1]) : null,
-				exertionCost: exertionMatch ? parseInt(exertionMatch[1]) : null,
+				staminaCost: staminaMatch ? parseInt(staminaMatch[1]) : null,
 				isToggle: false,
 				isInstant: true,
 			};
@@ -28091,7 +28091,7 @@ class CharacterSheetState {
 			"bond",
 			"flaw",
 			"combat methods", // Meta ability describing combat system, not activatable
-			"exertion", // Resource description, not activatable
+			"stamina", // Resource description, not activatable
 			"combat traditions", // Meta description
 			"maneuver", // Meta description of maneuver system
 			"metamagic", // Meta description of metamagic list
@@ -28108,7 +28108,7 @@ class CharacterSheetState {
 		const toggleAnalysis = this.analyzeToggleability(text);
 
 		// ===== EXTRACT RESOURCE COSTS =====
-		let exertionCost = null;
+		let staminaCost = null;
 		let kiCost = null;
 		let sorceryPointCost = null;
 		let bardicInspirationCost = null;
@@ -28118,10 +28118,10 @@ class CharacterSheetState {
 		let rageCost = null;
 
 		// Check for various resource costs
-		// Matches: "1 Exertion Point", "(1 Exertion Point)", "spend 1 exertion", "costs 2 exertion points"
-		const exertionMatch = text.match(/(?:spend|expend|use|costs?)?\s*\(?(\d+)\s*exertion\s*(?:points?)?\)?/i);
-		if (exertionMatch) {
-			exertionCost = parseInt(exertionMatch[1]);
+		// Matches: "1 Stamina Point", "(1 Stamina Point)", "spend 1 stamina", "costs 2 stamina points"
+		const staminaMatch = text.match(/(?:spend|expend|use|costs?)?\s*\(?(\d+)\s*stamina\s*(?:points?)?\)?/i);
+		if (staminaMatch) {
+			staminaCost = parseInt(staminaMatch[1]);
 		}
 
 		// Matches: "spend 1 ki", "1 ki points", "(2 Ki Points)", "for 1 ki"
@@ -28193,7 +28193,7 @@ class CharacterSheetState {
 					effects: parsedEffects.length > 0 ? parsedEffects : stateType.effects,
 					duration: toggleAnalysis.duration || stateType.duration,
 					endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
-					exertionCost,
+					staminaCost,
 					kiCost,
 					focusPointCost,
 					sorceryPointCost,
@@ -28217,7 +28217,7 @@ class CharacterSheetState {
 							effects: parsedEffects.length > 0 ? parsedEffects : stateType.effects,
 							duration: toggleAnalysis.duration || stateType.duration,
 							endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
-							exertionCost,
+							staminaCost,
 							kiCost,
 							focusPointCost,
 							sorceryPointCost,
@@ -28298,7 +28298,7 @@ class CharacterSheetState {
 						effects: parsedEffects.length > 0 ? parsedEffects : this.ACTIVE_STATE_TYPES[stateTypeId].effects,
 						duration: toggleAnalysis.duration || this.ACTIVE_STATE_TYPES[stateTypeId].duration,
 						endConditions: toggleAnalysis.endConditions,
-						exertionCost,
+						staminaCost,
 						kiCost,
 						focusPointCost,
 						sorceryPointCost,
@@ -28319,7 +28319,7 @@ class CharacterSheetState {
 					effects: parsedEffects,
 					duration: toggleAnalysis.duration,
 					endConditions: toggleAnalysis.endConditions,
-					exertionCost,
+					staminaCost,
 					kiCost,
 					focusPointCost,
 					sorceryPointCost,
@@ -28348,7 +28348,7 @@ class CharacterSheetState {
 					duration: toggleAnalysis.duration,
 					endConditions: toggleAnalysis.endConditions,
 					confidence: toggleAnalysis.confidence,
-					exertionCost,
+					staminaCost,
 					kiCost,
 					focusPointCost,
 					sorceryPointCost,
@@ -28363,7 +28363,7 @@ class CharacterSheetState {
 		// ===== RESOURCE-COSTING ABILITIES =====
 		// Detect features that cost resources - these are activatable even if not toggle states
 		const hasResourceCost = kiCost || focusPointCost || sorceryPointCost || bardicInspirationCost
-			|| exertionCost || channelDivinityCost || superiorityDiceCost;
+			|| staminaCost || channelDivinityCost || superiorityDiceCost;
 
 		if (hasResourceCost) {
 			// Must have some indication of being an active choice
@@ -28380,7 +28380,7 @@ class CharacterSheetState {
 					effects: parsedEffects,
 					duration: toggleAnalysis.duration,
 					endConditions: toggleAnalysis.endConditions,
-					exertionCost,
+					staminaCost,
 					kiCost,
 					focusPointCost,
 					sorceryPointCost,
@@ -28590,7 +28590,7 @@ class CharacterSheetState {
 			endConditions: activationInfo?.endConditions || toggleAnalysis.endConditions,
 			confidence: toggleAnalysis.confidence,
 			resourceCosts: {
-				exertion: activationInfo?.exertionCost || null,
+				stamina: activationInfo?.staminaCost || null,
 				ki: activationInfo?.kiCost || null,
 				focusPoints: activationInfo?.focusPointCost || null,
 				sorceryPoints: activationInfo?.sorceryPointCost || null,
@@ -28599,7 +28599,7 @@ class CharacterSheetState {
 				superiorityDice: activationInfo?.superiorityDiceCost || null,
 			},
 			hasResourceCost: !!(
-				activationInfo?.exertionCost
+				activationInfo?.staminaCost
 				|| activationInfo?.kiCost
 				|| activationInfo?.focusPointCost
 				|| activationInfo?.sorceryPointCost
@@ -29365,15 +29365,15 @@ class CharacterSheetState {
 			if (activationInfo.isDataDriven && activationInfo.resourceName) {
 				resource = this._findResource(resources, activationInfo.resourceName, activationInfo.resourceCost);
 			}
-			// Check for exertion cost from description (e.g., "1 Exertion Point", "2 Exertion Points")
-			else if (activationInfo.exertionCost) {
+			// Check for stamina cost from description (e.g., "1 Stamina Point", "2 Stamina Points")
+			else if (activationInfo.staminaCost) {
 				resource = {
-					id: "exertion",
-					name: "Exertion",
-					current: this.getExertionCurrent(),
-					max: this.getExertionMax(),
-					isExertion: true,
-					cost: activationInfo.exertionCost,
+					id: "stamina",
+					name: "Stamina",
+					current: this.getStaminaCurrent(),
+					max: this.getStaminaMax(),
+					isStamina: true,
+					cost: activationInfo.staminaCost,
 				};
 			}
 			// Check for Ki cost
@@ -29414,14 +29414,14 @@ class CharacterSheetState {
 			}
 			// Check state type's default resource
 			else if (stateType?.resourceName) {
-				// Special case: Exertion is tracked separately, not in resources array
-				if (stateType.resourceName.toLowerCase() === "exertion") {
+				// Special case: Stamina is tracked separately, not in resources array
+				if (stateType.resourceName.toLowerCase() === "stamina") {
 					resource = {
-						id: "exertion",
-						name: "Exertion",
-						current: this.getExertionCurrent(),
-						max: this.getExertionMax(),
-						isExertion: true,
+						id: "stamina",
+						name: "Stamina",
+						current: this.getStaminaCurrent(),
+						max: this.getStaminaMax(),
+						isStamina: true,
 						cost: stateType.resourceCost || 1,
 					};
 				} else {
@@ -31703,8 +31703,8 @@ class CharacterSheetState {
 		// Recover short rest innate spells
 		this.restoreInnateSpells("short");
 
-		// Recover exertion (Thelemar: recovers on short rest)
-		this.restoreExertion();
+		// Recover stamina (Thelemar: recovers on short rest)
+		this.restoreStamina();
 
 		// Sorcerous Restoration: recover SP on short rest
 		this.applySorcerousRestoration();
@@ -31756,8 +31756,8 @@ class CharacterSheetState {
 			this._data.exhaustion = Math.max(0, this._data.exhaustion - 1);
 		}
 
-		// Recover exertion (Thelemar: recovers on any rest)
-		this.restoreExertion();
+		// Recover stamina (Thelemar: recovers on any rest)
+		this.restoreStamina();
 
 		// Recharge magic items at dawn
 		this._rechargeItems("dawn");

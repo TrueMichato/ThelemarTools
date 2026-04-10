@@ -70,14 +70,14 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	});
 
 	// --- AM: Adamant Mountain ---
-	it("AM — should parse action + exertion cost + save type", () => {
+	it("AM — should parse action + stamina cost + save type", () => {
 		addMethod("Power Strike", "AM", 1,
-			"Action (1 Exertion Point). Make a melee weapon attack against a creature within reach.");
+			"Action (1 Stamina Point). Make a melee weapon attack against a creature within reach.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Power Strike");
 		expect(m.tradition).toBe("AM");
 		expect(m.degree).toBe(1);
-		expect(m.exertionCost).toBe(1);
+		expect(m.staminaCost).toBe(1);
 		expect(m.actionType).toBe("Action");
 		expect(m.isStance).toBe(false);
 	});
@@ -85,19 +85,19 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- AK: Arcane Knight ---
 	it("AK — should parse bonus action + save", () => {
 		addMethod("Eldritch Ward", "AK", 1,
-			"Bonus Action (1 Exertion Point). You create a magical ward. A creature that attacks you must make an Intelligence saving throw or lose its reaction.");
+			"Bonus Action (1 Stamina Point). You create a magical ward. A creature that attacks you must make an Intelligence saving throw or lose its reaction.");
 		const m = state.getCombatMethods().find(x => x.name === "Eldritch Ward");
 		expect(m.tradition).toBe("AK");
 		expect(m.degree).toBe(1);
 		expect(m.actionType).toBe("Bonus Action");
 		expect(m.saveType).toBe("intelligence");
-		expect(m.exertionCost).toBe(1);
+		expect(m.staminaCost).toBe(1);
 	});
 
 	// --- BU: Beast Unity ---
 	it("BU — should parse stance with speed bonus", () => {
 		addMethod("Feral Stance", "BU", 1,
-			"Bonus Action (1 Exertion Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
+			"Bonus Action (1 Stamina Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
 		const m = state.getCombatMethods().find(x => x.name === "Feral Stance");
 		expect(m.tradition).toBe("BU");
 		expect(m.degree).toBe(1);
@@ -108,19 +108,19 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- BZ: Biting Zephyr ---
 	it("BZ — should parse ranged method with advantage", () => {
 		addMethod("Gale Shot", "BZ", 2,
-			"Action (2 Exertion Points). You fire a projectile with a normal range of 30 feet and long range of 120 feet. You have advantage on attack rolls made with this method.");
+			"Action (2 Stamina Points). You fire a projectile with a normal range of 30 feet and long range of 120 feet. You have advantage on attack rolls made with this method.");
 		const m = state.getCombatMethods().find(x => x.name === "Gale Shot");
 		expect(m.tradition).toBe("BZ");
 		expect(m.degree).toBe(2);
 		expect(m.range).toEqual({normal: 30, long: 120});
 		expect(m.grantsAdvantage).toBe(true);
-		expect(m.exertionCost).toBe(2);
+		expect(m.staminaCost).toBe(2);
 	});
 
 	// --- CJ: Comedic Jabs ---
 	it("CJ — should parse bonus action + Wisdom save", () => {
 		addMethod("Distracting Quip", "CJ", 1,
-			"Bonus Action (1 Exertion Point). You taunt a creature within 30 feet. It must make a Wisdom saving throw or have disadvantage on its next attack.");
+			"Bonus Action (1 Stamina Point). You taunt a creature within 30 feet. It must make a Wisdom saving throw or have disadvantage on its next attack.");
 		const m = state.getCombatMethods().find(x => x.name === "Distracting Quip");
 		expect(m.tradition).toBe("CJ");
 		expect(m.degree).toBe(1);
@@ -131,7 +131,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- EB: Eldritch Blackguard ---
 	it("EB — should parse Wisdom save from debuff", () => {
 		addMethod("Blackguard's Blight", "EB", 1,
-			"Bonus Action (1 Exertion Point). It must make a Wisdom save or be unable to gain advantage on attacks.");
+			"Bonus Action (1 Stamina Point). It must make a Wisdom save or be unable to gain advantage on attacks.");
 		const m = state.getCombatMethods().find(x => x.name === "Blackguard's Blight");
 		expect(m.tradition).toBe("EB");
 		expect(m.degree).toBe(1);
@@ -141,7 +141,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- GH: Gallant Heart ---
 	it("GH — should parse reaction + Constitution save", () => {
 		addMethod("Shield Wall", "GH", 1,
-			"Reaction (1 Exertion Point). When an ally within 5 feet is hit, you impose your shield. The attacker must make a Constitution saving throw or deal no damage.");
+			"Reaction (1 Stamina Point). When an ally within 5 feet is hit, you impose your shield. The attacker must make a Constitution saving throw or deal no damage.");
 		const m = state.getCombatMethods().find(x => x.name === "Shield Wall");
 		expect(m.tradition).toBe("GH");
 		expect(m.degree).toBe(1);
@@ -152,7 +152,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- MG: Mirror's Glint ---
 	it("MG — should parse Charisma save on deception method", () => {
 		addMethod("Phantom Feint", "MG", 2,
-			"Action (2 Exertion Points). You create an illusory double. A creature attacking you must make a Charisma saving throw or target the illusion instead.");
+			"Action (2 Stamina Points). You create an illusory double. A creature attacking you must make a Charisma saving throw or target the illusion instead.");
 		const m = state.getCombatMethods().find(x => x.name === "Phantom Feint");
 		expect(m.tradition).toBe("MG");
 		expect(m.degree).toBe(2);
@@ -162,7 +162,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- MS: Mist and Shade ---
 	it("MS — should parse stance with skill bonus", () => {
 		addMethod("Shadow Stance", "MS", 1,
-			"Bonus Action (1 Exertion Point). You enter a shadowy stance. You gain a bonus to Dexterity (Stealth) checks equal to your proficiency bonus. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You enter a shadowy stance. You gain a bonus to Dexterity (Stealth) checks equal to your proficiency bonus. This stance lasts until you end it.");
 		const m = state.getCombatMethods().find(x => x.name === "Shadow Stance");
 		expect(m.tradition).toBe("MS");
 		expect(m.isStance).toBe(true);
@@ -172,7 +172,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- RC: Rapid Current ---
 	it("RC — should parse multi-target method", () => {
 		addMethod("Whirlwind Strike", "RC", 3,
-			"Bonus Action (2 Exertion Points). You make a melee attack against any number of creatures within 5 feet of you.");
+			"Bonus Action (2 Stamina Points). You make a melee attack against any number of creatures within 5 feet of you.");
 		const m = state.getCombatMethods().find(x => x.name === "Whirlwind Strike");
 		expect(m.tradition).toBe("RC");
 		expect(m.degree).toBe(3);
@@ -182,7 +182,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- RE: Razor's Edge ---
 	it("RE — should parse attack modifier with bonus damage", () => {
 		addMethod("Precision Cut", "RE", 2,
-			"Action (2 Exertion Points). Make a melee weapon attack as part of an attack. On a hit, deal an additional 2d6 damage.");
+			"Action (2 Stamina Points). Make a melee weapon attack as part of an attack. On a hit, deal an additional 2d6 damage.");
 		const m = state.getCombatMethods().find(x => x.name === "Precision Cut");
 		expect(m.tradition).toBe("RE");
 		expect(m.degree).toBe(2);
@@ -193,7 +193,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- SK: Sanguine Knot ---
 	it("SK — should parse Constitution save on blood method", () => {
 		addMethod("Crimson Bind", "SK", 1,
-			"Action (1 Exertion Point). A creature within 15 feet must make a Constitution saving throw or take 1d8 necrotic damage and be restrained until end of your next turn.");
+			"Action (1 Stamina Point). A creature within 15 feet must make a Constitution saving throw or take 1d8 necrotic damage and be restrained until end of your next turn.");
 		const m = state.getCombatMethods().find(x => x.name === "Crimson Bind");
 		expect(m.tradition).toBe("SK");
 		expect(m.degree).toBe(1);
@@ -203,7 +203,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- SS: Spirited Steed ---
 	it("SS — should parse Dexterity save on mounted charge", () => {
 		addMethod("Trampling Charge", "SS", 2,
-			"Action (2 Exertion Points). While mounted, your steed charges through. Each creature in a line must make a Dexterity saving throw or take 2d8 bludgeoning damage.");
+			"Action (2 Stamina Points). While mounted, your steed charges through. Each creature in a line must make a Dexterity saving throw or take 2d8 bludgeoning damage.");
 		const m = state.getCombatMethods().find(x => x.name === "Trampling Charge");
 		expect(m.tradition).toBe("SS");
 		expect(m.degree).toBe(2);
@@ -213,7 +213,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- TI: Tempered Iron ---
 	it("TI — should parse stance with Athletics bonus", () => {
 		addMethod("Wary Stance", "TI", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus on saving throws made to resist being moved. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus on saving throws made to resist being moved. This stance lasts until you end it.");
 		const m = state.getCombatMethods().find(x => x.name === "Wary Stance");
 		expect(m.tradition).toBe("TI");
 		expect(m.isStance).toBe(true);
@@ -223,7 +223,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- TC: Tooth and Claw ---
 	it("TC — should parse Strength save on grapple method", () => {
 		addMethod("Rending Grasp", "TC", 1,
-			"Action (1 Exertion Point). As part of an attack action, you grab a creature. It must make a Strength saving throw or be grappled.");
+			"Action (1 Stamina Point). As part of an attack action, you grab a creature. It must make a Strength saving throw or be grappled.");
 		const m = state.getCombatMethods().find(x => x.name === "Rending Grasp");
 		expect(m.tradition).toBe("TC");
 		expect(m.degree).toBe(1);
@@ -234,7 +234,7 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- UW: Unending Wheel ---
 	it("UW — should parse ranged method with bonus weapon die", () => {
 		addMethod("Wind Strike", "UW", 4,
-			"Action (3 Exertion Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet. You have advantage on attack rolls. If both attack rolls hit, deal an additional weapon damage die.");
+			"Action (3 Stamina Points). You use a melee weapon to strike a foe from a distance, giving your attack a normal range of 20 feet and long range of 60 feet. You have advantage on attack rolls. If both attack rolls hit, deal an additional weapon damage die.");
 		const m = state.getCombatMethods().find(x => x.name === "Wind Strike");
 		expect(m.tradition).toBe("UW");
 		expect(m.degree).toBe(4);
@@ -246,12 +246,12 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 	// --- UH: Unerring Hawk ---
 	it("UH — should parse ranged precision method", () => {
 		addMethod("Eagle Eye Shot", "UH", 1,
-			"Bonus Action (1 Exertion Point). You take careful aim. Your next ranged attack ignores half cover and three-quarters cover.");
+			"Bonus Action (1 Stamina Point). You take careful aim. Your next ranged attack ignores half cover and three-quarters cover.");
 		const m = state.getCombatMethods().find(x => x.name === "Eagle Eye Shot");
 		expect(m.tradition).toBe("UH");
 		expect(m.degree).toBe(1);
 		expect(m.actionType).toBe("Bonus Action");
-		expect(m.exertionCost).toBe(1);
+		expect(m.staminaCost).toBe(1);
 	});
 });
 
@@ -269,7 +269,7 @@ describe("Combat Methods Survey — Stance Speed Integration", () => {
 
 	it("should apply stance speed bonus to walk speed", () => {
 		addMethod("Feral Stance", "BU", 1,
-			"Bonus Action (1 Exertion Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
+			"Bonus Action (1 Stamina Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
 
 		const baseParts = state.getSpeed();
 		state.activateStance("Feral Stance");
@@ -283,7 +283,7 @@ describe("Combat Methods Survey — Stance Speed Integration", () => {
 
 	it("should include stance bonus in getWalkSpeed()", () => {
 		addMethod("Feral Stance", "BU", 1,
-			"Bonus Action (1 Exertion Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
+			"Bonus Action (1 Stamina Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
 
 		const baseWalk = state.getWalkSpeed();
 		state.activateStance("Feral Stance");
@@ -292,7 +292,7 @@ describe("Combat Methods Survey — Stance Speed Integration", () => {
 
 	it("should include stance bonus in getSpeedBreakdown()", () => {
 		addMethod("Feral Stance", "BU", 1,
-			"Bonus Action (1 Exertion Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
+			"Bonus Action (1 Stamina Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
 
 		state.activateStance("Feral Stance");
 		const breakdown = state.getSpeedBreakdown("walk");
@@ -303,7 +303,7 @@ describe("Combat Methods Survey — Stance Speed Integration", () => {
 
 	it("should remove stance speed bonus when deactivated", () => {
 		addMethod("Feral Stance", "BU", 1,
-			"Bonus Action (1 Exertion Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
+			"Bonus Action (1 Stamina Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
 
 		const baseWalk = state.getWalkSpeed();
 		state.activateStance("Feral Stance");
@@ -315,7 +315,7 @@ describe("Combat Methods Survey — Stance Speed Integration", () => {
 
 	it("should NOT apply stance speed to non-walk speeds", () => {
 		addMethod("Feral Stance", "BU", 1,
-			"Bonus Action (1 Exertion Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
+			"Bonus Action (1 Stamina Point). You adopt a primal stance. Your Speed increases by 10 feet. This stance lasts until you end it or are incapacitated.");
 
 		state.setSpeed("fly", 30);
 		state.activateStance("Feral Stance");
@@ -324,7 +324,7 @@ describe("Combat Methods Survey — Stance Speed Integration", () => {
 
 	it("should resolve proficiency placeholder in stance skill bonuses", () => {
 		addMethod("Shadow Stance", "MS", 1,
-			"Bonus Action (1 Exertion Point). You enter a shadowy stance. You gain a bonus to Dexterity (Stealth) checks equal to your proficiency bonus. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You enter a shadowy stance. You gain a bonus to Dexterity (Stealth) checks equal to your proficiency bonus. This stance lasts until you end it.");
 
 		state.activateStance("Shadow Stance");
 		const calcs = state.getFeatureCalculations();
@@ -507,25 +507,25 @@ describe("Combat Methods Survey — Parser Edge Cases", () => {
 		state.addCombatTradition("AM");
 	});
 
-	it("should handle multi-point exertion cost", () => {
+	it("should handle multi-point stamina cost", () => {
 		addMethod("Grand Slam", "AM", 5,
-			"Action (5 Exertion Points). A massive overhead strike that hits all creatures in a 15-foot cone.");
+			"Action (5 Stamina Points). A massive overhead strike that hits all creatures in a 15-foot cone.");
 		const m = state.getCombatMethods().find(x => x.name === "Grand Slam");
-		expect(m.exertionCost).toBe(5);
+		expect(m.staminaCost).toBe(5);
 		expect(m.degree).toBe(5);
 	});
 
-	it("should handle method with no exertion cost", () => {
+	it("should handle method with no stamina cost", () => {
 		addMethod("Basic Counter", "AM", 1,
 			"Reaction. When a creature misses you with a melee attack, you can make one melee weapon attack against it.");
 		const m = state.getCombatMethods().find(x => x.name === "Basic Counter");
-		expect(m.exertionCost).toBe(0);
+		expect(m.staminaCost).toBe(0);
 		expect(m.actionType).toBe("Reaction");
 	});
 
 	it("should handle proficiency-capped multi-target", () => {
 		addMethod("Fan of Blades", "AM", 3,
-			"Action (3 Exertion Points). You attack any number of creatures within reach, up to your proficiency bonus.");
+			"Action (3 Stamina Points). You attack any number of creatures within reach, up to your proficiency bonus.");
 		const m = state.getCombatMethods().find(x => x.name === "Fan of Blades");
 		expect(m.isMultiTarget).toBe(true);
 		expect(m.maxTargets).toBe("proficiency");
@@ -533,7 +533,7 @@ describe("Combat Methods Survey — Parser Edge Cases", () => {
 
 	it("should handle per-subsequent-hit bonus damage", () => {
 		addMethod("Cascade Strike", "RC", 4,
-			"Action (3 Exertion Points). Make a melee weapon attack against any number of creatures within 10 feet. Each subsequent hit deals an additional 1d6 damage per subsequent hit.");
+			"Action (3 Stamina Points). Make a melee weapon attack against any number of creatures within 10 feet. Each subsequent hit deals an additional 1d6 damage per subsequent hit.");
 		const m = state.getCombatMethods().find(x => x.name === "Cascade Strike");
 		expect(m.isMultiTarget).toBe(true);
 		expect(m.bonusDamage).toEqual({die: "1d6", condition: "per subsequent hit"});
@@ -541,7 +541,7 @@ describe("Combat Methods Survey — Parser Edge Cases", () => {
 
 	it("should handle stance with difficult terrain ignore", () => {
 		addMethod("Mountain Roots", "AM", 2,
-			"Bonus Action (1 Exertion Point). You root yourself. You can ignore the first 10 feet of difficult terrain each turn. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You root yourself. You can ignore the first 10 feet of difficult terrain each turn. This stance lasts until you end it.");
 		const m = state.getCombatMethods().find(x => x.name === "Mountain Roots");
 		expect(m.isStance).toBe(true);
 		expect(m.stanceEffects.otherEffects).toEqual([
@@ -551,7 +551,7 @@ describe("Combat Methods Survey — Parser Edge Cases", () => {
 
 	it("should handle method with 'as part of an attack' action type", () => {
 		addMethod("Trip Attack", "TI", 1,
-			"As part of an attack (1 Exertion Point), you attempt to trip the creature. It must make a Strength saving throw.");
+			"As part of an attack (1 Stamina Point), you attempt to trip the creature. It must make a Strength saving throw.");
 		const m = state.getCombatMethods().find(x => x.name === "Trip Attack");
 		expect(m.actionType).toBe("Attack");
 		expect(m.saveType).toBe("strength");
@@ -564,7 +564,7 @@ describe("Combat Methods Survey — Parser Edge Cases", () => {
 			source: "TGTT",
 			featureType: "Optional Feature",
 			optionalFeatureTypes: ["CTM:2ABC", "CTM:ABC", "CTM"],
-			description: "Action (1 Exertion Point). Test.",
+			description: "Action (1 Stamina Point). Test.",
 		});
 		const m = state.getCombatMethods().find(x => x.name === "Test Method");
 		expect(m.tradition).toBe("ABC");
@@ -660,7 +660,7 @@ describe("Combat Methods Survey — DC Calculation", () => {
 // EXERTION POOL
 // =========================================================================
 
-describe("Combat Methods Survey — Exertion Pool", () => {
+describe("Combat Methods Survey — Stamina Pool", () => {
 
 	beforeEach(() => {
 		state = new CharacterSheetState();
@@ -668,35 +668,35 @@ describe("Combat Methods Survey — Exertion Pool", () => {
 		state.addCombatTradition("AM");
 	});
 
-	it("should have exertion max = 2 × prof", () => {
-		state.ensureExertionInitialized();
-		expect(state.getExertionMax()).toBe(6); // prof 3 × 2
+	it("should have stamina max = 2 × prof", () => {
+		state.ensureStaminaInitialized();
+		expect(state.getStaminaMax()).toBe(6); // prof 3 × 2
 	});
 
-	it("should spend exertion for method use", () => {
-		state.ensureExertionInitialized();
+	it("should spend stamina for method use", () => {
+		state.ensureStaminaInitialized();
 		addMethod("Power Strike", "AM", 1,
-			"Action (2 Exertion Points). Make a melee weapon attack.");
+			"Action (2 Stamina Points). Make a melee weapon attack.");
 		const result = state.useCombatMethod("Power Strike");
 		expect(result).toBe(true);
-		expect(state.getExertionCurrent()).toBe(4); // 6 - 2
+		expect(state.getStaminaCurrent()).toBe(4); // 6 - 2
 	});
 
-	it("should fail on insufficient exertion", () => {
-		state.ensureExertionInitialized();
+	it("should fail on insufficient stamina", () => {
+		state.ensureStaminaInitialized();
 		addMethod("Grand Slam", "AM", 5,
-			"Action (5 Exertion Points). A massive overhead strike.");
+			"Action (5 Stamina Points). A massive overhead strike.");
 		// Spend down to 1
-		state.spendExertion(5);
+		state.spendStamina(5);
 		const result = state.useCombatMethod("Grand Slam");
 		expect(result).toBe(false);
-		expect(state.getExertionCurrent()).toBe(1); // unchanged
+		expect(state.getStaminaCurrent()).toBe(1); // unchanged
 	});
 
 	it("should auto-activate stance on use", () => {
-		state.ensureExertionInitialized();
+		state.ensureStaminaInitialized();
 		addMethod("Heavy Stance", "AM", 1,
-			"Bonus Action (1 Exertion Point). You enter a heavily-braced stance. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You enter a heavily-braced stance. This stance lasts until you end it.");
 		state.useCombatMethod("Heavy Stance");
 		expect(state.getActiveStance()).toBe("Heavy Stance");
 	});
@@ -717,7 +717,7 @@ describe("Combat Methods Survey — Stance Activation Bridge", () => {
 
 	it("should apply stance skill bonus when activated via activateStance()", () => {
 		addMethod("Wary Stance", "MG", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus. This stance lasts until you end it.");
 
 		state.activateStance("Wary Stance");
 		const calcs = state.getFeatureCalculations();
@@ -726,7 +726,7 @@ describe("Combat Methods Survey — Stance Activation Bridge", () => {
 
 	it("should clear stance skill bonus on deactivateStance()", () => {
 		addMethod("Wary Stance", "MG", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus. This stance lasts until you end it.");
 
 		state.activateStance("Wary Stance");
 		expect(state.getFeatureCalculations().stanceSkillBonuses?.insight).toBe(3);
@@ -738,7 +738,7 @@ describe("Combat Methods Survey — Stance Activation Bridge", () => {
 
 	it("should NOT double-count stance skill bonus via getSkillBonusFromStates()", () => {
 		addMethod("Iron Stance", "TI", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it.");
 
 		// Activate stance — this sets _data.activeStance
 		state.activateStance("Iron Stance");
@@ -746,7 +746,7 @@ describe("Combat Methods Survey — Stance Activation Bridge", () => {
 		// Also simulate what the UI does — add as active state with parsed effects
 		state.addActiveState("combatStance", {
 			name: "Iron Stance",
-			description: "Bonus Action (1 Exertion Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it.",
+			description: "Bonus Action (1 Stamina Point). You gain a bonus to Strength (Athletics) checks equal to your proficiency bonus. This stance lasts until you end it.",
 			customEffects: [{type: "bonus", target: "check:str:athletics", useProficiency: true}],
 		});
 
@@ -761,7 +761,7 @@ describe("Combat Methods Survey — Stance Activation Bridge", () => {
 
 	it("should NOT double-count stance save bonus via getSaveBonusFromStates()", () => {
 		addMethod("Guard Stance", "TI", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus equal to your proficiency bonus on saving throws made to resist being moved. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus equal to your proficiency bonus on saving throws made to resist being moved. This stance lasts until you end it.");
 
 		state.activateStance("Guard Stance");
 
@@ -791,7 +791,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 
 	it("should parse passive bonus from stance description", () => {
 		addMethod("Wary Stance", "MG", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
 
 		const methods = state.getCombatMethods();
 		const wary = methods.find(m => m.name === "Wary Stance");
@@ -800,7 +800,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 
 	it("should parse passive bonus alongside skill bonus", () => {
 		addMethod("Wary Stance", "MG", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
 
 		const methods = state.getCombatMethods();
 		const wary = methods.find(m => m.name === "Wary Stance");
@@ -810,7 +810,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 
 	it("should apply passive bonus to getPassiveScore() when stance is active", () => {
 		addMethod("Wary Stance", "MG", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
 
 		const basePassive = state.getPassiveScore("insight");
 
@@ -823,7 +823,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 
 	it("should remove passive bonus from getPassiveScore() when stance deactivated", () => {
 		addMethod("Wary Stance", "MG", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
 
 		const basePassive = state.getPassiveScore("insight");
 
@@ -836,7 +836,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 
 	it("should include stancePassiveBonuses in feature calculations", () => {
 		addMethod("Wary Stance", "MG", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
 
 		state.activateStance("Wary Stance");
 		const calcs = state.getFeatureCalculations();
@@ -845,7 +845,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 
 	it("should NOT include stancePassiveBonuses when no stance is active", () => {
 		addMethod("Wary Stance", "MG", 1,
-			"Bonus Action (1 Exertion Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you end it.");
 
 		const calcs = state.getFeatureCalculations();
 		expect(calcs.stancePassiveBonuses).toBeUndefined();
@@ -853,7 +853,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 
 	it("should handle stance with no passive bonus", () => {
 		addMethod("Shadow Stance", "MS", 1,
-			"Bonus Action (1 Exertion Point). You enter a shadowy stance. You gain a bonus to Dexterity (Stealth) checks equal to your proficiency bonus. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You enter a shadowy stance. You gain a bonus to Dexterity (Stealth) checks equal to your proficiency bonus. This stance lasts until you end it.");
 
 		state.activateStance("Shadow Stance");
 		const calcs = state.getFeatureCalculations();
@@ -863,7 +863,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 
 	it("should parse multiple skill bonuses from a single stance (Deceptive Stance)", () => {
 		addMethod("Deceptive Stance", "CJ", 1,
-			"Bonus Action (1 Exertion Point). You adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (Sleight of Hand) and Charisma (Deception) checks equal to your proficiency bonus. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (Sleight of Hand) and Charisma (Deception) checks equal to your proficiency bonus. This stance lasts until you end it.");
 
 		const methods = state.getCombatMethods();
 		const deceptive = methods.find(m => m.name === "Deceptive Stance");
@@ -876,7 +876,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 
 	it("should apply both skill bonuses when Deceptive Stance is active", () => {
 		addMethod("Deceptive Stance", "CJ", 1,
-			"Bonus Action (1 Exertion Point). You adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (Sleight of Hand) and Charisma (Deception) checks equal to your proficiency bonus. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (Sleight of Hand) and Charisma (Deception) checks equal to your proficiency bonus. This stance lasts until you end it.");
 
 		state.activateStance("Deceptive Stance");
 		const calcs = state.getFeatureCalculations();
@@ -891,7 +891,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 			source: "TGTT",
 			featureType: "Optional Feature",
 			optionalFeatureTypes: ["CTM:1MG", "CTM:MG", "CTM"],
-			description: '<b>Bonus Action (1 Exertion Point)</b>. As a bonus action, you adopt a keenly observant stance. While in this stance, you gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you are <a href="#">incapacitated</a> or use a bonus action to end it.',
+			description: '<b>Bonus Action (1 Stamina Point)</b>. As a bonus action, you adopt a keenly observant stance. While in this stance, you gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you are <a href="#">incapacitated</a> or use a bonus action to end it.',
 		});
 
 		state.activateStance("Wary Stance");
@@ -906,7 +906,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 			source: "TGTT",
 			featureType: "Optional Feature",
 			optionalFeatureTypes: ["CTM:1CJ", "CTM:CJ", "CTM"],
-			description: '<b>Bonus Action (1 Exertion Point)</b>. As a bonus action, you adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (<span class="skill-link">Sleight of Hand</span>) and Charisma (<span class="skill-link">Deception</span>) checks equal to your proficiency bonus. This stance lasts until you are <a href="#">incapacitated</a> or use a bonus action to end it.',
+			description: '<b>Bonus Action (1 Stamina Point)</b>. As a bonus action, you adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (<span class="skill-link">Sleight of Hand</span>) and Charisma (<span class="skill-link">Deception</span>) checks equal to your proficiency bonus. This stance lasts until you are <a href="#">incapacitated</a> or use a bonus action to end it.',
 		});
 
 		state.activateStance("Deceptive Stance");
@@ -929,7 +929,7 @@ describe("Combat Methods Survey — Method Category Classification", () => {
 
 	it("should classify Wounding Strike as weaponModifier", () => {
 		addMethod("Wounding Strike", "UW", 1,
-			"Bonus Action (2 Exertion Points). Choose a weapon. If you hit with your next attack roll using the chosen weapon against a living creature, you deliver a wound that deals 1d4 ongoing damage.");
+			"Bonus Action (2 Stamina Points). Choose a weapon. If you hit with your next attack roll using the chosen weapon against a living creature, you deliver a wound that deals 1d4 ongoing damage.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Wounding Strike");
 		expect(m.methodCategory).toBe("weaponModifier");
@@ -937,7 +937,7 @@ describe("Combat Methods Survey — Method Category Classification", () => {
 
 	it("should classify stances as stance category", () => {
 		addMethod("Wary Stance", "MG", 1,
-			"Bonus Action (1 Exertion Point). You adopt a keenly observant stance. While in this stance, you gain a bonus. This stance lasts until you end it.");
+			"Bonus Action (1 Stamina Point). You adopt a keenly observant stance. While in this stance, you gain a bonus. This stance lasts until you end it.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Wary Stance");
 		expect(m.methodCategory).toBe("stance");
@@ -945,7 +945,7 @@ describe("Combat Methods Survey — Method Category Classification", () => {
 
 	it("should classify healing methods as selfHeal", () => {
 		addMethod("Catch Your Breath", "AM", 1,
-			"Bonus Action (1 Exertion Point). You regain hit points equal to 1d6 + your proficiency bonus + your Constitution modifier.");
+			"Bonus Action (1 Stamina Point). You regain hit points equal to 1d6 + your proficiency bonus + your Constitution modifier.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Catch Your Breath");
 		expect(m.methodCategory).toBe("selfHeal");
@@ -953,7 +953,7 @@ describe("Combat Methods Survey — Method Category Classification", () => {
 
 	it("should classify reaction methods as reaction", () => {
 		addMethod("Deflect Strike", "UW", 2,
-			"Reaction (1 Exertion Point). When hit by a melee attack, reduce the damage by your proficiency bonus d6.");
+			"Reaction (1 Stamina Point). When hit by a melee attack, reduce the damage by your proficiency bonus d6.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Deflect Strike");
 		expect(m.methodCategory).toBe("reaction");
@@ -961,7 +961,7 @@ describe("Combat Methods Survey — Method Category Classification", () => {
 
 	it("should classify AC buff methods as acBuff", () => {
 		addMethod("Warding Wield", "AM", 2,
-			"Bonus Action (1 Exertion Point). Your AC increases by 2 until the start of your next turn.");
+			"Bonus Action (1 Stamina Point). Your AC increases by 2 until the start of your next turn.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Warding Wield");
 		expect(m.methodCategory).toBe("acBuff");
@@ -969,7 +969,7 @@ describe("Combat Methods Survey — Method Category Classification", () => {
 
 	it("should default unknown methods to instant", () => {
 		addMethod("Unknown Method", "AM", 1,
-			"Action (1 Exertion Point). You do something mysterious.");
+			"Action (1 Stamina Point). You do something mysterious.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Unknown Method");
 		expect(m.methodCategory).toBe("instant");
@@ -989,7 +989,7 @@ describe("Combat Methods Survey — Weapon Modifier Parsing", () => {
 
 	it("should parse ongoing damage dice from Wounding Strike", () => {
 		addMethod("Wounding Strike", "UW", 1,
-			"Bonus Action (2 Exertion Points). Choose a weapon. If you hit with your next attack roll using the chosen weapon against a living creature, you deliver a wound that deals 1d4 ongoing damage.");
+			"Bonus Action (2 Stamina Points). Choose a weapon. If you hit with your next attack roll using the chosen weapon against a living creature, you deliver a wound that deals 1d4 ongoing damage.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Wounding Strike");
 		expect(m.ongoingDamage).toBe("1d4");
@@ -997,7 +997,7 @@ describe("Combat Methods Survey — Weapon Modifier Parsing", () => {
 
 	it("should parse ongoing save type from Wounding Strike description", () => {
 		addMethod("Wounding Strike", "UW", 1,
-			"Bonus Action (2 Exertion Points). Choose a weapon. If you hit with your next attack roll, you deliver a wound that deals 1d4 ongoing damage. At the start of each of the wounded creature's turns, it makes a Constitution saving throw, ending the effect on itself on a success.");
+			"Bonus Action (2 Stamina Points). Choose a weapon. If you hit with your next attack roll, you deliver a wound that deals 1d4 ongoing damage. At the start of each of the wounded creature's turns, it makes a Constitution saving throw, ending the effect on itself on a success.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Wounding Strike");
 		expect(m.ongoingSaveType).toBe("constitution");
@@ -1005,7 +1005,7 @@ describe("Combat Methods Survey — Weapon Modifier Parsing", () => {
 
 	it("should parse alternative end condition (Medicine check)", () => {
 		addMethod("Wounding Strike", "UW", 1,
-			"Bonus Action (2 Exertion Points). If you hit with your next attack roll, it deals 1d4 ongoing damage. A creature within 5 feet can use an action to make a Medicine check against your method DC, ending the ongoing damage on a success.");
+			"Bonus Action (2 Stamina Points). If you hit with your next attack roll, it deals 1d4 ongoing damage. A creature within 5 feet can use an action to make a Medicine check against your method DC, ending the ongoing damage on a success.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Wounding Strike");
 		expect(m.alternativeEndCheck).toBe("medicine");
@@ -1013,7 +1013,7 @@ describe("Combat Methods Survey — Weapon Modifier Parsing", () => {
 
 	it("should not parse ongoing damage for non-weapon-modifier methods", () => {
 		addMethod("Power Strike", "AM", 1,
-			"Action (1 Exertion Point). Make a melee weapon attack against a creature within reach.");
+			"Action (1 Stamina Point). Make a melee weapon attack against a creature within reach.");
 		const methods = state.getCombatMethods();
 		const m = methods.find(x => x.name === "Power Strike");
 		expect(m.ongoingDamage).toBeUndefined();

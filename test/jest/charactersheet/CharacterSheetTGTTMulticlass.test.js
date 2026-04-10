@@ -177,11 +177,11 @@ describe("TGTT Multiclass Builds", () => {
 				expect(state.usesCombatSystem()).toBe(true);
 			});
 
-			it("should have exertion pool based on total proficiency", () => {
+			it("should have stamina pool based on total proficiency", () => {
 				makeRangerDruid(7, 3); // total 10, prof 4
 				state.addCombatTradition("Rapid Current");
-				state.ensureExertionInitialized();
-				expect(state.getExertionMax()).toBe(8); // 2 × 4
+				state.ensureStaminaInitialized();
+				expect(state.getStaminaMax()).toBe(8); // 2 × 4
 			});
 		});
 
@@ -373,17 +373,17 @@ describe("TGTT Multiclass Builds", () => {
 				expect(state.usesCombatSystem()).toBe(true);
 			});
 
-			it("should scale exertion with total proficiency", () => {
+			it("should scale stamina with total proficiency", () => {
 				makeSorlock(7, 3); // total 10, prof 4
 				state.addCombatTradition("Mirror's Glint");
-				state.ensureExertionInitialized();
-				expect(state.getExertionMax()).toBe(8); // 2 × 4
+				state.ensureStaminaInitialized();
+				expect(state.getStaminaMax()).toBe(8); // 2 × 4
 			});
 
 			it("should use Hexblade spellcasting DC override for combat methods", () => {
 				makeSorlock(7, 3);
 				state.addCombatTradition("Mirror's Glint");
-				state.ensureExertionInitialized();
+				state.ensureStaminaInitialized();
 				state.applyClassFeatureEffects();
 				const calcs = state.getFeatureCalculations();
 				// Physical DC = 8 + prof(4) + DEX(+2) = 14

@@ -82,29 +82,29 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(out.spellcasting[0].spells[1].spells.some(s => s.includes("sleep"))).toBe(true);
 	});
 
-	it("should include combat methods grouped by exertion cost", () => {
+	it("should include combat methods grouped by stamina cost", () => {
 		state.addFeature({
 			name: "Flowing Strike",
 			source: "TGTT",
 			featureType: "Optional Feature",
 			optionalFeatureTypes: ["CTM:2RC"],
-			description: "As an Action (1 Exertion Point), make a quick strike.",
+			description: "As an Action (1 Stamina Point), make a quick strike.",
 		});
 		state.addFeature({
 			name: "Rooted Stance",
 			source: "TGTT",
 			featureType: "Optional Feature",
 			optionalFeatureTypes: ["CTM:1AM"],
-			description: "As a Bonus Action (0 Exertion Points), you enter a stance. This stance lasts until dismissed.",
+			description: "As a Bonus Action (0 Stamina Points), you enter a stance. This stance lasts until dismissed.",
 		});
 		state.addFeature({
 			name: "Crushing Wave",
 			source: "TGTT",
 			featureType: "Optional Feature",
 			optionalFeatureTypes: ["CTM:3SM"],
-			description: "As an Action (2 Exertion Points), force a Strength save.",
+			description: "As an Action (2 Stamina Points), force a Strength save.",
 		});
-		state.setExertionMax(6);
+		state.setStaminaMax(6);
 
 		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
 		const methodsTrait = out.trait.find(t => t.name === "Combat Methods");

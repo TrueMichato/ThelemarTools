@@ -37,8 +37,8 @@ state._data.combatTraditions = [
 	{code: "TI", name: "Tempered Iron"},
 	{code: "GH", name: "Gallant Heart"},
 ];
-state._data.exertionMax = 6;
-state._data.exertionCurrent = 4;
+state._data.staminaMax = 6;
+state._data.staminaCurrent = 4;
 
 const pdf = new CharacterSheetPdf(state);
 const html = pdf.generate();

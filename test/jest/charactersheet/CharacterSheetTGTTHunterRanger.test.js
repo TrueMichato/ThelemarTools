@@ -255,10 +255,10 @@ describe("TGTT Hunter Ranger", () => {
 			expect(state.usesCombatSystem()).toBe(true);
 		});
 
-		it("should have exertion pool = 2 × prof", () => {
+		it("should have stamina pool = 2 × prof", () => {
 			state.addCombatTradition("Rapid Current");
-			state.ensureExertionInitialized();
-			expect(state.getExertionMax()).toBe(6); // prof 3 × 2
+			state.ensureStaminaInitialized();
+			expect(state.getStaminaMax()).toBe(6); // prof 3 × 2
 		});
 
 		it("should support 6 combat traditions", () => {

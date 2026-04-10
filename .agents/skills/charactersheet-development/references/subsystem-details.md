@@ -192,7 +192,7 @@ Users can configure custom source with `charsheet-npc-export-source-config` stor
 - **Arcane Recovery** (Wizard): Select slot levels to recover, capped by LEVEL SUM (not count). "Max 5 levels" means any combo summing ≤5. No 6th+ slots.
 - **Natural Recovery** (Land Druid): Same mechanic as Arcane Recovery
 - **Sorcerous Restoration** (Sorcerer 20): Auto-applies via `state.applySorcerousRestoration()`, not manual
-- **Exertion pool** (TGTT): Restores on BOTH short and long rest
+- **Stamina pool** (TGTT): Restores on BOTH short and long rest
 
 ### Long Rest
 - Full HP + half hit dice recovered (minimum 1 per die type)
@@ -243,7 +243,7 @@ Features are classified into display categories via `FEATURE_CLASSIFICATION_OVER
     grantsAdvantage: true,
     isMultiTarget: true,
     choiceModal: true,  // Detected from "replace" wording (e.g., FoHaH replaces FoB attack)
-    exertionCost: 2,
+    staminaCost: 2,
 }
 ```
 
@@ -288,7 +288,7 @@ Applied via `combatTradition` effect type during feature calculations. Cleared a
 ### Test Coverage
 
 - `CharacterSheetCombatActionEffects.test.js` — 90 tests: effect pipeline, modal rendering, dice rolling, choice modals, Patient Defense preview, FoHaH choice integration
-- `CharacterSheetCombatMethodsSurvey.test.js` — 81 tests: all 17 traditions parsed, stance integration, subclass grants, degree progression, DC calculation, exertion pool
+- `CharacterSheetCombatMethodsSurvey.test.js` — 81 tests: all 17 traditions parsed, stance integration, subclass grants, degree progression, DC calculation, stamina pool
 
 ## Custom Abilities
 

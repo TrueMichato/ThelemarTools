@@ -10,7 +10,7 @@
  * - Hexblade's Curse toggle (L1)
  * - Accursed Specter (L6), Armor of Hexes (L10), Master of Hexes (L14)
  * - Pact Magic slot scaling
- * - Exertion pool with spell-save DC as combat method DC
+ * - Stamina pool with spell-save DC as combat method DC
  * - Full L1→20 progression
  */
 
@@ -191,14 +191,14 @@ describe("TGTT Hexblade Warlock", () => {
 			expect(state.usesCombatSystem()).toBe(true);
 		});
 
-		it("should have an exertion pool based on level", () => {
-			state.ensureExertionInitialized();
-			const maxEx = state.getExertionMax();
+		it("should have an stamina pool based on level", () => {
+			state.ensureStaminaInitialized();
+			const maxSt = state.getStaminaMax();
 			expect(maxEx).toBeGreaterThan(0);
 		});
 
 		it("should use higher of physical or spellcasting DC per TGTT", () => {
-			state.ensureExertionInitialized();
+			state.ensureStaminaInitialized();
 			state.applyClassFeatureEffects();
 			const calcs = state.getFeatureCalculations();
 			// TGTT Hexblade: "You can use your spellcasting DC in place of your method DC"
@@ -222,31 +222,31 @@ describe("TGTT Hexblade Warlock", () => {
 			expect(traditions.length).toBe(7);
 		});
 
-		it("should spend and restore exertion", () => {
-			state.ensureExertionInitialized();
-			const max = state.getExertionMax();
-			state.spendExertion(2);
-			expect(state.getExertionCurrent()).toBe(max - 2);
+		it("should spend and restore stamina", () => {
+			state.ensureStaminaInitialized();
+			const max = state.getStaminaMax();
+			state.spendStamina(2);
+			expect(state.getStaminaCurrent()).toBe(max - 2);
 
-			// restoreExertion() restores to full (no partial restore)
-			state.restoreExertion();
-			expect(state.getExertionCurrent()).toBe(max);
+			// restoreStamina() restores to full (no partial restore)
+			state.restoreStamina();
+			expect(state.getStaminaCurrent()).toBe(max);
 		});
 
-		it("should scale exertion pool at higher levels", () => {
+		it("should scale stamina pool at higher levels", () => {
 			const lowLevel = new CharacterSheetState();
 			lowLevel.addClass({name: "Warlock", source: "TGTT", level: 3,
 				subclass: {name: "The Hexblade", shortName: "Hexblade", source: "TGTT"}});
 			lowLevel.addCombatTradition({name: "Mirror's Glint", source: "TGTT"});
-			lowLevel.ensureExertionInitialized();
+			lowLevel.ensureStaminaInitialized();
 
 			const highLevel = new CharacterSheetState();
 			highLevel.addClass({name: "Warlock", source: "TGTT", level: 15,
 				subclass: {name: "The Hexblade", shortName: "Hexblade", source: "TGTT"}});
 			highLevel.addCombatTradition({name: "Mirror's Glint", source: "TGTT"});
-			highLevel.ensureExertionInitialized();
+			highLevel.ensureStaminaInitialized();
 
-			expect(highLevel.getExertionMax()).toBeGreaterThan(lowLevel.getExertionMax());
+			expect(highLevel.getStaminaMax()).toBeGreaterThan(lowLevel.getStaminaMax());
 		});
 	});
 

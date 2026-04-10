@@ -1792,54 +1792,54 @@ class CharacterSheetFeatures {
 		const usesCombatSystem = this._state.usesCombatSystem?.() || false;
 
 		if (usesCombatSystem) {
-			// Ensure exertion is initialized (use public method)
-			if (typeof this._state.ensureExertionInitialized === "function") {
-				this._state.ensureExertionInitialized();
+			// Ensure stamina is initialized (use public method)
+			if (typeof this._state.ensureStaminaInitialized === "function") {
+				this._state.ensureStaminaInitialized();
 			}
 
-			const exertionMax = this._state.getExertionMax() || 0;
-			const exertionCurrent = this._state.getExertionCurrent() ?? exertionMax;
+			const staminaMax = this._state.getStaminaMax() || 0;
+			const staminaCurrent = this._state.getStaminaCurrent() ?? staminaMax;
 
-			if (exertionMax > 0) {
-				const exertion = e_({outer: `
-					<div class="charsheet__resource-row" data-resource-id="exertion">
-						<span class="charsheet__resource-name">Exertion</span>
+			if (staminaMax > 0) {
+				const stamina = e_({outer: `
+					<div class="charsheet__resource-row" data-resource-id="stamina">
+						<span class="charsheet__resource-name">Stamina</span>
 						<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(Short)</span>
 						<div class="charsheet__resource-uses ml-auto">
-							<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__exertion-use-btn" ${exertionCurrent <= 0 ? "disabled" : ""}>Use</button>
-							<span class="charsheet__resource-current">${exertionCurrent}</span>
-							<span class="charsheet__resource-max">/ ${exertionMax}</span>
-							<button class="ve-btn ve-btn-xs ve-btn-success ml-2 charsheet__exertion-restore-btn" ${exertionCurrent >= exertionMax ? "disabled" : ""}>+</button>
+							<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__stamina-use-btn" ${staminaCurrent <= 0 ? "disabled" : ""}>Use</button>
+							<span class="charsheet__resource-current">${staminaCurrent}</span>
+							<span class="charsheet__resource-max">/ ${staminaMax}</span>
+							<button class="ve-btn ve-btn-xs ve-btn-success ml-2 charsheet__stamina-restore-btn" ${staminaCurrent >= staminaMax ? "disabled" : ""}>+</button>
 						</div>
 					</div>
 				`});
 
-				// Use button - decrease exertion by 1
-				exertion.querySelector(".charsheet__exertion-use-btn").addEventListener("click", () => {
-					const current = this._state.getExertionCurrent() || 0;
+				// Use button - decrease stamina by 1
+				stamina.querySelector(".charsheet__stamina-use-btn").addEventListener("click", () => {
+					const current = this._state.getStaminaCurrent() || 0;
 					if (current > 0) {
-						this._state.setExertionCurrent(current - 1);
+						this._state.setStaminaCurrent(current - 1);
 						this._renderResources();
 						if (this._page?._combat) {
-							this._page._combat._updateExertionDisplay();
+							this._page._combat._updateStaminaDisplay();
 						}
 					}
 				});
 
-				// Restore button - increase exertion by 1
-				exertion.querySelector(".charsheet__exertion-restore-btn").addEventListener("click", () => {
-					const current = this._state.getExertionCurrent() || 0;
-					const max = this._state.getExertionMax() || 0;
+				// Restore button - increase stamina by 1
+				stamina.querySelector(".charsheet__stamina-restore-btn").addEventListener("click", () => {
+					const current = this._state.getStaminaCurrent() || 0;
+					const max = this._state.getStaminaMax() || 0;
 					if (current < max) {
-						this._state.setExertionCurrent(current + 1);
+						this._state.setStaminaCurrent(current + 1);
 						this._renderResources();
 						if (this._page?._combat) {
-							this._page._combat._updateExertionDisplay();
+							this._page._combat._updateStaminaDisplay();
 						}
 					}
 				});
 
-				container.append(exertion);
+				container.append(stamina);
 			}
 		}
 
@@ -1891,7 +1891,7 @@ class CharacterSheetFeatures {
 			if (!uses) return;
 			
 			// Skip if this ability links to an existing resource pool (already shown above)
-			if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId !== "exertion") {
+			if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId !== "stamina") {
 				const linkedResource = resources.find(r => r.id === ability.resourceSource.resourceId);
 				if (linkedResource) return;
 			}

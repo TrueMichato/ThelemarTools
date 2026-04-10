@@ -571,9 +571,9 @@ class CharacterSheetRest {
 			}
 		});
 
-		// Restore exertion (Combat Methods system) - recovers on both short and long rests
+		// Restore stamina (Combat Methods system) - recovers on both short and long rests
 		if (this._state.usesCombatSystem?.()) {
-			this._state.restoreExertion?.();
+			this._state.restoreStamina?.();
 		}
 
 		// Restore Primal Focus (TGTT Ranger) - only on long rest

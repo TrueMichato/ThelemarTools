@@ -99,14 +99,14 @@ All abilities tracked with prerequisite validation:
 
 ### The Warder (Fighter Variant)
 
-TGTT's Fighter class variant with focus on exertion and combat traditions.
+TGTT's Fighter class variant with focus on stamina and combat traditions.
 
 #### ✅ Core Features
 
 | Feature | Level | Implementation |
 |---------|-------|----------------|
 | **Combat Traditions** | 1 | Selectable tradition + methods |
-| **Exertion Pool** | 1 | Uses per rest resource |
+| **Stamina Pool** | 1 | Uses per rest resource |
 | **Specialties** | 1, 5, 9, 13, 17 | Feature choice selections |
 | **Battle Tactics** | Various | See Battle Tactics section |
 | **Auto-Grant Traditions** | 3 (Warder) | Tempered Iron + Gallant Heart via `_subclassGrantedTraditions` |
@@ -176,15 +176,15 @@ Generic `_subclassGrantedTraditions` pattern feeds into `combatTradition` effect
 
 ## Combat Methods System
 
-The exertion-based combat system is fully implemented.
+The stamina-based combat system is fully implemented.
 
 ### ✅ Core Mechanics
 
 | Feature | Implementation |
 |---------|----------------|
-| **Exertion Pool** | `exertionPool = 2 × proficiency bonus` |
-| **Exertion Recovery** | Full on long rest, half (rounded up) on short rest |
-| **Method Costs** | 1-3 exertion per method |
+| **Stamina Pool** | `staminaPool = 2 × proficiency bonus` |
+| **Stamina Recovery** | Full on long rest, half (rounded up) on short rest |
+| **Method Costs** | 1-3 stamina per method |
 | **Method DC** | `8 + proficiency + STR or DEX` |
 | **Stance System** | One active stance at a time, stance speed bonus wired into `getSpeedBonusFromStates()` |
 
@@ -390,7 +390,7 @@ These would require broader system changes:
 ### Test Files
 
 - `CharacterSheetTGTT.test.js` — 737 tests (core TGTT systems)
-- `CharacterSheetCombatMethodsSurvey.test.js` — 81 tests (Phase D: tradition parsing, stance integration, subclass tradition grants, edge cases, degree progression, DC calculation, exertion pool)
+- `CharacterSheetCombatMethodsSurvey.test.js` — 81 tests (Phase D: tradition parsing, stance integration, subclass tradition grants, edge cases, degree progression, DC calculation, stamina pool)
 
 ### Test Categories
 
@@ -477,6 +477,6 @@ if (raceName?.toLowerCase()?.includes("newrace") ||
 
 - [Feature Calculations](./05-feature-calculations.md) - How getFeatureCalculations() works
 - [Toggle Abilities](./08-toggle-abilities.md) - Combat stances and modes
-- [Combat System](./06-combat-system.md) - Exertion and methods
+- [Combat System](./06-combat-system.md) - Stamina and methods
 - [Testing Strategy](./09-testing-strategy.md) - Test patterns
 

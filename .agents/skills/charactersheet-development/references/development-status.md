@@ -159,7 +159,7 @@ Tracked in `CHARACTERSHEET_TEST_AUDIT.md`:
 
 TGTT (Thelemar) content is deeply integrated throughout the codebase. It's gated by settings flags but touches:
 - `charactersheet-state.js` — Feature calculations, combat traditions, dream magic
-- `charactersheet-combat.js` — Exertion system, combat methods
+- `charactersheet-combat.js` — Stamina system, combat methods
 - `charactersheet-spells.js` — Spell rarity system
 - `charactersheet-builder.js` — Combat tradition selections
 - `charactersheet-levelup.js` — Tradition/tactic selections at level-up

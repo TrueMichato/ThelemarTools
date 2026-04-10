@@ -5077,7 +5077,7 @@ class CharacterSheetPage {
 		
 		// Count abilities that will be shown (exclude those linking to existing resources)
 		const visibleLimitedAbilities = limitedAbilities.filter(a => {
-			if (a.resourceSource?.type === "linked" && a.resourceSource?.resourceId !== "exertion") {
+			if (a.resourceSource?.type === "linked" && a.resourceSource?.resourceId !== "stamina") {
 				const linkedResource = resources.find(r => r.id === a.resourceSource.resourceId);
 				if (linkedResource) return false; // Skip - already shown in resources
 			}
@@ -5087,56 +5087,56 @@ class CharacterSheetPage {
 		// Update resources count badge
 		let totalResourceCount = resources.length + visibleLimitedAbilities.length;
 		if (usesCombatSystem) {
-			const exertionMax = this._state.getExertionMax() || 0;
-			if (exertionMax > 0) totalResourceCount++;
+			const staminaMax = this._state.getStaminaMax() || 0;
+			if (staminaMax > 0) totalResourceCount++;
 		}
 		document.getElementById("charsheet-resources-count").textContent = totalResourceCount;
 
-		// Show exertion if character uses combat methods system
+		// Show stamina if character uses combat methods system
 		if (usesCombatSystem) {
-			// Ensure exertion is initialized
-			if (typeof this._state.ensureExertionInitialized === "function") {
-				this._state.ensureExertionInitialized();
+			// Ensure stamina is initialized
+			if (typeof this._state.ensureStaminaInitialized === "function") {
+				this._state.ensureStaminaInitialized();
 			}
 			
-			const exertionMax = this._state.getExertionMax() || 0;
-			const exertionCurrent = this._state.getExertionCurrent() ?? exertionMax;
+			const staminaMax = this._state.getStaminaMax() || 0;
+			const staminaCurrent = this._state.getStaminaCurrent() ?? staminaMax;
 			
-			if (exertionMax > 0) {
+			if (staminaMax > 0) {
 				const row = e_({outer: `
-					<div class="charsheet__resource-row" data-resource-id="exertion">
-						<span class="charsheet__resource-name">Exertion</span>
+					<div class="charsheet__resource-row" data-resource-id="stamina">
+						<span class="charsheet__resource-name">Stamina</span>
 						<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(Short)</span>
 						<div class="charsheet__resource-uses ml-auto">
-							<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__exertion-use-btn" ${exertionCurrent <= 0 ? "disabled" : ""}>Use</button>
-							<span class="charsheet__resource-current">${exertionCurrent}</span>
-							<span class="charsheet__resource-max">/ ${exertionMax}</span>
-							<button class="ve-btn ve-btn-xs ve-btn-success ml-2 charsheet__exertion-restore-btn" ${exertionCurrent >= exertionMax ? "disabled" : ""}>+</button>
+							<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__stamina-use-btn" ${staminaCurrent <= 0 ? "disabled" : ""}>Use</button>
+							<span class="charsheet__resource-current">${staminaCurrent}</span>
+							<span class="charsheet__resource-max">/ ${staminaMax}</span>
+							<button class="ve-btn ve-btn-xs ve-btn-success ml-2 charsheet__stamina-restore-btn" ${staminaCurrent >= staminaMax ? "disabled" : ""}>+</button>
 						</div>
 					</div>
 				`});
 
-				row.querySelector(".charsheet__exertion-use-btn").addEventListener("click", () => {
-					const current = this._state.getExertionCurrent() || 0;
+				row.querySelector(".charsheet__stamina-use-btn").addEventListener("click", () => {
+					const current = this._state.getStaminaCurrent() || 0;
 					if (current > 0) {
-						this._state.setExertionCurrent(current - 1);
+						this._state.setStaminaCurrent(current - 1);
 						this._saveCurrentCharacter();
 						this._renderResources();
 						this._renderActiveStates(); // Refresh active states to update Activate button states
 						if (this._features) this._features._renderResources();
-						if (this._combat) this._combat._updateExertionDisplay();
+						if (this._combat) this._combat._updateStaminaDisplay();
 					}
 				});
 
-				row.querySelector(".charsheet__exertion-restore-btn").addEventListener("click", () => {
-					const current = this._state.getExertionCurrent() || 0;
-					if (current < exertionMax) {
-						this._state.setExertionCurrent(current + 1);
+				row.querySelector(".charsheet__stamina-restore-btn").addEventListener("click", () => {
+					const current = this._state.getStaminaCurrent() || 0;
+					if (current < staminaMax) {
+						this._state.setStaminaCurrent(current + 1);
 						this._saveCurrentCharacter();
 						this._renderResources();
 						this._renderActiveStates(); // Refresh active states to update Activate button states
 						if (this._features) this._features._renderRvisibleLsources();
-						if (this._combat) this._combat._updateExertionDisplay();
+						if (this._combat) this._combat._updateStaminaDisplay();
 					}
 				});
 
@@ -5193,7 +5193,7 @@ class CharacterSheetPage {
 			if (!uses) return;
 			
 			// Check if this ability links to an existing resource pool (don't show duplicate)
-			if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId !== "exertion") {
+			if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId !== "stamina") {
 				const linkedResource = resources.find(r => r.id === ability.resourceSource.resourceId);
 				if (linkedResource) {
 					// Skip - the linked resource is already shown in the resources list
@@ -5529,10 +5529,10 @@ class CharacterSheetPage {
 			let costHtml = "";
 			const kiMatch = desc.match(/(\d+)\s*ki\s*point/);
 			const focusMatch = desc.match(/(\d+)\s*focus\s*point/);
-			const exertionMatch = desc.match(/(\d+)\s*exertion/);
+			const staminaMatch = desc.match(/(\d+)\s*stamina/);
 			if (kiMatch) costHtml = `<span class="ve-small ve-muted mr-1">${kiMatch[1]} Ki</span>`;
 			else if (focusMatch) costHtml = `<span class="ve-small ve-muted mr-1">${focusMatch[1]} Focus</span>`;
-			else if (exertionMatch) costHtml = `<span class="ve-small ve-muted mr-1">${exertionMatch[1]} Exertion</span>`;
+			else if (staminaMatch) costHtml = `<span class="ve-small ve-muted mr-1">${staminaMatch[1]} Stamina</span>`;
 
 			// Uses display
 			let usesHtml = "";
@@ -5646,7 +5646,7 @@ class CharacterSheetPage {
 					const customAbility = isCustomAbility ? this._state.getCustomAbility?.(feature.id) : null;
 					const icon = customAbility?.icon || stateType?.icon || "⚡";
 					// Use resource cost from description detection, or resource object, or default
-					const resourceCost = resource?.cost || activationInfo.exertionCost || stateType?.resourceCost || 1;
+					const resourceCost = resource?.cost || activationInfo.staminaCost || stateType?.resourceCost || 1;
 					const hasResourceAvailable = !resource || resource.current >= resourceCost;
 					
 					// Determine if this is a limited-use ability (uses up charges, doesn't stay active)
@@ -5671,9 +5671,9 @@ class CharacterSheetPage {
 					if (resource) {
 						resourceInfo = `${resource.current}/${resource.max} ${resource.name}`;
 						resourceTooltip = `Uses ${resourceCost} ${resource.name} (${resource.current}/${resource.max} remaining)`;
-					} else if (activationInfo.exertionCost) {
-						resourceInfo = `${resourceCost} Exertion`;
-						resourceTooltip = `Costs ${resourceCost} Exertion`;
+					} else if (activationInfo.staminaCost) {
+						resourceInfo = `${resourceCost} Stamina`;
+						resourceTooltip = `Costs ${resourceCost} Stamina`;
 					}
 					
 					const row = e_({outer: `
@@ -6077,9 +6077,9 @@ class CharacterSheetPage {
 		
 		// Deduct resource cost if applicable
 		if (resource && resource.current >= cost) {
-			// Special handling for Exertion (tracked separately)
-			if (resource.isExertion) {
-				this._state.setExertionCurrent(resource.current - cost);
+			// Special handling for Stamina (tracked separately)
+			if (resource.isStamina) {
+				this._state.setStaminaCurrent(resource.current - cost);
 			} else {
 				this._state.setResourceCurrent(resource.id, resource.current - cost);
 			}

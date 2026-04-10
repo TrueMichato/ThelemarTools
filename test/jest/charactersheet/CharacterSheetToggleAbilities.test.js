@@ -40,7 +40,7 @@ describe("Character Sheet Toggle Abilities", () => {
 			// Combat Stances
 			expect(stateTypes.heavyStance).toBeDefined();
 			expect(stateTypes.heavyStance.name).toBe("Heavy Stance");
-			expect(stateTypes.heavyStance.resourceName).toBe("Exertion");
+			expect(stateTypes.heavyStance.resourceName).toBe("Stamina");
 			expect(stateTypes.heavyStance.resourceCost).toBe(1);
 
 			expect(stateTypes.standTallStance).toBeDefined();
@@ -108,25 +108,25 @@ describe("Character Sheet Toggle Abilities", () => {
 		test("should detect combat stance features", () => {
 			const feature = {
 				name: "Heavy Stance",
-				description: "Bonus Action (1 Exertion Point). You enter this stance. While in this stance, you gain a bonus...",
+				description: "Bonus Action (1 Stamina Point). You enter this stance. While in this stance, you gain a bonus...",
 			};
 			const result = CharacterSheetState.detectActivatableFeature(feature);
 
 			expect(result).not.toBeNull();
 			expect(result.stateTypeId).toBe("heavyStance");
-			expect(result.exertionCost).toBe(1);
+			expect(result.staminaCost).toBe(1);
 			expect(result.activationAction).toBe("bonus");
 		});
 
-		test("should detect exertion cost from description", () => {
+		test("should detect stamina cost from description", () => {
 			const feature = {
 				name: "Stand Tall Stance",
-				description: "Bonus Action (1 Exertion Point). You enter this stance, counting as one size larger...",
+				description: "Bonus Action (1 Stamina Point). You enter this stance, counting as one size larger...",
 			};
 			const result = CharacterSheetState.detectActivatableFeature(feature);
 
 			expect(result).not.toBeNull();
-			expect(result.exertionCost).toBe(1);
+			expect(result.staminaCost).toBe(1);
 		});
 
 		test("should detect Ki cost from description", () => {
@@ -253,7 +253,7 @@ describe("Character Sheet Toggle Abilities", () => {
 				{name: "Suggested Characteristics", description: "..."},
 				{name: "Personality Trait", description: "..."},
 				{name: "Combat Methods", description: "You learn combat methods..."},
-				{name: "Exertion", description: "You have exertion points..."},
+				{name: "Stamina", description: "You have stamina points..."},
 			];
 
 			excluded.forEach(feature => {
@@ -512,7 +512,7 @@ describe("Character Sheet Toggle Abilities", () => {
 
 			charState.addFeature({
 				name: "Heavy Stance",
-				description: "Bonus Action (1 Exertion Point). You enter this stance. While in this stance, you gain a bonus to Athletics checks equal to your proficiency bonus.",
+				description: "Bonus Action (1 Stamina Point). You enter this stance. While in this stance, you gain a bonus to Athletics checks equal to your proficiency bonus.",
 				className: "Fighter",
 				classSource: "A5E",
 				level: 3,
@@ -526,8 +526,8 @@ describe("Character Sheet Toggle Abilities", () => {
 				recharge: "long",
 			});
 
-			charState.setExertionMax(5);
-			charState.setExertionCurrent(5);
+			charState.setStaminaMax(5);
+			charState.setStaminaCurrent(5);
 		});
 
 		test("should find activatable features", () => {
@@ -543,7 +543,7 @@ describe("Character Sheet Toggle Abilities", () => {
 
 			const heavyStance = activatables.find(a => a.stateTypeId === "heavyStance");
 			expect(heavyStance.resource).toBeDefined();
-			expect(heavyStance.resource.isExertion).toBe(true);
+			expect(heavyStance.resource.isStamina).toBe(true);
 			expect(heavyStance.resource.cost).toBe(1);
 		});
 
@@ -736,19 +736,19 @@ describe("Character Sheet Toggle Abilities", () => {
 			charState.addClass({name: "Fighter", level: 5, source: "A5E"});
 			charState.addFeature({
 				name: "Heavy Stance",
-				description: "Bonus Action (1 Exertion Point). You enter this stance. While in this stance, you gain a bonus to Strength (Athletics) checks equal to your proficiency bonus and you ignore the first 10 feet of difficult terrain.",
+				description: "Bonus Action (1 Stamina Point). You enter this stance. While in this stance, you gain a bonus to Strength (Athletics) checks equal to your proficiency bonus and you ignore the first 10 feet of difficult terrain.",
 				className: "Fighter",
 				level: 3,
 			});
-			charState.setExertionMax(5);
-			charState.setExertionCurrent(5);
+			charState.setStaminaMax(5);
+			charState.setStaminaCurrent(5);
 
 			// Verify detection
 			const activatables = charState.getActivatableFeatures();
 			const stance = activatables.find(a => a.stateTypeId === "heavyStance");
 			expect(stance).toBeDefined();
-			expect(stance.resource?.isExertion).toBe(true);
-			expect(stance.activationInfo.exertionCost).toBe(1);
+			expect(stance.resource?.isStamina).toBe(true);
+			expect(stance.activationInfo.staminaCost).toBe(1);
 
 			// Activate stance
 			charState.activateState("heavyStance");
@@ -846,16 +846,16 @@ describe("Character Sheet Toggle Abilities", () => {
 			}
 		});
 
-		test("Combat stance with exertion cost detection", () => {
+		test("Combat stance with stamina cost detection", () => {
 			// A proper toggle ability with a stance and duration
 			const feature = {
 				name: "Mountain Stance",
-				description: "Bonus Action (2 Exertion Points). You enter this stance. While in this stance, you have resistance to being moved or knocked prone. This stance lasts until you end it as a bonus action or become incapacitated.",
+				description: "Bonus Action (2 Stamina Points). You enter this stance. While in this stance, you have resistance to being moved or knocked prone. This stance lasts until you end it as a bonus action or become incapacitated.",
 			};
 
 			const result = CharacterSheetState.detectActivatableFeature(feature);
 			expect(result).not.toBeNull();
-			expect(result.exertionCost).toBe(2);
+			expect(result.staminaCost).toBe(2);
 			expect(result.activationAction).toBe("bonus");
 		});
 
@@ -985,10 +985,10 @@ describe("Character Sheet Toggle Abilities", () => {
 		});
 
 		test("should extract resource costs", () => {
-			const text = "You spend 2 exertion points to activate this stance.";
+			const text = "You spend 2 stamina points to activate this stance.";
 			const result = CharacterSheetState.analyzeToggleability(text.toLowerCase());
 
-			expect(result.resourceType).toBe("exertion");
+			expect(result.resourceType).toBe("stamina");
 			expect(result.resourceCost).toBe(2);
 		});
 	});
@@ -1056,7 +1056,7 @@ describe("Character Sheet Toggle Abilities", () => {
 		test("should provide complete analysis of a toggle ability", () => {
 			const feature = {
 				name: "Combat Stance",
-				description: "As a bonus action (1 Exertion Point), you enter this stance. While in this stance, you gain +2 to AC and advantage on Strength saving throws. The stance lasts until you are incapacitated.",
+				description: "As a bonus action (1 Stamina Point), you enter this stance. While in this stance, you gain +2 to AC and advantage on Strength saving throws. The stance lasts until you are incapacitated.",
 			};
 
 			const analysis = CharacterSheetState.analyzeFeature(feature);
@@ -1065,7 +1065,7 @@ describe("Character Sheet Toggle Abilities", () => {
 			expect(analysis.isToggle).toBe(true);
 			expect(analysis.effects.length).toBeGreaterThan(0);
 			expect(analysis.effectsSummary).toContain("AC");
-			expect(analysis.resourceCosts.exertion).toBe(1);
+			expect(analysis.resourceCosts.stamina).toBe(1);
 			expect(analysis.hasResourceCost).toBe(true);
 		});
 
@@ -1095,7 +1095,7 @@ describe("Character Sheet Toggle Abilities", () => {
 		test("should parse complex TGTT ability", () => {
 			const feature = {
 				name: "Iron Bull Stance",
-				description: "Bonus Action (2 Exertion Points). You enter this defensive stance. While in this stance, "
+				description: "Bonus Action (2 Stamina Points). You enter this defensive stance. While in this stance, "
 					+ "you gain +2 to AC, advantage on Strength saving throws, and resistance to bludgeoning, piercing, and slashing damage. "
 					+ "Additionally, your speed is reduced by 10 feet. The stance ends if you are incapacitated or knocked unconscious.",
 			};
@@ -1104,7 +1104,7 @@ describe("Character Sheet Toggle Abilities", () => {
 
 			expect(analysis.isActivatable).toBe(true);
 			expect(analysis.isToggle).toBe(true);
-			expect(analysis.resourceCosts.exertion).toBe(2);
+			expect(analysis.resourceCosts.stamina).toBe(2);
 
 			// Check various parsed effects
 			const effects = analysis.effects;
@@ -1273,12 +1273,12 @@ describe("Character Sheet Toggle Abilities", () => {
 				{name: "Hand of Ultimate Mercy", description: "As an action, you can spend 5 ki points to touch a dead creature and return it to life."},
 				{name: "Stunning Strike", description: "When you hit a creature with an unarmed strike, you can spend 1 ki point to attempt a stunning strike."},
 				{name: "Instant Step", description: "As a bonus action, you can spend 1 ki point to become invisible until the start of your next turn."},
-				{name: "Religious Training", description: "As an action, you can spend exertion to perform a religious rite."},
-				{name: "Instant Strike", description: "As a bonus action, you can spend 1 exertion point to make a melee weapon attack."},
+				{name: "Religious Training", description: "As an action, you can spend stamina to perform a religious rite."},
+				{name: "Instant Strike", description: "As a bonus action, you can spend 1 stamina point to make a melee weapon attack."},
 				{name: "Flurry of Blows", description: "You can spend 1 ki point to make two unarmed strikes as a bonus action."},
 				{name: "Step of the Wind", description: "You can spend 1 ki point to take the Disengage or Dash action as a bonus action."},
 				{name: "Slow Fall", description: "As a reaction when you fall, you can reduce falling damage by 5 times your monk level."},
-				{name: "Wall Walk", description: "You can move along vertical surfaces and across ceilings without falling. As a bonus action, spend 1 exertion to gain Spider Climb."},
+				{name: "Wall Walk", description: "You can move along vertical surfaces and across ceilings without falling. As a bonus action, spend 1 stamina to gain Spider Climb."},
 			];
 
 			test.each(combatFeatures)("$name should return interactionMode 'combat'", ({name, description}) => {
@@ -1319,13 +1319,13 @@ describe("Character Sheet Toggle Abilities", () => {
 			expect(result.kiCost).toBe(1);
 		});
 
-		test("combat override should still parse exertion cost from description", () => {
+		test("combat override should still parse stamina cost from description", () => {
 			const result = CharacterSheetState.detectActivatableFeature({
 				name: "Instant Strike",
-				description: "As a bonus action, you can spend 1 exertion point to make a melee weapon attack.",
+				description: "As a bonus action, you can spend 1 stamina point to make a melee weapon attack.",
 			});
 			expect(result).not.toBeNull();
-			expect(result.exertionCost).toBe(1);
+			expect(result.staminaCost).toBe(1);
 		});
 
 		test("combat override should detect activation action type", () => {

@@ -409,8 +409,8 @@ describe("CharacterSheetCombat._useCombatAction — effect pipeline integration"
 			useKiPoint: () => true,
 			getKiPointsCurrent: () => 5,
 			getKiPoints: () => 5,
-			canUseFocusForExertion: () => true,
-			useFocusForExertion: () => true,
+			canUseFocusForStamina: () => true,
+			useFocusForStamina: () => true,
 		};
 
 		combat = Object.create(CharacterSheetCombat.prototype);
@@ -450,7 +450,7 @@ describe("CharacterSheetCombat._useCombatAction — effect pipeline integration"
 		const feature = {
 			name: "Instant Step",
 			source: "TGTT",
-			description: "As a bonus action, you teleport up to 60 feet. You become invisible until the start of your next turn. (4 Exertion Points)",
+			description: "As a bonus action, you teleport up to 60 feet. You become invisible until the start of your next turn. (4 Stamina Points)",
 			combatActionEffects: {
 				applyCondition: {name: "invisible", duration: "until start of next turn", self: true},
 			},

@@ -1024,15 +1024,15 @@ class CharacterSheetPdf {
 		const traditions = this._state.getCombatTraditionEntries?.() || [];
 		if (!traditions.length) return "";
 
-		const exertionMax = this._state.getExertionMax?.() || 0;
-		const exertionCurrent = this._state.getExertionCurrent?.() || 0;
+		const staminaMax = this._state.getStaminaMax?.() || 0;
+		const staminaCurrent = this._state.getStaminaCurrent?.() || 0;
 		const activeStance = this._state.getActiveStance?.();
 
 		const tradRows = traditions.map(t =>
 			`<span class="pdf-tradition">${this._esc(t.name || t.code)}</span>`,
 		).join(" · ");
 
-		const exertionPips = exertionMax > 0 ? `<div class="pdf-tgtt-row"><span class="pdf-label">Exertion</span> ${this._renderPips(exertionCurrent, exertionMax)}</div>` : "";
+		const staminaPips = staminaMax > 0 ? `<div class="pdf-tgtt-row"><span class="pdf-label">Stamina</span> ${this._renderPips(staminaCurrent, staminaMax)}</div>` : "";
 		const stanceRow = activeStance ? `<div class="pdf-tgtt-row"><span class="pdf-label">Stance</span> ${this._esc(activeStance)}</div>` : "";
 
 		// Render combat methods (CTM:*) that were excluded from features section
@@ -1045,7 +1045,7 @@ class CharacterSheetPdf {
 		return `<div class="pdf-section pdf-section--tgtt">
 			<h3 class="pdf-section__title pdf-section__title--tgtt">Combat Traditions</h3>
 			<div class="pdf-traditions">${tradRows}</div>
-			${exertionPips}
+			${staminaPips}
 			${stanceRow}
 			${methodsHtml}
 		</div>`;

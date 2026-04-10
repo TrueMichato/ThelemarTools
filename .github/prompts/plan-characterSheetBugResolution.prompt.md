@@ -41,7 +41,7 @@ Fix 50+ bugs from bugs.md organized into **10 phases by root cause**, not indivi
 1. Add `renderCombatActionModal()` in charactersheet-combat.js — analogous to `CharacterSheetSpellPicker.showSpellInfoModal()`
 2. Extend `renderCombatActions()` (~L1720) to include features from Phase 1's override map
 3. Add "Actions" section to overview tab (charactersheet.js ~L4731) — race/feat/class actions with hover detail
-4. Wire "Use" button to existing resource deduction (`useFocusForExertion`, ki point deduction)
+4. Wire "Use" button to existing resource deduction (`useFocusForStamina`, ki point deduction)
 5. Gate combat spells modal: only show if character actually has spells (fixes Monk having empty spell modal)
 
 **Verification**: Manual verification — Monk with Stunning Strike/Deflect Attack visible in combat tab; overview tab shows actions section; non-caster has no spell modal
@@ -69,7 +69,7 @@ Fix 50+ bugs from bugs.md organized into **10 phases by root cause**, not indivi
 
 **Goal**: Complete missing TGTT Monk subclass features (Way of Mercy, etc.)
 
-**Steps**: Implements of Mercy, Physician's Touch, Flurry of Healing/Harm, Hand of Ultimate Mercy, Focus→Exertion verification. Read TGTT data files for exact feature definitions.
+**Steps**: Implements of Mercy, Physician's Touch, Flurry of Healing/Harm, Hand of Ultimate Mercy, Focus→Stamina verification. Read TGTT data files for exact feature definitions.
 
 **Verification**: Run `CharacterSheetTGTTMercyMonk` (500+ tests) — no regressions + new tests
 
