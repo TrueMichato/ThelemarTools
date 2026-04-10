@@ -18,6 +18,9 @@ export class PartyTrackerCharacterSerializer {
 			ov: char.overrides,
 			bon: char.bonuses,
 			nt: char.notes,
+			cnd: char.conditions?.map(c => ({n: c.name, s: c.source})),
+			dis: char.diseases?.map(d => ({n: d.name, s: d.source})),
+			ctr: char.counters,
 		};
 	}
 
@@ -71,6 +74,9 @@ export class PartyTrackerCharacterSerializer {
 				...(raw.bon || {}),
 			},
 			notes: raw.nt || "",
+			conditions: (raw.cnd || []).map(c => typeof c === "string" ? {name: c, source: null} : {name: c.n || c.name || "", source: c.s || c.source || null}),
+			diseases: (raw.dis || []).map(d => typeof d === "string" ? {name: d, source: null} : {name: d.n || d.name || "", source: d.s || d.source || null}),
+			counters: raw.ctr?.map(c => ({name: c.name || "", current: c.current ?? 0, max: c.max ?? 0})) || [],
 		};
 	}
 

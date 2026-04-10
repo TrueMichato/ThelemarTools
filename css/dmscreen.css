@@ -591,7 +591,7 @@
     flex: none;
   }
   .dm-party__summary {
-    font-size: 0.85rem;
+    font-size: 0.91rem;
     color: #333;
     opacity: 0.75;
     white-space: nowrap;
@@ -630,7 +630,7 @@
     text-overflow: ellipsis;
   }
   .dm-party__char-meta {
-    font-size: 0.84rem;
+    font-size: 0.9rem;
     color: #333;
     opacity: 0.75;
     white-space: nowrap;
@@ -638,7 +638,7 @@
   .dm-party__char-stat {
     display: inline-flex;
     align-items: center;
-    font-size: 0.84rem;
+    font-size: 0.9rem;
     gap: 3px;
     white-space: nowrap;
     padding: 1px 4px;
@@ -648,7 +648,7 @@
   .dm-party__char-tgtt-stat {
     display: inline-flex;
     align-items: center;
-    font-size: 0.82rem;
+    font-size: 0.88rem;
     gap: 3px;
     white-space: nowrap;
     padding: 1px 4px;
@@ -681,7 +681,7 @@
     gap: 4px;
   }
   .dm-party__section-title {
-    font-size: 0.84rem;
+    font-size: 0.9rem;
     font-weight: 700;
     color: #333;
     text-transform: uppercase;
@@ -704,14 +704,14 @@
     background: rgba(0, 0, 0, 0.02);
   }
   .dm-party__ability-cell .dm-party__ability-label {
-    font-size: 0.78rem;
+    font-size: 0.84rem;
     font-weight: 700;
     text-transform: uppercase;
     color: #333;
     opacity: 0.8;
   }
   .dm-party__ability-cell .dm-party__ability-mod {
-    font-size: 0.78rem;
+    font-size: 0.84rem;
     opacity: 0.65;
   }
   .dm-party__stats-bar {
@@ -724,11 +724,11 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 0.85rem;
+    font-size: 0.91rem;
   }
   .dm-party__stat-group .dm-party__stat-label {
     font-weight: 600;
-    font-size: 0.82rem;
+    font-size: 0.88rem;
   }
   .dm-party__speed-grid,
   .dm-party__senses-grid {
@@ -741,7 +741,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 0.84rem;
+    font-size: 0.9rem;
   }
   .dm-party__speed-item .dm-party__field-label,
   .dm-party__sense-item .dm-party__field-label {
@@ -758,7 +758,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 0.84rem;
+    font-size: 0.9rem;
   }
   .dm-party__skills-grid {
     display: grid;
@@ -772,7 +772,7 @@
     gap: 2px;
   }
   .dm-party__skill-name {
-    font-size: 0.8rem;
+    font-size: 0.86rem;
     width: 72px;
     min-width: 72px;
     white-space: nowrap;
@@ -784,7 +784,7 @@
     color: #5b4f8a;
   }
   .dm-party__skill-bonus {
-    font-size: 0.82rem;
+    font-size: 0.88rem;
     width: 24px;
     text-align: right;
   }
@@ -794,7 +794,7 @@
   /* Manual bonus inputs (saves, skills, passives) */
   .dm-party__bonus-input {
     width: 30px;
-    font-size: 0.74rem;
+    font-size: 0.8rem;
     opacity: 0.6;
     transition: opacity 0.15s;
   }
@@ -816,11 +816,11 @@
     font-size: 0.9rem;
   }
   .dm-party__passive-label {
-    font-size: 0.84rem;
+    font-size: 0.9rem;
     font-weight: 600;
   }
   .dm-party__passive-value {
-    font-size: 0.88rem;
+    font-size: 0.94rem;
     font-weight: 700;
     min-width: 22px;
     text-align: center;
@@ -834,7 +834,7 @@
     gap: 4px;
   }
   .dm-party__tgtt-title {
-    font-size: 0.84rem;
+    font-size: 0.9rem;
     font-weight: 700;
     color: #7b6daa;
   }
@@ -848,12 +848,104 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px 14px;
-    font-size: 0.82rem;
+    font-size: 0.88rem;
     color: #333;
     opacity: 0.8;
     padding: 4px 6px;
     background: rgba(0, 0, 0, 0.02);
     border-radius: 4px;
+  }
+  /* ================================= */
+  /*  Conditions, Diseases, Counters  */
+  /* ================================= */
+  .dm-party__conditions-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .dm-party__condition-btn {
+    font-size: 0.78rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1.5px solid #ccc;
+    background: transparent;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    white-space: nowrap;
+  }
+  .dm-party__condition-btn:hover {
+    opacity: 0.85;
+  }
+  .dm-party__condition-btn--active {
+    color: #fff;
+  }
+  .dm-party__conditions-custom,
+  .dm-party__diseases-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 3px;
+  }
+  .dm-party__condition-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #6c757d;
+    color: #fff;
+    white-space: nowrap;
+    cursor: default;
+  }
+  .dm-party__condition-pill--custom {
+    background: #868e96;
+  }
+  .dm-party__condition-pill--disease {
+    background: #8b5e3c;
+  }
+  .dm-party__conditions-summary {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    align-items: center;
+  }
+  .dm-party__disease-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #8b5e3c;
+    color: #fff;
+    white-space: nowrap;
+  }
+  .dm-party__pill-remove {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0 2px;
+    opacity: 0.7;
+  }
+  .dm-party__pill-remove:hover {
+    opacity: 1;
+  }
+  .dm-party__counters-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .dm-party__counter-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
   /* ================================= */
   /*  DC Calculator                    */
@@ -865,7 +957,7 @@
     flex: none;
   }
   .dm-party__dc-title {
-    font-size: 0.88rem;
+    font-size: 0.94rem;
     font-weight: 700;
     margin-bottom: 6px;
   }
@@ -880,11 +972,11 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 0.84rem;
+    font-size: 0.9rem;
   }
   .dm-party__dc-control-group .dm-party__dc-label {
     font-weight: 600;
-    font-size: 0.8rem;
+    font-size: 0.86rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
@@ -895,7 +987,7 @@
   .dm-party__dc-row-header {
     display: flex;
     align-items: center;
-    font-size: 0.82rem;
+    font-size: 0.88rem;
     font-weight: 700;
     padding: 3px 0;
     border-bottom: 2px solid #ccc;
@@ -904,7 +996,7 @@
   .dm-party__dc-row {
     display: flex;
     align-items: center;
-    font-size: 0.84rem;
+    font-size: 0.9rem;
     padding: 3px 0;
     border-bottom: 1px solid #f0f0f0;
     gap: 4px;
@@ -916,7 +1008,7 @@
   .dm-party__dc-row-summary {
     display: flex;
     align-items: center;
-    font-size: 0.84rem;
+    font-size: 0.9rem;
     font-weight: 700;
     padding: 4px 0;
     border-top: 2px solid #999;
@@ -977,7 +1069,7 @@
     gap: 6px;
   }
   .dm-party__settings-title {
-    font-size: 0.88rem;
+    font-size: 0.94rem;
     font-weight: 700;
     padding-bottom: 4px;
     border-bottom: 1px solid #eee;
@@ -993,7 +1085,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.86rem;
+    font-size: 0.92rem;
   }
   /* ================================= */
   /*  Night mode                       */
@@ -1098,6 +1190,21 @@
   }
   .ve-night-mode .dm-party__settings-group {
     border-left-color: #9b8dca;
+  }
+  .ve-night-mode .dm-party__condition-btn {
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+  .ve-night-mode .dm-party__condition-pill--custom {
+    background: #555;
+  }
+  .ve-night-mode .dm-party__disease-pill {
+    background: #6d4a30;
+  }
+  .ve-night-mode .dm-party__condition-pill--disease {
+    background: #6d4a30;
+  }
+  .ve-night-mode .dm-party__pill-remove {
+    color: #ddd;
   }
   .ve-night-mode .dm-party__toolbar {
     border-bottom-color: rgba(255, 255, 255, 0.12);
@@ -1673,598 +1780,6 @@
   }
   .ve-night-mode .dm__panel-bg {
     background: #222;
-  }
-  /* ============================================= */
-  /*  Journey & Camp Tracker                        */
-  /* ============================================= */
-  .dm-journey__root {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .dm-journey__header {
-    display: flex;
-    align-items: center;
-    padding: 6px 8px;
-    padding-right: 44px;
-    border-bottom: 1px solid #ccc;
-    gap: 8px;
-    flex: none;
-    flex-wrap: wrap;
-  }
-  .dm-journey__rm-section {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .dm-journey__rm-label {
-    font-weight: 700;
-    font-size: 0.85rem;
-  }
-  .dm-journey__rm-input {
-    width: 50px;
-    text-align: center;
-    font-size: 0.85rem;
-    padding: 2px 4px;
-    border: 1px solid #aaa;
-    border-radius: 3px;
-  }
-  .dm-journey__rm-badge {
-    display: inline-block;
-    font-weight: 700;
-    font-size: 0.85rem;
-    padding: 1px 8px;
-    border-radius: 10px;
-    min-width: 32px;
-    text-align: center;
-  }
-  .dm-journey__rm-badge--low {
-    background: #d4edda;
-    color: #155724;
-  }
-  .dm-journey__rm-badge--mid {
-    background: #fff3cd;
-    color: #856404;
-  }
-  .dm-journey__rm-badge--high {
-    background: #f8d7da;
-    color: #721c24;
-  }
-  .dm-journey__rm-btn {
-    min-width: 28px;
-    font-size: 1rem;
-    padding: 1px 5px;
-  }
-  .dm-journey__pace-section {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: 8px;
-  }
-  .dm-journey__pace-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    font-size: 0.82rem;
-    cursor: pointer;
-  }
-  .dm-journey__sync-section {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-  }
-  .dm-journey__sync-status {
-    font-size: 0.78rem;
-    padding: 1px 6px;
-    border-radius: 8px;
-  }
-  .dm-journey__sync-status--active {
-    background: #d4edda;
-    color: #155724;
-  }
-  .dm-journey__sync-status--manual {
-    background: #e2e3e5;
-    color: #383d41;
-  }
-  /* --- Tab bar --- */
-  .dm-journey__tab-bar {
-    display: flex;
-    gap: 2px;
-    padding: 4px 6px;
-    border-bottom: 1px solid #ccc;
-    flex: none;
-  }
-  .dm-journey__tab-btn.ve-active {
-    background: #337ab7;
-    color: #fff;
-    border-color: #2e6da4;
-  }
-  /* --- Body --- */
-  .dm-journey__body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 0;
-  }
-  .dm-journey__tab-content {
-    padding: 6px 8px;
-  }
-  /* --- Segment cards --- */
-  .dm-journey__segment-card {
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    margin-bottom: 6px;
-    background: #fff;
-  }
-  .dm-journey__segment-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 8px;
-    background: #f5f5f5;
-    border-radius: 5px 5px 0 0;
-    border-bottom: 1px solid #eee;
-  }
-  .dm-journey__segment-name {
-    font-weight: 600;
-    font-size: 0.88rem;
-  }
-  .dm-journey__collapse-btn {
-    min-width: 22px;
-    padding: 1px 4px;
-  }
-  .dm-journey__override-input {
-    width: 50px;
-    font-size: 0.82rem;
-    padding: 2px 4px;
-    border: 1px solid #aaa;
-    border-radius: 3px;
-    text-align: center;
-  }
-  /* --- Risk badges --- */
-  .dm-journey__badge {
-    display: inline-block;
-    font-weight: 600;
-    font-size: 0.82rem;
-    padding: 2px 10px;
-    border-radius: 10px;
-    white-space: nowrap;
-  }
-  .dm-journey__badge--none {
-    background: #e9ecef;
-    color: #6c757d;
-  }
-  .dm-journey__badge--empty {
-    background: #e9ecef;
-    color: #495057;
-  }
-  .dm-journey__badge--mild {
-    background: #d4edda;
-    color: #155724;
-  }
-  .dm-journey__badge--moderate {
-    background: #fff3cd;
-    color: #856404;
-  }
-  .dm-journey__badge--intense {
-    background: #f8d7da;
-    color: #721c24;
-  }
-  /* --- Activity table --- */
-  .dm-journey__activity-table {
-    margin: 4px 0;
-  }
-  .dm-journey__activity-row {
-    display: grid;
-    grid-template-columns: minmax(70px, 1fr) minmax(90px, 2fr) 55px 40px minmax(40px, 55px) minmax(60px, 90px);
-    gap: 4px;
-    align-items: center;
-    padding: 3px 4px;
-    border-bottom: 1px solid #eee;
-    font-size: 0.84rem;
-  }
-  .dm-journey__activity-row--header {
-    font-weight: 600;
-    background: #f8f9fa;
-    border-bottom: 2px solid #ccc;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    color: #6c757d;
-  }
-  .dm-journey__player-name {
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-  }
-  .dm-journey__remove-player {
-    padding: 0 3px;
-    font-size: 0.7rem;
-    line-height: 1;
-    flex-shrink: 0;
-  }
-  .dm-journey__activity-sel {
-    max-width: 120px;
-  }
-  .dm-journey__custom-input {
-    max-width: 90px;
-  }
-  .dm-journey__roll-input {
-    max-width: 60px;
-  }
-  .dm-journey__player-sel {
-    max-width: 120px;
-  }
-  .dm-journey__skill-bonus {
-    font-size: 0.82rem;
-    color: #495057;
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-  }
-  .dm-journey__rm-hint {
-    font-size: 0.7rem;
-    color: #856404;
-    font-style: italic;
-    white-space: nowrap;
-  }
-  .dm-journey__quick-rm {
-    display: inline-flex;
-    gap: 2px;
-  }
-  .dm-journey__empty-msg {
-    padding: 12px;
-    text-align: center;
-    color: #6c757d;
-    font-size: 0.84rem;
-  }
-  /* --- Interaction notes --- */
-  .dm-journey__interaction-notes {
-    margin-top: 6px;
-    padding: 6px 8px;
-    background: #fffbe6;
-    border: 1px solid #ffe58f;
-    border-radius: 4px;
-  }
-  .dm-journey__interaction-header {
-    font-weight: 600;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    color: #856404;
-    margin-bottom: 3px;
-  }
-  .dm-journey__interaction-note {
-    font-size: 0.82rem;
-    padding: 1px 0 1px 8px;
-    border-left: 3px solid #ffe58f;
-    margin: 2px 0;
-    color: #5a4a00;
-  }
-  /* --- Camp --- */
-  .dm-journey__campfire-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 0;
-    cursor: pointer;
-    font-size: 0.86rem;
-  }
-  .dm-journey__risk-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 0;
-  }
-  .dm-journey__guard-section {
-    padding: 4px 0;
-  }
-  .dm-journey__note {
-    font-size: 0.78rem;
-    color: #6c757d;
-    font-style: italic;
-  }
-  /* --- Area config --- */
-  .dm-journey__area-name-input {
-    max-width: 260px;
-  }
-  .dm-journey__label {
-    font-size: 0.84rem;
-    min-width: 70px;
-  }
-  .dm-journey__range-label {
-    display: inline-block;
-    font-weight: 600;
-    font-size: 0.82rem;
-    padding: 1px 8px;
-    border-radius: 8px;
-    text-align: center;
-  }
-  /* --- Log --- */
-  .dm-journey__log-entries {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    max-height: 400px;
-    overflow-y: auto;
-  }
-  .dm-journey__log-entry {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    font-size: 0.82rem;
-    padding: 2px 4px;
-    border-radius: 3px;
-  }
-  .dm-journey__log-entry--rm-change {
-    background: #e8f4fd;
-  }
-  .dm-journey__log-entry--risk-roll {
-    background: #fff8e1;
-  }
-  .dm-journey__log-entry--reset {
-    background: #fce4ec;
-  }
-  .dm-journey__log-entry--note {
-    background: #f3e5f5;
-  }
-  .dm-journey__log-entry--party-sync {
-    background: #e8f5e9;
-  }
-  .dm-journey__log-time {
-    font-size: 0.72rem;
-    color: #6c757d;
-    white-space: nowrap;
-    min-width: 55px;
-  }
-  .dm-journey__log-msg {
-    word-break: break-word;
-  }
-  /* --- DC & result cells --- */
-  .dm-journey__dc-cell {
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #495057;
-    text-align: center;
-  }
-  .dm-journey__dc-cell--modified {
-    color: #856404;
-  }
-  .dm-journey__dc-cell--impossible {
-    color: #dc3545;
-    font-weight: 700;
-    font-size: 0.72rem;
-    text-decoration: line-through;
-  }
-  .dm-journey__activity-row--impossible {
-    background: #fff5f5;
-    border-left: 3px solid #dc3545;
-  }
-  .dm-journey__roll-result {
-    font-size: 0.8rem;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .dm-journey__roll-result--pass {
-    color: #28a745;
-  }
-  .dm-journey__roll-result--fail {
-    color: #dc3545;
-  }
-  .dm-journey__rm-auto {
-    color: #856404;
-    font-size: 0.75rem;
-    font-style: italic;
-  }
-  .dm-journey__tool-indicator {
-    font-size: 0.7rem;
-    margin-left: 1px;
-    cursor: help;
-  }
-  .dm-journey__log-entry--activity {
-    background: #f0f6ff;
-  }
-  /* --- Night mode --- */
-  .ve-night-mode .dm-journey__header {
-    border-bottom-color: #444;
-  }
-  .ve-night-mode .dm-journey__rm-input {
-    background: #333;
-    color: #ddd;
-    border-color: #555;
-  }
-  .ve-night-mode .dm-journey__rm-badge--low {
-    background: #1b3c28;
-    color: #8fd19e;
-  }
-  .ve-night-mode .dm-journey__rm-badge--mid {
-    background: #3d3520;
-    color: #e6c766;
-  }
-  .ve-night-mode .dm-journey__rm-badge--high {
-    background: #3d1c1c;
-    color: #e88e8e;
-  }
-  .ve-night-mode .dm-journey__sync-status--active {
-    background: #1b3c28;
-    color: #8fd19e;
-  }
-  .ve-night-mode .dm-journey__sync-status--manual {
-    background: #333;
-    color: #aaa;
-  }
-  .ve-night-mode .dm-journey__tab-bar {
-    border-bottom-color: #444;
-  }
-  .ve-night-mode .dm-journey__tab-btn.ve-active {
-    background: #2a6496;
-    border-color: #245f8c;
-  }
-  .ve-night-mode .dm-journey__segment-card {
-    border-color: #444;
-    background: #2a2a2a;
-  }
-  .ve-night-mode .dm-journey__segment-header {
-    background: #333;
-    border-bottom-color: #444;
-  }
-  .ve-night-mode .dm-journey__override-input {
-    background: #333;
-    color: #ddd;
-    border-color: #555;
-  }
-  .ve-night-mode .dm-journey__badge--none {
-    background: #333;
-    color: #888;
-  }
-  .ve-night-mode .dm-journey__badge--empty {
-    background: #333;
-    color: #aaa;
-  }
-  .ve-night-mode .dm-journey__badge--mild {
-    background: #1b3c28;
-    color: #8fd19e;
-  }
-  .ve-night-mode .dm-journey__badge--moderate {
-    background: #3d3520;
-    color: #e6c766;
-  }
-  .ve-night-mode .dm-journey__badge--intense {
-    background: #3d1c1c;
-    color: #e88e8e;
-  }
-  .ve-night-mode .dm-journey__activity-row {
-    border-bottom-color: #444;
-  }
-  .ve-night-mode .dm-journey__activity-row--header {
-    background: #2a2a2a;
-    border-bottom-color: #555;
-    color: #999;
-  }
-  .ve-night-mode .dm-journey__skill-bonus {
-    color: #bbb;
-  }
-  .ve-night-mode .dm-journey__rm-hint {
-    color: #e6c766;
-  }
-  .ve-night-mode .dm-journey__interaction-notes {
-    background: #33301e;
-    border-color: #5a4f2b;
-  }
-  .ve-night-mode .dm-journey__interaction-header {
-    color: #e6c766;
-  }
-  .ve-night-mode .dm-journey__interaction-note {
-    color: #d4c478;
-    border-left-color: #5a4f2b;
-  }
-  .ve-night-mode .dm-journey__note {
-    color: #888;
-  }
-  .ve-night-mode .dm-journey__log-entry--rm-change {
-    background: #1c2d3a;
-  }
-  .ve-night-mode .dm-journey__log-entry--risk-roll {
-    background: #33301e;
-  }
-  .ve-night-mode .dm-journey__log-entry--reset {
-    background: #3a1c2d;
-  }
-  .ve-night-mode .dm-journey__log-entry--note {
-    background: #2d1c3a;
-  }
-  .ve-night-mode .dm-journey__log-entry--party-sync {
-    background: #1c3a2d;
-  }
-  .ve-night-mode .dm-journey__log-entry--activity {
-    background: #1c2a3a;
-  }
-  .ve-night-mode .dm-journey__log-time {
-    color: #888;
-  }
-  .ve-night-mode .dm-journey__dc-cell {
-    color: #bbb;
-  }
-  .ve-night-mode .dm-journey__dc-cell--modified {
-    color: #e6c766;
-  }
-  .ve-night-mode .dm-journey__dc-cell--impossible {
-    color: #f66;
-  }
-  .ve-night-mode .dm-journey__activity-row--impossible {
-    background: #3a1c1c;
-    border-left-color: #f66;
-  }
-  .ve-night-mode .dm-journey__roll-result--pass {
-    color: #8fd19e;
-  }
-  .ve-night-mode .dm-journey__roll-result--fail {
-    color: #f66;
-  }
-  .ve-night-mode .dm-journey__rm-auto {
-    color: #e6c766;
-  }
-
-  /* --- Stealth section --- */
-  .dm-journey__stealth-section {
-    padding: 6px 4px;
-    border-top: 1px solid #e0e0e0;
-  }
-  .dm-journey__stealth-section--disabled {
-    opacity: 0.5;
-    pointer-events: none;
-  }
-  .ve-night-mode .dm-journey__stealth-section {
-    border-top-color: #555;
-  }
-
-  /* --- Risk roll section (bottom of segment / camp) --- */
-  .dm-journey__risk-section {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 4px;
-    border-top: 1px solid #e0e0e0;
-    margin-top: 4px;
-  }
-  .ve-night-mode .dm-journey__risk-section {
-    border-top-color: #555;
-  }
-
-  /* --- RM Summary --- */
-  .dm-journey__rm-summary {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 4px;
-    font-size: 0.85em;
-  }
-
-  /* --- Activity info line (tooltip / desc) --- */
-  .dm-journey__activity-info {
-    font-size: 0.75em;
-    color: #888;
-    line-height: 1.2;
-    max-height: 2.4em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    margin-top: 1px;
-  }
-  .ve-night-mode .dm-journey__activity-info {
-    color: #999;
-  }
-
-  /* --- Activity cell (wraps select + info) --- */
-  .dm-journey__activity-cell {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
   }
 }
 

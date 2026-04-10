@@ -154,6 +154,9 @@ export class PartyTrackerCharacter {
 		this._isExpanded = false;
 		this._enableTgtt = enableTgtt;
 
+		// Kick off async data load (non-blocking)
+		PartyTrackerCharacter.pLoadConditionDiseaseData().catch(() => {});
+
 		this._eleRow = ee`<div class="ve-flex-col ve-w-100" role="listitem"></div>`;
 		this._renderSummaryRow();
 		this._eleRow.appendTo(eleParent);
@@ -169,10 +172,14 @@ export class PartyTrackerCharacter {
 		const classStr = this._data.classes.map(c => `${c.name || "?"}${c.level ? ` ${c.level}` : ""}`).join("/");
 
 		const btnExpand = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" title="${this._isExpanded ? "Collapse" : "Expand"} character details" aria-label="${this._isExpanded ? "Collapse" : "Expand"} ${this._data.name || "character"}" aria-expanded="${this._isExpanded}"><span class="glyphicon glyphicon-${this._isExpanded ? "minus" : "plus"}" aria-hidden="true"></span></button>`
-			.onn("click", () => {
+			.onn("click", async () => {
 				this._isExpanded = !this._isExpanded;
-				if (this._isExpanded) this._renderExpandedForm();
-				else this._renderSummaryRow();
+				if (this._isExpanded) {
+					await PartyTrackerCharacter.pLoadConditionDiseaseData().catch(() => {});
+					this._renderExpandedForm();
+				} else {
+					this._renderSummaryRow();
+				}
 			});
 
 		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" title="Remove ${this._data.name || "character"}" aria-label="Remove ${this._data.name || "character"}"><span class="glyphicon glyphicon-trash" aria-hidden="true"></span></button>`
@@ -181,6 +188,19 @@ export class PartyTrackerCharacter {
 		const tgttInfo = this._enableTgtt?.()
 			? ee`<span class="dm-party__char-tgtt-stat" title="Exertion Pool / Combat Method DC">Ex ${this.getExertionMax()} · DC ${this.getCombatMethodDc() ?? "—"}</span>`
 			: "";
+
+		const wrpCondPills = ee`<span class="dm-party__conditions-summary"></span>`;
+		for (const cond of (this._data.conditions || [])) {
+			const color = Parser?.CONDITION_TO_COLOR?.[cond.name];
+			const pill = ee`<span class="dm-party__condition-pill" style="${color ? `background: ${color}; color: #fff;` : ""}" title="${cond.name}">${cond.name}</span>`;
+			if (cond.source || color) this._bindConditionDiseaseHover(pill, cond.name, cond.source);
+			pill.appendTo(wrpCondPills);
+		}
+		for (const disease of (this._data.diseases || [])) {
+			const pill = ee`<span class="dm-party__condition-pill dm-party__condition-pill--disease" title="${disease.name}">${disease.name}</span>`;
+			if (disease.source) this._bindConditionDiseaseHover(pill, disease.name, disease.source);
+			pill.appendTo(wrpCondPills);
+		}
 
 		ee`<div class="dm-party__char-row">
 			${btnExpand}
@@ -191,6 +211,7 @@ export class PartyTrackerCharacter {
 			<span class="dm-party__char-stat" title="Passive Perception">\u{1F441} ${this.getPassiveScore("perception")}</span>
 			<span class="dm-party__char-stat" title="Passive Investigation">\u{1F50D} ${this.getPassiveScore("investigation")}</span>
 			<span class="dm-party__char-stat" title="Passive Insight">\u{1F4A1} ${this.getPassiveScore("insight")}</span>
+			${wrpCondPills}
 			${tgttInfo}
 			<div class="ve-ml-auto">${btnRemove}</div>
 		</div>`.appendTo(this._eleRow);
@@ -315,6 +336,11 @@ export class PartyTrackerCharacter {
 		const iptNotes = ee`<textarea class="ve-form-control ve-input-xs" rows="2" placeholder="Notes" aria-label="Character notes">${this._data.notes || ""}</textarea>`
 			.onn("change", (e) => { this._data.notes = e.target.value; this._doUpdate(); });
 
+		/* ----- Conditions, Diseases, Counters ----- */
+		const wrpConditions = this._renderConditionsSection();
+		const wrpDiseases = this._renderDiseasesSection();
+		const wrpCounters = this._renderCountersSection();
+
 		/* ----- Derived Stats ----- */
 		const carry = this.getCarryCapacity();
 		const jump = this.getJumpDistances();
@@ -408,6 +434,10 @@ export class PartyTrackerCharacter {
 				<div class="dm-party__section-title">Passives</div>
 				${wrpPassives}
 			</div>
+
+			${wrpConditions}
+			${wrpDiseases}
+			${wrpCounters}
 
 			<div class="dm-party__derived-bar">
 				<span title="Carrying Capacity">\u{1F3CB} Carry: ${carry} lb</span>
@@ -555,6 +585,293 @@ export class PartyTrackerCharacter {
 		}
 
 		return wrp;
+	}
+
+	/* -------------------------------------------- */
+	//  Conditions, Diseases & Counters
+	/* -------------------------------------------- */
+
+	static _conditionDiseaseCache = null;
+
+	static async pLoadConditionDiseaseData () {
+		if (PartyTrackerCharacter._conditionDiseaseCache) return PartyTrackerCharacter._conditionDiseaseCache;
+
+		const allSite = await DataLoader.pCacheAndGetAllSite(UrlUtil.PG_CONDITIONS_DISEASES) || [];
+		let allBrew = [];
+		try { allBrew = await DataLoader.pCacheAndGetAllBrew(UrlUtil.PG_CONDITIONS_DISEASES) || []; } catch { /* no brew loaded */ }
+
+		const conditions = [];
+		const diseases = [];
+
+		for (const ent of [...allSite, ...allBrew]) {
+			if (ent.__prop === "condition" || ent.__prop === "status") conditions.push(ent);
+			else if (ent.__prop === "disease") diseases.push(ent);
+		}
+
+		// Store all entities per name (multiple sources possible)
+		const conditionsByName = new Map();
+		for (const ent of conditions) {
+			if (!conditionsByName.has(ent.name)) conditionsByName.set(ent.name, []);
+			conditionsByName.get(ent.name).push(ent);
+		}
+
+		const diseasesByName = new Map();
+		for (const ent of diseases) {
+			if (!diseasesByName.has(ent.name)) diseasesByName.set(ent.name, []);
+			diseasesByName.get(ent.name).push(ent);
+		}
+
+		// Full lookup by name+source for hover resolution
+		const entityLookup = new Map();
+		for (const ent of [...conditions, ...diseases]) {
+			entityLookup.set(`${ent.name}|${ent.source}`.toLowerCase(), ent);
+		}
+
+		PartyTrackerCharacter._conditionDiseaseCache = {conditionsByName, diseasesByName, entityLookup};
+		return PartyTrackerCharacter._conditionDiseaseCache;
+	}
+
+	/** Pick the best entity for a name given current settings. TGTT > XPHB > PHB > other. */
+	_getBestEntity (entitiesByName, name) {
+		const ents = entitiesByName?.get(name);
+		if (!ents?.length) return null;
+		if (ents.length === 1) return ents[0];
+
+		const useTgtt = this._settings?.enableTgtt;
+		let best = ents[0];
+		let bestPri = -1;
+		for (const ent of ents) {
+			let pri = 0;
+			if (ent.source === "TGTT" && useTgtt) pri = 4;
+			else if (ent.source === "XPHB") pri = 3;
+			else if (ent.source === "PHB") pri = 2;
+			else pri = 1;
+			if (pri > bestPri) { best = ent; bestPri = pri; }
+		}
+		return best;
+	}
+
+	/** Get deduplicated conditions map using current settings for source priority. */
+	_getConditionMap () {
+		const cache = PartyTrackerCharacter._conditionDiseaseCache;
+		if (!cache?.conditionsByName) return new Map();
+		const out = new Map();
+		for (const [name, ents] of cache.conditionsByName) {
+			out.set(name, this._getBestEntity(cache.conditionsByName, name) || ents[0]);
+		}
+		return out;
+	}
+
+	/** Get deduplicated diseases map using current settings for source priority. */
+	_getDiseaseMap () {
+		const cache = PartyTrackerCharacter._conditionDiseaseCache;
+		if (!cache?.diseasesByName) return new Map();
+		const out = new Map();
+		for (const [name, ents] of cache.diseasesByName) {
+			out.set(name, this._getBestEntity(cache.diseasesByName, name) || ents[0]);
+		}
+		return out;
+	}
+
+	_resolveEntitySource (name, storedSource) {
+		const cache = PartyTrackerCharacter._conditionDiseaseCache;
+		if (!cache) return storedSource;
+
+		// If stored source is specific and exists, verify it
+		if (storedSource) {
+			const key = `${name}|${storedSource}`.toLowerCase();
+			if (cache.entityLookup.has(key)) return storedSource;
+		}
+
+		// Use settings-aware best entity resolution
+		const best = this._getBestEntity(cache.conditionsByName, name)
+			|| this._getBestEntity(cache.diseasesByName, name);
+		if (best) return best.source;
+
+		return storedSource;
+	}
+
+	_bindConditionDiseaseHover (ele, name, source) {
+		const resolvedSource = this._resolveEntitySource(name, source);
+		if (!resolvedSource) return;
+		const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CONDITIONS_DISEASES]({name, source: resolvedSource});
+		ele.onn("mouseover", (evt) => {
+			Renderer.hover.pHandleLinkMouseOver(evt, ele, {isSpecifiedLinkData: true, page: UrlUtil.PG_CONDITIONS_DISEASES, source: resolvedSource, hash}).then(null);
+		});
+		ele.onn("mousemove", (evt) => Renderer.hover.handleLinkMouseMove(evt, ele));
+		ele.onn("mouseleave", (evt) => Renderer.hover.handleLinkMouseLeave(evt, ele));
+	}
+
+	_renderConditionsSection () {
+		const cache = PartyTrackerCharacter._conditionDiseaseCache;
+		const SKIP = new Set(["Exhausted", "Exhaustion"]);
+		const wrpGrid = ee`<div class="dm-party__conditions-grid"></div>`;
+
+		// Build from loaded data using settings-aware source priority
+		const conditionMap = this._getConditionMap();
+		const condEntries = conditionMap.size
+			? [...conditionMap.values()].filter(ent => !SKIP.has(ent.name))
+			: Object.keys(Parser.CONDITION_TO_COLOR).filter(n => !SKIP.has(n)).map(n => ({name: n, source: Parser.SRC_PHB}));
+
+		// Sort: conditions with known colors first, then alphabetically
+		condEntries.sort((a, b) => {
+			const aHasColor = Parser.CONDITION_TO_COLOR?.[a.name] ? 0 : 1;
+			const bHasColor = Parser.CONDITION_TO_COLOR?.[b.name] ? 0 : 1;
+			return (aHasColor - bHasColor) || a.name.localeCompare(b.name);
+		});
+
+		for (const ent of condEntries) {
+			const condName = ent.name;
+			const condSource = ent.source;
+			const color = Parser.CONDITION_TO_COLOR?.[condName];
+			const isActive = (this._data.conditions || []).some(c => c.name === condName);
+			const btn = ee`<button class="dm-party__condition-btn ${isActive ? "dm-party__condition-btn--active" : ""}" style="${isActive ? `background: ${color || "#6c757d"}; color: #fff; border-color: ${color || "#6c757d"};` : color ? `border-color: ${color}; color: ${color};` : ""}" title="${condName} (${condSource})" aria-label="${condName}" aria-pressed="${isActive}">${condName}</button>`;
+			btn.onn("click", () => {
+				if (!this._data.conditions) this._data.conditions = [];
+				const ix = this._data.conditions.findIndex(c => c.name === condName);
+				if (~ix) this._data.conditions.splice(ix, 1);
+				else this._data.conditions.push({name: condName, source: condSource});
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
+			this._bindConditionDiseaseHover(btn, condName, condSource);
+			btn.appendTo(wrpGrid);
+		}
+
+		const wrpCustom = ee`<div class="dm-party__conditions-custom"></div>`;
+		const knownNames = new Set(condEntries.map(e => e.name));
+		const customConds = (this._data.conditions || []).filter(c => !knownNames.has(c.name));
+		for (const cond of customConds) {
+			const btnRm = ee`<button class="dm-party__pill-remove" aria-label="Remove ${cond.name}">\u00d7</button>`;
+			btnRm.onn("click", () => {
+				this._data.conditions = (this._data.conditions || []).filter(c => c.name !== cond.name);
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
+			const pill = ee`<span class="dm-party__condition-pill dm-party__condition-pill--custom">${cond.name} ${btnRm}</span>`;
+			if (cond.source) this._bindConditionDiseaseHover(pill, cond.name, cond.source);
+			pill.appendTo(wrpCustom);
+		}
+
+		const iptCustom = ee`<input class="ve-form-control ve-input-xs" style="width: 110px;" placeholder="Custom..." aria-label="Custom condition">`;
+		const btnAdd = ee`<button class="ve-btn ve-btn-primary ve-btn-xxs" aria-label="Add custom condition"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span></button>`;
+		const fnAddCustom = () => {
+			const val = iptCustom.val().trim();
+			if (!val) return;
+			if (!this._data.conditions) this._data.conditions = [];
+			if (!this._data.conditions.some(c => c.name === val)) {
+				this._data.conditions.push({name: val, source: null});
+				this._renderExpandedForm();
+				this._doUpdate();
+			}
+		};
+		btnAdd.onn("click", fnAddCustom);
+		iptCustom.onn("keydown", (e) => { if (e.key === "Enter") fnAddCustom(); });
+
+		return ee`<div class="dm-party__section">
+			<div class="dm-party__section-title">Conditions</div>
+			${wrpGrid}
+			${wrpCustom}
+			<div class="ve-flex-v-center ve-gap-1 ve-mt-1">${iptCustom}${btnAdd}</div>
+		</div>`;
+	}
+
+	_renderDiseasesSection () {
+		const diseaseMap = this._getDiseaseMap();
+
+		const wrpPills = ee`<div class="dm-party__diseases-list"></div>`;
+		for (const disease of (this._data.diseases || [])) {
+			const btnRm = ee`<button class="dm-party__pill-remove" aria-label="Remove ${disease.name}">\u00d7</button>`;
+			btnRm.onn("click", () => {
+				this._data.diseases = (this._data.diseases || []).filter(d => d.name !== disease.name);
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
+			const pill = ee`<span class="dm-party__disease-pill">${disease.name} ${btnRm}</span>`;
+			this._bindConditionDiseaseHover(pill, disease.name, disease.source);
+			pill.appendTo(wrpPills);
+		}
+
+		// Disease picker — dropdown of known diseases + free-text
+		const knownDiseases = diseaseMap.size ? [...diseaseMap.values()].sort((a, b) => a.name.localeCompare(b.name)) : [];
+		const existingNames = new Set((this._data.diseases || []).map(d => d.name));
+
+		let selDisease = "";
+		if (knownDiseases.length) {
+			selDisease = ee`<select class="ve-form-control ve-input-xs" style="width: 160px;" aria-label="Select disease">
+				<option value="">— Select —</option>
+				${knownDiseases.filter(d => !existingNames.has(d.name)).map(d => `<option value="${d.name.replace(/"/g, "&quot;")}" data-source="${d.source}">${d.name} (${d.source})</option>`).join("")}
+			</select>`;
+			selDisease.onn("change", (e) => {
+				const name = e.target.value;
+				if (!name) return;
+				const ent = diseaseMap.get(name);
+				if (!this._data.diseases) this._data.diseases = [];
+				if (!this._data.diseases.some(d => d.name === name)) {
+					this._data.diseases.push({name, source: ent?.source || null});
+					this._renderExpandedForm();
+					this._doUpdate();
+				}
+			});
+		}
+
+		const iptDisease = ee`<input class="ve-form-control ve-input-xs" style="width: 110px;" placeholder="Custom..." aria-label="Custom disease name">`;
+		const btnAdd = ee`<button class="ve-btn ve-btn-primary ve-btn-xxs" aria-label="Add disease"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span></button>`;
+		const fnAdd = () => {
+			const val = iptDisease.val().trim();
+			if (!val) return;
+			if (!this._data.diseases) this._data.diseases = [];
+			if (!this._data.diseases.some(d => d.name === val)) {
+				// Check if it matches a known disease
+				const known = diseaseMap.get(val);
+				this._data.diseases.push({name: val, source: known?.source || null});
+				this._renderExpandedForm();
+				this._doUpdate();
+			}
+		};
+		btnAdd.onn("click", fnAdd);
+		iptDisease.onn("keydown", (e) => { if (e.key === "Enter") fnAdd(); });
+
+		return ee`<div class="dm-party__section">
+			<div class="dm-party__section-title">Diseases</div>
+			${wrpPills}
+			${selDisease ? ee`<div class="ve-flex-v-center ve-gap-1 ve-mb-1">${selDisease}</div>` : ""}
+			<div class="ve-flex-v-center ve-gap-1">${iptDisease}${btnAdd}</div>
+		</div>`;
+	}
+
+	_renderCountersSection () {
+		const wrpCounters = ee`<div class="dm-party__counters-list"></div>`;
+		if (!this._data.counters) this._data.counters = [];
+
+		this._data.counters.forEach((counter, ix) => {
+			const iptName = ee`<input class="ve-form-control ve-input-xs" style="width: 100px;" placeholder="Name" value="${counter.name || ""}" aria-label="Counter name">`
+				.onn("change", (e) => { counter.name = e.target.value; this._doUpdate(); });
+			const iptCurrent = ee`<input class="ve-form-control ve-input-xs ve-text-center" style="width: 36px;" type="number" min="0" value="${counter.current ?? 0}" aria-label="Current value">`
+				.onn("change", (e) => { counter.current = Math.max(0, Number(e.target.value) || 0); this._doUpdate(); });
+			const iptMax = ee`<input class="ve-form-control ve-input-xs ve-text-center" style="width: 36px;" type="number" min="0" value="${counter.max ?? 0}" aria-label="Maximum value">`
+				.onn("change", (e) => { counter.max = Math.max(0, Number(e.target.value) || 0); this._doUpdate(); });
+			const btnRm = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" aria-label="Remove counter"><span class="glyphicon glyphicon-minus" aria-hidden="true"></span></button>`
+				.onn("click", () => {
+					this._data.counters.splice(ix, 1);
+					this._renderExpandedForm();
+					this._doUpdate();
+				});
+			ee`<div class="dm-party__counter-row">${iptName}${iptCurrent}<span class="ve-muted">/</span>${iptMax}${btnRm}</div>`.appendTo(wrpCounters);
+		});
+
+		const btnAdd = ee`<button class="ve-btn ve-btn-primary ve-btn-xxs" aria-label="Add counter"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Counter</button>`
+			.onn("click", () => {
+				this._data.counters.push({name: "", current: 0, max: 0});
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
+
+		return ee`<div class="dm-party__section">
+			<div class="dm-party__section-title">Counters</div>
+			${wrpCounters}
+			${btnAdd}
+		</div>`;
 	}
 
 	/* -------------------------------------------- */

@@ -22,7 +22,7 @@
 	}
 
 	.dm-party__summary {
-		font-size: 0.85rem;
+		font-size: 0.91rem;
 		color: vars.$rgb-off-black;
 		opacity: 0.75;
 		white-space: nowrap;
@@ -67,7 +67,7 @@
 	}
 
 	.dm-party__char-meta {
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 		color: vars.$rgb-off-black;
 		opacity: 0.75;
 		white-space: nowrap;
@@ -76,7 +76,7 @@
 	.dm-party__char-stat {
 		display: inline-flex;
 		align-items: center;
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 		gap: 3px;
 		white-space: nowrap;
 		padding: 1px 4px;
@@ -87,7 +87,7 @@
 	.dm-party__char-tgtt-stat {
 		display: inline-flex;
 		align-items: center;
-		font-size: 0.82rem;
+		font-size: 0.88rem;
 		gap: 3px;
 		white-space: nowrap;
 		padding: 1px 4px;
@@ -125,7 +125,7 @@
 	}
 
 	.dm-party__section-title {
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 		font-weight: 700;
 		color: vars.$rgb-off-black;
 		text-transform: uppercase;
@@ -150,7 +150,7 @@
 		background: rgba(0, 0, 0, 0.02);
 
 		.dm-party__ability-label {
-			font-size: 0.78rem;
+			font-size: 0.84rem;
 			font-weight: 700;
 			text-transform: uppercase;
 			color: vars.$rgb-off-black;
@@ -158,7 +158,7 @@
 		}
 
 		.dm-party__ability-mod {
-			font-size: 0.78rem;
+			font-size: 0.84rem;
 			opacity: 0.65;
 		}
 	}
@@ -174,11 +174,11 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
-		font-size: 0.85rem;
+		font-size: 0.91rem;
 
 		.dm-party__stat-label {
 			font-weight: 600;
-			font-size: 0.82rem;
+			font-size: 0.88rem;
 		}
 	}
 
@@ -194,7 +194,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 3px;
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 
 		.dm-party__field-label {
 			color: vars.$rgb-off-black;
@@ -213,7 +213,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 3px;
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 	}
 
 	.dm-party__skills-grid {
@@ -230,7 +230,7 @@
 	}
 
 	.dm-party__skill-name {
-		font-size: 0.8rem;
+		font-size: 0.86rem;
 		width: 72px;
 		min-width: 72px;
 		white-space: nowrap;
@@ -244,7 +244,7 @@
 	}
 
 	.dm-party__skill-bonus {
-		font-size: 0.82rem;
+		font-size: 0.88rem;
 		width: 24px;
 		text-align: right;
 	}
@@ -256,7 +256,7 @@
 	/* Manual bonus inputs (saves, skills, passives) */
 	.dm-party__bonus-input {
 		width: 30px;
-		font-size: 0.74rem;
+		font-size: 0.80rem;
 		opacity: 0.6;
 		transition: opacity 0.15s;
 
@@ -284,12 +284,12 @@
 	}
 
 	.dm-party__passive-label {
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 		font-weight: 600;
 	}
 
 	.dm-party__passive-value {
-		font-size: 0.88rem;
+		font-size: 0.94rem;
 		font-weight: 700;
 		min-width: 22px;
 		text-align: center;
@@ -305,7 +305,7 @@
 	}
 
 	.dm-party__tgtt-title {
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 		font-weight: 700;
 		color: #7b6daa;
 	}
@@ -321,12 +321,119 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px 14px;
-		font-size: 0.82rem;
+		font-size: 0.88rem;
 		color: vars.$rgb-off-black;
 		opacity: 0.8;
 		padding: 4px 6px;
 		background: rgba(0, 0, 0, 0.02);
 		border-radius: 4px;
+	}
+
+	/* ================================= */
+	/*  Conditions, Diseases, Counters  */
+	/* ================================= */
+
+	.dm-party__conditions-grid {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 3px;
+	}
+
+	.dm-party__condition-btn {
+		font-size: 0.78rem;
+		padding: 2px 6px;
+		border-radius: 3px;
+		border: 1.5px solid #ccc;
+		background: transparent;
+		cursor: pointer;
+		font-weight: 600;
+		transition: background 0.12s, color 0.12s, border-color 0.12s;
+		white-space: nowrap;
+
+		&:hover {
+			opacity: 0.85;
+		}
+
+		&--active {
+			color: #fff;
+		}
+	}
+
+	.dm-party__conditions-custom,
+	.dm-party__diseases-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		margin-top: 3px;
+	}
+
+	.dm-party__condition-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		font-size: 0.76rem;
+		font-weight: 600;
+		padding: 1px 6px;
+		border-radius: 10px;
+		background: #6c757d;
+		color: #fff;
+		white-space: nowrap;
+		cursor: default;
+
+		&--custom {
+			background: #868e96;
+		}
+
+		&--disease {
+			background: #8b5e3c;
+		}
+	}
+
+	.dm-party__conditions-summary {
+		display: inline-flex;
+		flex-wrap: wrap;
+		gap: 2px;
+		align-items: center;
+	}
+
+	.dm-party__disease-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		font-size: 0.80rem;
+		font-weight: 600;
+		padding: 2px 8px;
+		border-radius: 10px;
+		background: #8b5e3c;
+		color: #fff;
+		white-space: nowrap;
+	}
+
+	.dm-party__pill-remove {
+		background: none;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+		font-size: 0.90rem;
+		line-height: 1;
+		padding: 0 2px;
+		opacity: 0.7;
+
+		&:hover {
+			opacity: 1;
+		}
+	}
+
+	.dm-party__counters-list {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+
+	.dm-party__counter-row {
+		display: flex;
+		align-items: center;
+		gap: 4px;
 	}
 
 	/* ================================= */
@@ -341,7 +448,7 @@
 	}
 
 	.dm-party__dc-title {
-		font-size: 0.88rem;
+		font-size: 0.94rem;
 		font-weight: 700;
 		margin-bottom: 6px;
 	}
@@ -358,11 +465,11 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 
 		.dm-party__dc-label {
 			font-weight: 600;
-			font-size: 0.8rem;
+			font-size: 0.86rem;
 			text-transform: uppercase;
 			letter-spacing: 0.03em;
 		}
@@ -376,7 +483,7 @@
 	.dm-party__dc-row-header {
 		display: flex;
 		align-items: center;
-		font-size: 0.82rem;
+		font-size: 0.88rem;
 		font-weight: 700;
 		padding: 3px 0;
 		border-bottom: 2px solid vars.$rgb-border-grey;
@@ -386,7 +493,7 @@
 	.dm-party__dc-row {
 		display: flex;
 		align-items: center;
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 		padding: 3px 0;
 		border-bottom: 1px solid #f0f0f0;
 		gap: 4px;
@@ -400,7 +507,7 @@
 	.dm-party__dc-row-summary {
 		display: flex;
 		align-items: center;
-		font-size: 0.84rem;
+		font-size: 0.90rem;
 		font-weight: 700;
 		padding: 4px 0;
 		border-top: 2px solid #999;
@@ -473,7 +580,7 @@
 	}
 
 	.dm-party__settings-title {
-		font-size: 0.88rem;
+		font-size: 0.94rem;
 		font-weight: 700;
 		padding-bottom: 4px;
 		border-bottom: 1px solid #eee;
@@ -491,7 +598,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		font-size: 0.86rem;
+		font-size: 0.92rem;
 	}
 
 	/* ================================= */
@@ -628,6 +735,26 @@
 
 		.dm-party__settings-group {
 			border-left-color: #9b8dca;
+		}
+
+		.dm-party__condition-btn {
+			border-color: rgba(255, 255, 255, 0.2);
+		}
+
+		.dm-party__condition-pill--custom {
+			background: #555;
+		}
+
+		.dm-party__disease-pill {
+			background: #6d4a30;
+		}
+
+		.dm-party__condition-pill--disease {
+			background: #6d4a30;
+		}
+
+		.dm-party__pill-remove {
+			color: #ddd;
 		}
 
 		.dm-party__toolbar {
