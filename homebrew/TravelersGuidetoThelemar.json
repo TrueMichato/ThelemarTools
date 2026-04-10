@@ -230,6 +230,14 @@
       ]
     },
     {
+      "name": "Attacking While Falling",
+      "source": "TGTT",
+      "page": 38,
+      "entries": [
+        "When you attack a creature while falling on it from above, you add {@dice 1d4} damage for every 10 feet you fell."
+      ]
+    },
+    {
       "name": "Identifying Magic Items & Effects",
       "source": "TGTT",
       "page": 38,
@@ -887,7 +895,7 @@
       "ruleType": "V",
       "entries": [
         "When you make a Long Jump, you leap horizontally up to your Strength score in feet if you moved at least 10 feet immediately before the jump; a standing long jump is half that distance. Each foot you jump costs a foot of movement.",
-        "If you land in difficult terrain, make a {@dc 10} Dexterity ({@skill Acrobatics|XPHB}) check or fall {@condition prone|XPHB}.",
+        "If you land in difficult terrain, make a {@dc 10} Dexterity ({@skill Acrobatics|XPHB}) check or fall {@condition prone|TGTT}.",
         "For quick reference by Athletics modifier (A): Running = {@dice 8 + #$prompt_number:title=Enter Athletics Modifier$#|8 + A} ft.; Standing = {@dice 4 + #$prompt_number:title=Enter Athletics Modifier$# × 0.5|4 + A × 0.5} ft."
       ]
     },
@@ -1524,7 +1532,7 @@
       "source": "TGTT",
       "page": 38,
       "entries": [
-        "While you have the Poisoned condition, you experience the following effect.",
+        "While you have the Poisoned condition, you experience the following effects.",
         {
           "type": "list",
           "items": [
@@ -1539,13 +1547,29 @@
       "source": "TGTT",
       "page": 38,
       "entries": [
-        "While you have the Frightened condition, you experience the following effect.",
+        "While you have the Frightened condition, you experience the following effects.",
         {
           "type": "list",
           "items": [
             "{@b Ability Checks and Attacks Affected.} You have Disadvantage on ability checks and attack rolls while the source of fear is within line of sight.",
             "{@b Can’t Approach.} You can’t willingly move closer to the source of fear.",
             "{@b Verbal Constraint.} When attempting to cast a spell with a verbal component while frightened, you must first roll a concentration check. On failure, the spell is disrupted."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Prone",
+      "source": "TGTT",
+      "page": 38,
+      "entries": [
+        "While you have the Prone condition, you experience the following effects.",
+        {
+          "type": "list",
+          "items": [
+            "{@b Restricted Movement.} Your only movement options are to crawl or to spend an amount of movement equal to half your Speed (round down) to right yourself and thereby end the condition. If your Speed is 0, you can't right yourself.",
+            "{@b Attacks Affected.} You have Disadvantage on attack rolls. An attack roll against you has Advantage if the attacker is within 5 feet of you. Otherwise, that attack roll has Disadvantage.",
+            "{@b Concentration Disruption.} When you are knocked prone, you must roll a Concentration check if you are concentrating on a spell."
           ]
         }
       ]
@@ -2506,7 +2530,7 @@
           },
           {
             "name": "Ranger",
-            "source": "PHB"
+            "source": "TGTT"
           }
         ]
       }
