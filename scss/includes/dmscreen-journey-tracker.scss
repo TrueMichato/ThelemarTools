@@ -244,11 +244,12 @@
 
 	.dm-journey__activity-table {
 		padding: 0 4px 4px;
+		width: 100%;
 	}
 
 	.dm-journey__activity-row {
 		display: grid;
-		grid-template-columns: minmax(70px, 100px) minmax(90px, 160px) 55px 45px 72px minmax(70px, 1fr);
+		grid-template-columns: minmax(70px, 100px) minmax(120px, 1fr) 52px 42px 75px minmax(80px, 1fr) 28px;
 		gap: 4px 6px;
 		align-items: center;
 		padding: 3px 4px;
@@ -264,6 +265,13 @@
 			border-bottom: 1px solid #eee;
 			min-height: 22px;
 			padding-bottom: 2px;
+
+			/* Center compact headers */
+			span:nth-child(3),
+			span:nth-child(4),
+			span:nth-child(7) {
+				text-align: center;
+			}
 		}
 
 		&:not(&--header):nth-child(even) {
@@ -539,25 +547,16 @@
 		font-weight: 600;
 	}
 
-	/* --- Banter row --- */
+	/* --- Banter cell (column 7) --- */
 
-	.dm-journey__banter-row {
+	.dm-journey__banter-cell {
 		display: flex;
 		align-items: center;
-		gap: 6px;
-		padding: 2px 4px 2px 8px;
-		font-size: 0.80rem;
-		opacity: 0.85;
-
-		label {
-			display: flex;
-			align-items: center;
-			gap: 4px;
-			cursor: pointer;
-		}
+		justify-content: center;
 
 		input[type="checkbox"] {
 			margin: 0;
+			cursor: pointer;
 		}
 	}
 

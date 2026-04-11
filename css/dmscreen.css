@@ -1414,10 +1414,11 @@
   /* ============================================================ */
   .dm-journey__activity-table {
     padding: 0 4px 4px;
+    width: 100%;
   }
   .dm-journey__activity-row {
     display: grid;
-    grid-template-columns: minmax(70px, 100px) minmax(90px, 160px) 55px 45px 72px minmax(70px, 1fr);
+    grid-template-columns: minmax(70px, 100px) minmax(120px, 1fr) 52px 42px 75px minmax(80px, 1fr) 28px;
     gap: 4px 6px;
     align-items: center;
     padding: 3px 4px;
@@ -1433,6 +1434,12 @@
     border-bottom: 1px solid #eee;
     min-height: 22px;
     padding-bottom: 2px;
+    /* Center compact headers */
+  }
+  .dm-journey__activity-row--header span:nth-child(3),
+  .dm-journey__activity-row--header span:nth-child(4),
+  .dm-journey__activity-row--header span:nth-child(7) {
+    text-align: center;
   }
   .dm-journey__activity-row:not(.dm-journey__activity-row--header):nth-child(even) {
     background: rgba(136, 136, 136, 0.0941176471);
@@ -1659,23 +1666,15 @@
     font-size: 0.82rem;
     font-weight: 600;
   }
-  /* --- Banter row --- */
-  .dm-journey__banter-row {
+  /* --- Banter cell (column 7) --- */
+  .dm-journey__banter-cell {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 4px 2px 8px;
-    font-size: 0.8rem;
-    opacity: 0.85;
+    justify-content: center;
   }
-  .dm-journey__banter-row label {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
-  }
-  .dm-journey__banter-row input[type=checkbox] {
+  .dm-journey__banter-cell input[type=checkbox] {
     margin: 0;
+    cursor: pointer;
   }
   /* --- Interaction notes --- */
   .dm-journey__interaction-notes {

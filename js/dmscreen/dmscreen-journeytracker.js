@@ -181,7 +181,6 @@ const DEFAULT_STATE = () => ({
 	journey: {segments: []},
 	camp: {
 		campfireActive: false,
-		hideCampAttempted: false,
 		activities: {},
 		guardSlots: [],
 		riskRoll: null,
@@ -419,6 +418,12 @@ class JourneyTrackerRoot {
 		const btnAddPlayer = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" title="Add a player manually" aria-label="Add Player"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Player</button>`
 			.onn("click", () => this._addManualPlayer());
 
+		const btnNewDay = ee`<button class="ve-btn ve-btn-warning ve-btn-xs" title="Reset RM, clear all activities, and start a new day" aria-label="New Day">New Day</button>`;
+		btnNewDay.onn("click", () => {
+			if (!confirm("Start a new day? This resets RM, clears all activities, and logs the event.")) return;
+			this._doNewDay();
+		});
+
 		this._eleHeader = ee`<div class="dm-journey__header">
 			<div class="dm-journey__rm-section">
 				<span class="dm-journey__rm-label">RM</span>
@@ -430,6 +435,7 @@ class JourneyTrackerRoot {
 			</div>
 			${elePace}
 			<div class="dm-journey__sync-section">
+				${btnNewDay}
 				${btnRollMode}
 				${this._eleSyncStatus}
 				${btnAddPlayer}
@@ -867,17 +873,6 @@ class JourneyTrackerRoot {
 			<span class="dm-journey__note">(+1 RM while active)</span>
 		</label>`;
 
-		/* Hide Camp */
-		const btnHideCamp = ee`<button class="ve-btn ve-btn-default ve-btn-xs" ${camp.hideCampAttempted ? "disabled" : ""}>
-			${camp.hideCampAttempted ? "Hide Camp (attempted)" : "Attempt Hide Camp"}
-		</button>`;
-		btnHideCamp.onn("click", () => {
-			if (camp.hideCampAttempted) return;
-			camp.hideCampAttempted = true;
-			this._renderCamp();
-			this._doSave();
-		});
-
 		/* Activity table */
 		const body = this._renderActivityTable(camp.activities, CAMP_ACTIVITIES);
 
@@ -891,7 +886,6 @@ class JourneyTrackerRoot {
 		const eleRisk = this._renderRiskRollSection(camp, () => { this._renderCamp(); this._doSave(); });
 
 		this._wrpCamp.appendChild(eleCampfire);
-		this._wrpCamp.appendChild(btnHideCamp);
 		ee`<hr class="dm-journey__camp-section-divider">`.appendTo(this._wrpCamp);
 		ee`<div class="dm-journey__section-title">Activities</div>`.appendTo(this._wrpCamp);
 		this._wrpCamp.appendChild(body);
@@ -998,6 +992,7 @@ class JourneyTrackerRoot {
 			<span>DC</span>
 			<span>Roll</span>
 			<span>Result</span>
+			<span title="Also Bantering — grants Inspiration Points">Ban.</span>
 		</div>`.appendTo(wrp);
 
 		for (const player of players) {
@@ -1011,26 +1006,15 @@ class JourneyTrackerRoot {
 			/* Trim excess (but only empty trailing slots) */
 			while (activities[player.id].length > numActions && !activities[player.id].at(-1)?.activity) activities[player.id].pop();
 
+			const banterKey = `_bantering_${player.id}`;
+			if (activities[banterKey] == null) activities[banterKey] = false;
+
 			const slots = activities[player.id];
 			for (let i = 0; i < slots.length; i++) {
 				const act = slots[i];
-				const row = this._renderActivityRow(player, act, ptChar, activityList, activities, players, i === 0, i);
+				const row = this._renderActivityRow(player, act, ptChar, activityList, activities, players, i === 0, i, banterKey);
 				wrp.appendChild(row);
 			}
-
-			/* Banter checkbox — shown on last row, spans full width */
-			const banterKey = `_bantering_${player.id}`;
-			if (activities[banterKey] == null) activities[banterKey] = false;
-			const cbxBanter = ee`<input type="checkbox" ${activities[banterKey] ? "checked" : ""} aria-label="Bantering">`;
-			cbxBanter.onn("change", () => {
-				activities[banterKey] = cbxBanter.prop("checked");
-				this._doSave();
-			});
-			ee`<label class="dm-journey__banter-row">
-				${cbxBanter}
-				<span>Also Bantering</span>
-				<span class="dm-journey__note">(no roll — grants Inspiration Points)</span>
-			</label>`.appendTo(wrp);
 		}
 
 		/* Activity interaction notes */
@@ -1047,7 +1031,7 @@ class JourneyTrackerRoot {
 		return wrp;
 	}
 
-	_renderActivityRow (player, act, ptChar, activityList, activities, allPlayers, isFirstRow = true, slotIndex = 0) {
+	_renderActivityRow (player, act, ptChar, activityList, activities, allPlayers, isFirstRow = true, slotIndex = 0, banterKey = null) {
 		const actDef = activityList.find(a => a.id === act.activity);
 
 		/* ---- Activity dropdown ---- */
@@ -1196,6 +1180,19 @@ class JourneyTrackerRoot {
 			${eleInfoBtn}
 		</div>`;
 
+		/* ---- Banter cell (column 7) ---- */
+		let eleBanterCell;
+		if (isFirstRow && banterKey) {
+			const cbxBanter = ee`<input type="checkbox" ${activities[banterKey] ? "checked" : ""} aria-label="Bantering" title="Also Bantering — grants Inspiration Points">`;
+			cbxBanter.onn("change", () => {
+				activities[banterKey] = cbxBanter.prop("checked");
+				this._doSave();
+			});
+			eleBanterCell = ee`<span class="dm-journey__banter-cell">${cbxBanter}</span>`;
+		} else {
+			eleBanterCell = ee`<span class="dm-journey__banter-cell"></span>`;
+		}
+
 		return ee`<div class="${rowCls}">
 			${eleNameCell}
 			${eleActivityCell}
@@ -1203,6 +1200,7 @@ class JourneyTrackerRoot {
 			${eleDcCell}
 			${eleRollCell}
 			${eleResultCell}
+			${eleBanterCell}
 		</div>`;
 	}
 
@@ -1452,12 +1450,6 @@ class JourneyTrackerRoot {
 			this._doSave();
 		});
 
-		const btnNewDay = ee`<button class="ve-btn ve-btn-warning ve-btn-sm">New Day</button>`;
-		btnNewDay.onn("click", () => {
-			if (!confirm("Start a new day? This resets RM, clears all activities, and logs the event.")) return;
-			this._doNewDay();
-		});
-
 		ee`<div class="ve-flex-col ve-gap-2 ve-p-2">
 			<div>
 				<label class="ve-bold">Area Name</label>
@@ -1483,7 +1475,6 @@ class JourneyTrackerRoot {
 			</div>
 			<div class="ve-flex ve-gap-2">
 				${btnReset}
-				${btnNewDay}
 			</div>
 		</div>`.appendTo(this._wrpArea);
 	}
@@ -1790,7 +1781,6 @@ class JourneyTrackerRoot {
 		this._state.journey.segments = [];
 		this._state.camp = {
 			campfireActive: false,
-			hideCampAttempted: false,
 			activities: {},
 			guardSlots: [],
 			riskRoll: null,
@@ -2051,7 +2041,6 @@ class JourneyTrackerRoot {
 			},
 			camp: {
 				campfireActive: toLoad.camp?.campfireActive || false,
-				hideCampAttempted: toLoad.camp?.hideCampAttempted || false,
 				activities: JourneyTrackerRoot._migrateActivities(toLoad.camp?.activities),
 				guardSlots: (toLoad.camp?.guardSlots || []).map(s => ({...s})),
 				riskRoll: toLoad.camp?.riskRoll ?? null,
@@ -2094,7 +2083,6 @@ class JourneyTrackerRoot {
 			},
 			camp: {
 				campfireActive: this._state.camp.campfireActive,
-				hideCampAttempted: this._state.camp.hideCampAttempted,
 				activities: JourneyTrackerRoot._cloneActivities(this._state.camp.activities),
 				guardSlots: this._state.camp.guardSlots.map(s => ({...s})),
 				riskRoll: this._state.camp.riskRoll,
