@@ -6,30 +6,125 @@ import {DmScreenUtil} from "./dmscreen-util.js";
 /* ============================================================================================== */
 
 const JOURNEY_ACTIVITIES = [
-	{id: "navigate", label: "Navigate", skill: "survival", rmOnSuccess: 0, rmAlways: 0, desc: "Survival check vs DC. On success, the group won't get lost this segment. On failure, the group may wander off course or lose time."},
-	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmAlways: 0, desc: "Perception check vs DC. On success, −1 RM (you spot danger early). +2 DC to Hide Tracks per scout. Disadvantage at Fast Pace."},
-	{id: "map", label: "Map", skill: "investigation", rmOnSuccess: 0, rmAlways: 0, desc: "Investigation check vs DC. On success, you contribute to a useful map. Not possible at Fast Pace."},
-	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmAlways: 0, desc: "Survival check vs DC. On success, gather food/water/herbs. +2 DC to Hide Tracks per forager. Not possible at Fast Pace."},
-	{id: "hideTracks", label: "Hide Tracks", skill: "stealth", rmOnSuccess: -1, rmAlways: 0, desc: "Stealth check vs DC (raised by scouts, foragers, entertainers). On success, −1 RM. DC modified by pace."},
-	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmAlways: 1, desc: "Performance check. Automatically +1 RM (noise). On success, boost morale. +2 DC to Hide Tracks per entertainer."},
-	{id: "banter", label: "Banter", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "No roll needed. Casual conversation during travel — no mechanical effect."},
-	{id: "track", label: "Track", skill: "survival", rmOnSuccess: 0, rmAlways: 0, desc: "Survival check vs DC. On success, follow or find tracks of creatures in the area."},
-	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "A custom activity — set your own name and rules."},
+	{id: "navigate", label: "Navigate", skill: "survival", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 0, rmAlways: 0,
+		desc: "Essential navigation activity for journeys without a clear path.",
+		successText: "The party continues toward their destination, covering the expected distance.",
+		critSuccessText: "Exceptional navigation — the party finds a shortcut or avoids a hazard.",
+		failureText: "The party makes no progress or veers off course (adds 1d6 hours to travel time).",
+		critFailText: "The party becomes badly lost, potentially entering dangerous territory.",
+		restrictionText: "Fast Pace: DC +2. Slow Pace: DC −2."},
+	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmOnCritSuccess: -1, rmOnFail: 0, rmOnCritFail: 1, rmAlways: 0, critSuccessPerPlayer: true,
+		desc: "Look out for danger along the party's path.",
+		successText: "−1 RM. You spot danger early and alert the party.",
+		critSuccessText: "−1 RM for every party member taking this activity.",
+		failureText: "No effect.",
+		critFailText: "+1 RM. You miss something important.",
+		restrictionText: "Fast Pace gives Disadvantage. +2 DC to Hide Tracks per scout."},
+	{id: "map", label: "Map", skill: "investigation", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 0, rmAlways: 0,
+		desc: "Document terrain, create maps, and refine understanding of the region.",
+		successText: "The party gains Advantage on their next Navigation check in this area.",
+		critSuccessText: "Advantage on all Navigation checks in this area for the rest of the Journey Phase.",
+		failureText: "No effect.",
+		critFailText: "Misrecorded details — next Navigation check in this area at Disadvantage.",
+		restrictionText: "Not possible at Fast Pace."},
+	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 1, rmAlways: 0,
+		desc: "Gather edible plants, hunt small game, and locate water sources.",
+		successText: "Find 1d4 rations (DM may adjust based on biome).",
+		critSuccessText: "Find 1d4 + proficiency bonus rations, or locate a rare resource.",
+		failureText: "No resources found.",
+		critFailText: "+1 RM. You disturb the environment.",
+		restrictionText: "Not possible at Fast Pace. +2 DC to Hide Tracks per forager."},
+	{id: "hideTracks", label: "Hide Tracks", skill: "stealth", rmOnSuccess: -1, rmOnCritSuccess: -2, rmOnFail: 0, rmOnCritFail: 1, rmAlways: 0,
+		desc: "Cover footprints and obscure evidence of passage.",
+		successText: "−1 RM.",
+		critSuccessText: "−2 RM, and impose Disadvantage on any creature attempting to track the party for 24 hours.",
+		failureText: "No effect.",
+		critFailText: "+1 RM. You leave obvious clues.",
+		restrictionText: "Fast Pace: DC +2. Slow Pace: DC −2. For each ally performing Scout, Forage, or Entertain: DC +2."},
+	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 2, rmAlways: 1,
+		desc: "Tell stories, sing, play instruments, or boost morale. Noise draws attention.",
+		successText: "Grant Heroic Inspiration to all allies.",
+		critSuccessText: null,
+		failureText: "No effect.",
+		critFailText: "+2 RM. You make a racket.",
+		restrictionText: "Always +1 RM (noise). May prevent stealth-based actions."},
+	{id: "track", label: "Track", skill: "survival", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 0, rmAlways: 0,
+		desc: "Follow tracks, signs, or magical traces. Replaces Navigation for the segment.",
+		successText: "Successfully follow the trail.",
+		critSuccessText: null,
+		failureText: "Trail is lost; must retry or abandon pursuit.",
+		critFailText: null,
+		restrictionText: "Normal Pace: Disadvantage. Fast Pace: Not possible."},
+	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 0, rmAlways: 0,
+		desc: "A custom activity — set your own name and rules.",
+		successText: null, critSuccessText: null, failureText: null, critFailText: null, restrictionText: null},
 ];
 
 const CAMP_ACTIVITIES = [
-	{id: "campfire", label: "Campfire", skill: "survival", rmOnSuccess: 0, rmAlways: 0, desc: "Survival check. Build/maintain the campfire. Toggle the Campfire Active switch separately (+1 RM while lit)."},
-	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmAlways: 1, desc: "Survival check vs DC. Automatically +1 RM (leaving camp). On success, gather food/water/herbs near camp."},
-	{id: "cook", label: "Cook", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "Prepare a meal using rations or foraged ingredients. May require supplies or proficiency."},
-	{id: "pray", label: "Pray", skill: "religion", rmOnSuccess: 0, rmAlways: 0, desc: "Religion check. Commune with your deity for guidance, blessings, or spiritual clarity."},
-	{id: "tend", label: "Tend", skill: "medicine", rmOnSuccess: 0, rmAlways: 0, desc: "Medicine check. Treat wounds, stabilize injured, or care for the sick."},
-	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmAlways: 1, desc: "Performance check. Automatically +1 RM (noise). On success, boost camp morale."},
-	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmAlways: 0, desc: "Perception check vs DC. On success, −1 RM (early warning of threats near camp)."},
-	{id: "research", label: "Research", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "Study notes, books, or maps. No standard roll — DM may call for Investigation or Arcana."},
-	{id: "hideCamp", label: "Hide Camp", skill: "stealth", rmOnSuccess: -1, rmAlways: 0, desc: "Stealth check vs DC (raised by scouts, foragers, entertainers). On success, −1 RM. DC modified by pace."},
-	{id: "banter", label: "Banter", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "No roll needed. Socialize around camp — no mechanical effect."},
-	{id: "guard", label: "Guard", skill: "perception", rmOnSuccess: 0, rmAlways: 0, desc: "Perception check. Stand watch during a rest period. Use Guard Watches section for dedicated guard slots."},
-	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmAlways: 0, desc: "A custom activity — set your own name and rules."},
+	{id: "campfire", label: "Campfire", skill: "survival", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 2, rmAlways: 0,
+		desc: "Build and maintain a campfire for warmth, light, safety, and cooking.",
+		successText: "A stable fire burns throughout the night, enabling Cook and other fire-dependent activities.",
+		critSuccessText: "Exceptionally well-prepared — grants Advantage on Cook checks.",
+		failureText: "The fire sputters out after 1 hour unless someone spends another hour fixing it.",
+		critFailText: "+2 RM. Excessive smoke or flare; the fire fails.",
+		restrictionText: "+1 RM while active (toggle separately). Required for activities needing light."},
+	{id: "forage", label: "Forage", skill: "survival", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 1, rmAlways: 1,
+		desc: "Search surroundings (within 1 mile) for food, water, herbs, or ingredients.",
+		successText: "Find 1d4 rations or gather herbs/ingredients.",
+		critSuccessText: "Find 1d4 + proficiency bonus rations or a valuable natural resource.",
+		failureText: "No supplies found.",
+		critFailText: "+1 RM. You disturb the ecosystem.",
+		restrictionText: "+1 RM (leaving camp). May require Campfire to process finds."},
+	{id: "cook", label: "Cook", skill: null, rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 0, rmAlways: 0,
+		desc: "Prepare a hearty meal using ingredients (1 ration + 1 water per person).",
+		successText: "A creature who eats the meal reduces 1 level of Exhaustion (once per Long Rest).",
+		critSuccessText: null,
+		failureText: "The meal is edible but unimpressive; no benefits.",
+		critFailText: "Food is spoiled or badly made. Rations are wasted.",
+		restrictionText: "Requires light (typically Campfire). Chef feat may grant improved effects."},
+	{id: "pray", label: "Pray", skill: "religion", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 0, rmAlways: 0,
+		desc: "Offer devotion, seek guidance, or perform rituals.",
+		successText: null, critSuccessText: null, failureText: null, critFailText: null,
+		restrictionText: "Each special ritual component (incense, sacrifice, chanting) adds +1 RM."},
+	{id: "tend", label: "Tend", skill: "medicine", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 0, rmAlways: 0,
+		desc: "Provide care by healing wounds, massaging muscles, or practicing meditation.",
+		successText: "Benefits depend on the player's specific actions (DM adjudicates).",
+		critSuccessText: null, failureText: null, critFailText: null, restrictionText: null},
+	{id: "entertain", label: "Entertain", skill: "performance", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 2, rmAlways: 1,
+		desc: "Tell stories, sing, play instruments, or boost morale. Noise draws attention.",
+		successText: "Grant Heroic Inspiration to all allies.",
+		critSuccessText: null,
+		failureText: "No effect.",
+		critFailText: "+2 RM. You make a racket.",
+		restrictionText: "Always +1 RM (noise). May prevent stealth-based actions."},
+	{id: "scout", label: "Scout", skill: "perception", rmOnSuccess: -1, rmOnCritSuccess: -1, rmOnFail: 0, rmOnCritFail: 1, rmAlways: 0,
+		desc: "Survey the perimeter, check for tracks, and assess nighttime dangers.",
+		successText: "−1 RM.",
+		critSuccessText: "−1 RM, and all Guards gain Advantage on perception checks until camp break.",
+		failureText: "No effect.",
+		critFailText: "+1 RM.",
+		restrictionText: "+2 DC to Hide Camp per scout. Can be performed before or after setting camp."},
+	{id: "research", label: "Research", skill: null, rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 0, rmAlways: 0,
+		desc: "Study books, experiment with magic, write notes, craft formulas, or practice rituals.",
+		successText: null, critSuccessText: null, failureText: null, critFailText: null,
+		restrictionText: "Requires light. Some experiments may add RM (DM discretion)."},
+	{id: "hideCamp", label: "Hide Camp", skill: "stealth", rmOnSuccess: -1, rmOnCritSuccess: -2, rmOnFail: 0, rmOnCritFail: 1, rmAlways: 0,
+		desc: "Camouflage tents, position camp in shadows, reduce fire visibility.",
+		successText: "−1 RM.",
+		critSuccessText: "−2 RM.",
+		failureText: "No effect.",
+		critFailText: "+1 RM. You accidentally make the camp more conspicuous.",
+		restrictionText: "Campfire present: DC +2. For each Scout/Forage: DC +2. Only at the beginning of a camp sequence."},
+	{id: "guard", label: "Guard", skill: "perception", rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 2, rmAlways: 0,
+		desc: "Keep watch during camp. Can be taken alongside a light activity.",
+		successText: "If a random encounter occurs, the party is not surprised.",
+		critSuccessText: "If an encounter occurs, the party gains Advantage on initiative.",
+		failureText: "If an encounter occurs, the party is surprised.",
+		critFailText: "+2 RM. The guard falls asleep; enemies gain a free round if they attack.",
+		restrictionText: "Can be done alongside low-intensity tasks (Banter). Multiple Guards act in shifts."},
+	{id: "custom", label: "Custom\u2026", skill: null, rmOnSuccess: 0, rmOnCritSuccess: 0, rmOnFail: 0, rmOnCritFail: 0, rmAlways: 0,
+		desc: "A custom activity — set your own name and rules.",
+		successText: null, critSuccessText: null, failureText: null, critFailText: null, restrictionText: null},
 ];
 
 const PACE_OPTIONS = [
@@ -543,35 +638,31 @@ class JourneyTrackerRoot {
 		/* DC display */
 		const eleDc = ee`<span class="dm-journey__dc-cell" title="Base DC ${baseDc}">${baseDc}</span>`;
 
-		/* Roll input */
+		/* Roll input + crit toggle for total mode */
 		const iptResult = ee`<input type="number" class="ve-form-control ve-input-xs dm-journey__roll-input" placeholder="${isTotalMode ? "Total" : "d20"}" value="${slot.rollResult || ""}" aria-label="Stealth roll">`;
+
+		const CRIT_CYCLE = [null, "critSuccess", "critFail"];
+		const CRIT_LABELS = {null: "\u2014", critSuccess: "\u21D1", critFail: "\u21D3"};
+		const CRIT_CLASSES = {null: "dm-journey__crit-toggle--normal", critSuccess: "dm-journey__crit-toggle--crit-pass", critFail: "dm-journey__crit-toggle--crit-fail"};
+		const CRIT_TITLES = {null: "Normal result (click to cycle)", critSuccess: "Critical Success (click to cycle)", critFail: "Critical Failure (click to cycle)"};
+
+		const curCrit = slot._critOverride || null;
+		const btnCrit = ee`<button class="dm-journey__crit-toggle ${CRIT_CLASSES[curCrit]}" title="${CRIT_TITLES[curCrit]}" type="button" aria-label="Toggle critical result">${CRIT_LABELS[curCrit]}</button>`;
+		btnCrit.toggleVe(isTotalMode);
+		btnCrit.onn("click", () => {
+			const curIdx = CRIT_CYCLE.indexOf(slot._critOverride || null);
+			slot._critOverride = CRIT_CYCLE[(curIdx + 1) % CRIT_CYCLE.length];
+			this._applyStealthRollRm(slot, ix, bonus, baseDc, isTotalMode, players);
+			this._renderJourney();
+			this._doSave();
+		});
+
+		const eleRollCell = ee`<div class="dm-journey__roll-cell">${iptResult}${btnCrit}</div>`;
+
 		iptResult.onn("change", () => {
-			const rawVal = iptResult.val()?.trim();
-			slot.rollResult = rawVal;
-
-			/* Undo previous RM */
-			if (slot._rmApplied) {
-				this._setRm(this._state.riskModifier - slot._rmApplied, `Undo stealth roll (slot ${ix + 1})`);
-				slot._rmApplied = 0;
-			}
-
-			const rollNum = parseInt(rawVal, 10);
-			if (!isNaN(rollNum) && slot.playerId) {
-				const total = isTotalMode ? rollNum : rollNum + bonus;
-				const success = total >= baseDc;
-				const playerName = players.find(p => p.id === slot.playerId)?.name || "?";
-				const logStr = isTotalMode
-					? `${playerName} — Stealth: total ${total} vs DC ${baseDc}`
-					: `${playerName} — Stealth: d20(${rollNum}) ${this._fmtBonus(bonus)} = ${total} vs DC ${baseDc}`;
-
-				if (success) {
-					slot._rmApplied = -1;
-					this._setRm(this._state.riskModifier - 1, `Stealth success (${playerName}): −1 RM`);
-					this._addLog("activity", `${logStr} \u2192 Success (RM −1)`);
-				} else {
-					this._addLog("activity", `${logStr} \u2192 Fail`);
-				}
-			}
+			slot.rollResult = iptResult.val()?.trim() || "";
+			slot._critOverride = isTotalMode ? (slot._critOverride || null) : null;
+			this._applyStealthRollRm(slot, ix, bonus, baseDc, isTotalMode, players);
 			this._renderJourney();
 			this._doSave();
 		});
@@ -582,11 +673,17 @@ class JourneyTrackerRoot {
 			const rollNum = parseInt(slot.rollResult, 10);
 			if (!isNaN(rollNum) && slot.playerId) {
 				const total = isTotalMode ? rollNum : rollNum + bonus;
-				const success = total >= baseDc;
-				const icon = success ? "\u2714" : "\u2718";
-				const cls = success ? "dm-journey__roll-result--pass" : "dm-journey__roll-result--fail";
-				eleResult.className = `dm-journey__roll-result ${cls}`;
-				eleResult.txt(`${icon} ${total}${slot._rmApplied ? " (RM −1)" : ""}`);
+				const outcome = this._classifyStealthRoll(rollNum, total, baseDc, isTotalMode, slot._critOverride);
+
+				const ICONS = {critSuccess: "\u2714\u2714", success: "\u2714", fail: "\u2718", critFail: "\u2718\u2718"};
+				const CLASSES = {critSuccess: "dm-journey__roll-result--crit-pass", success: "dm-journey__roll-result--pass", fail: "dm-journey__roll-result--fail", critFail: "dm-journey__roll-result--crit-fail"};
+				const LABELS = {critSuccess: "Crit!", success: "", fail: "", critFail: "Crit Fail!"};
+
+				eleResult.className = `dm-journey__roll-result ${CLASSES[outcome]}`;
+				const parts = [`${ICONS[outcome]} ${total}`];
+				if (LABELS[outcome]) parts.push(LABELS[outcome]);
+				if (slot._rmApplied) parts.push(`(RM ${slot._rmApplied > 0 ? "+" : ""}${slot._rmApplied})`);
+				eleResult.txt(parts.join(" "));
 			}
 		}
 
@@ -604,10 +701,50 @@ class JourneyTrackerRoot {
 			${sel}
 			<span class="dm-journey__skill-bonus" title="Stealth bonus">${bonusStr}</span>
 			${eleDc}
-			${iptResult}
+			${eleRollCell}
 			${eleResult}
 			${btnRemove}
 		</div>`;
+	}
+
+	/** Classify a stealth roll: check nat 20/1 in d20 mode, or manual override in total mode. */
+	_classifyStealthRoll (rollNum, total, dc, isTotalMode, critOverride) {
+		const success = total >= dc;
+		if (isTotalMode && critOverride) return critOverride;
+		if (!isTotalMode) {
+			if (rollNum === 20) return success ? "critSuccess" : "success";
+			if (rollNum === 1) return !success ? "critFail" : "fail";
+		}
+		return success ? "success" : "fail";
+	}
+
+	/** Apply stealth roll RM effects with crit support. */
+	_applyStealthRollRm (slot, ix, bonus, baseDc, isTotalMode, players) {
+		/* Undo previous RM */
+		if (slot._rmApplied) {
+			this._setRm(this._state.riskModifier - slot._rmApplied, `Undo stealth roll (slot ${ix + 1})`);
+			slot._rmApplied = 0;
+		}
+
+		const rollNum = parseInt(slot.rollResult, 10);
+		if (isNaN(rollNum) || !slot.playerId) return;
+
+		const total = isTotalMode ? rollNum : rollNum + bonus;
+		const outcome = this._classifyStealthRoll(rollNum, total, baseDc, isTotalMode, slot._critOverride);
+		const playerName = players.find(p => p.id === slot.playerId)?.name || "?";
+		const logStr = isTotalMode
+			? `${playerName} \u2014 Stealth: total ${total} vs DC ${baseDc}`
+			: `${playerName} \u2014 Stealth: d20(${rollNum}) ${this._fmtBonus(bonus)} = ${total} vs DC ${baseDc}`;
+
+		const OUTCOME_LABELS = {critSuccess: "Critical Success", success: "Success", fail: "Failure", critFail: "Critical Failure"};
+		const RM_MAP = {critSuccess: -2, success: -1, fail: 0, critFail: 2};
+		const rmDelta = RM_MAP[outcome];
+		slot._rmApplied = rmDelta;
+
+		if (rmDelta) {
+			this._setRm(this._state.riskModifier + rmDelta, `Stealth ${OUTCOME_LABELS[outcome]} (${playerName}): ${rmDelta > 0 ? "+" : ""}${rmDelta} RM`);
+		}
+		this._addLog("activity", `${logStr} \u2192 ${OUTCOME_LABELS[outcome]}${rmDelta ? ` (RM ${rmDelta > 0 ? "+" : ""}${rmDelta})` : ""}`);
 	}
 
 	/* -------------------------------------------- */
@@ -880,6 +1017,20 @@ class JourneyTrackerRoot {
 				const row = this._renderActivityRow(player, act, ptChar, activityList, activities, players, i === 0, i);
 				wrp.appendChild(row);
 			}
+
+			/* Banter checkbox — shown on last row, spans full width */
+			const banterKey = `_bantering_${player.id}`;
+			if (activities[banterKey] == null) activities[banterKey] = false;
+			const cbxBanter = ee`<input type="checkbox" ${activities[banterKey] ? "checked" : ""} aria-label="Bantering">`;
+			cbxBanter.onn("change", () => {
+				activities[banterKey] = cbxBanter.prop("checked");
+				this._doSave();
+			});
+			ee`<label class="dm-journey__banter-row">
+				${cbxBanter}
+				<span>Also Bantering</span>
+				<span class="dm-journey__note">(no roll — grants Inspiration Points)</span>
+			</label>`.appendTo(wrp);
 		}
 
 		/* Activity interaction notes */
@@ -914,8 +1065,10 @@ class JourneyTrackerRoot {
 			/* Switch to new activity */
 			act.activity = sel.val();
 			act.rollResult = "";
+			act.customName = act.activity === "custom" ? (act.customName || "") : "";
 			act._rmAlwaysApplied = 0;
 			act._rmRollApplied = 0;
+			act._critOverride = null;
 
 			/* Auto-apply rmAlways for the new activity */
 			const newDef = activityList.find(a => a.id === act.activity);
@@ -970,63 +1123,40 @@ class JourneyTrackerRoot {
 		const dcTitle = impossible ? "Impossible at current pace" : dcNotes.length ? `Base ${this._state.area.baseDc ?? 10}: ${dcNotes.join(", ")}` : "";
 		const eleDcCell = ee`<span class="${dcCls}" title="${this._escAttr(dcTitle)}">${dcStr}</span>`;
 
-		/* ---- Roll input ---- */
+		/* ---- Roll input + crit cycle button ---- */
 		const isTotalMode = this._state.rollMode === "total";
 		const iptResult = ee`<input type="number" class="ve-form-control ve-input-xs dm-journey__roll-input" placeholder="${isTotalMode ? "Total" : "d20"}" value="${act.rollResult || ""}" aria-label="Roll for ${this._escAttr(player.name)}">`;
+
+		/* Crit cycle button (total mode) — cycles: null → critSuccess → critFail → null */
+		const CRIT_CYCLE = [null, "critSuccess", "critFail"];
+		const CRIT_LABELS = {null: "\u2014", critSuccess: "\u21D1", critFail: "\u21D3"};
+		const CRIT_CLASSES = {null: "dm-journey__crit-toggle--normal", critSuccess: "dm-journey__crit-toggle--crit-pass", critFail: "dm-journey__crit-toggle--crit-fail"};
+		const CRIT_TITLES = {null: "Normal result (click to cycle)", critSuccess: "Critical Success (click to cycle)", critFail: "Critical Failure (click to cycle)"};
+
+		const curCrit = act._critOverride || null;
+		const btnCrit = ee`<button class="dm-journey__crit-toggle ${CRIT_CLASSES[curCrit]}" title="${CRIT_TITLES[curCrit]}" type="button" aria-label="Toggle critical result">${CRIT_LABELS[curCrit]}</button>`;
+		btnCrit.toggleVe(isTotalMode && !!actDef?.skill);
+		btnCrit.onn("click", () => {
+			const curIdx = CRIT_CYCLE.indexOf(act._critOverride || null);
+			act._critOverride = CRIT_CYCLE[(curIdx + 1) % CRIT_CYCLE.length];
+			/* Re-evaluate RM for this roll with the new crit state */
+			this._applyActivityRollRm(act, actDef, player, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList);
+			this._reRenderCurrentTab();
+			this._doSave();
+		});
+
+		const eleRollCell = ee`<div class="dm-journey__roll-cell">${iptResult}${btnCrit}</div>`;
+
 		iptResult.onn("change", () => {
-			const rawVal = iptResult.val()?.trim();
-			act.rollResult = rawVal;
-
-			/* Undo previous roll-based RM */
-			if (act._rmRollApplied) {
-				this._setRm(this._state.riskModifier - act._rmRollApplied, `Undo roll ${actDef?.label || "?"} (${player.name})`);
-				act._rmRollApplied = 0;
-			}
-
-			const rollNum = parseInt(rawVal, 10);
-			if (!isNaN(rollNum) && actDef?.skill && dc != null && !impossible) {
-				const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
-				const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
-				const success = total >= dc;
-
-				const logStr = isTotalMode
-					? `${player.name} \u2014 ${actDef.label}: total ${total} vs DC ${dc}`
-					: `${player.name} \u2014 ${actDef.label}: d20(${rollNum}) ${this._fmtBonus(bonusInfo.total)} = ${total} vs DC ${dc}`;
-
-				if (success && actDef.rmOnSuccess) {
-					act._rmRollApplied = actDef.rmOnSuccess;
-					this._setRm(this._state.riskModifier + actDef.rmOnSuccess, `${actDef.label} success (${player.name}): ${actDef.rmOnSuccess > 0 ? "+" : ""}${actDef.rmOnSuccess} RM`);
-					this._addLog("activity", `${logStr} \u2192 Success (RM ${actDef.rmOnSuccess > 0 ? "+" : ""}${actDef.rmOnSuccess})`);
-				} else if (!success) {
-					this._addLog("activity", `${logStr} \u2192 Fail`);
-				} else {
-					this._addLog("activity", `${logStr} \u2192 Success`);
-				}
-			}
+			act.rollResult = iptResult.val()?.trim() || "";
+			act._critOverride = isTotalMode ? (act._critOverride || null) : null;
+			this._applyActivityRollRm(act, actDef, player, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList);
 			this._reRenderCurrentTab();
 			this._doSave();
 		});
 
 		/* ---- Result cell ---- */
-		const eleResultCell = ee`<span class="dm-journey__roll-result"></span>`;
-		if (act.rollResult !== "" && act.rollResult != null) {
-			const rollNum = parseInt(act.rollResult, 10);
-			if (!isNaN(rollNum) && actDef?.skill && dc != null) {
-				const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
-				const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
-				const success = total >= dc;
-				const icon = impossible ? "\u2718" : success ? "\u2714" : "\u2718";
-				const cls = impossible ? "dm-journey__roll-result--fail" : success ? "dm-journey__roll-result--pass" : "dm-journey__roll-result--fail";
-				eleResultCell.className = `dm-journey__roll-result ${cls}`;
-				const resultParts = [`${icon} ${total}`];
-				if (act._rmRollApplied) resultParts.push(`(RM ${act._rmRollApplied > 0 ? "+" : ""}${act._rmRollApplied})`);
-				if (act._rmAlwaysApplied) resultParts.push(`(auto RM ${act._rmAlwaysApplied > 0 ? "+" : ""}${act._rmAlwaysApplied})`);
-				eleResultCell.txt(resultParts.join(" "));
-			}
-		} else if (act._rmAlwaysApplied) {
-			eleResultCell.className = "dm-journey__roll-result dm-journey__rm-auto";
-			eleResultCell.txt(`auto RM ${act._rmAlwaysApplied > 0 ? "+" : ""}${act._rmAlwaysApplied}`);
-		}
+		const eleResultCell = this._renderActivityResultCell(act, actDef, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList);
 
 		/* ---- Player name + remove button ---- */
 		let eleNameCell;
@@ -1035,7 +1165,6 @@ class JourneyTrackerRoot {
 			if (!player.isFromPartyTracker) {
 				const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs dm-journey__remove-player" title="Remove ${this._escAttr(player.name)}" aria-label="Remove ${this._escAttr(player.name)}">\u00d7</button>`;
 				btnRemove.onn("click", () => {
-					/* Undo all RM from this player across all activity tables */
 					this._undoPlayerRm(player);
 					this._state.players = this._state.players.filter(p => p.id !== player.id);
 					this._addLog("party-sync", `Removed player: ${player.name}`);
@@ -1052,14 +1181,10 @@ class JourneyTrackerRoot {
 		/* Row class — add impossible highlight */
 		const rowCls = `dm-journey__activity-row${impossible ? " dm-journey__activity-row--impossible" : ""}`;
 
-		/* Activity info line (shows desc on hover of row) */
+		/* Activity info popover (full system doc) */
 		let eleInfoBtn = "";
-		if (actDef?.desc) {
-			const popover = ee`<div class="dm-journey__popover">
-				<div class="dm-journey__popover-title">${this._escHtml(actDef.label)}</div>
-				<div>${this._escHtml(actDef.desc)}</div>
-				${actDef.skill ? `<div class="dm-journey__popover-skill">Skill: ${actDef.skill}</div>` : ""}
-			</div>`;
+		if (actDef) {
+			const popover = this._renderActivityPopover(actDef);
 			eleInfoBtn = ee`<button class="dm-journey__info-btn" aria-label="Activity info" type="button">\u2139</button>`;
 			eleInfoBtn.onn("mouseenter", () => popover.classList.add("dm-journey__popover--visible"));
 			eleInfoBtn.onn("mouseleave", () => popover.classList.remove("dm-journey__popover--visible"));
@@ -1076,9 +1201,184 @@ class JourneyTrackerRoot {
 			${eleActivityCell}
 			${eleBonusCell}
 			${eleDcCell}
-			${iptResult}
+			${eleRollCell}
 			${eleResultCell}
 		</div>`;
+	}
+
+	/* ---- Popover with full activity description ---- */
+
+	_renderActivityPopover (actDef) {
+		const lines = [];
+		if (actDef.desc) lines.push(`<div class="dm-journey__popover-desc">${this._escHtml(actDef.desc)}</div>`);
+		if (actDef.skill) lines.push(`<div class="dm-journey__popover-skill">Skill: ${this._escHtml(actDef.skill)}</div>`);
+
+		const outcomes = [];
+		if (actDef.successText) outcomes.push(`<div class="dm-journey__popover-outcome"><span class="dm-journey__popover-outcome-label dm-journey__popover-outcome-label--pass">Success:</span> ${this._escHtml(actDef.successText)}</div>`);
+		if (actDef.critSuccessText) outcomes.push(`<div class="dm-journey__popover-outcome"><span class="dm-journey__popover-outcome-label dm-journey__popover-outcome-label--crit-pass">Crit Success:</span> ${this._escHtml(actDef.critSuccessText)}</div>`);
+		if (actDef.failureText) outcomes.push(`<div class="dm-journey__popover-outcome"><span class="dm-journey__popover-outcome-label dm-journey__popover-outcome-label--fail">Failure:</span> ${this._escHtml(actDef.failureText)}</div>`);
+		if (actDef.critFailText) outcomes.push(`<div class="dm-journey__popover-outcome"><span class="dm-journey__popover-outcome-label dm-journey__popover-outcome-label--crit-fail">Crit Failure:</span> ${this._escHtml(actDef.critFailText)}</div>`);
+		if (outcomes.length) lines.push(`<div class="dm-journey__popover-outcomes">${outcomes.join("")}</div>`);
+
+		if (actDef.restrictionText) lines.push(`<div class="dm-journey__popover-restriction"><span class="ve-bold">Restrictions:</span> ${this._escHtml(actDef.restrictionText)}</div>`);
+
+		return ee`<div class="dm-journey__popover">
+			<div class="dm-journey__popover-title">${this._escHtml(actDef.label)}</div>
+			${lines.join("")}
+		</div>`;
+	}
+
+	/* ---- Activity roll RM evaluation (unified for initial roll and crit cycle) ---- */
+
+	_applyActivityRollRm (act, actDef, player, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList) {
+		/* Undo previous roll-based RM */
+		if (act._rmRollApplied) {
+			this._setRm(this._state.riskModifier - act._rmRollApplied, `Undo roll ${actDef?.label || "?"} (${player.name})`);
+			act._rmRollApplied = 0;
+		}
+
+		const rawVal = act.rollResult;
+		const rollNum = parseInt(rawVal, 10);
+		if (isNaN(rollNum) || !actDef?.skill || dc == null || impossible) return;
+
+		const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
+		const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
+		const outcome = this._classifyActivityRoll(rollNum, total, dc, actDef, isTotalMode, act._critOverride, activities, allPlayers, activityList);
+
+		const logStr = isTotalMode
+			? `${player.name} \u2014 ${actDef.label}: total ${total} vs DC ${dc}`
+			: `${player.name} \u2014 ${actDef.label}: d20(${rollNum}) ${this._fmtBonus(bonusInfo.total)} = ${total} vs DC ${dc}`;
+
+		let rmDelta = 0;
+		const OUTCOME_LABELS = {critSuccess: "Critical Success", success: "Success", fail: "Failure", critFail: "Critical Failure"};
+		const label = OUTCOME_LABELS[outcome];
+
+		if (outcome === "critSuccess") {
+			if (actDef.critSuccessPerPlayer) {
+				/* Scout crit: −1 RM per player taking this activity */
+				const count = this._countPlayersWithActivity(actDef.id, activities, allPlayers);
+				rmDelta = (actDef.rmOnCritSuccess || 0) * count;
+			} else {
+				rmDelta = actDef.rmOnCritSuccess ?? actDef.rmOnSuccess ?? 0;
+			}
+		} else if (outcome === "success") {
+			rmDelta = actDef.rmOnSuccess ?? 0;
+		} else if (outcome === "critFail") {
+			rmDelta = actDef.rmOnCritFail ?? actDef.rmOnFail ?? 0;
+		} else {
+			rmDelta = actDef.rmOnFail ?? 0;
+		}
+
+		act._rmRollApplied = rmDelta;
+		if (rmDelta) {
+			this._setRm(this._state.riskModifier + rmDelta, `${actDef.label} ${label} (${player.name}): ${rmDelta > 0 ? "+" : ""}${rmDelta} RM`);
+		}
+		this._addLog("activity", `${logStr} \u2192 ${label}${rmDelta ? ` (RM ${rmDelta > 0 ? "+" : ""}${rmDelta})` : ""}`);
+	}
+
+	/** Classify a roll as critSuccess/success/fail/critFail. */
+	_classifyActivityRoll (rollNum, total, dc, actDef, isTotalMode, critOverride, activities, allPlayers, activityList) {
+		const success = total >= dc;
+
+		/* Total mode: use manual crit override if present */
+		if (isTotalMode && critOverride) return critOverride;
+
+		/* d20 mode: auto-detect crits */
+		if (!isTotalMode) {
+			/* Check for group check (2+ players with same activity) */
+			const count = this._countPlayersWithActivity(actDef.id, activities, allPlayers);
+			if (count >= 2) {
+				/* Group check: all pass = crit success, all fail = crit fail */
+				const groupResult = this._evaluateGroupCheck(actDef, activities, allPlayers, dc, activityList);
+				if (groupResult) return groupResult;
+			} else {
+				/* Single player: nat 20 / nat 1 */
+				if (rollNum === 20) return success ? "critSuccess" : "success";
+				if (rollNum === 1) return !success ? "critFail" : "fail";
+			}
+		}
+
+		return success ? "success" : "fail";
+	}
+
+	/** Count how many activity slots across all players have the given activity. */
+	_countPlayersWithActivity (activityId, activities, allPlayers) {
+		let count = 0;
+		for (const p of allPlayers) {
+			const slots = activities[p.id];
+			if (!slots) continue;
+			const arr = Array.isArray(slots) ? slots : [slots];
+			for (const s of arr) {
+				if (s?.activity === activityId) count++;
+			}
+		}
+		return count;
+	}
+
+	/** Evaluate a group check: if all rolled and all pass → critSuccess, all fail → critFail, else null. */
+	_evaluateGroupCheck (actDef, activities, allPlayers, dc, activityList) {
+		const isTotalMode = this._state.rollMode === "total";
+		const relevantSlots = [];
+		for (const p of allPlayers) {
+			const slots = activities[p.id];
+			if (!slots) continue;
+			const arr = Array.isArray(slots) ? slots : [slots];
+			for (const s of arr) {
+				if (s?.activity === actDef.id) relevantSlots.push({slot: s, playerId: p.id});
+			}
+		}
+		if (relevantSlots.length < 2) return null;
+
+		let allRolled = true;
+		let allPass = true;
+		let allFail = true;
+
+		for (const {slot, playerId} of relevantSlots) {
+			const rollNum = parseInt(slot.rollResult, 10);
+			if (isNaN(rollNum)) { allRolled = false; break; }
+
+			const ptChar = this._getPartyTrackerCharacters().find(c => c.id === playerId);
+			const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
+			const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
+			const success = total >= dc;
+			if (success) allFail = false;
+			else allPass = false;
+		}
+
+		if (!allRolled) return null;
+		if (allPass) return "critSuccess";
+		if (allFail) return "critFail";
+		return null;
+	}
+
+	/** Render the result cell based on current activity state. */
+	_renderActivityResultCell (act, actDef, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList) {
+		const eleResultCell = ee`<span class="dm-journey__roll-result"></span>`;
+
+		if (act.rollResult !== "" && act.rollResult != null) {
+			const rollNum = parseInt(act.rollResult, 10);
+			if (!isNaN(rollNum) && actDef?.skill && dc != null) {
+				const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
+				const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
+				const outcome = this._classifyActivityRoll(rollNum, total, dc, actDef, isTotalMode, act._critOverride, activities, allPlayers, activityList);
+
+				const ICONS = {critSuccess: "\u2714\u2714", success: "\u2714", fail: "\u2718", critFail: "\u2718\u2718"};
+				const CLASSES = {critSuccess: "dm-journey__roll-result--crit-pass", success: "dm-journey__roll-result--pass", fail: "dm-journey__roll-result--fail", critFail: "dm-journey__roll-result--crit-fail"};
+				const LABELS = {critSuccess: "Crit!", success: "", fail: "", critFail: "Crit Fail!"};
+
+				eleResultCell.className = `dm-journey__roll-result ${CLASSES[outcome]}`;
+				const resultParts = [`${ICONS[outcome]} ${total}`];
+				if (LABELS[outcome]) resultParts.push(LABELS[outcome]);
+				if (act._rmRollApplied) resultParts.push(`(RM ${act._rmRollApplied > 0 ? "+" : ""}${act._rmRollApplied})`);
+				if (act._rmAlwaysApplied) resultParts.push(`(auto ${act._rmAlwaysApplied > 0 ? "+" : ""}${act._rmAlwaysApplied})`);
+				eleResultCell.txt(resultParts.join(" "));
+			}
+		} else if (act._rmAlwaysApplied) {
+			eleResultCell.className = "dm-journey__roll-result dm-journey__rm-auto";
+			eleResultCell.txt(`auto RM ${act._rmAlwaysApplied > 0 ? "+" : ""}${act._rmAlwaysApplied}`);
+		}
+
+		return eleResultCell;
 	}
 
 	/* -------------------------------------------- */

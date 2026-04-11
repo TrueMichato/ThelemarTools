@@ -1417,7 +1417,7 @@
   }
   .dm-journey__activity-row {
     display: grid;
-    grid-template-columns: minmax(70px, 110px) minmax(100px, 1fr) 50px 42px 52px minmax(60px, 95px);
+    grid-template-columns: minmax(70px, 100px) minmax(90px, 160px) 55px 45px 72px minmax(70px, 1fr);
     gap: 4px 6px;
     align-items: center;
     padding: 3px 4px;
@@ -1502,7 +1502,7 @@
     top: 100%;
     left: 0;
     z-index: 100;
-    width: 280px;
+    width: 320px;
     max-width: 90vw;
     padding: 8px 10px;
     background: #fff;
@@ -1527,15 +1527,50 @@
     opacity: 0.7;
     margin-top: 4px;
   }
+  .dm-journey__popover-desc {
+    margin-bottom: 6px;
+  }
+  .dm-journey__popover-outcomes {
+    margin-top: 6px;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+    padding-top: 5px;
+  }
+  .dm-journey__popover-outcome {
+    margin-bottom: 3px;
+    font-size: 0.8rem;
+  }
+  .dm-journey__popover-outcome-label {
+    font-weight: 600;
+    margin-right: 3px;
+  }
+  .dm-journey__popover-outcome-label--pass {
+    color: #28a745;
+  }
+  .dm-journey__popover-outcome-label--crit-pass {
+    color: #1b7a2f;
+  }
+  .dm-journey__popover-outcome-label--fail {
+    color: #dc3545;
+  }
+  .dm-journey__popover-outcome-label--crit-fail {
+    color: #a71d2a;
+  }
+  .dm-journey__popover-restriction {
+    margin-top: 5px;
+    font-size: 0.78rem;
+    color: #856404;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+    padding-top: 4px;
+  }
   /* --- Bonus cell --- */
   .dm-journey__skill-bonus {
     font-size: 0.88rem;
     font-weight: 600;
-    text-align: right;
+    text-align: center;
     white-space: nowrap;
     display: inline-flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: center;
     gap: 2px;
   }
   .dm-journey__tool-indicator {
@@ -1555,11 +1590,47 @@
     color: #dc3545;
     font-weight: 700;
   }
-  /* --- Roll input --- */
+  /* --- Roll cell (input + crit toggle) --- */
+  .dm-journey__roll-cell {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
   .dm-journey__roll-input {
     width: 100%;
+    min-width: 36px;
     text-align: center;
     font-size: 0.86rem;
+  }
+  .dm-journey__crit-toggle {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: #f8f9fa;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #999;
+  }
+  .dm-journey__crit-toggle--crit-pass {
+    color: #1b7a2f;
+    border-color: #28a745;
+    background: #e6f9ec;
+  }
+  .dm-journey__crit-toggle--crit-fail {
+    color: #a71d2a;
+    border-color: #dc3545;
+    background: #fce4e6;
+  }
+  .dm-journey__crit-toggle:hover {
+    opacity: 0.8;
   }
   /* --- Result cell --- */
   .dm-journey__roll-result {
@@ -1572,13 +1643,39 @@
   .dm-journey__roll-result--pass {
     color: #28a745;
   }
+  .dm-journey__roll-result--crit-pass {
+    color: #1b7a2f;
+    font-weight: 700;
+  }
   .dm-journey__roll-result--fail {
     color: #dc3545;
+  }
+  .dm-journey__roll-result--crit-fail {
+    color: #a71d2a;
+    font-weight: 700;
   }
   .dm-journey__rm-auto {
     color: #e6a100;
     font-size: 0.82rem;
     font-weight: 600;
+  }
+  /* --- Banter row --- */
+  .dm-journey__banter-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px 2px 8px;
+    font-size: 0.8rem;
+    opacity: 0.85;
+  }
+  .dm-journey__banter-row label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+  }
+  .dm-journey__banter-row input[type=checkbox] {
+    margin: 0;
   }
   /* --- Interaction notes --- */
   .dm-journey__interaction-notes {
@@ -1875,10 +1972,45 @@
   .ve-night-mode .dm-journey__roll-result--pass {
     color: #8fd19e;
   }
+  .ve-night-mode .dm-journey__roll-result--crit-pass {
+    color: #6fdc86;
+    font-weight: 700;
+  }
   .ve-night-mode .dm-journey__roll-result--fail {
     color: #f66;
   }
+  .ve-night-mode .dm-journey__roll-result--crit-fail {
+    color: #ff4444;
+    font-weight: 700;
+  }
   .ve-night-mode .dm-journey__rm-auto {
+    color: #e6c766;
+  }
+  .ve-night-mode .dm-journey__crit-toggle {
+    background: #333;
+    border-color: #555;
+    color: #888;
+  }
+  .ve-night-mode .dm-journey__crit-toggle--crit-pass {
+    color: #6fdc86;
+    border-color: #8fd19e;
+    background: #1b3a26;
+  }
+  .ve-night-mode .dm-journey__crit-toggle--crit-fail {
+    color: #ff4444;
+    border-color: #f66;
+    background: #3a1c1c;
+  }
+  .ve-night-mode .dm-journey__popover {
+    background: #2a2a2a;
+    border-color: #555;
+    color: #ddd;
+  }
+  .ve-night-mode .dm-journey__popover-outcomes {
+    border-top-color: #444;
+  }
+  .ve-night-mode .dm-journey__popover-restriction {
+    border-top-color: #444;
     color: #e6c766;
   }
   .ve-night-mode .dm-journey__interaction-notes {
