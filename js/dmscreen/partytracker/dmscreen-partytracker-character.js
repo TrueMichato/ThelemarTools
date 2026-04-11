@@ -274,6 +274,12 @@ export class PartyTrackerCharacter {
 				this._doUpdate();
 			});
 
+		const iptJourneyActions = ee`<input class="ve-form-control ve-input-xs ve-text-center" style="width: 40px;" type="number" min="1" max="4" value="${this._data.journeyActions ?? 1}" aria-label="Journey actions">`
+			.onn("change", (e) => {
+				this._data.journeyActions = Math.max(1, Math.min(4, Number(e.target.value) || 1));
+				this._doUpdate();
+			});
+
 		/* ----- Save Proficiencies ----- */
 		const wrpSaves = ee`<div class="dm-party__saves-grid"></div>`;
 		for (const ability of ["str", "dex", "con", "int", "wis", "cha"]) {
@@ -395,6 +401,7 @@ export class PartyTrackerCharacter {
 				<div class="dm-party__stat-group"><span class="dm-party__stat-label">AC</span>${iptAc}</div>
 				<div class="dm-party__stat-group"><span class="dm-party__stat-label">Exhaustion</span>${iptExhaustion}<span class="ve-muted ve-small">/ ${maxExh}</span></div>
 				<div class="dm-party__stat-group"><span class="dm-party__stat-label">Prof</span><span>+${this.getProficiencyBonus()}</span></div>
+				<div class="dm-party__stat-group"><span class="dm-party__stat-label">Actions</span>${iptJourneyActions}</div>
 			</div>
 
 			<div class="dm-party__section">

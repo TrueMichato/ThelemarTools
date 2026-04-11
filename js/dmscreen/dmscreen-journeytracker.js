@@ -105,10 +105,14 @@ function _getActivityInteractions (activities, allPlayers, activityList, pace) {
 	const notes = [];
 	const chosen = {};
 	for (const p of allPlayers) {
-		const act = activities[p.id];
-		if (!act?.activity) continue;
-		if (!chosen[act.activity]) chosen[act.activity] = [];
-		chosen[act.activity].push(p.name);
+		const slots = activities[p.id];
+		if (!slots) continue;
+		const slotArr = Array.isArray(slots) ? slots : [slots];
+		for (const act of slotArr) {
+			if (!act?.activity) continue;
+			if (!chosen[act.activity]) chosen[act.activity] = [];
+			chosen[act.activity].push(p.name);
+		}
 	}
 
 	const scoutCount = (chosen.scout || []).length;
@@ -450,12 +454,15 @@ class JourneyTrackerRoot {
 
 		/* Body (collapsible): activities → stealth → RM summary → risk roll */
 		if (!isCollapsed) {
+			ee`<div class="dm-journey__section-title">Activities</div>`.appendTo(card);
 			const body = this._renderActivityTable(seg.activities, JOURNEY_ACTIVITIES);
 			card.appendChild(body);
 
+			ee`<div class="dm-journey__section-title">Stealth</div>`.appendTo(card);
 			const eleStealth = this._renderStealthSlots(seg);
 			card.appendChild(eleStealth);
 
+			ee`<div class="dm-journey__section-title">RM Changes</div>`.appendTo(card);
 			const eleRmSummary = this._renderRmSummary(seg.activities, seg.stealthSlots, JOURNEY_ACTIVITIES);
 			card.appendChild(eleRmSummary);
 
@@ -645,16 +652,19 @@ class JourneyTrackerRoot {
 
 		/* Gather RM contributions from activity slots */
 		for (const player of players) {
-			const act = activities[player.id];
-			if (!act) continue;
-			const actDef = activityList.find(a => a.id === act.activity);
-			if (!actDef) continue;
+			const slots = activities[player.id];
+			if (!slots) continue;
+			const slotArr = Array.isArray(slots) ? slots : [slots];
+			for (const act of slotArr) {
+				const actDef = activityList.find(a => a.id === act.activity);
+				if (!actDef) continue;
 
-			if (act._rmAlwaysApplied) {
-				items.push({label: `${actDef.label} (${player.name})`, value: act._rmAlwaysApplied, type: "auto"});
-			}
-			if (act._rmRollApplied) {
-				items.push({label: `${actDef.label} roll (${player.name})`, value: act._rmRollApplied, type: "roll"});
+				if (act._rmAlwaysApplied) {
+					items.push({label: `${actDef.label} (${player.name})`, value: act._rmAlwaysApplied, type: "auto"});
+				}
+				if (act._rmRollApplied) {
+					items.push({label: `${actDef.label} roll (${player.name})`, value: act._rmRollApplied, type: "roll"});
+				}
 			}
 		}
 
@@ -679,8 +689,11 @@ class JourneyTrackerRoot {
 		ee`<span class="ve-bold">Activity RM:</span>`.appendTo(wrp);
 		for (const item of items) {
 			const sign = item.value > 0 ? "+" : "";
-			const cls = item.type === "auto" ? "dm-journey__rm-auto" : (item.value < 0 ? "dm-journey__roll-result--pass" : "dm-journey__roll-result--fail");
-			ee`<span class="${cls}" title="${this._escAttr(item.label)}">${sign}${item.value} ${this._escHtml(item.label)}</span>`.appendTo(wrp);
+			let chipCls = "dm-journey__rm-chip";
+			if (item.type === "auto") chipCls += " dm-journey__rm-chip--auto";
+			else if (item.value < 0) chipCls += " dm-journey__rm-chip--negative";
+			else chipCls += " dm-journey__rm-chip--positive";
+			ee`<span class="${chipCls}" title="${this._escAttr(item.label)}">${sign}${item.value} ${this._escHtml(item.label)}</span>`.appendTo(wrp);
 		}
 		ee`<span class="ve-bold">= ${totalRm >= 0 ? "+" : ""}${totalRm}</span>`.appendTo(wrp);
 
@@ -742,13 +755,16 @@ class JourneyTrackerRoot {
 
 		this._wrpCamp.appendChild(eleCampfire);
 		this._wrpCamp.appendChild(btnHideCamp);
-		ee`<hr class="ve-hr-1">`.appendTo(this._wrpCamp);
+		ee`<hr class="dm-journey__camp-section-divider">`.appendTo(this._wrpCamp);
+		ee`<div class="dm-journey__section-title">Activities</div>`.appendTo(this._wrpCamp);
 		this._wrpCamp.appendChild(body);
-		ee`<hr class="ve-hr-1">`.appendTo(this._wrpCamp);
+		ee`<hr class="dm-journey__camp-section-divider">`.appendTo(this._wrpCamp);
+		ee`<div class="dm-journey__section-title">Guard Watches</div>`.appendTo(this._wrpCamp);
 		this._wrpCamp.appendChild(eleGuard);
-		ee`<hr class="ve-hr-1">`.appendTo(this._wrpCamp);
+		ee`<hr class="dm-journey__camp-section-divider">`.appendTo(this._wrpCamp);
+		ee`<div class="dm-journey__section-title">RM Changes</div>`.appendTo(this._wrpCamp);
 		this._wrpCamp.appendChild(eleRmSummary);
-		ee`<hr class="ve-hr-1">`.appendTo(this._wrpCamp);
+		ee`<hr class="dm-journey__camp-section-divider">`.appendTo(this._wrpCamp);
 		this._wrpCamp.appendChild(eleRisk);
 	}
 
@@ -848,12 +864,22 @@ class JourneyTrackerRoot {
 		</div>`.appendTo(wrp);
 
 		for (const player of players) {
-			if (!activities[player.id]) activities[player.id] = {activity: "", rollResult: "", customName: "", _rmAlwaysApplied: 0, _rmRollApplied: 0};
-			const act = activities[player.id];
 			const ptChar = ptChars.find(c => c.id === player.id);
+			const numActions = ptChar?.journeyActions ?? 1;
 
-			const row = this._renderActivityRow(player, act, ptChar, activityList, activities, players);
-			wrp.appendChild(row);
+			/* Ensure activities[playerId] is an array with the right number of slots */
+			if (!activities[player.id]) activities[player.id] = [];
+			if (!Array.isArray(activities[player.id])) activities[player.id] = [activities[player.id]];
+			while (activities[player.id].length < numActions) activities[player.id].push({activity: "", rollResult: "", customName: "", _rmAlwaysApplied: 0, _rmRollApplied: 0});
+			/* Trim excess (but only empty trailing slots) */
+			while (activities[player.id].length > numActions && !activities[player.id].at(-1)?.activity) activities[player.id].pop();
+
+			const slots = activities[player.id];
+			for (let i = 0; i < slots.length; i++) {
+				const act = slots[i];
+				const row = this._renderActivityRow(player, act, ptChar, activityList, activities, players, i === 0, i);
+				wrp.appendChild(row);
+			}
 		}
 
 		/* Activity interaction notes */
@@ -870,7 +896,7 @@ class JourneyTrackerRoot {
 		return wrp;
 	}
 
-	_renderActivityRow (player, act, ptChar, activityList, activities, allPlayers) {
+	_renderActivityRow (player, act, ptChar, activityList, activities, allPlayers, isFirstRow = true, slotIndex = 0) {
 		const actDef = activityList.find(a => a.id === act.activity);
 
 		/* ---- Activity dropdown ---- */
@@ -1003,32 +1029,46 @@ class JourneyTrackerRoot {
 		}
 
 		/* ---- Player name + remove button ---- */
-		const eleNameCell = ee`<span class="dm-journey__player-name" title="${this._escAttr(player.name)}">${this._escHtml(player.name || "Unnamed")}</span>`;
-		if (!player.isFromPartyTracker) {
-			const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs dm-journey__remove-player" title="Remove ${this._escAttr(player.name)}" aria-label="Remove ${this._escAttr(player.name)}">\u00d7</button>`;
-			btnRemove.onn("click", () => {
-				/* Undo all RM from this player across all activity tables */
-				this._undoPlayerRm(player);
-				this._state.players = this._state.players.filter(p => p.id !== player.id);
-				this._addLog("party-sync", `Removed player: ${player.name}`);
-				this._updateSyncStatus();
-				this._reRenderCurrentTab();
-				this._doSave();
-			});
-			eleNameCell.appendChild(btnRemove);
+		let eleNameCell;
+		if (isFirstRow) {
+			eleNameCell = ee`<span class="dm-journey__player-name" title="${this._escAttr(player.name)}">${this._escHtml(player.name || "Unnamed")}</span>`;
+			if (!player.isFromPartyTracker) {
+				const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs dm-journey__remove-player" title="Remove ${this._escAttr(player.name)}" aria-label="Remove ${this._escAttr(player.name)}">\u00d7</button>`;
+				btnRemove.onn("click", () => {
+					/* Undo all RM from this player across all activity tables */
+					this._undoPlayerRm(player);
+					this._state.players = this._state.players.filter(p => p.id !== player.id);
+					this._addLog("party-sync", `Removed player: ${player.name}`);
+					this._updateSyncStatus();
+					this._reRenderCurrentTab();
+					this._doSave();
+				});
+				eleNameCell.appendChild(btnRemove);
+			}
+		} else {
+			eleNameCell = ee`<span class="dm-journey__player-name dm-journey__note">\u21B3</span>`;
 		}
 
 		/* Row class — add impossible highlight */
 		const rowCls = `dm-journey__activity-row${impossible ? " dm-journey__activity-row--impossible" : ""}`;
 
 		/* Activity info line (shows desc on hover of row) */
-		const eleActivityInfo = actDef?.desc
-			? ee`<div class="dm-journey__activity-info" title="${this._escAttr(actDef.desc)}">${this._escHtml(actDef.desc)}</div>`
-			: null;
+		let eleInfoBtn = "";
+		if (actDef?.desc) {
+			const popover = ee`<div class="dm-journey__popover">
+				<div class="dm-journey__popover-title">${this._escHtml(actDef.label)}</div>
+				<div>${this._escHtml(actDef.desc)}</div>
+				${actDef.skill ? `<div class="dm-journey__popover-skill">Skill: ${actDef.skill}</div>` : ""}
+			</div>`;
+			eleInfoBtn = ee`<button class="dm-journey__info-btn" aria-label="Activity info" type="button">\u2139</button>`;
+			eleInfoBtn.onn("mouseenter", () => popover.classList.add("dm-journey__popover--visible"));
+			eleInfoBtn.onn("mouseleave", () => popover.classList.remove("dm-journey__popover--visible"));
+			eleInfoBtn.appendChild(popover);
+		}
 
 		const eleActivityCell = ee`<div class="dm-journey__activity-cell">
-			<div class="ve-flex-v-center ve-gap-1">${sel}${iptCustom}</div>
-			${eleActivityInfo || ""}
+			${sel}${iptCustom}
+			${eleInfoBtn}
 		</div>`;
 
 		return ee`<div class="${rowCls}">
@@ -1297,17 +1337,26 @@ class JourneyTrackerRoot {
 		let total = 0;
 		/* Journey segments */
 		for (const seg of this._state.journey.segments) {
-			const act = seg.activities?.[player.id];
-			if (!act) continue;
-			total += (act._rmAlwaysApplied || 0) + (act._rmRollApplied || 0);
+			const slots = seg.activities?.[player.id];
+			if (slots) {
+				const slotArr = Array.isArray(slots) ? slots : [slots];
+				for (const act of slotArr) {
+					total += (act._rmAlwaysApplied || 0) + (act._rmRollApplied || 0);
+				}
+			}
 			/* Stealth slots */
 			for (const slot of (seg.stealthSlots || [])) {
 				if (slot.playerId === player.id) total += (slot._rmApplied || 0);
 			}
 		}
 		/* Camp */
-		const campAct = this._state.camp.activities?.[player.id];
-		if (campAct) total += (campAct._rmAlwaysApplied || 0) + (campAct._rmRollApplied || 0);
+		const campSlots = this._state.camp.activities?.[player.id];
+		if (campSlots) {
+			const slotArr = Array.isArray(campSlots) ? campSlots : [campSlots];
+			for (const campAct of slotArr) {
+				total += (campAct._rmAlwaysApplied || 0) + (campAct._rmRollApplied || 0);
+			}
+		}
 
 		if (total) this._setRm(this._state.riskModifier - total, `Undo all RM from ${player.name}`);
 	}
@@ -1489,10 +1538,15 @@ class JourneyTrackerRoot {
 			let interactionMod = 0;
 			const counts = {};
 			for (const p of allPlayers) {
-				const a = activities[p.id]?.activity;
-				if (a === "scout" || a === "forage" || a === "entertain") {
-					counts[a] = (counts[a] || 0) + 1;
-					interactionMod += 2;
+				const slots = activities[p.id];
+				if (!slots) continue;
+				const slotArr = Array.isArray(slots) ? slots : [slots];
+				for (const slot of slotArr) {
+					const a = slot?.activity;
+					if (a === "scout" || a === "forage" || a === "entertain") {
+						counts[a] = (counts[a] || 0) + 1;
+						interactionMod += 2;
+					}
 				}
 			}
 			if (interactionMod) {
@@ -1570,6 +1624,30 @@ class JourneyTrackerRoot {
 		} catch {
 			return isoStr;
 		}
+	}
+
+	/**
+	 * Migrate activities from old single-object format to array format.
+	 * Old: activities[playerId] = {activity, rollResult, ...}
+	 * New: activities[playerId] = [{activity, rollResult, ...}, ...]
+	 */
+	static _migrateActivities (activities) {
+		if (!activities) return {};
+		const out = {};
+		for (const [id, val] of Object.entries(activities)) {
+			out[id] = Array.isArray(val) ? val.map(s => ({...s})) : [{...val}];
+		}
+		return out;
+	}
+
+	/** Deep-clone activities map (array format). */
+	static _cloneActivities (activities) {
+		if (!activities) return {};
+		const out = {};
+		for (const [id, val] of Object.entries(activities)) {
+			out[id] = (Array.isArray(val) ? val : [val]).map(s => ({...s}));
+		}
+		return out;
 	}
 
 	static _getSkillBonusFromData (charData, skill) {
@@ -1662,7 +1740,7 @@ class JourneyTrackerRoot {
 			},
 			journey: {
 				segments: (toLoad.journey?.segments || []).map(seg => ({
-					activities: {...(seg.activities || {})},
+					activities: JourneyTrackerRoot._migrateActivities(seg.activities),
 					stealthSlots: (seg.stealthSlots || []).map(s => ({...s})),
 					riskRoll: seg.riskRoll ?? null,
 					riskRollTotal: seg.riskRollTotal ?? null,
@@ -1674,7 +1752,7 @@ class JourneyTrackerRoot {
 			camp: {
 				campfireActive: toLoad.camp?.campfireActive || false,
 				hideCampAttempted: toLoad.camp?.hideCampAttempted || false,
-				activities: {...(toLoad.camp?.activities || {})},
+				activities: JourneyTrackerRoot._migrateActivities(toLoad.camp?.activities),
 				guardSlots: (toLoad.camp?.guardSlots || []).map(s => ({...s})),
 				riskRoll: toLoad.camp?.riskRoll ?? null,
 				riskRollTotal: toLoad.camp?.riskRollTotal ?? null,
@@ -1705,7 +1783,7 @@ class JourneyTrackerRoot {
 			},
 			journey: {
 				segments: this._state.journey.segments.map(seg => ({
-					activities: {...seg.activities},
+					activities: JourneyTrackerRoot._cloneActivities(seg.activities),
 					stealthSlots: (seg.stealthSlots || []).map(s => ({...s})),
 					riskRoll: seg.riskRoll,
 					riskRollTotal: seg.riskRollTotal,
@@ -1717,7 +1795,7 @@ class JourneyTrackerRoot {
 			camp: {
 				campfireActive: this._state.camp.campfireActive,
 				hideCampAttempted: this._state.camp.hideCampAttempted,
-				activities: {...this._state.camp.activities},
+				activities: JourneyTrackerRoot._cloneActivities(this._state.camp.activities),
 				guardSlots: this._state.camp.guardSlots.map(s => ({...s})),
 				riskRoll: this._state.camp.riskRoll,
 				riskRollTotal: this._state.camp.riskRollTotal,

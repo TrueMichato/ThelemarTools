@@ -17,6 +17,7 @@ export class PartyTrackerCharacterSerializer {
 			exh: char.exhaustionLevel,
 			ov: char.overrides,
 			bon: char.bonuses,
+			ja: char.journeyActions,
 			nt: char.notes,
 			cnd: char.conditions?.map(c => ({n: c.name, s: c.source})),
 			dis: char.diseases?.map(d => ({n: d.name, s: d.source})),
@@ -59,6 +60,7 @@ export class PartyTrackerCharacterSerializer {
 			senses: {darkvision: 0, blindsight: 0, tremorsense: 0, truesight: 0, ...(raw.sns || {})},
 			combatTraditions: raw.ct || [],
 			exhaustionLevel: raw.exh ?? 0,
+			journeyActions: raw.ja ?? 1,
 			overrides: {
 				proficiencyBonus: null,
 				skillBonuses: {},
