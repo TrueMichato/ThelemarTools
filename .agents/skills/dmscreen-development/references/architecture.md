@@ -49,14 +49,17 @@ Full settings:
 
 ```javascript
 {
-  tab: 0-3,                    // Journey | Camp | Area Config | Log
+  tab: 0-4,                    // Journey | Camp | Area Config | Log | Timeline
   riskModifier: number,        // Central RM value
   travelPace: "slow"|"normal"|"fast",
   rollMode: "raw"|"total",
   players: [{ id, name, isFromPartyTracker }],
-  area: { areaName, baseDc, numSegments, segmentNames, riskRanges },
+  area: { areaName, baseDc, numSegments, segmentNames, riskRanges, weatherTable },
   journey: { segments: [{ activities, stealthSlots, riskRoll, riskRollTotal, riskRollOverride, rmAtRoll, _collapsed }] },
   camp: { campfireActive, activities, guardSlots, riskRoll, riskRollTotal, riskRollOverride, rmAtRoll },
+  weather: { current, perSegment, segmentWeather, customTypes },
+  supplies: { items: [{ id, name, count, dailyBurn, unit, isDefault }], autoDeplete },
+  timeline: { days, currentDayIndex, journeyName, startDate },
   log: [{ timestamp, type, message }]
 }
 ```

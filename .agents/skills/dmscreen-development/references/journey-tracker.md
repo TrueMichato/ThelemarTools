@@ -41,6 +41,29 @@ Compressed reference for `JourneyTrackerRoot`, activities, RM system, and state 
 | normal | Base DC | No | Normal | Normal |
 | fast | +2 | No | Disadvantage | Impossible |
 
+### Weather Presets (10 built-in)
+
+| Key | Label | DC Mod | RM Mod | Pace Restrict | Effects |
+|-----|-------|--------|--------|---------------|----------|
+| clear | Clear | 0 | 0 | — | — |
+| overcast | Overcast | 0 | 0 | — | — |
+| rain | Rain | +2 | 0 | — | Disadv Perception (sight), extinguishes flames |
+| heavyRain | Heavy Rain | +3 | +1 | — | Heavily obscured 100ft+, Disadv Perception, −2 Nav |
+| fog | Fog | +2 | 0 | — | Heavily obscured 30ft+, Disadv Scout |
+| snow | Snow | +2 | 0 | Force Slow | Difficult terrain, visible tracks |
+| blizzard | Blizzard | +5 | +2 | Force Slow | Heavily obscured, Extreme Cold, no Forage/Map |
+| extremeHeat | Extreme Heat | +2 | 0 | — | CON save or exhaustion, water doubled |
+| extremeCold | Extreme Cold | +2 | 0 | — | CON save or exhaustion |
+| wind | Strong Wind | +1 | 0 | — | Disadv ranged attacks, Disadv Perception (hearing) |
+
+### Weather Table Presets (6 area types)
+
+Temperate, Desert, Arctic, Tropical, Coastal, Mountain — each defines a weighted distribution of weather types for the 🎲 Roll Weather feature.
+
+### Custom Weather Types
+
+DMs can create custom weather types with: icon, label, dcMod, rmMod, paceRestrict, effects[]. Custom types integrate into all weather selectors and the weather table.
+
 ### Tool Proficiency Keywords
 
 ```
@@ -121,13 +144,44 @@ Sync status: "Synced (N chars)" or "Manual mode"
 |-----|-------|---------|-----------|
 | Journey | 0 | Segment cards (collapsible) → activities + stealth + RM summary + risk roll | `_renderJourney()` |
 | Camp | 1 | Campfire toggle + activities + guard slots + RM summary + risk roll | `_renderCamp()` |
-| Area Config | 2 | Area name, base DC, segment count/names, risk ranges | `_renderArea()` |
+| Area Config | 2 | Area name, base DC, weather (selector + roll + table + custom types), segment count/names, risk ranges | `_renderArea()` |
 | Log | 3 | Event log (newest first), add note, clear all | `_renderLog()` |
+| 📅 Timeline | 4 | Journey name/date, running totals, current day indicator, day cards (reverse chrono), copy markdown | `_renderTimeline()` |
 
 ## New Day Reset
 
-Resets: RM → 0, all activities → cleared, campfire → off, stealth/guard slots → cleared.
-Preserves: players, area config, log (adds reset entry).
+Snapshots current day to timeline (weather, pace, risk rolls, RM start/end, supplies consumed, notes), then resets:
+- RM → 0, all activities → cleared, campfire → off, stealth/guard slots → cleared
+- Auto-depletes supplies if enabled (Extreme Heat doubles water consumption)
+
+Preserves: players, area config, weather, supplies, timeline, log (adds reset entry).
+
+## Supply Tracker
+
+Tracks consumable supplies (default: Rations, Water, Torches):
+- Per-item: count, dailyBurn rate, unit label
+- Auto-depletion on New Day (with Extreme Heat water doubling)
+- Party sync auto-sets burn rates to match party size
+- Forage success adds rations via `+🍖` button
+- Color-coded counts: green (>3 days), yellow (1-3 days), red (<1 day)
+
+## Weather System
+
+- **Current weather**: Global selector + per-segment toggle for different weather per segment
+- **🎲 Roll Weather**: Header button + Area Config button roll random weather from area's weighted table
+- **Weather Table**: Per-area weighted distribution. 6 presets (Temperate/Desert/Arctic/Tropical/Coastal/Mountain). DM can add/remove types, adjust weights. Visual probability bars.
+- **Custom Types**: DM-created weather with icon, label, DC mod, RM mod, pace restriction, effects
+- **DC Integration**: Weather DC modifier applied via `_getEffectiveDc()` with per-segment support
+- **Pace Restriction**: Snow/Blizzard force slow pace automatically
+- **Blizzard**: Makes Forage/Map impossible
+
+## Day Timeline
+
+- Journey name & start date (optional metadata)
+- Running totals: total days, risk rolls, average RM
+- Current day indicator with weather/pace/RM
+- Reverse-chronological day cards with: weather, pace, RM delta, risk rolls per segment, supply changes, editable notes
+- 📋 Copy Timeline exports all days as markdown
 
 ## Activity Interaction Analysis
 

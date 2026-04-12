@@ -1,6 +1,6 @@
 ---
 name: dmscreen-development
-description: "Develop, debug, and extend the 5etools DM Screen panels — Party Tracker (js/dmscreen/partytracker/) and Journey Tracker (js/dmscreen/dmscreen-journeytracker.js). Covers character data model, ability calculations, carry capacity, jump distances, exhaustion rules, DC probability engine, group checks, Risk Modifier system, journey/camp activities, travel pace, risk rolls, area configuration, party-journey sync, tool proficiency detection, TGTT/Thelemar homebrew settings, SCSS styling, night mode. Use for any task mentioning DM Screen, dmscreen, party tracker, journey tracker, DC calculator, risk modifier, journey activities, camp activities, carry capacity, group check, stealth rolls, or travel pace."
+description: "Develop, debug, and extend the 5etools DM Screen panels — Party Tracker (js/dmscreen/partytracker/) and Journey Tracker (js/dmscreen/dmscreen-journeytracker.js). Covers character data model, ability calculations, carry capacity, jump distances, exhaustion rules, DC probability engine, group checks, Risk Modifier system, journey/camp activities, travel pace, risk rolls, area configuration, weather system (rolling, custom types, area weather tables), supply tracking, day timeline, party-journey sync, tool proficiency detection, HP tracking, character sheet import, TGTT/Thelemar homebrew settings, SCSS styling, night mode. Use for any task mentioning DM Screen, dmscreen, party tracker, journey tracker, DC calculator, risk modifier, journey activities, camp activities, carry capacity, group check, stealth rolls, travel pace, weather system, supply tracker, or day timeline."
 ---
 
 # DM Screen Development (Party Tracker & Journey Tracker)
@@ -9,8 +9,8 @@ description: "Develop, debug, and extend the 5etools DM Screen panels — Party 
 
 The DM Screen (`dmscreen.html`) hosts panel apps for DM tools. Two custom panels manage party data and overland travel:
 
-- **Party Tracker** — 4 modules in `js/dmscreen/partytracker/` managing character stats, derived calculations, DC probabilities, and TGTT homebrew
-- **Journey Tracker** — 1 large module (`js/dmscreen/dmscreen-journeytracker.js`, ~2100 lines) managing travel segments, activities, Risk Modifier, and camp phases
+- **Party Tracker** — 5 modules in `js/dmscreen/partytracker/` managing character stats, HP tracking, derived calculations, DC probabilities, character sheet import, and TGTT homebrew
+- **Journey Tracker** — 1 large module (`js/dmscreen/dmscreen-journeytracker.js`, ~3100 lines) managing travel segments, activities, Risk Modifier, camp phases, weather system, supply tracking, and day timeline
 
 Both extend `DmScreenPanelAppBase` and persist state via `board.doSaveStateDebounced()` → localStorage. The Party Tracker fires `partyTrackerUpdate` board events that the Journey Tracker consumes for automatic character sync.
 
@@ -28,11 +28,12 @@ Both extend `DmScreenPanelAppBase` and persist state via `board.doSaveStateDebou
 
 | File | Class(es) | Lines | Role |
 |------|-----------|-------|------|
-| `partytracker/dmscreen-partytracker.js` | `PartyTracker`, `PartyTrackerRoot` | ~290 | Panel app + controller |
-| `partytracker/dmscreen-partytracker-character.js` | `PartyTrackerCharacter` | ~760 | Data model, calculations, rendering |
+| `partytracker/dmscreen-partytracker.js` | `PartyTracker`, `PartyTrackerRoot` | ~300 | Panel app + controller |
+| `partytracker/dmscreen-partytracker-character.js` | `PartyTrackerCharacter` | ~960 | Data model, calculations, rendering |
 | `partytracker/dmscreen-partytracker-serial.js` | `PartyTrackerCharacterSerializer` | ~260 | Serialization, static data maps |
 | `partytracker/dmscreen-partytracker-dccalc.js` | `PartyTrackerDcCalc` | ~450 | DC probability engine |
-| `dmscreen-journeytracker.js` | `JourneyTracker`, `JourneyTrackerRoot` | ~2100 | Full journey/camp implementation |
+| `partytracker/dmscreen-partytracker-import.js` | `PartyTrackerImporter` | ~160 | Character sheet JSON import |
+| `dmscreen-journeytracker.js` | `JourneyTracker`, `JourneyTrackerRoot` | ~3100 | Journey/camp/weather/supply/timeline |
 | `dmscreen-panels.js` | `PanelContentManager_*` | — | Panel registration |
 | `dmscreen-panelapp-base.js` | `DmScreenPanelAppBase` | — | Base class for panel apps |
 | `dmscreen-util.js` | `DmScreenUtil` | — | Cross-panel utilities |
