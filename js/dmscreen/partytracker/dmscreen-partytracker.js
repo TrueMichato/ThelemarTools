@@ -2,6 +2,7 @@ import {DmScreenPanelAppBase} from "../dmscreen-panelapp-base.js";
 import {PartyTrackerCharacterSerializer} from "./dmscreen-partytracker-serial.js";
 import {PartyTrackerCharacter} from "./dmscreen-partytracker-character.js";
 import {PartyTrackerDcCalc} from "./dmscreen-partytracker-dccalc.js";
+import {PartyTrackerImporter} from "./dmscreen-partytracker-import.js";
 
 export class PartyTracker extends DmScreenPanelAppBase {
 	constructor (...args) {
@@ -59,6 +60,8 @@ class PartyTrackerRoot {
 				this._characters.push(charComp);
 				this._renderCharacter(charComp, this._wrpChars);
 				this._doSave();
+				this._updateSummary();
+				this._dcCalc?.refresh();
 				this._board.fireBoardEvent({type: "partyTrackerUpdate"});
 			});
 
@@ -69,6 +72,22 @@ class PartyTrackerRoot {
 				btnDcCalc.attr("aria-pressed", this._showDcCalc);
 				this._renderDcCalcSection();
 			});
+
+		/* Hidden file input for character sheet import */
+		const iptFileImport = ee`<input type="file" accept=".json" style="display: none;" aria-hidden="true">`;
+		iptFileImport.onn("change", (e) => {
+			const file = e.target.files?.[0];
+			if (!file) return;
+			const reader = new FileReader();
+			reader.onload = (evt) => {
+				this._handleImportJson(evt.target.result);
+				iptFileImport.val("");
+			};
+			reader.readAsText(file);
+		});
+
+		const btnImport = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="Import character from Character Sheet JSON export" aria-label="Import Character"><span class="glyphicon glyphicon-import" aria-hidden="true"></span> Import</button>`
+			.onn("click", () => iptFileImport.click());
 
 		const btnSettings = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="Party Tracker Settings" aria-label="Settings"><span class="glyphicon glyphicon-cog" aria-hidden="true"></span></button>`
 			.onn("click", (evt) => this._openSettingsMenu(evt));
@@ -86,10 +105,11 @@ class PartyTrackerRoot {
 
 		ee`<div class="ve-w-100 ve-h-100 ve-flex-col">
 			<div class="dm-party__toolbar">
-				<div class="ve-btn-group">${btnAdd}${btnDcCalc}</div>
+				<div class="ve-btn-group">${btnAdd}${btnImport}${btnDcCalc}</div>
 				${this._eleSummary}
 				<div class="ve-ml-auto">${btnSettings}</div>
 			</div>
+			${iptFileImport}
 			${this._wrpChars}
 			${this._wrpDcCalc}
 		</div>`.appendTo(eleParent);
@@ -135,6 +155,71 @@ class PartyTrackerRoot {
 		wrpCalc.appendTo(this._wrpDcCalc);
 	}
 
+	/* -------------------------------------------- */
+	//  Character Sheet Import
+	/* -------------------------------------------- */
+
+	_handleImportJson (jsonStr) {
+		let parsed;
+		try {
+			parsed = JSON.parse(jsonStr);
+		} catch (e) {
+			JqueryUtil.doToast({content: "Import failed: invalid JSON", type: "danger"});
+			return;
+		}
+
+		const validation = PartyTrackerImporter.validate(parsed);
+		if (!validation.valid) {
+			JqueryUtil.doToast({content: `Import failed: ${validation.reason}`, type: "danger"});
+			return;
+		}
+
+		let charData;
+		try {
+			charData = PartyTrackerImporter.mapCharacterSheetData(parsed);
+		} catch (e) {
+			JqueryUtil.doToast({content: `Import failed: ${e.message}`, type: "danger"});
+			return;
+		}
+
+		// Check for existing character with same name
+		const existingIx = charData.name
+			? this._characters.findIndex(c => (c.data?.name || "").toLowerCase() === charData.name.toLowerCase())
+			: -1;
+
+		if (~existingIx) {
+			const doUpdate = confirm(`"${charData.name}" already exists in the party. Update existing? (Cancel to add as new)`);
+			if (doUpdate) {
+				const existing = this._characters[existingIx];
+				// Preserve PT-only fields
+				charData.counters = existing.data.counters || [];
+				charData.notes = existing.data.notes || "";
+				charData.bonuses = existing.data.bonuses || {skills: {}, saves: {}, passives: {}};
+				charData.id = existing.data.id;
+				existing.data = charData;
+				existing.eleRow?.remove();
+				this._renderCharacter(existing, this._wrpChars);
+				JqueryUtil.doToast({content: `Updated "${charData.name}"`, type: "success"});
+			} else {
+				this._addImportedCharacter(charData);
+			}
+		} else {
+			this._addImportedCharacter(charData);
+		}
+
+		this._doSave();
+		this._updateSummary();
+		this._dcCalc?.refresh();
+		this._board.fireBoardEvent({type: "partyTrackerUpdate"});
+	}
+
+	_addImportedCharacter (charData) {
+		const charComp = new PartyTrackerCharacter(charData, this._settings);
+		this._characters.push(charComp);
+		this._renderCharacter(charComp, this._wrpChars);
+		JqueryUtil.doToast({content: `Imported "${charData.name}"`, type: "success"});
+	}
+
 	_updateSummary () {
 		if (!this._eleSummary) return;
 		const n = this._characters.length;
@@ -142,8 +227,30 @@ class PartyTrackerRoot {
 			this._eleSummary.textContent = "No characters";
 			return;
 		}
-		const avgLevel = Math.round(this._characters.reduce((sum, c) => sum + new PartyTrackerCharacter(c.data, this._settings).getTotalLevel(), 0) / n * 10) / 10;
-		this._eleSummary.textContent = `${n} character${n !== 1 ? "s" : ""} · Avg Lv ${avgLevel}`;
+
+		let totalCapacity = 0;
+		let totalWeight = 0;
+		let totalLevel = 0;
+		let totalHpCurrent = 0;
+		let totalHpMax = 0;
+		let anyHpSet = false;
+		for (const c of this._characters) {
+			const data = c.data || c.getSaveableData();
+			const calc = new PartyTrackerCharacter(data, this._settings);
+			totalLevel += calc.getTotalLevel();
+			totalCapacity += calc.getCarryCapacity();
+			totalWeight += data.currentWeight || 0;
+			if (data.hp?.max > 0) {
+				totalHpCurrent += data.hp.current || 0;
+				totalHpMax += data.hp.max || 0;
+				anyHpSet = true;
+			}
+		}
+		const avgLevel = Math.round((totalLevel / n) * 10) / 10;
+		const carryPct = totalCapacity > 0 ? Math.round((totalWeight / totalCapacity) * 100) : 0;
+
+		const hpStr = anyHpSet ? ` \u00b7 HP: ${totalHpCurrent}/${totalHpMax}` : "";
+		this._eleSummary.textContent = `${n} char${n !== 1 ? "s" : ""} \u00b7 Lv ${avgLevel}${hpStr} \u00b7 Carry: ${totalWeight}/${totalCapacity} lb (${carryPct}%)`;
 	}
 
 	_openSettingsMenu (evt) {

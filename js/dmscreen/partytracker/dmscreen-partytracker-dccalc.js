@@ -10,6 +10,7 @@ export class PartyTrackerDcCalc {
 		this._checkType = "skill";
 		this._selectedSkillOrAbility = "perception";
 		this._rollMode = "normal";
+		this._groupCheckMode = false;
 		this._ele = null;
 		this._wrpResults = null;
 	}
@@ -36,11 +37,15 @@ export class PartyTrackerDcCalc {
 			<option value="disadvantage">Dis</option>
 		</select>`.onn("change", () => { this._rollMode = selRollMode.val(); this._renderResults(); });
 
+		const cbxGroupCheck = ee`<input type="checkbox" ${this._groupCheckMode ? "checked" : ""} aria-label="Group check mode">`
+			.onn("change", () => { this._groupCheckMode = cbxGroupCheck.prop("checked"); this._renderResults(); });
+
 		ee`<div class="dm-party__dc-controls">
 			<div class="dm-party__dc-control-group"><span class="dm-party__dc-label">DC</span>${iptDc}</div>
 			<div class="dm-party__dc-control-group"><span class="dm-party__dc-label">Type</span>${selCheckType}</div>
 			${this._wrpSkillSelector}
 			<div class="dm-party__dc-control-group"><span class="dm-party__dc-label">Roll</span>${selRollMode}</div>
+			<label class="dm-party__dc-control-group" style="cursor: pointer;"><span class="dm-party__dc-label">Group</span>${cbxGroupCheck}</label>
 		</div>`.appendTo(this._ele);
 
 		/* ----- Results ----- */
@@ -131,6 +136,7 @@ export class PartyTrackerDcCalc {
 		/* ----- Per-character rows ----- */
 		let succeedCount = 0;
 		let totalPct = 0;
+		const individualPcts = [];
 
 		for (const charData of characters) {
 			const calc = new PartyTrackerCharacter(charData, settings);
@@ -174,6 +180,7 @@ export class PartyTrackerDcCalc {
 			const bonusStr = bonus >= 0 ? `+${bonus}` : `${bonus}`;
 			if (pct >= 0.5) succeedCount++;
 			totalPct += pct;
+			individualPcts.push(pct);
 
 			const barClass = pct >= 0.75 ? "dm-party__dc-bar--success-high" : pct >= 0.5 ? "dm-party__dc-bar--success-med" : pct >= 0.25 ? "dm-party__dc-bar--success-low" : "dm-party__dc-bar--success-fail";
 
@@ -188,15 +195,83 @@ export class PartyTrackerDcCalc {
 		}
 
 		if (this._checkType !== "combatDc" && characters.length) {
-			const avgPct = Math.round((totalPct / characters.length) * 100);
-			const tgttLabel = useTgttCrit ? ` (Thelemar)` : "";
-			ee`<div class="dm-party__dc-row-summary" role="row">
-				<span class="dm-party__dc-col-name">Summary</span>
-				<span class="dm-party__dc-col-bonus"></span>
-				<span class="dm-party__dc-col-pct">${avgPct}%</span>
-				<span class="dm-party__dc-bar-wrap">${succeedCount}/${characters.length} likely succeed (\u226550%)${tgttLabel}</span>
-			</div>`.appendTo(this._wrpResults);
+			if (this._groupCheckMode && individualPcts.length >= 2) {
+				this._renderGroupCheckSummary(individualPcts, useTgttCrit);
+			} else {
+				const avgPct = Math.round((totalPct / characters.length) * 100);
+				const tgttLabel = useTgttCrit ? ` (Thelemar)` : "";
+				ee`<div class="dm-party__dc-row-summary" role="row">
+					<span class="dm-party__dc-col-name">Summary</span>
+					<span class="dm-party__dc-col-bonus"></span>
+					<span class="dm-party__dc-col-pct">${avgPct}%</span>
+					<span class="dm-party__dc-bar-wrap">${succeedCount}/${characters.length} likely succeed (\u226550%)${tgttLabel}</span>
+				</div>`.appendTo(this._wrpResults);
+			}
 		}
+	}
+
+	/* -------------------------------------------- */
+	//  Group Check
+	/* -------------------------------------------- */
+
+	/**
+	 * Calculate group check probabilities using dynamic programming.
+	 * Group check passes if >= ceil(N/2) of N characters succeed.
+	 * @param {number[]} probs - Array of individual success probabilities [0..1]
+	 * @returns {{pPass: number, pAllPass: number, pAllFail: number}}
+	 */
+	_calcGroupCheckProbabilities (probs) {
+		const n = probs.length;
+		const threshold = Math.ceil(n / 2);
+
+		// dp[j] = probability that exactly j characters have succeeded so far
+		let dp = new Array(n + 1).fill(0);
+		dp[0] = 1;
+		for (let i = 0; i < n; i++) {
+			const p = probs[i];
+			const next = new Array(n + 1).fill(0);
+			for (let j = 0; j <= i; j++) {
+				if (dp[j] === 0) continue;
+				next[j + 1] += dp[j] * p;        // character i succeeds
+				next[j] += dp[j] * (1 - p);       // character i fails
+			}
+			dp = next;
+		}
+
+		let pPass = 0;
+		for (let j = threshold; j <= n; j++) pPass += dp[j];
+		const pAllPass = dp[n];
+		const pAllFail = dp[0];
+
+		return {pPass, pAllPass, pAllFail};
+	}
+
+	_renderGroupCheckSummary (individualPcts, useTgttCrit) {
+		const {pPass, pAllPass, pAllFail} = this._calcGroupCheckProbabilities(individualPcts);
+		const n = individualPcts.length;
+		const threshold = Math.ceil(n / 2);
+		const passPctDisplay = Math.round(pPass * 100);
+		const allPassDisplay = Math.round(pAllPass * 100);
+		const allFailDisplay = Math.round(pAllFail * 100);
+
+		const passBarClass = pPass >= 0.75 ? "dm-party__dc-bar--success-high" : pPass >= 0.5 ? "dm-party__dc-bar--success-med" : pPass >= 0.25 ? "dm-party__dc-bar--success-low" : "dm-party__dc-bar--success-fail";
+
+		const tgttLabel = useTgttCrit ? " (Thelemar)" : "";
+
+		ee`<div class="dm-party__dc-group-result">
+			<div class="dm-party__dc-group-row dm-party__dc-group-row--main">
+				<span class="dm-party__dc-group-label">Group Check (\u2265${threshold}/${n} pass)</span>
+				<span class="dm-party__dc-group-pct ${passPctDisplay >= 50 ? "dm-party__dc-group-pct--pass" : "dm-party__dc-group-pct--fail"}">${passPctDisplay}%</span>
+				<div class="dm-party__dc-bar-wrap">
+					<div class="dm-party__dc-bar ${passBarClass}" style="width: ${passPctDisplay}%;"></div>
+				</div>
+			</div>
+			<div class="dm-party__dc-group-row dm-party__dc-group-row--detail">
+				<span class="dm-party__dc-group-crit dm-party__dc-group-crit--pass" title="All ${n} characters pass">\u2728 Crit Pass: ${allPassDisplay}%</span>
+				<span class="dm-party__dc-group-crit dm-party__dc-group-crit--fail" title="All ${n} characters fail">\u{1F480} Crit Fail: ${allFailDisplay}%</span>
+				${tgttLabel ? ee`<span class="ve-muted ve-small">${tgttLabel}</span>` : ""}
+			</div>
+		</div>`.appendTo(this._wrpResults);
 	}
 
 	/* -------------------------------------------- */

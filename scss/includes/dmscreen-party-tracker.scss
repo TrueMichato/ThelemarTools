@@ -43,6 +43,11 @@
 	/*  Character — collapsed row       */
 	/* ================================ */
 
+	.dm-party__char-row-wrap {
+		display: flex;
+		flex-direction: column;
+	}
+
 	.dm-party__char-row {
 		display: flex;
 		align-items: center;
@@ -94,6 +99,18 @@
 		border-radius: 3px;
 		background: rgba(123, 109, 170, 0.1);
 		color: #5b4f8a;
+	}
+
+	.dm-party__char-stat--warn {
+		background: rgba(255, 193, 7, 0.15);
+		color: #856404;
+		font-weight: 600;
+	}
+
+	.dm-party__char-stat--danger {
+		background: rgba(220, 53, 69, 0.12);
+		color: #dc3545;
+		font-weight: 600;
 	}
 
 	/* ================================ */
@@ -378,7 +395,7 @@
 		background: #6c757d;
 		color: #fff;
 		white-space: nowrap;
-		cursor: default;
+		cursor: pointer;
 
 		&--custom {
 			background: #868e96;
@@ -407,6 +424,7 @@
 		background: #8b5e3c;
 		color: #fff;
 		white-space: nowrap;
+		cursor: pointer;
 	}
 
 	.dm-party__pill-remove {
@@ -563,6 +581,143 @@
 		background: #dc3545;
 	}
 
+	/* Group check result styles */
+	.dm-party__dc-group-result {
+		border-top: 2px solid #999;
+		padding-top: 4px;
+		margin-top: 2px;
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+
+	.dm-party__dc-group-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+
+		&--main {
+			font-weight: 700;
+			font-size: 0.92rem;
+		}
+
+		&--detail {
+			font-size: 0.84rem;
+			gap: 12px;
+			padding-left: 2px;
+		}
+	}
+
+	.dm-party__dc-group-label {
+		min-width: 140px;
+		white-space: nowrap;
+	}
+
+	.dm-party__dc-group-pct {
+		font-weight: 700;
+		min-width: 38px;
+		text-align: center;
+
+		&--pass {
+			color: #28a745;
+		}
+
+		&--fail {
+			color: #dc3545;
+		}
+	}
+
+	.dm-party__dc-group-crit {
+		font-weight: 600;
+		white-space: nowrap;
+
+		&--pass {
+			color: #28a745;
+		}
+
+		&--fail {
+			color: #dc3545;
+		}
+	}
+
+	/* ================================= */
+	/*  Hit Points                       */
+	/* ================================= */
+
+	.dm-party__hp-stat--green {
+		background: rgba(40, 167, 69, 0.12);
+		color: #28a745;
+	}
+
+	.dm-party__hp-stat--yellow {
+		background: rgba(255, 193, 7, 0.15);
+		color: #856404;
+	}
+
+	.dm-party__hp-stat--orange {
+		background: rgba(253, 126, 20, 0.15);
+		color: #fd7e14;
+		font-weight: 600;
+	}
+
+	.dm-party__hp-stat--red {
+		background: rgba(220, 53, 69, 0.12);
+		color: #dc3545;
+		font-weight: 600;
+	}
+
+	.dm-party__hp-bar {
+		height: 3px;
+		background: rgba(0, 0, 0, 0.08);
+		border-radius: 2px;
+		overflow: hidden;
+		margin: 0 8px;
+	}
+
+	.dm-party__hp-bar--expanded {
+		height: 6px;
+		margin: 2px 0 0 0;
+		border-radius: 3px;
+	}
+
+	.dm-party__hp-bar-fill {
+		height: 100%;
+		border-radius: inherit;
+		transition: width 0.2s;
+
+		&.dm-party__hp-stat--green {
+			background: #28a745;
+			color: transparent;
+		}
+		&.dm-party__hp-stat--yellow {
+			background: #ffc107;
+			color: transparent;
+		}
+		&.dm-party__hp-stat--orange {
+			background: #fd7e14;
+			color: transparent;
+		}
+		&.dm-party__hp-stat--red {
+			background: #dc3545;
+			color: transparent;
+		}
+	}
+
+	.dm-party__hp-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+
+	.dm-party__hp-actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+		margin-top: 2px;
+	}
+
 	/* ================================= */
 	/*  Settings menu                    */
 	/* ================================= */
@@ -691,6 +846,16 @@
 			color: #bbb;
 		}
 
+		.dm-party__char-stat--warn {
+			background: rgba(255, 193, 7, 0.2);
+			color: #ffc107;
+		}
+
+		.dm-party__char-stat--danger {
+			background: rgba(255, 107, 107, 0.2);
+			color: #ff6b6b;
+		}
+
 		.dm-party__dc-title {
 			color: #ddd;
 		}
@@ -720,6 +885,30 @@
 
 		.dm-party__dc-col-pct {
 			color: #ddd;
+		}
+
+		.dm-party__dc-group-result {
+			border-top-color: #777;
+		}
+
+		.dm-party__dc-group-label {
+			color: #ddd;
+		}
+
+		.dm-party__dc-group-pct--pass {
+			color: #4caf50;
+		}
+
+		.dm-party__dc-group-pct--fail {
+			color: #ff6b6b;
+		}
+
+		.dm-party__dc-group-crit--pass {
+			color: #4caf50;
+		}
+
+		.dm-party__dc-group-crit--fail {
+			color: #ff6b6b;
 		}
 
 		.dm-party__settings {
@@ -759,6 +948,45 @@
 
 		.dm-party__toolbar {
 			border-bottom-color: rgba(255, 255, 255, 0.12);
+		}
+
+		.dm-party__hp-stat--green {
+			background: rgba(40, 167, 69, 0.2);
+			color: #4caf50;
+		}
+
+		.dm-party__hp-stat--yellow {
+			background: rgba(255, 193, 7, 0.2);
+			color: #ffc107;
+		}
+
+		.dm-party__hp-stat--orange {
+			background: rgba(253, 126, 20, 0.2);
+			color: #fd7e14;
+		}
+
+		.dm-party__hp-stat--red {
+			background: rgba(255, 107, 107, 0.2);
+			color: #ff6b6b;
+		}
+
+		.dm-party__hp-bar {
+			background: rgba(255, 255, 255, 0.1);
+		}
+
+		.dm-party__hp-bar-fill {
+			&.dm-party__hp-stat--green {
+				background: #4caf50;
+			}
+			&.dm-party__hp-stat--yellow {
+				background: #ffc107;
+			}
+			&.dm-party__hp-stat--orange {
+				background: #fd7e14;
+			}
+			&.dm-party__hp-stat--red {
+				background: #ff6b6b;
+			}
 		}
 	}
 }
