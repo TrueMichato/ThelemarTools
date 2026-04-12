@@ -189,6 +189,27 @@ export class PartyTrackerCharacter {
 			? ee`<span class="dm-party__char-tgtt-stat" title="Stamina Pool / Combat Method DC">St ${this.getStaminaMax()} · DC ${this.getCombatMethodDc() ?? "—"}</span>`
 			: "";
 
+		/* ----- Personal stats for collapsed row ----- */
+		const carry = this.getCarryCapacity();
+		const curWeight = this._data.currentWeight || 0;
+		const carryPct = carry > 0 ? Math.round((curWeight / carry) * 100) : 0;
+		const carryClass = carryPct > 100 ? "dm-party__char-stat--danger" : carryPct > 75 ? "dm-party__char-stat--warn" : "";
+
+		const exhaustion = this._data.exhaustionLevel || 0;
+
+		const senses = this._data.senses || {};
+		const senseEntries = [
+			senses.darkvision ? `DV ${senses.darkvision}` : null,
+			senses.blindsight ? `BS ${senses.blindsight}` : null,
+			senses.tremorsense ? `TS ${senses.tremorsense}` : null,
+			senses.truesight ? `TrS ${senses.truesight}` : null,
+		].filter(Boolean);
+		const sightStr = senseEntries.length ? senseEntries.join(" ") : null;
+
+		const passiveLinguistics = this._enableTgtt?.() ? this.getPassiveScore("linguistics") : null;
+
+		const jump = this.getJumpDistances();
+
 		const wrpCondPills = ee`<span class="dm-party__conditions-summary"></span>`;
 		for (const cond of (this._data.conditions || [])) {
 			const color = Parser?.CONDITION_TO_COLOR?.[cond.name];
@@ -211,6 +232,11 @@ export class PartyTrackerCharacter {
 			<span class="dm-party__char-stat" title="Passive Perception">\u{1F441} ${this.getPassiveScore("perception")}</span>
 			<span class="dm-party__char-stat" title="Passive Investigation">\u{1F50D} ${this.getPassiveScore("investigation")}</span>
 			<span class="dm-party__char-stat" title="Passive Insight">\u{1F4A1} ${this.getPassiveScore("insight")}</span>
+			${passiveLinguistics != null ? ee`<span class="dm-party__char-stat dm-party__char-tgtt-stat" title="Passive Linguistics">\u{1F5E3} ${passiveLinguistics}</span>` : ""}
+			<span class="dm-party__char-stat ${carryClass}" title="Carry: ${curWeight}/${carry} lb (${carryPct}%)">\u{1F3CB} ${curWeight}/${carry}</span>
+			${sightStr ? ee`<span class="dm-party__char-stat" title="Senses: ${senseEntries.join(", ")}">\u{1F440} ${sightStr}</span>` : ""}
+			<span class="dm-party__char-stat" title="Long Jump ${jump.longRunning}/${jump.longStanding} ft · High Jump ${jump.highRunning}/${jump.highStanding} ft">\u{27A1} ${jump.longRunning}/${jump.longStanding} \u{2B06} ${jump.highRunning}/${jump.highStanding}</span>
+			${exhaustion > 0 ? ee`<span class="dm-party__char-stat dm-party__char-stat--danger" title="Exhaustion Level ${exhaustion}">\u{1F4A4} ${exhaustion}</span>` : ""}
 			${wrpCondPills}
 			${tgttInfo}
 			<div class="ve-ml-auto">${btnRemove}</div>
@@ -350,6 +376,12 @@ export class PartyTrackerCharacter {
 		/* ----- Derived Stats ----- */
 		const carry = this.getCarryCapacity();
 		const jump = this.getJumpDistances();
+		const iptCurrentWeight = ee`<input class="ve-form-control ve-input-xs ve-text-center" style="width: 50px;" type="number" min="0" value="${this._data.currentWeight || 0}" aria-label="Current carried weight (lb)">`
+			.onn("change", (e) => {
+				this._data.currentWeight = Math.max(0, Number(e.target.value) || 0);
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
 
 		/* ----- Passives with bonus inputs ----- */
 		const wrpPassives = ee`<div class="dm-party__passives-grid"></div>`;
@@ -447,7 +479,7 @@ export class PartyTrackerCharacter {
 			${wrpCounters}
 
 			<div class="dm-party__derived-bar">
-				<span title="Carrying Capacity">\u{1F3CB} Carry: ${carry} lb</span>
+				<span class="ve-flex-v-center ve-gap-1" title="Carrying Capacity">\u{1F3CB} Carry: ${iptCurrentWeight}<span>/ ${carry} lb</span></span>
 				<span title="Long Jump (running / standing)">\u{27A1} L.Jump: ${jump.longRunning}/${jump.longStanding} ft</span>
 				<span title="High Jump (running / standing)">\u{2B06} H.Jump: ${jump.highRunning}/${jump.highStanding} ft</span>
 			</div>
@@ -707,6 +739,11 @@ export class PartyTrackerCharacter {
 		});
 		ele.onn("mousemove", (evt) => Renderer.hover.handleLinkMouseMove(evt, ele));
 		ele.onn("mouseleave", (evt) => Renderer.hover.handleLinkMouseLeave(evt, ele));
+		ele.onn("click", (evt) => {
+			if (evt.shiftKey || evt.ctrlKey || evt.metaKey) return;
+			window.open(`${window.location.origin}/${UrlUtil.PG_CONDITIONS_DISEASES}#${hash}`, "_blank", "noopener,noreferrer");
+		});
+		ele.css("cursor", "pointer");
 	}
 
 	_renderConditionsSection () {

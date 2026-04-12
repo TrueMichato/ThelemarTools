@@ -59,6 +59,8 @@ class PartyTrackerRoot {
 				this._characters.push(charComp);
 				this._renderCharacter(charComp, this._wrpChars);
 				this._doSave();
+				this._updateSummary();
+				this._dcCalc?.refresh();
 				this._board.fireBoardEvent({type: "partyTrackerUpdate"});
 			});
 
@@ -142,8 +144,21 @@ class PartyTrackerRoot {
 			this._eleSummary.textContent = "No characters";
 			return;
 		}
-		const avgLevel = Math.round(this._characters.reduce((sum, c) => sum + new PartyTrackerCharacter(c.data, this._settings).getTotalLevel(), 0) / n * 10) / 10;
-		this._eleSummary.textContent = `${n} character${n !== 1 ? "s" : ""} · Avg Lv ${avgLevel}`;
+
+		let totalCapacity = 0;
+		let totalWeight = 0;
+		let totalLevel = 0;
+		for (const c of this._characters) {
+			const data = c.data || c.getSaveableData();
+			const calc = new PartyTrackerCharacter(data, this._settings);
+			totalLevel += calc.getTotalLevel();
+			totalCapacity += calc.getCarryCapacity();
+			totalWeight += data.currentWeight || 0;
+		}
+		const avgLevel = Math.round((totalLevel / n) * 10) / 10;
+		const carryPct = totalCapacity > 0 ? Math.round((totalWeight / totalCapacity) * 100) : 0;
+
+		this._eleSummary.textContent = `${n} char${n !== 1 ? "s" : ""} \u00b7 Lv ${avgLevel} \u00b7 Carry: ${totalWeight}/${totalCapacity} lb (${carryPct}%)`;
 	}
 
 	_openSettingsMenu (evt) {
