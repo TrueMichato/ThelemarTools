@@ -189,6 +189,16 @@ export class PartyTrackerCharacter {
 			? ee`<span class="dm-party__char-tgtt-stat" title="Stamina Pool / Combat Method DC">St ${this.getStaminaMax()} · DC ${this.getCombatMethodDc() ?? "—"}</span>`
 			: "";
 
+		/* ----- HP stats for collapsed row ----- */
+		const hp = this._data.hp || {current: 0, max: 0, temp: 0};
+		const hpMax = hp.max || 0;
+		const hpCurrent = hp.current || 0;
+		const hpTemp = hp.temp || 0;
+		const hpPct = hpMax > 0 ? Math.round((hpCurrent / hpMax) * 100) : -1;
+		const hpClass = hpPct < 0 ? "" : hpPct > 50 ? "dm-party__hp-stat--green" : hpPct > 25 ? "dm-party__hp-stat--yellow" : hpPct > 10 ? "dm-party__hp-stat--orange" : "dm-party__hp-stat--red";
+		const hpDisplay = hpMax > 0 ? `${hpCurrent}${hpTemp > 0 ? `+${hpTemp}` : ""}/${hpMax}` : "\u2014";
+		const hpTitle = hpMax > 0 ? `HP: ${hpCurrent}${hpTemp > 0 ? ` (+${hpTemp} temp)` : ""} / ${hpMax} (${Math.max(0, hpPct)}%)` : "HP not set";
+
 		/* ----- Personal stats for collapsed row ----- */
 		const carry = this.getCarryCapacity();
 		const curWeight = this._data.currentWeight || 0;
@@ -223,11 +233,13 @@ export class PartyTrackerCharacter {
 			pill.appendTo(wrpCondPills);
 		}
 
-		ee`<div class="dm-party__char-row">
+		ee`<div class="dm-party__char-row-wrap">
+			<div class="dm-party__char-row">
 			${btnExpand}
 			<span class="dm-party__char-name" title="${this._data.name || ""}">${this._data.name || "\u2014"}</span>
 			<span class="dm-party__char-meta">${this._data.race || ""}</span>
 			<span class="dm-party__char-meta">${classStr || "\u2014"}</span>
+			<span class="dm-party__char-stat ${hpClass}" title="${hpTitle}">\u2764 ${hpDisplay}</span>
 			<span class="dm-party__char-stat" title="Armor Class">\u{1F6E1} ${this._data.ac}</span>
 			<span class="dm-party__char-stat" title="Passive Perception">\u{1F441} ${this.getPassiveScore("perception")}</span>
 			<span class="dm-party__char-stat" title="Passive Investigation">\u{1F50D} ${this.getPassiveScore("investigation")}</span>
@@ -240,6 +252,8 @@ export class PartyTrackerCharacter {
 			${wrpCondPills}
 			${tgttInfo}
 			<div class="ve-ml-auto">${btnRemove}</div>
+		</div>
+		${hpMax > 0 ? ee`<div class="dm-party__hp-bar"><div class="dm-party__hp-bar-fill ${hpClass}" style="width: ${Math.max(0, Math.min(100, hpPct))}%"></div></div>` : ""}
 		</div>`.appendTo(this._eleRow);
 	}
 
@@ -305,6 +319,87 @@ export class PartyTrackerCharacter {
 				this._data.journeyActions = Math.max(1, Math.min(4, Number(e.target.value) || 1));
 				this._doUpdate();
 			});
+
+		/* ----- Hit Points ----- */
+		if (!this._data.hp) this._data.hp = {current: 0, max: 0, temp: 0};
+		const hpData = this._data.hp;
+
+		const iptHpMax = ee`<input class="ve-form-control ve-input-xs ve-text-center" style="width: 48px;" type="number" min="0" max="999" value="${hpData.max}" aria-label="Maximum HP">`
+			.onn("change", (e) => {
+				hpData.max = Math.max(0, Math.min(999, Number(e.target.value) || 0));
+				hpData.current = Math.min(hpData.current, hpData.max);
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
+
+		const iptHpCurrent = ee`<input class="ve-form-control ve-input-xs ve-text-center" style="width: 48px;" type="number" min="0" max="${hpData.max || 999}" value="${hpData.current}" aria-label="Current HP">`
+			.onn("change", (e) => {
+				hpData.current = Math.max(0, Math.min(hpData.max || 999, Number(e.target.value) || 0));
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
+
+		const iptHpTemp = ee`<input class="ve-form-control ve-input-xs ve-text-center" style="width: 40px;" type="number" min="0" max="999" value="${hpData.temp}" aria-label="Temporary HP">`
+			.onn("change", (e) => {
+				hpData.temp = Math.max(0, Math.min(999, Number(e.target.value) || 0));
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
+
+		const fnApplyDamage = (amount) => {
+			let remaining = amount;
+			// Damage temp HP first (5e rule)
+			if (hpData.temp > 0) {
+				const absorbed = Math.min(hpData.temp, remaining);
+				hpData.temp -= absorbed;
+				remaining -= absorbed;
+			}
+			hpData.current = Math.max(0, hpData.current - remaining);
+			this._renderExpandedForm();
+			this._doUpdate();
+		};
+
+		const fnApplyHeal = (amount) => {
+			hpData.current = Math.min(hpData.max || 999, hpData.current + amount);
+			this._renderExpandedForm();
+			this._doUpdate();
+		};
+
+		const btnDmg1 = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" title="Take 1 damage" aria-label="Take 1 damage">\u22121</button>`
+			.onn("click", () => fnApplyDamage(1));
+		const btnDmg5 = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" title="Take 5 damage" aria-label="Take 5 damage">\u22125</button>`
+			.onn("click", () => fnApplyDamage(5));
+		const btnDmg10 = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" title="Take 10 damage" aria-label="Take 10 damage">\u221210</button>`
+			.onn("click", () => fnApplyDamage(10));
+		const btnDmgCustom = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" title="Take custom damage" aria-label="Take custom damage">\u2212?</button>`
+			.onn("click", () => {
+				const val = window.prompt("Damage amount:");
+				if (val == null) return;
+				const num = Number(val);
+				if (num > 0) fnApplyDamage(num);
+			});
+		const btnHeal = ee`<button class="ve-btn ve-btn-success ve-btn-xxs" title="Heal" aria-label="Heal">+Heal</button>`
+			.onn("click", () => {
+				const val = window.prompt("Heal amount:");
+				if (val == null) return;
+				const num = Number(val);
+				if (num > 0) fnApplyHeal(num);
+			});
+		const btnTempHp = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" title="Add temporary HP (takes highest)" aria-label="Add temporary HP">+Temp</button>`
+			.onn("click", () => {
+				const val = window.prompt("Temporary HP amount:");
+				if (val == null) return;
+				const num = Number(val);
+				if (num > 0) {
+					// 5e rule: temp HP doesn't stack, take higher
+					hpData.temp = Math.max(hpData.temp, num);
+					this._renderExpandedForm();
+					this._doUpdate();
+				}
+			});
+
+		const hpBarPct = hpData.max > 0 ? Math.round((hpData.current / hpData.max) * 100) : 0;
+		const hpBarClass = hpBarPct > 50 ? "dm-party__hp-stat--green" : hpBarPct > 25 ? "dm-party__hp-stat--yellow" : hpBarPct > 10 ? "dm-party__hp-stat--orange" : "dm-party__hp-stat--red";
 
 		/* ----- Save Proficiencies ----- */
 		const wrpSaves = ee`<div class="dm-party__saves-grid"></div>`;
@@ -434,6 +529,21 @@ export class PartyTrackerCharacter {
 				<div class="dm-party__stat-group"><span class="dm-party__stat-label">Exhaustion</span>${iptExhaustion}<span class="ve-muted ve-small">/ ${maxExh}</span></div>
 				<div class="dm-party__stat-group"><span class="dm-party__stat-label">Prof</span><span>+${this.getProficiencyBonus()}</span></div>
 				<div class="dm-party__stat-group"><span class="dm-party__stat-label">Activities</span>${iptJourneyActions}</div>
+			</div>
+
+			<div class="dm-party__section">
+				<div class="dm-party__section-title">Hit Points</div>
+				<div class="dm-party__hp-row">
+					<div class="dm-party__stat-group"><span class="dm-party__stat-label">Current</span>${iptHpCurrent}</div>
+					<span class="ve-muted">/</span>
+					<div class="dm-party__stat-group"><span class="dm-party__stat-label">Max</span>${iptHpMax}</div>
+					<div class="dm-party__stat-group"><span class="dm-party__stat-label">Temp</span>${iptHpTemp}</div>
+				</div>
+				<div class="dm-party__hp-actions">
+					<div class="ve-btn-group">${btnDmg1}${btnDmg5}${btnDmg10}${btnDmgCustom}</div>
+					<div class="ve-btn-group">${btnHeal}${btnTempHp}</div>
+				</div>
+				${hpData.max > 0 ? ee`<div class="dm-party__hp-bar dm-party__hp-bar--expanded"><div class="dm-party__hp-bar-fill ${hpBarClass}" style="width: ${Math.max(0, Math.min(100, hpBarPct))}%"></div></div>` : ""}
 			</div>
 
 			<div class="dm-party__section">
