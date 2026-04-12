@@ -68,11 +68,12 @@ export class PartyTrackerCharacter {
 
 	getCarryCapacity () {
 		if (this._data.overrides?.carryCapacity != null) return this._data.overrides.carryCapacity;
+		const mult = this._data.powerfulBuild ? 2 : 1;
 		if (this._settings?.enableTgtt && this._settings?.thelemar_carryWeight) {
 			const mightMod = this.getSkillBonusRaw("might");
-			return Math.max(50, 50 + 25 * mightMod);
+			return Math.max(50, 50 + 25 * mightMod) * mult;
 		}
-		return (this._data.abilities?.str ?? 10) * 15;
+		return (this._data.abilities?.str ?? 10) * 15 * mult;
 	}
 
 	getSkillBonusRaw (skill) {
@@ -477,6 +478,12 @@ export class PartyTrackerCharacter {
 				this._renderExpandedForm();
 				this._doUpdate();
 			});
+		const cbxPowerfulBuild = ee`<input type="checkbox" ${this._data.powerfulBuild ? "checked" : ""} aria-label="Powerful Build (×2 carry capacity)">`
+			.onn("change", () => {
+				this._data.powerfulBuild = cbxPowerfulBuild.prop("checked");
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
 
 		/* ----- Passives with bonus inputs ----- */
 		const wrpPassives = ee`<div class="dm-party__passives-grid"></div>`;
@@ -590,6 +597,7 @@ export class PartyTrackerCharacter {
 
 			<div class="dm-party__derived-bar">
 				<span class="ve-flex-v-center ve-gap-1" title="Carrying Capacity">\u{1F3CB} Carry: ${iptCurrentWeight}<span>/ ${carry} lb</span></span>
+				<label class="ve-flex-v-center ve-gap-1" title="Powerful Build — count as one size larger for carrying capacity (×2)" style="cursor: pointer;">${cbxPowerfulBuild}<span class="ve-small">Powerful Build</span></label>
 				<span title="Long Jump (running / standing)">\u{27A1} L.Jump: ${jump.longRunning}/${jump.longStanding} ft</span>
 				<span title="High Jump (running / standing)">\u{2B06} H.Jump: ${jump.highRunning}/${jump.highStanding} ft</span>
 			</div>
