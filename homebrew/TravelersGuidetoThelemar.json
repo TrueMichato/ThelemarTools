@@ -32696,6 +32696,22 @@
       ]
     },
     {
+      "name": "Crushing Waterfall",
+      "source": "TGTT",
+      "featureType": [
+        "CTM:3RC",
+        "CTM:RC",
+        "CTM"
+      ],
+      "entries": [
+        "{@b Action (2+ Stamina Points)}. You crash down like a raging torrent, turning gravity itself into a weapon. When you hit a creature with an attack while falling onto it, you can use this maneuver to amplify the impact. Increase the damage dice granted by your fall by two steps, meaning each {@dice d4} becomes a {@dice d8}. For every 2 additional stamina points you spend when you use this maneuver, the damage dice increase by two additional steps (for example, {@dice d8} to {@dice d12}, {@dice d12} to {@dice 2d8}, and so on)."
+      ],
+      "consumes": {
+        "name": "Stamina",
+        "amount": 2
+      }
+    },
+    {
       "name": "First Blood",
       "source": "TGTT",
       "featureType": [
