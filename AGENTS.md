@@ -172,3 +172,48 @@ Root: `.agents/skills/charactersheet-development/references/`
 |Future roadmap and planned improvements|[docs/charactersheet/11-future-roadmap.md](docs/charactersheet/11-future-roadmap.md)|
 |Contributing guide and coding standards|[docs/charactersheet/12-contributing-guide.md](docs/charactersheet/12-contributing-guide.md)|
 |TGTT Thelemar homebrew system|[docs/charactersheet/13-tgtt-thelemar-homebrew.md](docs/charactersheet/13-tgtt-thelemar-homebrew.md)|
+
+## DM Screen — Party Tracker & Journey Tracker
+
+The DM Screen (`dmscreen.html`) hosts panel apps for DM tools. Two custom panels are documented:
+
+- **Party Tracker** — 4 modules in `js/dmscreen/partytracker/` for managing party character stats, DC probabilities, and TGTT homebrew settings
+- **Journey Tracker** — 1 module (`js/dmscreen/dmscreen-journeytracker.js`, ~2100 lines) for overland travel segments, activities, Risk Modifier, camp phases
+
+Both extend `DmScreenPanelAppBase`, persist via `board.doSaveStateDebounced()` → localStorage, and communicate through board events. No unit tests exist yet.
+
+### Critical Facts
+
+- DOM via `ee` tagged templates, `.onn()`, `.appendTo()`, `.empty()`. **`.text()` does NOT work** — use `.textContent` or `.txt()`.
+- Party Tracker fires `partyTrackerUpdate` board event → Journey Tracker syncs players automatically.
+- Serialization uses compressed keys (`n`=name, `cl`=classes, `ab`=abilities, etc.). New fields need defaults in `deserialize()`.
+- TGTT homebrew is gated by `settings.enableTgtt` and sub-toggles (carry, jumping, linguistics, critical rolls, exhaustion rules).
+- Journey Tracker is system-neutral — no TGTT references. It gets character data via `DmScreenUtil.getPartyTrackerCharacters()`.
+- 8 journey activities + 11 camp activities, each with skill, RM deltas (success/crit/fail/critFail/always).
+
+### File Layout
+
+|Path|Contains|
+|---|---|
+|`js/dmscreen/partytracker/dmscreen-partytracker.js`|`PartyTracker` + `PartyTrackerRoot` (panel app + controller)|
+|`js/dmscreen/partytracker/dmscreen-partytracker-character.js`|`PartyTrackerCharacter` (data model, calculations, rendering)|
+|`js/dmscreen/partytracker/dmscreen-partytracker-serial.js`|`PartyTrackerCharacterSerializer` (serialization, static data maps)|
+|`js/dmscreen/partytracker/dmscreen-partytracker-dccalc.js`|`PartyTrackerDcCalc` (DC probability engine, group checks)|
+|`js/dmscreen/dmscreen-journeytracker.js`|`JourneyTracker` + `JourneyTrackerRoot` (full journey/camp implementation)|
+|`scss/includes/dmscreen-party-tracker.scss`|Party Tracker styles (`.dm-party__*`)|
+|`scss/includes/dmscreen-journey-tracker.scss`|Journey Tracker styles (`.dm-journey__*`)|
+
+### Detailed Reference Docs — Read Before Editing DM Screen Code
+
+Root: `.agents/skills/dmscreen-development/references/`
+
+|When to read|File|
+|---|---|
+|Module roles, class hierarchy, data flow, DOM toolkit, event system|[architecture.md](.agents/skills/dmscreen-development/references/architecture.md)|
+|Character data shape, serialization keys, calculation formulas, exhaustion rules|[party-tracker.md](.agents/skills/dmscreen-development/references/party-tracker.md)|
+|Journey/camp activities, RM system, risk rolls, tool proficiency, party sync|[journey-tracker.md](.agents/skills/dmscreen-development/references/journey-tracker.md)|
+|Panel architecture, settings, toolbar, state persistence, collapsed row stats|[docs/dmscreen/01-party-tracker.md](docs/dmscreen/01-party-tracker.md)|
+|DC probability math, group check DP algorithm, TGTT critical rules|[docs/dmscreen/03-dc-calculator.md](docs/dmscreen/03-dc-calculator.md)|
+|All 19 activities with RM deltas, pace interactions, crit detection|[docs/dmscreen/05-journey-activities.md](docs/dmscreen/05-journey-activities.md)|
+|Board event sync, player data mapping, manual mode|[docs/dmscreen/06-party-journey-integration.md](docs/dmscreen/06-party-journey-integration.md)|
+|SCSS class hierarchy, color conventions, night mode|[docs/dmscreen/07-styling-guide.md](docs/dmscreen/07-styling-guide.md)|
