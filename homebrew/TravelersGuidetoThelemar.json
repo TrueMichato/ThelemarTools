@@ -35350,9 +35350,7 @@
             ],
             "count": 1,
             "amount": 2
-          }
-        },
-        {
+          }, 
           "choose": {
             "from": [
               "str",
@@ -35432,9 +35430,7 @@
       "darkvision": 60,
       "ability": [
         {
-          "cha": 2
-        },
-        {
+          "cha": 2,
           "choose": {
             "from": [
               "wis",
@@ -35504,10 +35500,8 @@
       "darkvision": 60,
       "ability": [
         {
-          "int": 2
-        },
-        {
-          "choose": {
+          "int": 2,
+           "choose": {
             "from": [
               "wis",
               "dex"
@@ -35714,10 +35708,8 @@
       "darkvision": 60,
       "ability": [
         {
-          "str": 2
-        },
-        {
-          "choose": {
+          "str": 2,
+           "choose": {
             "from": [
               "dex",
               "con",
@@ -35831,9 +35823,7 @@
       },
       "ability": [
         {
-          "dex": 2
-        },
-        {
+          "dex": 2,
           "cha": 1
         }
       ],
