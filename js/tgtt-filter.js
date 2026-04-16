@@ -435,12 +435,12 @@ class TgttFilter {
 	}
 
 	_filterLists () {
-		const listItems = document.querySelectorAll("a.lst__row-border");
+		const listItems = document.querySelectorAll("a.ve-lst__row-border");
 		const itemsByName = {};
 
 		listItems.forEach(item => {
-			const nameEl = item.querySelector(".bold");
-			const sourceEl = item.querySelector("[class*='source__']");
+			const nameEl = item.querySelector(".ve-bold");
+			const sourceEl = item.querySelector("[class*='ve-source__']");
 
 			if (nameEl && sourceEl) {
 				const name = nameEl.textContent.trim();
@@ -474,7 +474,7 @@ class TgttFilter {
 	_tagListItems () {
 		if (!this._isSpellsPage()) return;
 
-		const listItems = document.querySelectorAll("a.lst__row-border");
+		const listItems = document.querySelectorAll("a.ve-lst__row-border");
 
 		// Try to get the spell data list from the page
 		const dataList = globalThis.dbg_page?._dataList || [];
@@ -482,8 +482,8 @@ class TgttFilter {
 		listItems.forEach(item => {
 			if (item.hasAttribute("data-tgtt-rarity")) return;
 
-			const sourceEl = item.querySelector("[class*='source__']");
-			const nameEl = item.querySelector(".bold");
+			const sourceEl = item.querySelector("[class*='ve-source__']");
+			const nameEl = item.querySelector(".ve-bold");
 
 			if (sourceEl) {
 				const sourceText = sourceEl.textContent.trim();
@@ -566,22 +566,22 @@ class TgttFilter {
 		// If any 'yes' filters are active, hide items that don't match ANY of them (OR logic)
 		if (activeRarityFilters.length > 0) {
 			const selectors = activeRarityFilters.map(r => `[data-tgtt-rarity="${r}"]`).join(",");
-			css += `a.lst__row-border:not(:is(${selectors})) { display: none !important; }\n`;
+			css += `a.ve-lst__row-border:not(:is(${selectors})) { display: none !important; }\n`;
 		}
 
 		// Hide explicitly excluded items
 		excludedRarityFilters.forEach(rarity => {
-			css += `a.lst__row-border[data-tgtt-rarity="${rarity}"] { display: none !important; }\n`;
+			css += `a.ve-lst__row-border[data-tgtt-rarity="${rarity}"] { display: none !important; }\n`;
 		});
 
 		// Same for legality
 		if (activeLegalityFilters.length > 0) {
 			const selectors = activeLegalityFilters.map(l => `[data-tgtt-legality="${l}"]`).join(",");
-			css += `a.lst__row-border:not(:is(${selectors})) { display: none !important; }\n`;
+			css += `a.ve-lst__row-border:not(:is(${selectors})) { display: none !important; }\n`;
 		}
 
 		excludedLegalityFilters.forEach(legality => {
-			css += `a.lst__row-border[data-tgtt-legality="${legality}"] { display: none !important; }\n`;
+			css += `a.ve-lst__row-border[data-tgtt-legality="${legality}"] { display: none !important; }\n`;
 		});
 
 		this._dynamicStyleSheet.textContent = css;
