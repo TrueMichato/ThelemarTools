@@ -2866,6 +2866,14 @@
 		opacity: 1;
 	}
 
+	.tab-content > .tab-pane {
+		display: none;
+	}
+
+	.tab-content > .ve-active {
+		display: block;
+	}
+
 	.caret {
 		display: inline-block;
 		width: 0;
