@@ -35243,14 +35243,21 @@
           "type": "entries",
           "name": "Age",
           "entries": [
-            "Nyuidj mature and age at roughly the same rate as humans, though their connection to dreams often makes them seem ageless in demeanor."
+            "Nyuidj mature and age at the same rate as regular humans, though their connection to the Dreamtime often makes them appear timeless."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Alignment",
+          "entries": [
+            "Nyuidj tend toward Neutral alignments. Their fluid understanding of morality in the dream world can make them difficult to categorize by typical ethical standards."
           ]
         },
         {
           "type": "entries",
           "name": "Size",
           "entries": [
-            "Nyuidj vary widely in height and build, from barely 5 feet to well over 6 feet tall. Your size is Medium."
+            "Nyuidj are of medium size, with their height and weight comparable to humans."
           ]
         },
         {
@@ -35277,9 +35284,9 @@
         },
         {
           "type": "entries",
-          "name": "Dreamers",
+          "name": "Dreamer",
           "entries": [
-            "Nyuidj always dream lucid dreams, and possess an affinity to The Dreamtime.",
+            "Nyuidj always dream lucid dreams and have an affinity to the Dreamtime.",
             "You gain the {@optfeature Dreamwalk|TGTT} ability.",
             "You then learn one other Dreamwalker ability of your choice from the list below. You must meet any prerequisites.",
             {
@@ -35393,12 +35400,15 @@
           }
         }
       ],
-      "traitTags": [],
+      "traitTags": [
+        "Spellcasting"
+      ],
       "entries": [
         {
           "type": "entries",
           "name": "The Affinity",
           "entries": [
+            "Each child develops a small magical talent by the time they hit puberty, which develops more as they practice it and grow.",
             "Choose one cantrip, except for {@spell Eldritch Blast}, {@spell Shillelagh}, {@spell Vicious Mockery}, or {@spell Guidance}. Your spellcasting ability for it is Intelligence, Wisdom, or Charisma (your choice)."
           ]
         },
@@ -35406,7 +35416,37 @@
           "type": "entries",
           "name": "Dauntless Heritage",
           "entries": [
-            "You have advantage on saving throws against being frightened."
+            "The children are a race who experienced many hardships through the ages, always to stand up again and continue fighting for their future.",
+            "You gain advantage on saving throws against being frightened."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Age",
+          "entries": [
+            "Children reach adulthood in their late teens and live around a century."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Alignment",
+          "entries": [
+            "Children tend toward no particular alignment."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Size",
+          "entries": [
+            "Children vary widely in height and build, from barely 5 feet to well over 6 feet tall. Regardless of your position in that range, your size is Medium."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You can speak, read, and write Common. Common evolved from the old language of the empire and is used throughout the lands of Thelemar, with each country using a different dialect of the general common language.",
+            "You speak one dialect of common that is appropriate for your culture. The options are Lexalian, Olympian, Jaknian, Clairnian and Hubian."
           ]
         }
       ]
@@ -35459,6 +35499,14 @@
       "entries": [
         {
           "type": "entries",
+          "name": "Feywild Connection",
+          "entries": [
+            "A dendulra has a special magical connection to the feywild that allows them to channel some of its magic. At 1st level you gain the cantrip {@spell druidcraft}. When you reach 3rd level, you can cast the spell {@spell entangle} once per day without using material components or a spell slot.",
+            "Your spellcasting ability for these spells is Charisma."
+          ]
+        },
+        {
+          "type": "entries",
           "name": "Fey Ancestry",
           "entries": [
             "You have advantage on saving throws against being charmed, and magic can't put you to sleep."
@@ -35468,15 +35516,51 @@
           "type": "entries",
           "name": "Bubbling Energy",
           "entries": [
-            "You can complete a long rest in 4 hours."
+            "Due to their innate connection to the Feywild, the dendulras don't need as much sleep as normal creatures. You can complete a long rest in 4 hours of sleep, instead of 8."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Darkvision",
+          "entries": [
+            "Born of magical creatures that see the world through different eyes, you have superior vision in dark and dim conditions. You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
           ]
         },
         {
           "type": "entries",
           "name": "Step of Feywild",
           "entries": [
-            "As a bonus action, you can teleport up to 30 feet to an unoccupied space you can see. Once you use this trait, you can't do so again until you finish a short or long rest.",
-            "Starting at 3rd level, when you use this trait, up to two creatures of your choice that you can see within 10 feet of where you appear must succeed on a Wisdom saving throw or be charmed by you for 1 minute. The DC equals 8 + your proficiency bonus + your Charisma modifier."
+            "The magic of the Feywild coursing through their veins allows the dendulras to channel said energy in unique ways.",
+            "As a bonus action, you can magically teleport up to 30 feet to an unoccupied space you can see. Once you use this trait, you can't do so again until you finish a short or long rest.",
+            "When you reach 3rd level, this ability grows: When you use your Step, up to two creatures of your choice that you can see within 10 feet of where you appear must succeed on a Wisdom saving throw or be charmed by you for 1 minute, or until you or your companions deal any damage to it. The DC for the saving throw equals 8 + your proficiency bonus + your Charisma modifier."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Age",
+          "entries": [
+            "Dendulras will reach adulthood in their late teens, but live to be as old as 400 years."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Alignment",
+          "entries": [
+            "Dendulras often tend toward Chaotic Alignments."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Size",
+          "entries": [
+            "Dendulras vary widely in height and build, from barely 4 feet to well over 6 feet tall. Regardless of your position in that range, your size is Medium."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You can speak, read, and write Common (General and one dialect) and Sylvan, language of fey creatures. Thanks to your fey blood you can also, through sounds and gestures, communicate simple ideas with Small or smaller beasts."
           ]
         }
       ]
@@ -35522,7 +35606,7 @@
           "type": "entries",
           "name": "Shadow Affinity",
           "entries": [
-            "You can attempt to hide even when you are only lightly obscured by natural phenomena such as foliage, rain, snow, or mist."
+            "Descathi are kins to the shadows, being able to hide with ease. You can attempt to hide even when you are only lightly obscured by foliage, heavy rain, falling snow, mist, and other natural phenomena."
           ]
         },
         {
@@ -35534,17 +35618,60 @@
         },
         {
           "type": "entries",
+          "name": "Shadowfell Blood",
+          "entries": [
+            "You have resistance to necrotic damage."
+          ]
+        },
+        {
+          "type": "entries",
           "name": "Hollow Rest",
           "entries": [
-            "You can complete a long rest in 4 hours."
+            "The Descathi are fueled by magic from the shadowfell that gives them energy, despite their shriveled bodies. You can complete a long rest in 4 hours of sleep, instead of 8."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Darkvision",
+          "entries": [
+            "Born of a world wrapped in shadows, you have superior vision in dark and dim conditions. You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
           ]
         },
         {
           "type": "entries",
           "name": "Step of Shadowfell",
           "entries": [
-            "As a bonus action, you can teleport up to 30 feet to an unoccupied space you can see. Once you use this trait, you can't do so again until you finish a short or long rest.",
-            "Starting at 3rd level, when you use this trait, up to two creatures of your choice that you can see within 10 feet of you before you teleport must succeed on a Wisdom saving throw or be frightened of you until the end of your next turn. The DC equals 8 + your proficiency bonus + your Intelligence modifier."
+            "Their innate connection to the shadowfell allows the descathi to draw upon it and use it in unique ways.",
+            "As a bonus action, you can magically teleport up to 30 feet to an unoccupied space you can see. Once you use this trait, you can't do so again until you finish a short or long rest.",
+            "When you reach 3rd level, this ability grows: When you use your Step, up to two creatures of your choice that you can see within 10 feet of you before you teleport must succeed on a Wisdom saving throw or be frightened of you until the end of your next turn. The DC for the saving throw equals 8 + your proficiency bonus + your Intelligence modifier."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Age",
+          "entries": [
+            "Descathi will reach adulthood in their late teens, but live to be as old as 400 years."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Alignment",
+          "entries": [
+            "Descathi often tend toward Chaotic Alignments."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Size",
+          "entries": [
+            "Descathi vary widely in height and build, from barely 4 feet to well over 6 feet tall. Regardless of your position in that range, your size is Medium."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You can speak, read, and write Common (General and one dialect) and Stygian, language of shadow creatures."
           ]
         }
       ]
@@ -35576,8 +35703,37 @@
           "type": "entries",
           "name": "Elemental Empowerment",
           "entries": [
-            "You have resistance to the damage type associated with your subrace. Whenever you take damage of that type from a source other than yourself, you can use your reaction to empower your next attack to deal {@damage 1d6} of that damage type. You can use this trait a number of times equal to your proficiency bonus, and regain all expended uses when you finish a long rest.",
+            "Because of your elemental heritage, you have a duality when it comes to damage from the element of your ancestry. You have resistance to your elemental type, as only your mortal half is damaged by the element, but your primordial half is empowered by it. Whenever you are damaged by this element from a source other than yourself, you can use your reaction to deal {@damage 1d6} of damage of the same element type in your next attack, be it ranged or melee, weapon or magic.",
+            "You can use this feature a number of times equal to your proficiency bonus.",
             "The damage increases to {@damage 2d6} when your proficiency bonus is +3, {@damage 3d6} at +4, {@damage 4d6} at +5, and {@damage 5d6} at +6."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Age",
+          "entries": [
+            "Genasi mature at about the same rate as Children and reach adulthood in their late teens. They live somewhat longer than humans do, easily reaching into their second century."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Alignment",
+          "entries": [
+            "Varied and self-confident, many Genasi tend to follow the paths of their elemental heritage. Air genasi trend toward chaotic, Earth toward lawful, Water toward neutral, and Fire toward extremes."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Size",
+          "entries": [
+            "Genasi are as varied as their mortal parents, exhibiting physical builds and characteristics of them. Your size is Medium."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You can speak, read, and write Common (General and one dialect) and Primordial. Additionally, you speak the elemental dialect language of the element you are associated with."
           ]
         }
       ]
@@ -35605,7 +35761,35 @@
           "type": "entries",
           "name": "Eyes of the Abyss",
           "entries": [
-            "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
+            "The blood of fiends give tieflings a special eyesight. You have superior vision in dark and dim conditions. You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Age",
+          "entries": [
+            "Tieflings mature at the same rate as Children but live a few years longer."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Alignment",
+          "entries": [
+            "Tieflings might not have an innate tendency toward evil, but many of them end up there. Evil or not, an independent nature inclines many tieflings toward a chaotic alignment."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Size",
+          "entries": [
+            "Tieflings are about the same size and build as Children. Your size is Medium."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You can speak, read, and write Common (General and one dialect) and Mictlanian. Mictlanian is the language of hell, one spoken by fiends and creatures of the abyss."
           ]
         }
       ]
@@ -35657,9 +35841,54 @@
           "type": "entries",
           "name": "Ancestral Affinity",
           "entries": [
-            "You have resistance to psychic damage and advantage on saving throws against being frightened."
+            "You have resistance to psychic damage and advantage on saving throws against effects causing the frightened condition."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Draconic Nature",
+          "entries": [
+            "You are descended from either a Fear Dragon or a Safety Dragon. This choice is made at 1st level and determines your unique abilities, reflecting the deep imprint of your ancestor's domain."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Darkvision",
+          "entries": [
+            "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Age",
+          "entries": [
+            "Young dragonborn grow quickly. They walk hours after hatching, attain the size and development of a 10-year-old Children kid by the age of 3, and reach adulthood by 15. They live to be around 80."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Alignment",
+          "entries": [
+            "Dragonborn tend to extremes, making a conscious choice for one side or the other in the cosmic war between good and evil, law and chaos. They inherit this extremity from their draconic ancestors."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Size",
+          "entries": [
+            "Dragonborn are taller and heavier than Children, standing well over 6 feet tall and averaging almost 250 pounds. Your size is Medium."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You can speak, read, and write Common (General and one dialect) and Draconic. Draconic is thought to be one of the oldest languages and is often used in the study of magic. The language sounds harsh to most other creatures and includes numerous hard consonants and sibilants."
           ]
         }
+      ],
+      "resist": [
+        "psychic"
       ]
     },
     {
@@ -35736,7 +35965,8 @@
           "type": "entries",
           "name": "Thrill of the Hunt",
           "entries": [
-            "As a bonus action, you can mark a creature you can see that is below its hit point maximum for a number of hours equal to your proficiency bonus. Until the mark ends, you have advantage on Wisdom (Perception or Survival) checks to track or locate the target. If you are within 30 feet of the target, you can use your reaction to grant an ally advantage on a melee attack roll against it, ending the mark. You can use this trait once per long rest."
+            "If you can see or hear a creature that is below its maximum number of hit points, you can use your bonus action to mark that target for a number of hours equal to your proficiency bonus. For the duration, you have advantage on Wisdom ({@skill Perception}, {@skill Survival}) checks you make to track or locate the target, and if you are within 30 feet of the target, you can grant an ally advantage on a melee attack roll they make against the target using your reaction, which consumes the mark.",
+            "You can use this trait once, and regain use of it when you complete a long rest."
           ]
         },
         {
@@ -35751,6 +35981,48 @@
           "name": "Carrion Feeder",
           "entries": [
             "You have advantage on Constitution saving throws against disease."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Darkvision",
+          "entries": [
+            "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Age",
+          "entries": [
+            "Gnolls mature at 5 years, and live up to three decades."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Alignment",
+          "entries": [
+            "The Grasp of Yeenoghu and keen hunting instincts makes many Gnolls chaotic evil."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Size",
+          "entries": [
+            "Gnolls are between 6\u00bd and 7\u00bd feet tall, and weigh 200-280 pounds. Your size is Medium."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Speed",
+          "entries": [
+            "You have a base walking speed of 30 feet."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You can speak, read, and write Common (General and one dialect) and Mictlanian. Mictlanian is the language of hell, one spoken by fiends and creatures of the abyss."
           ]
         }
       ]
@@ -35767,7 +36039,8 @@
       "ability": [
         {
           "str": 2,
-          "con": 2
+          "con": 2,
+          "int": -1
         }
       ],
       "traitTags": [
@@ -35800,6 +36073,48 @@
           "entries": [
             "You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift."
           ]
+        },
+        {
+          "type": "entries",
+          "name": "Darkvision",
+          "entries": [
+            "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Age",
+          "entries": [
+            "Half Ogres mature at 15 years, and live up to seven decades."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Alignment",
+          "entries": [
+            "Ogre blood pushes many half ogres towards chaos."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Size",
+          "entries": [
+            "Half Ogres are between 7 and 9 feet tall, and weigh 300-500 pounds. Your size is Medium."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Speed",
+          "entries": [
+            "You have a base walking speed of 30 feet."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You can speak, read, and write Common (General and one dialect) and Jötunn, language of ogres, firbolgs and goliath."
+          ]
         }
       ]
     },
@@ -35821,7 +36136,14 @@
         }
       ],
       "darkvision": 60,
-      "traitTags": [],
+      "traitTags": [
+        "Tool Proficiency"
+      ],
+      "toolProficiencies": [
+        {
+          "thieves' tools": true
+        }
+      ],
       "languageProficiencies": [
         {
           "common": true,
@@ -35838,16 +36160,45 @@
         },
         {
           "type": "entries",
+          "name": "Darkvision",
+          "entries": [
+            "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light, but only shades of gray."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Center of Attention",
+          "entries": [
+            "As an action on your turn, you can distract nearby foes. This can be done by cowering pathetically, shrieking furiously, boasting arrogantly, or through different means. Until the end of your next turn, your allies gain advantage on attack rolls against enemies within 10 feet of you that can see you.",
+            "Once you use this trait, you can't use it again until you finish a short or long rest."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Skilled Trapper",
+          "entries": [
+            "You are proficient with {@item thieves' tools|PHB}, and whenever you make an ability check to create traps, you can add double your proficiency bonus to the check, rather than your normal proficiency bonus."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Fleeting Courage",
+          "entries": [
+            "When you succeed on a saving throw, your next attack roll or saving throw you make before the end of your next turn has advantage."
+          ]
+        },
+        {
+          "type": "entries",
           "name": "Age",
           "entries": [
-            "Kobolds reach adulthood at age 6 and can live up to 120 years, though most live much shorter lives."
+            "Kobolds reach adulthood at age 6 and can live up to 120 years, but rarely do so. Those that live within or near draconic communities tend to live longer."
           ]
         },
         {
           "type": "entries",
           "name": "Alignment",
           "entries": [
-            "Their reliance on the strength of their group tends to push Kobolds toward lawful alignments."
+            "Their reliance on the strength of their group makes them tend toward law."
           ]
         },
         {
@@ -35855,6 +36206,13 @@
           "name": "Size",
           "entries": [
             "Kobolds are between 2 and 3 feet tall and weigh between 25 and 35 pounds. Your size is Small."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You can speak, read, and write Common (General and one dialect) and Draconic."
           ]
         }
       ]
@@ -36098,6 +36456,23 @@
         "Skill Proficiency",
         "Language Proficiency"
       ],
+      "skillProficiencies": [
+        {
+          "choose": {
+            "from": [
+              "religion",
+              "athletics",
+              "might|TGTT"
+            ],
+            "count": 1
+          }
+        }
+      ],
+      "languageProficiencies": [
+        {
+          "celestial": true
+        }
+      ],
       "entries": [
         {
           "type": "entries",
@@ -36123,6 +36498,31 @@
       "traitTags": [
         "Skill Proficiency",
         "Tool Proficiency"
+      ],
+      "skillProficiencies": [
+        {
+          "choose": {
+            "from": [
+              "deception",
+              "insight",
+              "sleight of hand",
+              "history",
+              "culture|TGTT"
+            ],
+            "count": 1
+          }
+        }
+      ],
+      "toolProficiencies": [
+        {
+          "choose": {
+            "from": [
+              "forgery kit",
+              "disguise kit"
+            ],
+            "count": 1
+          }
+        }
       ],
       "entries": [
         {
@@ -36150,6 +36550,22 @@
         "Skill Proficiency",
         "Tool Proficiency"
       ],
+      "skillProficiencies": [
+        {
+          "choose": {
+            "from": [
+              "persuasion",
+              "investigation"
+            ],
+            "count": 1
+          }
+        }
+      ],
+      "toolProficiencies": [
+        {
+          "anyArtisansTool": 2
+        }
+      ],
       "entries": [
         {
           "type": "entries",
@@ -36175,6 +36591,23 @@
       "traitTags": [
         "Skill Proficiency",
         "Language Proficiency"
+      ],
+      "skillProficiencies": [
+        {
+          "choose": {
+            "from": [
+              "persuasion",
+              "investigation",
+              "deception",
+              "insight",
+              "sleight of hand",
+              "history",
+              "religion",
+              "athletics"
+            ],
+            "count": 2
+          }
+        }
       ],
       "entries": [
         {
@@ -36213,6 +36646,10 @@
       "source": "TGTT",
       "raceName": "Child of the Empire",
       "raceSource": "TGTT",
+      "speed": {
+        "walk": 30,
+        "swim": true
+      },
       "traitTags": [],
       "entries": [
         {
@@ -36266,7 +36703,29 @@
           "type": "entries",
           "name": "Unending Breath",
           "entries": [
-            "You can hold your breath indefinitely while you're not incapacitated."
+            "You can hold your breath indefinitely while you're not incapacitated, and have endless breath while breathing out or in. You breathe only as a habit, and not as a natural need for air."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Spirit of the Winds",
+          "entries": [
+            "You know the {@spell gust|XGE} cantrip and can cast it without verbal or material components. When you reach 3rd level, you can cast {@spell feather fall} once as a 1st-level spell, and regain the ability to do so when you finish a long rest. When you reach 5th level, you can cast {@spell gust of wind} once, and regain the ability to do so when you finish a long rest.",
+            "Constitution is your casting ability for these spells."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Lightning Empowerment",
+          "entries": [
+            "Your elemental empowerment is to Lightning damage."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "In addition to Common and Primordial, you speak Auran, the dialect language of air and flight based creatures and the Djinni of the elemental plane of air."
           ]
         }
       ]
@@ -36315,6 +36774,28 @@
           "entries": [
             "You can move across difficult terrain made of earth or stone without expending extra movement."
           ]
+        },
+        {
+          "type": "entries",
+          "name": "Soul of the Earth",
+          "entries": [
+            "You know the {@spell mold earth|XGE} cantrip and can cast it without verbal or material components. When you reach 3rd level, you can cast {@spell earth tremor|XGE} once as a 1st-level spell, and regain the ability to do so when you finish a long rest. When you reach 5th level, you can cast {@spell earthbind|XGE} once, and regain the ability to do so when you finish a long rest.",
+            "Constitution is your spellcasting ability for these spells."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Acid Empowerment",
+          "entries": [
+            "Your elemental empowerment is to Acid damage."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "In addition to Common and Primordial, you speak Terran, the dialect language of earth based creatures and the Dao of the elemental plane of earth."
+          ]
         }
       ]
     },
@@ -36355,6 +36836,37 @@
           },
           "ability": "con"
         }
+      ],
+      "entries": [
+        {
+          "type": "entries",
+          "name": "Darkvision",
+          "entries": [
+            "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. Your ties to the Elemental Plane of Fire make your darkvision unusual: everything you see in darkness is in a shade of red."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Heart of Fire",
+          "entries": [
+            "You know the {@spell produce flame} cantrip and can cast it without verbal or material components. When you reach 3rd level, you can cast {@spell burning hands} once as a 1st-level spell, and regain the ability to do so when you finish a long rest. When you reach 5th level, you can cast {@spell pyrotechnics} once, and regain the ability to do so when you finish a long rest.",
+            "Constitution is your spellcasting ability for these spells."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Fire Empowerment",
+          "entries": [
+            "Your elemental empowerment is to fire damage."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "In addition to Common and Primordial, you speak Ignan, the dialect language of fire based creatures and Efreeti of the elemental plane of fire."
+          ]
+        }
       ]
     },
     {
@@ -36376,8 +36888,13 @@
         }
       ],
       "traitTags": [
-        "Damage Resistance"
+        "Damage Resistance",
+        "Amphibious"
       ],
+      "speed": {
+        "walk": 30,
+        "swim": true
+      },
       "additionalSpells": [
         {
           "innate": {
@@ -36399,7 +36916,29 @@
           "type": "entries",
           "name": "Amphibious",
           "entries": [
-            "You can breathe air and water, and you have a swim speed equal to your walking speed."
+            "You can breathe underwater and have a swim speed the same speed as your walking speed."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Anima of Water",
+          "entries": [
+            "You know the {@spell shape water} cantrip and can cast it without verbal or material components. When you reach 3rd level, you can cast {@spell create or destroy water} once as a 1st-level spell, and regain the ability to do so when you finish a long rest. When you reach 5th level, you can cast {@spell Snilloc's snowball swarm} as a 3rd-level spell once, and regain the ability to do so when you finish a long rest.",
+            "Your spellcasting ability for these spells is Constitution."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Cold Empowerment",
+          "entries": [
+            "Your elemental empowerment is to cold damage."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Languages",
+          "entries": [
+            "You speak Aquan, the dialect language of water based sea creatures and the Marid of the elemental plane of water."
           ]
         }
       ]
@@ -36449,7 +36988,15 @@
           "type": "entries",
           "name": "Dark Queen's Blessing",
           "entries": [
-            "You have advantage on Intelligence, Wisdom, and Charisma saving throws against magic."
+            "You have advantage on all Intelligence, Wisdom, and Charisma saving throws against magic."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Rangda's Legacy",
+          "entries": [
+            "You know the {@spell mind sliver|TCE} cantrip. When you reach 3rd level, you can cast the spell {@spell Tasha's caustic brew|TCE} as a 2nd-level spell once with this trait and regain the ability to do so when you finish a long rest. When you reach 5th level, you can cast the {@spell Tasha's mind whip|TCE} spell once with this trait and regain the ability to do so when you finish a long rest.",
+            "Wisdom is your spellcasting ability for these spells."
           ]
         }
       ]
@@ -36505,7 +37052,15 @@
           "type": "entries",
           "name": "Temptation's Guidance",
           "entries": [
-            "You gain proficiency in Persuasion, and you can add double your proficiency bonus when using it."
+            "You are proficient in the Persuasion skill, and may add double your proficiency bonus whenever you are using the skill."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Mara's Legacy",
+          "entries": [
+            "You know the {@spell friends} cantrip. When you reach 3rd level, you can cast the spell {@spell charm person} as a 2nd-level spell once with this trait and regain the ability to do so when you finish a long rest. When you reach 5th level, you can cast the {@spell suggestion} spell once with this trait and regain the ability to do so when you finish a long rest.",
+            "Charisma is your spellcasting ability for these spells."
           ]
         }
       ]
@@ -36555,7 +37110,16 @@
           "type": "entries",
           "name": "Infernal Luck",
           "entries": [
-            "You can reroll one ability check or attack roll you make. You must use the new roll. Once you use this trait, you can't use it again until you finish a long rest."
+            "You may reroll one ability check or attack roll you make; you may do so only before you know whether the roll was successful.",
+            "Once you use this trait you must complete a long rest before using it again."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Asmodeus' Legacy",
+          "entries": [
+            "You know the {@spell thaumaturgy} cantrip. When you reach 3rd level, you can cast the spell {@spell hellish rebuke} as a 2nd-level spell once with this trait and regain the ability to do so when you finish a long rest. When you reach 5th level, you can cast the {@spell blindness/deafness} spell once with this trait and regain the ability to do so when you finish a long rest.",
+            "Intelligence is your spellcasting ability for these spells."
           ]
         }
       ]
