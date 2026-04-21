@@ -421,7 +421,7 @@ describe("Combat Methods Survey — Subclass Tradition Granting", () => {
 	});
 
 	// --- Arcane Archer (TGTT) ---
-	it("TGTT Arcane Archer should auto-grant Biting Zephyr", () => {
+	it("TGTT Arcane Archer should NOT auto-grant Biting Zephyr (player choice)", () => {
 		state.addClass({
 			name: "Fighter",
 			source: "TGTT",
@@ -430,7 +430,25 @@ describe("Combat Methods Survey — Subclass Tradition Granting", () => {
 			subclass: {name: "Arcane Archer", shortName: "Arcane Archer", source: "TGTT"},
 		});
 		state.applyClassFeatureEffects();
-		expect(state.hasCombatTradition("Biting Zephyr")).toBe(true);
+		// Arcane Archer chooses 2 from 4 traditions — no auto-grant
+		expect(state.hasCombatTradition("Biting Zephyr")).toBe(false);
+	});
+
+	it("TGTT Arcane Archer should expose allowed traditions list", () => {
+		state.addClass({
+			name: "Fighter",
+			source: "TGTT",
+			level: 3,
+			hitDice: "d10",
+			subclass: {name: "Arcane Archer", shortName: "Arcane Archer", source: "TGTT"},
+		});
+		const calcs = state.getFeatureCalculations();
+		expect(calcs.arcaneArcherAllowedTraditions).toEqual([
+			"Biting Zephyr",
+			"Razor's Edge",
+			"Unending Wheel",
+			"Unerring Hawk",
+		]);
 	});
 
 	it("TGTT Arcane Archer should set hasArcaneArcherCombatMethods", () => {
