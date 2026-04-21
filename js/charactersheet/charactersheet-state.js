@@ -3594,9 +3594,6 @@ class CharacterSheetState {
 			this._data.grantedProficiencies = {skills: {}, tools: {}, weapons: {}, armor: {}, languages: {}};
 		}
 
-		// Re-register custom ability effects after loading (they're stored but need to be applied)
-		this._reapplyCustomAbilityEffects();
-
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
 
@@ -3611,6 +3608,9 @@ class CharacterSheetState {
 
 		// Migrate: backfill levelHistory with race/background data from state
 		this._migrateRaceBackgroundToHistory();
+
+		// Re-register custom ability effects after loading — run after migrations so effects reference up-to-date data
+		this._reapplyCustomAbilityEffects();
 
 		// Reapply history-backed optional features for saves which persisted history
 		// but did not fully reconstruct runtime feature state.
@@ -5073,6 +5073,11 @@ class CharacterSheetState {
 		const directBonus = this._data.directAbilityBonuses?.[ability] || 0;
 		let computed = base + racialBonus + featureBonus + directBonus;
 
+		// Primal Champion (Barbarian 20): +4 STR and CON, max 24 for the natural score
+		if ((ability === "str" || ability === "con") && this._hasPrimalChampion()) {
+			computed = Math.min(computed + 4, 24);
+		}
+
 		// Apply item ability bonuses (e.g., Belt of Dwarvenkind +2 CON)
 		const itemBonus = this._data.itemAbilityOverrides?.bonus?.[ability] || 0;
 		computed += itemBonus;
@@ -5682,6 +5687,12 @@ class CharacterSheetState {
 		}
 		return 0;
 	}
+
+	_hasPrimalChampion () {
+		return this._data.classes.some(cls => cls.name?.toLowerCase() === "barbarian" && cls.level >= 20);
+	}
+
+
 	// #endregion
 
 	// #region Skills
@@ -23099,8 +23110,13 @@ class CharacterSheetState {
 		}
 
 		const profBonus = this.getProficiencyBonus();
-		const calculatedMax = profBonus * 2;
+		let calculatedMax = profBonus * 2;
 
+		// Add bonus stamina from parsed feature modifiers (e.g., "You gain 2 additional stamina points")
+		const staminaMods = this.getModifiersForType("resource:stamina");
+		for (const mod of staminaMods) {
+			calculatedMax += (mod.value || 0);
+		}
 
 		const previousMax = this._data.staminaMax;
 		if (previousMax !== calculatedMax) {
