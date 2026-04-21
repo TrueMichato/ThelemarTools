@@ -3182,6 +3182,7 @@ class CharacterSheetState {
 				wis: 0,
 				cha: 0,
 			},
+			abilityScoreMaximums: {}, // Per-ability maximum overrides (e.g., {str: 24, con: 24} for Primal Champion)
 
 			// HP
 			hp: {
@@ -3481,6 +3482,8 @@ class CharacterSheetState {
 				thelemar_asiFeat: true,
 				thelemar_itemUtilization: true,
 				thelemar_spellRarity: true, // Apply Thelemar spell rarity/legality tags
+				// Ability score cap enforcement
+				enforceAbilityScoreCap: false, // When true, cap ability scores at maximum (default 20)
 				// Ammunition tracking - disabled by default
 				ammunitionTracking: false,
 			},
@@ -3594,9 +3597,6 @@ class CharacterSheetState {
 			this._data.grantedProficiencies = {skills: {}, tools: {}, weapons: {}, armor: {}, languages: {}};
 		}
 
-		// Re-register custom ability effects after loading (they're stored but need to be applied)
-		this._reapplyCustomAbilityEffects();
-
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
 
@@ -3611,6 +3611,9 @@ class CharacterSheetState {
 
 		// Migrate: backfill levelHistory with race/background data from state
 		this._migrateRaceBackgroundToHistory();
+
+		// Re-register custom ability effects after loading — run after migrations so effects reference up-to-date data
+		this._reapplyCustomAbilityEffects();
 
 		// Reapply history-backed optional features for saves which persisted history
 		// but did not fully reconstruct runtime feature state.
@@ -5073,6 +5076,11 @@ class CharacterSheetState {
 		const directBonus = this._data.directAbilityBonuses?.[ability] || 0;
 		let computed = base + racialBonus + featureBonus + directBonus;
 
+		// Primal Champion (Barbarian 20): +4 STR and CON, max 24 for the natural score
+		if ((ability === "str" || ability === "con") && this._hasPrimalChampion()) {
+			computed = Math.min(computed + 4, 24);
+		}
+
 		// Apply item ability bonuses (e.g., Belt of Dwarvenkind +2 CON)
 		const itemBonus = this._data.itemAbilityOverrides?.bonus?.[ability] || 0;
 		computed += itemBonus;
@@ -5088,6 +5096,18 @@ class CharacterSheetState {
 		const customStatic = this._data.customModifiers.abilityScoreStatic?.[ability];
 		if (customStatic && customStatic > computed) {
 			computed = customStatic;
+		}
+
+		// Enforce ability score cap when setting is enabled
+		if (this._data.settings?.enforceAbilityScoreCap) {
+			const defaultMax = 20;
+			let perAbilityMax = this._data.abilityScoreMaximums?.[ability];
+			// Primal Champion auto-raises STR/CON cap to 24
+			if (perAbilityMax == null && (ability === "str" || ability === "con") && this._hasPrimalChampion()) {
+				perAbilityMax = 24;
+			}
+			const effectiveMax = perAbilityMax ?? defaultMax;
+			computed = Math.min(computed, effectiveMax);
 		}
 
 		return computed;
@@ -5156,9 +5176,38 @@ class CharacterSheetState {
 	 * @param {number} [maxScore=20] - Maximum ability score cap (30 for Epic Boons)
 	 */
 	increaseAbility (ability, amount, maxScore = 20) {
+		const effectiveMax = this.getAbilityScoreMaximum(ability) ?? maxScore;
 		const currentBase = this.getAbilityBase(ability);
-		const newBase = Math.min(maxScore, currentBase + amount);
+		const newBase = Math.min(effectiveMax, currentBase + amount);
 		this.setAbilityBase(ability, newBase);
+	}
+
+	/**
+	 * Set a per-ability score maximum override.
+	 * @param {string} ability - The ability name (str, dex, con, int, wis, cha)
+	 * @param {number|null} max - The maximum score, or null to remove the override
+	 */
+	setAbilityScoreMaximum (ability, max) {
+		if (!this._data.abilityScoreMaximums) {
+			this._data.abilityScoreMaximums = {};
+		}
+		if (max == null) {
+			delete this._data.abilityScoreMaximums[ability];
+		} else {
+			this._data.abilityScoreMaximums[ability] = max;
+		}
+	}
+
+	/**
+	 * Get the effective maximum for an ability score.
+	 * Returns the per-ability override if set, otherwise the default of 20.
+	 * Returns null if ability score cap is not enforced.
+	 * @param {string} ability - The ability name
+	 * @returns {number|null}
+	 */
+	getAbilityScoreMaximum (ability) {
+		if (!this._data.settings?.enforceAbilityScoreCap) return null;
+		return this._data.abilityScoreMaximums?.[ability] ?? 20;
 	}
 	// #endregion
 
@@ -5658,15 +5707,36 @@ class CharacterSheetState {
 		const stateBonus = this.getSaveBonusFromStates(ability);
 		// Combat stance save bonus (Thelemar homebrew)
 		const stanceBonus = this._getStanceSaveBonus(ability);
+		// Paladin Aura of Protection (level 6+): add CHA mod to all saving throws
+		const auraBonus = this._getAuraOfProtectionBonus();
 		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
 		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus - exhaustionPenalty;
+		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus - exhaustionPenalty;
 	}
 
 	// Alias for test compatibility
 	getSaveModifier (ability) {
 		return this.getSaveMod(ability);
 	}
+
+	/**
+	 * Get Paladin Aura of Protection bonus (CHA mod to all saves when Paladin level >= 6).
+	 * @returns {number} CHA mod (minimum 0) if Paladin 6+, otherwise 0
+	 */
+	_getAuraOfProtectionBonus () {
+		for (const cls of this._data.classes) {
+			if (cls.name?.toLowerCase() === "paladin" && cls.level >= 6) {
+				return Math.max(0, this.getAbilityMod("cha"));
+			}
+		}
+		return 0;
+	}
+
+	_hasPrimalChampion () {
+		return this._data.classes.some(cls => cls.name?.toLowerCase() === "barbarian" && cls.level >= 20);
+	}
+
+
 	// #endregion
 
 	// #region Skills
@@ -7513,10 +7583,23 @@ class CharacterSheetState {
 			"Gambler": "1/3",
 		};
 
-		// Calculate total caster level (for multiclassing)
+		// Calculate total caster level
+		// Single-class: use class table (ceil for half-casters maps to PHB table)
+		// Multiclass: use PHB p.164 rules (floor for half/third casters)
 		let casterLevel = 0;
 		let isWarlock = false;
 		let warlockLevel = 0;
+
+		// Count how many non-pact caster classes contribute
+		const casterClasses = classes.filter(c => {
+			const prog = c.casterProgression
+				|| c.subclass?.casterProgression
+				|| subclassProgressionFallback[c.subclass?.name]
+				|| classProgressionFallback[c.name]
+				|| null;
+			return prog && prog !== "pact";
+		});
+		const isMulticlassCaster = casterClasses.length > 1;
 
 		for (const cls of classes) {
 			const className = cls.name;
@@ -7537,13 +7620,15 @@ class CharacterSheetState {
 				// Full casters: each level counts
 				casterLevel += level;
 			} else if (progression === "1/2") {
-				// Half casters (Paladin, Ranger): round UP per 2024 multiclass rules
-				casterLevel += Math.ceil(level / 2);
+				// Half casters (Paladin, Ranger):
+				// Single-class: ceil matches the class spell slot table
+				// Multiclass: floor per PHB p.164 multiclass rules
+				casterLevel += isMulticlassCaster ? Math.floor(level / 2) : Math.ceil(level / 2);
 			} else if (progression === "1/3") {
 				// Third casters (Eldritch Knight, Arcane Trickster): round DOWN
 				casterLevel += Math.floor(level / 3);
 			} else if (progression === "artificer") {
-				// Artificer progression: round up (same as half caster)
+				// Artificer progression: round up
 				casterLevel += Math.ceil(level / 2);
 			}
 			// Non-caster classes (no progression) don't contribute
@@ -8782,8 +8867,8 @@ class CharacterSheetState {
 									calculations.spellcastingAbility = "int";
 									calculations.spellSaveDc = 8 + profBonus + this.getAbilityMod("int") - exhaustionPenalty;
 									calculations.spellAttackBonus = profBonus + this.getAbilityMod("int") - exhaustionPenalty;
-									// Cantrips known: 3 at level 3, +1 at level 10 (3 total)
-									calculations.cantripsKnown = level >= 10 ? 3 : 3;
+									// Cantrips known: 3 at level 3, 4 at level 10
+									calculations.cantripsKnown = level >= 10 ? 4 : 3;
 									// Spells known (PHB) or prepared (XPHB)
 									if (is2024) {
 										// XPHB prepared spell progression
@@ -23069,17 +23154,24 @@ class CharacterSheetState {
 		}
 
 		const profBonus = this.getProficiencyBonus();
-		const calculatedMax = profBonus * 2;
+		let calculatedMax = profBonus * 2;
 
+		// Add bonus stamina from parsed feature modifiers (e.g., "You gain 2 additional stamina points")
+		const staminaMods = this.getModifiersForType("resource:stamina");
+		for (const mod of staminaMods) {
+			calculatedMax += (mod.value || 0);
+		}
 
-		if (this._data.staminaMax !== calculatedMax) {
+		const previousMax = this._data.staminaMax;
+		if (previousMax !== calculatedMax) {
 			this._data.staminaMax = calculatedMax;
-			// If current exceeds new max, adjust it
-			if ((this._data.staminaCurrent || 0) > calculatedMax) {
+			// If current exceeds new max, cap it
+			if (this._data.staminaCurrent > calculatedMax) {
 				this._data.staminaCurrent = calculatedMax;
 			}
-			// If current was 0 (never set), initialize to full
-			if (!this._data.staminaCurrent) {
+			// Only auto-fill on first initialization (previousMax was 0 = never set).
+			// If previousMax > 0, stamina was already in use and a current of 0 is valid (all spent).
+			if (!previousMax) {
 				this._data.staminaCurrent = calculatedMax;
 			}
 		}
@@ -30869,10 +30961,11 @@ class CharacterSheetState {
 		let bonus = this.getSaveMod("con");
 
 		// Add concentration-specific bonuses from named modifiers
-		// This catches Bladesong (+INT to concentration), and any feature that adds
-		// a bonus specifically to concentration saves
 		const concMods = this.aggregateModifiers("concentration");
 		bonus += concMods.bonus || 0;
+
+		// Add concentration bonuses from active states (e.g., Bladesong +INT to concentration saves)
+		bonus += this.getBonusFromStates("concentration");
 
 		// Add item bonus for concentration saves (e.g., War Caster's Staff, homebrew items)
 		bonus += this._data.itemBonuses?.savingThrowConcentration || 0;

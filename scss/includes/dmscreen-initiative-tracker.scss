@@ -204,7 +204,7 @@
 		&btn-cond {
 			width: 115px !important;
 			color: #fff !important;
-			outline: none !important;
+			@include vars.mix-focus-visible;
 		}
 	}
 

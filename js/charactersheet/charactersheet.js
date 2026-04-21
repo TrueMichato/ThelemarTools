@@ -3000,6 +3000,12 @@ class CharacterSheetPage {
 		const successes = document.querySelectorAll("#charsheet-deathsaves-success input:checked").length;
 		const failures = document.querySelectorAll("#charsheet-deathsaves-failure input:checked").length;
 		this._state.setDeathSaves(successes, failures);
+
+		if (successes >= 3) {
+			JqueryUtil.doToast({type: "success", content: "Stabilized! Three death save successes."});
+		} else if (failures >= 3) {
+			JqueryUtil.doToast({type: "danger", content: "Dead. Three death save failures."});
+		}
 	}
 
 	_renderInspiration () {
@@ -7355,25 +7361,35 @@ class CharacterSheetPage {
 	/**
 	 * Reset section layout to default for current tab
 	 */
-	_resetLayout () {
+	async _resetLayout () {
 		if (!this._layout) return;
-		
-		// Show confirmation dialog
-		if (confirm("Reset layout to default for this tab? This cannot be undone.")) {
-			this._layout.resetLayout(false); // false = current tab only
+
+		const confirm = await InputUiUtil.pGetUserBoolean({
+			title: "Reset Tab Layout",
+			htmlDescription: "<p>Reset layout to default for this tab? This cannot be undone.</p>",
+			textYes: "Reset",
+			textNo: "Cancel",
+		});
+		if (confirm) {
+			this._layout.resetLayout(false);
 			this._saveCurrentCharacter();
 		}
 	}
-	
+
 	/**
 	 * Reset all tabs to the default sheet layout
 	 */
-	_resetToDefaultLayout () {
+	async _resetToDefaultLayout () {
 		if (!this._layout) return;
-		
-		// Show confirmation dialog
-		if (confirm("Reset ALL tabs to the default sheet layout? This will clear any custom section ordering you've done.")) {
-			this._layout.resetLayout(true); // true = all tabs
+
+		const confirm = await InputUiUtil.pGetUserBoolean({
+			title: "Reset All Layouts",
+			htmlDescription: "<p>Reset ALL tabs to the default sheet layout? This will clear any custom section ordering.</p>",
+			textYes: "Reset All",
+			textNo: "Cancel",
+		});
+		if (confirm) {
+			this._layout.resetLayout(true);
 			this._saveCurrentCharacter();
 		}
 	}
@@ -8513,7 +8529,7 @@ class CharacterSheetPage {
 		const noteHtml = resultNote ? `<div class="charsheet__dice-result-note">${resultNote}</div>` : "";
 
 		const resultEl = e_({outer: `
-			<div class="charsheet__dice-result">
+			<div class="charsheet__dice-result" role="status" aria-live="assertive">
 				<span class="charsheet__dice-result-close glyphicon glyphicon-remove"></span>
 				<div class="charsheet__dice-result-header">${title}</div>
 				<div class="charsheet__dice-result-total${totalClass}">${total}</div>
@@ -9121,6 +9137,18 @@ class CharacterSheetPage {
 			</label>
 		</div>`;
 
+		// Ability score cap enforcement
+		const currentEnforceAbilityScoreCap = this._state.getSettings()?.enforceAbilityScoreCap === true;
+		const enforceAbilityScoreCap = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-enforce-ability-cap" ${currentEnforceAbilityScoreCap ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">🛡️ Enforce Ability Score Cap</span>
+					<span class="charsheet__settings-checkbox-desc">Cap ability scores at 20 by default. Features like Primal Champion auto-raise the cap for affected abilities. You can also set per-ability maximums.</span>
+				</span>
+			</label>
+		</div>`;
+
 		// Priority sources section
 		const currentPriority = this._state.getPrioritySources() || [];
 		const homebrewSources = allSources.filter(src => BrewUtil2.hasSourceJson(src.json) || PrereleaseUtil.hasSourceJson(src.json));
@@ -9167,6 +9195,7 @@ class CharacterSheetPage {
 				${exhaustionToggle}
 				${includeCoreSpells}
 				${allowExoticLanguages}
+				${enforceAbilityScoreCap}
 			</div>
 			
 			<div class="charsheet__settings-section">
@@ -9361,6 +9390,15 @@ class CharacterSheetPage {
 		// Allow exotic languages handler
 		modalInner.querySelector("#settings-allow-exotic-languages").addEventListener("change", (e) => {
 			this._state.setSetting("allowExoticLanguages", e.target.checked);
+		});
+
+		// Ability score cap handler
+		modalInner.querySelector("#settings-enforce-ability-cap").addEventListener("change", (e) => {
+			this._state.setSetting("enforceAbilityScoreCap", e.target.checked);
+			// Re-render stats since ability scores may change
+			this._renderAbilities();
+			this._renderCombatStats();
+			if (this._spellsModule) this._spellsModule.render();
 		});
 	}
 
@@ -9742,8 +9780,14 @@ class CharacterSheetPage {
 				});
 
 				// Delete handler
-				rowEl.querySelector(".charsheet__modifier-delete").addEventListener("click", () => {
-					if (confirm(`Remove "${mod.name}" modifier?`)) {
+				rowEl.querySelector(".charsheet__modifier-delete").addEventListener("click", async () => {
+					const doDelete = await InputUiUtil.pGetUserBoolean({
+						title: "Remove Modifier",
+						htmlDescription: `<p>Remove "${mod.name}" modifier?</p>`,
+						textYes: "Remove",
+						textNo: "Cancel",
+					});
+					if (doDelete) {
 						this._state.removeNamedModifier(mod.id);
 						renderModifiersList();
 						renderSummary();

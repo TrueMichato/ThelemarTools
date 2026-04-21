@@ -1348,8 +1348,9 @@ describe("Ranger Multiclass", () => {
 	});
 
 	it("should require DEX 13 and WIS 13 for multiclassing", () => {
-		// This is a documentation test - multiclass requirements
-		expect(true).toBe(true);
+		// Verify ability scores meet the Ranger multiclass prerequisites
+		expect(state.getAbilityScore("dex")).toBeGreaterThanOrEqual(13);
+		expect(state.getAbilityScore("wis")).toBeGreaterThanOrEqual(13);
 	});
 
 	it("should calculate Extra Attack based on ranger level", () => {

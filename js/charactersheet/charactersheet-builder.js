@@ -1735,7 +1735,7 @@ class CharacterSheetBuilder {
 		});
 
 		// Store selected combat traditions on the character for level-up reference
-		if (this._selectedCombatTraditions?.length) {
+		if (this._selectedCombatTraditions != null && this._state.setCombatTraditions) {
 			this._state.setCombatTraditions([...this._selectedCombatTraditions]);
 		}
 

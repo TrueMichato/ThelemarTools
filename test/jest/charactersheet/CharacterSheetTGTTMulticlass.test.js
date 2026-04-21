@@ -76,7 +76,7 @@ describe("TGTT Multiclass Builds", () => {
 
 		describe("Multiclass Spellcasting Slots", () => {
 			it("should calculate multiclass spell slots", () => {
-				makeRangerDruid(7, 3); // half-caster 7 = 3.5 + full-caster 3 = 3 → effective caster level 6
+				makeRangerDruid(7, 3); // half-caster 7 = floor(7/2)=3 + full-caster 3 = 3 → effective caster level 6
 				state.calculateSpellSlots();
 				// Level 6 caster: 4/3/3 slots
 				expect(state.getSpellSlotsMax(1)).toBeGreaterThanOrEqual(4);
@@ -84,12 +84,12 @@ describe("TGTT Multiclass Builds", () => {
 				expect(state.getSpellSlotsMax(3)).toBeGreaterThanOrEqual(3);
 			});
 
-			it("should have 4th level slots at Ranger 7 / Druid 3", () => {
-				// Ranger 7 (half-caster → 3 effective) + Druid 3 (full → 3 effective) = 6 effective
-				// A 6th-level caster gets 1 4th-level slot
+			it("should not yet have 4th level slots at Ranger 7 / Druid 3", () => {
+				// Ranger 7 (half-caster multiclass → floor(7/2) = 3) + Druid 3 (full → 3) = 6 effective
+				// A 6th-level caster does NOT have 4th-level slots (need 7th)
 				makeRangerDruid(7, 3);
 				state.calculateSpellSlots();
-				expect(state.getSpellSlotsMax(4)).toBe(1);
+				expect(state.getSpellSlotsMax(4)).toBe(0);
 			});
 
 			it("should gain 4th level slots at higher splits", () => {
