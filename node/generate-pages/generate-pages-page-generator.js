@@ -168,11 +168,17 @@ export class PageGeneratorListBase extends PageGeneratorGeneric {
 		return {
 			...data,
 
+			stylesheets: [
+				...(data.stylesheets || []),
+				"tgtt-filter",
+			],
+
 			scripts: [
 				"listpage.js",
 				...(this._isMultisource ? ["multisource.js"] : []),
 				"filter-common.js",
 				`filter-${this._scriptIdentList}.js`,
+				"tgtt-filter.js",
 				...(this._scriptsPrePageAdditional || []),
 				...(this._isModule ? [] : [`${this._scriptIdentList}.js`]),
 				...data.scripts || [],
