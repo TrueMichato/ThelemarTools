@@ -4714,7 +4714,7 @@ class CharacterSheetState {
 	getMulticlassCasterLevel () {
 		const fullCasters = ["Bard", "Cleric", "Druid", "Sorcerer", "Wizard"];
 		const halfCasters = ["Paladin", "Ranger", "Artificer"];
-		const thirdCasters = ["Eldritch Knight", "Arcane Trickster"]; // Subclasses
+		const thirdCasters = ["Eldritch Knight", "Arcane Trickster", "Architect of Ruin"]; // Subclasses
 
 		let totalLevels = 0;
 
@@ -4723,7 +4723,7 @@ class CharacterSheetState {
 				totalLevels += cls.level;
 			} else if (halfCasters.includes(cls.name)) {
 				totalLevels += Math.floor(cls.level / 2);
-			} else if (cls.subclass?.name === "Eldritch Knight" || cls.subclass?.name === "Arcane Trickster") {
+			} else if (cls.subclass?.name === "Eldritch Knight" || cls.subclass?.name === "Arcane Trickster" || cls.subclass?.name === "Architect of Ruin") {
 				totalLevels += Math.floor(cls.level / 3);
 			}
 		}
@@ -4745,7 +4745,7 @@ class CharacterSheetState {
 		}
 
 		// Most martial classes get Extra Attack at 5
-		const extraAttackClasses = ["Barbarian", "Monk", "Paladin", "Ranger"];
+		const extraAttackClasses = ["Barbarian", "Monk", "Paladin", "Ranger", "Illrigger"];
 		const hasExtraAttack = this._data.classes.some(c =>
 			extraAttackClasses.includes(c.name) && c.level >= 5,
 		);
@@ -7493,6 +7493,21 @@ class CharacterSheetState {
 			};
 		}
 
+		// Architect of Ruin (Illrigger subclass) — 1/3 CHA caster, spells known
+		if (subclassName === "Architect of Ruin") {
+			if (level < 3) return null;
+			const aorSpellsKnown = [0, 0, 3, 4, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10, 10, 11, 11, 11, 12, 13];
+			const knownMax = aorSpellsKnown[levelIndex];
+			return {
+				type: "known",
+				max: knownMax,
+				cantripsKnown: level >= 10 ? 3 : (level >= 3 ? 2 : 0),
+				spellsKnownMax: knownMax,
+				hasFullAccess: false,
+				is2024: false,
+			};
+		}
+
 		return null;
 	}
 
@@ -7581,6 +7596,7 @@ class CharacterSheetState {
 			"Eldritch Knight": "1/3",
 			"Arcane Trickster": "1/3",
 			"Gambler": "1/3",
+			"Architect of Ruin": "1/3",
 		};
 
 		// Calculate total caster level
@@ -15109,6 +15125,278 @@ class CharacterSheetState {
 						calculations.hasJustAWeave = true;
 					}
 					
+					break;
+				}
+
+				// =========================================================
+				// ILLRIGGER (MCDM Productions — The Illrigger Revised)
+				// A diabolist warrior who channels infernal power through seals
+				// Source: IllriggerRevised
+				// =========================================================
+				case "Illrigger": {
+					const chaMod = this.getAbilityMod("cha");
+
+					// Interdict Save DC: 8 + proficiency + CHA modifier
+					calculations.interdictDc = 8 + profBonus + chaMod - exhaustionPenalty;
+
+					// Seals (short rest recovery) — scaling by level
+					const sealsTable = [3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7, 7, 7];
+					calculations.sealsMax = sealsTable[Math.min(level, 20) - 1] || 3;
+
+					// Seal Damage — scaling dice
+					if (level >= 20) {
+						calculations.sealDamage = "4d6";
+						calculations.sealDamageDieCount = 4;
+					} else if (level >= 11) {
+						calculations.sealDamage = "3d6";
+						calculations.sealDamageDieCount = 3;
+					} else if (level >= 5) {
+						calculations.sealDamage = "2d6";
+						calculations.sealDamageDieCount = 2;
+					} else {
+						calculations.sealDamage = "1d6";
+						calculations.sealDamageDieCount = 1;
+					}
+					calculations.sealDamageDie = 6;
+
+					// Interdict Boons Known — scaling by level
+					const boonsTable = [0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4];
+					calculations.interdictBoonsKnown = boonsTable[Math.min(level, 20) - 1] || 0;
+
+					// Infernal Conduit Dice (d10, long rest recovery) — from level 6
+					if (level >= 6) {
+						const conduitTable = [0, 0, 0, 0, 0, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10];
+						calculations.infernalConduitDice = conduitTable[Math.min(level, 20) - 1] || 0;
+						calculations.infernalConduitDie = 10;
+					} else {
+						calculations.infernalConduitDice = 0;
+					}
+
+					// Level 1: Baleful Interdict, Forked Tongue
+					if (level >= 1) {
+						calculations.hasBalefulInterdict = true;
+						calculations.hasForkedTongue = true;
+					}
+
+					// Level 2: Combat Mastery, Interdiction
+					if (level >= 2) {
+						calculations.hasCombatMastery = true;
+						calculations.hasInterdiction = true;
+					}
+
+					// Level 3: Diabolic Contract (subclass), Invoke Hell
+					if (level >= 3) {
+						calculations.hasDiabolicContract = true;
+						calculations.hasInvokeHell = true;
+						calculations.invokeHellUses = 1; // 1/short rest
+					}
+
+					// Level 5: Extra Attack
+					if (level >= 5) {
+						calculations.hasExtraAttack = true;
+					}
+
+					// Level 6: Infernal Conduit
+					if (level >= 6) {
+						calculations.hasInfernalConduit = true;
+					}
+
+					// Level 9: Forked Tongue Improvement
+					if (level >= 9) {
+						calculations.hasForkedTongueImprovement = true;
+					}
+
+					// Level 10: Blood Price (spend hit die to boost failed save)
+					if (level >= 10) {
+						calculations.hasBloodPrice = true;
+					}
+
+					// Level 11: Terrorizing Force (+1d8 chosen element on weapon hits)
+					// Level 17: Infernal Majesty upgrades this to 2d8
+					if (level >= 11) {
+						calculations.hasTerrorizingForce = true;
+						calculations.terrorForceExtraDamage = level >= 17 ? "2d8" : "1d8";
+						calculations.terrorForceExtraDamageDie = 8;
+						calculations.terrorForceExtraDamageDieCount = level >= 17 ? 2 : 1;
+					}
+
+					// Level 11: Infernal Conduit Improvement (exhaustion on Devour)
+					if (level >= 11) {
+						calculations.hasInfernalConduitImprovement = true;
+					}
+
+					// Level 14: Superior Interdict (seals ignore resistance, bonus action regain 1 seal 1/long rest)
+					if (level >= 14) {
+						calculations.hasSuperiorInterdict = true;
+					}
+
+					// Level 17: Infernal Majesty (10 min transformation)
+					if (level >= 17) {
+						calculations.hasInfernalMajesty = true;
+					}
+
+					// Level 20: Master of Hell (hellstorm: Inferno/Pestilence/Darkness, 1/long rest)
+					if (level >= 20) {
+						calculations.hasMasterOfHell = true;
+					}
+
+					// ----- Subclass Features (Diabolic Contract) -----
+					const illSubclass = cls.subclass?.shortName || cls.subclass?.name;
+					switch (illSubclass) {
+						// Architect of Ruin (Asmodeus) — 1/3 caster, CHA
+						case "Architect of Ruin": {
+							// Spellcasting (level 3) — 1/3 caster
+							if (level >= 3) {
+								calculations.hasSpellcasting = true;
+								calculations.spellcastingAbility = "cha";
+								calculations.spellSaveDc = 8 + profBonus + chaMod - exhaustionPenalty;
+								calculations.spellAttackBonus = profBonus + chaMod - exhaustionPenalty;
+
+								// Cantrips known: 2 at L3, 3 at L10
+								calculations.cantripsKnown = level >= 10 ? 3 : 2;
+
+								// Spells known progression (from subclass data)
+								const aorSpellsKnown = [0, 0, 3, 4, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10, 10, 11, 11, 11, 12, 13];
+								calculations.spellsKnown = aorSpellsKnown[Math.min(level, 20) - 1] || 0;
+							}
+
+							// Level 3: Asmodeus's Blessing (extra skill proficiency)
+							if (level >= 3) {
+								calculations.hasAsmodeusBlessing = true;
+							}
+
+							// Level 7: Hellish Versatility (cantrip replaces Extra Attack)
+							if (level >= 7) {
+								calculations.hasHellishVersatility = true;
+							}
+
+							// Level 11: Submit (burn 2 seals → disadvantage on save vs spell)
+							if (level >= 11) {
+								calculations.hasSubmit = true;
+							}
+
+							// Level 15: Vile Transmogrification (seal ↔ spell slot conversion)
+							if (level >= 15) {
+								calculations.hasVileTransmogrification = true;
+							}
+
+							break;
+						}
+
+						// Hellspeaker (Moloch) — social/charm focus
+						case "Hellspeaker": {
+							// Level 3: Moloch's Blessing, Charm Enemy
+							if (level >= 3) {
+								calculations.hasMolochBlessing = true;
+								calculations.hasCharmEnemy = true;
+								calculations.charmEnemyDc = calculations.interdictDc;
+							}
+
+							// Level 7: Moloch's Interdiction (free boons)
+							if (level >= 7) {
+								calculations.hasMolochInterdiction = true;
+							}
+
+							// Level 11: Intransigent (charmed immunity 10ft aura), Let's Make a Deal
+							if (level >= 11) {
+								calculations.hasIntransigent = true;
+								calculations.intransigentRange = 10;
+								calculations.hasLetsMakeADeal = true;
+							}
+
+							// Level 15: Quid Pro Quo (banish + summon devil)
+							if (level >= 15) {
+								calculations.hasQuidProQuo = true;
+							}
+
+							break;
+						}
+
+						// Painkiller (Dispater) — heavy armor tank
+						case "Painkiller": {
+							// Level 3: Dispater's Blessing (heavy armor prof), Devastator
+							if (level >= 3) {
+								calculations.hasDispaterBlessing = true;
+								calculations.hasHeavyArmorProficiency = true;
+								calculations.hasDevastator = true;
+							}
+
+							// Level 7: Dispater's Interdiction (free boons)
+							if (level >= 7) {
+								calculations.hasDispaterInterdiction = true;
+							}
+
+							// Level 11: You Die on My Command! (ally drops to 1 HP instead of 0)
+							if (level >= 11) {
+								calculations.hasYouDieOnMyCommand = true;
+							}
+
+							// Level 15: Deathstrike (reaction crit + doubled seal damage)
+							if (level >= 15) {
+								calculations.hasDeathstrike = true;
+								calculations.deathstrikeBonusDamage = `${calculations.sealDamageDieCount * 2}d6`;
+							}
+
+							break;
+						}
+
+						// Sanguine Knight (Sutekh) — blood/healing focus
+						case "Sanguine Knight": {
+							// Level 3: Sutekh's Blessing (Religion prof, blood sense), Exsanguinate
+							if (level >= 3) {
+								calculations.hasSutekhBlessing = true;
+								calculations.hasExsanguinate = true;
+							}
+
+							// Level 7: Sutekh's Interdiction (free boons)
+							if (level >= 7) {
+								calculations.hasSutekhInterdiction = true;
+							}
+
+							// Level 11: Bloodstroke (retaliatory damage from temp HP allies)
+							if (level >= 11) {
+								calculations.hasBloodstroke = true;
+							}
+
+							// Level 15: Haemal Exchange (d8 debuff/buff transfer via seal burn)
+							if (level >= 15) {
+								calculations.hasHaemalExchange = true;
+							}
+
+							break;
+						}
+
+						// Shadowmaster (Belial) — stealth/assassination
+						case "Shadowmaster": {
+							// Level 3: Marked for Death, Strike from the Dark
+							if (level >= 3) {
+								calculations.hasMarkedForDeath = true;
+								calculations.hasStrikeFromTheDark = true;
+								calculations.strikeFromTheDarkDie = level >= 15 ? "d8" : "d4";
+							}
+
+							// Level 7: Belial's Interdiction (free boons)
+							if (level >= 7) {
+								calculations.hasBelialInterdiction = true;
+							}
+
+							// Level 11: Umbral Killer (darkvision 60ft, +10 speed, stealth advantage, Evasion)
+							if (level >= 11) {
+								calculations.hasUmbralKiller = true;
+								calculations.umbralKillerDarkvision = 60;
+								calculations.umbralKillerSpeedBonus = 10;
+								calculations.hasEvasion = true;
+							}
+
+							// Level 15: Doomed to the Shadows (Strike from Dark → d8s)
+							if (level >= 15) {
+								calculations.hasDoomedToTheShadows = true;
+							}
+
+							break;
+						}
+					}
+
 					break;
 				}
 			}
@@ -27473,6 +27761,25 @@ class CharacterSheetState {
 			resourceCost: 2,
 			detectPatterns: ["warding spell"],
 			activationAction: "special",
+		},
+		// Illrigger: Infernal Majesty (level 17 transformation)
+		infernalMajesty: {
+			id: "infernalMajesty",
+			name: "Infernal Majesty",
+			icon: "👑",
+			description: "10 min transformation: fire/cold/necrotic resistance, 60ft fly, enhanced Blood Price, 2d8 Terrorizing Force",
+			effects: [
+				{type: "resistance", target: "damage:fire"},
+				{type: "resistance", target: "damage:cold"},
+				{type: "resistance", target: "damage:necrotic"},
+				{type: "speed", target: "fly", value: 60},
+			],
+			duration: "10 minutes",
+			endConditions: ["Duration expires", "Dropped to 0 HP"],
+			resourceName: "Infernal Majesty",
+			resourceCost: 1,
+			detectPatterns: ["infernal majesty", "infernal\\s+majesty"],
+			activationAction: "action",
 		},
 		// Generic homebrew toggle - catch-all for data-driven features
 		homebrewToggle: {
