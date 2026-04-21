@@ -4119,12 +4119,16 @@ class CharacterSheetLevelUp {
 
 			// Warn if prerequisites not met
 			if (currentPrereqCheck && !currentPrereqCheck.met) {
-				const confirmAnyway = confirm(
-					`Warning: Your character does not meet the multiclass prerequisites:\n\n`
-						+ `${currentPrereqCheck.failedAbilities.join("\n")}\n\n`
-						+ `The rules require 13+ in the primary ability of both your current class(es) and the new class. `
-						+ `Add this class anyway?`,
-				);
+				const failedList = currentPrereqCheck.failedAbilities.map(a => `<li>${a}</li>`).join("");
+				const confirmAnyway = await InputUiUtil.pGetUserBoolean({
+					title: "Multiclass Prerequisites Not Met",
+					htmlDescription: `<p>Your character does not meet the multiclass prerequisites:</p>
+						<ul>${failedList}</ul>
+						<p>The rules require 13+ in the primary ability of both your current class(es) and the new class.</p>
+						<p>Add this class anyway?</p>`,
+					textYes: "Add Anyway",
+					textNo: "Cancel",
+				});
 				if (!confirmAnyway) return;
 			}
 

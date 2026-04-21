@@ -3000,6 +3000,12 @@ class CharacterSheetPage {
 		const successes = document.querySelectorAll("#charsheet-deathsaves-success input:checked").length;
 		const failures = document.querySelectorAll("#charsheet-deathsaves-failure input:checked").length;
 		this._state.setDeathSaves(successes, failures);
+
+		if (successes >= 3) {
+			JqueryUtil.doToast({type: "success", content: "Stabilized! Three death save successes."});
+		} else if (failures >= 3) {
+			JqueryUtil.doToast({type: "danger", content: "Dead. Three death save failures."});
+		}
 	}
 
 	_renderInspiration () {
@@ -7355,25 +7361,35 @@ class CharacterSheetPage {
 	/**
 	 * Reset section layout to default for current tab
 	 */
-	_resetLayout () {
+	async _resetLayout () {
 		if (!this._layout) return;
-		
-		// Show confirmation dialog
-		if (confirm("Reset layout to default for this tab? This cannot be undone.")) {
-			this._layout.resetLayout(false); // false = current tab only
+
+		const confirm = await InputUiUtil.pGetUserBoolean({
+			title: "Reset Tab Layout",
+			htmlDescription: "<p>Reset layout to default for this tab? This cannot be undone.</p>",
+			textYes: "Reset",
+			textNo: "Cancel",
+		});
+		if (confirm) {
+			this._layout.resetLayout(false);
 			this._saveCurrentCharacter();
 		}
 	}
-	
+
 	/**
 	 * Reset all tabs to the default sheet layout
 	 */
-	_resetToDefaultLayout () {
+	async _resetToDefaultLayout () {
 		if (!this._layout) return;
-		
-		// Show confirmation dialog
-		if (confirm("Reset ALL tabs to the default sheet layout? This will clear any custom section ordering you've done.")) {
-			this._layout.resetLayout(true); // true = all tabs
+
+		const confirm = await InputUiUtil.pGetUserBoolean({
+			title: "Reset All Layouts",
+			htmlDescription: "<p>Reset ALL tabs to the default sheet layout? This will clear any custom section ordering.</p>",
+			textYes: "Reset All",
+			textNo: "Cancel",
+		});
+		if (confirm) {
+			this._layout.resetLayout(true);
 			this._saveCurrentCharacter();
 		}
 	}
@@ -9742,8 +9758,14 @@ class CharacterSheetPage {
 				});
 
 				// Delete handler
-				rowEl.querySelector(".charsheet__modifier-delete").addEventListener("click", () => {
-					if (confirm(`Remove "${mod.name}" modifier?`)) {
+				rowEl.querySelector(".charsheet__modifier-delete").addEventListener("click", async () => {
+					const doDelete = await InputUiUtil.pGetUserBoolean({
+						title: "Remove Modifier",
+						htmlDescription: `<p>Remove "${mod.name}" modifier?</p>`,
+						textYes: "Remove",
+						textNo: "Cancel",
+					});
+					if (doDelete) {
 						this._state.removeNamedModifier(mod.id);
 						renderModifiersList();
 						renderSummary();

@@ -770,7 +770,16 @@ class CharacterSheetQuickBuild {
 		this._renderCurrentStep();
 	}
 
-	_closeWizard () {
+	async _closeWizard ({force = false} = {}) {
+		if (!force && this._currentStep > 0) {
+			const confirm = await InputUiUtil.pGetUserBoolean({
+				title: "Close Quick Build?",
+				htmlDescription: "<p>You have unsaved progress. Are you sure you want to close?</p>",
+				textYes: "Close",
+				textNo: "Cancel",
+			});
+			if (!confirm) return;
+		}
 		if (this._overlay) {
 			this._overlay.remove();
 			this._overlay = null;
@@ -858,7 +867,7 @@ class CharacterSheetQuickBuild {
 		if (this._currentStep >= this._steps.length - 1) {
 			// Final step — apply the build
 			await this._applyQuickBuild();
-			this._closeWizard();
+			this._closeWizard({force: true});
 		} else {
 			this._goToStep(this._currentStep + 1);
 		}

@@ -1906,7 +1906,7 @@ class CharacterSheetCombat {
 		});
 
 		if (!combatSpells.length) {
-			container.innerHTML = `<p class="ve-muted text-center">No prepared combat spells. Prepare spells from the Spells tab.</p>`;
+			container.innerHTML = `<p class="ve-muted text-center">No prepared spells. Prepare spells from the Spells tab to use them in combat.</p>`;
 			return;
 		}
 

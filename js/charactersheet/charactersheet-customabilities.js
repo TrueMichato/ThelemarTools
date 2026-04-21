@@ -730,8 +730,14 @@ class CharacterSheetCustomAbilities {
 		}
 	}
 
-	_confirmDelete (id, name) {
-		if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+	async _confirmDelete (id, name) {
+		const doDelete = await InputUiUtil.pGetUserBoolean({
+			title: "Delete Custom Ability",
+			htmlDescription: `<p>Delete "${name}"? This cannot be undone.</p>`,
+			textYes: "Delete",
+			textNo: "Cancel",
+		});
+		if (!doDelete) return;
 		const state = this._sheet.getState();
 		if (state.removeCustomAbility(id)) {
 			this.render();
