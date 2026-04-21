@@ -9793,6 +9793,13 @@ class CharacterSheetState {
 					if (cls.subclass?.shortName === "Shackled") {
 						const chaMod = this.getAbilityMod("cha");
 
+						// Combat Methods — auto-grant Unending Wheel tradition
+						calculations.hasShackledCombatMethods = true;
+						if (!calculations._subclassGrantedTraditions) calculations._subclassGrantedTraditions = [];
+						calculations._subclassGrantedTraditions.push(
+							{tradition: "Unending Wheel", source: "Way of The Shackled: Combat Methods"},
+						);
+
 						// Hidden Arts (level 3): Acrobatics + Performance proficiency, DEX for Performance
 						calculations.hasHiddenArts = true;
 
@@ -9823,6 +9830,13 @@ class CharacterSheetState {
 
 					// Way of the Five Animals
 					if (cls.subclass?.shortName === "Five Animals") {
+						// Combat Methods — auto-grant Tooth and Claw tradition
+						calculations.hasFiveAnimalsCombatMethods = true;
+						if (!calculations._subclassGrantedTraditions) calculations._subclassGrantedTraditions = [];
+						calculations._subclassGrantedTraditions.push(
+							{tradition: "Tooth and Claw", source: "Way of Five Animals: Combat Methods"},
+						);
+
 						// Animal Style (level 3): choose primary animal
 						calculations.hasAnimalStyle = true;
 						// Animal Versatility (level 3): 1 skill proficiency choice
@@ -11103,13 +11117,15 @@ class CharacterSheetState {
 							calculations.hasEverReadyShot = true;
 						}
 
-						// TGTT Arcane Archer: Combat Methods — auto-grant Biting Zephyr tradition
+						// TGTT Arcane Archer: Combat Methods — player chooses 2 from restricted list
 						if (isAAFromTGTT) {
 							calculations.hasArcaneArcherCombatMethods = true;
-							if (!calculations._subclassGrantedTraditions) calculations._subclassGrantedTraditions = [];
-							calculations._subclassGrantedTraditions.push(
-								{tradition: "Biting Zephyr", source: "Arcane Archer: Combat Methods"},
-							);
+							calculations.arcaneArcherAllowedTraditions = [
+								"Biting Zephyr",
+								"Razor's Edge",
+								"Unending Wheel",
+								"Unerring Hawk",
+							];
 						}
 					}
 
@@ -12519,9 +12535,10 @@ class CharacterSheetState {
 									calculations.divineStrikeType = "thunder";
 								}
 
-								// Stormborn (level 17): fly speed in non-enclosed spaces
+								// Stormborn (level 17): fly speed equal to walking speed in non-enclosed spaces
 								if (level >= 17) {
 									calculations.hasStormborn = true;
+									calculations.stormFlySpeed = this.getSpeed("walk") || 30;
 								}
 								break;
 							}
@@ -12954,7 +12971,9 @@ class CharacterSheetState {
 								calculations.rightOnTimeBonus = wisMod;
 
 								// Channel Divinity: Temporal Manipulation (level 3)
+								// DC = 8 + proficiency bonus + WIS modifier, uses = Channel Divinity uses
 								calculations.hasTemporalManipulation = true;
+								calculations.temporalManipulationDc = 8 + profBonus + wisMod - exhaustionPenalty;
 
 								// Eyes of the Future Past (level 6): WIS mod uses
 								if (level >= 6) {
@@ -13779,6 +13798,13 @@ class CharacterSheetState {
 							// TGTT College of Jesters (Bard Subclass)
 							// =====================================================================
 							case "College of Jesters": {
+								// Combat Methods — auto-grant Comedic Jabs tradition
+								calculations.hasJesterCombatMethods = true;
+								if (!calculations._subclassGrantedTraditions) calculations._subclassGrantedTraditions = [];
+								calculations._subclassGrantedTraditions.push(
+									{tradition: "Comedic Jabs", source: "College of Jesters: Combat Methods"},
+								);
+
 								// Calculate Performance skill bonus for Act DC
 								// Performance = CHA mod + proficiency (+ expertise if chosen)
 								const performanceProfBonus = profBonus; // Guaranteed at level 3
@@ -27391,6 +27417,40 @@ class CharacterSheetState {
 			detectPatterns: ["precise strike", "debilitating strike"],
 			activationAction: "special", // Part of attack action
 			isGeneric: true,
+		},
+		rhythmicStep: {
+			id: "rhythmicStep",
+			name: "Rhythmic Step",
+			icon: "🩰",
+			description: "A flowing dance that bolsters your defenses with CHA",
+			effects: [
+				{type: "bonus", target: "ac", abilityMod: "cha", minimum: 1}, // +CHA to AC (min 1)
+				{type: "advantage", target: "save:dex"},
+				{type: "advantage", target: "skill:acrobatics"},
+			],
+			duration: "1 minute",
+			endConditions: ["Incapacitated", "Wearing medium or heavy armor", "Using a shield"],
+			resourceName: "Ki Points",
+			resourceCost: 2,
+			detectPatterns: ["rhythmic step"],
+			activationAction: "bonus",
+			requiresSubclass: "The Shackled",
+		},
+		craneParry: {
+			id: "craneParry",
+			name: "Crane Parry",
+			icon: "🦢",
+			description: "Deflect an incoming attack with graceful precision",
+			effects: [
+				{type: "bonus", target: "ac", value: 2},
+			],
+			duration: "Until start of next turn",
+			endConditions: ["Start of your next turn"],
+			resourceName: "Ki Points",
+			resourceCost: 1,
+			detectPatterns: ["crane parry"],
+			activationAction: "reaction",
+			requiresSubclass: "Five Animals",
 		},
 		// Bard Jester's Acts
 		jestersAct: {
