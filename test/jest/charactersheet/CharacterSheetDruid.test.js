@@ -1627,8 +1627,24 @@ describe("PHB vs XPHB Druid Feature Comparison", () => {
 	describe("Features that differ between versions", () => {
 		it("should have PHB subclass at level 2, XPHB at level 3", () => {
 			// PHB druids get their circle at level 2
+			const phbState = new CharacterSheetState();
+			phbState.addClass({
+				name: "Druid",
+				source: "PHB",
+				level: 2,
+				subclass: {name: "Circle of the Land", shortName: "Land", source: "PHB"},
+			});
+			expect(phbState.getClasses()[0].subclass?.name).toBe("Circle of the Land");
+
 			// XPHB druids get their circle at level 3
-			expect(true).toBe(true);
+			const xphbState = new CharacterSheetState();
+			xphbState.addClass({
+				name: "Druid",
+				source: "XPHB",
+				level: 3,
+				subclass: {name: "Circle of the Land", shortName: "Land", source: "XPHB"},
+			});
+			expect(xphbState.getClasses()[0].subclass?.name).toBe("Circle of the Land");
 		});
 
 		it("should have PHB Wild Shape CR limits, XPHB uses stat blocks", () => {
@@ -1661,7 +1677,18 @@ describe("PHB vs XPHB Druid Feature Comparison", () => {
 	describe("XPHB-exclusive features", () => {
 		it("should have Primal Order at level 1 only in XPHB", () => {
 			// Primal Order lets you choose Magician or Warden
-			expect(true).toBe(true);
+			const xphbState = new CharacterSheetState();
+			xphbState.addClass({name: "Druid", source: "XPHB", level: 1});
+			xphbState.setSpellcastingAbility("wis");
+			expect(xphbState.getClasses()[0].source).toBe("XPHB");
+
+			// PHB Druid level 1 should not have Magician/Warden
+			const phbState = new CharacterSheetState();
+			phbState.addClass({name: "Druid", source: "PHB", level: 1});
+			phbState.setSpellcastingAbility("wis");
+			const phbCalc = phbState.getFeatureCalculations();
+			expect(phbCalc.hasMagician).toBeUndefined();
+			expect(phbCalc.hasWarden).toBeUndefined();
 		});
 
 		it("should have Wild Resurgence at level 5 only in XPHB", () => {
@@ -1703,7 +1730,18 @@ describe("PHB vs XPHB Druid Feature Comparison", () => {
 		});
 
 		it("should have Epic Boon at level 19 only in XPHB", () => {
-			expect(true).toBe(true);
+			const xphbState = new CharacterSheetState();
+			xphbState.addClass({name: "Druid", source: "XPHB", level: 19});
+			xphbState.setSpellcastingAbility("wis");
+			expect(xphbState.getClasses()[0].source).toBe("XPHB");
+			expect(xphbState.getTotalLevel()).toBe(19);
+
+			// PHB Druid at level 19 has ASI, not Epic Boon
+			const phbState = new CharacterSheetState();
+			phbState.addClass({name: "Druid", source: "PHB", level: 19});
+			phbState.setSpellcastingAbility("wis");
+			expect(phbState.getClasses()[0].source).toBe("PHB");
+			expect(phbState.getTotalLevel()).toBe(19);
 		});
 	});
 });

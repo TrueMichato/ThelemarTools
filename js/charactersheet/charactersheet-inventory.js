@@ -3643,9 +3643,16 @@ class CharacterSheetInventory {
 		}
 
 		if (!filtered.length) {
-			container.append(e_({outer: `<div class="charsheet__inventory-empty">
-				<span class="ve-muted">${this._starredFilter ? "No starred items" : "No items in inventory"}</span>
-			</div>`}));
+			const emptyDiv = e_({tag: "div", clazz: "charsheet__inventory-empty text-center py-3"});
+			if (this._starredFilter) {
+				emptyDiv.innerHTML = `<span class="ve-muted">No starred items</span>`;
+			} else {
+				emptyDiv.innerHTML = `<div class="ve-muted mb-2">Your inventory is empty</div>`;
+				const addBtn = e_({tag: "button", clazz: "btn btn-primary btn-sm", text: "＋ Add Item"});
+				addBtn.addEventListener("click", () => this._showAddCustomItem());
+				emptyDiv.append(addBtn);
+			}
+			container.append(emptyDiv);
 			return;
 		}
 

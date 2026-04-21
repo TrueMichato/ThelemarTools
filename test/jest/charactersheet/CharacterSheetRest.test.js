@@ -112,12 +112,14 @@ describe("Rest Mechanics", () => {
 			expect(state.getPactSlots().current).toBeGreaterThan(before);
 		});
 
-		it("should track short rest count", () => {
-			// Note: short rest count tracking may not be implemented
-			// Just verify onShortRest runs without error
+		it("should recover short-rest resources after multiple short rests", () => {
+			state.addResource({name: "Action Surge", max: 1, current: 0, recharge: "short"});
 			state.onShortRest();
+			expect(state.getResources().find(r => r.name === "Action Surge").current).toBe(1);
+			// Deplete and rest again
+			state.getResources().find(r => r.name === "Action Surge").current = 0;
 			state.onShortRest();
-			expect(true).toBe(true);
+			expect(state.getResources().find(r => r.name === "Action Surge").current).toBe(1);
 		});
 	});
 

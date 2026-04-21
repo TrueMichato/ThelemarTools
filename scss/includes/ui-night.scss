@@ -243,8 +243,9 @@ Shared UI components
 			&:focus,
 			&:active:focus {
 				box-shadow: none;
-				outline: none;
 			}
+
+			@include vars.mix-focus-visible(var(--focus-ring-color, #{vars-night.$rgb-border-grey--night}));
 
 			&:hover {
 				background: color.adjust(vars-night.$rgb-border-grey--night, $lightness: - vars.$pct-darken-hover);

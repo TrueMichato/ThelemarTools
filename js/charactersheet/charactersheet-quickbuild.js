@@ -42,6 +42,8 @@ class CharacterSheetQuickBuild {
 			spells: [], // batch spell selections
 			hpMethod: "average", // "average" or "roll"
 			hpRolls: {}, // {levelKey: rollResult}
+			_combatTraditions: [], // TGTT combat tradition selections
+			weaponMasteries: [], // XPHB weapon mastery selections
 		};
 
 		// Modal/overlay reference
@@ -146,6 +148,8 @@ class CharacterSheetQuickBuild {
 			spells: [],
 			hpMethod: "average",
 			hpRolls: {},
+			_combatTraditions: [],
+			weaponMasteries: [],
 		};
 		this._levelAnalysis = [];
 		this._steps = [];
@@ -761,12 +765,29 @@ class CharacterSheetQuickBuild {
 		this._overlay.querySelector("#quickbuild-prev").addEventListener("click", () => this._prevStep());
 		this._overlay.querySelector("#quickbuild-next").addEventListener("click", () => this._nextStep());
 
+		// Escape key closes the wizard
+		this._escapeHandler = (e) => { if (e.key === "Escape") this._closeWizard(); };
+		document.addEventListener("keydown", this._escapeHandler);
+
 		// Render initial step
 		this._renderStepIndicators();
 		this._renderCurrentStep();
 	}
 
-	_closeWizard () {
+	async _closeWizard ({force = false} = {}) {
+		if (!force && this._currentStep > 0) {
+			const confirm = await InputUiUtil.pGetUserBoolean({
+				title: "Close Quick Build?",
+				htmlDescription: "<p>You have unsaved progress. Are you sure you want to close?</p>",
+				textYes: "Close",
+				textNo: "Cancel",
+			});
+			if (!confirm) return;
+		}
+		if (this._escapeHandler) {
+			document.removeEventListener("keydown", this._escapeHandler);
+			this._escapeHandler = null;
+		}
 		if (this._overlay) {
 			this._overlay.remove();
 			this._overlay = null;
@@ -854,7 +875,7 @@ class CharacterSheetQuickBuild {
 		if (this._currentStep >= this._steps.length - 1) {
 			// Final step — apply the build
 			await this._applyQuickBuild();
-			this._closeWizard();
+			this._closeWizard({force: true});
 		} else {
 			this._goToStep(this._currentStep + 1);
 		}
@@ -4083,7 +4104,7 @@ class CharacterSheetQuickBuild {
 		}
 
 		// Apply combat traditions (if selected during QB)
-		if (this._selections._combatTraditions?.length > 0) {
+		if (this._selections._combatTraditions != null) {
 			this._state.setCombatTraditions(this._selections._combatTraditions);
 		}
 

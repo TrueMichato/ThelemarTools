@@ -1906,7 +1906,7 @@ class CharacterSheetCombat {
 		});
 
 		if (!combatSpells.length) {
-			container.innerHTML = `<p class="ve-muted text-center">No prepared combat spells. Prepare spells from the Spells tab.</p>`;
+			container.innerHTML = `<p class="ve-muted text-center">No prepared spells. Prepare spells from the Spells tab to use them in combat.</p>`;
 			return;
 		}
 
@@ -2014,9 +2014,9 @@ class CharacterSheetCombat {
 		this.renderCombatStates();
 
 		// Render combat stats
-		const initiative = this._state.getAbilityMod("dex");
+		const initiative = this._state.getInitiative();
 		const elInitiative = document.getElementById("charsheet-initiative");
-		if (elInitiative) elInitiative.textContent = `+${initiative}`;
+		if (elInitiative) elInitiative.textContent = `${initiative >= 0 ? "+" : ""}${initiative}`;
 	}
 
 	/**
@@ -5469,34 +5469,32 @@ class CharacterSheetCombat {
 		const tabContainer = document.getElementById("charsheet-combat-methods-tab");
 		const tabDcDisplay = document.getElementById("charsheet-method-dc-tab");
 
+		if (!section || !container) return;
+
 		// Hide sections if no combat methods
 		if (combatMethods.length === 0) {
 			section.style.display = "none";
-			tabSection.style.display = "none";
+			if (tabSection) tabSection.style.display = "none";
 			return;
 		}
 
 		section.style.display = "";
-		tabSection.style.display = "";
+		if (tabSection) tabSection.style.display = "";
 		container.innerHTML = "";
-		tabContainer.innerHTML = "";
+		if (tabContainer) tabContainer.innerHTML = "";
 
 		// Use state-calculated Method DC (handles Monk +1 base, WIS mod, Hexblade/Bladesinger override)
 		const calcs = this._state.getFeatureCalculations();
 		const profBonus = this._state.getProficiencyBonus();
 		const methodDC = calcs.combatMethodDc
 			?? (8 + profBonus + Math.max(this._state.getAbilityMod("str"), this._state.getAbilityMod("dex")));
-		dcDisplay.textContent = methodDC;
-		tabDcDisplay.textContent = methodDC;
+		if (dcDisplay) dcDisplay.textContent = methodDC;
+		if (tabDcDisplay) tabDcDisplay.textContent = methodDC;
 
-		// Calculate Stamina Pool: 2 × proficiency bonus
-		const staminaMax = profBonus * 2;
-		staminaDisplay.textContent = staminaMax;
-
-		// Initialize stamina in state if not set
-		if (this._state.getStaminaMax() !== staminaMax) {
-			this._state.setStaminaMax(staminaMax);
-		}
+		// Ensure stamina is initialized, then read from state (single source of truth)
+		this._state.ensureStaminaInitialized();
+		const staminaMax = this._state.getStaminaMax();
+		if (staminaDisplay) staminaDisplay.textContent = staminaMax;
 		if (this._state.getStaminaCurrent() === null || this._state.getStaminaCurrent() === undefined) {
 			this._state.setStaminaCurrent(staminaMax);
 		}
@@ -5644,8 +5642,12 @@ class CharacterSheetCombat {
 			return;
 		}
 
-		// Get the method data from the parent element
+		// Get the method data from the parent element (validate before spending stamina)
 		const method = btn.closest(".charsheet__method-item")?._methodData;
+		if (!method) {
+			JqueryUtil.doToast({type: "warning", content: `Could not resolve method data. Please try again.`});
+			return;
+		}
 
 		this._state.setStaminaCurrent(currentStamina - cost);
 		this._updateStaminaDisplay();
