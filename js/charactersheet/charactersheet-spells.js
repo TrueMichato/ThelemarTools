@@ -295,7 +295,7 @@ class CharacterSheetSpells {
 		// Half casters
 		const halfCasters = ["Paladin", "Ranger", "Artificer"];
 		// Third casters
-		const thirdCasters = ["Eldritch Knight", "Arcane Trickster", "Gambler"];
+		const thirdCasters = ["Eldritch Knight", "Arcane Trickster", "Gambler", "Architect of Ruin"];
 
 		const className = classInfo.name;
 		const subclassName = classInfo.subclass?.name;
