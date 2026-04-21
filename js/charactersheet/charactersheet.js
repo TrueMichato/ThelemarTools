@@ -8529,7 +8529,7 @@ class CharacterSheetPage {
 		const noteHtml = resultNote ? `<div class="charsheet__dice-result-note">${resultNote}</div>` : "";
 
 		const resultEl = e_({outer: `
-			<div class="charsheet__dice-result">
+			<div class="charsheet__dice-result" role="status" aria-live="assertive">
 				<span class="charsheet__dice-result-close glyphicon glyphicon-remove"></span>
 				<div class="charsheet__dice-result-header">${title}</div>
 				<div class="charsheet__dice-result-total${totalClass}">${total}</div>

@@ -765,6 +765,10 @@ class CharacterSheetQuickBuild {
 		this._overlay.querySelector("#quickbuild-prev").addEventListener("click", () => this._prevStep());
 		this._overlay.querySelector("#quickbuild-next").addEventListener("click", () => this._nextStep());
 
+		// Escape key closes the wizard
+		this._escapeHandler = (e) => { if (e.key === "Escape") this._closeWizard(); };
+		document.addEventListener("keydown", this._escapeHandler);
+
 		// Render initial step
 		this._renderStepIndicators();
 		this._renderCurrentStep();
@@ -779,6 +783,10 @@ class CharacterSheetQuickBuild {
 				textNo: "Cancel",
 			});
 			if (!confirm) return;
+		}
+		if (this._escapeHandler) {
+			document.removeEventListener("keydown", this._escapeHandler);
+			this._escapeHandler = null;
 		}
 		if (this._overlay) {
 			this._overlay.remove();
