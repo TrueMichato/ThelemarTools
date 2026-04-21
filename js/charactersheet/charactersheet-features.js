@@ -1528,6 +1528,8 @@ class CharacterSheetFeatures {
 			"AF": "Alchemist Formulas",
 			"DW:C": "Dreamwalker Core Abilities",
 			"DW:S": "Dreamwalker Special Abilities",
+			"ItdBoon": "Interdict Boons",
+			"IllMastery": "Combat Masteries",
 		};
 
 		// Combat tradition names (Thelemar homebrew)
