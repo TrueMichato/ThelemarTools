@@ -9137,6 +9137,18 @@ class CharacterSheetPage {
 			</label>
 		</div>`;
 
+		// Ability score cap enforcement
+		const currentEnforceAbilityScoreCap = this._state.getSettings()?.enforceAbilityScoreCap === true;
+		const enforceAbilityScoreCap = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-enforce-ability-cap" ${currentEnforceAbilityScoreCap ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">🛡️ Enforce Ability Score Cap</span>
+					<span class="charsheet__settings-checkbox-desc">Cap ability scores at 20 by default. Features like Primal Champion auto-raise the cap for affected abilities. You can also set per-ability maximums.</span>
+				</span>
+			</label>
+		</div>`;
+
 		// Priority sources section
 		const currentPriority = this._state.getPrioritySources() || [];
 		const homebrewSources = allSources.filter(src => BrewUtil2.hasSourceJson(src.json) || PrereleaseUtil.hasSourceJson(src.json));
@@ -9183,6 +9195,7 @@ class CharacterSheetPage {
 				${exhaustionToggle}
 				${includeCoreSpells}
 				${allowExoticLanguages}
+				${enforceAbilityScoreCap}
 			</div>
 			
 			<div class="charsheet__settings-section">
@@ -9377,6 +9390,15 @@ class CharacterSheetPage {
 		// Allow exotic languages handler
 		modalInner.querySelector("#settings-allow-exotic-languages").addEventListener("change", (e) => {
 			this._state.setSetting("allowExoticLanguages", e.target.checked);
+		});
+
+		// Ability score cap handler
+		modalInner.querySelector("#settings-enforce-ability-cap").addEventListener("change", (e) => {
+			this._state.setSetting("enforceAbilityScoreCap", e.target.checked);
+			// Re-render stats since ability scores may change
+			this._renderAbilities();
+			this._renderCombatStats();
+			if (this._spellsModule) this._spellsModule.render();
 		});
 	}
 

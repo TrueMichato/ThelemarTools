@@ -3182,6 +3182,7 @@ class CharacterSheetState {
 				wis: 0,
 				cha: 0,
 			},
+			abilityScoreMaximums: {}, // Per-ability maximum overrides (e.g., {str: 24, con: 24} for Primal Champion)
 
 			// HP
 			hp: {
@@ -3481,6 +3482,8 @@ class CharacterSheetState {
 				thelemar_asiFeat: true,
 				thelemar_itemUtilization: true,
 				thelemar_spellRarity: true, // Apply Thelemar spell rarity/legality tags
+				// Ability score cap enforcement
+				enforceAbilityScoreCap: false, // When true, cap ability scores at maximum (default 20)
 				// Ammunition tracking - disabled by default
 				ammunitionTracking: false,
 			},
@@ -5095,6 +5098,18 @@ class CharacterSheetState {
 			computed = customStatic;
 		}
 
+		// Enforce ability score cap when setting is enabled
+		if (this._data.settings?.enforceAbilityScoreCap) {
+			const defaultMax = 20;
+			let perAbilityMax = this._data.abilityScoreMaximums?.[ability];
+			// Primal Champion auto-raises STR/CON cap to 24
+			if (perAbilityMax == null && (ability === "str" || ability === "con") && this._hasPrimalChampion()) {
+				perAbilityMax = 24;
+			}
+			const effectiveMax = perAbilityMax ?? defaultMax;
+			computed = Math.min(computed, effectiveMax);
+		}
+
 		return computed;
 	}
 
@@ -5161,9 +5176,38 @@ class CharacterSheetState {
 	 * @param {number} [maxScore=20] - Maximum ability score cap (30 for Epic Boons)
 	 */
 	increaseAbility (ability, amount, maxScore = 20) {
+		const effectiveMax = this.getAbilityScoreMaximum(ability) ?? maxScore;
 		const currentBase = this.getAbilityBase(ability);
-		const newBase = Math.min(maxScore, currentBase + amount);
+		const newBase = Math.min(effectiveMax, currentBase + amount);
 		this.setAbilityBase(ability, newBase);
+	}
+
+	/**
+	 * Set a per-ability score maximum override.
+	 * @param {string} ability - The ability name (str, dex, con, int, wis, cha)
+	 * @param {number|null} max - The maximum score, or null to remove the override
+	 */
+	setAbilityScoreMaximum (ability, max) {
+		if (!this._data.abilityScoreMaximums) {
+			this._data.abilityScoreMaximums = {};
+		}
+		if (max == null) {
+			delete this._data.abilityScoreMaximums[ability];
+		} else {
+			this._data.abilityScoreMaximums[ability] = max;
+		}
+	}
+
+	/**
+	 * Get the effective maximum for an ability score.
+	 * Returns the per-ability override if set, otherwise the default of 20.
+	 * Returns null if ability score cap is not enforced.
+	 * @param {string} ability - The ability name
+	 * @returns {number|null}
+	 */
+	getAbilityScoreMaximum (ability) {
+		if (!this._data.settings?.enforceAbilityScoreCap) return null;
+		return this._data.abilityScoreMaximums?.[ability] ?? 20;
 	}
 	// #endregion
 

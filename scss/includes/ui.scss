@@ -882,8 +882,9 @@ Shared UI components
 			&:focus,
 			&:active:focus {
 				box-shadow: none;
-				outline: none;
 			}
+
+			@include vars.mix-focus-visible;
 
 			&:hover {
 				background: #0005;
