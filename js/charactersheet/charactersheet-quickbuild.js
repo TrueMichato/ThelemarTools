@@ -1314,7 +1314,6 @@ class CharacterSheetQuickBuild {
 
 	_renderAsiStep (content, asiLevels) {
 		const step = e_({outer: `<div class="charsheet__quickbuild-step"></div>`});
-		const thelemar_asiFeat = this._state.getSettings()?.thelemar_asiFeat || false;
 
 		step.append(e_({outer: `
 			<div class="charsheet__quickbuild-step-header">
@@ -1361,7 +1360,8 @@ class CharacterSheetQuickBuild {
 		asiLevels.forEach((analysis, idx) => {
 			const {characterLevel, className, classLevel, classData} = analysis;
 			const levelKey = `${className}_${classLevel}`;
-			const isBoth = thelemar_asiFeat && classLevel === 4;
+			// Thelemar rule fires at CHARACTER level 4 (matters for multiclass).
+			const isBoth = this._state.shouldGrantBothAsiAndFeat(characterLevel);
 			const isEpicBoon = classLevel === 19;
 
 			if (!this._selections.asi[levelKey]) {
@@ -2092,8 +2092,6 @@ class CharacterSheetQuickBuild {
 	}
 
 	_validateAsiStep (asiLevels) {
-		const thelemar_asiFeat = this._state.getSettings()?.thelemar_asiFeat || false;
-
 		for (const analysis of asiLevels) {
 			const levelKey = `${analysis.className}_${analysis.classLevel}`;
 			const sel = this._selections.asi[levelKey];
@@ -2102,7 +2100,7 @@ class CharacterSheetQuickBuild {
 				return false;
 			}
 
-			const isBoth = thelemar_asiFeat && analysis.classLevel === 4;
+			const isBoth = this._state.shouldGrantBothAsiAndFeat(analysis.characterLevel);
 
 			if (isBoth) {
 				// Need both ASI points spent AND a feat

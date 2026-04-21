@@ -8370,8 +8370,17 @@ class CharacterSheetBuilder {
 			? CharacterSheetClassUtils.getKnownSpellsAtLevel(cls, className, 1)
 			: null;
 
-		// Return null only if no spells AND no cantrips at all
-		if (!cantripAtLevel1 && !knownAtLevel1 && !isSpellbookCaster && !isPreparedCaster) return null;
+		// 2024-style prepared casters (XPHB / TGTT) have an explicit preparedSpellsProgression
+		// giving the exact number of spells prepared at level 1. Let the builder prompt for
+		// those initial prepared selections so new characters don't start with an empty list.
+		// 2014-style prepared casters (no preparedSpellsProgression — e.g. PHB Cleric/Druid)
+		// traditionally re-prepare each long rest, so we do not prompt at builder.
+		const preparedAtLevel1 = isPreparedCaster
+			? (cls.preparedSpellsProgression?.[0] || 0)
+			: 0;
+
+		// Return null only if there is nothing to select at level 1 at all.
+		if (!cantripAtLevel1 && !knownAtLevel1 && !preparedAtLevel1 && !isSpellbookCaster) return null;
 
 		const maxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(
 			cls.casterProgression || this._selectedSubclass?.casterProgression, 1,
@@ -8392,8 +8401,10 @@ class CharacterSheetBuilder {
 			classSource: cls.source,
 			classLevel: 1,
 			isSpellbookCaster,
+			isPreparedCaster,
+			isKnownCaster,
 			spellbookCount,
-			spellCount: knownAtLevel1 || 0,
+			spellCount: (knownAtLevel1 || 0) + preparedAtLevel1,
 			cantripCount: cantripAtLevel1 || 0,
 			maxSpellLevel,
 			additionalClassNames,
@@ -8537,10 +8548,14 @@ class CharacterSheetBuilder {
 				}));
 			}
 		} else {
-			// Known-caster (Bard, Sorcerer, Warlock, Ranger)
+			// Known-caster (Bard, Sorcerer, Warlock, 2014 Ranger) OR prepared-caster
+			// picking initial prepared spells (2024 XPHB/TGTT Cleric, Druid, Paladin, Ranger).
+			// The picker is the same UI in both cases; only the sourceFeature label differs
+			// so downstream consumers can distinguish known vs prepared spells if needed.
+			const sourceFeature = knownInfo.isPreparedCaster ? "Spells Prepared" : "Spells Known";
 			for (const spell of this._selectedKnownSpells) {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
-					sourceFeature: "Spells Known",
+					sourceFeature,
 					sourceClass: knownInfo.className,
 					prepared: true,
 				}));

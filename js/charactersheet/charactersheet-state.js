@@ -4641,6 +4641,22 @@ class CharacterSheetState {
 		return cls?.level || 0;
 	}
 
+	/**
+	 * Thelemar (TGTT) homebrew rule: at character level 4, the level-up grants BOTH an
+	 * Ability Score Improvement AND a Feat (rather than the choice of one). This applies
+	 * once per character — the level-up that brings the character to total level 4 —
+	 * regardless of which class is being leveled. Critical for multiclass characters.
+	 *
+	 * Gated by the `thelemar_asiFeat` setting.
+	 *
+	 * @param {number} newCharacterLevel - The character's TOTAL level after the level-up.
+	 * @returns {boolean}
+	 */
+	shouldGrantBothAsiAndFeat (newCharacterLevel) {
+		if (!this.getSettings()?.thelemar_asiFeat) return false;
+		return newCharacterLevel === 4;
+	}
+
 	getProficiencyBonus () {
 		const level = Math.max(1, this.getTotalLevel()); // Treat level 0 as level 1 for prof bonus
 		const baseProfBonus = Math.floor((level - 1) / 4) + 2;
@@ -7325,7 +7341,9 @@ class CharacterSheetState {
 			}
 		}
 
-		// Fallback: hardcoded tables for when class data isn't available
+		// Fallback: hardcoded tables for when class data isn't available.
+		// 2014 PHB Ranger is a known-caster, but XPHB / TGTT (2024) Ranger is a prepared caster —
+		// so the Ranger entry here is intentionally gated to pre-2024 sources below.
 		const spellsKnownTables = {
 			"Bard": [4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 15, 16, 18, 19, 19, 20, 22, 22, 22],
 			"Sorcerer": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 13, 13, 14, 14, 15, 15, 15, 15],
@@ -7346,7 +7364,10 @@ class CharacterSheetState {
 
 		let cantripsKnown = cantripsKnownTables[className]?.[levelIndex] || 0;
 
-		if (spellsKnownTables[className]) {
+		// 2014-only known-caster fallback. For 2024 sources the caller should supply
+		// progression arrays (handled above); falling back to 2014 math here would
+		// misclassify XPHB/TGTT Ranger as a known caster.
+		if (!is2024 && spellsKnownTables[className]) {
 			return {
 				type: "known",
 				max: spellsKnownTables[className][levelIndex],

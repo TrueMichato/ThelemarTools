@@ -35,7 +35,7 @@ All Thelemar variant rules are implemented as toggleable settings:
 | **Linguistics Bonus** | `thelemar_linguisticsBonus` | +1 Linguistics per known language except Common |
 | **Jumping** | `thelemar_jumping` | Modified high/long jump formulas |
 | **Critical Rolls** | `thelemar_criticalRolls` | Nat 1 auto-fails, nat 20 auto-succeeds (all checks) |
-| **ASI + Feat** | `thelemar_asiFeat` | ASIs grant both ability increase AND a feat |
+| **ASI + Feat** | `thelemar_asiFeat` | At **character level 4** (not class level 4), the level-up grants BOTH an ASI and a feat. Fires exactly once per character, on the level-up that brings the total character level to 4 — regardless of which class is being leveled. |
 | **Item Utilization** | `thelemar_itemUtilization` | CON-based limits on consumable items |
 | **Spell Rarity/Legality** | `thelemar_spellRarity` | Applies Thelemar spell rarity tags and legality rules |
 

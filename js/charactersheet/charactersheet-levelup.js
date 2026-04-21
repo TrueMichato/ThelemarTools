@@ -132,8 +132,9 @@ class CharacterSheetLevelUp {
 		let subclassGrantedTraditionCodes = [];
 
 		// ========== DETERMINE WHAT SECTIONS ARE NEEDED ==========
-		const thelemar_asiFeat = this._state.getSettings()?.thelemar_asiFeat || false;
-		const isBothAsiAndFeat = thelemar_asiFeat && newLevel === 4;
+		// Thelemar rule: applies at CHARACTER level 4, not per-class level 4 (matters for multiclass).
+		// At this point the new class level has not yet been written, so getTotalLevel()+1 = new character level.
+		const isBothAsiAndFeat = this._state.shouldGrantBothAsiAndFeat((this._state.getTotalLevel() || 0) + 1);
 		const isEpicBoonLevel = newLevel === 19 && (classEntry.source === "XPHB" || classEntry.source === "TGTT");
 		const optionalFeatureGains = CharacterSheetClassUtils.getOptionalFeatureGains(classData, classEntry.level, newLevel, this._state);
 		featureOptionGroups = CharacterSheetClassUtils.getFeatureOptionsForLevel(currentFeatures, newLevel, this._page.getClassFeatures())
@@ -3352,9 +3353,9 @@ class CharacterSheetLevelUp {
 		// Update unarmed strike (monk martial arts die progression)
 		this._state.ensureUnarmedStrike();
 
-		// Check if Thelemar ASI+Feat rule applies
-		const thelemar_asiFeat = this._state.getSettings()?.thelemar_asiFeat || false;
-		const isBothAsiAndFeat = thelemar_asiFeat && newLevel === 4;
+		// Thelemar rule: applies at CHARACTER level 4, not per-class level 4 (matters for multiclass).
+		// targetClass.level was just updated above, so getTotalLevel() already reflects the new character level.
+		const isBothAsiAndFeat = this._state.shouldGrantBothAsiAndFeat(this._state.getTotalLevel() || 0);
 
 		// Apply ASI and/or feat
 		if (isBothAsiAndFeat) {

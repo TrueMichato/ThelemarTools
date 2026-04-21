@@ -194,7 +194,7 @@ describe("TGTT Hexblade Warlock", () => {
 		it("should have an stamina pool based on level", () => {
 			state.ensureStaminaInitialized();
 			const maxSt = state.getStaminaMax();
-			expect(maxEx).toBeGreaterThan(0);
+			expect(maxSt).toBeGreaterThan(0);
 		});
 
 		it("should use higher of physical or spellcasting DC per TGTT", () => {

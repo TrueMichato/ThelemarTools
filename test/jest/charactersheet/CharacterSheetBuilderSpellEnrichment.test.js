@@ -322,12 +322,15 @@ describe("CharacterSheetBuilder _getKnownCasterInfoForBuilder()", () => {
                 expect(info.spellCount).toBe(0);
         });
 
-        test("XPHB Cleric → not spellbook, cantrip-only (preparedSpellsProgression no longer blocks)", () => {
+        test("XPHB Cleric → prepared-caster, prompts for initial prepared spells + cantrips", () => {
                 const info = makeBuilder(XPHB_CLERIC)._getKnownCasterInfoForBuilder();
                 expect(info).not.toBeNull();
                 expect(info.isSpellbookCaster).toBe(false);
+                expect(info.isPreparedCaster).toBe(true);
                 expect(info.cantripCount).toBe(3);
-                expect(info.spellCount).toBe(0);
+                // XPHB prepared-caster: level-1 prepared count drives the spell picker so
+                // new characters do not start with an empty prepared list.
+                expect(info.spellCount).toBe(4);
         });
 
         test("PHB Druid → cantrip-only (2 cantrips)", () => {
@@ -348,6 +351,42 @@ describe("CharacterSheetBuilder _getKnownCasterInfoForBuilder()", () => {
         test("Barbarian → returns null", () => {
                 const info = makeBuilder(PHB_BARBARIAN)._getKnownCasterInfoForBuilder();
                 expect(info).toBeNull();
+        });
+
+        // Regression: TGTT/XPHB prepared casters must prompt for initial prepared spells
+        // at builder (L1) so they don't start with an empty spell list. See bugs.md.
+        const TGTT_RANGER = {
+                name: "Ranger", source: "TGTT",
+                casterProgression: "artificer",
+                spellcastingAbility: "wis",
+                preparedSpellsProgression: [2, 3, 4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15],
+                // No cantripProgression: XPHB/TGTT Ranger gets no cantrips (this is correct per 2024 rules).
+        };
+
+        const TGTT_DRUID = {
+                name: "Druid", source: "TGTT",
+                casterProgression: "full",
+                spellcastingAbility: "wis",
+                preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
+                cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        };
+
+        test("TGTT Ranger (L1) → prepared-caster with 2 prepared spells, 0 cantrips", () => {
+                const info = makeBuilder(TGTT_RANGER)._getKnownCasterInfoForBuilder();
+                expect(info).not.toBeNull();
+                expect(info.isSpellbookCaster).toBe(false);
+                expect(info.isPreparedCaster).toBe(true);
+                expect(info.spellCount).toBe(2);
+                expect(info.cantripCount).toBe(0);
+        });
+
+        test("TGTT Druid (L1) → prepared-caster with 4 prepared spells, 2 cantrips", () => {
+                const info = makeBuilder(TGTT_DRUID)._getKnownCasterInfoForBuilder();
+                expect(info).not.toBeNull();
+                expect(info.isSpellbookCaster).toBe(false);
+                expect(info.isPreparedCaster).toBe(true);
+                expect(info.spellCount).toBe(4);
+                expect(info.cantripCount).toBe(2);
         });
 });
 
@@ -414,5 +453,40 @@ describe("CharacterSheetBuilder _applyBuilderSpellChoices() spellbook path", () 
                 // Only spellbook spells should be applied, not _selectedKnownSpells
                 expect(capturedSpells).toHaveLength(1);
                 expect(capturedSpells[0].name).toBe("Fireball");
+        });
+
+        // Regression: TGTT/XPHB prepared casters should tag applied spells as "Spells Prepared",
+        // not "Spells Known", so downstream consumers can distinguish prepared vs known lists.
+        const TGTT_DRUID = {
+                name: "Druid", source: "TGTT",
+                casterProgression: "full",
+                spellcastingAbility: "wis",
+                preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
+                cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        };
+
+        test("TGTT Druid prepared spells are tagged as Spells Prepared (not Spells Known)", () => {
+                const capturedSpells = [];
+                const capturedCantrips = [];
+                const builder = Object.create(CharacterSheetBuilder.prototype);
+                builder._selectedClass = TGTT_DRUID;
+                builder._selectedSubclass = null;
+                builder._divineSoulAffinity = null;
+                builder._selectedSpellbookSpells = [];
+                builder._selectedKnownSpells = [MOCK_FIREBALL, MOCK_SHIELD];
+                builder._selectedKnownCantrips = [MOCK_FIRE_BOLT];
+                builder._state = {
+                        addSpell: (s) => capturedSpells.push(s),
+                        addCantrip: (c) => capturedCantrips.push(c),
+                        setSubclassChoice: () => {},
+                };
+
+                builder._applyBuilderSpellChoices();
+
+                expect(capturedSpells).toHaveLength(2);
+                expect(capturedSpells.every(s => s.sourceFeature === "Spells Prepared")).toBe(true);
+                expect(capturedSpells.every(s => s.prepared === true)).toBe(true);
+                expect(capturedCantrips).toHaveLength(1);
+                expect(capturedCantrips[0].name).toBe("Fire Bolt");
         });
 });
