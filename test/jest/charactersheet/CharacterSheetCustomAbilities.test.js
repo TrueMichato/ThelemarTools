@@ -1202,7 +1202,7 @@ describe("Character Sheet Custom Abilities", () => {
 
 		test("getSkillAbility should return ability for homebrew standard skills", () => {
 			expect(charState.getSkillAbility("cooking")).toBe("wis");
-			expect(charState.getSkillAbility("linguistics")).toBe("int");
+			expect(charState.getSkillAbility("linguistics")).toBe("wis");
 			expect(charState.getSkillAbility("might")).toBe("str");
 			expect(charState.getSkillAbility("endurance")).toBe("con");
 		});

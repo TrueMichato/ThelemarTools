@@ -518,7 +518,13 @@ class CharacterSheetFeatures {
 						const addBtn = item.querySelector(".feat-picker-add");
 						addBtn.addEventListener("click", async (e) => {
 							e.stopPropagation();
-							await this._addFeat(feat);
+							const choices = this._getFeatChoices(feat);
+							let featChoices = null;
+							if (choices) {
+								featChoices = await this._pShowFeatChoicesModal(feat, choices);
+								if (!featChoices) return; // User cancelled
+							}
+							await this._addFeat(feat, featChoices);
 							knownFeatNames.push(feat.name.toLowerCase());
 							item.classList.add("ve-muted");
 							addBtn.replaceWith(e_({outer: `<span class="charsheet__modal-list-item-badge charsheet__modal-list-item-badge--known">✓ Known</span>`}));
@@ -581,26 +587,28 @@ class CharacterSheetFeatures {
 				p.race.forEach(r => parts.push(r.name));
 			}
 			if (p.level) {
-				parts.push(`Level ${p.level.level}+`);
+				const levelNum = typeof p.level === "object" ? p.level.level : p.level;
+				parts.push(`Level ${levelNum}+`);
 			}
 			return parts.join(", ");
 		}).join("; ");
 	}
 
-	async _addFeat (feat) {
+	async _addFeat (feat, featChoices = null) {
 		const newFeat = {
 			name: feat.name,
 			source: feat.source,
 			description: feat.entries ? Renderer.get().render({type: "entries", entries: feat.entries}) : "",
 			additionalSpells: feat.additionalSpells, // Preserve for spell processing
+			choices: featChoices || null,
 		};
 
-		// Apply ability score increases
+		// Apply static ability score increases (non-choose)
 		if (feat.ability) {
 			feat.ability.forEach(abiSet => {
 				const max = abiSet.max || 20;
 				Object.entries(abiSet).forEach(([abi, bonus]) => {
-					if (abi === "max") return; // Skip the max property itself
+					if (abi === "max" || abi === "choose") return;
 					if (Parser.ABIL_ABVS.includes(abi) && typeof bonus === "number") {
 						const current = this._state.getAbilityBase(abi);
 						this._state.setAbilityBase(abi, Math.min(max, current + bonus));
@@ -609,8 +617,34 @@ class CharacterSheetFeatures {
 			});
 		}
 
+		// Apply user-selected feat choices
+		if (featChoices) {
+			if (featChoices.ability) {
+				const amount = feat.ability?.find(a => a.choose)?.choose?.amount || 1;
+				const current = this._state.getAbilityBase(featChoices.ability);
+				this._state.setAbilityBase(featChoices.ability, Math.min(20, current + amount));
+			}
+			if (featChoices.skills?.length) {
+				featChoices.skills.forEach(skill => {
+					const normalized = skill.toLowerCase().replace(/\s+/g, "");
+					this._state.addSkillProficiency(normalized);
+				});
+			}
+			if (featChoices.expertise?.length) {
+				featChoices.expertise.forEach(skill => this._state.addExpertise(skill));
+			}
+			if (featChoices.languages?.length) {
+				featChoices.languages.forEach(lang => this._state.addLanguage(lang));
+			}
+		}
+
 		this._state.addFeat(newFeat, {allSpells: this._page.getSpells()});
 		this.render();
+		// Re-render ability-dependent sections on main page
+		this._page._renderAbilityScores?.();
+		this._page._renderAbilitiesDetailed?.();
+		this._page._renderSavingThrows?.();
+		this._page._renderSkills?.();
 		this._page.saveCharacter();
 
 		// Check for pending spell choices and trigger the picker
@@ -622,6 +656,15 @@ class CharacterSheetFeatures {
 				this.render(); // Re-render after spell selection
 			}
 		}
+	}
+
+	_formatFeatChoices (choices) {
+		const parts = [];
+		if (choices.ability) parts.push(`+${choices.amount || 1} ${Parser.attAbvToFull(choices.ability)}`);
+		if (choices.skills?.length) parts.push(choices.skills.map(s => s.toTitleCase()).join(", ") + " proficiency");
+		if (choices.expertise?.length) parts.push(choices.expertise.map(s => s.toTitleCase()).join(", ") + " expertise");
+		if (choices.languages?.length) parts.push(choices.languages.map(l => l.toTitleCase()).join(", "));
+		return parts.join(" • ") || "None";
 	}
 
 	async _showFeatInfo (feat) {
@@ -1752,6 +1795,7 @@ class CharacterSheetFeatures {
 					</div>
 					<div class="charsheet__feat-body charsheet__feature-body" style="display: ${isExpanded ? "block" : "none"};">
 						${description}
+						${feat.choices ? `<div class="charsheet__feat-choices ve-small ve-muted mt-1" style="border-top: 1px solid var(--rgb-border-grey, #ddd); padding-top: 4px;">Chose: ${this._formatFeatChoices(feat.choices)}</div>` : ""}
 					</div>
 				</div>
 			`});
@@ -1999,6 +2043,222 @@ class CharacterSheetFeatures {
 		const langEl = document.getElementById("charsheet-languages");
 		if (langEl) langEl.textContent = languages.length ? languages.join(", ") : "None";
 	}
+
+	// region Feat Choices
+
+	_getFeatChoices (feat) {
+		const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null};
+
+		const allSkillNames = this._page?.getSkillsList?.()?.map(s => s.name) || Object.keys(Parser.SKILL_TO_ATB_ABV);
+
+		if (feat.skillProficiencies) {
+			for (const sp of feat.skillProficiencies) {
+				if (sp.choose) {
+					choices.skills = {count: sp.choose.count || 1, from: sp.choose.from || allSkillNames};
+					break;
+				}
+				if (sp.any) {
+					choices.skills = {count: sp.any, from: allSkillNames};
+					break;
+				}
+			}
+		}
+
+		if (feat.languageProficiencies) {
+			for (const lp of feat.languageProficiencies) {
+				if (lp.anyStandard) { choices.languages = {count: lp.anyStandard, type: "standard"}; break; }
+				if (lp.any) { choices.languages = {count: lp.any, type: "any"}; break; }
+			}
+		}
+
+		if (feat.expertise) {
+			for (const exp of feat.expertise) {
+				if (exp.anyProficientSkill) { choices.expertise = {count: exp.anyProficientSkill, type: "proficient"}; break; }
+			}
+		}
+
+		if (feat.ability) {
+			for (const ab of feat.ability) {
+				if (ab.choose) {
+					choices.ability = {count: ab.choose.count || 1, amount: ab.choose.amount || 1, from: ab.choose.from || Parser.ABIL_ABVS};
+					break;
+				}
+			}
+		}
+
+		const hasChoices = choices.skills || choices.languages || choices.ability || choices.expertise;
+		return hasChoices ? choices : null;
+	}
+
+	async _pShowFeatChoicesModal (feat, choices) {
+		return new Promise((resolve) => {
+			const selected = {ability: null, skills: [], expertise: [], languages: []};
+			let doClose;
+			let resolved = false;
+
+			const doResolve = (val) => {
+				if (resolved) return;
+				resolved = true;
+				resolve(val);
+			};
+
+			const updateConfirmBtn = () => {
+				let canConfirm = true;
+				if (choices.ability && !selected.ability) canConfirm = false;
+				if (choices.skills && selected.skills.length < choices.skills.count) canConfirm = false;
+				if (choices.expertise && selected.expertise.length < choices.expertise.count) canConfirm = false;
+				if (choices.languages && selected.languages.length < choices.languages.count) canConfirm = false;
+				confirmBtn.disabled = !canConfirm;
+			};
+
+			const confirmBtn = e_({outer: `<button class="ve-btn ve-btn-primary" disabled>Confirm Choices</button>`});
+			confirmBtn.addEventListener("click", () => { doResolve(selected); doClose(); });
+
+			const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default mr-2">Cancel</button>`});
+			cancelBtn.addEventListener("click", () => { doResolve(null); doClose(); });
+
+			UiUtil.pGetShowModal({
+				title: `Choices for ${feat.name}`,
+				isMinHeight0: true,
+				cbClose: () => doResolve(null),
+			}).then(({eleModalInner: modalInner, doClose: _doClose}) => {
+				doClose = _doClose;
+				const content = e_({tag: "div", clazz: "p-2"});
+
+				// Ability choices
+				if (choices.ability) {
+					const section = e_({outer: `<div class="mb-3"><label class="ve-small ve-bold">Choose ability to increase by ${choices.ability.amount}:</label></div>`});
+					const grid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
+
+					choices.ability.from.forEach(abl => {
+						const currentScore = this._state.getAbilityScore(abl);
+						const newScore = Math.min(20, currentScore + (choices.ability.amount || 1));
+						const btn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-default">${Parser.attAbvToFull(abl)} (${currentScore} → ${newScore})</button>`});
+						btn.addEventListener("click", () => {
+							selected.ability = selected.ability === abl ? null : abl;
+							grid.querySelectorAll(".ve-btn").forEach(el => { el.classList.remove("ve-btn-primary"); el.classList.add("ve-btn-default"); });
+							if (selected.ability) { btn.classList.remove("ve-btn-default"); btn.classList.add("ve-btn-primary"); }
+							updateConfirmBtn();
+						});
+						grid.append(btn);
+					});
+					section.append(grid);
+					content.append(section);
+				}
+
+				// Shared render function reference for cross-section updates
+				let renderExpertise = null;
+
+				// Skill choices
+				if (choices.skills) {
+					const section = e_({outer: `<div class="mb-3"><label class="ve-small ve-bold">Choose ${choices.skills.count} skill${choices.skills.count > 1 ? "s" : ""}:</label></div>`});
+					const grid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
+					const counter = e_({outer: `<div class="ve-small ve-muted mt-1">Selected: 0/${choices.skills.count}</div>`});
+					const existingSkills = new Set(Object.keys(this._state.getSkillProficiencies?.() || {}));
+
+					const renderSkills = () => {
+						grid.innerHTML = "";
+						choices.skills.from.forEach(skill => {
+							const isKnown = existingSkills.has(skill);
+							const isSelected = selected.skills.includes(skill);
+							const displayName = skill.toTitleCase();
+							const btn = e_({outer: `<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isKnown ? 'disabled title="Already proficient" style="opacity:0.5;"' : ""}>${displayName}${isKnown ? " ✓" : ""}</button>`});
+							if (!isKnown) {
+								btn.addEventListener("click", () => {
+									if (isSelected) selected.skills = selected.skills.filter(s => s !== skill);
+									else if (selected.skills.length < choices.skills.count) selected.skills.push(skill);
+									renderSkills();
+									if (renderExpertise) renderExpertise();
+									updateConfirmBtn();
+								});
+							}
+							grid.append(btn);
+						});
+						counter.textContent = `Selected: ${selected.skills.length}/${choices.skills.count}`;
+					};
+					renderSkills();
+					section.append(grid, counter);
+					content.append(section);
+				}
+
+				// Expertise choices
+				if (choices.expertise) {
+					const section = e_({outer: `<div class="mb-3"><label class="ve-small ve-bold">Choose ${choices.expertise.count} skill${choices.expertise.count > 1 ? "s" : ""} for expertise:</label></div>`});
+					const grid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
+					const counter = e_({outer: `<div class="ve-small ve-muted mt-1">Selected: 0/${choices.expertise.count}</div>`});
+
+					const existingProf = Object.keys(this._state.getSkillProficiencies?.() || {});
+					const existingExpertise = new Set((this._state.getExpertise?.() || []).map(e => e.toLowerCase()));
+					const availableForExpertise = existingProf.filter(s => !existingExpertise.has(s.toLowerCase()));
+
+					renderExpertise = () => {
+						grid.innerHTML = "";
+						// Include any skills being chosen in this feat too
+						const allAvailable = [...new Set([...availableForExpertise, ...selected.skills])];
+						// Remove expertise selections that are no longer available
+						selected.expertise = selected.expertise.filter(s => allAvailable.includes(s));
+						allAvailable.forEach(skill => {
+							const isSelected = selected.expertise.includes(skill);
+							const displayName = skill.toTitleCase();
+							const btn = e_({outer: `<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}">${displayName}</button>`});
+							btn.addEventListener("click", () => {
+								if (isSelected) selected.expertise = selected.expertise.filter(s => s !== skill);
+								else if (selected.expertise.length < choices.expertise.count) selected.expertise.push(skill);
+								renderExpertise();
+								updateConfirmBtn();
+							});
+							grid.append(btn);
+						});
+						counter.textContent = `Selected: ${selected.expertise.length}/${choices.expertise.count}`;
+					};
+					renderExpertise();
+					section.append(grid, counter);
+					content.append(section);
+				}
+
+				// Language choices
+				if (choices.languages) {
+					const section = e_({outer: `<div class="mb-3"><label class="ve-small ve-bold">Choose ${choices.languages.count} language${choices.languages.count > 1 ? "s" : ""}:</label></div>`});
+					const grid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
+					const counter = e_({outer: `<div class="ve-small ve-muted mt-1">Selected: 0/${choices.languages.count}</div>`});
+
+					const existingLangs = new Set((this._state.getLanguages?.() || []).map(l => l.toLowerCase()));
+					const standardLangs = ["common", "dwarvish", "elvish", "giant", "gnomish", "goblin", "halfling", "orc"];
+					const exoticLangs = ["abyssal", "celestial", "draconic", "deep speech", "infernal", "primordial", "sylvan", "undercommon"];
+					const availableLangs = choices.languages.type === "standard" ? standardLangs : [...standardLangs, ...exoticLangs];
+
+					const renderLangs = () => {
+						grid.innerHTML = "";
+						availableLangs.forEach(lang => {
+							const isKnown = existingLangs.has(lang.toLowerCase());
+							const isSelected = selected.languages.includes(lang);
+							const btn = e_({outer: `<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isKnown ? 'disabled title="Already known" style="opacity:0.5;"' : ""}>${lang.toTitleCase()}${isKnown ? " ✓" : ""}</button>`});
+							if (!isKnown) {
+								btn.addEventListener("click", () => {
+									if (isSelected) selected.languages = selected.languages.filter(l => l !== lang);
+									else if (selected.languages.length < choices.languages.count) selected.languages.push(lang);
+									renderLangs();
+									updateConfirmBtn();
+								});
+							}
+							grid.append(btn);
+						});
+						counter.textContent = `Selected: ${selected.languages.length}/${choices.languages.count}`;
+					};
+					renderLangs();
+					section.append(grid, counter);
+					content.append(section);
+				}
+
+				const footer = e_({outer: `<div class="ve-flex-v-center ve-flex-h-right mt-3"></div>`});
+				footer.append(cancelBtn, confirmBtn);
+				content.append(footer);
+				modalInner.append(content);
+			});
+		});
+	}
+
+	// endregion
 	// #endregion
 }
 

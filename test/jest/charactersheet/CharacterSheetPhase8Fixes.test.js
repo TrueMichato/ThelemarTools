@@ -114,7 +114,7 @@ describe("Phase 8: Standalone Simple Fixes", () => {
 			expect(charState.getSkillAbility("endurance")).toBe("con");
 			expect(charState.getSkillAbility("engineering")).toBe("int");
 			expect(charState.getSkillAbility("harvesting")).toBe("wis");
-			expect(charState.getSkillAbility("linguistics")).toBe("int");
+			expect(charState.getSkillAbility("linguistics")).toBe("wis");
 			expect(charState.getSkillAbility("might")).toBe("str");
 		});
 	});

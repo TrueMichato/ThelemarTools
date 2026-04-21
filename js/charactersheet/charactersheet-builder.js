@@ -6994,8 +6994,7 @@ class CharacterSheetBuilder {
 							<label class="ve-muted ve-small">Additional (Tool or Language):</label>
 							<select class="ve-form-control form-control--minimal" id="custom-bg-extra">
 								<option value="">-- None --</option>
-								<optgroup label="Tools" id="custom-bg-extra-tools"></optgroup>
-								<optgroup label="Languages" id="custom-bg-extra-langs"></optgroup>
+								<optgroup label="──── Tools ────" id="custom-bg-extra-tools"></optgroup>
 							</select>
 						</div>
 					</div>
@@ -7050,39 +7049,57 @@ class CharacterSheetBuilder {
 			homebrew: [],
 		};
 
+		// Build source lookup for language display
+		const bgPrioritySources = this._state.getPrioritySources() || [];
+		const bgSourceLookup = new Map();
+		for (const lang of (this._page._languagesData || [])) {
+			const existing = bgSourceLookup.get(lang.name);
+			if (!existing) {
+				bgSourceLookup.set(lang.name, lang.source);
+			} else if (bgPrioritySources.includes(lang.source) && !bgPrioritySources.includes(existing)) {
+				bgSourceLookup.set(lang.name, lang.source);
+			}
+		}
+
 		const langSelectEl = document.getElementById("custom-bg-lang1");
 		const addCustomBgLangOptgroup = (selectEl, label, langs, valueFn, selectedFn) => {
+			if (!langs.length) return;
 			const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
-			langs.forEach(lang => grp.append(e_({outer: `<option value="${valueFn(lang)}" ${selectedFn(lang) ? "selected" : ""}>${lang}</option>`})));
+			langs.forEach(lang => {
+				const src = bgSourceLookup.get(lang);
+				const display = src ? `${lang} (${src})` : lang;
+				grp.append(e_({outer: `<option value="${valueFn(lang)}" ${selectedFn(lang) ? "selected" : ""}>${display}</option>`}));
+			});
 			selectEl.append(grp);
 		};
 		const langSelectedFn = lang => this._customBackgroundData.languages[0] === lang;
 		const langValueFn = lang => lang;
-		if (langOptions.homebrew.length) {
-			addCustomBgLangOptgroup(langSelectEl, "──── Homebrew Languages ────", langOptions.homebrew, langValueFn, langSelectedFn);
-		}
+		addCustomBgLangOptgroup(langSelectEl, "──── Homebrew Languages ────", langOptions.homebrew, langValueFn, langSelectedFn);
 		addCustomBgLangOptgroup(langSelectEl, "──── Standard Languages ────", langOptions.standard, langValueFn, langSelectedFn);
 		addCustomBgLangOptgroup(langSelectEl, "──── Exotic/Rare Languages ────", langOptions.exotic, langValueFn, langSelectedFn);
 		addCustomBgLangOptgroup(langSelectEl, "──── Secret Languages ────", langOptions.secret, langValueFn, langSelectedFn);
 
 		// Populate extra dropdown (combined tools and languages)
+		const extraSelect = document.getElementById("custom-bg-extra");
 		const extraToolsGroup = document.getElementById("custom-bg-extra-tools");
-		const extraLangsGroup = document.getElementById("custom-bg-extra-langs");
 		allTools.forEach(tool => {
 			extraToolsGroup.append(e_({outer: `<option value="tool:${tool}">${tool}</option>`}));
 		});
-		// Add grouped languages to extra dropdown
+		// Add language optgroups as direct children of <select> (not nested inside another optgroup)
 		const addExtraLangOptgroup = (label, langs) => {
+			if (!langs.length) return;
 			const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
-			langs.forEach(lang => grp.append(e_({outer: `<option value="lang:${lang}">${lang}</option>`})));
-			extraLangsGroup.append(grp);
+			langs.forEach(lang => {
+				const src = bgSourceLookup.get(lang);
+				const display = src ? `${lang} (${src})` : lang;
+				grp.append(e_({outer: `<option value="lang:${lang}">${display}</option>`}));
+			});
+			extraSelect.append(grp);
 		};
-		if (langOptions.homebrew.length) {
-			addExtraLangOptgroup("Homebrew", langOptions.homebrew);
-		}
-		addExtraLangOptgroup("Standard", langOptions.standard);
-		addExtraLangOptgroup("Exotic/Rare", langOptions.exotic);
-		addExtraLangOptgroup("Secret", langOptions.secret);
+		addExtraLangOptgroup("──── Homebrew Languages ────", langOptions.homebrew);
+		addExtraLangOptgroup("──── Standard Languages ────", langOptions.standard);
+		addExtraLangOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
+		addExtraLangOptgroup("──── Secret Languages ────", langOptions.secret);
 
 		// Event handlers
 		document.getElementById("custom-bg-name").addEventListener("input", (e) => {
@@ -7346,10 +7363,17 @@ class CharacterSheetBuilder {
 
 			const overlaps = bgFixedSkills.filter(s => takenByOthers.has(s));
 
+			// Build skill source map so hover resolves homebrew skills correctly
+			const skillSourceMap = new Map();
+			for (const skill of (this._page._skillsData || [])) {
+				skillSourceMap.set(skill.name.toLowerCase(), skill.source);
+			}
+
 			const {summary: skillSummary} = Renderer.generic.getSkillSummary({
 				skillProfs: bg.skillProficiencies,
 				skillToolLanguageProfs: bg.skillToolLanguageProficiencies,
 				isShort: false,
+				sourceMap: skillSourceMap,
 			});
 			if (skillSummary) {
 				content.append(e_({outer: `<p><strong>Skills:</strong> ${Renderer.get().render(skillSummary)}</p>`}));

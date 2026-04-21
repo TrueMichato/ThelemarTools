@@ -230,12 +230,11 @@ class CharacterSheetSpellPicker {
 				</h5>
 				<p class="ve-small">Choose ${parts.join(" and ")} for your ${className}:</p>
 				<div class="charsheet__spell-picker-progress-area"></div>
-				<div class="charsheet__levelup-known-spell-selections"></div>
+				<div class="charsheet__spell-picker-selection"></div>
 			</div>
 		`});
 
 		const progressArea = section.querySelector(".charsheet__spell-picker-progress-area");
-		const container = section.querySelector(".charsheet__levelup-known-spell-selections");
 		const selectedSpells = [...preSelectedSpells];
 		const selectedCantrips = [...preSelectedCantrips];
 
@@ -290,35 +289,46 @@ class CharacterSheetSpellPicker {
 		// Collect unique schools for filters
 		const schools = [...new Set(classSpells.map(s => s.school).filter(Boolean))].sort();
 
-		// Build filter row
-		const filterRow = e_({tag: "div", clazz: "ve-flex-wrap gap-2 mb-2", style: "align-items: center;"});
-		container.append(filterRow);
+		// Two-column layout: left = filters + list, right = spell preview
+		const selectionGrid = section.querySelector(".charsheet__spell-picker-selection");
+		const listPane = e_({tag: "div", clazz: "charsheet__spell-picker-list-pane"});
+		const previewPane = e_({outer: `
+			<div class="charsheet__spell-picker-preview">
+				<div class="charsheet__spell-picker-preview-placeholder">Select a spell to see details</div>
+			</div>
+		`});
+		selectionGrid.append(listPane, previewPane);
 
-		const search = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
+		// Build filter row
+		const filterRow = e_({tag: "div", clazz: "charsheet__spell-picker-filters"});
+		listPane.append(filterRow);
+
+		const search = e_({tag: "input", clazz: "ve-form-control form-control--minimal charsheet__spell-picker-search"});
 		search.type = "text";
-		search.placeholder = "🔍 Search...";
-		search.style.flex = "1";
-		search.style.minWidth = "150px";
+		search.placeholder = "🔍 Search spells...";
 		filterRow.append(search);
+
+		const filterSelects = e_({tag: "div", clazz: "charsheet__spell-picker-filter-selects"});
+		filterRow.append(filterSelects);
 
 		const levelOptions = [];
 		if (cantripCount > 0) levelOptions.push({value: "0", label: "Cantrips"});
 		for (let i = 1; i <= maxSpellLevel; i++) levelOptions.push({value: i.toString(), label: `Level ${i}`});
 		const levelFilter = e_({outer: `
-			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
+			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 90px;">
 				<option value="">All Levels</option>
 				${levelOptions.map(l => `<option value="${l.value}">${l.label}</option>`).join("")}
 			</select>
 		`});
-		filterRow.append(levelFilter);
+		filterSelects.append(levelFilter);
 
 		const schoolFilter = e_({outer: `
-			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 120px;">
+			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 				<option value="">All Schools</option>
 				${schools.map(s => `<option value="${s}">${CharacterSheetClassUtils.getSchoolEmoji(s)} ${Parser.spSchoolAbvToFull(s)}</option>`).join("")}
 			</select>
 		`});
-		filterRow.append(schoolFilter);
+		filterSelects.append(schoolFilter);
 
 		const rarities = CharacterSheetSpellPicker._extractSubschoolTagValues(classSpells, "rarity");
 		const legalities = CharacterSheetSpellPicker._extractSubschoolTagValues(classSpells, "legality");
@@ -326,31 +336,31 @@ class CharacterSheetSpellPicker {
 		let rarityFilter = null;
 		if (rarities.length) {
 			rarityFilter = e_({outer: `
-				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 110px;">
+				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 					<option value="">All Rarities</option>
 					${rarities.map(r => `<option value="${r}">${r.toTitleCase()}</option>`).join("")}
 				</select>
 			`});
-			filterRow.append(rarityFilter);
+			filterSelects.append(rarityFilter);
 		}
 
 		let legalityFilter = null;
 		if (legalities.length) {
 			legalityFilter = e_({outer: `
-				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 110px;">
+				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 					<option value="">All Legalities</option>
 					${legalities.map(l => `<option value="${l}">${l.toTitleCase()}</option>`).join("")}
 				</select>
 			`});
-			filterRow.append(legalityFilter);
+			filterSelects.append(legalityFilter);
 		}
 
 		const ritualFilter = e_({outer: `<label class="ve-flex-v-center ve-small" style="cursor: pointer; white-space: nowrap;"><input type="checkbox" class="mr-1"> 🔮 Ritual</label>`});
 		const concFilter = e_({outer: `<label class="ve-flex-v-center ve-small" style="cursor: pointer; white-space: nowrap;"><input type="checkbox" class="mr-1"> ⏳ Conc.</label>`});
-		filterRow.append(ritualFilter, concFilter);
+		filterSelects.append(ritualFilter, concFilter);
 
-		const spellList = e_({tag: "div", clazz: "charsheet__modal-list", style: "max-height: 350px; overflow-y: auto;"});
-		container.append(spellList);
+		const spellList = e_({tag: "div", clazz: "charsheet__spell-picker-list-content"});
+		listPane.append(spellList);
 
 		const fireCallback = () => {
 			CharacterSheetSpellPicker._updateProgressHeader({
@@ -407,6 +417,7 @@ class CharacterSheetSpellPicker {
 				spellCount,
 				cantripCount,
 				getHoverLink,
+				previewPane,
 				onToggle: (spell) => {
 					const isCantrip = spell.level === 0;
 					const targetArr = isCantrip ? selectedCantrips : selectedSpells;
@@ -495,12 +506,11 @@ class CharacterSheetSpellPicker {
 				</h5>
 				<p class="ve-small">Choose ${spellCount} wizard spells (up to level ${maxSpellLevel}) to add to your spellbook:</p>
 				<div class="charsheet__spell-picker-progress-area"></div>
-				<div class="charsheet__levelup-spellbook-selections"></div>
+				<div class="charsheet__spell-picker-selection"></div>
 			</div>
 		`});
 
 		const progressArea = section.querySelector(".charsheet__spell-picker-progress-area");
-		const container = section.querySelector(".charsheet__levelup-spellbook-selections");
 		const selectedSpells = [...preSelectedSpells];
 
 		const progressHeader = CharacterSheetSpellPicker._renderProgressHeader({
@@ -541,33 +551,44 @@ class CharacterSheetSpellPicker {
 
 		const schools = [...new Set(wizardSpells.map(s => s.school).filter(Boolean))].sort();
 
-		const filterRow = e_({tag: "div", clazz: "ve-flex-wrap gap-2 mb-2", style: "align-items: center;"});
-		container.append(filterRow);
+		// Two-column layout
+		const selectionGrid = section.querySelector(".charsheet__spell-picker-selection");
+		const listPane = e_({tag: "div", clazz: "charsheet__spell-picker-list-pane"});
+		const previewPane = e_({outer: `
+			<div class="charsheet__spell-picker-preview">
+				<div class="charsheet__spell-picker-preview-placeholder">Select a spell to see details</div>
+			</div>
+		`});
+		selectionGrid.append(listPane, previewPane);
 
-		const search = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
+		const filterRow = e_({tag: "div", clazz: "charsheet__spell-picker-filters"});
+		listPane.append(filterRow);
+
+		const search = e_({tag: "input", clazz: "ve-form-control form-control--minimal charsheet__spell-picker-search"});
 		search.type = "text";
-		search.placeholder = "🔍 Search...";
-		search.style.flex = "1";
-		search.style.minWidth = "150px";
+		search.placeholder = "🔍 Search spells...";
 		filterRow.append(search);
+
+		const filterSelects = e_({tag: "div", clazz: "charsheet__spell-picker-filter-selects"});
+		filterRow.append(filterSelects);
 
 		const levelOptions = [];
 		for (let i = 1; i <= maxSpellLevel; i++) levelOptions.push({value: i.toString(), label: `Level ${i}`});
 		const levelFilter = e_({outer: `
-			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
+			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 90px;">
 				<option value="">All Levels</option>
 				${levelOptions.map(l => `<option value="${l.value}">${l.label}</option>`).join("")}
 			</select>
 		`});
-		filterRow.append(levelFilter);
+		filterSelects.append(levelFilter);
 
 		const schoolFilter = e_({outer: `
-			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 120px;">
+			<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 				<option value="">All Schools</option>
 				${schools.map(s => `<option value="${s}">${CharacterSheetClassUtils.getSchoolEmoji(s)} ${Parser.spSchoolAbvToFull(s)}</option>`).join("")}
 			</select>
 		`});
-		filterRow.append(schoolFilter);
+		filterSelects.append(schoolFilter);
 
 		const rarities = CharacterSheetSpellPicker._extractSubschoolTagValues(wizardSpells, "rarity");
 		const legalities = CharacterSheetSpellPicker._extractSubschoolTagValues(wizardSpells, "legality");
@@ -575,31 +596,31 @@ class CharacterSheetSpellPicker {
 		let rarityFilter = null;
 		if (rarities.length) {
 			rarityFilter = e_({outer: `
-				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 110px;">
+				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 					<option value="">All Rarities</option>
 					${rarities.map(r => `<option value="${r}">${r.toTitleCase()}</option>`).join("")}
 				</select>
 			`});
-			filterRow.append(rarityFilter);
+			filterSelects.append(rarityFilter);
 		}
 
 		let legalityFilter = null;
 		if (legalities.length) {
 			legalityFilter = e_({outer: `
-				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 110px;">
+				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 					<option value="">All Legalities</option>
 					${legalities.map(l => `<option value="${l}">${l.toTitleCase()}</option>`).join("")}
 				</select>
 			`});
-			filterRow.append(legalityFilter);
+			filterSelects.append(legalityFilter);
 		}
 
 		const ritualFilter = e_({outer: `<label class="ve-flex-v-center ve-small" style="cursor: pointer; white-space: nowrap;"><input type="checkbox" class="mr-1"> 🔮 Ritual</label>`});
 		const concFilter = e_({outer: `<label class="ve-flex-v-center ve-small" style="cursor: pointer; white-space: nowrap;"><input type="checkbox" class="mr-1"> ⏳ Conc.</label>`});
-		filterRow.append(ritualFilter, concFilter);
+		filterSelects.append(ritualFilter, concFilter);
 
-		const spellList = e_({tag: "div", clazz: "charsheet__modal-list", style: "max-height: 350px; overflow-y: auto;"});
-		container.append(spellList);
+		const spellList = e_({tag: "div", clazz: "charsheet__spell-picker-list-content"});
+		listPane.append(spellList);
 
 		const fireCallback = () => {
 			CharacterSheetSpellPicker._updateProgressHeader({
@@ -656,6 +677,7 @@ class CharacterSheetSpellPicker {
 				spellCount,
 				cantripCount: 0,
 				getHoverLink,
+				previewPane,
 				onToggle: (spell) => {
 					const spellId = `${spell.name}|${spell.source}`;
 					const idx = selectedSpells.findIndex(s => `${s.name}|${s.source}` === spellId);
@@ -807,7 +829,7 @@ class CharacterSheetSpellPicker {
 	 * Shared rendering logic used by all pickers.
 	 * @private
 	 */
-	static _renderGroupedSpellList ({container, spells, knownSpellIds, selectedSpells, selectedCantrips, spellCount, cantripCount, getHoverLink, onToggle}) {
+	static _renderGroupedSpellList ({container, spells, knownSpellIds, selectedSpells, selectedCantrips, spellCount, cantripCount, getHoverLink, previewPane, onToggle}) {
 		const byLevel = {};
 		spells.forEach(spell => {
 			if (!byLevel[spell.level]) byLevel[spell.level] = [];
@@ -821,9 +843,9 @@ class CharacterSheetSpellPicker {
 				: (["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"][levelNum - 1] || "📜");
 			const levelLabel = levelNum === 0 ? "Cantrips" : `Level ${level}`;
 
-			const levelSection = e_({tag: "div", clazz: "charsheet__modal-section"});
+			const levelSection = e_({tag: "div", clazz: "charsheet__spell-picker-section"});
 			container.append(levelSection);
-			levelSection.append(e_({outer: `<div class="charsheet__modal-section-title">${levelEmoji} ${levelLabel} <span style="opacity: 0.6;">(${byLevel[level].length})</span></div>`}));
+			levelSection.append(e_({outer: `<div class="charsheet__spell-picker-section-title">${levelEmoji} ${levelLabel} <span style="opacity: 0.6;">(${byLevel[level].length})</span></div>`}));
 
 			byLevel[level].forEach(spell => {
 				const spellId = `${spell.name}|${spell.source}`;
@@ -833,10 +855,8 @@ class CharacterSheetSpellPicker {
 					? selectedCantrips.some(s => `${s.name}|${s.source}` === spellId)
 					: selectedSpells.some(s => `${s.name}|${s.source}` === spellId);
 
-				const school = Parser.spSchoolAbvToFull?.(spell.school) || spell.school;
 				const schoolEmoji = CharacterSheetClassUtils.getSchoolEmoji(spell.school);
 
-				const componentStr = CharacterSheetClassUtils.getSpellComponents(spell) || "No components";
 				const isConcentration = CharacterSheetClassUtils.spellIsConcentration(spell);
 				const isRitual = CharacterSheetClassUtils.spellIsRitual(spell);
 
@@ -845,42 +865,37 @@ class CharacterSheetSpellPicker {
 				if (isConcentration) tagParts.push("⏳");
 				const tagsStr = tagParts.length ? ` ${tagParts.join(" ")}` : "";
 
-				let subschoolStr = "";
-				if (spell.subschools?.length) {
-					const formatSubschool = (sub) => {
-						const p = sub.split(":");
-						return p.length === 2 ? p[1].toTitleCase() : sub.toTitleCase();
-					};
-					subschoolStr = ` • 🏷️ ${spell.subschools.map(formatSubschool).join(", ")}`;
-				}
+				const selectedClass = isSelected ? " charsheet__spell-picker-item--selected" : "";
+				const knownClass = isKnown ? " charsheet__spell-picker-item--known" : "";
 
 				const item = e_({outer: `
-					<div class="charsheet__modal-list-item ${isKnown ? "ve-muted" : ""} ${isSelected ? "charsheet__modal-list-item--selected" : ""}">
-						<div class="charsheet__modal-list-item-icon">${schoolEmoji}</div>
-						<div class="charsheet__modal-list-item-content">
-							<div class="charsheet__modal-list-item-title"></div>
-							<div class="charsheet__modal-list-item-subtitle">${school} • ${componentStr} • ${Parser.sourceJsonToAbv(spell.source)}${subschoolStr}</div>
+					<div class="charsheet__spell-picker-item${selectedClass}${knownClass}">
+						<div class="charsheet__spell-picker-item-info">
+							<span class="charsheet__spell-picker-item-icon">${schoolEmoji}</span>
+							<span class="charsheet__spell-picker-item-name"></span>
+							<span class="charsheet__spell-picker-item-tags">${tagsStr}</span>
+							<span class="charsheet__spell-picker-item-source">${Parser.sourceJsonToAbv(spell.source)}</span>
 						</div>
 						${isKnown
-							? `<span class="charsheet__modal-list-item-badge charsheet__modal-list-item-badge--known">✓ Known</span>`
+							? `<span class="charsheet__spell-picker-item-badge charsheet__spell-picker-item-badge--known">✓ Known</span>`
 							: isSelected
-								? `<button class="ve-btn ve-btn-danger ve-btn-xs spell-toggle">✓ Selected</button>`
-								: `<button class="ve-btn ve-btn-primary ve-btn-xs spell-toggle">+ Add</button>`
+								? `<button class="ve-btn ve-btn-danger ve-btn-xs spell-toggle">✓</button>`
+								: `<button class="ve-btn ve-btn-primary ve-btn-xs spell-toggle">+</button>`
 						}
 					</div>
 				`});
 
 				// Add spell name with hover link
-				const titleEl = item.querySelector(".charsheet__modal-list-item-title");
+				const nameEl = item.querySelector(".charsheet__spell-picker-item-name");
 				try {
 					if (getHoverLink) {
 						const hoverLink = getHoverLink(UrlUtil.PG_SPELLS, spell.name, spell.source || Parser.SRC_XPHB);
-						titleEl.innerHTML = `${hoverLink}${tagsStr}`;
+						nameEl.innerHTML = hoverLink;
 					} else {
-						titleEl.innerHTML = `${spell.name}${tagsStr}`;
+						nameEl.textContent = spell.name;
 					}
 				} catch (e) {
-					titleEl.innerHTML = `${spell.name}${tagsStr}`;
+					nameEl.textContent = spell.name;
 				}
 
 				if (!isKnown) {
@@ -888,17 +903,98 @@ class CharacterSheetSpellPicker {
 						e.stopPropagation();
 						onToggle(spell);
 					});
-
-					item.addEventListener("click", (e) => {
-						if (!e.target.matches("button") && !e.target.closest("a")) {
-							CharacterSheetSpellPicker.showSpellInfoModal(spell);
-						}
-					});
 				}
+
+				// Click on row → show preview (not on button or link)
+				item.addEventListener("click", (e) => {
+					if (e.target.matches("button") || e.target.closest("a")) return;
+					if (previewPane) {
+						CharacterSheetSpellPicker._renderSpellPreview(previewPane, spell);
+						// Highlight active preview row
+						container.querySelectorAll(".charsheet__spell-picker-item--previewing").forEach(el => el.classList.remove("charsheet__spell-picker-item--previewing"));
+						item.classList.add("charsheet__spell-picker-item--previewing");
+					} else {
+						CharacterSheetSpellPicker.showSpellInfoModal(spell);
+					}
+				});
 
 				levelSection.append(item);
 			});
 		});
+	}
+	/**
+	 * Render spell details into the preview pane.
+	 * @param {HTMLElement} previewPane - The preview container element
+	 * @param {Object} spell - Spell data object
+	 * @private
+	 */
+	static _renderSpellPreview (previewPane, spell) {
+		previewPane.innerHTML = "";
+
+		const levelSchool = spell.level === 0
+			? `${Parser.spSchoolAbvToFull(spell.school)} cantrip`
+			: `${Parser.spLevelToFull(spell.level)}-level ${Parser.spSchoolAbvToFull(spell.school).toLowerCase()}`;
+
+		const header = e_({outer: `
+			<div class="charsheet__spell-picker-preview-header">
+				<div class="charsheet__spell-picker-preview-name">${spell.name}</div>
+				<div class="charsheet__spell-picker-preview-school">${levelSchool}</div>
+			</div>
+		`});
+		previewPane.append(header);
+
+		const infoLines = [];
+		if (spell.time?.length) {
+			const time = spell.time[0];
+			infoLines.push(`<strong>Casting Time:</strong> ${time.number} ${time.unit}`);
+		}
+		if (spell.range) {
+			let rangeStr = "";
+			const range = spell.range;
+			if (range.type === "point") {
+				if (range.distance?.type === "self") rangeStr = "Self";
+				else if (range.distance?.type === "touch") rangeStr = "Touch";
+				else rangeStr = `${range.distance?.amount || ""} ${range.distance?.type || ""}`.trim();
+			} else {
+				rangeStr = range.type || "";
+			}
+			infoLines.push(`<strong>Range:</strong> ${rangeStr}`);
+		}
+		if (spell.components) {
+			infoLines.push(`<strong>Components:</strong> ${CharacterSheetClassUtils.getSpellComponents(spell)}`);
+		}
+		if (spell.duration?.length) {
+			const dur = spell.duration[0];
+			let durStr = "Instantaneous";
+			if (dur.type === "timed") {
+				durStr = dur.concentration
+					? `Concentration, up to ${dur.duration.amount} ${dur.duration.type}`
+					: `${dur.duration.amount} ${dur.duration.type}`;
+			} else if (dur.type === "permanent") {
+				durStr = "Until dispelled";
+			}
+			infoLines.push(`<strong>Duration:</strong> ${durStr}`);
+		}
+
+		if (infoLines.length) {
+			previewPane.append(e_({outer: `<div class="charsheet__spell-picker-preview-info">${infoLines.join("<br>")}</div>`}));
+		}
+
+		if (spell.entries) {
+			try {
+				previewPane.append(e_({outer: `<div class="rd__b charsheet__spell-picker-preview-body">${Renderer.get().render({type: "entries", entries: spell.entries})}</div>`}));
+			} catch (e) {
+				// Renderer may not be available in all contexts
+			}
+		}
+
+		if (spell.entriesHigherLevel) {
+			try {
+				previewPane.append(e_({outer: `<div class="rd__b charsheet__spell-picker-preview-body"><strong>At Higher Levels.</strong> ${Renderer.get().render({type: "entries", entries: spell.entriesHigherLevel})}</div>`}));
+			} catch (e) {
+				// Renderer may not be available
+			}
+		}
 	}
 }
 

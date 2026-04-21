@@ -343,6 +343,9 @@ class CharacterSheetRespec {
 		if (preview.optionalFeatures.length) {
 			items.push(`Optional Features: ${preview.optionalFeatures.map(f => f.name).join(", ")}`);
 		}
+		if (preview.featureChoices?.length) {
+			items.push(`Feature Choices: ${preview.featureChoices.map(f => f.name).join(", ")}`);
+		}
 		if (preview.spells.length) {
 			items.push(`Spells: ${preview.spells.map(s => s.name).join(", ")}`);
 		}
@@ -1465,9 +1468,8 @@ class CharacterSheetRespec {
 			return;
 		}
 
-		// Get options from the parent feature
-		const levelUp = this._page._levelUp;
-		const optionGroups = levelUp._findFeatureOptions(parentFeature, level);
+		// Get options from the parent feature (static ClassUtils method — extracted from LevelUp)
+		const optionGroups = CharacterSheetClassUtils.findFeatureOptions(parentFeature, level, classFeatures);
 
 		if (!optionGroups.length || !optionGroups[0].options?.length) {
 			content.append(e_({outer: `<p class="text-danger">No alternative options found for this feature.</p>`}));
@@ -1564,6 +1566,9 @@ class CharacterSheetRespec {
 		);
 		if (oldFeature) {
 			this._state.removeFeature(oldFeature.id);
+		} else {
+			// Fallback: remove orphaned modifiers by name if feature lookup failed
+			this._state.removeModifiersByName(oldChoice.choice);
 		}
 
 		// Add new feature
@@ -1592,6 +1597,22 @@ class CharacterSheetRespec {
 			parentFeature: oldChoice.featureName,
 		});
 
+		// Apply specialty auto-effects for the new feature (passive bonuses, PB skill bonuses, etc.)
+		const autoEffects = CharacterSheetClassUtils.parseFeatureAutoEffects(
+			newOption,
+			classFeatures,
+			{resolvedData: fullFeature},
+		);
+		autoEffects.forEach(effect => {
+			this._state.addNamedModifier({
+				name: newOption.name,
+				type: effect.type,
+				value: effect.value,
+				note: effect.note || `From specialty: ${newOption.name}`,
+				enabled: true,
+			});
+		});
+
 		// Update history
 		const updatedFeatureChoices = [...history.choices.featureChoices];
 		updatedFeatureChoices[choiceIndex] = {
@@ -1603,6 +1624,10 @@ class CharacterSheetRespec {
 		this._state.updateLevelChoice(level, {
 			featureChoices: updatedFeatureChoices,
 		});
+
+		// Recalculate derived values after the swap
+		this._state.applyClassFeatureEffects();
+		this._state.calculateSpellSlots();
 	}
 
 	/**

@@ -820,11 +820,9 @@ class CharacterSheetClassUtils {
 			effects.push({type: `passive:${skill}`, value, note: `+${value} passive ${passiveIncreaseMatch[1]}`});
 		}
 
-		const skillBonusProfMatch = text.match(/bonus\s+to\s+\w+\s*\(\{@skill\s+([^}]+)\}\)\s*checks?\s+equal\s+to\s+(?:your\s+)?proficiency\s+bonus/i);
-		if (skillBonusProfMatch) {
-			const skill = skillBonusProfMatch[1].toLowerCase().replace(/\s+/g, "");
-			effects.push({type: `skill:${skill}`, value: "proficiency", note: `+PB to ${skillBonusProfMatch[1]} checks`});
-		}
+		// NOTE: PB-based skill bonus ("bonus to X checks equal to your proficiency bonus")
+		// is NOT parsed here — it is already handled by FeatureModifierParser when addFeature()
+		// calls _processFeatureModifiers(). Parsing it here too would double-count the bonus.
 
 		const skillBonusFixedMatch = text.match(/gain\s+a?\s*\+?(\d+)\s*bonus\s+to\s+\w+\s*\(\{@skill\s+([^}]+)\}\)\s*checks?/i);
 		if (skillBonusFixedMatch) {

@@ -688,10 +688,10 @@ class CharacterSheetLevelUp {
 				accordions.expertise.setComplete(allComplete, allSkills.join(", "));
 			};
 
+			main.append(createAccordion("expertise", "⭐", "Expertise", expertiseContent, {required: true}));
+
 			// Run initial status update for any pre-populated fixed skills
 			updateExpertiseStatus();
-
-			main.append(createAccordion("expertise", "⭐", "Expertise", expertiseContent, {required: true}));
 		}
 
 		// ========== 6. LANGUAGES ==========
@@ -3508,6 +3508,8 @@ class CharacterSheetLevelUp {
 						}
 
 						// Apply automatic effects from the specialty (passive bonuses, speed, etc.)
+						// Find the feature we just added to link modifiers via sourceFeatureId
+						const addedFeature = this._state.getFeatures().find(f => f.name === opt.name && f.isFeatureOption);
 						const autoEffects = this._parseFeatureAutoEffects(opt);
 						autoEffects.forEach(effect => {
 							this._state.addNamedModifier({
@@ -3516,6 +3518,7 @@ class CharacterSheetLevelUp {
 								value: effect.value,
 								note: effect.note || `From specialty: ${opt.name}`,
 								enabled: true,
+								sourceFeatureId: addedFeature?.id,
 							});
 						});
 					} else if (opt.type === "subclassFeature" && opt.ref) {

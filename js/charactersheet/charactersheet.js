@@ -520,9 +520,14 @@ class CharacterSheetPage {
 				for (const li of tabs.querySelectorAll("li")) li.classList.remove("ve-active");
 				e.currentTarget.parentElement.classList.add("ve-active");
 
-				// Update tab content
-				for (const pane of tabContent.querySelectorAll(".tab-pane")) pane.classList.remove("ve-active", "in");
-				document.querySelector(targetId).classList.add("ve-active", "in");
+				// Update tab content — set inline display as belt-and-suspenders
+				for (const pane of tabContent.querySelectorAll(".tab-pane")) {
+					pane.classList.remove("ve-active", "in");
+					pane.style.display = "none";
+				}
+				const target = document.querySelector(targetId);
+				target.classList.add("ve-active", "in");
+				target.style.display = "";
 			});
 		}
 	}
@@ -802,6 +807,9 @@ class CharacterSheetPage {
 
 		// Edit proficiencies
 		document.getElementById("charsheet-edit-proficiencies").addEventListener("click", () => this._showEditProficienciesModal());
+
+		// Edit ability scores
+		document.getElementById("charsheet-edit-abilities").addEventListener("click", () => this._showEditAbilityScoresModal());
 
 		// Edit weapon masteries
 		document.getElementById("charsheet-edit-masteries").addEventListener("click", () => this._showEditWeaponMasteriesModal());
@@ -10843,6 +10851,105 @@ class CharacterSheetPage {
 			tools: toolSuggestions,
 			languages: languageSuggestions,
 		};
+	}
+
+	/**
+	 * Show modal for editing base ability scores
+	 */
+	async _showEditAbilityScoresModal () {
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Edit Ability Scores",
+			isMinHeight0: true,
+			isWidth100: true,
+			cbClose: () => {
+				this._renderAbilities();
+				this._renderAbilityScores();
+				this._renderAbilitiesDetailed();
+				this._renderSavingThrows();
+				this._renderSkills();
+				this._saveCurrentCharacter();
+			},
+		});
+
+		const itemOverrides = this._state.getItemAbilityOverrides?.() || {};
+
+		Parser.ABIL_ABVS.forEach(abl => {
+			const base = this._state.getAbilityBase(abl);
+			const bonus = this._state.getAbilityBonus(abl);
+			const itemBonus = itemOverrides.bonus?.[abl] || 0;
+			const itemStatic = itemOverrides.static?.[abl];
+			const total = this._state.getAbilityScore(abl);
+			const mod = this._state.getAbilityMod(abl);
+			const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+
+			const row = e_({outer: `
+				<div class="charsheet__edit-ability-row mb-3" style="display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--rgb-border-grey, #ddd); border-radius: 6px;">
+					<div style="min-width: 120px;">
+						<strong>${Parser.attAbvToFull(abl)}</strong>
+						<span class="ve-muted">(${abl.toUpperCase()})</span>
+					</div>
+					<div style="display: flex; align-items: center; gap: 6px;">
+						<button class="ve-btn ve-btn-default ve-btn-xs ability-dec" style="width: 28px; height: 28px; font-size: 1rem;">−</button>
+						<input type="number" class="ve-form-control ability-input" value="${base}" min="1" max="30" style="width: 60px; text-align: center; font-weight: bold;">
+						<button class="ve-btn ve-btn-default ve-btn-xs ability-inc" style="width: 28px; height: 28px; font-size: 1rem;">+</button>
+					</div>
+					<div class="ve-muted ve-small ability-breakdown" style="min-width: 160px;"></div>
+					<div style="min-width: 60px; text-align: center;">
+						<span class="ability-total" style="font-size: 1.1rem; font-weight: bold;"></span>
+						<span class="ve-muted ability-mod" style="margin-left: 4px;"></span>
+					</div>
+				</div>
+			`});
+
+			const inputEl = row.querySelector(".ability-input");
+			const breakdownEl = row.querySelector(".ability-breakdown");
+			const totalEl = row.querySelector(".ability-total");
+			const modEl = row.querySelector(".ability-mod");
+			const decBtn = row.querySelector(".ability-dec");
+			const incBtn = row.querySelector(".ability-inc");
+
+			const updateDisplay = () => {
+				const curBase = this._state.getAbilityBase(abl);
+				const curBonus = this._state.getAbilityBonus(abl);
+				const curItemBonus = (this._state.getItemAbilityOverrides?.()?.bonus?.[abl]) || 0;
+				const curItemStatic = this._state.getItemAbilityOverrides?.()?.static?.[abl];
+				const curTotal = this._state.getAbilityScore(abl);
+				const curMod = this._state.getAbilityMod(abl);
+				const curModStr = curMod >= 0 ? `+${curMod}` : `${curMod}`;
+
+				inputEl.value = curBase;
+
+				const parts = [`Base ${curBase}`];
+				if (curBonus) parts.push(`${curBonus >= 0 ? "+" : ""}${curBonus} bonus`);
+				if (curItemBonus) parts.push(`${curItemBonus >= 0 ? "+" : ""}${curItemBonus} item`);
+				if (curItemStatic && curItemStatic > (curBase + curBonus + curItemBonus)) {
+					parts.push(`→ ${curItemStatic} (item override)`);
+				}
+				breakdownEl.textContent = parts.join(" | ");
+
+				totalEl.textContent = curTotal;
+				modEl.textContent = `(${curModStr})`;
+			};
+
+			const setBase = (val) => {
+				const clamped = Math.max(1, Math.min(30, val));
+				this._state.setAbilityBase(abl, clamped);
+				updateDisplay();
+			};
+
+			decBtn.addEventListener("click", () => setBase(this._state.getAbilityBase(abl) - 1));
+			incBtn.addEventListener("click", () => setBase(this._state.getAbilityBase(abl) + 1));
+			inputEl.addEventListener("change", () => setBase(parseInt(inputEl.value) || 10));
+
+			updateDisplay();
+			modalInner.append(row);
+		});
+
+		const doneFooter = ee`<div class="ve-flex-h-right mt-3">
+			<button class="ve-btn ve-btn-primary">Done</button>
+		</div>`;
+		modalInner.append(doneFooter);
+		doneFooter.querySelector("button").addEventListener("click", () => doClose());
 	}
 
 	/**

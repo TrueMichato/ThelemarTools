@@ -4330,9 +4330,9 @@ class CharacterSheetState {
 		const subclassLevel = this._getSubclassSelectionLevel(className, classSource);
 		const willRemoveSubclass = !!classEntry.subclass && (willRemoveClass || (classLevel - 1) < subclassLevel);
 
-		// Features at this level
+		// Features at this class level (features store class level, not total level)
 		const features = this._data.features
-			.filter(f => f.level === totalLevel)
+			.filter(f => f.level === classLevel && f.className === className)
 			.map(f => ({name: f.name, source: f.source}));
 
 		const choices = history.choices || {};
@@ -4349,6 +4349,7 @@ class CharacterSheetState {
 			feat: choices.feat || null,
 			asi: choices.asi || null,
 			optionalFeatures: (choices.optionalFeatures || []).map(of => ({name: of.name})),
+			featureChoices: (choices.featureChoices || []).map(fc => ({name: fc.choice, featureName: fc.featureName})),
 			spells: (choices.spellbookSpells || []).map(s => ({name: s.name})),
 			expertise: choices.expertise || [],
 			languages: (choices.languages || []).map(l => typeof l === "string" ? l : l.language),
@@ -4400,8 +4401,8 @@ class CharacterSheetState {
 			subclass: null,
 		};
 
-		// 1. Remove features gained at this level
-		const featuresAtLevel = this._data.features.filter(f => f.level === totalLevel);
+		// 1. Remove features gained at this class level (features store class level, not total level)
+		const featuresAtLevel = this._data.features.filter(f => f.level === classEntry.level && f.className === className);
 		for (const feature of featuresAtLevel) {
 			this.removeFeature(feature.name, feature.source);
 			removedInfo.features.push({name: feature.name, source: feature.source});
@@ -4413,10 +4414,11 @@ class CharacterSheetState {
 			removedInfo.feat = choices.feat;
 		}
 
-		// 3. Reverse ASI if applied at this level
+		// 3. Reverse ASI if applied at this level (ASI modifies base ability scores via setAbilityBase)
 		if (choices.asi) {
 			for (const [ability, amount] of Object.entries(choices.asi)) {
-				this.removeAbilityBonus(ability, amount);
+				const currentBase = this.getAbilityBase(ability);
+				this.setAbilityBase(ability, Math.max(1, currentBase - amount));
 			}
 			removedInfo.asi = choices.asi;
 		}
@@ -4440,6 +4442,13 @@ class CharacterSheetState {
 		if (choices.optionalFeatures?.length) {
 			for (const of_ of choices.optionalFeatures) {
 				this.removeFeature(of_.name, of_.source);
+			}
+		}
+
+		// 5b. Remove feature choices (specialties, fighting styles, etc.)
+		if (choices.featureChoices?.length) {
+			for (const fc of choices.featureChoices) {
+				this.removeFeature(fc.choice, fc.source);
 			}
 		}
 
@@ -21040,8 +21049,9 @@ class CharacterSheetState {
 			this._data.attacks = this._data.attacks.filter(a => a.featureId !== feature.id && a.sourceFeature !== feature.name);
 			// Remove associated innate spells
 			this.removeInnateSpellsByFeature(feature.name);
-			// Remove associated modifiers
+			// Remove associated modifiers (by ID and by name for orphaned modifiers)
 			this.removeModifiersByFeature(feature.id);
+			this.removeModifiersByName(feature.name);
 		}
 
 		// Remove the feature
@@ -21151,6 +21161,7 @@ class CharacterSheetState {
 			additionalSpells: feat.additionalSpells, // Preserve for spell processing
 			isOriginFeat: feat.isOriginFeat || false,
 			backgroundName: feat.backgroundName || null,
+			choices: feat.choices || null,
 		};
 
 		// Add uses if detected
@@ -21248,6 +21259,36 @@ class CharacterSheetState {
 			this.removeInnateSpellsByFeature(feat.name);
 			// Remove associated modifiers
 			this.removeModifiersByFeature(feat.id);
+
+			// Reverse user-selected feat choices
+			if (feat.choices) {
+				if (feat.choices.ability) {
+					const amount = feat.choices.amount || 1;
+					const current = this.getAbilityBase(feat.choices.ability);
+					this.setAbilityBase(feat.choices.ability, Math.max(1, current - amount));
+				}
+				if (feat.choices.skills?.length) {
+					feat.choices.skills.forEach(skill => {
+						const normalized = skill.toLowerCase().replace(/\s+/g, "");
+						// Only remove if it's still at proficiency level (not upgraded to expertise by another source)
+						if (this._data.skillProficiencies[normalized] === 1) {
+							this.setSkillProficiency(normalized, 0);
+						}
+					});
+				}
+				if (feat.choices.expertise?.length) {
+					feat.choices.expertise.forEach(skill => {
+						const normalized = skill.toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
+						// Downgrade from expertise to proficiency
+						if (this._data.skillProficiencies[normalized] === 2) {
+							this.setSkillProficiency(normalized, 1);
+						}
+					});
+				}
+				if (feat.choices.languages?.length) {
+					feat.choices.languages.forEach(lang => this.removeLanguage(lang));
+				}
+			}
 		}
 
 		// Remove the feat
@@ -25876,6 +25917,19 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Remove all named modifiers by source name (catches orphaned modifiers without sourceFeatureId)
+	 * @param {string} name - The modifier name (typically the feature/specialty name)
+	 */
+	removeModifiersByName (name) {
+		if (!name) return;
+		const hadModifiers = this._data.namedModifiers.some(m => m.name === name);
+		this._data.namedModifiers = this._data.namedModifiers.filter(m => m.name !== name);
+		if (hadModifiers) {
+			this._recalculateCustomModifiers();
+		}
+	}
+
+	/**
 	 * Toggle a named modifier's enabled state
 	 * @param {string} id - The modifier ID
 	 * @returns {boolean} The new enabled state
@@ -26383,6 +26437,27 @@ class CharacterSheetState {
 		if (result.removeAdvantage && result.advantage) result.advantage = false;
 		if (result.removeDisadvantage && result.disadvantage) result.disadvantage = false;
 
+		// Apply roll floors (e.g., Reliable Talent) for skill types
+		if (this._data.rollFloors?.skill) {
+			const parts = type.split(":");
+			const category = parts[0];
+			const specific = parts[1];
+
+			if (category === "skill" && specific) {
+				// Check specific skill floor, then "all" proficient floor
+				const floor = this._data.rollFloors.skill[specific] || this._data.rollFloors.skill["all"];
+				if (floor) {
+					const meetsReq = !floor.requiresProficiency || this.getSkillProficiency(specific) >= 1;
+					if (meetsReq) {
+						result.minimum = result.minimum == null ? floor.minimum : Math.max(result.minimum, floor.minimum);
+						if (floor.source && !result.sources.includes(floor.source)) {
+							result.sources.push(floor.source);
+						}
+					}
+				}
+			}
+		}
+
 		return result;
 	}
 
@@ -26522,7 +26597,7 @@ class CharacterSheetState {
 			endurance: "con",
 			engineering: "int",
 			harvesting: "wis",
-			linguistics: "int",
+			linguistics: "wis",
 			might: "str",
 		};
 

@@ -179,35 +179,39 @@ describe("CharacterSheetRemoveLevel", () => {
 	describe("ASI Reversal", () => {
 		it("should reverse ASI applied at the removed level", () => {
 			buildFighter(state, 4);
-			state.addAbilityBonus("str", 2);
+			const baseBefore = state.getAbilityBase("str");
+			state.setAbilityBase("str", baseBefore + 2);
 			state.updateLevelChoice(4, {asi: {str: 2}});
 
-			const bonusBefore = state.getAbilityBonus("str");
 			state.removeLastLevel();
-			const bonusAfter = state.getAbilityBonus("str");
+			const baseAfter = state.getAbilityBase("str");
 
-			expect(bonusAfter).toBe(bonusBefore - 2);
+			expect(baseAfter).toBe(baseBefore);
 		});
 
 		it("should handle multi-ability ASI reversal", () => {
 			buildFighter(state, 4);
-			state.addAbilityBonus("str", 1);
-			state.addAbilityBonus("con", 1);
+			const strBefore = state.getAbilityBase("str");
+			const conBefore = state.getAbilityBase("con");
+			state.setAbilityBase("str", strBefore + 1);
+			state.setAbilityBase("con", conBefore + 1);
 			state.updateLevelChoice(4, {asi: {str: 1, con: 1}});
 
 			state.removeLastLevel();
 
-			expect(state.getAbilityBonus("str")).toBe(0);
-			expect(state.getAbilityBonus("con")).toBe(0);
+			expect(state.getAbilityBase("str")).toBe(strBefore);
+			expect(state.getAbilityBase("con")).toBe(conBefore);
 		});
 
-		it("should clamp ability bonus at 0", () => {
+		it("should clamp ability base at 1", () => {
 			buildFighter(state, 4);
+			const baseBefore = state.getAbilityBase("str");
 			// Don't add the bonus, just record the choice (simulating a data inconsistency)
 			state.updateLevelChoice(4, {asi: {str: 2}});
 
 			state.removeLastLevel();
-			expect(state.getAbilityBonus("str")).toBe(0);
+			// Base is subtracted but clamped at minimum 1
+			expect(state.getAbilityBase("str")).toBe(Math.max(1, baseBefore - 2));
 		});
 	});
 

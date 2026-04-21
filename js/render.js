@@ -15035,7 +15035,7 @@ Renderer.generic = class {
 	static _SKILL_TOOL_LANGUAGE_KEYS__LANGAUGE_ANY = new Set(["anyLanguage", "anyStandardLanguage", "anyExoticLanguage", "anyRareLanguage"]);
 	// endregion
 
-	static getSkillSummary ({skillProfs, skillToolLanguageProfs, isShort = false}) {
+	static getSkillSummary ({skillProfs, skillToolLanguageProfs, isShort = false, sourceMap = null}) {
 		return this._summariseProfs({
 			profGroupArr: skillProfs,
 			skillToolLanguageProfs,
@@ -15044,6 +15044,7 @@ Renderer.generic = class {
 			anyAlt: "anySkill",
 			isShort,
 			hoverTag: "skill",
+			sourceMap,
 		});
 	}
 
@@ -15069,7 +15070,7 @@ Renderer.generic = class {
 		});
 	}
 
-	static _summariseProfs ({profGroupArr, skillToolLanguageProfs, setValid, setValidAny, anyAlt, isShort, hoverTag}) {
+	static _summariseProfs ({profGroupArr, skillToolLanguageProfs, setValid, setValidAny, anyAlt, isShort, hoverTag, sourceMap = null}) {
 		if (!profGroupArr?.length && !skillToolLanguageProfs?.length) return {summary: "", collection: []};
 
 		const collectionSet = new Set();
@@ -15090,13 +15091,13 @@ Renderer.generic = class {
 							.filter(s => !isValidate || setValid.has(s))
 							.map(s => {
 								collectionSet.add(this._summariseProfs_getCollectionKey(s, anyAlt));
-								return this._summariseProfs_getEntry({str: s, isShort, hoverTag});
+								return this._summariseProfs_getEntry({str: s, isShort, hoverTag, sourceMap});
 							});
 						return `${isShort ? `${i === 0 ? "C" : "c"}hoose ` : ""}${v.count || 1} ${isShort ? `of` : `from`} ${chooseProfs.joinConjunct(", ", " or ")}`;
 					}
 
 					collectionSet.add(this._summariseProfs_getCollectionKey(k, anyAlt));
-					return this._summariseProfs_getEntry({str: k, isShort, hoverTag});
+					return this._summariseProfs_getEntry({str: k, isShort, hoverTag, sourceMap});
 				});
 
 			return toJoin.join(sep);
@@ -15130,8 +15131,12 @@ Renderer.generic = class {
 		return SortUtil.ascSort(a, b);
 	}
 
-	static _summariseProfs_getEntry ({str, isShort, hoverTag}) {
-		if (!isShort && hoverTag) return `{@${hoverTag} ${str.toTitleCase()}}`;
+	static _summariseProfs_getEntry ({str, isShort, hoverTag, sourceMap = null}) {
+		if (!isShort && hoverTag) {
+			const source = sourceMap?.get(str.toLowerCase());
+			if (source) return `{@${hoverTag} ${str.toTitleCase()}|${source}}`;
+			return `{@${hoverTag} ${str.toTitleCase()}}`;
+		}
 		const [name, , displayName] = str.split("|");
 		return (displayName || name).toTitleCase();
 	}

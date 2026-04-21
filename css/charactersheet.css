@@ -4,6 +4,17 @@
 @import url('charactersheet-modern.css');
 
 /* ========================================================================
+   Tab Pane Visibility — high-specificity override to ensure bootstrap
+   .tab-content>.tab-pane{display:none} is never defeated by cascade issues
+   ======================================================================== */
+.charsheet-page .tab-content > .tab-pane {
+	display: none;
+}
+.charsheet-page .tab-content > .tab-pane.ve-active {
+	display: block;
+}
+
+/* ========================================================================
    Custom Scrollbars
    ======================================================================== */
 .charsheet__attacks-list::-webkit-scrollbar,
@@ -1728,15 +1739,15 @@
 /* Ensure modals and dropdowns aren't affected by text scaling */
 .charsheet__theme-dropdown,
 .charsheet__textsize-dropdown,
-.ui-modal__inner,
-.ui-modal__wrapper {
+.ve-ui-modal__inner,
+.ve-ui-modal__wrapper {
 	font-size: 1rem !important;
 	--cs-text-scale: 1 !important;
 }
 
 /* Reset scaling inside modals */
-.ui-modal__inner *,
-.ui-modal__wrapper * {
+.ve-ui-modal__inner *,
+.ve-ui-modal__wrapper * {
 	--cs-text-scale: 1 !important;
 }
 
@@ -6918,12 +6929,36 @@
 	border-color: var(--rgb-border-blue);
 }
 
+/* Badge base styles (not in project's custom Bootstrap build) */
+.badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 2.5rem;
+	height: 2.5rem;
+	padding: 0.35em 0.65em;
+	font-size: 0.85rem;
+	font-weight: 700;
+	line-height: 1;
+	color: #fff;
+	text-align: center;
+	white-space: nowrap;
+	vertical-align: baseline;
+	border-radius: 50%;
+}
+
+.badge-primary {
+	background-color: var(--cs-primary, #6366f1);
+}
+
 .charsheet__builder-score-badge {
 	transition: transform 0.15s, box-shadow 0.15s;
+	cursor: pointer;
 }
 
 .charsheet__builder-score-badge:hover {
 	transform: scale(1.1);
+	filter: brightness(1.15);
 }
 
 .charsheet__builder-score-badge.active {
@@ -11114,11 +11149,11 @@ body.has-quickbuild-overlay .toast__container {
    Modern Modal Enhancements - Character Sheet Specific
    Modals are appended to body, so we use :has() to check if charsheet-page exists
    ======================================================================== */
-body.is-charsheet-page .ui-modal__overlay {
+body.is-charsheet-page .ve-ui-modal__overlay {
 	background: rgba(0, 0, 0, 0.7);
 }
 
-body.is-charsheet-page .ui-modal__inner {
+body.is-charsheet-page .ve-ui-modal__inner {
 	background: var(--cs-bg-surface, #1e1e2e);
 	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.2));
 	border-radius: var(--cs-radius-lg, 12px);
@@ -11129,33 +11164,34 @@ body.is-charsheet-page .ui-modal__inner {
 }
 
 /* Content-heavy modals (those using full width) get a taller height */
-body.is-charsheet-page .ui-modal__inner.w-100 {
+body.is-charsheet-page .ve-ui-modal__inner.ve-w-100 {
 	height: min(700px, 80vh) !important;
 }
 
 /* The scroller inside needs to fill the available height */
-body.is-charsheet-page .ui-modal__inner.w-100 > .ui-modal__scroller {
+body.is-charsheet-page .ve-ui-modal__inner.ve-w-100 > .ve-ui-modal__scroller {
 	flex: 1 1 auto;
 	min-height: 0;
 	overflow-y: auto;
 }
 
 /* Performance: isolate modal scroller paint/layout from page */
-body.is-charsheet-page .ui-modal__scroller {
+body.is-charsheet-page .ve-ui-modal__scroller {
 	contain: content;
 	will-change: transform;
 }
 
 /* Larger modals for item/spell pickers */
-body.is-charsheet-page .ui-modal__inner:has(.charsheet__source-multiselect),
-body.is-charsheet-page .ui-modal__inner:has(.charsheet__spell-list),
-body.is-charsheet-page .ui-modal__inner:has(.charsheet__item-list) {
+body.is-charsheet-page .ve-ui-modal__inner:has(.charsheet__source-multiselect),
+body.is-charsheet-page .ve-ui-modal__inner:has(.charsheet__spell-list),
+body.is-charsheet-page .ve-ui-modal__inner:has(.charsheet__item-list),
+body.is-charsheet-page .ve-ui-modal__inner:has(.charsheet__modal-list) {
 	max-width: 900px;
-	height: min(700px, 75vh) !important;
+	height: min(850px, 85vh) !important;
 }
 
 /* Level-up wizard modal - much larger */
-body.is-charsheet-page .ui-modal__inner:has(.charsheet__levelup-wizard) {
+body.is-charsheet-page .ve-ui-modal__inner:has(.charsheet__levelup-wizard) {
 	max-width: 95vw !important;
 	width: 95vw !important;
 	max-height: 90vh !important;
@@ -11164,59 +11200,50 @@ body.is-charsheet-page .ui-modal__inner:has(.charsheet__levelup-wizard) {
 	padding: var(--cs-space-lg, 1.25rem);
 }
 
-/* Fix hover windows appearing behind level-up modal */
-body.has-levelup-wizard .hwin {
-	z-index: 2000 !important;
-}
-
-body.has-levelup-wizard .hwin .hoverborder {
-	z-index: 2001 !important;
-}
-
 /* Ensure modal scroller allows overflow for dropdowns */
-body.is-charsheet-page .ui-modal__scroller:has(.charsheet__source-multiselect) {
+body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__source-multiselect) {
 	overflow: visible !important;
 }
 
-body.is-charsheet-page .ui-modal__inner h4,
-body.is-charsheet-page .ui-modal__inner h5 {
+body.is-charsheet-page .ve-ui-modal__inner h4,
+body.is-charsheet-page .ve-ui-modal__inner h5 {
 	color: var(--cs-text, inherit);
 	font-weight: 700;
 }
 
-body.is-charsheet-page .ui-modal__inner h4 {
+body.is-charsheet-page .ve-ui-modal__inner h4 {
 	background: linear-gradient(90deg, var(--cs-primary, #6366f1) 0%, var(--cs-accent, #8b5cf6) 100%);
 	-webkit-background-clip: text;
 	-webkit-text-fill-color: transparent;
 	background-clip: text;
 }
 
-body.is-charsheet-page .ui-modal__inner hr {
+body.is-charsheet-page .ve-ui-modal__inner hr {
 	border-color: var(--cs-border, rgba(99, 102, 241, 0.2));
 	margin: var(--cs-space-md, 0.75rem) 0;
 }
 
 /* Modal Scrollbar */
-body.is-charsheet-page .ui-modal__scroller::-webkit-scrollbar {
+body.is-charsheet-page .ve-ui-modal__scroller::-webkit-scrollbar {
 	width: 8px;
 }
 
-body.is-charsheet-page .ui-modal__scroller::-webkit-scrollbar-track {
+body.is-charsheet-page .ve-ui-modal__scroller::-webkit-scrollbar-track {
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.2));
 	border-radius: 4px;
 }
 
-body.is-charsheet-page .ui-modal__scroller::-webkit-scrollbar-thumb {
+body.is-charsheet-page .ve-ui-modal__scroller::-webkit-scrollbar-thumb {
 	background: var(--cs-primary, #6366f1);
 	border-radius: 4px;
 }
 
-body.is-charsheet-page .ui-modal__scroller::-webkit-scrollbar-thumb:hover {
+body.is-charsheet-page .ve-ui-modal__scroller::-webkit-scrollbar-thumb:hover {
 	background: var(--cs-accent, #8b5cf6);
 }
 
 /* Modal Form Controls */
-body.is-charsheet-page .ui-modal__inner .ve-form-control {
+body.is-charsheet-page .ve-ui-modal__inner .ve-form-control {
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.3));
 	border: 2px solid var(--cs-border, rgba(99, 102, 241, 0.2));
 	border-radius: var(--cs-radius-md, 8px);
@@ -12561,15 +12588,6 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
    Combat Method Picker - Modern Glass Morphism Design
    ======================================================================== */
 
-/* Fix hover windows appearing behind modal - CRITICAL */
-body.has-method-picker .hwin {
-	z-index: 2000 !important;
-}
-
-body.has-method-picker .hwin .hoverborder {
-	z-index: 2001 !important;
-}
-
 /* Method Picker Container */
 .charsheet__method-picker {
 	color: var(--cs-text, #e2e8f0);
@@ -13874,11 +13892,6 @@ body.has-method-picker .hwin .hoverborder {
 	justify-content: center;
 	z-index: 10000;
 	padding: var(--cs-space-lg, 1.5rem);
-}
-
-/* Ensure hover windows appear above the modal */
-.hwin {
-	z-index: 10001 !important;
 }
 
 /* Modal content sizing */
@@ -15376,8 +15389,10 @@ body.has-method-picker .hwin .hoverborder {
    Hover Windows in High Z-Index Modals
    ========================================== */
 
-/* Ensure hover windows appear above spell picker and similar modals */
-.hwin {
+/* Cross-sheet hover z-index fix: keeps hover tooltips (.ve-hwin) above ALL
+   modal layers (overlay=1000, inner=1001, sub-modals up to 10003).
+   This single rule replaces per-modal body-class workarounds. */
+.ve-hwin {
 	z-index: 10004 !important;
 }
 
@@ -15791,6 +15806,253 @@ body.has-method-picker .hwin .hoverborder {
 
 	.charsheet__spell-picker-chip-name {
 		max-width: 80px;
+	}
+}
+
+/* ==========================================
+   Spell Picker — Two-Column Layout
+   ========================================== */
+
+.charsheet__spell-picker-selection {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--cs-space-lg, 1rem);
+	min-height: 350px;
+}
+
+.charsheet__spell-picker-list-pane {
+	border: 2px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-lg, 12px);
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	background: var(--cs-bg-base, var(--rgb-bg));
+}
+
+.charsheet__spell-picker-filters {
+	padding: var(--cs-space-md, 0.75rem);
+	background: var(--cs-bg-surface, var(--rgb-bg-alt-grey));
+	border-bottom: 2px solid var(--cs-border, var(--rgb-border-grey));
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.charsheet__spell-picker-search {
+	width: 100%;
+}
+
+.charsheet__spell-picker-filter-selects {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	align-items: center;
+}
+
+.charsheet__spell-picker-list-content {
+	flex: 1;
+	overflow-y: auto;
+	max-height: 400px;
+}
+
+.charsheet__spell-picker-list-content::-webkit-scrollbar {
+	width: 8px;
+}
+
+.charsheet__spell-picker-list-content::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.charsheet__spell-picker-list-content::-webkit-scrollbar-thumb {
+	background: var(--cs-primary, #6366f1);
+	border-radius: 4px;
+}
+
+/* Spell Picker Preview Pane */
+.charsheet__spell-picker-preview {
+	border: 2px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-lg, 12px);
+	padding: var(--cs-space-lg, 1rem);
+	overflow-y: auto;
+	max-height: 500px;
+	background: var(--cs-bg-base, var(--rgb-bg));
+}
+
+.charsheet__spell-picker-preview-placeholder {
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+	text-align: center;
+	padding: var(--cs-space-2xl, 2rem);
+	font-style: italic;
+}
+
+.charsheet__spell-picker-preview-header {
+	margin-bottom: var(--cs-space-md, 0.75rem);
+	padding-bottom: var(--cs-space-sm, 0.5rem);
+	border-bottom: 1px solid var(--cs-border, rgba(99, 102, 241, 0.2));
+}
+
+.charsheet__spell-picker-preview-name {
+	font-size: 1.1rem;
+	font-weight: 700;
+	color: var(--cs-text-primary, var(--rgb-text));
+}
+
+.charsheet__spell-picker-preview-school {
+	font-size: 0.85rem;
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.6));
+	font-style: italic;
+}
+
+.charsheet__spell-picker-preview-info {
+	font-size: 0.85rem;
+	margin-bottom: var(--cs-space-md, 0.75rem);
+	line-height: 1.6;
+}
+
+.charsheet__spell-picker-preview-body {
+	font-size: 0.85rem;
+	line-height: 1.5;
+	margin-top: var(--cs-space-sm, 0.5rem);
+}
+
+/* Spell Picker Section Headers */
+.charsheet__spell-picker-section {
+	margin-bottom: 0;
+}
+
+.charsheet__spell-picker-section:first-child .charsheet__spell-picker-section-title {
+	border-radius: 0;
+}
+
+.charsheet__spell-picker-section-title {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	font-size: 0.75rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.6));
+	padding: 0.5rem 0.75rem;
+	background: linear-gradient(90deg, var(--cs-bg-surface, rgba(30, 30, 46, 0.95)) 0%, var(--cs-bg-surface, rgba(30, 30, 46, 0.9)) 100%);
+	border-bottom: 1px solid var(--cs-border, rgba(99, 102, 241, 0.15));
+}
+
+/* Spell Picker List Items — Builder-Style */
+.charsheet__spell-picker-item {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+	cursor: pointer;
+	border-bottom: 1px solid var(--cs-border, var(--rgb-border-grey));
+	transition: all var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__spell-picker-item:last-child {
+	border-bottom: none;
+}
+
+.charsheet__spell-picker-item:hover {
+	background: rgba(99, 102, 241, 0.1);
+	padding-left: calc(var(--cs-space-md, 0.75rem) + 4px);
+}
+
+.charsheet__spell-picker-item--selected {
+	background: rgba(99, 102, 241, 0.15);
+	border-left: 4px solid var(--cs-primary, #6366f1);
+	padding-left: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__spell-picker-item--selected:hover {
+	background: rgba(99, 102, 241, 0.2);
+	padding-left: calc(var(--cs-space-md, 0.75rem) + 4px);
+}
+
+.charsheet__spell-picker-item--known {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.charsheet__spell-picker-item--known:hover {
+	background: transparent;
+	padding-left: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__spell-picker-item--previewing {
+	background: rgba(139, 92, 246, 0.12);
+	border-left: 4px solid var(--cs-accent, #8b5cf6);
+}
+
+.charsheet__spell-picker-item-info {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.charsheet__spell-picker-item-icon {
+	font-size: 1rem;
+	flex-shrink: 0;
+}
+
+.charsheet__spell-picker-item-name {
+	font-weight: 600;
+	color: var(--cs-text-primary, var(--rgb-text));
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-size: 0.9rem;
+}
+
+.charsheet__spell-picker-item-tags {
+	flex-shrink: 0;
+	font-size: 0.8rem;
+}
+
+.charsheet__spell-picker-item-source {
+	font-size: var(--cs-text-xs, 0.7rem);
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+	background: var(--cs-bg-surface, var(--rgb-bg-alt));
+	padding: 0.1rem 0.4rem;
+	border-radius: var(--cs-radius-sm, 4px);
+	flex-shrink: 0;
+}
+
+.charsheet__spell-picker-item-badge {
+	padding: 0.2rem 0.5rem;
+	font-size: 0.65rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	border-radius: var(--cs-radius-full, 20px);
+	white-space: nowrap;
+}
+
+.charsheet__spell-picker-item-badge--known {
+	background: rgba(16, 185, 129, 0.15);
+	color: var(--cs-success, #10b981);
+}
+
+.charsheet__spell-picker-item .ve-btn-xs {
+	padding: 0.3rem 0.6rem;
+	font-size: 0.8rem;
+	font-weight: 700;
+	border-radius: var(--cs-radius-md, 8px);
+	flex-shrink: 0;
+	min-width: 32px;
+}
+
+/* Responsive: single column on narrow screens */
+@media (max-width: 768px) {
+	.charsheet__spell-picker-selection {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__spell-picker-preview {
+		max-height: 250px;
 	}
 }
 

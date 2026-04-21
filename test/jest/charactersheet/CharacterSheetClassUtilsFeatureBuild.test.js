@@ -100,12 +100,13 @@ describe("CharacterSheetClassUtils optional feature parsing", () => {
 		expect(passiveEffect.value).toBe(3);
 	});
 
-	test("parseFeatureAutoEffects should parse skill PB bonus from optionalfeature", () => {
+	test("parseFeatureAutoEffects should NOT parse skill PB bonus (handled by FeatureModifierParser)", () => {
 		const opt = {type: "optionalfeature", ref: "Observer|TGTT", name: "Observer", source: "TGTT"};
 		const effects = CharacterSheetClassUtils.parseFeatureAutoEffects(opt, [], {optionalFeatures: allOptFeatures});
-		const skillEffect = effects.find(e => e.type === "skill:perception");
-		expect(skillEffect).toBeDefined();
-		expect(skillEffect.value).toBe("proficiency");
+		// PB-based skill bonus is created by FeatureModifierParser via addFeature()._processFeatureModifiers()
+		// parseFeatureAutoEffects should NOT duplicate it — that caused double-counting in passive scores
+		const skillPbEffect = effects.find(e => e.type === "skill:perception" && e.value === "proficiency");
+		expect(skillPbEffect).toBeUndefined();
 	});
 
 	test("parseFeatureSkillChoice should parse proficiency choice from optionalfeature", () => {
