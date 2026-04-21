@@ -42,6 +42,8 @@ class CharacterSheetQuickBuild {
 			spells: [], // batch spell selections
 			hpMethod: "average", // "average" or "roll"
 			hpRolls: {}, // {levelKey: rollResult}
+			_combatTraditions: [], // TGTT combat tradition selections
+			weaponMasteries: [], // XPHB weapon mastery selections
 		};
 
 		// Modal/overlay reference
@@ -146,6 +148,8 @@ class CharacterSheetQuickBuild {
 			spells: [],
 			hpMethod: "average",
 			hpRolls: {},
+			_combatTraditions: [],
+			weaponMasteries: [],
 		};
 		this._levelAnalysis = [];
 		this._steps = [];
@@ -4083,7 +4087,7 @@ class CharacterSheetQuickBuild {
 		}
 
 		// Apply combat traditions (if selected during QB)
-		if (this._selections._combatTraditions?.length > 0) {
+		if (this._selections._combatTraditions != null) {
 			this._state.setCombatTraditions(this._selections._combatTraditions);
 		}
 

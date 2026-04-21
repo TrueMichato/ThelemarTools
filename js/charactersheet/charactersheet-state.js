@@ -5658,14 +5658,29 @@ class CharacterSheetState {
 		const stateBonus = this.getSaveBonusFromStates(ability);
 		// Combat stance save bonus (Thelemar homebrew)
 		const stanceBonus = this._getStanceSaveBonus(ability);
+		// Paladin Aura of Protection (level 6+): add CHA mod to all saving throws
+		const auraBonus = this._getAuraOfProtectionBonus();
 		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
 		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus - exhaustionPenalty;
+		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus - exhaustionPenalty;
 	}
 
 	// Alias for test compatibility
 	getSaveModifier (ability) {
 		return this.getSaveMod(ability);
+	}
+
+	/**
+	 * Get Paladin Aura of Protection bonus (CHA mod to all saves when Paladin level >= 6).
+	 * @returns {number} CHA mod (minimum 0) if Paladin 6+, otherwise 0
+	 */
+	_getAuraOfProtectionBonus () {
+		for (const cls of this._data.classes) {
+			if (cls.name?.toLowerCase() === "paladin" && cls.level >= 6) {
+				return Math.max(0, this.getAbilityMod("cha"));
+			}
+		}
+		return 0;
 	}
 	// #endregion
 
@@ -7513,10 +7528,23 @@ class CharacterSheetState {
 			"Gambler": "1/3",
 		};
 
-		// Calculate total caster level (for multiclassing)
+		// Calculate total caster level
+		// Single-class: use class table (ceil for half-casters maps to PHB table)
+		// Multiclass: use PHB p.164 rules (floor for half/third casters)
 		let casterLevel = 0;
 		let isWarlock = false;
 		let warlockLevel = 0;
+
+		// Count how many non-pact caster classes contribute
+		const casterClasses = classes.filter(c => {
+			const prog = c.casterProgression
+				|| c.subclass?.casterProgression
+				|| subclassProgressionFallback[c.subclass?.name]
+				|| classProgressionFallback[c.name]
+				|| null;
+			return prog && prog !== "pact";
+		});
+		const isMulticlassCaster = casterClasses.length > 1;
 
 		for (const cls of classes) {
 			const className = cls.name;
@@ -7537,13 +7565,15 @@ class CharacterSheetState {
 				// Full casters: each level counts
 				casterLevel += level;
 			} else if (progression === "1/2") {
-				// Half casters (Paladin, Ranger): round UP per 2024 multiclass rules
-				casterLevel += Math.ceil(level / 2);
+				// Half casters (Paladin, Ranger):
+				// Single-class: ceil matches the class spell slot table
+				// Multiclass: floor per PHB p.164 multiclass rules
+				casterLevel += isMulticlassCaster ? Math.floor(level / 2) : Math.ceil(level / 2);
 			} else if (progression === "1/3") {
 				// Third casters (Eldritch Knight, Arcane Trickster): round DOWN
 				casterLevel += Math.floor(level / 3);
 			} else if (progression === "artificer") {
-				// Artificer progression: round up (same as half caster)
+				// Artificer progression: round up
 				casterLevel += Math.ceil(level / 2);
 			}
 			// Non-caster classes (no progression) don't contribute
@@ -8782,8 +8812,8 @@ class CharacterSheetState {
 									calculations.spellcastingAbility = "int";
 									calculations.spellSaveDc = 8 + profBonus + this.getAbilityMod("int") - exhaustionPenalty;
 									calculations.spellAttackBonus = profBonus + this.getAbilityMod("int") - exhaustionPenalty;
-									// Cantrips known: 3 at level 3, +1 at level 10 (3 total)
-									calculations.cantripsKnown = level >= 10 ? 3 : 3;
+									// Cantrips known: 3 at level 3, 4 at level 10
+									calculations.cantripsKnown = level >= 10 ? 4 : 3;
 									// Spells known (PHB) or prepared (XPHB)
 									if (is2024) {
 										// XPHB prepared spell progression
@@ -23072,14 +23102,16 @@ class CharacterSheetState {
 		const calculatedMax = profBonus * 2;
 
 
-		if (this._data.staminaMax !== calculatedMax) {
+		const previousMax = this._data.staminaMax;
+		if (previousMax !== calculatedMax) {
 			this._data.staminaMax = calculatedMax;
-			// If current exceeds new max, adjust it
-			if ((this._data.staminaCurrent || 0) > calculatedMax) {
+			// If current exceeds new max, cap it
+			if (this._data.staminaCurrent > calculatedMax) {
 				this._data.staminaCurrent = calculatedMax;
 			}
-			// If current was 0 (never set), initialize to full
-			if (!this._data.staminaCurrent) {
+			// Only auto-fill on first initialization (previousMax was 0 = never set).
+			// If previousMax > 0, stamina was already in use and a current of 0 is valid (all spent).
+			if (!previousMax) {
 				this._data.staminaCurrent = calculatedMax;
 			}
 		}
@@ -30869,10 +30901,11 @@ class CharacterSheetState {
 		let bonus = this.getSaveMod("con");
 
 		// Add concentration-specific bonuses from named modifiers
-		// This catches Bladesong (+INT to concentration), and any feature that adds
-		// a bonus specifically to concentration saves
 		const concMods = this.aggregateModifiers("concentration");
 		bonus += concMods.bonus || 0;
+
+		// Add concentration bonuses from active states (e.g., Bladesong +INT to concentration saves)
+		bonus += this.getBonusFromStates("concentration");
 
 		// Add item bonus for concentration saves (e.g., War Caster's Staff, homebrew items)
 		bonus += this._data.itemBonuses?.savingThrowConcentration || 0;

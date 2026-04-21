@@ -3425,7 +3425,7 @@ class CharacterSheetLevelUp {
 			}
 		}
 
-		if (selectedCombatTraditions?.length) {
+		if (selectedCombatTraditions != null) {
 			this._state.setCombatTraditions([...selectedCombatTraditions]);
 		}
 
