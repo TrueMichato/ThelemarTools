@@ -2056,10 +2056,13 @@
         "F",
         "ER|TalDoreiCampaignSettingReborn"
       ],
-      "range": "5/20",
+      "mastery": [
+        "Slow|XPHB"
+      ],
       "dmg1": "1d4",
       "dmgType": "S",
       "reach": 20,
+      "weapon": true,
       "entries": [
         "A sturdy, longer version of a regular whip, which is more easily used by whip fighters in various situations that require reach."
       ]
@@ -2077,8 +2080,12 @@
         "F",
         "R"
       ],
+      "mastery": [
+        "Sap|XPHB"
+      ],
       "dmg1": "1d6",
       "dmgType": "S",
+      "weapon": true,
       "entries": [
         "Also called \"Unicorn Whip\", this weapon is made from steel rods decreasing in size linked by progressively smaller steel rings, enabling the user to inflict far graver damage to the enemy with quick, devastating blows."
       ]
@@ -2097,9 +2104,12 @@
         "R",
         "S"
       ],
-      "range": "10/10",
+      "mastery": [
+        "Slow|XPHB"
+      ],
       "dmg1": "1d4",
       "dmgType": "S",
+      "weapon": true,
       "entries": [
         "Invented by cattle farmers to control their herd, this weapon is known for it's ability to produce a startling noise that draws attention.",
         "Special - Instead of attacking, the user can attempt to crack with the whip. Every creature who can hear in a 15ft radius of the user that is concentrating on a spell must attempt a {@dc 10} Constitution Saving Throw. On failure, they lose {@status concentration}."
