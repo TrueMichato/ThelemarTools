@@ -630,7 +630,7 @@ class TgttFilterModalUI {
 
 	_watchForFilterModal () {
 		const modalObserver = new MutationObserver(() => {
-			const isModalOpen = document.body.classList.contains("ui-modal__body-active");
+			const isModalOpen = document.body.classList.contains("ve-ui-modal__body-active");
 			if (isModalOpen && !this._injected) {
 				setTimeout(() => this._injectFilterUI(), 100);
 			} else if (!isModalOpen) {
@@ -648,7 +648,7 @@ class TgttFilterModalUI {
 			return;
 		}
 
-		const modalScroller = document.querySelector(".ui-modal__scroller");
+		const modalScroller = document.querySelector(".ve-ui-modal__scroller");
 		if (!modalScroller) return;
 
 		// Create filter sections
@@ -667,7 +667,7 @@ class TgttFilterModalUI {
 		]);
 
 		// Find insertion point
-		const saveButtons = modalScroller.querySelector(".w-100.ve-flex-vh-center.my-1");
+		const saveButtons = modalScroller.querySelector(".ve-w-100.ve-flex-vh-center.ve-my-1");
 		if (saveButtons) {
 			modalScroller.insertBefore(raritySection, saveButtons);
 			modalScroller.insertBefore(legalitySection, saveButtons);
