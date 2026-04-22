@@ -5952,7 +5952,7 @@ class CharacterSheetCombat {
 		// Add class for styling and make sure hovers appear above
 		modalInner.classList.add("charsheet__method-picker");
 		document.body.classList.add("has-method-picker");
-		modalInner.closest(".ui-modal__inner").style.zIndex = "1500";
+		modalInner.closest(".ve-ui-modal__inner").style.zIndex = "1500";
 
 		// Create content container
 		const content = e_({outer: `<div class="ve-flex-col h-100"></div>`}); modalInner.append(content);

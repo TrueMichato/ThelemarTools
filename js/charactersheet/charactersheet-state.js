@@ -17536,6 +17536,9 @@ class CharacterSheetState {
 		}
 		this._data._classFeatureCombatTraditions = [];
 
+		// Clear roll floors (Reliable Talent, etc.) so stale entries don't persist
+		this._data.rollFloors = {};
+
 		// Clear applied effects list
 		this._data.appliedClassFeatureEffects = [];
 	}

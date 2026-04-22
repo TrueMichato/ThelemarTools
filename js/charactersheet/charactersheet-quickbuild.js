@@ -1793,7 +1793,7 @@ class CharacterSheetQuickBuild {
 				const skillGrid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
 
 				const availableSkills = choices.skills.from.map(s => s.toLowerCase().replace(/\s+/g, ""));
-				const existingSkills = new Set((this._state.getSkillProficiencies?.() || []).map(s => s.toLowerCase()));
+				const existingSkills = new Set(Object.keys(this._state.getSkillProficiencies?.() || {}).map(s => s.toLowerCase()));
 
 				availableSkills.forEach(skill => {
 					const isKnown = existingSkills.has(skill);

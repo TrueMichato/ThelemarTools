@@ -198,6 +198,45 @@ describe("Rogue Core Class Features (PHB)", () => {
 			const calculations = state.getFeatureCalculations();
 			expect(calculations.reliableTalentMinimum).toBe(10);
 		});
+
+		it("should populate rollFloors after applyClassFeatureEffects", () => {
+			state.addClass({name: "Rogue", source: "PHB", level: 11});
+			state.setSkillProficiency("stealth", 1);
+			state.applyClassFeatureEffects();
+			expect(state._data.rollFloors).toBeDefined();
+			expect(state._data.rollFloors.skill).toBeDefined();
+			expect(state._data.rollFloors.skill["all"]).toBeDefined();
+			expect(state._data.rollFloors.skill["all"].minimum).toBe(10);
+			expect(state._data.rollFloors.skill["all"].requiresProficiency).toBe(true);
+		});
+
+		it("should apply minimum 10 to proficient skill via aggregateModifiers", () => {
+			state.addClass({name: "Rogue", source: "PHB", level: 11});
+			state.setSkillProficiency("stealth", 1);
+			state.applyClassFeatureEffects();
+			const agg = state.aggregateModifiers("skill:stealth");
+			expect(agg.minimum).toBe(10);
+		});
+
+		it("should NOT apply minimum to unproficient skill", () => {
+			state.addClass({name: "Rogue", source: "PHB", level: 11});
+			// arcana is not proficient
+			state.applyClassFeatureEffects();
+			const agg = state.aggregateModifiers("skill:arcana");
+			expect(agg.minimum).toBeNull();
+		});
+
+		it("should clear rollFloors when level drops below 11", () => {
+			state.addClass({name: "Rogue", source: "PHB", level: 11});
+			state.setSkillProficiency("stealth", 1);
+			state.applyClassFeatureEffects();
+			expect(state._data.rollFloors.skill["all"]).toBeDefined();
+
+			// Drop level
+			state.addClass({name: "Rogue", source: "PHB", level: 10});
+			state.applyClassFeatureEffects();
+			expect(state._data.rollFloors.skill?.["all"]).toBeUndefined();
+		});
 	});
 
 	// -------------------------------------------------------------------------
