@@ -200,12 +200,14 @@
 					<div class="charsheet__textsize-dropdown" id="charsheet-textsize-dropdown">
 						<div class="charsheet__textsize-dropdown-content">
 							<div class="charsheet__textsize-header">Text Size</div>
-							<div class="charsheet__textsize-slider-container">
+							<div class="charsheet__textsize-input-container">
 								<button class="charsheet__textsize-btn charsheet__textsize-btn--decrease" id="charsheet-textsize-decrease" title="Decrease text size">−</button>
-								<input type="range" class="charsheet__textsize-slider" id="charsheet-textsize-slider" min="80" max="150" value="100" step="5">
+								<div class="charsheet__textsize-input-wrapper">
+									<input type="number" class="charsheet__textsize-input" id="charsheet-textsize-input" min="80" max="250" value="100">
+									<span class="charsheet__textsize-input-suffix">%</span>
+								</div>
 								<button class="charsheet__textsize-btn charsheet__textsize-btn--increase" id="charsheet-textsize-increase" title="Increase text size">+</button>
 							</div>
-							<div class="charsheet__textsize-value"><span id="charsheet-textsize-value">100</span>%</div>
 							<div class="charsheet__textsize-presets">
 								<button class="charsheet__textsize-preset" data-size="85">Small</button>
 								<button class="charsheet__textsize-preset charsheet__textsize-preset--active" data-size="100">Normal</button>

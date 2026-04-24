@@ -79,6 +79,15 @@ function getLanguageNamesSorted (page) {
 		} else if (lang.source === Parser.SRC_XPHB && !prioritySources.includes(existing.source)) {
 			langMap.set(lang.name, {name: lang.name, source: lang.source});
 		}
+
+		// Also add dialect names so they appear as choosable languages
+		if (lang.dialects?.length) {
+			for (const dialect of lang.dialects) {
+				if (!langMap.has(dialect)) {
+					langMap.set(dialect, {name: dialect, source: lang.source});
+				}
+			}
+		}
 	});
 
 	if (isTgtt) {
@@ -130,6 +139,15 @@ function getLanguageOptionsGrouped (page) {
 			langMap.set(lang.name, {name: lang.name, source: lang.source});
 		} else if (lang.source === Parser.SRC_XPHB && !prioritySources.includes(existing.source)) {
 			langMap.set(lang.name, {name: lang.name, source: lang.source});
+		}
+
+		// Also add dialect names so they appear as choosable languages
+		if (lang.dialects?.length) {
+			for (const dialect of lang.dialects) {
+				if (!langMap.has(dialect)) {
+					langMap.set(dialect, {name: dialect, source: lang.source});
+				}
+			}
 		}
 	});
 
@@ -534,5 +552,235 @@ describe("groupLanguagesByType (builder _groupLanguagesByType mirror)", () => {
 		const result = groupLanguagesByType(["Zyrax", "Aurobec", "Mellishian"], page);
 
 		expect(result.homebrew).toEqual(["Aurobec", "Mellishian", "Zyrax"]);
+	});
+});
+
+describe("Dialect display (Ignan/Primordial bug)", () => {
+	// Build dialect parent map the same way charactersheet.js does
+	function buildDialectParentMap (languagesData) {
+		const dialectParentMap = {};
+		for (const lang of languagesData) {
+			if (!lang.dialects?.length) continue;
+			for (const dialect of lang.dialects) {
+				const key = dialect.toLowerCase();
+				if (!dialectParentMap[key] || lang.source === Parser.SRC_XPHB) {
+					dialectParentMap[key] = {name: lang.name, source: lang.source};
+				}
+			}
+		}
+		return dialectParentMap;
+	}
+
+	// Re-implement getHoverLink matching the static method in charactersheet.js,
+	// to avoid importing the full CharacterSheetPage module tree.
+	function getHoverLink (page, name, source, hash = null, displayName = null) {
+		const finalHash = hash || [name, source].join("_").toLowerCase();
+		return `<a href="${page}#${finalHash}">${displayName || name}</a>`;
+	}
+
+	// Simulate the rendering path for a single language from _renderProficiencies
+	function renderLanguageLink (lang, dialectParentMap, languagesData) {
+		const langLower = lang.toLowerCase();
+		const dialectParent = dialectParentMap[langLower];
+		if (dialectParent) {
+			return getHoverLink("languages.html", dialectParent.name, dialectParent.source, null, lang);
+		}
+		const langData = languagesData?.find(l => l.name.toLowerCase() === langLower);
+		if (!langData) return lang;
+		return getHoverLink("languages.html", lang, langData.source);
+	}
+
+	const PRIMORDIAL_PHB = {
+		name: "Primordial", source: "PHB", type: "exotic",
+		dialects: ["Auran", "Aquan", "Ignan", "Terran"],
+	};
+	const PRIMORDIAL_XPHB = {
+		name: "Primordial", source: "XPHB", type: "rare",
+		dialects: ["Auran", "Aquan", "Ignan", "Terran"],
+	};
+
+	test("dialect parent map maps all four Primordial dialects", () => {
+		const map = buildDialectParentMap([PRIMORDIAL_PHB]);
+		expect(map["ignan"]).toEqual({name: "Primordial", source: "PHB"});
+		expect(map["aquan"]).toEqual({name: "Primordial", source: "PHB"});
+		expect(map["auran"]).toEqual({name: "Primordial", source: "PHB"});
+		expect(map["terran"]).toEqual({name: "Primordial", source: "PHB"});
+	});
+
+	test("XPHB source takes priority in dialect parent map", () => {
+		const map = buildDialectParentMap([PRIMORDIAL_PHB, PRIMORDIAL_XPHB]);
+		expect(map["ignan"]).toEqual({name: "Primordial", source: "XPHB"});
+	});
+
+	test("rendering a dialect shows dialect name, not parent language name", () => {
+		const map = buildDialectParentMap([PRIMORDIAL_PHB]);
+		const result = renderLanguageLink("Ignan", map, PHB_LANGUAGES);
+		expect(result).toContain(">Ignan<");
+		expect(result).not.toContain(">Primordial<");
+	});
+
+	test("rendering a dialect links to the parent language page", () => {
+		const map = buildDialectParentMap([PRIMORDIAL_PHB]);
+		const result = renderLanguageLink("Ignan", map, PHB_LANGUAGES);
+		// The href hash should reference Primordial, not Ignan
+		expect(result).toMatch(/href="languages\.html#.*primordial/i);
+	});
+
+	test("all four Primordial dialects render with their own name", () => {
+		const map = buildDialectParentMap([PRIMORDIAL_PHB]);
+		for (const dialect of ["Ignan", "Aquan", "Auran", "Terran"]) {
+			const result = renderLanguageLink(dialect, map, PHB_LANGUAGES);
+			expect(result).toContain(`>${dialect}<`);
+			expect(result).not.toContain(">Primordial<");
+		}
+	});
+
+	test("non-dialect language renders normally", () => {
+		const map = buildDialectParentMap([PRIMORDIAL_PHB]);
+		const result = renderLanguageLink("Celestial", map, PHB_LANGUAGES);
+		expect(result).toContain(">Celestial<");
+	});
+
+	test("getHoverLink without displayName uses entity name as before", () => {
+		const result = getHoverLink("languages.html", "Primordial", "PHB");
+		expect(result).toContain(">Primordial<");
+	});
+
+	test("dialects appear as selectable options in exotic group", () => {
+		const page = makePage({languagesData: [...PHB_LANGUAGES, PRIMORDIAL_PHB]});
+		const result = getLanguageOptionsGrouped(page);
+		// Dialects from Parser.LANGUAGES_EXOTIC fallback (no standalone data entries)
+		expect(result.exotic).toContain("Ignan");
+		expect(result.exotic).toContain("Aquan");
+		expect(result.exotic).toContain("Auran");
+		expect(result.exotic).toContain("Terran");
+	});
+
+	test("state stores dialect name as-is (not parent)", () => {
+		const state = new globalThis.CharacterSheetState();
+		state.addLanguage("Ignan");
+		expect(state.getLanguages()).toContain("Ignan");
+		expect(state.getLanguages()).not.toContain("Primordial");
+	});
+
+	test("save/load round-trip preserves dialect name", () => {
+		const state = new globalThis.CharacterSheetState();
+		state.addLanguage("Common");
+		state.addLanguage("Ignan");
+		state.addLanguage("Aquan");
+
+		const json = state.toJson();
+		const state2 = new globalThis.CharacterSheetState();
+		state2.loadFromJson(json);
+
+		expect(state2.getLanguages()).toContain("Ignan");
+		expect(state2.getLanguages()).toContain("Aquan");
+		expect(state2.getLanguages()).not.toContain("Primordial");
+	});
+});
+
+describe("Dialect availability and conflict detection", () => {
+	const PRIMORDIAL_PHB = {
+		name: "Primordial", source: "PHB", type: "exotic",
+		dialects: ["Auran", "Aquan", "Ignan", "Terran"],
+	};
+	const PRIMORDIAL_XPHB = {
+		name: "Primordial", source: "XPHB", type: "rare",
+		dialects: ["Auran", "Aquan", "Ignan", "Terran"],
+	};
+
+	// Re-implement getDialectConflicts matching charactersheet.js
+	function buildDialectMaps (languagesData) {
+		const dialectParentMap = {};
+		const dialectFamilyMap = {};
+		for (const lang of languagesData) {
+			if (!lang.dialects?.length) continue;
+			const parentKey = lang.name.toLowerCase();
+			if (!dialectFamilyMap[parentKey] || lang.source === Parser.SRC_XPHB) {
+				dialectFamilyMap[parentKey] = lang.dialects.map(d => d);
+			}
+			for (const dialect of lang.dialects) {
+				const key = dialect.toLowerCase();
+				if (!dialectParentMap[key] || lang.source === Parser.SRC_XPHB) {
+					dialectParentMap[key] = {name: lang.name, source: lang.source};
+				}
+			}
+		}
+		return {dialectParentMap, dialectFamilyMap};
+	}
+
+	function getDialectConflicts (langName, dialectParentMap, dialectFamilyMap) {
+		const key = langName.toLowerCase();
+		const parent = dialectParentMap[key];
+		if (parent) return [parent.name];
+		const dialects = dialectFamilyMap[key];
+		if (dialects) return [...dialects];
+		return [];
+	}
+
+	test("dialect returns only parent as conflict", () => {
+		const {dialectParentMap, dialectFamilyMap} = buildDialectMaps([PRIMORDIAL_PHB]);
+		expect(getDialectConflicts("Ignan", dialectParentMap, dialectFamilyMap)).toEqual(["Primordial"]);
+		expect(getDialectConflicts("Aquan", dialectParentMap, dialectFamilyMap)).toEqual(["Primordial"]);
+	});
+
+	test("parent returns all dialects as conflicts", () => {
+		const {dialectParentMap, dialectFamilyMap} = buildDialectMaps([PRIMORDIAL_PHB]);
+		const conflicts = getDialectConflicts("Primordial", dialectParentMap, dialectFamilyMap);
+		expect(conflicts).toContain("Auran");
+		expect(conflicts).toContain("Aquan");
+		expect(conflicts).toContain("Ignan");
+		expect(conflicts).toContain("Terran");
+		expect(conflicts).toHaveLength(4);
+	});
+
+	test("dialect does NOT conflict with sibling dialects", () => {
+		const {dialectParentMap, dialectFamilyMap} = buildDialectMaps([PRIMORDIAL_PHB]);
+		const conflicts = getDialectConflicts("Ignan", dialectParentMap, dialectFamilyMap);
+		expect(conflicts).not.toContain("Aquan");
+		expect(conflicts).not.toContain("Auran");
+		expect(conflicts).not.toContain("Terran");
+	});
+
+	test("non-dialect non-parent language returns empty conflicts", () => {
+		const {dialectParentMap, dialectFamilyMap} = buildDialectMaps([PRIMORDIAL_PHB]);
+		expect(getDialectConflicts("Celestial", dialectParentMap, dialectFamilyMap)).toEqual([]);
+		expect(getDialectConflicts("Common", dialectParentMap, dialectFamilyMap)).toEqual([]);
+	});
+
+	test("XPHB preferred in dialect maps", () => {
+		const {dialectParentMap, dialectFamilyMap} = buildDialectMaps([PRIMORDIAL_PHB, PRIMORDIAL_XPHB]);
+		expect(getDialectConflicts("Ignan", dialectParentMap, dialectFamilyMap)).toEqual(["Primordial"]);
+		// Parent map should use XPHB source
+		expect(dialectParentMap["ignan"].source).toBe("XPHB");
+	});
+
+	test("getLanguageNamesSorted includes dialects from Primordial entry", () => {
+		const page = makePage({languagesData: [...PHB_LANGUAGES, PRIMORDIAL_PHB]});
+		const result = getLanguageNamesSorted(page);
+		expect(result).toContain("Ignan");
+		expect(result).toContain("Aquan");
+		expect(result).toContain("Auran");
+		expect(result).toContain("Terran");
+		expect(result).toContain("Primordial");
+	});
+
+	test("getLanguageOptionsGrouped includes dialects in exotic group via langMap", () => {
+		const page = makePage({languagesData: [...PHB_LANGUAGES, PRIMORDIAL_PHB]});
+		const result = getLanguageOptionsGrouped(page);
+		expect(result.exotic).toContain("Ignan");
+		expect(result.exotic).toContain("Aquan");
+		expect(result.exotic).toContain("Auran");
+		expect(result.exotic).toContain("Terran");
+		expect(result.exotic).toContain("Primordial");
+	});
+
+	test("dialects are available even without Parser.LANGUAGES_EXOTIC fallback", () => {
+		// If Parser.LANGUAGES_EXOTIC didn't include dialects, they'd still appear
+		// because we inject them from the parent's dialects array
+		const page = makePage({languagesData: [PRIMORDIAL_PHB]});
+		const result = getLanguageNamesSorted(page);
+		expect(result).toContain("Ignan");
+		expect(result).toContain("Primordial");
 	});
 });

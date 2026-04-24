@@ -3238,8 +3238,7 @@ class CharacterSheetQuickBuild {
 			const existingSpellbook = this._state.getWizardSpellbook?.() || [];
 			const knownSpellIds = new Set(existingSpellbook.map(s => `${s.name}|${s.source}`));
 
-			const allSpells = this._page.getSpells() || [];
-			const sourceFiltered = this._page.filterByAllowedSources(allSpells);
+			const sourceFiltered = this._page.getFilteredSpellData();
 
 			const section = CharacterSheetSpellPicker.renderWizardSpellbookPicker({
 				spellCount: totalSpellbookSpells,
@@ -3293,8 +3292,7 @@ class CharacterSheetQuickBuild {
 		const knownCantrips = this._state.getCantripsKnown?.() || [];
 		const knownSpellIds = new Set([...knownSpells, ...knownCantrips].map(s => `${s.name}|${s.source}`));
 
-		const allSpells = this._page.getSpells() || [];
-		const sourceFiltered = this._page.filterByAllowedSources(allSpells);
+		const sourceFiltered = this._page.getFilteredSpellData();
 
 		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
 			className,
@@ -3389,8 +3387,7 @@ class CharacterSheetQuickBuild {
 		const preparedSpells = this._state.getPreparedSpells?.() || [];
 		const knownSpellIds = new Set([...knownSpells, ...knownCantrips, ...preparedSpells].map(s => `${s.name}|${s.source}`));
 
-		const allSpells = this._page.getSpells() || [];
-		const sourceFiltered = this._page.filterByAllowedSources(allSpells);
+		const sourceFiltered = this._page.getFilteredSpellData();
 
 		const section = CharacterSheetSpellPicker.renderKnownSpellPicker({
 			className,
@@ -3593,6 +3590,10 @@ class CharacterSheetQuickBuild {
 		// Helper to create hoverable entity link
 		const makeHoverLink = (entity, page) => {
 			try {
+				// For spells, use getSpellHoverLink for charsheet-aware hover
+				if (page === UrlUtil.PG_SPELLS && this._page?.getSpellHoverLink) {
+					return this._page.getSpellHoverLink(entity.name, entity.source || "XPHB", entity, null);
+				}
 				const source = entity.source || "XPHB";
 				const hash = UrlUtil.URL_TO_HASH_BUILDER[page]?.(entity) || `${UrlUtil.encodeForHash(entity.name)}${HASH_PART_SEP}${UrlUtil.encodeForHash(source)}`;
 				const hoverAttrs = Renderer.hover.getHoverElementAttributes({page, source, hash});
@@ -3977,6 +3978,7 @@ class CharacterSheetQuickBuild {
 						source: selectedSubclass.source,
 						casterProgression: selectedSubclass.casterProgression,
 						spellcastingAbility: selectedSubclass.spellcastingAbility,
+						additionalSpells: selectedSubclass.additionalSpells,
 					};
 					if (selectedSubclass.casterProgression && !targetClass.casterProgression) {
 						targetClass.casterProgression = selectedSubclass.casterProgression;
@@ -4095,6 +4097,10 @@ class CharacterSheetQuickBuild {
 			const historyEntry = this._buildHistoryEntry(analysis, levelKey);
 			pendingHistoryEntries.push(historyEntry);
 		}
+
+		// Recalculate HP from scratch and sync current = max
+		// This corrects any drift from incremental additions and ensures CON changes are reflected
+		this._state.recalculateHp({syncCurrent: true});
 
 		// Post-loop finalizations
 

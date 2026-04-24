@@ -5270,6 +5270,20 @@ class CharacterSheetState {
 		}
 	}
 
+	/**
+	 * Recalculate max HP from class levels + CON, then optionally sync current HP to max.
+	 * Use at build/levelup/multiclass completion points to ensure HP is correct.
+	 * @param {Object} [opts]
+	 * @param {boolean} [opts.syncCurrent=false] If true, set current HP = max HP after recalculation.
+	 */
+	recalculateHp ({syncCurrent = false} = {}) {
+		this._recalculateMaxHp();
+		if (syncCurrent) {
+			this._data.hp.current = this._data.hp.max;
+			this._updateBloodiedCondition();
+		}
+	}
+
 	setTempHp (hp) {
 		if (hp < 0) return false;
 		this._data.hp.temp = hp;
@@ -7967,6 +7981,23 @@ class CharacterSheetState {
 					}
 				}
 			}
+
+			// Process "innate" entries (level-keyed, granted as innate spells/cantrips)
+			// e.g., "innate": { "0": ["light#c"] } — key "0" means always available, "#c" marks cantrips
+			if (spellBlock.innate) {
+				for (const [levelKey, spells] of Object.entries(spellBlock.innate)) {
+					const reqLevel = parseInt(levelKey);
+					// Key "0" means always available (no level requirement)
+					if (isNaN(reqLevel) || (reqLevel > 0 && characterLevel < reqLevel)) continue;
+
+					for (const spellRef of spells) {
+						const parsed = this._parseSpellReference(spellRef);
+						if (parsed) {
+							result.push({...parsed, alwaysPrepared: true, prepared: true, sourceFeature: `${subclassData.name} Spells`, sourceClass: cls.name});
+						}
+					}
+				}
+			}
 		}
 
 		return result;
@@ -7974,18 +8005,21 @@ class CharacterSheetState {
 
 	/**
 	 * Parse a spell reference from additionalSpells data.
-	 * Handles string references like "bless" and "bless|PHB", and object references.
+	 * Handles string references like "bless", "bless|PHB", "light#c", "mind sliver|tce#c",
+	 * and object references. The "#c" suffix marks cantrips.
 	 * @param {string|object} spellRef - The spell reference
-	 * @returns {object|null} {name, source, level} or null
+	 * @returns {object|null} {name, source, level, isCantrip} or null
 	 */
 	_parseSpellReference (spellRef) {
 		if (!spellRef) return null;
 		if (typeof spellRef === "string") {
-			const [name, source] = spellRef.split("|");
-			return {name: name.trim(), source: source || "PHB", level: null};
+			const isCantrip = spellRef.endsWith("#c");
+			const cleanRef = isCantrip ? spellRef.slice(0, -2) : spellRef;
+			const [name, source] = cleanRef.split("|");
+			return {name: name.trim(), source: source || "PHB", level: null, isCantrip};
 		}
 		if (typeof spellRef === "object" && spellRef.name) {
-			return {name: spellRef.name, source: spellRef.source || "PHB", level: spellRef.level ?? null};
+			return {name: spellRef.name, source: spellRef.source || "PHB", level: spellRef.level ?? null, isCantrip: false};
 		}
 		return null;
 	}
@@ -8002,6 +8036,24 @@ class CharacterSheetState {
 			const spells = this.getSubclassAlwaysPreparedSpells(cls);
 
 			for (const spell of spells) {
+				// Innate cantrips go to cantripsKnown, not spellsKnown
+				if (spell.isCantrip) {
+					const existingCantrip = this._data.spellcasting.cantripsKnown.find(
+						s => s.name.toLowerCase() === spell.name.toLowerCase()
+							&& (s.source === spell.source || !spell.source),
+					);
+					if (!existingCantrip) {
+						this.addCantrip({
+							name: spell.name,
+							source: spell.source,
+							sourceFeature: spell.sourceFeature,
+							sourceClass: spell.sourceClass || cls.name,
+						});
+						totalAdded++;
+					}
+					continue;
+				}
+
 				// Check if already exists
 				const existing = this._data.spellcasting.spellsKnown.find(
 					s => s.name.toLowerCase() === spell.name.toLowerCase()
@@ -16850,6 +16902,35 @@ class CharacterSheetState {
 		// Storm Guide (Storm Sorcery): control weather around you
 		// (Active ability, narrative)
 
+		// Sunlit Path (Sun Bloodline 6): +15 walking speed, radiant resistance
+		if (calculations.hasSunlitPath && !alreadyProcessed("Sunlit Path")) {
+			effects.push({
+				type: "speed",
+				speedType: "walk",
+				value: calculations.sunlitPathSpeedBonus || 15,
+				source: "Sunlit Path",
+			});
+			if (calculations.hasRadiantResistance) {
+				effects.push({
+					type: "resistance",
+					damageType: "radiant",
+					source: "Sunlit Path",
+				});
+			}
+		}
+
+		// Glimpse of the Sun (Sun Bloodline 1): blinding light, sorcery point cost
+		// (Active ability, tracked as uses/SP cost)
+
+		// Summer's Defiant Blood (Sun Bloodline 1): CHA mod to spell damage after being attacked
+		// (Reactive ability, triggered by being attacked)
+
+		// Grasping the Sun (Sun Bloodline 14): reaction damage reduction + radiant retaliation
+		// (Reactive ability, tracked by feature calculations)
+
+		// Bright Zenith (Sun Bloodline 18): AoE blind + blindsight, 6 SP cost
+		// (Active ability, tracked as SP cost)
+
 		// =========================================================
 		// BARD FEATURES
 		// =========================================================
@@ -17021,6 +17102,9 @@ class CharacterSheetState {
 	applyClassFeatureEffects () {
 		// First, clear all previously applied class feature effects
 		this._clearClassFeatureEffects();
+
+		// Populate subclass spells (domain spells, patron spells, origin spells, etc.)
+		this.populateSubclassSpells();
 
 		const calculations = this.getFeatureCalculations();
 		const effects = calculations._effects || [];
@@ -32924,11 +33008,11 @@ class CharacterSheetState {
 		if (this._data.tunedMetamagics.includes(key)) return false; // Already tuned
 
 		const res = this._getSpResource();
-		if (!res || res.max < metamagic.cost) return false;
+		if (!res || res.max < metamagic.cost || res.current < metamagic.cost) return false;
 
 		// Reduce max and current by cost
 		res.max -= metamagic.cost;
-		res.current = Math.min(res.current, res.max);
+		res.current = Math.max(0, Math.min(res.current - metamagic.cost, res.max));
 
 		this._data.tunedMetamagics.push(key);
 		return true;
@@ -33126,6 +33210,164 @@ class CharacterSheetState {
 				key,
 				tuned: this.isMetamagicTuned(key),
 			}));
+	}
+
+	/**
+	 * Compute modified spell stats based on currently tuned passive metamagics.
+	 * Works with raw spell data objects (structured range/duration from 5etools data).
+	 * Returns original and modified values for display, plus informational notes.
+	 * @param {object} spellData - Full spell data object with structured range/duration
+	 * @returns {object} { range: {original, modified, changed}, duration: {original, modified, changed}, notes: string[] }
+	 */
+	getModifiedSpellStats (spellData) {
+		const result = {
+			range: {original: null, modified: null, changed: false},
+			duration: {original: null, modified: null, changed: false},
+			notes: [],
+		};
+		const tuned = this.getTunedMetamagics();
+		if (!tuned.length || !spellData) return result;
+
+		// Distant Spell: double range (5ft+) or touch → 30ft
+		if (tuned.includes("distant") && spellData.range) {
+			const rangeType = spellData.range.distance?.type;
+			if (rangeType === "touch") {
+				result.range.original = "Touch";
+				result.range.modified = "30 feet";
+				result.range.changed = true;
+			} else if (rangeType === "feet" && spellData.range.distance?.amount >= 5) {
+				const amt = spellData.range.distance.amount;
+				result.range.original = `${amt} feet`;
+				result.range.modified = `${amt * 2} feet`;
+				result.range.changed = true;
+			}
+		}
+
+		// Extended Spell: double duration (1min+, max 24h)
+		if (tuned.includes("extended") && spellData.duration?.length) {
+			const dur = spellData.duration[0];
+			if (dur.duration?.amount && dur.duration?.type) {
+				const minutes = CharacterSheetState._durationToMinutes(dur);
+				if (minutes >= 1) {
+					const doubled = minutes * 2;
+					const maxMinutes = 24 * 60;
+					const capped = Math.min(doubled, maxMinutes);
+
+					result.duration.original = CharacterSheetState._formatDuration(dur);
+					result.duration.modified = CharacterSheetState._formatMinutes(capped);
+					if (capped === maxMinutes && doubled > maxMinutes) result.duration.modified += " (24h cap)";
+					result.duration.changed = true;
+				}
+			}
+		}
+
+		// Supple Spell: adjust AoE by ± half (10ft+ areas)
+		if (tuned.includes("supple")) {
+			const aoeSize = CharacterSheetState._getSpellAreaSizeFromData(spellData);
+			if (aoeSize >= 10) {
+				const half = Math.ceil(aoeSize / 2 / 5) * 5; // round up to nearest 5
+				result.notes.push(`Supple: AoE adjustable ±${half} ft (${aoeSize - half}\u2013${aoeSize + half} ft)`);
+			}
+		}
+
+		// Split Spell: split AoE between 2 points (10ft+ areas)
+		if (tuned.includes("split")) {
+			const aoeSize = CharacterSheetState._getSpellAreaSizeFromData(spellData);
+			if (aoeSize >= 10) {
+				result.notes.push("Split: AoE can be divided between two points");
+			}
+		}
+
+		// Careful Spell: chosen creatures auto-succeed on saving throws
+		if (tuned.includes("careful") && spellData.savingThrow?.length) {
+			result.notes.push("Careful: chosen creatures auto-succeed on saves");
+		}
+
+		// Empowered Spell: reroll damage dice up to CHA mod
+		if (tuned.includes("empowered") && spellData.damageInflict?.length) {
+			const chaMod = Math.max(1, this.getAbilityMod("cha"));
+			result.notes.push(`Empowered: reroll up to ${chaMod} damage dice`);
+		}
+
+		// Transmuted Spell: change damage type
+		if (tuned.includes("transmuted") && spellData.damageInflict?.length) {
+			result.notes.push("Transmuted: can change damage type (acid/cold/fire/lightning/poison/thunder)");
+		}
+
+		// Resonant Spell: dispel/counterspell attempts have disadvantage
+		if (tuned.includes("resonant")) {
+			result.notes.push("Resonant: dispel/counter attempts have disadvantage");
+		}
+
+		// Warding Spell: AC +1 while concentrating on this spell
+		if (tuned.includes("warding") && spellData.duration?.[0]?.concentration) {
+			result.notes.push("Warding: AC +1 while concentrating");
+		}
+
+		return result;
+	}
+
+	/**
+	 * Convert a duration entry to minutes.
+	 * @param {object} dur - Duration object from spell data, e.g. {type: "timed", duration: {type: "minute", amount: 1}}
+	 * @returns {number} Duration in minutes
+	 */
+	static _durationToMinutes (dur) {
+		const amount = dur.duration?.amount || 0;
+		switch (dur.duration?.type) {
+			case "round": return amount / 10;
+			case "minute": return amount;
+			case "hour": return amount * 60;
+			case "day": return amount * 60 * 24;
+			default: return 0;
+		}
+	}
+
+	/**
+	 * Format a duration entry to a display string.
+	 * @param {object} dur - Duration object from spell data
+	 * @returns {string} e.g. "Concentration, up to 1 minute", "1 hour"
+	 */
+	static _formatDuration (dur) {
+		if (dur.type === "instant") return "Instantaneous";
+		if (dur.type === "permanent") return "Permanent";
+		const amt = dur.duration?.amount || "";
+		const type = dur.duration?.type || "";
+		const typeStr = amt > 1 ? `${type}s` : type;
+		if (dur.concentration) return `Concentration, up to ${amt} ${typeStr}`.trim();
+		return `${amt} ${typeStr}`.trim();
+	}
+
+	/**
+	 * Format minutes back into a human-readable duration string.
+	 * @param {number} minutes
+	 * @returns {string} e.g. "2 hours", "48 minutes"
+	 */
+	static _formatMinutes (minutes) {
+		if (minutes >= 60 * 24 && minutes % (60 * 24) === 0) {
+			const d = minutes / (60 * 24);
+			return `${d} day${d > 1 ? "s" : ""}`;
+		}
+		if (minutes >= 60 && minutes % 60 === 0) {
+			const h = minutes / 60;
+			return `${h} hour${h > 1 ? "s" : ""}`;
+		}
+		return `${minutes} minute${minutes > 1 ? "s" : ""}`;
+	}
+
+	/**
+	 * Extract AoE size from structured spell data.
+	 * Checks range.type for area shapes, then falls back to parsing entries text.
+	 * @param {object} spellData - Full spell data
+	 * @returns {number} AoE size in feet, or 0
+	 */
+	static _getSpellAreaSizeFromData (spellData) {
+		if (spellData?.range?.type && !["point", "special"].includes(spellData.range.type)) {
+			return spellData.range.distance?.amount || 0;
+		}
+		const entriesStr = JSON.stringify(spellData?.entries || []);
+		const aoeMatch = entriesStr.match(/(\d+)-foot[- ](?:radius|cube|cone|sphere|line|emanation|cylinder)/i);
+		return aoeMatch ? Number(aoeMatch[1]) : 0;
 	}
 	// #endregion
 

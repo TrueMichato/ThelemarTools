@@ -1955,10 +1955,29 @@ class CharacterSheetCombat {
 		const isCantrip = spell.level === 0;
 		const spellId = spell.id || `${spell.name}|${spell.source}`;
 
-		// Create hoverable spell name
+		// Look up full spell data for metamagic and hover
+		const spellData = this._page._spells?._allSpells?.find(s => s.name === spell.name && s.source === spell.source);
+		const modStats = this._state.getModifiedSpellStats?.(spellData);
+
+		// Create hoverable spell name — uses custom predefined hover with metamagic + rarity/legality
 		let spellLink;
 		try {
-			spellLink = Renderer.get().render(`{@spell ${spell.name}|${spell.source || "PHB"}}`);
+			if (this._page?.getSpellHoverLink) {
+				spellLink = this._page.getSpellHoverLink(
+					spell.name,
+					spell.source || Parser.SRC_XPHB,
+					spellData,
+					spell,
+				);
+			} else if (this._page?.getHoverLink) {
+				spellLink = this._page.getHoverLink(
+					UrlUtil.PG_SPELLS,
+					spell.name,
+					spell.source || Parser.SRC_XPHB,
+				);
+			} else {
+				spellLink = Renderer.get().render(`{@spell ${spell.name}|${spell.source || "PHB"}}`);
+			}
 		} catch (e) {
 			spellLink = spell.name;
 		}
@@ -1966,21 +1985,32 @@ class CharacterSheetCombat {
 		// Get school full name
 		const schoolFull = spell.school ? Parser.spSchoolAbvToFull(spell.school) : "";
 
-		// Use the stored string values from when spell was added
-		const castingTime = spell.castingTime || "";
-		const range = spell.range || "";
-		const duration = spell.duration || "";
-		const components = spell.components || "";
-
-		// Build details string - casting time, range, duration, components
+		// Build details string — apply tuned passive metamagic stat overrides
 		const detailParts = [];
+		const castingTime = spell.castingTime || "";
 		if (castingTime) detailParts.push(castingTime);
-		if (range) detailParts.push(range);
-		if (duration) detailParts.push(duration);
+
+		if (modStats?.range?.changed) {
+			detailParts.push(modStats.range.modified);
+		} else if (spell.range) {
+			detailParts.push(spell.range);
+		}
+
+		if (modStats?.duration?.changed) {
+			detailParts.push(modStats.duration.modified);
+		} else if (spell.duration) {
+			detailParts.push(spell.duration);
+		}
+
+		const components = spell.components || "";
 		if (components) detailParts.push(components);
 		const details = detailParts.join(" · ");
 
-		return e_({outer: `
+		const metamagicNotesHtml = modStats?.notes?.length
+			? `<div class="charsheet__metamagic-mod ve-small">${modStats.notes.join(" · ")}</div>`
+			: "";
+
+		const el = e_({outer: `
 			<div class="charsheet__combat-spell-item" data-spell-id="${spellId}">
 				<div class="charsheet__combat-spell-info">
 					<div class="charsheet__combat-spell-header">
@@ -1989,12 +2019,26 @@ class CharacterSheetCombat {
 						${spell.concentration ? `<span class="badge badge-info ve-small ml-1" title="Concentration">C</span>` : ""}
 					</div>
 					${details ? `<div class="charsheet__combat-spell-details ve-muted ve-small">${details}</div>` : ""}
+					${metamagicNotesHtml}
 				</div>
 				<button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-spell-cast" data-spell-id="${spellId}" title="Cast Spell">
 					<span class="glyphicon glyphicon-flash"></span> Cast
 				</button>
 			</div>
 		`});
+
+		// Add click handler on spell name to show metamagic-aware info modal
+		const nameEl = el.querySelector(".charsheet__combat-spell-name");
+		if (nameEl && spellData && this._page._spells) {
+			nameEl.style.cursor = "pointer";
+			nameEl.addEventListener("click", (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this._page._spells._showSpellInfoFromData(spellData);
+			});
+		}
+
+		return el;
 	}
 
 	render () {
@@ -4812,12 +4856,12 @@ class CharacterSheetCombat {
 				// Try to create hoverable name from source feature or spell
 				let stateNameHtml = state.name || stateType?.name || state.stateTypeId;
 				if (isSpellEffect) {
-					// Create spell hover link
+					// Create spell hover link with charsheet modifications (metamagic, rarity)
 					try {
 						const source = state.spellSource || Parser.SRC_XPHB;
-						const hash = UrlUtil.encodeForHash([state.name, source].join(HASH_LIST_SEP));
-						const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_SPELLS, source: source, hash: hash});
-						stateNameHtml = `<a href="${UrlUtil.PG_SPELLS}#${hash}" ${hoverAttrs}>${state.name}</a>`;
+						const spellData = this._page._spells?._allSpells?.find(s => s.name === state.name && s.source === source);
+						const characterSpell = this._state.getSpells?.().find(s => s.name === state.name && s.source === source);
+						stateNameHtml = this._page.getSpellHoverLink(state.name, source, spellData || null, characterSpell || null);
 					} catch (e) {
 						// Fall back to plain name
 						stateNameHtml = state.name;
@@ -6744,7 +6788,7 @@ class CharacterSheetCombat {
 			container.append(untunedHeader);
 
 			for (const meta of untunedPassives) {
-				const canAfford = typeof meta.cost === "number" && sp.max >= meta.cost;
+				const canAfford = typeof meta.cost === "number" && sp.max >= meta.cost && sp.current >= meta.cost;
 				const row = e_({outer: `
 					<div class="charsheet__mm-row charsheet__mm-row--available">
 						<span class="charsheet__mm-indicator">○</span>
@@ -6804,6 +6848,10 @@ class CharacterSheetCombat {
 				);
 				// Refresh resources section so SP counter stays in sync
 				if (typeof page._renderResources === "function") page._renderResources();
+				// Refresh spell list so metamagic modifications are reflected
+				if (page._spells && typeof page._spells._renderSpellList === "function") page._spells._renderSpellList();
+				// Refresh combat spells tab so metamagic modifications are reflected
+				if (page._combat && typeof page._combat.renderCombatSpells === "function") page._combat.renderCombatSpells();
 			});
 		});
 	}

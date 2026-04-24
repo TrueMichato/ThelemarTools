@@ -322,6 +322,54 @@ describe("Phase 2 Features", () => {
 				state.addClass(cls);
 				expect(state.getSubclassAlwaysPreparedSpells(cls)).toEqual([]);
 			});
+
+			it("should return innate cantrips from additionalSpells.innate", () => {
+				const cls = {
+					name: "Sorcerer",
+					level: 1,
+					source: "PHB",
+					subclass: {
+						name: "Test Origin",
+						source: "PHB",
+						additionalSpells: [{
+							innate: {
+								"0": ["light#c"],
+							},
+						}],
+					},
+				};
+				state.addClass(cls);
+
+				const spells = state.getSubclassAlwaysPreparedSpells(cls);
+				expect(spells.length).toBe(1);
+				expect(spells[0].name).toBe("light");
+				expect(spells[0].isCantrip).toBe(true);
+				expect(spells[0].alwaysPrepared).toBe(true);
+			});
+
+			it("should return level-gated innate spells from additionalSpells.innate", () => {
+				const cls = {
+					name: "Warlock",
+					level: 3,
+					source: "PHB",
+					subclass: {
+						name: "Test Patron",
+						source: "PHB",
+						additionalSpells: [{
+							innate: {
+								"0": ["light#c"],
+								"5": ["daylight"],
+							},
+						}],
+					},
+				};
+				state.addClass(cls);
+
+				const spells = state.getSubclassAlwaysPreparedSpells(cls);
+				// Only Light cantrip — level 5 innate not yet available
+				expect(spells.length).toBe(1);
+				expect(spells[0].name).toBe("light");
+			});
 		});
 
 		describe("populateSubclassSpells", () => {
@@ -342,17 +390,23 @@ describe("Phase 2 Features", () => {
 					},
 				});
 
-				const added = state.populateSubclassSpells();
-				expect(added).toBe(3);
-
+				// populateSubclassSpells is called automatically by applyClassFeatureEffects
+				// during addClass, so spells should already be present
 				const spells = state.getSpells();
 				const bless = spells.find(s => s.name === "bless");
 				expect(bless).toBeTruthy();
 				expect(bless.alwaysPrepared).toBe(true);
 				expect(bless.prepared).toBe(true);
+
+				// Calling again should be idempotent (no duplicates)
+				const added = state.populateSubclassSpells();
+				expect(added).toBe(0);
 			});
 
 			it("should not duplicate existing spells", () => {
+				// Add bless manually BEFORE adding the class
+				state.addSpell({name: "bless", source: "PHB", level: 1, prepared: false});
+
 				state.addClass({
 					name: "Cleric",
 					level: 3,
@@ -365,12 +419,6 @@ describe("Phase 2 Features", () => {
 						}],
 					},
 				});
-
-				// Add bless manually first
-				state.addSpell({name: "bless", source: "PHB", level: 1, prepared: false});
-
-				const added = state.populateSubclassSpells();
-				expect(added).toBe(1); // Should update the existing one
 
 				const spells = state.getSpells().filter(s => s.name === "bless");
 				expect(spells.length).toBe(1); // No duplicates
@@ -419,12 +467,14 @@ describe("Phase 2 Features", () => {
 				const result = state._parseSpellReference("bless|PHB");
 				expect(result.name).toBe("bless");
 				expect(result.source).toBe("PHB");
+				expect(result.isCantrip).toBe(false);
 			});
 
 			it("should parse name-only format with PHB default", () => {
 				const result = state._parseSpellReference("bless");
 				expect(result.name).toBe("bless");
 				expect(result.source).toBe("PHB");
+				expect(result.isCantrip).toBe(false);
 			});
 
 			it("should parse object format", () => {
@@ -432,12 +482,94 @@ describe("Phase 2 Features", () => {
 				expect(result.name).toBe("fireball");
 				expect(result.source).toBe("XPHB");
 				expect(result.level).toBe(3);
+				expect(result.isCantrip).toBe(false);
+			});
+
+			it("should strip #c suffix and set isCantrip for name-only cantrip", () => {
+				const result = state._parseSpellReference("light#c");
+				expect(result.name).toBe("light");
+				expect(result.source).toBe("PHB");
+				expect(result.isCantrip).toBe(true);
+			});
+
+			it("should strip #c suffix and set isCantrip for name|source cantrip", () => {
+				const result = state._parseSpellReference("mind sliver|tce#c");
+				expect(result.name).toBe("mind sliver");
+				expect(result.source).toBe("tce");
+				expect(result.isCantrip).toBe(true);
+			});
+
+			it("should strip #c suffix for XPHB cantrip references", () => {
+				const result = state._parseSpellReference("sacred flame|xphb#c");
+				expect(result.name).toBe("sacred flame");
+				expect(result.source).toBe("xphb");
+				expect(result.isCantrip).toBe(true);
 			});
 
 			it("should return null for invalid input", () => {
 				expect(state._parseSpellReference(null)).toBeNull();
 				expect(state._parseSpellReference(42)).toBeNull();
 				expect(state._parseSpellReference(undefined)).toBeNull();
+			});
+		});
+
+		describe("Cantrips in known/prepared blocks", () => {
+			it("should route cantrips from known block to cantripsKnown", () => {
+				state.addClass({
+					name: "Sorcerer",
+					level: 1,
+					source: "PHB",
+					subclass: {
+						name: "Aberrant Mind",
+						source: "TCE",
+						additionalSpells: [{
+							known: {
+								"1": [
+									"mind sliver|tce#c",
+									"arms of hadar",
+									"dissonant whispers",
+								],
+							},
+						}],
+					},
+				});
+
+				// populateSubclassSpells is auto-called via applyClassFeatureEffects
+				const cantrips = state.getCantrips();
+				const spellsOnly = state.getSpellsKnown();
+
+				// Mind Sliver should be in cantrips, not spells
+				expect(cantrips.some(c => c.name.toLowerCase() === "mind sliver")).toBe(true);
+				// Regular spells should be in spells
+				expect(spellsOnly.some(s => s.name.toLowerCase() === "arms of hadar")).toBe(true);
+				expect(spellsOnly.some(s => s.name.toLowerCase() === "dissonant whispers")).toBe(true);
+				// Mind Sliver should NOT be in spellsKnown (only in cantrips)
+				expect(spellsOnly.some(s => s.name.toLowerCase() === "mind sliver")).toBe(false);
+			});
+
+			it("should handle Cleric prepared block without cantrips", () => {
+				state.addClass({
+					name: "Cleric",
+					level: 3,
+					source: "PHB",
+					subclass: {
+						name: "Knowledge Domain",
+						source: "PHB",
+						additionalSpells: [{
+							prepared: {
+								"1": ["command", "identify"],
+								"3": ["augury", "suggestion"],
+							},
+						}],
+					},
+				});
+
+				const spells = state.getSpells();
+				expect(spells.some(s => s.name.toLowerCase() === "command")).toBe(true);
+				expect(spells.some(s => s.name.toLowerCase() === "augury")).toBe(true);
+				// All should be always prepared
+				const command = spells.find(s => s.name.toLowerCase() === "command");
+				expect(command.alwaysPrepared).toBe(true);
 			});
 		});
 	});

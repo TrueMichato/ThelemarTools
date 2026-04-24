@@ -976,6 +976,7 @@ class CharacterSheetFeatures {
 			.filter(meta => knownKeys.has(meta.key));
 		const lockedPoints = this._state.getLockedSorceryPoints?.() || 0;
 		const effectiveMax = this._state.getEffectiveSorceryPointMax?.() ?? 0;
+		const spCurrent = this._state.getSorceryPoints?.().current ?? 0;
 
 		const renderCost = (cost) => {
 			if (cost === "level") return "spell level";
@@ -993,7 +994,7 @@ class CharacterSheetFeatures {
 		};
 
 		const passiveHtml = renderList(passiveMetamagics, meta => {
-			const canAfford = !meta.tuned && typeof meta.cost === "number" && effectiveMax >= meta.cost;
+			const canAfford = !meta.tuned && typeof meta.cost === "number" && effectiveMax >= meta.cost && spCurrent >= meta.cost;
 			const btnLabel = meta.tuned ? "Detune" : "Tune";
 			const btnClass = meta.tuned ? "btn-outline-danger" : "btn-outline-success";
 			const btnDisabled = !meta.tuned && !canAfford ? "disabled title=\"Not enough effective sorcery points\"" : "";

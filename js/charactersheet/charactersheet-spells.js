@@ -1,8 +1,29 @@
 /**
+ * sourceFeature values assigned to player-chosen spells by the Builder, LevelUp, and QuickBuild flows.
+ * Spells with these labels (or with no sourceFeature at all) count against known/prepared limits.
+ * Feature-granted spells (racial innates, subclass always-prepared, etc.) use other labels and should NOT count.
+ */
+const PLAYER_CHOSEN_SPELL_FEATURES = new Set([
+	"Spells Known",
+	"Cantrips Known",
+	"Wizard Spellbook",
+	"Prepared Spells",
+	"Spells Prepared",
+]);
+
+/**
  * Character Sheet Spells Manager
  * Handles spell slots, known spells, prepared spells, and casting
  */
 class CharacterSheetSpells {
+	/**
+	 * Returns true if the spell was chosen by the player (counts against known/prepared limit).
+	 * Returns false for feature-granted spells (racial innates, subclass always-prepared, etc.).
+	 */
+	static isPlayerChosenSpell (spell) {
+		return !spell.sourceFeature || PLAYER_CHOSEN_SPELL_FEATURES.has(spell.sourceFeature);
+	}
+
 	constructor (page) {
 		this._page = page;
 		this._state = page.getState();
@@ -48,7 +69,7 @@ class CharacterSheetSpells {
 	 * @param {Array} spells - Array of spell objects
 	 * @returns {Array} Spells with rarity/legality applied
 	 */
-	_applyThelemarSpellRarity (spells) {
+	applyThelemarSpellRarity (spells) {
 		// Check if the setting is enabled (defaults to true if not explicitly set to false)
 		const settings = this._state.getSettings() || {};
 		if (settings.thelemar_spellRarity === false) {
@@ -249,7 +270,7 @@ class CharacterSheetSpells {
 		const isGambler = characterClass.subclass?.name === "Gambler";
 		const spellListClassName = isGambler ? "Warlock" : className;
 
-		const filteredSpells = this._page.filterByAllowedSources(this._allSpells);
+		const filteredSpells = this._page.getFilteredSpellData();
 
 		// Check if we should include core spell lists for homebrew classes
 		const settings = this._state.getSettings?.() || {};
@@ -342,9 +363,6 @@ class CharacterSheetSpells {
 	}
 
 	async _pShowSpellPickerModal (spells) {
-		// Apply Thelemar spell rarity/legality if enabled
-		spells = this._applyThelemarSpellRarity(spells);
-
 		const knownSpellIds = this._state.getSpells().map(s => `${s.name}|${s.source}`);
 
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
@@ -369,7 +387,7 @@ class CharacterSheetSpells {
 			// Cantrips
 			if (info.cantripsKnown) {
 				const allCantrips = this._state.getCantripsKnown();
-				const count = allCantrips.filter(c => !c.sourceFeature).length;
+				const count = allCantrips.filter(c => CharacterSheetSpells.isPlayerChosenSpell(c)).length;
 				const limit = info.cantripsKnown;
 				const colorClass = count > limit ? "text-danger" : (count === limit ? "text-success" : "");
 				const icon = count > limit ? `<span class="glyphicon glyphicon-alert mr-1"></span>` : "⭐ ";
@@ -386,8 +404,8 @@ class CharacterSheetSpells {
 			const spells = this._state.getSpells();
 			const leveledSpells = spells.filter(s => s.level > 0);
 			const preparedSpells = leveledSpells.filter(s => s.prepared || s.alwaysPrepared);
-			// Count spells that aren't from features (manual selections)
-			const manualLeveledSpells = leveledSpells.filter(s => !s.sourceFeature);
+			// Count spells chosen by the player (not feature-granted)
+			const manualLeveledSpells = leveledSpells.filter(s => CharacterSheetSpells.isPlayerChosenSpell(s));
 
 			// For multiclass with per-class breakdown, show each class separately
 			if (info.isMulticlass && info.byClass?.length > 1) {
@@ -1618,6 +1636,20 @@ class CharacterSheetSpells {
 			components.push(`M (${mStr})`);
 		}
 
+		// Compute passive metamagic modifications
+		const modStats = this._state.getModifiedSpellStats?.(spell);
+
+		const rangeDisplay = modStats?.range?.changed
+			? `${this._getRange(spell)} <span class="charsheet__metamagic-mod">(${modStats.range.modified})</span>`
+			: this._getRange(spell);
+		const durationDisplay = modStats?.duration?.changed
+			? `${this._getDuration(spell)} <span class="charsheet__metamagic-mod">(${modStats.duration.modified})</span>`
+			: this._getDuration(spell);
+
+		const metamagicNotesHtml = modStats?.notes?.length
+			? `<div class="charsheet__metamagic-mod ve-small mt-1">${modStats.notes.join(" · ")}</div>`
+			: "";
+
 		const content = e_({outer: `
 			<div class="charsheet__spell-info-modal">
 				<div class="ve-flex gap-2 mb-2">
@@ -1628,9 +1660,10 @@ class CharacterSheetSpells {
 				</div>
 				<div class="ve-small mb-3">
 					<div><strong>Casting Time:</strong> ${this._getCastingTime(spell)}</div>
-					<div><strong>Range:</strong> ${this._getRange(spell)}</div>
+					<div><strong>Range:</strong> ${rangeDisplay}</div>
 					<div><strong>Components:</strong> ${components.join(", ")}</div>
-					<div><strong>Duration:</strong> ${this._getDuration(spell)}</div>
+					<div><strong>Duration:</strong> ${durationDisplay}</div>
+					${metamagicNotesHtml}
 				</div>
 				<hr>
 				<div class="rd__b">${Renderer.get().render({entries: spell.entries || []})}</div>
@@ -4453,22 +4486,8 @@ class CharacterSheetSpells {
 		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source);
 		if (!spellData) return;
 
-		// Show spell details using UiUtil modal
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: spellData.name,
-			isMinHeight0: true,
-		});
-
-		const content = Renderer.get().render({type: "entries", entries: spellData.entries || []});
-		const higherLevel = spellData.entriesHigherLevel
-			? `<p><strong>At Higher Levels.</strong> ${Renderer.get().render({type: "entries", entries: spellData.entriesHigherLevel})}</p>`
-			: "";
-
-		modalInner.insertAdjacentHTML("beforeend", `<div class="rd__b">${content}${higherLevel}</div>`);
-
-		{ const _cl = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
-			<button class="ve-btn ve-btn-default">Close</button>
-		</div>`; modalInner.append(_cl); _cl.querySelector("button").addEventListener("click", () => doClose(false)); }
+		// Delegate to shared method that handles metamagic display
+		await this._showSpellInfoFromData(spellData);
 	}
 
 	// #region Rendering
@@ -4553,7 +4572,7 @@ class CharacterSheetSpells {
 
 		let spells = this._state.getSpells();
 		// Apply Thelemar rarity to stored spells (for backwards compatibility and display)
-		spells = this._applyThelemarSpellRarity(spells);
+		spells = this.applyThelemarSpellRarity(spells);
 
 		// Check if this character has a spellbook-style caster (Wizard)
 		const classes = this._state.getClasses() || [];
@@ -4939,10 +4958,21 @@ class CharacterSheetSpells {
 		// Ensure spell has a valid ID
 		const spellId = spell.id || `${spell.name}|${spell.source}`;
 
-		// Create hover link for spell name
+		// Look up full spell data for metamagic and hover
+		const spellData = this._allSpells?.find(s => s.name === spell.name && s.source === spell.source);
+		const modStats = this._state.getModifiedSpellStats?.(spellData);
+
+		// Create hover link — uses custom predefined hover with metamagic + rarity/legality
 		let spellLink = spell.name;
 		try {
-			if (this._page?.getHoverLink) {
+			if (this._page?.getSpellHoverLink) {
+				spellLink = this._page.getSpellHoverLink(
+					spell.name,
+					spell.source || Parser.SRC_XPHB,
+					spellData,
+					spell,
+				);
+			} else if (this._page?.getHoverLink) {
 				spellLink = this._page.getHoverLink(
 					UrlUtil.PG_SPELLS,
 					spell.name,
@@ -4953,12 +4983,26 @@ class CharacterSheetSpells {
 			// Fall back to plain name
 		}
 
-		// Build spell details line
+		// Build spell details line — apply tuned passive metamagic stat overrides
 		const detailParts = [];
+		let metamagicNotes = [];
+
 		if (spell.castingTime) detailParts.push(spell.castingTime);
-		if (spell.range) detailParts.push(spell.range);
-		if (spell.duration) detailParts.push(spell.duration);
+
+		if (modStats?.range?.changed) {
+			detailParts.push(modStats.range.modified);
+		} else if (spell.range) {
+			detailParts.push(spell.range);
+		}
+
+		if (modStats?.duration?.changed) {
+			detailParts.push(modStats.duration.modified);
+		} else if (spell.duration) {
+			detailParts.push(spell.duration);
+		}
+
 		if (spell.components) detailParts.push(spell.components);
+		if (modStats?.notes?.length) metamagicNotes = modStats.notes;
 		const detailsLine = detailParts.join(" · ");
 
 		// Build rarity/legality inline text from subschools (if stored)
@@ -5036,6 +5080,7 @@ class CharacterSheetSpells {
 						</span>
 					</div>
 					${fullDetailsLine ? `<div class="charsheet__spell-item-details ve-muted ve-small">${fullDetailsLine}</div>` : ""}
+					${metamagicNotes.length ? `<div class="charsheet__spell-item-details charsheet__metamagic-mod ve-small">${metamagicNotes.join(" · ")}</div>` : ""}
 				</div>
 				<div class="charsheet__spell-item-actions">
 					${prepButtonHtml}
@@ -5248,11 +5293,11 @@ class CharacterSheetSpells {
 		const leveledSpells = spells.filter(s => s.level > 0);
 		const allCantrips = this._state.getCantripsKnown();
 		const preparedSpells = leveledSpells.filter(s => s.prepared || s.alwaysPrepared);
-		// Manual spells = those not from features (count against limit)
-		const manualLeveledSpells = leveledSpells.filter(s => !s.sourceFeature);
+		// Player-chosen spells count against the limit; feature-granted ones do not
+		const manualLeveledSpells = leveledSpells.filter(s => CharacterSheetSpells.isPlayerChosenSpell(s));
 
 		// Cantrips count (excluding feature-granted ones)
-		const cantripsChosen = allCantrips.filter(c => !c.sourceFeature).length;
+		const cantripsChosen = allCantrips.filter(c => CharacterSheetSpells.isPlayerChosenSpell(c)).length;
 		const cantripsMax = spellcastingInfo.cantripsKnown || 0;
 
 		// Show cantrips info if the class has cantrips
@@ -5547,8 +5592,8 @@ class CharacterSheetSpells {
 		const criteria = this._parseSpellFilter(choice.filter);
 		const filterDescription = this._getFilterDescription(criteria);
 
-		// Get filtered spells
-		const filteredSpells = this._page.filterByAllowedSources(this._allSpells);
+		// Get filtered spells with rarity/legality tags
+		const filteredSpells = this._page.getFilteredSpellData();
 		const matchingSpells = this._filterSpellsByCriteria(filteredSpells, criteria)
 			.sort((a, b) => a.name.localeCompare(b.name));
 

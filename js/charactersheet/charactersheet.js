@@ -468,8 +468,14 @@ class CharacterSheetPage {
 	 */
 	_buildDialectParentMap () {
 		this._dialectParentMap = {};
+		this._dialectFamilyMap = {}; // parent name (lowercase) → [dialect names]
 		for (const lang of this._languagesData) {
 			if (!lang.dialects?.length) continue;
+			const parentKey = lang.name.toLowerCase();
+			// Build parent → dialects map (prefer XPHB)
+			if (!this._dialectFamilyMap[parentKey] || lang.source === Parser.SRC_XPHB) {
+				this._dialectFamilyMap[parentKey] = lang.dialects.map(d => d);
+			}
 			for (const dialect of lang.dialects) {
 				const key = dialect.toLowerCase();
 				// Prefer XPHB parent, then keep first found
@@ -478,6 +484,25 @@ class CharacterSheetPage {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Get languages that conflict with the given language due to dialect relationships.
+	 * - If langName is a dialect (e.g. "Ignan"), returns ["Primordial"] (just the parent)
+	 * - If langName is a parent (e.g. "Primordial"), returns all dialects ["Auran", "Aquan", "Ignan", "Terran"]
+	 * - Otherwise returns []
+	 * @param {string} langName
+	 * @returns {string[]}
+	 */
+	getDialectConflicts (langName) {
+		const key = langName.toLowerCase();
+		// Check if it's a dialect → conflict with parent only
+		const parent = this._dialectParentMap[key];
+		if (parent) return [parent.name];
+		// Check if it's a parent → conflict with all dialects
+		const dialects = this._dialectFamilyMap[key];
+		if (dialects) return [...dialects];
+		return [];
 	}
 
 	/**
@@ -3046,7 +3071,8 @@ class CharacterSheetPage {
 					// Check if this is a dialect (e.g., Aquan → Primordial)
 					const dialectParent = this._dialectParentMap[langLower];
 					if (dialectParent) {
-						return this.getHoverLink(UrlUtil.PG_LANGUAGES, dialectParent.name, dialectParent.source);
+						// Link to parent language page, but display the dialect name the user chose
+						return CharacterSheetPage.getHoverLink(UrlUtil.PG_LANGUAGES, dialectParent.name, dialectParent.source, null, lang);
 					}
 
 					// Look up language in data, preferring XPHB source
@@ -5847,7 +5873,9 @@ class CharacterSheetPage {
 					hashInput.subclassSource = feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
 				}
 				const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
-				return this.getHoverLink(UrlUtil.PG_CLASS_SUBCLASS_FEATURES, feature.name, feature.source || Parser.SRC_XPHB, hash);
+				const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: feature.className, source: classSource});
+				const classHref = `${UrlUtil.PG_CLASSES}#${classHash}`;
+				return this.getHoverLink(UrlUtil.PG_CLASS_SUBCLASS_FEATURES, feature.name, feature.source || Parser.SRC_XPHB, hash, null, classHref);
 			}
 			// Optional features (invocations, combat methods, etc.)
 			if (feature.featureType === "Optional Feature" || feature.optionalfeatureType) {
@@ -5912,12 +5940,12 @@ class CharacterSheetPage {
 		// Try to create hoverable name by finding the source feature or spell
 		let nameHtml = state.name;
 		if (isSpellEffect) {
-			// Create spell hover link for spell effects
+			// Create spell hover link with charsheet modifications (metamagic, rarity)
 			try {
 				const source = state.spellSource || Parser.SRC_XPHB;
-				const hash = UrlUtil.encodeForHash([state.name, source].join(HASH_LIST_SEP));
-				const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_SPELLS, source: source, hash: hash});
-				nameHtml = `<a href="${UrlUtil.PG_SPELLS}#${hash}" ${hoverAttrs}>${state.name}</a>`;
+				const spellData = this._spellsData?.find(s => s.name === state.name && s.source === source);
+				const characterSpell = this._state.getSpells?.().find(s => s.name === state.name && s.source === source);
+				nameHtml = this.getSpellHoverLink(state.name, source, spellData || null, characterSpell || null);
 			} catch (e) {
 				// Fall back to plain name if hover fails
 				nameHtml = state.name;
@@ -6420,13 +6448,12 @@ class CharacterSheetPage {
 			container.append(slotsRow);
 		}
 
-		// Helper to create hoverable spell name
+		// Helper to create hoverable spell name with charsheet modifications
 		const getSpellLink = (spell) => {
-			const source = spell.source || Parser.SRC_XPHB;
-			const hash = UrlUtil.encodeForHash([spell.name, source].join(HASH_LIST_SEP));
 			try {
-				const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_SPELLS, source: source, hash: hash});
-				return `<a href="${UrlUtil.PG_SPELLS}#${hash}" ${hoverAttrs}>${spell.name}</a>`;
+				const source = spell.source || Parser.SRC_XPHB;
+				const spellData = this._spellsData?.find(s => s.name === spell.name && s.source === source);
+				return this.getSpellHoverLink(spell.name, source, spellData || null, spell);
 			} catch (e) {
 				return spell.name;
 			}
@@ -7019,18 +7046,19 @@ class CharacterSheetPage {
 	_initTextSizePicker () {
 		const btn = document.getElementById("charsheet-btn-textsize");
 		const dropdown = document.getElementById("charsheet-textsize-dropdown");
-		const slider = document.getElementById("charsheet-textsize-slider");
-		const valueDisplay = document.getElementById("charsheet-textsize-value");
+		const sizeInput = document.getElementById("charsheet-textsize-input");
 		const decreaseBtn = document.getElementById("charsheet-textsize-decrease");
 		const increaseBtn = document.getElementById("charsheet-textsize-increase");
 		const resetBtn = document.getElementById("charsheet-textsize-reset");
-		const presets = dropdown.querySelector(".charsheet__textsize-preset");
+		const presetsContainer = dropdown.querySelector(".charsheet__textsize-presets");
 
 		const STORAGE_KEY = "charsheet-text-size";
 		const DEFAULT_SIZE = 100;
 		const MIN_SIZE = 80;
-		const MAX_SIZE = 150;
+		const MAX_SIZE = 250;
 		const STEP = 5;
+
+		let currentSize = DEFAULT_SIZE;
 
 		// Load saved text size (global setting)
 		const loadTextSize = () => {
@@ -7055,10 +7083,11 @@ class CharacterSheetPage {
 		const applyTextSize = (size) => {
 			const page = document.querySelector(".charsheet-page");
 			page.setAttribute("data-textsize", size);
+			page.style.setProperty("--cs-text-scale", size / 100);
 
 			// Update UI
-			slider.value = size;
-			valueDisplay.textContent = size;
+			sizeInput.value = size;
+			currentSize = size;
 
 			// Update preset buttons
 			dropdown.querySelectorAll(".charsheet__textsize-preset--active").forEach(el => el.classList.remove("charsheet__textsize-preset--active"));
@@ -7067,11 +7096,7 @@ class CharacterSheetPage {
 
 		// Set text size (apply + save)
 		const setTextSize = (size) => {
-			// Clamp to valid range
-			size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, size));
-			// Round to step
-			size = Math.round(size / STEP) * STEP;
-
+			size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size)));
 			applyTextSize(size);
 			saveTextSize(size);
 		};
@@ -7103,30 +7128,36 @@ class CharacterSheetPage {
 			btn.classList.toggle("active", !isOpen);
 		});
 
-		// Slider input
-		slider.addEventListener("input", (e) => {
-			const size = parseInt(e.target.value, 10);
-			setTextSize(size);
+		// Number input — apply on change, blur, or Enter
+		sizeInput.addEventListener("change", () => {
+			setTextSize(parseInt(sizeInput.value, 10) || DEFAULT_SIZE);
+		});
+
+		sizeInput.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				setTextSize(parseInt(sizeInput.value, 10) || DEFAULT_SIZE);
+			}
 		});
 
 		// Decrease button
 		decreaseBtn.addEventListener("click", (e) => {
 			e.stopPropagation();
-			const currentSize = parseInt(slider.value, 10);
 			setTextSize(currentSize - STEP);
 		});
 
 		// Increase button
 		increaseBtn.addEventListener("click", (e) => {
 			e.stopPropagation();
-			const currentSize = parseInt(slider.value, 10);
 			setTextSize(currentSize + STEP);
 		});
 
-		// Preset buttons
-		presets.addEventListener("click", (e) => {
+		// Preset buttons (event delegation on container)
+		presetsContainer.addEventListener("click", (e) => {
+			const preset = e.target.closest(".charsheet__textsize-preset");
+			if (!preset) return;
 			e.stopPropagation();
-			const size = parseInt(e.currentTarget.dataset.size, 10);
+			const size = parseInt(preset.dataset.size, 10);
 			setTextSize(size);
 		});
 
@@ -8791,33 +8822,217 @@ class CharacterSheetPage {
 	/**
 	 * Create a 5etools hover link (instance method for sub-modules)
 	 * @param {string} page - The page URL (e.g., "conditionsdiseases.html", "items.html")
-	 * @param {string} name - Display name
+	 * @param {string} name - Entity name (used for hash/lookup)
 	 * @param {string} source - Source book abbreviation
 	 * @param {string} [hash] - Optional hash override
+	 * @param {string} [displayName] - Optional display name override
 	 * @returns {string} HTML string for the link
 	 */
-	getHoverLink (page, name, source, hash = null) {
-		return CharacterSheetPage.getHoverLink(page, name, source, hash);
+	getHoverLink (page, name, source, hash = null, displayName = null) {
+		return CharacterSheetPage.getHoverLink(page, name, source, hash, displayName);
+	}
+
+	/**
+	 * Create a spell hover link with character-aware content (metamagic mods + Thelemar rarity/legality).
+	 * Renders the same 2-column layout as the standard 5etools spell hover, with modifications injected.
+	 * Falls back to standard hover link if spellData is missing or there are no charsheet modifications.
+	 */
+	getSpellHoverLink (name, source, spellData, characterSpell) {
+		if (!spellData) return this.getHoverLink(UrlUtil.PG_SPELLS, name, source);
+
+		try {
+			const state = this.getState();
+			const modStats = state?.getModifiedSpellStats?.(spellData);
+			const hasCharsheetMods = modStats?.range?.changed || modStats?.duration?.changed
+				|| modStats?.notes?.length
+				|| (characterSpell?.subschools || []).some(s => s.startsWith("rarity:") || s.startsWith("legality:"));
+
+			// If no charsheet-specific mods, use the standard hover (prettiest by default)
+			if (!hasCharsheetMods) return this.getHoverLink(UrlUtil.PG_SPELLS, name, source);
+
+			// Build custom hover rows and cache them
+			const hoverRows = CharacterSheetPage._buildSpellHoverRows(spellData, characterSpell, modStats);
+			const hoverEntry = {name: spellData.name, _charsheetSpellRows: hoverRows};
+			const id = Renderer.hover._getNextId();
+			Renderer.hover._entryCache[id] = hoverEntry;
+
+			const hash = UrlUtil.encodeForHash([name, source].join(HASH_LIST_SEP));
+			const href = `${UrlUtil.PG_SPELLS}#${hash}`;
+
+			const hoverAttrs = [
+				`onmouseover="CharacterSheetPage._handleSpellHoverMouseOver(event, this, ${id})"`,
+				`onmousemove="Renderer.hover.handlePredefinedMouseMove(event, this)"`,
+				`onmouseleave="Renderer.hover.handlePredefinedMouseLeave(event, this)"`,
+				Renderer.hover.getPreventTouchString(),
+			].join(" ");
+
+			return `<a href="${href}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${name}</a>`;
+		} catch (e) {
+			console.error("[CharSheet] getSpellHoverLink error:", e);
+			return this.getHoverLink(UrlUtil.PG_SPELLS, name, source);
+		}
+	}
+
+	/**
+	 * Custom mouseover handler for spell hovers with charsheet modifications.
+	 * Renders our pre-built rows in a proper ve-stats table element, bypassing
+	 * the generic entry rendering path.
+	 */
+	static _handleSpellHoverMouseOver (evt, ele, entryId) {
+		Renderer.hover._doInit();
+
+		const meta = Renderer.hover._handleGenericMouseOverStart({evt, ele});
+		if (meta == null) return;
+
+		Renderer.hover.cleanTempWindows();
+
+		const toRender = Renderer.hover._entryCache[entryId];
+		meta.isLoading = false;
+
+		if (!meta.isHovered && !meta.isPermanent) return;
+
+		const tableEl = e_({
+			tag: "table",
+			clazz: "ve-w-100 ve-stats",
+			html: toRender._charsheetSpellRows,
+		});
+
+		meta.windowMeta = Renderer.hover.getShowWindow(
+			tableEl,
+			Renderer.hover.getWindowPositionFromEvent(evt, {isPreventFlicker: !meta.isPermanent}),
+			{
+				title: toRender.name || "",
+				isPermanent: meta.isPermanent,
+				cbClose: () => meta.isHovered = meta.isPermanent = meta.isLoading = false,
+				sourceData: toRender,
+			},
+		);
+
+		ele.style.cursor = "";
+	}
+
+	/**
+	 * Build HTML table rows for a custom spell hover, matching the standard 5etools
+	 * spell compact layout (2-column flex grid) with metamagic and rarity injected.
+	 * Uses the real Parser formatting methods so text is identical to the site hover.
+	 */
+	static _buildSpellHoverRows (spellData, characterSpell, modStats) {
+		// Use the same static helpers the real spell hover uses
+		const htmlPtLevelSchool = Renderer.spell.getHtmlPtLevelSchoolRitual(spellData);
+		const htmlPtCastingTime = Renderer.spell.getHtmlPtCastingTime(spellData);
+		let htmlPtRange = Renderer.spell.getHtmlPtRange(spellData);
+		const htmlPtComponents = Renderer.spell.getHtmlPtComponents(spellData);
+		let htmlPtDuration = Renderer.spell.getHtmlPtDuration(spellData);
+
+		// Inject metamagic range modification
+		if (modStats?.range?.changed) {
+			htmlPtRange += ` <span style="color: #10b981; font-weight: 600;">(${modStats.range.modified})</span>`;
+		}
+
+		// Inject metamagic duration modification
+		if (modStats?.duration?.changed) {
+			htmlPtDuration += ` <span style="color: #10b981; font-weight: 600;">(${modStats.duration.modified})</span>`;
+		}
+
+		// Thelemar rarity/legality badges
+		let htmlPtRarity = "";
+		const rarity = (characterSpell?.subschools || []).find(s => s.startsWith("rarity:"))?.replace("rarity:", "");
+		const legality = (characterSpell?.subschools || []).find(s => s.startsWith("legality:"))?.replace("legality:", "");
+		if (rarity || legality) {
+			const badges = [];
+			if (rarity) {
+				const color = rarity === "common" ? "#9ca3af" : (rarity === "uncommon" ? "#6366f1" : (rarity === "rare" ? "#8b5cf6" : "#f59e0b"));
+				badges.push(`<span style="color: ${color}; font-weight: 600;">[${rarity}]</span>`);
+			}
+			if (legality) {
+				const color = legality === "legal" ? "#10b981" : (legality === "restricted" ? "#f59e0b" : "#ef4444");
+				badges.push(`<span style="color: ${color}; font-weight: 600;">[${legality}]</span>`);
+			}
+			htmlPtRarity = `<div class="ve-pb-1">${badges.join(" ")}</div>`;
+		}
+
+		// Render spell body entries using the real Renderer
+		const entryStack = [];
+		if (spellData.entries) {
+			Renderer.get().recursiveRender({type: "entries", entries: spellData.entries}, entryStack, {depth: 1});
+		}
+		if (spellData.entriesHigherLevel) {
+			Renderer.get().recursiveRender({type: "entries", entries: spellData.entriesHigherLevel}, entryStack, {depth: 2});
+		}
+
+		// Classes
+		let htmlPtClasses = "";
+		try {
+			const fromClassList = Renderer.spell.getCombinedClasses(spellData, "fromClassList");
+			if (fromClassList.length) {
+				const [current] = Parser.spClassesToCurrentAndLegacy(fromClassList);
+				htmlPtClasses = `<div><span class="ve-bold">Classes: </span>${Parser.spMainClassesToFull(current)}</div>`;
+			}
+		} catch { /* ignore class resolution errors in charsheet context */ }
+
+		// Metamagic notes
+		let htmlPtMetamagic = "";
+		if (modStats?.notes?.length) {
+			htmlPtMetamagic = `<div style="color: #10b981; font-weight: 600;" class="ve-pt-1">${modStats.notes.join(" \u00B7 ")}</div>`;
+		}
+
+		// Name header row — simplified version of Renderer.utils.getNameTr
+		const sourceColorClass = spellData.source ? Parser.sourceJsonToSourceClassname(spellData.source) : "";
+		const htmlPtName = `<tr>
+			<th class="ve-stats__th-name ve-text-left ve-pb-0" colspan="6">
+				<div class="ve-split-v-end">
+					<div class="ve-flex-v-center">
+						<h1 class="ve-stats__h-name ve-m-0">${spellData.name}</h1>
+					</div>
+					<div class="ve-stats__wrp-h-source ve-flex-v-baseline">
+						<i class="ve-help-subtle ve-stats__h-source-abbreviation ${sourceColorClass}" title="${Parser.sourceJsonToFull(spellData.source)}">${Parser.sourceJsonToAbv(spellData.source)}</i>
+						${spellData.page ? `<i class="ve-rd__stats-name-page ve-ml-1">p${spellData.page}</i>` : ""}
+					</div>
+				</div>
+			</th>
+		</tr>`;
+
+		// Content row — same 2-column flex grid as the standard spell hover
+		const htmlPtContent = `<tr><td colspan="6" class="ve-pb-2">
+			<div class="ve-pb-2">${htmlPtLevelSchool}</div>
+			${htmlPtRarity}
+			<div class="ve-flex ve-pb-2 w100">
+				<div class="ve-flex-col ve-grow ve-min-w-25 ve-pr-2">
+					<div>${htmlPtCastingTime}</div>
+					<div>${htmlPtComponents}</div>
+				</div>
+				<div class="ve-flex-col ve-grow ve-min-w-25">
+					<div>${htmlPtRange}</div>
+					<div>${htmlPtDuration}</div>
+				</div>
+			</div>
+			${entryStack.join("")}
+			${htmlPtClasses}
+			${htmlPtMetamagic}
+		</td></tr>`;
+
+		return htmlPtName + htmlPtContent;
 	}
 
 	/**
 	 * Create a 5etools hover link (static method)
 	 * @param {string} page - The page URL (e.g., "conditionsdiseases.html", "items.html")
-	 * @param {string} name - Display name
+	 * @param {string} name - Entity name (used for hash/lookup)
 	 * @param {string} source - Source book abbreviation
 	 * @param {string} [hash] - Optional hash override
+	 * @param {string} [displayName] - Optional display name override (defaults to entity name)
 	 * @returns {string} HTML string for the link
 	 */
-	static getHoverLink (page, name, source, hash = null) {
+	static getHoverLink (page, name, source, hash = null, displayName = null, hrefOverride = null) {
 		try {
-			// Create hash manually - don't use autoEncodeHash which uses getCurrentPage()
 			const finalHash = hash || UrlUtil.encodeForHash([name, source].join(HASH_LIST_SEP));
 			const hoverAttrs = Renderer.hover.getHoverElementAttributes({page, source, hash: finalHash});
-			const link = `<a href="${page}#${finalHash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${name}</a>`;
+			const href = hrefOverride || `${page}#${finalHash}`;
+			const link = `<a href="${href}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${displayName || name}</a>`;
 			return link;
 		} catch (e) {
 			console.error("[CharSheet] getHoverLink error:", e);
-			return name; // Fallback to just the name
+			return displayName || name;
 		}
 	}
 
@@ -9540,6 +9755,17 @@ class CharacterSheetPage {
 			filtered = this._applyPriorityFilter(filtered, priority);
 		}
 
+		return filtered;
+	}
+
+	/**
+	 * Get spell data with source filtering, priority filtering, and Thelemar rarity/legality tags applied.
+	 * Single entry point for all spell picker consumers.
+	 * @returns {Array} Fully prepared spell array
+	 */
+	getFilteredSpellData () {
+		const filtered = this.filterByAllowedSources(this._spellsData || []);
+		if (this._spells) return this._spells.applyThelemarSpellRarity(filtered);
 		return filtered;
 	}
 
@@ -10405,6 +10631,15 @@ class CharacterSheetPage {
 			} else if (lang.source === Parser.SRC_XPHB && !prioritySources.includes(existing.source)) {
 				langMap.set(lang.name, {name: lang.name, source: lang.source});
 			}
+
+			// Also add dialect names so they appear as choosable languages
+			if (lang.dialects?.length) {
+				for (const dialect of lang.dialects) {
+					if (!langMap.has(dialect)) {
+						langMap.set(dialect, {name: dialect, source: lang.source});
+					}
+				}
+			}
 		});
 
 		// When TGTT is priority, exclude non-Common standard D&D languages
@@ -10460,6 +10695,15 @@ class CharacterSheetPage {
 				langMap.set(lang.name, {name: lang.name, source: lang.source});
 			} else if (lang.source === Parser.SRC_XPHB && !prioritySources.includes(existing.source)) {
 				langMap.set(lang.name, {name: lang.name, source: lang.source});
+			}
+
+			// Also add dialect names so they appear as choosable languages
+			if (lang.dialects?.length) {
+				for (const dialect of lang.dialects) {
+					if (!langMap.has(dialect)) {
+						langMap.set(dialect, {name: dialect, source: lang.source});
+					}
+				}
 			}
 		});
 
