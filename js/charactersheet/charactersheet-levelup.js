@@ -739,7 +739,7 @@ class CharacterSheetLevelUp {
 		if (isWizard) {
 			summaryItems.append(createSummaryItem("spellbook", "📕", "Spellbook", {required: true}));
 
-			const allSpells = this._page.filterByAllowedSources?.(this._page.getSpells?.() || []) || [];
+			const allSpells = this._page.getFilteredSpellData();
 			const knownSpellIds = new Set((this._state.getSpells?.() || []).map(s => `${s.name}|${s.source}`));
 
 			const spellbookContent = CharacterSheetSpellPicker.renderWizardSpellbookPicker({
@@ -767,7 +767,7 @@ class CharacterSheetLevelUp {
 			const totalGain = knownSpellsGain + knownCantripsGain;
 			summaryItems.append(createSummaryItem("knownspells", "✨", "Spells Known", {required: totalGain > 0}));
 
-			const knownAllSpells = this._page.filterByAllowedSources?.(this._page.getSpells?.() || []) || [];
+			const knownAllSpells = this._page.getFilteredSpellData();
 			const knownExistingIds = new Set([
 				...(this._state.getSpells?.() || []),
 				...(this._state.getCantripsKnown?.() || []),
@@ -815,7 +815,7 @@ class CharacterSheetLevelUp {
 			const totalGain = preparedSpellsGain + preparedCantripsGain;
 			summaryItems.append(createSummaryItem("preparedspells", "✨", "Prepared Spells", {required: totalGain > 0}));
 
-			const prepAllSpells = this._page.filterByAllowedSources?.(this._page.getSpells?.() || []) || [];
+			const prepAllSpells = this._page.getFilteredSpellData();
 			const prepExistingIds = new Set([
 				...(this._state.getSpells?.() || []),
 				...(this._state.getCantripsKnown?.() || []),
@@ -1357,11 +1357,15 @@ class CharacterSheetLevelUp {
 					
 					// For subclass features, use subclassSource; for class features, use classSource
 					const hoverSource = hashInput.subclassSource || hashInput.classSource;
+					const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: feature.className, source: actualClassSource});
+					const classHref = `${UrlUtil.PG_CLASSES}#${classHash}`;
 					const hoverLink = this._page.getHoverLink(
 						UrlUtil.PG_CLASS_SUBCLASS_FEATURES,
 						feature.name,
 						hoverSource,
 						hash,
+						null,
+						classHref,
 					);
 					header.innerHTML = hoverLink;
 				} else if (this._page?.getHoverLink && feature.featureType) {
@@ -3337,6 +3341,7 @@ class CharacterSheetLevelUp {
 					source: selectedSubclass.source,
 					casterProgression: selectedSubclass.casterProgression,
 					spellcastingAbility: selectedSubclass.spellcastingAbility,
+					additionalSpells: selectedSubclass.additionalSpells,
 				};
 				// Update class-level caster progression if subclass grants spellcasting (like Eldritch Knight)
 				if (selectedSubclass.casterProgression && !targetClass.casterProgression) {
@@ -3679,7 +3684,8 @@ class CharacterSheetLevelUp {
 
 		const currentMaxHp = this._state.getMaxHp();
 		this._state.setMaxHp(currentMaxHp + hpIncrease);
-		this._state.setCurrentHp(this._state.getCurrentHp() + hpIncrease);
+		// Always fill current HP to new max on level-up
+		this._state.setCurrentHp(this._state.getMaxHp());
 
 		// Add new features to character
 		// Filter out placeholder features and ASI features (since ASI is handled separately)
@@ -4408,7 +4414,10 @@ class CharacterSheetLevelUp {
 			}
 		}
 
-		// Add hit die (don't add first level HP for multiclass - only on level up)
+		// Recalculate HP to include the new class level and sync current to max
+		this._state.recalculateHp({syncCurrent: true});
+
+		// Add hit die
 		CharacterSheetClassUtils.updateHitDice(this._state, selectedClass);
 
 		// Add proficiencies from multiclass (armor/weapons)

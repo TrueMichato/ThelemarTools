@@ -2492,11 +2492,15 @@ class CharacterSheetCustomAbilities {
 	// #region Grants Rendering Helpers
 
 	/**
-	 * Get hover link HTML for a spell
+	 * Get hover link HTML for a spell, with charsheet modifications if available
 	 */
 	_getSpellHoverLink (spell) {
 		try {
 			const source = spell.source || Parser.SRC_PHB;
+			const spellData = this._page?._spellsData?.find(s => s.name === spell.name && s.source === source);
+			if (this._page?.getSpellHoverLink) {
+				return this._page.getSpellHoverLink(spell.name, source, spellData || null, null);
+			}
 			const hash = UrlUtil.encodeForHash([spell.name, source].join(HASH_LIST_SEP));
 			const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_SPELLS, source, hash});
 			return `<a href="${UrlUtil.PG_SPELLS}#${hash}" ${hoverAttrs} class="custom-abilities__hover-link">${spell.name}</a>`;

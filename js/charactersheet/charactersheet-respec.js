@@ -1954,6 +1954,9 @@ class CharacterSheetRespec {
 				name: newSubclass.name,
 				shortName: newSubclass.shortName,
 				source: newSubclass.source,
+				casterProgression: newSubclass.casterProgression,
+				spellcastingAbility: newSubclass.spellcastingAbility,
+				additionalSpells: newSubclass.additionalSpells,
 			};
 		}
 

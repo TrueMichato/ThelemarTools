@@ -809,11 +809,49 @@
 	text-align: center;
 }
 
-.charsheet__textsize-slider-container {
+.charsheet__textsize-input-container {
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	margin-bottom: 8px;
+}
+
+.charsheet__textsize-input-wrapper {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	background: var(--cs-bg-elevated, rgba(255,255,255,0.05));
+	border: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+	border-radius: var(--cs-radius-sm, 4px);
+	padding: 2px 6px;
+}
+
+.charsheet__textsize-input {
+	width: 3.5ch;
+	background: transparent;
+	border: none;
+	outline: none;
+	color: var(--cs-primary, #6366f1);
+	font-size: 1rem;
+	font-weight: 600;
+	text-align: right;
+	-moz-appearance: textfield;
+}
+
+.charsheet__textsize-input::-webkit-outer-spin-button,
+.charsheet__textsize-input::-webkit-inner-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+
+.charsheet__textsize-input:focus {
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__textsize-input-suffix {
+	color: var(--cs-text-secondary, #94a3b8);
+	font-size: 0.875rem;
+	font-weight: 600;
 }
 
 .charsheet__textsize-btn {
@@ -842,50 +880,7 @@
 	transform: scale(0.95);
 }
 
-.charsheet__textsize-slider {
-	flex: 1;
-	-webkit-appearance: none;
-	appearance: none;
-	height: 6px;
-	background: var(--cs-bg-elevated, rgba(255,255,255,0.1));
-	border-radius: 3px;
-	outline: none;
-	cursor: pointer;
-}
 
-.charsheet__textsize-slider::-webkit-slider-thumb {
-	-webkit-appearance: none;
-	appearance: none;
-	width: 18px;
-	height: 18px;
-	background: var(--cs-primary, #6366f1);
-	border-radius: 50%;
-	cursor: pointer;
-	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-	transition: transform 0.15s ease;
-}
-
-.charsheet__textsize-slider::-webkit-slider-thumb:hover {
-	transform: scale(1.1);
-}
-
-.charsheet__textsize-slider::-moz-range-thumb {
-	width: 18px;
-	height: 18px;
-	background: var(--cs-primary, #6366f1);
-	border: none;
-	border-radius: 50%;
-	cursor: pointer;
-	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-.charsheet__textsize-value {
-	text-align: center;
-	font-size: 0.875rem;
-	font-weight: 600;
-	color: var(--cs-primary, #6366f1);
-	margin-bottom: 12px;
-}
 
 .charsheet__textsize-presets {
 	display: grid;
@@ -1299,6 +1294,14 @@
 	font-family: var(--cs-font-family, inherit);
 }
 
+/* Apply font to secondary header — buttons need explicit font-family (they don't inherit) */
+.charsheet-page[data-font] .charsheet__header-row--secondary,
+.charsheet-page[data-font] .charsheet__header-row--secondary button,
+.charsheet-page[data-font] .charsheet__header-row--secondary input,
+.charsheet-page[data-font] .charsheet__header-row--secondary select {
+	font-family: var(--cs-font-family, inherit);
+}
+
 /* Text Size Scaling - Applied via CSS custom property */
 .charsheet-page {
 	--cs-text-scale: 1;
@@ -1309,22 +1312,7 @@
 	font-size: calc(1rem * var(--cs-text-scale, 1));
 }
 
-/* Scale the CSS text variables based on the scale factor */
-.charsheet-page[data-textsize="80"] { --cs-text-scale: 0.8; }
-.charsheet-page[data-textsize="85"] { --cs-text-scale: 0.85; }
-.charsheet-page[data-textsize="90"] { --cs-text-scale: 0.9; }
-.charsheet-page[data-textsize="95"] { --cs-text-scale: 0.95; }
-.charsheet-page[data-textsize="100"] { --cs-text-scale: 1; }
-.charsheet-page[data-textsize="105"] { --cs-text-scale: 1.05; }
-.charsheet-page[data-textsize="110"] { --cs-text-scale: 1.1; }
-.charsheet-page[data-textsize="115"] { --cs-text-scale: 1.15; }
-.charsheet-page[data-textsize="120"] { --cs-text-scale: 1.2; }
-.charsheet-page[data-textsize="125"] { --cs-text-scale: 1.25; }
-.charsheet-page[data-textsize="130"] { --cs-text-scale: 1.3; }
-.charsheet-page[data-textsize="135"] { --cs-text-scale: 1.35; }
-.charsheet-page[data-textsize="140"] { --cs-text-scale: 1.4; }
-.charsheet-page[data-textsize="145"] { --cs-text-scale: 1.45; }
-.charsheet-page[data-textsize="150"] { --cs-text-scale: 1.5; }
+/* --cs-text-scale is set via inline style in JS to support arbitrary values */
 
 /* Apply scaling to the entire character sheet content area */
 .charsheet-page[data-textsize] .tab-content {
@@ -1730,10 +1718,61 @@
 	font-size: 1rem;
 }
 
-/* Ensure header controls are NOT scaled */
+/* Scale header with page text size */
 .charsheet-page[data-textsize] .charsheet__main-header,
 .charsheet-page[data-textsize] .charsheet__header-row {
-	font-size: 1rem;
+	font-size: calc(1rem * var(--cs-text-scale, 1));
+}
+
+/* Scale header child elements that have hardcoded font sizes */
+.charsheet-page[data-textsize] .charsheet__header-select {
+	font-size: calc(0.9375rem * var(--cs-text-scale, 1)) !important;
+}
+
+.charsheet-page[data-textsize] .charsheet__icon-btn {
+	font-size: calc(1.1rem * var(--cs-text-scale, 1));
+	width: calc(32px * var(--cs-text-scale, 1));
+	height: calc(32px * var(--cs-text-scale, 1));
+}
+
+.charsheet-page[data-textsize] .charsheet__xp-control {
+	font-size: calc(0.8rem * var(--cs-text-scale, 1));
+}
+
+.charsheet-page[data-textsize] .charsheet__xp-label {
+	font-size: calc(0.7rem * var(--cs-text-scale, 1));
+}
+
+.charsheet-page[data-textsize] .charsheet__xp-input {
+	font-size: calc(0.7rem * var(--cs-text-scale, 1));
+}
+
+.charsheet-page[data-textsize] .charsheet__xp-add-btn {
+	font-size: calc(0.7rem * var(--cs-text-scale, 1));
+}
+
+/* Scale secondary header child elements that have hardcoded font sizes */
+.charsheet-page[data-textsize] .charsheet__help-tip {
+	font-size: calc(0.8rem * var(--cs-text-scale, 1));
+}
+
+.charsheet-page[data-textsize] .charsheet__help-tip kbd {
+	font-size: calc(0.7rem * var(--cs-text-scale, 1));
+}
+
+.charsheet-page[data-textsize] .charsheet__layout-toggle,
+.charsheet-page[data-textsize] .charsheet__theme-toggle,
+.charsheet-page[data-textsize] .charsheet__textsize-toggle,
+.charsheet-page[data-textsize] .charsheet__font-toggle,
+.charsheet-page[data-textsize] .charsheet__dice-toggle {
+	font-size: calc(0.8rem * var(--cs-text-scale, 1));
+}
+
+.charsheet-page[data-textsize] .charsheet__layout-toggle-icon,
+.charsheet-page[data-textsize] .charsheet__theme-toggle-icon,
+.charsheet-page[data-textsize] .charsheet__font-toggle-icon,
+.charsheet-page[data-textsize] .charsheet__dice-toggle-icon {
+	font-size: calc(0.9rem * var(--cs-text-scale, 1));
 }
 
 /* Ensure modals and dropdowns aren't affected by text scaling */
@@ -4828,6 +4867,11 @@
 	font-size: var(--cs-text-sm, 0.8rem);
 	line-height: 1.4;
 	color: var(--cs-text-muted, var(--rgb-text-muted));
+}
+
+.charsheet__metamagic-mod {
+	color: var(--cs-success, #10b981);
+	font-weight: 600;
 }
 
 .charsheet__spell-item-actions {

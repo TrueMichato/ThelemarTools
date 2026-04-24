@@ -375,6 +375,105 @@ describe("CharacterSheetState", () => {
 	});
 
 	// ==========================================================================
+	// recalculateHp
+	// ==========================================================================
+	describe("recalculateHp", () => {
+		it("should recalculate max HP from class levels and CON", () => {
+			state.addClass({name: "Fighter", source: "PHB", level: 1});
+			state.setAbilityBase("con", 16); // +3 CON
+			// addClass set hp.max with CON=10 (mod 0) → stale value = 10
+			// recalculateHp should fix it to 10+3 = 13
+			state.recalculateHp();
+			expect(state.getMaxHp()).toBe(13);
+		});
+
+		it("should not increase current HP without syncCurrent", () => {
+			state.addClass({name: "Fighter", source: "PHB", level: 1});
+			state.setMaxHp(10);
+			state.setCurrentHp(5); // damaged
+			state.setAbilityBase("con", 16);
+			state.recalculateHp(); // no syncCurrent
+			expect(state.getMaxHp()).toBe(13);
+			expect(state.getCurrentHp()).toBe(5); // damage gap preserved
+		});
+
+		it("should set current = max when syncCurrent is true", () => {
+			state.addClass({name: "Fighter", source: "PHB", level: 1});
+			state.setMaxHp(10);
+			state.setCurrentHp(5);
+			state.setAbilityBase("con", 16);
+			state.recalculateHp({syncCurrent: true});
+			expect(state.getMaxHp()).toBe(13);
+			expect(state.getCurrentHp()).toBe(13);
+		});
+
+		it("should reflect CON changes in Builder scenario", () => {
+			// Simulates: Builder adds class (CON=10), then sets CON=16, then finishes
+			state.addClass({name: "Wizard", source: "PHB", level: 1});
+			// After addClass, max is 6+0 = 6 (default CON 10, mod 0)
+			expect(state.getMaxHp()).toBe(6);
+
+			state.setAbilityBase("con", 16); // +3 CON
+			state.recalculateHp({syncCurrent: true});
+			// Now should be 6+3 = 9
+			expect(state.getMaxHp()).toBe(9);
+			expect(state.getCurrentHp()).toBe(9);
+		});
+
+		it("should handle multiclass HP correctly", () => {
+			state.addClass({name: "Fighter", source: "PHB", level: 3});
+			state.setAbilityBase("con", 14); // +2 CON
+			state.addClass({name: "Wizard", source: "PHB", level: 2});
+			state.recalculateHp({syncCurrent: true});
+			// Fighter L1: 10+2=12, L2: 5+1+2=8, L3: 8
+			// Wizard L1 (not first class): 3+1+2=6, L2: 6
+			// Total: 12+8+8+6+6 = 40
+			expect(state.getMaxHp()).toBe(40);
+			expect(state.getCurrentHp()).toBe(40);
+		});
+
+		it("should cap current down if max decreases", () => {
+			state.addClass({name: "Fighter", source: "PHB", level: 5});
+			state.setAbilityBase("con", 16);
+			state.recalculateHp({syncCurrent: true});
+			const fullHp = state.getMaxHp();
+
+			// Simulate removing CON bonus
+			state.setAbilityBase("con", 10);
+			state.recalculateHp();
+			expect(state.getMaxHp()).toBeLessThan(fullHp);
+			// Current should be capped to new max
+			expect(state.getCurrentHp()).toBeLessThanOrEqual(state.getMaxHp());
+		});
+
+		it("should always produce at least 1 HP", () => {
+			state.addClass({name: "Wizard", source: "PHB", level: 1});
+			state.setAbilityBase("con", 1); // -5 CON mod
+			state.recalculateHp({syncCurrent: true});
+			expect(state.getMaxHp()).toBeGreaterThanOrEqual(1);
+			expect(state.getCurrentHp()).toBeGreaterThanOrEqual(1);
+		});
+
+		it("should work after levelUp with syncCurrent", () => {
+			state.addClass({name: "Fighter", source: "PHB", level: 1});
+			state.setAbilityBase("con", 14);
+			state.recalculateHp({syncCurrent: true});
+			expect(state.getCurrentHp()).toBe(state.getMaxHp());
+
+			// Take some damage
+			state.setCurrentHp(5);
+			expect(state.getCurrentHp()).toBe(5);
+
+			// Level up (state.levelUp only recalculates max, caps down)
+			state.levelUp("Fighter");
+			// After levelUp, current is still 5 (capped down only)
+			// Then recalculateHp with sync fills to max
+			state.recalculateHp({syncCurrent: true});
+			expect(state.getCurrentHp()).toBe(state.getMaxHp());
+		});
+	});
+
+	// ==========================================================================
 	// Hit Dice
 	// ==========================================================================
 	describe("Hit Dice", () => {

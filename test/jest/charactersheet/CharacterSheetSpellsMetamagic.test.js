@@ -867,4 +867,204 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			expect(spells._formatDurationMinutes(1440)).toBe("1 day");
 		});
 	});
+
+	describe("getModifiedSpellStats passive metamagic notes", () => {
+		beforeEach(() => {
+			state.getKnownMetamagicKeys = () => ["careful", "distant", "empowered", "extended", "transmuted", "resonant", "split", "supple", "warding"];
+			state.setSorceryPoints(20, 20);
+		});
+
+		const FIREBALL_DATA = {
+			name: "Fireball",
+			source: "XPHB",
+			level: 3,
+			range: {type: "point", distance: {type: "feet", amount: 150}},
+			duration: [{type: "instant"}],
+			savingThrow: ["dexterity"],
+			damageInflict: ["fire"],
+			entries: ["Each creature in a 20-foot-radius Sphere centered on that point must make a Dexterity saving throw."],
+		};
+
+		const HOLD_PERSON_DATA = {
+			name: "Hold Person",
+			source: "XPHB",
+			level: 2,
+			range: {type: "point", distance: {type: "feet", amount: 60}},
+			duration: [{type: "timed", duration: {amount: 1, type: "minute"}, concentration: true}],
+			savingThrow: ["wisdom"],
+			entries: ["The target must succeed on a Wisdom saving throw or be paralyzed."],
+		};
+
+		const FIRE_BOLT_DATA = {
+			name: "Fire Bolt",
+			source: "XPHB",
+			level: 0,
+			range: {type: "point", distance: {type: "feet", amount: 120}},
+			duration: [{type: "instant"}],
+			damageInflict: ["fire"],
+			entries: ["Make a ranged spell attack against the target."],
+		};
+
+		it("should add Careful note for save-based spells", () => {
+			state.tuneMetamagic("careful");
+			const result = state.getModifiedSpellStats(FIREBALL_DATA);
+			expect(result.notes).toEqual(expect.arrayContaining([
+				expect.stringContaining("Careful"),
+			]));
+			expect(result.notes.find(n => n.includes("Careful"))).toContain("auto-succeed");
+		});
+
+		it("should not add Careful note for non-save spells", () => {
+			state.tuneMetamagic("careful");
+			const result = state.getModifiedSpellStats(FIRE_BOLT_DATA);
+			expect(result.notes.find(n => n.includes("Careful"))).toBeUndefined();
+		});
+
+		it("should add Empowered note with CHA mod for damage spells", () => {
+			state.setAbilityBase("cha", 16); // +3 mod
+			state.tuneMetamagic("empowered");
+			const result = state.getModifiedSpellStats(FIREBALL_DATA);
+			const note = result.notes.find(n => n.includes("Empowered"));
+			expect(note).toBeDefined();
+			expect(note).toContain("3");
+		});
+
+		it("should not add Empowered note for non-damage spells", () => {
+			state.tuneMetamagic("empowered");
+			const result = state.getModifiedSpellStats(HOLD_PERSON_DATA);
+			expect(result.notes.find(n => n.includes("Empowered"))).toBeUndefined();
+		});
+
+		it("should add Transmuted note for damage spells", () => {
+			state.tuneMetamagic("transmuted");
+			const result = state.getModifiedSpellStats(FIREBALL_DATA);
+			const note = result.notes.find(n => n.includes("Transmuted"));
+			expect(note).toBeDefined();
+			expect(note).toContain("damage type");
+		});
+
+		it("should not add Transmuted note for non-damage spells", () => {
+			state.tuneMetamagic("transmuted");
+			const result = state.getModifiedSpellStats(HOLD_PERSON_DATA);
+			expect(result.notes.find(n => n.includes("Transmuted"))).toBeUndefined();
+		});
+
+		it("should add Resonant note for any spell", () => {
+			state.tuneMetamagic("resonant");
+			const result = state.getModifiedSpellStats(FIRE_BOLT_DATA);
+			const note = result.notes.find(n => n.includes("Resonant"));
+			expect(note).toBeDefined();
+			expect(note).toContain("disadvantage");
+		});
+
+		it("should add Warding note for concentration spells", () => {
+			state.tuneMetamagic("warding");
+			const result = state.getModifiedSpellStats(HOLD_PERSON_DATA);
+			const note = result.notes.find(n => n.includes("Warding"));
+			expect(note).toBeDefined();
+			expect(note).toContain("AC +1");
+		});
+
+		it("should not add Warding note for non-concentration spells", () => {
+			state.tuneMetamagic("warding");
+			const result = state.getModifiedSpellStats(FIREBALL_DATA);
+			expect(result.notes.find(n => n.includes("Warding"))).toBeUndefined();
+		});
+
+		it("should show Distant range doubling", () => {
+			state.tuneMetamagic("distant");
+			const result = state.getModifiedSpellStats(FIREBALL_DATA);
+			expect(result.range.changed).toBe(true);
+			expect(result.range.modified).toBe("300 feet");
+		});
+
+		it("should show Extended duration doubling", () => {
+			state.tuneMetamagic("extended");
+			const result = state.getModifiedSpellStats(HOLD_PERSON_DATA);
+			expect(result.duration.changed).toBe(true);
+			expect(result.duration.modified).toBe("2 minutes");
+		});
+
+		it("should combine multiple passive metamagic notes", () => {
+			state.tuneMetamagic("careful");
+			state.tuneMetamagic("resonant");
+			const result = state.getModifiedSpellStats(FIREBALL_DATA);
+			expect(result.notes.find(n => n.includes("Careful"))).toBeDefined();
+			expect(result.notes.find(n => n.includes("Resonant"))).toBeDefined();
+		});
+	});
+
+	describe("tuneMetamagic sorcery point validation", () => {
+		beforeEach(() => {
+			state.getKnownMetamagicKeys = () => ["careful", "distant", "extended", "resonant"];
+		});
+
+		it("should reject tuning when current SP is 0 but max > 0", () => {
+			state.setSorceryPoints({current: 0, max: 5});
+			expect(state.tuneMetamagic("careful")).toBe(false);
+			expect(state.getTunedMetamagics()).not.toContain("careful");
+		});
+
+		it("should reject tuning when current SP is less than cost", () => {
+			state.setSorceryPoints({current: 1, max: 5});
+			// Resonant costs 2 SP
+			expect(state.tuneMetamagic("resonant")).toBe(false);
+			expect(state.getTunedMetamagics()).not.toContain("resonant");
+		});
+
+		it("should allow tuning when current SP equals cost", () => {
+			state.setSorceryPoints({current: 1, max: 5});
+			// Careful costs 1 SP
+			expect(state.tuneMetamagic("careful")).toBe(true);
+			expect(state.getTunedMetamagics()).toContain("careful");
+		});
+
+		it("should allow tuning when current SP exceeds cost", () => {
+			state.setSorceryPoints({current: 5, max: 5});
+			expect(state.tuneMetamagic("resonant")).toBe(true);
+			expect(state.getTunedMetamagics()).toContain("resonant");
+		});
+
+		it("should reduce both max and current after successful tune", () => {
+			state.setSorceryPoints({current: 5, max: 5});
+			state.tuneMetamagic("careful"); // cost 1
+			const sp = state.getSorceryPoints();
+			expect(sp.max).toBe(4);
+			expect(sp.current).toBe(4);
+		});
+
+		it("should reject tuning when max SP is 0 (all locked)", () => {
+			state.setSorceryPoints({current: 2, max: 2});
+			state.tuneMetamagic("careful"); // cost 1, now max=1, current=1
+			state.tuneMetamagic("distant"); // cost 1, now max=0, current=0
+			expect(state.tuneMetamagic("extended")).toBe(false);
+			expect(state.getTunedMetamagics()).not.toContain("extended");
+		});
+
+		it("should reject tuning when no SP resource exists", () => {
+			// Fresh state with no Sorcery Points resource
+			const freshState = new CharacterSheetState();
+			freshState.getKnownMetamagicKeys = () => ["careful"];
+			expect(freshState.tuneMetamagic("careful")).toBe(false);
+		});
+
+		it("should restore max on detune", () => {
+			state.setSorceryPoints({current: 5, max: 5});
+			state.tuneMetamagic("careful"); // cost 1, max=4, current=4
+			expect(state.getSorceryPoints().max).toBe(4);
+			state.detuneMetamagic("careful");
+			expect(state.getSorceryPoints().max).toBe(5);
+			expect(state.getTunedMetamagics()).not.toContain("careful");
+		});
+
+		it("should not allow tuning with current=0 even after detune restores max", () => {
+			state.setSorceryPoints({current: 1, max: 5});
+			state.tuneMetamagic("careful"); // cost 1, max=4, current=0
+			state.detuneMetamagic("careful"); // max=5, current=0
+			expect(state.getSorceryPoints().max).toBe(5);
+			expect(state.getSorceryPoints().current).toBe(0);
+			// Cannot re-tune because current is still 0
+			expect(state.tuneMetamagic("careful")).toBe(false);
+		});
+	});
 });

@@ -463,6 +463,7 @@ class CharacterSheetBuilder {
 						source: this._selectedSubclass.source,
 						casterProgression: this._selectedSubclass.casterProgression,
 						spellcastingAbility: this._selectedSubclass.spellcastingAbility,
+						additionalSpells: this._selectedSubclass.additionalSpells,
 					} : null,
 					subclassChoice: this._divineSoulAffinity,
 					casterProgression: casterProgressionBuilder,
@@ -2239,11 +2240,8 @@ class CharacterSheetBuilder {
 	}
 
 	async _finishCharacter () {
-		// Set HP to full (max HP) for new characters
-		const maxHp = this._state.getMaxHp();
-		if (maxHp > 0) {
-			this._state.setHp(maxHp, maxHp);
-		}
+		// Recalculate max HP (CON may have changed since addClass) and fill to full
+		this._state.recalculateHp({syncCurrent: true});
 
 		// Save the character
 		await this._page.saveCharacter();
@@ -7843,6 +7841,13 @@ class CharacterSheetBuilder {
 			.filter(l => l)
 			.map(l => l.toLowerCase());
 
+		// Expand with dialect conflicts (e.g. selecting "Ignan" also disables "Primordial")
+		const allDisabledLangs = new Set(allSelectedLangs);
+		for (const lang of allSelectedLangs) {
+			const conflicts = this._page?.getDialectConflicts?.(lang) || [];
+			for (const c of conflicts) allDisabledLangs.add(c.toLowerCase());
+		}
+
 		// Update each select element
 		[...container.querySelectorAll("select")].forEach((selectEl) => {
 			const currentVal = selectEl.value;
@@ -7851,8 +7856,8 @@ class CharacterSheetBuilder {
 				const val = opt.value;
 				if (!val) return; // Skip placeholder option
 
-				// Disable if selected elsewhere, but not if it's the current selection
-				const isSelectedElsewhere = allSelectedLangs.includes(val.toLowerCase()) && val !== currentVal;
+				// Disable if selected elsewhere (or dialect-conflicting), but not if it's the current selection
+				const isSelectedElsewhere = allDisabledLangs.has(val.toLowerCase()) && val !== currentVal;
 				opt.disabled = isSelectedElsewhere;
 			});
 		});
@@ -8464,8 +8469,7 @@ class CharacterSheetBuilder {
 			if (pickerEl) pickerEl.before(affinitySection);
 		}
 
-		const allSpells = this._page.getSpells() || [];
-		const sourceFiltered = this._page.filterByAllowedSources(allSpells);
+		const sourceFiltered = this._page.getFilteredSpellData();
 
 		// Re-get knownInfo to reflect the current affinity selection
 		const updatedKnownInfo = this._getKnownCasterInfoForBuilder();

@@ -5,8 +5,10 @@
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 
 describe("Spellcasting", () => {
 	let state;
@@ -498,5 +500,115 @@ describe("Spellcasting", () => {
 			expect(prepared).toHaveLength(1);
 			expect(prepared[0].name).toBe("Magic Missile");
 		});
+	});
+});
+
+// ==========================================================================
+// isPlayerChosenSpell — counter filter logic
+// ==========================================================================
+describe("CharacterSheetSpells.isPlayerChosenSpell", () => {
+	it("should count spells with no sourceFeature (manual add from modal)", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({name: "Fireball", sourceFeature: null})).toBe(true);
+		expect(CharacterSheetSpells.isPlayerChosenSpell({name: "Fireball"})).toBe(true);
+	});
+
+	it("should count spells with sourceFeature 'Spells Known' (builder/levelup)", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "Spells Known"})).toBe(true);
+	});
+
+	it("should count cantrips with sourceFeature 'Cantrips Known' (builder)", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "Cantrips Known"})).toBe(true);
+	});
+
+	it("should count spells with sourceFeature 'Wizard Spellbook' (builder/levelup)", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "Wizard Spellbook"})).toBe(true);
+	});
+
+	it("should count spells with sourceFeature 'Prepared Spells' (levelup/quickbuild)", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "Prepared Spells"})).toBe(true);
+	});
+
+	it("should count spells with sourceFeature 'Spells Prepared' (builder)", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "Spells Prepared"})).toBe(true);
+	});
+
+	it("should NOT count racial innate spells (e.g. High Elf cantrip)", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "High Elf"})).toBe(false);
+	});
+
+	it("should NOT count subclass always-prepared spells", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "Life Domain Spells"})).toBe(false);
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "Land Spells"})).toBe(false);
+	});
+
+	it("should NOT count Divine Soul Affinity spell", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "Divine Soul Affinity"})).toBe(false);
+	});
+
+	it("should NOT count Tiefling innate spells", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({sourceFeature: "Tiefling"})).toBe(false);
+	});
+});
+
+describe("Spell tracking counter integration", () => {
+	let state;
+
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		state.addClass({
+			name: "Sorcerer", source: "PHB", level: 3,
+			spellsKnownProgression: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 13, 13, 14, 14, 15, 15, 15, 15],
+			cantripProgression: [4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
+		});
+		state.setAbilityBase("cha", 16);
+	});
+
+	it("should count builder-added spells toward the known limit", () => {
+		// Simulate builder adding spells with sourceFeature
+		state.addSpell({name: "Magic Missile", source: "PHB", level: 1, sourceFeature: "Spells Known", sourceClass: "Sorcerer"}, true);
+		state.addSpell({name: "Shield", source: "PHB", level: 1, sourceFeature: "Spells Known", sourceClass: "Sorcerer"}, true);
+
+		const spells = state.getSpells();
+		const playerChosen = spells.filter(s => CharacterSheetSpells.isPlayerChosenSpell(s));
+		expect(playerChosen).toHaveLength(2);
+	});
+
+	it("should count builder-added cantrips toward the cantrip limit", () => {
+		state.addCantrip({name: "Fire Bolt", source: "PHB", school: "V", sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
+		state.addCantrip({name: "Prestidigitation", source: "PHB", school: "T", sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
+
+		const cantrips = state.getCantripsKnown();
+		const playerChosen = cantrips.filter(c => CharacterSheetSpells.isPlayerChosenSpell(c));
+		expect(playerChosen).toHaveLength(2);
+	});
+
+	it("should NOT count feature-granted spells toward the known limit", () => {
+		// Player-chosen spell
+		state.addSpell({name: "Magic Missile", source: "PHB", level: 1, sourceFeature: "Spells Known", sourceClass: "Sorcerer"}, true);
+		// Feature-granted (e.g. Divine Soul affinity)
+		state.addSpell({name: "Cure Wounds", source: "PHB", level: 1, sourceFeature: "Divine Soul Affinity", sourceClass: "Sorcerer", alwaysPrepared: true}, true);
+
+		const spells = state.getSpells();
+		const playerChosen = spells.filter(s => CharacterSheetSpells.isPlayerChosenSpell(s));
+		expect(playerChosen).toHaveLength(1);
+		expect(playerChosen[0].name).toBe("Magic Missile");
+	});
+
+	it("should NOT count racial cantrips toward the cantrip limit", () => {
+		state.addCantrip({name: "Fire Bolt", source: "PHB", school: "V", sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
+		state.addCantrip({name: "Light", source: "PHB", school: "V", sourceFeature: "High Elf"});
+
+		const cantrips = state.getCantripsKnown();
+		const playerChosen = cantrips.filter(c => CharacterSheetSpells.isPlayerChosenSpell(c));
+		expect(playerChosen).toHaveLength(1);
+		expect(playerChosen[0].name).toBe("Fire Bolt");
+	});
+
+	it("should count manually added spells (no sourceFeature) toward the limit", () => {
+		state.addSpell({name: "Magic Missile", source: "PHB", level: 1}, true);
+
+		const spells = state.getSpells();
+		const playerChosen = spells.filter(s => CharacterSheetSpells.isPlayerChosenSpell(s));
+		expect(playerChosen).toHaveLength(1);
 	});
 });

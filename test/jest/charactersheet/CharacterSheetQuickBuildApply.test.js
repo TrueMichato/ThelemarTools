@@ -25,6 +25,7 @@ describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 			applyClassFeatureEffects: jest.fn(),
 			calculateSpellSlots: jest.fn(),
 			recalculateAllCompanions: jest.fn(),
+			recalculateHp: jest.fn(),
 		};
 
 		const page = {

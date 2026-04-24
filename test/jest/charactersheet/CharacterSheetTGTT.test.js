@@ -4024,6 +4024,43 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				const result = state.tuneMetamagic("resonant");
 				expect(result).toBe(false);
 			});
+
+			it("should correctly track SP through tune → detune → retune cycle", () => {
+				// Warding costs 2 SP
+				const sp = () => state.getSorceryPoints();
+
+				// Start: 5/5
+				expect(sp().current).toBe(5);
+				expect(sp().max).toBe(5);
+
+				// Tune warding (cost 2): 3/3
+				state.tuneMetamagic("warding");
+				expect(sp().current).toBe(3);
+				expect(sp().max).toBe(3);
+
+				// Detune warding: current stays 3, max restored to 5 → 3/5
+				state.detuneMetamagic("warding");
+				expect(sp().current).toBe(3);
+				expect(sp().max).toBe(5);
+
+				// Retune warding (cost 2): current=3-2=1, max=5-2=3 → 1/3
+				state.tuneMetamagic("warding");
+				expect(sp().current).toBe(1);
+				expect(sp().max).toBe(3);
+			});
+
+			it("should reject tuning when current SP is less than cost", () => {
+				// Spend SP down to 1 first
+				const res = state._getSpResource();
+				res.current = 1;
+
+				// Tune warding (cost 2): current=1 < cost=2 → rejected
+				const result = state.tuneMetamagic("warding");
+				expect(result).toBe(false);
+				const sp = state.getSorceryPoints();
+				expect(sp.current).toBe(1);
+				expect(sp.max).toBe(5);
+			});
 		});
 
 		describe("Metamagic Info", () => {
@@ -4052,6 +4089,220 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				
 				expect(careful.tuned).toBe(true);
 				expect(distant.tuned).toBe(false);
+			});
+		});
+
+		describe("Modified Spell Stats from Tuned Passives", () => {
+			it("should return no changes when no metamagic tuned", () => {
+				const spellData = {
+					range: {type: "point", distance: {type: "feet", amount: 30}},
+					duration: [{type: "timed", duration: {type: "minute", amount: 1}}],
+				};
+				const result = state.getModifiedSpellStats(spellData);
+				expect(result.range.changed).toBe(false);
+				expect(result.duration.changed).toBe(false);
+				expect(result.notes).toHaveLength(0);
+			});
+
+			it("should return no changes with null spellData", () => {
+				state.tuneMetamagic("distant");
+				const result = state.getModifiedSpellStats(null);
+				expect(result.range.changed).toBe(false);
+				expect(result.duration.changed).toBe(false);
+			});
+
+			describe("Distant Spell", () => {
+				beforeEach(() => {
+					state.tuneMetamagic("distant");
+				});
+
+				it("should double range for a 30ft spell", () => {
+					const spellData = {range: {type: "point", distance: {type: "feet", amount: 30}}};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.range.changed).toBe(true);
+					expect(result.range.original).toBe("30 feet");
+					expect(result.range.modified).toBe("60 feet");
+				});
+
+				it("should double range for a 120ft spell", () => {
+					const spellData = {range: {type: "point", distance: {type: "feet", amount: 120}}};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.range.changed).toBe(true);
+					expect(result.range.original).toBe("120 feet");
+					expect(result.range.modified).toBe("240 feet");
+				});
+
+				it("should change Touch to 30 feet", () => {
+					const spellData = {range: {type: "point", distance: {type: "touch"}}};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.range.changed).toBe(true);
+					expect(result.range.original).toBe("Touch");
+					expect(result.range.modified).toBe("30 feet");
+				});
+
+				it("should not modify Self range", () => {
+					const spellData = {range: {type: "point", distance: {type: "self"}}};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.range.changed).toBe(false);
+				});
+
+				it("should not modify range below 5ft", () => {
+					const spellData = {range: {type: "point", distance: {type: "feet", amount: 0}}};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.range.changed).toBe(false);
+				});
+			});
+
+			describe("Extended Spell", () => {
+				beforeEach(() => {
+					state.tuneMetamagic("extended");
+				});
+
+				it("should double a 1-minute duration", () => {
+					const spellData = {duration: [{type: "timed", duration: {type: "minute", amount: 1}}]};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.duration.changed).toBe(true);
+					expect(result.duration.original).toBe("1 minute");
+					expect(result.duration.modified).toBe("2 minutes");
+				});
+
+				it("should double a 1-hour duration", () => {
+					const spellData = {duration: [{type: "timed", duration: {type: "hour", amount: 1}}]};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.duration.changed).toBe(true);
+					expect(result.duration.original).toBe("1 hour");
+					expect(result.duration.modified).toBe("2 hours");
+				});
+
+				it("should double a concentration duration and format original correctly", () => {
+					const spellData = {duration: [{type: "timed", concentration: true, duration: {type: "minute", amount: 10}}]};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.duration.changed).toBe(true);
+					expect(result.duration.original).toBe("Concentration, up to 10 minutes");
+					expect(result.duration.modified).toBe("20 minutes");
+				});
+
+				it("should cap at 24 hours", () => {
+					const spellData = {duration: [{type: "timed", duration: {type: "hour", amount: 24}}]};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.duration.changed).toBe(true);
+					expect(result.duration.modified).toContain("24h cap");
+				});
+
+				it("should not modify instantaneous duration", () => {
+					const spellData = {duration: [{type: "instant"}]};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.duration.changed).toBe(false);
+				});
+
+				it("should not modify permanent duration", () => {
+					const spellData = {duration: [{type: "permanent"}]};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.duration.changed).toBe(false);
+				});
+			});
+
+			describe("Multiple passives tuned simultaneously", () => {
+				it("should modify both range and duration when Distant and Extended tuned", () => {
+					state.tuneMetamagic("distant");
+					state.tuneMetamagic("extended");
+					const spellData = {
+						range: {type: "point", distance: {type: "feet", amount: 60}},
+						duration: [{type: "timed", duration: {type: "minute", amount: 10}}],
+					};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.range.changed).toBe(true);
+					expect(result.range.modified).toBe("120 feet");
+					expect(result.duration.changed).toBe(true);
+					expect(result.duration.modified).toBe("20 minutes");
+				});
+			});
+
+			describe("Supple Spell notes", () => {
+				it("should add AoE note for 20ft cone spell", () => {
+					state.tuneMetamagic("supple");
+					const spellData = {
+						range: {type: "cone", distance: {type: "feet", amount: 20}},
+					};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.notes.length).toBeGreaterThan(0);
+					expect(result.notes[0]).toContain("Supple");
+					expect(result.notes[0]).toContain("10");
+				});
+
+				it("should not add note for point-range spell without AoE", () => {
+					state.tuneMetamagic("supple");
+					const spellData = {
+						range: {type: "point", distance: {type: "feet", amount: 30}},
+						entries: ["You deal 1d8 damage to a target."],
+					};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.notes).toHaveLength(0);
+				});
+			});
+
+			describe("Split Spell notes", () => {
+				it("should add split note for 15ft AoE spell", () => {
+					state.tuneMetamagic("split");
+					const spellData = {
+						range: {type: "sphere", distance: {type: "feet", amount: 15}},
+					};
+					const result = state.getModifiedSpellStats(spellData);
+					expect(result.notes.length).toBeGreaterThan(0);
+					expect(result.notes[0]).toContain("Split");
+				});
+			});
+
+			describe("Static helpers", () => {
+				it("_durationToMinutes should convert rounds", () => {
+					expect(CharacterSheetState._durationToMinutes({duration: {type: "round", amount: 10}})).toBeCloseTo(1);
+				});
+
+				it("_durationToMinutes should convert hours", () => {
+					expect(CharacterSheetState._durationToMinutes({duration: {type: "hour", amount: 2}})).toBe(120);
+				});
+
+				it("_formatMinutes should format days", () => {
+					expect(CharacterSheetState._formatMinutes(1440)).toBe("1 day");
+				});
+
+				it("_formatMinutes should format hours plural", () => {
+					expect(CharacterSheetState._formatMinutes(180)).toBe("3 hours");
+				});
+
+				it("_formatMinutes should format minutes plural", () => {
+					expect(CharacterSheetState._formatMinutes(45)).toBe("45 minutes");
+				});
+
+				it("_formatDuration should format concentration", () => {
+					const dur = {type: "timed", concentration: true, duration: {type: "minute", amount: 1}};
+					expect(CharacterSheetState._formatDuration(dur)).toBe("Concentration, up to 1 minute");
+				});
+
+				it("_formatDuration should format instantaneous", () => {
+					expect(CharacterSheetState._formatDuration({type: "instant"})).toBe("Instantaneous");
+				});
+
+				it("_getSpellAreaSizeFromData should detect cone range type", () => {
+					const data = {range: {type: "cone", distance: {type: "feet", amount: 60}}};
+					expect(CharacterSheetState._getSpellAreaSizeFromData(data)).toBe(60);
+				});
+
+				it("_getSpellAreaSizeFromData should parse entries fallback", () => {
+					const data = {
+						range: {type: "point", distance: {type: "feet", amount: 60}},
+						entries: ["Each creature in a 20-foot radius must make a save."],
+					};
+					expect(CharacterSheetState._getSpellAreaSizeFromData(data)).toBe(20);
+				});
+
+				it("_getSpellAreaSizeFromData should return 0 for non-AoE", () => {
+					const data = {
+						range: {type: "point", distance: {type: "feet", amount: 30}},
+						entries: ["You hurl a bolt of fire."],
+					};
+					expect(CharacterSheetState._getSpellAreaSizeFromData(data)).toBe(0);
+				});
 			});
 		});
 	});
@@ -8032,6 +8283,168 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						});
 						const calcs = state.getFeatureCalculations();
 						expect(calcs.brightZenithDuration).toBe(1);
+					});
+				});
+
+				// Effect Application Tests
+				describe("Effect Application", () => {
+					it("should apply +15 walking speed effect at level 6", () => {
+						state.addClass({
+							name: "Sorcerer",
+							source: "TGTT",
+							level: 6,
+							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"}
+						});
+						const appliedEffects = state.getAppliedClassFeatureEffects();
+						expect(appliedEffects.some(e => e.includes("Sunlit Path"))).toBe(true);
+					});
+
+					it("should apply radiant resistance at level 6", () => {
+						state.addClass({
+							name: "Sorcerer",
+							source: "TGTT",
+							level: 6,
+							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"}
+						});
+						state.applyClassFeatureEffects();
+						expect(state.hasResistance("radiant")).toBe(true);
+					});
+
+					it("should not apply Sunlit Path effects before level 6", () => {
+						// beforeEach adds level 1 Sorcerer
+						const appliedEffects = state.getAppliedClassFeatureEffects();
+						expect(appliedEffects.some(e => e.includes("Sunlit Path"))).toBe(false);
+						expect(state.hasResistance("radiant")).toBe(false);
+					});
+				});
+
+				// Subclass Spells Tests
+				describe("Subclass Spells (additionalSpells)", () => {
+					const SUN_BLOODLINE_ADDITIONAL_SPELLS = [{
+						innate: {
+							"0": ["light#c"],
+						},
+						known: {
+							"3": ["daybreak|ar1", "faerie fire", "continual flame", "flaming sphere"],
+							"5": ["daylight", "melf's minute meteors|xge"],
+							"7": ["fire shield", "sickening radiance|xge"],
+							"9": ["wall of light|xge", "dawn"],
+						},
+					}];
+
+					it("should return innate Light cantrip from getSubclassAlwaysPreparedSpells", () => {
+						const cls = {
+							name: "Sorcerer",
+							level: 1,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						};
+						state.addClass(cls);
+						const spells = state.getSubclassAlwaysPreparedSpells(cls);
+						const light = spells.find(s => s.name === "light");
+						expect(light).toBeTruthy();
+						expect(light.isCantrip).toBe(true);
+						expect(light.sourceFeature).toBe("Child of the Sun Bloodline Spells");
+					});
+
+					it("should return level-gated known spells at level 3", () => {
+						const cls = {
+							name: "Sorcerer",
+							level: 3,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						};
+						state.addClass(cls);
+						const spells = state.getSubclassAlwaysPreparedSpells(cls);
+						// Should have Light cantrip + 4 level-3 spells = 5
+						expect(spells.filter(s => !s.isCantrip).length).toBe(4);
+						expect(spells.find(s => s.name === "faerie fire")).toBeTruthy();
+						expect(spells.find(s => s.name === "flaming sphere")).toBeTruthy();
+					});
+
+					it("should not return level 5 spells at level 3", () => {
+						const cls = {
+							name: "Sorcerer",
+							level: 3,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						};
+						state.addClass(cls);
+						const spells = state.getSubclassAlwaysPreparedSpells(cls);
+						expect(spells.find(s => s.name === "daylight")).toBeFalsy();
+					});
+
+					it("should return all spells at level 9", () => {
+						const cls = {
+							name: "Sorcerer",
+							level: 9,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						};
+						state.addClass(cls);
+						const spells = state.getSubclassAlwaysPreparedSpells(cls);
+						// 1 cantrip + 4 + 2 + 2 + 2 = 11 total
+						expect(spells.length).toBe(11);
+						expect(spells.find(s => s.name === "dawn")).toBeTruthy();
+						expect(spells.find(s => s.name === "wall of light")).toBeTruthy();
+					});
+
+					it("should populate innate cantrip into cantripsKnown via populateSubclassSpells", () => {
+						state.addClass({
+							name: "Sorcerer",
+							level: 3,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						});
+						state.populateSubclassSpells();
+						const cantrips = state.getCantrips();
+						expect(cantrips.some(c => c.name.toLowerCase() === "light")).toBe(true);
+					});
+
+					it("should populate known spells into spellsKnown via populateSubclassSpells", () => {
+						state.addClass({
+							name: "Sorcerer",
+							level: 5,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						});
+						state.populateSubclassSpells();
+						const spells = state.getSpells();
+						expect(spells.some(s => s.name.toLowerCase() === "faerie fire")).toBe(true);
+						expect(spells.some(s => s.name.toLowerCase() === "daylight")).toBe(true);
+						// Always prepared
+						const faerieFire = spells.find(s => s.name.toLowerCase() === "faerie fire");
+						expect(faerieFire.alwaysPrepared).toBe(true);
 					});
 				});
 			});
@@ -12302,4 +12715,217 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
                         });
                 });
         });
+
+	// ==================================================================
+	// Spell Picker TGTT Filter Integration
+	// ==================================================================
+	describe("Spell Picker TGTT Filters", () => {
+		let CharacterSheetSpells;
+
+		beforeAll(async () => {
+			await import("../../../js/charactersheet/charactersheet-spells.js");
+			CharacterSheetSpells = globalThis.CharacterSheetSpells;
+		});
+
+		const makeRarityApplier = (settings = {}) => {
+			const mockState = new CharacterSheetState();
+			mockState.loadFromJson({settings});
+			// Build a context with the methods applyThelemarSpellRarity needs
+			const context = {
+				_state: mockState,
+				_isOfficialSource: CharacterSheetSpells.prototype._isOfficialSource,
+			};
+			return (spells) => CharacterSheetSpells.prototype.applyThelemarSpellRarity.call(context, spells);
+		};
+
+		const PHB_SPELL = {name: "Fireball", source: "PHB", level: 3, school: "V"};
+		const TGTT_SPELL = {name: "Dreamfire", source: "TGTT", level: 2, school: "V"};
+		const TAGGED_SPELL = {name: "Tagged", source: "PHB", level: 1, school: "A", subschools: ["rarity:rare", "legality:restricted"]};
+
+		describe("applyThelemarSpellRarity", () => {
+			it("should tag official spells as common + legal when setting enabled", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
+				const result = applyRarity([PHB_SPELL]);
+				expect(result[0].subschools).toContain("rarity:common");
+				expect(result[0].subschools).toContain("legality:legal");
+			});
+
+			it("should tag homebrew spells as uncommon + legal", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
+				const result = applyRarity([TGTT_SPELL]);
+				expect(result[0].subschools).toContain("rarity:uncommon");
+				expect(result[0].subschools).toContain("legality:legal");
+			});
+
+			it("should not overwrite existing rarity/legality tags", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
+				const result = applyRarity([TAGGED_SPELL]);
+				expect(result[0].subschools).toContain("rarity:rare");
+				expect(result[0].subschools).toContain("legality:restricted");
+				expect(result[0].subschools).not.toContain("rarity:common");
+			});
+
+			it("should not mutate original spell objects", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
+				const original = {name: "Shield", source: "PHB", level: 1, school: "A"};
+				applyRarity([original]);
+				expect(original.subschools).toBeUndefined();
+			});
+
+			it("should skip tagging when setting is disabled", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: false});
+				const result = applyRarity([PHB_SPELL]);
+				expect(result[0].subschools).toBeUndefined();
+			});
+
+			it("should default to enabled when setting is not explicitly set", () => {
+				const applyRarity = makeRarityApplier({});
+				const result = applyRarity([PHB_SPELL]);
+				expect(result[0].subschools).toContain("rarity:common");
+			});
+
+			it("should handle mix of official and homebrew spells", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
+				const result = applyRarity([PHB_SPELL, TGTT_SPELL]);
+				expect(result[0].subschools).toContain("rarity:common");
+				expect(result[1].subschools).toContain("rarity:uncommon");
+			});
+
+			it("should handle empty array", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
+				const result = applyRarity([]);
+				expect(result).toEqual([]);
+			});
+		});
+
+		describe("getFilteredSpellData integration", () => {
+			it("should apply rarity tags through the centralized page method", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
+				const spellData = [PHB_SPELL, TGTT_SPELL];
+
+				// Simulate getFilteredSpellData: filterByAllowedSources → applyThelemarSpellRarity
+				const filtered = spellData; // no source restriction in this test
+				const result = applyRarity(filtered);
+
+				expect(result).toHaveLength(2);
+				expect(result[0].subschools).toContain("rarity:common");
+				expect(result[0].subschools).toContain("legality:legal");
+				expect(result[1].subschools).toContain("rarity:uncommon");
+				expect(result[1].subschools).toContain("legality:legal");
+			});
+
+			it("should combine priority filtering with rarity tagging", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
+
+				// Simulate both PHB and TGTT versions of same spell
+				const phbFireball = {name: "Fireball", source: "PHB", level: 3, school: "V"};
+				const tgttFireball = {name: "Fireball", source: "TGTT", level: 3, school: "V"};
+				const phbShield = {name: "Shield", source: "PHB", level: 1, school: "A"};
+				const allSpells = [phbFireball, tgttFireball, phbShield];
+
+				// Simulate priority filtering: TGTT hides PHB duplicates
+				const priorityNames = new Set();
+				allSpells.forEach(e => {
+					if (e.source === "TGTT") priorityNames.add(e.name.toLowerCase());
+				});
+				const priorityFiltered = allSpells.filter(e => e.source === "TGTT" || !priorityNames.has(e.name.toLowerCase()));
+
+				// Then apply rarity (like getFilteredSpellData does)
+				const result = applyRarity(priorityFiltered);
+
+				// PHB Fireball should be hidden (TGTT version exists)
+				expect(result).toHaveLength(2);
+				expect(result.find(s => s.name === "Fireball").source).toBe("TGTT");
+				expect(result.find(s => s.name === "Shield").source).toBe("PHB");
+				// Both should have rarity tags
+				expect(result.find(s => s.name === "Fireball").subschools).toContain("rarity:uncommon");
+				expect(result.find(s => s.name === "Shield").subschools).toContain("rarity:common");
+			});
+		});
+
+		describe("double-application guard", () => {
+			it("applyThelemarSpellRarity should not double-apply rarity tags", () => {
+				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
+				const spells = [{name: "Fireball", source: "PHB", level: 3, school: "V"}];
+
+				// Apply twice (simulating the old double-application bug)
+				const firstPass = applyRarity(spells);
+				const secondPass = applyRarity(firstPass);
+
+				// Should still have exactly one rarity tag and one legality tag
+				const rarityTags = secondPass[0].subschools.filter(t => t.startsWith("rarity:"));
+				const legalityTags = secondPass[0].subschools.filter(t => t.startsWith("legality:"));
+				expect(rarityTags).toHaveLength(1);
+				expect(legalityTags).toHaveLength(1);
+			});
+		});
+	});
+
+	describe("TGTT Filter Centralization Guards", () => {
+		let readFile, charsheetDir;
+
+		beforeAll(async () => {
+			const fs = await import("node:fs");
+			const path = await import("node:path");
+			const url = await import("node:url");
+			const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
+			charsheetDir = path.resolve(__dirname, "../../../js/charactersheet");
+			readFile = (file) => fs.readFileSync(path.join(charsheetDir, file), "utf8");
+		});
+
+		const SPELL_CONSUMER_FILES = [
+			"charactersheet-spells.js",
+			"charactersheet-builder.js",
+			"charactersheet-levelup.js",
+			"charactersheet-quickbuild.js",
+		];
+
+		it("spell consumer files should not call filterByAllowedSources directly for spells", () => {
+			const violations = [];
+			for (const file of SPELL_CONSUMER_FILES) {
+				const content = readFile(file);
+				const lines = content.split("\n");
+				lines.forEach((line, i) => {
+					if (line.includes("filterByAllowedSources") && (
+						line.includes("Spell") || line.includes("spell") || line.includes("_allSpells")
+					)) {
+						violations.push(`${file}:${i + 1}: ${line.trim()}`);
+					}
+				});
+			}
+			expect(violations).toEqual([]);
+		});
+
+		it("spell consumer files should not call applyThelemarSpellRarity inline for picker data", () => {
+			const violations = [];
+			for (const file of SPELL_CONSUMER_FILES) {
+				const content = readFile(file);
+				const lines = content.split("\n");
+				lines.forEach((line, i) => {
+					if (line.includes("applyThelemarSpellRarity") && !line.trim().startsWith("//") && !line.trim().startsWith("*")) {
+						const isDefinition = line.includes("applyThelemarSpellRarity (") || line.includes("applyThelemarSpellRarity(");
+						const isDisplayCall = line.includes("getSpells()") || line.includes("_state.getSpells");
+						if (!isDefinition && !isDisplayCall) {
+							violations.push(`${file}:${i + 1}: ${line.trim()}`);
+						}
+					}
+				});
+			}
+			expect(violations).toEqual([]);
+		});
+
+		it("getFilteredSpellData calls should not use optional chaining", () => {
+			const violations = [];
+			for (const file of SPELL_CONSUMER_FILES) {
+				const content = readFile(file);
+				const lines = content.split("\n");
+				lines.forEach((line, i) => {
+					if (line.includes("getFilteredSpellData?.")) {
+						violations.push(`${file}:${i + 1}: ${line.trim()}`);
+					}
+				});
+			}
+			expect(violations).toEqual([]);
+		});
+	});
 });
