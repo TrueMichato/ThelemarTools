@@ -2056,13 +2056,10 @@
         "F",
         "ER|TalDoreiCampaignSettingReborn"
       ],
-      "mastery": [
-        "Slow|XPHB"
-      ],
+      "range": "5/20",
       "dmg1": "1d4",
       "dmgType": "S",
       "reach": 20,
-      "weapon": true,
       "entries": [
         "A sturdy, longer version of a regular whip, which is more easily used by whip fighters in various situations that require reach."
       ]
@@ -2080,12 +2077,8 @@
         "F",
         "R"
       ],
-      "mastery": [
-        "Sap|XPHB"
-      ],
       "dmg1": "1d6",
       "dmgType": "S",
-      "weapon": true,
       "entries": [
         "Also called \"Unicorn Whip\", this weapon is made from steel rods decreasing in size linked by progressively smaller steel rings, enabling the user to inflict far graver damage to the enemy with quick, devastating blows."
       ]
@@ -2104,12 +2097,9 @@
         "R",
         "S"
       ],
-      "mastery": [
-        "Slow|XPHB"
-      ],
+      "range": "10/10",
       "dmg1": "1d4",
       "dmgType": "S",
-      "weapon": true,
       "entries": [
         "Invented by cattle farmers to control their herd, this weapon is known for it's ability to produce a startling noise that draws attention.",
         "Special - Instead of attacking, the user can attempt to crack with the whip. Every creature who can hear in a 15ft radius of the user that is concentrating on a spell must attempt a {@dc 10} Constitution Saving Throw. On failure, they lose {@status concentration}."
@@ -36435,6 +36425,127 @@
         "name": "Yuan-Ti",
         "source": "MPMM"
       }
+    },
+    {
+      "name": "Dulahan",
+      "source": "TGTT",
+      "page": 0,
+      "creatureTypes": [
+        "undead"
+      ],
+      "size": [
+        "M"
+      ],
+      "speed": 30,
+      "darkvision": 60,
+      "ability": [
+        {
+          "choose": {
+            "weighted": {
+              "from": [
+                "str",
+                "dex",
+                "con",
+                "int",
+                "wis",
+                "cha"
+              ],
+              "weights": [
+                2,
+                1,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "choose": {
+            "weighted": {
+              "from": [
+                "str",
+                "dex",
+                "con",
+                "int",
+                "wis",
+                "cha"
+              ],
+              "weights": [
+                2,
+                2
+              ]
+            }
+          }
+        }
+      ],
+      "traitTags": [
+        "Improved Resting",
+        "Damage Resistance"
+      ],
+      "languageProficiencies": [
+        {
+          "common": true,
+          "mictlanian|TGTT": true,
+          "anyStandard": 1
+        }
+      ],
+      "resist": [
+        "poison",
+        "necrotic"
+      ],
+      "vulnerable": [
+        "radiant"
+      ],
+      "entries": [
+        {
+          "type": "entries",
+          "name": "Creature Type",
+          "entries": [
+            "You are an Undead. You are immune to the {@classFeature Turn Undead|Cleric||2|PHB} ability."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Darkvision",
+          "entries": [
+            "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Deathless Nature",
+          "entries": [
+            "You do not need to breathe or eat."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Sentry's Rest",
+          "entries": [
+            "You do not sleep. Instead, you can finish a long rest in 4 hours if you spend those hours in light activity, such as keeping watch or standing still. Additionally, magic cannot put you to sleep."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Spectral Fortitude",
+          "entries": [
+            "You have resistance to Poison and Necrotic damage. You also have advantage on saving throws against the {@condition poisoned} condition."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Radiant Frailty",
+          "entries": [
+            "You have vulnerability to Radiant damage."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Language of the Dead",
+          "entries": [
+            "You can speak, read, and write Common, Mictlanian, and one other language of your choice. When speaking with an undead creature, you can choose to pour supernatural intent into your words. If you do so, the undead acts as if affected by the {@spell suggestion} spell  and always understands you, regardless of language barriers."
+          ]
+        }
+      ]
     }
   ],
   "subrace": [
