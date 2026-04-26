@@ -2548,19 +2548,16 @@ class CharacterSheetLevelUp {
 			return;
 		}
 
+		// Merge combatMethod entities into the available pool
+		const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
+		const allMethods = [...allOptFeatures, ...combatMethodEntities];
+
 		// Filter methods by known traditions and max degree
-		const availableMethods = allOptFeatures.filter(opt => {
-			if (!opt.featureType) return false;
-
-			return opt.featureType.some(ft => {
-				const match = ft.match(/^CTM:(\d)([A-Z]{2})$/);
-				if (!match) return false;
-
-				const degree = parseInt(match[1]);
-				const tradCode = match[2];
-
-				return degree <= maxDegree && knownTraditions.includes(tradCode);
-			});
+		const availableMethods = allMethods.filter(opt => {
+			if (!CharacterSheetClassUtils.isCombatMethod(opt)) return false;
+			const degree = CharacterSheetClassUtils.getMethodDegree(opt);
+			const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(opt);
+			return degree > 0 && degree <= maxDegree && tradCode && knownTraditions.includes(tradCode);
 		});
 
 		// Mark as already known or available
@@ -2573,7 +2570,7 @@ class CharacterSheetLevelUp {
 				_alreadyKnown: alreadyHas,
 				_selectable: !alreadyHas,
 				_degree: CharacterSheetClassUtils.getMethodDegree(opt),
-				_tradition: CharacterSheetClassUtils.getMethodTradition(opt),
+				_tradition: CharacterSheetClassUtils.getMethodTraditionCode(opt),
 			};
 		});
 

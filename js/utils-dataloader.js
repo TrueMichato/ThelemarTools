@@ -814,6 +814,13 @@ class _DataTypeLoaderItemUpgrade extends _DataTypeLoaderSingleSource {
 	_filename = "itemupgrades.json";
 }
 
+class _DataTypeLoaderCombatMethod extends _DataTypeLoaderSingleSource {
+	static PROPS = ["combatMethod"];
+	static PAGE = UrlUtil.PG_COMBAT_METHODS;
+
+	_filename = "combatmethods.json";
+}
+
 class _DataTypeLoaderReward extends _DataTypeLoaderSingleSource {
 	static PROPS = ["reward"];
 	static PAGE = UrlUtil.PG_REWARDS;
@@ -1810,6 +1817,7 @@ class DataLoader {
 		"feat": UrlUtil.PG_FEATS,
 		"optionalfeature": UrlUtil.PG_OPT_FEATURES,
 		"itemUpgrade": UrlUtil.PG_ITEM_UPGRADES,
+		"combatMethod": UrlUtil.PG_COMBAT_METHODS,
 		"reward": UrlUtil.PG_REWARDS,
 		"charoption": UrlUtil.PG_CHAR_CREATION_OPTIONS,
 		"race": UrlUtil.PG_RACES,
@@ -1903,6 +1911,7 @@ class DataLoader {
 		_DataTypeLoaderFeat.register({fnRegister});
 		_DataTypeLoaderOptionalfeature.register({fnRegister});
 		_DataTypeLoaderItemUpgrade.register({fnRegister});
+		_DataTypeLoaderCombatMethod.register({fnRegister});
 		_DataTypeLoaderReward.register({fnRegister});
 		_DataTypeLoaderCharoption.register({fnRegister});
 		_DataTypeLoaderBastion.register({fnRegister});

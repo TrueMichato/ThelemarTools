@@ -2097,7 +2097,7 @@ class CharacterSheetCombat {
 			desc = desc.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
 
 			// Skip combat methods (they have their own section)
-			if (f.optionalFeatureTypes?.some(ft => /^CTM:\d?[A-Z]{2}$/.test(ft))) return false;
+			if (CharacterSheetClassUtils.isCombatMethod(f)) return false;
 
 			// Skip metamagic features (managed via metamagic dashboard)
 			if (f.optionalFeatureTypes?.includes("MM")) return false;
@@ -5495,12 +5495,7 @@ class CharacterSheetCombat {
 	renderCombatMethods () {
 		// Get combat method features from character
 		const features = this._state.getFeatures();
-		const combatMethods = features.filter(f => {
-			if (f.featureType !== "Optional Feature") return false;
-			// Check if it's a combat method (has CTM:X featureType)
-			// Format: CTM:XYY where X is optional degree (1-5), YY is tradition code
-			return f.optionalFeatureTypes?.some(ft => /^CTM:\d?[A-Z]{2}$/.test(ft));
-		});
+		const combatMethods = features.filter(f => CharacterSheetClassUtils.isCombatMethod(f));
 
 		// Main page section
 		const section = document.getElementById("charsheet-combat-methods-section");
@@ -5959,10 +5954,11 @@ class CharacterSheetCombat {
 	 */
 	async _showMethodPicker () {
 		const allOptFeatures = this._page.getOptionalFeatures() || [];
+		const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
 
-		// Get all combat method optional features
-		const allMethods = allOptFeatures.filter(opt =>
-			opt.featureType?.some(ft => /^CTM:\d[A-Z]{2}$/.test(ft)),
+		// Get all combat method features (both legacy optionalfeatures and new combatMethod entities)
+		const allMethods = [...allOptFeatures, ...combatMethodEntities].filter(opt =>
+			CharacterSheetClassUtils.isCombatMethod(opt),
 		);
 
 		if (allMethods.length === 0) {
@@ -5974,10 +5970,7 @@ class CharacterSheetCombat {
 		let selectedTraditions = this._getCharacterTraditions();
 
 		// Get currently known methods
-		const knownMethods = this._state.getFeatures().filter(f =>
-			f.featureType === "Optional Feature"
-			&& f.optionalFeatureTypes?.some(ft => /^CTM:\d[A-Z]{2}$/.test(ft)),
-		);
+		const knownMethods = this._state.getFeatures().filter(f => CharacterSheetClassUtils.isCombatMethod(f));
 		const knownMethodNames = new Set(knownMethods.map(m => `${m.name}|${m.source || ""}`));
 
 		// Get max degree and max methods based on character level
@@ -6205,7 +6198,7 @@ class CharacterSheetCombat {
 			if (!classData?.optionalfeatureProgression) continue;
 
 			const cmProg = classData.optionalfeatureProgression.find(prog =>
-				prog.featureType?.some(ft => ft.startsWith("CTM:")),
+				prog.featureType?.some(ft => ft.startsWith("CTM:")) || prog.name?.toLowerCase().includes("combat method"),
 			);
 			if (!cmProg?.progression) continue;
 
@@ -6233,25 +6226,9 @@ class CharacterSheetCombat {
 		container.innerHTML = "";
 		Object.assign(container.style, {"display": "flex", "flex-wrap": "wrap", "gap": "0.4rem", "padding": "0.5rem", "background": "var(--rgb-bg-alt)", "border-radius": "4px"});
 
-		const allTraditions = [
-			{code: "AM", name: "Adamant Mountain"},
-			{code: "AK", name: "Arcane Knight"},
-			{code: "BU", name: "Beast Unity"},
-			{code: "BZ", name: "Biting Zephyr"},
-			{code: "CJ", name: "Comedic Jabs"},
-			{code: "EB", name: "Eldritch Blackguard"},
-			{code: "GH", name: "Gallant Heart"},
-			{code: "MG", name: "Mirror's Glint"},
-			{code: "MS", name: "Mist and Shade"},
-			{code: "RC", name: "Rapid Current"},
-			{code: "RE", name: "Razor's Edge"},
-			{code: "SK", name: "Sanguine Knot"},
-			{code: "SS", name: "Spirited Steed"},
-			{code: "TI", name: "Tempered Iron"},
-			{code: "TC", name: "Tooth and Claw"},
-			{code: "UW", name: "Unending Wheel"},
-			{code: "UH", name: "Unerring Hawk"},
-		];
+		const allTraditions = Object.entries(CharacterSheetClassUtils.TRADITION_CODE_TO_NAME)
+			.map(([code, name]) => ({code, name}))
+			.sort((a, b) => a.name.localeCompare(b.name));
 
 		const tradIcons = this._getTraditionIcons();
 
@@ -6517,17 +6494,12 @@ class CharacterSheetCombat {
 		if (stateTraditions.length) return stateTraditions;
 
 		// Infer from known combat methods
-		const knownMethods = this._state.getFeatures().filter(f =>
-			f.featureType === "Optional Feature"
-			&& f.optionalFeatureTypes?.some(ft => /^CTM:\d[A-Z]{2}$/.test(ft)),
-		);
+		const knownMethods = this._state.getFeatures().filter(f => CharacterSheetClassUtils.isCombatMethod(f));
 
 		const traditions = new Set();
 		for (const method of knownMethods) {
-			for (const ft of (method.optionalFeatureTypes || [])) {
-				const match = ft.match(/^CTM:\d([A-Z]{2})$/);
-				if (match) traditions.add(match[1]);
-			}
+			const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(method);
+			if (tradCode) traditions.add(tradCode);
 		}
 
 		return Array.from(traditions);
@@ -6549,12 +6521,11 @@ class CharacterSheetCombat {
 		let maxDegree = 0;
 
 		for (const cls of classes) {
-			// Check if this class uses combat methods
 			const classData = this._page.getClasses?.().find(c => c.name === cls.name && c.source === cls.source);
 			if (!classData?.optionalfeatureProgression) continue;
 
 			const cmProg = classData.optionalfeatureProgression.find(prog =>
-				prog.featureType?.some(ft => ft.startsWith("CTM:")),
+				prog.featureType?.some(ft => ft.startsWith("CTM:")) || prog.name?.toLowerCase().includes("combat method"),
 			);
 			if (!cmProg) continue;
 
@@ -6601,97 +6572,37 @@ class CharacterSheetCombat {
 	 * Get method tradition code from optional feature
 	 */
 	_getMethodTraditionFromOptFeature (method) {
-		if (!method.featureType) return "Unknown";
-		for (const ft of method.featureType) {
-			const match = ft.match(/^CTM:\d([A-Z]{2})$/);
-			if (match) return match[1];
-		}
-		return "Unknown";
+		return CharacterSheetClassUtils.getMethodTraditionCode(method) || "Unknown";
 	}
 
-	/**
-	 * Get method degree from optional feature
-	 */
 	_getMethodDegreeFromOptFeature (method) {
-		if (!method.featureType) return 0;
-		for (const ft of method.featureType) {
-			const match = ft.match(/^CTM:(\d)[A-Z]{2}$/);
-			if (match) return parseInt(match[1]);
-		}
-		return 0;
+		return CharacterSheetClassUtils.getMethodDegree(method);
 	}
 
-	/**
-	 * Get method stamina cost from optional feature
-	 */
 	_getMethodStaminaCostFromOptFeature (method) {
-		// First check consumes.amount
-		if (method.consumes?.amount) return method.consumes.amount;
-
-		if (!method.entries) return 0;
-		const entriesStr = JSON.stringify(method.entries);
-
-		// Parse from entries like "{@b Action (2 Stamina Points)}"
-		const costMatch = entriesStr.match(/\((\d+)\s+stamina\s+points?\)/i);
-		if (costMatch) return parseInt(costMatch[1]);
-
-		return 0;
+		return CharacterSheetClassUtils.getMethodStaminaCost(method);
 	}
 
-	/**
-	 * Get method activation time from entries
-	 */
 	_getMethodActivationTime (method) {
-		if (!method.entries) return null;
-		const entriesStr = JSON.stringify(method.entries);
-
-		// Look for patterns like "{@b Action", "{@b Bonus Action", "{@b Reaction"
-		if (entriesStr.includes("{@b Reaction")) return "R";
-		if (entriesStr.includes("{@b Bonus Action")) return "BA";
-		if (entriesStr.includes("{@b Action")) return "A";
-
+		const actionType = CharacterSheetClassUtils.getMethodActionType(method);
+		if (!actionType) return null;
+		const lower = actionType.toLowerCase();
+		if (lower.includes("reaction")) return "R";
+		if (lower.includes("bonus")) return "BA";
+		if (lower.includes("action")) return "A";
 		return null;
 	}
 
 	_getMethodDegree (feature) {
-		if (!feature.optionalFeatureTypes) return 0;
-		for (const ft of feature.optionalFeatureTypes) {
-			const match = ft.match(/^CTM:(\d)[A-Z]{2}$/);
-			if (match) return parseInt(match[1]);
-		}
-		return 0;
+		return CharacterSheetClassUtils.getMethodDegree(feature);
 	}
 
 	_getMethodTradition (feature) {
-		if (!feature.optionalFeatureTypes) return "Unknown";
-		for (const ft of feature.optionalFeatureTypes) {
-			const match = ft.match(/^CTM:\d([A-Z]{2})$/);
-			if (match) return match[1];
-		}
-		return "Unknown";
+		return CharacterSheetClassUtils.getMethodTraditionCode(feature) || "Unknown";
 	}
 
 	_getTraditionName (tradCode) {
-		const names = {
-			"AM": "Adamant Mountain",
-			"AK": "Arcane Knight",
-			"BU": "Beast Unity",
-			"BZ": "Biting Zephyr",
-			"CJ": "Comedic Jabs",
-			"EB": "Eldritch Blackguard",
-			"GH": "Gallant Heart",
-			"MG": "Mirror's Glint",
-			"MS": "Mist and Shade",
-			"RC": "Rapid Current",
-			"RE": "Razor's Edge",
-			"SK": "Sanguine Knot",
-			"SS": "Spirited Steed",
-			"TI": "Tempered Iron",
-			"TC": "Tooth and Claw",
-			"UW": "Unending Wheel",
-			"UH": "Unerring Hawk",
-		};
-		return names[tradCode] || tradCode;
+		return CharacterSheetClassUtils.getTraditionName(tradCode);
 	}
 
 	_getOrdinalSuffix (n) {

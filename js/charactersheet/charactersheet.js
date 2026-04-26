@@ -51,6 +51,7 @@ class CharacterSheetPage {
 		this._itemsData = [];
 		this._featsData = [];
 		this._optionalFeaturesData = [];
+		this._combatMethodsData = [];
 		this._skillsData = [];
 		this._conditionsData = [];
 		this._languagesData = [];
@@ -195,7 +196,7 @@ class CharacterSheetPage {
 		// Load all necessary data in parallel
 		// Note: Using loadRawJSON for classes to get classFeature and subclassFeature arrays
 		// Also pre-cache class/subclass features in DataLoader so hover links work properly
-		const [races, classes, backgrounds, spells, items, feats, optFeatures, skills, conditionsData, languagesData, prereleaseData, brewData] = await Promise.all([
+		const [races, classes, backgrounds, spells, items, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, prereleaseData, brewData] = await Promise.all([
 			DataUtil.race.loadJSON(),
 			DataUtil.class.loadRawJSON(),
 			DataUtil.loadJSON("data/backgrounds.json"),
@@ -206,6 +207,7 @@ class CharacterSheetPage {
 			DataUtil.loadJSON("data/skills.json"),
 			DataUtil.loadJSON("data/conditionsdiseases.json"),
 			DataUtil.loadJSON("data/languages.json"),
+			DataUtil.combatmethod.loadJSON().catch(() => ({combatMethod: []})),
 			// Load homebrew/prerelease data
 			PrereleaseUtil.pGetBrewProcessed(),
 			BrewUtil2.pGetBrewProcessed(),
@@ -225,6 +227,7 @@ class CharacterSheetPage {
 		this._itemsData = (items || []).filter(it => !it._isItemGroup);
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
+		this._combatMethodsData = (combatMethods.combatMethod || []).map(m => ({...m, _entityType: "combatMethod"}));
 		this._skillsData = skills.skill || [];
 		this._conditionsData = conditionsData.condition || [];
 		this._languagesData = languagesData.language || [];
@@ -441,6 +444,12 @@ class CharacterSheetPage {
 		// Optional features (invocations, metamagic, etc.)
 		if (brewData.optionalfeature?.length) {
 			this._optionalFeaturesData = [...this._optionalFeaturesData, ...MiscUtil.copyFast(brewData.optionalfeature)];
+		}
+
+		// Combat methods (TGTT combat tradition methods)
+		if (brewData.combatMethod?.length) {
+			const brewMethods = MiscUtil.copyFast(brewData.combatMethod).map(m => ({...m, _entityType: "combatMethod"}));
+			this._combatMethodsData = [...this._combatMethodsData, ...brewMethods];
 		}
 
 		// Skills (rare but possible)
@@ -9635,6 +9644,8 @@ class CharacterSheetPage {
 		this._featsData?.forEach(f => sourceSet.add(f.source));
 		// Add sources from optional features
 		this._optionalFeaturesData?.forEach(of => sourceSet.add(of.source));
+		// Add sources from combat methods
+		this._combatMethodsData?.forEach(cm => sourceSet.add(cm.source));
 
 		// Also add all standard sources from Parser
 		Object.keys(Parser.SOURCE_JSON_TO_FULL).forEach(src => sourceSet.add(src));
@@ -10434,6 +10445,7 @@ class CharacterSheetPage {
 	getItems () { return this._itemsData; }
 	getFeats () { return this._featsData; }
 	getOptionalFeatures () { return this._optionalFeaturesData; }
+	getCombatMethodEntities () { return this._combatMethodsData; }
 	getSkillsData () { return this._skillsData; }
 	getConditionsData () { return this._conditionsData; }
 	getState () { return this._state; }
