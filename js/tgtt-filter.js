@@ -687,18 +687,18 @@ class TgttFilterModalUI {
 		section.className = "tgtt-filter-section";
 
 		section.innerHTML = `
-			<div class="fltr__dropdown-divider mb-1"></div>
-			<div class="split fltr__h mb-1">
-				<div class="fltr__h-text ve-flex-h-center mobile-sm__w-100">
+			<div class="ve-fltr__dropdown-divider ve-mb-1"></div>
+			<div class="ve-split ve-fltr__h ve-mb-1">
+				<div class="ve-fltr__h-text ve-flex-h-center ve-mobile-sm__w-100">
 					<span>⚜️ ${title}</span>
 				</div>
-				<div class="ve-flex-v-center fltr__h-wrp-btns-outer mobile-sm__hidden">
-					<div class="ve-btn-group ve-flex-v-center w-100">
+				<div class="ve-flex-v-center ve-fltr__h-wrp-btns-outer ve-mobile-sm__hidden">
+					<div class="ve-btn-group ve-flex-v-center ve-w-100">
 						<button class="ve-btn ve-btn-default ve-btn-xs tgtt-reset-btn" data-filter-type="${filterType}">Reset</button>
 					</div>
 				</div>
 			</div>
-			<div class="fltr__wrp-pills fltr__container-pills tgtt-pills-container" data-filter-type="${filterType}">
+			<div class="ve-fltr__wrp-pills ve-fltr__container-pills tgtt-pills-container" data-filter-type="${filterType}">
 				${options.map(opt => `
 					<div class="tgtt-filter-pill" 
 						 data-filter-type="${filterType}" 
