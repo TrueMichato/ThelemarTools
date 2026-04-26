@@ -3557,6 +3557,7 @@ globalThis.UrlUtil = class {
 	static PG_SEARCH = "search.html";
 	static PG_DECKS = "decks.html";
 	static PG_BASTIONS = "bastions.html";
+	static PG_ITEM_UPGRADES = "itemupgrades.html";
 
 	static URL_TO_HASH_GENERIC = (it) => UrlUtil.encodeArrayForHash(it.name, it.source);
 
@@ -3943,6 +3944,7 @@ UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CHAR_CREATION_OPTIONS] = UrlUtil.URL_TO_H
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_RECIPES] = (it) => `${UrlUtil.encodeArrayForHash(it.name, it.source)}${it._scaleFactor ? `${HASH_PART_SEP}${VeCt.HASH_SCALED}${HASH_SUB_KV_SEP}${it._scaleFactor}` : ""}`;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_DECKS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_BASTIONS] = UrlUtil.URL_TO_HASH_GENERIC;
+UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_ITEM_UPGRADES] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES] = (it) => (it.__prop === "subclassFeature" || it.subclassSource) ? UrlUtil.URL_TO_HASH_BUILDER["subclassFeature"](it) : UrlUtil.URL_TO_HASH_BUILDER["classFeature"](it);
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CREATURE_FEATURES] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_VEHICLE_FEATURES] = UrlUtil.URL_TO_HASH_GENERIC;
@@ -4082,6 +4084,7 @@ UrlUtil.PG_TO_NAME[UrlUtil.PG_TRAP_FEATURES] = "Trap Features";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_MAPS] = "Maps";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_DECKS] = "Decks";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_BASTIONS] = "Bastions";
+UrlUtil.PG_TO_NAME[UrlUtil.PG_ITEM_UPGRADES] = "Item Upgrades";
 
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CREATURE] = UrlUtil.PG_BESTIARY;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_SPELL] = UrlUtil.PG_SPELLS;
@@ -4207,10 +4210,12 @@ UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_COMBAT_METHODS] = ["combatMethod"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_REWARDS] = ["reward"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_TRAPS_HAZARDS] = ["trap", "hazard"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_VARIANTRULES] = ["variantrule"];
+UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_ITEM_UPGRADES] = ["itemUpgrade"];
 
 UrlUtil.PROP_TO_PAGE["spell"] = UrlUtil.PG_SPELLS;
 UrlUtil.PROP_TO_PAGE["item"] = UrlUtil.PG_ITEMS;
 UrlUtil.PROP_TO_PAGE["baseitem"] = UrlUtil.PG_ITEMS;
+UrlUtil.PROP_TO_PAGE["itemUpgrade"] = UrlUtil.PG_ITEM_UPGRADES;
 
 if (!IS_DEPLOYED && !globalThis.IS_VTT && typeof window !== "undefined") {
 	// for local testing, hotkey to get a link to the current page on the main site
@@ -7236,6 +7241,11 @@ globalThis.DataUtil = class {
 	static optionalfeature = class extends _DataUtilPropConfigSingleSource {
 		static _PAGE = UrlUtil.PG_OPT_FEATURES;
 		static _FILENAME = "optionalfeatures.json";
+	};
+
+	static itemUpgrade = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_ITEM_UPGRADES;
+		static _FILENAME = "itemupgrades.json";
 	};
 
 	static combatmethod = class extends _DataUtilPropConfigSingleSource {

@@ -1,0 +1,599 @@
+{
+	"_meta": {
+		"sources": [
+			{
+				"json": "TCAH",
+				"abbreviation": "TCAH",
+				"full": "The Complete Armorer's Handbook",
+				"authors": [
+					"Heavyarms"
+				],
+				"convertedBy": [
+					"TrueMichato"
+				],
+				"version": "1.0.0",
+				"url": "",
+				"targetSchema": "1.0.0"
+			}
+		],
+		"itemUpgradeTypes": {
+			"WU": "Weapon Upgrade",
+			"WU:1": "Weapon Upgrade; 1st Tier",
+			"WU:2": "Weapon Upgrade; 2nd Tier",
+			"WU:3": "Weapon Upgrade; 3rd Tier",
+			"AU": "Armor Upgrade"
+		}
+	},
+	"itemUpgrade": [
+		{
+			"name": "Balanced",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:1"
+			],
+			"cost": "100 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"any weapon"
+					]
+				}
+			],
+			"entries": [
+				"You gain a +1 bonus to attack rolls made with this weapon."
+			]
+		},
+		{
+			"name": "Critical: Sharpened",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:1"
+			],
+			"cost": "100 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"melee weapons that deal piercing or slashing damage only"
+					]
+				}
+			],
+			"entries": [
+				"Attacks with this weapon score a critical hit on a roll one lower than normal. For example, if you normally score a critical hit on a roll of 20 you instead score one on a roll of 19 or 20."
+			]
+		},
+		{
+			"name": "Critical: Sight Pin",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:1"
+			],
+			"cost": "100 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"bows and crossbows only"
+					]
+				}
+			],
+			"entries": [
+				"Attacks with this weapon score a critical hit on a roll one lower than normal. For example, if you normally score a critical hit on a roll of 20 you instead score one on a roll of 19 or 20."
+			]
+		},
+		{
+			"name": "Critical: Spiked",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:1"
+			],
+			"cost": "100 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"melee weapons that deal bludgeoning damage only"
+					]
+				}
+			],
+			"entries": [
+				"Attacks with this weapon score a critical hit on a roll one lower than normal. For example, if you normally score a critical hit on a roll of 20 you instead score one on a roll of 19 or 20."
+			]
+		},
+		{
+			"name": "Runic",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:1"
+			],
+			"cost": "100 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"can only be applied by a runesmith"
+					]
+				}
+			],
+			"entries": [
+				"This weapon can be imbued with rune magic."
+			]
+		},
+		{
+			"name": "Silvered",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:1"
+			],
+			"cost": "100 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"any weapon"
+					]
+				}
+			],
+			"entries": [
+				"Attacks with this weapon count as silvered for the purposes overcoming resistance and immunity to nonmagical attacks and damage."
+			]
+		},
+		{
+			"name": "Wounding: Keen",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:1"
+			],
+			"cost": "100 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"melee weapons only"
+					]
+				}
+			],
+			"entries": [
+				"You gain a +1 bonus to damage rolls made with this weapon."
+			]
+		},
+		{
+			"name": "Wounding: Oiled String",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:1"
+			],
+			"cost": "100 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"melee weapons only"
+					]
+				}
+			],
+			"entries": [
+				"You gain a +1 bonus to damage rolls made with this weapon."
+			]
+		},
+		{
+			"name": "Brutal",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:2"
+			],
+			"cost": "1,000 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"sharpened or spiked tag"
+					]
+				}
+			],
+			"entries": [
+				"When you attack with this weapon and roll the maximum result for the weapon's damage dice, you can roll these dice again and add the new roll to the damage of the attack. If you roll the maximum amount again, you can repeat this process until you don't."
+			]
+		},
+		{
+			"name": "Enchanted",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:2"
+			],
+			"cost": "1,000 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"any 1st tier tag, can only be applied by an arcane spellcaster, quarterstaffs only"
+					]
+				}
+			],
+			"entries": [
+				"You gain a +1 bonus to spell attack rolls while using this weapon as a spellcasting focus."
+			]
+		},
+		{
+			"name": "Flanged",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:2"
+			],
+			"cost": "1,000 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"spiked tag, can only be applied to maces and mauls"
+					]
+				}
+			],
+			"entries": [
+				"When you hit a creature wearing medium or heavy armor with this weapon you sunder its armor, inflicting a cumulative -1 penalty to its Armor Class until the armor is repaired."
+			]
+		},
+		{
+			"name": "Magical",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:2"
+			],
+			"cost": "1,000 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"silvered tag, can only be applied by an arcane spellcaster"
+					]
+				}
+			],
+			"entries": [
+				"Attacks with this weapon count as magical for the purposes of overcoming resistance and immunity to nonmagical attacks and damage, and features such as {@creature black pudding}'s {@i corrosive form}."
+			]
+		},
+		{
+			"name": "Saw-toothed",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:2"
+			],
+			"cost": "1,000 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"sharpened tag, can only be applied to daggers"
+					]
+				}
+			],
+			"entries": [
+				"Attacks with this weapon deal an extra {@dice 1d4} slashing damage. No effect against constructs or undead."
+			]
+		},
+		{
+			"name": "Superior",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:2"
+			],
+			"cost": "1,000 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"balanced, keen, or oiled string tag, can only be applied to weapons with one damage die"
+					]
+				}
+			],
+			"entries": [
+				"The damage die of this weapon is increased by one size (for example, {@dice 1d6} becomes {@dice 1d8}, and {@dice 1d10} becomes {@dice 1d12}) to a maximum of {@dice 1d12}."
+			]
+		},
+		{
+			"name": "Arcane",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:3"
+			],
+			"cost": "10,000 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"enchanted tag, can only be applied by an arcane spellcaster"
+					]
+				}
+			],
+			"entries": [
+				"You gain a +1 bonus to your spell save DC while using this weapon as a spellcasting focus."
+			]
+		},
+		{
+			"name": "Masterwork",
+			"source": "TCAH",
+			"page": 11,
+			"upgradeType": [
+				"WU:3"
+			],
+			"cost": "10,000 gp (base)",
+			"prerequisite": [
+				{
+					"item": [
+						"brutal or superior tag"
+					]
+				}
+			],
+			"entries": [
+				"You gain an additional +1 bonus to attack and damage rolls made with this weapon."
+			]
+		},
+		{
+			"name": "Armor Proofing: 1st Tier",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "1,000 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light, medium or heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"While wearing this armor, if you would take 6 or less nonmagical slashing damage before resistance is applied, you take none of that damage instead."
+			]
+		},
+		{
+			"name": "Armor Proofing: 2nd Tier",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "2,000 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor with 1st tier armor proofing tag"
+					]
+				}
+			],
+			"entries": [
+				"While wearing this armor, if you would take 7 or less nonmagical slashing or piercing damage before resistance is applied, you take none of that damage instead."
+			]
+		},
+		{
+			"name": "Armor Proofing: 3rd Tier",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "3,000 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"heavy armor with the 2nd tier armor proofing tag"
+					]
+				}
+			],
+			"entries": [
+				"While wearing this armor, if you would take 8 or less nonmagical slashing, piercing, or bludgeoning damage before resistance is applied, you take none of that damage instead."
+			]
+		},
+		{
+			"name": "Breathable",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "100 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light or medium armor, incompatible with the insulated tag"
+					]
+				}
+			],
+			"entries": [
+				"While wearing this armor, you have advantage on saving throws you make against exhaustion effects due to extreme heat, as described in {@book chapter 5|DMG|5} of the {@i Dungeon Master's Guide}."
+			]
+		},
+		{
+			"name": "Burnished",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "10 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"This armor has been polished to a mirror finish. While wearing it, you may have advantage on Charisma-based skill checks when interacting with certain humanoids, as determined by the DM. This tag is automatically removed after 24 hours of wear or at the end of a combat."
+			]
+		},
+		{
+			"name": "Climbing Harness",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "100 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light, medium, or heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"This armor has been modified with a climbing harness around the midriff, comprising leather straps and quickdraws. While wearing it, you make Strength ({@skill Athletics}) checks to scale vertical surfaces with advantage when using a rope or similar aid."
+			]
+		},
+		{
+			"name": "Decorated",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "5 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor and shields"
+					]
+				}
+			],
+			"entries": [
+				"This armor or shield is adorned with a holy symbol and can be used as a spellcasting focus for cleric and paladin spells."
+			]
+		},
+		{
+			"name": "Insulated",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "100 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"incompatible with breathable tag"
+					]
+				}
+			],
+			"entries": [
+				"This armor counts as cold weather gear in conditions of extreme cold, as described in {@book chapter 5|DMG|5} of the {@i Dungeon Master's Guide}."
+			]
+		},
+		{
+			"name": "Locking Joints",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "150 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"half plate or plate armor"
+					]
+				}
+			],
+			"entries": [
+				"This armor is made with hinged joints that can be locked by a quick motion from the wearer. While wearing it, you make Strength ({@skill Athletics}) checks to oppose attempts to shove you with advantage."
+			]
+		},
+		{
+			"name": "Muffled",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "50 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"brigandine armor"
+					]
+				}
+			],
+			"entries": [
+				"This armor no longer confers disadvantage on Dexterity ({@skill Stealth}) checks."
+			]
+		},
+		{
+			"name": "Quick-release Clasps",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "200 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light, medium, or heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"You can doff this armor as an action."
+			]
+		},
+		{
+			"name": "Reinforced",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "300 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"This armor has been reinforced at the joints and other weak points. While wearing it, critical damage you take from nonmagical attacks is reduced by 3."
+			]
+		},
+		{
+			"name": "Runic",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "400 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"armor proofing tag (any tier) or a shield, can only be applied by a runesmith"
+					]
+				}
+			],
+			"entries": [
+				"This armor or shield can be imbued with rune magic."
+			]
+		},
+		{
+			"name": "Spiked",
+			"source": "TCAH",
+			"page": 8,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "250 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"This armor has been modified with spikes, barbs, or other similar feature, and deals {@dice 1d4} piercing damage to creatures attacking with unarmed strikes or natural weapons that aren't magical."
+			]
+		}
+	]
+}
