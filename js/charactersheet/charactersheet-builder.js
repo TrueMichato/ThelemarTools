@@ -5229,28 +5229,18 @@ class CharacterSheetBuilder {
 	 * Get available combat traditions from optional features
 	 * Traditions are identified by feature types like "CTM:AM", "CTM:RC", etc. (no degree number)
 	 */
-	_getAvailableTraditions (allOptFeatures) {
+	_getAvailableTraditions (allFeatures) {
 		const traditions = new Map();
 
-		// Find all unique traditions from optional features
-		for (const opt of allOptFeatures) {
-			if (!opt.featureType) continue;
-
-			for (const ft of opt.featureType) {
-				// Match tradition codes like "CTM:AM", "CTM:1AM", etc.
-				const match = ft.match(/^CTM:(\d)?([A-Z]{2})$/);
-				if (match) {
-					const tradCode = match[2]; // e.g., "AM", "RC", "BZ"
-					if (!traditions.has(tradCode)) {
-						// Get the tradition name from optionalFeatureTypes if available
-						const tradKey = `CTM:${tradCode}`;
-						traditions.set(tradCode, {
-							code: tradCode,
-							fullCode: tradKey,
-							name: this._getTraditionName(tradCode),
-						});
-					}
-				}
+		for (const opt of allFeatures) {
+			if (!CharacterSheetClassUtils.isCombatMethod(opt)) continue;
+			const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(opt);
+			if (tradCode && !traditions.has(tradCode)) {
+				traditions.set(tradCode, {
+					code: tradCode,
+					fullCode: `CTM:${tradCode}`,
+					name: CharacterSheetClassUtils.getTraditionName(tradCode),
+				});
 			}
 		}
 
@@ -5259,154 +5249,37 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Extract tradition codes from class feature description text.
-	 * Looks for patterns like {@filter ...|feature type=ctm:am} in the feature entries.
-	 * @param {string} className - The class name to look up
-	 * @param {number} level - The level to search features at (default 1-2 for Combat Methods)
-	 * @returns {Set<string>} Set of tradition codes like "AM", "RC", etc.
+	 * Delegates to ClassUtils.extractTraditionsFromClassFeature.
 	 */
 	_extractTraditionsFromClassFeature (className, level = 2) {
-		const traditions = new Set();
-
-		// Look up "Combat Methods" feature for this class
 		const classFeatures = this._page.getClassFeatures();
-		if (!classFeatures?.length) {
-			return traditions;
-		}
-
-		// Find the Combat Methods feature (prioritize "Combat Methods" over "Specialties")
-		// "Combat Methods" is the feature that contains the tradition list
-		let combatMethodsFeature = classFeatures.find(f =>
-			f.className === className
-			&& f.name === "Combat Methods"
-			&& f.level <= 5,
-		);
-
-		// If no "Combat Methods" feature found, this class might not have combat traditions
-		if (!combatMethodsFeature) {
-			return traditions;
-		}
-
-
-		// Recursively extract text from entries and look for tradition codes
-		const extractFromEntries = (entries) => {
-			if (!entries) return;
-			if (typeof entries === "string") {
-				// Look for patterns like "feature type=ctm:am" or "feature type=CTM:AM"
-				const matches = entries.matchAll(/feature\s+type[=:]\s*ctm:([a-z]{2})/gi);
-				for (const match of matches) {
-					traditions.add(match[1].toUpperCase());
-				}
-				return;
-			}
-			if (Array.isArray(entries)) {
-				for (const entry of entries) {
-					extractFromEntries(entry);
-				}
-				return;
-			}
-			if (typeof entries === "object") {
-				if (entries.entries) extractFromEntries(entries.entries);
-				if (entries.items) extractFromEntries(entries.items);
-				if (entries.entry) extractFromEntries(entries.entry);
-			}
-		};
-
-		extractFromEntries(combatMethodsFeature.entries);
-
-		return traditions;
+		return CharacterSheetClassUtils.extractTraditionsFromClassFeature(className, classFeatures);
 	}
 
 	/**
-	 * Get available combat traditions filtered by what the class has access to
-	 * @param {Array} allOptFeatures - All optional features
-	 * @param {Array<string>} classAllowedTypes - Feature types the class has access to (e.g., ["CTM:1", "CTM:2"])
-	 * @param {string} [className] - The class name to extract traditions from
+	 * Get available combat traditions filtered by what the class has access to.
+	 * Delegates to ClassUtils.getAvailableTraditionsForClass.
 	 */
-	_getAvailableTraditionsForClass (allOptFeatures, classAllowedTypes, className) {
-
-		// First try to extract tradition codes from class-allowed types (e.g., "CTM:AM" -> "AM", "CTM:1AM" -> "AM")
-		const allowedTraditionCodes = new Set();
-		for (const ft of classAllowedTypes) {
-			const match = ft.match(/^CTM:(\d)?([A-Z]{2})$/);
-			if (match && match[2]) {
-				allowedTraditionCodes.add(match[2]);
-			}
-		}
-
-
-		// If no tradition codes found in types, try to extract from class feature description
-		if (allowedTraditionCodes.size === 0 && className) {
-			const featureTraditions = this._extractTraditionsFromClassFeature(className);
-			for (const trad of featureTraditions) {
-				allowedTraditionCodes.add(trad);
-			}
-		}
-
-		// If still no traditions found, fall back to all traditions
-		if (allowedTraditionCodes.size === 0) {
-			return this._getAvailableTraditions(allOptFeatures);
-		}
-
-
-		// Filter to only allowed traditions
-		const traditions = new Map();
-		for (const tradCode of allowedTraditionCodes) {
-			traditions.set(tradCode, {
-				code: tradCode,
-				fullCode: `CTM:${tradCode}`,
-				name: this._getTraditionName(tradCode),
-			});
-		}
-
-		return Array.from(traditions.values()).sort((a, b) => a.name.localeCompare(b.name));
+	_getAvailableTraditionsForClass (allFeatures, classAllowedTypes, className) {
+		const classFeatures = this._page.getClassFeatures();
+		return CharacterSheetClassUtils.getAvailableTraditionsForClass(allFeatures, classAllowedTypes, className, classFeatures);
 	}
 
 	/**
 	 * Get the display name for a tradition code
 	 */
 	_getTraditionName (tradCode) {
-		const names = {
-			"AM": "Adamant Mountain",
-			"AK": "Arcane Knight",
-			"BU": "Beast Unity",
-			"BZ": "Biting Zephyr",
-			"CJ": "Comedic Jabs",
-			"EB": "Eldritch Blackguard",
-			"GH": "Gallant Heart",
-			"MG": "Mirror's Glint",
-			"MS": "Mist and Shade",
-			"RC": "Rapid Current",
-			"RE": "Razor's Edge",
-			"SK": "Sanguine Knot",
-			"SS": "Spirited Steed",
-			"TI": "Tempered Iron",
-			"TC": "Tooth and Claw",
-			"UW": "Unending Wheel",
-			"UH": "Unerring Hawk",
-		};
-		return names[tradCode] || tradCode;
+		return CharacterSheetClassUtils.getTraditionName(tradCode);
 	}
 
 	/**
 	 * Check if an optional feature matches the selected traditions and is within max degree
 	 */
 	_methodMatchesTraditionsAndDegree (opt, selectedTraditions, maxDegree) {
-		if (!opt.featureType) return false;
-
-		for (const ft of opt.featureType) {
-			// Parse feature type like "CTM:1AM", "CTM:2RC"
-			const match = ft.match(/^CTM:(\d)([A-Z]{2})$/);
-			if (match) {
-				const degree = parseInt(match[1]);
-				const tradCode = match[2];
-
-				// Check if within max degree and matches selected tradition
-				if (degree <= maxDegree && selectedTraditions.includes(tradCode)) {
-					return true;
-				}
-			}
-		}
-		return false;
+		if (!CharacterSheetClassUtils.isCombatMethod(opt)) return false;
+		const degree = CharacterSheetClassUtils.getMethodDegree(opt);
+		const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(opt);
+		return degree > 0 && degree <= maxDegree && tradCode && selectedTraditions.includes(tradCode);
 	}
 
 	/**
@@ -5470,9 +5343,13 @@ class CharacterSheetBuilder {
 	 * Render Combat Methods selection with tradition choice first, then method selection
 	 */
 	_renderCombatMethodsSelection (container, cls, optFeatProg, methodCount, name, featureKey, allOptFeatures) {
+		// Merge combatMethod entities into the available method pool
+		const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
+		const allMethods = [...allOptFeatures, ...combatMethodEntities];
+
 		// Get traditions filtered by what the class has access to
 		const classAllowedTypes = optFeatProg.featureType || [];
-		const availableTraditions = this._getAvailableTraditionsForClass(allOptFeatures, classAllowedTypes, cls?.name);
+		const availableTraditions = this._getAvailableTraditionsForClass(allMethods, classAllowedTypes, cls?.name);
 		const maxDegree = this._getMaxMethodDegree(cls, 1);
 
 		// Determine how many traditions to select (usually 2)
@@ -5533,20 +5410,20 @@ class CharacterSheetBuilder {
 					this._selectedCombatTraditions = this._selectedCombatTraditions.filter(t => t !== trad.code);
 					// Also remove any selected methods from this tradition
 					this._selectedOptionalFeatures[featureKey] = this._selectedOptionalFeatures[featureKey].filter(m => {
-						return !m.featureType?.some(ft => ft.includes(trad.code));
+						return CharacterSheetClassUtils.getMethodTraditionCode(m) !== trad.code;
 					});
 					section.querySelector(".method-count").textContent = this._selectedOptionalFeatures[featureKey].length;
 				}
 				section.querySelector(".tradition-count").textContent = this._selectedCombatTraditions.length;
 				// Re-render method list when traditions change
-				this._renderMethodList(methodList, allOptFeatures, featureKey, methodCount, maxDegree, section);
+				this._renderMethodList(methodList, allMethods, featureKey, methodCount, maxDegree, section);
 			});
 
 			traditionList.append(item);
 		});
 
 		// Initial method list render
-		this._renderMethodList(methodList, allOptFeatures, featureKey, methodCount, maxDegree, section);
+		this._renderMethodList(methodList, allMethods, featureKey, methodCount, maxDegree, section);
 
 		container.append(section);
 	}
@@ -5554,7 +5431,7 @@ class CharacterSheetBuilder {
 	/**
 	 * Render the list of available methods based on selected traditions and max degree
 	 */
-	_renderMethodList (methodList, allOptFeatures, featureKey, methodCount, maxDegree, section) {
+	_renderMethodList (methodList, allMethods, featureKey, methodCount, maxDegree, section) {
 		methodList.innerHTML = "";
 
 		if (this._selectedCombatTraditions.length === 0) {
@@ -5568,7 +5445,7 @@ class CharacterSheetBuilder {
 		}
 
 		// Filter methods by selected traditions and max degree
-		const availableMethods = allOptFeatures.filter(opt =>
+		const availableMethods = allMethods.filter(opt =>
 			this._methodMatchesTraditionsAndDegree(opt, this._selectedCombatTraditions, maxDegree),
 		);
 
@@ -5580,20 +5457,18 @@ class CharacterSheetBuilder {
 		// Group methods by tradition for easier browsing
 		const methodsByTradition = new Map();
 		for (const method of availableMethods) {
-			for (const ft of method.featureType || []) {
-				const match = ft.match(/^CTM:(\d)([A-Z]{2})$/);
-				if (match && this._selectedCombatTraditions.includes(match[2])) {
-					const tradCode = match[2];
-					if (!methodsByTradition.has(tradCode)) {
-						methodsByTradition.set(tradCode, []);
-					}
-					// Avoid duplicates
-					if (!methodsByTradition.get(tradCode).some(m => m.name === method.name)) {
-						methodsByTradition.get(tradCode).push({
-							...method,
-							degree: parseInt(match[1]),
-						});
-					}
+			const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(method);
+			const degree = CharacterSheetClassUtils.getMethodDegree(method);
+			if (tradCode && this._selectedCombatTraditions.includes(tradCode)) {
+				if (!methodsByTradition.has(tradCode)) {
+					methodsByTradition.set(tradCode, []);
+				}
+				// Avoid duplicates
+				if (!methodsByTradition.get(tradCode).some(m => m.name === method.name)) {
+					methodsByTradition.get(tradCode).push({
+						...method,
+						degree,
+					});
 				}
 			}
 		}

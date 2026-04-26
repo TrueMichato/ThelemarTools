@@ -2496,10 +2496,9 @@ class CharacterSheetQuickBuild {
 						this._selections._combatTraditions = this._selections._combatTraditions.filter(t => t !== trad.code);
 						const allTraditions = getAllTraditions();
 						const remaining = selectedList.filter(s => {
-							const ft = (s.featureType || []).find(t => t.startsWith("CTM:"));
-							if (!ft) return true;
-							const match = ft.match(/^CTM:\d([A-Z]{2})$/);
-							return !match || allTraditions.includes(match[1]);
+							const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(s);
+							if (!tradCode) return true;
+							return allTraditions.includes(tradCode);
 						});
 						selectedList.length = 0;
 						remaining.forEach(s => selectedList.push(s));
@@ -2528,15 +2527,14 @@ class CharacterSheetQuickBuild {
 				return;
 			}
 
-			const availableMethods = allOptFeatures.filter(opt => {
-				if (!opt.featureType) return false;
-				return opt.featureType.some(ft => {
-					const match = ft.match(/^CTM:(\d)([A-Z]{2})$/);
-					if (!match) return false;
-					const degree = parseInt(match[1]);
-					const tradCode = match[2];
-					return degree <= maxDegree && activeTraditions.includes(tradCode);
-				});
+			const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
+			const allMethods = [...allOptFeatures, ...combatMethodEntities];
+
+			const availableMethods = allMethods.filter(opt => {
+				if (!CharacterSheetClassUtils.isCombatMethod(opt)) return false;
+				const degree = CharacterSheetClassUtils.getMethodDegree(opt);
+				const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(opt);
+				return degree > 0 && degree <= maxDegree && tradCode && activeTraditions.includes(tradCode);
 			});
 
 			const existingNames = new Set(existingOptFeatures.map(f => `${f.name}|${f.source}`));
@@ -2553,10 +2551,7 @@ class CharacterSheetQuickBuild {
 					const tradName = CharacterSheetClassUtils.getTraditionName(tradCode);
 					const tradMethods = newMethods.filter(m => {
 						if (filter && !m.name.toLowerCase().includes(filterLower)) return false;
-						return (m.featureType || []).some(ft => {
-							const match = ft.match(/^CTM:\d([A-Z]{2})$/);
-							return match && match[1] === tradCode;
-						});
+						return CharacterSheetClassUtils.getMethodTraditionCode(m) === tradCode;
 					});
 					if (tradMethods.length === 0) continue;
 

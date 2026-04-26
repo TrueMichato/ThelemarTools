@@ -1,19 +1,15 @@
 # bugs
 
 ## Open Bugs
-
-[x] Ignan and Primordial have some weird issues, sometimes you can choose primordial in builder but not ignan, sometimes you can choose ignan but not primordial.
-[x] When choosing Cantrips or Spells, the spells known and cantrips known modals show 0/6 despite choices being made and spells appearing
-[x] Child of the Sun Bloodline Sorcerer is completley unimplemented
-[x] Subclass spells are not implemented correcty.
-[x] Activating Passive Metamagic (TGTT) like Extended Spell, Distant spell doesn't alter spell data. What we want is that when a passive metamagic changes a spell stat, if we hover a spell we will see the original stat and then some green parenthesis that will show the new stat. If the stat is in the sheet, we want just the new stat. This also needs to work for all passive metamgic options that alter specific stats, not just for extended and distant.
-[x] you can tune to passive metamagic options even if you don't have sorcery points
-[x] when choosing spells using any of the spell pickers, the sheet does not use the existing filter logics that 1. hide spells if thelemar version exists 2. set rarity and legality for each spell based on source and spell data. This means players can't filter or sort by rarity and legality, which is a problem.
-[x] Site fonts feel too small for some players. let's allow players to set the font size themselves instead of using sliders, and see how this goes. It might be worse, might be better, we will see.
-[x] ve-flex-col w-100 charsheet__main-header feels smaller relative to the rest of the page, font wise.
-[x] When clicking a hover link to something that is part of a page (for example, hover to a specific ability from a class), the opened page is 404; need some override to just open the general page and go to the specific part (I think this issue is specific for classes)
-[x] The TGTT filter logic seems to disappear from pages from time to time after edits. We want to make sure it always works and doesn't become something I need to patch back on each time.
-[x] building a character sometimes results with it having 0 hp out of max, and sometimes levelups don't fill the hp to the max.
+[] Combat Methods & Traditions choices in Builder are not hoverable and are not explained. Would be great to write a short explaination for people who don't know what these are, and to make the choices hoverable to the relevant section of the class.
+[] Font size change should affect all fonts across the sheet, including modals and popups. Currently it only affects the main sheet, and some elements (e.g. modals) still use the default font size. This should be fixed by applying the font size change more globally across all elements of the sheet.
+[] if no items exist in inventory there is an extra "add item" button, but it leads to custom item creation rather than the normal item addition flow. This should be fixed so that the button either leads to the normal item addition flow or is hidden when no items exist.
+[] showing both regular items and magical items in the item addition modal is confusing, especially since the magical filter is not working. It would be better to separate regular items and magical items into different sections or tabs in the modal, so that it's clearer which items are which and the magical filter can work properly.
+[] in the add item modal, the filter for item type (armor, weapon, etc.) is not working and shows empty text instead of choices.
+[] in general across the sheet we want to make sure that chosen filter options are marked as selected in the UI, and that the filter options are clear and easy to use. Currently this is not always the case (for example, the item rarity filter shows the options but does not indicate which one is selected, and the item type filter shows empty text instead of the options). This should be fixed to improve usability.
+[] It would be nice to be able to filter weapons based on their properties (e.g. finesse, reach) and masteries (e.g. vex, sap) in the item addition modal. Currently you can only filter by weapon type (simple, martial) and category (melee, ranged), but not by specific properties. Adding this feature would make it easier to find the right weapon when adding items.
+[] the "magical" filter in the item addition modal is not working and not filtering items correctly. This should be fixed so that it properly filters items based on whether they are magical or not.
+[] it would be nice to be able to sort items in the add item modal by different criteria (e.g. name, rarity) to make it easier to find the right item. Currently there is no sorting option, and items are displayed in a default order that may not be optimal for finding specific items. Adding sorting options would improve usability. Also, I think I would like it to be cascaded sorting - to be able to sort by rarity, and inside each rarity sort by name, for example. This should also be the default sorting order, so that items are sorted by rarity first and then by name within each rarity level.
 
 ## Unverified bugs
 

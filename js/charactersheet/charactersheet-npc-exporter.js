@@ -913,7 +913,7 @@ class CharacterSheetNpcExporter {
 
 		const features = (state.getFeatures?.() || [])
 			.filter(f => f?.name && f?.description)
-			.filter(f => !f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")));
+			.filter(f => !CharacterSheetClassUtils.isCombatMethod(f));
 
 		const classified = features
 			.map(feature => this._classifyFeatureForStatblock(feature, {sourceFeatureIds}))
