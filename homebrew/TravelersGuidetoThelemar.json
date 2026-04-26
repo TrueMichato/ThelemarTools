@@ -201,7 +201,15 @@
     },
     "dateAdded": 1649140894,
     "dateLastModified": 1774699200,
-    "edition": "classic"
+    "edition": "classic",
+    "itemUpgradeTypes": {
+      "GS": "Gemstone",
+      "GS:C": "Gemstone; Common",
+      "GS:UC": "Gemstone; Uncommon",
+      "GS:R": "Gemstone; Rare",
+      "GS:VR": "Gemstone; Very Rare",
+      "GS:L": "Gemstone; Legendary"
+    }
   },
   "variantrule": [
     {
@@ -1331,6 +1339,67 @@
             ]
           ]
         }
+      ]
+    },
+    {
+      "name": "Gemstone Empowerment",
+      "source": "TGTT",
+      "page": 0,
+      "ruleType": "O",
+      "entries": [
+        "Empowered gemstones are created by a character proficient with {@item jeweler's tools|PHB} through a special crafting process. Once all requirements are met, the process of creating a gemstone is performed over a two hour period, which can be split into shorter sessions such as during a short rest.",
+        "At the end of the period, make a craft check. When you make this check, you don't benefit from any bonuses (such as Bardic Inspiration) except your own ability score and proficiency bonus, unless you benefited from the bonus for the entire duration of the period.",
+        "{@b Gemstone Empowerment bonus} = your proficiency bonus + your Charisma or Wisdom modifier (your choice)",
+        "On success, the gemstone is empowered successfully and becomes an empowered gemstone, otherwise the gem is muted and cannot be empowered anymore. The DC depends on the rarity of the gemstone, as shown in the Gem Empowerment table.",
+        {
+          "type": "table",
+          "caption": "Gem Empowerment",
+          "colLabels": [
+            "Gemstone Rarity",
+            "Gem Value",
+            "Size Required",
+            "DC"
+          ],
+          "colStyles": [
+            "col-3",
+            "col-3",
+            "col-3",
+            "col-3"
+          ],
+          "rows": [
+            [
+              "Common",
+              "At least 10 gp",
+              "Small",
+              "10"
+            ],
+            [
+              "Uncommon",
+              "At least 50 gp",
+              "Medium",
+              "15"
+            ],
+            [
+              "Rare",
+              "At least 500 gp",
+              "Medium",
+              "20"
+            ],
+            [
+              "Very Rare",
+              "At least 1,000 gp",
+              "Large",
+              "25"
+            ],
+            [
+              "Legendary",
+              "At least 5,000 gp",
+              "Large",
+              "30"
+            ]
+          ]
+        },
+        "An empowered gemstone can then be affixed to a piece of equipment (armor, shield, or weapon as specified by the gemstone's description) by a character proficient with {@item jeweler's tools|PHB} over the course of a short rest. A gemstone can be removed and re-affixed to different equipment during a short rest."
       ]
     }
   ],
@@ -35335,13 +35404,21 @@
         "psychic"
       ],
       "featureGrants": [
-        {"name": "Dreamwalk", "source": "TGTT"}
+        {
+          "name": "Dreamwalk",
+          "source": "TGTT"
+        }
       ],
       "optionalfeatureProgression": [
         {
           "name": "Dreamwalker Ability",
-          "featureType": ["DW:C", "DW:S"],
-          "progression": {"1": 1}
+          "featureType": [
+            "DW:C",
+            "DW:S"
+          ],
+          "progression": {
+            "1": 1
+          }
         }
       ]
     },
@@ -35357,22 +35434,22 @@
       "ability": [
         {
           "choose": {
-			"weighted": {
-            "from": [
-              "str",
-              "dex",
-              "con",
-              "int",
-              "wis",
-              "cha"
-            ],
-            "weights": [
-				2,
-				1,
-				1
-			]
+            "weighted": {
+              "from": [
+                "str",
+                "dex",
+                "con",
+                "int",
+                "wis",
+                "cha"
+              ],
+              "weights": [
+                2,
+                1,
+                1
+              ]
+            }
           }
-		}
         }
       ],
       "languageProficiencies": [
@@ -35588,7 +35665,7 @@
       "ability": [
         {
           "int": 2,
-           "choose": {
+          "choose": {
             "from": [
               "wis",
               "dex"
@@ -35941,7 +36018,7 @@
       "ability": [
         {
           "str": 2,
-           "choose": {
+          "choose": {
             "from": [
               "dex",
               "con",
@@ -36018,7 +36095,7 @@
           "type": "entries",
           "name": "Size",
           "entries": [
-            "Gnolls are between 6\u00bd and 7\u00bd feet tall, and weigh 200-280 pounds. Your size is Medium."
+            "Gnolls are between 6½ and 7½ feet tall, and weigh 200-280 pounds. Your size is Medium."
           ]
         },
         {
@@ -37177,6 +37254,866 @@
             "Starting at 5th level, as a bonus action, you can emanate an aura of bolstering energy in a 15-foot radius for 1 minute. You and friendly creatures that start their turn in the aura gain temporary hit points equal to your proficiency bonus. These temporary hit points last until the start of their next turn. You can use this trait once per short or long rest."
           ]
         }
+      ]
+    }
+  ],
+  "itemUpgrade": [
+    {
+      "name": "Alchemist",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:C"
+      ],
+      "gemName": "Bloodstone",
+      "rarity": "common",
+      "cost": "At least 10 gp",
+      "craftingDC": 10,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing this armor, you regain 2 additional hit points when you drink a potion of healing."
+      ]
+    },
+    {
+      "name": "Mariner",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:C"
+      ],
+      "gemName": "Jasper",
+      "rarity": "common",
+      "cost": "At least 10 gp",
+      "craftingDC": 10,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "This weapon or ammunition fired with it magically repels water. Attack rolls you make using it aren't made with disadvantage for being underwater."
+      ]
+    },
+    {
+      "name": "Thief",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:C"
+      ],
+      "gemName": "Malachite",
+      "rarity": "common",
+      "cost": "At least 10 gp",
+      "craftingDC": 10,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor"
+          ]
+        }
+      ],
+      "entries": [
+        "A favorite of cutpurses and thieves. Once per day while wearing this armor you can reroll a failed Dexterity check. If you do so, you must use the new roll."
+      ]
+    },
+    {
+      "name": "Warrior",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:C"
+      ],
+      "gemName": "Onyx",
+      "rarity": "common",
+      "cost": "At least 10 gp",
+      "craftingDC": 10,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "Popular among mercenaries and soldiers, this gemstone ensures you keep your sword in your hand. While you are wielding this weapon, you can't be disarmed of this weapon while you are conscious."
+      ]
+    },
+    {
+      "name": "Arrow-Catcher",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Coral",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "a shield"
+          ]
+        }
+      ],
+      "entries": [
+        "This gemstone has three charges. While you are wielding this shield, when you or a friendly creature within 10 feet of you are the target of a ranged weapon attack you can expend a charge as a reaction to impose disadvantage on the attack. You must choose to do so before the roll. The gemstone regains {@dice 1d3} charges daily at dawn."
+      ]
+    },
+    {
+      "name": "Bound Armor",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Spinel",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor"
+          ]
+        }
+      ],
+      "entries": [
+        "As a bonus action while you aren't wearing armor, you can cause this armor to appear in a flash of light around you—instantly donning it. Also as a bonus action while you are wearing this armor, you can cause the armor to vanish entirely, instantly doffing it."
+      ]
+    },
+    {
+      "name": "Bound Weapon",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Spinel",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "As a bonus action, you can cause this weapon to disappear or appear instantly in a free hand."
+      ]
+    },
+    {
+      "name": "Cat",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Chrysoberyl",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "While wielding this weapon, as a bonus action you can activate this gem by speaking its command phrase. For 1 hour, you can see normally in darkness to a distance of 120 feet. Once used, this property can't be used again until the following dawn."
+      ]
+    },
+    {
+      "name": "Chaos",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Jet",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "A popular project among apprentice artificers, this gem embodies the chaos of unbound magic. When you score a critical hit with an attack using this weapon, roll on the Wild Magic Surge table in the Player's Handbook to create a magical effect. If the effect is a spell that requires concentration, it doesn't require concentration in this case and lasts for its full duration."
+      ]
+    },
+    {
+      "name": "Daywalker",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Tourmaline",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor with a helmet or hood"
+          ]
+        }
+      ],
+      "entries": [
+        "While wearing this armor with the hood drawn, you are unaffected by sunlight."
+      ]
+    },
+    {
+      "name": "Elemental Shield",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Pearl",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor or a shield"
+          ]
+        }
+      ],
+      "entries": [
+        "When you first affix this gem to a suit of armor or a shield, choose one of the following damage types: acid, cold, fire, lightning, or thunder. While wearing (armor) or wielding (shield) this item, whenever you take damage of the chosen type you can use your reaction to reduce the damage by an amount equal to twice your character level + your Constitution modifier and suffer one level of exhaustion. You can change the chosen damage type over the course of a short or long rest by spending at least 30 minutes in contact with the gemstone."
+      ]
+    },
+    {
+      "name": "Featherfoot",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Garnet",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "any armor or weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing (armor) or wielding (weapon or shield) this item, you have a standing jump distance equal to your current walking speed. Each foot you clear while jumping costs a foot of movement, and you can't jump further than your remaining movement in a turn."
+      ]
+    },
+    {
+      "name": "Knock",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Carnelian",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "a gauntleted suit of armor"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing this armor, you can rap your fist on an object to cast the {@spell knock} spell on it. Once used, this property can't be used again until the following dawn."
+      ]
+    },
+    {
+      "name": "Nondetection",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Amber",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "any armor or weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing (armor) or wielding (weapon or shield) this item, you are hidden from divination magic. You can't be targeted by such magic or perceived through magical scrying sensors."
+      ]
+    },
+    {
+      "name": "Serpent",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:UC"
+      ],
+      "gemName": "Jade",
+      "rarity": "uncommon",
+      "cost": "At least 50 gp",
+      "craftingDC": 15,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "When you hit a creature with this weapon, you can attempt to poison it. The target must succeed on a Constitution saving throw or become {@condition poisoned} for 1 minute. The creature can repeat the saving throw at the end of each of its turns. On success, the effect ends. Once used, this property can't be used again until the following dawn."
+      ]
+    },
+    {
+      "name": "Bastion",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Aquamarine",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a gauntleted suit of armor or a shield"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing (armor) or wielding (shield) this item, you can use a bonus action to press your fist to the ground and speak its command word, causing a 10-foot radius immobile dome of force to spring into existence around and above you that remains stationary and lasts for 1 minute. The dome automatically repels nonmagical ranged attacks attempting to pass through it, and the area inside the dome is considered difficult terrain for hostile creatures. Once used, this property can't be used again until the following dawn."
+      ]
+    },
+    {
+      "name": "Berserker",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Crimson Essence",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "When you hit a creature with this weapon, you can expend a number of Hit Dice up to half your character level (rounded down). For each Hit Die spent this way, roll the die and add it to the damage of the attack. You take an amount of damage equal to the damage dealt in this way, including any extra damage from a critical hit. This damage to you can't be reduced or prevented in any way. Once used, this property can't be used again until the following dawn."
+      ]
+    },
+    {
+      "name": "Chalice",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Alexandrite",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "any armor or weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "This gemstone stores spells cast into it, holding them until the attuned wearer uses them. The gem can store up to 2 levels worth of spells at a time. Any creature can cast a spell of 1st through 2nd level into the gem by touching the gem as the spell is cast. The spell has no effect, other than to be stored in the gem. If the gem can't hold the spell, the spell is expended without effect. The level of the spell used to cast the spell determines how much space it uses. While you are wearing (armor) or wielding (shield) this item, you can cast any spell stored in the gemstone. The spell uses the slot level, spell save DC, spell attack bonus, and the spellcasting ability of the original caster, but is otherwise treated as if you cast the spell. The spell cast from the gem is no longer stored in it, freeing up space."
+      ]
+    },
+    {
+      "name": "Death",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Black Pearl",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "Whenever you kill a Small or Medium humanoid with an attack using this weapon, it rises immediately as a zombie under your control with 1 hit point, as per the {@spell animate dead} spell. The creature uses the {@creature zombie} statistics. It remains animate for 1 minute, after which time it collapses and dies."
+      ]
+    },
+    {
+      "name": "Hunt",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Topaz",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon with the ammunition property"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wielding this weapon, you can use an action on your turn to mark a creature you can see within 90 feet of you. For 1 hour, when you hit the marked creature with a ranged attack using this weapon, you can use a bonus action to teleport to an unoccupied space within 30 feet of it that you can see. Once used, this property can't be used again until the following dawn."
+      ]
+    },
+    {
+      "name": "Journey",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Star Ruby",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing this armor, your speed increases by 10 feet. In addition, you can travel at a fast pace without suffering the normal penalty to passive Wisdom ({@skill Perception}) checks, and your food and water requirements are halved."
+      ]
+    },
+    {
+      "name": "Magebane",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Amethyst",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "This gemstone has three charges. When you hit a creature with this weapon, you can expend a charge to cause any spell effects of 3rd level or lower on the target to end. Additionally, for each spell of 4th level or higher on the target, make an ability check using your weapon ability. The DC equals 10 + the spell's level. On a successful check, the spell ends. The gemstone regains {@dice 1d3} expended charges daily at dawn."
+      ]
+    },
+    {
+      "name": "Phoenix",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Yellow Sapphire",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor"
+          ]
+        }
+      ],
+      "entries": [
+        "When you're reduced to 0 hit points and start dying while wearing this armor, this gem immediately casts a {@spell fireball} centered on you. At the start of your next turn, instead of rolling a death saving throw, you regain {@dice 1d6} hit points. Once used, this property can't be used again until the following dawn."
+      ]
+    },
+    {
+      "name": "Soultrap",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Peridot",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "When you kill a creature with a challenge rating equal to or higher than your level with this weapon, you regain one expended spell slot. This spell can't be of a level higher than your proficiency bonus. Once used, this property can't be used again until the following dawn."
+      ]
+    },
+    {
+      "name": "Superconductor",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Blue Spinel",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "This gemstone captures and stores magical potential for short-term use, and can hold a number of spell levels equal to the proficiency bonus of the creature attuned to it. When you are targeted by a spell while holding this weapon, the gemstone gains a number of charges equal to the level of the spell, up to the maximum the gemstone can hold. When you hit a creature with an attack using this weapon, you can expend any number of charges to deal an extra {@dice 1d6} force damage per charge expended. This item loses any accrued charges when you finish a short or long rest."
+      ]
+    },
+    {
+      "name": "Warmage",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:R"
+      ],
+      "gemName": "Star Sapphire",
+      "rarity": "rare",
+      "cost": "At least 500 gp",
+      "craftingDC": 20,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor or a shield"
+          ]
+        }
+      ],
+      "entries": [
+        "This gemstone has three charges. While you are wearing (armor) or wielding (shield) this item and fail a concentration saving throw that you make to maintain concentration on a spell due to taking damage, you can expend a charge as a reaction to reroll the saving throw. If you do so, you must use the new roll. You can expend a spell slot of 1st level or higher to recover an expended charge."
+      ]
+    },
+    {
+      "name": "Blood Weapon",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:VR"
+      ],
+      "gemName": "Ruby",
+      "rarity": "very rare",
+      "cost": "At least 1,000 gp",
+      "craftingDC": 25,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial melee weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "When you score a critical hit with an attack using this weapon, you regain a number of hit points equal to the damage dealt to a maximum of the hit points lost by the target. No effect against constructs or undead."
+      ]
+    },
+    {
+      "name": "Displacement",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:VR"
+      ],
+      "gemName": "Oriental Amethyst",
+      "rarity": "very rare",
+      "cost": "At least 1,000 gp",
+      "craftingDC": 25,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of light or medium armor"
+          ]
+        }
+      ],
+      "entries": [
+        "When you take damage from a weapon attack, you can teleport 30 feet to an unoccupied space that you can see. Once you teleport in this way, you can't do so again until the start of your next turn."
+      ]
+    },
+    {
+      "name": "Dragonbane",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:VR"
+      ],
+      "gemName": "Opal",
+      "rarity": "very rare",
+      "cost": "At least 1,000 gp",
+      "craftingDC": 25,
+      "prerequisite": [
+        {
+          "item": [
+            "a martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "When you hit a dragon with this weapon, it takes an extra {@dice 2d6} damage of the weapon's type and must succeed on a Strength saving throw or its flying speed (if any) is reduced to 0 feet until the end of its next turn. If the target is airborne, it descends at 60 feet per round until it reaches the ground or the effect ends. For the purpose of this weapon, \"dragon\" refers to any creature with the dragon type, including dragon turtles and wyverns."
+      ]
+    },
+    {
+      "name": "Earthshaker",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:VR"
+      ],
+      "gemName": "Oriental Topaz",
+      "rarity": "very rare",
+      "cost": "At least 1,000 gp",
+      "craftingDC": 25,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial melee weapon with the heavy property"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wielding this weapon, you can use an action to strike a point on the ground within reach, creating a seismic disturbance as per the {@spell earthquake} spell with a duration of 1 round. Once used, this property can't be used again until the following dawn."
+      ]
+    },
+    {
+      "name": "Giant Slayer",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:VR"
+      ],
+      "gemName": "Fire Opal",
+      "rarity": "very rare",
+      "cost": "At least 1,000 gp",
+      "craftingDC": 25,
+      "prerequisite": [
+        {
+          "item": [
+            "a martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "When you hit a giant with this weapon, it takes an extra {@dice 2d6} damage of the weapon's type and must succeed on a Strength saving throw or fall {@condition prone}. For the purpose of this weapon, \"giant\" refers to any creature with the giant type, including ettins and trolls."
+      ]
+    },
+    {
+      "name": "Mark/Recall",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:VR"
+      ],
+      "gemName": "Oriental Emerald",
+      "rarity": "very rare",
+      "cost": "At least 1,000 gp",
+      "craftingDC": 25,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing this armor, you can use an action to magically mark a surface on which you are standing. While a location is marked in this way, you can spend 1 minute concentrating on it (as if concentrating on a spell). At the end of the period, you and up to five willing creatures within 5 feet of you teleport to the marked location, and the mark vanishes. Once you mark a location, you can't do so again until the following dawn. If you mark another location while you already have a mark, the older mark vanishes."
+      ]
+    },
+    {
+      "name": "Overshield",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:VR"
+      ],
+      "gemName": "Black Opal",
+      "rarity": "very rare",
+      "cost": "At least 1,000 gp",
+      "craftingDC": 25,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of heavy armor"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing this armor, you gain 8 temporary hit points at the start of each of your turns."
+      ]
+    },
+    {
+      "name": "Retribution",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:VR"
+      ],
+      "gemName": "Jacinth",
+      "rarity": "very rare",
+      "cost": "At least 1,000 gp",
+      "craftingDC": 25,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor or a shield"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing (armor) or wielding (shield) this item, whenever you take damage from a creature you have advantage on your next attack roll against creatures of that type before the end of your next turn."
+      ]
+    },
+    {
+      "name": "Wolfsbane",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:VR"
+      ],
+      "gemName": "Star Ruby",
+      "rarity": "very rare",
+      "cost": "At least 1,000 gp",
+      "craftingDC": 25,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial melee weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "In darkness, the unsheathed blade or head of this weapon sheds moonlight, creating bright light in a 15-foot radius and dim light for an additional 15 feet. In addition, when you hit a shapechanger with this weapon, it takes an extra {@dice 2d6} radiant damage and must succeed on a Constitution saving throw. On a failure, it immediately assumes its true form if it was shapechanged and it can't shapechange until the end of its next turn."
+      ]
+    },
+    {
+      "name": "Force of Will",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:L"
+      ],
+      "gemName": "Emerald",
+      "rarity": "legendary",
+      "cost": "At least 5,000 gp",
+      "craftingDC": 30,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing this armor, you can't be affected by enchantment magic unless you choose to be."
+      ]
+    },
+    {
+      "name": "Mime",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:L"
+      ],
+      "gemName": "Diamond",
+      "rarity": "legendary",
+      "cost": "At least 5,000 gp",
+      "craftingDC": 30,
+      "prerequisite": [
+        {
+          "item": [
+            "any armor or weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "This gemstone is able to mimic the properties of magic items. A creature can spend a short rest focusing on a magic item and this gemstone. The magic item must be of the same type as the type of equipment to which this gem is affixed. Focus usually takes the form of quiet meditation or other appropriate activity. If the short rest is interrupted, the copying process fails. Otherwise, at the end of the short rest the gemstone gains the properties of the magic item, excluding any fixed bonuses such as those to attack and damage rolls, spell save DC, and Armor Class. If a property has charges, it is copied with no remaining charges. Only the properties of one magic item can be copied at a time. The mimicking process overwrites any existing copied properties. The process automatically fails when attempting to mimic the properties of artifacts."
+      ]
+    },
+    {
+      "name": "Tempest",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:L"
+      ],
+      "gemName": "Blue Sapphire",
+      "rarity": "legendary",
+      "cost": "At least 5,000 gp",
+      "craftingDC": 30,
+      "prerequisite": [
+        {
+          "item": [
+            "a simple or martial weapon"
+          ]
+        }
+      ],
+      "entries": [
+        "Once on each of your turns, when you hit a creature with this weapon you can deal an extra {@dice 1d10} lightning damage. An arc of lightning then leaps from that target to as many as three additional creatures of your choice within 30 feet of it, which also take {@dice 1d10} lightning damage."
+      ]
+    },
+    {
+      "name": "Volant",
+      "source": "TGTT",
+      "page": 0,
+      "upgradeType": [
+        "GS:L"
+      ],
+      "gemName": "Black Sapphire",
+      "rarity": "legendary",
+      "cost": "At least 5,000 gp",
+      "craftingDC": 30,
+      "prerequisite": [
+        {
+          "item": [
+            "a suit of armor"
+          ]
+        }
+      ],
+      "entries": [
+        "While you are wearing this armor, you gain a flight (hover) speed equal to twice your walking speed."
       ]
     }
   ]
