@@ -807,6 +807,13 @@ class _DataTypeLoaderOptionalfeature extends _DataTypeLoaderSingleSource {
 	_filename = "optionalfeatures.json";
 }
 
+class _DataTypeLoaderItemUpgrade extends _DataTypeLoaderSingleSource {
+	static PROPS = ["itemUpgrade"];
+	static PAGE = UrlUtil.PG_ITEM_UPGRADES;
+
+	_filename = "itemupgrades.json";
+}
+
 class _DataTypeLoaderReward extends _DataTypeLoaderSingleSource {
 	static PROPS = ["reward"];
 	static PAGE = UrlUtil.PG_REWARDS;
@@ -1802,6 +1809,7 @@ class DataLoader {
 		"vehicleUpgrade": UrlUtil.PG_VEHICLES,
 		"feat": UrlUtil.PG_FEATS,
 		"optionalfeature": UrlUtil.PG_OPT_FEATURES,
+		"itemUpgrade": UrlUtil.PG_ITEM_UPGRADES,
 		"reward": UrlUtil.PG_REWARDS,
 		"charoption": UrlUtil.PG_CHAR_CREATION_OPTIONS,
 		"race": UrlUtil.PG_RACES,
@@ -1894,6 +1902,7 @@ class DataLoader {
 		_DataTypeLoaderAction.register({fnRegister});
 		_DataTypeLoaderFeat.register({fnRegister});
 		_DataTypeLoaderOptionalfeature.register({fnRegister});
+		_DataTypeLoaderItemUpgrade.register({fnRegister});
 		_DataTypeLoaderReward.register({fnRegister});
 		_DataTypeLoaderCharoption.register({fnRegister});
 		_DataTypeLoaderBastion.register({fnRegister});
