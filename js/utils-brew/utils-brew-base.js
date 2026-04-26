@@ -1316,13 +1316,17 @@ export class BrewUtil2Base {
 		const out = {};
 		Object.entries(data)
 			.forEach(([prop, val]) => {
+				if (!(val instanceof Array)) {
+					out[prop] = val;
+					return;
+				}
+
 				if (!homebrew[prop]) {
 					out[prop] = [...val];
 					return;
 				}
 
-				if (!(homebrew[prop] instanceof Array)) throw new Error(`${this.DISPLAY_NAME.uppercaseFirst()} was not array!`);
-				if (!(val instanceof Array)) throw new Error(`Data was not array!`);
+				if (!(homebrew[prop] instanceof Array)) throw new Error(`${this.DISPLAY_NAME.uppercaseFirst()} "${prop}" was not array!`);
 				out[prop] = [...val, ...homebrew[prop]];
 			});
 
