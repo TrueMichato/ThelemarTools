@@ -2370,6 +2370,35 @@ Parser.charCreationOptionTypeToFull = function (type) {
 	return type;
 };
 
+Parser.ITEM_UPGRADE_TYPE_TO_FULL = {
+	"WU": "Weapon Upgrade",
+	"WU:1": "Weapon Upgrade; 1st Tier",
+	"WU:2": "Weapon Upgrade; 2nd Tier",
+	"WU:3": "Weapon Upgrade; 3rd Tier",
+	"AU": "Armor Upgrade",
+	"GS": "Gemstone",
+	"GS:C": "Gemstone; Common",
+	"GS:UC": "Gemstone; Uncommon",
+	"GS:R": "Gemstone; Rare",
+	"GS:VR": "Gemstone; Very Rare",
+	"GS:L": "Gemstone; Legendary",
+};
+
+Parser.itemUpgradeTypeToFull = function (type) {
+	if (Parser.ITEM_UPGRADE_TYPE_TO_FULL[type]) return Parser.ITEM_UPGRADE_TYPE_TO_FULL[type];
+	if (PrereleaseUtil.getMetaLookup("itemUpgradeTypes")?.[type]) return PrereleaseUtil.getMetaLookup("itemUpgradeTypes")[type];
+	if (BrewUtil2.getMetaLookup("itemUpgradeTypes")?.[type]) return BrewUtil2.getMetaLookup("itemUpgradeTypes")[type];
+	return type;
+};
+
+Parser.itemUpgradeTypeToAbv = function (type) {
+	const full = Parser.itemUpgradeTypeToFull(type);
+	if (!full) return type;
+	const parts = full.split(";").map(it => it.trim());
+	if (parts.length === 1) return parts[0];
+	return parts[1];
+};
+
 Parser._ALIGNMENT_ABV_TO_FULL = {
 	"L": "lawful",
 	"N": "neutral",
