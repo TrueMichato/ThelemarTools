@@ -109,6 +109,7 @@ class NavBar {
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "actions.html", aText: "Actions"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "bastions.html", aText: "Bastions"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "bestiary.html", aText: "Bestiary"});
+		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "combatmethods.html", aText: "Combat Methods"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "conditionsdiseases.html", aText: "Conditions & Diseases"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "decks.html", aText: "Decks"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "deities.html", aText: "Deities"});

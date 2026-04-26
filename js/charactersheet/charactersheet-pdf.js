@@ -679,7 +679,7 @@ class CharacterSheetPdf {
 		if (overrides?.[nameLower] === "passive") return false;
 		if (overrides?.[nameLower] === "combat" || overrides?.[nameLower] === "reaction") return true;
 
-		if (f.optionalFeatureTypes?.some(ft => /^CTM:\d?[A-Z]{2}$/.test(ft))) return false;
+		if (CharacterSheetClassUtils.isCombatMethod(f)) return false;
 		if (f.optionalFeatureTypes?.includes("MM")) return false;
 
 		let desc = f.description || "";
@@ -807,7 +807,7 @@ class CharacterSheetPdf {
 		const features = this._state.getFeatures();
 		if (!features.length) return [];
 		return features.filter(f => {
-			if (f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"))) return false;
+			if (CharacterSheetClassUtils.isCombatMethod(f)) return false;
 			return true;
 		});
 	}
@@ -1035,9 +1035,9 @@ class CharacterSheetPdf {
 		const staminaPips = staminaMax > 0 ? `<div class="pdf-tgtt-row"><span class="pdf-label">Stamina</span> ${this._renderPips(staminaCurrent, staminaMax)}</div>` : "";
 		const stanceRow = activeStance ? `<div class="pdf-tgtt-row"><span class="pdf-label">Stance</span> ${this._esc(activeStance)}</div>` : "";
 
-		// Render combat methods (CTM:*) that were excluded from features section
+		// Render combat methods that were excluded from features section
 		const allFeatures = this._state.getFeatures?.() || [];
-		const methods = allFeatures.filter(f => f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")));
+		const methods = allFeatures.filter(f => CharacterSheetClassUtils.isCombatMethod(f));
 		const methodsHtml = methods.length
 			? `<div class="pdf-tgtt-methods"><h4 class="pdf-subsection__title" style="color:#1a3c5e">Methods</h4>${methods.map(f => this._renderSingleFeature(f)).join("\n")}</div>`
 			: "";

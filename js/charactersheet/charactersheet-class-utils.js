@@ -153,31 +153,52 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * Extract the degree number from a combat method's feature type.
-	 * @param {Object} opt - Optional feature with featureType array
+	 * Extract the degree number from a combat method (either format).
+	 * @param {Object} opt - combatMethod entity or legacy CTM optionalfeature
 	 * @returns {number} The degree (0 if not found)
 	 */
 	static getMethodDegree (opt) {
-		if (!opt.featureType) return 0;
-		for (const ft of opt.featureType) {
-			const match = ft.match(/^CTM:(\d)[A-Z]{2}$/);
+		if (!opt) return 0;
+		// New entity: explicit field
+		if (opt.degree !== undefined && opt.tradition !== undefined) return opt.degree;
+		// Legacy: extract from featureType or optionalFeatureTypes
+		const types = opt.optionalFeatureTypes || (Array.isArray(opt.featureType) ? opt.featureType : []);
+		for (const ft of types) {
+			const match = ft?.match?.(/^CTM:(\d)[A-Z]{2,3}$/);
 			if (match) return parseInt(match[1]);
 		}
 		return 0;
 	}
 
 	/**
-	 * Extract the tradition code from a combat method's feature type.
-	 * @param {Object} opt - Optional feature with featureType array
+	 * Extract the tradition code from a combat method (either format).
+	 * @param {Object} opt - combatMethod entity or legacy CTM optionalfeature
 	 * @returns {string|null} Two-letter tradition code or null
 	 */
-	static getMethodTradition (opt) {
-		if (!opt.featureType) return null;
-		for (const ft of opt.featureType) {
-			const match = ft.match(/^CTM:\d([A-Z]{2})$/);
+	static getMethodTraditionCode (opt) {
+		if (!opt) return null;
+		// New entity: convert full name to code
+		if (opt.tradition && typeof opt.tradition === "string" && opt.tradition.length > 2) {
+			return CharacterSheetClassUtils.getTraditionCode(opt.tradition);
+		}
+		// New entity: tradition might already be a code
+		if (opt.tradition && opt.tradition.length <= 3) {
+			return opt.tradition.toUpperCase();
+		}
+		// Legacy: extract from featureType or optionalFeatureTypes
+		const types = opt.optionalFeatureTypes || (Array.isArray(opt.featureType) ? opt.featureType : []);
+		for (const ft of types) {
+			const match = ft?.match?.(/^CTM:\d?([A-Z]{2,3})$/);
 			if (match) return match[1];
 		}
 		return null;
+	}
+
+	/**
+	 * @deprecated Use getMethodTraditionCode instead
+	 */
+	static getMethodTradition (opt) {
+		return CharacterSheetClassUtils.getMethodTraditionCode(opt);
 	}
 
 	/**
@@ -1502,32 +1523,138 @@ class CharacterSheetClassUtils {
 		return granted.reduce((sum, t) => sum + (t.bonusMethods || 0), 0);
 	}
 
+	// ==========================================
+	// Combat Method Canonical Maps
+	// ==========================================
+
+	static TRADITION_CODE_TO_NAME = {
+		"AM": "Adamant Mountain",
+		"AK": "Arcane Knight",
+		"AS": "Ace Starfighter",
+		"BU": "Beast Unity",
+		"BZ": "Biting Zephyr",
+		"CJ": "Comedic Jabs",
+		"EB": "Eldritch Blackguard",
+		"GH": "Gallant Heart",
+		"MG": "Mirror's Glint",
+		"MS": "Mist and Shade",
+		"RC": "Rapid Current",
+		"RE": "Razor's Edge",
+		"SK": "Sanguine Knot",
+		"SS": "Spirited Steed",
+		"TI": "Tempered Iron",
+		"TC": "Tooth and Claw",
+		"UW": "Unending Wheel",
+		"UH": "Unerring Hawk",
+	};
+
+	static TRADITION_NAME_TO_CODE = Object.entries(CharacterSheetClassUtils.TRADITION_CODE_TO_NAME)
+		.reduce((acc, [code, name]) => ({...acc, [name.toLowerCase()]: code}), {});
+
 	/**
 	 * Map a tradition code to its full name.
 	 * @param {string} tradCode - Two-letter code
 	 * @returns {string}
 	 */
 	static getTraditionName (tradCode) {
-		const names = {
-			"AM": "Adamant Mountain",
-			"AK": "Arcane Knight",
-			"BU": "Beast Unity",
-			"BZ": "Biting Zephyr",
-			"CJ": "Comedic Jabs",
-			"EB": "Eldritch Blackguard",
-			"GH": "Gallant Heart",
-			"MG": "Mirror's Glint",
-			"MS": "Mist and Shade",
-			"RC": "Rapid Current",
-			"RE": "Razor's Edge",
-			"SK": "Sanguine Knot",
-			"SS": "Spirited Steed",
-			"TI": "Tempered Iron",
-			"TC": "Tooth and Claw",
-			"UW": "Unending Wheel",
-			"UH": "Unerring Hawk",
+		return CharacterSheetClassUtils.TRADITION_CODE_TO_NAME[tradCode] || tradCode;
+	}
+
+	/**
+	 * Map a tradition full name to its two-letter code.
+	 * @param {string} tradName - Full tradition name
+	 * @returns {string|null} Two-letter code or null
+	 */
+	static getTraditionCode (tradName) {
+		if (!tradName) return null;
+		// Already a code?
+		if (CharacterSheetClassUtils.TRADITION_CODE_TO_NAME[tradName.toUpperCase()]) return tradName.toUpperCase();
+		return CharacterSheetClassUtils.TRADITION_NAME_TO_CODE[tradName.toLowerCase()] || null;
+	}
+
+	// ==========================================
+	// Combat Method Adapter Helpers
+	// ==========================================
+
+	/**
+	 * Check if a feature is a combat method (either new combatMethod entity or legacy CTM optionalfeature).
+	 * @param {Object} feature
+	 * @returns {boolean}
+	 */
+	static isCombatMethod (feature) {
+		if (!feature) return false;
+		// New combatMethod entity type
+		if (feature._entityType === "combatMethod" || (feature.tradition !== undefined && feature.degree !== undefined && feature.staminaCost !== undefined)) return true;
+		// Legacy CTM optionalfeature
+		if (feature.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"))) return true;
+		if (feature.featureType?.some?.(ft => ft?.startsWith?.("CTM:"))) return true;
+		return false;
+	}
+
+	/**
+	 * Get the full tradition name from a combat method (either format).
+	 * @param {Object} feature
+	 * @returns {string|null}
+	 */
+	static getMethodTraditionName (feature) {
+		if (!feature) return null;
+		// New entity: tradition is already a full name
+		if (feature.tradition && typeof feature.tradition === "string" && feature.tradition.length > 2) return feature.tradition;
+		// Legacy: extract code from featureType and convert
+		const code = CharacterSheetClassUtils.getMethodTraditionCode(feature);
+		return code ? CharacterSheetClassUtils.getTraditionName(code) : null;
+	}
+
+	/**
+	 * Get the stamina cost from a combat method (either format).
+	 * @param {Object} feature
+	 * @returns {number}
+	 */
+	static getMethodStaminaCost (feature) {
+		if (!feature) return 0;
+		// New entity: explicit field
+		if (feature.staminaCost !== undefined) return feature.staminaCost;
+		// Legacy: from consumes object
+		if (feature.consumes?.name === "Stamina") return feature.consumes.amount || 1;
+		return 0;
+	}
+
+	/**
+	 * Get the action type from a combat method (either format).
+	 * @param {Object} feature
+	 * @returns {string|null}
+	 */
+	static getMethodActionType (feature) {
+		if (!feature) return null;
+		// New entity: explicit field
+		if (feature.actionType) return feature.actionType;
+		return null;
+	}
+
+	/**
+	 * Normalize a combat method (either format) to a common shape.
+	 * @param {Object} feature - combatMethod entity or legacy CTM optionalfeature
+	 * @returns {Object} Unified shape
+	 */
+	static normalizeMethodToCommon (feature) {
+		if (!feature) return null;
+
+		const traditionCode = CharacterSheetClassUtils.getMethodTraditionCode(feature);
+
+		return {
+			name: feature.name,
+			source: feature.source,
+			tradition: CharacterSheetClassUtils.getMethodTraditionName(feature) || feature.tradition,
+			traditionCode,
+			degree: CharacterSheetClassUtils.getMethodDegree(feature),
+			staminaCost: CharacterSheetClassUtils.getMethodStaminaCost(feature),
+			actionType: CharacterSheetClassUtils.getMethodActionType(feature),
+			entries: feature.entries,
+			description: feature.description,
+			prerequisite: feature.prerequisite,
+			_isLegacyCTM: !feature._entityType && !feature.staminaCost,
+			_original: feature,
 		};
-		return names[tradCode] || tradCode;
 	}
 
 	/**
@@ -1549,10 +1676,9 @@ class CharacterSheetClassUtils {
 		// Fall back to inferring from existing combat method features
 		const traditions = new Set();
 		for (const feature of existingOptFeatures) {
-			if (!feature.optionalFeatureTypes) continue;
-			for (const ft of feature.optionalFeatureTypes) {
-				const match = ft.match(/^CTM:(\d)?([A-Z]{2})$/);
-				if (match) traditions.add(match[2]);
+			if (CharacterSheetClassUtils.isCombatMethod(feature)) {
+				const code = CharacterSheetClassUtils.getMethodTraditionCode(feature);
+				if (code) traditions.add(code);
 			}
 		}
 		return Array.from(traditions);
@@ -1641,26 +1767,21 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * Get available combat traditions from optional features.
-	 * @param {Array} allOptFeatures - All optional features
+	 * Get available combat traditions from combat method entities and/or optional features.
+	 * @param {Array} allFeatures - combatMethod entities and/or optional features
 	 * @returns {Array<{code: string, name: string}>}
 	 */
-	static getAvailableTraditions (allOptFeatures) {
+	static getAvailableTraditions (allFeatures) {
 		const traditions = new Map();
 
-		for (const opt of allOptFeatures) {
-			if (!opt.featureType) continue;
-			for (const ft of opt.featureType) {
-				const match = ft.match(/^CTM:\d([A-Z]{2})$/);
-				if (match) {
-					const tradCode = match[1];
-					if (!traditions.has(tradCode)) {
-						traditions.set(tradCode, {
-							code: tradCode,
-							name: CharacterSheetClassUtils.getTraditionName(tradCode),
-						});
-					}
-				}
+		for (const feature of allFeatures) {
+			if (!CharacterSheetClassUtils.isCombatMethod(feature)) continue;
+			const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(feature);
+			if (tradCode && !traditions.has(tradCode)) {
+				traditions.set(tradCode, {
+					code: tradCode,
+					name: CharacterSheetClassUtils.getTraditionName(tradCode),
+				});
 			}
 		}
 
@@ -1689,9 +1810,16 @@ class CharacterSheetClassUtils {
 		const extractFromEntries = (entries) => {
 			if (!entries) return;
 			if (typeof entries === "string") {
-				const matches = entries.matchAll(/feature\s+type[=:]\s*ctm:([a-z]{2})/gi);
-				for (const match of matches) {
+				// Legacy format: feature type=ctm:XX
+				const ctmMatches = entries.matchAll(/feature\s+type[=:]\s*ctm:([a-z]{2,3})/gi);
+				for (const match of ctmMatches) {
 					traditions.add(match[1].toUpperCase());
+				}
+				// New format: |combatmethods|tradition=Name
+				const newMatches = entries.matchAll(/\|combatmethods\|tradition=([^}]+)/gi);
+				for (const match of newMatches) {
+					const code = CharacterSheetClassUtils.getTraditionCode(match[1].trim());
+					if (code) traditions.add(code);
 				}
 				return;
 			}
@@ -1718,10 +1846,10 @@ class CharacterSheetClassUtils {
 	 * @param {Array} classFeatures
 	 * @returns {Array<{code: string, name: string}>}
 	 */
-	static getAvailableTraditionsForClass (allOptFeatures, classAllowedTypes, className, classFeatures) {
+	static getAvailableTraditionsForClass (allFeatures, classAllowedTypes, className, classFeatures) {
 		const allowedTraditionCodes = new Set();
 		for (const ft of classAllowedTypes) {
-			const match = ft.match(/^CTM:(\d)?([A-Z]{2})$/);
+			const match = ft.match(/^CTM:(\d)?([A-Z]{2,3})$/);
 			if (match && match[2]) allowedTraditionCodes.add(match[2]);
 		}
 
@@ -1731,7 +1859,7 @@ class CharacterSheetClassUtils {
 		}
 
 		if (allowedTraditionCodes.size === 0) {
-			return CharacterSheetClassUtils.getAvailableTraditions(allOptFeatures);
+			return CharacterSheetClassUtils.getAvailableTraditions(allFeatures);
 		}
 
 		const traditions = new Map();

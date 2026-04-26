@@ -91,6 +91,7 @@ export class OmnisearchBacking {
 			[new Renderer.tag.TagRace().tagName]: [Parser.pageCategoryToFull(Parser.CAT_ID_RACE)],
 			[new Renderer.tag.TagReward().tagName]: [Parser.pageCategoryToFull(Parser.CAT_ID_OTHER_REWARD)],
 			[new Renderer.tag.TagOptfeature().tagName]: Parser.CAT_ID_GROUPS["optionalfeature"].map(catId => Parser.pageCategoryToFull(catId)),
+			[new Renderer.tag.TagCombatmethod().tagName]: [Parser.pageCategoryToFull(Parser.CAT_ID_COMBAT_METHOD)],
 			[new Renderer.tag.TagClassFeature().tagName]: [Parser.pageCategoryToFull(Parser.CAT_ID_CLASS_FEATURE)],
 			[new Renderer.tag.TagSubclassFeature().tagName]: [Parser.pageCategoryToFull(Parser.CAT_ID_SUBCLASS_FEATURE)],
 			[new Renderer.tag.TagVehupgrade().tagName]: Parser.CAT_ID_GROUPS["vehicleUpgrade"].map(catId => Parser.pageCategoryToFull(catId)),

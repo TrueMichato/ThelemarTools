@@ -2533,6 +2533,7 @@ Parser.CAT_ID_CARD = 53;
 Parser.CAT_ID_ITEM_MASTERY = 54;
 Parser.CAT_ID_FACILITY = 55;
 Parser.CAT_ID_VEHICLE_UPGRADE_OTHER = 56;
+Parser.CAT_ID_COMBAT_METHOD = 57;
 
 Parser.CAT_ID_GROUPS = {
 	"optionalfeature": [
@@ -2616,6 +2617,7 @@ Parser.CAT_ID_TO_FULL[Parser.CAT_ID_FACILITY] = "Facility";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_SKILLS] = "Skill";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_SENSES] = "Sense";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_ITEM_MASTERY] = "Item Mastery";
+Parser.CAT_ID_TO_FULL[Parser.CAT_ID_COMBAT_METHOD] = "Combat Method";
 
 Parser.pageCategoryToFull = function (catId) {
 	return Parser._parse_aToB(Parser.CAT_ID_TO_FULL, catId);
@@ -2677,6 +2679,7 @@ Parser.CAT_ID_TO_PROP[Parser.CAT_ID_DECK] = "deck";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CARD] = "card";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_FACILITY] = "facility";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_SKILLS] = "skill";
+Parser.CAT_ID_TO_PROP[Parser.CAT_ID_COMBAT_METHOD] = "combatMethod";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_SENSES] = "sense";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_ITEM_MASTERY] = "itemMastery";
 
@@ -2977,6 +2980,33 @@ Parser.SP_SCHOOL_ABV_TO_CSS_CLASS[Parser.SKL_ABV_TRA] = "ve-sp__school--t";
 Parser.spSchoolAbvToStyleClass = function (school) {
 	return Parser.SP_SCHOOL_ABV_TO_CSS_CLASS[school] || "";
 };
+
+// region Combat method tradition colors
+Parser.CM_TRADITION_TO_CSS_CLASS = {
+	"Adamant Mountain": "ve-cm__tradition--am",
+	"Arcane Knight": "ve-cm__tradition--ak",
+	"Beast Unity": "ve-cm__tradition--bu",
+	"Biting Zephyr": "ve-cm__tradition--bz",
+	"Comedic Jabs": "ve-cm__tradition--cj",
+	"Eldritch Blackguard": "ve-cm__tradition--eb",
+	"Gallant Heart": "ve-cm__tradition--gh",
+	"Mirror's Glint": "ve-cm__tradition--mg",
+	"Mist and Shade": "ve-cm__tradition--ms",
+	"Rapid Current": "ve-cm__tradition--rc",
+	"Razor's Edge": "ve-cm__tradition--re",
+	"Sanguine Knot": "ve-cm__tradition--sk",
+	"Spirited Steed": "ve-cm__tradition--ss",
+	"Tempered Iron": "ve-cm__tradition--ti",
+	"Tooth and Claw": "ve-cm__tradition--tc",
+	"Unending Wheel": "ve-cm__tradition--uw",
+	"Unerring Hawk": "ve-cm__tradition--uh",
+	"Ace Starfighter": "ve-cm__tradition--as",
+};
+
+Parser.cmTraditionToStyleClass = function (tradition) {
+	return Parser.CM_TRADITION_TO_CSS_CLASS[tradition] || "";
+};
+// endregion
 
 Parser.PSI_ABV_TYPE_TO_CSS_CLASS = {};
 Parser.PSI_ABV_TYPE_TO_CSS_CLASS[Parser.PSI_ABV_TYPE_TALENT] = "ve-psi__type--t";
