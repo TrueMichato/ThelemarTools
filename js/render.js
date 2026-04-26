@@ -4838,6 +4838,7 @@ Renderer.utils = class {
 			case "@recipe": out.page = UrlUtil.PG_RECIPES; break;
 			case "@deck": out.page = UrlUtil.PG_DECKS; break;
 			case "@facility": out.page = UrlUtil.PG_BASTIONS; break;
+			case "@combatmethod": out.page = UrlUtil.PG_COMBAT_METHODS; break;
 
 			case "@legroup": {
 				out.page = "legendaryGroup";
@@ -14069,6 +14070,37 @@ Renderer.action = class {
 	}
 };
 
+
+Renderer.combatmethod = class {
+	static _getDegreeDisplay (degree) {
+		switch (degree) {
+			case 1: return "1st";
+			case 2: return "2nd";
+			case 3: return "3rd";
+			case 4: return "4th";
+			case 5: return "5th";
+			default: return `${degree}th`;
+		}
+	}
+
+	static getCompactRenderedString (ent) {
+		const ptsMeta = [];
+		if (ent.tradition) {
+			const tradClass = Parser.cmTraditionToStyleClass(ent.tradition);
+			ptsMeta.push(`<b>Tradition:</b> <span class="${tradClass}">${ent.tradition}</span>`);
+		}
+		if (ent.degree) ptsMeta.push(`<b>Degree:</b> ${Renderer.combatmethod._getDegreeDisplay(ent.degree)}`);
+		ptsMeta.push(`<b>Type:</b> ${ent.isStance ? "Stance" : "Strike"}`);
+		if (ent.staminaCost != null) ptsMeta.push(`<b>Stamina:</b> ${ent.staminaCost}`);
+		if (ent.actionType) ptsMeta.push(`<b>Action:</b> ${ent.actionType.toTitleCase()}`);
+
+		return `${Renderer.utils.getExcludedTr({entity: ent, dataProp: "combatMethod", page: UrlUtil.PG_COMBAT_METHODS})}
+		${Renderer.utils.getNameTr(ent, {page: UrlUtil.PG_COMBAT_METHODS})}
+		${ptsMeta.length ? `<tr><td colspan="6" class="ve-pt-0">${ptsMeta.join(" &bull; ")}</td></tr>` : ""}
+		<tr><td colspan="6" class="ve-py-0"><div class="ve-tbl-divider"></div></td></tr>
+		<tr><td colspan="6">${Renderer.get().setFirstSection(true).render({entries: ent.entries}, 1)}</td></tr>`;
+	}
+};
 Renderer.language = class {
 	static getLanguageRenderableEntriesMeta (ent) {
 		const hasMeta = ent.typicalSpeakers || ent.script || ent.origin;
@@ -16776,6 +16808,7 @@ Renderer.hover = class {
 			case UrlUtil.PG_CREATURE_FEATURES: return Renderer.hover.getGenericCompactRenderedString.bind(Renderer.hover);
 			case UrlUtil.PG_DECKS: return Renderer.deck.getCompactRenderedString.bind(Renderer.deck);
 			case UrlUtil.PG_BASTIONS: return Renderer.bastion.getCompactRenderedString.bind(Renderer.bastion);
+			case UrlUtil.PG_COMBAT_METHODS: return Renderer.combatmethod.getCompactRenderedString.bind(Renderer.combatmethod);
 			// region props
 			case "classfeature":
 			case "classFeature":

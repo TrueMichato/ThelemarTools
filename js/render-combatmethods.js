@@ -32,8 +32,12 @@ class _RenderCombatMethodsImplBase extends RenderPageImplBase {
 
 	_getCommonHtmlParts_traditionDegree ({ent}) {
 		const parts = [];
-		if (ent.tradition) parts.push(`<b>Tradition:</b> ${ent.tradition}`);
+		if (ent.tradition) {
+			const tradClass = Parser.cmTraditionToStyleClass(ent.tradition);
+			parts.push(`<b>Tradition:</b> <span class="${tradClass}">${ent.tradition}</span>`);
+		}
 		if (ent.degree) parts.push(`<b>Degree:</b> ${PageFilterCombatMethods._getDegreeDisplay(ent.degree)}`);
+		parts.push(`<b>Type:</b> ${ent.isStance ? "Stance" : "Strike"}`);
 		const content = parts.join(" &bull; ");
 		return content ? `<tr><td colspan="6" class="ve-pt-0">${content}</td></tr>` : "";
 	}

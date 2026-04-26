@@ -201,3 +201,31 @@ body:not(.tgtt-filter-active) .tgtt-winner {
 		height: 16px;
 	}
 }
+
+/* ==================== COMBAT METHOD TRADITION COLORS ==================== */
+
+.ve-cm__tradition--am { color: #8B6914; } /* Adamant Mountain — earthy gold */
+.ve-cm__tradition--ak { color: #7B2FBE; } /* Arcane Knight — arcane purple */
+.ve-cm__tradition--bu { color: #2E8B57; } /* Beast Unity — forest green */
+.ve-cm__tradition--bz { color: #4A90D9; } /* Biting Zephyr — sky blue */
+.ve-cm__tradition--cj { color: #E8A317; } /* Comedic Jabs — jester gold */
+.ve-cm__tradition--eb { color: #8B0000; } /* Eldritch Blackguard — dark crimson */
+.ve-cm__tradition--gh { color: #C0392B; } /* Gallant Heart — noble red */
+.ve-cm__tradition--mg { color: #00ADB3; } /* Mirror's Glint — reflective teal */
+.ve-cm__tradition--ms { color: #6C7A89; } /* Mist and Shade — misty grey */
+.ve-cm__tradition--rc { color: #2980B9; } /* Rapid Current — water blue */
+.ve-cm__tradition--re { color: #A0A0A0; } /* Razor's Edge — steel silver */
+.ve-cm__tradition--sk { color: #C0392B; } /* Sanguine Knot — blood red */
+.ve-cm__tradition--ss { color: #B8860B; } /* Spirited Steed — golden brown */
+.ve-cm__tradition--ti { color: #7F8C8D; } /* Tempered Iron — iron grey */
+.ve-cm__tradition--tc { color: #D35400; } /* Tooth and Claw — amber orange */
+.ve-cm__tradition--uw { color: #16A085; } /* Unending Wheel — jade green */
+.ve-cm__tradition--uh { color: #1ABC9C; } /* Unerring Hawk — keen teal-green */
+.ve-cm__tradition--as { color: #3498DB; } /* Ace Starfighter — stellar blue */
+
+/* ==================== COMBAT METHOD TYPE (STANCE/STRIKE) ==================== */
+
+.ve-cm__type--stance {
+	color: #00b921;
+	font-weight: bold;
+}

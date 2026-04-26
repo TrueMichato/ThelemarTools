@@ -116,14 +116,17 @@ class CombatMethodsPage extends ListPage {
 		const degree = it.degree ? PageFilterCombatMethods._getDegreeDisplay(it.degree) : "\u2014";
 		const stamina = it.staminaCost != null ? it.staminaCost : "\u2014";
 		const action = it.actionType ? it.actionType.toTitleCase() : "\u2014";
+		const type = it.isStance ? "Stance" : "Strike";
+		const tradClass = Parser.cmTraditionToStyleClass(it.tradition);
 
 		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
 			<span class="ve-col-0-3 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
-			<span class="ve-bold ve-col-3 ve-px-1">${it.name}</span>
-			<span class="ve-col-2-5 ve-px-1">${it.tradition || "\u2014"}</span>
+			<span class="ve-bold ve-col-2-7 ve-px-1">${it.name}</span>
+			<span class="ve-col-2-2 ve-px-1 ${tradClass}">${it.tradition || "\u2014"}</span>
+			<span class="ve-col-0-8 ve-px-1 ve-text-center ${it.isStance ? "ve-cm__type--stance" : ""}">${type}</span>
 			<span class="ve-col-1 ve-px-1 ve-text-center">${degree}</span>
 			<span class="ve-col-1 ve-px-1 ve-text-center">${stamina}</span>
-			<span class="ve-col-2-2 ve-px-1 ve-text-center">${action}</span>
+			<span class="ve-col-2 ve-px-1 ve-text-center">${action}</span>
 			<span class="ve-col-2 ${Parser.sourceJsonToSourceClassname(it.source)} ve-text-center ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(it.source)}">${source}</span>
 		</a>
 		<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
@@ -139,6 +142,7 @@ class CombatMethodsPage extends ListPage {
 				hash,
 				source,
 				tradition: it.tradition || "",
+				type,
 				degree,
 				stamina,
 				action,

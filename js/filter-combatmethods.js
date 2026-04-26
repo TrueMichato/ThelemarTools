@@ -30,6 +30,10 @@ class PageFilterCombatMethods extends PageFilterBase {
 			header: "Tradition",
 			items: [],
 		});
+		this._typeFilter = new Filter({
+			header: "Type",
+			items: ["Stance", "Strike"],
+		});
 		this._degreeFilter = new Filter({
 			header: "Degree",
 			items: ["1st", "2nd", "3rd", "4th", "5th"],
@@ -38,6 +42,7 @@ class PageFilterCombatMethods extends PageFilterBase {
 		this._staminaFilter = new Filter({
 			header: "Stamina Cost",
 			items: [],
+			displayFn: it => `${it}`,
 			itemSortFn: SortUtil.ascSort,
 		});
 		this._actionTypeFilter = new Filter({
@@ -61,6 +66,7 @@ class PageFilterCombatMethods extends PageFilterBase {
 		this._mutateForFilters_commonSources(ent);
 
 		ent._fTradition = ent.tradition || "Unknown";
+		ent._fType = ent.isStance ? "Stance" : "Strike";
 		ent._fDegree = ent.degree ? PageFilterCombatMethods._getDegreeDisplay(ent.degree) : "Unknown";
 		ent._fStaminaCost = ent.staminaCost != null ? ent.staminaCost : 0;
 		ent._fActionType = ent.actionType || "Unknown";
@@ -90,6 +96,7 @@ class PageFilterCombatMethods extends PageFilterBase {
 
 		this._sourceFilter.addItem(it._fSources);
 		this._traditionFilter.addItem(it._fTradition);
+		this._typeFilter.addItem(it._fType);
 		this._degreeFilter.addItem(it._fDegree);
 		this._staminaFilter.addItem(it._fStaminaCost);
 		this._actionTypeFilter.addItem(it._fActionType);
@@ -101,6 +108,7 @@ class PageFilterCombatMethods extends PageFilterBase {
 		opts.filters = [
 			this._sourceFilter,
 			this._traditionFilter,
+			this._typeFilter,
 			this._degreeFilter,
 			this._staminaFilter,
 			this._actionTypeFilter,
@@ -114,6 +122,7 @@ class PageFilterCombatMethods extends PageFilterBase {
 			values,
 			it._fSources,
 			it._fTradition,
+			it._fType,
 			it._fDegree,
 			it._fStaminaCost,
 			it._fActionType,
