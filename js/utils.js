@@ -3514,6 +3514,7 @@ globalThis.UrlUtil = class {
 	static PG_CONDITIONS_DISEASES = "conditionsdiseases.html";
 	static PG_FEATS = "feats.html";
 	static PG_OPT_FEATURES = "optionalfeatures.html";
+	static PG_COMBAT_METHODS = "combatmethods.html";
 	static PG_PSIONICS = "psionics.html";
 	static PG_RACES = "races.html";
 	static PG_REWARDS = "rewards.html";
@@ -3921,6 +3922,7 @@ UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CONDITIONS_DISEASES] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_FEATS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_OPT_FEATURES] = UrlUtil.URL_TO_HASH_GENERIC;
+UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_COMBAT_METHODS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_PSIONICS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_RACES] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_REWARDS] = UrlUtil.URL_TO_HASH_GENERIC;
@@ -3966,6 +3968,7 @@ UrlUtil.URL_TO_HASH_BUILDER["disease"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_
 UrlUtil.URL_TO_HASH_BUILDER["status"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CONDITIONS_DISEASES];
 UrlUtil.URL_TO_HASH_BUILDER["feat"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_FEATS];
 UrlUtil.URL_TO_HASH_BUILDER["optionalfeature"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_OPT_FEATURES];
+UrlUtil.URL_TO_HASH_BUILDER["combatMethod"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_COMBAT_METHODS];
 UrlUtil.URL_TO_HASH_BUILDER["psionic"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_PSIONICS];
 UrlUtil.URL_TO_HASH_BUILDER["race"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_RACES];
 UrlUtil.URL_TO_HASH_BUILDER["subrace"] = (it) => UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_RACES]({name: `${it.name} (${it.raceName})`, source: it.source});
@@ -4040,6 +4043,7 @@ UrlUtil.PG_TO_NAME[UrlUtil.PG_CLASSES] = "Classes";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_CONDITIONS_DISEASES] = "Conditions & Diseases";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_FEATS] = "Feats";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_OPT_FEATURES] = "Other Options and Features";
+UrlUtil.PG_TO_NAME[UrlUtil.PG_COMBAT_METHODS] = "Combat Methods";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_PSIONICS] = "Psionics";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_RACES] = "Species";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_REWARDS] = "Supernatural Gifts & Rewards";
@@ -4122,6 +4126,7 @@ UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_ONOMANCY_RESONANT] = UrlUtil.PG_OPT_FEATURES;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_RUNE_KNIGHT_RUNE] = UrlUtil.PG_OPT_FEATURES;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_ALCHEMICAL_FORMULA] = UrlUtil.PG_OPT_FEATURES;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_MANEUVER] = UrlUtil.PG_OPT_FEATURES;
+UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_COMBAT_METHOD] = UrlUtil.PG_COMBAT_METHODS;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_ACTION] = UrlUtil.PG_ACTIONS;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_LANGUAGE] = UrlUtil.PG_LANGUAGES;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_BOOK] = UrlUtil.PG_BOOK;
@@ -4158,6 +4163,7 @@ UrlUtil.SUBLIST_PAGES = {
 	[UrlUtil.PG_CONDITIONS_DISEASES]: true,
 	[UrlUtil.PG_FEATS]: true,
 	[UrlUtil.PG_OPT_FEATURES]: true,
+	[UrlUtil.PG_COMBAT_METHODS]: true,
 	[UrlUtil.PG_PSIONICS]: true,
 	[UrlUtil.PG_RACES]: true,
 	[UrlUtil.PG_REWARDS]: true,
@@ -4197,6 +4203,7 @@ UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_FEATS] = ["feat"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_LANGUAGES] = ["language"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_OBJECTS] = ["object"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_OPT_FEATURES] = ["optionalfeature"];
+UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_COMBAT_METHODS] = ["combatMethod"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_REWARDS] = ["reward"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_TRAPS_HAZARDS] = ["trap", "hazard"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_VARIANTRULES] = ["variantrule"];
@@ -7229,6 +7236,11 @@ globalThis.DataUtil = class {
 	static optionalfeature = class extends _DataUtilPropConfigSingleSource {
 		static _PAGE = UrlUtil.PG_OPT_FEATURES;
 		static _FILENAME = "optionalfeatures.json";
+	};
+
+	static combatmethod = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_COMBAT_METHODS;
+		static _FILENAME = "combatmethods.json";
 	};
 
 	static optionalfeatureFluff = class extends _DataUtilPropConfigSingleSource {

@@ -3892,6 +3892,21 @@ class CharacterSheetState {
 		const backgroundName = this._data.background?.name?.toLowerCase();
 
 		this._data.features = this._data.features.map(f => {
+			// Migrate legacy CTM optionalfeatures to new combatMethod shape
+			if (f.featureType === "Optional Feature"
+				&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"))
+				&& !f._entityType) {
+				const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(f);
+				const degree = CharacterSheetClassUtils.getMethodDegree(f);
+				return {
+					...f,
+					_entityType: "combatMethod",
+					tradition: tradCode ? CharacterSheetClassUtils.getTraditionName(tradCode) : f.tradition,
+					degree: degree || f.degree || 0,
+					staminaCost: f.consumes?.name === "Stamina" ? (f.consumes.amount || 1) : (f.staminaCost || 0),
+				};
+			}
+
 			// Already has a featureType, skip
 			if (f.featureType) return f;
 
@@ -20944,8 +20959,8 @@ class CharacterSheetState {
 		}
 
 		// Check if this feature grants a natural weapon and auto-add as attack
-		// Skip combat methods (CTM:) — they are not standalone attacks
-		const isCombatMethod = feature.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"));
+		// Skip combat methods — they are not standalone attacks
+		const isCombatMethod = CharacterSheetClassUtils.isCombatMethod(feature);
 		if (!isCombatMethod && feature.description && NaturalWeaponParser.isNaturalWeapon(feature.description)) {
 			const naturalWeapon = NaturalWeaponParser.parseNaturalWeapon(feature.description, feature.name);
 			if (naturalWeapon) {
@@ -21255,8 +21270,7 @@ class CharacterSheetState {
 		// Skip combat methods (stances) - their effects are handled dynamically by the stance system
 		// (activateStance, _getActiveStanceEffects, getSkillBonusFromStates, etc.)
 		// Registering them as named modifiers would make them active even when the stance is not.
-		const isCombatMethod = feature.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"));
-		if (isCombatMethod) {
+		if (CharacterSheetClassUtils.isCombatMethod(feature)) {
 			return;
 		}
 
@@ -21940,28 +21954,8 @@ class CharacterSheetState {
 	_normalizeCombatTradition (tradition) {
 		if (!tradition) return null;
 
-		const traditionMap = {
-			"AM": "Adamant Mountain",
-			"AK": "Arcane Knight",
-			"BU": "Beast Unity",
-			"BZ": "Biting Zephyr",
-			"CJ": "Comedic Jabs",
-			"EB": "Eldritch Blackguard",
-			"GH": "Gallant Heart",
-			"MG": "Mirror's Glint",
-			"MS": "Mist and Shade",
-			"RC": "Rapid Current",
-			"RE": "Razor's Edge",
-			"SK": "Sanguine Knot",
-			"SS": "Spirited Steed",
-			"TI": "Tempered Iron",
-			"TC": "Tooth and Claw",
-			"UW": "Unending Wheel",
-			"UH": "Unerring Hawk",
-		};
-
-		const nameToCode = Object.entries(traditionMap)
-			.reduce((acc, [code, name]) => ({...acc, [name.toLowerCase()]: code}), {});
+		const traditionMap = CharacterSheetClassUtils.TRADITION_CODE_TO_NAME;
+		const nameToCode = CharacterSheetClassUtils.TRADITION_NAME_TO_CODE;
 
 		if (typeof tradition === "string") {
 			const trimmed = tradition.trim();
@@ -22054,17 +22048,8 @@ class CharacterSheetState {
 			return true;
 		}
 
-		// Check for combat method features - look for any CTM: feature type
-		const hasMethods = this._data.features?.some(f => {
-			if (f.featureType !== "Optional Feature") return false;
-			// Match any CTM feature type (CTM:1RC, CTM:RC, etc.)
-			const result = f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"));
-			if (result) {
-			}
-			return result;
-		}) ?? false;
-
-		return hasMethods;
+		// Check for combat method features via adapter
+		return this._data.features?.some(f => CharacterSheetClassUtils.isCombatMethod(f)) ?? false;
 	}
 
 	// =========================================================================
@@ -22077,8 +22062,7 @@ class CharacterSheetState {
 	 */
 	getCombatMethods () {
 		const methods = this._data.features?.filter(f => {
-			if (f.featureType !== "Optional Feature") return false;
-			return f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"));
+			return CharacterSheetClassUtils.isCombatMethod(f);
 		}) ?? [];
 
 		return methods.map(m => ({
@@ -22215,22 +22199,31 @@ class CharacterSheetState {
 			bonusDamage: null, // e.g. {die: "1d6", condition: "per subsequent hit"}
 		};
 
-		// Extract degree and tradition from optionalFeatureTypes
-		// Format: CTM:1AM (1st degree Adamant Mountain), CTM:3RC (3rd degree Rapid Current)
-		const types = feature.optionalFeatureTypes || [];
-		for (const ft of types) {
-			if (!ft?.startsWith?.("CTM:")) continue;
-			const suffix = ft.slice(4); // Remove "CTM:"
-			// Match degree + tradition code: "1AM", "3RC", "5UW"
-			const degreeMatch = suffix.match(/^(\d)([A-Z]{2,3})$/);
-			if (degreeMatch) {
-				effects.degree = parseInt(degreeMatch[1], 10);
-				effects.tradition = degreeMatch[2];
-				break;
+		// Use structured fields from new combatMethod entity if available
+		const isNewEntity = feature._entityType === "combatMethod" || (feature.tradition !== undefined && feature.degree !== undefined && feature.staminaCost !== undefined);
+
+		if (isNewEntity) {
+			effects.degree = feature.degree || 0;
+			effects.tradition = CharacterSheetClassUtils.getMethodTraditionCode(feature);
+			effects.staminaCost = feature.staminaCost || 0;
+			if (feature.actionType) {
+				effects.actionType = feature.actionType.replace(/\b\w/g, c => c.toUpperCase());
 			}
-			// Also match just tradition code: "AM", "RC"
-			if (/^[A-Z]{2,3}$/.test(suffix) && !effects.tradition) {
-				effects.tradition = suffix;
+		} else {
+			// Legacy: extract degree and tradition from optionalFeatureTypes
+			const types = feature.optionalFeatureTypes || [];
+			for (const ft of types) {
+				if (!ft?.startsWith?.("CTM:")) continue;
+				const suffix = ft.slice(4); // Remove "CTM:"
+				const degreeMatch = suffix.match(/^(\d)([A-Z]{2,3})$/);
+				if (degreeMatch) {
+					effects.degree = parseInt(degreeMatch[1], 10);
+					effects.tradition = degreeMatch[2];
+					break;
+				}
+				if (/^[A-Z]{2,3}$/.test(suffix) && !effects.tradition) {
+					effects.tradition = suffix;
+				}
 			}
 		}
 
@@ -22239,21 +22232,25 @@ class CharacterSheetState {
 		const rawText = feature.description || (feature.entries ? JSON.stringify(feature.entries) : "");
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1").replace(/\s+/g, " ");
 
-		// Parse stamina cost: "(1 Stamina Point)", "(3 Stamina Points)"
-		const staminaMatch = text.match(/\((\d+)\s*Stamina\s*Points?\)/i);
-		if (staminaMatch) {
-			effects.staminaCost = parseInt(staminaMatch[1], 10);
+		// Parse stamina cost: "(1 Stamina Point)", "(3 Stamina Points)" — skip if already set from structured fields
+		if (!effects.staminaCost) {
+			const staminaMatch = text.match(/\((\d+)\s*Stamina\s*Points?\)/i);
+			if (staminaMatch) {
+				effects.staminaCost = parseInt(staminaMatch[1], 10);
+			}
 		}
 
-		// Parse action type from entry prefix
-		if (/Bonus\s*Action/i.test(text)) {
-			effects.actionType = "Bonus Action";
-		} else if (/\bReaction\b/i.test(text)) {
-			effects.actionType = "Reaction";
-		} else if (/\bAction\b.*Stamina/i.test(text) || /Stamina.*\bAction\b/i.test(text)) {
-			effects.actionType = "Action";
-		} else if (/as\s*part\s*of\s*an?\s*attack/i.test(text)) {
-			effects.actionType = "Attack";
+		// Parse action type from entry prefix — skip if already set from structured fields
+		if (!effects.actionType) {
+			if (/Bonus\s*Action/i.test(text)) {
+				effects.actionType = "Bonus Action";
+			} else if (/\bReaction\b/i.test(text)) {
+				effects.actionType = "Reaction";
+			} else if (/\bAction\b.*Stamina/i.test(text) || /Stamina.*\bAction\b/i.test(text)) {
+				effects.actionType = "Action";
+			} else if (/as\s*part\s*of\s*an?\s*attack/i.test(text)) {
+				effects.actionType = "Attack";
+			}
 		}
 
 		// Parse save type

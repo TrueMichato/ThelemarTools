@@ -5820,6 +5820,12 @@ Renderer.tag = class {
 		page = UrlUtil.PG_OPT_FEATURES;
 	};
 
+	static TagCombatmethod = class extends this._TagPipedDisplayTextThird {
+		tagName = "combatmethod";
+		defaultSource = "TGTT";
+		page = UrlUtil.PG_COMBAT_METHODS;
+	};
+
 	static TagPsionic = class extends this._TagPipedDisplayTextThird {
 		tagName = "psionic";
 		defaultSource = Parser.SRC_UATMC;
@@ -6139,6 +6145,7 @@ Renderer.tag = class {
 		new this.TagLegroup(),
 		new this.TagObject(),
 		new this.TagOptfeature(),
+		new this.TagCombatmethod(),
 		new this.TagPsionic(),
 		new this.TagRace(),
 		new this.TagRaceFluff(),

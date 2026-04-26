@@ -2504,6 +2504,7 @@ Parser.CAT_ID_CARD = 53;
 Parser.CAT_ID_ITEM_MASTERY = 54;
 Parser.CAT_ID_FACILITY = 55;
 Parser.CAT_ID_VEHICLE_UPGRADE_OTHER = 56;
+Parser.CAT_ID_COMBAT_METHOD = 57;
 
 Parser.CAT_ID_GROUPS = {
 	"optionalfeature": [
@@ -2587,6 +2588,7 @@ Parser.CAT_ID_TO_FULL[Parser.CAT_ID_FACILITY] = "Facility";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_SKILLS] = "Skill";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_SENSES] = "Sense";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_ITEM_MASTERY] = "Item Mastery";
+Parser.CAT_ID_TO_FULL[Parser.CAT_ID_COMBAT_METHOD] = "Combat Method";
 
 Parser.pageCategoryToFull = function (catId) {
 	return Parser._parse_aToB(Parser.CAT_ID_TO_FULL, catId);
@@ -2648,6 +2650,7 @@ Parser.CAT_ID_TO_PROP[Parser.CAT_ID_DECK] = "deck";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CARD] = "card";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_FACILITY] = "facility";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_SKILLS] = "skill";
+Parser.CAT_ID_TO_PROP[Parser.CAT_ID_COMBAT_METHOD] = "combatMethod";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_SENSES] = "sense";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_ITEM_MASTERY] = "itemMastery";
 

@@ -915,19 +915,10 @@ class CharacterSheetFeatures {
 				let groupKey = f.optionalFeatureTypes?.join("_") || "other";
 
 				// Check if this is a combat method - if so, group by tradition
-				const types = f.optionalFeatureTypes || [];
-				for (const ft of types) {
-					// Match CTM:1AM, CTM:2RC, etc. - extract tradition code
-					const ctmMatch = ft.match(/^CTM:\d([A-Z]{2,3})$/);
-					if (ctmMatch) {
-						groupKey = `CTM:${ctmMatch[1]}`; // Normalize to just "CTM:AM", "CTM:RC", etc.
-						break;
-					}
-					// Also match CTM:AM (tradition-only type)
-					const ctmTradMatch = ft.match(/^CTM:([A-Z]{2,3})$/);
-					if (ctmTradMatch && !ft.match(/^CTM:\d/)) {
-						groupKey = `CTM:${ctmTradMatch[1]}`;
-						break;
+				if (CharacterSheetClassUtils.isCombatMethod(f)) {
+					const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(f);
+					if (tradCode) {
+						groupKey = `CTM:${tradCode}`;
 					}
 				}
 
@@ -1533,34 +1524,14 @@ class CharacterSheetFeatures {
 			"IllMastery": "Combat Masteries",
 		};
 
-		// Combat tradition names (Thelemar homebrew)
-		const traditionNames = {
-			"AM": "Adamant Mountain",
-			"AK": "Arcane Knight",
-			"BU": "Beast Unity",
-			"BZ": "Biting Zephyr",
-			"CJ": "Comedic Jabs",
-			"EB": "Eldritch Blackguard",
-			"GH": "Gallant Heart",
-			"MG": "Mirror's Glint",
-			"MS": "Mist and Shade",
-			"RC": "Rapid Current",
-			"RE": "Razor's Edge",
-			"SK": "Sanguine Knot",
-			"SS": "Spirited Steed",
-			"TI": "Tempered Iron",
-			"TC": "Tooth and Claw",
-			"UW": "Unending Wheel",
-			"UH": "Unerring Hawk",
-		};
-
-		// Check for Combat Methods (CTM:X patterns) - group by tradition
+		// Check for Combat Methods - use ClassUtils for tradition name
 		for (const ft of featureTypes) {
-			const ctmMatch = ft.match(/^CTM:\d([A-Z]{2})$/);
-			if (ctmMatch) {
-				const tradCode = ctmMatch[1];
-				const tradName = traditionNames[tradCode] || tradCode;
-				return `Combat Methods: ${tradName}`;
+			if (!ft?.startsWith?.("CTM:")) continue;
+			const suffix = ft.slice(4);
+			// Strip optional leading degree digit
+			const tradCode = suffix.replace(/^\d/, "");
+			if (tradCode) {
+				return `Combat Methods: ${CharacterSheetClassUtils.getTraditionName(tradCode)}`;
 			}
 		}
 
