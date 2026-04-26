@@ -8341,6 +8341,149 @@ Renderer.optionalfeature = class {
 	}
 };
 
+/** @abstract */
+class _RenderCompactItemUpgradesImplBase extends _RenderCompactImplBase {
+	_page = UrlUtil.PG_ITEM_UPGRADES;
+	_dataProp = "itemUpgrade";
+
+	/* -------------------------------------------- */
+
+	_getCommonHtmlParts (
+		{
+			ent,
+			renderer,
+			opts,
+		},
+	) {
+		return {
+			...super._getCommonHtmlParts({ent, renderer, opts}),
+
+			htmlPtCost: this._getCommonHtmlParts_cost({ent}),
+
+			htmlPtEntries: this._getCommonHtmlParts_entries({ent, renderer}),
+
+			htmlPtUpgradeType: this._getCommonHtmlParts_upgradeType({ent, renderer}),
+
+			htmlPtGemInfo: this._getCommonHtmlParts_gemInfo({ent}),
+		};
+	}
+
+	/* ----- */
+
+	_getCommonHtmlParts_cost ({ent}) {
+		if (!ent.cost) return "";
+		return `<div>{@i Cost: ${ent.cost}}</div>`;
+	}
+
+	/* ----- */
+
+	_getCommonHtmlParts_entries ({ent, renderer}) {
+		return renderer.render({entries: ent.entries}, 1);
+	}
+
+	/* ----- */
+
+	_getCommonHtmlParts_upgradeType ({ent, renderer}) {
+		return `<tr><td colspan="6" class="ve-pb-2">${renderer.render(Renderer.itemUpgrade.getTypeEntry(ent))}</td></tr>`;
+	}
+
+	/* ----- */
+
+	_getCommonHtmlParts_gemInfo ({ent}) {
+		if (!ent.gemName) return "";
+		const parts = [`Gemstone: ${ent.gemName}`];
+		if (ent.craftingDC != null) parts.push(`Empowerment DC: ${ent.craftingDC}`);
+		return `<div>{@i ${parts.join(" | ")}}</div>`;
+	}
+
+	/* -------------------------------------------- */
+
+	_getCompactRenderedString ({ent, renderer, opts}) {
+		const {
+			htmlPtIsExcluded,
+			htmlPtName,
+
+			htmlPtPrerequisites,
+
+			htmlPtCost,
+
+			htmlPtEntries,
+
+			htmlPtUpgradeType,
+
+			htmlPtGemInfo,
+		} = this._getCommonHtmlParts({
+			ent,
+			renderer,
+			opts,
+		});
+
+		const ptHeader = htmlPtPrerequisites || htmlPtCost || htmlPtGemInfo ? `<tr><td colspan="6" class="ve-pb-2 ve-pt-0">
+			${htmlPtPrerequisites}
+			${htmlPtCost}
+			${htmlPtGemInfo}
+		</td></tr>` : "";
+
+		return `
+			${htmlPtIsExcluded}
+			${htmlPtName}
+			${ptHeader}
+			<tr><td colspan="6" class="ve-pb-2 ${ptHeader ? "" : "ve-pt-0"}">
+				${htmlPtEntries}
+			</td></tr>
+			${htmlPtUpgradeType}
+		`;
+	}
+}
+
+class _RenderCompactItemUpgradesImplClassic extends _RenderCompactItemUpgradesImplBase {
+	_style = "classic";
+}
+
+class _RenderCompactItemUpgradesImplOne extends _RenderCompactItemUpgradesImplBase {
+	_style = "one";
+}
+
+Renderer.itemUpgrade = class {
+	static getTypeText (ent) {
+		const types = ent.upgradeType || [];
+		const commonPrefix = types.length > 1 ? MiscUtil.findCommonPrefix(types.map(t => Parser.itemUpgradeTypeToFull(t)), {isRespectWordBoundaries: true}) : "";
+
+		return [
+			commonPrefix.trim() || null,
+			types.map(t => Parser.itemUpgradeTypeToFull(t).substring(commonPrefix.length)).join("/"),
+		]
+			.filter(Boolean).join(" ");
+	}
+
+	static getTypeEntry (ent) {
+		return `{@note Type: ${Renderer.itemUpgrade.getTypeText(ent)}}`;
+	}
+
+	/* -------------------------------------------- */
+
+	static _RENDER_CLASSIC = new _RenderCompactItemUpgradesImplClassic();
+	static _RENDER_ONE = new _RenderCompactItemUpgradesImplOne();
+
+	static getCompactRenderedString (ent, opts) {
+		const styleHint = VetoolsConfig.get("styleSwitcher", "style");
+		switch (styleHint) {
+			case "classic": return this._RENDER_CLASSIC.getCompactRenderedString(ent, opts);
+			case "one": return this._RENDER_ONE.getCompactRenderedString(ent, opts);
+			default: throw new Error(`Unhandled style "${styleHint}"!`);
+		}
+	}
+
+	/* -------------------------------------------- */
+
+	static pGetFluff (ent) {
+		return Renderer.utils.pGetFluff({
+			entity: ent,
+			fluffProp: "itemUpgradeFluff",
+		});
+	}
+};
+
 Renderer.reward = class {
 	static getRewardRenderableEntriesMeta (ent) {
 		const ptSubtitle = [
@@ -16790,6 +16933,7 @@ Renderer.hover = class {
 			case UrlUtil.PG_BACKGROUNDS: return Renderer.background.getCompactRenderedString.bind(Renderer.background);
 			case UrlUtil.PG_FEATS: return Renderer.feat.getCompactRenderedString.bind(Renderer.feat);
 			case UrlUtil.PG_OPT_FEATURES: return Renderer.optionalfeature.getCompactRenderedString.bind(Renderer.optionalfeature);
+			case UrlUtil.PG_ITEM_UPGRADES: return Renderer.itemUpgrade.getCompactRenderedString.bind(Renderer.itemUpgrade);
 			case UrlUtil.PG_PSIONICS: return Renderer.psionic.getCompactRenderedString.bind(Renderer.psionic);
 			case UrlUtil.PG_REWARDS: return Renderer.reward.getCompactRenderedString.bind(Renderer.reward);
 			case UrlUtil.PG_RACES: return it => Renderer.race.getCompactRenderedString(it, {isStatic});
