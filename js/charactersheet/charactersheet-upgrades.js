@@ -691,6 +691,7 @@ class CharacterSheetUpgrades {
 		const effects = {
 			muffled: false,
 			reinforced: false,
+			critDamageReduction: 0,
 			armorProofingTier: 0,
 			spiked: false,
 			breathable: false,
@@ -709,7 +710,7 @@ class CharacterSheetUpgrades {
 			const name = upgrade.name.toLowerCase();
 
 			if (name === "muffled") effects.muffled = true;
-			else if (name === "reinforced") effects.reinforced = true;
+			else if (name === "reinforced") { effects.reinforced = true; effects.critDamageReduction = 3; }
 			else if (name === "spiked") effects.spiked = true;
 			else if (name === "breathable") effects.breathable = true;
 			else if (name === "insulated") effects.insulated = true;
@@ -729,9 +730,42 @@ class CharacterSheetUpgrades {
 	}
 
 	/**
+	 * Get human-readable notes for armor upgrade effects
+	 * @param {object} item - Inventory item with appliedUpgrades
+	 * @returns {Array<{label: string, description: string, type: string}>} Display-ready notes
+	 */
+	static getArmorUpgradeNotes (item) {
+		const flags = this.getArmorUpgradeEffects(item);
+		const notes = [];
+
+		if (flags.muffled) notes.push({label: "Muffled", description: "No disadvantage on Stealth checks", type: "passive"});
+		if (flags.reinforced) notes.push({label: "Reinforced", description: "Reduce critical damage from nonmagical attacks by 3", type: "passive"});
+		if (flags.armorProofingTier >= 1) {
+			const thresholds = {1: "6", 2: "7", 3: "8"};
+			const types = {1: "slashing", 2: "slashing and piercing", 3: "slashing, piercing, and bludgeoning"};
+			notes.push({
+				label: `Armor Proofing (Tier ${flags.armorProofingTier})`,
+				description: `Ignore ${thresholds[flags.armorProofingTier]} or less nonmagical ${types[flags.armorProofingTier]} damage`,
+				type: "passive",
+			});
+		}
+		if (flags.spiked) notes.push({label: "Spiked", description: "Attackers take 1d4 piercing (unarmed/natural weapons)", type: "reactive"});
+		if (flags.breathable) notes.push({label: "Breathable", description: "Advantage on exhaustion saves vs extreme heat", type: "passive"});
+		if (flags.insulated) notes.push({label: "Insulated", description: "Counts as cold weather gear", type: "passive"});
+		if (flags.climbingHarness) notes.push({label: "Climbing Harness", description: "Advantage on Athletics to climb with rope", type: "passive"});
+		if (flags.lockingJoints) notes.push({label: "Locking Joints", description: "Advantage on Athletics vs shove attempts", type: "passive"});
+		if (flags.quickRelease) notes.push({label: "Quick-release Clasps", description: "Doff armor as an action", type: "passive"});
+		if (flags.decorated) notes.push({label: "Decorated", description: "Usable as spellcasting focus (Cleric/Paladin)", type: "passive"});
+		if (flags.runic) notes.push({label: "Runic", description: "Can be imbued with rune magic", type: "passive"});
+		if (flags.burnished) notes.push({label: "Burnished", description: "Advantage on Charisma checks vs certain humanoids (24h or until combat)", type: "passive"});
+
+		return notes;
+	}
+
+	/**
 	 * Get the total bonus adjustments from applied upgrades on an item
 	 * @param {object} item - Inventory item data (with appliedUpgrades array)
-	 * @returns {object} Bonus adjustments {bonusWeaponAttack, bonusWeaponDamage, critThreshold, bonusSpellAttack, bonusSpellSaveDc, damageDieIncrease}
+	 * @returns {object} Bonus adjustments including numeric bonuses, tags, notes, and extra damage
 	 */
 	static getUpgradeEffects (item) {
 		const effects = {
@@ -741,6 +775,13 @@ class CharacterSheetUpgrades {
 			bonusSpellAttack: 0,
 			bonusSpellSaveDc: 0,
 			damageDieIncrease: 0,
+			// Tags: weapon properties granted by upgrades (e.g., "Silvered", "Magical")
+			tags: [],
+			// Notes: free-text mechanical reminders for the player
+			notes: [],
+			// Extra damage dice (e.g., Saw-toothed +1d4 slashing)
+			bonusDamageDice: null,
+			bonusDamageType: null,
 		};
 
 		if (!item?.appliedUpgrades?.length) return effects;
@@ -783,6 +824,38 @@ class CharacterSheetUpgrades {
 			if (name === "arcane") {
 				effects.bonusSpellSaveDc += 1;
 			}
+
+			// Silvered: weapon counts as silvered
+			if (name === "silvered") {
+				effects.tags.push("Silvered");
+			}
+
+			// Magical: weapon counts as magical
+			if (name === "magical") {
+				effects.tags.push("Magical");
+			}
+
+			// Runic (weapon): can be imbued with rune magic
+			if (name === "runic") {
+				effects.tags.push("Runic");
+			}
+
+			// Saw-toothed: +1d4 slashing (no effect vs constructs/undead)
+			if (name === "saw-toothed") {
+				effects.bonusDamageDice = "1d4";
+				effects.bonusDamageType = "slashing";
+				effects.notes.push("Saw-toothed: +1d4 slashing damage (no effect vs constructs/undead)");
+			}
+
+			// Brutal: on max damage die, reroll and add (repeats if max again)
+			if (name === "brutal") {
+				effects.notes.push("Brutal: Reroll max damage dice and add to total (repeats if max rolled again)");
+			}
+
+			// Flanged: sunder armor on hit
+			if (name === "flanged") {
+				effects.notes.push("Flanged: On hit, target\u2019s medium/heavy armor takes cumulative \u22121 AC");
+			}
 		}
 
 		return effects;
@@ -802,7 +875,89 @@ class CharacterSheetUpgrades {
 			charges: gem.chargesMax,
 			chargesCurrent: gem.chargesCurrent,
 			recharge: gem.recharge,
+			usedToday: gem.usedToday || false,
 		}));
+	}
+
+	/**
+	 * Get a concise summary string for a gemstone's mechanical effect
+	 * @param {object} gem - Socketed gemstone data
+	 * @returns {string} One-line summary of the gemstone's effect
+	 */
+	static getGemstoneSummary (gem) {
+		if (!gem?.name) return "";
+		const name = gem.name.toLowerCase();
+		const summaries = {
+			"alchemist": "+2 HP when drinking potion of healing",
+			"mariner": "No disadvantage on underwater weapon attacks",
+			"thief": "1/day: Reroll failed DEX check",
+			"warrior": "Can\u2019t be disarmed while conscious",
+			"arrow-catcher": "Reaction: Impose disadvantage on ranged attack (3 charges, 1d3/dawn)",
+			"bound armor": "Bonus action: Don/doff armor instantly",
+			"bound weapon": "Bonus action: Make weapon disappear/appear",
+			"cat": "1/dawn: 1 hour darkvision 120 ft.",
+			"chaos": "Critical hit triggers Wild Magic Surge",
+			"daywalker": "Unaffected by sunlight with hood drawn",
+			"elemental shield": "Reaction: Reduce chosen damage by 2\u00D7level + CON mod (1 exhaustion)",
+			"featherfoot": "Standing jump = walking speed (1 ft. per ft. cleared)",
+			"knock": "1/dawn: Cast Knock by tapping fist",
+			"nondetection": "Hidden from divination magic and scrying",
+			"serpent": "1/dawn: On hit, CON save or poisoned 1 min",
+			"bastion": "1/dawn: Bonus action 10-ft. force dome (1 min)",
+			"berserker": "1/dawn: Expend Hit Dice on hit, add to damage (take equal damage)",
+			"chalice": "Store up to 2 spell levels; cast stored spells",
+			"death": "Kill humanoid = rises as zombie (1 HP, 1 min)",
+			"hunt": "1/dawn: Mark creature \u226490 ft.; bonus action teleport \u226430 ft. on ranged hit",
+			"journey": "+10 speed; fast pace without Perception penalty; halved food/water",
+			"magebane": "On hit: end \u22643rd level spells; check for 4th+ (3 charges, 1d3/dawn)",
+			"phoenix": "1/dawn: At 0 HP, casts Fireball on you; gain 1d6 HP next turn",
+			"soultrap": "1/dawn: Kill CR \u2265 level = regain 1 spell slot (max level = PB)",
+			"superconductor": "Gains charges from targeted spells; spend for +1d6 force per charge",
+			"warmage": "Fail concentration save = reroll (3 charges; spend slot to recover)",
+			"blood weapon": "Critical hit: Regain HP = damage dealt (not vs undead/constructs)",
+			"displacement": "1/turn: Take weapon damage = teleport 30 ft.",
+			"dragonbane": "Hit dragon: +2d6 damage; STR save or flying speed 0",
+			"earthshaker": "1/dawn: Action Earthquake spell (1 round)",
+			"giant slayer": "Hit giant: +2d6 damage; STR save or prone",
+			"mark/recall": "1/dawn: Mark surface; concentrate 1 min = teleport to mark with up to 5",
+			"overshield": "Gain 8 temp HP at start of each turn",
+			"retribution": "Take damage = advantage on next attack vs that creature type",
+			"wolfsbane": "Sheds moonlight; hit shapechanger: +2d6 radiant; CON save or true form",
+			"force of will": "Can\u2019t be affected by enchantment magic unless you choose",
+			"mime": "Short rest: Copy magic item properties (no fixed bonuses)",
+			"tempest": "1/turn on hit: +1d10 lightning; arcs to 3 creatures within 30 ft.",
+			"volant": "Gain hover flight speed = 2\u00D7 walking speed",
+		};
+		return summaries[name] || (gem.entries?.length ? gem.entries[0]?.toString?.() || "" : "");
+	}
+
+	/**
+	 * Detect gemstones that have passive mechanical effects on calculations
+	 * @param {object} gem - Socketed gemstone data
+	 * @returns {object} Passive effects: {speedBonus, notes[]}
+	 */
+	static getGemstonePassiveEffects (gem) {
+		const effects = {speedBonus: 0, notes: []};
+		if (!gem?.name) return effects;
+		const name = gem.name.toLowerCase();
+
+		if (name === "journey") {
+			effects.speedBonus = 10;
+			effects.notes.push("Journey: +10 speed; fast pace without Perception penalty; halved food/water");
+		}
+		if (name === "overshield") effects.notes.push("Overshield: Gain 8 temp HP at start of each turn");
+		if (name === "featherfoot") effects.notes.push("Featherfoot: Standing jump distance equals walking speed");
+		if (name === "warrior") effects.notes.push("Warrior: Can\u2019t be disarmed while conscious");
+		if (name === "nondetection") effects.notes.push("Nondetection: Hidden from divination and scrying");
+		if (name === "daywalker") effects.notes.push("Daywalker: Unaffected by sunlight with hood drawn");
+		if (name === "force of will") effects.notes.push("Force of Will: Immune to enchantment magic unless you choose");
+		if (name === "volant") effects.notes.push("Volant: Hover flight speed = 2\u00D7 walking speed");
+		if (name === "chaos") effects.notes.push("Chaos: Critical hits trigger Wild Magic Surge");
+		if (name === "retribution") effects.notes.push("Retribution: Advantage on next attack when damaged");
+		if (name === "alchemist") effects.notes.push("Alchemist: +2 HP when drinking healing potions");
+		if (name === "mariner") effects.notes.push("Mariner: No underwater attack disadvantage");
+
+		return effects;
 	}
 
 	/**
