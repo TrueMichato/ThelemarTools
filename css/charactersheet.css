@@ -16449,3 +16449,68 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	color: var(--col-muted, #888);
 	font-weight: 400;
 }
+
+/* ==========================================================================
+   Item Upgrades & Gemstones
+   ========================================================================== */
+
+.charsheet__upgrade-modal,
+.charsheet__empower-modal,
+.charsheet__socket-modal {
+	max-height: 60vh;
+	overflow-y: auto;
+}
+
+.charsheet__upgrade-applied,
+.charsheet__upgrade-gem,
+.charsheet__upgrade-option,
+.charsheet__empower-option,
+.charsheet__socket-option {
+	border-radius: var(--cs-radius-sm, 6px);
+	transition: background-color 0.15s ease;
+}
+
+.charsheet__upgrade-applied:hover,
+.charsheet__upgrade-gem:hover,
+.charsheet__upgrade-option:hover,
+.charsheet__empower-option:hover,
+.charsheet__socket-option:hover {
+	background-color: var(--cs-bg-hover, rgba(99, 102, 241, 0.06));
+}
+
+.charsheet__upgrade-current h5,
+.charsheet__upgrade-gems h5,
+.charsheet__upgrade-available h5,
+.charsheet__empower-rarity .ve-bold {
+	border-bottom: 1px solid var(--cs-border, rgba(99, 102, 241, 0.15));
+	padding-bottom: 0.25rem;
+}
+
+.charsheet__empower-rules {
+	border-left: 3px solid var(--cs-success, #22c55e);
+}
+
+.charsheet__empower-result .alert {
+	border-radius: var(--cs-radius-md, 8px);
+}
+
+.charsheet__item-upgrade-badges,
+.charsheet__item-gem-badges {
+	display: inline-flex;
+	gap: 0.25rem;
+	flex-wrap: wrap;
+}
+
+.charsheet__item-upgrade-badges .badge {
+	font-size: 0.65em;
+	letter-spacing: 0.02em;
+}
+
+.charsheet__item-gem-badges .badge {
+	font-size: 0.65em;
+	letter-spacing: 0.02em;
+}
+
+.charsheet__btn-empower-gem {
+	font-size: 0.75em;
+}
