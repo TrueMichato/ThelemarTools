@@ -7110,6 +7110,8 @@ class CharacterSheetPage {
 			const page = document.querySelector(".charsheet-page");
 			page.setAttribute("data-textsize", size);
 			page.style.setProperty("--cs-text-scale", size / 100);
+			// Also set on document root so modals (which are siblings of .charsheet-page) inherit the scale
+			document.documentElement.style.setProperty("--cs-text-scale", size / 100);
 
 			// Update UI
 			sizeInput.value = size;

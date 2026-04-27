@@ -2366,7 +2366,8 @@ class CharacterSheetQuickBuild {
 							Parser.SRC_XPHB,
 							Parser.SRC_PHB,
 						]);
-						const link = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, opt.name, resolvedSource);
+						const page = CharacterSheetClassUtils.isCombatMethod(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+						const link = CharacterSheetPage.getHoverLink(page, opt.name, resolvedSource);
 						if (typeof link === "string") optName.innerHTML = link;
 						else optName.append(link);
 					} catch (e) {
