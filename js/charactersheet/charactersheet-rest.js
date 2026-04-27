@@ -651,6 +651,11 @@ class CharacterSheetRest {
 				content: `Item charges restored: ${itemList}`,
 			});
 		}
+
+		// Recharge socketed gemstones on long rest (dawn recharge)
+		if (restType === "long") {
+			this._state.rechargeAllGemstones();
+		}
 	}
 
 	/**

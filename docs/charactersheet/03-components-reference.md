@@ -494,6 +494,8 @@ _calculateEncumbrance()
     properties: [],
     ac: 18,
     notes: "",
+    appliedUpgrades: [],     // [{name, source, upgradeType, entries, tier, costPaid}]
+    socketedGemstones: [],   // [{name, source, gemName, entries, charges: {current, max}}]
 }
 ```
 
@@ -635,6 +637,63 @@ _saveLayoutForTab(tabId)
 _loadLayoutForTab(tabId)
 _resetLayout()
 toggleEditMode()
+```
+
+---
+
+## CharacterSheetUpgrades
+
+**File**: `js/charactersheet/charactersheet-upgrades.js`  
+**Lines**: ~560  
+**Role**: Item Upgrades, Gemstone Empowerment & Socketing
+
+### Features
+
+- Upgrade picker modal: browse eligible upgrades by tier, show prerequisites and costs
+- Gold deduction with multi-denomination conversion
+- Gemstone empowerment modal: crafting roll (proficiency + CHA/WIS vs DC)
+- Gemstone socketing: socket/unsocket with 1-gem-per-item limit
+- Mechanical effect calculation from applied upgrades
+- Upgrade badges on item rows
+
+### Key Methods
+
+```javascript
+// Modals
+showUpgradePickerModal(itemId)
+showEmpowermentModal()
+showGemstoneSocketModal(itemId)
+
+// Type detection (static)
+static isWeapon(item)
+static isArmor(item)
+static isShield(item)
+static isSocketable(item)
+
+// Effects (static)
+static getUpgradeEffects(item)      // {bonusWeaponAttack, bonusWeaponDamage, critThresholdReduction, ...}
+static getGemstoneEffects(item)     // [{name, entries, charges, ...}]
+static increaseDamageDie(die, steps) // "1d6" -> "1d8"
+static parseGoldCost(str)           // "1,000 gp (base)" -> 1000
+```
+
+### State Methods (on CharacterSheetState)
+
+```javascript
+applyItemUpgrade(itemId, upgrade, costPaid)
+removeItemUpgrade(itemId, name, source)
+getItemUpgrades(itemId)
+hasItemUpgrade(itemId, name)
+getItemWeaponUpgradeTier(itemId)
+socketGemstone(itemId, gemstone)
+unsocketGemstone(itemId, name)
+getSocketedGemstones(itemId)
+useGemstoneCharge(itemId, name)
+restoreGemstoneCharges(itemId, name, amount)
+rechargeAllGemstones()
+getUpgradedItems()
+deductGold(gpCost)
+getEffectiveItemBonuses(itemId)
 ```
 
 ---

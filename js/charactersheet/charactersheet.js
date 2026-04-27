@@ -15,6 +15,7 @@ import {CharacterSheetCustomAbilities} from "./charactersheet-customabilities.js
 import {CharacterSheetQuickBuild} from "./charactersheet-quickbuild.js";
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
+import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 
 /**
  * Character Sheet - Main Controller
@@ -35,6 +36,7 @@ class CharacterSheetPage {
 		this._notes = null;
 		this._customAbilities = null;
 		this._quickBuild = null;
+		this._upgrades = null;
 
 		this._selCharacter = null;
 		this._currentCharacterId = null;
@@ -52,6 +54,7 @@ class CharacterSheetPage {
 		this._featsData = [];
 		this._optionalFeaturesData = [];
 		this._combatMethodsData = [];
+		this._itemUpgradesData = [];
 		this._skillsData = [];
 		this._conditionsData = [];
 		this._languagesData = [];
@@ -118,6 +121,10 @@ class CharacterSheetPage {
 		} catch (e) { console.error("Failed to init quickBuild:", e); }
 
 		try {
+			this._upgrades = new CharacterSheetUpgrades(this);
+		} catch (e) { console.error("Failed to init upgrades:", e); }
+
+		try {
 			this._respec = new CharacterSheetRespec({page: this, state: this._state});
 			this._respec.init();
 		} catch (e) { console.error("Failed to init respec:", e); }
@@ -127,6 +134,7 @@ class CharacterSheetPage {
 		if (this._combat) this._combat.setItems(this._itemsData);
 		if (this._features) this._features.setFeats(this._featsData);
 		if (this._spells) this._spells.setSpells(this._spellsData);
+		if (this._upgrades) this._upgrades.setUpgrades(this._itemUpgradesData);
 
 
 		// Check for character in URL
@@ -196,7 +204,7 @@ class CharacterSheetPage {
 		// Load all necessary data in parallel
 		// Note: Using loadRawJSON for classes to get classFeature and subclassFeature arrays
 		// Also pre-cache class/subclass features in DataLoader so hover links work properly
-		const [races, classes, backgrounds, spells, items, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, prereleaseData, brewData] = await Promise.all([
+		const [races, classes, backgrounds, spells, items, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, prereleaseData, brewData] = await Promise.all([
 			DataUtil.race.loadJSON(),
 			DataUtil.class.loadRawJSON(),
 			DataUtil.loadJSON("data/backgrounds.json"),
@@ -208,6 +216,7 @@ class CharacterSheetPage {
 			DataUtil.loadJSON("data/conditionsdiseases.json"),
 			DataUtil.loadJSON("data/languages.json"),
 			DataUtil.combatmethod.loadJSON().catch(() => ({combatMethod: []})),
+			DataUtil.itemUpgrade.loadJSON().catch(() => ({itemUpgrade: []})),
 			// Load homebrew/prerelease data
 			PrereleaseUtil.pGetBrewProcessed(),
 			BrewUtil2.pGetBrewProcessed(),
@@ -228,6 +237,7 @@ class CharacterSheetPage {
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
 		this._combatMethodsData = (combatMethods.combatMethod || []).map(m => ({...m, _entityType: "combatMethod"}));
+		this._itemUpgradesData = (itemUpgrades.itemUpgrade || []).map(u => ({...u, _entityType: "itemUpgrade"}));
 		this._skillsData = skills.skill || [];
 		this._conditionsData = conditionsData.condition || [];
 		this._languagesData = languagesData.language || [];
@@ -450,6 +460,12 @@ class CharacterSheetPage {
 		if (brewData.combatMethod?.length) {
 			const brewMethods = MiscUtil.copyFast(brewData.combatMethod).map(m => ({...m, _entityType: "combatMethod"}));
 			this._combatMethodsData = [...this._combatMethodsData, ...brewMethods];
+		}
+
+		// Item upgrades (TGTT gemstones, etc.)
+		if (brewData.itemUpgrade?.length) {
+			const brewUpgrades = MiscUtil.copyFast(brewData.itemUpgrade).map(u => ({...u, _entityType: "itemUpgrade"}));
+			this._itemUpgradesData = [...this._itemUpgradesData, ...brewUpgrades];
 		}
 
 		// Skills (rare but possible)
@@ -9646,6 +9662,8 @@ class CharacterSheetPage {
 		this._optionalFeaturesData?.forEach(of => sourceSet.add(of.source));
 		// Add sources from combat methods
 		this._combatMethodsData?.forEach(cm => sourceSet.add(cm.source));
+		// Add sources from item upgrades
+		this._itemUpgradesData?.forEach(iu => sourceSet.add(iu.source));
 
 		// Also add all standard sources from Parser
 		Object.keys(Parser.SOURCE_JSON_TO_FULL).forEach(src => sourceSet.add(src));
@@ -10446,6 +10464,8 @@ class CharacterSheetPage {
 	getFeats () { return this._featsData; }
 	getOptionalFeatures () { return this._optionalFeaturesData; }
 	getCombatMethodEntities () { return this._combatMethodsData; }
+	getItemUpgrades () { return this._itemUpgradesData; }
+	getUpgradesModule () { return this._upgrades; }
 	getSkillsData () { return this._skillsData; }
 	getConditionsData () { return this._conditionsData; }
 	getState () { return this._state; }
