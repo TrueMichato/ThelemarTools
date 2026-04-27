@@ -87,6 +87,8 @@ class CharacterSheetNpcExporter {
 
 		const methodsBlock = this._getCombatMethodsBlock(state, {npcName});
 		const specialEquipmentBlock = this._getSpecialEquipmentBlock(state);
+		const armorUpgradeBlock = this._getArmorUpgradeBlock(state);
+		const gemstoneNotesBlock = this._getGemstoneNotesBlock(state);
 		const itemUseBlocks = this._getMagicItemUseBlocks(state, {npcName});
 		const spellcastingBlock = this._getSpellcastingBlock(state);
 
@@ -140,6 +142,8 @@ class CharacterSheetNpcExporter {
 				...(customAbilityBlocks.trait || []),
 				...(namedModifierTrait ? [namedModifierTrait] : []),
 				...(specialEquipmentBlock ? [specialEquipmentBlock] : []),
+				...(armorUpgradeBlock ? [armorUpgradeBlock] : []),
+				...(gemstoneNotesBlock ? [gemstoneNotesBlock] : []),
 				...(methodsBlock ? [methodsBlock] : []),
 			],
 			action: [...actions, ...(featureBlocks.action || []), ...(customAbilityBlocks.action || []), ...(itemUseBlocks.action || [])],
@@ -622,6 +626,26 @@ class CharacterSheetNpcExporter {
 		};
 	}
 
+	static _getArmorUpgradeBlock (state) {
+		if (typeof CharacterSheetUpgrades === "undefined") return null;
+		const notes = state.getArmorUpgradeNotes?.() || [];
+		if (!notes.length) return null;
+		return {
+			name: "Armor Upgrades",
+			entries: notes.map(n => `{@b ${n.label}.} ${n.description}`),
+		};
+	}
+
+	static _getGemstoneNotesBlock (state) {
+		if (typeof CharacterSheetUpgrades === "undefined") return null;
+		const passiveNotes = state.getGemstonePassiveNotes?.() || [];
+		if (!passiveNotes.length) return null;
+		return {
+			name: "Gemstone Effects",
+			entries: passiveNotes,
+		};
+	}
+
 	static _getMagicItemUseBlocks (state, {npcName = "The NPC"} = {}) {
 		const out = {action: [], bonus: [], reaction: []};
 		const items = (state.getItems?.() || [])
@@ -775,6 +799,21 @@ class CharacterSheetNpcExporter {
 			if (magicAttackBonus) magicBits.push(`${this._toSignedStr(magicAttackBonus)} attack`);
 			if (magicDamageBonus) magicBits.push(`${this._toSignedStr(magicDamageBonus)} damage`);
 			parts.push(`Magic weapon (${magicBits.join(", ")})`);
+		}
+
+		// Weapon upgrade tags and notes from the source item
+		if (attack._sourceItem && typeof CharacterSheetUpgrades !== "undefined") {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects(attack._sourceItem);
+			if (eff.tags.length) parts.push(eff.tags.join(", "));
+			if (eff.bonusDamageDice) parts.push(`Plus {@damage ${eff.bonusDamageDice}} ${eff.bonusDamageType} damage`);
+			for (const note of eff.notes) parts.push(note);
+
+			// Gemstone effect summary
+			const gems = attack._sourceItem.socketedGemstones || [];
+			for (const gem of gems) {
+				const summary = CharacterSheetUpgrades.getGemstoneSummary(gem);
+				if (summary) parts.push(`Gemstone (${gem.gemName || gem.name}): ${summary}`);
+			}
 		}
 
 		const masteryEffect = state.getMasteryEffectsForAttack?.(attack);

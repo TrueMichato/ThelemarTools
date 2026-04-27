@@ -109,6 +109,33 @@ class CharacterSheetInventory {
 				if (itemId) this._restoreCharge(itemId);
 				return;
 			}
+			if (e.target.closest(".charsheet__gem-use-charge")) {
+				const itemId = _getItemId(e.target);
+				const gemName = e.target.closest(".charsheet__gem-use-charge")?.dataset?.gemName;
+				if (itemId && gemName) {
+					this._state.useGemstoneCharge(itemId, gemName);
+					this._renderItemList();
+				}
+				return;
+			}
+			if (e.target.closest(".charsheet__gem-restore-charge")) {
+				const itemId = _getItemId(e.target);
+				const gemName = e.target.closest(".charsheet__gem-restore-charge")?.dataset?.gemName;
+				if (itemId && gemName) {
+					this._state.restoreGemstoneCharges(itemId, gemName, 1);
+					this._renderItemList();
+				}
+				return;
+			}
+			if (e.target.closest(".charsheet__gem-use-daily")) {
+				const itemId = _getItemId(e.target);
+				const gemName = e.target.closest(".charsheet__gem-use-daily")?.dataset?.gemName;
+				if (itemId && gemName) {
+					this._state.useGemstoneDaily(itemId, gemName);
+					this._renderItemList();
+				}
+				return;
+			}
 			if (e.target.closest(".charsheet__item-use")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._useConsumable(itemId);
@@ -3843,6 +3870,9 @@ class CharacterSheetInventory {
 		const artifactNeedsConfig = isArtifact && item.artifactProperties?.hasRequirements && !this._state.isArtifactFullyConfigured(item.id);
 		const canUpgrade = CharacterSheetUpgrades.isWeapon(item) || CharacterSheetUpgrades.isArmor(item) || CharacterSheetUpgrades.isShield(item);
 		const hasUpgrades = !!(item.appliedUpgrades?.length || item.socketedGemstones?.length);
+		const activeGem = item.socketedGemstones?.[0] || null;
+		const gemHasCharges = activeGem?.chargesMax > 0;
+		const gemIsDaily = activeGem && !gemHasCharges && !activeGem.usedToday;
 
 		// Render item name with a 5etools hover link if it has a source
 		let itemNameHtml = item.name;
@@ -3906,8 +3936,30 @@ class CharacterSheetInventory {
 						${propertiesStr ? `<span class="ve-small ve-muted" title="Properties">${propertiesStr}</span>` : ""}
 						${masteryStr ? `<span class="ve-small text-info" title="Mastery">⚔ ${masteryStr}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}">Charges: <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
-						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => `<span class="badge badge-warning ve-small" title="${u.name}">${u.name}</span>`).join(" ")}</span>` : ""}
-						${item.socketedGemstones?.length ? `<span class="ve-small charsheet__item-gem-badges">${item.socketedGemstones.map(g => `<span class="badge badge-success ve-small" title="${g.name}">💎 ${g.gemName || g.name}</span>`).join(" ")}</span>` : ""}
+						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => {
+							const tooltip = typeof CharacterSheetUpgrades !== "undefined" ? (() => {
+								const eff = CharacterSheetUpgrades.getUpgradeEffects({appliedUpgrades: [u]});
+								const parts = [];
+								if (eff.bonusWeaponAttack) parts.push(`+${eff.bonusWeaponAttack} attack`);
+								if (eff.bonusWeaponDamage) parts.push(`+${eff.bonusWeaponDamage} damage`);
+								if (eff.critThresholdReduction) parts.push(`Crit on ${20 - eff.critThresholdReduction}-20`);
+								if (eff.damageDieIncrease) parts.push(`Damage die +${eff.damageDieIncrease} step`);
+								if (eff.bonusSpellAttack) parts.push(`+${eff.bonusSpellAttack} spell attack`);
+								if (eff.bonusSpellSaveDc) parts.push(`+${eff.bonusSpellSaveDc} spell DC`);
+								if (eff.bonusDamageDice) parts.push(`+${eff.bonusDamageDice} ${eff.bonusDamageType}`);
+								parts.push(...eff.tags);
+								parts.push(...eff.notes);
+								return parts.length ? `${u.name}: ${parts.join("; ")}` : u.name;
+							})() : u.name;
+							return `<span class="badge badge-warning ve-small" title="${tooltip.replace(/"/g, "&quot;")}">${u.name}</span>`;
+						}).join(" ")}</span>` : ""}
+						${item.socketedGemstones?.length ? `<span class="ve-small charsheet__item-gem-badges">${item.socketedGemstones.map(g => {
+							const summary = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneSummary(g) : "";
+							const chargeStr = g.chargesMax ? ` [${g.chargesCurrent ?? g.chargesMax}/${g.chargesMax}]` : "";
+							const usedStr = g.usedToday ? " (Used)" : "";
+							const tooltip = `${g.name}${chargeStr}${usedStr}${summary ? ": " + summary : ""}`;
+							return `<span class="badge badge-success ve-small${g.usedToday ? " charsheet__gem-used" : ""}" title="${tooltip.replace(/"/g, "&quot;")}">💎 ${g.gemName || g.name}${chargeStr}</span>`;
+						}).join(" ")}</span>` : ""}
 					</div>
 					<div class="charsheet__item-actions">
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-qty-decrease" title="Decrease quantity">−</button>
@@ -3919,6 +3971,19 @@ class CharacterSheetInventory {
 							</button>
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-restore-charge" title="Restore 1 charge" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-plus"></span>
+							</button>
+						` : ""}
+						${gemHasCharges ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__gem-use-charge" data-gem-name="${activeGem.name}" title="Use 💎 ${activeGem.gemName || activeGem.name} charge" ${(activeGem.chargesCurrent ?? 0) <= 0 ? "disabled" : ""}>
+								💎 Use
+							</button>
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__gem-restore-charge" data-gem-name="${activeGem.name}" title="Restore 💎 ${activeGem.gemName || activeGem.name} charge" ${(activeGem.chargesCurrent ?? 0) >= activeGem.chargesMax ? "disabled" : ""}>
+								💎 +
+							</button>
+						` : ""}
+						${activeGem && !gemHasCharges ? `
+							<button type="button" class="ve-btn ve-btn-xs ${activeGem.usedToday ? "ve-btn-default charsheet__gem-used" : "ve-btn-success"} charsheet__gem-use-daily" data-gem-name="${activeGem.name}" title="${activeGem.usedToday ? activeGem.name + " (used, resets at dawn)" : "Use " + (activeGem.gemName || activeGem.name) + " ability"}" ${activeGem.usedToday ? "disabled" : ""}>
+								💎 ${activeGem.usedToday ? "Used" : "Activate"}
 							</button>
 						` : ""}
 						${canEquip ? `

@@ -16514,3 +16514,14 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__btn-empower-gem {
 	font-size: 0.75em;
 }
+
+.charsheet__gem-used {
+	opacity: 0.5;
+	text-decoration: line-through;
+}
+
+.charsheet__attack-upgrade-note {
+	font-size: 0.75em;
+	padding-left: 0.5rem;
+	line-height: 1.3;
+}

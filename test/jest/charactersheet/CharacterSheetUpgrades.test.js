@@ -891,4 +891,360 @@ describe("Item Upgrades", () => {
 			expect(state.hasArmorStealthDisadvantage()).toBe(true);
 		});
 	});
+
+	// ==========================================================================
+	// Weapon Upgrade Notes & Tags
+	// ==========================================================================
+	describe("Weapon Upgrade Notes & Tags", () => {
+		it("should return Silvered tag", () => {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects({
+				appliedUpgrades: [{name: "Silvered", source: "TCAH"}],
+			});
+			expect(eff.tags).toContain("Silvered");
+		});
+
+		it("should return Magical tag", () => {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects({
+				appliedUpgrades: [{name: "Magical", source: "TCAH"}],
+			});
+			expect(eff.tags).toContain("Magical");
+		});
+
+		it("should return Runic tag for weapon", () => {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects({
+				appliedUpgrades: [{name: "Runic", source: "TCAH"}],
+			});
+			expect(eff.tags).toContain("Runic");
+		});
+
+		it("should return Saw-toothed bonus damage and note", () => {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects({
+				appliedUpgrades: [{name: "Saw-toothed", source: "TCAH"}],
+			});
+			expect(eff.bonusDamageDice).toBe("1d4");
+			expect(eff.bonusDamageType).toBe("slashing");
+			expect(eff.notes).toHaveLength(1);
+			expect(eff.notes[0]).toContain("Saw-toothed");
+		});
+
+		it("should return Brutal note", () => {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects({
+				appliedUpgrades: [{name: "Brutal", source: "TCAH"}],
+			});
+			expect(eff.notes).toHaveLength(1);
+			expect(eff.notes[0]).toContain("Brutal");
+			expect(eff.notes[0]).toContain("Reroll max");
+		});
+
+		it("should return Flanged note", () => {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects({
+				appliedUpgrades: [{name: "Flanged", source: "TCAH"}],
+			});
+			expect(eff.notes).toHaveLength(1);
+			expect(eff.notes[0]).toContain("Flanged");
+			expect(eff.notes[0]).toContain("AC");
+		});
+
+		it("should combine tags and notes from multiple upgrades", () => {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects({
+				appliedUpgrades: [
+					{name: "Silvered", source: "TCAH"},
+					{name: "Balanced", source: "TCAH"},
+					{name: "Brutal", source: "TCAH"},
+				],
+			});
+			expect(eff.tags).toContain("Silvered");
+			expect(eff.bonusWeaponAttack).toBe(1);
+			expect(eff.notes).toHaveLength(1);
+		});
+
+		it("should return empty tags/notes for pure bonus upgrades", () => {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects({
+				appliedUpgrades: [{name: "Balanced", source: "TCAH"}],
+			});
+			expect(eff.tags).toHaveLength(0);
+			expect(eff.notes).toHaveLength(0);
+			expect(eff.bonusDamageDice).toBeNull();
+		});
+	});
+
+	// ==========================================================================
+	// Armor Upgrade Notes
+	// ==========================================================================
+	describe("Armor Upgrade Notes", () => {
+		it("should return notes for each armor upgrade type", () => {
+			const notes = CharacterSheetUpgrades.getArmorUpgradeNotes({
+				appliedUpgrades: [
+					{name: "Muffled", source: "TCAH"},
+					{name: "Reinforced", source: "TCAH"},
+					{name: "Spiked", source: "TCAH"},
+				],
+			});
+			expect(notes).toHaveLength(3);
+			expect(notes.find(n => n.label === "Muffled")).toBeTruthy();
+			expect(notes.find(n => n.label === "Reinforced")).toBeTruthy();
+			expect(notes.find(n => n.label === "Spiked")).toBeTruthy();
+		});
+
+		it("should return Armor Proofing note with tier info", () => {
+			const notes = CharacterSheetUpgrades.getArmorUpgradeNotes({
+				appliedUpgrades: [{name: "Armor Proofing: 2nd Tier", source: "TCAH"}],
+			});
+			expect(notes).toHaveLength(1);
+			expect(notes[0].label).toContain("Tier 2");
+			expect(notes[0].description).toContain("7");
+		});
+
+		it("should return empty notes for item with no upgrades", () => {
+			const notes = CharacterSheetUpgrades.getArmorUpgradeNotes({});
+			expect(notes).toHaveLength(0);
+		});
+
+		it("should return Breathable note", () => {
+			const notes = CharacterSheetUpgrades.getArmorUpgradeNotes({
+				appliedUpgrades: [{name: "Breathable", source: "TCAH"}],
+			});
+			expect(notes).toHaveLength(1);
+			expect(notes[0].description).toContain("heat");
+		});
+
+		it("should return Insulated note", () => {
+			const notes = CharacterSheetUpgrades.getArmorUpgradeNotes({
+				appliedUpgrades: [{name: "Insulated", source: "TCAH"}],
+			});
+			expect(notes).toHaveLength(1);
+			expect(notes[0].description).toContain("cold weather");
+		});
+
+		it("should return Quick-release Clasps note", () => {
+			const notes = CharacterSheetUpgrades.getArmorUpgradeNotes({
+				appliedUpgrades: [{name: "Quick-release Clasps", source: "TCAH"}],
+			});
+			expect(notes).toHaveLength(1);
+			expect(notes[0].description).toContain("Doff");
+		});
+
+		it("should return Decorated note", () => {
+			const notes = CharacterSheetUpgrades.getArmorUpgradeNotes({
+				appliedUpgrades: [{name: "Decorated", source: "TCAH"}],
+			});
+			expect(notes).toHaveLength(1);
+			expect(notes[0].description).toContain("focus");
+		});
+	});
+
+	// ==========================================================================
+	// Reinforced Crit Damage Reduction
+	// ==========================================================================
+	describe("Reinforced Crit Damage Reduction", () => {
+		it("should return critDamageReduction from Reinforced", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Reinforced", source: "TCAH"}],
+			});
+			expect(effects.critDamageReduction).toBe(3);
+		});
+
+		it("should return 0 for no Reinforced", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Muffled", source: "TCAH"}],
+			});
+			expect(effects.critDamageReduction).toBe(0);
+		});
+
+		it("should expose getCritDamageReduction on state", () => {
+			expect(state.getCritDamageReduction()).toBe(0);
+
+			state._data.ac.armor = {
+				ac: 18,
+				type: "heavy",
+				name: "Plate",
+				appliedUpgrades: [{name: "Reinforced", source: "TCAH"}],
+			};
+
+			expect(state.getCritDamageReduction()).toBe(3);
+		});
+	});
+
+	// ==========================================================================
+	// Gemstone Summaries
+	// ==========================================================================
+	describe("Gemstone Summaries", () => {
+		it("should return summary for known gemstone", () => {
+			const summary = CharacterSheetUpgrades.getGemstoneSummary({name: "Journey"});
+			expect(summary).toContain("+10 speed");
+		});
+
+		it("should return summary for Warrior gemstone", () => {
+			const summary = CharacterSheetUpgrades.getGemstoneSummary({name: "Warrior"});
+			expect(summary).toContain("disarmed");
+		});
+
+		it("should return summary for Tempest gemstone", () => {
+			const summary = CharacterSheetUpgrades.getGemstoneSummary({name: "Tempest"});
+			expect(summary).toContain("lightning");
+		});
+
+		it("should return empty string for null gem", () => {
+			expect(CharacterSheetUpgrades.getGemstoneSummary(null)).toBe("");
+		});
+
+		it("should fall back to entries for unknown gemstone", () => {
+			const summary = CharacterSheetUpgrades.getGemstoneSummary({name: "Custom Gem", entries: ["Does something cool"]});
+			expect(summary).toBe("Does something cool");
+		});
+	});
+
+	// ==========================================================================
+	// Gemstone Passive Effects
+	// ==========================================================================
+	describe("Gemstone Passive Effects", () => {
+		it("should detect Journey speed bonus", () => {
+			const effects = CharacterSheetUpgrades.getGemstonePassiveEffects({name: "Journey"});
+			expect(effects.speedBonus).toBe(10);
+			expect(effects.notes).toHaveLength(1);
+		});
+
+		it("should detect Overshield passive note", () => {
+			const effects = CharacterSheetUpgrades.getGemstonePassiveEffects({name: "Overshield"});
+			expect(effects.notes[0]).toContain("8 temp HP");
+		});
+
+		it("should detect Warrior passive note", () => {
+			const effects = CharacterSheetUpgrades.getGemstonePassiveEffects({name: "Warrior"});
+			expect(effects.notes[0]).toContain("disarmed");
+		});
+
+		it("should return no effects for unknown gem", () => {
+			const effects = CharacterSheetUpgrades.getGemstonePassiveEffects({name: "Random Custom"});
+			expect(effects.speedBonus).toBe(0);
+			expect(effects.notes).toHaveLength(0);
+		});
+	});
+
+	// ==========================================================================
+	// Gemstone Speed Bonus (Journey)
+	// ==========================================================================
+	describe("Gemstone Speed Bonus", () => {
+		it("should add Journey gemstone speed to walk speed", () => {
+			state.setSpeed("walk", 30);
+			const baseSpeed = state.getWalkSpeed();
+
+			state.addItem({name: "Armor", source: "PHB", type: "LA", armor: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Journey", source: "TGTT", gemName: "Star Ruby"});
+
+			expect(state.getGemstoneSpeedBonus()).toBe(10);
+			expect(state.getWalkSpeed()).toBe(baseSpeed + 10);
+		});
+
+		it("should not add speed for unequipped items", () => {
+			state.setSpeed("walk", 30);
+			state.addItem({name: "Armor", source: "PHB", type: "LA", armor: true}, 1, false);
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Journey", source: "TGTT", gemName: "Star Ruby"});
+
+			expect(state.getGemstoneSpeedBonus()).toBe(0);
+		});
+	});
+
+	// ==========================================================================
+	// Gemstone Daily Tracking
+	// ==========================================================================
+	describe("Gemstone Daily Tracking", () => {
+		it("should mark gemstone as used today", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true});
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Cat", source: "TGTT", gemName: "Chrysoberyl"});
+
+			const result = state.useGemstoneDaily(itemId, "Cat");
+			expect(result.success).toBe(true);
+
+			const gems = state.getSocketedGemstones(itemId);
+			expect(gems[0].usedToday).toBe(true);
+		});
+
+		it("should prevent double use", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true});
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Cat", source: "TGTT", gemName: "Chrysoberyl"});
+
+			state.useGemstoneDaily(itemId, "Cat");
+			const result = state.useGemstoneDaily(itemId, "Cat");
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("Already used");
+		});
+
+		it("should reset daily use on recharge", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true});
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Cat", source: "TGTT", gemName: "Chrysoberyl"});
+
+			state.useGemstoneDaily(itemId, "Cat");
+			expect(state.getSocketedGemstones(itemId)[0].usedToday).toBe(true);
+
+			state.rechargeAllGemstones();
+			expect(state.getSocketedGemstones(itemId)[0].usedToday).toBe(false);
+		});
+
+		it("should reset daily use manually", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true});
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Cat", source: "TGTT", gemName: "Chrysoberyl"});
+
+			state.useGemstoneDaily(itemId, "Cat");
+			state.resetGemstoneDaily(itemId, "Cat");
+			expect(state.getSocketedGemstones(itemId)[0].usedToday).toBe(false);
+		});
+	});
+
+	// ==========================================================================
+	// Armor Upgrade Notes on State
+	// ==========================================================================
+	describe("Armor Upgrade Notes on State", () => {
+		it("should return armor upgrade notes from state", () => {
+			state._data.ac.armor = {
+				ac: 15,
+				type: "medium",
+				name: "Brigandine",
+				appliedUpgrades: [
+					{name: "Muffled", source: "TCAH"},
+					{name: "Spiked", source: "TCAH"},
+				],
+			};
+
+			const notes = state.getArmorUpgradeNotes();
+			expect(notes).toHaveLength(2);
+			expect(notes.find(n => n.label === "Muffled")).toBeTruthy();
+			expect(notes.find(n => n.label === "Spiked")).toBeTruthy();
+		});
+
+		it("should return empty notes for no armor", () => {
+			const notes = state.getArmorUpgradeNotes();
+			expect(notes).toHaveLength(0);
+		});
+	});
+
+	// ==========================================================================
+	// Gemstone Passive Notes on State
+	// ==========================================================================
+	describe("Gemstone Passive Notes on State", () => {
+		it("should return passive notes from equipped items with gemstones", () => {
+			state.addItem({name: "Armor", source: "PHB", type: "LA", armor: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Overshield", source: "TGTT", gemName: "Black Opal"});
+
+			const notes = state.getGemstonePassiveNotes();
+			expect(notes.length).toBeGreaterThan(0);
+			expect(notes[0]).toContain("temp HP");
+		});
+
+		it("should not return notes from unequipped items", () => {
+			state.addItem({name: "Armor", source: "PHB", type: "LA", armor: true}, 1, false);
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Overshield", source: "TGTT", gemName: "Black Opal"});
+
+			const notes = state.getGemstonePassiveNotes();
+			expect(notes).toHaveLength(0);
+		});
+	});
 });

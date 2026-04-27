@@ -6907,6 +6907,42 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Get critical damage reduction from armor upgrades (Reinforced)
+	 * @returns {number} Amount to reduce critical hit damage from nonmagical attacks
+	 */
+	getCritDamageReduction () {
+		const armor = this._data.ac.armor;
+		if (!armor || typeof CharacterSheetUpgrades === "undefined") return 0;
+		return CharacterSheetUpgrades.getArmorUpgradeEffects(armor).critDamageReduction || 0;
+	}
+
+	/**
+	 * Get all armor upgrade notes for display in the AC/equipment area
+	 * @returns {Array<{label: string, description: string, type: string}>}
+	 */
+	getArmorUpgradeNotes () {
+		const armor = this._data.ac.armor;
+		if (!armor || typeof CharacterSheetUpgrades === "undefined") return [];
+		return CharacterSheetUpgrades.getArmorUpgradeNotes(armor);
+	}
+
+	/**
+	 * Get speed bonus from socketed gemstones (e.g., Journey gem: +10 speed)
+	 * @returns {number} Total speed bonus from gemstones
+	 */
+	getGemstoneSpeedBonus () {
+		if (typeof CharacterSheetUpgrades === "undefined") return 0;
+		let bonus = 0;
+		for (const invItem of this._data.inventory) {
+			if (!invItem.equipped) continue;
+			for (const gem of (invItem.item?.socketedGemstones || [])) {
+				if (gem.name?.toLowerCase() === "journey") bonus += 10;
+			}
+		}
+		return bonus;
+	}
+
+	/**
 	 * Get speed penalty from armor STR requirement not being met
 	 * @returns {number} Speed penalty in feet (0 or -10)
 	 */
@@ -7006,7 +7042,8 @@ class CharacterSheetState {
 		const stateBonus = this.getSpeedBonusFromStates();
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
-		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
+		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
+		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
 		const walkMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
 		const exhaustionSpeedPenalty = this._getExhaustionSpeedPenalty();
 		const walk = Math.max(0, Math.floor(rawWalk * walkMultiplier * speedMultiplier) - exhaustionSpeedPenalty);
@@ -7077,8 +7114,9 @@ class CharacterSheetState {
 		const stateBonus = this.getSpeedBonusFromStates();
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
+		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
 		const armorPenalty = this.getArmorStrengthPenalty(); // -10 if STR requirement not met
-		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + armorPenalty;
+		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + armorPenalty;
 		return Math.max(0, Math.floor(raw * this.getSpeedMultiplierFromConditions()) - this._getExhaustionSpeedPenalty());
 	}
 
@@ -19723,8 +19761,53 @@ class CharacterSheetState {
 				if (gem.recharge === "dawn" && gem.chargesMax !== null) {
 					gem.chargesCurrent = gem.chargesMax;
 				}
+				// Reset daily use tracking on dawn/long rest
+				if (gem.usedToday) gem.usedToday = false;
 			}
 		}
+	}
+
+	/**
+	 * Mark a gemstone's daily ability as used
+	 * @param {string} itemId - The item ID
+	 * @param {string} gemstoneName - The gemstone power name
+	 * @returns {object} {success: boolean, error?: string}
+	 */
+	useGemstoneDaily (itemId, gemstoneName) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
+		if (!gem) return {success: false, error: "Gemstone not found"};
+		if (gem.usedToday) return {success: false, error: "Already used today"};
+		gem.usedToday = true;
+		return {success: true};
+	}
+
+	/**
+	 * Reset a gemstone's daily use (e.g., manually or on dawn)
+	 * @param {string} itemId - The item ID
+	 * @param {string} gemstoneName - The gemstone power name
+	 */
+	resetGemstoneDaily (itemId, gemstoneName) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
+		if (gem) gem.usedToday = false;
+	}
+
+	/**
+	 * Get all passive notes from socketed gemstones on equipped items
+	 * @returns {Array<string>} Array of passive effect note strings
+	 */
+	getGemstonePassiveNotes () {
+		if (typeof CharacterSheetUpgrades === "undefined") return [];
+		const notes = [];
+		for (const invItem of this._data.inventory) {
+			if (!invItem.equipped || !invItem.item?.socketedGemstones?.length) continue;
+			for (const gem of invItem.item.socketedGemstones) {
+				const passive = CharacterSheetUpgrades.getGemstonePassiveEffects(gem);
+				notes.push(...passive.notes);
+			}
+		}
+		return notes;
 	}
 
 	/**
