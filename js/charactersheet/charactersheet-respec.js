@@ -840,17 +840,25 @@ class CharacterSheetRespec {
 		});
 
 		const classData = this._page.getClasses()?.find(c => c.name === history.class?.name && c.source === history.class?.source);
+
+		// Extract CTM feature types from class optional feature progression
+		const classAllowedTypes = [];
+		if (classData?.optionalfeatureProgression) {
+			for (const prog of classData.optionalfeatureProgression) {
+				if (prog.featureType?.some(ft => ft.startsWith("CTM:"))) {
+					classAllowedTypes.push(...prog.featureType.filter(ft => ft.startsWith("CTM:")));
+				}
+			}
+		}
 		let allTraditions = CharacterSheetClassUtils.getAvailableTraditionsForClass(
 			this._page.getOptionalFeatures() || [],
-			[],
+			classAllowedTypes,
 			classData?.name || history.class?.name,
 			this._page.getClassFeatures() || [],
 		);
-		if (!allTraditions.length && history.choices?.combatTraditions?.length) {
-			allTraditions = history.choices.combatTraditions.map(code => ({
-				code,
-				name: CharacterSheetClassUtils.getTraditionName(code),
-			}));
+		// If no traditions found from class data, show all traditions as fallback
+		if (!allTraditions.length) {
+			allTraditions = CharacterSheetClassUtils.getAllTraditions();
 		}
 
 		const classFeatures = this._page.getClassFeatures() || [];
@@ -873,13 +881,30 @@ class CharacterSheetRespec {
 		modalInner.append(list);
 		allTraditions.forEach(trad => {
 			const isSelected = selectedTraditions.includes(trad.code);
+			const desc = CharacterSheetClassUtils.getTraditionDescription?.(trad.code) || "";
 			const label = e_({outer: `
-				<label style="display:flex; align-items:center; cursor:pointer; padding:4px 8px; border:1px solid var(--rgb-border-grey); border-radius:4px; ${isSelected ? "background: var(--rgb-bg-highlight);" : ""}">
+				<label style="display:flex; align-items:center; cursor:pointer; padding:4px 8px; border:1px solid var(--rgb-border-grey); border-radius:4px; ${isSelected ? "background: var(--rgb-bg-highlight);" : ""}" title="${desc}">
 					<input type="checkbox" value="${trad.code}" ${isSelected ? "checked" : ""} style="margin-right:6px;">
-					<span>${trad.name}</span>
+					<span class="respec-trad-name"></span>
 					<span class="ve-small text-muted ml-1">(${trad.code})</span>
 				</label>
 			`});
+
+			// Add hover link for the tradition name
+			const tradNameEl = label.querySelector(".respec-trad-name");
+			try {
+				const tradLink = CharacterSheetPage.getHoverLink(
+					UrlUtil.PG_VARIANTRULES,
+					"Combat Traditions",
+					Parser.SRC_TGTT || "TGTT",
+					null,
+					trad.name,
+				);
+				if (typeof tradLink === "string") tradNameEl.innerHTML = tradLink;
+				else tradNameEl.append(tradLink);
+			} catch (e) {
+				tradNameEl.textContent = trad.name;
+			}
 
 			label.querySelector("input").addEventListener("change", (evt) => {
 				if (evt.target.checked) {
@@ -945,10 +970,10 @@ class CharacterSheetRespec {
 		);
 		let selectedMasteries = [...(history.choices?.weaponMasteries || [])];
 
-		modalInner.append(e_({outer: `
+		modalInner.append(e_({outer: `<div>
 			<p class="ve-muted mb-2">Choose up to ${requiredMasteries} weapon masteries for this level history entry.</p>
 			<div class="ve-small ve-muted mb-2">Selected: <span id="respec-mastery-count">${selectedMasteries.length}</span>/${requiredMasteries}</div>
-		`}));
+		</div>`}));
 
 		const weaponsWithMastery = (this._page.getItems() || []).filter(item => {
 			if (!item._isBaseItem) return false;
@@ -977,9 +1002,19 @@ class CharacterSheetRespec {
 				const label = e_({outer: `
 					<label style="display:flex; align-items:center; cursor:pointer; padding:4px 8px; border:1px solid var(--rgb-border-grey); border-radius:4px; ${isSelected ? "background: var(--rgb-bg-highlight);" : ""}">
 						<input type="checkbox" value="${weaponKey}" ${isSelected ? "checked" : ""} style="margin-right:6px;">
-						<span>${weapon.name}</span>
+						<span class="respec-weapon-name"></span>
 					</label>
 				`});
+
+				// Add hover link for the weapon name
+				const weaponNameEl = label.querySelector(".respec-weapon-name");
+				try {
+					const weaponLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEMS, weapon.name, weapon.source);
+					if (typeof weaponLink === "string") weaponNameEl.innerHTML = weaponLink;
+					else weaponNameEl.append(weaponLink);
+				} catch (e) {
+					weaponNameEl.textContent = weapon.name;
+				}
 
 				label.querySelector("input").addEventListener("change", (evt) => {
 					if (evt.target.checked) {
@@ -1057,6 +1092,13 @@ class CharacterSheetRespec {
 
 		// Get all available optional features of this type
 		const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
+
+		// Merge combat method entities for CTM types
+		if (featureTypeKey.startsWith("CTM:")) {
+			const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
+			allOptFeaturesRaw.push(...combatMethodEntities);
+		}
+
 		const classData = this._page.getClasses()?.find(c =>
 			c.name === history.class?.name && c.source === history.class?.source,
 		);
@@ -1105,12 +1147,24 @@ class CharacterSheetRespec {
 					<label style="display:flex; align-items:center; cursor:pointer; padding:6px 8px; border-bottom:1px solid var(--rgb-border-grey); ${isSelected ? "background: var(--rgb-bg-highlight);" : ""} ${isOtherLevel && !isCurrentLevel ? "opacity:0.5;" : ""}">
 						<input type="checkbox" ${isSelected ? "checked" : ""} ${isOtherLevel && !isCurrentLevel ? "disabled" : ""} style="margin-right:8px;">
 						<span>
-							<strong>${opt.name}</strong>
+							<strong class="respec-opt-name"></strong>
 							${opt.source ? `<span class="text-muted ve-small ml-1">[${Parser.sourceJsonToAbv(opt.source)}]</span>` : ""}
 							${isOtherLevel && !isCurrentLevel ? `<span class="text-muted ve-small ml-1">(known from another level)</span>` : ""}
 						</span>
 					</label>
 				`});
+
+				// Add hover link for the feature name
+				const nameEl = item.querySelector(".respec-opt-name");
+				try {
+					const isCM = CharacterSheetClassUtils.isCombatMethod(opt);
+					const page = isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+					const link = CharacterSheetPage.getHoverLink(page, opt.name, opt.source);
+					if (typeof link === "string") nameEl.innerHTML = link;
+					else nameEl.append(link);
+				} catch (e) {
+					nameEl.textContent = opt.name;
+				}
 
 				item.querySelector("input").addEventListener("change", (evt) => {
 					if (evt.target.checked) {
@@ -1224,7 +1278,9 @@ class CharacterSheetRespec {
 			"AI": "Artificer Infusions",
 			"RN": "Rune Knight Runes",
 		};
-		return typeNames[typeKey] || `Optional Features (${typeKey})`;
+		if (typeNames[typeKey]) return typeNames[typeKey];
+		if (typeKey.startsWith("CTM:")) return "Combat Methods";
+		return `Optional Features (${typeKey})`;
 	}
 
 	/**

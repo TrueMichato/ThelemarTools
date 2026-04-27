@@ -11286,6 +11286,15 @@ body.is-charsheet-page .ve-ui-modal__scroller::-webkit-scrollbar-thumb:hover {
 	background: var(--cs-accent, #8b5cf6);
 }
 
+/* Character sheet text scale for modals and popups */
+body.is-charsheet-page .ve-ui-modal__inner {
+	font-size: calc(1rem * var(--cs-text-scale, 1));
+}
+
+body.is-charsheet-page .hwin__wrp-table {
+	font-size: calc(1rem * var(--cs-text-scale, 1));
+}
+
 /* Modal Form Controls */
 body.is-charsheet-page .ve-ui-modal__inner .ve-form-control {
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.3));
@@ -11549,6 +11558,23 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active,
 body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hover,
 .charsheet__modal-filter-btn.active:hover {
 	box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4) !important;
+}
+
+.charsheet__modal-filter-btn--sm {
+	font-size: 0.75rem;
+	padding: 2px 8px;
+}
+
+.charsheet__modal-quick-filters--sub {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-top: 2px;
+}
+
+.charsheet__modal-filter-section-label {
+	margin-top: 6px;
+	margin-bottom: 2px;
 }
 
 /* ========================================================================
