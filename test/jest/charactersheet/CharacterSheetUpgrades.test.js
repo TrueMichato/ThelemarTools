@@ -1119,6 +1119,85 @@ describe("Item Upgrades", () => {
 			expect(effects.speedBonus).toBe(0);
 			expect(effects.notes).toHaveLength(0);
 		});
+
+		it("should detect Volant flight speed sentinel", () => {
+			const effects = CharacterSheetUpgrades.getGemstonePassiveEffects({name: "Volant"});
+			expect(effects.flightSpeed).toBe(-1);
+			expect(effects.notes[0]).toContain("flight");
+		});
+
+		it("should return flightSpeed 0 for non-Volant gems", () => {
+			const effects = CharacterSheetUpgrades.getGemstonePassiveEffects({name: "Journey"});
+			expect(effects.flightSpeed).toBe(0);
+		});
+
+		// Passive gems (always-on effects)
+		it.each([
+			["Featherfoot", "jump"],
+			["Nondetection", "divination"],
+			["Daywalker", "sunlight"],
+			["Force of Will", "enchantment"],
+			["Chaos", "Wild Magic"],
+			["Retribution", "advantage"],
+			["Alchemist", "+2 HP"],
+			["Mariner", "underwater"],
+			["Blood Weapon", "Critical hit"],
+			["Wolfsbane", "moonlight"],
+			["Dragonbane", "dragon"],
+			["Giant Slayer", "Large"],
+			["Superconductor", "charges"],
+			["Tempest", "lightning"],
+		])("should return passive note for %s containing '%s'", (gemName, keyword) => {
+			const effects = CharacterSheetUpgrades.getGemstonePassiveEffects({name: gemName});
+			expect(effects.notes).toHaveLength(1);
+			expect(effects.notes[0].toLowerCase()).toContain(keyword.toLowerCase());
+		});
+
+		// Active/charge gems (daily/limited use)
+		it.each([
+			["Thief", "1/day"],
+			["Arrow-catcher", "3 charges"],
+			["Bound Armor", "don/doff"],
+			["Bound Weapon", "disappear"],
+			["Cat", "darkvision"],
+			["Elemental Shield", "reduce"],
+			["Knock", "Knock"],
+			["Serpent", "poisoned"],
+			["Bastion", "dome"],
+			["Berserker", "Hit Dice"],
+			["Chalice", "spell"],
+			["Death", "zombie"],
+			["Hunt", "mark"],
+			["Magebane", "end"],
+			["Phoenix", "0 HP"],
+			["Soultrap", "spell slot"],
+			["Warmage", "concentration"],
+			["Displacement", "teleport"],
+			["Earthshaker", "Earthquake"],
+			["Mark/Recall", "teleport"],
+			["Mime", "magic item"],
+		])("should return active note for %s containing '%s'", (gemName, keyword) => {
+			const effects = CharacterSheetUpgrades.getGemstonePassiveEffects({name: gemName});
+			expect(effects.notes).toHaveLength(1);
+			expect(effects.notes[0].toLowerCase()).toContain(keyword.toLowerCase());
+		});
+
+		it("should return notes for all 39 gemstones", () => {
+			const allGems = [
+				"Alchemist", "Mariner", "Thief", "Warrior",
+				"Arrow-catcher", "Bound Armor", "Bound Weapon", "Cat", "Chaos",
+				"Daywalker", "Elemental Shield", "Featherfoot", "Knock", "Nondetection", "Serpent",
+				"Bastion", "Berserker", "Chalice", "Death", "Hunt", "Journey",
+				"Magebane", "Phoenix", "Soultrap", "Superconductor", "Warmage",
+				"Blood Weapon", "Displacement", "Dragonbane", "Earthshaker",
+				"Giant Slayer", "Mark/Recall", "Overshield", "Retribution", "Wolfsbane",
+				"Force of Will", "Mime", "Tempest", "Volant",
+			];
+			for (const name of allGems) {
+				const effects = CharacterSheetUpgrades.getGemstonePassiveEffects({name});
+				expect(effects.notes.length).toBeGreaterThan(0);
+			}
+		});
 	});
 
 	// ==========================================================================
@@ -1144,6 +1223,53 @@ describe("Item Upgrades", () => {
 			state.socketGemstone(itemId, {name: "Journey", source: "TGTT", gemName: "Star Ruby"});
 
 			expect(state.getGemstoneSpeedBonus()).toBe(0);
+		});
+	});
+
+	// ==========================================================================
+	// Volant Flight Speed
+	// ==========================================================================
+	describe("Volant Flight Speed", () => {
+		it("should grant hover flight speed = 2x walk from Volant gem", () => {
+			state.setSpeed("walk", 30);
+			state.addItem({name: "Sword", source: "PHB", type: "M", weapon: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Volant", source: "TGTT", gemName: "Diamond"});
+
+			expect(state.getGemstoneFlightSpeed()).toBe(60);
+		});
+
+		it("should return 0 flight speed without Volant gem", () => {
+			expect(state.getGemstoneFlightSpeed()).toBe(0);
+		});
+
+		it("should not grant flight for unequipped Volant gem", () => {
+			state.setSpeed("walk", 30);
+			state.addItem({name: "Sword", source: "PHB", type: "M", weapon: true}, 1, false);
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Volant", source: "TGTT", gemName: "Diamond"});
+
+			expect(state.getGemstoneFlightSpeed()).toBe(0);
+		});
+
+		it("should include Volant flight in getSpeedByType fly", () => {
+			state.setSpeed("walk", 30);
+			state.addItem({name: "Sword", source: "PHB", type: "M", weapon: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Volant", source: "TGTT", gemName: "Diamond"});
+
+			const flySpeed = state.getSpeedByType("fly");
+			expect(flySpeed).toBe(60);
+		});
+
+		it("should include Volant flight in getSpeed display string", () => {
+			state.setSpeed("walk", 30);
+			state.addItem({name: "Sword", source: "PHB", type: "M", weapon: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+			state.socketGemstone(itemId, {name: "Volant", source: "TGTT", gemName: "Diamond"});
+
+			const speedStr = state.getSpeed();
+			expect(speedStr).toContain("fly 60 ft.");
 		});
 	});
 

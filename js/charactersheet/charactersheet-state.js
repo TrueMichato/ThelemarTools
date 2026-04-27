@@ -6943,6 +6943,21 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Get hover flight speed granted by Volant gemstone (2x walk speed)
+	 * @returns {number} Flight speed in feet, or 0 if no Volant gem equipped
+	 */
+	getGemstoneFlightSpeed () {
+		if (typeof CharacterSheetUpgrades === "undefined") return 0;
+		for (const invItem of this._data.inventory) {
+			if (!invItem.equipped) continue;
+			for (const gem of (invItem.item?.socketedGemstones || [])) {
+				if (gem.name?.toLowerCase() === "volant") return this.getWalkSpeed() * 2;
+			}
+		}
+		return 0;
+	}
+
+	/**
 	 * Get speed penalty from armor STR requirement not being met
 	 * @returns {number} Speed penalty in feet (0 or -10)
 	 */
@@ -7079,6 +7094,9 @@ class CharacterSheetState {
 
 		// Apply item static speed overrides (e.g., Boots of Elvenkind granting fly 30)
 		let effectiveFly = itemSpeedStatic.fly ? Math.max(baseFly, itemSpeedStatic.fly) : baseFly;
+		// Volant gemstone grants hover flight = 2x walk
+		const gemFlightSpeed = this.getGemstoneFlightSpeed();
+		if (gemFlightSpeed > 0) effectiveFly = Math.max(effectiveFly, gemFlightSpeed);
 		let effectiveSwim = itemSpeedStatic.swim ? Math.max(baseSwim, itemSpeedStatic.swim) : baseSwim;
 		let effectiveClimb = itemSpeedStatic.climb ? Math.max(baseClimb, itemSpeedStatic.climb) : baseClimb;
 		let effectiveBurrow = itemSpeedStatic.burrow ? Math.max(baseBurrow, itemSpeedStatic.burrow) : baseBurrow;
@@ -7131,6 +7149,12 @@ class CharacterSheetState {
 		let base = this._data.speed[type] || 0;
 		// Apply static speed from items (e.g., Winged Boots granting fly 30)
 		if (itemSpeedStatic[type]) base = Math.max(base, itemSpeedStatic[type]);
+
+		// Volant gemstone grants hover flight = 2x walk
+		if (type === "fly") {
+			const gemFlightSpeed = this.getGemstoneFlightSpeed();
+			if (gemFlightSpeed > 0) base = Math.max(base, gemFlightSpeed);
+		}
 
 		// Apply equal-to from items (e.g., Mariner's Armor: swim = walk)
 		if (itemSpeedEqual[type]) {
