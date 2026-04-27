@@ -13,17 +13,27 @@ class ItemUpgradesSublistManager extends SublistManager {
 		return [
 			new SublistCellTemplate({
 				name: "Name",
-				css: "ve-bold ve-col-4 ve-pl-0 ve-pr-1",
+				css: "ve-bold ve-col-3 ve-pl-0 ve-pr-1",
 				colStyle: "",
 			}),
 			new SublistCellTemplate({
+				name: "Category",
+				css: "ve-col-2-5 ve-px-1 ve-text-center",
+				colStyle: "ve-text-center",
+			}),
+			new SublistCellTemplate({
+				name: "Tier",
+				css: "ve-col-2 ve-px-1 ve-text-center",
+				colStyle: "ve-text-center",
+			}),
+			new SublistCellTemplate({
 				name: "Type",
-				css: "ve-col-3 ve-px-1 ve-text-center",
+				css: "ve-col-1-5 ve-px-1 ve-text-center",
 				colStyle: "ve-text-center",
 			}),
 			new SublistCellTemplate({
 				name: "Cost",
-				css: "ve-col-3 ve-px-1",
+				css: "ve-col-1 ve-px-1",
 				colStyle: "",
 			}),
 			new SublistCellTemplate({
@@ -37,7 +47,9 @@ class ItemUpgradesSublistManager extends SublistManager {
 	pGetSublistItem (it, hash) {
 		const cellsText = [
 			it.name,
-			new SublistCell({title: it._dUpgradeType.join(", "), text: it._lUpgradeType}),
+			it._lCategory,
+			it._lTier,
+			it._lEquipmentType,
 			it.cost || "\u2014",
 			Parser.sourceJsonToAbv(it.source),
 		];
@@ -56,7 +68,9 @@ class ItemUpgradesSublistManager extends SublistManager {
 			it.name,
 			{
 				hash,
-				type: it._lUpgradeType,
+				category: it._lCategory,
+				tier: it._lTier,
+				type: it._lEquipmentType,
 				cost: it.cost || "",
 				source: Parser.sourceJsonToAbv(it.source),
 			},
@@ -108,11 +122,13 @@ class ItemUpgradesPage extends ListPage {
 
 		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
 			<span class="ve-col-0-3 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
-			<span class="ve-bold ve-col-3 ve-px-1">${it.name}</span>
-			<span class="ve-col-2-5 ve-px-1 ve-text-center" title="${it._dUpgradeType.join(", ").qq()}">${it._lUpgradeType}</span>
-			<span class="ve-col-2-5 ve-px-1">${cost}</span>
-			<span class="ve-col-2-2 ve-px-1">${Renderer.utils.prerequisite.getHtml(it.prerequisite, {isListMode: true}) || "\u2014"}</span>
-			<span class="ve-col-1-5 ${Parser.sourceJsonToSourceClassname(it.source)} ve-text-center ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(it.source)}">${source}</span>
+			<span class="ve-bold ve-col-2-5 ve-px-1">${it.name}</span>
+			<span class="ve-col-1-8 ve-px-1 ve-text-center">${it._lCategory}</span>
+			<span class="ve-col-1-5 ve-px-1 ve-text-center">${it._lTier}</span>
+			<span class="ve-col-1-2 ve-px-1 ve-text-center">${it._lEquipmentType}</span>
+			<span class="ve-col-1-5 ve-px-1">${cost}</span>
+			<span class="ve-col-1 ve-px-1 ve-text-center">${it._lHasPrerequisite}</span>
+			<span class="ve-grow ${Parser.sourceJsonToSourceClassname(it.source)} ve-text-center ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(it.source)}">${source}</span>
 		</a>
 		<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
 			<div class="ve-vr-0 ve-absolute ve-accordion__vr-preview"></div>
@@ -128,7 +144,10 @@ class ItemUpgradesPage extends ListPage {
 				source,
 				page: it.page,
 				cost,
-				type: it._lUpgradeType,
+				category: it._lCategory,
+				tier: it._lTier,
+				type: it._lEquipmentType,
+				prerequisite: it._lHasPrerequisite,
 			},
 			{
 				isExcluded,

@@ -2399,6 +2399,29 @@ Parser.itemUpgradeTypeToAbv = function (type) {
 	return parts[1];
 };
 
+Parser.itemUpgradeTypeToCategory = function (type) {
+	if (type.startsWith("WU")) return "Weapon Upgrade";
+	if (type.startsWith("AU")) return "Armor Upgrade";
+	if (type.startsWith("GS")) return "Gem";
+	return "Other";
+};
+
+Parser.ITEM_UPGRADE_TIER_ORDER = ["1st Tier", "2nd Tier", "3rd Tier", "Common", "Uncommon", "Rare", "Very Rare", "Legendary"];
+
+Parser.itemUpgradeTypeToTier = function (type) {
+	const full = Parser.itemUpgradeTypeToFull(type);
+	if (!full) return null;
+	const parts = full.split(";").map(it => it.trim());
+	if (parts.length < 2) return null;
+	return parts[1];
+};
+
+Parser.itemUpgradeTypeToEquipmentType = function (type) {
+	if (type.startsWith("WU") || type.startsWith("AU")) return "Equipment";
+	if (type.startsWith("GS")) return "Gem";
+	return "Other";
+};
+
 Parser._ALIGNMENT_ABV_TO_FULL = {
 	"L": "lawful",
 	"N": "neutral",
