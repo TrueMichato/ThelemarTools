@@ -297,6 +297,7 @@ class CharacterSheetInventory {
 			{value: "wondrous", label: "Wondrous", emoji: "✨"},
 			{value: "gear", label: "Gear", emoji: "🎒"},
 			{value: "tool", label: "Tools", emoji: "🔧"},
+			{value: "gemstone", label: "Gemstones", emoji: "💎"},
 		];
 		let selectedTypes = new Set(); // Empty = all types
 
@@ -894,6 +895,7 @@ class CharacterSheetInventory {
 			"wondrous": "✨",
 			"gear": "🎒",
 			"tool": "🔧",
+			"gemstone": "💎",
 		};
 		return emojis[type] || "📦";
 	}
@@ -943,6 +945,25 @@ class CharacterSheetInventory {
 			</div>
 		`}));
 
+		// Empowerment button for base gems (TGTT)
+		const itemType = item.type?.split("|")[0];
+		if (itemType === "$G" && !item._isEmpoweredGemstone) {
+			const isTgtt = this._page._state?._data?.settings?.enableTgtt;
+			if (isTgtt && this._page._upgrades) {
+				const empowerSection = e_({outer: `<div class="mt-3 p-2" style="background: var(--cs-bg-secondary, #f0f7ff); border-radius: 6px;"></div>`});
+				empowerSection.append(e_({outer: `
+					<p class="ve-small mb-2"><strong>💎 Gemstone Empowerment</strong> — Imbue this gem with magical power through a crafting check.</p>
+				`}));
+				const empowerBtn = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-success", html: `<span class="glyphicon glyphicon-flash"></span> Empower ${item.name}`});
+				empowerBtn.addEventListener("click", async () => {
+					doClose(false);
+					await this._page._upgrades.showEmpowermentModal({fromInventoryGem: {id: item.id, name: item.name, source: item.source}});
+				});
+				empowerSection.append(empowerBtn);
+				modalInner.append(empowerSection);
+			}
+		}
+
 		const closeFooter = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			<button class="ve-btn ve-btn-default">Close</button>
 		</div>`;
@@ -964,6 +985,8 @@ class CharacterSheetInventory {
 		if (item.wondrous) return "wondrous";
 		if (item.type === "AT" || item.type === "T") return "tool";
 		if (item.type === "G" || item.type === "SCF") return "gear";
+		if (typeBase === "$G") return "gemstone";
+		if (item._isEmpoweredGemstone) return "gemstone";
 		return "gear";
 	}
 
@@ -979,6 +1002,8 @@ class CharacterSheetInventory {
 		if (item.type === "RG") return "Ring";
 		if (item.wondrous) return "Wondrous";
 		if (item.type === "AT" || item.type === "T") return "Tool";
+		if (typeBase === "$G") return "Gemstone";
+		if (item._isEmpoweredGemstone) return "Empowered Gem";
 		return "";
 	}
 
@@ -2863,6 +2888,25 @@ class CharacterSheetInventory {
 
 		modalInner.append(e_({outer: `<div>${itemData ? this._renderItemDetails(itemData) : this._renderBasicItemDetails(item)}</div>`}));
 
+		// Empowerment button for base gems in inventory (TGTT)
+		const itemType = (itemData || item).type?.split("|")[0];
+		if (itemType === "$G" && !item._isEmpoweredGemstone) {
+			const isTgtt = this._page._state?._data?.settings?.enableTgtt;
+			if (isTgtt && this._page._upgrades) {
+				const empowerSection = e_({outer: `<div class="mt-3 p-2" style="background: var(--cs-bg-secondary, #f0f7ff); border-radius: 6px;"></div>`});
+				empowerSection.append(e_({outer: `
+					<p class="ve-small mb-2"><strong>💎 Gemstone Empowerment</strong> — Imbue this gem with magical power through a crafting check.</p>
+				`}));
+				const empowerBtn = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-success", html: `<span class="glyphicon glyphicon-flash"></span> Empower ${item.name}`});
+				empowerBtn.addEventListener("click", async () => {
+					doClose(false);
+					await this._page._upgrades.showEmpowermentModal({fromInventoryGem: {id: item.id, name: item.name, source: item.source}});
+				});
+				empowerSection.append(empowerBtn);
+				modalInner.append(empowerSection);
+			}
+		}
+
 		const closeFooter = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			<button class="ve-btn ve-btn-default">Close</button>
 		</div>`;
@@ -3681,6 +3725,7 @@ class CharacterSheetInventory {
 		if (item.wondrous) return "Wondrous Items";
 		if (item.type === "AT" || item.type === "T") return "Tools";
 		if (item.type === "G" || item.type === "SCF") return "Adventuring Gear";
+		if (typeBase === "$G" || item._isEmpoweredGemstone) return "Gemstones";
 		return "Other";
 	}
 
@@ -3698,6 +3743,7 @@ class CharacterSheetInventory {
 			"Wondrous Items": "✨",
 			"Tools": "🔧",
 			"Adventuring Gear": "🎒",
+			"Gemstones": "💎",
 			"Other": "📦",
 		};
 		return icons[category] || "📦";
@@ -3773,7 +3819,7 @@ class CharacterSheetInventory {
 		}
 
 		// Group items by category
-		const categoryOrder = ["Starred", "Weapons", "Armor", "Consumables", "Wondrous Items", "Tools", "Adventuring Gear", "Other"];
+		const categoryOrder = ["Starred", "Weapons", "Armor", "Consumables", "Wondrous Items", "Gemstones", "Tools", "Adventuring Gear", "Other"];
 		const categories = {};
 
 		// Separate starred items for the Starred category (if not filtering by starred)

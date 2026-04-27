@@ -16504,6 +16504,38 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	background-color: var(--cs-bg-hover, rgba(99, 102, 241, 0.06));
 }
 
+/* Clickable upgrade rows */
+.charsheet__upgrade-option,
+.charsheet__empower-option,
+.charsheet__socket-option {
+	cursor: pointer;
+}
+
+/* Stronger hover for clickable rows */
+.charsheet__upgrade-option:hover,
+.charsheet__empower-option:hover,
+.charsheet__socket-option:hover {
+	background-color: var(--cs-bg-hover, rgba(99, 102, 241, 0.12));
+	box-shadow: inset 0 0 0 1px var(--cs-border-color, rgba(99, 102, 241, 0.15));
+}
+
+/* Disabled upgrade options */
+.charsheet__upgrade-option .ve-btn[disabled],
+.charsheet__empower-option .ve-btn[disabled] {
+	cursor: not-allowed;
+}
+
+/* Hover link styling within upgrade modals */
+.charsheet__upgrade-name a {
+	font-weight: bold;
+	color: inherit;
+}
+
+.charsheet__upgrade-name a:hover {
+	text-decoration: underline;
+	color: var(--cs-accent, #6366f1);
+}
+
 .charsheet__upgrade-current h5,
 .charsheet__upgrade-gems h5,
 .charsheet__upgrade-available h5,

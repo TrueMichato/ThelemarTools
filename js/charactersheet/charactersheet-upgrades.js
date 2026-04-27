@@ -169,11 +169,12 @@ class CharacterSheetUpgrades {
 			for (const upgrade of currentUpgrades) {
 				const tierLabel = CharacterSheetUpgrades.getUpgradeTierLabel(upgrade.upgradeType);
 				const tierColor = CharacterSheetUpgrades.getUpgradeTierColor(upgrade.upgradeType);
+				const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
 				currentSection.append(e_({outer: `
 					<div class="charsheet__upgrade-applied ve-flex-v-center mb-1 p-1 stripe-even">
 						<div class="ve-flex-1">
 							<span class="badge ${tierColor} ve-small mr-1">${tierLabel}</span>
-							<strong>${upgrade.name}</strong>
+							<span class="charsheet__upgrade-name">${upgradeLink}</span>
 							${upgrade.costPaid ? `<span class="ve-muted ve-small ml-1">(${upgrade.costPaid} gp)</span>` : ""}
 						</div>
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__upgrade-remove" data-upgrade-name="${upgrade.name}" data-upgrade-source="${upgrade.source}" title="Remove upgrade">
@@ -193,11 +194,12 @@ class CharacterSheetUpgrades {
 			for (const gem of gemstones) {
 				const tierLabel = CharacterSheetUpgrades.getUpgradeTierLabel(gem.upgradeType);
 				const chargeStr = gem.chargesMax != null ? ` (${gem.chargesCurrent}/${gem.chargesMax} charges)` : "";
+				const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gem.name, gem.source);
 				gemSection.append(e_({outer: `
 					<div class="charsheet__upgrade-gem ve-flex-v-center mb-1 p-1 stripe-even">
 						<div class="ve-flex-1">
 							<span class="badge badge-success ve-small mr-1">${gem.gemName || tierLabel}</span>
-							<strong>${gem.name}</strong>
+							<span class="charsheet__upgrade-name">${gemLink}</span>
 							<span class="ve-muted ve-small">${chargeStr}</span>
 						</div>
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-warning charsheet__gem-unsocket" data-gem-name="${gem.name}" title="Unsocket gemstone">
@@ -233,13 +235,17 @@ class CharacterSheetUpgrades {
 					const canAfford = totalGold >= gpCost;
 					const prereqText = upgrade.prerequisite?.[0]?.item?.join("; ") || "None";
 					const entrySummary = (upgrade.entries || []).join(" ");
-					const entryTrimmed = entrySummary.length > 120 ? entrySummary.substring(0, 120) + "..." : entrySummary;
+					const firstSentence = entrySummary.match(/^[^.!?]+[.!?]/)?.[0] || "";
+					const entryTrimmed = firstSentence && firstSentence.length <= 200
+						? firstSentence
+						: (entrySummary.length > 200 ? entrySummary.substring(0, 200) + "..." : entrySummary);
 					const btnAttr = !canAfford ? 'disabled title="Insufficient gold"' : "title=\"Apply for " + gpCost + " gp\"";
+					const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
 
 					const row = e_({outer: `
 						<div class="charsheet__upgrade-option ve-flex-v-center mb-1 p-2 stripe-even">
 							<div class="ve-flex-1">
-								<strong>${upgrade.name}</strong>
+								<span class="charsheet__upgrade-name">${upgradeLink}</span>
 								<span class="ve-muted ve-small ml-1">${upgrade.cost || "Free"}</span>
 								<div class="ve-small ve-muted">${prereqText}</div>
 								<div class="ve-small">${entryTrimmed}</div>
@@ -361,7 +367,7 @@ class CharacterSheetUpgrades {
 	/**
 	 * Show the gemstone empowerment modal
 	 */
-	async showEmpowermentModal () {
+	async showEmpowermentModal (opts = {}) {
 		const gemstones = this.getGemstoneUpgrades();
 		if (!gemstones.length) {
 			JqueryUtil.doToast({content: "No gemstone data loaded. Check if Thelemar homebrew is enabled.", type: "warning"});
@@ -369,7 +375,7 @@ class CharacterSheetUpgrades {
 		}
 
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: "Gemstone Empowerment",
+			title: opts.fromInventoryGem ? `Empower: ${opts.fromInventoryGem.name}` : "Gemstone Empowerment",
 			isMinHeight0: true,
 			isWidth100: true,
 		});
@@ -379,14 +385,31 @@ class CharacterSheetUpgrades {
 		// Instructions
 		content.append(e_({outer: `
 			<div class="charsheet__empower-rules mb-3 p-2" style="background: var(--rgb-bg-secondary, #f5f5f5); border-radius: 4px;">
+				${opts.fromInventoryGem ? `<p class="ve-small mb-1"><strong>Empowering:</strong> ${opts.fromInventoryGem.name} from your inventory. Choose a power to imbue.</p>` : ""}
 				<p class="ve-small mb-1"><strong>Gemstone Empowerment:</strong> Choose a gemstone power to imbue. You must succeed on a crafting check to empower the gem.</p>
 				<p class="ve-small mb-0"><strong>Crafting Check:</strong> Proficiency bonus + CHA or WIS modifier vs. the gemstone's crafting DC.</p>
 			</div>
 		`}));
 
+		// Filter gems to matching gemName when empowering from inventory
+		const filteredGemstones = opts.fromInventoryGem
+			? gemstones.filter(g => g.gemName && g.gemName.toLowerCase() === opts.fromInventoryGem.name.toLowerCase())
+			: gemstones;
+
+		if (opts.fromInventoryGem && !filteredGemstones.length) {
+			content.append(e_({outer: `
+				<div class="alert alert-warning">No empowerment options found for "${opts.fromInventoryGem.name}". Not all gemstones have empowerment recipes.</div>
+			`}));
+			modalInner.append(content);
+			const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3"><button class="ve-btn ve-btn-default">Close</button></div>`;
+			modalInner.append(footer);
+			footer.querySelector("button").addEventListener("click", () => doClose(false));
+			return;
+		}
+
 		// Group gemstones by rarity
 		const grouped = {};
-		for (const gem of gemstones) {
+		for (const gem of filteredGemstones) {
 			const rarity = gem.rarity || "Unknown";
 			if (!grouped[rarity]) grouped[rarity] = [];
 			grouped[rarity].push(gem);
@@ -415,16 +438,21 @@ class CharacterSheetUpgrades {
 			for (const gem of gems) {
 				const costGp = CharacterSheetUpgrades.parseGoldCost(gem.cost);
 				const canAfford = this._state.getTotalGold() >= costGp;
-				const entrySummary = (gem.entries || []).join(" ").substring(0, 150);
+				const entrySummary = (gem.entries || []).join(" ");
+				const firstSentence = entrySummary.match(/^[^.!?]+[.!?]/)?.[0] || "";
+				const entryTrimmed = firstSentence && firstSentence.length <= 200
+					? firstSentence
+					: (entrySummary.length > 200 ? entrySummary.substring(0, 200) + "..." : entrySummary);
+				const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gem.name, gem.source);
 
 				section.append(e_({outer: `
 					<div class="charsheet__empower-option ve-flex-v-center mb-1 p-2 stripe-even">
 						<div class="ve-flex-1">
-							<strong>${gem.name}</strong>
+							<span class="charsheet__upgrade-name">${gemLink}</span>
 							${gem.gemName ? `<span class="ve-muted ve-small ml-1">(${gem.gemName})</span>` : ""}
 							<span class="ve-muted ve-small ml-1">${gem.cost || "Free"}</span>
 							${gem.charges ? `<span class="badge badge-info ve-small ml-1">${gem.charges} charges</span>` : ""}
-							<div class="ve-small">${entrySummary}${entrySummary.length >= 150 ? "..." : ""}</div>
+							<div class="ve-small">${entryTrimmed}</div>
 						</div>
 						<button type="button"
 							class="ve-btn ve-btn-xs ${canAfford ? "ve-btn-success" : "ve-btn-default"} charsheet__empower-select"
@@ -461,7 +489,7 @@ class CharacterSheetUpgrades {
 			const costGp = parseFloat(empowerBtn.dataset.gemCost);
 
 			doClose(false);
-			await this._showCraftingRollModal(gemName, gemSource, dc, costGp);
+			await this._showCraftingRollModal(gemName, gemSource, dc, costGp, opts);
 		});
 	}
 
@@ -471,8 +499,9 @@ class CharacterSheetUpgrades {
 	 * @param {string} gemSource - Gemstone source
 	 * @param {number} dc - Crafting DC
 	 * @param {number} costGp - Gold cost
+	 * @param {object} [opts] - Options (fromInventoryGem, etc.)
 	 */
-	async _showCraftingRollModal (gemName, gemSource, dc, costGp) {
+	async _showCraftingRollModal (gemName, gemSource, dc, costGp, opts = {}) {
 		const profBonus = this._state.getProficiencyBonus();
 		const chaMod = this._state.getAbilityMod("cha");
 		const wisMod = this._state.getAbilityMod("wis");
@@ -539,38 +568,60 @@ class CharacterSheetUpgrades {
 				);
 
 				if (gemEntity) {
-					// Add empowered gemstone to inventory
-					this._state.addItem({
-						name: `${gemName} (Empowered ${gemEntity.gemName || "Gemstone"})`,
-						source: gemSource,
-						type: "G",
-						rarity: gemEntity.rarity || "common",
-						entries: gemEntity.entries || [],
-						weight: 0,
-						_isEmpoweredGemstone: true,
-						_gemstoneData: {
-							name: gemEntity.name,
-							source: gemEntity.source,
-							gemName: gemEntity.gemName,
-							rarity: gemEntity.rarity,
-							upgradeType: gemEntity.upgradeType,
-							entries: gemEntity.entries,
-							charges: gemEntity.charges || null,
-							recharge: gemEntity.recharge || null,
-						},
-					});
+					if (opts.fromInventoryGem) {
+						// Transform the existing inventory gem into an empowered gem
+						const existingItems = this._state.getItems();
+						const existingGem = existingItems.find(i => i.id === opts.fromInventoryGem.id);
+						if (existingGem) {
+							existingGem.name = `${gemName} (Empowered ${gemEntity.gemName || "Gemstone"})`;
+							existingGem.rarity = gemEntity.rarity || "common";
+							existingGem.entries = gemEntity.entries || [];
+							existingGem._isEmpoweredGemstone = true;
+							existingGem._gemstoneData = {
+								name: gemEntity.name,
+								source: gemEntity.source,
+								gemName: gemEntity.gemName,
+								rarity: gemEntity.rarity,
+								upgradeType: gemEntity.upgradeType,
+								entries: gemEntity.entries,
+								charges: gemEntity.charges || null,
+								recharge: gemEntity.recharge || null,
+							};
+						}
+					} else {
+						// Original flow: create new empowered gem from scratch
+						this._state.addItem({
+							name: `${gemName} (Empowered ${gemEntity.gemName || "Gemstone"})`,
+							source: gemSource,
+							type: "G",
+							rarity: gemEntity.rarity || "common",
+							entries: gemEntity.entries || [],
+							weight: 0,
+							_isEmpoweredGemstone: true,
+							_gemstoneData: {
+								name: gemEntity.name,
+								source: gemEntity.source,
+								gemName: gemEntity.gemName,
+								rarity: gemEntity.rarity,
+								upgradeType: gemEntity.upgradeType,
+								entries: gemEntity.entries,
+								charges: gemEntity.charges || null,
+								recharge: gemEntity.recharge || null,
+							},
+						});
+					}
 				}
 
 				resultDiv.style.display = "";
 				resultDiv.innerHTML = `
 					<div class="alert alert-success">
 						<strong>${nat20 ? "🎯 Natural 20! " : ""}Roll: ${roll} + ${totalBonus} = ${total} vs DC ${dc} — Success!</strong>
-						<p>The gemstone has been empowered and added to your inventory. You can now socket it into a weapon, armor, or shield.</p>
+						<p>${opts.fromInventoryGem ? "Your gemstone has been empowered!" : "The gemstone has been empowered and added to your inventory."} You can now socket it into a weapon, armor, or shield.</p>
 						${costGp > 0 ? `<p class="ve-muted ve-small">Paid ${costGp} gp</p>` : ""}
 					</div>
 				`;
 
-				JqueryUtil.doToast({content: `Empowered ${gemName}! Added to inventory.`, type: "success"});
+				JqueryUtil.doToast({content: `Empowered ${gemName}!${opts.fromInventoryGem ? "" : " Added to inventory."}`, type: "success"});
 				this._page.saveCharacter();
 				this._page._inventory?.render();
 			} else {
@@ -626,14 +677,19 @@ class CharacterSheetUpgrades {
 			for (const gem of empoweredGems) {
 				const gemData = gem._gemstoneData;
 				const chargeStr = gemData.charges ? `${gemData.charges} charges` : "";
-				const entrySummary = (gemData.entries || []).join(" ").substring(0, 120);
+				const entrySummary = (gemData.entries || []).join(" ");
+				const firstSentence = entrySummary.match(/^[^.!?]+[.!?]/)?.[0] || "";
+				const entryTrimmed = firstSentence && firstSentence.length <= 200
+					? firstSentence
+					: (entrySummary.length > 200 ? entrySummary.substring(0, 200) + "..." : entrySummary);
+				const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gemData.name, gemData.source);
 
 				content.append(e_({outer: `
 					<div class="charsheet__socket-option ve-flex-v-center mb-1 p-2 stripe-even">
 						<div class="ve-flex-1">
-							<strong>${gem.name}</strong>
+							<span class="charsheet__upgrade-name">${gemLink}</span>
 							${chargeStr ? `<span class="badge badge-info ve-small ml-1">${chargeStr}</span>` : ""}
-							<div class="ve-small">${entrySummary}${entrySummary.length >= 120 ? "..." : ""}</div>
+							<div class="ve-small">${entryTrimmed}</div>
 						</div>
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-success charsheet__socket-apply"
 							data-gem-id="${gem.id}" title="Socket into ${item.name}">
