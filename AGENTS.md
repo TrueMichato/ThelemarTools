@@ -221,3 +221,15 @@ Root: `.agents/skills/dmscreen-development/references/`
 |All 19 activities with RM deltas, pace interactions, crit detection|[docs/dmscreen/05-journey-activities.md](docs/dmscreen/05-journey-activities.md)|
 |Board event sync, player data mapping, manual mode|[docs/dmscreen/06-party-journey-integration.md](docs/dmscreen/06-party-journey-integration.md)|
 |SCSS class hierarchy, color conventions, night mode|[docs/dmscreen/07-styling-guide.md](docs/dmscreen/07-styling-guide.md)|
+
+## Troubleshooting — Common Errors & Fixes
+
+When encountering bugs, errors, or unexpected behavior anywhere in the codebase, consult the troubleshooting skill. Covers test failures, state management errors, data/schema issues, parser bugs, UI/DOM gotchas, Builder/LevelUp/QuickBuild pitfalls, DM Screen patterns, TGTT homebrew gating, renderer/site code errors (unhandled tags, cross-references, dice expressions), data loading failures (missing strategies, orphan subraces), and degraded mode patterns (silent module failures, renderer fallbacks) — all sourced from real bugs and investigations.
+
+### Detailed Reference Docs — Read When Debugging
+
+Root: `.agents/skills/troubleshooting/references/`
+
+|When to read|File|
+|---|---|
+|Any error, bug, or unexpected behavior — full catalog organized by category with root causes and fixes|[common-errors.md](.agents/skills/troubleshooting/references/common-errors.md)|
