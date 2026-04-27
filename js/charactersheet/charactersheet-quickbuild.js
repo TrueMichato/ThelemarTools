@@ -2477,14 +2477,30 @@ class CharacterSheetQuickBuild {
 			availableTraditions.filter(trad => !subclassGrantedCodes.includes(trad.code)).forEach(trad => {
 				const isChecked = this._selections._combatTraditions.includes(trad.code);
 				const desc = CharacterSheetClassUtils.getTraditionDescription(trad.code);
+
+				// Build hoverable tradition name linking to the Combat Traditions variant rule
+				let tradNameHtml;
+				try {
+					tradNameHtml = CharacterSheetPage.getHoverLink(
+						UrlUtil.PG_VARIANTRULES,
+						"Combat Traditions",
+						Parser.SRC_TGTT || "TGTT",
+						null,
+						trad.name,
+					);
+				} catch (e) {
+					tradNameHtml = `<strong>${trad.name}</strong>`;
+				}
+
 				const item = e_({outer: `
 					<label class="d-block ve-small mb-1" style="cursor: pointer; padding: 4px 6px;">
 						<input type="checkbox" class="mr-2" ${isChecked ? "checked" : ""}>
-						<strong>${trad.name}</strong>
+						<strong class="tradition-name-slot"></strong>
 						<span class="ve-muted ml-1">(${trad.code})</span>
 						${desc ? `<div class="ve-muted" style="margin-left: 1.5rem; font-size: 0.85em;">${desc}</div>` : ""}
 					</label>
 				`});
+				item.querySelector(".tradition-name-slot").innerHTML = tradNameHtml;
 
 				item.querySelector("input").addEventListener("change", (e) => {
 					if (e.target.checked) {

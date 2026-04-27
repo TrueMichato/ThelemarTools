@@ -1596,6 +1596,16 @@ class CharacterSheetClassUtils {
 		.reduce((acc, [code, name]) => ({...acc, [name.toLowerCase()]: code}), {});
 
 	/**
+	 * Get all known traditions as an array of {code, name} objects, sorted by name.
+	 * @returns {Array<{code: string, name: string}>}
+	 */
+	static getAllTraditions () {
+		return Object.entries(CharacterSheetClassUtils.TRADITION_CODE_TO_NAME)
+			.map(([code, name]) => ({code, name}))
+			.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	/**
 	 * Map a tradition code to its full name.
 	 * @param {string} tradCode - Two-letter code
 	 * @returns {string}
@@ -1892,9 +1902,22 @@ class CharacterSheetClassUtils {
 	 */
 	static getAvailableTraditionsForClass (allFeatures, classAllowedTypes, className, classFeatures) {
 		const allowedTraditionCodes = new Set();
+		let hasDegreeOnlyCodes = false;
+
 		for (const ft of classAllowedTypes) {
 			const match = ft.match(/^CTM:(\d)?([A-Z]{2,3})$/);
-			if (match && match[2]) allowedTraditionCodes.add(match[2]);
+			if (match && match[2]) {
+				// Tradition-specific code like CTM:1AM → extract tradition
+				allowedTraditionCodes.add(match[2]);
+			} else if (/^CTM:\d+$/.test(ft)) {
+				// Degree-only code like CTM:1 → class has unrestricted tradition access
+				hasDegreeOnlyCodes = true;
+			}
+		}
+
+		// Degree-only CTM codes (CTM:1, CTM:2, etc.) mean all traditions are available
+		if (hasDegreeOnlyCodes && allowedTraditionCodes.size === 0) {
+			return CharacterSheetClassUtils.getAllTraditions();
 		}
 
 		if (allowedTraditionCodes.size === 0 && className) {
