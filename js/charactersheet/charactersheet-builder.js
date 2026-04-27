@@ -3738,7 +3738,8 @@ class CharacterSheetBuilder {
 				if (optName) {
 					try {
 						const resolvedSource = this._page.resolveOptionalFeatureSource?.(opt.name, [opt.source]) || opt.source;
-						optName.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, opt.name, resolvedSource);
+						const page = CharacterSheetClassUtils.isCombatMethod(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+						optName.innerHTML = CharacterSheetPage.getHoverLink(page, opt.name, resolvedSource);
 					} catch (e) {
 						optName.textContent = opt.name;
 					}
