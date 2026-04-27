@@ -6707,12 +6707,18 @@ class CharacterSheetState {
 	getItemAcBonus () { return this._data.ac.itemBonus || 0; }
 
 	// Item bonuses from equipped/attuned magic items
-	setItemBonuses (bonuses) { this._data.itemBonuses = bonuses || {}; }
+	setItemBonuses (bonuses) {
+		this._data.itemBonuses = bonuses || {};
+		// Store manual overrides so _recalculateItemBonuses merges rather than overwrites
+		this._data._manualItemBonuses = {...(bonuses || {})};
+	}
 	getItemBonuses () { return this._data.itemBonuses || {}; }
 	getItemBonus (type) { return this._data.itemBonuses?.[type] || 0; }
 	setItemBonus (type, value) {
 		if (!this._data.itemBonuses) this._data.itemBonuses = {};
 		this._data.itemBonuses[type] = value || 0;
+		if (!this._data._manualItemBonuses) this._data._manualItemBonuses = {};
+		this._data._manualItemBonuses[type] = value || 0;
 	}
 
 	/**
@@ -6721,14 +6727,53 @@ class CharacterSheetState {
 	 */
 	_recalculateItemBonuses () {
 		if (!this._data.itemBonuses) this._data.itemBonuses = {};
+		const manual = this._data._manualItemBonuses || {};
 
 		// Aggregate Ki save DC bonus (take highest from all items)
 		let maxKiDcBonus = 0;
+		// Aggregate spell attack / save DC bonuses (take highest from all equipped items, including upgrades)
+		let maxSpellAttack = 0;
+		let maxSpellSaveDc = 0;
+		// Aggregate crit threshold (take lowest from all equipped items, including upgrades)
+		let minCritThreshold = 20;
+
 		for (const invItem of this._data.inventory) {
 			const bonus = invItem.item?.kiSaveDcBonus || 0;
 			if (bonus > maxKiDcBonus) maxKiDcBonus = bonus;
+
+			// Only consider equipped items for combat bonuses
+			if (!invItem.equipped) continue;
+
+			// Base item bonuses
+			const baseSpellAtk = invItem.item?.bonusSpellAttack || 0;
+			const baseSpellDc = invItem.item?.bonusSpellSaveDc || 0;
+			const baseCrit = invItem.item?.critThreshold || 20;
+
+			// Upgrade bonuses (if CharacterSheetUpgrades module is loaded)
+			let upgradeSpellAtk = 0;
+			let upgradeSpellDc = 0;
+			let upgradeCritReduction = 0;
+			if (typeof CharacterSheetUpgrades !== "undefined" && invItem.item?.appliedUpgrades?.length) {
+				const effects = CharacterSheetUpgrades.getUpgradeEffects(invItem.item);
+				upgradeSpellAtk = effects.bonusSpellAttack;
+				upgradeSpellDc = effects.bonusSpellSaveDc;
+				upgradeCritReduction = effects.critThresholdReduction;
+			}
+
+			const totalSpellAtk = baseSpellAtk + upgradeSpellAtk;
+			const totalSpellDc = baseSpellDc + upgradeSpellDc;
+			const effectiveCrit = baseCrit - upgradeCritReduction;
+
+			if (totalSpellAtk > maxSpellAttack) maxSpellAttack = totalSpellAtk;
+			if (totalSpellDc > maxSpellSaveDc) maxSpellSaveDc = totalSpellDc;
+			if (effectiveCrit < minCritThreshold) minCritThreshold = effectiveCrit;
 		}
+
 		this._data.itemBonuses.kiSaveDc = maxKiDcBonus;
+		// Merge with manual overrides (take max of manual and calculated)
+		this._data.itemBonuses.spellAttack = Math.max(maxSpellAttack, manual.spellAttack || 0);
+		this._data.itemBonuses.spellSaveDc = Math.max(maxSpellSaveDc, manual.spellSaveDc || 0);
+		this._data.itemBonuses.critThreshold = minCritThreshold < 20 ? minCritThreshold : null;
 	}
 
 	// Defensive properties from equipped/attuned magic items
@@ -6775,6 +6820,7 @@ class CharacterSheetState {
 			bonusSpellAttack: item.bonusSpellAttack || 0,
 			bonusSpellSaveDc: item.bonusSpellSaveDc || 0,
 			critThreshold: item.critThreshold || 20,
+			damageDieIncrease: 0,
 		};
 
 		// Add upgrade effects
@@ -6784,6 +6830,7 @@ class CharacterSheetState {
 			base.bonusWeaponDamage += effects.bonusWeaponDamage;
 			base.bonusSpellAttack += effects.bonusSpellAttack;
 			base.bonusSpellSaveDc += effects.bonusSpellSaveDc;
+			base.damageDieIncrease += effects.damageDieIncrease;
 			if (effects.critThresholdReduction > 0) {
 				base.critThreshold = (base.critThreshold || 20) - effects.critThresholdReduction;
 			}
@@ -6848,6 +6895,12 @@ class CharacterSheetState {
 				m.enabled && m.type === "armor:medium:noStealthDisadvantage",
 			);
 			if (noStealthDisadv) return false;
+		}
+
+		// Check for "Muffled" armor upgrade (removes stealth disadvantage)
+		if (typeof CharacterSheetUpgrades !== "undefined") {
+			const armorEffects = CharacterSheetUpgrades.getArmorUpgradeEffects(armor);
+			if (armorEffects.muffled) return false;
 		}
 
 		return true;
@@ -19497,6 +19550,8 @@ class CharacterSheetState {
 			appliedAt: Date.now(),
 		});
 
+		this._recalculateItemBonuses();
+
 		return {success: true};
 	}
 
@@ -19517,6 +19572,7 @@ class CharacterSheetState {
 		if (idx === -1) return false;
 
 		item.item.appliedUpgrades.splice(idx, 1);
+		this._recalculateItemBonuses();
 		return true;
 	}
 
@@ -19593,6 +19649,8 @@ class CharacterSheetState {
 			socketedAt: Date.now(),
 		});
 
+		this._recalculateItemBonuses();
+
 		return {success: true};
 	}
 
@@ -19609,7 +19667,9 @@ class CharacterSheetState {
 		const idx = item.item.socketedGemstones.findIndex(g => g.name === gemstoneName);
 		if (idx === -1) return null;
 
-		return item.item.socketedGemstones.splice(idx, 1)[0];
+		const removed = item.item.socketedGemstones.splice(idx, 1)[0];
+		this._recalculateItemBonuses();
+		return removed;
 	}
 
 	/**

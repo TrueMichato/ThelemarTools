@@ -296,7 +296,8 @@ class CharacterSheetCombat {
 							<select class="charsheet__attack-select charsheet__attack-select--inventory">
 								<option value="">— Select weapon —</option>
 								${inventoryWeapons.map(weapon => {
-		const bonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0);
+		const eff = this._state.getEffectiveItemBonuses?.(weapon.id);
+		const bonus = eff ? ((eff.bonusWeapon || 0) + (eff.bonusWeaponAttack || 0)) : ((weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0));
 		const label = bonus > 0 ? `${weapon.name} (+${bonus})` : weapon.name;
 		return `<option value="inv:${weapon.name}">${label}</option>`;
 	}).join("")}
@@ -366,8 +367,16 @@ class CharacterSheetCombat {
 					}
 					if (weapon.range) rangeInput.value = weapon.range;
 					if (props.length) propertiesInput.value = props.map(p => typeof p === "string" ? p : Parser.itemPropertyToFull(p)).join(", ");
-					const attackBonusVal = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0);
-					const damageBonusVal = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0);
+					const eff = this._state.getEffectiveItemBonuses?.(weapon.id);
+					let attackBonusVal;
+					let damageBonusVal;
+					if (eff) {
+						attackBonusVal = (eff.bonusWeapon || 0) + (eff.bonusWeaponAttack || 0);
+						damageBonusVal = (eff.bonusWeapon || 0) + (eff.bonusWeaponDamage || 0);
+					} else {
+						attackBonusVal = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0);
+						damageBonusVal = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0);
+					}
 					bonusInput.value = attackBonusVal;
 					dmgBonusInput.value = damageBonusVal;
 					weaponSelect.value = "";
@@ -1595,9 +1604,19 @@ class CharacterSheetCombat {
 				const isMonkWeapon = this._state.isMonkWeapon?.(weapon);
 				const defaultAbility = isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? "finesse" : "str");
 
-				// Calculate total bonuses including magic item bonuses and custom bonuses
-				const magicAttackBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0);
-				const magicDamageBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0);
+				// Calculate total bonuses including magic item bonuses, upgrade bonuses, and custom bonuses
+				const effectiveBonuses = this._state.getEffectiveItemBonuses?.(weapon.id);
+				let magicAttackBonus;
+				let magicDamageBonus;
+				let damageDieIncrease = 0;
+				if (effectiveBonuses) {
+					magicAttackBonus = (effectiveBonuses.bonusWeapon || 0) + (effectiveBonuses.bonusWeaponAttack || 0);
+					magicDamageBonus = (effectiveBonuses.bonusWeapon || 0) + (effectiveBonuses.bonusWeaponDamage || 0);
+					damageDieIncrease = effectiveBonuses.damageDieIncrease || 0;
+				} else {
+					magicAttackBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0);
+					magicDamageBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0);
+				}
 				const customAttackBonus = weapon.customAttackBonus || 0;
 				const customDamageBonus = weapon.customDamageBonus || 0;
 
@@ -1615,6 +1634,11 @@ class CharacterSheetCombat {
 						const monkMax = this._parseDieMax(calc.martialArtsDie);
 						if (monkMax > weaponMax) baseDamageDie = calc.martialArtsDie;
 					}
+				}
+
+				// Apply Superior upgrade damage die increase (e.g., 1d6 → 1d8)
+				if (damageDieIncrease > 0 && typeof CharacterSheetUpgrades !== "undefined") {
+					baseDamageDie = CharacterSheetUpgrades.increaseDamageDie(baseDamageDie, damageDieIncrease);
 				}
 
 				const autoAttack = {
@@ -1737,6 +1761,16 @@ class CharacterSheetCombat {
 		if (activeMethod) {
 			const methodTitle = `${activeMethod.name}${activeMethod.ongoingDamage ? `: ${activeMethod.ongoingDamage} ongoing damage` : ""}`;
 			badgeHtml += ` <span class="badge badge-danger" title="${methodTitle}">🩸 ${activeMethod.name}</span>`;
+		}
+
+		// Show upgrade/gemstone badges for auto-generated attacks with upgraded items
+		if (attack.sourceItem?.appliedUpgrades?.length) {
+			const upgradeNames = attack.sourceItem.appliedUpgrades.map(u => u.name).join(", ");
+			badgeHtml += ` <span class="badge badge-info" title="Upgrades: ${upgradeNames}">⚒ ${attack.sourceItem.appliedUpgrades.length}</span>`;
+		}
+		if (attack.sourceItem?.socketedGemstones?.length) {
+			const gem = attack.sourceItem.socketedGemstones[0];
+			badgeHtml += ` <span class="badge badge-success" title="${gem.name}">💎 ${gem.gemName || gem.name}</span>`;
 		}
 
 		return e_({outer: `
