@@ -12,7 +12,7 @@ class CharacterSheetInventory {
 		this._starredFilter = false;
 		this._currentPage = 0;
 		this._itemsPerPage = 50; // Increased since we now group by category
-		this._sortBy = "name"; // name, weight, rarity, value
+		this._sortBy = "rarity"; // name, weight, rarity, value
 		this._sortAsc = true;
 		this._collapsedCategories = new Set(); // Track collapsed category sections
 
@@ -297,6 +297,7 @@ class CharacterSheetInventory {
 			{value: "wondrous", label: "Wondrous", emoji: "✨"},
 			{value: "gear", label: "Gear", emoji: "🎒"},
 			{value: "tool", label: "Tools", emoji: "🔧"},
+			{value: "gemstone", label: "Gemstones", emoji: "💎"},
 		];
 		let selectedTypes = new Set(); // Empty = all types
 
@@ -342,7 +343,7 @@ class CharacterSheetInventory {
 		const updateTypeText = () => {
 			const checked = [...typeDropdown.querySelectorAll("input:checked")];
 			if (checked.length === 0) {
-				typeText.textContent = "No Types";
+				typeText.textContent = "No Types Selected";
 				selectedTypes = new Set(["__NONE__"]);
 			} else if (checked.length === itemTypes.length) {
 				typeText.textContent = "All Types";
@@ -421,7 +422,7 @@ class CharacterSheetInventory {
 		const updateRarityText = () => {
 			const checked = [...rarityDropdown.querySelectorAll("input:checked")];
 			if (checked.length === 0) {
-				rarityText.textContent = "No Rarities";
+				rarityText.textContent = "No Rarities Selected";
 				selectedRarities = new Set(["__NONE__"]);
 			} else if (checked.length === rarities.length) {
 				rarityText.textContent = "All Rarities";
@@ -570,6 +571,54 @@ class CharacterSheetInventory {
 		const consumeBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", txt: "🧪 Consumables"});
 		quickFilters.append(consumeBtn);
 
+		// Weapon property filter buttons
+		const weaponProps = ["finesse", "heavy", "light", "reach", "thrown", "two-handed", "versatile", "loading", "ammunition"];
+		let selectedProps = new Set();
+
+		const propLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Properties:"});
+		modalInner.append(propLabel);
+		const propBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
+		modalInner.append(propBtns);
+
+		weaponProps.forEach(prop => {
+			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: prop.toTitleCase()});
+			btn.addEventListener("click", () => {
+				if (selectedProps.has(prop)) {
+					selectedProps.delete(prop);
+					btn.classList.remove("active");
+				} else {
+					selectedProps.add(prop);
+					btn.classList.add("active");
+				}
+				renderList();
+			});
+			propBtns.append(btn);
+		});
+
+		// Weapon mastery filter buttons
+		const masteryTypes = ["cleave", "graze", "nick", "push", "sap", "slow", "topple", "vex"];
+		let selectedMasteries = new Set();
+
+		const masteryLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Masteries:"});
+		modalInner.append(masteryLabel);
+		const masteryBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
+		modalInner.append(masteryBtns);
+
+		masteryTypes.forEach(mastery => {
+			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: mastery.toTitleCase()});
+			btn.addEventListener("click", () => {
+				if (selectedMasteries.has(mastery)) {
+					selectedMasteries.delete(mastery);
+					btn.classList.remove("active");
+				} else {
+					selectedMasteries.add(mastery);
+					btn.classList.add("active");
+				}
+				renderList();
+			});
+			masteryBtns.append(btn);
+		});
+
 		// Results count
 		const resultsCount = e_({outer: `<div class="charsheet__modal-results-count"></div>`});
 		modalInner.append(resultsCount);
@@ -604,10 +653,33 @@ class CharacterSheetInventory {
 				if (filterMagic && !this._isMagicItem(item)) return false;
 				if (filterMundane && this._isMagicItem(item)) return false;
 				if (filterConsumable && !this._isConsumable(item)) return false;
+				// Weapon property filter
+				if (selectedProps.size > 0) {
+					const propMap = {"F": "finesse", "H": "heavy", "L": "light", "R": "reach", "T": "thrown", "2H": "two-handed", "V": "versatile", "LD": "loading", "A": "ammunition"};
+					const itemProps = (item.property || []).map(p => propMap[p] || p.toLowerCase());
+					if (!Array.from(selectedProps).some(p => itemProps.includes(p))) return false;
+				}
+				// Weapon mastery filter
+				if (selectedMasteries.size > 0) {
+					const itemMasteries = (item.mastery || []).map(m => {
+						const name = typeof m === "string" ? m : m.name || m;
+						return name.toLowerCase();
+					});
+					if (!Array.from(selectedMasteries).some(m => itemMasteries.includes(m))) return false;
+				}
 				return true;
 			};
 
 			const filtered = items.filter(filterItem).slice(0, 150); // Limit for performance
+
+			// Sort filtered items by rarity then name
+			const rarityOrder = {"artifact": 6, "legendary": 5, "very rare": 4, "rare": 3, "uncommon": 2, "common": 1, "none": 0};
+			filtered.sort((a, b) => {
+				const ra = rarityOrder[(a.rarity || "none").toLowerCase()] || 0;
+				const rb = rarityOrder[(b.rarity || "none").toLowerCase()] || 0;
+				if (ra !== rb) return ra - rb;
+				return a.name.localeCompare(b.name);
+			});
 			const totalMatches = items.filter(filterItem).length;
 
 			resultsCount.innerHTML = `<span>${filtered.length}${totalMatches > 150 ? ` of ${totalMatches}` : ""} item${filtered.length !== 1 ? "s" : ""} found</span>${totalMatches > 150 ? `<span class="ml-2" style="opacity: 0.7;">(showing first 150)</span>` : ""}`;
@@ -718,18 +790,18 @@ class CharacterSheetInventory {
 				filterMagic = !filterMagic;
 				if (filterMagic && filterMundane) {
 					filterMundane = false;
-					mundaneBtn.classList.remove("ve-active");
+					mundaneBtn.classList.remove("active");
 				}
 			}
 			if (prop === "mundane") {
 				filterMundane = !filterMundane;
 				if (filterMundane && filterMagic) {
 					filterMagic = false;
-					magicBtn.classList.remove("ve-active");
+					magicBtn.classList.remove("active");
 				}
 			}
 			if (prop === "consumable") filterConsumable = !filterConsumable;
-			btn.classList.toggle("ve-active");
+			btn.classList.toggle("active");
 			renderList();
 		};
 
@@ -795,6 +867,8 @@ class CharacterSheetInventory {
 		if (item.wondrous) return true;
 		if (item.reqAttune) return true;
 		if (item.bonusWeapon || item.bonusAc || item.bonusSpellAttack) return true;
+		if (["WD", "ST", "RG", "RD"].includes(item.type)) return true;
+		if (item.bonusWeaponDamage || item.bonusSavingThrow || item.bonusSpellDamage) return true;
 		return false;
 	}
 
@@ -821,6 +895,7 @@ class CharacterSheetInventory {
 			"wondrous": "✨",
 			"gear": "🎒",
 			"tool": "🔧",
+			"gemstone": "💎",
 		};
 		return emojis[type] || "📦";
 	}
@@ -870,6 +945,25 @@ class CharacterSheetInventory {
 			</div>
 		`}));
 
+		// Empowerment button for base gems (TGTT)
+		const itemType = item.type?.split("|")[0];
+		if (itemType === "$G" && !item._isEmpoweredGemstone) {
+			const isTgtt = this._page._state?._data?.settings?.enableTgtt;
+			if (isTgtt && this._page._upgrades) {
+				const empowerSection = e_({outer: `<div class="mt-3 p-2" style="background: var(--cs-bg-secondary, #f0f7ff); border-radius: 6px;"></div>`});
+				empowerSection.append(e_({outer: `
+					<p class="ve-small mb-2"><strong>💎 Gemstone Empowerment</strong> — Imbue this gem with magical power through a crafting check.</p>
+				`}));
+				const empowerBtn = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-success", html: `<span class="glyphicon glyphicon-flash"></span> Empower ${item.name}`});
+				empowerBtn.addEventListener("click", async () => {
+					doClose(false);
+					await this._page._upgrades.showEmpowermentModal({fromInventoryGem: {id: item.id, name: item.name, source: item.source}});
+				});
+				empowerSection.append(empowerBtn);
+				modalInner.append(empowerSection);
+			}
+		}
+
 		const closeFooter = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			<button class="ve-btn ve-btn-default">Close</button>
 		</div>`;
@@ -891,6 +985,8 @@ class CharacterSheetInventory {
 		if (item.wondrous) return "wondrous";
 		if (item.type === "AT" || item.type === "T") return "tool";
 		if (item.type === "G" || item.type === "SCF") return "gear";
+		if (typeBase === "$G") return "gemstone";
+		if (item._isEmpoweredGemstone) return "gemstone";
 		return "gear";
 	}
 
@@ -906,6 +1002,8 @@ class CharacterSheetInventory {
 		if (item.type === "RG") return "Ring";
 		if (item.wondrous) return "Wondrous";
 		if (item.type === "AT" || item.type === "T") return "Tool";
+		if (typeBase === "$G") return "Gemstone";
+		if (item._isEmpoweredGemstone) return "Empowered Gem";
 		return "";
 	}
 
@@ -2790,6 +2888,25 @@ class CharacterSheetInventory {
 
 		modalInner.append(e_({outer: `<div>${itemData ? this._renderItemDetails(itemData) : this._renderBasicItemDetails(item)}</div>`}));
 
+		// Empowerment button for base gems in inventory (TGTT)
+		const itemType = (itemData || item).type?.split("|")[0];
+		if (itemType === "$G" && !item._isEmpoweredGemstone) {
+			const isTgtt = this._page._state?._data?.settings?.enableTgtt;
+			if (isTgtt && this._page._upgrades) {
+				const empowerSection = e_({outer: `<div class="mt-3 p-2" style="background: var(--cs-bg-secondary, #f0f7ff); border-radius: 6px;"></div>`});
+				empowerSection.append(e_({outer: `
+					<p class="ve-small mb-2"><strong>💎 Gemstone Empowerment</strong> — Imbue this gem with magical power through a crafting check.</p>
+				`}));
+				const empowerBtn = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-success", html: `<span class="glyphicon glyphicon-flash"></span> Empower ${item.name}`});
+				empowerBtn.addEventListener("click", async () => {
+					doClose(false);
+					await this._page._upgrades.showEmpowermentModal({fromInventoryGem: {id: item.id, name: item.name, source: item.source}});
+				});
+				empowerSection.append(empowerBtn);
+				modalInner.append(empowerSection);
+			}
+		}
+
 		const closeFooter = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			<button class="ve-btn ve-btn-default">Close</button>
 		</div>`;
@@ -3608,6 +3725,7 @@ class CharacterSheetInventory {
 		if (item.wondrous) return "Wondrous Items";
 		if (item.type === "AT" || item.type === "T") return "Tools";
 		if (item.type === "G" || item.type === "SCF") return "Adventuring Gear";
+		if (typeBase === "$G" || item._isEmpoweredGemstone) return "Gemstones";
 		return "Other";
 	}
 
@@ -3625,6 +3743,7 @@ class CharacterSheetInventory {
 			"Wondrous Items": "✨",
 			"Tools": "🔧",
 			"Adventuring Gear": "🎒",
+			"Gemstones": "💎",
 			"Other": "📦",
 		};
 		return icons[category] || "📦";
@@ -3643,7 +3762,8 @@ class CharacterSheetInventory {
 				const rarityOrder = {none: 0, common: 1, uncommon: 2, rare: 3, "very rare": 4, legendary: 5, artifact: 6};
 				const ra = rarityOrder[(a.rarity || "none").toLowerCase()] || 0;
 				const rb = rarityOrder[(b.rarity || "none").toLowerCase()] || 0;
-				return ra - rb;
+				if (ra !== rb) return ra - rb;
+				return a.name.localeCompare(b.name);
 			},
 			value: (a, b) => ((a.value || 0) * a.quantity) - ((b.value || 0) * b.quantity),
 		};
@@ -3691,7 +3811,7 @@ class CharacterSheetInventory {
 			} else {
 				emptyDiv.innerHTML = `<div class="ve-muted mb-2">Your inventory is empty</div>`;
 				const addBtn = e_({tag: "button", clazz: "btn btn-primary btn-sm", text: "＋ Add Item"});
-				addBtn.addEventListener("click", () => this._showAddCustomItem());
+				addBtn.addEventListener("click", () => this._showItemPicker());
 				emptyDiv.append(addBtn);
 			}
 			container.append(emptyDiv);
@@ -3699,7 +3819,7 @@ class CharacterSheetInventory {
 		}
 
 		// Group items by category
-		const categoryOrder = ["Starred", "Weapons", "Armor", "Consumables", "Wondrous Items", "Tools", "Adventuring Gear", "Other"];
+		const categoryOrder = ["Starred", "Weapons", "Armor", "Consumables", "Wondrous Items", "Gemstones", "Tools", "Adventuring Gear", "Other"];
 		const categories = {};
 
 		// Separate starred items for the Starred category (if not filtering by starred)
