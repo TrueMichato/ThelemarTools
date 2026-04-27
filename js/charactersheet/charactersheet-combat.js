@@ -2528,7 +2528,8 @@ class CharacterSheetCombat {
 			try {
 				// Try to get hover link based on feature type
 				if (feature.optionalFeatureTypes?.length) {
-					nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, feature.name, feature.source);
+					const isCM = CharacterSheetClassUtils.isCombatMethod(feature);
+					nameHtml = this._page.getHoverLink(isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES, feature.name, feature.source);
 					hasHoverLink = true;
 				} else if (feature.featureType === "Class" && feature.className) {
 					// Class features - use proper page and hash
@@ -5641,7 +5642,7 @@ class CharacterSheetCombat {
 				if (this._page?.getHoverLink && method.source) {
 					try {
 						methodNameHtml = this._page.getHoverLink(
-							UrlUtil.PG_OPT_FEATURES,
+							UrlUtil.PG_COMBAT_METHODS,
 							method.name,
 							method.source,
 						);
@@ -6475,7 +6476,7 @@ class CharacterSheetCombat {
 				let methodNameHtml = `<span class="bold">${method.name}</span>`;
 				try {
 					if (this._page?.getHoverLink && method.source) {
-						methodNameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, method.name, method.source);
+						methodNameHtml = this._page.getHoverLink(UrlUtil.PG_COMBAT_METHODS, method.name, method.source);
 					}
 				} catch (e) {
 					// Fall back to plain text

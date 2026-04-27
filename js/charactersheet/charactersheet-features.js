@@ -1626,10 +1626,11 @@ class CharacterSheetFeatures {
 						const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_BACKGROUNDS, source: background.source || Parser.SRC_XPHB, hash: bgHash});
 						featureNameHtml = `<a href="${UrlUtil.PG_BACKGROUNDS}#${bgHash}" ${hoverAttrs}>${feature.name}</a>`;
 					}
-				// Optional features (invocations, etc.) - link to optional features page with hover
+				// Optional features (invocations, combat methods, etc.) - link to appropriate page with hover
 				} else if (feature.featureType === "Optional Feature") {
+					const isCM = CharacterSheetClassUtils.isCombatMethod(feature);
 					featureNameHtml = this._page.getHoverLink(
-						UrlUtil.PG_OPT_FEATURES,
+						isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES,
 						feature.name,
 						feature.source || Parser.SRC_XPHB,
 					);

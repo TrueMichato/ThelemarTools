@@ -116,7 +116,7 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(methodsTrait.entries.join(" ")).toContain("Rooted Stance");
 		expect(methodsTrait.entries.join(" ")).toContain("Flowing Strike");
 		expect(methodsTrait.entries.join(" ")).toContain("Crushing Wave");
-		expect(methodsTrait.entries.join(" ")).toContain("{@optfeature");
+		expect(methodsTrait.entries.join(" ")).toContain("{@combatmethod");
 		expect(methodsTrait.entries.join(" ")).toContain("save {@dc");
 
 		const methodsText = methodsTrait.entries.join(" ");

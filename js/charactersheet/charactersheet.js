@@ -5904,7 +5904,8 @@ class CharacterSheetPage {
 			}
 			// Optional features (invocations, combat methods, etc.)
 			if (feature.featureType === "Optional Feature" || feature.optionalfeatureType) {
-				return this.getHoverLink(UrlUtil.PG_OPT_FEATURES, feature.name, feature.source || Parser.SRC_XPHB);
+				const isCM = CharacterSheetClassUtils.isCombatMethod(feature);
+				return this.getHoverLink(isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES, feature.name, feature.source || Parser.SRC_XPHB);
 			}
 			// Species/Race features
 			if (feature.featureType === "Species" || feature.featureType === "Race") {
