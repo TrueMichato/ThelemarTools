@@ -1370,8 +1370,9 @@ class CharacterSheetLevelUp {
 					header.innerHTML = hoverLink;
 				} else if (this._page?.getHoverLink && feature.featureType) {
 					// Optional feature
+					const isCM = CharacterSheetClassUtils.isCombatMethod(feature);
 					const hoverLink = this._page.getHoverLink(
-						UrlUtil.PG_OPT_FEATURES,
+						isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES,
 						feature.name,
 						feature.source || Parser.SRC_XPHB,
 					);
@@ -2480,6 +2481,7 @@ class CharacterSheetLevelUp {
 			const section = e_({outer: `
 				<div class="charsheet__levelup-opt-gain mb-3">
 					<p><strong>${gain.name}:</strong></p>
+					${CharacterSheetClassUtils.getCombatMethodsSystemSummary()}
 					<div class="charsheet__levelup-traditions mb-3">
 						<p class="ve-muted ve-small mb-2">You haven't selected Combat Traditions yet. Please choose ${traditionCount} traditions first:</p>
 						<div class="charsheet__levelup-tradition-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--rgb-border-grey); border-radius: 4px; padding: 0.5rem;"></div>
@@ -2493,11 +2495,13 @@ class CharacterSheetLevelUp {
 			const methodsContainer = section.querySelector(".charsheet__levelup-methods-container");
 
 			availableTraditions.forEach(trad => {
+				const desc = CharacterSheetClassUtils.getTraditionDescription(trad.code);
 				const item = e_({outer: `
 					<label class="charsheet__builder-tradition-item d-block mb-1" style="cursor: pointer;">
 						<input type="checkbox" class="mr-2">
 						<strong>${trad.name}</strong>
 						<span class="ve-muted ve-small ml-1">(${trad.code})</span>
+						${desc ? `<div class="ve-muted ve-small ml-4">${desc}</div>` : ""}
 					</label>
 				`});
 
@@ -2629,7 +2633,7 @@ class CharacterSheetLevelUp {
 						Parser.SRC_XPHB,
 						Parser.SRC_PHB,
 					]);
-					methodName.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, method.name, resolvedSource);
+					methodName.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_COMBAT_METHODS, method.name, resolvedSource);
 				} catch (e) {
 					methodName.innerHTML = `<strong>${method.name}</strong>`;
 				}
@@ -2793,7 +2797,8 @@ class CharacterSheetLevelUp {
 						Parser.SRC_XPHB,
 						Parser.SRC_PHB,
 					]);
-					optName.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, opt.name, resolvedSource);
+					const page = CharacterSheetClassUtils.isCombatMethod(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+					optName.innerHTML = CharacterSheetPage.getHoverLink(page, opt.name, resolvedSource);
 				} catch (e) {
 					optName.innerHTML = `<strong>${opt.name}</strong>`;
 				}
@@ -3007,7 +3012,8 @@ class CharacterSheetLevelUp {
 							Parser.SRC_PHB,
 						]);
 						try {
-							nameSpan.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, refParts[0], resolvedSource);
+							const page = CharacterSheetClassUtils.isCombatMethod(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+							nameSpan.innerHTML = CharacterSheetPage.getHoverLink(page, refParts[0], resolvedSource);
 						} catch (e) {
 							nameSpan.textContent = opt.name;
 						}

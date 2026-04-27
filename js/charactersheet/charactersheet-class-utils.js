@@ -1548,6 +1548,50 @@ class CharacterSheetClassUtils {
 		"UH": "Unerring Hawk",
 	};
 
+	static TRADITION_CODE_TO_DESC = {
+		"AM": "Focuses on hardiness, might, and enduring your opponents' blows.",
+		"AK": "Blends magic with martial prowess.",
+		"AS": "Masters space combat and aerial maneuvers.",
+		"BU": "Develops deep connections with animal companions.",
+		"BZ": "Masters ranged combat and thrown weapons.",
+		"CJ": "Uses humor and wit as weapons.",
+		"EB": "Channels dark magic through martial techniques.",
+		"GH": "Embodies chivalry and noble combat.",
+		"MG": "Focuses on defense, parries, and reflection.",
+		"MS": "Emphasizes deception, feinting, and mental games.",
+		"RC": "Prizes speed, swift strikes, and mobility.",
+		"RE": "Requires awareness, concentration, and discipline.",
+		"SK": "Focuses on teamwork and fighting alongside allies.",
+		"SS": "Masters mounted combat.",
+		"TI": "Channels confidence, conviction, and zealous pursuit.",
+		"TC": "Embraces animalistic, predatory combat.",
+		"UW": "Embodies mastery, patience, and refined training.",
+		"UH": "Perfects precision strikes and keen observation.",
+	};
+
+	/**
+	 * Get a short description for a tradition by code.
+	 * @param {string} tradCode - Two-letter code
+	 * @returns {string}
+	 */
+	static getTraditionDescription (tradCode) {
+		return CharacterSheetClassUtils.TRADITION_CODE_TO_DESC[tradCode] || "";
+	}
+
+	/**
+	 * Returns a short explanatory blurb about the combat methods system for use
+	 * in Builder/LevelUp/QuickBuild UIs.
+	 * @returns {string} HTML string
+	 */
+	static getCombatMethodsSystemSummary () {
+		return `<div class="ve-small ve-muted mb-2">`
+			+ `<p class="mb-1"><strong>Combat Methods</strong> are tactical techniques fueled by <strong>Stamina</strong> (pool = 2× your proficiency bonus; regains on short/long rest).</p>`
+			+ `<p class="mb-1"><strong>Traditions</strong> are schools of martial technique — like schools of magic for spellcasters. You must be proficient in a tradition to learn its methods.</p>`
+			+ `<p class="mb-1">Methods are organized into <strong>degrees</strong> (1st–5th). Your class level determines the highest degree you can learn.</p>`
+			+ `<p class="mb-0"><strong>Method DC</strong> = 8 + proficiency bonus + STR or DEX modifier (your choice).</p>`
+			+ `</div>`;
+	}
+
 	static TRADITION_NAME_TO_CODE = Object.entries(CharacterSheetClassUtils.TRADITION_CODE_TO_NAME)
 		.reduce((acc, [code, name]) => ({...acc, [name.toLowerCase()]: code}), {});
 

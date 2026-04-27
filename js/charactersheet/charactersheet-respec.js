@@ -863,10 +863,10 @@ class CharacterSheetRespec {
 
 		let selectedTraditions = [...(history.choices?.combatTraditions || [])];
 
-		modalInner.append(e_({outer: `
+		modalInner.append(e_({outer: `<div>
 			<p class="ve-muted mb-2">Choose up to ${requiredTraditions} traditions for this level history entry.</p>
 			<div class="ve-small ve-muted mb-2">Selected: <span id="respec-tradition-count">${selectedTraditions.length}</span>/${requiredTraditions}</div>
-		`}));
+		</div>`}));
 
 		const list = e_({tag: "div"});
 		Object.assign(list.style, {display: "flex", flexWrap: "wrap", gap: "8px"});
@@ -1086,10 +1086,10 @@ class CharacterSheetRespec {
 
 		let selectedNames = new Set(currentNames);
 
-		modalInner.append(e_({outer: `
+		modalInner.append(e_({outer: `<div>
 			<p class="ve-muted mb-2">Choose ${requiredCount} ${choice.label.toLowerCase()} for this level.</p>
 			<div class="ve-small ve-muted mb-2">Selected: <span id="respec-optfeat-count">${selectedNames.size}</span>/${requiredCount}</div>
-		`}));
+		</div>`}));
 
 		const list = e_({tag: "div"});
 		Object.assign(list.style, {maxHeight: "60vh", overflowY: "auto", border: "1px solid var(--rgb-border-grey)", borderRadius: "4px", padding: "0.5rem"});

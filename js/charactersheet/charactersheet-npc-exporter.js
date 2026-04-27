@@ -951,7 +951,7 @@ class CharacterSheetNpcExporter {
 					const stanceMark = m.isStance ? " [Stance]" : "";
 					const safeName = this._getSafeInlineText(m.name, {maxLen: 80}) || "Method";
 					const safeSource = this._getSafeSourceJson(m.source || Parser.SRC_TGTT || Parser.SRC_XPHB);
-					const methodTag = `{@optfeature ${safeName}|${safeSource}}`;
+					const methodTag = `{@combatmethod ${safeName}|${safeSource}}`;
 					return `${methodTag}${actionType}${stanceMark}`;
 				});
 

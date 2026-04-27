@@ -2445,6 +2445,7 @@ class CharacterSheetQuickBuild {
 		const section = e_({outer: `
 			<div class="charsheet__quickbuild-section mb-3">
 				<h5>${gain.name} <span class="badge badge-primary">${selectedList.length}/${gain.totalNeeded}</span></h5>
+				${CharacterSheetClassUtils.getCombatMethodsSystemSummary()}
 				<p class="ve-muted ve-small">Max degree: ${maxDegree}${CharacterSheetClassUtils.getOrdinalSuffix(maxDegree)}</p>
 			</div>
 		`});
@@ -2475,11 +2476,13 @@ class CharacterSheetQuickBuild {
 
 			availableTraditions.filter(trad => !subclassGrantedCodes.includes(trad.code)).forEach(trad => {
 				const isChecked = this._selections._combatTraditions.includes(trad.code);
+				const desc = CharacterSheetClassUtils.getTraditionDescription(trad.code);
 				const item = e_({outer: `
 					<label class="d-block ve-small mb-1" style="cursor: pointer; padding: 4px 6px;">
 						<input type="checkbox" class="mr-2" ${isChecked ? "checked" : ""}>
 						<strong>${trad.name}</strong>
 						<span class="ve-muted ml-1">(${trad.code})</span>
+						${desc ? `<div class="ve-muted" style="margin-left: 1.5rem; font-size: 0.85em;">${desc}</div>` : ""}
 					</label>
 				`});
 
@@ -2581,7 +2584,7 @@ class CharacterSheetQuickBuild {
 								Parser.SRC_XPHB,
 								Parser.SRC_PHB,
 							]);
-							const link = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, opt.name, resolvedSource);
+							const link = CharacterSheetPage.getHoverLink(UrlUtil.PG_COMBAT_METHODS, opt.name, resolvedSource);
 							if (typeof link === "string") methodName.innerHTML = link;
 							else methodName.append(link);
 						} catch (e) {
@@ -2936,7 +2939,8 @@ class CharacterSheetQuickBuild {
 							Parser.SRC_XPHB,
 							Parser.SRC_PHB,
 						]);
-						const link = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, refParts[0], resolvedSource);
+						const page = CharacterSheetClassUtils.isCombatMethod(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+						const link = CharacterSheetPage.getHoverLink(page, refParts[0], resolvedSource);
 						if (typeof link === "string") featOptName.innerHTML = link;
 						else featOptName.append(link);
 					} catch (e) {
@@ -3670,7 +3674,10 @@ class CharacterSheetQuickBuild {
 			});
 			Object.entries(byType).forEach(([typeName, items]) => {
 				const row = e_({outer: `<div class="ve-small mb-1"></div>`});
-				const links = items.map(f => makeHoverLink(f, UrlUtil.PG_OPT_FEATURES)).join(", ");
+				const links = items.map(f => {
+					const page = CharacterSheetClassUtils.isCombatMethod(f) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+					return makeHoverLink(f, page);
+				}).join(", ");
 				row.innerHTML = `<strong>${typeName}</strong> (${items.length}): ${links}`;
 				optSummary.append(row);
 			});
@@ -3691,7 +3698,8 @@ class CharacterSheetQuickBuild {
 					const row = e_({outer: `<div class="ve-small mb-1"><strong>${featureName}</strong> (${className} ${classLevel}): </div>`});
 					const links = list.map(f => {
 						if (f.featureType || f.type === "optionalfeature") {
-							return CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, f.name, f.source || Parser.SRC_XPHB);
+							const page = CharacterSheetClassUtils.isCombatMethod(f) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+							return CharacterSheetPage.getHoverLink(page, f.name, f.source || Parser.SRC_XPHB);
 						}
 						if (f.type === "classFeature" && f.ref) {
 							try {
@@ -3705,7 +3713,8 @@ class CharacterSheetQuickBuild {
 							}
 						}
 						if (f.source) {
-							return CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, f.name, f.source);
+							const page = CharacterSheetClassUtils.isCombatMethod(f) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+							return CharacterSheetPage.getHoverLink(page, f.name, f.source);
 						}
 						return f.name;
 					});

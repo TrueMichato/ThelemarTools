@@ -5367,6 +5367,7 @@ class CharacterSheetBuilder {
 		const section = e_({outer: `
 			<div class="charsheet__builder-combat-methods mb-3">
 				<h6 class="mt-2 mb-1">Combat Traditions & Methods</h6>
+				${CharacterSheetClassUtils.getCombatMethodsSystemSummary()}
 				<p class="ve-small ve-muted">First choose ${traditionCount} traditions you're proficient with, then select ${methodCount} methods from those traditions.</p>
 				
 				<div class="charsheet__builder-traditions mb-2">
@@ -5389,11 +5390,13 @@ class CharacterSheetBuilder {
 		// Render tradition selection
 		availableTraditions.forEach(trad => {
 			const isSelected = this._selectedCombatTraditions.includes(trad.code);
+			const desc = CharacterSheetClassUtils.getTraditionDescription(trad.code);
 			const item = e_({outer: `
 				<label class="charsheet__builder-tradition-item d-block mb-1" style="cursor: pointer;">
 					<input type="checkbox" class="mr-2" ${isSelected ? "checked" : ""}>
 					<strong>${trad.name}</strong>
 					<span class="ve-muted ve-small ml-1">(${trad.code})</span>
+					${desc ? `<div class="ve-muted ve-small ml-4">${desc}</div>` : ""}
 				</label>
 			`});
 
@@ -5505,7 +5508,7 @@ class CharacterSheetBuilder {
 						Parser.SRC_XPHB,
 						Parser.SRC_PHB,
 					]);
-					methodName.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, method.name, resolvedSource);
+					methodName.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_COMBAT_METHODS, method.name, resolvedSource);
 				} catch (e) {
 					methodName.textContent = method.name;
 				}
@@ -5610,7 +5613,8 @@ class CharacterSheetBuilder {
 					Parser.SRC_XPHB,
 					Parser.SRC_PHB,
 				]);
-				optName.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, opt.name, resolvedSource);
+				const page = CharacterSheetClassUtils.isCombatMethod(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+				optName.innerHTML = CharacterSheetPage.getHoverLink(page, opt.name, resolvedSource);
 			} catch (e) {
 				optName.textContent = opt.name;
 			}
@@ -5954,7 +5958,8 @@ class CharacterSheetBuilder {
 						Parser.SRC_PHB,
 					]);
 					try {
-						nameSpan.innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_OPT_FEATURES, refParts[0], resolvedSource);
+						const page = CharacterSheetClassUtils.isCombatMethod(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+						nameSpan.innerHTML = CharacterSheetPage.getHoverLink(page, refParts[0], resolvedSource);
 					} catch (e) {
 						nameSpan.textContent = opt.name;
 					}
