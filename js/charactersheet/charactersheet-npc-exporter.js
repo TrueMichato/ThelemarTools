@@ -87,6 +87,8 @@ class CharacterSheetNpcExporter {
 
 		const methodsBlock = this._getCombatMethodsBlock(state, {npcName});
 		const specialEquipmentBlock = this._getSpecialEquipmentBlock(state);
+		const armorUpgradeBlock = this._getArmorUpgradeBlock(state);
+		const gemstoneNotesBlock = this._getGemstoneNotesBlock(state);
 		const itemUseBlocks = this._getMagicItemUseBlocks(state, {npcName});
 		const spellcastingBlock = this._getSpellcastingBlock(state);
 
@@ -140,6 +142,8 @@ class CharacterSheetNpcExporter {
 				...(customAbilityBlocks.trait || []),
 				...(namedModifierTrait ? [namedModifierTrait] : []),
 				...(specialEquipmentBlock ? [specialEquipmentBlock] : []),
+				...(armorUpgradeBlock ? [armorUpgradeBlock] : []),
+				...(gemstoneNotesBlock ? [gemstoneNotesBlock] : []),
 				...(methodsBlock ? [methodsBlock] : []),
 			],
 			action: [...actions, ...(featureBlocks.action || []), ...(customAbilityBlocks.action || []), ...(itemUseBlocks.action || [])],
@@ -488,8 +492,17 @@ class CharacterSheetNpcExporter {
 			const item = key ? activeWeaponByName.get(key) : null;
 			if (!item) return attack;
 
-			const magicAttackBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponAttack) || 0);
-			const magicDamageBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponDamage) || 0);
+			// Use effective bonuses (includes upgrade effects) when available
+			const eff = state.getEffectiveItemBonuses?.(item.id);
+			let magicAttackBonus;
+			let magicDamageBonus;
+			if (eff) {
+				magicAttackBonus = (Number(eff.bonusWeapon) || 0) + (Number(eff.bonusWeaponAttack) || 0);
+				magicDamageBonus = (Number(eff.bonusWeapon) || 0) + (Number(eff.bonusWeaponDamage) || 0);
+			} else {
+				magicAttackBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponAttack) || 0);
+				magicDamageBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponDamage) || 0);
+			}
 			const masteryProperty = this._getMasteryName(item.mastery?.[0]);
 
 			return {
@@ -511,14 +524,30 @@ class CharacterSheetNpcExporter {
 			if (attackNames.has(key)) return;
 			attackNames.add(key);
 
-			const magicAttackBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponAttack) || 0);
-			const magicDamageBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponDamage) || 0);
+			// Use effective bonuses (includes upgrade effects) when available
+			const eff = state.getEffectiveItemBonuses?.(item.id);
+			let magicAttackBonus;
+			let magicDamageBonus;
+			let damageDieIncrease = 0;
+			if (eff) {
+				magicAttackBonus = (Number(eff.bonusWeapon) || 0) + (Number(eff.bonusWeaponAttack) || 0);
+				magicDamageBonus = (Number(eff.bonusWeapon) || 0) + (Number(eff.bonusWeaponDamage) || 0);
+				damageDieIncrease = eff.damageDieIncrease || 0;
+			} else {
+				magicAttackBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponAttack) || 0);
+				magicDamageBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponDamage) || 0);
+			}
+			// Apply Superior upgrade die increase to exported damage
+			let exportDamage = derived.damage;
+			if (damageDieIncrease > 0 && typeof CharacterSheetUpgrades !== "undefined") {
+				exportDamage = CharacterSheetUpgrades.increaseDamageDie(exportDamage, damageDieIncrease);
+			}
 			const masteryProperty = this._getMasteryName(item.mastery?.[0]);
 			attacks.push({
 				...derived,
 				isMelee: !/\d+\s*\/\s*\d+|range/i.test(String(derived.range || "")),
 				attackBonus: (Number(derived.attackBonus) || 0) + magicAttackBonus,
-				damage: this._addFlatBonusToDiceFormula(derived.damage, magicDamageBonus),
+				damage: this._addFlatBonusToDiceFormula(exportDamage, magicDamageBonus),
 				_sourceItem: item,
 				weaponKey: `${item.name}|${item.source || Parser.SRC_XPHB}`,
 				mastery: item.mastery || [],
@@ -594,6 +623,26 @@ class CharacterSheetNpcExporter {
 		return {
 			name: "Special Equipment",
 			entries,
+		};
+	}
+
+	static _getArmorUpgradeBlock (state) {
+		if (typeof CharacterSheetUpgrades === "undefined") return null;
+		const notes = state.getArmorUpgradeNotes?.() || [];
+		if (!notes.length) return null;
+		return {
+			name: "Armor Upgrades",
+			entries: notes.map(n => `{@b ${n.label}.} ${n.description}`),
+		};
+	}
+
+	static _getGemstoneNotesBlock (state) {
+		if (typeof CharacterSheetUpgrades === "undefined") return null;
+		const passiveNotes = state.getGemstonePassiveNotes?.() || [];
+		if (!passiveNotes.length) return null;
+		return {
+			name: "Gemstone Effects",
+			entries: passiveNotes,
 		};
 	}
 
@@ -750,6 +799,21 @@ class CharacterSheetNpcExporter {
 			if (magicAttackBonus) magicBits.push(`${this._toSignedStr(magicAttackBonus)} attack`);
 			if (magicDamageBonus) magicBits.push(`${this._toSignedStr(magicDamageBonus)} damage`);
 			parts.push(`Magic weapon (${magicBits.join(", ")})`);
+		}
+
+		// Weapon upgrade tags and notes from the source item
+		if (attack._sourceItem && typeof CharacterSheetUpgrades !== "undefined") {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects(attack._sourceItem);
+			if (eff.tags.length) parts.push(eff.tags.join(", "));
+			if (eff.bonusDamageDice) parts.push(`Plus {@damage ${eff.bonusDamageDice}} ${eff.bonusDamageType} damage`);
+			for (const note of eff.notes) parts.push(note);
+
+			// Gemstone effect summary
+			const gems = attack._sourceItem.socketedGemstones || [];
+			for (const gem of gems) {
+				const summary = CharacterSheetUpgrades.getGemstoneSummary(gem);
+				if (summary) parts.push(`Gemstone (${gem.gemName || gem.name}): ${summary}`);
+			}
 		}
 
 		const masteryEffect = state.getMasteryEffectsForAttack?.(attack);

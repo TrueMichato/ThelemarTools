@@ -121,6 +121,18 @@ it("should produce 2 elixirs at level 6", () => {
 | **Sidekick classes** | Missing | Warrior/Expert/Spellcaster sidekick classes |
 | **Epic Boon picker** | ✅ Implemented | XPHB level 19 Epic Boon section with ability score max 30 |
 
+### Item Upgrades & Gemstones
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Upgrade picker/application** | ✅ Implemented | Browse, prerequisite check, gold deduction |
+| **Gemstone empowerment** | ✅ Implemented | Crafting roll modal with DC/bonus |
+| **Gemstone socketing** | ✅ Implemented | Socket/unsocket, 1-per-item limit |
+| **Charge tracking** | ✅ Implemented | Use/restore, dawn recharge on long rest |
+| **Upgrade badges on items** | ✅ Implemented | Tags and gem names shown on item rows |
+| **Combat stat integration** | Partial | `getEffectiveItemBonuses()` exists but not yet wired into combat attack/damage display |
+| **Armor upgrade effects** | Partial | State tracked; AC/stealth effects not auto-applied |
+
 ### Combat Features
 
 | Feature | Status | Notes |
@@ -140,7 +152,7 @@ it("should produce 2 elixirs at level 6", () => {
 | **Concentration saves** | ✅ Implemented | DC calc, bonus aggregation, advantage detection |
 | **Sorcerous Restoration** | ✅ Implemented | SP recovery on short rest at level 20 |
 | **Combat round tracking** | ✅ Implemented | Start/end combat, round counter, auto-expire states |
-| **Dawn/dusk recharge** | Partial | Items recharge, but timing not tracked |
+| **Dawn/dusk recharge** | Partial | Items recharge; gemstones recharge at dawn on long rest |
 | **Per-encounter resources** | Missing | No concept of encounter-based recovery |
 | **Lair/Legendary actions** | Missing | Not applicable to PCs, but could be useful |
 

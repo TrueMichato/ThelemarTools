@@ -122,6 +122,16 @@ Benefits:
 - Collapsed sections by default
 - Quick-action floating buttons
 
+### Item Upgrade Combat Integration
+
+Wire upgrade bonuses into combat attack/damage calculations:
+
+- `getEffectiveItemBonuses()` already computes combined base + upgrade bonuses
+- Combat module should call this instead of reading raw item properties
+- Armor upgrades should auto-apply AC/stealth modifiers
+- Gemstone effects should appear in the combat feature list
+- Superior upgrade (die increase) should reflect in weapon damage display
+
 ---
 
 ## Long-Term Vision (Next Year)

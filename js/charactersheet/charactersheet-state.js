@@ -3586,6 +3586,16 @@ class CharacterSheetState {
 			this._data.activeCombatMethodEffects = [];
 		}
 
+		// Ensure inventory items have upgrade/gemstone arrays (backward compat)
+		if (Array.isArray(this._data.inventory)) {
+			for (const invItem of this._data.inventory) {
+				if (invItem.item) {
+					if (!Array.isArray(invItem.item.appliedUpgrades)) invItem.item.appliedUpgrades = [];
+					if (!Array.isArray(invItem.item.socketedGemstones)) invItem.item.socketedGemstones = [];
+				}
+			}
+		}
+
 		// Ensure combat traditions are normalized to canonical entries
 		this._data.combatTraditions = this._normalizeCombatTraditions(this._data.combatTraditions);
 		if ((!this._data.combatTraditions || !this._data.combatTraditions.length) && Array.isArray(this._data.settings?.combatTraditions)) {
@@ -6697,12 +6707,18 @@ class CharacterSheetState {
 	getItemAcBonus () { return this._data.ac.itemBonus || 0; }
 
 	// Item bonuses from equipped/attuned magic items
-	setItemBonuses (bonuses) { this._data.itemBonuses = bonuses || {}; }
+	setItemBonuses (bonuses) {
+		this._data.itemBonuses = bonuses || {};
+		// Store manual overrides so _recalculateItemBonuses merges rather than overwrites
+		this._data._manualItemBonuses = {...(bonuses || {})};
+	}
 	getItemBonuses () { return this._data.itemBonuses || {}; }
 	getItemBonus (type) { return this._data.itemBonuses?.[type] || 0; }
 	setItemBonus (type, value) {
 		if (!this._data.itemBonuses) this._data.itemBonuses = {};
 		this._data.itemBonuses[type] = value || 0;
+		if (!this._data._manualItemBonuses) this._data._manualItemBonuses = {};
+		this._data._manualItemBonuses[type] = value || 0;
 	}
 
 	/**
@@ -6711,14 +6727,53 @@ class CharacterSheetState {
 	 */
 	_recalculateItemBonuses () {
 		if (!this._data.itemBonuses) this._data.itemBonuses = {};
+		const manual = this._data._manualItemBonuses || {};
 
 		// Aggregate Ki save DC bonus (take highest from all items)
 		let maxKiDcBonus = 0;
+		// Aggregate spell attack / save DC bonuses (take highest from all equipped items, including upgrades)
+		let maxSpellAttack = 0;
+		let maxSpellSaveDc = 0;
+		// Aggregate crit threshold (take lowest from all equipped items, including upgrades)
+		let minCritThreshold = 20;
+
 		for (const invItem of this._data.inventory) {
 			const bonus = invItem.item?.kiSaveDcBonus || 0;
 			if (bonus > maxKiDcBonus) maxKiDcBonus = bonus;
+
+			// Only consider equipped items for combat bonuses
+			if (!invItem.equipped) continue;
+
+			// Base item bonuses
+			const baseSpellAtk = invItem.item?.bonusSpellAttack || 0;
+			const baseSpellDc = invItem.item?.bonusSpellSaveDc || 0;
+			const baseCrit = invItem.item?.critThreshold || 20;
+
+			// Upgrade bonuses (if CharacterSheetUpgrades module is loaded)
+			let upgradeSpellAtk = 0;
+			let upgradeSpellDc = 0;
+			let upgradeCritReduction = 0;
+			if (typeof CharacterSheetUpgrades !== "undefined" && invItem.item?.appliedUpgrades?.length) {
+				const effects = CharacterSheetUpgrades.getUpgradeEffects(invItem.item);
+				upgradeSpellAtk = effects.bonusSpellAttack;
+				upgradeSpellDc = effects.bonusSpellSaveDc;
+				upgradeCritReduction = effects.critThresholdReduction;
+			}
+
+			const totalSpellAtk = baseSpellAtk + upgradeSpellAtk;
+			const totalSpellDc = baseSpellDc + upgradeSpellDc;
+			const effectiveCrit = baseCrit - upgradeCritReduction;
+
+			if (totalSpellAtk > maxSpellAttack) maxSpellAttack = totalSpellAtk;
+			if (totalSpellDc > maxSpellSaveDc) maxSpellSaveDc = totalSpellDc;
+			if (effectiveCrit < minCritThreshold) minCritThreshold = effectiveCrit;
 		}
+
 		this._data.itemBonuses.kiSaveDc = maxKiDcBonus;
+		// Merge with manual overrides (take max of manual and calculated)
+		this._data.itemBonuses.spellAttack = Math.max(maxSpellAttack, manual.spellAttack || 0);
+		this._data.itemBonuses.spellSaveDc = Math.max(maxSpellSaveDc, manual.spellSaveDc || 0);
+		this._data.itemBonuses.critThreshold = minCritThreshold < 20 ? minCritThreshold : null;
 	}
 
 	// Defensive properties from equipped/attuned magic items
@@ -6746,6 +6801,42 @@ class CharacterSheetState {
 
 	getItemGrantedSpells () {
 		return this._data.itemGrantedSpells || [];
+	}
+
+	/**
+	 * Get effective item bonuses for a specific inventory item, including upgrade effects
+	 * @param {string} itemId - The item ID
+	 * @returns {object} Combined bonuses from base item + applied upgrades
+	 */
+	getEffectiveItemBonuses (itemId) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem) return {};
+
+		const item = invItem.item || invItem;
+		const base = {
+			bonusWeaponAttack: item.bonusWeaponAttack || 0,
+			bonusWeaponDamage: item.bonusWeaponDamage || 0,
+			bonusWeapon: item.bonusWeapon || 0,
+			bonusSpellAttack: item.bonusSpellAttack || 0,
+			bonusSpellSaveDc: item.bonusSpellSaveDc || 0,
+			critThreshold: item.critThreshold || 20,
+			damageDieIncrease: 0,
+		};
+
+		// Add upgrade effects
+		if (typeof CharacterSheetUpgrades !== "undefined") {
+			const effects = CharacterSheetUpgrades.getUpgradeEffects(item);
+			base.bonusWeaponAttack += effects.bonusWeaponAttack;
+			base.bonusWeaponDamage += effects.bonusWeaponDamage;
+			base.bonusSpellAttack += effects.bonusSpellAttack;
+			base.bonusSpellSaveDc += effects.bonusSpellSaveDc;
+			base.damageDieIncrease += effects.damageDieIncrease;
+			if (effects.critThresholdReduction > 0) {
+				base.critThreshold = (base.critThreshold || 20) - effects.critThresholdReduction;
+			}
+		}
+
+		return base;
 	}
 
 	// Senses granted by equipped/attuned magic items
@@ -6806,7 +6897,64 @@ class CharacterSheetState {
 			if (noStealthDisadv) return false;
 		}
 
+		// Check for "Muffled" armor upgrade (removes stealth disadvantage)
+		if (typeof CharacterSheetUpgrades !== "undefined") {
+			const armorEffects = CharacterSheetUpgrades.getArmorUpgradeEffects(armor);
+			if (armorEffects.muffled) return false;
+		}
+
 		return true;
+	}
+
+	/**
+	 * Get critical damage reduction from armor upgrades (Reinforced)
+	 * @returns {number} Amount to reduce critical hit damage from nonmagical attacks
+	 */
+	getCritDamageReduction () {
+		const armor = this._data.ac.armor;
+		if (!armor || typeof CharacterSheetUpgrades === "undefined") return 0;
+		return CharacterSheetUpgrades.getArmorUpgradeEffects(armor).critDamageReduction || 0;
+	}
+
+	/**
+	 * Get all armor upgrade notes for display in the AC/equipment area
+	 * @returns {Array<{label: string, description: string, type: string}>}
+	 */
+	getArmorUpgradeNotes () {
+		const armor = this._data.ac.armor;
+		if (!armor || typeof CharacterSheetUpgrades === "undefined") return [];
+		return CharacterSheetUpgrades.getArmorUpgradeNotes(armor);
+	}
+
+	/**
+	 * Get speed bonus from socketed gemstones (e.g., Journey gem: +10 speed)
+	 * @returns {number} Total speed bonus from gemstones
+	 */
+	getGemstoneSpeedBonus () {
+		if (typeof CharacterSheetUpgrades === "undefined") return 0;
+		let bonus = 0;
+		for (const invItem of this._data.inventory) {
+			if (!invItem.equipped) continue;
+			for (const gem of (invItem.item?.socketedGemstones || [])) {
+				if (gem.name?.toLowerCase() === "journey") bonus += 10;
+			}
+		}
+		return bonus;
+	}
+
+	/**
+	 * Get hover flight speed granted by Volant gemstone (2x walk speed)
+	 * @returns {number} Flight speed in feet, or 0 if no Volant gem equipped
+	 */
+	getGemstoneFlightSpeed () {
+		if (typeof CharacterSheetUpgrades === "undefined") return 0;
+		for (const invItem of this._data.inventory) {
+			if (!invItem.equipped) continue;
+			for (const gem of (invItem.item?.socketedGemstones || [])) {
+				if (gem.name?.toLowerCase() === "volant") return this.getWalkSpeed() * 2;
+			}
+		}
+		return 0;
 	}
 
 	/**
@@ -6909,7 +7057,8 @@ class CharacterSheetState {
 		const stateBonus = this.getSpeedBonusFromStates();
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
-		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
+		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
+		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
 		const walkMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
 		const exhaustionSpeedPenalty = this._getExhaustionSpeedPenalty();
 		const walk = Math.max(0, Math.floor(rawWalk * walkMultiplier * speedMultiplier) - exhaustionSpeedPenalty);
@@ -6945,6 +7094,9 @@ class CharacterSheetState {
 
 		// Apply item static speed overrides (e.g., Boots of Elvenkind granting fly 30)
 		let effectiveFly = itemSpeedStatic.fly ? Math.max(baseFly, itemSpeedStatic.fly) : baseFly;
+		// Volant gemstone grants hover flight = 2x walk
+		const gemFlightSpeed = this.getGemstoneFlightSpeed();
+		if (gemFlightSpeed > 0) effectiveFly = Math.max(effectiveFly, gemFlightSpeed);
 		let effectiveSwim = itemSpeedStatic.swim ? Math.max(baseSwim, itemSpeedStatic.swim) : baseSwim;
 		let effectiveClimb = itemSpeedStatic.climb ? Math.max(baseClimb, itemSpeedStatic.climb) : baseClimb;
 		let effectiveBurrow = itemSpeedStatic.burrow ? Math.max(baseBurrow, itemSpeedStatic.burrow) : baseBurrow;
@@ -6980,8 +7132,9 @@ class CharacterSheetState {
 		const stateBonus = this.getSpeedBonusFromStates();
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
+		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
 		const armorPenalty = this.getArmorStrengthPenalty(); // -10 if STR requirement not met
-		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + armorPenalty;
+		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + armorPenalty;
 		return Math.max(0, Math.floor(raw * this.getSpeedMultiplierFromConditions()) - this._getExhaustionSpeedPenalty());
 	}
 
@@ -6996,6 +7149,12 @@ class CharacterSheetState {
 		let base = this._data.speed[type] || 0;
 		// Apply static speed from items (e.g., Winged Boots granting fly 30)
 		if (itemSpeedStatic[type]) base = Math.max(base, itemSpeedStatic[type]);
+
+		// Volant gemstone grants hover flight = 2x walk
+		if (type === "fly") {
+			const gemFlightSpeed = this.getGemstoneFlightSpeed();
+			if (gemFlightSpeed > 0) base = Math.max(base, gemFlightSpeed);
+		}
 
 		// Apply equal-to from items (e.g., Mariner's Armor: swim = walk)
 		if (itemSpeedEqual[type]) {
@@ -18326,6 +18485,8 @@ class CharacterSheetState {
 			// Initialize arrays for complex item features
 			if (!itemProps.containedItems) itemProps.containedItems = [];
 			if (!itemProps.storedSpells) itemProps.storedSpells = [];
+			if (!itemProps.appliedUpgrades) itemProps.appliedUpgrades = [];
+			if (!itemProps.socketedGemstones) itemProps.socketedGemstones = [];
 
 			this._data.inventory.push({
 				id: itemId,
@@ -19420,6 +19581,338 @@ class CharacterSheetState {
 
 	// Alias
 	getTieredItems (tierType = null) { return this.getVestiges(tierType); }
+
+	// ==========================================
+	// Item Upgrades (TCAH weapon/armor tags)
+	// ==========================================
+
+	/**
+	 * Apply an upgrade to an inventory item
+	 * @param {string} itemId - The item ID
+	 * @param {object} upgrade - The upgrade entity {name, source, upgradeType, cost, entries, ...}
+	 * @param {number} costPaid - Gold cost actually paid (in gp)
+	 * @returns {object} {success: boolean, error?: string}
+	 */
+	applyItemUpgrade (itemId, upgrade, costPaid = 0) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		if (!item) return {success: false, error: "Item not found"};
+
+		if (!Array.isArray(item.item.appliedUpgrades)) item.item.appliedUpgrades = [];
+
+		// Check for duplicate upgrade
+		if (item.item.appliedUpgrades.some(u => u.name === upgrade.name && u.source === upgrade.source)) {
+			return {success: false, error: `${upgrade.name} is already applied to this item`};
+		}
+
+		item.item.appliedUpgrades.push({
+			name: upgrade.name,
+			source: upgrade.source,
+			upgradeType: upgrade.upgradeType?.[0] || null,
+			costPaid,
+			appliedAt: Date.now(),
+		});
+
+		this._recalculateItemBonuses();
+
+		return {success: true};
+	}
+
+	/**
+	 * Remove an upgrade from an inventory item
+	 * @param {string} itemId - The item ID
+	 * @param {string} upgradeName - The upgrade name
+	 * @param {string} upgradeSource - The upgrade source
+	 * @returns {boolean} True if removed
+	 */
+	removeItemUpgrade (itemId, upgradeName, upgradeSource) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		if (!item?.item?.appliedUpgrades?.length) return false;
+
+		const idx = item.item.appliedUpgrades.findIndex(
+			u => u.name === upgradeName && u.source === upgradeSource,
+		);
+		if (idx === -1) return false;
+
+		item.item.appliedUpgrades.splice(idx, 1);
+		this._recalculateItemBonuses();
+		return true;
+	}
+
+	/**
+	 * Get all applied upgrades for an item
+	 * @param {string} itemId - The item ID
+	 * @returns {Array} Array of applied upgrade entries
+	 */
+	getItemUpgrades (itemId) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		return item?.item?.appliedUpgrades || [];
+	}
+
+	/**
+	 * Check if an item has a specific upgrade applied
+	 * @param {string} itemId - The item ID
+	 * @param {string} upgradeName - The upgrade name to check
+	 * @returns {boolean}
+	 */
+	hasItemUpgrade (itemId, upgradeName) {
+		return this.getItemUpgrades(itemId).some(
+			u => u.name.toLowerCase() === upgradeName.toLowerCase(),
+		);
+	}
+
+	/**
+	 * Get the highest weapon upgrade tier applied to an item
+	 * @param {string} itemId - The item ID
+	 * @returns {number} 0, 1, 2, or 3
+	 */
+	getItemWeaponUpgradeTier (itemId) {
+		const upgrades = this.getItemUpgrades(itemId);
+		let maxTier = 0;
+		for (const u of upgrades) {
+			if (u.upgradeType === "WU:3") maxTier = Math.max(maxTier, 3);
+			else if (u.upgradeType === "WU:2") maxTier = Math.max(maxTier, 2);
+			else if (u.upgradeType === "WU:1") maxTier = Math.max(maxTier, 1);
+		}
+		return maxTier;
+	}
+
+	// ==========================================
+	// Gemstone Socketing
+	// ==========================================
+
+	/**
+	 * Socket an empowered gemstone into an inventory item
+	 * @param {string} itemId - The target item ID
+	 * @param {object} gemstone - The gemstone data {name, source, gemName, rarity, entries, charges?, recharge?}
+	 * @returns {object} {success: boolean, error?: string}
+	 */
+	socketGemstone (itemId, gemstone) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		if (!item) return {success: false, error: "Item not found"};
+
+		if (!Array.isArray(item.item.socketedGemstones)) item.item.socketedGemstones = [];
+
+		// Limit: 1 gemstone per item
+		if (item.item.socketedGemstones.length >= 1) {
+			return {success: false, error: "This item already has a gemstone socketed"};
+		}
+
+		item.item.socketedGemstones.push({
+			name: gemstone.name,
+			source: gemstone.source,
+			gemName: gemstone.gemName || null,
+			rarity: gemstone.rarity || null,
+			upgradeType: gemstone.upgradeType?.[0] || null,
+			entries: gemstone.entries || [],
+			charges: gemstone.charges || null,
+			chargesCurrent: gemstone.charges || null,
+			chargesMax: gemstone.charges || null,
+			recharge: gemstone.recharge || null,
+			socketedAt: Date.now(),
+		});
+
+		this._recalculateItemBonuses();
+
+		return {success: true};
+	}
+
+	/**
+	 * Remove (unsocket) a gemstone from an inventory item
+	 * @param {string} itemId - The item ID
+	 * @param {string} gemstoneName - The gemstone power name
+	 * @returns {object|null} The removed gemstone data, or null
+	 */
+	unsocketGemstone (itemId, gemstoneName) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		if (!item?.item?.socketedGemstones?.length) return null;
+
+		const idx = item.item.socketedGemstones.findIndex(g => g.name === gemstoneName);
+		if (idx === -1) return null;
+
+		const removed = item.item.socketedGemstones.splice(idx, 1)[0];
+		this._recalculateItemBonuses();
+		return removed;
+	}
+
+	/**
+	 * Get socketed gemstones for an item
+	 * @param {string} itemId - The item ID
+	 * @returns {Array} Array of socketed gemstone entries
+	 */
+	getSocketedGemstones (itemId) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		return item?.item?.socketedGemstones || [];
+	}
+
+	/**
+	 * Use a charge from a socketed gemstone
+	 * @param {string} itemId - The item ID
+	 * @param {string} gemstoneName - The gemstone power name
+	 * @returns {object} {success: boolean, remaining?: number, error?: string}
+	 */
+	useGemstoneCharge (itemId, gemstoneName) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
+		if (!gem) return {success: false, error: "Gemstone not found"};
+		if (gem.chargesMax === null) return {success: false, error: "This gemstone does not use charges"};
+		if (gem.chargesCurrent <= 0) return {success: false, error: "No charges remaining"};
+
+		gem.chargesCurrent--;
+		return {success: true, remaining: gem.chargesCurrent};
+	}
+
+	/**
+	 * Restore charges to a socketed gemstone
+	 * @param {string} itemId - The item ID
+	 * @param {string} gemstoneName - The gemstone power name
+	 * @param {number} amount - Charges to restore
+	 */
+	restoreGemstoneCharges (itemId, gemstoneName, amount = 1) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
+		if (!gem || gem.chargesMax === null) return;
+
+		gem.chargesCurrent = Math.min(gem.chargesMax, gem.chargesCurrent + amount);
+	}
+
+	/**
+	 * Recharge all dawn-recharge gemstones (called during long rest)
+	 */
+	rechargeAllGemstones () {
+		for (const invItem of this._data.inventory) {
+			if (!invItem.item?.socketedGemstones?.length) continue;
+			for (const gem of invItem.item.socketedGemstones) {
+				if (gem.recharge === "dawn" && gem.chargesMax !== null) {
+					gem.chargesCurrent = gem.chargesMax;
+				}
+				// Reset daily use tracking on dawn/long rest
+				if (gem.usedToday) gem.usedToday = false;
+			}
+		}
+	}
+
+	/**
+	 * Mark a gemstone's daily ability as used
+	 * @param {string} itemId - The item ID
+	 * @param {string} gemstoneName - The gemstone power name
+	 * @returns {object} {success: boolean, error?: string}
+	 */
+	useGemstoneDaily (itemId, gemstoneName) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
+		if (!gem) return {success: false, error: "Gemstone not found"};
+		if (gem.usedToday) return {success: false, error: "Already used today"};
+		gem.usedToday = true;
+		return {success: true};
+	}
+
+	/**
+	 * Reset a gemstone's daily use (e.g., manually or on dawn)
+	 * @param {string} itemId - The item ID
+	 * @param {string} gemstoneName - The gemstone power name
+	 */
+	resetGemstoneDaily (itemId, gemstoneName) {
+		const item = this._data.inventory.find(i => i.id === itemId);
+		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
+		if (gem) gem.usedToday = false;
+	}
+
+	/**
+	 * Get all passive notes from socketed gemstones on equipped items
+	 * @returns {Array<string>} Array of passive effect note strings
+	 */
+	getGemstonePassiveNotes () {
+		if (typeof CharacterSheetUpgrades === "undefined") return [];
+		const notes = [];
+		for (const invItem of this._data.inventory) {
+			if (!invItem.equipped || !invItem.item?.socketedGemstones?.length) continue;
+			for (const gem of invItem.item.socketedGemstones) {
+				const passive = CharacterSheetUpgrades.getGemstonePassiveEffects(gem);
+				notes.push(...passive.notes);
+			}
+		}
+		return notes;
+	}
+
+	/**
+	 * Get all items with upgrades or gemstones
+	 * @returns {Array} Array of inventory entries that have upgrades or gemstones
+	 */
+	getUpgradedItems () {
+		return this._data.inventory.filter(i =>
+			i.item?.appliedUpgrades?.length || i.item?.socketedGemstones?.length,
+		);
+	}
+
+	/**
+	 * Deduct gold from currency for an upgrade purchase
+	 * @param {number} gpCost - Cost in gold pieces
+	 * @returns {object} {success: boolean, error?: string}
+	 */
+	deductGold (gpCost) {
+		const totalGp = this.getTotalGold();
+		if (totalGp < gpCost) {
+			return {success: false, error: `Insufficient funds: need ${gpCost} gp, have ${totalGp.toFixed(2)} gp`};
+		}
+
+		// Deduct from gp first, then convert from higher denominations if needed
+		let remaining = gpCost;
+		if (this._data.currency.gp >= remaining) {
+			this._data.currency.gp -= remaining;
+			return {success: true};
+		}
+		remaining -= this._data.currency.gp;
+		this._data.currency.gp = 0;
+
+		// Convert from pp (1 pp = 10 gp)
+		if (remaining > 0 && this._data.currency.pp > 0) {
+			const ppNeeded = Math.ceil(remaining / 10);
+			const ppUsed = Math.min(ppNeeded, this._data.currency.pp);
+			this._data.currency.pp -= ppUsed;
+			const gpFromPp = ppUsed * 10;
+			remaining -= gpFromPp;
+			if (remaining < 0) {
+				this._data.currency.gp += Math.abs(remaining);
+				remaining = 0;
+			}
+		}
+
+		// Convert from ep (1 ep = 0.5 gp)
+		if (remaining > 0 && this._data.currency.ep > 0) {
+			const epNeeded = Math.ceil(remaining / 0.5);
+			const epUsed = Math.min(epNeeded, this._data.currency.ep);
+			this._data.currency.ep -= epUsed;
+			const gpFromEp = epUsed * 0.5;
+			remaining -= gpFromEp;
+			if (remaining < 0) {
+				this._data.currency.gp += Math.abs(remaining);
+				remaining = 0;
+			}
+		}
+
+		// Convert from sp (10 sp = 1 gp)
+		if (remaining > 0 && this._data.currency.sp > 0) {
+			const spNeeded = Math.ceil(remaining * 10);
+			const spUsed = Math.min(spNeeded, this._data.currency.sp);
+			this._data.currency.sp -= spUsed;
+			const gpFromSp = spUsed * 0.1;
+			remaining -= gpFromSp;
+			if (remaining < 0) {
+				this._data.currency.gp += Math.abs(remaining);
+				remaining = 0;
+			}
+		}
+
+		// Convert from cp (100 cp = 1 gp)
+		if (remaining > 0 && this._data.currency.cp > 0) {
+			const cpNeeded = Math.ceil(remaining * 100);
+			const cpUsed = Math.min(cpNeeded, this._data.currency.cp);
+			this._data.currency.cp -= cpUsed;
+			remaining -= cpUsed * 0.01;
+		}
+
+		return {success: true};
+	}
 
 	// ==========================================
 	// Resource Restoration (Ki, Sorcery Points, etc.)

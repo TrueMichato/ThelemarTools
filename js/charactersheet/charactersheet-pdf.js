@@ -542,8 +542,25 @@ class CharacterSheetPdf {
 			const damageType = this._esc(atk.damageType || "");
 			const range = this._esc(atk.range || "");
 			const props = (atk.properties || []).map(p => this._esc(p)).join(", ");
+
+			// Collect upgrade/gemstone notes for this attack's source item
+			let upgradeNote = "";
+			if (atk._sourceItem && typeof CharacterSheetUpgrades !== "undefined") {
+				const bits = [];
+				const eff = CharacterSheetUpgrades.getUpgradeEffects(atk._sourceItem);
+				if (eff.tags.length) bits.push(eff.tags.join(", "));
+				if (eff.bonusDamageDice) bits.push(`+${eff.bonusDamageDice} ${eff.bonusDamageType}`);
+				for (const note of eff.notes) bits.push(note);
+				const gems = atk._sourceItem.socketedGemstones || [];
+				for (const gem of gems) {
+					const summary = CharacterSheetUpgrades.getGemstoneSummary(gem);
+					if (summary) bits.push(`${this._esc(gem.name)}: ${this._esc(summary)}`);
+				}
+				if (bits.length) upgradeNote = `<div class="pdf-atk__upgrade-note">${bits.map(b => this._esc(b)).join(" · ")}</div>`;
+			}
+
 			return `<tr>
-				<td class="pdf-atk__name">${name}</td>
+				<td class="pdf-atk__name">${name}${upgradeNote}</td>
 				<td class="pdf-atk__bonus">${bonus}</td>
 				<td class="pdf-atk__damage">${damage} ${damageType}</td>
 				<td class="pdf-atk__range">${range}</td>
@@ -976,8 +993,14 @@ class CharacterSheetPdf {
 				const qty = inv.quantity || 1;
 				const equipped = inv.equipped ? "✓" : "";
 				const attuned = inv.attuned ? "⬥" : "";
+
+				// Upgrade and gemstone indicators
+				const upgradeNames = (item.appliedUpgrades || []).map(u => this._esc(u.name)).join(", ");
+				const gemNames = (item.socketedGemstones || []).map(g => this._esc(g.name)).join(", ");
+				const extras = [upgradeNames ? `⚒ ${upgradeNames}` : "", gemNames ? `💎 ${gemNames}` : ""].filter(Boolean).join(" · ");
+
 				return `<tr>
-					<td class="pdf-inv__name">${name}</td>
+					<td class="pdf-inv__name">${name}${extras ? `<div class="pdf-inv__extras">${extras}</div>` : ""}</td>
 					<td class="pdf-inv__qty">${qty > 1 ? qty : ""}</td>
 					<td class="pdf-inv__eq">${equipped}</td>
 					<td class="pdf-inv__att">${attuned}</td>
@@ -988,6 +1011,22 @@ class CharacterSheetPdf {
 				<thead><tr><th>Item</th><th>Qty</th><th>Eq.</th><th>Att.</th></tr></thead>
 				<tbody>${rows}</tbody>
 			</table>`);
+		}
+
+		// Armor upgrade notes
+		if (typeof CharacterSheetUpgrades !== "undefined") {
+			const armorNotes = this._state.getArmorUpgradeNotes?.() || [];
+			if (armorNotes.length) {
+				const noteItems = armorNotes.map(n => `<li><strong>${this._esc(n.label)}.</strong> ${this._esc(n.description)}</li>`).join("");
+				parts.push(`<div class="pdf-upgrade-notes"><h4>Armor Upgrades</h4><ul>${noteItems}</ul></div>`);
+			}
+
+			// Gemstone passive effects
+			const gemNotes = this._state.getGemstonePassiveNotes?.() || [];
+			if (gemNotes.length) {
+				const gemItems = gemNotes.map(n => `<li>${this._esc(n)}</li>`).join("");
+				parts.push(`<div class="pdf-upgrade-notes"><h4>Gemstone Effects</h4><ul>${gemItems}</ul></div>`);
+			}
 		}
 
 		return `<div class="pdf-section pdf-section--inventory">
@@ -1999,6 +2038,13 @@ body {
 	color: #555;
 }
 
+.pdf-atk__upgrade-note {
+	font-size: 6pt;
+	color: #666;
+	font-style: italic;
+	margin-top: 1px;
+}
+
 .pdf-table--spells .pdf-spell__unprepared {
 	color: #999;
 }
@@ -2011,6 +2057,33 @@ body {
 .pdf-table--inventory .pdf-inv__att {
 	text-align: center;
 	width: 24px;
+}
+
+.pdf-inv__extras {
+	font-size: 6pt;
+	color: #666;
+	font-style: italic;
+}
+
+.pdf-upgrade-notes {
+	margin-top: 6px;
+}
+
+.pdf-upgrade-notes h4 {
+	font-size: 7.5pt;
+	color: var(--pdf-heading, #5e0000);
+	margin: 4px 0 2px;
+}
+
+.pdf-upgrade-notes ul {
+	margin: 0;
+	padding-left: 12px;
+	font-size: 6.5pt;
+	line-height: 1.4;
+}
+
+.pdf-upgrade-notes li {
+	margin-bottom: 1px;
 }
 
 .pdf-table--comp-abilities {
