@@ -119,6 +119,11 @@ class CharacterSheetInventory {
 				if (itemId) this._showArtifactPropertiesModal(itemId);
 				return;
 			}
+			if (e.target.closest(".charsheet__item-upgrade-config")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._page.getUpgradesModule()?.showUpgradePickerModal(itemId);
+				return;
+			}
 			if (e.target.closest(".charsheet__item-star")) {
 				e.stopPropagation();
 				const itemId = _getItemId(e.target);
@@ -140,6 +145,12 @@ class CharacterSheetInventory {
 				e.target.closest("#charsheet-btn-starred-filter").classList.toggle("active", this._starredFilter);
 				this._currentPage = 0;
 				this._renderItemList();
+				return;
+			}
+
+			// Empower gemstone button
+			if (e.target.closest("#charsheet-btn-empower-gem")) {
+				this._page.getUpgradesModule()?.showEmpowermentModal();
 				return;
 			}
 
@@ -1020,6 +1031,10 @@ class CharacterSheetInventory {
 			// Spell storing (e.g., Ring of Spell Storing)
 			storedSpells: [], // [{spell, level, saveDc, attackBonus, ability, casterName}]
 			maxSpellLevels: this._detectSpellStoringCapacity(item), // Max total spell levels (5 for Ring of Spell Storing)
+			// Item Upgrades (TCAH weapon/armor tags)
+			appliedUpgrades: [], // [{name, source, upgradeType, costPaid, appliedAt}]
+			// Socketed Gemstones (TGTT empowered gemstones)
+			socketedGemstones: [], // [{name, source, gemName, rarity, upgradeType, entries, charges, chargesCurrent, chargesMax, recharge, socketedAt}]
 		};
 
 		this._state.addItem(newItem);
@@ -3745,6 +3760,9 @@ class CharacterSheetInventory {
 					<button type="button" class="ve-btn ve-btn-xs ${this._starredFilter ? "ve-btn-warning" : "ve-btn-default"} charsheet__btn-starred-filter" id="charsheet-btn-starred-filter" title="Show only starred items">
 						<span class="glyphicon glyphicon-star"></span> Starred
 					</button>
+					<button type="button" class="ve-btn ve-btn-xs ve-btn-success charsheet__btn-empower-gem" id="charsheet-btn-empower-gem" title="Empower a gemstone">
+						💎 Empower Gem
+					</button>
 				</div>
 				<div class="charsheet__inventory-toolbar-right">
 					<select class="ve-form-control form-control--minimal charsheet__inventory-sort-select" id="charsheet-inventory-sort" title="Sort by">
@@ -3823,6 +3841,8 @@ class CharacterSheetInventory {
 		const isConsumable = item.type === "P" || item.type === "SC"; // Potion or Scroll
 		const isArtifact = item.rarity === "artifact";
 		const artifactNeedsConfig = isArtifact && item.artifactProperties?.hasRequirements && !this._state.isArtifactFullyConfigured(item.id);
+		const canUpgrade = CharacterSheetUpgrades.isWeapon(item) || CharacterSheetUpgrades.isArmor(item) || CharacterSheetUpgrades.isShield(item);
+		const hasUpgrades = !!(item.appliedUpgrades?.length || item.socketedGemstones?.length);
 
 		// Render item name with a 5etools hover link if it has a source
 		let itemNameHtml = item.name;
@@ -3886,6 +3906,8 @@ class CharacterSheetInventory {
 						${propertiesStr ? `<span class="ve-small ve-muted" title="Properties">${propertiesStr}</span>` : ""}
 						${masteryStr ? `<span class="ve-small text-info" title="Mastery">⚔ ${masteryStr}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}">Charges: <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
+						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => `<span class="badge badge-warning ve-small" title="${u.name}">${u.name}</span>`).join(" ")}</span>` : ""}
+						${item.socketedGemstones?.length ? `<span class="ve-small charsheet__item-gem-badges">${item.socketedGemstones.map(g => `<span class="badge badge-success ve-small" title="${g.name}">💎 ${g.gemName || g.name}</span>`).join(" ")}</span>` : ""}
 					</div>
 					<div class="charsheet__item-actions">
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-qty-decrease" title="Decrease quantity">−</button>
@@ -3917,6 +3939,11 @@ class CharacterSheetInventory {
 						${isArtifact ? `
 							<button type="button" class="ve-btn ve-btn-xs ${artifactNeedsConfig ? "ve-btn-warning" : "ve-btn-default"} charsheet__item-artifact-config" title="${artifactNeedsConfig ? "Configure artifact properties" : "View/edit artifact properties"}">
 								<span class="glyphicon glyphicon-cog"></span> ${artifactNeedsConfig ? "Configure" : "Properties"}
+							</button>
+						` : ""}
+						${canUpgrade ? `
+							<button type="button" class="ve-btn ve-btn-xs ${hasUpgrades ? "ve-btn-info" : "ve-btn-default"} charsheet__item-upgrade-config" title="${hasUpgrades ? "View/manage upgrades" : "Apply upgrades"}">
+								<span class="glyphicon glyphicon-wrench"></span> ${hasUpgrades ? "Upgrades" : "Upgrade"}
 							</button>
 						` : ""}
 						<button type="button" class="ve-btn ve-btn-xs ${hasNote ? "ve-btn-primary" : "ve-btn-default"} charsheet__item-note" title="${hasNote ? "View/Edit Note" : "Add Note"}">
