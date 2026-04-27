@@ -937,10 +937,11 @@ class CharacterSheetUpgrades {
 	 * @returns {object} Passive effects: {speedBonus, notes[]}
 	 */
 	static getGemstonePassiveEffects (gem) {
-		const effects = {speedBonus: 0, notes: []};
+		const effects = {speedBonus: 0, flightSpeed: 0, notes: []};
 		if (!gem?.name) return effects;
 		const name = gem.name.toLowerCase();
 
+		// --- Passive / always-on effects ---
 		if (name === "journey") {
 			effects.speedBonus = 10;
 			effects.notes.push("Journey: +10 speed; fast pace without Perception penalty; halved food/water");
@@ -951,11 +952,43 @@ class CharacterSheetUpgrades {
 		if (name === "nondetection") effects.notes.push("Nondetection: Hidden from divination and scrying");
 		if (name === "daywalker") effects.notes.push("Daywalker: Unaffected by sunlight with hood drawn");
 		if (name === "force of will") effects.notes.push("Force of Will: Immune to enchantment magic unless you choose");
-		if (name === "volant") effects.notes.push("Volant: Hover flight speed = 2\u00D7 walking speed");
+		if (name === "volant") {
+			effects.flightSpeed = -1; // sentinel: 2x walk, resolved dynamically
+			effects.notes.push("Volant: Hover flight speed = 2\u00D7 walking speed");
+		}
 		if (name === "chaos") effects.notes.push("Chaos: Critical hits trigger Wild Magic Surge");
 		if (name === "retribution") effects.notes.push("Retribution: Advantage on next attack when damaged");
 		if (name === "alchemist") effects.notes.push("Alchemist: +2 HP when drinking healing potions");
 		if (name === "mariner") effects.notes.push("Mariner: No underwater attack disadvantage");
+		if (name === "blood weapon") effects.notes.push("Blood Weapon: Critical hit heals HP = extra crit damage (not vs undead/constructs)");
+		if (name === "wolfsbane") effects.notes.push("Wolfsbane: Sheds moonlight 5 ft.; +2d6 radiant vs shapechangers; CON save or true form");
+		if (name === "dragonbane") effects.notes.push("Dragonbane: +2d6 damage vs dragons; STR save or flying speed 0");
+		if (name === "giant slayer") effects.notes.push("Giant Slayer: +2d6 damage vs Large+ creatures; STR save or prone");
+		if (name === "superconductor") effects.notes.push("Superconductor: Gains charges from targeted spells; spend for +1d6 force per charge");
+		if (name === "tempest") effects.notes.push("Tempest: 1/turn on hit: +1d10 lightning; arcs to 3 creatures within 30 ft.");
+
+		// --- Active / charge-based abilities (note for reference) ---
+		if (name === "thief") effects.notes.push("Thief: 1/day reroll failed DEX (Stealth) check");
+		if (name === "arrow-catcher") effects.notes.push("Arrow-catcher: Reaction: impose disadvantage on ranged attack (3 charges, 1d3/dawn)");
+		if (name === "bound armor") effects.notes.push("Bound Armor: Bonus action don/doff armor instantly");
+		if (name === "bound weapon") effects.notes.push("Bound Weapon: Bonus action make weapon disappear/appear");
+		if (name === "cat") effects.notes.push("Cat: 1/dawn darkvision 120 ft. for 1 hour");
+		if (name === "elemental shield") effects.notes.push("Elemental Shield: Reaction: reduce chosen element damage by 2\u00D7level + CON mod (1 exhaustion)");
+		if (name === "knock") effects.notes.push("Knock: 1/dawn cast Knock by tapping fist on lock");
+		if (name === "serpent") effects.notes.push("Serpent: 1/dawn on hit: CON save or poisoned 1 min");
+		if (name === "bastion") effects.notes.push("Bastion: 1/dawn bonus action 10 ft. force dome (1 min)");
+		if (name === "berserker") effects.notes.push("Berserker: 1/dawn expend Hit Dice on hit, add to damage (take equal)");
+		if (name === "chalice") effects.notes.push("Chalice: Store up to 2 spell levels; cast stored spells");
+		if (name === "death") effects.notes.push("Death: Kill humanoid = rises as zombie (1 HP, 1 min)");
+		if (name === "hunt") effects.notes.push("Hunt: 1/dawn mark creature \u226490 ft.; bonus action teleport \u226430 ft. on ranged hit");
+		if (name === "magebane") effects.notes.push("Magebane: On hit: end \u22643rd level spells; check for 4th+ (3 charges, 1d3/dawn)");
+		if (name === "phoenix") effects.notes.push("Phoenix: 1/dawn at 0 HP, casts Fireball centered on you; gain 1d6 HP next turn");
+		if (name === "soultrap") effects.notes.push("Soultrap: 1/dawn kill CR \u2265 level = regain 1 spell slot (max level = PB)");
+		if (name === "warmage") effects.notes.push("Warmage: Fail concentration save = reroll (3 charges; spend slot to recover)");
+		if (name === "displacement") effects.notes.push("Displacement: 1/turn take weapon damage = teleport 30 ft.");
+		if (name === "earthshaker") effects.notes.push("Earthshaker: 1/dawn Earthquake spell (1 round, 100 ft.)");
+		if (name === "mark/recall") effects.notes.push("Mark/Recall: 1/dawn mark surface; concentrate 1 min = teleport with up to 5 creatures");
+		if (name === "mime") effects.notes.push("Mime: Short rest: copy magic item properties (no fixed bonuses)");
 
 		return effects;
 	}
