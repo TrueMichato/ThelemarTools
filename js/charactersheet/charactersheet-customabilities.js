@@ -2516,8 +2516,9 @@ class CharacterSheetCustomAbilities {
 		try {
 			const source = feature.source || Parser.SRC_PHB;
 			const hash = UrlUtil.encodeForHash([feature.name, source].join(HASH_LIST_SEP));
-			const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_OPT_FEATURES, source, hash});
-			return `<a href="${UrlUtil.PG_OPT_FEATURES}#${hash}" ${hoverAttrs} class="custom-abilities__hover-link">${feature.name}</a>`;
+			const page = CharacterSheetClassUtils.isCombatMethod(feature) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+			const hoverAttrs = Renderer.hover.getHoverElementAttributes({page, source, hash});
+			return `<a href="${page}#${hash}" ${hoverAttrs} class="custom-abilities__hover-link">${feature.name}</a>`;
 		} catch (e) {
 			return feature.name;
 		}

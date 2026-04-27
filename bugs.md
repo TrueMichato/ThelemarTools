@@ -12,7 +12,29 @@ await in pHandleLinkMouseOver
 onmouseover
 [] Font size change should affect all fonts across the sheet, including modals and popups. Currently it only affects the main sheet, and some elements (e.g. modals) still use the default font size. This should be fixed by applying the font size change more globally across all elements of the sheet.
 [] gems are not empowerable in the inventory or item addition flows.
-[] Item upgrades modal needs some visual improvements and hovers.
+[] Item upgrades modal needs some visual improvements and hovers, current hovers are bugged:
+render.js:15824 Uncaught (in promise) Error: Failed to load renderable content for: page="itemupgrades.html" source="TCAH" hash="wounding%3a%20keen_tcah" preloadId="null" customHashId="undefined" isFluff="undefined"
+    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15824:9)
+    at Renderer.hover.pHandleLinkMouseOver (render.js:15739:9)
+_pHandleLinkMouseOver_doVerifyToRender @ render.js:15824
+pHandleLinkMouseOver @ render.js:15739
+await in pHandleLinkMouseOver
+onmouseover @ charactersheet.html?id=f17aa5b9-48e1-42da-874d-52f99cd01c19:1
+render.js:15824 Uncaught (in promise) Error: Failed to load renderable content for: page="itemupgrades.html" source="TCAH" hash="critical%3a%20sharpened_tcah" preloadId="null" customHashId="undefined" isFluff="undefined"
+    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15824:9)
+    at Renderer.hover.pHandleLinkMouseOver (render.js:15739:9)
+_pHandleLinkMouseOver_doVerifyToRender @ render.js:15824
+pHandleLinkMouseOver @ render.js:15739
+await in pHandleLinkMouseOver
+onmouseover @ charactersheet.html?id=f17aa5b9-48e1-42da-874d-52f99cd01c19:1
+render.js:15824 Uncaught (in promise) Error: Failed to load renderable content for: page="itemupgrades.html" source="TCAH" hash="balanced_tcah" preloadId="null" customHashId="undefined" isFluff="undefined"
+    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15824:9)
+    at Renderer.hover.pHandleLinkMouseOver (render.js:15739:9)
+_pHandleLinkMouseOver_doVerifyToRender @ render.js:15824
+pHandleLinkMouseOver @ render.js:15739
+await in pHandleLinkMouseOver
+onmouseover @ charactersheet.html?id=f17aa5b9-48e1-42da-874d-52f99cd01c19:1
+
 [] if no items exist in inventory there is an extra "add item" button, but it leads to custom item creation rather than the normal item addition flow. This should be fixed so that the button either leads to the normal item addition flow or is hidden when no items exist.
 [] showing both regular items and magical items in the item addition modal is confusing, especially since the magical filter is not working. It would be better to separate regular items and magical items into different sections or tabs in the modal, so that it's clearer which items are which and the magical filter can work properly.
 [] in the add item modal, the filter for item type (armor, weapon, etc.) is not working and shows empty text instead of choices.

@@ -244,7 +244,7 @@ class CharacterSheetPage {
 
 		// Pre-cache class/subclass features in DataLoader so hover links work properly
 		// This runs in parallel with the data processing below
-		this._pPreCacheClassFeatures();
+		this._pPreCacheEntityData();
 
 		// Merge prerelease/homebrew data
 		this._mergeBrewData(prereleaseData);
@@ -296,11 +296,11 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * Pre-cache class and subclass features in DataLoader
-	 * This ensures hover links for @classFeature and @subclassFeature work properly
+	 * Pre-cache entity data in DataLoader for hover tooltips
+	 * Covers class/subclass features and item upgrades
 	 * Runs in parallel and doesn't block page initialization
 	 */
-	async _pPreCacheClassFeatures () {
+	async _pPreCacheEntityData () {
 		try {
 			await Promise.all([
 				DataLoader.pCacheAndGetAllSite("classFeature"),
@@ -309,10 +309,13 @@ class CharacterSheetPage {
 				DataLoader.pCacheAndGetAllPrerelease("subclassFeature"),
 				DataLoader.pCacheAndGetAllBrew("classFeature"),
 				DataLoader.pCacheAndGetAllBrew("subclassFeature"),
+				DataLoader.pCacheAndGetAllSite("itemUpgrade"),
+				DataLoader.pCacheAndGetAllPrerelease("itemUpgrade"),
+				DataLoader.pCacheAndGetAllBrew("itemUpgrade"),
 			]);
 		} catch (e) {
 			// Non-critical - just means some hover links may not work
-			console.warn("[CharSheet] Failed to pre-cache class features for hovers:", e);
+			console.warn("[CharSheet] Failed to pre-cache entity data for hovers:", e);
 		}
 	}
 
@@ -7110,7 +7113,8 @@ class CharacterSheetPage {
 			const page = document.querySelector(".charsheet-page");
 			page.setAttribute("data-textsize", size);
 			page.style.setProperty("--cs-text-scale", size / 100);
-			// Also set on document root so modals (which are siblings of .charsheet-page) inherit the scale
+			// Set root font-size so ALL rem-based content scales — including modals/popups appended to body
+			document.documentElement.style.fontSize = `${size}%`;
 			document.documentElement.style.setProperty("--cs-text-scale", size / 100);
 
 			// Update UI
