@@ -613,5 +613,282 @@ describe("Item Upgrades", () => {
 			const bonuses = state.getEffectiveItemBonuses(itemId);
 			expect(bonuses.critThreshold).toBe(19);
 		});
+
+		it("should include damageDieIncrease in effective bonuses for Superior upgrade", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true});
+			const itemId = state.getItems()[0].id;
+
+			state.applyItemUpgrade(itemId, {name: "Superior", source: "TCAH", upgradeType: ["WU:3"]}, 10000);
+
+			const bonuses = state.getEffectiveItemBonuses(itemId);
+			expect(bonuses.damageDieIncrease).toBe(1);
+		});
+	});
+
+	// ==========================================================================
+	// Global Item Bonus Aggregation (_recalculateItemBonuses)
+	// ==========================================================================
+	describe("Global Item Bonus Aggregation", () => {
+		it("should aggregate spellAttack bonus from equipped item with Enchanted upgrade", () => {
+			state.addItem({name: "Magic Staff", source: "PHB", type: "ST", weapon: true, bonusSpellAttack: 0}, 1, true);
+			const itemId = state.getItems()[0].id;
+
+			state.applyItemUpgrade(itemId, {name: "Enchanted", source: "TCAH", upgradeType: ["WU:2"]}, 1000);
+
+			expect(state.getItemBonuses?.()?.spellAttack || state._data?.itemBonuses?.spellAttack).toBe(1);
+		});
+
+		it("should aggregate spellSaveDc bonus from equipped item with Arcane upgrade", () => {
+			state.addItem({name: "Magic Staff", source: "PHB", type: "ST", weapon: true, bonusSpellSaveDc: 0}, 1, true);
+			const itemId = state.getItems()[0].id;
+
+			state.applyItemUpgrade(itemId, {name: "Arcane", source: "TCAH", upgradeType: ["WU:2"]}, 1000);
+
+			const itemBonuses = state._data?.itemBonuses || {};
+			expect(itemBonuses.spellSaveDc).toBe(1);
+		});
+
+		it("should aggregate critThreshold from equipped item with Critical upgrade", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+
+			state.applyItemUpgrade(itemId, {name: "Critical: Sharpened", source: "TCAH", upgradeType: ["WU:1"]}, 100);
+
+			const itemBonuses = state._data?.itemBonuses || {};
+			expect(itemBonuses.critThreshold).toBe(19);
+		});
+
+		it("should NOT aggregate bonuses from unequipped items", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true}, 1, false);
+			const itemId = state.getItems()[0].id;
+
+			state.applyItemUpgrade(itemId, {name: "Enchanted", source: "TCAH", upgradeType: ["WU:2"]}, 1000);
+
+			const itemBonuses = state._data?.itemBonuses || {};
+			expect(itemBonuses.spellAttack).toBe(0);
+		});
+
+		it("should take max spellAttack from multiple equipped items", () => {
+			state.addItem({name: "Wand A", source: "PHB", type: "WD", weapon: false, bonusSpellAttack: 1}, 1, true);
+			state.addItem({name: "Wand B", source: "PHB", type: "WD", weapon: false, bonusSpellAttack: 2}, 1, true);
+
+			const itemBonuses = state._data?.itemBonuses || {};
+			expect(itemBonuses.spellAttack).toBe(2);
+		});
+
+		it("should update bonuses when an upgrade is removed", () => {
+			state.addItem({name: "Staff", source: "PHB", type: "ST", weapon: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+
+			state.applyItemUpgrade(itemId, {name: "Enchanted", source: "TCAH", upgradeType: ["WU:2"]}, 1000);
+			expect(state._data?.itemBonuses?.spellAttack).toBe(1);
+
+			state.removeItemUpgrade(itemId, "Enchanted", "TCAH");
+			expect(state._data?.itemBonuses?.spellAttack).toBe(0);
+		});
+
+		it("should update bonuses when a gemstone is socketed/unsocketed", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+
+			// Socket shouldn't crash even if gemstone doesn't have direct bonuses
+			const result = state.socketGemstone(itemId, {name: "Ruby of Flame", source: "TGTT", gemName: "Ruby", entries: ["Fire damage"]});
+			expect(result.success).toBe(true);
+
+			state.unsocketGemstone(itemId, "Ruby of Flame");
+			expect(state.getSocketedGemstones(itemId)).toHaveLength(0);
+		});
+
+		it("should feed upgrade crit threshold into getCriticalRange()", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+
+			state.applyItemUpgrade(itemId, {name: "Critical: Sharpened", source: "TCAH", upgradeType: ["WU:1"]}, 100);
+
+			expect(state.getCriticalRange()).toBe(19);
+		});
+
+		it("should feed upgrade spell bonuses into getSpellSaveDC()", () => {
+			state.addItem({name: "Staff", source: "PHB", type: "ST", weapon: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+
+			// Set up spellcasting
+			state._data.spellcasting = state._data.spellcasting || {};
+			state._data.spellcasting.ability = "cha";
+
+			const baseDc = state.getSpellSaveDc();
+
+			state.applyItemUpgrade(itemId, {name: "Arcane", source: "TCAH", upgradeType: ["WU:2"]}, 1000);
+
+			const upgradedDc = state.getSpellSaveDc();
+			expect(upgradedDc).toBe(baseDc + 1);
+		});
+
+		it("should feed upgrade spell bonuses into getSpellAttackBonus()", () => {
+			state.addItem({name: "Staff", source: "PHB", type: "ST", weapon: true}, 1, true);
+			const itemId = state.getItems()[0].id;
+
+			state._data.spellcasting = state._data.spellcasting || {};
+			state._data.spellcasting.ability = "cha";
+
+			const baseAtk = state.getSpellAttackBonus();
+
+			state.applyItemUpgrade(itemId, {name: "Enchanted", source: "TCAH", upgradeType: ["WU:2"]}, 1000);
+
+			const upgradedAtk = state.getSpellAttackBonus();
+			expect(upgradedAtk).toBe(baseAtk + 1);
+		});
+	});
+
+	// ==========================================================================
+	// Armor Upgrade Effects
+	// ==========================================================================
+	describe("Armor Upgrade Effects", () => {
+		it("should return default flags for item with no upgrades", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({});
+			expect(effects.muffled).toBe(false);
+			expect(effects.reinforced).toBe(false);
+			expect(effects.armorProofingTier).toBe(0);
+			expect(effects.spiked).toBe(false);
+			expect(effects.breathable).toBe(false);
+			expect(effects.insulated).toBe(false);
+		});
+
+		it("should detect Muffled upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Muffled", source: "TCAH"}],
+			});
+			expect(effects.muffled).toBe(true);
+		});
+
+		it("should detect Reinforced upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Reinforced", source: "TCAH"}],
+			});
+			expect(effects.reinforced).toBe(true);
+		});
+
+		it("should detect Armor Proofing tiers", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [
+					{name: "Armor Proofing: 1st Tier", source: "TCAH"},
+					{name: "Armor Proofing: 2nd Tier", source: "TCAH"},
+				],
+			});
+			expect(effects.armorProofingTier).toBe(2);
+		});
+
+		it("should detect Spiked upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Spiked", source: "TCAH"}],
+			});
+			expect(effects.spiked).toBe(true);
+		});
+
+		it("should detect Breathable upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Breathable", source: "TCAH"}],
+			});
+			expect(effects.breathable).toBe(true);
+		});
+
+		it("should detect Insulated upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Insulated", source: "TCAH"}],
+			});
+			expect(effects.insulated).toBe(true);
+		});
+
+		it("should detect Climbing Harness upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Climbing Harness", source: "TCAH"}],
+			});
+			expect(effects.climbingHarness).toBe(true);
+		});
+
+		it("should detect Locking Joints upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Locking Joints", source: "TCAH"}],
+			});
+			expect(effects.lockingJoints).toBe(true);
+		});
+
+		it("should detect Quick-release Clasps upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Quick-release Clasps", source: "TCAH"}],
+			});
+			expect(effects.quickRelease).toBe(true);
+		});
+
+		it("should detect Decorated upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Decorated", source: "TCAH"}],
+			});
+			expect(effects.decorated).toBe(true);
+		});
+
+		it("should detect Runic upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Runic", source: "TCAH"}],
+			});
+			expect(effects.runic).toBe(true);
+		});
+
+		it("should detect Burnished upgrade", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [{name: "Burnished", source: "TCAH"}],
+			});
+			expect(effects.burnished).toBe(true);
+		});
+
+		it("should detect multiple upgrades simultaneously", () => {
+			const effects = CharacterSheetUpgrades.getArmorUpgradeEffects({
+				appliedUpgrades: [
+					{name: "Muffled", source: "TCAH"},
+					{name: "Spiked", source: "TCAH"},
+					{name: "Climbing Harness", source: "TCAH"},
+				],
+			});
+			expect(effects.muffled).toBe(true);
+			expect(effects.spiked).toBe(true);
+			expect(effects.climbingHarness).toBe(true);
+		});
+
+		it("should remove stealth disadvantage when Muffled upgrade is applied to armor", () => {
+			// Set up armor with stealth disadvantage (brigandine-like)
+			state._data.ac.armor = {
+				ac: 15,
+				type: "medium",
+				name: "Brigandine",
+				stealth: true,
+				appliedUpgrades: [{name: "Muffled", source: "TCAH"}],
+			};
+
+			expect(state.hasArmorStealthDisadvantage()).toBe(false);
+		});
+
+		it("should still have stealth disadvantage without Muffled upgrade", () => {
+			state._data.ac.armor = {
+				ac: 15,
+				type: "medium",
+				name: "Brigandine",
+				stealth: true,
+				appliedUpgrades: [],
+			};
+
+			expect(state.hasArmorStealthDisadvantage()).toBe(true);
+		});
+
+		it("should still have stealth disadvantage with unrelated upgrade", () => {
+			state._data.ac.armor = {
+				ac: 15,
+				type: "medium",
+				name: "Brigandine",
+				stealth: true,
+				appliedUpgrades: [{name: "Spiked", source: "TCAH"}],
+			};
+
+			expect(state.hasArmorStealthDisadvantage()).toBe(true);
+		});
 	});
 });

@@ -683,6 +683,52 @@ class CharacterSheetUpgrades {
 	// ==========================================
 
 	/**
+	 * Get armor-specific upgrade effects (flags for passive/reference effects)
+	 * @param {object} item - Armor item data (with appliedUpgrades array)
+	 * @returns {object} Flags for each armor upgrade type
+	 */
+	static getArmorUpgradeEffects (item) {
+		const effects = {
+			muffled: false,
+			reinforced: false,
+			armorProofingTier: 0,
+			spiked: false,
+			breathable: false,
+			insulated: false,
+			climbingHarness: false,
+			lockingJoints: false,
+			quickRelease: false,
+			decorated: false,
+			runic: false,
+			burnished: false,
+		};
+
+		if (!item?.appliedUpgrades?.length) return effects;
+
+		for (const upgrade of item.appliedUpgrades) {
+			const name = upgrade.name.toLowerCase();
+
+			if (name === "muffled") effects.muffled = true;
+			else if (name === "reinforced") effects.reinforced = true;
+			else if (name === "spiked") effects.spiked = true;
+			else if (name === "breathable") effects.breathable = true;
+			else if (name === "insulated") effects.insulated = true;
+			else if (name === "climbing harness") effects.climbingHarness = true;
+			else if (name === "locking joints") effects.lockingJoints = true;
+			else if (name === "quick-release clasps") effects.quickRelease = true;
+			else if (name === "decorated") effects.decorated = true;
+			else if (name === "runic") effects.runic = true;
+			else if (name === "burnished") effects.burnished = true;
+			else if (name.startsWith("armor proofing")) {
+				const tierMatch = name.match(/(\d)(?:st|nd|rd)/);
+				if (tierMatch) effects.armorProofingTier = Math.max(effects.armorProofingTier, parseInt(tierMatch[1]));
+			}
+		}
+
+		return effects;
+	}
+
+	/**
 	 * Get the total bonus adjustments from applied upgrades on an item
 	 * @param {object} item - Inventory item data (with appliedUpgrades array)
 	 * @returns {object} Bonus adjustments {bonusWeaponAttack, bonusWeaponDamage, critThreshold, bonusSpellAttack, bonusSpellSaveDc, damageDieIncrease}
