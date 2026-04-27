@@ -233,31 +233,32 @@ class CharacterSheetUpgrades {
 				for (const upgrade of upgrades) {
 					const gpCost = CharacterSheetUpgrades.parseGoldCost(upgrade.cost);
 					const canAfford = totalGold >= gpCost;
-					const prereqText = upgrade.prerequisite?.[0]?.item?.join("; ") || "None";
-					const entrySummary = (upgrade.entries || []).join(" ");
-					const firstSentence = entrySummary.match(/^[^.!?]+[.!?]/)?.[0] || "";
-					const entryTrimmed = firstSentence && firstSentence.length <= 200
-						? firstSentence
-						: (entrySummary.length > 200 ? entrySummary.substring(0, 200) + "..." : entrySummary);
+					const prereqItems = upgrade.prerequisite?.[0]?.item;
+					const prereqText = prereqItems?.length ? `Requires: ${prereqItems.join("; ")}` : "";
+					const renderedEntries = upgrade.entries?.length
+						? Renderer.get().render({entries: upgrade.entries})
+						: "";
 					const btnAttr = !canAfford ? 'disabled title="Insufficient gold"' : "title=\"Apply for " + gpCost + " gp\"";
 					const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
 
 					const row = e_({outer: `
-						<div class="charsheet__upgrade-option ve-flex-v-center mb-1 p-2 stripe-even">
-							<div class="ve-flex-1">
-								<span class="charsheet__upgrade-name">${upgradeLink}</span>
-								<span class="ve-muted ve-small ml-1">${upgrade.cost || "Free"}</span>
-								<div class="ve-small ve-muted">${prereqText}</div>
-								<div class="ve-small">${entryTrimmed}</div>
+						<div class="charsheet__upgrade-option mb-1 p-2 stripe-even">
+							<div class="ve-flex-v-center mb-1">
+								<div class="ve-flex-1">
+									<span class="charsheet__upgrade-name">${upgradeLink}</span>
+									<span class="ve-muted ve-small ml-1">${upgrade.cost || "Free"}</span>
+									${prereqText ? `<div class="ve-small ve-muted">${prereqText}</div>` : ""}
+								</div>
+								<button type="button"
+									class="ve-btn ve-btn-xs ${canAfford ? "ve-btn-primary" : "ve-btn-default"} charsheet__upgrade-apply"
+									data-upgrade-name="${upgrade.name}"
+									data-upgrade-source="${upgrade.source}"
+									data-upgrade-cost="${gpCost}"
+									${btnAttr}>
+									<span class="glyphicon glyphicon-plus"></span> Apply
+								</button>
 							</div>
-							<button type="button"
-								class="ve-btn ve-btn-xs ${canAfford ? "ve-btn-primary" : "ve-btn-default"} charsheet__upgrade-apply"
-								data-upgrade-name="${upgrade.name}"
-								data-upgrade-source="${upgrade.source}"
-								data-upgrade-cost="${gpCost}"
-								${btnAttr}>
-								<span class="glyphicon glyphicon-plus"></span> Apply
-							</button>
+							${renderedEntries ? `<details class="ve-small charsheet__upgrade-details"><summary class="ve-muted">Details</summary><div class="mt-1">${renderedEntries}</div></details>` : ""}
 						</div>
 					`});
 					availSection.append(row);
@@ -568,46 +569,41 @@ class CharacterSheetUpgrades {
 				);
 
 				if (gemEntity) {
+					const baseGemName = gemEntity.gemName || opts.fromInventoryGem?.name || "Gemstone";
+					const empoweredName = `Empowered ${baseGemName} (${gemEntity.name})`;
+					const gemstoneData = {
+						name: gemEntity.name,
+						source: gemEntity.source,
+						gemName: gemEntity.gemName,
+						rarity: gemEntity.rarity,
+						upgradeType: gemEntity.upgradeType,
+						entries: gemEntity.entries,
+						charges: gemEntity.charges || null,
+						recharge: gemEntity.recharge || null,
+					};
+
 					if (opts.fromInventoryGem) {
 						// Transform the existing inventory gem into an empowered gem
 						const existingItems = this._state.getItems();
 						const existingGem = existingItems.find(i => i.id === opts.fromInventoryGem.id);
 						if (existingGem) {
-							existingGem.name = `${gemName} (Empowered ${gemEntity.gemName || "Gemstone"})`;
+							existingGem.name = empoweredName;
 							existingGem.rarity = gemEntity.rarity || "common";
 							existingGem.entries = gemEntity.entries || [];
 							existingGem._isEmpoweredGemstone = true;
-							existingGem._gemstoneData = {
-								name: gemEntity.name,
-								source: gemEntity.source,
-								gemName: gemEntity.gemName,
-								rarity: gemEntity.rarity,
-								upgradeType: gemEntity.upgradeType,
-								entries: gemEntity.entries,
-								charges: gemEntity.charges || null,
-								recharge: gemEntity.recharge || null,
-							};
+							existingGem._gemstoneData = gemstoneData;
 						}
 					} else {
-						// Original flow: create new empowered gem from scratch
+						// Standalone flow: create new empowered gem
 						this._state.addItem({
-							name: `${gemName} (Empowered ${gemEntity.gemName || "Gemstone"})`,
+							name: empoweredName,
 							source: gemSource,
-							type: "G",
+							type: "$G",
 							rarity: gemEntity.rarity || "common",
 							entries: gemEntity.entries || [],
 							weight: 0,
 							_isEmpoweredGemstone: true,
-							_gemstoneData: {
-								name: gemEntity.name,
-								source: gemEntity.source,
-								gemName: gemEntity.gemName,
-								rarity: gemEntity.rarity,
-								upgradeType: gemEntity.upgradeType,
-								entries: gemEntity.entries,
-								charges: gemEntity.charges || null,
-								recharge: gemEntity.recharge || null,
-							},
+							_gemstoneData: gemstoneData,
 						});
 					}
 				}
@@ -621,17 +617,27 @@ class CharacterSheetUpgrades {
 					</div>
 				`;
 
-				JqueryUtil.doToast({content: `Empowered ${gemName}!${opts.fromInventoryGem ? "" : " Added to inventory."}`, type: "success"});
+				const toastGemLabel = gemEntity?.gemName || opts.fromInventoryGem?.name || gemName;
+				JqueryUtil.doToast({content: `Empowered ${toastGemLabel} with ${gemName}!${opts.fromInventoryGem ? "" : " Added to inventory."}`, type: "success"});
 				this._page.saveCharacter();
 				this._page._inventory?.render();
 			} else {
+				// Failure — gem is destroyed
+				if (opts.fromInventoryGem) {
+					this._state.removeItem(opts.fromInventoryGem.id);
+					this._page.saveCharacter();
+					this._page._inventory?.render();
+				}
+
 				resultDiv.style.display = "";
 				resultDiv.innerHTML = `
 					<div class="alert alert-danger">
 						<strong>${nat1 ? "💥 Natural 1! " : ""}Roll: ${roll} + ${totalBonus} = ${total} vs DC ${dc} — Failed!</strong>
-						<p>The empowerment fails. The gemstone is muted and cannot hold the power.</p>
+						<p>The empowerment fails. The gemstone shatters and is destroyed.</p>
 					</div>
 				`;
+
+				JqueryUtil.doToast({content: `Empowerment failed — ${opts.fromInventoryGem?.name || gemName} was destroyed.`, type: "danger"});
 			}
 
 			// Add close button

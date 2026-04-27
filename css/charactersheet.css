@@ -1302,21 +1302,21 @@
 	font-family: var(--cs-font-family, inherit);
 }
 
-/* Text Size Scaling - Applied via CSS custom property */
+/* Text Size Scaling - Applied via root font-size in JS */
 .charsheet-page {
 	--cs-text-scale: 1;
 	position: relative;
 }
 
 .charsheet-page[data-textsize] {
-	font-size: calc(1rem * var(--cs-text-scale, 1));
+	font-size: 1rem;
 }
 
-/* --cs-text-scale is set via inline style in JS to support arbitrary values */
+/* Root font-size is set in JS (document.documentElement.style.fontSize) so all rem values auto-scale */
 
 /* Apply scaling to the entire character sheet content area */
 .charsheet-page[data-textsize] .tab-content {
-	font-size: calc(1rem * var(--cs-text-scale, 1));
+	font-size: 1rem;
 }
 
 /* Scale all text within character sheet sections */
@@ -1324,7 +1324,7 @@
 .charsheet-page[data-textsize] .charsheet__panel,
 .charsheet-page[data-textsize] .charsheet__card,
 .charsheet-page[data-textsize] .cs-card {
-	font-size: calc(1rem * var(--cs-text-scale, 1));
+	font-size: 1rem;
 }
 
 /* Large display values - ability scores, HP, AC, etc. */
@@ -1339,7 +1339,7 @@
 .charsheet-page[data-textsize] .charsheet__speed-value,
 .charsheet-page[data-textsize] .charsheet__proficiency-value,
 .charsheet-page[data-textsize] .charsheet__passive-value {
-	font-size: calc(var(--cs-text-3xl, 2rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-3xl, 2rem);
 }
 
 /* Medium display values */
@@ -1347,7 +1347,7 @@
 .charsheet-page[data-textsize] .charsheet__resource-value,
 .charsheet-page[data-textsize] .charsheet__currency-value,
 .charsheet-page[data-textsize] .charsheet__level-value {
-	font-size: calc(var(--cs-text-2xl, 1.5rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-2xl, 1.5rem);
 }
 
 /* Section headers and titles */
@@ -1357,7 +1357,7 @@
 .charsheet-page[data-textsize] .cs-card__title,
 .charsheet-page[data-textsize] h3,
 .charsheet-page[data-textsize] h4 {
-	font-size: calc(var(--cs-text-lg, 1.125rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-lg, 1.125rem);
 }
 
 /* Item/entry names */
@@ -1372,7 +1372,7 @@
 .charsheet-page[data-textsize] .charsheet__method-name,
 .charsheet-page[data-textsize] .charsheet__proficiency-item,
 .charsheet-page[data-textsize] .charsheet__language-item {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Bonus/modifier values */
@@ -1382,7 +1382,7 @@
 .charsheet-page[data-textsize] .charsheet__attack-damage,
 .charsheet-page[data-textsize] .charsheet__spell-level,
 .charsheet-page[data-textsize] .charsheet__item-quantity {
-	font-size: calc(var(--cs-text-base, 1rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-base, 1rem);
 }
 
 /* Description/body text */
@@ -1394,7 +1394,7 @@
 .charsheet-page[data-textsize] .rd__b,
 .charsheet-page[data-textsize] .rd__p,
 .charsheet-page[data-textsize] p {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Small/muted text */
@@ -1409,41 +1409,41 @@
 .charsheet-page[data-textsize] .ve-small,
 .charsheet-page[data-textsize] .ve-muted,
 .charsheet-page[data-textsize] small {
-	font-size: calc(var(--cs-text-xs, 0.75rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-xs, 0.75rem);
 }
 
 /* Form inputs and selects within character sheet */
 .charsheet-page[data-textsize] .tab-content input:not([type="checkbox"]):not([type="radio"]),
 .charsheet-page[data-textsize] .tab-content select,
 .charsheet-page[data-textsize] .tab-content textarea {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Buttons within character sheet content (not header) */
 .charsheet-page[data-textsize] .tab-content .ve-btn,
 .charsheet-page[data-textsize] .tab-content .btn,
 .charsheet-page[data-textsize] .tab-content button:not(.charsheet__textsize-btn):not(.charsheet__theme-swatch) {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Badges and tags */
 .charsheet-page[data-textsize] .badge,
 .charsheet-page[data-textsize] .charsheet__tag,
 .charsheet-page[data-textsize] .charsheet__badge {
-	font-size: calc(var(--cs-text-xs, 0.75rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-xs, 0.75rem);
 }
 
 /* Lists */
 .charsheet-page[data-textsize] .charsheet__list-item,
 .charsheet-page[data-textsize] ul li,
 .charsheet-page[data-textsize] ol li {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Tables */
 .charsheet-page[data-textsize] table,
 .charsheet-page[data-textsize] .charsheet__table {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Tabs - scale tab text */
@@ -1451,31 +1451,31 @@
 .charsheet-page[data-textsize] .nav-tabs a,
 .charsheet-page[data-textsize] .charsheet__tab-icon,
 .charsheet-page[data-textsize] .charsheet__tab-text {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Character info in overview */
 .charsheet-page[data-textsize] .charsheet__char-name,
 .charsheet-page[data-textsize] .charsheet__char-info {
-	font-size: calc(var(--cs-text-xl, 1.25rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-xl, 1.25rem);
 }
 
 /* Spell slots */
 .charsheet-page[data-textsize] .charsheet__spell-slot-level,
 .charsheet-page[data-textsize] .charsheet__spell-slot-count {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Combat methods */
 .charsheet-page[data-textsize] .charsheet__method-item,
 .charsheet-page[data-textsize] .charsheet__method-badge {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Inventory sections */
 .charsheet-page[data-textsize] .charsheet__inventory-section,
 .charsheet-page[data-textsize] .charsheet__equipment-slot {
-	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
+	font-size: var(--cs-text-sm, 0.875rem);
 }
 
 /* Ability cards and hero elements */
@@ -11286,14 +11286,7 @@ body.is-charsheet-page .ve-ui-modal__scroller::-webkit-scrollbar-thumb:hover {
 	background: var(--cs-accent, #8b5cf6);
 }
 
-/* Character sheet text scale for modals and popups */
-body.is-charsheet-page .ve-ui-modal__inner {
-	font-size: calc(1rem * var(--cs-text-scale, 1));
-}
-
-body.is-charsheet-page .hwin__wrp-table {
-	font-size: calc(1rem * var(--cs-text-scale, 1));
-}
+/* Character sheet text scale for modals and popups - handled by root font-size in JS */
 
 /* Modal Form Controls */
 body.is-charsheet-page .ve-ui-modal__inner .ve-form-control {
@@ -16534,6 +16527,20 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__upgrade-name a:hover {
 	text-decoration: underline;
 	color: var(--cs-accent, #6366f1);
+}
+
+.charsheet__upgrade-details summary {
+	cursor: pointer;
+	user-select: none;
+}
+
+.charsheet__upgrade-details[open] summary {
+	margin-bottom: 0.25rem;
+}
+
+.charsheet__upgrade-details .rd__b,
+.charsheet__upgrade-details .rd__p {
+	margin-bottom: 0.25rem;
 }
 
 .charsheet__upgrade-current h5,

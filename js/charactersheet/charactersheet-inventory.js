@@ -945,22 +945,47 @@ class CharacterSheetInventory {
 			</div>
 		`}));
 
-		// Empowerment button for base gems (TGTT)
+		// Empowerment info for base gems (TGTT) — read-only preview since item isn't in inventory yet
 		const itemType = item.type?.split("|")[0];
 		if (itemType === "$G" && !item._isEmpoweredGemstone) {
 			const isTgtt = this._page._state?._data?.settings?.enableTgtt;
 			if (isTgtt && this._page._upgrades) {
-				const empowerSection = e_({outer: `<div class="mt-3 p-2" style="background: var(--cs-bg-secondary, #f0f7ff); border-radius: 6px;"></div>`});
-				empowerSection.append(e_({outer: `
-					<p class="ve-small mb-2"><strong>💎 Gemstone Empowerment</strong> — Imbue this gem with magical power through a crafting check.</p>
-				`}));
-				const empowerBtn = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-success", html: `<span class="glyphicon glyphicon-flash"></span> Empower ${item.name}`});
-				empowerBtn.addEventListener("click", async () => {
-					doClose(false);
-					await this._page._upgrades.showEmpowermentModal({fromInventoryGem: {id: item.id, name: item.name, source: item.source}});
-				});
-				empowerSection.append(empowerBtn);
-				modalInner.append(empowerSection);
+				const gemPowers = this._page._upgrades.getGemstoneUpgrades()
+					.filter(g => g.gemName && g.gemName.toLowerCase() === item.name.toLowerCase());
+
+				if (gemPowers.length) {
+					const empowerSection = e_({outer: `<div class="mt-3"></div>`});
+					empowerSection.append(e_({outer: `
+						<h5 class="mb-2">💎 Empowerment Options</h5>
+						<p class="ve-small ve-muted mb-2">Add this gem to your inventory, then empower it with one of the following powers.</p>
+					`}));
+
+					const rarityDCs = {"common": 10, "uncommon": 15, "rare": 20, "very rare": 25, "legendary": 30};
+
+					for (const gem of gemPowers) {
+						const dc = gem.craftingDC || rarityDCs[gem.rarity] || 10;
+						const renderedEntries = gem.entries?.length
+							? Renderer.get().render({entries: gem.entries})
+							: "";
+						const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gem.name, gem.source);
+
+						empowerSection.append(e_({outer: `
+							<div class="charsheet__empower-option mb-2 p-2 stripe-even" style="border-radius: var(--cs-radius-sm, 6px);">
+								<div class="ve-flex-v-center mb-1">
+									<div class="ve-flex-1">
+										<span class="charsheet__upgrade-name">${gemLink}</span>
+										<span class="badge badge-success ve-small ml-1">${(gem.rarity || "common").toTitleCase()}</span>
+										<span class="ve-muted ve-small ml-1">DC ${dc} · ${gem.cost || "Free"}</span>
+										${gem.charges ? `<span class="badge badge-info ve-small ml-1">${gem.charges} charges</span>` : ""}
+									</div>
+								</div>
+								${renderedEntries ? `<div class="ve-small mt-1">${renderedEntries}</div>` : ""}
+							</div>
+						`}));
+					}
+
+					modalInner.append(empowerSection);
+				}
 			}
 		}
 
@@ -2888,22 +2913,80 @@ class CharacterSheetInventory {
 
 		modalInner.append(e_({outer: `<div>${itemData ? this._renderItemDetails(itemData) : this._renderBasicItemDetails(item)}</div>`}));
 
-		// Empowerment button for base gems in inventory (TGTT)
+		// Empowerment section for base gems in inventory (TGTT) — show available powers inline
 		const itemType = (itemData || item).type?.split("|")[0];
-		if (itemType === "$G" && !item._isEmpoweredGemstone) {
+		if ((itemType === "$G" || itemType === "gemstone") && !item._isEmpoweredGemstone) {
 			const isTgtt = this._page._state?._data?.settings?.enableTgtt;
 			if (isTgtt && this._page._upgrades) {
-				const empowerSection = e_({outer: `<div class="mt-3 p-2" style="background: var(--cs-bg-secondary, #f0f7ff); border-radius: 6px;"></div>`});
-				empowerSection.append(e_({outer: `
-					<p class="ve-small mb-2"><strong>💎 Gemstone Empowerment</strong> — Imbue this gem with magical power through a crafting check.</p>
-				`}));
-				const empowerBtn = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-success", html: `<span class="glyphicon glyphicon-flash"></span> Empower ${item.name}`});
-				empowerBtn.addEventListener("click", async () => {
-					doClose(false);
-					await this._page._upgrades.showEmpowermentModal({fromInventoryGem: {id: item.id, name: item.name, source: item.source}});
-				});
-				empowerSection.append(empowerBtn);
-				modalInner.append(empowerSection);
+				const gemPowers = this._page._upgrades.getGemstoneUpgrades()
+					.filter(g => g.gemName && g.gemName.toLowerCase() === item.name.toLowerCase());
+
+				if (gemPowers.length) {
+					const empowerSection = e_({outer: `<div class="mt-3"></div>`});
+					empowerSection.append(e_({outer: `
+						<h5 class="mb-2">💎 Empowerment Options</h5>
+						<p class="ve-small ve-muted mb-2">Imbue this gem with magical power. Requires jeweler's tools proficiency and a crafting check (PB + CHA or WIS vs DC).</p>
+					`}));
+
+					const rarityDCs = {"common": 10, "uncommon": 15, "rare": 20, "very rare": 25, "legendary": 30};
+					const totalGold = this._page._state?.getTotalGold?.() || 0;
+
+					for (const gem of gemPowers) {
+						const dc = gem.craftingDC || rarityDCs[gem.rarity] || 10;
+						const costGp = CharacterSheetUpgrades.parseGoldCost(gem.cost);
+						const canAfford = totalGold >= costGp;
+						const renderedEntries = gem.entries?.length
+							? Renderer.get().render({entries: gem.entries})
+							: "";
+						const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gem.name, gem.source);
+
+						const row = e_({outer: `
+							<div class="charsheet__empower-option mb-2 p-2 stripe-even" style="border-radius: var(--cs-radius-sm, 6px);">
+								<div class="ve-flex-v-center mb-1">
+									<div class="ve-flex-1">
+										<span class="charsheet__upgrade-name">${gemLink}</span>
+										<span class="badge badge-success ve-small ml-1">${(gem.rarity || "common").toTitleCase()}</span>
+										<span class="ve-muted ve-small ml-1">DC ${dc} · ${gem.cost || "Free"}</span>
+										${gem.charges ? `<span class="badge badge-info ve-small ml-1">${gem.charges} charges</span>` : ""}
+									</div>
+									<button type="button"
+										class="ve-btn ve-btn-xs ${canAfford ? "ve-btn-success" : "ve-btn-default"} charsheet__empower-inline-btn"
+										data-gem-name="${gem.name}"
+										data-gem-source="${gem.source}"
+										data-gem-dc="${dc}"
+										data-gem-cost="${costGp}"
+										${!canAfford ? `disabled title="Need ${costGp} gp"` : `title="Empower for ${costGp} gp"`}>
+										<span class="glyphicon glyphicon-flash"></span> Empower
+									</button>
+								</div>
+								${renderedEntries ? `<div class="ve-small mt-1">${renderedEntries}</div>` : ""}
+							</div>
+						`});
+						empowerSection.append(row);
+					}
+
+					// Event delegation for inline empower buttons
+					empowerSection.addEventListener("click", async (e) => {
+						const btn = e.target.closest(".charsheet__empower-inline-btn");
+						if (!btn) return;
+						doClose(false);
+						await this._page._upgrades._showCraftingRollModal(
+							btn.dataset.gemName,
+							btn.dataset.gemSource,
+							parseInt(btn.dataset.gemDc),
+							parseFloat(btn.dataset.gemCost),
+							{fromInventoryGem: {id: item.id, name: item.name, source: item.source}},
+						);
+					});
+
+					modalInner.append(empowerSection);
+				} else {
+					modalInner.append(e_({outer: `
+						<div class="mt-3 p-2 ve-small ve-muted" style="background: var(--cs-bg-secondary, #f0f7ff); border-radius: 6px;">
+							💎 No empowerment recipes found for this gemstone.
+						</div>
+					`}));
+				}
 			}
 		}
 
