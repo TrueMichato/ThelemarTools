@@ -204,12 +204,17 @@ class CharacterSheetPage {
 		// Load all necessary data in parallel
 		// Note: Using loadRawJSON for classes to get classFeature and subclassFeature arrays
 		// Also pre-cache class/subclass features in DataLoader so hover links work properly
-		const [races, classes, backgrounds, spells, items, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, prereleaseData, brewData] = await Promise.all([
+		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, prereleaseData, brewData] = await Promise.all([
 			DataUtil.race.loadJSON(),
 			DataUtil.class.loadRawJSON(),
 			DataUtil.loadJSON("data/backgrounds.json"),
 			DataUtil.spell.pLoadAll(),
-			Renderer.item.pBuildList(),
+			// Use DataUtil.item.loadJSON/loadBrew/loadPrerelease so brew items go through the
+			// full enhancement pipeline (generic variant generation + property/mastery merging)
+			// — same path used by items.html. Otherwise brew weapons lack mastery/property fields.
+			DataUtil.item.loadJSON().then(d => d.item || []),
+			DataUtil.item.loadBrew().then(d => d.item || []).catch(() => []),
+			DataUtil.item.loadPrerelease().then(d => d.item || []).catch(() => []),
 			DataUtil.loadJSON("data/feats.json"),
 			DataUtil.loadJSON("data/optionalfeatures.json"),
 			DataUtil.loadJSON("data/skills.json"),
@@ -217,7 +222,7 @@ class CharacterSheetPage {
 			DataUtil.loadJSON("data/languages.json"),
 			DataUtil.combatmethod.loadJSON().catch(() => ({combatMethod: []})),
 			DataUtil.itemUpgrade.loadJSON().catch(() => ({itemUpgrade: []})),
-			// Load homebrew/prerelease data
+			// Load homebrew/prerelease data (for non-item entities)
 			PrereleaseUtil.pGetBrewProcessed(),
 			BrewUtil2.pGetBrewProcessed(),
 		]);
@@ -232,8 +237,10 @@ class CharacterSheetPage {
 		this._subclassFeatures = classes.subclassFeature || [];
 		this._backgrounds = backgrounds.background || [];
 		this._spellsData = spells;
-		// Filter out item groups which are not actual items
-		this._itemsData = (items || []).filter(it => !it._isItemGroup);
+		// Filter out item groups which are not actual items.
+		// Merge site + prerelease + brew items here (all already enhanced by DataUtil.item.*).
+		this._itemsData = [...(items || []), ...(prereleaseItems || []), ...(brewItems || [])]
+			.filter(it => !it._isItemGroup);
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
 		this._combatMethodsData = (combatMethods.combatMethod || []).map(m => ({...m, _entityType: "combatMethod"}));
@@ -375,6 +382,10 @@ class CharacterSheetPage {
 	_mergeBrewData (brewData) {
 		if (!brewData) return;
 
+		// Register brew item properties, types, and masteries into Renderer.item lookup maps
+		// so that getProperty()/getMastery() can resolve them for filter display
+		Renderer.item.addPrereleaseBrewPropertiesAndTypesFrom({data: brewData});
+
 		// Races - process with same logic as site races (mergeSubraces + expand _versions)
 		if (brewData.race?.length) {
 			const processedBrewRaces = this._processRaceData(MiscUtil.copyFast(brewData.race));
@@ -443,11 +454,9 @@ class CharacterSheetPage {
 			this._spellsData = [...this._spellsData, ...MiscUtil.copyFast(brewData.spell)];
 		}
 
-		// Items - need to handle differently as items can be complex
-		if (brewData.item?.length) {
-			const brewItems = MiscUtil.copyFast(brewData.item).filter(it => !it._isItemGroup);
-			this._itemsData = [...this._itemsData, ...brewItems];
-		}
+		// Items are loaded separately via DataUtil.item.loadBrew() in _pLoadData so they go
+		// through the full enhancement pipeline (generic variants, property/mastery merging).
+		// Do not merge raw brewData.item here — it lacks the enhanced fields.
 
 		// Feats
 		if (brewData.feat?.length) {
@@ -7083,7 +7092,7 @@ class CharacterSheetPage {
 
 		const STORAGE_KEY = "charsheet-text-size";
 		const DEFAULT_SIZE = 100;
-		const MIN_SIZE = 80;
+		const MIN_SIZE = 50;
 		const MAX_SIZE = 250;
 		const STEP = 5;
 
