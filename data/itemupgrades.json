@@ -102,7 +102,7 @@
 			]
 		},
 		{
-			"name": "Runic",
+			"name": "Gem Socket",
 			"source": "TCAH",
 			"page": 11,
 			"upgradeType": [
@@ -112,12 +112,12 @@
 			"prerequisite": [
 				{
 					"item": [
-						"can only be applied by a runesmith"
+						"any weapon"
 					]
 				}
 			],
 			"entries": [
-				"This weapon can be imbued with rune magic."
+				"This weapon can be imbued with a gemstone."
 			]
 		},
 		{
@@ -558,7 +558,7 @@
 			]
 		},
 		{
-			"name": "Runic",
+			"name": "Gem Socket",
 			"source": "TCAH",
 			"page": 8,
 			"upgradeType": [
@@ -568,12 +568,12 @@
 			"prerequisite": [
 				{
 					"item": [
-						"armor proofing tag (any tier) or a shield, can only be applied by a runesmith"
+						"armor proofing tag (any tier) or a shield"
 					]
 				}
 			],
 			"entries": [
-				"This armor or shield can be imbued with rune magic."
+				"This armor or shield can be imbued with a gemstone."
 			]
 		},
 		{
