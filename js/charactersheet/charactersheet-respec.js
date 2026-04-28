@@ -159,22 +159,26 @@ class CharacterSheetRespec {
 
 			// Feat choice
 			if (history.choices.feat) {
-				choices.append(e_({outer: `
+				const featPill = e_({outer: `
 					<span class="charsheet__level-choice charsheet__level-choice--feat">
 						<span class="charsheet__level-choice-icon">⭐</span>
-						${history.choices.feat.name}
+						<span class="respec-hover-slot"></span>
 					</span>
-				`}));
+				`});
+				CharacterSheetRespec._setHoverLink(featPill.querySelector(".respec-hover-slot"), UrlUtil.PG_FEATS, history.choices.feat.name, history.choices.feat.source);
+				choices.append(featPill);
 			}
 
 			// Subclass choice
 			if (history.choices.subclass) {
-				choices.append(e_({outer: `
+				const subPill = e_({outer: `
 					<span class="charsheet__level-choice charsheet__level-choice--subclass">
 						<span class="charsheet__level-choice-icon">🎭</span>
-						${history.choices.subclass.name}
+						<span class="respec-hover-slot"></span>
 					</span>
-				`}));
+				`});
+				CharacterSheetRespec._setHoverLink(subPill.querySelector(".respec-hover-slot"), UrlUtil.PG_CLASSES, history.choices.subclass.name, history.choices.subclass.source);
+				choices.append(subPill);
 			}
 
 			// Skills chosen
@@ -189,27 +193,32 @@ class CharacterSheetRespec {
 				`}));
 			}
 
-			// Feature choices
+			// Feature choices (specialties, fighting styles, etc.)
 			if (history.choices.featureChoices?.length > 0) {
 				history.choices.featureChoices.forEach(fc => {
-					choices.append(e_({outer: `
+					const fcPill = e_({outer: `
 						<span class="charsheet__level-choice charsheet__level-choice--feature">
 							<span class="charsheet__level-choice-icon">✦</span>
-							${fc.choice}
+							<span class="respec-hover-slot"></span>
 						</span>
-					`}));
+					`});
+					CharacterSheetRespec._setHoverLink(fcPill.querySelector(".respec-hover-slot"), UrlUtil.PG_OPT_FEATURES, fc.choice, fc.source);
+					choices.append(fcPill);
 				});
 			}
 
-			// Optional features (invocations, metamagic, etc.)
+			// Optional features (invocations, metamagic, combat methods, etc.)
 			if (history.choices.optionalFeatures?.length > 0) {
 				history.choices.optionalFeatures.forEach(of => {
-					choices.append(e_({outer: `
+					const ofPill = e_({outer: `
 						<span class="charsheet__level-choice charsheet__level-choice--feature">
 							<span class="charsheet__level-choice-icon">✧</span>
-							${of.name}
+							<span class="respec-hover-slot"></span>
 						</span>
-					`}));
+					`});
+					const page = of.type?.startsWith("CTM:") ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+					CharacterSheetRespec._setHoverLink(ofPill.querySelector(".respec-hover-slot"), page, of.name, of.source);
+					choices.append(ofPill);
 				});
 			}
 
@@ -227,29 +236,40 @@ class CharacterSheetRespec {
 
 			// Combat traditions
 			if (history.choices.combatTraditions?.length > 0) {
-				const traditionsText = history.choices.combatTraditions.slice(0, 3).join(", ");
-				const more = history.choices.combatTraditions.length > 3 ? ` +${history.choices.combatTraditions.length - 3} more` : "";
-				choices.append(e_({outer: `
+				const tradPill = e_({outer: `
 					<span class="charsheet__level-choice charsheet__level-choice--feature">
 						<span class="charsheet__level-choice-icon">⚔️</span>
-						Traditions: ${traditionsText}${more}
+						Traditions: <span class="respec-hover-slots"></span>
 					</span>
-				`}));
+				`});
+				const slotsEl = tradPill.querySelector(".respec-hover-slots");
+				history.choices.combatTraditions.forEach((code, i) => {
+					if (i > 0) slotsEl.append(document.createTextNode(", "));
+					const tradName = CharacterSheetClassUtils.getTraditionName?.(code) || code;
+					const slot = e_({tag: "span", clazz: "respec-hover-slot"});
+					CharacterSheetRespec._setHoverLink(slot, UrlUtil.PG_VARIANTRULES, "Combat Traditions", Parser.SRC_TGTT || "TGTT", null, tradName);
+					slotsEl.append(slot);
+				});
+				choices.append(tradPill);
 			}
 
 			// Weapon masteries
 			if (history.choices.weaponMasteries?.length > 0) {
-				const masteryText = history.choices.weaponMasteries
-					.map(m => m.split("|")[0])
-					.slice(0, 2)
-					.join(", ");
-				const more = history.choices.weaponMasteries.length > 2 ? ` +${history.choices.weaponMasteries.length - 2} more` : "";
-				choices.append(e_({outer: `
+				const masteryPill = e_({outer: `
 					<span class="charsheet__level-choice charsheet__level-choice--feature">
 						<span class="charsheet__level-choice-icon">🗡️</span>
-						Masteries: ${masteryText}${more}
+						Masteries: <span class="respec-hover-slots"></span>
 					</span>
-				`}));
+				`});
+				const slotsEl = masteryPill.querySelector(".respec-hover-slots");
+				history.choices.weaponMasteries.forEach((m, i) => {
+					if (i > 0) slotsEl.append(document.createTextNode(", "));
+					const [name, source] = m.split("|");
+					const slot = e_({tag: "span", clazz: "respec-hover-slot"});
+					CharacterSheetRespec._setHoverLink(slot, UrlUtil.PG_ITEMS, name, source);
+					slotsEl.append(slot);
+				});
+				choices.append(masteryPill);
 			}
 
 			// Language choices
@@ -722,9 +742,10 @@ class CharacterSheetRespec {
 				(byType[key] = byType[key] || []).push(of);
 			}
 			for (const [typeKey, features] of Object.entries(byType)) {
+				const isCTM = typeKey.startsWith("CTM:");
 				const label = CharacterSheetRespec._getOptionalFeatureTypeLabel(typeKey);
 				editable.push({
-					type: "optionalFeatures",
+					type: isCTM ? "combatMethods" : "optionalFeatures",
 					label,
 					current: features.map(f => f.name).join(", "),
 					featureTypeKey: typeKey,
@@ -821,6 +842,9 @@ class CharacterSheetRespec {
 				break;
 			case "weaponMasteries":
 				await this._editWeaponMasteries(level, history, closeParentModal);
+				break;
+			case "combatMethods":
+				await this._editCombatMethods(level, history, choice, closeParentModal);
 				break;
 			case "optionalFeatures":
 				await this._editOptionalFeatures(level, history, choice, closeParentModal);
@@ -951,6 +975,221 @@ class CharacterSheetRespec {
 			this._page.renderCharacter();
 			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Updated level ${level} combat traditions.`});
+		});
+	}
+
+	/**
+	 * Edit combat methods — dedicated flow with tradition grouping and degree filtering.
+	 * Modeled on LevelUp's _renderMethodsForLevelUp.
+	 */
+	async _editCombatMethods (level, history, choice, closeParentModal) {
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: `Change Combat Methods (Level ${level})`,
+			isMinHeight0: true,
+			isWidth100: true,
+			isUncappedWidth: true,
+			cbClose: () => {},
+		});
+
+		const featureTypeKey = choice.featureTypeKey;
+		const featureTypes = featureTypeKey.split("_");
+		const requiredCount = choice.count;
+
+		// Get class data and compute filtering params
+		const classData = this._page.getClasses()?.find(c => c.name === history.class?.name && c.source === history.class?.source);
+
+		// Get existing optional features from state
+		const existingOptFeatures = this._state.getFeatures().filter(f => f.featureType === "Optional Feature");
+
+		// Get known traditions
+		const knownTraditions = CharacterSheetClassUtils.getKnownCombatTraditions(existingOptFeatures, this._state);
+		const maxDegree = CharacterSheetClassUtils.getMaxMethodDegree(classData, level);
+
+		// Merge combat method entities into the pool
+		const allOptFeaturesRaw = this._page.filterByAllowedSources?.(this._page.getOptionalFeatures() || []) || [];
+		const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
+		const allMethods = [...allOptFeaturesRaw, ...combatMethodEntities];
+
+		// Filter to methods in known traditions at valid degree
+		const availableMethods = allMethods.filter(opt => {
+			if (!CharacterSheetClassUtils.isCombatMethod(opt)) return false;
+			const degree = CharacterSheetClassUtils.getMethodDegree(opt);
+			const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(opt);
+			return degree > 0 && degree <= maxDegree && tradCode && knownTraditions.includes(tradCode);
+		});
+
+		// Filter by edition
+		const filteredMethods = CharacterSheetClassUtils.filterOptFeaturesByEdition?.(availableMethods, classData?.source || history.class?.source) || availableMethods;
+
+		// Current selections for this type at this level
+		const currentSelections = (history.choices.optionalFeatures || []).filter(of => of.type === featureTypeKey);
+		const currentNames = new Set(currentSelections.map(s => s.name));
+
+		// Already-known methods from OTHER levels
+		const existingFromOtherLevels = new Set();
+		for (const entry of this._state.getLevelHistory()) {
+			if (entry.level === level) continue;
+			for (const of of (entry.choices?.optionalFeatures || [])) {
+				if (of.type === featureTypeKey) existingFromOtherLevels.add(of.name);
+			}
+		}
+
+		// Mark methods
+		const processedMethods = filteredMethods.map(opt => ({
+			...opt,
+			_alreadyKnown: existingFromOtherLevels.has(opt.name) && !currentNames.has(opt.name),
+			_degree: CharacterSheetClassUtils.getMethodDegree(opt),
+			_tradition: CharacterSheetClassUtils.getMethodTraditionCode(opt),
+		}));
+
+		let selectedNames = new Set(currentNames);
+
+		modalInner.append(e_({outer: `<div>
+			<p class="ve-muted mb-2">Choose ${requiredCount} combat method${requiredCount > 1 ? "s" : ""} for this level.</p>
+			<p class="ve-small ve-muted mb-2">Max degree: ${maxDegree}${CharacterSheetClassUtils.getOrdinalSuffix?.(maxDegree) || ""} | Traditions: ${knownTraditions.map(t => CharacterSheetClassUtils.getTraditionName(t)).join(", ")}</p>
+			<div class="ve-small ve-muted mb-2">Selected: <span id="respec-cm-count">${selectedNames.size}</span>/${requiredCount}</div>
+		</div>`}));
+
+		const list = e_({tag: "div"});
+		Object.assign(list.style, {maxHeight: "60vh", overflowY: "auto", border: "1px solid var(--rgb-border-grey)", borderRadius: "4px", padding: "0.5rem"});
+
+		// Group by tradition
+		const methodsByTradition = new Map();
+		for (const method of processedMethods) {
+			const trad = method._tradition;
+			if (!methodsByTradition.has(trad)) methodsByTradition.set(trad, []);
+			methodsByTradition.get(trad).push(method);
+		}
+
+		for (const tradCode of knownTraditions) {
+			const methods = methodsByTradition.get(tradCode) || [];
+			if (methods.length === 0) continue;
+
+			const tradGroup = e_({outer: `<div class="mb-2"><p class="ve-small mb-1"><strong>${CharacterSheetClassUtils.getTraditionName(tradCode)}</strong></p></div>`});
+
+			methods.sort((a, b) => a._degree - b._degree || a.name.localeCompare(b.name)).forEach(method => {
+				const isDisabled = method._alreadyKnown;
+				const isSelected = selectedNames.has(method.name);
+				const knownBadge = isDisabled ? `<span class="badge badge-secondary ml-1">Known</span>` : "";
+
+				const item = e_({outer: `
+					<label style="display:flex; align-items:center; cursor:${isDisabled ? "not-allowed" : "pointer"}; padding:6px 8px; border-bottom:1px solid var(--rgb-border-grey); ${isSelected ? "background: var(--rgb-bg-highlight);" : ""} ${isDisabled ? "opacity:0.5;" : ""}">
+						<input type="checkbox" ${isSelected ? "checked" : ""} ${isDisabled ? "disabled" : ""} style="margin-right:8px;">
+						<span>
+							<span class="respec-hover-slot"></span>
+							${knownBadge}
+							<span class="ve-muted ve-small ml-1">(${method._degree}${CharacterSheetClassUtils.getOrdinalSuffix?.(method._degree) || ""} degree)</span>
+						</span>
+					</label>
+				`});
+
+				CharacterSheetRespec._setHoverLink(item.querySelector(".respec-hover-slot"), UrlUtil.PG_COMBAT_METHODS, method.name, method.source);
+
+				if (!isDisabled) {
+					item.querySelector("input").addEventListener("change", (evt) => {
+						if (evt.target.checked) {
+							if (selectedNames.size < requiredCount) {
+								selectedNames.add(method.name);
+								item.style.background = "var(--rgb-bg-highlight)";
+							} else {
+								evt.target.checked = false;
+								JqueryUtil.doToast({type: "warning", content: `You can only choose ${requiredCount} combat methods.`});
+							}
+						} else {
+							selectedNames.delete(method.name);
+							item.style.background = "";
+						}
+						document.getElementById("respec-cm-count").textContent = selectedNames.size;
+					});
+				}
+
+				tradGroup.append(item);
+			});
+
+			list.append(tradGroup);
+		}
+
+		if ([...list.children].length === 0) {
+			list.insertAdjacentHTML("beforeend", `<div class="ve-muted">No combat methods available. Check that traditions are set.</div>`);
+		}
+
+		modalInner.append(list);
+
+		const btnRow = ee`<div class="ve-flex-h-right mt-3">
+			<button class="ve-btn ve-btn-default mr-2">Cancel</button>
+			<button class="ve-btn ve-btn-primary">Apply Changes</button>
+		</div>`;
+		modalInner.append(btnRow);
+		btnRow.querySelector(".ve-btn-default").addEventListener("click", () => doClose());
+
+		btnRow.querySelector(".ve-btn-primary").addEventListener("click", async () => {
+			if (selectedNames.size !== requiredCount) {
+				JqueryUtil.doToast({type: "warning", content: `Please select exactly ${requiredCount} combat methods.`});
+				return;
+			}
+
+			// Build new selections from the full method objects
+			const matchingOptions = filteredMethods.filter(opt => CharacterSheetClassUtils.isCombatMethod(opt));
+			const newSelections = matchingOptions
+				.filter(opt => selectedNames.has(opt.name))
+				.map(opt => ({name: opt.name, source: opt.source, type: featureTypeKey}));
+
+			// Remove old method features from state
+			for (const old of currentSelections) {
+				const stateFeature = existingOptFeatures.find(f =>
+					f.name === old.name && f.featureType === "Optional Feature"
+					&& (f.optionalFeatureTypes || []).some(ft => featureTypes.includes(ft)),
+				);
+				if (stateFeature) this._state.removeFeature(stateFeature.id);
+			}
+
+			// Add new method features to state
+			for (const sel of newSelections) {
+				const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
+				if (fullOpt) {
+					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(fullOpt, {
+						className: history.class?.name,
+						classSource: history.class?.source,
+						level,
+						featureType: "Optional Feature",
+						optionalFeatureTypes: featureTypes,
+					}));
+				}
+			}
+
+			// Update history — replace optionalFeatures of this type, keep others
+			const otherTypeFeatures = (history.choices.optionalFeatures || []).filter(of => of.type !== featureTypeKey);
+			const updatedOptionalFeatures = [...otherTypeFeatures, ...newSelections];
+
+			// Also update replayData snapshots
+			const newReplaySnapshots = newSelections.map(sel => {
+				const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
+				return fullOpt
+					? CharacterSheetClassUtils.buildHistoryFeatureSnapshot(fullOpt, {type: featureTypeKey})
+					: sel;
+			});
+			const otherTypeReplay = (history.choices.replayData?.optionalFeatures || [])
+				.filter(snap => {
+					const snapType = snap.type || snap.optionalFeatureTypes?.join("_");
+					return snapType !== featureTypeKey;
+				});
+
+			this._state.updateLevelChoice(level, {
+				optionalFeatures: updatedOptionalFeatures,
+				replayData: {
+					...(history.choices.replayData || {}),
+					optionalFeatures: [...otherTypeReplay, ...newReplaySnapshots],
+				},
+			});
+
+			this._page.replayHistoryMartialChoices();
+
+			doClose();
+			closeParentModal();
+			this.render();
+			this._page.renderCharacter();
+			await this._page.saveCharacter();
+			JqueryUtil.doToast({type: "success", content: "Updated combat methods."});
 		});
 	}
 
@@ -1263,6 +1502,26 @@ class CharacterSheetRespec {
 	}
 
 	/**
+	 * Set an element's content to a hoverable link, falling back to plain text on error.
+	 * @param {HTMLElement} el - The element to populate
+	 * @param {string} page - The hover page (e.g. UrlUtil.PG_FEATS)
+	 * @param {string} name - The entity name
+	 * @param {string} source - The entity source
+	 * @param {string|null} [hash] - Optional custom hash
+	 * @param {string|null} [displayName] - Optional display name override
+	 */
+	static _setHoverLink (el, page, name, source, hash = null, displayName = null) {
+		if (!name) { el.textContent = "Unknown"; return; }
+		try {
+			const link = CharacterSheetPage.getHoverLink(page, name, source, hash, displayName);
+			if (typeof link === "string") el.innerHTML = link;
+			else el.append(link);
+		} catch (e) {
+			el.textContent = displayName || name;
+		}
+	}
+
+	/**
 	 * Get a human-readable label for an optional feature type code.
 	 * @param {string} typeKey - e.g. "MM", "EI", "PB"
 	 * @returns {string} Human-readable label
@@ -1437,10 +1696,11 @@ class CharacterSheetRespec {
 				const isSelected = selectedFeat && feat.name === selectedFeat.name && feat.source === selectedFeat.source;
 				const item = e_({outer: `
 					<div class="charsheet__respec-feat-item ${isCurrent ? "charsheet__respec-feat-current" : ""} ${isSelected ? "charsheet__respec-feat-selected" : ""}">
-						<strong>${feat.name}</strong>
+						<span class="respec-hover-slot"></span>
 						<span class="text-muted">${Parser.sourceJsonToAbv(feat.source)}</span>
 					</div>
 				`});
+				CharacterSheetRespec._setHoverLink(item.querySelector(".respec-hover-slot"), UrlUtil.PG_FEATS, feat.name, feat.source);
 				item.addEventListener("click", () => {
 					selectedFeat = feat;
 					featList.querySelectorAll(".charsheet__respec-feat-selected").forEach(el => el.classList.remove("charsheet__respec-feat-selected"));
@@ -1556,10 +1816,29 @@ class CharacterSheetRespec {
 			const isCurrent = opt.name === currentChoice.choice;
 			const item = e_({outer: `
 				<div class="charsheet__respec-feat-item ${isCurrent ? "charsheet__respec-feat-current" : ""}">
-					<strong>${opt.name}</strong>
+					<span class="respec-hover-slot"></span>
 					${opt.source ? `<span class="text-muted">${Parser.sourceJsonToAbv(opt.source)}</span>` : ""}
 				</div>
 			`});
+
+			// Add hover link — determine page from option type
+			const nameEl = item.querySelector(".respec-hover-slot");
+			if (opt.type === "classFeature" && opt.ref) {
+				const parts = opt.ref.split("|");
+				const featureSource = parts[2] || opt.source || history.class?.source;
+				try {
+					const hash = UrlUtil.encodeArrayForHash(parts[0], parts[1], parts[2], parts[3], featureSource);
+					const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_CLASS_SUBCLASS_FEATURES, source: featureSource, hash});
+					nameEl.innerHTML = `<a href="${UrlUtil.PG_CLASS_SUBCLASS_FEATURES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${opt.name}</a>`;
+				} catch (e) {
+					nameEl.textContent = opt.name;
+				}
+			} else if (opt.source) {
+				const page = CharacterSheetClassUtils.isCombatMethod?.(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+				CharacterSheetRespec._setHoverLink(nameEl, page, opt.name, opt.source);
+			} else {
+				nameEl.textContent = opt.name;
+			}
 
 			item.addEventListener("click", () => {
 				selectedOption = opt;
@@ -1897,10 +2176,11 @@ class CharacterSheetRespec {
 				const isSelected = selectedSubclass && subclass.name === selectedSubclass.name && subclass.source === selectedSubclass.source;
 				const item = e_({outer: `
 					<div class="charsheet__respec-feat-item ${isCurrent ? "charsheet__respec-feat-current" : ""} ${isSelected ? "charsheet__respec-feat-selected" : ""}">
-						<strong>${subclass.name}</strong>
+						<span class="respec-hover-slot"></span>
 						<span class="text-muted">${Parser.sourceJsonToAbv(subclass.source)}</span>
 					</div>
 				`});
+				CharacterSheetRespec._setHoverLink(item.querySelector(".respec-hover-slot"), UrlUtil.PG_CLASSES, subclass.name, subclass.source);
 				item.addEventListener("click", () => {
 					selectedSubclass = subclass;
 					subclassList.querySelectorAll(".charsheet__respec-feat-selected").forEach(el => el.classList.remove("charsheet__respec-feat-selected"));

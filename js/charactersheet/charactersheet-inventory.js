@@ -175,9 +175,15 @@ class CharacterSheetInventory {
 				return;
 			}
 
-			// Empower gemstone button
-			if (e.target.closest("#charsheet-btn-empower-gem")) {
-				this._page.getUpgradesModule()?.showEmpowermentModal();
+			// Empower gemstone button (per-gem in inventory row)
+			if (e.target.closest(".charsheet__item-empower-gem")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) {
+					const item = this._state.getItems().find(i => i.id === itemId);
+					if (item) {
+						this._page.getUpgradesModule()?.showEmpowermentModal({fromInventoryGem: {id: item.id, name: item.name, source: item.source}});
+					}
+				}
 				return;
 			}
 
@@ -258,6 +264,7 @@ class CharacterSheetInventory {
 		await this._pShowItemPickerModal();
 	}
 
+
 	async _pShowItemPickerModal () {
 		// Filter items by allowed sources
 		const items = this._page.filterByAllowedSources(this._allItems);
@@ -268,24 +275,52 @@ class CharacterSheetInventory {
 			isWidth100: true,
 		});
 
-		// Intro text
-		modalInner.append(e_({outer: `
-			<p class="ve-small ve-muted mb-3">
-				Browse and add items to your inventory. Hover over item names for details, or click <strong>+ Add</strong> to add directly.
-			</p>
-		`}));
+		// Forward declarations for functions used in tab click handlers
+		let updateFilterVisibility;
+		let renderList;
 
-		// Build enhanced filter UI
-		const filterContainer = e_({outer: `<div class="charsheet__modal-filter"></div>`});
-		modalInner.append(filterContainer);
+		// Classify items into tabs
+		const tabItems = {equipment: [], magic: [], consumable: []};
+		for (const item of items) {
+			if (this._isConsumable(item)) tabItems.consumable.push(item);
+			else if (this._isMagicItem(item)) tabItems.magic.push(item);
+			else tabItems.equipment.push(item);
+		}
 
-		// Search input with icon
-		const searchWrapper = e_({outer: `<div class="charsheet__modal-search"></div>`});
-		filterContainer.append(searchWrapper);
+		// Tab bar
+		let currentTab = "equipment";
+		const tabBar = e_({outer: `<div class="charsheet__item-tabs"></div>`});
+		const tabDefs = [
+			{key: "equipment", label: "Equipment", emoji: "⚔️", count: tabItems.equipment.length},
+			{key: "magic", label: "Magic Items", emoji: "✨", count: tabItems.magic.length},
+			{key: "consumable", label: "Consumables", emoji: "🧪", count: tabItems.consumable.length},
+		];
+		const tabBtns = {};
+		for (const td of tabDefs) {
+			const btn = e_({tag: "button", clazz: `charsheet__item-tab${td.key === currentTab ? " charsheet__item-tab--active" : ""}`});
+			btn.innerHTML = `${td.emoji} ${td.label} <span class="charsheet__item-tab-count">${td.count}</span>`;
+			btn.addEventListener("click", () => {
+				currentTab = td.key;
+				for (const [k, b] of Object.entries(tabBtns)) b.classList.toggle("charsheet__item-tab--active", k === td.key);
+				updateFilterVisibility();
+				renderList();
+			});
+			tabBtns[td.key] = btn;
+			tabBar.append(btn);
+		}
+		modalInner.append(tabBar);
+
+		// Search input
+		const searchWrapper = e_({outer: `<div class="charsheet__modal-search mt-2"></div>`});
+		modalInner.append(searchWrapper);
 		const search = e_({tag: "input", clazz: "ve-form-control", attr: {type: "text", placeholder: "🔍 Search items by name..."}});
 		searchWrapper.append(search);
 
-		// Type filter - Multi-select dropdown
+		// Filter row: Type + Rarity + Source dropdowns
+		const filterContainer = e_({outer: `<div class="charsheet__modal-filter charsheet__modal-filter-row mt-2"></div>`});
+		modalInner.append(filterContainer);
+
+		// ---- Type filter ----
 		const itemTypes = [
 			{value: "weapon", label: "Weapons", emoji: "⚔️"},
 			{value: "armor", label: "Armor", emoji: "🛡️"},
@@ -299,78 +334,35 @@ class CharacterSheetInventory {
 			{value: "tool", label: "Tools", emoji: "🔧"},
 			{value: "gemstone", label: "Gemstones", emoji: "💎"},
 		];
-		let selectedTypes = new Set(); // Empty = all types
+		let selectedTypes = new Set();
 
-		const typeDropdown = e_({outer: `
-			<div class="charsheet__source-multiselect">
-				<button class="charsheet__source-multiselect-btn">
-					<span class="charsheet__source-multiselect-icon">📦</span>
-					<span class="charsheet__source-multiselect-text">All Types</span>
-					<span class="charsheet__source-multiselect-arrow">▼</span>
-				</button>
-				<div class="charsheet__source-multiselect-dropdown">
-					<div class="charsheet__source-multiselect-actions">
-						<button class="charsheet__source-action-btn" data-action="all">Select All</button>
-						<button class="charsheet__source-action-btn" data-action="none">Clear All</button>
-					</div>
-					<div class="charsheet__source-multiselect-list">
-						${itemTypes.map(t => `
-							<label class="charsheet__source-multiselect-item">
-								<input type="checkbox" value="${t.value}" checked>
-								<span class="charsheet__source-multiselect-check">✓</span>
-								<span class="charsheet__source-multiselect-label">${t.emoji} ${t.label}</span>
-							</label>
-						`).join("")}
-					</div>
+		const typeDropdownEl = document.createElement("div");
+		typeDropdownEl.className = "charsheet__source-multiselect";
+		typeDropdownEl.innerHTML = `
+			<button class="charsheet__source-multiselect-btn" type="button">
+				<span class="charsheet__source-multiselect-icon">📦</span>
+				<span class="charsheet__source-multiselect-text">All Types</span>
+				<span class="charsheet__source-multiselect-arrow">▼</span>
+			</button>
+			<div class="charsheet__source-multiselect-dropdown open-right">
+				<div class="charsheet__source-multiselect-actions">
+					<button class="charsheet__source-action-btn" type="button" data-action="all">Select All</button>
+					<button class="charsheet__source-action-btn" type="button" data-action="none">Clear All</button>
+				</div>
+				<div class="charsheet__source-multiselect-list">
+					${itemTypes.map(t => '<label class="charsheet__source-multiselect-item"><input type="checkbox" value="' + t.value + '" checked><span class="charsheet__source-multiselect-check">✓</span><span class="charsheet__source-multiselect-label">' + t.emoji + " " + t.label + "</span></label>").join("")}
 				</div>
 			</div>
-		`});
-		filterContainer.append(typeDropdown);
+		`;
+		filterContainer.append(typeDropdownEl);
 
-		// Type dropdown behavior
-		const typeBtn = typeDropdown.querySelector(".charsheet__source-multiselect-btn");
-		const typeDropdownMenu = typeDropdown.querySelector(".charsheet__source-multiselect-dropdown");
-		const typeText = typeDropdown.querySelector(".charsheet__source-multiselect-text");
+		const typeBtn = typeDropdownEl.querySelector(".charsheet__source-multiselect-btn");
+		const typeDropdownMenu = typeDropdownEl.querySelector(".charsheet__source-multiselect-dropdown");
+		const typeText = typeDropdownEl.querySelector(".charsheet__source-multiselect-text");
 
-		typeBtn.addEventListener("click", (e) => {
-			e.stopPropagation();
-			typeDropdownMenu.classList.toggle("open");
-			// Close other dropdowns
-			rarityDropdownMenu.classList.remove("open");
-			sourceDropdownMenu.classList.remove("open");
-		});
-
-		const updateTypeText = () => {
-			const checked = [...typeDropdown.querySelectorAll("input:checked")];
-			if (checked.length === 0) {
-				typeText.textContent = "No Types Selected";
-				selectedTypes = new Set(["__NONE__"]);
-			} else if (checked.length === itemTypes.length) {
-				typeText.textContent = "All Types";
-				selectedTypes = new Set();
-			} else if (checked.length <= 2) {
-				const labels = checked.map(el => itemTypes.find(t => t.value === el.value)?.label || el.value);
-				typeText.textContent = labels.join(", ");
-				selectedTypes = new Set(checked.map(el => el.value));
-			} else {
-				typeText.textContent = `${checked.length} Types`;
-				selectedTypes = new Set(checked.map(el => el.value));
-			}
-			renderList();
-		};
-
-		typeDropdown.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", updateTypeText));
-		typeDropdown.querySelector("[data-action=all]").addEventListener("click", () => {
-			typeDropdown.querySelectorAll("input").forEach(cb => { cb.checked = true; });
-			updateTypeText();
-		});
-		typeDropdown.querySelector("[data-action=none]").addEventListener("click", () => {
-			typeDropdown.querySelectorAll("input").forEach(cb => { cb.checked = false; });
-			updateTypeText();
-		});
-
-		// Rarity filter - Multi-select dropdown
+		// ---- Rarity filter ----
 		const rarities = [
+			{value: "none", label: "Mundane", emoji: "⚫"},
 			{value: "common", label: "Common", emoji: "⚪"},
 			{value: "uncommon", label: "Uncommon", emoji: "🟢"},
 			{value: "rare", label: "Rare", emoji: "🔵"},
@@ -378,79 +370,34 @@ class CharacterSheetInventory {
 			{value: "legendary", label: "Legendary", emoji: "🟠"},
 			{value: "artifact", label: "Artifact", emoji: "🔴"},
 		];
-		let selectedRarities = new Set(); // Empty = all rarities
+		let selectedRarities = new Set();
 
-		const rarityDropdown = e_({outer: `
-			<div class="charsheet__source-multiselect">
-				<button class="charsheet__source-multiselect-btn">
-					<span class="charsheet__source-multiselect-icon">🌟</span>
-					<span class="charsheet__source-multiselect-text">All Rarities</span>
-					<span class="charsheet__source-multiselect-arrow">▼</span>
-				</button>
-				<div class="charsheet__source-multiselect-dropdown">
-					<div class="charsheet__source-multiselect-actions">
-						<button class="charsheet__source-action-btn" data-action="all">Select All</button>
-						<button class="charsheet__source-action-btn" data-action="none">Clear All</button>
-					</div>
-					<div class="charsheet__source-multiselect-list">
-						${rarities.map(r => `
-							<label class="charsheet__source-multiselect-item">
-								<input type="checkbox" value="${r.value}" checked>
-								<span class="charsheet__source-multiselect-check">✓</span>
-								<span class="charsheet__source-multiselect-label">${r.emoji} ${r.label}</span>
-							</label>
-						`).join("")}
-					</div>
+		const rarityDropdownEl = document.createElement("div");
+		rarityDropdownEl.className = "charsheet__source-multiselect";
+		rarityDropdownEl.innerHTML = `
+			<button class="charsheet__source-multiselect-btn" type="button">
+				<span class="charsheet__source-multiselect-icon">🌟</span>
+				<span class="charsheet__source-multiselect-text">All Rarities</span>
+				<span class="charsheet__source-multiselect-arrow">▼</span>
+			</button>
+			<div class="charsheet__source-multiselect-dropdown">
+				<div class="charsheet__source-multiselect-actions">
+					<button class="charsheet__source-action-btn" type="button" data-action="all">Select All</button>
+					<button class="charsheet__source-action-btn" type="button" data-action="none">Clear All</button>
+				</div>
+				<div class="charsheet__source-multiselect-list">
+					${rarities.map(r => '<label class="charsheet__source-multiselect-item"><input type="checkbox" value="' + r.value + '" checked><span class="charsheet__source-multiselect-check">✓</span><span class="charsheet__source-multiselect-label">' + r.emoji + " " + r.label + "</span></label>").join("")}
 				</div>
 			</div>
-		`});
-		filterContainer.append(rarityDropdown);
+		`;
+		filterContainer.append(rarityDropdownEl);
 
-		// Rarity dropdown behavior
-		const rarityBtn = rarityDropdown.querySelector(".charsheet__source-multiselect-btn");
-		const rarityDropdownMenu = rarityDropdown.querySelector(".charsheet__source-multiselect-dropdown");
-		const rarityText = rarityDropdown.querySelector(".charsheet__source-multiselect-text");
+		const rarityBtn = rarityDropdownEl.querySelector(".charsheet__source-multiselect-btn");
+		const rarityDropdownMenu = rarityDropdownEl.querySelector(".charsheet__source-multiselect-dropdown");
+		const rarityText = rarityDropdownEl.querySelector(".charsheet__source-multiselect-text");
 
-		rarityBtn.addEventListener("click", (e) => {
-			e.stopPropagation();
-			rarityDropdownMenu.classList.toggle("open");
-			// Close other dropdowns
-			typeDropdownMenu.classList.remove("open");
-			sourceDropdownMenu.classList.remove("open");
-		});
-
-		const updateRarityText = () => {
-			const checked = [...rarityDropdown.querySelectorAll("input:checked")];
-			if (checked.length === 0) {
-				rarityText.textContent = "No Rarities Selected";
-				selectedRarities = new Set(["__NONE__"]);
-			} else if (checked.length === rarities.length) {
-				rarityText.textContent = "All Rarities";
-				selectedRarities = new Set();
-			} else if (checked.length <= 2) {
-				const labels = checked.map(el => rarities.find(r => r.value === el.value)?.label || el.value);
-				rarityText.textContent = labels.join(", ");
-				selectedRarities = new Set(checked.map(el => el.value));
-			} else {
-				rarityText.textContent = `${checked.length} Rarities`;
-				selectedRarities = new Set(checked.map(el => el.value));
-			}
-			renderList();
-		};
-
-		rarityDropdown.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", updateRarityText));
-		rarityDropdown.querySelector("[data-action=all]").addEventListener("click", () => {
-			rarityDropdown.querySelectorAll("input").forEach(cb => { cb.checked = true; });
-			updateRarityText();
-		});
-		rarityDropdown.querySelector("[data-action=none]").addEventListener("click", () => {
-			rarityDropdown.querySelectorAll("input").forEach(cb => { cb.checked = false; });
-			updateRarityText();
-		});
-
-		// Source filter - collect unique sources from items with multi-select
+		// ---- Source filter ----
 		const uniqueSources = [...new Set(items.map(i => i.source))].sort((a, b) => {
-			// Sort PHB/DMG/etc first, then alphabetically
 			const priority = ["PHB", "DMG", "MM", "XGE", "TCE", "FTD", "XPHB", "XDMG"];
 			const aIdx = priority.indexOf(a);
 			const bIdx = priority.indexOf(b);
@@ -459,120 +406,184 @@ class CharacterSheetInventory {
 			if (bIdx !== -1) return 1;
 			return a.localeCompare(b);
 		});
+		let selectedSources = new Set();
 
-		// Multi-select source filter
-		let selectedSources = new Set(); // Empty = all sources
-		const sourceDropdown = e_({outer: `
-			<div class="charsheet__source-multiselect">
-				<button class="charsheet__source-multiselect-btn">
-					<span class="charsheet__source-multiselect-icon">📚</span>
-					<span class="charsheet__source-multiselect-text">All Sources</span>
-					<span class="charsheet__source-multiselect-arrow">▼</span>
-				</button>
-				<div class="charsheet__source-multiselect-dropdown">
-					<div class="charsheet__source-multiselect-actions">
-						<button class="charsheet__source-action-btn" data-action="all">Select All</button>
-						<button class="charsheet__source-action-btn" data-action="none">Clear All</button>
-						<button class="charsheet__source-action-btn" data-action="official">Official Only</button>
-					</div>
-					<div class="charsheet__source-multiselect-list">
-						${uniqueSources.map(s => `
-							<label class="charsheet__source-multiselect-item">
-								<input type="checkbox" value="${s}" checked>
-								<span class="charsheet__source-multiselect-check">✓</span>
-								<span class="charsheet__source-multiselect-label">${Parser.sourceJsonToAbv(s)}</span>
-								<span class="charsheet__source-multiselect-full">${Parser.sourceJsonToFull(s)}</span>
-							</label>
-						`).join("")}
-					</div>
+		const sourceDropdownEl = document.createElement("div");
+		sourceDropdownEl.className = "charsheet__source-multiselect";
+		sourceDropdownEl.innerHTML = `
+			<button class="charsheet__source-multiselect-btn" type="button">
+				<span class="charsheet__source-multiselect-icon">📚</span>
+				<span class="charsheet__source-multiselect-text">All Sources</span>
+				<span class="charsheet__source-multiselect-arrow">▼</span>
+			</button>
+			<div class="charsheet__source-multiselect-dropdown">
+				<div class="charsheet__source-multiselect-actions">
+					<button class="charsheet__source-action-btn" type="button" data-action="all">Select All</button>
+					<button class="charsheet__source-action-btn" type="button" data-action="none">Clear All</button>
+					<button class="charsheet__source-action-btn" type="button" data-action="official">Official Only</button>
+				</div>
+				<div class="charsheet__source-multiselect-list">
+					${uniqueSources.map(s => '<label class="charsheet__source-multiselect-item"><input type="checkbox" value="' + s.escapeQuotes() + '" checked><span class="charsheet__source-multiselect-check">✓</span><span class="charsheet__source-multiselect-label">' + Parser.sourceJsonToAbv(s) + '</span><span class="charsheet__source-multiselect-full">' + Parser.sourceJsonToFull(s) + "</span></label>").join("")}
 				</div>
 			</div>
-		`});
-		filterContainer.append(sourceDropdown);
+		`;
+		filterContainer.append(sourceDropdownEl);
 
-		// Source dropdown toggle behavior
-		const sourceBtn = sourceDropdown.querySelector(".charsheet__source-multiselect-btn");
-		const sourceDropdownMenu = sourceDropdown.querySelector(".charsheet__source-multiselect-dropdown");
-		const sourceText = sourceDropdown.querySelector(".charsheet__source-multiselect-text");
+		const sourceBtn = sourceDropdownEl.querySelector(".charsheet__source-multiselect-btn");
+		const sourceDropdownMenu = sourceDropdownEl.querySelector(".charsheet__source-multiselect-dropdown");
+		const sourceText = sourceDropdownEl.querySelector(".charsheet__source-multiselect-text");
 
-		sourceBtn.addEventListener("click", (e) => {
+		// ---- Dropdown toggle behavior ----
+		const allMenus = [typeDropdownMenu, rarityDropdownMenu, sourceDropdownMenu];
+		const openDropdown = (menu, e) => {
 			e.stopPropagation();
-			sourceDropdownMenu.classList.toggle("open");
-			// Close other dropdowns
-			typeDropdownMenu.classList.remove("open");
-			rarityDropdownMenu.classList.remove("open");
-		});
-
-		// Close all dropdowns when clicking outside
-		const _closeDropdowns = () => {
-			sourceDropdownMenu.classList.remove("open");
-			typeDropdownMenu.classList.remove("open");
-			rarityDropdownMenu.classList.remove("open");
+			const wasOpen = menu.classList.contains("open");
+			allMenus.forEach(m => m.classList.remove("open"));
+			if (!wasOpen) menu.classList.add("open");
 		};
-		document.addEventListener("click", _closeDropdowns);
-		sourceDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
-		typeDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
-		rarityDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
+		typeBtn.addEventListener("click", (e) => openDropdown(typeDropdownMenu, e));
+		rarityBtn.addEventListener("click", (e) => openDropdown(rarityDropdownMenu, e));
+		sourceBtn.addEventListener("click", (e) => openDropdown(sourceDropdownMenu, e));
 
-		// Update source text based on selection
-		const updateSourceText = () => {
-			const checked = [...sourceDropdown.querySelectorAll("input:checked")];
+		const _closeDropdowns = () => allMenus.forEach(m => m.classList.remove("open"));
+		document.addEventListener("click", _closeDropdowns);
+		allMenus.forEach(m => m.addEventListener("click", (e) => e.stopPropagation()));
+
+		// ---- Shared dropdown update helper ----
+		const _updateMultiselect = (dropdownEl, optionsList, selectedSet, textEl, allLabel, noneLabel) => {
+			const checked = [...dropdownEl.querySelectorAll("input:checked")];
 			if (checked.length === 0) {
-				sourceText.textContent = "No Sources";
-				selectedSources = new Set(["__NONE__"]); // Special marker
-			} else if (checked.length === uniqueSources.length) {
-				sourceText.textContent = "All Sources";
-				selectedSources = new Set(); // Empty = all
+				textEl.textContent = noneLabel;
+				selectedSet.clear();
+				selectedSet.add("__NONE__");
+			} else if (checked.length === optionsList.length) {
+				textEl.textContent = allLabel;
+				selectedSet.clear();
 			} else if (checked.length <= 2) {
-				sourceText.textContent = checked.map(el => Parser.sourceJsonToAbv(el.value)).join(", ");
-				selectedSources = new Set(checked.map(el => el.value));
+				const labels = checked.map(el => {
+					const opt = optionsList.find(o => (o.value || o) === el.value);
+					return opt?.label || opt?.value || Parser.sourceJsonToAbv(el.value);
+				});
+				textEl.textContent = labels.join(", ");
+				selectedSet.clear();
+				checked.forEach(el => selectedSet.add(el.value));
 			} else {
-				sourceText.textContent = `${checked.length} Sources`;
-				selectedSources = new Set(checked.map(el => el.value));
+				textEl.textContent = `${checked.length} selected`;
+				selectedSet.clear();
+				checked.forEach(el => selectedSet.add(el.value));
 			}
 			renderList();
 		};
 
-		// Checkbox change handler
-		sourceDropdown.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", updateSourceText));
+		const updateTypeText = () => _updateMultiselect(typeDropdownEl, itemTypes, selectedTypes, typeText, "All Types", "No Types");
+		const updateRarityText = () => _updateMultiselect(rarityDropdownEl, rarities, selectedRarities, rarityText, "All Rarities", "No Rarities");
+		const updateSourceText = () => _updateMultiselect(sourceDropdownEl, uniqueSources, selectedSources, sourceText, "All Sources", "No Sources");
 
-		// Action buttons
-		sourceDropdown.querySelector("[data-action=all]").addEventListener("click", () => {
-			sourceDropdown.querySelectorAll("input").forEach(cb => { cb.checked = true; });
-			updateSourceText();
-		});
-		sourceDropdown.querySelector("[data-action=none]").addEventListener("click", () => {
-			sourceDropdown.querySelectorAll("input").forEach(cb => { cb.checked = false; });
-			updateSourceText();
-		});
-		sourceDropdown.querySelector("[data-action=official]").addEventListener("click", () => {
-			const official = ["PHB", "DMG", "MM", "XGE", "TCE", "FTD", "XPHB", "XDMG", "VGM", "MTF", "SCAG", "AI", "EGW", "MOT", "IDRotF"];
-			sourceDropdown.querySelectorAll("input").forEach(el => {
-				el.checked = official.includes(el.value);
+		// Wire up checkbox changes and action buttons
+		const _wireDropdown = (el, updateFn, extraActions) => {
+			el.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", updateFn));
+			el.querySelector("[data-action=all]").addEventListener("click", () => {
+				el.querySelectorAll("input").forEach(cb => { cb.checked = true; });
+				updateFn();
 			});
-			updateSourceText();
+			el.querySelector("[data-action=none]").addEventListener("click", () => {
+				el.querySelectorAll("input").forEach(cb => { cb.checked = false; });
+				updateFn();
+			});
+			if (extraActions) extraActions(el);
+		};
+
+		_wireDropdown(typeDropdownEl, updateTypeText);
+		_wireDropdown(rarityDropdownEl, updateRarityText);
+		_wireDropdown(sourceDropdownEl, updateSourceText, (el) => {
+			el.querySelector("[data-action=official]").addEventListener("click", () => {
+				const official = ["PHB", "DMG", "MM", "XGE", "TCE", "FTD", "XPHB", "XDMG", "VGM", "MTF", "SCAG", "AI", "EGW", "MOT", "IDRotF"];
+				el.querySelectorAll("input").forEach(cb => { cb.checked = official.includes(cb.value); });
+				updateSourceText();
+			});
 		});
 
-		// Quick filter buttons row
+		// ---- Quick filter: Attunement only (tabs replace Magical/Mundane/Consumable) ----
 		const quickFilters = e_({outer: `<div class="charsheet__modal-quick-filters"></div>`});
 		modalInner.append(quickFilters);
 
 		let filterAttunement = false;
-		let filterMagic = false;
-		let filterMundane = false;
-		let filterConsumable = false;
-
 		const attuneBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", txt: "🔗 Requires Attunement"});
 		quickFilters.append(attuneBtn);
-		const magicBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", txt: "✨ Magical"});
-		quickFilters.append(magicBtn);
-		const mundaneBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", txt: "📦 Mundane"});
-		quickFilters.append(mundaneBtn);
-		const consumeBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", txt: "🧪 Consumables"});
-		quickFilters.append(consumeBtn);
+		attuneBtn.addEventListener("click", () => {
+			filterAttunement = !filterAttunement;
+			attuneBtn.classList.toggle("active", filterAttunement);
+			renderList();
+		});
 
-		// Weapon property filter buttons
-		const weaponProps = ["finesse", "heavy", "light", "reach", "thrown", "two-handed", "versatile", "loading", "ammunition"];
+		// ---- Weapon category filter (simple/martial) ----
+		const weaponCatLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Category:"});
+		modalInner.append(weaponCatLabel);
+		const weaponCatBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
+		modalInner.append(weaponCatBtns);
+
+		let selectedWeaponCat = null;
+		["simple", "martial"].forEach(cat => {
+			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: cat.toTitleCase()});
+			btn.addEventListener("click", () => {
+				selectedWeaponCat = selectedWeaponCat === cat ? null : cat;
+				weaponCatBtns.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+				if (selectedWeaponCat) btn.classList.add("active");
+				renderList();
+			});
+			weaponCatBtns.append(btn);
+		});
+
+		// ---- Armor category filter (light/medium/heavy) ----
+		const armorCatLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Armor Category:"});
+		modalInner.append(armorCatLabel);
+		const armorCatBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
+		modalInner.append(armorCatBtns);
+
+		let selectedArmorCat = null;
+		const armorCatMap = {"light": "LA", "medium": "MA", "heavy": "HA"};
+		["light", "medium", "heavy"].forEach(cat => {
+			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: cat.toTitleCase()});
+			btn.addEventListener("click", () => {
+				selectedArmorCat = selectedArmorCat === cat ? null : cat;
+				armorCatBtns.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+				if (selectedArmorCat) btn.classList.add("active");
+				renderList();
+			});
+			armorCatBtns.append(btn);
+		});
+
+		// ---- Hover helper: build a 5etools-style popover for a property/mastery entity ----
+		// Uses Renderer.hover.getMakePredefinedHover() so the chip shows the same nicely
+		// formatted popover the rest of the site uses (handles `entries`, `entriesTemplate`,
+		// nested lists, @tags, etc. for free).
+		const _attachEntityHover = (btn, ent) => {
+			if (!ent) return;
+			const entries = ent.entries || (ent.entriesTemplate ? MiscUtil.copyFast(ent.entriesTemplate) : null);
+			if (!entries?.length) return;
+			const hoverEntry = {type: "entries", name: ent.name, entries};
+			const hoverMeta = Renderer.hover.getMakePredefinedHover(hoverEntry, {isBookContent: false});
+			btn.addEventListener("mouseover", (evt) => hoverMeta.mouseOver(evt, btn));
+			btn.addEventListener("mousemove", (evt) => hoverMeta.mouseMove(evt, btn));
+			btn.addEventListener("mouseleave", (evt) => hoverMeta.mouseLeave(evt, btn));
+			btn.addEventListener("touchstart", (evt) => hoverMeta.touchStart(evt, btn), {passive: true});
+		};
+
+		// ---- Weapon property filter (dynamic from data via Renderer.item.getProperty) ----
+		const _getProperty = (uid) => Renderer.item.getProperty(uid, {isIgnoreMissing: true});
+		const seenProps = new Map(); // name.toLowerCase() → {displayName, ent}
+		for (const item of this._allItems) {
+			for (const p of (item.property || [])) {
+				const uid = typeof p === "string" ? p : (p?.uid || p?.name || "");
+				if (!uid) continue;
+				const prop = _getProperty(uid);
+				const name = prop?.name || uid.split("|")[0];
+				if (!name) continue;
+				const key = name.toLowerCase();
+				if (!seenProps.has(key)) seenProps.set(key, {displayName: name, ent: prop});
+			}
+		}
+		const weaponProps = [...seenProps.entries()].sort((a, b) => a[1].displayName.localeCompare(b[1].displayName));
 		let selectedProps = new Set();
 
 		const propLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Properties:"});
@@ -580,23 +591,35 @@ class CharacterSheetInventory {
 		const propBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
 		modalInner.append(propBtns);
 
-		weaponProps.forEach(prop => {
-			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: prop.toTitleCase()});
+		weaponProps.forEach(([key, {displayName, ent}]) => {
+			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: displayName});
+			_attachEntityHover(btn, ent);
 			btn.addEventListener("click", () => {
-				if (selectedProps.has(prop)) {
-					selectedProps.delete(prop);
-					btn.classList.remove("active");
-				} else {
-					selectedProps.add(prop);
-					btn.classList.add("active");
-				}
+				selectedProps.has(key) ? selectedProps.delete(key) : selectedProps.add(key);
+				btn.classList.toggle("active", selectedProps.has(key));
 				renderList();
 			});
 			propBtns.append(btn);
 		});
 
-		// Weapon mastery filter buttons
-		const masteryTypes = ["cleave", "graze", "nick", "push", "sap", "slow", "topple", "vex"];
+		// ---- Weapon mastery filter (dynamic from data via Renderer.item._getMastery) ----
+		const _getMastery = (uid) => {
+			try { return Renderer.item._getMastery(uid); }
+			catch (e) { return null; }
+		};
+		const seenMasteries = new Map(); // name.toLowerCase() → {displayName, ent}
+		for (const item of this._allItems) {
+			for (const m of (item.mastery || [])) {
+				const uid = typeof m === "string" ? m : (m.uid || m.name || "");
+				if (!uid) continue;
+				const mastery = _getMastery(uid);
+				const name = mastery?.name || uid.split("|")[0];
+				if (!name) continue;
+				const key = name.toLowerCase();
+				if (!seenMasteries.has(key)) seenMasteries.set(key, {displayName: name, ent: mastery});
+			}
+		}
+		const masteryTypes = [...seenMasteries.entries()].sort((a, b) => a[1].displayName.localeCompare(b[1].displayName));
 		let selectedMasteries = new Set();
 
 		const masteryLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Masteries:"});
@@ -604,83 +627,184 @@ class CharacterSheetInventory {
 		const masteryBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
 		modalInner.append(masteryBtns);
 
-		masteryTypes.forEach(mastery => {
-			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: mastery.toTitleCase()});
+		masteryTypes.forEach(([key, {displayName, ent}]) => {
+			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: displayName});
+			_attachEntityHover(btn, ent);
 			btn.addEventListener("click", () => {
-				if (selectedMasteries.has(mastery)) {
-					selectedMasteries.delete(mastery);
-					btn.classList.remove("active");
-				} else {
-					selectedMasteries.add(mastery);
-					btn.classList.add("active");
-				}
+				selectedMasteries.has(key) ? selectedMasteries.delete(key) : selectedMasteries.add(key);
+				btn.classList.toggle("active", selectedMasteries.has(key));
 				renderList();
 			});
 			masteryBtns.append(btn);
 		});
 
-		// Results count
+		// ---- Damage type filter (dynamic from data via Parser.dmgTypeToFull) ----
+		const seenDmgTypes = new Map(); // letter code → display name
+		for (const item of this._allItems) {
+			if (item.dmgType) {
+				const fullName = Parser.dmgTypeToFull(item.dmgType);
+				if (fullName) seenDmgTypes.set(item.dmgType, fullName.toTitleCase());
+			}
+		}
+		const dmgTypes = [...seenDmgTypes.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+		let selectedDmgTypes = new Set();
+
+		const dmgTypeLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Damage Type:"});
+		modalInner.append(dmgTypeLabel);
+		const dmgTypeBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
+		modalInner.append(dmgTypeBtns);
+
+		dmgTypes.forEach(([code, displayName]) => {
+			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: displayName});
+			btn.addEventListener("click", () => {
+				selectedDmgTypes.has(code) ? selectedDmgTypes.delete(code) : selectedDmgTypes.add(code);
+				btn.classList.toggle("active", selectedDmgTypes.has(code));
+				renderList();
+			});
+			dmgTypeBtns.append(btn);
+		});
+
+		// ---- Context-sensitive filter visibility ----
+		updateFilterVisibility = () => {
+			const isConsumableTab = currentTab === "consumable";
+			// Rarity filter shown on all tabs (includes Mundane option for non-magical items)
+			rarityDropdownEl.style.display = "";
+			// Hide weapon/armor filters on consumable tab
+			const showWeaponFilters = !isConsumableTab;
+			weaponCatLabel.style.display = showWeaponFilters ? "" : "none";
+			weaponCatBtns.style.display = showWeaponFilters ? "" : "none";
+			armorCatLabel.style.display = showWeaponFilters ? "" : "none";
+			armorCatBtns.style.display = showWeaponFilters ? "" : "none";
+			propLabel.style.display = showWeaponFilters ? "" : "none";
+			propBtns.style.display = showWeaponFilters ? "" : "none";
+			masteryLabel.style.display = showWeaponFilters ? "" : "none";
+			masteryBtns.style.display = showWeaponFilters ? "" : "none";
+			dmgTypeLabel.style.display = showWeaponFilters ? "" : "none";
+			dmgTypeBtns.style.display = showWeaponFilters ? "" : "none";
+		};
+		updateFilterVisibility();
+
+		// ---- Sort selector ----
+		// Cascading sort: primary key chosen by user, ties always broken by name (asc).
+		// Default: rarity desc, then name asc.
+		const sortRow = e_({outer: `<div class="charsheet__modal-sort-row ve-flex-v-center mt-2"></div>`});
+		modalInner.append(sortRow);
+		sortRow.append(e_({tag: "label", clazz: "ve-small ve-muted mr-2 mb-0", txt: "Sort by:"}));
+		const SORT_OPTIONS = [
+			{value: "rarity-desc", label: "Rarity (high → low), then Name"},
+			{value: "rarity-asc", label: "Rarity (low → high), then Name"},
+			{value: "name-asc", label: "Name (A → Z)"},
+			{value: "name-desc", label: "Name (Z → A)"},
+			{value: "type-asc", label: "Type, then Name"},
+			{value: "value-desc", label: "Value (high → low), then Name"},
+			{value: "value-asc", label: "Value (low → high), then Name"},
+			{value: "weight-asc", label: "Weight (light → heavy), then Name"},
+			{value: "weight-desc", label: "Weight (heavy → light), then Name"},
+			{value: "source-asc", label: "Source, then Name"},
+		];
+		const sortSelect = e_({tag: "select", clazz: "ve-form-control charsheet__modal-sort-select"});
+		SORT_OPTIONS.forEach(opt => {
+			const o = e_({tag: "option", attr: {value: opt.value}, txt: opt.label});
+			sortSelect.append(o);
+		});
+		sortSelect.value = "rarity-desc";
+		let currentSort = "rarity-desc";
+		sortSelect.addEventListener("change", () => { currentSort = sortSelect.value; renderList(); });
+		sortRow.append(sortSelect);
+
+		// ---- Results count ----
 		const resultsCount = e_({outer: `<div class="charsheet__modal-results-count"></div>`});
 		modalInner.append(resultsCount);
 
-		// Item list
+		// ---- Item list ----
 		const list = e_({outer: `<div class="charsheet__modal-list"></div>`});
 		modalInner.append(list);
 
-		const renderList = () => {
+		renderList = () => {
 			list.innerHTML = "";
 
 			const searchTerm = search.value.toLowerCase();
+			const tabPool = tabItems[currentTab];
 
 			const filterItem = (item) => {
 				if (searchTerm && !item.name.toLowerCase().includes(searchTerm)) return false;
 				// Multi-select type filter
 				if (selectedTypes.has("__NONE__")) return false;
-				if (selectedTypes.size > 0) {
+				if (selectedTypes.size > 0 && !selectedTypes.has("__NONE__")) {
 					const itemType = this._getItemType(item);
 					if (!selectedTypes.has(itemType)) return false;
 				}
 				// Multi-select rarity filter
 				if (selectedRarities.has("__NONE__")) return false;
-				if (selectedRarities.size > 0) {
-					const itemRarity = (item.rarity || "").toLowerCase();
+				if (selectedRarities.size > 0 && !selectedRarities.has("__NONE__")) {
+					const rawRarity = (item.rarity || "none").toLowerCase();
+					const itemRarity = ["none", "unknown", "unknown (magic)", "varies"].includes(rawRarity) ? "none" : rawRarity;
 					if (!selectedRarities.has(itemRarity)) return false;
 				}
 				// Multi-select source filter
-				if (selectedSources.has("__NONE__")) return false; // No sources selected
-				if (selectedSources.size > 0 && !selectedSources.has(item.source)) return false;
+				if (selectedSources.has("__NONE__")) return false;
+				if (selectedSources.size > 0 && !selectedSources.has("__NONE__") && !selectedSources.has(item.source)) return false;
 				if (filterAttunement && !item.reqAttune) return false;
-				if (filterMagic && !this._isMagicItem(item)) return false;
-				if (filterMundane && this._isMagicItem(item)) return false;
-				if (filterConsumable && !this._isConsumable(item)) return false;
+				// Weapon category filter
+				if (selectedWeaponCat && (item.weaponCategory || "").toLowerCase() !== selectedWeaponCat) return false;
+				// Armor category filter
+				if (selectedArmorCat && item.type !== armorCatMap[selectedArmorCat]) return false;
 				// Weapon property filter
 				if (selectedProps.size > 0) {
-					const propMap = {"F": "finesse", "H": "heavy", "L": "light", "R": "reach", "T": "thrown", "2H": "two-handed", "V": "versatile", "LD": "loading", "A": "ammunition"};
-					const itemProps = (item.property || []).map(p => propMap[p] || p.toLowerCase());
+					const itemProps = (item.property || []).map(p => {
+						const uid = typeof p === "string" ? p : (p?.uid || p?.name || "");
+						if (!uid) return "";
+						const name = _getProperty(uid)?.name || uid.split("|")[0];
+						return name ? name.toLowerCase() : "";
+					}).filter(Boolean);
 					if (!Array.from(selectedProps).some(p => itemProps.includes(p))) return false;
 				}
 				// Weapon mastery filter
 				if (selectedMasteries.size > 0) {
 					const itemMasteries = (item.mastery || []).map(m => {
-						const name = typeof m === "string" ? m : m.name || m;
-						return name.toLowerCase();
-					});
+						const uid = typeof m === "string" ? m : (m.uid || m.name || "");
+						if (!uid) return "";
+						const name = _getMastery(uid)?.name || uid.split("|")[0];
+						return name ? name.toLowerCase() : "";
+					}).filter(Boolean);
 					if (!Array.from(selectedMasteries).some(m => itemMasteries.includes(m))) return false;
+				}
+				// Damage type filter
+				if (selectedDmgTypes.size > 0) {
+					if (!item.dmgType || !selectedDmgTypes.has(item.dmgType)) return false;
 				}
 				return true;
 			};
 
-			const filtered = items.filter(filterItem).slice(0, 150); // Limit for performance
+			const allMatching = tabPool.filter(filterItem);
+			const totalMatches = allMatching.length;
 
-			// Sort filtered items by rarity then name
-			const rarityOrder = {"artifact": 6, "legendary": 5, "very rare": 4, "rare": 3, "uncommon": 2, "common": 1, "none": 0};
-			filtered.sort((a, b) => {
-				const ra = rarityOrder[(a.rarity || "none").toLowerCase()] || 0;
-				const rb = rarityOrder[(b.rarity || "none").toLowerCase()] || 0;
-				if (ra !== rb) return ra - rb;
-				return a.name.localeCompare(b.name);
-			});
-			const totalMatches = items.filter(filterItem).length;
+			// ---- Cascading sort ----
+			// Primary key chosen by user, secondary key always Name (asc) so results stay stable.
+			const rarityOrder = {"artifact": 6, "legendary": 5, "very rare": 4, "rare": 3, "uncommon": 2, "common": 1, "none": 0, "unknown": 0};
+			const getRarityRank = (it) => rarityOrder[(it.rarity || "none").toLowerCase()] ?? 0;
+			const getValue = (it) => (typeof it.value === "number" ? it.value : 0);
+			const getWeight = (it) => (typeof it.weight === "number" ? it.weight : 0);
+			const getTypeLabel = (it) => {
+				try { return Renderer.item.getItemTypeName?.(it.type) || it.type || ""; }
+				catch (e) { return it.type || ""; }
+			};
+			const byName = (a, b) => a.name.localeCompare(b.name);
+			const sortFns = {
+				"rarity-desc": (a, b) => (getRarityRank(b) - getRarityRank(a)) || byName(a, b),
+				"rarity-asc": (a, b) => (getRarityRank(a) - getRarityRank(b)) || byName(a, b),
+				"name-asc": byName,
+				"name-desc": (a, b) => byName(b, a),
+				"type-asc": (a, b) => getTypeLabel(a).localeCompare(getTypeLabel(b)) || byName(a, b),
+				"value-desc": (a, b) => (getValue(b) - getValue(a)) || byName(a, b),
+				"value-asc": (a, b) => (getValue(a) - getValue(b)) || byName(a, b),
+				"weight-asc": (a, b) => (getWeight(a) - getWeight(b)) || byName(a, b),
+				"weight-desc": (a, b) => (getWeight(b) - getWeight(a)) || byName(a, b),
+				"source-asc": (a, b) => (a.source || "").localeCompare(b.source || "") || byName(a, b),
+			};
+			allMatching.sort(sortFns[currentSort] || sortFns["rarity-desc"]);
+
+			const filtered = allMatching.slice(0, 150);
 
 			resultsCount.innerHTML = `<span>${filtered.length}${totalMatches > 150 ? ` of ${totalMatches}` : ""} item${filtered.length !== 1 ? "s" : ""} found</span>${totalMatches > 150 ? `<span class="ml-2" style="opacity: 0.7;">(showing first 150)</span>` : ""}`;
 
@@ -702,20 +826,9 @@ class CharacterSheetInventory {
 				grouped[type].push(item);
 			});
 
-			const typeOrder = ["Weapon", "Armor", "Shield", "Potion", "Scroll", "Wand", "Staff", "Ring", "Wondrous", "Tool", "Other"];
-			const typeEmojis = {
-				"Weapon": "⚔️",
-				"Armor": "🛡️",
-				"Shield": "🛡️",
-				"Potion": "🧪",
-				"Scroll": "📜",
-				"Wand": "🪄",
-				"Staff": "🏑",
-				"Ring": "💍",
-				"Wondrous": "✨",
-				"Tool": "🔧",
-				"Other": "📦",
-			};
+			const typeOrder = ["Weapon", "Armor", "Shield", "Potion", "Scroll", "Wand", "Staff", "Ring", "Wondrous", "Tool", "Gemstone", "Other"];
+			const typeEmojis = {"Weapon": "⚔️", "Armor": "🛡️", "Shield": "🛡️", "Potion": "🧪", "Scroll": "📜", "Wand": "🪄", "Staff": "🏑", "Ring": "💍", "Wondrous": "✨", "Tool": "🔧", "Gemstone": "💎", "Other": "📦"};
+
 			Object.entries(grouped).sort((a, b) => {
 				const aIdx = typeOrder.indexOf(a[0]);
 				const bIdx = typeOrder.indexOf(b[0]);
@@ -731,25 +844,15 @@ class CharacterSheetInventory {
 						: "";
 					const isMagic = this._isMagicItem(item);
 
-					// Build tags string
 					const tagParts = [];
 					if (item.reqAttune) tagParts.push("🔗");
 					if (isMagic) tagParts.push("✨");
 					if (this._state.isMonkWeapon?.(item)) tagParts.push("🥋");
 					const tagsStr = tagParts.length ? ` ${tagParts.join(" ")}` : "";
 
-					// Get rarity color
-					const rarityColors = {
-						"common": "#9ca3af",
-						"uncommon": "#22c55e",
-						"rare": "#3b82f6",
-						"very rare": "#a855f7",
-						"legendary": "#f97316",
-						"artifact": "#ef4444",
-					};
+					const rarityColors = {"common": "#9ca3af", "uncommon": "#22c55e", "rare": "#3b82f6", "very rare": "#a855f7", "legendary": "#f97316", "artifact": "#ef4444"};
 					const rarityColor = rarityColors[(item.rarity || "").toLowerCase()] || "";
 
-					// Create hoverable link for item name
 					const itemHoverLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEMS, item.name, item.source);
 
 					const itemEl = e_({outer: `
@@ -771,9 +874,7 @@ class CharacterSheetInventory {
 						JqueryUtil.doToast({type: "success", content: `Added ${item.name} to your inventory!`});
 					});
 
-					// Click row as fallback for accessibility (keyboard/mobile users)
 					itemEl.addEventListener("click", (e) => {
-						// Don't trigger if user clicked the hover link itself
 						if (e.target.closest("a")) return;
 						this._showItemInfoFromData(item);
 					});
@@ -783,35 +884,7 @@ class CharacterSheetInventory {
 			});
 		};
 
-		// Toggle quick filter buttons
-		const toggleBtn = (btn, prop) => {
-			if (prop === "attunement") filterAttunement = !filterAttunement;
-			if (prop === "magic") {
-				filterMagic = !filterMagic;
-				if (filterMagic && filterMundane) {
-					filterMundane = false;
-					mundaneBtn.classList.remove("active");
-				}
-			}
-			if (prop === "mundane") {
-				filterMundane = !filterMundane;
-				if (filterMundane && filterMagic) {
-					filterMagic = false;
-					magicBtn.classList.remove("active");
-				}
-			}
-			if (prop === "consumable") filterConsumable = !filterConsumable;
-			btn.classList.toggle("active");
-			renderList();
-		};
-
-		attuneBtn.addEventListener("click", () => toggleBtn(attuneBtn, "attunement"));
-		magicBtn.addEventListener("click", () => toggleBtn(magicBtn, "magic"));
-		mundaneBtn.addEventListener("click", () => toggleBtn(mundaneBtn, "mundane"));
-		consumeBtn.addEventListener("click", () => toggleBtn(consumeBtn, "consumable"));
-
 		search.addEventListener("input", MiscUtil.debounce(renderList, 150));
-		// Type, rarity, and source filters are handled by checkbox change events above
 
 		// Initial render
 		renderList();
@@ -819,40 +892,10 @@ class CharacterSheetInventory {
 		// Focus search on open
 		setTimeout(() => search.focus(), 100);
 
-		// Custom item section
-		const customSection = e_({outer: `<div class="charsheet__modal-custom-section"></div>`});
-		modalInner.append(customSection);
-		customSection.append(e_({outer: `<div class="charsheet__modal-section-title" style="margin-bottom: 0.75rem;">✏️ Create Custom Item</div>`}));
-		customSection.append(e_({outer: `<p class="ve-small ve-muted mb-2">Can't find what you're looking for? Add a custom item:</p>`}));
-
-		const customInputs = e_({outer: `<div class="charsheet__modal-custom-inputs"></div>`});
-		customSection.append(customInputs);
-		const customName = e_({tag: "input", clazz: "ve-form-control", attr: {type: "text", placeholder: "Item name...", style: "flex: 1;"}});
-		customInputs.append(customName);
-		const customQty = e_({tag: "input", clazz: "ve-form-control", attr: {type: "number", placeholder: "Qty", style: "width: 70px;", value: "1", min: "1"}});
-		customInputs.append(customQty);
-		const customWeight = e_({tag: "input", clazz: "ve-form-control", attr: {type: "number", placeholder: "Weight", style: "width: 90px;", step: "0.1", min: "0"}});
-		customInputs.append(customWeight);
-		const customAddBtn = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "+ Add Custom"});
-		customInputs.append(customAddBtn);
-
-		customAddBtn.addEventListener("click", () => {
-			const name = customName.value.trim();
-			if (name) {
-				const qty = parseInt(customQty.value) || 1;
-				const weight = parseFloat(customWeight.value) || 0;
-				this._addCustomItem(name, qty, weight);
-				customName.value = "";
-				customQty.value = "1";
-				customWeight.value = "";
-				JqueryUtil.doToast({type: "success", content: `Added custom item: ${name}`});
-			}
-		});
-
-		// Enter to add custom item
-		customName.addEventListener("keydown", (e) => {
-			if (e.key === "Enter") customAddBtn.click();
-		});
+		// Note: custom-item creation is intentionally NOT shown here. The toolbar has a
+		// dedicated "Create Custom Item" button + full modal (_showAddCustomItem) that
+		// supports type, weight, charges, attunement, etc. Keep this picker focused on
+		// browsing existing items.
 
 		// Close button
 		const footer = ee`<div class="charsheet__modal-footer">
@@ -861,7 +904,6 @@ class CharacterSheetInventory {
 		modalInner.append(footer);
 		footer.querySelector("button").addEventListener("click", () => doClose(false));
 	}
-
 	_isMagicItem (item) {
 		if (item.rarity && !["none", "unknown"].includes(item.rarity.toLowerCase())) return true;
 		if (item.wondrous) return true;
@@ -965,7 +1007,7 @@ class CharacterSheetInventory {
 					for (const gem of gemPowers) {
 						const dc = gem.craftingDC || rarityDCs[gem.rarity] || 10;
 						const renderedEntries = gem.entries?.length
-							? Renderer.get().render({entries: gem.entries})
+							? Renderer.get().render({type: "entries", entries: gem.entries})
 							: "";
 						const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gem.name, gem.source);
 
@@ -996,9 +1038,14 @@ class CharacterSheetInventory {
 		closeFooter.querySelector("button").addEventListener("click", () => doClose(false));
 	}
 
+	_isWeapon (item) {
+		const typeBase = item.type?.split("|")[0];
+		return item.weapon || typeBase === "M" || typeBase === "R" || !!item.weaponCategory;
+	}
+
 	_getItemType (item) {
 		const typeBase = item.type?.split("|")[0];
-		if (item.weapon) return "weapon";
+		if (this._isWeapon(item)) return "weapon";
 		// Check both armor flag and armor type codes
 		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "armor";
 		if (typeBase === "S") return "armor"; // Shield
@@ -1017,7 +1064,7 @@ class CharacterSheetInventory {
 
 	_getItemTypeTag (item) {
 		const typeBase = item.type?.split("|")[0];
-		if (item.weapon) return "Weapon";
+		if (this._isWeapon(item)) return "Weapon";
 		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
 		if (typeBase === "S") return "Shield";
 		if (item.type === "P") return "Potion";
@@ -2923,20 +2970,20 @@ class CharacterSheetInventory {
 
 				if (gemPowers.length) {
 					const empowerSection = e_({outer: `<div class="mt-3"></div>`});
+					const hasGemEmpowerment = this._page._state?.isProficientInSkill?.("gemempowerment");
 					empowerSection.append(e_({outer: `
 						<h5 class="mb-2">💎 Empowerment Options</h5>
-						<p class="ve-small ve-muted mb-2">Imbue this gem with magical power. Requires jeweler's tools proficiency and a crafting check (PB + CHA or WIS vs DC).</p>
+						<p class="ve-small ve-muted mb-1">Imbue this gem with magical power using your <strong>Gem Empowerment</strong> skill vs the crafting DC.</p>
+						<p class="ve-small mb-2" style="color: #d9534f;"><strong>⚠ Warning:</strong> If the crafting check fails, this gemstone is <strong>destroyed</strong>.</p>
+						${!hasGemEmpowerment ? `<p class="ve-small mb-2" style="color: #e67e22;"><strong>Note:</strong> You need the "Gem Empowerment" custom skill to attempt this.</p>` : ""}
 					`}));
 
 					const rarityDCs = {"common": 10, "uncommon": 15, "rare": 20, "very rare": 25, "legendary": 30};
-					const totalGold = this._page._state?.getTotalGold?.() || 0;
 
 					for (const gem of gemPowers) {
 						const dc = gem.craftingDC || rarityDCs[gem.rarity] || 10;
-						const costGp = CharacterSheetUpgrades.parseGoldCost(gem.cost);
-						const canAfford = totalGold >= costGp;
 						const renderedEntries = gem.entries?.length
-							? Renderer.get().render({entries: gem.entries})
+							? Renderer.get().render({type: "entries", entries: gem.entries})
 							: "";
 						const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gem.name, gem.source);
 
@@ -2946,16 +2993,15 @@ class CharacterSheetInventory {
 									<div class="ve-flex-1">
 										<span class="charsheet__upgrade-name">${gemLink}</span>
 										<span class="badge badge-success ve-small ml-1">${(gem.rarity || "common").toTitleCase()}</span>
-										<span class="ve-muted ve-small ml-1">DC ${dc} · ${gem.cost || "Free"}</span>
+										<span class="ve-muted ve-small ml-1">DC ${dc}</span>
 										${gem.charges ? `<span class="badge badge-info ve-small ml-1">${gem.charges} charges</span>` : ""}
 									</div>
 									<button type="button"
-										class="ve-btn ve-btn-xs ${canAfford ? "ve-btn-success" : "ve-btn-default"} charsheet__empower-inline-btn"
+										class="ve-btn ve-btn-xs ${hasGemEmpowerment ? "ve-btn-success" : "ve-btn-default"} charsheet__empower-inline-btn"
 										data-gem-name="${gem.name}"
 										data-gem-source="${gem.source}"
 										data-gem-dc="${dc}"
-										data-gem-cost="${costGp}"
-										${!canAfford ? `disabled title="Need ${costGp} gp"` : `title="Empower for ${costGp} gp"`}>
+										${!hasGemEmpowerment ? `disabled title="Requires Gem Empowerment skill"` : `title="Attempt empowerment (DC ${dc})"`}>
 										<span class="glyphicon glyphicon-flash"></span> Empower
 									</button>
 								</div>
@@ -2974,7 +3020,6 @@ class CharacterSheetInventory {
 							btn.dataset.gemName,
 							btn.dataset.gemSource,
 							parseInt(btn.dataset.gemDc),
-							parseFloat(btn.dataset.gemCost),
 							{fromInventoryGem: {id: item.id, name: item.name, source: item.source}},
 						);
 					});
@@ -3990,9 +4035,6 @@ class CharacterSheetInventory {
 					<button type="button" class="ve-btn ve-btn-xs ${this._starredFilter ? "ve-btn-warning" : "ve-btn-default"} charsheet__btn-starred-filter" id="charsheet-btn-starred-filter" title="Show only starred items">
 						<span class="glyphicon glyphicon-star"></span> Starred
 					</button>
-					<button type="button" class="ve-btn ve-btn-xs ve-btn-success charsheet__btn-empower-gem" id="charsheet-btn-empower-gem" title="Empower a gemstone">
-						💎 Empower Gem
-					</button>
 				</div>
 				<div class="charsheet__inventory-toolbar-right">
 					<select class="ve-form-control form-control--minimal charsheet__inventory-sort-select" id="charsheet-inventory-sort" title="Sort by">
@@ -4072,6 +4114,7 @@ class CharacterSheetInventory {
 		const isArtifact = item.rarity === "artifact";
 		const artifactNeedsConfig = isArtifact && item.artifactProperties?.hasRequirements && !this._state.isArtifactFullyConfigured(item.id);
 		const canUpgrade = CharacterSheetUpgrades.isWeapon(item) || CharacterSheetUpgrades.isArmor(item) || CharacterSheetUpgrades.isShield(item);
+		const isBaseGemstone = (item.type === "$G" || item.type === "gemstone") && !item._isEmpoweredGemstone;
 		const hasUpgrades = !!(item.appliedUpgrades?.length || item.socketedGemstones?.length);
 		const activeGem = item.socketedGemstones?.[0] || null;
 		const gemHasCharges = activeGem?.chargesMax > 0;
@@ -4207,6 +4250,11 @@ class CharacterSheetInventory {
 						${isArtifact ? `
 							<button type="button" class="ve-btn ve-btn-xs ${artifactNeedsConfig ? "ve-btn-warning" : "ve-btn-default"} charsheet__item-artifact-config" title="${artifactNeedsConfig ? "Configure artifact properties" : "View/edit artifact properties"}">
 								<span class="glyphicon glyphicon-cog"></span> ${artifactNeedsConfig ? "Configure" : "Properties"}
+							</button>
+						` : ""}
+						${isBaseGemstone ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-success charsheet__item-empower-gem" title="Empower this gemstone (⚠ destroyed on failure)">
+								💎 Empower
 							</button>
 						` : ""}
 						${canUpgrade ? `

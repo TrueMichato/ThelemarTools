@@ -11221,8 +11221,13 @@ body.is-charsheet-page .ve-ui-modal__inner.ve-w-100 > .ve-ui-modal__scroller {
 
 /* Performance: isolate modal scroller paint/layout from page */
 body.is-charsheet-page .ve-ui-modal__scroller {
-	contain: content;
 	will-change: transform;
+}
+
+/* Remove containment for modals with dropdown filters — otherwise position:absolute dropdowns get clipped */
+body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__source-multiselect) {
+	contain: none;
+	overflow: visible;
 }
 
 /* Larger modals for item/spell pickers */
@@ -11425,6 +11430,62 @@ body.is-charsheet-page .ui-modal__inner input[type="radio"]:focus {
 }
 
 /* ========================================================================
+   Item Picker Tab Bar
+   ======================================================================== */
+.charsheet__item-tabs {
+	display: flex;
+	gap: 0;
+	border-bottom: 2px solid var(--cs-border, rgba(99, 102, 241, 0.2));
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__item-tab {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4rem;
+	padding: 0.65rem 0.85rem;
+	font-size: 0.875rem;
+	font-weight: 600;
+	background: transparent;
+	border: none;
+	border-bottom: 3px solid transparent;
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.5));
+	cursor: pointer;
+	transition: all var(--cs-transition-fast, 0.15s ease);
+	margin-bottom: -2px;
+}
+
+.charsheet__item-tab:hover {
+	color: var(--cs-text, inherit);
+	background: rgba(99, 102, 241, 0.05);
+}
+
+.charsheet__item-tab--active {
+	color: var(--cs-primary, #6366f1);
+	border-bottom-color: var(--cs-primary, #6366f1);
+}
+
+.charsheet__item-tab-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1.4em;
+	padding: 0 0.35em;
+	font-size: 0.7rem;
+	font-weight: 700;
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.2));
+	border-radius: var(--cs-radius-full, 20px);
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.5));
+}
+
+.charsheet__item-tab--active .charsheet__item-tab-count {
+	background: rgba(99, 102, 241, 0.15);
+	color: var(--cs-primary, #6366f1);
+}
+
+/* ========================================================================
    Enhanced Modal Picker Styles
    ======================================================================== */
 
@@ -11434,7 +11495,10 @@ body.is-charsheet-page .ui-modal__inner input[type="radio"]:focus {
 	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--cs-space-sm, 0.5rem);
-	margin-bottom: var(--cs-space-md, 0.75rem);
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+	overflow: visible;
+	position: relative;
+	z-index: 10;
 }
 
 /* Source filter always pushed to right */
@@ -11512,8 +11576,8 @@ body.is-charsheet-page .ui-modal__inner input[type="radio"]:focus {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.5rem;
-	margin-top: 0.75rem;
-	padding-top: 0.75rem;
+	margin-top: 0.5rem;
+	padding-top: 0.5rem;
 	border-top: 1px solid var(--cs-border, rgba(99, 102, 241, 0.15));
 }
 
@@ -11555,7 +11619,8 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .charsheet__modal-filter-btn--sm {
 	font-size: 0.75rem;
-	padding: 2px 8px;
+	padding: 3px 10px;
+	border-radius: var(--cs-radius-md, 8px);
 }
 
 .charsheet__modal-quick-filters--sub {
@@ -11563,11 +11628,14 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	flex-wrap: wrap;
 	gap: 4px;
 	margin-top: 2px;
+	padding: 0;
+	border-top: none;
 }
 
 .charsheet__modal-filter-section-label {
-	margin-top: 6px;
+	margin-top: 8px;
 	margin-bottom: 2px;
+	font-weight: 600;
 }
 
 /* ========================================================================
@@ -11588,16 +11656,17 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__source-multiselect-btn {
 	display: flex;
 	align-items: center;
-	gap: 0.5rem;
-	padding: 0.4rem 0.75rem;
+	gap: 0.4rem;
+	padding: 0.35rem 0.65rem;
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.2));
 	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.3));
 	border-radius: var(--cs-radius-md, 8px);
 	color: var(--cs-text, inherit);
 	cursor: pointer;
 	transition: all var(--cs-transition-fast, 0.15s ease);
-	min-width: 140px;
-	font-size: 0.875rem;
+	min-width: 120px;
+	max-width: 180px;
+	font-size: 0.8rem;
 }
 
 .charsheet__source-multiselect-btn:hover {
@@ -11828,6 +11897,25 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	height: 4px;
 	background: var(--cs-primary, #6366f1);
 	border-radius: 50%;
+}
+
+/* Sort Row (item picker modal) */
+.charsheet__modal-sort-row {
+	gap: 0.5rem;
+	margin-top: 0.5rem;
+}
+
+.charsheet__modal-sort-row > label {
+	font-size: 0.85rem;
+	white-space: nowrap;
+}
+
+.charsheet__modal-sort-select {
+	width: auto;
+	max-width: 320px;
+	font-size: 0.85rem;
+	height: auto;
+	padding: 0.25rem 0.5rem;
 }
 
 /* Modal List Container */
@@ -16554,6 +16642,148 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__empower-rules {
 	border-left: 3px solid var(--cs-success, #22c55e);
 }
+
+/* Empower modal — header bar */
+.charsheet__empower-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 6px 8px;
+	margin-bottom: 6px;
+	background: var(--cs-bg-elevated, rgba(99, 102, 241, 0.04));
+	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.12));
+	border-radius: var(--cs-radius-sm, 4px);
+}
+
+/* Empower modal — warning banner (inline in header or standalone) */
+.charsheet__empower-warning {
+	width: 100%;
+	padding: 4px 8px;
+	margin-top: 2px;
+	background: rgba(220, 53, 69, 0.06);
+	border-left: 3px solid var(--cs-danger, #dc3545);
+	border-radius: 0 var(--cs-radius-sm, 4px) var(--cs-radius-sm, 4px) 0;
+	color: var(--cs-danger, #dc3545);
+}
+
+/* Empower modal — rarity section */
+.charsheet__empower-rarity {
+	margin-bottom: 4px;
+}
+
+.charsheet__empower-rarity-header {
+	padding: 3px 6px;
+	gap: 4px;
+	border-bottom: 1px solid var(--cs-border, rgba(99, 102, 241, 0.10));
+	margin-bottom: 2px;
+}
+
+/* Empower modal — gem option row */
+.charsheet__empower-option {
+	padding: 4px 8px;
+	margin-bottom: 1px;
+	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.06));
+	border-radius: var(--cs-radius-sm, 4px);
+	background: var(--cs-bg-elevated, transparent);
+}
+
+/* Empower modal — collapsible details */
+.charsheet__empower-details summary {
+	cursor: pointer;
+	user-select: none;
+}
+
+.charsheet__empower-details[open] summary {
+	margin-bottom: 2px;
+}
+
+.charsheet__empower-details .rd__b,
+.charsheet__empower-details .rd__p {
+	margin-bottom: 2px;
+}
+
+/* Empower roll modal */
+.charsheet__empower-roll {
+	padding: 6px;
+}
+
+.charsheet__empower-roll-info {
+	padding: 6px 8px;
+	margin-bottom: 6px;
+	background: var(--cs-bg-elevated, rgba(99, 102, 241, 0.04));
+	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.12));
+	border-radius: var(--cs-radius-sm, 4px);
+	line-height: 1.4;
+}
+
+.charsheet__empower-roll-dc {
+	font-size: 1.2em;
+	font-weight: 700;
+	color: var(--cs-accent, #6366f1);
+}
+
+.charsheet__empower-roll-warning {
+	color: var(--cs-danger, #dc3545);
+	font-weight: 600;
+	margin-bottom: 6px;
+}
+
+.charsheet__empower-roll-btn {
+	margin-bottom: 4px;
+}
+
+/* Empower result panels */
+.charsheet__empower-result--success,
+.charsheet__empower-result--failure {
+	padding: 8px;
+	margin-top: 4px;
+	border-radius: var(--cs-radius-sm, 4px);
+	line-height: 1.5;
+}
+
+.charsheet__empower-result--success {
+	background: rgba(34, 197, 94, 0.08);
+	border: 1px solid var(--cs-success, #22c55e);
+}
+
+.charsheet__empower-result--failure {
+	background: rgba(220, 53, 69, 0.08);
+	border: 1px solid var(--cs-danger, #dc3545);
+}
+
+.charsheet__empower-result-title {
+	font-size: 1.05em;
+	font-weight: 700;
+	margin-bottom: 2px;
+}
+
+.charsheet__empower-result--success .charsheet__empower-result-title {
+	color: var(--cs-success, #22c55e);
+}
+
+.charsheet__empower-result--failure .charsheet__empower-result-title {
+	color: var(--cs-danger, #dc3545);
+}
+
+/* Rarity badges — compact, theme-safe */
+.charsheet__rarity-badge--common,
+.charsheet__rarity-badge--uncommon,
+.charsheet__rarity-badge--rare,
+.charsheet__rarity-badge--very-rare,
+.charsheet__rarity-badge--legendary {
+	font-size: 0.7em;
+	padding: 1px 5px;
+	border-radius: 3px;
+	color: #fff;
+	line-height: 1.4;
+}
+.charsheet__rarity-badge--common { background: #6b7280; }
+.charsheet__rarity-badge--uncommon { background: #059669; }
+.charsheet__rarity-badge--rare { background: #2563eb; }
+.charsheet__rarity-badge--very-rare { background: #7c3aed; }
+.charsheet__rarity-badge--legendary { background: #d97706; }
 
 .charsheet__empower-result .alert {
 	border-radius: var(--cs-radius-md, 8px);

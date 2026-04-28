@@ -161,6 +161,7 @@ globalThis.Renderer = globalThis.Renderer || {
 		getMediaUrl: (type, path) => `${type}/${path}`,
 		baseUrl: "",
 	}),
+	stripTags: (str) => (str || "").replace(/\{@[^}]+\s([^|}]+)[^}]*\}/g, "$1"),
 };
 // Ensure Renderer.monster exists for companion icon token URLs
 if (!globalThis.Renderer.monster) {
