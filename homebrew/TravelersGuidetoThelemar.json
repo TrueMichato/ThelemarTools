@@ -94,6 +94,7 @@
 		"dateLastModified": 1774699200,
 		"edition": "classic",
 		"itemUpgradeTypes": {
+			"AU": "Armor Upgrade",
 			"GS": "Gemstone",
 			"GS:C": "Gemstone; Common",
 			"GS:UC": "Gemstone; Uncommon",
@@ -32790,6 +32791,385 @@
 			],
 			"entries": [
 				"While you are wearing this armor, you gain a flight (hover) speed equal to twice your walking speed."
+			]
+		},
+		{
+			"name": "Comfortable",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "200 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light, medium, or heavy armor; conflicts with quick-release clasps tag"
+					]
+				}
+			],
+			"entries": [
+				"Cushioned to maximise comfort, you can sleep in this armor and gain the benefits of a long rest."
+			]
+		},
+		{
+			"name": "Camouflaged",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "250 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light or medium armor that lacks disadvantage on Stealth checks"
+					]
+				}
+			],
+			"entries": [
+				"Originally made for hunters who stalked perceptive prey, this armor gives advantage on {@skill Stealth} checks if the camouflage reasonably fits the terrain."
+			]
+		},
+		{
+			"name": "Inflatable",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "350 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light armor"
+					]
+				}
+			],
+			"entries": [
+				"This armor has a cord that, when pulled, allows you to rise out of the water and float."
+			]
+		},
+		{
+			"name": "Oil Coating",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "20 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor; conflicts with glue coating tag"
+					]
+				}
+			],
+			"entries": [
+				"You have advantage on checks to escape a grapple and disadvantage on checks to grapple others. This tag is automatically removed after 24 hours of wear or at the end of a combat where the wearer was grappled or grappled another creature."
+			]
+		},
+		{
+			"name": "Glue Coating",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "25 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light, medium, or heavy armor; conflicts with oil coating tag"
+					]
+				}
+			],
+			"entries": [
+				"You have disadvantage on checks to escape a grapple and advantage on checks to grapple others. This tag is automatically removed after 24 hours of wear or at the end of a combat where the wearer was grappled or grappled another creature."
+			]
+		},
+		{
+			"name": "Hardened",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "400 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"A creature takes half damage from the critical hit dice if the damage is bludgeoning, piercing, or slashing from a nonmagical source."
+			]
+		},
+		{
+			"name": "Form Fitted",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "200 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light armor"
+					]
+				}
+			],
+			"entries": [
+				"You gain a +3 bonus to {@skill Acrobatics} checks."
+			]
+		},
+		{
+			"name": "Tailored",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "50 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light armor; conflicts with grappling hook and mirrored tags"
+					]
+				}
+			],
+			"entries": [
+				"This set of armor is disguised to look like a normal set of clothes. The player and DM can determine the style. A creature can discover the armor is a disguise on a successful {@skill Investigation} check ({@dc 15})."
+			]
+		},
+		{
+			"name": "Blessed",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "500 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"any armor"
+					]
+				}
+			],
+			"entries": [
+				"You gain resistance to necrotic damage while wearing this armor."
+			]
+		},
+		{
+			"name": "Mirrored",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "400 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"any armor; conflicts with tailored tag"
+					]
+				}
+			],
+			"entries": [
+				"You gain resistance to radiant damage while wearing this armor."
+			]
+		},
+		{
+			"name": "Specifically Tempered",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "600 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"any armor; conflicts with copper plated tag; can only be applied once"
+					]
+				}
+			],
+			"entries": [
+				"You gain resistance to one of the following damage types of your choice: fire, cold, lightning, or thunder."
+			]
+		},
+		{
+			"name": "Super Spiked",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "350 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor with the spiked tag"
+					]
+				}
+			],
+			"entries": [
+				"Your armor is completely covered in points of varying sizes. You gain the following benefits and drawbacks:",
+				{
+					"type": "list",
+					"items": [
+						"Your unarmed attacks deal {@damage 1d6} piercing damage.",
+						"When a creature hits you with a melee attack that isn't made with a reach weapon or a natural weapon, the attacker takes {@damage 1d6} piercing damage.",
+						"Any creature that attempts to grapple you does so with disadvantage.",
+						"When you roll a natural 1 on an {@skill Acrobatics} check, you take piercing damage equal to half your level."
+					]
+				}
+			]
+		},
+		{
+			"name": "Copper Plated",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "500 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor; conflicts with specifically tempered tag"
+					]
+				}
+			],
+			"entries": [
+				"You gain resistance to acid damage while wearing this armor."
+			]
+		},
+		{
+			"name": "Diving Armor",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "80 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"This armor contains a pocket of breathable air, allowing you to breathe underwater for 30 minutes at a time."
+			]
+		},
+		{
+			"name": "Heavy",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "350 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"You have disadvantage on {@skill Acrobatics} checks and the armor's Strength minimum requirement increases by 1 (if there is no Strength minimum, it becomes 13). However, you cannot be pushed, pulled, or knocked {@condition prone} without a successful {@skill Athletics} check (DC 10 + your Athletics modifier) for melee, or an Arcana check for spells."
+			]
+		},
+		{
+			"name": "Magnetic",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "300 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"medium or heavy armor"
+					]
+				}
+			],
+			"entries": [
+				"On any melee attack against you with a metal weapon, an attack roll of 1 causes the metal weapon to stick to the armor. You can use a bonus action on your turn to attempt to disarm the attacker with a competing {@skill Athletics} check. Otherwise, the attacker can use a bonus action on their next turn to attempt a {@dc 12} {@skill Athletics} check to remove the weapon."
+			]
+		},
+		{
+			"name": "Hidden Crossbow",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "125 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light armor"
+					]
+				}
+			],
+			"entries": [
+				"Your armor has a hidden {@item light crossbow|PHB} with stats as described in the Player's Handbook. The crossbow cannot be disarmed since it is attached to you. A creature can make a {@dc 15} {@skill Investigation} check to notice the hidden crossbow."
+			]
+		},
+		{
+			"name": "Hidden Blades",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "54 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light armor"
+					]
+				}
+			],
+			"entries": [
+				"Your armor has two hidden {@item dagger|PHB|daggers} as described in the Player's Handbook. The daggers cannot be disarmed since they are attached to you. A creature can make a {@dc 15} {@skill Investigation} check to notice the sheathed daggers."
+			]
+		},
+		{
+			"name": "Grappling Hook",
+			"source": "TGTT",
+			"page": 0,
+			"upgradeType": [
+				"AU"
+			],
+			"cost": "230 gp",
+			"prerequisite": [
+				{
+					"item": [
+						"light armor; conflicts with tailored tag"
+					]
+				}
+			],
+			"entries": [
+				"Your armor has a built-in grappling hook with a 30-foot range. Make a ranged attack against a target. If the attack hits, the type of target determines the outcome:",
+				{
+					"type": "list",
+					"style": "list-decimal",
+					"items": [
+						"If the target is a structure or a creature of size Huge or larger, you can pull yourself through the air to the target.",
+						"If the target is a creature of size Large or smaller, you can attempt to pull the creature up to 10 feet closer to you. Both the target and you make competing {@skill Athletics} checks. The target moves 10 feet toward you if it loses the contested check."
+					]
+				},
+				"At the end of your turn, the grappling hook shoots back to your armor."
 			]
 		}
 	],
