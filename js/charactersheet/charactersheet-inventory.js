@@ -4119,6 +4119,7 @@ class CharacterSheetInventory {
 		const activeGem = item.socketedGemstones?.[0] || null;
 		const gemHasCharges = activeGem?.chargesMax > 0;
 		const gemIsDaily = activeGem && !gemHasCharges && !activeGem.usedToday;
+		const isVariantComponent = !!(item.variantComponent?.spellEffects?.length);
 
 		// Render item name with a 5etools hover link if it has a source
 		let itemNameHtml = item.name;
@@ -4172,6 +4173,7 @@ class CharacterSheetInventory {
 						</span>
 						<span class="charsheet__item-meta">
 							${typeTag ? `<span class="badge badge-secondary ve-small">${typeTag}</span>` : ""}
+							${isVariantComponent ? `<span class="badge badge-info ve-small" title="Variant Spell Component — can enhance matching spells when cast">🧪 Component</span>` : ""}
 							${isArtifact ? `<span class="badge badge-danger ve-small" title="Artifact">⚗️ Artifact</span>` : item.rarity && !["none", "unknown", "unknown (magic)", "varies"].includes(item.rarity.toLowerCase()) ? `<span class="badge badge-info ve-small">${item.rarity.toTitleCase()}</span>` : ""}
 							${item.weight ? `<span class="ve-muted ve-small">${(item.weight * item.quantity).toFixed(1)} lb.</span>` : ""}
 						</span>

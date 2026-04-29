@@ -3344,6 +3344,9 @@ class CharacterSheetState {
 			// Attacks (weapons + custom)
 			attacks: [], // [{name, attackBonus, damage, damageType, range, properties}]
 
+			// Temporary attacks (from variant spell components, spells, etc.)
+			temporaryAttacks: [], // [{id, name, isMelee, abilityMod, damage, damageType, range, properties, sourceSpell, sourceDuration, expiresOn}]
+
 			// Conditions
 			conditions: [],
 
@@ -3584,6 +3587,11 @@ class CharacterSheetState {
 		// Ensure activeCombatMethodEffects array exists
 		if (!Array.isArray(this._data.activeCombatMethodEffects)) {
 			this._data.activeCombatMethodEffects = [];
+		}
+
+		// Ensure temporaryAttacks array exists (variant components system)
+		if (!Array.isArray(this._data.temporaryAttacks)) {
+			this._data.temporaryAttacks = [];
 		}
 
 		// Ensure inventory items have upgrade/gemstone arrays (backward compat)
@@ -19219,6 +19227,150 @@ class CharacterSheetState {
 		return true;
 	}
 
+	// region Variant Spell Components
+
+	/**
+	 * Get all inventory items that have variant component effects matching a given spell.
+	 * Matching criteria:
+	 *   - match.spell: exact "name|source" match (case-insensitive)
+	 *   - match.damageType: spell deals that damage type
+	 *   - match.spellTag: spell has a tag (e.g. "restoration", "dragonBreathMatch")
+	 * @param {object} spell - {name, source, level} from the spell being cast
+	 * @param {object} [spellData] - Full spell data from the spell database (for damage type matching)
+	 * @returns {Array<{invItem: object, spellEffect: object}>} Matching components with their applicable effects
+	 */
+	getMatchingVariantComponents (spell, spellData = null) {
+		if (!spell?.name || !spell?.source) return [];
+
+		const spellUid = `${spell.name}|${spell.source}`.toLowerCase();
+		const spellDamageTypes = spellData ? this._extractSpellDamageTypes(spellData) : new Set();
+		const spellTags = spellData ? this._extractSpellTags(spellData) : new Set();
+
+		const matches = [];
+
+		for (const invItem of this._data.inventory) {
+			const vc = invItem.item?.variantComponent;
+			if (!vc?.spellEffects?.length) continue;
+
+			// Must have at least 1 unit available
+			if ((invItem.quantity ?? 1) < 1) continue;
+
+			for (const se of vc.spellEffects) {
+				if (!se.match) continue;
+
+				let isMatch = false;
+
+				if (se.match.spell) {
+					isMatch = se.match.spell.toLowerCase() === spellUid;
+				} else if (se.match.damageType) {
+					isMatch = spellDamageTypes.has(se.match.damageType.toLowerCase());
+				} else if (se.match.spellTag) {
+					isMatch = spellTags.has(se.match.spellTag.toLowerCase());
+				}
+
+				if (isMatch) {
+					matches.push({invItem, spellEffect: se});
+				}
+			}
+		}
+
+		return matches;
+	}
+
+	/**
+	 * Extract damage types from a spell's data (entries, damageInflict, etc.)
+	 * @param {object} spellData - Full spell data
+	 * @returns {Set<string>} Set of lowercase damage type strings
+	 */
+	_extractSpellDamageTypes (spellData) {
+		const types = new Set();
+
+		// Primary source: damageInflict array
+		if (spellData.damageInflict) {
+			for (const dt of spellData.damageInflict) types.add(dt.toLowerCase());
+		}
+
+		return types;
+	}
+
+	/**
+	 * Extract semantic tags from a spell's data for variant component matching.
+	 * Tags include: "restoration" (heals HP), "dragonBreathMatch" (elemental damage),
+	 * "psychicDamage" (deals psychic), "charm" (charm effects), etc.
+	 * @param {object} spellData - Full spell data
+	 * @returns {Set<string>} Set of lowercase tag strings
+	 */
+	_extractSpellTags (spellData) {
+		const tags = new Set();
+		const damageTypes = this._extractSpellDamageTypes(spellData);
+
+		// Restoration: any spell that heals
+		if (spellData.miscTags?.includes("HL") || spellData.spellAttack?.includes("heal")) {
+			tags.add("restoration");
+		}
+		// Also check entries for healing dice patterns
+		const entriesStr = JSON.stringify(spellData.entries || []).toLowerCase();
+		if (entriesStr.includes("regain") && (entriesStr.includes("hit point") || entriesStr.includes("hp"))) {
+			tags.add("restoration");
+		}
+
+		// Dragon breath match: acid, cold, fire, lightning, poison
+		const dragonTypes = new Set(["acid", "cold", "fire", "lightning", "poison"]);
+		for (const dt of damageTypes) {
+			if (dragonTypes.has(dt)) {
+				tags.add("dragonbreathmatch");
+				break;
+			}
+		}
+
+		// Psychic damage
+		if (damageTypes.has("psychic")) tags.add("psychicdamage");
+
+		// Charm: check for charmed condition
+		if (spellData.conditionInflict?.some(c => c.toLowerCase() === "charmed")) {
+			tags.add("charm");
+		}
+
+		return tags;
+	}
+
+	/**
+	 * Consume a variant component from inventory (decrements quantity or removes).
+	 * @param {string} itemId - The inventory item ID
+	 * @returns {boolean} True if consumed
+	 */
+	consumeVariantComponent (itemId) {
+		return this.consumeItem(itemId);
+	}
+
+	/**
+	 * Get the specific variant component effects for an item matching a spell.
+	 * @param {string} itemId - The inventory item ID
+	 * @param {object} spell - {name, source} of the spell
+	 * @param {object} [spellData] - Full spell data
+	 * @returns {object|null} The matching spellEffect entry, or null
+	 */
+	getVariantComponentEffects (itemId, spell, spellData = null) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem?.item?.variantComponent?.spellEffects?.length) return null;
+
+		const spellUid = `${spell.name}|${spell.source}`.toLowerCase();
+		const spellDamageTypes = spellData ? this._extractSpellDamageTypes(spellData) : new Set();
+		const spellTags = spellData ? this._extractSpellTags(spellData) : new Set();
+
+		for (const se of invItem.item.variantComponent.spellEffects) {
+			if (!se.match) continue;
+
+			if (se.match.spell && se.match.spell.toLowerCase() === spellUid) return se;
+			if (se.match.damageType && spellDamageTypes.has(se.match.damageType.toLowerCase())) return se;
+			if (se.match.spellTag && spellTags.has(se.match.spellTag.toLowerCase())) return se;
+		}
+
+		return null;
+	}
+
+	// endregion
+
 	/**
 	 * Get healing effect from a potion item
 	 * @param {string} itemId - The item ID
@@ -20657,6 +20809,72 @@ class CharacterSheetState {
 	removeAttack (attackId) {
 		this._data.attacks = this._data.attacks.filter(a => a.id !== attackId);
 	}
+
+	// region Temporary Attacks
+
+	/**
+	 * Get all temporary attacks (from variant components, spells, etc.)
+	 * @returns {Array}
+	 */
+	getTemporaryAttacks () {
+		return [...(this._data.temporaryAttacks || [])];
+	}
+
+	/**
+	 * Add a temporary attack (e.g. granted by a variant spell component).
+	 * @param {object} attack - Attack definition
+	 * @param {string} attack.name - Attack name
+	 * @param {boolean} [attack.isMelee=true] - Melee or ranged
+	 * @param {string} [attack.abilityMod="str"] - Ability modifier: "str", "dex", "finesse", "spellcasting"
+	 * @param {string} attack.damage - Damage dice, e.g. "2d6"
+	 * @param {string} attack.damageType - Damage type
+	 * @param {string} [attack.range="5 ft"] - Range string
+	 * @param {string[]} [attack.properties=[]] - Weapon properties
+	 * @param {string} [attack.sourceSpell] - Name of the spell that granted this attack
+	 * @param {string} [attack.sourceDuration] - How long it lasts: "concentration", "1 minute", etc.
+	 * @param {string} [attack.sourceComponent] - Name of the variant component
+	 * @returns {string} The generated attack ID
+	 */
+	addTemporaryAttack (attack) {
+		if (!this._data.temporaryAttacks) this._data.temporaryAttacks = [];
+		const id = attack.id || CryptUtil.uid();
+		this._data.temporaryAttacks.push({
+			...attack,
+			id,
+			isTemporary: true,
+		});
+		return id;
+	}
+
+	/**
+	 * Remove a temporary attack by ID.
+	 * @param {string} attackId
+	 */
+	removeTemporaryAttack (attackId) {
+		if (!this._data.temporaryAttacks) return;
+		this._data.temporaryAttacks = this._data.temporaryAttacks.filter(a => a.id !== attackId);
+	}
+
+	/**
+	 * Remove all temporary attacks granted by a specific spell.
+	 * Useful when concentration is broken or spell ends.
+	 * @param {string} spellName
+	 */
+	removeTemporaryAttacksBySpell (spellName) {
+		if (!this._data.temporaryAttacks) return;
+		this._data.temporaryAttacks = this._data.temporaryAttacks.filter(
+			a => a.sourceSpell?.toLowerCase() !== spellName?.toLowerCase(),
+		);
+	}
+
+	/**
+	 * Clear all temporary attacks (e.g. on long rest).
+	 */
+	clearTemporaryAttacks () {
+		this._data.temporaryAttacks = [];
+	}
+
+	// endregion
 
 	updateAttackFromWeapon (item) {
 		// Calculate attack bonus and damage for a weapon
@@ -31826,6 +32044,11 @@ class CharacterSheetState {
 			this.dismissConcentrationCompanions();
 		}
 
+		// Remove concentration-linked temporary attacks
+		if (concSpellName && !shouldLingerSpellEffects) {
+			this.removeTemporaryAttacksBySpell(concSpellName);
+		}
+
 		// Remove concentration active state (legacy)
 		const concState = this._data.activeStates.find(s => s.stateTypeId === "concentration");
 		if (concState) {
@@ -32917,6 +33140,9 @@ class CharacterSheetState {
 
 		// Restore companions on long rest
 		this.restCompanions("long");
+
+		// Clear all temporary attacks (from variant components, etc.)
+		this.clearTemporaryAttacks();
 	}
 
 	/**
