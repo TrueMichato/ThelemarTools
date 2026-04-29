@@ -1,0 +1,4142 @@
+{
+	"item": [
+		{
+			"name": "Aboleth Eye",
+			"source": "Ar8",
+			"page": 15,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"An eye harvested from an {@creature aboleth}. When used as a variant spell component for {@spell legend lore}, you can learn about an additional person, place, or object of legendary importance."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 17,
+				"harvestQuantity": 3,
+				"harvestSource": "Aboleth",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "legend lore|phb"},
+						"description": "Learn about an additional person, place, or object of legendary importance.",
+						"effects": [
+							{"type": "text", "text": "Learn about an additional person, place, or object of legendary importance."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Piece of Aboleth Brain",
+			"source": "Ar8",
+			"page": 15,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A piece of brain harvested from an {@creature aboleth}. When used as a variant spell component for any spell that deals psychic damage, the damage die size increases by one step (to a maximum of {@dice d12}) and you deal three extra dice of damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 20,
+				"harvestQuantity": 8,
+				"harvestSource": "Aboleth",
+				"harvestTime": "30 minutes",
+				"spellEffects": [
+					{
+						"match": {"damageType": "psychic"},
+						"description": "Damage die +1 step (max d12), +3 extra damage dice.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 1, "maxDie": "d12"},
+							{"type": "bonusDice", "count": 3}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Piece of Aboleth Tentacle",
+			"source": "Ar8",
+			"page": 15,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A piece of tentacle harvested from an {@creature aboleth}. When used as a variant spell component for {@spell Evard's black tentacles}, creatures taking damage from the tentacles take an additional {@damage 1d10} acid damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 12,
+				"harvestQuantity": 20,
+				"harvestSource": "Aboleth",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "evard's black tentacles|phb"},
+						"description": "Creatures taking damage take additional 1d10 acid damage.",
+						"effects": [
+							{"type": "bonusDamage", "dice": "1d10", "damageType": "acid"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Cloaker Eye",
+			"source": "Ar8",
+			"page": 15,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"An eye harvested from a {@creature cloaker}. When used as a variant spell component for {@spell mirror image}, you create three additional duplicates."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 17,
+				"harvestQuantity": 2,
+				"harvestSource": "Cloaker",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mirror image|phb"},
+						"description": "Create 3 additional duplicates. Need 4+ to force roll to change attack target.",
+						"effects": [
+							{"type": "text", "text": "Create 3 additional duplicates. If you have four or more duplicates, attackers must roll 4 or higher to change an attack's target to a duplicate."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Cloaker Hide",
+			"source": "Ar8",
+			"page": 15,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A hide harvested from a {@creature cloaker}. When used as a variant spell component for {@spell mage armor}, the target's base AC becomes 15 + Dexterity modifier and the target gains resistance to bludgeoning, piercing, and slashing damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Cloaker",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mage armor|phb"},
+						"description": "Base AC becomes 15 + DEX. Gain resistance to bludgeoning, piercing, and slashing.",
+						"effects": [
+							{"type": "acOverride", "formula": "15 + DEX"},
+							{"type": "resistance", "types": ["bludgeoning", "piercing", "slashing"]}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Lord Rall Hide",
+			"source": "Ar8",
+			"page": 15,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A hide harvested from Lord Rall. When used as a variant spell component for {@spell polymorph} or {@spell true polymorph}, you can target one additional creature within the spell's range."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Lord Rall",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "polymorph|phb"},
+						"description": "Target one additional creature within range.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					},
+					{
+						"match": {"spell": "true polymorph|phb"},
+						"description": "Target one additional creature within range.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Maladar Dictum Hide",
+			"source": "Ar8",
+			"page": 15,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A hide harvested from Maladar Dictum. When used as a variant spell component for {@spell regenerate}, the target regains an additional {@dice 1d8} hit points, regains 5 HP at the start of each turn, and any severed appendages are instantly restored."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Maladar Dictum",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "regenerate|phb"},
+						"description": "Target regains additional 1d8 HP, 5 HP/turn, and severed appendages instantly restored.",
+						"effects": [
+							{"type": "bonusDamage", "dice": "1d8", "damageType": "healing"},
+							{"type": "text", "text": "Target regains 5 HP at the start of each turn. Any severed appendages are instantly restored."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Piece of Mindkiller Brain",
+			"source": "Ar8",
+			"page": 15,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A piece of brain harvested from a mindkiller. When used as a variant spell component for any spell that deals psychic damage, the damage die size increases by one step (to a maximum of {@dice d12}) and you deal two extra dice of damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 20,
+				"harvestQuantity": 4,
+				"harvestSource": "Mindkiller",
+				"harvestTime": "30 minutes",
+				"spellEffects": [
+					{
+						"match": {"damageType": "psychic"},
+						"description": "Damage die +1 step (max d12), +2 extra damage dice.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 1, "maxDie": "d12"},
+							{"type": "bonusDice", "count": 2}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Authority Blood",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from an authority. When used as a variant spell component for {@spell bless}, the die creatures add to attack rolls and saving throws increases to a {@dice d6}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Authority",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "bless|phb"},
+						"description": "Die added to attack rolls and saving throws increases to d6.",
+						"effects": [
+							{"type": "text", "text": "The die creatures add to attack rolls and saving throws increases to a d6 (instead of d4)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Authority Sword",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A sword from an authority. When used as a variant spell component for {@spell protection from evil and good}, you can target up to three willing creatures within the spell's range."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestQuantity": 1,
+				"harvestSource": "Authority",
+				"spellEffects": [
+					{
+						"match": {"spell": "protection from evil and good|phb"},
+						"description": "Target up to 3 willing creatures within range.",
+						"effects": [
+							{"type": "additionalTargets", "count": 2}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Couatl Feather",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A feather from a {@creature couatl}. When used as a variant spell component for {@spell polymorph}, the target retains mental ability scores and the ability to speak, and can perform somatic and verbal spell components (but not material)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": 20,
+				"harvestSource": "Couatl",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "polymorph|phb"},
+						"description": "Target retains mental ability scores, speech, and somatic/verbal spell components.",
+						"effects": [
+							{"type": "text", "text": "Target retains mental ability scores and ability to speak. Can perform somatic and verbal spell components but not material components."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Deva Blood",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature deva}. When used as a variant spell component for any spell that allows you to roll dice to restore HP, roll two additional dice. For {@spell aid}, each target's HP maximum and current HP increase by an additional 20."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Deva",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "restoration"},
+						"description": "Roll 2 additional dice when restoring HP.",
+						"effects": [
+							{"type": "bonusDice", "count": 2}
+						]
+					},
+					{
+						"match": {"spell": "aid|phb"},
+						"description": "Each target's HP max and current HP increase by additional 20.",
+						"effects": [
+							{"type": "text", "text": "Each target's HP maximum and current HP increase by an additional 20 for the duration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Deva Feather",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A feather from a {@creature deva}. When used as a variant spell component for {@spell feather fall}, creatures fall at 90 feet per round. For {@spell fly}, target's flying speed increases to 90 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": 20,
+				"harvestSource": "Deva",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "feather fall|phb"},
+						"description": "Creatures fall at rate of 90 feet per round.",
+						"effects": [
+							{"type": "speedFallRate", "rate": 90}
+						]
+					},
+					{
+						"match": {"spell": "fly|phb"},
+						"description": "Target's flying speed increases to 90 feet.",
+						"effects": [
+							{"type": "speedOverride", "speedType": "fly", "value": 90}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Deva Hide",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A hide from a {@creature deva}. When used as a variant spell component for {@spell polymorph}, you can transform the chosen creature into a celestial of CR 10 or lower."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Deva",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "polymorph|phb"},
+						"description": "Can transform target into a celestial of CR 10 or lower.",
+						"effects": [
+							{"type": "text", "text": "Can transform the chosen creature into a celestial of CR 10 or lower."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Planetar Blood",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature planetar}. When used as a variant spell component for any spell that allows you to roll dice to restore HP, roll three additional dice. For {@spell aid}, each target's HP maximum and current HP increase by an additional 30."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "15 vials",
+				"harvestSource": "Planetar",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "restoration"},
+						"description": "Roll 3 additional dice when restoring HP.",
+						"effects": [
+							{"type": "bonusDice", "count": 3}
+						]
+					},
+					{
+						"match": {"spell": "aid|phb"},
+						"description": "Each target's HP max and current HP increase by additional 30.",
+						"effects": [
+							{"type": "text", "text": "Each target's HP maximum and current HP increase by an additional 30 for the duration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Planetar Feather",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A feather from a {@creature planetar}. When used as a variant spell component for {@spell feather fall}, creatures fall at 120 feet per round. For {@spell fly}, target's flying speed increases to 120 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": 30,
+				"harvestSource": "Planetar",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "feather fall|phb"},
+						"description": "Creatures fall at rate of 120 feet per round.",
+						"effects": [
+							{"type": "speedFallRate", "rate": 120}
+						]
+					},
+					{
+						"match": {"spell": "fly|phb"},
+						"description": "Target's flying speed increases to 120 feet.",
+						"effects": [
+							{"type": "speedOverride", "speedType": "fly", "value": 120}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Planetar Hide",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A hide from a {@creature planetar}. When used as a variant spell component for {@spell polymorph}, you can transform the chosen creature into a celestial of CR 16 or lower."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Planetar",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "polymorph|phb"},
+						"description": "Can transform target into a celestial of CR 16 or lower.",
+						"effects": [
+							{"type": "text", "text": "Can transform the chosen creature into a celestial of CR 16 or lower."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Princip Blood",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a princip. When used as a variant spell component for {@spell protection from evil and good}, you can target up to two willing creatures within the spell's range."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "1 vial",
+				"harvestSource": "Princip",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "protection from evil and good|phb"},
+						"description": "Target up to 2 willing creatures within range.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Princip Crown",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A crown from a princip. When used as a variant spell component for {@spell mind blank}, you can target up to three willing creatures within the spell's range."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestQuantity": 1,
+				"harvestSource": "Princip",
+				"spellEffects": [
+					{
+						"match": {"spell": "mind blank|phb"},
+						"description": "Target up to 3 willing creatures within range.",
+						"effects": [
+							{"type": "additionalTargets", "count": 2}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Solar Blood",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature solar}. When used as a variant spell component for HP restoration spells, roll four additional dice. For radiant damage spells, damage die increases by one step (max d12) with one extra die. For {@spell aid}, HP max and current increase by additional 40."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "15 vials",
+				"harvestSource": "Solar",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "restoration"},
+						"description": "Roll 4 additional dice when restoring HP.",
+						"effects": [
+							{"type": "bonusDice", "count": 4}
+						]
+					},
+					{
+						"match": {"damageType": "radiant"},
+						"description": "Damage die +1 step (max d12), +1 extra damage die.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 1, "maxDie": "d12"},
+							{"type": "bonusDice", "count": 1}
+						]
+					},
+					{
+						"match": {"spell": "aid|phb"},
+						"description": "Each target's HP max and current HP increase by additional 40.",
+						"effects": [
+							{"type": "text", "text": "Each target's HP maximum and current HP increase by an additional 40 for the duration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Solar Feather",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A feather from a {@creature solar}. When used as a variant spell component for {@spell feather fall}, creatures fall at 150 feet per round. For {@spell fly}, target's flying speed increases to 150 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": 30,
+				"harvestSource": "Solar",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "feather fall|phb"},
+						"description": "Creatures fall at rate of 150 feet per round.",
+						"effects": [
+							{"type": "speedFallRate", "rate": 150}
+						]
+					},
+					{
+						"match": {"spell": "fly|phb"},
+						"description": "Target's flying speed increases to 150 feet.",
+						"effects": [
+							{"type": "speedOverride", "speedType": "fly", "value": 150}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Unicorn Blood",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature unicorn}. When used as a variant spell component for HP restoration spells, roll one additional die. For {@spell aid}, HP max and current increase by additional 10."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "15 vials",
+				"harvestSource": "Unicorn",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "restoration"},
+						"description": "Roll 1 additional die when restoring HP.",
+						"effects": [
+							{"type": "bonusDice", "count": 1}
+						]
+					},
+					{
+						"match": {"spell": "aid|phb"},
+						"description": "Each target's HP max and current HP increase by additional 10.",
+						"effects": [
+							{"type": "text", "text": "Each target's HP maximum and current HP increase by an additional 10 for the duration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Unicorn Hoof",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A hoof from a {@creature unicorn}. Enhances {@spell dimension door} (bring up to 4 creatures), {@spell expeditious retreat} (movement doubled), or {@spell haste} (movement tripled)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 4,
+				"harvestSource": "Unicorn",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "dimension door|phb"},
+						"description": "Bring up to 4 willing creatures of your size or smaller.",
+						"effects": [
+							{"type": "additionalTargets", "count": 3}
+						]
+					},
+					{
+						"match": {"spell": "expeditious retreat|phb"},
+						"description": "Movement speed is doubled.",
+						"effects": [
+							{"type": "text", "text": "Your movement speed is doubled for the duration."}
+						]
+					},
+					{
+						"match": {"spell": "haste|phb"},
+						"description": "Target's movement speed is tripled instead of doubled.",
+						"effects": [
+							{"type": "text", "text": "Target's movement speed is tripled instead of doubled."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Unicorn Horn",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A horn from a {@creature unicorn}. When used as a variant spell component for {@spell shield}, you gain a +7 bonus to AC until the start of your next turn."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": 1,
+				"harvestSource": "Unicorn",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "shield|phb"},
+						"description": "+7 bonus to AC until start of next turn (instead of +5).",
+						"effects": [
+							{"type": "text", "text": "You gain a +7 bonus to AC until the start of your next turn (instead of +5)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Virtue Vocal Cord",
+			"source": "Ar8",
+			"page": 16,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A vocal cord from a virtue. Enhances multiple spells: {@spell bless} (d10), {@spell lesser restoration} becomes {@spell greater restoration}, {@spell greater restoration} gains +1 target, {@spell hellish rebuke} deals radiant d12 damage, {@spell banishment} target has disadvantage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 17,
+				"harvestQuantity": 4,
+				"harvestSource": "Virtue",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "bless|phb"},
+						"description": "Die added to attack rolls and saving throws increases to d10.",
+						"effects": [
+							{"type": "text", "text": "The die creatures add to attack rolls and saving throws increases to a d10 (instead of d4)."}
+						]
+					},
+					{
+						"match": {"spell": "lesser restoration|phb"},
+						"description": "Spell has the effects of greater restoration instead.",
+						"effects": [
+							{"type": "text", "text": "The spell has the effects of greater restoration instead."}
+						]
+					},
+					{
+						"match": {"spell": "greater restoration|phb"},
+						"description": "Target one additional creature within range.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					},
+					{
+						"match": {"spell": "hellish rebuke|phb"},
+						"description": "Deals radiant damage instead of fire, damage die increases to d12.",
+						"effects": [
+							{"type": "text", "text": "Spell deals radiant damage instead of fire damage and the damage die increases to d12."}
+						]
+					},
+					{
+						"match": {"spell": "banishment|phb"},
+						"description": "Target has disadvantage on saving throw.",
+						"effects": [
+							{"type": "saveDisadvantage", "ability": "charisma"}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Air Elemental Air Essence",
+			"source": "Ar8",
+			"page": 22,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of air essence from an {@creature air elemental}. When used as a variant spell component for {@spell fog cloud}, creatures starting their turn in the fog must make a Constitution save or be unable to breathe and have disadvantage on Constitution saves for concentration."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": "1 vial",
+				"harvestSource": "Air Elemental",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "fog cloud|phb"},
+						"description": "Creatures in fog: CON save or can't breathe, disadvantage on concentration saves.",
+						"effects": [
+							{"type": "text", "text": "Creatures starting turn in fog must make Constitution save vs. your spell DC or be unable to breathe and have disadvantage on Constitution saves to maintain concentration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Djinni Zephyr Essence",
+			"source": "Ar8",
+			"page": 22,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of zephyr essence from a {@creature djinni}. When used as a variant spell component for {@spell wind wall}, you can move the wall 15 feet as a bonus action and creatures starting their turn in the wall must save or become restrained."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": "1 vial",
+				"harvestSource": "Djinni",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "wind wall|phb"},
+						"description": "Move wall 15 ft as bonus action. Creatures in wall: STR save or restrained.",
+						"effects": [
+							{"type": "text", "text": "Can move wall up to 15 feet as a bonus action. Creatures starting turn in wall make Strength save vs. your spell DC or become restrained until start of their next turn."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Efreeti Fire Essence",
+			"source": "Ar8",
+			"page": 22,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of fire essence from an {@creature efreeti}. Enhances {@spell flame blade} (+4d6 fire, ranged attack option) or {@spell wall of fire} (bonus action fireball)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": "1 vial",
+				"harvestSource": "Efreeti",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "flame blade|phb"},
+						"description": "+4d6 fire damage. Action for ranged spell attack (120 ft) dealing 6d6 fire.",
+						"effects": [
+							{"type": "bonusDamage", "dice": "4d6", "damageType": "fire"},
+							{"type": "text", "text": "While active, use an action for a ranged spell attack within 120 feet dealing 6d6 fire damage on hit."}
+						]
+					},
+					{
+						"match": {"spell": "wall of fire|phb"},
+						"description": "Bonus action to hurl 15-ft radius fireball dealing 2d8 fire.",
+						"effects": [
+							{"type": "text", "text": "While active, use bonus action to hurl fireball in 15-foot-radius sphere. Creatures make Dex save for 2d8 fire damage (half on success)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Earth Elemental Earth Essence",
+			"source": "Ar8",
+			"page": 22,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of earth essence from an {@creature earth elemental}. When used as a variant spell component for {@spell earthquake}, prone creatures sink into the earth and become restrained."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": "1 vial",
+				"harvestSource": "Earth Elemental",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "earthquake|phb"},
+						"description": "Prone creatures sink 1 ft/turn into earth, become restrained. DC +2 per foot to escape.",
+						"effects": [
+							{"type": "text", "text": "Creatures knocked prone sink 1 foot into the earth and become restrained. Each turn they sink 1 foot deeper. STR save (DC = spell DC + 2 per foot sunk) to break free."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Invisible Stalker Stalker Essence",
+			"source": "Ar8",
+			"page": 22,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of stalker essence from an {@creature invisible stalker}. When used as a variant spell component for {@spell pass without trace}, you can make up to two creatures benefitting from the spell invisible."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": "1 vial",
+				"harvestSource": "Invisible Stalker",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "pass without trace|phb"},
+						"description": "Make up to 2 creatures invisible. Use action to change which creatures.",
+						"effects": [
+							{"type": "text", "text": "Make up to two creatures benefitting from the spell's bonus invisible for the duration. Use an action to change which creatures are invisible."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Storm Magistrate Storm Essence",
+			"source": "Ar8",
+			"page": 22,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of storm essence from a storm magistrate. When used as a variant spell component for {@spell call lightning}, you can call up to two additional bolts (one creature per turn max)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": "1 vial",
+				"harvestSource": "Storm Magistrate",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "call lightning|phb"},
+						"description": "Call up to 2 additional bolts per turn (one creature per turn max).",
+						"effects": [
+							{"type": "text", "text": "When calling down a bolt, can call up to two additional bolts. A creature can't be affected by multiple bolts on the same turn."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Fiend Blood (Lore Devil)",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a lore devil. When used as a variant spell component for {@spell heroes' feast}, creatures partaking can't be affected or detected by spells of 6th level or lower and have advantage on saves vs. all other spells and magical effects."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Lore Devil",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "heroes' feast|phb"},
+						"description": "Immunity to spells 6th level or lower; advantage on all spell saves.",
+						"effects": [
+							{"type": "text", "text": "Creatures partaking can't be affected or detected by spells of 6th level or lower (unless willing), and have advantage on saves vs. all other spells and magical effects."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Fiend Blood (Rakshasa)",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature rakshasa}. When used as a variant spell component for {@spell heroes' feast}, creatures partaking can't be affected or detected by spells of 6th level or lower and have advantage on saves vs. all other spells and magical effects."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Rakshasa",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "heroes' feast|phb"},
+						"description": "Immunity to spells 6th level or lower; advantage on all spell saves.",
+						"effects": [
+							{"type": "text", "text": "Creatures partaking can't be affected or detected by spells of 6th level or lower (unless willing), and have advantage on saves vs. all other spells and magical effects."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Fiend Blood",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a fiend. When used as a variant spell component for {@spell heroes' feast}, creatures partaking gain advantage on saves vs. spells and magical effects."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Fiend (generic)",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "heroes' feast|phb"},
+						"description": "Advantage on saves vs. spells and magical effects.",
+						"effects": [
+							{"type": "text", "text": "Creatures partaking gain advantage on saves vs. spells and magical effects for the duration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Fiend Eye",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"An eye from a devil (barbed, bearded, bone, chain, or lemure). When used as a variant spell component for {@spell darkvision}, the target can see through magical darkness."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 17,
+				"harvestQuantity": 2,
+				"harvestSource": "Devil",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "darkvision|phb"},
+						"description": "Target can see through magical darkness.",
+						"effects": [
+							{"type": "text", "text": "Target can see through magical darkness for the duration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Skin from Lore Devil Hands",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Skin from a lore devil's hands. Enhances {@spell feeblemind} (steal spell slot, heal 10\u00d7 level) or {@spell legend lore} (perfect clarity)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 2,
+				"harvestSource": "Lore Devil",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "feeblemind|phb"},
+						"description": "Steal target's spell slot; heal 10 \u00d7 slot level HP.",
+						"effects": [
+							{"type": "text", "text": "If target has Spellcasting, they lose a spell slot of your choice and you regain HP equal to 10 \u00d7 the slot level."}
+						]
+					},
+					{
+						"match": {"spell": "legend lore|phb"},
+						"description": "Gain maximum precise and detailed information.",
+						"effects": [
+							{"type": "text", "text": "Gain as much precise and detailed information as possible. Information presented in straightforward and clear manner."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Skin from Rakshasa Hands",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Skin from a {@creature rakshasa}'s hands. When used as a variant spell component for {@spell tree stride}, removes distance requirements and allows travel to any living tree in the multiverse, even on other planes."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 2,
+				"harvestSource": "Rakshasa",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "tree stride|phb"},
+						"description": "No distance limit; travel to any tree in the multiverse, any plane.",
+						"effects": [
+							{"type": "text", "text": "No distance requirements. You know the location of every living tree in the multiverse and can travel to any of them, even on other planes."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Balor Blood",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature balor}. When used as a variant spell component for {@spell death ward}, if target drops to 0 HP, creatures within 30 feet make DEX save for {@damage 8d6} fire damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Balor",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "death ward|phb"},
+						"description": "When target drops to 0 HP: 30-ft radius 8d6 fire damage (DEX save half).",
+						"effects": [
+							{"type": "text", "text": "If target drops to 0 HP, each creature within 30 feet makes a Dex save vs. your spell DC, taking 8d6 fire damage on a failed save (half on success)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Balor Skin",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"Skin from a {@creature balor}. When used as a variant spell component for {@spell resistance}, when the target adds the d4, they also gain advantage on that saving throw."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Balor",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "resistance|phb"},
+						"description": "When d4 is added, target also gains advantage on that save.",
+						"effects": [
+							{"type": "text", "text": "When the target adds the d4 to a saving throw, they also gain advantage on that saving throw."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Chain Devil Chain Link",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A chain link from a {@creature chain devil}. When used as a variant spell component for {@spell blade barrier}, as a bonus action you can command chains to yank a creature within 10 feet into the barrier."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": 20,
+				"harvestSource": "Chain Devil",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "blade barrier|phb"},
+						"description": "Bonus action: chains yank creature within 10 ft into barrier (DEX save).",
+						"effects": [
+							{"type": "text", "text": "As a bonus action, command chains to shoot at a creature within 10 feet of the barrier. Creature makes Dex save vs. your spell DC or is yanked into the barrier."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dretch Fetid Pouch",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A fetid pouch from a {@creature dretch}. When used as a variant spell component for {@spell poison spray}, on a failed save the target is also {@condition poisoned} until the start of your next turn."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 12,
+				"harvestQuantity": 1,
+				"harvestSource": "Dretch",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "poison spray|phb"},
+						"description": "Failed save: poisoned until start of your next turn, limited to action OR bonus action.",
+						"effects": [
+							{"type": "condition", "condition": "poisoned", "duration": "start of your next turn"},
+							{"type": "text", "text": "While poisoned, target can take an action or a bonus action, not both, and can't take reactions."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Piece of Dretch Brain",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A piece of brain from a {@creature dretch}. When used as a variant spell component for {@spell message}, you can cast through solid objects and magical silence."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 20,
+				"harvestQuantity": 4,
+				"harvestSource": "Dretch",
+				"harvestTime": "30 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "message|phb"},
+						"description": "Cast through any solid object and areas of magical silence.",
+						"effects": [
+							{"type": "text", "text": "Can cast through any solid object regardless of thickness or material, and through areas of magical silence."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Erinyes Longsword Shards",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Longsword shards from an {@creature erinyes}. When used as a variant spell component for {@spell blade barrier}, creatures taking damage take an additional {@damage 3d8} poison damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": 10,
+				"harvestSource": "Erinyes",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "blade barrier|phb"},
+						"description": "Creatures taking damage take additional 3d8 poison damage.",
+						"effects": [
+							{"type": "bonusDamage", "dice": "3d8", "damageType": "poison"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Glabrezu Horn",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A horn from a {@creature glabrezu}. When used as a variant spell component for {@spell darkness} or {@spell detect magic}, don't expend a spell slot. For {@spell confusion}, {@spell dispel magic}, {@spell fly}, or {@spell power word stun}, use a slot one level lower."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": 2,
+				"harvestSource": "Glabrezu",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "darkness|phb"},
+						"description": "Don't expend a spell slot.",
+						"effects": [
+							{"type": "noSlot"}
+						]
+					},
+					{
+						"match": {"spell": "detect magic|phb"},
+						"description": "Don't expend a spell slot.",
+						"effects": [
+							{"type": "noSlot"}
+						]
+					},
+					{
+						"match": {"spell": "confusion|phb"},
+						"description": "Use a spell slot one level lower than required.",
+						"effects": [
+							{"type": "lowerSlot", "reduction": 1}
+						]
+					},
+					{
+						"match": {"spell": "dispel magic|phb"},
+						"description": "Use a spell slot one level lower than required.",
+						"effects": [
+							{"type": "lowerSlot", "reduction": 1}
+						]
+					},
+					{
+						"match": {"spell": "fly|phb"},
+						"description": "Use a spell slot one level lower than required.",
+						"effects": [
+							{"type": "lowerSlot", "reduction": 1}
+						]
+					},
+					{
+						"match": {"spell": "power word stun|phb"},
+						"description": "Use a spell slot one level lower than required.",
+						"effects": [
+							{"type": "lowerSlot", "reduction": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Hezrou Claw",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A claw from a {@creature hezrou}. When used as a variant spell component for {@spell alter self}, give yourself claws that deal {@damage 2d6} slashing damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": 6,
+				"harvestSource": "Hezrou",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "alter self|phb"},
+						"description": "Claws as natural weapon: 2d6 slashing.",
+						"effects": [
+							{"type": "text", "text": "Give yourself claws as a natural weapon. Unarmed strikes deal 2d6 slashing damage."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Hezrou Tooth",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A tooth from a {@creature hezrou}. When used as a variant spell component for {@spell alter self}, give yourself teeth that deal {@damage 2d10} piercing damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 12,
+				"harvestSource": "Hezrou",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "alter self|phb"},
+						"description": "Teeth as natural weapon: 2d10 piercing.",
+						"effects": [
+							{"type": "text", "text": "Give yourself sharp teeth as a natural weapon. Unarmed strikes deal 2d10 piercing damage."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Horned Devil Tail",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A tail from a {@creature horned devil}. When used as a variant spell component for {@spell alter self}, give yourself a tail that deals {@damage 1d8} piercing and inflicts an infernal wound."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 11,
+				"harvestQuantity": 1,
+				"harvestSource": "Horned Devil",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "alter self|phb"},
+						"description": "Tail: 1d8 piercing + infernal wound (3d6 HP/turn, increases 1d6 per hit).",
+						"effects": [
+							{"type": "text", "text": "Give yourself a pointy tail as a natural weapon. Unarmed strikes deal 1d8 piercing. Hit creatures make CON save vs. your spell DC or lose 3d6 HP at start of next turn (infernal wound). Damage increases 1d6 per subsequent hit. Wound closes with magical healing."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Ice Devil Claw",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A claw from an {@creature ice devil}. When used as a variant spell component for {@spell alter self}, give yourself claws that deal {@damage 2d4} slashing + {@damage 3d6} cold damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": 6,
+				"harvestSource": "Ice Devil",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "alter self|phb"},
+						"description": "Claws: 2d4 slashing + 3d6 cold.",
+						"effects": [
+							{"type": "text", "text": "Give yourself claws as a natural weapon. Unarmed strikes deal 2d4 slashing + 3d6 cold damage."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Ice Devil Tailbone",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A tailbone from an {@creature ice devil}. When used as a variant spell component for {@spell ray of frost}, deals additional {@damage 2d8} cold damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 4,
+				"harvestSource": "Ice Devil",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "ray of frost|phb"},
+						"description": "+2d8 cold damage.",
+						"effects": [
+							{"type": "bonusDamage", "dice": "2d8", "damageType": "cold"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Ice Devil Tooth",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A tooth from an {@creature ice devil}. When used as a variant spell component for {@spell alter self}, give yourself teeth that deal {@damage 2d6} piercing + {@damage 3d6} cold damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 6,
+				"harvestSource": "Ice Devil",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "alter self|phb"},
+						"description": "Teeth: 2d6 piercing + 3d6 cold.",
+						"effects": [
+							{"type": "text", "text": "Give yourself sharp teeth as a natural weapon. Unarmed strikes deal 2d6 piercing + 3d6 cold damage."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Piece of Imp Brain",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A piece of brain from an {@creature imp}. Enhances {@spell invisibility} (self, no slot) or {@spell polymorph} (self into rat/raven/spider, no slot)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 20,
+				"harvestQuantity": 4,
+				"harvestSource": "Imp",
+				"harvestTime": "30 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "invisibility|phb"},
+						"description": "Cast on self without expending a spell slot.",
+						"effects": [
+							{"type": "noSlot"},
+							{"type": "text", "text": "Self only."}
+						]
+					},
+					{
+						"match": {"spell": "polymorph|phb"},
+						"description": "Turn into rat, raven, or spider without expending a spell slot.",
+						"effects": [
+							{"type": "noSlot"},
+							{"type": "text", "text": "Self only. Can turn into a rat, raven, or spider."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Marilith Eye",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"An eye from a {@creature marilith}. When used as a variant spell component for {@spell misty step}, you don't need to expend a spell slot."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 17,
+				"harvestQuantity": 2,
+				"harvestSource": "Marilith",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "misty step|phb"},
+						"description": "Don't expend a spell slot.",
+						"effects": [
+							{"type": "noSlot"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Marilith Tail",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A tail from a {@creature marilith}. When used as a variant spell component for {@spell alter self}, give yourself a tail as a natural weapon dealing {@damage 2d10} bludgeoning with grapple."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 11,
+				"harvestQuantity": 1,
+				"harvestSource": "Marilith",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "alter self|phb"},
+						"description": "Tail: 2d10 bludgeoning + grapple (Medium or smaller).",
+						"effects": [
+							{"type": "text", "text": "Give yourself a tail as a natural weapon. Unarmed strikes deal 2d10 bludgeoning. If you hit a Medium or smaller creature, you can wrap your tail around it, grappling it (escape DC = your spell DC). Only grapple one creature at a time."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Nightmare Hoof",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A hoof from a {@creature nightmare}. When used as a variant spell component for {@spell etherealness}, you can target up to three additional willing creatures."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 4,
+				"harvestSource": "Nightmare",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "etherealness|phb"},
+						"description": "Target up to 3 additional willing creatures.",
+						"effects": [
+							{"type": "additionalTargets", "count": 3}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Pit Fiend Tooth",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A tooth from a {@creature pit fiend}. Enhances {@spell detect magic} or {@spell fireball} (3rd level, no slot), or {@spell hold monster}/{@spell wall of fire} (slot one level lower)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 10,
+				"harvestSource": "Pit Fiend",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "detect magic|phb"},
+						"description": "Don't expend a spell slot.",
+						"effects": [
+							{"type": "noSlot"}
+						]
+					},
+					{
+						"match": {"spell": "fireball|phb"},
+						"description": "Don't expend a spell slot (3rd level only).",
+						"effects": [
+							{"type": "noSlot"},
+							{"type": "text", "text": "Only for fireball cast at 3rd level (not higher)."}
+						]
+					},
+					{
+						"match": {"spell": "hold monster|phb"},
+						"description": "Use a spell slot one level lower.",
+						"effects": [
+							{"type": "lowerSlot", "reduction": 1}
+						]
+					},
+					{
+						"match": {"spell": "wall of fire|phb"},
+						"description": "Use a spell slot one level lower.",
+						"effects": [
+							{"type": "lowerSlot", "reduction": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Stone Devil Skin",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"Skin from a stone devil. When used as a variant spell component for {@spell stoneskin}, your AC becomes 20."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Stone Devil",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "stoneskin|phb"},
+						"description": "Your AC becomes 20.",
+						"effects": [
+							{"type": "acOverride", "formula": "20"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Vrock Beak",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A beak from a {@creature vrock}. When used as a variant spell component for {@spell alter self}, give yourself a beak that deals {@damage 2d6} piercing damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 1,
+				"harvestSource": "Vrock",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "alter self|phb"},
+						"description": "Beak: 2d6 piercing.",
+						"effects": [
+							{"type": "text", "text": "Give yourself a beak as a natural weapon. Unarmed strikes deal 2d6 piercing damage."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Vrock Spores",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Spores from a {@creature vrock}. When used as a variant spell component for any spell dealing poison damage, target must save or become {@condition poisoned} for 1 minute, taking {@damage 1d10} poison per turn."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 12,
+				"harvestQuantity": "15 vials",
+				"harvestSource": "Vrock",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"damageType": "poison"},
+						"description": "Target: CON save or poisoned 1 min, 1d10 poison/turn, repeat save at turn end.",
+						"effects": [
+							{"type": "condition", "condition": "poisoned", "duration": "1 minute", "save": {"ability": "constitution", "dc": "spell"}},
+							{"type": "text", "text": "Poisoned creature takes 1d10 poison damage at start of each turn. Can repeat save at end of turn to end condition."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Vrock Talon",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A talon from a {@creature vrock}. When used as a variant spell component for {@spell alter self}, give yourself talons that deal {@damage 2d10} piercing damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": 12,
+				"harvestSource": "Vrock",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "alter self|phb"},
+						"description": "Talons: 2d10 piercing.",
+						"effects": [
+							{"type": "text", "text": "Give yourself talons as a natural weapon. Unarmed strikes deal 2d10 piercing damage."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Vrock Vocal Cord",
+			"source": "Ar8",
+			"page": 23,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A vocal cord from a {@creature vrock}. When used as a variant spell component for {@spell power word stun}, the spell targets all creatures in a 20-foot radius."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 17,
+				"harvestQuantity": 2,
+				"harvestSource": "Vrock",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "power word stun|phb"},
+						"description": "Affects all creatures in 20-foot radius from a point in range.",
+						"effects": [
+							{"type": "areaChange", "description": "20-foot-radius sphere centered on a point within range"}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Storm Giant Lightning Essence",
+			"source": "Ar8",
+			"page": 26,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of lightning essence from a {@creature storm giant}. When used as a variant spell component for {@spell call lightning}, the spell's range increases to 500 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": "4 vials",
+				"harvestSource": "Storm Giant",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "call lightning|phb"},
+						"description": "Range increases to 500 feet.",
+						"effects": [
+							{"type": "rangeChange", "value": 500, "unit": "feet"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Troll Blood",
+			"source": "Ar8",
+			"page": 26,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature troll}. When used as a variant spell component for {@spell heal}, the target regains 20 HP at the start of each turn for a number of rounds equal to the spell slot level. Acid or fire damage stops it. While active, target dies only at 0 HP without regaining."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Troll",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "heal|phb"},
+						"description": "Regeneration: 20 HP/turn for rounds = slot level. Acid/fire stops it.",
+						"effects": [
+							{"type": "text", "text": "Target regains 20 HP at start of each turn for a number of rounds equal to spell slot level. If target takes acid or fire damage, doesn't regain HP next turn. While active, target dies only if starting turn at 0 HP and doesn't regain HP."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Androsphinx Tongue",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A tongue from an {@creature androsphinx}. When used as a variant spell component for {@spell zone of truth}, creatures failing the save must truthfully answer any question you ask."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 1,
+				"harvestSource": "Androsphinx",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "zone of truth|phb"},
+						"description": "Targets failing save must truthfully answer your questions.",
+						"effects": [
+							{"type": "text", "text": "Target failing save must truthfully answer any question you ask for the duration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Ettercap Eye",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"An eye from an {@creature ettercap}. When used as a variant spell component for {@spell darkvision}, the target gains darkvision out to 90 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 17,
+				"harvestQuantity": 2,
+				"harvestSource": "Ettercap",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "darkvision|phb"},
+						"description": "Darkvision range increases to 90 feet.",
+						"effects": [
+							{"type": "rangeChange", "value": 90, "unit": "feet"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Ettercap Foot",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A foot from an {@creature ettercap}. When used as a variant spell component for {@spell spider climb}, you can target one additional creature within range."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 2,
+				"harvestSource": "Ettercap",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "spider climb|phb"},
+						"description": "Target one additional creature within range.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Ettercap Web Sack",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A web sack from an {@creature ettercap}. When used as a variant spell component for {@spell web}, the area of effect is a 40-foot cube."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Ettercap",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "web|phb"},
+						"description": "Area of effect is a 40-foot cube.",
+						"effects": [
+							{"type": "areaChange", "description": "40-foot cube"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Griffon Feather",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A feather from a {@creature griffon}. Enhances {@spell feather fall} (80 ft/round) or {@spell fly} (speed 80 ft)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": 25,
+				"harvestSource": "Griffon",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "feather fall|phb"},
+						"description": "Creatures fall at rate of 80 feet per round.",
+						"effects": [
+							{"type": "speedFallRate", "rate": 80}
+						]
+					},
+					{
+						"match": {"spell": "fly|phb"},
+						"description": "Flying speed increases to 80 feet.",
+						"effects": [
+							{"type": "speedOverride", "speedType": "fly", "value": 80}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Guardian Naga Bone",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A bone from a {@creature guardian naga}. When used (3 bones) as a variant spell component for a resurrection spell, if the target dies within {@dice 1d6} days, they instantly return to life."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 9,
+				"harvestSource": "Guardian Naga",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "revivify|phb"},
+						"description": "Use 3 bones. If target dies within 1d6 days, instantly returns to life.",
+						"effects": [
+							{"type": "text", "text": "Use 3 bones. If target dies again within 1d6 days, target instantly returns to life as if the spell was cast again."}
+						]
+					},
+					{
+						"match": {"spell": "raise dead|phb"},
+						"description": "Use 3 bones. If target dies within 1d6 days, instantly returns to life.",
+						"effects": [
+							{"type": "text", "text": "Use 3 bones. If target dies again within 1d6 days, target instantly returns to life as if the spell was cast again."}
+						]
+					},
+					{
+						"match": {"spell": "reincarnate|phb"},
+						"description": "Use 3 bones. If target dies within 1d6 days, instantly returns to life.",
+						"effects": [
+							{"type": "text", "text": "Use 3 bones. If target dies again within 1d6 days, target instantly returns to life as if the spell was cast again."}
+						]
+					},
+					{
+						"match": {"spell": "resurrection|phb"},
+						"description": "Use 3 bones. If target dies within 1d6 days, instantly returns to life.",
+						"effects": [
+							{"type": "text", "text": "Use 3 bones. If target dies again within 1d6 days, target instantly returns to life as if the spell was cast again."}
+						]
+					},
+					{
+						"match": {"spell": "true resurrection|phb"},
+						"description": "Use 3 bones. If target dies within 1d6 days, instantly returns to life.",
+						"effects": [
+							{"type": "text", "text": "Use 3 bones. If target dies again within 1d6 days, target instantly returns to life as if the spell was cast again."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Guardian Naga Venom",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Venom from a {@creature guardian naga}. When used as a variant spell component for any spell dealing poison damage, roll 5 additional damage dice."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": "4 vials",
+				"harvestSource": "Guardian Naga",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"damageType": "poison"},
+						"description": "Roll 5 additional damage dice.",
+						"effects": [
+							{"type": "bonusDice", "count": 5}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Harpy Vocal Cord",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A vocal cord from a {@creature harpy}. When used as a variant spell component for any charm spell, the target has disadvantage on the saving throw."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 17,
+				"harvestQuantity": 1,
+				"harvestSource": "Harpy",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "psychicDamage"},
+						"description": "Target has disadvantage on save to resist charm effects.",
+						"effects": [
+							{"type": "saveDisadvantage", "ability": "wisdom"},
+							{"type": "text", "text": "Applies to spells that charm or whose saves resist being charmed."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Kraken Blood",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature kraken}. When used as a variant spell component for {@spell lightning bolt}, create two additional lines of lightning."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "25 vials",
+				"harvestSource": "Kraken",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "lightning bolt|phb"},
+						"description": "Create 2 additional lines of lightning.",
+						"effects": [
+							{"type": "text", "text": "Create two additional lines of lightning originating from you."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Kraken Piece of Lung",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A piece of lung from a {@creature kraken}. When used as a variant spell component for {@spell water breathing}, the spell lasts until dispelled."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": "16 (2 per lung)",
+				"harvestSource": "Kraken",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "water breathing|phb"},
+						"description": "Spell lasts until dispelled.",
+						"effects": [
+							{"type": "text", "text": "The spell lasts until dispelled."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Kraken Piece of Tentacle",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A piece of tentacle from a {@creature kraken}. When used as a variant spell component for {@spell Evard's black tentacles}, the tentacles deal {@damage 3d10} bludgeoning damage instead of {@damage 3d6}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": "150 (15 per tentacle)",
+				"harvestSource": "Kraken",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "evard's black tentacles|phb"},
+						"description": "Tentacles deal 3d10 bludgeoning instead of 3d6.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 2, "maxDie": "d10"},
+							{"type": "text", "text": "Tentacles deal 3d10 bludgeoning damage instead of 3d6."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Lamia Skin from Hands",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Skin from a {@creature lamia}'s hands. When used as a variant spell component for {@spell bestow curse}, you can target an additional creature within range."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 2,
+				"harvestSource": "Lamia",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "bestow curse|phb"},
+						"description": "Target one additional creature within range.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Medusa Eye",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"An eye from a {@creature medusa}. When used as a variant spell component for {@spell flesh to stone}, the target has disadvantage on saves and the spell doesn't require concentration."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 17,
+				"harvestQuantity": 2,
+				"harvestSource": "Medusa",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "flesh to stone|phb"},
+						"description": "Disadvantage on saves. No concentration required.",
+						"effects": [
+							{"type": "saveDisadvantage", "ability": "constitution"},
+							{"type": "removeConcentration"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Phase Spider Blood",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature phase spider}. When used as a variant spell component for {@spell blink}, you can reroll the d20 at the end of each turn (must use second result)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "15 vials",
+				"harvestSource": "Phase Spider",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "blink|phb"},
+						"description": "Reroll d20 at end of turn to stay on Material Plane (must use 2nd result).",
+						"effects": [
+							{"type": "text", "text": "Can reroll the d20 at end of each turn to determine if you remain on the Material Plane. Must use the second result."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Phase Spider Hide",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A hide from a {@creature phase spider}. When used as a variant spell component for {@spell etherealness}, you can target one additional creature."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Phase Spider",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "etherealness|phb"},
+						"description": "Target one additional creature within range.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Purple Worm Blood",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature purple worm}. When used as a variant spell component for {@spell enlarge/reduce}, the target becomes Gargantuan with massively increased Strength."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "20 vials",
+				"harvestSource": "Purple Worm",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "enlarge/reduce|phb"},
+						"description": "Target becomes Gargantuan (4\u00d7 dimensions, 24\u00d7 weight, +5 STR, +2d12 weapon damage).",
+						"effects": [
+							{"type": "text", "text": "Target becomes Gargantuan. All dimensions quadrupled, weight \u00d724. Gains +5 to Strength checks and saves. Weapons grow to match size, dealing additional 2d12 damage."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Remorhaz Blood",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a {@creature remorhaz}. When used as a variant spell component for {@spell holy aura}, affected creatures deal extra {@damage 1d6} fire damage on melee hits."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "20 vials",
+				"harvestSource": "Remorhaz",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "holy aura|phb"},
+						"description": "Affected creatures deal extra 1d6 fire damage on melee hits.",
+						"effects": [
+							{"type": "bonusDamage", "dice": "1d6", "damageType": "fire"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Remorhaz Hide",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 10,
+			"entries": [
+				"A hide from a {@creature remorhaz}. When used as a variant spell component for {@spell fire shield}, the spell has effects of both chill shield and warm shield simultaneously."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Remorhaz",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "fire shield|phb"},
+						"description": "Both chill shield and warm shield simultaneously.",
+						"effects": [
+							{"type": "text", "text": "Spell has effects of both chill shield and warm shield simultaneously."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Roc Feather",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A feather from a {@creature roc}. Enhances {@spell feather fall} (120 ft/round) or {@spell fly} (speed 120 ft)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": 15,
+				"harvestSource": "Roc",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "feather fall|phb"},
+						"description": "Creatures fall at rate of 120 feet per round.",
+						"effects": [
+							{"type": "speedFallRate", "rate": 120}
+						]
+					},
+					{
+						"match": {"spell": "fly|phb"},
+						"description": "Flying speed increases to 120 feet.",
+						"effects": [
+							{"type": "speedOverride", "speedType": "fly", "value": 120}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Tarrasque Hide",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 20,
+			"entries": [
+				"A piece of hide from a {@creature tarrasque}. When used as a variant spell component for {@spell mage armor}, AC becomes 19 + DEX and you gain reflective magic (d6: 1-3 normal, 4-5 no effect, 6 reflected)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 15,
+				"harvestSource": "Tarrasque",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mage armor|phb"},
+						"description": "AC 19 + DEX. Magic missile/line/ranged spells: d6 (1-3 normal, 4-5 no effect, 6 reflected).",
+						"effects": [
+							{"type": "acOverride", "formula": "19 + DEX"},
+							{"type": "text", "text": "When targeted by magic missile, a line spell, or a ranged spell attack, roll d6: 1-3 normal effect, 4-5 no effect on you, 6 reflected back at caster."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Shambling Mound Vine",
+			"source": "Ar8",
+			"page": 29,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A vine from a {@creature shambling mound}. When used as a variant spell component for {@spell entangle}, restrained creatures and those moving through the area take bludgeoning damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 11,
+				"harvestQuantity": 20,
+				"harvestSource": "Shambling Mound",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "entangle|phb"},
+						"description": "Restrained: 2d8 bludgeoning. Moving through: 1d8 per 5 ft.",
+						"effects": [
+							{"type": "bonusDamage", "dice": "2d8", "damageType": "bludgeoning"},
+							{"type": "text", "text": "Restrained creature takes 2d8 bludgeoning damage initially and at start of each turn. Moving through area costs 1d8 bludgeoning per 5 feet."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Shrieker Stalk Clipping",
+			"source": "Ar8",
+			"page": 29,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A stalk clipping from a {@creature shrieker}. When used as a variant spell component for {@spell vicious mockery}, the spell's range increases to 300 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 10,
+				"harvestSource": "Shrieker",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "vicious mockery|phb"},
+						"description": "Range increases to 300 feet.",
+						"effects": [
+							{"type": "rangeChange", "value": 300, "unit": "feet"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Treant Bark",
+			"source": "Ar8",
+			"page": 29,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"Bark from a {@creature treant}. When used as a variant spell component for {@spell barkskin}, the target gains resistance to bludgeoning and piercing damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Treant",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "barkskin|phb"},
+						"description": "Gain resistance to bludgeoning and piercing damage.",
+						"effects": [
+							{"type": "resistance", "types": ["bludgeoning", "piercing"]}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Treant Branch",
+			"source": "Ar8",
+			"page": 29,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A branch from a {@creature treant}. When used as a variant spell component for {@spell shillelagh}, the weapon deals {@damage 3d6} bludgeoning instead of {@damage 1d8}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 11,
+				"harvestQuantity": 20,
+				"harvestSource": "Treant",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "shillelagh|phb"},
+						"description": "Weapon deals 3d6 bludgeoning instead of 1d8.",
+						"effects": [
+							{"type": "text", "text": "Weapon deals 3d6 bludgeoning damage on a hit instead of 1d8."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Treant Sap",
+			"source": "Ar8",
+			"page": 29,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Sap from a {@creature treant}. When used as a variant spell component for {@spell commune with nature}, you learn any additional information the treant knows about the area."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "20 vials",
+				"harvestSource": "Treant",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "commune with nature|phb"},
+						"description": "Learn additional information the treant knew about the area.",
+						"effects": [
+							{"type": "text", "text": "Learn any additional information the treant knows about the area (lore about fauna, flora, historical events, personal memories)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Violet Fungus Spore",
+			"source": "Ar8",
+			"page": 29,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"Spores from a {@creature violet fungus}. When used as a variant spell component for {@spell chill touch}, you can target two creatures within 10 feet of each other."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": "15 vials",
+				"harvestSource": "Violet Fungus",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "chill touch|phb"},
+						"description": "Target 2 creatures within 10 feet of each other.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Khorak Crown",
+			"source": "Ar8",
+			"page": 30,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A crown from a khorak. When used as a variant spell component for {@spell feeblemind}, the spell deals {@damage 14d6} psychic damage instead of {@damage 4d6}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestQuantity": 1,
+				"harvestSource": "Khorak",
+				"spellEffects": [
+					{
+						"match": {"spell": "feeblemind|phb"},
+						"description": "14d6 psychic damage instead of 4d6.",
+						"effects": [
+							{"type": "bonusDice", "count": 10}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Maelodor Rhyllearnan Bow Slivers",
+			"source": "Ar8",
+			"page": 30,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Bow slivers from Maelodor Rhyllearnan. When used as a variant spell component for {@spell hunter's mark}, you gain advantage on attack rolls against the target."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 20,
+				"harvestSource": "Maelodor Rhyllearnan",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "hunter's mark|phb"},
+						"description": "Advantage on attack rolls against the marked target.",
+						"effects": [
+							{"type": "text", "text": "You have advantage on attack rolls against the target of your hunter's mark."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Shadow Shadow Essence",
+			"source": "Ar8",
+			"page": 30,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Shadow essence from a {@creature shadow}. When used as a variant spell component for {@spell pass without trace}, creatures gaining the bonus can take the Hide action as a bonus action."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": 1,
+				"harvestSource": "Shadow",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "pass without trace|phb"},
+						"description": "Creatures gaining bonus can Hide as a bonus action.",
+						"effects": [
+							{"type": "text", "text": "Creatures gaining the spell's bonus to Stealth can take the Hide action as a bonus action."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Telcezalco XXVIII Breath Sac",
+			"source": "Ar8",
+			"page": 30,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A breath sac from Telcezalco XXVIII. When used as a variant spell component for {@spell harm}, the spell becomes a 30-foot cone from you dealing {@damage 16d6} necrotic damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Telcezalco XXVIII",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "harm|phb"},
+						"description": "Range Self, 30-ft cone, 16d6 necrotic (save half).",
+						"effects": [
+							{"type": "areaChange", "description": "Self, 30-foot cone"},
+							{"type": "text", "text": "Spell has range of Self and affects each creature within a 30-foot cone from you. Target takes 16d6 necrotic damage on a failed save, or half on a success."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Vampire Piece of Brain",
+			"source": "Ar8",
+			"page": 30,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A piece of brain from a {@creature vampire}. When used as a variant spell component for {@spell conjure animals}, you can summon {@dice 4d4} swarms of bats or rats, or {@dice 4d6} wolves."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 20,
+				"harvestQuantity": 4,
+				"harvestSource": "Vampire",
+				"harvestTime": "30 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "conjure animals|phb"},
+						"description": "Summon 4d4 bat/rat swarms or 4d6 wolves.",
+						"effects": [
+							{"type": "text", "text": "Can summon 4d4 swarms of bats or rats, or 4d6 wolves."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Will-o'-Wisp Wisp",
+			"source": "Ar8",
+			"page": 30,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.1,
+			"entries": [
+				"A wisp from a {@creature will-o'-wisp}. When used as a variant spell component for {@spell feather fall}, creatures fall at a rate of 10 feet per round."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 13,
+				"harvestQuantity": 3,
+				"harvestSource": "Will-o'-Wisp",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "feather fall|phb"},
+						"description": "Creatures fall at rate of 10 feet per round.",
+						"effects": [
+							{"type": "speedFallRate", "rate": 10}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Wraith Ichor",
+			"source": "Ar8",
+			"page": 30,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"Ichor from a {@creature wraith}. When used as a variant spell component for {@spell harm}, the spell deals {@damage 14d8} necrotic damage on a failed save (half on success)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Wraith",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "harm|phb"},
+						"description": "14d8 necrotic damage (save half).",
+						"effects": [
+							{"type": "text", "text": "Spell deals 14d8 necrotic damage on a failed save, or half on a success."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Hydra Hide",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 10,
+			"entries": [
+				"A hide from a {@creature hydra}. When used as a variant spell component for {@spell regenerate} (self only), you grow one additional body part for the duration: an arm (two-weapon fighting), a head (cast additional 2nd-level spell), or a leg (+10 ft speed, advantage vs. prone)."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Hydra",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "regenerate|phb"},
+						"description": "Self only. Grow extra body part: arm, head, or leg with unique benefits.",
+						"effects": [
+							{"type": "text", "text": "Self only. Choose one additional body part to grow: Arm (carry light melee weapon/shield, use two-weapon fighting, with 3 light weapons make 2 bonus attacks), Head (when casting spell as action, also cast one 2nd-level-or-lower spell with no concentration as part of same action), or Leg (+10 ft walking speed, advantage on saves vs. falling prone)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Manticore Hide",
+			"source": "Ar8",
+			"page": 27,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A hide from a {@creature manticore}. When used as a variant spell component for {@spell alter self}, you grow 24 throwable spikes dealing {@damage 1d8} + spellcasting mod piercing damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Manticore",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "alter self|phb"},
+						"description": "Grow 24 spikes. Throw as ranged weapon (100/200 ft), 1d8 + spellcasting mod piercing.",
+						"effects": [
+							{"type": "text", "text": "Grow 24 tail spikes. Can break off and throw as ranged weapon (thrown, 100/200 ft range), dealing 1d8 + spellcasting ability modifier piercing damage on hit."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Dragon Hide (CR 1-5)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A hide from a dragon of {@dc CR 1-5} (typically a wyrmling). When used as a variant spell component for {@spell mage armor}, target's base AC becomes 14 + Dexterity modifier."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (CR 1-5)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mage armor|phb"},
+						"description": "Base AC becomes 14 + DEX.",
+						"effects": [
+							{"type": "acOverride", "formula": "14 + DEX"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Hide (CR 6-9)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 8,
+			"entries": [
+				"A hide from a dragon of CR 6-9 (typically young). When used as a variant spell component for {@spell mage armor}, target's base AC becomes 15 + Dexterity modifier."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (CR 6-9)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mage armor|phb"},
+						"description": "Base AC becomes 15 + DEX.",
+						"effects": [
+							{"type": "acOverride", "formula": "15 + DEX"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Hide (CR 10-14)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 10,
+			"entries": [
+				"A hide from a dragon of CR 10-14 (typically adult). When used as a variant spell component for {@spell mage armor}, target's base AC becomes 16 + Dexterity modifier. If from an adult dragon, gain resistance to the dragon's breath damage type."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (CR 10-14)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mage armor|phb"},
+						"description": "Base AC 16 + DEX. Resistance to dragon's breath damage type.",
+						"effects": [
+							{"type": "acOverride", "formula": "16 + DEX"},
+							{"type": "text", "text": "If from an adult dragon, target also gains resistance to the dragon's breath weapon damage type for the duration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Hide (CR 15-20)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 15,
+			"entries": [
+				"A hide from a dragon of CR 15-20. When used as a variant spell component for {@spell mage armor}, target's base AC becomes 17 + Dexterity modifier. If from an adult dragon, gain resistance to the dragon's breath damage type."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (CR 15-20)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mage armor|phb"},
+						"description": "Base AC 17 + DEX. Resistance to dragon's breath damage type.",
+						"effects": [
+							{"type": "acOverride", "formula": "17 + DEX"},
+							{"type": "text", "text": "If from an adult or ancient dragon, target gains resistance (adult) or immunity (ancient) to the dragon's breath weapon damage type for the duration."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Hide (CR 21-24)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 15,
+			"entries": [
+				"A hide from a dragon of CR 21-24 (typically ancient). When used as a variant spell component for {@spell mage armor}, target's base AC becomes 18 + Dexterity modifier. Gain immunity to the dragon's breath damage type."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (CR 21-24)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mage armor|phb"},
+						"description": "Base AC 18 + DEX. Immunity to dragon's breath damage type.",
+						"effects": [
+							{"type": "acOverride", "formula": "18 + DEX"},
+							{"type": "immunity", "types": ["(dragon's breath damage type)"]}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Hide (CR 25-29)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 20,
+			"entries": [
+				"A hide from a dragon of CR 25-29. When used as a variant spell component for {@spell mage armor}, target's base AC becomes 19 + Dexterity modifier. Gain immunity to the dragon's breath damage type."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (CR 25-29)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mage armor|phb"},
+						"description": "Base AC 19 + DEX. Immunity to dragon's breath damage type.",
+						"effects": [
+							{"type": "acOverride", "formula": "19 + DEX"},
+							{"type": "immunity", "types": ["(dragon's breath damage type)"]}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Hide (CR 30+)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 25,
+			"entries": [
+				"A hide from a dragon of CR 30+. When used as a variant spell component for {@spell mage armor}, target's base AC becomes 20 + Dexterity modifier. Gain immunity to the dragon's breath damage type."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 16,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (CR 30+)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "mage armor|phb"},
+						"description": "Base AC 20 + DEX. Immunity to dragon's breath damage type.",
+						"effects": [
+							{"type": "acOverride", "formula": "20 + DEX"},
+							{"type": "immunity", "types": ["(dragon's breath damage type)"]}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Dragon Blood (Wyrmling)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a wyrmling dragon. When used as a variant spell component for a spell dealing the dragon's breath damage type (acid, cold, fire, lightning, or poison), the damage die increases by one step (max {@dice d12}). No additional dice."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "5 vials",
+				"harvestSource": "Dragon (Wyrmling)",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "dragonBreathMatch"},
+						"description": "Damage die +1 step (max d12). No extra dice.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 1, "maxDie": "d12"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Blood (Young)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from a young dragon. When used as a variant spell component for a spell dealing the dragon's breath damage type, the damage die increases by one step (max {@dice d12}) and you deal one extra die of damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Dragon (Young)",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "dragonBreathMatch"},
+						"description": "Damage die +1 step (max d12), +1 extra damage die.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 1, "maxDie": "d12"},
+							{"type": "bonusDice", "count": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Blood (Adult)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from an adult dragon. When used as a variant spell component for a spell dealing the dragon's breath damage type, the damage die increases by one step (max {@dice d12}) and you deal two extra dice of damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "15 vials",
+				"harvestSource": "Dragon (Adult)",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "dragonBreathMatch"},
+						"description": "Damage die +1 step (max d12), +2 extra damage dice.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 1, "maxDie": "d12"},
+							{"type": "bonusDice", "count": 2}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Blood (Ancient)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of blood from an ancient dragon. When used as a variant spell component for a spell dealing the dragon's breath damage type, the damage die increases by one step (max {@dice d12}) and you deal three extra dice of damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "20 vials",
+				"harvestSource": "Dragon (Ancient)",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "dragonBreathMatch"},
+						"description": "Damage die +1 step (max d12), +3 extra damage dice.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 1, "maxDie": "d12"},
+							{"type": "bonusDice", "count": 3}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Dragon Bone",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"Bones from a wyrmling dragon. When used (3 bones) with a vial of wyrmling blood as a variant spell component for {@spell animate dead}, creates a skeletal wyrmling instead of a normal skeleton or zombie."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 14,
+				"harvestQuantity": 9,
+				"harvestSource": "Dragon (Wyrmling)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "animate dead|phb"},
+						"description": "Use 3 bones + 1 vial wyrmling blood. Create skeletal wyrmling.",
+						"effects": [
+							{"type": "text", "text": "Use 3 wyrmling bones and 1 vial of wyrmling blood. Creates a skeletal wyrmling (special stat block) instead of a normal skeleton or zombie."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Dragon Breath Gland (Wyrmling)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A breath weapon gland from a wyrmling dragon. When used as a variant spell component for a breath-like spell, the damage die becomes {@dice d8}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (Wyrmling)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "dragonBreathMatch"},
+						"description": "Damage die becomes d8.",
+						"effects": [
+							{"type": "text", "text": "Damage die becomes d8 (minimum). Matches dragon's breath weapon damage type."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Breath Gland (Young)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A breath weapon gland from a young dragon. When used as a variant spell component for a breath-like spell, the damage die becomes {@dice d10}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (Young)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "dragonBreathMatch"},
+						"description": "Damage die becomes d10.",
+						"effects": [
+							{"type": "text", "text": "Damage die becomes d10 (minimum). Matches dragon's breath weapon damage type."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Breath Gland (Adult)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A breath weapon gland from an adult dragon. When used as a variant spell component for a breath-like spell, the damage die becomes {@dice d12}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (Adult)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "dragonBreathMatch"},
+						"description": "Damage die becomes d12.",
+						"effects": [
+							{"type": "text", "text": "Damage die becomes d12. Matches dragon's breath weapon damage type."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Breath Gland (Ancient)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A breath weapon gland from an ancient dragon. When used as a variant spell component for a breath-like spell, the damage die becomes {@dice d12} and you deal one additional die per spell slot level used."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (Ancient)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spellTag": "dragonBreathMatch"},
+						"description": "Damage die becomes d12, +1 die per slot level.",
+						"effects": [
+							{"type": "text", "text": "Damage die becomes d12 and you deal one additional die of damage per spell slot level used. Matches dragon's breath weapon damage type."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Gemstone Dragon Brain (Wyrmling)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A piece of brain from a gemstone dragon wyrmling. When used as a variant spell component for {@spell magic missile}, each dart deals {@dice d6} force damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 20,
+				"harvestQuantity": 4,
+				"harvestSource": "Gemstone Dragon (Wyrmling)",
+				"harvestTime": "30 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "magic missile|phb"},
+						"description": "Each dart deals d6 force damage.",
+						"effects": [
+							{"type": "text", "text": "Each dart deals d6 force damage (instead of d4+1)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Gemstone Dragon Brain (Young)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A piece of brain from a young gemstone dragon. When used as a variant spell component for {@spell magic missile}, each dart deals {@dice d8} force damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 20,
+				"harvestQuantity": 4,
+				"harvestSource": "Gemstone Dragon (Young)",
+				"harvestTime": "30 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "magic missile|phb"},
+						"description": "Each dart deals d8 force damage.",
+						"effects": [
+							{"type": "text", "text": "Each dart deals d8 force damage (instead of d4+1)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Gemstone Dragon Brain (Adult)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A piece of brain from an adult gemstone dragon. When used as a variant spell component for {@spell eldritch blast}, deal one additional die of damage on hit. For {@spell magic missile}, each dart deals {@dice d10} force damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 20,
+				"harvestQuantity": 4,
+				"harvestSource": "Gemstone Dragon (Adult)",
+				"harvestTime": "30 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "eldritch blast|phb"},
+						"description": "+1 additional damage die on hit.",
+						"effects": [
+							{"type": "bonusDice", "count": 1}
+						]
+					},
+					{
+						"match": {"spell": "magic missile|phb"},
+						"description": "Each dart deals d10 force damage.",
+						"effects": [
+							{"type": "text", "text": "Each dart deals d10 force damage (instead of d4+1)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Gemstone Dragon Brain (Ancient)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A piece of brain from an ancient gemstone dragon. When used as a variant spell component for {@spell eldritch blast}, deal two additional dice of damage on hit. For {@spell magic missile}, each dart deals {@dice d12} force damage."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 20,
+				"harvestQuantity": 4,
+				"harvestSource": "Gemstone Dragon (Ancient)",
+				"harvestTime": "30 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "eldritch blast|phb"},
+						"description": "+2 additional damage dice on hit.",
+						"effects": [
+							{"type": "bonusDice", "count": 2}
+						]
+					},
+					{
+						"match": {"spell": "magic missile|phb"},
+						"description": "Each dart deals d12 force damage.",
+						"effects": [
+							{"type": "text", "text": "Each dart deals d12 force damage (instead of d4+1)."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Dragon Heart (Young)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A heart from a young dragon. When used as a variant spell component for {@spell fear}, the spell's area becomes a 60-foot cone and the save DC increases by 1."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (Young)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "fear|phb"},
+						"description": "60-ft cone, DC +1.",
+						"effects": [
+							{"type": "areaChange", "description": "60-foot cone"},
+							{"type": "saveDcMod", "mod": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Heart (Adult)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A heart from an adult dragon. When used as a variant spell component for {@spell fear}, the spell's area becomes a 90-foot cone and the save DC increases by 2."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (Adult)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "fear|phb"},
+						"description": "90-ft cone, DC +2.",
+						"effects": [
+							{"type": "areaChange", "description": "90-foot cone"},
+							{"type": "saveDcMod", "mod": 2}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Dragon Heart (Ancient)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 8,
+			"entries": [
+				"A heart from an ancient dragon. When used as a variant spell component for {@spell fear}, the spell's area becomes a 120-foot cone, the save DC increases by 3, and creatures have disadvantage on the Wisdom save."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Dragon (Ancient)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "fear|phb"},
+						"description": "120-ft cone, DC +3, disadvantage on saves.",
+						"effects": [
+							{"type": "areaChange", "description": "120-foot cone"},
+							{"type": "saveDcMod", "mod": 3},
+							{"type": "saveDisadvantage", "ability": "wisdom"}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Dragon Blood (Protection)",
+			"source": "Ar8",
+			"page": 20,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 0.5,
+			"entries": [
+				"A vial of dragon blood matching a specific damage type. When used as a variant spell component for {@spell protection from energy}, if blood matches chosen damage type, target halves all damage of that type. If from ancient dragon, target is immune."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 10,
+				"harvestQuantity": "10 vials",
+				"harvestSource": "Dragon (any)",
+				"harvestTime": "5 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "protection from energy|phb"},
+						"description": "If blood matches damage type: halve all damage. Ancient: immunity.",
+						"effects": [
+							{"type": "text", "text": "If blood matches chosen damage type, target halves all damage of that type (in addition to the spell's resistance). If from an ancient dragon, target is immune to chosen damage type for the duration."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Brass Dragon Sleep Gland (Wyrmling)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A sleep gland from a brass dragon wyrmling. When used as a variant spell component for {@spell sleep}, roll an additional {@dice 1d8}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Brass Dragon (Wyrmling)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "sleep|phb"},
+						"description": "Roll additional 1d8.",
+						"effects": [
+							{"type": "bonusDice", "count": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Brass Dragon Sleep Gland (Young)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A sleep gland from a young brass dragon. When used as a variant spell component for {@spell sleep}, roll an additional {@dice 2d8}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Brass Dragon (Young)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "sleep|phb"},
+						"description": "Roll additional 2d8.",
+						"effects": [
+							{"type": "bonusDice", "count": 2}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Brass Dragon Sleep Gland (Adult)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A sleep gland from an adult brass dragon. When used as a variant spell component for {@spell sleep}, use d10s instead of d8s and roll an additional {@dice 3d10}."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Brass Dragon (Adult)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "sleep|phb"},
+						"description": "Use d10s instead of d8s, +3d10.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 1, "maxDie": "d10"},
+							{"type": "bonusDice", "count": 3}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Brass Dragon Sleep Gland (Ancient)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A sleep gland from an ancient brass dragon. When used as a variant spell component for {@spell sleep}, use d10s instead of d8s, roll an additional {@dice 4d10}, and gain {@dice 3d10} per slot level above 1st."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Brass Dragon (Ancient)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "sleep|phb"},
+						"description": "d10s instead of d8s, +4d10, +3d10 per upcast level.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 1, "maxDie": "d10"},
+							{"type": "bonusDice", "count": 4},
+							{"type": "text", "text": "Also roll 3d10 additional HP per slot level above 1st."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Bronze Dragon Repulsion Gland (Wyrmling)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A repulsion gland from a bronze dragon wyrmling. When used as a variant spell component for {@spell thunderwave}, failed save pushes target 30 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Bronze Dragon (Wyrmling)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "thunderwave|phb"},
+						"description": "Push 30 feet on failed save.",
+						"effects": [
+							{"type": "text", "text": "On a failed save, creature is pushed 30 feet away (instead of 10 feet)."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Bronze Dragon Repulsion Gland (Young)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A repulsion gland from a young bronze dragon. When used as a variant spell component for {@spell thunderwave}, failed save pushes target 40 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Bronze Dragon (Young)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "thunderwave|phb"},
+						"description": "Push 40 feet on failed save.",
+						"effects": [
+							{"type": "text", "text": "On a failed save, creature is pushed 40 feet away."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Bronze Dragon Repulsion Gland (Adult)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A repulsion gland from an adult bronze dragon. When used as a variant spell component for {@spell thunderwave}, damage dice become d10s and failed save pushes target 50 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Bronze Dragon (Adult)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "thunderwave|phb"},
+						"description": "Damage dice d10s. Push 50 feet on failed save.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 2, "maxDie": "d10"},
+							{"type": "text", "text": "On a failed save, creature is pushed 50 feet away."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Bronze Dragon Repulsion Gland (Ancient)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A repulsion gland from an ancient bronze dragon. When used as a variant spell component for {@spell thunderwave}, damage dice become d12s and failed save pushes target 60 feet."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Bronze Dragon (Ancient)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "thunderwave|phb"},
+						"description": "Damage dice d12s. Push 60 feet on failed save.",
+						"effects": [
+							{"type": "dieSizeIncrease", "steps": 4, "maxDie": "d12"},
+							{"type": "text", "text": "On a failed save, creature is pushed 60 feet away."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Copper Dragon Slow Gland (Wyrmling)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A slow gland from a copper dragon wyrmling. When used as a variant spell component for {@spell slow}, the spell's area becomes a 50-foot cube."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Copper Dragon (Wyrmling)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "slow|phb"},
+						"description": "Area becomes 50-foot cube.",
+						"effects": [
+							{"type": "areaChange", "description": "50-foot cube"}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Copper Dragon Slow Gland (Young)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A slow gland from a young copper dragon. When used as a variant spell component for {@spell slow}, the spell's area becomes a 60-foot cube and you can target 2 additional creatures."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Copper Dragon (Young)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "slow|phb"},
+						"description": "60-ft cube, +2 targets.",
+						"effects": [
+							{"type": "areaChange", "description": "60-foot cube"},
+							{"type": "additionalTargets", "count": 2}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Copper Dragon Slow Gland (Adult)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A slow gland from an adult copper dragon. When used as a variant spell component for {@spell slow}, the spell's area becomes a 70-foot cube, +2 targets, and targets can't take bonus actions."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Copper Dragon (Adult)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "slow|phb"},
+						"description": "70-ft cube, +2 targets, no bonus actions.",
+						"effects": [
+							{"type": "areaChange", "description": "70-foot cube"},
+							{"type": "additionalTargets", "count": 2},
+							{"type": "text", "text": "Affected creatures also can't take bonus actions."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Copper Dragon Slow Gland (Ancient)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A slow gland from an ancient copper dragon. When used as a variant spell component for {@spell slow}, the spell's area becomes a 70-foot cube, +2 targets, no bonus actions, and -3 to AC and Dex saves."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Copper Dragon (Ancient)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "slow|phb"},
+						"description": "70-ft cube, +2 targets, no bonus actions, -3 AC/-3 DEX saves.",
+						"effects": [
+							{"type": "areaChange", "description": "70-foot cube"},
+							{"type": "additionalTargets", "count": 2},
+							{"type": "text", "text": "Affected creatures can't take bonus actions and take a -3 penalty to AC and Dexterity saving throws."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Gold Dragon Weakening Gland (Wyrmling)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A weakening gland from a gold dragon wyrmling. When used as a variant spell component for {@spell bane}, affected targets also have disadvantage on Strength checks."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Gold Dragon (Wyrmling)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "bane|phb"},
+						"description": "Disadvantage on STR checks.",
+						"effects": [
+							{"type": "text", "text": "Affected targets also have disadvantage on Strength checks."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Gold Dragon Weakening Gland (Young)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A weakening gland from a young gold dragon. When used as a variant spell component for {@spell bane}, affected targets have disadvantage on Strength checks and saves."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Gold Dragon (Young)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "bane|phb"},
+						"description": "Disadvantage on STR checks and saves.",
+						"effects": [
+							{"type": "text", "text": "Affected targets have disadvantage on Strength checks and Strength saving throws."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Gold Dragon Weakening Gland (Adult)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A weakening gland from an adult gold dragon. When used as a variant spell component for {@spell bane}, affected targets have disadvantage on Strength checks, saves, and Strength-based attacks."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Gold Dragon (Adult)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "bane|phb"},
+						"description": "Disadvantage on STR checks, saves, and STR-based attacks.",
+						"effects": [
+							{"type": "text", "text": "Affected targets have disadvantage on Strength checks, Strength saving throws, and Strength-based attack rolls."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Gold Dragon Weakening Gland (Ancient)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A weakening gland from an ancient gold dragon. When used as a variant spell component for {@spell bane}, affected targets have disadvantage on STR checks/saves/attacks, and Strength score reduced by 2."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Gold Dragon (Ancient)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "bane|phb"},
+						"description": "Disadvantage on all STR, STR reduced by 2.",
+						"effects": [
+							{"type": "text", "text": "Affected targets have disadvantage on Strength checks, Strength saving throws, and attack rolls. Strength score is also reduced by 2."}
+						]
+					}
+				]
+			}
+		},
+
+		{
+			"name": "Silver Dragon Paralyzing Gland (Wyrmling)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 1,
+			"entries": [
+				"A paralyzing gland from a silver dragon wyrmling. When used as a variant spell component for {@spell hold person} or {@spell hold monster}, target 1 additional creature."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Silver Dragon (Wyrmling)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "hold person|phb"},
+						"description": "+1 target.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					},
+					{
+						"match": {"spell": "hold monster|phb"},
+						"description": "+1 target.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Silver Dragon Paralyzing Gland (Young)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 2,
+			"entries": [
+				"A paralyzing gland from a young silver dragon. When used as a variant spell component for {@spell hold person} or {@spell hold monster}, +1 target and max duration increases by 1 minute."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Silver Dragon (Young)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "hold person|phb"},
+						"description": "+1 target, +1 min duration.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1},
+							{"type": "text", "text": "Maximum duration increases by 1 minute."}
+						]
+					},
+					{
+						"match": {"spell": "hold monster|phb"},
+						"description": "+1 target, +1 min duration.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1},
+							{"type": "text", "text": "Maximum duration increases by 1 minute."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Silver Dragon Paralyzing Gland (Adult)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 3,
+			"entries": [
+				"A paralyzing gland from an adult silver dragon. When used as a variant spell component for {@spell hold person}/{@spell hold monster}, +1 target, +1 min duration, disadvantage on WIS saves."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Silver Dragon (Adult)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "hold person|phb"},
+						"description": "+1 target, +1 min duration, disadvantage on WIS saves.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1},
+							{"type": "saveDisadvantage", "ability": "wisdom"},
+							{"type": "text", "text": "Maximum duration increases by 1 minute."}
+						]
+					},
+					{
+						"match": {"spell": "hold monster|phb"},
+						"description": "+1 target, +1 min duration, disadvantage on WIS saves.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1},
+							{"type": "saveDisadvantage", "ability": "wisdom"},
+							{"type": "text", "text": "Maximum duration increases by 1 minute."}
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "Silver Dragon Paralyzing Gland (Ancient)",
+			"source": "Ar8",
+			"page": 21,
+			"type": "G",
+			"rarity": "unknown",
+			"weight": 5,
+			"entries": [
+				"A paralyzing gland from an ancient silver dragon. When used as a variant spell component for {@spell hold person}/{@spell hold monster}, +1 target, +1 min duration, +30 ft range, disadvantage on WIS saves."
+			],
+			"miscTags": ["CNS"],
+			"variantComponent": {
+				"harvestDC": 15,
+				"harvestQuantity": 1,
+				"harvestSource": "Silver Dragon (Ancient)",
+				"harvestTime": "15 minutes",
+				"spellEffects": [
+					{
+						"match": {"spell": "hold person|phb"},
+						"description": "+1 target, +1 min duration, +30 ft range, disadvantage on WIS saves.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1},
+							{"type": "saveDisadvantage", "ability": "wisdom"},
+							{"type": "rangeChange", "value": 30, "unit": "feet"},
+							{"type": "text", "text": "Maximum duration increases by 1 minute. Range increases by 30 feet."}
+						]
+					},
+					{
+						"match": {"spell": "hold monster|phb"},
+						"description": "+1 target, +1 min duration, +30 ft range, disadvantage on WIS saves.",
+						"effects": [
+							{"type": "additionalTargets", "count": 1},
+							{"type": "saveDisadvantage", "ability": "wisdom"},
+							{"type": "rangeChange", "value": 30, "unit": "feet"},
+							{"type": "text", "text": "Maximum duration increases by 1 minute. Range increases by 30 feet."}
+						]
+					}
+				]
+			}
+		}
+	]
+}

@@ -1874,16 +1874,29 @@ class CharacterSheetSpells {
 			}
 			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
+			// Variant spell component selection (cantrips)
+			const variantComponentChoice = await this._pChooseVariantComponent({spell, spellData});
+			if (variantComponentChoice?.cancelled) return;
+			if (variantComponentChoice?.variantComponent) {
+				for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
+					this._state.consumeVariantComponent(id);
+				}
+			}
+
 			const castMeta = this._getNormalizedCastMeta({
 				spell,
 				spellData,
 				slotLevel: 0,
-				castMeta: activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : null,
+				castMeta: {
+					...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
+					...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
+				},
 			});
 
 			await this._showCastResult(spell, 0, false, false, castMeta);
 			// Set concentration for concentration cantrips (rare but possible)
-			if (requiresConcentration) {
+			const vcRemovesConc0 = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
+			if (requiresConcentration && !vcRemovesConc0) {
 				this._state.setConcentration?.({name: spell.name, level: 0, appliedMetamagic: castMeta?.appliedMetamagic || null});
 				this._updateConcentrationUI();
 			}
@@ -1929,16 +1942,29 @@ class CharacterSheetSpells {
 				}
 				if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
+				// Variant spell component selection (ritual)
+				const variantComponentChoice = await this._pChooseVariantComponent({spell, spellData});
+				if (variantComponentChoice?.cancelled) return;
+				if (variantComponentChoice?.variantComponent) {
+					for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
+						this._state.consumeVariantComponent(id);
+					}
+				}
+
 				const castMeta = this._getNormalizedCastMeta({
 					spell,
 					spellData,
 					slotLevel: spell.level,
-					castMeta: activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : null,
+					castMeta: {
+						...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
+						...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
+					},
 				});
 
 				// Ritual cast: no slot consumed
 				await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
-				if (requiresConcentration) {
+				const vcRemovesConcR = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
+				if (requiresConcentration && !vcRemovesConcR) {
 					this._state.setConcentration?.({name: spell.name, level: spell.level, appliedMetamagic: castMeta?.appliedMetamagic || null});
 					this._updateConcentrationUI();
 				}
@@ -2001,19 +2027,49 @@ class CharacterSheetSpells {
 		}
 		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
+		// Variant spell component selection
+		const variantComponentChoice = await this._pChooseVariantComponent({spell, spellData});
+		if (variantComponentChoice?.cancelled) return;
+
 		const castMeta = this._getNormalizedCastMeta({
 			spell,
 			spellData,
 			slotLevel: selectedSlot.level,
-			castMeta: activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : null,
+			castMeta: {
+				...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
+				...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
+			},
 		});
 
+		// Handle variant component slot modifications (noSlot / lowerSlot)
+		let skipSlotConsumption = false;
+		if (variantComponentChoice?.variantComponent) {
+			const vcEffects = variantComponentChoice.variantComponent.effects;
+			if (vcEffects.some(e => e.type === "noSlot")) {
+				skipSlotConsumption = true;
+			} else {
+				const lowerSlotEffect = vcEffects.find(e => e.type === "lowerSlot");
+				if (lowerSlotEffect) {
+					const reducedLevel = Math.max(1, selectedSlot.level - (lowerSlotEffect.reduction || 1));
+					if (reducedLevel < selectedSlot.level) {
+						selectedSlot = {...selectedSlot, level: reducedLevel};
+					}
+				}
+			}
+			// Consume the component(s)
+			for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
+				this._state.consumeVariantComponent(id);
+			}
+		}
+
 		// Consume the selected slot
-		if (selectedSlot.isPact) {
-			this._state.setPactSlotsCurrent(pactSlots.current - 1);
-		} else {
-			const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
-			this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current - 1);
+		if (!skipSlotConsumption) {
+			if (selectedSlot.isPact) {
+				this._state.setPactSlotsCurrent(pactSlots.current - 1);
+			} else {
+				const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
+				this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current - 1);
+			}
 		}
 
 		const castResult = await this._showCastResult(
@@ -2026,17 +2082,20 @@ class CharacterSheetSpells {
 
 		// If user cancelled (e.g. target selection), refund the slot
 		if (castResult?.cancelled) {
-			if (selectedSlot.isPact) {
-				this._state.setPactSlotsCurrent(pactSlots.current);
-			} else {
-				const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
-				this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current + 1);
+			if (!skipSlotConsumption) {
+				if (selectedSlot.isPact) {
+					this._state.setPactSlotsCurrent(pactSlots.current);
+				} else {
+					const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
+					this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current + 1);
+				}
 			}
 			return;
 		}
 
 		// Set concentration if spell requires it
-		if (requiresConcentration) {
+		const vcRemovesConcN = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
+		if (requiresConcentration && !vcRemovesConcN) {
 			this._state.setConcentration?.({name: spell.name, level: selectedSlot.level, appliedMetamagic: castMeta?.appliedMetamagic || null});
 			this._updateConcentrationUI();
 		}
@@ -2198,6 +2257,272 @@ class CharacterSheetSpells {
 		const metamagic = availableOptions.find(it => `${it.name} (${it.cost} SP)` === choice) || null;
 		return {cancelled: false, metamagic};
 	}
+
+	// region Variant Spell Components
+
+	/**
+	 * Offer the player a choice of variant spell components from their inventory that match the spell being cast.
+	 * Supports selecting multiple components — effects are merged into one object.
+	 * If multiple components are selected, `variantComponent.componentCount` > 1 triggers Wild Magic surge.
+	 * @param {object} opts
+	 * @param {object} opts.spell - {name, source, level} from the character's spell list
+	 * @param {object} [opts.spellData] - Full spell data from the database
+	 * @returns {Promise<{cancelled: boolean, variantComponent: object|null}>}
+	 *   variantComponent: {itemIds, itemName, effects, componentCount} or null
+	 */
+	async _pChooseVariantComponent ({spell, spellData = null}) {
+		const matches = this._state.getMatchingVariantComponents(spell, spellData);
+		if (!matches.length) return {cancelled: false, variantComponent: null};
+
+		const selected = [];
+		let remaining = [...matches];
+
+		// Loop: pick one component at a time, offer to add more if available
+		while (remaining.length > 0) {
+			const labels = [`${selected.length ? "Done — no more components" : "None — cast normally"}`];
+			const matchMap = [];
+			for (const {invItem, spellEffect} of remaining) {
+				const qty = invItem.quantity || 1;
+				const effectSummary = (spellEffect.effects || [])
+					.map(eff => this._getVariantEffectLabel(eff))
+					.filter(Boolean)
+					.join(", ");
+				const desc = spellEffect.description || effectSummary || "Enhanced casting";
+				labels.push(`🧪 ${invItem.item.name} (×${qty}) — ${desc}`);
+				matchMap.push({invItem, spellEffect});
+			}
+
+			const selectedNames = selected.map(s => s.itemName).join(", ");
+			const alreadySelected = selected.length
+				? `<br><span class="text-success">Selected: ${selectedNames}</span>`
+				: "";
+			const wildMagicWarning = selected.length >= 1
+				? `<br><span class="text-warning">⚠ Adding another component risks a Wild Magic surge!</span>`
+				: remaining.length > 1
+					? `<br><span class="text-muted">Multiple components available — using 2+ on one spell risks a Wild Magic surge.</span>`
+					: "";
+
+			const choice = await InputUiUtil.pGetUserEnum({
+				title: `${spell.name} — Variant Component${selected.length ? ` (${selected.length} selected)` : ""}`,
+				htmlDescription: `<div>You have variant spell components that can enhance this spell. Using a component consumes it.${alreadySelected}${wildMagicWarning}</div>`,
+				values: labels,
+				fnDisplay: v => v,
+				isResolveItem: true,
+			});
+
+			if (choice == null) return {cancelled: true, variantComponent: null};
+			if (choice === labels[0]) break; // "None" or "Done"
+
+			const idx = labels.indexOf(choice) - 1;
+			if (idx < 0 || idx >= matchMap.length) break;
+
+			const pick = matchMap[idx];
+			selected.push({
+				itemId: pick.invItem.id,
+				itemName: pick.invItem.item.name,
+				effects: pick.spellEffect.effects || [],
+			});
+
+			// Remove from remaining so the same component can't be picked twice
+			remaining = remaining.filter((_, i) => i !== idx);
+
+			// If only one was selected and there are more available, loop continues
+			// If no more remain, break automatically
+			if (!remaining.length) break;
+		}
+
+		if (!selected.length) return {cancelled: false, variantComponent: null};
+
+		// Merge all selected components into one variantComponent object
+		const mergedEffects = selected.flatMap(s => s.effects);
+		const mergedNames = selected.map(s => s.itemName).join(" + ");
+		return {
+			cancelled: false,
+			variantComponent: {
+				itemIds: selected.map(s => s.itemId),
+				itemId: selected[0].itemId, // backward compat: first component ID
+				itemName: mergedNames,
+				effects: mergedEffects,
+				componentCount: selected.length,
+			},
+		};
+	}
+
+	/**
+	 * Get a human-readable label for a variant component effect.
+	 * @param {object} effect - A single effect from spellEffect.effects
+	 * @returns {string}
+	 */
+	_getVariantEffectLabel (effect) {
+		switch (effect.type) {
+			case "bonusDamage": return `+${effect.dice || "?"} ${effect.damageType || ""} damage`;
+			case "bonusDice": return `+${effect.count || 1} damage dice`;
+			case "dieSizeIncrease": return `die size +${effect.steps || 1}${effect.maxDie ? ` (max ${effect.maxDie})` : ""}`;
+			case "maximizeDamage": return "maximize damage dice";
+			case "noSlot": return "no spell slot consumed";
+			case "lowerSlot": return `cast ${effect.reduction || 1} level${(effect.reduction || 1) > 1 ? "s" : ""} lower`;
+			case "saveDcMod": return `save DC ${(effect.mod || 0) > 0 ? "+" : ""}${effect.mod || 0}`;
+			case "saveDisadvantage": return `${effect.ability || ""} save at disadvantage`;
+			case "condition": return `applies ${effect.condition || "?"}${effect.duration ? ` for ${effect.duration}` : ""}`;
+			case "removeConcentration": return "no concentration required";
+			case "acOverride": return `AC becomes ${effect.formula || "?"}`;
+			case "resistance": return `grants ${(effect.types || []).join(", ")} resistance`;
+			case "immunity": return `grants ${(effect.types || []).join(", ")} immunity`;
+			case "speedOverride": return `${effect.speedType || "speed"} becomes ${effect.value || "?"} ft.`;
+			case "speedFallRate": return `fall rate ${effect.rate || "?"} ft./round`;
+			case "additionalTargets": return `+${effect.count || 1} additional target${(effect.count || 1) > 1 ? "s" : ""}`;
+			case "areaChange": return `area: ${effect.description || "?"}`;
+			case "rangeChange": return `range: ${effect.value || "?"}${effect.unit ? ` ${effect.unit}` : ""}`;
+			case "grantAttack": return `grants ${effect.attackName || "attack"}${effect.attackDamage ? ` (${effect.attackDamage} ${effect.attackDamageType || ""})` : ""}`;
+			case "text": return effect.text || "";
+			default: return effect.type;
+		}
+	}
+
+	/**
+	 * Apply variant component effects to the spell cast and return display notes.
+	 * Mutates damageResult and effectsApplied in place where appropriate.
+	 * @param {object} opts
+	 * @param {Array} opts.effects - The variant component effect objects
+	 * @param {object|null} opts.damageResult - The current damage result (mutable)
+	 * @param {object} opts.spell - The spell being cast
+	 * @param {object|null} opts.spellData - Full spell data
+	 * @param {Array<string>} opts.effectsApplied - Array to push applied effect strings into
+	 * @returns {Array<string>} Notes to display in the cast toast
+	 */
+	_applyVariantComponentEffects ({effects, damageResult, spell, spellData, effectsApplied}) {
+		const notes = [];
+
+		for (const effect of effects) {
+			switch (effect.type) {
+				case "bonusDamage": {
+					const dmgType = effect.damageType || damageResult?.damageType || "";
+					const diceExpr = effect.dice || "0";
+					notes.push(`🧪 +${diceExpr} ${dmgType} damage (variant component)`);
+					break;
+				}
+
+				case "bonusDice": {
+					notes.push(`🧪 +${effect.count || 1} bonus damage dice (variant component)`);
+					break;
+				}
+
+				case "dieSizeIncrease": {
+					const stepNote = effect.maxDie ? ` (max ${effect.maxDie})` : "";
+					notes.push(`🧪 Damage die size +${effect.steps || 1} step${(effect.steps || 1) > 1 ? "s" : ""}${stepNote} (variant component)`);
+					break;
+				}
+
+				case "maximizeDamage": {
+					notes.push(`🧪 Damage dice maximized (variant component)`);
+					break;
+				}
+
+				// noSlot and lowerSlot handled in _castSpell before slot consumption
+				case "noSlot":
+					notes.push(`🧪 No spell slot consumed (variant component)`);
+					break;
+
+				case "lowerSlot": {
+					const red = effect.reduction || 1;
+					notes.push(`🧪 Spell slot reduced by ${red} level${red > 1 ? "s" : ""} (variant component)`);
+					break;
+				}
+
+				// saveDcMod and saveDisadvantage handled in save DC calculation above
+				case "saveDcMod":
+				case "saveDisadvantage":
+					break;
+
+				case "condition": {
+					const condName = effect.condition || "a condition";
+					const condDur = effect.duration ? ` for ${effect.duration}` : "";
+					effectsApplied.push(`🧪 ${condName}${condDur} (variant component)`);
+					break;
+				}
+
+				case "removeConcentration":
+					notes.push(`🧪 Concentration removed (variant component)`);
+					break;
+
+				case "acOverride":
+					notes.push(`🧪 AC becomes ${effect.formula || effect.value || "?"} (variant component)`);
+					break;
+
+				case "resistance":
+					notes.push(`🧪 Grants ${(effect.types || []).join(", ") || "?"} resistance (variant component)`);
+					break;
+
+				case "immunity":
+					notes.push(`🧪 Grants ${(effect.types || []).join(", ") || "?"} immunity (variant component)`);
+					break;
+
+				case "speedOverride":
+					notes.push(`🧪 ${effect.speedType || "Speed"} becomes ${effect.value || "?"} ft. (variant component)`);
+					break;
+
+				case "speedFallRate":
+					notes.push(`🧪 Fall rate ${effect.rate || "?"} ft./round (variant component)`);
+					break;
+
+				case "additionalTargets":
+					notes.push(`🧪 +${effect.count || 1} additional target${(effect.count || 1) > 1 ? "s" : ""} (variant component)`);
+					break;
+
+				case "areaChange":
+					notes.push(`🧪 Area changed: ${effect.description || "?"} (variant component)`);
+					break;
+
+				case "rangeChange":
+					notes.push(`🧪 Range changed: ${effect.value || "?"}${effect.unit ? ` ${effect.unit}` : ""} (variant component)`);
+					break;
+
+				case "grantAttack": {
+					const atkName = effect.attackName || "Variant Attack";
+					const atkDmg = effect.attackDamage ? ` (${effect.attackDamage} ${effect.attackDamageType || ""})` : "";
+					const atkDur = effect.attackDuration ? ` for ${effect.attackDuration}` : "";
+					notes.push(`🧪 Granted attack: ${atkName}${atkDmg}${atkDur}`);
+					// Actual attack creation handled by caller after effects
+					break;
+				}
+
+				case "text":
+					notes.push(`🧪 ${effect.text || ""}`);
+					break;
+
+				default:
+					notes.push(`🧪 ${effect.type} (variant component)`);
+					break;
+			}
+		}
+
+		return notes;
+	}
+
+	/**
+	 * Roll a Wild Magic surge check triggered by using multiple variant components on one spell.
+	 * Surge probability increases with the number of components used.
+	 * @param {number} componentCount - Number of variant components used (2+)
+	 * @returns {{roll: number, threshold: number, surged: boolean, effect: string|null}}
+	 */
+	_rollVariantWildMagicSurge (componentCount) {
+		// Threshold: 2 components = surge on 1-2, 3 = 1-4, etc. (2^(n-1) on d20)
+		const threshold = Math.min(20, Math.pow(2, componentCount - 1));
+		const roll = RollerUtil.randomise(20);
+		const surged = roll <= threshold;
+
+		if (!surged) return {roll, threshold, surged, effect: null};
+
+		// Roll on the Wild Magic Surge table (d100)
+		const surgeRoll = RollerUtil.randomise(100);
+		const effect = CharacterSheetSpells._VARIANT_WILD_MAGIC_TABLE.find(
+			e => surgeRoll >= e.min && surgeRoll <= e.max,
+		)?.effect || "The DM determines a random magical effect.";
+
+		return {roll, threshold, surged, effect, surgeRoll};
+	}
+
+	// endregion
 
 	async _pMaybeApplySeekingSpell ({spell, attackRoll = 0, attackTotal = 0, castMeta = null} = {}) {
 		if (castMeta?.appliedMetamagic?.key !== "seeking") return castMeta;
@@ -2405,13 +2730,24 @@ class CharacterSheetSpells {
 
 			// Check for save DC
 			if (spellData.savingThrow) {
-				const saveDC = 8 + spellcastingMod + profBonus - exhaustionDcPenalty;
-				const saveNote = normalizedCastMeta.saveMeta?.firstTargetDisadvantage
-					? "; first target rolls at disadvantage"
-					: "";
+				let saveDC = 8 + spellcastingMod + profBonus - exhaustionDcPenalty;
+
+				// Apply variant component save DC modifier
+				const vcSaveDcMod = normalizedCastMeta.variantComponent?.effects?.find(e => e.type === "saveDcMod");
+				const vcDcModVal = vcSaveDcMod?.mod || 0;
+				if (vcDcModVal) saveDC += vcDcModVal;
+
+				const vcSaveDisadv = normalizedCastMeta.variantComponent?.effects?.some(e => e.type === "saveDisadvantage");
+				let saveNote = "";
+				if (normalizedCastMeta.saveMeta?.firstTargetDisadvantage) {
+					saveNote = "; first target rolls at disadvantage";
+				} else if (vcSaveDisadv) {
+					saveNote = "; target saves at disadvantage (🧪)";
+				}
 				const gamblerDcNote = gamblerModRoll ? ` <span class="ve-muted">(🎲 ${gamblerModRoll.dice}: ${gamblerModRoll.total})</span>` : "";
-				attackInfo += `<br>Save DC: <strong>${saveDC}</strong> (${spellData.savingThrow.join("/")} save${saveNote})${gamblerDcNote}`;
-				_rollMeta.dc = {total: saveDC, breakdown: `8 + ${spellcastingMod} + ${profBonus}${exhaustionDcPenalty ? ` - ${exhaustionDcPenalty}` : ""} (${spellData.savingThrow.join("/")})`};
+				const vcDcNote = vcDcModVal ? ` <span class="text-info">(🧪 ${vcDcModVal > 0 ? "+" : ""}${vcDcModVal} DC)</span>` : "";
+				attackInfo += `<br>Save DC: <strong>${saveDC}</strong> (${spellData.savingThrow.join("/")} save${saveNote})${gamblerDcNote}${vcDcNote}`;
+				_rollMeta.dc = {total: saveDC, breakdown: `8 + ${spellcastingMod} + ${profBonus}${exhaustionDcPenalty ? ` - ${exhaustionDcPenalty}` : ""}${vcDcModVal ? ` + ${vcDcModVal} (component)` : ""} (${spellData.savingThrow.join("/")})`};
 			}
 
 			// Parse spell effects to determine what the spell does
@@ -2490,12 +2826,52 @@ class CharacterSheetSpells {
 					effectsApplied.push(`Vampiric Spell healed ${healed} HP`);
 				}
 			}
+
+			// Apply variant component damage/combat effects
+			if (normalizedCastMeta.variantComponent?.effects?.length) {
+				const vcNotes = this._applyVariantComponentEffects({
+					effects: normalizedCastMeta.variantComponent.effects,
+					damageResult,
+					spell,
+					spellData,
+					effectsApplied,
+				});
+				if (vcNotes.length) metamagicNotes.push(...vcNotes);
+
+				// Create temporary attacks from grantAttack effects
+				for (const eff of normalizedCastMeta.variantComponent.effects) {
+					if (eff.type !== "grantAttack") continue;
+					this._state.addTemporaryAttack({
+						name: eff.attackName || `${spell.name} Attack`,
+						isMelee: eff.attackIsMelee !== false,
+						abilityMod: eff.attackAbility || "spellcasting",
+						damage: eff.attackDamage || "1d6",
+						damageType: eff.attackDamageType || "force",
+						range: eff.attackRange || "5 ft",
+						properties: eff.attackProperties || [],
+						sourceSpell: spell.name,
+						sourceDuration: eff.attackDuration || "concentration",
+						sourceComponent: normalizedCastMeta.variantComponent.itemName,
+					});
+				}
+			}
+		}
+
+		// Wild Magic surge check: using 2+ variant components on one spell
+		let wildMagicSurgeResult = null;
+		if (normalizedCastMeta.variantComponent?.componentCount > 1) {
+			wildMagicSurgeResult = this._rollVariantWildMagicSurge(normalizedCastMeta.variantComponent.componentCount);
 		}
 
 		// Build the toast message
 		let toastContent = `Cast ${spell.name}${upcast}${slotType}`;
 		if (normalizedCastMeta.appliedMetamagic) {
 			toastContent += `<br><span class="ve-muted">Metamagic: ${normalizedCastMeta.appliedMetamagic.name} (-${normalizedCastMeta.appliedMetamagic.cost} SP)</span>`;
+		}
+
+		// Show variant component usage
+		if (normalizedCastMeta.variantComponent) {
+			toastContent += `<br><span class="text-info">🧪 Component: ${normalizedCastMeta.variantComponent.itemName}</span>`;
 		}
 
 		if (deliveredViaFamiliar) {
@@ -2510,6 +2886,16 @@ class CharacterSheetSpells {
 
 		if (metamagicNotes.length > 0) {
 			toastContent += `<br><span class="text-info">${metamagicNotes.join("<br>")}</span>`;
+		}
+
+		// Wild Magic surge result from multi-component usage
+		if (wildMagicSurgeResult) {
+			if (wildMagicSurgeResult.surged) {
+				toastContent += `<br><span class="text-danger">🌀 <strong>Wild Magic Surge!</strong> Rolled ${wildMagicSurgeResult.roll} (needed ≤${wildMagicSurgeResult.threshold})</span>`;
+				toastContent += `<br><span class="text-warning">⚡ ${wildMagicSurgeResult.effect}</span>`;
+			} else {
+				toastContent += `<br><span class="text-muted">🌀 Wild Magic check: ${wildMagicSurgeResult.roll} (safe — needed ≤${wildMagicSurgeResult.threshold})</span>`;
+			}
 		}
 
 		// Gambler's Folly - automatic bet roll on spell cast (TGTT Gambler subclass)
@@ -5767,6 +6153,38 @@ class CharacterSheetSpells {
 	}
 	// #endregion
 }
+
+/**
+ * Wild Magic Surge table for variant component overuse (d100).
+ * Based on PHB Wild Magic Surge table, adapted for variant component context.
+ */
+CharacterSheetSpells._VARIANT_WILD_MAGIC_TABLE = [
+	{min: 1, max: 4, effect: "The component explodes — you take 1d6 force damage."},
+	{min: 5, max: 8, effect: "You cast Faerie Fire centered on yourself (no concentration, 1 minute)."},
+	{min: 9, max: 12, effect: "All variant components in your inventory glow faintly for 1 hour — no effect."},
+	{min: 13, max: 16, effect: "You are frightened of the nearest creature until the end of your next turn."},
+	{min: 17, max: 20, effect: "You regain 1 expended spell slot of the lowest level available."},
+	{min: 21, max: 24, effect: "Your skin turns a vibrant color (DM's choice) for 24 hours."},
+	{min: 25, max: 28, effect: "A spectral eye appears above you for 1 minute — you can't be hidden."},
+	{min: 29, max: 32, effect: "You teleport up to 30 feet to an unoccupied space you can see."},
+	{min: 33, max: 36, effect: "The spell's damage type changes to a random type (DM rolls d10)."},
+	{min: 37, max: 40, effect: "You are invisible until the start of your next turn or until you attack/cast."},
+	{min: 41, max: 44, effect: "Flowers sprout in a 10-ft radius around you. Difficult terrain for 1 minute."},
+	{min: 45, max: 48, effect: "The component's effect is doubled (DM adjudicates)."},
+	{min: 49, max: 52, effect: "You emit bright light in a 30-ft radius for 1 minute."},
+	{min: 53, max: 56, effect: "1d6 gems worth 10 gp each appear at your feet."},
+	{min: 57, max: 60, effect: "The next spell you cast within 1 minute costs no spell slot."},
+	{min: 61, max: 64, effect: "You shrink by one size category for 1 minute."},
+	{min: 65, max: 68, effect: "All creatures within 10 ft take 1d4 lightning damage."},
+	{min: 69, max: 72, effect: "You regain 2d10 hit points."},
+	{min: 73, max: 76, effect: "Your voice echoes magically for 10 minutes — you have advantage on Intimidation checks."},
+	{min: 77, max: 80, effect: "The component is not consumed — it reappears in your inventory."},
+	{min: 81, max: 84, effect: "A 10-ft-radius fog cloud appears centered on you (lasts 1 minute, no concentration)."},
+	{min: 85, max: 88, effect: "You gain resistance to the spell's damage type until the end of your next turn."},
+	{min: 89, max: 92, effect: "A random creature within 30 ft is polymorphed into a sheep for 1 round (DM's choice)."},
+	{min: 93, max: 96, effect: "Your spell slot expenditure is refunded, but the component is still consumed."},
+	{min: 97, max: 100, effect: "The DM determines a unique magical effect appropriate to the situation."},
+];
 
 globalThis.CharacterSheetSpells = CharacterSheetSpells;
 

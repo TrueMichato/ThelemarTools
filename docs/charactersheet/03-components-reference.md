@@ -650,7 +650,9 @@ toggleEditMode()
 ### Features
 
 - Upgrade picker modal: browse eligible upgrades by tier, show prerequisites and costs
+- **Rules-reference hover header** in the picker — links the governing TCAH variant rule (Upgrading Armor for armor/shields, Weapon Upgrade Comparison for weapons) so players can hover for the source text.
 - Gold deduction with multi-denomination conversion
+- **Refund-on-remove flow**: removing an applied upgrade prompts for No / Full / Half refund of the originally paid cost via `state.addGold()`.
 - Gemstone empowerment modal: crafting roll (proficiency + CHA/WIS vs DC)
 - Gemstone socketing: socket/unsocket with 1-gem-per-item limit
 - Mechanical effect calculation from applied upgrades
@@ -674,7 +676,14 @@ static isSocketable(item)
 static getUpgradeEffects(item)      // {bonusWeaponAttack, bonusWeaponDamage, critThresholdReduction, ...}
 static getGemstoneEffects(item)     // [{name, entries, charges, ...}]
 static increaseDamageDie(die, steps) // "1d6" -> "1d8"
-static parseGoldCost(str)           // "1,000 gp (base)" -> 1000
+
+// Cost helpers (static) — accept legacy string OR structured {gp, isBase?, note?}
+static parseGoldCost(cost)          // "1,000 gp (base)" or {gp:1000, isBase:true} -> 1000
+static formatCostDisplay(cost)      // -> "1,000 gp (base)"
+static isBaseCost(cost)             // true if cost is a per-upgrade base cost (DM may scale)
+
+// Rules reference (static)
+static getRulesReference(item)      // -> {name, source, label} | null
 ```
 
 ### State Methods (on CharacterSheetState)
@@ -693,8 +702,13 @@ restoreGemstoneCharges(itemId, name, amount)
 rechargeAllGemstones()
 getUpgradedItems()
 deductGold(gpCost)
+addGold(gpAmount)                   // refunds, accepts fractional amounts
 getEffectiveItemBonuses(itemId)
 ```
+
+### Data Schema
+
+`itemUpgrade` entities are validated by [`schema/site/itemupgrades.json`](https://github.com/5etools-mirror-3/5etools-utils/blob/master/schema/site/itemupgrades.json) and [`schema/brew/itemupgrades.json`](https://github.com/5etools-mirror-3/5etools-utils/blob/master/schema/brew/itemupgrades.json). The `cost` field accepts either a legacy string (e.g. `"100 gp (base)"`) or a structured object `{gp: number, isBase?: boolean, note?: string}`. Site data restricts `upgradeType` to `WU`, `WU:1`, `WU:2`, `WU:3`, `AU`; brew may declare additional codes (e.g. `GS:C`) via `_meta.itemUpgradeTypes`.
 
 ---
 
