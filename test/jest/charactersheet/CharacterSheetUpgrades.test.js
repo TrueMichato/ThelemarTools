@@ -310,6 +310,101 @@ describe("Item Upgrades", () => {
 			expect(state.getCurrency("pp")).toBe(1);
 			expect(state.getCurrency("gp")).toBe(5);
 		});
+
+		it("should refund gold via addGold", () => {
+			state.setCurrency("gp", 100);
+			const result = state.addGold(250);
+			expect(result.success).toBe(true);
+			expect(state.getCurrency("gp")).toBe(350);
+		});
+
+		it("addGold should ignore non-positive amounts", () => {
+			state.setCurrency("gp", 100);
+			expect(state.addGold(0).success).toBe(false);
+			expect(state.addGold(-10).success).toBe(false);
+			expect(state.getCurrency("gp")).toBe(100);
+		});
+
+		it("addGold should preserve fractional refunds (half-refund)", () => {
+			state.setCurrency("gp", 0);
+			state.addGold(50.5);
+			expect(state.getCurrency("gp")).toBeCloseTo(50.5, 2);
+		});
+	});
+
+	// ==========================================================================
+	// Cost Parsing & Display
+	// ==========================================================================
+	describe("Cost Parsing", () => {
+		it("should parse legacy string costs (with and without (base))", () => {
+			expect(CharacterSheetUpgrades.parseGoldCost("100 gp (base)")).toBe(100);
+			expect(CharacterSheetUpgrades.parseGoldCost("1,000 gp")).toBe(1000);
+			expect(CharacterSheetUpgrades.parseGoldCost("10 gp")).toBe(10);
+		});
+
+		it("should parse structured object costs", () => {
+			expect(CharacterSheetUpgrades.parseGoldCost({gp: 100, isBase: true})).toBe(100);
+			expect(CharacterSheetUpgrades.parseGoldCost({gp: 1000})).toBe(1000);
+		});
+
+		it("should return 0 for null/undefined/invalid", () => {
+			expect(CharacterSheetUpgrades.parseGoldCost(null)).toBe(0);
+			expect(CharacterSheetUpgrades.parseGoldCost(undefined)).toBe(0);
+			expect(CharacterSheetUpgrades.parseGoldCost("Free")).toBe(0);
+			expect(CharacterSheetUpgrades.parseGoldCost({})).toBe(0);
+		});
+
+		it("should detect base-cost flag in both forms", () => {
+			expect(CharacterSheetUpgrades.isBaseCost("100 gp (base)")).toBe(true);
+			expect(CharacterSheetUpgrades.isBaseCost("100 gp")).toBe(false);
+			expect(CharacterSheetUpgrades.isBaseCost({gp: 100, isBase: true})).toBe(true);
+			expect(CharacterSheetUpgrades.isBaseCost({gp: 100})).toBe(false);
+			expect(CharacterSheetUpgrades.isBaseCost(null)).toBe(false);
+		});
+
+		it("should format both string and structured costs for display", () => {
+			expect(CharacterSheetUpgrades.formatCostDisplay("100 gp (base)")).toBe("100 gp (base)");
+			expect(CharacterSheetUpgrades.formatCostDisplay({gp: 100, isBase: true})).toBe("100 gp (base)");
+			expect(CharacterSheetUpgrades.formatCostDisplay({gp: 1000})).toBe("1,000 gp");
+			expect(CharacterSheetUpgrades.formatCostDisplay({gp: 50, note: "varies"})).toBe("50 gp (varies)");
+			expect(CharacterSheetUpgrades.formatCostDisplay(null)).toBe("Free");
+		});
+	});
+
+	// ==========================================================================
+	// Rules Reference Hover
+	// ==========================================================================
+	describe("Rules Reference", () => {
+		it("should return Armor rule for armor items (variantrule-backed)", () => {
+			const ref = CharacterSheetUpgrades.getRulesReference({type: "MA", armor: true});
+			expect(ref).not.toBeNull();
+			expect(ref.name).toBe("Upgrading Armor");
+			expect(ref.source).toBe("TCAH");
+			expect(ref.isVariantrule).toBe(true);
+			expect(ref.inlineEntry).toBeUndefined();
+		});
+
+		it("should return Armor rule for shields", () => {
+			const ref = CharacterSheetUpgrades.getRulesReference({type: "S", shield: true});
+			expect(ref).not.toBeNull();
+			expect(ref.name).toBe("Upgrading Armor");
+			expect(ref.isVariantrule).toBe(true);
+		});
+
+		it("should return Weapon rule reference with inline entry", () => {
+			const ref = CharacterSheetUpgrades.getRulesReference({type: "M", weapon: true});
+			expect(ref).not.toBeNull();
+			expect(ref.name).toBe("Upgrading Weapons");
+			expect(ref.source).toBe("TCAH");
+			expect(ref.inlineEntry).toBeDefined();
+			expect(ref.inlineEntry.type).toBe("entries");
+			expect(ref.inlineEntry.entries.length).toBeGreaterThan(0);
+		});
+
+		it("should return null for non-eligible items", () => {
+			const ref = CharacterSheetUpgrades.getRulesReference({type: "P"});
+			expect(ref).toBeNull();
+		});
 	});
 
 	// ==========================================================================
