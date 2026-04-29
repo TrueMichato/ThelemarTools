@@ -19914,6 +19914,17 @@ class CharacterSheetState {
 		return {success: true};
 	}
 
+	/**
+	 * Add gold pieces to the character's currency (used for refunds).
+	 * @param {number} gpAmount - Amount in gp (may be fractional; rounded to 2dp)
+	 * @returns {object} {success: boolean}
+	 */
+	addGold (gpAmount) {
+		if (!gpAmount || gpAmount <= 0) return {success: false};
+		this._data.currency.gp = Math.round(((this._data.currency.gp || 0) + gpAmount) * 100) / 100;
+		return {success: true};
+	}
+
 	// ==========================================
 	// Resource Restoration (Ki, Sorcery Points, etc.)
 	// ==========================================

@@ -93,15 +93,120 @@ class CharacterSheetUpgrades {
 	}
 
 	/**
-	 * Parse gold cost from a cost string like "100 gp (base)" or "1,000 gp"
-	 * @param {string} costStr - The cost string
+	 * Parse gold cost from either a free-form string ("100 gp (base)", "1,000 gp")
+	 * or a structured cost object ({gp, isBase?, note?}).
+	 * @param {string|object} cost - The cost value from the upgrade entity
 	 * @returns {number} Gold cost in gp
 	 */
-	static parseGoldCost (costStr) {
-		if (!costStr) return 0;
-		const match = costStr.replace(/,/g, "").match(/([\d.]+)\s*gp/i);
+	static parseGoldCost (cost) {
+		if (cost == null) return 0;
+		if (typeof cost === "object") {
+			return typeof cost.gp === "number" && cost.gp >= 0 ? cost.gp : 0;
+		}
+		if (typeof cost !== "string") return 0;
+		const match = cost.replace(/,/g, "").match(/([\d.]+)\s*gp/i);
 		return match ? parseFloat(match[1]) : 0;
 	}
+
+	/**
+	 * Format a cost value for display, normalising both string and structured forms.
+	 * @param {string|object} cost
+	 * @returns {string}
+	 */
+	static formatCostDisplay (cost) {
+		if (cost == null) return "Free";
+		if (typeof cost === "string") return cost;
+		if (typeof cost === "object" && typeof cost.gp === "number") {
+			const gpStr = `${cost.gp.toLocaleString()} gp`;
+			if (cost.note) return `${gpStr} (${cost.note})`;
+			if (cost.isBase) return `${gpStr} (base)`;
+			return gpStr;
+		}
+		return "Free";
+	}
+
+	/**
+	 * Whether this cost is flagged as a per-upgrade base cost (DM may scale per item).
+	 * @param {string|object} cost
+	 * @returns {boolean}
+	 */
+	static isBaseCost (cost) {
+		if (cost == null) return false;
+		if (typeof cost === "object") return !!cost.isBase;
+		if (typeof cost === "string") return /\(base\)/i.test(cost);
+		return false;
+	}
+
+	/**
+	 * Get the governing variant rule (variantrule entity) for an item being upgraded.
+	 * Used to render a hover-link to the source rules in the modal header.
+	 * Armor/Shield → links to the real "Upgrading Armor" variantrule in the TCAH brew.
+	 * Weapons → inline predefined hover (no variantrule entity exists upstream in TCAH).
+	 * @param {object} item - The inventory item
+	 * @returns {{name: string, source: string, label: string, isVariantrule?: boolean, inlineEntry?: object}|null}
+	 */
+	static getRulesReference (item) {
+		if (CharacterSheetUpgrades.isArmor(item) || CharacterSheetUpgrades.isShield(item)) {
+			return {name: "Upgrading Armor", source: "TCAH", label: "Armor & Shield Upgrade Rules", isVariantrule: true};
+		}
+		if (CharacterSheetUpgrades.isWeapon(item)) {
+			return {
+				name: "Upgrading Weapons",
+				source: "TCAH",
+				label: "Weapon Upgrade Rules",
+				inlineEntry: CharacterSheetUpgrades._WEAPON_UPGRADE_RULES_ENTRY,
+			};
+		}
+		return null;
+	}
+
+	/**
+	 * Inline entry content for the weapon upgrade rules hover.
+	 * Sourced from TCAH p.11 — kept here instead of modifying the upstream TCAH brew file.
+	 */
+	static _WEAPON_UPGRADE_RULES_ENTRY = {
+		type: "entries",
+		name: "Upgrading Weapons",
+		source: "TCAH",
+		page: 11,
+		entries: [
+			"Upgrading weapons follows a branching path system, with available options split into multiple tiers. At first, a weapon can only be upgraded with a limited selection of 1st tier tags depending on its type, each of which \"unlocks\" one or more options from the next tier. The following additional rules apply when upgrading a weapon with a new tag:",
+			{
+				type: "list",
+				items: [
+					"All prerequisite conditions must be satisfied to apply a new tag, as shown in the Weapon Upgrades table.",
+					"2nd tier upgrades can only be applied by a trained craftsman, with 3rd tier upgrades requiring the skills of a master artisan.",
+					"Typically, it takes an artisan a full day of work (minimum 8 hours) to upgrade a weapon with a new tag.",
+					"Once added, a tag can't be removed from a weapon.",
+				],
+			},
+			{
+				type: "entries",
+				name: "Weapon Upgrade Cost Structure",
+				entries: [
+					"Upgrading a weapon has a base cost associated with each tier, with subsequent upgrades of that tier costing twice the previous amount for that tier. For example, adding the {@b {@i balanced}} tag costs the tier 1 base cost of 100 gp. A second 1st tier upgrade costs 200 gp, the next 400 gp, and so on.",
+					"Upgrades are grouped by tier for the purposes of this cost scaling.",
+				],
+			},
+			{
+				type: "table",
+				caption: "Weapon Upgrade Comparison",
+				colLabels: ["Tier", "Rarity", "Guide Price (DMG)", "Equivalent Upgrade Cost"],
+				colStyles: ["col-1 text-center", "col-3", "col-4 text-right", "col-4 text-right"],
+				rows: [
+					["+1", "Uncommon", "101\u2013500 gp", "300\u20131,700 gp*"],
+					["+2", "Rare", "501\u20135,000 gp", "4,000\u20135,000 gp"],
+					["+3", "Very rare", "5,001\u201350,000 gp", "16,000\u201328,000 gp"],
+				],
+				footnotes: [
+					"* Cost varies depending on the requirement for the ability to overcome resistance and immunity to nonmagical attacks and damage.",
+				],
+			},
+		],
+		data: {
+			hoverTitle: "Upgrading Weapons \u2014 TCAH p. 11",
+		},
+	};
 
 	/**
 	 * Get the tier label for an upgrade type code
@@ -153,6 +258,7 @@ class CharacterSheetUpgrades {
 		const eligibleUpgrades = this.getEligibleUpgrades(item);
 		const currentUpgrades = this._state.getItemUpgrades(itemId);
 		const totalGold = this._state.getTotalGold();
+		const rulesRef = CharacterSheetUpgrades.getRulesReference(item);
 
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: `Upgrade: ${item.name}`,
@@ -161,6 +267,33 @@ class CharacterSheetUpgrades {
 		});
 
 		const content = e_({outer: `<div class="charsheet__upgrade-modal"></div>`});
+
+		// Rules reference header — gives players one-click hover access to the governing TCAH rules
+		if (rulesRef) {
+			let rulesLink;
+			if (rulesRef.isVariantrule) {
+				// Real variantrule entity in the loaded TCAH brew — standard hover link
+				rulesLink = CharacterSheetPage.getHoverLink(
+					UrlUtil.PG_VARIANTRULES,
+					rulesRef.name,
+					rulesRef.source,
+					null,
+					rulesRef.label,
+				);
+			} else if (rulesRef.inlineEntry) {
+				// No upstream variantrule — render a predefined hover from inline entry content
+				const hoverMeta = Renderer.hover.getMakePredefinedHover(rulesRef.inlineEntry, {isBookContent: true});
+				rulesLink = `<a href="#" ${hoverMeta.html} onclick="event.preventDefault()">${rulesRef.label}</a>`;
+			}
+			if (rulesLink) {
+				content.append(e_({outer: `
+					<div class="charsheet__upgrade-rules-ref ve-flex-v-center mb-2 p-2 stripe-even ve-small">
+						<span class="glyphicon glyphicon-book mr-1" aria-hidden="true"></span>
+						<span><strong>Rules:</strong> ${rulesLink} <span class="ve-muted">(hover for full text)</span></span>
+					</div>
+				`}));
+			}
+		}
 
 		// Current upgrades section
 		if (currentUpgrades.length) {
@@ -232,21 +365,26 @@ class CharacterSheetUpgrades {
 
 				for (const upgrade of upgrades) {
 					const gpCost = CharacterSheetUpgrades.parseGoldCost(upgrade.cost);
+					const isBase = CharacterSheetUpgrades.isBaseCost(upgrade.cost);
+					const costLabel = CharacterSheetUpgrades.formatCostDisplay(upgrade.cost);
 					const canAfford = totalGold >= gpCost;
 					const prereqItems = upgrade.prerequisite?.[0]?.item;
 					const prereqText = prereqItems?.length ? `Requires: ${prereqItems.join("; ")}` : "";
 					const renderedEntries = upgrade.entries?.length
 						? Renderer.get().render({type: "entries", entries: upgrade.entries})
 						: "";
-					const btnAttr = !canAfford ? 'disabled title="Insufficient gold"' : "title=\"Apply for " + gpCost + " gp\"";
+					const btnAttr = !canAfford ? 'disabled title="Insufficient gold"' : `title="Apply for ${gpCost} gp"`;
 					const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
+					const baseHint = isBase
+						? `<span class="badge badge-default ve-small ml-1" title="Per-upgrade base cost. The DM may scale this for the specific item per the source's pricing tables.">base</span>`
+						: "";
 
 					const row = e_({outer: `
 						<div class="charsheet__upgrade-option mb-1 p-2 stripe-even">
 							<div class="ve-flex-v-center mb-1">
 								<div class="ve-flex-1">
 									<span class="charsheet__upgrade-name">${upgradeLink}</span>
-									<span class="ve-muted ve-small ml-1">${upgrade.cost || "Free"}</span>
+									<span class="ve-muted ve-small ml-1">${costLabel}</span>${baseHint}
 									${prereqText ? `<div class="ve-small ve-muted">${prereqText}</div>` : ""}
 								</div>
 								<button type="button"
@@ -325,13 +463,46 @@ class CharacterSheetUpgrades {
 				return;
 			}
 
-			// Remove upgrade
+			// Remove upgrade (with optional refund)
 			const removeBtn = e.target.closest(".charsheet__upgrade-remove");
 			if (removeBtn) {
 				const name = removeBtn.dataset.upgradeName;
 				const source = removeBtn.dataset.upgradeSource;
-				this._state.removeItemUpgrade(itemId, name, source);
-				JqueryUtil.doToast({content: `Removed "${name}" from ${item.name}`, type: "info"});
+				const applied = this._state.getItemUpgrades(itemId).find(
+					u => u.name === name && u.source === source,
+				);
+				const paid = applied?.costPaid || 0;
+
+				let refund = 0;
+				if (paid > 0) {
+					const choice = await InputUiUtil.pGetUserEnum({
+						title: `Remove "${name}"`,
+						placeholder: "How should the cost be handled?",
+						values: ["No refund", `Full refund (${paid} gp)`, `Half refund (${paid / 2} gp)`],
+						isResolveItem: false,
+					});
+					if (choice == null) return; // cancelled
+					if (choice === 1) refund = paid;
+					else if (choice === 2) refund = paid / 2;
+				} else {
+					const ok = await InputUiUtil.pGetUserBoolean({
+						title: `Remove "${name}"?`,
+						htmlDescription: `This upgrade will be removed from <strong>${item.name}</strong>.`,
+						textYes: "Remove",
+						textNo: "Cancel",
+					});
+					if (!ok) return;
+				}
+
+				const removed = this._state.removeItemUpgrade(itemId, name, source);
+				if (!removed) {
+					JqueryUtil.doToast({content: `Could not remove "${name}"`, type: "danger"});
+					return;
+				}
+				if (refund > 0) this._state.addGold(refund);
+
+				const refundStr = refund > 0 ? ` (refunded ${refund} gp)` : "";
+				JqueryUtil.doToast({content: `Removed "${name}" from ${item.name}${refundStr}`, type: "info"});
 				this._page.saveCharacter();
 				doClose(true);
 				this._page._inventory?.render();
