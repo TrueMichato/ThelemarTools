@@ -201,6 +201,8 @@ class CharacterSheetLevelUp {
 					knownMaxSpellLevel = Math.min(4, Math.ceil(newLevel / 7));
 				} else if (casterProg === "pact") {
 					knownMaxSpellLevel = Math.min(5, Math.ceil(newLevel / 2));
+				} else if (casterProg === "artificer") {
+					knownMaxSpellLevel = Math.min(5, Math.ceil(newLevel / 4));
 				} else {
 					knownMaxSpellLevel = Math.min(9, Math.ceil(newLevel / 2));
 				}
@@ -2414,9 +2416,11 @@ class CharacterSheetLevelUp {
 	 * @param {number} newLevel - The new level for filtering by max degree
 	 */
 	_renderOptionalFeaturesSelection (classData, gains, onSelect, newLevel, {subclassGrantedTraditionCodes = [], existingSelections = {}} = {}) {
-		// Filter optional features by allowed sources and edition
+		// Filter optional features by allowed sources and deduplicate by edition priority
 		const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
-		const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesByEdition(allOptFeaturesRaw, classData.source);
+		const showAllSetting = this._state.getSettings()?.showAllOptFeatureVersions || false;
+		let showAll = showAllSetting;
+		let allOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
 		const existingOptFeatures = this._state.getFeatures().filter(f => f.featureType === "Optional Feature");
 
 		const section = e_({outer: `
@@ -2424,11 +2428,33 @@ class CharacterSheetLevelUp {
 				<h5 class="charsheet__levelup-section-title">
 					<span class="glyphicon glyphicon-list-alt"></span> Choose Features
 				</h5>
+				<label class="charsheet__settings-checkbox-label ve-small ve-muted mb-2" style="cursor: pointer;">
+					<input type="checkbox" class="charsheet__opt-show-all-toggle" ${showAll ? "checked" : ""}>
+					<span>Show all source versions</span>
+				</label>
 				<div class="charsheet__levelup-opt-features"></div>
 			</div>
 		`});
 
+		const toggle = section.querySelector(".charsheet__opt-show-all-toggle");
 		const container = section.querySelector(".charsheet__levelup-opt-features");
+
+		const renderFeatures = () => {
+			allOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
+			container.innerHTML = "";
+			this._renderOptFeaturesInContainer(container, classData, gains, onSelect, newLevel, allOptFeatures, existingOptFeatures, {subclassGrantedTraditionCodes, existingSelections});
+		};
+
+		toggle.addEventListener("change", (e) => {
+			showAll = e.target.checked;
+			renderFeatures();
+		});
+
+		renderFeatures();
+		return section;
+	}
+
+	_renderOptFeaturesInContainer (container, classData, gains, onSelect, newLevel, allOptFeatures, existingOptFeatures, {subclassGrantedTraditionCodes = [], existingSelections = {}} = {}) {
 
 		gains.forEach(gain => {
 			const featureKey = gain.featureTypes.join("_");
@@ -2442,8 +2468,6 @@ class CharacterSheetLevelUp {
 				this._renderStandardOptionalFeaturesLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey);
 			}
 		});
-
-		return section;
 	}
 
 	/**
@@ -2705,36 +2729,23 @@ class CharacterSheetLevelUp {
 			return checkEntries(opt.entries);
 		};
 
-		// Filter options by feature type
+		// Filter options by feature type and check prerequisites
+		const prereqContext = {
+			classes: this._state.getClasses(),
+			totalLevel: this._state.getTotalLevel(),
+			existingFeatures: existingOptFeatures,
+			cantrips: this._state.getCantripsKnown?.() || [],
+			spells: this._state.getSpellsKnown?.() || [],
+		};
+
 		const allMatchingOptions = allOptFeatures.filter(opt => {
 			const matchesType = opt.featureType?.some(ft =>
 				gain.featureTypes.some(progType => ft === progType || ft.startsWith(progType)),
 			);
-			if (!matchesType) return false;
-
-			if (opt.prerequisite) {
-				for (const prereq of opt.prerequisite) {
-					if (prereq.level) {
-						const reqLevel = prereq.level.level || prereq.level;
-						const totalLevel = this._state.getTotalLevel();
-						if (prereq.level.class) {
-							const classes = this._state.getClasses();
-							const classMatch = classes.find(c =>
-								c.name.toLowerCase() === prereq.level.class.name.toLowerCase(),
-							);
-							if (!classMatch || classMatch.level < reqLevel) return false;
-						} else if (totalLevel < reqLevel) {
-							return false;
-						}
-					}
-					// Check pact prerequisite — e.g. "Pact of Transformation" invocations
-					if (prereq.pact) {
-						const hasPact = existingOptFeatures.some(f => f.name === prereq.pact);
-						if (!hasPact) return false;
-					}
-				}
-			}
-			return true;
+			return matchesType;
+		}).map(opt => {
+			const {met, reasons} = CharacterSheetClassUtils.checkPrerequisites(opt.prerequisite, prereqContext);
+			return {...opt, _meetsPrereqs: met, _prereqReasons: reasons};
 		});
 
 		const availableOptions = allMatchingOptions.map(opt => {
@@ -2744,11 +2755,12 @@ class CharacterSheetLevelUp {
 			).length;
 			const alreadyHas = timesKnown > 0;
 			const repeatable = isRepeatable(opt);
+			const selectable = opt._meetsPrereqs && (!alreadyHas || repeatable);
 			return {
 				...opt,
 				_alreadyKnown: alreadyHas,
 				_timesKnown: timesKnown,
-				_selectable: !alreadyHas || repeatable,
+				_selectable: selectable,
 				_repeatable: repeatable,
 			};
 		});
@@ -2764,25 +2776,29 @@ class CharacterSheetLevelUp {
 		const list = gainSection.querySelector(".charsheet__levelup-opt-list");
 
 		const selectableOptions = availableOptions.filter(opt => opt._selectable);
-		if (!selectableOptions.length && !availableOptions.some(opt => opt._alreadyKnown)) {
+		if (!selectableOptions.length && !availableOptions.some(opt => opt._alreadyKnown || !opt._meetsPrereqs)) {
 			list.insertAdjacentHTML("beforeend", `<div class="ve-muted">No options available at this level.</div>`);
 		} else {
 			// Add legend for badges
 			const hasKnownOptions = availableOptions.some(opt => opt._alreadyKnown);
-			if (hasKnownOptions) {
+			const hasPrereqOptions = availableOptions.some(opt => !opt._meetsPrereqs);
+			if (hasKnownOptions || hasPrereqOptions) {
 				list.insertAdjacentHTML("afterbegin", `
 					<div class="ve-small ve-muted mb-2 pb-2" style="border-bottom: 1px solid var(--rgb-border-grey);">
-						<span class="badge badge-success mr-1">✓ Known</span> = Already selected
-						<span class="badge badge-info ml-2 mr-1">↺ Repeatable</span> = Can be taken again
+						${hasKnownOptions ? `<span class="badge badge-success mr-1">✓ Known</span> = Already selected` : ""}
+						${hasKnownOptions ? `<span class="badge badge-info ml-2 mr-1">↺ Repeatable</span> = Can be taken again` : ""}
+						${hasPrereqOptions ? `<span class="badge badge-warning ml-2 mr-1">⚠ Requires</span> = Prerequisites not met` : ""}
 					</div>
 				`);
 			}
 
 			availableOptions.sort((a, b) => {
-				// Selectable options first, then by name
+				// Selectable options first
 				if (a._selectable !== b._selectable) return a._selectable ? -1 : 1;
-				// Known options at the top of their section so players can see what they have
+				// Known options before prereq-blocked ones
 				if (a._alreadyKnown !== b._alreadyKnown) return a._alreadyKnown ? -1 : 1;
+				// Prereq-blocked at the bottom
+				if (a._meetsPrereqs !== b._meetsPrereqs) return a._meetsPrereqs ? -1 : 1;
 				return a.name.localeCompare(b.name);
 			}).forEach(opt => {
 				const isDisabled = !opt._selectable;
@@ -2794,12 +2810,15 @@ class CharacterSheetLevelUp {
 				const repeatableBadge = opt._repeatable
 					? `<span class="badge badge-info ml-1" title="Can be taken multiple times">↺ Repeatable</span>`
 					: "";
+				const prereqBadge = !opt._meetsPrereqs && opt._prereqReasons?.length
+					? `<span class="badge badge-warning ml-1" title="Requires: ${opt._prereqReasons.join(", ")}">⚠ ${opt._prereqReasons.join(", ")}</span>`
+					: "";
 
 				const item = e_({outer: `
-					<label class="charsheet__levelup-opt-item d-block mb-1${isDisabled ? " charsheet__levelup-opt-item--disabled" : ""}${opt._alreadyKnown ? " charsheet__levelup-opt-item--known" : ""}" style="cursor: ${isDisabled ? "not-allowed" : "pointer"}; padding: 0.5rem; border-radius: 4px;${isDisabled ? " opacity: 0.5;" : ""}${opt._alreadyKnown && opt._selectable ? " background: rgba(var(--rgb-success-rgb), 0.1); border-left: 3px solid var(--rgb-success);" : ""}${opt._alreadyKnown && !opt._selectable ? " background: rgba(128, 128, 128, 0.1);" : ""}">
+					<label class="charsheet__levelup-opt-item d-block mb-1${isDisabled ? " charsheet__levelup-opt-item--disabled" : ""}${opt._alreadyKnown ? " charsheet__levelup-opt-item--known" : ""}" style="cursor: ${isDisabled ? "not-allowed" : "pointer"}; padding: 0.5rem; border-radius: 4px;${isDisabled ? " opacity: 0.5;" : ""}${opt._alreadyKnown && opt._selectable ? " background: rgba(var(--rgb-success-rgb), 0.1); border-left: 3px solid var(--rgb-success);" : ""}${opt._alreadyKnown && !opt._selectable ? " background: rgba(128, 128, 128, 0.1);" : ""}${!opt._meetsPrereqs ? " background: rgba(255, 193, 7, 0.05);" : ""}">
 						<input type="checkbox" class="mr-2"${isDisabled ? " disabled" : ""}>
 						<span class="opt-name"></span>
-						${knownBadge}${repeatableBadge}
+						${knownBadge}${repeatableBadge}${prereqBadge}
 						<span class="ve-muted ve-small ml-1">(${Parser.sourceJsonToAbv(opt.source)})</span>
 					</label>
 				`});
@@ -4200,9 +4219,31 @@ class CharacterSheetLevelUp {
 		};
 		const skillGrant = multiclassSkillGrants[selectedClass.name];
 
+		// Determine spell gains for multiclass level 1
+		const isWizardMulticlass = selectedClass.name === "Wizard";
+		const isKnownCasterMulticlass = !isWizardMulticlass && !selectedClass.preparedSpellsProgression && selectedClass.spellsKnownProgression;
+		const isPreparedCasterMulticlass = !isWizardMulticlass && !isKnownCasterMulticlass && !!selectedClass.preparedSpellsProgression;
+
+		let multiclassSpellGain = 0;
+		let multiclassCantripGain = 0;
+		const multiclassMaxSpellLevel = 1; // Multiclass level 1 always caps at 1st-level spells
+
+		if (isWizardMulticlass) {
+			multiclassSpellGain = 6; // PHB multiclass rule: 6 wizard spells
+			multiclassCantripGain = selectedClass.cantripProgression?.[0] || 3;
+		} else if (isKnownCasterMulticlass) {
+			multiclassSpellGain = selectedClass.spellsKnownProgression[0] || 0;
+			multiclassCantripGain = selectedClass.cantripProgression?.[0] || 0;
+		} else if (isPreparedCasterMulticlass) {
+			multiclassSpellGain = selectedClass.preparedSpellsProgression[0] || 0;
+			multiclassCantripGain = selectedClass.cantripProgression?.[0] || 0;
+		}
+
+		const hasSpellChoices = multiclassSpellGain > 0 || multiclassCantripGain > 0;
+
 		// If no choices needed, add the class directly
-		if (!optionalFeatureGains.length && !featureOptionGroups.length && !skillGrant) {
-			await this._applyMulticlass(selectedClass, features, {}, {}, []);
+		if (!optionalFeatureGains.length && !featureOptionGroups.length && !skillGrant && !hasSpellChoices) {
+			await this._applyMulticlass(selectedClass, features, {}, {}, [], [], []);
 			return true;
 		}
 
@@ -4216,6 +4257,8 @@ class CharacterSheetLevelUp {
 		let selectedOptionalFeatures = {};
 		let selectedFeatureOptions = {};
 		let selectedSkills = [];
+		let selectedMulticlassSpells = [];
+		let selectedMulticlassCantrips = [];
 
 		const content = e_({outer: `<div></div>`});
 
@@ -4229,6 +4272,12 @@ class CharacterSheetLevelUp {
 		}
 		if (skillGrant) {
 			choicesList.push(`${skillGrant.count} skill proficiency`);
+		}
+		if (multiclassSpellGain > 0) {
+			choicesList.push(`${multiclassSpellGain} spell${multiclassSpellGain !== 1 ? "s" : ""}`);
+		}
+		if (multiclassCantripGain > 0) {
+			choicesList.push(`${multiclassCantripGain} cantrip${multiclassCantripGain !== 1 ? "s" : ""}`);
 		}
 
 		content.insertAdjacentHTML("beforeend", `
@@ -4295,6 +4344,52 @@ class CharacterSheetLevelUp {
 			content.append(featOptSection);
 		}
 
+		// Render spell selection for multiclass casters
+		if (hasSpellChoices) {
+			const allSpells = this._page.getFilteredSpellData();
+			const knownSpellIds = new Set([
+				...(this._state.getSpells?.() || []),
+				...(this._state.getCantripsKnown?.() || []),
+			].map(s => `${s.name}|${s.source}`));
+
+			if (isWizardMulticlass) {
+				const spellbookContent = CharacterSheetSpellPicker.renderWizardSpellbookPicker({
+					spellCount: multiclassSpellGain,
+					maxSpellLevel: multiclassMaxSpellLevel,
+					allSpells,
+					knownSpellIds,
+					className: selectedClass.name,
+					subclass: null,
+					getHoverLink: (...args) => CharacterSheetPage.getHoverLink(...args),
+					cantripCount: multiclassCantripGain,
+					onSelect: (spells) => { selectedMulticlassSpells = spells; },
+					onSelectCantrips: (cantrips) => { selectedMulticlassCantrips = cantrips; },
+				});
+				content.append(spellbookContent);
+			} else {
+				const spellPickerContent = CharacterSheetSpellPicker.renderKnownSpellPicker({
+					className: selectedClass.name,
+					classSource: selectedClass.source,
+					spellCount: multiclassSpellGain,
+					cantripCount: multiclassCantripGain,
+					maxSpellLevel: multiclassMaxSpellLevel,
+					allSpells,
+					knownSpellIds,
+					getHoverLink: (...args) => CharacterSheetPage.getHoverLink(...args),
+					subclass: null,
+					additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
+						className: selectedClass.name,
+						subclass: null,
+					}),
+					onSelect: (spells, cantrips) => {
+						selectedMulticlassSpells = spells;
+						selectedMulticlassCantrips = cantrips;
+					},
+				});
+				content.append(spellPickerContent);
+			}
+		}
+
 		modalInner.append(content);
 
 		// Footer buttons
@@ -4328,8 +4423,18 @@ class CharacterSheetLevelUp {
 					return;
 				}
 
+				// Validate spell selections
+				if (multiclassSpellGain > 0 && selectedMulticlassSpells.length < multiclassSpellGain) {
+					JqueryUtil.doToast({type: "warning", content: `Please select ${multiclassSpellGain} spell${multiclassSpellGain !== 1 ? "s" : ""}.`});
+					return;
+				}
+				if (multiclassCantripGain > 0 && selectedMulticlassCantrips.length < multiclassCantripGain) {
+					JqueryUtil.doToast({type: "warning", content: `Please select ${multiclassCantripGain} cantrip${multiclassCantripGain !== 1 ? "s" : ""}.`});
+					return;
+				}
+
 				// Apply multiclass with selections
-				await this._applyMulticlass(selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills);
+				await this._applyMulticlass(selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills, selectedMulticlassSpells, selectedMulticlassCantrips);
 
 				doClose(true);
 			});
@@ -4355,7 +4460,7 @@ class CharacterSheetLevelUp {
 	/**
 	 * Apply multiclass - add class, features, proficiencies, and selected optional features
 	 */
-	async _applyMulticlass (selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills = []) {
+	async _applyMulticlass (selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills = [], selectedSpells = [], selectedCantrips = []) {
 		// Add class at level 1 with caster info for multiclass spell slot calculation
 		this._state.addClass({
 			name: selectedClass.name,
@@ -4446,6 +4551,29 @@ class CharacterSheetLevelUp {
 		if (selectedSkills && selectedSkills.length) {
 			selectedSkills.forEach(skill => {
 				this._state.addSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""));
+			});
+		}
+
+		// Add selected spells from multiclass
+		if (selectedSpells && selectedSpells.length) {
+			const isWizard = selectedClass.name === "Wizard";
+			selectedSpells.forEach(spell => {
+				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
+					sourceFeature: isWizard ? "Wizard Spellbook" : (selectedClass.preparedSpellsProgression ? "Prepared Spells" : "Spells Known"),
+					sourceClass: selectedClass.name,
+					inSpellbook: isWizard,
+				}));
+			});
+		}
+
+		// Add selected cantrips from multiclass
+		if (selectedCantrips && selectedCantrips.length) {
+			selectedCantrips.forEach(cantrip => {
+				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(cantrip, {
+					sourceFeature: "Cantrips Known",
+					sourceClass: selectedClass.name,
+					isCantrip: true,
+				}));
 			});
 		}
 

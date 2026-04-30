@@ -2280,8 +2280,8 @@ class CharacterSheetQuickBuild {
 			);
 		});
 
-		const classSource = gain.classData?.source || gain.classSource;
-		const editionFiltered = CharacterSheetClassUtils.filterOptFeaturesByEdition(filtered, classSource);
+		const showAll = this._state.getSettings()?.showAllOptFeatureVersions || false;
+		const editionFiltered = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(filtered, {showAll});
 		const sourceFiltered = this._page.filterByAllowedSources(editionFiltered);
 
 		const existingCountMap = new Map();
@@ -2411,9 +2411,9 @@ class CharacterSheetQuickBuild {
 		}
 		const selectedList = this._selections.optionalFeatures[typeKey];
 
-		const classSource = gain.classData?.source || gain.classSource;
 		const rawOptFeatures = this._page.getOptionalFeatures() || [];
-		const editionFiltered = CharacterSheetClassUtils.filterOptFeaturesByEdition(rawOptFeatures, classSource);
+		const showAll = this._state.getSettings()?.showAllOptFeatureVersions || false;
+		const editionFiltered = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(rawOptFeatures, {showAll});
 		const allOptFeatures = this._page.filterByAllowedSources(editionFiltered);
 		const existingOptFeatures = this._state.getFeatures().filter(f => f.featureType === "Optional Feature");
 

@@ -296,6 +296,12 @@ class CharacterSheetPage {
 						return true;
 					}
 				}
+
+				// Allow homebrew subclasses with homebrew classSource to match base classes of the same name
+				// This handles cases like TGTT "Circle of the Zodiac" (classSource: "TGTT") targeting base Druid
+				if (isSubclassHomebrew && isClassBase && scClassSource === sc.source) {
+					return true;
+				}
 				
 				return false;
 			});
@@ -9405,6 +9411,18 @@ class CharacterSheetPage {
 			</label>
 		</div>`;
 
+		// Show all optional feature versions (no deduplication)
+		const currentShowAllOptFeatureVersions = this._state.getSettings()?.showAllOptFeatureVersions || false;
+		const showAllOptFeatureVersions = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-show-all-opt-versions" ${currentShowAllOptFeatureVersions ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">📋 Show All Feature Versions</span>
+					<span class="charsheet__settings-checkbox-desc">Show all source versions of optional features (Invocations, Metamagic, etc.) instead of deduplicating by priority (TGTT > XPHB > PHB)</span>
+				</span>
+			</label>
+		</div>`;
+
 		// Priority sources section
 		const currentPriority = this._state.getPrioritySources() || [];
 		const homebrewSources = allSources.filter(src => BrewUtil2.hasSourceJson(src.json) || PrereleaseUtil.hasSourceJson(src.json));
@@ -9452,6 +9470,7 @@ class CharacterSheetPage {
 				${includeCoreSpells}
 				${allowExoticLanguages}
 				${enforceAbilityScoreCap}
+				${showAllOptFeatureVersions}
 			</div>
 			
 			<div class="charsheet__settings-section">
@@ -9655,6 +9674,11 @@ class CharacterSheetPage {
 			this._renderAbilities();
 			this._renderCombatStats();
 			if (this._spellsModule) this._spellsModule.render();
+		});
+
+		// Show all optional feature versions handler
+		modalInner.querySelector("#settings-show-all-opt-versions").addEventListener("change", (e) => {
+			this._state.setSetting("showAllOptFeatureVersions", e.target.checked);
 		});
 	}
 

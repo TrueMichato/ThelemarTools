@@ -1590,6 +1590,77 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(state.hasPrimalFocus()).toBe(false);
 			});
 		});
+
+		describe("Primal Focus Stat Effects", () => {
+			it("should grant +10 walking speed in Predator mode at level 6+", () => {
+				state.addClass({name: "Ranger", source: "TGTT", level: 6});
+				state.applyClassFeatureEffects();
+				state.setPrimalFocusMode("predator");
+
+				const effects = state.getFeatureCalculations()._effects;
+				const speedEffect = effects.find(e => e.source === "Pursuit (Predator Focus)");
+				expect(speedEffect).toBeDefined();
+				expect(speedEffect.type).toBe("speed");
+				expect(speedEffect.value).toBe(10);
+			});
+
+			it("should NOT grant speed bonus in Prey mode", () => {
+				state.addClass({name: "Ranger", source: "TGTT", level: 6});
+				state.applyClassFeatureEffects();
+				state.setPrimalFocusMode("prey");
+
+				const effects = state.getFeatureCalculations()._effects;
+				const speedEffect = effects.find(e => e.source === "Pursuit (Predator Focus)");
+				expect(speedEffect).toBeUndefined();
+			});
+
+			it("should NOT grant speed bonus before level 6", () => {
+				state.addClass({name: "Ranger", source: "TGTT", level: 5});
+				state.applyClassFeatureEffects();
+				state.setPrimalFocusMode("predator");
+
+				const effects = state.getFeatureCalculations()._effects;
+				const speedEffect = effects.find(e => e.source === "Pursuit (Predator Focus)");
+				expect(speedEffect).toBeUndefined();
+			});
+
+			it("should grant AC bonus in Prey mode at level 6+", () => {
+				state.addClass({name: "Ranger", source: "TGTT", level: 6});
+				state.applyClassFeatureEffects();
+				state.setPrimalFocusMode("prey");
+
+				const effects = state.getFeatureCalculations()._effects;
+				const acEffect = effects.find(e => e.source === "Terrain Defense (Prey Focus)");
+				expect(acEffect).toBeDefined();
+				expect(acEffect.type).toBe("acBonus");
+				expect(acEffect.value).toBeGreaterThanOrEqual(1);
+			});
+
+			it("should NOT grant AC bonus in Predator mode", () => {
+				state.addClass({name: "Ranger", source: "TGTT", level: 6});
+				state.applyClassFeatureEffects();
+				state.setPrimalFocusMode("predator");
+
+				const effects = state.getFeatureCalculations()._effects;
+				const acEffect = effects.find(e => e.source === "Terrain Defense (Prey Focus)");
+				expect(acEffect).toBeUndefined();
+			});
+
+			it("should switch effects when mode changes", () => {
+				state.addClass({name: "Ranger", source: "TGTT", level: 6});
+				state.applyClassFeatureEffects();
+				state.setPrimalFocusMode("predator");
+
+				let effects = state.getFeatureCalculations()._effects;
+				expect(effects.find(e => e.source === "Pursuit (Predator Focus)")).toBeDefined();
+				expect(effects.find(e => e.source === "Terrain Defense (Prey Focus)")).toBeUndefined();
+
+				state.switchPrimalFocus();
+				effects = state.getFeatureCalculations()._effects;
+				expect(effects.find(e => e.source === "Pursuit (Predator Focus)")).toBeUndefined();
+				expect(effects.find(e => e.source === "Terrain Defense (Prey Focus)")).toBeDefined();
+			});
+		});
 	});
 	
 	// =========================================================================
@@ -4427,11 +4498,68 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 			// Verify cold resistance is applied
 			expect(state.hasResistance("cold")).toBe(true);
 		});
+
+		describe("Magician (Primal Order) Skill Bonuses", () => {
+			it("should grant WIS mod bonus to arcana and nature for TGTT Druid", () => {
+				state.addClass({name: "Druid", source: "TGTT", level: 1});
+				state.setAbilityBase("wis", 16); // +3 mod
+				state.addFeature({
+					name: "Magician",
+					source: "TGTT",
+					featureType: "Class",
+					className: "Druid",
+					level: 1,
+				});
+				state.applyClassFeatureEffects();
+
+				const calcs = state.getFeatureCalculations();
+				expect(calcs.hasMagician).toBe(true);
+				expect(calcs.magicianSkillBonus).toBe(3);
+			});
+
+			it("should apply minimum +1 bonus even with low WIS", () => {
+				state.addClass({name: "Druid", source: "TGTT", level: 1});
+				state.setAbilityBase("wis", 10); // +0 mod
+				state.addFeature({
+					name: "Magician",
+					source: "TGTT",
+					featureType: "Class",
+					className: "Druid",
+					level: 1,
+				});
+				state.applyClassFeatureEffects();
+
+				const calcs = state.getFeatureCalculations();
+				expect(calcs.hasMagician).toBe(true);
+				expect(calcs.magicianSkillBonus).toBe(1);
+			});
+
+			it("should push skillBonus effects for arcana and nature", () => {
+				state.addClass({name: "Druid", source: "TGTT", level: 1});
+				state.setAbilityBase("wis", 18); // +4 mod
+				state.addFeature({
+					name: "Magician",
+					source: "TGTT",
+					featureType: "Class",
+					className: "Druid",
+					level: 1,
+				});
+				state.applyClassFeatureEffects();
+
+				const calcs = state.getFeatureCalculations();
+				const arcanaEffect = calcs._effects.find(e => e.source === "Magician (Primal Order)" && e.skill === "arcana");
+				const natureEffect = calcs._effects.find(e => e.source === "Magician (Primal Order)" && e.skill === "nature");
+				expect(arcanaEffect).toBeDefined();
+				expect(arcanaEffect.value).toBe(4);
+				expect(natureEffect).toBeDefined();
+				expect(natureEffect.value).toBe(4);
+			});
+		});
 	});
 	
-	// =========================================================================
+	// =========================================================
 	// TGTT BARD SPECIALTIES
-	// =========================================================================
+	// =========================================================
 	describe("TGTT Bard Specialties", () => {
 		
 		it("should support Song of Rest specialty (healing)", () => {
@@ -9950,13 +10078,13 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 		// -----------------------------------------------------------------
 		describe("Druid Subclasses", () => {
 			
-			describe("Circle of the Stars (Zodiac)", () => {
+			describe("Circle of the Zodiac", () => {
 				beforeEach(() => {
 					state.addClass({
 						name: "Druid",
 						source: "TGTT",
 						level: 14,
-						subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+						subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 					});
 				});
 				
@@ -9966,7 +10094,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						source: "TGTT",
 						featureType: "Subclass",
 						className: "Druid",
-						subclassName: "Circle of the Stars",
+						subclassName: "Circle of the Zodiac",
 						level: 3,
 						description: "You can take on aspects of zodiac constellations."
 					});
@@ -9981,7 +10109,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						source: "TGTT",
 						featureType: "Subclass",
 						className: "Druid",
-						subclassName: "Circle of the Stars",
+						subclassName: "Circle of the Zodiac",
 						level: 3,
 						description: "You have advantage on saving throws against being frightened."
 					});
@@ -9996,7 +10124,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						source: "TGTT",
 						featureType: "Subclass",
 						className: "Druid",
-						subclassName: "Circle of the Stars",
+						subclassName: "Circle of the Zodiac",
 						level: 3,
 						description: "Your Armor Class increases by half your proficiency bonus (rounded up)."
 					});
@@ -10011,7 +10139,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						source: "TGTT",
 						featureType: "Subclass",
 						className: "Druid",
-						subclassName: "Circle of the Stars",
+						subclassName: "Circle of the Zodiac",
 						level: 10,
 						description: "You gain access to more powerful zodiac forms."
 					});
@@ -10026,7 +10154,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						source: "TGTT",
 						featureType: "Subclass",
 						className: "Druid",
-						subclassName: "Circle of the Stars",
+						subclassName: "Circle of the Zodiac",
 						level: 10,
 						description: "You have advantage on Constitution saving throws, and you can ignore effects that would push, pull, or knock you prone."
 					});
@@ -10041,7 +10169,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						source: "TGTT",
 						featureType: "Subclass",
 						className: "Druid",
-						subclassName: "Circle of the Stars",
+						subclassName: "Circle of the Zodiac",
 						level: 10,
 						description: "You gain blindsight out to 10 feet.",
 						senses: {blindsight: 10}
@@ -10058,7 +10186,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						source: "TGTT",
 						featureType: "Subclass",
 						className: "Druid",
-						subclassName: "Circle of the Stars",
+						subclassName: "Circle of the Zodiac",
 						level: 14,
 						description: "You master all zodiac forms."
 					});
@@ -10081,7 +10209,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					it("should grant Zodiac Form for TGTT Stars druid", () => {
 						state.addClass({
 							name: "Druid", source: "TGTT", level: 3,
-							subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+							subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 						});
 						const calcs = state.getFeatureCalculations();
 						expect(calcs.hasZodiacForm).toBe(true);
@@ -10106,7 +10234,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					beforeEach(() => {
 						state.addClass({
 							name: "Druid", source: "TGTT", level: 6,
-							subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+							subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 						});
 					});
 					
@@ -10178,7 +10306,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					it("should scale Bee damage to 2d8 at level 10", () => {
 						state.addClass({
 							name: "Druid", source: "TGTT", level: 10,
-							subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+							subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 						});
 						const calcs = state.getFeatureCalculations();
 						expect(calcs.beeDamage).toBe("2d8+3");
@@ -10187,7 +10315,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					it("should scale Bee damage to 3d8 at level 14", () => {
 						state.addClass({
 							name: "Druid", source: "TGTT", level: 14,
-							subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+							subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 						});
 						const calcs = state.getFeatureCalculations();
 						expect(calcs.beeDamage).toBe("3d8+3");
@@ -10198,7 +10326,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					beforeEach(() => {
 						state.addClass({
 							name: "Druid", source: "TGTT", level: 10,
-							subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+							subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 						});
 					});
 					
@@ -10274,7 +10402,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					it("should not have Star Week at level 9", () => {
 						state.addClass({
 							name: "Druid", source: "TGTT", level: 9,
-							subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+							subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 						});
 						const calcs = state.getFeatureCalculations();
 						expect(calcs.hasStarWeek).toBeFalsy();
@@ -10286,7 +10414,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					it("should grant Full Zodiac at level 14", () => {
 						state.addClass({
 							name: "Druid", source: "TGTT", level: 14,
-							subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+							subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 						});
 						const calcs = state.getFeatureCalculations();
 						expect(calcs.hasFullZodiac).toBe(true);
@@ -10295,7 +10423,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					it("should not have Full Zodiac before level 14", () => {
 						state.addClass({
 							name: "Druid", source: "TGTT", level: 13,
-							subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+							subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 						});
 						const calcs = state.getFeatureCalculations();
 						expect(calcs.hasFullZodiac).toBeFalsy();
@@ -10317,7 +10445,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 							state = new CharacterSheetState();
 							state.addClass({
 								name: "Druid", source: "TGTT", level: tc.level,
-								subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+								subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 							});
 							const calcs = state.getFeatureCalculations();
 							expect(calcs.buletteAcBonus).toBe(tc.expected);

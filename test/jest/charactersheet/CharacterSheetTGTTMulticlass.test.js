@@ -43,7 +43,7 @@ describe("TGTT Multiclass Builds", () => {
 			state.addClass({
 				name: "Druid", source: "TGTT", level: druidLevel,
 				subclass: druidLevel >= 3
-					? {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
+					? {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 					: undefined,
 			});
 			state.setAbilityBase("str", 10);
@@ -142,7 +142,7 @@ describe("TGTT Multiclass Builds", () => {
 				s2.addClass({name: "Ranger", source: "TGTT", level: 14,
 					subclass: {name: "Hunter", shortName: "Hunter", source: "TGTT"}});
 				s2.addClass({name: "Druid", source: "TGTT", level: 6,
-					subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
+					subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}});
 				s2.setAbilityBase("wis", 18);
 				s2.applyClassFeatureEffects();
 				const high = s2.getFeatureCalculations().focusSwitchesMax;
@@ -447,6 +447,127 @@ describe("TGTT Multiclass Builds", () => {
 				// SP still at TGTT value (7 + 1 = 8)
 				const calcs = state.getFeatureCalculations();
 				expect(calcs.sorceryPoints).toBe(8);
+			});
+		});
+	});
+
+	// =========================================================================
+	// MULTICLASS SPELL CHOICES — Verifies spell state when multiclassing into casters
+	// =========================================================================
+	describe("Multiclass Spell Choices", () => {
+
+		describe("Known caster multiclass (Ranger into Sorcerer)", () => {
+			it("should store spells added via multiclass with correct sourceClass", () => {
+				// Start as Ranger 5
+				state.addClass({name: "Ranger", source: "TGTT", level: 5});
+
+				// Multiclass into Sorcerer — add class then manually add spells (simulating _applyMulticlass)
+				state.addClass({
+					name: "Sorcerer", source: "TGTT", level: 1,
+					casterProgression: "full",
+					spellsKnownProgression: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 13, 13, 14, 14, 15, 15, 15, 15],
+					cantripProgression: [4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
+				});
+
+				// Simulate spell choices that _applyMulticlass would apply
+				state.addSpell({name: "Shield", source: "PHB", level: 1, sourceClass: "Sorcerer", sourceFeature: "Spells Known"});
+				state.addSpell({name: "Magic Missile", source: "PHB", level: 1, sourceClass: "Sorcerer", sourceFeature: "Spells Known"});
+
+				const spells = state.getSpells();
+				const sorcererSpells = spells.filter(s => s.sourceClass === "Sorcerer");
+				expect(sorcererSpells.length).toBe(2);
+				expect(sorcererSpells.some(s => s.name === "Shield")).toBe(true);
+				expect(sorcererSpells.some(s => s.name === "Magic Missile")).toBe(true);
+			});
+
+			it("should store cantrips added via multiclass with correct sourceClass", () => {
+				state.addClass({name: "Ranger", source: "TGTT", level: 5});
+				state.addClass({
+					name: "Sorcerer", source: "TGTT", level: 1,
+					casterProgression: "full",
+					cantripProgression: [4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
+				});
+
+				state.addSpell({name: "Fire Bolt", source: "PHB", level: 0, sourceClass: "Sorcerer", sourceFeature: "Cantrips Known", isCantrip: true});
+				state.addSpell({name: "Prestidigitation", source: "PHB", level: 0, sourceClass: "Sorcerer", sourceFeature: "Cantrips Known", isCantrip: true});
+
+				const cantrips = state.getSpells().filter(s => s.level === 0 && s.sourceClass === "Sorcerer");
+				expect(cantrips.length).toBe(2);
+			});
+		});
+
+		describe("Prepared caster multiclass (Fighter into Druid)", () => {
+			it("should store prepared spells added via multiclass", () => {
+				state.addClass({name: "Fighter", source: "TGTT", level: 5});
+				state.addClass({
+					name: "Druid", source: "TGTT", level: 1,
+					casterProgression: "full",
+					preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
+					cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+				});
+
+				// Simulate the 4 prepared spells from preparedSpellsProgression[0]
+				state.addSpell({name: "Cure Wounds", source: "PHB", level: 1, sourceClass: "Druid", sourceFeature: "Prepared Spells"});
+				state.addSpell({name: "Entangle", source: "PHB", level: 1, sourceClass: "Druid", sourceFeature: "Prepared Spells"});
+				state.addSpell({name: "Faerie Fire", source: "PHB", level: 1, sourceClass: "Druid", sourceFeature: "Prepared Spells"});
+				state.addSpell({name: "Healing Word", source: "PHB", level: 1, sourceClass: "Druid", sourceFeature: "Prepared Spells"});
+
+				const druidSpells = state.getSpells().filter(s => s.sourceClass === "Druid" && s.level === 1);
+				expect(druidSpells.length).toBe(4);
+			});
+
+			it("should store cantrips added via Druid multiclass", () => {
+				state.addClass({name: "Fighter", source: "TGTT", level: 5});
+				state.addClass({
+					name: "Druid", source: "TGTT", level: 1,
+					casterProgression: "full",
+					cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+				});
+
+				state.addSpell({name: "Druidcraft", source: "PHB", level: 0, sourceClass: "Druid", sourceFeature: "Cantrips Known", isCantrip: true});
+				state.addSpell({name: "Produce Flame", source: "PHB", level: 0, sourceClass: "Druid", sourceFeature: "Cantrips Known", isCantrip: true});
+
+				const cantrips = state.getSpells().filter(s => s.level === 0 && s.sourceClass === "Druid");
+				expect(cantrips.length).toBe(2);
+			});
+		});
+
+		describe("Multiclass spell slots are correct with added spells", () => {
+			it("should have correct combined spell slots for Ranger 6 / Druid 1", () => {
+				state.addClass({
+					name: "Ranger", source: "TGTT", level: 6,
+					casterProgression: "artificer",
+				});
+				state.addClass({
+					name: "Druid", source: "TGTT", level: 1,
+					casterProgression: "full",
+					preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
+				});
+
+				state.calculateSpellSlots();
+				const slots = state.getSpellSlots();
+
+				// Multiclass caster level: Ranger 6 / 2 (artificer=half rounded up) + Druid 1 = 4
+				// Level 4 full caster slots: 4/3/0/0/0/0/0/0/0
+				expect(slots[1]?.max).toBe(4);
+				expect(slots[2]?.max).toBe(3);
+			});
+
+			it("should keep multiclass spells separate by sourceClass", () => {
+				state.addClass({name: "Ranger", source: "TGTT", level: 5});
+				state.addSpell({name: "Hunter's Mark", source: "PHB", level: 1, sourceClass: "Ranger", sourceFeature: "Spells Known"});
+
+				state.addClass({name: "Druid", source: "TGTT", level: 1, casterProgression: "full"});
+				state.addSpell({name: "Cure Wounds", source: "PHB", level: 1, sourceClass: "Druid", sourceFeature: "Prepared Spells"});
+
+				const allSpells = state.getSpells();
+				const rangerSpells = allSpells.filter(s => s.sourceClass === "Ranger");
+				const druidSpells = allSpells.filter(s => s.sourceClass === "Druid");
+
+				expect(rangerSpells.length).toBe(1);
+				expect(rangerSpells[0].name).toBe("Hunter's Mark");
+				expect(druidSpells.length).toBe(1);
+				expect(druidSpells[0].name).toBe("Cure Wounds");
 			});
 		});
 	});
