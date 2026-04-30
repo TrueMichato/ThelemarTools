@@ -3129,6 +3129,9 @@
 			"page": 38,
 			"level": 1,
 			"school": "D",
+			"meta": {
+				"ritual": true
+			},
 			"time": [
 				{
 					"number": 1,
