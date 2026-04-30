@@ -85,26 +85,189 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * Filter optional features to only include those matching the class's edition.
+	 * Deduplicate optional features by source priority. When the same feature exists in multiple
+	 * sources, keeps only the highest-priority version (TGTT > XPHB > PHB > others alphabetical).
 	 * @param {Array} optFeatures - All optional features
-	 * @param {string} classSource - The class's source book
-	 * @returns {Array} Filtered optional features
+	 * @param {object} [opts] - Options
+	 * @param {boolean} [opts.showAll=false] - If true, skip deduplication and return all features
+	 * @returns {Array} Deduplicated optional features
 	 */
-	static filterOptFeaturesByEdition (optFeatures, classSource) {
-		if (!classSource || !optFeatures?.length) return optFeatures;
+	static deduplicateOptFeaturesByEdition (optFeatures, {showAll = false} = {}) {
+		if (!optFeatures?.length) return optFeatures;
+		if (showAll) return optFeatures;
 
-		const editionMap = {
-			"TGTT": ["TGTT"],
-			"XPHB": ["XPHB", "TCE", "XGE", "FTD", "SCC"],
-			"PHB": ["PHB", "TCE", "XGE", "UA", "FTD", "SCC"],
+		// Source priority: lower = higher priority
+		const SOURCE_PRIORITY = {"TGTT": 0, "XPHB": 1, "PHB": 2};
+
+		const getSourcePriority = (source) => {
+			if (source in SOURCE_PRIORITY) return SOURCE_PRIORITY[source];
+			return 100; // Other sources get equal low priority (kept if no higher-priority dupe)
 		};
 
-		const allowedSources = editionMap[classSource];
-		if (!allowedSources) return optFeatures;
+		// Group by lowercase name
+		const groups = new Map();
+		for (const opt of optFeatures) {
+			const key = opt.name.toLowerCase();
+			if (!groups.has(key)) {
+				groups.set(key, []);
+			}
+			groups.get(key).push(opt);
+		}
 
-		return optFeatures.filter(opt => {
-			if (!opt.source) return true;
-			return allowedSources.includes(opt.source);
+		// For each group, pick the one with highest priority (lowest number)
+		const result = [];
+		for (const group of groups.values()) {
+			if (group.length === 1) {
+				result.push(group[0]);
+			} else {
+				group.sort((a, b) => {
+					const prioA = getSourcePriority(a.source);
+					const prioB = getSourcePriority(b.source);
+					if (prioA !== prioB) return prioA - prioB;
+					return (a.source || "").localeCompare(b.source || "");
+				});
+				result.push(group[0]);
+			}
+		}
+
+		return result;
+	}
+
+	/**
+	 * @deprecated Use deduplicateOptFeaturesByEdition instead
+	 */
+	static filterOptFeaturesByEdition (optFeatures, classSource) {
+		return CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(optFeatures);
+	}
+
+	/**
+	 * Check whether a character meets an optional feature's prerequisites.
+	 * @param {Array|null} prerequisite - The feature's `prerequisite` array (from data)
+	 * @param {object} context - Character state context
+	 * @param {Array} context.classes - Array of {name, source, level}
+	 * @param {number} context.totalLevel - Character's total level
+	 * @param {Array} context.existingFeatures - Already-chosen optional features (with `name` field)
+	 * @param {Array} context.cantrips - Known cantrips (with `name`, optionally `sourceClass`)
+	 * @param {Array} context.spells - Known spells (with `name`, optionally `sourceClass`)
+	 * @returns {{met: boolean, reasons: string[]}} Whether prerequisites are met, with unmet reasons
+	 */
+	static checkPrerequisites (prerequisite, context) {
+		if (!prerequisite?.length) return {met: true, reasons: []};
+
+		const {classes = [], totalLevel = 0, existingFeatures = [], cantrips = [], spells = []} = context;
+		const reasons = [];
+
+		for (const prereq of prerequisite) {
+			// Level prerequisite
+			if (prereq.level) {
+				const reqLevel = prereq.level.level || prereq.level;
+				if (prereq.level.class) {
+					const className = prereq.level.class.name?.toLowerCase();
+					const classMatch = classes.find(c => c.name.toLowerCase() === className);
+					if (!classMatch || classMatch.level < reqLevel) {
+						const classLabel = prereq.level.class.name || "class";
+						reasons.push(`Level ${reqLevel} ${classLabel}`);
+					}
+				} else if (totalLevel < reqLevel) {
+					reasons.push(`Level ${reqLevel}`);
+				}
+			}
+
+			// Pact prerequisite (short form: "Blade", "Chain", "Tome", "Talisman")
+			if (prereq.pact) {
+				const pactLc = prereq.pact.toLowerCase();
+				const hasPact = existingFeatures.some(f => {
+					const nameLc = f.name?.toLowerCase() || "";
+					return nameLc === `pact of the ${pactLc}`
+						|| nameLc === `pact of ${pactLc}`
+						|| nameLc.includes(`pact of the ${pactLc}`)
+						|| nameLc.includes(`pact of ${pactLc}`);
+				});
+				if (!hasPact) {
+					reasons.push(`Pact of the ${prereq.pact.charAt(0).toUpperCase() + prereq.pact.slice(1)}`);
+				}
+			}
+
+			// Spell prerequisite
+			if (prereq.spell) {
+				for (const spellReq of prereq.spell) {
+					if (typeof spellReq === "string") {
+						// PHB format: "eldritch blast#c" — strip #c suffix, match by name
+						const spellName = spellReq.replace(/#c$/i, "").toLowerCase().trim();
+						const isCantrip = spellReq.endsWith("#c");
+						const pool = isCantrip ? cantrips : [...cantrips, ...spells];
+						const hasSpell = pool.some(s => s.name?.toLowerCase() === spellName);
+						if (!hasSpell) {
+							const displayName = spellName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+							reasons.push(`${displayName} ${isCantrip ? "cantrip" : "spell"}`);
+						}
+					} else if (typeof spellReq === "object" && spellReq.choose) {
+						// XPHB format: {choose: "level=0|class=Warlock", entry: "...", entrySummary: "..."}
+						const met = CharacterSheetClassUtils._checkSpellChoosePrereq(spellReq, context);
+						if (!met) {
+							const label = spellReq.entrySummary || spellReq.entry || "a required spell";
+							reasons.push(label);
+						}
+					}
+				}
+			}
+
+			// Optional feature prerequisite
+			if (prereq.optionalfeature) {
+				for (const ofReq of prereq.optionalfeature) {
+					// Format is "name|source" UID
+					const reqName = (typeof ofReq === "string" ? ofReq.split("|")[0] : ofReq.name || "").toLowerCase();
+					const hasFeature = existingFeatures.some(f => f.name?.toLowerCase() === reqName);
+					if (!hasFeature) {
+						const displayName = reqName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+						reasons.push(displayName);
+					}
+				}
+			}
+
+			// Feature prerequisite (class/subclass feature)
+			if (prereq.feature) {
+				for (const fReq of prereq.feature) {
+					const reqName = (typeof fReq === "string" ? fReq.split("|")[0] : fReq.name || "").toLowerCase();
+					const hasFeature = existingFeatures.some(f => f.name?.toLowerCase() === reqName);
+					if (!hasFeature) {
+						const displayName = reqName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+						reasons.push(displayName);
+					}
+				}
+			}
+		}
+
+		return {met: reasons.length === 0, reasons};
+	}
+
+	/**
+	 * Check an XPHB-style spell "choose" prerequisite.
+	 * Format: "level=0|class=Warlock" means "has a level-0 spell from class Warlock"
+	 * @private
+	 */
+	static _checkSpellChoosePrereq (spellReq, context) {
+		const {cantrips = [], spells = []} = context;
+		const chooseStr = spellReq.choose || "";
+		const parts = chooseStr.split("|");
+
+		let requiredLevel = null;
+		let requiredClass = null;
+
+		for (const part of parts) {
+			const [key, val] = part.split("=");
+			if (key === "level") requiredLevel = parseInt(val);
+			if (key === "class") requiredClass = val?.toLowerCase();
+		}
+
+		const pool = requiredLevel === 0 ? cantrips : [...cantrips, ...spells];
+		return pool.some(s => {
+			if (requiredLevel !== null && requiredLevel === 0 && !cantrips.includes(s)) return false;
+			if (requiredLevel !== null && requiredLevel > 0) {
+				if (s.level !== undefined && s.level !== requiredLevel) return false;
+			}
+			if (requiredClass && s.sourceClass?.toLowerCase() !== requiredClass) return false;
+			return true;
 		});
 	}
 
@@ -250,6 +413,13 @@ class CharacterSheetClassUtils {
 			if (classList?.some(c => c.name === className)) return true;
 		} catch (e) { /* fall through */ }
 		if (spell.classes?.fromClassList?.some(c => c.name === className)) return true;
+
+		// Check variant/optional class lists (e.g. spells added via XGE/TCE expanded lists)
+		try {
+			const classListVariant = Renderer.spell.getCombinedClasses(spell, "fromClassListVariant");
+			if (classListVariant?.some(c => c.name === className)) return true;
+		} catch (e) { /* fall through */ }
+		if (spell.classes?.fromClassListVariant?.some(c => c.name === className)) return true;
 
 		// Check subclass spell lists if subclass is provided
 		if (opts.subclass) {
@@ -507,6 +677,8 @@ class CharacterSheetClassUtils {
 			return Math.min(4, Math.ceil(classLevel / 7));
 		} else if (casterProgression === "pact") {
 			return Math.min(5, Math.ceil(classLevel / 2));
+		} else if (casterProgression === "artificer") {
+			return Math.min(5, Math.ceil(classLevel / 4));
 		}
 		return Math.min(9, Math.ceil(classLevel / 2));
 	}

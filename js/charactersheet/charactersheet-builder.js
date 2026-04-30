@@ -5284,25 +5284,12 @@ class CharacterSheetBuilder {
 	}
 
 	/**
-	 * Filter optional features by class edition/source.
-	 * TGTT classes only see TGTT optional features, XPHB/PHB see their respective editions.
+	 * Deduplicate optional features by source priority.
+	 * @deprecated Use CharacterSheetClassUtils.deduplicateOptFeaturesByEdition instead
 	 */
 	_filterOptFeaturesByEdition (optFeatures, classSource) {
-		if (!classSource || !optFeatures?.length) return optFeatures;
-
-		const editionMap = {
-			"TGTT": ["TGTT"],
-			"XPHB": ["XPHB", "TCE", "XGE", "FTD", "SCC"],
-			"PHB": ["PHB", "TCE", "XGE", "UA", "FTD", "SCC"],
-		};
-
-		const allowedSources = editionMap[classSource];
-		if (!allowedSources) return optFeatures;
-
-		return optFeatures.filter(opt => {
-			if (!opt.source) return true;
-			return allowedSources.includes(opt.source);
-		});
+		const showAll = this._state?.getSettings?.()?.showAllOptFeatureVersions || false;
+		return CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(optFeatures, {showAll});
 	}
 
 	_renderClassOptionalFeatures (cls) {

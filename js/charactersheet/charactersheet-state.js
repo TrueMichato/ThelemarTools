@@ -13258,7 +13258,7 @@ class CharacterSheetState {
 					// Wild Shape DC is spell save DC
 					calculations.wildShapeDc = this.getSpellSaveDc();
 
-					// Primal Order (XPHB level 1) - Magician or Warden choice
+					// Primal Order (XPHB/TGTT level 1) - Magician or Warden choice
 					if (isXPHB && level >= 1) {
 						const hasMagician = this.hasFeature("Magician");
 						const hasWarden = this.hasFeature("Warden");
@@ -13522,7 +13522,9 @@ class CharacterSheetState {
 							}
 							case "circle of the stars":
 							case "circle of stars":
-							case "stars": {
+							case "stars":
+							case "circle of the zodiac":
+							case "zodiac": {
 								const isTGTTStars = cls.subclass?.source === "TGTT" || cls.source === "TGTT";
 
 								if (isTGTTStars) {
@@ -16636,6 +16638,30 @@ class CharacterSheetState {
 		// RANGER FEATURES
 		// =========================================================
 
+		// Primal Focus — Pursuit (Predator L6+): +10 walking speed
+		if (calculations.hasPrimalFocus && calculations.primalFocusUpgrade1
+			&& this.getPrimalFocusMode() === "predator" && !alreadyProcessed("Pursuit")) {
+			effects.push({
+				type: "speed",
+				speedType: "walk",
+				value: 10,
+				source: "Pursuit (Predator Focus)",
+				conditional: "while in Predator focus",
+			});
+		}
+
+		// Primal Focus — Terrain Defense (Prey L6+): +half proficiency to AC (conditional)
+		if (calculations.hasPrimalFocus && calculations.primalFocusUpgrade1
+			&& this.getPrimalFocusMode() === "prey" && !alreadyProcessed("Terrain Defense")) {
+			const halfProf = Math.max(1, Math.floor(this.getProficiencyBonus() / 2));
+			effects.push({
+				type: "acBonus",
+				value: halfProf,
+				source: "Terrain Defense (Prey Focus)",
+				conditional: "when benefiting from cover or in difficult terrain",
+			});
+		}
+
 		// Feral Senses (Ranger 18): 30ft blindsight
 		if (calculations.hasFeralSenses && calculations.feralSensesRange && !alreadyProcessed("Feral Senses")) {
 			effects.push({ type: "sense", sense: "blindsight", range: calculations.feralSensesRange, source: "Feral Senses" });
@@ -17402,6 +17428,18 @@ class CharacterSheetState {
 				if (effect.bonus === "halfProficiency") {
 					// Jack of All Trades style - handled in skill calculations
 					return `${effect.source}: +half proficiency to unproficient checks`;
+				}
+				// Value-based skill bonuses (e.g., Magician: +WIS to Arcana/Nature)
+				if (effect.skill && effect.value) {
+					const skillTarget = `skill:${effect.skill}`;
+					this._addClassFeatureModifier({
+						name: effect.source,
+						type: skillTarget,
+						value: effect.value,
+						note: `From ${effect.source}`,
+						enabled: true,
+					});
+					return `${effect.source}: +${effect.value} to ${effect.skill} checks`;
 				}
 				return null;
 			}
@@ -21257,7 +21295,7 @@ class CharacterSheetState {
 
 	// #region Settings
 	getSettings () {
-		return this._data.settings || {exhaustionRules: "2024"};
+		return this._data.settings || {exhaustionRules: "2024", showAllOptFeatureVersions: false};
 	}
 
 	setSetting (key, value) {
@@ -21267,6 +21305,7 @@ class CharacterSheetState {
 				allowedSources: null,
 				includeCoreSpellsForHomebrew: true,
 				allowExoticLanguages: true,
+				showAllOptFeatureVersions: false,
 			};
 		}
 		this._data.settings[key] = value;

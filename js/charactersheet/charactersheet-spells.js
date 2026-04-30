@@ -256,13 +256,42 @@ class CharacterSheetSpells {
 
 	async _showSpellPicker () {
 		const classes = this._state.getClasses();
-		if (!classes) {
+		if (!classes || !classes.length) {
 			JqueryUtil.doToast({type: "warning", content: "Add a class to your character first."});
 			return;
 		}
 
+		// For multiclass: let user pick which class to add spells for
+		let characterClass;
+		if (classes.length > 1) {
+			// Filter to caster classes only
+			const casterClasses = classes.filter(cls => {
+				if (cls.casterProgression) return true;
+				const casterNames = ["Bard", "Cleric", "Druid", "Sorcerer", "Wizard", "Warlock", "Paladin", "Ranger", "Artificer"];
+				return casterNames.includes(cls.name);
+			});
+
+			if (!casterClasses.length) {
+				JqueryUtil.doToast({type: "warning", content: "No spellcasting classes found."});
+				return;
+			}
+
+			if (casterClasses.length === 1) {
+				characterClass = casterClasses[0];
+			} else {
+				// Show class selection
+				const selectedIndex = await InputUiUtil.pGetUserEnum({
+					title: "Select Class for Spell List",
+					values: casterClasses.map(c => `${c.name} (Level ${c.level})`),
+				});
+				if (selectedIndex == null) return;
+				characterClass = casterClasses[selectedIndex];
+			}
+		} else {
+			characterClass = classes[0];
+		}
+
 		// Get class spell list, filtered by allowed sources
-		const characterClass = classes[0];
 		let className = characterClass.name;
 		const classSource = characterClass.source;
 
@@ -297,7 +326,7 @@ class CharacterSheetSpells {
 
 		// Filter by level
 		const characterLevel = this._state.getTotalLevel();
-		const maxSpellLevel = this._getMaxSpellLevel(classes[0], characterLevel);
+		const maxSpellLevel = this._getMaxSpellLevel(characterClass, characterLevel);
 
 		const availableSpells = classSpells
 			.filter(spell => spell.level <= maxSpellLevel)
@@ -311,11 +340,18 @@ class CharacterSheetSpells {
 	}
 
 	_getMaxSpellLevel (classInfo, characterLevel) {
-		// Full casters
+		// Get the per-class level (not total character level) for spell level limits
+		const classLevel = this._state.getClassLevel(classInfo.name) || characterLevel;
+
+		// Use the class's casterProgression field if available (handles homebrew correctly)
+		const casterProg = classInfo.casterProgression;
+		if (casterProg) {
+			return CharacterSheetClassUtils.getMaxSpellLevelFromProgression(casterProg, classLevel);
+		}
+
+		// Fallback: hardcoded class name lookup for classes without casterProgression field
 		const fullCasters = ["Bard", "Cleric", "Druid", "Sorcerer", "Wizard"];
-		// Half casters
 		const halfCasters = ["Paladin", "Ranger", "Artificer"];
-		// Third casters
 		const thirdCasters = ["Eldritch Knight", "Arcane Trickster", "Gambler", "Architect of Ruin"];
 
 		const className = classInfo.name;
@@ -323,28 +359,26 @@ class CharacterSheetSpells {
 
 		// Warlock has special progression - pact magic up to 5th, plus Mystic Arcanum
 		if (className === "Warlock") {
-			// Mystic Arcanum grants access to higher level spells
-			if (characterLevel >= 17) return 9;
-			if (characterLevel >= 15) return 8;
-			if (characterLevel >= 13) return 7;
-			if (characterLevel >= 11) return 6;
-			// Pact Magic maxes at 5th level spells at level 9
-			if (characterLevel >= 9) return 5;
-			if (characterLevel >= 7) return 4;
-			if (characterLevel >= 5) return 3;
-			if (characterLevel >= 3) return 2;
-			if (characterLevel >= 1) return 1;
+			if (classLevel >= 17) return 9;
+			if (classLevel >= 15) return 8;
+			if (classLevel >= 13) return 7;
+			if (classLevel >= 11) return 6;
+			if (classLevel >= 9) return 5;
+			if (classLevel >= 7) return 4;
+			if (classLevel >= 5) return 3;
+			if (classLevel >= 3) return 2;
+			if (classLevel >= 1) return 1;
 			return 0;
 		}
 
-		let casterLevel = characterLevel;
+		let casterLevel = classLevel;
 
 		if (fullCasters.includes(className)) {
 			// Full caster: use full level
 		} else if (halfCasters.includes(className)) {
-			casterLevel = Math.floor(characterLevel / 2);
+			casterLevel = Math.floor(classLevel / 2);
 		} else if (thirdCasters.includes(subclassName)) {
-			casterLevel = Math.floor(characterLevel / 3);
+			casterLevel = Math.floor(classLevel / 3);
 		} else {
 			return 0; // Non-caster
 		}

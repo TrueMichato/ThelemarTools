@@ -1018,8 +1018,9 @@ class CharacterSheetRespec {
 			return degree > 0 && degree <= maxDegree && tradCode && knownTraditions.includes(tradCode);
 		});
 
-		// Filter by edition
-		const filteredMethods = CharacterSheetClassUtils.filterOptFeaturesByEdition?.(availableMethods, classData?.source || history.class?.source) || availableMethods;
+		// Deduplicate by edition priority
+		const showAll = this._state.getSettings()?.showAllOptFeatureVersions || false;
+		const filteredMethods = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition?.(availableMethods, {showAll}) || availableMethods;
 
 		// Current selections for this type at this level
 		const currentSelections = (history.choices.optionalFeatures || []).filter(of => of.type === featureTypeKey);
@@ -1341,7 +1342,8 @@ class CharacterSheetRespec {
 		const classData = this._page.getClasses()?.find(c =>
 			c.name === history.class?.name && c.source === history.class?.source,
 		);
-		const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesByEdition(allOptFeaturesRaw, classData?.source || history.class?.source);
+		const showAll = this._state.getSettings()?.showAllOptFeatureVersions || false;
+		const allOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
 
 		// Filter to matching feature type
 		const featureTypes = featureTypeKey.split("_");

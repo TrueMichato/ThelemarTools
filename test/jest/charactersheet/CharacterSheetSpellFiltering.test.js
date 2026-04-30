@@ -136,6 +136,52 @@ describe("spellIsForClass", () => {
 	});
 
 	// ==========================================================================
+	// spellIsForClass — variant class list (fromClassListVariant)
+	// ==========================================================================
+	describe("variant class list (fromClassListVariant)", () => {
+		const absorbElements = {
+			name: "Absorb Elements",
+			source: "XGE",
+			level: 1,
+			classes: {
+				fromClassListVariant: [
+					{name: "Druid", source: "PHB", definedInSource: "XGE"},
+					{name: "Ranger", source: "PHB", definedInSource: "XGE"},
+					{name: "Sorcerer", source: "PHB", definedInSource: "XGE"},
+					{name: "Wizard", source: "PHB", definedInSource: "XGE"},
+				],
+			},
+		};
+
+		it("should match Ranger via fromClassListVariant", () => {
+			expect(CharacterSheetClassUtils.spellIsForClass(absorbElements, "Ranger")).toBe(true);
+		});
+
+		it("should match Druid via fromClassListVariant", () => {
+			expect(CharacterSheetClassUtils.spellIsForClass(absorbElements, "Druid")).toBe(true);
+		});
+
+		it("should NOT match a class not in variant list", () => {
+			expect(CharacterSheetClassUtils.spellIsForClass(absorbElements, "Cleric")).toBe(false);
+		});
+
+		it("should match when spell has both fromClassList and fromClassListVariant", () => {
+			const spell = {
+				name: "Ice Knife",
+				source: "XGE",
+				level: 1,
+				classes: {
+					fromClassList: [{name: "Wizard", source: "PHB"}],
+					fromClassListVariant: [{name: "Sorcerer", source: "PHB", definedInSource: "XGE"}],
+				},
+			};
+			expect(CharacterSheetClassUtils.spellIsForClass(spell, "Wizard")).toBe(true);
+			expect(CharacterSheetClassUtils.spellIsForClass(spell, "Sorcerer")).toBe(true);
+			expect(CharacterSheetClassUtils.spellIsForClass(spell, "Bard")).toBe(false);
+		});
+	});
+
+	// ==========================================================================
 	// Backward compatibility
 	// ==========================================================================
 	describe("backward compatibility", () => {
@@ -165,5 +211,79 @@ describe("spellIsForClass", () => {
 				globalThis.Renderer.spell.getCombinedClasses = original;
 			}
 		});
+	});
+});
+
+// ==========================================================================
+// getMaxSpellLevelFromProgression — caster progression formulas
+// ==========================================================================
+describe("getMaxSpellLevelFromProgression", () => {
+	it("should return 2 for half-caster at level 6", () => {
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("1/2", 6)).toBe(2);
+	});
+
+	it("should return 2 for artificer progression at level 6", () => {
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("artificer", 6)).toBe(2);
+	});
+
+	it("should return 1 for artificer progression at level 2", () => {
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("artificer", 2)).toBe(1);
+	});
+
+	it("should return 3 for artificer progression at level 9", () => {
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("artificer", 9)).toBe(3);
+	});
+
+	it("should cap artificer progression at 5", () => {
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("artificer", 20)).toBe(5);
+	});
+
+	it("should return 3 for full caster at level 5", () => {
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("full", 5)).toBe(3);
+	});
+
+	it("should return 5 for pact caster at level 9", () => {
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("pact", 9)).toBe(5);
+	});
+
+	it("should return 1 for third-caster at level 3", () => {
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("1/3", 3)).toBe(1);
+	});
+});
+
+// ==========================================================================
+// Multiclass per-class spell level limits
+// ==========================================================================
+describe("Multiclass per-class max spell level", () => {
+	it("Druid 3 in a multiclass should cap at 2nd level spells", () => {
+		// Druid is a full caster: ceil(3/2) = 2
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("full", 3)).toBe(2);
+	});
+
+	it("Ranger 6 (artificer prog) in a multiclass should cap at 2nd level spells", () => {
+		// Artificer/Ranger: ceil(6/4) = 2
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("artificer", 6)).toBe(2);
+	});
+
+	it("Ranger 6 (half-caster prog) in a multiclass should cap at 2nd level spells", () => {
+		// Half caster: ceil(6/4) = 2
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("1/2", 6)).toBe(2);
+	});
+
+	it("Warlock 5 in a multiclass should cap at 3rd level spells", () => {
+		// Pact: ceil(5/2) = 3
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("pact", 5)).toBe(3);
+	});
+
+	it("Sorcerer 1 in a multiclass should cap at 1st level spells", () => {
+		// Full caster: ceil(1/2) = 1
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("full", 1)).toBe(1);
+	});
+
+	it("should NOT use combined caster level — Druid 3 is 2nd, not 5th (if total was 9)", () => {
+		// The bug was using characterLevel (9) for a Druid 3 → ceil(9/2) = 5
+		// Correct: per-class level 3 → ceil(3/2) = 2
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("full", 3)).toBe(2);
+		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("full", 9)).toBe(5);
 	});
 });

@@ -1,5 +1,5 @@
 /**
- * TGTT Zodiac Druid (Circle of the Stars) — Extended L1→20 test coverage.
+ * TGTT Zodiac Druid (Circle of the Zodiac) — Extended L1→20 test coverage.
  *
  * The main CharacterSheetTGTT.test.js already covers extensive Zodiac Form
  * calculations (Month Constellations, Star Week, Full Zodiac, Bee Damage
