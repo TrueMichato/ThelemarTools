@@ -142,9 +142,9 @@ class CharacterSheetLevelUp {
 			// handled by optionalfeatureProgression in the Class Options step (e.g. Metamagic)
 			.filter(optGroup => !optGroup.options.every(opt => opt.type === "optionalfeature"));
 
-		// Scholar expertise (Wizard XPHB level 2)
+		// Scholar expertise (Wizard XPHB/TGTT level 2)
 		const existingScholarExpertise = this._state.getScholarExpertise();
-		const isWizard2024 = classEntry.name === "Wizard" && classEntry.source === "XPHB";
+		const isWizard2024 = classEntry.name === "Wizard" && CharacterSheetClassUtils.is2024Source(classEntry.source);
 		const needsScholarChoice = isWizard2024 && newLevel === 2 && !existingScholarExpertise;
 
 		// Wizard spellbook

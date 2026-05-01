@@ -204,7 +204,7 @@ class CharacterSheetPage {
 		// Load all necessary data in parallel
 		// Note: Using loadRawJSON for classes to get classFeature and subclassFeature arrays
 		// Also pre-cache class/subclass features in DataLoader so hover links work properly
-		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, prereleaseData, brewData] = await Promise.all([
+		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, prereleaseData, brewData, variantComponents] = await Promise.all([
 			DataUtil.race.loadJSON(),
 			DataUtil.class.loadRawJSON(),
 			DataUtil.loadJSON("data/backgrounds.json"),
@@ -225,6 +225,8 @@ class CharacterSheetPage {
 			// Load homebrew/prerelease data (for non-item entities)
 			PrereleaseUtil.pGetBrewProcessed(),
 			BrewUtil2.pGetBrewProcessed(),
+			// Load variant spell components (Arcadia 8)
+			DataUtil.loadJSON("data/items-variant-components-ar8.json").catch(() => ({item: []})),
 		]);
 
 		// Base site data
@@ -238,8 +240,8 @@ class CharacterSheetPage {
 		this._backgrounds = backgrounds.background || [];
 		this._spellsData = spells;
 		// Filter out item groups which are not actual items.
-		// Merge site + prerelease + brew items here (all already enhanced by DataUtil.item.*).
-		this._itemsData = [...(items || []), ...(prereleaseItems || []), ...(brewItems || [])]
+		// Merge site + prerelease + brew + variant component items here (all already enhanced by DataUtil.item.*).
+		this._itemsData = [...(items || []), ...(prereleaseItems || []), ...(brewItems || []), ...(variantComponents.item || [])]
 			.filter(it => !it._isItemGroup);
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
@@ -326,6 +328,15 @@ class CharacterSheetPage {
 				DataLoader.pCacheAndGetAllPrerelease("itemUpgrade"),
 				DataLoader.pCacheAndGetAllBrew("itemUpgrade"),
 			]);
+
+			// Pre-cache variant component items (Ar8) so hover tooltips work.
+			// These items aren't in the standard item loading pipeline, so we inject
+			// them into the DataLoader cache manually.
+			const vcItems = (this._itemsData || []).filter(it => it.source === "Ar8");
+			if (vcItems.length) {
+				vcItems.forEach(it => it.__prop = it.__prop || "item");
+				DataLoader._pCache_addToCache({allDataMerged: {item: vcItems}, propAllowlist: new Set(["item"])});
+			}
 		} catch (e) {
 			// Non-critical - just means some hover links may not work
 			console.warn("[CharSheet] Failed to pre-cache entity data for hovers:", e);

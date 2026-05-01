@@ -11224,10 +11224,18 @@ body.is-charsheet-page .ve-ui-modal__scroller {
 	will-change: transform;
 }
 
-/* Remove containment for modals with dropdown filters — otherwise position:absolute dropdowns get clipped */
-body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__source-multiselect) {
+/* Remove containment for modals with dropdown filters — but NOT the item picker which needs to scroll */
+body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__source-multiselect):not(:has(.charsheet__modal-list)) {
 	contain: none;
 	overflow: visible;
+}
+
+/* Item picker modal scroller: override overflow:visible so the modal scrolls when filters are expanded.
+   Dropdowns use position:absolute near the top and fit within the scrollable viewport. */
+body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__modal-list) {
+	height: 100%;
+	min-height: 0;
+	overflow-y: auto !important;
 }
 
 /* Larger modals for item/spell pickers */
@@ -11249,8 +11257,8 @@ body.is-charsheet-page .ve-ui-modal__inner:has(.charsheet__levelup-wizard) {
 	padding: var(--cs-space-lg, 1.25rem);
 }
 
-/* Ensure modal scroller allows overflow for dropdowns */
-body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__source-multiselect) {
+/* Ensure modal scroller allows overflow for dropdowns — but NOT the item picker which needs to scroll */
+body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__source-multiselect):not(:has(.charsheet__modal-list)) {
 	overflow: visible !important;
 }
 
@@ -11899,6 +11907,56 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	border-radius: 50%;
 }
 
+/* ========================================================================
+   Collapsible Filter Section
+   ======================================================================== */
+.charsheet__filter-toggle {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	width: 100%;
+	padding: 0.5rem 0.75rem;
+	margin-top: 0.5rem;
+	font-size: 0.85rem;
+	font-weight: 600;
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.15));
+	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.2));
+	border-radius: var(--cs-radius-md, 8px);
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.7));
+	cursor: pointer;
+	transition: all var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__filter-toggle:hover {
+	background: rgba(99, 102, 241, 0.1);
+	border-color: var(--cs-primary, #6366f1);
+	color: var(--cs-text, inherit);
+}
+
+.charsheet__filter-toggle-icon {
+	font-size: 0.7rem;
+	transition: transform var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__filter-toggle-count {
+	font-size: 0.75rem;
+	color: var(--cs-primary, #6366f1);
+	font-weight: 700;
+}
+
+.charsheet__filter-collapsible {
+	max-height: 0;
+	overflow: hidden;
+	transition: max-height 0.25s ease, opacity 0.2s ease;
+	opacity: 0;
+}
+
+.charsheet__filter-collapsible--open {
+	max-height: 600px;
+	overflow: visible;
+	opacity: 1;
+}
+
 /* Sort Row (item picker modal) */
 .charsheet__modal-sort-row {
 	gap: 0.5rem;
@@ -11920,12 +11978,21 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 /* Modal List Container */
 .charsheet__modal-list {
-	max-height: 50vh;
-	min-height: 350px;
+	flex: 1 1 auto;
+	min-height: 150px;
 	overflow-y: auto;
 	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.2));
 	border-radius: var(--cs-radius-lg, 12px);
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.15));
+}
+
+/* Prevent non-list elements from shrinking in flex layout */
+.charsheet__item-tabs,
+.charsheet__modal-search,
+.charsheet__filter-toggle,
+.charsheet__filter-collapsible,
+.charsheet__modal-results-count {
+	flex-shrink: 0;
 }
 
 .charsheet__modal-list::-webkit-scrollbar {

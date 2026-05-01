@@ -221,7 +221,7 @@ class CharacterSheetQuickBuild {
 
 			// Check for Wizard-specific features
 			const isWizard = classData.name === "Wizard";
-			const isXPHBWizard = isWizard && (classSource === "XPHB" || classData.source === "XPHB");
+			const isXPHBWizard = isWizard && (CharacterSheetClassUtils.is2024Source(classSource) || CharacterSheetClassUtils.is2024Source(classData.source));
 			const isScholarLevel = isXPHBWizard && classLevel === 2;
 			const isSpellbookLevel = isWizard && classLevel >= 2;
 

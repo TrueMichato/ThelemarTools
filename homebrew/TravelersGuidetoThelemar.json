@@ -6423,7 +6423,7 @@
 			"name": "Bard",
 			"source": "TGTT",
 			"page": 38,
-			"edition": "classic",
+			"edition": "one",
 			"primaryAbility": [
 				{
 					"cha": true
@@ -7594,7 +7594,8 @@
 				"Divine Intervention Improvement|Cleric|PHB|20",
 				"Specialties|Cleric|TGTT|20"
 			],
-			"subclassTitle": "Divine Domain"
+			"subclassTitle": "Divine Domain",
+			"edition": "one"
 		},
 		{
 			"name": "Druid",
@@ -8218,7 +8219,8 @@
 				"Archdruid|Druid|PHB|20",
 				"Timeless Body|Druid|PHB|18"
 			],
-			"subclassTitle": "Druid Circle"
+			"subclassTitle": "Druid Circle",
+			"edition": "one"
 		},
 		{
 			"name": "Fighter",
@@ -11381,7 +11383,7 @@
 			"name": "Sorcerer",
 			"source": "TGTT",
 			"page": 38,
-			"edition": "classic",
+			"edition": "one",
 			"hd": {
 				"number": 1,
 				"faces": 6
@@ -12510,7 +12512,7 @@
 			"name": "Wizard",
 			"source": "TGTT",
 			"page": 38,
-			"edition": "classic",
+			"edition": "one",
 			"primaryAbility": [
 				{
 					"int": true
@@ -13191,7 +13193,8 @@
 					}
 				}
 			],
-			"subclassTitle": "Dreamwalker Path"
+			"subclassTitle": "Dreamwalker Path",
+			"edition": "one"
 		}
 	],
 	"subclass": [

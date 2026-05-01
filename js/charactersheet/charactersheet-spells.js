@@ -306,7 +306,7 @@ class CharacterSheetSpells {
 		const includeCoreSpells = settings.includeCoreSpellsForHomebrew !== false; // Default true
 
 		// Determine if this is a non-standard source (homebrew/third-party)
-		const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE"].includes(classSource);
+		const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE", "TGTT"].includes(classSource);
 
 		// Get character's subclass for subclass spell list checking
 		const characterSubclass = characterClass.subclass;
@@ -543,7 +543,7 @@ class CharacterSheetSpells {
 			}
 
 			// Then official sources
-			const officialPriority = ["PHB", "XGE", "TCE", "FTD", "XPHB"];
+			const officialPriority = ["TGTT", "PHB", "XGE", "TCE", "FTD", "XPHB"];
 			const aIdx = officialPriority.indexOf(a);
 			const bIdx = officialPriority.indexOf(b);
 			if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
@@ -1375,7 +1375,7 @@ class CharacterSheetSpells {
 			updateSourceText();
 		});
 		sourceDropdown.querySelector("[data-action=official]").addEventListener("click", () => {
-			const official = ["PHB", "XGE", "TCE", "FTD", "XPHB", "XDMG"];
+			const official = ["PHB", "XGE", "TCE", "FTD", "XPHB", "XDMG", "TGTT"];
 			sourceDropdown.querySelectorAll("input").forEach(el => {
 				el.checked = official.includes(el.value);
 			});
@@ -4710,7 +4710,8 @@ class CharacterSheetSpells {
 		}
 
 		// Distant Spell: double range or make touch → 30ft
-		if (tuned.includes("distant") && spellData?.range) {
+		// Only applies to point-range spells (not self-range or AoE-from-self like cone/cube/line)
+		if (tuned.includes("distant") && spellData?.range?.type === "point") {
 			const rangeType = spellData.range?.distance?.type;
 			if (rangeType === "touch") {
 				notes.push("Distant Spell: range changed from Touch to 30 feet");
