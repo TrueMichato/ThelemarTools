@@ -1,0 +1,977 @@
+/* ========================================================================
+   Character Sheet — Mobile Responsive Styles
+   Activates below 768px viewport width.
+   Progressive enhancement: desktop remains unchanged.
+   ======================================================================== */
+
+/* ========================================================================
+   Mobile Detection — Applied via media query + .is-touch class (set by JS)
+   ======================================================================== */
+
+@media (max-width: 768px) {
+
+	/* ====================================================================
+	   Bottom Tab Bar — Fixed navigation at screen bottom
+	   ==================================================================== */
+	#charsheet-tabs {
+		position: fixed;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		z-index: 1050;
+		display: flex !important;
+		flex-wrap: nowrap !important;
+		overflow-x: auto;
+		overflow-y: hidden;
+		-webkit-overflow-scrolling: touch;
+		background: var(--cs-bg-surface, #1e293b);
+		border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+		border-bottom: none;
+		border-radius: 0;
+		padding: 0;
+		margin: 0 !important;
+		gap: 0;
+		box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.3);
+		scrollbar-width: none;
+	}
+
+	#charsheet-tabs::-webkit-scrollbar {
+		display: none;
+	}
+
+	#charsheet-tabs > li {
+		flex: 0 0 auto;
+		margin-bottom: 0;
+		min-width: 64px;
+	}
+
+	#charsheet-tabs > li > a {
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 6px 10px 4px;
+		gap: 2px;
+		border: none;
+		border-bottom: none;
+		border-radius: 0;
+		font-size: 0.65rem;
+		min-height: 56px;
+		white-space: nowrap;
+	}
+
+	#charsheet-tabs > li > a .charsheet__tab-icon {
+		font-size: 1.3rem;
+		line-height: 1;
+	}
+
+	#charsheet-tabs > li > a .charsheet__tab-text {
+		font-size: 0.6rem;
+		line-height: 1.2;
+	}
+
+	#charsheet-tabs > li.ve-active > a,
+	#charsheet-tabs > li.ve-active > a:hover,
+	#charsheet-tabs > li.ve-active > a:focus {
+		border-bottom: none;
+		border-top: 3px solid var(--cs-primary, #6366f1);
+		background: rgba(99, 102, 241, 0.12);
+	}
+
+	#charsheet-tabs > li > a:hover {
+		border-bottom: none;
+	}
+
+	/* Add bottom padding to main content so tabs don't overlap */
+	.charsheet-page .tab-content {
+		padding-bottom: 70px;
+	}
+
+	/* ====================================================================
+	   Header — Compact Single Row + Expandable Secondary
+	   ==================================================================== */
+	.charsheet__main-header {
+		border-radius: var(--cs-radius-md, 8px);
+		margin-bottom: 0.75rem !important;
+	}
+
+	.charsheet__header-row--primary {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		padding: 0.4rem 0.5rem;
+		gap: 0.4rem;
+	}
+
+	.charsheet__header-group--character {
+		flex: 0 0 auto !important;
+		order: 1;
+	}
+
+	.charsheet__header-group--character .charsheet__header-select {
+		max-width: 120px;
+		font-size: 0.8rem;
+	}
+
+	.charsheet__header-group--progression {
+		flex: 0 0 auto;
+		order: 2;
+	}
+
+	.charsheet__header-group--tools {
+		flex: 0 0 auto !important;
+		order: 3;
+		margin-left: auto;
+	}
+
+	.charsheet__header-divider {
+		display: none;
+	}
+
+	/* Hide text labels in header on mobile */
+	.charsheet__action-btn-text,
+	.charsheet__rolllog-toggle-text,
+	.charsheet__more-toggle-text {
+		display: none !important;
+	}
+
+	.charsheet__tool-btn {
+		font-size: 1rem;
+		padding: 0.4rem;
+		min-width: 36px;
+		min-height: 36px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* XP controls - compact */
+	.charsheet__xp-control {
+		display: none;
+	}
+
+	/* Secondary row - hidden by default, toggled via JS */
+	.charsheet__header-row--secondary {
+		max-height: 0;
+		padding: 0 0.5rem;
+		opacity: 0;
+		overflow: hidden;
+		border-top: none;
+		transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
+	}
+
+	.charsheet__header-row--secondary.charsheet-mobile--expanded {
+		max-height: 300px;
+		padding: 0.5rem;
+		opacity: 1;
+		overflow: visible;
+		border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.06));
+	}
+
+	/* ====================================================================
+	   Single-Column Layout
+	   ==================================================================== */
+	.charsheet__col-left,
+	.charsheet__col-center,
+	.charsheet__col-right {
+		min-width: 100% !important;
+		max-width: 100% !important;
+		flex: 1 1 100% !important;
+		padding: 0 !important;
+	}
+
+	.charsheet__col-half {
+		min-width: 100% !important;
+		flex: 1 1 100% !important;
+		padding: 0 !important;
+	}
+
+	/* The flex container should wrap */
+	#charsheet-tab-overview > .ve-flex,
+	#charsheet-tab-combat > .ve-flex {
+		flex-wrap: wrap;
+	}
+
+	/* ====================================================================
+	   Sections — Compact + Collapsible
+	   ==================================================================== */
+	.charsheet__section {
+		border-radius: var(--cs-radius-md, 10px);
+		padding: 0.75rem;
+		margin-bottom: 0.5rem;
+	}
+
+	.charsheet__section--header {
+		padding: 0.75rem;
+		border-radius: var(--cs-radius-lg, 12px);
+	}
+
+	/* Collapsible section support */
+	.charsheet__section.charsheet-mobile--collapsed .charsheet__section-title {
+		margin-bottom: 0;
+	}
+
+	.charsheet__section.charsheet-mobile--collapsed > *:not(.charsheet__section-title) {
+		display: none !important;
+	}
+
+	.charsheet__section-title {
+		cursor: pointer;
+		user-select: none;
+		position: relative;
+		padding-right: 1.5rem;
+	}
+
+	/* Collapse chevron indicator */
+	.charsheet__section-title::after {
+		content: '▾';
+		position: absolute;
+		right: 0;
+		top: 50%;
+		transform: translateY(-50%);
+		font-size: 0.8rem;
+		color: var(--cs-text-muted, #64748b);
+		transition: transform 0.2s ease;
+	}
+
+	.charsheet__section.charsheet-mobile--collapsed .charsheet__section-title::after {
+		transform: translateY(-50%) rotate(-90deg);
+	}
+
+	/* Sections that should NOT be collapsible */
+	.charsheet__section--hp .charsheet__section-title::after,
+	.charsheet__section--identity .charsheet__section-title::after,
+	.charsheet__section--combat-stats .charsheet__section-title::after {
+		display: none;
+	}
+
+	.charsheet__section--hp .charsheet__section-title,
+	.charsheet__section--identity .charsheet__section-title,
+	.charsheet__section--combat-stats .charsheet__section-title {
+		cursor: default;
+		padding-right: 0;
+	}
+
+	/* ====================================================================
+	   Touch Targets — Minimum 44x44px
+	   ==================================================================== */
+	.charsheet__icon-btn,
+	.charsheet__action-btn {
+		min-width: 44px;
+		min-height: 44px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.charsheet__quick-action {
+		min-height: 48px;
+		font-size: 0.9rem;
+	}
+
+	/* Skill/Save rows — larger tap area */
+	.charsheet__skill-row,
+	.charsheet__save-row {
+		min-height: 40px;
+		padding: 0.4rem 0.5rem;
+	}
+
+	/* Attack roll/damage buttons */
+	.charsheet__attack-roll,
+	.charsheet__attack-damage {
+		min-width: 44px;
+		min-height: 44px;
+		padding: 0.5rem;
+	}
+
+	/* ====================================================================
+	   Ability Scores Grid — Touch Optimized
+	   ==================================================================== */
+	.charsheet__abilities-grid {
+		grid-template-columns: repeat(3, 1fr) !important;
+		gap: 0.5rem;
+	}
+
+	.charsheet__ability {
+		min-height: 70px;
+		padding: 0.5rem;
+	}
+
+	.charsheet__ability-score {
+		font-size: 1.5rem;
+	}
+
+	/* ====================================================================
+	   Combat Stats Row — Responsive
+	   ==================================================================== */
+	.charsheet__combat-stats-row {
+		gap: 0.5rem;
+	}
+
+	.charsheet__combat-stat {
+		min-width: 80px;
+		min-height: 80px;
+		padding: 0.5rem;
+	}
+
+	/* ====================================================================
+	   HP Section — Compact
+	   ==================================================================== */
+	.charsheet__hp-inputs {
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.charsheet__hp-box {
+		width: 100%;
+	}
+
+	.charsheet__hp-btn {
+		min-height: 40px;
+		flex: 1;
+	}
+
+	/* ====================================================================
+	   Currency Grid — Compact Horizontal
+	   ==================================================================== */
+	.charsheet__currency-grid {
+		display: grid;
+		grid-template-columns: repeat(5, 1fr);
+		gap: 0.25rem;
+	}
+
+	.charsheet__currency-item {
+		flex-direction: column;
+		align-items: center;
+		gap: 2px;
+	}
+
+	.charsheet__ipt-currency {
+		width: 100%;
+		text-align: center;
+		font-size: 0.85rem;
+		min-height: 36px;
+	}
+
+	/* ====================================================================
+	   Identity Section — Mobile Layout
+	   ==================================================================== */
+	.charsheet__identity-main {
+		flex-direction: column;
+		align-items: center;
+		text-align: center;
+		gap: 0.5rem;
+	}
+
+	.charsheet__portrait-container {
+		width: 80px;
+		height: 80px;
+	}
+
+	.charsheet__identity-details {
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 0.4rem;
+	}
+
+	.charsheet__info-chip {
+		font-size: 0.75rem;
+		padding: 0.25rem 0.5rem;
+	}
+
+	.charsheet__ipt-name {
+		text-align: center;
+		font-size: 1.1rem;
+	}
+
+	/* ====================================================================
+	   Roll Log — Full Width Overlay on Mobile
+	   ==================================================================== */
+	.charsheet__roll-history-wrapper {
+		position: fixed !important;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 56px;
+		width: 100% !important;
+		max-width: 100% !important;
+		z-index: 1040;
+		border-radius: 0;
+	}
+
+	/* ====================================================================
+	   Modals — Bottom Sheet Style
+	   ==================================================================== */
+	body.is-charsheet-page .ve-ui-modal__inner {
+		position: fixed;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		top: auto;
+		max-height: 85vh;
+		border-radius: var(--cs-radius-xl, 24px) var(--cs-radius-xl, 24px) 0 0;
+		margin: 0;
+		transform: translateY(0);
+		animation: charsheet-mobile-slideUp 0.3s ease;
+	}
+
+	@keyframes charsheet-mobile-slideUp {
+		from {
+			transform: translateY(100%);
+		}
+		to {
+			transform: translateY(0);
+		}
+	}
+
+	/* Modal scroll containment */
+	body.is-charsheet-page .ve-ui-modal__inner .ve-ui-modal__row--body {
+		max-height: 65vh;
+		overflow-y: auto;
+		-webkit-overflow-scrolling: touch;
+	}
+
+	/* ====================================================================
+	   Spell Picker — Single Column on Mobile
+	   ==================================================================== */
+	.charsheet__spell-picker-selection {
+		grid-template-columns: 1fr !important;
+	}
+
+	.charsheet__spell-picker-preview {
+		max-height: 200px;
+	}
+
+	/* ====================================================================
+	   Inventory List — Touch Friendly
+	   ==================================================================== */
+	.charsheet__inventory-item {
+		min-height: 48px;
+		padding: 0.5rem;
+	}
+
+	/* ====================================================================
+	   Builder — Full Width Steps
+	   ==================================================================== */
+	.charsheet__builder-steps {
+		flex-wrap: nowrap !important;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none;
+		gap: 0.25rem;
+	}
+
+	.charsheet__builder-steps::-webkit-scrollbar {
+		display: none;
+	}
+
+	.charsheet__builder-step {
+		flex: 0 0 auto;
+		min-width: 80px;
+	}
+
+	/* ====================================================================
+	   Floating Action Button (FAB)
+	   ==================================================================== */
+	.charsheet-mobile__fab {
+		position: fixed;
+		bottom: 72px;
+		right: 16px;
+		z-index: 1040;
+		display: flex;
+		flex-direction: column-reverse;
+		align-items: flex-end;
+		gap: 8px;
+	}
+
+	.charsheet-mobile__fab-main {
+		width: 56px;
+		height: 56px;
+		border-radius: 50%;
+		background: var(--cs-primary, #6366f1);
+		color: #fff;
+		border: none;
+		box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+		font-size: 1.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		transition: transform 0.2s ease, box-shadow 0.2s ease;
+	}
+
+	.charsheet-mobile__fab-main:active {
+		transform: scale(0.9);
+	}
+
+	.charsheet-mobile__fab-main.charsheet-mobile__fab--open {
+		transform: rotate(45deg);
+		background: var(--cs-danger, #ef4444);
+	}
+
+	.charsheet-mobile__fab-actions {
+		display: none;
+		flex-direction: column-reverse;
+		align-items: flex-end;
+		gap: 8px;
+	}
+
+	.charsheet-mobile__fab-main.charsheet-mobile__fab--open ~ .charsheet-mobile__fab-actions {
+		display: flex;
+	}
+
+	.charsheet-mobile__fab-action {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 0;
+		border: none;
+		background: transparent;
+		cursor: pointer;
+	}
+
+	.charsheet-mobile__fab-action-label {
+		background: var(--cs-bg-surface, #1e293b);
+		color: var(--cs-text-primary, #f1f5f9);
+		padding: 6px 12px;
+		border-radius: var(--cs-radius-md, 8px);
+		font-size: 0.8rem;
+		font-weight: 500;
+		box-shadow: var(--cs-shadow-md);
+		white-space: nowrap;
+	}
+
+	.charsheet-mobile__fab-action-btn {
+		width: 44px;
+		height: 44px;
+		border-radius: 50%;
+		background: var(--cs-bg-elevated, #334155);
+		color: var(--cs-text-primary, #f1f5f9);
+		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+		font-size: 1.1rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-shadow: var(--cs-shadow-sm);
+	}
+
+	/* ====================================================================
+	   Roll Modifier Toolbar — Replaces Shift/Ctrl+Click
+	   ==================================================================== */
+	.charsheet-mobile__roll-toolbar {
+		position: fixed;
+		bottom: 72px;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 1060;
+		display: none;
+		background: var(--cs-bg-surface, #1e293b);
+		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.15));
+		border-radius: var(--cs-radius-xl, 24px);
+		padding: 8px 12px;
+		gap: 8px;
+		align-items: center;
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+		animation: charsheet-mobile-fadeIn 0.15s ease;
+	}
+
+	.charsheet-mobile__roll-toolbar.charsheet-mobile--visible {
+		display: flex;
+	}
+
+	@keyframes charsheet-mobile-fadeIn {
+		from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+		to { opacity: 1; transform: translateX(-50%) translateY(0); }
+	}
+
+	.charsheet-mobile__roll-toolbar-btn {
+		padding: 10px 16px;
+		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+		border-radius: var(--cs-radius-md, 10px);
+		background: var(--cs-bg-elevated, #334155);
+		color: var(--cs-text-primary, #f1f5f9);
+		font-size: 0.8rem;
+		font-weight: 600;
+		cursor: pointer;
+		white-space: nowrap;
+		min-height: 44px;
+		transition: background 0.15s ease, border-color 0.15s ease;
+	}
+
+	.charsheet-mobile__roll-toolbar-btn:active {
+		background: var(--cs-primary, #6366f1);
+		border-color: var(--cs-primary, #6366f1);
+	}
+
+	.charsheet-mobile__roll-toolbar-btn--advantage {
+		color: var(--cs-success, #10b981);
+		border-color: rgba(16, 185, 129, 0.3);
+	}
+
+	.charsheet-mobile__roll-toolbar-btn--disadvantage {
+		color: var(--cs-danger, #ef4444);
+		border-color: rgba(239, 68, 68, 0.3);
+	}
+
+	.charsheet-mobile__roll-toolbar-close {
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		border: none;
+		background: rgba(255, 255, 255, 0.1);
+		color: var(--cs-text-muted, #64748b);
+		font-size: 1rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		margin-left: 4px;
+	}
+
+	/* ====================================================================
+	   Long-Press Context Menu
+	   ==================================================================== */
+	.charsheet-mobile__context-menu {
+		position: fixed;
+		z-index: 1070;
+		background: var(--cs-bg-surface, #1e293b);
+		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.15));
+		border-radius: var(--cs-radius-lg, 16px);
+		padding: 8px 0;
+		min-width: 180px;
+		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+		display: none;
+		animation: charsheet-mobile-contextAppear 0.15s ease;
+	}
+
+	.charsheet-mobile__context-menu.charsheet-mobile--visible {
+		display: block;
+	}
+
+	@keyframes charsheet-mobile-contextAppear {
+		from { opacity: 0; transform: scale(0.95); }
+		to { opacity: 1; transform: scale(1); }
+	}
+
+	.charsheet-mobile__context-menu-item {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 12px 16px;
+		font-size: 0.875rem;
+		color: var(--cs-text-primary, #f1f5f9);
+		cursor: pointer;
+		transition: background 0.1s ease;
+		min-height: 44px;
+	}
+
+	.charsheet-mobile__context-menu-item:active {
+		background: var(--cs-bg-active, rgba(255, 255, 255, 0.1));
+	}
+
+	.charsheet-mobile__context-menu-item-icon {
+		font-size: 1.1rem;
+		width: 24px;
+		text-align: center;
+	}
+
+	.charsheet-mobile__context-menu-separator {
+		height: 1px;
+		background: var(--cs-border, rgba(255, 255, 255, 0.08));
+		margin: 4px 12px;
+	}
+
+	/* ====================================================================
+	   Help Tips — Hidden on Mobile (replaced by toolbar/long-press)
+	   ==================================================================== */
+	.charsheet__help-tips {
+		display: none !important;
+	}
+
+	/* ====================================================================
+	   General Mobile Utilities
+	   ==================================================================== */
+
+	/* Prevent body scroll when modal/overlay is open */
+	body.charsheet-mobile--no-scroll {
+		overflow: hidden;
+		position: fixed;
+		width: 100%;
+	}
+
+	/* Touch feedback ripple */
+	.charsheet-mobile--touch-active {
+		position: relative;
+		overflow: hidden;
+	}
+
+	.charsheet-mobile--touch-active::after {
+		content: '';
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		width: 100%;
+		height: 100%;
+		border-radius: inherit;
+		background: rgba(99, 102, 241, 0.2);
+		transform: translate(-50%, -50%) scale(0);
+		animation: charsheet-mobile-ripple 0.4s ease-out;
+		pointer-events: none;
+	}
+
+	@keyframes charsheet-mobile-ripple {
+		to {
+			transform: translate(-50%, -50%) scale(2.5);
+			opacity: 0;
+		}
+	}
+
+	/* Smooth scrolling for tab content */
+	.charsheet-page .tab-content {
+		scroll-behavior: smooth;
+	}
+
+	/* Level up banner — full width fixed */
+	.charsheet__levelup-banner {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		z-index: 1045;
+		border-radius: 0;
+	}
+
+	/* Save indicator — simplified */
+	.charsheet__save-indicator {
+		font-size: 0.9rem;
+	}
+
+	/* Quick actions — full width grid */
+	.charsheet__quick-actions-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.5rem;
+	}
+
+	/* ====================================================================
+	   Tab-Specific: Combat — Action-Focused Layout
+	   ==================================================================== */
+	#charsheet-tab-combat .charsheet__section {
+		margin-bottom: 0.5rem;
+	}
+
+	/* Combat quick state buttons — larger touch targets */
+	.charsheet__quick-states .ve-btn {
+		min-height: 40px;
+		padding: 0.4rem 0.75rem;
+		font-size: 0.85rem;
+	}
+
+	/* Combat tracker — stack vertically */
+	.charsheet__combat-tracker {
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	/* Attack items — card style for mobile */
+	.charsheet__attack-item {
+		padding: 0.75rem;
+		border-radius: var(--cs-radius-md, 10px);
+		margin-bottom: 0.5rem;
+	}
+
+	/* Method/resource items — comfortable spacing */
+	.charsheet__methods-list,
+	.charsheet__combat-resources-list {
+		gap: 0.5rem;
+	}
+
+	/* ====================================================================
+	   Tab-Specific: Spells — Slot Usage Top, Touch-Friendly List
+	   ==================================================================== */
+	#charsheet-tab-spells .charsheet__section {
+		margin-bottom: 0.5rem;
+	}
+
+	/* Spell slot display — horizontal scroll */
+	.charsheet__spell-slots-grid {
+		display: flex;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		gap: 0.5rem;
+		padding-bottom: 0.5rem;
+		scrollbar-width: none;
+	}
+
+	.charsheet__spell-slots-grid::-webkit-scrollbar {
+		display: none;
+	}
+
+	.charsheet__spell-slot-item {
+		flex: 0 0 auto;
+		min-width: 60px;
+	}
+
+	/* Spell list items — larger touch area */
+	.charsheet__spell-item {
+		min-height: 44px;
+		padding: 0.5rem 0.75rem;
+	}
+
+	/* ====================================================================
+	   Tab-Specific: Inventory — Search-First, Touch-Friendly
+	   ==================================================================== */
+	#charsheet-tab-inventory .charsheet__section {
+		margin-bottom: 0.5rem;
+	}
+
+	/* Inventory search — full width, prominent */
+	.charsheet__inventory-search {
+		position: sticky;
+		top: 0;
+		z-index: 10;
+		background: var(--cs-bg-surface, #1e293b);
+		padding: 0.5rem 0;
+		margin-bottom: 0.5rem;
+	}
+
+	.charsheet__inventory-search input {
+		min-height: 44px;
+		font-size: 1rem;
+	}
+
+	/* Inventory items — card-like with swipe affordance */
+	.charsheet__inventory-item {
+		border-radius: var(--cs-radius-md, 10px);
+		padding: 0.75rem;
+		margin-bottom: 0.4rem;
+		min-height: 52px;
+	}
+
+	/* Equipment section — compact grid */
+	.charsheet__equipment-slots {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.4rem;
+	}
+
+	/* ====================================================================
+	   Tab-Specific: Notes — Full Width Editor
+	   ==================================================================== */
+	#charsheet-tab-notes textarea {
+		min-height: 200px;
+		font-size: 1rem;
+	}
+
+	/* ====================================================================
+	   Tab-Specific: Features — Accordion Style
+	   ==================================================================== */
+	.charsheet__feature-item {
+		border-radius: var(--cs-radius-md, 10px);
+		margin-bottom: 0.4rem;
+	}
+
+	.charsheet__feature-header {
+		min-height: 44px;
+		padding: 0.5rem 0.75rem;
+	}
+
+	/* ====================================================================
+	   Tab-Specific: Abilities (Detailed) — Touch Grid
+	   ==================================================================== */
+	.charsheet__abilities-detailed .charsheet__ability-detail-card {
+		padding: 0.75rem;
+	}
+
+	/* ====================================================================
+	   Tab-Specific: Companions — Card Layout
+	   ==================================================================== */
+	.charsheet__companion-card {
+		margin-bottom: 0.75rem;
+	}
+
+	.charsheet__companion-stat {
+		min-height: 36px;
+	}
+}
+
+/* ========================================================================
+   Extra Small Devices (< 480px)
+   ======================================================================== */
+@media (max-width: 480px) {
+	#charsheet-tabs > li {
+		min-width: 56px;
+	}
+
+	#charsheet-tabs > li > a {
+		padding: 5px 6px 3px;
+		min-height: 50px;
+	}
+
+	#charsheet-tabs > li > a .charsheet__tab-icon {
+		font-size: 1.1rem;
+	}
+
+	#charsheet-tabs > li > a .charsheet__tab-text {
+		font-size: 0.55rem;
+	}
+
+	.charsheet__combat-stat {
+		min-width: 70px;
+		min-height: 70px;
+	}
+
+	.charsheet-mobile__fab-main {
+		width: 48px;
+		height: 48px;
+		font-size: 1.3rem;
+	}
+
+	.charsheet-mobile__roll-toolbar {
+		left: 8px;
+		right: 8px;
+		transform: none;
+		border-radius: var(--cs-radius-lg, 16px);
+	}
+
+	.charsheet-mobile__roll-toolbar-btn {
+		padding: 8px 12px;
+		font-size: 0.75rem;
+	}
+
+	/* Identity — even more compact */
+	.charsheet__portrait-container {
+		width: 64px;
+		height: 64px;
+	}
+
+	.charsheet__ipt-name {
+		font-size: 1rem;
+	}
+}
+
+/* ========================================================================
+   Landscape Phone — Adjustments
+   ======================================================================== */
+@media (max-width: 768px) and (orientation: landscape) {
+	#charsheet-tabs > li > a {
+		min-height: 44px;
+		padding: 4px 10px 2px;
+	}
+
+	#charsheet-tabs > li > a .charsheet__tab-text {
+		display: none;
+	}
+
+	.charsheet-mobile__fab {
+		bottom: 60px;
+	}
+
+	/* More horizontal space — use 2 columns */
+	.charsheet__abilities-grid {
+		grid-template-columns: repeat(6, 1fr) !important;
+	}
+
+	body.is-charsheet-page .ve-ui-modal__inner {
+		max-height: 90vh;
+	}
+}
