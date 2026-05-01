@@ -5364,6 +5364,19 @@ class CharacterSheetState {
 		// Apply remaining damage to current HP
 		this._data.hp.current = Math.max(0, this._data.hp.current - damage);
 
+		// Death Ward: if character would drop to 0 HP, set to 1 instead and consume the ward
+		if (this._data.hp.current === 0 && startingHp > 0) {
+			const effects = this.getActiveStateEffects();
+			const deathWardEffect = effects.find(e => e.type === "deathWard");
+			if (deathWardEffect) {
+				this._data.hp.current = 1;
+				// Remove the death ward active state
+				this._data.activeStates = this._data.activeStates.filter(s => s.id !== deathWardEffect.stateId);
+				this._updateBloodiedCondition();
+				return true;
+			}
+		}
+
 		// Check for massive damage death (damage remaining after reaching 0 >= max HP)
 		const overkill = startingHp - damage;
 		if (overkill <= -maxHp) {
@@ -6148,6 +6161,17 @@ class CharacterSheetState {
 			ac = 10 + dexMod;
 		}
 
+		// Spell-based AC formulas (e.g., Mage Armor: 13 + DEX) — only when unarmored
+		// Per RAW: "your base AC becomes 13 + your Dexterity modifier" if not wearing armor
+		if (!this._data.ac.armor) {
+			const effects = this.getActiveStateEffects();
+			for (const e of effects) {
+				if (e.type !== "setAc") continue;
+				const spellAc = (e.baseAc || 10) + (e.addDex ? dexMod : 0);
+				if (spellAc > ac) ac = spellAc;
+			}
+		}
+
 		// Shield (only add if not using a formula that forbids it, like Monk unarmored defense)
 		if (this._data.ac.shield) {
 			const isMonkUnarmored = !this._data.ac.armor && this._hasMonkUnarmoredDefense();
@@ -6178,6 +6202,14 @@ class CharacterSheetState {
 		this._data.ac.bonuses.forEach(bonus => {
 			ac += bonus.value || 0;
 		});
+
+		// Spell-based AC minimums (e.g., Barkskin: AC can't be less than 16)
+		// Applied last so the floor overrides all other calculations
+		const allEffects = this.getActiveStateEffects();
+		for (const e of allEffects) {
+			if (e.type !== "minAc") continue;
+			if (e.value > ac) ac = e.value;
+		}
 
 		return ac;
 	}
@@ -6385,6 +6417,28 @@ class CharacterSheetState {
 			}
 		}
 
+		// Spell-based AC formulas (e.g., Mage Armor: 13 + DEX) — only when unarmored
+		if (!this._data.ac.armor) {
+			const effects = this.getActiveStateEffects();
+			let bestSpellAc = null;
+			for (const e of effects) {
+				if (e.type !== "setAc") continue;
+				const spellAc = (e.baseAc || 10) + (e.addDex ? dexMod : 0);
+				const currentBaseTotal = components.reduce((sum, comp) => sum + comp.value, 0);
+				if (spellAc > currentBaseTotal && (!bestSpellAc || spellAc > bestSpellAc.ac)) {
+					bestSpellAc = {ac: spellAc, baseAc: e.baseAc || 10, addDex: e.addDex, name: e.stateName || "Spell"};
+				}
+			}
+			if (bestSpellAc) {
+				// Replace base components with spell AC formula
+				components.length = 0;
+				components.push({type: "spell", name: bestSpellAc.name, value: bestSpellAc.baseAc, icon: "🔮"});
+				if (bestSpellAc.addDex && dexMod !== 0) {
+					components.push({type: "dex", name: "DEX modifier", value: dexMod, icon: "🎯"});
+				}
+			}
+		}
+
 		// Shield
 		if (this._data.ac.shield) {
 			const isMonkUnarmored = !this._data.ac.armor && this._hasMonkUnarmoredDefense();
@@ -6432,7 +6486,19 @@ class CharacterSheetState {
 		});
 
 		// Calculate total
-		const total = components.reduce((sum, comp) => sum + comp.value, 0);
+		let total = components.reduce((sum, comp) => sum + comp.value, 0);
+
+		// Spell-based AC minimums (e.g., Barkskin: AC can't be less than 16)
+		const allEffects = this.getActiveStateEffects();
+		for (const e of allEffects) {
+			if (e.type !== "minAc") continue;
+			if (e.value > total) {
+				// Replace all components with the AC floor
+				components.length = 0;
+				components.push({type: "spell", name: e.stateName || "Spell (AC floor)", value: e.value, icon: "🔮"});
+				total = e.value;
+			}
+		}
 
 		return {
 			total,
@@ -7111,6 +7177,15 @@ class CharacterSheetState {
 
 		// Apply equal-to grants (take highest between existing and equal-to speed)
 		effectiveFly = Math.max(effectiveFly, applyEqual("fly"));
+
+		// Apply spell-granted speeds (e.g., Fly spell: flySpeed 60)
+		const activeEffects = this.getActiveStateEffects();
+		for (const e of activeEffects) {
+			if (e.type === "flySpeed") effectiveFly = Math.max(effectiveFly, e.value || 0);
+			else if (e.type === "swimSpeed") effectiveSwim = Math.max(effectiveSwim, e.value || 0);
+			else if (e.type === "climbSpeed") effectiveClimb = Math.max(effectiveClimb, e.value || 0);
+			else if (e.type === "burrowSpeed") effectiveBurrow = Math.max(effectiveBurrow, e.value || 0);
+		}
 		effectiveSwim = Math.max(effectiveSwim, applyEqual("swim"));
 		effectiveClimb = Math.max(effectiveClimb, applyEqual("climb"));
 		effectiveBurrow = Math.max(effectiveBurrow, applyEqual("burrow"));
@@ -7180,6 +7255,13 @@ class CharacterSheetState {
 		if (equalToWalkMod) {
 			// Override base with walking speed
 			base = Math.max(base, this.getWalkSpeed());
+		}
+
+		// Apply spell-granted speeds (e.g., Fly spell: flySpeed 60)
+		const spellSpeedType = `${type}Speed`; // e.g., "flySpeed", "swimSpeed"
+		const activeEffects = this.getActiveStateEffects();
+		for (const e of activeEffects) {
+			if (e.type === spellSpeedType) base = Math.max(base, e.value || 0);
 		}
 
 		// For non-walk speeds, only apply bonuses if character has that movement type
@@ -19281,6 +19363,7 @@ class CharacterSheetState {
 		if (!spell?.name || !spell?.source) return [];
 
 		const spellUid = `${spell.name}|${spell.source}`.toLowerCase();
+		const spellNameLower = spell.name.toLowerCase();
 		const spellDamageTypes = spellData ? this._extractSpellDamageTypes(spellData) : new Set();
 		const spellTags = spellData ? this._extractSpellTags(spellData) : new Set();
 
@@ -19299,7 +19382,11 @@ class CharacterSheetState {
 				let isMatch = false;
 
 				if (se.match.spell) {
-					isMatch = se.match.spell.toLowerCase() === spellUid;
+					// Match by exact UID first, then fall back to name-only match
+					// so PHB components work with XPHB spells and vice versa
+					const matchUid = se.match.spell.toLowerCase();
+					const matchName = matchUid.split("|")[0];
+					isMatch = matchUid === spellUid || matchName === spellNameLower;
 				} else if (se.match.damageType) {
 					isMatch = spellDamageTypes.has(se.match.damageType.toLowerCase());
 				} else if (se.match.spellTag) {
@@ -19393,13 +19480,18 @@ class CharacterSheetState {
 		if (!invItem?.item?.variantComponent?.spellEffects?.length) return null;
 
 		const spellUid = `${spell.name}|${spell.source}`.toLowerCase();
+		const spellNameLower = spell.name.toLowerCase();
 		const spellDamageTypes = spellData ? this._extractSpellDamageTypes(spellData) : new Set();
 		const spellTags = spellData ? this._extractSpellTags(spellData) : new Set();
 
 		for (const se of invItem.item.variantComponent.spellEffects) {
 			if (!se.match) continue;
 
-			if (se.match.spell && se.match.spell.toLowerCase() === spellUid) return se;
+			if (se.match.spell) {
+				const matchUid = se.match.spell.toLowerCase();
+				const matchName = matchUid.split("|")[0];
+				if (matchUid === spellUid || matchName === spellNameLower) return se;
+			}
 			if (se.match.damageType && spellDamageTypes.has(se.match.damageType.toLowerCase())) return se;
 			if (se.match.spellTag && spellTags.has(se.match.spellTag.toLowerCase())) return se;
 		}
@@ -31105,7 +31197,11 @@ class CharacterSheetState {
 			this.breakConcentration();
 		}
 
-		const existing = this._data.activeStates.find(s => s.stateTypeId === stateTypeId);
+		// For custom states, match by sourceFeatureId (same logic as addActiveState)
+		// to avoid overwriting unrelated custom spell effects
+		const existing = stateTypeId === "custom"
+			? (options.sourceFeatureId ? this._data.activeStates.find(s => s.sourceFeatureId === options.sourceFeatureId) : null)
+			: this._data.activeStates.find(s => s.stateTypeId === stateTypeId);
 		if (existing) {
 			existing.active = true;
 			existing.activatedAt = Date.now();
@@ -34499,6 +34595,49 @@ class CharacterSheetState {
 				{type: "resistance", target: "damage:slashing"},
 			],
 			duration: {amount: 1, unit: "round"},
+		},
+		// --- Additional buff spells ---
+		"absorb elements": {
+			selfEffects: [{type: "resistance", target: "damage:triggering"}, {type: "extraDamage", dice: "1d6", damageType: "triggering"}],
+			duration: {amount: 1, unit: "round"},
+			upcastPerLevel: {extraDamageDice: "1d6"},
+		},
+		"enhance ability": {
+			concentration: true,
+			selfEffects: [{type: "advantage", target: "check:str"}], // Default to STR; user can customize
+			duration: {amount: 1, unit: "hour"},
+		},
+		"invisibility": {
+			concentration: true,
+			selfEffects: [
+				{type: "advantage", target: "attack"},
+				{type: "disadvantage", target: "attacksAgainst"},
+			],
+			duration: {amount: 1, unit: "hour"},
+		},
+		"expeditious retreat": {
+			concentration: true,
+			selfEffects: [{type: "note", value: "Dash as bonus action each turn"}],
+			duration: {amount: 10, unit: "minute"},
+		},
+		"shadow blade": {
+			concentration: true,
+			selfEffects: [{type: "extraDamage", dice: "2d8", damageType: "psychic"}],
+			upcastScaling: {3: {dice: "3d8"}, 5: {dice: "4d8"}, 7: {dice: "5d8"}},
+			duration: {amount: 1, unit: "minute"},
+		},
+		"spirit guardians": {
+			concentration: true,
+			selfEffects: [{type: "note", value: "Creatures within 15 ft take 3d8 radiant/necrotic damage (WIS save for half)"}],
+			duration: {amount: 10, unit: "minute"},
+		},
+		"spiritual weapon": {
+			selfEffects: [{type: "note", value: "Bonus action: melee spell attack for 1d8 + spellcasting mod force damage"}],
+			duration: {amount: 1, unit: "minute"},
+		},
+		"blink": {
+			selfEffects: [{type: "note", value: "End of turn: roll d20. On 11+, vanish to Ethereal Plane until start of next turn"}],
+			duration: {amount: 1, unit: "minute"},
 		},
 	};
 

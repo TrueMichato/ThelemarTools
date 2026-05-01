@@ -386,6 +386,38 @@ describe("CharacterSheetVariantComponents", () => {
 			expect(matches.length).toBe(1);
 			expect(matches[0].invItem.item.name).toBe("Spell-Specific");
 		});
+
+		it("should match PHB component with XPHB spell (cross-source)", () => {
+			const comp = makeInventoryEntry({
+				name: "Cloaker Hide",
+				spellEffects: [{
+					match: {spell: "Mage Armor|PHB"},
+					description: "AC becomes 15 + DEX",
+					effects: [{type: "acOverride", formula: "15 + DEX"}],
+				}],
+			});
+			const state = createStateWithComponents([comp]);
+			const matches = state.getMatchingVariantComponents(
+				{name: "Mage Armor", source: "XPHB", level: 1},
+			);
+			expect(matches.length).toBe(1);
+			expect(matches[0].invItem.item.name).toBe("Cloaker Hide");
+		});
+
+		it("should match XPHB component with PHB spell (cross-source)", () => {
+			const comp = makeInventoryEntry({
+				name: "Test Component",
+				spellEffects: [{
+					match: {spell: "Shield|XPHB"},
+					effects: [{type: "text", text: "Enhanced"}],
+				}],
+			});
+			const state = createStateWithComponents([comp]);
+			const matches = state.getMatchingVariantComponents(
+				{name: "Shield", source: "PHB", level: 1},
+			);
+			expect(matches.length).toBe(1);
+		});
 	});
 
 	// =============================================================================
