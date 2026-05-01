@@ -10,6 +10,16 @@ class CharacterSheetClassUtils {
 	// ==========================================
 
 	/**
+	 * Check if a source uses 2024 (D&D One) edition rules.
+	 * TGTT homebrew classes replace XPHB and follow the same 2024 mechanics.
+	 * @param {string} source - The source abbreviation (e.g. "XPHB", "TGTT", "PHB")
+	 * @returns {boolean}
+	 */
+	static is2024Source (source) {
+		return source === "XPHB" || source === "TGTT";
+	}
+
+	/**
 	 * Check if a class level grants an Ability Score Improvement.
 	 * @param {Object} classData - The class data object
 	 * @param {number} level - The class level

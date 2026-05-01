@@ -59,8 +59,8 @@ class CharacterSheetBuilder {
 	// Helper to detect if content is from 2024 edition (D&D One)
 	_is2024Edition (entity) {
 		if (!entity) return false;
-		// 2024 content has "edition": "one" or source "XPHB"
-		return entity.edition === "one" || entity.source === "XPHB";
+		// 2024 content has "edition": "one" or source "XPHB"/"TGTT"
+		return entity.edition === "one" || CharacterSheetClassUtils.is2024Source(entity.source);
 	}
 
 	// Check if race uses 2024 ASI rules (ASI comes from background, not race)

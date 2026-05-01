@@ -280,9 +280,10 @@ class CharacterSheetInventory {
 		let renderList;
 
 		// Classify items into tabs
-		const tabItems = {equipment: [], magic: [], consumable: []};
+		const tabItems = {equipment: [], magic: [], consumable: [], component: []};
 		for (const item of items) {
-			if (this._isConsumable(item)) tabItems.consumable.push(item);
+			if (this._isVariantComponent(item)) tabItems.component.push(item);
+			else if (this._isConsumable(item)) tabItems.consumable.push(item);
 			else if (this._isMagicItem(item)) tabItems.magic.push(item);
 			else tabItems.equipment.push(item);
 		}
@@ -294,6 +295,7 @@ class CharacterSheetInventory {
 			{key: "equipment", label: "Equipment", emoji: "⚔️", count: tabItems.equipment.length},
 			{key: "magic", label: "Magic Items", emoji: "✨", count: tabItems.magic.length},
 			{key: "consumable", label: "Consumables", emoji: "🧪", count: tabItems.consumable.length},
+			{key: "component", label: "Components", emoji: "🧫", count: tabItems.component.length},
 		];
 		const tabBtns = {};
 		for (const td of tabDefs) {
@@ -316,9 +318,46 @@ class CharacterSheetInventory {
 		const search = e_({tag: "input", clazz: "ve-form-control", attr: {type: "text", placeholder: "🔍 Search items by name..."}});
 		searchWrapper.append(search);
 
+		// ---- Collapsible filter section ----
+		const filterToggle = e_({outer: `<button class="charsheet__filter-toggle" type="button">
+			<span class="charsheet__filter-toggle-icon">▶</span>
+			<span>Filters</span>
+			<span class="charsheet__filter-toggle-count"></span>
+		</button>`});
+		modalInner.append(filterToggle);
+
+		const filterCollapsible = e_({outer: `<div class="charsheet__filter-collapsible"></div>`});
+		modalInner.append(filterCollapsible);
+
+		let filtersOpen = false;
+		const _activeFilterCount = () => {
+			let count = 0;
+			if (selectedTypes.size > 0) count++;
+			if (selectedRarities.size > 0) count++;
+			if (selectedSources.size > 0) count++;
+			if (filterAttunement) count++;
+			if (selectedWeaponCat) count++;
+			if (selectedArmorCat) count++;
+			if (selectedProps.size > 0) count++;
+			if (selectedMasteries.size > 0) count++;
+			if (selectedDmgTypes.size > 0) count++;
+			return count;
+		};
+		const _updateFilterToggle = () => {
+			const count = _activeFilterCount();
+			const countEl = filterToggle.querySelector(".charsheet__filter-toggle-count");
+			countEl.textContent = count > 0 ? `(${count} active)` : "";
+			filterToggle.querySelector(".charsheet__filter-toggle-icon").textContent = filtersOpen ? "▼" : "▶";
+			filterCollapsible.classList.toggle("charsheet__filter-collapsible--open", filtersOpen);
+		};
+		filterToggle.addEventListener("click", () => {
+			filtersOpen = !filtersOpen;
+			_updateFilterToggle();
+		});
+
 		// Filter row: Type + Rarity + Source dropdowns
 		const filterContainer = e_({outer: `<div class="charsheet__modal-filter charsheet__modal-filter-row mt-2"></div>`});
-		modalInner.append(filterContainer);
+		filterCollapsible.append(filterContainer);
 
 		// ---- Type filter ----
 		const itemTypes = [
@@ -439,7 +478,11 @@ class CharacterSheetInventory {
 			e.stopPropagation();
 			const wasOpen = menu.classList.contains("open");
 			allMenus.forEach(m => m.classList.remove("open"));
-			if (!wasOpen) menu.classList.add("open");
+			if (!wasOpen) {
+				menu.classList.add("open");
+				// Auto-expand filters if collapsed when opening a dropdown
+				if (!filtersOpen) { filtersOpen = true; _updateFilterToggle(); }
+			}
 		};
 		typeBtn.addEventListener("click", (e) => openDropdown(typeDropdownMenu, e));
 		rarityBtn.addEventListener("click", (e) => openDropdown(rarityDropdownMenu, e));
@@ -505,7 +548,7 @@ class CharacterSheetInventory {
 
 		// ---- Quick filter: Attunement only (tabs replace Magical/Mundane/Consumable) ----
 		const quickFilters = e_({outer: `<div class="charsheet__modal-quick-filters"></div>`});
-		modalInner.append(quickFilters);
+		filterCollapsible.append(quickFilters);
 
 		let filterAttunement = false;
 		const attuneBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", txt: "🔗 Requires Attunement"});
@@ -518,9 +561,9 @@ class CharacterSheetInventory {
 
 		// ---- Weapon category filter (simple/martial) ----
 		const weaponCatLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Category:"});
-		modalInner.append(weaponCatLabel);
+		filterCollapsible.append(weaponCatLabel);
 		const weaponCatBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		modalInner.append(weaponCatBtns);
+		filterCollapsible.append(weaponCatBtns);
 
 		let selectedWeaponCat = null;
 		["simple", "martial"].forEach(cat => {
@@ -536,9 +579,9 @@ class CharacterSheetInventory {
 
 		// ---- Armor category filter (light/medium/heavy) ----
 		const armorCatLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Armor Category:"});
-		modalInner.append(armorCatLabel);
+		filterCollapsible.append(armorCatLabel);
 		const armorCatBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		modalInner.append(armorCatBtns);
+		filterCollapsible.append(armorCatBtns);
 
 		let selectedArmorCat = null;
 		const armorCatMap = {"light": "LA", "medium": "MA", "heavy": "HA"};
@@ -587,9 +630,9 @@ class CharacterSheetInventory {
 		let selectedProps = new Set();
 
 		const propLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Properties:"});
-		modalInner.append(propLabel);
+		filterCollapsible.append(propLabel);
 		const propBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		modalInner.append(propBtns);
+		filterCollapsible.append(propBtns);
 
 		weaponProps.forEach(([key, {displayName, ent}]) => {
 			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: displayName});
@@ -623,9 +666,9 @@ class CharacterSheetInventory {
 		let selectedMasteries = new Set();
 
 		const masteryLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Masteries:"});
-		modalInner.append(masteryLabel);
+		filterCollapsible.append(masteryLabel);
 		const masteryBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		modalInner.append(masteryBtns);
+		filterCollapsible.append(masteryBtns);
 
 		masteryTypes.forEach(([key, {displayName, ent}]) => {
 			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: displayName});
@@ -650,9 +693,9 @@ class CharacterSheetInventory {
 		let selectedDmgTypes = new Set();
 
 		const dmgTypeLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Damage Type:"});
-		modalInner.append(dmgTypeLabel);
+		filterCollapsible.append(dmgTypeLabel);
 		const dmgTypeBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		modalInner.append(dmgTypeBtns);
+		filterCollapsible.append(dmgTypeBtns);
 
 		dmgTypes.forEach(([code, displayName]) => {
 			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: displayName});
@@ -688,7 +731,7 @@ class CharacterSheetInventory {
 		// Cascading sort: primary key chosen by user, ties always broken by name (asc).
 		// Default: rarity desc, then name asc.
 		const sortRow = e_({outer: `<div class="charsheet__modal-sort-row ve-flex-v-center mt-2"></div>`});
-		modalInner.append(sortRow);
+		filterCollapsible.append(sortRow);
 		sortRow.append(e_({tag: "label", clazz: "ve-small ve-muted mr-2 mb-0", txt: "Sort by:"}));
 		const SORT_OPTIONS = [
 			{value: "rarity-desc", label: "Rarity (high → low), then Name"},
@@ -826,8 +869,8 @@ class CharacterSheetInventory {
 				grouped[type].push(item);
 			});
 
-			const typeOrder = ["Weapon", "Armor", "Shield", "Potion", "Scroll", "Wand", "Staff", "Ring", "Wondrous", "Tool", "Gemstone", "Other"];
-			const typeEmojis = {"Weapon": "⚔️", "Armor": "🛡️", "Shield": "🛡️", "Potion": "🧪", "Scroll": "📜", "Wand": "🪄", "Staff": "🏑", "Ring": "💍", "Wondrous": "✨", "Tool": "🔧", "Gemstone": "💎", "Other": "📦"};
+			const typeOrder = ["Weapon", "Armor", "Shield", "Potion", "Scroll", "Wand", "Staff", "Ring", "Wondrous", "Tool", "Gemstone", "Component", "Other"];
+			const typeEmojis = {"Weapon": "⚔️", "Armor": "🛡️", "Shield": "🛡️", "Potion": "🧪", "Scroll": "📜", "Wand": "🪄", "Staff": "🏑", "Ring": "💍", "Wondrous": "✨", "Tool": "🔧", "Gemstone": "💎", "Component": "🧫", "Other": "📦"};
 
 			Object.entries(grouped).sort((a, b) => {
 				const aIdx = typeOrder.indexOf(a[0]);
@@ -855,6 +898,11 @@ class CharacterSheetInventory {
 
 					const itemHoverLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEMS, item.name, item.source);
 
+					const vcSpellLabels = this._getVariantComponentSpellLabels(item);
+					const vcSpellLine = vcSpellLabels.length
+						? `<div class="charsheet__modal-list-item-subtitle" style="color: #8b5cf6; font-style: italic;">🧫 ${vcSpellLabels.join(", ")}</div>`
+						: "";
+
 					const itemEl = e_({outer: `
 						<div class="charsheet__modal-list-item">
 							<div class="charsheet__modal-list-item-icon">${this._getItemTypeEmoji(item)}</div>
@@ -863,6 +911,7 @@ class CharacterSheetInventory {
 								<div class="charsheet__modal-list-item-subtitle">
 									${rarity ? `<span style="color: ${rarityColor}; font-weight: 500;">${rarity}</span> • ` : ""}${item.value ? `${this._formatValue(item.value)} • ` : ""}${Parser.sourceJsonToAbv(item.source)}
 								</div>
+								${vcSpellLine}
 							</div>
 							<button class="ve-btn ve-btn-primary ve-btn-xs item-picker-add">+ Add</button>
 						</div>
@@ -882,6 +931,8 @@ class CharacterSheetInventory {
 					section.append(itemEl);
 				});
 			});
+
+			_updateFilterToggle();
 		};
 
 		search.addEventListener("input", MiscUtil.debounce(renderList, 150));
@@ -914,6 +965,34 @@ class CharacterSheetInventory {
 		return false;
 	}
 
+	_isVariantComponent (item) {
+		return !!(item.variantComponent?.spellEffects?.length);
+	}
+
+	/**
+	 * Get human-readable labels for what spells/effects a variant component enhances.
+	 * Returns an array of short strings like "Legend Lore", "psychic damage spells", "restoration spells".
+	 */
+	_getVariantComponentSpellLabels (item) {
+		const vc = item.variantComponent;
+		if (!vc?.spellEffects?.length) return [];
+		const labels = [];
+		for (const se of vc.spellEffects) {
+			const m = se.match;
+			if (!m) continue;
+			if (m.spell) {
+				// "legend lore|phb" → "Legend Lore"
+				const name = m.spell.split("|")[0];
+				labels.push(name.toTitleCase());
+			} else if (m.damageType) {
+				labels.push(`${m.damageType} damage spells`);
+			} else if (m.spellTag) {
+				labels.push(`${m.spellTag} spells`);
+			}
+		}
+		return labels;
+	}
+
 	_isConsumable (item) {
 		const type = item.type?.toLowerCase();
 		if (type === "p") return true; // Potion
@@ -938,6 +1017,7 @@ class CharacterSheetInventory {
 			"gear": "🎒",
 			"tool": "🔧",
 			"gemstone": "💎",
+			"component": "🧫",
 		};
 		return emojis[type] || "📦";
 	}
@@ -1045,6 +1125,7 @@ class CharacterSheetInventory {
 
 	_getItemType (item) {
 		const typeBase = item.type?.split("|")[0];
+		if (this._isVariantComponent(item)) return "component";
 		if (this._isWeapon(item)) return "weapon";
 		// Check both armor flag and armor type codes
 		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "armor";
@@ -1064,6 +1145,7 @@ class CharacterSheetInventory {
 
 	_getItemTypeTag (item) {
 		const typeBase = item.type?.split("|")[0];
+		if (this._isVariantComponent(item)) return "Component";
 		if (this._isWeapon(item)) return "Weapon";
 		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
 		if (typeBase === "S") return "Shield";
@@ -1232,6 +1314,8 @@ class CharacterSheetInventory {
 			appliedUpgrades: [], // [{name, source, upgradeType, costPaid, appliedAt}]
 			// Socketed Gemstones (TGTT empowered gemstones)
 			socketedGemstones: [], // [{name, source, gemName, rarity, upgradeType, entries, charges, chargesCurrent, chargesMax, recharge, socketedAt}]
+			// Variant spell component data (Arcadia 8)
+			variantComponent: item.variantComponent || null,
 		};
 
 		this._state.addItem(newItem);
@@ -4120,6 +4204,7 @@ class CharacterSheetInventory {
 		const gemHasCharges = activeGem?.chargesMax > 0;
 		const gemIsDaily = activeGem && !gemHasCharges && !activeGem.usedToday;
 		const isVariantComponent = !!(item.variantComponent?.spellEffects?.length);
+		const vcSpellLabels = isVariantComponent ? this._getVariantComponentSpellLabels(item) : [];
 
 		// Render item name with a 5etools hover link if it has a source
 		let itemNameHtml = item.name;
@@ -4183,6 +4268,7 @@ class CharacterSheetInventory {
 						${item.ac ? `<span class="ve-small">AC: ${item.ac}</span>` : ""}
 						${propertiesStr ? `<span class="ve-small ve-muted" title="Properties">${propertiesStr}</span>` : ""}
 						${masteryStr ? `<span class="ve-small text-info" title="Mastery">⚔ ${masteryStr}</span>` : ""}
+						${vcSpellLabels.length ? `<span class="ve-small" style="color: #8b5cf6; font-style: italic;" title="Enhances these spells when used as a variant component">🧫 ${vcSpellLabels.join(", ")}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}">Charges: <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
 						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => {
 							const tooltip = typeof CharacterSheetUpgrades !== "undefined" ? (() => {
@@ -4403,6 +4489,7 @@ class CharacterSheetInventory {
 			wondrous: "Wondrous",
 			tool: "Tool",
 			gear: "Gear",
+			component: "Component",
 		};
 		return tags[type] || "";
 	}

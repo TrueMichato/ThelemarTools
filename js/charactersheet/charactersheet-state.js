@@ -4566,8 +4566,8 @@ class CharacterSheetState {
 	 */
 	_getSubclassSelectionLevel (className, source) {
 		const earlySubclassClasses = ["Cleric", "Sorcerer", "Warlock", "Wizard"];
-		// XPHB 2024 classes all get subclass at level 3
-		if (source === "XPHB") return 3;
+		// XPHB 2024 and TGTT classes all get subclass at level 3
+		if (CharacterSheetClassUtils.is2024Source(source)) return 3;
 		return earlySubclassClasses.includes(className) ? 1 : 3;
 	}
 
@@ -9686,7 +9686,7 @@ class CharacterSheetState {
 					// Way of the Open Hand
 					if (cls.subclass?.shortName === "Open Hand") {
 						const subSource = cls.subclass?.source || source;
-						const isOpenHand2024 = subSource === "XPHB";
+						const isOpenHand2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						// Open Hand Technique (level 3) - effects on Flurry of Blows
 						calculations.hasOpenHandTechnique = true;
@@ -9726,7 +9726,7 @@ class CharacterSheetState {
 					// Way of Shadow
 					if (cls.subclass?.shortName === "Shadow") {
 						const subSource = cls.subclass?.source || source;
-						const isShadow2024 = subSource === "XPHB";
+						const isShadow2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						// Shadow Arts (level 3) - cast spells for ki
 						calculations.hasShadowArts = true;
@@ -9761,7 +9761,7 @@ class CharacterSheetState {
 					// Way of the Four Elements / Warrior of the Elements
 					if (cls.subclass?.shortName === "Four Elements" || cls.subclass?.shortName === "Elements") {
 						const subSource = cls.subclass?.source || source;
-						const isElements2024 = subSource === "XPHB";
+						const isElements2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						if (isElements2024) {
 							// XPHB Warrior of the Elements
@@ -9902,7 +9902,7 @@ class CharacterSheetState {
 					// Way of Mercy (TCE)
 					if (cls.subclass?.shortName === "Mercy") {
 						const subSource = cls.subclass?.source || source;
-						const isMercy2024 = subSource === "XPHB";
+						const isMercy2024 = CharacterSheetClassUtils.is2024Source(subSource);
 						const isMercyFromTGTT = cls.source === "TGTT" || cls.subclass?.source === "TGTT";
 
 						// Implements of Mercy (level 3) - Insight, Medicine, Herbalism Kit proficiency
@@ -10688,7 +10688,7 @@ class CharacterSheetState {
 					// =========================================================
 					if (cls.subclass?.shortName === "Devotion") {
 						const subSource = cls.subclass?.source || source;
-						const isDevotion2024 = subSource === "XPHB";
+						const isDevotion2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						// Sacred Weapon (level 3) - add CHA to attack rolls
 						if (level >= 3) {
@@ -10735,7 +10735,7 @@ class CharacterSheetState {
 					// =========================================================
 					if (cls.subclass?.shortName === "Ancients") {
 						const subSource = cls.subclass?.source || source;
-						const isAncients2024 = subSource === "XPHB";
+						const isAncients2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						// Nature's Wrath (level 3) - restrain creature
 						if (level >= 3) {
@@ -10772,7 +10772,7 @@ class CharacterSheetState {
 					// =========================================================
 					if (cls.subclass?.shortName === "Vengeance") {
 						const subSource = cls.subclass?.source || source;
-						const isVengeance2024 = subSource === "XPHB";
+						const isVengeance2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						// Abjure Enemy (PHB level 3) - frighten creature
 						if (!isVengeance2024 && level >= 3) {
@@ -10808,7 +10808,7 @@ class CharacterSheetState {
 					// =========================================================
 					if (cls.subclass?.shortName === "Glory") {
 						const subSource = cls.subclass?.source || source;
-						const isGlory2024 = subSource === "XPHB";
+						const isGlory2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						// Peerless Athlete (level 3) - bonus to athletics/acrobatics
 						if (level >= 3) {
@@ -11201,7 +11201,7 @@ class CharacterSheetState {
 					// Champion subclass
 					if (cls.subclass?.shortName === "Champion") {
 						const subSource = cls.subclass?.source || source;
-						const isChampion2024 = subSource === "XPHB";
+						const isChampion2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						// Improved Critical (level 3): crit on 19-20
 						calculations.criticalRange = level >= 15 ? 18 : 19; // Superior Critical at 15
@@ -11246,7 +11246,7 @@ class CharacterSheetState {
 					// Battle Master subclass
 					if (cls.subclass?.shortName === "Battle Master") {
 						const subSource = cls.subclass?.source || source;
-						const isBM2024 = subSource === "XPHB";
+						const isBM2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						// Superiority Dice
 						const superiorityDie = level >= 18 ? "d12" : level >= 10 ? "d10" : "d8";
@@ -11306,7 +11306,7 @@ class CharacterSheetState {
 					// Psi Warrior subclass
 					if (cls.subclass?.shortName === "Psi Warrior") {
 						const subSource = cls.subclass?.source || source;
-						const isPsi2024 = subSource === "XPHB";
+						const isPsi2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
 						// Psionic Energy dice
 						const psionicDie = level >= 17 ? "d12" : level >= 11 ? "d10" : level >= 5 ? "d8" : "d6";
@@ -31772,7 +31772,7 @@ class CharacterSheetState {
 		const druid = classes.find(c => c.name?.toLowerCase() === "druid");
 		if (!druid) return "2014";
 		const source = (druid.source || "").toUpperCase();
-		return source === "XPHB" ? "2024" : "2014";
+		return CharacterSheetClassUtils.is2024Source(source) ? "2024" : "2014";
 	}
 
 	/**
@@ -33530,6 +33530,7 @@ class CharacterSheetState {
 	 */
 	getMaxConvertibleSlotLevel () {
 		const sorcererClass = this._data.classes?.find(c => c.name?.toLowerCase() === "sorcerer");
+		// XPHB 2024 limits to level 3; TGTT intentionally keeps classic cap at 5
 		const is2024 = sorcererClass?.source === "XPHB";
 		return is2024 ? 3 : 5;
 	}
@@ -33995,7 +33996,8 @@ class CharacterSheetState {
 		if (!tuned.length || !spellData) return result;
 
 		// Distant Spell: double range (5ft+) or touch → 30ft
-		if (tuned.includes("distant") && spellData.range) {
+		// Only applies to point-range spells (not self-range or AoE-from-self like cone/cube/line)
+		if (tuned.includes("distant") && spellData.range?.type === "point") {
 			const rangeType = spellData.range.distance?.type;
 			if (rangeType === "touch") {
 				result.range.original = "Touch";
