@@ -3493,6 +3493,10 @@ class CharacterSheetState {
 
 			// Ammunition consumption tracking for current combat
 			ammunitionConsumed: {}, // {ammoId: countConsumed}
+
+			// Play Mode (alternative intent-based UI)
+			viewMode: "full", // "full" | "play"
+			favorites: [], // [{id, type, name, icon, detail, ref}] — pinned actions for quick access
 		};
 	}
 
@@ -21535,6 +21539,12 @@ class CharacterSheetState {
 		}
 		this._data.settings.backgroundTheme = theme || "default";
 	}
+
+	// Play Mode view state
+	getViewMode () { return this._data.viewMode || "full"; }
+	setViewMode (mode) { this._data.viewMode = mode || "full"; }
+	getFavorites () { return [...(this._data.favorites || [])]; }
+	setFavorites (favorites) { this._data.favorites = favorites || []; }
 	// #endregion
 
 	// #region Resources

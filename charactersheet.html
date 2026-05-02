@@ -19,6 +19,7 @@
 	<link rel="stylesheet" href="css/charactersheet.css">
 	<link rel="stylesheet" href="css/charactersheet-modern.css">
 	<link rel="stylesheet" href="css/charactersheet-mobile.css">
+	<link rel="stylesheet" href="css/charactersheet-playmode.css">
 	
 	<!-- Google Fonts for modern typography -->
 	<link rel="preconnect" href="https://fonts.googleapis.com">
@@ -126,6 +127,10 @@
 						<span class="charsheet__rolllog-toggle-icon">📜</span>
 						<span class="charsheet__rolllog-toggle-text">Roll Log</span>
 						<span class="charsheet__rolllog-badge" id="charsheet-rolllog-badge" style="display: none"></span>
+					</button>
+					<button class="pm-toggle-btn" id="charsheet-btn-playmode" title="Switch to Play Mode (Ctrl+Shift+P)">
+						<span>🎮</span>
+						<span>Play Mode</span>
 					</button>
 					<button class="charsheet__tool-btn charsheet__tool-btn--note" id="charsheet-add-sticky-note" title="Add a Sticky Note">📌 Note</button>
 					<span class="charsheet__tool-separator"></span>
@@ -299,6 +304,9 @@
 			<li><a data-toggle="tab" href="#charsheet-tab-builder"><span class="charsheet__tab-icon">🔧</span><span class="charsheet__tab-text">Builder</span></a></li>
 			<li><a data-toggle="tab" href="#charsheet-tab-respec"><span class="charsheet__tab-icon">🔄</span><span class="charsheet__tab-text">Respec</span></a></li>
 		</ul>
+
+		<!-- Play Mode Container (hidden unless charsheet--play-mode is active) -->
+		<div id="charsheet-play-mode"></div>
 
 		<!-- Tab Content -->
 		<div class="tab-content">
