@@ -2,12 +2,14 @@
  * Character Sheet — Mobile Interaction Module
  * Provides touch-optimized interactions for mobile devices:
  * - Mobile detection
- * - Swipe navigation between tabs
+ * - Swipe navigation between tabs (with scrollable-container exclusion)
  * - Long-press context menus (replaces right-click)
  * - Roll modifier toolbar (replaces Shift+click / Ctrl+click)
- * - Floating Action Button (FAB)
- * - Collapsible sections
+ * - Floating Action Button (FAB) with backdrop
+ * - Collapsible sections with smooth animation
  * - Haptic feedback
+ * - iOS safe-area and viewport fixes
+ * - Scroll-position-preserving modal scroll lock
  */
 class CharacterSheetMobile {
 	constructor (page) {
@@ -20,14 +22,27 @@ class CharacterSheetMobile {
 		this._swipeThreshold = 60;
 		this._longPressTimer = null;
 		this._longPressDuration = 500;
+		this._longPressTarget = null;
+		this._longPressFired = false;
 		this._rollTarget = null;
 		this._fabOpen = false;
 		this._contextMenuVisible = false;
+		this._scrollYBeforeLock = 0;
+
+		// Guard against duplicate initialization on resize
+		this._mobileInitialized = false;
 
 		// Elements (created lazily)
 		this._elRollToolbar = null;
 		this._elContextMenu = null;
 		this._elFab = null;
+		this._elFabBackdrop = null;
+
+		// Bound handlers for cleanup
+		this._boundOnResize = this._onResize.bind(this);
+		this._boundLongPressStart = this._onLongPressStart.bind(this);
+		this._boundLongPressMove = this._onLongPressMove.bind(this);
+		this._boundLongPressEnd = this._onLongPressEnd.bind(this);
 
 		this._init();
 	}
@@ -59,19 +74,28 @@ class CharacterSheetMobile {
 		// Add touch class to body for CSS hooks
 		document.body.classList.add("is-touch-device");
 
+		// Set CSS custom property for iOS dynamic viewport height
+		this._updateViewportHeight();
+
 		if (this._isMobile) {
 			document.body.classList.add("is-charsheet-mobile");
 			this._initMobileLayout();
 		}
 
 		// Re-evaluate on resize/orientation change
-		window.addEventListener("resize", this._onResize.bind(this));
+		window.addEventListener("resize", this._boundOnResize);
 		window.addEventListener("orientationchange", () => {
-			setTimeout(() => this._onResize(), 100);
+			setTimeout(() => {
+				this._updateViewportHeight();
+				this._boundOnResize();
+			}, 150);
 		});
 	}
 
 	_initMobileLayout () {
+		if (this._mobileInitialized) return;
+		this._mobileInitialized = true;
+
 		this._initCollapsibleSections();
 		this._initSwipeNavigation();
 		this._initLongPress();
@@ -80,11 +104,19 @@ class CharacterSheetMobile {
 		this._initHeaderToggle();
 		this._initTouchFeedback();
 		this._initModalScrollLock();
+		this._initDropdownMobilePositioning();
+
+		// Scroll active tab into view on load
+		requestAnimationFrame(() => {
+			const activeTab = document.querySelector("#charsheet-tabs > li.ve-active");
+			activeTab?.scrollIntoView({behavior: "smooth", inline: "center", block: "nearest"});
+		});
 	}
 
 	_onResize () {
 		const wasMobile = this._isMobile;
 		this._isMobile = CharacterSheetMobile.isMobile();
+		this._updateViewportHeight();
 
 		if (this._isMobile && !wasMobile) {
 			document.body.classList.add("is-charsheet-mobile");
@@ -100,14 +132,24 @@ class CharacterSheetMobile {
 		this._elRollToolbar?.remove();
 		this._elContextMenu?.remove();
 		this._elFab?.remove();
+		this._elFabBackdrop?.remove();
 		this._elRollToolbar = null;
 		this._elContextMenu = null;
 		this._elFab = null;
+		this._elFabBackdrop = null;
 
 		// Uncollapse all sections
 		document.querySelectorAll(".charsheet-mobile--collapsed").forEach(el => {
 			el.classList.remove("charsheet-mobile--collapsed");
 		});
+
+		this._mobileInitialized = false;
+	}
+
+	/** Set --vh custom property for iOS Safari dynamic toolbar */
+	_updateViewportHeight () {
+		const vh = window.innerHeight * 0.01;
+		document.documentElement.style.setProperty("--vh", `${vh}px`);
 	}
 
 	// =========================================================================
@@ -144,17 +186,51 @@ class CharacterSheetMobile {
 			const title = section.querySelector(".charsheet__section-title");
 			if (!title) return;
 
+			// Skip if already initialized
+			if (title.dataset.mobileCollapsible) return;
+			title.dataset.mobileCollapsible = "true";
+
+			// Wrap content for animated collapse (skip the title itself)
+			const contentWrapper = document.createElement("div");
+			contentWrapper.className = "charsheet-mobile__section-content";
+			const children = [...section.children].filter(c => c !== title);
+			children.forEach(c => contentWrapper.appendChild(c));
+			section.appendChild(contentWrapper);
+
 			// Collapse by default for specified sections
 			const shouldCollapse = [...defaultCollapsed].some(cls => section.classList.contains(cls));
 			if (shouldCollapse) {
 				section.classList.add("charsheet-mobile--collapsed");
+				contentWrapper.style.maxHeight = "0";
+			} else {
+				// Set initial max-height for animation
+				contentWrapper.style.maxHeight = contentWrapper.scrollHeight + "px";
 			}
 
 			// Add tap-to-toggle behavior
 			title.addEventListener("click", (e) => {
 				// Don't toggle if clicking edit buttons within the title
 				if (e.target.closest(".charsheet__section-edit, .ve-btn, button")) return;
-				section.classList.toggle("charsheet-mobile--collapsed");
+
+				const isCollapsed = section.classList.toggle("charsheet-mobile--collapsed");
+
+				if (isCollapsed) {
+					contentWrapper.style.maxHeight = contentWrapper.scrollHeight + "px";
+					// Force reflow then collapse
+					contentWrapper.offsetHeight; // eslint-disable-line no-unused-expressions
+					contentWrapper.style.maxHeight = "0";
+				} else {
+					contentWrapper.style.maxHeight = contentWrapper.scrollHeight + "px";
+					// After transition, remove max-height to allow dynamic content changes
+					const onTransitionEnd = () => {
+						if (!section.classList.contains("charsheet-mobile--collapsed")) {
+							contentWrapper.style.maxHeight = "none";
+						}
+						contentWrapper.removeEventListener("transitionend", onTransitionEnd);
+					};
+					contentWrapper.addEventListener("transitionend", onTransitionEnd);
+				}
+
 				this._haptic("light");
 			});
 		});
@@ -168,13 +244,29 @@ class CharacterSheetMobile {
 		const tabContent = document.querySelector(".charsheet-page .tab-content");
 		if (!tabContent) return;
 
+		// Selectors for containers that scroll horizontally — swipe should NOT trigger tab nav on these
+		this._horizontalScrollSelectors = [
+			".charsheet__spell-slots-grid",
+			".charsheet__builder-steps",
+			"#charsheet-tabs",
+			".charsheet__header-row--primary",
+		].join(", ");
+
 		tabContent.addEventListener("touchstart", (e) => {
 			if (e.touches.length !== 1) return;
+
+			// Don't intercept swipes on horizontally-scrollable containers
+			if (e.target.closest(this._horizontalScrollSelectors)) {
+				this._swipeStartX = null;
+				return;
+			}
+
 			this._swipeStartX = e.touches[0].clientX;
 			this._swipeStartY = e.touches[0].clientY;
 		}, {passive: true});
 
 		tabContent.addEventListener("touchend", (e) => {
+			if (this._swipeStartX == null) return;
 			if (e.changedTouches.length !== 1) return;
 			const deltaX = e.changedTouches[0].clientX - this._swipeStartX;
 			const deltaY = e.changedTouches[0].clientY - this._swipeStartY;
@@ -208,8 +300,11 @@ class CharacterSheetMobile {
 			targetLink.click();
 			this._haptic("light");
 
-			// Scroll the tab into view
+			// Scroll the tab into view in the bottom bar
 			tabs[newIdx].scrollIntoView({behavior: "smooth", inline: "center", block: "nearest"});
+
+			// Scroll content to top on tab switch
+			window.scrollTo({top: 0, behavior: "smooth"});
 		}
 	}
 
@@ -218,29 +313,44 @@ class CharacterSheetMobile {
 	// =========================================================================
 
 	_initLongPress () {
-		// Attach to rollable elements and items
-		document.addEventListener("touchstart", (e) => {
-			const target = e.target.closest(
-				".charsheet__skill-row, .charsheet__save-row, .charsheet__attack-item, "
-				+ ".charsheet__ability, .charsheet__combat-stat--clickable, "
-				+ ".charsheet__inventory-item, .charsheet__resource-item",
-			);
-			if (!target) return;
+		document.addEventListener("touchstart", this._boundLongPressStart, {passive: true});
+		document.addEventListener("touchmove", this._boundLongPressMove, {passive: true});
+		document.addEventListener("touchend", this._boundLongPressEnd, {passive: true});
+	}
 
-			this._longPressTimer = setTimeout(() => {
-				e.preventDefault();
-				this._haptic("medium");
-				this._showContextMenu(target, e.touches[0]);
-			}, this._longPressDuration);
-		}, {passive: false});
+	_onLongPressStart (e) {
+		const target = e.target.closest(
+			".charsheet__skill-row, .charsheet__save-row, .charsheet__attack-item, "
+			+ ".charsheet__ability, .charsheet__combat-stat--clickable, "
+			+ ".charsheet__inventory-item, .charsheet__resource-item",
+		);
+		if (!target) return;
 
-		document.addEventListener("touchmove", () => {
-			this._cancelLongPress();
-		}, {passive: true});
+		this._longPressFired = false;
+		this._longPressTarget = target;
+		const touch = e.touches[0];
+		// Capture touch coords now (event object won't be available later)
+		const touchData = {clientX: touch.clientX, clientY: touch.clientY};
 
-		document.addEventListener("touchend", () => {
-			this._cancelLongPress();
-		}, {passive: true});
+		this._longPressTimer = setTimeout(() => {
+			this._longPressFired = true;
+			this._haptic("medium");
+			this._showContextMenu(target, touchData);
+		}, this._longPressDuration);
+	}
+
+	_onLongPressMove () {
+		this._cancelLongPress();
+	}
+
+	_onLongPressEnd (e) {
+		this._cancelLongPress();
+
+		// If long press fired, suppress the click that follows
+		if (this._longPressFired) {
+			e.preventDefault?.();
+			this._longPressFired = false;
+		}
 	}
 
 	_cancelLongPress () {
@@ -256,6 +366,7 @@ class CharacterSheetMobile {
 
 	_showContextMenu (target, touch) {
 		this._hideContextMenu();
+		this._hideRollToolbar();
 
 		if (!this._elContextMenu) {
 			this._elContextMenu = this._createContextMenu();
@@ -264,8 +375,19 @@ class CharacterSheetMobile {
 
 		// Build menu items based on target type
 		const items = this._getContextMenuItems(target);
+		if (!items.length) return;
+
 		const contentEl = this._elContextMenu.querySelector(".charsheet-mobile__context-menu-items");
 		contentEl.innerHTML = "";
+
+		// Add a header showing what element this is for
+		const label = this._getTargetLabel(target);
+		if (label) {
+			const header = document.createElement("div");
+			header.className = "charsheet-mobile__context-menu-header";
+			header.textContent = label;
+			contentEl.appendChild(header);
+		}
 
 		items.forEach(item => {
 			if (item.separator) {
@@ -288,9 +410,12 @@ class CharacterSheetMobile {
 			contentEl.appendChild(el);
 		});
 
-		// Position the menu
-		const x = Math.min(touch.clientX, window.innerWidth - 200);
-		const y = Math.min(touch.clientY - 20, window.innerHeight - 250);
+		// Position: ensure menu doesn't overflow screen or go behind bottom tab bar
+		const tabBarHeight = 60;
+		const menuWidth = 200;
+		const menuEstHeight = items.length * 48 + (label ? 36 : 0);
+		const x = Math.max(8, Math.min(touch.clientX, window.innerWidth - menuWidth - 8));
+		const y = Math.max(8, Math.min(touch.clientY - 20, window.innerHeight - tabBarHeight - menuEstHeight - 8));
 		this._elContextMenu.style.left = `${x}px`;
 		this._elContextMenu.style.top = `${y}px`;
 		this._elContextMenu.classList.add("charsheet-mobile--visible");
@@ -298,9 +423,10 @@ class CharacterSheetMobile {
 
 		// Close on outside tap
 		setTimeout(() => {
-			document.addEventListener("touchstart", this._hideContextMenuHandler = () => {
+			document.addEventListener("touchstart", this._hideContextMenuHandler = (evt) => {
+				if (this._elContextMenu?.contains(evt.target)) return;
 				this._hideContextMenu();
-			}, {once: true});
+			}, {once: true, capture: true});
 		}, 50);
 	}
 
@@ -310,7 +436,7 @@ class CharacterSheetMobile {
 		}
 		this._contextMenuVisible = false;
 		if (this._hideContextMenuHandler) {
-			document.removeEventListener("touchstart", this._hideContextMenuHandler);
+			document.removeEventListener("touchstart", this._hideContextMenuHandler, {capture: true});
 			this._hideContextMenuHandler = null;
 		}
 	}
@@ -322,13 +448,42 @@ class CharacterSheetMobile {
 		return el;
 	}
 
+	/** Extract a human-readable label for the target element */
+	_getTargetLabel (target) {
+		// Skill row
+		const skillName = target.querySelector(".charsheet__skill-name");
+		if (skillName) return skillName.textContent.trim();
+
+		// Save row
+		const saveName = target.querySelector(".charsheet__save-name");
+		if (saveName) return `${saveName.textContent.trim()} Save`;
+
+		// Attack
+		const attackName = target.querySelector(".charsheet__attack-name");
+		if (attackName) return attackName.textContent.trim();
+
+		// Ability
+		const abilityLabel = target.querySelector(".charsheet__ability-label");
+		if (abilityLabel) return abilityLabel.textContent.trim();
+
+		// Inventory item
+		const itemName = target.querySelector(".charsheet__inventory-name, .charsheet__resource-name");
+		if (itemName) return itemName.textContent.trim();
+
+		// Combat stat
+		const statLabel = target.querySelector(".charsheet__combat-stat-label");
+		if (statLabel) return statLabel.textContent.trim();
+
+		return null;
+	}
+
 	_getContextMenuItems (target) {
 		const items = [];
 
 		// Skill/Save row
 		if (target.matches(".charsheet__skill-row, .charsheet__save-row")) {
 			items.push(
-				{icon: "🎲", label: "Roll Normal", action: () => target.click()},
+				{icon: "🎲", label: "Roll Normal", action: () => this._simulateModifiedClick(target, {})},
 				{icon: "⬆️", label: "Roll with Advantage", action: () => this._simulateModifiedClick(target, {shiftKey: true})},
 				{icon: "⬇️", label: "Roll with Disadvantage", action: () => this._simulateModifiedClick(target, {ctrlKey: true})},
 			);
@@ -351,7 +506,7 @@ class CharacterSheetMobile {
 		// Ability score
 		if (target.matches(".charsheet__ability")) {
 			items.push(
-				{icon: "🎲", label: "Roll Check", action: () => target.click()},
+				{icon: "🎲", label: "Roll Check", action: () => this._simulateModifiedClick(target, {})},
 				{icon: "⬆️", label: "Roll (Advantage)", action: () => this._simulateModifiedClick(target, {shiftKey: true})},
 				{icon: "⬇️", label: "Roll (Disadvantage)", action: () => this._simulateModifiedClick(target, {ctrlKey: true})},
 			);
@@ -366,10 +521,19 @@ class CharacterSheetMobile {
 			);
 		}
 
+		// Resource item
+		if (target.matches(".charsheet__resource-item")) {
+			items.push(
+				{icon: "✨", label: "Use Resource", action: () => target.querySelector(".charsheet__resource-use, .charsheet__resource-decrement")?.click()},
+				{icon: "🔄", label: "Reset", action: () => target.querySelector(".charsheet__resource-reset")?.click()},
+				{icon: "✏️", label: "Edit", action: () => target.querySelector(".charsheet__resource-edit")?.click()},
+			);
+		}
+
 		// Combat stat (initiative, AC)
 		if (target.matches(".charsheet__combat-stat--clickable")) {
 			items.push(
-				{icon: "🎲", label: "Roll", action: () => target.click()},
+				{icon: "🎲", label: "Roll", action: () => this._simulateModifiedClick(target, {})},
 				{icon: "⬆️", label: "Roll (Advantage)", action: () => this._simulateModifiedClick(target, {shiftKey: true})},
 				{icon: "⬇️", label: "Roll (Disadvantage)", action: () => this._simulateModifiedClick(target, {ctrlKey: true})},
 			);
@@ -386,9 +550,17 @@ class CharacterSheetMobile {
 		this._elRollToolbar = this._createRollToolbar();
 		document.body.appendChild(this._elRollToolbar);
 
-		// Intercept taps on rollable elements
+		// Tap on rollable elements shows the toolbar (does NOT block the click)
+		// Normal tap = roll normally (click passes through to original handler)
+		// The toolbar gives Adv/Disadv options for the NEXT roll
 		document.addEventListener("click", (e) => {
 			if (!this._isMobile) return;
+
+			// Don't intercept clicks originating from inside the toolbar itself
+			if (e.target.closest(".charsheet-mobile__roll-toolbar")) return;
+
+			// Don't intercept if long press just fired (context menu is showing)
+			if (this._contextMenuVisible) return;
 
 			const rollable = e.target.closest(
 				".charsheet__skill-row, .charsheet__save-row, "
@@ -401,26 +573,21 @@ class CharacterSheetMobile {
 				return;
 			}
 
-			// On mobile, intercept the click and show toolbar instead
-			if (this._isRollToolbarNeeded(rollable)) {
-				e.preventDefault();
-				e.stopPropagation();
-				this._showRollToolbar(rollable);
-			}
-		}, {capture: true});
-	}
-
-	_isRollToolbarNeeded (target) {
-		// Only show toolbar for elements that support advantage/disadvantage
-		return target.matches(
-			".charsheet__skill-row, .charsheet__save-row, "
-			+ ".charsheet__ability[data-ability], .charsheet__combat-stat--initiative, "
-			+ ".charsheet__attack-roll",
-		);
+			// Show the toolbar for this element — but let the click pass through
+			// so the user gets a normal roll immediately. The toolbar stays visible
+			// for subsequent Adv/Disadv rolls on the same target.
+			this._showRollToolbar(rollable);
+		});
 	}
 
 	_showRollToolbar (target) {
 		this._rollTarget = target;
+
+		// Update the label showing what we're rolling
+		const label = this._getTargetLabel(target) || "Roll";
+		const labelEl = this._elRollToolbar.querySelector(".charsheet-mobile__roll-toolbar-label");
+		if (labelEl) labelEl.textContent = label;
+
 		this._elRollToolbar.classList.add("charsheet-mobile--visible");
 		this._haptic("light");
 	}
@@ -434,16 +601,16 @@ class CharacterSheetMobile {
 		const el = document.createElement("div");
 		el.className = "charsheet-mobile__roll-toolbar";
 		el.innerHTML = `
-			<button class="charsheet-mobile__roll-toolbar-btn charsheet-mobile__roll-toolbar-btn--advantage" data-roll="advantage">
-				⬆️ Adv.
-			</button>
-			<button class="charsheet-mobile__roll-toolbar-btn" data-roll="normal">
-				🎲 Normal
-			</button>
-			<button class="charsheet-mobile__roll-toolbar-btn charsheet-mobile__roll-toolbar-btn--disadvantage" data-roll="disadvantage">
-				⬇️ Disadv.
-			</button>
-			<button class="charsheet-mobile__roll-toolbar-close" data-roll="close">✕</button>
+			<span class="charsheet-mobile__roll-toolbar-label"></span>
+			<div class="charsheet-mobile__roll-toolbar-buttons">
+				<button class="charsheet-mobile__roll-toolbar-btn charsheet-mobile__roll-toolbar-btn--advantage" data-roll="advantage">
+					⬆️ Adv.
+				</button>
+				<button class="charsheet-mobile__roll-toolbar-btn charsheet-mobile__roll-toolbar-btn--disadvantage" data-roll="disadvantage">
+					⬇️ Disadv.
+				</button>
+				<button class="charsheet-mobile__roll-toolbar-close" data-roll="close">✕</button>
+			</div>
 		`;
 
 		el.addEventListener("click", (e) => {
@@ -466,10 +633,6 @@ class CharacterSheetMobile {
 				case "disadvantage":
 					this._simulateModifiedClick(this._rollTarget, {ctrlKey: true});
 					break;
-				case "normal":
-				default:
-					this._simulateModifiedClick(this._rollTarget, {});
-					break;
 			}
 
 			this._haptic("medium");
@@ -480,12 +643,25 @@ class CharacterSheetMobile {
 	}
 
 	// =========================================================================
-	// Floating Action Button (FAB)
+	// Floating Action Button (FAB) with Backdrop
 	// =========================================================================
 
 	_initFab () {
+		this._elFabBackdrop = document.createElement("div");
+		this._elFabBackdrop.className = "charsheet-mobile__fab-backdrop";
+		this._elFabBackdrop.addEventListener("click", () => this._closeFab());
+		document.body.appendChild(this._elFabBackdrop);
+
 		this._elFab = this._createFab();
 		document.body.appendChild(this._elFab);
+	}
+
+	_closeFab () {
+		if (!this._fabOpen) return;
+		this._fabOpen = false;
+		const mainBtn = this._elFab?.querySelector(".charsheet-mobile__fab-main");
+		mainBtn?.classList.remove("charsheet-mobile__fab--open");
+		this._elFabBackdrop?.classList.remove("charsheet-mobile--visible");
 	}
 
 	_createFab () {
@@ -520,6 +696,7 @@ class CharacterSheetMobile {
 		mainBtn.addEventListener("click", () => {
 			this._fabOpen = !this._fabOpen;
 			mainBtn.classList.toggle("charsheet-mobile__fab--open", this._fabOpen);
+			this._elFabBackdrop?.classList.toggle("charsheet-mobile--visible", this._fabOpen);
 			this._haptic("light");
 		});
 
@@ -530,8 +707,7 @@ class CharacterSheetMobile {
 
 			const actionType = action.dataset.action;
 			this._executeFabAction(actionType);
-			this._fabOpen = false;
-			mainBtn.classList.remove("charsheet-mobile__fab--open");
+			this._closeFab();
 		});
 
 		return el;
@@ -561,17 +737,21 @@ class CharacterSheetMobile {
 	// =========================================================================
 
 	_initHeaderToggle () {
-		const moreBtn = document.getElementById("charsheet-btn-more");
 		const secondaryRow = document.getElementById("charsheet-header-secondary");
+		if (!secondaryRow) return;
 
-		if (!moreBtn || !secondaryRow) return;
+		// Skip if already initialized
+		if (secondaryRow.dataset.mobileToggle) return;
+		secondaryRow.dataset.mobileToggle = "true";
 
-		// On mobile, the secondary row starts collapsed (CSS handles initial state)
-		// The More button toggles it
-		moreBtn.addEventListener("click", () => {
-			secondaryRow.classList.toggle("charsheet-mobile--expanded");
-			this._haptic("light");
+		// Hook into the existing More button — the desktop handler toggles
+		// charsheet__header-row--collapsed. We listen for that class change and
+		// sync our mobile-specific expanded class.
+		const observer = new MutationObserver(() => {
+			const isDesktopCollapsed = secondaryRow.classList.contains("charsheet__header-row--collapsed");
+			secondaryRow.classList.toggle("charsheet-mobile--expanded", !isDesktopCollapsed);
 		});
+		observer.observe(secondaryRow, {attributes: true, attributeFilter: ["class"]});
 	}
 
 	// =========================================================================
@@ -606,24 +786,22 @@ class CharacterSheetMobile {
 	}
 
 	// =========================================================================
-	// Modal Scroll Lock
+	// Modal Scroll Lock (preserves scroll position)
 	// =========================================================================
 
 	_initModalScrollLock () {
-		// Watch for modal overlays appearing/disappearing
 		const observer = new MutationObserver((mutations) => {
 			for (const mutation of mutations) {
 				for (const node of mutation.addedNodes) {
 					if (node.nodeType === 1 && node.classList?.contains("ve-ui-modal__overlay")) {
-						document.body.classList.add("charsheet-mobile--no-scroll");
+						this._lockScroll();
 					}
 				}
 				for (const node of mutation.removedNodes) {
 					if (node.nodeType === 1 && node.classList?.contains("ve-ui-modal__overlay")) {
-						// Check if any other modals remain
 						const remaining = document.querySelectorAll(".ve-ui-modal__overlay");
 						if (!remaining.length) {
-							document.body.classList.remove("charsheet-mobile--no-scroll");
+							this._unlockScroll();
 						}
 					}
 				}
@@ -631,6 +809,75 @@ class CharacterSheetMobile {
 		});
 
 		observer.observe(document.body, {childList: true});
+	}
+
+	_lockScroll () {
+		this._scrollYBeforeLock = window.scrollY;
+		document.body.classList.add("charsheet-mobile--no-scroll");
+		document.body.style.top = `-${this._scrollYBeforeLock}px`;
+	}
+
+	_unlockScroll () {
+		document.body.classList.remove("charsheet-mobile--no-scroll");
+		document.body.style.top = "";
+		window.scrollTo(0, this._scrollYBeforeLock);
+	}
+
+	// =========================================================================
+	// Dropdown Mobile Positioning
+	// =========================================================================
+
+	_initDropdownMobilePositioning () {
+		// Watch for dropdown activation and re-position for mobile
+		const dropdownSelectors = [
+			".charsheet__theme-dropdown",
+			".charsheet__font-dropdown",
+			".charsheet__dice-dropdown",
+			".charsheet__textsize-dropdown",
+		];
+
+		const observer = new MutationObserver((mutations) => {
+			for (const mutation of mutations) {
+				if (mutation.type !== "attributes" || mutation.attributeName !== "class") continue;
+				const el = mutation.target;
+				if (!dropdownSelectors.some(sel => el.matches(sel))) continue;
+
+				if (el.classList.contains("active")) {
+					this._repositionDropdown(el);
+				}
+			}
+		});
+
+		// Observe the header area where dropdowns live
+		const header = document.querySelector(".charsheet__main-header");
+		if (header) {
+			observer.observe(header, {attributes: true, attributeFilter: ["class"], subtree: true});
+		}
+	}
+
+	_repositionDropdown (dropdown) {
+		if (!this._isMobile) return;
+
+		// Center dropdowns horizontally on mobile, ensure they don't overflow
+		const rect = dropdown.getBoundingClientRect();
+		const vpWidth = window.innerWidth;
+
+		if (rect.right > vpWidth - 8) {
+			dropdown.style.left = "auto";
+			dropdown.style.right = "8px";
+		}
+		if (rect.left < 8) {
+			dropdown.style.left = "8px";
+			dropdown.style.right = "auto";
+		}
+
+		// Ensure dropdown doesn't extend beyond bottom tab bar
+		const tabBarHeight = 60;
+		const maxBottom = window.innerHeight - tabBarHeight;
+		if (rect.bottom > maxBottom) {
+			dropdown.style.maxHeight = `${maxBottom - rect.top - 8}px`;
+			dropdown.style.overflowY = "auto";
+		}
 	}
 
 	// =========================================================================
