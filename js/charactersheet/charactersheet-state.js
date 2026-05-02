@@ -21545,6 +21545,33 @@ class CharacterSheetState {
 	setViewMode (mode) { this._data.viewMode = mode || "full"; }
 	getFavorites () { return [...(this._data.favorites || [])]; }
 	setFavorites (favorites) { this._data.favorites = favorites || []; }
+
+	isFavorite (type, id) {
+		const key = `${type}:${id}`;
+		return (this._data.favorites || []).some(f => f.id === key);
+	}
+
+	addFavorite (favData, {max = 8} = {}) {
+		if (!this._data.favorites) this._data.favorites = [];
+		if (this._data.favorites.length >= max) return false;
+		if (this._data.favorites.some(f => f.id === favData.id)) return false;
+		this._data.favorites = [...this._data.favorites, favData];
+		return true;
+	}
+
+	removeFavorite (id) {
+		if (!this._data.favorites) return false;
+		const before = this._data.favorites.length;
+		this._data.favorites = this._data.favorites.filter(f => f.id !== id);
+		return this._data.favorites.length < before;
+	}
+
+	toggleFavorite (favData, {max = 8} = {}) {
+		if (this.isFavorite(favData.type, favData.id?.split(":")[1] || "")) {
+			return this.removeFavorite(favData.id) ? "removed" : null;
+		}
+		return this.addFavorite(favData, {max}) ? "added" : null;
+	}
 	// #endregion
 
 	// #region Resources
