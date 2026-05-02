@@ -9858,7 +9858,8 @@ body.has-quickbuild-overlay .toast__container {
 	.charsheet__col-center,
 	.charsheet__col-right {
 		max-width: none;
-		min-width: 100%;
+		min-width: 280px;
+		flex: 1 1 45%;
 	}
 
 	.charsheet__abilities-grid {
@@ -11151,6 +11152,7 @@ body.has-quickbuild-overlay .toast__container {
 /* ========================================================================
    Responsive Improvements
    ======================================================================== */
+/* Note: On mobile (<768px), charactersheet-mobile.css overrides tabs to bottom nav */
 @media (max-width: 768px) {
 	#charsheet-tabs {
 		gap: 0;
