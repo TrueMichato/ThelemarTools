@@ -160,7 +160,7 @@ export class CharacterSheetPlayMode {
 		const wrap = this._ce("div", "pm-status__identity", parent);
 
 		// Portrait
-		const portrait = this._state._data?.appearance?.portraitUrl;
+		const portrait = this._state.getAppearance("portraitUrl");
 		if (portrait) {
 			const img = this._ce("img", "pm-status__portrait", wrap);
 			img.src = portrait;
@@ -304,11 +304,10 @@ export class CharacterSheetPlayMode {
 			const conc = this._ce("span", "pm-status__indicator pm-status__indicator--concentration", parent);
 			conc.textContent = `🔮 Concentrating: ${concentrating.name || "Spell"}`;
 			this._makeClickable(conc, `End concentration on ${concentrating.name || "spell"}`, () => {
-				if (confirm(`End concentration on ${concentrating.name || "spell"}?`)) {
-					this._state.setActiveState(concentrating.id, false);
-					this._renderStatusBar();
-					this._logActivity("🔮", `Dropped concentration on ${concentrating.name}`);
-				}
+				this._state.setActiveState(concentrating.id, false);
+				this._renderStatusBar();
+				this._logActivity("🔮", `Dropped concentration on ${concentrating.name}`);
+				JqueryUtil?.doToast?.({type: "info", content: `Dropped concentration on ${concentrating.name || "spell"}`});
 			});
 		}
 
@@ -343,7 +342,7 @@ export class CharacterSheetPlayMode {
 		});
 
 		// Exhaustion
-		const exhaustion = this._state._data?.exhaustion || 0;
+		const exhaustion = this._state.getExhaustion();
 		if (exhaustion > 0) {
 			const exh = this._ce("span", "pm-status__indicator pm-status__indicator--exhaustion", parent);
 			exh.textContent = `😫 Exhaustion ${exhaustion}`;
@@ -354,8 +353,8 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderCombatTracker (parent) {
-		const inCombat = this._state._data?.inCombat;
-		const combatRound = this._state._data?.combatRound || 0;
+		const inCombat = this._state.isInCombat();
+		const combatRound = this._state.getCombatRound();
 
 		const tracker = this._ce("div", "pm-combat-tracker", parent);
 
@@ -573,7 +572,7 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderFavoritesBar () {
-		const favorites = this._state._data?.favorites || [];
+		const favorites = this._state.getFavorites();
 		const card = this._makeCard(this._elActionsHub, "⭐", "Favorites");
 
 		if (!favorites.length) {
@@ -742,7 +741,7 @@ export class CharacterSheetPlayMode {
 		const card = this._makeCard(this._elActionsHub, "✨", "Spells");
 
 		// Spell slot pips
-		const slotData = this._state._data?.spellcasting?.spellSlots || {};
+		const slotData = this._state.getSpellSlots();
 		const hasSlots = Object.keys(slotData).some(k => (slotData[k]?.max || 0) > 0);
 		if (hasSlots) {
 			const slotsRow = this._ce("div", "pm-slots", card);
@@ -758,10 +757,12 @@ export class CharacterSheetPlayMode {
 				for (let i = 0; i < slot.max; i++) {
 					const pip = this._ce("span", `pm-slots__pip pm-slots__pip--${i < slot.current ? "filled" : "empty"}`, pips);
 					this._makeClickable(pip, `Level ${lvl} spell slot ${i + 1} (${i < slot.current ? "use" : "restore"})`, () => {
-						if (i < slot.current) {
-							this._state._data.spellcasting.spellSlots[lvl].current--;
+						const cur = this._state.getSpellSlotsCurrent(lvl);
+						const max = this._state.getSpellSlotsMax(lvl);
+						if (i < cur) {
+							this._state.setSpellSlotCurrent(lvl, cur - 1);
 						} else {
-							this._state._data.spellcasting.spellSlots[lvl].current = Math.min(slot.max, slot.current + 1);
+							this._state.setSpellSlotCurrent(lvl, Math.min(max, cur + 1));
 						}
 						this._renderSpellsQuick();
 					});
@@ -930,10 +931,13 @@ export class CharacterSheetPlayMode {
 			for (let i = 0; i < data.max; i++) {
 				const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < data.current ? "filled" : "empty"}`, pips);
 				this._makeClickable(pip, `Hit Die ${die} ${i + 1} (${i < data.current ? "use" : "restore"})`, () => {
-					if (i < data.current) {
-						this._state._data.hitDice[die].current--;
+					const fresh = this._state.getHitDice();
+					const cur = fresh[die];
+					if (!cur) return;
+					if (i < cur.current) {
+						this._state.setHitDice(Object.entries(fresh).map(([d, v]) => ({die: d, current: d === die ? v.current - 1 : v.current, max: v.max})));
 					} else {
-						this._state._data.hitDice[die].current = Math.min(data.max, data.current + 1);
+						this._state.setHitDice(Object.entries(fresh).map(([d, v]) => ({die: d, current: d === die ? Math.min(v.max, v.current + 1) : v.current, max: v.max})));
 					}
 					this._renderResources();
 				});
@@ -1028,7 +1032,7 @@ export class CharacterSheetPlayMode {
 	_renderSpellsDrawer (container) {
 		const spells = this._state.getSpells();
 		if (!spells.length) {
-			container.innerHTML = `<div class="pm-empty"><span class="pm-empty__icon">✨</span>No spells known. Add spells from the Spells tab.</div>`;
+			this._renderEmptyState(container, "✨", "No spells known. Add spells from the Spells tab.");
 			return;
 		}
 
@@ -1054,15 +1058,14 @@ export class CharacterSheetPlayMode {
 		const items = this._state.getItems();
 
 		// Currency
-		const currency = this._state._data?.currency || {};
-		const coins = ["cp", "sp", "ep", "gp", "pp"].filter(c => currency[c] > 0);
+		const coins = ["cp", "sp", "ep", "gp", "pp"].filter(c => this._state.getCurrency(c) > 0);
 		if (coins.length) {
 			const currCard = this._makeCard(container, "💰", "Currency");
 			const currRow = this._ce("div", "pm-passives", currCard);
 			coins.forEach(c => {
 				const cell = this._ce("div", "pm-passive", currRow);
 				const val = this._ce("span", "pm-passive__value", cell);
-				val.textContent = currency[c];
+				val.textContent = this._state.getCurrency(c);
 				const lbl = this._ce("span", "pm-passive__label", cell);
 				lbl.textContent = c.toUpperCase();
 			});
@@ -1096,14 +1099,14 @@ export class CharacterSheetPlayMode {
 				}
 			});
 		} else {
-			container.innerHTML += `<div class="pm-empty"><span class="pm-empty__icon">🎒</span>No items. Add items from the Inventory tab.</div>`;
+			this._renderEmptyState(container, "🎒", "No items. Add items from the Inventory tab.");
 		}
 	}
 
 	_renderReferenceDrawer (container) {
 		const features = this._state.getFeatures();
 		if (!features.length) {
-			container.innerHTML = `<div class="pm-empty"><span class="pm-empty__icon">📜</span>No features yet.</div>`;
+			this._renderEmptyState(container, "📜", "No features yet.");
 			return;
 		}
 
@@ -1129,35 +1132,37 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderNotesDrawer (container) {
-		const notes = this._state._data?.notes || {};
 		const entries = [
-			{label: "Personality", value: notes.personality},
-			{label: "Ideals", value: notes.ideals},
-			{label: "Bonds", value: notes.bonds},
-			{label: "Flaws", value: notes.flaws},
-			{label: "Backstory", value: notes.backstory},
-			{label: "Additional Notes", value: notes.additional},
+			{label: "Personality", field: "personality"},
+			{label: "Ideals", field: "ideals"},
+			{label: "Bonds", field: "bonds"},
+			{label: "Flaws", field: "flaws"},
+			{label: "Backstory", field: "backstory"},
+			{label: "Additional Notes", field: "additional"},
 		];
 
+		let hasAny = false;
 		entries.forEach(e => {
-			if (!e.value) return;
+			const value = this._state.getNote(e.field);
+			if (!value) return;
+			hasAny = true;
 			const card = this._makeCard(container, "📝", e.label);
 			const text = this._ce("div", null, card);
 			text.style.whiteSpace = "pre-wrap";
 			text.style.fontSize = "var(--cs-text-sm, 0.875rem)";
 			text.style.color = "var(--cs-text-secondary, #94a3b8)";
-			text.textContent = e.value;
+			text.textContent = value;
 		});
 
-		if (!entries.some(e => e.value)) {
-			container.innerHTML = `<div class="pm-empty"><span class="pm-empty__icon">📝</span>No notes. Add notes from the Notes tab.</div>`;
+		if (!hasAny) {
+			this._renderEmptyState(container, "📝", "No notes. Add notes from the Notes tab.");
 		}
 	}
 
 	_renderCompanionsDrawer (container) {
-		const companions = this._state._data?.companions || [];
+		const companions = this._state.getCompanions();
 		if (!companions.length) {
-			container.innerHTML = `<div class="pm-empty"><span class="pm-empty__icon">🐾</span>No companions. Add from the Companions tab.</div>`;
+			this._renderEmptyState(container, "🐾", "No companions. Add from the Companions tab.");
 			return;
 		}
 
@@ -1173,34 +1178,23 @@ export class CharacterSheetPlayMode {
 	// ─── Favorites System ───────────────────────────────────────
 
 	_isFavorite (type, id) {
-		const favorites = this._state._data?.favorites || [];
-		return favorites.some(f => f.id === `${type}:${id}`);
+		return this._state.isFavorite(type, id);
 	}
 
 	_toggleFavorite (favData) {
-		if (!this._state._data.favorites) this._state._data.favorites = [];
-		const idx = this._state._data.favorites.findIndex(f => f.id === favData.id);
-		if (idx >= 0) {
-			this._state._data.favorites.splice(idx, 1);
-		} else {
-			if (this._state._data.favorites.length >= 8) {
-				JqueryUtil?.doToast?.({type: "warning", content: "Maximum 8 favorites. Remove one first."});
-				return;
-			}
-			this._state._data.favorites.push(favData);
+		const result = this._state.toggleFavorite(favData);
+		if (!result) {
+			JqueryUtil?.doToast?.({type: "warning", content: "Maximum 8 favorites. Remove one first."});
+			return;
 		}
 		this._renderFavoritesBar();
-		// Also re-render the section that contains the star to update its state
 		this._renderAttacks();
 		this._renderSpellsQuick();
 		this._renderFeaturesQuick();
 	}
 
 	_removeFavorite (id) {
-		if (!this._state._data.favorites) return;
-		const idx = this._state._data.favorites.findIndex(f => f.id === id);
-		if (idx >= 0) {
-			this._state._data.favorites.splice(idx, 1);
+		if (this._state.removeFavorite(id)) {
 			this.render();
 		}
 	}
@@ -1229,12 +1223,11 @@ export class CharacterSheetPlayMode {
 		}
 
 		// Find the lowest available slot at or above spell level
-		const slotData = this._state._data?.spellcasting?.spellSlots || {};
 		let usedLevel = null;
 		for (let lvl = spell.level; lvl <= 9; lvl++) {
-			const slot = slotData[lvl];
-			if (slot && slot.current > 0) {
-				slot.current--;
+			const cur = this._state.getSpellSlotsCurrent(lvl);
+			if (cur > 0) {
+				this._state.setSpellSlotCurrent(lvl, cur - 1);
 				usedLevel = lvl;
 				break;
 			}
@@ -1251,10 +1244,59 @@ export class CharacterSheetPlayMode {
 	// ─── HP Flow ────────────────────────────────────────────────
 
 	_promptHpChange (mode) {
-		const amount = prompt(mode === "heal" ? "Heal amount:" : "Damage amount:");
-		if (!amount) return;
-		const val = parseInt(amount);
-		if (isNaN(val) || val <= 0) return;
+		// Show inline input form instead of browser prompt
+		const overlay = this._ce("div", "pm-hp-input-overlay");
+		overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:600;display:flex;align-items:center;justify-content:center;";
+
+		const panel = this._ce("div", "pm-hp-input-panel", overlay);
+		panel.style.cssText = "background:var(--cs-bg-surface,#1e293b);border-radius:12px;padding:1.5rem;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.5);";
+
+		const title = this._ce("div", null, panel);
+		title.style.cssText = "font-size:1.1rem;font-weight:600;margin-bottom:1rem;color:var(--cs-text-primary,#f1f5f9);";
+		title.textContent = mode === "heal" ? "💚 Heal" : "💔 Take Damage";
+
+		const inputRow = this._ce("div", null, panel);
+		inputRow.style.cssText = "display:flex;gap:0.5rem;margin-bottom:1rem;";
+
+		const input = this._ce("input", null, inputRow);
+		input.type = "number";
+		input.min = "1";
+		input.placeholder = "Amount";
+		input.style.cssText = "flex:1;padding:0.5rem;border-radius:6px;border:1px solid var(--cs-border,#334155);background:var(--cs-bg-card,#0f172a);color:var(--cs-text-primary,#f1f5f9);font-size:1rem;";
+
+		const btnRow = this._ce("div", null, panel);
+		btnRow.style.cssText = "display:flex;gap:0.5rem;justify-content:flex-end;";
+
+		const cancelBtn = this._ce("button", null, btnRow);
+		cancelBtn.textContent = "Cancel";
+		cancelBtn.style.cssText = "padding:0.4rem 1rem;border-radius:6px;border:1px solid var(--cs-border,#334155);background:transparent;color:var(--cs-text-secondary,#94a3b8);cursor:pointer;";
+
+		const applyBtn = this._ce("button", null, btnRow);
+		applyBtn.textContent = "Apply";
+		applyBtn.style.cssText = `padding:0.4rem 1rem;border-radius:6px;border:none;background:${mode === "heal" ? "var(--cs-success,#22c55e)" : "var(--cs-danger,#ef4444)"};color:white;cursor:pointer;font-weight:600;`;
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		const apply = () => {
+			const val = parseInt(input.value);
+			if (isNaN(val) || val <= 0) return;
+			close();
+			this._applyHpChange(mode, val);
+		};
+
+		applyBtn.addEventListener("click", apply);
+		input.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") apply();
+			if (e.key === "Escape") close();
+		});
+
+		document.body.appendChild(overlay);
+		input.focus();
+	}
+
+	_applyHpChange (mode, val) {
 
 		if (mode === "heal") {
 			const current = this._state.getCurrentHp();
@@ -1318,37 +1360,79 @@ export class CharacterSheetPlayMode {
 		} else {
 			// Check for Focused Spell (Sorcerer metamagic) reroll
 			if (this._state.canUseFocusedConcentrationReroll?.()) {
-				const useReroll = confirm(
-					`Concentration FAILED (${resultText}).\n\nUse Focused Spell (Sorcerer) to spend 1 sorcery point and reroll?`,
-				);
-				if (useReroll) {
-					this._state.useFocusedConcentrationReroll?.();
-					roll1 = this._rollD20();
-					roll2 = advantage ? this._rollD20() : null;
-					naturalRoll = advantage ? Math.max(roll1, roll2) : roll1;
-					total = naturalRoll + bonus;
-					passed = total >= dc;
-					const rerollDesc = advantage
-						? `d20(${roll1}, ${roll2}) → ${naturalRoll}`
-						: `d20(${naturalRoll})`;
-					const rerollText = `${rerollDesc} + ${bonus} = ${total} vs DC ${dc}`;
-
-					if (passed) {
-						JqueryUtil.doToast({type: "success", content: `Focused Spell reroll saved! ${rerollText}`});
-						this._logActivity("🔮", `Concentration reroll: ✅ ${rerollText}`);
-					} else {
-						this._state.breakConcentration?.();
-						JqueryUtil.doToast({type: "danger", content: `Concentration broken! ${rerollText}`});
-						this._logActivity("🔮", `Concentration reroll: ❌ ${rerollText} — concentration broken`);
-					}
-					return;
-				}
+				this._showFocusedSpellPrompt(resultText, dc, bonus, advantage);
+				return;
 			}
 
 			this._state.breakConcentration?.();
 			JqueryUtil.doToast({type: "danger", content: `Concentration broken! ${resultText}`});
 			this._logActivity("🔮", `Concentration save: ❌ ${resultText} — concentration broken`);
 		}
+	}
+
+	_showFocusedSpellPrompt (failText, dc, bonus, advantage) {
+		const overlay = this._ce("div", "pm-hp-input-overlay");
+		overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:600;display:flex;align-items:center;justify-content:center;";
+
+		const panel = this._ce("div", null, overlay);
+		panel.style.cssText = "background:var(--cs-bg-surface,#1e293b);border-radius:12px;padding:1.5rem;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,0.5);";
+
+		const title = this._ce("div", null, panel);
+		title.style.cssText = "font-size:1.1rem;font-weight:600;color:var(--cs-danger,#ef4444);margin-bottom:0.75rem;";
+		title.textContent = "🔮 Concentration FAILED";
+
+		const desc = this._ce("div", null, panel);
+		desc.style.cssText = "font-size:0.9rem;color:var(--cs-text-secondary,#94a3b8);margin-bottom:1rem;line-height:1.4;";
+		desc.textContent = `${failText}\n\nUse Focused Spell to spend 1 sorcery point and reroll?`;
+		desc.style.whiteSpace = "pre-wrap";
+
+		const btnRow = this._ce("div", null, panel);
+		btnRow.style.cssText = "display:flex;gap:0.5rem;justify-content:flex-end;";
+
+		const declineBtn = this._ce("button", null, btnRow);
+		declineBtn.textContent = "Break Concentration";
+		declineBtn.style.cssText = "padding:0.4rem 1rem;border-radius:6px;border:1px solid var(--cs-border,#334155);background:transparent;color:var(--cs-text-secondary,#94a3b8);cursor:pointer;";
+
+		const rerollBtn = this._ce("button", null, btnRow);
+		rerollBtn.textContent = "🎲 Reroll";
+		rerollBtn.style.cssText = "padding:0.4rem 1rem;border-radius:6px;border:none;background:var(--cs-primary,#6366f1);color:white;cursor:pointer;font-weight:600;";
+
+		const close = () => overlay.remove();
+
+		declineBtn.addEventListener("click", () => {
+			close();
+			this._state.breakConcentration?.();
+			JqueryUtil.doToast({type: "danger", content: `Concentration broken! ${failText}`});
+			this._logActivity("🔮", `Concentration save: ❌ ${failText} — concentration broken`);
+			this._renderStatusBar();
+		});
+
+		rerollBtn.addEventListener("click", () => {
+			close();
+			this._state.useFocusedConcentrationReroll?.();
+			let roll1 = this._rollD20();
+			let roll2 = advantage ? this._rollD20() : null;
+			const naturalRoll = advantage ? Math.max(roll1, roll2) : roll1;
+			const total = naturalRoll + bonus;
+			const passed = total >= dc;
+			const rerollDesc = advantage
+				? `d20(${roll1}, ${roll2}) → ${naturalRoll}`
+				: `d20(${naturalRoll})`;
+			const rerollText = `${rerollDesc} + ${bonus} = ${total} vs DC ${dc}`;
+
+			if (passed) {
+				JqueryUtil.doToast({type: "success", content: `Focused Spell reroll saved! ${rerollText}`});
+				this._logActivity("🔮", `Concentration reroll: ✅ ${rerollText}`);
+			} else {
+				this._state.breakConcentration?.();
+				JqueryUtil.doToast({type: "danger", content: `Concentration broken! ${rerollText}`});
+				this._logActivity("🔮", `Concentration reroll: ❌ ${rerollText} — concentration broken`);
+			}
+			this._renderStatusBar();
+		});
+
+		document.body.appendChild(overlay);
+		rerollBtn.focus();
 	}
 
 	// ─── Activity Log ───────────────────────────────────────────
@@ -1363,15 +1447,32 @@ export class CharacterSheetPlayMode {
 	// ─── Breakdowns ─────────────────────────────────────────────
 
 	_showBreakdown (type) {
-		let info;
+		let lines = [];
 		if (type === "ac") {
-			const ac = this._state.getAc();
-			info = typeof ac === "object" ? JSON.stringify(ac, null, 2) : `AC: ${ac}`;
+			const breakdown = this._state.getAcBreakdown?.();
+			if (breakdown && typeof breakdown === "object") {
+				if (breakdown.base) lines.push(`Base: ${breakdown.base}`);
+				if (breakdown.armor) lines.push(`Armor: ${breakdown.armor}`);
+				if (breakdown.shield) lines.push(`Shield: ${breakdown.shield}`);
+				if (breakdown.dexMod !== undefined) lines.push(`DEX: ${this._fmtMod(breakdown.dexMod)}`);
+				if (breakdown.bonus) lines.push(`Bonus: ${this._fmtMod(breakdown.bonus)}`);
+				lines.push(`Total: ${this._state.getAc()?.total ?? this._state.getAc()}`);
+			} else {
+				lines.push(`AC: ${this._state.getAc()?.total ?? this._state.getAc()}`);
+			}
 		} else if (type === "speed") {
 			const speed = this._state.getSpeed();
-			info = typeof speed === "object" ? Object.entries(speed).map(([k, v]) => `${k}: ${v}ft`).join(", ") : `Speed: ${speed}ft`;
+			if (typeof speed === "object") {
+				Object.entries(speed).forEach(([k, v]) => { if (v) lines.push(`${k}: ${v}ft`); });
+			} else {
+				lines.push(`Walk: ${speed}ft`);
+			}
 		}
-		if (info) alert(info);
+
+		if (!lines.length) return;
+
+		// Show as toast instead of alert
+		JqueryUtil?.doToast?.({type: "info", content: lines.join(" · ")});
 	}
 
 	// ─── Keyboard ───────────────────────────────────────────────
@@ -1391,6 +1492,14 @@ export class CharacterSheetPlayMode {
 	}
 
 	// ─── Helpers ────────────────────────────────────────────────
+
+	/** Render a styled empty state message */
+	_renderEmptyState (parent, icon, message) {
+		const wrap = this._ce("div", "pm-empty", parent);
+		const iconEl = this._ce("span", "pm-empty__icon", wrap);
+		iconEl.textContent = icon;
+		wrap.appendChild(document.createTextNode(message));
+	}
 
 	_updateToggleButton (isPlayMode) {
 		const btn = document.getElementById("charsheet-btn-playmode");

@@ -1609,7 +1609,7 @@
 
 .pm-combat-tracker__btn:hover {
 	background: var(--cs-accent-ruby, #ef4444);
-	color: white;
+	color: var(--cs-text-on-accent, #fff);
 }
 
 .pm-combat-tracker__btn--end {
@@ -1633,7 +1633,7 @@
 
 .pm-combat-tracker__btn--start:hover {
 	background: var(--cs-accent-ruby, #ef4444);
-	color: white;
+	color: var(--cs-text-on-accent, #fff);
 }
 
 /* Condition duration badge */
@@ -1722,10 +1722,57 @@
 
 .pm-conc-check__btn--dismiss {
 	background: var(--cs-accent-amethyst, #a855f7);
-	color: white;
+	color: var(--cs-text-on-accent, #fff);
 	border-color: transparent;
 }
 
 .pm-conc-check__btn--dismiss:hover {
 	filter: brightness(1.1);
+}
+
+/* ========================================================================
+   Z-Index Scale:
+   200 = sticky status bar (sits above content scroll)
+   500 = drawer backdrop (modal layer)
+   501 = drawer panel (above backdrop)
+   600 = HP input / concentration reroll overlays (above everything)
+   ======================================================================== */
+
+/* ========================================================================
+   Reduced Motion — disable all animations for users who prefer it
+   ======================================================================== */
+@media (prefers-reduced-motion: reduce) {
+	.pm-conc-pulse,
+	.pm-magic-glow,
+	.pm-pip-pulse,
+	.pm-expire-pulse,
+	.pm-slide-in-right,
+	.pm-fade-in {
+		animation: none !important;
+	}
+
+	.pm-status__indicator--concentration,
+	.pm-status__indicator--inspiration.active,
+	.pm-status__indicator--expiring,
+	.pm-resource__pip--just-toggled,
+	.pm-slots__pip--just-toggled,
+	.pm-feature__pip--just-toggled {
+		animation: none !important;
+	}
+
+	.pm-drawer,
+	.pm-drawer-backdrop {
+		animation: none !important;
+	}
+
+	.pm-status__hp-fill {
+		transition: none !important;
+	}
+
+	.pm-status__indicator:active,
+	.pm-favorite:active,
+	.pm-economy__slot:active,
+	.pm-expander:active {
+		transform: none !important;
+	}
 }
