@@ -1735,8 +1735,394 @@
    200 = sticky status bar (sits above content scroll)
    500 = drawer backdrop (modal layer)
    501 = drawer panel (above backdrop)
-   600 = HP input / concentration reroll overlays (above everything)
+   600 = Modal overlays (HP, upcast, rest preview, concentration reroll)
    ======================================================================== */
+
+/* ========================================================================
+   Modal System (shared by damage flow, upcast, rest preview, etc.)
+   ======================================================================== */
+.pm-modal-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.4);
+	z-index: 600;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.pm-modal {
+	background: var(--cs-bg-surface, #1e293b);
+	border-radius: 12px;
+	padding: 1.5rem;
+	min-width: 300px;
+	max-width: 420px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.pm-modal__title {
+	font-size: 1.1rem;
+	font-weight: 600;
+	margin-bottom: 0.75rem;
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.pm-modal__title--danger {
+	color: var(--cs-danger, #ef4444);
+}
+
+.pm-modal__subtitle {
+	font-size: 0.9rem;
+	color: var(--cs-text-secondary, #94a3b8);
+	margin-bottom: 1rem;
+	line-height: 1.4;
+}
+
+.pm-modal__row {
+	display: flex;
+	gap: 0.5rem;
+	margin-bottom: 1rem;
+}
+
+.pm-modal__input {
+	flex: 1;
+	padding: 0.5rem;
+	border-radius: 6px;
+	border: 1px solid var(--cs-border, #334155);
+	background: var(--cs-bg-card, #0f172a);
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: 1rem;
+}
+
+.pm-modal__select {
+	padding: 0.5rem;
+	border-radius: 6px;
+	border: 1px solid var(--cs-border, #334155);
+	background: var(--cs-bg-card, #0f172a);
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: 0.875rem;
+	max-width: 140px;
+}
+
+.pm-modal__info {
+	min-height: 1.5rem;
+	margin-bottom: 0.75rem;
+}
+
+.pm-modal__tag {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 4px;
+	font-size: 0.8rem;
+	font-weight: 600;
+}
+
+.pm-modal__tag--immune {
+	background: var(--cs-accent-emerald-light, rgba(16, 185, 129, 0.15));
+	color: var(--cs-accent-emerald, #10b981);
+}
+
+.pm-modal__tag--resist {
+	background: var(--cs-accent-sky-light, rgba(56, 189, 248, 0.15));
+	color: var(--cs-accent-sky, #38bdf8);
+}
+
+.pm-modal__tag--vuln {
+	background: var(--cs-accent-ruby-light, rgba(239, 68, 68, 0.1));
+	color: var(--cs-accent-ruby, #ef4444);
+}
+
+.pm-modal__preview {
+	font-size: 0.85rem;
+	color: var(--cs-text-secondary, #94a3b8);
+	margin-bottom: 1rem;
+	min-height: 1.2rem;
+	padding: 6px 10px;
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.03));
+	border-radius: 6px;
+}
+
+.pm-modal__buttons {
+	display: flex;
+	gap: 0.5rem;
+	justify-content: flex-end;
+}
+
+.pm-modal__btn {
+	padding: 0.4rem 1rem;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: 0.9rem;
+	transition: all var(--cs-transition-fast, 150ms);
+}
+
+.pm-modal__btn--cancel {
+	border: 1px solid var(--cs-border, #334155);
+	background: transparent;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.pm-modal__btn--cancel:hover {
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+.pm-modal__btn--heal {
+	border: none;
+	background: var(--cs-success, #22c55e);
+	color: var(--cs-text-on-accent, #fff);
+	font-weight: 600;
+}
+
+.pm-modal__btn--damage {
+	border: none;
+	background: var(--cs-danger, #ef4444);
+	color: var(--cs-text-on-accent, #fff);
+	font-weight: 600;
+}
+
+.pm-modal__btn--confirm {
+	border: none;
+	background: var(--cs-primary, #6366f1);
+	color: var(--cs-text-on-accent, #fff);
+	font-weight: 600;
+}
+
+.pm-modal__btn--confirm:hover,
+.pm-modal__btn--heal:hover,
+.pm-modal__btn--damage:hover {
+	filter: brightness(1.1);
+}
+
+/* ========================================================================
+   Upcast Spell Picker
+   ======================================================================== */
+.pm-upcast {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	margin-bottom: 0.5rem;
+}
+
+.pm-upcast__slot {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.6rem 1rem;
+	background: var(--cs-bg-card, #0f172a);
+	border: 1px solid var(--cs-border, #334155);
+	border-radius: 8px;
+	cursor: pointer;
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: 0.9rem;
+	transition: all var(--cs-transition-fast, 150ms);
+}
+
+.pm-upcast__slot:hover:not(:disabled) {
+	border-color: var(--cs-primary, #6366f1);
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+.pm-upcast__slot--empty {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.pm-upcast__level {
+	font-weight: 700;
+	min-width: 2rem;
+}
+
+.pm-upcast__pips {
+	display: flex;
+	gap: 3px;
+	font-size: 0.75rem;
+}
+
+.pm-upcast__pip--filled {
+	color: var(--cs-primary, #6366f1);
+}
+
+.pm-upcast__tag {
+	font-size: 0.7rem;
+	padding: 1px 6px;
+	border-radius: 4px;
+	background: var(--cs-accent-amethyst-light, rgba(168, 85, 247, 0.15));
+	color: var(--cs-accent-amethyst, #a855f7);
+	font-weight: 600;
+	margin-left: auto;
+}
+
+/* ========================================================================
+   Rest Preview
+   ======================================================================== */
+.pm-rest-preview {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	margin-bottom: 1rem;
+}
+
+.pm-rest-preview__item {
+	padding: 0.4rem 0.75rem;
+	font-size: 0.9rem;
+	color: var(--cs-text-primary, #f1f5f9);
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.03));
+	border-radius: 6px;
+}
+
+.pm-rest-preview__item--clear {
+	color: var(--cs-accent-amber, #f59e0b);
+}
+
+.pm-rest-preview__item--warn {
+	color: var(--cs-accent-amethyst, #a855f7);
+}
+
+/* ========================================================================
+   Activity Feed Strip (bottom of Actions Hub)
+   ======================================================================== */
+.pm-activity-strip {
+	margin-top: auto;
+	padding-top: var(--cs-space-sm, 8px);
+	border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+}
+
+.pm-activity-strip__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: var(--cs-space-xs, 4px);
+}
+
+.pm-activity-strip__label {
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 600;
+	color: var(--cs-text-muted, #64748b);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.pm-activity-strip__viewall {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-primary, #6366f1);
+	cursor: pointer;
+}
+
+.pm-activity-strip__viewall:hover {
+	text-decoration: underline;
+}
+
+.pm-activity-strip__entry {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-secondary, #94a3b8);
+	padding: 2px 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.pm-activity-strip__empty {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, #64748b);
+	font-style: italic;
+}
+
+/* Activity drawer entries */
+.pm-activity-entry {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	padding: 6px 0;
+	border-bottom: 1px solid var(--cs-border, rgba(255, 255, 255, 0.05));
+	font-size: 0.85rem;
+}
+
+.pm-activity-entry__time {
+	color: var(--cs-text-muted, #64748b);
+	font-variant-numeric: tabular-nums;
+	flex-shrink: 0;
+	font-size: 0.75rem;
+}
+
+.pm-activity-entry__icon {
+	flex-shrink: 0;
+}
+
+.pm-activity-entry__text {
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+/* ========================================================================
+   Tablet & Touch Optimization
+   ======================================================================== */
+@media (max-width: 1024px) and (pointer: coarse) {
+	/* Ensure minimum touch target sizes */
+	.pm-ability,
+	.pm-save,
+	.pm-skill,
+	.pm-attack,
+	.pm-spell,
+	.pm-feature,
+	.pm-favorite,
+	.pm-economy__slot,
+	.pm-status__indicator,
+	.pm-status__tool-btn,
+	.pm-expander {
+		min-height: 44px;
+		display: flex;
+		align-items: center;
+	}
+
+	/* Larger pip targets */
+	.pm-slots__pip,
+	.pm-feature__pip,
+	.pm-resource__pip {
+		min-width: 28px;
+		min-height: 28px;
+		font-size: 1.1rem;
+	}
+
+	/* More padding for buttons */
+	.pm-modal__btn,
+	.pm-combat-tracker__btn,
+	.pm-feature__use-btn {
+		padding: 0.6rem 1.2rem;
+		min-height: 44px;
+	}
+
+	/* Status bar tools wrap nicely */
+	.pm-status__tools {
+		flex-wrap: wrap;
+	}
+
+	/* Drawer takes more space */
+	.pm-drawer {
+		width: min(420px, 85vw);
+	}
+}
+
+@media (max-width: 640px) and (pointer: coarse) {
+	/* Full-width drawer on phones */
+	.pm-drawer {
+		width: 100vw;
+	}
+
+	/* Stack ability scores vertically */
+	.pm-abilities {
+		grid-template-columns: 1fr 1fr !important;
+	}
+
+	/* Single-column layout */
+	.pm-layout {
+		grid-template-columns: 1fr !important;
+	}
+
+	/* Status bar compact */
+	.pm-status__row--primary {
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+}
 
 /* ========================================================================
    Reduced Motion — disable all animations for users who prefer it
