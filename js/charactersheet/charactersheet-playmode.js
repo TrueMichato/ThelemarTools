@@ -266,9 +266,9 @@ export class CharacterSheetPlayMode {
 	_renderStatusTools (parent) {
 		const tools = this._ce("div", "pm-status__tools", parent);
 
-		// Rest buttons
-		this._makeToolBtn(tools, "🏕️ Short Rest", () => this._page._rest?.doShortRest?.());
-		this._makeToolBtn(tools, "🛏️ Long Rest", () => this._page._rest?.doLongRest?.());
+		// Rest buttons with preview
+		this._makeToolBtn(tools, "🏕️ Short Rest", () => this._showRestPreview("short"));
+		this._makeToolBtn(tools, "🛏️ Long Rest", () => this._showRestPreview("long"));
 
 		this._ce("div", "pm-status__divider", tools);
 
@@ -1026,6 +1026,7 @@ export class CharacterSheetPlayMode {
 			case "reference": this._renderReferenceDrawer(container); break;
 			case "notes": this._renderNotesDrawer(container); break;
 			case "companions": this._renderCompanionsDrawer(container); break;
+			case "activity": this._renderActivityDrawer(container); break;
 		}
 	}
 
@@ -1222,58 +1223,193 @@ export class CharacterSheetPlayMode {
 			return;
 		}
 
-		// Find the lowest available slot at or above spell level
-		let usedLevel = null;
+		// Collect available slot levels at or above spell level
+		const available = [];
 		for (let lvl = spell.level; lvl <= 9; lvl++) {
 			const cur = this._state.getSpellSlotsCurrent(lvl);
-			if (cur > 0) {
-				this._state.setSpellSlotCurrent(lvl, cur - 1);
-				usedLevel = lvl;
-				break;
-			}
+			const max = this._state.getSpellSlotsMax(lvl);
+			if (max > 0) available.push({level: lvl, current: cur, max});
 		}
 
-		if (usedLevel !== null) {
-			this._logActivity("✨", `Cast ${spell.name} (${usedLevel === spell.level ? `level ${usedLevel}` : `upcast to level ${usedLevel}`})`);
-			this._renderSpellsQuick();
-		} else {
+		if (!available.length || !available.some(s => s.current > 0)) {
 			JqueryUtil?.doToast?.({type: "warning", content: `No spell slots available to cast ${spell.name}!`});
+			return;
 		}
+
+		// If only one level available, cast immediately
+		if (available.length === 1 || (available.filter(s => s.current > 0).length === 1)) {
+			const slot = available.find(s => s.current > 0);
+			if (slot) {
+				this._state.setSpellSlotCurrent(slot.level, slot.current - 1);
+				this._logActivity("✨", `Cast ${spell.name} (level ${slot.level})`);
+				this._renderSpellsQuick();
+			}
+			return;
+		}
+
+		// Show upcast picker inline
+		this._showUpcastPicker(spell, available);
+	}
+
+	_showUpcastPicker (spell, slots) {
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const title = this._ce("div", "pm-modal__title", panel);
+		title.textContent = `✨ Cast ${spell.name}`;
+
+		const desc = this._ce("div", "pm-modal__subtitle", panel);
+		desc.textContent = "Choose a spell slot level:";
+
+		const slotRow = this._ce("div", "pm-upcast", panel);
+
+		slots.forEach(slot => {
+			const btn = this._ce("button", `pm-upcast__slot ${slot.current <= 0 ? "pm-upcast__slot--empty" : ""}`, slotRow);
+			btn.disabled = slot.current <= 0;
+
+			const lvl = this._ce("span", "pm-upcast__level", btn);
+			lvl.textContent = slot.level === spell.level ? `${slot.level}st` : `${slot.level}${slot.level === 2 ? "nd" : slot.level === 3 ? "rd" : "th"}`;
+
+			const pips = this._ce("span", "pm-upcast__pips", btn);
+			for (let i = 0; i < slot.max; i++) {
+				const pip = this._ce("span", `pm-upcast__pip ${i < slot.current ? "pm-upcast__pip--filled" : ""}`, pips);
+				pip.textContent = i < slot.current ? "●" : "○";
+			}
+
+			if (slot.level > spell.level) {
+				const tag = this._ce("span", "pm-upcast__tag", btn);
+				tag.textContent = "upcast";
+			}
+
+			if (slot.current > 0) {
+				btn.addEventListener("click", () => {
+					overlay.remove();
+					this._state.setSpellSlotCurrent(slot.level, slot.current - 1);
+					const label = slot.level === spell.level ? `level ${slot.level}` : `upcast level ${slot.level}`;
+					this._logActivity("✨", `Cast ${spell.name} (${label})`);
+					this._renderSpellsQuick();
+				});
+			}
+		});
+
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", panel);
+		cancelBtn.textContent = "Cancel";
+		cancelBtn.style.marginTop = "1rem";
+		cancelBtn.addEventListener("click", () => overlay.remove());
+
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+		document.addEventListener("keydown", function onEsc (e) {
+			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
+		});
+
+		document.body.appendChild(overlay);
 	}
 
 	// ─── HP Flow ────────────────────────────────────────────────
 
 	_promptHpChange (mode) {
-		// Show inline input form instead of browser prompt
-		const overlay = this._ce("div", "pm-hp-input-overlay");
-		overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:600;display:flex;align-items:center;justify-content:center;";
+		const overlay = this._ce("div", "pm-modal-overlay");
 
-		const panel = this._ce("div", "pm-hp-input-panel", overlay);
-		panel.style.cssText = "background:var(--cs-bg-surface,#1e293b);border-radius:12px;padding:1.5rem;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.5);";
+		const panel = this._ce("div", "pm-modal", overlay);
 
-		const title = this._ce("div", null, panel);
-		title.style.cssText = "font-size:1.1rem;font-weight:600;margin-bottom:1rem;color:var(--cs-text-primary,#f1f5f9);";
+		const title = this._ce("div", "pm-modal__title", panel);
 		title.textContent = mode === "heal" ? "💚 Heal" : "💔 Take Damage";
 
-		const inputRow = this._ce("div", null, panel);
-		inputRow.style.cssText = "display:flex;gap:0.5rem;margin-bottom:1rem;";
+		const inputRow = this._ce("div", "pm-modal__row", panel);
 
-		const input = this._ce("input", null, inputRow);
+		const input = this._ce("input", "pm-modal__input", inputRow);
 		input.type = "number";
 		input.min = "1";
 		input.placeholder = "Amount";
-		input.style.cssText = "flex:1;padding:0.5rem;border-radius:6px;border:1px solid var(--cs-border,#334155);background:var(--cs-bg-card,#0f172a);color:var(--cs-text-primary,#f1f5f9);font-size:1rem;";
 
-		const btnRow = this._ce("div", null, panel);
-		btnRow.style.cssText = "display:flex;gap:0.5rem;justify-content:flex-end;";
+		// Damage type selector (damage mode only)
+		let dmgTypeSelect = null;
+		let infoRow = null;
+		if (mode === "damage") {
+			dmgTypeSelect = this._ce("select", "pm-modal__select", inputRow);
+			const types = ["—", "acid", "cold", "fire", "force", "lightning", "necrotic", "poison", "psychic", "radiant", "thunder", "bludgeoning", "piercing", "slashing"];
+			types.forEach(t => {
+				const opt = this._ce("option", null, dmgTypeSelect);
+				opt.value = t === "—" ? "" : t;
+				opt.textContent = t === "—" ? "Type…" : t.charAt(0).toUpperCase() + t.slice(1);
+			});
 
-		const cancelBtn = this._ce("button", null, btnRow);
+			infoRow = this._ce("div", "pm-modal__info", panel);
+
+			const updateInfo = () => {
+				const dtype = dmgTypeSelect.value;
+				infoRow.innerHTML = "";
+				if (!dtype) return;
+
+				const resistances = this._state.getResistances();
+				const immunities = this._state.getImmunities();
+				const vulnerabilities = this._state.getVulnerabilities();
+
+				if (immunities.includes(dtype)) {
+					const tag = this._ce("span", "pm-modal__tag pm-modal__tag--immune", infoRow);
+					tag.textContent = `🛡️ Immune to ${dtype} — 0 damage`;
+				} else if (resistances.includes(dtype)) {
+					const tag = this._ce("span", "pm-modal__tag pm-modal__tag--resist", infoRow);
+					tag.textContent = `🛡️ Resistant to ${dtype} — halved`;
+				} else if (vulnerabilities.includes(dtype)) {
+					const tag = this._ce("span", "pm-modal__tag pm-modal__tag--vuln", infoRow);
+					tag.textContent = `⚠️ Vulnerable to ${dtype} — doubled`;
+				}
+			};
+			dmgTypeSelect.addEventListener("change", updateInfo);
+		}
+
+		// Preview row
+		const previewRow = this._ce("div", "pm-modal__preview", panel);
+
+		const updatePreview = () => {
+			previewRow.innerHTML = "";
+			const val = parseInt(input.value);
+			if (isNaN(val) || val <= 0) return;
+
+			if (mode === "heal") {
+				const current = this._state.getCurrentHp();
+				const max = this._state.getMaxHp();
+				const healed = Math.min(max - current, val);
+				previewRow.textContent = `${current} → ${current + healed} HP (${healed > 0 ? `+${healed}` : "already full"})`;
+			} else {
+				let effective = val;
+				const dtype = dmgTypeSelect?.value || "";
+				if (dtype) {
+					const immunities = this._state.getImmunities();
+					const resistances = this._state.getResistances();
+					const vulnerabilities = this._state.getVulnerabilities();
+					if (immunities.includes(dtype)) effective = 0;
+					else if (resistances.includes(dtype)) effective = Math.floor(val / 2);
+					else if (vulnerabilities.includes(dtype)) effective = val * 2;
+				}
+
+				const temp = this._state.getTempHp();
+				const current = this._state.getCurrentHp();
+				let rem = effective;
+				const parts = [];
+				if (effective !== val) parts.push(`${val} → ${effective} (${effective === 0 ? "immune" : effective < val ? "resistant" : "vulnerable"})`);
+				if (temp > 0 && rem > 0) {
+					const absorbed = Math.min(temp, rem);
+					parts.push(`Temp HP absorbs ${absorbed}`);
+					rem -= absorbed;
+				}
+				if (rem > 0) parts.push(`${current} → ${Math.max(0, current - rem)} HP`);
+				else if (effective > 0) parts.push("Fully absorbed by Temp HP");
+				else parts.push("No damage taken");
+				previewRow.textContent = parts.join(" · ");
+			}
+		};
+		input.addEventListener("input", updatePreview);
+		dmgTypeSelect?.addEventListener("change", updatePreview);
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
 		cancelBtn.textContent = "Cancel";
-		cancelBtn.style.cssText = "padding:0.4rem 1rem;border-radius:6px;border:1px solid var(--cs-border,#334155);background:transparent;color:var(--cs-text-secondary,#94a3b8);cursor:pointer;";
 
-		const applyBtn = this._ce("button", null, btnRow);
+		const applyBtn = this._ce("button", `pm-modal__btn pm-modal__btn--${mode}`, btnRow);
 		applyBtn.textContent = "Apply";
-		applyBtn.style.cssText = `padding:0.4rem 1rem;border-radius:6px;border:none;background:${mode === "heal" ? "var(--cs-success,#22c55e)" : "var(--cs-danger,#ef4444)"};color:white;cursor:pointer;font-weight:600;`;
 
 		const close = () => overlay.remove();
 		cancelBtn.addEventListener("click", close);
@@ -1282,8 +1418,9 @@ export class CharacterSheetPlayMode {
 		const apply = () => {
 			const val = parseInt(input.value);
 			if (isNaN(val) || val <= 0) return;
+			const dtype = dmgTypeSelect?.value || "";
 			close();
-			this._applyHpChange(mode, val);
+			this._applyHpChange(mode, val, dtype);
 		};
 
 		applyBtn.addEventListener("click", apply);
@@ -1296,7 +1433,7 @@ export class CharacterSheetPlayMode {
 		input.focus();
 	}
 
-	_applyHpChange (mode, val) {
+	_applyHpChange (mode, val, damageType = "") {
 
 		if (mode === "heal") {
 			const current = this._state.getCurrentHp();
@@ -1305,7 +1442,25 @@ export class CharacterSheetPlayMode {
 			this._state.setCurrentHp(newHp);
 			this._logActivity("💚", `Healed ${newHp - current} HP (${current} → ${newHp})`);
 		} else {
-			let remaining = val;
+			// Apply resistance/immunity/vulnerability
+			let effective = val;
+			if (damageType) {
+				const immunities = this._state.getImmunities();
+				const resistances = this._state.getResistances();
+				const vulnerabilities = this._state.getVulnerabilities();
+				if (immunities.includes(damageType)) {
+					effective = 0;
+					this._logActivity("🛡️", `Immune to ${val} ${damageType} damage`);
+					this._renderStatusBar();
+					return;
+				} else if (resistances.includes(damageType)) {
+					effective = Math.floor(val / 2);
+				} else if (vulnerabilities.includes(damageType)) {
+					effective = val * 2;
+				}
+			}
+
+			let remaining = effective;
 			const temp = this._state.getTempHp();
 
 			// Absorb with temp HP first
@@ -1319,14 +1474,15 @@ export class CharacterSheetPlayMode {
 				const current = this._state.getCurrentHp();
 				const newHp = Math.max(0, current - remaining);
 				this._state.setCurrentHp(newHp);
-				this._logActivity("💔", `Took ${val} damage → ${newHp} HP`);
+				const suffix = effective !== val ? ` (${val} ${damageType} → ${effective} after ${effective < val ? "resistance" : "vulnerability"})` : "";
+				this._logActivity("💔", `Took ${effective} damage${suffix} → ${newHp} HP`);
 			} else {
-				this._logActivity("🛡️", `Temp HP absorbed ${val} damage`);
+				this._logActivity("🛡️", `Temp HP absorbed ${effective} damage`);
 			}
 
 			// Concentration auto-check
 			if (this._state.isConcentrating?.()) {
-				this._doConcentrationCheck(val);
+				this._doConcentrationCheck(effective);
 			}
 		}
 
@@ -1371,31 +1527,24 @@ export class CharacterSheetPlayMode {
 	}
 
 	_showFocusedSpellPrompt (failText, dc, bonus, advantage) {
-		const overlay = this._ce("div", "pm-hp-input-overlay");
-		overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:600;display:flex;align-items:center;justify-content:center;";
+		const overlay = this._ce("div", "pm-modal-overlay");
 
-		const panel = this._ce("div", null, overlay);
-		panel.style.cssText = "background:var(--cs-bg-surface,#1e293b);border-radius:12px;padding:1.5rem;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,0.5);";
+		const panel = this._ce("div", "pm-modal", overlay);
 
-		const title = this._ce("div", null, panel);
-		title.style.cssText = "font-size:1.1rem;font-weight:600;color:var(--cs-danger,#ef4444);margin-bottom:0.75rem;";
+		const title = this._ce("div", "pm-modal__title pm-modal__title--danger", panel);
 		title.textContent = "🔮 Concentration FAILED";
 
-		const desc = this._ce("div", null, panel);
-		desc.style.cssText = "font-size:0.9rem;color:var(--cs-text-secondary,#94a3b8);margin-bottom:1rem;line-height:1.4;";
+		const desc = this._ce("div", "pm-modal__subtitle", panel);
 		desc.textContent = `${failText}\n\nUse Focused Spell to spend 1 sorcery point and reroll?`;
 		desc.style.whiteSpace = "pre-wrap";
 
-		const btnRow = this._ce("div", null, panel);
-		btnRow.style.cssText = "display:flex;gap:0.5rem;justify-content:flex-end;";
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
 
-		const declineBtn = this._ce("button", null, btnRow);
+		const declineBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
 		declineBtn.textContent = "Break Concentration";
-		declineBtn.style.cssText = "padding:0.4rem 1rem;border-radius:6px;border:1px solid var(--cs-border,#334155);background:transparent;color:var(--cs-text-secondary,#94a3b8);cursor:pointer;";
 
-		const rerollBtn = this._ce("button", null, btnRow);
+		const rerollBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
 		rerollBtn.textContent = "🎲 Reroll";
-		rerollBtn.style.cssText = "padding:0.4rem 1rem;border-radius:6px;border:none;background:var(--cs-primary,#6366f1);color:white;cursor:pointer;font-weight:600;";
 
 		const close = () => overlay.remove();
 
@@ -1435,13 +1584,161 @@ export class CharacterSheetPlayMode {
 		rerollBtn.focus();
 	}
 
+	// ─── Rest Preview ───────────────────────────────────────────
+
+	_showRestPreview (type) {
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const title = this._ce("div", "pm-modal__title", panel);
+		title.textContent = type === "short" ? "🏕️ Short Rest Preview" : "🛏️ Long Rest Preview";
+
+		const list = this._ce("div", "pm-rest-preview", panel);
+
+		// HP recovery
+		const hp = this._state.getHp();
+		if (type === "long") {
+			const item = this._ce("div", "pm-rest-preview__item", list);
+			item.textContent = `❤️ HP: ${hp.current} → ${hp.max} (full recovery)`;
+		} else {
+			const item = this._ce("div", "pm-rest-preview__item", list);
+			item.textContent = `❤️ HP: ${hp.current}/${hp.max} — spend Hit Dice to heal`;
+		}
+
+		// Hit dice recovery (long rest only)
+		if (type === "long") {
+			const hitDice = this._state.getHitDice();
+			const totalLevel = this._state.getTotalLevel();
+			const recover = Math.max(1, Math.floor(totalLevel / 2));
+			const item = this._ce("div", "pm-rest-preview__item", list);
+			item.textContent = `🎲 Hit Dice: Recover ${recover} (half level, min 1)`;
+		}
+
+		// Spell slots
+		const slotData = this._state.getSpellSlots();
+		const hasSlots = Object.keys(slotData).some(k => slotData[k]?.max > 0);
+		if (hasSlots && type === "long") {
+			const item = this._ce("div", "pm-rest-preview__item", list);
+			item.textContent = "✨ Spell Slots: All restored";
+		}
+
+		// Class resources
+		const resources = this._state.getResources();
+		const restorable = resources.filter(r => {
+			if (type === "long") return r.current < r.max;
+			return r.restsOn === "short" && r.current < r.max;
+		});
+		restorable.forEach(r => {
+			const item = this._ce("div", "pm-rest-preview__item", list);
+			item.textContent = `⚡ ${r.name}: ${r.current}/${r.max} → ${r.max}/${r.max}`;
+		});
+
+		// Conditions that clear on long rest
+		if (type === "long") {
+			const conditions = this._state.getConditionNames?.() || [];
+			if (conditions.length) {
+				const item = this._ce("div", "pm-rest-preview__item pm-rest-preview__item--clear", list);
+				item.textContent = `⚠️ Clears: ${conditions.join(", ")}`;
+			}
+		}
+
+		// Concentration note
+		if (this._state.isConcentrating?.()) {
+			const item = this._ce("div", "pm-rest-preview__item pm-rest-preview__item--warn", list);
+			item.textContent = `🔮 Concentration will end`;
+		}
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+
+		const confirmBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		confirmBtn.textContent = type === "short" ? "🏕️ Take Short Rest" : "🛏️ Take Long Rest";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		confirmBtn.addEventListener("click", () => {
+			close();
+			if (type === "short") {
+				this._page._rest?._showShortRestDialog?.();
+			} else {
+				this._page._rest?._showLongRestDialog?.();
+			}
+			this._logActivity(type === "short" ? "🏕️" : "🛏️", `${type === "short" ? "Short" : "Long"} Rest taken`);
+		});
+
+		document.body.appendChild(overlay);
+	}
+
 	// ─── Activity Log ───────────────────────────────────────────
 
 	_logActivity (icon, text) {
 		const now = new Date();
 		const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
 		this._activityLog.unshift({time, icon, text});
-		if (this._activityLog.length > 50) this._activityLog.length = 50;
+		if (this._activityLog.length > 100) this._activityLog.length = 100;
+		this._renderActivityStrip();
+	}
+
+	_renderActivityStrip () {
+		if (!this._elActionsHub) return;
+		let strip = this._elActionsHub.querySelector(".pm-activity-strip");
+		if (!strip) {
+			strip = this._ce("div", "pm-activity-strip", this._elActionsHub);
+		}
+		strip.innerHTML = "";
+
+		const header = this._ce("div", "pm-activity-strip__header", strip);
+		const label = this._ce("span", "pm-activity-strip__label", header);
+		label.textContent = "📋 Recent Activity";
+		const viewAll = this._ce("span", "pm-activity-strip__viewall", header);
+		viewAll.textContent = "View all ▸";
+		this._makeClickable(viewAll, "View full activity log", () => this._openDrawerByType("activity"));
+
+		const recent = this._activityLog.slice(0, 4);
+		recent.forEach(entry => {
+			const row = this._ce("div", "pm-activity-strip__entry", strip);
+			row.textContent = `${entry.time} ${entry.icon} ${entry.text}`;
+		});
+
+		if (!recent.length) {
+			const empty = this._ce("div", "pm-activity-strip__empty", strip);
+			empty.textContent = "No activity yet";
+		}
+	}
+
+	_renderActivityDrawer (container) {
+		if (!this._activityLog.length) {
+			this._renderEmptyState(container, "📋", "No activity logged this session.");
+			return;
+		}
+
+		const header = this._ce("div", "pm-card__header", container);
+		const title = this._ce("span", "pm-card__title", header);
+		title.textContent = `📋 Session Activity (${this._activityLog.length})`;
+
+		const exportBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", header);
+		exportBtn.textContent = "📋 Copy";
+		exportBtn.style.marginLeft = "auto";
+		exportBtn.addEventListener("click", () => {
+			const md = this._activityLog.map(e => `- ${e.time} ${e.icon} ${e.text}`).join("\n");
+			navigator.clipboard?.writeText?.(md).then(() => {
+				JqueryUtil?.doToast?.({type: "success", content: "Activity log copied to clipboard!"});
+			});
+		});
+
+		this._activityLog.forEach(entry => {
+			const row = this._ce("div", "pm-activity-entry", container);
+			const time = this._ce("span", "pm-activity-entry__time", row);
+			time.textContent = entry.time;
+			const icon = this._ce("span", "pm-activity-entry__icon", row);
+			icon.textContent = entry.icon;
+			const text = this._ce("span", "pm-activity-entry__text", row);
+			text.textContent = entry.text;
+		});
 	}
 
 	// ─── Breakdowns ─────────────────────────────────────────────
