@@ -78,6 +78,13 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 ├── CharacterSheetNotes (charactersheet-notes.js, ~500 lines)
 │   Sticky notes per entity and per tab (5 colors).
 │
+├── CharacterSheetPlayMode (charactersheet-playmode.js, ~1,860 lines)
+│   Intent-based alternative UI for gameplay. Togglable view mode.
+│   Status bar, character panel, actions hub, 6 drawers,
+│   favorites, action economy, smart damage flow, upcast picker,
+│   rest preview, activity feed, combat tracker, concentration checks.
+│   Reads from same state, delegates all mutations to existing modules.
+│
 ├── CharacterSheetSpellPicker (charactersheet-spell-picker.js, ~1,200 lines, all static)
 │   Reusable spell selection UI for Builder, LevelUp, QuickBuild.
 │
