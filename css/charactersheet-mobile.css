@@ -410,7 +410,7 @@
 		right: 0;
 		top: auto;
 		max-height: 85vh;
-		max-height: 85dvh;
+		max-height: calc(var(--vh, 1vh) * 85);
 		border-radius: var(--cs-radius-xl, 24px) var(--cs-radius-xl, 24px) 0 0;
 		margin: 0;
 		transform: translateY(0);
@@ -429,7 +429,7 @@
 	/* Modal scroll containment */
 	body.is-charsheet-page .ve-ui-modal__inner .ve-ui-modal__row--body {
 		max-height: 65vh;
-		max-height: 65dvh;
+		max-height: calc(var(--vh, 1vh) * 65);
 		overflow-y: auto;
 		-webkit-overflow-scrolling: touch;
 	}
@@ -1049,7 +1049,7 @@
 
 	body.is-charsheet-page .ve-ui-modal__inner {
 		max-height: 90vh;
-		max-height: 90dvh;
+		max-height: calc(var(--vh, 1vh) * 90);
 	}
 }
 

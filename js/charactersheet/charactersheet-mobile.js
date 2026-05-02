@@ -138,10 +138,46 @@ class CharacterSheetMobile {
 		this._elFab = null;
 		this._elFabBackdrop = null;
 
+		// Disconnect header observer
+		this._headerObserver?.disconnect();
+		this._headerObserver = null;
+
+		// Remove global touch listeners added by _initLongPress and _initTouchFeedback
+		document.removeEventListener("touchstart", this._boundLongPressStart);
+		document.removeEventListener("touchmove", this._boundLongPressMove);
+		document.removeEventListener("touchend", this._boundLongPressEnd);
+		if (this._boundTouchFeedbackStart) {
+			document.removeEventListener("touchstart", this._boundTouchFeedbackStart);
+		}
+		if (this._boundTouchFeedbackEnd) {
+			document.removeEventListener("touchend", this._boundTouchFeedbackEnd);
+		}
+
+		// Unwrap section-content wrappers so desktop DOM is clean
+		document.querySelectorAll(".charsheet-mobile__section-content").forEach(wrapper => {
+			const parent = wrapper.parentNode;
+			while (wrapper.firstChild) {
+				parent.insertBefore(wrapper.firstChild, wrapper);
+			}
+			wrapper.remove();
+		});
+
+		// Clear collapsible data attributes so they can be re-initialized
+		document.querySelectorAll("[data-mobile-collapsible]").forEach(el => {
+			delete el.dataset.mobileCollapsible;
+		});
+
 		// Uncollapse all sections
 		document.querySelectorAll(".charsheet-mobile--collapsed").forEach(el => {
 			el.classList.remove("charsheet-mobile--collapsed");
 		});
+
+		// Clear header toggle data
+		const secondaryRow = document.getElementById("charsheet-header-secondary");
+		if (secondaryRow) {
+			delete secondaryRow.dataset.mobileToggle;
+			secondaryRow.classList.remove("charsheet-mobile--expanded");
+		}
 
 		this._mobileInitialized = false;
 	}
@@ -346,10 +382,20 @@ class CharacterSheetMobile {
 	_onLongPressEnd (e) {
 		this._cancelLongPress();
 
-		// If long press fired, suppress the click that follows
+		// If long press fired, suppress the synthetic click that follows touchend.
+		// preventDefault() on touchend doesn't prevent click — use a capture-phase
+		// click blocker with a brief timing window instead.
 		if (this._longPressFired) {
-			e.preventDefault?.();
 			this._longPressFired = false;
+			const blocker = (evt) => {
+				evt.stopPropagation();
+				evt.preventDefault();
+			};
+			document.addEventListener("click", blocker, {capture: true, once: true});
+			// Safety: remove blocker if the click never comes (e.g., scrolled away)
+			setTimeout(() => {
+				document.removeEventListener("click", blocker, {capture: true});
+			}, 500);
 		}
 	}
 
@@ -747,11 +793,15 @@ class CharacterSheetMobile {
 		// Hook into the existing More button — the desktop handler toggles
 		// charsheet__header-row--collapsed. We listen for that class change and
 		// sync our mobile-specific expanded class.
-		const observer = new MutationObserver(() => {
+		// Use a state guard to prevent infinite loop (our toggle triggers another mutation).
+		let lastKnownCollapsed = secondaryRow.classList.contains("charsheet__header-row--collapsed");
+		this._headerObserver = new MutationObserver(() => {
 			const isDesktopCollapsed = secondaryRow.classList.contains("charsheet__header-row--collapsed");
+			if (isDesktopCollapsed === lastKnownCollapsed) return;
+			lastKnownCollapsed = isDesktopCollapsed;
 			secondaryRow.classList.toggle("charsheet-mobile--expanded", !isDesktopCollapsed);
 		});
-		observer.observe(secondaryRow, {attributes: true, attributeFilter: ["class"]});
+		this._headerObserver.observe(secondaryRow, {attributes: true, attributeFilter: ["class"]});
 	}
 
 	// =========================================================================
@@ -771,18 +821,21 @@ class CharacterSheetMobile {
 			".ve-btn",
 		].join(", ");
 
-		document.addEventListener("touchstart", (e) => {
+		this._boundTouchFeedbackStart = (e) => {
 			const target = e.target.closest(interactiveSelectors);
 			if (target) {
 				target.classList.add("charsheet-mobile--touch-active");
 			}
-		}, {passive: true});
+		};
 
-		document.addEventListener("touchend", () => {
+		this._boundTouchFeedbackEnd = () => {
 			document.querySelectorAll(".charsheet-mobile--touch-active").forEach(el => {
 				setTimeout(() => el.classList.remove("charsheet-mobile--touch-active"), 300);
 			});
-		}, {passive: true});
+		};
+
+		document.addEventListener("touchstart", this._boundTouchFeedbackStart, {passive: true});
+		document.addEventListener("touchend", this._boundTouchFeedbackEnd, {passive: true});
 	}
 
 	// =========================================================================
@@ -858,7 +911,13 @@ class CharacterSheetMobile {
 	_repositionDropdown (dropdown) {
 		if (!this._isMobile) return;
 
-		// Center dropdowns horizontally on mobile, ensure they don't overflow
+		// Clear previous inline positioning to avoid stale conflicts
+		dropdown.style.left = "";
+		dropdown.style.right = "";
+		dropdown.style.maxHeight = "";
+		dropdown.style.overflowY = "";
+
+		// Re-read rect after clearing styles
 		const rect = dropdown.getBoundingClientRect();
 		const vpWidth = window.innerWidth;
 
