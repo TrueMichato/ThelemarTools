@@ -259,7 +259,7 @@ export class CharacterSheetPlayMode {
 		elLabel.textContent = label;
 		if (onClick) {
 			chip.style.cursor = "pointer";
-			chip.addEventListener("click", onClick);
+			this._makeClickable(chip, `Roll ${label}`, onClick);
 		}
 	}
 
@@ -290,7 +290,8 @@ export class CharacterSheetPlayMode {
 		const inspired = this._state.hasInspiration();
 		const inspBtn = this._ce("span", `pm-status__indicator pm-status__indicator--inspiration${inspired ? " active" : ""}`, parent);
 		inspBtn.textContent = `⭐ ${inspired ? "Inspired" : "Inspiration"}`;
-		inspBtn.addEventListener("click", () => {
+		inspBtn.setAttribute("aria-pressed", inspired ? "true" : "false");
+		this._makeClickable(inspBtn, `Toggle inspiration (${inspired ? "active" : "inactive"})`, () => {
 			this._state.toggleInspiration();
 			this._renderStatusBar();
 			this._logActivity("⭐", inspired ? "Lost inspiration" : "Gained inspiration");
@@ -302,8 +303,7 @@ export class CharacterSheetPlayMode {
 		if (concentrating) {
 			const conc = this._ce("span", "pm-status__indicator pm-status__indicator--concentration", parent);
 			conc.textContent = `🔮 Concentrating: ${concentrating.name || "Spell"}`;
-			conc.title = "Click to end concentration";
-			conc.addEventListener("click", () => {
+			this._makeClickable(conc, `End concentration on ${concentrating.name || "spell"}`, () => {
 				if (confirm(`End concentration on ${concentrating.name || "spell"}?`)) {
 					this._state.setActiveState(concentrating.id, false);
 					this._renderStatusBar();
@@ -315,13 +315,30 @@ export class CharacterSheetPlayMode {
 		// Conditions
 		const conditions = this._state.getConditions();
 		conditions.forEach(cond => {
+			const condName = cond.name || cond;
 			const el = this._ce("span", "pm-status__indicator pm-status__indicator--condition", parent);
-			el.textContent = `⚠️ ${cond.name || cond}`;
-			el.title = "Click to remove";
-			el.addEventListener("click", () => {
-				this._state.removeCondition?.(cond.name || cond);
+
+			// Check if condition has duration from active states
+			const activeStates = this._state.getActiveStates();
+			const linkedState = activeStates.find(s => s.active && s.grantsConditions?.includes(condName));
+			const roundsLeft = linkedState?.roundsRemaining;
+
+			let labelText = `⚠️ ${condName}`;
+			if (roundsLeft != null && roundsLeft > 0) {
+				const durSpan = document.createElement("span");
+				durSpan.className = "pm-status__indicator-duration";
+				durSpan.textContent = `${roundsLeft}r`;
+				el.textContent = labelText + " ";
+				el.appendChild(durSpan);
+				if (roundsLeft <= 1) el.classList.add("pm-status__indicator--expiring");
+			} else {
+				el.textContent = labelText;
+			}
+
+			this._makeClickable(el, `Remove condition: ${condName}`, () => {
+				this._state.removeCondition?.(condName);
 				this._renderStatusBar();
-				this._logActivity("⚠️", `Removed condition: ${cond.name || cond}`);
+				this._logActivity("⚠️", `Removed condition: ${condName}`);
 			});
 		});
 
@@ -330,6 +347,54 @@ export class CharacterSheetPlayMode {
 		if (exhaustion > 0) {
 			const exh = this._ce("span", "pm-status__indicator pm-status__indicator--exhaustion", parent);
 			exh.textContent = `😫 Exhaustion ${exhaustion}`;
+		}
+
+		// Combat Round Tracker
+		this._renderCombatTracker(parent);
+	}
+
+	_renderCombatTracker (parent) {
+		const inCombat = this._state._data?.inCombat;
+		const combatRound = this._state._data?.combatRound || 0;
+
+		const tracker = this._ce("div", "pm-combat-tracker", parent);
+
+		if (inCombat) {
+			const roundLabel = this._ce("span", "pm-combat-tracker__round", tracker);
+			roundLabel.textContent = `⚔️ Round ${combatRound}`;
+
+			const nextBtn = this._ce("button", "pm-combat-tracker__btn pm-combat-tracker__btn--next", tracker);
+			nextBtn.textContent = "Next Round ▸";
+			nextBtn.setAttribute("aria-label", `Advance to round ${combatRound + 1}`);
+			nextBtn.addEventListener("click", () => {
+				const expired = this._state.advanceRound?.() || [];
+				if (expired.length > 0) {
+					const names = expired.map(e => e.name || "Effect").join(", ");
+					JqueryUtil.doToast({type: "info", content: `Expired: ${names}`});
+					this._logActivity("⏱️", `Round ${combatRound + 1} — expired: ${names}`);
+				} else {
+					this._logActivity("⏱️", `Round ${combatRound + 1}`);
+				}
+				this._renderStatusBar();
+			});
+
+			const endBtn = this._ce("button", "pm-combat-tracker__btn pm-combat-tracker__btn--end", tracker);
+			endBtn.textContent = "End Combat";
+			endBtn.setAttribute("aria-label", "End combat encounter");
+			endBtn.addEventListener("click", () => {
+				this._state.endCombat?.();
+				this._logActivity("🏁", "Combat ended");
+				this._renderStatusBar();
+			});
+		} else {
+			const startBtn = this._ce("button", "pm-combat-tracker__btn pm-combat-tracker__btn--start", tracker);
+			startBtn.textContent = "⚔️ Start Combat";
+			startBtn.setAttribute("aria-label", "Start combat encounter");
+			startBtn.addEventListener("click", () => {
+				this._state.startCombat?.();
+				this._logActivity("⚔️", "Combat started");
+				this._renderStatusBar();
+			});
 		}
 	}
 
@@ -362,8 +427,7 @@ export class CharacterSheetPlayMode {
 			const elMod = this._ce("span", "pm-ability__mod", row);
 			elMod.textContent = this._fmtMod(mod);
 
-			row.title = `Roll ${ABILITY_NAMES[abl]} check`;
-			row.addEventListener("click", (e) => this._page._rollAbilityCheck(abl, e));
+			this._makeClickable(row, `Roll ${ABILITY_NAMES[abl]} check`, (e) => this._page._rollAbilityCheck(abl, e));
 		});
 	}
 
@@ -384,8 +448,7 @@ export class CharacterSheetPlayMode {
 			const elMod = this._ce("span", "pm-save__mod", row);
 			elMod.textContent = this._fmtMod(mod);
 
-			row.title = `Roll ${ABILITY_NAMES[abl]} save`;
-			row.addEventListener("click", (e) => this._page._rollSavingThrow(abl, e));
+			this._makeClickable(row, `Roll ${ABILITY_NAMES[abl]} saving throw`, (e) => this._page._rollSavingThrow(abl, e));
 		});
 	}
 
@@ -446,7 +509,7 @@ export class CharacterSheetPlayMode {
 			arrow.textContent = "▾";
 			const txt = document.createTextNode(expanded ? " Hide non-proficient" : ` Show all ${proficient.length + nonProficient.length} skills`);
 			expander.appendChild(txt);
-			expander.addEventListener("click", () => {
+			this._makeClickable(expander, expanded ? "Hide non-proficient skills" : "Show all skills", () => {
 				this._expandedSections.skills = !this._expandedSections.skills;
 				this._renderSkills();
 			});
@@ -470,8 +533,7 @@ export class CharacterSheetPlayMode {
 		const elMod = this._ce("span", "pm-skill__mod", row);
 		elMod.textContent = this._fmtMod(mod);
 
-		row.title = `Roll ${skill.name} (${ability.toUpperCase?.() || "?"})`;
-		row.addEventListener("click", (e) => this._page._rollSkillCheck(skill.key, skill.name, e));
+		this._makeClickable(row, `Roll ${skill.name} (${ability.toUpperCase?.() || "?"})`, (e) => this._page._rollSkillCheck(skill.key, skill.name, e));
 	}
 
 	_renderProficiencies () {
@@ -532,7 +594,7 @@ export class CharacterSheetPlayMode {
 				detail.textContent = fav.detail;
 			}
 
-			el.addEventListener("click", () => this._useFavorite(fav));
+			this._makeClickable(el, `Use favorite: ${fav.name}`, () => this._useFavorite(fav));
 
 			// Right-click to remove
 			el.addEventListener("contextmenu", (e) => {
@@ -556,7 +618,7 @@ export class CharacterSheetPlayMode {
 			const avail = this._actionEconomy[slot.key];
 			const el = this._ce("div", `pm-economy__slot pm-economy__slot--${avail ? "available" : "used"}`, row);
 			el.textContent = `${slot.icon} ${slot.label}`;
-			el.addEventListener("click", () => {
+			this._makeClickable(el, `${avail ? "Use" : "Restore"} ${slot.label}`, () => {
 				this._actionEconomy[slot.key] = !this._actionEconomy[slot.key];
 				this._renderActionEconomy();
 			});
@@ -567,7 +629,7 @@ export class CharacterSheetPlayMode {
 		const walkSpeed = typeof speed === "object" ? speed.walk : speed;
 		const mvEl = this._ce("div", `pm-economy__slot pm-economy__slot--${this._actionEconomy.movement ? "available" : "used"}`, row);
 		mvEl.textContent = `🏃 ${walkSpeed || 30}ft`;
-		mvEl.addEventListener("click", () => {
+		this._makeClickable(mvEl, `${this._actionEconomy.movement ? "Use" : "Restore"} Movement`, () => {
 			this._actionEconomy.movement = !this._actionEconomy.movement;
 			this._renderActionEconomy();
 		});
@@ -575,7 +637,7 @@ export class CharacterSheetPlayMode {
 		// Reset
 		const reset = this._ce("span", "pm-economy__reset", row);
 		reset.textContent = "↺ Reset turn";
-		reset.addEventListener("click", () => {
+		this._makeClickable(reset, "Reset turn (restore all actions)", () => {
 			this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
 			this._renderActionEconomy();
 			this._logActivity("⏱️", "New turn started");
@@ -644,7 +706,7 @@ export class CharacterSheetPlayMode {
 			const isFav = this._isFavorite("attack", attack.id || attack.name);
 			star.textContent = "⭐";
 			if (isFav) star.classList.add("pm-attack__star--active");
-			star.addEventListener("click", (e) => {
+			this._makeClickable(star, `${isFav ? "Remove" : "Add"} ${attack.name} favorite`, (e) => {
 				e.stopPropagation();
 				this._toggleFavorite({
 					id: `attack:${attack.id || attack.name}`,
@@ -659,6 +721,16 @@ export class CharacterSheetPlayMode {
 			row.addEventListener("click", () => {
 				this._page._rollAttack(attack);
 				this._logActivity(attack.isMelee ? "🗡️" : "🏹", `Attacked with ${attack.name}`);
+			});
+			row.setAttribute("role", "button");
+			row.setAttribute("tabindex", "0");
+			row.setAttribute("aria-label", `Roll attack: ${attack.name}, ${this._fmtMod(totalBonus)} to hit, ${dmgStr} damage`);
+			row.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					this._page._rollAttack(attack);
+					this._logActivity(attack.isMelee ? "🗡️" : "🏹", `Attacked with ${attack.name}`);
+				}
 			});
 		});
 	}
@@ -685,12 +757,10 @@ export class CharacterSheetPlayMode {
 
 				for (let i = 0; i < slot.max; i++) {
 					const pip = this._ce("span", `pm-slots__pip pm-slots__pip--${i < slot.current ? "filled" : "empty"}`, pips);
-					pip.addEventListener("click", () => {
+					this._makeClickable(pip, `Level ${lvl} spell slot ${i + 1} (${i < slot.current ? "use" : "restore"})`, () => {
 						if (i < slot.current) {
-							// Use a slot
 							this._state._data.spellcasting.spellSlots[lvl].current--;
 						} else {
-							// Restore a slot
 							this._state._data.spellcasting.spellSlots[lvl].current = Math.min(slot.max, slot.current + 1);
 						}
 						this._renderSpellsQuick();
@@ -721,7 +791,7 @@ export class CharacterSheetPlayMode {
 			if (prepared.length > 10) {
 				const more = this._ce("div", "pm-expander", card);
 				more.textContent = `▸ Show all ${prepared.length} prepared...`;
-				more.addEventListener("click", () => this._openDrawerByType("spells"));
+				this._makeClickable(more, `Show all ${prepared.length} prepared spells`, () => this._openDrawerByType("spells"));
 			}
 		}
 	}
@@ -754,7 +824,7 @@ export class CharacterSheetPlayMode {
 		const isFav = this._isFavorite("spell", spell.name);
 		star.textContent = "⭐";
 		if (isFav) star.classList.add("pm-spell__star--active");
-		star.addEventListener("click", (e) => {
+		this._makeClickable(star, `${isFav ? "Remove" : "Add"} ${spell.name} favorite`, (e) => {
 			e.stopPropagation();
 			this._toggleFavorite({
 				id: `spell:${spell.name}`,
@@ -783,7 +853,7 @@ export class CharacterSheetPlayMode {
 				const pips = this._ce("div", "pm-feature__pips", row);
 				for (let i = 0; i < feature.uses.max; i++) {
 					const pip = this._ce("span", `pm-feature__pip pm-feature__pip--${i < feature.uses.current ? "filled" : "empty"}`, pips);
-					pip.addEventListener("click", (e) => {
+					this._makeClickable(pip, `${feature.name} use ${i + 1} (${i < feature.uses.current ? "expend" : "restore"})`, (e) => {
 						e.stopPropagation();
 						if (i < feature.uses.current) {
 							feature.uses.current--;
@@ -802,6 +872,7 @@ export class CharacterSheetPlayMode {
 			if (feature.uses?.current > 0) {
 				const useBtn = this._ce("button", "pm-feature__use-btn", row);
 				useBtn.textContent = "Use";
+				useBtn.setAttribute("aria-label", `Use ${feature.name} (${feature.uses.current} remaining)`);
 				useBtn.addEventListener("click", (e) => {
 					e.stopPropagation();
 					if (feature.uses.current > 0) {
@@ -820,7 +891,7 @@ export class CharacterSheetPlayMode {
 			const isFav = this._isFavorite("feature", feature.id || feature.name);
 			star.textContent = "⭐";
 			if (isFav) star.classList.add("pm-feature__star--active");
-			star.addEventListener("click", (e) => {
+			this._makeClickable(star, `${isFav ? "Remove" : "Add"} ${feature.name} favorite`, (e) => {
 				e.stopPropagation();
 				this._toggleFavorite({
 					id: `feature:${feature.id || feature.name}`,
@@ -836,7 +907,7 @@ export class CharacterSheetPlayMode {
 		if (actionable.length > 12) {
 			const more = this._ce("div", "pm-expander", card);
 			more.textContent = `▸ Show all ${actionable.length} features...`;
-			more.addEventListener("click", () => this._openDrawerByType("reference"));
+			this._makeClickable(more, `Show all ${actionable.length} features`, () => this._openDrawerByType("reference"));
 		}
 	}
 
@@ -858,7 +929,7 @@ export class CharacterSheetPlayMode {
 
 			for (let i = 0; i < data.max; i++) {
 				const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < data.current ? "filled" : "empty"}`, pips);
-				pip.addEventListener("click", () => {
+				this._makeClickable(pip, `Hit Die ${die} ${i + 1} (${i < data.current ? "use" : "restore"})`, () => {
 					if (i < data.current) {
 						this._state._data.hitDice[die].current--;
 					} else {
@@ -880,7 +951,7 @@ export class CharacterSheetPlayMode {
 				const pips = this._ce("div", "pm-resource__pips", row);
 				for (let i = 0; i < res.max; i++) {
 					const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < res.current ? "filled" : "empty"}`, pips);
-					pip.addEventListener("click", () => {
+					this._makeClickable(pip, `${res.name} use ${i + 1} (${i < res.current ? "expend" : "restore"})`, () => {
 						if (i < res.current) res.current--;
 						else res.current = Math.min(res.max, res.current + 1);
 						this._renderResources();
@@ -912,16 +983,23 @@ export class CharacterSheetPlayMode {
 
 		this._elDrawerBackdrop.classList.add("pm-drawer-backdrop--open");
 		this._elDrawer.classList.add("pm-drawer--open");
+		this._elDrawer.setAttribute("role", "dialog");
+		this._elDrawer.setAttribute("aria-modal", "true");
 
 		this._elDrawer.innerHTML = "";
 
 		// Header
 		const header = this._ce("div", "pm-drawer__header", this._elDrawer);
+		const titleId = `pm-drawer-title-${type}`;
 		const title = this._ce("span", "pm-drawer__title", header);
+		title.id = titleId;
 		title.textContent = drawerTitles[type] || type;
+		this._elDrawer.setAttribute("aria-labelledby", titleId);
 		const closeBtn = this._ce("button", "pm-drawer__close", header);
 		closeBtn.textContent = "✕";
+		closeBtn.setAttribute("aria-label", "Close drawer");
 		closeBtn.addEventListener("click", () => this._closeDrawer());
+		closeBtn.focus();
 
 		// Content
 		const content = this._ce("div", "pm-drawer__content", this._elDrawer);
@@ -932,6 +1010,9 @@ export class CharacterSheetPlayMode {
 		this._openDrawer = null;
 		this._elDrawerBackdrop?.classList.remove("pm-drawer-backdrop--open");
 		this._elDrawer?.classList.remove("pm-drawer--open");
+		this._elDrawer?.removeAttribute("role");
+		this._elDrawer?.removeAttribute("aria-modal");
+		this._elDrawer?.removeAttribute("aria-labelledby");
 	}
 
 	_renderDrawerContent (type, container) {
@@ -1200,9 +1281,74 @@ export class CharacterSheetPlayMode {
 			} else {
 				this._logActivity("🛡️", `Temp HP absorbed ${val} damage`);
 			}
+
+			// Concentration auto-check
+			if (this._state.isConcentrating?.()) {
+				this._doConcentrationCheck(val);
+			}
 		}
 
 		this._renderStatusBar();
+	}
+
+	/**
+	 * Perform a concentration save after taking damage.
+	 * Shows inline result panel and handles break/success.
+	 */
+	_doConcentrationCheck (damage) {
+		const checkInfo = this._state.makeConcentrationCheck?.(damage);
+		if (!checkInfo) return;
+
+		const {dc, bonus, advantage} = checkInfo;
+		let roll1 = this._rollD20();
+		let roll2 = advantage ? this._rollD20() : null;
+		let naturalRoll = advantage ? Math.max(roll1, roll2) : roll1;
+		let total = naturalRoll + bonus;
+		let passed = total >= dc;
+
+		// Build result description
+		const rollDesc = advantage
+			? `d20(${roll1}, ${roll2}) → ${naturalRoll}`
+			: `d20(${naturalRoll})`;
+		const resultText = `${rollDesc} + ${bonus} = ${total} vs DC ${dc}`;
+
+		if (passed) {
+			JqueryUtil.doToast({type: "success", content: `Concentration saved! ${resultText}`});
+			this._logActivity("🔮", `Concentration save: ✅ ${resultText}`);
+		} else {
+			// Check for Focused Spell (Sorcerer metamagic) reroll
+			if (this._state.canUseFocusedConcentrationReroll?.()) {
+				const useReroll = confirm(
+					`Concentration FAILED (${resultText}).\n\nUse Focused Spell (Sorcerer) to spend 1 sorcery point and reroll?`,
+				);
+				if (useReroll) {
+					this._state.useFocusedConcentrationReroll?.();
+					roll1 = this._rollD20();
+					roll2 = advantage ? this._rollD20() : null;
+					naturalRoll = advantage ? Math.max(roll1, roll2) : roll1;
+					total = naturalRoll + bonus;
+					passed = total >= dc;
+					const rerollDesc = advantage
+						? `d20(${roll1}, ${roll2}) → ${naturalRoll}`
+						: `d20(${naturalRoll})`;
+					const rerollText = `${rerollDesc} + ${bonus} = ${total} vs DC ${dc}`;
+
+					if (passed) {
+						JqueryUtil.doToast({type: "success", content: `Focused Spell reroll saved! ${rerollText}`});
+						this._logActivity("🔮", `Concentration reroll: ✅ ${rerollText}`);
+					} else {
+						this._state.breakConcentration?.();
+						JqueryUtil.doToast({type: "danger", content: `Concentration broken! ${rerollText}`});
+						this._logActivity("🔮", `Concentration reroll: ❌ ${rerollText} — concentration broken`);
+					}
+					return;
+				}
+			}
+
+			this._state.breakConcentration?.();
+			JqueryUtil.doToast({type: "danger", content: `Concentration broken! ${resultText}`});
+			this._logActivity("🔮", `Concentration save: ❌ ${resultText} — concentration broken`);
+		}
 	}
 
 	// ─── Activity Log ───────────────────────────────────────────
@@ -1265,6 +1411,24 @@ export class CharacterSheetPlayMode {
 		return el;
 	}
 
+	/**
+	 * Make an element clickable with full accessibility support.
+	 * Sets role="button", tabindex="0", aria-label, wires click + Enter/Space.
+	 */
+	_makeClickable (el, label, handler) {
+		el.setAttribute("role", "button");
+		el.setAttribute("tabindex", "0");
+		if (label) el.setAttribute("aria-label", label);
+		el.addEventListener("click", handler);
+		el.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				handler(e);
+			}
+		});
+		return el;
+	}
+
 	/** Build a card section with icon + title */
 	_makeCard (parent, icon, title) {
 		const card = this._ce("div", "pm-card", parent);
@@ -1284,5 +1448,10 @@ export class CharacterSheetPlayMode {
 		btn.textContent = label;
 		btn.addEventListener("click", onClick);
 		return btn;
+	}
+
+	/** Simple d20 roll */
+	_rollD20 () {
+		return Math.floor(Math.random() * 20) + 1;
 	}
 }
