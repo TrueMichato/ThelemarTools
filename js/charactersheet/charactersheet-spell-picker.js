@@ -39,6 +39,14 @@ class CharacterSheetSpellPicker {
 			`}));
 		}
 
+		if (spellCount > 0 || cantripCount > 0) {
+			header.append(e_({outer: `
+				<div class="charsheet__spell-picker-skip-hint ve-muted ve-small" style="margin-top: 2px; font-style: italic;">
+					You can skip this and choose spells later on the Spells tab.
+				</div>
+			`}));
+		}
+
 		return header;
 	}
 

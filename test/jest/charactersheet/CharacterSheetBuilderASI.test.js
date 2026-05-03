@@ -531,4 +531,96 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 			expect(builder._getRacialBonus("con")).toBe(1);
 		});
 	});
+
+	describe("TGTT races with ability data get Tasha's toggle", () => {
+		test("_raceUses2024ASI returns false for TGTT race with fixed ASI", () => {
+			const builder = createBuilder({
+				race: {name: "Nyuidj", source: "TGTT", ability: [{int: 2, wis: 1}]},
+			});
+			expect(builder._raceUses2024ASI()).toBe(false);
+		});
+
+		test("_raceUses2024ASI returns true for XPHB race with no ability field", () => {
+			const builder = createBuilder({
+				race: {name: "Aasimar", source: "XPHB", edition: "one"},
+			});
+			expect(builder._raceUses2024ASI()).toBe(true);
+		});
+
+		test("_raceUses2024ASI returns true for race with empty ability array", () => {
+			const builder = createBuilder({
+				race: {name: "Test", source: "XPHB", ability: []},
+			});
+			expect(builder._raceUses2024ASI()).toBe(true);
+		});
+
+		test("TGTT race with fixed ASI applies bonuses normally (no Tasha's)", () => {
+			const state = createMockState();
+			const builder = createBuilder({
+				state,
+				race: {name: "Nyuidj", source: "TGTT", ability: [{int: 2, wis: 1}]},
+			});
+
+			builder._currentStep = 1;
+			builder._applyCurrentStep();
+			expect(state.bonuses.int).toBe(2);
+			expect(state.bonuses.wis).toBe(1);
+			expect(state.bonuses.str).toBe(0);
+		});
+
+		test("TGTT race with Tasha's enabled reassigns bonuses", () => {
+			const state = createMockState();
+			const builder = createBuilder({
+				state,
+				race: {name: "Nyuidj", source: "TGTT", ability: [{int: 2, wis: 1}]},
+			});
+
+			builder._useTashasRules = true;
+			builder._tashasAbilityBonuses = {
+				tasha_0: "cha", tasha_0_amount: 2,
+				tasha_1: "dex", tasha_1_amount: 1,
+			};
+			builder._tashasSkillReplacements = [];
+			builder._tashasLanguageReplacements = [];
+
+			builder._currentStep = 1;
+			builder._applyCurrentStep();
+			expect(state.bonuses.cha).toBe(2);
+			expect(state.bonuses.dex).toBe(1);
+			expect(state.bonuses.int).toBe(0); // Original INT +2 reassigned
+			expect(state.bonuses.wis).toBe(0); // Original WIS +1 reassigned
+		});
+
+		test("TGTT race with mixed fixed+choose ASI applies correctly", () => {
+			const state = createMockState();
+			// Dendulra: +2 CHA (fixed) + choose +1 from [wis, dex]
+			const builder = createBuilder({
+				state,
+				race: {
+					name: "Dendulra",
+					source: "TGTT",
+					ability: [{cha: 2, choose: {from: ["wis", "dex"], count: 1, amount: 1}}],
+				},
+				racialAbilityChoices: {
+					"Dendulra|TGTT": {
+						"choose_0_0": "wis",
+						"choose_0_0_amount": 1,
+					},
+				},
+			});
+
+			builder._currentStep = 1;
+			builder._applyCurrentStep();
+			expect(state.bonuses.cha).toBe(2);
+			expect(state.bonuses.wis).toBe(1);
+			expect(state.bonuses.dex).toBe(0);
+		});
+
+		test("_getRacialASITotal works for TGTT race", () => {
+			const builder = createBuilder({
+				race: {name: "Nyuidj", source: "TGTT", ability: [{int: 2, wis: 1}]},
+			});
+			expect(builder._getRacialASITotal()).toBe(3);
+		});
+	});
 });

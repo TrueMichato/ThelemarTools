@@ -2061,13 +2061,21 @@ class CharacterSheetFeatures {
 			}
 		}
 
-		const hasChoices = choices.skills || choices.languages || choices.ability || choices.expertise;
+		// Spell Scribing Adept: class choice
+		if (feat.name === "Spell Scribing Adept") {
+			const eligibleClasses = ["Bard", "Sorcerer", "Warlock"];
+			const characterClasses = (this._state.getClasses?.() || []).map(c => c.name);
+			const available = eligibleClasses.filter(c => characterClasses.includes(c));
+			if (available.length > 0) choices.scribingClass = {from: available};
+		}
+
+		const hasChoices = choices.skills || choices.languages || choices.ability || choices.expertise || choices.scribingClass;
 		return hasChoices ? choices : null;
 	}
 
 	async _pShowFeatChoicesModal (feat, choices) {
 		return new Promise((resolve) => {
-			const selected = {ability: null, skills: [], expertise: [], languages: []};
+			const selected = {ability: null, skills: [], expertise: [], languages: [], scribingClass: null};
 			let doClose;
 			let resolved = false;
 
@@ -2083,6 +2091,7 @@ class CharacterSheetFeatures {
 				if (choices.skills && selected.skills.length < choices.skills.count) canConfirm = false;
 				if (choices.expertise && selected.expertise.length < choices.expertise.count) canConfirm = false;
 				if (choices.languages && selected.languages.length < choices.languages.count) canConfirm = false;
+				if (choices.scribingClass && !selected.scribingClass) canConfirm = false;
 				confirmBtn.disabled = !canConfirm;
 			};
 
@@ -2222,6 +2231,25 @@ class CharacterSheetFeatures {
 					};
 					renderLangs();
 					section.append(grid, counter);
+					content.append(section);
+				}
+
+				// Scribing class choice (Spell Scribing Adept)
+				if (choices.scribingClass) {
+					const section = e_({outer: `<div class="mb-3"><label class="ve-small ve-bold">Choose class for scribing spellbook:</label></div>`});
+					const grid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
+
+					choices.scribingClass.from.forEach(cls => {
+						const btn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-default">${cls}</button>`});
+						btn.addEventListener("click", () => {
+							selected.scribingClass = selected.scribingClass === cls ? null : cls;
+							grid.querySelectorAll(".ve-btn").forEach(el => { el.classList.remove("ve-btn-primary"); el.classList.add("ve-btn-default"); });
+							if (selected.scribingClass) { btn.classList.remove("ve-btn-default"); btn.classList.add("ve-btn-primary"); }
+							updateConfirmBtn();
+						});
+						grid.append(btn);
+					});
+					section.append(grid);
 					content.append(section);
 				}
 

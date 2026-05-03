@@ -426,7 +426,7 @@ class CharacterSheetLevelUp {
 		if (needsSubclass) {
 			summaryItems.append(createSummaryItem("subclass", "📚", classData.subclassTitle || "Subclass", {required: true}));
 
-			const subclassContent = this._renderSubclassSelectionCompact(classData, (subclass) => {
+			const subclassContent = this._renderSubclassSelectionCompact(classData, async (subclass) => {
 				selectedSubclass = subclass;
 				currentFeatures = CharacterSheetClassUtils.getLevelFeatures(classData, newLevel, subclass, this._page.getClassFeatures(), this._page.getSubclassFeatures());
 
@@ -513,6 +513,70 @@ class CharacterSheetLevelUp {
 				// Update summary & accordion
 				summaryItemEls.subclass.setStatus(true, subclass.name);
 				accordions.subclass.setComplete(true, subclass.shortName || subclass.name);
+
+				// Divine Soul: prompt for affinity immediately so spell picker can include Cleric spells
+				if (classEntry.name === "Sorcerer" && CharacterSheetClassUtils.isDivineSoulSubclass(subclass) && !CharacterSheetClassUtils.normalizeDivineSoulAffinity(selectedSubclassChoice)) {
+					const affinityOptions = CharacterSheetClassUtils.getDivineSoulAffinityOptions(subclass);
+					if (affinityOptions.length) {
+						const affinityChoice = await InputUiUtil.pGetUserEnum({
+							title: "Divine Soul Affinity",
+							values: affinityOptions,
+							fnDisplay: opt => opt.name,
+							isResolveItem: true,
+							zIndex: 10002,
+							htmlDescription: "<div>Choose the Divine Soul affinity that grants your extra spell and Cleric spell access.</div>",
+						});
+						if (affinityChoice) {
+							selectedSubclassChoice = affinityChoice;
+						}
+					}
+				}
+
+				// Re-render known spells section if it exists (subclass may grant additional spell lists)
+				if (accordions.knownspells) {
+					const body = accordions.knownspells.el.querySelector(".charsheet__levelup-accordion-body");
+					body.innerHTML = "";
+					const knownAllSpells = this._page.getFilteredSpellData();
+					const knownExistingIds = new Set([
+						...(this._state.getSpells?.() || []),
+						...(this._state.getCantripsKnown?.() || []),
+					].map(s => `${s.name}|${s.source}`));
+					const updatedKnownContent = CharacterSheetSpellPicker.renderKnownSpellPicker({
+						className: classEntry.name,
+						classSource: classEntry.source,
+						spellCount: knownSpellsGain,
+						cantripCount: knownCantripsGain,
+						maxSpellLevel: knownMaxSpellLevel,
+						allSpells: knownAllSpells,
+						knownSpellIds: knownExistingIds,
+						getHoverLink: (...args) => CharacterSheetPage.getHoverLink(...args),
+						subclass: selectedSubclass || classEntry.subclass,
+						additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
+							className: classEntry.name,
+							subclass: selectedSubclass || classEntry.subclass,
+							subclassChoice: selectedSubclassChoice,
+						}),
+						onSelect: (spells, cantrips) => {
+							selectedKnownSpells = spells;
+							selectedKnownCantrips = cantrips;
+							const spellComplete = spells.length >= knownSpellsGain;
+							const cantripComplete = cantrips.length >= knownCantripsGain;
+							const complete = spellComplete && cantripComplete;
+							const parts = [];
+							if (knownSpellsGain > 0) parts.push(`${spells.length}/${knownSpellsGain} spells`);
+							if (knownCantripsGain > 0) parts.push(`${cantrips.length}/${knownCantripsGain} cantrips`);
+							const allNames = [...cantrips, ...spells].map(s => s.name).join(", ");
+							summaryItemEls.knownspells.setStatus(complete, allNames || parts.join(", "));
+							accordions.knownspells.setComplete(complete, parts.join(", "));
+						},
+					});
+					body.append(updatedKnownContent);
+					// Clear previous spell selections since the spell list changed
+					selectedKnownSpells = [];
+					selectedKnownCantrips = [];
+					summaryItemEls.knownspells?.setStatus(false, "Select spells");
+					accordions.knownspells.setComplete(false, "");
+				}
 
 				// Update features accordion
 				if (accordions.features) {
@@ -737,9 +801,40 @@ class CharacterSheetLevelUp {
 			main.append(createAccordion("scholar", "📖", "Scholar Expertise", scholarContent, {required: true}));
 		}
 
+		// ========== 7b. SPELL SWAP (Known-casters only) ==========
+		let stagedSpellSwap = null; // {oldSpell, newSpell}
+		const spellSwapCount = CharacterSheetClassUtils.getSpellSwapCount(classEntry.name, classEntry.source, newLevel);
+		if (spellSwapCount > 0) {
+			summaryItems.append(createSummaryItem("spellswap", "🔄", "Swap Spell", {required: false}));
+
+			const swapContent = this._renderSpellSwapSection({
+				classEntry,
+				newLevel,
+				knownMaxSpellLevel: (() => {
+					const cp = classData?.casterProgression;
+					if (cp === "pact") return Math.min(5, Math.ceil(newLevel / 2));
+					if (cp === "1/2") return Math.min(5, Math.ceil(newLevel / 4));
+					if (cp === "1/3") return Math.min(4, Math.ceil(newLevel / 7));
+					return Math.min(9, Math.ceil(newLevel / 2));
+				})(),
+				selectedSubclass: () => selectedSubclass || classEntry.subclass,
+				selectedSubclassChoice: () => selectedSubclassChoice,
+				onSwap: (oldSpell, newSpell) => {
+					stagedSpellSwap = oldSpell && newSpell ? {oldSpell, newSpell} : null;
+					const summary = stagedSpellSwap
+						? `${oldSpell.name} → ${newSpell.name}`
+						: "No swap";
+					summaryItemEls.spellswap.setStatus(true, summary);
+					accordions.spellswap.setComplete(true, summary);
+				},
+			});
+
+			main.append(createAccordion("spellswap", "🔄", "Swap Spell (Optional)", swapContent, {required: false}));
+		}
+
 		// ========== 8. WIZARD SPELLBOOK ==========
 		if (isWizard) {
-			summaryItems.append(createSummaryItem("spellbook", "📕", "Spellbook", {required: true}));
+			summaryItems.append(createSummaryItem("spellbook", "📕", "Spellbook", {required: false}));
 
 			const allSpells = this._page.getFilteredSpellData();
 			const knownSpellIds = new Set((this._state.getSpells?.() || []).map(s => `${s.name}|${s.source}`));
@@ -761,13 +856,13 @@ class CharacterSheetLevelUp {
 				},
 			});
 
-			main.append(createAccordion("spellbook", "📕", `Spellbook (+${wizardSpellCount} Spells)`, spellbookContent, {required: true}));
+			main.append(createAccordion("spellbook", "📕", `Spellbook (+${wizardSpellCount} Spells)`, spellbookContent, {required: false}));
 		}
 
 		// ========== 8b. KNOWN SPELLS (Sorcerer, Bard, Ranger, Warlock, etc.) ==========
 		if (isKnownCaster && (knownSpellsGain > 0 || knownCantripsGain > 0)) {
 			const totalGain = knownSpellsGain + knownCantripsGain;
-			summaryItems.append(createSummaryItem("knownspells", "✨", "Spells Known", {required: totalGain > 0}));
+			summaryItems.append(createSummaryItem("knownspells", "✨", "Spells Known", {required: false}));
 
 			const knownAllSpells = this._page.getFilteredSpellData();
 			const knownExistingIds = new Set([
@@ -809,13 +904,13 @@ class CharacterSheetLevelUp {
 			const sectionLabel = [];
 			if (knownSpellsGain > 0) sectionLabel.push(`+${knownSpellsGain} Spell${knownSpellsGain !== 1 ? "s" : ""}`);
 			if (knownCantripsGain > 0) sectionLabel.push(`+${knownCantripsGain} Cantrip${knownCantripsGain !== 1 ? "s" : ""}`);
-			main.append(createAccordion("knownspells", "✨", `Spells Known (${sectionLabel.join(", ")})`, knownSpellsContent, {required: totalGain > 0}));
+			main.append(createAccordion("knownspells", "✨", `Spells Known (${sectionLabel.join(", ")})`, knownSpellsContent, {required: false}));
 		}
 
 		// ========== 8c. PREPARED SPELLS (XPHB Warlock, etc.) ==========
 		if (isPreparedCaster && (preparedSpellsGain > 0 || preparedCantripsGain > 0)) {
 			const totalGain = preparedSpellsGain + preparedCantripsGain;
-			summaryItems.append(createSummaryItem("preparedspells", "✨", "Prepared Spells", {required: totalGain > 0}));
+			summaryItems.append(createSummaryItem("preparedspells", "✨", "Prepared Spells", {required: false}));
 
 			const prepAllSpells = this._page.getFilteredSpellData();
 			const prepExistingIds = new Set([
@@ -853,7 +948,7 @@ class CharacterSheetLevelUp {
 			const sectionLabel = [];
 			if (preparedSpellsGain > 0) sectionLabel.push(`+${preparedSpellsGain} Spell${preparedSpellsGain !== 1 ? "s" : ""}`);
 			if (preparedCantripsGain > 0) sectionLabel.push(`+${preparedCantripsGain} Cantrip${preparedCantripsGain !== 1 ? "s" : ""}`);
-			main.append(createAccordion("preparedspells", "✨", `Prepared Spells (${sectionLabel.join(", ")})`, preparedContent, {required: totalGain > 0}));
+			main.append(createAccordion("preparedspells", "✨", `Prepared Spells (${sectionLabel.join(", ")})`, preparedContent, {required: false}));
 		}
 
 		// ========== 9. NEW FEATURES (Info Only) ==========
@@ -1053,39 +1148,31 @@ class CharacterSheetLevelUp {
 				return;
 			}
 
+			// Collect incomplete spell selections for a single skip confirmation
+			const spellMissing = [];
 			if (isWizard && selectedSpellbookSpells.length < wizardSpellCount) {
-				JqueryUtil.doToast({type: "warning", content: `Please select ${wizardSpellCount} spells for your spellbook.`});
-				accordions.spellbook?.el.classList.add("expanded");
-				accordions.spellbook?.el.scrollIntoView({behavior: "smooth"});
-				return;
+				spellMissing.push(`${wizardSpellCount - selectedSpellbookSpells.length} spellbook spell(s)`);
 			}
-
 			if (isKnownCaster && knownSpellsGain > 0 && selectedKnownSpells.length < knownSpellsGain) {
-				JqueryUtil.doToast({type: "warning", content: `Please select ${knownSpellsGain} spell(s) to learn.`});
-				accordions.knownspells?.el.classList.add("expanded");
-				accordions.knownspells?.el.scrollIntoView({behavior: "smooth"});
-				return;
+				spellMissing.push(`${knownSpellsGain - selectedKnownSpells.length} spell(s) to learn`);
 			}
-
 			if (isKnownCaster && knownCantripsGain > 0 && selectedKnownCantrips.length < knownCantripsGain) {
-				JqueryUtil.doToast({type: "warning", content: `Please select ${knownCantripsGain} cantrip(s) to learn.`});
-				accordions.knownspells?.el.classList.add("expanded");
-				accordions.knownspells?.el.scrollIntoView({behavior: "smooth"});
-				return;
+				spellMissing.push(`${knownCantripsGain - selectedKnownCantrips.length} cantrip(s) to learn`);
 			}
-
 			if (isPreparedCaster && preparedSpellsGain > 0 && selectedPreparedSpells.length < preparedSpellsGain) {
-				JqueryUtil.doToast({type: "warning", content: `Please select ${preparedSpellsGain} prepared spell(s).`});
-				accordions.preparedspells?.el.classList.add("expanded");
-				accordions.preparedspells?.el.scrollIntoView({behavior: "smooth"});
-				return;
+				spellMissing.push(`${preparedSpellsGain - selectedPreparedSpells.length} prepared spell(s)`);
 			}
-
 			if (isPreparedCaster && preparedCantripsGain > 0 && selectedPreparedCantrips.length < preparedCantripsGain) {
-				JqueryUtil.doToast({type: "warning", content: `Please select ${preparedCantripsGain} cantrip(s).`});
-				accordions.preparedspells?.el.classList.add("expanded");
-				accordions.preparedspells?.el.scrollIntoView({behavior: "smooth"});
-				return;
+				spellMissing.push(`${preparedCantripsGain - selectedPreparedCantrips.length} cantrip(s)`);
+			}
+			if (spellMissing.length > 0) {
+				const confirmed = await InputUiUtil.pGetUserBoolean({
+					title: "Skip Spell Selection?",
+					htmlDescription: `You still need to choose ${spellMissing.join(" and ")}. You can pick them later on the Spells tab.`,
+					textYes: "Skip",
+					textNo: "Go Back",
+				});
+				if (!confirmed) return;
 			}
 
 			// ========== APPLY LEVEL UP ==========
@@ -1108,6 +1195,7 @@ class CharacterSheetLevelUp {
 				selectedKnownCantrips,
 				selectedPreparedSpells,
 				selectedPreparedCantrips,
+				stagedSpellSwap,
 				newFeatures: currentFeatures,
 				hpMethod,
 				classData,
@@ -1877,7 +1965,7 @@ class CharacterSheetLevelUp {
 
 					// Initialize feat choices storage
 					if (!feat._featChoices) {
-						feat._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: []};
+						feat._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: [], scribingClass: null};
 					}
 
 					// Track current feat for ASI↔Feat sync
@@ -2240,6 +2328,43 @@ class CharacterSheetLevelUp {
 			this._renderFeatAbilityButtons(feat, choices.ability, abilitySection, onAbilityChange);
 
 			container.append(abilitySection);
+		}
+
+		// Spell Scribing Adept: class choice (Bard, Sorcerer, or Warlock)
+		if (feat.name === "Spell Scribing Adept") {
+			const scribingSection = e_({outer: `<div class="mb-2"></div>`});
+			scribingSection.insertAdjacentHTML("beforeend", `<label class="ve-small">Choose class for scribing spellbook:</label>`);
+			const radioContainer = e_({outer: `<div class="ve-flex-wrap gap-2 mt-1"></div>`});
+
+			const eligibleClasses = ["Bard", "Sorcerer", "Warlock"];
+			const characterClasses = (this._state.getClasses?.() || []).map(c => c.name);
+			const available = eligibleClasses.filter(c => characterClasses.includes(c));
+
+			if (available.length === 0) {
+				radioContainer.insertAdjacentHTML("beforeend", `<span class="ve-muted ve-small">No eligible class (requires Bard, Sorcerer, or Warlock)</span>`);
+			} else {
+				available.forEach(cls => {
+					const isSelected = feat._featChoices.scribingClass === cls;
+					const label = e_({outer: `
+						<label class="charsheet__levelup-skill-radio mr-3 mb-1 d-inline-block" style="cursor: pointer;">
+							<input type="radio" name="scribing-class-choice" class="mr-1" value="${cls}" ${isSelected ? "checked" : ""}>
+							${cls}
+						</label>
+					`});
+					label.querySelector("input").addEventListener("change", (e) => {
+						if (e.target.checked) feat._featChoices.scribingClass = cls;
+					});
+					radioContainer.append(label);
+				});
+				// Default to first available if not set
+				if (!feat._featChoices.scribingClass && available.length > 0) {
+					feat._featChoices.scribingClass = available[0];
+					radioContainer.querySelector("input").checked = true;
+				}
+			}
+
+			scribingSection.append(radioContainer);
+			container.append(scribingSection);
 		}
 
 		// Cantrip choices
@@ -3301,6 +3426,152 @@ class CharacterSheetLevelUp {
 	 * @param {Function} onSelect - Callback(skill) when a skill is selected
 	 * @returns {jQuery} The section element
 	 */
+	/**
+	 * Render the spell swap section for known-casters.
+	 * Shows current known spells with a swap button; clicking swap opens an inline picker for replacement.
+	 * Only 1 swap allowed per level-up.
+	 */
+	_renderSpellSwapSection ({classEntry, newLevel, knownMaxSpellLevel, selectedSubclass, selectedSubclassChoice, onSwap}) {
+		const section = e_({outer: `
+			<div class="charsheet__levelup-section">
+				<h5 class="charsheet__levelup-section-title">
+					<span>🔄</span> Swap a Known Spell
+				</h5>
+				<p class="ve-small ve-muted">You may replace one spell you know with a different spell of the same class. This is optional.</p>
+				<div class="charsheet__levelup-spell-swap-list"></div>
+				<div class="charsheet__levelup-spell-swap-picker" style="display: none;"></div>
+			</div>
+		`});
+
+		const listContainer = section.querySelector(".charsheet__levelup-spell-swap-list");
+		const pickerContainer = section.querySelector(".charsheet__levelup-spell-swap-picker");
+
+		// Get current known spells (level 1+, not feature-granted)
+		const knownSpells = (this._state.getSpellsKnown?.() || [])
+			.filter(s => s.level > 0 && !s.alwaysPrepared && !s.sourceFeature);
+
+		if (knownSpells.length === 0) {
+			listContainer.insertAdjacentHTML("beforeend", `<p class="ve-muted ve-small">No swappable spells known.</p>`);
+			return section;
+		}
+
+		let activeSwapSpell = null;
+
+		const renderList = () => {
+			listContainer.innerHTML = "";
+			knownSpells.forEach(spell => {
+				const isSwapped = activeSwapSpell && spell.name === activeSwapSpell.name && spell.source === activeSwapSpell.source;
+				const row = e_({outer: `
+					<div class="charsheet__levelup-spell-swap-row ${isSwapped ? "charsheet__levelup-spell-swap-row--swapped" : ""}" style="display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; ${isSwapped ? "text-decoration: line-through; opacity: 0.5;" : ""}">
+						<span style="flex: 1;">${spell.name} <span class="ve-muted ve-small">(Level ${spell.level})</span></span>
+						${isSwapped
+							? `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__spell-swap-undo" title="Undo swap">Undo</button>`
+							: `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__spell-swap-btn" title="Swap this spell">🔄 Swap</button>`
+						}
+					</div>
+				`});
+
+				const btn = row.querySelector(".charsheet__spell-swap-btn, .charsheet__spell-swap-undo");
+				btn.addEventListener("click", () => {
+					if (isSwapped) {
+						// Undo
+						activeSwapSpell = null;
+						pickerContainer.style.display = "none";
+						pickerContainer.innerHTML = "";
+						onSwap(null, null);
+						renderList();
+					} else {
+						// Start swap — show picker
+						activeSwapSpell = spell;
+						renderList();
+						showReplacementPicker(spell);
+					}
+				});
+
+				listContainer.append(row);
+			});
+		};
+
+		const showReplacementPicker = (oldSpell) => {
+			pickerContainer.innerHTML = "";
+			pickerContainer.style.display = "block";
+
+			const allSpells = this._page.getFilteredSpellData();
+			const knownIds = new Set((this._state.getSpells?.() || []).map(s => `${s.name}|${s.source}`));
+
+			// Resolve current subclass/subclassChoice (may have changed during level-up)
+			const currentSubclass = typeof selectedSubclass === "function" ? selectedSubclass() : selectedSubclass;
+			const currentSubclassChoice = typeof selectedSubclassChoice === "function" ? selectedSubclassChoice() : selectedSubclassChoice;
+
+			const additionalClasses = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+				className: classEntry.name,
+				subclass: currentSubclass || classEntry.subclass,
+				subclassChoice: currentSubclassChoice,
+			});
+
+			// Filter to valid replacements: same class, level 1..maxSpellLevel, not already known
+			const validSpells = allSpells.filter(s => {
+				if (s.level < 1 || s.level > knownMaxSpellLevel) return false;
+				if (knownIds.has(`${s.name}|${s.source}`)) return false;
+				if (CharacterSheetClassUtils.spellIsForClass(s, classEntry.name, {subclass: currentSubclass || classEntry.subclass})) return true;
+				if (additionalClasses.some(cn => CharacterSheetClassUtils.spellIsForClass(s, cn))) return true;
+				return false;
+			}).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+
+			pickerContainer.insertAdjacentHTML("beforeend", `
+				<div style="border-top: 1px solid rgba(var(--rgb-bg-text), 0.15); margin-top: 8px; padding-top: 8px;">
+					<p class="ve-small"><strong>Replace ${oldSpell.name}</strong> with:</p>
+					<input type="text" class="form-control form-control-sm charsheet__spell-swap-search mb-2" placeholder="Search spells...">
+					<div class="charsheet__spell-swap-results" style="max-height: 200px; overflow-y: auto;"></div>
+				</div>
+			`);
+
+			const searchInput = pickerContainer.querySelector(".charsheet__spell-swap-search");
+			const resultsContainer = pickerContainer.querySelector(".charsheet__spell-swap-results");
+
+			const renderResults = (filter = "") => {
+				resultsContainer.innerHTML = "";
+				const filtered = filter
+					? validSpells.filter(s => s.name.toLowerCase().includes(filter.toLowerCase()))
+					: validSpells;
+
+				if (filtered.length === 0) {
+					resultsContainer.insertAdjacentHTML("beforeend", `<p class="ve-muted ve-small">No matching spells found.</p>`);
+					return;
+				}
+
+				filtered.slice(0, 50).forEach(spell => {
+					const row = e_({outer: `
+						<div class="charsheet__spell-swap-result-row" style="display: flex; align-items: center; gap: 8px; padding: 3px 6px; cursor: pointer; border-radius: 3px;" onmouseover="this.style.background='rgba(var(--rgb-bg-text),0.07)'" onmouseout="this.style.background=''">
+							<span style="flex: 1;">${spell.name} <span class="ve-muted ve-small">(Lvl ${spell.level})</span></span>
+							<button class="ve-btn ve-btn-xs ve-btn-primary">Select</button>
+						</div>
+					`});
+
+					row.addEventListener("click", () => {
+						onSwap(oldSpell, spell);
+						pickerContainer.style.display = "none";
+						pickerContainer.innerHTML = "";
+						renderList();
+					});
+
+					resultsContainer.append(row);
+				});
+
+				if (filtered.length > 50) {
+					resultsContainer.insertAdjacentHTML("beforeend", `<p class="ve-muted ve-small">Showing first 50 of ${filtered.length} results. Refine your search.</p>`);
+				}
+			};
+
+			searchInput.addEventListener("input", () => renderResults(searchInput.value));
+			renderResults();
+			searchInput.focus();
+		};
+
+		renderList();
+		return section;
+	}
+
 	_renderScholarExpertiseSelection (onSelect) {
 		const section = e_({outer: `
 			<div class="charsheet__levelup-section">
@@ -3356,7 +3627,7 @@ class CharacterSheetLevelUp {
 		return section;
 	}
 
-	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedFeatureOptions, selectedExpertise, selectedLanguages, languageGrants, selectedScholarSkill, selectedSpellbookSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, newFeatures, hpMethod, classData}) {
+	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedFeatureOptions, selectedExpertise, selectedLanguages, languageGrants, selectedScholarSkill, selectedSpellbookSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
 		const prevCombatTraditions = this._state.getCombatTraditions?.() || [];
 		const prevWeaponMasteries = this._state.getWeaponMasteries?.() || [];
 
@@ -3626,6 +3897,16 @@ class CharacterSheetLevelUp {
 		// Apply Scholar expertise selection (Wizard XPHB level 2)
 		if (selectedScholarSkill) {
 			this._state.setScholarExpertise(selectedScholarSkill);
+		}
+
+		// Apply spell swap (known-casters only)
+		if (stagedSpellSwap) {
+			const {oldSpell, newSpell} = stagedSpellSwap;
+			this._state.removeSpell(oldSpell.id || `${oldSpell.name}|${oldSpell.source}`);
+			this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(newSpell, {
+				sourceFeature: "Spells Known",
+				sourceClass: classEntry.name,
+			}));
 		}
 
 		// Apply wizard spellbook spell selections
@@ -3900,6 +4181,14 @@ class CharacterSheetLevelUp {
 				source: spell.source,
 				level: spell.level,
 			}));
+		}
+
+		// Record spell swap in history
+		if (stagedSpellSwap) {
+			historyEntry.choices.spellSwap = {
+				removed: {name: stagedSpellSwap.oldSpell.name, source: stagedSpellSwap.oldSpell.source},
+				added: {name: stagedSpellSwap.newSpell.name, source: stagedSpellSwap.newSpell.source},
+			};
 		}
 
 		const nextCombatTraditions = this._state.getCombatTraditions?.() || [];

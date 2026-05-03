@@ -311,9 +311,19 @@ class CharacterSheetSpells {
 		// Get character's subclass for subclass spell list checking
 		const characterSubclass = characterClass.subclass;
 
+		// Check for subclass-granted additional spell lists (e.g. Divine Soul → Cleric)
+		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+			className,
+			subclass: characterSubclass,
+			subclassChoice: characterClass.subclassChoice,
+		});
+
 		const classSpells = filteredSpells.filter(spell => {
 			// Check base class spell list + subclass spell list via shared utility
 			if (CharacterSheetClassUtils.spellIsForClass(spell, spellListClassName, {subclass: characterSubclass})) return true;
+
+			// Check additional class spell lists granted by subclass features
+			if (additionalClassNames.some(cls => CharacterSheetClassUtils.spellIsForClass(spell, cls))) return true;
 
 			// For homebrew/third-party classes: also include spells from the equivalent core class
 			// (both base class and subclass spell lists) if the setting is enabled
@@ -1897,11 +1907,7 @@ class CharacterSheetSpells {
 		if (spell.level === 0) {
 			const activeMetamagicChoice = await this._pChooseActiveMetamagic({spell, spellData, slotLevel: 0});
 			if (activeMetamagicChoice?.cancelled) return;
-			const castingConstraint = this._checkCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null);
-			if (castingConstraint) {
-				JqueryUtil.doToast({type: "warning", content: castingConstraint});
-				return;
-			}
+			if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
 			if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
 				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 				return;
@@ -1965,11 +1971,7 @@ class CharacterSheetSpells {
 			if (castAsRitual) {
 				const activeMetamagicChoice = await this._pChooseActiveMetamagic({spell, spellData, slotLevel: spell.level});
 				if (activeMetamagicChoice?.cancelled) return;
-				const castingConstraint = this._checkCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null);
-				if (castingConstraint) {
-					JqueryUtil.doToast({type: "warning", content: castingConstraint});
-					return;
-				}
+				if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
 				if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
 					JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 					return;
@@ -2050,11 +2052,7 @@ class CharacterSheetSpells {
 
 		const activeMetamagicChoice = await this._pChooseActiveMetamagic({spell, spellData, slotLevel: selectedSlot.level});
 		if (activeMetamagicChoice?.cancelled) return;
-		const castingConstraint = this._checkCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null);
-		if (castingConstraint) {
-			JqueryUtil.doToast({type: "warning", content: castingConstraint});
-			return;
-		}
+		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
 		if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
 			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 			return;
@@ -2193,19 +2191,47 @@ class CharacterSheetSpells {
 	}
 
 	/**
+	 * Process casting constraints: block if hard-blocked, confirm if soft-check required.
+	 * @param {object} spell - The spell being cast
+	 * @param {object} spellData - Full spell data
+	 * @param {object|null} appliedMetamagic - Active metamagic
+	 * @returns {Promise<boolean>} true if casting should proceed, false if blocked/cancelled
+	 */
+	async _pHandleCastingConstraints (spell, spellData, appliedMetamagic = null) {
+		const {block, checks} = this._checkCastingConstraints(spell, spellData, appliedMetamagic);
+		if (block) {
+			JqueryUtil.doToast({type: "warning", content: block});
+			return false;
+		}
+		if (checks.length) {
+			const confirmed = await InputUiUtil.pGetUserBoolean({
+				title: "Condition Check Required",
+				htmlDescription: `<div class="mb-2">Casting <strong>${spell.name}</strong> requires passing a check:</div>
+					<ul class="mb-2">${checks.map(c => `<li>${c}</li>`).join("")}</ul>
+					<div>Did you pass the required check(s)?</div>`,
+				textYes: "Yes — cast the spell",
+				textNo: "No — cancel",
+			});
+			if (!confirmed) return false;
+		}
+		return true;
+	}
+
+	/**
 	 * Check for conditions/effects that prevent spellcasting
 	 * @param {object} spell - The spell being cast (from character's spell list)
 	 * @param {object} spellData - Full spell data from the spells database
 	 * @param {object|null} appliedMetamagic - Active metamagic chosen for this cast
-	 * @returns {string|null} Error message if casting is prevented, null if allowed
+	 * @returns {{block: string|null, checks: string[]}} block = hard block message, checks = conditions requiring confirmation
 	 */
 	_checkCastingConstraints (spell, spellData, appliedMetamagic = null) {
-		// Check for conditions that completely prevent actions (thus spellcasting)
-		const incapacitatingConditions = ["Incapacitated", "Paralyzed", "Petrified", "Stunned", "Unconscious"];
-		for (const condition of incapacitatingConditions) {
-			if (this._state.hasCondition?.(condition)) {
-				return `Cannot cast spells while ${condition.toLowerCase()}!`;
-			}
+		// Check for incapacitation via active effects (covers all conditions with incapacitated flag)
+		if (this._state.isIncapacitated?.()) {
+			// Find which condition(s) are causing it for a clear message
+			const conditions = this._state.getConditionNames?.() || [];
+			const incapNames = ["Incapacitated", "Paralyzed", "Petrified", "Stunned", "Unconscious"];
+			const active = conditions.find(c => incapNames.includes(c)) || "incapacitated";
+			return {block: `Cannot cast spells while ${active.toLowerCase()}!`, checks: []};
 		}
 
 		// Get spell components
@@ -2213,40 +2239,41 @@ class CharacterSheetSpells {
 		const isSubtleSpell = appliedMetamagic?.key === "subtle";
 		const hasVerbal = !isSubtleSpell && components.v;
 		const hasSomatic = !isSubtleSpell && components.s;
-		const hasMaterial = components.m;
 
-		// Check if character is in a Silence effect (custom condition/active state)
-		// Also check for conditions that prevent speaking
+		// Aggregate casting constraints from all active conditions
+		const constraints = this._state.getCastingConstraints?.() || {verbal: [], somatic: []};
+		const checks = [];
+
+		// Verbal component constraints
 		if (hasVerbal) {
-			if (this._state.hasCondition?.("Silenced")) {
-				return `Cannot cast ${spell.name} - spell has verbal components and you are silenced!`;
+			const banned = constraints.verbal.find(c => c.value === "banned");
+			if (banned) {
+				return {block: `Cannot cast ${spell.name} — spell has verbal components and you are ${banned.conditionName.toLowerCase()}!`, checks: []};
 			}
-			// Some conditions prevent speech indirectly (already covered by incapacitated check above)
+			const check = constraints.verbal.find(c => c.value === "check");
+			if (check) {
+				checks.push(`${check.conditionName}: verbal spells require a concentration check to cast`);
+			}
 		}
 
-		// Check for restrained affecting somatic components (doesn't actually prevent casting in RAW)
-		// Restrained only affects movement and attack rolls, not spellcasting directly
-		// But some DMs rule it affects somatic components - could add optional check here
-
-		// Check if hands are full/occupied for somatic components (if we track this)
-		// This would require tracking what the character is holding
-		// For now, we skip this check as it requires more state tracking
-
-		// Check for material component availability (if we track components)
-		// This would require an inventory check for specific components
-		// Spellcasting focus typically substitutes for non-consumed components
-		// For now, we assume the character has access to required materials
+		// Somatic component constraints
+		if (hasSomatic) {
+			const banned = constraints.somatic.find(c => c.value === "banned");
+			if (banned) {
+				return {block: `Cannot cast ${spell.name} — spell has somatic components and you are ${banned.conditionName.toLowerCase()}!`, checks: []};
+			}
+			const check = constraints.somatic.find(c => c.value === "check");
+			if (check) {
+				checks.push(`${check.conditionName}: somatic spells require a concentration check to cast`);
+			}
+		}
 
 		// Check for Wild Shape (can't cast most spells while transformed)
-		// Would need to check if character has active Wild Shape state
 		const activeStates = this._state.getActiveStates?.() || [];
 		const wildShapeState = activeStates.find(s =>
 			s.name?.toLowerCase().includes("wild shape") && s.active,
 		);
 		if (wildShapeState) {
-			// Note: Some druids can cast spells in Wild Shape (e.g., Moon Druid at high levels)
-			// For now, show a warning but allow casting - DM can rule
-			// Could add a feature check for Beast Spells here
 			const hasBeastSpells = this._state.getFeatures?.()?.some(f =>
 				f.name?.toLowerCase().includes("beast spells"),
 			);
@@ -2255,8 +2282,8 @@ class CharacterSheetSpells {
 			}
 		}
 
-		// All checks passed
-		return null;
+		// All checks passed (may have soft checks that need confirmation)
+		return {block: null, checks};
 	}
 
 	async _showCastResult (spell, slotLevel = null, isPactSlot = false, isRitual = false, castMeta = null) {
@@ -4982,6 +5009,111 @@ class CharacterSheetSpells {
 		}
 	}
 
+	/**
+	 * Render the Spell Scribing Adept spellbook section.
+	 * Shows all scribed spells with memorize/remove controls and a "Scribe New Spell" button.
+	 */
+	_renderScribingSpellbook (container) {
+		const calcs = this._state.getFeatureCalculations();
+		if (!calcs.hasSpellScribingAdept) return;
+
+		const spellbook = this._state.getScribingSpellbook();
+		const memorized = this._state.getScribingMemorizedSpell();
+		const maxLevel = this._state.getScribingMaxSpellLevel();
+		const scribingClass = this._state.getScribingClass();
+
+		const section = e_({outer: `<div class="charsheet__spell-section mb-3" style="border: 1px solid var(--cs-border); border-radius: 8px; padding: 12px;"></div>`});
+
+		// Header
+		section.insertAdjacentHTML("beforeend", `
+			<div class="ve-flex-v-center mb-2">
+				<span class="ve-bold">📖 Scribing Spellbook</span>
+				<span class="ve-small ve-muted ml-2">(${scribingClass} • max level ${maxLevel})</span>
+			</div>
+		`);
+
+		if (memorized) {
+			section.insertAdjacentHTML("beforeend", `
+				<div class="ve-small mb-2" style="color: var(--cs-success);">⭐ Memorized: <strong>${memorized.name}</strong> (Level ${memorized.level})</div>
+			`);
+		} else {
+			section.insertAdjacentHTML("beforeend", `
+				<div class="ve-small ve-muted mb-2">No spell memorized — take a long rest to memorize one</div>
+			`);
+		}
+
+		// Spell list
+		if (spellbook.length) {
+			const list = e_({outer: `<div></div>`});
+			spellbook.forEach(spell => {
+				const isMemo = memorized && spell.id === memorized.id;
+				const tooHigh = spell.level > maxLevel;
+				const school = Parser.spSchoolAbvToFull?.(spell.school) || "";
+				const spellNameRendered = Renderer.get().render(`{@spell ${spell.name}|${spell.source}}`);
+
+				const row = e_({outer: `
+					<div class="ve-flex-v-center p-1 ${tooHigh ? "ve-muted" : ""}" style="border-bottom: 1px solid var(--cs-border-faint, rgba(0,0,0,0.1));">
+						<div class="ve-flex-col ve-flex-1">
+							<div>${isMemo ? "⭐ " : ""}${spellNameRendered}</div>
+							<div class="ve-small ve-muted">Level ${spell.level} ${school}</div>
+						</div>
+						<div class="ve-flex gap-1">
+						</div>
+					</div>
+				`});
+
+				const btnContainer = row.querySelector(".ve-flex.gap-1");
+
+				// Memorize button (only from Spells tab — not long rest, but as convenience)
+				if (!isMemo && !tooHigh) {
+					const btnMemo = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default", txt: "📖 Memorize"});
+					btnMemo.addEventListener("click", () => {
+						this._state.setScribingMemorizedSpell(spell.id);
+						this._renderSpellList();
+						this._page.saveCharacter();
+						JqueryUtil.doToast({type: "success", content: `📖 Memorized: ${spell.name}`});
+					});
+					btnContainer.append(btnMemo);
+				}
+				if (isMemo) {
+					const btnClear = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-warning", txt: "Clear"});
+					btnClear.addEventListener("click", () => {
+						this._state.clearScribingMemorizedSpell();
+						this._renderSpellList();
+						this._page.saveCharacter();
+						JqueryUtil.doToast({type: "info", content: "📖 Cleared memorized spell"});
+					});
+					btnContainer.append(btnClear);
+				}
+
+				// Remove from spellbook
+				const btnRemove = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-danger", txt: "×"});
+				btnRemove.title = "Remove from spellbook";
+				btnRemove.addEventListener("click", () => {
+					if (!confirm(`Remove ${spell.name} from your scribing spellbook?`)) return;
+					this._state.removeScribingSpell(spell.id);
+					this._renderSpellList();
+					this._page.saveCharacter();
+				});
+				btnContainer.append(btnRemove);
+
+				list.append(row);
+			});
+			section.append(list);
+		} else {
+			section.insertAdjacentHTML("beforeend", `<p class="ve-muted ve-small">No spells in spellbook yet</p>`);
+		}
+
+		// "Scribe New Spell" button
+		const btnScribe = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-primary mt-2", txt: "📝 Scribe New Spell"});
+		btnScribe.addEventListener("click", async () => {
+			await this._pShowScribeNewSpellPicker();
+		});
+		section.append(btnScribe);
+
+		container.append(section);
+	}
+
 	_renderSpellList () {
 		const container = document.getElementById("charsheet-spell-lists");
 		if (!container) return;
@@ -4990,6 +5122,9 @@ class CharacterSheetSpells {
 
 		// Render innate spells first (from features/feats)
 		this._renderInnateSpells(container);
+
+		// Render scribing spellbook section (Spell Scribing Adept)
+		this._renderScribingSpellbook(container);
 
 		let spells = this._state.getSpells();
 		// Apply Thelemar rarity to stored spells (for backwards compatibility and display)
@@ -5340,7 +5475,7 @@ class CharacterSheetSpells {
 	/**
 	 * Cast an innate spell (use one charge)
 	 */
-	_castInnateSpell (spellId) {
+	async _castInnateSpell (spellId) {
 		const spell = this._state.getInnateSpells().find(s => s.id === spellId);
 		if (!spell) return;
 
@@ -5348,11 +5483,7 @@ class CharacterSheetSpells {
 		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source);
 
 		// Check for conditions that prevent spellcasting
-		const castingConstraint = this._checkCastingConstraints(spell, spellData);
-		if (castingConstraint) {
-			JqueryUtil.doToast({type: "warning", content: castingConstraint});
-			return;
-		}
+		if (!await this._pHandleCastingConstraints(spell, spellData)) return;
 
 		if (spell.atWill) {
 			// At-will spells can always be cast
@@ -6172,6 +6303,40 @@ class CharacterSheetSpells {
 	}
 
 	/**
+	 * Show a spell picker to scribe a new spell into the scribing spellbook.
+	 * Filtered to the chosen class's spell list, up to the max scribing level.
+	 * Shows cost info (50 gp/level, 2 hr/level).
+	 */
+	async _pShowScribeNewSpellPicker () {
+		const scribingClass = this._state.getScribingClass();
+		if (!scribingClass) return;
+
+		const maxLevel = this._state.getScribingMaxSpellLevel();
+		const allSpells = this._page.getFilteredSpellData() || this._page.getSpells() || [];
+		const existingIds = new Set(this._state.getScribingSpellbook().map(s => `${s.name}|${s.source}`));
+
+		const spell = await this._pShowScribingSpellPicker({
+			title: "📝 Scribe New Spell",
+			className: scribingClass,
+			maxLevel,
+			allSpells,
+			existingIds,
+		});
+
+		if (!spell) return;
+
+		const cost = spell.level * 50;
+		const hours = spell.level * 2;
+
+		if (!confirm(`Scribe ${spell.name} (Level ${spell.level})?\n\nCost: ${cost} gp\nTime: ${hours} hours`)) return;
+
+		this._state.addScribingSpell(spell);
+		this._renderSpellList();
+		this._page.saveCharacter();
+		JqueryUtil.doToast({type: "success", content: `📝 Scribed: ${spell.name} (${cost} gp, ${hours} hrs)`});
+	}
+
+	/**
 	 * Process all pending spell choices, showing the picker for each
 	 */
 	async processPendingSpellChoices () {
@@ -6185,6 +6350,121 @@ class CharacterSheetSpells {
 				this._page.saveCharacter();
 			});
 		}
+
+		// Process pending scribing spellbook picks (Spell Scribing Adept)
+		await this.processScribingSpellPicks();
+	}
+
+	/**
+	 * Process pending scribing spellbook picks for Spell Scribing Adept.
+	 * Shows a spell picker for each remaining pick, filtering to the chosen class's spell list
+	 * at 1st level (initial picks) or up to max scribing level (later scribing).
+	 */
+	async processScribingSpellPicks () {
+		let remaining = this._state.getPendingScribingPicks();
+		if (!remaining) return;
+
+		const scribingClass = this._state.getScribingClass();
+		if (!scribingClass) return;
+
+		const maxLevel = 1; // Initial picks are always 1st-level
+		const allSpells = this._page.getFilteredSpellData() || this._page.getSpells() || [];
+		const existingBook = this._state.getScribingSpellbook();
+		const existingIds = new Set(existingBook.map(s => `${s.name}|${s.source}`));
+
+		while (remaining > 0) {
+			const spell = await this._pShowScribingSpellPicker({
+				title: `Scribing Spellbook: Choose Spell (${remaining} remaining)`,
+				className: scribingClass,
+				maxLevel,
+				allSpells,
+				existingIds,
+			});
+
+			if (!spell) break; // User cancelled
+
+			this._state.addScribingSpell(spell);
+			existingIds.add(`${spell.name}|${spell.source}`);
+			remaining--;
+			this._state.setPendingScribingPicks(remaining);
+		}
+
+		if (remaining === 0) {
+			this._state.setPendingScribingPicks(0);
+			this._renderSpellList();
+			this._page.saveCharacter();
+		}
+	}
+
+	/**
+	 * Show a spell picker modal filtered for the scribing spellbook.
+	 * @param {object} opts - {title, className, maxLevel, allSpells, existingIds}
+	 * @returns {Promise<object|null>} - Selected spell or null if cancelled
+	 */
+	async _pShowScribingSpellPicker ({title, className, maxLevel, allSpells, existingIds}) {
+		// Filter spells: correct class list, level range, not already in scribing spellbook
+		const classSpells = allSpells.filter(spell => {
+			if (spell.level < 1 || spell.level > maxLevel) return false;
+			if (existingIds.has(`${spell.name}|${spell.source}`)) return false;
+			// Check if spell is on the class's spell list
+			const lists = spell.classes?.fromClassList || [];
+			return lists.some(c => c.name === className);
+		}).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+
+		return new Promise(async (resolve) => {
+			const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+				title,
+				isMinHeight0: true,
+				zIndex: 10002,
+				cbClose: () => resolve(null),
+			});
+
+			modalInner.insertAdjacentHTML("beforeend", `<p class="mb-2">Select a <strong>${className} spell</strong> (level 1–${maxLevel}) for your scribing spellbook:</p>`);
+
+			const search = e_({outer: `<input type="text" class="ve-form-control form-control--minimal mb-2" placeholder="Search spells...">`});
+			modalInner.append(search);
+
+			const list = e_({outer: `<div style="max-height: 350px; overflow-y: auto;"></div>`});
+			modalInner.append(list);
+
+			const renderList = (filter = "") => {
+				list.innerHTML = "";
+				const filtered = filter
+					? classSpells.filter(s => s.name.toLowerCase().includes(filter))
+					: classSpells;
+
+				if (!filtered.length) {
+					list.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center py-2">No matching spells</p>`);
+					return;
+				}
+
+				filtered.forEach(spell => {
+					const school = Parser.spSchoolAbvToFull?.(spell.school) || spell.school;
+					const spellNameRendered = Renderer.get().render(`{@spell ${spell.name}|${spell.source}}`);
+					const item = e_({outer: `
+						<div class="ve-flex-v-center p-2 clickable spell-choice-item" style="border-bottom: 1px solid var(--cs-border);">
+							<div class="ve-flex-col ve-flex-1">
+								<div>${spellNameRendered}</div>
+								<div class="ve-small ve-muted">Level ${spell.level} ${school}</div>
+							</div>
+							<button class="ve-btn ve-btn-primary ve-btn-xs">Select</button>
+						</div>
+					`});
+					item.querySelector("button").addEventListener("click", () => {
+						doClose();
+						resolve(spell);
+					});
+					list.append(item);
+				});
+			};
+
+			search.addEventListener("input", (e) => renderList(e.target.value.toLowerCase()));
+			renderList();
+
+			const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default mt-2">Cancel</button>`});
+			cancelBtn.addEventListener("click", () => { doClose(); resolve(null); });
+			modalInner.append(cancelBtn);
+		});
 	}
 	// #endregion
 }
