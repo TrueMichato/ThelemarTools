@@ -450,6 +450,10 @@ export class CharacterSheetPlayMode {
 			const condName = cond.name || cond;
 			const el = this._ce("span", "pm-status__indicator pm-status__indicator--condition", parent);
 
+			// Condition tooltip
+			const condDesc = CharacterSheetPlayMode.CONDITION_DESCRIPTIONS[condName];
+			if (condDesc) el.title = `${condName}: ${condDesc}`;
+
 			// Check if condition has duration from active states
 			const activeStates = this._state.getActiveStates();
 			const linkedState = activeStates.find(s => s.active && s.grantsConditions?.includes(condName));
@@ -1204,8 +1208,26 @@ export class CharacterSheetPlayMode {
 		}
 	}
 
-	_renderSpellRow (parent, spell) {
-		const row = this._ce("div", "pm-spell", parent);
+	_renderSpellRow (parent, spell, {showPreparedToggle = false} = {}) {
+		const wrapper = this._ce("div", "pm-spell-wrapper", parent);
+		const row = this._ce("div", "pm-spell", wrapper);
+
+		// Prepared toggle (for drawer only)
+		if (showPreparedToggle && spell.level > 0 && !spell.alwaysPrepared) {
+			const prepCb = this._ce("span", `pm-spell__prep ${spell.prepared ? "pm-spell__prep--active" : ""}`, row);
+			prepCb.textContent = spell.prepared ? "✅" : "⬜";
+			prepCb.title = spell.prepared ? "Unprepare" : "Prepare";
+			this._makeClickable(prepCb, `${spell.prepared ? "Unprepare" : "Prepare"} ${spell.name}`, (e) => {
+				e.stopPropagation();
+				this._state.setSpellPrepared?.(spell.id, !spell.prepared);
+				this._openDrawerByType("spells"); // re-render drawer
+			});
+		} else if (showPreparedToggle && spell.alwaysPrepared) {
+			const prepBadge = this._ce("span", "pm-spell__prep pm-spell__prep--always", row);
+			prepBadge.textContent = "🔒";
+			prepBadge.title = "Always prepared";
+		}
+
 		const name = this._ce("span", "pm-spell__name", row);
 		name.textContent = spell.name;
 
@@ -1214,13 +1236,49 @@ export class CharacterSheetPlayMode {
 
 		const meta = this._ce("span", "pm-spell__meta", row);
 		const parts = [];
+		if (spell.time) parts.push(spell.time);
+		else if (spell.castingTime) parts.push(spell.castingTime);
 		if (spell.school) parts.push(spell.school);
 		if (spell.concentration) parts.push("conc.");
-		if (spell.ritual) parts.push("🕯️ ritual");
-		if (spell.components) parts.push(spell.components);
-		if (spell.range) parts.push(spell.range);
-		if (spell.duration) parts.push(spell.duration);
+		if (spell.ritual) parts.push("🕯️");
 		meta.textContent = parts.join(" · ");
+
+		// Info button → expandable description
+		if (spell.entries || spell.description) {
+			const infoBtn = this._ce("button", "pm-spell__info", row);
+			infoBtn.textContent = "ℹ️";
+			infoBtn.title = "Show description";
+			infoBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				let desc = wrapper.querySelector(".pm-spell__desc");
+				if (desc) {
+					desc.style.display = desc.style.display === "none" ? "block" : "none";
+					return;
+				}
+				desc = this._ce("div", "pm-spell__desc", wrapper);
+				// Full spell details
+				const detailParts = [];
+				if (spell.range) detailParts.push(`**Range:** ${spell.range}`);
+				if (spell.duration) detailParts.push(`**Duration:** ${spell.duration}${spell.concentration ? " (concentration)" : ""}`);
+				if (spell.components) detailParts.push(`**Components:** ${spell.components}`);
+				if (detailParts.length) {
+					const detailEl = this._ce("div", "pm-spell__details", desc);
+					detailEl.textContent = detailParts.join(" · ");
+				}
+				if (spell.entries) {
+					this._renderEntries(desc, spell.entries);
+				} else if (spell.description) {
+					const text = this._ce("div", "pm-rendered-content", desc);
+					text.textContent = spell.description;
+				}
+				if (spell.entriesHigherLevel) {
+					const upcast = this._ce("div", "pm-spell__upcast-info", desc);
+					const upcastLabel = this._ce("strong", null, upcast);
+					upcastLabel.textContent = "At Higher Levels. ";
+					this._renderEntries(upcast, spell.entriesHigherLevel);
+				}
+			});
+		}
 
 		if (spell.level > 0) {
 			const castBtn = this._ce("button", "pm-spell__cast", row);
@@ -1587,7 +1645,7 @@ export class CharacterSheetPlayMode {
 				const badge = this._ce("span", "pm-card__badge", header);
 				badge.textContent = `${byLevel[lvl].length}`;
 
-				byLevel[lvl].forEach(spell => this._renderSpellRow(spellsContainer, spell));
+				byLevel[lvl].forEach(spell => this._renderSpellRow(spellsContainer, spell, {showPreparedToggle: true}));
 			});
 
 			if (!filtered.length) {
@@ -1645,44 +1703,85 @@ export class CharacterSheetPlayMode {
 			else if (pct > 66) capRow.style.color = "var(--cs-accent-amber, #f59e0b)";
 		}
 
-		// Equipped items
+		// Equipped items (interactive)
 		const equipped = items.filter(i => i.equipped);
 		if (equipped.length) {
-			const eqCard = this._makeCard(container, "⚔️", "Equipped");
-			equipped.forEach(item => {
-				const row = this._ce("div", "pm-attack", eqCard);
-				const name = this._ce("span", "pm-attack__name", row);
-				name.textContent = item.name;
-				if (item.quantity > 1) {
-					const qty = this._ce("span", "pm-attack__type", row);
-					qty.textContent = `×${item.quantity}`;
-				}
-				// Charges
-				if (item.charges?.max > 0) {
-					const charges = this._ce("span", "pm-card__badge", row);
-					charges.textContent = `${item.charges.current}/${item.charges.max} charges`;
+			const eqCard = this._makeCard(container, "⚔️", `Equipped (${equipped.length})`);
+			equipped.forEach(item => this._renderItemRow(eqCard, item));
+		}
+
+		// All items (interactive)
+		if (items.length) {
+			const allCard = this._makeCard(container, "🎒", `All Items (${items.length})`);
+			items.slice(0, 50).forEach(item => this._renderItemRow(allCard, item));
+		} else {
+			this._renderEmptyState(container, "🎒", "No items. Add items from the Inventory tab.");
+		}
+	}
+
+	_renderItemRow (parent, item) {
+		const row = this._ce("div", "pm-item", parent);
+
+		// Equip toggle
+		const equipBtn = this._ce("span", `pm-item__toggle ${item.equipped ? "pm-item__toggle--active" : ""}`, row);
+		equipBtn.textContent = item.equipped ? "🛡️" : "⚪";
+		equipBtn.title = item.equipped ? "Unequip" : "Equip";
+		this._makeClickable(equipBtn, `${item.equipped ? "Unequip" : "Equip"} ${item.name}`, (e) => {
+			e.stopPropagation();
+			this._state.setItemEquipped?.(item.id, !item.equipped);
+			this._openDrawerByType("gear");
+		});
+
+		// Name
+		const name = this._ce("span", "pm-item__name", row);
+		name.textContent = item.name;
+
+		// Meta badges
+		const metaWrap = this._ce("span", "pm-item__meta", row);
+
+		// Attunement toggle (if item supports it)
+		if (item.reqAttune || item.attuned) {
+			const attuneBtn = this._ce("span", `pm-item__attune ${item.attuned ? "pm-item__attune--active" : ""}`, metaWrap);
+			attuneBtn.textContent = item.attuned ? "✨" : "◇";
+			attuneBtn.title = item.attuned ? "Unattune" : "Attune";
+			this._makeClickable(attuneBtn, `${item.attuned ? "Unattune" : "Attune"} ${item.name}`, (e) => {
+				e.stopPropagation();
+				this._state.setItemAttuned?.(item.id, !item.attuned);
+				this._openDrawerByType("gear");
+			});
+		}
+
+		// Charges
+		if (item.charges?.max > 0) {
+			const charges = this._ce("span", "pm-item__charges", metaWrap);
+			charges.textContent = `${item.charges.current}/${item.charges.max}`;
+			charges.title = "Click to use charge";
+			this._makeClickable(charges, `Use charge on ${item.name} (${item.charges.current} remaining)`, (e) => {
+				e.stopPropagation();
+				if (item.charges.current > 0) {
+					this._state.useItemCharge?.(item.id);
+					this._logActivity("⚡", `Used charge on ${item.name}`);
+					this._openDrawerByType("gear");
 				}
 			});
 		}
 
-		// All items
-		if (items.length) {
-			const allCard = this._makeCard(container, "🎒", `All Items (${items.length})`);
-			items.slice(0, 50).forEach(item => {
-				const row = this._ce("div", "pm-skill", allCard);
-				const name = this._ce("span", "pm-skill__name", row);
-				name.textContent = item.name;
-				const meta = [];
-				if (item.quantity > 1) meta.push(`×${item.quantity}`);
-				if (item.attuned) meta.push("✨");
-				if (item.charges?.max > 0) meta.push(`${item.charges.current}/${item.charges.max}`);
-				if (meta.length) {
-					const info = this._ce("span", "pm-skill__mod", row);
-					info.textContent = meta.join(" · ");
-				}
+		// Quantity
+		if (item.quantity > 1) {
+			const qty = this._ce("span", "pm-item__qty", metaWrap);
+			qty.textContent = `×${item.quantity}`;
+		}
+
+		// Consumable use button (potions, scrolls)
+		if (item.consumable || item.type === "P" || item.type === "SC") {
+			const useBtn = this._ce("button", "pm-item__use-btn", row);
+			useBtn.textContent = "Use";
+			useBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._state.consumeItem?.(item.id);
+				this._logActivity("🧪", `Used ${item.name}`);
+				this._openDrawerByType("gear");
 			});
-		} else {
-			this._renderEmptyState(container, "🎒", "No items. Add items from the Inventory tab.");
 		}
 	}
 
@@ -1712,20 +1811,26 @@ export class CharacterSheetPlayMode {
 					uses.textContent = `${f.uses.current}/${f.uses.max}`;
 				}
 
-				// Expandable description
+				// Expandable description (rendered with Renderer for @tags and entries)
 				if (f.description || f.entries) {
-					const descText = f.description || (Array.isArray(f.entries) ? f.entries.filter(e => typeof e === "string").join("\n") : "");
-					if (descText) {
-						const desc = this._ce("div", "pm-feature__desc", row);
-						desc.textContent = descText;
-						desc.style.display = "none";
+					const desc = this._ce("div", "pm-feature__desc", row);
+					desc.style.display = "none";
 
-						this._makeClickable(header, `Toggle description for ${f.name}`, () => {
-							const showing = desc.style.display !== "none";
-							desc.style.display = showing ? "none" : "block";
-							row.classList.toggle("pm-feature--expanded", !showing);
-						});
-					}
+					// Render entries with Renderer on first expand (lazy)
+					let rendered = false;
+					this._makeClickable(header, `Toggle description for ${f.name}`, () => {
+						const showing = desc.style.display !== "none";
+						if (!rendered && !showing) {
+							if (f.entries) {
+								this._renderEntries(desc, f.entries);
+							} else if (f.description) {
+								desc.textContent = f.description;
+							}
+							rendered = true;
+						}
+						desc.style.display = showing ? "none" : "block";
+						row.classList.toggle("pm-feature--expanded", !showing);
+					});
 				}
 			});
 		});
@@ -1828,15 +1933,17 @@ export class CharacterSheetPlayMode {
 					const name = this._ce("span", "pm-feature__name", header);
 					name.textContent = action.name;
 
-					// Show entries text
-					const entryText = Array.isArray(action.entries) ? action.entries.filter(e => typeof e === "string").join(" ") : (action.entries || "");
-					if (entryText) {
+					if (action.entries) {
 						const desc = this._ce("div", "pm-feature__desc", row);
-						desc.textContent = entryText;
 						desc.style.display = "none";
 
+						let rendered = false;
 						this._makeClickable(header, `Toggle ${action.name} description`, () => {
 							const showing = desc.style.display !== "none";
+							if (!rendered && !showing) {
+								this._renderEntries(desc, action.entries);
+								rendered = true;
+							}
 							desc.style.display = showing ? "none" : "block";
 							row.classList.toggle("pm-feature--expanded", !showing);
 						});
@@ -2555,6 +2662,29 @@ export class CharacterSheetPlayMode {
 		wrap.appendChild(document.createTextNode(message));
 	}
 
+	/** Render 5etools entries/description as HTML using the global Renderer */
+	_renderEntries (parent, entries) {
+		if (!entries) return;
+		try {
+			const toRender = Array.isArray(entries) ? {type: "entries", entries} : entries;
+			const html = Renderer.get().render(toRender);
+			if (html) {
+				const wrap = this._ce("div", "pm-rendered-content", parent);
+				wrap.innerHTML = html;
+				return wrap;
+			}
+		} catch (e) {
+			// Fallback: if Renderer fails, show as plain text
+			const text = Array.isArray(entries) ? entries.filter(e => typeof e === "string").join("\n") : String(entries);
+			if (text) {
+				const wrap = this._ce("div", "pm-rendered-content", parent);
+				wrap.textContent = text;
+				return wrap;
+			}
+		}
+		return null;
+	}
+
 	_updateToggleButton (isPlayMode) {
 		const btn = document.getElementById("charsheet-btn-playmode");
 		if (!btn) return;
@@ -2618,3 +2748,21 @@ export class CharacterSheetPlayMode {
 		return Math.floor(Math.random() * 20) + 1;
 	}
 }
+
+CharacterSheetPlayMode.CONDITION_DESCRIPTIONS = {
+	Blinded: "Can't see. Auto-fail checks requiring sight. Attacks have disadvantage; attacks against have advantage.",
+	Charmed: "Can't attack the charmer. Charmer has advantage on social checks against you.",
+	Deafened: "Can't hear. Auto-fail checks requiring hearing.",
+	Frightened: "Disadvantage on ability checks and attacks while source of fear is in line of sight. Can't willingly move closer.",
+	Grappled: "Speed becomes 0. Ends if grappler is incapacitated or you're moved out of reach.",
+	Incapacitated: "Can't take actions or reactions.",
+	Invisible: "Impossible to see without magic/special sense. Attacks against have disadvantage; your attacks have advantage.",
+	Paralyzed: "Incapacitated. Can't move or speak. Auto-fail STR/DEX saves. Attacks against have advantage. Hits within 5ft are crits.",
+	Petrified: "Transformed to stone. Incapacitated, can't move/speak, unaware. Attacks against have advantage. Auto-fail STR/DEX saves. Resistant to all damage. Immune to poison/disease.",
+	Poisoned: "Disadvantage on attack rolls and ability checks.",
+	Prone: "Can only crawl. Disadvantage on attacks. Melee attacks against have advantage; ranged have disadvantage. Stand up costs half movement.",
+	Restrained: "Speed becomes 0. Attacks have disadvantage; attacks against have advantage. Disadvantage on DEX saves.",
+	Stunned: "Incapacitated. Can't move. Speak only falteringly. Auto-fail STR/DEX saves. Attacks against have advantage.",
+	Unconscious: "Incapacitated. Can't move or speak. Unaware. Drop what you're holding, fall prone. Auto-fail STR/DEX saves. Attacks have advantage. Hits within 5ft are crits.",
+	Exhaustion: "Cumulative levels: 1=disadvantage on checks, 2=speed halved, 3=disadvantage on attacks/saves, 4=HP max halved, 5=speed 0, 6=death.",
+};
