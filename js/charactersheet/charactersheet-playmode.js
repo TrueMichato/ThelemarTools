@@ -1780,9 +1780,23 @@ export class CharacterSheetPlayMode {
 			if (comp.speed) {
 				const spdCell = this._ce("div", "pm-passive", stats);
 				const spdVal = this._ce("span", "pm-passive__value", spdCell);
-				spdVal.textContent = `${comp.speed}ft`;
+				const walkSpeed = typeof comp.speed === "object" ? (comp.speed.walk || 0) : comp.speed;
+				spdVal.textContent = `${walkSpeed}ft`;
 				const spdLbl = this._ce("span", "pm-passive__label", spdCell);
 				spdLbl.textContent = "Speed";
+
+				// Show other speed types
+				if (typeof comp.speed === "object") {
+					["fly", "swim", "climb", "burrow"].forEach(type => {
+						if (comp.speed[type] > 0) {
+							const extraCell = this._ce("div", "pm-passive", stats);
+							const extraVal = this._ce("span", "pm-passive__value", extraCell);
+							extraVal.textContent = `${comp.speed[type]}ft`;
+							const extraLbl = this._ce("span", "pm-passive__label", extraCell);
+							extraLbl.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+						}
+					});
+				}
 			}
 
 			// Type
@@ -1793,20 +1807,45 @@ export class CharacterSheetPlayMode {
 				type.textContent = comp.type;
 			}
 
-			// Attacks
-			if (comp.attacks?.length) {
-				comp.attacks.forEach(atk => {
-					const row = this._ce("div", "pm-attack", card);
-					const name = this._ce("span", "pm-attack__name", row);
-					name.textContent = atk.name;
-					if (atk.bonus != null) {
-						const bonus = this._ce("span", "pm-attack__bonus", row);
-						bonus.textContent = this._fmtMod(atk.bonus);
+			// Actions (5etools entries format: [{name, entries}])
+			const actions = comp.actions || comp.attacks || [];
+			if (actions.length) {
+				const actHeader = this._ce("div", "pm-card__header", card);
+				const actTitle = this._ce("span", "pm-card__badge", actHeader);
+				actTitle.textContent = `Actions (${actions.length})`;
+
+				actions.forEach(action => {
+					const row = this._ce("div", "pm-feature pm-feature--expandable", card);
+					const header = this._ce("div", "pm-feature__header", row);
+					const name = this._ce("span", "pm-feature__name", header);
+					name.textContent = action.name;
+
+					// Show entries text
+					const entryText = Array.isArray(action.entries) ? action.entries.filter(e => typeof e === "string").join(" ") : (action.entries || "");
+					if (entryText) {
+						const desc = this._ce("div", "pm-feature__desc", row);
+						desc.textContent = entryText;
+						desc.style.display = "none";
+
+						this._makeClickable(header, `Toggle ${action.name} description`, () => {
+							const showing = desc.style.display !== "none";
+							desc.style.display = showing ? "none" : "block";
+							row.classList.toggle("pm-feature--expanded", !showing);
+						});
 					}
-					if (atk.damage) {
-						const dmg = this._ce("span", "pm-attack__damage", row);
-						dmg.textContent = atk.damage;
-					}
+				});
+			}
+
+			// Reactions
+			if (comp.reactions?.length) {
+				const reactHeader = this._ce("div", "pm-card__header", card);
+				const reactTitle = this._ce("span", "pm-card__badge", reactHeader);
+				reactTitle.textContent = `Reactions (${comp.reactions.length})`;
+
+				comp.reactions.forEach(reaction => {
+					const row = this._ce("div", "pm-feature", card);
+					const name = this._ce("span", "pm-feature__name", row);
+					name.textContent = reaction.name;
 				});
 			}
 		});
