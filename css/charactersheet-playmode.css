@@ -2610,3 +2610,802 @@
 		transform: none !important;
 	}
 }
+
+/* ========================================================================
+   Phase B: Info Modals, Note Buttons, Companion Controls
+   ======================================================================== */
+
+/* ── Wider info modal variant ── */
+.pm-modal--info {
+	max-width: 560px;
+	width: min(560px, 94vw);
+}
+
+.pm-modal--statblock {
+	max-width: 580px;
+	width: min(580px, 96vw);
+}
+
+/* ── Modal title row (title + source badge side-by-side) ── */
+.pm-modal__title-row {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+	margin-bottom: 0.5rem;
+}
+
+.pm-modal__source-badge {
+	font-size: 0.75rem;
+	font-weight: 600;
+	padding: 2px 7px;
+	border-radius: 4px;
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.06));
+	color: var(--cs-text-tertiary, #64748b);
+	white-space: nowrap;
+}
+
+.pm-modal__rarity-badge {
+	font-size: 0.75rem;
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 4px;
+	text-transform: capitalize;
+}
+
+.pm-modal__rarity-badge--common { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+.pm-modal__rarity-badge--uncommon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.pm-modal__rarity-badge--rare { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+.pm-modal__rarity-badge--very-rare { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+.pm-modal__rarity-badge--legendary { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.pm-modal__rarity-badge--artifact { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+/* ── Badges row (concentration / ritual) ── */
+.pm-modal__badges {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	margin-bottom: 0.6rem;
+	min-height: 0;
+}
+
+.pm-modal__badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px 8px;
+	border-radius: 20px;
+	font-size: 0.78rem;
+	font-weight: 600;
+}
+
+.pm-modal__badge--conc {
+	background: rgba(99, 102, 241, 0.15);
+	color: var(--cs-primary, #6366f1);
+}
+
+.pm-modal__badge--ritual {
+	background: rgba(245, 158, 11, 0.15);
+	color: var(--cs-accent-amber, #f59e0b);
+}
+
+/* ── Chips row (level, school, time, range, etc.) ── */
+.pm-modal__chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin-bottom: 0.6rem;
+}
+
+.pm-modal__chip {
+	display: inline-block;
+	padding: 3px 8px;
+	border-radius: 6px;
+	font-size: 0.78rem;
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.05));
+	color: var(--cs-text-secondary, #94a3b8);
+	border: 1px solid var(--cs-border, #334155);
+}
+
+.pm-modal__chip--prop {
+	background: rgba(245, 158, 11, 0.08);
+	border-color: rgba(245, 158, 11, 0.25);
+	color: var(--cs-accent-amber, #f59e0b);
+}
+
+/* ── Modal sections ── */
+.pm-modal__section {
+	margin-bottom: 0.75rem;
+}
+
+.pm-modal__section-title {
+	font-size: 0.75rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--cs-text-tertiary, #64748b);
+	margin-bottom: 0.25rem;
+}
+
+.pm-modal__section-body {
+	font-size: 0.875rem;
+	color: var(--cs-text-secondary, #94a3b8);
+	line-height: 1.45;
+}
+
+.pm-modal__section--higher {
+	border-left: 3px solid var(--cs-primary, #6366f1);
+	padding-left: 0.75rem;
+}
+
+/* ── Scrollable modal body ── */
+.pm-modal__scroll-body {
+	max-height: 240px;
+	overflow-y: auto;
+	margin-bottom: 0.75rem;
+	padding-right: 0.25rem;
+	font-size: 0.875rem;
+	color: var(--cs-text-secondary, #94a3b8);
+	line-height: 1.5;
+}
+
+.pm-modal__scroll-body::-webkit-scrollbar {
+	width: 4px;
+}
+
+.pm-modal__scroll-body::-webkit-scrollbar-thumb {
+	background: var(--cs-border, #334155);
+	border-radius: 2px;
+}
+
+/* ── Wrapped footer button row ── */
+.pm-modal__buttons--wrap {
+	flex-wrap: wrap;
+	justify-content: flex-start;
+	gap: 0.4rem;
+}
+
+/* ── Ritual cast button variant ── */
+.pm-modal__btn--ritual {
+	border: none;
+	background: rgba(245, 158, 11, 0.2);
+	color: var(--cs-accent-amber, #f59e0b);
+	font-weight: 600;
+}
+
+.pm-modal__btn--ritual:hover {
+	filter: brightness(1.15);
+}
+
+/* ── Note button (📝) on rows ── */
+.pm-note-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 0 3px;
+	opacity: 0.35;
+	font-size: 0.9rem;
+	transition: opacity var(--cs-transition-fast, 150ms);
+	flex-shrink: 0;
+}
+
+.pm-note-btn:hover {
+	opacity: 0.85;
+}
+
+.pm-note-btn--active {
+	opacity: 0.9;
+	filter: sepia(1) saturate(3) hue-rotate(5deg) brightness(1.2);
+}
+
+/* ── Item info button (ℹ️) on rows ── */
+.pm-item__info-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 0 3px;
+	opacity: 0.4;
+	font-size: 0.9rem;
+	transition: opacity var(--cs-transition-fast, 150ms);
+	flex-shrink: 0;
+}
+
+.pm-item__info-btn:hover {
+	opacity: 0.9;
+}
+
+/* ── Item charge + quantity controls in modal ── */
+.pm-item__charge-controls {
+	display: flex;
+	gap: 0.4rem;
+	flex-wrap: wrap;
+	margin-bottom: 0.5rem;
+}
+
+.pm-item__charge-set-row {
+	display: flex;
+	gap: 0.4rem;
+}
+
+.pm-item__charge-set-input {
+	max-width: 80px;
+}
+
+.pm-item__qty-row {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.pm-item__qty-input {
+	max-width: 70px;
+	text-align: center;
+}
+
+.pm-item__toggle-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	margin-bottom: 0.75rem;
+}
+
+/* ── Note textarea ── */
+.pm-note-modal__textarea {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 0.5rem;
+	border-radius: 6px;
+	border: 1px solid var(--cs-border, #334155);
+	background: var(--cs-bg-card, #0f172a);
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: 0.9rem;
+	font-family: inherit;
+	resize: vertical;
+	margin-bottom: 0.75rem;
+	line-height: 1.5;
+}
+
+.pm-note-modal__textarea:focus {
+	outline: 2px solid var(--cs-primary, #6366f1);
+}
+
+/* ── Companion controls row (B4) ── */
+.pm-companion__controls {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	margin-bottom: 0.75rem;
+}
+
+.pm-companion__ctrl-btn {
+	padding: 0.3rem 0.65rem;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: 0.82rem;
+	border: 1px solid var(--cs-border, #334155);
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.04));
+	color: var(--cs-text-secondary, #94a3b8);
+	transition: all var(--cs-transition-fast, 150ms);
+}
+
+.pm-companion__ctrl-btn:hover {
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.08));
+}
+
+.pm-companion__ctrl-btn--heal {
+	color: var(--cs-success, #22c55e);
+	border-color: rgba(34, 197, 94, 0.3);
+}
+
+.pm-companion__ctrl-btn--damage {
+	color: var(--cs-danger, #ef4444);
+	border-color: rgba(239, 68, 68, 0.3);
+}
+
+.pm-companion__ctrl-btn--dismiss {
+	color: var(--cs-text-tertiary, #64748b);
+}
+
+/* ── Companion HP row ── */
+.pm-companion__hp-row {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin-bottom: 0.4rem;
+}
+
+.pm-companion__hp-label {
+	font-size: 0.75rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	color: var(--cs-text-tertiary, #64748b);
+	letter-spacing: 0.04em;
+}
+
+.pm-companion__hp-input {
+	width: 60px;
+	padding: 2px 6px;
+	border-radius: 4px;
+	border: 1px solid var(--cs-border, #334155);
+	background: var(--cs-bg-card, #0f172a);
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: 0.9rem;
+	text-align: center;
+}
+
+.pm-companion__hp-max {
+	font-size: 0.875rem;
+	color: var(--cs-text-tertiary, #64748b);
+}
+
+/* ── Companion HP bar ── */
+.pm-companion__hp-bar-wrap {
+	height: 4px;
+	border-radius: 2px;
+	background: var(--cs-bg-input, #1e293b);
+	margin-bottom: 0.6rem;
+	overflow: hidden;
+}
+
+.pm-companion__hp-bar-fill {
+	height: 100%;
+	border-radius: 2px;
+	background: var(--cs-success, #22c55e);
+	transition: width 0.3s ease;
+}
+
+.pm-companion__hp-bar-fill--bloodied {
+	background: var(--cs-accent-amber, #f59e0b);
+}
+
+.pm-companion__hp-bar-fill--critical {
+	background: var(--cs-danger, #ef4444);
+}
+
+/* ── Companion note preview ── */
+.pm-companion__note-preview {
+	font-size: 0.8rem;
+	color: var(--cs-text-tertiary, #64748b);
+	font-style: italic;
+	margin-bottom: 0.5rem;
+	padding: 4px 8px;
+	border-left: 2px solid rgba(245, 158, 11, 0.4);
+	background: rgba(245, 158, 11, 0.04);
+	border-radius: 0 4px 4px 0;
+}
+
+/* ── Statblock modal layout ── */
+.pm-statblock__stats {
+	display: flex;
+	gap: 0.75rem;
+	flex-wrap: wrap;
+	margin-bottom: 0.75rem;
+	padding: 0.6rem;
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.03));
+	border-radius: 8px;
+}
+
+.pm-statblock__stat-cell {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	min-width: 50px;
+}
+
+.pm-statblock__stat-val {
+	font-size: 1.1rem;
+	font-weight: 700;
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.pm-statblock__stat-label {
+	font-size: 0.7rem;
+	text-transform: uppercase;
+	color: var(--cs-text-tertiary, #64748b);
+	letter-spacing: 0.04em;
+}
+
+.pm-statblock__abilities {
+	display: grid;
+	grid-template-columns: repeat(6, 1fr);
+	gap: 0.25rem;
+	margin-bottom: 0.75rem;
+}
+
+.pm-statblock__ability-cell {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding: 0.35rem 0.25rem;
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.03));
+	border-radius: 6px;
+}
+
+.pm-statblock__ability-label {
+	font-size: 0.65rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	color: var(--cs-text-tertiary, #64748b);
+}
+
+.pm-statblock__ability-score {
+	font-size: 1rem;
+	font-weight: 700;
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.pm-statblock__ability-mod {
+	font-size: 0.75rem;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.pm-statblock__section-header {
+	font-size: 0.9rem;
+	font-weight: 700;
+	color: var(--cs-accent-ruby, #ef4444);
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+	padding-bottom: 2px;
+	margin: 0.75rem 0 0.4rem;
+}
+
+.pm-statblock__action {
+	font-size: 0.875rem;
+	color: var(--cs-text-secondary, #94a3b8);
+	margin-bottom: 0.5rem;
+	line-height: 1.45;
+}
+
+/* ========================================================================
+   Phase A1 — Named Modifiers Drawer
+   ======================================================================== */
+
+.pm-drawer-actions {
+display: flex;
+gap: 8px;
+padding: 8px 0 12px;
+flex-wrap: wrap;
+}
+
+.pm-drawer-actions__btn {
+background: var(--cs-accent-blue, #3b82f6);
+color: #fff;
+border: none;
+border-radius: 6px;
+padding: 6px 12px;
+font-size: 0.85rem;
+font-weight: 600;
+cursor: pointer;
+transition: background 0.15s;
+}
+
+.pm-drawer-actions__btn:hover {
+background: var(--cs-accent-blue-dark, #2563eb);
+}
+
+.pm-modifier {
+display: flex;
+align-items: center;
+gap: 8px;
+padding: 8px 10px;
+border-radius: 6px;
+background: var(--cs-bg-surface, #1e293b);
+margin-bottom: 6px;
+transition: opacity 0.15s;
+}
+
+.pm-modifier--disabled {
+opacity: 0.55;
+}
+
+.pm-modifier__toggle {
+width: 28px;
+height: 28px;
+border-radius: 50%;
+border: 2px solid var(--cs-border, #334155);
+background: transparent;
+cursor: pointer;
+font-size: 0.9rem;
+display: flex;
+align-items: center;
+justify-content: center;
+flex-shrink: 0;
+transition: background 0.15s, border-color 0.15s;
+}
+
+.pm-modifier__toggle--on {
+background: var(--cs-accent-green, #22c55e);
+border-color: var(--cs-accent-green, #22c55e);
+color: #fff;
+}
+
+.pm-modifier__info {
+flex: 1;
+min-width: 0;
+display: flex;
+flex-direction: column;
+gap: 2px;
+}
+
+.pm-modifier__name {
+font-size: 0.9rem;
+font-weight: 600;
+color: var(--cs-text-primary, #f1f5f9);
+white-space: nowrap;
+overflow: hidden;
+text-overflow: ellipsis;
+}
+
+.pm-modifier__details {
+font-size: 0.78rem;
+color: var(--cs-text-muted, #94a3b8);
+}
+
+.pm-modifier__note {
+font-size: 0.78rem;
+color: var(--cs-text-muted, #94a3b8);
+padding: 4px 0 8px;
+font-style: italic;
+}
+
+.pm-modifier__btn {
+background: transparent;
+border: 1px solid var(--cs-border, #334155);
+border-radius: 4px;
+padding: 3px 7px;
+cursor: pointer;
+color: var(--cs-text-secondary, #cbd5e1);
+font-size: 0.8rem;
+transition: background 0.15s;
+}
+
+.pm-modifier__btn:hover {
+background: var(--cs-bg-card, #0f172a);
+}
+
+.pm-modifier__btn--del:hover {
+background: var(--cs-danger-bg, #7f1d1d);
+border-color: var(--cs-danger, #ef4444);
+color: var(--cs-danger, #ef4444);
+}
+
+.pm-card__action-btn {
+background: var(--cs-accent-blue, #3b82f6);
+color: #fff;
+border: none;
+border-radius: 5px;
+padding: 3px 8px;
+font-size: 0.78rem;
+font-weight: 600;
+cursor: pointer;
+margin-left: auto;
+}
+
+.pm-card__action-btn:hover {
+background: var(--cs-accent-blue-dark, #2563eb);
+}
+
+/* Modal label + row extras */
+.pm-modal__label {
+font-size: 0.78rem;
+color: var(--cs-text-muted, #94a3b8);
+margin-bottom: 3px;
+display: block;
+}
+
+.pm-modal__row {
+display: flex;
+flex-direction: column;
+gap: 4px;
+margin-bottom: 10px;
+}
+
+.pm-modal__row--check {
+flex-direction: row;
+align-items: center;
+gap: 8px;
+}
+
+/* ========================================================================
+   Phase A2 — Sticky Notes Overlay
+   ======================================================================== */
+
+.pm-sticky-overlay {
+position: absolute;
+inset: 0;
+pointer-events: none;
+z-index: 200;
+overflow: hidden;
+}
+
+.pm-sticky-overlay--hidden {
+display: none;
+}
+
+.pm-sticky {
+position: absolute;
+width: 200px;
+min-height: 140px;
+border-radius: 8px;
+box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+display: flex;
+flex-direction: column;
+pointer-events: all;
+user-select: none;
+font-size: 0.85rem;
+color: #1e293b;
+}
+
+.pm-sticky__title-bar {
+display: flex;
+align-items: center;
+gap: 4px;
+padding: 6px 8px;
+border-radius: 8px 8px 0 0;
+background: rgba(0,0,0,0.08);
+cursor: grab;
+}
+
+.pm-sticky__title-bar:active {
+cursor: grabbing;
+}
+
+.pm-sticky__title-input {
+flex: 1;
+background: transparent;
+border: none;
+outline: none;
+font-weight: 700;
+font-size: 0.82rem;
+color: inherit;
+cursor: text;
+min-width: 0;
+}
+
+.pm-sticky__color-picker {
+width: 62px;
+font-size: 0.72rem;
+background: transparent;
+border: 1px solid rgba(0,0,0,0.2);
+border-radius: 3px;
+color: inherit;
+cursor: pointer;
+}
+
+.pm-sticky__del {
+background: transparent;
+border: none;
+cursor: pointer;
+font-size: 0.8rem;
+color: rgba(0,0,0,0.5);
+padding: 0 2px;
+line-height: 1;
+}
+
+.pm-sticky__del:hover {
+color: #dc2626;
+}
+
+.pm-sticky__content {
+flex: 1;
+background: transparent;
+border: none;
+outline: none;
+resize: none;
+padding: 8px;
+font-size: 0.82rem;
+color: inherit;
+font-family: inherit;
+cursor: text;
+border-radius: 0 0 8px 8px;
+min-height: 80px;
+}
+
+.pm-sticky-fab {
+position: absolute;
+bottom: 16px;
+right: 16px;
+background: var(--cs-accent-blue, #3b82f6);
+color: #fff;
+border: none;
+border-radius: 20px;
+padding: 7px 14px;
+font-size: 0.85rem;
+font-weight: 600;
+cursor: pointer;
+pointer-events: all;
+box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+z-index: 201;
+}
+
+.pm-sticky-fab:hover {
+background: var(--cs-accent-blue-dark, #2563eb);
+}
+
+/* ========================================================================
+   Phase A5 — Custom Attack CRUD buttons
+   ======================================================================== */
+
+.pm-attack__crud-btn {
+background: transparent;
+border: none;
+cursor: pointer;
+font-size: 0.82rem;
+padding: 2px 4px;
+border-radius: 4px;
+color: var(--cs-text-muted, #94a3b8);
+transition: background 0.15s;
+}
+
+.pm-attack__crud-btn:hover {
+background: var(--cs-bg-surface, #1e293b);
+}
+
+.pm-attack__del-btn:hover {
+color: var(--cs-danger, #ef4444);
+}
+
+.pm-attack-type-btn {
+padding: 4px 10px;
+border: 1px solid var(--cs-border, #334155);
+border-radius: 5px;
+background: var(--cs-bg-card, #0f172a);
+color: var(--cs-text-secondary, #cbd5e1);
+cursor: pointer;
+font-size: 0.85rem;
+transition: background 0.15s, border-color 0.15s;
+}
+
+.pm-attack-type-btn--active {
+background: var(--cs-accent-blue, #3b82f6);
+border-color: var(--cs-accent-blue, #3b82f6);
+color: #fff;
+}
+
+/* ========================================================================
+   Phase C2 — Settings Drawer
+   ======================================================================== */
+
+.pm-settings__row {
+display: flex;
+justify-content: space-between;
+align-items: center;
+padding: 8px 0;
+border-bottom: 1px solid var(--cs-border, #334155);
+gap: 12px;
+}
+
+.pm-settings__row:last-child {
+border-bottom: none;
+}
+
+.pm-settings__label {
+font-size: 0.88rem;
+color: var(--cs-text-primary, #f1f5f9);
+flex: 1;
+}
+
+.pm-settings__toggle {
+width: 18px;
+height: 18px;
+cursor: pointer;
+flex-shrink: 0;
+accent-color: var(--cs-accent-blue, #3b82f6);
+}
+
+.pm-settings__select {
+background: var(--cs-bg-card, #0f172a);
+border: 1px solid var(--cs-border, #334155);
+border-radius: 5px;
+color: var(--cs-text-primary, #f1f5f9);
+padding: 4px 6px;
+font-size: 0.83rem;
+cursor: pointer;
+}
+
+.pm-settings__info {
+font-size: 0.78rem;
+color: var(--cs-text-muted, #94a3b8);
+padding: 8px 0 4px;
+font-style: italic;
+}

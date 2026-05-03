@@ -396,9 +396,9 @@ export class CharacterSheetPlayMode {
 	_renderStatusTools (parent) {
 		const tools = this._ce("div", "pm-status__tools", parent);
 
-		// Rest buttons with preview
-		this._makeToolBtn(tools, "🏕️ Short Rest", () => this._showRestPreview("short"));
-		this._makeToolBtn(tools, "🛏️ Long Rest", () => this._showRestPreview("long"));
+		// Rest buttons (Phase A3: delegate directly to rest module's full dialogs)
+		this._makeToolBtn(tools, "🏕️ Short Rest", () => this._doShortRest());
+		this._makeToolBtn(tools, "🛏️ Long Rest", () => this._doLongRest());
 
 		this._ce("div", "pm-status__divider", tools);
 
@@ -410,6 +410,46 @@ export class CharacterSheetPlayMode {
 		if (this._state.getCompanions().length) {
 			this._makeToolBtn(tools, "🐾 Companions", () => this._openDrawerByType("companions"));
 		}
+
+		this._ce("div", "pm-status__divider", tools);
+
+		// Phase C1: Extended toolbar
+		this._makeToolBtn(tools, "🗒 Stickies", () => this._toggleStickyNotesOverlay());
+		this._makeToolBtn(tools, "🎯 Modifiers", () => this._openDrawerByType("modifiers"));
+		this._makeToolBtn(tools, "⚙️ Settings", () => this._openDrawerByType("settings"));
+		this._makeToolBtn(tools, "📋 Roll Log", () => this._openDrawerByType("activity"));
+
+		this._ce("div", "pm-status__divider", tools);
+
+		// Export / Import
+		this._makeToolBtn(tools, "💾 Export", () => this._exportCharacter());
+		const importBtn = this._makeToolBtn(tools, "📥 Import", () => this._elImportInput?.click());
+		const importInput = this._ce("input", null, tools);
+		importInput.type = "file";
+		importInput.accept = ".json";
+		importInput.style.display = "none";
+		this._elImportInput = importInput;
+		importInput.addEventListener("change", async (e) => {
+			const file = e.target.files?.[0];
+			if (!file) return;
+			try {
+				const text = await file.text();
+				this._state.loadFromJson(JSON.parse(text));
+				this.render();
+				JqueryUtil?.doToast?.({type: "success", content: `Imported ${file.name}`});
+				this._logActivity("📥", `Imported character from ${file.name}`);
+			} catch (err) {
+				JqueryUtil?.doToast?.({type: "danger", content: `Import failed: ${err.message}`});
+			}
+			importInput.value = "";
+		});
+
+		// NPC Export (only if exporter available)
+		if (this._page._export) {
+			this._makeToolBtn(tools, "🐉 NPC Export", () => this._page._export._showNpcExportDialog?.());
+		}
+
+		this._makeToolBtn(tools, "🖨️ Print", () => window.print());
 
 		this._ce("div", "pm-status__divider", tools);
 
@@ -1026,9 +1066,30 @@ export class CharacterSheetPlayMode {
 			});
 		});
 
-		if (!attacks.length) return;
+		if (!attacks.length) {
+			// Still show card with + Add Attack button even if no attacks
+		}
 
 		const card = this._makeCard(this._elActionsHub, "⚔️", "Attacks");
+
+		// Phase A5: "+ Add Attack" button in card header
+		const cardHeader = card.querySelector(".pm-card__header");
+		if (cardHeader) {
+			const addBtn = this._ce("button", "pm-card__action-btn", cardHeader);
+			addBtn.textContent = "+ Add";
+			addBtn.title = "Add a custom attack";
+			addBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._showAttackModal(null, () => {
+					// Re-render attacks section
+					const existing = this._elActionsHub.querySelector(".pm-card");
+					// Simpler: just re-render the whole actions hub
+					this._renderActionsHub();
+				});
+			});
+		}
+
+		const customAttackIds = new Set(this._state.getAttacks().map(a => a.id));
 
 		attacks.forEach(attack => {
 			const abilityMod = this._state.getAbilityMod(attack.abilityMod || "str");
@@ -1063,6 +1124,41 @@ export class CharacterSheetPlayMode {
 			if (hasMastery && attack.masteryProperty) {
 				const masteryTag = this._ce("span", "pm-attack__mastery", row);
 				masteryTag.textContent = attack.masteryProperty;
+			}
+
+			// Note button (B3)
+			const attackId = attack.id || attack.name;
+			const attackNote = this._state.getAttackNote?.(attackId);
+			const noteBtn = this._ce("button", `pm-note-btn${attackNote ? " pm-note-btn--active" : ""}`, row);
+			noteBtn.textContent = "📝";
+			noteBtn.title = attackNote ? `Note: ${attackNote.slice(0, 60)}${attackNote.length > 60 ? "…" : ""}` : "Add note";
+			noteBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._showEntityNoteModal("attack", attackId, attack.name, () => this._renderAttacks());
+			});
+
+			// Phase A5: edit/delete buttons for user-created attacks (not auto-generated)
+			const isCustom = customAttackIds.has(attack.id);
+			if (isCustom) {
+				const editBtn = this._ce("button", "pm-attack__crud-btn pm-attack__edit-btn", row);
+				editBtn.textContent = "✏️";
+				editBtn.title = "Edit attack";
+				editBtn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					this._showAttackModal(attack, () => this._renderActionsHub());
+				});
+
+				const delBtn = this._ce("button", "pm-attack__crud-btn pm-attack__del-btn", row);
+				delBtn.textContent = "🗑";
+				delBtn.title = "Delete attack";
+				delBtn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					this._showConfirmModal(`Delete attack "${attack.name}"?`, () => {
+						this._state.removeAttack(attack.id);
+						this._logActivity("🗑", `Deleted attack: ${attack.name}`);
+						this._renderActionsHub();
+					});
+				});
 			}
 
 			// Star for favorites
@@ -1243,42 +1339,27 @@ export class CharacterSheetPlayMode {
 		if (spell.ritual) parts.push("🕯️");
 		meta.textContent = parts.join(" · ");
 
-		// Info button → expandable description
-		if (spell.entries || spell.description) {
-			const infoBtn = this._ce("button", "pm-spell__info", row);
-			infoBtn.textContent = "ℹ️";
-			infoBtn.title = "Show description";
-			infoBtn.addEventListener("click", (e) => {
-				e.stopPropagation();
-				let desc = wrapper.querySelector(".pm-spell__desc");
-				if (desc) {
-					desc.style.display = desc.style.display === "none" ? "block" : "none";
-					return;
-				}
-				desc = this._ce("div", "pm-spell__desc", wrapper);
-				// Full spell details
-				const detailParts = [];
-				if (spell.range) detailParts.push(`**Range:** ${spell.range}`);
-				if (spell.duration) detailParts.push(`**Duration:** ${spell.duration}${spell.concentration ? " (concentration)" : ""}`);
-				if (spell.components) detailParts.push(`**Components:** ${spell.components}`);
-				if (detailParts.length) {
-					const detailEl = this._ce("div", "pm-spell__details", desc);
-					detailEl.textContent = detailParts.join(" · ");
-				}
-				if (spell.entries) {
-					this._renderEntries(desc, spell.entries);
-				} else if (spell.description) {
-					const text = this._ce("div", "pm-rendered-content", desc);
-					text.textContent = spell.description;
-				}
-				if (spell.entriesHigherLevel) {
-					const upcast = this._ce("div", "pm-spell__upcast-info", desc);
-					const upcastLabel = this._ce("strong", null, upcast);
-					upcastLabel.textContent = "At Higher Levels. ";
-					this._renderEntries(upcast, spell.entriesHigherLevel);
-				}
+		// Info button → full spell info modal (B1)
+		const infoBtn = this._ce("button", "pm-spell__info", row);
+		infoBtn.textContent = "ℹ️";
+		infoBtn.title = "Spell details";
+		infoBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._showSpellInfoModal(spell, {showPreparedToggle});
+		});
+
+		// Note button (B3)
+		const spellNote = this._state.getSpellNote?.(spell.id);
+		const noteBtn = this._ce("button", `pm-note-btn${spellNote ? " pm-note-btn--active" : ""}`, row);
+		noteBtn.textContent = "📝";
+		noteBtn.title = spellNote ? `Note: ${spellNote.slice(0, 60)}${spellNote.length > 60 ? "…" : ""}` : "Add note";
+		noteBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._showEntityNoteModal("spell", spell.id, spell.name, () => {
+				this._renderSpellsQuick();
+				if (this._openDrawer === "spells") this._openDrawerByType("spells");
 			});
-		}
+		});
 
 		if (spell.level > 0) {
 			const castBtn = this._ce("button", "pm-spell__cast", row);
@@ -1375,6 +1456,17 @@ export class CharacterSheetPlayMode {
 				const useBtn = this._ce("button", "pm-feature__use-btn pm-feature__use-btn--disabled", row);
 				useBtn.textContent = "Used";
 			}
+
+			// Note button (B3)
+			const featureId = feature.id || feature.name;
+			const featureNote = this._state.getFeatureNote?.(featureId);
+			const featureNoteBtn = this._ce("button", `pm-note-btn${featureNote ? " pm-note-btn--active" : ""}`, row);
+			featureNoteBtn.textContent = "📝";
+			featureNoteBtn.title = featureNote ? `Note: ${featureNote.slice(0, 60)}${featureNote.length > 60 ? "…" : ""}` : "Add note";
+			featureNoteBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._showEntityNoteModal("feature", featureId, feature.name, () => this._renderFeaturesQuick());
+			});
 
 			// Star for favorites
 			const star = this._ce("span", "pm-feature__star", row);
@@ -1566,6 +1658,8 @@ export class CharacterSheetPlayMode {
 			reference: "📜 Features & Reference",
 			notes: "📝 Notes",
 			companions: "🐾 Companions",
+			modifiers: "🎯 Active Modifiers",
+			settings: "⚙️ Settings",
 		};
 
 		this._elDrawerBackdrop.classList.add("pm-drawer-backdrop--open");
@@ -1610,13 +1704,29 @@ export class CharacterSheetPlayMode {
 			case "notes": this._renderNotesDrawer(container); break;
 			case "companions": this._renderCompanionsDrawer(container); break;
 			case "activity": this._renderActivityDrawer(container); break;
+			case "modifiers": this._renderModifiersDrawer(container); break;
+			case "settings": this._renderSettingsDrawer(container); break;
 		}
 	}
 
 	_renderSpellsDrawer (container) {
+		// Phase A4: "+ Add Spell" button in header area
+		const headerActions = this._ce("div", "pm-drawer-actions", container);
+		const addSpellBtn = this._ce("button", "pm-drawer-actions__btn", headerActions);
+		addSpellBtn.textContent = "+ Add Spell";
+		addSpellBtn.title = "Open spell picker to add a spell";
+		addSpellBtn.addEventListener("click", async () => {
+			if (this._page._spells?._showSpellPicker) {
+				await this._page._spells._showSpellPicker();
+				this._openDrawerByType("spells");
+			} else {
+				document.getElementById("charsheet-btn-add-spell")?.click();
+			}
+		});
+
 		const spells = this._state.getSpells();
 		if (!spells.length) {
-			this._renderEmptyState(container, "✨", "No spells known. Add spells from the Spells tab.");
+			this._renderEmptyState(container, "✨", "No spells known. Add spells using the button above.");
 			return;
 		}
 
@@ -1658,6 +1768,20 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderGearDrawer (container) {
+		// Phase A4: "+ Add Item" button in header area
+		const headerActions = this._ce("div", "pm-drawer-actions", container);
+		const addItemBtn = this._ce("button", "pm-drawer-actions__btn", headerActions);
+		addItemBtn.textContent = "+ Add Item";
+		addItemBtn.title = "Open item picker to add an item";
+		addItemBtn.addEventListener("click", async () => {
+			if (this._page._inventory?._showItemPicker) {
+				await this._page._inventory._showItemPicker();
+				this._openDrawerByType("gear");
+			} else {
+				document.getElementById("charsheet-btn-add-item")?.click();
+			}
+		});
+
 		const items = this._state.getItems();
 
 		// Attunement summary
@@ -1783,6 +1907,25 @@ export class CharacterSheetPlayMode {
 				this._openDrawerByType("gear");
 			});
 		}
+
+		// Info button → item info modal (B2)
+		const itemInfoBtn = this._ce("button", "pm-item__info-btn", row);
+		itemInfoBtn.textContent = "ℹ️";
+		itemInfoBtn.title = "Item details";
+		itemInfoBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._showItemInfoModal(item);
+		});
+
+		// Note button (B3)
+		const itemNote = this._state.getItemNote?.(item.id);
+		const itemNoteBtn = this._ce("button", `pm-note-btn${itemNote ? " pm-note-btn--active" : ""}`, row);
+		itemNoteBtn.textContent = "📝";
+		itemNoteBtn.title = itemNote ? `Note: ${itemNote.slice(0, 60)}${itemNote.length > 60 ? "…" : ""}` : "Add note";
+		itemNoteBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._showEntityNoteModal("item", item.id, item.name, () => this._openDrawerByType("gear"));
+		});
 	}
 
 	_renderReferenceDrawer (container) {
@@ -1810,6 +1953,17 @@ export class CharacterSheetPlayMode {
 					const uses = this._ce("span", "pm-card__badge", header);
 					uses.textContent = `${f.uses.current}/${f.uses.max}`;
 				}
+
+				// Note button (B3)
+				const refFeatureId = f.id || f.name;
+				const refNote = this._state.getFeatureNote?.(refFeatureId);
+				const refNoteBtn = this._ce("button", `pm-note-btn${refNote ? " pm-note-btn--active" : ""}`, header);
+				refNoteBtn.textContent = "📝";
+				refNoteBtn.title = refNote ? `Note: ${refNote.slice(0, 60)}${refNote.length > 60 ? "…" : ""}` : "Add note";
+				refNoteBtn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					this._showEntityNoteModal("feature", refFeatureId, f.name, () => this._openDrawerByType("reference"));
+				});
 
 				// Expandable description (rendered with Renderer for @tags and entries)
 				if (f.description || f.entries) {
@@ -1874,15 +2028,79 @@ export class CharacterSheetPlayMode {
 		companions.forEach(comp => {
 			const card = this._makeCard(container, "🐾", comp.name || "Companion");
 
-			// Stats row
-			const stats = this._ce("div", "pm-passives", card);
+			// ── Interactive controls (B4) ────────────────────────────
+			const controls = this._ce("div", "pm-companion__controls", card);
+
+			// Heal button
+			const healBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--heal", controls);
+			healBtn.textContent = "💚 Heal";
+			healBtn.title = "Heal companion";
+			healBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "heal", container));
+
+			// Damage button
+			const dmgBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--damage", controls);
+			dmgBtn.textContent = "💔 Damage";
+			dmgBtn.title = "Damage companion";
+			dmgBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "damage", container));
+
+			// Statblock button
+			const statblockBtn = this._ce("button", "pm-companion__ctrl-btn", controls);
+			statblockBtn.textContent = "📊 Statblock";
+			statblockBtn.title = "View full statblock";
+			statblockBtn.addEventListener("click", () => this._showCompanionStatblockModal(comp));
+
+			// Note button (B3)
+			const compNote = this._state.getCompanionNote?.(comp.id);
+			const compNoteBtn = this._ce("button", `pm-companion__ctrl-btn pm-note-btn${compNote ? " pm-note-btn--active" : ""}`, controls);
+			compNoteBtn.textContent = "📝 Note";
+			compNoteBtn.title = compNote ? `Note: ${compNote.slice(0, 60)}${compNote.length > 60 ? "…" : ""}` : "Add note";
+			compNoteBtn.addEventListener("click", () => this._showEntityNoteModal("companion", comp.id, comp.name || "Companion", () => this._openDrawerByType("companions")));
+
+			// Dismiss button
+			const dismissBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--dismiss", controls);
+			dismissBtn.textContent = "❌ Dismiss";
+			dismissBtn.title = "Remove this companion";
+			dismissBtn.addEventListener("click", () => {
+				if (!confirm(`Remove ${comp.name || "this companion"}?`)) return;
+				this._state.removeCompanion(comp.id);
+				this._logActivity("🐾", `Dismissed ${comp.name || "companion"}`);
+				this._openDrawerByType("companions");
+			});
+
+			// ── HP inline edit ──────────────────────────────────────
 			if (comp.hp?.max) {
-				const hpCell = this._ce("div", "pm-passive", stats);
-				const hpVal = this._ce("span", "pm-passive__value", hpCell);
-				hpVal.textContent = `${comp.hp.current ?? comp.hp.max}/${comp.hp.max}`;
-				const hpLbl = this._ce("span", "pm-passive__label", hpCell);
-				hpLbl.textContent = "HP";
+				const hpRow = this._ce("div", "pm-companion__hp-row", card);
+				const hpLabel = this._ce("span", "pm-companion__hp-label", hpRow);
+				hpLabel.textContent = "HP";
+
+				const hpInput = this._ce("input", "pm-companion__hp-input", hpRow);
+				hpInput.type = "number";
+				hpInput.min = "0";
+				hpInput.max = String(comp.hp.max);
+				hpInput.value = String(comp.hp.current ?? comp.hp.max);
+				hpInput.setAttribute("aria-label", `${comp.name || "Companion"} current HP`);
+				hpInput.addEventListener("change", () => {
+					const val = parseInt(hpInput.value);
+					if (!isNaN(val)) {
+						this._state.setCompanionHp(comp.id, val);
+						this._logActivity("🐾", `${comp.name} HP → ${val}/${comp.hp.max}`);
+					}
+				});
+
+				const hpMax = this._ce("span", "pm-companion__hp-max", hpRow);
+				hpMax.textContent = `/ ${comp.hp.max}`;
+
+				// HP bar
+				const hpBarWrap = this._ce("div", "pm-companion__hp-bar-wrap", card);
+				const pct = comp.hp.max > 0 ? Math.max(0, Math.min(100, ((comp.hp.current ?? comp.hp.max) / comp.hp.max) * 100)) : 0;
+				const hpBarFill = this._ce("div", "pm-companion__hp-bar-fill", hpBarWrap);
+				hpBarFill.style.width = `${pct}%`;
+				if (pct <= 25) hpBarFill.classList.add("pm-companion__hp-bar-fill--critical");
+				else if (pct <= 50) hpBarFill.classList.add("pm-companion__hp-bar-fill--bloodied");
 			}
+
+			// ── Stats row ───────────────────────────────────────────
+			const stats = this._ce("div", "pm-passives", card);
 			if (comp.ac) {
 				const acCell = this._ce("div", "pm-passive", stats);
 				const acVal = this._ce("span", "pm-passive__value", acCell);
@@ -1898,7 +2116,6 @@ export class CharacterSheetPlayMode {
 				const spdLbl = this._ce("span", "pm-passive__label", spdCell);
 				spdLbl.textContent = "Speed";
 
-				// Show other speed types
 				if (typeof comp.speed === "object") {
 					["fly", "swim", "climb", "burrow"].forEach(type => {
 						if (comp.speed[type] > 0) {
@@ -1918,6 +2135,12 @@ export class CharacterSheetPlayMode {
 				type.style.fontSize = "var(--cs-text-sm, 0.875rem)";
 				type.style.color = "var(--cs-text-secondary, #94a3b8)";
 				type.textContent = comp.type;
+			}
+
+			// Existing note preview
+			if (compNote) {
+				const notePreview = this._ce("div", "pm-companion__note-preview", card);
+				notePreview.textContent = `📝 ${compNote.slice(0, 100)}${compNote.length > 100 ? "…" : ""}`;
 			}
 
 			// Actions (5etools entries format: [{name, entries}])
@@ -1958,9 +2181,25 @@ export class CharacterSheetPlayMode {
 				reactTitle.textContent = `Reactions (${comp.reactions.length})`;
 
 				comp.reactions.forEach(reaction => {
-					const row = this._ce("div", "pm-feature", card);
-					const name = this._ce("span", "pm-feature__name", row);
+					const row = this._ce("div", "pm-feature pm-feature--expandable", card);
+					const header = this._ce("div", "pm-feature__header", row);
+					const name = this._ce("span", "pm-feature__name", header);
 					name.textContent = reaction.name;
+
+					if (reaction.entries) {
+						const desc = this._ce("div", "pm-feature__desc", row);
+						desc.style.display = "none";
+						let rendered = false;
+						this._makeClickable(header, `Toggle ${reaction.name} description`, () => {
+							const showing = desc.style.display !== "none";
+							if (!rendered && !showing) {
+								this._renderEntries(desc, reaction.entries);
+								rendered = true;
+							}
+							desc.style.display = showing ? "none" : "block";
+							row.classList.toggle("pm-feature--expanded", !showing);
+						});
+					}
 				});
 			}
 		});
@@ -2448,7 +2687,565 @@ export class CharacterSheetPlayMode {
 		rerollBtn.focus();
 	}
 
-	// ─── Rest Preview ───────────────────────────────────────────
+	// ─── Rest Handlers ──────────────────────────────────────────
+
+	/** Phase A3: Delegate directly to full rest dialogs (no extra preview step). */
+	_doShortRest () {
+		if (this._page._rest?._showShortRestDialog) {
+			this._page._rest._showShortRestDialog();
+			this._logActivity("🏕️", "Short Rest started");
+		} else {
+			// Fallback if rest module unavailable
+			this._showRestPreview("short");
+		}
+	}
+
+	_doLongRest () {
+		if (this._page._rest?._showLongRestDialog) {
+			this._page._rest._showLongRestDialog();
+			this._logActivity("🛏️", "Long Rest started");
+		} else {
+			// Fallback if rest module unavailable
+			this._showRestPreview("long");
+		}
+	}
+
+	// ─── Rest Preview (legacy fallback) ─────────────────────────
+
+	// ─── Phase B1: Spell Info Modal ─────────────────────────────
+
+	_showSpellInfoModal (spell, {showPreparedToggle = false} = {}) {
+		const SCHOOL_NAMES = {A: "Abjuration", C: "Conjuration", D: "Divination", E: "Enchantment", V: "Evocation", I: "Illusion", N: "Necromancy", T: "Transmutation"};
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal pm-modal--info", overlay);
+
+		// Title + source
+		const titleRow = this._ce("div", "pm-modal__title-row", panel);
+		const title = this._ce("div", "pm-modal__title", titleRow);
+		title.textContent = spell.name;
+		if (spell.source) {
+			const src = this._ce("span", "pm-modal__source-badge", titleRow);
+			src.textContent = spell.source;
+		}
+
+		// Badges: concentration / ritual
+		const badges = this._ce("div", "pm-modal__badges", panel);
+		if (spell.concentration) {
+			const conc = this._ce("span", "pm-modal__badge pm-modal__badge--conc", badges);
+			conc.textContent = "🔮 Concentration";
+		}
+		if (spell.ritual) {
+			const rit = this._ce("span", "pm-modal__badge pm-modal__badge--ritual", badges);
+			rit.textContent = "🕯️ Ritual";
+		}
+
+		// Chips row
+		const chips = this._ce("div", "pm-modal__chips", panel);
+		const levelText = spell.level === 0 ? "Cantrip" : `Level ${spell.level}`;
+		this._makeChip(chips, levelText);
+		if (spell.school) this._makeChip(chips, SCHOOL_NAMES[spell.school] || spell.school);
+		if (spell.time) this._makeChip(chips, `⏱ ${spell.time}`);
+		else if (spell.castingTime) this._makeChip(chips, `⏱ ${spell.castingTime}`);
+		if (spell.range) this._makeChip(chips, `🎯 ${spell.range}`);
+		if (spell.duration) this._makeChip(chips, spell.concentration ? `🔮 ${spell.duration}` : `⌛ ${spell.duration}`);
+		if (spell.components) this._makeChip(chips, `📦 ${typeof spell.components === "object" ? Object.keys(spell.components).map(k => k.toUpperCase()).join(", ") : spell.components}`);
+
+		// Classes
+		if (spell.classes?.length) {
+			const classRow = this._ce("div", "pm-modal__section", panel);
+			const classLabel = this._ce("div", "pm-modal__section-title", classRow);
+			classLabel.textContent = "Classes";
+			const classBody = this._ce("div", "pm-modal__section-body", classRow);
+			classBody.textContent = Array.isArray(spell.classes)
+				? spell.classes.map(c => (typeof c === "string" ? c : c.name || c)).join(", ")
+				: String(spell.classes);
+		}
+
+		// Scrollable description body
+		const body = this._ce("div", "pm-modal__scroll-body", panel);
+		if (spell.entries) {
+			this._renderEntries(body, spell.entries);
+		} else if (spell.description) {
+			const text = this._ce("div", "pm-rendered-content", body);
+			text.textContent = spell.description;
+		}
+
+		// At Higher Levels
+		if (spell.entriesHigherLevel) {
+			const hlSection = this._ce("div", "pm-modal__section pm-modal__section--higher", body);
+			const hlLabel = this._ce("div", "pm-modal__section-title", hlSection);
+			hlLabel.textContent = "At Higher Levels";
+			this._renderEntries(hlSection, spell.entriesHigherLevel);
+		}
+
+		// Material components detail
+		if (typeof spell.components === "object" && typeof spell.components?.m === "string") {
+			const matSection = this._ce("div", "pm-modal__section", body);
+			const matLabel = this._ce("div", "pm-modal__section-title", matSection);
+			matLabel.textContent = "Material";
+			const matBody = this._ce("div", "pm-modal__section-body", matSection);
+			matBody.textContent = spell.components.m;
+		}
+
+		// Footer buttons
+		const btnRow = this._ce("div", "pm-modal__buttons pm-modal__buttons--wrap", panel);
+		if (spell.level > 0) {
+			const castBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+			castBtn.textContent = "✨ Cast";
+			castBtn.addEventListener("click", () => { overlay.remove(); this._castSpell(spell); });
+		}
+		if (spell.ritual) {
+			const ritualBtn = this._ce("button", "pm-modal__btn pm-modal__btn--ritual", btnRow);
+			ritualBtn.textContent = "🕯️ Ritual";
+			ritualBtn.title = "Cast as Ritual (no slot)";
+			ritualBtn.addEventListener("click", () => {
+				overlay.remove();
+				if (spell.concentration && this._state.isConcentrating?.()) {
+					this._promptConcentrationBreak(spell, () => {
+						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+						this._logActivity("🕯️", `Cast ${spell.name} as ritual (no slot)`);
+						this._renderStatusBar();
+					});
+				} else {
+					if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+					this._logActivity("🕯️", `Cast ${spell.name} as ritual (no slot)`);
+					this._renderStatusBar();
+				}
+			});
+		}
+		if (showPreparedToggle && spell.level > 0 && !spell.alwaysPrepared) {
+			const prepBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+			prepBtn.textContent = spell.prepared ? "⬜ Unprepare" : "✅ Prepare";
+			prepBtn.addEventListener("click", () => {
+				this._state.setSpellPrepared?.(spell.id, !spell.prepared);
+				overlay.remove();
+				this._openDrawerByType("spells");
+			});
+		}
+		const favBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		favBtn.textContent = this._isFavorite("spell", spell.name) ? "⭐ Unfav" : "⭐ Fav";
+		favBtn.addEventListener("click", () => {
+			this._toggleFavorite({id: `spell:${spell.name}`, type: "spell", name: spell.name, icon: "✨", detail: spell.level === 0 ? "Cantrip" : `Level ${spell.level}`, ref: spell});
+			overlay.remove();
+		});
+		const noteBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		noteBtn.textContent = "📝 Note";
+		noteBtn.addEventListener("click", () => {
+			overlay.remove();
+			this._showEntityNoteModal("spell", spell.id, spell.name, () => {
+				this._renderSpellsQuick();
+				if (this._openDrawer === "spells") this._openDrawerByType("spells");
+			});
+		});
+		const closeBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		closeBtn.textContent = "Close";
+		closeBtn.addEventListener("click", () => overlay.remove());
+
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+		document.addEventListener("keydown", function esc (e) {
+			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
+		});
+		document.body.appendChild(overlay);
+	}
+
+	// ─── Phase B2: Item Info Modal ───────────────────────────────
+
+	_showItemInfoModal (item) {
+		const ITEM_TYPE_NAMES = {M: "Melee Weapon", R: "Ranged Weapon", A: "Ammunition", LA: "Light Armor", MA: "Medium Armor", HA: "Heavy Armor", S: "Shield", SCF: "Spellcasting Focus", G: "Gear", P: "Potion", RD: "Rod", RG: "Ring", SC: "Scroll", WD: "Wand", ST: "Staff", W: "Wondrous Item"};
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal pm-modal--info", overlay);
+
+		// Title + rarity badge
+		const titleRow = this._ce("div", "pm-modal__title-row", panel);
+		const title = this._ce("div", "pm-modal__title", titleRow);
+		title.textContent = item.name;
+		if (item.rarity && item.rarity !== "none") {
+			const rar = this._ce("span", `pm-modal__rarity-badge pm-modal__rarity-badge--${item.rarity.toLowerCase().replace(/\s+/g, "-")}`, titleRow);
+			rar.textContent = item.rarity;
+		}
+
+		// Chips
+		const chips = this._ce("div", "pm-modal__chips", panel);
+		if (item.type) this._makeChip(chips, ITEM_TYPE_NAMES[item.type] || item.type);
+		if (item.weight) this._makeChip(chips, `⚖️ ${item.weight} lb`);
+		if (item.value) {
+			const gp = item.value / 100;
+			this._makeChip(chips, `💰 ${Number.isInteger(gp) ? `${gp} gp` : `${(item.value / 10).toFixed(1)} sp`}`);
+		}
+
+		// Properties
+		const props = item.property || item.properties || [];
+		const PROP_NAMES = {F: "Finesse", L: "Light", T: "Thrown", H: "Heavy", V: "Versatile", A: "Ammunition", R: "Reach", S: "Special", "2H": "Two-Handed"};
+		if (props.length) {
+			const propChips = this._ce("div", "pm-modal__chips", panel);
+			props.forEach(p => {
+				const pName = typeof p === "string" ? (PROP_NAMES[p] || p.split("|")[0]) : String(p);
+				this._makeChip(propChips, pName, "pm-modal__chip--prop");
+			});
+		}
+
+		// Attunement note
+		if (item.reqAttune || item.attunement) {
+			const attuneNote = this._ce("div", "pm-modal__subtitle", panel);
+			attuneNote.textContent = `✨ ${typeof item.reqAttune === "string" ? item.reqAttune : (item.attunement || "Requires attunement")}`;
+		}
+
+		// Charges
+		if (item.charges?.max > 0) {
+			const chargeSection = this._ce("div", "pm-modal__section", panel);
+			const chargeLabel = this._ce("div", "pm-modal__section-title", chargeSection);
+			chargeLabel.textContent = `Charges: ${item.charges.current}/${item.charges.max}`;
+			const chargeControls = this._ce("div", "pm-item__charge-controls", chargeSection);
+
+			const useChargeBtn = this._ce("button", "pm-modal__btn pm-modal__btn--damage", chargeControls);
+			useChargeBtn.textContent = "− Use";
+			useChargeBtn.disabled = item.charges.current <= 0;
+			useChargeBtn.addEventListener("click", () => {
+				if (item.charges.current > 0) {
+					this._state.useItemCharge?.(item.id);
+					this._logActivity("⚡", `Used charge on ${item.name}`);
+					overlay.remove();
+					this._openDrawerByType("gear");
+				}
+			});
+			const restoreBtn = this._ce("button", "pm-modal__btn pm-modal__btn--heal", chargeControls);
+			restoreBtn.textContent = "+ Restore";
+			restoreBtn.disabled = item.charges.current >= item.charges.max;
+			restoreBtn.addEventListener("click", () => {
+				this._state.setItemCharges?.(item.id, Math.min(item.charges.max, item.charges.current + 1));
+				overlay.remove();
+				this._openDrawerByType("gear");
+			});
+			const setRow = this._ce("div", "pm-item__charge-set-row", chargeSection);
+			const setInput = this._ce("input", "pm-modal__input pm-item__charge-set-input", setRow);
+			setInput.type = "number";
+			setInput.min = "0";
+			setInput.max = String(item.charges.max);
+			setInput.placeholder = "Set charges…";
+			const setBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", setRow);
+			setBtn.textContent = "Set";
+			setBtn.addEventListener("click", () => {
+				const val = parseInt(setInput.value);
+				if (!isNaN(val)) {
+					this._state.setItemCharges?.(item.id, Math.max(0, Math.min(item.charges.max, val)));
+					overlay.remove();
+					this._openDrawerByType("gear");
+				}
+			});
+		}
+
+		// Quantity
+		const qtySection = this._ce("div", "pm-modal__section", panel);
+		const qtyLabel = this._ce("div", "pm-modal__section-title", qtySection);
+		qtyLabel.textContent = "Quantity";
+		const qtyRow = this._ce("div", "pm-item__qty-row", qtySection);
+		const qtyMinus = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", qtyRow);
+		qtyMinus.textContent = "−";
+		const qtyInput = this._ce("input", "pm-modal__input pm-item__qty-input", qtyRow);
+		qtyInput.type = "number";
+		qtyInput.min = "0";
+		qtyInput.value = String(item.quantity ?? 1);
+		const qtyPlus = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", qtyRow);
+		qtyPlus.textContent = "+";
+		const applyQty = (delta) => {
+			const next = Math.max(0, (parseInt(qtyInput.value) || 0) + delta);
+			qtyInput.value = String(next);
+			this._state.setItemQuantity?.(item.id, next);
+		};
+		qtyMinus.addEventListener("click", () => applyQty(-1));
+		qtyPlus.addEventListener("click", () => applyQty(1));
+
+		// Equipped / Attuned toggles
+		const toggleRow = this._ce("div", "pm-item__toggle-row", panel);
+		if (item.weapon || item.armor || item.type === "S" || item.type === "LA" || item.type === "MA" || item.type === "HA") {
+			const equipToggle = this._ce("button", `pm-modal__btn ${item.equipped ? "pm-modal__btn--confirm" : "pm-modal__btn--cancel"}`, toggleRow);
+			equipToggle.textContent = item.equipped ? "🛡️ Equipped" : "⚪ Unequipped";
+			equipToggle.addEventListener("click", () => {
+				this._state.setItemEquipped?.(item.id, !item.equipped);
+				overlay.remove();
+				this._openDrawerByType("gear");
+			});
+		}
+		if (item.reqAttune || item.attuned) {
+			const attuneToggle = this._ce("button", `pm-modal__btn ${item.attuned ? "pm-modal__btn--confirm" : "pm-modal__btn--cancel"}`, toggleRow);
+			attuneToggle.textContent = item.attuned ? "✨ Attuned" : "◇ Unattuned";
+			attuneToggle.addEventListener("click", () => {
+				this._state.setItemAttuned?.(item.id, !item.attuned);
+				overlay.remove();
+				this._openDrawerByType("gear");
+			});
+		}
+
+		// Description
+		if (item.entries?.length || item.description) {
+			const descSection = this._ce("div", "pm-modal__scroll-body", panel);
+			if (item.entries?.length) this._renderEntries(descSection, item.entries);
+			else { const t = this._ce("div", "pm-rendered-content", descSection); t.textContent = item.description; }
+		}
+
+		// Footer buttons
+		const btnRow = this._ce("div", "pm-modal__buttons pm-modal__buttons--wrap", panel);
+		if (item.consumable || item.type === "P" || item.type === "SC") {
+			const useBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+			useBtn.textContent = item.type === "P" ? "🧪 Drink" : item.type === "SC" ? "📜 Cast" : "Use";
+			useBtn.addEventListener("click", () => {
+				this._state.consumeItem?.(item.id);
+				this._logActivity("🧪", `Used ${item.name}`);
+				overlay.remove();
+				this._openDrawerByType("gear");
+			});
+		}
+		const noteBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		noteBtn.textContent = "📝 Note";
+		noteBtn.addEventListener("click", () => {
+			overlay.remove();
+			this._showEntityNoteModal("item", item.id, item.name, () => this._openDrawerByType("gear"));
+		});
+		const removeBtn = this._ce("button", "pm-modal__btn pm-modal__btn--damage", btnRow);
+		removeBtn.textContent = "🗑️ Remove";
+		removeBtn.addEventListener("click", () => {
+			if (!confirm(`Remove ${item.name} from inventory?`)) return;
+			this._state.removeItem?.(item.id);
+			overlay.remove();
+			this._openDrawerByType("gear");
+		});
+		const closeBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		closeBtn.textContent = "Close";
+		closeBtn.addEventListener("click", () => overlay.remove());
+
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+		document.addEventListener("keydown", function esc (e) {
+			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
+		});
+		document.body.appendChild(overlay);
+	}
+
+	// ─── Phase B3: Entity Note Modal (shared helper) ─────────────
+
+	_showEntityNoteModal (entityType, entityId, name, onSave) {
+		const getters = {
+			spell: () => this._state.getSpellNote?.(entityId),
+			item: () => this._state.getItemNote?.(entityId),
+			attack: () => this._state.getAttackNote?.(entityId),
+			feature: () => this._state.getFeatureNote?.(entityId),
+			feat: () => this._state.getFeatNote?.(entityId),
+			companion: () => this._state.getCompanionNote?.(entityId),
+		};
+		const setters = {
+			spell: (note) => this._state.updateSpellNote?.(entityId, note),
+			item: (note) => this._state.updateItemNote?.(entityId, note),
+			attack: (note) => this._state.updateAttackNote?.(entityId, note),
+			feature: (note) => this._state.updateFeatureNote?.(entityId, note),
+			feat: (note) => this._state.updateFeatNote?.(entityId, note),
+			companion: (note) => this._state.updateCompanionNote?.(entityId, note),
+		};
+		const currentNote = (getters[entityType] || getters["feature"])?.() || "";
+
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const title = this._ce("div", "pm-modal__title", panel);
+		title.textContent = `📝 Note: ${name}`;
+
+		const textarea = this._ce("textarea", "pm-note-modal__textarea", panel);
+		textarea.value = currentNote;
+		textarea.placeholder = "Write a note…";
+		textarea.rows = 5;
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		saveBtn.textContent = "Save";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		const save = () => {
+			(setters[entityType] || setters["feature"])?.(textarea.value.trim());
+			close();
+			onSave?.();
+		};
+		saveBtn.addEventListener("click", save);
+		textarea.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+
+		document.body.appendChild(overlay);
+		textarea.focus();
+	}
+
+	// ─── Phase B4: Companion HP prompts and Statblock modal ──────
+
+	_promptCompanionHpChange (comp, mode, container) {
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const title = this._ce("div", "pm-modal__title", panel);
+		title.textContent = mode === "heal" ? `💚 Heal ${comp.name}` : `💔 Damage ${comp.name}`;
+
+		const row = this._ce("div", "pm-modal__row", panel);
+		const input = this._ce("input", "pm-modal__input", row);
+		input.type = "number";
+		input.min = "1";
+		input.placeholder = "Amount";
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const applyBtn = this._ce("button", `pm-modal__btn pm-modal__btn--${mode}`, btnRow);
+		applyBtn.textContent = mode === "heal" ? "Heal" : "Apply";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		const apply = () => {
+			const val = parseInt(input.value);
+			if (isNaN(val) || val <= 0) return;
+			const curHp = comp.hp?.current ?? comp.hp?.max ?? 0;
+			if (mode === "heal") {
+				const newHp = Math.min(comp.hp?.max ?? curHp, curHp + val);
+				this._state.setCompanionHp(comp.id, newHp);
+				this._logActivity("💚", `Healed ${comp.name} ${val} HP (${curHp} → ${newHp})`);
+			} else {
+				const result = this._state.damageCompanion(comp.id, val);
+				const suffix = result?.tempAbsorbed > 0 ? ` (${result.tempAbsorbed} absorbed)` : "";
+				if (result?.droppedToZero) {
+					this._logActivity("💀", `${comp.name} dropped to 0 HP${suffix}`);
+				} else {
+					const hpLost = result?.hpLost ?? val;
+					const remaining = result?.remaining ?? Math.max(0, curHp - val);
+					this._logActivity("💔", `${comp.name} took ${hpLost} damage → ${remaining} HP${suffix}`);
+				}
+			}
+			close();
+			this._openDrawerByType("companions");
+		};
+		applyBtn.addEventListener("click", apply);
+		input.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(); if (e.key === "Escape") close(); });
+
+		document.body.appendChild(overlay);
+		input.focus();
+	}
+
+	_showCompanionStatblockModal (comp) {
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal pm-modal--statblock", overlay);
+
+		const titleRow = this._ce("div", "pm-modal__title-row", panel);
+		const title = this._ce("div", "pm-modal__title", titleRow);
+		title.textContent = comp.name || "Companion";
+		if (comp.type) {
+			const typeEl = this._ce("span", "pm-modal__source-badge", titleRow);
+			typeEl.textContent = comp.type;
+		}
+
+		const body = this._ce("div", "pm-modal__scroll-body", panel);
+
+		// Core stats row
+		const stats = this._ce("div", "pm-statblock__stats", body);
+		const statCells = [];
+		if (comp.hp?.max != null) statCells.push(["HP", `${comp.hp.current ?? comp.hp.max}/${comp.hp.max}${(comp.hp.temp > 0) ? `+${comp.hp.temp}` : ""}`]);
+		if (comp.ac != null) statCells.push(["AC", String(comp.ac)]);
+		if (comp.speed != null) {
+			const walk = typeof comp.speed === "object" ? (comp.speed.walk || 0) : comp.speed;
+			statCells.push(["Speed", `${walk}ft`]);
+		}
+		statCells.forEach(([lbl, val]) => {
+			const cell = this._ce("div", "pm-statblock__stat-cell", stats);
+			const v = this._ce("span", "pm-statblock__stat-val", cell);
+			v.textContent = val;
+			const l = this._ce("span", "pm-statblock__stat-label", cell);
+			l.textContent = lbl;
+		});
+
+		// Ability scores
+		const abData = comp.abilities || comp;
+		const ABILITIES_LIST = ["str", "dex", "con", "int", "wis", "cha"];
+		const hasAbilities = ABILITIES_LIST.some(ab => abData[ab] != null);
+		if (hasAbilities) {
+			const abRow = this._ce("div", "pm-statblock__abilities", body);
+			ABILITIES_LIST.forEach(ab => {
+				const score = abData[ab];
+				if (score == null) return;
+				const mod = Math.floor((score - 10) / 2);
+				const cell = this._ce("div", "pm-statblock__ability-cell", abRow);
+				const abLabel = this._ce("div", "pm-statblock__ability-label", cell);
+				abLabel.textContent = ab.toUpperCase();
+				const abScore = this._ce("div", "pm-statblock__ability-score", cell);
+				abScore.textContent = score;
+				const abMod = this._ce("div", "pm-statblock__ability-mod", cell);
+				abMod.textContent = this._fmtMod(mod);
+			});
+		}
+
+		// Entries
+		if (comp.entries?.length) {
+			this._renderEntries(body, comp.entries);
+		}
+
+		// Actions
+		const actions = comp.actions || comp.attacks || [];
+		if (actions.length) {
+			const actHead = this._ce("div", "pm-statblock__section-header", body);
+			actHead.textContent = "Actions";
+			actions.forEach(action => {
+				const actionRow = this._ce("div", "pm-statblock__action", body);
+				const aName = this._ce("strong", null, actionRow);
+				aName.textContent = `${action.name}. `;
+				if (action.entries) this._renderEntries(actionRow, action.entries);
+			});
+		}
+
+		// Reactions
+		if (comp.reactions?.length) {
+			const reactHead = this._ce("div", "pm-statblock__section-header", body);
+			reactHead.textContent = "Reactions";
+			comp.reactions.forEach(reaction => {
+				const reactionRow = this._ce("div", "pm-statblock__action", body);
+				const rName = this._ce("strong", null, reactionRow);
+				rName.textContent = `${reaction.name}. `;
+				if (reaction.entries) this._renderEntries(reactionRow, reaction.entries);
+			});
+		}
+
+		// Note
+		const note = this._state.getCompanionNote?.(comp.id);
+		if (note) {
+			const noteSection = this._ce("div", "pm-modal__section", body);
+			const noteLabel = this._ce("div", "pm-modal__section-title", noteSection);
+			noteLabel.textContent = "Note";
+			const noteBody = this._ce("div", "pm-modal__section-body", noteSection);
+			noteBody.style.whiteSpace = "pre-wrap";
+			noteBody.textContent = note;
+		}
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const noteBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		noteBtn.textContent = "📝 Note";
+		noteBtn.addEventListener("click", () => {
+			overlay.remove();
+			this._showEntityNoteModal("companion", comp.id, comp.name || "Companion", () => this._openDrawerByType("companions"));
+		});
+		const closeBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		closeBtn.textContent = "Close";
+		closeBtn.addEventListener("click", () => overlay.remove());
+
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+		document.addEventListener("keydown", function esc (e) {
+			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
+		});
+		document.body.appendChild(overlay);
+	}
+
+	/** Build a chip element for modal chip rows */
+	_makeChip (parent, text, extraClass = "") {
+		const chip = this._ce("span", `pm-modal__chip${extraClass ? ` ${extraClass}` : ""}`, parent);
+		chip.textContent = text;
+		return chip;
+	}
+
+	// ─── Rest Preview (legacy fallback) ─────────────────────────
 
 	_showRestPreview (type) {
 		const overlay = this._ce("div", "pm-modal-overlay");
@@ -2747,6 +3544,604 @@ export class CharacterSheetPlayMode {
 	_rollD20 () {
 		return Math.floor(Math.random() * 20) + 1;
 	}
+
+	// ─── Phase A1: Named Modifiers Drawer ───────────────────────
+
+	_renderModifiersDrawer (container) {
+		const mods = this._state.getNamedModifiers();
+		const userMods = mods.filter(m => !m.sourceFeatureId && !m.sourceType);
+		const featureMods = mods.filter(m => m.sourceFeatureId || m.sourceType);
+
+		// Add button
+		const headerActions = this._ce("div", "pm-drawer-actions", container);
+		const addBtn = this._ce("button", "pm-drawer-actions__btn", headerActions);
+		addBtn.textContent = "+ Add Modifier";
+		addBtn.addEventListener("click", () => this._showModifierModal(null));
+
+		// User-created modifiers
+		if (userMods.length) {
+			const card = this._makeCard(container, "🎯", `Custom Modifiers (${userMods.length})`);
+			userMods.forEach(mod => this._renderModifierRow(card, mod, true));
+		} else {
+			this._renderEmptyState(container, "🎯", "No custom modifiers. Click + Add Modifier to create one.");
+		}
+
+		// Feature/item-sourced modifiers (read-only display)
+		if (featureMods.length) {
+			const card = this._makeCard(container, "✨", `Feature Modifiers (${featureMods.length})`);
+			const note = this._ce("div", "pm-modifier__note", card);
+			note.textContent = "These are granted by features/items and cannot be manually edited.";
+			featureMods.slice(0, 30).forEach(mod => this._renderModifierRow(card, mod, false));
+		}
+	}
+
+	_renderModifierRow (parent, mod, allowEdit) {
+		const row = this._ce("div", `pm-modifier${mod.enabled ? "" : " pm-modifier--disabled"}`, parent);
+
+		// Toggle
+		const toggleBtn = this._ce("button", `pm-modifier__toggle${mod.enabled ? " pm-modifier__toggle--on" : ""}`, row);
+		toggleBtn.textContent = mod.enabled ? "✓" : "○";
+		toggleBtn.title = mod.enabled ? "Enabled — click to disable" : "Disabled — click to enable";
+		toggleBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const newState = this._state.toggleNamedModifier(mod.id);
+			this._logActivity("🎯", `${newState ? "Enabled" : "Disabled"} modifier: ${mod.name}`);
+			this._openDrawerByType("modifiers");
+		});
+
+		// Name & details
+		const info = this._ce("div", "pm-modifier__info", row);
+		const nameEl = this._ce("span", "pm-modifier__name", info);
+		nameEl.textContent = mod.name;
+
+		const details = this._ce("span", "pm-modifier__details", info);
+		const valStr = mod.value > 0 ? `+${mod.value}` : `${mod.value}`;
+		const condStr = mod.conditional ? ` (${this._state.formatConditionalText?.(mod) || mod.conditional})` : "";
+		details.textContent = `${valStr} to ${mod.type}${condStr}`;
+
+		if (!allowEdit) return;
+
+		// Edit
+		const editBtn = this._ce("button", "pm-modifier__btn", row);
+		editBtn.textContent = "✏️";
+		editBtn.title = "Edit modifier";
+		editBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._showModifierModal(mod);
+		});
+
+		// Delete
+		const delBtn = this._ce("button", "pm-modifier__btn pm-modifier__btn--del", row);
+		delBtn.textContent = "🗑";
+		delBtn.title = "Delete modifier";
+		delBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._showConfirmModal(`Delete modifier "${mod.name}"?`, () => {
+				this._state.removeNamedModifier(mod.id);
+				this._logActivity("🗑", `Deleted modifier: ${mod.name}`);
+				this._openDrawerByType("modifiers");
+			});
+		});
+	}
+
+	_showModifierModal (existing) {
+		const isEdit = !!existing;
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const title = this._ce("div", "pm-modal__title", panel);
+		title.textContent = isEdit ? "✏️ Edit Modifier" : "🎯 Add Modifier";
+
+		// Name
+		const nameRow = this._ce("div", "pm-modal__row", panel);
+		const nameLbl = this._ce("label", "pm-modal__label", nameRow);
+		nameLbl.textContent = "Name";
+		const nameInput = this._ce("input", "pm-modal__input", nameRow);
+		nameInput.placeholder = "e.g. Bless, Bane, Aid…";
+		nameInput.value = existing?.name || "";
+
+		// Type (scope)
+		const typeRow = this._ce("div", "pm-modal__row", panel);
+		const typeLbl = this._ce("label", "pm-modal__label", typeRow);
+		typeLbl.textContent = "Affects";
+		const typeSelect = this._ce("select", "pm-modal__select", typeRow);
+		const MODIFIER_SCOPES = [
+			["ac", "Armor Class"],
+			["initiative", "Initiative"],
+			["attack", "All Attacks"],
+			["attack:melee", "Melee Attacks"],
+			["attack:ranged", "Ranged Attacks"],
+			["attack:spell", "Spell Attacks"],
+			["damage", "All Damage"],
+			["spellDc", "Spell Save DC"],
+			["spellAttack", "Spell Attack Bonus"],
+			["save:all", "All Saving Throws"],
+			["save:str", "STR Saves"],
+			["save:dex", "DEX Saves"],
+			["save:con", "CON Saves"],
+			["save:int", "INT Saves"],
+			["save:wis", "WIS Saves"],
+			["save:cha", "CHA Saves"],
+			["check:all", "All Ability Checks"],
+			["check:str", "STR Checks"],
+			["check:dex", "DEX Checks"],
+			["check:con", "CON Checks"],
+			["check:int", "INT Checks"],
+			["check:wis", "WIS Checks"],
+			["check:cha", "CHA Checks"],
+			["skill:all", "All Skills"],
+			["skill:athletics", "Athletics"],
+			["skill:acrobatics", "Acrobatics"],
+			["skill:stealth", "Stealth"],
+			["skill:perception", "Perception"],
+			["skill:insight", "Insight"],
+			["skill:persuasion", "Persuasion"],
+			["skill:deception", "Deception"],
+			["skill:intimidation", "Intimidation"],
+			["skill:history", "History"],
+			["skill:arcana", "Arcana"],
+			["skill:nature", "Nature"],
+			["skill:religion", "Religion"],
+			["skill:investigation", "Investigation"],
+			["skill:medicine", "Medicine"],
+			["skill:animalhandling", "Animal Handling"],
+			["skill:survival", "Survival"],
+			["skill:performance", "Performance"],
+			["skill:sleightofhand", "Sleight of Hand"],
+			["d20:all", "All d20 Rolls"],
+			["hp", "Max HP"],
+			["proficiencyBonus", "Proficiency Bonus"],
+			["deathSave", "Death Saves"],
+		];
+		MODIFIER_SCOPES.forEach(([val, label]) => {
+			const opt = this._ce("option", null, typeSelect);
+			opt.value = val;
+			opt.textContent = label;
+		});
+		if (existing?.type) typeSelect.value = existing.type;
+
+		// Value
+		const valRow = this._ce("div", "pm-modal__row", panel);
+		const valLbl = this._ce("label", "pm-modal__label", valRow);
+		valLbl.textContent = "Bonus (numeric)";
+		const valInput = this._ce("input", "pm-modal__input", valRow);
+		valInput.type = "number";
+		valInput.placeholder = "e.g. 1, -2, 4";
+		valInput.value = existing?.value ?? "1";
+
+		// Enabled
+		const enabledRow = this._ce("div", "pm-modal__row pm-modal__row--check", panel);
+		const enabledCheck = this._ce("input", null, enabledRow);
+		enabledCheck.type = "checkbox";
+		enabledCheck.checked = existing?.enabled !== false;
+		const enabledLbl = this._ce("label", null, enabledRow);
+		enabledLbl.textContent = " Active now";
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		saveBtn.textContent = isEdit ? "💾 Save" : "➕ Add";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		saveBtn.addEventListener("click", () => {
+			const name = nameInput.value.trim();
+			if (!name) { nameInput.focus(); return; }
+			const value = parseInt(valInput.value) || 0;
+			const type = typeSelect.value;
+			const enabled = enabledCheck.checked;
+
+			if (isEdit) {
+				this._state.updateNamedModifier(existing.id, {name, type, value, enabled});
+				this._logActivity("✏️", `Updated modifier: ${name}`);
+			} else {
+				this._state.addNamedModifier({name, type, value, enabled});
+				this._logActivity("🎯", `Added modifier: ${name} (${value >= 0 ? "+" : ""}${value} to ${type})`);
+			}
+			close();
+			this._openDrawerByType("modifiers");
+		});
+
+		document.body.appendChild(overlay);
+		nameInput.focus();
+	}
+
+	// ─── Phase A2: Sticky Notes Overlay ─────────────────────────
+
+	_toggleStickyNotesOverlay () {
+		let overlay = document.getElementById("pm-sticky-overlay");
+		if (overlay) {
+			overlay.classList.toggle("pm-sticky-overlay--hidden");
+			return;
+		}
+		// First open: create the overlay container
+		overlay = this._ce("div", "pm-sticky-overlay");
+		overlay.id = "pm-sticky-overlay";
+		this._elRoot.appendChild(overlay);
+
+		// Render existing notes
+		const notes = this._state.getStickyNotes("playmode");
+		notes.forEach(note => this._renderStickyNote(overlay, note));
+
+		// Show "new note" fab
+		const fab = this._ce("button", "pm-sticky-fab");
+		fab.textContent = "＋ Sticky";
+		fab.title = "Add a new sticky note";
+		fab.addEventListener("click", () => {
+			const id = this._state.addStickyNote({
+				title: "Note",
+				content: "",
+				tab: "playmode",
+				position: {x: 80 + Math.random() * 200, y: 120 + Math.random() * 100},
+				color: "yellow",
+			});
+			const note = this._state.getStickyNote(id);
+			this._renderStickyNote(overlay, note);
+			this._logActivity("🗒", "Added sticky note");
+		});
+		overlay.appendChild(fab);
+	}
+
+	_renderStickyNote (overlayEl, note) {
+		const COLORS = {yellow: "#fef08a", pink: "#fbcfe8", blue: "#bfdbfe", green: "#bbf7d0", purple: "#e9d5ff"};
+		const existing = overlayEl.querySelector(`[data-note-id="${note.id}"]`);
+		if (existing) existing.remove();
+
+		const el = this._ce("div", "pm-sticky");
+		el.dataset.noteId = note.id;
+		el.style.background = COLORS[note.color] || COLORS.yellow;
+		if (note.position) {
+			el.style.left = `${note.position.x}px`;
+			el.style.top = `${note.position.y}px`;
+		}
+
+		// Title bar (drag handle)
+		const titleBar = this._ce("div", "pm-sticky__title-bar", el);
+		titleBar.setAttribute("aria-label", "Drag to move note");
+
+		const titleInput = this._ce("input", "pm-sticky__title-input", titleBar);
+		titleInput.value = note.title || "Note";
+		titleInput.addEventListener("blur", () => {
+			this._state.updateStickyNote(note.id, {title: titleInput.value});
+		});
+		titleInput.addEventListener("click", (e) => e.stopPropagation());
+
+		// Color picker
+		const colorPicker = this._ce("select", "pm-sticky__color-picker", titleBar);
+		Object.entries(COLORS).forEach(([name]) => {
+			const opt = this._ce("option", null, colorPicker);
+			opt.value = name;
+			opt.textContent = name;
+		});
+		colorPicker.value = note.color || "yellow";
+		colorPicker.addEventListener("change", (e) => {
+			e.stopPropagation();
+			this._state.updateStickyNote(note.id, {color: colorPicker.value});
+			el.style.background = COLORS[colorPicker.value] || COLORS.yellow;
+		});
+
+		// Delete
+		const delBtn = this._ce("button", "pm-sticky__del", titleBar);
+		delBtn.textContent = "✕";
+		delBtn.title = "Delete note";
+		delBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._state.removeStickyNote(note.id);
+			el.remove();
+			this._logActivity("🗒", `Deleted sticky note: ${note.title || "Note"}`);
+		});
+
+		// Content area
+		const content = this._ce("textarea", "pm-sticky__content", el);
+		content.value = note.content || "";
+		content.placeholder = "Write something…";
+		content.addEventListener("blur", () => {
+			this._state.updateStickyNote(note.id, {content: content.value});
+		});
+		content.addEventListener("click", (e) => e.stopPropagation());
+
+		// Drag to reposition
+		let dragging = false, dragOffX = 0, dragOffY = 0;
+		titleBar.addEventListener("mousedown", (e) => {
+			if (e.target === titleInput || e.target === colorPicker || e.target === delBtn) return;
+			dragging = true;
+			const rect = el.getBoundingClientRect();
+			dragOffX = e.clientX - rect.left;
+			dragOffY = e.clientY - rect.top;
+			el.style.zIndex = "9999";
+			e.preventDefault();
+		});
+		document.addEventListener("mousemove", (e) => {
+			if (!dragging) return;
+			const parentRect = overlayEl.getBoundingClientRect();
+			const x = Math.max(0, e.clientX - parentRect.left - dragOffX);
+			const y = Math.max(0, e.clientY - parentRect.top - dragOffY);
+			el.style.left = `${x}px`;
+			el.style.top = `${y}px`;
+		});
+		document.addEventListener("mouseup", () => {
+			if (!dragging) return;
+			dragging = false;
+			el.style.zIndex = "";
+			const x = parseFloat(el.style.left) || 0;
+			const y = parseFloat(el.style.top) || 0;
+			this._state.updateStickyNote(note.id, {position: {x, y}});
+		});
+
+		overlayEl.insertBefore(el, overlayEl.querySelector(".pm-sticky-fab"));
+	}
+
+	// ─── Phase A5: Custom Attack Modal ──────────────────────────
+
+	_showAttackModal (existing, onSave) {
+		const isEdit = !!existing;
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const titleEl = this._ce("div", "pm-modal__title", panel);
+		titleEl.textContent = isEdit ? "✏️ Edit Attack" : "⚔️ Add Custom Attack";
+
+		const row = (label) => {
+			const r = this._ce("div", "pm-modal__row", panel);
+			const lbl = this._ce("label", "pm-modal__label", r);
+			lbl.textContent = label;
+			return r;
+		};
+
+		// Name
+		const nameRow = row("Name");
+		const nameInput = this._ce("input", "pm-modal__input", nameRow);
+		nameInput.placeholder = "e.g. Longsword, Sneak Attack…";
+		nameInput.value = existing?.name || "";
+
+		// Melee / Ranged
+		const typeRow = row("Type");
+		const meleeBtn = this._ce("button", "pm-attack-type-btn pm-attack-type-btn--active", typeRow);
+		meleeBtn.textContent = "🗡️ Melee";
+		const rangedBtn = this._ce("button", "pm-attack-type-btn", typeRow);
+		rangedBtn.textContent = "🏹 Ranged";
+		let isMelee = existing?.isMelee !== false;
+		const updateTypeButtons = () => {
+			meleeBtn.classList.toggle("pm-attack-type-btn--active", isMelee);
+			rangedBtn.classList.toggle("pm-attack-type-btn--active", !isMelee);
+		};
+		updateTypeButtons();
+		meleeBtn.addEventListener("click", () => { isMelee = true; updateTypeButtons(); });
+		rangedBtn.addEventListener("click", () => { isMelee = false; updateTypeButtons(); });
+
+		// Ability mod
+		const abilRow = row("Ability Mod");
+		const abilSelect = this._ce("select", "pm-modal__select", abilRow);
+		["str", "dex", "con", "int", "wis", "cha"].forEach(abl => {
+			const opt = this._ce("option", null, abilSelect);
+			opt.value = abl;
+			opt.textContent = abl.toUpperCase();
+		});
+		abilSelect.value = existing?.abilityMod || (isMelee ? "str" : "dex");
+
+		// Attack bonus
+		const atkRow = row("Attack Bonus");
+		const atkInput = this._ce("input", "pm-modal__input", atkRow);
+		atkInput.type = "number";
+		atkInput.value = existing?.attackBonus ?? 0;
+
+		// Damage formula
+		const dmgRow = row("Damage");
+		const dmgInput = this._ce("input", "pm-modal__input", dmgRow);
+		dmgInput.placeholder = "e.g. 1d8, 2d6+1d4";
+		dmgInput.value = existing?.damage || "1d6";
+
+		// Damage type
+		const dmgTypeRow = row("Damage Type");
+		const dmgTypeSelect = this._ce("select", "pm-modal__select", dmgTypeRow);
+		["slashing", "piercing", "bludgeoning", "fire", "cold", "lightning", "thunder", "acid", "poison", "necrotic", "radiant", "force", "psychic"].forEach(t => {
+			const opt = this._ce("option", null, dmgTypeSelect);
+			opt.value = t;
+			opt.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+		});
+		dmgTypeSelect.value = existing?.damageType || "slashing";
+
+		// Damage bonus
+		const dmgBonRow = row("Damage Bonus");
+		const dmgBonInput = this._ce("input", "pm-modal__input", dmgBonRow);
+		dmgBonInput.type = "number";
+		dmgBonInput.value = existing?.damageBonus ?? 0;
+
+		// Range
+		const rangeRow = row("Range");
+		const rangeInput = this._ce("input", "pm-modal__input", rangeRow);
+		rangeInput.placeholder = "e.g. 5 ft., 80/320 ft.";
+		rangeInput.value = existing?.range || (isMelee ? "5 ft." : "80/320 ft.");
+
+		// Properties
+		const propRow = row("Properties");
+		const propInput = this._ce("input", "pm-modal__input", propRow);
+		propInput.placeholder = "e.g. Versatile, Thrown";
+		propInput.value = existing?.properties || "";
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		saveBtn.textContent = isEdit ? "💾 Save" : "➕ Add Attack";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		saveBtn.addEventListener("click", () => {
+			const name = nameInput.value.trim();
+			if (!name) { nameInput.focus(); return; }
+
+			const attackData = {
+				name,
+				isMelee,
+				abilityMod: abilSelect.value,
+				attackBonus: parseInt(atkInput.value) || 0,
+				damage: dmgInput.value.trim() || "1d6",
+				damageType: dmgTypeSelect.value,
+				damageBonus: parseInt(dmgBonInput.value) || 0,
+				range: rangeInput.value.trim() || (isMelee ? "5 ft." : "80/320 ft."),
+				properties: propInput.value.trim(),
+			};
+
+			if (isEdit) {
+				this._state.updateAttack({...existing, ...attackData});
+				this._logActivity("✏️", `Updated attack: ${name}`);
+			} else {
+				const id = `custom_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+				this._state.addAttack({id, ...attackData});
+				this._logActivity("⚔️", `Added custom attack: ${name}`);
+			}
+
+			close();
+			onSave?.();
+		});
+
+		document.body.appendChild(overlay);
+		nameInput.focus();
+	}
+
+	// ─── Phase C2: Settings Drawer ───────────────────────────────
+
+	_renderSettingsDrawer (container) {
+		const settings = this._state.getSettings?.() || {};
+
+		const makeSection = (title, items) => {
+			const card = this._makeCard(container, null, title);
+			items.forEach(({key, label, type, options, value, onChange}) => {
+				const row = this._ce("div", "pm-settings__row", card);
+				const lbl = this._ce("label", "pm-settings__label", row);
+				lbl.textContent = label;
+
+				if (type === "toggle") {
+					const cb = this._ce("input", "pm-settings__toggle", row);
+					cb.type = "checkbox";
+					cb.checked = !!value;
+					cb.addEventListener("change", () => {
+						onChange?.(cb.checked);
+						this._state.setSetting(key, cb.checked);
+					});
+				} else if (type === "select") {
+					const sel = this._ce("select", "pm-settings__select", row);
+					(options || []).forEach(([val, txt]) => {
+						const opt = this._ce("option", null, sel);
+						opt.value = val;
+						opt.textContent = txt;
+					});
+					sel.value = value || "";
+					sel.addEventListener("change", () => {
+						onChange?.(sel.value);
+						this._state.setSetting(key, sel.value);
+					});
+				}
+			});
+			return card;
+		};
+
+		// Exhaustion rules
+		makeSection("📜 Ruleset", [
+			{
+				key: "exhaustionRules",
+				label: "Exhaustion Rules",
+				type: "select",
+				value: settings.exhaustionRules || "2024",
+				options: [
+					["2024", "2024 (One D&D)"],
+					["2014", "2014 (Classic)"],
+					["thelemar", "Thelemar Homebrew"],
+				],
+				onChange: (v) => this._state.setExhaustionRules?.(v),
+			},
+		]);
+
+		// TGTT Homebrew
+		makeSection("🐉 TGTT Homebrew", [
+			{
+				key: "enableTgtt",
+				label: "Enable Thelemar Homebrew",
+				type: "toggle",
+				value: settings.enableTgtt,
+				onChange: (v) => { this._renderSettingsDrawer(container); },
+			},
+			...(settings.enableTgtt ? [
+				{key: "tgttCarry", label: "TGTT Carry Capacity", type: "toggle", value: settings.tgttCarry},
+				{key: "tgttJumping", label: "TGTT Jumping Rules", type: "toggle", value: settings.tgttJumping},
+				{key: "tgttLinguistics", label: "TGTT Linguistics", type: "toggle", value: settings.tgttLinguistics},
+				{key: "tgttCriticalRolls", label: "TGTT Critical Rolls", type: "toggle", value: settings.tgttCriticalRolls},
+			] : []),
+		]);
+
+		// Display
+		makeSection("🖥️ Display", [
+			{
+				key: "showAllOptFeatureVersions",
+				label: "Show All Optional Feature Versions",
+				type: "toggle",
+				value: settings.showAllOptFeatureVersions,
+			},
+		]);
+
+		// Save/Load helpers
+		const utilCard = this._makeCard(container, "💾", "Save / Load");
+		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", utilCard);
+		saveBtn.textContent = "💾 Export Character";
+		saveBtn.addEventListener("click", () => this._exportCharacter());
+
+		const charName = this._state.getName?.() || "character";
+		const info = this._ce("div", "pm-settings__info", utilCard);
+		info.textContent = `Character: ${charName} — Save to export a backup.`;
+	}
+
+	// ─── Phase C1: Export Helper ────────────────────────────────
+
+	_exportCharacter () {
+		try {
+			const json = this._state.toJson();
+			const name = (this._state.getName?.() || "character").replace(/[^a-z0-9_-]/gi, "_");
+			const blob = new Blob([JSON.stringify(json, null, 2)], {type: "application/json"});
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = `${name}.json`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+			this._logActivity("💾", `Exported character: ${name}.json`);
+			JqueryUtil?.doToast?.({type: "success", content: `Exported ${name}.json`});
+		} catch (err) {
+			JqueryUtil?.doToast?.({type: "danger", content: `Export failed: ${err.message}`});
+		}
+	}
+
+	// ─── Confirm Modal Helper ────────────────────────────────────
+
+	_showConfirmModal (message, onConfirm) {
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const msg = this._ce("div", "pm-modal__subtitle", panel);
+		msg.textContent = message;
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const confirmBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		confirmBtn.textContent = "Confirm";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+		confirmBtn.addEventListener("click", () => { close(); onConfirm(); });
+
+		document.body.appendChild(overlay);
+		confirmBtn.focus();
+	}
+
 }
 
 CharacterSheetPlayMode.CONDITION_DESCRIPTIONS = {
