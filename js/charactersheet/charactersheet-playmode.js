@@ -200,10 +200,9 @@ export class CharacterSheetPlayMode {
 		const init = this._state.getInitiativeBreakdown();
 		this._renderVitalChip(wrap, "⚡", this._fmtMod(init.total), "Init", (e) => this._page._rollInitiative(e));
 
-		// Speed
-		const speed = this._state.getSpeed();
-		const walkSpeed = typeof speed === "object" ? speed.walk : speed;
-		this._renderVitalChip(wrap, "🏃", `${walkSpeed || 30}ft`, "Speed", () => this._showBreakdown("speed"));
+		// Speed (use getSpeed("walk") for number, not getSpeed() which returns formatted string)
+		const walkSpeed = this._state.getSpeed("walk") || 30;
+		this._renderVitalChip(wrap, "🏃", `${walkSpeed}ft`, "Speed", () => this._showBreakdown("speed"));
 
 		// Additional speed types (fly, swim, climb, burrow)
 		const speedTypes = [
@@ -408,6 +407,9 @@ export class CharacterSheetPlayMode {
 		this._makeToolBtn(tools, "🎒 Gear", () => this._openDrawerByType("gear"));
 		this._makeToolBtn(tools, "📜 Reference", () => this._openDrawerByType("reference"));
 		this._makeToolBtn(tools, "📝 Notes", () => this._openDrawerByType("notes"));
+		if (this._state.getCompanions().length) {
+			this._makeToolBtn(tools, "🐾 Companions", () => this._openDrawerByType("companions"));
+		}
 
 		this._ce("div", "pm-status__divider", tools);
 
@@ -430,12 +432,12 @@ export class CharacterSheetPlayMode {
 
 		// Concentration
 		const activeStates = this._state.getActiveStates();
-		const concentrating = activeStates.find(s => s.type === "concentration" && s.active);
+		const concentrating = activeStates.find(s => s.stateTypeId === "concentration" && s.active);
 		if (concentrating) {
 			const conc = this._ce("span", "pm-status__indicator pm-status__indicator--concentration", parent);
 			conc.textContent = `🔮 Concentrating: ${concentrating.name || "Spell"}`;
 			this._makeClickable(conc, `End concentration on ${concentrating.name || "spell"}`, () => {
-				this._state.setActiveState(concentrating.id, false);
+				this._state.deactivateState("concentration");
 				this._renderStatusBar();
 				this._logActivity("🔮", `Dropped concentration on ${concentrating.name}`);
 				JqueryUtil?.doToast?.({type: "info", content: `Dropped concentration on ${concentrating.name || "spell"}`});
@@ -894,7 +896,7 @@ export class CharacterSheetPlayMode {
 	_renderActiveStates () {
 		const allStates = this._state.getActiveStates();
 		// Filter to show toggleable states the character has access to (not concentration — that's in status bar)
-		const toggleable = allStates.filter(s => s.type !== "concentration" && !s.isCondition);
+		const toggleable = allStates.filter(s => s.stateTypeId !== "concentration");
 		if (!toggleable.length) return;
 
 		const card = this._makeCard(this._elActionsHub, "🔥", "Active States");
@@ -916,7 +918,7 @@ export class CharacterSheetPlayMode {
 			}
 
 			this._makeClickable(el, `${state.active ? "Deactivate" : "Activate"} ${state.name || state.type}`, () => {
-				this._state.setActiveState(state.id, !state.active);
+				this._state.toggleActiveState(state.id);
 				this._logActivity("🔥", `${!state.active ? "Activated" : "Deactivated"} ${state.name || state.type}`);
 				// Re-render both status bar (conditions/concentration may change) and actions hub
 				this._renderStatusBar();
@@ -1076,8 +1078,8 @@ export class CharacterSheetPlayMode {
 				});
 			});
 
-			row.addEventListener("click", () => {
-				this._page._rollAttack(attack);
+			row.addEventListener("click", (e) => {
+				this._page._rollAttack(attack, e);
 				this._logActivity(attack.isMelee ? "🗡️" : "🏹", `Attacked with ${attack.name}`);
 			});
 			row.setAttribute("role", "button");
@@ -1086,7 +1088,7 @@ export class CharacterSheetPlayMode {
 			row.addEventListener("keydown", (e) => {
 				if (e.key === "Enter" || e.key === " ") {
 					e.preventDefault();
-					this._page._rollAttack(attack);
+					this._page._rollAttack(attack, e);
 					this._logActivity(attack.isMelee ? "🗡️" : "🏹", `Attacked with ${attack.name}`);
 				}
 			});
@@ -1100,9 +1102,10 @@ export class CharacterSheetPlayMode {
 		const card = this._makeCard(this._elActionsHub, "✨", "Spells");
 
 		// Spell DC + Attack Bonus header
-		const spellDc = this._state.getSpellDc?.();
+		const spellDcData = this._state.getSpellDcBreakdown?.();
+		const spellDc = spellDcData?.total;
 		const spellAtk = this._state.getSpellAttackBonus?.();
-		if (spellDc || spellAtk) {
+		if (spellDc || spellAtk != null) {
 			const dcRow = this._ce("div", "pm-spell-stats", card);
 			if (spellDc) {
 				const dcTag = this._ce("span", "pm-spell-stats__tag", dcRow);
@@ -1384,7 +1387,7 @@ export class CharacterSheetPlayMode {
 		const hasTgtt = settings.enableTgtt;
 		const staminaMax = hasTgtt ? (this._state.getStaminaMax?.() || 0) : 0;
 
-		if (!Object.keys(hitDice).length && !resources.length && !hasSp && !staminaMax) return;
+		if (!hitDice.length && !resources.length && !hasSp && !staminaMax) return;
 
 		const card = this._makeCard(this._elActionsHub, "🎲", "Resources");
 		const list = this._ce("div", "pm-resources", card);
@@ -1437,25 +1440,27 @@ export class CharacterSheetPlayMode {
 			}
 		}
 
-		// Hit dice
-		Object.entries(hitDice).forEach(([die, data]) => {
-			if (!data || data.max <= 0) return;
+		// Hit dice (getHitDice returns array [{type, die, current, max, className}])
+		hitDice.forEach(hd => {
+			if (!hd || hd.max <= 0) return;
 			const row = this._ce("div", "pm-resource", list);
 			const name = this._ce("span", "pm-resource__name", row);
-			name.textContent = `Hit Dice (${die})`;
+			name.textContent = `Hit Dice (${hd.type})`;
 			const pips = this._ce("div", "pm-resource__pips", row);
 
-			for (let i = 0; i < data.max; i++) {
-				const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < data.current ? "filled" : "empty"}`, pips);
-				this._makeClickable(pip, `Hit Die ${die} ${i + 1} (${i < data.current ? "use" : "restore"})`, () => {
+			for (let i = 0; i < hd.max; i++) {
+				const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < hd.current ? "filled" : "empty"}`, pips);
+				const hdType = hd.type;
+				this._makeClickable(pip, `Hit Die ${hd.type} ${i + 1} (${i < hd.current ? "use" : "restore"})`, () => {
 					const fresh = this._state.getHitDice();
-					const cur = fresh[die];
-					if (!cur) return;
-					if (i < cur.current) {
-						this._state.setHitDice(Object.entries(fresh).map(([d, v]) => ({die: d, current: d === die ? v.current - 1 : v.current, max: v.max})));
+					const target = fresh.find(h => h.type === hdType);
+					if (!target) return;
+					if (i < target.current) {
+						target.current--;
 					} else {
-						this._state.setHitDice(Object.entries(fresh).map(([d, v]) => ({die: d, current: d === die ? Math.min(v.max, v.current + 1) : v.current, max: v.max})));
+						target.current = Math.min(target.max, target.current + 1);
 					}
+					this._state.setHitDice(fresh);
 					this._renderResources();
 				});
 			}
@@ -1472,9 +1477,12 @@ export class CharacterSheetPlayMode {
 				const pips = this._ce("div", "pm-resource__pips", row);
 				for (let i = 0; i < res.max; i++) {
 					const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < res.current ? "filled" : "empty"}`, pips);
+					const resId = res.id;
 					this._makeClickable(pip, `${res.name} use ${i + 1} (${i < res.current ? "expend" : "restore"})`, () => {
-						if (i < res.current) res.current--;
-						else res.current = Math.min(res.max, res.current + 1);
+						const fresh = this._state.getResources().find(r => r.id === resId);
+						if (!fresh) return;
+						const newVal = i < fresh.current ? fresh.current - 1 : Math.min(fresh.max, fresh.current + 1);
+						this._state.setResourceCurrent?.(resId, newVal);
 						this._renderResources();
 					});
 				}
@@ -1877,16 +1885,14 @@ export class CharacterSheetPlayMode {
 
 	_useFavorite (fav) {
 		if (fav.type === "attack" && fav.ref) {
-			this._page._rollAttack(fav.ref);
+			this._page._rollAttack(fav.ref, null);
 			this._logActivity(fav.icon, `Attacked with ${fav.name}`);
 		} else if (fav.type === "spell" && fav.ref) {
 			this._castSpell(fav.ref);
 		} else if (fav.type === "feature" && fav.ref) {
-			if (fav.ref.uses?.current > 0) {
-				fav.ref.uses.current--;
-				this.render();
-				this._logActivity("⚡", `Used ${fav.name}`);
-			}
+			this._state.useFeature?.(fav.ref.id || fav.ref.name);
+			this.render();
+			this._logActivity("⚡", `Used ${fav.name}`);
 		}
 	}
 
@@ -1971,7 +1977,7 @@ export class CharacterSheetPlayMode {
 	}
 
 	_promptConcentrationBreak (newSpell, onConfirm) {
-		const concentrating = this._state.getActiveStates().find(s => s.type === "concentration" && s.active);
+		const concentrating = this._state.getActiveStates().find(s => s.stateTypeId === "concentration" && s.active);
 		const currentName = concentrating?.name || "a spell";
 
 		const overlay = this._ce("div", "pm-modal-overlay");
@@ -2377,7 +2383,7 @@ export class CharacterSheetPlayMode {
 		const resources = this._state.getResources();
 		const restorable = resources.filter(r => {
 			if (type === "long") return r.current < r.max;
-			return r.restsOn === "short" && r.current < r.max;
+			return (r.recharge === "short" || r.recharge === "short rest") && r.current < r.max;
 		});
 		restorable.forEach(r => {
 			const item = this._ce("div", "pm-rest-preview__item", list);
