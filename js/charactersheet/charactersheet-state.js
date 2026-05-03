@@ -3312,6 +3312,7 @@ class CharacterSheetState {
 
 			// Weapon Masteries (2024 rules)
 			weaponMasteries: [], // ["Longsword|XPHB", "Shortsword|XPHB"] - weapon keys (name|source)
+			weaponMasteryProperties: {}, // {weaponKey: masteryPropName} — player-chosen mastery property per weapon
 
 			// Combat Traditions (Thelemar homebrew) - tradition codes like ["AM", "RC"]
 			combatTraditions: [],
@@ -22762,6 +22763,32 @@ class CharacterSheetState {
 			}
 			return name.toLowerCase() === weaponName.toLowerCase();
 		});
+	}
+
+	/**
+	 * Get the player-chosen mastery property for a weapon.
+	 * @param {string} weaponKey - Weapon key e.g. "Longsword|XPHB" or just "Longsword"
+	 * @returns {string|null} Mastery property name like "Topple" or null if none chosen
+	 */
+	getWeaponMasteryProperty (weaponKey) {
+		return (this._data.weaponMasteryProperties || {})[weaponKey] || null;
+	}
+
+	/**
+	 * Set (or clear) the player-chosen mastery property for a weapon.
+	 * Also ensures the weapon is in the masteries list when a property is set.
+	 * @param {string} weaponKey - Weapon key e.g. "Longsword|XPHB"
+	 * @param {string|null} prop - Mastery property name like "Topple", or null to clear
+	 */
+	setWeaponMastery (weaponKey, prop) {
+		if (!this._data.weaponMasteryProperties) this._data.weaponMasteryProperties = {};
+		if (prop) {
+			this._data.weaponMasteryProperties[weaponKey] = prop;
+			this.addWeaponMastery(weaponKey);
+		} else {
+			delete this._data.weaponMasteryProperties[weaponKey];
+			this.removeWeaponMastery(weaponKey);
+		}
 	}
 	// #endregion
 
