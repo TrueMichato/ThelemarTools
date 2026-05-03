@@ -1731,6 +1731,242 @@
 }
 
 /* ========================================================================
+   Death Saves (shown when HP = 0)
+   ======================================================================== */
+.pm-death-saves {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px 12px;
+	background: var(--cs-accent-ruby-light, rgba(239, 68, 68, 0.1));
+	border: 1px solid rgba(239, 68, 68, 0.3);
+	border-radius: var(--cs-radius-md, 8px);
+	width: 100%;
+}
+
+.pm-death-saves__label {
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: 700;
+	color: var(--cs-accent-ruby, #ef4444);
+}
+
+.pm-death-saves__row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.pm-death-saves__type {
+	font-size: 1rem;
+	min-width: 1.5rem;
+}
+
+.pm-death-saves__pip {
+	font-size: 1.2rem;
+	cursor: pointer;
+	color: var(--cs-text-muted, #64748b);
+	transition: all var(--cs-transition-fast, 150ms);
+}
+
+.pm-death-saves__pip--success {
+	color: var(--cs-accent-emerald, #10b981);
+}
+
+.pm-death-saves__pip--failure {
+	color: var(--cs-accent-ruby, #ef4444);
+}
+
+.pm-death-saves__actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 4px;
+}
+
+.pm-death-saves__btn {
+	padding: 3px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--cs-border, #334155);
+	background: transparent;
+	color: var(--cs-text-secondary, #94a3b8);
+	font-size: var(--cs-text-xs, 0.75rem);
+	cursor: pointer;
+}
+
+.pm-death-saves__btn--heal {
+	background: var(--cs-accent-emerald-light, rgba(16, 185, 129, 0.15));
+	color: var(--cs-accent-emerald, #10b981);
+	border-color: transparent;
+}
+
+/* ========================================================================
+   Condition Picker
+   ======================================================================== */
+.pm-condition-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 6px;
+	margin-bottom: 0.5rem;
+}
+
+.pm-condition-grid__btn {
+	padding: 6px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--cs-border, #334155);
+	background: var(--cs-bg-card, #0f172a);
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: var(--cs-text-sm, 0.875rem);
+	cursor: pointer;
+	transition: all var(--cs-transition-fast, 150ms);
+	text-align: left;
+}
+
+.pm-condition-grid__btn:hover:not(:disabled) {
+	border-color: var(--cs-accent-amber, #f59e0b);
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+.pm-condition-grid__btn--active {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+/* ========================================================================
+   Defenses Summary (resist/immune/vuln tags)
+   ======================================================================== */
+.pm-defenses {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.pm-defenses__tag {
+	display: inline-block;
+	padding: 1px 6px;
+	border-radius: var(--cs-radius-full, 9999px);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 600;
+}
+
+.pm-defenses__tag--immune {
+	background: var(--cs-accent-sky-light, rgba(56, 189, 248, 0.15));
+	color: var(--cs-accent-sky, #38bdf8);
+}
+
+.pm-defenses__tag--resist {
+	background: var(--cs-accent-emerald-light, rgba(16, 185, 129, 0.15));
+	color: var(--cs-accent-emerald, #10b981);
+}
+
+.pm-defenses__tag--vuln {
+	background: var(--cs-accent-ruby-light, rgba(239, 68, 68, 0.1));
+	color: var(--cs-accent-ruby, #ef4444);
+}
+
+/* Add condition button */
+.pm-status__indicator--add-condition {
+	border: 1px dashed var(--cs-border, rgba(255, 255, 255, 0.15));
+	opacity: 0.7;
+}
+
+.pm-status__indicator--add-condition:hover {
+	opacity: 1;
+	border-color: var(--cs-accent-amber, #f59e0b);
+}
+
+/* Temp HP button */
+.pm-status__hp-btn--temp {
+	background: var(--cs-accent-sky-light, rgba(56, 189, 248, 0.15));
+	color: var(--cs-accent-sky, #38bdf8);
+	border-color: transparent;
+}
+
+.pm-status__hp-btn--temp:hover {
+	background: var(--cs-accent-sky, #38bdf8);
+	color: var(--cs-text-on-accent, #fff);
+}
+
+/* ========================================================================
+   Active States (Rage, Bladesong, etc.)
+   ======================================================================== */
+.pm-active-states {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.pm-active-state {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	border-radius: var(--cs-radius-full, 9999px);
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+	background: var(--cs-bg-card, #0f172a);
+	font-size: var(--cs-text-sm, 0.875rem);
+	cursor: pointer;
+	transition: all var(--cs-transition-fast, 150ms);
+}
+
+.pm-active-state:hover {
+	border-color: var(--cs-primary, #6366f1);
+}
+
+.pm-active-state--on {
+	background: var(--cs-primary-light, rgba(99, 102, 241, 0.15));
+	border-color: var(--cs-primary, #6366f1);
+}
+
+.pm-active-state__toggle {
+	font-size: 0.6rem;
+}
+
+.pm-active-state__name {
+	color: var(--cs-text-primary, #f1f5f9);
+	font-weight: 500;
+}
+
+.pm-active-state__duration {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-accent-amber, #f59e0b);
+	font-weight: 600;
+}
+
+/* ========================================================================
+   Spell Stats (DC + Attack Bonus header)
+   ======================================================================== */
+.pm-spell-stats {
+	display: flex;
+	gap: 8px;
+	margin-bottom: var(--cs-space-sm, 8px);
+}
+
+.pm-spell-stats__tag {
+	padding: 2px 10px;
+	border-radius: var(--cs-radius-full, 9999px);
+	background: var(--cs-accent-amethyst-light, rgba(168, 85, 247, 0.15));
+	color: var(--cs-accent-amethyst, #a855f7);
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: 600;
+}
+
+/* Drawer search input */
+.pm-drawer-search {
+	width: 100%;
+	padding: 8px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--cs-border, #334155);
+	background: var(--cs-bg-card, #0f172a);
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: var(--cs-text-sm, 0.875rem);
+	margin-bottom: var(--cs-space-sm, 8px);
+}
+
+.pm-drawer-search:focus {
+	outline: none;
+	border-color: var(--cs-primary, #6366f1);
+}
+
+/* ========================================================================
    Z-Index Scale:
    200 = sticky status bar (sits above content scroll)
    500 = drawer backdrop (modal layer)
