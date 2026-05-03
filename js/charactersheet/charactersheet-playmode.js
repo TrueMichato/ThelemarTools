@@ -1157,6 +1157,27 @@ export class CharacterSheetPlayMode {
 				e.stopPropagation();
 				this._castSpell(spell);
 			});
+
+			// Ritual cast button (no slot cost)
+			if (spell.ritual) {
+				const ritualBtn = this._ce("button", "pm-spell__cast pm-spell__cast--ritual", row);
+				ritualBtn.textContent = "🕯️";
+				ritualBtn.title = "Cast as Ritual (no slot)";
+				ritualBtn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					if (spell.concentration && this._state.isConcentrating?.()) {
+						this._promptConcentrationBreak(spell, () => {
+							if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+							this._logActivity("🕯️", `Cast ${spell.name} as ritual (no slot)`);
+							this._renderStatusBar();
+						});
+					} else {
+						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+						this._logActivity("🕯️", `Cast ${spell.name} as ritual (no slot)`);
+						this._renderStatusBar();
+					}
+				});
+			}
 		}
 
 		// Star for favorites
@@ -1502,18 +1523,36 @@ export class CharacterSheetPlayMode {
 			});
 		}
 
-		// Currency
-		const coins = ["cp", "sp", "ep", "gp", "pp"].filter(c => this._state.getCurrency(c) > 0);
-		if (coins.length) {
-			const currCard = this._makeCard(container, "💰", "Currency");
-			const currRow = this._ce("div", "pm-passives", currCard);
-			coins.forEach(c => {
-				const cell = this._ce("div", "pm-passive", currRow);
-				const val = this._ce("span", "pm-passive__value", cell);
-				val.textContent = this._state.getCurrency(c);
-				const lbl = this._ce("span", "pm-passive__label", cell);
-				lbl.textContent = c.toUpperCase();
+		// Currency (editable)
+		const allCoins = ["cp", "sp", "ep", "gp", "pp"];
+		const currCard = this._makeCard(container, "💰", "Currency");
+		const currRow = this._ce("div", "pm-passives", currCard);
+		allCoins.forEach(c => {
+			const cell = this._ce("div", "pm-passive", currRow);
+			const input = this._ce("input", "pm-currency-input", cell);
+			input.type = "number";
+			input.min = "0";
+			input.value = this._state.getCurrency(c) || 0;
+			input.style.cssText = "width:50px;text-align:center;padding:2px 4px;border-radius:4px;border:1px solid var(--cs-border,#334155);background:var(--cs-bg-card,#0f172a);color:var(--cs-text-primary,#f1f5f9);font-size:0.9rem;";
+			input.addEventListener("change", () => {
+				const val = parseInt(input.value) || 0;
+				this._state.setCurrency(c, Math.max(0, val));
+				input.value = this._state.getCurrency(c);
 			});
+			const lbl = this._ce("span", "pm-passive__label", cell);
+			lbl.textContent = c.toUpperCase();
+		});
+
+		// Carrying capacity
+		const totalWeight = this._state.getTotalWeight?.();
+		const capacity = this._state.getCarryingCapacity?.();
+		if (capacity > 0) {
+			const capRow = this._ce("div", "pm-carry-capacity", currCard);
+			const pct = Math.min(100, (totalWeight / capacity) * 100);
+			const encLevel = this._state.getEncumbranceLevel?.();
+			capRow.textContent = `⚖️ ${Math.round(totalWeight)}/${capacity} lbs${encLevel ? ` (${encLevel})` : ""}`;
+			if (pct > 100) capRow.style.color = "var(--cs-danger, #ef4444)";
+			else if (pct > 66) capRow.style.color = "var(--cs-accent-amber, #f59e0b)";
 		}
 
 		// Equipped items
@@ -1639,10 +1678,55 @@ export class CharacterSheetPlayMode {
 
 		companions.forEach(comp => {
 			const card = this._makeCard(container, "🐾", comp.name || "Companion");
-			const text = this._ce("div", null, card);
-			text.style.fontSize = "var(--cs-text-sm, 0.875rem)";
-			text.style.color = "var(--cs-text-secondary, #94a3b8)";
-			text.textContent = comp.type || "";
+
+			// Stats row
+			const stats = this._ce("div", "pm-passives", card);
+			if (comp.hp?.max) {
+				const hpCell = this._ce("div", "pm-passive", stats);
+				const hpVal = this._ce("span", "pm-passive__value", hpCell);
+				hpVal.textContent = `${comp.hp.current ?? comp.hp.max}/${comp.hp.max}`;
+				const hpLbl = this._ce("span", "pm-passive__label", hpCell);
+				hpLbl.textContent = "HP";
+			}
+			if (comp.ac) {
+				const acCell = this._ce("div", "pm-passive", stats);
+				const acVal = this._ce("span", "pm-passive__value", acCell);
+				acVal.textContent = comp.ac;
+				const acLbl = this._ce("span", "pm-passive__label", acCell);
+				acLbl.textContent = "AC";
+			}
+			if (comp.speed) {
+				const spdCell = this._ce("div", "pm-passive", stats);
+				const spdVal = this._ce("span", "pm-passive__value", spdCell);
+				spdVal.textContent = `${comp.speed}ft`;
+				const spdLbl = this._ce("span", "pm-passive__label", spdCell);
+				spdLbl.textContent = "Speed";
+			}
+
+			// Type
+			if (comp.type) {
+				const type = this._ce("div", null, card);
+				type.style.fontSize = "var(--cs-text-sm, 0.875rem)";
+				type.style.color = "var(--cs-text-secondary, #94a3b8)";
+				type.textContent = comp.type;
+			}
+
+			// Attacks
+			if (comp.attacks?.length) {
+				comp.attacks.forEach(atk => {
+					const row = this._ce("div", "pm-attack", card);
+					const name = this._ce("span", "pm-attack__name", row);
+					name.textContent = atk.name;
+					if (atk.bonus != null) {
+						const bonus = this._ce("span", "pm-attack__bonus", row);
+						bonus.textContent = this._fmtMod(atk.bonus);
+					}
+					if (atk.damage) {
+						const dmg = this._ce("span", "pm-attack__damage", row);
+						dmg.textContent = atk.damage;
+					}
+				});
+			}
 		});
 	}
 
