@@ -1821,6 +1821,21 @@
 			"name": "Lore Mastery",
 			"source": "TGTT",
 			"page": 38,
+			"ability": [
+				{
+					"choose": {
+						"from": [
+							"str",
+							"dex",
+							"con",
+							"int",
+							"wis",
+							"cha"
+						],
+						"count": 1
+					}
+				}
+			],
 			"entries": [
 				"When you take this feat, you gain one of the following benefits:",
 				{
@@ -1837,6 +1852,21 @@
 			"name": "Spellsword Technique",
 			"source": "TGTT",
 			"page": 38,
+			"ability": [
+				{
+					"choose": {
+						"from": [
+							"str",
+							"dex",
+							"con",
+							"int",
+							"wis",
+							"cha"
+						],
+						"count": 1
+					}
+				}
+			],
 			"prerequisite": [
 				{
 					"feature": [
@@ -1878,6 +1908,21 @@
 			"name": "Whip Master",
 			"source": "TGTT",
 			"page": 38,
+			"ability": [
+				{
+					"choose": {
+						"from": [
+							"str",
+							"dex",
+							"con",
+							"int",
+							"wis",
+							"cha"
+						],
+						"count": 1
+					}
+				}
+			],
 			"prerequisite": [
 				{
 					"proficiency": [
@@ -1913,6 +1958,21 @@
 			"name": "Spell Scribing Adept",
 			"source": "TGTT",
 			"page": 38,
+			"ability": [
+				{
+					"choose": {
+						"from": [
+							"str",
+							"dex",
+							"con",
+							"int",
+							"wis",
+							"cha"
+						],
+						"count": 1
+					}
+				}
+			],
 			"prerequisite": [
 				{
 					"other": "Member of the Bard, Sorcerer, or Warlock class"
