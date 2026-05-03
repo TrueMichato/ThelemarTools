@@ -812,6 +812,7 @@ export class CharacterSheetPlayMode {
 		this._renderFavoritesBar();
 		this._renderActionEconomy();
 		this._renderActiveStates();
+		this._renderCombatMethods();
 		this._renderAttacks();
 		this._renderSpellsQuick();
 		this._renderFeaturesQuick();
@@ -920,6 +921,68 @@ export class CharacterSheetPlayMode {
 				// Re-render both status bar (conditions/concentration may change) and actions hub
 				this._renderStatusBar();
 				this._renderActionsHub();
+			});
+		});
+	}
+
+	_renderCombatMethods () {
+		const settings = this._state.getSettings?.() || {};
+		if (!settings.enableTgtt) return;
+
+		const methods = this._state.getCombatMethods?.() || [];
+		if (!methods.length) return;
+
+		const staminaCur = this._state.getStaminaCurrent?.() || 0;
+		const staminaMax = this._state.getStaminaMax?.() || 0;
+
+		const card = this._makeCard(this._elActionsHub, "⚔️", "Combat Methods");
+
+		// Stamina display
+		if (staminaMax > 0) {
+			const staminaRow = this._ce("div", "pm-resource", card);
+			const staminaName = this._ce("span", "pm-resource__name", staminaRow);
+			staminaName.textContent = "Stamina";
+			const staminaPips = this._ce("div", "pm-resource__pips", staminaRow);
+			for (let i = 0; i < staminaMax; i++) {
+				const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < staminaCur ? "filled" : "empty"}`, staminaPips);
+				pip.style.color = i < staminaCur ? "var(--cs-accent-amber, #f59e0b)" : "";
+				this._makeClickable(pip, `Stamina ${i + 1} (${i < staminaCur ? "spend" : "restore"})`, () => {
+					const cur = this._state.getStaminaCurrent?.() || 0;
+					if (i < cur) {
+						this._state.setStaminaCurrent(cur - 1);
+					} else {
+						this._state.setStaminaCurrent(Math.min(staminaMax, cur + 1));
+					}
+					this._renderCombatMethods();
+				});
+			}
+		}
+
+		// Methods list
+		methods.forEach(method => {
+			const row = this._ce("div", "pm-feature", card);
+			const name = this._ce("span", "pm-feature__name", row);
+			name.textContent = method.name;
+
+			if (method.staminaCost > 0) {
+				const cost = this._ce("span", "pm-card__badge", row);
+				cost.textContent = `${method.staminaCost} SP`;
+			}
+
+			const useBtn = this._ce("button", "pm-feature__use-btn", row);
+			useBtn.textContent = "Use";
+			const canUse = staminaCur >= (method.staminaCost || 0);
+			if (!canUse) useBtn.classList.add("pm-feature__use-btn--disabled");
+			useBtn.disabled = !canUse;
+			useBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				if (method.staminaCost > 0) {
+					const cur = this._state.getStaminaCurrent?.() || 0;
+					if (cur < method.staminaCost) return;
+					this._state.setStaminaCurrent(cur - method.staminaCost);
+				}
+				this._logActivity("⚔️", `Used ${method.name}${method.staminaCost ? ` (${method.staminaCost} stamina)` : ""}`);
+				this._renderCombatMethods();
 			});
 		});
 	}
@@ -1113,6 +1176,12 @@ export class CharacterSheetPlayMode {
 			cantripTitle.textContent = `Cantrips (${cantrips.length})`;
 
 			cantrips.slice(0, 8).forEach(spell => this._renderSpellRow(card, spell));
+
+			if (cantrips.length > 8) {
+				const more = this._ce("div", "pm-expander", card);
+				more.textContent = `▸ Show all ${cantrips.length} cantrips...`;
+				this._makeClickable(more, `Show all ${cantrips.length} cantrips`, () => this._openDrawerByType("spells"));
+			}
 		}
 
 		// Prepared / known spells
@@ -1216,10 +1285,11 @@ export class CharacterSheetPlayMode {
 					const pip = this._ce("span", `pm-feature__pip pm-feature__pip--${i < feature.uses.current ? "filled" : "empty"}`, pips);
 					this._makeClickable(pip, `${feature.name} use ${i + 1} (${i < feature.uses.current ? "expend" : "restore"})`, (e) => {
 						e.stopPropagation();
+						const featureId = feature.id || feature.name;
 						if (i < feature.uses.current) {
-							feature.uses.current--;
+							this._state.setFeatureUses?.(featureId, feature.uses.current - 1);
 						} else {
-							feature.uses.current = Math.min(feature.uses.max, feature.uses.current + 1);
+							this._state.setFeatureUses?.(featureId, Math.min(feature.uses.max, feature.uses.current + 1));
 						}
 						this._renderFeaturesQuick();
 					});
@@ -1236,11 +1306,9 @@ export class CharacterSheetPlayMode {
 				useBtn.setAttribute("aria-label", `Use ${feature.name} (${feature.uses.current} remaining)`);
 				useBtn.addEventListener("click", (e) => {
 					e.stopPropagation();
-					if (feature.uses.current > 0) {
-						feature.uses.current--;
-						this._renderFeaturesQuick();
-						this._logActivity("⚡", `Used ${feature.name}`);
-					}
+					this._state.useFeature?.(feature.id || feature.name);
+					this._renderFeaturesQuick();
+					this._logActivity("⚡", `Used ${feature.name}`);
 				});
 			} else if (feature.uses?.max > 0) {
 				const useBtn = this._ce("button", "pm-feature__use-btn pm-feature__use-btn--disabled", row);
@@ -1281,6 +1349,13 @@ export class CharacterSheetPlayMode {
 				if (ability.toggleable) {
 					const toggle = this._ce("span", `pm-active-state__toggle`, row);
 					toggle.textContent = ability.active ? "🟢" : "⚪";
+					this._makeClickable(toggle, `${ability.active ? "Deactivate" : "Activate"} ${ability.name}`, (e) => {
+						e.stopPropagation();
+						ability.active = !ability.active;
+						this._logActivity(ability.icon || "✨", `${ability.active ? "Activated" : "Deactivated"} ${ability.name}`);
+						this._renderFeaturesQuick();
+						this._renderStatusBar();
+					});
 				}
 
 				const name = this._ce("span", "pm-feature__name", row);
@@ -1291,11 +1366,9 @@ export class CharacterSheetPlayMode {
 					useBtn.textContent = "Use";
 					useBtn.addEventListener("click", (e) => {
 						e.stopPropagation();
-						if (ability.uses.current > 0) {
-							ability.uses.current--;
-							this._renderFeaturesQuick();
-							this._logActivity(ability.icon || "✨", `Used ${ability.name}`);
-						}
+						this._state.useFeature?.(ability.id || ability.name);
+						this._renderFeaturesQuick();
+						this._logActivity(ability.icon || "✨", `Used ${ability.name}`);
 					});
 				}
 			});
@@ -1352,6 +1425,15 @@ export class CharacterSheetPlayMode {
 			for (let i = 0; i < staminaMax; i++) {
 				const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < staminaCur ? "filled" : "empty"}`, pips);
 				pip.style.color = i < staminaCur ? "var(--cs-accent-amber, #f59e0b)" : "";
+				this._makeClickable(pip, `Stamina ${i + 1} (${i < staminaCur ? "spend" : "restore"})`, () => {
+					const cur = this._state.getStaminaCurrent?.() || 0;
+					if (i < cur) {
+						this._state.setStaminaCurrent(cur - 1);
+					} else {
+						this._state.setStaminaCurrent(Math.min(staminaMax, cur + 1));
+					}
+					this._renderResources();
+				});
 			}
 		}
 
@@ -1786,6 +1868,7 @@ export class CharacterSheetPlayMode {
 				this._state.setConcentration?.({name: spell.name, level: 0});
 			}
 			this._logActivity("✨", `Cast ${spell.name} (cantrip)`);
+			if (spell.concentration) this._renderStatusBar();
 			return;
 		}
 
