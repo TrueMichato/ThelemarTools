@@ -459,15 +459,37 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderIndicators (parent) {
-		// Inspiration
-		const inspired = this._state.hasInspiration();
-		const inspBtn = this._ce("span", `pm-status__indicator pm-status__indicator--inspiration${inspired ? " active" : ""}`, parent);
-		inspBtn.textContent = `⭐ ${inspired ? "Inspired" : "Inspiration"}`;
-		inspBtn.setAttribute("aria-pressed", inspired ? "true" : "false");
-		this._makeClickable(inspBtn, `Toggle inspiration (${inspired ? "active" : "inactive"})`, () => {
-			this._state.toggleInspiration();
+		// Inspiration (E4: count-based, supports XPHB stacking)
+		const rawInsp = this._state.hasInspiration();
+		const inspCount = typeof rawInsp === "number" ? rawInsp : (rawInsp ? 1 : 0);
+		const inspEl = this._ce("span", `pm-status__indicator pm-status__indicator--inspiration${inspCount > 0 ? " active" : ""}`, parent);
+
+		const inspMinus = this._ce("button", "pm-inspiration__btn pm-inspiration__btn--minus", inspEl);
+		inspMinus.textContent = "−";
+		inspMinus.title = "Lose inspiration";
+		inspMinus.setAttribute("aria-label", "Lose one inspiration");
+		inspMinus.disabled = inspCount <= 0;
+		inspMinus.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const newVal = Math.max(0, inspCount - 1);
+			this._state.setInspiration(newVal);
 			this._renderStatusBar();
-			this._logActivity("⭐", inspired ? "Lost inspiration" : "Gained inspiration");
+			this._logActivity("⭐", "Lost inspiration");
+		});
+
+		const inspLabel = this._ce("span", "pm-inspiration__label", inspEl);
+		inspLabel.textContent = `⭐ ${inspCount}`;
+		inspLabel.title = inspCount > 0 ? `${inspCount} inspiration token${inspCount !== 1 ? "s" : ""}` : "No inspiration";
+
+		const inspPlus = this._ce("button", "pm-inspiration__btn pm-inspiration__btn--plus", inspEl);
+		inspPlus.textContent = "+";
+		inspPlus.title = "Gain inspiration";
+		inspPlus.setAttribute("aria-label", "Gain one inspiration");
+		inspPlus.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._state.setInspiration(inspCount + 1);
+			this._renderStatusBar();
+			this._logActivity("⭐", "Gained inspiration");
 		});
 
 		// Concentration
@@ -533,6 +555,9 @@ export class CharacterSheetPlayMode {
 			exh.textContent = `😫 Exhaustion ${exhaustion}`;
 		}
 
+		// Currency cluster (E5)
+		this._renderCurrencyCluster(parent);
+
 		// Combat Round Tracker
 		this._renderCombatTracker(parent);
 	}
@@ -580,6 +605,70 @@ export class CharacterSheetPlayMode {
 				this._renderStatusBar();
 			});
 		}
+	}
+
+	// ─── E5: Currency Cluster ────────────────────────────────────
+
+	_renderCurrencyCluster (parent) {
+		const COINS = [
+			{type: "cp", label: "CP", gpRate: 0.01},
+			{type: "sp", label: "SP", gpRate: 0.1},
+			{type: "ep", label: "EP", gpRate: 0.5},
+			{type: "gp", label: "GP", gpRate: 1},
+			{type: "pp", label: "PP", gpRate: 10},
+		];
+
+		const cluster = this._ce("span", "pm-status__indicator pm-currency-cluster", parent);
+		const totalGp = COINS.reduce((sum, c) => sum + (this._state.getCurrency(c.type) || 0) * c.gpRate, 0);
+		cluster.title = `Total wealth: ${totalGp % 1 === 0 ? totalGp : totalGp.toFixed(2)} gp`;
+
+		const gp = this._state.getCurrency("gp") || 0;
+		const gpDisplay = this._ce("span", "pm-currency-cluster__gp", cluster);
+		gpDisplay.textContent = `💰 ${gp} gp`;
+
+		const expandBtn = this._ce("button", "pm-currency-cluster__expand-btn", cluster);
+		expandBtn.textContent = "⋯";
+		expandBtn.title = "Edit all currencies";
+
+		const coinsRow = this._ce("div", "pm-currency-cluster__coins", cluster);
+		coinsRow.style.display = "none";
+
+		let expanded = false;
+
+		const renderCoins = () => {
+			coinsRow.innerHTML = "";
+			COINS.forEach(({type, label}) => {
+				const coinWrap = this._ce("span", "pm-currency-coin", coinsRow);
+				const coinLabel = this._ce("span", "pm-currency-coin__label", coinWrap);
+				coinLabel.textContent = label;
+				const coinInput = this._ce("input", "pm-currency-coin__input", coinWrap);
+				coinInput.type = "number";
+				coinInput.min = "0";
+				coinInput.value = String(this._state.getCurrency(type) || 0);
+				coinInput.setAttribute("aria-label", `${label} amount`);
+				const commit = () => {
+					const newVal = Math.max(0, parseInt(coinInput.value) || 0);
+					this._state.setCurrency(type, newVal);
+					if (type === "gp") gpDisplay.textContent = `💰 ${newVal} gp`;
+					const newTotal = COINS.reduce((sum, c) => sum + (this._state.getCurrency(c.type) || 0) * c.gpRate, 0);
+					cluster.title = `Total wealth: ${newTotal % 1 === 0 ? newTotal : newTotal.toFixed(2)} gp`;
+				};
+				coinInput.addEventListener("blur", commit);
+				coinInput.addEventListener("keydown", (ke) => {
+					if (ke.key === "Enter") { ke.preventDefault(); coinInput.blur(); }
+					if (ke.key === "Escape") { coinInput.value = String(this._state.getCurrency(type) || 0); coinInput.blur(); }
+				});
+			});
+		};
+
+		expandBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			expanded = !expanded;
+			gpDisplay.style.display = expanded ? "none" : "";
+			coinsRow.style.display = expanded ? "" : "none";
+			expandBtn.textContent = expanded ? "✕" : "⋯";
+			if (expanded) renderCoins();
+		});
 	}
 
 	// ─── Condition Picker ────────────────────────────────────────
@@ -923,8 +1012,11 @@ export class CharacterSheetPlayMode {
 		}
 
 		const bar = this._ce("div", "pm-favorites", card);
-		favorites.forEach(fav => {
+		let dragSrcIdx = null;
+
+		favorites.forEach((fav, idx) => {
 			const el = this._ce("div", "pm-favorite", bar);
+			el.setAttribute("draggable", "true");
 			const icon = this._ce("span", "pm-favorite__icon", el);
 			icon.textContent = fav.icon || "⚡";
 			const name = this._ce("span", "pm-favorite__name", el);
@@ -936,10 +1028,42 @@ export class CharacterSheetPlayMode {
 
 			this._makeClickable(el, `Use favorite: ${fav.name}`, () => this._useFavorite(fav));
 
-			// Right-click to remove
+			// E1: Drag-drop reorder
+			el.addEventListener("dragstart", () => {
+				dragSrcIdx = idx;
+				el.classList.add("pm-favorite--dragging");
+			});
+			el.addEventListener("dragend", () => {
+				el.classList.remove("pm-favorite--dragging");
+				bar.querySelectorAll(".pm-favorite--drag-over").forEach(e => e.classList.remove("pm-favorite--drag-over"));
+			});
+			el.addEventListener("dragover", (e) => {
+				e.preventDefault();
+				if (dragSrcIdx !== idx) el.classList.add("pm-favorite--drag-over");
+			});
+			el.addEventListener("dragleave", () => el.classList.remove("pm-favorite--drag-over"));
+			el.addEventListener("drop", (e) => {
+				e.preventDefault();
+				el.classList.remove("pm-favorite--drag-over");
+				if (dragSrcIdx === null || dragSrcIdx === idx) return;
+				const reordered = [...favorites];
+				const [moved] = reordered.splice(dragSrcIdx, 1);
+				reordered.splice(idx, 0, moved);
+				dragSrcIdx = null;
+				this._state.setFavorites(reordered);
+				this._renderFavoritesBar();
+			});
+
+			// E2: Right-click context menu
 			el.addEventListener("contextmenu", (e) => {
 				e.preventDefault();
-				this._removeFavorite(fav.id);
+				this._showContextMenu(e, [
+					{label: fav.name, icon: fav.icon || "⚡", disabled: true},
+					{separator: true},
+					{label: "Use", icon: "▶️", onClick: () => this._useFavorite(fav)},
+					{separator: true},
+					{label: "Remove from Favorites", icon: "🗑", danger: true, onClick: () => this._removeFavorite(fav.id)},
+				]);
 			});
 		});
 	}
@@ -1252,6 +1376,25 @@ export class CharacterSheetPlayMode {
 					this._logActivity(attack.isMelee ? "🗡️" : "🏹", `Attacked with ${attack.name}`);
 				}
 			});
+
+			// E2: Right-click context menu
+			row.addEventListener("contextmenu", (e) => {
+				e.preventDefault();
+				const isCustomAtk = customAttackIds.has(attack.id);
+				const atkIsFav = this._isFavorite("attack", attack.id || attack.name);
+				this._showContextMenu(e, [
+					{label: attack.name, icon: attack.isMelee ? "🗡️" : "🏹", disabled: true},
+					{separator: true},
+					{label: "Roll Attack", icon: "🎲", onClick: () => { this._page._rollAttack(attack, e); this._logActivity(attack.isMelee ? "🗡️" : "🏹", `Attacked with ${attack.name}`); }},
+					{label: "Add Note", icon: "📝", onClick: () => this._showEntityNoteModal("attack", attack.id || attack.name, attack.name, () => this._renderAttacks())},
+					{label: atkIsFav ? "Remove Favorite" : "Add Favorite", icon: "⭐", onClick: () => this._toggleFavorite({id: `attack:${attack.id || attack.name}`, type: "attack", name: attack.name, icon: attack.isMelee ? "🗡️" : "🏹", detail: this._fmtMod(totalBonus), ref: attack})},
+					...(isCustomAtk ? [
+						{separator: true},
+						{label: "Edit Attack", icon: "✏️", onClick: () => this._showAttackModal(attack, () => this._renderActionsHub())},
+						{label: "Delete Attack", icon: "🗑", danger: true, onClick: () => this._showConfirmModal(`Delete attack "${attack.name}"?`, () => { this._state.removeAttack(attack.id); this._logActivity("🗑", `Deleted attack: ${attack.name}`); this._renderActionsHub(); })},
+					] : []),
+				]);
+			});
 		});
 	}
 
@@ -1467,6 +1610,22 @@ export class CharacterSheetPlayMode {
 				ref: spell,
 			});
 		});
+
+		// E2: Right-click context menu
+		row.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
+			const spellIsFav = this._isFavorite("spell", spell.name);
+			const menuItems = [
+				{label: spell.name, icon: "✨", disabled: true},
+				{separator: true},
+			];
+			if (spell.level > 0) menuItems.push({label: "Cast Spell", icon: "🔮", onClick: () => this._castSpell(spell)});
+			if (spell.ritual) menuItems.push({label: "Cast as Ritual", icon: "🕯️", onClick: () => { if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level}); this._logActivity("🕯️", `Cast ${spell.name} as ritual`); this._renderStatusBar(); }});
+			if (spell.level > 0 && !spell.alwaysPrepared && showPreparedToggle) menuItems.push({label: spell.prepared ? "Unprepare" : "Prepare", icon: spell.prepared ? "✅" : "⬜", onClick: () => { this._state.setSpellPrepared?.(spell.id, !spell.prepared); this._openDrawerByType("spells"); }});
+			menuItems.push({label: "Add Note", icon: "📝", onClick: () => this._showEntityNoteModal("spell", spell.id, spell.name, () => { this._renderSpellsQuick(); if (this._openDrawer === "spells") this._openDrawerByType("spells"); })});
+			menuItems.push({label: spellIsFav ? "Remove Favorite" : "Add Favorite", icon: "⭐", onClick: () => this._toggleFavorite({id: `spell:${spell.name}`, type: "spell", name: spell.name, icon: "✨", detail: spell.level === 0 ? "Cantrip" : `Level ${spell.level}`, ref: spell})});
+			this._showContextMenu(e, menuItems);
+		});
 	}
 
 	_renderFeaturesQuick () {
@@ -1559,6 +1718,20 @@ export class CharacterSheetPlayMode {
 					detail: `${feature.uses?.current ?? "∞"}/${feature.uses?.max ?? "∞"}`,
 					ref: feature,
 				});
+			});
+
+			// E2: Right-click context menu
+			row.addEventListener("contextmenu", (e) => {
+				e.preventDefault();
+				const featIsFav = this._isFavorite("feature", feature.id || feature.name);
+				const menuItems = [
+					{label: feature.name, icon: "⚡", disabled: true},
+					{separator: true},
+				];
+				if (feature.uses?.current > 0) menuItems.push({label: "Use", icon: "▶️", onClick: () => { this._state.useFeature?.(feature.id || feature.name); this._renderFeaturesQuick(); this._logActivity("⚡", `Used ${feature.name}`); }});
+				menuItems.push({label: "Add Note", icon: "📝", onClick: () => this._showEntityNoteModal("feature", feature.id || feature.name, feature.name, () => this._renderFeaturesQuick())});
+				menuItems.push({label: featIsFav ? "Remove Favorite" : "Add Favorite", icon: "⭐", onClick: () => this._toggleFavorite({id: `feature:${feature.id || feature.name}`, type: "feature", name: feature.name, icon: "⚡", detail: `${feature.uses?.current ?? "∞"}/${feature.uses?.max ?? "∞"}`, ref: feature})});
+				this._showContextMenu(e, menuItems);
 			});
 		});
 
@@ -2095,6 +2268,20 @@ export class CharacterSheetPlayMode {
 		itemNoteBtn.addEventListener("click", (e) => {
 			e.stopPropagation();
 			this._showEntityNoteModal("item", item.id, item.name, () => this._openDrawerByType("gear"));
+		});
+
+		// E2: Right-click context menu
+		row.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
+			this._showContextMenu(e, [
+				{label: item.name, icon: "🎒", disabled: true},
+				{separator: true},
+				{label: item.equipped ? "Unequip" : "Equip", icon: item.equipped ? "🛡️" : "⚪", onClick: () => { this._state.setItemEquipped?.(item.id, !item.equipped); this._openDrawerByType("gear"); }},
+				...(item.reqAttune || item.attuned ? [{label: item.attuned ? "Unattune" : "Attune", icon: item.attuned ? "✨" : "◇", onClick: () => { this._state.setItemAttuned?.(item.id, !item.attuned); this._openDrawerByType("gear"); }}] : []),
+				...(item.consumable || item.type === "P" || item.type === "SC" ? [{label: "Use Item", icon: "🧪", onClick: () => { this._state.consumeItem?.(item.id); this._logActivity("🧪", `Used ${item.name}`); this._openDrawerByType("gear"); }}] : []),
+				{label: "Item Details", icon: "ℹ️", onClick: () => this._showItemInfoModal(item)},
+				{label: "Add Note", icon: "📝", onClick: () => this._showEntityNoteModal("item", item.id, item.name, () => this._openDrawerByType("gear"))},
+			]);
 		});
 	}
 
@@ -2770,21 +2957,37 @@ export class CharacterSheetPlayMode {
 
 		// Damage type selector (damage mode only)
 		let dmgTypeSelect = null;
+		let customDmgInput = null;
 		let infoRow = null;
 		if (mode === "damage") {
 			dmgTypeSelect = this._ce("select", "pm-modal__select", inputRow);
-			const types = ["—", "acid", "cold", "fire", "force", "lightning", "necrotic", "poison", "psychic", "radiant", "thunder", "bludgeoning", "piercing", "slashing"];
+			const types = ["—", "acid", "cold", "fire", "force", "lightning", "necrotic", "poison", "psychic", "radiant", "thunder", "bludgeoning", "piercing", "slashing", "other"];
 			types.forEach(t => {
 				const opt = this._ce("option", null, dmgTypeSelect);
 				opt.value = t === "—" ? "" : t;
-				opt.textContent = t === "—" ? "Type…" : t.charAt(0).toUpperCase() + t.slice(1);
+				opt.textContent = t === "—" ? "Type…" : t === "other" ? "Other…" : t.charAt(0).toUpperCase() + t.slice(1);
 			});
+
+			// E3: Custom type input (shown when "Other…" is selected)
+			customDmgInput = this._ce("input", "pm-modal__select pm-modal__custom-type-input", inputRow);
+			customDmgInput.type = "text";
+			customDmgInput.placeholder = "e.g. psychic fire";
+			customDmgInput.style.display = "none";
+
+			const customTypeNote = this._ce("div", "pm-modal__custom-type-note", inputRow);
+			customTypeNote.textContent = "⚠️ Custom type — resistance/immunity not auto-applied";
+			customTypeNote.style.display = "none";
 
 			infoRow = this._ce("div", "pm-modal__info", panel);
 
 			const updateInfo = () => {
-				const dtype = dmgTypeSelect.value;
 				infoRow.innerHTML = "";
+				if (dmgTypeSelect.value === "other") {
+					const tag = this._ce("span", "pm-modal__tag pm-modal__tag--custom", infoRow);
+					tag.textContent = "ℹ️ Custom type — resistance/immunity not auto-applied";
+					return;
+				}
+				const dtype = dmgTypeSelect.value;
 				if (!dtype) return;
 
 				const resistances = this._state.getResistances();
@@ -2802,7 +3005,15 @@ export class CharacterSheetPlayMode {
 					tag.textContent = `⚠️ Vulnerable to ${dtype} — doubled`;
 				}
 			};
-			dmgTypeSelect.addEventListener("change", updateInfo);
+			dmgTypeSelect.addEventListener("change", () => {
+				const isOther = dmgTypeSelect.value === "other";
+				dmgTypeSelect.style.display = isOther ? "none" : "";
+				customDmgInput.style.display = isOther ? "" : "none";
+				customTypeNote.style.display = isOther ? "" : "none";
+				if (isOther) customDmgInput.focus();
+				updateInfo();
+			});
+			customDmgInput.addEventListener("input", updateInfo);
 		}
 
 		// Preview row
@@ -2820,7 +3031,9 @@ export class CharacterSheetPlayMode {
 				previewRow.textContent = `${current} → ${current + healed} HP (${healed > 0 ? `+${healed}` : "already full"})`;
 			} else {
 				let effective = val;
-				const dtype = dmgTypeSelect?.value || "";
+				const dtype = dmgTypeSelect?.value === "other"
+					? (customDmgInput?.value.trim().toLowerCase() || "")
+					: (dmgTypeSelect?.value || "");
 				if (dtype) {
 					const immunities = this._state.getImmunities();
 					const resistances = this._state.getResistances();
@@ -2848,6 +3061,7 @@ export class CharacterSheetPlayMode {
 		};
 		input.addEventListener("input", updatePreview);
 		dmgTypeSelect?.addEventListener("change", updatePreview);
+		customDmgInput?.addEventListener("input", updatePreview);
 
 		const btnRow = this._ce("div", "pm-modal__buttons", panel);
 
@@ -2864,7 +3078,9 @@ export class CharacterSheetPlayMode {
 		const apply = () => {
 			const val = parseInt(input.value);
 			if (isNaN(val) || val <= 0) return;
-			const dtype = dmgTypeSelect?.value || "";
+			const dtype = dmgTypeSelect?.value === "other"
+				? (customDmgInput?.value.trim().toLowerCase() || "")
+				: (dmgTypeSelect?.value || "");
 			close();
 			this._applyHpChange(mode, val, dtype);
 		};
@@ -3842,6 +4058,63 @@ export class CharacterSheetPlayMode {
 		if (className) el.className = className;
 		if (parent) parent.appendChild(el);
 		return el;
+	}
+
+	/** E2: Show a positioned context menu. items: [{label, icon, onClick, disabled, danger, separator}] */
+	_showContextMenu (e, items) {
+		document.querySelectorAll(".pm-context-menu").forEach(m => m.remove());
+
+		const menu = this._ce("div", "pm-context-menu");
+		items.forEach(item => {
+			if (item.separator) {
+				this._ce("div", "pm-context-menu__separator", menu);
+				return;
+			}
+			const classes = ["pm-context-menu__item"];
+			if (item.danger) classes.push("pm-context-menu__item--danger");
+			if (item.disabled) classes.push("pm-context-menu__item--disabled");
+			const el = this._ce("button", classes.join(" "), menu);
+			if (item.icon) {
+				const iconEl = this._ce("span", "pm-context-menu__icon", el);
+				iconEl.textContent = item.icon;
+			}
+			el.appendChild(document.createTextNode(item.label));
+			if (item.disabled) {
+				el.disabled = true;
+			} else {
+				el.addEventListener("click", () => { menu.remove(); item.onClick(); });
+			}
+		});
+
+		// Position off-screen, append, then measure and reposition
+		menu.style.left = "-9999px";
+		menu.style.top = "-9999px";
+		document.body.appendChild(menu);
+		const menuW = menu.offsetWidth;
+		const menuH = menu.offsetHeight;
+		const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
+		const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
+		menu.style.left = `${Math.max(4, x)}px`;
+		menu.style.top = `${Math.max(4, y)}px`;
+
+		const onClose = (ev) => {
+			if (!menu.contains(ev.target)) {
+				menu.remove();
+				document.removeEventListener("click", onClose);
+				document.removeEventListener("keydown", onEsc);
+			}
+		};
+		const onEsc = (ev) => {
+			if (ev.key === "Escape") {
+				menu.remove();
+				document.removeEventListener("click", onClose);
+				document.removeEventListener("keydown", onEsc);
+			}
+		};
+		setTimeout(() => {
+			document.addEventListener("click", onClose);
+			document.addEventListener("keydown", onEsc);
+		}, 0);
 	}
 
 	/**
