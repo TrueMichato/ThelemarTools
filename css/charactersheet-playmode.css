@@ -3497,3 +3497,284 @@ font-style: italic;
 	background: rgba(99, 102, 241, 0.06);
 	border-radius: 0 var(--cs-radius-sm, 6px) var(--cs-radius-sm, 6px) 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   D4 — Weapon Mastery Editor
+   ═══════════════════════════════════════════════════════════════ */
+
+.pm-card__action-btn--mastery {
+margin-left: 4px;
+background: rgba(251, 191, 36, 0.15);
+color: var(--cs-warning, #fbbf24);
+border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.pm-card__action-btn--mastery:hover {
+background: rgba(251, 191, 36, 0.25);
+}
+
+.pm-mastery-modal {
+max-width: 520px;
+width: 95vw;
+}
+
+.pm-mastery-modal__row {
+display: flex;
+align-items: center;
+gap: 10px;
+padding: 8px 0;
+border-bottom: 1px solid var(--cs-border, rgba(255,255,255,0.08));
+}
+
+.pm-mastery-modal__row:last-of-type {
+border-bottom: none;
+}
+
+.pm-mastery-modal__check {
+width: 16px;
+height: 16px;
+accent-color: var(--cs-primary, #6366f1);
+cursor: pointer;
+flex-shrink: 0;
+}
+
+.pm-mastery-modal__label {
+flex: 1;
+font-size: 0.875rem;
+color: var(--cs-text-primary, #f1f5f9);
+cursor: pointer;
+user-select: none;
+}
+
+.pm-mastery-modal__source {
+color: var(--cs-text-muted, #64748b);
+font-size: 0.75em;
+}
+
+.pm-mastery-modal__select {
+flex-shrink: 0;
+padding: 4px 8px;
+font-size: 0.8rem;
+background: var(--cs-bg-secondary, #1e293b);
+color: var(--cs-text-primary, #f1f5f9);
+border: 1px solid var(--cs-border, rgba(255,255,255,0.12));
+border-radius: var(--cs-radius-sm, 6px);
+cursor: pointer;
+}
+
+.pm-mastery-modal__select:disabled {
+opacity: 0.4;
+cursor: default;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   D6 — Editable Notes Drawer
+   ═══════════════════════════════════════════════════════════════ */
+
+.pm-notes__edit-icon {
+display: inline-block;
+cursor: pointer;
+opacity: 0.6;
+font-size: 0.8em;
+vertical-align: middle;
+transition: opacity 0.15s;
+}
+
+.pm-notes__edit-icon:hover {
+opacity: 1;
+}
+
+.pm-notes__textarea-wrap {
+position: relative;
+margin-top: 6px;
+}
+
+.pm-notes__textarea {
+width: 100%;
+box-sizing: border-box;
+padding: 8px 10px;
+background: var(--cs-bg-tertiary, #0f172a);
+color: var(--cs-text-primary, #f1f5f9);
+border: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+border-radius: var(--cs-radius-sm, 6px);
+font-size: 0.85rem;
+font-family: inherit;
+line-height: 1.5;
+resize: vertical;
+outline: none;
+transition: border-color 0.15s;
+}
+
+.pm-notes__textarea:focus {
+border-color: var(--cs-primary, #6366f1);
+box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+
+.pm-notes__textarea::placeholder {
+color: var(--cs-text-muted, #64748b);
+font-style: italic;
+}
+
+.pm-notes__saved {
+position: absolute;
+top: 6px;
+right: 8px;
+font-size: 0.72rem;
+color: var(--cs-success, #22c55e);
+pointer-events: none;
+opacity: 0;
+transition: opacity 0.3s;
+}
+
+.pm-notes__saved--visible {
+opacity: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   D7 — Companion Add Toolbar
+   ═══════════════════════════════════════════════════════════════ */
+
+.pm-companion-toolbar {
+display: flex;
+flex-wrap: wrap;
+gap: 6px;
+padding: 8px 0 12px;
+border-bottom: 1px solid var(--cs-border, rgba(255,255,255,0.08));
+margin-bottom: 10px;
+}
+
+.pm-companion-toolbar__btn {
+display: inline-flex;
+align-items: center;
+gap: 4px;
+padding: 4px 10px;
+background: var(--cs-bg-secondary, #1e293b);
+color: var(--cs-text-secondary, #94a3b8);
+border: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+border-radius: var(--cs-radius-sm, 6px);
+font-size: 0.78rem;
+cursor: pointer;
+transition: all 0.15s;
+white-space: nowrap;
+}
+
+.pm-companion-toolbar__btn:hover {
+background: var(--cs-bg-hover, rgba(99,102,241,0.15));
+border-color: var(--cs-primary, #6366f1);
+color: var(--cs-text-primary, #f1f5f9);
+}
+
+.pm-companion-toolbar__btn--custom {
+background: rgba(99, 102, 241, 0.1);
+color: var(--cs-primary, #6366f1);
+border-color: var(--cs-primary, #6366f1);
+}
+
+.pm-companion-toolbar__btn--custom:hover {
+background: rgba(99, 102, 241, 0.2);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   D8 — Quantity ± Controls
+   ═══════════════════════════════════════════════════════════════ */
+
+.pm-item__qty-controls {
+display: inline-flex;
+align-items: center;
+gap: 3px;
+margin-left: 6px;
+}
+
+.pm-item__qty-btn {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+width: 20px;
+height: 20px;
+padding: 0;
+background: var(--cs-bg-secondary, #1e293b);
+border: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+border-radius: 4px;
+font-size: 0.65em;
+cursor: pointer;
+transition: all 0.15s;
+color: var(--cs-text-secondary, #94a3b8);
+line-height: 1;
+}
+
+.pm-item__qty-btn:hover {
+background: var(--cs-bg-hover, rgba(99,102,241,0.15));
+border-color: var(--cs-primary, #6366f1);
+color: var(--cs-text-primary, #f1f5f9);
+}
+
+.pm-item__qty-btn--minus:hover {
+border-color: var(--cs-danger, #ef4444);
+background: rgba(239,68,68,0.12);
+color: var(--cs-danger, #ef4444);
+}
+
+.pm-item__qty-display {
+min-width: 20px;
+text-align: center;
+font-size: 0.8rem;
+font-weight: 600;
+color: var(--cs-text-secondary, #94a3b8);
+cursor: pointer;
+padding: 0 2px;
+border-radius: 3px;
+transition: background 0.15s;
+}
+
+.pm-item__qty-display:hover {
+background: var(--cs-bg-hover, rgba(99,102,241,0.15));
+color: var(--cs-text-primary, #f1f5f9);
+}
+
+.pm-item__qty-inline-input {
+width: 3em;
+text-align: center;
+background: var(--cs-bg-secondary, #1e293b);
+color: var(--cs-text-primary, #f1f5f9);
+border: 1px solid var(--cs-primary, #6366f1);
+border-radius: 4px;
+padding: 1px 2px;
+font-size: 0.8rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   D9 — Hit Die Roll Dialog
+   ═══════════════════════════════════════════════════════════════ */
+
+.pm-hitdie-modal {
+max-width: 380px;
+text-align: center;
+}
+
+.pm-hitdie-modal__formula {
+font-size: 0.9rem;
+color: var(--cs-text-secondary, #94a3b8);
+margin: 6px 0 12px;
+}
+
+.pm-hitdie-modal__result {
+font-size: 1.3rem;
+font-weight: 700;
+color: var(--cs-success, #22c55e);
+padding: 10px 16px;
+margin: 8px 0;
+background: rgba(34, 197, 94, 0.1);
+border: 1px solid rgba(34, 197, 94, 0.25);
+border-radius: var(--cs-radius-sm, 6px);
+transition: all 0.2s;
+}
+
+.pm-hitdie-modal__result--rolled {
+animation: pm-hitdie-pop 0.3s ease-out;
+}
+
+@keyframes pm-hitdie-pop {
+0% { transform: scale(0.85); opacity: 0.5; }
+60% { transform: scale(1.08); }
+100% { transform: scale(1); opacity: 1; }
+}
