@@ -1931,6 +1931,16 @@
 	font-weight: 600;
 }
 
+/* Weapon mastery badge */
+.pm-attack__mastery {
+	padding: 1px 5px;
+	border-radius: 4px;
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 600;
+	background: var(--cs-accent-amber-light, rgba(245, 158, 11, 0.15));
+	color: var(--cs-accent-amber, #f59e0b);
+}
+
 /* ========================================================================
    Spell Stats (DC + Attack Bonus header)
    ======================================================================== */

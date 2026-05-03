@@ -955,6 +955,15 @@ export class CharacterSheetPlayMode {
 			const type = this._ce("span", "pm-attack__type", row);
 			type.textContent = attack.damageType || "";
 
+			// Weapon mastery badge (XPHB 2024)
+			const masteries = this._state.getWeaponMasteries();
+			const masteryKey = `${attack.name}|${attack.source || ""}`;
+			const hasMastery = masteries.some(m => m === masteryKey || m.split("|")[0] === attack.name);
+			if (hasMastery && attack.masteryProperty) {
+				const masteryTag = this._ce("span", "pm-attack__mastery", row);
+				masteryTag.textContent = attack.masteryProperty;
+			}
+
 			// Star for favorites
 			const star = this._ce("span", "pm-attack__star", row);
 			const isFav = this._isFavorite("attack", attack.id || attack.name);
@@ -1181,15 +1190,90 @@ export class CharacterSheetPlayMode {
 			more.textContent = `▸ Show all ${actionable.length} features...`;
 			this._makeClickable(more, `Show all ${actionable.length} features`, () => this._openDrawerByType("reference"));
 		}
+
+		// Custom abilities (homebrew)
+		const customAbilities = this._state.getCustomAbilities?.() || [];
+		const actionableCustom = customAbilities.filter(a => (a.uses?.max > 0) || a.toggleable);
+		if (actionableCustom.length) {
+			actionableCustom.forEach(ability => {
+				const row = this._ce("div", "pm-feature", card);
+
+				if (ability.toggleable) {
+					const toggle = this._ce("span", `pm-active-state__toggle`, row);
+					toggle.textContent = ability.active ? "🟢" : "⚪";
+				}
+
+				const name = this._ce("span", "pm-feature__name", row);
+				name.textContent = `${ability.icon || "✨"} ${ability.name}`;
+
+				if (ability.uses?.max > 0 && ability.uses?.current > 0) {
+					const useBtn = this._ce("button", "pm-feature__use-btn", row);
+					useBtn.textContent = "Use";
+					useBtn.addEventListener("click", (e) => {
+						e.stopPropagation();
+						if (ability.uses.current > 0) {
+							ability.uses.current--;
+							this._renderFeaturesQuick();
+							this._logActivity(ability.icon || "✨", `Used ${ability.name}`);
+						}
+					});
+				}
+			});
+		}
 	}
 
 	_renderResources () {
 		const hitDice = this._state.getHitDice();
 		const resources = this._state.getResources();
-		if (!Object.keys(hitDice).length && !resources.length) return;
+		const sp = this._state.getSorceryPoints();
+		const hasSp = sp.max > 0;
+		const settings = this._state.getSettings?.() || {};
+		const hasTgtt = settings.enableTgtt;
+		const staminaMax = hasTgtt ? (this._state.getStaminaMax?.() || 0) : 0;
+
+		if (!Object.keys(hitDice).length && !resources.length && !hasSp && !staminaMax) return;
 
 		const card = this._makeCard(this._elActionsHub, "🎲", "Resources");
 		const list = this._ce("div", "pm-resources", card);
+
+		// Sorcery points
+		if (hasSp) {
+			const row = this._ce("div", "pm-resource", list);
+			const name = this._ce("span", "pm-resource__name", row);
+			name.textContent = "Sorcery Points";
+			if (sp.max <= 20) {
+				const pips = this._ce("div", "pm-resource__pips", row);
+				for (let i = 0; i < sp.max; i++) {
+					const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < sp.current ? "filled" : "empty"}`, pips);
+					pip.style.color = i < sp.current ? "var(--cs-accent-amethyst, #a855f7)" : "";
+					this._makeClickable(pip, `Sorcery Point ${i + 1}`, () => {
+						const cur = this._state.getSorceryPoints();
+						if (i < cur.current) {
+							this._state.setSorceryPoints({current: cur.current - 1, max: cur.max});
+						} else {
+							this._state.setSorceryPoints({current: Math.min(cur.max, cur.current + 1), max: cur.max});
+						}
+						this._renderResources();
+					});
+				}
+			} else {
+				const text = this._ce("span", "pm-resource__text", row);
+				text.textContent = `${sp.current}/${sp.max}`;
+			}
+		}
+
+		// TGTT Stamina
+		if (staminaMax > 0) {
+			const staminaCur = this._state.getStaminaCurrent?.() || 0;
+			const row = this._ce("div", "pm-resource", list);
+			const name = this._ce("span", "pm-resource__name", row);
+			name.textContent = "⚔️ Stamina";
+			const pips = this._ce("div", "pm-resource__pips", row);
+			for (let i = 0; i < staminaMax; i++) {
+				const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < staminaCur ? "filled" : "empty"}`, pips);
+				pip.style.color = i < staminaCur ? "var(--cs-accent-amber, #f59e0b)" : "";
+			}
+		}
 
 		// Hit dice
 		Object.entries(hitDice).forEach(([die, data]) => {
@@ -1348,6 +1432,17 @@ export class CharacterSheetPlayMode {
 	_renderGearDrawer (container) {
 		const items = this._state.getItems();
 
+		// Attunement summary
+		const attunedItems = this._state.getAttunedItems?.() || [];
+		if (attunedItems.length) {
+			const attCard = this._makeCard(container, "✨", `Attuned (${attunedItems.length}/3)`);
+			attunedItems.forEach(item => {
+				const row = this._ce("div", "pm-skill", attCard);
+				const name = this._ce("span", "pm-skill__name", row);
+				name.textContent = item.name;
+			});
+		}
+
 		// Currency
 		const coins = ["cp", "sp", "ep", "gp", "pp"].filter(c => this._state.getCurrency(c) > 0);
 		if (coins.length) {
@@ -1374,6 +1469,11 @@ export class CharacterSheetPlayMode {
 					const qty = this._ce("span", "pm-attack__type", row);
 					qty.textContent = `×${item.quantity}`;
 				}
+				// Charges
+				if (item.charges?.max > 0) {
+					const charges = this._ce("span", "pm-card__badge", row);
+					charges.textContent = `${item.charges.current}/${item.charges.max} charges`;
+				}
 			});
 		}
 
@@ -1384,9 +1484,13 @@ export class CharacterSheetPlayMode {
 				const row = this._ce("div", "pm-skill", allCard);
 				const name = this._ce("span", "pm-skill__name", row);
 				name.textContent = item.name;
-				if (item.quantity > 1) {
-					const qty = this._ce("span", "pm-skill__mod", row);
-					qty.textContent = `×${item.quantity}`;
+				const meta = [];
+				if (item.quantity > 1) meta.push(`×${item.quantity}`);
+				if (item.attuned) meta.push("✨");
+				if (item.charges?.max > 0) meta.push(`${item.charges.current}/${item.charges.max}`);
+				if (meta.length) {
+					const info = this._ce("span", "pm-skill__mod", row);
+					info.textContent = meta.join(" · ");
 				}
 			});
 		} else {
