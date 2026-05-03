@@ -205,6 +205,20 @@ export class CharacterSheetPlayMode {
 		const walkSpeed = typeof speed === "object" ? speed.walk : speed;
 		this._renderVitalChip(wrap, "🏃", `${walkSpeed || 30}ft`, "Speed", () => this._showBreakdown("speed"));
 
+		// Additional speed types (fly, swim, climb, burrow)
+		const speedTypes = [
+			{type: "fly", icon: "🦅", label: "Fly"},
+			{type: "swim", icon: "🏊", label: "Swim"},
+			{type: "climb", icon: "🧗", label: "Climb"},
+			{type: "burrow", icon: "🕳️", label: "Burrow"},
+		];
+		speedTypes.forEach(({type, icon, label}) => {
+			const val = this._state.getSpeed?.(type);
+			if (val && val > 0) {
+				this._renderVitalChip(wrap, icon, `${val}ft`, label);
+			}
+		});
+
 		// Prof bonus
 		const prof = this._state.getProficiencyBonus();
 		this._renderVitalChip(wrap, "🎯", `+${prof}`, "Prof");
@@ -539,18 +553,22 @@ export class CharacterSheetPlayMode {
 
 		const grid = this._ce("div", "pm-condition-grid", panel);
 		const currentConditions = this._state.getConditionNames?.() || [];
+		const conditionImmunities = this._state.getConditionImmunities?.() || [];
 
 		STANDARD_CONDITIONS.forEach(cond => {
 			const already = currentConditions.includes(cond);
-			const btn = this._ce("button", `pm-condition-grid__btn ${already ? "pm-condition-grid__btn--active" : ""}`, grid);
-			btn.textContent = cond;
-			btn.disabled = already;
-			btn.addEventListener("click", () => {
-				this._state.addCondition(cond);
-				overlay.remove();
-				this._logActivity("⚠️", `Added condition: ${cond}`);
-				this._renderStatusBar();
-			});
+			const immune = conditionImmunities.includes(cond.toLowerCase());
+			const btn = this._ce("button", `pm-condition-grid__btn ${already ? "pm-condition-grid__btn--active" : ""} ${immune ? "pm-condition-grid__btn--immune" : ""}`, grid);
+			btn.textContent = immune ? `${cond} (immune)` : cond;
+			btn.disabled = already || immune;
+			if (!already && !immune) {
+				btn.addEventListener("click", () => {
+					this._state.addCondition(cond);
+					overlay.remove();
+					this._logActivity("⚠️", `Added condition: ${cond}`);
+					this._renderStatusBar();
+				});
+			}
 		});
 
 		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", panel);
@@ -568,8 +586,9 @@ export class CharacterSheetPlayMode {
 		const resistances = this._state.getResistances();
 		const immunities = this._state.getImmunities();
 		const vulnerabilities = this._state.getVulnerabilities();
+		const condImmunities = this._state.getConditionImmunities?.() || [];
 
-		if (!resistances.length && !immunities.length && !vulnerabilities.length) return;
+		if (!resistances.length && !immunities.length && !vulnerabilities.length && !condImmunities.length) return;
 
 		const wrap = this._ce("div", "pm-defenses", parent);
 
@@ -577,7 +596,14 @@ export class CharacterSheetPlayMode {
 			immunities.forEach(d => {
 				const tag = this._ce("span", "pm-defenses__tag pm-defenses__tag--immune", wrap);
 				tag.textContent = `🛡 ${d}`;
-				tag.title = `Immune to ${d}`;
+				tag.title = `Immune to ${d} damage`;
+			});
+		}
+		if (condImmunities.length) {
+			condImmunities.forEach(c => {
+				const tag = this._ce("span", "pm-defenses__tag pm-defenses__tag--cond-immune", wrap);
+				tag.textContent = `🚫 ${c}`;
+				tag.title = `Immune to ${c} condition`;
 			});
 		}
 		if (resistances.length) {
@@ -955,6 +981,12 @@ export class CharacterSheetPlayMode {
 			const type = this._ce("span", "pm-attack__type", row);
 			type.textContent = attack.damageType || "";
 
+			// Attack range
+			if (attack.range) {
+				const range = this._ce("span", "pm-attack__range", row);
+				range.textContent = attack.range;
+			}
+
 			// Weapon mastery badge (XPHB 2024)
 			const masteries = this._state.getWeaponMasteries();
 			const masteryKey = `${attack.name}|${attack.source || ""}`;
@@ -1049,6 +1081,30 @@ export class CharacterSheetPlayMode {
 			}
 		}
 
+		// Pact Magic slots (Warlock)
+		const pact = this._state.getPactSlots();
+		if (pact.max > 0) {
+			const pactRow = this._ce("div", "pm-slots", card);
+			const pactWrap = this._ce("div", "pm-slots__level", pactRow);
+			const pactLabel = this._ce("span", "pm-slots__label pm-slots__label--pact", pactWrap);
+			pactLabel.textContent = `Pact (${pact.level})`;
+			const pactPips = this._ce("div", "pm-slots__pips", pactWrap);
+
+			for (let i = 0; i < pact.max; i++) {
+				const pip = this._ce("span", `pm-slots__pip pm-slots__pip--${i < pact.current ? "filled" : "empty"}`, pactPips);
+				pip.style.color = i < pact.current ? "var(--cs-accent-amethyst, #a855f7)" : "";
+				this._makeClickable(pip, `Pact slot ${i + 1} (${i < pact.current ? "use" : "restore"})`, () => {
+					const cur = this._state.getPactSlots();
+					if (i < cur.current) {
+						this._state.setPactSlotsCurrent(cur.current - 1);
+					} else {
+						this._state.setPactSlotsCurrent(Math.min(cur.max, cur.current + 1));
+					}
+					this._renderSpellsQuick();
+				});
+			}
+		}
+
 		// Cantrips
 		const cantrips = spells.filter(s => s.level === 0);
 		if (cantrips.length) {
@@ -1089,6 +1145,9 @@ export class CharacterSheetPlayMode {
 		if (spell.school) parts.push(spell.school);
 		if (spell.concentration) parts.push("conc.");
 		if (spell.ritual) parts.push("🕯️ ritual");
+		if (spell.components) parts.push(spell.components);
+		if (spell.range) parts.push(spell.range);
+		if (spell.duration) parts.push(spell.duration);
 		meta.textContent = parts.join(" · ");
 
 		if (spell.level > 0) {
@@ -1515,12 +1574,29 @@ export class CharacterSheetPlayMode {
 		Object.entries(grouped).forEach(([source, feats]) => {
 			const card = this._makeCard(container, "📜", source);
 			feats.forEach(f => {
-				const row = this._ce("div", "pm-feature", card);
-				const name = this._ce("span", "pm-feature__name", row);
+				const row = this._ce("div", "pm-feature pm-feature--expandable", card);
+				const header = this._ce("div", "pm-feature__header", row);
+				const name = this._ce("span", "pm-feature__name", header);
 				name.textContent = f.name;
 				if (f.uses?.max > 0) {
-					const uses = this._ce("span", "pm-card__badge", row);
+					const uses = this._ce("span", "pm-card__badge", header);
 					uses.textContent = `${f.uses.current}/${f.uses.max}`;
+				}
+
+				// Expandable description
+				if (f.description || f.entries) {
+					const descText = f.description || (Array.isArray(f.entries) ? f.entries.filter(e => typeof e === "string").join("\n") : "");
+					if (descText) {
+						const desc = this._ce("div", "pm-feature__desc", row);
+						desc.textContent = descText;
+						desc.style.display = "none";
+
+						this._makeClickable(header, `Toggle description for ${f.name}`, () => {
+							const showing = desc.style.display !== "none";
+							desc.style.display = showing ? "none" : "block";
+							row.classList.toggle("pm-feature--expanded", !showing);
+						});
+					}
 				}
 			});
 		});
@@ -1613,6 +1689,18 @@ export class CharacterSheetPlayMode {
 
 	_castSpell (spell) {
 		if (spell.level === 0) {
+			// Cantrip concentration check
+			if (spell.concentration && this._state.isConcentrating?.()) {
+				this._promptConcentrationBreak(spell, () => {
+					this._state.setConcentration?.({name: spell.name, level: 0});
+					this._logActivity("✨", `Cast ${spell.name} (cantrip, concentration)`);
+					this._renderStatusBar();
+				});
+				return;
+			}
+			if (spell.concentration) {
+				this._state.setConcentration?.({name: spell.name, level: 0});
+			}
 			this._logActivity("✨", `Cast ${spell.name} (cantrip)`);
 			return;
 		}
@@ -1625,24 +1713,89 @@ export class CharacterSheetPlayMode {
 			if (max > 0) available.push({level: lvl, current: cur, max});
 		}
 
+		// Also check Pact Magic slots
+		const pact = this._state.getPactSlots();
+		if (pact.max > 0 && pact.level >= spell.level && pact.current > 0) {
+			available.push({level: pact.level, current: pact.current, max: pact.max, isPact: true});
+		}
+
 		if (!available.length || !available.some(s => s.current > 0)) {
 			JqueryUtil?.doToast?.({type: "warning", content: `No spell slots available to cast ${spell.name}!`});
 			return;
 		}
 
-		// If only one level available, cast immediately
-		if (available.length === 1 || (available.filter(s => s.current > 0).length === 1)) {
-			const slot = available.find(s => s.current > 0);
-			if (slot) {
-				this._state.setSpellSlotCurrent(slot.level, slot.current - 1);
-				this._logActivity("✨", `Cast ${spell.name} (level ${slot.level})`);
-				this._renderSpellsQuick();
-			}
+		// If only one slot source, cast immediately
+		const usable = available.filter(s => s.current > 0);
+		if (usable.length === 1) {
+			this._executeCast(spell, usable[0]);
 			return;
 		}
 
 		// Show upcast picker inline
 		this._showUpcastPicker(spell, available);
+	}
+
+	_executeCast (spell, slot) {
+		// Concentration check before casting
+		if (spell.concentration && this._state.isConcentrating?.()) {
+			this._promptConcentrationBreak(spell, () => {
+				this._doExecuteCast(spell, slot);
+			});
+			return;
+		}
+		this._doExecuteCast(spell, slot);
+	}
+
+	_doExecuteCast (spell, slot) {
+		if (slot.isPact) {
+			this._state.setPactSlotsCurrent(slot.current - 1);
+		} else {
+			this._state.setSpellSlotCurrent(slot.level, slot.current - 1);
+		}
+
+		// Set concentration
+		if (spell.concentration) {
+			this._state.setConcentration?.({name: spell.name, level: slot.level});
+		}
+
+		const slotLabel = slot.isPact ? `pact slot (lvl ${slot.level})` : (slot.level === spell.level ? `level ${slot.level}` : `upcast level ${slot.level}`);
+		this._logActivity("✨", `Cast ${spell.name} (${slotLabel})`);
+		this._renderSpellsQuick();
+		this._renderStatusBar();
+	}
+
+	_promptConcentrationBreak (newSpell, onConfirm) {
+		const concentrating = this._state.getActiveStates().find(s => s.type === "concentration" && s.active);
+		const currentName = concentrating?.name || "a spell";
+
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const title = this._ce("div", "pm-modal__title", panel);
+		title.textContent = "🔮 Already Concentrating";
+
+		const desc = this._ce("div", "pm-modal__subtitle", panel);
+		desc.textContent = `You are concentrating on ${currentName}. Casting ${newSpell.name} will break concentration.`;
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Keep Concentration";
+
+		const castBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		castBtn.textContent = "Cast & Break";
+
+		cancelBtn.addEventListener("click", () => overlay.remove());
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+
+		castBtn.addEventListener("click", () => {
+			overlay.remove();
+			this._state.breakConcentration?.();
+			this._logActivity("🔮", `Broke concentration on ${currentName}`);
+			onConfirm();
+		});
+
+		document.body.appendChild(overlay);
 	}
 
 	_showUpcastPicker (spell, slots) {
@@ -1662,7 +1815,8 @@ export class CharacterSheetPlayMode {
 			btn.disabled = slot.current <= 0;
 
 			const lvl = this._ce("span", "pm-upcast__level", btn);
-			lvl.textContent = slot.level === spell.level ? `${slot.level}st` : `${slot.level}${slot.level === 2 ? "nd" : slot.level === 3 ? "rd" : "th"}`;
+			const ordinal = slot.level === 1 ? "1st" : slot.level === 2 ? "2nd" : slot.level === 3 ? "3rd" : `${slot.level}th`;
+			lvl.textContent = slot.isPact ? `Pact (${ordinal})` : ordinal;
 
 			const pips = this._ce("span", "pm-upcast__pips", btn);
 			for (let i = 0; i < slot.max; i++) {
@@ -1670,7 +1824,7 @@ export class CharacterSheetPlayMode {
 				pip.textContent = i < slot.current ? "●" : "○";
 			}
 
-			if (slot.level > spell.level) {
+			if (slot.level > spell.level && !slot.isPact) {
 				const tag = this._ce("span", "pm-upcast__tag", btn);
 				tag.textContent = "upcast";
 			}
@@ -1678,10 +1832,7 @@ export class CharacterSheetPlayMode {
 			if (slot.current > 0) {
 				btn.addEventListener("click", () => {
 					overlay.remove();
-					this._state.setSpellSlotCurrent(slot.level, slot.current - 1);
-					const label = slot.level === spell.level ? `level ${slot.level}` : `upcast level ${slot.level}`;
-					this._logActivity("✨", `Cast ${spell.name} (${label})`);
-					this._renderSpellsQuick();
+					this._executeCast(spell, slot);
 				});
 			}
 		});
