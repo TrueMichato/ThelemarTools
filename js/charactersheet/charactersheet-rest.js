@@ -542,6 +542,11 @@ class CharacterSheetRest {
 				if (calcs.hasGamblerSpellcasting) {
 					this._showGamblerPreparedRollModal();
 				}
+
+				// Auto-popup scribing memorization after long rest (Spell Scribing Adept)
+				if (calcs.hasSpellScribingAdept && calcs.scribingSpellbookCount > 0) {
+					this._showScribingMemorizeModal();
+				}
 		});
 
 		ee`<div class="charsheet__modal-footer">
@@ -705,6 +710,81 @@ class CharacterSheetRest {
 		});
 
 		btnClose.addEventListener("click", () => doClose(true));
+	}
+
+	/**
+	 * Show modal to memorize a spell from the scribing spellbook after a long rest.
+	 * "You can memorize one spell from your spellbook after you finish a long rest,
+	 *  by spending 10 minutes studying your spellbook."
+	 */
+	async _showScribingMemorizeModal () {
+		const spellbook = this._state.getScribingSpellbook();
+		if (!spellbook.length) return;
+
+		const currentMemo = this._state.getScribingMemorizedSpell();
+		const maxLevel = this._state.getScribingMaxSpellLevel();
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "📖 Scribing Spellbook — Memorize Spell",
+			isMinHeight0: true,
+		});
+
+		modalInner.insertAdjacentHTML("beforeend", `
+			<p class="mb-2 ve-small">After finishing your long rest, you spend 10 minutes studying your spellbook. Choose one spell to memorize (cast with Charisma using your spell slots).</p>
+			${currentMemo ? `<p class="ve-small ve-muted mb-2">Currently memorized: <strong>${currentMemo.name}</strong></p>` : ""}
+		`);
+
+		const list = e_({outer: `<div style="max-height: 300px; overflow-y: auto;"></div>`});
+		let selectedId = currentMemo?.id || null;
+
+		const renderList = () => {
+			list.innerHTML = "";
+			spellbook.forEach(spell => {
+				const tooHigh = spell.level > maxLevel;
+				const isSelected = spell.id === selectedId;
+				const school = Parser.spSchoolAbvToFull?.(spell.school) || spell.school || "";
+				const item = e_({outer: `
+					<div class="ve-flex-v-center p-2 clickable ${isSelected ? "list-multi-selected" : ""} ${tooHigh ? "ve-muted" : ""}" style="border-bottom: 1px solid var(--cs-border);">
+						<div class="ve-flex-col ve-flex-1">
+							<div>${spell.name} ${isSelected ? "⭐" : ""}</div>
+							<div class="ve-small ve-muted">Level ${spell.level} ${school}</div>
+						</div>
+						${tooHigh ? `<span class="ve-small ve-muted">Level too high</span>` : ""}
+					</div>
+				`});
+				if (!tooHigh) {
+					item.addEventListener("click", () => {
+						selectedId = isSelected ? null : spell.id;
+						renderList();
+					});
+				}
+				list.append(item);
+			});
+		};
+		renderList();
+		modalInner.append(list);
+
+		const footer = e_({outer: `<div class="ve-flex-v-center ve-flex-h-right mt-3 gap-2"></div>`});
+		const btnSkip = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Skip"});
+		btnSkip.addEventListener("click", () => doClose(false));
+		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "📖 Memorize"});
+		btnConfirm.addEventListener("click", () => {
+			if (selectedId) {
+				this._state.setScribingMemorizedSpell(selectedId);
+			} else {
+				this._state.clearScribingMemorizedSpell();
+			}
+			this._page.saveCharacter();
+			this._page.renderCharacter();
+			doClose(true);
+			const memoSpell = spellbook.find(s => s.id === selectedId);
+			JqueryUtil.doToast({
+				type: "success",
+				content: memoSpell ? `📖 Memorized: ${memoSpell.name}` : "📖 Cleared memorized spell",
+			});
+		});
+		footer.append(btnSkip, btnConfirm);
+		modalInner.append(footer);
 	}
 }
 

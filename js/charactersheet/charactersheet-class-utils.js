@@ -458,6 +458,22 @@ class CharacterSheetClassUtils {
 			.some(name => String(name).toLowerCase() === "divine soul");
 	}
 
+	/**
+	 * Get the number of spells a known-caster can swap on level-up at the given level.
+	 * Per RAW, Sorcerer/Bard/Ranger/Warlock can swap 1 spell per level-up starting at level 2.
+	 * Prepared casters don't use this — they freely swap via the Spells tab.
+	 * @param {string} className
+	 * @param {string} classSource
+	 * @param {number} newLevel - The level being gained
+	 * @returns {number} Number of swaps allowed (0 or 1)
+	 */
+	static getSpellSwapCount (className, classSource, newLevel) {
+		if (newLevel < 2) return 0;
+		const knownCasters = ["Sorcerer", "Bard", "Ranger", "Warlock"];
+		if (!knownCasters.includes(className)) return 0;
+		return 1;
+	}
+
 	static normalizeDivineSoulAffinity (choice) {
 		if (!choice) return null;
 

@@ -66,12 +66,10 @@ class CharacterSheetBuilder {
 	// Check if race uses 2024 ASI rules (ASI comes from background, not race)
 	_raceUses2024ASI () {
 		if (!this._selectedRace) return false;
-		// Only 2024 species (XPHB) truly have no ASI from race
-		// Races with ability: [{choose: ...}] are NOT 2024 — they have choose-based ASI
-		if (this._is2024Edition(this._selectedRace)) return true;
-		if (!this._selectedRace.ability) return true;
-		// If race only has choose entries, it still provides ASI (just player chooses)
-		return false;
+		// Data-driven: if the race has ability data, it provides its own ASI (even if source is 2024-era like TGTT)
+		if (this._selectedRace.ability && this._selectedRace.ability.length) return false;
+		// No ability data — ASI comes from background (true 2024 species or races without bonuses)
+		return true;
 	}
 
 	// Check if background provides ASI (2024 backgrounds)
@@ -266,7 +264,7 @@ class CharacterSheetBuilder {
 
 	async _nextStep () {
 		// Validate current step before proceeding
-		if (!this._validateCurrentStep()) return;
+		if (!await this._validateCurrentStep()) return;
 
 		// Apply current step's choices
 		this._applyCurrentStep();
@@ -279,7 +277,7 @@ class CharacterSheetBuilder {
 		}
 	}
 
-	_validateCurrentStep () {
+	async _validateCurrentStep () {
 		switch (this._currentStep) {
 			case 1: // Race
 				if (!this._selectedRace) {
@@ -402,21 +400,25 @@ class CharacterSheetBuilder {
 					JqueryUtil.doToast({type: "warning", content: "Please choose a Divine Soul affinity before finishing spell selection."});
 					return false;
 				}
-				// Spellbook casters (Wizard) must fill their spellbook
+				// Build a list of incomplete spell selections for a single skip confirmation
+				const missing = [];
 				if (knownInfo.isSpellbookCaster && knownInfo.spellbookCount > 0 && this._selectedSpellbookSpells.length < knownInfo.spellbookCount) {
-					JqueryUtil.doToast({type: "warning", content: `Please select ${knownInfo.spellbookCount} spellbook spells (currently ${this._selectedSpellbookSpells.length}).`});
-					return false;
+					missing.push(`${knownInfo.spellbookCount - this._selectedSpellbookSpells.length} spellbook spell(s)`);
 				}
-				// Known-spell casters (Bard, Sorcerer, Warlock, Ranger)
 				if (!knownInfo.isSpellbookCaster && knownInfo.spellCount > 0 && this._selectedKnownSpells.length < knownInfo.spellCount) {
-					JqueryUtil.doToast({type: "warning", content: `Please select ${knownInfo.spellCount} spells (currently ${this._selectedKnownSpells.length}).`});
-					return false;
+					missing.push(`${knownInfo.spellCount - this._selectedKnownSpells.length} spell(s)`);
 				}
 				if (knownInfo.cantripCount > 0 && this._selectedKnownCantrips.length < knownInfo.cantripCount) {
-					JqueryUtil.doToast({type: "warning", content: `Please select ${knownInfo.cantripCount} cantrips (currently ${this._selectedKnownCantrips.length}).`});
-					return false;
+					missing.push(`${knownInfo.cantripCount - this._selectedKnownCantrips.length} cantrip(s)`);
 				}
-				return true;
+				if (missing.length === 0) return true;
+				const confirmed = await InputUiUtil.pGetUserBoolean({
+					title: "Skip Spell Selection?",
+					htmlDescription: `You still need to choose ${missing.join(" and ")}. You can pick them later on the Spells tab.`,
+					textYes: "Skip",
+					textNo: "Go Back",
+				});
+				return !!confirmed;
 			}
 
 			default:

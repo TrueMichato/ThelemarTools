@@ -3310,10 +3310,16 @@ class CharacterSheetQuickBuild {
 
 		const sourceFiltered = this._page.getFilteredSpellData();
 
+		// Resolve subclass/subclassChoice from current selections (may have been updated in subclass step
+		// after knownCasterInfo was captured at step-build time)
+		const subclassKey = `${className}_${classSource}`;
+		const resolvedSubclass = this._selections.subclasses[subclassKey] || knownCasterInfo.subclass;
+		const resolvedSubclassChoice = this._selections.subclassChoices[subclassKey] || knownCasterInfo.subclassChoice;
+
 		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
 			className,
-			subclass: knownCasterInfo.subclass,
-			subclassChoice: knownCasterInfo.subclassChoice,
+			subclass: resolvedSubclass,
+			subclassChoice: resolvedSubclassChoice,
 		});
 
 		const section = CharacterSheetSpellPicker.renderKnownSpellPicker({
@@ -3324,7 +3330,7 @@ class CharacterSheetQuickBuild {
 			maxSpellLevel,
 			allSpells: sourceFiltered,
 			knownSpellIds,
-			subclass: knownCasterInfo.subclass,
+			subclass: resolvedSubclass,
 			additionalClassNames,
 			onSelect: (spells, cantrips) => {
 				this._selections.knownSpells = spells;

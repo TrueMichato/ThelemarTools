@@ -211,7 +211,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 	});
 
 	it("should ignore silence for Subtle Spell casts", () => {
-		state.hasCondition = jest.fn(condition => condition === "Silenced");
+		state.addCondition({name: "Silenced", source: "HB"});
 		const subtleFireball = {
 			...SAMPLE_SPELLS.fireball,
 			components: {v: true, s: true, m: true},
@@ -222,14 +222,15 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			subtleFireball,
 			null,
 		);
-		expect(normalConstraint).toContain("silenced");
+		expect(normalConstraint.block).toContain("silenced");
 
 		const subtleConstraint = spells._checkCastingConstraints(
 			{name: "Fireball", source: "XPHB", components: {v: true, s: true}},
 			subtleFireball,
 			{key: "subtle", name: "Subtle Spell", cost: 1},
 		);
-		expect(subtleConstraint).toBeNull();
+		expect(subtleConstraint.block).toBeNull();
+		expect(subtleConstraint.checks).toEqual([]);
 	});
 
 	it("should annotate Bestowed Spell range conversion", async () => {

@@ -3300,6 +3300,11 @@ class CharacterSheetState {
 				gamblerLastTableRoll: null, // {roll, effect, timestamp}
 				gamblerExtraLuckUsed: 0, // Uses of Extra Luck (L9) today
 				gamblerMasterFortuneUsed: 0, // Uses of Master of Fortune nat-1-to-20 (L17) today
+				// Spell Scribing Adept (TGTT) — mini-spellbook for Bard/Sorcerer/Warlock
+				scribingSpellbook: [], // [{id, name, source, level, school, ...}]
+				scribingMemorizedSpellId: null, // ID of currently memorized spell
+				scribingClass: null, // "Bard", "Sorcerer", or "Warlock"
+				pendingScribingPicks: 0, // Number of initial spells to pick for scribing spellbook
 			},
 
 			// Inventory
@@ -9006,6 +9011,114 @@ class CharacterSheetState {
 		this._data.spellcasting.gamblerLastBet = null;
 		this._data.spellcasting.gamblerLastTableRoll = null;
 	}
+
+	// ==========================================
+	// Spell Scribing Adept (TGTT Feat)
+	// ==========================================
+
+	getScribingSpellbook () {
+		return [...(this._data.spellcasting.scribingSpellbook || [])];
+	}
+
+	addScribingSpell (spell) {
+		if (!this._data.spellcasting.scribingSpellbook) this._data.spellcasting.scribingSpellbook = [];
+		const existing = this._data.spellcasting.scribingSpellbook.find(
+			s => s.name === spell.name && s.source === spell.source,
+		);
+		if (existing) return false;
+		this._data.spellcasting.scribingSpellbook.push({
+			id: spell.id || CryptUtil.uid(),
+			name: spell.name,
+			source: spell.source,
+			level: spell.level,
+			school: spell.school || null,
+			castingTime: spell.castingTime || "",
+			range: spell.range || "",
+			duration: spell.duration || "",
+			components: spell.components || "",
+		});
+		return true;
+	}
+
+	removeScribingSpell (spellId) {
+		if (!this._data.spellcasting.scribingSpellbook) return;
+		this._data.spellcasting.scribingSpellbook = this._data.spellcasting.scribingSpellbook.filter(
+			s => s.id !== spellId && `${s.name}|${s.source}` !== spellId,
+		);
+		// If the removed spell was memorized, clear memorization
+		if (this._data.spellcasting.scribingMemorizedSpellId === spellId) {
+			this.clearScribingMemorizedSpell();
+		}
+	}
+
+	getScribingMemorizedSpell () {
+		const id = this._data.spellcasting.scribingMemorizedSpellId;
+		if (!id) return null;
+		return (this._data.spellcasting.scribingSpellbook || []).find(s => s.id === id) || null;
+	}
+
+	setScribingMemorizedSpell (spellId) {
+		// Remove old memorized spell from known spells
+		const oldMemo = this.getScribingMemorizedSpell();
+		if (oldMemo) {
+			this._data.spellcasting.spellsKnown = this._data.spellcasting.spellsKnown.filter(
+				s => s.sourceFeature !== "Spell Scribing Adept (Memorized)",
+			);
+		}
+		// Set new memorized spell
+		this._data.spellcasting.scribingMemorizedSpellId = spellId;
+		// Add the new memorized spell to known spells
+		const newMemo = this.getScribingMemorizedSpell();
+		if (newMemo) {
+			this.addSpell({
+				name: newMemo.name,
+				source: newMemo.source,
+				level: newMemo.level,
+				school: newMemo.school,
+				prepared: true,
+				alwaysPrepared: true,
+				sourceFeature: "Spell Scribing Adept (Memorized)",
+				sourceClass: this.getScribingClass(),
+				castingTime: newMemo.castingTime,
+				range: newMemo.range,
+				duration: newMemo.duration,
+				components: newMemo.components,
+			});
+		}
+	}
+
+	clearScribingMemorizedSpell () {
+		// Remove memorized spell from known spells
+		this._data.spellcasting.spellsKnown = this._data.spellcasting.spellsKnown.filter(
+			s => s.sourceFeature !== "Spell Scribing Adept (Memorized)",
+		);
+		this._data.spellcasting.scribingMemorizedSpellId = null;
+	}
+
+	getScribingClass () {
+		return this._data.spellcasting.scribingClass || null;
+	}
+
+	setScribingClass (className) {
+		this._data.spellcasting.scribingClass = className;
+	}
+
+	getScribingMaxSpellLevel () {
+		const scribingClass = this.getScribingClass();
+		if (!scribingClass) return 0;
+		const cls = (this._data.classes || []).find(c => c.name === scribingClass);
+		if (!cls) return 0;
+		return Math.min(9, Math.ceil(cls.level / 2));
+	}
+
+	getPendingScribingPicks () {
+		return this._data.spellcasting.pendingScribingPicks || 0;
+	}
+
+	setPendingScribingPicks (count) {
+		this._data.spellcasting.pendingScribingPicks = count;
+	}
+
 	// #endregion
 	// #endregion
 
@@ -16050,6 +16163,22 @@ class CharacterSheetState {
 			calculations.hasLoreMastery = true;
 		}
 
+		// Spell Scribing Adept (TGTT)
+		// - Choose Bard/Sorcerer/Warlock class, get spellbook with 2 L1 spells
+		// - Memorize 1 spell after long rest (10 min study)
+		// - Cast memorized spell using spell slots, always uses CHA
+		// - Copy new spells from scrolls/books: 50 gp/level, 2 hr/level
+		// - Max copyable spell level = ceil(chosen class level / 2)
+		if (this.hasFeat("Spell Scribing Adept")) {
+			calculations.hasSpellScribingAdept = true;
+			calculations.scribingClass = this.getScribingClass();
+			calculations.scribingSpellbookCount = this.getScribingSpellbook().length;
+			calculations.scribingMaxSpellLevel = this.getScribingMaxSpellLevel();
+			calculations.scribingMemorizedSpell = this.getScribingMemorizedSpell();
+			calculations.scribingCopyGoldPerLevel = 50;
+			calculations.scribingCopyHoursPerLevel = 2;
+		}
+
 		// =====================================================
 		// TGTT BATTLE TACTICS
 		// =====================================================
@@ -21117,6 +21246,17 @@ class CharacterSheetState {
 		if (!this.hasConditionExact(condObj.name, condObj.source)) {
 			this._data.conditions.push(condObj);
 			this._applyConditionEffects(condObj.name, condObj.source);
+
+			// Auto-break concentration if the condition causes incapacitation
+			// RAW: Incapacitated creatures can't concentrate (PHB/XPHB)
+			if (this._data.concentrating) {
+				const condDef = CharacterSheetState.getConditionEffects(condObj.name, condObj.source);
+				const isIncapacitating = condDef?.effects?.some(e => e.type === "incapacitated" && e.value);
+				if (isIncapacitating) {
+					this.breakConcentration();
+				}
+			}
+
 			return true;
 		}
 		return false;
@@ -21271,6 +21411,34 @@ class CharacterSheetState {
 	 */
 	getConditionStates () {
 		return this._data.activeStates.filter(s => s.isCondition);
+	}
+
+	/**
+	 * Get all active spellcasting constraints from conditions.
+	 * Scans condition effects for cantCast, verbalConstraint, somaticConstraint types.
+	 * @returns {{verbal: Array<{value: string, conditionName: string}>, somatic: Array<{value: string, conditionName: string}>}}
+	 *   value is "banned"/"check" for constraints, or "banned" for cantCast
+	 */
+	getCastingConstraints () {
+		const verbal = [];
+		const somatic = [];
+
+		for (const state of this._data.activeStates) {
+			if (!state.active || !state.isCondition) continue;
+			const effects = state.customEffects || [];
+			for (const effect of effects) {
+				const condName = state.conditionName || state.name;
+				if (effect.type === "cantCast" && effect.target === "verbal") {
+					verbal.push({value: "banned", conditionName: condName});
+				} else if (effect.type === "verbalConstraint") {
+					verbal.push({value: effect.value, conditionName: condName});
+				} else if (effect.type === "somaticConstraint") {
+					somatic.push({value: effect.value, conditionName: condName});
+				}
+			}
+		}
+
+		return {verbal, somatic};
 	}
 
 	/**
@@ -22617,6 +22785,16 @@ class CharacterSheetState {
 			}
 		}
 
+		// ====================
+		// TGTT Feat: Spell Scribing Adept
+		// Sets the chosen class for the scribing spellbook
+		// ====================
+		const scribingClass = feat.choices?.scribingClass || feat._featChoices?.scribingClass;
+		if (feat.name === "Spell Scribing Adept" && scribingClass) {
+			this.setScribingClass(scribingClass);
+			this.setPendingScribingPicks(2); // 2 initial 1st-level spells
+		}
+
 		return true;
 	}
 
@@ -22662,6 +22840,13 @@ class CharacterSheetState {
 				if (feat.choices.languages?.length) {
 					feat.choices.languages.forEach(lang => this.removeLanguage(lang));
 				}
+			}
+
+			// Clean up Spell Scribing Adept data
+			if (feat.name === "Spell Scribing Adept") {
+				this.clearScribingMemorizedSpell();
+				this._data.spellcasting.scribingSpellbook = [];
+				this._data.spellcasting.scribingClass = null;
 			}
 		}
 
@@ -30165,6 +30350,7 @@ class CharacterSheetState {
 			icon: "💫",
 			description: "Can't take actions or reactions",
 			effects: [
+				{type: "incapacitated", value: true},
 				{type: "note", value: "Cannot take actions or reactions"},
 			],
 		},

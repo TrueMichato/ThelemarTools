@@ -287,3 +287,101 @@ describe("Multiclass per-class max spell level", () => {
 		expect(CharacterSheetClassUtils.getMaxSpellLevelFromProgression("full", 9)).toBe(5);
 	});
 });
+
+// ==========================================================================
+// getAdditionalSpellListClasses — Divine Soul Cleric spell access
+// ==========================================================================
+describe("getAdditionalSpellListClasses", () => {
+	const divineSoulSubclass = {
+		name: "Divine Soul",
+		shortName: "Divine Soul",
+		source: "XGE",
+		additionalSpells: [
+			{name: "Good", known: {"1": ["cure wounds|PHB"]}},
+			{name: "Evil", known: {"1": ["inflict wounds|PHB"]}},
+		],
+	};
+
+	it("returns ['Cleric'] for Divine Soul Sorcerer with valid affinity", () => {
+		const result = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+			className: "Sorcerer",
+			subclass: divineSoulSubclass,
+			subclassChoice: {name: "Good", key: "good"},
+		});
+		expect(result).toEqual(["Cleric"]);
+	});
+
+	it("returns [] for Divine Soul Sorcerer without affinity", () => {
+		const result = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+			className: "Sorcerer",
+			subclass: divineSoulSubclass,
+			subclassChoice: null,
+		});
+		expect(result).toEqual([]);
+	});
+
+	it("returns [] for non-Divine-Soul sorcerer subclass", () => {
+		const result = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+			className: "Sorcerer",
+			subclass: {name: "Aberrant Mind", shortName: "Aberrant Mind", source: "TCE"},
+			subclassChoice: null,
+		});
+		expect(result).toEqual([]);
+	});
+
+	it("returns [] for non-Sorcerer class", () => {
+		const result = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+			className: "Wizard",
+			subclass: {name: "Some Subclass", source: "PHB"},
+		});
+		expect(result).toEqual([]);
+	});
+
+	it("returns [] when no arguments provided", () => {
+		expect(CharacterSheetClassUtils.getAdditionalSpellListClasses()).toEqual([]);
+		expect(CharacterSheetClassUtils.getAdditionalSpellListClasses({})).toEqual([]);
+	});
+});
+
+// ==========================================================================
+// Divine Soul spell filtering integration
+// ==========================================================================
+describe("Divine Soul spell filtering with additionalClassNames", () => {
+	const clericOnlySpell = mockSpell("Cure Wounds", {
+		fromClassList: [{name: "Cleric", source: "PHB"}],
+	});
+
+	const sorcererSpell = mockSpell("Fire Bolt", {
+		fromClassList: [{name: "Sorcerer", source: "PHB"}],
+	});
+
+	const sharedSpell = mockSpell("Guidance", {
+		fromClassList: [
+			{name: "Cleric", source: "PHB"},
+			{name: "Druid", source: "PHB"},
+		],
+	});
+
+	it("Cleric-only spell is accessible via additionalClassNames", () => {
+		const additionalClassNames = ["Cleric"];
+		const isAvailable = CharacterSheetClassUtils.spellIsForClass(clericOnlySpell, "Sorcerer")
+			|| additionalClassNames.some(cls => CharacterSheetClassUtils.spellIsForClass(clericOnlySpell, cls));
+		expect(isAvailable).toBe(true);
+	});
+
+	it("Cleric-only spell is NOT accessible without additionalClassNames", () => {
+		const isAvailable = CharacterSheetClassUtils.spellIsForClass(clericOnlySpell, "Sorcerer");
+		expect(isAvailable).toBe(false);
+	});
+
+	it("Sorcerer spell is accessible regardless of additionalClassNames", () => {
+		expect(CharacterSheetClassUtils.spellIsForClass(sorcererSpell, "Sorcerer")).toBe(true);
+	});
+
+	it("Shared Cleric/Druid spell is accessible via additionalClassNames", () => {
+		const additionalClassNames = ["Cleric"];
+		const isAvailable = CharacterSheetClassUtils.spellIsForClass(sharedSpell, "Sorcerer")
+			|| additionalClassNames.some(cls => CharacterSheetClassUtils.spellIsForClass(sharedSpell, cls));
+		expect(isAvailable).toBe(true);
+	});
+});
