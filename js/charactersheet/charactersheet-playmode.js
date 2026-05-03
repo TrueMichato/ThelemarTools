@@ -217,6 +217,13 @@ export class CharacterSheetPlayMode {
 		const current = hpInfo.current;
 		const max = hpInfo.max;
 		const temp = hpInfo.temp;
+
+		// Death saves mode when HP = 0
+		if (current <= 0) {
+			this._renderDeathSaves(hpWrap);
+			return;
+		}
+
 		const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
 
 		const bar = this._ce("div", "pm-status__hp-bar", hpWrap);
@@ -235,7 +242,7 @@ export class CharacterSheetPlayMode {
 		const text = this._ce("span", "pm-status__hp-text", bar);
 		text.textContent = temp > 0 ? `${current}+${temp}/${max}` : `${current}/${max}`;
 
-		// Heal/Damage buttons
+		// Heal/Damage/TempHP buttons
 		const btns = this._ce("div", "pm-status__hp-btns", hpWrap);
 
 		const healBtn = this._ce("button", "pm-status__hp-btn pm-status__hp-btn--heal", btns);
@@ -247,6 +254,116 @@ export class CharacterSheetPlayMode {
 		dmgBtn.textContent = "−";
 		dmgBtn.title = "Take Damage";
 		dmgBtn.addEventListener("click", () => this._promptHpChange("damage"));
+
+		const tempBtn = this._ce("button", "pm-status__hp-btn pm-status__hp-btn--temp", btns);
+		tempBtn.textContent = "🛡";
+		tempBtn.title = "Set Temp HP";
+		tempBtn.addEventListener("click", () => this._promptTempHp());
+	}
+
+	_renderDeathSaves (parent) {
+		const ds = this._state.getDeathSaves();
+		const wrap = this._ce("div", "pm-death-saves", parent);
+
+		const label = this._ce("div", "pm-death-saves__label", wrap);
+		label.textContent = "💀 Death Saves";
+
+		// Successes
+		const succRow = this._ce("div", "pm-death-saves__row", wrap);
+		const succLabel = this._ce("span", "pm-death-saves__type pm-death-saves__type--success", succRow);
+		succLabel.textContent = "✅";
+		for (let i = 0; i < 3; i++) {
+			const cb = this._ce("span", `pm-death-saves__pip ${i < ds.successes ? "pm-death-saves__pip--filled pm-death-saves__pip--success" : ""}`, succRow);
+			cb.textContent = i < ds.successes ? "●" : "○";
+			this._makeClickable(cb, `Death save success ${i + 1}`, () => {
+				if (i < ds.successes) {
+					this._state.setDeathSaveSuccesses(i);
+				} else {
+					this._state.addDeathSaveSuccess();
+				}
+				this._logActivity("💀", `Death save: ${this._state.getDeathSaves().successes}/3 successes`);
+				this._renderStatusBar();
+			});
+		}
+
+		// Failures
+		const failRow = this._ce("div", "pm-death-saves__row", wrap);
+		const failLabel = this._ce("span", "pm-death-saves__type pm-death-saves__type--failure", failRow);
+		failLabel.textContent = "❌";
+		for (let i = 0; i < 3; i++) {
+			const cb = this._ce("span", `pm-death-saves__pip ${i < ds.failures ? "pm-death-saves__pip--filled pm-death-saves__pip--failure" : ""}`, failRow);
+			cb.textContent = i < ds.failures ? "●" : "○";
+			this._makeClickable(cb, `Death save failure ${i + 1}`, () => {
+				if (i < ds.failures) {
+					this._state.setDeathSaveFailures(i);
+				} else {
+					this._state.addDeathSaveFailure();
+				}
+				this._logActivity("💀", `Death save: ${this._state.getDeathSaves().failures}/3 failures`);
+				this._renderStatusBar();
+			});
+		}
+
+		// Reset + Heal buttons
+		const actionRow = this._ce("div", "pm-death-saves__actions", wrap);
+		const resetBtn = this._ce("button", "pm-death-saves__btn", actionRow);
+		resetBtn.textContent = "🔄 Reset";
+		resetBtn.addEventListener("click", () => {
+			this._state.resetDeathSaves();
+			this._renderStatusBar();
+		});
+
+		const healBtn = this._ce("button", "pm-death-saves__btn pm-death-saves__btn--heal", actionRow);
+		healBtn.textContent = "💚 Heal";
+		healBtn.addEventListener("click", () => this._promptHpChange("heal"));
+	}
+
+	_promptTempHp () {
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const title = this._ce("div", "pm-modal__title", panel);
+		title.textContent = "🛡️ Set Temporary HP";
+
+		const row = this._ce("div", "pm-modal__row", panel);
+		const input = this._ce("input", "pm-modal__input", row);
+		input.type = "number";
+		input.min = "0";
+		input.value = this._state.getTempHp() || "";
+		input.placeholder = "Temp HP";
+
+		const info = this._ce("div", "pm-modal__subtitle", panel);
+		info.textContent = "Temp HP doesn't stack — the higher value wins.";
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const applyBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		applyBtn.textContent = "Apply";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		const apply = () => {
+			const val = parseInt(input.value);
+			if (isNaN(val) || val < 0) return;
+			const current = this._state.getTempHp();
+			// Temp HP doesn't stack — take the higher value
+			this._state.setTempHp(Math.max(val, current));
+			close();
+			this._logActivity("🛡️", `Set temp HP to ${Math.max(val, current)}`);
+			this._renderStatusBar();
+		};
+
+		applyBtn.addEventListener("click", apply);
+		input.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") apply();
+			if (e.key === "Escape") close();
+		});
+
+		document.body.appendChild(overlay);
+		input.focus();
 	}
 
 	_renderVitalChip (parent, icon, value, label, onClick) {
@@ -341,6 +458,14 @@ export class CharacterSheetPlayMode {
 			});
 		});
 
+		// Add condition button
+		const addCondBtn = this._ce("span", "pm-status__indicator pm-status__indicator--add-condition", parent);
+		addCondBtn.textContent = "➕ Condition";
+		this._makeClickable(addCondBtn, "Add a condition", () => this._showAddConditionPicker());
+
+		// Defenses summary (resistances, immunities, vulnerabilities)
+		this._renderDefenses(parent);
+
 		// Exhaustion
 		const exhaustion = this._state.getExhaustion();
 		if (exhaustion > 0) {
@@ -397,6 +522,80 @@ export class CharacterSheetPlayMode {
 		}
 	}
 
+	// ─── Condition Picker ────────────────────────────────────────
+
+	_showAddConditionPicker () {
+		const STANDARD_CONDITIONS = [
+			"Blinded", "Charmed", "Deafened", "Frightened", "Grappled",
+			"Incapacitated", "Invisible", "Paralyzed", "Petrified",
+			"Poisoned", "Prone", "Restrained", "Stunned", "Unconscious",
+		];
+
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const title = this._ce("div", "pm-modal__title", panel);
+		title.textContent = "➕ Add Condition";
+
+		const grid = this._ce("div", "pm-condition-grid", panel);
+		const currentConditions = this._state.getConditionNames?.() || [];
+
+		STANDARD_CONDITIONS.forEach(cond => {
+			const already = currentConditions.includes(cond);
+			const btn = this._ce("button", `pm-condition-grid__btn ${already ? "pm-condition-grid__btn--active" : ""}`, grid);
+			btn.textContent = cond;
+			btn.disabled = already;
+			btn.addEventListener("click", () => {
+				this._state.addCondition(cond);
+				overlay.remove();
+				this._logActivity("⚠️", `Added condition: ${cond}`);
+				this._renderStatusBar();
+			});
+		});
+
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", panel);
+		cancelBtn.textContent = "Cancel";
+		cancelBtn.style.marginTop = "1rem";
+		cancelBtn.addEventListener("click", () => overlay.remove());
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+
+		document.body.appendChild(overlay);
+	}
+
+	// ─── Defenses Summary ────────────────────────────────────────
+
+	_renderDefenses (parent) {
+		const resistances = this._state.getResistances();
+		const immunities = this._state.getImmunities();
+		const vulnerabilities = this._state.getVulnerabilities();
+
+		if (!resistances.length && !immunities.length && !vulnerabilities.length) return;
+
+		const wrap = this._ce("div", "pm-defenses", parent);
+
+		if (immunities.length) {
+			immunities.forEach(d => {
+				const tag = this._ce("span", "pm-defenses__tag pm-defenses__tag--immune", wrap);
+				tag.textContent = `🛡 ${d}`;
+				tag.title = `Immune to ${d}`;
+			});
+		}
+		if (resistances.length) {
+			resistances.forEach(d => {
+				const tag = this._ce("span", "pm-defenses__tag pm-defenses__tag--resist", wrap);
+				tag.textContent = `½ ${d}`;
+				tag.title = `Resistant to ${d}`;
+			});
+		}
+		if (vulnerabilities.length) {
+			vulnerabilities.forEach(d => {
+				const tag = this._ce("span", "pm-defenses__tag pm-defenses__tag--vuln", wrap);
+				tag.textContent = `×2 ${d}`;
+				tag.title = `Vulnerable to ${d}`;
+			});
+		}
+	}
+
 	// ─── Character Panel (Left Sidebar) ─────────────────────────
 
 	_renderCharacterPanel () {
@@ -406,6 +605,7 @@ export class CharacterSheetPlayMode {
 		this._renderAbilities();
 		this._renderSaves();
 		this._renderPassives();
+		this._renderSenses();
 		this._renderSkills();
 		this._renderProficiencies();
 	}
@@ -469,6 +669,26 @@ export class CharacterSheetPlayMode {
 			elVal.textContent = p.value;
 			const elLabel = this._ce("span", "pm-passive__label", cell);
 			elLabel.textContent = p.label;
+		});
+	}
+
+	_renderSenses () {
+		const senses = this._state.getSenses();
+		if (!senses || !Object.keys(senses).length) return;
+
+		const entries = [];
+		if (senses.darkvision) entries.push(`👁️ Darkvision ${senses.darkvision}ft`);
+		if (senses.blindsight) entries.push(`🔵 Blindsight ${senses.blindsight}ft`);
+		if (senses.tremorsense) entries.push(`🟤 Tremorsense ${senses.tremorsense}ft`);
+		if (senses.truesight) entries.push(`🟣 Truesight ${senses.truesight}ft`);
+		if (!entries.length) return;
+
+		const card = this._makeCard(this._elCharPanel, "👁️", "Senses");
+		const row = this._ce("div", "pm-passives", card);
+		entries.forEach(text => {
+			const cell = this._ce("div", "pm-passive", row);
+			cell.textContent = text;
+			cell.style.fontSize = "var(--cs-text-sm, 0.875rem)";
 		});
 	}
 
@@ -565,6 +785,7 @@ export class CharacterSheetPlayMode {
 
 		this._renderFavoritesBar();
 		this._renderActionEconomy();
+		this._renderActiveStates();
 		this._renderAttacks();
 		this._renderSpellsQuick();
 		this._renderFeaturesQuick();
@@ -640,6 +861,40 @@ export class CharacterSheetPlayMode {
 			this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
 			this._renderActionEconomy();
 			this._logActivity("⏱️", "New turn started");
+		});
+	}
+
+	_renderActiveStates () {
+		const allStates = this._state.getActiveStates();
+		// Filter to show toggleable states the character has access to (not concentration — that's in status bar)
+		const toggleable = allStates.filter(s => s.type !== "concentration" && !s.isCondition);
+		if (!toggleable.length) return;
+
+		const card = this._makeCard(this._elActionsHub, "🔥", "Active States");
+		const grid = this._ce("div", "pm-active-states", card);
+
+		toggleable.forEach(state => {
+			const el = this._ce("div", `pm-active-state ${state.active ? "pm-active-state--on" : ""}`, grid);
+
+			const toggle = this._ce("span", "pm-active-state__toggle", el);
+			toggle.textContent = state.active ? "🟢" : "⚪";
+
+			const name = this._ce("span", "pm-active-state__name", el);
+			name.textContent = state.name || state.type;
+
+			// Duration (if in combat)
+			if (state.active && state.roundsRemaining != null && state.roundsRemaining > 0) {
+				const dur = this._ce("span", "pm-active-state__duration", el);
+				dur.textContent = `${state.roundsRemaining}r`;
+			}
+
+			this._makeClickable(el, `${state.active ? "Deactivate" : "Activate"} ${state.name || state.type}`, () => {
+				this._state.setActiveState(state.id, !state.active);
+				this._logActivity("🔥", `${!state.active ? "Activated" : "Deactivated"} ${state.name || state.type}`);
+				// Re-render both status bar (conditions/concentration may change) and actions hub
+				this._renderStatusBar();
+				this._renderActionsHub();
+			});
 		});
 	}
 
@@ -740,6 +995,21 @@ export class CharacterSheetPlayMode {
 
 		const card = this._makeCard(this._elActionsHub, "✨", "Spells");
 
+		// Spell DC + Attack Bonus header
+		const spellDc = this._state.getSpellDc?.();
+		const spellAtk = this._state.getSpellAttackBonus?.();
+		if (spellDc || spellAtk) {
+			const dcRow = this._ce("div", "pm-spell-stats", card);
+			if (spellDc) {
+				const dcTag = this._ce("span", "pm-spell-stats__tag", dcRow);
+				dcTag.textContent = `DC ${spellDc}`;
+			}
+			if (spellAtk != null) {
+				const atkTag = this._ce("span", "pm-spell-stats__tag", dcRow);
+				atkTag.textContent = `${this._fmtMod(spellAtk)} attack`;
+			}
+		}
+
 		// Spell slot pips
 		const slotData = this._state.getSpellSlots();
 		const hasSlots = Object.keys(slotData).some(k => (slotData[k]?.max || 0) > 0);
@@ -809,6 +1079,7 @@ export class CharacterSheetPlayMode {
 		const parts = [];
 		if (spell.school) parts.push(spell.school);
 		if (spell.concentration) parts.push("conc.");
+		if (spell.ritual) parts.push("🕯️ ritual");
 		meta.textContent = parts.join(" · ");
 
 		if (spell.level > 0) {
@@ -1037,22 +1308,41 @@ export class CharacterSheetPlayMode {
 			return;
 		}
 
-		// Group by level
-		const byLevel = {};
-		spells.forEach(s => {
-			const lvl = s.level ?? 0;
-			(byLevel[lvl] = byLevel[lvl] || []).push(s);
-		});
+		// Search input
+		const searchInput = this._ce("input", "pm-drawer-search", container);
+		searchInput.type = "text";
+		searchInput.placeholder = "🔍 Search spells...";
 
-		Object.keys(byLevel).sort((a, b) => a - b).forEach(lvl => {
-			const header = this._ce("div", "pm-card__header", container);
-			const title = this._ce("span", "pm-card__title", header);
-			title.textContent = lvl === "0" ? "Cantrips" : `Level ${lvl}`;
-			const badge = this._ce("span", "pm-card__badge", header);
-			badge.textContent = `${byLevel[lvl].length}`;
+		const spellsContainer = this._ce("div", null, container);
 
-			byLevel[lvl].forEach(spell => this._renderSpellRow(container, spell));
-		});
+		const renderFiltered = (filter = "") => {
+			spellsContainer.innerHTML = "";
+			const lower = filter.toLowerCase();
+			const filtered = filter ? spells.filter(s => s.name.toLowerCase().includes(lower)) : spells;
+
+			const byLevel = {};
+			filtered.forEach(s => {
+				const lvl = s.level ?? 0;
+				(byLevel[lvl] = byLevel[lvl] || []).push(s);
+			});
+
+			Object.keys(byLevel).sort((a, b) => a - b).forEach(lvl => {
+				const header = this._ce("div", "pm-card__header", spellsContainer);
+				const title = this._ce("span", "pm-card__title", header);
+				title.textContent = lvl === "0" ? "Cantrips" : `Level ${lvl}`;
+				const badge = this._ce("span", "pm-card__badge", header);
+				badge.textContent = `${byLevel[lvl].length}`;
+
+				byLevel[lvl].forEach(spell => this._renderSpellRow(spellsContainer, spell));
+			});
+
+			if (!filtered.length) {
+				this._renderEmptyState(spellsContainer, "🔍", `No spells matching "${filter}"`);
+			}
+		};
+
+		searchInput.addEventListener("input", () => renderFiltered(searchInput.value));
+		renderFiltered();
 	}
 
 	_renderGearDrawer (container) {
