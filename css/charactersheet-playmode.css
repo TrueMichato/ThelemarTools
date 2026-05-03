@@ -2035,6 +2035,150 @@
 }
 
 /* ========================================================================
+   Rendered Content (5etools Renderer output)
+   ======================================================================== */
+.pm-rendered-content {
+	font-size: var(--cs-text-sm, 0.875rem);
+	color: var(--cs-text-secondary, #94a3b8);
+	line-height: 1.6;
+}
+
+.pm-rendered-content p {
+	margin: 0.3em 0;
+}
+
+.pm-rendered-content ul,
+.pm-rendered-content ol {
+	margin: 0.3em 0;
+	padding-left: 1.5em;
+}
+
+/* ========================================================================
+   Spell Description Expandable
+   ======================================================================== */
+.pm-spell-wrapper {
+	border-bottom: 1px solid var(--cs-border, rgba(255, 255, 255, 0.05));
+}
+
+.pm-spell__info {
+	padding: 1px 4px;
+	border: none;
+	background: transparent;
+	cursor: pointer;
+	font-size: 0.75rem;
+	opacity: 0.6;
+	transition: opacity var(--cs-transition-fast, 150ms);
+}
+
+.pm-spell__info:hover {
+	opacity: 1;
+}
+
+.pm-spell__desc {
+	padding: 8px 12px;
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.03));
+	border-radius: var(--cs-radius-sm, 6px);
+	margin: 4px 0 8px;
+}
+
+.pm-spell__details {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, #64748b);
+	margin-bottom: 6px;
+}
+
+.pm-spell__upcast-info {
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.05));
+	font-size: var(--cs-text-sm, 0.875rem);
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+/* Spell prepared toggle */
+.pm-spell__prep {
+	cursor: pointer;
+	font-size: 0.8rem;
+	flex-shrink: 0;
+	margin-right: 4px;
+}
+
+.pm-spell__prep--always {
+	cursor: default;
+	opacity: 0.5;
+}
+
+/* ========================================================================
+   Interactive Item Row
+   ======================================================================== */
+.pm-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--cs-border, rgba(255, 255, 255, 0.05));
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.pm-item__toggle {
+	cursor: pointer;
+	font-size: 0.8rem;
+	flex-shrink: 0;
+}
+
+.pm-item__toggle--active {
+	filter: none;
+}
+
+.pm-item__name {
+	flex: 1;
+	color: var(--cs-text-primary, #f1f5f9);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.pm-item__meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+.pm-item__attune {
+	cursor: pointer;
+	font-size: 0.8rem;
+}
+
+.pm-item__attune--active {
+	color: var(--cs-accent-amber, #f59e0b);
+}
+
+.pm-item__charges {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-accent-sky, #38bdf8);
+	cursor: pointer;
+	padding: 1px 4px;
+	background: var(--cs-accent-sky-light, rgba(56, 189, 248, 0.1));
+	border-radius: 4px;
+}
+
+.pm-item__qty {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, #64748b);
+}
+
+.pm-item__use-btn {
+	padding: 1px 6px;
+	border-radius: 4px;
+	border: 1px solid var(--cs-accent-emerald, #10b981);
+	background: transparent;
+	color: var(--cs-accent-emerald, #10b981);
+	font-size: var(--cs-text-xs, 0.75rem);
+	cursor: pointer;
+}
+
+/* ========================================================================
    Z-Index Scale:
    200 = sticky status bar (sits above content scroll)
    500 = drawer backdrop (modal layer)
