@@ -684,6 +684,19 @@ export class CharacterSheetPlayMode {
 
 	_renderAbilities () {
 		const card = this._makeCard(this._elCharPanel, "💪", "Abilities");
+
+		// D1: edit button in card header
+		const abilCardHeader = card.querySelector(".pm-card__header");
+		if (abilCardHeader) {
+			const editBtn = this._ce("button", "pm-card__action-btn", abilCardHeader);
+			editBtn.textContent = "✏️ Edit";
+			editBtn.title = "Edit base ability scores";
+			editBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._showEditAbilitiesModal();
+			});
+		}
+
 		const grid = this._ce("div", "pm-abilities", card);
 
 		ABILITIES.forEach(abl => {
@@ -805,6 +818,12 @@ export class CharacterSheetPlayMode {
 				this._renderSkills();
 			});
 		}
+
+		// D2: "+ Add Custom Skill" button
+		const addSkillBtn = this._ce("button", "pm-skill__add-btn", card);
+		addSkillBtn.textContent = "+ Add Custom Skill";
+		addSkillBtn.title = "Add a custom skill with a custom name and ability";
+		addSkillBtn.addEventListener("click", () => this._showAddCustomSkillModal());
 	}
 
 	_renderSkillRow (parent, skill) {
@@ -816,7 +835,22 @@ export class CharacterSheetPlayMode {
 		else if (skill.profLevel >= 1) cls += " pm-skill--proficient";
 
 		const row = this._ce("div", cls, parent);
-		this._ce("span", "pm-skill__prof-dot", row);
+
+		// D2: Proficiency cycle toggle (none → proficient → expertise → none)
+		const PROF_ICONS = ["○", "●", "◆"];
+		const PROF_TITLES = ["Not proficient — click to set proficient", "Proficient — click to set expertise", "Expertise — click to remove proficiency"];
+		const profToggle = this._ce("button", "pm-skill__prof-toggle", row);
+		profToggle.textContent = PROF_ICONS[Math.min(skill.profLevel, 2)];
+		profToggle.title = PROF_TITLES[Math.min(skill.profLevel, 2)];
+		profToggle.setAttribute("aria-label", PROF_TITLES[Math.min(skill.profLevel, 2)]);
+		profToggle.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const next = (skill.profLevel + 1) % 3;
+			this._state.setSkillProficiency(skill.key, next);
+			this._logActivity("📋", `${skill.name}: set to ${["none", "proficient", "expertise"][next]}`);
+			this._renderCharacterPanel();
+		});
+
 		const elName = this._ce("span", "pm-skill__name", row);
 		elName.textContent = skill.name;
 		const elAbility = this._ce("span", "pm-skill__ability", row);
@@ -830,6 +864,19 @@ export class CharacterSheetPlayMode {
 	_renderProficiencies () {
 		const profs = this._state.getProficiencies();
 		const card = this._makeCard(this._elCharPanel, "🔰", "Proficiencies");
+
+		// D3: edit button in card header
+		const profCardHeader = card.querySelector(".pm-card__header");
+		if (profCardHeader) {
+			const editBtn = this._ce("button", "pm-card__action-btn", profCardHeader);
+			editBtn.textContent = "✏️ Edit";
+			editBtn.title = "Edit armor, weapon, tool, and language proficiencies";
+			editBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._showEditProficienciesModal();
+			});
+		}
+
 		const list = this._ce("div", "pm-profs__list", card);
 
 		const entries = [
@@ -1086,6 +1133,19 @@ export class CharacterSheetPlayMode {
 					// Simpler: just re-render the whole actions hub
 					this._renderActionsHub();
 				});
+			});
+		}
+
+		// D4: ✏️ Weapon Masteries button — show for XPHB mastery classes
+		const masteryClasses = ["fighter", "barbarian", "paladin", "ranger", "rogue"];
+		const hasMasteryClass = (this._state.getClasses() || []).some(c => masteryClasses.includes((c.name || "").toLowerCase()));
+		if (hasMasteryClass && cardHeader) {
+			const masteryBtn = this._ce("button", "pm-card__action-btn pm-card__action-btn--mastery", cardHeader);
+			masteryBtn.textContent = "✏️ Masteries";
+			masteryBtn.title = "Edit weapon masteries";
+			masteryBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._showWeaponMasteryEditor();
 			});
 		}
 
@@ -1413,9 +1473,25 @@ export class CharacterSheetPlayMode {
 		const features = this._state.getFeatures();
 		// Show features that have limited uses (actionable ones)
 		const actionable = features.filter(f => f.uses && f.uses.max > 0);
-		if (!actionable.length) return;
+
+		// D5: Get custom abilities early so we can use them in the early-return check
+		const customAbilities = this._state.getCustomAbilities?.() || [];
+
+		if (!actionable.length && !customAbilities.length) return;
 
 		const card = this._makeCard(this._elActionsHub, "⚡", "Abilities & Features");
+
+		// D5: "+ Add Custom Ability" button in card header
+		const featCardHeader = card.querySelector(".pm-card__header");
+		if (featCardHeader) {
+			const addCustomBtn = this._ce("button", "pm-card__action-btn", featCardHeader);
+			addCustomBtn.textContent = "+ Custom";
+			addCustomBtn.title = "Add a custom homebrew ability";
+			addCustomBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._showCustomAbilityModal(null, () => this._renderFeaturesQuick());
+			});
+		}
 
 		actionable.slice(0, 12).forEach(feature => {
 			const row = this._ce("div", "pm-feature", card);
@@ -1492,14 +1568,16 @@ export class CharacterSheetPlayMode {
 			this._makeClickable(more, `Show all ${actionable.length} features`, () => this._openDrawerByType("reference"));
 		}
 
-		// Custom abilities (homebrew)
-		const customAbilities = this._state.getCustomAbilities?.() || [];
-		const actionableCustom = customAbilities.filter(a => (a.uses?.max > 0) || a.toggleable);
-		if (actionableCustom.length) {
-			actionableCustom.forEach(ability => {
+		// D5: Custom abilities — show all with CRUD (edit/delete), not just actionable
+		if (customAbilities.length) {
+			const customSectionHeader = this._ce("div", "pm-card__header", card);
+			const customSectionTitle = this._ce("span", "pm-card__badge", customSectionHeader);
+			customSectionTitle.textContent = `Custom (${customAbilities.length})`;
+
+			customAbilities.forEach(ability => {
 				const row = this._ce("div", "pm-feature", card);
 
-				if (ability.toggleable) {
+				if (ability.toggleable || ability.mode === "toggle") {
 					const toggle = this._ce("span", `pm-active-state__toggle`, row);
 					toggle.textContent = ability.active ? "🟢" : "⚪";
 					this._makeClickable(toggle, `${ability.active ? "Deactivate" : "Activate"} ${ability.name}`, (e) => {
@@ -1524,6 +1602,28 @@ export class CharacterSheetPlayMode {
 						this._logActivity(ability.icon || "✨", `Used ${ability.name}`);
 					});
 				}
+
+				// D5: Edit button
+				const editBtn = this._ce("button", "pm-attack__crud-btn pm-attack__edit-btn", row);
+				editBtn.textContent = "✏️";
+				editBtn.title = "Edit ability";
+				editBtn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					this._showCustomAbilityModal(ability, () => this._renderFeaturesQuick());
+				});
+
+				// D5: Delete button
+				const delBtn = this._ce("button", "pm-attack__crud-btn pm-attack__del-btn", row);
+				delBtn.textContent = "🗑";
+				delBtn.title = "Delete ability";
+				delBtn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					this._showConfirmModal(`Delete custom ability "${ability.name}"?`, () => {
+						this._state.removeCustomAbility(ability.id);
+						this._logActivity("🗑", `Deleted custom ability: ${ability.name}`);
+						this._renderFeaturesQuick();
+					});
+				});
 			});
 		}
 	}
@@ -1606,12 +1706,13 @@ export class CharacterSheetPlayMode {
 					const target = fresh.find(h => h.type === hdType);
 					if (!target) return;
 					if (i < target.current) {
-						target.current--;
+						// D9: Show roll dialog instead of direct decrement
+						this._showHitDieRollDialog(target);
 					} else {
 						target.current = Math.min(target.max, target.current + 1);
+						this._state.setHitDice(fresh);
+						this._renderResources();
 					}
-					this._state.setHitDice(fresh);
-					this._renderResources();
 				});
 			}
 		});
@@ -1890,11 +1991,80 @@ export class CharacterSheetPlayMode {
 			});
 		}
 
-		// Quantity
-		if (item.quantity > 1) {
-			const qty = this._ce("span", "pm-item__qty", metaWrap);
-			qty.textContent = `×${item.quantity}`;
-		}
+		// Quantity ± controls (D8)
+		const qty = item.quantity ?? 1;
+		const qtyWrap = this._ce("div", "pm-item__qty-controls", metaWrap);
+
+		const minusBtn = this._ce("button", "pm-item__qty-btn pm-item__qty-btn--minus", qtyWrap);
+		minusBtn.textContent = "➖";
+		minusBtn.title = "Decrease quantity";
+		minusBtn.setAttribute("aria-label", `Decrease quantity of ${item.name}`);
+		minusBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const newQty = qty - 1;
+			if (newQty <= 0) {
+				if (!confirm(`Remove ${item.name} from inventory?`)) return;
+				this._state.setItemQuantity(item.id, 0);
+				this._logActivity("🎒", `Removed ${item.name}`);
+			} else {
+				this._state.setItemQuantity(item.id, newQty);
+				this._logActivity("🎒", `${item.name}: qty ${qty} → ${newQty}`);
+			}
+			this._openDrawerByType("gear");
+		});
+
+		const qtyDisplay = this._ce("span", "pm-item__qty-display", qtyWrap);
+		qtyDisplay.textContent = String(qty);
+		qtyDisplay.title = "Click to set quantity";
+		qtyDisplay.setAttribute("role", "button");
+		qtyDisplay.setAttribute("tabindex", "0");
+		qtyDisplay.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const input = this._ce("input", "pm-item__qty-inline-input");
+			input.type = "number";
+			input.min = "0";
+			input.value = String(qty);
+			input.style.width = "3em";
+			input.style.textAlign = "center";
+			qtyDisplay.replaceWith(input);
+			input.focus();
+			input.select();
+			const commit = () => {
+				const newVal = parseInt(input.value);
+				if (!isNaN(newVal)) {
+					if (newVal <= 0) {
+						if (!confirm(`Remove ${item.name} from inventory?`)) {
+							input.replaceWith(qtyDisplay);
+							return;
+						}
+						this._state.setItemQuantity(item.id, 0);
+						this._logActivity("🎒", `Removed ${item.name}`);
+					} else {
+						this._state.setItemQuantity(item.id, newVal);
+					}
+					this._openDrawerByType("gear");
+				} else {
+					input.replaceWith(qtyDisplay);
+				}
+			};
+			input.addEventListener("blur", commit);
+			input.addEventListener("keydown", (ke) => {
+				if (ke.key === "Enter") { ke.preventDefault(); commit(); }
+				if (ke.key === "Escape") { input.replaceWith(qtyDisplay); }
+			});
+		});
+
+		const plusBtn = this._ce("button", "pm-item__qty-btn pm-item__qty-btn--plus", qtyWrap);
+		plusBtn.textContent = "➕";
+		plusBtn.title = "Increase quantity";
+		plusBtn.setAttribute("aria-label", `Increase quantity of ${item.name}`);
+		plusBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const newQty = qty + 1;
+			this._state.setItemQuantity(item.id, newQty);
+			this._logActivity("🎒", `${item.name}: qty ${qty} → ${newQty}`);
+			this._openDrawerByType("gear");
+		});
 
 		// Consumable use button (potions, scrolls)
 		if (item.consumable || item.type === "P" || item.type === "SC") {
@@ -1992,36 +2162,111 @@ export class CharacterSheetPlayMode {
 
 	_renderNotesDrawer (container) {
 		const entries = [
-			{label: "Personality", field: "personality"},
-			{label: "Ideals", field: "ideals"},
-			{label: "Bonds", field: "bonds"},
-			{label: "Flaws", field: "flaws"},
-			{label: "Backstory", field: "backstory"},
-			{label: "Additional Notes", field: "additional"},
+			{label: "Personality", field: "personality", icon: "😊"},
+			{label: "Ideals", field: "ideals", icon: "⭐"},
+			{label: "Bonds", field: "bonds", icon: "🔗"},
+			{label: "Flaws", field: "flaws", icon: "⚠️"},
+			{label: "Backstory", field: "backstory", icon: "📜"},
+			{label: "Additional Notes", field: "notes", icon: "📝"},
 		];
 
-		let hasAny = false;
 		entries.forEach(e => {
+			const card = this._makeCard(container, e.icon, e.label);
 			const value = this._state.getNote(e.field);
-			if (!value) return;
-			hasAny = true;
-			const card = this._makeCard(container, "📝", e.label);
-			const text = this._ce("div", null, card);
-			text.style.whiteSpace = "pre-wrap";
-			text.style.fontSize = "var(--cs-text-sm, 0.875rem)";
-			text.style.color = "var(--cs-text-secondary, #94a3b8)";
-			text.textContent = value;
-		});
 
-		if (!hasAny) {
-			this._renderEmptyState(container, "📝", "No notes. Add notes from the Notes tab.");
-		}
+			const editIcon = card.querySelector(".pm-card__title");
+			if (editIcon) {
+				const focusBtn = this._ce("span", "pm-notes__edit-icon", editIcon);
+				focusBtn.textContent = " ✏️";
+				focusBtn.title = `Edit ${e.label}`;
+				focusBtn.style.cursor = "pointer";
+				focusBtn.style.opacity = "0.6";
+				focusBtn.style.fontSize = "0.8em";
+			}
+
+			const textareaWrap = this._ce("div", "pm-notes__textarea-wrap", card);
+
+			const textarea = this._ce("textarea", "pm-notes__textarea", textareaWrap);
+			textarea.value = value;
+			textarea.placeholder = `Add ${e.label.toLowerCase()}…`;
+			textarea.rows = e.field === "backstory" || e.field === "notes" ? 6 : 3;
+			textarea.setAttribute("aria-label", e.label);
+
+			const savedIndicator = this._ce("span", "pm-notes__saved", textareaWrap);
+			savedIndicator.textContent = "✓ Saved";
+			savedIndicator.style.display = "none";
+
+			let saveTimer = null;
+			const doSave = () => {
+				this._state.setNote(e.field, textarea.value);
+				savedIndicator.style.display = "inline";
+				savedIndicator.classList.add("pm-notes__saved--visible");
+				clearTimeout(savedIndicator._hideTimer);
+				savedIndicator._hideTimer = setTimeout(() => {
+					savedIndicator.classList.remove("pm-notes__saved--visible");
+					setTimeout(() => { savedIndicator.style.display = "none"; }, 300);
+				}, 1500);
+			};
+
+			textarea.addEventListener("input", () => {
+				clearTimeout(saveTimer);
+				saveTimer = setTimeout(doSave, 300);
+			});
+
+			textarea.addEventListener("blur", () => {
+				clearTimeout(saveTimer);
+				doSave();
+			});
+
+			// Focus textarea when ✏️ icon is clicked
+			const focusBtn = textareaWrap.previousElementSibling?.querySelector?.(".pm-notes__edit-icon");
+			if (focusBtn) {
+				focusBtn.addEventListener("click", () => textarea.focus());
+			}
+		});
 	}
 
 	_renderCompanionsDrawer (container) {
+		// ── D7: Companion / Summon toolbar ──────────────────────
+		const classes = this._state.getClasses() || [];
+		const classNames = classes.map(c => (c.name || "").toLowerCase());
+		const hasDruid = classNames.includes("druid");
+		const hasRanger = classNames.includes("ranger");
+		const hasWarlock = classNames.includes("warlock");
+		const hasArtificer = classNames.includes("artificer");
+		const hasPaladin = classNames.includes("paladin");
+		const hasWizard = classNames.includes("wizard");
+		const hasSubclassMoon = classes.some(c => c.subclass?.name?.toLowerCase().includes("moon"));
+		const hasSubclassDrake = classes.some(c => c.subclass?.name?.toLowerCase().includes("drake"));
+		const hasSubclassSteel = classes.some(c => c.subclass?.name?.toLowerCase().includes("steel"));
+		const hasSubclassBeast = classes.some(c => c.subclass?.name?.toLowerCase().includes("beast"));
+
+		const toolbar = this._ce("div", "pm-companion-toolbar", container);
+
+		const addCompBtn = (icon, label, show, onClick) => {
+			if (!show) return;
+			const btn = this._ce("button", "pm-companion-toolbar__btn", toolbar);
+			btn.textContent = `${icon} ${label}`;
+			btn.title = label;
+			btn.addEventListener("click", onClick);
+		};
+
+		addCompBtn("🦅", "Familiar", hasWarlock || hasWizard, () => this._addBuiltinCompanion("familiar"));
+		addCompBtn("🐻", "Beast Companion", hasRanger || hasSubclassBeast, () => this._addBuiltinCompanion("beast-companion"));
+		addCompBtn("🐉", "Drake", hasSubclassDrake, () => this._addBuiltinCompanion("drake"));
+		addCompBtn("⚙️", "Steel Defender", hasSubclassSteel || hasArtificer, () => this._addBuiltinCompanion("steel-defender"));
+		addCompBtn("🦁", "Wild Shape", hasDruid, () => this._addBuiltinCompanion("wild-shape"));
+		addCompBtn("🌿", "Wild Companion", hasDruid, () => this._addBuiltinCompanion("wild-companion"));
+		addCompBtn("🐴", "Find Steed", hasPaladin, () => this._addBuiltinCompanion("find-steed"));
+		// Always show Custom
+		const customBtn = this._ce("button", "pm-companion-toolbar__btn pm-companion-toolbar__btn--custom", toolbar);
+		customBtn.textContent = "➕ Custom";
+		customBtn.title = "Add a custom companion";
+		customBtn.addEventListener("click", () => this._showCustomCompanionModal());
+
 		const companions = this._state.getCompanions();
 		if (!companions.length) {
-			this._renderEmptyState(container, "🐾", "No companions. Add from the Companions tab.");
+			this._renderEmptyState(container, "🐾", "No companions yet. Use the buttons above to add one.");
 			return;
 		}
 
@@ -2203,6 +2448,104 @@ export class CharacterSheetPlayMode {
 				});
 			}
 		});
+	}
+
+	/** D7: Delegate to existing companion/summon pickers, or show add-custom fallback */
+	_addBuiltinCompanion (type) {
+		const typeToHandler = {
+			"familiar": "_showFamiliarPicker",
+			"beast-companion": "_showBeastCompanionPicker",
+			"drake": "_showDrakePicker",
+			"steel-defender": "_showSteelDefenderPicker",
+			"wild-shape": "_showWildShapePicker",
+			"wild-companion": "_showWildCompanionPicker",
+			"find-steed": "_showFindSteedPicker",
+		};
+		const handlerName = typeToHandler[type];
+		if (handlerName && this._page._companions?.[handlerName]) {
+			this._page._companions[handlerName]();
+		} else {
+			// Fallback: open custom modal pre-filled with type info
+			const typeLabels = {
+				"familiar": "Familiar", "beast-companion": "Beast Companion",
+				"drake": "Drake Companion", "steel-defender": "Steel Defender",
+				"wild-shape": "Wild Shape Form", "wild-companion": "Wild Companion",
+				"find-steed": "Steed",
+			};
+			this._showCustomCompanionModal({prefillType: typeLabels[type] || type});
+		}
+	}
+
+	/** D7: Custom companion creation modal */
+	_showCustomCompanionModal ({prefillType = ""} = {}) {
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const titleEl = this._ce("div", "pm-modal__title", panel);
+		titleEl.textContent = "🐾 Add Companion";
+
+		const row = (label) => {
+			const r = this._ce("div", "pm-modal__row", panel);
+			const lbl = this._ce("label", "pm-modal__label", r);
+			lbl.textContent = label;
+			return r;
+		};
+
+		const nameRow = row("Name");
+		const nameInput = this._ce("input", "pm-modal__input", nameRow);
+		nameInput.placeholder = "e.g. Familiar, Battle Steed…";
+
+		const typeRow = row("Type");
+		const typeInput = this._ce("input", "pm-modal__input", typeRow);
+		typeInput.placeholder = "e.g. beast, familiar, construct…";
+		typeInput.value = prefillType;
+
+		const hpRow = row("Max HP");
+		const hpInput = this._ce("input", "pm-modal__input", hpRow);
+		hpInput.type = "number";
+		hpInput.min = "1";
+		hpInput.value = "10";
+
+		const acRow = row("AC");
+		const acInput = this._ce("input", "pm-modal__input", acRow);
+		acInput.type = "number";
+		acInput.min = "1";
+		acInput.value = "12";
+
+		const speedRow = row("Speed (ft)");
+		const speedInput = this._ce("input", "pm-modal__input", speedRow);
+		speedInput.type = "number";
+		speedInput.min = "0";
+		speedInput.value = "30";
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const addBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		addBtn.textContent = "➕ Add";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		addBtn.addEventListener("click", () => {
+			const name = nameInput.value.trim();
+			if (!name) { nameInput.focus(); return; }
+			const hpMax = parseInt(hpInput.value) || 10;
+			this._state.addCompanion({
+				name,
+				type: typeInput.value.trim() || "custom",
+				hp: {max: hpMax, current: hpMax},
+				ac: parseInt(acInput.value) || 12,
+				speed: {walk: parseInt(speedInput.value) || 30},
+			});
+			this._logActivity("🐾", `Added companion: ${name}`);
+			close();
+			this._openDrawerByType("companions");
+		});
+
+		document.body.appendChild(overlay);
+		nameInput.focus();
 	}
 
 	// ─── Favorites System ───────────────────────────────────────
@@ -4118,6 +4461,340 @@ export class CharacterSheetPlayMode {
 		}
 	}
 
+	// ─── Phase D1: Edit Ability Scores Modal ────────────────────
+
+	_showEditAbilitiesModal () {
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const titleEl = this._ce("div", "pm-modal__title", panel);
+		titleEl.textContent = "💪 Edit Ability Scores";
+
+		const subtitle = this._ce("div", "pm-modal__subtitle", panel);
+		subtitle.textContent = "Edit base scores. Racial, ASI, and item bonuses are applied separately.";
+
+		const inputs = {};
+		ABILITIES.forEach(abl => {
+			const baseScore = this._state.getAbilityBase(abl);
+			const totalScore = this._state.getAbilityScore(abl);
+			const bonus = totalScore - baseScore;
+
+			const row = this._ce("div", "pm-modal__row pm-edit-abilities__row", panel);
+			const lbl = this._ce("label", "pm-modal__label pm-edit-abilities__label", row);
+			lbl.textContent = ABILITY_NAMES[abl];
+
+			const input = this._ce("input", "pm-modal__input pm-edit-abilities__input", row);
+			input.type = "number";
+			input.min = "1";
+			input.max = "30";
+			input.value = baseScore;
+			inputs[abl] = input;
+
+			if (bonus !== 0) {
+				const bonusEl = this._ce("span", "pm-edit-abilities__bonus", row);
+				bonusEl.textContent = `(${bonus > 0 ? "+" : ""}${bonus} bonus → ${totalScore})`;
+			}
+		});
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		saveBtn.textContent = "💾 Save";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		saveBtn.addEventListener("click", () => {
+			let changed = false;
+			ABILITIES.forEach(abl => {
+				const val = parseInt(inputs[abl].value);
+				if (!isNaN(val) && val >= 1 && val <= 30) {
+					this._state.setAbilityBase(abl, val);
+					changed = true;
+				}
+			});
+			if (changed) {
+				this._logActivity("💪", "Updated ability scores");
+				this._renderCharacterPanel();
+				this._renderStatusBar();
+			}
+			close();
+		});
+
+		document.body.appendChild(overlay);
+		inputs.str.focus();
+	}
+
+	// ─── Phase D2: Add Custom Skill Modal ───────────────────────
+
+	_showAddCustomSkillModal () {
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const titleEl = this._ce("div", "pm-modal__title", panel);
+		titleEl.textContent = "➕ Add Custom Skill";
+
+		const nameRow = this._ce("div", "pm-modal__row", panel);
+		const nameLbl = this._ce("label", "pm-modal__label", nameRow);
+		nameLbl.textContent = "Skill Name";
+		const nameInput = this._ce("input", "pm-modal__input", nameRow);
+		nameInput.placeholder = "e.g. Brewing, Navigation, Sailing…";
+
+		const abilRow = this._ce("div", "pm-modal__row", panel);
+		const abilLbl = this._ce("label", "pm-modal__label", abilRow);
+		abilLbl.textContent = "Ability";
+		const abilSelect = this._ce("select", "pm-modal__select", abilRow);
+		ABILITIES.forEach(abl => {
+			const opt = this._ce("option", null, abilSelect);
+			opt.value = abl;
+			opt.textContent = ABILITY_NAMES[abl];
+		});
+
+		const profRow = this._ce("div", "pm-modal__row", panel);
+		const profLbl = this._ce("label", "pm-modal__label", profRow);
+		profLbl.textContent = "Proficiency";
+		const profSelect = this._ce("select", "pm-modal__select", profRow);
+		[["0", "None"], ["1", "Proficient"], ["2", "Expertise"]].forEach(([val, label]) => {
+			const opt = this._ce("option", null, profSelect);
+			opt.value = val;
+			opt.textContent = label;
+		});
+		profSelect.value = "1";
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		saveBtn.textContent = "➕ Add Skill";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		saveBtn.addEventListener("click", () => {
+			const name = nameInput.value.trim();
+			if (!name) { nameInput.focus(); return; }
+			const result = this._state.addCustomSkill(name, abilSelect.value);
+			if (result === false) {
+				nameInput.style.outline = "2px solid var(--cs-danger, #ef4444)";
+				nameInput.title = "A skill with this name already exists";
+				nameInput.focus();
+				return;
+			}
+			const profLevel = parseInt(profSelect.value);
+			if (profLevel > 0) {
+				const key = name.toLowerCase().replace(/\s+/g, "");
+				this._state.setSkillProficiency(key, profLevel);
+			}
+			this._logActivity("📋", `Added custom skill: ${name} (${ABILITY_NAMES[abilSelect.value]})`);
+			close();
+			this._renderCharacterPanel();
+		});
+
+		document.body.appendChild(overlay);
+		nameInput.focus();
+	}
+
+	// ─── Phase D3: Edit Proficiencies Modal ──────────────────────
+
+	_showEditProficienciesModal () {
+		const profs = this._state.getProficiencies();
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const titleEl = this._ce("div", "pm-modal__title", panel);
+		titleEl.textContent = "🔰 Edit Proficiencies";
+
+		const subtitle = this._ce("div", "pm-modal__subtitle", panel);
+		subtitle.textContent = "Enter items separated by commas.";
+
+		const categories = [
+			{key: "armor", label: "Armor", value: profs.armor, placeholder: "e.g. Light Armor, Medium Armor, Shields"},
+			{key: "weapons", label: "Weapons", value: profs.weapons, placeholder: "e.g. Simple Weapons, Longswords"},
+			{key: "tools", label: "Tools", value: profs.tools, placeholder: "e.g. Thieves' Tools, Herbalism Kit"},
+			{key: "languages", label: "Languages", value: profs.languages, placeholder: "e.g. Common, Elvish, Dwarvish"},
+		];
+
+		const inputs = {};
+		categories.forEach(cat => {
+			const row = this._ce("div", "pm-modal__row", panel);
+			const lbl = this._ce("label", "pm-modal__label", row);
+			lbl.textContent = cat.label;
+			const input = this._ce("input", "pm-modal__input", row);
+			input.placeholder = cat.placeholder;
+			input.value = (cat.value || []).map(v => (typeof v === "string" ? v : v.name)).join(", ");
+			inputs[cat.key] = input;
+		});
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		saveBtn.textContent = "💾 Save";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		saveBtn.addEventListener("click", () => {
+			const parse = (str) => str.split(",").map(s => s.trim()).filter(Boolean);
+			// Bulk-replace the proficiency arrays directly (no bulk setter exists in state API)
+			this._state._data.armorProficiencies = parse(inputs.armor.value);
+			this._state._data.weaponProficiencies = parse(inputs.weapons.value);
+			this._state._data.toolProficiencies = parse(inputs.tools.value);
+			this._state._data.languages = parse(inputs.languages.value);
+			this._logActivity("🔰", "Updated proficiencies");
+			close();
+			this._renderCharacterPanel();
+		});
+
+		document.body.appendChild(overlay);
+		inputs.armor.focus();
+	}
+
+	// ─── Phase D5: Custom Ability Modal ─────────────────────────
+
+	_showCustomAbilityModal (existing, onSave) {
+		const isEdit = !!existing;
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal", overlay);
+
+		const titleEl = this._ce("div", "pm-modal__title", panel);
+		titleEl.textContent = isEdit ? "✏️ Edit Custom Ability" : "✨ Add Custom Ability";
+
+		const nameRow = this._ce("div", "pm-modal__row", panel);
+		const nameLbl = this._ce("label", "pm-modal__label", nameRow);
+		nameLbl.textContent = "Name";
+		const nameInput = this._ce("input", "pm-modal__input", nameRow);
+		nameInput.placeholder = "e.g. Bardic Inspiration bonus…";
+		nameInput.value = existing?.name || "";
+
+		const iconRow = this._ce("div", "pm-modal__row", panel);
+		const iconLbl = this._ce("label", "pm-modal__label", iconRow);
+		iconLbl.textContent = "Icon (emoji)";
+		const iconInput = this._ce("input", "pm-modal__input pm-edit-abilities__input", iconRow);
+		iconInput.placeholder = "✨";
+		iconInput.value = existing?.icon || "✨";
+
+		const catRow = this._ce("div", "pm-modal__row", panel);
+		const catLbl = this._ce("label", "pm-modal__label", catRow);
+		catLbl.textContent = "Category";
+		const catSelect = this._ce("select", "pm-modal__select", catRow);
+		["homebrew", "class", "racial", "feat", "item", "other"].forEach(c => {
+			const opt = this._ce("option", null, catSelect);
+			opt.value = c;
+			opt.textContent = c.charAt(0).toUpperCase() + c.slice(1);
+		});
+		catSelect.value = existing?.category || "homebrew";
+
+		const descRow = this._ce("div", "pm-modal__row", panel);
+		const descLbl = this._ce("label", "pm-modal__label", descRow);
+		descLbl.textContent = "Description";
+		const descInput = this._ce("textarea", "pm-modal__input", descRow);
+		descInput.style.cssText = "min-height:70px;resize:vertical;";
+		descInput.placeholder = "What does this ability do?";
+		descInput.value = existing?.description || "";
+
+		const modeRow = this._ce("div", "pm-modal__row", panel);
+		const modeLbl = this._ce("label", "pm-modal__label", modeRow);
+		modeLbl.textContent = "Type";
+		const modeSelect = this._ce("select", "pm-modal__select", modeRow);
+		[["passive", "Passive (always active)"], ["limited", "Limited Uses"], ["toggle", "Toggleable"]].forEach(([val, label]) => {
+			const opt = this._ce("option", null, modeSelect);
+			opt.value = val;
+			opt.textContent = label;
+		});
+		// Determine current mode
+		let initMode = "passive";
+		if (existing) {
+			if (existing.uses?.max > 0) initMode = "limited";
+			else if (existing.toggleable || existing.mode === "toggle") initMode = "toggle";
+			else initMode = existing.mode || "passive";
+		}
+		modeSelect.value = initMode;
+
+		// Limited uses sub-section (shown only for mode=limited)
+		const usesSection = this._ce("div", "pm-edit-abilities__uses-section", panel);
+		usesSection.style.display = initMode === "limited" ? "" : "none";
+
+		const usesRow = this._ce("div", "pm-modal__row", usesSection);
+		const usesLbl = this._ce("label", "pm-modal__label", usesRow);
+		usesLbl.textContent = "Max Uses";
+		const usesInput = this._ce("input", "pm-modal__input pm-edit-abilities__input", usesRow);
+		usesInput.type = "number";
+		usesInput.min = "1";
+		usesInput.value = existing?.uses?.max || 1;
+
+		const rechargeRow = this._ce("div", "pm-modal__row", usesSection);
+		const rechargeLbl = this._ce("label", "pm-modal__label", rechargeRow);
+		rechargeLbl.textContent = "Recharge";
+		const rechargeSelect = this._ce("select", "pm-modal__select", rechargeRow);
+		[["long", "Long Rest"], ["short", "Short Rest"], ["dawn", "At Dawn"], ["never", "Manual Only"]].forEach(([val, label]) => {
+			const opt = this._ce("option", null, rechargeSelect);
+			opt.value = val;
+			opt.textContent = label;
+		});
+		rechargeSelect.value = existing?.uses?.recharge || "long";
+
+		modeSelect.addEventListener("change", () => {
+			usesSection.style.display = modeSelect.value === "limited" ? "" : "none";
+		});
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		saveBtn.textContent = isEdit ? "💾 Save" : "✨ Add";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		saveBtn.addEventListener("click", () => {
+			const name = nameInput.value.trim();
+			if (!name) { nameInput.focus(); return; }
+
+			const mode = modeSelect.value;
+			const updates = {
+				name,
+				icon: iconInput.value.trim() || "✨",
+				description: descInput.value.trim(),
+				category: catSelect.value,
+				mode: mode === "toggle" ? "passive" : mode, // stored as passive for toggle
+				toggleable: mode === "toggle",
+			};
+
+			if (mode === "limited") {
+				updates.uses = {
+					current: isEdit ? (existing?.uses?.current ?? parseInt(usesInput.value) ?? 1) : parseInt(usesInput.value) || 1,
+					max: parseInt(usesInput.value) || 1,
+					recharge: rechargeSelect.value,
+				};
+			} else {
+				updates.uses = null;
+			}
+
+			if (isEdit) {
+				this._state.updateCustomAbility(existing.id, updates);
+				this._logActivity("✏️", `Updated custom ability: ${name}`);
+			} else {
+				this._state.addCustomAbility({
+					...updates,
+					resourceSource: mode === "limited" ? {type: "self"} : null,
+				});
+				this._logActivity("✨", `Added custom ability: ${name}`);
+			}
+
+			close();
+			onSave?.();
+		});
+
+		document.body.appendChild(overlay);
+		nameInput.focus();
+	}
+
 	// ─── Confirm Modal Helper ────────────────────────────────────
 
 	_showConfirmModal (message, onConfirm) {
@@ -4140,6 +4817,183 @@ export class CharacterSheetPlayMode {
 
 		document.body.appendChild(overlay);
 		confirmBtn.focus();
+	}
+
+	/** D9: Show a hit die roll dialog with Roll / Spend Average / Cancel options */
+	_showHitDieRollDialog (hd) {
+		const dieSize = parseInt((hd.type || "d8").replace("d", "")) || 8;
+		const conMod = this._state.getAbilityMod("con");
+		const avgRoll = Math.ceil(dieSize / 2) + 1;
+		const avgHeal = Math.max(1, avgRoll + conMod);
+
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal pm-hitdie-modal", overlay);
+
+		const titleEl = this._ce("div", "pm-modal__title", panel);
+		titleEl.textContent = `🎲 Spend Hit Die (${hd.type})`;
+
+		const formulaEl = this._ce("div", "pm-hitdie-modal__formula", panel);
+		formulaEl.textContent = `Roll ${hd.type} + CON (${conMod >= 0 ? "+" : ""}${conMod})`;
+
+		const resultEl = this._ce("div", "pm-hitdie-modal__result", panel);
+		resultEl.textContent = `Average: ${avgHeal} HP`;
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+
+		const rollBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		rollBtn.textContent = "🎲 Roll";
+		rollBtn.title = `Roll ${hd.type} and heal`;
+
+		const avgBtn = this._ce("button", "pm-modal__btn", btnRow);
+		avgBtn.textContent = `📊 Average (+${avgHeal} HP)`;
+		avgBtn.title = `Spend hit die for average (${avgHeal} HP)`;
+
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		const spendDie = (healAmt) => {
+			const fresh = this._state.getHitDice();
+			const target = fresh.find(h => h.type === hd.type);
+			if (!target || target.current <= 0) { close(); return; }
+			target.current--;
+			this._state.setHitDice(fresh);
+			this._state.heal(healAmt);
+			this._logActivity("🎲", `Spent ${hd.type}: healed ${healAmt} HP`);
+			this._renderResources();
+			close();
+		};
+
+		rollBtn.addEventListener("click", () => {
+			const roll = Math.floor(Math.random() * dieSize) + 1;
+			const total = Math.max(1, roll + conMod);
+			resultEl.textContent = `Rolled ${roll} + ${conMod} = +${total} HP`;
+			resultEl.classList.add("pm-hitdie-modal__result--rolled");
+			rollBtn.textContent = `✅ Confirm (+${total} HP)`;
+			rollBtn.onclick = () => spendDie(total);
+		});
+
+		avgBtn.addEventListener("click", () => {
+			this._state.useHitDie(hd.type);
+			this._logActivity("🎲", `Spent ${hd.type} (average): healed ${avgHeal} HP`);
+			this._renderResources();
+			close();
+		});
+
+		document.body.appendChild(overlay);
+		rollBtn.focus();
+	}
+
+	/** D4: Weapon mastery property editor modal */
+	_showWeaponMasteryEditor () {
+		const MASTERY_PROPS = Object.keys(CharacterSheetState.WEAPON_MASTERY_EFFECTS || {});
+		const masteryPropList = MASTERY_PROPS.length
+			? MASTERY_PROPS
+			: ["Cleave", "Graze", "Nick", "Push", "Sap", "Slow", "Topple", "Vex"];
+
+		const items = this._state.getItems();
+		const equippedWeapons = items.filter(i => i.weapon && i.equipped);
+		const allAttacks = this._state.getAttacks() || [];
+
+		// Gather all weapon sources (equipped items + custom attacks)
+		const weaponEntries = [];
+		const seenKeys = new Set();
+
+		equippedWeapons.forEach(w => {
+			const key = `${w.name}${w.source ? "|" + w.source : ""}`;
+			if (!seenKeys.has(key)) {
+				seenKeys.add(key);
+				weaponEntries.push({key, name: w.name, source: w.source});
+			}
+		});
+
+		allAttacks.forEach(a => {
+			const key = `${a.name}${a.source ? "|" + a.source : ""}`;
+			if (!seenKeys.has(key)) {
+				seenKeys.add(key);
+				weaponEntries.push({key, name: a.name, source: a.source});
+			}
+		});
+
+		const overlay = this._ce("div", "pm-modal-overlay");
+		const panel = this._ce("div", "pm-modal pm-mastery-modal", overlay);
+
+		const titleEl = this._ce("div", "pm-modal__title", panel);
+		titleEl.textContent = "✏️ Weapon Masteries";
+
+		const subtitle = this._ce("div", "pm-modal__subtitle", panel);
+		subtitle.textContent = "Choose a mastery property for each weapon you want to master.";
+
+		if (!weaponEntries.length) {
+			const empty = this._ce("div", "pm-modal__empty", panel);
+			empty.textContent = "No weapons equipped. Equip weapons from your inventory first.";
+		}
+
+		const rows = [];
+		weaponEntries.forEach(entry => {
+			const rowEl = this._ce("div", "pm-mastery-modal__row", panel);
+
+			const enableChk = this._ce("input", "pm-mastery-modal__check", rowEl);
+			enableChk.type = "checkbox";
+			enableChk.id = `pm-mastery-${entry.key}`;
+			enableChk.checked = this._state.getWeaponMasteries().includes(entry.key);
+
+			const lbl = this._ce("label", "pm-mastery-modal__label", rowEl);
+			lbl.htmlFor = `pm-mastery-${entry.key}`;
+			lbl.textContent = entry.name;
+			if (entry.source) {
+				const src = this._ce("span", "pm-mastery-modal__source", lbl);
+				src.textContent = ` (${entry.source})`;
+			}
+
+			const select = this._ce("select", "pm-mastery-modal__select", rowEl);
+			const noneOpt = this._ce("option", null, select);
+			noneOpt.value = "";
+			noneOpt.textContent = "— choose property —";
+			masteryPropList.forEach(prop => {
+				const opt = this._ce("option", null, select);
+				opt.value = prop;
+				opt.textContent = prop;
+			});
+			const existing = this._state.getWeaponMasteryProperty(entry.key);
+			select.value = existing || "";
+			select.disabled = !enableChk.checked;
+
+			enableChk.addEventListener("change", () => {
+				select.disabled = !enableChk.checked;
+				if (!enableChk.checked) select.value = "";
+			});
+
+			rows.push({entry, enableChk, select});
+		});
+
+		const btnRow = this._ce("div", "pm-modal__buttons", panel);
+		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
+		cancelBtn.textContent = "Cancel";
+		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		saveBtn.textContent = "💾 Save";
+
+		const close = () => overlay.remove();
+		cancelBtn.addEventListener("click", close);
+		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+		saveBtn.addEventListener("click", () => {
+			rows.forEach(({entry, enableChk, select}) => {
+				if (enableChk.checked && select.value) {
+					this._state.setWeaponMastery(entry.key, select.value);
+				} else {
+					this._state.setWeaponMastery(entry.key, null);
+				}
+			});
+			this._logActivity("✏️", "Updated weapon masteries");
+			this._renderActionsHub();
+			close();
+		});
+
+		document.body.appendChild(overlay);
 	}
 
 }
