@@ -1985,6 +1985,20 @@
 	padding: 4px 8px;
 }
 
+/* Carry capacity */
+.pm-carry-capacity {
+	font-size: var(--cs-text-xs, 0.75rem);
+	padding: 4px 0;
+	color: var(--cs-text-muted, #64748b);
+}
+
+/* Ritual cast button */
+.pm-spell__cast--ritual {
+	font-size: 0.7rem;
+	padding: 1px 4px;
+	background: var(--cs-bg-card, #0f172a);
+}
+
 /* ========================================================================
    Spell Stats (DC + Attack Bonus header)
    ======================================================================== */
