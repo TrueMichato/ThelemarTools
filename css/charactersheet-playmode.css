@@ -1941,6 +1941,50 @@
 	color: var(--cs-accent-amber, #f59e0b);
 }
 
+/* Attack range */
+.pm-attack__range {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, #64748b);
+}
+
+/* Pact slot label */
+.pm-slots__label--pact {
+	color: var(--cs-accent-amethyst, #a855f7);
+	font-weight: 600;
+}
+
+/* Condition immunity in picker */
+.pm-condition-grid__btn--immune {
+	opacity: 0.3;
+	cursor: not-allowed;
+	text-decoration: line-through;
+}
+
+/* Condition immunity in defenses */
+.pm-defenses__tag--cond-immune {
+	background: var(--cs-accent-amber-light, rgba(245, 158, 11, 0.15));
+	color: var(--cs-accent-amber, #f59e0b);
+}
+
+/* Feature description expansion */
+.pm-feature--expandable .pm-feature__header {
+	cursor: pointer;
+}
+
+.pm-feature__desc {
+	font-size: var(--cs-text-sm, 0.875rem);
+	color: var(--cs-text-secondary, #94a3b8);
+	line-height: 1.5;
+	padding: 8px 0 4px;
+	white-space: pre-wrap;
+}
+
+.pm-feature--expanded {
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.03));
+	border-radius: var(--cs-radius-sm, 6px);
+	padding: 4px 8px;
+}
+
 /* ========================================================================
    Spell Stats (DC + Attack Bonus header)
    ======================================================================== */
