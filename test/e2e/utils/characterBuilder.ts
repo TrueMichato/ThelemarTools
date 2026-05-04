@@ -222,7 +222,7 @@ export const PRESET_FULL_HUNTER_CENTAUR: CharacterPreset = {
 	className: "Ranger",
 	classSource: "TGTT",
 	background: "Outlander",
-	bgSource: "PHB'24",
+	bgSource: "PHB",
 	name: "Kael Wildhoof",
 	skillCount: 3,
 	subclassName: "Hunter",

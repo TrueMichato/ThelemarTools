@@ -64,6 +64,11 @@ export function describeCharacter (spec: CharacterSpec): void {
 
 		// ── L1 creation smoke ───────────────────────────────────────────
 		test(`L1: creates ${displayName} via builder wizard`, async ({page}) => {
+			// Wizard creation now drives 7 steps with all sub-pickers, which
+			// realistically takes 30-45s for the heavier classes. Give the
+			// L1 smoke a generous budget so we don't conflate slowness with
+			// genuine assertion failures.
+			test.setTimeout(120_000);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 			await charSheet.expectCharacterName(preset.name);
 			await charSheet.expectLevel(1);

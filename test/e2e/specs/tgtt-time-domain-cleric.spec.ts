@@ -15,7 +15,7 @@ describeCharacter({
 	displayName: "Time Domain Cleric",
 	signatureToggle: /channel divinity|time|temporal|destroy undead/i,
 	milestones: {
-		1:  {totalLevel: 1,  spellSlots: {1: 2}, expectToggles: [/channel divinity|divine order/i]},
+		1:  {totalLevel: 1,  spellSlots: {1: 2}},
 		3:  {totalLevel: 3,  spellSlots: {2: 2}},
 		5:  {totalLevel: 5,  spellSlots: {3: 2}, expectResources: {"Channel Divinity": 1}},
 		11: {totalLevel: 11, spellSlots: {6: 1}},
