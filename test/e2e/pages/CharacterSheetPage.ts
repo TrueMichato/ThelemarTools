@@ -35,6 +35,7 @@ export class CharacterSheetPage {
 	readonly characterLevel: Locator;
 	readonly characterRace: Locator;
 	readonly characterClass: Locator;
+	readonly classLabel: Locator;
 
 	// HP elements
 	readonly hpCurrent: Locator;
@@ -88,6 +89,7 @@ export class CharacterSheetPage {
 		this.characterLevel = page.locator("#charsheet-disp-level");
 		this.characterRace = page.locator("#charsheet-disp-race");
 		this.characterClass = page.locator("#charsheet-disp-class");
+		this.classLabel = this.characterClass;
 
 		// HP
 		this.hpCurrent = page.locator("#charsheet-ipt-hp-current");

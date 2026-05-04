@@ -364,12 +364,26 @@ export async function createCharacterViaWizard (
 	await charSheet.goto();
 	await charSheet.switchToTab(charSheet.tabBuilder);
 
+	// Builder steps (current order, see js/charactersheet/charactersheet-builder.js):
+	//   1. Race  →  2. Background  →  3. Class  →  4. Abilities
+	//   5. Equipment  →  6. Spells  →  7. Details
+
 	// Step 1: Race
 	await builder.selectRaceExact(preset.race, preset.raceSource);
 	await page.waitForTimeout(300);
+	// Race may require sub-choices (skill/tool/language picks) — satisfy
+	// validation before clicking Next.  No-op for races without choices.
+	await builder.selectAllRacialChoices();
 	await builder.clickNext();
 
-	// Step 2: Class
+	// Step 2: Background
+	await builder.selectBackgroundExact(preset.background, preset.bgSource);
+	// Backgrounds (esp. 2024) may have skill/tool/feat sub-pickers — these
+	// are harmless no-ops if the background has no choices.
+	await builder.selectFirstAvailableFeatureOptions(10);
+	await builder.clickNext();
+
+	// Step 3: Class
 	await builder.selectClassExact(preset.className, preset.classSource);
 	if (preset.quickBuildTargetLevel != null) {
 		await builder.setQuickBuildTargetLevel(preset.quickBuildTargetLevel);
@@ -378,33 +392,52 @@ export async function createCharacterViaWizard (
 	if (preset.skillCount) {
 		await builder.selectFirstAvailableSkills(preset.skillCount);
 	}
+	// Expertise (Rogue / Bard / TGTT-Ranger) — must come AFTER class skills
+	// are picked so the expertise list isn't empty.
+	await builder.selectFirstAvailableExpertise(4);
+	// Class-feature language grants (e.g. Ranger Deft Explorer)
+	await builder.selectAllClassFeatureLanguages();
 	if (preset.masteryCount) {
 		await builder.selectFirstAvailableWeaponMasteries(preset.masteryCount);
+	} else {
+		// Fighter/Paladin/Ranger/Rogue (and TGTT variants) require weapon
+		// masteries even when the test preset doesn't request a specific
+		// count. Selecting up to 3 is safe — the picker caps itself.
+		await builder.selectFirstAvailableWeaponMasteries(3);
 	}
 	if (preset.optFeatCount) {
 		await builder.selectFirstAvailableOptionalFeatures(preset.optFeatCount);
+	} else {
+		// TGTT Warlock starts with Eldritch Invocations at L1 (etc.) so
+		// always attempt to fill any optional-feature picker that's present.
+		await builder.selectFirstAvailableOptionalFeatures(5);
 	}
+	// TGTT Fighter / Paladin / etc. expose Combat Traditions + Methods
+	// pickers under the optional-features region — these gate Next when
+	// unfilled. The helper is a no-op when the section is absent.
+	await builder.selectCombatTraditionsAndMethods();
 	// Always try feature options (harmless if none exist)
 	await builder.selectFirstAvailableFeatureOptions(10);
 	await builder.clickNext();
 
-	// Step 3: Abilities
+	// Step 4: Abilities
 	await builder.assignStandardArrayDefaults();
-	await builder.clickNext();
-
-	// Step 4: Background
-	await builder.selectBackgroundExact(preset.background, preset.bgSource);
 	await builder.clickNext();
 
 	// Step 5: Equipment — take gold (simplest)
 	await builder.selectEquipmentOption("gold");
 	await builder.clickNext();
-	await builder.autoFillStartingSpells({divineSoulAffinity: preset.divineSoulAffinity});
-	if (await page.getByRole("heading", {name: "Starting Spells"}).count()) {
-		await builder.clickNext();
-	}
 
-	// Step 6: Details
+	// Step 6: Spells (renders for every class; only spellcasters have a
+	// "Starting Spells" heading, but the wizard still has a Next button to
+	// advance to step 7 either way).
+	await builder.autoFillStartingSpells({divineSoulAffinity: preset.divineSoulAffinity});
+	await builder.clickNext();
+	// If we under-filled spells/cantrips, the wizard pops a "Skip Spell
+	// Selection?" confirmation modal — accept it so we reach Details.
+	await builder.acceptSkipSpellsDialog();
+
+	// Step 7: Details
 	await builder.fillDetails({name: preset.name});
 	await builder.finishWizard();
 
