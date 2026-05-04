@@ -1,0 +1,29 @@
+import {describeCharacter} from "../utils/characterSpecFactory";
+import {PRESET_FULL_ARCANE_ARCHER_HOCHLING} from "../utils/characterBuilder";
+
+/**
+ * #2 — Arcane Archer Fighter Hochling (TGTT) — L1→20.
+ *
+ * Coverage focus:
+ *   - Fighter Action Surge / Second Wind at low levels
+ *   - Arcane Shot options arrive at L3 (Fighter subclass level)
+ *   - Extra Attack ×2 at L11, ×3 at L20
+ *   - Mid-tier loadout: +1 Longbow → attack bonus delta
+ */
+describeCharacter({
+	preset: PRESET_FULL_ARCANE_ARCHER_HOCHLING,
+	displayName: "Arcane Archer Fighter Hochling",
+	midTierLoadout: [
+		{name: "Longbow +1", source: "DMG"},
+		{name: "Studded Leather +1", source: "DMG"},
+	],
+	signatureToggle: /action surge|second wind|arcane shot/i,
+	milestones: {
+		1:  {totalLevel: 1,  minMaxHp: 10, expectToggles: [/second wind/i]},
+		3:  {totalLevel: 3,  minMaxHp: 26, expectToggles: [/arcane shot|second wind/i]},
+		5:  {totalLevel: 5,  minMaxHp: 44},
+		11: {totalLevel: 11, minMaxHp: 80},
+		17: {totalLevel: 17, minMaxHp: 120},
+		20: {totalLevel: 20, minMaxHp: 140},
+	},
+});
