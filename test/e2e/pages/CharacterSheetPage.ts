@@ -222,15 +222,12 @@ export class CharacterSheetPage {
 	 */
 	async getActivatableFeatureNames (): Promise<string[]> {
 		await this.switchToTab(this.tabFeatures);
-		const toggles = this.page.locator(".charsheet__feature-toggle, [data-testid='feature-toggle']");
-		const count = await toggles.count();
+		const nameEls = this.page.locator(".charsheet__feature .charsheet__feature-name");
+		const count = await nameEls.count();
 		const names: string[] = [];
 		for (let i = 0; i < count; i++) {
-			const text = await toggles.nth(i)
-				.locator(".charsheet__feature-toggle-name, .charsheet__feature-name")
-				.first()
-				.textContent();
-			if (text) names.push(text.trim());
+			const text = await nameEls.nth(i).textContent({timeout: 1000}).catch(() => null);
+			if (text && text.trim()) names.push(text.trim());
 		}
 		return names;
 	}
@@ -278,18 +275,22 @@ export class CharacterSheetPage {
 	 */
 	async getResource (resourceName: string): Promise<{current: number; max: number}> {
 		const container = this.page
-			.locator(".charsheet__resource-tracker, [data-testid='resource-tracker']")
-			.filter({hasText: resourceName});
+			.locator(".charsheet__resource-row, .charsheet__resource-tracker, [data-testid='resource-tracker']")
+			.filter({hasText: resourceName})
+			.first();
 		const currentEl = container.locator(".charsheet__resource-current, input").first();
 		const maxEl = container.locator(".charsheet__resource-max").first();
 
-		const currentText = await currentEl.inputValue().catch(() => currentEl.textContent());
-		const maxText = await maxEl.textContent();
+		const currentText = await currentEl.inputValue().catch(() => currentEl.textContent({timeout: 2000}).catch(() => "0"));
+		const maxText = await maxEl.textContent({timeout: 2000}).catch(() => "0");
 
-		return {
-			current: parseInt(String(currentText) || "0", 10),
-			max: parseInt(maxText || "0", 10),
+		const parseNum = (s: string | null | undefined) => {
+			if (!s) return 0;
+			const m = String(s).match(/-?\d+/);
+			return m ? parseInt(m[0], 10) : 0;
 		};
+
+		return {current: parseNum(currentText as string), max: parseNum(maxText)};
 	}
 
 	// ========== TGTT — COMBAT TAB DCs ==========
@@ -323,12 +324,23 @@ export class CharacterSheetPage {
 		await this.switchToTab(this.tabSpells);
 		const slotContainer = this.page.locator(
 			`[data-spell-level="${level}"], .charsheet__spell-slot-level-${level}`,
-		);
+		).first();
+
+		// New rendering: pips. `charsheet__spell-slot-pip--used` = consumed.
+		const allPips = slotContainer.locator(".charsheet__spell-slot-pip, .charsheet__slot-pip");
+		const pipMax = await allPips.count();
+		if (pipMax > 0) {
+			const usedPips = await slotContainer
+				.locator(".charsheet__spell-slot-pip--used, .charsheet__slot-pip--used")
+				.count();
+			return {current: pipMax - usedPips, max: pipMax};
+		}
+
+		// Legacy fallback for input-based slot displays.
 		const currentEl = slotContainer.locator(".charsheet__slot-current, input").first();
 		const maxEl = slotContainer.locator(".charsheet__slot-max").first();
-
 		const currentText = await currentEl.inputValue().catch(() => currentEl.textContent());
-		const maxText = await maxEl.textContent();
+		const maxText = await maxEl.textContent().catch(() => "0");
 
 		return {
 			current: parseInt(String(currentText) || "0", 10),
