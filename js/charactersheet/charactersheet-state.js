@@ -5859,7 +5859,6 @@ class CharacterSheetState {
 
 	setScholarExpertise (skill) {
 		this._data.scholarExpertise = skill;
-		this._saveState();
 	}
 
 	hasScholarFeature () {
