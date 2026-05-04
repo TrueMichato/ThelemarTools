@@ -362,6 +362,17 @@ export async function createCharacterViaWizard (
 	const builder = new BuilderWizardPage(page);
 
 	await charSheet.goto();
+
+	// CRITICAL: the wizard must run against an actual character record.
+	// Just switching to the builder tab does NOT create a character — the
+	// page only assigns a `_currentCharacterId` when the user clicks the
+	// "+" New Character button (or selects an existing one). Without an
+	// id, `_saveCurrentCharacter()` early-returns, so the wizard's final
+	// "Finish" never persists. The sheet then renders the in-memory state
+	// (so L1 assertions pass) but `#charsheet-name-select` remains on the
+	// "Create New Character" placeholder, breaking every later flow that
+	// depends on a loaded character (Level Up, Multiclass, etc.).
+	await page.locator("#charsheet-btn-new").click();
 	await charSheet.switchToTab(charSheet.tabBuilder);
 
 	// Builder steps (current order, see js/charactersheet/charactersheet-builder.js):
@@ -441,6 +452,23 @@ export async function createCharacterViaWizard (
 	await builder.fillDetails({name: preset.name});
 	await builder.finishWizard();
 
+	// Confirm the character actually saved & became the active record.
+	// `_finishCharacter` calls `saveCharacter()` then switches to the
+	// overview tab — both async. Without this wait, downstream steps
+	// (Level Up, etc.) operate against a not-yet-loaded character.
+	// (Note: the builder doesn't refresh `#charsheet-sel-character` after
+	// save, so we don't assert on the dropdown here — only on the
+	// in-memory state, which is what every other module reads.)
+	await page.waitForFunction(
+		(name) => {
+			const cs: any = (globalThis as any).charSheet;
+			if (!cs?._currentCharacterId) return false;
+			return cs?._state?.getName?.() === name;
+		},
+		preset.name,
+		{timeout: 10_000},
+	);
+
 	return {charSheet, builder};
 }
 
@@ -505,5 +533,31 @@ export async function levelUpTo (
 		await levelUp.finish();
 		await levelUp.expectModalClosed();
 		await page.waitForTimeout(300);
+
+		// Confirm the level actually advanced. If not, the wizard rejected
+		// `finish()` (e.g. silent toast about an unfilled required choice)
+		// and we'd otherwise spin up another level-up against the same
+		// state. Surface this immediately.
+		await page.waitForFunction(
+			(expected) => {
+				const cs: any = (globalThis as any).charSheet;
+				return (cs?._state?.getTotalLevel?.() ?? 0) >= expected;
+			},
+			lvl,
+			{timeout: 10_000},
+		).catch(async () => {
+			const got = await page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				return {
+					level: cs?._state?.getTotalLevel?.() ?? null,
+					name: cs?._state?.getName?.() ?? null,
+					id: cs?._currentCharacterId ?? null,
+					selValue: (document.getElementById("charsheet-sel-character") as HTMLSelectElement | null)?.value ?? null,
+				};
+			});
+			throw new Error(
+				`level-up to ${lvl} did not take effect. sheet state=${JSON.stringify(got)}`,
+			);
+		});
 	}
 }
