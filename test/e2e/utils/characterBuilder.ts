@@ -20,6 +20,15 @@ export interface CharacterPreset {
 	masteryCount?: number;
 	optFeatCount?: number;
 	divineSoulAffinity?: string;
+	/** Subclass to select on level-up (e.g. "Bladesinging"). */
+	subclassName?: string;
+	/** Subclass source ("TGTT", "TGTT-2014", "TGTT-2024", ...). */
+	subclassSource?: string;
+	/**
+	 * Optional signature spells to deterministically pick during creation /
+	 * level-up wizards instead of relying on auto-fill. See pickSignatureSpells.
+	 */
+	signatureSpells?: string[];
 }
 
 /** Simple Fighter — minimal selections, fastest to create */
@@ -151,6 +160,196 @@ export const PRESET_TGTT_HEXBLADE: CharacterPreset = {
 	skillCount: 2,
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  COMPREHENSIVE PLAYER-BUILD PRESETS — full L1→20 coverage
+//  ───────────────────────────────────────────────────────────────────────
+//  These are the 10 builds exercised by the comprehensive E2E specs added
+//  alongside this preset block.  Race, subclass, and signature spells are
+//  pre-resolved to the names actually present in
+//  homebrew/TravelersGuidetoThelemar.json so the wizard can select them
+//  directly via the existing fuzzy `includes` matchers in
+//  BuilderWizardPage / LevelUpPage.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 1. Mercy Monk Changeling (TGTT) */
+export const PRESET_FULL_MERCY_MONK_CHANGELING: CharacterPreset = {
+	race: "Changeling",
+	raceSource: "TGTT",
+	className: "Monk",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Zara Mercyhand",
+	skillCount: 2,
+	subclassName: "Warrior of Mercy",
+	subclassSource: "TGTT",
+};
+
+/** 2. Arcane Archer Fighter Hochling (TGTT) */
+export const PRESET_FULL_ARCANE_ARCHER_HOCHLING: CharacterPreset = {
+	race: "Hochling",
+	raceSource: "TGTT",
+	className: "Fighter",
+	classSource: "TGTT",
+	background: "Soldier",
+	bgSource: "PHB'24",
+	name: "Varn Boltcaller",
+	skillCount: 2,
+	masteryCount: 3,
+	subclassName: "Arcane Archer",
+	subclassSource: "TGTT",
+};
+
+/** 3. Bladesinger Wizard Tabaxi (TGTT) */
+export const PRESET_FULL_BLADESINGER_TABAXI: CharacterPreset = {
+	race: "Tabaxi",
+	raceSource: "TGTT",
+	className: "Wizard",
+	classSource: "TGTT",
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Thea Dancesteel",
+	skillCount: 2,
+	subclassName: "Bladesinging",
+	subclassSource: "TGTT-2014",
+	signatureSpells: ["Shield", "Booming Blade", "Mage Armor"],
+};
+
+/** 4a. Hunter Ranger Centaur (TGTT) — pure single-class */
+export const PRESET_FULL_HUNTER_CENTAUR: CharacterPreset = {
+	race: "Centaur",
+	raceSource: "TGTT",
+	className: "Ranger",
+	classSource: "TGTT",
+	background: "Outlander",
+	bgSource: "PHB'24",
+	name: "Kael Wildhoof",
+	skillCount: 3,
+	subclassName: "Hunter",
+	subclassSource: "TGTT-2024",
+	signatureSpells: ["Hunter's Mark", "Cure Wounds"],
+};
+
+/** 4b. Zodiac Druid Centaur (TGTT) — pure single-class */
+export const PRESET_FULL_ZODIAC_CENTAUR: CharacterPreset = {
+	race: "Centaur",
+	raceSource: "TGTT",
+	className: "Druid",
+	classSource: "TGTT",
+	background: "Hermit",
+	bgSource: "PHB'24",
+	name: "Celeste Starhoof",
+	skillCount: 2,
+	subclassName: "Circle of the Zodiac",
+	subclassSource: "TGTT",
+	signatureSpells: ["Druidcraft", "Goodberry"],
+};
+
+/** 5. Hexblade Warlock 2 / Divine Soul Sorcerer 18 Tortle (TGTT) */
+export const PRESET_FULL_HEX_DIVINE_TORTLE: CharacterPreset = {
+	race: "Tortle",
+	raceSource: "TGTT",
+	className: "Warlock",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Shellbound Hex",
+	skillCount: 2,
+	subclassName: "The Hexblade",
+	subclassSource: "TGTT-2014",
+	signatureSpells: ["Hex", "Eldritch Blast"],
+};
+
+/** 6. Child of the Sun Bloodline Sorcerer Hochling (TGTT) */
+export const PRESET_FULL_CHILD_OF_SUN_HOCHLING: CharacterPreset = {
+	race: "Hochling",
+	raceSource: "TGTT",
+	className: "Sorcerer",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Solis Hochsun",
+	skillCount: 2,
+	subclassName: "Child of the Sun Bloodline",
+	subclassSource: "TGTT",
+	signatureSpells: ["Fire Bolt", "Burning Hands"],
+};
+
+/** 7. Chronurgy Wizard Nyuidj (TGTT) */
+export const PRESET_FULL_CHRONURGY_NYUIDJ: CharacterPreset = {
+	race: "Nyuidj",
+	raceSource: "TGTT",
+	className: "Wizard",
+	classSource: "TGTT",
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Tyk Hourglass",
+	skillCount: 2,
+	subclassName: "Chronurgy Magic",
+	subclassSource: "TGTT-2014",
+	signatureSpells: ["Mage Hand", "Magic Missile"],
+};
+
+/** 8. College of Surrealism Bard Yuan-Ti (TGTT) */
+export const PRESET_FULL_SURREALISM_YUANTI: CharacterPreset = {
+	race: "Yuan-Ti",
+	raceSource: "TGTT",
+	className: "Bard",
+	classSource: "TGTT",
+	background: "Entertainer",
+	bgSource: "PHB'24",
+	name: "Sissin Dreamweaver",
+	skillCount: 3,
+	subclassName: "College of Surrealism",
+	subclassSource: "TGTT",
+	signatureSpells: ["Vicious Mockery", "Healing Word"],
+};
+
+/** 9. Chained Fury Barbarian Minotaur (TGTT) */
+export const PRESET_FULL_CHAINED_FURY_MINOTAUR: CharacterPreset = {
+	race: "Minotaur",
+	raceSource: "TGTT",
+	className: "Barbarian",
+	classSource: "TGTT",
+	background: "Soldier",
+	bgSource: "PHB'24",
+	name: "Korr Ironhorn",
+	skillCount: 2,
+	masteryCount: 2,
+	subclassName: "Path of the Chained Fury",
+	subclassSource: "TGTT",
+};
+
+/** 10. Time Domain Cleric (TGTT) — race not specified by user; default to a flexible TGTT race. */
+export const PRESET_FULL_TIME_CLERIC: CharacterPreset = {
+	race: "Aarakocra",
+	raceSource: "MPMM",
+	className: "Cleric",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Mira Hourward",
+	skillCount: 2,
+	subclassName: "Time Domain",
+	subclassSource: "TGTT",
+	signatureSpells: ["Sacred Flame", "Cure Wounds"],
+};
+
+/** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
+export const PRESETS_FULL_PARTY: CharacterPreset[] = [
+	PRESET_FULL_MERCY_MONK_CHANGELING,
+	PRESET_FULL_ARCANE_ARCHER_HOCHLING,
+	PRESET_FULL_BLADESINGER_TABAXI,
+	PRESET_FULL_HUNTER_CENTAUR,
+	PRESET_FULL_ZODIAC_CENTAUR,
+	PRESET_FULL_HEX_DIVINE_TORTLE,
+	PRESET_FULL_CHILD_OF_SUN_HOCHLING,
+	PRESET_FULL_CHRONURGY_NYUIDJ,
+	PRESET_FULL_SURREALISM_YUANTI,
+	PRESET_FULL_CHAINED_FURY_MINOTAUR,
+	PRESET_FULL_TIME_CLERIC,
+];
+
 /**
  * Build a complete character via the Builder Wizard UI.
  * Returns the CharacterSheetPage for further interaction.
@@ -218,11 +417,13 @@ export async function createCharacterViaWizard (
  * first available skills/feats/spells), and finishes.
  *
  * If a subclass needs selecting (e.g. level 3), pass `subclassName`.
+ * Pass `signatureSpells` to deterministically tick named spells before
+ * the auto-fill step picks the first-available remainder.
  */
 export async function levelUpTo (
 	page: Page,
 	targetLevel: number,
-	opts?: {subclassName?: string; subclassSource?: string},
+	opts?: {subclassName?: string; subclassSource?: string; signatureSpells?: string[]},
 ): Promise<void> {
 	const charSheet = new CharacterSheetPage(page);
 	const levelUp = new LevelUpPage(page);
@@ -255,6 +456,13 @@ export async function levelUpTo (
 		if (await levelUp.isAccordionVisible("hp")) {
 			await levelUp.expandAccordion("hp");
 			await levelUp.selectHpOption("average");
+		}
+
+		// Try signature spells before the generic auto-fill so they win.
+		if (opts?.signatureSpells?.length && await levelUp.isAccordionVisible("knownspells")) {
+			await levelUp.expandAccordion("knownspells");
+			const {pickSignatureSpells} = await import("./comprehensiveBuildHelpers");
+			await pickSignatureSpells(page, opts.signatureSpells);
 		}
 
 		// Auto-fill all remaining selections (skills, spells, feats, etc.)
