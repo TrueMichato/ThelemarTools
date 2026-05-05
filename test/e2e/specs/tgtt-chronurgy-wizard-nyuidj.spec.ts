@@ -14,6 +14,12 @@ describeCharacter({
 	preset: PRESET_FULL_CHRONURGY_NYUIDJ,
 	displayName: "Chronurgy Wizard Nyuidj",
 	signatureToggle: /chronal|convergent|temporal|momentary/i,
+	usage: {
+		atLevel: 5,
+		castSpellSlotLevel: 1,
+		expectLongRestRestores: true,
+		attackName: /quarterstaff|dagger/i,
+	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2}},
 		3:  {totalLevel: 3,  spellSlots: {2: 2}},

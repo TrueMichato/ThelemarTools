@@ -14,6 +14,13 @@ describeCharacter({
 	preset: PRESET_FULL_SURREALISM_YUANTI,
 	displayName: "College of Surrealism Bard Yuan-Ti",
 	signatureToggle: /bardic inspiration|surreal|illusion|mockery/i,
+	usage: {
+		atLevel: 5,
+		castSpellSlotLevel: 1,
+		useResourceName: "Bardic Inspiration",
+		expectLongRestRestores: true,
+		attackName: /rapier|shortsword|dagger/i,
+	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2}, expectToggles: [/bardic inspiration/i]},
 		3:  {totalLevel: 3,  spellSlots: {2: 2}},

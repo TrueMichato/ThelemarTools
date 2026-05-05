@@ -33,4 +33,5 @@ dev-*.sh
 5etools-src.code-workspace
 
 playwright-report/
+test-results/
 .playwright-mcp/

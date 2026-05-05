@@ -391,6 +391,12 @@ export class LevelUpPage {
 		// ASI + Feat (Thelemar L4 / standard L4/8/12/16/19) — the wizard
 		// uses +/− steppers and a feat radio list, not a counter group,
 		// so the generic counter pass above can't satisfy it.
+		//
+		// Strategy: ALWAYS prefer "Increase Ability Scores (+2 total)"
+		// when available — +2 to a stat is unconditionally legal and
+		// avoids the feat sub-picker rabbit hole entirely. Only fall
+		// back to "Take a Feat" when the ASI mode is disabled (some
+		// Thelemar nodes only offer a feat).
 		// ──────────────────────────────────────────────────────────────
 		await this.page.evaluate(() => {
 			const wizard = document.querySelector(".charsheet__levelup-wizard");
@@ -401,38 +407,123 @@ export class LevelUpPage {
 			if (!asi) return;
 			if (!asi.classList.contains("expanded")) {
 				asi.querySelector<HTMLElement>(".charsheet__levelup-accordion-header")?.click();
+				asi.classList.add("expanded");
 			}
 
-			// Click "+" until "Points remaining: 0". Use the first
-			// ability's "+" button — class-agnostic fallback.
-			for (let i = 0; i < 6; i++) {
-				const text = (asi.textContent || "");
+			// Helper: dispatch a real MouseEvent on top of .click() so any
+			// React-style/jQuery delegated change listeners actually fire.
+			const robustClick = (el: HTMLElement) => {
+				try { el.click(); } catch (_) { /* noop */ }
+				try {
+					el.dispatchEvent(new MouseEvent("mousedown", {bubbles: true}));
+					el.dispatchEvent(new MouseEvent("mouseup", {bubbles: true}));
+					el.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+					el.dispatchEvent(new Event("change", {bubbles: true}));
+				} catch (_) { /* noop */ }
+			};
+
+			// Find the mode-selector radios (top-level pair: ASI vs Feat).
+			// Each lives in a label/.cursor-pointer wrapper whose text
+			// contains the mode name.
+			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
+			const modeAsi = allRadios.find(r => {
+				const wrap = r.closest("label") || r.parentElement;
+				return !!wrap && /Increase Ability Scores/i.test(wrap.textContent || "");
+			});
+			const modeFeat = allRadios.find(r => {
+				const wrap = r.closest("label") || r.parentElement;
+				return !!wrap && /Take a Feat/i.test(wrap.textContent || "");
+			});
+
+			// Switch to ASI mode whenever it's available and not already
+			// selected. Click both the wrapper AND the radio for safety.
+			if (modeAsi && !modeAsi.disabled && !modeAsi.checked) {
+				const wrap = (modeAsi.closest("label") || modeAsi.parentElement) as HTMLElement | null;
+				if (wrap) robustClick(wrap);
+				robustClick(modeAsi);
+			}
+		});
+		await this.page.waitForTimeout(200);
+
+		// Now drain the +/- stepper. Re-query the ASI accordion each
+		// pass — switching modes re-renders the body.
+		for (let pass = 0; pass < 8; pass++) {
+			const remaining = await this.page.evaluate(() => {
+				const wizard = document.querySelector(".charsheet__levelup-wizard");
+				if (!wizard) return 0;
+				const asi = wizard.querySelector<HTMLElement>("[data-accordion-id='asi']")
+					|| Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion"))
+						.find(el => /ASI|Ability Score Improvement/i.test(el.textContent || "")) || null;
+				if (!asi) return 0;
+				const text = asi.textContent || "";
 				const m = text.match(/Points remaining:\s*(\d+)/i);
-				const remaining = m ? parseInt(m[1], 10) : 0;
-				if (remaining <= 0) break;
-				const plusBtn = Array.from(asi.querySelectorAll<HTMLButtonElement>("button"))
-					.find(btn => btn.textContent?.trim() === "+");
-				if (!plusBtn || plusBtn.disabled) break;
-				plusBtn.click();
-			}
+				const left = m ? parseInt(m[1], 10) : 0;
+				if (left <= 0) return 0;
+				const plusBtns = Array.from(asi.querySelectorAll<HTMLButtonElement>("button"))
+					.filter(btn => btn.textContent?.trim() === "+" && !btn.disabled);
+				if (plusBtns.length === 0) return -1;
+				plusBtns[0].click();
+				return left;
+			});
+			if (remaining <= 0) break;
+			if (remaining === -1) break;
+			await this.page.waitForTimeout(150);
+		}
 
-			// Pick a feat — prefer one WITHOUT "has choices" so we don't
-			// have to drive cascading sub-pickers.
-			const feats = Array.from(asi.querySelectorAll<HTMLElement>("[cursor='pointer'], label"))
-				.filter(el => el.querySelector("input[type='radio']"));
-			const radios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:checked):not(:disabled)"));
-			const candidates = radios.filter(r => {
+		// Fallback: if ASI mode wasn't available (or steppers couldn't
+		// be driven), pick a feat. Prefer one WITHOUT "has choices"; if
+		// none exist, take the first and recurse — the next counter
+		// pass at the top of the next call will fill any sub-picker.
+		await this.page.evaluate(() => {
+			const wizard = document.querySelector(".charsheet__levelup-wizard");
+			if (!wizard) return;
+			const asi = wizard.querySelector<HTMLElement>("[data-accordion-id='asi']")
+				|| Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion"))
+					.find(el => /ASI|Ability Score Improvement/i.test(el.textContent || "")) || null;
+			if (!asi) return;
+			// If the ASI requirement is satisfied (no ⚠️ Required), bail.
+			if (!/⚠️\s*Required/.test(asi.textContent || "")) return;
+			// If steppers exist but Points remaining > 0, the user is in
+			// ASI mode and we already failed to drive them — try feat.
+			// Find the Feat-mode radio and switch to it, then pick a feat.
+			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
+			const modeFeat = allRadios.find(r => {
+				const wrap = r.closest("label") || r.parentElement;
+				return !!wrap && /Take a Feat/i.test(wrap.textContent || "");
+			});
+			const robustClick = (el: HTMLElement) => {
+				try { el.click(); } catch (_) { /* noop */ }
+				try {
+					el.dispatchEvent(new MouseEvent("mousedown", {bubbles: true}));
+					el.dispatchEvent(new MouseEvent("mouseup", {bubbles: true}));
+					el.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+					el.dispatchEvent(new Event("change", {bubbles: true}));
+				} catch (_) { /* noop */ }
+			};
+			if (modeFeat && !modeFeat.disabled && !modeFeat.checked) {
+				const wrap = (modeFeat.closest("label") || modeFeat.parentElement) as HTMLElement | null;
+				if (wrap) robustClick(wrap);
+				robustClick(modeFeat);
+			}
+			// Refresh radio list — feat radios appear after switching mode.
+			const featRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:checked):not(:disabled)"))
+				.filter(r => {
+					const wrap = r.closest("label") || r.parentElement;
+					if (!wrap) return false;
+					const txt = wrap.textContent || "";
+					// Exclude the mode-toggle radios themselves.
+					if (/Increase Ability Scores|Take a Feat/i.test(txt)) return false;
+					return true;
+				});
+			const noChoice = featRadios.filter(r => {
 				const wrap = r.closest("label") || r.parentElement;
 				return wrap && !/has choices/i.test(wrap.textContent || "");
 			});
-			const target = candidates[0] || radios[0];
-			if (target) {
-				target.click();
-				if (!target.checked) {
-					const wrap = target.closest("label") || target.parentElement;
-					if (wrap) (wrap as HTMLElement).click();
-				}
-			}
+			const target = noChoice[0] || featRadios[0];
+			if (!target) return;
+			const wrap = (target.closest("label") || target.parentElement) as HTMLElement | null;
+			if (wrap) robustClick(wrap);
+			robustClick(target);
 		});
 		await this.page.waitForTimeout(300);
 

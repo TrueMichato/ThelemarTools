@@ -178,7 +178,7 @@ export interface MulticlassOpts {
  */
 export async function startMulticlass (page: Page, opts: MulticlassOpts): Promise<void> {
 	await page.locator("#charsheet-btn-multiclass").click();
-	const modal = page.locator(".ui-modal__inner").filter({hasText: /Multiclass/i}).last();
+	const modal = page.locator(".ve-ui-modal__inner, .ui-modal__inner").filter({hasText: /Multiclass/i}).last();
 	await modal.waitFor({state: "visible", timeout: 10000});
 
 	// Pick the requested class radio
@@ -204,7 +204,7 @@ export async function startMulticlass (page: Page, opts: MulticlassOpts): Promis
 
 	// Some classes pop a follow-up choice modal (Fighting Style, Cleric Domain, etc.).
 	// Auto-tick the first available radio/checkbox in any visible follow-up modal.
-	const followUp = page.locator(".ui-modal__inner:visible").last();
+	const followUp = page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
 	if (await followUp.count() && await followUp.isVisible().catch(() => false)) {
 		const firstChoice = followUp.locator("input[type='radio'], input[type='checkbox']").first();
 		if (await firstChoice.count() && !(await firstChoice.isChecked().catch(() => true))) {

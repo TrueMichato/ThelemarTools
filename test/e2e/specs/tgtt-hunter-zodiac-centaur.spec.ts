@@ -13,6 +13,12 @@ describeCharacter({
 	preset: PRESET_FULL_HUNTER_CENTAUR,
 	displayName: "Hunter Ranger Centaur",
 	signatureToggle: /hunter|hunter's mark|colossus|horde/i,
+	usage: {
+		atLevel: 5,
+		castSpellSlotLevel: 1,
+		expectLongRestRestores: true,
+		attackName: /longbow|shortbow/i,
+	},
 	milestones: {
 		1:  {totalLevel: 1,  minMaxHp: 10},
 		3:  {totalLevel: 3,  spellSlots: {1: 3}},
@@ -27,6 +33,13 @@ describeCharacter({
 	preset: PRESET_FULL_ZODIAC_CENTAUR,
 	displayName: "Zodiac Druid Centaur",
 	signatureToggle: /zodiac|starry|wild shape|stellar/i,
+	usage: {
+		atLevel: 5,
+		castSpellSlotLevel: 1,
+		useResourceName: "Wild Shape",
+		expectLongRestRestores: true,
+		attackName: /quarterstaff|scimitar|club/i,
+	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2}},
 		3:  {totalLevel: 3,  spellSlots: {2: 2}, expectToggles: [/zodiac|starry/i]},
