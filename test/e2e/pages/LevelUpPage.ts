@@ -715,6 +715,23 @@ export class LevelUpPage {
 					? Array.from(wizard.querySelectorAll("[data-testid]")).map(e => e.getAttribute("data-testid"))
 					: [];
 				const wizardHtmlSnippet = wizard ? wizard.outerHTML.slice(-800) : null;
+				const accordionDump = wizard
+					? Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion")).map(acc => {
+						const id = acc.getAttribute("data-accordion-id");
+						const title = (acc.querySelector(".charsheet__levelup-accordion-title")?.textContent || "").trim();
+						const expanded = acc.classList.contains("expanded");
+						const required = /⚠️\s*Required/.test(acc.textContent || "");
+						const radios = Array.from(acc.querySelectorAll<HTMLInputElement>("input[type='radio']"))
+							.map(r => ({
+								name: r.name,
+								value: r.value,
+								checked: r.checked,
+								disabled: r.disabled,
+								label: ((r.closest("label") || r.parentElement)?.textContent || "").trim().slice(0, 80),
+							}));
+						return {id, title, expanded, required, radioCount: radios.length, radios: radios.slice(0, 8)};
+					})
+					: [];
 				return {
 					err: err || null,
 					innerCount: inners.length,
@@ -723,6 +740,7 @@ export class LevelUpPage {
 					finishDisabled: finishBtn?.disabled,
 					allTestids,
 					wizardHtmlTail: wizardHtmlSnippet,
+					accordionDump,
 				};
 			});
 			// eslint-disable-next-line no-console

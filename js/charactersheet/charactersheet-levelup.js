@@ -1788,8 +1788,11 @@ class CharacterSheetLevelUp {
 		const featList = e_({outer: `<div class="charsheet__levelup-feats-list"></div>`});
 		const featChoicesContainer = e_({outer: `<div class="charsheet__levelup-feat-choices"></div>`});
 
-		// Helper to detect if feat has choices
-		const getFeatChoices = (feat) => {
+		// Helper to detect if feat has choices.
+		// Declared as a `function` (not `const` arrow) so it is hoisted
+		// to the top of `_renderAsiSelection` — the Epic Boon section
+		// (rendered earlier in the function body) needs to call it.
+		function getFeatChoices (feat) {
 			const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null, spells: null};
 
 			if (feat.skillProficiencies) {
@@ -1930,7 +1933,7 @@ class CharacterSheetLevelUp {
 			}
 
 			return choices;
-		};
+		}
 
 		const renderFeats = (filter = "") => {
 			featList.innerHTML = "";
