@@ -489,16 +489,25 @@ export async function levelUpTo (
 	const charSheet = new CharacterSheetPage(page);
 	const levelUp = new LevelUpPage(page);
 
-	// Read current level from the sheet
+	// Read current level from the live state (single source of truth).
+	// DOM-based selectors here historically defaulted to 1 when they
+	// missed (the real element is `#charsheet-disp-level`), causing
+	// consecutive `levelUpTo` calls to overshoot by re-levelling from L1.
 	const startLevel = await page.evaluate(() => {
-		const el = document.querySelector("[data-testid='charsheet-level']")
+		const cs: any = (globalThis as any).charSheet;
+		const fromState = cs?._state?.getTotalLevel?.();
+		if (typeof fromState === "number" && fromState >= 1) return fromState;
+		const el = document.getElementById("charsheet-disp-level")
+			|| document.querySelector("[data-testid='charsheet-level']")
 			|| document.querySelector(".charsheet__header-level");
-		if (!el) return 1;
-		const match = el.textContent?.match(/(\d+)/);
+		const match = el?.textContent?.match(/(\d+)/);
 		return match ? parseInt(match[1], 10) : 1;
 	});
 
+	if (targetLevel <= startLevel) return;
+
 	for (let lvl = startLevel + 1; lvl <= targetLevel; lvl++) {
+		if (page.isClosed()) throw new Error(`levelUpTo: page closed before reaching L${lvl} (last reached L${lvl - 1})`);
 		// Click the Level Up button on the character sheet
 		await charSheet.btnLevelUp.waitFor({state: "visible", timeout: 5000});
 		await charSheet.btnLevelUp.click();

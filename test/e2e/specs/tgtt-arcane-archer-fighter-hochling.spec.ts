@@ -13,6 +13,11 @@ import {PRESET_FULL_ARCANE_ARCHER_HOCHLING} from "../utils/characterBuilder";
 describeCharacter({
 	preset: PRESET_FULL_ARCANE_ARCHER_HOCHLING,
 	displayName: "Arcane Archer Fighter Hochling",
+	// Skip L7 + MEGA: blocked by CS-BUG-003 (Combat Methods validator
+	// makes the wizard unfinishable when no new methods are available).
+	// L3 / L5 stay on as red reminders of the bug.
+	skipL7: true,
+	skipMega: true,
 	midTierLoadout: [
 		{name: "Longbow +1", source: "DMG"},
 		{name: "Studded Leather +1", source: "DMG"},

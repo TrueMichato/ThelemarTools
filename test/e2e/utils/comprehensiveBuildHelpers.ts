@@ -41,6 +41,7 @@ export interface InventoryItemRef {
  */
 export async function addInventoryItems (page: Page, items: InventoryItemRef[]): Promise<void> {
 	for (const item of items) {
+		if (page.isClosed()) throw new Error("addInventoryItems: page closed mid-loop (earlier failure?)");
 		const result = await page.evaluate(async ({name, source, attune}) => {
 			const cs: any = (globalThis as any).charSheet;
 			if (!cs?._state) return {ok: false, reason: "charSheet not initialised"};
@@ -299,6 +300,7 @@ export async function probeToggleDelta (
 	featureName: string | RegExp,
 ): Promise<{acDelta: number; dcDelta: number}> {
 	const re = featureName instanceof RegExp ? featureName : new RegExp(featureName, "i");
+	if (charSheet.page.isClosed()) throw new Error(`probeToggleDelta(${re}): page already closed`);
 	const features = await charSheet.getActivatableFeatureNames();
 	const match = features.find(f => re.test(f));
 	if (!match) throw new Error(`probeToggleDelta: no feature matches ${re} (have: ${features.join(", ")})`);

@@ -14,6 +14,11 @@ import {PRESET_FULL_BLADESINGER_TABAXI} from "../utils/characterBuilder";
 describeCharacter({
 	preset: PRESET_FULL_BLADESINGER_TABAXI,
 	displayName: "Bladesinger Wizard Tabaxi",
+	// Skip L7 + MEGA: blocked by CS-BUG-002 (subclass features not granted,
+	// so Bladesong toggle never registers).  L3 / L5 stay on as red
+	// reminders of the bug.
+	skipL7: true,
+	skipMega: true,
 	midTierLoadout: [
 		{name: "Wand of the War Mage, +1", source: "DMG"},
 	],
