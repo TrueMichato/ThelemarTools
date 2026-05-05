@@ -19,6 +19,14 @@ describeCharacter({
 		castSpellSlotLevel: 1,
 		expectLongRestRestores: true,
 		attackName: /quarterstaff|dagger/i,
+		skillRoll: {name: "Arcana"},
+		// Wizards regain one slot of level ≤ ⌈half-level⌉ via Arcane Recovery (SR).
+		// Resource isn't named uniformly; skip the strict check.
+		shortRestRestores: {skip: true},
+		concentrationCheck: {castSpell: "Slow", thenAction: "damage", expectActive: false},
+		deathSaves: true,
+		applyCondition: {skip: true},
+		featAbility: {skip: true},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2}},

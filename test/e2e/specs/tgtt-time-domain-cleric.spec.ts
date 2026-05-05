@@ -20,6 +20,13 @@ describeCharacter({
 		useResourceName: "Channel Divinity",
 		expectLongRestRestores: true,
 		attackName: /mace|warhammer/i,
+		skillRoll: {name: "Religion"},
+		// Channel Divinity restores on a short rest.
+		shortRestRestores: {resourceName: "Channel Divinity"},
+		concentrationCheck: {castSpell: "Bless", thenAction: "damage", expectActive: false},
+		deathSaves: true,
+		applyCondition: {skip: true},
+		featAbility: {skip: true},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2}},

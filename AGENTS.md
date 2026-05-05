@@ -233,3 +233,31 @@ Root: `.agents/skills/troubleshooting/references/`
 |When to read|File|
 |---|---|
 |Any error, bug, or unexpected behavior — full catalog organized by category with root causes and fixes|[common-errors.md](.agents/skills/troubleshooting/references/common-errors.md)|
+
+## E2E Character Tests — Comprehensive Build Suite
+
+The Playwright suite at `test/e2e/specs/tgtt-*.spec.ts` drives full
+character lifecycles (creation → level-up → loadout → in-play usage)
+through the real Character Sheet UI to catch ~95% of player-facing
+bugs.  Specs are thin wrappers around a shared
+`characterSpecFactory` that generates a canonical 7-test set per build
+plus multiclass coverage.
+
+When writing or extending E2E character build tests, **invoke the
+`e2e-character-tests` skill**.  It defines the required-checks
+standard, the spec template, the page-object API, and the
+infra-vs-product-bug troubleshooting heuristics.  Reader-facing entry
+point: [`docs/e2e/comprehensive-test-standard.md`](docs/e2e/comprehensive-test-standard.md).
+
+### Detailed Reference Docs — Read Before Writing or Extending E2E Specs
+
+Root: `.agents/skills/e2e-character-tests/references/`
+
+|When to read|File|
+|---|---|
+|The 18 required checks every comprehensive spec must cover (or skip with reason)|[standard.md](.agents/skills/e2e-character-tests/references/standard.md)|
+|Copy-paste template + 10-step authoring checklist for new TGTT character specs|[spec-template.md](.agents/skills/e2e-character-tests/references/spec-template.md)|
+|Public method reference for CharacterBuilderPage / LevelUpPage / CharacterSheetPage|[page-objects.md](.agents/skills/e2e-character-tests/references/page-objects.md)|
+|How CharacterSpec and MulticlassCharacterSpec become individual tests; coverage map|[factory-tests.md](.agents/skills/e2e-character-tests/references/factory-tests.md)|
+|Decision tree: infra failure (modal race, autoFill timing, "Target page closed") vs real product bug|[troubleshooting.md](.agents/skills/e2e-character-tests/references/troubleshooting.md)|
+|Running list of product bugs surfaced by the suite|[docs/charactersheet/known-bugs.md](docs/charactersheet/known-bugs.md)|

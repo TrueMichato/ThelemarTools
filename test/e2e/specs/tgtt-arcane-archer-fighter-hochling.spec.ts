@@ -24,7 +24,10 @@ describeCharacter({
 	signatureToggle: /action surge|second wind|arcane shot/i,
 	// Usage spec skipped — CS-BUG-003 makes the L3+ level-up wizard
 	// unfinishable for this preset, so the L5 build doesn't complete.
-	// Re-enable once the validator is fixed.
+	// Re-enable once the validator is fixed.  When un-skipping, restore:
+	//   skillRoll: {name: "Perception"}, shortRestRestores: {resourceName: "Action Surge", expectAfter: 1},
+	//   concentrationCheck: {skip: true}, deathSaves: true,
+	//   applyCondition: {skip: true}, featAbility: {skip: true},
 	usage: {skip: true},
 	milestones: {
 		1:  {totalLevel: 1,  minMaxHp: 10, expectToggles: [/second wind/i]},

@@ -20,6 +20,13 @@ describeCharacter({
 		useResourceName: "Sorcery Points",
 		expectLongRestRestores: true,
 		attackName: /dagger|crossbow/i,
+		skillRoll: {name: "Persuasion"},
+		// Sorcery Points restore on long rest, not short rest; skip cleanly.
+		shortRestRestores: {skip: true},
+		concentrationCheck: {castSpell: "Bless", thenAction: "damage", expectActive: false},
+		deathSaves: true,
+		applyCondition: {skip: true},
+		featAbility: {skip: true},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2},  expectResources: {"Sorcery Points": 1}},
