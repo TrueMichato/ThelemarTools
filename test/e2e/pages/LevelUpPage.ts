@@ -422,17 +422,19 @@ export class LevelUpPage {
 				} catch (_) { /* noop */ }
 			};
 
-			// Find the mode-selector radios (top-level pair: ASI vs Feat).
-			// Each lives in a label/.cursor-pointer wrapper whose text
-			// contains the mode name.
+			// Find the mode-selector radios. The label text varies by
+			// level: "Increase Ability Scores", "Take a Feat", "Take an
+			// Epic Boon" (L19 in 2024 rules), etc. We always prefer the
+			// "Increase Ability Scores" path because +2 to a stat is
+			// unconditionally legal at every ASI node.
 			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
 			const modeAsi = allRadios.find(r => {
 				const wrap = r.closest("label") || r.parentElement;
-				return !!wrap && /Increase Ability Scores/i.test(wrap.textContent || "");
+				return !!wrap && /Increase Ability Scores|Ability Score Improvement/i.test(wrap.textContent || "");
 			});
-			const modeFeat = allRadios.find(r => {
+			const modeFeatOrBoon = allRadios.find(r => {
 				const wrap = r.closest("label") || r.parentElement;
-				return !!wrap && /Take a Feat/i.test(wrap.textContent || "");
+				return !!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || "");
 			});
 
 			// Switch to ASI mode whenever it's available and not already
@@ -487,9 +489,9 @@ export class LevelUpPage {
 			// ASI mode and we already failed to drive them — try feat.
 			// Find the Feat-mode radio and switch to it, then pick a feat.
 			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
-			const modeFeat = allRadios.find(r => {
+			const modeFeatOrBoon = allRadios.find(r => {
 				const wrap = r.closest("label") || r.parentElement;
-				return !!wrap && /Take a Feat/i.test(wrap.textContent || "");
+				return !!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || "");
 			});
 			const robustClick = (el: HTMLElement) => {
 				try { el.click(); } catch (_) { /* noop */ }
@@ -500,19 +502,19 @@ export class LevelUpPage {
 					el.dispatchEvent(new Event("change", {bubbles: true}));
 				} catch (_) { /* noop */ }
 			};
-			if (modeFeat && !modeFeat.disabled && !modeFeat.checked) {
-				const wrap = (modeFeat.closest("label") || modeFeat.parentElement) as HTMLElement | null;
+			if (modeFeatOrBoon && !modeFeatOrBoon.disabled && !modeFeatOrBoon.checked) {
+				const wrap = (modeFeatOrBoon.closest("label") || modeFeatOrBoon.parentElement) as HTMLElement | null;
 				if (wrap) robustClick(wrap);
-				robustClick(modeFeat);
+				robustClick(modeFeatOrBoon);
 			}
-			// Refresh radio list — feat radios appear after switching mode.
+			// Refresh radio list — feat/boon radios appear after switching mode.
 			const featRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:checked):not(:disabled)"))
 				.filter(r => {
 					const wrap = r.closest("label") || r.parentElement;
 					if (!wrap) return false;
 					const txt = wrap.textContent || "";
 					// Exclude the mode-toggle radios themselves.
-					if (/Increase Ability Scores|Take a Feat/i.test(txt)) return false;
+					if (/Increase Ability Scores|Take a (Feat|Epic Boon)|Take an Epic Boon/i.test(txt)) return false;
 					return true;
 				});
 			const noChoice = featRadios.filter(r => {
