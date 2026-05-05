@@ -175,7 +175,15 @@ export class BuilderWizardPage {
 	 * Select a subrace if the preview shows a subrace dropdown
 	 */
 	async selectSubrace (subraceName: string): Promise<void> {
-		await this.subraceSelect.selectOption({label: subraceName});
+		// The wizard renders option labels as `${SubraceName} (${SrcAbv})`
+		// (e.g. "Clairnian (TGTT)"). Look up the matching <option> value
+		// then `selectOption` by value so callers can pass the bare name.
+		const opt = this.subraceSelect.locator("option").filter({hasText: subraceName}).first();
+		const value = await opt.getAttribute("value");
+		if (value == null) {
+			throw new Error(`Subrace "${subraceName}" not found in subrace dropdown`);
+		}
+		await this.subraceSelect.selectOption({value});
 		await this.page.waitForTimeout(100);
 	}
 

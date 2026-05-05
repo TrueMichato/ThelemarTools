@@ -10,6 +10,14 @@ import {LevelUpPage} from "../pages/LevelUpPage";
 export interface CharacterPreset {
 	race: string;
 	raceSource: string;
+	/**
+	 * Optional subrace label exactly as it appears in the wizard's
+	 * subrace dropdown (e.g. "Jaknian", "Lexalian"). When the chosen
+	 * race exposes a subrace selector, this label is selected after
+	 * the parent race click. Required for races that gate stats
+	 * behind a subrace pick.
+	 */
+	subrace?: string;
 	className: string;
 	classSource: string;
 	background: string;
@@ -335,6 +343,127 @@ export const PRESET_FULL_TIME_CLERIC: CharacterPreset = {
 	signatureSpells: ["Sacred Flame", "Cure Wounds"],
 };
 
+/** 11. Gambler Rogue Clairnian (TGTT) — Spellcasting from L3 (warlock list). */
+export const PRESET_FULL_GAMBLER_CLAIRNIAN: CharacterPreset = {
+	race: "Child of the Empire",
+	raceSource: "TGTT",
+	subrace: "Clairnian",
+	className: "Rogue",
+	classSource: "TGTT",
+	background: "Charlatan",
+	bgSource: "PHB'24",
+	name: "Faro Luckwell",
+	skillCount: 4,
+	subclassName: "Gambler",
+	subclassSource: "TGTT",
+	signatureSpells: ["Eldritch Blast", "Hex"],
+};
+
+/** 12. Belly Dancer Rogue Jaknian (TGTT) — Dance of the Country toggle. */
+export const PRESET_FULL_BELLY_DANCER_JAKNIAN: CharacterPreset = {
+	race: "Child of the Empire",
+	raceSource: "TGTT",
+	subrace: "Jaknian",
+	className: "Rogue",
+	classSource: "TGTT",
+	background: "Entertainer",
+	bgSource: "PHB'24",
+	name: "Sahar Whirlstep",
+	skillCount: 4,
+	subclassName: "The Belly Dancer",
+	subclassSource: "TGTT",
+};
+
+/** 13. Jester Bard Dendulra (TGTT) — Jester's Acts at L3. */
+export const PRESET_FULL_JESTER_DENDULRA: CharacterPreset = {
+	race: "Dendulra",
+	raceSource: "TGTT",
+	className: "Bard",
+	classSource: "TGTT",
+	background: "Entertainer",
+	bgSource: "PHB'24",
+	name: "Pip Bellsong",
+	skillCount: 3,
+	subclassName: "College of Jesters",
+	subclassSource: "TGTT",
+	signatureSpells: ["Vicious Mockery", "Healing Word"],
+};
+
+/** 14. Oath of Bastion Paladin Bugbear (TGTT). */
+export const PRESET_FULL_BASTION_BUGBEAR: CharacterPreset = {
+	race: "Bugbear",
+	raceSource: "TGTT",
+	className: "Paladin",
+	classSource: "TGTT",
+	background: "Soldier",
+	bgSource: "PHB'24",
+	name: "Grom Shieldoath",
+	skillCount: 2,
+	subclassName: "Oath of Bastion",
+	subclassSource: "TGTT",
+};
+
+/** 15. Heroic Soul Sorcerer Half-Ogre (TGTT) — Over Soul + Stamina + Metamagic. */
+export const PRESET_FULL_HEROIC_SOUL_HALFOGRE: CharacterPreset = {
+	race: "Half-Ogre",
+	raceSource: "TGTT",
+	className: "Sorcerer",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Kael Heartflame",
+	skillCount: 2,
+	subclassName: "Heroic Soul",
+	subclassSource: "TGTT",
+	signatureSpells: ["Fire Bolt", "Magic Missile"],
+};
+
+/** 16. Trickster Rogue Goblin (TGTT) — Trickster Dice resource + Tricks. */
+export const PRESET_FULL_TRICKSTER_GOBLIN: CharacterPreset = {
+	race: "Goblin",
+	raceSource: "TGTT",
+	className: "Rogue",
+	classSource: "TGTT",
+	background: "Criminal",
+	bgSource: "PHB'24",
+	name: "Snik Quickfingers",
+	skillCount: 4,
+	subclassName: "Trickster",
+	subclassSource: "TGTT",
+};
+
+/** 17. Lust Domain Cleric Lexalian (TGTT). */
+export const PRESET_FULL_LUST_LEXALIAN: CharacterPreset = {
+	race: "Child of the Empire",
+	raceSource: "TGTT",
+	subrace: "Lexalian",
+	className: "Cleric",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Lyra Heartcall",
+	skillCount: 2,
+	subclassName: "Lust Domain",
+	subclassSource: "TGTT",
+	signatureSpells: ["Sacred Flame", "Cure Wounds"],
+};
+
+/** 18. Horror Warlock Theocracian (TGTT). */
+export const PRESET_FULL_HORROR_THEOCRACIAN: CharacterPreset = {
+	race: "Child of the Empire",
+	raceSource: "TGTT",
+	subrace: "Theocracian",
+	className: "Warlock",
+	classSource: "TGTT",
+	background: "Hermit",
+	bgSource: "PHB'24",
+	name: "Vex Whisperer",
+	skillCount: 2,
+	subclassName: "The Horror",
+	subclassSource: "TGTT",
+	signatureSpells: ["Eldritch Blast", "Hex"],
+};
+
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
 export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_MERCY_MONK_CHANGELING,
@@ -348,6 +477,14 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_SURREALISM_YUANTI,
 	PRESET_FULL_CHAINED_FURY_MINOTAUR,
 	PRESET_FULL_TIME_CLERIC,
+	PRESET_FULL_GAMBLER_CLAIRNIAN,
+	PRESET_FULL_BELLY_DANCER_JAKNIAN,
+	PRESET_FULL_JESTER_DENDULRA,
+	PRESET_FULL_BASTION_BUGBEAR,
+	PRESET_FULL_HEROIC_SOUL_HALFOGRE,
+	PRESET_FULL_TRICKSTER_GOBLIN,
+	PRESET_FULL_LUST_LEXALIAN,
+	PRESET_FULL_HORROR_THEOCRACIAN,
 ];
 
 /**
@@ -382,6 +519,14 @@ export async function createCharacterViaWizard (
 	// Step 1: Race
 	await builder.selectRaceExact(preset.race, preset.raceSource);
 	await page.waitForTimeout(300);
+	if (preset.subrace) {
+		// Some races (Children of the Empire, Genasi, etc.) defer their
+		// stat-relevant choices to a subrace dropdown that appears in the
+		// race preview pane after the parent row is clicked.
+		if (await builder.hasSubraceSelection()) {
+			await builder.selectSubrace(preset.subrace);
+		}
+	}
 	// Race may require sub-choices (skill/tool/language picks) — satisfy
 	// validation before clicking Next.  No-op for races without choices.
 	await builder.selectAllRacialChoices();
