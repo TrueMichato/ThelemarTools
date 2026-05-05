@@ -123,3 +123,32 @@ codebase. The `TypeError` was swallowed by the level-up async chain,
 leaving the wizard hanging with no user-visible feedback.
 **Fix**: Removed the orphan call; matches the pattern of all other
 setters in the file (mutate `_data` only).
+
+---
+
+### CS-BUG-006 — Multiclass entry leaves modal overlay intercepting wizard clicks
+
+**Status**: Open. Discovered via the Hexblade 2 / Divine Soul 18 Tortle
+multiclass MEGA E2E test. Repro: build a character at L2, multiclass
+into a second class via the `➕ Multiclass` flow, then trigger Level Up
+on the new class. The Level Up wizard renders, but a leftover
+`.ve-ui-modal__overlay` from the multiclass-entry modal stays in the
+DOM and intercepts pointer events on the HP accordion (and other
+inputs), so the user cannot interact with the wizard. After ~1000+
+retries Playwright surfaces "element intercepts pointer events".
+
+**Hypothesis**: `_pShowMulticlassChoicesModal` resolves and removes its
+inner modal panel but leaves the backdrop attached, OR a follow-up
+prompt (Divine Soul affinity? Sorcerer L1 spell picker?) opens a second
+overlay that's not torn down before the next Level Up flow begins.
+
+**Workaround for tests**: None — the wizard is genuinely unusable. The
+test fails honestly and reflects what a player would experience.
+
+**Investigation hints**:
+- Open browser devtools after multiclass entry; check for orphan
+  `.ve-ui-modal__overlay` elements.
+- Check `UiUtil.pGetShowModal` resolution path in
+  `js/charactersheet/charactersheet-levelup.js` for the multiclass
+  branch (around L4690 — "Confirm & Add" button handler).
+
