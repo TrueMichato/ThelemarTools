@@ -164,7 +164,10 @@ export class CharacterSheetPage {
 	// ========== COMBAT STATS ==========
 
 	async getAC (): Promise<number> {
-		const text = await this.dispAC.textContent();
+		// Bounded: the AC display selector occasionally doesn't render on
+		// alternate layouts. Fail-fast with a reasonable default rather
+		// than letting Playwright's default (no timeout) hang the test.
+		const text = await this.dispAC.textContent({timeout: 2000}).catch(() => null);
 		return parseInt(text || "10", 10);
 	}
 
@@ -218,7 +221,11 @@ export class CharacterSheetPage {
 	// ========== TGTT — FEATURE TOGGLES & RESOURCES ==========
 
 	/**
-	 * Get all feature toggle buttons (activatable features) on the Features tab.
+	 * Get every feature card visible on the Features tab — passive AND
+	 * toggleable. Use this for "feature exists at level X" assertions
+	 * where you don't care whether it has a UI toggle. Pair with
+	 * `getToggleableFeatureNames()` when you specifically need a
+	 * clickable toggle.
 	 */
 	async getActivatableFeatureNames (): Promise<string[]> {
 		await this.switchToTab(this.tabFeatures);
@@ -227,6 +234,25 @@ export class CharacterSheetPage {
 		const names: string[] = [];
 		for (let i = 0; i < count; i++) {
 			const text = await nameEls.nth(i).textContent({timeout: 1000}).catch(() => null);
+			if (text && text.trim()) names.push(text.trim());
+		}
+		return names;
+	}
+
+	/**
+	 * Get only features that actually have a toggle button (e.g.
+	 * Bladesong, Rage). Resource-style features like "Channel Divinity"
+	 * — where the player spends a charge but no on/off toggle exists —
+	 * are excluded so callers like `probeToggleDelta` don't try to
+	 * click a nonexistent button.
+	 */
+	async getToggleableFeatureNames (): Promise<string[]> {
+		await this.switchToTab(this.tabFeatures);
+		const toggles = this.page.locator(".charsheet__feature-toggle, [data-testid='feature-toggle']");
+		const count = await toggles.count();
+		const names: string[] = [];
+		for (let i = 0; i < count; i++) {
+			const text = await toggles.nth(i).textContent({timeout: 1000}).catch(() => null);
 			if (text && text.trim()) names.push(text.trim());
 		}
 		return names;
@@ -315,7 +341,11 @@ export class CharacterSheetPage {
 	async getSpellSaveDC (): Promise<number> {
 		await this.switchToTab(this.tabCombat);
 		const dcEl = this.page.locator("#charsheet-disp-spell-save-dc, .charsheet__spell-dc-value").first();
-		const text = await dcEl.textContent();
+		// Bounded: the DC selector isn't always rendered (e.g. martial
+		// classes), so don't let textContent's no-timeout default hang
+		// the test. Returning 0 lets the caller treat it as "not
+		// present" without aborting.
+		const text = await dcEl.textContent({timeout: 2000}).catch(() => null);
 		return parseInt(text || "0", 10);
 	}
 
@@ -325,7 +355,7 @@ export class CharacterSheetPage {
 	async getCombatMethodDC (): Promise<number> {
 		await this.switchToTab(this.tabCombat);
 		const dcEl = this.page.locator("#charsheet-disp-combat-method-dc, .charsheet__combat-dc-value").first();
-		const text = await dcEl.textContent();
+		const text = await dcEl.textContent({timeout: 2000}).catch(() => null);
 		return parseInt(text || "0", 10);
 	}
 

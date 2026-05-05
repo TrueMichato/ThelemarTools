@@ -20,7 +20,7 @@ describeCharacter({
 	skipL7: true,
 	skipMega: true,
 	midTierLoadout: [
-		{name: "Wand of the War Mage, +1", source: "DMG"},
+		{name: "Cloak of Protection", source: "XDMG", attune: true},
 	],
 	signatureToggle: /bladesong/i,
 	// Usage spec skipped — same reason as L7/MEGA: subclass features

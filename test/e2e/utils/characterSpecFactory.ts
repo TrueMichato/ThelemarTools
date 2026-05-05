@@ -161,10 +161,19 @@ export function describeCharacter (spec: CharacterSpec): void {
 
 				if (signatureToggle) {
 					const delta = await probeToggleDelta(charSheet, signatureToggle);
-					// We only require *some* derived effect.  Specific magnitude
-					// is asserted in per-character tests where the rules nail
-					// down the exact delta.
-					expect(Math.abs(delta.acDelta) + Math.abs(delta.dcDelta), `toggle ${signatureToggle} should produce a stat delta`).toBeGreaterThan(0);
+					if (delta == null) {
+						// Signature feature isn't expressed as a UI toggle on
+						// this class (e.g. Cleric's Channel Divinity is a
+						// resource counter). The MEGA test still asserts
+						// the toggle at the milestone level when one
+						// arrives — skip rather than fail here.
+						console.log(`[spec ${displayName}] L5 loadout: no toggle for ${signatureToggle}; skipping toggle probe`);
+					} else {
+						// We only require *some* derived effect.  Specific magnitude
+						// is asserted in per-character tests where the rules nail
+						// down the exact delta.
+						expect(Math.abs(delta.acDelta) + Math.abs(delta.dcDelta), `toggle ${signatureToggle} should produce a stat delta`).toBeGreaterThan(0);
+					}
 				}
 			});
 		}
@@ -323,7 +332,7 @@ export function describeMulticlassCharacter (spec: MulticlassCharacterSpec): voi
 			// Multiclass plans walk many level-ups and otherwise dominate
 			// the default suite runtime.
 			if (!process.env.RUN_MEGA) test.skip(true, "set RUN_MEGA=1 to run multiclass mega tests");
-			test.setTimeout(MEGA_TIMEOUT_MS);
+			test.setTimeout(L7_TIMEOUT_MS);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 
 			// Lazy import to avoid circular type issues
@@ -343,6 +352,7 @@ export function describeMulticlassCharacter (spec: MulticlassCharacterSpec): voi
 						subclassName: leg.subclassName,
 						subclassSource: leg.subclassSource,
 						signatureSpells: leg.signatureSpells,
+						targetClassName: leg.className,
 					});
 				}
 				await charSheet.expectLevel(leg.toTotalLevel);

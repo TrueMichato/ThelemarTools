@@ -19,8 +19,7 @@ describeCharacter({
 	skipL7: true,
 	skipMega: true,
 	midTierLoadout: [
-		{name: "Longbow +1", source: "DMG"},
-		{name: "Studded Leather +1", source: "DMG"},
+		{name: "Cloak of Protection", source: "XDMG", attune: true},
 	],
 	signatureToggle: /action surge|second wind|arcane shot/i,
 	// Usage spec skipped — CS-BUG-003 makes the L3+ level-up wizard

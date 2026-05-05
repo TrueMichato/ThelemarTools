@@ -481,10 +481,77 @@ export async function createCharacterViaWizard (
  * Pass `signatureSpells` to deterministically tick named spells before
  * the auto-fill step picks the first-available remainder.
  */
+/**
+ * After clicking the Level Up button on a multiclass character, the
+ * runtime opens an `InputUiUtil.pGetUserEnum` modal asking which class
+ * to advance. This helper picks the class deterministically and clicks
+ * OK so the actual level-up wizard appears.
+ *
+ * If `targetClassName` is provided, picks that class. Otherwise picks
+ * the LAST class in the dropdown — which matches the most-recently
+ * added multiclass leg (so consecutive level-ups in a multiclass plan
+ * land on the new class).
+ *
+ * Returns immediately (no-op) if no picker modal opens (single-class
+ * characters skip the picker entirely). Bounded ~1.5s.
+ */
+export async function pHandleLevelUpClassPicker (page: Page, targetClassName?: string): Promise<void> {
+	// The picker modal is the InputUiUtil enum dialog: a `<select>`
+	// inside a modal whose only contents are the select + OK/Cancel.
+	// Crucially it does NOT contain `.charsheet__levelup-wizard` —
+	// that's how we tell the picker apart from the real wizard.
+	const picker = await page.waitForFunction(
+		() => {
+			const inners = Array.from(document.querySelectorAll<HTMLElement>(".ve-ui-modal__inner, .ui-modal__inner"))
+				.filter(m => m.offsetParent !== null);
+			for (const m of inners) {
+				if (m.querySelector(".charsheet__levelup-wizard")) continue;
+				const sel = m.querySelector<HTMLSelectElement>("select");
+				if (sel && sel.options.length > 1) return true;
+			}
+			return false;
+		},
+		{timeout: 1500},
+	).then(() => true).catch(() => false);
+
+	if (!picker) {
+		(globalThis as unknown as {__lastPickerSeen?: boolean}).__lastPickerSeen = false;
+		return;
+	}
+	(globalThis as unknown as {__lastPickerSeen?: boolean}).__lastPickerSeen = true;
+
+	await page.evaluate((wantClassName) => {
+		const inners = Array.from(document.querySelectorAll<HTMLElement>(".ve-ui-modal__inner, .ui-modal__inner"))
+			.filter(m => m.offsetParent !== null);
+		for (const m of inners) {
+			if (m.querySelector(".charsheet__levelup-wizard")) continue;
+			const sel = m.querySelector<HTMLSelectElement>("select");
+			if (!sel) continue;
+			const realOpts = Array.from(sel.options).filter(o => o.value !== "-1");
+			if (!realOpts.length) continue;
+			let chosen: HTMLOptionElement | undefined;
+			if (wantClassName) {
+				const re = new RegExp(`\\b${wantClassName}\\b`, "i");
+				chosen = realOpts.find(o => re.test(o.textContent || ""));
+			}
+			if (!chosen) chosen = realOpts[realOpts.length - 1];
+			sel.value = chosen.value;
+			sel.dispatchEvent(new Event("change", {bubbles: true}));
+			const okBtn = Array.from(m.querySelectorAll<HTMLButtonElement>("button"))
+				.find(b => /\bOK\b|\bConfirm\b/i.test(b.textContent || ""));
+			if (okBtn) okBtn.click();
+			return;
+		}
+	}, targetClassName);
+
+	await page.waitForTimeout(200);
+}
+
+
 export async function levelUpTo (
 	page: Page,
 	targetLevel: number,
-	opts?: {subclassName?: string; subclassSource?: string; signatureSpells?: string[]},
+	opts?: {subclassName?: string; subclassSource?: string; signatureSpells?: string[]; targetClassName?: string},
 ): Promise<void> {
 	const charSheet = new CharacterSheetPage(page);
 	const levelUp = new LevelUpPage(page);
@@ -507,11 +574,34 @@ export async function levelUpTo (
 	if (targetLevel <= startLevel) return;
 
 	for (let lvl = startLevel + 1; lvl <= targetLevel; lvl++) {
+		const t0 = Date.now();
 		if (page.isClosed()) throw new Error(`levelUpTo: page closed before reaching L${lvl} (last reached L${lvl - 1})`);
-		// Click the Level Up button on the character sheet
-		await charSheet.btnLevelUp.waitFor({state: "visible", timeout: 5000});
-		await charSheet.btnLevelUp.click();
-		await page.waitForTimeout(500);
+
+		// When `opts.targetClassName` is provided, bypass the Level Up
+		// button entirely and call the production API directly. This
+		// sidesteps the multiclass class-picker modal that
+		// `pGetUserEnum` otherwise raises (and which played havoc with
+		// our DOM-based wait loop on multiclass characters).
+		if (opts?.targetClassName) {
+			await page.evaluate(async (cls) => {
+				const cs: any = (globalThis as any).charSheet;
+				if (!cs?._levelUp?.showLevelUp) throw new Error("charSheet._levelUp.showLevelUp unavailable");
+				await cs._levelUp.showLevelUp(cls);
+			}, opts.targetClassName);
+			await page.waitForTimeout(200);
+		} else {
+			await charSheet.btnLevelUp.waitFor({state: "visible", timeout: 5000});
+			await charSheet.btnLevelUp.click();
+			await page.waitForTimeout(300);
+			// Only single-class characters reach this branch in normal
+			// flow (multiclass tests pass `targetClassName` and use the
+			// API path above). For safety against unexpected pickers we
+			// still detect the picker modal — but only if it appears
+			// BEFORE the wizard renders, so we never race against the
+			// wizard's own select elements (HP option, subclass picker).
+			const wizardOpen = await page.locator(".charsheet__levelup-wizard").isVisible().catch(() => false);
+			if (!wizardOpen) await pHandleLevelUpClassPicker(page, opts?.targetClassName);
+		}
 
 		// Wait for the level-up modal
 		await levelUp.waitForModal();
@@ -541,7 +631,7 @@ export async function levelUpTo (
 		// Finish this level
 		await levelUp.finish();
 		await levelUp.expectModalClosed();
-		await page.waitForTimeout(300);
+		await page.waitForTimeout(100);
 
 		// Confirm the level actually advanced. If not, the wizard rejected
 		// `finish()` (e.g. silent toast about an unfilled required choice)
@@ -568,5 +658,7 @@ export async function levelUpTo (
 				`level-up to ${lvl} did not take effect. sheet state=${JSON.stringify(got)}`,
 			);
 		});
+		// eslint-disable-next-line no-console
+		console.log(`[levelUpTo] reached L${lvl} in ${Date.now() - t0}ms`);
 	}
 }

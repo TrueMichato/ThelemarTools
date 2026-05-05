@@ -15,7 +15,7 @@ describeCharacter({
 	preset: PRESET_FULL_CHAINED_FURY_MINOTAUR,
 	displayName: "Chained Fury Barbarian Minotaur",
 	midTierLoadout: [
-		{name: "Greataxe +1", source: "DMG"},
+		{name: "Cloak of Protection", source: "XDMG", attune: true},
 	],
 	signatureToggle: /rage|reckless attack|chained/i,
 	usage: {

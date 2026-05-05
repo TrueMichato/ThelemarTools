@@ -55,7 +55,51 @@ export class LevelUpPage {
 	 * Wait for the level-up modal to appear
 	 */
 	async waitForModal (): Promise<void> {
-		await this.modalContainer.waitFor({state: "visible", timeout: 10000});
+		try {
+			await this.modalContainer.waitFor({state: "visible", timeout: 10000});
+		} catch (e) {
+			// Diagnostic: capture page state so we can tell whether the
+			// click was swallowed by a lingering modal, the wizard
+			// failed to render, or the button itself wasn't where we
+			// expected. Surfaces in the test failure message instead of
+			// just "TimeoutError".
+			let diag: unknown = null;
+			try {
+				diag = await this.page.evaluate(() => {
+					const wiz = document.querySelector(".charsheet__levelup-wizard");
+					const inners = Array.from(document.querySelectorAll(".ve-ui-modal__inner, .ui-modal__inner")) as HTMLElement[];
+					const innerSummary = inners.map(m => ({
+						visible: m.offsetParent !== null,
+						title: ((m.querySelector("h4,h3,h2") as HTMLElement | null)?.textContent || "").trim().slice(0, 80),
+						hasWizard: !!m.querySelector(".charsheet__levelup-wizard"),
+						hasSelect: !!m.querySelector("select"),
+						selectOpts: Array.from(m.querySelectorAll("select option")).map(o => (o as HTMLOptionElement).textContent?.trim()).filter(Boolean),
+					}));
+					const btn = document.getElementById("charsheet-btn-levelup") as HTMLButtonElement | null;
+					const cs: any = (globalThis as any).charSheet;
+					const lvl = cs?._state?.getTotalLevel?.();
+					const classes = (cs?._state?._data?.classes || []).map((c: any) => `${c.name}|${c.source}|${c.level}`);
+					const err = (window as unknown as {__levelupErr?: string}).__levelupErr;
+					const pickerSeen = (window as unknown as {__lastPickerSeen?: boolean}).__lastPickerSeen;
+					return {
+						wizardInDom: !!wiz,
+						wizardHidden: wiz ? (wiz as HTMLElement).offsetParent === null : null,
+						modalCount: inners.length,
+						modalSummary: innerSummary,
+						btnLevelUpExists: !!btn,
+						btnDisabled: btn?.disabled,
+						btnVisible: btn ? btn.offsetParent !== null : false,
+						currentLevel: lvl,
+						classes,
+						lastErr: err || null,
+						pickerSeen: pickerSeen ?? null,
+					};
+				});
+			} catch (innerErr) {
+				diag = {error: "evaluate failed", inner: String(innerErr).slice(0, 200), pageClosed: this.page.isClosed()};
+			}
+			throw new Error(`waitForModal: levelup wizard not visible within 10s. diag=${JSON.stringify(diag)}`);
+		}
 	}
 
 	/**
@@ -239,7 +283,15 @@ export class LevelUpPage {
 			}
 		}
 
-		throw new Error(`Could not find subclass "${subclassName}"${sourceAbbv ? ` with source "${sourceAbbv}"` : ""}`);
+		// Diagnostic dump of all visible options so test failures don't
+		// reduce to "subclass not found" with no context — invaluable
+		// when source naming drifts (TGTT vs TGTT-2024 vs XPHB).
+		const optionTexts: string[] = [];
+		for (let i = 0; i < optionCount; i++) {
+			const o = options.nth(i);
+			if (await o.isVisible()) optionTexts.push(((await o.textContent()) || "").replace(/\s+/g, " ").slice(0, 120));
+		}
+		throw new Error(`Could not find subclass "${subclassName}"${sourceAbbv ? ` with source "${sourceAbbv}"` : ""}. Visible options: ${JSON.stringify(optionTexts)}`);
 	}
 
 	// ========== KNOWN SPELLS SECTION ==========
@@ -327,13 +379,14 @@ export class LevelUpPage {
 				if (!cb.checked) cb.click();
 			}
 		});
-		await this.page.waitForTimeout(200);
 
 		// Some sub-pickers gate later choices on earlier ones (e.g. Monk
 		// L2 Combat Methods only become valid after Combat Traditions are
 		// chosen, even if both render in the same accordion body). Loop
 		// the auto-fill pass up to 3 times so each round can satisfy
-		// counters that just became fillable.
+		// counters that just became fillable. Inter-pass wait is short
+		// (50ms) because the DOM mutates synchronously on click — we
+		// only need one frame for re-render.
 		for (let pass = 0; pass < 3; pass++) {
 			const clicked = await this.page.evaluate(() => {
 				const wizard = document.querySelector(".charsheet__levelup-wizard");
@@ -359,9 +412,6 @@ export class LevelUpPage {
 						const checkboxes = Array.from(
 							scope.querySelectorAll<HTMLInputElement>("input[type='checkbox']:not(:checked):not(:disabled)"),
 						);
-						// Filter out the global "Show all source versions"
-						// helper and any checkbox that's part of a different
-						// counter group nested under this scope.
 						const group = checkboxes.filter(cb => {
 							const lbl = (cb.parentElement?.textContent || "").toLowerCase();
 							return !lbl.includes("show all source versions");
@@ -448,7 +498,8 @@ export class LevelUpPage {
 		await this.page.waitForTimeout(200);
 
 		// Now drain the +/- stepper. Re-query the ASI accordion each
-		// pass — switching modes re-renders the body.
+		// pass — switching modes re-renders the body. 50ms wait between
+		// presses is plenty (DOM mutates synchronously on click).
 		for (let pass = 0; pass < 8; pass++) {
 			const remaining = await this.page.evaluate(() => {
 				const wizard = document.querySelector(".charsheet__levelup-wizard");

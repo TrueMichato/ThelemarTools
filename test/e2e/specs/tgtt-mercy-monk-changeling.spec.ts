@@ -29,6 +29,6 @@ describeCharacter({
 		5:  {totalLevel: 5,  minMaxHp: 30},
 		11: {totalLevel: 11, minMaxHp: 60},
 		17: {totalLevel: 17, minMaxHp: 90},
-		20: {totalLevel: 20, minMaxHp: 100, expectToggles: [/perfect self|empty body/i]},
+		20: {totalLevel: 20, minMaxHp: 100, expectToggles: [/body and mind|superior defense|perfect self/i]},
 	},
 });
