@@ -241,7 +241,15 @@ export class CharacterSheetPage {
 			.locator(".charsheet__feature-toggle, [data-testid='feature-toggle']")
 			.filter({hasText: featureName});
 		const btn = toggle.locator("button, .charsheet__feature-toggle-btn").first();
-		await btn.click();
+		// Hard timeout: missing toggle must fail fast, not hang the whole test.
+		// (Helps us cleanly distinguish "feature not toggleable" from
+		// "general infra wedge" in triage.)
+		try {
+			await btn.waitFor({state: "visible", timeout: 5000});
+		} catch (e) {
+			throw new Error(`activateFeature(${featureName}): no visible toggle button within 5s. Feature may be passive on the sheet — see docs/charactersheet/known-bugs.md.`);
+		}
+		await btn.click({timeout: 5000});
 		await this.page.waitForTimeout(200);
 	}
 
