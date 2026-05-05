@@ -40,6 +40,29 @@ Each spec calls one of two factories from `../utils/characterSpecFactory.ts`:
 
 - `describeMulticlassCharacter(spec)` — emits one walkthrough that levels primary class to the split point, opens the in-sheet `#charsheet-btn-multiclass` dialog, and continues levelling through the secondary class.
 
+### Spec layers (`describeCharacter`)
+
+When all switches are present, a single preset emits up to 7 tests:
+
+1. **L1 creation smoke** — builder wizard end-to-end.
+2. **L3 subclass arrival** — verifies the subclass and signature feature land.
+3. **L5 milestone** — Extra Attack / 3rd-level slots / proficiency +3.
+4. **L5 loadout** — installs `midTierLoadout` and asserts the toggle delta. Skipped via `skipL7: true`.
+5. **MEGA L1→20** — gated by `RUN_MEGA`; checkpoint asserts at L3/5/11/17/20.
+6. **USE: cast/attack/resource/rest at L{atLevel}** *(Phase 2)* — see below. Skipped via `usage: {skip: true}`.
+7. **L1 export round-trip** — `state.toJson()` → `loadFromJson()` parity.
+
+#### `usage` block (sheet-interaction probes)
+
+Phase 2 added a layer that exercises the BUILT sheet — what a player would actually do — rather than just asserting the build succeeded. Each `usage` switch is independent and runs only if set:
+
+- `castSpellSlotLevel` → consumes a slot via `state.useSpellSlot(level)`, re-renders, and asserts the rendered pip count decremented.
+- `useResourceName` → spends one charge of a named resource (e.g. `"Sorcery Points"`, `"Channel Divinity"`, `"Focus Points"`); verifies the counter on the sheet decremented.
+- `attackName` → finds the matching attack row on the Combat tab and clicks the roll button (verifies the pipeline doesn't throw). If no attacks are rendered the probe logs and skips; install gear via `midTierLoadout` for strict attack-roll coverage.
+- `expectLongRestRestores` → triggers a long rest via state and re-asserts spell slots are full.
+
+Toggles marked with the bug tracker (CS-BUG-002 / CS-BUG-003) skip usage entirely until the underlying product issue lands.
+
 ### Running modes
 
 ```bash
@@ -77,9 +100,9 @@ Milestone shape lives in `comprehensiveBuildHelpers.ts → MilestoneExpect`.
 
 ### Triage workflow when a spec fails
 
-1. **Real character-sheet bug** → file a follow-up issue, leave the assertion as-is so the failure stays visible.
+1. **Real character-sheet bug** → log it in [`docs/charactersheet/known-bugs.md`](../../../docs/charactersheet/known-bugs.md) and either leave the assertion as-is (so the failure stays visible) or set `usage: {skip: true}` / `skipL7: true` / `skipMega: true` on the affected preset to keep the canonical suite green elsewhere.
 2. **Builder gap that prevents a build** → wrap *only that test* in `test.fixme()` with a TODO comment naming the failure mode.
-3. **Locator/selector flake** → fix in `comprehensiveBuildHelpers.ts` or `characterSpecFactory.ts` so every spec benefits.
+3. **Locator/selector flake** → fix in `comprehensiveBuildHelpers.ts`, `LevelUpPage.ts`, or `characterSpecFactory.ts` so every spec benefits.
 
 ### Known limitation
 

@@ -14,6 +14,13 @@ describeCharacter({
 	preset: PRESET_FULL_CHILD_OF_SUN_HOCHLING,
 	displayName: "Child of the Sun Sorcerer Hochling",
 	signatureToggle: /metamagic|sun|font of magic|searing/i,
+	usage: {
+		atLevel: 5,
+		castSpellSlotLevel: 1,
+		useResourceName: "Sorcery Points",
+		expectLongRestRestores: true,
+		attackName: /dagger|crossbow/i,
+	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2},  expectResources: {"Sorcery Points": 1}},
 		3:  {totalLevel: 3,  spellSlots: {2: 2},  expectResources: {"Sorcery Points": 3}},

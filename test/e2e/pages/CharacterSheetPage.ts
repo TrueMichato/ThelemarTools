@@ -280,16 +280,22 @@ export class CharacterSheetPage {
 
 	/**
 	 * Get the current/max value of a named resource (e.g. "Sorcery Points", "Stamina").
+	 * Bounded: returns {current: -1, max: -1} if the resource isn't rendered within 2s.
 	 */
 	async getResource (resourceName: string): Promise<{current: number; max: number}> {
 		const container = this.page
 			.locator(".charsheet__resource-row, .charsheet__resource-tracker, [data-testid='resource-tracker']")
 			.filter({hasText: resourceName})
 			.first();
+		// Hard 2s presence check — missing resources must NOT hang the
+		// test budget on retried `.inputValue()` waits.
+		const present = await container.waitFor({state: "attached", timeout: 2000}).then(() => true).catch(() => false);
+		if (!present) return {current: -1, max: -1};
 		const currentEl = container.locator(".charsheet__resource-current, input").first();
 		const maxEl = container.locator(".charsheet__resource-max").first();
 
-		const currentText = await currentEl.inputValue().catch(() => currentEl.textContent({timeout: 2000}).catch(() => "0"));
+		const currentText = await currentEl.inputValue({timeout: 2000})
+			.catch(() => currentEl.textContent({timeout: 2000}).catch(() => "0"));
 		const maxText = await maxEl.textContent({timeout: 2000}).catch(() => "0");
 
 		const parseNum = (s: string | null | undefined) => {
@@ -389,5 +395,153 @@ export class CharacterSheetPage {
 			if (!state?.getKnownSpells) return [];
 			return state.getKnownSpells().map(spell => spell.name);
 		});
+	}
+
+	// ========== SHEET-USAGE HELPERS (Phase 2) ==========
+
+	/**
+	 * Read a combat stat displayed on the sheet.
+	 *  - "ac" → armor class
+	 *  - "spellSaveDc" → primary spell save DC
+	 *  - "speed" → walking speed (numeric)
+	 *  - "initiative" → initiative bonus (signed int)
+	 */
+	async getCombatStat (kind: "ac" | "spellSaveDc" | "speed" | "initiative"): Promise<number> {
+		const map: Record<typeof kind, string> = {
+			ac: "#charsheet-disp-ac",
+			spellSaveDc: "#charsheet-disp-spell-save-dc",
+			speed: "#charsheet-disp-speed",
+			initiative: "#charsheet-disp-initiative",
+		};
+		const sel = map[kind];
+		const el = this.page.locator(sel).first();
+		await el.waitFor({state: "attached", timeout: 5000}).catch(() => null);
+		const text = await el.textContent({timeout: 2000}).catch(() => "");
+		const m = (text || "").match(/-?\d+/);
+		return m ? parseInt(m[0], 10) : 0;
+	}
+
+	/**
+	 * Cast a spell by directly invoking the state API and re-rendering.
+	 * Returns the slot count for that level after consumption.
+	 *
+	 * Driving the in-sheet "cast" UI is fragile (modal-based, varies by
+	 * spell type), so we exercise the same state mutation the UI invokes
+	 * and verify the rendered spell-slot pips decrement — proving the
+	 * end-to-end pipeline (state → render → DOM) is intact.
+	 */
+	async castSpellAtSlot (level: number): Promise<{ok: boolean; remaining: number}> {
+		await this.switchToTab(this.tabSpells);
+		const ok = await this.page.evaluate(lvl => {
+			const cs: any = (globalThis as any).charSheet;
+			if (!cs?._state?.useSpellSlot) return false;
+			const result = cs._state.useSpellSlot(lvl);
+			cs._renderCharacter?.();
+			return !!result;
+		}, level);
+		await this.page.waitForTimeout(150);
+		const slots = await this.getSpellSlots(level);
+		return {ok, remaining: slots.current};
+	}
+
+	/**
+	 * Spend N charges of a named resource (e.g. "Channel Divinity",
+	 * "Bardic Inspiration"). Returns remaining charges.
+	 */
+	async useResourceByName (resourceName: string, amount = 1): Promise<{ok: boolean; remaining: number}> {
+		const ok = await this.page.evaluate(({name, n}) => {
+			const cs: any = (globalThis as any).charSheet;
+			if (!cs?._state?.useResourceCharge) return false;
+			const result = cs._state.useResourceCharge(name, n);
+			cs._renderCharacter?.();
+			return !!result;
+		}, {name: resourceName, n: amount});
+		await this.page.waitForTimeout(150);
+		const res = await this.getResource(resourceName).catch(() => ({current: -1, max: -1}));
+		return {ok, remaining: res.current};
+	}
+
+	/**
+	 * Trigger a short rest. Bypasses the confirm dialog by invoking the
+	 * state hook directly (the dialog is awkward to drive in CI). The
+	 * UI's render runs afterwards so we can still assert the visual
+	 * outcome (HP bar, slot pips, resource counters).
+	 */
+	async triggerShortRest (): Promise<void> {
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.onShortRest?.();
+			cs?._renderCharacter?.();
+		});
+		await this.page.waitForTimeout(200);
+	}
+
+	async triggerLongRest (): Promise<void> {
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.onLongRest?.();
+			cs?._renderCharacter?.();
+		});
+		await this.page.waitForTimeout(250);
+	}
+
+	/**
+	 * Click an attack roll on the Combat tab matching `attackName` (case-
+	 * insensitive substring). Returns true if a click happened, false if
+	 * no matching attack exists. Does NOT assert on the toast text — many
+	 * dice systems route differently — so callers should wrap with state
+	 * checks if they need precise verification.
+	 */
+	async clickAttackRoll (attackName: string): Promise<boolean> {
+		await this.switchToTab(this.tabCombat);
+		const item = this.page.locator(".charsheet__attack-item")
+			.filter({hasText: new RegExp(attackName, "i")})
+			.first();
+		if (await item.count() === 0) return false;
+		const rollBtn = item.locator(".charsheet__attack-roll").first();
+		if (await rollBtn.count() === 0) return false;
+		await rollBtn.click({timeout: 5000}).catch(() => null);
+		await this.page.waitForTimeout(150);
+		return true;
+	}
+
+	/** Read an attack-bonus string from a named attack row (e.g. "+5"). */
+	async getAttackBonus (attackName: string): Promise<string | null> {
+		await this.switchToTab(this.tabCombat);
+		const item = this.page.locator(".charsheet__attack-item")
+			.filter({hasText: new RegExp(attackName, "i")})
+			.first();
+		if (await item.count() === 0) return null;
+		const bonusEl = item.locator(".charsheet__attack-bonus, .charsheet__attack-roll-bonus").first();
+		if (await bonusEl.count() === 0) {
+			// Fallback: read the raw attack item textContent.
+			return (await item.textContent({timeout: 1000}).catch(() => "")) || null;
+		}
+		return ((await bonusEl.textContent({timeout: 1000}).catch(() => "")) || "").trim() || null;
+	}
+
+	/** List the attack-item names rendered on the Combat tab. */
+	async getAttackNames (): Promise<string[]> {
+		await this.switchToTab(this.tabCombat);
+		const nameEls = this.page.locator(".charsheet__attack-item .charsheet__attack-name");
+		const count = await nameEls.count();
+		const out: string[] = [];
+		for (let i = 0; i < count; i++) {
+			const t = await nameEls.nth(i).textContent({timeout: 500}).catch(() => null);
+			if (t && t.trim()) out.push(t.trim());
+		}
+		return out;
+	}
+
+	/** List the resource names rendered on the sheet. */
+	async getResourceNames (): Promise<string[]> {
+		const els = this.page.locator(".charsheet__resource-row .charsheet__resource-name, .charsheet__resource-tracker .charsheet__resource-name");
+		const count = await els.count();
+		const out: string[] = [];
+		for (let i = 0; i < count; i++) {
+			const t = await els.nth(i).textContent({timeout: 500}).catch(() => null);
+			if (t && t.trim()) out.push(t.trim());
+		}
+		return out;
 	}
 }

@@ -227,7 +227,7 @@ test.describe("TGTT Party — Cross-character checks", () => {
 		await charSheet.expectLevel(1);
 
 		// Verify the level is rendered as "1" somewhere on the sheet
-		const levelText = await charSheet.page.locator("[data-testid='charsheet-level'], .charsheet__header-level")
+		const levelText = await charSheet.page.locator("#charsheet-disp-level, [data-testid='charsheet-level'], .charsheet__header-level")
 			.first()
 			.textContent();
 		expect(levelText).toContain("1");

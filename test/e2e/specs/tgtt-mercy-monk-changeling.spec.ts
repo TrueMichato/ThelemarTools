@@ -14,6 +14,15 @@ describeCharacter({
 	preset: PRESET_FULL_MERCY_MONK_CHANGELING,
 	displayName: "Mercy Monk Changeling",
 	signatureToggle: /flurry|hand of (heal|harm)|patient defense/i,
+	usage: {
+		atLevel: 5,
+		// Monks render Unarmed Strike via a dedicated panel, not the
+		// auto-attack list, and TGTT Mercy Monks don't auto-equip a
+		// weapon. Probe the resource pipeline (Focus Points) instead;
+		// the attack lives in the spec separately if/when we add a
+		// dedicated Monk-attack helper.
+		useResourceName: "Focus Points",
+	},
 	milestones: {
 		1:  {totalLevel: 1,  minMaxHp: 8,  acRange: [10, 20]},
 		3:  {totalLevel: 3,  minMaxHp: 18, expectToggles: [/hand of (healing|harm)/i]},

@@ -18,6 +18,11 @@ describeCharacter({
 		{name: "Greataxe +1", source: "DMG"},
 	],
 	signatureToggle: /rage|reckless attack|chained/i,
+	usage: {
+		atLevel: 5,
+		useResourceName: "Rage",
+		attackName: /greataxe|battleaxe|maul/i,
+	},
 	milestones: {
 		1:  {totalLevel: 1,  expectToggles: [/rage/i], expectResources: {"Rage": 2}},
 		3:  {totalLevel: 3,  expectResources: {"Rage": 3}},

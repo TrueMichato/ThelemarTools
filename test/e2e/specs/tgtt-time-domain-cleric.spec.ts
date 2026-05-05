@@ -14,6 +14,13 @@ describeCharacter({
 	preset: PRESET_FULL_TIME_CLERIC,
 	displayName: "Time Domain Cleric",
 	signatureToggle: /channel divinity|time|temporal|destroy undead/i,
+	usage: {
+		atLevel: 5,
+		castSpellSlotLevel: 1,
+		useResourceName: "Channel Divinity",
+		expectLongRestRestores: true,
+		attackName: /mace|warhammer/i,
+	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2}},
 		3:  {totalLevel: 3,  spellSlots: {2: 2}},
