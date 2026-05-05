@@ -26,7 +26,10 @@ describeCharacter({
 	// Usage spec skipped — same reason as L7/MEGA: subclass features
 	// missing means Bladesong toggle never appears, and the L5 build
 	// itself sometimes errors before we can probe the spell pipeline.
-	// Re-enable once CS-BUG-002 lands.
+	// Re-enable once CS-BUG-002 lands.  When un-skipping, restore:
+	//   skillRoll: {name: "Arcana"}, shortRestRestores: {resourceName: "Bladesong", expectAfter: 1},
+	//   concentrationCheck: {castSpell: "Shield", thenAction: "damage", expectActive: false},
+	//   deathSaves: true, applyCondition: {skip: true}, featAbility: {skip: true},
 	usage: {skip: true},
 	milestones: {
 		1:  {totalLevel: 1,  minMaxHp: 6,  spellSlots: {1: 2}},

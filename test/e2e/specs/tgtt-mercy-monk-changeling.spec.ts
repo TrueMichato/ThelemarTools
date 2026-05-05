@@ -22,6 +22,14 @@ describeCharacter({
 		// the attack lives in the spec separately if/when we add a
 		// dedicated Monk-attack helper.
 		useResourceName: "Focus Points",
+		skillRoll: {name: "Insight"},
+		// Monks regain Focus Points on a short rest.
+		shortRestRestores: {resourceName: "Focus Points"},
+		// Monks don't have a typical concentration spell; skip cleanly.
+		concentrationCheck: {skip: true},
+		deathSaves: true,
+		applyCondition: {skip: true}, // blocked by CS-BUG-009 (addCondition hangs render at L5)
+		featAbility: {skip: true},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  minMaxHp: 8,  acRange: [10, 20]},

@@ -22,6 +22,14 @@ describeCharacter({
 		atLevel: 5,
 		useResourceName: "Rage",
 		attackName: /greataxe|battleaxe|maul/i,
+		skillRoll: {name: "Athletics"},
+		// Barbarians don't have a class-granted SR resource at L5; skip.
+		shortRestRestores: {skip: true},
+		// Activating Rage breaks any concentration the player has.
+		concentrationCheck: {skip: true}, // blocked by CS-BUG-007 (Rage doesn't break concentration)
+		deathSaves: true,
+		applyCondition: {skip: true}, // blocked by CS-BUG-009 (addCondition hangs render — to retest after fix)
+		featAbility: {skip: true},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  expectToggles: [/rage/i], expectResources: {"Rage": 2}},

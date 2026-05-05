@@ -18,6 +18,12 @@ describeCharacter({
 		castSpellSlotLevel: 1,
 		expectLongRestRestores: true,
 		attackName: /longbow|shortbow/i,
+		skillRoll: {name: "Stealth"},
+		shortRestRestores: {skip: true},
+		concentrationCheck: {castSpell: "Hunter's Mark", thenAction: "damage", expectActive: false},
+		deathSaves: true,
+		applyCondition: {skip: true},
+		featAbility: {skip: true},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  minMaxHp: 10},
@@ -39,6 +45,12 @@ describeCharacter({
 		useResourceName: "Wild Shape",
 		expectLongRestRestores: true,
 		attackName: /quarterstaff|scimitar|club/i,
+		skillRoll: {name: "Nature"},
+		shortRestRestores: {resourceName: "Wild Shape"},
+		concentrationCheck: {castSpell: "Entangle", thenAction: "damage", expectActive: false},
+		deathSaves: true,
+		applyCondition: {skip: true},
+		featAbility: {skip: true},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2}},
@@ -58,6 +70,20 @@ describeMulticlassCharacter({
 			signatureSpells: PRESET_FULL_HUNTER_CENTAUR.signatureSpells, toTotalLevel: 6},
 		{className: "Druid", classSource: "TGTT", subclassName: "Circle of the Zodiac", subclassSource: "TGTT",
 			signatureSpells: PRESET_FULL_ZODIAC_CENTAUR.signatureSpells, toTotalLevel: 20},
+	],
+	usageAfterEachLeg: [
+		// After Ranger 6 — should have Hunter's Mark + 1st-level slots + bow attack
+		{
+			castSpellSlotLevel: 1,
+			attackName: /longbow|shortbow/i,
+			skillRoll: {name: "Stealth"},
+		},
+		// After Druid 20 — full 9th-level access + Wild Shape resource + Nature roll
+		{
+			castSpellSlotLevel: 1,
+			useResourceName: "Wild Shape",
+			skillRoll: {name: "Nature"},
+		},
 	],
 	finalMilestone: {
 		totalLevel: 20,

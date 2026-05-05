@@ -20,6 +20,14 @@ describeCharacter({
 		useResourceName: "Bardic Inspiration",
 		expectLongRestRestores: true,
 		attackName: /rapier|shortsword|dagger/i,
+		skillRoll: {name: "Performance"},
+		// Bardic Inspiration restores on long rest in 2014 PHB, on a SR
+		// once the bard hits L5 (Font of Inspiration).  TGTT mirrors XPHB.
+		shortRestRestores: {skip: true}, // blocked by CS-BUG-008 (Bardic Inspiration not restored on short rest)
+		concentrationCheck: {castSpell: "Bless", thenAction: "damage", expectActive: false},
+		deathSaves: true,
+		applyCondition: {skip: true},
+		featAbility: {skip: true},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  spellSlots: {1: 2}, expectToggles: [/bardic inspiration/i]},

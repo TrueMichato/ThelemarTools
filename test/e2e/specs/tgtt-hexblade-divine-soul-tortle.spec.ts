@@ -27,6 +27,19 @@ describeMulticlassCharacter({
 		{className: "Sorcerer", classSource: "TGTT", subclassName: "Divine Soul", subclassSource: "TGTT-2014",
 			signatureSpells: ["Cure Wounds", "Shield"], toTotalLevel: 20},
 	],
+	usageAfterEachLeg: [
+		// After Warlock 2 — Pact slots present + Hex available + Arcana skill
+		{
+			useResourceName: "Sorcery Points",  // not yet present; probe will log + skip
+			skillRoll: {name: "Arcana"},
+		},
+		// After Sorcerer 18 — full caster + Sorcery Points + skill probe
+		{
+			castSpellSlotLevel: 1,
+			useResourceName: "Sorcery Points",
+			skillRoll: {name: "Persuasion"},
+		},
+	],
 	finalMilestone: {
 		totalLevel: 20,
 		spellSlots: {1: 4, 5: 2, 7: 1, 9: 1},

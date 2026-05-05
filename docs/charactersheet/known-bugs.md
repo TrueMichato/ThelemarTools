@@ -152,3 +152,77 @@ test fails honestly and reflects what a player would experience.
   `js/charactersheet/charactersheet-levelup.js` for the multiclass
   branch (around L4690 — "Confirm & Add" button handler).
 
+---
+
+### CS-BUG-007 — Activating Rage does not break existing concentration
+
+**Status**: Open. Surfaced by the Phase-4 USE probe on
+`tgtt-chained-fury-barbarian-minotaur.spec.ts` (L5). Repro:
+
+1. Build a Barbarian; cast or programmatically `setConcentration("Bless", 1)`.
+2. Activate Rage via the toggle (or
+   `cs._state.activateState("rage")`).
+3. Read `cs._state.getConcentratingSpell()`.
+
+**Expected**: `getConcentratingSpell()` returns `null` — Rage's
+`breaksConcentration: true` flag (state config at
+`charactersheet-state.js:28543`) should clear concentration on
+activation.
+
+**Observed**: Concentration spell remains active after Rage starts.
+The `breaksConcentration` flag isn't being honoured by
+`activateState`. Likely the state-activation pathway needs to call
+`this.breakConcentration()` when the activated state config has
+`breaksConcentration: true`.
+
+**Test workaround**: `concentrationCheck` in the Chained Fury spec is
+set to `{skip: true}` with a `// blocked by CS-BUG-007` comment until
+the state activation hook is wired.
+
+---
+
+### CS-BUG-008 — Bardic Inspiration not restored on short rest at L5+ (XPHB Font of Inspiration)
+
+**Status**: Open. Surfaced by the Phase-4 short-rest probe on
+`tgtt-surrealism-bard-yuanti.spec.ts` (L5). Repro:
+
+1. Build a College of Surrealism Bard to L5.
+2. Spend one Bardic Inspiration use
+   (`cs._state.spendResource("Bardic Inspiration", 1)`).
+3. Trigger short rest (`cs._state.shortRest()`).
+4. Read `cs._state.getResource("Bardic Inspiration")`.
+
+**Expected**: `current === max` (XPHB 2024 Bard "Font of Inspiration"
+restores all Bardic Inspiration on a short rest from L5 onward).
+
+**Observed**: `current` stays at the post-spend value (0); short rest
+does not refill Bardic Inspiration. Suggests Font of Inspiration
+isn't toggling the resource's `restoreOn` field from `long` → `short`
+at L5 in the TGTT/XPHB feature pipeline.
+
+**Test workaround**: `shortRestRestores` in the Surrealism Bard spec
+is set to `{skip: true}` with a `// blocked by CS-BUG-008` comment.
+
+---
+
+### CS-BUG-009 — Render hang triggered by `addCondition` on Mercy Monk L5
+
+**Status**: Open / suspected. The Phase-4 `applyCondition: poisoned`
+probe on `tgtt-mercy-monk-changeling.spec.ts` consistently times out
+the test at 600s, even though the same probe completes in <1s on
+other builds. The most likely culprit is `addCondition("poisoned")`
+followed by `_renderCharacter()` entering a slow / infinite loop on
+Mercy Monk's L5 state (Hand of Healing/Harm + Focus Points pipeline
+interacting with poisoned-condition effects).
+
+**Investigation hints**:
+- Manually load a Mercy Monk L5 character and call
+  `cs._state.addCondition("poisoned"); cs._renderCharacter();` in
+  devtools — confirm whether the page hangs.
+- If it does, instrument `_applyConditionEffects` and the Monk feature
+  re-evaluation path for an infinite loop.
+
+**Test workaround**: `applyCondition` in the Mercy Monk spec is set to
+`{skip: true}` with a `// blocked by CS-BUG-009` comment. Remove the
+skip once the underlying hang is fixed.
+

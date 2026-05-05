@@ -1,0 +1,75 @@
+# Comprehensive E2E Character Test Standard
+
+This document is a reader-facing pointer.  The authoritative content
+lives in the
+[`e2e-character-tests`](../../.agents/skills/e2e-character-tests/) skill
+so that AI agents pick it up automatically when writing or extending
+Playwright character-build specs.
+
+## Why a standard?
+
+The `test/e2e/specs/tgtt-*.spec.ts` suite drives the full character
+sheet — creation wizard, level-up wizard, loadout, in-play usage —
+through real DOM.  It exists to catch ~95% of the bugs a player would
+run into when picking one of the canonical TGTT character archetypes.
+Without a shared standard, specs drift in coverage and we miss obvious
+gaps (e.g. nobody rolls a skill, nobody short-rests a Warlock).
+
+## The required-checks list
+
+See **[skill standard](../../.agents/skills/e2e-character-tests/references/standard.md)**
+for the canonical numbered list (currently 18 checks).  At a glance:
+
+1. L1 creation via builder wizard
+2. L3 subclass arrival
+3. L5 milestone (Extra Attack / 3rd-level slots / prof +3)
+4. L5 loadout: gear changes derived stats
+5. L5 signature toggle changes derived stats
+6. MEGA L1→20 with milestone asserts
+7. USE: cast a spell decrements a slot
+8. USE: spend a class resource
+9. USE: weapon attack roll button
+10. USE: long rest restores spell slots
+11. USE: skill roll bonus + button
+12. USE: short rest restores SR-class resource
+13. USE: concentration breaks on damage / Rage
+14. USE: death save tracker
+15. USE: condition apply / check / remove
+16. USE: feat-toggle delta (when applicable)
+17. L1 export round-trip preserves identity
+18. Multiclass: usage probes after each leg
+
+Every spec lists every check, even when skipping (use `{skip: true}` with
+a one-line reason — coverage gaps stay visible).
+
+## Authoring a new character spec
+
+1. Open the `e2e-character-tests` skill.
+2. Copy the template from
+   [`spec-template.md`](../../.agents/skills/e2e-character-tests/references/spec-template.md).
+3. Walk the 10-step authoring checklist.
+4. Run the spec locally (with and without `RUN_MEGA=1`) before pushing.
+
+## Running the suite
+
+```bash
+# Full suite with MEGA L1→20 paths (~45 min on --workers=2):
+RUN_MEGA=1 npx playwright test test/e2e/specs/tgtt-*.spec.ts \
+  --reporter=list --workers=2
+
+# Single spec:
+npx playwright test test/e2e/specs/tgtt-mercy-monk-changeling.spec.ts
+
+# Open last HTML report:
+npx playwright show-report
+```
+
+## Pointers
+
+- Skill root: [`.agents/skills/e2e-character-tests/`](../../.agents/skills/e2e-character-tests/)
+- Standard: [`references/standard.md`](../../.agents/skills/e2e-character-tests/references/standard.md)
+- Spec template + checklist: [`references/spec-template.md`](../../.agents/skills/e2e-character-tests/references/spec-template.md)
+- Page-object API: [`references/page-objects.md`](../../.agents/skills/e2e-character-tests/references/page-objects.md)
+- Factory test map: [`references/factory-tests.md`](../../.agents/skills/e2e-character-tests/references/factory-tests.md)
+- Troubleshooting infra vs product: [`references/troubleshooting.md`](../../.agents/skills/e2e-character-tests/references/troubleshooting.md)
+- Known product bugs surfaced by the suite: [`docs/charactersheet/known-bugs.md`](../charactersheet/known-bugs.md)

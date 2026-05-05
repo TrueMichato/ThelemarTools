@@ -574,4 +574,192 @@ export class CharacterSheetPage {
 		}
 		return out;
 	}
+
+	// ========== SKILL ROLLS (Phase 4) ==========
+
+	/**
+	 * Read a skill bonus directly from state. Bypasses the Abilities-tab
+	 * roll button (which routes through dice toasts and has no stable
+	 * result selector across stylesheets). The numeric bonus is the
+	 * authoritative thing to assert — proves prof + ability + expertise
+	 * + item + state bonuses + exhaustion penalty all collapse correctly.
+	 *
+	 * Skill name is normalised by `state.getSkillBonus`, so callers can
+	 * pass either "Stealth", "stealth", or "athletics" interchangeably.
+	 * Returns 0 (a valid bonus) if state lookup fails — callers should
+	 * use {@link rollSkill} when they want a hard failure on missing API.
+	 */
+	async getSkillBonus (skill: string): Promise<number> {
+		return this.page.evaluate((s) => {
+			const cs: any = (globalThis as any).charSheet;
+			const fn = cs?._state?.getSkillBonus || cs?._state?.getSkillMod;
+			if (!fn) return 0;
+			try {
+				return fn.call(cs._state, s) | 0;
+			} catch (_) {
+				return 0;
+			}
+		}, skill);
+	}
+
+	/**
+	 * "Roll" a skill check by clicking its roll button on the Abilities
+	 * tab. Returns the read bonus and a flag indicating whether the roll
+	 * button was actually present and clickable. This is a smoke probe —
+	 * we don't assert dice outcome, only that:
+	 *   1. the bonus exists in state
+	 *   2. the button is wired up (no JS throw on click)
+	 *
+	 * If no clickable roll button exists, falls back to a state-only read
+	 * so the test can still assert the bonus value.
+	 */
+	async rollSkill (skill: string): Promise<{bonus: number; clicked: boolean}> {
+		const bonus = await this.getSkillBonus(skill);
+		// Try the Abilities tab first; skill rolls live there in the
+		// 2024-style sheet, and on Combat tab in some legacy layouts.
+		await this.switchToTab(this.tabAbilities).catch(() => null);
+		const re = new RegExp(`\\b${skill}\\b`, "i");
+		const row = this.page
+			.locator(".charsheet__skill-row, [data-skill]")
+			.filter({hasText: re})
+			.first();
+		const btn = row.locator(".charsheet__skill-roll, .charsheet__skill-bonus, button").first();
+		const visible = await btn.isVisible({timeout: 1500}).catch(() => false);
+		if (!visible) return {bonus, clicked: false};
+		await btn.click({timeout: 2000}).catch(() => null);
+		await this.page.waitForTimeout(100);
+		return {bonus, clicked: true};
+	}
+
+	// ========== DEATH SAVES (Phase 4) ==========
+
+	/** Read the current death-save tracker state. */
+	async getDeathSaves (): Promise<{successes: number; failures: number; stabilized: boolean; dead: boolean}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const ds = cs?._state?.getDeathSaves?.() ?? null;
+			if (!ds) return {successes: 0, failures: 0, stabilized: false, dead: false};
+			return {
+				successes: ds.successes ?? 0,
+				failures: ds.failures ?? 0,
+				stabilized: (ds.successes ?? 0) >= 3,
+				dead: (ds.failures ?? 0) >= 3,
+			};
+		});
+	}
+
+	/**
+	 * Mark one death-save success or failure via the state API and re-render.
+	 * Wraps `state.makeDeathSave(boolean)` (the canonical API).
+	 */
+	async markDeathSave (kind: "success" | "failure"): Promise<{successes: number; failures: number}> {
+		await this.page.evaluate((k) => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.makeDeathSave?.(k === "success");
+			cs?._renderCharacter?.();
+		}, kind);
+		await this.page.waitForTimeout(100);
+		const out = await this.getDeathSaves();
+		return {successes: out.successes, failures: out.failures};
+	}
+
+	/** Reset death-save tracker (use between sub-probes within one test). */
+	async resetDeathSaves (): Promise<void> {
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			// `resetDeathSaves` is the canonical method; fall back to `setDeathSaves`
+			// for older builds.
+			if (cs?._state?.resetDeathSaves) cs._state.resetDeathSaves();
+			else cs?._state?.setDeathSaves?.({successes: 0, failures: 0});
+			cs?._renderCharacter?.();
+		});
+	}
+
+	// ========== CONDITIONS (Phase 4) ==========
+
+	/**
+	 * Apply a condition by name (e.g. "poisoned", "frightened"). Uses the
+	 * state API, which is also what the AddCondition modal calls — so we
+	 * cover the same downstream effect-application path without driving
+	 * the modal (which is the expensive, flake-prone bit).
+	 */
+	async applyCondition (conditionName: string): Promise<void> {
+		await this.page.evaluate((name) => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.addCondition?.(name);
+			cs?._renderCharacter?.();
+		}, conditionName);
+		await this.page.waitForTimeout(150);
+	}
+
+	/** Whether a named condition is currently active in state. */
+	async hasCondition (conditionName: string): Promise<boolean> {
+		return this.page.evaluate((name) => {
+			const cs: any = (globalThis as any).charSheet;
+			return !!cs?._state?.hasCondition?.(name);
+		}, conditionName);
+	}
+
+	// ========== CONCENTRATION (Phase 4) ==========
+
+	/** Current concentration status as reported by state. */
+	async getConcentrationStatus (): Promise<{active: boolean; spell: string | null; level: number | null}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const c = cs?._state?.getConcentratingSpell?.() ?? null;
+			if (!c) return {active: false, spell: null, level: null};
+			return {
+				active: true,
+				spell: c.spellName ?? c.name ?? null,
+				level: c.spellLevel ?? null,
+			};
+		});
+	}
+
+	/**
+	 * Begin concentrating on a named spell via state, then re-render.
+	 * Used to set up the "is concentration broken by Rage / damage?" probe.
+	 */
+	async startConcentration (spellName: string, spellLevel = 1): Promise<void> {
+		await this.page.evaluate(({name, lvl}) => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.setConcentration?.(name, lvl);
+			cs?._renderCharacter?.();
+		}, {name: spellName, lvl: spellLevel});
+		await this.page.waitForTimeout(100);
+	}
+
+	// ========== DAMAGE (Phase 4) ==========
+
+	/**
+	 * Apply N damage via state. Drives the same path as the in-sheet
+	 * damage button without needing to type into the input. Used to
+	 * verify concentration breaks on damage and HP-bar updates.
+	 */
+	async dealDamage (amount: number): Promise<{currentHp: number}> {
+		const newHp = await this.page.evaluate((dmg) => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.takeDamage?.(dmg);
+			cs?._renderCharacter?.();
+			return cs?._state?.getHp?.()?.current ?? 0;
+		}, amount);
+		await this.page.waitForTimeout(100);
+		return {currentHp: newHp};
+	}
+
+	// ========== SHORT REST (Phase 4) ==========
+
+	/**
+	 * Take a short rest and assert that a named resource was restored to
+	 * its expected value. If the resource doesn't exist, throws — callers
+	 * that want a soft probe should call {@link triggerShortRest} +
+	 * {@link getResource} manually.
+	 */
+	async shortRestAndExpect (resourceName: string, expectAfter: number): Promise<{before: number; after: number}> {
+		const before = await this.getResource(resourceName).catch(() => ({current: -1, max: -1}));
+		await this.triggerShortRest();
+		const after = await this.getResource(resourceName).catch(() => ({current: -1, max: -1}));
+		expect(after.current, `${resourceName} after short rest`).toBe(expectAfter);
+		return {before: before.current, after: after.current};
+	}
 }

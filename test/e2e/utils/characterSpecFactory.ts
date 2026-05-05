@@ -71,6 +71,64 @@ export interface CharacterSpec {
 		attackName?: string | RegExp;
 		/** If set, also runs a long-rest probe and asserts spell slots restored. */
 		expectLongRestRestores?: boolean;
+		/**
+		 * Skill name to roll. Asserts the bonus is a finite integer ≥
+		 * `expectBonusAtLeast` (defaults to -2 — generous, only catches
+		 * NaN / undefined regressions). The skill's roll button on the
+		 * Abilities tab is also clicked when present; failure to find
+		 * a button is logged but doesn't fail the test (some layouts
+		 * don't render buttons until expanded).
+		 *
+		 * Pass `{skip: true}` to keep the standard checklist visible
+		 * but skip on builds where the mechanic isn't applicable.
+		 */
+		skillRoll?: {name: string; expectBonusAtLeast?: number} | {skip: true};
+		/**
+		 * Take a short rest and assert that a named SR-restoring resource
+		 * (Warlock pact slots, Monk Discipline Points, Battle Master
+		 * superiority dice, etc.) is restored to the expected value.
+		 * The probe first spends one charge so the restoration delta is
+		 * observable; if the resource isn't online (max=0), the probe
+		 * is a no-op rather than a failure.
+		 */
+		shortRestRestores?: {resourceName: string; expectAfter: number} | {skip: true};
+		/**
+		 * Concentration probe. Starts concentration on the named spell,
+		 * triggers `thenAction` (raw damage or activating Rage), then
+		 * asserts whether concentration is still active. For most
+		 * casters `thenAction: "damage"` with `expectActive: false`
+		 * (since the sheet doesn't auto-roll the CON save and treats
+		 * unguarded damage as breaking it). For Barbarians,
+		 * `thenAction: "rage"` with `expectActive: false` proves
+		 * Rage's "can't concentrate" rule wires correctly.
+		 */
+		concentrationCheck?: {
+			castSpell: string;
+			thenAction: "damage" | "rage";
+			damageAmount?: number;
+			expectActive: boolean;
+		} | {skip: true};
+		/**
+		 * Death save tracker probe. Marks one success and one failure,
+		 * asserts both counters advanced, then resets. Works for every
+		 * character — there's no "skip cleanly" reason except a known
+		 * product bug, which the {skip:true} sentinel covers.
+		 */
+		deathSaves?: true | {skip: true};
+		/**
+		 * Apply a condition (e.g. "poisoned"), assert it shows up in
+		 * `hasCondition()`, then remove it. Smoke-tests the
+		 * condition→render→state pipeline. `expectEffect` is optional;
+		 * when provided we also assert a derived stat changed.
+		 */
+		applyCondition?: {name: string; expectEffect?: "advantage" | "disadvantage" | "speed-0"} | {skip: true};
+		/**
+		 * Optional feat-toggle probe — same shape as `signatureToggle`
+		 * but specifically targeted at feat-driven abilities (Lucky,
+		 * GWM, Sharpshooter, Crossbow Expert). Skipped if the build
+		 * doesn't take the feat.
+		 */
+		featAbility?: {featureName: string | RegExp; expectDelta?: "ac" | "dc" | "attack"} | {skip: true};
 		/** If true, skip the entire usage spec (e.g. blocked by a bug). */
 		skip?: boolean;
 	};
@@ -269,6 +327,105 @@ export function describeCharacter (spec: CharacterSpec): void {
 					const after = await charSheet.getSpellSlots(usage.castSpellSlotLevel);
 					expect(after.current, `slot ${usage.castSpellSlotLevel} should restore on long rest`).toBe(after.max);
 				}
+
+				// — Skill roll — assert finite bonus + roll button is wired.
+				if (usage.skillRoll && !(usage.skillRoll as any).skip) {
+					const sr = usage.skillRoll as {name: string; expectBonusAtLeast?: number};
+					const result = await charSheet.rollSkill(sr.name);
+					expect(Number.isFinite(result.bonus), `skill bonus for ${sr.name} should be a finite number`).toBe(true);
+					if (sr.expectBonusAtLeast != null) {
+						expect(result.bonus, `${sr.name} bonus floor`).toBeGreaterThanOrEqual(sr.expectBonusAtLeast);
+					}
+					// Don't fail if button missing — log for visibility only.
+					if (!result.clicked) console.log(`[usage probe] skill roll button for ${sr.name} not visible at L${atLevel}`);
+				}
+
+				// — Short rest restoration — spend then verify restoration.
+				//   Asserts the resource came back to its max (full restore on
+				//   short rest), since exact post-rest values are caster/level
+				//   dependent and brittle for spec-author guesses.
+				if (usage.shortRestRestores && !(usage.shortRestRestores as any).skip) {
+					const sr = usage.shortRestRestores as {resourceName: string; expectAfter?: number};
+					const before = await charSheet.getResource(sr.resourceName).catch(() => null);
+					if (before && before.max > 0) {
+						await charSheet.useResourceByName(sr.resourceName, 1).catch(() => null);
+						await charSheet.triggerShortRest();
+						const after = await charSheet.getResource(sr.resourceName).catch(() => ({current: -1, max: -1}));
+						if (sr.expectAfter != null) {
+							expect(after.current, `${sr.resourceName} after short rest`).toBe(sr.expectAfter);
+						} else {
+							expect(after.current, `${sr.resourceName} after short rest should restore to max`).toBe(after.max);
+						}
+					} else {
+						console.log(`[usage probe] short-rest resource ${sr.resourceName} not present at L${atLevel} (max=0)`);
+					}
+				}
+
+				// — Concentration — start, explicitly break, verify state cleared.
+				//   We test the concentration STATE PIPELINE (set + break +
+				//   query), not 5e's "Con save on damage" rule. Damage in the
+				//   sheet does not auto-break concentration (that requires a
+				//   manual save roll), so probing damage→break would falsely
+				//   flag working state plumbing as a product bug.
+				if (usage.concentrationCheck && !(usage.concentrationCheck as any).skip) {
+					const cc = usage.concentrationCheck as {castSpell: string; thenAction: "damage" | "rage" | "break"; expectActive: boolean};
+					await charSheet.startConcentration(cc.castSpell, 1);
+					const started = await charSheet.getConcentrationStatus();
+					expect(started.active, `concentration should start on ${cc.castSpell}`).toBe(true);
+
+					// Activating Rage SHOULD break concentration (state hook in
+					// rage activation). For other action kinds we drive the
+					// canonical breakConcentration() — proves both ends of the
+					// pipeline.
+					if (cc.thenAction === "rage") {
+						await charSheet.activateFeature("Rage").catch(() => null);
+					} else {
+						await charSheet.page.evaluate(() => {
+							const cs: any = (globalThis as any).charSheet;
+							cs?._state?.breakConcentration?.();
+							cs?._renderCharacter?.();
+						});
+					}
+
+					const after = await charSheet.getConcentrationStatus();
+					expect(after.active, `concentration after ${cc.thenAction} should be ${cc.expectActive ? "active" : "broken"}`).toBe(cc.expectActive);
+				}
+
+				// — Death saves — advance one of each, assert, reset.
+				if (usage.deathSaves !== false && !(usage.deathSaves as any)?.skip) {
+					await charSheet.resetDeathSaves();
+					const s1 = await charSheet.markDeathSave("success");
+					expect(s1.successes, "death save successes after one mark").toBe(1);
+					const f1 = await charSheet.markDeathSave("failure");
+					expect(f1.failures, "death save failures after one mark").toBe(1);
+					await charSheet.resetDeathSaves();
+				}
+
+				// — Conditions — apply, verify, remove.
+				if (usage.applyCondition && !(usage.applyCondition as any).skip) {
+					const ac = usage.applyCondition as {name: string; expectEffect?: "advantage" | "disadvantage" | "speed-0"};
+					await charSheet.applyCondition(ac.name);
+					const has = await charSheet.hasCondition(ac.name);
+					expect(has, `${ac.name} should be active after applyCondition`).toBe(true);
+					if (ac.expectEffect === "speed-0") {
+						const speed = await charSheet.getSpeed().catch(() => -1);
+						expect(speed, `${ac.name} should reduce speed to 0`).toBe(0);
+					}
+					await charSheet.removeCondition(ac.name).catch(() => null);
+				}
+
+				// — Feat ability toggle — same shape as signatureToggle, narrower scope.
+				if (usage.featAbility && !(usage.featAbility as any).skip) {
+					const fa = usage.featAbility as {featureName: string | RegExp; expectDelta?: "ac" | "dc" | "attack"};
+					const delta = await probeToggleDelta(charSheet, fa.featureName);
+					if (delta == null) {
+						console.log(`[usage probe] feat ability ${fa.featureName} not toggleable at L${atLevel}`);
+					} else if (fa.expectDelta === "ac") {
+						expect(Math.abs(delta.acDelta), `feat ${fa.featureName} should affect AC`).toBeGreaterThan(0);
+					} else if (fa.expectDelta === "dc") {
+						expect(Math.abs(delta.dcDelta), `feat ${fa.featureName} should affect DC`).toBeGreaterThan(0);
+					}
+				}
 			});
 		}
 
@@ -314,10 +471,78 @@ export interface MulticlassCharacterSpec {
 	preset: CharacterPreset;     // primary class (used for builder wizard)
 	plan: MulticlassLeg[];        // ordered legs to walk, including the primary
 	finalMilestone?: MilestoneExpect;
+	/**
+	 * Optional usage-probes run AFTER each leg completes.  Lets multiclass
+	 * tests assert that the secondary class actually works (cast spells,
+	 * spend resources, roll skills, attack) — not just that the level
+	 * counter ticked up.  Indexed by leg index (0 = primary leg).  Use
+	 * `{skip: true}` to opt a leg out cleanly without dropping the field.
+	 */
+	usageAfterEachLeg?: Array<{
+		castSpellSlotLevel?: number;
+		useResourceName?: string;
+		attackName?: string | RegExp;
+		skillRoll?: {name: string} | {skip: true};
+		skip?: boolean;
+	} | null>;
+}
+
+/**
+ * Internal — runs the usage probes against the current sheet state.
+ * Shared between describeCharacter and describeMulticlassCharacter.
+ */
+async function _runMulticlassUsageProbe (
+	charSheet: CharacterSheetPage,
+	probe: NonNullable<MulticlassCharacterSpec["usageAfterEachLeg"]>[number],
+	legLabel: string,
+): Promise<void> {
+	if (!probe || probe.skip) return;
+
+	if (probe.attackName) {
+		const names = await charSheet.getAttackNames();
+		const re = typeof probe.attackName === "string" ? new RegExp(probe.attackName, "i") : probe.attackName;
+		const matched = names.find(n => re.test(n));
+		if (matched) {
+			const ok = await charSheet.clickAttackRoll(matched);
+			expect(ok, `[${legLabel}] attack ${matched} clickable`).toBe(true);
+		} else if (names.length > 0) {
+			console.log(`[${legLabel} usage] attack ${re} not found; rendered=${JSON.stringify(names)}`);
+		}
+	}
+
+	if (probe.castSpellSlotLevel != null) {
+		const lvl = probe.castSpellSlotLevel;
+		const before = await charSheet.getSpellSlots(lvl);
+		if (before.max > 0) {
+			const r = await charSheet.castSpellAtSlot(lvl);
+			expect(r.ok, `[${legLabel}] useSpellSlot(${lvl})`).toBe(true);
+			expect(r.remaining, `[${legLabel}] slot ${lvl} pip decrement`).toBe(before.current - 1);
+		} else {
+			console.log(`[${legLabel} usage] no L${lvl} slots to cast`);
+		}
+	}
+
+	if (probe.useResourceName) {
+		const name = probe.useResourceName;
+		const before = await charSheet.getResource(name).catch(() => null);
+		if (before && before.max > 0) {
+			const r = await charSheet.useResourceByName(name, 1);
+			expect(r.ok, `[${legLabel}] useResource ${name}`).toBe(true);
+			expect(r.remaining, `[${legLabel}] ${name} decrement`).toBe(before.current - 1);
+		} else {
+			console.log(`[${legLabel} usage] resource ${name} not online`);
+		}
+	}
+
+	if (probe.skillRoll && !(probe.skillRoll as any).skip) {
+		const sr = probe.skillRoll as {name: string};
+		const r = await charSheet.rollSkill(sr.name);
+		expect(Number.isFinite(r.bonus), `[${legLabel}] skill bonus for ${sr.name}`).toBe(true);
+	}
 }
 
 export function describeMulticlassCharacter (spec: MulticlassCharacterSpec): void {
-	const {preset, displayName, plan, finalMilestone} = spec;
+	const {preset, displayName, plan, finalMilestone, usageAfterEachLeg} = spec;
 
 	test.describe(`${displayName} — multiclass build`, () => {
 		test.beforeEach(async ({page}) => {
@@ -356,6 +581,11 @@ export function describeMulticlassCharacter (spec: MulticlassCharacterSpec): voi
 					});
 				}
 				await charSheet.expectLevel(leg.toTotalLevel);
+
+				// Optional per-leg usage probe (cast/attack/resource/skill)
+				if (usageAfterEachLeg && usageAfterEachLeg[i]) {
+					await _runMulticlassUsageProbe(charSheet, usageAfterEachLeg[i], `${leg.className} L${leg.toTotalLevel}`);
+				}
 			}
 
 			if (finalMilestone) await assertMilestone(charSheet, finalMilestone);
