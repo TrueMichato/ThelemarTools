@@ -93,6 +93,27 @@ issue numbers stay stable.
 
 ## Resolved
 
+### CS-BUG-005 — `getFeatChoices` Temporal Dead Zone at L19 (Epic Boon)
+
+**Status**: Fixed by hoisting `getFeatChoices` to a function declaration.
+**Surfaced by**: All MEGA L1→20 specs hit this at L19 of any
+XPHB/TGTT class (Epic Boon level). Wizard never opens, throws
+`ReferenceError: Cannot access 'getFeatChoices' before initialization`,
+falls back to a 0%-complete shell that can't be finished.
+
+**Root cause**: `_renderAsiSelection` in
+`js/charactersheet/charactersheet-levelup.js` rendered the Epic Boon
+list (~L1717) and called `getFeatChoices(boon)` (~L1733), but
+`getFeatChoices` was declared as `const` at L1792 — same function
+scope, but later in source order, so the call hit the TDZ.
+
+**Fix**: Converted `const getFeatChoices = (feat) => {...}` to
+`function getFeatChoices (feat) {...}` so the declaration is
+hoisted to the top of `_renderAsiSelection`. No behavioural change
+(the helper does not use `this`).
+
+---
+
 ### CS-BUG-001 — `setScholarExpertise` orphan `_saveState` call
 
 **Status**: Fixed in commit `2de132f`.
