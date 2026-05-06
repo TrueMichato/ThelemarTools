@@ -53,6 +53,9 @@ describeCharacter({
 				{kind: "rollSkillCheck", skill: "stealth"},
 				{kind: "rollAttack", attackName: /rapier|shortsword|dagger|crossbow/i},
 				{kind: "rollInitiative"},
+				// Phase 8: Sneak Attack scales 1d6 → 10d6 across levels.
+				// L1 anchor — at least 1d6 from L1 onward.
+				{kind: "sneakAttackDice", min: 1},
 			],
 		},
 		// Cunning Action = Disengage/Hide as bonus action; both are
@@ -68,7 +71,15 @@ describeCharacter({
 		// Uncanny Dodge halves damage on attack hits (dex-reactionish);
 		// no clean state-observable probe — the underlying mechanic is
 		// reactive damage reduction. No effect.
-		{level: 5, name: /uncanny dodge/i, kind: "passive"},
+		{
+			level: 5,
+			name: /uncanny dodge/i,
+			kind: "passive",
+			// Phase 8: at L5+ Sneak Attack is 3d6+ (matrix L5/11/17/20).
+			effects: [
+				{kind: "sneakAttackDice", min: 3},
+			],
+		},
 		// Evasion: succeed = no dmg, fail = half on dex saves.
 		// Probe the dex save roll button to make sure the handler still
 		// fires once Evasion is in play.
@@ -89,6 +100,8 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSavingThrow", ability: "int"},
+				// Phase 8: at L11+ Sneak Attack is 6d6+ (matrix L11/17/20).
+				{kind: "sneakAttackDice", min: 6},
 			],
 		},
 		// Stroke of Luck — once-per-short-rest reroll/auto-20. Surfaces
@@ -100,6 +113,8 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", skill: "deception"},
+				// Phase 8: at L20 Sneak Attack caps at 10d6.
+				{kind: "sneakAttackDice", min: 10},
 			],
 		},
 
@@ -132,6 +147,17 @@ describeCharacter({
 				/explosive flask/i,
 				/instant barrier/i,
 			],
+			// Phase 8: each Trick is action/bonus-action — verify at
+			// least one picked Trick activates without throwing. min=1
+			// because we don't know which 3 the user picked.
+			effects: [
+				{kind: "pickActivatable", matchAny: [
+					/disarming strike/i, /trip attack/i, /swing away/i,
+					/deafening strike/i, /blinding strike/i, /noise maker/i,
+					/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
+					/explosive flask/i, /instant barrier/i,
+				], min: 1},
+			],
 		},
 		{
 			level: 7,
@@ -143,6 +169,14 @@ describeCharacter({
 				/deafening strike/i, /blinding strike/i, /noise maker/i,
 				/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
 				/explosive flask/i, /instant barrier/i,
+			],
+			effects: [
+				{kind: "pickActivatable", matchAny: [
+					/disarming strike/i, /trip attack/i, /swing away/i,
+					/deafening strike/i, /blinding strike/i, /noise maker/i,
+					/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
+					/explosive flask/i, /instant barrier/i,
+				], min: 1},
 			],
 		},
 		{
@@ -156,6 +190,14 @@ describeCharacter({
 				/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
 				/explosive flask/i, /instant barrier/i,
 			],
+			effects: [
+				{kind: "pickActivatable", matchAny: [
+					/disarming strike/i, /trip attack/i, /swing away/i,
+					/deafening strike/i, /blinding strike/i, /noise maker/i,
+					/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
+					/explosive flask/i, /instant barrier/i,
+				], min: 1},
+			],
 		},
 		{
 			level: 15,
@@ -168,6 +210,14 @@ describeCharacter({
 				/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
 				/explosive flask/i, /instant barrier/i,
 			],
+			effects: [
+				{kind: "pickActivatable", matchAny: [
+					/disarming strike/i, /trip attack/i, /swing away/i,
+					/deafening strike/i, /blinding strike/i, /noise maker/i,
+					/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
+					/explosive flask/i, /instant barrier/i,
+				], min: 1},
+			],
 		},
 		{
 			level: 19,
@@ -179,6 +229,14 @@ describeCharacter({
 				/deafening strike/i, /blinding strike/i, /noise maker/i,
 				/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
 				/explosive flask/i, /instant barrier/i,
+			],
+			effects: [
+				{kind: "pickActivatable", matchAny: [
+					/disarming strike/i, /trip attack/i, /swing away/i,
+					/deafening strike/i, /blinding strike/i, /noise maker/i,
+					/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
+					/explosive flask/i, /instant barrier/i,
+				], min: 1},
 			],
 		},
 
@@ -201,6 +259,14 @@ describeCharacter({
 		// trickster dice on item interaction; refund mechanics aren't
 		// surfaced (CS-BUG-012 covers the underlying resource), so no
 		// clean probe.
-		{level: 17, name: /master of mischief/i, kind: "passive"},
+		{
+			level: 17,
+			name: /master of mischief/i,
+			kind: "passive",
+			// Phase 8: at L17+ Sneak Attack is 9d6+ (matrix L17/20).
+			effects: [
+				{kind: "sneakAttackDice", min: 9},
+			],
+		},
 	],
 });

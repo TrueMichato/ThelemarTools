@@ -72,7 +72,15 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSkillCheck", skill: "perception"},
 		],
 	},
-	{level: 17, name: /action surge/i, kind: "resource", resourceMax: 2},
+	{
+		level: 17,
+		name: /action surge/i,
+		kind: "resource",
+		resourceMax: 2,
+		effects: [
+			{kind: "shortRestRestores", resource: "Action Surge"},
+		],
+	},
 	// Fighter ASIs at L4/6/8/12/14/16/19.
 	{level: 4,  name: /ability score improvement/i, kind: "passive"},
 	{level: 6,  name: /ability score improvement/i, kind: "passive"},
@@ -120,8 +128,24 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSkillCheck", skill: "athletics"},
 		],
 	},
-	{level: 13, name: /indomitable/i, kind: "resource", resourceMax: 2},
-	{level: 17, name: /indomitable/i, kind: "resource", resourceMax: 3},
+	{
+		level: 13,
+		name: /indomitable/i,
+		kind: "resource",
+		resourceMax: 2,
+		effects: [
+			{kind: "longRestRestores", resource: "Indomitable"},
+		],
+	},
+	{
+		level: 17,
+		name: /indomitable/i,
+		kind: "resource",
+		resourceMax: 3,
+		effects: [
+			{kind: "longRestRestores", resource: "Indomitable"},
+		],
+	},
 
 	// Arcane Archer subclass.
 	// Arcane Shot resource pool (2/short-rest at L3, scales) — blocked
@@ -138,7 +162,11 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	},
 	// Arcane Shot pick — choose 2 options at L3 (+1 at L7/10/15/18).
 	// Blocked by CS-BUG-003 (Combat Methods validator path makes the
-	// wizard unfinishable when the pick step fires).
+	// wizard unfinishable when the pick step fires). The
+	// pickActivatable effect is documentation for when the bug is
+	// fixed: the FeatureCheck.skip short-circuits effects today, but
+	// re-enabling the entry will exercise each picked Arcane Shot
+	// option as an activatable feature on the sheet.
 	{
 		level: 3,
 		name: /arcane shot/i,
@@ -153,6 +181,22 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 			/piercing arrow/i,
 			/seeking arrow/i,
 			/shadow arrow/i,
+		],
+		effects: [
+			{
+				kind: "pickActivatable",
+				matchAny: [
+					/banishing arrow/i,
+					/beguiling arrow/i,
+					/bursting arrow/i,
+					/enfeebling arrow/i,
+					/grasping arrow/i,
+					/piercing arrow/i,
+					/seeking arrow/i,
+					/shadow arrow/i,
+				],
+				min: 1,
+			},
 		],
 		skip: true,
 		skipReason: "CS-BUG-003",

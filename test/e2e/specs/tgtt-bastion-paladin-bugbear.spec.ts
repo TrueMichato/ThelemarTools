@@ -39,7 +39,18 @@ describeCharacter({
 	},
 	featuresMatrix: <FeatureCheck[]>[
 		// ── L1: half-caster baseline ────────────────────────────────────
-		{level: 1, name: /lay on hands/i, kind: "resource", resourceMax: [5, 5]},
+		// Lay on Hands pool (5 × paladin level) replenishes on a Long
+		// Rest only (XPHB & PHB'14 agree). Probe the long-rest restore
+		// path on top of the resource pool size.
+		{
+			level: 1,
+			name: /lay on hands/i,
+			kind: "resource",
+			resourceMax: [5, 5],
+			effects: [
+				{kind: "longRestRestores", resource: "Lay on Hands"},
+			],
+		},
 		// Weapon Mastery is the L1 catch-all entry — piggyback the
 		// always-on roll-button probes (one weapon attack + initiative)
 		// here so they fire at every checkpoint from L1 upward.

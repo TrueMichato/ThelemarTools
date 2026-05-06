@@ -44,13 +44,16 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 		pickedFrom: [/colossus slayer/i, /giant killer/i, /horde breaker/i]},
 	// L5 Extra Attack — anchor for the weapon-attack roll-button
 	// probe. The TGTT Ranger starting kit guarantees a longbow,
-	// shortsword, and scimitar.
+	// shortsword, and scimitar. Phase 8: also a good slot for the
+	// half-caster spellSaveDc scaling floor (8 + prof + WIS mod;
+	// at L5 prof=3 + WIS≥10 → DC ≥ 11; at L20 prof=6 → DC ≥ 14).
 	{
 		level: 5,
 		name: /extra attack/i,
 		kind: "passive",
 		effects: [
 			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar/i},
+			{kind: "spellSaveDc", min: 11},
 		],
 	},
 	// L6 Roving — XPHB Ranger speed-boost passive (no extra probe;
@@ -110,7 +113,8 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 	// L1 Spellcasting — racial speed probe + signature signature
 	// spell + WIS save (Druid proficient) + Nature skill probe +
-	// Initiative button.
+	// Initiative button. Phase 8: cantripCount floor — Druid L1
+	// grants 2 cantrips (signatureSpells: Druidcraft + autoFill).
 	{
 		level: 1,
 		name: /spellcasting/i,
@@ -121,6 +125,7 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSavingThrow", ability: "wis"},
 			{kind: "rollSkillCheck", skill: "nature"},
 			{kind: "rollInitiative"},
+			{kind: "cantripCount", min: 2},
 		],
 	},
 	// L1 Druidic — passive subclass-language feature.
@@ -157,8 +162,17 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 		],
 	},
 	// L5 Wild Resurgence — passive 1/long-rest Hunter's-Mark-style
-	// recovery.
-	{level: 5, name: /wild resurgence/i, kind: "passive"},
+	// recovery. Phase 8: full-caster spellSaveDc scaling floor
+	// (8 + prof + WIS mod; at L5 prof=3, WIS≥10 → DC ≥ 11; at
+	// L20 prof=6 → DC ≥ 14).
+	{
+		level: 5,
+		name: /wild resurgence/i,
+		kind: "passive",
+		effects: [
+			{kind: "spellSaveDc", min: 11},
+		],
+	},
 	// L7 Elemental Fury — TGTT Druid passive (XPHB equivalent
 	// "Elemental Fury" pick of Potent Spellcasting / Primal Strike).
 	// Anchor a weapon-attack probe here; druid's starting kit gives
@@ -246,7 +260,9 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// duplicate matcher. Anchor the druid-leg roll-button probes
 	// here: WIS save (Druid proficient — already proficient via
 	// Ranger?  no — STR/DEX for Ranger; WIS comes from Druid leg)
-	// and Nature skill (druid theme).
+	// and Nature skill (druid theme). Phase 8: cantripCount floor
+	// (Druid 1 grants 2 cantrips) and full-caster spellSaveDc
+	// floor (8 + prof + WIS mod; at char L7 prof=3, WIS≥10 → ≥11).
 	{
 		level: 7,
 		name: /druidic/i,
@@ -254,6 +270,8 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "rollSavingThrow", ability: "wis"},
 			{kind: "rollSkillCheck", skill: "nature"},
+			{kind: "cantripCount", min: 2},
+			{kind: "spellSaveDc", min: 11},
 		],
 	},
 	// Druid 2 = char L8: Wild Shape (resource, 2 uses, short rest)

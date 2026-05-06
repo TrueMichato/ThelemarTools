@@ -62,22 +62,60 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollInitiative"},
 			{kind: "rollAttack", attackName: /dagger|crossbow|quarterstaff/i},
 		]},
-	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11},
+	// L11 SP anchor also probes spell save DC scaling. By L11 the
+	// auto-build has had several ASIs targeting CHA on the primary
+	// caster class; PB=4 + CHA mod ≥ 1 keeps the floor comfortably
+	// above DC 13 even on a slow-CHA path.
+	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11,
+		effects: [
+			{kind: "spellSaveDc", min: 13},
+		]},
 	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17},
 	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
 
 	// Metamagic picks scale 2 → 3 → 4 across L3 / L10 / L17.
 	// `pickedCount` is the lower bound — passing means at least N of
 	// the listed Metamagic options surfaced as feature entries.
+	// `pickToggleable` then verifies that ≥1 of the picked options is
+	// an Active metamagic surfaced as a toggle on the sheet. The
+	// `matchAny` list intentionally enumerates ONLY the active
+	// metamagic options (TGTT splits metamagic into Active and
+	// Passive — Passive options like Careful / Distant / Empowered /
+	// Extended / Resonant / Split / Supple / Transmuted / Warding
+	// don't surface as toggles, so listing them would be noise).
 	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i]},
+		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		effects: [
+			{kind: "pickToggleable", min: 1, matchAny: [
+				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
+				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
+				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+			]},
+		]},
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i]},
+		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		effects: [
+			{kind: "pickToggleable", min: 1, matchAny: [
+				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
+				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
+				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+			]},
+		]},
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i]},
+		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		effects: [
+			{kind: "pickToggleable", min: 1, matchAny: [
+				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
+				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
+				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+			]},
+		]},
 
 	// Sorcerous Restoration at L20 — short-rest recovery of up to 4 SP.
-	{level: 20, name: /sorcerous restoration/i, kind: "passive"},
+	{level: 20, name: /sorcerous restoration/i, kind: "passive",
+		effects: [
+			{kind: "shortRestRestores", resource: "Sorcery Points"},
+		]},
 
 	// ── Heroic Soul subclass ─────────────────────────────────────
 	// Heroic Spells — passive table that expands the learnable spell
@@ -119,6 +157,8 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// Combat Methods pick at L3 — 2 methods from Arcane Knight /
 	// Gallant Heart. Each picked method surfaces as its own feature
 	// entry on the sheet (e.g. "Frigid Strike", "Honourable Bout").
+	// `pickActivatable` then clicks at least one matching method's
+	// activation control (smoke-test: doesn't throw).
 	{level: 3, name: /combat methods/i, kind: "pick", pickedCount: 1,
 		pickedFrom: [
 			// Arcane Knight 1st-degree methods
@@ -127,6 +167,14 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 			// Gallant Heart 1st-degree methods
 			/challenger'?s strike/i, /engender doubt/i, /socialite stance/i, /stylish tumble/i,
 			/honourable bout/i, /overconfident gambit/i, /wink and smile/i, /formal introduction/i,
+		],
+		effects: [
+			{kind: "pickActivatable", min: 1, matchAny: [
+				/frigid strike/i, /grasp of the storm/i, /malicious mark/i, /warding flourish/i,
+				/blazing pursuit/i, /duelist'?s sigil/i, /mystic feint/i, /quickening/i,
+				/challenger'?s strike/i, /engender doubt/i, /socialite stance/i, /stylish tumble/i,
+				/honourable bout/i, /overconfident gambit/i, /wink and smile/i, /formal introduction/i,
+			]},
 		]},
 
 	// Hero's Reflex at L6 — passive bonus-action weapon-attack rider

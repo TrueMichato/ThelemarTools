@@ -48,6 +48,7 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollInitiative"},
+				{kind: "sneakAttackDice", min: 1},
 			],
 		},
 		{level: 1, name: /thieves['’]? cant/i, kind: "passive"},
@@ -60,6 +61,7 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSavingThrow", ability: "dex"},
+				{kind: "sneakAttackDice", min: 3},
 			],
 		},
 		// Evasion converts DEX saves into half-on-fail; rogue is also
@@ -72,6 +74,7 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSavingThrow", ability: "int"},
+				{kind: "sneakAttackDice", min: 4},
 			],
 		},
 		// Reliable Talent treats any proficient skill check d20 < 10 as
@@ -83,19 +86,41 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", skill: "acrobatics"},
+				{kind: "sneakAttackDice", min: 6},
 			],
 		},
 		{level: 14, name: /blindsense/i, kind: "passive"},
-		{level: 15, name: /slippery mind/i, kind: "passive"},
+		{
+			level: 15,
+			name: /slippery mind/i,
+			kind: "passive",
+			effects: [
+				{kind: "sneakAttackDice", min: 8},
+			],
+		},
 		{level: 18, name: /elusive/i, kind: "passive"},
-		{level: 20, name: /stroke of luck/i, kind: "passive"},
+		{
+			level: 20,
+			name: /stroke of luck/i,
+			kind: "passive",
+			effects: [
+				{kind: "sneakAttackDice", min: 10},
+			],
+		},
 
 		// ── Belly Dancer subclass ─────────────────────────────────────
 		// Bonus Proficiency grants Expertise in Performance + lets weapons
 		// be treated as Concealed. Expertise wiring on TGTT subclasses is
 		// not consistently surfaced through skill-bonus state — leave the
 		// numeric assertion off and rely on the feature-presence check.
-		{level: 3, name: /bonus proficiency/i, kind: "passive"},
+		{
+			level: 3,
+			name: /bonus proficiency/i,
+			kind: "passive",
+			effects: [
+				{kind: "sneakAttackDice", min: 2},
+			],
+		},
 		// Dance of the Country — bladesong-like AC buff (+CHA mod) when
 		// active. Bonus-action toggle, lasts until ended/incapacitated,
 		// uses = PB, short-rest restore.
@@ -167,9 +192,17 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", skill: "performance"},
+				{kind: "sneakAttackDice", min: 5},
 			],
 		},
-		{level: 13, name: /fluid step/i, kind: "passive"},
+		{
+			level: 13,
+			name: /fluid step/i,
+			kind: "passive",
+			effects: [
+				{kind: "sneakAttackDice", min: 7},
+			],
+		},
 		// Percussive Strike sets a save DC = 8 + PB + CHA mod for hostile
 		// onlookers. The DC isn't surfaced as a feature-DC field, but
 		// CHA is the signature ability — exercise the CHA ability-check
@@ -180,6 +213,7 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollAbilityCheck", ability: "cha"},
+				{kind: "sneakAttackDice", min: 9},
 			],
 		},
 		// Jaknian race traits (Trade Secrets: Persuasion or Investigation

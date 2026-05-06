@@ -84,21 +84,68 @@ describeCharacter({
 		},
 
 		// Eldritch Invocations — count scales with level.
+		// Phase 8: pickActivatable probes layered on each EI tier.
+		// The wizard's auto-pick can vary between runs; the matchAny
+		// list covers the EIs that surface as activatable features
+		// (those granting at-will spells like Mask of Many Faces /
+		// Fiendish Vigor / Armor of Shadows / Misty Visions / One
+		// with Shadows / Sign of Ill Omen). Many EIs are PASSIVE
+		// (Agonizing Blast, Repelling Blast, Devil's Sight, Eldritch
+		// Spear, Beast Speech, Thirsting Blade, Lifedrinker) and
+		// would not surface as activatable, so the probes stay
+		// `{skip: true}` until the preset pins specific picks. Left
+		// inline so a future preset that pins active EIs can flip
+		// `skip: false` with no schema change.
 		{level: 2,  name: /eldritch invocation/i, kind: "pick", pickedCount: 2,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i]},
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i],
+			effects: [
+				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
+					skip: true, skipReason: "wizard auto-pick may favor passive EIs (Agonizing/Repelling/Devil's Sight) which lack a toggle button"},
+			]},
 		{level: 5,  name: /eldritch invocation/i, kind: "pick", pickedCount: 3,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i]},
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i],
+			effects: [
+				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
+					skip: true, skipReason: "wizard auto-pick may favor passive EIs (Agonizing/Repelling/Devil's Sight/Thirsting Blade) which lack a toggle button"},
+			]},
 		{level: 9,  name: /eldritch invocation/i, kind: "pick", pickedCount: 5,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i]},
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i],
+			effects: [
+				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
+					skip: true, skipReason: "wizard auto-pick may favor passive EIs which lack a toggle button"},
+			]},
 		{level: 15, name: /eldritch invocation/i, kind: "pick", pickedCount: 7,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i, /one with shadows/i, /sign of ill omen/i]},
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i, /one with shadows/i, /sign of ill omen/i],
+			effects: [
+				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
+					skip: true, skipReason: "wizard auto-pick may favor passive EIs which lack a toggle button"},
+			]},
 		{level: 18, name: /eldritch invocation/i, kind: "pick", pickedCount: 8,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i, /one with shadows/i, /sign of ill omen/i]},
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i, /one with shadows/i, /sign of ill omen/i],
+			effects: [
+				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
+					skip: true, skipReason: "wizard auto-pick may favor passive EIs which lack a toggle button"},
+			]},
 
 		// Pact Boon at L3 — no clean state probe (boon-specific).
 		// Roll-button probes layered here so they fan out by level.
+		// Phase 8: also probe that the picked Pact Boon surfaces as
+		// an activatable feature on the sheet (Pact of the Blade =
+		// summon weapon, Pact of the Chain = find familiar, Pact of
+		// the Tome = Book of Shadows, Pact of the Talisman = grant).
+		// Plus a dedicated attackPresent probe for the Pact Blade
+		// summoned weapon. Both stay `{skip: true}` because the
+		// wizard's auto-pick across the four boons is not pinned by
+		// the preset — many runs will pick a non-Blade boon and the
+		// attackPresent probe would surface no Pact Weapon row.
 		{level: 3, name: /pact boon|pact of the/i, kind: "pick", pickedCount: 1,
-			pickedFrom: [/blade/i, /tome/i, /chain/i, /talisman/i]},
+			pickedFrom: [/blade/i, /tome/i, /chain/i, /talisman/i],
+			effects: [
+				{kind: "pickActivatable", matchAny: [/pact of the blade/i, /pact of the tome/i, /pact of the chain/i, /pact of the talisman/i], min: 1,
+					skip: true, skipReason: "wizard auto-pick across pact boons is non-deterministic; not all boons surface as activatable toggles (Tome/Talisman are passive grants)"},
+				{kind: "attackPresent", namePattern: /pact (weapon|blade)|pact of the blade/i,
+					skip: true, skipReason: "preset does not pin Pact of the Blade — wizard may auto-pick Tome/Chain/Talisman, leaving no Pact Weapon attack row"},
+			]},
 
 		// Mystic Arcanum — grants one fixed-pick spell per level
 		// tier. Concrete spell picks aren't deterministic for the

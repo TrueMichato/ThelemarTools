@@ -55,6 +55,12 @@ describeCharacter({
 				{kind: "longRestRestores", resource: "Bardic Inspiration"},
 				// Bard always knows ≥2 cantrips from L1 (Spellcasting effect probe).
 				{kind: "cantripCount", min: 2},
+				// Signature spells from the preset must surface in the
+				// Bard's known/prepared spell list.
+				{kind: "spellInList", spell: "Vicious Mockery"},
+				{kind: "spellInList", spell: "Healing Word"},
+				// Bardic Inspiration die starts at d6 (L1-L4).
+				{kind: "bardicInspirationDie", minFaces: 6},
 				// Roll-button smoke probes — anchor the always-available
 				// d20 buttons here so we hit them at every level the
 				// matrix runs at. Bard is proficient in DEX + CHA saves.
@@ -70,6 +76,17 @@ describeCharacter({
 		// Font of Inspiration (L5+) → BI restores on short OR long rest.
 		// Blocked by CS-BUG-008 (short-rest restore not wired).
 		{level: 5, name: /bardic inspiration/i, kind: "resource", resourceMax: [1, 5], restoreOn: "short", skip: true, skipReason: "CS-BUG-008"},
+		// L5+ Bardic Inspiration die grows to d8 (then d10 at L10, d12
+		// at L15). Anchored on a passive row so the resource skip above
+		// doesn't suppress the die probe.
+		{
+			level: 5,
+			name: /bardic inspiration/i,
+			kind: "passive",
+			effects: [
+				{kind: "bardicInspirationDie", minFaces: 8},
+			],
+		},
 		{
 			level: 10,
 			name: /bardic inspiration/i,
@@ -80,6 +97,8 @@ describeCharacter({
 				// Bard's spell save DC at mid-level: 8 + prof(4) + CHA mod(≥3) ≥ 15;
 				// keep min loose at 13 to tolerate non-maxed CHA builds.
 				{kind: "spellSaveDc", min: 13},
+				// L10+ BI die grows to d10.
+				{kind: "bardicInspirationDie", minFaces: 10},
 				// Font of Inspiration: should restore on short rest too — blocked by CS-BUG-008.
 				{kind: "shortRestRestores", resource: "Bardic Inspiration", skip: true, skipReason: "CS-BUG-008"},
 			],
@@ -91,6 +110,8 @@ describeCharacter({
 			resourceMax: [1, 5],
 			effects: [
 				{kind: "longRestRestores", resource: "Bardic Inspiration"},
+				// L15+ BI die grows to d12 (final tier).
+				{kind: "bardicInspirationDie", minFaces: 12},
 				{kind: "shortRestRestores", resource: "Bardic Inspiration", skip: true, skipReason: "CS-BUG-008"},
 			],
 		},
@@ -148,6 +169,31 @@ describeCharacter({
 				/witty wordplay|wordplay/i,
 				/jester's jest|jest/i,
 			],
+			effects: [
+				// At least one of the active Jester's Acts (pantomime,
+				// disengagement, tumbler, disguise, juggle, folly, lunge,
+				// jaunt, ruse, agility, wordplay, jest) should surface as
+				// activatable on the sheet. Wizard auto-picks vary, so
+				// list every active act and require ≥1 hit.
+				{
+					kind: "pickActivatable",
+					min: 1,
+					matchAny: [
+						/pantomime/i,
+						/trickster's disengagement|disengagement/i,
+						/tumbler/i,
+						/dazzling disguise/i,
+						/jester's juggle|juggle/i,
+						/fool's folly|folly/i,
+						/laughing lunge/i,
+						/jester's jaunt|jaunt/i,
+						/ridiculous ruse|ruse/i,
+						/jester's agility|agility/i,
+						/witty wordplay|wordplay/i,
+						/jester's jest|jest/i,
+					],
+				},
+			],
 		},
 		{
 			level: 6,
@@ -159,6 +205,27 @@ describeCharacter({
 				/dazzling disguise/i, /juggle/i, /folly/i, /laughing lunge/i,
 				/jaunt/i, /ruse/i, /agility/i, /wordplay/i, /jest/i,
 			],
+			effects: [
+				// Same lenient ≥1-active-act assertion as L3.
+				{
+					kind: "pickActivatable",
+					min: 1,
+					matchAny: [
+						/pantomime/i,
+						/trickster's disengagement|disengagement/i,
+						/tumbler/i,
+						/dazzling disguise/i,
+						/jester's juggle|juggle/i,
+						/fool's folly|folly/i,
+						/laughing lunge/i,
+						/jester's jaunt|jaunt/i,
+						/ridiculous ruse|ruse/i,
+						/jester's agility|agility/i,
+						/witty wordplay|wordplay/i,
+						/jester's jest|jest/i,
+					],
+				},
+			],
 		},
 		{
 			level: 14,
@@ -169,6 +236,28 @@ describeCharacter({
 				/pantomime/i, /prankster/i, /disengagement/i, /tumbler/i,
 				/dazzling disguise/i, /juggle/i, /folly/i, /laughing lunge/i,
 				/jaunt/i, /ruse/i, /agility/i, /wordplay/i, /jest/i,
+			],
+			effects: [
+				// By L14 the bard has 5 acts picked — still only require
+				// ≥1 to be activatable to stay tolerant of pick variance.
+				{
+					kind: "pickActivatable",
+					min: 1,
+					matchAny: [
+						/pantomime/i,
+						/trickster's disengagement|disengagement/i,
+						/tumbler/i,
+						/dazzling disguise/i,
+						/jester's juggle|juggle/i,
+						/fool's folly|folly/i,
+						/laughing lunge/i,
+						/jester's jaunt|jaunt/i,
+						/ridiculous ruse|ruse/i,
+						/jester's agility|agility/i,
+						/witty wordplay|wordplay/i,
+						/jester's jest|jest/i,
+					],
+				},
 			],
 		},
 

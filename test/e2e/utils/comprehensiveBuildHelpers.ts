@@ -652,6 +652,40 @@ export type EffectCheck = _EffectCommon & (
 	// === Resource semantics extension ===
 	| {kind: "longRestRestores"; resource: string; toMax?: boolean}
 	| {kind: "shortRestRestores"; resource: string; toMax?: boolean}
+
+	// === Phase 8: per-pick + scaling stat probes ===
+	// Verify a named attack row has bonus ≥ N (or exact). Useful
+	// for Magic Arrow (+1), Improved Pact Weapon (+1/+2/+3),
+	// magical weapon variants, and any flat-add attack rider.
+	| {kind: "attackBonus"; attackName: string | RegExp; min?: number; exact?: number}
+	// Substring-match a named attack's damage line. Use lowercase
+	// needle; the runner downcases the haystack. Used for sneak
+	// attack dice ("sneak"), hexblade's curse ("hexblade"),
+	// hunter's prey ("colossus"/"prey"), elemental rune adders
+	// ("fire", "lightning"), or generic "+1d6"-style riders.
+	| {kind: "attackDamageContains"; attackName: string | RegExp; needle: string}
+	// Verify the rogue's sneak attack die count from
+	// `getFeatureCalculations().sneakAttackDice`. Number of d6.
+	| {kind: "sneakAttackDice"; min?: number; exact?: number}
+	// Verify the bard's BI die FACE size. minFaces of 6/8/10/12.
+	| {kind: "bardicInspirationDie"; minFaces: number}
+	// Verify the monk's MA die FACE size. minFaces of 4/6/8/10/12.
+	| {kind: "martialArtsDie"; minFaces: number}
+	// For each picked option matching ANY pattern in `matchAny`,
+	// verify it surfaces as a TOGGLEABLE feature on the sheet.
+	// Defaults `min: 1` — we only require that AT LEAST ONE
+	// matching pick is toggleable, since the wizard's auto-pick
+	// choice can vary across runs.
+	| {kind: "pickToggleable"; matchAny: (string | RegExp)[]; min?: number}
+	// For each picked option matching ANY pattern in `matchAny`,
+	// activate it via `activateFeature` and verify it doesn't
+	// throw. After verifying, deactivate. Defaults `min: 1`.
+	| {kind: "pickActivatable"; matchAny: (string | RegExp)[]; min?: number}
+	// Verify an attack row matching the pattern exists on the
+	// Combat tab. Used for Pact of the Blade summoned weapons,
+	// Mercy Monk unarmed strike, and other "feature creates an
+	// attack row" abilities.
+	| {kind: "attackPresent"; namePattern: string | RegExp}
 );
 
 const _TOGGLE_EFFECT_KINDS = new Set([
@@ -825,6 +859,82 @@ async function _runPassiveOrRollEffect (
 			const after = await charSheet.getResource(e.resource).catch(() => afterSpend);
 			const target = e.toMax === false ? (before.current) : before.max;
 			if (after.current < target) throw new Error(`expected ${isShort ? "short" : "long"} rest to restore "${e.resource}" to ≥${target}, got ${after.current}/${after.max}`);
+			return;
+		}
+
+		// ── Phase 8: per-pick + scaling stat probes ─────────────
+		case "attackBonus": {
+			const v = await charSheet.getAttackBonusNumber(e.attackName);
+			if (v == null) throw new Error(`attack "${e.attackName}" not on sheet`);
+			_checkNumeric(v, e, `attackBonus:${e.attackName}`);
+			return;
+		}
+		case "attackDamageContains": {
+			const dmg = await charSheet.getAttackDamageString(e.attackName);
+			if (dmg == null) throw new Error(`attack "${e.attackName}" not on sheet`);
+			if (!dmg.toLowerCase().includes(e.needle.toLowerCase())) {
+				throw new Error(`attack "${e.attackName}" damage="${dmg}" does not contain "${e.needle}"`);
+			}
+			return;
+		}
+		case "sneakAttackDice": {
+			const n = await charSheet.getSneakAttackDiceCount();
+			_checkNumeric(n, e, `sneakAttackDice`);
+			return;
+		}
+		case "bardicInspirationDie": {
+			const n = await charSheet.getBardicInspirationDieSize();
+			if (n < e.minFaces) throw new Error(`BI die face=${n} < min=${e.minFaces}`);
+			return;
+		}
+		case "martialArtsDie": {
+			const n = await charSheet.getMartialArtsDieSize();
+			if (n < e.minFaces) throw new Error(`MA die face=${n} < min=${e.minFaces}`);
+			return;
+		}
+		case "pickToggleable": {
+			const allFeatures = await charSheet.getActivatableFeatureNames().catch(() => [] as string[]);
+			const toggleable = await charSheet.getToggleableFeatureNames().catch(() => [] as string[]);
+			const need = e.min ?? 1;
+			let hits = 0;
+			const seen: string[] = [];
+			for (const pat of e.matchAny) {
+				const re = pat instanceof RegExp ? pat : new RegExp(pat, "i");
+				const match = allFeatures.find(f => re.test(f));
+				if (match && toggleable.some(t => t.toLowerCase() === match.toLowerCase())) {
+					hits++;
+					seen.push(match);
+					if (hits >= need) return;
+				}
+			}
+			throw new Error(`pickToggleable: only ${hits} of expected ≥${need} matched picks are toggleable. matchedToggleable=[${seen.join(", ")}] toggleable=[${toggleable.slice(0, 10).join(", ")}…]`);
+		}
+		case "pickActivatable": {
+			const allFeatures = await charSheet.getActivatableFeatureNames().catch(() => [] as string[]);
+			const need = e.min ?? 1;
+			let hits = 0;
+			const errs: string[] = [];
+			for (const pat of e.matchAny) {
+				const re = pat instanceof RegExp ? pat : new RegExp(pat, "i");
+				const match = allFeatures.find(f => re.test(f));
+				if (!match) continue;
+				try {
+					await charSheet.activateFeature(match);
+					hits++;
+					try { await charSheet.deactivateFeature(match); } catch (_) { /* swallow */ }
+					if (hits >= need) return;
+				} catch (aErr: any) {
+					errs.push(`${match}: ${aErr.message}`);
+				}
+			}
+			throw new Error(`pickActivatable: only ${hits} of expected ≥${need} matched picks could be activated. errors=[${errs.join(" | ")}]`);
+		}
+		case "attackPresent": {
+			const re = e.namePattern instanceof RegExp ? e.namePattern : new RegExp(e.namePattern, "i");
+			const names = await charSheet.getAttackNames();
+			if (!names.some(n => re.test(n))) {
+				throw new Error(`no attack matching ${re} present. seen=[${names.slice(0, 15).join(", ")}]`);
+			}
 			return;
 		}
 	}

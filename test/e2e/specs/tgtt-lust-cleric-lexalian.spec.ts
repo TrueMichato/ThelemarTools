@@ -47,8 +47,16 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 2, name: "Channel Divinity", kind: "resource", resourceMax: [1, 3], effects: [
 		{kind: "shortRestRestores", resource: "Channel Divinity"},
 	]},
-	{level: 6, name: "Channel Divinity", kind: "resource", resourceMax: [2, 3]},
-	{level: 18, name: "Channel Divinity", kind: "resource", resourceMax: [2, 4]},
+	// Phase 8: re-assert short-rest restoration at the L6/L18 scaling
+	// tiers — the resource pool grows but must still refill on a short
+	// rest. Mirrors the L2 probe so a regression in the refill path at
+	// any tier fails loudly with the offending milestone.
+	{level: 6, name: "Channel Divinity", kind: "resource", resourceMax: [2, 3], effects: [
+		{kind: "shortRestRestores", resource: "Channel Divinity"},
+	]},
+	{level: 18, name: "Channel Divinity", kind: "resource", resourceMax: [2, 4], effects: [
+		{kind: "shortRestRestores", resource: "Channel Divinity"},
+	]},
 	{level: 2, name: /principles of devotion/i, kind: "passive"},
 	// L4/8/12/16 ASIs + L19 Epic Boon — passive listing only.
 	{level: 4,  name: /ability score improvement/i, kind: "passive"},

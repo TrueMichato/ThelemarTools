@@ -85,10 +85,13 @@ const CHRONURGY_WIZARD_FEATURES_MATRIX: FeatureCheck[] = [
 	// L5 Memorize Spell — XPHB-only Wizard feature (swap a prepared
 	// spell on a short rest). The swap mechanic itself isn't easily
 	// probed, so we ride a mid-level spell-DC floor here: by L5 a
-	// dedicated wizard's INT should be 16+ (mod +3) → DC ≥ 13.
+	// Nyuidj wizard with INT 15 base + 2 racial = 17 (mod +3) and
+	// prof +3 lands at DC 14 minimum (an L4 ASI into INT only raises
+	// it). Keep `min: 14` — point-buy variants still pick INT 15+
+	// for the primary stat.
 	{level: 5, name: /memorize spell/i, kind: "passive",
 		effects: [
-			{kind: "spellSaveDc", min: 13},
+			{kind: "spellSaveDc", min: 14},
 		],
 	},
 	// L18 Spell Mastery — pick a 1st + 2nd-level spell to cast at
@@ -105,12 +108,26 @@ const CHRONURGY_WIZARD_FEATURES_MATRIX: FeatureCheck[] = [
 	// fail even though the JSON payload is correct.
 	//
 	// L3 Chronal Shift — reaction reroll, 2 uses per long rest.
+	// Effect probes are inert today (FeatureCheck is skipped by
+	// CS-BUG-002) but will auto-activate once the subclass-grant
+	// pipeline is fixed.
 	{level: 3, name: /chronal shift/i, kind: "resource",
 		resourceMax: 2, restoreOn: "long",
-		skip: true, skipReason: "CS-BUG-002"},
+		skip: true, skipReason: "CS-BUG-002",
+		effects: [
+			{kind: "longRestRestores", resource: "Chronal Shift"},
+		],
+	},
 	// L3 Temporal Awareness — passive +INT mod to initiative.
+	// Pre-bug-fix: skipped. Once Chronurgy is granted, INT mod +3
+	// (Nyuidj +2 on INT 15 = 17 → +3) plus a base DEX +1 lands at
+	// initiative ≥ +4 from L3 onwards.
 	{level: 3, name: /temporal awareness/i, kind: "passive",
-		skip: true, skipReason: "CS-BUG-002"},
+		skip: true, skipReason: "CS-BUG-002",
+		effects: [
+			{kind: "initiative", min: 4},
+		],
+	},
 	// L6 Momentary Stasis — action, INT mod uses per long rest,
 	// freezes a Large-or-smaller creature in a stasis field.
 	{level: 6, name: /momentary stasis/i, kind: "passive",

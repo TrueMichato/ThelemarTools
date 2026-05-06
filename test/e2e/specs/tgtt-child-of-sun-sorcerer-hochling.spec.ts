@@ -58,18 +58,48 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
 
 	// Metamagic picks: 2 at L3, +1 at L10, +1 at L17.
-	// `pickedFrom` already verifies that a chosen Metamagic surfaces
-	// as a feature entry, so no extra effect probe is needed.
+	// `pickedFrom` verifies that a chosen Metamagic surfaces as a
+	// feature entry. `pickToggleable` then verifies that ≥1 of the
+	// picked options is an Active metamagic surfaced as a toggle on
+	// the sheet. `matchAny` enumerates ONLY active TGTT metamagics
+	// (passive options like Careful / Distant / Empowered / Extended
+	// / Transmuted don't surface as toggles, so listing them would
+	// be noise). Mirrors the Heroic Soul Sorcerer pattern.
 	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i]},
+		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		effects: [
+			{kind: "pickToggleable", min: 1, matchAny: [
+				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
+				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
+				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+			]},
+		]},
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i]},
+		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		effects: [
+			{kind: "pickToggleable", min: 1, matchAny: [
+				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
+				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
+				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+			]},
+		]},
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i]},
+		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		effects: [
+			{kind: "pickToggleable", min: 1, matchAny: [
+				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
+				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
+				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+			]},
+		]},
 
-	// Sorcerous Restoration capstone at L20 — passive listing only;
-	// the short-rest SP top-up isn't surfaced as a discrete probe.
-	{level: 20, name: /sorcerous restoration/i, kind: "passive"},
+	// Sorcerous Restoration capstone at L20 — short-rest recovery of
+	// up to 4 SP. Probe the short-rest restore behaviour to confirm
+	// the resource is wired up.
+	{level: 20, name: /sorcerous restoration/i, kind: "passive",
+		effects: [
+			{kind: "shortRestRestores", resource: "Sorcery Points"},
+		]},
 
 	// ── Child of the Sun Bloodline subclass ──────────────────────
 	// Subclass features all key off L3 in this build (TGTT copies the

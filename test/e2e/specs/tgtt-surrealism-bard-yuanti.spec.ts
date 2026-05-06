@@ -35,6 +35,11 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		resourceMax: [1, 6],
 		effects: [
 			{kind: "longRestRestores", resource: "Bardic Inspiration"},
+			// PHB-flavoured BI die scaling: d6 from L1, d8 at L5, d10 at
+			// L10, d12 at L15. The L1 floor (≥6) survives every probe
+			// level; tighter mins ride along on the L5 / L10 / L14
+			// entries so each tier asserts its own face count.
+			{kind: "bardicInspirationDie", minFaces: 6},
 		],
 	},
 	{
@@ -48,11 +53,15 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 			// rest. Blocked by CS-BUG-008 (short-rest restore not wired).
 			{kind: "shortRestRestores", resource: "Bardic Inspiration",
 				skip: true, skipReason: "CS-BUG-008"},
+			// L5+ BI die has scaled to d8.
+			{kind: "bardicInspirationDie", minFaces: 8},
 		],
 	},
 	// Font of Inspiration (XPHB L5) — Bardic Inspiration restores on
 	// short rest. Restoration semantics are blocked by CS-BUG-008 so
 	// we only assert the pool exists at the higher tiers, not restore.
+	// Spellcasting maturity probes also live here (Bard CHA mod hits
+	// +3 by L5 with the auto-fill picks → expected DC ≥ 13).
 	{
 		level: 5,
 		name: /font of inspiration/i,
@@ -60,6 +69,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "shortRestRestores", resource: "Bardic Inspiration",
 				skip: true, skipReason: "CS-BUG-008"},
+			{kind: "spellSaveDc", min: 13},
 		],
 	},
 	// Spellcasting + Jack of All Trades + Expertise (L2 / L9 picks two
@@ -131,7 +141,15 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 	// Countercharm (L7), Magical Secrets (L10), Superior Inspiration
 	// (L18), Words of Creation (L20).
 	{level: 7,  name: /countercharm/i, kind: "passive"},
-	{level: 10, name: /magical secrets/i, kind: "passive"},
+	{
+		level: 10,
+		name: /magical secrets/i,
+		kind: "passive",
+		effects: [
+			// L10+ BI die has scaled to d10.
+			{kind: "bardicInspirationDie", minFaces: 10},
+		],
+	},
 	{level: 18, name: /superior inspiration/i, kind: "passive"},
 	{level: 20, name: /words of creation/i, kind: "passive"},
 
@@ -172,8 +190,17 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 6,  name: /canvas of the mind/i, kind: "passive"},
 	// L14 Guiding Whispers: passive — once-per-short-rest emotion
 	// manipulation; also unlocks bonus-action Bardic Inspiration in
-	// the Canvas.
-	{level: 14, name: /guiding whispers/i, kind: "passive"},
+	// the Canvas. Doubles as the L15+ probe carrier for the BI die's
+	// final upgrade to d12 (probe levels are 3/5/11/17/20, so a L14
+	// entry only fires at L17/L20 where the d12 is in effect).
+	{
+		level: 14,
+		name: /guiding whispers/i,
+		kind: "passive",
+		effects: [
+			{kind: "bardicInspirationDie", minFaces: 12},
+		],
+	},
 ];
 
 describeCharacter({
