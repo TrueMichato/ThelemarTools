@@ -13,6 +13,10 @@ import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 // Curving Shot (L7 passive), Ever-Ready Shot (L15 passive).
 const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// Fighting Style at L1 — pick 1 from the Fighter list.
+	// No effect probe: the +2 from Archery (the most likely pick) goes
+	// onto attack rolls, which the sheet doesn't expose as a stable,
+	// readable field; reading attack-button text is brittle and
+	// preset-dependent.
 	{
 		level: 1,
 		name: /fighting style/i,
@@ -36,10 +40,38 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// PHB classic Second Wind is 1/short-rest; XPHB grants prof-bonus
 	// uses. The TGTT preset uses the 2024-style class file, so allow
 	// a [1, prof-bonus-at-20] range and just verify the resource and
-	// short-rest restore semantics.
-	{level: 1, name: /second wind/i, kind: "resource", resourceMax: [1, 6], restoreOn: "short"},
+	// short-rest restore semantics.  Effects: layer the explicit
+	// shortRestRestores probe on top, plus base-roll-button probes
+	// (STR ability check, STR save, initiative — all available from L1
+	// on every character).
+	{
+		level: 1,
+		name: /second wind/i,
+		kind: "resource",
+		resourceMax: [1, 6],
+		restoreOn: "short",
+		effects: [
+			{kind: "shortRestRestores", resource: "Second Wind"},
+			{kind: "rollSavingThrow", ability: "str"},
+			{kind: "rollAbilityCheck", ability: "str"},
+			{kind: "rollInitiative"},
+		],
+	},
 	// Action Surge at L2 — 1 use, short-rest. Bumps to 2 uses at L17.
-	{level: 2,  name: /action surge/i, kind: "resource", resourceMax: 1, restoreOn: "short"},
+	// Effects: explicit shortRestRestores probe, plus a CON save (the
+	// other Fighter-proficient save) and a Perception skill-roll probe.
+	{
+		level: 2,
+		name: /action surge/i,
+		kind: "resource",
+		resourceMax: 1,
+		restoreOn: "short",
+		effects: [
+			{kind: "shortRestRestores", resource: "Action Surge"},
+			{kind: "rollSavingThrow", ability: "con"},
+			{kind: "rollSkillCheck", skill: "perception"},
+		],
+	},
 	{level: 17, name: /action surge/i, kind: "resource", resourceMax: 2},
 	// Fighter ASIs at L4/6/8/12/14/16/19.
 	{level: 4,  name: /ability score improvement/i, kind: "passive"},
@@ -50,11 +82,44 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 16, name: /ability score improvement/i, kind: "passive"},
 	{level: 19, name: /ability score improvement|epic boon/i, kind: "passive"},
 	// Extra Attack: L5 (×2), L11 (×3), L20 (×4) — passive listing.
-	{level: 5,  name: /extra attack/i, kind: "passive"},
+	// Effects on L5 entry: a longbow/shortbow attack-roll probe (the
+	// signature Arcane Archer weapon). Skipped because the preset
+	// doesn't auto-equip a bow — the wizard's default starting kit
+	// for the TGTT Fighter doesn't surface a longbow attack on the
+	// sheet, so clickAttackRoll(/longbow|shortbow/) returns
+	// `clicked: false`. Re-enable once the preset's equipment block
+	// adds a longbow (or once Arcane Archer's level-up auto-grants
+	// the implied weapon).
+	{
+		level: 5,
+		name: /extra attack/i,
+		kind: "passive",
+		effects: [
+			{
+				kind: "rollAttack",
+				attackName: /longbow|shortbow/i,
+				skip: true,
+				skipReason: "preset has no bow attack auto-equipped",
+			},
+		],
+	},
 	{level: 11, name: /extra attack/i, kind: "passive"},
 	{level: 20, name: /extra attack/i, kind: "passive"},
 	// Indomitable at L9 — re-roll a failed save. 1 use → 2 at L13 → 3 at L17.
-	{level: 9,  name: /indomitable/i, kind: "resource", resourceMax: 1, restoreOn: "long"},
+	// Effects: explicit longRestRestores probe (Indomitable is the
+	// canonical long-rest Fighter resource) plus an Athletics
+	// skill-roll probe (Fighter signature physical skill).
+	{
+		level: 9,
+		name: /indomitable/i,
+		kind: "resource",
+		resourceMax: 1,
+		restoreOn: "long",
+		effects: [
+			{kind: "longRestRestores", resource: "Indomitable"},
+			{kind: "rollSkillCheck", skill: "athletics"},
+		],
+	},
 	{level: 13, name: /indomitable/i, kind: "resource", resourceMax: 2},
 	{level: 17, name: /indomitable/i, kind: "resource", resourceMax: 3},
 

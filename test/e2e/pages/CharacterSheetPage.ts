@@ -762,4 +762,364 @@ export class CharacterSheetPage {
 		expect(after.current, `${resourceName} after short rest`).toBe(expectAfter);
 		return {before: before.current, after: after.current};
 	}
+
+	// ========== EFFECT-VALIDATION PRIMITIVES (Phase 7) ==========
+	// Read APIs that let the featuresMatrix runner verify that a feature
+	// actually produces its declared mechanical effect — not just that
+	// it appears in the feature list.
+
+	/**
+	 * Read a saving throw modifier directly from state. Includes ability
+	 * mod + proficiency (if proficient) + state bonuses (Aura of
+	 * Protection, Magic Resistance, etc.) + item bonuses + condition
+	 * penalties. The authoritative number a player would add to their d20.
+	 */
+	async getSaveBonus (ability: "str" | "dex" | "con" | "int" | "wis" | "cha"): Promise<number> {
+		return this.page.evaluate((abl) => {
+			const cs: any = (globalThis as any).charSheet;
+			const fn = cs?._state?.getSaveMod || cs?._state?.getSaveModifier;
+			if (!fn) return 0;
+			try { return fn.call(cs._state, abl) | 0; } catch (_) { return 0; }
+		}, ability);
+	}
+
+	/** Read an ability score AND its derived modifier in one call. */
+	async getAbilityScore (ability: "str" | "dex" | "con" | "int" | "wis" | "cha"): Promise<{score: number; mod: number}> {
+		return this.page.evaluate((abl) => {
+			const cs: any = (globalThis as any).charSheet;
+			const score = cs?._state?.getAbilityScore?.(abl) ?? 10;
+			const mod = cs?._state?.getAbilityMod?.(abl) ?? 0;
+			return {score: score | 0, mod: mod | 0};
+		}, ability);
+	}
+
+	/** Read the initiative bonus from state (includes Alert, Jack of All Trades, etc.). */
+	async getInitiativeBonusFromState (): Promise<number> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			try {
+				const fn = cs?._state?.getInitiative || cs?._state?.getInitiativeBonus;
+				return fn ? (fn.call(cs._state) | 0) : 0;
+			} catch (_) { return 0; }
+		});
+	}
+
+	/** Damage resistances as a deduplicated list of damage-type strings (case as rendered). */
+	async getResistances (): Promise<string[]> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			try {
+				const r = cs?._state?.getResistances?.();
+				if (!r) return [];
+				if (Array.isArray(r)) return r.map((s: any) => String(s));
+				return Object.keys(r);
+			} catch (_) { return []; }
+		});
+	}
+
+	/** Damage immunities, same shape as getResistances. */
+	async getImmunities (): Promise<string[]> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			try {
+				const r = cs?._state?.getImmunities?.();
+				if (!r) return [];
+				if (Array.isArray(r)) return r.map((s: any) => String(s));
+				return Object.keys(r);
+			} catch (_) { return []; }
+		});
+	}
+
+	/** Damage vulnerabilities, same shape as getResistances. */
+	async getVulnerabilities (): Promise<string[]> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			try {
+				const r = cs?._state?.getVulnerabilities?.();
+				if (!r) return [];
+				if (Array.isArray(r)) return r.map((s: any) => String(s));
+				return Object.keys(r);
+			} catch (_) { return []; }
+		});
+	}
+
+	/**
+	 * Speed in feet. Pass "walk" for the primary walking speed (default),
+	 * or one of fly/swim/climb/burrow for alt-mode speeds.
+	 * Returns 0 if the speed type isn't applicable to the character.
+	 */
+	async getSpeed (type: "walk" | "fly" | "swim" | "climb" | "burrow" = "walk"): Promise<number> {
+		return this.page.evaluate((t) => {
+			const cs: any = (globalThis as any).charSheet;
+			try { return cs?._state?.getSpeed?.(t) | 0; } catch (_) { return 0; }
+		}, type);
+	}
+
+	/**
+	 * Query advantage state for any roll type. The `rollType` string
+	 * follows the in-state convention:
+	 *   "attack"            — any attack
+	 *   "save:str"          — STR save
+	 *   "check:dex"         — DEX ability check
+	 *   "skill:stealth"     — Stealth skill
+	 * Returns the full {advantage, disadvantage, cancelled, sources}
+	 * object so callers can assert sources for diagnostic clarity.
+	 */
+	async getAdvantageState (rollType: string): Promise<{advantage: boolean; disadvantage: boolean; cancelled: boolean; sources: string[]}> {
+		return this.page.evaluate((rt) => {
+			const cs: any = (globalThis as any).charSheet;
+			try {
+				const s = cs?._state?.getAdvantageState?.(rt);
+				if (!s) return {advantage: false, disadvantage: false, cancelled: false, sources: []};
+				return {
+					advantage: !!s.advantage,
+					disadvantage: !!s.disadvantage,
+					cancelled: !!s.cancelled,
+					sources: Array.isArray(s.sources) ? s.sources.map((x: any) => String(x)) : [],
+				};
+			} catch (_) {
+				return {advantage: false, disadvantage: false, cancelled: false, sources: []};
+			}
+		}, rollType);
+	}
+
+	/** Per-skill advantage state. Equivalent to getAdvantageState(`skill:<lowercaseskill>`). */
+	async getSkillAdvantageState (skill: string): Promise<{advantage: boolean; disadvantage: boolean; cancelled: boolean; sources: string[]}> {
+		return this.page.evaluate((s) => {
+			const cs: any = (globalThis as any).charSheet;
+			try {
+				const r = cs?._state?.getSkillAdvantageState?.(s)
+					|| cs?._state?.getAdvantageState?.(`skill:${String(s).toLowerCase()}`);
+				if (!r) return {advantage: false, disadvantage: false, cancelled: false, sources: []};
+				return {
+					advantage: !!r.advantage,
+					disadvantage: !!r.disadvantage,
+					cancelled: !!r.cancelled,
+					sources: Array.isArray(r.sources) ? r.sources.map((x: any) => String(x)) : [],
+				};
+			} catch (_) {
+				return {advantage: false, disadvantage: false, cancelled: false, sources: []};
+			}
+		}, skill);
+	}
+
+	/**
+	 * Group all known/prepared spells by spell level (0 = cantrip).
+	 * Returns a map {0: [cantrips], 1: [...], ...}. Useful for "subclass
+	 * granted these L3 spells" assertions.
+	 */
+	async getKnownSpellsByLevel (): Promise<Record<number, string[]>> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			if (!state?.getKnownSpells) return {};
+			const out: Record<number, string[]> = {};
+			try {
+				const spells = state.getKnownSpells() || [];
+				for (const sp of spells) {
+					const lvl = sp.level ?? 0;
+					if (!out[lvl]) out[lvl] = [];
+					out[lvl].push(sp.name);
+				}
+			} catch (_) {}
+			return out;
+		});
+	}
+
+	/**
+	 * Snapshot of every active-state instance currently on the character.
+	 * Includes inactive instances too (so `instance.active === false` is
+	 * possible) — callers should filter by `.active` if they only care
+	 * about live toggles.
+	 */
+	async getActiveStateInstances (): Promise<Array<{id: string; stateTypeId: string; active: boolean; name?: string}>> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const list = cs?._state?.getActiveStates?.() ?? [];
+			return list.map((s: any) => ({
+				id: String(s.id),
+				stateTypeId: String(s.stateTypeId),
+				active: !!s.active,
+				name: s.name ? String(s.name) : undefined,
+			}));
+		});
+	}
+
+	/**
+	 * Activate a built-in active state by its `stateTypeId` (one of the
+	 * keys in `CharacterSheetState.ACTIVE_STATE_TYPES` — e.g. "rage",
+	 * "bladesong", "wildShape"). Bypasses the DOM toggle button so we
+	 * can run effect-delta probes deterministically.
+	 *
+	 * Returns the new instance id (for later deactivation), or null if
+	 * the state type isn't recognised.
+	 */
+	async activateStateById (stateTypeId: string): Promise<string | null> {
+		const id = await this.page.evaluate((typeId) => {
+			const cs: any = (globalThis as any).charSheet;
+			try {
+				const newId = cs?._state?.activateState?.(typeId);
+				cs?._renderCharacter?.();
+				return newId ? String(newId) : null;
+			} catch (_) { return null; }
+		}, stateTypeId);
+		await this.page.waitForTimeout(100);
+		return id;
+	}
+
+	/** Deactivate an active state by instance id (the value returned from activateStateById). */
+	async deactivateStateById (stateInstanceId: string): Promise<void> {
+		await this.page.evaluate((id) => {
+			const cs: any = (globalThis as any).charSheet;
+			try {
+				const list = cs?._state?.getActiveStates?.() ?? [];
+				const inst = list.find((s: any) => String(s.id) === id);
+				if (inst?.active) cs?._state?.toggleActiveState?.(id);
+				cs?._renderCharacter?.();
+			} catch (_) {}
+		}, stateInstanceId);
+		await this.page.waitForTimeout(100);
+	}
+
+	/**
+	 * Click an ability check or save roll button. Wraps the click in a
+	 * try/catch inside `evaluate` so synchronous handler throws are
+	 * captured rather than swallowed (the existing `rollSkill` helper
+	 * uses a Playwright click that hides handler errors).
+	 *
+	 * Returns {clicked: bool, threwError: bool, errorMessage?: string}.
+	 *  - clicked === false → no button found
+	 *  - threwError === true → button exists but click handler threw
+	 */
+	async clickAbilityRoll (
+		ability: "str" | "dex" | "con" | "int" | "wis" | "cha",
+		kind: "check" | "save",
+	): Promise<{clicked: boolean; threwError: boolean; errorMessage?: string}> {
+		await this.switchToTab(this.tabAbilities);
+		return this.page.evaluate(({abl, k}) => {
+			const sel = k === "check"
+				? `.charsheet__ability-roll-check[data-ability="${abl}"]`
+				: `.charsheet__ability-roll-save[data-ability="${abl}"]`;
+			const btn = document.querySelector(sel) as HTMLElement | null;
+			if (!btn) return {clicked: false, threwError: false};
+			try { btn.click(); return {clicked: true, threwError: false}; } catch (e: any) {
+				return {clicked: true, threwError: true, errorMessage: String(e?.message ?? e)};
+			}
+		}, {abl: ability, k: kind});
+	}
+
+	/**
+	 * Hard variant of rollSkill — clicks the skill row's roll button via
+	 * page.evaluate so synchronous handler throws are captured.
+	 */
+	async clickSkillRollHard (skill: string): Promise<{clicked: boolean; threwError: boolean; errorMessage?: string}> {
+		await this.switchToTab(this.tabAbilities);
+		return this.page.evaluate((s) => {
+			const re = new RegExp(`\\b${s}\\b`, "i");
+			const rows = document.querySelectorAll(".charsheet__skill-row, [data-skill]") as NodeListOf<HTMLElement>;
+			for (const row of Array.from(rows)) {
+				if (!re.test(row.textContent || "")) continue;
+				const btn = row.querySelector(".charsheet__skill-roll, button") as HTMLElement | null;
+				if (!btn) continue;
+				try { btn.click(); return {clicked: true, threwError: false}; } catch (e: any) {
+					return {clicked: true, threwError: true, errorMessage: String(e?.message ?? e)};
+				}
+			}
+			return {clicked: false, threwError: false};
+		}, skill);
+	}
+
+	/** Click an attack-row's roll button by attack name; throws-aware. */
+	async clickAttackRoll (attackName: string | RegExp): Promise<{clicked: boolean; threwError: boolean; errorMessage?: string}> {
+		await this.switchToTab(this.tabCombat);
+		const reSrc = attackName instanceof RegExp ? attackName.source : attackName;
+		const reFlags = attackName instanceof RegExp ? attackName.flags : "i";
+		return this.page.evaluate(({src, flags}) => {
+			const re = new RegExp(src, flags);
+			const rows = document.querySelectorAll(".charsheet__attack-item") as NodeListOf<HTMLElement>;
+			for (const row of Array.from(rows)) {
+				if (!re.test(row.textContent || "")) continue;
+				const btn = row.querySelector(".charsheet__attack-roll, button") as HTMLElement | null;
+				if (!btn) continue;
+				try { btn.click(); return {clicked: true, threwError: false}; } catch (e: any) {
+					return {clicked: true, threwError: true, errorMessage: String(e?.message ?? e)};
+				}
+			}
+			return {clicked: false, threwError: false};
+		}, {src: reSrc, flags: reFlags});
+	}
+
+	/** Click the initiative roll button on the Combat tab; throws-aware. */
+	async clickInitiativeRoll (): Promise<{clicked: boolean; threwError: boolean; errorMessage?: string}> {
+		await this.switchToTab(this.tabCombat);
+		return this.page.evaluate(() => {
+			const btn = (document.getElementById("charsheet-roll-initiative")
+				|| document.getElementById("charsheet-box-initiative")) as HTMLElement | null;
+			if (!btn) return {clicked: false, threwError: false};
+			try { btn.click(); return {clicked: true, threwError: false}; } catch (e: any) {
+				return {clicked: true, threwError: true, errorMessage: String(e?.message ?? e)};
+			}
+		});
+	}
+
+	/**
+	 * One-call snapshot of every "effective" derived stat. Use to diff
+	 * before/after a toggle activation so probes can assert deltas
+	 * without making 30 round-trips.
+	 */
+	async snapshotEffectiveStats (): Promise<EffectiveStatsSnapshot> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const st = cs?._state;
+			if (!st) return {ac: 0, spellSaveDc: 0, walkSpeed: 0, init: 0, abilityScores: {}, abilityMods: {}, saveMods: {}, skillBonuses: {}, resistances: [], immunities: []};
+			const abls = ["str", "dex", "con", "int", "wis", "cha"] as const;
+			const skills = ["acrobatics", "animal handling", "arcana", "athletics", "deception", "history", "insight", "intimidation", "investigation", "medicine", "nature", "perception", "performance", "persuasion", "religion", "sleight of hand", "stealth", "survival"] as const;
+			const out: any = {
+				ac: st.getAC?.() ?? 0,
+				spellSaveDc: st.getSpellSaveDC?.() ?? 0,
+				walkSpeed: st.getSpeed?.("walk") ?? 0,
+				init: (st.getInitiative ? st.getInitiative() : (st.getInitiativeBonus?.() ?? 0)),
+				abilityScores: {},
+				abilityMods: {},
+				saveMods: {},
+				skillBonuses: {},
+				resistances: [],
+				immunities: [],
+			};
+			for (const a of abls) {
+				try { out.abilityScores[a] = st.getAbilityScore?.(a) ?? 10; } catch (_) { out.abilityScores[a] = 10; }
+				try { out.abilityMods[a] = st.getAbilityMod?.(a) ?? 0; } catch (_) { out.abilityMods[a] = 0; }
+				try { out.saveMods[a] = (st.getSaveMod || st.getSaveModifier)?.call(st, a) ?? 0; } catch (_) { out.saveMods[a] = 0; }
+			}
+			for (const s of skills) {
+				try { out.skillBonuses[s] = st.getSkillBonus?.(s) ?? 0; } catch (_) { out.skillBonuses[s] = 0; }
+			}
+			try {
+				const r = st.getResistances?.();
+				out.resistances = Array.isArray(r) ? r.map((x: any) => String(x)) : (r ? Object.keys(r) : []);
+			} catch (_) {}
+			try {
+				const i = st.getImmunities?.();
+				out.immunities = Array.isArray(i) ? i.map((x: any) => String(x)) : (i ? Object.keys(i) : []);
+			} catch (_) {}
+			return out;
+		});
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────
+//  Phase-7 effective-stats snapshot type (exported for helpers)
+// ──────────────────────────────────────────────────────────────────
+
+export interface EffectiveStatsSnapshot {
+	ac: number;
+	spellSaveDc: number;
+	walkSpeed: number;
+	init: number;
+	abilityScores: Record<string, number>;
+	abilityMods: Record<string, number>;
+	saveMods: Record<string, number>;
+	skillBonuses: Record<string, number>;
+	resistances: string[];
+	immunities: string[];
 }

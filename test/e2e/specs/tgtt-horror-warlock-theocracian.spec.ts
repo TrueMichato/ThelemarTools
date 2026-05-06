@@ -40,10 +40,48 @@ describeCharacter({
 	featuresMatrix: [
 		// ── Class features ────────────────────────────────────────
 		// Pact Magic slots — entirely blocked by CS-BUG-013.
-		{level: 1,  name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
+		// Effects below are documented but skipped: anything that
+		// reads from the pact-slot pipeline (spellbook entries fed
+		// by signatureSpells, slot-pool restoration) can't be probed
+		// while CS-BUG-013 stands.
+		{level: 1,  name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013",
+			effects: [
+				{kind: "spellInList", spell: "Eldritch Blast", skip: true, skipReason: "CS-BUG-013"},
+				{kind: "spellInList", spell: "Hex",            skip: true, skipReason: "CS-BUG-013"},
+				{kind: "shortRestRestores", resource: "Pact Magic", skip: true, skipReason: "CS-BUG-013"},
+			],
+		},
 		{level: 2,  name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
 		{level: 11, name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
 		{level: 17, name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
+
+		// Spellbook-side probes for Pact Magic. Added as a separate
+		// non-skipped passive entry so the cantrip/spell-list checks
+		// still run even though the slot resource itself is gated by
+		// CS-BUG-013. The actual spellInList probes for Eldritch
+		// Blast / Hex remain skipped here too, because spell
+		// registration may also be impacted while pact slots aren't
+		// wired (see CS-BUG-013).
+		{level: 1, name: /pact magic|pact slots/i, kind: "passive",
+			effects: [
+				{kind: "cantripCount", min: 2},
+				{kind: "spellInList", spell: "Eldritch Blast", skip: true, skipReason: "CS-BUG-013"},
+				{kind: "spellInList", spell: "Hex",            skip: true, skipReason: "CS-BUG-013"},
+				// Saves a warlock is proficient in: WIS, CHA.
+				{kind: "rollSavingThrow", ability: "wis"},
+				{kind: "rollSavingThrow", ability: "cha"},
+				{kind: "rollAbilityCheck", ability: "cha"},
+			],
+		},
+
+		// Mid-level spell save DC probe — CHA-based, PB scales.
+		// Even at PB=4 with CHA mod 0, DC = 8+4+0 = 12. We expect
+		// at least 13 by L11 for a CHA-focused warlock build.
+		{level: 11, name: /pact magic|pact slots/i, kind: "passive",
+			effects: [
+				{kind: "spellSaveDc", min: 13},
+			],
+		},
 
 		// Eldritch Invocations — count scales with level.
 		{level: 2,  name: /eldritch invocation/i, kind: "pick", pickedCount: 2,
@@ -57,23 +95,72 @@ describeCharacter({
 		{level: 18, name: /eldritch invocation/i, kind: "pick", pickedCount: 8,
 			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i, /one with shadows/i, /sign of ill omen/i]},
 
-		// Pact Boon at L3.
+		// Pact Boon at L3 — no clean state probe (boon-specific).
+		// Roll-button probes layered here so they fan out by level.
 		{level: 3, name: /pact boon|pact of the/i, kind: "pick", pickedCount: 1,
 			pickedFrom: [/blade/i, /tome/i, /chain/i, /talisman/i]},
 
+		// Mystic Arcanum — grants one fixed-pick spell per level
+		// tier. Concrete spell picks aren't deterministic for the
+		// preset, so no spellInList probe is asserted here. Marked
+		// inline rather than skipped so a future preset that pins
+		// the picks can attach probes with no schema change.
 		{level: 11, name: /mystic arcanum.*6th|mystic arcanum \(6/i, kind: "passive"},
 		{level: 13, name: /mystic arcanum.*7th|mystic arcanum \(7/i, kind: "passive"},
 		{level: 15, name: /mystic arcanum.*8th|mystic arcanum \(8/i, kind: "passive"},
 		{level: 17, name: /mystic arcanum.*9th|mystic arcanum \(9/i, kind: "passive"},
 
+		// Eldritch Master — restores expended pact slots after a 1-min
+		// rest. Conditional ritual; nothing the sheet exposes as a
+		// queryable state delta, so no effect probe.
 		{level: 20, name: /eldritch master/i, kind: "passive"},
 
 		// ── Subclass: The Horror (TGTT) ──────────────────────────
+		// Expanded Spell List — patron spells are added to the
+		// learnable picklist, not auto-granted, so spellInList
+		// probes wouldn't pass without a fixed selection. Left as
+		// presence-only.
 		{level: 1, name: /expanded spell list/i, kind: "passive"},
-		{level: 1, name: /devastating strike/i, kind: "passive"},
+
+		// Devastating Strike — unarmed-strike attack at L1; uses CON
+		// mod for resource pool. The strike itself isn't a separate
+		// attack on the attack list (it modifies the unarmed strike),
+		// so we attach roll probes that exercise warlock-signature
+		// rolls + the race walk speed (Theocracian = Child of the
+		// Empire base, speed 30).
+		{level: 1, name: /devastating strike/i, kind: "passive",
+			effects: [
+				{kind: "speed", type: "walk", exact: 30},
+				{kind: "rollAttack", attackName: /eldritch blast|dagger|crossbow|quarterstaff/i, skip: true, skipReason: "CS-BUG-013"},
+				{kind: "rollInitiative"},
+				{kind: "rollSkillCheck", skill: "intimidation"},
+				{kind: "rollSkillCheck", skill: "deception"},
+			],
+		},
+
+		// Lone Survivor — situational immunity to frightened only
+		// when no allies within 30 ft. Sheet has no probe for that
+		// gate, so no effect.
 		{level: 6, name: /lone survivor/i, kind: "passive"},
-		{level: 6, name: /unearthly manifestation/i, kind: "passive"},
+
+		// Unearthly Manifestation — grants CON save proficiency.
+		// At L6 PB=3, so a non-dumped CON yields a save bonus ≥ 3
+		// only after proficiency is added. We assert min: 2 to
+		// allow CON 8 (mod -1, +PB 3 = +2) but still catch a
+		// regression where proficiency isn't applied at all.
+		{level: 6, name: /unearthly manifestation/i, kind: "passive",
+			effects: [
+				{kind: "saveBonus", ability: "con", min: 2},
+			],
+		},
+
+		// Degenerating Touch — situational, requires hit + failed
+		// CON save against spell DC; no state-observable always-on
+		// effect to probe.
 		{level: 10, name: /degenerating touch/i, kind: "passive"},
+
+		// Imploding Infestation — once-per-long-rest situational AoE
+		// applied via unarmed strike; nothing always-on to probe.
 		{level: 14, name: /imploding infestation/i, kind: "passive"},
 	],
 });

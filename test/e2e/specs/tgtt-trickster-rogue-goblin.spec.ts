@@ -41,12 +41,67 @@ describeCharacter({
 	},
 	featuresMatrix: [
 		// ── Rogue base ────────────────────────────────────────────────
-		{level: 1, name: /sneak attack/i, kind: "passive"},
-		{level: 2, name: /cunning action/i, kind: "passive"},
+		// Sneak Attack carries the Rogue signature roll-button probes:
+		// signature stealth check, an attack roll (rapier/shortsword/
+		// dagger/crossbow — whatever the loadout grabs), plus the
+		// initiative probe (Rogues are dex-init characters).
+		{
+			level: 1,
+			name: /sneak attack/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollSkillCheck", skill: "stealth"},
+				{kind: "rollAttack", attackName: /rapier|shortsword|dagger|crossbow/i},
+				{kind: "rollInitiative"},
+			],
+		},
+		// Cunning Action = Disengage/Hide as bonus action; both are
+		// dex-driven, so probe a dex ability check button here.
+		{
+			level: 2,
+			name: /cunning action/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollAbilityCheck", ability: "dex"},
+			],
+		},
+		// Uncanny Dodge halves damage on attack hits (dex-reactionish);
+		// no clean state-observable probe — the underlying mechanic is
+		// reactive damage reduction. No effect.
 		{level: 5, name: /uncanny dodge/i, kind: "passive"},
-		{level: 7, name: /evasion/i, kind: "passive"},
-		{level: 11, name: /reliable talent/i, kind: "passive"},
-		{level: 20, name: /stroke of luck/i, kind: "passive"},
+		// Evasion: succeed = no dmg, fail = half on dex saves.
+		// Probe the dex save roll button to make sure the handler still
+		// fires once Evasion is in play.
+		{
+			level: 7,
+			name: /evasion/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollSavingThrow", ability: "dex"},
+			],
+		},
+		// Reliable Talent — ≥10 on every proficient ability check.
+		// Probe a non-signature save (int) to make sure the global roll
+		// pipeline didn't break under the Reliable Talent override.
+		{
+			level: 11,
+			name: /reliable talent/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollSavingThrow", ability: "int"},
+			],
+		},
+		// Stroke of Luck — once-per-short-rest reroll/auto-20. Surfaces
+		// as a passive on the sheet; probe a deception skill roll to
+		// cover the Trickster's social-skill side.
+		{
+			level: 20,
+			name: /stroke of luck/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollSkillCheck", skill: "deception"},
+			],
+		},
 
 		// ── Trickster subclass ───────────────────────────────────────
 		// Trickster Dice pool — 4 @ L3, +1 at L9/L13/L17 (max 7).
@@ -128,8 +183,24 @@ describeCharacter({
 		},
 
 		// Other Trickster passives / scaling features.
-		{level: 9, name: /sticky hands/i, kind: "passive"},
+		// Sticky Hands explicitly calls for a Dexterity (Sleight of
+		// Hand) check with advantage to steal — perfect place for the
+		// signature sleight-of-hand roll-button probe.
+		{
+			level: 9,
+			name: /sticky hands/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollSkillCheck", skill: "sleight of hand"},
+			],
+		},
+		// The Switch (L13) — reactive Dexterity (Acrobatics) contest
+		// against another creature; not state-observable.
 		{level: 13, name: /the switch|switch/i, kind: "passive"},
+		// Master of Mischief (L17) — extends Quick Hands and refunds
+		// trickster dice on item interaction; refund mechanics aren't
+		// surfaced (CS-BUG-012 covers the underlying resource), so no
+		// clean probe.
 		{level: 17, name: /master of mischief/i, kind: "passive"},
 	],
 });
