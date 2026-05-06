@@ -9,9 +9,11 @@ import {
 import {
 	addInventoryItems,
 	assertMilestone,
+	assertFeaturesMatrix,
 	probeToggleDelta,
 	readCombatStats,
 	MilestoneExpect,
+	FeatureCheck,
 	InventoryItemRef,
 } from "./comprehensiveBuildHelpers";
 
@@ -132,6 +134,18 @@ export interface CharacterSpec {
 		/** If true, skip the entire usage spec (e.g. blocked by a bug). */
 		skip?: boolean;
 	};
+	/**
+	 * Phase-6 declarative per-feature ability matrix. When provided AND
+	 * RUN_MEGA=1, an additional MEGA-style spec walks L1→20 and asserts
+	 * that every entry is wired correctly (toggle activates, resource
+	 * pool size & rest-restore semantics, granted spells appear, optional-
+	 * feature picks surface). See `FeatureCheck` doc for entry shape.
+	 *
+	 * The matrix runs at the SAME checkpoint levels as MEGA milestones
+	 * (3/5/11/17/20) and only checks entries with `level <= currentLevel`,
+	 * so adding L11+ entries doesn't make the L3 milestone slower.
+	 */
+	featuresMatrix?: FeatureCheck[];
 }
 
 const MEGA_TIMEOUT_MS = 360_000; // 6 min — generous, matches existing capstone tests
@@ -144,7 +158,7 @@ const MIDTIER_TIMEOUT_MS = 180_000;
 const L7_TIMEOUT_MS = 600_000;
 
 export function describeCharacter (spec: CharacterSpec): void {
-	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, skipMega, skipL7} = spec;
+	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, skipMega, skipL7, featuresMatrix} = spec;
 	const subclassOpts = preset.subclassName
 		? {subclassName: preset.subclassName, subclassSource: preset.subclassSource}
 		: undefined;
@@ -251,8 +265,32 @@ export function describeCharacter (spec: CharacterSpec): void {
 				await charSheet.expectLevel(cp);
 				const m = milestones[cp];
 				if (m) await assertMilestone(charSheet, m);
+				if (featuresMatrix?.length) await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
 			}
 		});
+
+		// ── Features-matrix-only MEGA (Phase 6) ────────────────────────
+		// Same wizard navigation cost as MEGA, but ONLY runs the
+		// declarative per-feature checks. Useful for triaging matrix
+		// regressions in isolation from milestone failures.
+		// Gated behind RUN_MATRIX so it doesn't double the suite cost
+		// when contributors only want milestone coverage.
+		if (featuresMatrix?.length) {
+			const matrixGated = process.env.RUN_MATRIX ? test : test.skip;
+			matrixGated(`MEGA Features matrix L1→20`, async ({page}) => {
+				test.setTimeout(MEGA_TIMEOUT_MS);
+				const {charSheet} = await createCharacterViaWizard(page, preset);
+				const checkpoints = [3, 5, 11, 17, 20];
+				let cursor = 1;
+				for (const cp of checkpoints) {
+					if (cp <= cursor) continue;
+					await levelUpTo(page, cp, {...subclassOpts, signatureSpells: preset.signatureSpells});
+					cursor = cp;
+					await charSheet.expectLevel(cp);
+					await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
+				}
+			});
+		}
 
 		// ── Sheet-usage probes (Phase 2) ───────────────────────────────
 		// Validates that the BUILT sheet actually WORKS — players can
@@ -485,6 +523,14 @@ export interface MulticlassCharacterSpec {
 		skillRoll?: {name: string} | {skip: true};
 		skip?: boolean;
 	} | null>;
+	/**
+	 * Phase-6 declarative per-feature ability matrix for multiclass
+	 * builds. Levels are TOTAL character levels (not per-class). The
+	 * matrix runs after each leg completes against `leg.toTotalLevel`,
+	 * so entries with `level <= currentTotalLevel` are asserted.
+	 * See `FeatureCheck` for entry shape.
+	 */
+	featuresMatrix?: FeatureCheck[];
 }
 
 /**
@@ -542,7 +588,7 @@ async function _runMulticlassUsageProbe (
 }
 
 export function describeMulticlassCharacter (spec: MulticlassCharacterSpec): void {
-	const {preset, displayName, plan, finalMilestone, usageAfterEachLeg} = spec;
+	const {preset, displayName, plan, finalMilestone, usageAfterEachLeg, featuresMatrix} = spec;
 
 	test.describe(`${displayName} — multiclass build`, () => {
 		test.beforeEach(async ({page}) => {
@@ -561,7 +607,7 @@ export function describeMulticlassCharacter (spec: MulticlassCharacterSpec): voi
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 
 			// Lazy import to avoid circular type issues
-			const {startMulticlass} = await import("./comprehensiveBuildHelpers");
+			const {startMulticlass, assertFeaturesMatrix} = await import("./comprehensiveBuildHelpers");
 
 			for (let i = 0; i < plan.length; i++) {
 				const leg = plan[i];
@@ -585,6 +631,13 @@ export function describeMulticlassCharacter (spec: MulticlassCharacterSpec): voi
 				// Optional per-leg usage probe (cast/attack/resource/skill)
 				if (usageAfterEachLeg && usageAfterEachLeg[i]) {
 					await _runMulticlassUsageProbe(charSheet, usageAfterEachLeg[i], `${leg.className} L${leg.toTotalLevel}`);
+				}
+
+				// Phase-6 features matrix — assert after each leg at its
+				// total character level (entries above this level are
+				// skipped automatically by assertFeaturesMatrix).
+				if (featuresMatrix?.length) {
+					await assertFeaturesMatrix(charSheet, featuresMatrix, leg.toTotalLevel);
 				}
 			}
 

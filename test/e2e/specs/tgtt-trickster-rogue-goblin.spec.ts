@@ -39,4 +39,97 @@ describeCharacter({
 		17: {totalLevel: 17, minMaxHp: 90}, // L17 "Master of Mischief" not always exposed as activatable feature
 		20: {totalLevel: 20, minMaxHp: 100},
 	},
+	featuresMatrix: [
+		// ── Rogue base ────────────────────────────────────────────────
+		{level: 1, name: /sneak attack/i, kind: "passive"},
+		{level: 2, name: /cunning action/i, kind: "passive"},
+		{level: 5, name: /uncanny dodge/i, kind: "passive"},
+		{level: 7, name: /evasion/i, kind: "passive"},
+		{level: 11, name: /reliable talent/i, kind: "passive"},
+		{level: 20, name: /stroke of luck/i, kind: "passive"},
+
+		// ── Trickster subclass ───────────────────────────────────────
+		// Trickster Dice pool — 4 @ L3, +1 at L9/L13/L17 (max 7).
+		// Blocked by CS-BUG-012 (resource not surfaced on the sheet).
+		{level: 3, name: /trickster dice/i, kind: "resource", resourceMax: 4, restoreOn: "either", skip: true, skipReason: "CS-BUG-012"},
+		{level: 9, name: /trickster dice/i, kind: "resource", resourceMax: 5, restoreOn: "either", skip: true, skipReason: "CS-BUG-012"},
+		{level: 13, name: /trickster dice/i, kind: "resource", resourceMax: 6, restoreOn: "either", skip: true, skipReason: "CS-BUG-012"},
+		{level: 17, name: /trickster dice/i, kind: "resource", resourceMax: 7, restoreOn: "either", skip: true, skipReason: "CS-BUG-012"},
+
+		// Tricks (TT optional features) — 3 picked at L3, +1 at L7/L10/L15/L19.
+		// Candidate names sourced from `featureType: ["TT"]` in
+		// homebrew/TravelersGuidetoThelemar.json.
+		{
+			level: 3,
+			name: /tricks?/i,
+			kind: "pick",
+			pickedCount: 3,
+			pickedFrom: [
+				/disarming strike/i,
+				/trip attack/i,
+				/swing away/i,
+				/deafening strike/i,
+				/blinding strike/i,
+				/noise maker/i,
+				/rebounding throw/i,
+				/weaponized debris/i,
+				/rapid deployment/i,
+				/explosive flask/i,
+				/instant barrier/i,
+			],
+		},
+		{
+			level: 7,
+			name: /tricks?/i,
+			kind: "pick",
+			pickedCount: 4,
+			pickedFrom: [
+				/disarming strike/i, /trip attack/i, /swing away/i,
+				/deafening strike/i, /blinding strike/i, /noise maker/i,
+				/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
+				/explosive flask/i, /instant barrier/i,
+			],
+		},
+		{
+			level: 10,
+			name: /tricks?/i,
+			kind: "pick",
+			pickedCount: 5,
+			pickedFrom: [
+				/disarming strike/i, /trip attack/i, /swing away/i,
+				/deafening strike/i, /blinding strike/i, /noise maker/i,
+				/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
+				/explosive flask/i, /instant barrier/i,
+			],
+		},
+		{
+			level: 15,
+			name: /tricks?/i,
+			kind: "pick",
+			pickedCount: 6,
+			pickedFrom: [
+				/disarming strike/i, /trip attack/i, /swing away/i,
+				/deafening strike/i, /blinding strike/i, /noise maker/i,
+				/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
+				/explosive flask/i, /instant barrier/i,
+			],
+		},
+		{
+			level: 19,
+			name: /tricks?/i,
+			kind: "pick",
+			pickedCount: 7,
+			pickedFrom: [
+				/disarming strike/i, /trip attack/i, /swing away/i,
+				/deafening strike/i, /blinding strike/i, /noise maker/i,
+				/rebounding throw/i, /weaponized debris/i, /rapid deployment/i,
+				/explosive flask/i, /instant barrier/i,
+			],
+		},
+
+		// Other Trickster passives / scaling features.
+		{level: 9, name: /sticky hands/i, kind: "passive"},
+		{level: 13, name: /the switch|switch/i, kind: "passive"},
+		{level: 17, name: /master of mischief/i, kind: "passive"},
+	],
 });

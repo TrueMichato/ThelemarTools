@@ -312,3 +312,44 @@ hangs trying to cast an L3 pact slot that doesn't exist.
 **Test workaround**: Horror Warlock spec drops all `pactSlots`
 assertions and the L5 USE probe (set `castSpellSlotLevel` to skip
 or omit). Re-enable once pact slots arrive.
+
+---
+
+## E2E Phase 6 — featuresMatrix triage notes
+
+The Phase 6 `featuresMatrix` infra (see
+`test/e2e/utils/comprehensiveBuildHelpers.ts`) walks every declared
+class/subclass feature L1→20 and verifies it's correctly wired on the
+sheet. It runs inside the existing MEGA L1→20 test (only when
+`RUN_MEGA=1`) and additionally as a standalone gated test (only when
+`RUN_MATRIX=1`).
+
+The first runtime smoke (Time Domain Cleric) surfaced two categories
+of failure that need post-Phase-6 triage before each spec can land
+clean under `RUN_MATRIX=1`:
+
+1. **Spec-side regex mismatches** — feature names declared in the
+   matrix don't match the sheet's actual rendered name (e.g.
+   declared `Channel Divinity` resource was likely rendered as
+   `Channel Divinity Charges` or surfaced under a different label).
+   Fix: tighten/loosen the regex per spec after a single matrix
+   triage pass.
+
+2. **Spec-side wrong-spell guesses** — `kind: "spells"` entries
+   listed plausible but wrong domain spells (e.g. Time Domain L3
+   declared `Feather Fall`; sheet actually grants
+   `Accelerate/Decelerate`, `Animate Claw`, …). Fix: replace
+   guessed spells with the actual TGTT subclass spell list per
+   spec.
+
+3. **Real product bugs** — any `kind: "toggle"` entry that fails
+   `toggleDelta: "ac"` / `"any"` after the regex matches a real
+   feature is a real bug; file CS-BUG-014+ following the Phase 5
+   pattern (`docs/charactersheet/known-bugs.md`) and add
+   `skip: true, skipReason: "CS-BUG-NNN"` to the matrix entry.
+
+To do the per-spec triage:
+```
+RUN_MATRIX=1 npx playwright test test/e2e/specs/tgtt-<spec>.spec.ts \
+  -g "MEGA Features matrix" --workers=1
+```

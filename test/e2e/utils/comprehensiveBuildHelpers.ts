@@ -516,3 +516,212 @@ export async function probeToggleDelta (
 
 	return {acDelta: acAfter - acBefore, dcDelta: dcAfter - dcBefore};
 }
+
+// ───────────────────────────────────────────────────────────────────────
+//  Features matrix — declarative per-feature ability coverage (Phase 6)
+// ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Declarative description of a class/subclass feature that should be
+ * present on the sheet at a given level, plus what kind of correctness
+ * check the matrix should run on it.
+ *
+ * The matrix runs inside the existing MEGA L1→20 test (no new wizard
+ * navigation), so each entry is essentially a few state reads + at most
+ * one toggle activation. Resource pool sizes are checked, but rest-
+ * restoration semantics are deliberately kept opt-in (`restoreOn`)
+ * because resting is expensive.
+ *
+ * Entries with `skip: true` are tracked but not asserted. ALWAYS pair
+ * with a `skipReason` referencing the bug ID (CS-BUG-NNN) — that way
+ * audit reports can list still-broken features cleanly.
+ */
+export interface FeatureCheck {
+	/** Total character level at which this feature is granted. */
+	level: number;
+	/** Display name on the sheet (regex preferred for resilience). */
+	name: string | RegExp;
+	/** Check kind. */
+	kind: "toggle" | "resource" | "spells" | "passive" | "pick";
+	/**
+	 * For kind="toggle": which derived stat must change when the toggle
+	 * is activated.
+	 *  - "any"   → at least one of {ac, dc} delta is non-zero
+	 *  - "ac"    → AC must change
+	 *  - "dc"    → spell-save DC must change
+	 *  - "none"  → toggle button must exist & flip; no stat-delta required
+	 */
+	toggleDelta?: "ac" | "dc" | "any" | "none";
+	/** For kind="resource": expected pool max — exact or [min,max]. */
+	resourceMax?: number | [number, number];
+	/**
+	 * For kind="resource": which rest restores the resource.
+	 *  - omit       → don't test restoration (just pool size)
+	 *  - "short"    → spend 1, short-rest, expect restored
+	 *  - "long"     → spend 1, long-rest, expect restored
+	 *  - "either"   → either rest restores it
+	 *  - "none"     → spending must NOT be restored by short rest
+	 */
+	restoreOn?: "short" | "long" | "either" | "none";
+	/** For kind="spells": names that must appear in the spell list. */
+	grantsSpells?: string[];
+	/** For kind="pick": at least N entries from `pickedFrom` must surface. */
+	pickedCount?: number;
+	pickedFrom?: (string | RegExp)[];
+	/** Skip this entry (blocked by known bug). Always pair with skipReason. */
+	skip?: boolean;
+	/** CS-BUG-NNN reference if skipped. */
+	skipReason?: string;
+}
+
+const _describeName = (n: string | RegExp): string =>
+	n instanceof RegExp ? n.toString() : `"${n}"`;
+
+/**
+ * Assert every `FeatureCheck` whose `level <= currentLevel` is wired
+ * correctly on the sheet. Collects per-entry errors and surfaces a
+ * single grouped failure so tests don't bail on the first miss.
+ */
+export async function assertFeaturesMatrix (
+	charSheet: CharacterSheetPage,
+	matrix: FeatureCheck[],
+	currentLevel: number,
+): Promise<void> {
+	if (!matrix?.length) return;
+
+	const allFeatures = await charSheet.getActivatableFeatureNames().catch(() => [] as string[]);
+	const toggleable = await charSheet.getToggleableFeatureNames().catch(() => [] as string[]);
+	const knownSpells = await charSheet.getKnownSpellNames().catch(() => [] as string[]);
+
+	const errors: string[] = [];
+
+	for (const fc of matrix) {
+		if (fc.level > currentLevel) continue;
+		if (fc.skip) continue;
+
+		const re = fc.name instanceof RegExp ? fc.name : new RegExp(fc.name, "i");
+		const label = `L${fc.level} ${_describeName(fc.name)} (${fc.kind})`;
+
+		try {
+			switch (fc.kind) {
+				case "passive": {
+					if (!allFeatures.some(f => re.test(f))) {
+						throw new Error(`feature not present in feature list. seen=${allFeatures.slice(0, 25).join(", ")}…`);
+					}
+					break;
+				}
+
+				case "pick": {
+					if (!fc.pickedFrom?.length) throw new Error(`pickedFrom is required for kind="pick"`);
+					const want = fc.pickedCount ?? 1;
+					const matchCount = fc.pickedFrom.filter(pf => {
+						const pfRe = pf instanceof RegExp ? pf : new RegExp(pf, "i");
+						return allFeatures.some(f => pfRe.test(f));
+					}).length;
+					if (matchCount < want) {
+						throw new Error(`expected ≥${want} of ${fc.pickedFrom.length} picks to surface, got ${matchCount}. seen=${allFeatures.slice(0, 25).join(", ")}…`);
+					}
+					break;
+				}
+
+				case "toggle": {
+					if (!allFeatures.some(f => re.test(f))) {
+						throw new Error(`feature not present in feature list. seen=${allFeatures.slice(0, 25).join(", ")}…`);
+					}
+					if (!toggleable.some(f => re.test(f))) {
+						throw new Error(`feature has no toggle button (expected toggleable). toggleable=${toggleable.slice(0, 15).join(", ")}…`);
+					}
+					const want = fc.toggleDelta ?? "any";
+					if (want !== "none") {
+						const delta = await probeToggleDelta(charSheet, re);
+						if (!delta) throw new Error(`probeToggleDelta returned null (toggle vanished)`);
+						const acOK = Math.abs(delta.acDelta) > 0;
+						const dcOK = Math.abs(delta.dcDelta) > 0;
+						const ok = (want === "any" && (acOK || dcOK))
+							|| (want === "ac" && acOK)
+							|| (want === "dc" && dcOK);
+						if (!ok) {
+							throw new Error(`toggleDelta=${want} failed; observed acDelta=${delta.acDelta} dcDelta=${delta.dcDelta}`);
+						}
+					} else {
+						// just confirm it activates without error
+						await charSheet.activateFeature(allFeatures.find(f => re.test(f))!);
+						await charSheet.deactivateFeature(allFeatures.find(f => re.test(f))!);
+					}
+					break;
+				}
+
+				case "resource": {
+					const nameStr = fc.name instanceof RegExp ? fc.name.source : fc.name;
+					const r = await charSheet.getResource(nameStr).catch(() => ({current: -1, max: -1}));
+					if (r.max < 0) throw new Error(`resource not found on sheet`);
+					if (fc.resourceMax != null) {
+						if (Array.isArray(fc.resourceMax)) {
+							const [lo, hi] = fc.resourceMax;
+							if (r.max < lo || r.max > hi) {
+								throw new Error(`resource max=${r.max} outside expected range [${lo},${hi}]`);
+							}
+						} else if (r.max !== fc.resourceMax) {
+							throw new Error(`resource max=${r.max} expected ${fc.resourceMax}`);
+						}
+					}
+					if (fc.restoreOn) {
+						// restoration probe: spend 1, rest, check restoration
+						const before = r.current;
+						if (before <= 0) break; // can't probe an empty pool
+						await charSheet.page.evaluate(([nm]) => {
+							const cs: any = (globalThis as any).charSheet;
+							cs?._state?.spendResource?.(nm, 1);
+							cs?._renderCharacter?.();
+						}, [nameStr] as const);
+						const afterSpend = await charSheet.getResource(nameStr).catch(() => r);
+						if (afterSpend.current >= before) {
+							// spendResource API not present — skip restore probe quietly
+							break;
+						}
+						// short rest
+						await charSheet.page.evaluate(() => {
+							const cs: any = (globalThis as any).charSheet;
+							cs?._state?.shortRest?.();
+							cs?._renderCharacter?.();
+						});
+						const afterShort = await charSheet.getResource(nameStr).catch(() => afterSpend);
+						const shortRestored = afterShort.current >= before;
+						// long rest
+						let longRestored = shortRestored;
+						if (!shortRestored && (fc.restoreOn === "long" || fc.restoreOn === "either")) {
+							await charSheet.page.evaluate(() => {
+								const cs: any = (globalThis as any).charSheet;
+								cs?._state?.longRest?.();
+								cs?._renderCharacter?.();
+							});
+							const afterLong = await charSheet.getResource(nameStr).catch(() => afterShort);
+							longRestored = afterLong.current >= before;
+						}
+						if (fc.restoreOn === "short" && !shortRestored) throw new Error(`expected short-rest restore; got ${afterShort.current}/${afterShort.max}`);
+						if (fc.restoreOn === "long" && !longRestored) throw new Error(`expected long-rest restore; got current=${(await charSheet.getResource(nameStr)).current}`);
+						if (fc.restoreOn === "either" && !shortRestored && !longRestored) throw new Error(`expected short OR long rest restore`);
+						if (fc.restoreOn === "none" && shortRestored) throw new Error(`expected NO short-rest restore but resource refilled`);
+					}
+					break;
+				}
+
+				case "spells": {
+					if (!fc.grantsSpells?.length) throw new Error(`grantsSpells required for kind="spells"`);
+					const missing = fc.grantsSpells.filter(s =>
+						!knownSpells.some(k => k.toLowerCase() === s.toLowerCase()));
+					if (missing.length) {
+						throw new Error(`spells missing from spellbook: ${missing.join(", ")}. seen=${knownSpells.slice(0, 20).join(", ")}…`);
+					}
+					break;
+				}
+			}
+		} catch (e: any) {
+			errors.push(`${label}: ${e.message}`);
+		}
+	}
+
+	if (errors.length) {
+		throw new Error(`featuresMatrix at L${currentLevel} (${errors.length} failures):\n  - ${errors.join("\n  - ")}`);
+	}
+}

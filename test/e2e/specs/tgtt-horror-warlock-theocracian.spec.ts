@@ -37,4 +37,43 @@ describeCharacter({
 		17: {totalLevel: 17}, // CS-BUG-013
 		20: {totalLevel: 20}, // CS-BUG-013
 	},
+	featuresMatrix: [
+		// ── Class features ────────────────────────────────────────
+		// Pact Magic slots — entirely blocked by CS-BUG-013.
+		{level: 1,  name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
+		{level: 2,  name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
+		{level: 11, name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
+		{level: 17, name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
+
+		// Eldritch Invocations — count scales with level.
+		{level: 2,  name: /eldritch invocation/i, kind: "pick", pickedCount: 2,
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i]},
+		{level: 5,  name: /eldritch invocation/i, kind: "pick", pickedCount: 3,
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i]},
+		{level: 9,  name: /eldritch invocation/i, kind: "pick", pickedCount: 5,
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i]},
+		{level: 15, name: /eldritch invocation/i, kind: "pick", pickedCount: 7,
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i, /one with shadows/i, /sign of ill omen/i]},
+		{level: 18, name: /eldritch invocation/i, kind: "pick", pickedCount: 8,
+			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i, /one with shadows/i, /sign of ill omen/i]},
+
+		// Pact Boon at L3.
+		{level: 3, name: /pact boon|pact of the/i, kind: "pick", pickedCount: 1,
+			pickedFrom: [/blade/i, /tome/i, /chain/i, /talisman/i]},
+
+		{level: 11, name: /mystic arcanum.*6th|mystic arcanum \(6/i, kind: "passive"},
+		{level: 13, name: /mystic arcanum.*7th|mystic arcanum \(7/i, kind: "passive"},
+		{level: 15, name: /mystic arcanum.*8th|mystic arcanum \(8/i, kind: "passive"},
+		{level: 17, name: /mystic arcanum.*9th|mystic arcanum \(9/i, kind: "passive"},
+
+		{level: 20, name: /eldritch master/i, kind: "passive"},
+
+		// ── Subclass: The Horror (TGTT) ──────────────────────────
+		{level: 1, name: /expanded spell list/i, kind: "passive"},
+		{level: 1, name: /devastating strike/i, kind: "passive"},
+		{level: 6, name: /lone survivor/i, kind: "passive"},
+		{level: 6, name: /unearthly manifestation/i, kind: "passive"},
+		{level: 10, name: /degenerating touch/i, kind: "passive"},
+		{level: 14, name: /imploding infestation/i, kind: "passive"},
+	],
 });
