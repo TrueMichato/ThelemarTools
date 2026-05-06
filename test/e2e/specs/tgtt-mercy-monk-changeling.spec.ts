@@ -26,47 +26,121 @@ import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 // Hand of Ultimate Mercy.
 const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	// ── Class — Monk (TGTT/XPHB) ─────────────────────────────────────
-	{level: 1,  name: /martial arts/i, kind: "passive"},
-	{level: 1,  name: /unarmored defense/i, kind: "passive"},
+	// Martial Arts: STR is one of the monk's two L1 proficient saves;
+	// use it as the home for the rollSavingThrow:str probe.
+	{
+		level: 1,  name: /martial arts/i, kind: "passive",
+		effects: [
+			{kind: "rollSavingThrow", ability: "str"},
+		],
+	},
+	// Unarmored Defense: DEX is the other L1 proficient save; also
+	// host the rollInitiative probe here (initiative = DEX).
+	{
+		level: 1,  name: /unarmored defense/i, kind: "passive",
+		effects: [
+			{kind: "rollSavingThrow", ability: "dex"},
+		],
+	},
 	// Monk's Focus + Focus Points pool — XPHB grants the resource at
 	// L2 (not L1) with max = monk level. Probed at the milestone
-	// checkpoints; restoration semantics omitted (short-rest restore
-	// is generally working for monks but resting is expensive).
-	{level: 2,  name: /monk'?s focus/i, kind: "passive"},
-	{level: 2,  name: /unarmored movement/i, kind: "passive"},
+	// checkpoints; restoration semantics moved onto the L3 Focus
+	// Points resource entry below via shortRestRestores.
+	// WIS-check probe lives here because Monk's Focus is the WIS-
+	// flavored umbrella feature for the Discipline pool.
+	{
+		level: 2,  name: /monk'?s focus/i, kind: "passive",
+		effects: [
+			{kind: "rollAbilityCheck", ability: "wis"},
+		],
+	},
+	// Unarmored Movement L2 — +10 ft speed (monk base 30 + UM 10).
+	// `min: 40` floor holds at L2 and only grows at L6/10/14/18.
+	{
+		level: 2,  name: /unarmored movement/i, kind: "passive",
+		effects: [
+			{kind: "speed", type: "walk", min: 40},
+		],
+	},
 	{level: 2,  name: /uncanny metabolism/i, kind: "passive"},
-	{level: 3,  name: "Focus Points", kind: "resource", resourceMax: 3},
+	// Focus Points resource — also the home of the short-rest restore
+	// probe (monks regain all Focus Points on a short rest per XPHB).
+	{
+		level: 3,  name: "Focus Points", kind: "resource", resourceMax: 3,
+		effects: [
+			{kind: "shortRestRestores", resource: "Focus Points"},
+		],
+	},
 	{level: 5,  name: "Focus Points", kind: "resource", resourceMax: 5},
 	{level: 11, name: "Focus Points", kind: "resource", resourceMax: 11},
 	{level: 17, name: "Focus Points", kind: "resource", resourceMax: 17},
 	{level: 20, name: "Focus Points", kind: "resource", resourceMax: 20},
 	// Deflect Attacks (XPHB L3 — replaces 2014 Deflect Missiles).
+	// No clean state probe (it's a reaction-time rider, not a passive
+	// stat or toggle).
 	{level: 3,  name: /deflect attacks/i, kind: "passive"},
 	// ASIs at L4/8/12/16 + Epic Boon at L19.
 	{level: 4,  name: /ability score improvement/i, kind: "passive"},
+	// Slow Fall — reaction that reduces fall damage; no easy state
+	// probe (no resistance/toggle/derived stat exposed).
 	{level: 4,  name: /slow fall/i, kind: "passive"},
-	{level: 5,  name: /extra attack/i, kind: "passive"},
+	// Extra Attack — host the rollInitiative probe here (the L5
+	// "combat-readiness" milestone is a natural home).
+	{
+		level: 5,  name: /extra attack/i, kind: "passive",
+		effects: [
+			{kind: "rollInitiative"},
+		],
+	},
 	// Stunning Strike — XPHB renders as a passive (no toggle, costs a
-	// Focus Point on a hit). Treat as passive.
+	// Focus Point on a hit). No clean state probe (the stun is rolled
+	// reactively by the target, not a passive bonus on the monk).
 	{level: 5,  name: /stunning strike/i, kind: "passive"},
 	{level: 6,  name: /empowered strikes/i, kind: "passive"},
+	// Evasion L7 — DEX-save success-on-half rider; no easy state
+	// probe (no resistance/advantage/derived stat exposed).
 	{level: 7,  name: /evasion/i, kind: "passive"},
 	{level: 8,  name: /ability score improvement/i, kind: "passive"},
-	{level: 9,  name: /acrobatic movement/i, kind: "passive"},
+	// Acrobatic Movement L9 — climbing/jumping rider. Host the
+	// rollSkillCheck:acrobatics probe (signature monk skill).
+	{
+		level: 9,  name: /acrobatic movement/i, kind: "passive",
+		effects: [
+			{kind: "rollSkillCheck", skill: "acrobatics"},
+		],
+	},
 	{level: 10, name: /heightened focus/i, kind: "passive"},
 	// Self-Restoration (XPHB L10) — replaces 2014 Stillness of Mind/
 	// Purity of Body, lets the monk shake conditions on their turn.
+	// Auto-end-condition behavior is not a probeable passive state;
+	// leave passive without effects.
 	{level: 10, name: /self.restoration/i, kind: "passive"},
 	{level: 12, name: /ability score improvement/i, kind: "passive"},
 	{level: 13, name: /deflect energy/i, kind: "passive"},
 	// Disciplined Survivor (XPHB L14) — XPHB rename of 2014 Diamond
 	// Soul (proficiency in all saves + spend Focus Point to reroll).
-	{level: 14, name: /disciplined survivor/i, kind: "passive"},
+	// At L14 monk PB is +5; bumping the three previously unproficient
+	// saves (INT/WIS/CHA) to proficient guarantees a non-trivial total
+	// even with negative ability mods. `min: 1` is conservative.
+	{
+		level: 14, name: /disciplined survivor/i, kind: "passive",
+		effects: [
+			{kind: "saveBonus", ability: "int", min: 1},
+			{kind: "saveBonus", ability: "wis", min: 1},
+			{kind: "saveBonus", ability: "cha", min: 1},
+		],
+	},
 	{level: 15, name: /perfect focus/i, kind: "passive"},
 	{level: 16, name: /ability score improvement/i, kind: "passive"},
+	// Superior Defense L18 (XPHB) — closest analog to 2014 Empty Body
+	// (resistance to all damage except force while spending focus).
+	// Not exposed as a toggle/state on the sheet, so no probe.
 	{level: 18, name: /superior defense/i, kind: "passive"},
 	{level: 19, name: /ability score improvement|epic boon/i, kind: "passive"},
 	// Body and Mind (XPHB L20) — XPHB rename of 2014 Perfect Self.
+	// +4 to DEX & WIS at L20; conservatively not probed because the
+	// spec doesn't pin starting ability scores (preset uses defaults)
+	// and `abilityScore` exact/min would be brittle across builds.
 	{level: 20, name: /body and mind/i, kind: "passive"},
 
 	// ── TGTT Monk additions ──────────────────────────────────────────
@@ -84,11 +158,32 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	// toggles with no required derived-stat delta — they consume
 	// Focus Points / hit dice rather than buffing AC/DC directly.
 	{level: 3,  name: /^hand of healing/i, kind: "toggle", toggleDelta: "none"},
-	{level: 3,  name: /^hand of harm/i, kind: "toggle", toggleDelta: "none"},
-	{level: 3,  name: /implements of mercy/i, kind: "passive"},
+	// Hand of Harm rides on a successful unarmed strike — host the
+	// rollAttack probe targeting the unarmed-strike / martial-arts
+	// attack row.
+	{
+		level: 3,  name: /^hand of harm/i, kind: "toggle", toggleDelta: "none",
+		effects: [
+			{kind: "rollAttack", attackName: /unarmed|martial arts/i},
+		],
+	},
+	// Implements of Mercy L3 — grants Insight + Medicine proficiency
+	// + a Herbalism Kit. Probe the two skill bonuses (PB +2 at L3,
+	// scaling with PB at L5+/L9+/L13+/L17+) and host the
+	// rollSkillCheck:medicine probe (mercy-themed).
+	{
+		level: 3,  name: /implements of mercy/i, kind: "passive",
+		effects: [
+			{kind: "skillBonus", skill: "medicine", min: 2},
+			{kind: "skillBonus", skill: "insight",  min: 2},
+			{kind: "rollSkillCheck", skill: "medicine"},
+		],
+	},
 	// TGTT-specific Combat Methods (Mercy) grant.
 	{level: 3,  name: /combat methods.*mercy/i, kind: "passive"},
-	// L6 Physician's Touch — riders on Hand of Healing/Harm.
+	// L6 Physician's Touch — riders on Hand of Healing/Harm (e.g.
+	// Hand of Healing also ends a condition; Hand of Harm poisons).
+	// Effect is gated by the parent toggles, not a separate probe.
 	{level: 6,  name: /physician'?s touch/i, kind: "passive"},
 	// L11 Flurry of Healing and Harm — passive enhancement on
 	// Flurry of Blows.

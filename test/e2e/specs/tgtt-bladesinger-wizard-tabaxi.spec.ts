@@ -11,10 +11,43 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 	// Wizard base — Arcane Recovery: prof-bonus-tied recovery slots,
 	// once per long rest. Pool exposure varies on the sheet, so we
 	// validate it as a passive feature listing rather than a resource.
-	{level: 1, name: /arcane recovery/i, kind: "passive"},
-	// Wizard ASIs at L4/8/12/16/19 — passive listing.
-	{level: 4,  name: /ability score improvement/i, kind: "passive"},
-	{level: 8,  name: /ability score improvement/i, kind: "passive"},
+	// Effects attached here cover the L1 wizard baseline that the
+	// matrix can probe at every checkpoint: 3 starting cantrips, the
+	// always-prepared signature spell, and roll-button no-throw probes
+	// for an Int save (proficient), an Arcana skill check, and the
+	// Initiative button.
+	{
+		level: 1,
+		name: /arcane recovery/i,
+		kind: "passive",
+		effects: [
+			{kind: "cantripCount", min: 3},
+			{kind: "spellInList", spell: "Mage Armor"},
+			{kind: "rollSavingThrow", ability: "int"},
+			{kind: "rollSkillCheck", skill: "arcana"},
+			{kind: "rollInitiative"},
+		],
+	},
+	// Wizard ASIs at L4/8/12/16/19 — passive listing. We piggyback
+	// roll-button probes onto these mid-tier entries so they fire at
+	// L4+ (Int ability check) and L8+ (Wis save — wizard's other
+	// proficient save) rather than spamming them all at L1.
+	{
+		level: 4,
+		name: /ability score improvement/i,
+		kind: "passive",
+		effects: [
+			{kind: "rollAbilityCheck", ability: "int"},
+		],
+	},
+	{
+		level: 8,
+		name: /ability score improvement/i,
+		kind: "passive",
+		effects: [
+			{kind: "rollSavingThrow", ability: "wis"},
+		],
+	},
 	{level: 12, name: /ability score improvement/i, kind: "passive"},
 	{level: 16, name: /ability score improvement/i, kind: "passive"},
 	{level: 19, name: /ability score improvement|epic boon/i, kind: "passive"},
@@ -33,9 +66,33 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 	// variant and keep a `none` variant so we still verify the toggle
 	// button exists and activates without throwing.
 	{level: 3, name: /bladesong/i, kind: "toggle", toggleDelta: "ac", skip: true, skipReason: "CS-BUG-006"},
-	{level: 3, name: /bladesong/i, kind: "toggle", toggleDelta: "none"},
+	// Canonical Bladesong rule effects per ACTIVE_STATE_TYPES.bladesong:
+	// +INT mod to AC, +10 ft walk speed, advantage on Acrobatics.
+	// All blocked by CS-BUG-006 (toggle activates but mechanical
+	// effects aren't applied), so we record intent without false
+	// failures by skipping each individual effect.
+	{
+		level: 3,
+		name: /bladesong/i,
+		kind: "toggle",
+		toggleDelta: "none",
+		effects: [
+			{kind: "togglePlusAc", whenActive: "abilityMod", ability: "int", skip: true, skipReason: "CS-BUG-006"},
+			{kind: "togglePlusSpeed", type: "walk", delta: 10, skip: true, skipReason: "CS-BUG-006"},
+			{kind: "toggleGrantsAdvantage", rollType: "skill:acrobatics", skip: true, skipReason: "CS-BUG-006"},
+		],
+	},
 	// Extra Attack at L6 — passive damage/attack-count feature.
-	{level: 6, name: /extra attack/i, kind: "passive"},
+	// Probe the actual attack roll button against the wizard's
+	// likely melee weapon (dagger/quarterstaff from starting kit).
+	{
+		level: 6,
+		name: /extra attack/i,
+		kind: "passive",
+		effects: [
+			{kind: "rollAttack", attackName: /dagger|quarterstaff/i},
+		],
+	},
 	// Song of Defense at L10 — spend a spell slot as a reaction to
 	// reduce damage. Modeled as a passive feature: it doesn't expose
 	// its own resource pool (it consumes existing slots), so the

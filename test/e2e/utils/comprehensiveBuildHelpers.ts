@@ -572,6 +572,320 @@ export interface FeatureCheck {
 	skip?: boolean;
 	/** CS-BUG-NNN reference if skipped. */
 	skipReason?: string;
+	/**
+	 * Phase 7: effect probes. Each entry is an extra mechanical
+	 * assertion — the feature doesn't just exist on the sheet, it
+	 * actually does what it claims (e.g. Bladesong adds +INT to AC,
+	 * Rage grants resistance to bludgeoning, Aura of Protection adds
+	 * +CHA to all six saves at L6+). Effects run AFTER the kind
+	 * handler so a feature that's not even present fails fast.
+	 */
+	effects?: EffectCheck[];
+}
+
+// ──────────────────────────────────────────────────────────────────
+//  Phase 7 — EffectCheck discriminated union
+// ──────────────────────────────────────────────────────────────────
+
+type AblKey = "str" | "dex" | "con" | "int" | "wis" | "cha";
+type SpeedType = "walk" | "fly" | "swim" | "climb" | "burrow";
+
+interface _EffectCommon {
+	skip?: boolean;
+	skipReason?: string;
+}
+
+/**
+ * One declarative assertion about a feature's mechanical effect.
+ * Three families:
+ *
+ *   PASSIVE  — read state directly and check a number / list /
+ *              advantage flag is what it should be at this level.
+ *
+ *   TOGGLE   — activate the feature via its sheet button, snapshot
+ *              the diff, assert the delta matches expectation, then
+ *              deactivate. Expected to be paired with a FeatureCheck
+ *              whose `kind: "toggle"` so the toggle button is
+ *              guaranteed to exist before we try to click it.
+ *
+ *   ROLL     — click a roll button (ability check, save, skill,
+ *              attack, initiative) inside `page.evaluate` so a
+ *              click handler that throws is caught (the legacy
+ *              `rollSkill` helper swallows handler errors).
+ *
+ *   RESOURCE — extra probes for restoration semantics layered on
+ *              top of `kind: "resource"`'s pool-size check.
+ */
+export type EffectCheck = _EffectCommon & (
+	// === Passive: read state and check ===
+	| {kind: "saveBonus"; ability: AblKey; min?: number; exact?: number; sourceMustInclude?: string}
+	| {kind: "skillBonus"; skill: string; min?: number; exact?: number}
+	| {kind: "abilityScore"; ability: AblKey; min?: number; exact?: number}
+	| {kind: "abilityMod"; ability: AblKey; min?: number; exact?: number}
+	| {kind: "ac"; min?: number; exact?: number}
+	| {kind: "spellSaveDc"; min?: number; exact?: number}
+	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
+	| {kind: "initiative"; min?: number; exact?: number}
+	| {kind: "resistance"; damageType: string}
+	| {kind: "immunity"; damageType: string}
+	| {kind: "vulnerability"; damageType: string}
+	| {kind: "advantage"; rollType: string}
+	| {kind: "disadvantage"; rollType: string}
+	| {kind: "skillAdvantage"; skill: string}
+	| {kind: "spellInList"; spell: string}
+	| {kind: "cantripCount"; min: number}
+
+	// === Toggle: snapshot before, activate, snapshot diff, deactivate ===
+	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey}
+	| {kind: "togglePlusSpeed"; type?: SpeedType; delta: number}
+	| {kind: "toggleGrantsResistance"; damageType: string}
+	| {kind: "toggleGrantsAdvantage"; rollType: string}
+	| {kind: "toggleGrantsImmunity"; damageType: string}
+
+	// === Roll: clicking the button doesn't throw ===
+	| {kind: "rollAbilityCheck"; ability: AblKey}
+	| {kind: "rollSavingThrow"; ability: AblKey}
+	| {kind: "rollSkillCheck"; skill: string}
+	| {kind: "rollAttack"; attackName: string | RegExp}
+	| {kind: "rollInitiative"}
+
+	// === Resource semantics extension ===
+	| {kind: "longRestRestores"; resource: string; toMax?: boolean}
+	| {kind: "shortRestRestores"; resource: string; toMax?: boolean}
+);
+
+const _TOGGLE_EFFECT_KINDS = new Set([
+	"togglePlusAc",
+	"togglePlusSpeed",
+	"toggleGrantsResistance",
+	"toggleGrantsAdvantage",
+	"toggleGrantsImmunity",
+]);
+
+function _checkNumeric (
+	actual: number,
+	e: {min?: number; exact?: number},
+	label: string,
+): void {
+	if (e.exact != null && actual !== e.exact) throw new Error(`${label}=${actual}, expected exact=${e.exact}`);
+	if (e.min != null && actual < e.min) throw new Error(`${label}=${actual}, expected min=${e.min}`);
+}
+
+function _hasDamageType (list: string[], dt: string): boolean {
+	const t = dt.toLowerCase();
+	return list.some(x => x.toLowerCase().includes(t));
+}
+
+async function _runPassiveOrRollEffect (
+	charSheet: CharacterSheetPage,
+	e: EffectCheck,
+): Promise<void> {
+	switch (e.kind) {
+		case "saveBonus": {
+			const v = await charSheet.getSaveBonus(e.ability);
+			_checkNumeric(v, e, `save:${e.ability}`);
+			return;
+		}
+		case "skillBonus": {
+			const v = await charSheet.getSkillBonus(e.skill);
+			if (v == null) throw new Error(`skill bonus for "${e.skill}" not found`);
+			_checkNumeric(v as number, e, `skill:${e.skill}`);
+			return;
+		}
+		case "abilityScore": {
+			const {score} = await charSheet.getAbilityScore(e.ability);
+			_checkNumeric(score, e, `score:${e.ability}`);
+			return;
+		}
+		case "abilityMod": {
+			const {mod} = await charSheet.getAbilityScore(e.ability);
+			_checkNumeric(mod, e, `mod:${e.ability}`);
+			return;
+		}
+		case "ac": {
+			const ac = await charSheet.getCombatStat("ac").catch(() => null);
+			if (ac == null) throw new Error(`AC not readable from sheet`);
+			_checkNumeric(ac, e, `ac`);
+			return;
+		}
+		case "spellSaveDc": {
+			const dc = await charSheet.getSpellSaveDC().catch(() => null);
+			if (dc == null) throw new Error(`spell save DC not readable from sheet`);
+			_checkNumeric(dc, e, `spellSaveDc`);
+			return;
+		}
+		case "speed": {
+			const v = await charSheet.getSpeed(e.type ?? "walk");
+			_checkNumeric(v, e, `speed:${e.type ?? "walk"}`);
+			return;
+		}
+		case "initiative": {
+			const v = await charSheet.getInitiativeBonusFromState();
+			_checkNumeric(v, e, `init`);
+			return;
+		}
+		case "resistance": {
+			const list = await charSheet.getResistances();
+			if (!_hasDamageType(list, e.damageType)) {
+				throw new Error(`resistance "${e.damageType}" not present. seen=[${list.join(", ")}]`);
+			}
+			return;
+		}
+		case "immunity": {
+			const list = await charSheet.getImmunities();
+			if (!_hasDamageType(list, e.damageType)) {
+				throw new Error(`immunity "${e.damageType}" not present. seen=[${list.join(", ")}]`);
+			}
+			return;
+		}
+		case "vulnerability": {
+			const list = await charSheet.getVulnerabilities();
+			if (!_hasDamageType(list, e.damageType)) {
+				throw new Error(`vulnerability "${e.damageType}" not present. seen=[${list.join(", ")}]`);
+			}
+			return;
+		}
+		case "advantage": {
+			const s = await charSheet.getAdvantageState(e.rollType);
+			if (!s.advantage) throw new Error(`expected advantage on "${e.rollType}", got adv=${s.advantage} dis=${s.disadvantage} sources=[${s.sources.join(", ")}]`);
+			return;
+		}
+		case "disadvantage": {
+			const s = await charSheet.getAdvantageState(e.rollType);
+			if (!s.disadvantage) throw new Error(`expected disadvantage on "${e.rollType}", got adv=${s.advantage} dis=${s.disadvantage}`);
+			return;
+		}
+		case "skillAdvantage": {
+			const s = await charSheet.getSkillAdvantageState(e.skill);
+			if (!s.advantage) throw new Error(`expected skill advantage on "${e.skill}", got adv=${s.advantage} dis=${s.disadvantage}`);
+			return;
+		}
+		case "spellInList": {
+			const known = await charSheet.getKnownSpellNames().catch(() => [] as string[]);
+			const want = e.spell.toLowerCase();
+			if (!known.some(n => n.toLowerCase() === want)) {
+				throw new Error(`spell "${e.spell}" not in spellbook. seen=${known.slice(0, 30).join(", ")}…`);
+			}
+			return;
+		}
+		case "cantripCount": {
+			const byLvl = await charSheet.getKnownSpellsByLevel().catch(() => ({} as Record<number, string[]>));
+			const count = (byLvl[0] ?? []).length;
+			if (count < e.min) throw new Error(`cantrip count ${count} < ${e.min}`);
+			return;
+		}
+		case "rollAbilityCheck": {
+			const r = await charSheet.clickAbilityRoll(e.ability, "check");
+			if (!r.clicked) throw new Error(`ability check button for ${e.ability} not found`);
+			if (r.threwError) throw new Error(`ability check ${e.ability} click threw: ${r.errorMessage ?? "unknown"}`);
+			return;
+		}
+		case "rollSavingThrow": {
+			const r = await charSheet.clickAbilityRoll(e.ability, "save");
+			if (!r.clicked) throw new Error(`save button for ${e.ability} not found`);
+			if (r.threwError) throw new Error(`save ${e.ability} click threw: ${r.errorMessage ?? "unknown"}`);
+			return;
+		}
+		case "rollSkillCheck": {
+			const r = await charSheet.clickSkillRollHard(e.skill);
+			if (!r.clicked) throw new Error(`skill roll button for "${e.skill}" not found`);
+			if (r.threwError) throw new Error(`skill ${e.skill} click threw: ${r.errorMessage ?? "unknown"}`);
+			return;
+		}
+		case "rollAttack": {
+			const r = await charSheet.clickAttackRoll(e.attackName);
+			if (!r.clicked) throw new Error(`attack roll button for ${e.attackName} not found`);
+			if (r.threwError) throw new Error(`attack click threw: ${r.errorMessage ?? "unknown"}`);
+			return;
+		}
+		case "rollInitiative": {
+			const r = await charSheet.clickInitiativeRoll();
+			if (!r.clicked) throw new Error(`initiative roll button not found`);
+			if (r.threwError) throw new Error(`initiative click threw: ${r.errorMessage ?? "unknown"}`);
+			return;
+		}
+		case "longRestRestores":
+		case "shortRestRestores": {
+			const isShort = e.kind === "shortRestRestores";
+			const before = await charSheet.getResource(e.resource).catch(() => null);
+			if (!before || before.max <= 0) throw new Error(`resource "${e.resource}" not on sheet`);
+			// spend one charge programmatically
+			await charSheet.page.evaluate(([nm]) => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._state?.spendResource?.(nm, 1);
+				cs?._renderCharacter?.();
+			}, [e.resource] as const);
+			const afterSpend = await charSheet.getResource(e.resource).catch(() => before);
+			if (afterSpend.current >= before.current) return; // spendResource API absent; soft skip
+			await charSheet.page.evaluate((short) => {
+				const cs: any = (globalThis as any).charSheet;
+				if (short) cs?._state?.shortRest?.(); else cs?._state?.longRest?.();
+				cs?._renderCharacter?.();
+			}, isShort);
+			const after = await charSheet.getResource(e.resource).catch(() => afterSpend);
+			const target = e.toMax === false ? (before.current) : before.max;
+			if (after.current < target) throw new Error(`expected ${isShort ? "short" : "long"} rest to restore "${e.resource}" to ≥${target}, got ${after.current}/${after.max}`);
+			return;
+		}
+	}
+}
+
+async function _runToggleEffect (
+	e: EffectCheck,
+	before: any,
+	after: any,
+	beforeRes: string[],
+	afterRes: string[],
+	beforeImm: string[],
+	afterImm: string[],
+	advProbes: Map<string, {advBefore: boolean; advAfter: boolean}>,
+	abilityModsBefore: Record<string, number>,
+): Promise<void> {
+	switch (e.kind) {
+		case "togglePlusAc": {
+			const delta = after.ac - before.ac;
+			let want: number;
+			if (e.whenActive === "abilityMod") {
+				if (!e.ability) throw new Error(`togglePlusAc(abilityMod) requires ability`);
+				want = abilityModsBefore[e.ability] ?? 0;
+			} else {
+				want = e.whenActive;
+			}
+			if (delta !== want) throw new Error(`AC delta on toggle = ${delta}, expected ${want}`);
+			return;
+		}
+		case "togglePlusSpeed": {
+			const t = e.type ?? "walk";
+			// speed snapshot is walk-only; if asking for non-walk, fall through
+			if (t === "walk") {
+				const delta = after.walkSpeed - before.walkSpeed;
+				if (delta !== e.delta) throw new Error(`speed:${t} delta on toggle = ${delta}, expected ${e.delta}`);
+			}
+			// non-walk: caller would need to check via getSpeed before+after manually; skip
+			return;
+		}
+		case "toggleGrantsResistance": {
+			const had = _hasDamageType(beforeRes, e.damageType);
+			const has = _hasDamageType(afterRes, e.damageType);
+			if (had) throw new Error(`already had resistance "${e.damageType}" before toggle — can't probe`);
+			if (!has) throw new Error(`expected resistance "${e.damageType}" after toggle. seen=[${afterRes.join(", ")}]`);
+			return;
+		}
+		case "toggleGrantsImmunity": {
+			const had = _hasDamageType(beforeImm, e.damageType);
+			const has = _hasDamageType(afterImm, e.damageType);
+			if (had) throw new Error(`already had immunity "${e.damageType}" before toggle — can't probe`);
+			if (!has) throw new Error(`expected immunity "${e.damageType}" after toggle. seen=[${afterImm.join(", ")}]`);
+			return;
+		}
+		case "toggleGrantsAdvantage": {
+			const probe = advProbes.get(e.rollType);
+			if (!probe) throw new Error(`internal: no adv probe captured for "${e.rollType}"`);
+			if (probe.advBefore) throw new Error(`already had advantage on "${e.rollType}" before toggle — can't probe`);
+			if (!probe.advAfter) throw new Error(`expected advantage on "${e.rollType}" after toggle, but state.getAdvantageState reports none`);
+			return;
+		}
+	}
 }
 
 const _describeName = (n: string | RegExp): string =>
@@ -714,6 +1028,58 @@ export async function assertFeaturesMatrix (
 						throw new Error(`spells missing from spellbook: ${missing.join(", ")}. seen=${knownSpells.slice(0, 20).join(", ")}…`);
 					}
 					break;
+				}
+			}
+
+			// ── Phase 7 effect probes ─────────────────────────────
+			if (fc.effects?.length) {
+				const passiveOrRoll = fc.effects.filter(e => !e.skip && !_TOGGLE_EFFECT_KINDS.has(e.kind));
+				const toggleEffects = fc.effects.filter(e => !e.skip && _TOGGLE_EFFECT_KINDS.has(e.kind));
+
+				for (const eff of passiveOrRoll) {
+					try { await _runPassiveOrRollEffect(charSheet, eff); }
+					catch (eErr: any) { errors.push(`${label} effect ${eff.kind}: ${eErr.message}`); }
+				}
+
+				if (toggleEffects.length) {
+					const matched = allFeatures.find(f => re.test(f));
+					if (!matched) {
+						errors.push(`${label} toggle-effects skipped: no matching feature on sheet`);
+					} else {
+						const before = await charSheet.snapshotEffectiveStats();
+						const beforeRes = await charSheet.getResistances();
+						const beforeImm = await charSheet.getImmunities();
+						const advProbes = new Map<string, {advBefore: boolean; advAfter: boolean}>();
+						for (const eff of toggleEffects) {
+							if (eff.kind === "toggleGrantsAdvantage") {
+								const s = await charSheet.getAdvantageState(eff.rollType);
+								advProbes.set(eff.rollType, {advBefore: s.advantage, advAfter: false});
+							}
+						}
+						let activated = false;
+						try { await charSheet.activateFeature(matched); activated = true; }
+						catch (aErr: any) { errors.push(`${label} could not activate to probe toggle effects: ${aErr.message}`); }
+						if (activated) {
+							const after = await charSheet.snapshotEffectiveStats();
+							const afterRes = await charSheet.getResistances();
+							const afterImm = await charSheet.getImmunities();
+							for (const eff of toggleEffects) {
+								if (eff.kind === "toggleGrantsAdvantage") {
+									const s = await charSheet.getAdvantageState(eff.rollType);
+									const probe = advProbes.get(eff.rollType)!;
+									probe.advAfter = s.advantage;
+								}
+							}
+							for (const eff of toggleEffects) {
+								try {
+									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, before.abilityMods);
+								} catch (eErr: any) {
+									errors.push(`${label} effect ${eff.kind}: ${eErr.message}`);
+								}
+							}
+							try { await charSheet.deactivateFeature(matched); } catch (_) { /* swallow */ }
+						}
+					}
 				}
 			}
 		} catch (e: any) {

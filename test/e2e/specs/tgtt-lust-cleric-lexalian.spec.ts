@@ -19,7 +19,22 @@ import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// ── Class features ──────────────────────────────────────────────
 	// L1: Spellcasting + Divine Order (Protector / Thaumaturge choice).
-	{level: 1, name: /spellcasting/i, kind: "passive"},
+	// Cleric grants 3 cantrips at L1 and prepared spells from the
+	// cleric list. Sacred Flame is the canonical pick; Cure Wounds is
+	// the spec's signature L1 prepared spell. Cleric saves are
+	// proficient in WIS + CHA — both roll buttons should fire cleanly.
+	// Religion is INT-based and is granted by the Acolyte background;
+	// CHA ability checks and initiative also probed here.
+	{level: 1, name: /spellcasting/i, kind: "passive", effects: [
+		{kind: "cantripCount", min: 3},
+		{kind: "spellInList", spell: "Sacred Flame"},
+		{kind: "spellInList", spell: "Cure Wounds"},
+		{kind: "rollSavingThrow", ability: "wis"},
+		{kind: "rollSavingThrow", ability: "cha"},
+		{kind: "rollAbilityCheck", ability: "cha"},
+		{kind: "rollSkillCheck", skill: "religion"},
+		{kind: "rollInitiative"},
+	]},
 	{level: 1, name: /divine order/i, kind: "passive"},
 	// L2: Channel Divinity is the iconic resource — pool starts at 2,
 	// scales to 3 at L6 and 4 at L18 per the TGTT class table. Use
@@ -27,7 +42,11 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// assertions hint the implementation may surface a smaller pool
 	// than the table prescribes — see the spec milestones above).
 	{level: 2, name: /channel divinity/i, kind: "passive"},
-	{level: 2, name: "Channel Divinity", kind: "resource", resourceMax: [1, 3]},
+	// Channel Divinity refreshes on a short or long rest per RAW
+	// (XPHB cleric); probe via shortRestRestores on the resource entry.
+	{level: 2, name: "Channel Divinity", kind: "resource", resourceMax: [1, 3], effects: [
+		{kind: "shortRestRestores", resource: "Channel Divinity"},
+	]},
 	{level: 6, name: "Channel Divinity", kind: "resource", resourceMax: [2, 3]},
 	{level: 18, name: "Channel Divinity", kind: "resource", resourceMax: [2, 4]},
 	{level: 2, name: /principles of devotion/i, kind: "passive"},
@@ -38,9 +57,20 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 16, name: /ability score improvement/i, kind: "passive"},
 	{level: 19, name: /ability score improvement|epic boon/i, kind: "passive"},
 	// L5 Sear Undead — XPHB rebrand of Destroy Undead (use either name).
-	{level: 5, name: /sear undead|destroy undead/i, kind: "passive"},
+	// Use this as the mid-level perch for spell save DC (PB jumps to
+	// +3 at L5, so DC = 8 + 3 + WIS mod ≥ 13) and an attack roll probe
+	// — by L5 the comprehensive build has equipped a starting weapon.
+	// Persuasion roll-button probe also lives here: cleric is
+	// proficient via Bonus Proficiencies (L3+), so the button must be
+	// click-without-throw at every milestone L5+.
+	{level: 5, name: /sear undead|destroy undead/i, kind: "passive", effects: [
+		{kind: "spellSaveDc", min: 13},
+		{kind: "rollAttack", attackName: /mace|warhammer|crossbow/i},
+		{kind: "rollSkillCheck", skill: "persuasion"},
+	]},
 	// L7 Blessed Strikes / L14 Improved Blessed Strikes — passive damage
-	// rider on weapon attacks or cantrips.
+	// rider on weapon attacks or cantrips. Damage scaling not surfaced
+	// as a discrete state scalar; rules-text only.
 	{level: 7, name: /blessed strikes/i, kind: "passive"},
 	{level: 14, name: /improved blessed strikes/i, kind: "passive"},
 	// L10 Divine Intervention + L20 Divine Intervention Improvement.
@@ -49,26 +79,65 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 
 	// ── Subclass: Lust Domain (TGTT) ────────────────────────────────
 	// L3 grants the subclass + the first Channel Divinity option.
-	// "Lust Domain" itself appears as a feature header.
-	{level: 3, name: /lust domain/i, kind: "passive"},
+	// "Lust Domain" itself appears as a feature header. The L3 Bonus
+	// Proficiencies sub-feature grants Deception + Persuasion — both
+	// observable as a min skill bonus of +PB (=+2 at L3) on the sheet.
+	{level: 3, name: /lust domain/i, kind: "passive", effects: [
+		{kind: "skillBonus", skill: "persuasion", min: 2},
+		{kind: "skillBonus", skill: "deception", min: 2},
+	]},
 	// Channel Divinity: Impulsive Infatuation — charm-themed CD option
 	// (no separate resource pool; consumes Channel Divinity charges).
+	// The WIS-save-or-charm-and-attack mechanic is rules-text only and
+	// the sheet doesn't surface a clean state probe for it; skip.
 	{level: 3, name: /impulsive infatuation/i, kind: "passive"},
 	// Domain Spells unlock at L3/5/7/9 (always prepared for Cleric).
+	// Complement the kind:"spells" grantsSpells assertion with
+	// spellInList probes per spell so a missing spellbook entry fails
+	// loudly with the offending name (rather than the aggregated set).
 	{level: 3, name: /lust.*spells|domain spells/i, kind: "spells",
-		grantsSpells: ["Charm Person", "Command", "Enthrall", "Suggestion"]},
+		grantsSpells: ["Charm Person", "Command", "Enthrall", "Suggestion"],
+		effects: [
+			{kind: "spellInList", spell: "Charm Person"},
+			{kind: "spellInList", spell: "Command"},
+			{kind: "spellInList", spell: "Enthrall"},
+			{kind: "spellInList", spell: "Suggestion"},
+		]},
 	{level: 5, name: /lust.*spells|domain spells/i, kind: "spells",
-		grantsSpells: ["Detect Thoughts", "Hypnotic Pattern"]},
+		grantsSpells: ["Detect Thoughts", "Hypnotic Pattern"],
+		effects: [
+			{kind: "spellInList", spell: "Detect Thoughts"},
+			{kind: "spellInList", spell: "Hypnotic Pattern"},
+		]},
 	{level: 7, name: /lust.*spells|domain spells/i, kind: "spells",
-		grantsSpells: ["Charm Monster", "Compulsion"]},
+		grantsSpells: ["Charm Monster", "Compulsion"],
+		effects: [
+			{kind: "spellInList", spell: "Charm Monster"},
+			{kind: "spellInList", spell: "Compulsion"},
+		]},
 	{level: 9, name: /lust.*spells|domain spells/i, kind: "spells",
-		grantsSpells: ["Dominate Person", "Hold Monster"]},
-	// L6 Enchanting Presence — allure feature (passive aura/charm boost).
+		grantsSpells: ["Dominate Person", "Hold Monster"],
+		effects: [
+			{kind: "spellInList", spell: "Dominate Person"},
+			{kind: "spellInList", spell: "Hold Monster"},
+		]},
+	// L6 Enchanting Presence — imposes disadvantage on a target's save
+	// vs. a 1st-level+ enchantment cast within 5 ft. Per-target,
+	// per-spell conditional disadvantage isn't exposed by
+	// state.getAdvantageState; rules-text only.
 	{level: 6, name: /enchanting presence/i, kind: "passive"},
-	// L8 Potent Spellcasting — adds WIS mod to cantrip damage.
+	// L8 Potent Spellcasting — adds WIS mod to cleric cantrip damage.
+	// Sheet bakes this into rendered cantrip damage rolls rather than
+	// exposing a top-level scalar; no clean state probe.
 	{level: 8, name: /potent spellcasting/i, kind: "passive"},
-	// L17 Supplicant of the Flesh — capstone allure feature.
+	// L17 Supplicant of the Flesh — capstone allure feature: damage
+	// against creatures charmed by you doesn't end the condition. No
+	// surfaced state probe.
 	{level: 17, name: /supplicant of the flesh/i, kind: "passive"},
+	// Note: Lexalian racial (Trained — light/medium armor, ranged
+	// martial weapons, polearms) is proficiency-only. Armor/weapon
+	// proficiency lists aren't surfaced as state scalars on the sheet,
+	// so no race-level effect probes are added here.
 ];
 
 describeCharacter({

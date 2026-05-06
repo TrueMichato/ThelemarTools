@@ -28,20 +28,69 @@ const CHRONURGY_WIZARD_FEATURES_MATRIX: FeatureCheck[] = [
 	// + Arcane Recovery (recover slots ≤ ⌈half-level⌉ once per long
 	// rest, total slot levels = prof bonus). Pool exposure is
 	// inconsistent across builds; assert as passive listing.
-	{level: 1, name: /spellcasting/i, kind: "passive"},
+	// L1 Spellcasting carries the bulk of always-on probes for this
+	// build: minimum spell DC + cantrip count, a spread of roll-button
+	// no-throw probes (INT check, INT/WIS saves the wizard is proficient
+	// in, Arcana + History as INT skills, the staff/dagger attack, and
+	// initiative), and the Nyuidj racial passives (psychic resistance,
+	// advantage on WIS saves from Dual Mind, and the base 30 ft speed
+	// — Wizards have no class speed buffs so `exact: 30` is safe).
+	{level: 1, name: /spellcasting/i, kind: "passive",
+		effects: [
+			// INT 15 base + Nyuidj +2 = 17 (mod +3), prof +2 → DC 13.
+			// Use `min: 12` to tolerate point-buy variants where the
+			// builder picks INT 14 (mod +3 after racial → DC 13) or
+			// INT 13 (mod +2 → DC 12).
+			{kind: "spellSaveDc", min: 12},
+			// Wizard L1 cantrips known = 3 (XPHB).
+			{kind: "cantripCount", min: 3},
+			// Wizard saving-throw proficiencies are INT + WIS.
+			{kind: "rollAbilityCheck", ability: "int"},
+			{kind: "rollSavingThrow", ability: "int"},
+			{kind: "rollSavingThrow", ability: "wis"},
+			// INT-based class signature skills.
+			{kind: "rollSkillCheck", skill: "arcana"},
+			{kind: "rollSkillCheck", skill: "history"},
+			// Default wizard weapon loadout.
+			{kind: "rollAttack", attackName: /quarterstaff|dagger/i},
+			{kind: "rollInitiative"},
+			// Nyuidj racial: resistance to psychic damage.
+			{kind: "resistance", damageType: "psychic"},
+			// Nyuidj racial: Dual Mind grants advantage on WIS saves.
+			{kind: "advantage", rollType: "save:wis"},
+			// Nyuidj base speed is 30 ft, Wizards never modify it.
+			{kind: "speed", exact: 30},
+		],
+	},
+	// Ritual Adept lets the wizard ritual-cast any spell from their
+	// spellbook — purely a metadata flag, no state-observable effect.
 	{level: 1, name: /ritual adept/i, kind: "passive"},
+	// Arcane Recovery is modeled as `kind: "passive"` here because
+	// the resource pool isn't surfaced uniformly across builds (see
+	// `usage.shortRestRestores: {skip: true}` below). Adding a
+	// `longRestRestores` effect would error with "resource not on
+	// sheet"; leave it un-probed at the matrix level.
 	{level: 1, name: /arcane recovery/i, kind: "passive"},
-	// L2 Scholar — INT-based skill expertise pick.
+	// L2 Scholar — INT-based skill expertise pick. Which skill the
+	// builder picked isn't known up front, so no `skillBonus` probe.
 	{level: 2, name: /scholar/i, kind: "passive"},
-	// ASIs at L4/8/12/16 + Epic Boon at L19.
+	// ASIs at L4/8/12/16 + Epic Boon at L19. The numeric effect
+	// (higher INT, higher save DC) shows up on the L5 Memorize Spell
+	// row below as a mid-level `spellSaveDc` floor.
 	{level: 4,  name: /ability score improvement/i, kind: "passive"},
 	{level: 8,  name: /ability score improvement/i, kind: "passive"},
 	{level: 12, name: /ability score improvement/i, kind: "passive"},
 	{level: 16, name: /ability score improvement/i, kind: "passive"},
 	{level: 19, name: /ability score improvement|epic boon/i, kind: "passive"},
 	// L5 Memorize Spell — XPHB-only Wizard feature (swap a prepared
-	// spell on a short rest).
-	{level: 5, name: /memorize spell/i, kind: "passive"},
+	// spell on a short rest). The swap mechanic itself isn't easily
+	// probed, so we ride a mid-level spell-DC floor here: by L5 a
+	// dedicated wizard's INT should be 16+ (mod +3) → DC ≥ 13.
+	{level: 5, name: /memorize spell/i, kind: "passive",
+		effects: [
+			{kind: "spellSaveDc", min: 13},
+		],
+	},
 	// L18 Spell Mastery — pick a 1st + 2nd-level spell to cast at
 	// will. The at-will mechanic is a spell-list annotation rather
 	// than a toggle/resource.

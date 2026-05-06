@@ -40,19 +40,88 @@ describeCharacter({
 	},
 	featuresMatrix: [
 		// ── Rogue base ────────────────────────────────────────────────
-		{level: 1, name: /sneak attack/i, kind: "passive"},
+		// Sneak Attack: damage scales 1d6/2 levels — no clean state probe
+		// (the bonus damage applies only to qualifying attacks). Use this
+		// entry as a host for the DEX-save roll probe (rogues are
+		// proficient in DEX saves from L1) and the initiative click probe.
+		{
+			level: 1,
+			name: /sneak attack/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollSavingThrow", ability: "dex"},
+				{kind: "rollInitiative"},
+			],
+		},
 		{level: 1, name: /thieves['’]? cant/i, kind: "passive"},
-		{level: 2, name: /cunning action/i, kind: "passive"},
+		// Cunning Action: bonus-action Dash/Disengage/Hide. No
+		// state-observable delta; host the Sleight of Hand skill probe
+		// here (signature rogue skill).
+		{
+			level: 2,
+			name: /cunning action/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollSkillCheck", skill: "sleight of hand"},
+			],
+		},
 		{level: 5, name: /uncanny dodge/i, kind: "passive"},
-		{level: 7, name: /evasion/i, kind: "passive"},
-		{level: 11, name: /reliable talent/i, kind: "passive"},
+		// Evasion: half/no damage on DEX saves vs AoE — not state-probed.
+		// Host the INT-save roll probe (rogues are proficient in INT
+		// saves) and a CHA ability-check probe here.
+		{
+			level: 7,
+			name: /evasion/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollSavingThrow", ability: "int"},
+				{kind: "rollAbilityCheck", ability: "cha"},
+			],
+		},
+		// Reliable Talent: floors any d20 ability check on a proficient
+		// skill to 10. State doesn't expose the floor explicitly, so we
+		// can't assert it directly — host the Deception roll probe here
+		// instead so we exercise a skill click at high level.
+		{
+			level: 11,
+			name: /reliable talent/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollSkillCheck", skill: "deception"},
+			],
+		},
 		{level: 14, name: /blindsense/i, kind: "passive"},
-		{level: 15, name: /slippery mind/i, kind: "passive"},
+		// Slippery Mind: grants proficiency in WIS saves. With PB=+5 at
+		// L15 the WIS save bonus must include the prof bonus — even with
+		// a dumped WIS (8 → mod -1) the total is ≥ +4. Use min:2 as a
+		// conservative lower bound that still proves prof is being added.
+		{
+			level: 15,
+			name: /slippery mind/i,
+			kind: "passive",
+			effects: [
+				{kind: "saveBonus", ability: "wis", min: 2},
+			],
+		},
 		{level: 18, name: /elusive/i, kind: "passive"},
+		// Stroke of Luck: once-per-rest auto-20 — no state probe (consumed
+		// by player choice on a specific roll).
 		{level: 20, name: /stroke of luck/i, kind: "passive"},
 
 		// ── Gambler subclass ──────────────────────────────────────────
-		{level: 3, name: /gambler['’]?s tools/i, kind: "passive"},
+		// Gambler's Tools: grants proficiency with cards/dice and lets
+		// the gambler use coins/dice/cards as finesse weapons. The weapon
+		// auto-equip is unreliable (logged-not-asserted in usage), so use
+		// a tolerant attack-name regex including the standard rogue
+		// fallbacks (rapier/shortsword/hand crossbow).
+		{
+			level: 3,
+			name: /gambler['’]?s tools/i,
+			kind: "passive",
+			effects: [
+				{kind: "rollAttack", attackName: /rapier|shortsword|hand crossbow|coins|dice|cards|dagger|shortbow/i},
+			],
+		},
 		{level: 3, name: /gambler['’]?s folly/i, kind: "passive"},
 		// Gambler's Spellcasting grants Warlock-list cantrips + 1/3-caster
 		// slots. Both the slot table and the granted spell list are blocked
@@ -84,9 +153,18 @@ describeCharacter({
 		},
 		// Extra Luck — bonus-action toggle, uses = PB, long-rest restore.
 		// Surfaces as a toggle on the sheet (no AC/DC delta — grants
-		// advantage to a single roll).
+		// advantage to a single player-chosen roll). We can't probe
+		// toggleGrantsAdvantage because the buff is consumed on the next
+		// applicable roll rather than persisting as a generic
+		// "advantage on attacks/saves/checks" flag in state.
 		{level: 9, name: /extra luck/i, kind: "toggle", toggleDelta: "none"},
+		// Versatile Gambler: increases the prepared-spell roll (2d4 → 3d6)
+		// and the Gambling Modifier (1d6 → 2d4). Both numbers feed the
+		// Gambler spellcasting subsystem which is blocked by CS-BUG-010,
+		// so no probe.
 		{level: 13, name: /versatile gambler/i, kind: "passive"},
+		// Master of Fortune: roll twice on Gambler's Table + once-per-PB
+		// nat-1-to-nat-20 conversion. Neither effect is exposed in state.
 		{level: 17, name: /master of fortune/i, kind: "passive"},
 	],
 });

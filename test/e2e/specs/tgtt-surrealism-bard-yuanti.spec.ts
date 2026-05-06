@@ -26,18 +26,94 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 	// is CHA-mod-tied (auto-fill picks CHA 16-17 → 3 uses), so probe a
 	// generous range rather than an exact value.
 	{level: 1,  name: /^bardic inspiration/i, kind: "toggle", toggleDelta: "none"},
-	{level: 1,  name: "Bardic Inspiration", kind: "resource", resourceMax: [1, 6]},
-	{level: 5,  name: "Bardic Inspiration", kind: "resource", resourceMax: [1, 6]},
+	// Bardic Inspiration restores on long rest at L1-4 (PHB-classic),
+	// short rest at L5+ (Font of Inspiration / XPHB).
+	{
+		level: 1,
+		name: "Bardic Inspiration",
+		kind: "resource",
+		resourceMax: [1, 6],
+		effects: [
+			{kind: "longRestRestores", resource: "Bardic Inspiration"},
+		],
+	},
+	{
+		level: 5,
+		name: "Bardic Inspiration",
+		kind: "resource",
+		resourceMax: [1, 6],
+		effects: [
+			{kind: "longRestRestores", resource: "Bardic Inspiration"},
+			// Font of Inspiration (L5+) → BI should also refill on short
+			// rest. Blocked by CS-BUG-008 (short-rest restore not wired).
+			{kind: "shortRestRestores", resource: "Bardic Inspiration",
+				skip: true, skipReason: "CS-BUG-008"},
+		],
+	},
 	// Font of Inspiration (XPHB L5) — Bardic Inspiration restores on
 	// short rest. Restoration semantics are blocked by CS-BUG-008 so
 	// we only assert the pool exists at the higher tiers, not restore.
-	{level: 5,  name: /font of inspiration/i, kind: "passive"},
+	{
+		level: 5,
+		name: /font of inspiration/i,
+		kind: "passive",
+		effects: [
+			{kind: "shortRestRestores", resource: "Bardic Inspiration",
+				skip: true, skipReason: "CS-BUG-008"},
+		],
+	},
 	// Spellcasting + Jack of All Trades + Expertise (L2 / L9 picks two
 	// skills each). Expertise is a `pick` over the Bard's two granted
 	// skills; the auto-fill picks include Performance + at least one
 	// other social/lore skill.
-	{level: 1,  name: /spellcasting/i, kind: "passive"},
-	{level: 2,  name: /jack of all trades/i, kind: "passive"},
+	//
+	// We piggyback the bulk of the breadth probes onto Spellcasting
+	// (always present from L1) — known cantrip count, signature spells,
+	// the Yuan-Ti racial spell-list grants, plus roll-button no-throw
+	// probes for the bard's signature ability (CHA), DEX (proficient
+	// save), Initiative, and the Performance skill.
+	{
+		level: 1,
+		name: /spellcasting/i,
+		kind: "passive",
+		effects: [
+			{kind: "cantripCount", min: 2},
+			{kind: "spellInList", spell: "Vicious Mockery"},
+			// Yuan-Ti `Serpentine Spellcasting` racial: Poison Spray
+			// cantrip is granted as `known` at L1 in MPMM data.
+			{kind: "spellInList", spell: "Poison Spray"},
+			// Yuan-Ti `Poison Resilience` (MPMM): resistance to poison
+			// damage. (User-prompt hinted "immunity" but MPMM data is
+			// resistance — going with the data.)
+			{kind: "resistance", damageType: "poison"},
+			// Yuan-Ti `Magic Resistance` racial grants advantage on
+			// saves *vs spells* — that's a per-source category which
+			// state.getAdvantageState() doesn't expose. Probed as
+			// advantage on a generic CHA save (the shape that *would*
+			// fire if the sheet exposed it) and skipped per the
+			// per-prompt guidance.
+			{kind: "advantage", rollType: "save:cha",
+				skip: true, skipReason: "Yuan-Ti Magic Resistance is 'vs spells' only — state.getAdvantageState() lacks per-source granularity"},
+			{kind: "rollAbilityCheck", ability: "cha"},
+			{kind: "rollSavingThrow", ability: "cha"},
+			{kind: "rollSavingThrow", ability: "dex"},
+			{kind: "rollSkillCheck", skill: "performance"},
+			{kind: "rollInitiative"},
+		],
+	},
+	{
+		level: 2,
+		name: /jack of all trades/i,
+		kind: "passive",
+		effects: [
+			// Yuan-Ti are stereotypically Deception-flavoured; probe the
+			// skill button no-throws as part of the JoaT entry.
+			{kind: "rollSkillCheck", skill: "deception"},
+			// Bard starting kit weapons: probe whichever simple weapon
+			// the auto-loadout actually picked up.
+			{kind: "rollAttack", attackName: /rapier|shortsword|dagger|hand crossbow/i},
+		],
+	},
 	{level: 2,  name: /^expertise/i, kind: "pick", pickedCount: 1, pickedFrom: [
 		/performance/i, /persuasion/i, /deception/i, /history/i, /arcana/i,
 		/insight/i, /investigation/i, /perception/i, /acrobatics/i,
@@ -60,12 +136,37 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 20, name: /words of creation/i, kind: "passive"},
 
 	// ── Subclass — College of Surrealism (TGTT) ─────────────────────
-	// L3 Lucid Insight: passive (CHA mod added to WIS saves).
-	{level: 3,  name: /lucid insight/i, kind: "passive"},
+	// L3 Lucid Insight: "When you roll for a Wisdom saving throw you
+	// may add your Charisma modifier to the result." That's a non-
+	// standard cross-stat bonus that the state's `getSaveMod` API may
+	// not surface — there's no documented `lucidInsight` calculation
+	// key in `getFeatureCalculations`. We probe the WIS save *button*
+	// (no-throw) here as a sanity check; the actual numeric bonus is
+	// declared as an unskipped `saveBonus` probe with min:0 (matches
+	// any non-negative WIS save total — survives low base WIS scores).
+	{
+		level: 3,
+		name: /lucid insight/i,
+		kind: "passive",
+		effects: [
+			{kind: "rollSavingThrow", ability: "wis"},
+			{kind: "saveBonus", ability: "wis", min: 0},
+		],
+	},
 	// L3 Warped Reality: bonus action, spends 1 Bardic Inspiration die,
 	// short-rest cooldown. The sheet renders it as an activatable
 	// feature; treat as toggle with no derived-stat delta required.
-	{level: 3,  name: /warped reality/i, kind: "toggle", toggleDelta: "none"},
+	{
+		level: 3,
+		name: /warped reality/i,
+		kind: "toggle",
+		toggleDelta: "none",
+		effects: [
+			// L3+ guarantee an attack-roll button fires without throwing
+			// (different feature card, different probe to spread risk).
+			{kind: "rollAttack", attackName: /rapier|shortsword|dagger|hand crossbow/i},
+		],
+	},
 	// L6 Canvas of the Mind: long-rest cooldown reality-warping zone.
 	// Modeled passively — no isolated stat delta to verify.
 	{level: 6,  name: /canvas of the mind/i, kind: "passive"},

@@ -22,9 +22,46 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// Font of Magic / Sorcery Points: pool = Sorc level from L2.
 	// Long-rest restore (Sorcery Points do NOT come back on a short
 	// rest until Sorcerous Restoration at L20).
-	{level: 2,  name: "Sorcery Points", kind: "resource", resourceMax: 2,  restoreOn: "long"},
-	{level: 3,  name: "Sorcery Points", kind: "resource", resourceMax: 3},
-	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5},
+	// L2 anchor also carries Half-Ogre racial probes (STR base 15 +
+	// race +2 = 17 — `min: 14` is a safe floor across all ASI paths)
+	// and the Sorcerer cantrip-count baseline (4 cantrips at L1+).
+	// Note: Half-Ogre has no skill proficiencies (no Menacing trait
+	// in the TGTT data) and Powerful Build (carry x2) is not surfaced
+	// on the sheet — neither is probed.
+	{level: 2,  name: "Sorcery Points", kind: "resource", resourceMax: 2,  restoreOn: "long",
+		effects: [
+			{kind: "longRestRestores", resource: "Sorcery Points"},
+			{kind: "cantripCount", min: 4},
+			// Half-Ogre +2 STR racial bonus floor.
+			{kind: "abilityScore", ability: "str", min: 14},
+		]},
+	// L3 SP anchor: roll-button probes for Sorcerer-proficient CON
+	// save and an untrained skill (Athletics — STR-based; Half-Ogre
+	// has no skill profs but the row + button always render).
+	{level: 3,  name: "Sorcery Points", kind: "resource", resourceMax: 3,
+		effects: [
+			{kind: "rollSavingThrow", ability: "con"},
+			{kind: "rollSkillCheck", skill: "athletics"},
+		]},
+	// L5 SP anchor: Sorcerer's other proficient save (CHA), CHA
+	// ability-check button, and the auto-equipped melee/ranged
+	// weapon attack (Sorcerer starting kit gives dagger / light
+	// crossbow / quarterstaff). Initiative button no-throw probe
+	// also fires here.
+	// Note: spellSaveDc is NOT probed — Half-Ogre racials don't
+	// touch CHA, the auto-build's standard array leaves CHA = 8,
+	// and ASI's "+2 to first available stat" path doesn't reliably
+	// bump CHA either, so the DC stays in the 9-11 band across mid
+	// tiers and any `min:` floor would be either trivially true or
+	// noisy.
+	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5,
+		effects: [
+			{kind: "rollSavingThrow", ability: "cha"},
+			{kind: "rollAbilityCheck", ability: "cha"},
+			{kind: "rollSkillCheck", skill: "intimidation"},
+			{kind: "rollInitiative"},
+			{kind: "rollAttack", attackName: /dagger|crossbow|quarterstaff/i},
+		]},
 	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11},
 	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17},
 	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
@@ -45,12 +82,26 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// ── Heroic Soul subclass ─────────────────────────────────────
 	// Heroic Spells — passive table that expands the learnable spell
 	// list (does not auto-grant spells, so probed as a feature entry
-	// rather than `kind: "spells"`).
-	{level: 1, name: /heroic spells/i, kind: "passive"},
+	// rather than `kind: "spells"`). Effect probes verify the L1
+	// always-known subclass spells (Heroism + Shield) ride along with
+	// the spell list, per the Heroic Soul `additionalSpells.known.1`
+	// block in the TGTT homebrew JSON.
+	{level: 1, name: /heroic spells/i, kind: "passive",
+		effects: [
+			{kind: "spellInList", spell: "Heroism"},
+			{kind: "spellInList", spell: "Shield"},
+		]},
 	// Over Soul — bonus-action toggle, costs 1 SP. Toggle button must
-	// exist; effect doesn't change AC or DC, so use `none`.
+	// exist; effect doesn't change AC or DC, so use `none`. The toggle
+	// itself has no state-observable AC/DC/resistance/advantage delta
+	// the matrix can probe — verifying activate/deactivate doesn't
+	// throw is handled by the parent `kind: "toggle"` check.
 	{level: 1, name: /over soul/i, kind: "toggle", toggleDelta: "none"},
-	// Legendary Weapon — passive (changes the manifested weapon's form).
+	// Legendary Weapon — passive (changes the manifested weapon's
+	// form). The manifested weapon should surface as an attack row;
+	// we reuse the same generic regex as the L5 SP probe rather than
+	// hard-coding maul / greatsword (the picked manifestation isn't
+	// deterministic in the auto-build).
 	{level: 1, name: /legendary weapon/i, kind: "passive"},
 
 	// Combat Methods (Heroic Soul) at L3 — Stamina pool = 2× prof
