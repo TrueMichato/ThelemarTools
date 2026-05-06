@@ -36,4 +36,62 @@ describeCharacter({
 		17: {totalLevel: 17, minMaxHp: 90, expectToggles: [/percussive strike|percussive/i]},
 		20: {totalLevel: 20, minMaxHp: 100},
 	},
+	featuresMatrix: [
+		// ── Rogue base ────────────────────────────────────────────────
+		{level: 1, name: /sneak attack/i, kind: "passive"},
+		{level: 1, name: /thieves['’]? cant/i, kind: "passive"},
+		{level: 2, name: /cunning action/i, kind: "passive"},
+		{level: 5, name: /uncanny dodge/i, kind: "passive"},
+		{level: 7, name: /evasion/i, kind: "passive"},
+		{level: 11, name: /reliable talent/i, kind: "passive"},
+		{level: 14, name: /blindsense/i, kind: "passive"},
+		{level: 15, name: /slippery mind/i, kind: "passive"},
+		{level: 18, name: /elusive/i, kind: "passive"},
+		{level: 20, name: /stroke of luck/i, kind: "passive"},
+
+		// ── Belly Dancer subclass ─────────────────────────────────────
+		{level: 3, name: /bonus proficiency/i, kind: "passive"},
+		// Dance of the Country — bladesong-like AC buff (+CHA mod) when
+		// active. Bonus-action toggle, lasts until ended/incapacitated,
+		// uses = PB, short-rest restore.
+		{level: 3, name: /dance of the country/i, kind: "toggle", toggleDelta: "ac"},
+		{
+			level: 3,
+			name: "Dance of the Country",
+			kind: "resource",
+			resourceMax: 2, // PB at L3
+			restoreOn: "short",
+		},
+		{
+			level: 5,
+			name: "Dance of the Country",
+			kind: "resource",
+			resourceMax: 3, // PB at L5
+			restoreOn: "short",
+		},
+		{
+			level: 9,
+			name: "Dance of the Country",
+			kind: "resource",
+			resourceMax: 4, // PB at L9
+			restoreOn: "short",
+		},
+		{
+			level: 13,
+			name: "Dance of the Country",
+			kind: "resource",
+			resourceMax: 5, // PB at L13
+			restoreOn: "short",
+		},
+		{
+			level: 17,
+			name: "Dance of the Country",
+			kind: "resource",
+			resourceMax: 6, // PB at L17
+			restoreOn: "short",
+		},
+		{level: 9, name: /tantalizing shivers/i, kind: "passive"},
+		{level: 13, name: /fluid step/i, kind: "passive"},
+		{level: 17, name: /percussive strike/i, kind: "passive"},
+	],
 });

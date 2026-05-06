@@ -1,5 +1,95 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HEROIC_SOUL_HALFOGRE} from "../utils/characterBuilder";
+import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+
+// ── Heroic Soul Sorcerer L1→20 features matrix ───────────────────────
+// Sorcerer base (PHB / TGTT-sourced subclass):
+//   L2 Font of Magic / Sorcery Points (= Sorc level, long-rest restore)
+//   L3 Metamagic — pick 2 (then +1 at L10, +1 at L17 → 3, then 4)
+//   L20 Sorcerous Restoration — short-rest restore of up to 4 SP
+// Heroic Soul subclass (TGTT):
+//   L1 Heroic Spells (passive — adds spells to learnable list)
+//   L1 Over Soul — bonus-action toggle that costs 1 SP
+//   L1 Legendary Weapon (passive — modifies the manifested weapon)
+//   L3 Combat Methods (Heroic Soul) — pick 2 from Arcane Knight /
+//      Gallant Heart traditions, plus a 2× prof-bonus Stamina pool
+//      (short OR long rest restore)
+//   L6 Hero's Reflex (passive — bonus-action weapon attack rider)
+//   L14 Manifest Legend — toggle, costs 3 SP, 1/long-rest
+//   L18 Eternal Hero (passive — Over Soul always on, downed-rider)
+const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
+	// ── Sorcerer base ────────────────────────────────────────────
+	// Font of Magic / Sorcery Points: pool = Sorc level from L2.
+	// Long-rest restore (Sorcery Points do NOT come back on a short
+	// rest until Sorcerous Restoration at L20).
+	{level: 2,  name: "Sorcery Points", kind: "resource", resourceMax: 2,  restoreOn: "long"},
+	{level: 3,  name: "Sorcery Points", kind: "resource", resourceMax: 3},
+	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5},
+	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11},
+	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17},
+	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
+
+	// Metamagic picks scale 2 → 3 → 4 across L3 / L10 / L17.
+	// `pickedCount` is the lower bound — passing means at least N of
+	// the listed Metamagic options surfaced as feature entries.
+	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
+		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i]},
+	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
+		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i]},
+	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
+		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i]},
+
+	// Sorcerous Restoration at L20 — short-rest recovery of up to 4 SP.
+	{level: 20, name: /sorcerous restoration/i, kind: "passive"},
+
+	// ── Heroic Soul subclass ─────────────────────────────────────
+	// Heroic Spells — passive table that expands the learnable spell
+	// list (does not auto-grant spells, so probed as a feature entry
+	// rather than `kind: "spells"`).
+	{level: 1, name: /heroic spells/i, kind: "passive"},
+	// Over Soul — bonus-action toggle, costs 1 SP. Toggle button must
+	// exist; effect doesn't change AC or DC, so use `none`.
+	{level: 1, name: /over soul/i, kind: "toggle", toggleDelta: "none"},
+	// Legendary Weapon — passive (changes the manifested weapon's form).
+	{level: 1, name: /legendary weapon/i, kind: "passive"},
+
+	// Combat Methods (Heroic Soul) at L3 — Stamina pool = 2× prof
+	// bonus, short OR long rest restore. Blocked by CS-BUG-011: the
+	// pool is not surfaced as a resource on the sheet.
+	{level: 3,  name: /stamina/i, kind: "resource", resourceMax: 4, restoreOn: "either",
+		skip: true, skipReason: "CS-BUG-011"},
+	{level: 5,  name: /stamina/i, kind: "resource", resourceMax: 6,
+		skip: true, skipReason: "CS-BUG-011"},
+	{level: 11, name: /stamina/i, kind: "resource", resourceMax: 8,
+		skip: true, skipReason: "CS-BUG-011"},
+	{level: 17, name: /stamina/i, kind: "resource", resourceMax: 12,
+		skip: true, skipReason: "CS-BUG-011"},
+
+	// Combat Methods pick at L3 — 2 methods from Arcane Knight /
+	// Gallant Heart. Each picked method surfaces as its own feature
+	// entry on the sheet (e.g. "Frigid Strike", "Honourable Bout").
+	{level: 3, name: /combat methods/i, kind: "pick", pickedCount: 1,
+		pickedFrom: [
+			// Arcane Knight 1st-degree methods
+			/frigid strike/i, /grasp of the storm/i, /malicious mark/i, /warding flourish/i,
+			/blazing pursuit/i, /duelist'?s sigil/i, /mystic feint/i, /quickening/i,
+			// Gallant Heart 1st-degree methods
+			/challenger'?s strike/i, /engender doubt/i, /socialite stance/i, /stylish tumble/i,
+			/honourable bout/i, /overconfident gambit/i, /wink and smile/i, /formal introduction/i,
+		]},
+
+	// Hero's Reflex at L6 — passive bonus-action weapon-attack rider
+	// after spell casts.
+	{level: 6, name: /hero'?s reflex/i, kind: "passive"},
+
+	// Manifest Legend at L14 — action, costs 3 SP, 1/long-rest. Has a
+	// toggle button on the sheet; no AC/DC delta.
+	{level: 14, name: /manifest legend/i, kind: "toggle", toggleDelta: "none"},
+
+	// Eternal Hero at L18 — passive capstone (Over Soul always on +
+	// drop-to-1-HP rider).
+	{level: 18, name: /eternal hero/i, kind: "passive"},
+];
 
 /**
  * #15 — Heroic Soul Sorcerer Half-Ogre (TGTT) — L1→20.
@@ -44,4 +134,5 @@ describeCharacter({
 		17: {totalLevel: 17, spellSlots: {9: 1}, expectResources: {"Sorcery Points": 17}},
 		20: {totalLevel: 20, spellSlots: {9: 1}, expectResources: {"Sorcery Points": 20}, expectToggles: [/eternal hero|over soul/i]},
 	},
+	featuresMatrix: HEROIC_SOUL_FEATURES_MATRIX,
 });

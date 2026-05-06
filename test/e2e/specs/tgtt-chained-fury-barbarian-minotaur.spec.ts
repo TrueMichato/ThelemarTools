@@ -39,4 +39,34 @@ describeCharacter({
 		17: {totalLevel: 17, expectResources: {"Rage": 6}},
 		20: {totalLevel: 20, expectToggles: [/primal champion|persistent rage|indomitable/i]},
 	},
+	featuresMatrix: [
+		// ── Class features ────────────────────────────────────────
+		{level: 1, name: /^rage$/i, kind: "toggle", toggleDelta: "any"},
+		// Rage uses pool — re-checked at scaling thresholds.
+		{level: 1,  name: "Rage", kind: "resource", resourceMax: 2},
+		{level: 3,  name: "Rage", kind: "resource", resourceMax: 3},
+		{level: 6,  name: "Rage", kind: "resource", resourceMax: 4},
+		{level: 12, name: "Rage", kind: "resource", resourceMax: 5},
+		{level: 17, name: "Rage", kind: "resource", resourceMax: 6},
+		// L20 grants unlimited rages — accept any high value or sentinel.
+		{level: 20, name: "Rage", kind: "resource", resourceMax: [6, 999]},
+
+		{level: 1, name: /unarmored defense/i, kind: "passive"},
+		{level: 2, name: /reckless attack/i, kind: "toggle", toggleDelta: "none"},
+		{level: 2, name: /danger sense/i, kind: "passive"},
+		{level: 5, name: /extra attack/i, kind: "passive"},
+		{level: 5, name: /fast movement/i, kind: "passive"},
+		{level: 7, name: /feral instinct/i, kind: "passive"},
+		{level: 9, name: /brutal critical/i, kind: "passive"},
+		{level: 11, name: /relentless rage/i, kind: "passive"},
+		{level: 15, name: /persistent rage/i, kind: "passive"},
+		{level: 18, name: /indomitable might/i, kind: "passive"},
+		{level: 20, name: /primal champion/i, kind: "passive"},
+
+		// ── Subclass: Path of the Chained Fury (TGTT) ────────────
+		{level: 3,  name: /manifest chains/i, kind: "passive"},
+		{level: 6,  name: /chain imprisonment/i, kind: "passive"},
+		{level: 10, name: /chain control/i, kind: "passive"},
+		{level: 14, name: /unchained fury/i, kind: "passive"},
+	],
 });
