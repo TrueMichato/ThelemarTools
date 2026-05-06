@@ -77,12 +77,25 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 4, name: /font of magic/i, kind: "passive", effects: [
 		{kind: "spellSaveDc", min: 13},
 	]},
-	// L5 = Sorc 3: Metamagic — pick 2 options. `kind: "pick"`
-	// validates count; no additional effect probes.
+	// L5 = Sorc 3: Metamagic — pick 2 options. `pickedCount` is the
+	// count floor; `pickToggleable` then verifies that ≥1 picked
+	// option surfaces as a toggle on the sheet. The Sorcerer class
+	// here is `TGTT` source, which splits Metamagic into Active
+	// (toggleable) and Passive variants — only the Active flavours
+	// surface as feature toggles, so `matchAny` lists only the
+	// active options. (Passive variants like Careful / Distant /
+	// Empowered / Extended / Transmuted don't render as toggles.)
 	{level: 5, name: /metamagic/i, kind: "pick", pickedCount: 2,
 		pickedFrom: [/careful spell/i, /distant spell/i, /empowered spell/i, /extended spell/i,
 			/heightened spell/i, /quickened spell/i, /seeking spell/i, /subtle spell/i,
-			/transmuted spell/i, /twinned spell/i]},
+			/transmuted spell/i, /twinned spell/i],
+		effects: [
+			{kind: "pickToggleable", min: 1, matchAny: [
+				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
+				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
+				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+			]},
+		]},
 	// L8 = Sorc 6: Empowered Healing (subclass — costs 1 sorcery
 	// point to reroll a healing die). Modeled as passive feature
 	// listing — it consumes the existing Sorcery Points pool rather

@@ -26,6 +26,9 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSavingThrow", ability: "int"},
 			{kind: "rollSkillCheck", skill: "arcana"},
 			{kind: "rollInitiative"},
+			// L1 wizard with INT 16-17 base + prof +2 → DC 13.
+			// `min: 12` tolerates point-buy variants (INT 14 → DC 12).
+			{kind: "spellSaveDc", min: 12},
 		],
 	},
 	// Wizard ASIs at L4/8/12/16/19 — passive listing. We piggyback
@@ -38,6 +41,10 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			{kind: "rollAbilityCheck", ability: "int"},
+			// Post-first-ASI floor: by L4 a dedicated wizard's INT
+			// should be 18 (mod +4) → DC 14, or 17 (mod +3) → DC 13
+			// if ASI went to a feat. `min: 13` is safe either way.
+			{kind: "spellSaveDc", min: 13},
 		],
 	},
 	{

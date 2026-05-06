@@ -51,6 +51,9 @@ describeCharacter({
 			effects: [
 				{kind: "rollSavingThrow", ability: "dex"},
 				{kind: "rollInitiative"},
+				// Phase 8: Sneak Attack scales 1d6 → 10d6 across levels.
+				// L1 anchor — at least 1d6 from L1 onward (matrix L1/3/5/11/17/20).
+				{kind: "sneakAttackDice", min: 1},
 			],
 		},
 		{level: 1, name: /thieves['’]? cant/i, kind: "passive"},
@@ -65,7 +68,15 @@ describeCharacter({
 				{kind: "rollSkillCheck", skill: "sleight of hand"},
 			],
 		},
-		{level: 5, name: /uncanny dodge/i, kind: "passive"},
+		{
+			level: 5,
+			name: /uncanny dodge/i,
+			kind: "passive",
+			// Phase 8: at L5+ Sneak Attack is 3d6+ (matrix L5/11/17/20).
+			effects: [
+				{kind: "sneakAttackDice", min: 3},
+			],
+		},
 		// Evasion: half/no damage on DEX saves vs AoE — not state-probed.
 		// Host the INT-save roll probe (rogues are proficient in INT
 		// saves) and a CHA ability-check probe here.
@@ -88,6 +99,8 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", skill: "deception"},
+				// Phase 8: at L11+ Sneak Attack is 6d6+ (matrix L11/17/20).
+				{kind: "sneakAttackDice", min: 6},
 			],
 		},
 		{level: 14, name: /blindsense/i, kind: "passive"},
@@ -105,8 +118,16 @@ describeCharacter({
 		},
 		{level: 18, name: /elusive/i, kind: "passive"},
 		// Stroke of Luck: once-per-rest auto-20 — no state probe (consumed
-		// by player choice on a specific roll).
-		{level: 20, name: /stroke of luck/i, kind: "passive"},
+		// by player choice on a specific roll). Host the L20 SA dice cap.
+		{
+			level: 20,
+			name: /stroke of luck/i,
+			kind: "passive",
+			// Phase 8: at L20 Sneak Attack caps at 10d6.
+			effects: [
+				{kind: "sneakAttackDice", min: 10},
+			],
+		},
 
 		// ── Gambler subclass ──────────────────────────────────────────
 		// Gambler's Tools: grants proficiency with cards/dice and lets

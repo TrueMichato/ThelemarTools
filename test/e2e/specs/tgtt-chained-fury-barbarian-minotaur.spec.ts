@@ -95,6 +95,9 @@ describeCharacter({
 			effects: [
 				{kind: "rollAttack", attackName: /greataxe|battleaxe|maul/i},
 				{kind: "rollSkillCheck", skill: "athletics"},
+				// Phase 8: numeric attack-bonus probe. At L5 prof = +3 and a
+				// martial STR weapon adds STR mod (≥0) → bonus must be ≥3.
+				{kind: "attackBonus", attackName: /greataxe|battleaxe|maul/i, min: 3},
 			],
 		},
 		{

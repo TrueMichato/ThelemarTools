@@ -1105,6 +1105,131 @@ export class CharacterSheetPage {
 			return out;
 		});
 	}
+
+	// ========== PHASE 8: per-pick + scaling stat helpers ==========
+
+	/**
+	 * Read an attack-bonus and parse it as an integer.  Wraps
+	 * `getAttackBonus()` (which returns a string like "+5") and
+	 * tolerates leading "+", trailing whitespace, surrounding text.
+	 * Returns null if the attack row isn't present or the bonus
+	 * can't be parsed.
+	 */
+	async getAttackBonusNumber (attackName: string | RegExp): Promise<number | null> {
+		const re = attackName instanceof RegExp ? attackName : new RegExp(attackName, "i");
+		const names = await this.getAttackNames();
+		const found = names.find(n => re.test(n));
+		if (!found) return null;
+		const raw = await this.getAttackBonus(found);
+		if (raw == null) return null;
+		const m = raw.match(/[+-]?\d+/);
+		return m ? parseInt(m[0], 10) : null;
+	}
+
+	/**
+	 * Read the full damage string from a named attack row.  Returns
+	 * the textContent of the damage cell (e.g. "1d8+3 piercing"),
+	 * or null when the attack isn't on the sheet.  Used by the
+	 * `attackDamageContains` effect to substring-match damage
+	 * riders (sneak attack dice, hexblade's curse extra damage,
+	 * elemental rune adders, etc).
+	 */
+	async getAttackDamageString (attackName: string | RegExp): Promise<string | null> {
+		await this.switchToTab(this.tabCombat);
+		const re = attackName instanceof RegExp ? attackName : new RegExp(attackName, "i");
+		const item = this.page.locator(".charsheet__attack-item")
+			.filter({hasText: re})
+			.first();
+		if (await item.count() === 0) return null;
+		const damageEl = item.locator(".charsheet__attack-damage, .charsheet__attack-roll-damage").first();
+		if (await damageEl.count() === 0) {
+			return (await item.textContent({timeout: 1000}).catch(() => "")) || null;
+		}
+		const t = await damageEl.textContent({timeout: 1000}).catch(() => null);
+		return t ? t.trim() : null;
+	}
+
+	/**
+	 * Read the rogue's sneak-attack dice count from
+	 * `getFeatureCalculations().sneakAttackDice`.  Returns 0 when
+	 * the calc isn't surfaced (non-rogue, build hasn't loaded).
+	 */
+	async getSneakAttackDiceCount (): Promise<number> {
+		return await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			if (!st) return 0;
+			try {
+				const calc = st.getFeatureCalculations?.() || {};
+				return Number(calc.sneakAttackDice ?? 0) || 0;
+			} catch (_) { return 0; }
+		});
+	}
+
+	/**
+	 * Read the monk's martial-arts die FACE (4/6/8/10/12).  The
+	 * state stores this as a string like "1d8" → returns 8.
+	 * Returns 0 when the calc isn't surfaced.
+	 */
+	async getMartialArtsDieSize (): Promise<number> {
+		return await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			if (!st) return 0;
+			try {
+				const calc = st.getFeatureCalculations?.() || {};
+				const d = String(calc.martialArtsDie ?? "");
+				const m = d.match(/d(\d+)/i);
+				return m ? parseInt(m[1], 10) : 0;
+			} catch (_) { return 0; }
+		});
+	}
+
+	/**
+	 * Read the bard's bardic-inspiration die FACE (6/8/10/12) from
+	 * `getFeatureCalculations().bardicInspirationDie`.  Returns 0
+	 * when not surfaced.
+	 */
+	async getBardicInspirationDieSize (): Promise<number> {
+		return await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			if (!st) return 0;
+			try {
+				const calc = st.getFeatureCalculations?.() || {};
+				const d = String(calc.bardicInspirationDie ?? "");
+				const m = d.match(/d(\d+)/i);
+				return m ? parseInt(m[1], 10) : 0;
+			} catch (_) { return 0; }
+		});
+	}
+
+	/**
+	 * List the warlock's known eldritch invocation names by
+	 * filtering the activatable feature list for the EI prefix
+	 * convention used by the renderer ("Invocation: …" rows).
+	 * Falls back to a heuristic when the prefix isn't present.
+	 */
+	async getInvocationsKnown (): Promise<string[]> {
+		const all = await this.getActivatableFeatureNames().catch(() => [] as string[]);
+		// Most TGTT/PHB invocations surface as "Invocation: <Name>" or
+		// just bare names; heuristic match by either pattern.
+		const named = all.filter(n => /^invocation:|^eldritch invocation\b/i.test(n));
+		if (named.length) return named.map(n => n.replace(/^invocation:\s*/i, "").trim());
+		// Fallback: read the state's _data.featureChoices.invocations
+		// list directly.
+		return await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			if (!st?._data?.featureChoices) return [];
+			const fc: any = st._data.featureChoices;
+			const inv: any = fc.invocations || fc.eldritchInvocations || fc.invocation;
+			if (!inv) return [];
+			if (Array.isArray(inv)) return inv.map((x: any) => String(x?.name ?? x));
+			if (typeof inv === "object") return Object.keys(inv);
+			return [];
+		});
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────

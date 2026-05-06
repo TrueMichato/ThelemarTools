@@ -32,6 +32,22 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 1,  name: /martial arts/i, kind: "passive",
 		effects: [
 			{kind: "rollSavingThrow", ability: "str"},
+			// XPHB Monk MA progression: d6 (L1) → d8 (L5) → d10
+			// (L11) → d12 (L17). minFaces: 6 holds at every
+			// milestone (the floor only grows from here).
+			{kind: "martialArtsDie", minFaces: 6},
+			// Monks render Unarmed Strike via a dedicated panel,
+			// not as a `.charsheet__attack-item` row, and TGTT
+			// Mercy Monks don't auto-equip a weapon. Skipped to
+			// avoid a guaranteed false negative; revisit if the
+			// monk panel ever surfaces unarmed strikes through
+			// the standard attack list.
+			{
+				kind: "attackPresent",
+				namePattern: /unarmed strike|martial arts/i,
+				skip: true,
+				skipReason: "monk unarmed strike lives in dedicated panel, not .charsheet__attack-item",
+			},
 		],
 	},
 	// Unarmored Defense: DEX is the other L1 proficient save; also
@@ -85,11 +101,13 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	// probe (no resistance/toggle/derived stat exposed).
 	{level: 4,  name: /slow fall/i, kind: "passive"},
 	// Extra Attack — host the rollInitiative probe here (the L5
-	// "combat-readiness" milestone is a natural home).
+	// "combat-readiness" milestone is a natural home). Also host
+	// the L5 MA-die bump (d8); minFaces:8 holds at L5/L11/L17/L20.
 	{
 		level: 5,  name: /extra attack/i, kind: "passive",
 		effects: [
 			{kind: "rollInitiative"},
+			{kind: "martialArtsDie", minFaces: 8},
 		],
 	},
 	// Stunning Strike — XPHB renders as a passive (no toggle, costs a
@@ -186,12 +204,23 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	// Effect is gated by the parent toggles, not a separate probe.
 	{level: 6,  name: /physician'?s touch/i, kind: "passive"},
 	// L11 Flurry of Healing and Harm — passive enhancement on
-	// Flurry of Blows.
-	{level: 11, name: /flurry of healing and harm/i, kind: "passive"},
+	// Flurry of Blows. Also the natural home for the L11 MA-die
+	// bump (d10); minFaces:10 holds at L11/L17/L20.
+	{
+		level: 11, name: /flurry of healing and harm/i, kind: "passive",
+		effects: [
+			{kind: "martialArtsDie", minFaces: 10},
+		],
+	},
 	// L17 Hand of Ultimate Mercy — once-per-long-rest revive. Passive
 	// listing on the feature panel (not a toggle in the active-state
-	// sense).
-	{level: 17, name: /hand of ultimate mercy/i, kind: "passive"},
+	// sense). Also the natural home for the L17 MA-die bump (d12).
+	{
+		level: 17, name: /hand of ultimate mercy/i, kind: "passive",
+		effects: [
+			{kind: "martialArtsDie", minFaces: 12},
+		],
+	},
 ];
 
 describeCharacter({
