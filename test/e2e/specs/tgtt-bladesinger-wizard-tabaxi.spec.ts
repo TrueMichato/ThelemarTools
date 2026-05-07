@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_BLADESINGER_TABAXI} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 // ── Bladesinger Wizard L1→20 features matrix ─────────────────────────
 // Wizard base (PHB / TGTT-2014 sourced subclass): Arcane Recovery,
@@ -108,6 +109,7 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 	// Song of Victory at L14 — passive damage bonus while Bladesong
 	// is active.
 	{level: 14, name: /song of victory/i, kind: "passive"},
+	...buildSpecialtyChecks("Wizard"),
 ];
 
 /**

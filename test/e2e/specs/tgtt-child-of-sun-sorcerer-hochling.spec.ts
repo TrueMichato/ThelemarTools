@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_CHILD_OF_SUN_HOCHLING} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 // ── Child of the Sun Sorcerer L1→20 features matrix ──────────────────
 // Sorcerer base (PHB classic — TGTT uses PHB Sorc table):
@@ -149,6 +150,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 6,  name: /sunlit path/i,    kind: "passive"},
 	{level: 14, name: /grasping the sun/i, kind: "passive"},
 	{level: 18, name: /bright zenith/i,  kind: "passive"},
+	...buildSpecialtyChecks("Sorcerer"),
 ];
 
 /**

@@ -34,8 +34,42 @@ character: cast spells, spend resources, attack, roll skills, rest.
 | 16 | **USE: feat-toggle delta** *(new, optional)* | factory `USE: feat`, `probeToggleDelta` | If the build takes a feat with an active toggle (Lucky, GWM, Sharpshooter), the toggle measurably changes a derived stat. |
 | 17 | **L1 export round-trip preserves identity** | factory `L1 export round-trip …` | `state.toJson()` → `state.loadFromJson()` preserves name and L1 state. |
 | 18 | **Multiclass: usage probes after each leg** *(new)* | factory multiclass test, `usageAfterEachLeg` | After each multiclass leg, the secondary class actually works — slot, resource, attack, skill all functional. |
+| 19 | **TGTT Specialties: cumulative pick coverage** *(new)* | per-spec `featuresMatrix` via `buildSpecialtyChecks(className)` | Every TGTT class grants cumulative "Specialties" picks at fixed levels (Fighter 1/5/9/13/17, Monk 2/4/…, Cleric 3/7/…, etc.). Each milestone must assert ≥N distinct specialty names land on the sheet, drawn from the class's L1 pool. |
+| 20 | **Weapon Mastery: pickedFrom + rollAttack** *(new, martials)* | per-spec `featuresMatrix` `pick` with `rollAttack` effect | XPHB martials (Fighter, Barbarian, Ranger, Paladin, Rogue, Monk where applicable) gain Weapon Mastery at L1. The picked weapons must surface as attacks and roll without throwing. |
+| 21 | **Battle Tactics / class-option pickers** *(new, Fighter/etc.)* | per-spec `featuresMatrix` `pick` with `pickActivatable` effect | Fighter Battle Tactics (2 at L3, +1 at L7/10/15), Sorcerer Metamagic, Warlock Invocations, Battle Master Maneuvers, Eldritch Knight spells, Arcane Shot options — each must register the picked option as a feature on the sheet. |
 
-## Skip discipline
+## Helpers for class-option pickers
+
+For TGTT classes, use the shared pools in
+[`test/e2e/utils/tgttFeaturePools.ts`](../../../test/e2e/utils/tgttFeaturePools.ts):
+
+- `TGTT_SPECIALTIES[className]` — per-class regex pool of specialty names.
+- `TGTT_SPECIALTY_LEVELS[className]` — class-levels at which a new
+  specialty pick is granted (used to build cumulative `pickedCount`).
+- `buildSpecialtyChecks(className, levelMap?)` — returns a ready-made
+  `FeatureCheck[]` list of cumulative `kind: "pick"` entries for every
+  specialty milestone. Spread it into your `featuresMatrix`:
+
+  ```ts
+  import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+
+  const FOO_FEATURES_MATRIX: FeatureCheck[] = [
+      // … class-specific entries …
+      ...buildSpecialtyChecks("Fighter"),
+  ];
+  ```
+
+  For multiclass specs, pass a `levelMap` mapping class-level → spec
+  character-level so the matrix targets the right characterLevel.
+
+- `TGTT_BATTLE_TACTICS` / `TGTT_BATTLE_TACTICS_CUM` — Fighter Battle
+  Tactics pool and cumulative count per class-level (3→2, 7→3, 10→4,
+  15→5).
+
+Pools are auto-derived from `homebrew/TravelersGuidetoThelemar.json`;
+regenerate when homebrew changes.
+
+## Skip discipline (continued)
 
 Every spec lists every check, even when skipping.  Use the `{skip: true}`
 sentinel so the test report shows `test.skip(...)` with a comment

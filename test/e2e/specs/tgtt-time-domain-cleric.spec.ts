@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_TIME_CLERIC} from "../utils/characterBuilder";
 import type {EffectCheck, FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #10 — Time Domain Cleric (TGTT) — L1→20.
@@ -153,5 +154,6 @@ describeCharacter({
 		// ── L20: Divine Intervention auto-success ───────────────────────
 		// Auto-success rules upgrade — no probe per hint #5.
 		{level: 20, name: /divine intervention improvement|divine intervention/i, kind: "passive"},
+		...buildSpecialtyChecks("Cleric"),
 	],
 });

@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_SURREALISM_YUANTI} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #8 — College of Surrealism Bard Yuan-Ti (TGTT) — L1→20.
@@ -201,6 +202,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "bardicInspirationDie", minFaces: 12},
 		],
 	},
+	...buildSpecialtyChecks("Bard"),
 ];
 
 describeCharacter({

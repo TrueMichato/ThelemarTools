@@ -1,5 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_CHAINED_FURY_MINOTAUR} from "../utils/characterBuilder";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #9 — Chained Fury Barbarian Minotaur (TGTT) — L1→20.
@@ -169,5 +170,6 @@ describeCharacter({
 		{level: 6,  name: /chain imprisonment/i, kind: "passive"},
 		{level: 10, name: /chain control/i, kind: "passive"},
 		{level: 14, name: /unchained fury/i, kind: "passive"},
+		...buildSpecialtyChecks("Barbarian"),
 	],
 });

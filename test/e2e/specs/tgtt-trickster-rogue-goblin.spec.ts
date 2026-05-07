@@ -1,5 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_TRICKSTER_GOBLIN} from "../utils/characterBuilder";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #16 — Trickster Rogue Goblin (TGTT) — L1→20.
@@ -268,5 +269,6 @@ describeCharacter({
 				{kind: "sneakAttackDice", min: 9},
 			],
 		},
+		...buildSpecialtyChecks("Rogue"),
 	],
 });

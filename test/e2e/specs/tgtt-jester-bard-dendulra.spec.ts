@@ -1,5 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_JESTER_DENDULRA} from "../utils/characterBuilder";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #13 — College of Jesters Bard Dendulra (TGTT) — L1→20.
@@ -296,5 +297,6 @@ describeCharacter({
 		//     attached to the race, not the matrix's class entries,
 		//     and there's no Dendulra row to hang them on.
 		// Documented here intentionally; no effects: arrays added.
+		...buildSpecialtyChecks("Bard"),
 	],
 });

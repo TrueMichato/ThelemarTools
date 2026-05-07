@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_BASTION_BUGBEAR} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #14 — Oath of Bastion Paladin Bugbear (TGTT) — L1→20.
@@ -213,5 +214,6 @@ describeCharacter({
 		// through `getResistances()` / `getImmunities()`. No clean state
 		// probe without a product fix.
 		{level: 20, name: /eternal bastion/i, kind: "passive"},
+		...buildSpecialtyChecks("Paladin"),
 	],
 });

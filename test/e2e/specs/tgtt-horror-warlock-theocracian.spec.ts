@@ -1,5 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HORROR_THEOCRACIAN} from "../utils/characterBuilder";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #18 — The Horror Warlock Theocracian (TGTT) — L1→20.
@@ -209,5 +210,6 @@ describeCharacter({
 		// Imploding Infestation — once-per-long-rest situational AoE
 		// applied via unarmed strike; nothing always-on to probe.
 		{level: 14, name: /imploding infestation/i, kind: "passive"},
+		...buildSpecialtyChecks("Warlock"),
 	],
 });
