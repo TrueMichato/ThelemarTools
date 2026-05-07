@@ -50,49 +50,44 @@ defining feature of the subclass.
 
 ### CS-BUG-003 — Arcane Archer: level-up wizard unfinishable when all Combat Methods already known
 
-**Status**: Open
+**Status**: Fixed (2026-05-07)
 **Surfaced by**: `test/e2e/specs/tgtt-arcane-archer-fighter-hochling.spec.ts`
-(L3, L5, MEGA — all fail; wizard never closes)
+(L3, L5, MEGA — all failed; wizard never closed)
 
-**Repro**:
-1. Build a TGTT Fighter with race Hochling via the builder wizard.
-2. Level up to 3, selecting subclass `Arcane Archer` (source `TGTT`).
-3. Click Finish on the wizard.
+**Root cause** (two coupled bugs):
+1. **Builder L1 combat-method tagging** — `_applySelectedOptionalFeatures`
+   in `charactersheet-builder.js` was passing `optionalFeatureTypes:
+   opt.featureType` for combat-method picks. Raw `combatMethod` data
+   entries (in `homebrew/TravelersGuidetoThelemar.json`) have
+   `tradition`/`degree` fields but NO `featureType` field, so picks
+   were stored with `optionalFeatureTypes: undefined`. This broke
+   `getOptionalFeatureGains` at L2: it could not match the L1 picks
+   against the progression's `CTM:*` types, so it returned the FULL
+   progression total (4) instead of the new picks (1) → autofill
+   selected 4 methods at L2 → entire 1st-degree pool exhausted by L3.
+2. **Level-up render container reuse** — `_renderMethodsForLevelUp`
+   in `charactersheet-levelup.js` did `container.innerHTML = ""` at
+   the start, but `_renderCombatMethodsLevelUp`'s "has traditions"
+   branch passed the SHARED outer container. So when CTM was the
+   second gain rendered (e.g. after Battle Tactics at L3 with
+   subclass), the CTM render wiped the BT section that had just
+   been appended, leaving the wizard with an unsatisfiable BT
+   picker count of 0/2.
 
-**Expected**: Wizard closes; the player is told they have no NEW Combat
-Methods to learn this level (or the picker is hidden) but can still
-finish the level-up.
-**Actual**: Wizard refuses to finish with a toast `Please select 1 new
-method`. Every Combat Method checkbox in the picker is `[disabled]`
-with the label `Known (1st degree)` because the Hochling species + base
-Fighter class together already grant every default-source 1st-degree
-method. Even after enabling "Show all source versions", no additional
-methods are selectable.
+**Fixes**:
+- `charactersheet-builder.js` L1728+: Derive `optionalFeatureTypes`
+  from `featureKey.split("_")` when `opt.featureType` is missing or
+  not an array. Mirrors the level-up fallback at
+  `charactersheet-levelup.js:3757`.
+- `charactersheet-levelup.js` L2710+: Wrap the CTM rendering in a
+  dedicated sub-container (`charsheet__levelup-methods-container`)
+  appended to the outer container, so the inner `innerHTML = ""`
+  no longer wipes sibling gain sections.
 
-**Suspected fix**: Two pieces:
-1. In `_renderCombatMethodsLevelUp` (`charactersheet-levelup.js` L2604+),
-   detect choice-based subclass tradition grants from
-   `CharacterSheetClassUtils.getSubclassGrantedTraditions` and present
-   a tradition-selection UI for them (mirroring the existing
-   `knownTraditions.length < traditionCount` retroactive flow at
-   L2628). Today the wizard skips choice-based grants entirely
-   (only fixed `code && !choice` codes are pre-seeded at L442 of
-   the same file), leaving the picker locked to the L1 traditions
-   even though the Arcane Archer feature explicitly grants new ones.
-2. In `_applyLevelUp`'s validator (L1078–1088), mirror the
-   `availableCount` logic the `featureOptionGroups` validator uses
-   a few lines below (L1090+). Compute how many of `gain.options`
-   the character does NOT already know, then
-   `requiredCount = Math.min(gain.newCount, availableCount)`. Skip
-   the toast (and treat as satisfied) when `requiredCount === 0` —
-   covers any subclass that exhausts its restricted pool.
+**Regression coverage**: `tgtt-arcane-archer-fighter-hochling.spec.ts`
+L3/L5/L7/MEGA all re-enabled and passing.
 
-**Workaround in tests**: `tgtt-arcane-archer-fighter-hochling.spec.ts`
-sets `skipL3 / skipL5 / skipL7 / skipMega = true`. Only the L1 build
-+ L1 export round-trip run as regression coverage for the build path.
-Restore the level-up tests once the wizard fix lands.
-
-**Severity**: High — completely blocks levelling up an Arcane Archer
+**Severity**: High — completely blocked levelling up an Arcane Archer
 Hochling once defaults are exhausted.
 
 ---
