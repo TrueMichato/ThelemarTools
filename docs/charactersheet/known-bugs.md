@@ -69,13 +69,28 @@ Fighter class together already grant every default-source 1st-degree
 method. Even after enabling "Show all source versions", no additional
 methods are selectable.
 
-**Suspected fix**: In `_applyLevelUp`'s validator
-(`charactersheet-levelup.js` L1078–1088), mirror the `availableCount`
-logic the `featureOptionGroups` validator uses a few lines below
-(L1090+). Compute how many of `gain.options` the character does NOT
-already know, then `requiredCount = Math.min(gain.newCount,
-availableCount)`. Skip the toast (and treat as satisfied) when
-`requiredCount === 0`.
+**Suspected fix**: Two pieces:
+1. In `_renderCombatMethodsLevelUp` (`charactersheet-levelup.js` L2604+),
+   detect choice-based subclass tradition grants from
+   `CharacterSheetClassUtils.getSubclassGrantedTraditions` and present
+   a tradition-selection UI for them (mirroring the existing
+   `knownTraditions.length < traditionCount` retroactive flow at
+   L2628). Today the wizard skips choice-based grants entirely
+   (only fixed `code && !choice` codes are pre-seeded at L442 of
+   the same file), leaving the picker locked to the L1 traditions
+   even though the Arcane Archer feature explicitly grants new ones.
+2. In `_applyLevelUp`'s validator (L1078–1088), mirror the
+   `availableCount` logic the `featureOptionGroups` validator uses
+   a few lines below (L1090+). Compute how many of `gain.options`
+   the character does NOT already know, then
+   `requiredCount = Math.min(gain.newCount, availableCount)`. Skip
+   the toast (and treat as satisfied) when `requiredCount === 0` —
+   covers any subclass that exhausts its restricted pool.
+
+**Workaround in tests**: `tgtt-arcane-archer-fighter-hochling.spec.ts`
+sets `skipL3 / skipL5 / skipL7 / skipMega = true`. Only the L1 build
++ L1 export round-trip run as regression coverage for the build path.
+Restore the level-up tests once the wizard fix lands.
 
 **Severity**: High — completely blocks levelling up an Arcane Archer
 Hochling once defaults are exhausted.

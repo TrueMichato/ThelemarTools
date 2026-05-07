@@ -740,17 +740,62 @@ export class BuilderWizardPage {
 		];
 
 		for (const {score, ability} of assignments) {
-			// Click the score badge to select it
-			const scoreBadge = this.page.locator(`.charsheet__builder-score-badge[data-score="${score}"]`);
-			if (await scoreBadge.isVisible()) {
-				await scoreBadge.click();
-				await this.page.waitForTimeout(100);
+			// Per-iteration retry — the badge layout reflows after each
+			// successful assignment (the assigned badge is removed and
+			// siblings shift), and on slower / more-feature-laden builds
+			// (e.g. Theocracian Warlock) a stale node can hang a click
+			// while waiting for "stable". Re-resolve the locator every
+			// attempt and verify the dropzone took the score before
+			// moving on, instead of relying on a blind 100 ms wait.
+			let assigned = false;
+			for (let attempt = 0; attempt < 3 && !assigned; attempt++) {
+				const scoreBadge = this.page.locator(
+					`.charsheet__builder-score-badge[data-score="${score}"]`,
+				).first();
+				const dropzone = this.page.locator(
+					`.charsheet__builder-ability-dropzone[data-ability="${ability}"]`,
+				).first();
 
-				// Click the ability dropzone to assign it
-				const abilityDropzone = this.page.locator(`.charsheet__builder-ability-dropzone[data-ability="${ability}"]`);
-				if (await abilityDropzone.isVisible()) {
-					await abilityDropzone.click();
-					await this.page.waitForTimeout(100);
+				try {
+					await scoreBadge.waitFor({state: "visible", timeout: 5000});
+				} catch {
+					// Badge not present — score may already be assigned
+					// elsewhere (e.g. user re-ran the helper) or the
+					// step doesn't render the standard array. Bail this
+					// assignment cleanly.
+					break;
+				}
+
+				try {
+					await scoreBadge.click({timeout: 5000});
+					await dropzone.click({timeout: 5000});
+				} catch {
+					await this.page.waitForTimeout(150);
+					continue;
+				}
+
+				// Verify the dropzone now reflects the assigned score
+				// before advancing. Polling beats a blind sleep — on
+				// fast renders we move on immediately, on slow ones
+				// we wait up to the timeout for the DOM to settle.
+				try {
+					await this.page.waitForFunction(
+						({abil, sc}) => {
+							const dz = document.querySelector(
+								`.charsheet__builder-ability-dropzone[data-ability="${abil}"]`,
+							);
+							if (!dz) return false;
+							const txt = (dz.textContent || "").trim();
+							return txt.includes(String(sc));
+						},
+						{abil: ability, sc: score},
+						{timeout: 3000},
+					);
+					assigned = true;
+				} catch {
+					// Click succeeded but the dropzone never reflected
+					// the score — re-resolve and retry.
+					await this.page.waitForTimeout(150);
 				}
 			}
 		}
