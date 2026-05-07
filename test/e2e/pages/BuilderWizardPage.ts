@@ -502,27 +502,51 @@ export class BuilderWizardPage {
 	}
 
 	/**
-	 * Select first available optional features (fighting styles, divine order, combat methods, etc.)
+	 * Select first available optional features (fighting styles, divine order, eldritch invocations, etc.)
 	 * Handles multiple UI patterns: label-wrapped checkboxes and bare checkbox containers.
+	 *
+	 * IMPORTANT: This helper deliberately EXCLUDES combat-method DOM
+	 * (`.charsheet__builder-method-item`, `.charsheet__builder-combat-methods label`).
+	 * Combat traditions and methods are owned exclusively by
+	 * `selectCombatTraditionsAndMethods()` because they have strict per-level
+	 * grant counts that this generic picker would over-fill, exhausting the
+	 * 1st-degree pool before subclass features arrive (e.g. Arcane Archer L3).
+	 * See CS-BUG-003 for context.
 	 */
 	async selectFirstAvailableOptionalFeatures (count: number): Promise<void> {
 		await this.page.waitForTimeout(300);
 
 		let selected = 0;
 
-		// Broad approach: find ALL clickable labels/containers with checkboxes
-		// across optional feature sections, combat method sections, etc.
+		// Broad approach: find clickable labels/containers with checkboxes
+		// across optional feature sections (fighting styles, EI, divine order, etc.).
+		// Combat method selectors are intentionally absent — see method docstring.
+		//
+		// NOTE: `.charsheet__builder-optional-features` is a parent container
+		// that *also* wraps the Combat Methods sub-section, so a naive
+		// descendant `label` selector still bleeds into combat-method DOM.
+		// We filter those out at runtime by skipping any label that is
+		// inside a `.charsheet__builder-combat-methods` ancestor or that
+		// IS a combat-method item.
 		const allOptFeatLabels = this.page.locator(
 			".charsheet__builder-opt-feat-item, " +
 			".charsheet__builder-opt-feat-section label, " +
-			".charsheet__builder-optional-features label, " +
-			".charsheet__builder-method-item, " +
-			".charsheet__builder-combat-methods label",
+			".charsheet__builder-optional-features label",
 		);
 
 		const labelCount = await allOptFeatLabels.count();
 		for (let i = 0; i < labelCount && selected < count; i++) {
 			const label = allOptFeatLabels.nth(i);
+
+			// Hard-skip any combat-method DOM — these are owned by
+			// `selectCombatTraditionsAndMethods()`. See docstring above.
+			const isCombatMethodLabel = await label.evaluate((el: HTMLElement) => {
+				return el.classList.contains("charsheet__builder-method-item")
+					|| el.classList.contains("charsheet__builder-tradition-item")
+					|| !!el.closest(".charsheet__builder-combat-methods");
+			}).catch(() => false);
+			if (isCombatMethodLabel) continue;
+
 			const checkbox = label.locator("input[type='checkbox']");
 			if (await label.isVisible() && await checkbox.count() > 0 && !(await checkbox.isChecked())) {
 				await label.scrollIntoViewIfNeeded();

@@ -2583,7 +2583,6 @@ class CharacterSheetLevelUp {
 	}
 
 	_renderOptFeaturesInContainer (container, classData, gains, onSelect, newLevel, allOptFeatures, existingOptFeatures, {subclassGrantedTraditionCodes = [], existingSelections = {}} = {}) {
-
 		gains.forEach(gain => {
 			const featureKey = gain.featureTypes.join("_");
 			const isCombatMethods = gain.featureTypes.some(ft => ft.startsWith("CTM:"));
@@ -2705,8 +2704,13 @@ class CharacterSheetLevelUp {
 			return;
 		}
 
-		// Normal flow: has traditions, render methods directly
-		this._renderMethodsForLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, knownTraditions, maxDegree, selectedForType);
+		// Normal flow: has traditions, render methods directly.
+		// Wrap in a dedicated sub-container so _renderMethodsForLevelUp's
+		// `container.innerHTML = ""` doesn't wipe sibling gain sections
+		// (e.g. Battle Tactics rendered earlier in the same parent).
+		const methodsWrapper = e_({outer: `<div class="charsheet__levelup-methods-container"></div>`});
+		container.append(methodsWrapper);
+		this._renderMethodsForLevelUp(methodsWrapper, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, knownTraditions, maxDegree, selectedForType);
 	}
 
 	/**

@@ -230,8 +230,8 @@ describeCharacter({
 	// regression coverage for the build path itself.  Re-enable once
 	// CS-BUG-003 lands its `requiredCount = min(newCount, available)`
 	// fix in `_applyLevelUp`.
-	skipL3: true,
-	skipL5: true,
+	skipL3: false,
+	skipL5: false,
 	skipL7: true,
 	skipMega: true,
 	midTierLoadout: [
@@ -247,8 +247,8 @@ describeCharacter({
 	usage: {skip: true},
 	milestones: {
 		1:  {totalLevel: 1,  minMaxHp: 10, expectToggles: [/second wind/i]},
-		3:  {totalLevel: 3,  minMaxHp: 26, expectToggles: [/arcane shot|second wind/i]},
-		5:  {totalLevel: 5,  minMaxHp: 44},
+		3:  {totalLevel: 3,  minMaxHp: 25, expectToggles: [/arcane shot|second wind/i]},
+		5:  {totalLevel: 5,  minMaxHp: 39},
 		11: {totalLevel: 11, minMaxHp: 80},
 		17: {totalLevel: 17, minMaxHp: 120},
 		20: {totalLevel: 20, minMaxHp: 140},
