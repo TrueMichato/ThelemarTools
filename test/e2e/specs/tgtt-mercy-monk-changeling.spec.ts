@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_MERCY_MONK_CHANGELING} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {TGTT_SPECIALTIES} from "../utils/tgttFeaturePools";
 
 /**
  * #1 — Mercy Monk Changeling (TGTT) — L1→20.
@@ -162,10 +163,18 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 20, name: /body and mind/i, kind: "passive"},
 
 	// ── TGTT Monk additions ──────────────────────────────────────────
-	// Specialties (TGTT) are a pick-list at L2/4/6/8/10/12/14/16/18/20;
-	// list the L2 grant once as a passive marker. The L8 Unhindered
-	// Flurry rider is also TGTT-specific.
-	{level: 2,  name: /specialties/i, kind: "passive"},
+	// Specialties (TGTT) — Monk gains a pick at L2 then +1 each at
+	// L4/6/8/10/12/14/16/18/20 (cumulative 1→10) from a 17-option pool.
+	{level: 2,  name: /specialties/i, kind: "pick", pickedCount: 1,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 4,  name: /specialties/i, kind: "pick", pickedCount: 2,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 6,  name: /specialties/i, kind: "pick", pickedCount: 3,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 8,  name: /specialties/i, kind: "pick", pickedCount: 4,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 10, name: /specialties/i, kind: "pick", pickedCount: 5,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 12, name: /specialties/i, kind: "pick", pickedCount: 6,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 14, name: /specialties/i, kind: "pick", pickedCount: 7,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 16, name: /specialties/i, kind: "pick", pickedCount: 8,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 18, name: /specialties/i, kind: "pick", pickedCount: 9,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 20, name: /specialties/i, kind: "pick", pickedCount: 10, pickedFrom: TGTT_SPECIALTIES.Monk},
 	{level: 8,  name: /unhindered flurry/i, kind: "passive"},
 
 	// ── Subclass — Warrior of Mercy (XPHB, exposed via TGTT) ─────────

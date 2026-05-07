@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_CHRONURGY_NYUIDJ} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #7 — Chronurgy Wizard Nyuidj (TGTT) — L1→20.
@@ -141,6 +142,7 @@ const CHRONURGY_WIZARD_FEATURES_MATRIX: FeatureCheck[] = [
 	// at the cost of one level of exhaustion (long rest to remove).
 	{level: 14, name: /convergent future/i, kind: "passive",
 		skip: true, skipReason: "CS-BUG-002"},
+	...buildSpecialtyChecks("Wizard"),
 ];
 
 describeCharacter({

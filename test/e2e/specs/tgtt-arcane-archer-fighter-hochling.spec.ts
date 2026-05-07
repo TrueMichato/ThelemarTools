@@ -1,16 +1,27 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_ARCANE_ARCHER_HOCHLING} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {TGTT_SPECIALTIES, TGTT_BATTLE_TACTICS} from "../utils/tgttFeaturePools";
 
 // ── Arcane Archer Fighter L1→20 features matrix ──────────────────────
 // Fighter base: Fighting Style (L1 pick), Second Wind (L1 resource —
-// prof-bonus uses, short-rest), Action Surge (L2 resource — 1 use,
-// then 2 at L17), Extra Attack (L5/11/20 passive, count grows),
+// prof-bonus uses, short-rest), Weapon Mastery (L1 passive — 3 picks),
+// Specialties (L1/5/9/13/17 — picks from a 16-option pool),
+// Action Surge (L2 resource — 1 use, then 2 at L17),
+// Battle Tactics (L3/7/10/15 — picks from 13 BT options),
+// Extra Attack (L5/11/20 passive, count grows),
 // Indomitable (L9 resource — 1 → 2 at L13 → 3 at L17), ASIs at
 // L4/6/8/12/14/16/19. Subclass: Arcane Shot pool (L3, L7+) and
-// 2-of-N Arcane Shot pick (L3 / +1 at L7/10/15/18) — both blocked by
-// CS-BUG-002 / CS-BUG-003 respectively. Magic Arrow (L7 passive),
-// Curving Shot (L7 passive), Ever-Ready Shot (L15 passive).
+// 2-of-N Arcane Shot pick (L3 / +1 at L7/10/15/18). Magic Arrow (L7
+// passive), Curving Shot (L7 passive), Ever-Ready Shot (L15 passive).
+//
+// CS-BUG-003 (Combat Methods validator + render container reuse) is
+// fixed; CS-BUG-002 (Arcane Shot resource pool not granted) is the
+// only blocker remaining for the resource-pool entries.
+
+const FIGHTER_SPECIALTIES = TGTT_SPECIALTIES.Fighter;
+const FIGHTER_BATTLE_TACTICS = TGTT_BATTLE_TACTICS;
+
 const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// Fighting Style at L1 — pick 1 from the Fighter list.
 	// No effect probe: the +2 from Archery (the most likely pick) goes
@@ -57,6 +68,33 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollInitiative"},
 		],
 	},
+	// Weapon Mastery at L1 — Fighter (XPHB/TGTT) gains the mastery
+	// property on 3 chosen weapons. The chosen weapon names live in
+	// the inventory (not the feature list), so the FEATURE itself is
+	// what we probe here. Layered effect: a melee attack roll probe
+	// using one of the common Fighter mastery picks.
+	{
+		level: 1,
+		name: /weapon mastery/i,
+		kind: "passive",
+		effects: [
+			{
+				kind: "rollAttack",
+				attackName: /longsword|greatsword|warhammer|battleaxe|mace|scimitar|rapier|shortsword|longbow|shortbow/i,
+				skip: true,
+				skipReason: "preset weapon equip varies — covered by other martial specs",
+			},
+		],
+	},
+	// Specialties at L1 / +1 each at L5, L9, L13, L17 — TGTT Fighter's
+	// pick-list of passive flavor abilities. Every level builds on the
+	// L1 pool of 16; cumulative pickedCount reflects total picks owned
+	// at that level.
+	{level: 1,  name: /specialties/i, kind: "pick", pickedCount: 1, pickedFrom: FIGHTER_SPECIALTIES},
+	{level: 5,  name: /specialties/i, kind: "pick", pickedCount: 2, pickedFrom: FIGHTER_SPECIALTIES},
+	{level: 9,  name: /specialties/i, kind: "pick", pickedCount: 3, pickedFrom: FIGHTER_SPECIALTIES},
+	{level: 13, name: /specialties/i, kind: "pick", pickedCount: 4, pickedFrom: FIGHTER_SPECIALTIES},
+	{level: 17, name: /specialties/i, kind: "pick", pickedCount: 5, pickedFrom: FIGHTER_SPECIALTIES},
 	// Action Surge at L2 — 1 use, short-rest. Bumps to 2 uses at L17.
 	// Effects: explicit shortRestRestores probe, plus a CON save (the
 	// other Fighter-proficient save) and a Perception skill-roll probe.
@@ -147,6 +185,14 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		],
 	},
 
+	// Battle Tactics at L3/7/10/15 — TGTT Fighter's curated optional
+	// feature pool (13 BT options). Cumulative count grows with the
+	// {3:2, 7:1, 10:1, 15:1} progression: 2 / 3 / 4 / 5.
+	{level: 3,  name: /battle tactics/i, kind: "pick", pickedCount: 2, pickedFrom: FIGHTER_BATTLE_TACTICS},
+	{level: 7,  name: /battle tactics/i, kind: "pick", pickedCount: 3, pickedFrom: FIGHTER_BATTLE_TACTICS},
+	{level: 10, name: /battle tactics/i, kind: "pick", pickedCount: 4, pickedFrom: FIGHTER_BATTLE_TACTICS},
+	{level: 15, name: /battle tactics/i, kind: "pick", pickedCount: 5, pickedFrom: FIGHTER_BATTLE_TACTICS},
+
 	// Arcane Archer subclass.
 	// Arcane Shot resource pool (2/short-rest at L3, scales) — blocked
 	// by CS-BUG-002 (subclass features not granted on level-up, so the
@@ -161,12 +207,8 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		skipReason: "CS-BUG-002",
 	},
 	// Arcane Shot pick — choose 2 options at L3 (+1 at L7/10/15/18).
-	// Blocked by CS-BUG-003 (Combat Methods validator path makes the
-	// wizard unfinishable when the pick step fires). The
-	// pickActivatable effect is documentation for when the bug is
-	// fixed: the FeatureCheck.skip short-circuits effects today, but
-	// re-enabling the entry will exercise each picked Arcane Shot
-	// option as an activatable feature on the sheet.
+	// Re-enabled after CS-BUG-003 fix.  Each picked Arcane Shot must
+	// surface as an activatable feature on the sheet (pickActivatable).
 	{
 		level: 3,
 		name: /arcane shot/i,
@@ -198,8 +240,6 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 				min: 1,
 			},
 		],
-		skip: true,
-		skipReason: "CS-BUG-003",
 	},
 	// Magic Arrow at L7 — non-magical ammo counts as magical. Passive.
 	{level: 7, name: /magic arrow/i, kind: "passive"},
@@ -223,28 +263,24 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 describeCharacter({
 	preset: PRESET_FULL_ARCANE_ARCHER_HOCHLING,
 	displayName: "Arcane Archer Fighter Hochling",
-	// All level-up tests at L3+ are blocked by CS-BUG-003 (Combat Methods
-	// validator makes the wizard unfinishable once the chosen traditions'
-	// 1st-degree pool is already fully Known — see known-bugs.md). The
-	// builder-only L1 smoke + L1 export round-trip still run as
-	// regression coverage for the build path itself.  Re-enable once
-	// CS-BUG-003 lands its `requiredCount = min(newCount, available)`
-	// fix in `_applyLevelUp`.
+	// CS-BUG-003 fixed (Combat Methods validator + render container reuse).
+	// All level-up checkpoints re-enabled.
 	skipL3: false,
 	skipL5: false,
-	skipL7: true,
-	skipMega: true,
+	skipL7: false,
+	skipMega: false,
 	midTierLoadout: [
 		{name: "Cloak of Protection", source: "XDMG", attune: true},
 	],
 	signatureToggle: /action surge|second wind|arcane shot/i,
-	// Usage spec skipped — CS-BUG-003 makes the L3+ level-up wizard
-	// unfinishable for this preset, so the L5 build doesn't complete.
-	// Re-enable once the validator is fixed.  When un-skipping, restore:
-	//   skillRoll: {name: "Perception"}, shortRestRestores: {resourceName: "Action Surge", expectAfter: 1},
-	//   concentrationCheck: {skip: true}, deathSaves: true,
-	//   applyCondition: {skip: true}, featAbility: {skip: true},
-	usage: {skip: true},
+	usage: {
+		skillRoll: {name: "Perception"},
+		shortRestRestores: {resourceName: "Action Surge", expectAfter: 1},
+		concentrationCheck: {skip: true},
+		deathSaves: true,
+		applyCondition: {skip: true},
+		featAbility: {skip: true},
+	},
 	milestones: {
 		1:  {totalLevel: 1,  minMaxHp: 10, expectToggles: [/second wind/i]},
 		3:  {totalLevel: 3,  minMaxHp: 25, expectToggles: [/arcane shot|second wind/i]},

@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HEROIC_SOUL_HALFOGRE} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 // ── Heroic Soul Sorcerer L1→20 features matrix ───────────────────────
 // Sorcerer base (PHB / TGTT-sourced subclass):
@@ -188,6 +189,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// Eternal Hero at L18 — passive capstone (Over Soul always on +
 	// drop-to-1-HP rider).
 	{level: 18, name: /eternal hero/i, kind: "passive"},
+	...buildSpecialtyChecks("Sorcerer"),
 ];
 
 /**

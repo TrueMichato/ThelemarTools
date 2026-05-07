@@ -18,7 +18,7 @@ gaps (e.g. nobody rolls a skill, nobody short-rests a Warlock).
 ## The required-checks list
 
 See **[skill standard](../../.agents/skills/e2e-character-tests/references/standard.md)**
-for the canonical numbered list (currently 18 checks).  At a glance:
+for the canonical numbered list (currently 21 checks).  At a glance:
 
 1. L1 creation via builder wizard
 2. L3 subclass arrival
@@ -38,6 +38,9 @@ for the canonical numbered list (currently 18 checks).  At a glance:
 16. USE: feat-toggle delta (when applicable)
 17. L1 export round-trip preserves identity
 18. Multiclass: usage probes after each leg
+19. TGTT Specialties: cumulative pick coverage (use `buildSpecialtyChecks`)
+20. Weapon Mastery: pickedFrom + rollAttack (martial classes)
+21. Battle Tactics / class-option pickers: pickActivatable effect
 
 Every spec lists every check, even when skipping (use `{skip: true}` with
 a one-line reason — coverage gaps stay visible).

@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_LUST_LEXALIAN} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #17 — Lust Domain Cleric Lexalian (TGTT) — L1→20.
@@ -146,6 +147,7 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// martial weapons, polearms) is proficiency-only. Armor/weapon
 	// proficiency lists aren't surfaced as state scalars on the sheet,
 	// so no race-level effect probes are added here.
+	...buildSpecialtyChecks("Cleric"),
 ];
 
 describeCharacter({
