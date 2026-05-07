@@ -51,6 +51,18 @@ export interface CharacterSpec {
 	 */
 	skipL7?: boolean;
 	/**
+	 * Set true to skip the L3 subclass-arrival test. Use only when a
+	 * known product bug guarantees the L3 wizard cannot finish for this
+	 * preset (e.g. Arcane Archer / CS-BUG-003).  See known-bugs.md.
+	 */
+	skipL3?: boolean;
+	/**
+	 * Set true to skip the L5 mid-game milestone test. Use only when a
+	 * known product bug at L3 cascades into L5 unfinishability for this
+	 * preset.  See known-bugs.md.
+	 */
+	skipL5?: boolean;
+	/**
 	 * Sheet-usage probes. When provided, an additional spec is generated
 	 * that levels the character to {usageLevel} (default 5) and exercises
 	 * core actions a player would perform — casting spells, attacking,
@@ -158,7 +170,7 @@ const MIDTIER_TIMEOUT_MS = 180_000;
 const L7_TIMEOUT_MS = 600_000;
 
 export function describeCharacter (spec: CharacterSpec): void {
-	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, skipMega, skipL7, featuresMatrix} = spec;
+	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
 	const subclassOpts = preset.subclassName
 		? {subclassName: preset.subclassName, subclassSource: preset.subclassSource}
 		: undefined;
@@ -187,7 +199,8 @@ export function describeCharacter (spec: CharacterSpec): void {
 		});
 
 		// ── L3 subclass arrival ─────────────────────────────────────────
-		test(`L3: subclass arrives and registers feature`, async ({page}) => {
+		const l3Test = skipL3 ? test.skip : test;
+		l3Test(`L3: subclass arrives and registers feature`, async ({page}) => {
 			test.setTimeout(MIDTIER_TIMEOUT_MS);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 			await levelUpTo(page, 3, {...subclassOpts, signatureSpells: preset.signatureSpells});
@@ -197,7 +210,8 @@ export function describeCharacter (spec: CharacterSpec): void {
 		});
 
 		// ── L5 mid-game milestone ──────────────────────────────────────
-		test(`L5: extra attack / 3rd-level slots / prof +3`, async ({page}) => {
+		const l5Test = skipL5 ? test.skip : test;
+		l5Test(`L5: extra attack / 3rd-level slots / prof +3`, async ({page}) => {
 			test.setTimeout(MIDTIER_TIMEOUT_MS);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 			await levelUpTo(page, 5, {...subclassOpts, signatureSpells: preset.signatureSpells});
