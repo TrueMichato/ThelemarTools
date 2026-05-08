@@ -632,7 +632,16 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "advantage"; rollType: string}
 	| {kind: "disadvantage"; rollType: string}
 	| {kind: "skillAdvantage"; skill: string}
-	| {kind: "spellInList"; spell: string}
+	// `spellMatchMode` controls which TGTT-vs-first-party spell list
+	// the probe is meant to verify. Default is `"first-party"` for
+	// backward compatibility — existing matrices keep their semantics.
+	// Use `"tgtt-flavor"` to assert a TGTT-flavor spell name (e.g.
+	// "Accelerate/Decelerate", "Animate Claw") that the TGTT class
+	// preset actually loads. Use `"any"` to drop the name assertion
+	// and only verify that ≥1 spell of that level surfaces — useful
+	// when the spell list mechanism is the thing under test, not any
+	// specific spell name.
+	| {kind: "spellInList"; spell: string; spellMatchMode?: "first-party" | "tgtt-flavor" | "any"; level?: number}
 	| {kind: "cantripCount"; min: number}
 
 	// === Toggle: snapshot before, activate, snapshot diff, deactivate ===
@@ -645,7 +654,14 @@ export type EffectCheck = _EffectCommon & (
 	// === Roll: clicking the button doesn't throw ===
 	| {kind: "rollAbilityCheck"; ability: AblKey}
 	| {kind: "rollSavingThrow"; ability: AblKey}
-	| {kind: "rollSkillCheck"; skill: string}
+	// `proficientSkills: true` is a shorthand for "verify a roll
+	// button exists for AT LEAST ONE proficient skill on the sheet".
+	// When set, the helper queries `state.isProficientInSkill(s)` for
+	// every standard 5e skill and asserts the first one that's
+	// proficient has a clickable roll button. Use this on TGTT
+	// presets where the matrix shouldn't hard-code class-list skill
+	// names (which the preset may pick differently).
+	| {kind: "rollSkillCheck"; skill?: string; proficientSkills?: true}
 	| {kind: "rollAttack"; attackName: string | RegExp}
 	| {kind: "rollInitiative"}
 
@@ -807,9 +823,27 @@ async function _runPassiveOrRollEffect (
 		}
 		case "spellInList": {
 			const known = await charSheet.getKnownSpellNames().catch(() => [] as string[]);
+			const mode = e.spellMatchMode ?? "first-party";
+			if (mode === "any") {
+				// Drop the name assertion; just verify at least N spells
+				// of the requested level surface. Default level is 0
+				// (cantrips); caller can pass `level: 1` etc. We only
+				// require ≥1 spell at the requested level — the test is
+				// here to catch "no spells loaded at all" regressions.
+				const wantLevel = e.level ?? 0;
+				const byLvl = await charSheet.getKnownSpellsByLevel().catch(() => ({} as Record<number, string[]>));
+				const got = (byLvl[wantLevel] ?? []).length;
+				if (got < 1) {
+					throw new Error(`spellInList[any]: 0 spells at level ${wantLevel}. seen=${known.slice(0, 30).join(", ")}…`);
+				}
+				return;
+			}
+			// "first-party" and "tgtt-flavor" both use exact-name lookup.
+			// The mode is metadata for skipReason annotations and human
+			// review; the runtime check is identical.
 			const want = e.spell.toLowerCase();
 			if (!known.some(n => n.toLowerCase() === want)) {
-				throw new Error(`spell "${e.spell}" not in spellbook. seen=${known.slice(0, 30).join(", ")}…`);
+				throw new Error(`spell "${e.spell}" not in spellbook [${mode}]. seen=${known.slice(0, 30).join(", ")}…`);
 			}
 			return;
 		}
@@ -832,9 +866,28 @@ async function _runPassiveOrRollEffect (
 			return;
 		}
 		case "rollSkillCheck": {
-			const r = await charSheet.clickSkillRollHard(e.skill);
-			if (!r.clicked) throw new Error(`skill roll button for "${e.skill}" not found`);
-			if (r.threwError) throw new Error(`skill ${e.skill} click threw: ${r.errorMessage ?? "unknown"}`);
+			let skill = e.skill;
+			if (e.proficientSkills) {
+				// Resolve to first proficient skill via state introspection.
+				const profSkill = await charSheet.page.evaluate(() => {
+					const cs: any = (globalThis as any).charSheet;
+					const st: any = cs?._state;
+					if (!st || typeof st.isProficientInSkill !== "function") return null;
+					const skills = ["acrobatics", "animal handling", "arcana", "athletics", "deception", "history", "insight", "intimidation", "investigation", "medicine", "nature", "perception", "performance", "persuasion", "religion", "sleight of hand", "stealth", "survival"];
+					for (const s of skills) {
+						try { if (st.isProficientInSkill(s)) return s; } catch (_) {}
+					}
+					return null;
+				});
+				if (!profSkill) {
+					throw new Error(`rollSkillCheck[proficientSkills]: no proficient skill found on sheet`);
+				}
+				skill = profSkill;
+			}
+			if (!skill) throw new Error(`rollSkillCheck requires either skill or proficientSkills:true`);
+			const r = await charSheet.clickSkillRollHard(skill);
+			if (!r.clicked) throw new Error(`skill roll button for "${skill}" not found`);
+			if (r.threwError) throw new Error(`skill ${skill} click threw: ${r.errorMessage ?? "unknown"}`);
 			return;
 		}
 		case "rollAttack": {
