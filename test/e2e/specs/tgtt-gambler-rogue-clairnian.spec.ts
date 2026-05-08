@@ -1,6 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_GAMBLER_CLAIRNIAN} from "../utils/characterBuilder";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildPainfulStrikeChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #11 — Gambler Rogue Clairnian (TGTT) — L1→20.
@@ -189,5 +189,7 @@ describeCharacter({
 		// nat-1-to-nat-20 conversion. Neither effect is exposed in state.
 		{level: 17, name: /master of fortune/i, kind: "passive"},
 		...buildSpecialtyChecks("Rogue"),
+		// Painful Strikes (PS optional features) granted by Gambler.
+		...buildPainfulStrikeChecks(),
 	],
 });

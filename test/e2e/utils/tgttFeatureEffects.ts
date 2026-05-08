@@ -348,27 +348,10 @@ export const XPHB_INVOCATION_EFFECTS: Record<string, EffectCheck[]> = {
 	"Repelling Blast": [],
 };
 
-/** XPHB Metamagic options (Sorcerer). */
-export const XPHB_METAMAGIC_EFFECTS: Record<string, EffectCheck[]> = {
-	"Careful Spell": [
-		{kind: "pickActivatable", matchAny: [/Careful Spell/i], min: 1},
-	],
-	"Distant Spell": [
-		{kind: "pickActivatable", matchAny: [/Distant Spell/i], min: 1},
-	],
-	"Empowered Spell": [
-		{kind: "pickActivatable", matchAny: [/Empowered Spell/i], min: 1},
-	],
-	"Quickened Spell": [
-		{kind: "pickActivatable", matchAny: [/Quickened Spell/i], min: 1},
-	],
-	"Subtle Spell": [
-		{kind: "pickActivatable", matchAny: [/Subtle Spell/i], min: 1},
-	],
-	"Twinned Spell": [
-		{kind: "pickActivatable", matchAny: [/Twinned Spell/i], min: 1},
-	],
-};
+/** XPHB Metamagic options (Sorcerer). NOTE: TGTT specs use TGTT_METAMAGIC
+ *  exclusively; this map exists only for non-TGTT/vanilla Sorcerer specs.
+ *  It is intentionally minimal — extend on demand. */
+export const XPHB_METAMAGIC_EFFECTS: Record<string, EffectCheck[]> = {};
 
 /** XGE Arcane Shot options (Arcane Archer Fighter). */
 export const XGE_ARCANE_SHOT_EFFECTS: Record<string, EffectCheck[]> = {
@@ -414,19 +397,46 @@ export const XPHB_PACT_BOON_EFFECTS: Record<string, EffectCheck[]> = {
 	],
 };
 
-/** Zodiac Druid forms (TGTT). Roc/Octopus/Unicorn surface as Wild Shape
- *  options — verify they appear as activatables. */
+/** Zodiac Druid forms (TGTT). These are individual subclassFeature
+ *  entries (not picker options) — every form surfaces on the sheet for
+ *  any Zodiac druid at the appropriate level. Most form effects are
+ *  conditional on form activation (entered via Wild Shape) and don't
+ *  manifest as passive stat changes; we attach effect probes only for
+ *  representatives whose existence-as-a-feature is itself the meaningful
+ *  signal. Forms without concrete sheet-visible effects use empty arrays
+ *  to declare them existence-only intentionally (no warning from audit). */
 export const ZODIAC_FORM_EFFECTS: Record<string, EffectCheck[]> = {
+	// L3 (Month) — 12 constellation forms.
+	"Beaver": [],          // damage-reduction reaction (conditional)
+	"Aurochs": [],         // STR check advantage (conditional)
+	"Horse": [],           // doubled walk speed (conditional)
+	"Octopus": [],         // swim speed + reach (conditional, needs water)
+	"Peacock": [],         // attacker WIS save (conditional)
 	"Roc": [
 		{kind: "pickActivatable", matchAny: [/Roc/i], min: 1},
 	],
-	"Octopus": [
-		{kind: "pickActivatable", matchAny: [/Octopus/i], min: 1},
-	],
+	"Bee": [],             // ranged spell attack (conditional)
+	"Hound": [],           // mark target (conditional)
+	"Cat": [],             // perception bonus (conditional)
+	"Griffon": [],         // frighten saves advantage (conditional)
+	"Bulette": [],         // AC + burrow (conditional on form active)
+	"Phoenix": [],         // unconscious-recovery (conditional)
+	// L10 (Star Week) — 12 constellation forms.
+	"Sequoia": [],         // temp HP (conditional on form active)
 	"Unicorn": [
 		{kind: "pickActivatable", matchAny: [/Unicorn/i], min: 1},
 	],
+	"Raven": [],           // initiative advantage (conditional)
+	"Kitsune": [],         // teleport reaction (conditional)
+	"Hillstep Turtle": [], // CON save advantage (conditional)
+	"Owlbear": [],         // bonus force damage (conditional)
+	"Almiraj": [],         // d4 reroll (conditional)
+	"Bat": [],             // blindsight (conditional)
+	"Pseudodragon": [],    // mental-stat floor (conditional)
+	"Aurumvorax": [],      // temp HP + persuasion advantage (conditional)
+	"Salmon": [],          // difficult-terrain ignore (conditional)
+	"Lizard": [],          // healing aura (conditional)
 };
 
-/** Debilitation Monk Precise Strike Methods (TGTT). */
-export const DEBILITATION_PRECISE_STRIKE_EFFECTS: Record<string, EffectCheck[]> = {};
+/** Debilitation Monk Precise Strike Methods are `PS` optional features —
+ *  use TGTT_PAINFUL_STRIKE_EFFECTS / buildPainfulStrikeChecks for them. */

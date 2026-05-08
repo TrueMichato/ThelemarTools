@@ -3,7 +3,7 @@ import {PRESET_FULL_HEX_DIVINE_TORTLE} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 import {
 	buildSpecialtyChecks,
-	buildAnyMetamagicChecks,
+	buildMetamagicChecks,
 } from "../utils/tgttFeaturePools";
 
 // Char-level → Sorcerer-level mapping (Sorcerer 1 = char L3, 18 = L20).
@@ -131,8 +131,8 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 20, name: /sorcery points/i, kind: "resource", resourceMax: [18, 18]},
 	// TGTT Specialties (Sorcerer: 1/5/9/13/17 → mapped through SORC_LEVELMAP).
 	...buildSpecialtyChecks("Sorcerer", SORC_LEVELMAP),
-	// Metamagic across XPHB + TGTT (Sorcerer base feature, scales 2/3/4 picks).
-	...buildAnyMetamagicChecks(["XPHB", "TGTT"], undefined, SORC_LEVELMAP),
+	// Metamagic — TGTT only (TGTT specs intentionally exclude XPHB MM).
+	...buildMetamagicChecks(undefined, SORC_LEVELMAP),
 ];
 
 /**

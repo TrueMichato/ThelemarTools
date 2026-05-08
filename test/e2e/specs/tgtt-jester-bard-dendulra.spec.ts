@@ -1,6 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_JESTER_DENDULRA} from "../utils/characterBuilder";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildJesterActChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #13 — College of Jesters Bard Dendulra (TGTT) — L1→20.
@@ -298,5 +298,7 @@ describeCharacter({
 		//     and there's no Dendulra row to hang them on.
 		// Documented here intentionally; no effects: arrays added.
 		...buildSpecialtyChecks("Bard"),
+		// Jester Acts (JA optional features) — Bard subclass picks.
+		...buildJesterActChecks(),
 	],
 });

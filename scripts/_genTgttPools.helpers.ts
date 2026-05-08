@@ -301,9 +301,12 @@ export function buildAnyInvocationChecks (
 	);
 }
 
-/** Metamagic across an arbitrary mix of sources. */
+/** Metamagic — TGTT-focused by default. XPHB metamagic is intentionally
+ *  excluded from the default sources because the TGTT spec suite focuses
+ *  on TGTT homebrew variants; pass `["XPHB","TGTT"]` explicitly if a spec
+ *  genuinely needs both. */
 export function buildAnyMetamagicChecks (
-	sources: string[] = ["XPHB", "TGTT"],
+	sources: string[] = ["TGTT"],
 	progression: Array<{level: number; cum: number}> = [
 		{level: 3, cum: 2}, {level: 10, cum: 3}, {level: 17, cum: 4},
 	],

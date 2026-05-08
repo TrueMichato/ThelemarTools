@@ -1,6 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_TRICKSTER_GOBLIN} from "../utils/characterBuilder";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildTricksterTrickChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #16 — Trickster Rogue Goblin (TGTT) — L1→20.
@@ -270,5 +270,8 @@ describeCharacter({
 			],
 		},
 		...buildSpecialtyChecks("Rogue"),
+		// Trickster Tricks (TT optional features) — 3 picks at L3,
+		// scaling to 7 by L19. Helper attaches per-pick effect probes.
+		...buildTricksterTrickChecks(),
 	],
 });

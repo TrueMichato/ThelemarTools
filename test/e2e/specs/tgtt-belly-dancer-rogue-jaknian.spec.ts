@@ -1,6 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_BELLY_DANCER_JAKNIAN} from "../utils/characterBuilder";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildPainfulStrikeChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #12 — Belly Dancer Rogue Jaknian (TGTT) — L1→20.
@@ -224,5 +224,7 @@ describeCharacter({
 		// is a flat 30 with no Jaknian-specific speed bonus — no clean
 		// effect probe to add at the class-feature level.
 		...buildSpecialtyChecks("Rogue"),
+		// Painful Strikes (PS optional features) granted by Belly Dancer.
+		...buildPainfulStrikeChecks(),
 	],
 });

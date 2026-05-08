@@ -33,7 +33,6 @@ import {
 	XPHB_MANEUVER_EFFECTS,
 	XPHB_PACT_BOON_EFFECTS,
 	ZODIAC_FORM_EFFECTS,
-	DEBILITATION_PRECISE_STRIKE_EFFECTS,
 } from "./tgttFeatureEffects";
 
 // ── Specialties (Class-feature "Specialties" pick-list at progression levels) ──
@@ -1028,13 +1027,6 @@ export const ZODIAC_FORMS_L10: RegExp[] = [
 ];
 export const ZODIAC_FORMS_L10_LEVEL: number = 10;
 
-// Monk / Debilitation L3
-export const DEBILITATION_PRECISE_STRIKES_L3: RegExp[] = [
-	/^Combat Methods \(Debilitation\)$/i,
-	/^Precise Strike$/i,
-];
-export const DEBILITATION_PRECISE_STRIKES_L3_LEVEL: number = 3;
-
 // ────────────────────────────────────────────────────────────────────────
 // build*Checks helpers — emit FeatureCheck arrays that specs spread
 // into their featuresMatrix. Each helper attaches a "pickedFeatureGrants"
@@ -1338,9 +1330,12 @@ export function buildAnyInvocationChecks (
 	);
 }
 
-/** Metamagic across an arbitrary mix of sources. */
+/** Metamagic — TGTT-focused by default. XPHB metamagic is intentionally
+ *  excluded from the default sources because the TGTT spec suite focuses
+ *  on TGTT homebrew variants; pass `["XPHB","TGTT"]` explicitly if a spec
+ *  genuinely needs both. */
 export function buildAnyMetamagicChecks (
-	sources: string[] = ["XPHB", "TGTT"],
+	sources: string[] = ["TGTT"],
 	progression: Array<{level: number; cum: number}> = [
 		{level: 3, cum: 2}, {level: 10, cum: 3}, {level: 17, cum: 4},
 	],
