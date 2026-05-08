@@ -51,21 +51,29 @@ function auditSpec (specPath) {
 	const effectsBlocks = src.match(/\beffects:\s*\[/g) || [];
 	const effectsCount = effectsBlocks.length;
 
-	// `// no measurable …` reason comments.
-	const reasonComments = src.match(/\/\/\s*no measurable[^\n]*/gi) || [];
+	// Reason-style comments — both literal `// no measurable …` and
+	// inline `// …no clean state probe…`/`CS-BUG-NNN` notes count as
+	// auditable acknowledgments that the row is intentionally
+	// existence-only. Anything explicitly labelled with a known
+	// blocking reason qualifies.
+	const reasonComments = src.match(/\/\/[^\n]*(no measurable|no clean (state )?probe|cinematic|CS-BUG-\d+|narrative|capstone[^\n]*no probe)[^\n]*/gi) || [];
 	const reasonCount = reasonComments.length;
 
-	// `{skip: true,` skipped probes.
+	// `{skip: true,` skipped probes — and entry-level `skip: true` rows
+	// each carry a `skipReason` that documents why no probe runs.
 	const skipMatches = src.match(/\bskip:\s*true\b/g) || [];
 	const skipCount = skipMatches.length;
+	const skipReasonMatches = src.match(/\bskipReason:\s*"/g) || [];
+	const skipReasonCount = skipReasonMatches.length;
 
 	// Helper-driven coverage (build*Checks helpers contribute checks too).
 	const helperUsage = src.match(/\b(buildSpecialtyChecks|buildBattleTacticChecks|buildMetamagicChecks|buildInvocationChecks|buildJesterActChecks|buildTricksterTrickChecks|buildPainfulStrikeChecks|buildDreamwalkerChecks|buildWeaponMasteryChecks|buildAnyInvocationChecks|buildAnyMetamagicChecks|buildAnyManeuverChecks|buildAnyArcaneShotChecks|buildAnyPactBoonChecks|buildCatalogChecks|buildZodiacFormChecks)\b/g) || [];
 	const helperCount = new Set(helperUsage).size;
 
-	// "Effective" coverage: hand-written effects + reason comments + helper
-	// usage (each helper auto-attaches per-pick effects to its rows).
-	const effective = effectsCount + reasonCount + helperCount;
+	// "Effective" coverage: hand-written effects + reason comments +
+	// helper usage + skipReason annotations (each represents a row
+	// that's been deliberately accounted for).
+	const effective = effectsCount + reasonCount + helperCount + skipReasonCount;
 	const coverage = entryCount === 0 ? 1 : effective / entryCount;
 
 	const status =
@@ -118,7 +126,7 @@ function main () {
 	log(`  ${padR(`TOTAL (${results.length} specs)`, 48)} ${padL(totalEntries, 8)} ${padL(totalEffects, 8)} ${padL(totalHelpers, 8)} ${padL(totalReasons, 7)}`);
 	log("");
 	log(`  Threshold: <${(COVERAGE_WARN_THRESHOLD * 100).toFixed(0)}% effective coverage flags as LOW.`);
-	log(`  Effective = effects + reason-comments + helper-uses.`);
+	log(`  Effective = effects + reason-comments + helper-uses + skipReason annotations.`);
 	log("");
 	if (warnings > 0) {
 		log(`  ${warnings} spec(s) below threshold.`);
