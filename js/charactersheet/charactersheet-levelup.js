@@ -1788,8 +1788,11 @@ class CharacterSheetLevelUp {
 		const featList = e_({outer: `<div class="charsheet__levelup-feats-list"></div>`});
 		const featChoicesContainer = e_({outer: `<div class="charsheet__levelup-feat-choices"></div>`});
 
-		// Helper to detect if feat has choices
-		const getFeatChoices = (feat) => {
+		// Helper to detect if feat has choices.
+		// Declared as a `function` (not `const` arrow) so it is hoisted
+		// to the top of `_renderAsiSelection` — the Epic Boon section
+		// (rendered earlier in the function body) needs to call it.
+		function getFeatChoices (feat) {
 			const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null, spells: null};
 
 			if (feat.skillProficiencies) {
@@ -1930,7 +1933,7 @@ class CharacterSheetLevelUp {
 			}
 
 			return choices;
-		};
+		}
 
 		const renderFeats = (filter = "") => {
 			featList.innerHTML = "";
@@ -2580,7 +2583,6 @@ class CharacterSheetLevelUp {
 	}
 
 	_renderOptFeaturesInContainer (container, classData, gains, onSelect, newLevel, allOptFeatures, existingOptFeatures, {subclassGrantedTraditionCodes = [], existingSelections = {}} = {}) {
-
 		gains.forEach(gain => {
 			const featureKey = gain.featureTypes.join("_");
 			const isCombatMethods = gain.featureTypes.some(ft => ft.startsWith("CTM:"));
@@ -2702,8 +2704,13 @@ class CharacterSheetLevelUp {
 			return;
 		}
 
-		// Normal flow: has traditions, render methods directly
-		this._renderMethodsForLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, knownTraditions, maxDegree, selectedForType);
+		// Normal flow: has traditions, render methods directly.
+		// Wrap in a dedicated sub-container so _renderMethodsForLevelUp's
+		// `container.innerHTML = ""` doesn't wipe sibling gain sections
+		// (e.g. Battle Tactics rendered earlier in the same parent).
+		const methodsWrapper = e_({outer: `<div class="charsheet__levelup-methods-container"></div>`});
+		container.append(methodsWrapper);
+		this._renderMethodsForLevelUp(methodsWrapper, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, knownTraditions, maxDegree, selectedForType);
 	}
 
 	/**

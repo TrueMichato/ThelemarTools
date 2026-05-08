@@ -1726,13 +1726,25 @@ class CharacterSheetBuilder {
 
 		// Add selected optional features
 		Object.entries(this._selectedOptionalFeatures).forEach(([featureKey, features]) => {
+			// Combat method entities (data/homebrew "combatMethod" entries) do
+			// NOT carry a `featureType` field — they have `tradition`/`degree`
+			// instead. Without this fallback, the resulting state feature has
+			// `optionalFeatureTypes: undefined`, which breaks the level-up
+			// counters at L2+ (`getOptionalFeatureGains` can't recognize the
+			// L1 picks as combat methods, so it grants the full progression
+			// total instead of `total - existing`). Mirrors the level-up
+			// fallback at `charactersheet-levelup.js:3757`.
+			const featureTypesFromKey = featureKey.split("_");
 			features.forEach(opt => {
+				const optionalFeatureTypes = (Array.isArray(opt.featureType) && opt.featureType.length)
+					? opt.featureType
+					: featureTypesFromKey;
 				this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(opt, {
 					className: this._selectedClass?.name,
 					classSource: this._selectedClass?.source,
 					level: 1,
 					featureType: "Optional Feature",
-					optionalFeatureTypes: opt.featureType,
+					optionalFeatureTypes,
 				}));
 			});
 		});

@@ -131,16 +131,17 @@ export class BuilderWizardPage {
 	 */
 	async selectRaceExact (raceName: string, sourceAbbv: string): Promise<void> {
 		await waitForListItems(this.page, "#builder-race-list");
-		// Find items with the source, then look for exact name match
-		// The source element might have different formats, so be flexible
-		const items = this.raceList.locator(`.charsheet__builder-list-item`);
+		// Skip separator/header rows that have no name node (would otherwise hang).
+		const items = this.raceList.locator(`.charsheet__builder-list-item`).filter({
+			has: this.page.locator(`.charsheet__builder-list-item-name`),
+		});
 		const count = await items.count();
 		for (let i = 0; i < count; i++) {
 			const item = items.nth(i);
 			const nameEl = item.locator(`.charsheet__builder-list-item-name`);
 			const sourceEl = item.locator(`.charsheet__builder-list-item-source`);
-			const nameText = await nameEl.textContent() || "";
-			const sourceText = await sourceEl.textContent() || "";
+			const nameText = (await nameEl.textContent({timeout: 2000}).catch(() => "")) || "";
+			const sourceText = (await sourceEl.textContent({timeout: 2000}).catch(() => "")) || "";
 			// Match exact name (not containing subraces info) and source
 			if (nameText.startsWith(raceName) && sourceText.includes(sourceAbbv)) {
 				// Skip entries with subraces since we want the non-subrace version first
@@ -158,8 +159,8 @@ export class BuilderWizardPage {
 			const item = items.nth(i);
 			const nameEl = item.locator(`.charsheet__builder-list-item-name`);
 			const sourceEl = item.locator(`.charsheet__builder-list-item-source`);
-			const nameText = await nameEl.textContent() || "";
-			const sourceText = await sourceEl.textContent() || "";
+			const nameText = (await nameEl.textContent({timeout: 2000}).catch(() => "")) || "";
+			const sourceText = (await sourceEl.textContent({timeout: 2000}).catch(() => "")) || "";
 			if (nameText.startsWith(raceName) && sourceText.includes(sourceAbbv)) {
 				await item.scrollIntoViewIfNeeded();
 				await item.click();
@@ -174,7 +175,15 @@ export class BuilderWizardPage {
 	 * Select a subrace if the preview shows a subrace dropdown
 	 */
 	async selectSubrace (subraceName: string): Promise<void> {
-		await this.subraceSelect.selectOption({label: subraceName});
+		// The wizard renders option labels as `${SubraceName} (${SrcAbv})`
+		// (e.g. "Clairnian (TGTT)"). Look up the matching <option> value
+		// then `selectOption` by value so callers can pass the bare name.
+		const opt = this.subraceSelect.locator("option").filter({hasText: subraceName}).first();
+		const value = await opt.getAttribute("value");
+		if (value == null) {
+			throw new Error(`Subrace "${subraceName}" not found in subrace dropdown`);
+		}
+		await this.subraceSelect.selectOption({value});
 		await this.page.waitForTimeout(100);
 	}
 
@@ -183,6 +192,51 @@ export class BuilderWizardPage {
 	 */
 	async hasSubraceSelection (): Promise<boolean> {
 		return await this.subraceSelect.isVisible();
+	}
+
+	/**
+	 * Tick the first available checkboxes in every racial-choice block
+	 * (skills, tools, languages) until each block's "Selected: N/M" counter
+	 * reaches its target. Required because validation in `_validateCurrentStep`
+	 * for the race step blocks Next when `_selectedRacialSkills` /
+	 * `_selectedRacialTools` are short of `_getRacialSkillChoiceCount` /
+	 * `_getRacialToolChoiceCount`. (Languages are not validated but we still
+	 * tick them so `Selected: 0/N` doesn't surface in failure diagnostics.)
+	 *
+	 * Idempotent — safe for races with no choices.
+	 */
+	async selectAllRacialChoices (): Promise<void> {
+		const sections = [
+			".charsheet__builder-racial-skill-selection",
+			".charsheet__builder-racial-tool-selection",
+			".charsheet__builder-racial-lang-selection",
+		];
+		for (const sectionSel of sections) {
+			const sectionLocs = this.page.locator(sectionSel);
+			const sectionCount = await sectionLocs.count();
+			for (let s = 0; s < sectionCount; s++) {
+				const section = sectionLocs.nth(s);
+				const checkboxes = section.locator("input[type='checkbox']");
+				const cbCount = await checkboxes.count();
+				if (cbCount === 0) continue;
+				// Parse "Selected: N/M" to find target.
+				const counterText = (await section.textContent()) || "";
+				const match = counterText.match(/Selected:\s*(\d+)\s*\/\s*(\d+)/i);
+				const target = match ? parseInt(match[2], 10) : 1;
+				let selected = 0;
+				for (let i = 0; i < cbCount && selected < target; i++) {
+					const cb = checkboxes.nth(i);
+					try {
+						if (!(await cb.isVisible())) continue;
+						if (await cb.isDisabled()) continue;
+						if (await cb.isChecked()) { selected++; continue; }
+						await cb.check();
+						await this.page.waitForTimeout(40);
+						if (await cb.isChecked()) selected++;
+					} catch { /* fall through to next checkbox */ }
+				}
+			}
+		}
 	}
 
 	// ========== CLASS STEP ==========
@@ -204,15 +258,16 @@ export class BuilderWizardPage {
 	 */
 	async selectClassExact (className: string, sourceAbbv: string): Promise<void> {
 		await waitForListItems(this.page, "#builder-class-list");
-		// Find items matching class name and source
-		const items = this.classList.locator(`.charsheet__builder-list-item`);
+		const items = this.classList.locator(`.charsheet__builder-list-item`).filter({
+			has: this.page.locator(`.charsheet__builder-list-item-name`),
+		});
 		const count = await items.count();
 		for (let i = 0; i < count; i++) {
 			const item = items.nth(i);
 			const nameEl = item.locator(`.charsheet__builder-list-item-name`);
 			const sourceEl = item.locator(`.charsheet__builder-list-item-source`);
-			const nameText = await nameEl.textContent() || "";
-			const sourceText = await sourceEl.textContent() || "";
+			const nameText = (await nameEl.textContent({timeout: 2000}).catch(() => "")) || "";
+			const sourceText = (await sourceEl.textContent({timeout: 2000}).catch(() => "")) || "";
 			if (nameText === className && sourceText.includes(sourceAbbv)) {
 				await item.click();
 				await this.page.waitForTimeout(100);
@@ -276,15 +331,141 @@ export class BuilderWizardPage {
 	 * Select the first N available skill checkboxes (for class skill proficiency)
 	 */
 	async selectFirstAvailableSkills (count: number): Promise<void> {
-		const skillCheckboxes = this.page.locator(".charsheet__builder-skill-checkbox input[type='checkbox']");
+		// Scope to the class-step skill section so we don't accidentally
+		// tick checkboxes in the sibling expertise / weapon-mastery / racial
+		// sections, which all reuse the `.charsheet__builder-skill-checkbox`
+		// label class.
+		const classSkillSection = this.page.locator(".charsheet__builder-skill-selection").first();
+		const scope = (await classSkillSection.count()) > 0
+			? classSkillSection
+			: this.page;
+		const skillCheckboxes = scope.locator(".charsheet__builder-skill-checkbox input[type='checkbox']");
 		const visibleCount = await skillCheckboxes.count();
-		const toSelect = Math.min(count, visibleCount);
-		for (let i = 0; i < toSelect; i++) {
+		let selected = 0;
+		for (let i = 0; i < visibleCount && selected < count; i++) {
 			const checkbox = skillCheckboxes.nth(i);
-			if (await checkbox.isVisible() && !(await checkbox.isChecked())) {
+			try {
+				if (!(await checkbox.isVisible())) continue;
+				if (await checkbox.isDisabled()) continue;          // already proficient (e.g. from background)
+				if (await checkbox.isChecked()) continue;
 				await checkbox.check();
 				await this.page.waitForTimeout(50);
+				if (await checkbox.isChecked()) selected++;
+			} catch {
+				// At capacity or option became unavailable — try next.
 			}
+		}
+	}
+
+	/**
+	 * Pick traditions then methods inside the TGTT
+	 * `.charsheet__builder-combat-methods` region. No-op when absent.
+	 * Reads `Selected: N/M` counters to know how many to pick.
+	 */
+	async selectCombatTraditionsAndMethods (): Promise<void> {
+		const section = this.page.locator(".charsheet__builder-combat-methods").first();
+		if ((await section.count()) === 0) return;
+
+		const parseCount = async (label: string): Promise<number> => {
+			const txt = await section.locator(label).first().textContent({timeout: 1000}).catch(() => "");
+			const m = (txt || "").match(/(\d+)/);
+			return m ? parseInt(m[1], 10) : 0;
+		};
+
+		// 1) Traditions — `Selected: <span class="tradition-count">N</span>/M`
+		const tradHeader = await section.locator(".charsheet__builder-traditions").first().textContent().catch(() => "");
+		const tradTarget = (() => {
+			const m = (tradHeader || "").match(/Choose\s+(\d+)/i);
+			return m ? parseInt(m[1], 10) : 2;
+		})();
+		const tradBoxes = section.locator(".charsheet__builder-tradition-list input[type='checkbox']");
+		const nTrad = await tradBoxes.count();
+		let pickedTrad = 0;
+		for (let i = 0; i < nTrad && pickedTrad < tradTarget; i++) {
+			const cb = tradBoxes.nth(i);
+			try {
+				if (!(await cb.isVisible())) continue;
+				if (await cb.isChecked()) { pickedTrad++; continue; }
+				await cb.check();
+				await this.page.waitForTimeout(80);
+				if (await cb.isChecked()) pickedTrad++;
+			} catch { /* capacity */ }
+		}
+
+		// Wait for the methods list to render after traditions are picked.
+		await this.page.waitForTimeout(250);
+
+		// 2) Methods — header reads "Choose N (max degree: …)"
+		const methHeader = await section.locator(".charsheet__builder-methods").first().textContent().catch(() => "");
+		const methTarget = (() => {
+			const m = (methHeader || "").match(/Choose\s+(\d+)/i);
+			return m ? parseInt(m[1], 10) : 3;
+		})();
+		const methBoxes = section.locator(".charsheet__builder-method-list input[type='checkbox']");
+		const nMeth = await methBoxes.count();
+		let pickedMeth = 0;
+		for (let i = 0; i < nMeth && pickedMeth < methTarget; i++) {
+			const cb = methBoxes.nth(i);
+			try {
+				if (!(await cb.isVisible())) continue;
+				if (await cb.isChecked()) { pickedMeth++; continue; }
+				await cb.check();
+				await this.page.waitForTimeout(50);
+				if (await cb.isChecked()) pickedMeth++;
+			} catch { /* capacity */ }
+		}
+	}
+
+
+	/**
+	 * Pick a value for every empty class-feature language dropdown
+	 * (`#class-lang-choice-*`), e.g. Ranger's Deft Explorer. Picks the first
+	 * non-empty option per dropdown to avoid duplicate-language validation.
+	 */
+	async selectAllClassFeatureLanguages (): Promise<void> {
+		const section = this.page.locator(".charsheet__builder-class-lang-selection").first();
+		if ((await section.count()) === 0) return;
+		const selects = section.locator("select");
+		const total = await selects.count();
+		const used = new Set<string>();
+		for (let i = 0; i < total; i++) {
+			const sel = selects.nth(i);
+			const current = await sel.inputValue();
+			if (current) { used.add(current); continue; }
+			const opts = sel.locator("option");
+			const optCount = await opts.count();
+			for (let j = 1; j < optCount; j++) {
+				const v = await opts.nth(j).getAttribute("value");
+				if (!v || used.has(v)) continue;
+				await sel.selectOption(v);
+				used.add(v);
+				break;
+			}
+		}
+	}
+
+	/**
+	 * Tick the first N available expertise checkboxes inside the class step's
+	 * `.charsheet__builder-expertise-selection` region. No-op when the
+	 * selected class doesn't expose early-level expertise (Rogue/Bard/Ranger).
+	 */
+	async selectFirstAvailableExpertise (count: number = 4): Promise<void> {
+		const expertiseSection = this.page.locator(".charsheet__builder-expertise-selection").first();
+		if ((await expertiseSection.count()) === 0) return;
+		await this.page.waitForTimeout(150);
+		const boxes = expertiseSection.locator("input[type='checkbox']");
+		const total = await boxes.count();
+		let selected = 0;
+		for (let i = 0; i < total && selected < count; i++) {
+			const cb = boxes.nth(i);
+			try {
+				if (!(await cb.isVisible())) continue;
+				if (await cb.isDisabled()) continue;
+				if (await cb.isChecked()) continue;
+				await cb.check();
+				await this.page.waitForTimeout(50);
+				if (await cb.isChecked()) selected++;
+			} catch { /* capacity hit */ }
 		}
 	}
 
@@ -321,36 +502,63 @@ export class BuilderWizardPage {
 	}
 
 	/**
-	 * Select first available optional features (fighting styles, divine order, combat methods, etc.)
+	 * Select first available optional features (fighting styles, divine order, eldritch invocations, etc.)
 	 * Handles multiple UI patterns: label-wrapped checkboxes and bare checkbox containers.
+	 *
+	 * IMPORTANT: This helper deliberately EXCLUDES combat-method DOM
+	 * (`.charsheet__builder-method-item`, `.charsheet__builder-combat-methods label`).
+	 * Combat traditions and methods are owned exclusively by
+	 * `selectCombatTraditionsAndMethods()` because they have strict per-level
+	 * grant counts that this generic picker would over-fill, exhausting the
+	 * 1st-degree pool before subclass features arrive (e.g. Arcane Archer L3).
+	 * See CS-BUG-003 for context.
 	 */
 	async selectFirstAvailableOptionalFeatures (count: number): Promise<void> {
 		await this.page.waitForTimeout(300);
 
 		let selected = 0;
 
-		// Broad approach: find ALL clickable labels/containers with checkboxes
-		// across optional feature sections, combat method sections, etc.
+		// Broad approach: find clickable labels/containers with checkboxes
+		// across optional feature sections (fighting styles, EI, divine order, etc.).
+		// Combat method selectors are intentionally absent — see method docstring.
+		//
+		// NOTE: `.charsheet__builder-optional-features` is a parent container
+		// that *also* wraps the Combat Methods sub-section, so a naive
+		// descendant `label` selector still bleeds into combat-method DOM.
+		// We filter those out at runtime by skipping any label that is
+		// inside a `.charsheet__builder-combat-methods` ancestor or that
+		// IS a combat-method item.
 		const allOptFeatLabels = this.page.locator(
 			".charsheet__builder-opt-feat-item, " +
 			".charsheet__builder-opt-feat-section label, " +
-			".charsheet__builder-optional-features label, " +
-			".charsheet__builder-method-item, " +
-			".charsheet__builder-combat-methods label",
+			".charsheet__builder-optional-features label",
 		);
 
 		const labelCount = await allOptFeatLabels.count();
 		for (let i = 0; i < labelCount && selected < count; i++) {
 			const label = allOptFeatLabels.nth(i);
+
+			// Hard-skip any combat-method DOM — these are owned by
+			// `selectCombatTraditionsAndMethods()`. See docstring above.
+			const isCombatMethodLabel = await label.evaluate((el: HTMLElement) => {
+				return el.classList.contains("charsheet__builder-method-item")
+					|| el.classList.contains("charsheet__builder-tradition-item")
+					|| !!el.closest(".charsheet__builder-combat-methods");
+			}).catch(() => false);
+			if (isCombatMethodLabel) continue;
+
 			const checkbox = label.locator("input[type='checkbox']");
 			if (await label.isVisible() && await checkbox.count() > 0 && !(await checkbox.isChecked())) {
 				await label.scrollIntoViewIfNeeded();
-				await label.click();
-				await this.page.waitForTimeout(150);
-				// Verify the click was accepted (handler may reject if section is at max)
-				if (await checkbox.isChecked()) {
-					selected++;
+				// Click the checkbox directly — hover-link <a> tags inside
+				// the label can intercept label clicks otherwise.
+				try {
+					await checkbox.check({timeout: 1500});
+				} catch {
+					try { await label.click({timeout: 1500}); } catch { /* ignore */ }
 				}
+				await this.page.waitForTimeout(120);
+				if (await checkbox.isChecked()) selected++;
 			}
 		}
 
@@ -556,17 +764,62 @@ export class BuilderWizardPage {
 		];
 
 		for (const {score, ability} of assignments) {
-			// Click the score badge to select it
-			const scoreBadge = this.page.locator(`.charsheet__builder-score-badge[data-score="${score}"]`);
-			if (await scoreBadge.isVisible()) {
-				await scoreBadge.click();
-				await this.page.waitForTimeout(100);
+			// Per-iteration retry — the badge layout reflows after each
+			// successful assignment (the assigned badge is removed and
+			// siblings shift), and on slower / more-feature-laden builds
+			// (e.g. Theocracian Warlock) a stale node can hang a click
+			// while waiting for "stable". Re-resolve the locator every
+			// attempt and verify the dropzone took the score before
+			// moving on, instead of relying on a blind 100 ms wait.
+			let assigned = false;
+			for (let attempt = 0; attempt < 3 && !assigned; attempt++) {
+				const scoreBadge = this.page.locator(
+					`.charsheet__builder-score-badge[data-score="${score}"]`,
+				).first();
+				const dropzone = this.page.locator(
+					`.charsheet__builder-ability-dropzone[data-ability="${ability}"]`,
+				).first();
 
-				// Click the ability dropzone to assign it
-				const abilityDropzone = this.page.locator(`.charsheet__builder-ability-dropzone[data-ability="${ability}"]`);
-				if (await abilityDropzone.isVisible()) {
-					await abilityDropzone.click();
-					await this.page.waitForTimeout(100);
+				try {
+					await scoreBadge.waitFor({state: "visible", timeout: 5000});
+				} catch {
+					// Badge not present — score may already be assigned
+					// elsewhere (e.g. user re-ran the helper) or the
+					// step doesn't render the standard array. Bail this
+					// assignment cleanly.
+					break;
+				}
+
+				try {
+					await scoreBadge.click({timeout: 5000});
+					await dropzone.click({timeout: 5000});
+				} catch {
+					await this.page.waitForTimeout(150);
+					continue;
+				}
+
+				// Verify the dropzone now reflects the assigned score
+				// before advancing. Polling beats a blind sleep — on
+				// fast renders we move on immediately, on slow ones
+				// we wait up to the timeout for the DOM to settle.
+				try {
+					await this.page.waitForFunction(
+						({abil, sc}) => {
+							const dz = document.querySelector(
+								`.charsheet__builder-ability-dropzone[data-ability="${abil}"]`,
+							);
+							if (!dz) return false;
+							const txt = (dz.textContent || "").trim();
+							return txt.includes(String(sc));
+						},
+						{abil: ability, sc: score},
+						{timeout: 3000},
+					);
+					assigned = true;
+				} catch {
+					// Click succeeded but the dropzone never reflected
+					// the score — re-resolve and retry.
+					await this.page.waitForTimeout(150);
 				}
 			}
 		}
@@ -591,15 +844,18 @@ export class BuilderWizardPage {
 	 */
 	async selectBackgroundExact (backgroundName: string, sourceAbbv: string): Promise<void> {
 		await waitForListItems(this.page, "#builder-bg-list");
-		const items = this.backgroundList.locator(`.charsheet__builder-list-item`);
+		// Filter out separator/header rows that lack a name node so the
+		// per-item textContent() lookup below can't hang on an empty cell.
+		const items = this.backgroundList.locator(`.charsheet__builder-list-item`).filter({
+			has: this.page.locator(`.charsheet__builder-list-item-name`),
+		});
 		const count = await items.count();
 		for (let i = 0; i < count; i++) {
 			const item = items.nth(i);
 			const nameEl = item.locator(`.charsheet__builder-list-item-name`);
 			const sourceEl = item.locator(`.charsheet__builder-list-item-source`);
-			const nameText = await nameEl.textContent() || "";
-			const sourceText = await sourceEl.textContent() || "";
-			// Match exact name and source
+			const nameText = (await nameEl.textContent({timeout: 2000}).catch(() => "")) || "";
+			const sourceText = (await sourceEl.textContent({timeout: 2000}).catch(() => "")) || "";
 			if (nameText.trim() === backgroundName && sourceText.includes(sourceAbbv)) {
 				await item.scrollIntoViewIfNeeded();
 				await item.click();
@@ -642,7 +898,15 @@ export class BuilderWizardPage {
 		flaws?: string;
 	}): Promise<void> {
 		if (details.name && await this.nameInput.isVisible()) {
-			await this.nameInput.fill(details.name);
+			// The builder's name input persists state on the `change` event,
+			// not `input`. Use clear+type+blur via the page so the input,
+			// change, and blur events all fire in the natural order.
+			await this.nameInput.click({clickCount: 3});
+			await this.nameInput.press("Delete");
+			await this.nameInput.pressSequentially(details.name, {delay: 10});
+			await this.nameInput.press("Tab");
+			await this.nameInput.dispatchEvent("change");
+			await this.page.waitForTimeout(200);
 		}
 		if (details.personality && await this.personalityInput.isVisible()) {
 			await this.personalityInput.fill(details.personality);
@@ -666,6 +930,23 @@ export class BuilderWizardPage {
 		await this.btnNext.click();
 		// Wait for the character sheet to load
 		await this.page.waitForTimeout(500);
+	}
+
+	/**
+	 * If the spell-step "Skip Spell Selection?" confirm dialog appeared,
+	 * click its primary (Skip) button. No-op if the dialog isn't open.
+	 */
+	async acceptSkipSpellsDialog (): Promise<void> {
+		// The modal title is "Skip Spell Selection?" and the primary button
+		// label is "Skip" (with a leading icon span).  Scope the lookup to
+		// the modal so the heading text doesn't accidentally match.
+		const modal = this.page.locator(".ve-ui-modal__overlay").last();
+		const skipBtn = modal.getByRole("button", {name: /Skip/i}).first();
+		try {
+			await skipBtn.waitFor({state: "visible", timeout: 3000});
+			await skipBtn.click();
+			await this.page.waitForTimeout(300);
+		} catch { /* dialog never appeared — fully populated spells */ }
 	}
 
 	/**
