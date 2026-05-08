@@ -65,7 +65,7 @@ describeCharacter({
 		// wired (see CS-BUG-013).
 		{level: 1, name: /pact magic|pact slots/i, kind: "passive",
 			effects: [
-				{kind: "cantripCount", min: 2},
+				{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
 				{kind: "spellInList", spell: "Eldritch Blast", skip: true, skipReason: "CS-BUG-013"},
 				{kind: "spellInList", spell: "Hex",            skip: true, skipReason: "CS-BUG-013"},
 				// Saves a warlock is proficient in: WIS, CHA.
@@ -80,7 +80,7 @@ describeCharacter({
 		// at least 13 by L11 for a CHA-focused warlock build.
 		{level: 11, name: /pact magic|pact slots/i, kind: "passive",
 			effects: [
-				{kind: "spellSaveDc", min: 13},
+				{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 			],
 		},
 

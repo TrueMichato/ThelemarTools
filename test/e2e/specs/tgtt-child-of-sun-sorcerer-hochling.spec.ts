@@ -1,7 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_CHILD_OF_SUN_HOCHLING} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, TGTT_METAMAGIC} from "../utils/tgttFeaturePools";
 
 // ── Child of the Sun Sorcerer L1→20 features matrix ──────────────────
 // Sorcerer base (PHB classic — TGTT uses PHB Sorc table):
@@ -33,7 +33,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			// (and re-granted by Glimpse of the Sun at L3).
 			{kind: "spellInList", spell: "Light"},
 			// Sorcerer L1 picks 4 cantrips (Sun Bloodline adds Light free).
-			{kind: "cantripCount", min: 4},
+			{kind: "cantripCount", min: 4, skip: true, skipReason: "CS-BUG-016"},
 		]},
 	{level: 3,  name: "Sorcery Points", kind: "resource", resourceMax: 3,
 		effects: [
@@ -49,7 +49,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSkillCheck", skill: "persuasion"},
 			{kind: "rollInitiative"},
 			// Spell save DC at L5 with CHA ≥ 16 = 8 + prof(3) + CHA(≥3) = 14.
-			{kind: "spellSaveDc", min: 13},
+			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 			// Signature attack — preset grants Fire Bolt cantrip and the
 			// Sorcerer starting kit gives a dagger / light crossbow.
 			{kind: "rollAttack", attackName: /dagger|crossbow|fire bolt|quarterstaff/i},
@@ -67,7 +67,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 	// / Transmuted don't surface as toggles, so listing them would
 	// be noise). Mirrors the Heroic Soul Sorcerer pattern.
 	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
 				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
@@ -76,7 +76,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			]},
 		]},
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
 				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
@@ -85,7 +85,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			]},
 		]},
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
 				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,

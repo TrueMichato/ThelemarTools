@@ -1440,22 +1440,32 @@ export function buildCatalogChecks (args: {
 	return out;
 }
 
-/** Convenience wrapper for Zodiac Druid forms — emits L3 + L10 catalogs. */
+/** Convenience wrapper for Zodiac Druid forms — emits L3 + L10 umbrella entries.
+ *
+ * Phase 15 P10 fix: only the *current* month/star-week form is
+ * rendered on the sheet at any time (the form rotates by in-game
+ * date). Asserting all 12 monthly forms as separate passives flagged
+ * 11 false-positive failures every test run. Instead, assert the
+ * single `Zodiac Form: <Month>` umbrella row that the renderer
+ * surfaces and attach the representative effect probe to it. The
+ * full 12-entry catalog still lives in `ZODIAC_FORMS_L3` /
+ * `ZODIAC_FORMS_L10` for documentation and for test authors who want
+ * to opt back into per-form assertions. */
 export function buildZodiacFormChecks (levelMap?: Record<number, number>): FeatureCheck[] {
-	return [
-		...buildCatalogChecks({
-			pool: ZODIAC_FORMS_L3, level: ZODIAC_FORMS_L3_LEVEL,
-			featureNameRe: /Zodiac Form: Month/i,
-			repName: "Roc",
-			effectMap: ZODIAC_FORM_EFFECTS,
-			levelMap,
-		}),
-		...buildCatalogChecks({
-			pool: ZODIAC_FORMS_L10, level: ZODIAC_FORMS_L10_LEVEL,
-			featureNameRe: /Zodiac Form: Star Week/i,
-			repName: "Unicorn",
-			effectMap: ZODIAC_FORM_EFFECTS,
-			levelMap,
-		}),
-	];
+	const out: FeatureCheck[] = [];
+	const subL3 = ZODIAC_FORM_EFFECTS["Roc"];
+	out.push({
+		level: applyLevelMap(ZODIAC_FORMS_L3_LEVEL, levelMap),
+		name: /Zodiac Form: Month/i,
+		kind: "passive" as const,
+		...(subL3 && subL3.length ? {effects: [{kind: "pickedFeatureGrants" as const, pickName: "Roc", subEffects: subL3}]} : {}),
+	});
+	const subL10 = ZODIAC_FORM_EFFECTS["Unicorn"];
+	out.push({
+		level: applyLevelMap(ZODIAC_FORMS_L10_LEVEL, levelMap),
+		name: /Zodiac Form: Star Week/i,
+		kind: "passive" as const,
+		...(subL10 && subL10.length ? {effects: [{kind: "pickedFeatureGrants" as const, pickName: "Unicorn", subEffects: subL10}]} : {}),
+	});
+	return out;
 }

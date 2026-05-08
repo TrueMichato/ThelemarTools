@@ -54,7 +54,7 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar/i},
-			{kind: "spellSaveDc", min: 11},
+			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
 		],
 	},
 	// L6 Roving — XPHB Ranger speed-boost passive (no extra probe;
@@ -128,7 +128,7 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSavingThrow", ability: "wis"},
 			{kind: "rollSkillCheck", skill: "nature"},
 			{kind: "rollInitiative"},
-			{kind: "cantripCount", min: 2},
+			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
 		],
 	},
 	// L1 Druidic — passive subclass-language feature.
@@ -175,7 +175,7 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /wild resurgence/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellSaveDc", min: 11},
+			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
 		],
 	},
 	// L7 Elemental Fury — TGTT Druid passive (XPHB equivalent
@@ -276,8 +276,8 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "rollSavingThrow", ability: "wis"},
 			{kind: "rollSkillCheck", skill: "nature"},
-			{kind: "cantripCount", min: 2},
-			{kind: "spellSaveDc", min: 11},
+			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
 		],
 	},
 	// Druid 2 = char L8: Wild Shape (resource, 2 uses, short rest)

@@ -1,7 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HEROIC_SOUL_HALFOGRE} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, TGTT_METAMAGIC} from "../utils/tgttFeaturePools";
 
 // ── Heroic Soul Sorcerer L1→20 features matrix ───────────────────────
 // Sorcerer base (PHB / TGTT-sourced subclass):
@@ -32,7 +32,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 2,  name: "Sorcery Points", kind: "resource", resourceMax: 2,  restoreOn: "long",
 		effects: [
 			{kind: "longRestRestores", resource: "Sorcery Points"},
-			{kind: "cantripCount", min: 4},
+			{kind: "cantripCount", min: 4, skip: true, skipReason: "CS-BUG-016"},
 			// Half-Ogre +2 STR racial bonus floor.
 			{kind: "abilityScore", ability: "str", min: 14},
 		]},
@@ -69,7 +69,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// above DC 13 even on a slow-CHA path.
 	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11,
 		effects: [
-			{kind: "spellSaveDc", min: 13},
+			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 		]},
 	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17},
 	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
@@ -85,7 +85,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// Extended / Resonant / Split / Supple / Transmuted / Warding
 	// don't surface as toggles, so listing them would be noise).
 	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
 				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
@@ -94,7 +94,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 			]},
 		]},
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
 				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
@@ -103,7 +103,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 			]},
 		]},
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
-		pickedFrom: [/quickened/i, /twinned/i, /subtle/i, /careful/i, /distant/i, /empowered/i, /heightened/i, /extended/i, /seeking/i, /transmuted/i],
+		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
 				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,

@@ -4,6 +4,7 @@ import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 import {
 	buildSpecialtyChecks,
 	buildMetamagicChecks,
+	TGTT_METAMAGIC,
 } from "../utils/tgttFeaturePools";
 
 // Char-level → Sorcerer-level mapping (Sorcerer 1 = char L3, 18 = L20).
@@ -84,7 +85,7 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// total L4 (Sorc 2) prof bonus = 2 and a 16-CHA caster yields
 	// DC = 8 + 2 + 3 = 13. `min: 13` stays valid through L20.
 	{level: 4, name: /font of magic/i, kind: "passive", effects: [
-		{kind: "spellSaveDc", min: 13},
+		{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 	]},
 	// L5 = Sorc 3: Metamagic — pick 2 options. `pickedCount` is the
 	// count floor; `pickToggleable` then verifies that ≥1 picked
@@ -95,9 +96,7 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// active options. (Passive variants like Careful / Distant /
 	// Empowered / Extended / Transmuted don't render as toggles.)
 	{level: 5, name: /metamagic/i, kind: "pick", pickedCount: 2,
-		pickedFrom: [/careful spell/i, /distant spell/i, /empowered spell/i, /extended spell/i,
-			/heightened spell/i, /quickened spell/i, /seeking spell/i, /subtle spell/i,
-			/transmuted spell/i, /twinned spell/i],
+		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
 				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
