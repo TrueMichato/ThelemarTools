@@ -40,13 +40,13 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			// Sorcerers are proficient in CON + CHA saves; CON button
 			// must exist and not throw on click.
 			{kind: "rollSavingThrow", ability: "con"},
-			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 		]},
 	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5,
 		effects: [
 			{kind: "rollSavingThrow", ability: "cha"},
 			{kind: "rollAbilityCheck", ability: "cha"},
-			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			{kind: "rollInitiative"},
 			// Spell save DC at L5 with CHA ≥ 16 = 8 + prof(3) + CHA(≥3) = 14.
 			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},

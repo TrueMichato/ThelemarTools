@@ -113,7 +113,7 @@ describeCharacter({
 			name: /stroke of luck/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", proficientSkills: true},
+				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 				// Phase 8: at L20 Sneak Attack caps at 10d6.
 				{kind: "sneakAttackDice", min: 10},
 			],

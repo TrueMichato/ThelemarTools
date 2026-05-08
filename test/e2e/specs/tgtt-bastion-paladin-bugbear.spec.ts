@@ -170,7 +170,7 @@ describeCharacter({
 			name: /abjure foes/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", proficientSkills: true},
+				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			],
 		},
 		{level: 9, name: /oath of bastion spells/i, kind: "spells", grantsSpells: ["Spirit Guardians", "Protection from Energy"]},

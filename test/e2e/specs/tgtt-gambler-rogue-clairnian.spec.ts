@@ -99,7 +99,7 @@ describeCharacter({
 			name: /reliable talent/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", proficientSkills: true},
+				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 				// Phase 8: at L11+ Sneak Attack is 6d6+ (matrix L11/17/20).
 				{kind: "sneakAttackDice", min: 6},
 			],

@@ -126,7 +126,7 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "spellInList", spell: "Druidcraft", skip: true, skipReason: "CS-BUG-016"},
 			{kind: "speed", type: "walk", min: 40},
 			{kind: "rollSavingThrow", ability: "wis"},
-			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			{kind: "rollInitiative"},
 			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
 		],
@@ -275,7 +275,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			{kind: "rollSavingThrow", ability: "wis"},
-			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
 			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
 		],

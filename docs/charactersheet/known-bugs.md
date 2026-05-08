@@ -621,3 +621,38 @@ Domain (silver-tongued seduction) is straight-up broken.
 **Test workaround**: skip the L3 `lust domain` skillBonus
 effect with `skipReason: "CS-BUG-019"` until the fix lands.
 
+
+## CS-BUG-020 — Skill-button rendering inconsistent with state-side proficiency
+
+**Status**: Open  
+**Surfaced**: Phase 15 E2E sweep (Bladesinger Wizard Tabaxi, Chronurgy Wizard Nyuidj, Jester Bard Dendulra MEGA L1→20 — 3 specs at L1).  
+**Component**: Character Sheet · Abilities tab · Skill rendering.
+
+### Symptom
+The new `proficientSkills: true` E2E probe queries
+`state.isProficientInSkill(s)` for every standard 5e skill, picks the
+first that returns true, then asks the page object to click the
+matching `.charsheet__skill-row` roll button. On TGTT class presets
+(at least Wizard Bladesinger, Wizard Chronurgy, Bard Jester at L1)
+the state reports `arcana` / `acrobatics` etc. as proficient but the
+Abilities-tab DOM has no roll button for those skills. Result: the
+test errors `skill roll button for "<skill>" not found` even though
+state-side the skill is marked proficient.
+
+### Repro
+1. Build a TGTT Wizard / Bard via the preset helper.
+2. Open the L1 character sheet → Abilities tab.
+3. `globalThis.charSheet._state.isProficientInSkill("arcana")` → `true`.
+4. The Abilities tab does NOT render the Arcana row's roll button.
+
+### Suggested fix
+Either (a) render the roll button consistently for any
+state-proficient skill regardless of source, or (b) revisit the
+`isProficientInSkill` semantics so that "proficient via state" and
+"renders on the sheet" agree.
+
+### E2E coverage
+21 `proficientSkills: true` probes across 14 TGTT specs are
+currently `skip:true, skipReason:"P5 follow-up: proficientSkills
+DOM lookup needs CharacterSheetPage hardening"` — re-enable when
+fixed. Tracked as a P5 follow-up in the Phase 15 plan.

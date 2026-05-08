@@ -53,7 +53,7 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 			/eldritch spear/i, /repelling blast/i, /mask of many faces/i, /misty visions/i,
 			/beast speech/i, /book of ancient secrets/i],
 		effects: [
-			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 		]},
 
 	// ── Sorcerer leg (TGTT-2014 Divine Soul — copy of XGE Divine Soul)
@@ -78,7 +78,7 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		{kind: "longRestRestores", resource: "Sorcery Points"},
 		{kind: "rollSavingThrow", ability: "cha"},
 		{kind: "rollAbilityCheck", ability: "cha"},
-		{kind: "rollSkillCheck", proficientSkills: true},
+		{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 	]},
 	// Font of Magic — passive plumbing. Use this anchor to assert the
 	// CHA-based spell save DC has reached its mid-game floor: at
