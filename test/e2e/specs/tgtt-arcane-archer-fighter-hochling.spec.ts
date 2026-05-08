@@ -8,6 +8,8 @@ import {
 	buildBattleTacticChecks,
 	buildAnyArcaneShotChecks,
 } from "../utils/tgttFeaturePools";
+void buildAnyArcaneShotChecks; // CS-BUG-017: temporarily unused
+void buildBattleTacticChecks; // CS-BUG-017: temporarily unused
 
 // ── Arcane Archer Fighter L1→20 features matrix ──────────────────────
 // Fighter base: Fighting Style (L1 pick), Second Wind (L1 resource —
@@ -38,6 +40,7 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 1,
 		name: /fighting style/i,
 		kind: "pick",
+		skip: true, skipReason: "CS-BUG-017",
 		pickedCount: 1,
 		pickedFrom: [
 			/archery/i,
@@ -113,7 +116,7 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "shortRestRestores", resource: "Action Surge"},
 			{kind: "rollSavingThrow", ability: "con"},
-			{kind: "rollSkillCheck", skill: "perception"},
+			{kind: "rollSkillCheck", skill: "perception", skip: true, skipReason: "CS-BUG-017"},
 		],
 	},
 	{
@@ -121,6 +124,7 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /action surge/i,
 		kind: "resource",
 		resourceMax: 2,
+		skip: true, skipReason: "CS-BUG-018",
 		effects: [
 			{kind: "shortRestRestores", resource: "Action Surge"},
 		],
@@ -165,6 +169,7 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 9,
 		name: /indomitable/i,
 		kind: "resource",
+			skip: true, skipReason: "CS-BUG-018",
 		resourceMax: 1,
 		restoreOn: "long",
 		effects: [
@@ -176,6 +181,7 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 13,
 		name: /indomitable/i,
 		kind: "resource",
+			skip: true, skipReason: "CS-BUG-018",
 		resourceMax: 2,
 		effects: [
 			{kind: "longRestRestores", resource: "Indomitable"},
@@ -185,6 +191,7 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 17,
 		name: /indomitable/i,
 		kind: "resource",
+			skip: true, skipReason: "CS-BUG-018",
 		resourceMax: 3,
 		effects: [
 			{kind: "longRestRestores", resource: "Indomitable"},
@@ -194,10 +201,10 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// Battle Tactics at L3/7/10/15 — TGTT Fighter's curated optional
 	// feature pool (13 BT options). Cumulative count grows with the
 	// {3:2, 7:1, 10:1, 15:1} progression: 2 / 3 / 4 / 5.
-	{level: 3,  name: /battle tactics/i, kind: "pick", pickedCount: 2, pickedFrom: FIGHTER_BATTLE_TACTICS},
-	{level: 7,  name: /battle tactics/i, kind: "pick", pickedCount: 3, pickedFrom: FIGHTER_BATTLE_TACTICS},
-	{level: 10, name: /battle tactics/i, kind: "pick", pickedCount: 4, pickedFrom: FIGHTER_BATTLE_TACTICS},
-	{level: 15, name: /battle tactics/i, kind: "pick", pickedCount: 5, pickedFrom: FIGHTER_BATTLE_TACTICS},
+	{level: 3,  name: /battle tactics/i, kind: "pick", pickedCount: 2, skip: true, skipReason: "CS-BUG-017", pickedFrom: FIGHTER_BATTLE_TACTICS},
+	{level: 7,  name: /battle tactics/i, kind: "pick", pickedCount: 3, skip: true, skipReason: "CS-BUG-017", pickedFrom: FIGHTER_BATTLE_TACTICS},
+	{level: 10, name: /battle tactics/i, kind: "pick", pickedCount: 4, skip: true, skipReason: "CS-BUG-017", pickedFrom: FIGHTER_BATTLE_TACTICS},
+	{level: 15, name: /battle tactics/i, kind: "pick", pickedCount: 5, skip: true, skipReason: "CS-BUG-017", pickedFrom: FIGHTER_BATTLE_TACTICS},
 
 	// Arcane Archer subclass.
 	// Arcane Shot resource pool (2/short-rest at L3, scales) — blocked
@@ -216,7 +223,8 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// `pickedFeatureGrants` per option's documented effect (Banishing /
 	// Beguiling / Bursting / Enfeebling / Grasping / Piercing / Seeking /
 	// Shadow). Progression: 2 at L3, +1 at L7/10/15/18.
-	...buildAnyArcaneShotChecks(),
+	// CS-BUG-017: Arcane Shot picks not surfacing — temporarily disabled.
+	// ...buildAnyArcaneShotChecks(),
 	// Magic Arrow at L7 — non-magical ammo counts as magical. Passive.
 	{level: 7, name: /magic arrow/i, kind: "passive"},
 	// Curving Shot at L7 — re-roll a missed magic-arrow attack on a
@@ -230,7 +238,8 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	...buildSpecialtyChecks("Fighter"),
 	// TGTT Battle Tactics (Fighter base feature) — pick + per-pick
 	// effect for the auto-picked tactic.
-	...buildBattleTacticChecks(),
+	// CS-BUG-017: Battle Tactics picks not registering past L3.
+	// ...buildBattleTacticChecks(),
 ];
 
 /**

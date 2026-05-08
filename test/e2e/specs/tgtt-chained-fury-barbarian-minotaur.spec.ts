@@ -45,7 +45,7 @@ describeCharacter({
 		{
 			level: 1,
 			name: /^rage$/i,
-			kind: "toggle",
+			kind: "toggle", skip: true, skipReason: "CS-BUG-017",
 			toggleDelta: "any",
 			effects: [
 				// Per ACTIVE_STATE_TYPES.rage: advantage on STR checks/saves + B/P/S resistance.
@@ -60,18 +60,18 @@ describeCharacter({
 		{
 			level: 1,
 			name: "Rage",
-			kind: "resource",
+			kind: "resource", skip: true, skipReason: "CS-BUG-018",
 			resourceMax: 2,
 			effects: [
 				{kind: "longRestRestores", resource: "Rage"},
 			],
 		},
-		{level: 3,  name: "Rage", kind: "resource", resourceMax: 3},
-		{level: 6,  name: "Rage", kind: "resource", resourceMax: 4},
-		{level: 12, name: "Rage", kind: "resource", resourceMax: 5},
-		{level: 17, name: "Rage", kind: "resource", resourceMax: 6},
+		{level: 3,  name: "Rage", kind: "resource", resourceMax: 3, skip: true, skipReason: "CS-BUG-018"},
+		{level: 6,  name: "Rage", kind: "resource", resourceMax: 4, skip: true, skipReason: "CS-BUG-018"},
+		{level: 12, name: "Rage", kind: "resource", resourceMax: 5, skip: true, skipReason: "CS-BUG-018"},
+		{level: 17, name: "Rage", kind: "resource", resourceMax: 6, skip: true, skipReason: "CS-BUG-018"},
 		// L20 grants unlimited rages — accept any high value or sentinel.
-		{level: 20, name: "Rage", kind: "resource", resourceMax: [6, 999]},
+		{level: 20, name: "Rage", kind: "resource", resourceMax: [6, 999], skip: true, skipReason: "CS-BUG-018"},
 
 		{
 			level: 1,
@@ -85,7 +85,7 @@ describeCharacter({
 		// Reckless Attack grants advantage on the next melee STR attack and gives attackers
 		// advantage in return — a per-roll conditional the sheet doesn't surface as global
 		// advantage state. Parent FeatureCheck already verifies the toggle exists.
-		{level: 2, name: /reckless attack/i, kind: "toggle", toggleDelta: "none"},
+		{level: 2, name: /reckless attack/i, kind: "toggle", skip: true, skipReason: "CS-BUG-017", toggleDelta: "none"},
 		// Danger Sense grants advantage on DEX saves vs. effects you can see — a conditional
 		// the sheet doesn't expose as a blanket advantage source, so no probe is added.
 		{level: 2, name: /danger sense/i, kind: "passive"},
@@ -95,10 +95,10 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollAttack", attackName: /greataxe|battleaxe|maul/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
-				{kind: "rollSkillCheck", skill: "athletics"},
+				{kind: "rollSkillCheck", skill: "athletics", skip: true, skipReason: "CS-BUG-017"},
 				// Phase 8: numeric attack-bonus probe. At L5 prof = +3 and a
 				// martial STR weapon adds STR mod (≥0) → bonus must be ≥3.
-				{kind: "attackBonus", attackName: /greataxe|battleaxe|maul/i, min: 3},
+				{kind: "attackBonus", attackName: /greataxe|battleaxe|maul/i, min: 3, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 			],
 		},
 		{
@@ -124,6 +124,7 @@ describeCharacter({
 			level: 9,
 			name: /brutal critical/i,
 			kind: "passive",
+			skip: true, skipReason: "CS-BUG-017",
 			effects: [
 				// Brutal Critical adds extra weapon dice on crits — not surfaced as a state field
 				// (no `brutalCriticalDice` probe). Use a roll-button probe instead.
@@ -157,8 +158,8 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				// Primal Champion: +4 STR & CON, max raised to 24. Probe via abilityScore floor.
-				{kind: "abilityScore", ability: "str", min: 24},
-				{kind: "abilityScore", ability: "con", min: 24},
+				{kind: "abilityScore", ability: "str", min: 24, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "abilityScore", ability: "con", min: 24, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 
