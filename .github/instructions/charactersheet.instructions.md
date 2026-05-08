@@ -82,6 +82,13 @@ description: "Instructions for 5etools character sheet work with emphasis on gen
 - Update docs and reference files that describe the touched behavior.
 - Keep comments and code organization concise and maintainable.
 
+## Comprehensive E2E Coverage
+
+- The Playwright suite at `test/e2e/specs/tgtt-*.spec.ts` is the safety net for player-facing character sheet behavior. Treat it as required coverage, not an afterthought.
+- When adding or extending a class, subclass, feat, race, or active-state mechanic that a player would encounter in normal play, verify it is exercised by the relevant TGTT character spec — and add probes if it is not.
+- When authoring or extending an E2E character build spec, **invoke the `e2e-character-tests` skill** and follow `.agents/skills/e2e-character-tests/references/standard.md`. Every spec must hit (or explicitly `{skip: true}` with a one-line reason) every numbered required check.
+- New product bugs surfaced by the suite must be logged as `CS-BUG-NNN` entries in `docs/charactersheet/known-bugs.md`; the affected probe must be skipped with `// blocked by CS-BUG-NNN`. Do not loosen E2E assertions to make red go green over a real bug.
+
 ## Preferred Outcome
 
 Agents working on the character sheet should leave the codebase with less duplication, better reuse of existing systems, stronger tests, clearer docs, and a more polished user experience than they found.

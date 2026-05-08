@@ -55,7 +55,51 @@ export class LevelUpPage {
 	 * Wait for the level-up modal to appear
 	 */
 	async waitForModal (): Promise<void> {
-		await this.modalContainer.waitFor({state: "visible", timeout: 10000});
+		try {
+			await this.modalContainer.waitFor({state: "visible", timeout: 10000});
+		} catch (e) {
+			// Diagnostic: capture page state so we can tell whether the
+			// click was swallowed by a lingering modal, the wizard
+			// failed to render, or the button itself wasn't where we
+			// expected. Surfaces in the test failure message instead of
+			// just "TimeoutError".
+			let diag: unknown = null;
+			try {
+				diag = await this.page.evaluate(() => {
+					const wiz = document.querySelector(".charsheet__levelup-wizard");
+					const inners = Array.from(document.querySelectorAll(".ve-ui-modal__inner, .ui-modal__inner")) as HTMLElement[];
+					const innerSummary = inners.map(m => ({
+						visible: m.offsetParent !== null,
+						title: ((m.querySelector("h4,h3,h2") as HTMLElement | null)?.textContent || "").trim().slice(0, 80),
+						hasWizard: !!m.querySelector(".charsheet__levelup-wizard"),
+						hasSelect: !!m.querySelector("select"),
+						selectOpts: Array.from(m.querySelectorAll("select option")).map(o => (o as HTMLOptionElement).textContent?.trim()).filter(Boolean),
+					}));
+					const btn = document.getElementById("charsheet-btn-levelup") as HTMLButtonElement | null;
+					const cs: any = (globalThis as any).charSheet;
+					const lvl = cs?._state?.getTotalLevel?.();
+					const classes = (cs?._state?._data?.classes || []).map((c: any) => `${c.name}|${c.source}|${c.level}`);
+					const err = (window as unknown as {__levelupErr?: string}).__levelupErr;
+					const pickerSeen = (window as unknown as {__lastPickerSeen?: boolean}).__lastPickerSeen;
+					return {
+						wizardInDom: !!wiz,
+						wizardHidden: wiz ? (wiz as HTMLElement).offsetParent === null : null,
+						modalCount: inners.length,
+						modalSummary: innerSummary,
+						btnLevelUpExists: !!btn,
+						btnDisabled: btn?.disabled,
+						btnVisible: btn ? btn.offsetParent !== null : false,
+						currentLevel: lvl,
+						classes,
+						lastErr: err || null,
+						pickerSeen: pickerSeen ?? null,
+					};
+				});
+			} catch (innerErr) {
+				diag = {error: "evaluate failed", inner: String(innerErr).slice(0, 200), pageClosed: this.page.isClosed()};
+			}
+			throw new Error(`waitForModal: levelup wizard not visible within 10s. diag=${JSON.stringify(diag)}`);
+		}
 	}
 
 	/**
@@ -108,33 +152,16 @@ export class LevelUpPage {
 	}
 
 	/**
-	 * Check if an accordion section is visible
+	 * Check if an accordion section is visible. Strict: only returns true
+	 * when an element with `[data-accordion-id="<id>"]` exists AND is
+	 * currently visible. The previous text-based fallback matched generic
+	 * wizard heading text (e.g. "Choose ...") and produced false positives
+	 * that caused downstream `selectSubclass` calls to time out at L3+.
 	 */
 	async isAccordionVisible (accordionId: string): Promise<boolean> {
-		// Try data-accordion-id first
 		const accordion = this.page.locator(`[data-accordion-id="${accordionId}"]`);
-		if (await accordion.count() > 0) {
-			return await accordion.isVisible();
-		}
-
-		// Fallback: check by text content in the wizard
-		const textMap: Record<string, string> = {
-			subclass: "Choose",
-			asi: "Ability Score",
-			hp: "Hit Points",
-			optfeatures: "Optional Feature",
-			featoptions: "Feature Option",
-			expertise: "Expertise",
-			knownspells: "Spells Known",
-			features: "New Features",
-		};
-
-		const searchText = textMap[accordionId];
-		if (searchText) {
-			const el = this.page.locator(".charsheet__levelup-wizard").getByText(searchText, {exact: false});
-			return await el.count() > 0;
-		}
-		return false;
+		if ((await accordion.count()) === 0) return false;
+		return await accordion.first().isVisible();
 	}
 
 	/**
@@ -227,26 +254,44 @@ export class LevelUpPage {
 		await options.first().waitFor({state: "visible", timeout: 10000});
 
 		const optionCount = await options.count();
-		for (let i = 0; i < optionCount; i++) {
-			const option = options.nth(i);
-			if (!(await option.isVisible())) continue;
+		// First pass: strict — match name AND source when source is provided.
+		// Second pass: name-only fallback (subclass cards may render source as
+		// an abbreviation badge that differs from the JSON source string,
+		// e.g. "TGTT" for "TGTT-2014" homebrew variants).
+		for (const requireSource of sourceAbbv ? [true, false] : [false]) {
+			for (let i = 0; i < optionCount; i++) {
+				const option = options.nth(i);
+				if (!(await option.isVisible())) continue;
 
-			const text = await option.textContent() || "";
-			if (!text.includes(subclassName)) continue;
-			if (sourceAbbv && !text.includes(sourceAbbv)) continue;
+				const text = await option.textContent() || "";
+				if (!text.includes(subclassName)) continue;
+				if (requireSource && sourceAbbv && !text.includes(sourceAbbv)) continue;
 
-			await option.scrollIntoViewIfNeeded();
-			await option.click({force: true});
+				await option.scrollIntoViewIfNeeded();
+				await option.click({force: true});
 
-			const radio = option.locator("input[type='radio']").first();
-			await expect(radio).toBeChecked({timeout: 5000});
+				const radio = option.locator("input[type='radio']").first();
+				await expect(radio).toBeChecked({timeout: 5000});
 
-			const summaryItem = wizard.locator(".charsheet__levelup-summary-item").filter({hasText: /Origin|Subclass/i}).first();
-			await expect(summaryItem).toContainText(subclassName, {timeout: 5000});
-			return;
+				// The summary heading varies by class — Cleric "Divine Domain",
+				// Sorcerer "Sorcerous Origin", Wizard "Arcane Tradition",
+				// Warlock "Otherworldly Patron", etc. — so match by the chosen
+				// name rather than a class-specific keyword.
+				const summaryItem = wizard.locator(".charsheet__levelup-summary-item").filter({hasText: subclassName}).first();
+				await expect(summaryItem).toContainText(subclassName, {timeout: 5000});
+				return;
+			}
 		}
 
-		throw new Error(`Could not find subclass "${subclassName}"${sourceAbbv ? ` with source "${sourceAbbv}"` : ""}`);
+		// Diagnostic dump of all visible options so test failures don't
+		// reduce to "subclass not found" with no context — invaluable
+		// when source naming drifts (TGTT vs TGTT-2024 vs XPHB).
+		const optionTexts: string[] = [];
+		for (let i = 0; i < optionCount; i++) {
+			const o = options.nth(i);
+			if (await o.isVisible()) optionTexts.push(((await o.textContent()) || "").replace(/\s+/g, " ").slice(0, 120));
+		}
+		throw new Error(`Could not find subclass "${subclassName}"${sourceAbbv ? ` with source "${sourceAbbv}"` : ""}. Visible options: ${JSON.stringify(optionTexts)}`);
 	}
 
 	// ========== KNOWN SPELLS SECTION ==========
@@ -308,64 +353,449 @@ export class LevelUpPage {
 	 * Uses jQuery to find and check unchecked checkboxes in sections that need more selections.
 	 */
 	async autoFillAllSelections (): Promise<void> {
+		// First, force every accordion expanded so all sub-pickers
+		// (including optional ones like Wizard's Spellbook) render their
+		// inputs. Note: clicking accordion headers triggers single-open
+		// behavior, so we add the `expanded` class directly instead.
 		await this.page.evaluate(() => {
-			const $ = (window as any).jQuery || (window as any).$;
-			if (!$) return;
+			const wizard = document.querySelector(".charsheet__levelup-wizard");
+			if (!wizard) return;
+			const accordions = wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion");
+			for (const acc of accordions) acc.classList.add("expanded");
+		});
+		await this.page.waitForTimeout(300);
 
-			$(".charsheet__levelup-wizard").find("*").filter(function (this: HTMLElement) {
-				const text = $(this).text();
-				return /^Selected:\s*\d+\s*\/\s*\d+$/.test(text.trim());
-			}).each(function (this: HTMLElement) {
-				const text = $(this).text().trim();
-				const match = text.match(/Selected:\s*(\d+)\s*\/\s*(\d+)/);
-				if (!match) return;
-				const current = parseInt(match[1]);
-				const max = parseInt(match[2]);
-				if (current >= max) return;
+		// Enable any "Show all source versions" toggles so additional
+		// combat-methods / optional-feature variants become selectable.
+		// (Character may already know all default-source methods, leaving
+		// 0 selectable until the broader catalog is unlocked.)
+		await this.page.evaluate(() => {
+			const wizard = document.querySelector(".charsheet__levelup-wizard");
+			if (!wizard) return;
+			const toggles = wizard.querySelectorAll<HTMLInputElement>("input.charsheet__opt-show-all-toggle, input[type='checkbox']");
+			for (const cb of toggles) {
+				const lbl = (cb.closest("label")?.textContent || cb.parentElement?.textContent || "").toLowerCase();
+				if (!lbl.includes("show all source versions")) continue;
+				if (!cb.checked) cb.click();
+			}
+		});
 
-				const needed = max - current;
-				let $el = $(this);
-				for (let depth = 0; depth < 8; depth++) {
-					$el = $el.parent();
-					if (!$el.length) break;
-					const $checkboxes = $el.find("input[type='checkbox']:not(:checked)");
-					if ($checkboxes.length > 0) {
-						$checkboxes.slice(0, needed).each(function (this: HTMLInputElement) {
-							$(this).prop("checked", true).trigger("change");
+		// Some sub-pickers gate later choices on earlier ones (e.g. Monk
+		// L2 Combat Methods only become valid after Combat Traditions are
+		// chosen, even if both render in the same accordion body). Loop
+		// the auto-fill pass up to 3 times so each round can satisfy
+		// counters that just became fillable. Inter-pass wait is short
+		// (50ms) because the DOM mutates synchronously on click — we
+		// only need one frame for re-render.
+		for (let pass = 0; pass < 3; pass++) {
+			const clicked = await this.page.evaluate(() => {
+				const wizard = document.querySelector(".charsheet__levelup-wizard");
+				if (!wizard) return 0;
+
+				const counters = Array.from(wizard.querySelectorAll<HTMLElement>("*"))
+					.filter(el => /^Selected:\s*\d+\s*\/\s*\d+$/.test((el.textContent || "").trim()));
+
+				let totalClicked = 0;
+
+				for (const counter of counters) {
+					const text = (counter.textContent || "").trim();
+					const m = text.match(/Selected:\s*(\d+)\s*\/\s*(\d+)/);
+					if (!m) continue;
+					const current = parseInt(m[1], 10);
+					const max = parseInt(m[2], 10);
+					if (current >= max) continue;
+					const needed = max - current;
+
+					let scope: HTMLElement | null = counter.parentElement;
+					let clicked = 0;
+					for (let depth = 0; depth < 8 && scope && clicked < needed; depth++) {
+						const checkboxes = Array.from(
+							scope.querySelectorAll<HTMLInputElement>("input[type='checkbox']:not(:checked):not(:disabled)"),
+						);
+						const group = checkboxes.filter(cb => {
+							const lbl = (cb.parentElement?.textContent || "").toLowerCase();
+							return !lbl.includes("show all source versions");
 						});
-						break;
+						if (group.length > 0) {
+							for (const cb of group.slice(0, needed - clicked)) {
+								cb.click();
+								if (!cb.checked) {
+									const wrap = cb.closest("label") || cb.parentElement;
+									if (wrap) (wrap as HTMLElement).click();
+								}
+								clicked++;
+								totalClicked++;
+							}
+							break;
+						}
+						scope = scope.parentElement;
 					}
 				}
+				return totalClicked;
 			});
+			if (clicked === 0) break;
+			await this.page.waitForTimeout(300);
+		}
+
+		// ──────────────────────────────────────────────────────────────
+		// ASI + Feat (Thelemar L4 / standard L4/8/12/16/19) — the wizard
+		// uses +/− steppers and a feat radio list, not a counter group,
+		// so the generic counter pass above can't satisfy it.
+		//
+		// Strategy: ALWAYS prefer "Increase Ability Scores (+2 total)"
+		// when available — +2 to a stat is unconditionally legal and
+		// avoids the feat sub-picker rabbit hole entirely. Only fall
+		// back to "Take a Feat" when the ASI mode is disabled (some
+		// Thelemar nodes only offer a feat).
+		// ──────────────────────────────────────────────────────────────
+		await this.page.evaluate(() => {
+			const wizard = document.querySelector(".charsheet__levelup-wizard");
+			if (!wizard) return;
+			const asi = wizard.querySelector<HTMLElement>("[data-accordion-id='asi']")
+				|| Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion"))
+					.find(el => /ASI|Ability Score Improvement/i.test(el.textContent || "")) || null;
+			if (!asi) return;
+			if (!asi.classList.contains("expanded")) {
+				asi.querySelector<HTMLElement>(".charsheet__levelup-accordion-header")?.click();
+				asi.classList.add("expanded");
+			}
+
+			// Helper: dispatch a real MouseEvent on top of .click() so any
+			// React-style/jQuery delegated change listeners actually fire.
+			const robustClick = (el: HTMLElement) => {
+				try { el.click(); } catch (_) { /* noop */ }
+				try {
+					el.dispatchEvent(new MouseEvent("mousedown", {bubbles: true}));
+					el.dispatchEvent(new MouseEvent("mouseup", {bubbles: true}));
+					el.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+					el.dispatchEvent(new Event("change", {bubbles: true}));
+				} catch (_) { /* noop */ }
+			};
+
+			// Find the mode-selector radios. The label text varies by
+			// level: "Increase Ability Scores", "Take a Feat", "Take an
+			// Epic Boon" (L19 in 2024 rules), etc. We always prefer the
+			// "Increase Ability Scores" path because +2 to a stat is
+			// unconditionally legal at every ASI node.
+			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
+			const modeAsi = allRadios.find(r => {
+				const wrap = r.closest("label") || r.parentElement;
+				return !!wrap && /Increase Ability Scores|Ability Score Improvement/i.test(wrap.textContent || "");
+			});
+			const modeFeatOrBoon = allRadios.find(r => {
+				const wrap = r.closest("label") || r.parentElement;
+				return !!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || "");
+			});
+
+			// Switch to ASI mode whenever it's available and not already
+			// selected. Click both the wrapper AND the radio for safety.
+			if (modeAsi && !modeAsi.disabled && !modeAsi.checked) {
+				const wrap = (modeAsi.closest("label") || modeAsi.parentElement) as HTMLElement | null;
+				if (wrap) robustClick(wrap);
+				robustClick(modeAsi);
+			}
 		});
-		await this.page.waitForTimeout(500);
+		await this.page.waitForTimeout(200);
+
+		// Now drain the +/- stepper. Re-query the ASI accordion each
+		// pass — switching modes re-renders the body. 50ms wait between
+		// presses is plenty (DOM mutates synchronously on click).
+		for (let pass = 0; pass < 8; pass++) {
+			const remaining = await this.page.evaluate(() => {
+				const wizard = document.querySelector(".charsheet__levelup-wizard");
+				if (!wizard) return 0;
+				const asi = wizard.querySelector<HTMLElement>("[data-accordion-id='asi']")
+					|| Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion"))
+						.find(el => /ASI|Ability Score Improvement/i.test(el.textContent || "")) || null;
+				if (!asi) return 0;
+				const text = asi.textContent || "";
+				const m = text.match(/Points remaining:\s*(\d+)/i);
+				const left = m ? parseInt(m[1], 10) : 0;
+				if (left <= 0) return 0;
+				const plusBtns = Array.from(asi.querySelectorAll<HTMLButtonElement>("button"))
+					.filter(btn => btn.textContent?.trim() === "+" && !btn.disabled);
+				if (plusBtns.length === 0) return -1;
+				plusBtns[0].click();
+				return left;
+			});
+			if (remaining <= 0) break;
+			if (remaining === -1) break;
+			await this.page.waitForTimeout(150);
+		}
+
+		// Fallback: if ASI mode wasn't available (or steppers couldn't
+		// be driven), pick a feat. Prefer one WITHOUT "has choices"; if
+		// none exist, take the first and recurse — the next counter
+		// pass at the top of the next call will fill any sub-picker.
+		await this.page.evaluate(() => {
+			const wizard = document.querySelector(".charsheet__levelup-wizard");
+			if (!wizard) return;
+			const asi = wizard.querySelector<HTMLElement>("[data-accordion-id='asi']")
+				|| Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion"))
+					.find(el => /ASI|Ability Score Improvement/i.test(el.textContent || "")) || null;
+			if (!asi) return;
+			// If the ASI requirement is satisfied (no ⚠️ Required), bail.
+			if (!/⚠️\s*Required/.test(asi.textContent || "")) return;
+			// If steppers exist but Points remaining > 0, the user is in
+			// ASI mode and we already failed to drive them — try feat.
+			// Find the Feat-mode radio and switch to it, then pick a feat.
+			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
+			const modeFeatOrBoon = allRadios.find(r => {
+				const wrap = r.closest("label") || r.parentElement;
+				return !!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || "");
+			});
+			const robustClick = (el: HTMLElement) => {
+				try { el.click(); } catch (_) { /* noop */ }
+				try {
+					el.dispatchEvent(new MouseEvent("mousedown", {bubbles: true}));
+					el.dispatchEvent(new MouseEvent("mouseup", {bubbles: true}));
+					el.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+					el.dispatchEvent(new Event("change", {bubbles: true}));
+				} catch (_) { /* noop */ }
+			};
+			if (modeFeatOrBoon && !modeFeatOrBoon.disabled && !modeFeatOrBoon.checked) {
+				const wrap = (modeFeatOrBoon.closest("label") || modeFeatOrBoon.parentElement) as HTMLElement | null;
+				if (wrap) robustClick(wrap);
+				robustClick(modeFeatOrBoon);
+			}
+			// Refresh radio list — feat/boon radios appear after switching mode.
+			const featRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:checked):not(:disabled)"))
+				.filter(r => {
+					const wrap = r.closest("label") || r.parentElement;
+					if (!wrap) return false;
+					const txt = wrap.textContent || "";
+					// Exclude the mode-toggle radios themselves.
+					if (/Increase Ability Scores|Take a (Feat|Epic Boon)|Take an Epic Boon/i.test(txt)) return false;
+					return true;
+				});
+			const noChoice = featRadios.filter(r => {
+				const wrap = r.closest("label") || r.parentElement;
+				return wrap && !/has choices/i.test(wrap.textContent || "");
+			});
+			const target = noChoice[0] || featRadios[0];
+			if (!target) return;
+			const wrap = (target.closest("label") || target.parentElement) as HTMLElement | null;
+			if (wrap) robustClick(wrap);
+			robustClick(target);
+		});
+		await this.page.waitForTimeout(300);
+
+		// ──────────────────────────────────────────────────────────────
+		// Scholar Expertise / other single-pick radio sections — for any
+		// accordion still flagged ⚠️ Required that contains an unchecked
+		// radio group but no "Selected: N/M" counter, pick the first
+		// available radio.
+		// ──────────────────────────────────────────────────────────────
+		await this.page.evaluate(() => {
+			const wizard = document.querySelector(".charsheet__levelup-wizard");
+			if (!wizard) return;
+			const accordions = wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion");
+			for (const acc of accordions) {
+				const text = acc.textContent || "";
+				if (!text.includes("⚠️ Required")) continue;
+				if (/Selected:\s*\d+\s*\/\s*\d+/.test(text)) continue;
+				if (acc.matches("[data-accordion-id='asi']") || /Ability Score Improvement/i.test(text)) continue;
+				// Skip subclass accordion entirely — selectSubclass() handles
+				// it deterministically, and clicking another radio in the
+				// same group would silently swap the chosen subclass.
+				if (acc.matches("[data-accordion-id='subclass']")) continue;
+				const allRadios = Array.from(acc.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:disabled)"));
+				// Group radios by `name` and skip groups that already have
+				// a checked option — the generic handler only fills the
+				// FIRST unchecked group, never overwrites prior choices.
+				const byName = new Map<string, HTMLInputElement[]>();
+				for (const r of allRadios) {
+					const n = r.name || "_anon";
+					if (!byName.has(n)) byName.set(n, []);
+					byName.get(n)!.push(r);
+				}
+				let target: HTMLInputElement | null = null;
+				for (const radios of byName.values()) {
+					if (radios.some(r => r.checked)) continue;
+					target = radios[0];
+					break;
+				}
+				if (!target) continue;
+				target.click();
+				if (!target.checked) {
+					const wrap = target.closest("label") || target.parentElement;
+					if (wrap) (wrap as HTMLElement).click();
+				}
+			}
+		});
+		await this.page.waitForTimeout(200);
+
+		// ──────────────────────────────────────────────────────────────
+		// Spell pickers (Wizard spellbook, Known caster spells/cantrips,
+		// Prepared caster spells/cantrips). These render their own
+		// progress headers `<current>/<max>` and use `.spell-toggle`
+		// buttons (`+` to add, `✓` to remove). The generic counter pass
+		// can't satisfy them. Loop a few times to fill all visible
+		// pickers.
+		// ──────────────────────────────────────────────────────────────
+		for (let pass = 0; pass < 4; pass++) {
+			const clicked = await this.page.evaluate(() => {
+				const wizard = document.querySelector(".charsheet__levelup-wizard");
+				if (!wizard) return 0;
+				const pickers = Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__spell-picker-container"));
+				let total = 0;
+				for (const picker of pickers) {
+					const counters = Array.from(picker.querySelectorAll<HTMLElement>(".spell-counter-value, .cantrip-counter-value"));
+					for (const counter of counters) {
+						const isCantrip = counter.classList.contains("cantrip-counter-value");
+						const cur = parseInt(counter.querySelector(isCantrip ? ".cantrip-count-current" : ".spell-count-current")?.textContent || "0", 10);
+						const max = parseInt(counter.querySelector(isCantrip ? ".cantrip-count-max" : ".spell-count-max")?.textContent || "0", 10);
+						if (cur >= max) continue;
+						const need = max - cur;
+						const addBtns = Array.from(picker.querySelectorAll<HTMLButtonElement>("button.spell-toggle"))
+							.filter(b => (b.textContent || "").trim() === "+");
+						for (const btn of addBtns.slice(0, need)) {
+							btn.click();
+							total++;
+						}
+					}
+				}
+				return total;
+			});
+			if (clicked === 0) break;
+			await this.page.waitForTimeout(250);
+		}
 	}
 
 	// ========== COMPLETION ==========
 
 	/**
-	 * Click finish to complete level-up
+	 * Click finish to complete level-up.
+	 *
+	 * The level-up wizard may pop additional confirmation modals
+	 * after we click "Level Up to N" — most notably a
+	 * "Skip Spell Selection?" prompt for prepared/known casters
+	 * when we haven't picked the new spells. We auto-confirm
+	 * (Skip) those so the test flow continues.
 	 */
 	async finish (): Promise<void> {
-		// Primary: button text pattern (most reliable based on actual DOM)
-		const levelUpBtn = this.page.locator(".charsheet__levelup-wizard button").filter({hasText: /Level Up to/i});
-		if (await levelUpBtn.count() > 0 && await levelUpBtn.first().isVisible()) {
-			await levelUpBtn.first().click();
-			await this.page.waitForTimeout(1000);
-			return;
+		const click = async () => {
+			// Footer (Cancel + "Level Up to N") is appended to the modal
+			// inner, NOT to `.charsheet__levelup-wizard` — they're
+			// siblings. So we search at the modal level.
+			const ok = await this.page.evaluate(() => {
+				const wizard = document.querySelector(".charsheet__levelup-wizard");
+				if (!wizard) return false;
+				const modalInner = wizard.closest<HTMLElement>(".ve-ui-modal__inner");
+				if (!modalInner) return false;
+				const btn = modalInner.querySelector<HTMLButtonElement>('[data-testid="levelup-finish"]')
+					|| Array.from(modalInner.querySelectorAll<HTMLButtonElement>("button"))
+						.find(b => /Level Up to/i.test(b.textContent || ""));
+				if (!btn) return false;
+				(window as unknown as {__levelupErr?: string}).__levelupErr = undefined;
+				const onErr = (e: ErrorEvent) => {
+					(window as unknown as {__levelupErr?: string}).__levelupErr = String(e.error?.stack || e.message);
+				};
+				const onRej = (e: PromiseRejectionEvent) => {
+					(window as unknown as {__levelupErr?: string}).__levelupErr = String(e.reason?.stack || e.reason);
+				};
+				window.addEventListener("error", onErr, {once: true});
+				window.addEventListener("unhandledrejection", onRej, {once: true});
+				btn.click();
+				setTimeout(() => {
+					window.removeEventListener("error", onErr);
+					window.removeEventListener("unhandledrejection", onRej);
+				}, 5000);
+				return true;
+			});
+			if (ok) return true;
+			const finishBtn = this.page.locator('.ve-ui-modal__inner [data-testid="levelup-finish"]');
+			if (await finishBtn.count() > 0) {
+				await finishBtn.first().click({force: true});
+				return true;
+			}
+			return false;
+		};
+		await click();
+
+		// After clicking, the wizard may either close immediately or pop a
+		// confirmation prompt (e.g. "Skip Spell Selection?" for casters
+		// who haven't picked all gained spells). Poll up to ~6s for a
+		// prompt to appear and dismiss it; the wizard closes itself when
+		// the prompt resolves.
+		const deadline = Date.now() + 6000;
+		while (Date.now() < deadline) {
+			await this.page.waitForTimeout(250);
+			const wizardOpen = await this.page.locator(".charsheet__levelup-wizard").isVisible().catch(() => false);
+			if (!wizardOpen) break;
+
+			const dismissed = await this.page.evaluate(() => {
+				const inners = Array.from(document.querySelectorAll<HTMLElement>(".ve-ui-modal__inner"))
+					// Exclude the level-up wizard's own modal — it's the
+					// PARENT of `.charsheet__levelup-wizard`, so checking
+					// `.closest()` doesn't filter it.
+					.filter(m => !m.querySelector(".charsheet__levelup-wizard"));
+				for (const m of inners) {
+					const buttons = Array.from(m.querySelectorAll<HTMLButtonElement>("button"));
+					if (!buttons.length) continue;
+					const skip = buttons.find(b => /\bSkip\b/i.test(b.textContent || ""));
+					const ok = buttons.find(b => /\bOK\b|\bContinue\b|\bYes\b/i.test(b.textContent || ""));
+					const primary = buttons.find(b => b.classList.contains("ve-btn-primary"));
+					(skip || ok || primary || buttons[0])?.click();
+					return true;
+				}
+				return false;
+			});
+			if (dismissed) {
+				await this.page.waitForTimeout(400);
+				break;
+			}
 		}
-		// Try data-testid
-		const finishBtn = this.page.locator('[data-testid="levelup-finish"]');
-		if (await finishBtn.count() > 0 && await finishBtn.isVisible()) {
-			await finishBtn.click();
-			await this.page.waitForTimeout(1000);
-			return;
-		}
-		// Fallback: primary button in the wizard
-		const primaryBtn = this.page.locator(".charsheet__levelup-wizard .ve-btn-primary");
-		if (await primaryBtn.count() > 0 && await primaryBtn.first().isVisible()) {
-			await primaryBtn.first().click();
-			await this.page.waitForTimeout(1000);
+
+		await this.page.waitForTimeout(300);
+
+		// If the wizard is still visible at this point, dump diagnostics.
+		const stillOpen = await this.page.locator(".charsheet__levelup-wizard").isVisible().catch(() => false);
+		if (stillOpen) {
+			const diag = await this.page.evaluate(() => {
+				const wizard = document.querySelector(".charsheet__levelup-wizard");
+				const err = (window as unknown as {__levelupErr?: string}).__levelupErr;
+				const inners = Array.from(document.querySelectorAll(".ve-ui-modal__inner"));
+				const innerSummary = inners.map(m => ({
+					hasWizard: !!m.querySelector(".charsheet__levelup-wizard"),
+					title: (m.querySelector("h4")?.textContent || "").trim().slice(0, 80),
+					buttons: Array.from(m.querySelectorAll("button")).map(b => (b.textContent || "").trim()),
+				}));
+				const finishBtn = wizard?.querySelector('[data-testid="levelup-finish"]') as HTMLButtonElement | null;
+				const allTestids = wizard
+					? Array.from(wizard.querySelectorAll("[data-testid]")).map(e => e.getAttribute("data-testid"))
+					: [];
+				const wizardHtmlSnippet = wizard ? wizard.outerHTML.slice(-800) : null;
+				const accordionDump = wizard
+					? Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion")).map(acc => {
+						const id = acc.getAttribute("data-accordion-id");
+						const title = (acc.querySelector(".charsheet__levelup-accordion-title")?.textContent || "").trim();
+						const expanded = acc.classList.contains("expanded");
+						const required = /⚠️\s*Required/.test(acc.textContent || "");
+						const radios = Array.from(acc.querySelectorAll<HTMLInputElement>("input[type='radio']"))
+							.map(r => ({
+								name: r.name,
+								value: r.value,
+								checked: r.checked,
+								disabled: r.disabled,
+								label: ((r.closest("label") || r.parentElement)?.textContent || "").trim().slice(0, 80),
+							}));
+						return {id, title, expanded, required, radioCount: radios.length, radios: radios.slice(0, 8)};
+					})
+					: [];
+				return {
+					err: err || null,
+					innerCount: inners.length,
+					innerSummary,
+					finishVisible: !!finishBtn,
+					finishDisabled: finishBtn?.disabled,
+					allTestids,
+					wizardHtmlTail: wizardHtmlSnippet,
+					accordionDump,
+				};
+			});
+			// eslint-disable-next-line no-console
+			console.log("[LevelUpPage.finish] wizard still open after dismiss loop:", JSON.stringify(diag, null, 2));
 		}
 	}
 
