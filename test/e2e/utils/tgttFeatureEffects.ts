@@ -327,3 +327,106 @@ export const XPHB_WEAPON_MASTERY_EFFECTS: Record<string, EffectCheck[]> = {
 		{kind: "attackPresent", namePattern: /Heavy Crossbow/i},
 	],
 };
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Cross-source effect maps (XPHB / XGE / etc.). Keyed on the canonical
+// optional-feature `name`. Entries here are best-effort starters — the
+// helper falls through with no effect probe when a pick name is absent,
+// so it's safe to add entries incrementally.
+// ────────────────────────────────────────────────────────────────────────
+
+/** XPHB Eldritch Invocations. */
+export const XPHB_INVOCATION_EFFECTS: Record<string, EffectCheck[]> = {
+	"Agonizing Blast": [
+		{kind: "attackDamageContains", attackName: /Eldritch Blast/i, contains: /\+/},
+	],
+	"Devil's Sight": [],
+	"Pact of the Blade": [
+		{kind: "pickActivatable", matchAny: [/Pact of the Blade/i], min: 1},
+	],
+	"Repelling Blast": [],
+};
+
+/** XPHB Metamagic options (Sorcerer). */
+export const XPHB_METAMAGIC_EFFECTS: Record<string, EffectCheck[]> = {
+	"Careful Spell": [
+		{kind: "pickActivatable", matchAny: [/Careful Spell/i], min: 1},
+	],
+	"Distant Spell": [
+		{kind: "pickActivatable", matchAny: [/Distant Spell/i], min: 1},
+	],
+	"Empowered Spell": [
+		{kind: "pickActivatable", matchAny: [/Empowered Spell/i], min: 1},
+	],
+	"Quickened Spell": [
+		{kind: "pickActivatable", matchAny: [/Quickened Spell/i], min: 1},
+	],
+	"Subtle Spell": [
+		{kind: "pickActivatable", matchAny: [/Subtle Spell/i], min: 1},
+	],
+	"Twinned Spell": [
+		{kind: "pickActivatable", matchAny: [/Twinned Spell/i], min: 1},
+	],
+};
+
+/** XGE Arcane Shot options (Arcane Archer Fighter). */
+export const XGE_ARCANE_SHOT_EFFECTS: Record<string, EffectCheck[]> = {
+	"Banishing Arrow": [
+		{kind: "pickActivatable", matchAny: [/Banishing Arrow/i], min: 1},
+	],
+	"Beguiling Arrow": [
+		{kind: "pickActivatable", matchAny: [/Beguiling Arrow/i], min: 1},
+	],
+	"Bursting Arrow": [
+		{kind: "pickActivatable", matchAny: [/Bursting Arrow/i], min: 1},
+	],
+	"Enfeebling Arrow": [
+		{kind: "pickActivatable", matchAny: [/Enfeebling Arrow/i], min: 1},
+	],
+	"Grasping Arrow": [
+		{kind: "pickActivatable", matchAny: [/Grasping Arrow/i], min: 1},
+	],
+	"Piercing Arrow": [
+		{kind: "pickActivatable", matchAny: [/Piercing Arrow/i], min: 1},
+	],
+	"Seeking Arrow": [
+		{kind: "pickActivatable", matchAny: [/Seeking Arrow/i], min: 1},
+	],
+	"Shadow Arrow": [
+		{kind: "pickActivatable", matchAny: [/Shadow Arrow/i], min: 1},
+	],
+};
+
+/** XPHB Battle Master Maneuvers. */
+export const XPHB_MANEUVER_EFFECTS: Record<string, EffectCheck[]> = {};
+
+/** XPHB Pact Boons. */
+export const XPHB_PACT_BOON_EFFECTS: Record<string, EffectCheck[]> = {
+	"Pact of the Blade": [
+		{kind: "pickActivatable", matchAny: [/Pact of the Blade/i], min: 1},
+	],
+	"Pact of the Chain": [
+		{kind: "pickActivatable", matchAny: [/Pact of the Chain|Find Familiar/i], min: 1},
+	],
+	"Pact of the Tome": [
+		{kind: "pickActivatable", matchAny: [/Pact of the Tome|Book of Shadows/i], min: 1},
+	],
+};
+
+/** Zodiac Druid forms (TGTT). Roc/Octopus/Unicorn surface as Wild Shape
+ *  options — verify they appear as activatables. */
+export const ZODIAC_FORM_EFFECTS: Record<string, EffectCheck[]> = {
+	"Roc": [
+		{kind: "pickActivatable", matchAny: [/Roc/i], min: 1},
+	],
+	"Octopus": [
+		{kind: "pickActivatable", matchAny: [/Octopus/i], min: 1},
+	],
+	"Unicorn": [
+		{kind: "pickActivatable", matchAny: [/Unicorn/i], min: 1},
+	],
+};
+
+/** Debilitation Monk Precise Strike Methods (TGTT). */
+export const DEBILITATION_PRECISE_STRIKE_EFFECTS: Record<string, EffectCheck[]> = {};
