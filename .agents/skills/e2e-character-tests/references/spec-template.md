@@ -169,7 +169,7 @@ on the sheet, so it's safe to declare optimistically.  Helpers like
 `buildSpecialtyChecks`, `buildBattleTacticChecks`,
 `buildMetamagicChecks`, `buildInvocationChecks`,
 `buildJesterActChecks`, `buildTricksterTrickChecks`,
-`buildPainfulStrikeChecks`, `buildPactBoonChecks`,
+`buildPreciseStrikeChecks`, `buildPactBoonChecks`,
 `buildDreamwalkerChecks`, `buildWeaponMasteryChecks` already wire this
 up automatically for the auto-picker's deterministic first choice —
 just spread them into your matrix.

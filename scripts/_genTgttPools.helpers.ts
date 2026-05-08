@@ -157,15 +157,17 @@ export function buildTricksterTrickChecks (
 	);
 }
 
-/** Belly Dancer Rogue / Pugilist Painful Strikes — picks at L3+. */
-export function buildPainfulStrikeChecks (
+/** Monk Debilitation Precise Strike Methods (TGTT) — Monk-subclass-only
+ *  feature. 3 picks at L3, +1 each at L6/11/17 (cumulative 3/4/5/6).
+ *  No other class or subclass grants this feature. */
+export function buildPreciseStrikeChecks (
 	progression: Array<{level: number; cum: number}> = [
-		{level: 3, cum: 2}, {level: 9, cum: 3}, {level: 13, cum: 4}, {level: 17, cum: 5},
+		{level: 3, cum: 3}, {level: 6, cum: 4}, {level: 11, cum: 5}, {level: 17, cum: 6},
 	],
 	levelMap?: Record<number, number>,
 ): FeatureCheck[] {
 	return buildOptionalFeatureChecks(
-		/Painful Strikes|Strikes/i, TGTT_PAINFUL_STRIKES, TGTT_PAINFUL_STRIKE_EFFECTS, progression, levelMap,
+		/Precise Strike Methods|Precise Strike/i, TGTT_PRECISE_STRIKES, TGTT_PRECISE_STRIKE_EFFECTS, progression, levelMap,
 	);
 }
 
