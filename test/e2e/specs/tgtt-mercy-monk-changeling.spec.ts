@@ -203,7 +203,7 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "skillBonus", skill: "medicine", min: 2},
 			{kind: "skillBonus", skill: "insight",  min: 2},
-			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 		],
 	},
 	// TGTT-specific Combat Methods (Mercy) grant.

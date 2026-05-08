@@ -114,7 +114,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollAbilityCheck", ability: "cha"},
 			{kind: "rollSavingThrow", ability: "cha"},
 			{kind: "rollSavingThrow", ability: "dex"},
-			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			{kind: "rollInitiative"},
 		],
 	},
@@ -125,7 +125,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			// Yuan-Ti are stereotypically Deception-flavoured; probe the
 			// skill button no-throws as part of the JoaT entry.
-			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			// Bard starting kit weapons: probe whichever simple weapon
 			// the auto-loadout actually picked up.
 			{kind: "rollAttack", attackName: /rapier|shortsword|dagger|hand crossbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},

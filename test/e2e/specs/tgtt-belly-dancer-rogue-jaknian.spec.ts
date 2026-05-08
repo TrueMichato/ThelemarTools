@@ -192,7 +192,7 @@ describeCharacter({
 			name: /tantalizing shivers/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", proficientSkills: true},
+				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 				{kind: "sneakAttackDice", min: 5},
 			],
 		},

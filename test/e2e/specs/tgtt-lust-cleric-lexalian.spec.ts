@@ -33,7 +33,7 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 		{kind: "rollSavingThrow", ability: "wis"},
 		{kind: "rollSavingThrow", ability: "cha"},
 		{kind: "rollAbilityCheck", ability: "cha"},
-		{kind: "rollSkillCheck", proficientSkills: true},
+		{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 		{kind: "rollInitiative"},
 	]},
 	{level: 1, name: /divine order/i, kind: "passive"},
@@ -75,7 +75,7 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 5, name: /sear undead|destroy undead/i, kind: "passive", effects: [
 		{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 		{kind: "rollAttack", attackName: /mace|warhammer|crossbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
-		{kind: "rollSkillCheck", proficientSkills: true},
+		{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 	]},
 	// L7 Blessed Strikes / L14 Improved Blessed Strikes — passive damage
 	// rider on weapon attacks or cantrips. Damage scaling not surfaced

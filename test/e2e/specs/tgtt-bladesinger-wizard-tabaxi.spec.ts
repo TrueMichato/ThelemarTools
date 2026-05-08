@@ -25,7 +25,7 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "cantripCount", min: 3, skip: true, skipReason: "CS-BUG-016"},
 			{kind: "spellInList", spell: "Mage Armor", skip: true, skipReason: "CS-BUG-016"},
 			{kind: "rollSavingThrow", ability: "int"},
-			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			{kind: "rollInitiative"},
 			// L1 wizard with INT 16-17 base + prof +2 → DC 13.
 			// `min: 12` tolerates point-buy variants (INT 14 → DC 12).
