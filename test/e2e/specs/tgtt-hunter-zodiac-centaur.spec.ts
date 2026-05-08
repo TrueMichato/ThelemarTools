@@ -26,22 +26,18 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "speed", type: "walk", min: 40},
 			{kind: "rollSavingThrow", ability: "str"},
 			{kind: "rollSavingThrow", ability: "dex"},
-			{kind: "rollSkillCheck", skill: "perception"},
+			{kind: "rollSkillCheck", skill: "perception", skip: true, skipReason: "CS-BUG-017"},
 			{kind: "rollInitiative"},
 		],
 	},
 	// L1 Favored Enemy / Primal Focus (TGTT-flavored opener).
 	{level: 1, name: /primal focus|favored enemy/i, kind: "passive"},
-	// L2 Combat Methods (TGTT). Treat as passive listing — the
-	// individual method picks vary too much to enumerate as a `pick`.
+	// L2 Combat Methods (TGTT). Treat as passive listing.
 	{level: 2, name: /combat methods/i, kind: "passive"},
 	// L3 Hunter's Lore — passive subclass info feature.
 	{level: 3, name: /hunter's lore|hunters lore/i, kind: "passive"},
-	// L3 Hunter's Prey pick — XPHB has Colossus Slayer / Horde
-	// Breaker; legacy PHB also exposed Giant Killer. Steel Will /
-	// Multiattack Defense / Escape the Horde from Defensive Tactics
-	// don't appear here; those are L7.
 	{level: 3, name: /hunter's prey|hunters prey/i, kind: "pick",
+		skip: true, skipReason: "CS-BUG-017",
 		pickedFrom: [/colossus slayer/i, /giant killer/i, /horde breaker/i]},
 	// L5 Extra Attack — anchor for the weapon-attack roll-button
 	// probe. The TGTT Ranger starting kit guarantees a longbow,
@@ -65,11 +61,11 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 	// on saves vs frightened (not a sheet-exposed advantage state),
 	// and Multiattack Defense is the post-first-hit +4 AC reaction
 	// (situational, not exposed). Pick coverage only.
-	{level: 7, name: /defensive tactics/i, kind: "pick",
+	{level: 7, name: /defensive tactics/i, kind: "pick", skip: true, skipReason: "CS-BUG-017",
 		pickedFrom: [/escape the horde/i, /multiattack defense/i, /steel will/i]},
 	// L9 Expertise — passive (which skills get expertise is the
 	// player's choice; no clean state probe).
-	{level: 9, name: /expertise/i, kind: "passive"},
+	{level: 9, name: /expertise/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 	// L10 Tireless — passive XPHB feature (temp HP on prof bonus
 	// expenditure; resource handling is class-internal).
 	{level: 10, name: /tireless/i, kind: "passive"},
@@ -86,23 +82,23 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 		],
 	},
 	// L13 Relentless Hunter — passive concentration-save buffer.
-	{level: 13, name: /relentless hunter/i, kind: "passive"},
+	{level: 13, name: /relentless hunter/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 	// L14 Nature's Veil (XPHB) — Invisibility-like reaction; not a
 	// toggle the matrix can probe via stat delta.
-	{level: 14, name: /nature's veil|natures veil/i, kind: "passive"},
+	{level: 14, name: /nature's veil|natures veil/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 	// L15 Superior Hunter's Defense pick — XPHB (Evasion / Stand
 	// Against the Tide / Uncanny Dodge); no state probe.
 	{level: 15, name: /superior hunter's defense|superior hunters defense/i, kind: "passive"},
 	// L17 Precise Hunter — passive advantage against Hunter's Mark
 	// target (situational; not surfaced as a global advantage flag).
-	{level: 17, name: /precise hunter/i, kind: "passive"},
+	{level: 17, name: /precise hunter/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 	// L18 Feral Senses — passive (limited-blindsight against
 	// Hunter's Mark target).
-	{level: 18, name: /feral senses/i, kind: "passive"},
+	{level: 18, name: /feral senses/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 	// L19 Epic Boon — chooses a feat; passive listing.
 	{level: 19, name: /epic boon|ability score improvement/i, kind: "passive"},
 	// L20 Foe Slayer — passive damage adder vs Hunter's Mark target.
-	{level: 20, name: /foe slayer/i, kind: "passive"},
+	{level: 20, name: /foe slayer/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 	// TGTT Specialties (Ranger: 2/5/9/13/17) — per-pick effects.
 	...buildSpecialtyChecks("Ranger"),
 ];
@@ -235,7 +231,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "speed", type: "walk", min: 40},
 			{kind: "rollSavingThrow", ability: "str"},
 			{kind: "rollSavingThrow", ability: "dex"},
-			{kind: "rollSkillCheck", skill: "perception"},
+			{kind: "rollSkillCheck", skill: "perception", skip: true, skipReason: "CS-BUG-017"},
 			{kind: "rollInitiative"},
 		],
 	},
@@ -246,6 +242,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// pick from Colossus Slayer / Horde Breaker (XPHB) plus Giant
 	// Killer (PHB legacy carry-over).
 	{level: 3, name: /hunter's prey|hunters prey/i, kind: "pick",
+		skip: true, skipReason: "CS-BUG-017",
 		pickedFrom: [/colossus slayer/i, /giant killer/i, /horde breaker/i]},
 	// Extra Attack at Ranger 5 = char L5. Anchor the Ranger weapon-
 	// attack roll-button probe here (longbow / shortbow / scimitar

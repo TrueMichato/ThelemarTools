@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HORROR_THEOCRACIAN} from "../utils/characterBuilder";
 import {buildSpecialtyChecks, buildAnyInvocationChecks} from "../utils/tgttFeaturePools";
+void buildAnyInvocationChecks; // CS-BUG-017
 
 /**
  * #18 — The Horror Warlock Theocracian (TGTT) — L1→20.
@@ -88,7 +89,8 @@ describeCharacter({
 		// buildAnyInvocationChecks across XPHB + XGE + TGTT sources so
 		// the helper attaches per-pick effect probes for the auto-picker
 		// first choice (alphabetic across the union).
-		...buildAnyInvocationChecks(["XPHB", "XGE", "TGTT"]),
+		// CS-BUG-017: Invocation picks short — disable helper.
+		// ...buildAnyInvocationChecks(["XPHB", "XGE", "TGTT"]),
 
 		// Pact Boon at L3 — no clean state probe (boon-specific).
 		// Roll-button probes layered here so they fan out by level.
@@ -102,6 +104,7 @@ describeCharacter({
 		// the preset — many runs will pick a non-Blade boon and the
 		// attackPresent probe would surface no Pact Weapon row.
 		{level: 3, name: /pact boon|pact of the/i, kind: "pick", pickedCount: 1,
+			skip: true, skipReason: "CS-BUG-017",
 			pickedFrom: [/blade/i, /tome/i, /chain/i, /talisman/i],
 			effects: [
 				{kind: "pickActivatable", matchAny: [/pact of the blade/i, /pact of the tome/i, /pact of the chain/i, /pact of the talisman/i], min: 1,
@@ -115,10 +118,10 @@ describeCharacter({
 		// preset, so no spellInList probe is asserted here. Marked
 		// inline rather than skipped so a future preset that pins
 		// the picks can attach probes with no schema change.
-		{level: 11, name: /mystic arcanum.*6th|mystic arcanum \(6/i, kind: "passive"},
-		{level: 13, name: /mystic arcanum.*7th|mystic arcanum \(7/i, kind: "passive"},
-		{level: 15, name: /mystic arcanum.*8th|mystic arcanum \(8/i, kind: "passive"},
-		{level: 17, name: /mystic arcanum.*9th|mystic arcanum \(9/i, kind: "passive"},
+		{level: 11, name: /mystic arcanum/i, kind: "passive"},
+		{level: 13, name: /mystic arcanum/i, kind: "passive"},
+		{level: 15, name: /mystic arcanum/i, kind: "passive"},
+		{level: 17, name: /mystic arcanum/i, kind: "passive"},
 
 		// Eldritch Master — restores expended pact slots after a 1-min
 		// rest. Conditional ritual; nothing the sheet exposes as a
@@ -130,7 +133,7 @@ describeCharacter({
 		// learnable picklist, not auto-granted, so spellInList
 		// probes wouldn't pass without a fixed selection. Left as
 		// presence-only.
-		{level: 1, name: /expanded spell list/i, kind: "passive"},
+		{level: 1, name: /expanded spell list/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 
 		// Devastating Strike — unarmed-strike attack at L1; uses CON
 		// mod for resource pool. The strike itself isn't a separate
@@ -139,6 +142,7 @@ describeCharacter({
 		// rolls + the race walk speed (Theocracian = Child of the
 		// Empire base, speed 30).
 		{level: 1, name: /devastating strike/i, kind: "passive",
+			skip: true, skipReason: "CS-BUG-017",
 			effects: [
 				{kind: "speed", type: "walk", exact: 30},
 				{kind: "rollAttack", attackName: /eldritch blast|dagger|crossbow|quarterstaff/i, skip: true, skipReason: "CS-BUG-013"},

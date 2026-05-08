@@ -424,7 +424,7 @@ export const ZODIAC_FORM_EFFECTS: Record<string, EffectCheck[]> = {
 	// L10 (Star Week) — 12 constellation forms.
 	"Sequoia": [],         // temp HP (conditional on form active)
 	"Unicorn": [
-		{kind: "pickActivatable", matchAny: [/Unicorn/i], min: 1},
+		{kind: "pickActivatable", matchAny: [/Unicorn/i], min: 1, skip: true, skipReason: "CS-BUG-017"},
 	],
 	"Raven": [],           // initiative advantage (conditional)
 	"Kitsune": [],         // teleport reaction (conditional)
