@@ -25,8 +25,8 @@ the skill reference at
 | 8 | `tgtt-surrealism-bard-yuanti.spec.ts` | College of Surrealism Bard · Yuan-Ti | 1–20 | Surrealism subclass effects, Bardic Inspiration short-rest restore, full caster. |
 | 9 | `tgtt-chained-fury-barbarian-minotaur.spec.ts` | Chained Fury Barbarian · Minotaur | 1–20 | Rage toggle, Rage breaks concentration, weapon mastery + chained fury riders. |
 | 10 | `tgtt-time-domain-cleric.spec.ts` | Time Domain Cleric | 1–20 | Channel Divinity scaling (1→2→3 by L18), full divine slot table, time-domain features at L1/3/6/8/17. |
-| 11 | `tgtt-gambler-rogue-clairnian.spec.ts` | Gambler Rogue · Clairnian Children | 1–20 | Gambler Painful Strikes, Sneak Attack scaling, Cunning Action use, weapon mastery. |
-| 12 | `tgtt-belly-dancer-rogue-jaknian.spec.ts` | Belly Dancer Rogue · Jaknian Children | 1–20 | Belly Dancer Painful Strikes, Sneak Attack, Cunning Action, expertise pipeline. |
+| 11 | `tgtt-gambler-rogue-clairnian.spec.ts` | Gambler Rogue · Clairnian Children | 1–20 | Gambler's Folly / Tools / Spellcasting, Sneak Attack scaling, Cunning Action use, weapon mastery. |
+| 12 | `tgtt-belly-dancer-rogue-jaknian.spec.ts` | Belly Dancer Rogue · Jaknian Children | 1–20 | Dance of the Country / Tantalizing Shivers / Fluid Step, Sneak Attack, Cunning Action, expertise pipeline. |
 | 13 | `tgtt-jester-bard-dendulra.spec.ts` | Jester Bard · Dendulra | 1–20 | Jester Acts pick-list, Bardic Inspiration, full bard caster, Acts effect riders. |
 | 14 | `tgtt-bastion-paladin-bugbear.spec.ts` | Oath of Bastion Paladin · Bugbear | 1–20 | Aura of Protection saveBonus (CHA-mod scaling), Lay on Hands pool, Channel Divinity, weapon mastery. |
 | 15 | `tgtt-heroic-soul-sorcerer-halfogre.spec.ts` | Heroic Soul Sorcerer · Half-Ogre | 1–20 | Heroic Soul subclass features, sorcery points + metamagic, signature toggle. |

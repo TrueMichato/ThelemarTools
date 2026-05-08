@@ -200,18 +200,18 @@ export const TGTT_TRICKSTER_TRICK_EFFECTS: Record<string, EffectCheck[]> = {
 	"Blinding Strike": _tricksterActivatable("Blinding Strike"),
 };
 
-// ── Painful Strikes ──────────────────────────────────────────────────
+// ── Precise Strike Methods (Monk Debilitation only) ─────────────────
 
-const _painfulActivatable = (name: string): EffectCheck[] => [
+const _preciseActivatable = (name: string): EffectCheck[] => [
 	{kind: "pickActivatable", matchAny: [new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")], min: 1},
 ];
 
-export const TGTT_PAINFUL_STRIKE_EFFECTS: Record<string, EffectCheck[]> = {
-	"Arm Snap": _painfulActivatable("Arm Snap"),
-	"Air Draining Strike": _painfulActivatable("Air Draining Strike"),
-	"Ear Clap": _painfulActivatable("Ear Clap"),
-	"Eye Gouge": _painfulActivatable("Eye Gouge"),
-	"Finger Smash": _painfulActivatable("Finger Smash"),
+export const TGTT_PRECISE_STRIKE_EFFECTS: Record<string, EffectCheck[]> = {
+	"Arm Snap": _preciseActivatable("Arm Snap"),
+	"Air Draining Strike": _preciseActivatable("Air Draining Strike"),
+	"Ear Clap": _preciseActivatable("Ear Clap"),
+	"Eye Gouge": _preciseActivatable("Eye Gouge"),
+	"Finger Smash": _preciseActivatable("Finger Smash"),
 };
 
 // ── Pact Boons ───────────────────────────────────────────────────────
@@ -439,4 +439,4 @@ export const ZODIAC_FORM_EFFECTS: Record<string, EffectCheck[]> = {
 };
 
 /** Debilitation Monk Precise Strike Methods are `PS` optional features —
- *  use TGTT_PAINFUL_STRIKE_EFFECTS / buildPainfulStrikeChecks for them. */
+ *  use TGTT_PRECISE_STRIKE_EFFECTS / buildPreciseStrikeChecks for them. */

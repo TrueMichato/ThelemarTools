@@ -8,7 +8,7 @@
  *
  * Run after editing the homebrew JSON whenever a Specialty, Battle
  * Tactic, Metamagic, Eldritch Invocation, Jester Act, Trickster Trick,
- * Painful Strike, Pact Boon, Dreamwalker call/study, or per-tradition
+ * Precise Strike, Pact Boon, Dreamwalker call/study, or per-tradition
  * combat-method pool changes. The generator is deterministic — same
  * input produces byte-identical output.
  *
@@ -19,7 +19,7 @@
  *   - TGTT_ELDRITCH_INVOCATIONS     (EI)
  *   - TGTT_JESTER_ACTS              (JA)
  *   - TGTT_TRICKSTER_TRICKS         (TT)
- *   - TGTT_PAINFUL_STRIKES          (PS)
+ *   - TGTT_PRECISE_STRIKES          (PS)
  *   - TGTT_PACT_BOONS               (PB)
  *   - TGTT_DREAMWALKER_CUSTOMS      (DW:C)
  *   - TGTT_DREAMWALKER_SPECIALS     (DW:S)
@@ -127,7 +127,7 @@ const metamagic = poolFor("MM");
 const invocations = poolFor("EI");
 const jesterActs = poolFor("JA");
 const tricksterTricks = poolFor("TT");
-const painfulStrikes = poolFor("PS");
+const preciseStrikes = poolFor("PS");
 const pactBoons = poolFor("PB");
 const dreamwalkerCustoms = poolFor("DW:C");
 const dreamwalkerSpecials = poolFor("DW:S");
@@ -173,8 +173,8 @@ const CATALOG_SPEC = [
 	{varName: "ZODIAC_FORMS_L10", className: "Druid", subShort: "Zodiac",      level: 10,
 		exclude: [/^Zodiac Form: /i]},
 	// NOTE: Debilitation Monk Precise Strike Methods are NOT a catalog —
-	// they are `PS` (Painful Strike) optional features picked from a pool,
-	// already covered by buildPainfulStrikeChecks().
+	// they are `PS` optional features picked from a pool, already covered
+	// by buildPreciseStrikeChecks() (Monk Debilitation only).
 ];
 const catalogPools = {};
 for (const spec of CATALOG_SPEC) {
@@ -230,7 +230,7 @@ import {
 \tTGTT_JESTER_ACT_EFFECTS,
 \tTGTT_METAMAGIC_EFFECTS,
 \tTGTT_PACT_BOON_EFFECTS,
-\tTGTT_PAINFUL_STRIKE_EFFECTS,
+\tTGTT_PRECISE_STRIKE_EFFECTS,
 \tTGTT_SPECIALTY_EFFECTS,
 \tTGTT_TRICKSTER_TRICK_EFFECTS,
 \tXPHB_WEAPON_MASTERY_EFFECTS,
@@ -291,7 +291,7 @@ const optionalPoolsBody = [
 	poolBlock("Eldritch Invocations (EI)", "featureType EI — TGTT-flavoured Warlock Invocations.", "TGTT_ELDRITCH_INVOCATIONS", invocations),
 	poolBlock("Jester Acts (JA)", "featureType JA — Jester Bard subclass acts.", "TGTT_JESTER_ACTS", jesterActs),
 	poolBlock("Trickster Tricks (TT)", "featureType TT — Trickster Rogue subclass tricks.", "TGTT_TRICKSTER_TRICKS", tricksterTricks),
-	poolBlock("Painful Strikes (PS)", "featureType PS — Painful / pugilistic strikes pool.", "TGTT_PAINFUL_STRIKES", painfulStrikes),
+	poolBlock("Precise Strike Methods (PS)", "featureType PS — Monk Debilitation Precise Strike Methods pool.", "TGTT_PRECISE_STRIKES", preciseStrikes),
 	poolBlock("Pact Boons (PB)", "featureType PB — TGTT Warlock Pact Boon variants.", "TGTT_PACT_BOONS", pactBoons),
 	poolBlock("Dreamwalker Customs (DW:C)", "featureType DW:C — Dreamwalker calls / customs.", "TGTT_DREAMWALKER_CUSTOMS", dreamwalkerCustoms),
 	poolBlock("Dreamwalker Specials (DW:S)", "featureType DW:S — Dreamwalker studies / specials.", "TGTT_DREAMWALKER_SPECIALS", dreamwalkerSpecials),
@@ -299,7 +299,7 @@ const optionalPoolsBody = [
 
 const combatMethodsBody = `// ── Combat Methods grouped by tradition (TGTT) ──
 // Each combat tradition has its own pool of methods of varying degrees;
-// the Fighter / Pugilist / etc. Combat Methods feature picks from the
+// the Fighter / Monk / etc. Combat Methods feature picks from the
 // pool of every tradition the character knows.
 export const TGTT_COMBAT_METHODS_BY_TRADITION: Record<string, RegExp[]> = {
 ${combatMethodsByTraditionEntries
@@ -375,7 +375,7 @@ console.log(`  Metamagic:              ${metamagic.length}`);
 console.log(`  Eldritch Invocations:   ${invocations.length}`);
 console.log(`  Jester Acts:            ${jesterActs.length}`);
 console.log(`  Trickster Tricks:       ${tricksterTricks.length}`);
-console.log(`  Painful Strikes:        ${painfulStrikes.length}`);
+console.log(`  Precise Strikes:        ${preciseStrikes.length}`);
 console.log(`  Pact Boons:             ${pactBoons.length}`);
 console.log(`  Dreamwalker (C/S):      ${dreamwalkerCustoms.length}/${dreamwalkerSpecials.length}`);
 console.log(`  Combat Method traditions: ${combatMethodsByTraditionEntries.length}`);
