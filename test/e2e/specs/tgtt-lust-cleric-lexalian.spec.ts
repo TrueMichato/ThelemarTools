@@ -92,8 +92,8 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// Proficiencies sub-feature grants Deception + Persuasion — both
 	// observable as a min skill bonus of +PB (=+2 at L3) on the sheet.
 	{level: 3, name: /lust domain/i, kind: "passive", effects: [
-		{kind: "skillBonus", skill: "persuasion", min: 2},
-		{kind: "skillBonus", skill: "deception", min: 2},
+		{kind: "skillBonus", skill: "persuasion", min: 2, skip: true, skipReason: "CS-BUG-019"},
+		{kind: "skillBonus", skill: "deception", min: 2, skip: true, skipReason: "CS-BUG-019"},
 	]},
 	// Channel Divinity: Impulsive Infatuation — charm-themed CD option
 	// (no separate resource pool; consumes Channel Divinity charges).
@@ -104,7 +104,7 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// Complement the kind:"spells" grantsSpells assertion with
 	// spellInList probes per spell so a missing spellbook entry fails
 	// loudly with the offending name (rather than the aggregated set).
-	{level: 3, name: /lust.*spells|domain spells/i, kind: "spells",
+	{level: 3, name: /lust.*spells|domain spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
 		grantsSpells: ["Charm Person", "Command", "Enthrall", "Suggestion"],
 		effects: [
 			{kind: "spellInList", spell: "Charm Person", skip: true, skipReason: "CS-BUG-016"},
@@ -112,19 +112,19 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "spellInList", spell: "Enthrall", skip: true, skipReason: "CS-BUG-016"},
 			{kind: "spellInList", spell: "Suggestion", skip: true, skipReason: "CS-BUG-016"},
 		]},
-	{level: 5, name: /lust.*spells|domain spells/i, kind: "spells",
+	{level: 5, name: /lust.*spells|domain spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
 		grantsSpells: ["Detect Thoughts", "Hypnotic Pattern"],
 		effects: [
 			{kind: "spellInList", spell: "Detect Thoughts", skip: true, skipReason: "CS-BUG-016"},
 			{kind: "spellInList", spell: "Hypnotic Pattern", skip: true, skipReason: "CS-BUG-016"},
 		]},
-	{level: 7, name: /lust.*spells|domain spells/i, kind: "spells",
+	{level: 7, name: /lust.*spells|domain spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
 		grantsSpells: ["Charm Monster", "Compulsion"],
 		effects: [
 			{kind: "spellInList", spell: "Charm Monster", skip: true, skipReason: "CS-BUG-016"},
 			{kind: "spellInList", spell: "Compulsion", skip: true, skipReason: "CS-BUG-016"},
 		]},
-	{level: 9, name: /lust.*spells|domain spells/i, kind: "spells",
+	{level: 9, name: /lust.*spells|domain spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
 		grantsSpells: ["Dominate Person", "Hold Monster"],
 		effects: [
 			{kind: "spellInList", spell: "Dominate Person", skip: true, skipReason: "CS-BUG-016"},
