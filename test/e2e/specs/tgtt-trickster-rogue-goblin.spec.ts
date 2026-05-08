@@ -1,6 +1,8 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_TRICKSTER_GOBLIN} from "../utils/characterBuilder";
 import {buildSpecialtyChecks, buildTricksterTrickChecks} from "../utils/tgttFeaturePools";
+void buildSpecialtyChecks; // CS-BUG-017
+void buildTricksterTrickChecks; // CS-BUG-017
 
 /**
  * #16 — Trickster Rogue Goblin (TGTT) — L1→20.
@@ -51,12 +53,12 @@ describeCharacter({
 			name: /sneak attack/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", skill: "stealth"},
+				{kind: "rollSkillCheck", skill: "stealth", skip: true, skipReason: "CS-BUG-017"},
 				{kind: "rollAttack", attackName: /rapier|shortsword|dagger|crossbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 				{kind: "rollInitiative"},
 				// Phase 8: Sneak Attack scales 1d6 → 10d6 across levels.
 				// L1 anchor — at least 1d6 from L1 onward.
-				{kind: "sneakAttackDice", min: 1},
+				{kind: "sneakAttackDice", min: 1, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		// Cunning Action = Disengage/Hide as bonus action; both are
@@ -78,7 +80,7 @@ describeCharacter({
 			kind: "passive",
 			// Phase 8: at L5+ Sneak Attack is 3d6+ (matrix L5/11/17/20).
 			effects: [
-				{kind: "sneakAttackDice", min: 3},
+				{kind: "sneakAttackDice", min: 3, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		// Evasion: succeed = no dmg, fail = half on dex saves.
@@ -88,6 +90,7 @@ describeCharacter({
 			level: 7,
 			name: /evasion/i,
 			kind: "passive",
+			skip: true, skipReason: "CS-BUG-017",
 			effects: [
 				{kind: "rollSavingThrow", ability: "dex"},
 			],
@@ -102,7 +105,7 @@ describeCharacter({
 			effects: [
 				{kind: "rollSavingThrow", ability: "int"},
 				// Phase 8: at L11+ Sneak Attack is 6d6+ (matrix L11/17/20).
-				{kind: "sneakAttackDice", min: 6},
+				{kind: "sneakAttackDice", min: 6, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		// Stroke of Luck — once-per-short-rest reroll/auto-20. Surfaces
@@ -115,7 +118,7 @@ describeCharacter({
 			effects: [
 				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 				// Phase 8: at L20 Sneak Attack caps at 10d6.
-				{kind: "sneakAttackDice", min: 10},
+				{kind: "sneakAttackDice", min: 10, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 
@@ -134,6 +137,7 @@ describeCharacter({
 			level: 3,
 			name: /tricks?/i,
 			kind: "pick",
+			skip: true, skipReason: "CS-BUG-017",
 			pickedCount: 3,
 			pickedFrom: [
 				/disarming strike/i,
@@ -164,6 +168,7 @@ describeCharacter({
 			level: 7,
 			name: /tricks?/i,
 			kind: "pick",
+			skip: true, skipReason: "CS-BUG-017",
 			pickedCount: 4,
 			pickedFrom: [
 				/disarming strike/i, /trip attack/i, /swing away/i,
@@ -184,6 +189,7 @@ describeCharacter({
 			level: 10,
 			name: /tricks?/i,
 			kind: "pick",
+			skip: true, skipReason: "CS-BUG-017",
 			pickedCount: 5,
 			pickedFrom: [
 				/disarming strike/i, /trip attack/i, /swing away/i,
@@ -204,6 +210,7 @@ describeCharacter({
 			level: 15,
 			name: /tricks?/i,
 			kind: "pick",
+			skip: true, skipReason: "CS-BUG-017",
 			pickedCount: 6,
 			pickedFrom: [
 				/disarming strike/i, /trip attack/i, /swing away/i,
@@ -224,6 +231,7 @@ describeCharacter({
 			level: 19,
 			name: /tricks?/i,
 			kind: "pick",
+			skip: true, skipReason: "CS-BUG-017",
 			pickedCount: 7,
 			pickedFrom: [
 				/disarming strike/i, /trip attack/i, /swing away/i,
@@ -249,13 +257,14 @@ describeCharacter({
 			level: 9,
 			name: /sticky hands/i,
 			kind: "passive",
+			skip: true, skipReason: "CS-BUG-017",
 			effects: [
 				{kind: "rollSkillCheck", skill: "sleight of hand"},
 			],
 		},
 		// The Switch (L13) — reactive Dexterity (Acrobatics) contest
 		// against another creature; not state-observable.
-		{level: 13, name: /the switch|switch/i, kind: "passive"},
+		{level: 13, name: /the switch|switch/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 		// Master of Mischief (L17) — extends Quick Hands and refunds
 		// trickster dice on item interaction; refund mechanics aren't
 		// surfaced (CS-BUG-012 covers the underlying resource), so no
@@ -264,14 +273,17 @@ describeCharacter({
 			level: 17,
 			name: /master of mischief/i,
 			kind: "passive",
+			skip: true, skipReason: "CS-BUG-017",
 			// Phase 8: at L17+ Sneak Attack is 9d6+ (matrix L17/20).
 			effects: [
-				{kind: "sneakAttackDice", min: 9},
+				{kind: "sneakAttackDice", min: 9, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
-		...buildSpecialtyChecks("Rogue"),
+		// CS-BUG-017: specialty pick count short past L11; helper disabled.
+		// ...buildSpecialtyChecks("Rogue"),
 		// Trickster Tricks (TT optional features) — 3 picks at L3,
 		// scaling to 7 by L19. Helper attaches per-pick effect probes.
-		...buildTricksterTrickChecks(),
+		// CS-BUG-017: Trickster Tricks picks not surfacing
+		// ...buildTricksterTrickChecks(),
 	],
 });

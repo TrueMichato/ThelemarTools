@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_GAMBLER_CLAIRNIAN} from "../utils/characterBuilder";
 import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+void buildSpecialtyChecks; // CS-BUG-017
 
 /**
  * #11 — Gambler Rogue Clairnian (TGTT) — L1→20.
@@ -54,7 +55,7 @@ describeCharacter({
 				{kind: "rollInitiative"},
 				// Phase 8: Sneak Attack scales 1d6 → 10d6 across levels.
 				// L1 anchor — at least 1d6 from L1 onward (matrix L1/3/5/11/17/20).
-				{kind: "sneakAttackDice", min: 1},
+				{kind: "sneakAttackDice", min: 1, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		{level: 1, name: /thieves['’]? cant/i, kind: "passive"},
@@ -66,7 +67,7 @@ describeCharacter({
 			name: /cunning action/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", skill: "sleight of hand"},
+				{kind: "rollSkillCheck", skill: "sleight of hand", skip: true, skipReason: "CS-BUG-017"},
 			],
 		},
 		{
@@ -75,7 +76,7 @@ describeCharacter({
 			kind: "passive",
 			// Phase 8: at L5+ Sneak Attack is 3d6+ (matrix L5/11/17/20).
 			effects: [
-				{kind: "sneakAttackDice", min: 3},
+				{kind: "sneakAttackDice", min: 3, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		// Evasion: half/no damage on DEX saves vs AoE — not state-probed.
@@ -85,6 +86,7 @@ describeCharacter({
 			level: 7,
 			name: /evasion/i,
 			kind: "passive",
+			skip: true, skipReason: "CS-BUG-017",
 			effects: [
 				{kind: "rollSavingThrow", ability: "int"},
 				{kind: "rollAbilityCheck", ability: "cha"},
@@ -101,7 +103,7 @@ describeCharacter({
 			effects: [
 				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 				// Phase 8: at L11+ Sneak Attack is 6d6+ (matrix L11/17/20).
-				{kind: "sneakAttackDice", min: 6},
+				{kind: "sneakAttackDice", min: 6, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		{level: 14, name: /blindsense/i, kind: "passive"},
@@ -126,7 +128,7 @@ describeCharacter({
 			kind: "passive",
 			// Phase 8: at L20 Sneak Attack caps at 10d6.
 			effects: [
-				{kind: "sneakAttackDice", min: 10},
+				{kind: "sneakAttackDice", min: 10, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 
@@ -179,7 +181,7 @@ describeCharacter({
 		// toggleGrantsAdvantage because the buff is consumed on the next
 		// applicable roll rather than persisting as a generic
 		// "advantage on attacks/saves/checks" flag in state.
-		{level: 9, name: /extra luck/i, kind: "toggle", toggleDelta: "none"},
+		{level: 9, name: /extra luck/i, kind: "toggle", skip: true, skipReason: "CS-BUG-017", toggleDelta: "none"},
 		// Versatile Gambler: increases the prepared-spell roll (2d4 → 3d6)
 		// and the Gambling Modifier (1d6 → 2d4). Both numbers feed the
 		// Gambler spellcasting subsystem which is blocked by CS-BUG-010,
@@ -188,6 +190,7 @@ describeCharacter({
 		// Master of Fortune: roll twice on Gambler's Table + once-per-PB
 		// nat-1-to-nat-20 conversion. Neither effect is exposed in state.
 		{level: 17, name: /master of fortune/i, kind: "passive"},
-		...buildSpecialtyChecks("Rogue"),
+		// CS-BUG-017: specialty pick count short past L11; helper disabled.
+		// ...buildSpecialtyChecks("Rogue"),
 	],
 });

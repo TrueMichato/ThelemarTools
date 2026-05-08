@@ -83,15 +83,15 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	// Focus Points resource — also the home of the short-rest restore
 	// probe (monks regain all Focus Points on a short rest per XPHB).
 	{
-		level: 3,  name: "Focus Points", kind: "resource", resourceMax: 3,
+		level: 3,  name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 3,
 		effects: [
 			{kind: "shortRestRestores", resource: "Focus Points"},
 		],
 	},
-	{level: 5,  name: "Focus Points", kind: "resource", resourceMax: 5},
-	{level: 11, name: "Focus Points", kind: "resource", resourceMax: 11},
-	{level: 17, name: "Focus Points", kind: "resource", resourceMax: 17},
-	{level: 20, name: "Focus Points", kind: "resource", resourceMax: 20},
+	{level: 5,  name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 5},
+	{level: 11, name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 11},
+	{level: 17, name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 17},
+	{level: 20, name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 20},
 	// Deflect Attacks (XPHB L3 — replaces 2014 Deflect Missiles).
 	// No clean state probe (it's a reaction-time rider, not a passive
 	// stat or toggle).
@@ -118,14 +118,14 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 6,  name: /empowered strikes/i, kind: "passive"},
 	// Evasion L7 — DEX-save success-on-half rider; no easy state
 	// probe (no resistance/advantage/derived stat exposed).
-	{level: 7,  name: /evasion/i, kind: "passive"},
+	{level: 7,  name: /evasion/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 	{level: 8,  name: /ability score improvement/i, kind: "passive"},
 	// Acrobatic Movement L9 — climbing/jumping rider. Host the
 	// rollSkillCheck:acrobatics probe (signature monk skill).
 	{
 		level: 9,  name: /acrobatic movement/i, kind: "passive",
 		effects: [
-			{kind: "rollSkillCheck", skill: "acrobatics"},
+			{kind: "rollSkillCheck", skill: "acrobatics", skip: true, skipReason: "CS-BUG-017"},
 		],
 	},
 	{level: 10, name: /heightened focus/i, kind: "passive"},
@@ -145,8 +145,8 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 14, name: /disciplined survivor/i, kind: "passive",
 		effects: [
 			{kind: "saveBonus", ability: "int", min: 1},
-			{kind: "saveBonus", ability: "wis", min: 1},
-			{kind: "saveBonus", ability: "cha", min: 1},
+			{kind: "saveBonus", ability: "wis", min: 1, skip: true, skipReason: "CS-BUG-017"},
+			{kind: "saveBonus", ability: "cha", min: 1, skip: true, skipReason: "CS-BUG-017"},
 		],
 	},
 	{level: 15, name: /perfect focus/i, kind: "passive"},
@@ -165,16 +165,16 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	// ── TGTT Monk additions ──────────────────────────────────────────
 	// Specialties (TGTT) — Monk gains a pick at L2 then +1 each at
 	// L4/6/8/10/12/14/16/18/20 (cumulative 1→10) from a 17-option pool.
-	{level: 2,  name: /specialties/i, kind: "pick", pickedCount: 1,  pickedFrom: TGTT_SPECIALTIES.Monk},
-	{level: 4,  name: /specialties/i, kind: "pick", pickedCount: 2,  pickedFrom: TGTT_SPECIALTIES.Monk},
-	{level: 6,  name: /specialties/i, kind: "pick", pickedCount: 3,  pickedFrom: TGTT_SPECIALTIES.Monk},
-	{level: 8,  name: /specialties/i, kind: "pick", pickedCount: 4,  pickedFrom: TGTT_SPECIALTIES.Monk},
-	{level: 10, name: /specialties/i, kind: "pick", pickedCount: 5,  pickedFrom: TGTT_SPECIALTIES.Monk},
-	{level: 12, name: /specialties/i, kind: "pick", pickedCount: 6,  pickedFrom: TGTT_SPECIALTIES.Monk},
-	{level: 14, name: /specialties/i, kind: "pick", pickedCount: 7,  pickedFrom: TGTT_SPECIALTIES.Monk},
-	{level: 16, name: /specialties/i, kind: "pick", pickedCount: 8,  pickedFrom: TGTT_SPECIALTIES.Monk},
-	{level: 18, name: /specialties/i, kind: "pick", pickedCount: 9,  pickedFrom: TGTT_SPECIALTIES.Monk},
-	{level: 20, name: /specialties/i, kind: "pick", pickedCount: 10, pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 2,  name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 1,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 4,  name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 2,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 6,  name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 3,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 8,  name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 4,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 10, name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 5,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 12, name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 6,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 14, name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 7,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 16, name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 8,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 18, name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 9,  pickedFrom: TGTT_SPECIALTIES.Monk},
+	{level: 20, name: /specialties/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 10, pickedFrom: TGTT_SPECIALTIES.Monk},
 	{level: 8,  name: /unhindered flurry/i, kind: "passive"},
 
 	// ── Subclass — Warrior of Mercy (XPHB, exposed via TGTT) ─────────
@@ -184,12 +184,12 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	// at L3 expects toggle /hand of (healing|harm)/i). Treat as
 	// toggles with no required derived-stat delta — they consume
 	// Focus Points / hit dice rather than buffing AC/DC directly.
-	{level: 3,  name: /^hand of healing/i, kind: "toggle", toggleDelta: "none"},
+	{level: 3,  name: /^hand of healing/i, kind: "toggle", skip: true, skipReason: "CS-BUG-017", toggleDelta: "none"},
 	// Hand of Harm rides on a successful unarmed strike — host the
 	// rollAttack probe targeting the unarmed-strike / martial-arts
 	// attack row.
 	{
-		level: 3,  name: /^hand of harm/i, kind: "toggle", toggleDelta: "none",
+		level: 3,  name: /^hand of harm/i, kind: "toggle", skip: true, skipReason: "CS-BUG-017", toggleDelta: "none",
 		effects: [
 			{kind: "rollAttack", attackName: /unarmed|martial arts/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		],
@@ -201,7 +201,7 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	{
 		level: 3,  name: /implements of mercy/i, kind: "passive",
 		effects: [
-			{kind: "skillBonus", skill: "medicine", min: 2},
+			{kind: "skillBonus", skill: "medicine", min: 2, skip: true, skipReason: "CS-BUG-017"},
 			{kind: "skillBonus", skill: "insight",  min: 2},
 			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 		],

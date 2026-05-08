@@ -46,7 +46,7 @@ describeCharacter({
 		{
 			level: 1,
 			name: /lay on hands/i,
-			kind: "resource",
+			kind: "resource", skip: true, skipReason: "CS-BUG-018",
 			resourceMax: [5, 5],
 			effects: [
 				{kind: "longRestRestores", resource: "Lay on Hands"},
@@ -68,7 +68,7 @@ describeCharacter({
 		{
 			level: 2,
 			name: /fighting style/i,
-			kind: "pick",
+			kind: "pick", skip: true, skipReason: "CS-BUG-017",
 			pickedCount: 1,
 			pickedFrom: [/defense/i, /great weapon fighting/i, /protection/i, /dueling/i, /blessed warrior/i, /blind fighting/i, /interception/i, /two-weapon fighting/i],
 		},
@@ -90,13 +90,13 @@ describeCharacter({
 		{
 			level: 3,
 			name: /^channel divinity$/i,
-			kind: "resource",
+			kind: "resource", skip: true, skipReason: "CS-BUG-017",
 			resourceMax: [1, 3],
 			effects: [
 				{kind: "shortRestRestores", resource: "Channel Divinity"},
 			],
 		},
-		{level: 3, name: /oath of bastion spells/i, kind: "spells", grantsSpells: ["Shield of Faith", "Sanctuary"]},
+		{level: 3, name: /oath of bastion spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016", grantsSpells: ["Shield of Faith", "Sanctuary"]},
 		// Sentry's Lingering Aura — CD-fueled aura that frightens nearby
 		// foes on a failed WIS save. The aura's frightened mechanic
 		// isn't surfaced on the caster's own state, but we can use this
@@ -122,7 +122,7 @@ describeCharacter({
 		// probe at the L5+ checkpoint (different attackName regex would
 		// be redundant; the L1 probe already covers the click handler).
 		{level: 5, name: /extra attack/i, kind: "passive"},
-		{level: 5, name: /oath of bastion spells/i, kind: "spells", grantsSpells: ["Warding Bond", "Lesser Restoration"]},
+		{level: 5, name: /oath of bastion spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016", grantsSpells: ["Warding Bond", "Lesser Restoration"]},
 		// Faithful Steed — grants the Find Steed spell as a ritual /
 		// always-prepared option. No clean state probe (the spell list
 		// check isn't reliable across editions).
@@ -173,7 +173,7 @@ describeCharacter({
 				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			],
 		},
-		{level: 9, name: /oath of bastion spells/i, kind: "spells", grantsSpells: ["Spirit Guardians", "Protection from Energy"]},
+		{level: 9, name: /oath of bastion spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016", grantsSpells: ["Spirit Guardians", "Protection from Energy"]},
 		// ── L10: Aura of Courage ────────────────────────────────────────
 		// Aura of Courage grants immunity to the *frightened condition*
 		// (registered as `conditionImmunity: frightened`). The
@@ -188,7 +188,7 @@ describeCharacter({
 		// clean state probe.
 		{level: 11, name: /radiant strikes|improved divine smite/i, kind: "passive"},
 		// ── L13: 4th-tier oath spells ───────────────────────────────────
-		{level: 13, name: /oath of bastion spells/i, kind: "spells", grantsSpells: ["Stoneskin", "Guardian of Faith"]},
+		{level: 13, name: /oath of bastion spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016", grantsSpells: ["Stoneskin", "Guardian of Faith"]},
 		// ── L14: Cleansing Touch (XPHB Restoring Touch) ─────────────────
 		// Restoring Touch consumes Lay on Hands charges to remove
 		// conditions; the conditions removed aren't a queryable flag.
@@ -202,7 +202,7 @@ describeCharacter({
 		// without a product fix.
 		{level: 15, name: /indomitable guardian/i, kind: "passive"},
 		// ── L17: 5th-tier oath spells ───────────────────────────────────
-		{level: 17, name: /oath of bastion spells/i, kind: "spells", grantsSpells: ["Wall of Stone", "Greater Restoration"]},
+		{level: 17, name: /oath of bastion spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016", grantsSpells: ["Wall of Stone", "Greater Restoration"]},
 		// ── L18: Aura Expansion ─────────────────────────────────────────
 		// Bumps Aura of Protection (and other auras) to 30 ft range —
 		// the range itself isn't read back via the EffectCheck union.

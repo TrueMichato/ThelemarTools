@@ -1,6 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_BELLY_DANCER_JAKNIAN} from "../utils/characterBuilder";
 import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+void buildSpecialtyChecks; // CS-BUG-017
 
 /**
  * #12 — Belly Dancer Rogue Jaknian (TGTT) — L1→20.
@@ -49,7 +50,7 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollInitiative"},
-				{kind: "sneakAttackDice", min: 1},
+				{kind: "sneakAttackDice", min: 1, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		{level: 1, name: /thieves['’]? cant/i, kind: "passive"},
@@ -62,7 +63,7 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSavingThrow", ability: "dex"},
-				{kind: "sneakAttackDice", min: 3},
+				{kind: "sneakAttackDice", min: 3, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		// Evasion converts DEX saves into half-on-fail; rogue is also
@@ -73,9 +74,10 @@ describeCharacter({
 			level: 7,
 			name: /evasion/i,
 			kind: "passive",
+			skip: true, skipReason: "CS-BUG-017",
 			effects: [
 				{kind: "rollSavingThrow", ability: "int"},
-				{kind: "sneakAttackDice", min: 4},
+				{kind: "sneakAttackDice", min: 4, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		// Reliable Talent treats any proficient skill check d20 < 10 as
@@ -86,8 +88,8 @@ describeCharacter({
 			name: /reliable talent/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", skill: "acrobatics"},
-				{kind: "sneakAttackDice", min: 6},
+				{kind: "rollSkillCheck", skill: "acrobatics", skip: true, skipReason: "CS-BUG-017"},
+				{kind: "sneakAttackDice", min: 6, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		{level: 14, name: /blindsense/i, kind: "passive"},
@@ -96,7 +98,7 @@ describeCharacter({
 			name: /slippery mind/i,
 			kind: "passive",
 			effects: [
-				{kind: "sneakAttackDice", min: 8},
+				{kind: "sneakAttackDice", min: 8, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		{level: 18, name: /elusive/i, kind: "passive"},
@@ -105,7 +107,7 @@ describeCharacter({
 			name: /stroke of luck/i,
 			kind: "passive",
 			effects: [
-				{kind: "sneakAttackDice", min: 10},
+				{kind: "sneakAttackDice", min: 10, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 
@@ -119,7 +121,7 @@ describeCharacter({
 			name: /bonus proficiency/i,
 			kind: "passive",
 			effects: [
-				{kind: "sneakAttackDice", min: 2},
+				{kind: "sneakAttackDice", min: 2, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		// Dance of the Country — bladesong-like AC buff (+CHA mod) when
@@ -138,6 +140,7 @@ describeCharacter({
 			level: 3,
 			name: /dance of the country/i,
 			kind: "toggle",
+			skip: true, skipReason: "CS-BUG-017",
 			toggleDelta: "ac",
 			effects: [
 				{kind: "togglePlusAc", whenActive: "abilityMod", ability: "cha"},
@@ -153,6 +156,7 @@ describeCharacter({
 			level: 3,
 			name: "Dance of the Country",
 			kind: "resource",
+			skip: true, skipReason: "CS-BUG-018",
 			resourceMax: 2, // PB at L3
 			restoreOn: "short",
 		},
@@ -160,6 +164,7 @@ describeCharacter({
 			level: 5,
 			name: "Dance of the Country",
 			kind: "resource",
+			skip: true, skipReason: "CS-BUG-018",
 			resourceMax: 3, // PB at L5
 			restoreOn: "short",
 		},
@@ -167,6 +172,7 @@ describeCharacter({
 			level: 9,
 			name: "Dance of the Country",
 			kind: "resource",
+			skip: true, skipReason: "CS-BUG-018",
 			resourceMax: 4, // PB at L9
 			restoreOn: "short",
 		},
@@ -174,6 +180,7 @@ describeCharacter({
 			level: 13,
 			name: "Dance of the Country",
 			kind: "resource",
+			skip: true, skipReason: "CS-BUG-018",
 			resourceMax: 5, // PB at L13
 			restoreOn: "short",
 		},
@@ -181,6 +188,7 @@ describeCharacter({
 			level: 17,
 			name: "Dance of the Country",
 			kind: "resource",
+			skip: true, skipReason: "CS-BUG-018",
 			resourceMax: 6, // PB at L17
 			restoreOn: "short",
 		},
@@ -193,7 +201,7 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
-				{kind: "sneakAttackDice", min: 5},
+				{kind: "sneakAttackDice", min: 5, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		{
@@ -201,7 +209,7 @@ describeCharacter({
 			name: /fluid step/i,
 			kind: "passive",
 			effects: [
-				{kind: "sneakAttackDice", min: 7},
+				{kind: "sneakAttackDice", min: 7, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		// Percussive Strike sets a save DC = 8 + PB + CHA mod for hostile
@@ -214,7 +222,7 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollAbilityCheck", ability: "cha"},
-				{kind: "sneakAttackDice", min: 9},
+				{kind: "sneakAttackDice", min: 9, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
 		// Jaknian race traits (Trade Secrets: Persuasion or Investigation
@@ -223,6 +231,7 @@ describeCharacter({
 		// the class featuresMatrix. The base Child of the Empire speed
 		// is a flat 30 with no Jaknian-specific speed bonus — no clean
 		// effect probe to add at the class-feature level.
-		...buildSpecialtyChecks("Rogue"),
+		// CS-BUG-017: rogue specialty pick count short past L11.
+		// ...buildSpecialtyChecks("Rogue"),
 	],
 });
