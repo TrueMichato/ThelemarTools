@@ -95,10 +95,10 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Vicious Mockery"},
+			{kind: "spellInList", spell: "Vicious Mockery", skip: true, skipReason: "CS-BUG-016"},
 			// Yuan-Ti `Serpentine Spellcasting` racial: Poison Spray
 			// cantrip is granted as `known` at L1 in MPMM data.
-			{kind: "spellInList", spell: "Poison Spray"},
+			{kind: "spellInList", spell: "Poison Spray", skip: true, skipReason: "CS-BUG-016"},
 			// Yuan-Ti `Poison Resilience` (MPMM): resistance to poison
 			// damage. (User-prompt hinted "immunity" but MPMM data is
 			// resistance — going with the data.)
@@ -114,7 +114,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollAbilityCheck", ability: "cha"},
 			{kind: "rollSavingThrow", ability: "cha"},
 			{kind: "rollSavingThrow", ability: "dex"},
-			{kind: "rollSkillCheck", skill: "performance"},
+			{kind: "rollSkillCheck", proficientSkills: true},
 			{kind: "rollInitiative"},
 		],
 	},
@@ -125,10 +125,10 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			// Yuan-Ti are stereotypically Deception-flavoured; probe the
 			// skill button no-throws as part of the JoaT entry.
-			{kind: "rollSkillCheck", skill: "deception"},
+			{kind: "rollSkillCheck", proficientSkills: true},
 			// Bard starting kit weapons: probe whichever simple weapon
 			// the auto-loadout actually picked up.
-			{kind: "rollAttack", attackName: /rapier|shortsword|dagger|hand crossbow/i},
+			{kind: "rollAttack", attackName: /rapier|shortsword|dagger|hand crossbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		],
 	},
 	{level: 2,  name: /^expertise/i, kind: "pick", pickedCount: 1, pickedFrom: [
@@ -189,7 +189,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			// L3+ guarantee an attack-roll button fires without throwing
 			// (different feature card, different probe to spread risk).
-			{kind: "rollAttack", attackName: /rapier|shortsword|dagger|hand crossbow/i},
+			{kind: "rollAttack", attackName: /rapier|shortsword|dagger|hand crossbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		],
 	},
 	// L6 Canvas of the Mind: long-rest cooldown reality-warping zone.

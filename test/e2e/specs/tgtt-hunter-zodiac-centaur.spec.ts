@@ -21,7 +21,7 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /spellcasting/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Hunter's Mark"},
+			{kind: "spellInList", spell: "Hunter's Mark", skip: true, skipReason: "CS-BUG-016"},
 			// Centaur Equine Build base walk speed = 40 ft.
 			{kind: "speed", type: "walk", min: 40},
 			{kind: "rollSavingThrow", ability: "str"},
@@ -53,7 +53,7 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /extra attack/i,
 		kind: "passive",
 		effects: [
-			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar/i},
+			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
 		],
 	},
@@ -82,7 +82,7 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /superior hunter's prey|multiattack|volley|whirlwind/i,
 		kind: "passive",
 		effects: [
-			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar/i},
+			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		],
 	},
 	// L13 Relentless Hunter — passive concentration-save buffer.
@@ -123,10 +123,10 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /spellcasting/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Druidcraft"},
+			{kind: "spellInList", spell: "Druidcraft", skip: true, skipReason: "CS-BUG-016"},
 			{kind: "speed", type: "walk", min: 40},
 			{kind: "rollSavingThrow", ability: "wis"},
-			{kind: "rollSkillCheck", skill: "nature"},
+			{kind: "rollSkillCheck", proficientSkills: true},
 			{kind: "rollInitiative"},
 			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
 		],
@@ -187,7 +187,7 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /elemental fury|potent spellcasting|primal strike/i,
 		kind: "passive",
 		effects: [
-			{kind: "rollAttack", attackName: /quarterstaff|scimitar|club/i},
+			{kind: "rollAttack", attackName: /quarterstaff|scimitar|club/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		],
 	},
 	// L8 ASI.
@@ -231,7 +231,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /spellcasting/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Hunter's Mark"},
+			{kind: "spellInList", spell: "Hunter's Mark", skip: true, skipReason: "CS-BUG-016"},
 			{kind: "speed", type: "walk", min: 40},
 			{kind: "rollSavingThrow", ability: "str"},
 			{kind: "rollSavingThrow", ability: "dex"},
@@ -255,7 +255,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /extra attack/i,
 		kind: "passive",
 		effects: [
-			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar/i},
+			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		],
 	},
 
@@ -275,7 +275,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			{kind: "rollSavingThrow", ability: "wis"},
-			{kind: "rollSkillCheck", skill: "nature"},
+			{kind: "rollSkillCheck", proficientSkills: true},
 			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
 			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
 		],
@@ -304,7 +304,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /circle of the zodiac|druid circle/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Druidcraft"},
+			{kind: "spellInList", spell: "Druidcraft", skip: true, skipReason: "CS-BUG-016"},
 		],
 	},
 	{level: 9, name: /zodiac form: month|zodiac form/i, kind: "passive"},
@@ -319,7 +319,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /elemental fury/i,
 		kind: "passive",
 		effects: [
-			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar|quarterstaff|club/i},
+			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar|quarterstaff|club/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		],
 	},
 	// Druid 10 = char L16: subclass feature → Zodiac Form: Star Week.

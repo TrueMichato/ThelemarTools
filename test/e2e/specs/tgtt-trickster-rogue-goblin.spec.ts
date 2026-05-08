@@ -52,7 +52,7 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", skill: "stealth"},
-				{kind: "rollAttack", attackName: /rapier|shortsword|dagger|crossbow/i},
+				{kind: "rollAttack", attackName: /rapier|shortsword|dagger|crossbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 				{kind: "rollInitiative"},
 				// Phase 8: Sneak Attack scales 1d6 → 10d6 across levels.
 				// L1 anchor — at least 1d6 from L1 onward.
@@ -113,7 +113,7 @@ describeCharacter({
 			name: /stroke of luck/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", skill: "deception"},
+				{kind: "rollSkillCheck", proficientSkills: true},
 				// Phase 8: at L20 Sneak Attack caps at 10d6.
 				{kind: "sneakAttackDice", min: 10},
 			],

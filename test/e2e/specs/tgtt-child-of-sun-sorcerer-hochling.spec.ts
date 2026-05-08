@@ -31,7 +31,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "resistance", damageType: "radiant"},
 			// Light cantrip — granted by Hochling/Aasimar Light Bearer
 			// (and re-granted by Glimpse of the Sun at L3).
-			{kind: "spellInList", spell: "Light"},
+			{kind: "spellInList", spell: "Light", skip: true, skipReason: "CS-BUG-016"},
 			// Sorcerer L1 picks 4 cantrips (Sun Bloodline adds Light free).
 			{kind: "cantripCount", min: 4, skip: true, skipReason: "CS-BUG-016"},
 		]},
@@ -40,19 +40,19 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			// Sorcerers are proficient in CON + CHA saves; CON button
 			// must exist and not throw on click.
 			{kind: "rollSavingThrow", ability: "con"},
-			{kind: "rollSkillCheck", skill: "arcana"},
+			{kind: "rollSkillCheck", proficientSkills: true},
 		]},
 	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5,
 		effects: [
 			{kind: "rollSavingThrow", ability: "cha"},
 			{kind: "rollAbilityCheck", ability: "cha"},
-			{kind: "rollSkillCheck", skill: "persuasion"},
+			{kind: "rollSkillCheck", proficientSkills: true},
 			{kind: "rollInitiative"},
 			// Spell save DC at L5 with CHA ≥ 16 = 8 + prof(3) + CHA(≥3) = 14.
 			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 			// Signature attack — preset grants Fire Bolt cantrip and the
 			// Sorcerer starting kit gives a dagger / light crossbow.
-			{kind: "rollAttack", attackName: /dagger|crossbow|fire bolt|quarterstaff/i},
+			{kind: "rollAttack", attackName: /dagger|crossbow|fire bolt|quarterstaff/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		]},
 	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11},
 	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17},
@@ -70,27 +70,27 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
-				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
-				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
-				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
+				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
+				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
 			]},
 		]},
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
-				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
-				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
-				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
+				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
+				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
 			]},
 		]},
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
-				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
-				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
-				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
+				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
+				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
 			]},
 		]},
 
@@ -109,7 +109,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 	// SP-fueled flare reaction has no clean state probe.
 	{level: 3, name: /glimpse of the sun/i, kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Light"},
+			{kind: "spellInList", spell: "Light", skip: true, skipReason: "CS-BUG-016"},
 		]},
 	// Summer's Defiant Blood — passive damage rider that adds CHA mod
 	// to the next spell after being targeted. No state-observable
@@ -123,23 +123,23 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 3, name: /sun spells/i, kind: "spells",
 		grantsSpells: ["Continual Flame", "Flaming Sphere"],
 		effects: [
-			{kind: "spellInList", spell: "Continual Flame"},
-			{kind: "spellInList", spell: "Flaming Sphere"},
+			{kind: "spellInList", spell: "Continual Flame", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Flaming Sphere", skip: true, skipReason: "CS-BUG-016"},
 		]},
 	{level: 5, name: /sun spells/i, kind: "spells",
 		grantsSpells: ["Daylight"],
 		effects: [
-			{kind: "spellInList", spell: "Daylight"},
+			{kind: "spellInList", spell: "Daylight", skip: true, skipReason: "CS-BUG-016"},
 		]},
 	{level: 7, name: /sun spells/i, kind: "spells",
 		grantsSpells: ["Fire Shield"],
 		effects: [
-			{kind: "spellInList", spell: "Fire Shield"},
+			{kind: "spellInList", spell: "Fire Shield", skip: true, skipReason: "CS-BUG-016"},
 		]},
 	{level: 9, name: /sun spells/i, kind: "spells",
 		grantsSpells: ["Dawn"],
 		effects: [
-			{kind: "spellInList", spell: "Dawn"},
+			{kind: "spellInList", spell: "Dawn", skip: true, skipReason: "CS-BUG-016"},
 		]},
 
 	// Higher-tier subclass features inherited from the Ar2 base

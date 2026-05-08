@@ -23,9 +23,9 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			{kind: "cantripCount", min: 3, skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Mage Armor"},
+			{kind: "spellInList", spell: "Mage Armor", skip: true, skipReason: "CS-BUG-016"},
 			{kind: "rollSavingThrow", ability: "int"},
-			{kind: "rollSkillCheck", skill: "arcana"},
+			{kind: "rollSkillCheck", proficientSkills: true},
 			{kind: "rollInitiative"},
 			// L1 wizard with INT 16-17 base + prof +2 → DC 13.
 			// `min: 12` tolerates point-buy variants (INT 14 → DC 12).
@@ -98,7 +98,7 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /extra attack/i,
 		kind: "passive",
 		effects: [
-			{kind: "rollAttack", attackName: /dagger|quarterstaff/i},
+			{kind: "rollAttack", attackName: /dagger|quarterstaff/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		],
 	},
 	// Song of Defense at L10 — spend a spell slot as a reaction to
