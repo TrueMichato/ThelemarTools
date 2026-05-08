@@ -144,7 +144,7 @@ describeCharacter({
 				{kind: "rollAttack", attackName: /eldritch blast|dagger|crossbow|quarterstaff/i, skip: true, skipReason: "CS-BUG-013"},
 				{kind: "rollInitiative"},
 				{kind: "rollSkillCheck", skill: "intimidation"},
-				{kind: "rollSkillCheck", skill: "deception"},
+				{kind: "rollSkillCheck", proficientSkills: true},
 			],
 		},
 

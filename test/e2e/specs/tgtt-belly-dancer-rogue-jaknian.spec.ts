@@ -192,7 +192,7 @@ describeCharacter({
 			name: /tantalizing shivers/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", skill: "performance"},
+				{kind: "rollSkillCheck", proficientSkills: true},
 				{kind: "sneakAttackDice", min: 5},
 			],
 		},

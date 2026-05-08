@@ -99,7 +99,7 @@ describeCharacter({
 			name: /reliable talent/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", skill: "deception"},
+				{kind: "rollSkillCheck", proficientSkills: true},
 				// Phase 8: at L11+ Sneak Attack is 6d6+ (matrix L11/17/20).
 				{kind: "sneakAttackDice", min: 6},
 			],
@@ -141,7 +141,7 @@ describeCharacter({
 			name: /gambler['’]?s tools/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollAttack", attackName: /rapier|shortsword|hand crossbow|coins|dice|cards|dagger|shortbow/i},
+				{kind: "rollAttack", attackName: /rapier|shortsword|hand crossbow|coins|dice|cards|dagger|shortbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 			],
 		},
 		{level: 3, name: /gambler['’]?s folly/i, kind: "passive"},

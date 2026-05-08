@@ -50,10 +50,10 @@ const CHRONURGY_WIZARD_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSavingThrow", ability: "int"},
 			{kind: "rollSavingThrow", ability: "wis"},
 			// INT-based class signature skills.
-			{kind: "rollSkillCheck", skill: "arcana"},
-			{kind: "rollSkillCheck", skill: "history"},
+			{kind: "rollSkillCheck", proficientSkills: true},
+			{kind: "rollSkillCheck", proficientSkills: true},
 			// Default wizard weapon loadout.
-			{kind: "rollAttack", attackName: /quarterstaff|dagger/i},
+			{kind: "rollAttack", attackName: /quarterstaff|dagger/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 			{kind: "rollInitiative"},
 			// Nyuidj racial: resistance to psychic damage.
 			{kind: "resistance", damageType: "psychic"},

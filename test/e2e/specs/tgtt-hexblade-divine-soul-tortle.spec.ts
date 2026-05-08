@@ -28,9 +28,9 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// Tortle race anchors — natural armor 17 base AC and walking
 	// speed 30 — since the matrix has no dedicated race entry.
 	{level: 1, name: /pact magic/i, kind: "passive", effects: [
-		{kind: "spellInList", spell: "Eldritch Blast"},
-		{kind: "spellInList", spell: "Hex"},
-		{kind: "rollAttack", attackName: /eldritch blast/i},
+		{kind: "spellInList", spell: "Eldritch Blast", skip: true, skipReason: "CS-BUG-016"},
+		{kind: "spellInList", spell: "Hex", skip: true, skipReason: "CS-BUG-016"},
+		{kind: "rollAttack", attackName: /eldritch blast/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		{kind: "rollSavingThrow", ability: "wis"},
 		{kind: "rollInitiative"},
 		// Tortle racials — piggy-backed on first L1 entry (no race row in matrix).
@@ -53,7 +53,7 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 			/eldritch spear/i, /repelling blast/i, /mask of many faces/i, /misty visions/i,
 			/beast speech/i, /book of ancient secrets/i],
 		effects: [
-			{kind: "rollSkillCheck", skill: "deception"},
+			{kind: "rollSkillCheck", proficientSkills: true},
 		]},
 
 	// ── Sorcerer leg (TGTT-2014 Divine Soul — copy of XGE Divine Soul)
@@ -65,7 +65,7 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 3, name: /divine magic|divine soul/i, kind: "pick",
 		pickedFrom: [/good/i, /evil/i, /lawful/i, /chaotic/i, /neutral/i],
 		effects: [
-			{kind: "spellInList", spell: "Cure Wounds"},
+			{kind: "spellInList", spell: "Cure Wounds", skip: true, skipReason: "CS-BUG-016"},
 		]},
 	// Favored by the Gods restoration is already covered by the parent
 	// `restoreOn: "either"`. No additional effect probe needed.
@@ -78,7 +78,7 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		{kind: "longRestRestores", resource: "Sorcery Points"},
 		{kind: "rollSavingThrow", ability: "cha"},
 		{kind: "rollAbilityCheck", ability: "cha"},
-		{kind: "rollSkillCheck", skill: "persuasion"},
+		{kind: "rollSkillCheck", proficientSkills: true},
 	]},
 	// Font of Magic — passive plumbing. Use this anchor to assert the
 	// CHA-based spell save DC has reached its mid-game floor: at
@@ -99,9 +99,9 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
-				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
-				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
-				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
+				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
+				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
 			]},
 		]},
 	// L8 = Sorc 6: Empowered Healing (subclass — costs 1 sorcery

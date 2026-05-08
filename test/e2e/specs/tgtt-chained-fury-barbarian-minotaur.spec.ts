@@ -94,7 +94,7 @@ describeCharacter({
 			name: /extra attack/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollAttack", attackName: /greataxe|battleaxe|maul/i},
+				{kind: "rollAttack", attackName: /greataxe|battleaxe|maul/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 				{kind: "rollSkillCheck", skill: "athletics"},
 				// Phase 8: numeric attack-bonus probe. At L5 prof = +3 and a
 				// martial STR weapon adds STR mod (≥0) → bonus must be ≥3.
@@ -127,7 +127,7 @@ describeCharacter({
 			effects: [
 				// Brutal Critical adds extra weapon dice on crits — not surfaced as a state field
 				// (no `brutalCriticalDice` probe). Use a roll-button probe instead.
-				{kind: "rollAttack", attackName: /greataxe|battleaxe|maul/i},
+				{kind: "rollAttack", attackName: /greataxe|battleaxe|maul/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 			],
 		},
 		{

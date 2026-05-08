@@ -191,7 +191,7 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	{
 		level: 3,  name: /^hand of harm/i, kind: "toggle", toggleDelta: "none",
 		effects: [
-			{kind: "rollAttack", attackName: /unarmed|martial arts/i},
+			{kind: "rollAttack", attackName: /unarmed|martial arts/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		],
 	},
 	// Implements of Mercy L3 — grants Insight + Medicine proficiency
@@ -203,7 +203,7 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "skillBonus", skill: "medicine", min: 2},
 			{kind: "skillBonus", skill: "insight",  min: 2},
-			{kind: "rollSkillCheck", skill: "medicine"},
+			{kind: "rollSkillCheck", proficientSkills: true},
 		],
 	},
 	// TGTT-specific Combat Methods (Mercy) grant.

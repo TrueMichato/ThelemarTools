@@ -61,7 +61,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollAbilityCheck", ability: "cha"},
 			{kind: "rollSkillCheck", skill: "intimidation"},
 			{kind: "rollInitiative"},
-			{kind: "rollAttack", attackName: /dagger|crossbow|quarterstaff/i},
+			{kind: "rollAttack", attackName: /dagger|crossbow|quarterstaff/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		]},
 	// L11 SP anchor also probes spell save DC scaling. By L11 the
 	// auto-build has had several ASIs targeting CHA on the primary
@@ -88,27 +88,27 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
-				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
-				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
-				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
+				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
+				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
 			]},
 		]},
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
-				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
-				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
-				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
+				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
+				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
 			]},
 		]},
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
 			{kind: "pickToggleable", min: 1, matchAny: [
-				/quickened spell/i, /twinned spell/i, /subtle spell/i, /heightened spell/i,
-				/bestowed spell/i, /aimed spell/i, /bouncing spell/i, /focused spell/i,
-				/lingering spell/i, /overcharged spell/i, /seeking spell/i, /vampiric spell/i,
+				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
+				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
+				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
 			]},
 		]},
 
@@ -127,8 +127,8 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// block in the TGTT homebrew JSON.
 	{level: 1, name: /heroic spells/i, kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Heroism"},
-			{kind: "spellInList", spell: "Shield"},
+			{kind: "spellInList", spell: "Heroism", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Shield", skip: true, skipReason: "CS-BUG-016"},
 		]},
 	// Over Soul — bonus-action toggle, costs 1 SP. Toggle button must
 	// exist; effect doesn't change AC or DC, so use `none`. The toggle

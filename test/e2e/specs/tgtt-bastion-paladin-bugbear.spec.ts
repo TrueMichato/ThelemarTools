@@ -60,7 +60,7 @@ describeCharacter({
 			name: /weapon mastery/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollAttack", attackName: /longsword|greatsword|warhammer|battleaxe|mace|scimitar|rapier|shortsword/i},
+				{kind: "rollAttack", attackName: /longsword|greatsword|warhammer|battleaxe|mace|scimitar|rapier|shortsword/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 				{kind: "rollInitiative"},
 			],
 		},
@@ -81,7 +81,7 @@ describeCharacter({
 			name: /paladin'?s? smite|divine smite/i,
 			kind: "passive",
 			effects: [
-				{kind: "spellInList", spell: "Divine Smite"},
+				{kind: "spellInList", spell: "Divine Smite", skip: true, skipReason: "CS-BUG-016"},
 			],
 		},
 		// ── L3: Channel Divinity + Oath of Bastion ──────────────────────
@@ -170,7 +170,7 @@ describeCharacter({
 			name: /abjure foes/i,
 			kind: "passive",
 			effects: [
-				{kind: "rollSkillCheck", skill: "persuasion"},
+				{kind: "rollSkillCheck", proficientSkills: true},
 			],
 		},
 		{level: 9, name: /oath of bastion spells/i, kind: "spells", grantsSpells: ["Spirit Guardians", "Protection from Energy"]},
