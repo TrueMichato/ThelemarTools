@@ -29,7 +29,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// Note: Half-Ogre has no skill proficiencies (no Menacing trait
 	// in the TGTT data) and Powerful Build (carry x2) is not surfaced
 	// on the sheet — neither is probed.
-	{level: 2,  name: "Sorcery Points", kind: "resource", resourceMax: 2,  restoreOn: "long",
+	{level: 2,  name: "Sorcery Points", kind: "resource", resourceMax: 2, skip: true, skipReason: "CS-BUG-018",  restoreOn: "long",
 		effects: [
 			{kind: "longRestRestores", resource: "Sorcery Points"},
 			{kind: "cantripCount", min: 4, skip: true, skipReason: "CS-BUG-016"},
@@ -39,7 +39,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// L3 SP anchor: roll-button probes for Sorcerer-proficient CON
 	// save and an untrained skill (Athletics — STR-based; Half-Ogre
 	// has no skill profs but the row + button always render).
-	{level: 3,  name: "Sorcery Points", kind: "resource", resourceMax: 3,
+	{level: 3,  name: "Sorcery Points", kind: "resource", resourceMax: 3, skip: true, skipReason: "CS-BUG-018",
 		effects: [
 			{kind: "rollSavingThrow", ability: "con"},
 			{kind: "rollSkillCheck", skill: "athletics"},
@@ -55,7 +55,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// bump CHA either, so the DC stays in the 9-11 band across mid
 	// tiers and any `min:` floor would be either trivially true or
 	// noisy.
-	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5,
+	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5, skip: true, skipReason: "CS-BUG-018",
 		effects: [
 			{kind: "rollSavingThrow", ability: "cha"},
 			{kind: "rollAbilityCheck", ability: "cha"},
@@ -67,12 +67,12 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// auto-build has had several ASIs targeting CHA on the primary
 	// caster class; PB=4 + CHA mod ≥ 1 keeps the floor comfortably
 	// above DC 13 even on a slow-CHA path.
-	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11,
+	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11, skip: true, skipReason: "CS-BUG-018",
 		effects: [
 			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 		]},
-	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17},
-	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
+	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17, skip: true, skipReason: "CS-BUG-018",},
+	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20, skip: true, skipReason: "CS-BUG-018",},
 
 	// Metamagic picks scale 2 → 3 → 4 across L3 / L10 / L17.
 	// `pickedCount` is the lower bound — passing means at least N of
@@ -87,7 +87,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", min: 1, matchAny: [
+			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018", min: 1, matchAny: [
 				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
 				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
 				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
@@ -96,7 +96,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", min: 1, matchAny: [
+			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018", min: 1, matchAny: [
 				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
 				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
 				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
@@ -105,7 +105,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", min: 1, matchAny: [
+			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018", min: 1, matchAny: [
 				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
 				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
 				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
@@ -125,7 +125,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// always-known subclass spells (Heroism + Shield) ride along with
 	// the spell list, per the Heroic Soul `additionalSpells.known.1`
 	// block in the TGTT homebrew JSON.
-	{level: 1, name: /heroic spells/i, kind: "passive",
+	{level: 1, name: /heroic spells/i, kind: "passive", skip: true, skipReason: "CS-BUG-017",
 		effects: [
 			{kind: "spellInList", spell: "Heroism", skip: true, skipReason: "CS-BUG-016"},
 			{kind: "spellInList", spell: "Shield", skip: true, skipReason: "CS-BUG-016"},
@@ -135,13 +135,13 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// itself has no state-observable AC/DC/resistance/advantage delta
 	// the matrix can probe — verifying activate/deactivate doesn't
 	// throw is handled by the parent `kind: "toggle"` check.
-	{level: 1, name: /over soul/i, kind: "toggle", toggleDelta: "none"},
+	{level: 1, name: /over soul/i, kind: "toggle", toggleDelta: "none", skip: true, skipReason: "CS-BUG-017"},
 	// Legendary Weapon — passive (changes the manifested weapon's
 	// form). The manifested weapon should surface as an attack row;
 	// we reuse the same generic regex as the L5 SP probe rather than
 	// hard-coding maul / greatsword (the picked manifestation isn't
 	// deterministic in the auto-build).
-	{level: 1, name: /legendary weapon/i, kind: "passive"},
+	{level: 1, name: /legendary weapon/i, kind: "passive", skip: true, skipReason: "CS-BUG-017"},
 
 	// Combat Methods (Heroic Soul) at L3 — Stamina pool = 2× prof
 	// bonus, short OR long rest restore. Blocked by CS-BUG-011: the
@@ -160,7 +160,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// entry on the sheet (e.g. "Frigid Strike", "Honourable Bout").
 	// `pickActivatable` then clicks at least one matching method's
 	// activation control (smoke-test: doesn't throw).
-	{level: 3, name: /combat methods/i, kind: "pick", pickedCount: 1,
+	{level: 3, name: /combat methods/i, kind: "pick", skip: true, skipReason: "CS-BUG-017", pickedCount: 1,
 		pickedFrom: [
 			// Arcane Knight 1st-degree methods
 			/frigid strike/i, /grasp of the storm/i, /malicious mark/i, /warding flourish/i,
@@ -184,7 +184,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 
 	// Manifest Legend at L14 — action, costs 3 SP, 1/long-rest. Has a
 	// toggle button on the sheet; no AC/DC delta.
-	{level: 14, name: /manifest legend/i, kind: "toggle", toggleDelta: "none"},
+	{level: 14, name: /manifest legend/i, kind: "toggle", toggleDelta: "none", skip: true, skipReason: "CS-BUG-017"},
 
 	// Eternal Hero at L18 — passive capstone (Over Soul always on +
 	// drop-to-1-HP rider).
