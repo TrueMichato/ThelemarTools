@@ -16,6 +16,7 @@ import {CharacterSheetQuickBuild} from "./charactersheet-quickbuild.js";
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
+import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
 
 /**
  * Character Sheet - Main Controller
@@ -37,6 +38,7 @@ class CharacterSheetPage {
 		this._customAbilities = null;
 		this._quickBuild = null;
 		this._upgrades = null;
+		this._playMode = null;
 
 		this._selCharacter = null;
 		this._currentCharacterId = null;
@@ -123,6 +125,11 @@ class CharacterSheetPage {
 		try {
 			this._upgrades = new CharacterSheetUpgrades(this);
 		} catch (e) { console.error("Failed to init upgrades:", e); }
+
+		try {
+			this._playMode = new CharacterSheetPlayMode(this);
+			this._playMode.init();
+		} catch (e) { console.error("Failed to init playMode:", e); }
 
 		try {
 			this._respec = new CharacterSheetRespec({page: this, state: this._state});
@@ -813,6 +820,9 @@ class CharacterSheetPage {
 		// Roll history toggle
 		document.getElementById("charsheet-btn-rolllog")?.addEventListener("click", () => this._rollHistory?.toggle());
 
+		// Play Mode toggle
+		document.getElementById("charsheet-btn-playmode")?.addEventListener("click", () => this._playMode?.toggle());
+
 		// Layout editing
 		document.getElementById("charsheet-btn-layout").addEventListener("click", () => this._toggleLayoutEditMode());
 		document.getElementById("charsheet-btn-reset-layout").addEventListener("click", () => this._resetLayout());
@@ -965,6 +975,13 @@ class CharacterSheetPage {
 			const currentTheme = this._state.getBackgroundTheme();
 			this._applyBackgroundTheme(currentTheme);
 			this._updateThemePickerSelection(currentTheme);
+
+			// Restore Play Mode if it was active
+			if (this._playMode && this._state.getViewMode() === "play") {
+				this._playMode.activate();
+			} else if (this._playMode) {
+				this._playMode.deactivate();
+			}
 
 			// Update URL
 			const url = new URL(window.location);
@@ -2412,6 +2429,7 @@ class CharacterSheetPage {
 		if (this._customAbilities) this._customAbilities.render();
 		if (this._combat) this._combat.render();
 		if (this._respec) this._respec.render();
+		if (this._playMode && this._state.getViewMode() === "play") this._playMode.render();
 
 		// Update tab visibility based on character state
 		this._updateTabVisibility();
@@ -10522,6 +10540,7 @@ class CharacterSheetPage {
 	getState () { return this._state; }
 	getLayout () { return this._layout; }
 	getNotes () { return this._notes; }
+	getPlayMode () { return this._playMode; }
 
 	/**
 	 * Get tools list from items data (artisan tools, gaming sets, musical instruments, other tools)

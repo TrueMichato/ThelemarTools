@@ -122,6 +122,31 @@ Benefits:
 - Collapsed sections by default
 - Quick-action floating buttons
 
+### Play Mode (Alternative UI)
+
+**Status**: ✅ Core Complete
+
+An intent-based alternative view that reorganizes character data by player intent (attack/cast/check/track) rather than data type (tabs). Toggle between Full Sheet and Play Mode.
+
+Implemented:
+- ✅ Status bar (HP, AC, conditions, concentration, combat tracker)
+- ✅ Character panel (abilities, saves, skills, proficiencies)
+- ✅ Actions hub (favorites, action economy, attacks, spells, features, resources)
+- ✅ 6 drawers (Spells, Gear, Reference, Notes, Companions, Activity)
+- ✅ Smart damage flow with resistance/immunity/vulnerability detection
+- ✅ Spell upcast quick-select with slot level picker
+- ✅ Rest preview before confirming
+- ✅ Activity feed with clipboard export
+- ✅ Tablet/touch optimization (44px targets, responsive layout)
+- ✅ Accessibility (ARIA, keyboard, reduced-motion)
+
+Future enhancements:
+- Inline roll results (show dice next to triggering element)
+- Encounter mode (initiative order, enemy HP)
+- Party view (DM sees all status bars)
+- Custom layout presets (martial vs caster)
+- Drag-to-reorder favorites
+
 ### Item Upgrade Combat Integration
 
 Wire upgrade bonuses into combat attack/damage calculations:
