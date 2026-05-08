@@ -1,6 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HORROR_THEOCRACIAN} from "../utils/characterBuilder";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildAnyInvocationChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #18 — The Horror Warlock Theocracian (TGTT) — L1→20.
@@ -84,49 +84,11 @@ describeCharacter({
 			],
 		},
 
-		// Eldritch Invocations — count scales with level.
-		// Phase 8: pickActivatable probes layered on each EI tier.
-		// The wizard's auto-pick can vary between runs; the matchAny
-		// list covers the EIs that surface as activatable features
-		// (those granting at-will spells like Mask of Many Faces /
-		// Fiendish Vigor / Armor of Shadows / Misty Visions / One
-		// with Shadows / Sign of Ill Omen). Many EIs are PASSIVE
-		// (Agonizing Blast, Repelling Blast, Devil's Sight, Eldritch
-		// Spear, Beast Speech, Thirsting Blade, Lifedrinker) and
-		// would not surface as activatable, so the probes stay
-		// `{skip: true}` until the preset pins specific picks. Left
-		// inline so a future preset that pins active EIs can flip
-		// `skip: false` with no schema change.
-		{level: 2,  name: /eldritch invocation/i, kind: "pick", pickedCount: 2,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i],
-			effects: [
-				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
-					skip: true, skipReason: "wizard auto-pick may favor passive EIs (Agonizing/Repelling/Devil's Sight) which lack a toggle button"},
-			]},
-		{level: 5,  name: /eldritch invocation/i, kind: "pick", pickedCount: 3,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i],
-			effects: [
-				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
-					skip: true, skipReason: "wizard auto-pick may favor passive EIs (Agonizing/Repelling/Devil's Sight/Thirsting Blade) which lack a toggle button"},
-			]},
-		{level: 9,  name: /eldritch invocation/i, kind: "pick", pickedCount: 5,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i],
-			effects: [
-				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
-					skip: true, skipReason: "wizard auto-pick may favor passive EIs which lack a toggle button"},
-			]},
-		{level: 15, name: /eldritch invocation/i, kind: "pick", pickedCount: 7,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i, /one with shadows/i, /sign of ill omen/i],
-			effects: [
-				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
-					skip: true, skipReason: "wizard auto-pick may favor passive EIs which lack a toggle button"},
-			]},
-		{level: 18, name: /eldritch invocation/i, kind: "pick", pickedCount: 8,
-			pickedFrom: [/agonizing/i, /repelling/i, /devil's? sight/i, /eldritch spear/i, /mask of many/i, /fiendish/i, /armor of shadows/i, /beast speech/i, /thirsting blade/i, /lifedrinker/i, /one with shadows/i, /sign of ill omen/i],
-			effects: [
-				{kind: "pickActivatable", matchAny: [/mask of many/i, /fiendish vigor/i, /armor of shadows/i, /misty visions/i, /one with shadows/i, /sign of ill omen/i], min: 1,
-					skip: true, skipReason: "wizard auto-pick may favor passive EIs which lack a toggle button"},
-			]},
+		// Eldritch Invocations — count scales with level. Replaced with
+		// buildAnyInvocationChecks across XPHB + XGE + TGTT sources so
+		// the helper attaches per-pick effect probes for the auto-picker
+		// first choice (alphabetic across the union).
+		...buildAnyInvocationChecks(["XPHB", "XGE", "TGTT"]),
 
 		// Pact Boon at L3 — no clean state probe (boon-specific).
 		// Roll-button probes layered here so they fan out by level.

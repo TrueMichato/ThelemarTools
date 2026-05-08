@@ -172,8 +172,9 @@ const CATALOG_SPEC = [
 		exclude: [/^Zodiac Form: /i, /^Circle of the Zodiac$/i]},
 	{varName: "ZODIAC_FORMS_L10", className: "Druid", subShort: "Zodiac",      level: 10,
 		exclude: [/^Zodiac Form: /i]},
-	{varName: "DEBILITATION_PRECISE_STRIKES_L3", className: "Monk", subShort: "Debilitation", level: 3,
-		exclude: [/^Precise Strike Methods$/i, /^Debilitation$/i]},
+	// NOTE: Debilitation Monk Precise Strike Methods are NOT a catalog —
+	// they are `PS` (Painful Strike) optional features picked from a pool,
+	// already covered by buildPainfulStrikeChecks().
 ];
 const catalogPools = {};
 for (const spec of CATALOG_SPEC) {
@@ -239,7 +240,6 @@ import {
 \tXPHB_MANEUVER_EFFECTS,
 \tXPHB_PACT_BOON_EFFECTS,
 \tZODIAC_FORM_EFFECTS,
-\tDEBILITATION_PRECISE_STRIKE_EFFECTS,
 } from "./tgttFeatureEffects";
 
 `;
