@@ -408,7 +408,10 @@ RUN_MATRIX=1 npx playwright test test/e2e/specs/tgtt-<spec>.spec.ts \
 
 ## CS-BUG-015 — Time Domain Cleric: cantrips not auto-prepped & Channel Divinity not surfaced as a resource
 
-**Status**: Filed (Phase 7 effect-validation matrix smoke)
+**Status**: Filed (Phase 7 effect-validation matrix smoke).
+See **CS-BUG-016** for the cross-class generalisation
+(same cantripCount/spellSaveDc/TGTT-flavor pattern observed
+on every TGTT caster preset, not just Cleric).
 
 **Repro**: Build a Time Domain Cleric via the TGTT preset (see
 `test/e2e/specs/tgtt-time-domain-cleric.spec.ts`). After the L1
@@ -460,3 +463,161 @@ counter visible at L2. Both are core cleric mechanics.
   valid spell save DC. Possibly the cleric DC is rendered under
   a different element or on a non-Combat tab. Worth verifying as
   part of the same fix.
+
+---
+
+### CS-BUG-016 — TGTT class presets surface 0 cantrips, spellSaveDc=0, and TGTT-flavor (not first-party) spell list across ALL caster classes
+
+**Status**: Open. Generalisation of CS-BUG-015 (which was filed
+against the Time Domain Cleric only). Phase 14 MEGA sweep
+showed the **same three symptoms** on Wizard (Bladesinger,
+Chronurgy), Bard (Jester, Surrealism), Sorcerer (Child of the
+Sun, Heroic Soul), Paladin (Bastion), Ranger (Hunter), Warlock
+(Horror), and Cleric (Lust Domain) presets:
+
+1. `state.getCantrips()` / `cantripCount` returns **0 at L1**
+   for every TGTT caster, even though the class spec grants 2-3
+   cantrips at L1.
+2. `state.getSpellSaveDC()` returns **0** even though the build
+   has a valid spellcasting ability and proficiency bonus.
+3. The L1 spell list contains TGTT-flavor spells
+   (`Accelerate/Decelerate`, `Animate Claw`, `Acrid Orb`,
+   `Assisted Aim`, `Blade of Blood and Bone`, `Absorb Elements`,
+   `Amplify`, …) **instead of** the first-party cantrips/spells
+   the class' SRS/PHB list would grant (`Vicious Mockery`,
+   `Mage Armor`, `Cure Wounds`, `Hunter's Mark`, `Druidcraft`,
+   `Sacred Flame`, `Charm Person`, …).
+
+**Severity**: High — every TGTT caster build starts with zero
+visible cantrips and a broken spell-save-DC display, plus a
+spell list that doesn't match what 5e players expect from
+their class.
+
+**Likely root cause**: a single TGTT-preset spell-pick wiring
+that injects TGTT-only spells into `_data.knownSpells` and skips
+the cantrip auto-prep step. The `getSpellSaveDC()` zero return
+likely comes from reading the wrong tab or reading from a state
+field that the TGTT preset never writes.
+
+**Test workaround**: every affected MEGA spec must mark
+`cantripCount`, `spellInList` (for first-party names), and
+`spellSaveDc` effect probes as `skip: true,
+skipReason: "CS-BUG-016"` until resolved. CS-BUG-015 is the
+narrower Cleric-only entry — keep both until 015 is rolled into
+016 by the fix commit.
+
+**Surfacing specs**: `tgtt-bladesinger-wizard-tabaxi`,
+`tgtt-chronurgy-wizard-nyuidj`, `tgtt-jester-bard-dendulra`,
+`tgtt-surrealism-bard-yuanti`,
+`tgtt-child-of-sun-sorcerer-hochling`,
+`tgtt-heroic-soul-sorcerer-halfogre`,
+`tgtt-bastion-paladin-bugbear`,
+`tgtt-hunter-zodiac-centaur` (Hunter half),
+`tgtt-horror-warlock-theocracian`,
+`tgtt-lust-cleric-lexalian`,
+`tgtt-time-domain-cleric` (already CS-BUG-015).
+
+---
+
+### CS-BUG-017 — Multiple TGTT subclass features and resources don't register on the sheet
+
+**Status**: Open. Phase 14 MEGA sweep umbrella entry for the
+"subclass feature exists in the data but never appears on the
+rendered sheet" pattern. Distinct from CS-BUG-002 (which covers
+the level-up pipeline not granting *any* subclass features for
+TGTT 2024-style Wizard subclasses); CS-BUG-017 cases register
+the parent feature but don't surface the toggle/resource the
+feature is supposed to provide.
+
+| Class / subclass | Level | Feature | Symptom |
+|---|---|---|---|
+| Mercy Monk | 3 | Hand of Healing | toggle button absent (`toggleable=∅`) |
+| Mercy Monk | 3 | Hand of Harm | toggle button absent |
+| Mercy Monk | 3 | Channel Divinity (parent class resource via Mercy plumbing) | resource not surfaced |
+| Surrealism Bard | 3 | Warped Reality | toggle button absent |
+| Belly Dancer Rogue | 3 | Dance of the Country | toggle button absent |
+| Heroic Soul Sorcerer | 1 | Over Soul, Heroic Spells, Legendary Weapon | features absent from feature list entirely |
+| Horror Warlock | 1 | Devastating Strike, Expanded Spell List | features absent from feature list entirely |
+| Horror Warlock | 3 | Pact Boon pick | pick row not surfacing on sheet |
+| Mercy Monk | 3 | Implements of Mercy → Medicine proficiency | `skill:medicine=0`, no Medicine roll button |
+
+**Severity**: High — every player on these subclasses loses
+access to their signature toggle/resource. Mercy Monk, Heroic
+Soul Sorcerer, and Horror Warlock are the worst-affected because
+the missing features are their core class identity.
+
+**Surfacing specs**: `tgtt-mercy-monk-changeling`,
+`tgtt-surrealism-bard-yuanti`,
+`tgtt-belly-dancer-rogue-jaknian`,
+`tgtt-heroic-soul-sorcerer-halfogre`,
+`tgtt-horror-warlock-theocracian`.
+
+**Test workaround**: skip the affected `(toggle)` /
+`(resource)` / `(passive)` matrix entries with
+`skipReason: "CS-BUG-017"` until the subclass plumbing is fixed.
+
+---
+
+### CS-BUG-018 — TGTT class resource maxes wrong on multiple presets
+
+**Status**: Open. Phase 14 MEGA sweep umbrella entry for
+incorrect resource maximums on TGTT presets:
+
+| Spec | Level | Resource | Expected | Actual |
+|---|---|---|---|---|
+| Heroic Soul Sorcerer | 2 | Sorcery Points | 2 | 4 |
+| Heroic Soul Sorcerer | 3 | Sorcery Points | 3 | 4 |
+| Chained Fury Barbarian | 1 | Rage uses/day | 2 | 3 |
+| Bastion Paladin | 1 | Lay on Hands | 5 | 15 |
+| Belly Dancer Rogue | 1 | Sneak Attack dice | ≥1 | 0 |
+| Gambler Rogue | 1 | Sneak Attack dice | ≥1 | 0 |
+| Trickster Rogue | 1 | Sneak Attack dice | ≥1 | 0 |
+| Belly Dancer / Gambler / Trickster | 3 | Sneak Attack dice | ≥2 | 0 |
+
+The Sneak-Attack-dice entries may indicate the dice pool isn't
+even being initialised on TGTT Rogue presets (zero, not just a
+wrong value). The Lay-on-Hands max=15 may be the TGTT pool size
+from a different table — could be by-design or a setting flag
+issue.
+
+**Severity**: High — Rogue players with no sneak attack dice
+and Sorcerer players with the wrong SP pool will hit broken
+mechanics on every turn.
+
+**Test workaround**: skip the affected `(resource)` / `effect
+sneakAttackDice` matrix entries with `skipReason: "CS-BUG-018"`
+until the resource-table wiring is fixed.
+
+---
+
+### CS-BUG-019 — Lust Domain Cleric Persuasion bonus reports as **negative** (-1)
+
+**Status**: Open. Phase 14 MEGA sweep, surfaced by
+`tgtt-lust-cleric-lexalian.spec.ts`.
+
+**Repro**: Build a Lust Domain Cleric via the TGTT preset,
+level to 3 (when Lust Domain grants the Bonus Proficiency in
+Deception and Persuasion). Inspect the Skills row on the sheet:
+
+- `skill:deception` = +1 (expected ≥+2 — proficiency + Cha mod)
+- `skill:persuasion` = **-1** (expected ≥+2 — proficiency + Cha mod)
+
+Persuasion reports a *negative* bonus, which is impossible for
+a class-proficient Charisma-based skill. Likely two distinct
+sub-bugs being reported by the same probe:
+
+1. The Lust Domain proficiency grant doesn't reach the skill
+   table for Persuasion (and possibly under-applies for
+   Deception).
+2. The Cha modifier is being read negatively for Persuasion —
+   possibly reading from the wrong stat row (Wis is typically
+   the cleric primary, but a TGTT Lust Cleric might dump a
+   stat into Cha via a swap that the skill table doesn't
+   pick up correctly).
+
+**Severity**: High — the marquee subclass feature of Lust
+Domain (silver-tongued seduction) is straight-up broken.
+
+**Test workaround**: skip the L3 `lust domain` skillBonus
+effect with `skipReason: "CS-BUG-019"` until the fix lands.
+
