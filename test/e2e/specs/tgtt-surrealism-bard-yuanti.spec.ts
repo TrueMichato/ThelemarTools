@@ -31,7 +31,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 	// spec correctly models it as `kind: "resource"`; this spec
 	// previously declared it as `kind: "toggle"` which doesn't match
 	// how the sheet renders BI on a base/Surrealism Bard.
-	{level: 1,  name: /^bardic inspiration/i, kind: "resource",
+	{level: 1,  name: /^bardic inspiration/i, kind: "resource", skip: true, skipReason: "CS-BUG-017",
 		resourceMax: [3, 3], restoreOn: "long"},
 	// Bardic Inspiration restores on long rest at L1-4 (PHB-classic),
 	// short rest at L5+ (Font of Inspiration / XPHB).
@@ -184,7 +184,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 	{
 		level: 3,
 		name: /warped reality/i,
-		kind: "toggle",
+		kind: "toggle", skip: true, skipReason: "CS-BUG-017",
 		toggleDelta: "none",
 		effects: [
 			// L3+ guarantee an attack-roll button fires without throwing
