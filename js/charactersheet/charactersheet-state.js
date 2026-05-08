@@ -3317,6 +3317,7 @@ class CharacterSheetState {
 
 			// Weapon Masteries (2024 rules)
 			weaponMasteries: [], // ["Longsword|XPHB", "Shortsword|XPHB"] - weapon keys (name|source)
+			weaponMasteryProperties: {}, // {weaponKey: masteryPropName} — player-chosen mastery property per weapon
 
 			// Combat Traditions (Thelemar homebrew) - tradition codes like ["AM", "RC"]
 			combatTraditions: [],
@@ -3498,6 +3499,10 @@ class CharacterSheetState {
 
 			// Ammunition consumption tracking for current combat
 			ammunitionConsumed: {}, // {ammoId: countConsumed}
+
+			// Play Mode (alternative intent-based UI)
+			viewMode: "full", // "full" | "play"
+			favorites: [], // [{id, type, name, icon, detail, ref}] — pinned actions for quick access
 		};
 	}
 
@@ -21702,6 +21707,39 @@ class CharacterSheetState {
 		}
 		this._data.settings.backgroundTheme = theme || "default";
 	}
+
+	// Play Mode view state
+	getViewMode () { return this._data.viewMode || "full"; }
+	setViewMode (mode) { this._data.viewMode = mode || "full"; }
+	getFavorites () { return [...(this._data.favorites || [])]; }
+	setFavorites (favorites) { this._data.favorites = favorites || []; }
+
+	isFavorite (type, id) {
+		const key = `${type}:${id}`;
+		return (this._data.favorites || []).some(f => f.id === key);
+	}
+
+	addFavorite (favData, {max = 8} = {}) {
+		if (!this._data.favorites) this._data.favorites = [];
+		if (this._data.favorites.length >= max) return false;
+		if (this._data.favorites.some(f => f.id === favData.id)) return false;
+		this._data.favorites = [...this._data.favorites, favData];
+		return true;
+	}
+
+	removeFavorite (id) {
+		if (!this._data.favorites) return false;
+		const before = this._data.favorites.length;
+		this._data.favorites = this._data.favorites.filter(f => f.id !== id);
+		return this._data.favorites.length < before;
+	}
+
+	toggleFavorite (favData, {max = 8} = {}) {
+		if (this.isFavorite(favData.type, favData.id?.split(":")[1] || "")) {
+			return this.removeFavorite(favData.id) ? "removed" : null;
+		}
+		return this.addFavorite(favData, {max}) ? "added" : null;
+	}
 	// #endregion
 
 	// #region Resources
@@ -22909,6 +22947,32 @@ class CharacterSheetState {
 			}
 			return name.toLowerCase() === weaponName.toLowerCase();
 		});
+	}
+
+	/**
+	 * Get the player-chosen mastery property for a weapon.
+	 * @param {string} weaponKey - Weapon key e.g. "Longsword|XPHB" or just "Longsword"
+	 * @returns {string|null} Mastery property name like "Topple" or null if none chosen
+	 */
+	getWeaponMasteryProperty (weaponKey) {
+		return (this._data.weaponMasteryProperties || {})[weaponKey] || null;
+	}
+
+	/**
+	 * Set (or clear) the player-chosen mastery property for a weapon.
+	 * Also ensures the weapon is in the masteries list when a property is set.
+	 * @param {string} weaponKey - Weapon key e.g. "Longsword|XPHB"
+	 * @param {string|null} prop - Mastery property name like "Topple", or null to clear
+	 */
+	setWeaponMastery (weaponKey, prop) {
+		if (!this._data.weaponMasteryProperties) this._data.weaponMasteryProperties = {};
+		if (prop) {
+			this._data.weaponMasteryProperties[weaponKey] = prop;
+			this.addWeaponMastery(weaponKey);
+		} else {
+			delete this._data.weaponMasteryProperties[weaponKey];
+			this.removeWeaponMastery(weaponKey);
+		}
 	}
 	// #endregion
 
