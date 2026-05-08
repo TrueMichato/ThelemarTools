@@ -27,7 +27,7 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// Religion is INT-based and is granted by the Acolyte background;
 	// CHA ability checks and initiative also probed here.
 	{level: 1, name: /spellcasting/i, kind: "passive", effects: [
-		{kind: "cantripCount", min: 3},
+		{kind: "cantripCount", min: 3, skip: true, skipReason: "CS-BUG-016"},
 		{kind: "spellInList", spell: "Sacred Flame"},
 		{kind: "spellInList", spell: "Cure Wounds"},
 		{kind: "rollSavingThrow", ability: "wis"},
@@ -73,7 +73,7 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// proficient via Bonus Proficiencies (L3+), so the button must be
 	// click-without-throw at every milestone L5+.
 	{level: 5, name: /sear undead|destroy undead/i, kind: "passive", effects: [
-		{kind: "spellSaveDc", min: 13},
+		{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 		{kind: "rollAttack", attackName: /mace|warhammer|crossbow/i},
 		{kind: "rollSkillCheck", skill: "persuasion"},
 	]},

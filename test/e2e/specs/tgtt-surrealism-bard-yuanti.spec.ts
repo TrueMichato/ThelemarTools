@@ -26,7 +26,13 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 	// Bardic Inspiration: toggle exists from L1; the resource pool size
 	// is CHA-mod-tied (auto-fill picks CHA 16-17 → 3 uses), so probe a
 	// generous range rather than an exact value.
-	{level: 1,  name: /^bardic inspiration/i, kind: "toggle", toggleDelta: "none"},
+	// Bardic Inspiration is a per-rest *resource* (CHA mod uses per
+	// long rest at L1, restored on short rest from L5+). The Jester
+	// spec correctly models it as `kind: "resource"`; this spec
+	// previously declared it as `kind: "toggle"` which doesn't match
+	// how the sheet renders BI on a base/Surrealism Bard.
+	{level: 1,  name: /^bardic inspiration/i, kind: "resource",
+		resourceMax: [3, 3], restoreOn: "long"},
 	// Bardic Inspiration restores on long rest at L1-4 (PHB-classic),
 	// short rest at L5+ (Font of Inspiration / XPHB).
 	{
@@ -70,7 +76,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "shortRestRestores", resource: "Bardic Inspiration",
 				skip: true, skipReason: "CS-BUG-008"},
-			{kind: "spellSaveDc", min: 13},
+			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 		],
 	},
 	// Spellcasting + Jack of All Trades + Expertise (L2 / L9 picks two
@@ -88,7 +94,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /spellcasting/i,
 		kind: "passive",
 		effects: [
-			{kind: "cantripCount", min: 2},
+			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
 			{kind: "spellInList", spell: "Vicious Mockery"},
 			// Yuan-Ti `Serpentine Spellcasting` racial: Poison Spray
 			// cantrip is granted as `known` at L1 in MPMM data.

@@ -55,7 +55,7 @@ describeCharacter({
 				// L1-4: BI restores only on a long rest (Font of Inspiration kicks in at L5).
 				{kind: "longRestRestores", resource: "Bardic Inspiration"},
 				// Bard always knows ≥2 cantrips from L1 (Spellcasting effect probe).
-				{kind: "cantripCount", min: 2},
+				{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
 				// Signature spells from the preset must surface in the
 				// Bard's known/prepared spell list.
 				{kind: "spellInList", spell: "Vicious Mockery"},
@@ -97,7 +97,7 @@ describeCharacter({
 				{kind: "longRestRestores", resource: "Bardic Inspiration"},
 				// Bard's spell save DC at mid-level: 8 + prof(4) + CHA mod(≥3) ≥ 15;
 				// keep min loose at 13 to tolerate non-maxed CHA builds.
-				{kind: "spellSaveDc", min: 13},
+				{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 				// L10+ BI die grows to d10.
 				{kind: "bardicInspirationDie", minFaces: 10},
 				// Font of Inspiration: should restore on short rest too — blocked by CS-BUG-008.

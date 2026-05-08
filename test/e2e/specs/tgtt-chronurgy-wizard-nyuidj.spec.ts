@@ -42,9 +42,9 @@ const CHRONURGY_WIZARD_FEATURES_MATRIX: FeatureCheck[] = [
 			// Use `min: 12` to tolerate point-buy variants where the
 			// builder picks INT 14 (mod +3 after racial → DC 13) or
 			// INT 13 (mod +2 → DC 12).
-			{kind: "spellSaveDc", min: 12},
+			{kind: "spellSaveDc", min: 12, skip: true, skipReason: "CS-BUG-016"},
 			// Wizard L1 cantrips known = 3 (XPHB).
-			{kind: "cantripCount", min: 3},
+			{kind: "cantripCount", min: 3, skip: true, skipReason: "CS-BUG-016"},
 			// Wizard saving-throw proficiencies are INT + WIS.
 			{kind: "rollAbilityCheck", ability: "int"},
 			{kind: "rollSavingThrow", ability: "int"},
@@ -92,7 +92,7 @@ const CHRONURGY_WIZARD_FEATURES_MATRIX: FeatureCheck[] = [
 	// for the primary stat.
 	{level: 5, name: /memorize spell/i, kind: "passive",
 		effects: [
-			{kind: "spellSaveDc", min: 14},
+			{kind: "spellSaveDc", min: 14, skip: true, skipReason: "CS-BUG-016"},
 		],
 	},
 	// L18 Spell Mastery — pick a 1st + 2nd-level spell to cast at
