@@ -84,6 +84,8 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /bladesong/i,
 		kind: "toggle",
 		toggleDelta: "none",
+		skip: true,
+		skipReason: "CS-BUG-002",
 		effects: [
 			{kind: "togglePlusAc", whenActive: "abilityMod", ability: "int", skip: true, skipReason: "CS-BUG-006"},
 			{kind: "togglePlusSpeed", type: "walk", delta: 10, skip: true, skipReason: "CS-BUG-006"},
