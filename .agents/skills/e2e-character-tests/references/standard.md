@@ -67,6 +67,13 @@ The generator emits the following pools and their matching
 | `TGTT_DREAMWALKER_CUSTOMS` / `TGTT_DREAMWALKER_SPECIALS` | `buildDreamwalkerChecks(levelMap?)` | Dreamwalker calls / studies (DW:C / DW:S) |
 | `TGTT_COMBAT_METHODS_BY_TRADITION` | n/a (read directly when needed) | Per-tradition combat-method pool |
 | `XPHB_WEAPON_MASTERY_EFFECTS` (hand-written) | `buildWeaponMasteryChecks(weaponNames)` | XPHB Weapon Mastery picks |
+| `EI_XPHB` / `EI_XGE` / `EI_PHB` / `EI_TCE` | `buildAnyInvocationChecks(sources?, progression?, levelMap?)` | Cross-source Eldritch Invocations (Warlock dips into XPHB + XGE + TGTT) |
+| `MM_XPHB` / `MM_PHB` / `MM_TCE` | `buildAnyMetamagicChecks(sources?, progression?, levelMap?)` | Cross-source Metamagic (Sorcerer can mix XPHB MM with TGTT MM) |
+| `AS_XGE` | `buildAnyArcaneShotChecks(progression?, levelMap?)` | XGE Arcane Shot options (Arcane Archer Fighter) |
+| `MVB_XPHB` / `MVB_PHB` / `MVB_TCE` | `buildAnyManeuverChecks(sources?, progression?, levelMap?)` | Battle Master Maneuvers across sources |
+| `PB_PHB` / `PB_TCE` | `buildAnyPactBoonChecks(sources?, progression?, levelMap?)` | Cross-source Pact Boons (TGTT + PHB Warlock) |
+| `ZODIAC_FORMS_L3` / `ZODIAC_FORMS_L10` | `buildZodiacFormChecks(levelMap?)` | Zodiac Druid form catalogs (12 forms at L3, 12 more at L10) |
+| `DEBILITATION_PRECISE_STRIKES_L3` | `buildCatalogChecks({pool, level, …})` | Subclass-feature catalog helper for any subclass that enumerates options as individual `subclassFeature` entries |
 
 Spread the helper output into your spec's `featuresMatrix`:
 
@@ -254,6 +261,35 @@ When confirmed, log it as `CS-BUG-NNN` in
 `docs/charactersheet/known-bugs.md`, set the relevant probe to
 `{skip: true}`, and move on.  Do **not** loosen assertions to make a
 test go green over a product bug.
+
+## Coverage audit script
+
+Run before opening a PR that adds or modifies a TGTT spec:
+
+```sh
+node scripts/auditE2eCoverage.mjs
+```
+
+This walks every `test/e2e/specs/tgtt-*.spec.ts`, counts hand-written
+`featuresMatrix` entries, and reports per-spec EffectCheck coverage:
+
+```
+spec=tgtt-foo entries=N effects=M helpers=K reason=R skip=S cov=M/N status
+```
+
+- `effects` = explicit `effects: [...]` blocks attached to entries.
+- `helpers` = number of `build*Checks` helpers used (each helper
+  attaches per-pick `pickedFeatureGrants` automatically).
+- `reason` = `// no measurable …` comments justifying existence-only
+  rows (cinematic features, capstones, narrative flavor).
+- `skip` = `{skip: true, skipReason: ...}` probes anchored to a
+  CS-BUG-NNN entry.
+
+Specs at < 80% effective coverage flag as **LOW** — either backfill
+effect probes for measurable features, or add explicit `// no
+measurable …` comments documenting why a row is existence-only.  The
+script is advisory by default; pass `--strict` to make it exit
+non-zero on any LOW spec (use in CI gates).
 
 ## See also
 

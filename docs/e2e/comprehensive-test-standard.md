@@ -91,3 +91,15 @@ npx playwright show-report
 - Factory test map: [`references/factory-tests.md`](../../.agents/skills/e2e-character-tests/references/factory-tests.md)
 - Troubleshooting infra vs product: [`references/troubleshooting.md`](../../.agents/skills/e2e-character-tests/references/troubleshooting.md)
 - Known product bugs surfaced by the suite: [`docs/charactersheet/known-bugs.md`](../charactersheet/known-bugs.md)
+
+## Pre-PR coverage check
+
+Run the audit before opening a PR:
+
+```sh
+node scripts/auditE2eCoverage.mjs
+```
+
+The script reports per-spec EffectCheck coverage (effects + helpers +
+reason-comments) and flags specs below 80%. Either backfill effects
+or add `// no measurable derived effect: <reason>` comments.

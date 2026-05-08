@@ -27,6 +27,13 @@ import {
 	TGTT_SPECIALTY_EFFECTS,
 	TGTT_TRICKSTER_TRICK_EFFECTS,
 	XPHB_WEAPON_MASTERY_EFFECTS,
+	XPHB_INVOCATION_EFFECTS,
+	XPHB_METAMAGIC_EFFECTS,
+	XGE_ARCANE_SHOT_EFFECTS,
+	XPHB_MANEUVER_EFFECTS,
+	XPHB_PACT_BOON_EFFECTS,
+	ZODIAC_FORM_EFFECTS,
+	DEBILITATION_PRECISE_STRIKE_EFFECTS,
 } from "./tgttFeatureEffects";
 
 // ── Specialties (Class-feature "Specialties" pick-list at progression levels) ──
@@ -774,6 +781,260 @@ export const TGTT_COMBAT_METHODS_BY_TRADITION: Record<string, RegExp[]> = {
 	],
 };
 
+// ── Cross-source first-party picker pools ──
+// One named export per (featureType × source). Specs that pick from
+// multiple sources should use the buildAny*Checks helpers below to
+// union the relevant pools.
+
+export const AS_XGE: RegExp[] = [
+	/^Banishing Arrow$/i,
+	/^Beguiling Arrow$/i,
+	/^Bursting Arrow$/i,
+	/^Enfeebling Arrow$/i,
+	/^Grasping Arrow$/i,
+	/^Piercing Arrow$/i,
+	/^Seeking Arrow$/i,
+	/^Shadow Arrow$/i,
+];
+export const AS_XGE_FIRST_PICK: string = "Banishing Arrow";
+
+export const EI_XPHB: RegExp[] = [
+	/^Agonizing Blast$/i,
+	/^Armor of Shadows$/i,
+	/^Ascendant Step$/i,
+	/^Devil's Sight$/i,
+	/^Devouring Blade$/i,
+	/^Eldritch Mind$/i,
+	/^Eldritch Smite$/i,
+	/^Eldritch Spear$/i,
+	/^Fiendish Vigor$/i,
+	/^Gaze of Two Minds$/i,
+	/^Gift of the Depths$/i,
+	/^Gift of the Protectors$/i,
+	/^Investment of the Chain Master$/i,
+	/^Lessons of the First Ones$/i,
+	/^Lifedrinker$/i,
+	/^Mask of Many Faces$/i,
+	/^Master of Myriad Forms$/i,
+	/^Misty Visions$/i,
+	/^One with Shadows$/i,
+	/^Otherworldly Leap$/i,
+	/^Pact of the Blade$/i,
+	/^Pact of the Chain$/i,
+	/^Pact of the Tome$/i,
+	/^Repelling Blast$/i,
+	/^Thirsting Blade$/i,
+	/^Visions of Distant Realms$/i,
+	/^Whispers of the Grave$/i,
+	/^Witch Sight$/i,
+];
+export const EI_XPHB_FIRST_PICK: string = "Agonizing Blast";
+export const EI_XGE: RegExp[] = [
+	/^Aspect of the Moon$/i,
+	/^Cloak of Flies$/i,
+	/^Eldritch Smite$/i,
+	/^Ghostly Gaze$/i,
+	/^Gift of the Depths$/i,
+	/^Gift of the Ever-Living Ones$/i,
+	/^Grasp of Hadar$/i,
+	/^Improved Pact Weapon$/i,
+	/^Lance of Lethargy$/i,
+	/^Maddening Hex$/i,
+	/^Relentless Hex$/i,
+	/^Shroud of Shadow$/i,
+	/^Tomb of Levistus$/i,
+	/^Trickster's Escape$/i,
+];
+export const EI_XGE_FIRST_PICK: string = "Aspect of the Moon";
+export const EI_PHB: RegExp[] = [
+	/^Agonizing Blast$/i,
+	/^Armor of Shadows$/i,
+	/^Ascendant Step$/i,
+	/^Beast Speech$/i,
+	/^Beguiling Influence$/i,
+	/^Bewitching Whispers$/i,
+	/^Book of Ancient Secrets$/i,
+	/^Chains of Carceri$/i,
+	/^Devil's Sight$/i,
+	/^Dreadful Word$/i,
+	/^Eldritch Sight$/i,
+	/^Eldritch Spear$/i,
+	/^Eyes of the Rune Keeper$/i,
+	/^Fiendish Vigor$/i,
+	/^Gaze of Two Minds$/i,
+	/^Lifedrinker$/i,
+	/^Mask of Many Faces$/i,
+	/^Master of Myriad Forms$/i,
+	/^Minions of Chaos$/i,
+	/^Mire the Mind$/i,
+	/^Misty Visions$/i,
+	/^One with Shadows$/i,
+	/^Otherworldly Leap$/i,
+	/^Repelling Blast$/i,
+	/^Sculptor of Flesh$/i,
+	/^Sign of Ill Omen$/i,
+	/^Thief of Five Fates$/i,
+	/^Thirsting Blade$/i,
+	/^Visions of Distant Realms$/i,
+	/^Voice of the Chain Master$/i,
+	/^Whispers of the Grave$/i,
+	/^Witch Sight$/i,
+];
+export const EI_PHB_FIRST_PICK: string = "Agonizing Blast";
+export const EI_TCE: RegExp[] = [
+	/^Bond of the Talisman$/i,
+	/^Eldritch Mind$/i,
+	/^Far Scribe$/i,
+	/^Gift of the Protectors$/i,
+	/^Investment of the Chain Master$/i,
+	/^Protection of the Talisman$/i,
+	/^Rebuke of the Talisman$/i,
+	/^Undying Servitude$/i,
+];
+export const EI_TCE_FIRST_PICK: string = "Bond of the Talisman";
+
+export const MM_XPHB: RegExp[] = [
+	/^Careful Spell$/i,
+	/^Distant Spell$/i,
+	/^Empowered Spell$/i,
+	/^Extended Spell$/i,
+	/^Heightened Spell$/i,
+	/^Quickened Spell$/i,
+	/^Seeking Spell$/i,
+	/^Subtle Spell$/i,
+	/^Transmuted Spell$/i,
+	/^Twinned Spell$/i,
+];
+export const MM_XPHB_FIRST_PICK: string = "Careful Spell";
+export const MM_PHB: RegExp[] = [
+	/^Careful Spell$/i,
+	/^Distant Spell$/i,
+	/^Empowered Spell$/i,
+	/^Extended Spell$/i,
+	/^Heightened Spell$/i,
+	/^Quickened Spell$/i,
+	/^Subtle Spell$/i,
+	/^Twinned Spell$/i,
+];
+export const MM_PHB_FIRST_PICK: string = "Careful Spell";
+export const MM_TCE: RegExp[] = [
+	/^Seeking Spell$/i,
+	/^Transmuted Spell$/i,
+];
+export const MM_TCE_FIRST_PICK: string = "Seeking Spell";
+
+export const MVB_XPHB: RegExp[] = [
+	/^Ambush$/i,
+	/^Bait and Switch$/i,
+	/^Commander's Strike$/i,
+	/^Commanding Presence$/i,
+	/^Disarming Attack$/i,
+	/^Distracting Strike$/i,
+	/^Evasive Footwork$/i,
+	/^Feinting Attack$/i,
+	/^Goading Attack$/i,
+	/^Lunging Attack$/i,
+	/^Maneuvering Attack$/i,
+	/^Menacing Attack$/i,
+	/^Parry$/i,
+	/^Precision Attack$/i,
+	/^Pushing Attack$/i,
+	/^Rally$/i,
+	/^Riposte$/i,
+	/^Sweeping Attack$/i,
+	/^Tactical Assessment$/i,
+	/^Trip Attack$/i,
+];
+export const MVB_XPHB_FIRST_PICK: string = "Ambush";
+export const MVB_PHB: RegExp[] = [
+	/^Commander's Strike$/i,
+	/^Disarming Attack$/i,
+	/^Distracting Strike$/i,
+	/^Evasive Footwork$/i,
+	/^Feinting Attack$/i,
+	/^Goading Attack$/i,
+	/^Lunging Attack$/i,
+	/^Maneuvering Attack$/i,
+	/^Menacing Attack$/i,
+	/^Parry$/i,
+	/^Precision Attack$/i,
+	/^Pushing Attack$/i,
+	/^Rally$/i,
+	/^Riposte$/i,
+	/^Sweeping Attack$/i,
+	/^Trip Attack$/i,
+];
+export const MVB_PHB_FIRST_PICK: string = "Commander's Strike";
+export const MVB_TCE: RegExp[] = [
+	/^Ambush$/i,
+	/^Bait and Switch$/i,
+	/^Brace$/i,
+	/^Commanding Presence$/i,
+	/^Grappling Strike$/i,
+	/^Quick Toss$/i,
+	/^Tactical Assessment$/i,
+];
+export const MVB_TCE_FIRST_PICK: string = "Ambush";
+
+export const PB_XPHB: RegExp[] = [];
+export const PB_XPHB_FIRST_PICK: string | undefined = undefined;
+export const PB_PHB: RegExp[] = [
+	/^Pact of the Blade$/i,
+	/^Pact of the Chain$/i,
+	/^Pact of the Tome$/i,
+];
+export const PB_PHB_FIRST_PICK: string = "Pact of the Blade";
+export const PB_TCE: RegExp[] = [
+	/^Pact of the Talisman$/i,
+];
+export const PB_TCE_FIRST_PICK: string = "Pact of the Talisman";
+
+// ── Subclass-feature catalogs ──
+// Subclasses that enumerate options as individual subclassFeature
+// entries (NOT pickers) — every catalog entry surfaces on the sheet
+// for any character of that subclass at the appropriate level.
+
+// Druid / Zodiac L3
+export const ZODIAC_FORMS_L3: RegExp[] = [
+	/^Aurochs$/i,
+	/^Beaver$/i,
+	/^Bee$/i,
+	/^Bulette$/i,
+	/^Cat$/i,
+	/^Griffon$/i,
+	/^Horse$/i,
+	/^Hound$/i,
+	/^Octopus$/i,
+	/^Peacock$/i,
+	/^Phoenix$/i,
+	/^Roc$/i,
+];
+export const ZODIAC_FORMS_L3_LEVEL: number = 3;
+
+// Druid / Zodiac L10
+export const ZODIAC_FORMS_L10: RegExp[] = [
+	/^Almiraj$/i,
+	/^Aurumvorax$/i,
+	/^Bat$/i,
+	/^Hillstep Turtle$/i,
+	/^Kitsune$/i,
+	/^Lizard$/i,
+	/^Owlbear$/i,
+	/^Pseudodragon$/i,
+	/^Raven$/i,
+	/^Salmon$/i,
+	/^Sequoia$/i,
+	/^Unicorn$/i,
+];
+export const ZODIAC_FORMS_L10_LEVEL: number = 10;
+
+// Monk / Debilitation L3
+export const DEBILITATION_PRECISE_STRIKES_L3: RegExp[] = [
+	/^Combat Methods \(Debilitation\)$/i,
+	/^Precise Strike$/i,
+];
+export const DEBILITATION_PRECISE_STRIKES_L3_LEVEL: number = 3;
+
 // ────────────────────────────────────────────────────────────────────────
 // build*Checks helpers — emit FeatureCheck arrays that specs spread
 // into their featuresMatrix. Each helper attaches a "pickedFeatureGrants"
@@ -1001,4 +1262,203 @@ export function buildWeaponMasteryChecks (
 		pickedFrom: weaponNames.map(w => new RegExp("^" + escape(w) + "$", "i")),
 		effects: effects.length ? effects : undefined,
 	}];
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Cross-source helpers — union per-source pools and call the common
+// optional-feature-check builder. Effect maps are merged per-pick.
+// ────────────────────────────────────────────────────────────────────────
+
+const _CROSS_SOURCE_POOLS = {
+	EI: {XPHB: EI_XPHB, XGE: EI_XGE, PHB: EI_PHB, TCE: EI_TCE, TGTT: TGTT_ELDRITCH_INVOCATIONS},
+	MM: {XPHB: MM_XPHB, PHB: MM_PHB, TCE: MM_TCE, TGTT: TGTT_METAMAGIC},
+	AS: {XGE: AS_XGE},
+	"MV:B": {XPHB: MVB_XPHB, PHB: MVB_PHB, TCE: MVB_TCE},
+	PB: {XPHB: PB_XPHB, PHB: PB_PHB, TCE: PB_TCE, TGTT: TGTT_PACT_BOONS},
+} as const;
+
+const _CROSS_SOURCE_EFFECTS = {
+	EI: {XPHB: XPHB_INVOCATION_EFFECTS, TGTT: TGTT_ELDRITCH_INVOCATION_EFFECTS},
+	MM: {XPHB: XPHB_METAMAGIC_EFFECTS, TGTT: TGTT_METAMAGIC_EFFECTS},
+	AS: {XGE: XGE_ARCANE_SHOT_EFFECTS},
+	"MV:B": {XPHB: XPHB_MANEUVER_EFFECTS},
+	PB: {XPHB: XPHB_PACT_BOON_EFFECTS, TGTT: TGTT_PACT_BOON_EFFECTS},
+} as const;
+
+function _mergedEffectMap (
+	featureType: keyof typeof _CROSS_SOURCE_EFFECTS,
+	sources: string[],
+): Record<string, EffectCheck[] | undefined> {
+	const merged: Record<string, EffectCheck[] | undefined> = {};
+	const bucket = _CROSS_SOURCE_EFFECTS[featureType] as Record<string, Record<string, EffectCheck[] | undefined> | undefined>;
+	for (const src of sources) {
+		const m = bucket?.[src];
+		if (!m) continue;
+		for (const [k, v] of Object.entries(m)) {
+			if (merged[k] === undefined) merged[k] = v;
+		}
+	}
+	return merged;
+}
+
+function _unionPool (
+	featureType: keyof typeof _CROSS_SOURCE_POOLS,
+	sources: string[],
+): RegExp[] {
+	const seen = new Set<string>();
+	const out: RegExp[] = [];
+	const bucket = _CROSS_SOURCE_POOLS[featureType] as Record<string, RegExp[] | undefined>;
+	for (const src of sources) {
+		for (const re of (bucket?.[src] ?? [])) {
+			const key = re.toString();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			out.push(re);
+		}
+	}
+	return out.sort((a, b) => a.toString().localeCompare(b.toString()));
+}
+
+/** Eldritch Invocations across an arbitrary mix of sources. */
+export function buildAnyInvocationChecks (
+	sources: string[] = ["XPHB", "XGE", "TGTT"],
+	progression: Array<{level: number; cum: number}> = [
+		{level: 2, cum: 2}, {level: 5, cum: 3}, {level: 7, cum: 4},
+		{level: 9, cum: 5}, {level: 12, cum: 6}, {level: 15, cum: 7}, {level: 18, cum: 8},
+	],
+	levelMap?: Record<number, number>,
+): FeatureCheck[] {
+	return buildOptionalFeatureChecks(
+		/Eldritch Invocations|Invocations/i,
+		_unionPool("EI", sources),
+		_mergedEffectMap("EI", sources),
+		progression,
+		levelMap,
+	);
+}
+
+/** Metamagic across an arbitrary mix of sources. */
+export function buildAnyMetamagicChecks (
+	sources: string[] = ["XPHB", "TGTT"],
+	progression: Array<{level: number; cum: number}> = [
+		{level: 3, cum: 2}, {level: 10, cum: 3}, {level: 17, cum: 4},
+	],
+	levelMap?: Record<number, number>,
+): FeatureCheck[] {
+	return buildOptionalFeatureChecks(
+		/Metamagic/i,
+		_unionPool("MM", sources),
+		_mergedEffectMap("MM", sources),
+		progression,
+		levelMap,
+	);
+}
+
+/** Battle Master Maneuvers across an arbitrary mix of sources. */
+export function buildAnyManeuverChecks (
+	sources: string[] = ["XPHB"],
+	progression: Array<{level: number; cum: number}> = [
+		{level: 3, cum: 3}, {level: 7, cum: 5}, {level: 10, cum: 7}, {level: 15, cum: 9},
+	],
+	levelMap?: Record<number, number>,
+): FeatureCheck[] {
+	return buildOptionalFeatureChecks(
+		/Maneuvers|Combat Superiority/i,
+		_unionPool("MV:B", sources),
+		_mergedEffectMap("MV:B", sources),
+		progression,
+		levelMap,
+	);
+}
+
+/** Arcane Shot options (XGE — Arcane Archer Fighter). */
+export function buildAnyArcaneShotChecks (
+	progression: Array<{level: number; cum: number}> = [
+		{level: 3, cum: 2}, {level: 7, cum: 3}, {level: 10, cum: 4},
+		{level: 15, cum: 5}, {level: 18, cum: 6},
+	],
+	levelMap?: Record<number, number>,
+): FeatureCheck[] {
+	return buildOptionalFeatureChecks(
+		/Arcane Shot/i,
+		_unionPool("AS", ["XGE"]),
+		_mergedEffectMap("AS", ["XGE"]),
+		progression,
+		levelMap,
+	);
+}
+
+/** Pact Boons across an arbitrary mix of sources. */
+export function buildAnyPactBoonChecks (
+	sources: string[] = ["XPHB", "TGTT"],
+	progression: Array<{level: number; cum: number}> = [{level: 3, cum: 1}],
+	levelMap?: Record<number, number>,
+): FeatureCheck[] {
+	return buildOptionalFeatureChecks(
+		/Pact Boon/i,
+		_unionPool("PB", sources),
+		_mergedEffectMap("PB", sources),
+		progression,
+		levelMap,
+	);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Subclass-feature catalog helper (Zodiac forms, Precise Strike Methods).
+// Catalogs differ from pickers: every entry surfaces on the sheet for any
+// character of that subclass; the spec asserts existence of every entry
+// AND verifies the documented effect of one representative entry.
+// ────────────────────────────────────────────────────────────────────────
+
+export function buildCatalogChecks (args: {
+	pool: RegExp[];
+	level: number;
+	featureNameRe?: RegExp;
+	repName?: string;
+	effectMap?: Record<string, EffectCheck[] | undefined>;
+	levelMap?: Record<number, number>;
+}): FeatureCheck[] {
+	const {pool, level, featureNameRe, repName, effectMap, levelMap} = args;
+	const charLevel = applyLevelMap(level, levelMap);
+	const out: FeatureCheck[] = [];
+	for (const re of pool) {
+		out.push({
+			level: charLevel,
+			name: re,
+			kind: "passive" as const,
+		});
+	}
+	if (repName && featureNameRe) {
+		const sub = effectMap?.[repName];
+		if (sub && sub.length) {
+			out.push({
+				level: charLevel,
+				name: featureNameRe,
+				kind: "passive" as const,
+				effects: [{kind: "pickedFeatureGrants" as const, pickName: repName, subEffects: sub}],
+			});
+		}
+	}
+	return out;
+}
+
+/** Convenience wrapper for Zodiac Druid forms — emits L3 + L10 catalogs. */
+export function buildZodiacFormChecks (levelMap?: Record<number, number>): FeatureCheck[] {
+	return [
+		...buildCatalogChecks({
+			pool: ZODIAC_FORMS_L3, level: ZODIAC_FORMS_L3_LEVEL,
+			featureNameRe: /Zodiac Form: Month/i,
+			repName: "Roc",
+			effectMap: ZODIAC_FORM_EFFECTS,
+			levelMap,
+		}),
+		...buildCatalogChecks({
+			pool: ZODIAC_FORMS_L10, level: ZODIAC_FORMS_L10_LEVEL,
+			featureNameRe: /Zodiac Form: Star Week/i,
+			repName: "Unicorn",
+			effectMap: ZODIAC_FORM_EFFECTS,
+			levelMap,
+		}),
+	];
 }
