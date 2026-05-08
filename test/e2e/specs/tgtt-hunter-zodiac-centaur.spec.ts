@@ -1,6 +1,7 @@
 import {describeCharacter, describeMulticlassCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HUNTER_CENTAUR, PRESET_FULL_ZODIAC_CENTAUR} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
+import {buildSpecialtyChecks, buildZodiacFormChecks} from "../utils/tgttFeaturePools";
 
 // ─────────────────────────────────────────────────────────────────────
 // Hunter Ranger L20 standalone features matrix (TGTT Ranger + XPHB
@@ -102,6 +103,8 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 19, name: /epic boon|ability score improvement/i, kind: "passive"},
 	// L20 Foe Slayer — passive damage adder vs Hunter's Mark target.
 	{level: 20, name: /foe slayer/i, kind: "passive"},
+	// TGTT Specialties (Ranger: 2/5/9/13/17) — per-pick effects.
+	...buildSpecialtyChecks("Ranger"),
 ];
 
 // ─────────────────────────────────────────────────────────────────────
@@ -147,10 +150,12 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 2, name: /wild companion/i, kind: "passive"},
 	// L3 Druid Circle (Zodiac).
 	{level: 3, name: /circle of the zodiac|druid circle/i, kind: "passive"},
-	// L3 Zodiac Form: Month — picks among 12 constellation features
-	// (Beaver / Aurochs / Horse / etc.). Treated as passive listing
-	// rather than enumerating all 12 options as `pick`.
-	{level: 3, name: /zodiac form: month|zodiac form/i, kind: "passive"},
+	// L3 Zodiac Form: Month — 12 constellation features (Beaver / Aurochs
+	// / Horse / Octopus / Peacock / Roc / Bee / Hound / Cat / Griffon /
+	// Bulette / Phoenix). Catalog helper asserts every form surfaces and
+	// attaches a representative effect probe (Roc — flight via Wild Shape).
+	// Also covers L10 Star Week (Sequoia / Unicorn / Raven / etc.).
+	...buildZodiacFormChecks(),
 	// L4 ASI — also a good slot for an INT save roll-button probe
 	// (Druid's other proficient save).
 	{
@@ -187,9 +192,8 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 	},
 	// L8 ASI.
 	{level: 8, name: /ability score improvement/i, kind: "passive"},
-	// L10 Zodiac Form: Star Week — picks among 12 constellation
-	// features (Sequoia / Unicorn / etc.).
-	{level: 10, name: /zodiac form: star week|star week/i, kind: "passive"},
+	// L10 Zodiac Form: Star Week — 12 constellation features (covered by
+	// buildZodiacFormChecks() above).
 	// L12 ASI.
 	{level: 12, name: /ability score improvement/i, kind: "passive"},
 	// L14 Full Zodiac — Zodiac capstone subclass feature.
@@ -205,6 +209,8 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 	// L20 Archdruid — passive capstone (Wild Shape becomes effectively
 	// at-will + magic-item attunement bypass on natural items).
 	{level: 20, name: /archdruid/i, kind: "passive"},
+	// TGTT Specialties (Druid: 1/5/9/13/17) — per-pick effects.
+	...buildSpecialtyChecks("Druid"),
 ];
 
 // ── Ranger 6 / Druid 14 Centaur multiclass features matrix ───────────

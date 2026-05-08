@@ -1,7 +1,13 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_ARCANE_ARCHER_HOCHLING} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
-import {TGTT_SPECIALTIES, TGTT_BATTLE_TACTICS} from "../utils/tgttFeaturePools";
+import {
+	TGTT_SPECIALTIES,
+	TGTT_BATTLE_TACTICS,
+	buildSpecialtyChecks,
+	buildBattleTacticChecks,
+	buildAnyArcaneShotChecks,
+} from "../utils/tgttFeaturePools";
 
 // ── Arcane Archer Fighter L1→20 features matrix ──────────────────────
 // Fighter base: Fighting Style (L1 pick), Second Wind (L1 resource —
@@ -206,41 +212,11 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		skip: true,
 		skipReason: "CS-BUG-002",
 	},
-	// Arcane Shot pick — choose 2 options at L3 (+1 at L7/10/15/18).
-	// Re-enabled after CS-BUG-003 fix.  Each picked Arcane Shot must
-	// surface as an activatable feature on the sheet (pickActivatable).
-	{
-		level: 3,
-		name: /arcane shot/i,
-		kind: "pick",
-		pickedCount: 2,
-		pickedFrom: [
-			/banishing arrow/i,
-			/beguiling arrow/i,
-			/bursting arrow/i,
-			/enfeebling arrow/i,
-			/grasping arrow/i,
-			/piercing arrow/i,
-			/seeking arrow/i,
-			/shadow arrow/i,
-		],
-		effects: [
-			{
-				kind: "pickActivatable",
-				matchAny: [
-					/banishing arrow/i,
-					/beguiling arrow/i,
-					/bursting arrow/i,
-					/enfeebling arrow/i,
-					/grasping arrow/i,
-					/piercing arrow/i,
-					/seeking arrow/i,
-					/shadow arrow/i,
-				],
-				min: 1,
-			},
-		],
-	},
+	// Arcane Shot pick — replaced with cross-source helper that emits
+	// `pickedFeatureGrants` per option's documented effect (Banishing /
+	// Beguiling / Bursting / Enfeebling / Grasping / Piercing / Seeking /
+	// Shadow). Progression: 2 at L3, +1 at L7/10/15/18.
+	...buildAnyArcaneShotChecks(),
 	// Magic Arrow at L7 — non-magical ammo counts as magical. Passive.
 	{level: 7, name: /magic arrow/i, kind: "passive"},
 	// Curving Shot at L7 — re-roll a missed magic-arrow attack on a
@@ -249,6 +225,12 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// Ever-Ready Shot at L15 — start every combat with at least 1
 	// Arcane Shot use. Passive feature listing.
 	{level: 15, name: /ever-ready shot/i, kind: "passive"},
+	// TGTT Specialties (Fighter: 1/5/9/13/17) — helper attaches per-pick
+	// effects for the deterministic auto-picker first choice.
+	...buildSpecialtyChecks("Fighter"),
+	// TGTT Battle Tactics (Fighter base feature) — pick + per-pick
+	// effect for the auto-picked tactic.
+	...buildBattleTacticChecks(),
 ];
 
 /**
