@@ -18,7 +18,7 @@ gaps (e.g. nobody rolls a skill, nobody short-rests a Warlock).
 ## The required-checks list
 
 See **[skill standard](../../.agents/skills/e2e-character-tests/references/standard.md)**
-for the canonical numbered list (currently 21 checks).  At a glance:
+for the canonical numbered list (currently **22 checks**).  At a glance:
 
 1. L1 creation via builder wizard
 2. L3 subclass arrival
@@ -38,12 +38,27 @@ for the canonical numbered list (currently 21 checks).  At a glance:
 16. USE: feat-toggle delta (when applicable)
 17. L1 export round-trip preserves identity
 18. Multiclass: usage probes after each leg
-19. TGTT Specialties: cumulative pick coverage (use `buildSpecialtyChecks`)
-20. Weapon Mastery: pickedFrom + rollAttack (martial classes)
-21. Battle Tactics / class-option pickers: pickActivatable effect
+19. TGTT Specialties: cumulative pick coverage **+ per-pick effect** (use `buildSpecialtyChecks`)
+20. Weapon Mastery: pickedFrom + rollAttack **+ per-mastery effect** (martial classes)
+21. Battle Tactics / class-option pickers: pickActivatable **+ per-pick effect** (Metamagic, Invocations, Acts, Tricks, Strikes, Pact Boons, Dreamwalker)
+22. **Per-feature effect coverage** *(new, applies to every entry)* — every non-cinematic `featuresMatrix` row must attach at least one `EffectCheck` (or carry a `// no measurable derived effect: <reason>` comment).  Existence-only assertions are insufficient.
+
+> **Effect verification is a first-class requirement.**  When a feature
+> grants advantage on a save, prove the advantage flag flips.  When a
+> toggle adds INT to AC, snapshot AC, toggle, assert the delta.  When a
+> metamagic option boosts spell damage, assert the rendered damage
+> changes.  See the
+> [Effect verification doctrine](../../.agents/skills/e2e-character-tests/references/standard.md#effect-verification-every-feature-should-do-something)
+> for the decision tree and canonical examples.
 
 Every spec lists every check, even when skipping (use `{skip: true}` with
 a one-line reason — coverage gaps stay visible).
+
+## Suite catalog
+
+See [`test-suite-catalog.md`](./test-suite-catalog.md) for the full
+list of TGTT character specs — build, level scope, and the one-line
+"what it proves" hook for each.
 
 ## Authoring a new character spec
 

@@ -82,6 +82,44 @@ If the *entire* `usage` block is `usage: {skip: true}`, the whole USE
 test is skipped (use only when blocked by a CS-BUG that prevents the
 build from reaching the probe level).
 
+## How effect probes run
+
+`featuresMatrix` entries with `effects: [...]` are dispatched inside
+the L3 / L5 / MEGA tests by `assertFeaturesMatrix` in
+[`comprehensiveBuildHelpers.ts`](../../../test/e2e/utils/comprehensiveBuildHelpers.ts)
+(see the Phase 7 effect dispatcher, ~line 1144).  Two effect families:
+
+- **Passive / roll effects** (`saveBonus`, `skillBonus`, `ac`, `speed`,
+  `initiative`, `spellSaveDc`, `advantage`, `resistance`, `immunity`,
+  `vulnerability`, `attackPresent`, `attackBonus`,
+  `attackDamageContains`, `pickActivatable`, `pickToggleable`,
+  `rollAbilityCheck`, `rollSkillCheck`, `spells`, …) run individually
+  against the page in the order declared.
+- **Toggle deltas** (`toggleAcDelta`, `toggleSpeedDelta`,
+  `toggleSaveDelta`, `toggleSkillDelta`, `toggleAttackDelta`,
+  `toggleDamageDelta`, `toggleGrantsAdvantage`, …) are batched: the
+  helper snapshots derived stats, toggles the matched feature on,
+  re-snapshots, asserts the deltas, toggles off, asserts restore.
+
+### `pickedFeatureGrants` (Phase 11)
+
+When a `kind: "pick"` row uses
+`{kind: "pickedFeatureGrants", pickName, subEffects}`, the dispatcher
+checks whether the named pick actually surfaced on the sheet (via
+`allFeatures` regex match).  If yes, it expands `subEffects` into the
+concrete probes above; if no, it silently no-ops (backward-compatible
+with specs that don't yet declare per-pick effects).  Nesting is
+forbidden — a `subEffects` element with `kind: "pickedFeatureGrants"`
+is dropped.
+
+This is how the TGTT pool helpers (`buildSpecialtyChecks`,
+`buildBattleTacticChecks`, `buildMetamagicChecks`, …) attach per-pick
+effects for the auto-picker's deterministic first choice.  See
+[`tgttFeaturePools.ts`](../../../test/e2e/utils/tgttFeaturePools.ts)
+(auto-generated) and
+[`tgttFeatureEffects.ts`](../../../test/e2e/utils/tgttFeatureEffects.ts)
+(hand-written).
+
 ## Adding a new probe category
 
 1. Add a new method to `CharacterSheetPage` (see `page-objects.md`).

@@ -686,6 +686,17 @@ export type EffectCheck = _EffectCommon & (
 	// Mercy Monk unarmed strike, and other "feature creates an
 	// attack row" abilities.
 	| {kind: "attackPresent"; namePattern: string | RegExp}
+	// === Phase 11: per-pick effect dispatch ===
+	// On a parent FeatureCheck of `kind: "pick"`, attach
+	// `pickedFeatureGrants` to declare effects that should fire ONLY
+	// IF a specific pick name surfaces in `allFeatures`. Used by the
+	// generated build*Checks helpers in tgttFeaturePools.ts to attach
+	// the documented effect of the auto-picker's deterministic first
+	// choice (e.g. Sorcerer Metamagic "Careful Spell" → activatable;
+	// Warlock Invocation "Agonizing Blast" → +CHA to Eldritch Blast
+	// damage). Sub-effects cannot themselves contain
+	// `pickedFeatureGrants` — no nesting.
+	| {kind: "pickedFeatureGrants"; pickName: string | RegExp; subEffects: EffectCheck[]}
 );
 
 const _TOGGLE_EFFECT_KINDS = new Set([
@@ -1143,8 +1154,31 @@ export async function assertFeaturesMatrix (
 
 			// ── Phase 7 effect probes ─────────────────────────────
 			if (fc.effects?.length) {
-				const passiveOrRoll = fc.effects.filter(e => !e.skip && !_TOGGLE_EFFECT_KINDS.has(e.kind));
-				const toggleEffects = fc.effects.filter(e => !e.skip && _TOGGLE_EFFECT_KINDS.has(e.kind));
+				// Phase 11: expand pickedFeatureGrants into concrete sub-effects
+				// when the named pick surfaced. Skip silently when not surfaced
+				// — backward-compatible with specs that don't yet declare
+				// per-pick effects.
+				const expandedEffects: EffectCheck[] = [];
+				for (const eff of fc.effects) {
+					if (eff.skip) continue;
+					if (eff.kind === "pickedFeatureGrants") {
+						const pickRe = eff.pickName instanceof RegExp
+							? eff.pickName
+							: new RegExp(`^${eff.pickName}$`, "i");
+						const matched = allFeatures.some(f => pickRe.test(f));
+						if (!matched) continue;
+						for (const sub of eff.subEffects) {
+							if (sub.skip) continue;
+							if (sub.kind === "pickedFeatureGrants") continue; // no nesting
+							expandedEffects.push(sub);
+						}
+						continue;
+					}
+					expandedEffects.push(eff);
+				}
+
+				const passiveOrRoll = expandedEffects.filter(e => !_TOGGLE_EFFECT_KINDS.has(e.kind));
+				const toggleEffects = expandedEffects.filter(e => _TOGGLE_EFFECT_KINDS.has(e.kind));
 
 				for (const eff of passiveOrRoll) {
 					try { await _runPassiveOrRollEffect(charSheet, eff); }

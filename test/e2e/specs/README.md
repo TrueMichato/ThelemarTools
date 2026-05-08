@@ -13,20 +13,32 @@ The local dev server is started automatically by `playwright.config.ts` on port 
 
 ## TGTT comprehensive player-build coverage
 
-Ten spec files (`tgtt-*.spec.ts`) drive the full builder → level-up → loadout → toggle-effect flow for every TGTT character class/race combination actually played in the Thelemar campaign. They are deliberately exhaustive — the goal is to catch ~95% of player-facing bugs before a session.
+Eighteen spec files (`tgtt-*.spec.ts`) drive the full builder → level-up → loadout → toggle-effect flow for every TGTT character class/race combination actually played in the Thelemar campaign. They are deliberately exhaustive — the goal is to catch ~95% of player-facing bugs before a session.
 
 | # | File | Build | Levels |
 |---|------|-------|--------|
-| 1 | `tgtt-mercy-monk-changeling.spec.ts`            | Mercy Monk Changeling                        | 1→20 |
-| 2 | `tgtt-arcane-archer-fighter-hochling.spec.ts`   | Arcane Archer Fighter Hochling               | 1→20 |
-| 3 | `tgtt-bladesinger-wizard-tabaxi.spec.ts`        | Bladesinger Wizard Tabaxi                    | 1→20 |
-| 4 | `tgtt-hunter-zodiac-centaur.spec.ts`            | Hunter Ranger / Zodiac Druid Centaur         | R20, D20, R6/D14 multiclass |
-| 5 | `tgtt-hexblade-divine-soul-tortle.spec.ts`      | Hexblade Warlock 2 / Divine Soul Sorcerer 18 | 2/18 multiclass |
-| 6 | `tgtt-child-of-sun-sorcerer-hochling.spec.ts`   | Child of the Sun Sorcerer Hochling           | 1→20 |
-| 7 | `tgtt-chronurgy-wizard-nyuidj.spec.ts`          | Chronurgy Wizard Nyuidj                      | 1→20 |
-| 8 | `tgtt-surrealism-bard-yuanti.spec.ts`           | College of Surrealism Bard Yuan-Ti           | 1→20 |
-| 9 | `tgtt-chained-fury-barbarian-minotaur.spec.ts`  | Chained Fury Barbarian Minotaur              | 1→20 |
-| 10| `tgtt-time-domain-cleric.spec.ts`               | Time Domain Cleric                           | 1→20 |
+| 1 | `tgtt-mercy-monk-changeling.spec.ts`            | Mercy Monk Changeling                              | 1→20 |
+| 2 | `tgtt-arcane-archer-fighter-hochling.spec.ts`   | Arcane Archer Fighter Hochling                     | 1→20 |
+| 3 | `tgtt-bladesinger-wizard-tabaxi.spec.ts`        | Bladesinger Wizard Tabaxi                          | 1→20 |
+| 4 | `tgtt-hunter-zodiac-centaur.spec.ts`            | Hunter Ranger / Zodiac Druid Centaur               | R20, D20, R6/D14 multiclass |
+| 5 | `tgtt-hexblade-divine-soul-tortle.spec.ts`      | Hexblade Warlock 2 / Divine Soul Sorcerer 18       | 2/18 multiclass |
+| 6 | `tgtt-child-of-sun-sorcerer-hochling.spec.ts`   | Child of the Sun Sorcerer Hochling                 | 1→20 |
+| 7 | `tgtt-chronurgy-wizard-nyuidj.spec.ts`          | Chronurgy Wizard Nyuidj                            | 1→20 |
+| 8 | `tgtt-surrealism-bard-yuanti.spec.ts`           | College of Surrealism Bard Yuan-Ti                 | 1→20 |
+| 9 | `tgtt-chained-fury-barbarian-minotaur.spec.ts`  | Chained Fury Barbarian Minotaur                    | 1→20 |
+|10 | `tgtt-time-domain-cleric.spec.ts`               | Time Domain Cleric                                 | 1→20 |
+|11 | `tgtt-gambler-rogue-clairnian.spec.ts`          | Gambler Rogue Clairnian                            | 1→20 |
+|12 | `tgtt-belly-dancer-rogue-jaknian.spec.ts`       | Belly Dancer Rogue Jaknian                         | 1→20 |
+|13 | `tgtt-jester-bard-dendulra.spec.ts`             | Jester Bard Dendulra                               | 1→20 |
+|14 | `tgtt-bastion-paladin-bugbear.spec.ts`          | Oath of Bastion Paladin Bugbear                    | 1→20 |
+|15 | `tgtt-heroic-soul-sorcerer-halfogre.spec.ts`    | Heroic Soul Sorcerer Half-Ogre                     | 1→20 |
+|16 | `tgtt-trickster-rogue-goblin.spec.ts`           | Trickster Rogue Goblin                             | 1→20 |
+|17 | `tgtt-lust-cleric-lexalian.spec.ts`             | Lust Domain Cleric Lexalian                        | 1→20 |
+|18 | `tgtt-horror-warlock-theocracian.spec.ts`       | Horror Warlock Theocracian                         | 1→20 |
+
+The `tgtt-player-party.spec.ts` file is a separate party-import smoke test (not part of the comprehensive build standard).
+
+See [`docs/e2e/comprehensive-test-standard.md`](../../../docs/e2e/comprehensive-test-standard.md) and [`.agents/skills/e2e-character-tests/references/standard.md`](../../../.agents/skills/e2e-character-tests/references/standard.md) for the full list of required checks each spec must pass.
 
 Each spec calls one of two factories from `../utils/characterSpecFactory.ts`:
 
