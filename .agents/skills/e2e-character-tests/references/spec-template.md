@@ -128,6 +128,57 @@ Walk through this before submitting a new spec.
     ```
     All tests must either pass or skip with a documented reason.
 
+## Effect probe checklist (Phase 11)
+
+Every `featuresMatrix` entry that points at a feature with a
+*measurable derived effect* on the sheet must attach at least one
+`EffectCheck`.  Use this decision tree:
+
+| Feature type | EffectCheck kind |
+|---|---|
+| Adds a flat number to a save / skill / AC / DC / speed / initiative | `saveBonus` / `skillBonus` / `ac` / `spellSaveDc` / `speed` / `initiative` |
+| Grants advantage / disadvantage on a roll | `advantage` (passive) or `toggleGrantsAdvantage` (toggle) |
+| Grants resistance / immunity / vulnerability | `resistance` / `immunity` / `vulnerability` |
+| Toggle that changes a derived stat while active | `toggleAcDelta` / `toggleSpeedDelta` / `toggleSaveDelta` / `toggleSkillDelta` / `toggleAttackDelta` / `toggleDamageDelta` |
+| Adds a specific weapon attack | `attackPresent` |
+| Adds an attack-bonus / damage rider on attacks | `attackBonus` / `attackDamageContains` |
+| Pickable activatable feature row (Battle Tactic, Metamagic, …) | `pickActivatable` |
+| Pickable toggleable feature row | `pickToggleable` |
+| Adds a spell to the spellbook / list | `spells` (matrix entry) or `spellInList` |
+| Wires a roll button | `rollAbilityCheck` / `rollSkillCheck` / weapon `attackName` (in usage) |
+| **Per-pick effect attached only when the named pick surfaced** | `pickedFeatureGrants` (Phase 11 — see below) |
+| Pure narrative / cinematic (Wish, Divine Intervention, capstone) | none — add `// no measurable derived effect: <reason>` comment |
+
+**Per-pick effects (`pickedFeatureGrants`).**  When a `kind: "pick"`
+row's option-list is large and one auto-picked option has a documented
+mechanical effect, attach:
+
+```ts
+{
+    level: 3, name: /metamagic/i, kind: "pick", pickedCount: 2,
+    pickedFrom: TGTT_METAMAGIC,
+    effects: [
+        {kind: "pickedFeatureGrants", pickName: "Twinned Spell",
+            subEffects: [{kind: "pickActivatable", matchAny: [/twinned spell/i], min: 1}]},
+    ],
+},
+```
+
+The dispatcher only runs `subEffects` if `pickName` actually surfaced
+on the sheet, so it's safe to declare optimistically.  Helpers like
+`buildSpecialtyChecks`, `buildBattleTacticChecks`,
+`buildMetamagicChecks`, `buildInvocationChecks`,
+`buildJesterActChecks`, `buildTricksterTrickChecks`,
+`buildPainfulStrikeChecks`, `buildPactBoonChecks`,
+`buildDreamwalkerChecks`, `buildWeaponMasteryChecks` already wire this
+up automatically for the auto-picker's deterministic first choice —
+just spread them into your matrix.
+
+**Existence-only is insufficient.**  A test that asserts a feature
+*shows up* but doesn't probe what it *does* fails the standard's
+check #22.  When a feature is genuinely cinematic / un-probable,
+add a one-line comment so the audit diff stays clean.
+
 ## Naming conventions
 
 - File: `tgtt-<archetype>-<class>-<race>.spec.ts` (e.g.
