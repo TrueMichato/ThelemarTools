@@ -4045,7 +4045,7 @@ export class CharacterSheetPlayMode {
 		const btn = document.getElementById("charsheet-btn-playmode");
 		if (!btn) return;
 		btn.classList.toggle("pm-toggle-btn--active", isPlayMode);
-		btn.title = isPlayMode ? "Switch to Full Sheet" : "Switch to Play Mode";
+		btn.title = isPlayMode ? "Switch to Full Sheet" : "Switch to Alt View";
 	}
 
 	_fmtMod (n) {
