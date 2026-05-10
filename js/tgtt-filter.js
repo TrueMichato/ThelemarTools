@@ -35,6 +35,7 @@ class TgttFilter {
 	]);
 
 	// Source-specific rarity overrides
+	/** @type {Record<string, string>} */
 	static SOURCES_RARITY_MAP = {
 		"TftS": "common",
 		"IllR": "common",
@@ -47,14 +48,18 @@ class TgttFilter {
 	};
 
 	constructor () {
+		/** @type {Record<string, Record<string, string>>} */
 		this._filterState = {
 			rarity: {common: "ignore", uncommon: "ignore", rare: "ignore"},
 			legality: {legal: "ignore", "illegal-i": "ignore", "illegal-ii": "ignore", "illegal-iii": "ignore", "illegal-iv": "ignore"},
 		};
 		this._isActive = true;
+		/** @type {HTMLButtonElement|null} */
 		this._button = null;
+		/** @type {HTMLStyleElement|null} */
 		this._dynamicStyleSheet = null;
-		this._filterTimeout = null;
+		/** @type {ReturnType<typeof setTimeout>|undefined} */
+		this._filterTimeout = undefined;
 		this._initialized = false;
 	}
 
@@ -66,7 +71,10 @@ class TgttFilter {
 	 * @param {boolean} opts.enableButton Whether to show the toggle button
 	 * @param {boolean} opts.enableSpellFilters Whether to enable spell rarity/legality filters
 	 */
-	async init (opts = {}) {
+	async init (opts = {
+		enableButton: false,
+		enableSpellFilters: false,
+	}) {
 		if (this._initialized) return;
 		this._initialized = true;
 
@@ -118,7 +126,7 @@ class TgttFilter {
 
 	/**
 	 * Compute spell metadata (rarity and legality) for a spell entity
-	 * @param {Object} spell The spell entity
+	 * @param {any} spell The spell entity
 	 * @returns {{rarity: string, legality: string}}
 	 */
 	static computeSpellMetadata (spell) {
@@ -157,7 +165,7 @@ class TgttFilter {
 
 	/**
 	 * Get the filter state for external use
-	 * @returns {Object}
+	 * @returns {Record<string, Record<string, string>>}
 	 */
 	getFilterState () {
 		return JSON.parse(JSON.stringify(this._filterState));
@@ -224,6 +232,7 @@ class TgttFilter {
 	 * For a single link element, check whether TGTT provides the entity and,
 	 * if so, rewrite its data-vet-* attributes (and href) to point there.
 	 */
+	/** @param {HTMLElement} ele */
 	async _pTryRewriteToTgtt (ele) {
 		// Already checked this element
 		if (ele.hasAttribute("data-tgtt-hover-checked")) return;
@@ -290,7 +299,7 @@ class TgttFilter {
 
 	_loadFilterState () {
 		try {
-			const saved = StorageUtil.syncGetForPage(TgttFilter.STORAGE_KEY);
+			const saved = /** @type {any} */ (StorageUtil).syncGetForPage(TgttFilter.STORAGE_KEY);
 			if (saved) {
 				Object.assign(this._filterState.rarity, saved.rarity || {});
 				Object.assign(this._filterState.legality, saved.legality || {});
@@ -302,7 +311,7 @@ class TgttFilter {
 
 	_saveFilterState () {
 		try {
-			StorageUtil.syncSetForPage(TgttFilter.STORAGE_KEY, this._filterState);
+			/** @type {any} */ (StorageUtil).syncSetForPage(TgttFilter.STORAGE_KEY, this._filterState);
 		} catch {
 			// Silent fail
 		}
@@ -310,15 +319,16 @@ class TgttFilter {
 
 	_loadButtonPosition () {
 		try {
-			return StorageUtil.syncGetForPage(TgttFilter.POSITION_STORAGE_KEY);
+			return /** @type {any} */ (StorageUtil).syncGetForPage(TgttFilter.POSITION_STORAGE_KEY);
 		} catch {
 			return null;
 		}
 	}
 
+	/** @param {number} x @param {number} y */
 	_saveButtonPosition (x, y) {
 		try {
-			StorageUtil.syncSetForPage(TgttFilter.POSITION_STORAGE_KEY, {x, y});
+			/** @type {any} */ (StorageUtil).syncSetForPage(TgttFilter.POSITION_STORAGE_KEY, {x, y});
 		} catch {
 			// Silent fail
 		}
@@ -369,7 +379,7 @@ class TgttFilter {
 		// Drag logic
 		let isDragging = false;
 		let hasMoved = false;
-		let offsetX, offsetY;
+		let offsetX = 0; let offsetY = 0;
 
 		btn.addEventListener("mousedown", (e) => {
 			isDragging = true;
@@ -436,6 +446,7 @@ class TgttFilter {
 
 	_filterLists () {
 		const listItems = document.querySelectorAll("a.ve-lst__row-border");
+		/** @type {Record<string, Array<{element: Element, source: string}>>} */
 		const itemsByName = {};
 
 		listItems.forEach(item => {
@@ -505,6 +516,7 @@ class TgttFilter {
 		});
 	}
 
+	/** @param {any} spell @param {{rarity: string, legality: string}} defaultMetadata */
 	_computeMetadataFromSpell (spell, defaultMetadata) {
 		let rarity = defaultMetadata.rarity;
 		let legality = defaultMetadata.legality;
@@ -527,6 +539,7 @@ class TgttFilter {
 		return {rarity, legality};
 	}
 
+	/** @param {string} sourceText */
 	_computeMetadataFromSource (sourceText) {
 		let rarity = "common";
 		let legality = "legal";
@@ -616,6 +629,7 @@ class TgttFilter {
 // ==================== TGTT Filter UI for Filter Modal ====================
 
 class TgttFilterModalUI {
+	/** @param {TgttFilter} tgttFilter */
 	constructor (tgttFilter) {
 		this._tgttFilter = tgttFilter;
 		this._injected = false;
@@ -680,6 +694,11 @@ class TgttFilterModalUI {
 		this._injected = true;
 	}
 
+	/**
+	 * @param {string} title
+	 * @param {string} filterType
+	 * @param {Array<{key: string, label: string}>} options
+	 */
 	_createFilterSection (title, filterType, options) {
 		const filterState = this._tgttFilter.getFilterState();
 
@@ -716,13 +735,14 @@ class TgttFilterModalUI {
 			pill.addEventListener("click", (e) => this._handlePillClick(e));
 		});
 
-		section.querySelector(".tgtt-reset-btn").addEventListener("click", (e) => this._handleResetClick(e));
+		section.querySelector(".tgtt-reset-btn")?.addEventListener("click", (e) => this._handleResetClick(e));
 
 		return section;
 	}
 
+	/** @param {Event} e */
 	_handlePillClick (e) {
-		const pill = e.currentTarget;
+		const pill = /** @type {HTMLElement} */ (e.currentTarget);
 		const filterType = pill.dataset.filterType;
 		const filterKey = pill.dataset.filterKey;
 		const currentState = pill.dataset.state;
@@ -733,11 +753,13 @@ class TgttFilterModalUI {
 				: "ignore";
 
 		pill.dataset.state = nextState;
-		this._tgttFilter.setFilterState(filterType, filterKey, nextState);
+		if (filterType && filterKey) this._tgttFilter.setFilterState(filterType, filterKey, nextState);
 	}
 
+	/** @param {Event} e */
 	_handleResetClick (e) {
-		const filterType = e.currentTarget.dataset.filterType;
+		const filterType = /** @type {HTMLElement} */ (e.currentTarget).dataset.filterType;
+		if (!filterType) return;
 		this._tgttFilter.resetFilters(filterType);
 		this._updatePillStates();
 	}
@@ -745,10 +767,11 @@ class TgttFilterModalUI {
 	_updatePillStates () {
 		const filterState = this._tgttFilter.getFilterState();
 
-		document.querySelectorAll(".tgtt-filter-pill").forEach(pill => {
+		document.querySelectorAll(".tgtt-filter-pill").forEach(el => {
+			const pill = /** @type {HTMLElement} */ (el);
 			const filterType = pill.dataset.filterType;
 			const filterKey = pill.dataset.filterKey;
-			if (filterState[filterType]?.[filterKey]) {
+			if (filterType && filterKey && filterState[filterType]?.[filterKey]) {
 				pill.dataset.state = filterState[filterType][filterKey];
 			}
 		});
@@ -757,8 +780,8 @@ class TgttFilterModalUI {
 
 // ==================== Singleton Instance ====================
 
-globalThis.TgttFilter = TgttFilter;
-globalThis.TgttFilterModalUI = TgttFilterModalUI;
+/** @type {any} */ (globalThis).TgttFilter = TgttFilter;
+/** @type {any} */ (globalThis).TgttFilterModalUI = TgttFilterModalUI;
 
 // Auto-initialize if on a supported page
 if (typeof window !== "undefined") {
@@ -775,7 +798,7 @@ if (typeof window !== "undefined") {
 		tgttFilterUI.init();
 
 		// Expose for debugging
-		globalThis.tgttFilter = tgttFilter;
-		globalThis.tgttFilterUI = tgttFilterUI;
+		/** @type {any} */ (globalThis).tgttFilter = tgttFilter;
+		/** @type {any} */ (globalThis).tgttFilterUI = tgttFilterUI;
 	});
 }

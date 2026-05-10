@@ -57,8 +57,8 @@ const main = () => {
 	if (exit === 0 && cls.tgttFilterTouched) {
 		log("TGTT surface touched — running TGTT pattern pass.");
 		const code = runJest(
-			["--testPathPattern=TGTT"],
-			"--testPathPattern=TGTT",
+			["--testPathPatterns=TGTT"],
+			"--testPathPatterns=TGTT",
 		);
 		if (code !== 0) exit = code;
 	}
