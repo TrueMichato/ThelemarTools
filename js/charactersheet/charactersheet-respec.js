@@ -2,6 +2,8 @@
  * CharacterSheetRespec - Handles level history display and choice editing
  * Allows players to view and modify choices made during level-up
  */
+const {e_, ee} = /** @type {*} */ (globalThis);
+
 class CharacterSheetRespec {
 	constructor ({page, state}) {
 		this._page = page;
@@ -225,7 +227,7 @@ class CharacterSheetRespec {
 
 			// Expertise choices
 			if (history.choices.expertise?.length > 0) {
-				const expertiseText = history.choices.expertise.map(e => e.toTitleCase()).slice(0, 3).join(", ");
+				const expertiseText = history.choices.expertise.map(e => (/** @type {*} */ (e)).toTitleCase()).slice(0, 3).join(", ");
 				const more = history.choices.expertise.length > 3 ? ` +${history.choices.expertise.length - 3} more` : "";
 				choices.append(e_({outer: `
 					<span class="charsheet__level-choice charsheet__level-choice--expertise">
@@ -289,7 +291,7 @@ class CharacterSheetRespec {
 				choices.append(e_({outer: `
 					<span class="charsheet__level-choice charsheet__level-choice--scholar">
 						<span class="charsheet__level-choice-icon">📚</span>
-						Scholar: ${history.choices.scholarSkill.toTitleCase()}
+						Scholar: ${(/** @type {*} */ (history.choices.scholarSkill)).toTitleCase()}
 					</span>
 				`}));
 			}
@@ -371,7 +373,7 @@ class CharacterSheetRespec {
 			items.push(`Spells: ${preview.spells.map(s => s.name).join(", ")}`);
 		}
 		if (preview.expertise.length) {
-			items.push(`Expertise: ${preview.expertise.map(s => s.toTitleCase()).join(", ")}`);
+			items.push(`Expertise: ${preview.expertise.map(s => (/** @type {*} */ (s)).toTitleCase()).join(", ")}`);
 		}
 		if (preview.languages.length) {
 			items.push(`Languages: ${preview.languages.join(", ")}`);
@@ -473,7 +475,7 @@ class CharacterSheetRespec {
 				if (speed) items.push(`Speed ${speed} ft.`);
 				if (typeof race.speed === "object") {
 					["fly", "swim", "climb", "burrow"].forEach(t => {
-						if (race.speed[t]) items.push(`${t.toTitleCase()} ${race.speed[t]} ft.`);
+						if (race.speed[t]) items.push(`${(/** @type {*} */ (t)).toTitleCase()} ${race.speed[t]} ft.`);
 					});
 				}
 			}
@@ -498,7 +500,7 @@ class CharacterSheetRespec {
 			if (race.skillProficiencies?.length) {
 				race.skillProficiencies.forEach(sp => {
 					Object.keys(sp).forEach(s => {
-						if (s !== "any" && s !== "choose") raceSkills.push(s.toTitleCase());
+						if (s !== "any" && s !== "choose") raceSkills.push((/** @type {*} */ (s)).toTitleCase());
 					});
 				});
 			}
@@ -512,7 +514,7 @@ class CharacterSheetRespec {
 			if (race.languageProficiencies?.length) {
 				race.languageProficiencies.forEach(lp => {
 					Object.keys(lp).forEach(l => {
-						if (l !== "anyStandard" && l !== "any" && l !== "choose") raceLangs.push(l.toTitleCase());
+						if (l !== "anyStandard" && l !== "any" && l !== "choose") raceLangs.push((/** @type {*} */ (l)).toTitleCase());
 					});
 				});
 			}
@@ -568,7 +570,7 @@ class CharacterSheetRespec {
 				const skills = [];
 				background.skillProficiencies.forEach(sp => {
 					Object.keys(sp).forEach(s => {
-						if (s !== "any" && s !== "choose") skills.push(s.toTitleCase());
+						if (s !== "any" && s !== "choose") skills.push((/** @type {*} */ (s)).toTitleCase());
 					});
 				});
 				if (skills.length) items.push(`Skills: ${skills.join(", ")}`);
@@ -579,7 +581,7 @@ class CharacterSheetRespec {
 			if (background.toolProficiencies?.length) {
 				background.toolProficiencies.forEach(tp => {
 					Object.keys(tp).forEach(t => {
-						if (t !== "any" && t !== "choose" && t !== "anyArtisansTool" && t !== "anyMusicalInstrument") bgTools.push(t.toTitleCase());
+						if (t !== "any" && t !== "choose" && t !== "anyArtisansTool" && t !== "anyMusicalInstrument") bgTools.push((/** @type {*} */ (t)).toTitleCase());
 					});
 				});
 			}
@@ -596,7 +598,7 @@ class CharacterSheetRespec {
 			if (background.languageProficiencies?.length) {
 				background.languageProficiencies.forEach(lp => {
 					Object.keys(lp).forEach(l => {
-						if (l !== "anyStandard" && l !== "any" && l !== "choose") bgLangs.push(l.toTitleCase());
+						if (l !== "anyStandard" && l !== "any" && l !== "choose") bgLangs.push((/** @type {*} */ (l)).toTitleCase());
 					});
 				});
 			}
@@ -944,7 +946,7 @@ class CharacterSheetRespec {
 					selectedTraditions = selectedTraditions.filter(t => t !== trad.code);
 					label.style.background = "";
 				}
-				document.getElementById("respec-tradition-count").textContent = selectedTraditions.length;
+				(/** @type {*} */ (document.getElementById("respec-tradition-count"))).textContent = selectedTraditions.length;
 			});
 
 			list.append(label);
@@ -1101,7 +1103,7 @@ class CharacterSheetRespec {
 							selectedNames.delete(method.name);
 							item.style.background = "";
 						}
-						document.getElementById("respec-cm-count").textContent = selectedNames.size;
+						(/** @type {*} */ (document.getElementById("respec-cm-count"))).textContent = selectedNames.size;
 					});
 				}
 
@@ -1270,7 +1272,7 @@ class CharacterSheetRespec {
 						selectedMasteries = selectedMasteries.filter(m => m !== weaponKey);
 						label.style.background = "";
 					}
-					document.getElementById("respec-mastery-count").textContent = selectedMasteries.length;
+					(/** @type {*} */ (document.getElementById("respec-mastery-count"))).textContent = selectedMasteries.length;
 				});
 
 				checkboxes.append(label);
@@ -1421,7 +1423,7 @@ class CharacterSheetRespec {
 						selectedNames.delete(opt.name);
 						item.style.background = "";
 					}
-					document.getElementById("respec-optfeat-count").textContent = selectedNames.size;
+					(/** @type {*} */ (document.getElementById("respec-optfeat-count"))).textContent = selectedNames.size;
 				});
 
 				list.append(item);
@@ -1590,7 +1592,7 @@ class CharacterSheetRespec {
 		content.append(asiGrid);
 
 		// Wire up ASI controls
-		content.addEventListener("click", (e) => {
+		content.addEventListener("click", (/** @type {*} */ e) => {
 			const plusBtn = e.target.closest(".charsheet__respec-asi-plus");
 			if (plusBtn) {
 				const abl = plusBtn.dataset.abl;
@@ -2220,12 +2222,12 @@ class CharacterSheetRespec {
 			}
 
 			// Confirm cascade removal
-			const confirmed = await InputUiUtil.pGetUserBoolean({
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Confirm Subclass Change",
 				htmlDescription: `<p>This will remove <strong>${willRemoveCount}</strong> features from your character and add all features from <strong>${selectedSubclass.name}</strong> up to your current level.</p><p>Are you sure?</p>`,
 				textYes: "Change Subclass",
 				textNo: "Cancel",
-			});
+			}));
 
 			if (!confirmed) return;
 
@@ -2466,12 +2468,12 @@ class CharacterSheetRespec {
 				return;
 			}
 
-			const confirmed = await InputUiUtil.pGetUserBoolean({
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Confirm Species Change",
 				htmlDescription: `<p>This will replace all racial traits from <strong>${Renderer.stripTags(currentRaceName)}</strong> with traits from <strong>${Renderer.stripTags(selectedRace.name)}</strong>.</p><p>Are you sure?</p>`,
 				textYes: "Change Species",
 				textNo: "Cancel",
-			});
+			}));
 
 			if (!confirmed) return;
 
@@ -2617,12 +2619,12 @@ class CharacterSheetRespec {
 				return;
 			}
 
-			const confirmed = await InputUiUtil.pGetUserBoolean({
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Confirm Background Change",
 				htmlDescription: `<p>This will replace all background traits from <strong>${Renderer.stripTags(currentBgName)}</strong> with traits from <strong>${Renderer.stripTags(selectedBg.name)}</strong>.</p><p>Are you sure?</p>`,
 				textYes: "Change Background",
 				textNo: "Cancel",
-			});
+			}));
 
 			if (!confirmed) return;
 
@@ -2696,7 +2698,7 @@ class CharacterSheetRespec {
 		// Clear old racial proficiencies
 		this._clearProficienciesFromData(oldRace, oldSubrace);
 		if (oldUserChoices.selectedTools?.length) {
-			oldUserChoices.selectedTools.forEach(tool => this._state.removeToolProficiency(tool.toTitleCase()));
+			oldUserChoices.selectedTools.forEach(tool => this._state.removeToolProficiency((/** @type {*} */ (tool)).toTitleCase()));
 		}
 
 		// --- APPLY NEW RACE GRANTS ---
@@ -2825,7 +2827,7 @@ class CharacterSheetRespec {
 		this._clearToolsFromData(oldBg);
 		if (oldUserChoices.selectedTools?.length) {
 			oldUserChoices.selectedTools.forEach(c => {
-				if (c.tool) this._state.removeToolProficiency(c.tool.toTitleCase());
+				if (c.tool) this._state.removeToolProficiency((/** @type {*} */ (c.tool)).toTitleCase());
 			});
 		}
 
@@ -3008,7 +3010,7 @@ class CharacterSheetRespec {
 		if (!data?.skillProficiencies) return null;
 
 		const allSkillNames = Parser.SKILL_TO_ATB_ABV
-			? Object.keys(Parser.SKILL_TO_ATB_ABV).map(s => s.toTitleCase())
+			? Object.keys(Parser.SKILL_TO_ATB_ABV).map(s => (/** @type {*} */ (s)).toTitleCase())
 			: [];
 
 		const selected = [];
@@ -3121,7 +3123,7 @@ class CharacterSheetRespec {
 				addDropdowns(count, musicalInstruments, `Choose ${count} musical instrument${count > 1 ? "s" : ""}:`);
 			}
 			if (toolProf.choose) {
-				const from = (toolProf.choose.from || []).map(t => t.toTitleCase());
+				const from = (toolProf.choose.from || []).map(t => (/** @type {*} */ (t)).toTitleCase());
 				addDropdowns(toolProf.choose.count || 1, from, `Choose ${toolProf.choose.count || 1} tool${(toolProf.choose.count || 1) > 1 ? "s" : ""}:`);
 			}
 		});
@@ -3304,7 +3306,7 @@ class CharacterSheetRespec {
 		data.languageProficiencies.forEach(lp => {
 			Object.keys(lp).forEach(lang => {
 				if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-				this._state.removeLanguage(lang.toTitleCase());
+				this._state.removeLanguage((/** @type {*} */ (lang)).toTitleCase());
 			});
 		});
 	}
@@ -3312,15 +3314,15 @@ class CharacterSheetRespec {
 	_clearUserChosenLanguages (userChoices) {
 		if (userChoices.selectedLanguages) {
 			Object.values(userChoices.selectedLanguages).forEach(langArray => {
-				if (Array.isArray(langArray)) langArray.forEach(l => this._state.removeLanguage(l.toTitleCase()));
+				if (Array.isArray(langArray)) langArray.forEach(l => this._state.removeLanguage((/** @type {*} */ (l)).toTitleCase()));
 			});
 		}
 		if (userChoices.selectedSubraceLanguages?.length) {
-			userChoices.selectedSubraceLanguages.forEach(l => this._state.removeLanguage(l.toTitleCase()));
+			userChoices.selectedSubraceLanguages.forEach(l => this._state.removeLanguage((/** @type {*} */ (l)).toTitleCase()));
 		}
 		if (userChoices.tashasLanguageReplacements?.length) {
 			userChoices.tashasLanguageReplacements.forEach(l => {
-				if (l) this._state.removeLanguage(l.toTitleCase());
+				if (l) this._state.removeLanguage((/** @type {*} */ (l)).toTitleCase());
 			});
 		}
 	}
@@ -3361,18 +3363,18 @@ class CharacterSheetRespec {
 			if (!data) continue;
 			if (data.armorProficiencies) {
 				data.armorProficiencies.forEach(ap => {
-					Object.keys(ap).forEach(a => this._state.removeArmorProficiency(a.toTitleCase()));
+					Object.keys(ap).forEach(a => this._state.removeArmorProficiency((/** @type {*} */ (a)).toTitleCase()));
 				});
 			}
 			if (data.weaponProficiencies) {
 				data.weaponProficiencies.forEach(wp => {
-					Object.keys(wp).forEach(w => this._state.removeWeaponProficiency(w.toTitleCase()));
+					Object.keys(wp).forEach(w => this._state.removeWeaponProficiency((/** @type {*} */ (w)).toTitleCase()));
 				});
 			}
 			if (data.toolProficiencies) {
 				data.toolProficiencies.forEach(tp => {
 					Object.keys(tp).forEach(t => {
-						if (t !== "any" && t !== "choose") this._state.removeToolProficiency(t.toTitleCase());
+						if (t !== "any" && t !== "choose") this._state.removeToolProficiency((/** @type {*} */ (t)).toTitleCase());
 					});
 				});
 			}
@@ -3384,7 +3386,7 @@ class CharacterSheetRespec {
 		data.toolProficiencies.forEach(tp => {
 			Object.entries(tp).forEach(([key, value]) => {
 				if (key !== "choose" && key !== "any" && key !== "anyArtisansTool" && key !== "anyMusicalInstrument" && value === true) {
-					this._state.removeToolProficiency(key.toTitleCase());
+					this._state.removeToolProficiency((/** @type {*} */ (key)).toTitleCase());
 				}
 			});
 		});
@@ -3419,7 +3421,7 @@ class CharacterSheetRespec {
 		data.languageProficiencies.forEach(langProf => {
 			Object.keys(langProf).forEach(lang => {
 				if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-				this._state.addLanguage(lang.toTitleCase());
+				this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
 			});
 		});
 	}
@@ -3440,7 +3442,7 @@ class CharacterSheetRespec {
 		data.toolProficiencies.forEach(toolSet => {
 			Object.entries(toolSet).forEach(([key, value]) => {
 				if (key !== "choose" && key !== "any" && key !== "anyArtisansTool" && key !== "anyMusicalInstrument" && value === true) {
-					this._state.addToolProficiency(key.toTitleCase());
+					this._state.addToolProficiency((/** @type {*} */ (key)).toTitleCase());
 				}
 			});
 		});
@@ -3449,18 +3451,18 @@ class CharacterSheetRespec {
 	_applyProficienciesFromData (data) {
 		if (data.armorProficiencies) {
 			data.armorProficiencies.forEach(ap => {
-				Object.keys(ap).forEach(a => this._state.addArmorProficiency(a.toTitleCase()));
+				Object.keys(ap).forEach(a => this._state.addArmorProficiency((/** @type {*} */ (a)).toTitleCase()));
 			});
 		}
 		if (data.weaponProficiencies) {
 			data.weaponProficiencies.forEach(wp => {
-				Object.keys(wp).forEach(w => this._state.addWeaponProficiency(w.toTitleCase()));
+				Object.keys(wp).forEach(w => this._state.addWeaponProficiency((/** @type {*} */ (w)).toTitleCase()));
 			});
 		}
 		if (data.toolProficiencies) {
 			data.toolProficiencies.forEach(tp => {
 				Object.keys(tp).forEach(t => {
-					if (t !== "any" && t !== "choose") this._state.addToolProficiency(t.toTitleCase());
+					if (t !== "any" && t !== "choose") this._state.addToolProficiency((/** @type {*} */ (t)).toTitleCase());
 				});
 			});
 		}
@@ -3534,4 +3536,4 @@ class CharacterSheetRespec {
 }
 
 // Export for use in charactersheet.js
-globalThis.CharacterSheetRespec = CharacterSheetRespec;
+(/** @type {*} */ (globalThis)).CharacterSheetRespec = CharacterSheetRespec;
