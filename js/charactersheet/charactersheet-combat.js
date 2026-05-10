@@ -2,6 +2,8 @@
  * Character Sheet Combat Manager
  * Handles attacks, weapons, and combat-related actions
  */
+const {e_, ee} = /** @type {*} */ (globalThis);
+
 class CharacterSheetCombat {
 	constructor (page) {
 		this._page = page;
@@ -33,7 +35,7 @@ class CharacterSheetCombat {
 		document.getElementById("charsheet-btn-add-attack")?.addEventListener("click", () => this._showAttackCreator());
 
 		// Roll attack (Shift=Advantage, Ctrl=Disadvantage)
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__attack-roll");
 			if (!target) return;
 			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
@@ -41,7 +43,7 @@ class CharacterSheetCombat {
 		});
 
 		// Roll damage
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__attack-damage");
 			if (!target) return;
 			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
@@ -49,7 +51,7 @@ class CharacterSheetCombat {
 		});
 
 		// Edit attack
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__attack-edit");
 			if (!target) return;
 			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
@@ -57,7 +59,7 @@ class CharacterSheetCombat {
 		});
 
 		// Remove attack
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__attack-remove");
 			if (!target) return;
 			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
@@ -65,7 +67,7 @@ class CharacterSheetCombat {
 		});
 
 		// Attack note
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__attack-note");
 			if (!target) return;
 			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
@@ -81,7 +83,7 @@ class CharacterSheetCombat {
 		});
 
 		// Initiative roll (Shift=Advantage, Ctrl=Disadvantage)
-		document.getElementById("charsheet-roll-initiative")?.addEventListener("click", (e) => this._rollInitiative(e));
+		document.getElementById("charsheet-roll-initiative")?.addEventListener("click", (/** @type {*} */ e) => this._rollInitiative(e));
 
 		// Death save buttons
 		document.getElementById("charsheet-death-save-success")?.addEventListener("click", () => this._rollDeathSave(true));
@@ -89,7 +91,7 @@ class CharacterSheetCombat {
 		document.getElementById("charsheet-death-save-reset")?.addEventListener("click", () => this._resetDeathSaves());
 
 		// Combat spell casting
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__combat-spell-cast");
 			if (!target) return;
 			const spellId = target.dataset.spellId;
@@ -97,7 +99,7 @@ class CharacterSheetCombat {
 		});
 
 		// Combat Methods: use method (spend stamina)
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__method-use");
 			if (!target) return;
 			const methodId = target.dataset.methodId;
@@ -105,7 +107,7 @@ class CharacterSheetCombat {
 		});
 
 		// Combat Methods: choose weapon for weapon-modifier methods
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__method-choose-weapon");
 			if (!target) return;
 			const methodId = target.dataset.methodId;
@@ -237,7 +239,7 @@ class CharacterSheetCombat {
 						<label class="charsheet__attack-label">Damage Type</label>
 						<select class="charsheet__attack-select charsheet__attack-select--dmgtype">
 							${["bludgeoning", "piercing", "slashing", "fire", "cold", "lightning", "thunder", "poison", "acid", "necrotic", "radiant", "force", "psychic"].map(t =>
-		`<option value="${t}" ${attack.damageType === t ? "selected" : ""}>${this._getDamageTypeEmoji(t)} ${t.toTitleCase()}</option>`,
+		`<option value="${t}" ${attack.damageType === t ? "selected" : ""}>${this._getDamageTypeEmoji(t)} ${(/** @type {*} */ (t)).toTitleCase()}</option>`,
 	).join("")}
 						</select>
 					</div>
@@ -618,7 +620,7 @@ class CharacterSheetCombat {
 						<label class="charsheet__attack-label">Damage Type</label>
 						<select class="charsheet__attack-select charsheet__attack-select--dmgtype">
 							${["bludgeoning", "piercing", "slashing", "fire", "cold", "lightning", "thunder", "poison", "acid", "necrotic", "radiant", "force", "psychic"].map(t =>
-		`<option value="${t}" ${attack.damageType === t ? "selected" : ""}>${this._getDamageTypeEmoji(t)} ${t.toTitleCase()}</option>`,
+		`<option value="${t}" ${attack.damageType === t ? "selected" : ""}>${this._getDamageTypeEmoji(t)} ${(/** @type {*} */ (t)).toTitleCase()}</option>`,
 	).join("")}
 						</select>
 					</div>
@@ -1906,7 +1908,7 @@ class CharacterSheetCombat {
 	_formatMastery (mastery) {
 		// Extract mastery name (before |source)
 		const name = mastery.split("|")[0];
-		return name.toTitleCase();
+		return (/** @type {*} */ (name)).toTitleCase();
 	}
 
 	renderDeathSaves () {
@@ -2120,7 +2122,7 @@ class CharacterSheetCombat {
 		const nameEl = el.querySelector(".charsheet__combat-spell-name");
 		if (nameEl && spellData && this._page._spells) {
 			nameEl.style.cursor = "pointer";
-			nameEl.addEventListener("click", (e) => {
+			nameEl.addEventListener("click", (/** @type {*} */ e) => {
 				e.preventDefault();
 				e.stopPropagation();
 				this._page._spells._showSpellInfoFromData(spellData);
@@ -2371,14 +2373,14 @@ class CharacterSheetCombat {
 		`});
 
 		// Click on card to show modal with description
-		action.addEventListener("click", (e) => {
+		action.addEventListener("click", (/** @type {*} */ e) => {
 			// Don't trigger if clicking the Use button
 			if (e.target.classList.contains("charsheet__combat-action-use")) return;
 			this._showAbilityModal(ability);
 		});
 
 		// Use button handler
-		action.querySelector(".charsheet__combat-action-use").addEventListener("click", (e) => {
+		action.querySelector(".charsheet__combat-action-use").addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			this._useCustomAbility(ability);
 		});
@@ -2500,7 +2502,7 @@ class CharacterSheetCombat {
 		});
 
 		// Close on background click
-		modal.addEventListener("click", (e) => {
+		modal.addEventListener("click", (/** @type {*} */ e) => {
 			if (e.target.classList.contains("modal-overlay")) {
 				modal.remove();
 			}
@@ -2608,13 +2610,13 @@ class CharacterSheetCombat {
 		`});
 
 		// Click on card opens the detail modal
-		action.addEventListener("click", (e) => {
+		action.addEventListener("click", (/** @type {*} */ e) => {
 			if (e.target.classList.contains("charsheet__combat-action-use")) return;
 			this._showCombatActionModal(feature);
 		});
 
 		// Add click handler for use button
-		action.querySelector(".charsheet__combat-action-use").addEventListener("click", (e) => {
+		action.querySelector(".charsheet__combat-action-use").addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			this._useCombatAction(feature);
 		});
@@ -2949,7 +2951,7 @@ class CharacterSheetCombat {
 	 * Show a choice modal for combat actions with multiple sub-options.
 	 * Used for abilities like Flurry of Healing/Harm where the user picks a variant.
 	 * @param {object} feature - The parent feature
-	 * @param {Array<{name: string, description?: string, effects?: object}>} choices - Available sub-actions
+	 * @param {Array<{name: string, description?: string, effects?: object, id?: string}>} choices - Available sub-actions
 	 * @param {Function} [onChoice] - Callback receiving the chosen option
 	 * @returns {Promise<object|null>} The chosen option, or null if cancelled
 	 */
@@ -3192,7 +3194,7 @@ class CharacterSheetCombat {
 	 * and prompt the user to activate one during the damage roll.
 	 * Spends stamina on acceptance and creates the effect.
 	 * @param {object} attack - The attack being rolled
-	 * @returns {object|null} The activated effect, or null
+	 * @returns {Promise<*>} The activated effect, or null
 	 */
 	async _promptUseCombatMethod (attack) {
 		const methods = this._state.getCombatMethods?.() || [];
@@ -3313,10 +3315,10 @@ class CharacterSheetCombat {
 	 * Execute Hand of Healing: roll healing dice and optionally apply to self.
 	 * Shows Self/Other choice. Self applies heal; Other shows roll only.
 	 * @param {object} calc - Feature calculations from getFeatureCalculations()
-	 * @param {object} [opts]
-	 * @param {boolean} [opts.free=false] - If true, skip focus point cost (e.g. from Flurry)
+	 * @param {*} [opts] - Options: {free?: boolean, showResult?: boolean}
 	 */
-	async _executeHandOfHealing (calc, {free = false, showResult = true} = {}) {
+	async _executeHandOfHealing (calc, opts = {}) {
+		const {free = false, showResult = true} = opts;
 		const formula = calc.handOfHealingAmount;
 		if (!formula) return null;
 
@@ -3680,7 +3682,7 @@ class CharacterSheetCombat {
 	 * Shows what will happen when the action is used: conditions, temp HP, dice, etc.
 	 * @param {object} effects - The combatActionEffects object
 	 * @param {object} feature - The source feature
-	 * @returns {jQuery|null} The effects preview element, or null if nothing to show
+	 * @returns {*} The effects preview element, or null if nothing to show
 	 */
 	_renderEffectsPreview (effects, feature) {
 		const lines = [];
@@ -3734,7 +3736,7 @@ class CharacterSheetCombat {
 	 * Shows attack roll, save DC, and damage/healing buttons with advantage indicator.
 	 * @param {object} diceConfig - The rollDice portion of combatActionEffects
 	 * @param {object} feature - The source feature
-	 * @returns {jQuery} The roll section element
+	 * @returns {*} The roll section element
 	 */
 	_renderModalRollSection (diceConfig, feature) {
 		const section = e_({outer: `<div class="charsheet__action-modal-rolls mb-3 p-2" style="background: var(--bg-faint, #f8f9fa); border-radius: 4px;"></div>`});
@@ -4031,7 +4033,7 @@ class CharacterSheetCombat {
 				</div>
 			`});
 
-			condition.querySelector(".charsheet__condition-remove")?.addEventListener("click", (e) => {
+			condition.querySelector(".charsheet__condition-remove")?.addEventListener("click", (/** @type {*} */ e) => {
 				e.stopPropagation();
 				// Now passes {name, source} object
 				this._state.removeCondition?.({name: conditionName, source: conditionSource});
@@ -4658,7 +4660,7 @@ class CharacterSheetCombat {
 			`});
 
 			// Click on pips to use/restore
-			resourceEl.querySelector(".charsheet__resource-pip")?.addEventListener("click", (e) => {
+			resourceEl.querySelector(".charsheet__resource-pip")?.addEventListener("click", (/** @type {*} */ e) => {
 				const pipIndex = e.currentTarget.dataset.pipIndex;
 				const isUsed = e.currentTarget.classList.contains("used");
 				if (isUsed) {
@@ -4919,7 +4921,7 @@ class CharacterSheetCombat {
 						<span class="charsheet__state-remove ml-1" title="Break Concentration">&times;</span>
 					</div>
 				`});
-				conc.querySelector(".charsheet__state-remove")?.addEventListener("click", (e) => {
+				conc.querySelector(".charsheet__state-remove")?.addEventListener("click", (/** @type {*} */ e) => {
 					e.stopPropagation();
 					this._state.breakConcentration?.();
 					this.renderCombatStates();
@@ -4985,7 +4987,7 @@ class CharacterSheetCombat {
 				`});
 
 				if (isEndable) {
-					stateEl.querySelector(".charsheet__state-remove")?.addEventListener("click", (e) => {
+					stateEl.querySelector(".charsheet__state-remove")?.addEventListener("click", (/** @type {*} */ e) => {
 						e.stopPropagation();
 						// Check if this is a custom ability state
 						const customAbility = state.sourceFeatureId && this._state.getCustomAbilities?.()?.find(a => a.id === state.sourceFeatureId);
@@ -5257,7 +5259,7 @@ class CharacterSheetCombat {
 			const dodgeBtn = document.getElementById("charsheet-combat-dodge");
 			const tempEl = document.createElement("div");
 			tempEl.innerHTML = `<span ${hoverAttrs}></span>`;
-			const span = tempEl.firstChild;
+			const span = /** @type {*} */ (tempEl.firstChild);
 			for (const attr of span.attributes) {
 				dodgeBtn.setAttribute(attr.name, attr.value);
 			}
@@ -5311,12 +5313,12 @@ class CharacterSheetCombat {
 		// Concentration button (show modal to enter spell name)
 		document.getElementById("charsheet-combat-concentrate").onclick = async () => {
 			if (this._state.isConcentrating?.()) {
-				const confirmed = await InputUiUtil.pGetUserBoolean({
+				const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 					title: "Break Concentration?",
 					textYes: "Yes, break",
 					textNo: "Cancel",
 					htmlDescription: `Currently concentrating on: <strong>${this._state.getConcentration?.()?.spellName || "Unknown"}</strong>`,
-				});
+				}));
 				if (confirmed) {
 					this._state.breakConcentration();
 					this.renderCombatStates();
@@ -5750,7 +5752,7 @@ class CharacterSheetCombat {
 	}
 
 	_useMethod (methodId) {
-		const btn = document.querySelector(`.charsheet__method-use[data-method-id="${methodId}"]`);
+		const btn = /** @type {*} */ (document.querySelector(`.charsheet__method-use[data-method-id="${methodId}"]`));
 		const cost = parseInt(btn.dataset.cost) || 1;
 		const currentStamina = this._state.getStaminaCurrent();
 
@@ -5773,7 +5775,7 @@ class CharacterSheetCombat {
 		}
 
 		// Get the method data from the parent element (validate before spending stamina)
-		const method = btn.closest(".charsheet__method-item")?._methodData;
+		const method = /** @type {*} */ (btn.closest(".charsheet__method-item"))?._methodData;
 		if (!method) {
 			JqueryUtil.doToast({type: "warning", content: `Could not resolve method data. Please try again.`});
 			return;
@@ -5863,7 +5865,7 @@ class CharacterSheetCombat {
 	 * Choose (or re-choose) a weapon for a weapon-modifier method without spending stamina.
 	 */
 	async _chooseWeaponForMethod (methodId) {
-		const methodEl = document.querySelector(`.charsheet__method-choose-weapon[data-method-id="${methodId}"]`)?.closest(".charsheet__method-item");
+		const methodEl = /** @type {*} */ (document.querySelector(`.charsheet__method-choose-weapon[data-method-id="${methodId}"]`)?.closest(".charsheet__method-item"));
 		const method = methodEl?._methodData;
 		if (!method) return;
 
@@ -6220,17 +6222,17 @@ class CharacterSheetCombat {
 			this._renderMethodList(methodList, allMethods, selectedTraditions, maxDegree, knownMethodNames, filterTrad, filterDegree, filterStatus, searchQuery);
 		}, 150));
 
-		filterSection.querySelector("#method-picker-trad-filter")?.addEventListener("change", (e) => {
+		filterSection.querySelector("#method-picker-trad-filter")?.addEventListener("change", (/** @type {*} */ e) => {
 			filterTrad = e.target.value;
 			this._renderMethodList(methodList, allMethods, selectedTraditions, maxDegree, knownMethodNames, filterTrad, filterDegree, filterStatus, searchQuery);
 		});
 
-		filterSection.querySelector("#method-picker-degree")?.addEventListener("change", (e) => {
+		filterSection.querySelector("#method-picker-degree")?.addEventListener("change", (/** @type {*} */ e) => {
 			filterDegree = e.target.value;
 			this._renderMethodList(methodList, allMethods, selectedTraditions, maxDegree, knownMethodNames, filterTrad, filterDegree, filterStatus, searchQuery);
 		});
 
-		filterSection.querySelector("#method-picker-filter")?.addEventListener("change", (e) => {
+		filterSection.querySelector("#method-picker-filter")?.addEventListener("change", (/** @type {*} */ e) => {
 			filterStatus = e.target.value;
 			this._renderMethodList(methodList, allMethods, selectedTraditions, maxDegree, knownMethodNames, filterTrad, filterDegree, filterStatus, searchQuery);
 		});
@@ -6551,7 +6553,7 @@ class CharacterSheetCombat {
 				methodEl._methodData = method;
 
 				// Event handlers
-				methodEl.querySelector(".charsheet__method-add")?.addEventListener("click", (e) => {
+				methodEl.querySelector(".charsheet__method-add")?.addEventListener("click", (/** @type {*} */ e) => {
 					e.stopPropagation();
 					this._addCombatMethod(method);
 					knownMethodNames.add(key);
@@ -6560,7 +6562,7 @@ class CharacterSheetCombat {
 					document.getElementById("method-picker-known-count").textContent = knownMethodNames.size;
 				});
 
-				methodEl.querySelector(".charsheet__method-remove")?.addEventListener("click", (e) => {
+				methodEl.querySelector(".charsheet__method-remove")?.addEventListener("click", (/** @type {*} */ e) => {
 					e.stopPropagation();
 					this._removeCombatMethod(method);
 					knownMethodNames.delete(key);
