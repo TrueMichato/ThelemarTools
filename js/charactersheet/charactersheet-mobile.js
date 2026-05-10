@@ -164,7 +164,7 @@ class CharacterSheetMobile {
 
 		// Clear collapsible data attributes so they can be re-initialized
 		document.querySelectorAll("[data-mobile-collapsible]").forEach(el => {
-			delete el.dataset.mobileCollapsible;
+			delete (/** @type {*} */ (el)).dataset.mobileCollapsible;
 		});
 
 		// Uncollapse all sections
@@ -219,7 +219,7 @@ class CharacterSheetMobile {
 			const isNoCollapse = [...noCollapse].some(cls => section.classList.contains(cls));
 			if (isNoCollapse) return;
 
-			const title = section.querySelector(".charsheet__section-title");
+			const title = /** @type {*} */ (section.querySelector(".charsheet__section-title"));
 			if (!title) return;
 
 			// Skip if already initialized
@@ -244,7 +244,7 @@ class CharacterSheetMobile {
 			}
 
 			// Add tap-to-toggle behavior
-			title.addEventListener("click", (e) => {
+			title.addEventListener("click", (/** @type {*} */ e) => {
 				// Don't toggle if clicking edit buttons within the title
 				if (e.target.closest(".charsheet__section-edit, .ve-btn, button")) return;
 
@@ -288,7 +288,7 @@ class CharacterSheetMobile {
 			".charsheet__header-row--primary",
 		].join(", ");
 
-		tabContent.addEventListener("touchstart", (e) => {
+		tabContent.addEventListener("touchstart", (/** @type {*} */ e) => {
 			if (e.touches.length !== 1) return;
 
 			// Don't intercept swipes on horizontally-scrollable containers
@@ -301,7 +301,7 @@ class CharacterSheetMobile {
 			this._swipeStartY = e.touches[0].clientY;
 		}, {passive: true});
 
-		tabContent.addEventListener("touchend", (e) => {
+		tabContent.addEventListener("touchend", (/** @type {*} */ e) => {
 			if (this._swipeStartX == null) return;
 			if (e.changedTouches.length !== 1) return;
 			const deltaX = e.changedTouches[0].clientX - this._swipeStartX;
@@ -599,7 +599,7 @@ class CharacterSheetMobile {
 		// Tap on rollable elements shows the toolbar (does NOT block the click)
 		// Normal tap = roll normally (click passes through to original handler)
 		// The toolbar gives Adv/Disadv options for the NEXT roll
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			if (!this._isMobile) return;
 
 			// Don't intercept clicks originating from inside the toolbar itself
@@ -659,7 +659,7 @@ class CharacterSheetMobile {
 			</div>
 		`;
 
-		el.addEventListener("click", (e) => {
+		el.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest("[data-roll]");
 			if (!btn) return;
 
@@ -747,7 +747,7 @@ class CharacterSheetMobile {
 		});
 
 		// FAB actions
-		el.addEventListener("click", (e) => {
+		el.addEventListener("click", (/** @type {*} */ e) => {
 			const action = e.target.closest("[data-action]");
 			if (!action) return;
 
@@ -767,10 +767,12 @@ class CharacterSheetMobile {
 			case "long-rest":
 				document.getElementById("charsheet-btn-long-rest")?.click();
 				break;
-			case "initiative":
-				document.getElementById("charsheet-roll-initiative")?.click()
-					|| document.getElementById("charsheet-box-initiative")?.click();
+			case "initiative": {
+				const initBtn = document.getElementById("charsheet-roll-initiative");
+				if (initBtn) initBtn.click();
+				else document.getElementById("charsheet-box-initiative")?.click();
 				break;
+			}
 			case "death-save":
 				document.getElementById("charsheet-btn-deathsave")?.click();
 				break;
@@ -846,12 +848,12 @@ class CharacterSheetMobile {
 		const observer = new MutationObserver((mutations) => {
 			for (const mutation of mutations) {
 				for (const node of mutation.addedNodes) {
-					if (node.nodeType === 1 && node.classList?.contains("ve-ui-modal__overlay")) {
+					if (node.nodeType === 1 && (/** @type {*} */ (node)).classList?.contains("ve-ui-modal__overlay")) {
 						this._lockScroll();
 					}
 				}
 				for (const node of mutation.removedNodes) {
-					if (node.nodeType === 1 && node.classList?.contains("ve-ui-modal__overlay")) {
+					if (node.nodeType === 1 && (/** @type {*} */ (node)).classList?.contains("ve-ui-modal__overlay")) {
 						const remaining = document.querySelectorAll(".ve-ui-modal__overlay");
 						if (!remaining.length) {
 							this._unlockScroll();
@@ -892,7 +894,7 @@ class CharacterSheetMobile {
 		const observer = new MutationObserver((mutations) => {
 			for (const mutation of mutations) {
 				if (mutation.type !== "attributes" || mutation.attributeName !== "class") continue;
-				const el = mutation.target;
+				const el = /** @type {*} */ (mutation.target);
 				if (!dropdownSelectors.some(sel => el.matches(sel))) continue;
 
 				if (el.classList.contains("active")) {
@@ -970,11 +972,11 @@ class CharacterSheetMobile {
 if (document.readyState === "loading") {
 	document.addEventListener("DOMContentLoaded", () => {
 		if (document.querySelector(".charsheet-page")) {
-			window._charsheetMobile = new CharacterSheetMobile(window._charsheetPage);
+			(/** @type {*} */ (window))._charsheetMobile = new CharacterSheetMobile((/** @type {*} */ (window))._charsheetPage);
 		}
 	});
 } else {
 	if (document.querySelector(".charsheet-page")) {
-		window._charsheetMobile = new CharacterSheetMobile(window._charsheetPage);
+		(/** @type {*} */ (window))._charsheetMobile = new CharacterSheetMobile((/** @type {*} */ (window))._charsheetPage);
 	}
 }

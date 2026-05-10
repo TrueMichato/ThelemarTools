@@ -5,6 +5,9 @@
 import {CharacterSheetNpcExporter} from "./charactersheet-npc-exporter.js";
 import {CharacterSheetPdf} from "./charactersheet-pdf.js";
 
+// Project globals — typed via globalThis cast for TypeScript checkJs
+const {e_, ee, DataUtil, JqueryUtil, StorageUtil, InputUiUtil} = /** @type {*} */ (globalThis);
+
 class CharacterSheetExport {
 	static _STORAGE_KEY_NPC_SOURCE_CONFIG = "charsheet-npc-export-source-config";
 	static _STORAGE_KEY_NPC_EXPORT_OPTIONS = "charsheet-npc-export-options";

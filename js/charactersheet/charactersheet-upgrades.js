@@ -2,6 +2,10 @@
  * Character Sheet Upgrades Module
  * Handles item upgrade application, gemstone empowerment, socketing, and mechanical effects
  */
+
+// Project globals — typed via globalThis cast for TypeScript checkJs
+const {e_, ee, InputUiUtil, Renderer} = /** @type {*} */ (globalThis);
+
 class CharacterSheetUpgrades {
 	constructor (page) {
 		this._page = page;
@@ -604,7 +608,7 @@ class CharacterSheetUpgrades {
 			const section = e_({outer: `<div class="charsheet__empower-rarity"></div>`});
 			section.append(e_({outer: `
 				<div class="charsheet__empower-rarity-header ve-flex-v-center ve-small">
-					<span class="badge charsheet__rarity-badge--${rarity.replace(/\s+/g, "-")}">${rarity.toTitleCase()}</span>
+					<span class="badge charsheet__rarity-badge--${rarity.replace(/\s+/g, "-")}">${(/** @type {*} */ (rarity)).toTitleCase()}</span>
 					<span class="ml-1">DC ${dc}</span>
 					${hasGemEmpowerment ? `<span class="ve-muted ml-1">(need ${minNeeded}+)</span>` : ""}
 				</div>

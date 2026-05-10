@@ -2,6 +2,10 @@
  * Character Sheet Notes Handler
  * Manages sticky notes and entity notes (on items, spells, features, etc.)
  */
+
+// Project globals — typed via globalThis cast for TypeScript checkJs
+const {e_, InputUiUtil} = /** @type {*} */ (globalThis);
+
 export class CharacterSheetNotes {
 	constructor (page) {
 		this._page = page;
@@ -47,8 +51,9 @@ export class CharacterSheetNotes {
 
 		// Tab change listener - handle both Bootstrap events and direct clicks
 		document.addEventListener("shown.bs.tab", (e) => {
-			if (!e.target.matches("a[data-toggle=\"tab\"]")) return;
-			const href = e.target.getAttribute("href");
+			const target = /** @type {*} */ (e.target);
+			if (!target.matches("a[data-toggle=\"tab\"]")) return;
+			const href = target.getAttribute("href");
 			if (href) {
 				const tabId = href.replace("#", "");
 				this._activeTab = this._tabMap[tabId] || null;
@@ -58,7 +63,8 @@ export class CharacterSheetNotes {
 
 		// Also listen for click events on tabs (backup)
 		document.addEventListener("click", (e) => {
-			const tabLink = e.target.closest(".ve-nav-tabs a[data-toggle=\"tab\"]");
+			const target = /** @type {*} */ (e.target);
+			const tabLink = target.closest(".ve-nav-tabs a[data-toggle=\"tab\"]");
 			if (!tabLink) return;
 			const href = tabLink.getAttribute("href");
 			if (href) {
