@@ -189,6 +189,7 @@ class CharacterSheetQuickBuild {
 			const {characterLevel, className, classSource, classLevel, classData} = planEntry;
 
 			if (!classData) {
+				// eslint-disable-next-line no-console
 				console.warn(`[QuickBuild] No class data found for ${className}`);
 				continue;
 			}
@@ -1154,7 +1155,7 @@ class CharacterSheetQuickBuild {
 					const scClassSource = sc.classSource || Parser.SRC_PHB;
 					return scClassSource === classSource
 						|| ([Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource)
-						 && [Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource));
+							&& [Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource));
 				}).sort((a, b) => a.name.localeCompare(b.name));
 
 				const secondarySubclasses = allSubclasses.filter(sc => {
@@ -1836,9 +1837,9 @@ class CharacterSheetQuickBuild {
 				if (choices.tools.type === "artisan") {
 					availableTools = allTools.filter(t => t.name.toLowerCase().includes("tool")
 						|| ["alchemist's supplies", "brewer's supplies", "calligrapher's supplies", "carpenter's tools",
-						 "cartographer's tools", "cobbler's tools", "cook's utensils", "glassblower's tools",
-						 "jeweler's tools", "leatherworker's tools", "mason's tools", "painter's supplies",
-						 "potter's tools", "smith's tools", "tinker's tools", "weaver's tools", "woodcarver's tools"].some(art => t.name.toLowerCase().includes(art.toLowerCase().replace("'s tools", "").replace("'s supplies", "").replace("'s utensils", ""))));
+							"cartographer's tools", "cobbler's tools", "cook's utensils", "glassblower's tools",
+							"jeweler's tools", "leatherworker's tools", "mason's tools", "painter's supplies",
+							"potter's tools", "smith's tools", "tinker's tools", "weaver's tools", "woodcarver's tools"].some(art => t.name.toLowerCase().includes(art.toLowerCase().replace("'s tools", "").replace("'s supplies", "").replace("'s utensils", ""))));
 				} else if (choices.tools.from) {
 					availableTools = allTools.filter(t => choices.tools.from.some(f => t.name.toLowerCase().includes(f.toLowerCase())));
 				}
