@@ -2,7 +2,8 @@
     "compilerOptions": {
       "target": "ESNext",
       "module": "ESNext",
-      "checkJs": true
+      "checkJs": true,
+      "noImplicitAny": false
     },
     "include": [
         "js/**/*",
