@@ -233,7 +233,7 @@ class CharacterSheetNpcExporter {
 			errors.push("Missing required field: hp.");
 		} else {
 			if (!Number.isFinite(Number(monster.hp.average)) || Number(monster.hp.average) < 1) errors.push("HP average must be a positive number.");
-			if (!/^\d+d\d+(?:\s*[+\-]\s*\d+)?$/i.test(String(monster.hp.formula).trim())) {
+			if (!/^\d+d\d+(?:\s*[+-]\s*\d+)?$/i.test(String(monster.hp.formula).trim())) {
 				errors.push("HP formula must use dice notation (for example: 8d8 + 16).");
 			}
 		}
@@ -756,7 +756,7 @@ class CharacterSheetNpcExporter {
 	static _getAttackDamageText (attack, state) {
 		const damageType = this._getSafeInlineText((attack.damageType || "bludgeoning").toLowerCase(), {maxLen: 24}) || "bludgeoning";
 		const base = attack.damage || "1";
-		if (/^\d+d\d+(?:\s*[+\-]\s*\d+)?$/i.test(base.trim())) {
+		if (/^\d+d\d+(?:\s*[+-]\s*\d+)?$/i.test(base.trim())) {
 			return `{@damage ${base.trim()}} ${damageType} damage`;
 		}
 
@@ -861,7 +861,7 @@ class CharacterSheetNpcExporter {
 		if (!bonus) return damage;
 
 		const raw = String(damage || "").replace(/\s+/g, "").trim();
-		const m = raw.match(/^(\d+d\d+)([+\-]\d+)?$/i);
+		const m = raw.match(/^(\d+d\d+)([+-]\d+)?$/i);
 		if (!m) return damage;
 
 		const base = m[1];
@@ -1244,7 +1244,7 @@ class CharacterSheetNpcExporter {
 
 	static _estimateDamageScore (attack) {
 		const damage = String(attack.damage || "").trim();
-		const m = damage.match(/(\d+)d(\d+)(?:\s*([+\-])\s*(\d+))?/i);
+		const m = damage.match(/(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?/i);
 		if (m) {
 			const count = Number(m[1]) || 1;
 			const die = Number(m[2]) || 6;
