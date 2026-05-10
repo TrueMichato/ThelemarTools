@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable no-console */
 // Fast JSON syntax check for staged data/**/*.json files.
 // Used by lint-staged on pre-commit; full schema validation lives in pre-push.
 

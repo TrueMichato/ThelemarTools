@@ -26,7 +26,6 @@ beforeAll(async () => {
 });
 
 describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -92,7 +91,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 
 		it("should have Starry Form (not Zodiac Form) for official", () => {
 			state.addClass({
-				name: "Druid", source: "PHB", level: 3,
+				name: "Druid",
+				source: "PHB",
+				level: 3,
 				subclass: {name: "Circle of Stars", shortName: "Stars", source: "TCE"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -187,14 +188,18 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 
 			// L10 (WIS 18 +4): 2d8+4
 			const s10 = new CharacterSheetState();
-			s10.addClass({name: "Druid", source: "TGTT", level: 10,
+			s10.addClass({name: "Druid",
+				source: "TGTT",
+				level: 10,
 				subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 			s10.setAbilityBase("wis", 18);
 			expect(s10.getFeatureCalculations().beeDamage).toBe("2d8+4");
 
 			// L14 (WIS 20 +5): 3d8+5
 			const s14 = new CharacterSheetState();
-			s14.addClass({name: "Druid", source: "TGTT", level: 14,
+			s14.addClass({name: "Druid",
+				source: "TGTT",
+				level: 14,
 				subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 			s14.setAbilityBase("wis", 20);
 			expect(s14.getFeatureCalculations().beeDamage).toBe("3d8+5");
@@ -206,14 +211,18 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 
 			// L3 (prof 2): ceil(2/2) = 1
 			const s3 = new CharacterSheetState();
-			s3.addClass({name: "Druid", source: "TGTT", level: 3,
+			s3.addClass({name: "Druid",
+				source: "TGTT",
+				level: 3,
 				subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 			s3.setAbilityBase("wis", 16);
 			expect(s3.getFeatureCalculations().buletteAcBonus).toBe(1);
 
 			// L9 (prof 4): ceil(4/2) = 2
 			const s9 = new CharacterSheetState();
-			s9.addClass({name: "Druid", source: "TGTT", level: 9,
+			s9.addClass({name: "Druid",
+				source: "TGTT",
+				level: 9,
 				subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 			s9.setAbilityBase("wis", 16);
 			expect(s9.getFeatureCalculations().buletteAcBonus).toBe(2);
@@ -225,14 +234,18 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 
 			// L3 (prof 2): 3 + 2 = 5
 			const s3 = new CharacterSheetState();
-			s3.addClass({name: "Druid", source: "TGTT", level: 3,
+			s3.addClass({name: "Druid",
+				source: "TGTT",
+				level: 3,
 				subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 			s3.setAbilityBase("wis", 16);
 			expect(s3.getFeatureCalculations().beaverDamageReduction).toBe(5);
 
 			// L10 (prof 4): 10 + 4 = 14
 			const s10 = new CharacterSheetState();
-			s10.addClass({name: "Druid", source: "TGTT", level: 10,
+			s10.addClass({name: "Druid",
+				source: "TGTT",
+				level: 10,
 				subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 			s10.setAbilityBase("wis", 18);
 			expect(s10.getFeatureCalculations().beaverDamageReduction).toBe(14);
@@ -244,7 +257,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 
 			// L14 (WIS 20 +5): 2d8+5
 			const s14 = new CharacterSheetState();
-			s14.addClass({name: "Druid", source: "TGTT", level: 14,
+			s14.addClass({name: "Druid",
+				source: "TGTT",
+				level: 14,
 				subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 			s14.setAbilityBase("wis", 20);
 			expect(s14.getFeatureCalculations().phoenixStabilizeHeal).toBe("2d8+5");
@@ -268,7 +283,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 			aurochsProgression.forEach(({level, prof, expected}) => {
 				it(`should have aurochsStrBonus = ${expected} (prof ${prof}) at Druid level ${level}`, () => {
 					const s = new CharacterSheetState();
-					s.addClass({name: "Druid", source: "TGTT", level,
+					s.addClass({name: "Druid",
+						source: "TGTT",
+						level,
 						subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 					s.setAbilityBase("wis", 18);
 					expect(s.getFeatureCalculations().aurochsStrBonus).toBe(expected);
@@ -278,17 +295,19 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 
 		describe("Peacock Save DC = Spell Save DC", () => {
 			const peacockProgression = [
-				{level: 3, wis: 16, expected: 13},  // 8+2+3
-				{level: 5, wis: 18, expected: 15},  // 8+3+4
-				{level: 9, wis: 18, expected: 16},  // 8+4+4
-				{level: 13, wis: 20, expected: 18},  // 8+5+5
-				{level: 17, wis: 20, expected: 19},  // 8+6+5
+				{level: 3, wis: 16, expected: 13}, // 8+2+3
+				{level: 5, wis: 18, expected: 15}, // 8+3+4
+				{level: 9, wis: 18, expected: 16}, // 8+4+4
+				{level: 13, wis: 20, expected: 18}, // 8+5+5
+				{level: 17, wis: 20, expected: 19}, // 8+6+5
 			];
 
 			peacockProgression.forEach(({level, wis, expected}) => {
 				it(`should have peacockSaveDc = ${expected} at Druid level ${level} (WIS ${wis})`, () => {
 					const s = new CharacterSheetState();
-					s.addClass({name: "Druid", source: "TGTT", level,
+					s.addClass({name: "Druid",
+						source: "TGTT",
+						level,
 						subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 					s.setAbilityBase("wis", wis);
 					s.setSpellcastingAbility("wis");
@@ -300,7 +319,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 		describe("Cat Perception Bonus = \"1d4\"", () => {
 			it("should have catPerceptionBonus = \"1d4\" at level 3", () => {
 				const s = new CharacterSheetState();
-				s.addClass({name: "Druid", source: "TGTT", level: 3,
+				s.addClass({name: "Druid",
+					source: "TGTT",
+					level: 3,
 					subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 				s.setAbilityBase("wis", 18);
 				expect(s.getFeatureCalculations().catPerceptionBonus).toBe("1d4");
@@ -308,7 +329,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 
 			it("should have catPerceptionBonus = \"1d4\" at level 14", () => {
 				const s = new CharacterSheetState();
-				s.addClass({name: "Druid", source: "TGTT", level: 14,
+				s.addClass({name: "Druid",
+					source: "TGTT",
+					level: 14,
 					subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 				s.setAbilityBase("wis", 20);
 				expect(s.getFeatureCalculations().catPerceptionBonus).toBe("1d4");
@@ -319,7 +342,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 			[3, 6, 10, 14, 20].forEach(level => {
 				it(`should have houndMarkRange = 60 at level ${level}`, () => {
 					const s = new CharacterSheetState();
-					s.addClass({name: "Druid", source: "TGTT", level,
+					s.addClass({name: "Druid",
+						source: "TGTT",
+						level,
 						subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 					s.setAbilityBase("wis", 18);
 					expect(s.getFeatureCalculations().houndMarkRange).toBe(60);
@@ -331,7 +356,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 			[3, 6, 10, 14, 20].forEach(level => {
 				it(`should have horseSpeedMultiplier = 2 at level ${level}`, () => {
 					const s = new CharacterSheetState();
-					s.addClass({name: "Druid", source: "TGTT", level,
+					s.addClass({name: "Druid",
+						source: "TGTT",
+						level,
 						subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 					s.setAbilityBase("wis", 18);
 					expect(s.getFeatureCalculations().horseSpeedMultiplier).toBe(2);
@@ -343,7 +370,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 			[3, 6, 10, 14, 20].forEach(level => {
 				it(`should have octopusReachBonus = 5 at level ${level}`, () => {
 					const s = new CharacterSheetState();
-					s.addClass({name: "Druid", source: "TGTT", level,
+					s.addClass({name: "Druid",
+						source: "TGTT",
+						level,
 						subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 					s.setAbilityBase("wis", 18);
 					expect(s.getFeatureCalculations().octopusReachBonus).toBe(5);
@@ -368,7 +397,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 		wsProgression.forEach(({level, expected}) => {
 			it(`should have ${expected} Wild Shape uses at Druid level ${level}`, () => {
 				const s = new CharacterSheetState();
-				s.addClass({name: "Druid", source: "TGTT", level,
+				s.addClass({name: "Druid",
+					source: "TGTT",
+					level,
 					subclass: level >= 3 ? {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"} : undefined});
 				s.setAbilityBase("wis", 18);
 				expect(s.getFeatureCalculations().wildShapeUses).toBe(expected);
@@ -377,7 +408,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 
 		it("should have unlimited (Infinity) Wild Shape uses at Druid level 20 (Archdruid)", () => {
 			const s = new CharacterSheetState();
-			s.addClass({name: "Druid", source: "TGTT", level: 20,
+			s.addClass({name: "Druid",
+				source: "TGTT",
+				level: 20,
 				subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 			s.setAbilityBase("wis", 18);
 			expect(s.getFeatureCalculations().wildShapeUses).toBe(Infinity);
@@ -524,7 +557,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 			for (let lvl = 1; lvl <= 20; lvl++) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Druid", source: "TGTT", level: lvl,
+					name: "Druid",
+					source: "TGTT",
+					level: lvl,
 					subclass: lvl >= 3
 						? {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}
 						: undefined,
@@ -542,7 +577,9 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 			for (let lvl = 3; lvl <= 20; lvl++) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Druid", source: "TGTT", level: lvl,
+					name: "Druid",
+					source: "TGTT",
+					level: lvl,
 					subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"},
 				});
 				s.setAbilityBase("wis", 18);

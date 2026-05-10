@@ -21,7 +21,6 @@ beforeAll(async () => {
 });
 
 describe("TGTT Bladesinger Wizard", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -70,7 +69,7 @@ describe("TGTT Bladesinger Wizard", () => {
 			state.applyClassFeatureEffects();
 			const calcs = state.getFeatureCalculations();
 			expect(calcs.spellSaveDc).toBe(8 + 2 + 4); // 8 + prof(2) + INT(4) = 14
-			expect(calcs.spellAttackBonus).toBe(2 + 4);  // prof(2) + INT(4) = 6
+			expect(calcs.spellAttackBonus).toBe(2 + 4); // prof(2) + INT(4) = 6
 		});
 	});
 
@@ -156,7 +155,9 @@ describe("TGTT Bladesinger Wizard", () => {
 			// but per RAW Bladesong uses = proficiency bonus
 			const l9State = new CharacterSheetState();
 			l9State.addClass({
-				name: "Wizard", source: "TGTT", level: 9,
+				name: "Wizard",
+				source: "TGTT",
+				level: 9,
 				subclass: {name: "Bladesinger", shortName: "Bladesinger", source: "TGTT"},
 			});
 			l9State.setAbilityBase("int", 18);
@@ -223,9 +224,9 @@ describe("TGTT Bladesinger Wizard", () => {
 
 		it("should scale stamina pool with level", () => {
 			const cases = [
-				{level: 3, expected: 4},   // prof +2
-				{level: 5, expected: 6},   // prof +3
-				{level: 9, expected: 8},   // prof +4
+				{level: 3, expected: 4}, // prof +2
+				{level: 5, expected: 6}, // prof +3
+				{level: 9, expected: 8}, // prof +4
 				{level: 13, expected: 10}, // prof +5
 				{level: 17, expected: 12}, // prof +6
 			];
@@ -233,7 +234,9 @@ describe("TGTT Bladesinger Wizard", () => {
 			for (const {level, expected} of cases) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Wizard", source: "TGTT", level,
+					name: "Wizard",
+					source: "TGTT",
+					level,
 					subclass: {name: "Bladesinger", shortName: "Bladesinger", source: "TGTT"},
 				});
 				s.addCombatTradition("AK");
@@ -308,7 +311,6 @@ describe("TGTT Bladesinger Wizard", () => {
 	// SUBCLASS FEATURES BY LEVEL
 	// =========================================================================
 	describe("Subclass Feature Progression", () => {
-
 		describe("Extra Attack (Level 6)", () => {
 			it("should grant Extra Attack at Bladesinger level 6", () => {
 				makeBladesinger(6);
@@ -503,7 +505,9 @@ describe("TGTT Bladesinger Wizard", () => {
 			for (let lvl = 1; lvl <= 20; lvl++) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Wizard", source: "TGTT", level: lvl,
+					name: "Wizard",
+					source: "TGTT",
+					level: lvl,
 					subclass: lvl >= 3
 						? {name: "Bladesinger", shortName: "Bladesinger", source: "TGTT"}
 						: undefined,

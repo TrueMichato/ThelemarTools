@@ -431,7 +431,7 @@ describe("CharacterSheetNpcExporter", () => {
 			source: "<bad>",
 			alignment: [],
 			action: [],
-			languages: ["<img src=x onerror=alert(1)>"]
+			languages: ["<img src=x onerror=alert(1)>"],
 		});
 
 		expect(issues.errors.length).toBeGreaterThan(0);

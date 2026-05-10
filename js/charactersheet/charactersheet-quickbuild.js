@@ -49,7 +49,6 @@ class CharacterSheetQuickBuild {
 		// Modal/overlay reference
 		this._overlay = null;
 		this._isActive = false;
-
 	}
 
 	// ==========================================
@@ -980,8 +979,8 @@ class CharacterSheetQuickBuild {
 								value="${alloc.targetLevel}">
 						</div>
 						${this._classAllocations.length > 1 && !alloc.currentLevel
-							? `<button class="ve-btn ve-btn-xs ve-btn-danger" title="Remove class"><span class="glyphicon glyphicon-trash"></span></button>`
-							: ""}
+		? `<button class="ve-btn ve-btn-xs ve-btn-danger" title="Remove class"><span class="glyphicon glyphicon-trash"></span></button>`
+		: ""}
 					</div>
 				`});
 
@@ -1153,16 +1152,16 @@ class CharacterSheetQuickBuild {
 				// Group subclasses by source affinity
 				const primarySubclasses = allSubclasses.filter(sc => {
 					const scClassSource = sc.classSource || Parser.SRC_PHB;
-					return scClassSource === classSource ||
-						([Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource) &&
-						 [Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource));
+					return scClassSource === classSource
+						|| ([Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource)
+						 && [Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource));
 				}).sort((a, b) => a.name.localeCompare(b.name));
 
 				const secondarySubclasses = allSubclasses.filter(sc => {
 					const scClassSource = sc.classSource || Parser.SRC_PHB;
 					if (scClassSource === classSource) return false;
-					if ([Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource) &&
-						[Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource)) return false;
+					if ([Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource)
+						&& [Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource)) return false;
 					return true;
 				}).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1236,8 +1235,8 @@ class CharacterSheetQuickBuild {
 					const filterSubclasses = (scs) => scs.filter(sc => {
 						if (selectedSource && sc.source !== selectedSource) return false;
 						if (!textFilter) return true;
-						return sc.name.toLowerCase().includes(filterLower) ||
-							(sc.shortName && sc.shortName.toLowerCase().includes(filterLower));
+						return sc.name.toLowerCase().includes(filterLower)
+							|| (sc.shortName && sc.shortName.toLowerCase().includes(filterLower));
 					});
 
 					const filteredPrimary = filterSubclasses(primarySubclasses);
@@ -1640,7 +1639,7 @@ class CharacterSheetQuickBuild {
 			// Check spell choices (from additionalSpells)
 			if (feat.additionalSpells) {
 				choices.spells = {lists: [], cantrips: null, spells: null};
-				
+
 				// Check for named spell list options (Magic Initiate style)
 				const namedLists = feat.additionalSpells.filter(as => as.name);
 				if (namedLists.length > 1) {
@@ -1649,7 +1648,7 @@ class CharacterSheetQuickBuild {
 						ability: as.ability,
 					}));
 				}
-				
+
 				// Parse the first (or only) spell list for cantrip/spell counts
 				const spellList = feat.additionalSpells[0];
 				if (spellList) {
@@ -1713,7 +1712,7 @@ class CharacterSheetQuickBuild {
 						parseSpellChoicesFromBlock(spellList.prepared);
 					}
 				}
-				
+
 				// Clean up if no actual choices found
 				if (!choices.spells.lists.length && !choices.spells.cantrips && !choices.spells.spells) {
 					choices.spells = null;
@@ -1835,10 +1834,10 @@ class CharacterSheetQuickBuild {
 				const allTools = this._page.getToolsList() || [];
 				let availableTools = allTools;
 				if (choices.tools.type === "artisan") {
-					availableTools = allTools.filter(t => t.name.toLowerCase().includes("tool") || 
-						["alchemist's supplies", "brewer's supplies", "calligrapher's supplies", "carpenter's tools", 
-						 "cartographer's tools", "cobbler's tools", "cook's utensils", "glassblower's tools", 
-						 "jeweler's tools", "leatherworker's tools", "mason's tools", "painter's supplies", 
+					availableTools = allTools.filter(t => t.name.toLowerCase().includes("tool")
+						|| ["alchemist's supplies", "brewer's supplies", "calligrapher's supplies", "carpenter's tools",
+						 "cartographer's tools", "cobbler's tools", "cook's utensils", "glassblower's tools",
+						 "jeweler's tools", "leatherworker's tools", "mason's tools", "painter's supplies",
 						 "potter's tools", "smith's tools", "tinker's tools", "weaver's tools", "woodcarver's tools"].some(art => t.name.toLowerCase().includes(art.toLowerCase().replace("'s tools", "").replace("'s supplies", "").replace("'s utensils", ""))));
 				} else if (choices.tools.from) {
 					availableTools = allTools.filter(t => choices.tools.from.some(f => t.name.toLowerCase().includes(f.toLowerCase())));
@@ -1972,7 +1971,7 @@ class CharacterSheetQuickBuild {
 			if (choices.spells?.cantrips) {
 				const cantripSection = e_({outer: `<div class="mb-2"></div>`});
 				cantripSection.append(e_({outer: `<label class="ve-small">Choose ${choices.spells.cantrips.count} cantrip${choices.spells.cantrips.count > 1 ? "s" : ""}:</label>`}));
-				
+
 				const cantripList = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
 				sel.featChoices.cantrips.forEach((cantrip, idx) => {
 					const badge = e_({outer: `<span class="badge badge-primary mr-1">${cantrip.name} <span class="clickable" style="cursor: pointer;">×</span></span>`});
@@ -2006,7 +2005,7 @@ class CharacterSheetQuickBuild {
 				const spellSection = e_({outer: `<div class="mb-2"></div>`});
 				const spellType = choices.spells.spells.innate ? "innate spell" : "spell";
 				spellSection.append(e_({outer: `<label class="ve-small">Choose ${choices.spells.spells.count} ${spellType}${choices.spells.spells.count > 1 ? "s" : ""}:</label>`}));
-				
+
 				const spellList = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
 				sel.featChoices.spells.forEach((spell, idx) => {
 					const badge = e_({outer: `<span class="badge badge-primary mr-1">${spell.name} <span class="clickable" style="cursor: pointer;">×</span></span>`});
@@ -2023,8 +2022,8 @@ class CharacterSheetQuickBuild {
 						await this._showSpellPicker(choices.spells.spells.filter, false, (spell) => {
 							if (!sel.featChoices.spells.find(s => s.name === spell.name && s.source === spell.source)) {
 								sel.featChoices.spells.push({
-									name: spell.name, 
-									source: spell.source, 
+									name: spell.name,
+									source: spell.source,
 									level: spell.level,
 									innate: choices.spells.spells.innate,
 									daily: choices.spells.spells.daily,
@@ -2643,8 +2642,6 @@ class CharacterSheetQuickBuild {
 		step.append(section);
 	}
 
-
-
 	// ==========================================
 	// Step 5b: Weapon Mastery
 	// ==========================================
@@ -2902,7 +2899,7 @@ class CharacterSheetQuickBuild {
 
 			(optGroup.options || []).forEach(opt => {
 				const isRepeatable = isRepeatableOpt(opt);
-				
+
 				const chosenElsewhere = !isRepeatable && usedNames.has(opt.name)
 					? getPoolSelectionLevel(poolKey, opt.name, levelKey)
 					: null;
@@ -3434,7 +3431,7 @@ class CharacterSheetQuickBuild {
 
 	_validateSpellsStep ({hasSpellcasting, spellbookLevels, knownCasterInfo, preparedCasterInfo}) {
 		const warnings = [];
-		
+
 		if (spellbookLevels.length > 0) {
 			const totalNeeded = spellbookLevels.length * 2;
 			if (this._selections.spellbookSpells.length < totalNeeded) {
@@ -3459,7 +3456,7 @@ class CharacterSheetQuickBuild {
 				warnings.push(`Cantrips: ${prepCantrips.length}/${preparedCasterInfo.totalCantrips} selected`);
 			}
 		}
-		
+
 		// Show warning but allow continuation
 		if (warnings.length > 0) {
 			JqueryUtil.doToast({
@@ -3467,7 +3464,7 @@ class CharacterSheetQuickBuild {
 				content: `Spell selection incomplete (${warnings.join("; ")}). You can complete this later via the spells tab.`,
 			});
 		}
-		
+
 		return true; // Always allow continuation
 	}
 
@@ -3907,7 +3904,7 @@ class CharacterSheetQuickBuild {
 					try {
 						const rendered = Renderer.get().render({entries: feature.entries});
 						const textOnly = rendered.replace(/<[^>]*>/g, "").substring(0, 150);
-						return textOnly.length >= 150 ? textOnly + "..." : textOnly;
+						return textOnly.length >= 150 ? `${textOnly}...` : textOnly;
 					} catch (e) {
 						const firstEntry = feature.entries.find(e => typeof e === "string") || "";
 						return firstEntry.substring(0, 150) + (firstEntry.length >= 150 ? "..." : "");
@@ -3970,7 +3967,6 @@ class CharacterSheetQuickBuild {
 	 * Mirrors _applyLevelUp() from CharacterSheetLevelUp but processes multiple levels at once.
 	 */
 	async _applyQuickBuild () {
-
 		const conMod = this._state.getAbilityMod("con");
 		const pendingHistoryEntries = [];
 
@@ -3978,7 +3974,6 @@ class CharacterSheetQuickBuild {
 		for (const analysis of this._levelAnalysis) {
 			const {characterLevel, className, classSource, classLevel, classData, features} = analysis;
 			const levelKey = `${className}_${classLevel}`;
-
 
 			// 1. Resolve subclass if this is the subclass level
 			let selectedSubclass = null;

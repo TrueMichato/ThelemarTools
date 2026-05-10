@@ -28,7 +28,6 @@ beforeAll(async () => {
 });
 
 describe("TGTT ↔ PHB/XPHB Feature Parity", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});

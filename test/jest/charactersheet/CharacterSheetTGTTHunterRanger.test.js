@@ -26,7 +26,6 @@ beforeAll(async () => {
 });
 
 describe("TGTT Hunter Ranger", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -361,7 +360,6 @@ describe("TGTT Hunter Ranger", () => {
 	// HUNTER SUBCLASS FEATURES
 	// =========================================================================
 	describe("Hunter Subclass Features", () => {
-
 		describe("Hunter's Prey (Level 3)", () => {
 			it("should grant Colossus Slayer at level 3", () => {
 				makeHunterRanger(3);
@@ -539,7 +537,9 @@ describe("TGTT Hunter Ranger", () => {
 			for (let lvl = 1; lvl <= 20; lvl++) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Ranger", source: "TGTT", level: lvl,
+					name: "Ranger",
+					source: "TGTT",
+					level: lvl,
 					subclass: lvl >= 3
 						? {name: "Hunter", shortName: "Hunter", source: "TGTT"}
 						: undefined,

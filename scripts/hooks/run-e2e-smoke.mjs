@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable no-console */
 // Curated Playwright smoke subset for pre-push.
 // Goal: in ~2-3 minutes, exercise the highest-leverage paths:
 //   - Builder wizard (entry point for every character)

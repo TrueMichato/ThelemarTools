@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable no-console */
 // Pre-commit orchestrator. Fast checks only.
 //   1. classify staged files; bail early on docs-only commits (lint-staged still runs)
 //   2. lint-staged (eslint/stylelint/JSON parse on staged files)

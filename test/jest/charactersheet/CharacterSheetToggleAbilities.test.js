@@ -1403,7 +1403,6 @@ describe("Character Sheet Toggle Abilities", () => {
 // =========================================================================
 
 describe("Patient Defense — Effects & Summary", () => {
-
 	let charState;
 
 	beforeEach(() => {

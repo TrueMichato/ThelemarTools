@@ -371,12 +371,14 @@ describe("CharacterSheetRemoveLevel", () => {
 		it("should remove spellbook spells recorded at the removed level", () => {
 			state.addClass({name: "Wizard", source: "PHB", level: 2});
 			state.recordLevelChoice({level: 1, class: {name: "Wizard", source: "PHB"}, choices: {}});
-			state.recordLevelChoice({level: 2, class: {name: "Wizard", source: "PHB"}, choices: {
-				spellbookSpells: [
-					{name: "Scorching Ray", source: "PHB"},
-					{name: "Misty Step", source: "PHB"},
-				],
-			}});
+			state.recordLevelChoice({level: 2,
+				class: {name: "Wizard", source: "PHB"},
+				choices: {
+					spellbookSpells: [
+						{name: "Scorching Ray", source: "PHB"},
+						{name: "Misty Step", source: "PHB"},
+					],
+				}});
 
 			// Add the spells to known
 			state.addSpell({name: "Scorching Ray", source: "PHB", level: 2, className: "Wizard"});
@@ -415,9 +417,11 @@ describe("CharacterSheetRemoveLevel", () => {
 		it("should remove optional features chosen at the last level", () => {
 			state.addClass({name: "Warlock", source: "PHB", level: 2});
 			state.recordLevelChoice({level: 1, class: {name: "Warlock", source: "PHB"}, choices: {}});
-			state.recordLevelChoice({level: 2, class: {name: "Warlock", source: "PHB"}, choices: {
-				optionalFeatures: [{name: "Agonizing Blast", source: "PHB", type: "EI"}],
-			}});
+			state.recordLevelChoice({level: 2,
+				class: {name: "Warlock", source: "PHB"},
+				choices: {
+					optionalFeatures: [{name: "Agonizing Blast", source: "PHB", type: "EI"}],
+				}});
 			state.addFeature({name: "Agonizing Blast", source: "PHB", level: 2, className: "Warlock"});
 
 			state.removeLastLevel();
@@ -434,9 +438,11 @@ describe("CharacterSheetRemoveLevel", () => {
 		it("should remove combat traditions from the removed level", () => {
 			state.addClass({name: "Fighter", source: "TGTT", level: 2});
 			state.recordLevelChoice({level: 1, class: {name: "Fighter", source: "TGTT"}, choices: {}});
-			state.recordLevelChoice({level: 2, class: {name: "Fighter", source: "TGTT"}, choices: {
-				combatTraditions: ["AM", "RC"],
-			}});
+			state.recordLevelChoice({level: 2,
+				class: {name: "Fighter", source: "TGTT"},
+				choices: {
+					combatTraditions: ["AM", "RC"],
+				}});
 			state.addCombatTradition("AM");
 			state.addCombatTradition("RC");
 
@@ -455,9 +461,11 @@ describe("CharacterSheetRemoveLevel", () => {
 		it("should remove weapon masteries from the removed level", () => {
 			state.addClass({name: "Fighter", source: "XPHB", level: 2});
 			state.recordLevelChoice({level: 1, class: {name: "Fighter", source: "XPHB"}, choices: {}});
-			state.recordLevelChoice({level: 2, class: {name: "Fighter", source: "XPHB"}, choices: {
-				weaponMasteries: ["Longsword|XPHB"],
-			}});
+			state.recordLevelChoice({level: 2,
+				class: {name: "Fighter", source: "XPHB"},
+				choices: {
+					weaponMasteries: ["Longsword|XPHB"],
+				}});
 			state.addWeaponMastery("Longsword|XPHB");
 
 			state.removeLastLevel();

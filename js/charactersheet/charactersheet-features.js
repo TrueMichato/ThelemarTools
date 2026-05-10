@@ -661,8 +661,8 @@ class CharacterSheetFeatures {
 	_formatFeatChoices (choices) {
 		const parts = [];
 		if (choices.ability) parts.push(`+${choices.amount || 1} ${Parser.attAbvToFull(choices.ability)}`);
-		if (choices.skills?.length) parts.push(choices.skills.map(s => s.toTitleCase()).join(", ") + " proficiency");
-		if (choices.expertise?.length) parts.push(choices.expertise.map(s => s.toTitleCase()).join(", ") + " expertise");
+		if (choices.skills?.length) parts.push(`${choices.skills.map(s => s.toTitleCase()).join(", ")} proficiency`);
+		if (choices.expertise?.length) parts.push(`${choices.expertise.map(s => s.toTitleCase()).join(", ")} expertise`);
 		if (choices.languages?.length) parts.push(choices.languages.map(l => l.toTitleCase()).join(", "));
 		return parts.join(" • ") || "None";
 	}
@@ -1903,21 +1903,21 @@ class CharacterSheetFeatures {
 		// Add limited-use custom abilities
 		const customAbilities = this._state.getCustomAbilities?.() || [];
 		const limitedAbilities = customAbilities.filter(a => a.mode === "limited");
-		
+
 		limitedAbilities.forEach(ability => {
 			// Get the uses display (handles both self-contained and linked resources)
 			const uses = this._state.getCustomAbilityUsesDisplay?.(ability.id);
 			if (!uses) return;
-			
+
 			// Skip if this ability links to an existing resource pool (already shown above)
 			if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId !== "stamina") {
 				const linkedResource = resources.find(r => r.id === ability.resourceSource.resourceId);
 				if (linkedResource) return;
 			}
-			
+
 			const canUse = this._state.canUseCustomAbility?.(ability.id) ?? uses.current > 0;
 			const canRestore = uses.current < uses.max;
-			
+
 			const row = e_({outer: `
 				<div class="charsheet__resource-row charsheet__resource-row--custom" data-ability-id="${ability.id}">
 					<span class="charsheet__resource-icon mr-1">${ability.icon || "⚡"}</span>
@@ -2146,7 +2146,7 @@ class CharacterSheetFeatures {
 							const isKnown = existingSkills.has(skill);
 							const isSelected = selected.skills.includes(skill);
 							const displayName = skill.toTitleCase();
-							const btn = e_({outer: `<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isKnown ? 'disabled title="Already proficient" style="opacity:0.5;"' : ""}>${displayName}${isKnown ? " ✓" : ""}</button>`});
+							const btn = e_({outer: `<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isKnown ? "disabled title=\"Already proficient\" style=\"opacity:0.5;\"" : ""}>${displayName}${isKnown ? " ✓" : ""}</button>`});
 							if (!isKnown) {
 								btn.addEventListener("click", () => {
 									if (isSelected) selected.skills = selected.skills.filter(s => s !== skill);
@@ -2216,7 +2216,7 @@ class CharacterSheetFeatures {
 						availableLangs.forEach(lang => {
 							const isKnown = existingLangs.has(lang.toLowerCase());
 							const isSelected = selected.languages.includes(lang);
-							const btn = e_({outer: `<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isKnown ? 'disabled title="Already known" style="opacity:0.5;"' : ""}>${lang.toTitleCase()}${isKnown ? " ✓" : ""}</button>`});
+							const btn = e_({outer: `<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isKnown ? "disabled title=\"Already known\" style=\"opacity:0.5;\"" : ""}>${lang.toTitleCase()}${isKnown ? " ✓" : ""}</button>`});
 							if (!isKnown) {
 								btn.addEventListener("click", () => {
 									if (isSelected) selected.languages = selected.languages.filter(l => l !== lang);

@@ -23,7 +23,6 @@ beforeAll(async () => {
 });
 
 describe("TGTT Multiclass Builds", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -32,16 +31,19 @@ describe("TGTT Multiclass Builds", () => {
 	// RANGER / DRUID (Hunter Ranger 7 / Zodiac Druid 3)
 	// =========================================================================
 	describe("Ranger/Druid Multiclass (Hunter 7 / Stars 3)", () => {
-
 		function makeRangerDruid (rangerLevel = 7, druidLevel = 3) {
 			state.addClass({
-				name: "Ranger", source: "TGTT", level: rangerLevel,
+				name: "Ranger",
+				source: "TGTT",
+				level: rangerLevel,
 				subclass: rangerLevel >= 3
 					? {name: "Hunter", shortName: "Hunter", source: "TGTT"}
 					: undefined,
 			});
 			state.addClass({
-				name: "Druid", source: "TGTT", level: druidLevel,
+				name: "Druid",
+				source: "TGTT",
+				level: druidLevel,
 				subclass: druidLevel >= 3
 					? {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}
 					: undefined,
@@ -131,7 +133,9 @@ describe("TGTT Multiclass Builds", () => {
 			it("should scale focusSwitchesMax with Ranger level progression", () => {
 				// higher Ranger level → more switches
 				const s1 = new CharacterSheetState();
-				s1.addClass({name: "Ranger", source: "TGTT", level: 5,
+				s1.addClass({name: "Ranger",
+					source: "TGTT",
+					level: 5,
 					subclass: {name: "Hunter", shortName: "Hunter", source: "TGTT"}});
 				s1.addClass({name: "Druid", source: "TGTT", level: 1});
 				s1.setAbilityBase("wis", 18);
@@ -139,9 +143,13 @@ describe("TGTT Multiclass Builds", () => {
 				const low = s1.getFeatureCalculations().focusSwitchesMax;
 
 				const s2 = new CharacterSheetState();
-				s2.addClass({name: "Ranger", source: "TGTT", level: 14,
+				s2.addClass({name: "Ranger",
+					source: "TGTT",
+					level: 14,
 					subclass: {name: "Hunter", shortName: "Hunter", source: "TGTT"}});
-				s2.addClass({name: "Druid", source: "TGTT", level: 6,
+				s2.addClass({name: "Druid",
+					source: "TGTT",
+					level: 6,
 					subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"}});
 				s2.setAbilityBase("wis", 18);
 				s2.applyClassFeatureEffects();
@@ -211,16 +219,19 @@ describe("TGTT Multiclass Builds", () => {
 	// SORCERER / WARLOCK (Divine Soul Sorcerer X / Hexblade Warlock Y)
 	// =========================================================================
 	describe("Sorcerer/Warlock Multiclass (Divine Soul 7 / Hexblade 3)", () => {
-
 		function makeSorlock (sorcererLevel = 7, warlockLevel = 3) {
 			state.addClass({
-				name: "Sorcerer", source: "TGTT", level: sorcererLevel,
+				name: "Sorcerer",
+				source: "TGTT",
+				level: sorcererLevel,
 				subclass: sorcererLevel >= 3
 					? {name: "Divine Soul", shortName: "Divine Soul", source: "TGTT"}
 					: undefined,
 			});
 			state.addClass({
-				name: "Warlock", source: "TGTT", level: warlockLevel,
+				name: "Warlock",
+				source: "TGTT",
+				level: warlockLevel,
 				subclass: warlockLevel >= 3
 					? {name: "The Hexblade", shortName: "Hexblade", source: "TGTT"}
 					: undefined,
@@ -455,7 +466,6 @@ describe("TGTT Multiclass Builds", () => {
 	// MULTICLASS SPELL CHOICES — Verifies spell state when multiclassing into casters
 	// =========================================================================
 	describe("Multiclass Spell Choices", () => {
-
 		describe("Known caster multiclass (Ranger into Sorcerer)", () => {
 			it("should store spells added via multiclass with correct sourceClass", () => {
 				// Start as Ranger 5
@@ -463,7 +473,9 @@ describe("TGTT Multiclass Builds", () => {
 
 				// Multiclass into Sorcerer — add class then manually add spells (simulating _applyMulticlass)
 				state.addClass({
-					name: "Sorcerer", source: "TGTT", level: 1,
+					name: "Sorcerer",
+					source: "TGTT",
+					level: 1,
 					casterProgression: "full",
 					spellsKnownProgression: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 13, 13, 14, 14, 15, 15, 15, 15],
 					cantripProgression: [4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
@@ -483,7 +495,9 @@ describe("TGTT Multiclass Builds", () => {
 			it("should store cantrips added via multiclass with correct sourceClass", () => {
 				state.addClass({name: "Ranger", source: "TGTT", level: 5});
 				state.addClass({
-					name: "Sorcerer", source: "TGTT", level: 1,
+					name: "Sorcerer",
+					source: "TGTT",
+					level: 1,
 					casterProgression: "full",
 					cantripProgression: [4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
 				});
@@ -500,7 +514,9 @@ describe("TGTT Multiclass Builds", () => {
 			it("should store prepared spells added via multiclass", () => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 5});
 				state.addClass({
-					name: "Druid", source: "TGTT", level: 1,
+					name: "Druid",
+					source: "TGTT",
+					level: 1,
 					casterProgression: "full",
 					preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
 					cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
@@ -519,7 +535,9 @@ describe("TGTT Multiclass Builds", () => {
 			it("should store cantrips added via Druid multiclass", () => {
 				state.addClass({name: "Fighter", source: "TGTT", level: 5});
 				state.addClass({
-					name: "Druid", source: "TGTT", level: 1,
+					name: "Druid",
+					source: "TGTT",
+					level: 1,
 					casterProgression: "full",
 					cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
 				});
@@ -535,11 +553,15 @@ describe("TGTT Multiclass Builds", () => {
 		describe("Multiclass spell slots are correct with added spells", () => {
 			it("should have correct combined spell slots for Ranger 6 / Druid 1", () => {
 				state.addClass({
-					name: "Ranger", source: "TGTT", level: 6,
+					name: "Ranger",
+					source: "TGTT",
+					level: 6,
 					casterProgression: "artificer",
 				});
 				state.addClass({
-					name: "Druid", source: "TGTT", level: 1,
+					name: "Druid",
+					source: "TGTT",
+					level: 1,
 					casterProgression: "full",
 					preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
 				});

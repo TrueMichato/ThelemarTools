@@ -1194,13 +1194,13 @@ describe("CharacterSheetConditions", () => {
 
 			it("should include all standard restrained effects", () => {
 				const def = CharacterSheetState.getConditionEffects("Restrained", "TGTT");
-				
+
 				const setSpeed = def.effects.find(e => e.type === "setSpeed");
 				expect(setSpeed).toBeDefined();
-				
+
 				const attackDisadv = def.effects.find(e => e.type === "disadvantage" && e.target === "attack");
 				expect(attackDisadv).toBeDefined();
-				
+
 				const dexSaveDisadv = def.effects.find(e => e.type === "disadvantage" && e.target === "save:dex");
 				expect(dexSaveDisadv).toBeDefined();
 			});
@@ -1230,8 +1230,8 @@ describe("CharacterSheetConditions", () => {
 
 			it("should include concentration save disadvantage", () => {
 				const def = CharacterSheetState.getConditionEffects("Poisoned", "TGTT");
-				const concDisadv = def.effects.find(e => 
-					e.type === "disadvantage" && e.target?.includes("concentration")
+				const concDisadv = def.effects.find(e =>
+					e.type === "disadvantage" && e.target?.includes("concentration"),
 				);
 				expect(concDisadv).toBeDefined();
 			});
@@ -1254,14 +1254,14 @@ describe("CharacterSheetConditions", () => {
 
 			it("should give attacks against advantage (not AC penalty like 2024)", () => {
 				const def = CharacterSheetState.getConditionEffects("Slowed", "TGTT");
-				const attacksAgainstAdv = def.effects.find(e => 
-					e.type === "advantage" && e.target === "attacksAgainst"
+				const attacksAgainstAdv = def.effects.find(e =>
+					e.type === "advantage" && e.target === "attacksAgainst",
 				);
 				expect(attacksAgainstAdv).toBeDefined();
-				
+
 				// Should NOT have the 2024-style AC penalty
-				const acPenalty = def.effects.find(e => 
-					e.type === "bonus" && e.target === "ac"
+				const acPenalty = def.effects.find(e =>
+					e.type === "bonus" && e.target === "ac",
 				);
 				expect(acPenalty).toBeUndefined();
 			});
@@ -1269,8 +1269,8 @@ describe("CharacterSheetConditions", () => {
 			it("should have speed multiplier and DEX save disadvantage", () => {
 				const def = CharacterSheetState.getConditionEffects("Slowed", "TGTT");
 				const speedMult = def.effects.find(e => e.type === "speedMultiplier");
-				const dexSaveDisadv = def.effects.find(e => 
-					e.type === "disadvantage" && e.target === "save:dex"
+				const dexSaveDisadv = def.effects.find(e =>
+					e.type === "disadvantage" && e.target === "save:dex",
 				);
 				expect(speedMult).toBeDefined();
 				expect(dexSaveDisadv).toBeDefined();
@@ -1285,16 +1285,16 @@ describe("CharacterSheetConditions", () => {
 
 			it("should grant attack advantage", () => {
 				const def = CharacterSheetState.getConditionEffects("Hidden", "TGTT");
-				const attackAdv = def.effects.find(e => 
-					e.type === "advantage" && e.target === "attack"
+				const attackAdv = def.effects.find(e =>
+					e.type === "advantage" && e.target === "attack",
 				);
 				expect(attackAdv).toBeDefined();
 			});
 
 			it("should grant disadvantage on attacks against", () => {
 				const def = CharacterSheetState.getConditionEffects("Hidden", "TGTT");
-				const attacksAgainstDisadv = def.effects.find(e => 
-					e.type === "disadvantage" && e.target === "attacksAgainst"
+				const attacksAgainstDisadv = def.effects.find(e =>
+					e.type === "disadvantage" && e.target === "attacksAgainst",
 				);
 				expect(attacksAgainstDisadv).toBeDefined();
 			});
@@ -1312,11 +1312,11 @@ describe("CharacterSheetConditions", () => {
 			it("should use standard Grappled when source is not TGTT", () => {
 				const standardDef = CharacterSheetState.getConditionEffects("Grappled");
 				const tgttDef = CharacterSheetState.getConditionEffects("Grappled", "TGTT");
-				
+
 				// Standard should not have somatic constraint
 				const standardSomatic = standardDef.effects.find(e => e.type === "somaticConstraint");
 				expect(standardSomatic).toBeUndefined();
-				
+
 				// TGTT should have somatic constraint
 				const tgttSomatic = tgttDef.effects.find(e => e.type === "somaticConstraint");
 				expect(tgttSomatic).toBeDefined();
@@ -1325,16 +1325,16 @@ describe("CharacterSheetConditions", () => {
 			it("should use standard Slowed when source is not TGTT", () => {
 				const standardDef = CharacterSheetState.getConditionEffects("Slowed");
 				const tgttDef = CharacterSheetState.getConditionEffects("Slowed", "TGTT");
-				
+
 				// Standard 2024 Slowed has AC penalty
-				const standardAcBonus = standardDef.effects.find(e => 
-					e.type === "bonus" && e.target === "ac"
+				const standardAcBonus = standardDef.effects.find(e =>
+					e.type === "bonus" && e.target === "ac",
 				);
 				expect(standardAcBonus).toBeDefined();
-				
+
 				// TGTT Slowed has advantage on attacks against
-				const tgttAttacksAgainst = tgttDef.effects.find(e => 
-					e.type === "advantage" && e.target === "attacksAgainst"
+				const tgttAttacksAgainst = tgttDef.effects.find(e =>
+					e.type === "advantage" && e.target === "attacksAgainst",
 				);
 				expect(tgttAttacksAgainst).toBeDefined();
 			});

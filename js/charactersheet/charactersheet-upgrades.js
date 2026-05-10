@@ -373,7 +373,7 @@ class CharacterSheetUpgrades {
 					const renderedEntries = upgrade.entries?.length
 						? Renderer.get().render({type: "entries", entries: upgrade.entries})
 						: "";
-					const btnAttr = !canAfford ? 'disabled title="Insufficient gold"' : `title="Apply for ${gpCost} gp"`;
+					const btnAttr = !canAfford ? "disabled title=\"Insufficient gold\"" : `title="Apply for ${gpCost} gp"`;
 					const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
 					const baseHint = isBase
 						? `<span class="badge badge-default ve-small ml-1" title="Per-upgrade base cost. The DM may scale this for the specific item per the source's pricing tables.">base</span>`
@@ -527,7 +527,6 @@ class CharacterSheetUpgrades {
 			if (e.target.closest(".charsheet__gem-socket-btn")) {
 				doClose(false);
 				await this.showGemstoneSocketModal(itemId);
-				return;
 			}
 		});
 	}
@@ -815,7 +814,7 @@ class CharacterSheetUpgrades {
 			content.append(e_({outer: `
 				<p class="ve-muted">You don't have any empowered gemstones in your inventory. Use the "Empower Gemstone" action to create one first.</p>
 			`}));
-				} else {
+		} else {
 			content.append(e_({outer: `<h5 class="mb-2">Available Empowered Gemstones</h5>`}));
 
 			for (const gem of empoweredGems) {
@@ -910,8 +909,7 @@ class CharacterSheetUpgrades {
 			const name = upgrade.name.toLowerCase();
 
 			if (name === "muffled") effects.muffled = true;
-			else if (name === "reinforced") { effects.reinforced = true; effects.critDamageReduction = 3; }
-			else if (name === "spiked") effects.spiked = true;
+			else if (name === "reinforced") { effects.reinforced = true; effects.critDamageReduction = 3; } else if (name === "spiked") effects.spiked = true;
 			else if (name === "breathable") effects.breathable = true;
 			else if (name === "insulated") effects.insulated = true;
 			else if (name === "climbing harness") effects.climbingHarness = true;

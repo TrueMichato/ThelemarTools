@@ -57,86 +57,90 @@ describe("CharacterSheetBuilder feature entry ingestion", () => {
 	});
 });
 describe("CharacterSheetBuilder race optional feature choices (Nyuidj pattern)", () => {
-        let CharacterSheetBuilder;
+	let CharacterSheetBuilder;
 
-        beforeAll(() => {
-                CharacterSheetBuilder = globalThis.CharacterSheetBuilder;
-        });
+	beforeAll(() => {
+		CharacterSheetBuilder = globalThis.CharacterSheetBuilder;
+	});
 
-        function makeBuilder (optionalFeatures = []) {
-                const builder = Object.create(CharacterSheetBuilder.prototype);
-                builder._selectedRaceOptionalFeatures = {};
-                builder._page = {
-                        getOptionalFeatures: () => optionalFeatures,
-                        resolveOptionalFeatureSource: (name, sources) => sources[0] || "TGTT",
-                };
-                return builder;
-        }
+	function makeBuilder (optionalFeatures = []) {
+		const builder = Object.create(CharacterSheetBuilder.prototype);
+		builder._selectedRaceOptionalFeatures = {};
+		builder._page = {
+			getOptionalFeatures: () => optionalFeatures,
+			resolveOptionalFeatureSource: (name, sources) => sources[0] || "TGTT",
+		};
+		return builder;
+	}
 
-        const DREAMWALK = {name: "Dreamwalk", source: "TGTT", featureType: ["DW:C"], prerequisite: []};
-        const DREAMBEND = {name: "Dreambend", source: "TGTT", featureType: ["DW:C"], prerequisite: []};
-        const DREAMWATCH = {name: "Dreamwatch", source: "TGTT", featureType: ["DW:C"], prerequisite: []};
-        const DREAMJUMP = {
-                name: "Dreamjump", source: "TGTT", featureType: ["DW:S"],
-                prerequisite: [{otherSummary: {entry: "{@optfeature Dreamwalk|TGTT} ability", entrySummary: "Dreamwalk"}}],
-        };
-        const DREAMSNATCH = {
-                name: "Dreamsnatch", source: "TGTT", featureType: ["DW:S"],
-                prerequisite: [{otherSummary: {entry: "{@optfeature Dreamwatch|TGTT} ability", entrySummary: "Dreamwatch"}}],
-        };
+	const DREAMWALK = {name: "Dreamwalk", source: "TGTT", featureType: ["DW:C"], prerequisite: []};
+	const DREAMBEND = {name: "Dreambend", source: "TGTT", featureType: ["DW:C"], prerequisite: []};
+	const DREAMWATCH = {name: "Dreamwatch", source: "TGTT", featureType: ["DW:C"], prerequisite: []};
+	const DREAMJUMP = {
+		name: "Dreamjump",
+		source: "TGTT",
+		featureType: ["DW:S"],
+		prerequisite: [{otherSummary: {entry: "{@optfeature Dreamwalk|TGTT} ability", entrySummary: "Dreamwalk"}}],
+	};
+	const DREAMSNATCH = {
+		name: "Dreamsnatch",
+		source: "TGTT",
+		featureType: ["DW:S"],
+		prerequisite: [{otherSummary: {entry: "{@optfeature Dreamwatch|TGTT} ability", entrySummary: "Dreamwatch"}}],
+	};
 
-        const NYUIDJ_RACE = {
-                name: "Nyuidj",
-                source: "TGTT",
-                featureGrants: [{name: "Dreamwalk", source: "TGTT"}],
-                optionalfeatureProgression: [{
-                        name: "Dreamwalker Ability",
-                        featureType: ["DW:C", "DW:S"],
-                        progression: {"1": 1},
-                }],
-        };
+	const NYUIDJ_RACE = {
+		name: "Nyuidj",
+		source: "TGTT",
+		featureGrants: [{name: "Dreamwalk", source: "TGTT"}],
+		optionalfeatureProgression: [{
+			name: "Dreamwalker Ability",
+			featureType: ["DW:C", "DW:S"],
+			progression: {"1": 1},
+		}],
+	};
 
-        test("returns null for a race without optionalfeatureProgression", () => {
-                const builder = makeBuilder([DREAMWALK, DREAMBEND]);
-                const result = builder._renderRaceOptionalFeatureChoices({name: "Human", source: "PHB"});
-                expect(result).toBeNull();
-        });
+	test("returns null for a race without optionalfeatureProgression", () => {
+		const builder = makeBuilder([DREAMWALK, DREAMBEND]);
+		const result = builder._renderRaceOptionalFeatureChoices({name: "Human", source: "PHB"});
+		expect(result).toBeNull();
+	});
 
-        test("returns a container element for Nyuidj (has optionalfeatureProgression)", () => {
-                const builder = makeBuilder([DREAMWALK, DREAMBEND, DREAMWATCH, DREAMJUMP, DREAMSNATCH]);
-                const result = builder._renderRaceOptionalFeatureChoices(NYUIDJ_RACE);
-                expect(result).toBeTruthy();
-        });
+	test("returns a container element for Nyuidj (has optionalfeatureProgression)", () => {
+		const builder = makeBuilder([DREAMWALK, DREAMBEND, DREAMWATCH, DREAMJUMP, DREAMSNATCH]);
+		const result = builder._renderRaceOptionalFeatureChoices(NYUIDJ_RACE);
+		expect(result).toBeTruthy();
+	});
 
-        test("_getRaceOptFeatAvailableOptions excludes auto-granted features", () => {
-                const builder = makeBuilder([DREAMWALK, DREAMBEND, DREAMWATCH]);
-                const opts = builder._getRaceOptFeatAvailableOptions(NYUIDJ_RACE, ["DW:C", "DW:S"], {});
-                expect(opts.every(o => o.name !== "Dreamwalk")).toBe(true);
-        });
+	test("_getRaceOptFeatAvailableOptions excludes auto-granted features", () => {
+		const builder = makeBuilder([DREAMWALK, DREAMBEND, DREAMWATCH]);
+		const opts = builder._getRaceOptFeatAvailableOptions(NYUIDJ_RACE, ["DW:C", "DW:S"], {});
+		expect(opts.every(o => o.name !== "Dreamwalk")).toBe(true);
+	});
 
-        test("_getRaceOptFeatAvailableOptions shows Dreamjump when Dreamwalk is granted", () => {
-                const builder = makeBuilder([DREAMWALK, DREAMJUMP]);
-                const opts = builder._getRaceOptFeatAvailableOptions(NYUIDJ_RACE, ["DW:C", "DW:S"], {});
-                expect(opts.some(o => o.name === "Dreamjump")).toBe(true);
-        });
+	test("_getRaceOptFeatAvailableOptions shows Dreamjump when Dreamwalk is granted", () => {
+		const builder = makeBuilder([DREAMWALK, DREAMJUMP]);
+		const opts = builder._getRaceOptFeatAvailableOptions(NYUIDJ_RACE, ["DW:C", "DW:S"], {});
+		expect(opts.some(o => o.name === "Dreamjump")).toBe(true);
+	});
 
-        test("_getRaceOptFeatAvailableOptions hides Dreamsnatch when Dreamwatch not granted", () => {
-                const builder = makeBuilder([DREAMWALK, DREAMSNATCH]);
-                // Only Dreamwalk is in featureGrants, Dreamwatch is not
-                const opts = builder._getRaceOptFeatAvailableOptions(NYUIDJ_RACE, ["DW:C", "DW:S"], {});
-                expect(opts.every(o => o.name !== "Dreamsnatch")).toBe(true);
-        });
+	test("_getRaceOptFeatAvailableOptions hides Dreamsnatch when Dreamwatch not granted", () => {
+		const builder = makeBuilder([DREAMWALK, DREAMSNATCH]);
+		// Only Dreamwalk is in featureGrants, Dreamwatch is not
+		const opts = builder._getRaceOptFeatAvailableOptions(NYUIDJ_RACE, ["DW:C", "DW:S"], {});
+		expect(opts.every(o => o.name !== "Dreamsnatch")).toBe(true);
+	});
 
-        test("_applyRaceFeatureGrants adds auto-granted features to state", () => {
-                const captured = [];
-                const builder = Object.create(CharacterSheetBuilder.prototype);
-                builder._selectedRace = NYUIDJ_RACE;
-                builder._state = {addFeature: (f) => captured.push(f)};
-                builder._page = {getOptionalFeatures: () => [DREAMWALK]};
+	test("_applyRaceFeatureGrants adds auto-granted features to state", () => {
+		const captured = [];
+		const builder = Object.create(CharacterSheetBuilder.prototype);
+		builder._selectedRace = NYUIDJ_RACE;
+		builder._state = {addFeature: (f) => captured.push(f)};
+		builder._page = {getOptionalFeatures: () => [DREAMWALK]};
 
-                builder._applyRaceFeatureGrants();
+		builder._applyRaceFeatureGrants();
 
-                expect(captured).toHaveLength(1);
-                expect(captured[0].name).toBe("Dreamwalk");
-        });
+		expect(captured).toHaveLength(1);
+		expect(captured[0].name).toBe("Dreamwalk");
+	});
 });

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable no-console */
 // Pre-push orchestrator. The heavyweight regression net.
 //   1. full eslint     (npm run test:js)
 //   2. full stylelint  (npm run test:css:lint)
@@ -27,9 +28,9 @@ const run = (label, cmd, args) => {
 	log(`✓ ${label}`);
 };
 
-run("eslint",          "npm", ["run", "test:js"]);
-run("stylelint",       "npm", ["run", "test:css:lint"]);
-run("jest (full)",     "npm", ["run", "test:unit", "--", "--no-coverage"]);
+run("eslint", "npm", ["run", "test:js"]);
+run("stylelint", "npm", ["run", "test:css:lint"]);
+run("jest (full)", "npm", ["run", "test:unit", "--", "--no-coverage"]);
 run("data validation", "npm", ["run", "test:data"]);
 
 if (process.env.RUN_E2E_FULL === "1") {

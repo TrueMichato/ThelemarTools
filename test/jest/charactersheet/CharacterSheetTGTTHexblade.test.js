@@ -24,7 +24,6 @@ beforeAll(async () => {
 });
 
 describe("TGTT Hexblade Warlock", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -180,7 +179,6 @@ describe("TGTT Hexblade Warlock", () => {
 	// COMBAT METHODS (Hexblade grants at L3)
 	// =========================================================================
 	describe("Combat Methods (Hexblade subclass)", () => {
-
 		beforeEach(() => {
 			makeHexblade(5);
 			// Warlocks need explicit combat traditions to activate the combat system
@@ -235,13 +233,17 @@ describe("TGTT Hexblade Warlock", () => {
 
 		it("should scale stamina pool at higher levels", () => {
 			const lowLevel = new CharacterSheetState();
-			lowLevel.addClass({name: "Warlock", source: "TGTT", level: 3,
+			lowLevel.addClass({name: "Warlock",
+				source: "TGTT",
+				level: 3,
 				subclass: {name: "The Hexblade", shortName: "Hexblade", source: "TGTT"}});
 			lowLevel.addCombatTradition({name: "Mirror's Glint", source: "TGTT"});
 			lowLevel.ensureStaminaInitialized();
 
 			const highLevel = new CharacterSheetState();
-			highLevel.addClass({name: "Warlock", source: "TGTT", level: 15,
+			highLevel.addClass({name: "Warlock",
+				source: "TGTT",
+				level: 15,
 				subclass: {name: "The Hexblade", shortName: "Hexblade", source: "TGTT"}});
 			highLevel.addCombatTradition({name: "Mirror's Glint", source: "TGTT"});
 			highLevel.ensureStaminaInitialized();
@@ -323,7 +325,7 @@ describe("TGTT Hexblade Warlock", () => {
 
 		it("should scale curse mechanics with level", () => {
 			const cases = [
-				{level: 3, prof: 2, curseDmg: 2, curseHeal: 7},   // CHA +4, 4+3=7
+				{level: 3, prof: 2, curseDmg: 2, curseHeal: 7}, // CHA +4, 4+3=7
 				{level: 10, prof: 4, curseDmg: 4, curseHeal: 14}, // CHA +4, 4+10=14
 				{level: 17, prof: 6, curseDmg: 6, curseHeal: 21}, // CHA +4, 4+17=21
 			];
@@ -331,7 +333,9 @@ describe("TGTT Hexblade Warlock", () => {
 			for (const {level, curseDmg, curseHeal} of cases) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Warlock", source: "TGTT", level,
+					name: "Warlock",
+					source: "TGTT",
+					level,
 					subclass: {name: "The Hexblade", shortName: "Hexblade", source: "TGTT"},
 				});
 				s.setAbilityBase("cha", 18); // +4
@@ -347,7 +351,6 @@ describe("TGTT Hexblade Warlock", () => {
 	// HEXBLADE SUBCLASS FEATURES
 	// =========================================================================
 	describe("Hexblade Subclass Features", () => {
-
 		describe("Accursed Specter (Level 6)", () => {
 			it("should grant Accursed Specter at level 6", () => {
 				makeHexblade(6);
@@ -390,7 +393,9 @@ describe("TGTT Hexblade Warlock", () => {
 				it(`should have accursedSpecterTempHp = ${expected} at level ${level}`, () => {
 					const s = new CharacterSheetState();
 					s.addClass({
-						name: "Warlock", source: "TGTT", level,
+						name: "Warlock",
+						source: "TGTT",
+						level,
 						subclass: {name: "The Hexblade", shortName: "Hexblade", source: "TGTT"},
 					});
 					s.setAbilityBase("cha", 18);
@@ -452,7 +457,9 @@ describe("TGTT Hexblade Warlock", () => {
 			it(`should have ${arcanumLevel}th-level Mystic Arcanum available at Warlock level ${warlockLevel}`, () => {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Warlock", source: "TGTT", level: warlockLevel,
+					name: "Warlock",
+					source: "TGTT",
+					level: warlockLevel,
 					subclass: {name: "The Hexblade", shortName: "Hexblade", source: "TGTT"},
 				});
 				s.setAbilityBase("cha", 18);
@@ -525,7 +532,9 @@ describe("TGTT Hexblade Warlock", () => {
 			for (let lvl = 1; lvl <= 20; lvl++) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Warlock", source: "TGTT", level: lvl,
+					name: "Warlock",
+					source: "TGTT",
+					level: lvl,
 					subclass: lvl >= 3
 						? {name: "The Hexblade", shortName: "Hexblade", source: "TGTT"}
 						: undefined,

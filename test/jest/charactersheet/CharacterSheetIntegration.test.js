@@ -660,8 +660,8 @@ describe("Integration Tests", () => {
 		});
 
 		it("should calculate encumbrance based on carrying capacity", () => {
-				// Set to 2024 rules for predictable 15 x STR capacity
-				state.setSetting("thelemar_carryWeight", false);
+			// Set to 2024 rules for predictable 15 x STR capacity
+			state.setSetting("thelemar_carryWeight", false);
 			expect(state.getCarryingCapacity()).toBe(240);
 
 			state.addItem({name: "Plate Armor", weight: 65});

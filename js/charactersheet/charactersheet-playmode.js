@@ -526,7 +526,7 @@ export class CharacterSheetPlayMode {
 				const durSpan = document.createElement("span");
 				durSpan.className = "pm-status__indicator-duration";
 				durSpan.textContent = `${roundsLeft}r`;
-				el.textContent = labelText + " ";
+				el.textContent = `${labelText} `;
 				el.appendChild(durSpan);
 				if (roundsLeft <= 1) el.classList.add("pm-status__indicator--expiring");
 			} else {
@@ -2654,9 +2654,12 @@ export class CharacterSheetPlayMode {
 		} else {
 			// Fallback: open custom modal pre-filled with type info
 			const typeLabels = {
-				"familiar": "Familiar", "beast-companion": "Beast Companion",
-				"drake": "Drake Companion", "steel-defender": "Steel Defender",
-				"wild-shape": "Wild Shape Form", "wild-companion": "Wild Companion",
+				"familiar": "Familiar",
+				"beast-companion": "Beast Companion",
+				"drake": "Drake Companion",
+				"steel-defender": "Steel Defender",
+				"wild-shape": "Wild Shape Form",
+				"wild-companion": "Wild Companion",
 				"find-steed": "Steed",
 			};
 			this._showCustomCompanionModal({prefillType: typeLabels[type] || type});
@@ -3096,7 +3099,6 @@ export class CharacterSheetPlayMode {
 	}
 
 	_applyHpChange (mode, val, damageType = "") {
-
 		if (mode === "heal") {
 			const current = this._state.getCurrentHp();
 			const max = this._state.getMaxHp();
@@ -4460,7 +4462,7 @@ export class CharacterSheetPlayMode {
 		content.addEventListener("click", (e) => e.stopPropagation());
 
 		// Drag to reposition
-		let dragging = false, dragOffX = 0, dragOffY = 0;
+		let dragging = false; let dragOffX = 0; let dragOffY = 0;
 		titleBar.addEventListener("mousedown", (e) => {
 			if (e.target === titleInput || e.target === colorPicker || e.target === delBtn) return;
 			dragging = true;
@@ -5176,7 +5178,7 @@ export class CharacterSheetPlayMode {
 		const seenKeys = new Set();
 
 		equippedWeapons.forEach(w => {
-			const key = `${w.name}${w.source ? "|" + w.source : ""}`;
+			const key = `${w.name}${w.source ? `|${w.source}` : ""}`;
 			if (!seenKeys.has(key)) {
 				seenKeys.add(key);
 				weaponEntries.push({key, name: w.name, source: w.source});
@@ -5184,7 +5186,7 @@ export class CharacterSheetPlayMode {
 		});
 
 		allAttacks.forEach(a => {
-			const key = `${a.name}${a.source ? "|" + a.source : ""}`;
+			const key = `${a.name}${a.source ? `|${a.source}` : ""}`;
 			if (!seenKeys.has(key)) {
 				seenKeys.add(key);
 				weaponEntries.push({key, name: a.name, source: a.source});
@@ -5268,7 +5270,6 @@ export class CharacterSheetPlayMode {
 
 		document.body.appendChild(overlay);
 	}
-
 }
 
 CharacterSheetPlayMode.CONDITION_DESCRIPTIONS = {
