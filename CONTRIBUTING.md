@@ -23,6 +23,10 @@ In general, the following should be noted:
 
 Bugs should be reported via the `/bugreport` bot command in our [Discord](https://discord.gg/5etools).
 
+## Git Hooks
+
+This fork installs pre-commit and pre-push git hooks via Husky to keep regressions out of the character sheet, DM Screen, and TGTT/Thelemar homebrew surfaces. The hooks are wired up automatically by `npm install`. See [`docs/contributing/git-hooks.md`](docs/contributing/git-hooks.md) for what each hook runs, how to opt into Playwright E2E (`RUN_E2E=1 git push`), and how to bypass when necessary.
+
 ---
 
 ## Developer Notes
