@@ -311,6 +311,7 @@ export class CharacterSheetNotes {
 
 			return processedLines.join("\n");
 		} catch (e) {
+			// eslint-disable-next-line no-console
 			console.error("[Notes] Error rendering content:", e);
 			// Fallback to escaped text with line breaks
 			return content.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
@@ -342,6 +343,7 @@ export class CharacterSheetNotes {
 				processed = Renderer.get().render(processed);
 			} catch (e) {
 				// If renderer fails, leave the tags as-is
+				// eslint-disable-next-line no-console
 				console.warn("[Notes] Error rendering 5etools tags:", e);
 			}
 		}
