@@ -972,7 +972,7 @@ describe("Character Sheet Custom Abilities", () => {
 			expect(charState.isConcentrating()).toBe(false);
 			charState.toggleCustomAbility(abilityId);
 			expect(charState.isConcentrating()).toBe(true);
-			
+
 			// Should be concentrating on the ability
 			const conc = charState.getConcentratingSpell();
 			expect(conc?.customAbilityId).toBe(abilityId);

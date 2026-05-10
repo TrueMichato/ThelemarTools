@@ -189,7 +189,7 @@ describe("CharacterSheetRollHistory", () => {
 	// ===================================================================
 	describe("HTML safety", () => {
 		test("should escape HTML in title and breakdown for display", () => {
-			history.addRoll({title: '<script>alert("xss")</script>', total: 10, breakdown: '<img onerror=alert(1)>'});
+			history.addRoll({title: "<script>alert(\"xss\")</script>", total: 10, breakdown: "<img onerror=alert(1)>"});
 			const roll = history.getRolls()[0];
 			// The data is stored as-is; escaping happens in _buildRollEntry/_escapeHtml
 			expect(history._escapeHtml(roll.title)).not.toContain("<script>");

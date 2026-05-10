@@ -223,270 +223,280 @@ describe("CharacterSheetBuilder spell enrichment", () => {
 	});
 });
 describe("CharacterSheetBuilder _getKnownCasterInfoForBuilder()", () => {
-        let CharacterSheetBuilder;
+	let CharacterSheetBuilder;
 
-        beforeAll(() => {
-                CharacterSheetBuilder = globalThis.CharacterSheetBuilder;
-        });
+	beforeAll(() => {
+		CharacterSheetBuilder = globalThis.CharacterSheetBuilder;
+	});
 
-        function makeBuilder (cls, subclass = null) {
-                const builder = Object.create(CharacterSheetBuilder.prototype);
-                builder._selectedClass = cls;
-                builder._selectedSubclass = subclass;
-                builder._divineSoulAffinity = null;
-                return builder;
-        }
+	function makeBuilder (cls, subclass = null) {
+		const builder = Object.create(CharacterSheetBuilder.prototype);
+		builder._selectedClass = cls;
+		builder._selectedSubclass = subclass;
+		builder._divineSoulAffinity = null;
+		return builder;
+	}
 
-        // PHB Wizard: spellsKnownProgressionFixed, cantripProgression, no preparedSpellsProgression
-        const PHB_WIZARD = {
-                name: "Wizard", source: "PHB",
-                casterProgression: "full",
-                spellcastingAbility: "int",
-                cantripProgression: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
-                spellsKnownProgressionFixed: [6, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                spellsKnownProgressionFixedAllowLowerLevel: true,
-        };
+	// PHB Wizard: spellsKnownProgressionFixed, cantripProgression, no preparedSpellsProgression
+	const PHB_WIZARD = {
+		name: "Wizard",
+		source: "PHB",
+		casterProgression: "full",
+		spellcastingAbility: "int",
+		cantripProgression: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+		spellsKnownProgressionFixed: [6, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+		spellsKnownProgressionFixedAllowLowerLevel: true,
+	};
 
-        // XPHB Wizard: adds preparedSpellsProgression alongside spellsKnownProgressionFixed
-        const XPHB_WIZARD = {
-                name: "Wizard", source: "XPHB",
-                casterProgression: "full",
-                spellcastingAbility: "int",
-                cantripProgression: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
-                preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 18, 19, 21, 22, 23, 24, 25],
-                spellsKnownProgressionFixed: [6, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                spellsKnownProgressionFixedAllowLowerLevel: true,
-        };
+	// XPHB Wizard: adds preparedSpellsProgression alongside spellsKnownProgressionFixed
+	const XPHB_WIZARD = {
+		name: "Wizard",
+		source: "XPHB",
+		casterProgression: "full",
+		spellcastingAbility: "int",
+		cantripProgression: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+		preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 18, 19, 21, 22, 23, 24, 25],
+		spellsKnownProgressionFixed: [6, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+		spellsKnownProgressionFixedAllowLowerLevel: true,
+	};
 
-        // PHB Cleric: cantripProgression only, no preparedSpellsProgression, no spellsKnownFixed
-        const PHB_CLERIC = {
-                name: "Cleric", source: "PHB",
-                casterProgression: "full",
-                spellcastingAbility: "wis",
-                cantripProgression: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
-        };
+	// PHB Cleric: cantripProgression only, no preparedSpellsProgression, no spellsKnownFixed
+	const PHB_CLERIC = {
+		name: "Cleric",
+		source: "PHB",
+		casterProgression: "full",
+		spellcastingAbility: "wis",
+		cantripProgression: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+	};
 
-        // XPHB Cleric: has preparedSpellsProgression, cantripProgression, no spellsKnownFixed
-        const XPHB_CLERIC = {
-                name: "Cleric", source: "XPHB",
-                casterProgression: "full",
-                spellcastingAbility: "wis",
-                cantripProgression: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
-                preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
-        };
+	// XPHB Cleric: has preparedSpellsProgression, cantripProgression, no spellsKnownFixed
+	const XPHB_CLERIC = {
+		name: "Cleric",
+		source: "XPHB",
+		casterProgression: "full",
+		spellcastingAbility: "wis",
+		cantripProgression: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+		preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
+	};
 
-        // PHB Druid: same shape as Cleric
-        const PHB_DRUID = {
-                name: "Druid", source: "PHB",
-                casterProgression: "full",
-                spellcastingAbility: "wis",
-                cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-        };
+	// PHB Druid: same shape as Cleric
+	const PHB_DRUID = {
+		name: "Druid",
+		source: "PHB",
+		casterProgression: "full",
+		spellcastingAbility: "wis",
+		cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+	};
 
-        // PHB Bard: known-caster (spellsKnownProgression + cantripProgression)
-        const PHB_BARD = {
-                name: "Bard", source: "PHB",
-                casterProgression: "full",
-                spellcastingAbility: "cha",
-                cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-                spellsKnownProgression: [4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 15, 16, 18, 19, 19, 20, 22, 22, 22],
-        };
+	// PHB Bard: known-caster (spellsKnownProgression + cantripProgression)
+	const PHB_BARD = {
+		name: "Bard",
+		source: "PHB",
+		casterProgression: "full",
+		spellcastingAbility: "cha",
+		cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+		spellsKnownProgression: [4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 15, 16, 18, 19, 19, 20, 22, 22, 22],
+	};
 
-        // PHB Barbarian: non-caster
-        const PHB_BARBARIAN = {
-                name: "Barbarian", source: "PHB",
-        };
+	// PHB Barbarian: non-caster
+	const PHB_BARBARIAN = {
+		name: "Barbarian", source: "PHB",
+	};
 
-        test("PHB Wizard → isSpellbookCaster, 3 cantrips, 6 spellbook spells", () => {
-                const info = makeBuilder(PHB_WIZARD)._getKnownCasterInfoForBuilder();
-                expect(info).not.toBeNull();
-                expect(info.isSpellbookCaster).toBe(true);
-                expect(info.spellbookCount).toBe(6);
-                expect(info.cantripCount).toBe(3);
-                expect(info.spellCount).toBe(0);
-        });
+	test("PHB Wizard → isSpellbookCaster, 3 cantrips, 6 spellbook spells", () => {
+		const info = makeBuilder(PHB_WIZARD)._getKnownCasterInfoForBuilder();
+		expect(info).not.toBeNull();
+		expect(info.isSpellbookCaster).toBe(true);
+		expect(info.spellbookCount).toBe(6);
+		expect(info.cantripCount).toBe(3);
+		expect(info.spellCount).toBe(0);
+	});
 
-        test("XPHB Wizard → isSpellbookCaster (preparedSpellsProgression does not override)", () => {
-                const info = makeBuilder(XPHB_WIZARD)._getKnownCasterInfoForBuilder();
-                expect(info).not.toBeNull();
-                expect(info.isSpellbookCaster).toBe(true);
-                expect(info.spellbookCount).toBe(6);
-                expect(info.cantripCount).toBe(3);
-        });
+	test("XPHB Wizard → isSpellbookCaster (preparedSpellsProgression does not override)", () => {
+		const info = makeBuilder(XPHB_WIZARD)._getKnownCasterInfoForBuilder();
+		expect(info).not.toBeNull();
+		expect(info.isSpellbookCaster).toBe(true);
+		expect(info.spellbookCount).toBe(6);
+		expect(info.cantripCount).toBe(3);
+	});
 
-        test("PHB Cleric → not spellbook, cantrip-only (spellCount 0)", () => {
-                const info = makeBuilder(PHB_CLERIC)._getKnownCasterInfoForBuilder();
-                expect(info).not.toBeNull();
-                expect(info.isSpellbookCaster).toBe(false);
-                expect(info.cantripCount).toBe(3);
-                expect(info.spellCount).toBe(0);
-        });
+	test("PHB Cleric → not spellbook, cantrip-only (spellCount 0)", () => {
+		const info = makeBuilder(PHB_CLERIC)._getKnownCasterInfoForBuilder();
+		expect(info).not.toBeNull();
+		expect(info.isSpellbookCaster).toBe(false);
+		expect(info.cantripCount).toBe(3);
+		expect(info.spellCount).toBe(0);
+	});
 
-        test("XPHB Cleric → prepared-caster, prompts for initial prepared spells + cantrips", () => {
-                const info = makeBuilder(XPHB_CLERIC)._getKnownCasterInfoForBuilder();
-                expect(info).not.toBeNull();
-                expect(info.isSpellbookCaster).toBe(false);
-                expect(info.isPreparedCaster).toBe(true);
-                expect(info.cantripCount).toBe(3);
-                // XPHB prepared-caster: level-1 prepared count drives the spell picker so
-                // new characters do not start with an empty prepared list.
-                expect(info.spellCount).toBe(4);
-        });
+	test("XPHB Cleric → prepared-caster, prompts for initial prepared spells + cantrips", () => {
+		const info = makeBuilder(XPHB_CLERIC)._getKnownCasterInfoForBuilder();
+		expect(info).not.toBeNull();
+		expect(info.isSpellbookCaster).toBe(false);
+		expect(info.isPreparedCaster).toBe(true);
+		expect(info.cantripCount).toBe(3);
+		// XPHB prepared-caster: level-1 prepared count drives the spell picker so
+		// new characters do not start with an empty prepared list.
+		expect(info.spellCount).toBe(4);
+	});
 
-        test("PHB Druid → cantrip-only (2 cantrips)", () => {
-                const info = makeBuilder(PHB_DRUID)._getKnownCasterInfoForBuilder();
-                expect(info).not.toBeNull();
-                expect(info.cantripCount).toBe(2);
-                expect(info.spellCount).toBe(0);
-        });
+	test("PHB Druid → cantrip-only (2 cantrips)", () => {
+		const info = makeBuilder(PHB_DRUID)._getKnownCasterInfoForBuilder();
+		expect(info).not.toBeNull();
+		expect(info.cantripCount).toBe(2);
+		expect(info.spellCount).toBe(0);
+	});
 
-        test("PHB Bard → known-caster (4 spells, 2 cantrips)", () => {
-                const info = makeBuilder(PHB_BARD)._getKnownCasterInfoForBuilder();
-                expect(info).not.toBeNull();
-                expect(info.isSpellbookCaster).toBe(false);
-                expect(info.spellCount).toBe(4);
-                expect(info.cantripCount).toBe(2);
-        });
+	test("PHB Bard → known-caster (4 spells, 2 cantrips)", () => {
+		const info = makeBuilder(PHB_BARD)._getKnownCasterInfoForBuilder();
+		expect(info).not.toBeNull();
+		expect(info.isSpellbookCaster).toBe(false);
+		expect(info.spellCount).toBe(4);
+		expect(info.cantripCount).toBe(2);
+	});
 
-        test("Barbarian → returns null", () => {
-                const info = makeBuilder(PHB_BARBARIAN)._getKnownCasterInfoForBuilder();
-                expect(info).toBeNull();
-        });
+	test("Barbarian → returns null", () => {
+		const info = makeBuilder(PHB_BARBARIAN)._getKnownCasterInfoForBuilder();
+		expect(info).toBeNull();
+	});
 
-        // Regression: TGTT/XPHB prepared casters must prompt for initial prepared spells
-        // at builder (L1) so they don't start with an empty spell list. See bugs.md.
-        const TGTT_RANGER = {
-                name: "Ranger", source: "TGTT",
-                casterProgression: "artificer",
-                spellcastingAbility: "wis",
-                preparedSpellsProgression: [2, 3, 4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15],
-                // No cantripProgression: XPHB/TGTT Ranger gets no cantrips (this is correct per 2024 rules).
-        };
+	// Regression: TGTT/XPHB prepared casters must prompt for initial prepared spells
+	// at builder (L1) so they don't start with an empty spell list. See bugs.md.
+	const TGTT_RANGER = {
+		name: "Ranger",
+		source: "TGTT",
+		casterProgression: "artificer",
+		spellcastingAbility: "wis",
+		preparedSpellsProgression: [2, 3, 4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15],
+		// No cantripProgression: XPHB/TGTT Ranger gets no cantrips (this is correct per 2024 rules).
+	};
 
-        const TGTT_DRUID = {
-                name: "Druid", source: "TGTT",
-                casterProgression: "full",
-                spellcastingAbility: "wis",
-                preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
-                cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-        };
+	const TGTT_DRUID = {
+		name: "Druid",
+		source: "TGTT",
+		casterProgression: "full",
+		spellcastingAbility: "wis",
+		preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
+		cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+	};
 
-        test("TGTT Ranger (L1) → prepared-caster with 2 prepared spells, 0 cantrips", () => {
-                const info = makeBuilder(TGTT_RANGER)._getKnownCasterInfoForBuilder();
-                expect(info).not.toBeNull();
-                expect(info.isSpellbookCaster).toBe(false);
-                expect(info.isPreparedCaster).toBe(true);
-                expect(info.spellCount).toBe(2);
-                expect(info.cantripCount).toBe(0);
-        });
+	test("TGTT Ranger (L1) → prepared-caster with 2 prepared spells, 0 cantrips", () => {
+		const info = makeBuilder(TGTT_RANGER)._getKnownCasterInfoForBuilder();
+		expect(info).not.toBeNull();
+		expect(info.isSpellbookCaster).toBe(false);
+		expect(info.isPreparedCaster).toBe(true);
+		expect(info.spellCount).toBe(2);
+		expect(info.cantripCount).toBe(0);
+	});
 
-        test("TGTT Druid (L1) → prepared-caster with 4 prepared spells, 2 cantrips", () => {
-                const info = makeBuilder(TGTT_DRUID)._getKnownCasterInfoForBuilder();
-                expect(info).not.toBeNull();
-                expect(info.isSpellbookCaster).toBe(false);
-                expect(info.isPreparedCaster).toBe(true);
-                expect(info.spellCount).toBe(4);
-                expect(info.cantripCount).toBe(2);
-        });
+	test("TGTT Druid (L1) → prepared-caster with 4 prepared spells, 2 cantrips", () => {
+		const info = makeBuilder(TGTT_DRUID)._getKnownCasterInfoForBuilder();
+		expect(info).not.toBeNull();
+		expect(info.isSpellbookCaster).toBe(false);
+		expect(info.isPreparedCaster).toBe(true);
+		expect(info.spellCount).toBe(4);
+		expect(info.cantripCount).toBe(2);
+	});
 });
 
 describe("CharacterSheetBuilder _applyBuilderSpellChoices() spellbook path", () => {
-        let CharacterSheetBuilder;
-        let CharacterSheetClassUtils;
+	let CharacterSheetBuilder;
+	let CharacterSheetClassUtils;
 
-        beforeAll(() => {
-                CharacterSheetBuilder = globalThis.CharacterSheetBuilder;
-                CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
-        });
+	beforeAll(() => {
+		CharacterSheetBuilder = globalThis.CharacterSheetBuilder;
+		CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+	});
 
-        const PHB_WIZARD = {
-                name: "Wizard", source: "PHB",
-                casterProgression: "full",
-                spellcastingAbility: "int",
-                cantripProgression: [3, 3, 3, 4],
-                spellsKnownProgressionFixed: [6, 2, 2, 2],
-                spellsKnownProgressionFixedAllowLowerLevel: true,
-        };
+	const PHB_WIZARD = {
+		name: "Wizard",
+		source: "PHB",
+		casterProgression: "full",
+		spellcastingAbility: "int",
+		cantripProgression: [3, 3, 3, 4],
+		spellsKnownProgressionFixed: [6, 2, 2, 2],
+		spellsKnownProgressionFixedAllowLowerLevel: true,
+	};
 
-        test("spellbook spells are applied with inSpellbook: true", () => {
-                const capturedSpells = [];
-                const capturedCantrips = [];
-                const builder = Object.create(CharacterSheetBuilder.prototype);
-                builder._selectedClass = PHB_WIZARD;
-                builder._selectedSubclass = null;
-                builder._divineSoulAffinity = null;
-                builder._selectedSpellbookSpells = [MOCK_FIREBALL, MOCK_SHIELD];
-                builder._selectedKnownSpells = [];
-                builder._selectedKnownCantrips = [MOCK_FIRE_BOLT];
-                builder._state = {
-                        addSpell: (s) => capturedSpells.push(s),
-                        addCantrip: (c) => capturedCantrips.push(c),
-                        setSubclassChoice: () => {},
-                };
+	test("spellbook spells are applied with inSpellbook: true", () => {
+		const capturedSpells = [];
+		const capturedCantrips = [];
+		const builder = Object.create(CharacterSheetBuilder.prototype);
+		builder._selectedClass = PHB_WIZARD;
+		builder._selectedSubclass = null;
+		builder._divineSoulAffinity = null;
+		builder._selectedSpellbookSpells = [MOCK_FIREBALL, MOCK_SHIELD];
+		builder._selectedKnownSpells = [];
+		builder._selectedKnownCantrips = [MOCK_FIRE_BOLT];
+		builder._state = {
+			addSpell: (s) => capturedSpells.push(s),
+			addCantrip: (c) => capturedCantrips.push(c),
+			setSubclassChoice: () => {},
+		};
 
-                builder._applyBuilderSpellChoices();
+		builder._applyBuilderSpellChoices();
 
-                expect(capturedSpells).toHaveLength(2);
-                expect(capturedSpells.every(s => s.inSpellbook === true)).toBe(true);
-                expect(capturedSpells[0].sourceFeature).toBe("Wizard Spellbook");
-                expect(capturedCantrips).toHaveLength(1);
-                expect(capturedCantrips[0].name).toBe("Fire Bolt");
-        });
+		expect(capturedSpells).toHaveLength(2);
+		expect(capturedSpells.every(s => s.inSpellbook === true)).toBe(true);
+		expect(capturedSpells[0].sourceFeature).toBe("Wizard Spellbook");
+		expect(capturedCantrips).toHaveLength(1);
+		expect(capturedCantrips[0].name).toBe("Fire Bolt");
+	});
 
-        test("spellbook spells are NOT applied via the known-spell path", () => {
-                const capturedSpells = [];
-                const builder = Object.create(CharacterSheetBuilder.prototype);
-                builder._selectedClass = PHB_WIZARD;
-                builder._selectedSubclass = null;
-                builder._divineSoulAffinity = null;
-                builder._selectedSpellbookSpells = [MOCK_FIREBALL];
-                builder._selectedKnownSpells = [MOCK_SHIELD]; // should be ignored for spellbook casters
-                builder._selectedKnownCantrips = [];
-                builder._state = {
-                        addSpell: (s) => capturedSpells.push(s),
-                        addCantrip: () => {},
-                        setSubclassChoice: () => {},
-                };
+	test("spellbook spells are NOT applied via the known-spell path", () => {
+		const capturedSpells = [];
+		const builder = Object.create(CharacterSheetBuilder.prototype);
+		builder._selectedClass = PHB_WIZARD;
+		builder._selectedSubclass = null;
+		builder._divineSoulAffinity = null;
+		builder._selectedSpellbookSpells = [MOCK_FIREBALL];
+		builder._selectedKnownSpells = [MOCK_SHIELD]; // should be ignored for spellbook casters
+		builder._selectedKnownCantrips = [];
+		builder._state = {
+			addSpell: (s) => capturedSpells.push(s),
+			addCantrip: () => {},
+			setSubclassChoice: () => {},
+		};
 
-                builder._applyBuilderSpellChoices();
+		builder._applyBuilderSpellChoices();
 
-                // Only spellbook spells should be applied, not _selectedKnownSpells
-                expect(capturedSpells).toHaveLength(1);
-                expect(capturedSpells[0].name).toBe("Fireball");
-        });
+		// Only spellbook spells should be applied, not _selectedKnownSpells
+		expect(capturedSpells).toHaveLength(1);
+		expect(capturedSpells[0].name).toBe("Fireball");
+	});
 
-        // Regression: TGTT/XPHB prepared casters should tag applied spells as "Spells Prepared",
-        // not "Spells Known", so downstream consumers can distinguish prepared vs known lists.
-        const TGTT_DRUID = {
-                name: "Druid", source: "TGTT",
-                casterProgression: "full",
-                spellcastingAbility: "wis",
-                preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
-                cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-        };
+	// Regression: TGTT/XPHB prepared casters should tag applied spells as "Spells Prepared",
+	// not "Spells Known", so downstream consumers can distinguish prepared vs known lists.
+	const TGTT_DRUID = {
+		name: "Druid",
+		source: "TGTT",
+		casterProgression: "full",
+		spellcastingAbility: "wis",
+		preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
+		cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+	};
 
-        test("TGTT Druid prepared spells are tagged as Spells Prepared (not Spells Known)", () => {
-                const capturedSpells = [];
-                const capturedCantrips = [];
-                const builder = Object.create(CharacterSheetBuilder.prototype);
-                builder._selectedClass = TGTT_DRUID;
-                builder._selectedSubclass = null;
-                builder._divineSoulAffinity = null;
-                builder._selectedSpellbookSpells = [];
-                builder._selectedKnownSpells = [MOCK_FIREBALL, MOCK_SHIELD];
-                builder._selectedKnownCantrips = [MOCK_FIRE_BOLT];
-                builder._state = {
-                        addSpell: (s) => capturedSpells.push(s),
-                        addCantrip: (c) => capturedCantrips.push(c),
-                        setSubclassChoice: () => {},
-                };
+	test("TGTT Druid prepared spells are tagged as Spells Prepared (not Spells Known)", () => {
+		const capturedSpells = [];
+		const capturedCantrips = [];
+		const builder = Object.create(CharacterSheetBuilder.prototype);
+		builder._selectedClass = TGTT_DRUID;
+		builder._selectedSubclass = null;
+		builder._divineSoulAffinity = null;
+		builder._selectedSpellbookSpells = [];
+		builder._selectedKnownSpells = [MOCK_FIREBALL, MOCK_SHIELD];
+		builder._selectedKnownCantrips = [MOCK_FIRE_BOLT];
+		builder._state = {
+			addSpell: (s) => capturedSpells.push(s),
+			addCantrip: (c) => capturedCantrips.push(c),
+			setSubclassChoice: () => {},
+		};
 
-                builder._applyBuilderSpellChoices();
+		builder._applyBuilderSpellChoices();
 
-                expect(capturedSpells).toHaveLength(2);
-                expect(capturedSpells.every(s => s.sourceFeature === "Spells Prepared")).toBe(true);
-                expect(capturedSpells.every(s => s.prepared === true)).toBe(true);
-                expect(capturedCantrips).toHaveLength(1);
-                expect(capturedCantrips[0].name).toBe("Fire Bolt");
-        });
+		expect(capturedSpells).toHaveLength(2);
+		expect(capturedSpells.every(s => s.sourceFeature === "Spells Prepared")).toBe(true);
+		expect(capturedSpells.every(s => s.prepared === true)).toBe(true);
+		expect(capturedCantrips).toHaveLength(1);
+		expect(capturedCantrips[0].name).toBe("Fire Bolt");
+	});
 });

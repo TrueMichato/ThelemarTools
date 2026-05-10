@@ -47,7 +47,7 @@ export class CharacterSheetNotes {
 
 		// Tab change listener - handle both Bootstrap events and direct clicks
 		document.addEventListener("shown.bs.tab", (e) => {
-			if (!e.target.matches('a[data-toggle="tab"]')) return;
+			if (!e.target.matches("a[data-toggle=\"tab\"]")) return;
 			const href = e.target.getAttribute("href");
 			if (href) {
 				const tabId = href.replace("#", "");
@@ -58,7 +58,7 @@ export class CharacterSheetNotes {
 
 		// Also listen for click events on tabs (backup)
 		document.addEventListener("click", (e) => {
-			const tabLink = e.target.closest('.ve-nav-tabs a[data-toggle="tab"]');
+			const tabLink = e.target.closest(".ve-nav-tabs a[data-toggle=\"tab\"]");
 			if (!tabLink) return;
 			const href = tabLink.getAttribute("href");
 			if (href) {
@@ -379,8 +379,8 @@ export class CharacterSheetNotes {
 			const dx = e.clientX - startX;
 			const dy = e.clientY - startY;
 
-			noteEl.style.left = Math.max(0, startLeft + dx) + "px";
-			noteEl.style.top = Math.max(0, startTop + dy) + "px";
+			noteEl.style.left = `${Math.max(0, startLeft + dx)}px`;
+			noteEl.style.top = `${Math.max(0, startTop + dy)}px`;
 		};
 
 		const onMouseUp = () => {
@@ -518,7 +518,7 @@ export class CharacterSheetNotes {
 					btn.textContent = btn.dataset.color.charAt(0).toUpperCase() + btn.dataset.color.slice(1);
 				});
 				colorBtn.classList.add("charsheet__note-color-btn--selected");
-				colorBtn.textContent = "✓ " + colorName.charAt(0).toUpperCase() + colorName.slice(1);
+				colorBtn.textContent = `✓ ${colorName.charAt(0).toUpperCase()}${colorName.slice(1)}`;
 			});
 			colorRow.append(colorBtn);
 		});
@@ -548,37 +548,40 @@ export class CharacterSheetNotes {
 
 		e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel", click: () => doClose()}).appendTo(btnRow);
 
-		e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: isNew ? "Add Note" : "Save Changes", click: () => {
-			const title = titleInput.value.trim() || "Note";
-			const content = contentArea.value;
-			const tab = tabSelect.value || null;
-			const usePosition = positionCb.checked;
-			const position = usePosition ? (existingNote?.position || {x: 20, y: 60}) : null;
+		e_({tag: "button",
+			clazz: "ve-btn ve-btn-primary",
+			txt: isNew ? "Add Note" : "Save Changes",
+			click: () => {
+				const title = titleInput.value.trim() || "Note";
+				const content = contentArea.value;
+				const tab = tabSelect.value || null;
+				const usePosition = positionCb.checked;
+				const position = usePosition ? (existingNote?.position || {x: 20, y: 60}) : null;
 
-			if (isNew) {
-				this._state.addStickyNote({
-					title,
-					content,
-					tab,
-					position,
-					color: selectedColor,
-				});
-				JqueryUtil.doToast({type: "success", content: "Sticky note added!"});
-			} else {
-				this._state.updateStickyNote(noteId, {
-					title,
-					content,
-					tab,
-					position,
-					color: selectedColor,
-				});
-				JqueryUtil.doToast({type: "success", content: "Note updated!"});
-			}
+				if (isNew) {
+					this._state.addStickyNote({
+						title,
+						content,
+						tab,
+						position,
+						color: selectedColor,
+					});
+					JqueryUtil.doToast({type: "success", content: "Sticky note added!"});
+				} else {
+					this._state.updateStickyNote(noteId, {
+						title,
+						content,
+						tab,
+						position,
+						color: selectedColor,
+					});
+					JqueryUtil.doToast({type: "success", content: "Note updated!"});
+				}
 
-			this._page.saveCharacter();
-			this._renderStickyNotes();
-			doClose();
-		}}).appendTo(btnRow);
+				this._page.saveCharacter();
+				this._renderStickyNotes();
+				doClose();
+			}}).appendTo(btnRow);
 
 		titleInput.focus();
 	}
@@ -651,25 +654,31 @@ export class CharacterSheetNotes {
 		modalInner.append(btnRow);
 
 		if (currentNote) {
-			e_({tag: "button", clazz: "ve-btn ve-btn-danger", txt: "Clear Note", click: () => {
-				this._state.updateEntityNote(entityType, entityId, "");
-				this._page.saveCharacter();
-				if (onSave) onSave("");
-				JqueryUtil.doToast({type: "info", content: "Note cleared."});
-				doClose();
-			}}).appendTo(btnRow);
+			e_({tag: "button",
+				clazz: "ve-btn ve-btn-danger",
+				txt: "Clear Note",
+				click: () => {
+					this._state.updateEntityNote(entityType, entityId, "");
+					this._page.saveCharacter();
+					if (onSave) onSave("");
+					JqueryUtil.doToast({type: "info", content: "Note cleared."});
+					doClose();
+				}}).appendTo(btnRow);
 		}
 
 		e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel", click: () => doClose()}).appendTo(btnRow);
 
-		e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Save Note", click: () => {
-			const note = textarea.value;
-			this._state.updateEntityNote(entityType, entityId, note);
-			this._page.saveCharacter();
-			if (onSave) onSave(note);
-			JqueryUtil.doToast({type: "success", content: "Note saved!"});
-			doClose();
-		}}).appendTo(btnRow);
+		e_({tag: "button",
+			clazz: "ve-btn ve-btn-primary",
+			txt: "Save Note",
+			click: () => {
+				const note = textarea.value;
+				this._state.updateEntityNote(entityType, entityId, note);
+				this._page.saveCharacter();
+				if (onSave) onSave(note);
+				JqueryUtil.doToast({type: "success", content: "Note saved!"});
+				doClose();
+			}}).appendTo(btnRow);
 
 		textarea.focus();
 	}

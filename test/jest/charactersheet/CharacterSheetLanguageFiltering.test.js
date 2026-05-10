@@ -591,11 +591,15 @@ describe("Dialect display (Ignan/Primordial bug)", () => {
 	}
 
 	const PRIMORDIAL_PHB = {
-		name: "Primordial", source: "PHB", type: "exotic",
+		name: "Primordial",
+		source: "PHB",
+		type: "exotic",
 		dialects: ["Auran", "Aquan", "Ignan", "Terran"],
 	};
 	const PRIMORDIAL_XPHB = {
-		name: "Primordial", source: "XPHB", type: "rare",
+		name: "Primordial",
+		source: "XPHB",
+		type: "rare",
 		dialects: ["Auran", "Aquan", "Ignan", "Terran"],
 	};
 
@@ -681,11 +685,15 @@ describe("Dialect display (Ignan/Primordial bug)", () => {
 
 describe("Dialect availability and conflict detection", () => {
 	const PRIMORDIAL_PHB = {
-		name: "Primordial", source: "PHB", type: "exotic",
+		name: "Primordial",
+		source: "PHB",
+		type: "exotic",
 		dialects: ["Auran", "Aquan", "Ignan", "Terran"],
 	};
 	const PRIMORDIAL_XPHB = {
-		name: "Primordial", source: "XPHB", type: "rare",
+		name: "Primordial",
+		source: "XPHB",
+		type: "rare",
 		dialects: ["Auran", "Aquan", "Ignan", "Terran"],
 	};
 

@@ -14213,7 +14213,6 @@ Renderer.action = class {
 	}
 };
 
-
 Renderer.combatmethod = class {
 	static _getDegreeDisplay (degree) {
 		switch (degree) {

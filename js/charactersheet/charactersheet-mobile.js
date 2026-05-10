@@ -240,7 +240,7 @@ class CharacterSheetMobile {
 				contentWrapper.style.maxHeight = "0";
 			} else {
 				// Set initial max-height for animation
-				contentWrapper.style.maxHeight = contentWrapper.scrollHeight + "px";
+				contentWrapper.style.maxHeight = `${contentWrapper.scrollHeight}px`;
 			}
 
 			// Add tap-to-toggle behavior
@@ -251,12 +251,12 @@ class CharacterSheetMobile {
 				const isCollapsed = section.classList.toggle("charsheet-mobile--collapsed");
 
 				if (isCollapsed) {
-					contentWrapper.style.maxHeight = contentWrapper.scrollHeight + "px";
+					contentWrapper.style.maxHeight = `${contentWrapper.scrollHeight}px`;
 					// Force reflow then collapse
 					contentWrapper.offsetHeight; // eslint-disable-line no-unused-expressions
 					contentWrapper.style.maxHeight = "0";
 				} else {
-					contentWrapper.style.maxHeight = contentWrapper.scrollHeight + "px";
+					contentWrapper.style.maxHeight = `${contentWrapper.scrollHeight}px`;
 					// After transition, remove max-height to allow dynamic content changes
 					const onTransitionEnd = () => {
 						if (!section.classList.contains("charsheet-mobile--collapsed")) {

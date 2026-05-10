@@ -196,7 +196,6 @@ class CharacterSheetInventory {
 				icon.classList.toggle("glyphicon-sort-by-attributes-alt", !this._sortAsc);
 				btn.setAttribute("title", this._sortAsc ? "Sort ascending" : "Sort descending");
 				this._renderItemList();
-				return;
 			}
 		});
 
@@ -263,7 +262,6 @@ class CharacterSheetInventory {
 	async _showItemPicker () {
 		await this._pShowItemPickerModal();
 	}
-
 
 	async _pShowItemPickerModal () {
 		// Filter items by allowed sources
@@ -389,7 +387,7 @@ class CharacterSheetInventory {
 					<button class="charsheet__source-action-btn" type="button" data-action="none">Clear All</button>
 				</div>
 				<div class="charsheet__source-multiselect-list">
-					${itemTypes.map(t => '<label class="charsheet__source-multiselect-item"><input type="checkbox" value="' + t.value + '" checked><span class="charsheet__source-multiselect-check">✓</span><span class="charsheet__source-multiselect-label">' + t.emoji + " " + t.label + "</span></label>").join("")}
+					${itemTypes.map(t => `<label class="charsheet__source-multiselect-item"><input type="checkbox" value="${t.value}" checked><span class="charsheet__source-multiselect-check">✓</span><span class="charsheet__source-multiselect-label">${t.emoji} ${t.label}</span></label>`).join("")}
 				</div>
 			</div>
 		`;
@@ -425,7 +423,7 @@ class CharacterSheetInventory {
 					<button class="charsheet__source-action-btn" type="button" data-action="none">Clear All</button>
 				</div>
 				<div class="charsheet__source-multiselect-list">
-					${rarities.map(r => '<label class="charsheet__source-multiselect-item"><input type="checkbox" value="' + r.value + '" checked><span class="charsheet__source-multiselect-check">✓</span><span class="charsheet__source-multiselect-label">' + r.emoji + " " + r.label + "</span></label>").join("")}
+					${rarities.map(r => `<label class="charsheet__source-multiselect-item"><input type="checkbox" value="${r.value}" checked><span class="charsheet__source-multiselect-check">✓</span><span class="charsheet__source-multiselect-label">${r.emoji} ${r.label}</span></label>`).join("")}
 				</div>
 			</div>
 		`;
@@ -462,7 +460,7 @@ class CharacterSheetInventory {
 					<button class="charsheet__source-action-btn" type="button" data-action="official">Official Only</button>
 				</div>
 				<div class="charsheet__source-multiselect-list">
-					${uniqueSources.map(s => '<label class="charsheet__source-multiselect-item"><input type="checkbox" value="' + s.escapeQuotes() + '" checked><span class="charsheet__source-multiselect-check">✓</span><span class="charsheet__source-multiselect-label">' + Parser.sourceJsonToAbv(s) + '</span><span class="charsheet__source-multiselect-full">' + Parser.sourceJsonToFull(s) + "</span></label>").join("")}
+					${uniqueSources.map(s => `<label class="charsheet__source-multiselect-item"><input type="checkbox" value="${s.escapeQuotes()}" checked><span class="charsheet__source-multiselect-check">✓</span><span class="charsheet__source-multiselect-label">${Parser.sourceJsonToAbv(s)}</span><span class="charsheet__source-multiselect-full">${Parser.sourceJsonToFull(s)}</span></label>`).join("")}
 				</div>
 			</div>
 		`;
@@ -647,8 +645,7 @@ class CharacterSheetInventory {
 
 		// ---- Weapon mastery filter (dynamic from data via Renderer.item._getMastery) ----
 		const _getMastery = (uid) => {
-			try { return Renderer.item._getMastery(uid); }
-			catch (e) { return null; }
+			try { return Renderer.item._getMastery(uid); } catch (e) { return null; }
 		};
 		const seenMasteries = new Map(); // name.toLowerCase() → {displayName, ent}
 		for (const item of this._allItems) {
@@ -829,8 +826,7 @@ class CharacterSheetInventory {
 			const getValue = (it) => (typeof it.value === "number" ? it.value : 0);
 			const getWeight = (it) => (typeof it.weight === "number" ? it.weight : 0);
 			const getTypeLabel = (it) => {
-				try { return Renderer.item.getItemTypeName?.(it.type) || it.type || ""; }
-				catch (e) { return it.type || ""; }
+				try { return Renderer.item.getItemTypeName?.(it.type) || it.type || ""; } catch (e) { return it.type || ""; }
 			};
 			const byName = (a, b) => a.name.localeCompare(b.name);
 			const sortFns = {
@@ -1498,13 +1494,13 @@ class CharacterSheetInventory {
 				const propCode = propParts[0];
 				// Skip standard properties we already have
 				if (standardPropCodes.has(propCode)) continue;
-				
+
 				// Get the actual property object to find its real source and check for entries
 				let propObj = null;
 				let fullName = propCode;
 				let actualSource = propParts[1] || null;
 				let hoverAttrs = "";
-				
+
 				try {
 					propObj = typeof Renderer !== "undefined" && Renderer.item?.getProperty
 						? Renderer.item.getProperty(propUid, {isIgnoreMissing: true})
@@ -1521,11 +1517,11 @@ class CharacterSheetInventory {
 				} catch (e) {
 					// Ignore errors
 				}
-				
+
 				// Use the actual source or fallback for the key
 				const fullUid = actualSource ? `${propCode}|${actualSource}` : propCode;
 				if (homebrewPropertiesMap.has(fullUid)) continue;
-				
+
 				homebrewPropertiesMap.set(fullUid, {
 					label: fullName,
 					hoverAttrs: hoverAttrs,
@@ -1564,12 +1560,12 @@ class CharacterSheetInventory {
 				const masteryCode = masteryName.toLowerCase();
 				// Skip standard masteries we already have
 				if (standardMasteryCodes.has(masteryCode)) continue;
-				
+
 				// Get the actual mastery object to find its real source and check for entries
 				let masteryObj = null;
 				let actualSource = masteryParts[1] || null;
 				let hoverAttrs = "";
-				
+
 				try {
 					masteryObj = typeof Renderer !== "undefined" && Renderer.item?._getMastery
 						? Renderer.item._getMastery(masteryUid)
@@ -1585,11 +1581,11 @@ class CharacterSheetInventory {
 				} catch (e) {
 					// Ignore errors - mastery doesn't exist
 				}
-				
+
 				// Use the actual source or fallback for the key
 				const fullUid = actualSource ? `${masteryName}|${actualSource}` : masteryUid;
 				if (homebrewMasteriesMap.has(fullUid)) continue;
-				
+
 				homebrewMasteriesMap.set(fullUid, {
 					label: masteryName,
 					hoverAttrs: hoverAttrs,
@@ -1828,7 +1824,7 @@ class CharacterSheetInventory {
 
 		// All damage types for defenses
 		const allDamageTypes = Parser.DMG_TYPES;
-		
+
 		// Get conditions dynamically from the page (includes homebrew with priority source filtering)
 		const conditionsRaw = this._page.getConditionsListUnique?.() || [];
 		// Build condition data with hover attributes
@@ -1870,7 +1866,7 @@ class CharacterSheetInventory {
 				});
 			});
 		}
-		
+
 		const rechargeOptions = [
 			{value: "", label: "No Recharge"},
 			{value: "dawn", label: "At Dawn"},
@@ -2470,254 +2466,254 @@ class CharacterSheetInventory {
 		btnCancel.addEventListener("click", () => doClose(false));
 		const btnCreate = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✨ Create Item"});
 		btnCreate.addEventListener("click", () => {
-				const name = form.querySelector("#custom-item-name")?.value?.trim();
-				if (!name) {
-					JqueryUtil.doToast({type: "warning", content: "Please enter an item name!"});
-					return;
-				}
+			const name = form.querySelector("#custom-item-name")?.value?.trim();
+			if (!name) {
+				JqueryUtil.doToast({type: "warning", content: "Please enter an item name!"});
+				return;
+			}
 
-				const options = {
-					type: selectedType,
-					value: parseInt(form.querySelector("#custom-item-value")?.value) || 0,
-					rarity: form.querySelector("#custom-item-rarity")?.value || undefined,
-					requiresAttunement: form.querySelector("#custom-item-attunement")?.checked,
-					entries: form.querySelector("#custom-item-desc")?.value?.trim() || undefined,
-				};
+			const options = {
+				type: selectedType,
+				value: parseInt(form.querySelector("#custom-item-value")?.value) || 0,
+				rarity: form.querySelector("#custom-item-rarity")?.value || undefined,
+				requiresAttunement: form.querySelector("#custom-item-attunement")?.checked,
+				entries: form.querySelector("#custom-item-desc")?.value?.trim() || undefined,
+			};
 
-				// Weapon stats
-				if (selectedType === "weapon") {
-					options.weaponCategory = form.querySelector("#custom-item-weapon-cat")?.value;
-					options.dmg1 = form.querySelector("#custom-item-damage")?.value || "1d6";
-					options.dmgType = form.querySelector("#custom-item-dmg-type")?.value;
-					const range = form.querySelector("#custom-item-range")?.value?.trim();
-					if (range) options.range = range;
-					const bonus = parseInt(form.querySelector("#custom-item-weapon-bonus")?.value);
-					if (bonus > 0) options.bonusWeapon = `+${bonus}`;
-					const bonusAttack = parseInt(form.querySelector("#custom-item-bonus-attack")?.value) || 0;
-					if (bonusAttack) options.bonusWeaponAttack = `+${bonusAttack}`;
-					const bonusDamage = parseInt(form.querySelector("#custom-item-bonus-damage")?.value) || 0;
-					if (bonusDamage) options.bonusWeaponDamage = `+${bonusDamage}`;
-					const critDamage = form.querySelector("#custom-item-crit-damage")?.value?.trim();
-					if (critDamage) options.bonusWeaponCritDamage = critDamage;
-					const masteries = [];
-					form.querySelectorAll(".weapon-mastery-check:checked").forEach(cb => {
-						masteries.push(cb.value);
-					});
-					if (masteries.length) options.mastery = masteries;
-					const props = [];
-					form.querySelectorAll(".weapon-prop-check:checked").forEach(cb => {
-						props.push(cb.value);
-					});
-					if (props.length) options.property = props;
-				}
-
-				// Armor stats
-				if (selectedType === "armor") {
-					options.armor = true;
-					options.ac = parseInt(form.querySelector("#custom-item-ac")?.value) || 10;
-					const bonus = parseInt(form.querySelector("#custom-item-armor-bonus")?.value);
-					if (bonus > 0) options.bonusAc = `+${bonus}`;
-					const strReq = parseInt(form.querySelector("#custom-item-str-req")?.value);
-					if (strReq > 0) options.strength = strReq;
-					if (form.querySelector("#custom-item-stealth-dis")?.checked) options.stealth = true;
-				}
-
-				// Shield stats
-				if (selectedType === "shield") {
-					options.armor = true;
-					options.ac = parseInt(form.querySelector("#custom-item-shield-ac")?.value) || 2;
-					const bonus = parseInt(form.querySelector("#custom-item-shield-bonus")?.value);
-					if (bonus > 0) options.bonusAc = `+${bonus}`;
-				}
-
-				// Magic item properties
-				if (["wondrous", "wand", "ring", "potion", "scroll"].includes(selectedType)) {
-					const charges = parseInt(form.querySelector("#custom-item-charges")?.value);
-					if (charges > 0) {
-						options.charges = charges;
-						const recharge = form.querySelector("#custom-item-recharge")?.value;
-						if (recharge) options.recharge = recharge;
-						const rechargeAmount = form.querySelector("#custom-item-recharge-amount")?.value?.trim();
-						if (rechargeAmount) options.rechargeAmount = rechargeAmount;
-					}
-					if (form.querySelector("#custom-item-focus")?.checked) options.focus = true;
-					if (form.querySelector("#custom-item-cursed")?.checked) options.curse = true;
-					if (form.querySelector("#custom-item-sentient")?.checked) options.sentient = true;
-				}
-
-				// Bonuses
-				const bonusSpellAttack = parseInt(form.querySelector("#custom-item-bonus-spell-attack")?.value) || 0;
-				if (bonusSpellAttack) options.bonusSpellAttack = `+${bonusSpellAttack}`;
-				const bonusSpellDc = parseInt(form.querySelector("#custom-item-bonus-spell-dc")?.value) || 0;
-				if (bonusSpellDc) options.bonusSpellSaveDc = `+${bonusSpellDc}`;
-				const bonusSaveAll = parseInt(form.querySelector("#custom-item-bonus-save-all")?.value) || 0;
-				if (bonusSaveAll) options.bonusSavingThrow = `+${bonusSaveAll}`;
-				const bonusConcentration = parseInt(form.querySelector("#custom-item-bonus-concentration")?.value) || 0;
-				if (bonusConcentration) options.bonusSavingThrowConcentration = `+${bonusConcentration}`;
-				const bonusChecks = parseInt(form.querySelector("#custom-item-bonus-checks")?.value) || 0;
-				if (bonusChecks) options.bonusAbilityCheck = `+${bonusChecks}`;
-				const critThreshold = parseInt(form.querySelector("#custom-item-crit-threshold")?.value);
-				if (critThreshold && critThreshold < 20) options.critThreshold = critThreshold;
-
-				// Individual save bonuses
-				const saveStr = parseInt(form.querySelector("#custom-item-bonus-save-str")?.value) || 0;
-				const saveDex = parseInt(form.querySelector("#custom-item-bonus-save-dex")?.value) || 0;
-				const saveCon = parseInt(form.querySelector("#custom-item-bonus-save-con")?.value) || 0;
-				const saveInt = parseInt(form.querySelector("#custom-item-bonus-save-int")?.value) || 0;
-				const saveWis = parseInt(form.querySelector("#custom-item-bonus-save-wis")?.value) || 0;
-				const saveCha = parseInt(form.querySelector("#custom-item-bonus-save-cha")?.value) || 0;
-				if (saveStr) options.bonusSavingThrowStr = saveStr;
-				if (saveDex) options.bonusSavingThrowDex = saveDex;
-				if (saveCon) options.bonusSavingThrowCon = saveCon;
-				if (saveInt) options.bonusSavingThrowInt = saveInt;
-				if (saveWis) options.bonusSavingThrowWis = saveWis;
-				if (saveCha) options.bonusSavingThrowCha = saveCha;
-
-				// Defenses
-				const resist = [];
-				form.querySelectorAll(".resist-check:checked").forEach(cb => { resist.push(cb.value); });
-				if (resist.length) options.resist = resist;
-				const immune = [];
-				form.querySelectorAll(".immune-check:checked").forEach(cb => { immune.push(cb.value); });
-				if (immune.length) options.immune = immune;
-				const conditionImmune = [];
-				form.querySelectorAll(".condition-immune-check:checked").forEach(cb => {
-					const val = String(cb.value || "");
-					const condName = val.includes("|") ? val.split("|")[0] : val;
-					conditionImmune.push(condName);
+			// Weapon stats
+			if (selectedType === "weapon") {
+				options.weaponCategory = form.querySelector("#custom-item-weapon-cat")?.value;
+				options.dmg1 = form.querySelector("#custom-item-damage")?.value || "1d6";
+				options.dmgType = form.querySelector("#custom-item-dmg-type")?.value;
+				const range = form.querySelector("#custom-item-range")?.value?.trim();
+				if (range) options.range = range;
+				const bonus = parseInt(form.querySelector("#custom-item-weapon-bonus")?.value);
+				if (bonus > 0) options.bonusWeapon = `+${bonus}`;
+				const bonusAttack = parseInt(form.querySelector("#custom-item-bonus-attack")?.value) || 0;
+				if (bonusAttack) options.bonusWeaponAttack = `+${bonusAttack}`;
+				const bonusDamage = parseInt(form.querySelector("#custom-item-bonus-damage")?.value) || 0;
+				if (bonusDamage) options.bonusWeaponDamage = `+${bonusDamage}`;
+				const critDamage = form.querySelector("#custom-item-crit-damage")?.value?.trim();
+				if (critDamage) options.bonusWeaponCritDamage = critDamage;
+				const masteries = [];
+				form.querySelectorAll(".weapon-mastery-check:checked").forEach(cb => {
+					masteries.push(cb.value);
 				});
-				if (conditionImmune.length) options.conditionImmune = conditionImmune;
+				if (masteries.length) options.mastery = masteries;
+				const props = [];
+				form.querySelectorAll(".weapon-prop-check:checked").forEach(cb => {
+					props.push(cb.value);
+				});
+				if (props.length) options.property = props;
+			}
 
-				// Speed modifications
-				const speedBonus = {};
-				const speedWalk = parseInt(form.querySelector("#custom-item-speed-walk")?.value) || 0;
-				const speedFly = parseInt(form.querySelector("#custom-item-speed-fly")?.value) || 0;
-				const speedSwim = parseInt(form.querySelector("#custom-item-speed-swim")?.value) || 0;
-				const speedClimb = parseInt(form.querySelector("#custom-item-speed-climb")?.value) || 0;
-				const speedBurrow = parseInt(form.querySelector("#custom-item-speed-burrow")?.value) || 0;
-				if (speedWalk) speedBonus.walk = speedWalk;
-				if (speedFly) speedBonus.fly = speedFly;
-				if (speedSwim) speedBonus.swim = speedSwim;
-				if (speedClimb) speedBonus.climb = speedClimb;
-				if (speedBurrow) speedBonus.burrow = speedBurrow;
+			// Armor stats
+			if (selectedType === "armor") {
+				options.armor = true;
+				options.ac = parseInt(form.querySelector("#custom-item-ac")?.value) || 10;
+				const bonus = parseInt(form.querySelector("#custom-item-armor-bonus")?.value);
+				if (bonus > 0) options.bonusAc = `+${bonus}`;
+				const strReq = parseInt(form.querySelector("#custom-item-str-req")?.value);
+				if (strReq > 0) options.strength = strReq;
+				if (form.querySelector("#custom-item-stealth-dis")?.checked) options.stealth = true;
+			}
 
-				const speedStatic = {};
-				const grantFly = parseInt(form.querySelector("#custom-item-grant-fly")?.value) || 0;
-				const grantSwim = parseInt(form.querySelector("#custom-item-grant-swim")?.value) || 0;
-				const grantClimb = parseInt(form.querySelector("#custom-item-grant-climb")?.value) || 0;
-				const grantBurrow = parseInt(form.querySelector("#custom-item-grant-burrow")?.value) || 0;
-				if (grantFly) speedStatic.fly = grantFly;
-				if (grantSwim) speedStatic.swim = grantSwim;
-				if (grantClimb) speedStatic.climb = grantClimb;
-				if (grantBurrow) speedStatic.burrow = grantBurrow;
+			// Shield stats
+			if (selectedType === "shield") {
+				options.armor = true;
+				options.ac = parseInt(form.querySelector("#custom-item-shield-ac")?.value) || 2;
+				const bonus = parseInt(form.querySelector("#custom-item-shield-bonus")?.value);
+				if (bonus > 0) options.bonusAc = `+${bonus}`;
+			}
 
-				// Speed equal-to (fly = walk, etc.)
-				const speedEqual = {};
-				const equalFly = form.querySelector("#custom-item-equal-fly")?.value;
-				const equalSwim = form.querySelector("#custom-item-equal-swim")?.value;
-				const equalClimb = form.querySelector("#custom-item-equal-climb")?.value;
-				if (equalFly) speedEqual.fly = equalFly;
-				if (equalSwim) speedEqual.swim = equalSwim;
-				if (equalClimb) speedEqual.climb = equalClimb;
-
-				// Speed multiply (walk x2, etc.)
-				const speedMultiply = {};
-				const multiplyWalk = parseFloat(form.querySelector("#custom-item-multiply-walk")?.value);
-				if (multiplyWalk && multiplyWalk !== 1) speedMultiply.walk = multiplyWalk;
-
-				if (Object.keys(speedBonus).length || Object.keys(speedStatic).length || Object.keys(speedEqual).length || Object.keys(speedMultiply).length) {
-					options.modifySpeed = {};
-					if (Object.keys(speedBonus).length) options.modifySpeed.bonus = speedBonus;
-					if (Object.keys(speedStatic).length) options.modifySpeed.static = speedStatic;
-					if (Object.keys(speedEqual).length) options.modifySpeed.equal = speedEqual;
-					if (Object.keys(speedMultiply).length) options.modifySpeed.multiply = speedMultiply;
+			// Magic item properties
+			if (["wondrous", "wand", "ring", "potion", "scroll"].includes(selectedType)) {
+				const charges = parseInt(form.querySelector("#custom-item-charges")?.value);
+				if (charges > 0) {
+					options.charges = charges;
+					const recharge = form.querySelector("#custom-item-recharge")?.value;
+					if (recharge) options.recharge = recharge;
+					const rechargeAmount = form.querySelector("#custom-item-recharge-amount")?.value?.trim();
+					if (rechargeAmount) options.rechargeAmount = rechargeAmount;
 				}
+				if (form.querySelector("#custom-item-focus")?.checked) options.focus = true;
+				if (form.querySelector("#custom-item-cursed")?.checked) options.curse = true;
+				if (form.querySelector("#custom-item-sentient")?.checked) options.sentient = true;
+			}
 
-				// Ability score modifications
-				const abilityStatic = {};
-				const setStr = parseInt(form.querySelector("#custom-item-ability-set-str")?.value);
-				const setDex = parseInt(form.querySelector("#custom-item-ability-set-dex")?.value);
-				const setCon = parseInt(form.querySelector("#custom-item-ability-set-con")?.value);
-				const setInt = parseInt(form.querySelector("#custom-item-ability-set-int")?.value);
-				const setWis = parseInt(form.querySelector("#custom-item-ability-set-wis")?.value);
-				const setCha = parseInt(form.querySelector("#custom-item-ability-set-cha")?.value);
-				if (!isNaN(setStr) && setStr > 0) abilityStatic.str = setStr;
-				if (!isNaN(setDex) && setDex > 0) abilityStatic.dex = setDex;
-				if (!isNaN(setCon) && setCon > 0) abilityStatic.con = setCon;
-				if (!isNaN(setInt) && setInt > 0) abilityStatic.int = setInt;
-				if (!isNaN(setWis) && setWis > 0) abilityStatic.wis = setWis;
-				if (!isNaN(setCha) && setCha > 0) abilityStatic.cha = setCha;
+			// Bonuses
+			const bonusSpellAttack = parseInt(form.querySelector("#custom-item-bonus-spell-attack")?.value) || 0;
+			if (bonusSpellAttack) options.bonusSpellAttack = `+${bonusSpellAttack}`;
+			const bonusSpellDc = parseInt(form.querySelector("#custom-item-bonus-spell-dc")?.value) || 0;
+			if (bonusSpellDc) options.bonusSpellSaveDc = `+${bonusSpellDc}`;
+			const bonusSaveAll = parseInt(form.querySelector("#custom-item-bonus-save-all")?.value) || 0;
+			if (bonusSaveAll) options.bonusSavingThrow = `+${bonusSaveAll}`;
+			const bonusConcentration = parseInt(form.querySelector("#custom-item-bonus-concentration")?.value) || 0;
+			if (bonusConcentration) options.bonusSavingThrowConcentration = `+${bonusConcentration}`;
+			const bonusChecks = parseInt(form.querySelector("#custom-item-bonus-checks")?.value) || 0;
+			if (bonusChecks) options.bonusAbilityCheck = `+${bonusChecks}`;
+			const critThreshold = parseInt(form.querySelector("#custom-item-crit-threshold")?.value);
+			if (critThreshold && critThreshold < 20) options.critThreshold = critThreshold;
 
-				const abilityBonus = {};
-				const bonusStr = parseInt(form.querySelector("#custom-item-ability-bonus-str")?.value) || 0;
-				const bonusDex = parseInt(form.querySelector("#custom-item-ability-bonus-dex")?.value) || 0;
-				const bonusCon = parseInt(form.querySelector("#custom-item-ability-bonus-con")?.value) || 0;
-				const bonusInt = parseInt(form.querySelector("#custom-item-ability-bonus-int")?.value) || 0;
-				const bonusWis = parseInt(form.querySelector("#custom-item-ability-bonus-wis")?.value) || 0;
-				const bonusCha = parseInt(form.querySelector("#custom-item-ability-bonus-cha")?.value) || 0;
-				if (bonusStr) abilityBonus.str = bonusStr;
-				if (bonusDex) abilityBonus.dex = bonusDex;
-				if (bonusCon) abilityBonus.con = bonusCon;
-				if (bonusInt) abilityBonus.int = bonusInt;
-				if (bonusWis) abilityBonus.wis = bonusWis;
-				if (bonusCha) abilityBonus.cha = bonusCha;
+			// Individual save bonuses
+			const saveStr = parseInt(form.querySelector("#custom-item-bonus-save-str")?.value) || 0;
+			const saveDex = parseInt(form.querySelector("#custom-item-bonus-save-dex")?.value) || 0;
+			const saveCon = parseInt(form.querySelector("#custom-item-bonus-save-con")?.value) || 0;
+			const saveInt = parseInt(form.querySelector("#custom-item-bonus-save-int")?.value) || 0;
+			const saveWis = parseInt(form.querySelector("#custom-item-bonus-save-wis")?.value) || 0;
+			const saveCha = parseInt(form.querySelector("#custom-item-bonus-save-cha")?.value) || 0;
+			if (saveStr) options.bonusSavingThrowStr = saveStr;
+			if (saveDex) options.bonusSavingThrowDex = saveDex;
+			if (saveCon) options.bonusSavingThrowCon = saveCon;
+			if (saveInt) options.bonusSavingThrowInt = saveInt;
+			if (saveWis) options.bonusSavingThrowWis = saveWis;
+			if (saveCha) options.bonusSavingThrowCha = saveCha;
 
-				if (Object.keys(abilityStatic).length || Object.keys(abilityBonus).length) {
-					options.ability = {};
-					if (Object.keys(abilityStatic).length) options.ability.static = abilityStatic;
-					// Merge bonus into ability object (not nested)
-					Object.assign(options.ability, abilityBonus);
-				}
-
-				// Senses
-				const senses = {};
-				const senseDarkvision = parseInt(form.querySelector("#custom-item-sense-darkvision")?.value) || 0;
-				const senseBlindight = parseInt(form.querySelector("#custom-item-sense-blindsight")?.value) || 0;
-				const senseTremorsense = parseInt(form.querySelector("#custom-item-sense-tremorsense")?.value) || 0;
-				const senseTruesight = parseInt(form.querySelector("#custom-item-sense-truesight")?.value) || 0;
-				if (senseDarkvision) senses.darkvision = senseDarkvision;
-				if (senseBlindight) senses.blindsight = senseBlindight;
-				if (senseTremorsense) senses.tremorsense = senseTremorsense;
-				if (senseTruesight) senses.truesight = senseTruesight;
-				if (Object.keys(senses).length) options.senses = senses;
-
-				// Attached spells
-				if (selectedSpells.length) {
-					// Convert to the attachedSpells format
-					const attachedSpells = {};
-					const willSpells = [];
-					const dailySpells = {};
-					const chargesSpells = {};
-
-					for (const spell of selectedSpells) {
-						const spellRef = `${spell.name}|${spell.source}`;
-						if (spell.usageType === "will" || spell.level === 0) {
-							willSpells.push(spellRef);
-						} else if (spell.usageType === "daily") {
-							const key = `${spell.uses}${spell.recharge === "short" ? "" : "e"}`;
-							if (!dailySpells[key]) dailySpells[key] = [];
-							dailySpells[key].push(spellRef);
-						} else if (spell.usageType === "charges") {
-							const key = String(spell.uses);
-							if (!chargesSpells[key]) chargesSpells[key] = [];
-							chargesSpells[key].push(spellRef);
-						}
-					}
-
-					if (willSpells.length) attachedSpells.will = willSpells;
-					if (Object.keys(dailySpells).length) attachedSpells.daily = dailySpells;
-					if (Object.keys(chargesSpells).length) attachedSpells.charges = chargesSpells;
-
-					if (Object.keys(attachedSpells).length) options.attachedSpells = attachedSpells;
-				}
-
-				const quantity = parseInt(form.querySelector("#custom-item-qty")?.value) || 1;
-				const weight = parseFloat(form.querySelector("#custom-item-weight")?.value) || 0;
-
-				this._addCustomItem(name, quantity, weight, options);
-				JqueryUtil.doToast({type: "success", content: `Created ${name}!`});
-				doClose(true);
+			// Defenses
+			const resist = [];
+			form.querySelectorAll(".resist-check:checked").forEach(cb => { resist.push(cb.value); });
+			if (resist.length) options.resist = resist;
+			const immune = [];
+			form.querySelectorAll(".immune-check:checked").forEach(cb => { immune.push(cb.value); });
+			if (immune.length) options.immune = immune;
+			const conditionImmune = [];
+			form.querySelectorAll(".condition-immune-check:checked").forEach(cb => {
+				const val = String(cb.value || "");
+				const condName = val.includes("|") ? val.split("|")[0] : val;
+				conditionImmune.push(condName);
 			});
+			if (conditionImmune.length) options.conditionImmune = conditionImmune;
+
+			// Speed modifications
+			const speedBonus = {};
+			const speedWalk = parseInt(form.querySelector("#custom-item-speed-walk")?.value) || 0;
+			const speedFly = parseInt(form.querySelector("#custom-item-speed-fly")?.value) || 0;
+			const speedSwim = parseInt(form.querySelector("#custom-item-speed-swim")?.value) || 0;
+			const speedClimb = parseInt(form.querySelector("#custom-item-speed-climb")?.value) || 0;
+			const speedBurrow = parseInt(form.querySelector("#custom-item-speed-burrow")?.value) || 0;
+			if (speedWalk) speedBonus.walk = speedWalk;
+			if (speedFly) speedBonus.fly = speedFly;
+			if (speedSwim) speedBonus.swim = speedSwim;
+			if (speedClimb) speedBonus.climb = speedClimb;
+			if (speedBurrow) speedBonus.burrow = speedBurrow;
+
+			const speedStatic = {};
+			const grantFly = parseInt(form.querySelector("#custom-item-grant-fly")?.value) || 0;
+			const grantSwim = parseInt(form.querySelector("#custom-item-grant-swim")?.value) || 0;
+			const grantClimb = parseInt(form.querySelector("#custom-item-grant-climb")?.value) || 0;
+			const grantBurrow = parseInt(form.querySelector("#custom-item-grant-burrow")?.value) || 0;
+			if (grantFly) speedStatic.fly = grantFly;
+			if (grantSwim) speedStatic.swim = grantSwim;
+			if (grantClimb) speedStatic.climb = grantClimb;
+			if (grantBurrow) speedStatic.burrow = grantBurrow;
+
+			// Speed equal-to (fly = walk, etc.)
+			const speedEqual = {};
+			const equalFly = form.querySelector("#custom-item-equal-fly")?.value;
+			const equalSwim = form.querySelector("#custom-item-equal-swim")?.value;
+			const equalClimb = form.querySelector("#custom-item-equal-climb")?.value;
+			if (equalFly) speedEqual.fly = equalFly;
+			if (equalSwim) speedEqual.swim = equalSwim;
+			if (equalClimb) speedEqual.climb = equalClimb;
+
+			// Speed multiply (walk x2, etc.)
+			const speedMultiply = {};
+			const multiplyWalk = parseFloat(form.querySelector("#custom-item-multiply-walk")?.value);
+			if (multiplyWalk && multiplyWalk !== 1) speedMultiply.walk = multiplyWalk;
+
+			if (Object.keys(speedBonus).length || Object.keys(speedStatic).length || Object.keys(speedEqual).length || Object.keys(speedMultiply).length) {
+				options.modifySpeed = {};
+				if (Object.keys(speedBonus).length) options.modifySpeed.bonus = speedBonus;
+				if (Object.keys(speedStatic).length) options.modifySpeed.static = speedStatic;
+				if (Object.keys(speedEqual).length) options.modifySpeed.equal = speedEqual;
+				if (Object.keys(speedMultiply).length) options.modifySpeed.multiply = speedMultiply;
+			}
+
+			// Ability score modifications
+			const abilityStatic = {};
+			const setStr = parseInt(form.querySelector("#custom-item-ability-set-str")?.value);
+			const setDex = parseInt(form.querySelector("#custom-item-ability-set-dex")?.value);
+			const setCon = parseInt(form.querySelector("#custom-item-ability-set-con")?.value);
+			const setInt = parseInt(form.querySelector("#custom-item-ability-set-int")?.value);
+			const setWis = parseInt(form.querySelector("#custom-item-ability-set-wis")?.value);
+			const setCha = parseInt(form.querySelector("#custom-item-ability-set-cha")?.value);
+			if (!isNaN(setStr) && setStr > 0) abilityStatic.str = setStr;
+			if (!isNaN(setDex) && setDex > 0) abilityStatic.dex = setDex;
+			if (!isNaN(setCon) && setCon > 0) abilityStatic.con = setCon;
+			if (!isNaN(setInt) && setInt > 0) abilityStatic.int = setInt;
+			if (!isNaN(setWis) && setWis > 0) abilityStatic.wis = setWis;
+			if (!isNaN(setCha) && setCha > 0) abilityStatic.cha = setCha;
+
+			const abilityBonus = {};
+			const bonusStr = parseInt(form.querySelector("#custom-item-ability-bonus-str")?.value) || 0;
+			const bonusDex = parseInt(form.querySelector("#custom-item-ability-bonus-dex")?.value) || 0;
+			const bonusCon = parseInt(form.querySelector("#custom-item-ability-bonus-con")?.value) || 0;
+			const bonusInt = parseInt(form.querySelector("#custom-item-ability-bonus-int")?.value) || 0;
+			const bonusWis = parseInt(form.querySelector("#custom-item-ability-bonus-wis")?.value) || 0;
+			const bonusCha = parseInt(form.querySelector("#custom-item-ability-bonus-cha")?.value) || 0;
+			if (bonusStr) abilityBonus.str = bonusStr;
+			if (bonusDex) abilityBonus.dex = bonusDex;
+			if (bonusCon) abilityBonus.con = bonusCon;
+			if (bonusInt) abilityBonus.int = bonusInt;
+			if (bonusWis) abilityBonus.wis = bonusWis;
+			if (bonusCha) abilityBonus.cha = bonusCha;
+
+			if (Object.keys(abilityStatic).length || Object.keys(abilityBonus).length) {
+				options.ability = {};
+				if (Object.keys(abilityStatic).length) options.ability.static = abilityStatic;
+				// Merge bonus into ability object (not nested)
+				Object.assign(options.ability, abilityBonus);
+			}
+
+			// Senses
+			const senses = {};
+			const senseDarkvision = parseInt(form.querySelector("#custom-item-sense-darkvision")?.value) || 0;
+			const senseBlindight = parseInt(form.querySelector("#custom-item-sense-blindsight")?.value) || 0;
+			const senseTremorsense = parseInt(form.querySelector("#custom-item-sense-tremorsense")?.value) || 0;
+			const senseTruesight = parseInt(form.querySelector("#custom-item-sense-truesight")?.value) || 0;
+			if (senseDarkvision) senses.darkvision = senseDarkvision;
+			if (senseBlindight) senses.blindsight = senseBlindight;
+			if (senseTremorsense) senses.tremorsense = senseTremorsense;
+			if (senseTruesight) senses.truesight = senseTruesight;
+			if (Object.keys(senses).length) options.senses = senses;
+
+			// Attached spells
+			if (selectedSpells.length) {
+				// Convert to the attachedSpells format
+				const attachedSpells = {};
+				const willSpells = [];
+				const dailySpells = {};
+				const chargesSpells = {};
+
+				for (const spell of selectedSpells) {
+					const spellRef = `${spell.name}|${spell.source}`;
+					if (spell.usageType === "will" || spell.level === 0) {
+						willSpells.push(spellRef);
+					} else if (spell.usageType === "daily") {
+						const key = `${spell.uses}${spell.recharge === "short" ? "" : "e"}`;
+						if (!dailySpells[key]) dailySpells[key] = [];
+						dailySpells[key].push(spellRef);
+					} else if (spell.usageType === "charges") {
+						const key = String(spell.uses);
+						if (!chargesSpells[key]) chargesSpells[key] = [];
+						chargesSpells[key].push(spellRef);
+					}
+				}
+
+				if (willSpells.length) attachedSpells.will = willSpells;
+				if (Object.keys(dailySpells).length) attachedSpells.daily = dailySpells;
+				if (Object.keys(chargesSpells).length) attachedSpells.charges = chargesSpells;
+
+				if (Object.keys(attachedSpells).length) options.attachedSpells = attachedSpells;
+			}
+
+			const quantity = parseInt(form.querySelector("#custom-item-qty")?.value) || 1;
+			const weight = parseFloat(form.querySelector("#custom-item-weight")?.value) || 0;
+
+			this._addCustomItem(name, quantity, weight, options);
+			JqueryUtil.doToast({type: "success", content: `Created ${name}!`});
+			doClose(true);
+		});
 
 		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3 gap-2">
 			${btnCancel}
@@ -3282,7 +3278,6 @@ class CharacterSheetInventory {
 					this._page.saveCharacter();
 					JqueryUtil.doToast({type: "success", content: `Added: ${prop.name}`});
 				}
-				return;
 			}
 		});
 
@@ -3305,9 +3300,9 @@ class CharacterSheetInventory {
 		</div>`;
 		modalInner.append(closeFooter);
 		closeFooter.querySelector("button").addEventListener("click", () => {
-				this._renderItemList();
-				doClose(false);
-			});
+			this._renderItemList();
+			doClose(false);
+		});
 	}
 
 	_renderItemDetails (item) {
@@ -4271,29 +4266,29 @@ class CharacterSheetInventory {
 						${vcSpellLabels.length ? `<span class="ve-small" style="color: #8b5cf6; font-style: italic;" title="Enhances these spells when used as a variant component">🧫 ${vcSpellLabels.join(", ")}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}">Charges: <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
 						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => {
-							const tooltip = typeof CharacterSheetUpgrades !== "undefined" ? (() => {
-								const eff = CharacterSheetUpgrades.getUpgradeEffects({appliedUpgrades: [u]});
-								const parts = [];
-								if (eff.bonusWeaponAttack) parts.push(`+${eff.bonusWeaponAttack} attack`);
-								if (eff.bonusWeaponDamage) parts.push(`+${eff.bonusWeaponDamage} damage`);
-								if (eff.critThresholdReduction) parts.push(`Crit on ${20 - eff.critThresholdReduction}-20`);
-								if (eff.damageDieIncrease) parts.push(`Damage die +${eff.damageDieIncrease} step`);
-								if (eff.bonusSpellAttack) parts.push(`+${eff.bonusSpellAttack} spell attack`);
-								if (eff.bonusSpellSaveDc) parts.push(`+${eff.bonusSpellSaveDc} spell DC`);
-								if (eff.bonusDamageDice) parts.push(`+${eff.bonusDamageDice} ${eff.bonusDamageType}`);
-								parts.push(...eff.tags);
-								parts.push(...eff.notes);
-								return parts.length ? `${u.name}: ${parts.join("; ")}` : u.name;
-							})() : u.name;
-							return `<span class="badge badge-warning ve-small" title="${tooltip.replace(/"/g, "&quot;")}">${u.name}</span>`;
-						}).join(" ")}</span>` : ""}
+		const tooltip = typeof CharacterSheetUpgrades !== "undefined" ? (() => {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects({appliedUpgrades: [u]});
+			const parts = [];
+			if (eff.bonusWeaponAttack) parts.push(`+${eff.bonusWeaponAttack} attack`);
+			if (eff.bonusWeaponDamage) parts.push(`+${eff.bonusWeaponDamage} damage`);
+			if (eff.critThresholdReduction) parts.push(`Crit on ${20 - eff.critThresholdReduction}-20`);
+			if (eff.damageDieIncrease) parts.push(`Damage die +${eff.damageDieIncrease} step`);
+			if (eff.bonusSpellAttack) parts.push(`+${eff.bonusSpellAttack} spell attack`);
+			if (eff.bonusSpellSaveDc) parts.push(`+${eff.bonusSpellSaveDc} spell DC`);
+			if (eff.bonusDamageDice) parts.push(`+${eff.bonusDamageDice} ${eff.bonusDamageType}`);
+			parts.push(...eff.tags);
+			parts.push(...eff.notes);
+			return parts.length ? `${u.name}: ${parts.join("; ")}` : u.name;
+		})() : u.name;
+		return `<span class="badge badge-warning ve-small" title="${tooltip.replace(/"/g, "&quot;")}">${u.name}</span>`;
+	}).join(" ")}</span>` : ""}
 						${item.socketedGemstones?.length ? `<span class="ve-small charsheet__item-gem-badges">${item.socketedGemstones.map(g => {
-							const summary = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneSummary(g) : "";
-							const chargeStr = g.chargesMax ? ` [${g.chargesCurrent ?? g.chargesMax}/${g.chargesMax}]` : "";
-							const usedStr = g.usedToday ? " (Used)" : "";
-							const tooltip = `${g.name}${chargeStr}${usedStr}${summary ? ": " + summary : ""}`;
-							return `<span class="badge badge-success ve-small${g.usedToday ? " charsheet__gem-used" : ""}" title="${tooltip.replace(/"/g, "&quot;")}">💎 ${g.gemName || g.name}${chargeStr}</span>`;
-						}).join(" ")}</span>` : ""}
+		const summary = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneSummary(g) : "";
+		const chargeStr = g.chargesMax ? ` [${g.chargesCurrent ?? g.chargesMax}/${g.chargesMax}]` : "";
+		const usedStr = g.usedToday ? " (Used)" : "";
+		const tooltip = `${g.name}${chargeStr}${usedStr}${summary ? `: ${summary}` : ""}`;
+		return `<span class="badge badge-success ve-small${g.usedToday ? " charsheet__gem-used" : ""}" title="${tooltip.replace(/"/g, "&quot;")}">💎 ${g.gemName || g.name}${chargeStr}</span>`;
+	}).join(" ")}</span>` : ""}
 					</div>
 					<div class="charsheet__item-actions">
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-qty-decrease" title="Decrease quantity">−</button>
@@ -4316,7 +4311,7 @@ class CharacterSheetInventory {
 							</button>
 						` : ""}
 						${activeGem && !gemHasCharges ? `
-							<button type="button" class="ve-btn ve-btn-xs ${activeGem.usedToday ? "ve-btn-default charsheet__gem-used" : "ve-btn-success"} charsheet__gem-use-daily" data-gem-name="${activeGem.name}" title="${activeGem.usedToday ? activeGem.name + " (used, resets at dawn)" : "Use " + (activeGem.gemName || activeGem.name) + " ability"}" ${activeGem.usedToday ? "disabled" : ""}>
+							<button type="button" class="ve-btn ve-btn-xs ${activeGem.usedToday ? "ve-btn-default charsheet__gem-used" : "ve-btn-success"} charsheet__gem-use-daily" data-gem-name="${activeGem.name}" title="${activeGem.usedToday ? `${activeGem.name} (used, resets at dawn)` : `Use ${activeGem.gemName || activeGem.name} ability`}" ${activeGem.usedToday ? "disabled" : ""}>
 								💎 ${activeGem.usedToday ? "Used" : "Activate"}
 							</button>
 						` : ""}
@@ -4420,13 +4415,13 @@ class CharacterSheetInventory {
 	_formatPropertyWithHover (prop) {
 		const propUid = prop?.uid || prop;
 		const displayName = this._formatProperty(prop);
-		
+
 		try {
 			// Get the property object to check for entries and actual source
 			const propObj = typeof Renderer !== "undefined" && Renderer.item?.getProperty
 				? Renderer.item.getProperty(propUid, {isIgnoreMissing: true})
 				: null;
-			
+
 			if (propObj?.entries?.length && propObj.source) {
 				const abbreviation = propObj.abbreviation || propUid.split("|")[0];
 				const source = propObj.source;
@@ -4442,7 +4437,7 @@ class CharacterSheetInventory {
 		} catch (e) {
 			// Fall back to plain text
 		}
-		
+
 		return displayName;
 	}
 
@@ -4455,13 +4450,13 @@ class CharacterSheetInventory {
 		const displayName = this._formatMastery(mastery);
 		const masteryParts = mastery.split("|");
 		const masteryName = masteryParts[0];
-		
+
 		try {
 			// Get the mastery object to check for entries and actual source
 			const masteryObj = typeof Renderer !== "undefined" && Renderer.item?._getMastery
 				? Renderer.item._getMastery(mastery)
 				: null;
-			
+
 			if (masteryObj?.entries?.length && masteryObj.source) {
 				const name = masteryObj.name || masteryName;
 				const source = masteryObj.source;
@@ -4477,7 +4472,7 @@ class CharacterSheetInventory {
 		} catch (e) {
 			// Fall back to plain text
 		}
-		
+
 		return displayName;
 	}
 

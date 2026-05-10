@@ -143,7 +143,6 @@ class CharacterSheetPage {
 		if (this._spells) this._spells.setSpells(this._spellsData);
 		if (this._upgrades) this._upgrades.setUpgrades(this._itemUpgradesData);
 
-
 		// Check for character in URL
 		const urlParams = new URLSearchParams(window.location.search);
 		const charId = urlParams.get("id");
@@ -274,19 +273,19 @@ class CharacterSheetPage {
 			cls.subclasses = this._subclasses.filter(sc => {
 				// Match by class name
 				if (sc.className !== cls.name) return false;
-				
+
 				// Match by class source - be flexible with source matching for homebrew compatibility
 				const scClassSource = sc.classSource || Parser.SRC_PHB;
-				
+
 				// Direct source match
 				if (scClassSource === cls.source) return true;
-				
+
 				// Allow XPHB subclasses to match with PHB classes and vice versa
-				if ((scClassSource === Parser.SRC_PHB && cls.source === Parser.SRC_XPHB) ||
-					(scClassSource === Parser.SRC_XPHB && cls.source === Parser.SRC_PHB)) {
+				if ((scClassSource === Parser.SRC_PHB && cls.source === Parser.SRC_XPHB)
+					|| (scClassSource === Parser.SRC_XPHB && cls.source === Parser.SRC_PHB)) {
 					return true;
 				}
-				
+
 				// Allow homebrew subclasses targeting XPHB/PHB to match with homebrew classes of the same name
 				// This handles cases like TGTT subclasses that target base classes
 				const isBaseSource = [Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource);
@@ -294,7 +293,7 @@ class CharacterSheetPage {
 				if (isBaseSource && isClassHomebrew) {
 					return true;
 				}
-				
+
 				// Also allow homebrew subclasses to match base classes
 				// This handles cases where a homebrew subclass should work with the standard class
 				const isSubclassHomebrew = ![Parser.SRC_PHB, Parser.SRC_XPHB].includes(sc.source);
@@ -311,7 +310,7 @@ class CharacterSheetPage {
 				if (isSubclassHomebrew && isClassBase && scClassSource === sc.source) {
 					return true;
 				}
-				
+
 				return false;
 			});
 		});
@@ -358,20 +357,20 @@ class CharacterSheetPage {
 	 */
 	_processRaceData (rawRaces) {
 		const out = [];
-		
+
 		for (const race of rawRaces) {
 			// First, check if this race has _versions that need expansion
 			const hasVersions = race._versions?.length > 0;
 			let expandedVersions = [];
-			
+
 			if (hasVersions) {
 				try {
 					// Expand versions using DataUtil - this creates full entity copies with modifications
 					expandedVersions = DataUtil.generic.getVersions(
 						{...race, __prop: "race"},
-						{isExternalApplicationIdentityOnly: false}
+						{isExternalApplicationIdentityOnly: false},
 					);
-					
+
 					// Set _baseName/_baseSource on versions so they group with the base race
 					for (const version of expandedVersions) {
 						version._baseName = race.name;
@@ -382,20 +381,20 @@ class CharacterSheetPage {
 					console.warn("[CharSheet] Failed to expand race versions for:", race.name, e);
 				}
 			}
-			
+
 			// Merge subraces using the standard method
 			// This handles traditional subraces and sets _baseName/_baseSource
 			// Only add base race entries if there are subraces OR versions
 			const hasSubraces = race.subraces?.length > 0;
 			const mergedSubraces = Renderer.race.mergeSubraces([race], {isAddBaseRaces: hasSubraces || expandedVersions.length > 0});
 			out.push(...mergedSubraces);
-			
+
 			// Add expanded versions
 			if (expandedVersions.length) {
 				out.push(...expandedVersions);
 			}
 		}
-		
+
 		return out;
 	}
 
@@ -597,7 +596,7 @@ class CharacterSheetPage {
 		const tabs = document.getElementById("charsheet-tabs");
 		const tabContent = document.querySelector(".tab-content");
 
-		for (const link of tabs.querySelectorAll('a[data-toggle="tab"]')) {
+		for (const link of tabs.querySelectorAll("a[data-toggle=\"tab\"]")) {
 			link.addEventListener("click", (e) => {
 				e.preventDefault();
 				const targetId = e.currentTarget.getAttribute("href");
@@ -862,7 +861,7 @@ class CharacterSheetPage {
 				this._renderCurrency(); // Update total
 			});
 		});
-		
+
 		// Currency conversion button
 		document.getElementById("charsheet-btn-convert-currency").addEventListener("click", () => this._convertCurrencyToGold());
 
@@ -1410,10 +1409,10 @@ class CharacterSheetPage {
 		const level1Spells = classSpells.filter(sp => sp.level === 1);
 
 		// Determine cantrip and known spell counts from class data tables
-		const cantripCount = CharacterSheetClassUtils.getCantripsAtLevel?.(cls, cls.name, 1)
-			?? this._getDefaultCantripCount(cls.name);
-		const knownCount = CharacterSheetClassUtils.getKnownSpellsAtLevel?.(cls, cls.name, 1)
-			?? this._getDefaultKnownSpellCount(cls.name);
+		const cantripCount = CharacterSheetClassUtils.getCantripsAtLevel?.(cls, cls.name, 1) ??
+			this._getDefaultCantripCount(cls.name);
+		const knownCount = CharacterSheetClassUtils.getKnownSpellsAtLevel?.(cls, cls.name, 1) ??
+			this._getDefaultKnownSpellCount(cls.name);
 
 		// Add cantrips
 		if (cantripCount > 0 && cantrips.length) {
@@ -1650,8 +1649,8 @@ class CharacterSheetPage {
 		const cantrips = this._state.getCantrips?.() || [];
 
 		// Check if character has Find Familiar spell, Pact of the Chain, or Animal Accomplice
-		const hasFindFamiliar = spells.some(s => s.name?.toLowerCase() === "find familiar") ||
-			cantrips.some(c => c.name?.toLowerCase() === "find familiar");
+		const hasFindFamiliar = spells.some(s => s.name?.toLowerCase() === "find familiar")
+			|| cantrips.some(c => c.name?.toLowerCase() === "find familiar");
 		const hasPactOfTheChain = calculations.hasPactOfTheChain;
 		const hasAnimalAccomplice = calculations.hasAnimalAccomplice || calculations.hasImprovedFamiliar;
 
@@ -2314,7 +2313,7 @@ class CharacterSheetPage {
 			}
 
 			await StorageUtil.pSet("charsheet-characters", characters);
-			
+
 			// Show saved indicator
 			this._updateSaveIndicator("saved");
 		} catch (err) {
@@ -2353,12 +2352,12 @@ class CharacterSheetPage {
 
 	async _onImportCharacter () {
 		const {jsons, errors} = await InputUiUtil.pGetUserUploadJson({expectedFileTypes: ["character"]});
-		
+
 		if (errors?.length) {
 			JqueryUtil.doToast({type: "danger", content: `Error importing file: ${errors.join(", ")}`});
 			return;
 		}
-		
+
 		const json = jsons?.[0];
 		if (!json) return;
 
@@ -2438,7 +2437,7 @@ class CharacterSheetPage {
 	_renderBasicInfo () {
 		document.getElementById("charsheet-ipt-name").value = this._state.getName();
 		this._renderXpTracking();
-		
+
 		// Render race with hover link
 		const race = this._state.getRace();
 		if (race?.name) {
@@ -2452,7 +2451,7 @@ class CharacterSheetPage {
 		} else {
 			document.getElementById("charsheet-disp-race").textContent = "—";
 		}
-		
+
 		// Render class with hover links
 		const classes = this._state.getClasses();
 		if (classes.length) {
@@ -2468,9 +2467,9 @@ class CharacterSheetPage {
 		} else {
 			document.getElementById("charsheet-disp-class").textContent = "—";
 		}
-		
+
 		document.getElementById("charsheet-disp-level").textContent = this._state.getTotalLevel();
-		
+
 		// Render background with hover link
 		const background = this._state.getBackground();
 		if (background?.name) {
@@ -2488,11 +2487,11 @@ class CharacterSheetPage {
 		} else {
 			document.getElementById("charsheet-disp-background").textContent = "—";
 		}
-		
+
 		// Render size and reach chips
 		this._renderSizeChip();
 		this._renderReachChip();
-		
+
 		document.getElementById("charsheet-disp-proficiency").textContent = `+${this._state.getProficiencyBonus()}`;
 		this._renderLevelUpBanner();
 	}
@@ -2552,19 +2551,19 @@ class CharacterSheetPage {
 	_renderSizeChip () {
 		const chip = document.getElementById("charsheet-size-chip");
 		const value = document.getElementById("charsheet-disp-size");
-		
+
 		const baseSize = this._state.getBaseSize();
 		const currentSize = this._state.getSize();
-		
+
 		const sizeChanged = currentSize !== baseSize;
-		
+
 		// Always show the chip
 		chip.classList.remove("ve-hidden");
-		
+
 		// Build the display text
 		const sizeText = currentSize.charAt(0).toUpperCase() + currentSize.slice(1);
 		value.textContent = sizeText;
-		
+
 		// Build tooltip
 		const tooltipParts = [`Size: ${sizeText}`];
 		if (sizeChanged) {
@@ -2572,9 +2571,9 @@ class CharacterSheetPage {
 			tooltipParts.push(`Base Size: ${baseSizeText}`);
 		}
 		tooltipParts.push(`Carry Capacity: ×${this._state.getSizeCarryMultiplier()}`);
-		
+
 		chip.setAttribute("title", tooltipParts.join("\n"));
-		
+
 		// Add visual indicator if size is modified
 		if (sizeChanged) {
 			const direction = this._state.getSizeIncreaseFromStates() > this._state.getSizeDecreaseFromStates() ? "increased" : "decreased";
@@ -2591,16 +2590,16 @@ class CharacterSheetPage {
 	_renderReachChip () {
 		const chip = document.getElementById("charsheet-reach-chip");
 		const value = document.getElementById("charsheet-disp-reach");
-		
+
 		const baseReach = 5; // Standard reach for Medium/Small creatures
 		const reachBonus = this._state.getReachBonus();
 		const meleeReach = this._state.getMeleeReach();
-		
+
 		const hasReachModifier = reachBonus !== 0;
-		
+
 		// Build the display text
 		value.textContent = `${meleeReach} ft`;
-		
+
 		// Build tooltip
 		const tooltipParts = [`Melee Reach: ${meleeReach} ft`];
 		if (hasReachModifier) {
@@ -2608,9 +2607,9 @@ class CharacterSheetPage {
 			const sign = reachBonus > 0 ? "+" : "";
 			tooltipParts.push(`Modifier: ${sign}${reachBonus} ft`);
 		}
-		
+
 		chip.setAttribute("title", tooltipParts.join("\n"));
-		
+
 		// Add visual indicator if reach is modified
 		if (reachBonus > 0) {
 			chip.classList.add("charsheet__info-chip--reach-bonus");
@@ -2837,7 +2836,7 @@ class CharacterSheetPage {
 		const rules = this._state.getExhaustionRules();
 		const maxExhaustion = this._state.getMaxExhaustion();
 		let speedDisplay = this._state.getSpeed();
-		
+
 		if (exhaustion > 0 && exhaustion < maxExhaustion) {
 			if (rules === "2024") {
 				// 2024: -5 ft per level of exhaustion
@@ -2861,7 +2860,7 @@ class CharacterSheetPage {
 			}
 			// Thelemar rules: no speed penalty
 		}
-		
+
 		document.getElementById("charsheet-disp-speed").textContent = speedDisplay;
 		this._renderStatBreakdown("#charsheet-speed-breakdown", this._state.getSpeedBreakdown("walk"));
 
@@ -2870,9 +2869,9 @@ class CharacterSheetPage {
 		// Thelemar rules: Long jump = 8 + Athletics mod, High jump = 2 + Athletics × 0.5
 		// Running jumps require a 10ft running start; standing jumps are half
 		const useThelemarJumping = this._state.getSettings()?.thelemar_jumping;
-		
+
 		let longJumpRunning, highJumpRunning;
-		
+
 		if (useThelemarJumping) {
 			// Thelemar rules: Athletics-based
 			const athleticsMod = this._state.getSkillMod("athletics");
@@ -2885,7 +2884,7 @@ class CharacterSheetPage {
 			longJumpRunning = strScore; // Long jump = Strength score in feet
 			highJumpRunning = 3 + strMod; // High jump = 3 + Str mod in feet
 		}
-		
+
 		// Apply jump multiplier from active states (e.g. Step of the Wind)
 		const jumpMultiplier = this._state.getJumpMultiplierFromStates?.() || 1;
 		longJumpRunning = Math.floor(longJumpRunning * jumpMultiplier);
@@ -3109,13 +3108,13 @@ class CharacterSheetPage {
 		const hasInspiration = this._state.hasInspiration();
 		const icon = document.getElementById("charsheet-icon-inspiration");
 		const box = document.getElementById("charsheet-box-inspiration");
-		
+
 		// Update emoji-based icon
 		icon.textContent = hasInspiration ? "⭐" : "☆";
-		
+
 		// Toggle active class for styling
 		box.classList.toggle("active", hasInspiration);
-		
+
 		// Legacy glyphicon support (fallback)
 		icon.classList.remove("glyphicon-star", "glyphicon-star-empty");
 		if (icon.classList.contains("glyphicon")) {
@@ -3129,7 +3128,6 @@ class CharacterSheetPage {
 		const weapons = profs.weapons.map(w => typeof w === "string" ? w : w.full).join(", ");
 		const tools = profs.tools.map(t => typeof t === "string" ? t : t.full).join(", ");
 
-		
 		document.getElementById("charsheet-prof-armor").innerHTML = `${Renderer.get().render(armor)}` || "—";
 		document.getElementById("charsheet-prof-weapons").innerHTML = `${Renderer.get().render(weapons)}` || "—";
 		document.getElementById("charsheet-prof-tools").innerHTML = `${Renderer.get().render(tools)}` || "—";
@@ -3149,9 +3147,9 @@ class CharacterSheetPage {
 
 					// Look up language in data, preferring XPHB source
 					const langData = this._languagesData?.find(l =>
-						l.name.toLowerCase() === langLower && l.source === Parser.SRC_XPHB
+						l.name.toLowerCase() === langLower && l.source === Parser.SRC_XPHB,
 					) || this._languagesData?.find(l =>
-						l.name.toLowerCase() === langLower
+						l.name.toLowerCase() === langLower,
 					);
 
 					// If no data found, render as plain text to avoid broken hover links
@@ -3213,13 +3211,13 @@ class CharacterSheetPage {
 			masteries.forEach(m => {
 				const [weaponName, source] = m.split("|");
 				// Find the BASE weapon to get its mastery property
-				const weapon = this._itemsData?.find(i => 
-					i._isBaseItem &&
-					i.name.toLowerCase() === weaponName.toLowerCase() && 
-					(!source || i.source === source)
+				const weapon = this._itemsData?.find(i =>
+					i._isBaseItem
+					&& i.name.toLowerCase() === weaponName.toLowerCase()
+					&& (!source || i.source === source),
 				);
 				const masteryProp = this._getMasteryName(weapon?.mastery?.[0]);
-				
+
 				const badge = e_({outer: `
 					<span class="charsheet__mastery-badge" title="${masteryProp ? `Mastery: ${masteryProp}` : weaponName}">
 						<strong>${weaponName}</strong>
@@ -3228,7 +3226,7 @@ class CharacterSheetPage {
 				`});
 				container.append(badge);
 			});
-			
+
 			// Show count, highlight if there are unfilled slots
 			const hasUnfilled = masteries.length < maxMasteries;
 			container.append(e_({outer: `<span class="${hasUnfilled ? "text-warning" : "ve-muted"} ve-small ml-2">(${masteries.length}/${maxMasteries}${hasUnfilled ? " — click ✎ to add more" : ""})</span>`}));
@@ -3244,7 +3242,7 @@ class CharacterSheetPage {
 			values[currency] = this._state.getCurrency(currency) || 0;
 			document.getElementById(`charsheet-ipt-${currency}`).value = values[currency];
 		});
-		
+
 		// Calculate total value in GP (standard D&D conversion rates)
 		// 10 CP = 1 SP, 10 SP = 1 GP, 2 EP = 1 GP, 10 GP = 1 PP
 		const totalGp = (values.cp / 100) + (values.sp / 10) + (values.ep / 2) + values.gp + (values.pp * 10);
@@ -3263,24 +3261,24 @@ class CharacterSheetPage {
 		const ep = this._state.getCurrency("ep") || 0;
 		const gp = this._state.getCurrency("gp") || 0;
 		const pp = this._state.getCurrency("pp") || 0;
-		
+
 		// Convert everything to copper first (most precise)
 		const totalCopper = cp + (sp * 10) + (ep * 50) + (gp * 100) + (pp * 1000);
-		
+
 		// Convert copper to gold (keeping remainder as copper)
 		const newGp = Math.floor(totalCopper / 100);
 		const remainingCp = totalCopper % 100;
-		
+
 		// Update values
 		this._state.setCurrency("cp", remainingCp);
 		this._state.setCurrency("sp", 0);
 		this._state.setCurrency("ep", 0);
 		this._state.setCurrency("gp", newGp);
 		this._state.setCurrency("pp", 0);
-		
+
 		this._saveCurrentCharacter();
 		this._renderCurrency();
-		
+
 		JqueryUtil.doToast({type: "success", content: `Converted to ${newGp} GP${remainingCp > 0 ? ` and ${remainingCp} CP` : ""}`});
 	}
 
@@ -3301,7 +3299,7 @@ class CharacterSheetPage {
 	 */
 	_initPortraitHandlers () {
 		const portraitInput = document.getElementById("charsheet-portrait-input");
-		
+
 		// Overview tab portrait - clicking container triggers file input
 		document.getElementById("charsheet-portrait-container").addEventListener("click", (e) => {
 			if (e.target.closest("#charsheet-portrait-input")) return;
@@ -3420,7 +3418,7 @@ class CharacterSheetPage {
 		// Update button badge
 		const btn = document.getElementById("charsheet-btn-modifiers");
 		btn?.querySelector(".charsheet__modifier-badge")?.remove();
-		
+
 		if (activeCount > 0) {
 			btn.append(e_({outer: `<span class="charsheet__modifier-badge">${activeCount}</span>`}));
 			btn.classList.add("charsheet__btn--has-modifiers");
@@ -3493,12 +3491,12 @@ class CharacterSheetPage {
 		conditions.forEach(condObj => {
 			const conditionName = condObj.name;
 			const conditionSource = condObj.source;
-			
+
 			// Get condition effects for tooltip
 			const condDef = CharacterSheetState.getConditionEffects(conditionName);
 			const icon = condDef?.icon || "❓";
 			const description = condDef?.description || "Unknown condition";
-			
+
 			// Build effect list for tooltip
 			let effectsHtml = "";
 			if (condDef?.effects?.length) {
@@ -3516,11 +3514,11 @@ class CharacterSheetPage {
 					effectsHtml = `<div class="mt-1 ve-small">${effectList.join("<br>")}</div>`;
 				}
 			}
-			
+
 			// Use instance method for proper homebrew source lookup
 			const conditionLink = this.getConditionLinkWithSource(conditionName, conditionSource);
 			const sourceAbbr = Parser.sourceJsonToAbv(conditionSource);
-			
+
 			const badge = e_({outer: `
 				<span class="charsheet__condition-badge" title="${description}">
 					<span class="charsheet__condition-icon">${icon}</span>
@@ -3556,17 +3554,17 @@ class CharacterSheetPage {
 		const exhaustion = this._state.getExhaustion();
 		const rules = this._state.getExhaustionRules();
 		const maxExhaustion = this._state.getMaxExhaustion();
-		
+
 		// Update the number display
 		const number = document.getElementById("charsheet-exhaustion-number");
 		const maxDisplay = document.getElementById("charsheet-exhaustion-max");
 		const effect = document.getElementById("charsheet-exhaustion-effect");
 		const rulesToggle = document.getElementById("charsheet-exhaustion-rules");
 		const pipsContainer = document.getElementById("charsheet-exhaustion-display");
-		
+
 		// Update max display
 		maxDisplay.textContent = `/ ${maxExhaustion}`;
-		
+
 		// Dynamically generate pips based on rules
 		pipsContainer.innerHTML = "";
 		for (let i = 1; i <= maxExhaustion; i++) {
@@ -3808,7 +3806,7 @@ class CharacterSheetPage {
 				const hitMatch = entry.match(/\{@hit\s*(-?\d+)\}/);
 				const attackBonus = hitMatch ? parseInt(hitMatch[1]) : 0;
 				const bonusStr = attackBonus >= 0 ? `+${attackBonus}` : `${attackBonus}`;
-				return `<button class="ve-btn ve-btn-xs ve-btn-danger btn-companion-attack-roll" data-action-name="${action.name.replace(/"/g, '&quot;')}" title="Roll ${action.name}" ${usedAction ? 'disabled style="opacity: 0.5;"' : ''}>
+				return `<button class="ve-btn ve-btn-xs ve-btn-danger btn-companion-attack-roll" data-action-name="${action.name.replace(/"/g, "&quot;")}" title="Roll ${action.name}" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
 					⚔️ ${action.name} (${bonusStr})
 				</button>`;
 			}).join("");
@@ -3925,22 +3923,22 @@ class CharacterSheetPage {
 							</span>
 						</div>
 						<div class="ve-flex" style="gap: 6px; flex-wrap: wrap;">
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="help" title="Give an ally advantage on their next attack or ability check" ${usedAction ? 'disabled style="opacity: 0.5;"' : ''}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="help" title="Give an ally advantage on their next attack or ability check" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🤝 Help
 							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dash" title="Double your speed for this turn" ${usedAction ? 'disabled style="opacity: 0.5;"' : ''}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dash" title="Double your speed for this turn" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								💨 Dash
 							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="disengage" title="Your movement doesn't provoke opportunity attacks" ${usedAction ? 'disabled style="opacity: 0.5;"' : ''}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="disengage" title="Your movement doesn't provoke opportunity attacks" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🏃 Disengage
 							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dodge" title="Attacks against you have disadvantage; DEX saves have advantage" ${usedAction ? 'disabled style="opacity: 0.5;"' : ''}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dodge" title="Attacks against you have disadvantage; DEX saves have advantage" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🛡️ Dodge
 							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="hide" title="Make a Stealth check to become hidden" ${usedAction ? 'disabled style="opacity: 0.5;"' : ''}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="hide" title="Make a Stealth check to become hidden" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🫥 Hide
 							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="search" title="Make a Perception or Investigation check to find something" ${usedAction ? 'disabled style="opacity: 0.5;"' : ''}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="search" title="Make a Perception or Investigation check to find something" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🔎 Search
 							</button>
 						</div>
@@ -3948,7 +3946,7 @@ class CharacterSheetPage {
 						<div class="ve-flex mt-2" style="gap: 6px; flex-wrap: wrap;">
 							${attackButtonsHtml}
 						</div>
-						` : ''}
+						` : ""}
 					</div>
 
 					<!-- Action Buttons -->
@@ -4215,10 +4213,10 @@ class CharacterSheetPage {
 
 				const rollButton = isAttack ? `
 					<div class="ve-flex mt-1" style="gap: 6px;">
-						<button class="ve-btn ve-btn-xs ve-btn-danger btn-statblock-attack" data-action-name="${a.name.replace(/"/g, '&quot;')}" title="Roll attack">
+						<button class="ve-btn ve-btn-xs ve-btn-danger btn-statblock-attack" data-action-name="${a.name.replace(/"/g, "&quot;")}" title="Roll attack">
 							⚔️ Attack (${bonusStr})
 						</button>
-						${hasDamage ? `<button class="ve-btn ve-btn-xs ve-btn-warning btn-statblock-damage" data-action-name="${a.name.replace(/"/g, '&quot;')}" title="Roll damage only">
+						${hasDamage ? `<button class="ve-btn ve-btn-xs ve-btn-warning btn-statblock-damage" data-action-name="${a.name.replace(/"/g, "&quot;")}" title="Roll damage only">
 							💥 Damage
 						</button>` : ""}
 					</div>
@@ -4399,7 +4397,7 @@ class CharacterSheetPage {
 						<button class="ve-btn ve-btn-xxs ve-btn-success btn-heal-creature" data-index="${index}" title="Heal" ${isDead ? "" : ""}>+</button>
 						<button class="ve-btn ve-btn-xxs ve-btn-danger btn-damage-creature" data-index="${index}" title="Damage" ${isDead ? "disabled" : ""}>−</button>
 					</div>
-					${isDead ? '<span style="font-size: 0.8em; color: #ef4444;">☠️</span>' : ''}
+					${isDead ? "<span style=\"font-size: 0.8em; color: #ef4444;\">☠️</span>" : ""}
 				</div>
 			`;
 		}).join("");
@@ -4631,7 +4629,7 @@ class CharacterSheetPage {
 			const hitMatch = entry.match(/\{@hit\s*(-?\d+)\}/);
 			const attackBonus = hitMatch ? parseInt(hitMatch[1]) : 0;
 			const bonusStr = attackBonus >= 0 ? `+${attackBonus}` : `${attackBonus}`;
-			return `<button class="ve-btn ve-btn-xs ve-btn-danger btn-grouped-attack-roll" data-action-name="${action.name.replace(/"/g, '&quot;')}" title="Roll ${action.name}">
+			return `<button class="ve-btn ve-btn-xs ve-btn-danger btn-grouped-attack-roll" data-action-name="${action.name.replace(/"/g, "&quot;")}" title="Roll ${action.name}">
 				⚔️ ${action.name} (${bonusStr})
 			</button>`;
 		}).join("");
@@ -5000,21 +4998,20 @@ class CharacterSheetPage {
 					</div>
 					<div class="charsheet__ability-hero-skills">
 						${relatedSkills.map(s => {
-							const skillKey = s.name.toLowerCase().replace(/\s+/g, "");
-							const profLevel = this._state.getSkillProficiency(skillKey);
-							const skillMod = this._state.getSkillMod(skillKey);
-							const skillModStr = skillMod >= 0 ? `+${skillMod}` : `${skillMod}`;
-							let profIcon = "○";
-							let profClass = "";
-							let profTitle = "Not proficient - Click to toggle";
-							if (profLevel === 2) { profIcon = "◉"; profClass = "expertise"; profTitle = "Expertise - Click to toggle"; }
-							else if (profLevel === 1) { profIcon = "●"; profClass = "proficient"; profTitle = "Proficient - Click to toggle"; }
-							return `<div class="charsheet__ability-skill-mini ${profClass}" data-skill="${skillKey}" title="Click to roll ${s.name}">
+		const skillKey = s.name.toLowerCase().replace(/\s+/g, "");
+		const profLevel = this._state.getSkillProficiency(skillKey);
+		const skillMod = this._state.getSkillMod(skillKey);
+		const skillModStr = skillMod >= 0 ? `+${skillMod}` : `${skillMod}`;
+		let profIcon = "○";
+		let profClass = "";
+		let profTitle = "Not proficient - Click to toggle";
+		if (profLevel === 2) { profIcon = "◉"; profClass = "expertise"; profTitle = "Expertise - Click to toggle"; } else if (profLevel === 1) { profIcon = "●"; profClass = "proficient"; profTitle = "Proficient - Click to toggle"; }
+		return `<div class="charsheet__ability-skill-mini ${profClass}" data-skill="${skillKey}" title="Click to roll ${s.name}">
 								<span class="charsheet__ability-skill-prof" title="${profTitle}">${profIcon}</span>
 								<span class="charsheet__ability-skill-name">${s.name}</span>
 								<span class="charsheet__ability-skill-mod">${skillModStr}</span>
 							</div>`;
-						}).join("")}
+	}).join("")}
 					</div>
 					<div class="charsheet__ability-hero-actions">
 						<button class="charsheet__ability-roll-btn charsheet__ability-roll-check" data-ability="${abl}" title="Roll ${Parser.attAbvToFull(abl)} Check">
@@ -5152,8 +5149,7 @@ class CharacterSheetPage {
 
 				let profIcon = "○";
 				let profClass = "";
-				if (profLevel === 2) { profIcon = "◉"; profClass = "expertise"; }
-				else if (profLevel === 1) { profIcon = "●"; profClass = "proficient"; }
+				if (profLevel === 2) { profIcon = "◉"; profClass = "expertise"; } else if (profLevel === 1) { profIcon = "●"; profClass = "proficient"; }
 
 				const skillRow = e_({outer: `
 					<div class="charsheet__skill-full-row ${profClass}" data-skill="${skillKey}">
@@ -5182,11 +5178,11 @@ class CharacterSheetPage {
 
 		const resources = this._state.getResources();
 		const usesCombatSystem = this._state.usesCombatSystem?.() || false;
-		
+
 		// Get limited-use custom abilities (displayed in Resources section)
 		const customAbilities = this._state.getCustomAbilities?.() || [];
 		const limitedAbilities = customAbilities.filter(a => a.mode === "limited");
-		
+
 		// Count abilities that will be shown (exclude those linking to existing resources)
 		const visibleLimitedAbilities = limitedAbilities.filter(a => {
 			if (a.resourceSource?.type === "linked" && a.resourceSource?.resourceId !== "stamina") {
@@ -5210,10 +5206,10 @@ class CharacterSheetPage {
 			if (typeof this._state.ensureStaminaInitialized === "function") {
 				this._state.ensureStaminaInitialized();
 			}
-			
+
 			const staminaMax = this._state.getStaminaMax() || 0;
 			const staminaCurrent = this._state.getStaminaCurrent() ?? staminaMax;
-			
+
 			if (staminaMax > 0) {
 				const row = e_({outer: `
 					<div class="charsheet__resource-row" data-resource-id="stamina">
@@ -5303,7 +5299,7 @@ class CharacterSheetPage {
 			// Get the uses display (handles both self-contained and linked resources)
 			const uses = this._state.getCustomAbilityUsesDisplay?.(ability.id) || ability.uses;
 			if (!uses) return;
-			
+
 			// Check if this ability links to an existing resource pool (don't show duplicate)
 			if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId !== "stamina") {
 				const linkedResource = resources.find(r => r.id === ability.resourceSource.resourceId);
@@ -5312,10 +5308,10 @@ class CharacterSheetPage {
 					return;
 				}
 			}
-			
+
 			const canUse = this._state.canUseCustomAbility?.(ability.id) ?? uses.current > 0;
 			const canRestore = uses.current < uses.max;
-			
+
 			const row = e_({outer: `
 				<div class="charsheet__resource-row charsheet__resource-row--custom" data-ability-id="${ability.id}">
 					<span class="charsheet__resource-icon mr-1">${ability.icon || "⚡"}</span>
@@ -5632,9 +5628,7 @@ class CharacterSheetPage {
 			const actionType = this._combat?._getFeatureActionType?.(feature) || "action";
 			let actionIcon = "⚔️";
 			let actionLabel = "Action";
-			if (actionType === "bonus") { actionIcon = "⚡"; actionLabel = "Bonus"; }
-			else if (actionType === "reaction") { actionIcon = "🔄"; actionLabel = "Reaction"; }
-			else if (actionType === "free") { actionIcon = "✨"; actionLabel = "Free"; }
+			if (actionType === "bonus") { actionIcon = "⚡"; actionLabel = "Bonus"; } else if (actionType === "reaction") { actionIcon = "🔄"; actionLabel = "Reaction"; } else if (actionType === "free") { actionIcon = "✨"; actionLabel = "Free"; }
 
 			// Resource cost display
 			const desc = feature.description?.toLowerCase() || "";
@@ -5682,30 +5676,30 @@ class CharacterSheetPage {
 		const activeStates = this._state.getActiveStates();
 		const activatableFeatures = this._state.getActivatableFeatures();
 		const concentration = this._state.getConcentration();
-		
+
 		// Filter out condition-derived states (they're shown in the Conditions section)
 		const nonConditionStates = activeStates.filter(s => !s.isCondition);
-		
+
 		// Get currently active state type IDs
 		const activeStateTypeIds = new Set(nonConditionStates.filter(s => s.active).map(s => s.stateTypeId));
 
 		// === Section 1: Currently Active States ===
 		const hasActiveStates = nonConditionStates.some(s => s.active) || concentration;
-		
+
 		if (hasActiveStates) {
 			const activeSection = e_({outer: `<div class="charsheet__active-states-section mb-3">
 				<div class="charsheet__section-subtitle ve-flex-v-center mb-1">
 					<span class="ve-small ve-bold text-success">● Currently Active</span>
 				</div>
 			</div>`});
-			
+
 			// Render active states
 			nonConditionStates.filter(s => s.active).forEach(state => {
 				const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
 				const row = this._renderActiveStateRow(state, stateType, true);
 				activeSection.append(row);
 			});
-			
+
 			// Show concentration if active
 			if (concentration) {
 				const concRow = e_({outer: `
@@ -5724,7 +5718,7 @@ class CharacterSheetPage {
 				});
 				activeSection.append(concRow);
 			}
-			
+
 			container.append(activeSection);
 		}
 
@@ -5740,14 +5734,14 @@ class CharacterSheetPage {
 			}
 			return true;
 		});
-		
+
 		if (availableFeatures.length > 0 || !hasActiveStates) {
 			const availableSection = e_({outer: `<div class="charsheet__activatable-section">
 				<div class="charsheet__section-subtitle ve-flex-v-center mb-1">
 					<span class="ve-small ve-muted">Available to Activate</span>
 				</div>
 			</div>`});
-			
+
 			if (availableFeatures.length === 0) {
 				availableSection.append(e_({outer: `<div class="ve-muted ve-small ve-text-center py-1">No activatable features</div>`}));
 			} else {
@@ -5760,7 +5754,7 @@ class CharacterSheetPage {
 					// Use resource cost from description detection, or resource object, or default
 					const resourceCost = resource?.cost || activationInfo.staminaCost || stateType?.resourceCost || 1;
 					const hasResourceAvailable = !resource || resource.current >= resourceCost;
-					
+
 					// Determine if this is a limited-use ability (uses up charges, doesn't stay active)
 					const interactionMode = activationInfo.interactionMode || (activationInfo.isToggle ? "toggle" : "limited");
 					const isLimitedUse = customAbility?.mode === "limited"
@@ -5769,14 +5763,14 @@ class CharacterSheetPage {
 						|| interactionMode === "instant"
 						|| activationInfo.isInstant;
 					const buttonText = isLimitedUse ? "Use" : "Activate";
-					
+
 					// Get activation action type
 					const activationAction = activationInfo.activationAction || stateType?.activationAction;
 					const actionLabel = this._getActionLabel(activationAction);
-					
+
 					// Create hoverable feature name link
 					const featureNameHtml = this._getFeatureHoverLink(feature);
-					
+
 					// Build resource info string
 					let resourceInfo = "";
 					let resourceTooltip = "";
@@ -5787,7 +5781,7 @@ class CharacterSheetPage {
 						resourceInfo = `${resourceCost} Stamina`;
 						resourceTooltip = `Costs ${resourceCost} Stamina`;
 					}
-					
+
 					const row = e_({outer: `
 						<div class="charsheet__activatable-row ve-flex-v-center py-1 px-2 mb-1 rounded" 
 							style="background: var(--cs-bg-surface, var(--rgb-bg-alt, #1e293b));">
@@ -5799,21 +5793,21 @@ class CharacterSheetPage {
 								${actionLabel ? `<span class="ve-small ve-muted mr-1">${actionLabel}</span>` : ""}
 								${resourceInfo ? `<span class="ve-small ve-muted mr-2" title="${resourceTooltip}">${resourceInfo}</span>` : ""}
 								<button class="ve-btn ve-btn-xs ve-btn-success charsheet__activate-btn" 
-									${!hasResourceAvailable ? `disabled title="Not enough ${resource?.name || 'uses'} remaining"` : ''}>
+									${!hasResourceAvailable ? `disabled title="Not enough ${resource?.name || "uses"} remaining"` : ""}>
 									${buttonText}
 								</button>
 							</div>
 						</div>
 					`});
-					
+
 					row.querySelector(".charsheet__activate-btn").addEventListener("click", () => {
 						this._activateFeatureState(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
 					});
-					
+
 					availableSection.append(row);
 				});
 			}
-			
+
 			container.append(availableSection);
 		}
 
@@ -5825,7 +5819,7 @@ class CharacterSheetPage {
 					<span class="ve-small ve-muted">Ended (click to remove)</span>
 				</div>
 			</div>`});
-			
+
 			endedStates.forEach(state => {
 				const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
 				const row = e_({outer: `
@@ -5838,23 +5832,23 @@ class CharacterSheetPage {
 						</div>
 					</div>
 				`});
-				
+
 				row.querySelector(".charsheet__reactivate-btn").addEventListener("click", () => {
 					this._state.activateState(state.stateTypeId);
 					this._saveCurrentCharacter();
 					this._renderActiveStates();
 					this._renderCharacter();
 				});
-				
+
 				row.querySelector(".charsheet__remove-btn").addEventListener("click", () => {
 					this._state.removeActiveState(state.id);
 					this._saveCurrentCharacter();
 					this._renderActiveStates();
 				});
-				
+
 				endedSection.append(row);
 			});
-			
+
 			container.append(endedSection);
 		}
 
@@ -5862,10 +5856,10 @@ class CharacterSheetPage {
 		// Check if character has Reckless Attack (barbarian level 2+)
 		const barbarianClass = this._state._data.classes?.find(c => c.name?.toLowerCase() === "barbarian");
 		const hasRecklessAttack = barbarianClass && barbarianClass.level >= 2;
-		
+
 		// Get hover attributes for Dodge action
 		const dodgeHoverAttrs = this._getActionHoverAttrs("Dodge");
-		
+
 		const quickActions = e_({outer: `<div class="charsheet__quick-actions mt-2 pt-2 border-top">
 			<span class="ve-small ve-muted mr-2">Quick:</span>
 			<button class="ve-btn ve-btn-xs ${activeStateTypeIds.has("dodge") ? "ve-btn-warning" : "ve-btn-default"} mr-1 charsheet__toggle-dodge-btn" ${dodgeHoverAttrs}>
@@ -5875,7 +5869,7 @@ class CharacterSheetPage {
 				⚡ ${activeStateTypeIds.has("recklessAttack") ? "End Reckless" : "Reckless"}
 			</button>` : ""}
 		</div>`});
-		
+
 		quickActions.querySelector(".charsheet__toggle-dodge-btn").addEventListener("click", () => {
 			if (this._state.isStateTypeActive("dodge")) {
 				this._state.deactivateState("dodge");
@@ -5886,7 +5880,7 @@ class CharacterSheetPage {
 			this._renderActiveStates();
 			this._renderCharacter();
 		});
-		
+
 		if (hasRecklessAttack) {
 			quickActions.querySelector(".charsheet__toggle-reckless-btn").addEventListener("click", () => {
 				if (this._state.isStateTypeActive("recklessAttack")) {
@@ -5899,9 +5893,9 @@ class CharacterSheetPage {
 				this._renderCharacter();
 			});
 		}
-		
+
 		container.append(quickActions);
-		
+
 		// Sync combat tab's active states, defenses, and effects display
 		this._combat?.renderCombatStates?.();
 		this._combat?.renderCombatDefenses?.();
@@ -5932,7 +5926,7 @@ class CharacterSheetPage {
 			if (feature.featureType === "Class" && feature.className) {
 				const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
 				const classSource = feature.classSource || feature.source || storedClass?.source || Parser.SRC_XPHB;
-				
+
 				const hashInput = {
 					name: feature.name,
 					className: feature.className,
@@ -5990,7 +5984,7 @@ class CharacterSheetPage {
 			// Remove HTML tags
 			.replace(/<[^>]*>/g, "")
 			// Decode HTML entities
-			.replace(/&quot;/g, '"')
+			.replace(/&quot;/g, "\"")
 			.replace(/&amp;/g, "&")
 			.replace(/&lt;/g, "<")
 			.replace(/&gt;/g, ">")
@@ -6006,10 +6000,10 @@ class CharacterSheetPage {
 	_renderActiveStateRow (state, stateType, isActive) {
 		const activeClass = isActive ? "charsheet__state--active" : "charsheet__state--inactive";
 		const icon = state.icon || stateType?.icon || "⚡";
-		
+
 		// Check if this is a spell effect
 		const isSpellEffect = state.isSpellEffect || state.sourceFeatureId?.startsWith("spell_");
-		
+
 		// Try to create hoverable name by finding the source feature or spell
 		let nameHtml = state.name;
 		if (isSpellEffect) {
@@ -6029,13 +6023,13 @@ class CharacterSheetPage {
 				nameHtml = this._getFeatureHoverLink(feature);
 			}
 		}
-		
+
 		// Build tooltip from stateType description/effects
 		const tooltipParts = [];
 		if (stateType?.description) tooltipParts.push(stateType.description);
 		if (state.description) tooltipParts.push(state.description);
 		if (stateType?.effects?.length) {
-			const effectsStr = stateType.effects.map(e => e.type && e.target ? `${e.type} → ${e.target}` : e.type || "" ).filter(Boolean).join("; ");
+			const effectsStr = stateType.effects.map(e => e.type && e.target ? `${e.type} → ${e.target}` : e.type || "").filter(Boolean).join("; ");
 			if (effectsStr) tooltipParts.push(`Effects: ${effectsStr}`);
 		}
 		if (state.customEffects?.length) {
@@ -6050,10 +6044,10 @@ class CharacterSheetPage {
 		}
 		const tooltip = tooltipParts.join("\n");
 		const tooltipAttr = tooltip.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-		
+
 		// Check if this state can be ended (some passive states shouldn't be endable)
 		const isEndable = this._isStateEndable(state, stateType) || isSpellEffect;
-		
+
 		// Build duration/reminder info for spell effects
 		let durationHtml = "";
 		if (isSpellEffect && state.duration) {
@@ -6061,13 +6055,13 @@ class CharacterSheetPage {
 				durationHtml = `<span class="ve-small ve-muted ml-2">(${state.duration.amount} ${state.duration.unit})</span>`;
 			}
 		}
-		
+
 		// Show concentration warning for spell effects
 		let concentrationHtml = "";
 		if (isSpellEffect && state.concentration) {
 			concentrationHtml = `<span class="ve-small text-warning ml-1" title="Requires concentration">🔮</span>`;
 		}
-		
+
 		// Show conditions granted by spell
 		let grantsConditionsHtml = "";
 		if (isSpellEffect && state.grantsConditions?.length > 0) {
@@ -6094,13 +6088,13 @@ class CharacterSheetPage {
 		}
 
 		// Style differently for spell effects
-		const bgColor = isActive 
-			? (isSpellEffect ? "rgba(147, 51, 234, 0.15)" : "rgba(40, 167, 69, 0.1)") 
+		const bgColor = isActive
+			? (isSpellEffect ? "rgba(147, 51, 234, 0.15)" : "rgba(40, 167, 69, 0.1)")
 			: "transparent";
-		const borderColor = isActive 
-			? (isSpellEffect ? "var(--bs-purple, #6f42c1)" : "var(--bs-success, #28a745)") 
+		const borderColor = isActive
+			? (isSpellEffect ? "var(--bs-purple, #6f42c1)" : "var(--bs-success, #28a745)")
 			: "transparent";
-		
+
 		const row = e_({outer: `
 			<div class="charsheet__state-row ${activeClass} ve-flex-v-center py-2 px-2 mb-1 rounded" 
 				style="background: ${bgColor}; border: 1px solid ${borderColor};">
@@ -6157,16 +6151,16 @@ class CharacterSheetPage {
 	_isStateEndable (state, stateType) {
 		// If stateType explicitly says not endable
 		if (stateType?.isPassive || stateType?.notEndable) return false;
-		
+
 		// If it has a resource cost, it's definitely endable (activated abilities)
 		if (stateType?.resourceCost || stateType?.resourceName) return true;
-		
+
 		// Check source feature to see if it's a passive ability
 		if (state.sourceFeatureId) {
 			const feature = this._state.getFeatures().find(f => f.id === state.sourceFeatureId);
 			if (feature) {
 				const name = feature.name?.toLowerCase() || "";
-				
+
 				// Passive abilities that shouldn't be endable (truly passive, always-on effects)
 				const passivePatterns = [
 					/^unarmored defense$/i,
@@ -6175,11 +6169,11 @@ class CharacterSheetPage {
 					/^observant$/i,
 					/^alert$/i,
 				];
-				
+
 				if (passivePatterns.some(p => p.test(name))) return false;
 			}
 		}
-		
+
 		return true;
 	}
 
@@ -6189,7 +6183,7 @@ class CharacterSheetPage {
 	_activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
 		// Use passed cost, or fall back to state type default
 		const cost = resourceCost || stateType?.resourceCost || 1;
-		
+
 		// Deduct resource cost if applicable
 		if (resource && resource.current >= cost) {
 			// Special handling for Stamina (tracked separately)
@@ -6199,7 +6193,7 @@ class CharacterSheetPage {
 				this._state.setResourceCurrent(resource.id, resource.current - cost);
 			}
 		}
-		
+
 		// Handle custom abilities
 		if (feature.isCustomAbility && feature.id) {
 			// For limited-use custom abilities, just use (decrement) the ability
@@ -6235,13 +6229,13 @@ class CharacterSheetPage {
 			this._renderCharacter();
 			return;
 		}
-		
+
 		// Determine if we need to parse effects from description
 		// Parse effects for: custom states, generic state types (like combatStance), or state types with empty effects
-		const shouldParseEffects = stateTypeId === "custom" || 
-			!CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId] ||
-			stateType?.isGeneric || 
-			(stateType?.effects && stateType.effects.length === 0);
+		const shouldParseEffects = stateTypeId === "custom"
+			|| !CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId]
+			|| stateType?.isGeneric
+			|| (stateType?.effects && stateType.effects.length === 0);
 
 		const metadataEffects = activationInfo?.effects;
 		const parsedEffects = shouldParseEffects
@@ -6268,7 +6262,7 @@ class CharacterSheetPage {
 			this._renderCharacter();
 			return;
 		}
-		
+
 		// Activate the state
 		if (stateTypeId === "custom" || !CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId]) {
 			// Custom activatable - create a generic state
@@ -6297,7 +6291,7 @@ class CharacterSheetPage {
 		if (stateTypeId === "combatStance") {
 			this._state.activateStance(feature.name);
 		}
-		
+
 		this._saveCurrentCharacter();
 		this._renderResources();
 		this._renderActiveStates();
@@ -6384,7 +6378,7 @@ class CharacterSheetPage {
 			const profBonus = this._state.getProficiencyBonus();
 			const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0);
 			const totalDamageBonus = abilityMod + (attack.damageBonus || 0);
-			const damageStr = totalDamageBonus >= 0 
+			const damageStr = totalDamageBonus >= 0
 				? `${attack.damage}+${totalDamageBonus}`
 				: `${attack.damage}${totalDamageBonus}`;
 
@@ -6443,7 +6437,7 @@ class CharacterSheetPage {
 	_renderQuickSpells () {
 		const container = document.getElementById("charsheet-quick-spells");
 		if (!container) return;
-		
+
 		container.innerHTML = "";
 
 		const spells = this._state.getSpells();
@@ -6501,7 +6495,7 @@ class CharacterSheetPage {
 				slotsRow.insertAdjacentHTML("beforeend", `
 					<div class="charsheet__spell-slot-box" title="Level ${level} spell slots">
 						<span class="charsheet__spell-slot-level">${level}</span>
-						<span class="charsheet__spell-slot-count ${current === 0 ? 've-muted' : ''}">${current}/${max}</span>
+						<span class="charsheet__spell-slot-count ${current === 0 ? "ve-muted" : ""}">${current}/${max}</span>
 					</div>
 				`);
 			}
@@ -6513,7 +6507,7 @@ class CharacterSheetPage {
 			slotsRow.insertAdjacentHTML("beforeend", `
 				<div class="charsheet__spell-slot-box charsheet__spell-slot-box--pact" title="Pact Magic slots (level ${pactSlots.level})">
 					<span class="charsheet__spell-slot-level">P${pactSlots.level}</span>
-					<span class="charsheet__spell-slot-count ${pactSlots.current === 0 ? 've-muted' : ''}">${pactSlots.current}/${pactSlots.max}</span>
+					<span class="charsheet__spell-slot-count ${pactSlots.current === 0 ? "ve-muted" : ""}">${pactSlots.current}/${pactSlots.max}</span>
 				</div>
 			`);
 		}
@@ -6672,11 +6666,11 @@ class CharacterSheetPage {
 			});
 
 			const rollResult = e_({outer: `<div class="charsheet__concentration-result ve-hidden"></div>`});
-			
+
 			// Editable DC input
 			const dcInput = e_({outer: `<input type="number" class="ve-form-control form-control--minimal ve-input-xs" style="width: 50px; text-align: center;" value="${dc}" min="1">`});
 			const rollNeededDisplay = e_({outer: `<span>${rollNeeded}</span>`});
-			
+
 			// Update roll needed when DC changes
 			dcInput.addEventListener("change", () => {
 				dc = parseInt(dcInput.value) || 10;
@@ -6691,7 +6685,7 @@ class CharacterSheetPage {
 					</div>
 				</div>
 			`);
-			
+
 			// DC row with editable input
 			const dcRow = ee`<div class="ve-flex ve-flex-v-center mb-2">
 				<span class="mr-2"><strong>DC:</strong></span>
@@ -6700,7 +6694,7 @@ class CharacterSheetPage {
 				<span class="ve-muted ml-2 ve-small">(click to edit)</span>
 			</div>`;
 			modalInner.append(dcRow);
-			
+
 			modalInner.insertAdjacentHTML("beforeend", `
 				<div class="ve-flex-col w-100">
 					<div class="mb-2">
@@ -6710,13 +6704,13 @@ class CharacterSheetPage {
 					${advantage ? `<div class="mb-2 ve-small ve-muted">You have <strong>advantage</strong> on this check</div>` : ""}
 				</div>
 			`);
-			
+
 			// Roll needed display (updates dynamically)
 			const rollNeededRow = ee`<div class="mb-3">
 				<span class="ve-muted">You need to roll a </span>${rollNeededDisplay}<span class="ve-muted"> or higher on the die${advantage ? " (with advantage)" : ""} to maintain concentration.</span>
 			</div>`;
 			modalInner.append(rollNeededRow);
-			
+
 			modalInner.append(rollResult);
 
 			const btnRow = e_({outer: `<div class="ve-flex-h-right mt-3"></div>`});
@@ -6724,7 +6718,7 @@ class CharacterSheetPage {
 			const performRoll = async () => {
 				// Get current DC value from input
 				const currentDc = parseInt(dcInput.value) || 10;
-				
+
 				const roll1 = RollerUtil.randomise(20);
 				const roll2 = advantage ? RollerUtil.randomise(20) : null;
 				const effectiveRoll = advantage ? Math.max(roll1, roll2) : roll1;
@@ -6995,11 +6989,11 @@ class CharacterSheetPage {
 	 */
 	_toggleLayoutEditMode () {
 		if (!this._layout) return;
-		
+
 		const isNowEditing = this._layout.toggleEditMode();
 		const btn = document.getElementById("charsheet-btn-layout");
 		const btnText = btn.querySelector(".charsheet__layout-toggle-text");
-		
+
 		if (isNowEditing) {
 			// Auto-expand secondary header so layout controls are visible
 			this._toggleSecondaryHeader({force: false});
@@ -7022,7 +7016,7 @@ class CharacterSheetPage {
 		const btn = document.getElementById("charsheet-btn-theme");
 		const dropdown = document.getElementById("charsheet-theme-dropdown");
 		const content = dropdown.querySelector(".charsheet__theme-dropdown-content");
-		
+
 		const themes = [
 			{id: "default", name: "Default", color: "#1c1c1c"},
 			{id: "indigo", name: "Indigo", color: "#1e1b4b"},
@@ -7038,7 +7032,7 @@ class CharacterSheetPage {
 			{id: "forest", name: "Forest", color: "#14532d"},
 			{id: "midnight", name: "Midnight", color: "#0c1929"},
 		];
-		
+
 		// Build swatches
 		const currentTheme = this._state.getBackgroundTheme();
 		const swatchesHtml = themes.map(theme => {
@@ -7051,27 +7045,27 @@ class CharacterSheetPage {
 				<span class="charsheet__theme-swatch-name">${theme.name}</span>
 			</button>`;
 		}).join("");
-		
+
 		content.innerHTML = swatchesHtml;
-		
+
 		// Position dropdown relative to button (using fixed positioning)
 		const positionDropdown = () => {
 			const btnRect = btn.getBoundingClientRect();
 			const dropdownWidth = 280; // min-width from CSS
-			
+
 			// Position below button, aligned to right edge
 			let left = btnRect.right - dropdownWidth;
 			const top = btnRect.bottom + 8;
-			
+
 			// Ensure it doesn't go off-screen left
 			if (left < 8) left = 8;
-			
+
 			Object.assign(dropdown.style, {
 				top: `${top}px`,
 				left: `${left}px`,
 			});
 		};
-		
+
 		// Toggle dropdown
 		btn.addEventListener("click", (e) => {
 			e.stopPropagation();
@@ -7082,27 +7076,27 @@ class CharacterSheetPage {
 			dropdown.classList.toggle("active", !isOpen);
 			btn.classList.toggle("active", !isOpen);
 		});
-		
+
 		// Handle swatch click (delegated)
 		content.addEventListener("click", (e) => {
 			const swatch = e.target.closest(".charsheet__theme-swatch");
 			if (!swatch) return;
 			const theme = swatch.dataset.theme;
-			
+
 			// Update selection visuals
 			content.querySelectorAll(".charsheet__theme-swatch--selected").forEach(el => el.classList.remove("charsheet__theme-swatch--selected"));
 			swatch.classList.add("charsheet__theme-swatch--selected");
-			
+
 			// Save and apply theme
 			this._state.setBackgroundTheme(theme);
 			this._applyBackgroundTheme(theme);
 			this._saveCurrentCharacter();
-			
+
 			// Close dropdown
 			dropdown.classList.remove("active");
 			btn.classList.remove("active");
 		});
-		
+
 		// Close dropdown when clicking outside
 		document.addEventListener("click", (e) => {
 			if (!e.target.closest(".charsheet__header-theme-controls")) {
@@ -7316,12 +7310,12 @@ class CharacterSheetPage {
 
 		// Build font options
 		FONTS.forEach(font => {
-			const fontFamily = font.id === "system" ? "inherit" :
-				font.id === "serif" ? "Georgia, serif" :
-				font.id === "mono" ? "monospace" :
-				font.id === "fantasy" ? "Cinzel, serif" :
-				font.id === "hubot" ? "'Hubot Sans', 'Mona Sans', -apple-system, sans-serif" :
-				font.id === "readable" ? "Verdana, sans-serif" : "inherit";
+			const fontFamily = font.id === "system" ? "inherit"
+				: font.id === "serif" ? "Georgia, serif"
+					: font.id === "mono" ? "monospace"
+						: font.id === "fantasy" ? "Cinzel, serif"
+							: font.id === "hubot" ? "'Hubot Sans', 'Mona Sans', -apple-system, sans-serif"
+								: font.id === "readable" ? "Verdana, sans-serif" : "inherit";
 
 			const optionEl = e_({outer: `
 				<button class="charsheet__font-option" data-font="${font.id}" style="font-family: ${fontFamily};">
@@ -7508,12 +7502,12 @@ class CharacterSheetPage {
 
 		// Get current conditions as {name, source} objects
 		const currentConditions = this._state.getConditions();
-		
+
 		// Filter out conditions that are already applied (exact name + source match)
-		const availableConditions = allConditions.filter(cond => 
-			!currentConditions.some(curr => 
-				curr.name.toLowerCase() === cond.name.toLowerCase() && curr.source === cond.source
-			)
+		const availableConditions = allConditions.filter(cond =>
+			!currentConditions.some(curr =>
+				curr.name.toLowerCase() === cond.name.toLowerCase() && curr.source === cond.source,
+			),
 		);
 
 		if (!availableConditions) {
@@ -7528,10 +7522,10 @@ class CharacterSheetPage {
 		});
 
 		let selectedCondition = null;
-		
+
 		// Get priority sources for filtering
 		const prioritySources = this._state.getPrioritySources() || [];
-		
+
 		// Get unique sources for filtering
 		const conditionSources = [...new Set(availableConditions.map(c => c.source))].sort((a, b) => {
 			// Priority sources first
@@ -7546,7 +7540,7 @@ class CharacterSheetPage {
 			if (b === Parser.SRC_PHB) return 1;
 			return a.localeCompare(b);
 		});
-		
+
 		// Track selected sources - if priority sources set, default to those only
 		const selectedSources = prioritySources.length
 			? new Set(conditionSources.filter(s => prioritySources.includes(s)))
@@ -7570,7 +7564,7 @@ class CharacterSheetPage {
 			</button>
 		`});
 		const sourceDropdown = e_({outer: `<div class="charsheet__source-multiselect-dropdown"></div>`});
-		
+
 		// Action buttons
 		const sourceActions = e_({outer: `
 			<div class="charsheet__source-multiselect-actions">
@@ -7580,15 +7574,15 @@ class CharacterSheetPage {
 				${prioritySources.length ? `<button type="button" class="ve-btn ve-btn-xs ve-btn-success charsheet__source-action-btn" data-action="priority">Priority Only</button>` : ""}
 			</div>
 		`});
-		
+
 		const sourceList = e_({outer: `<div class="charsheet__source-multiselect-list"></div>`});
-		
+
 		// Build source checkboxes
 		conditionSources.forEach(src => {
 			const srcAbbr = Parser.sourceJsonToAbv(src);
 			const srcFull = Parser.sourceJsonToFull(src);
 			const isChecked = selectedSources.has(src);
-			
+
 			const itemEl = e_({outer: `
 				<label class="charsheet__source-multiselect-item">
 					<input type="checkbox" value="${src}" ${isChecked ? "checked" : ""}>
@@ -7599,8 +7593,8 @@ class CharacterSheetPage {
 					</span>
 				</label>
 			`});
-			
-			itemEl.querySelector("input").addEventListener("change", function() {
+
+			itemEl.querySelector("input").addEventListener("change", function () {
 				if (this.checked) {
 					selectedSources.add(src);
 					this.parentElement.querySelector(".charsheet__source-multiselect-check").textContent = "✓";
@@ -7611,27 +7605,27 @@ class CharacterSheetPage {
 				updateSourceBtnText();
 				renderList(search.value);
 			});
-			
+
 			sourceList.append(itemEl);
 		});
-		
+
 		sourceDropdown.append(sourceActions, sourceList);
 		sourceFilter.append(sourceBtn, sourceDropdown);
-		
+
 		// Toggle dropdown
 		sourceBtn.addEventListener("click", (e) => {
 			e.stopPropagation();
 			sourceDropdown.classList.toggle("open");
 		});
-		
+
 		// Close dropdown when clicking outside
 		const _condSourceFilterHandler = () => {
 			sourceDropdown.classList.remove("open");
 		};
 		document.addEventListener("click", _condSourceFilterHandler);
-		
+
 		sourceDropdown.addEventListener("click", (e) => e.stopPropagation());
-		
+
 		// Action button handlers
 		sourceActions.querySelector("[data-action='all']").addEventListener("click", () => {
 			conditionSources.forEach(src => selectedSources.add(src));
@@ -7640,7 +7634,7 @@ class CharacterSheetPage {
 			updateSourceBtnText();
 			renderList(search.value);
 		});
-		
+
 		sourceActions.querySelector("[data-action='clear']").addEventListener("click", () => {
 			selectedSources.clear();
 			sourceList.querySelector("input").checked = false;
@@ -7648,7 +7642,7 @@ class CharacterSheetPage {
 			updateSourceBtnText();
 			renderList(search.value);
 		});
-		
+
 		sourceActions.querySelector("[data-action='official']").addEventListener("click", () => {
 			selectedSources.clear();
 			const officialSources = [Parser.SRC_XPHB, Parser.SRC_PHB, Parser.SRC_DMG, Parser.SRC_MM, Parser.SRC_XDMG, Parser.SRC_XMM];
@@ -7657,7 +7651,7 @@ class CharacterSheetPage {
 					selectedSources.add(src);
 				}
 			});
-			[...sourceList.querySelectorAll("input")].forEach(function() {
+			[...sourceList.querySelectorAll("input")].forEach(function () {
 				const isSelected = selectedSources.has(this.value);
 				this.checked = isSelected;
 				this.parentElement.querySelector(".charsheet__source-multiselect-check").textContent = isSelected ? "✓" : "";
@@ -7665,7 +7659,7 @@ class CharacterSheetPage {
 			updateSourceBtnText();
 			renderList(search.value);
 		});
-		
+
 		// Priority Only button handler (only present if priority sources are set)
 		sourceActions.querySelector("[data-action='priority']").addEventListener("click", () => {
 			selectedSources.clear();
@@ -7678,7 +7672,7 @@ class CharacterSheetPage {
 			if (selectedSources.size === 0) {
 				conditionSources.forEach(s => selectedSources.add(s));
 			}
-			[...sourceList.querySelectorAll("input")].forEach(function() {
+			[...sourceList.querySelectorAll("input")].forEach(function () {
 				const isSelected = selectedSources.has(this.value);
 				this.checked = isSelected;
 				this.parentElement.querySelector(".charsheet__source-multiselect-check").textContent = isSelected ? "✓" : "";
@@ -7686,21 +7680,21 @@ class CharacterSheetPage {
 			updateSourceBtnText();
 			renderList(search.value);
 		});
-		
+
 		const updateSourceBtnText = () => {
 			if (selectedSources.size === conditionSources.length) {
 				sourceBtn.querySelector(".charsheet__source-multiselect-text").textContent = "All Sources";
 			} else if (selectedSources.size === 0) {
 				sourceBtn.querySelector(".charsheet__source-multiselect-text").textContent = "No Sources";
-			} else if (prioritySources.length && 
-				prioritySources.filter(s => conditionSources.includes(s)).every(s => selectedSources.has(s)) &&
-				[...selectedSources].every(s => prioritySources.includes(s))) {
+			} else if (prioritySources.length
+				&& prioritySources.filter(s => conditionSources.includes(s)).every(s => selectedSources.has(s))
+				&& [...selectedSources].every(s => prioritySources.includes(s))) {
 				sourceBtn.querySelector(".charsheet__source-multiselect-text").textContent = "Priority Sources";
 			} else {
 				sourceBtn.querySelector(".charsheet__source-multiselect-text").textContent = `${selectedSources.size} Source${selectedSources.size !== 1 ? "s" : ""}`;
 			}
 		};
-		
+
 		// Initialize button text
 		updateSourceBtnText();
 
@@ -7712,8 +7706,8 @@ class CharacterSheetPage {
 				if (!selectedSources.has(cond.source)) return false;
 				// Check text filter
 				if (filter) {
-					return cond.name.toLowerCase().includes(filter.toLowerCase()) ||
-					       cond.sourceAbbr.toLowerCase().includes(filter.toLowerCase());
+					return cond.name.toLowerCase().includes(filter.toLowerCase())
+					       || cond.sourceAbbr.toLowerCase().includes(filter.toLowerCase());
 				}
 				return true;
 			});
@@ -7744,7 +7738,7 @@ class CharacterSheetPage {
 				const condDef = CharacterSheetState.getConditionEffects(cond.name);
 				const icon = condDef?.icon || "❓";
 				const description = condDef?.description || "Apply this condition";
-				
+
 				// Build effect preview
 				let effectsPreview = "";
 				if (condDef?.effects?.length) {
@@ -7901,7 +7895,7 @@ class CharacterSheetPage {
 	 */
 	_rollD20 ({event, mode, isAttack = false} = {}) {
 		const stateMode = mode; // Track the state-based mode separately
-		
+
 		// Event modifier keys take priority over state-based mode
 		// This allows users to manually override advantage/disadvantage
 		if (event) {
@@ -7941,10 +7935,10 @@ class CharacterSheetPage {
 	 */
 	_formatD20Breakdown (rollResult, modifier, extraStr = "") {
 		const modStr = modifier >= 0 ? `+ ${modifier}` : `- ${Math.abs(modifier)}`;
-		const thelemar_critStr = rollResult.thelemar_critBonus 
+		const thelemar_critStr = rollResult.thelemar_critBonus
 			? (rollResult.thelemar_critBonus > 0 ? ` + ${rollResult.thelemar_critBonus} [Nat 20]` : ` - ${Math.abs(rollResult.thelemar_critBonus)} [Nat 1]`)
 			: "";
-		
+
 		if (rollResult.mode === "advantage") {
 			return `2d20kh (${rollResult.roll1}, ${rollResult.roll2}) → ${rollResult.roll} ${modStr}${thelemar_critStr}${extraStr}`;
 		} else if (rollResult.mode === "disadvantage") {
@@ -7979,12 +7973,12 @@ class CharacterSheetPage {
 	async _rollAbilityCheck (ability, event) {
 		const baseMod = this._state.getAbilityMod(ability);
 		const exhaustionPenalty = this._getExhaustionPenalty();
-		
+
 		// Get aggregated modifiers for this ability check (includes custom abilities, items, etc.)
 		const aggregated = this._state.aggregateModifiers(`check:${ability}`);
 		const customBonus = aggregated.bonus;
 		const totalMod = baseMod + customBonus;
-		
+
 		// Determine advantage/disadvantage from aggregated modifiers and active states
 		let mode;
 		const hasAdvantageFromStates = this._state.hasAdvantageFromStates(`check:${ability}`);
@@ -7993,9 +7987,9 @@ class CharacterSheetPage {
 		const hasDisadvantage = aggregated.disadvantage || hasDisadvantageFromStates;
 		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
-		
+
 		const rollResult = this._rollD20({event, mode});
-		
+
 		// Apply minimum if set (e.g., Reliable Talent, custom abilities)
 		let effectiveRoll = rollResult.roll;
 		let minimumApplied = false;
@@ -8003,7 +7997,7 @@ class CharacterSheetPage {
 			effectiveRoll = aggregated.minimum;
 			minimumApplied = true;
 		}
-		
+
 		let total = effectiveRoll + totalMod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Thelemar crit visual cues
@@ -8039,18 +8033,18 @@ class CharacterSheetPage {
 			resultNote,
 		);
 	}
-	
+
 	/**
 	 * Format d20 breakdown with custom bonus separated out
 	 */
 	_formatD20BreakdownWithCustom (rollResult, baseMod, customBonus, extraStr = "", minimumApplied = null) {
 		const baseModStr = baseMod >= 0 ? `+ ${baseMod}` : `- ${Math.abs(baseMod)}`;
 		const customStr = customBonus !== 0 ? (customBonus > 0 ? ` + ${customBonus}` : ` - ${Math.abs(customBonus)}`) : "";
-		const thelemar_critStr = rollResult.thelemar_critBonus 
+		const thelemar_critStr = rollResult.thelemar_critBonus
 			? (rollResult.thelemar_critBonus > 0 ? ` + ${rollResult.thelemar_critBonus} [Nat 20]` : ` - ${Math.abs(rollResult.thelemar_critBonus)} [Nat 1]`)
 			: "";
 		const minStr = minimumApplied != null ? ` [min ${minimumApplied}]` : "";
-		
+
 		if (rollResult.mode === "advantage") {
 			return `2d20kh (${rollResult.roll1}, ${rollResult.roll2}) → ${minimumApplied ?? rollResult.roll}${minStr} ${baseModStr}${customStr}${thelemar_critStr}${extraStr}`;
 		} else if (rollResult.mode === "disadvantage") {
@@ -8058,17 +8052,17 @@ class CharacterSheetPage {
 		}
 		return `1d20 (${rollResult.roll})${minStr} ${baseModStr}${customStr}${thelemar_critStr}${extraStr}`;
 	}
-	
+
 	/**
 	 * Format d20 breakdown with minimum applied
 	 */
 	_formatD20BreakdownWithMinimum (rollResult, modifier, extraStr = "", minimumApplied = null) {
 		const modStr = modifier >= 0 ? `+ ${modifier}` : `- ${Math.abs(modifier)}`;
-		const thelemar_critStr = rollResult.thelemar_critBonus 
+		const thelemar_critStr = rollResult.thelemar_critBonus
 			? (rollResult.thelemar_critBonus > 0 ? ` + ${rollResult.thelemar_critBonus} [Nat 20]` : ` - ${Math.abs(rollResult.thelemar_critBonus)} [Nat 1]`)
 			: "";
 		const minStr = minimumApplied != null ? ` [min ${minimumApplied}]` : "";
-		
+
 		if (rollResult.mode === "advantage") {
 			return `2d20kh (${rollResult.roll1}, ${rollResult.roll2}) → ${minimumApplied ?? rollResult.roll}${minStr} ${modStr}${thelemar_critStr}${extraStr}`;
 		} else if (rollResult.mode === "disadvantage") {
@@ -8092,12 +8086,12 @@ class CharacterSheetPage {
 
 		const baseMod = this._state.getSaveMod(ability);
 		const exhaustionPenalty = this._getExhaustionPenalty();
-		
+
 		// Get aggregated modifiers for this saving throw
 		const aggregated = this._state.aggregateModifiers(`save:${ability}`);
 		// Note: baseMod already includes custom save modifiers, avoid double-counting
 		const mod = baseMod;
-		
+
 		// Check for advantage/disadvantage from active states and aggregated modifiers
 		let mode;
 		const advState = this._state.getAdvantageState?.(`save:${ability}`);
@@ -8106,9 +8100,9 @@ class CharacterSheetPage {
 		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
 		// If both, they cancel out - use normal (event can still override)
-		
+
 		const rollResult = this._rollD20({event, mode});
-		
+
 		// Apply minimum if set
 		let effectiveRoll = rollResult.roll;
 		let minimumApplied = false;
@@ -8116,7 +8110,7 @@ class CharacterSheetPage {
 			effectiveRoll = aggregated.minimum;
 			minimumApplied = true;
 		}
-		
+
 		const total = effectiveRoll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Thelemar crit visual cues
@@ -8162,7 +8156,7 @@ class CharacterSheetPage {
 		// Also get check: type modifiers for the underlying ability
 		const skillAbility = this._state.getSkillAbility?.(skillKey) || this._getDefaultSkillAbility(skillKey);
 		const checkAggregated = this._state.aggregateModifiers(`check:${skillAbility}`);
-		
+
 		// Check for advantage/disadvantage from skill and check modifiers
 		let mode;
 		const advState = this._state.getAdvantageState?.(`skill:${skillKey}`);
@@ -8172,7 +8166,7 @@ class CharacterSheetPage {
 		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
 
 		const rollResult = this._rollD20({event, mode});
-		
+
 		// Apply minimum if set (take the highest minimum from skill and check modifiers)
 		let effectiveRoll = rollResult.roll;
 		let minimumApplied = false;
@@ -8184,7 +8178,7 @@ class CharacterSheetPage {
 				minimumApplied = true;
 			}
 		}
-		
+
 		const total = effectiveRoll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Thelemar crit visual cues
@@ -8220,7 +8214,7 @@ class CharacterSheetPage {
 			resultNote,
 		);
 	}
-	
+
 	/**
 	 * Get the default ability for a skill (delegates to state for custom skill support)
 	 */
@@ -8298,8 +8292,8 @@ class CharacterSheetPage {
 		// Position menu near cursor
 		Object.assign(menu.style, {
 			position: "fixed",
-			left: event.clientX + "px",
-			top: event.clientY + "px",
+			left: `${event.clientX}px`,
+			top: `${event.clientY}px`,
 			zIndex: 10000,
 		});
 
@@ -8353,21 +8347,21 @@ class CharacterSheetPage {
 
 	_rollAttack (attack, event) {
 		const exhaustionPenalty = this._getExhaustionPenalty();
-		
+
 		// Determine attack type for advantage/disadvantage matching
 		// Build specific attack type like "attack:melee:str" for proper matching with effects
-		const isMelee = attack.isMelee || attack.type === "melee" || attack.range === "melee" || 
-			(attack.range && !attack.range.includes("/"));
+		const isMelee = attack.isMelee || attack.type === "melee" || attack.range === "melee"
+			|| (attack.range && !attack.range.includes("/"));
 		const abilityUsed = attack.abilityMod || attack.ability || (isMelee ? "str" : "dex");
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
-		
+
 		// Check for advantage/disadvantage from active states using specific attack type
 		let mode;
 		const hasAdvantage = this._state.hasAdvantageFromStates(attackType);
 		const hasDisadvantage = this._state.hasDisadvantageFromStates(attackType);
 		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
-		
+
 		const rollResult = this._rollD20({event, mode, isAttack: true});
 		const attackTotal = rollResult.roll + attack.attackBonus - exhaustionPenalty;
 
@@ -8384,19 +8378,19 @@ class CharacterSheetPage {
 
 		// Parse and roll damage
 		let damageRoll = attack.damage;
-		
+
 		// Check for rage damage bonus on melee STR attacks (using isMelee/abilityUsed computed above)
 		const rageDamage = this._state.getRageDamageBonus(isMelee, abilityUsed);
-		
+
 		// Add any bonus damage from active states
 		const stateBonusDamage = this._state.getBonusFromStates("damage");
 		const totalBonusDamage = rageDamage + stateBonusDamage;
-		
+
 		let damageStr = attack.damage;
 		if (totalBonusDamage > 0) {
 			damageStr = `${attack.damage} + ${totalBonusDamage}`;
 		}
-		
+
 		const damageResult = Renderer.dice.parseRandomise2(attack.damage);
 		const totalDamage = damageResult + totalBonusDamage;
 
@@ -8404,7 +8398,7 @@ class CharacterSheetPage {
 		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
 		const rageDamageStr = rageDamage > 0 ? ` + ${rageDamage} (rage)` : "";
 		const stateDamageStr = stateBonusDamage > 0 ? ` + ${stateBonusDamage} (states)` : "";
-		
+
 		this._showDiceResult(
 			`${attack.name}${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			attackTotal,
@@ -8576,16 +8570,16 @@ class CharacterSheetPage {
 				}
 			}
 		};
-		
+
 		return new Promise(resolve => {
 			const animate = () => {
 				if (animationCycles < maxCycles) {
-					const randomVal = diceType === 100 
-						? (Math.floor(Math.random() * 10) + 1) * 10 
+					const randomVal = diceType === 100
+						? (Math.floor(Math.random() * 10) + 1) * 10
 						: Math.floor(Math.random() * maxValue) + 1;
 					updateFace(randomVal);
 					animationCycles++;
-					
+
 					let delay;
 					if (animationCycles < 4) {
 						delay = 60;
@@ -8594,14 +8588,14 @@ class CharacterSheetPage {
 					} else {
 						delay = 120 + (animationCycles - 8) * 40;
 					}
-					
+
 					setTimeout(animate, delay);
 				} else {
 					// Show final value with landing animation
 					updateFace(finalValue);
 					dice.classList.remove("charsheet__dice--rolling");
 					dice.classList.add("charsheet__dice--landed");
-					
+
 					// Check for critical/fumble styling
 					if (diceType === 20) {
 						if (finalValue === 20) {
@@ -8610,17 +8604,17 @@ class CharacterSheetPage {
 							dice.classList.add("charsheet__dice--fumble");
 						}
 					}
-					
+
 					// Remove after delay
 					const displayTime = (finalValue === 20 || finalValue === 1) && diceType === 20 ? 1000 : 700;
 					setTimeout(() => {
 						overlay.style.transition = "opacity 150ms";
-							overlay.style.opacity = "0";
-							setTimeout(() => { overlay.remove(); resolve(); }, 150);
+						overlay.style.opacity = "0";
+						setTimeout(() => { overlay.remove(); resolve(); }, 150);
 					}, displayTime);
 				}
 			};
-			
+
 			setTimeout(animate, 50);
 		});
 	}
@@ -8671,11 +8665,11 @@ class CharacterSheetPage {
 		}
 
 		breakdown.components.forEach(comp => {
-			const valueClass = comp.value > 0 && comp.type !== "base" && comp.type !== "armor" ? "charsheet__ac-breakdown-value--positive" : 
-				comp.value < 0 ? "charsheet__ac-breakdown-value--negative" : "";
+			const valueClass = comp.value > 0 && comp.type !== "base" && comp.type !== "armor" ? "charsheet__ac-breakdown-value--positive"
+				: comp.value < 0 ? "charsheet__ac-breakdown-value--negative" : "";
 			const displayValue = comp.type === "base" || comp.type === "armor" ? comp.value : this._formatMod(comp.value);
 			const subtypeHtml = comp.subtype ? `<span class="charsheet__ac-breakdown-subtype">(${comp.subtype})</span>` : "";
-			
+
 			container.insertAdjacentHTML("beforeend", `
 				<div class="charsheet__ac-breakdown-item">
 					<span class="charsheet__ac-breakdown-name">
@@ -8704,7 +8698,7 @@ class CharacterSheetPage {
 	 */
 	async _showAcBreakdownModal () {
 		const breakdown = this._state.getAcBreakdown();
-		
+
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: "🛡️ Armor Class Breakdown",
 			isMinHeight0: true,
@@ -8735,11 +8729,11 @@ class CharacterSheetPage {
 			`);
 		} else {
 			breakdown.components.forEach(comp => {
-				const valueClass = comp.value > 0 && comp.type !== "base" && comp.type !== "armor" ? "charsheet__ac-modal-item-value--positive" : 
-					comp.value < 0 ? "charsheet__ac-modal-item-value--negative" : "";
+				const valueClass = comp.value > 0 && comp.type !== "base" && comp.type !== "armor" ? "charsheet__ac-modal-item-value--positive"
+					: comp.value < 0 ? "charsheet__ac-modal-item-value--negative" : "";
 				const displayValue = comp.type === "base" || comp.type === "armor" ? comp.value : this._formatMod(comp.value);
 				const subtypeHtml = comp.subtype ? `<span class="charsheet__ac-modal-item-subtype">(${comp.subtype})</span>` : "";
-				
+
 				breakdownList.insertAdjacentHTML("beforeend", `
 					<div class="charsheet__ac-modal-item">
 						<span class="charsheet__ac-modal-item-name">
@@ -8759,7 +8753,7 @@ class CharacterSheetPage {
 		if (equippedArmor || equippedShield) {
 			const equipment = e_({outer: `<div class="charsheet__ac-modal-equipment"></div>`}); contentEl.append(equipment);
 			equipment.insertAdjacentHTML("beforeend", `<div class="charsheet__ac-modal-equipment-title">⚔️ Equipped Protection</div>`);
-			
+
 			if (equippedArmor) {
 				equipment.insertAdjacentHTML("beforeend", `<div class="charsheet__ac-modal-equipment-item">🛡️ ${equippedArmor.name}</div>`);
 			}
@@ -9188,16 +9182,16 @@ class CharacterSheetPage {
 	 */
 	getConditionLink (condition) {
 		const conditionClean = condition.trim().toLowerCase();
-		
+
 		// Look up the condition in loaded data to get the correct source
-		const conditionData = this._conditionsData?.find(c => 
-			c.name.toLowerCase() === conditionClean
+		const conditionData = this._conditionsData?.find(c =>
+			c.name.toLowerCase() === conditionClean,
 		);
-		
+
 		// Use found source, or fall back to XPHB for standard conditions
 		const source = conditionData?.source || Parser.SRC_XPHB;
 		const hash = UrlUtil.encodeForHash([condition.trim(), source].join(HASH_LIST_SEP));
-		
+
 		return this.getHoverLink(
 			UrlUtil.PG_CONDITIONS_DISEASES,
 			condition.trim(),
@@ -9214,7 +9208,7 @@ class CharacterSheetPage {
 	 */
 	getConditionLinkWithSource (condition, source) {
 		const hash = UrlUtil.encodeForHash([condition.trim(), source].join(HASH_LIST_SEP));
-		
+
 		return this.getHoverLink(
 			UrlUtil.PG_CONDITIONS_DISEASES,
 			condition.trim(),
@@ -9317,7 +9311,7 @@ class CharacterSheetPage {
 		const currentThelemar_asiFeat = this._state.getSettings()?.thelemar_asiFeat || false;
 		const currentThelemar_itemUtilization = this._state.getSettings()?.thelemar_itemUtilization || false;
 		const currentThelemar_spellRarityCheck = this._state.getSettings()?.thelemar_spellRarity !== false;
-		
+
 		// Master toggle for all Thelemar rules (uses currentExhaustionRules from above)
 		const allThelemar = currentThelemar_carryWeight && currentThelemar_jumping && currentThelemar_linguisticsBonus && currentThelemar_criticalRolls && currentThelemar_asiFeat && currentThelemar_itemUtilization && currentThelemar_spellRarityCheck && currentExhaustionRules === "thelemar";
 		const thelemar_masterToggle = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox charsheet__settings-option--master">
@@ -9455,14 +9449,14 @@ class CharacterSheetPage {
 		// Priority sources section
 		const currentPriority = this._state.getPrioritySources() || [];
 		const homebrewSources = allSources.filter(src => BrewUtil2.hasSourceJson(src.json) || PrereleaseUtil.hasSourceJson(src.json));
-		
+
 		let prioritySection = null;
 		if (homebrewSources.length) {
 			const priorityOptionsHtml = homebrewSources.map(src => `<option value="${src.json}" ${currentPriority.includes(src.json) ? "selected" : ""}>${src.full || src.abbr}</option>`).join("");
 			const prioritySelect = e_({outer: `<select class="ve-form-control" id="settings-priority-source">
 				<option value="">None (show all versions)</option>
 				${priorityOptionsHtml}
-			</select>`});;
+			</select>`}); ;
 
 			prioritySection = ee`<div class="charsheet__settings-section">
 				<div class="charsheet__settings-section-title">⭐ Priority Source</div>
@@ -9644,12 +9638,12 @@ class CharacterSheetPage {
 		// Thelemar linguistics bonus handler
 		modalInner.querySelector("#settings-thelemar-linguistics").addEventListener("change", (e) => {
 			this._state.setSetting("thelemar_linguisticsBonus", e.target.checked);
-			
+
 			// Auto-add/remove Linguistics custom skill when setting is toggled
 			const hasLinguisticsSkill = this._state.getCustomSkills().some(
-				s => s.name.toLowerCase() === "linguistics"
+				s => s.name.toLowerCase() === "linguistics",
 			);
-			
+
 			if (e.target.checked && !hasLinguisticsSkill) {
 				// Add Linguistics skill when setting is enabled
 				this._state.addCustomSkill("Linguistics", "int");
@@ -9657,7 +9651,7 @@ class CharacterSheetPage {
 				// Remove Linguistics skill when setting is disabled
 				this._state.removeCustomSkill("Linguistics");
 			}
-			
+
 			this._renderSkills();
 			updateMasterToggleState();
 		});
@@ -9807,7 +9801,7 @@ class CharacterSheetPage {
 		if (!settings?.thelemar_linguisticsBonus) return;
 
 		const hasLinguisticsSkill = this._state.getCustomSkills().some(
-			s => s.name.toLowerCase() === "linguistics"
+			s => s.name.toLowerCase() === "linguistics",
 		);
 
 		if (!hasLinguisticsSkill) {
@@ -9829,7 +9823,7 @@ class CharacterSheetPage {
 	_updateThemePickerSelection (theme) {
 		const dropdownEl = document.getElementById("charsheet-theme-dropdown");
 		if (!dropdownEl) return;
-		
+
 		const currentSelected = dropdownEl.querySelector(".charsheet__theme-swatch--selected");
 		if (currentSelected) currentSelected.classList.remove("charsheet__theme-swatch--selected");
 		const targetSwatch = dropdownEl.querySelector(`.charsheet__theme-swatch[data-theme="${theme || "default"}"]`);
@@ -10196,7 +10190,7 @@ class CharacterSheetPage {
 				customSkillInput.value = "";
 				customSkillAbilitySelect.value = "";
 				formEl;
-			delete formEl.dataset.editingId;
+				delete formEl.dataset.editingId;
 				formEl.querySelector(".charsheet__modifier-form-title-text").textContent = "Add Modifier";
 			}
 
@@ -10951,8 +10945,8 @@ class CharacterSheetPage {
 			const renderList = (filter = "") => {
 				listEl.innerHTML = "";
 				const filtered = allLanguages.filter(l =>
-					l.name.toLowerCase().includes(filter.toLowerCase()) &&
-					!selectedLanguages.includes(l.name),
+					l.name.toLowerCase().includes(filter.toLowerCase())
+					&& !selectedLanguages.includes(l.name),
 				);
 
 				if (filtered.length === 0 && selectedLanguages.length === 0) {
@@ -11030,7 +11024,7 @@ class CharacterSheetPage {
 
 			// Confirm button
 			const footerEl = e_({outer: `<div class="ve-flex ve-flex-h-right mt-3"></div>`}); modalInner.append(footerEl);
-			const confirmBtn = e_({outer: `<button class="ve-btn ve-btn-primary" ${count > 1 ? 'disabled' : ''}>Confirm Selection</button>`}); footerEl.append(confirmBtn);
+			const confirmBtn = e_({outer: `<button class="ve-btn ve-btn-primary" ${count > 1 ? "disabled" : ""}>Confirm Selection</button>`}); footerEl.append(confirmBtn);
 			confirmBtn.addEventListener("click", () => {
 				if (selectedLanguages.length === count || count === 1) {
 					doClose();
@@ -11471,10 +11465,10 @@ class CharacterSheetPage {
 	 */
 	async _showEditWeaponMasteriesModal () {
 		const currentMasteries = this._state.getWeaponMasteries();
-		
+
 		// Determine max masteries from class features
 		const maxMasteries = this._getMaxWeaponMasteries();
-		
+
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: "Edit Weapon Masteries",
 			isMinHeight0: true,
@@ -11501,12 +11495,12 @@ class CharacterSheetPage {
 		});
 
 		// Group by type
-		const simpleWeapons = weaponsWithMastery.filter(w => 
-			w.weaponCategory === "simple" || w.type === "S"
+		const simpleWeapons = weaponsWithMastery.filter(w =>
+			w.weaponCategory === "simple" || w.type === "S",
 		).sort((a, b) => a.name.localeCompare(b.name));
-		
-		const martialWeapons = weaponsWithMastery.filter(w => 
-			w.weaponCategory === "martial" || w.type === "M"
+
+		const martialWeapons = weaponsWithMastery.filter(w =>
+			w.weaponCategory === "martial" || w.type === "M",
 		).sort((a, b) => a.name.localeCompare(b.name));
 
 		const selectedMasteries = [...currentMasteries];
@@ -11521,7 +11515,7 @@ class CharacterSheetPage {
 				const masteryName = this._getMasteryName(weapon.mastery?.[0]);
 				const weaponKey = `${weapon.name}|${weapon.source}`;
 				const isSelected = selectedMasteries.includes(weaponKey);
-				
+
 				const labelEl = e_({outer: `
 					<label class="charsheet__mastery-checkbox" style="display: flex; align-items: center; cursor: pointer; padding: 4px 8px; border: 1px solid var(--rgb-border-grey); border-radius: 4px; ${isSelected ? "background: var(--rgb-bg-highlight);" : ""}">
 						<input type="checkbox" value="${weaponKey}" ${isSelected ? "checked" : ""} style="margin-right: 6px;">
@@ -11584,7 +11578,7 @@ class CharacterSheetPage {
 
 		// Check each class for weapon mastery progression
 		let maxMasteries = 0;
-		
+
 		for (const cls of classes) {
 			const classData = this._classes?.find(c => c.name === cls.name && c.source === cls.source);
 			if (!classData) continue;
@@ -11593,9 +11587,9 @@ class CharacterSheetPage {
 			if (classData.classTableGroups) {
 				for (const tableGroup of classData.classTableGroups) {
 					const masteryColIndex = tableGroup.colLabels?.findIndex(
-						col => col === "Weapon Mastery" || (typeof col === "string" && col.toLowerCase().includes("mastery"))
+						col => col === "Weapon Mastery" || (typeof col === "string" && col.toLowerCase().includes("mastery")),
 					);
-					
+
 					if (masteryColIndex === -1) continue;
 
 					// Get value at current level (rows are 0-indexed)
@@ -11611,10 +11605,10 @@ class CharacterSheetPage {
 
 			// If no table found, check for Weapon Mastery feature (defaults to 2)
 			if (maxMasteries === 0) {
-				const hasWeaponMastery = this._classFeatures?.some(f => 
-					f.name === "Weapon Mastery" && 
-					f.className === cls.name && 
-					f.level <= (cls.level || 1)
+				const hasWeaponMastery = this._classFeatures?.some(f =>
+					f.name === "Weapon Mastery"
+					&& f.className === cls.name
+					&& f.level <= (cls.level || 1),
 				);
 				if (hasWeaponMastery) maxMasteries = 2;
 			}
@@ -11627,7 +11621,6 @@ class CharacterSheetPage {
 
 // Initialize on page load
 window.addEventListener("load", async () => {
-	
 	try {
 		await Promise.all([
 			PrereleaseUtil.pInit(),

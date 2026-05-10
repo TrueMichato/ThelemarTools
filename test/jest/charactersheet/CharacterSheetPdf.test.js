@@ -315,13 +315,13 @@ describe("CharacterSheetPdf", () => {
 
 		test("should clean rendered HTML from feature descriptions", () => {
 			state._data.features = [
-				{name: "Test Feature", description: '<div class="rd__b"><p>Deal <span class="roller">2d6</span> fire damage with <a href="spells.html">fireball</a>.</p></div>'},
+				{name: "Test Feature", description: "<div class=\"rd__b\"><p>Deal <span class=\"roller\">2d6</span> fire damage with <a href=\"spells.html\">fireball</a>.</p></div>"},
 			];
 			const html = new CharacterSheetPdf(state).generate();
 			expect(html).toContain("2d6");
 			expect(html).toContain("fireball");
-			expect(html).not.toContain('class="rd__b"');
-			expect(html).not.toContain('<a href');
+			expect(html).not.toContain("class=\"rd__b\"");
+			expect(html).not.toContain("<a href");
 		});
 	});
 
@@ -536,7 +536,7 @@ describe("CharacterSheetPdf", () => {
 
 		test("should preserve tables in feature descriptions", () => {
 			state._data.features = [
-				{name: "Gambler's Tools", description: '<table><tr><th>Name</th><th>Damage</th></tr><tr><td>Coins</td><td>1d4 Piercing</td></tr></table>'},
+				{name: "Gambler's Tools", description: "<table><tr><th>Name</th><th>Damage</th></tr><tr><td>Coins</td><td>1d4 Piercing</td></tr></table>"},
 			];
 			const html = new CharacterSheetPdf(state).generate();
 			// Should render as a proper table, not flattened text

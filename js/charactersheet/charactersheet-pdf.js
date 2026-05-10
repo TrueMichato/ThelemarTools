@@ -360,8 +360,8 @@ class CharacterSheetPdf {
 			// Use raw key for proficiency lookup (matches stored data which may have |source suffix)
 			const profLevel = this._state.getSkillProficiency(rawKey);
 			// Use getSkillModWithAbility with raw key (correct proficiency) and authoritative ability
-			const mod = this._state.getSkillModWithAbility?.(rawKey, sk.ability)
-				?? this._state.getSkillMod(cleanKey);
+			const mod = this._state.getSkillModWithAbility?.(rawKey, sk.ability) ??
+				this._state.getSkillMod(cleanKey);
 			const dot = profLevel >= 2 ? "\u25C6" : profLevel >= 1 ? "\u25CF" : "\u25CB";
 			const abLabel = sk.ability.toUpperCase();
 			const passiveVal = PASSIVE_SKILLS.has(cleanKey) ? this._state.getPassiveScore?.(cleanKey) ?? null : null;
@@ -641,8 +641,7 @@ class CharacterSheetPdf {
 				const time = (sp.castingTime || sp.time || "").toLowerCase();
 				const key = (sp.name || "").toLowerCase();
 				if (seen.has(key)) continue;
-				if (/bonus action/i.test(time)) { seen.add(key); bonusActions.push({name: sp.name, suffix: "\u2020"}); }
-				else if (/reaction/i.test(time)) { seen.add(key); reactions.push({name: sp.name, suffix: "\u2020"}); }
+				if (/bonus action/i.test(time)) { seen.add(key); bonusActions.push({name: sp.name, suffix: "\u2020"}); } else if (/reaction/i.test(time)) { seen.add(key); reactions.push({name: sp.name, suffix: "\u2020"}); }
 			}
 		}
 
@@ -1369,7 +1368,7 @@ setTimeout(() => window.print(), 400);
 		if (!html) return "";
 		const text = html.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "");
 		const match = text.match(/^[^.!?]*[.!?]/);
-		return match ? match[0].trim() : (text.length > 120 ? text.substring(0, 117) + "..." : text);
+		return match ? match[0].trim() : (text.length > 120 ? `${text.substring(0, 117)}...` : text);
 	}
 
 	_getJumpString () {

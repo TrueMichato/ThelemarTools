@@ -14,12 +14,12 @@ function makeBuilder () {
 	const state = {
 		classes: [],
 		saveProficiencies: [],
-		skills: {},           // key → level (0=none, 1=prof, 2=expertise)
+		skills: {}, // key → level (0=none, 1=prof, 2=expertise)
 		armorProficiencies: [],
 		weaponProficiencies: [],
 		toolProficiencies: [],
 		languages: [],
-		features: [],         // { name, source, className, ... }
+		features: [], // { name, source, className, ... }
 		weaponMasteries: [],
 		spellcastingAbility: null,
 		levelHistory: [],
@@ -133,10 +133,16 @@ describe("CharacterSheetBuilder _clearClassApplication()", () => {
 		const builder = makeBuilder();
 		builder._state.classes.push({name: "Fighter", source: "PHB"});
 		const snapshot = {
-			className: "Fighter", classSource: "PHB",
-			saveProficiencies: [], skills: [], expertiseSkills: [],
-			armorProficiencies: [], weaponProficiencies: [], toolProficiencies: [],
-			languages: [], hadSpellcasting: false,
+			className: "Fighter",
+			classSource: "PHB",
+			saveProficiencies: [],
+			skills: [],
+			expertiseSkills: [],
+			armorProficiencies: [],
+			weaponProficiencies: [],
+			toolProficiencies: [],
+			languages: [],
+			hadSpellcasting: false,
 		};
 		builder._clearClassApplication(snapshot);
 		expect(builder._state.classes).toHaveLength(0);
@@ -146,11 +152,16 @@ describe("CharacterSheetBuilder _clearClassApplication()", () => {
 		const builder = makeBuilder();
 		builder._state.saveProficiencies = ["str", "con"];
 		const snapshot = {
-			className: "Fighter", classSource: "PHB",
+			className: "Fighter",
+			classSource: "PHB",
 			saveProficiencies: ["str", "con"],
-			skills: [], expertiseSkills: [],
-			armorProficiencies: [], weaponProficiencies: [], toolProficiencies: [],
-			languages: [], hadSpellcasting: false,
+			skills: [],
+			expertiseSkills: [],
+			armorProficiencies: [],
+			weaponProficiencies: [],
+			toolProficiencies: [],
+			languages: [],
+			hadSpellcasting: false,
 		};
 		builder._clearClassApplication(snapshot);
 		expect(builder._state.saveProficiencies).toHaveLength(0);
@@ -164,12 +175,16 @@ describe("CharacterSheetBuilder _clearClassApplication()", () => {
 			skillProficiencies: [{"acrobatics": true}],
 		};
 		const snapshot = {
-			className: "Fighter", classSource: "PHB",
+			className: "Fighter",
+			classSource: "PHB",
 			saveProficiencies: [],
-			skills: ["acrobatics"],  // class had chosen acrobatics
+			skills: ["acrobatics"], // class had chosen acrobatics
 			expertiseSkills: [],
-			armorProficiencies: [], weaponProficiencies: [], toolProficiencies: [],
-			languages: [], hadSpellcasting: false,
+			armorProficiencies: [],
+			weaponProficiencies: [],
+			toolProficiencies: [],
+			languages: [],
+			hadSpellcasting: false,
 		};
 		builder._clearClassApplication(snapshot);
 		// Background re-assertion should keep acrobatics at 1
@@ -182,12 +197,16 @@ describe("CharacterSheetBuilder _clearClassApplication()", () => {
 		// No background — athletics came solely from class
 		builder._selectedBackground = null;
 		const snapshot = {
-			className: "Fighter", classSource: "PHB",
+			className: "Fighter",
+			classSource: "PHB",
 			saveProficiencies: [],
 			skills: ["athletics"],
 			expertiseSkills: [],
-			armorProficiencies: [], weaponProficiencies: [], toolProficiencies: [],
-			languages: [], hadSpellcasting: false,
+			armorProficiencies: [],
+			weaponProficiencies: [],
+			toolProficiencies: [],
+			languages: [],
+			hadSpellcasting: false,
 		};
 		builder._clearClassApplication(snapshot);
 		expect(builder._state.skills["athletics"]).toBe(0);
@@ -198,13 +217,16 @@ describe("CharacterSheetBuilder _clearClassApplication()", () => {
 		builder._state.armorProficiencies = ["light armor", "heavy armor"];
 		builder._state.weaponProficiencies = ["simple weapons", "martial weapons"];
 		const snapshot = {
-			className: "Fighter", classSource: "PHB",
+			className: "Fighter",
+			classSource: "PHB",
 			saveProficiencies: [],
-			skills: [], expertiseSkills: [],
+			skills: [],
+			expertiseSkills: [],
 			armorProficiencies: ["light armor", "heavy armor"],
 			weaponProficiencies: ["simple weapons", "martial weapons"],
 			toolProficiencies: [],
-			languages: [], hadSpellcasting: false,
+			languages: [],
+			hadSpellcasting: false,
 		};
 		builder._clearClassApplication(snapshot);
 		expect(builder._state.armorProficiencies).toHaveLength(0);
@@ -215,13 +237,19 @@ describe("CharacterSheetBuilder _clearClassApplication()", () => {
 		const builder = makeBuilder();
 		builder._state.features = [
 			{name: "Second Wind", source: "PHB", className: "Fighter"},
-			{name: "Darkvision", source: "PHB", className: null},  // racial, should stay
+			{name: "Darkvision", source: "PHB", className: null}, // racial, should stay
 		];
 		const snapshot = {
-			className: "Fighter", classSource: "PHB",
-			saveProficiencies: [], skills: [], expertiseSkills: [],
-			armorProficiencies: [], weaponProficiencies: [], toolProficiencies: [],
-			languages: [], hadSpellcasting: false,
+			className: "Fighter",
+			classSource: "PHB",
+			saveProficiencies: [],
+			skills: [],
+			expertiseSkills: [],
+			armorProficiencies: [],
+			weaponProficiencies: [],
+			toolProficiencies: [],
+			languages: [],
+			hadSpellcasting: false,
 		};
 		builder._clearClassApplication(snapshot);
 		expect(builder._state.features).toHaveLength(1);
@@ -232,10 +260,16 @@ describe("CharacterSheetBuilder _clearClassApplication()", () => {
 		const builder = makeBuilder();
 		builder._state.spellcastingAbility = "int";
 		const snapshot = {
-			className: "Wizard", classSource: "PHB",
-			saveProficiencies: [], skills: [], expertiseSkills: [],
-			armorProficiencies: [], weaponProficiencies: [], toolProficiencies: [],
-			languages: [], hadSpellcasting: true,
+			className: "Wizard",
+			classSource: "PHB",
+			saveProficiencies: [],
+			skills: [],
+			expertiseSkills: [],
+			armorProficiencies: [],
+			weaponProficiencies: [],
+			toolProficiencies: [],
+			languages: [],
+			hadSpellcasting: true,
 		};
 		builder._clearClassApplication(snapshot);
 		expect(builder._state.spellcastingAbility).toBeNull();
@@ -245,10 +279,16 @@ describe("CharacterSheetBuilder _clearClassApplication()", () => {
 		const builder = makeBuilder();
 		builder._state.levelHistory = [{level: 1, class: {name: "Fighter"}}];
 		const snapshot = {
-			className: "Fighter", classSource: "PHB",
-			saveProficiencies: [], skills: [], expertiseSkills: [],
-			armorProficiencies: [], weaponProficiencies: [], toolProficiencies: [],
-			languages: [], hadSpellcasting: false,
+			className: "Fighter",
+			classSource: "PHB",
+			saveProficiencies: [],
+			skills: [],
+			expertiseSkills: [],
+			armorProficiencies: [],
+			weaponProficiencies: [],
+			toolProficiencies: [],
+			languages: [],
+			hadSpellcasting: false,
 		};
 		builder._clearClassApplication(snapshot);
 		expect(builder._state.levelHistory).toHaveLength(0);

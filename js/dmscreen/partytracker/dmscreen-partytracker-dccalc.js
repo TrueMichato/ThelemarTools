@@ -232,8 +232,8 @@ export class PartyTrackerDcCalc {
 			const next = new Array(n + 1).fill(0);
 			for (let j = 0; j <= i; j++) {
 				if (dp[j] === 0) continue;
-				next[j + 1] += dp[j] * p;        // character i succeeds
-				next[j] += dp[j] * (1 - p);       // character i fails
+				next[j + 1] += dp[j] * p; // character i succeeds
+				next[j] += dp[j] * (1 - p); // character i fails
 			}
 			dp = next;
 		}

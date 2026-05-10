@@ -62,7 +62,6 @@ function addMethod (name, tradition, degree, description) {
 // =========================================================================
 
 describe("Combat Methods Survey — Tradition Parsing", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 		makeTGTTFighter(5);
@@ -260,7 +259,6 @@ describe("Combat Methods Survey — Tradition Parsing", () => {
 // =========================================================================
 
 describe("Combat Methods Survey — Stance Speed Integration", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 		makeTGTTFighter(5);
@@ -337,7 +335,6 @@ describe("Combat Methods Survey — Stance Speed Integration", () => {
 // =========================================================================
 
 describe("Combat Methods Survey — Subclass Tradition Granting", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -518,7 +515,6 @@ describe("Combat Methods Survey — Subclass Tradition Granting", () => {
 // =========================================================================
 
 describe("Combat Methods Survey — Parser Edge Cases", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 		makeTGTTFighter(5);
@@ -608,7 +604,6 @@ describe("Combat Methods Survey — Parser Edge Cases", () => {
 // =========================================================================
 
 describe("Combat Methods Survey — Degree Progression", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -649,7 +644,6 @@ describe("Combat Methods Survey — Degree Progression", () => {
 // =========================================================================
 
 describe("Combat Methods Survey — DC Calculation", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -679,7 +673,6 @@ describe("Combat Methods Survey — DC Calculation", () => {
 // =========================================================================
 
 describe("Combat Methods Survey — Stamina Pool", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 		makeTGTTFighter(5);
@@ -725,7 +718,6 @@ describe("Combat Methods Survey — Stamina Pool", () => {
 // =========================================================================
 
 describe("Combat Methods Survey — Stance Activation Bridge", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 		makeTGTTFighter(5);
@@ -800,7 +792,6 @@ describe("Combat Methods Survey — Stance Activation Bridge", () => {
 // =========================================================================
 
 describe("Combat Methods Survey — Passive Bonus Parsing", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 		makeTGTTFighter(5);
@@ -909,7 +900,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 			source: "TGTT",
 			featureType: "Optional Feature",
 			optionalFeatureTypes: ["CTM:1MG", "CTM:MG", "CTM"],
-			description: '<b>Bonus Action (1 Stamina Point)</b>. As a bonus action, you adopt a keenly observant stance. While in this stance, you gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you are <a href="#">incapacitated</a> or use a bonus action to end it.',
+			description: "<b>Bonus Action (1 Stamina Point)</b>. As a bonus action, you adopt a keenly observant stance. While in this stance, you gain a bonus to Wisdom (Insight) checks equal to your proficiency bonus, and your passive Wisdom (Insight) score increases by 3. This stance lasts until you are <a href=\"#\">incapacitated</a> or use a bonus action to end it.",
 		});
 
 		state.activateStance("Wary Stance");
@@ -924,7 +915,7 @@ describe("Combat Methods Survey — Passive Bonus Parsing", () => {
 			source: "TGTT",
 			featureType: "Optional Feature",
 			optionalFeatureTypes: ["CTM:1CJ", "CTM:CJ", "CTM"],
-			description: '<b>Bonus Action (1 Stamina Point)</b>. As a bonus action, you adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (<span class="skill-link">Sleight of Hand</span>) and Charisma (<span class="skill-link">Deception</span>) checks equal to your proficiency bonus. This stance lasts until you are <a href="#">incapacitated</a> or use a bonus action to end it.',
+			description: "<b>Bonus Action (1 Stamina Point)</b>. As a bonus action, you adopt a deceptively passive stance. While in this stance during combat, you gain a bonus to Dexterity (<span class=\"skill-link\">Sleight of Hand</span>) and Charisma (<span class=\"skill-link\">Deception</span>) checks equal to your proficiency bonus. This stance lasts until you are <a href=\"#\">incapacitated</a> or use a bonus action to end it.",
 		});
 
 		state.activateStance("Deceptive Stance");
