@@ -252,6 +252,7 @@ class CharacterSheetExport {
 					doClose(true);
 					JqueryUtil.doToast({type: "success", content: `Imported ${data.name || "character"} successfully!`});
 				} catch (err) {
+					// eslint-disable-next-line no-console
 					console.error("Import error:", err);
 					JqueryUtil.doToast({type: "danger", content: "Failed to import: Invalid JSON data."});
 				}
@@ -425,6 +426,7 @@ class CharacterSheetExport {
 				${btnSave}
 			</div>`.appendTo(modalInner);
 		} catch (e) {
+			// eslint-disable-next-line no-console
 			console.error("NPC export failed:", e);
 			JqueryUtil.doToast({type: "danger", content: "Failed to build NPC statblock from character."});
 		}
@@ -567,6 +569,7 @@ class CharacterSheetExport {
 			await BrewUtil2.pPersistEditableBrewEntity("monster", toSave);
 			JqueryUtil.doToast({type: "success", content: `Saved ${toSave.name} to editable homebrew.`});
 		} catch (e) {
+			// eslint-disable-next-line no-console
 			console.error("Failed to save NPC to homebrew:", e);
 			JqueryUtil.doToast({type: "danger", content: "Failed to save NPC to editable homebrew."});
 		}
@@ -597,6 +600,7 @@ class CharacterSheetExport {
 			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: "Character saved!"});
 		} catch (err) {
+			// eslint-disable-next-line no-console
 			console.error("Save error:", err);
 			JqueryUtil.doToast({type: "danger", content: "Failed to save character."});
 		}
