@@ -201,8 +201,9 @@ class CharacterSheetLayout {
 	_initEventListeners () {
 		// Listen for tab changes to apply saved layout
 		document.addEventListener("shown.bs.tab", (e) => {
-			if (!e.target.matches("a[data-toggle='tab']")) return;
-			const tabId = e.target.getAttribute("href").replace("#charsheet-tab-", "");
+			const target = /** @type {*} */ (e.target);
+			if (!target.matches("a[data-toggle='tab']")) return;
+			const tabId = target.getAttribute("href").replace("#charsheet-tab-", "");
 			this._applySavedLayoutForTab(tabId);
 		});
 	}

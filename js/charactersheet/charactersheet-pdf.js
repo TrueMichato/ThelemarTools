@@ -590,8 +590,11 @@ class CharacterSheetPdf {
 	];
 
 	_renderActions () {
+		/** @type {Array<*>} */
 		const actions = CharacterSheetPdf._STANDARD_ACTIONS.map(name => ({name, standard: true}));
+		/** @type {Array<*>} */
 		const bonusActions = [];
+		/** @type {Array<*>} */
 		const reactions = [];
 
 		// --- Class/race/feat features with action economy ---

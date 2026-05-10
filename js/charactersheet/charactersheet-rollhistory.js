@@ -3,6 +3,10 @@
  * In-memory log of all dice rolls, displayed in a sliding side panel.
  * Session-only — not persisted; lost on page reload.
  */
+
+// Project globals — typed via globalThis cast for TypeScript checkJs
+const {e_} = /** @type {*} */ (globalThis);
+
 export class CharacterSheetRollHistory {
 	static MAX_ROLLS = 200;
 
@@ -221,7 +225,7 @@ export class CharacterSheetRollHistory {
 		const badge = document.getElementById("charsheet-rolllog-badge");
 		if (!badge) return;
 		if (this._rolls.length > 0) {
-			badge.textContent = this._rolls.length;
+			badge.textContent = String(this._rolls.length);
 			badge.style.display = "";
 		} else {
 			badge.style.display = "none";
