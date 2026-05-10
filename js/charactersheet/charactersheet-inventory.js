@@ -2,6 +2,8 @@
  * Character Sheet Inventory Manager
  * Handles items, equipment, currency, and encumbrance
  */
+const {e_, ee} = /** @type {*} */ (globalThis);
+
 class CharacterSheetInventory {
 	constructor (page) {
 		this._page = page;
@@ -29,7 +31,7 @@ class CharacterSheetInventory {
 
 	_initEventListeners () {
 		// Delegated click handler for dynamic inventory elements
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			// Inventory view toggle buttons
 			if (e.target.closest("#charsheet-btn-view-list")) {
 				document.querySelector(".charsheet__inventory-list")?.classList.remove("charsheet__inventory-list--compact");
@@ -201,7 +203,7 @@ class CharacterSheetInventory {
 
 		// Currency inputs
 		["cp", "sp", "ep", "gp", "pp"].forEach(currency => {
-			document.addEventListener("change", (e) => {
+			document.addEventListener("change", (/** @type {*} */ e) => {
 				if (e.target.id !== `charsheet-currency-${currency}`) return;
 				const value = parseInt(e.target.value) || 0;
 				this._state.setCurrency(currency, value);
@@ -210,7 +212,7 @@ class CharacterSheetInventory {
 		});
 
 		// Filter inputs (delegated)
-		document.addEventListener("input", (e) => {
+		document.addEventListener("input", (/** @type {*} */ e) => {
 			if (e.target.id === "charsheet-item-search" || e.target.id === "charsheet-ipt-inventory-search") {
 				this._itemFilter = e.target.value.toLowerCase();
 				this._currentPage = 0;
@@ -218,7 +220,7 @@ class CharacterSheetInventory {
 			}
 		});
 
-		document.addEventListener("change", (e) => {
+		document.addEventListener("change", (/** @type {*} */ e) => {
 			if (e.target.id === "charsheet-item-type-filter") {
 				this._itemTypeFilter = e.target.value;
 				this._currentPage = 0;
@@ -482,13 +484,13 @@ class CharacterSheetInventory {
 				if (!filtersOpen) { filtersOpen = true; _updateFilterToggle(); }
 			}
 		};
-		typeBtn.addEventListener("click", (e) => openDropdown(typeDropdownMenu, e));
-		rarityBtn.addEventListener("click", (e) => openDropdown(rarityDropdownMenu, e));
-		sourceBtn.addEventListener("click", (e) => openDropdown(sourceDropdownMenu, e));
+		typeBtn.addEventListener("click", (/** @type {*} */ e) => openDropdown(typeDropdownMenu, e));
+		rarityBtn.addEventListener("click", (/** @type {*} */ e) => openDropdown(rarityDropdownMenu, e));
+		sourceBtn.addEventListener("click", (/** @type {*} */ e) => openDropdown(sourceDropdownMenu, e));
 
 		const _closeDropdowns = () => allMenus.forEach(m => m.classList.remove("open"));
 		document.addEventListener("click", _closeDropdowns);
-		allMenus.forEach(m => m.addEventListener("click", (e) => e.stopPropagation()));
+		allMenus.forEach(m => m.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation()));
 
 		// ---- Shared dropdown update helper ----
 		const _updateMultiselect = (dropdownEl, optionsList, selectedSet, textEl, allLabel, noneLabel) => {
@@ -565,7 +567,7 @@ class CharacterSheetInventory {
 
 		let selectedWeaponCat = null;
 		["simple", "martial"].forEach(cat => {
-			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: cat.toTitleCase()});
+			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: (/** @type {*} */ (cat)).toTitleCase()});
 			btn.addEventListener("click", () => {
 				selectedWeaponCat = selectedWeaponCat === cat ? null : cat;
 				weaponCatBtns.querySelectorAll("button").forEach(b => b.classList.remove("active"));
@@ -584,7 +586,7 @@ class CharacterSheetInventory {
 		let selectedArmorCat = null;
 		const armorCatMap = {"light": "LA", "medium": "MA", "heavy": "HA"};
 		["light", "medium", "heavy"].forEach(cat => {
-			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: cat.toTitleCase()});
+			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: (/** @type {*} */ (cat)).toTitleCase()});
 			btn.addEventListener("click", () => {
 				selectedArmorCat = selectedArmorCat === cat ? null : cat;
 				armorCatBtns.querySelectorAll("button").forEach(b => b.classList.remove("active"));
@@ -913,13 +915,13 @@ class CharacterSheetInventory {
 						</div>
 					`});
 
-					itemEl.querySelector(".item-picker-add").addEventListener("click", (e) => {
+					itemEl.querySelector(".item-picker-add").addEventListener("click", (/** @type {*} */ e) => {
 						e.stopPropagation();
 						this._addItem(item);
 						JqueryUtil.doToast({type: "success", content: `Added ${item.name} to your inventory!`});
 					});
 
-					itemEl.addEventListener("click", (e) => {
+					itemEl.addEventListener("click", (/** @type {*} */ e) => {
 						if (e.target.closest("a")) return;
 						this._showItemInfoFromData(item);
 					});
@@ -2856,7 +2858,7 @@ class CharacterSheetInventory {
 	/**
 	 * Use a potion
 	 * @param {object} item - The item data
-	 * @returns {boolean} True if potion was used
+	 * @returns {Promise<boolean>} True if potion was used
 	 */
 	async _usePotion (item) {
 		const healing = this._state.getItemHealingEffect(item.id);
@@ -2897,12 +2899,12 @@ class CharacterSheetInventory {
 		}
 
 		// Non-healing potion - just confirm usage
-		const confirmed = await InputUiUtil.pGetUserBoolean({
+		const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 			title: `Use ${item.name}?`,
 			htmlDescription: `<p>Use this potion? It will be consumed.</p>`,
 			textYes: "Use",
 			textNo: "Cancel",
-		});
+		}));
 
 		if (confirmed) {
 			JqueryUtil.doToast({
@@ -2917,19 +2919,19 @@ class CharacterSheetInventory {
 	/**
 	 * Use a spell scroll
 	 * @param {object} item - The item data
-	 * @returns {boolean} True if scroll was used
+	 * @returns {Promise<boolean>} True if scroll was used
 	 */
 	async _useScroll (item) {
 		const scrollSpell = this._state.getScrollSpell(item.id);
 
 		if (!scrollSpell) {
 			// Unknown scroll - just confirm usage
-			const confirmed = await InputUiUtil.pGetUserBoolean({
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: `Use ${item.name}?`,
 				htmlDescription: `<p>Use this scroll? It will be consumed.</p>`,
 				textYes: "Use",
 				textNo: "Cancel",
-			});
+			}));
 
 			if (confirmed) {
 				JqueryUtil.doToast({
@@ -2956,7 +2958,7 @@ class CharacterSheetInventory {
 			const dc = this._state.getScrollAbilityCheckDc(spellLevel);
 			const arcanaBonus = this._state.getSkillMod("arcana");
 
-			const confirmed = await InputUiUtil.pGetUserBoolean({
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Arcana Check Required",
 				htmlDescription: `
 					<p>This scroll contains a level ${spellLevel} spell, which is above your casting ability.</p>
@@ -2966,7 +2968,7 @@ class CharacterSheetInventory {
 				`,
 				textYes: "Roll Arcana Check",
 				textNo: "Cancel",
-			});
+			}));
 
 			if (!confirmed) return false;
 
@@ -3001,7 +3003,7 @@ class CharacterSheetInventory {
 	 * Load spell data by name
 	 * @param {string} name - Spell name
 	 * @param {string} source - Optional source
-	 * @returns {object|null} Spell data or null
+	 * @returns {Promise<*>} Spell data or null
 	 */
 	async _loadSpellDataByName (name, source) {
 		// Try to find in any loaded spell data
@@ -3257,7 +3259,7 @@ class CharacterSheetInventory {
 		content.append(addSection);
 
 		// Event handlers
-		content.addEventListener("click", (e) => {
+		content.addEventListener("click", (/** @type {*} */ e) => {
 			const removeBtn = e.target.closest(".charsheet__artifact-remove-prop");
 			if (removeBtn) {
 				const index = parseInt(removeBtn.dataset.index);
@@ -4103,7 +4105,7 @@ class CharacterSheetInventory {
 			const starredBtn = existingToolbar.querySelector("#charsheet-btn-starred-filter");
 			if (starredBtn) starredBtn.classList.toggle("active", this._starredFilter);
 			// Update sort dropdown
-			const sortSelect = existingToolbar.querySelector("#charsheet-inventory-sort");
+			const sortSelect = /** @type {*} */ (existingToolbar.querySelector("#charsheet-inventory-sort"));
 			if (sortSelect) sortSelect.value = this._sortBy;
 			return;
 		}
@@ -4404,7 +4406,7 @@ class CharacterSheetInventory {
 	_formatMastery (mastery) {
 		// Extract mastery name (before |source)
 		const name = mastery.split("|")[0];
-		return name.toTitleCase();
+		return (/** @type {*} */ (name)).toTitleCase();
 	}
 
 	/**
@@ -4413,7 +4415,7 @@ class CharacterSheetInventory {
 	 * @returns {string} HTML string with hover attributes or plain text
 	 */
 	_formatPropertyWithHover (prop) {
-		const propUid = prop?.uid || prop;
+		const propUid = (/** @type {*} */ (prop))?.uid || prop;
 		const displayName = this._formatProperty(prop);
 
 		try {
@@ -4493,7 +4495,7 @@ class CharacterSheetInventory {
 		const currency = this._state.getCurrency();
 		["cp", "sp", "ep", "gp", "pp"].forEach(c => {
 			// Update inventory tab currency inputs
-			const el = document.getElementById(`charsheet-inv-ipt-${c}`);
+			const el = /** @type {*} */ (document.getElementById(`charsheet-inv-ipt-${c}`));
 			if (el) el.value = currency[c] || 0;
 		});
 
@@ -4526,7 +4528,7 @@ class CharacterSheetInventory {
 			// Clone and replace to remove old listeners
 			const fresh = el.cloneNode(true);
 			el.replaceWith(fresh);
-			fresh.addEventListener("change", (e) => {
+			fresh.addEventListener("change", (/** @type {*} */ e) => {
 				const value = parseInt(e.target.value) || 0;
 				this._state.setCurrency(currency, value);
 				this._renderCurrency();
@@ -4745,7 +4747,7 @@ class CharacterSheetInventory {
 	/**
 	 * Edit an item by its ID - scrolls to the item and opens its info modal
 	 * @param {string} itemId - The ID of the item to edit
-	 * @returns {boolean} True if the item was found and handled
+	 * @returns {Promise<boolean>} True if the item was found and handled
 	 */
 	async editItemById (itemId) {
 		const items = this._state.getItems();
