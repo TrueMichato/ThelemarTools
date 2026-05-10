@@ -493,6 +493,7 @@ class CharacterSheetCombat {
 		const attacks = this._state.getAttacks();
 		const attack = attacks.find(a => a.id === attackId);
 		if (!attack) {
+			// eslint-disable-next-line no-console
 			console.warn("[Combat] Attack not found:", attackId);
 			return;
 		}
@@ -2216,7 +2217,7 @@ class CharacterSheetCombat {
 				"speed",
 				"ability score",
 			];
-			if (excludePatterns.some(pattern => nameLower.includes(pattern) || desc.includes(pattern) && !desc.includes("action"))) {
+			if (excludePatterns.some(pattern => nameLower.includes(pattern) || (desc.includes(pattern) && !desc.includes("action")))) {
 				// Only exclude if there's no action economy
 				if (!/\b(bonus action|as an action|use your action|as a reaction)\b/i.test(desc)) {
 					return false;
@@ -2253,7 +2254,7 @@ class CharacterSheetCombat {
 			const hasLimitedUses = f.uses && f.uses.max > 0;
 
 			return (hasActionEconomy && (hasLimitedUses || hasCombatKeyword))
-				   || (hasCombatKeyword && (hasLimitedUses || hasActionEconomy));
+				|| (hasCombatKeyword && (hasLimitedUses || hasActionEconomy));
 		});
 
 		// Sort: features with uses first, then by feature type, then by name
@@ -2777,6 +2778,7 @@ class CharacterSheetCombat {
 				content: `Used ${feature.name}!${remainingText}${costText}`,
 			});
 		} catch (ex) {
+			// eslint-disable-next-line no-console
 			console.error(`[CharSheet] Error using combat action "${feature?.name}":`, ex);
 			JqueryUtil.doToast({type: "danger", content: `Error using ${feature?.name}: ${ex.message}`});
 		}
@@ -3666,6 +3668,7 @@ class CharacterSheetCombat {
 			try {
 				await this._useCombatAction(feature);
 			} catch (ex) {
+				// eslint-disable-next-line no-console
 				console.error(`[CharSheet] Error using combat action from modal:`, ex);
 			}
 		});
@@ -5259,6 +5262,7 @@ class CharacterSheetCombat {
 				dodgeBtn.setAttribute(attr.name, attr.value);
 			}
 		} catch (e) {
+			// eslint-disable-next-line no-console
 			console.warn("[Combat] Error adding Dodge hover attrs:", e);
 		}
 
