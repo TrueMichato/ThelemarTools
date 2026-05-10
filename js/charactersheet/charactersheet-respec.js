@@ -21,6 +21,7 @@ class CharacterSheetRespec {
 		this._legacyBadge = document.getElementById("charsheet-legacy-badge");
 
 		if (!this._container) {
+			// eslint-disable-next-line no-console
 			console.warn("[Respec] Level history container not found");
 			return;
 		}
