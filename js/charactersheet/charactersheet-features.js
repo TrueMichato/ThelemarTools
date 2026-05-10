@@ -2,6 +2,8 @@
  * Character Sheet Features Manager
  * Handles class features, racial traits, feats, and other abilities
  */
+const {e_, ee} = /** @type {*} */ (globalThis);
+
 class CharacterSheetFeatures {
 	constructor (page) {
 		this._page = page;
@@ -96,7 +98,7 @@ class CharacterSheetFeatures {
 	}
 
 	_initEventListeners () {
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			// Add feat button
 			if (e.target.closest("#charsheet-add-feat")) {
 				this._showFeatPicker();
@@ -197,8 +199,8 @@ class CharacterSheetFeatures {
 	_toggleFeatureExpansion (featureId) {
 		const featureEl = document.querySelector(`.charsheet__feature[data-feature-id="${featureId}"]`);
 		if (!featureEl) return;
-		const body = featureEl.querySelector(".charsheet__feature-body");
-		const toggle = featureEl.querySelector(".charsheet__feature-toggle");
+		const body = /** @type {*} */ (featureEl.querySelector(".charsheet__feature-body"));
+		const toggle = /** @type {*} */ (featureEl.querySelector(".charsheet__feature-toggle"));
 
 		if (this._expandedFeatures.has(featureId)) {
 			this._expandedFeatures.delete(featureId);
@@ -2217,7 +2219,7 @@ class CharacterSheetFeatures {
 						availableLangs.forEach(lang => {
 							const isKnown = existingLangs.has(lang.toLowerCase());
 							const isSelected = selected.languages.includes(lang);
-							const btn = e_({outer: `<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isKnown ? "disabled title=\"Already known\" style=\"opacity:0.5;\"" : ""}>${lang.toTitleCase()}${isKnown ? " ✓" : ""}</button>`});
+							const btn = e_({outer: `<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isKnown ? "disabled title=\"Already known\" style=\"opacity:0.5;\"" : ""}>${(/** @type {*} */ (lang)).toTitleCase()}${isKnown ? " ✓" : ""}</button>`});
 							if (!isKnown) {
 								btn.addEventListener("click", () => {
 									if (isSelected) selected.languages = selected.languages.filter(l => l !== lang);

@@ -48,7 +48,7 @@ class CharacterSheetCustomAbilities {
 	render () {
 		this.init(); // Ensure handlers are bound
 
-		const container = document.querySelector("#features-custom-abilities");
+		const container = /** @type {*} */ (document.querySelector("#features-custom-abilities"));
 		if (!container) return;
 
 		const state = this._sheet.getState();
@@ -320,7 +320,7 @@ class CharacterSheetCustomAbilities {
 			const toggleBtn = document.createElement("button");
 			toggleBtn.className = `custom-abilities__toggle-btn ${ability.isActive ? "custom-abilities__toggle-btn--active" : ""}`;
 			toggleBtn.innerHTML = ability.isActive ? "✓ Active" : "○ Inactive";
-			toggleBtn.addEventListener("click", (e) => {
+			toggleBtn.addEventListener("click", (/** @type {*} */ e) => {
 				e.stopPropagation();
 				this._toggleAbility(ability.id);
 			});
@@ -335,7 +335,7 @@ class CharacterSheetCustomAbilities {
 					${ability.uses.recharge === "short" ? "⚡SR" : "🌙LR"}
 				</span>
 			`;
-			usesDiv.querySelector(".custom-abilities__use-btn").addEventListener("click", (e) => {
+			(/** @type {*} */ (usesDiv.querySelector(".custom-abilities__use-btn"))).addEventListener("click", (/** @type {*} */ e) => {
 				e.stopPropagation();
 				this._useAbility(ability.id);
 			});
@@ -352,15 +352,15 @@ class CharacterSheetCustomAbilities {
 			<button class="custom-abilities__action-btn custom-abilities__action-btn--edit" title="Edit">✏️</button>
 			<button class="custom-abilities__action-btn custom-abilities__action-btn--delete" title="Delete">🗑️</button>
 		`;
-		rightControls.querySelector(".custom-abilities__action-btn--duplicate").addEventListener("click", (e) => {
+		(/** @type {*} */ (rightControls.querySelector(".custom-abilities__action-btn--duplicate"))).addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			this._duplicateAbility(ability.id);
 		});
-		rightControls.querySelector(".custom-abilities__action-btn--edit").addEventListener("click", (e) => {
+		(/** @type {*} */ (rightControls.querySelector(".custom-abilities__action-btn--edit"))).addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			this._showAbilityModal(ability.id);
 		});
-		rightControls.querySelector(".custom-abilities__action-btn--delete").addEventListener("click", (e) => {
+		(/** @type {*} */ (rightControls.querySelector(".custom-abilities__action-btn--delete"))).addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			this._confirmDelete(ability.id, ability.name);
 		});
@@ -731,12 +731,12 @@ class CharacterSheetCustomAbilities {
 	}
 
 	async _confirmDelete (id, name) {
-		const doDelete = await InputUiUtil.pGetUserBoolean({
+		const doDelete = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 			title: "Delete Custom Ability",
 			htmlDescription: `<p>Delete "${name}"? This cannot be undone.</p>`,
 			textYes: "Delete",
 			textNo: "Cancel",
-		});
+		}));
 		if (!doDelete) return;
 		const state = this._sheet.getState();
 		if (state.removeCustomAbility(id)) {
@@ -1554,7 +1554,7 @@ class CharacterSheetCustomAbilities {
 		// Helper to render size/reach section
 		const renderSizeReachUI = () => {
 			// Update size value display
-			const sizeValueEl = modal.querySelector("#size-value");
+			const sizeValueEl = /** @type {*} */ (modal.querySelector("#size-value"));
 			if (sizeValueEl) {
 				const sign = sizeChange > 0 ? "+" : "";
 				sizeValueEl.textContent = sizeChange === 0 ? "0" : `${sign}${sizeChange}`;
@@ -1566,7 +1566,7 @@ class CharacterSheetCustomAbilities {
 			// Update size preview
 			const state = this._sheet.getState();
 			const baseSize = state.getBaseSize();
-			const preview = modal.querySelector("#size-preview");
+			const preview = /** @type {*} */ (modal.querySelector("#size-preview"));
 			if (preview) {
 				if (sizeChange !== 0) {
 					const sizes = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
@@ -1581,7 +1581,7 @@ class CharacterSheetCustomAbilities {
 			}
 
 			// Update reach value display
-			const reachValueEl = modal.querySelector("#reach-value");
+			const reachValueEl = /** @type {*} */ (modal.querySelector("#reach-value"));
 			if (reachValueEl) {
 				const reachFt = reachBonus * 5;
 				const sign = reachFt > 0 ? "+" : "";
@@ -1594,7 +1594,7 @@ class CharacterSheetCustomAbilities {
 
 		// Helper to render bonus damage list
 		const renderBonusDamageList = () => {
-			const list = modal.querySelector("#bonus-damage-list");
+			const list = /** @type {*} */ (modal.querySelector("#bonus-damage-list"));
 			list.innerHTML = "";
 
 			if (!bonusDamage.length) {
@@ -1612,17 +1612,17 @@ class CharacterSheetCustomAbilities {
 					<select class="ve-form-control" style="flex: 1;">${damageTypeOptions}</select>
 					<button type="button" class="btn btn-xs btn-danger">&times;</button>
 				`;
-				row.querySelector("select").value = dmg.type || "fire";
-				row.querySelector("input").addEventListener("change", e => { bonusDamage[idx].dice = e.target.value.trim() || "1d6"; });
-				row.querySelector("select").addEventListener("change", e => { bonusDamage[idx].type = e.target.value; });
-				row.querySelector("button").addEventListener("click", () => { bonusDamage.splice(idx, 1); renderBonusDamageList(); });
+				(/** @type {*} */ (row.querySelector("select"))).value = dmg.type || "fire";
+				(/** @type {*} */ (row.querySelector("input"))).addEventListener("change", (/** @type {*} */ e) => { bonusDamage[idx].dice = e.target.value.trim() || "1d6"; });
+				(/** @type {*} */ (row.querySelector("select"))).addEventListener("change", (/** @type {*} */ e) => { bonusDamage[idx].type = e.target.value; });
+				(/** @type {*} */ (row.querySelector("button"))).addEventListener("click", () => { bonusDamage.splice(idx, 1); renderBonusDamageList(); });
 				list.appendChild(row);
 			});
 		};
 
 		// Helper to render reroll effects list
 		const renderRerollsUI = () => {
-			const list = modal.querySelector("#reroll-list");
+			const list = /** @type {*} */ (modal.querySelector("#reroll-list"));
 			if (!list) return;
 			list.innerHTML = "";
 
@@ -1663,21 +1663,21 @@ class CharacterSheetCustomAbilities {
 					<button type="button" class="btn btn-xs btn-danger">&times;</button>
 				`;
 
-				row.querySelector(".custom-abilities__reroll-trigger").addEventListener("change", e => {
+				(/** @type {*} */ (row.querySelector(".custom-abilities__reroll-trigger"))).addEventListener("change", (/** @type {*} */ e) => {
 					rerolls[idx].trigger = e.target.value;
 				});
-				row.querySelector(".custom-abilities__reroll-type").addEventListener("change", e => {
+				(/** @type {*} */ (row.querySelector(".custom-abilities__reroll-type"))).addEventListener("change", (/** @type {*} */ e) => {
 					rerolls[idx].rollType = e.target.value;
 					// Re-render to show/hide restriction dropdown
 					renderRerollsUI();
 				});
-				const restrictEl = row.querySelector(".custom-abilities__reroll-restrict");
+				const restrictEl = /** @type {*} */ (row.querySelector(".custom-abilities__reroll-restrict"));
 				if (restrictEl) {
-					restrictEl.addEventListener("change", e => {
+					restrictEl.addEventListener("change", (/** @type {*} */ e) => {
 						rerolls[idx].restriction = e.target.value;
 					});
 				}
-				row.querySelector("button").addEventListener("click", () => {
+				(/** @type {*} */ (row.querySelector("button"))).addEventListener("click", () => {
 					rerolls.splice(idx, 1);
 					renderRerollsUI();
 				});
@@ -1688,14 +1688,14 @@ class CharacterSheetCustomAbilities {
 
 		// Helper to render critical range UI
 		const renderCritRangeUI = () => {
-			const enabledCheckbox = modal.querySelector("#critrange-enabled");
-			const configSection = modal.querySelector("#critrange-config");
-			const setRow = modal.querySelector("#critrange-set-row");
-			const expandRow = modal.querySelector("#critrange-expand-row");
-			const setValue = modal.querySelector("#critrange-set-value");
-			const expandValue = modal.querySelector("#critrange-expand-value");
-			const expandPreview = modal.querySelector("#critrange-expand-preview");
-			const modeRadios = modal.querySelectorAll("input[name='critRangeMode']");
+			const enabledCheckbox = /** @type {*} */ (modal.querySelector("#critrange-enabled"));
+			const configSection = /** @type {*} */ (modal.querySelector("#critrange-config"));
+			const setRow = /** @type {*} */ (modal.querySelector("#critrange-set-row"));
+			const expandRow = /** @type {*} */ (modal.querySelector("#critrange-expand-row"));
+			const setValue = /** @type {*} */ (modal.querySelector("#critrange-set-value"));
+			const expandValue = /** @type {*} */ (modal.querySelector("#critrange-expand-value"));
+			const expandPreview = /** @type {*} */ (modal.querySelector("#critrange-expand-preview"));
+			const modeRadios = /** @type {*} */ (modal.querySelectorAll("input[name='critRangeMode']"));
 
 			if (!enabledCheckbox) return;
 
@@ -1725,14 +1725,14 @@ class CharacterSheetCustomAbilities {
 
 		// Helper to render temp HP UI
 		const renderTempHpUI = () => {
-			const enabledCheckbox = modal.querySelector("#temphp-enabled");
-			const configSection = modal.querySelector("#temphp-config");
-			const staticRow = modal.querySelector("#temphp-static-row");
-			const diceRow = modal.querySelector("#temphp-dice-row");
-			const staticValue = modal.querySelector("#temphp-static-value");
-			const diceValue = modal.querySelector("#temphp-dice-value");
-			const onActivationCheckbox = modal.querySelector("#temphp-on-activation");
-			const modeRadios = modal.querySelectorAll("input[name='tempHpMode']");
+			const enabledCheckbox = /** @type {*} */ (modal.querySelector("#temphp-enabled"));
+			const configSection = /** @type {*} */ (modal.querySelector("#temphp-config"));
+			const staticRow = /** @type {*} */ (modal.querySelector("#temphp-static-row"));
+			const diceRow = /** @type {*} */ (modal.querySelector("#temphp-dice-row"));
+			const staticValue = /** @type {*} */ (modal.querySelector("#temphp-static-value"));
+			const diceValue = /** @type {*} */ (modal.querySelector("#temphp-dice-value"));
+			const onActivationCheckbox = /** @type {*} */ (modal.querySelector("#temphp-on-activation"));
+			const modeRadios = /** @type {*} */ (modal.querySelectorAll("input[name='tempHpMode']"));
 
 			if (!enabledCheckbox) return;
 
@@ -1759,7 +1759,7 @@ class CharacterSheetCustomAbilities {
 
 		// Helper to render effects list
 		const renderEffectsList = () => {
-			const list = modal.querySelector("#ability-effects-list");
+			const list = /** @type {*} */ (modal.querySelector("#ability-effects-list"));
 			list.innerHTML = "";
 
 			if (!effects.length) {
@@ -1836,14 +1836,14 @@ class CharacterSheetCustomAbilities {
 				`;
 
 				// Set selected type
-				row.querySelector(".custom-abilities__effect-type").value = effect.type || "ac";
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-type"))).value = effect.type || "ac";
 
 				// Bind change handlers
-				const typeEl = row.querySelector(".custom-abilities__effect-type");
-				const modeEl = row.querySelector(".custom-abilities__effect-mode");
-				const valueEl = row.querySelector(".custom-abilities__effect-value");
+				const typeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-type"));
+				const modeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-mode"));
+				const valueEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-value"));
 
-				typeEl.addEventListener("change", (e) => {
+				typeEl.addEventListener("change", (/** @type {*} */ e) => {
 					effects[idx].type = e.target.value;
 					// Show/hide mode dropdown based on type
 					const isAbility = e.target.value.startsWith("ability:");
@@ -1853,7 +1853,7 @@ class CharacterSheetCustomAbilities {
 						valueEl.placeholder = "±0";
 					}
 				});
-				modeEl.addEventListener("change", (e) => {
+				modeEl.addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.value === "set") {
 						effects[idx].mode = "set";
 						valueEl.placeholder = "19";
@@ -1862,13 +1862,13 @@ class CharacterSheetCustomAbilities {
 						valueEl.placeholder = "±0";
 					}
 				});
-				valueEl.addEventListener("change", (e) => {
+				valueEl.addEventListener("change", (/** @type {*} */ e) => {
 					effects[idx].value = parseInt(e.target.value) || 0;
 				});
 
 				// Scaling dropdown handler
-				const scalingEl = row.querySelector(".custom-abilities__effect-scaling");
-				scalingEl.addEventListener("change", (e) => {
+				const scalingEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-scaling"));
+				scalingEl.addEventListener("change", (/** @type {*} */ e) => {
 					// Clear all scaling properties first
 					delete effects[idx].proficiencyBonus;
 					delete effects[idx].halfProficiency;
@@ -1892,30 +1892,30 @@ class CharacterSheetCustomAbilities {
 				});
 
 				// Class level dropdown handler (if present)
-				const classLevelEl = row.querySelector(".custom-abilities__effect-class-level");
+				const classLevelEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-class-level"));
 				if (classLevelEl) {
-					classLevelEl.addEventListener("change", (e) => {
+					classLevelEl.addEventListener("change", (/** @type {*} */ e) => {
 						effects[idx].perClassLevel = e.target.value;
 					});
 				}
 
-				row.querySelector(".custom-abilities__effect-advdis").addEventListener("change", (e) => {
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-advdis"))).addEventListener("change", (/** @type {*} */ e) => {
 					delete effects[idx].advantage;
 					delete effects[idx].disadvantage;
 					if (e.target.value === "advantage") effects[idx].advantage = true;
 					if (e.target.value === "disadvantage") effects[idx].disadvantage = true;
 				});
-				row.querySelector(".custom-abilities__effect-minimum").addEventListener("change", (e) => {
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-minimum"))).addEventListener("change", (/** @type {*} */ e) => {
 					const val = parseInt(e.target.value);
 					if (!isNaN(val)) effects[idx].setMinimum = val;
 					else delete effects[idx].setMinimum;
 				});
-				row.querySelector(".custom-abilities__effect-bonusdie").addEventListener("change", (e) => {
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-bonusdie"))).addEventListener("change", (/** @type {*} */ e) => {
 					const val = e.target.value.trim();
 					if (val) effects[idx].bonusDie = val;
 					else delete effects[idx].bonusDie;
 				});
-				row.querySelector(".custom-abilities__effect-conditional").addEventListener("change", (e) => {
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-conditional"))).addEventListener("change", (/** @type {*} */ e) => {
 					const val = e.target.value;
 					if (val === "custom") {
 						effects[idx].conditional = "custom:";
@@ -1926,14 +1926,14 @@ class CharacterSheetCustomAbilities {
 						delete effects[idx].conditional;
 					}
 				});
-				const conditionalText = row.querySelector(".custom-abilities__effect-conditional-text");
+				const conditionalText = /** @type {*} */ (row.querySelector(".custom-abilities__effect-conditional-text"));
 				if (conditionalText) {
-					conditionalText.addEventListener("change", (e) => {
+					conditionalText.addEventListener("change", (/** @type {*} */ e) => {
 						const val = e.target.value.trim();
 						effects[idx].conditional = val ? `custom:${val}` : "";
 					});
 				}
-				row.querySelector(".custom-abilities__effect-remove").addEventListener("click", () => {
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-remove"))).addEventListener("click", () => {
 					effects.splice(idx, 1);
 					renderEffectsList();
 				});
@@ -2005,11 +2005,11 @@ class CharacterSheetCustomAbilities {
 			}
 
 			const data = {
-				name: modal.querySelector("input[name='name']").value,
-				description: modal.querySelector("textarea[name='description']").value,
-				icon: modal.querySelector("input[name='icon']").value || "⚡",
-				category: modal.querySelector("select[name='category']").value,
-				mode: modal.querySelector("input[name='mode']:checked")?.value || "passive",
+				name: (/** @type {*} */ (modal.querySelector("input[name='name']"))).value,
+				description: (/** @type {*} */ (modal.querySelector("textarea[name='description']"))).value,
+				icon: (/** @type {*} */ (modal.querySelector("input[name='icon']"))).value || "⚡",
+				category: (/** @type {*} */ (modal.querySelector("select[name='category']"))).value,
+				mode: (/** @type {*} */ (modal.querySelector("input[name='mode']:checked")))?.value || "passive",
 				effects: allEffects,
 			};
 
@@ -2052,27 +2052,27 @@ class CharacterSheetCustomAbilities {
 			}
 
 			if (data.mode === "limited") {
-				const resourceSource = modal.querySelector("select[name='resourceSource']").value || "self";
+				const resourceSource = /** @type {*} */ (modal.querySelector("select[name='resourceSource']")).value || "self";
 				data.resourceSource = { type: resourceSource };
 
 				if (resourceSource === "self") {
 					data.uses = {
-						max: parseInt(modal.querySelector("input[name='maxUses']").value) || 1,
-						recharge: modal.querySelector("select[name='recharge']").value || "long",
+						max: parseInt((/** @type {*} */ (modal.querySelector("input[name='maxUses']"))).value) || 1,
+						recharge: (/** @type {*} */ (modal.querySelector("select[name='recharge']"))).value || "long",
 					};
 				} else if (resourceSource === "linked") {
-					data.resourceSource.resourceId = modal.querySelector("select[name='linkedResourceId']").value;
-					data.resourceSource.cost = parseInt(modal.querySelector("input[name='linkedResourceCost']").value) || 1;
+					data.resourceSource.resourceId = (/** @type {*} */ (modal.querySelector("select[name='linkedResourceId']"))).value;
+					data.resourceSource.cost = parseInt((/** @type {*} */ (modal.querySelector("input[name='linkedResourceCost']"))).value) || 1;
 				} else if (resourceSource === "new") {
-					data.resourceSource.newResourceName = modal.querySelector("input[name='newResourceName']").value;
-					data.resourceSource.newResourceMax = parseInt(modal.querySelector("input[name='newResourceMax']").value) || 3;
-					data.resourceSource.newResourceRecharge = modal.querySelector("select[name='newResourceRecharge']").value || "long";
+					data.resourceSource.newResourceName = (/** @type {*} */ (modal.querySelector("input[name='newResourceName']"))).value;
+					data.resourceSource.newResourceMax = parseInt((/** @type {*} */ (modal.querySelector("input[name='newResourceMax']"))).value) || 3;
+					data.resourceSource.newResourceRecharge = (/** @type {*} */ (modal.querySelector("select[name='newResourceRecharge']"))).value || "long";
 				}
 			}
 
 			// Add activation action for non-passive modes
 			if (data.mode && data.mode !== "passive") {
-				const activationAction = modal.querySelector("select[name='activationAction']").value;
+				const activationAction = /** @type {*} */ (modal.querySelector("select[name='activationAction']")).value;
 				if (activationAction && activationAction !== "free") {
 					data.activationAction = activationAction;
 				}
@@ -2080,20 +2080,20 @@ class CharacterSheetCustomAbilities {
 
 			// Add duration and concentration for toggleable mode
 			if (data.mode === "toggleable") {
-				const duration = modal.querySelector("select[name='duration']").value;
+				const duration = /** @type {*} */ (modal.querySelector("select[name='duration']")).value;
 				if (duration) {
 					data.duration = duration;
 				}
-				const concentration = modal.querySelector("input[name='concentration']").checked;
+				const concentration = /** @type {*} */ (modal.querySelector("input[name='concentration']")).checked;
 				if (concentration) {
 					data.concentration = true;
 				}
 				// Add resource cost if enabled
-				const hasResourceCost = modal.querySelector("input[name='hasResourceCost']").checked;
+				const hasResourceCost = /** @type {*} */ (modal.querySelector("input[name='hasResourceCost']")).checked;
 				if (hasResourceCost) {
 					data.resourceCost = {
-						resourceId: modal.querySelector("select[name='toggleResourceId']").value,
-						cost: parseInt(modal.querySelector("input[name='toggleResourceCost']").value) || 1,
+						resourceId: (/** @type {*} */ (modal.querySelector("select[name='toggleResourceId']"))).value,
+						cost: parseInt((/** @type {*} */ (modal.querySelector("input[name='toggleResourceCost']"))).value) || 1,
 					};
 				}
 			}
@@ -2112,51 +2112,51 @@ class CharacterSheetCustomAbilities {
 		// Sync JSON to form
 		const syncJsonToForm = (data) => {
 			if (!data) return;
-			modal.querySelector("input[name='name']").value = data.name || "";
-			modal.querySelector("textarea[name='description']").value = data.description || "";
-			modal.querySelector("input[name='icon']").value = data.icon || "⚡";
-			modal.querySelector("select[name='category']").value = data.category || "homebrew";
-			const modeRadio = modal.querySelector(`input[name='mode'][value='${data.mode || "passive"}']`);
+			(/** @type {*} */ (modal.querySelector("input[name='name']"))).value = data.name || "";
+			(/** @type {*} */ (modal.querySelector("textarea[name='description']"))).value = data.description || "";
+			(/** @type {*} */ (modal.querySelector("input[name='icon']"))).value = data.icon || "⚡";
+			(/** @type {*} */ (modal.querySelector("select[name='category']"))).value = data.category || "homebrew";
+			const modeRadio = /** @type {*} */ (modal.querySelector(`input[name='mode'][value='${data.mode || "passive"}']`));
 			if (modeRadio) modeRadio.checked = true;
 
 			// Restore resource source for limited mode
 			if (data.resourceSource) {
-				modal.querySelector("select[name='resourceSource']").value = data.resourceSource.type || "self";
+				(/** @type {*} */ (modal.querySelector("select[name='resourceSource']"))).value = data.resourceSource.type || "self";
 				if (data.resourceSource.type === "linked") {
-					const linkedSelect = modal.querySelector("select[name='linkedResourceId']");
+					const linkedSelect = /** @type {*} */ (modal.querySelector("select[name='linkedResourceId']"));
 					if (linkedSelect) linkedSelect.value = data.resourceSource.resourceId || "";
-					modal.querySelector("input[name='linkedResourceCost']").value = data.resourceSource.cost || 1;
+					(/** @type {*} */ (modal.querySelector("input[name='linkedResourceCost']"))).value = data.resourceSource.cost || 1;
 				} else if (data.resourceSource.type === "new") {
-					modal.querySelector("input[name='newResourceName']").value = data.resourceSource.newResourceName || "";
-					modal.querySelector("input[name='newResourceMax']").value = data.resourceSource.newResourceMax || 3;
-					modal.querySelector("select[name='newResourceRecharge']").value = data.resourceSource.newResourceRecharge || "long";
+					(/** @type {*} */ (modal.querySelector("input[name='newResourceName']"))).value = data.resourceSource.newResourceName || "";
+					(/** @type {*} */ (modal.querySelector("input[name='newResourceMax']"))).value = data.resourceSource.newResourceMax || 3;
+					(/** @type {*} */ (modal.querySelector("select[name='newResourceRecharge']"))).value = data.resourceSource.newResourceRecharge || "long";
 				}
 			}
 
 			if (data.uses) {
-				modal.querySelector("input[name='maxUses']").value = data.uses.max || 1;
-				modal.querySelector("select[name='recharge']").value = data.uses.recharge || "long";
+				(/** @type {*} */ (modal.querySelector("input[name='maxUses']"))).value = data.uses.max || 1;
+				(/** @type {*} */ (modal.querySelector("select[name='recharge']"))).value = data.uses.recharge || "long";
 			}
 
 			// Restore activation action
 			if (data.activationAction) {
-				modal.querySelector("select[name='activationAction']").value = data.activationAction;
+				(/** @type {*} */ (modal.querySelector("select[name='activationAction']"))).value = data.activationAction;
 			}
 
 			// Restore duration and concentration
 			if (data.duration) {
-				modal.querySelector("select[name='duration']").value = data.duration;
+				(/** @type {*} */ (modal.querySelector("select[name='duration']"))).value = data.duration;
 			}
 			if (data.concentration) {
-				modal.querySelector("input[name='concentration']").checked = true;
+				(/** @type {*} */ (modal.querySelector("input[name='concentration']"))).checked = true;
 			}
 
 			// Restore resource cost for toggleable mode
 			if (data.resourceCost) {
-				modal.querySelector("input[name='hasResourceCost']").checked = true;
-				const toggleSelect = modal.querySelector("select[name='toggleResourceId']");
+				(/** @type {*} */ (modal.querySelector("input[name='hasResourceCost']"))).checked = true;
+				const toggleSelect = /** @type {*} */ (modal.querySelector("select[name='toggleResourceId']"));
 				if (toggleSelect) toggleSelect.value = data.resourceCost.resourceId || "";
-				modal.querySelector("input[name='toggleResourceCost']").value = data.resourceCost.cost || 1;
+				(/** @type {*} */ (modal.querySelector("input[name='toggleResourceCost']"))).value = data.resourceCost.cost || 1;
 			}
 
 			// Parse effects array to extract special effect types
@@ -2253,37 +2253,37 @@ class CharacterSheetCustomAbilities {
 
 		// Update limited options visibility
 		const updateModeVisibility = () => {
-			const mode = modal.querySelector("input[name='mode']:checked")?.value;
-			modal.querySelector(".custom-abilities__limited-options").style.display = mode === "limited" ? "flex" : "none";
-			modal.querySelector(".custom-abilities__activation-options").style.display = mode && mode !== "passive" ? "flex" : "none";
-			modal.querySelector(".custom-abilities__duration-options").style.display = mode === "toggleable" ? "flex" : "none";
-			modal.querySelector(".custom-abilities__toggleable-resource-options").style.display = mode === "toggleable" ? "block" : "none";
+			const mode = /** @type {*} */ (modal.querySelector("input[name='mode']:checked"))?.value;
+			(/** @type {*} */ (modal.querySelector(".custom-abilities__limited-options"))).style.display = mode === "limited" ? "flex" : "none";
+			(/** @type {*} */ (modal.querySelector(".custom-abilities__activation-options"))).style.display = mode && mode !== "passive" ? "flex" : "none";
+			(/** @type {*} */ (modal.querySelector(".custom-abilities__duration-options"))).style.display = mode === "toggleable" ? "flex" : "none";
+			(/** @type {*} */ (modal.querySelector(".custom-abilities__toggleable-resource-options"))).style.display = mode === "toggleable" ? "block" : "none";
 		};
 
 		// Update resource source visibility (for limited mode)
 		const updateResourceSourceVisibility = () => {
-			const sourceType = modal.querySelector("select[name='resourceSource']")?.value || "self";
-			modal.querySelector(".custom-abilities__self-uses-options").style.display = sourceType === "self" ? "flex" : "none";
-			modal.querySelector(".custom-abilities__linked-resource-options").style.display = sourceType === "linked" ? "flex" : "none";
-			modal.querySelector(".custom-abilities__new-resource-options").style.display = sourceType === "new" ? "flex" : "none";
+			const sourceType = /** @type {*} */ (modal.querySelector("select[name='resourceSource']"))?.value || "self";
+			(/** @type {*} */ (modal.querySelector(".custom-abilities__self-uses-options"))).style.display = sourceType === "self" ? "flex" : "none";
+			(/** @type {*} */ (modal.querySelector(".custom-abilities__linked-resource-options"))).style.display = sourceType === "linked" ? "flex" : "none";
+			(/** @type {*} */ (modal.querySelector(".custom-abilities__new-resource-options"))).style.display = sourceType === "new" ? "flex" : "none";
 		};
 
 		// Update toggleable resource cost visibility
 		const updateToggleableResourceVisibility = () => {
-			const hasResourceCost = modal.querySelector("input[name='hasResourceCost']")?.checked;
-			modal.querySelector(".custom-abilities__toggleable-resource-details").style.display = hasResourceCost ? "flex" : "none";
+			const hasResourceCost = /** @type {*} */ (modal.querySelector("input[name='hasResourceCost']"))?.checked;
+			(/** @type {*} */ (modal.querySelector(".custom-abilities__toggleable-resource-details"))).style.display = hasResourceCost ? "flex" : "none";
 		};
 
 		// Event handlers
 		modal.querySelectorAll("input[name='mode']").forEach(r => r.addEventListener("change", updateModeVisibility));
-		modal.querySelector("select[name='resourceSource']")?.addEventListener("change", updateResourceSourceVisibility);
-		modal.querySelector("input[name='hasResourceCost']")?.addEventListener("change", updateToggleableResourceVisibility);
+		(/** @type {*} */ (modal.querySelector("select[name='resourceSource']")))?.addEventListener("change", updateResourceSourceVisibility);
+		(/** @type {*} */ (modal.querySelector("input[name='hasResourceCost']")))?.addEventListener("change", updateToggleableResourceVisibility);
 
 		// Icon picker
-		const iconPreview = modal.querySelector(".custom-abilities__icon-preview");
-		const iconDropdown = modal.querySelector(".custom-abilities__icon-dropdown");
-		const iconHidden = modal.querySelector("input[name='icon']");
-		const iconCustomInput = modal.querySelector(".custom-abilities__icon-custom input");
+		const iconPreview = /** @type {*} */ (modal.querySelector(".custom-abilities__icon-preview"));
+		const iconDropdown = /** @type {*} */ (modal.querySelector(".custom-abilities__icon-dropdown"));
+		const iconHidden = /** @type {*} */ (modal.querySelector("input[name='icon']"));
+		const iconCustomInput = /** @type {*} */ (modal.querySelector(".custom-abilities__icon-custom input"));
 
 		const updateIcon = (newIcon) => {
 			iconPreview.textContent = newIcon;
@@ -2291,33 +2291,33 @@ class CharacterSheetCustomAbilities {
 			iconDropdown.classList.remove("custom-abilities__icon-dropdown--open");
 		};
 
-		iconPreview.addEventListener("click", (e) => {
+		iconPreview.addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			iconDropdown.classList.toggle("custom-abilities__icon-dropdown--open");
 		});
 
-		modal.querySelectorAll(".custom-abilities__icon-option").forEach(btn => {
-			btn.addEventListener("click", (e) => {
+		modal.querySelectorAll(".custom-abilities__icon-option").forEach((/** @type {*} */ btn) => {
+			btn.addEventListener("click", (/** @type {*} */ e) => {
 				e.stopPropagation();
 				updateIcon(btn.dataset.icon);
 			});
 		});
 
-		iconCustomInput.addEventListener("input", (e) => {
+		iconCustomInput.addEventListener("input", (/** @type {*} */ e) => {
 			if (e.target.value.trim()) {
 				updateIcon(e.target.value.trim().slice(0, 2));
 			}
 		});
 
 		// Close icon dropdown when clicking outside
-		modal.addEventListener("click", (e) => {
+		modal.addEventListener("click", (/** @type {*} */ e) => {
 			if (!e.target.closest(".custom-abilities__icon-picker")) {
 				iconDropdown.classList.remove("custom-abilities__icon-dropdown--open");
 			}
 		});
 
 		// Editor mode toggle
-		modal.querySelectorAll(".custom-abilities__editor-mode-btn").forEach(btn => {
+		modal.querySelectorAll(".custom-abilities__editor-mode-btn").forEach((/** @type {*} */ btn) => {
 			btn.addEventListener("click", () => {
 				const newMode = btn.dataset.mode;
 				if (newMode === currentMode) return;
@@ -2325,10 +2325,10 @@ class CharacterSheetCustomAbilities {
 				// Sync data when switching modes
 				if (currentMode === "simple" && newMode === "advanced") {
 					const data = syncFormToJson();
-					modal.querySelector(".custom-abilities__json-editor").value = JSON.stringify(data, null, 2);
+					(/** @type {*} */ (modal.querySelector(".custom-abilities__json-editor"))).value = JSON.stringify(data, null, 2);
 				} else if (currentMode === "advanced" && newMode === "simple") {
 					try {
-						const data = JSON.parse(modal.querySelector(".custom-abilities__json-editor").value);
+						const data = JSON.parse((/** @type {*} */ (modal.querySelector(".custom-abilities__json-editor"))).value);
 						syncJsonToForm(data);
 					} catch (e) {
 						alert("Invalid JSON. Please fix errors before switching to Simple mode.");
@@ -2339,32 +2339,32 @@ class CharacterSheetCustomAbilities {
 				currentMode = newMode;
 				modal.querySelectorAll(".custom-abilities__editor-mode-btn").forEach(b => b.classList.remove("custom-abilities__editor-mode-btn--active"));
 				btn.classList.add("custom-abilities__editor-mode-btn--active");
-				modal.querySelector("[data-editor='simple']").style.display = newMode === "simple" ? "" : "none";
-				modal.querySelector("[data-editor='advanced']").style.display = newMode === "advanced" ? "" : "none";
+				(/** @type {*} */ (modal.querySelector("[data-editor='simple']"))).style.display = newMode === "simple" ? "" : "none";
+				(/** @type {*} */ (modal.querySelector("[data-editor='advanced']"))).style.display = newMode === "advanced" ? "" : "none";
 			});
 		});
 
 		// Add effect
-		modal.querySelector(".custom-abilities__add-effect-btn").addEventListener("click", () => {
+		(/** @type {*} */ (modal.querySelector(".custom-abilities__add-effect-btn"))).addEventListener("click", () => {
 			effects.push({type: "ac", value: 0});
 			renderEffectsList();
 		});
 
 		// Close handlers
 		const closeModal = () => modal.remove();
-		modal.querySelector(".modal-close").addEventListener("click", closeModal);
-		modal.querySelector(".custom-abilities__cancel-btn").addEventListener("click", closeModal);
-		modal.addEventListener("click", (e) => {
+		(/** @type {*} */ (modal.querySelector(".modal-close"))).addEventListener("click", closeModal);
+		(/** @type {*} */ (modal.querySelector(".custom-abilities__cancel-btn"))).addEventListener("click", closeModal);
+		modal.addEventListener("click", (/** @type {*} */ e) => {
 			if (e.target === modal) closeModal();
 		});
 
 		// Save handler
-		modal.querySelector(".custom-abilities__save-btn").addEventListener("click", () => {
+		(/** @type {*} */ (modal.querySelector(".custom-abilities__save-btn"))).addEventListener("click", () => {
 			let data;
 
 			if (currentMode === "advanced") {
 				try {
-					data = JSON.parse(modal.querySelector(".custom-abilities__json-editor").value);
+					data = JSON.parse((/** @type {*} */ (modal.querySelector(".custom-abilities__json-editor"))).value);
 				} catch (e) {
 					alert(`Invalid JSON: ${e.message}`);
 					return;
@@ -2394,74 +2394,74 @@ class CharacterSheetCustomAbilities {
 		});
 
 		// Size increment/decrement handlers
-		modal.querySelector(".custom-abilities__size-inc")?.addEventListener("click", () => {
+		(/** @type {*} */ (modal.querySelector(".custom-abilities__size-inc")))?.addEventListener("click", () => {
 			sizeChange = Math.min(sizeChange + 1, 5); // Max 5 size categories
 			renderSizeReachUI();
 		});
-		modal.querySelector(".custom-abilities__size-dec")?.addEventListener("click", () => {
+		(/** @type {*} */ (modal.querySelector(".custom-abilities__size-dec")))?.addEventListener("click", () => {
 			sizeChange = Math.max(sizeChange - 1, -5); // Min -5 size categories
 			renderSizeReachUI();
 		});
 
 		// Reach increment/decrement handlers
-		modal.querySelector(".custom-abilities__reach-inc")?.addEventListener("click", () => {
+		(/** @type {*} */ (modal.querySelector(".custom-abilities__reach-inc")))?.addEventListener("click", () => {
 			reachBonus = Math.min(reachBonus + 1, 10); // Max +50 ft reach
 			renderSizeReachUI();
 		});
-		modal.querySelector(".custom-abilities__reach-dec")?.addEventListener("click", () => {
+		(/** @type {*} */ (modal.querySelector(".custom-abilities__reach-dec")))?.addEventListener("click", () => {
 			reachBonus = Math.max(reachBonus - 1, -10); // Min -50 ft (for curses)
 			renderSizeReachUI();
 		});
 
 		// Add bonus damage handler
-		modal.querySelector("#add-bonus-damage-btn")?.addEventListener("click", () => {
+		(/** @type {*} */ (modal.querySelector("#add-bonus-damage-btn")))?.addEventListener("click", () => {
 			bonusDamage.push({type: "fire", dice: "1d6"});
 			renderBonusDamageList();
 		});
 
 		// Add reroll handler
-		modal.querySelector("#add-reroll-btn")?.addEventListener("click", () => {
+		(/** @type {*} */ (modal.querySelector("#add-reroll-btn")))?.addEventListener("click", () => {
 			rerolls.push({trigger: "1", rollType: "attack"});
 			renderRerollsUI();
 		});
 
 		// Critical range handlers
-		modal.querySelector("#critrange-enabled")?.addEventListener("change", e => {
+		(/** @type {*} */ (modal.querySelector("#critrange-enabled")))?.addEventListener("change", (/** @type {*} */ e) => {
 			critRangeConfig.enabled = e.target.checked;
 			renderCritRangeUI();
 		});
 		modal.querySelectorAll("input[name='critRangeMode']").forEach(radio => {
-			radio.addEventListener("change", e => {
+			radio.addEventListener("change", (/** @type {*} */ e) => {
 				critRangeConfig.mode = e.target.value;
 				renderCritRangeUI();
 			});
 		});
-		modal.querySelector("#critrange-set-value")?.addEventListener("change", e => {
+		(/** @type {*} */ (modal.querySelector("#critrange-set-value")))?.addEventListener("change", (/** @type {*} */ e) => {
 			critRangeConfig.value = parseInt(e.target.value) || 19;
 		});
-		modal.querySelector("#critrange-expand-value")?.addEventListener("change", e => {
+		(/** @type {*} */ (modal.querySelector("#critrange-expand-value")))?.addEventListener("change", (/** @type {*} */ e) => {
 			critRangeConfig.expand = Math.max(1, Math.min(19, parseInt(e.target.value) || 1));
 			renderCritRangeUI();
 		});
 
 		// Temp HP handlers
-		modal.querySelector("#temphp-enabled")?.addEventListener("change", e => {
+		(/** @type {*} */ (modal.querySelector("#temphp-enabled")))?.addEventListener("change", (/** @type {*} */ e) => {
 			tempHpConfig.enabled = e.target.checked;
 			renderTempHpUI();
 		});
 		modal.querySelectorAll("input[name='tempHpMode']").forEach(radio => {
-			radio.addEventListener("change", e => {
+			radio.addEventListener("change", (/** @type {*} */ e) => {
 				tempHpConfig.mode = e.target.value;
 				renderTempHpUI();
 			});
 		});
-		modal.querySelector("#temphp-static-value")?.addEventListener("change", e => {
+		(/** @type {*} */ (modal.querySelector("#temphp-static-value")))?.addEventListener("change", (/** @type {*} */ e) => {
 			tempHpConfig.value = Math.max(1, parseInt(e.target.value) || 5);
 		});
-		modal.querySelector("#temphp-dice-value")?.addEventListener("change", e => {
+		(/** @type {*} */ (modal.querySelector("#temphp-dice-value")))?.addEventListener("change", (/** @type {*} */ e) => {
 			tempHpConfig.dice = e.target.value.trim() || "1d4+4";
 		});
-		modal.querySelector("#temphp-on-activation")?.addEventListener("change", e => {
+		(/** @type {*} */ (modal.querySelector("#temphp-on-activation")))?.addEventListener("change", (/** @type {*} */ e) => {
 			tempHpConfig.onActivation = e.target.checked;
 		});
 
@@ -2481,11 +2481,11 @@ class CharacterSheetCustomAbilities {
 		this._updateProfCount(modal, grants);
 
 		if (existingAbility) {
-			modal.querySelector(".custom-abilities__json-editor").value = JSON.stringify(existingAbility, null, 2);
+			(/** @type {*} */ (modal.querySelector(".custom-abilities__json-editor"))).value = JSON.stringify(existingAbility, null, 2);
 		}
 
 		// Focus name input
-		setTimeout(() => modal.querySelector("input[name='name']").focus(), 100);
+		setTimeout(() => (/** @type {*} */ (modal.querySelector("input[name='name']"))).focus(), 100);
 	}
 
 	// #region Grants Rendering Helpers
@@ -2496,9 +2496,10 @@ class CharacterSheetCustomAbilities {
 	_getSpellHoverLink (spell) {
 		try {
 			const source = spell.source || Parser.SRC_PHB;
-			const spellData = this._page?._spellsData?.find(s => s.name === spell.name && s.source === source);
-			if (this._page?.getSpellHoverLink) {
-				return this._page.getSpellHoverLink(spell.name, source, spellData || null, null);
+			const page = /** @type {*} */ (this)._page;
+			const spellData = page?._spellsData?.find(s => s.name === spell.name && s.source === source);
+			if (page?.getSpellHoverLink) {
+				return page.getSpellHoverLink(spell.name, source, spellData || null, null);
 			}
 			const hash = UrlUtil.encodeForHash([spell.name, source].join(HASH_LIST_SEP));
 			const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_SPELLS, source, hash});
@@ -2538,11 +2539,11 @@ class CharacterSheetCustomAbilities {
 	 * Render spells grant section with improved UI
 	 */
 	_renderGrantsSpells (modal, grants, allSpells) {
-		const searchInput = modal.querySelector("#grants-spell-search");
-		const levelFilter = modal.querySelector("#grants-spell-level-filter");
-		const schoolFilter = modal.querySelector("#grants-spell-school-filter");
-		const listContainer = modal.querySelector("#grants-spell-list");
-		const selectedContainer = modal.querySelector("#grants-spell-selected");
+		const searchInput = /** @type {*} */ (modal.querySelector("#grants-spell-search"));
+		const levelFilter = /** @type {*} */ (modal.querySelector("#grants-spell-level-filter"));
+		const schoolFilter = /** @type {*} */ (modal.querySelector("#grants-spell-school-filter"));
+		const listContainer = /** @type {*} */ (modal.querySelector("#grants-spell-list"));
+		const selectedContainer = /** @type {*} */ (modal.querySelector("#grants-spell-selected"));
 
 		const renderSpellList = () => {
 			const searchTerm = searchInput?.value.toLowerCase() || "";
@@ -2579,7 +2580,7 @@ class CharacterSheetCustomAbilities {
 
 			// Bind add buttons
 			listContainer.querySelectorAll(".custom-abilities__grants-add-btn").forEach(btn => {
-				btn.addEventListener("click", (e) => {
+				btn.addEventListener("click", (/** @type {*} */ e) => {
 					e.preventDefault();
 					const item = btn.closest(".custom-abilities__grants-item");
 					const name = item.dataset.name;
@@ -2645,7 +2646,7 @@ class CharacterSheetCustomAbilities {
 				if (!spell) return;
 
 				// At-will toggle
-				const atWillCb = item.querySelector(".spell-at-will");
+				const atWillCb = /** @type {*} */ (item.querySelector(".spell-at-will"));
 				if (atWillCb) {
 					atWillCb.addEventListener("change", () => {
 						spell.atWill = atWillCb.checked;
@@ -2654,7 +2655,7 @@ class CharacterSheetCustomAbilities {
 				}
 
 				// Uses input
-				const usesInput = item.querySelector(".spell-uses");
+				const usesInput = /** @type {*} */ (item.querySelector(".spell-uses"));
 				if (usesInput) {
 					usesInput.addEventListener("change", () => {
 						spell.uses = parseInt(usesInput.value) || 1;
@@ -2662,7 +2663,7 @@ class CharacterSheetCustomAbilities {
 				}
 
 				// Recharge select
-				const rechargeSelect = item.querySelector(".spell-recharge");
+				const rechargeSelect = /** @type {*} */ (item.querySelector(".spell-recharge"));
 				if (rechargeSelect) {
 					rechargeSelect.addEventListener("change", () => {
 						spell.recharge = rechargeSelect.value;
@@ -2670,7 +2671,7 @@ class CharacterSheetCustomAbilities {
 				}
 
 				// Remove button
-				item.querySelector(".custom-abilities__grants-remove-btn")?.addEventListener("click", (e) => {
+				(/** @type {*} */ (item.querySelector(".custom-abilities__grants-remove-btn")))?.addEventListener("click", (/** @type {*} */ e) => {
 					e.preventDefault();
 					grants.spells = grants.spells.filter(s => !(s.name === name && s.source === source));
 					renderSpellList();
@@ -2715,7 +2716,7 @@ class CharacterSheetCustomAbilities {
 	 * Render skills grant section with pill-based selection and expertise toggle
 	 */
 	_renderGrantsSkills (modal, grants, skillsList) {
-		const container = modal.querySelector("#grants-skills-list");
+		const container = /** @type {*} */ (modal.querySelector("#grants-skills-list"));
 		if (!container) return;
 
 		const render = () => {
@@ -2786,7 +2787,7 @@ class CharacterSheetCustomAbilities {
 			`).join("");
 
 			selectedContainer.querySelectorAll(".custom-abilities__grants-pill-remove").forEach(btn => {
-				btn.addEventListener("click", (e) => {
+				btn.addEventListener("click", (/** @type {*} */ e) => {
 					e.preventDefault();
 					const itemToRemove = btn.dataset.item;
 					grants.proficiencies[type] = grants.proficiencies[type].filter(i => i !== itemToRemove);
@@ -2808,7 +2809,7 @@ class CharacterSheetCustomAbilities {
 		};
 
 		addBtn?.addEventListener("click", addItem);
-		input?.addEventListener("keypress", (e) => {
+		input?.addEventListener("keypress", (/** @type {*} */ e) => {
 			if (e.key === "Enter") {
 				e.preventDefault();
 				addItem();
@@ -2823,7 +2824,7 @@ class CharacterSheetCustomAbilities {
 	 */
 	_renderGrantsTools (modal, grants, toolsList) {
 		// Populate datalist with tools
-		const datalist = modal.querySelector("#grants-tools-datalist");
+		const datalist = /** @type {*} */ (modal.querySelector("#grants-tools-datalist"));
 		if (datalist && toolsList.length) {
 			datalist.innerHTML = toolsList.map(t => `<option value="${t.name}">`).join("");
 		}
@@ -2836,7 +2837,7 @@ class CharacterSheetCustomAbilities {
 	 */
 	_renderGrantsLanguages (modal, grants, languagesList) {
 		// Populate datalist with languages (includes homebrew)
-		const datalist = modal.querySelector("#grants-languages-datalist");
+		const datalist = /** @type {*} */ (modal.querySelector("#grants-languages-datalist"));
 		if (datalist && languagesList.length) {
 			datalist.innerHTML = languagesList.map(l => `<option value="${l.name}">`).join("");
 		}
@@ -2867,9 +2868,9 @@ class CharacterSheetCustomAbilities {
 
 		// Specific weapons input - filter out category grants for display
 		const weaponCategories = ["simple", "martial", "firearms"];
-		const specificWeaponsContainer = modal.querySelector("#grants-weapons-selected");
-		const input = modal.querySelector("#grants-weapons-input");
-		const addBtn = modal.querySelector("#grants-weapons-add");
+		const specificWeaponsContainer = /** @type {*} */ (modal.querySelector("#grants-weapons-selected"));
+		const input = /** @type {*} */ (modal.querySelector("#grants-weapons-input"));
+		const addBtn = /** @type {*} */ (modal.querySelector("#grants-weapons-add"));
 
 		const renderSpecific = () => {
 			const specificWeapons = grants.proficiencies.weapons.filter(w => !weaponCategories.includes(w.toLowerCase()));
@@ -2881,7 +2882,7 @@ class CharacterSheetCustomAbilities {
 			`).join("");
 
 			specificWeaponsContainer.querySelectorAll(".custom-abilities__grants-pill-remove").forEach(btn => {
-				btn.addEventListener("click", (e) => {
+				btn.addEventListener("click", (/** @type {*} */ e) => {
 					e.preventDefault();
 					const itemToRemove = btn.dataset.item;
 					grants.proficiencies.weapons = grants.proficiencies.weapons.filter(i => i !== itemToRemove);
@@ -2903,7 +2904,7 @@ class CharacterSheetCustomAbilities {
 		};
 
 		addBtn?.addEventListener("click", addSpecific);
-		input?.addEventListener("keypress", (e) => {
+		input?.addEventListener("keypress", (/** @type {*} */ e) => {
 			if (e.key === "Enter") {
 				e.preventDefault();
 				addSpecific();
@@ -2938,11 +2939,11 @@ class CharacterSheetCustomAbilities {
 	 * Render optional features grant section with improved UI
 	 */
 	_renderGrantsFeatures (modal, grants, allOptionalFeatures) {
-		const typeFilter = modal.querySelector("#grants-feature-type-filter");
-		const sourceFilter = modal.querySelector("#grants-feature-source-filter");
-		const searchInput = modal.querySelector("#grants-feature-search");
-		const listContainer = modal.querySelector("#grants-feature-list");
-		const selectedContainer = modal.querySelector("#grants-feature-selected");
+		const typeFilter = /** @type {*} */ (modal.querySelector("#grants-feature-type-filter"));
+		const sourceFilter = /** @type {*} */ (modal.querySelector("#grants-feature-source-filter"));
+		const searchInput = /** @type {*} */ (modal.querySelector("#grants-feature-search"));
+		const listContainer = /** @type {*} */ (modal.querySelector("#grants-feature-list"));
+		const selectedContainer = /** @type {*} */ (modal.querySelector("#grants-feature-selected"));
 
 		// Build dynamic type options including homebrew
 		const typeSet = new Set();
@@ -3037,7 +3038,7 @@ class CharacterSheetCustomAbilities {
 
 			// Bind add buttons
 			listContainer.querySelectorAll(".custom-abilities__grants-add-btn").forEach(btn => {
-				btn.addEventListener("click", (e) => {
+				btn.addEventListener("click", (/** @type {*} */ e) => {
 					e.preventDefault();
 					const item = btn.closest(".custom-abilities__grants-item");
 					const name = item.dataset.name;
@@ -3083,7 +3084,7 @@ class CharacterSheetCustomAbilities {
 
 			// Bind remove buttons
 			selectedContainer.querySelectorAll(".custom-abilities__grants-remove-btn").forEach(btn => {
-				btn.addEventListener("click", (e) => {
+				btn.addEventListener("click", (/** @type {*} */ e) => {
 					e.preventDefault();
 					const item = btn.closest(".custom-abilities__grants-selected-item");
 					const name = item.dataset.name;
@@ -3159,8 +3160,8 @@ class CharacterSheetCustomAbilities {
 	 * Render defensive traits section (resistances, immunities, vulnerabilities, condition immunities)
 	 * @param {Element} modal - The modal element
 	 * @param {object} defensiveTraits - The defensive traits object
-	 * @param {string[]} damageTypes - List of damage types
-	 * @param {string[]} conditions - List of condition names
+	 * @param {*} damageTypes - List of damage types
+	 * @param {*} conditions - List of condition names (or `{name, source}` objects)
 	 */
 	_renderDefensiveTraits (modal, defensiveTraits, damageTypes, conditions) {
 		// Render damage type pills for resistances
@@ -3216,8 +3217,8 @@ class CharacterSheetCustomAbilities {
 	 */
 	_renderDamageTypePills (modal, containerSelector, customInputSelector, addBtnSelector, countSelector, selectedTypes, allTypes, traitType) {
 		const container = modal.querySelector(containerSelector);
-		const customInput = modal.querySelector(customInputSelector);
-		const addBtn = modal.querySelector(addBtnSelector);
+		const customInput = /** @type {*} */ (modal.querySelector(customInputSelector));
+		const addBtn = /** @type {*} */ (modal.querySelector(addBtnSelector));
 
 		if (!container) return;
 
@@ -3290,8 +3291,8 @@ class CharacterSheetCustomAbilities {
 	 */
 	_renderConditionImmunityPills (modal, containerSelector, customInputSelector, addBtnSelector, countSelector, selectedConditions, allConditions) {
 		const container = modal.querySelector(containerSelector);
-		const customInput = modal.querySelector(customInputSelector);
-		const addBtn = modal.querySelector(addBtnSelector);
+		const customInput = /** @type {*} */ (modal.querySelector(customInputSelector));
+		const addBtn = /** @type {*} */ (modal.querySelector(addBtnSelector));
 
 		if (!container) return;
 
@@ -3343,7 +3344,7 @@ class CharacterSheetCustomAbilities {
 		}).join("");
 
 		// Bind pill click handlers
-		container.querySelectorAll(".custom-abilities__defensive-pill").forEach(pill => {
+		container.querySelectorAll(".custom-abilities__defensive-pill").forEach((/** @type {*} */ pill) => {
 			pill.addEventListener("click", () => {
 				const cond = pill.dataset.condition;
 				const idx = selectedConditions.findIndex(c => c.toLowerCase() === cond.toLowerCase());
