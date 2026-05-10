@@ -1615,6 +1615,7 @@ export class CharacterSheetPlayMode {
 		row.addEventListener("contextmenu", (e) => {
 			e.preventDefault();
 			const spellIsFav = this._isFavorite("spell", spell.name);
+			/** @type {Array<*>} */
 			const menuItems = [
 				{label: spell.name, icon: "✨", disabled: true},
 				{separator: true},
@@ -1724,6 +1725,7 @@ export class CharacterSheetPlayMode {
 			row.addEventListener("contextmenu", (e) => {
 				e.preventDefault();
 				const featIsFav = this._isFavorite("feature", feature.id || feature.name);
+				/** @type {Array<*>} */
 				const menuItems = [
 					{label: feature.name, icon: "⚡", disabled: true},
 					{separator: true},
@@ -2022,7 +2024,7 @@ export class CharacterSheetPlayMode {
 				(byLevel[lvl] = byLevel[lvl] || []).push(s);
 			});
 
-			Object.keys(byLevel).sort((a, b) => a - b).forEach(lvl => {
+			Object.keys(byLevel).sort((a, b) => Number(a) - Number(b)).forEach(lvl => {
 				const header = this._ce("div", "pm-card__header", spellsContainer);
 				const title = this._ce("span", "pm-card__title", header);
 				title.textContent = lvl === "0" ? "Cantrips" : `Level ${lvl}`;
