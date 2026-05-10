@@ -2,6 +2,10 @@
  * Character Sheet Rest Handler
  * Manages short rest, long rest, and recovery mechanics
  */
+
+// Project globals — typed via globalThis cast for TypeScript checkJs
+const {e_, ee} = /** @type {*} */ (globalThis);
+
 class CharacterSheetRest {
 	constructor (page) {
 		this._page = page;

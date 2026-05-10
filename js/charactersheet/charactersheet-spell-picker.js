@@ -3,6 +3,10 @@
  * Reusable spell selection UI used by both LevelUp and QuickBuild modules.
  * Single source of truth for all spell-picking UIs (known spells, cantrips, wizard spellbook).
  */
+
+// Project globals — typed via globalThis cast for TypeScript checkJs
+const {e_, ee} = /** @type {*} */ (globalThis);
+
 class CharacterSheetSpellPicker {
 	// ==========================================
 	// Progress Header & Summary Panel Helpers
@@ -207,6 +211,7 @@ class CharacterSheetSpellPicker {
 	 * @param {Array} [opts.preSelectedSpells] - Pre-selected leveled spells
 	 * @param {Array} [opts.preSelectedCantrips] - Pre-selected cantrips
 	 * @param {Array} [opts.additionalClassNames] - Additional class names whose spell lists to include (e.g. ["Cleric"] for Divine Soul)
+	 * @param {string} [opts.subclass] - Subclass short name (used for spell-source filtering, e.g. Divine Soul)
 	 * @returns {HTMLElement} The section element
 	 */
 	static renderKnownSpellPicker (opts) {
@@ -346,7 +351,7 @@ class CharacterSheetSpellPicker {
 			rarityFilter = e_({outer: `
 				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 					<option value="">All Rarities</option>
-					${rarities.map(r => `<option value="${r}">${r.toTitleCase()}</option>`).join("")}
+					${rarities.map(r => `<option value="${r}">${(/** @type {*} */ (r)).toTitleCase()}</option>`).join("")}
 				</select>
 			`});
 			filterSelects.append(rarityFilter);
@@ -357,7 +362,7 @@ class CharacterSheetSpellPicker {
 			legalityFilter = e_({outer: `
 				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 					<option value="">All Legalities</option>
-					${legalities.map(l => `<option value="${l}">${l.toTitleCase()}</option>`).join("")}
+					${legalities.map(l => `<option value="${l}">${(/** @type {*} */ (l)).toTitleCase()}</option>`).join("")}
 				</select>
 			`});
 			filterSelects.append(legalityFilter);
@@ -492,6 +497,8 @@ class CharacterSheetSpellPicker {
 	 * @param {Function} opts.onSelect - Callback(spells[]) on selection change
 	 * @param {Function} [opts.getHoverLink] - Optional hover link builder
 	 * @param {Array} [opts.preSelectedSpells] - Pre-selected spells
+	 * @param {string} [opts.className] - Class name (for display / spell-source filtering)
+	 * @param {string} [opts.subclass] - Subclass short name (for display / spell-source filtering)
 	 * @returns {HTMLElement} The section element
 	 */
 	static renderWizardSpellbookPicker (opts) {
@@ -606,7 +613,7 @@ class CharacterSheetSpellPicker {
 			rarityFilter = e_({outer: `
 				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 					<option value="">All Rarities</option>
-					${rarities.map(r => `<option value="${r}">${r.toTitleCase()}</option>`).join("")}
+					${rarities.map(r => `<option value="${r}">${(/** @type {*} */ (r)).toTitleCase()}</option>`).join("")}
 				</select>
 			`});
 			filterSelects.append(rarityFilter);
@@ -617,7 +624,7 @@ class CharacterSheetSpellPicker {
 			legalityFilter = e_({outer: `
 				<select class="ve-form-control ve-input-sm" style="width: auto; min-width: 100px;">
 					<option value="">All Legalities</option>
-					${legalities.map(l => `<option value="${l}">${l.toTitleCase()}</option>`).join("")}
+					${legalities.map(l => `<option value="${l}">${(/** @type {*} */ (l)).toTitleCase()}</option>`).join("")}
 				</select>
 			`});
 			filterSelects.append(legalityFilter);

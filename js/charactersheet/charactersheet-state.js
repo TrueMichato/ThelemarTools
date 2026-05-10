@@ -521,7 +521,7 @@ class SpellGrantParser {
 		const cleanRef = spellRef.replace(/#c$/, "");
 		const [name, source] = cleanRef.split("|");
 		return {
-			name: name.toTitleCase(),
+			name: (/** @type {*} */ (name)).toTitleCase(),
 			source: source?.toUpperCase() || Parser.SRC_PHB,
 			...additionalProps,
 			// Place after spread so cantrip suffix always wins over additionalProps
@@ -556,7 +556,7 @@ class SpellGrantParser {
 			const recharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
 
 			spells.push({
-				name: spellName.toTitleCase(),
+				name: (/** @type {*} */ (spellName)).toTitleCase(),
 				source,
 				innate: isAtWill || isOnce,
 				atWill: isAtWill,
@@ -4062,6 +4062,9 @@ class CharacterSheetState {
 	setCharacterName (name) { this.setName(name); }
 	getCharacterName () { return this.getName(); }
 
+	/**
+	 * @param {*} [arg]
+	 */
 	setBasicInfo ({name, race, background, subrace} = {}) {
 		if (name !== undefined) this.setName(name);
 		if (race !== undefined) this.setRace(race, subrace);
@@ -4694,7 +4697,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	shouldGrantBothAsiAndFeat (newCharacterLevel) {
-		if (!this.getSettings()?.thelemar_asiFeat) return false;
+		if (!(/** @type {*} */ (this.getSettings()))?.thelemar_asiFeat) return false;
 		return newCharacterLevel === 4;
 	}
 
@@ -4894,6 +4897,8 @@ class CharacterSheetState {
 	 * @param {Array} [entry.choices.expertise] - Expertise choices
 	 * @param {Array<string>} [entry.choices.combatTraditions] - Combat tradition codes
 	 * @param {Array<string>} [entry.choices.weaponMasteries] - Weapon mastery keys (name|source)
+	 * @param {boolean} [entry.complete] - Whether this level has been completed
+	 * @param {number} [entry.timestamp] - Epoch ms when the level was recorded
 	 */
 	recordLevelChoice (entry) {
 		if (!entry.level || !entry.class) {
@@ -5005,9 +5010,9 @@ class CharacterSheetState {
 	 * @returns {object} Object with sense names and ranges
 	 */
 	getSenses () {
-		const senseMods = this._data.customModifiers.senses || {};
-		const baseSenses = this._data.senses || {};
-		const itemSenses = this._data.itemSenses || {};
+		const senseMods = /** @type {*} */ (this._data.customModifiers.senses || {});
+		const baseSenses = /** @type {*} */ (this._data.senses || {});
+		const itemSenses = /** @type {*} */ (this._data.itemSenses || {});
 
 		// Also check named modifiers for sense bonuses
 		const getNamedModifierBonus = (senseType) => {
@@ -5036,8 +5041,8 @@ class CharacterSheetState {
 	 * @returns {number} The range in feet
 	 */
 	getSense (sense) {
-		const senseMods = this._data.customModifiers.senses || {};
-		const baseSenses = this._data.senses || {};
+		const senseMods = /** @type {*} */ (this._data.customModifiers.senses || {});
+		const baseSenses = /** @type {*} */ (this._data.senses || {});
 
 		// Get bonus from named modifiers
 		const namedBonus = this._data.namedModifiers
@@ -5058,7 +5063,7 @@ class CharacterSheetState {
 	 * @param {number} range - The range in feet
 	 */
 	setSense (sense, range) {
-		if (!this._data.senses) this._data.senses = {};
+		if (!this._data.senses) this._data.senses = /** @type {*} */ ({});
 		this._data.senses[sense] = range;
 	}
 
@@ -6185,7 +6190,7 @@ class CharacterSheetState {
 
 			if (!isMonkUnarmored && !formulaForbidsShield) {
 				// Shield AC = base AC from item (default 2) + magic enhancement bonus
-				const shield = this._data.ac.shield;
+				const shield = /** @type {*} */ (this._data.ac.shield);
 				const baseAc = (typeof shield === "object" ? (shield.ac ?? 2) : 2);
 				const magicBonus = (typeof shield === "object" ? (shield.bonus ?? 0) : 0);
 				ac += baseAc + magicBonus;
@@ -6450,7 +6455,7 @@ class CharacterSheetState {
 				&& (usedFormula.base || 10) + (usedFormula.addDex ? dexMod : 0) > (10 + dexMod);
 
 			if (!isMonkUnarmored && !formulaForbidsShield) {
-				const shield = this._data.ac.shield;
+				const shield = /** @type {*} */ (this._data.ac.shield);
 				const baseShieldBonus = (typeof shield === "object") ? (shield.ac ?? 2) : 2;
 				const magicBonus = (typeof shield === "object") ? (shield.bonus ?? 0) : 0;
 				const shieldName = (typeof shield === "object") ? (shield.name || "Shield") : "Shield";
@@ -6786,14 +6791,14 @@ class CharacterSheetState {
 
 	// Item bonuses from equipped/attuned magic items
 	setItemBonuses (bonuses) {
-		this._data.itemBonuses = bonuses || {};
+		this._data.itemBonuses = bonuses || /** @type {*} */ ({});
 		// Store manual overrides so _recalculateItemBonuses merges rather than overwrites
 		this._data._manualItemBonuses = {...(bonuses || {})};
 	}
 	getItemBonuses () { return this._data.itemBonuses || {}; }
 	getItemBonus (type) { return this._data.itemBonuses?.[type] || 0; }
 	setItemBonus (type, value) {
-		if (!this._data.itemBonuses) this._data.itemBonuses = {};
+		if (!this._data.itemBonuses) this._data.itemBonuses = /** @type {*} */ ({});
 		this._data.itemBonuses[type] = value || 0;
 		if (!this._data._manualItemBonuses) this._data._manualItemBonuses = {};
 		this._data._manualItemBonuses[type] = value || 0;
@@ -6804,7 +6809,7 @@ class CharacterSheetState {
 	 * Called when items are added, removed, equipped, or unequipped
 	 */
 	_recalculateItemBonuses () {
-		if (!this._data.itemBonuses) this._data.itemBonuses = {};
+		if (!this._data.itemBonuses) this._data.itemBonuses = /** @type {*} */ ({});
 		const manual = this._data._manualItemBonuses || {};
 
 		// Aggregate Ki save DC bonus (take highest from all items)
@@ -7538,7 +7543,7 @@ class CharacterSheetState {
 	/**
 	 * Get spellcasting info for the character - whether they use spells known or prepared
 	 * Reads progression directly from class data when available
-	 * @returns {{type: string, max: number, cantripsKnown: number}} or null if no spellcasting
+	 * @returns {*} Spellcasting summary or null if no spellcasting
 	 */
 	getSpellcastingInfo () {
 		const classes = this._data.classes || [];
@@ -7607,7 +7612,7 @@ class CharacterSheetState {
 	/**
 	 * Get spellcasting info for a single class
 	 * @param {Object} cls - Class entry with name, level, subclass, and spell progression arrays
-	 * @returns {{type: string, max: number, cantripsKnown: number, spellsKnownMax?: number, preparedMax?: number, hasFullAccess?: boolean}|null}
+	 * @returns {*} Spellcasting summary, or null if non-caster
 	 */
 	_getClassSpellcastingInfo (cls) {
 		const className = cls.name;
@@ -12426,7 +12431,7 @@ class CharacterSheetState {
 								// Unearthly Recovery (level 18)
 								if (level >= 18) {
 									calculations.hasUnearthlyRecovery = true;
-									calculations.unearthlyRecoveryHp = Math.floor(this.getMaxHpValue?.() / 2) || level;
+									calculations.unearthlyRecoveryHp = Math.floor((/** @type {*} */ (this).getMaxHpValue?.() || 0) / 2) || level;
 								}
 								break;
 							}
@@ -16070,7 +16075,7 @@ class CharacterSheetState {
 			// Rampage: On reducing creature to 0 HP with melee attack
 			// Bonus action to move half speed and make bite attack
 			calculations.hasRampage = true;
-			calculations.rampageMoveDistance = Math.floor(this.getSpeed("walk") / 2);
+			calculations.rampageMoveDistance = Math.floor(Number(this.getSpeed("walk")) / 2);
 			// Bite attack: 1d6 + STR piercing
 			const strMod = this.getAbilityMod("str");
 			calculations.rampageBiteDamage = "1d6";
@@ -18118,7 +18123,7 @@ class CharacterSheetState {
 
 	_setClassFeatureSense (sense, range) {
 		if (!this._data._classFeatureSenses) this._data._classFeatureSenses = {};
-		if (!this._data.senses) this._data.senses = {};
+		if (!this._data.senses) this._data.senses = /** @type {*} */ ({});
 		const current = this._data.senses[sense] || 0;
 		if (range > current) {
 			this._data.senses[sense] = range;
@@ -18179,9 +18184,9 @@ class CharacterSheetState {
 
 	/**
 	 * Get all cursed items in inventory
-	 * @param {object} options - Options
-	 * @param {boolean} options.equippedOnly - Only return equipped cursed items
-	 * @param {boolean} options.attunedOnly - Only return attuned cursed items
+	 * @param {object} [options] - Options
+	 * @param {boolean} [options.equippedOnly] - Only return equipped cursed items
+	 * @param {boolean} [options.attunedOnly] - Only return attuned cursed items
 	 * @returns {Array} Cursed items
 	 */
 	getCursedItems (options = {}) {
@@ -18205,9 +18210,9 @@ class CharacterSheetState {
 
 	/**
 	 * Get all sentient items in inventory
-	 * @param {object} options - Options
-	 * @param {boolean} options.equippedOnly - Only return equipped sentient items
-	 * @param {boolean} options.attunedOnly - Only return attuned sentient items
+	 * @param {object} [options] - Options
+	 * @param {boolean} [options.equippedOnly] - Only return equipped sentient items
+	 * @param {boolean} [options.attunedOnly] - Only return attuned sentient items
 	 * @returns {Array} Sentient items
 	 */
 	getSentientItems (options = {}) {
@@ -18242,9 +18247,9 @@ class CharacterSheetState {
 	/**
 	 * Get items filtered by activation type
 	 * @param {string} type - Activation type: "action", "bonus", "reaction", "none", "minute", "hour"
-	 * @param {object} options - Filter options
-	 * @param {boolean} options.equippedOnly - Only return equipped items
-	 * @param {boolean} options.attunedOnly - Only return items that are attuned (if they require it)
+	 * @param {object} [options] - Filter options
+	 * @param {boolean} [options.equippedOnly] - Only return equipped items
+	 * @param {boolean} [options.attunedOnly] - Only return items that are attuned (if they require it)
 	 * @returns {Array} Items with matching activation type
 	 */
 	getItemsByActivationType (type, options = {}) {
@@ -18258,9 +18263,9 @@ class CharacterSheetState {
 
 	/**
 	 * Get all items that have activatable abilities
-	 * @param {object} options - Filter options
-	 * @param {boolean} options.equippedOnly - Only return equipped items
-	 * @param {boolean} options.activeOnly - Only return items that are active (equipped and attuned if required)
+	 * @param {object} [options] - Filter options
+	 * @param {boolean} [options.equippedOnly] - Only return equipped items
+	 * @param {boolean} [options.activeOnly] - Only return items that are active (equipped and attuned if required)
 	 * @returns {Array} Items with activation abilities
 	 */
 	getActivatableItems (options = {}) {
@@ -18312,9 +18317,9 @@ class CharacterSheetState {
 
 	/**
 	 * Get all items that have conditional bonuses
-	 * @param {object} options - Filter options
-	 * @param {boolean} options.equippedOnly - Only return equipped items
-	 * @param {boolean} options.activeOnly - Only return items that are active (equipped and attuned if required)
+	 * @param {object} [options] - Filter options
+	 * @param {boolean} [options.equippedOnly] - Only return equipped items
+	 * @param {boolean} [options.activeOnly] - Only return items that are active (equipped and attuned if required)
 	 * @returns {Array} Items with conditional bonuses
 	 */
 	getItemsWithConditionalBonuses (options = {}) {
@@ -18758,7 +18763,7 @@ class CharacterSheetState {
 			if (equipped && item.type === "armor") {
 				if (item.acBonus !== undefined) {
 					// Shield-type item (has bonus instead of base AC)
-					this._data.ac.shield = {ac: item.ac ?? 2, bonus: item.acBonus, name: item.name};
+					this._data.ac.shield = /** @type {*} */ ({ac: item.ac ?? 2, bonus: item.acBonus, name: item.name});
 				} else if (item.ac !== undefined) {
 					// Body armor
 					const armorType = item.armorType || this._inferArmorType(item);
@@ -19292,7 +19297,7 @@ class CharacterSheetState {
 			if (item?.type === "armor" || item?.type === "M" || item?.type === "R" || item?.ac !== undefined || item?.acBonus !== undefined) {
 				if (item.acBonus !== undefined) {
 					// Shield
-					this._data.ac.shield = {ac: item.ac ?? 2, bonus: item.acBonus, name: item.name};
+					this._data.ac.shield = /** @type {*} */ ({ac: item.ac ?? 2, bonus: item.acBonus, name: item.name});
 				} else if (item.ac !== undefined) {
 					// Body armor
 					const armorType = item.armorType || this._inferArmorType(item);
@@ -21098,7 +21103,7 @@ class CharacterSheetState {
 	 */
 	addTemporaryAttack (attack) {
 		if (!this._data.temporaryAttacks) this._data.temporaryAttacks = [];
-		const id = attack.id || CryptUtil.uid();
+		const id = (/** @type {*} */ (attack)).id || CryptUtil.uid();
 		this._data.temporaryAttacks.push({
 			...attack,
 			id,
@@ -21562,13 +21567,13 @@ class CharacterSheetState {
 
 	setSetting (key, value) {
 		if (!this._data.settings) {
-			this._data.settings = {
+			this._data.settings = /** @type {*} */ ({
 				exhaustionRules: "2024",
 				allowedSources: null,
 				includeCoreSpellsForHomebrew: true,
 				allowExoticLanguages: true,
 				showAllOptFeatureVersions: false,
-			};
+			});
 		}
 		this._data.settings[key] = value;
 	}
@@ -21578,7 +21583,7 @@ class CharacterSheetState {
 	}
 
 	setExhaustionRules (rules) {
-		if (!this._data.settings) this._data.settings = {exhaustionRules: "2024", allowedSources: null, includeCoreSpellsForHomebrew: true, allowExoticLanguages: true};
+		if (!this._data.settings) this._data.settings = /** @type {*} */ ({exhaustionRules: "2024", allowedSources: null, includeCoreSpellsForHomebrew: true, allowExoticLanguages: true});
 		this._data.settings.exhaustionRules = rules;
 		// Clamp current exhaustion to new max when switching rules
 		const max = this.getMaxExhaustion();
@@ -21638,7 +21643,7 @@ class CharacterSheetState {
 	}
 
 	setAllowedSources (sources) {
-		if (!this._data.settings) this._data.settings = {exhaustionRules: "2024", allowedSources: null, includeCoreSpellsForHomebrew: true, allowExoticLanguages: true, prioritySources: null};
+		if (!this._data.settings) this._data.settings = /** @type {*} */ ({exhaustionRules: "2024", allowedSources: null, includeCoreSpellsForHomebrew: true, allowExoticLanguages: true, prioritySources: null});
 		this._data.settings.allowedSources = sources?.length ? sources : null;
 	}
 
@@ -21655,7 +21660,7 @@ class CharacterSheetState {
 	}
 
 	setPrioritySources (sources) {
-		if (!this._data.settings) this._data.settings = {exhaustionRules: "2024", allowedSources: null, includeCoreSpellsForHomebrew: true, allowExoticLanguages: true, prioritySources: null};
+		if (!this._data.settings) this._data.settings = /** @type {*} */ ({exhaustionRules: "2024", allowedSources: null, includeCoreSpellsForHomebrew: true, allowExoticLanguages: true, prioritySources: null});
 		this._data.settings.prioritySources = sources?.length ? sources : null;
 	}
 
@@ -21673,14 +21678,14 @@ class CharacterSheetState {
 
 	setSectionLayout (layout) {
 		if (!this._data.settings) {
-			this._data.settings = {
+			this._data.settings = /** @type {*} */ ({
 				exhaustionRules: "2024",
 				allowedSources: null,
 				includeCoreSpellsForHomebrew: true,
 				allowExoticLanguages: true,
 				prioritySources: null,
 				sectionLayout: null,
-			};
+			});
 		}
 		this._data.settings.sectionLayout = layout && Object.keys(layout).length ? layout : null;
 	}
@@ -21693,7 +21698,7 @@ class CharacterSheetState {
 
 	setBackgroundTheme (theme) {
 		if (!this._data.settings) {
-			this._data.settings = {
+			this._data.settings = /** @type {*} */ ({
 				exhaustionRules: "2024",
 				allowedSources: null,
 				includeCoreSpellsForHomebrew: true,
@@ -21701,7 +21706,7 @@ class CharacterSheetState {
 				prioritySources: null,
 				sectionLayout: null,
 				backgroundTheme: "default",
-			};
+			});
 		}
 		this._data.settings.backgroundTheme = theme || "default";
 	}
@@ -22545,7 +22550,7 @@ class CharacterSheetState {
 
 			// Try to resolve the full spell object for metadata enrichment
 			const fullSpell = allSpells?.length
-				? CharacterSheetClassUtils._resolveSpellReference(`${spell.name}|${spell.source}`, allSpells)
+				? (/** @type {*} */ (CharacterSheetClassUtils))._resolveSpellReference(`${spell.name}|${spell.source}`, allSpells)
 				: null;
 
 			// Add as innate spell if marked as such
@@ -24082,7 +24087,7 @@ class CharacterSheetState {
 		}) ?? [];
 
 		const monkLevel = this.getClassLevel("Monk");
-		const kiDc = this.getKiSaveDc?.() || (8 + this.getProficiencyBonus() + this.getAbilityMod("wis"));
+		const kiDc = (/** @type {*} */ (this)).getKiSaveDc?.() || (8 + this.getProficiencyBonus() + this.getAbilityMod("wis"));
 
 		return methods.map(m => ({
 			name: m.name,
@@ -24098,7 +24103,7 @@ class CharacterSheetState {
 	 * @returns {number|null} The save DC, or null if method not found
 	 */
 	getPreciseStrikeDc (methodName) {
-		const kiDc = this.getKiSaveDc?.() || (8 + this.getProficiencyBonus() + this.getAbilityMod("wis"));
+		const kiDc = (/** @type {*} */ (this)).getKiSaveDc?.() || (8 + this.getProficiencyBonus() + this.getAbilityMod("wis"));
 		const effects = this._getPreciseStrikeMethodEffects(methodName, 0, kiDc);
 		return effects.dc;
 	}
@@ -24889,7 +24894,7 @@ class CharacterSheetState {
 		if (max === "Unlimited") {
 			this._data.focusPool.current = value;
 		} else {
-			this._data.focusPool.current = Math.max(0, Math.min(value, max || 0));
+			this._data.focusPool.current = Math.max(0, Math.min(value, Number(max) || 0));
 		}
 	}
 
@@ -24954,7 +24959,7 @@ class CharacterSheetState {
 
 		this._ensureFocusPoolInitialized();
 		const max = this.getFocusPoolMax();
-		this._data.focusPool.current = max === "Unlimited" ? 99 : (max || 0);
+		this._data.focusPool.current = max === "Unlimited" ? 99 : (Number(max) || 0);
 		this._data.focusPool.lucidFocusActive = false;
 	}
 
@@ -24980,7 +24985,7 @@ class CharacterSheetState {
 		this._ensureFocusPoolInitialized();
 		if (!this._data.focusPool._initialized && this.hasFocusPool()) {
 			const max = this.getFocusPoolMax();
-			this._data.focusPool.current = max === "Unlimited" ? 99 : (max || 0);
+			this._data.focusPool.current = max === "Unlimited" ? 99 : (Number(max) || 0);
 			this._data.focusPool._initialized = true;
 		}
 	}
@@ -25918,24 +25923,31 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Add a new custom ability
-	 * @param {object} opts - Ability options
-	 * @param {string} opts.name - Ability name (required)
-	 * @param {string} [opts.description] - Description text
-	 * @param {string} [opts.icon] - Emoji icon (default: "⚡")
-	 * @param {string} [opts.category] - Category ID (default: "homebrew")
-	 * @param {string} [opts.mode] - "passive", "toggleable", or "limited" (default: "passive")
-	 * @param {Array} [opts.effects] - Array of effect objects
-	 * @param {object} [opts.uses] - For limited mode: {max, recharge: "short"|"long"}
-	 * @param {string} [opts.activationAction] - For non-passive: "action", "bonus", "reaction", "free"
-	 * @param {object} [opts.grants] - Granted spells, proficiencies, and features
-	 * @param {Array} [opts.grants.spells] - [{name, source, level, atWill, uses, recharge}]
-	 * @param {object} [opts.grants.proficiencies] - {skills:[], tools:[], weapons:[], armor:[], languages:[]}
-	 * @param {Array} [opts.grants.features] - [{name, source, featureType}] - Optional features like invocations
+	 * Add a new custom ability.
+	 *
+	 * `opts` shape:
+	 *   - `name` {string} (required) - Ability name
+	 *   - `description` {string} - Description text
+	 *   - `icon` {string} - Emoji icon (default: "⚡")
+	 *   - `category` {string} - Category ID (default: "homebrew")
+	 *   - `mode` {"passive"|"toggleable"|"limited"} (default: "passive")
+	 *   - `effects` {Array} - Effect objects
+	 *   - `uses` {object} - For limited mode: {max, recharge: "short"|"long"}
+	 *   - `activationAction` {"action"|"bonus"|"reaction"|"free"} - For non-passive
+	 *   - `grants` {object} - Granted spells, proficiencies, and features
+	 *   - `grants.spells` {Array} - [{name, source, level, atWill, uses, recharge}]
+	 *   - `grants.proficiencies` {object} - {skills:[], tools:[], weapons:[], armor:[], languages:[]}
+	 *   - `grants.features` {Array} - [{name, source, featureType}] - Optional features like invocations
+	 *   - `defensiveTraits` {object} - Defensive traits (resistances/immunities/vulns)
+	 *   - `duration` {string} - Active duration (e.g., "1 minute")
+	 *   - `concentration` {boolean} - Whether the ability requires concentration
+	 *   - `resourceCost` {*} - For toggleable abilities
+	 *   - `resourceSource` {*} - For limited abilities ("self" | "linked" | "new")
+	 * @param {*} [opts] - Ability options
 	 * @returns {string} The new ability's ID
 	 */
 	addCustomAbility (opts = {}) {
-		const ability = {
+		const ability = /** @type {*} */ ({
 			id: `ca_${CryptUtil.uid()}`,
 			name: opts.name || "New Ability",
 			description: opts.description || "",
@@ -25952,7 +25964,7 @@ class CharacterSheetState {
 			resourceCost: opts.resourceCost || null, // For toggleable abilities
 			resourceSource: opts.resourceSource || null, // For limited abilities
 			createdAt: Date.now(),
-		};
+		});
 
 		// Handle limited mode uses based on resource source type
 		if (opts.mode === "limited") {
@@ -27299,8 +27311,8 @@ class CharacterSheetState {
 	/**
 	 * Get enabled named modifiers of a specific type
 	 * @param {string} type - The modifier type (e.g., "ac", "save:str", "skill:all")
-	 * @param {object} options - Options for filtering
-	 * @param {boolean} options.includeConditional - Include conditional modifiers (default: true)
+	 * @param {object} [options] - Options for filtering
+	 * @param {boolean} [options.includeConditional] - Include conditional modifiers (default: true)
 	 * @returns {Array} Array of enabled modifier objects matching the type
 	 */
 	getNamedModifiersByType (type, options = {}) {
@@ -28125,12 +28137,12 @@ class CharacterSheetState {
 		if (agg.removeAdvantage) hasAdvantage = false;
 		if (agg.removeDisadvantage) hasDisadvantage = false;
 
-		return {
+		return /** @type {*} */ ({
 			advantage: hasAdvantage && !hasDisadvantage,
 			disadvantage: hasDisadvantage && !hasAdvantage,
 			cancelled: hasAdvantage && hasDisadvantage,
 			sources: agg.sources,
-		};
+		});
 	}
 
 	/**
@@ -28365,7 +28377,7 @@ class CharacterSheetState {
 
 		// Check if this weapon is in the character's mastered weapons list
 		const masteredName = weaponKey.split("|")[0];
-		if (!this.hasWeaponMastery(masteredName)) return null;
+		if (!this.hasWeaponMastery(masteredName, undefined)) return null;
 
 		// Get the mastery effect from the weapon data
 		const masteryName = attack.masteryProperty || null;
@@ -32669,6 +32681,10 @@ class CharacterSheetState {
 	 * @param {Array} [companionData.actions] - Action entries [{name, entries}]
 	 * @param {Array} [companionData.reactions] - Reaction entries [{name, entries}]
 	 * @param {Array} [companionData.bonusActions] - Bonus action entries [{name, entries}]
+	 * @param {number} [companionData.profBonus] - Proficiency bonus (defaults to character's PB)
+	 * @param {string} [companionData.alignment] - Creature alignment (e.g., "neutral evil")
+	 * @param {boolean} [companionData.active] - Whether the companion is currently active
+	 * @param {Array} [companionData.attacks] - Quick-reference attack data
 	 * @param {string[]} [companionData.saveProficiencies] - Abilities with save prof
 	 * @param {object} [companionData.skillProficiencies] - {perception: 1, stealth: 2, ...} (1=prof, 2=expert)
 	 * @param {string[]} [companionData.resistances] - Damage resistances
@@ -34228,11 +34244,11 @@ class CharacterSheetState {
 	 */
 	getCastableActiveMetamagics ({spell = null, spellData = null, slotLevel = null} = {}) {
 		const currentSp = this.getSorceryPoints().current;
-		const effectiveLevel = slotLevel ?? spell?.level ?? 0;
+		const effectiveLevel = slotLevel ?? (/** @type {*} */ (spell))?.level ?? 0;
 
 		return this.getKnownActiveMetamagics().map(meta => {
 			const cost = this.getMetamagicCost(meta.key, effectiveLevel);
-			const availability = this._getActiveMetamagicAvailability(meta.key, {spell, spellData, slotLevel: effectiveLevel});
+			const availability = this._getActiveMetamagicAvailability(meta.key, /** @type {*} */ ({spell, spellData, slotLevel: effectiveLevel}));
 			const isAffordable = cost != null && currentSp >= cost;
 			const unavailableReason = availability.unavailableReason
 				|| (!isAffordable ? `Requires ${cost} sorcery point${cost === 1 ? "" : "s"} (${currentSp} available)` : null);
@@ -35860,7 +35876,7 @@ class CharacterSheetState {
 		// Handle condition application
 		if (parsed.conditions?.length > 0) {
 			// Determine if save was failed
-			const dc = caster.getSpellSaveDC();
+			const dc = caster.getSpellSaveDC(undefined);
 			const saveRoll = options.targetSaveRoll || 10;
 			const saveFailed = saveRoll < dc;
 
