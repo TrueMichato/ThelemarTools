@@ -1636,6 +1636,7 @@ class CharacterSheetFeatures {
 					);
 				}
 			} catch (e) {
+				// eslint-disable-next-line no-console
 				console.error("[CharSheet Features] Error creating feature link:", e);
 				featureNameHtml = feature.name;
 			}
