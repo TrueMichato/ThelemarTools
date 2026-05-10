@@ -2,61 +2,72 @@
  * Character Sheet Builder
  * Step-by-step character creation wizard
  */
-class CharacterSheetBuilder {
-	constructor (page) {
-		this._page = page;
-		this._state = page.getState();
-		this._currentStep = 1;
-		this._maxSteps = 7;
 
-		this._selectedRace = null;
-		this._selectedSubrace = null;
-		this._selectedClass = null;
-		this._selectedSubclass = null;
-		this._selectedBackground = null;
-		this._abilityMethod = "standard";
+// Project globals — destructured from globalThis so the TypeScript checkJs
+// language service has typed names to reference. Zero runtime impact.
+const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, CharacterSheetClassUtils} = /** @type {*} */ (globalThis);
+
+class CharacterSheetBuilder {
+	/**
+	 * @param {*} page
+	 */
+	constructor (page) {
+		/** @type {*} */ this._page = page;
+		/** @type {*} */ this._state = page.getState();
+		/** @type {number} */ this._currentStep = 1;
+		/** @type {number} */ this._maxSteps = 7;
+
+		/** @type {*} */ this._selectedRace = null;
+		/** @type {*} */ this._selectedSubrace = null;
+		/** @type {*} */ this._selectedClass = null;
+		/** @type {*} */ this._selectedSubclass = null;
+		/** @type {*} */ this._selectedBackground = null;
+		/** @type {string} */ this._abilityMethod = "standard";
 		// Initialize with null for standard array mode (user must assign scores)
-		this._abilityScores = {str: null, dex: null, con: null, int: null, wis: null, cha: null};
-		this._standardArrayPool = [15, 14, 13, 12, 10, 8]; // Initialize pool for standard array
-		this._pointBuyRemaining = 27;
-		this._selectedSkills = []; // For class skill proficiency choices
-		this._selectedExpertise = []; // For class expertise choices (Rogue, Bard)
-		this._selectedWeaponMasteries = []; // For weapon mastery choices (Fighter, Paladin, Ranger, Rogue)
-		this._selectedAbilityBonuses = {}; // For background ASI choices
-		this._selectedOptionalFeatures = {}; // For class optional features like invocations {featureType: [features]}
-		this._selectedToolProficiencies = []; // For background tool proficiency choices
-		this._selectedLanguages = []; // For background language choices
-		this._selectedClassFeatureLanguages = []; // For class feature language choices (like Deft Explorer)
-		this._selectedFeatureOptions = {}; // For class/subclass features with embedded options (like Specialties)
-		this._selectedFeatureSkillChoices = {}; // For specialty features that require skill/expertise choices
-		this._selectedRaceOptionalFeatures = {}; // For race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
-		this._selectedCombatTraditions = []; // For combat tradition proficiency choices (Thelemar homebrew)
-		this._selectedClassToolProficiencies = []; // For class tool proficiency choices (e.g., Monk artisan/instrument)
-		this._lastAppliedClassSnapshot = null; // Snapshot of what case 3 applied; used to undo on class change
-		this._selectedRacialSkills = []; // For racial skill proficiency choices (e.g., Elf)
-		this._selectedRacialTools = []; // For racial tool proficiency choices (e.g., Dwarf)
-		this._selectedRacialLanguages = {}; // For racial language proficiency choices, keyed by profIdx
-		this._selectedSubraceLanguages = []; // For subrace language proficiency choices (e.g., Hub Residence Trilingual)
-		this._selectedRacialAbilityChoices = {}; // For races with choose-based ASI (TGTT races)
-		this._selectedRacialAbilitySetIdx = {}; // For races with multiple ability options (VRGR lineage): which option is selected
-		this._selectedRacialSpells = []; // For racial spell choices (e.g., Child of the Empire cantrip)
-		this._selectedRacialSpellAbilities = {}; // For racial spell ability choices (e.g., Child of the Empire INT/WIS/CHA)
-		this._useTashasRules = false; // For Tasha's Custom Origin rules - reassign racial ASI
-		this._tashasAbilityBonuses = {}; // Stores custom ASI when using Tasha's rules
-		this._tashasSkillReplacements = []; // Stores replacement skill proficiencies when using Tasha's rules
-		this._tashasLanguageReplacements = []; // Stores replacement languages when using Tasha's rules
-		this._customBackground = null; // Stores custom background object
-		this._customBackgroundData = null; // Stores custom background form data
-		this._selectedKnownSpells = []; // For known-caster spell choices at level 1
-		this._selectedKnownCantrips = []; // For known-caster cantrip choices at level 1
-		this._selectedSpellbookSpells = []; // For Wizard spellbook spell choices at level 1
-		this._divineSoulAffinity = null; // Stored Divine Soul affinity choice for spell access and bonus spell
-		this._quickBuildTargetLevel = 1; // Target level for Quick Build integration
+		/** @type {Object<string, ?number>} */ this._abilityScores = {str: null, dex: null, con: null, int: null, wis: null, cha: null};
+		/** @type {number[]} */ this._standardArrayPool = [15, 14, 13, 12, 10, 8]; // Initialize pool for standard array
+		/** @type {number} */ this._pointBuyRemaining = 27;
+		/** @type {string[]} */ this._selectedSkills = []; // For class skill proficiency choices
+		/** @type {string[]} */ this._selectedExpertise = []; // For class expertise choices (Rogue, Bard)
+		/** @type {string[]} */ this._selectedWeaponMasteries = []; // For weapon mastery choices (Fighter, Paladin, Ranger, Rogue)
+		/** @type {Object<string, *>} */ this._selectedAbilityBonuses = {}; // For background ASI choices
+		/** @type {Object<string, *[]>} */ this._selectedOptionalFeatures = {}; // For class optional features like invocations {featureType: [features]}
+		/** @type {*[]} */ this._selectedToolProficiencies = []; // For background tool proficiency choices
+		/** @type {*[]} */ this._selectedLanguages = []; // For background language choices
+		/** @type {string[]} */ this._selectedClassFeatureLanguages = []; // For class feature language choices (like Deft Explorer)
+		/** @type {Object<string, *[]>} */ this._selectedFeatureOptions = {}; // For class/subclass features with embedded options (like Specialties)
+		/** @type {Object<string, *>} */ this._selectedFeatureSkillChoices = {}; // For specialty features that require skill/expertise choices
+		/** @type {Object<string, *>} */ this._selectedRaceOptionalFeatures = {}; // For race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
+		/** @type {string[]} */ this._selectedCombatTraditions = []; // For combat tradition proficiency choices (Thelemar homebrew)
+		/** @type {*[]} */ this._selectedClassToolProficiencies = []; // For class tool proficiency choices (e.g., Monk artisan/instrument)
+		/** @type {*} */ this._lastAppliedClassSnapshot = null; // Snapshot of what case 3 applied; used to undo on class change
+		/** @type {string[]} */ this._selectedRacialSkills = []; // For racial skill proficiency choices (e.g., Elf)
+		/** @type {string[]} */ this._selectedRacialTools = []; // For racial tool proficiency choices (e.g., Dwarf)
+		/** @type {Object<string, string[]>} */ this._selectedRacialLanguages = {}; // For racial language proficiency choices, keyed by profIdx
+		/** @type {string[]} */ this._selectedSubraceLanguages = []; // For subrace language proficiency choices (e.g., Hub Residence Trilingual)
+		/** @type {Object<string, *>} */ this._selectedRacialAbilityChoices = {}; // For races with choose-based ASI (TGTT races)
+		/** @type {Object<string, number>} */ this._selectedRacialAbilitySetIdx = {}; // For races with multiple ability options (VRGR lineage): which option is selected
+		/** @type {*[]} */ this._selectedRacialSpells = []; // For racial spell choices (e.g., Child of the Empire cantrip)
+		/** @type {Object<string, string>} */ this._selectedRacialSpellAbilities = {}; // For racial spell ability choices (e.g., Child of the Empire INT/WIS/CHA)
+		/** @type {boolean} */ this._useTashasRules = false; // For Tasha's Custom Origin rules - reassign racial ASI
+		/** @type {Object<string, *>} */ this._tashasAbilityBonuses = {}; // Stores custom ASI when using Tasha's rules
+		/** @type {Object<string, *>} */ this._equipmentChoices = {};
+		/** @type {Object<string, *>} */ this._equipmentTypeChoices = {};
+		/** @type {string[]} */ this._tashasSkillReplacements = []; // Stores replacement skill proficiencies when using Tasha's rules
+		/** @type {string[]} */ this._tashasLanguageReplacements = []; // Stores replacement languages when using Tasha's rules
+		/** @type {*} */ this._customBackground = null; // Stores custom background object
+		/** @type {*} */ this._customBackgroundData = null; // Stores custom background form data
+		/** @type {*[]} */ this._selectedKnownSpells = []; // For known-caster spell choices at level 1
+		/** @type {*[]} */ this._selectedKnownCantrips = []; // For known-caster cantrip choices at level 1
+		/** @type {*[]} */ this._selectedSpellbookSpells = []; // For Wizard spellbook spell choices at level 1
+		/** @type {*} */ this._divineSoulAffinity = null; // Stored Divine Soul affinity choice for spell access and bonus spell
+		/** @type {number} */ this._quickBuildTargetLevel = 1; // Target level for Quick Build integration
 
 		this._init();
 	}
 
 	// Helper to detect if content is from 2024 edition (D&D One)
+	/** @param {*} entity */
 	_is2024Edition (entity) {
 		if (!entity) return false;
 		// 2024 content has "edition": "one" or source "XPHB"/"TGTT"
@@ -81,23 +92,23 @@ class CharacterSheetBuilder {
 	/**
 	 * Find entries of type "options" in a feature's entries array
 	 * These represent choices the player must make (like Specialties)
-	 * @param {Object} feature - The feature object with entries
+	 * @param {*} feature - The feature object with entries
 	 * @param {number} characterLevel - Current character level for filtering
-	 * @returns {Array} Array of {count, options} objects
+	 * @returns {Array<*>} Array of {count, options} objects
 	 */
 	_findFeatureOptions (feature, characterLevel = 1) {
 		if (!feature?.entries) return [];
+		/** @type {*[]} */ const results = [];
 
-		const results = [];
-
-		const searchEntries = (entries) => {
+		/** @param {*} entries */
+		const searchEntries = (/** @type {*} */ entries) => {
 			if (!Array.isArray(entries)) return;
 
 			for (const entry of entries) {
 				if (typeof entry === "object" && entry.type === "options") {
 					// Found an options entry
+					/** @type {*[]} */ const options = [];
 					const count = entry.count || 1;
-					const options = [];
 
 					// Process the option entries
 					if (entry.entries) {
@@ -194,7 +205,7 @@ class CharacterSheetBuilder {
 	/**
 	 * Get the full feature data for a class feature reference
 	 * @param {string} featureRef - "FeatureName|ClassName|Source|Level" format
-	 * @returns {Object|null} The feature object or null
+	 * @returns {*} The feature object or null
 	 */
 	_getClassFeatureDataFromRef (featureRef) {
 		const parts = featureRef.split("|");
@@ -211,9 +222,10 @@ class CharacterSheetBuilder {
 	}
 
 	_initStepClickHandlers () {
-		document.querySelectorAll(".charsheet__builder-step").forEach(el => {
-			el.addEventListener("click", (e) => {
-				const step = parseInt(e.currentTarget.dataset.step);
+		document.querySelectorAll(".charsheet__builder-step").forEach((/** @type {*} */ el) => {
+			el.addEventListener("click", (/** @type {*} */ e) => {
+				const target = /** @type {HTMLElement} */ (e.currentTarget);
+				const step = parseInt(/** @type {string} */ (target.dataset.step));
 				if (step <= this._currentStep) {
 					this._goToStep(step);
 				}
@@ -222,13 +234,13 @@ class CharacterSheetBuilder {
 	}
 
 	_initNavButtons () {
-		document.getElementById("charsheet-builder-prev").addEventListener("click", () => this._prevStep());
-		document.getElementById("charsheet-builder-next").addEventListener("click", () => this._nextStep());
+		document.getElementById("charsheet-builder-prev")?.addEventListener("click", () => this._prevStep());
+		document.getElementById("charsheet-builder-next")?.addEventListener("click", () => this._nextStep());
 	}
 
 	_updateStepIndicators () {
-		document.querySelectorAll(".charsheet__builder-step").forEach(el => {
-			const stepNum = parseInt(el.dataset.step);
+		document.querySelectorAll(".charsheet__builder-step").forEach((/** @type {*} */ el) => {
+			const stepNum = parseInt(/** @type {string} */ ((/** @type {HTMLElement} */ (el)).dataset.step));
 
 			el.classList.remove("active", "completed");
 
@@ -240,8 +252,10 @@ class CharacterSheetBuilder {
 		});
 
 		// Update nav buttons
-		document.getElementById("charsheet-builder-prev").disabled = this._currentStep <= 1;
-		const nextBtn = document.getElementById("charsheet-builder-next");
+		const prevBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById("charsheet-builder-prev"));
+		if (prevBtn) prevBtn.disabled = this._currentStep <= 1;
+		const nextBtn = /** @type {*} */ (document.getElementById("charsheet-builder-next"));
+		if (!nextBtn) return;
 
 		if (this._currentStep >= this._maxSteps) {
 			nextBtn.innerHTML = `<span class="glyphicon glyphicon-ok"></span> Finish`;
@@ -250,6 +264,7 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	/** @param {number} step */
 	_goToStep (step) {
 		this._currentStep = step;
 		this._updateStepIndicators();
@@ -309,7 +324,7 @@ class CharacterSheetBuilder {
 				}
 				return true;
 
-			case 3: // Class
+			case 3: { // Class
 				if (!this._selectedClass) {
 					JqueryUtil.doToast({type: "warning", content: "Please select a class."});
 					return false;
@@ -318,7 +333,7 @@ class CharacterSheetBuilder {
 				if (this._selectedClass.startingProficiencies?.skills) {
 					const skillChoices = this._selectedClass.startingProficiencies.skills;
 					let requiredCount = 2;
-					skillChoices.forEach(sc => {
+					skillChoices.forEach((/** @type {*} */ sc) => {
 						if (sc.choose?.count) requiredCount = sc.choose.count;
 						if (sc.any) requiredCount = sc.any;
 					});
@@ -338,7 +353,7 @@ class CharacterSheetBuilder {
 				// Validate class feature language selection (like Deft Explorer)
 				const classLangInfo = this._getClassFeatureLanguageGrants(this._selectedClass);
 				if (classLangInfo && classLangInfo.count > 0) {
-					const selectedCount = this._selectedClassFeatureLanguages.filter(l => l).length;
+					const selectedCount = this._selectedClassFeatureLanguages.filter((/** @type {*} */ l) => l).length;
 					if (selectedCount < classLangInfo.count) {
 						JqueryUtil.doToast({type: "warning", content: `Please select ${classLangInfo.count} languages from ${classLangInfo.featureName}.`});
 						return false;
@@ -367,6 +382,7 @@ class CharacterSheetBuilder {
 					return false;
 				}
 				return true;
+			}
 
 			case 4: // Abilities
 				if (this._abilityMethod === "pointbuy" && this._pointBuyRemaining !== 0) {
@@ -374,7 +390,7 @@ class CharacterSheetBuilder {
 					return false;
 				}
 				if (this._abilityMethod === "standard") {
-					const unassigned = Parser.ABIL_ABVS.filter(abl => this._abilityScores[abl] == null);
+					const unassigned = Parser.ABIL_ABVS.filter((/** @type {*} */ abl) => this._abilityScores[abl] == null);
 					if (unassigned.length > 0) {
 						JqueryUtil.doToast({type: "warning", content: "Please assign all ability scores from the standard array."});
 						return false;
@@ -384,7 +400,7 @@ class CharacterSheetBuilder {
 				if (this._useTashasRules) {
 					const bonuses = this._getRacialASIBonuses();
 					const assignedCount = Object.entries(this._tashasAbilityBonuses)
-						.filter(([k, v]) => !k.includes("_amount") && v)
+						.filter(([/** @type {*} */ k, /** @type {*} */ v]) => !k.includes("_amount") && v)
 						.length;
 					if (assignedCount < bonuses.length) {
 						JqueryUtil.doToast({type: "warning", content: "Please assign all ability score bonuses using Tasha's Custom Origin rules."});
@@ -432,7 +448,7 @@ class CharacterSheetBuilder {
 				this._state.setRace(this._selectedRace, this._selectedSubrace);
 				// Clear ability bonuses before applying racial traits to prevent
 				// accumulation when re-visiting step 1 (choose-based ASI uses ADD)
-				Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
+				Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => this._state.setAbilityBonus(abl, 0));
 				this._applyRacialTraits();
 				break;
 
@@ -441,12 +457,12 @@ class CharacterSheetBuilder {
 				// Clear all ability bonuses and re-apply racial before background
 				// to prevent accumulation when re-visiting step 2 without passing
 				// through step 1 (e.g., going from step 3 back to step 2)
-				Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
+				Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => this._state.setAbilityBonus(abl, 0));
 				this._applyRacialAbilityBonuses();
 				this._applyBackgroundFeatures();
 				break;
 
-			case 3: // Class
+			case 3: { // Class
 				// Clear any previously applied class data before reapplying
 				// (handles the "user goes back and picks a different class" scenario)
 				this._clearClassApplication(this._lastAppliedClassSnapshot);
@@ -482,19 +498,19 @@ class CharacterSheetBuilder {
 					className: this._selectedClass.name,
 					classSource: this._selectedClass.source,
 					saveProficiencies: [...(this._selectedClass.proficiency || [])],
-					skills: this._selectedSkills.map(s => s.toLowerCase().replace(/\s+/g, "")),
+					skills: this._selectedSkills.map((/** @type {*} */ s) => s.toLowerCase().replace(/\s+/g, "")),
 					expertiseSkills: this._selectedExpertise
-						.filter(s => !s.toLowerCase().includes("tools"))
-						.map(s => s.toLowerCase().replace(/\s+/g, "")),
+						.filter((/** @type {*} */ s) => !s.toLowerCase().includes("tools"))
+						.map((/** @type {*} */ s) => s.toLowerCase().replace(/\s+/g, "")),
 					armorProficiencies: (this._selectedClass.startingProficiencies?.armor || [])
-						.map(a => typeof a === "string" ? a : a.full).filter(Boolean),
+						.map((/** @type {*} */ a) => typeof a === "string" ? a : a.full).filter(Boolean),
 					weaponProficiencies: (this._selectedClass.startingProficiencies?.weapons || [])
-						.map(w => typeof w === "string" ? w : w.full).filter(Boolean),
+						.map((/** @type {*} */ w) => typeof w === "string" ? w : w.full).filter(Boolean),
 					toolProficiencies: [
-						...this._selectedClassToolProficiencies.map(c => c.tool?.toTitleCase()).filter(Boolean),
+						...this._selectedClassToolProficiencies.map((/** @type {*} */ c) => c.tool?.toTitleCase()).filter(Boolean),
 						...(this._selectedClass.startingProficiencies?.tools || [])
-							.filter(t => typeof t === "string" && !/\bany\b.*\bchoice\b|\bchoose\b/i.test(t))
-							.map(t => t.replace(/{@item\s+([^|}]+)[^}]*}/gi, "$1").toTitleCase()),
+							.filter((/** @type {*} */ t) => typeof t === "string" && !/\bany\b.*\bchoice\b|\bchoose\b/i.test(t))
+							.map((/** @type {*} */ t) => t.replace(/{@item\s+([^|}]+)[^}]*}/gi, "$1").toTitleCase()),
 					],
 					languages: [
 						...(this._getClassFeatureLanguageGrants(this._selectedClass)?.autoLanguages || []),
@@ -505,6 +521,7 @@ class CharacterSheetBuilder {
 
 				// Record level 1 history entry
 				{
+					/** @type {*} */
 					const level1History = {
 						level: 1,
 						class: {
@@ -523,7 +540,7 @@ class CharacterSheetBuilder {
 
 					// Record expertise selections (for Rogue, etc.)
 					if (this._selectedExpertise?.length > 0) {
-						level1History.choices.expertise = this._selectedExpertise.map(s => s.toLowerCase());
+						level1History.choices.expertise = this._selectedExpertise.map((/** @type {*} */ s) => s.toLowerCase());
 					}
 
 					// Record subclass if selected at level 1 (Cleric, Sorcerer, Warlock)
@@ -540,10 +557,10 @@ class CharacterSheetBuilder {
 
 					// Record optional features (invocations from Warlock, etc.)
 					if (this._selectedOptionalFeatures && Object.keys(this._selectedOptionalFeatures).length > 0) {
-						const optFeatures = [];
-						const optFeatureReplay = [];
-						Object.entries(this._selectedOptionalFeatures).forEach(([key, opts]) => {
-							opts.forEach(opt => {
+						/** @type {*[]} */ const optFeatures = [];
+						/** @type {*[]} */ const optFeatureReplay = [];
+						Object.entries(this._selectedOptionalFeatures).forEach(([/** @type {*} */ key, /** @type {*} */ opts]) => {
+							opts.forEach((/** @type {*} */ opt) => {
 								optFeatures.push({
 									name: opt.name,
 									source: opt.source,
@@ -563,11 +580,11 @@ class CharacterSheetBuilder {
 
 					// Record feature choices (fighting styles, specialties, etc.)
 					if (this._selectedFeatureOptions && Object.keys(this._selectedFeatureOptions).length > 0) {
-						const featureChoices = [];
-						const featureChoiceReplay = [];
-						Object.entries(this._selectedFeatureOptions).forEach(([featureName, options]) => {
+						/** @type {*[]} */ const featureChoices = [];
+						/** @type {*[]} */ const featureChoiceReplay = [];
+						Object.entries(this._selectedFeatureOptions).forEach(([/** @type {*} */ featureName, /** @type {*} */ options]) => {
 							const parentFeature = featureName.split("_")[0];
-							options.forEach(opt => {
+							options.forEach((/** @type {*} */ opt) => {
 								featureChoices.push({
 									featureName: parentFeature,
 									choice: opt.name,
@@ -644,10 +661,10 @@ class CharacterSheetBuilder {
 						};
 						level1History.choices.backgroundUserChoices = {};
 						if (this._selectedToolProficiencies?.length) {
-							level1History.choices.backgroundUserChoices.selectedTools = this._selectedToolProficiencies.map(c => ({...c}));
+							level1History.choices.backgroundUserChoices.selectedTools = this._selectedToolProficiencies.map((/** @type {*} */ c) => ({...c}));
 						}
 						if (this._selectedLanguages?.length) {
-							level1History.choices.backgroundUserChoices.selectedLanguages = this._selectedLanguages.map(c => ({...c}));
+							level1History.choices.backgroundUserChoices.selectedLanguages = this._selectedLanguages.map((/** @type {*} */ c) => ({...c}));
 						}
 						if (this._selectedAbilityBonuses && Object.keys(this._selectedAbilityBonuses).length) {
 							level1History.choices.backgroundUserChoices.selectedAbilityBonuses = {...this._selectedAbilityBonuses};
@@ -657,9 +674,10 @@ class CharacterSheetBuilder {
 					this._state.recordLevelChoice(level1History);
 				}
 				break;
+			}
 
 			case 4: // Abilities
-				Parser.ABIL_ABVS.forEach(abl => {
+				Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 					const score = this._abilityScores[abl];
 					if (score != null) {
 						this._state.setAbilityBase(abl, score);
@@ -696,7 +714,7 @@ class CharacterSheetBuilder {
 
 		// Check if this is 2024 format (uppercase keys like A, B, C)
 		const is2024Format = defaultData.length > 0 && defaultData[0]
-			&& Object.keys(defaultData[0]).some(k => /^[A-Z]$/.test(k));
+			&& Object.keys(defaultData[0]).some((/** @type {*} */ k) => /^[A-Z]$/.test(k));
 
 		if (is2024Format) {
 			this._apply2024EquipmentChoices(startingEquip);
@@ -705,21 +723,24 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	/**
+	 * @param {*} startingEquip
+	 */
 	_apply2024EquipmentChoices (startingEquip) {
 		const defaultData = startingEquip.defaultData || [];
 		if (!defaultData.length) return;
 
 		const choiceData = defaultData[0];
-		const selectedKey = this._equipmentChoices["2024"] || Object.keys(choiceData).filter(k => /^[A-Z]$/.test(k))[0];
+		const selectedKey = this._equipmentChoices["2024"] || Object.keys(choiceData).filter((/** @type {*} */ k) => /^[A-Z]$/.test(k))[0];
 		const items = choiceData[selectedKey] || [];
 
 		const allItems = this._page.getItems();
 
-		items.forEach(itemEntry => {
+		items.forEach((/** @type {*} */ itemEntry) => {
 			if (itemEntry.item) {
 				// Item with optional quantity
 				const [name, source] = itemEntry.item.split("|");
-				const item = allItems.find(i =>
+				const item = allItems.find((/** @type {*} */ i) =>
 					i.name.toLowerCase() === name.toLowerCase()
 					&& (!source || i.source?.toLowerCase() === source.toLowerCase()),
 				);
@@ -732,7 +753,7 @@ class CharacterSheetBuilder {
 				this._state.setCurrency("gp", (this._state.getCurrency("gp") || 0) + gp);
 			} else if (itemEntry.special) {
 				// Special items like "Spellbook" - try to find in items list
-				const item = allItems.find(i => i.name.toLowerCase() === itemEntry.special.toLowerCase());
+				const item = allItems.find((/** @type {*} */ i) => i.name.toLowerCase() === itemEntry.special.toLowerCase());
 				if (item) {
 					this._state.addItem(item, 1);
 				}
@@ -740,6 +761,9 @@ class CharacterSheetBuilder {
 		});
 	}
 
+	/**
+	 * @param {*} startingEquip
+	 */
 	_applyClassicEquipmentChoices (startingEquip) {
 		// If using gold alternative, add gold instead
 		if (this._useGoldAlternative && startingEquip.goldAlternative) {
@@ -759,8 +783,8 @@ class CharacterSheetBuilder {
 
 		const defaultData = startingEquip.defaultData || [];
 
-		defaultData.forEach((choiceSet, idx) => {
-			const selectedKey = this._equipmentChoices?.[idx] || Object.keys(choiceSet).filter(k => k !== "_")[0] || "_";
+		defaultData.forEach((/** @type {*} */ choiceSet, /** @type {*} */ idx) => {
+			const selectedKey = this._equipmentChoices?.[idx] || Object.keys(choiceSet).filter((/** @type {*} */ k) => k !== "_")[0] || "_";
 			const items = choiceSet[selectedKey] || choiceSet._ || [];
 			const pickerPrefix = selectedKey === "_" ? `${idx}__` : `${idx}_${selectedKey}`;
 
@@ -768,16 +792,20 @@ class CharacterSheetBuilder {
 		});
 	}
 
+	/**
+	 * @param {*} items
+	 * @param {*} pickerPrefix
+	 */
 	_addEquipmentItems (items, pickerPrefix = "") {
 		if (!Array.isArray(items)) return;
 
 		const allItems = this._page.getItems();
 
-		items.forEach((itemEntry, itemIdx) => {
+		items.forEach((/** @type {*} */ itemEntry, /** @type {*} */ itemIdx) => {
 			if (typeof itemEntry === "string") {
 				// Direct item reference like "chain mail|phb"
 				const [name, source] = itemEntry.split("|");
-				const item = allItems.find(i =>
+				const item = allItems.find((/** @type {*} */ i) =>
 					i.name.toLowerCase() === name.toLowerCase()
 					&& (!source || i.source?.toLowerCase() === source.toLowerCase()),
 				);
@@ -787,7 +815,7 @@ class CharacterSheetBuilder {
 			} else if (itemEntry.item) {
 				// Item with quantity
 				const [name, source] = itemEntry.item.split("|");
-				const item = allItems.find(i =>
+				const item = allItems.find((/** @type {*} */ i) =>
 					i.name.toLowerCase() === name.toLowerCase()
 					&& (!source || i.source?.toLowerCase() === source.toLowerCase()),
 				);
@@ -804,7 +832,7 @@ class CharacterSheetBuilder {
 						: `${pickerPrefix}${eqType}_${itemIdx}`;
 					const selectedItemName = this._equipmentTypeChoices?.[selectKey];
 					if (selectedItemName) {
-						const item = allItems.find(i => i.name === selectedItemName);
+						const item = allItems.find((/** @type {*} */ i) => i.name === selectedItemName);
 						if (item) {
 							this._state.addItem(item, 1);
 						}
@@ -824,7 +852,7 @@ class CharacterSheetBuilder {
 			} else {
 				if (this._selectedRace.speed.walk) this._state.setSpeed("walk", this._selectedRace.speed.walk);
 				// Handle non-walk speeds - true means "equal to walking speed"
-				["fly", "swim", "climb", "burrow"].forEach(speedType => {
+				["fly", "swim", "climb", "burrow"].forEach((/** @type {*} */ speedType) => {
 					const speedValue = this._selectedRace.speed[speedType];
 					if (speedValue === true) {
 						// Add a named modifier with equalToWalk instead of setting to 1
@@ -850,7 +878,7 @@ class CharacterSheetBuilder {
 			} else {
 				if (this._selectedSubrace.speed.walk) this._state.setSpeed("walk", this._selectedSubrace.speed.walk);
 				// Handle non-walk speeds - true means "equal to walking speed"
-				["fly", "swim", "climb", "burrow"].forEach(speedType => {
+				["fly", "swim", "climb", "burrow"].forEach((/** @type {*} */ speedType) => {
 					const speedValue = this._selectedSubrace.speed[speedType];
 					if (speedValue === true) {
 						// Add a named modifier with equalToWalk instead of setting to 1
@@ -877,9 +905,9 @@ class CharacterSheetBuilder {
 		// When using Tasha's Custom Origin, replace fixed racial languages (except Common) with user's choices
 		if (this._useTashasRules && this._tashasLanguageReplacements.length) {
 			// Always add Common (cannot be replaced per Tasha's rules)
-			const addCommon = (langProficiencies) => {
+			const addCommon = (/** @type {*} */ langProficiencies) => {
 				if (!langProficiencies) return;
-				langProficiencies.forEach(langProf => {
+				langProficiencies.forEach((/** @type {*} */ langProf) => {
 					if (langProf["common"]) this._state.addLanguage("Common");
 				});
 			};
@@ -887,25 +915,25 @@ class CharacterSheetBuilder {
 			addCommon(this._selectedSubrace?.languageProficiencies);
 
 			// Add user-chosen replacement languages
-			this._tashasLanguageReplacements.forEach(lang => {
-				if (lang) this._state.addLanguage(lang.toTitleCase());
+			this._tashasLanguageReplacements.forEach((/** @type {*} */ lang) => {
+				if (lang) this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
 			});
 		} else {
 			if (this._selectedRace.languageProficiencies) {
-				this._selectedRace.languageProficiencies.forEach(langProf => {
-					Object.keys(langProf).forEach(lang => {
+				this._selectedRace.languageProficiencies.forEach((/** @type {*} */ langProf) => {
+					Object.keys(langProf).forEach((/** @type {*} */ lang) => {
 						if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-						this._state.addLanguage(lang.toTitleCase());
+						this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
 					});
 				});
 			}
 
 			// Languages - subrace
 			if (this._selectedSubrace?.languageProficiencies) {
-				this._selectedSubrace.languageProficiencies.forEach(langProf => {
-					Object.keys(langProf).forEach(lang => {
+				this._selectedSubrace.languageProficiencies.forEach((/** @type {*} */ langProf) => {
+					Object.keys(langProf).forEach((/** @type {*} */ lang) => {
 						if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-						this._state.addLanguage(lang.toTitleCase());
+						this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
 					});
 				});
 			}
@@ -913,10 +941,10 @@ class CharacterSheetBuilder {
 
 		// Apply selected racial language choices (from all proficiency entries)
 		if (Object.keys(this._selectedRacialLanguages).length) {
-			Object.values(this._selectedRacialLanguages).forEach(langArray => {
+			Object.values(this._selectedRacialLanguages).forEach((/** @type {*} */ langArray) => {
 				if (Array.isArray(langArray)) {
-					langArray.forEach(lang => {
-						this._state.addLanguage(lang.toTitleCase());
+					langArray.forEach((/** @type {*} */ lang) => {
+						this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
 					});
 				}
 			});
@@ -924,21 +952,21 @@ class CharacterSheetBuilder {
 
 		// Apply selected subrace language choices (e.g., Hub Residence Trilingual)
 		if (this._selectedSubraceLanguages.length) {
-			this._selectedSubraceLanguages.forEach(lang => {
-				this._state.addLanguage(lang.toTitleCase());
+			this._selectedSubraceLanguages.forEach((/** @type {*} */ lang) => {
+				this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
 			});
 		}
 
 		// Resistances - base race
 		if (this._selectedRace.resist) {
-			this._selectedRace.resist.forEach(r => {
+			this._selectedRace.resist.forEach((/** @type {*} */ r) => {
 				if (typeof r === "string") this._state.addResistance(r);
 			});
 		}
 
 		// Resistances - subrace
 		if (this._selectedSubrace?.resist) {
-			this._selectedSubrace.resist.forEach(r => {
+			this._selectedSubrace.resist.forEach((/** @type {*} */ r) => {
 				if (typeof r === "string") this._state.addResistance(r);
 			});
 		}
@@ -958,7 +986,7 @@ class CharacterSheetBuilder {
 		// Skill proficiencies from race data
 		// When using Tasha's Custom Origin, replace fixed racial skills with user's choices
 		if (this._useTashasRules && this._tashasSkillReplacements.length) {
-			this._tashasSkillReplacements.forEach(skill => {
+			this._tashasSkillReplacements.forEach((/** @type {*} */ skill) => {
 				if (skill) {
 					const skillKey = skill.toLowerCase().replace(/\s+/g, "");
 					this._state.setSkillProficiency(skillKey, 1);
@@ -966,8 +994,8 @@ class CharacterSheetBuilder {
 			});
 		} else {
 			if (this._selectedRace.skillProficiencies) {
-				this._selectedRace.skillProficiencies.forEach(skillProf => {
-					Object.keys(skillProf).forEach(skill => {
+				this._selectedRace.skillProficiencies.forEach((/** @type {*} */ skillProf) => {
+					Object.keys(skillProf).forEach((/** @type {*} */ skill) => {
 						if (skill !== "any" && skill !== "choose") {
 							const skillKey = skill.toLowerCase().replace(/\s+/g, "");
 							this._state.setSkillProficiency(skillKey, 1);
@@ -978,8 +1006,8 @@ class CharacterSheetBuilder {
 
 			// Skill proficiencies from subrace
 			if (this._selectedSubrace?.skillProficiencies) {
-				this._selectedSubrace.skillProficiencies.forEach(skillProf => {
-					Object.keys(skillProf).forEach(skill => {
+				this._selectedSubrace.skillProficiencies.forEach((/** @type {*} */ skillProf) => {
+					Object.keys(skillProf).forEach((/** @type {*} */ skill) => {
 						if (skill !== "any" && skill !== "choose") {
 							const skillKey = skill.toLowerCase().replace(/\s+/g, "");
 							this._state.setSkillProficiency(skillKey, 1);
@@ -991,7 +1019,7 @@ class CharacterSheetBuilder {
 
 		// Apply selected racial skill proficiency choices
 		if (this._selectedRacialSkills.length) {
-			this._selectedRacialSkills.forEach(skill => {
+			this._selectedRacialSkills.forEach((/** @type {*} */ skill) => {
 				const skillKey = skill.toLowerCase().replace(/\s+/g, "");
 				this._state.setSkillProficiency(skillKey, 1);
 			});
@@ -999,51 +1027,51 @@ class CharacterSheetBuilder {
 
 		// Armor proficiencies from race (e.g., Mountain Dwarf)
 		if (this._selectedRace.armorProficiencies) {
-			this._selectedRace.armorProficiencies.forEach(armorProf => {
-				Object.keys(armorProf).forEach(armor => {
-					this._state.addArmorProficiency(armor.toTitleCase());
+			this._selectedRace.armorProficiencies.forEach((/** @type {*} */ armorProf) => {
+				Object.keys(armorProf).forEach((/** @type {*} */ armor) => {
+					this._state.addArmorProficiency((/** @type {*} */ (armor)).toTitleCase());
 				});
 			});
 		}
 		if (this._selectedSubrace?.armorProficiencies) {
-			this._selectedSubrace.armorProficiencies.forEach(armorProf => {
-				Object.keys(armorProf).forEach(armor => {
-					this._state.addArmorProficiency(armor.toTitleCase());
+			this._selectedSubrace.armorProficiencies.forEach((/** @type {*} */ armorProf) => {
+				Object.keys(armorProf).forEach((/** @type {*} */ armor) => {
+					this._state.addArmorProficiency((/** @type {*} */ (armor)).toTitleCase());
 				});
 			});
 		}
 
 		// Weapon proficiencies from race (e.g., Elf weapon training)
 		if (this._selectedRace.weaponProficiencies) {
-			this._selectedRace.weaponProficiencies.forEach(weaponProf => {
-				Object.keys(weaponProf).forEach(weapon => {
-					this._state.addWeaponProficiency(weapon.toTitleCase());
+			this._selectedRace.weaponProficiencies.forEach((/** @type {*} */ weaponProf) => {
+				Object.keys(weaponProf).forEach((/** @type {*} */ weapon) => {
+					this._state.addWeaponProficiency((/** @type {*} */ (weapon)).toTitleCase());
 				});
 			});
 		}
 		if (this._selectedSubrace?.weaponProficiencies) {
-			this._selectedSubrace.weaponProficiencies.forEach(weaponProf => {
-				Object.keys(weaponProf).forEach(weapon => {
-					this._state.addWeaponProficiency(weapon.toTitleCase());
+			this._selectedSubrace.weaponProficiencies.forEach((/** @type {*} */ weaponProf) => {
+				Object.keys(weaponProf).forEach((/** @type {*} */ weapon) => {
+					this._state.addWeaponProficiency((/** @type {*} */ (weapon)).toTitleCase());
 				});
 			});
 		}
 
 		// Tool proficiencies from race (e.g., Dwarf stonecunning tools)
 		if (this._selectedRace.toolProficiencies) {
-			this._selectedRace.toolProficiencies.forEach(toolProf => {
-				Object.keys(toolProf).forEach(tool => {
+			this._selectedRace.toolProficiencies.forEach((/** @type {*} */ toolProf) => {
+				Object.keys(toolProf).forEach((/** @type {*} */ tool) => {
 					if (tool !== "any" && tool !== "choose") {
-						this._state.addToolProficiency(tool.toTitleCase());
+						this._state.addToolProficiency((/** @type {*} */ (tool)).toTitleCase());
 					}
 				});
 			});
 		}
 		if (this._selectedSubrace?.toolProficiencies) {
-			this._selectedSubrace.toolProficiencies.forEach(toolProf => {
-				Object.keys(toolProf).forEach(tool => {
+			this._selectedSubrace.toolProficiencies.forEach((/** @type {*} */ toolProf) => {
+				Object.keys(toolProf).forEach((/** @type {*} */ tool) => {
 					if (tool !== "any" && tool !== "choose") {
-						this._state.addToolProficiency(tool.toTitleCase());
+						this._state.addToolProficiency((/** @type {*} */ (tool)).toTitleCase());
 					}
 				});
 			});
@@ -1051,8 +1079,8 @@ class CharacterSheetBuilder {
 
 		// Apply selected racial tool proficiency choices
 		if (this._selectedRacialTools.length) {
-			this._selectedRacialTools.forEach(tool => {
-				this._state.addToolProficiency(tool.toTitleCase());
+			this._selectedRacialTools.forEach((/** @type {*} */ tool) => {
+				this._state.addToolProficiency((/** @type {*} */ (tool)).toTitleCase());
 			});
 		}
 
@@ -1081,9 +1109,9 @@ class CharacterSheetBuilder {
 		if (!grants?.length) return;
 
 		const allOptFeatures = this._page.getOptionalFeatures?.() || [];
-		grants.forEach(grant => {
-			const opt = allOptFeatures.find(f => f.name === grant.name && f.source === grant.source)
-				|| allOptFeatures.find(f => f.name === grant.name);
+		grants.forEach((/** @type {*} */ grant) => {
+			const opt = allOptFeatures.find((/** @type {*} */ f) => f.name === grant.name && f.source === grant.source)
+				|| allOptFeatures.find((/** @type {*} */ f) => f.name === grant.name);
 			if (!opt) return;
 			this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(opt, {
 				raceSource: this._selectedRace.source,
@@ -1104,7 +1132,7 @@ class CharacterSheetBuilder {
 		if (!this._selectedRace) return;
 
 		if (this._useTashasRules) {
-			Object.entries(this._tashasAbilityBonuses).forEach(([key, value]) => {
+			Object.entries(this._tashasAbilityBonuses).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
 				if (key.includes("_amount") || !value) return;
 				const amountKey = `${key}_amount`;
 				const amount = this._tashasAbilityBonuses[amountKey] || 0;
@@ -1118,7 +1146,7 @@ class CharacterSheetBuilder {
 				const entries = this._getEffectiveAbilityEntries(this._selectedRace.ability, this._selectedRace.name, this._selectedRace.source);
 				for (const {abiSet, originalIdx: abiIdx} of entries) {
 					// Apply fixed ability entries (e.g., cha: 2) — always process these
-					Object.entries(abiSet).forEach(([abi, bonus]) => {
+					Object.entries(abiSet).forEach(([/** @type {*} */ abi, /** @type {*} */ bonus]) => {
 						if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
 							this._state.setAbilityBonus(abi, bonus);
 						}
@@ -1127,7 +1155,7 @@ class CharacterSheetBuilder {
 					if (abiSet.choose) {
 						const raceKey = `${this._selectedRace.name}|${this._selectedRace.source}`;
 						const choices = this._selectedRacialAbilityChoices[raceKey] || {};
-						Object.entries(choices).forEach(([key, abi]) => {
+						Object.entries(choices).forEach(([/** @type {*} */ key, /** @type {*} */ abi]) => {
 							if (!key.startsWith(`choose_${abiIdx}_`) || key.includes("_amount") || !abi) return;
 							const amount = choices[`${key}_amount`] || 1;
 							this._state.setAbilityBonus(abi, (this._state.getAbilityBonus(abi) || 0) + amount);
@@ -1140,7 +1168,7 @@ class CharacterSheetBuilder {
 				const entries = this._getEffectiveAbilityEntries(this._selectedSubrace.ability, this._selectedSubrace.name, this._selectedSubrace.source);
 				for (const {abiSet, originalIdx: abiIdx} of entries) {
 					// Apply fixed ability entries
-					Object.entries(abiSet).forEach(([abi, bonus]) => {
+					Object.entries(abiSet).forEach(([/** @type {*} */ abi, /** @type {*} */ bonus]) => {
 						if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
 							const current = this._state.getAbilityBonus(abi);
 							this._state.setAbilityBonus(abi, current + bonus);
@@ -1150,7 +1178,7 @@ class CharacterSheetBuilder {
 					if (abiSet.choose) {
 						const raceKey = `${this._selectedSubrace.name}|${this._selectedSubrace.source}`;
 						const choices = this._selectedRacialAbilityChoices[raceKey] || {};
-						Object.entries(choices).forEach(([key, abi]) => {
+						Object.entries(choices).forEach(([/** @type {*} */ key, /** @type {*} */ abi]) => {
 							if (!key.startsWith(`choose_${abiIdx}_`) || key.includes("_amount") || !abi) return;
 							const amount = choices[`${key}_amount`] || 1;
 							const current = this._state.getAbilityBonus(abi);
@@ -1174,7 +1202,7 @@ class CharacterSheetBuilder {
 		const raceName = race.name;
 		const subraceName = race._subraceName || this._selectedSubrace?.name;
 
-		race.additionalSpells.forEach(spellBlock => {
+		race.additionalSpells.forEach((/** @type {*} */ spellBlock) => {
 			// Check if this spell block is subrace-specific
 			if (spellBlock.name) {
 				// This spell block is for a specific subrace - only apply if it matches
@@ -1197,7 +1225,7 @@ class CharacterSheetBuilder {
 
 			// Process "known" spells - these are added to the character's spell list
 			if (spellBlock.known) {
-				Object.entries(spellBlock.known).forEach(([levelStr, spellsAtLevel]) => {
+				Object.entries(spellBlock.known).forEach(([/** @type {*} */ levelStr, /** @type {*} */ spellsAtLevel]) => {
 					const charLevel = parseInt(levelStr);
 					// Only add spells available at level 1 during character creation
 					if (charLevel > 1) return;
@@ -1208,7 +1236,7 @@ class CharacterSheetBuilder {
 
 			// Process "innate" spells - these are racial abilities with limited uses
 			if (spellBlock.innate) {
-				Object.entries(spellBlock.innate).forEach(([levelStr, spellConfig]) => {
+				Object.entries(spellBlock.innate).forEach(([/** @type {*} */ levelStr, /** @type {*} */ spellConfig]) => {
 					const charLevel = parseInt(levelStr);
 					// Only add spells available at level 1 during character creation
 					if (charLevel > 1) return;
@@ -1217,12 +1245,12 @@ class CharacterSheetBuilder {
 					if (typeof spellConfig === "object") {
 						// Handle daily/rest structure
 						if (spellConfig.daily) {
-							Object.entries(spellConfig.daily).forEach(([uses, spellList]) => {
+							Object.entries(spellConfig.daily).forEach(([/** @type {*} */ uses, /** @type {*} */ spellList]) => {
 								this._processInnateSpells(spellList, allSpells, raceName, spellAbility, parseInt(uses), "long");
 							});
 						}
 						if (spellConfig.rest) {
-							Object.entries(spellConfig.rest).forEach(([uses, spellList]) => {
+							Object.entries(spellConfig.rest).forEach(([/** @type {*} */ uses, /** @type {*} */ spellList]) => {
 								this._processInnateSpells(spellList, allSpells, raceName, spellAbility, parseInt(uses), "short");
 							});
 						}
@@ -1241,6 +1269,11 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Process a list of spells and add them as known spells
+	 * @param {*} spellList
+	 * @param {*} allSpells
+	 * @param {*} sourceName
+	 * @param {*} spellAbility
+	 * @param {*} isAlwaysPrepared
 	 */
 	_processSpellList (spellList, allSpells, sourceName, spellAbility, isAlwaysPrepared) {
 		if (!Array.isArray(spellList)) {
@@ -1260,7 +1293,7 @@ class CharacterSheetBuilder {
 			return;
 		}
 
-		spellList.forEach(spellRef => {
+		spellList.forEach((/** @type {*} */ spellRef) => {
 			if (typeof spellRef === "object" && spellRef.choose) {
 				// User-selected spell from _selectedRacialSpells
 				this._applySelectedRacialSpells(sourceName, spellAbility);
@@ -1275,11 +1308,13 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Apply user-selected racial spells from the builder UI
+	 * @param {*} sourceName
+	 * @param {*} spellAbility
 	 */
 	_applySelectedRacialSpells (sourceName, spellAbility) {
 		if (!this._selectedRacialSpells?.length) return;
 
-		this._selectedRacialSpells.forEach(spell => {
+		this._selectedRacialSpells.forEach((/** @type {*} */ spell) => {
 			if (!spell?.name) return;
 
 			if (spell.level === 0) {
@@ -1299,11 +1334,17 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Process innate spells with uses/recharge
+	 * @param {*} spellList
+	 * @param {*} allSpells
+	 * @param {*} sourceName
+	 * @param {*} spellAbility
+	 * @param {*} uses
+	 * @param {*} recharge
 	 */
 	_processInnateSpells (spellList, allSpells, sourceName, spellAbility, uses, recharge) {
 		if (!Array.isArray(spellList)) return;
 
-		spellList.forEach(spellRef => {
+		spellList.forEach((/** @type {*} */ spellRef) => {
 			const spellData = this._resolveSpellReference(spellRef, allSpells);
 			if (spellData) {
 				const atWill = uses === 0;
@@ -1322,6 +1363,8 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Resolve a spell reference (name|source or name|source#c for cantrips) to full spell data
+	 * @param {*} spellRef
+	 * @param {*} allSpells
 	 */
 	_resolveSpellReference (spellRef, allSpells) {
 		if (typeof spellRef !== "string") {
@@ -1349,23 +1392,23 @@ class CharacterSheetBuilder {
 		}
 
 		// Find the spell in the spell list
-		const spell = allSpells.find(s => {
+		const spell = allSpells.find((/** @type {*} */ s) => {
 			const nameMatch = s.name.toLowerCase() === spellName;
 			if (!nameMatch) return false;
 			if (source) return s.source === source;
 			return true;
 		});
 
-		if (!spell) {
-			console.warn(`[CharSheet Builder] Could not find spell: ${spellRef}`);
-			return null;
-		}
+		if (!spell) return null;
 
 		return spell;
 	}
 
 	/**
 	 * Add a racial spell to the character's spell list
+	 * @param {*} spellData
+	 * @param {*} sourceName
+	 * @param {*} isAlwaysPrepared
 	 */
 	_addRacialSpell (spellData, sourceName, isAlwaysPrepared) {
 		if (spellData.level === 0) {
@@ -1389,7 +1432,7 @@ class CharacterSheetBuilder {
 
 		// Saving throw proficiencies
 		if (this._selectedClass.proficiency) {
-			this._selectedClass.proficiency.forEach(prof => {
+			this._selectedClass.proficiency.forEach((/** @type {*} */ prof) => {
 				if (Parser.ABIL_ABVS.includes(prof)) {
 					this._state.addSaveProficiency(prof);
 				}
@@ -1398,7 +1441,7 @@ class CharacterSheetBuilder {
 
 		// Skill proficiencies (from user selection)
 		if (this._selectedSkills.length) {
-			this._selectedSkills.forEach(skill => {
+			this._selectedSkills.forEach((/** @type {*} */ skill) => {
 				const skillKey = skill.toLowerCase().replace(/\s+/g, "");
 				this._state.setSkillProficiency(skillKey, 1);
 			});
@@ -1406,7 +1449,7 @@ class CharacterSheetBuilder {
 
 		// Expertise (from user selection - Rogue, Bard, etc.)
 		if (this._selectedExpertise.length) {
-			this._selectedExpertise.forEach(skill => {
+			this._selectedExpertise.forEach((/** @type {*} */ skill) => {
 				const skillKey = skill.toLowerCase().replace(/\s+/g, "");
 				// Check if it's a tool (like "thieves' tools")
 				if (skill.toLowerCase().includes("tools")) {
@@ -1424,12 +1467,12 @@ class CharacterSheetBuilder {
 		// then add user-selected language choices
 		const classLangGrants = this._getClassFeatureLanguageGrants(this._selectedClass);
 		if (classLangGrants?.autoLanguages?.length) {
-			classLangGrants.autoLanguages.forEach(lang => {
+			classLangGrants.autoLanguages.forEach((/** @type {*} */ lang) => {
 				this._state.addLanguage(lang);
 			});
 		}
 		if (this._selectedClassFeatureLanguages?.length) {
-			this._selectedClassFeatureLanguages.forEach(lang => {
+			this._selectedClassFeatureLanguages.forEach((/** @type {*} */ lang) => {
 				if (lang) {
 					this._state.addLanguage(lang);
 				}
@@ -1438,7 +1481,7 @@ class CharacterSheetBuilder {
 
 		// Armor proficiencies
 		if (this._selectedClass.startingProficiencies?.armor) {
-			this._selectedClass.startingProficiencies.armor.forEach(armor => {
+			this._selectedClass.startingProficiencies.armor.forEach((/** @type {*} */ armor) => {
 				if (typeof armor === "string") {
 					this._state.addArmorProficiency(armor);
 				} else if (armor.full) {
@@ -1449,7 +1492,7 @@ class CharacterSheetBuilder {
 
 		// Weapon proficiencies
 		if (this._selectedClass.startingProficiencies?.weapons) {
-			this._selectedClass.startingProficiencies.weapons.forEach(weapon => {
+			this._selectedClass.startingProficiencies.weapons.forEach((/** @type {*} */ weapon) => {
 				if (typeof weapon === "string") {
 					this._state.addWeaponProficiency(weapon);
 				} else if (weapon.full) {
@@ -1460,19 +1503,19 @@ class CharacterSheetBuilder {
 
 		// Tool proficiencies — user-selected class tool choices (e.g., Monk artisan/instrument)
 		if (this._selectedClassToolProficiencies?.length) {
-			this._selectedClassToolProficiencies.forEach(choice => {
+			this._selectedClassToolProficiencies.forEach((/** @type {*} */ choice) => {
 				if (choice.tool) {
-					this._state.addToolProficiency(choice.tool.toTitleCase());
+					this._state.addToolProficiency((/** @type {*} */ (choice.tool)).toTitleCase());
 				}
 			});
 		} else if (this._selectedClass.startingProficiencies?.tools) {
 			// Fallback: parse text tool descriptions (for classes without structured toolProficiencies)
-			this._selectedClass.startingProficiencies.tools.forEach(tool => {
+			this._selectedClass.startingProficiencies.tools.forEach((/** @type {*} */ tool) => {
 				if (typeof tool === "string") {
 					// Skip choice descriptions like "any one type of..." — handled by UI above
 					if (/\bany\b.*\bchoice\b|\bchoose\b/i.test(tool)) return;
 					// Extract tool name from {@item} tags if present and normalize
-					const toolName = tool.replace(/{@item\s+([^|}]+)[^}]*}/gi, "$1").toTitleCase();
+					const toolName = (/** @type {*} */ (tool.replace(/{@item\s+([^|}]+)[^}]*}/gi, "$1"))).toTitleCase();
 					this._state.addToolProficiency(toolName);
 				}
 			});
@@ -1489,7 +1532,7 @@ class CharacterSheetBuilder {
 
 			// Set initial spell slots for level 1
 			const slots = this._getSpellSlotsForLevel(this._selectedClass.name, 1);
-			Object.entries(slots).forEach(([level, count]) => {
+			Object.entries(slots).forEach(([/** @type {*} */ level, /** @type {*} */ count]) => {
 				this._state.setSpellSlots(parseInt(level), count, count);
 			});
 		}
@@ -1507,7 +1550,7 @@ class CharacterSheetBuilder {
 			if (level1Features && !Array.isArray(level1Features)) {
 				// Check if this is a string/object feature entry rather than an array of features
 				// In this case, filter for level 1 features from the flat array
-				level1Features = this._selectedClass.classFeatures.filter(f => {
+				level1Features = this._selectedClass.classFeatures.filter((/** @type {*} */ f) => {
 					if (typeof f === "string") {
 						const parts = f.split("|");
 						return parts[3] === "1" || parts.length < 4; // Level 1 or no level specified
@@ -1526,7 +1569,7 @@ class CharacterSheetBuilder {
 			// Check if we have a subclass selected - if so, we'll filter out features with gainSubclassFeature
 			const hasSubclass = !!this._selectedSubclass;
 
-			level1Features.forEach(f => {
+			level1Features.forEach((/** @type {*} */ f) => {
 				let featureName, featureSource, classSource;
 				let hasGainSubclassFeature = false;
 
@@ -1577,17 +1620,16 @@ class CharacterSheetBuilder {
 				};
 				this._state.addFeature(featureToAdd);
 			});
-		} else {
 		}
 
 		// Add level 1 subclass features if a subclass is selected
 		// NOTE: After DataLoader processing, subclassFeatures is an array-of-arrays where each inner array
 		// contains feature OBJECTS (with level, name, entries properties), not strings
 		if (this._selectedSubclass && this._selectedSubclass.subclassFeatures) {
-			this._selectedSubclass.subclassFeatures.forEach(levelFeatures => {
+			this._selectedSubclass.subclassFeatures.forEach((/** @type {*} */ levelFeatures) => {
 				// levelFeatures is an array of feature objects for a specific level
 				if (Array.isArray(levelFeatures)) {
-					levelFeatures.forEach(feature => {
+					levelFeatures.forEach((/** @type {*} */ feature) => {
 						// Feature is an object with level, name, entries, source, etc.
 						if (typeof feature === "object" && feature.level === 1) {
 							const featureName = feature.name || Renderer.findName(feature);
@@ -1703,20 +1745,20 @@ class CharacterSheetBuilder {
 
 		// Build set of currently selected features (name|source)
 		const selectedKeys = new Set();
-		Object.values(this._selectedOptionalFeatures).flat().forEach(opt => {
+		Object.values(this._selectedOptionalFeatures).flat().forEach((/** @type {*} */ opt) => {
 			selectedKeys.add(`${opt.name}|${opt.source}`);
 		});
 
 		// Remove optional features from state that are no longer selected
 		// Only remove level 1 optional features for this class (builder context)
 		const className = this._selectedClass?.name;
-		const existingOptFeatures = this._state.getFeatures().filter(f =>
+		const existingOptFeatures = this._state.getFeatures().filter((/** @type {*} */ f) =>
 			f.featureType === "Optional Feature"
 			&& f.level === 1
 			&& f.className === className,
 		);
 
-		existingOptFeatures.forEach(f => {
+		existingOptFeatures.forEach((/** @type {*} */ f) => {
 			const key = `${f.name}|${f.source}`;
 			if (!selectedKeys.has(key)) {
 				this._state.removeFeature(f.name, f.source);
@@ -1724,7 +1766,7 @@ class CharacterSheetBuilder {
 		});
 
 		// Add selected optional features
-		Object.entries(this._selectedOptionalFeatures).forEach(([featureKey, features]) => {
+		Object.entries(this._selectedOptionalFeatures).forEach(([/** @type {*} */ featureKey, /** @type {*} */ features]) => {
 			// Combat method entities (data/homebrew "combatMethod" entries) do
 			// NOT carry a `featureType` field — they have `tradition`/`degree`
 			// instead. Without this fallback, the resulting state feature has
@@ -1734,7 +1776,7 @@ class CharacterSheetBuilder {
 			// total instead of `total - existing`). Mirrors the level-up
 			// fallback at `charactersheet-levelup.js:3757`.
 			const featureTypesFromKey = featureKey.split("_");
-			features.forEach(opt => {
+			features.forEach((/** @type {*} */ opt) => {
 				const optionalFeatureTypes = (Array.isArray(opt.featureType) && opt.featureType.length)
 					? opt.featureType
 					: featureTypesFromKey;
@@ -1755,8 +1797,8 @@ class CharacterSheetBuilder {
 
 		// Apply race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
 		if (this._selectedRaceOptionalFeatures) {
-			Object.entries(this._selectedRaceOptionalFeatures).forEach(([featureKey, features]) => {
-				features.forEach(opt => {
+			Object.entries(this._selectedRaceOptionalFeatures).forEach(([/** @type {*} */ featureKey, /** @type {*} */ features]) => {
+				features.forEach((/** @type {*} */ opt) => {
 					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(opt, {
 						raceSource: this._selectedRace?.source,
 						level: 1,
@@ -1771,8 +1813,8 @@ class CharacterSheetBuilder {
 	_applySelectedFeatureOptions () {
 		if (!this._selectedFeatureOptions) return;
 
-		Object.entries(this._selectedFeatureOptions).forEach(([featureKey, options]) => {
-			options.forEach(opt => {
+		Object.entries(this._selectedFeatureOptions).forEach(([/** @type {*} */ featureKey, /** @type {*} */ options]) => {
+			options.forEach((/** @type {*} */ opt) => {
 				// For class feature options (like Specialties), look up the full feature data
 				if (opt.type === "classFeature" && opt.ref) {
 					const fullOpt = this._getClassFeatureDataFromRef(opt.ref);
@@ -1798,7 +1840,7 @@ class CharacterSheetBuilder {
 					if (skillSelections?.length) {
 						const skillChoice = this._parseFeatureSkillChoice(opt);
 						if (skillChoice) {
-							skillSelections.forEach(skill => {
+							skillSelections.forEach((/** @type {*} */ skill) => {
 								const skillKey = skill.toLowerCase().replace(/\s+/g, "");
 								if (skillChoice.type === "proficiency") {
 									this._state.setSkillProficiency(skillKey, 1);
@@ -1820,7 +1862,7 @@ class CharacterSheetBuilder {
 
 					// Apply auto-effects (passive bonuses, etc.) that don't require user choices
 					const autoEffects = this._parseFeatureAutoEffects(opt);
-					autoEffects.forEach(effect => {
+					autoEffects.forEach((/** @type {*} */ effect) => {
 						this._state.addNamedModifier({
 							name: opt.name,
 							type: effect.type,
@@ -1855,15 +1897,10 @@ class CharacterSheetBuilder {
 						Parser.SRC_PHB,
 					]);
 
-					const fullOpt = allOptFeatures.find(f =>
+					const fullOpt = allOptFeatures.find((/** @type {*} */ f) =>
 						f.name === opt.name
 						&& f.source === resolvedSource,
-					) || allOptFeatures.find(f => f.name === opt.name);
-
-					if (!fullOpt) {
-						const similar = allOptFeatures.filter(f => f.name.toLowerCase().includes(opt.name.toLowerCase().substring(0, 5)));
-						console.warn(`[CharSheet Builder] Could not find optional feature "${opt.name}" (source: ${opt.source}). Similar names found:`, similar.map(f => `${f.name}|${f.source}`).join(", "));
-					}
+					) || allOptFeatures.find((/** @type {*} */ f) => f.name === opt.name);
 
 					const resolvedOptData = {
 						...(fullOpt || {}),
@@ -1890,7 +1927,7 @@ class CharacterSheetBuilder {
 					if (skillSelections?.length) {
 						const skillChoice = CharacterSheetClassUtils.parseFeatureSkillChoice(opt, [], {optionalFeatures: allOptFeatures, resolvedData: fullOpt});
 						if (skillChoice) {
-							skillSelections.forEach(skill => {
+							skillSelections.forEach((/** @type {*} */ skill) => {
 								const skillKey = skill.toLowerCase().replace(/\s+/g, "");
 								if (skillChoice.type === "proficiency") {
 									this._state.setSkillProficiency(skillKey, 1);
@@ -1911,7 +1948,7 @@ class CharacterSheetBuilder {
 
 					// Apply auto-effects (passive bonuses, speed, etc.)
 					const autoEffects = CharacterSheetClassUtils.parseFeatureAutoEffects(opt, [], {optionalFeatures: allOptFeatures, resolvedData: fullOpt});
-					autoEffects.forEach(effect => {
+					autoEffects.forEach((/** @type {*} */ effect) => {
 						this._state.addNamedModifier({
 							name: opt.name,
 							type: effect.type,
@@ -1932,7 +1969,7 @@ class CharacterSheetBuilder {
 
 		// Apply selected ability bonuses from 2024 background
 		if (this._selectedAbilityBonuses) {
-			Object.entries(this._selectedAbilityBonuses).forEach(([key, value]) => {
+			Object.entries(this._selectedAbilityBonuses).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
 				if (key.startsWith("bg_") && !key.includes("weight") && value) {
 					const weightKey = `${key}_weight`;
 					const bonus = this._selectedAbilityBonuses[weightKey] || 0;
@@ -1946,8 +1983,8 @@ class CharacterSheetBuilder {
 
 		// Skill proficiencies
 		if (this._selectedBackground.skillProficiencies) {
-			this._selectedBackground.skillProficiencies.forEach(skillSet => {
-				Object.keys(skillSet).forEach(skill => {
+			this._selectedBackground.skillProficiencies.forEach((/** @type {*} */ skillSet) => {
+				Object.keys(skillSet).forEach((/** @type {*} */ skill) => {
 					if (skill !== "choose" && skill !== "any") {
 						const skillKey = skill.toLowerCase().replace(/\s+/g, "");
 						this._state.setSkillProficiency(skillKey, 1);
@@ -1958,11 +1995,11 @@ class CharacterSheetBuilder {
 
 		// Tool proficiencies - fixed ones from background
 		if (this._selectedBackground.toolProficiencies) {
-			this._selectedBackground.toolProficiencies.forEach(toolSet => {
-				Object.entries(toolSet).forEach(([key, value]) => {
+			this._selectedBackground.toolProficiencies.forEach((/** @type {*} */ toolSet) => {
+				Object.entries(toolSet).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
 					// Only add fixed tool proficiencies here (not choose/any/anyMusical)
 					if (key !== "choose" && key !== "any" && key !== "anyArtisansTool" && key !== "anyMusicalInstrument" && value === true) {
-						this._state.addToolProficiency(key.toTitleCase());
+						this._state.addToolProficiency((/** @type {*} */ (key)).toTitleCase());
 					}
 				});
 			});
@@ -1970,20 +2007,20 @@ class CharacterSheetBuilder {
 
 		// Tool proficiencies - choices made by user
 		if (this._selectedToolProficiencies?.length) {
-			this._selectedToolProficiencies.forEach(choice => {
+			this._selectedToolProficiencies.forEach((/** @type {*} */ choice) => {
 				if (choice.tool) {
-					this._state.addToolProficiency(choice.tool.toTitleCase());
+					this._state.addToolProficiency((/** @type {*} */ (choice.tool)).toTitleCase());
 				}
 			});
 		}
 
 		// Languages - fixed ones from background
 		if (this._selectedBackground.languageProficiencies) {
-			this._selectedBackground.languageProficiencies.forEach(langSet => {
-				Object.entries(langSet).forEach(([key, value]) => {
+			this._selectedBackground.languageProficiencies.forEach((/** @type {*} */ langSet) => {
+				Object.entries(langSet).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
 					// Only add fixed language proficiencies here (not anyStandard/any)
 					if (key !== "anyStandard" && key !== "any" && value === true) {
-						this._state.addLanguage(key.toTitleCase());
+						this._state.addLanguage((/** @type {*} */ (key)).toTitleCase());
 					}
 				});
 			});
@@ -1991,7 +2028,7 @@ class CharacterSheetBuilder {
 
 		// Languages - choices made by user
 		if (this._selectedLanguages?.length) {
-			this._selectedLanguages.forEach(choice => {
+			this._selectedLanguages.forEach((/** @type {*} */ choice) => {
 				if (choice.language) {
 					this._state.addLanguage(choice.language);
 				}
@@ -2007,7 +2044,7 @@ class CharacterSheetBuilder {
 	/**
 	 * Undo everything that was applied by case 3 (_applyClassFeatures + addClass) so the user
 	 * can switch class without accumulating stale data.  Called at the top of case 3.
-	 * @param {object|null} snapshot - Built by case 3 after the previous class was applied
+	 * @param {*} snapshot - Built by case 3 after the previous class was applied
 	 */
 	_clearClassApplication (snapshot) {
 		if (!snapshot) return;
@@ -2016,19 +2053,19 @@ class CharacterSheetBuilder {
 		this._state.removeClass(snapshot.className, snapshot.classSource);
 
 		// Remove save proficiencies granted by this class
-		(snapshot.saveProficiencies || []).forEach(p => this._state.removeSaveProficiency(p));
+		(snapshot.saveProficiencies || []).forEach((/** @type {*} */ p) => this._state.removeSaveProficiency(p));
 
 		// Reset class skill proficiencies to 0
-		(snapshot.skills || []).forEach(s => this._state.setSkillProficiency(s, 0));
+		(snapshot.skills || []).forEach((/** @type {*} */ s) => this._state.setSkillProficiency(s, 0));
 
 		// Reset expertise-level skills to 0
-		(snapshot.expertiseSkills || []).forEach(s => this._state.setSkillProficiency(s, 0));
+		(snapshot.expertiseSkills || []).forEach((/** @type {*} */ s) => this._state.setSkillProficiency(s, 0));
 
 		// Re-assert background skill proficiencies in case there was an overlap
 		// (e.g., background + class both granted Acrobatics)
 		if (this._selectedBackground?.skillProficiencies) {
-			this._selectedBackground.skillProficiencies.forEach(skillSet => {
-				Object.keys(skillSet).forEach(skill => {
+			this._selectedBackground.skillProficiencies.forEach((/** @type {*} */ skillSet) => {
+				Object.keys(skillSet).forEach((/** @type {*} */ skill) => {
 					if (skill !== "choose" && skill !== "any") {
 						this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
 					}
@@ -2037,17 +2074,17 @@ class CharacterSheetBuilder {
 		}
 
 		// Remove armor, weapon, and tool proficiencies
-		(snapshot.armorProficiencies || []).forEach(a => { if (a) this._state.removeArmorProficiency(a); });
-		(snapshot.weaponProficiencies || []).forEach(w => { if (w) this._state.removeWeaponProficiency(w); });
-		(snapshot.toolProficiencies || []).forEach(t => { if (t) this._state.removeToolProficiency(t); });
+		(snapshot.armorProficiencies || []).forEach((/** @type {*} */ a) => { if (a) this._state.removeArmorProficiency(a); });
+		(snapshot.weaponProficiencies || []).forEach((/** @type {*} */ w) => { if (w) this._state.removeWeaponProficiency(w); });
+		(snapshot.toolProficiencies || []).forEach((/** @type {*} */ t) => { if (t) this._state.removeToolProficiency(t); });
 
 		// Remove class feature languages
-		(snapshot.languages || []).forEach(l => { if (l) this._state.removeLanguage(l); });
+		(snapshot.languages || []).forEach((/** @type {*} */ l) => { if (l) this._state.removeLanguage(l); });
 
 		// Remove all features belonging to this class
 		this._state.getFeatures()
-			.filter(f => f.className === snapshot.className)
-			.forEach(f => this._state.removeFeature(f.name, f.source));
+			.filter((/** @type {*} */ f) => f.className === snapshot.className)
+			.forEach((/** @type {*} */ f) => this._state.removeFeature(f.name, f.source));
 
 		// Clear weapon masteries (class-granted)
 		this._state.setWeaponMasteries([]);
@@ -2061,8 +2098,13 @@ class CharacterSheetBuilder {
 		this._state.removeLevelHistoryEntry(1);
 	}
 
+	/**
+	 * @param {*} entries
+	 * @param {*} source
+	 * @param {*} featureType
+	 */
 	_addFeatureEntries (entries, source, featureType) {
-		entries.forEach(entry => {
+		entries.forEach((/** @type {*} */ entry) => {
 			if (typeof entry === "object" && entry.name) {
 				this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
 					{
@@ -2077,6 +2119,10 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Look up full class feature data to get description/entries
+	 * @param {*} featureName
+	 * @param {*} className
+	 * @param {*} source
+	 * @param {*} level
 	 */
 	_getClassFeatureData (featureName, className, source, level) {
 		const classFeatures = this._page.getClassFeatures();
@@ -2086,7 +2132,7 @@ class CharacterSheetBuilder {
 
 		// Class features can have different property combinations depending on source
 		// First try exact source match
-		const exactResult = classFeatures.find(f => {
+		const exactResult = classFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.level !== level) return false;
@@ -2096,7 +2142,7 @@ class CharacterSheetBuilder {
 		if (exactResult) return exactResult;
 
 		// Fall back to flexible PHB/XPHB/SRD matching
-		const result = classFeatures.find(f => {
+		const result = classFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.level !== level) return false;
@@ -2110,19 +2156,16 @@ class CharacterSheetBuilder {
 			return true;
 		});
 
-		if (!result && featureName) {
-			// Try to find similar features for debugging
-			const similar = classFeatures.filter(f => f.name === featureName);
-			if (similar.length) {
-			} else {
-			}
-		} else if (result) {
-		}
 		return result;
 	}
 
 	/**
 	 * Look up full subclass feature data to get description/entries
+	 * @param {*} featureName
+	 * @param {*} className
+	 * @param {*} subclassShortName
+	 * @param {*} source
+	 * @param {*} level
 	 */
 	_getSubclassFeatureData (featureName, className, subclassShortName, source, level) {
 		const subclassFeatures = this._page.getSubclassFeatures();
@@ -2130,7 +2173,7 @@ class CharacterSheetBuilder {
 			return null;
 		}
 
-		const result = subclassFeatures.find(f => {
+		const result = subclassFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.subclassShortName !== subclassShortName) return false;
@@ -2144,11 +2187,13 @@ class CharacterSheetBuilder {
 			return true;
 		});
 
-		if (!result && featureName) {
-		}
 		return result;
 	}
 
+	/**
+	 * @param {*} cls
+	 * @param {*} level
+	 */
 	_addClassResources (cls, level) {
 		// Fallback class-specific resources for features that don't have parseable descriptions
 		// The auto-detection in addFeature() handles most cases, but some features have
@@ -2161,11 +2206,11 @@ class CharacterSheetBuilder {
 			"Monk": [
 				// Ki/Focus Points - level-based, not parseable from text
 				// Use "Focus Points" for 2024 (XPHB) monks, "Ki Points" for 2014 (PHB) monks
-				{name: "__MONK_RESOURCE__", maxByLevel: lvl => lvl >= 2 ? lvl : 0, recharge: "short"},
+				{name: "__MONK_RESOURCE__", maxByLevel: (/** @type {*} */ lvl) => lvl >= 2 ? lvl : 0, recharge: "short"},
 			],
 			"Sorcerer": [
 				{name: "Sorcery Points",
-					maxByLevel: lvl => {
+					maxByLevel: (/** @type {*} */ lvl) => {
 						const isTGTT = cls.source === "TGTT";
 						if (isTGTT) return lvl + 1;
 						return lvl >= 2 ? lvl : 0;
@@ -2174,7 +2219,7 @@ class CharacterSheetBuilder {
 			],
 			"Paladin": [
 				// Lay on Hands pool = 5 * level, not parseable
-				{name: "Lay on Hands", maxByLevel: lvl => lvl * 5, recharge: "long"},
+				{name: "Lay on Hands", maxByLevel: (/** @type {*} */ lvl) => lvl * 5, recharge: "long"},
 			],
 			"Bard": [
 				// Bardic Inspiration uses = CHA mod, recharge changes at level 5
@@ -2182,10 +2227,10 @@ class CharacterSheetBuilder {
 			],
 		};
 
-		const classResources = resources[cls.name];
+		const classResources = (/** @type {*} */ (resources))[cls.name];
 		if (classResources) {
 			const existingResources = this._state.getResources();
-			classResources.forEach(resource => {
+			classResources.forEach((/** @type {*} */ resource) => {
 				// Resolve special placeholder for monk Ki/Focus Points
 				let resourceName = resource.name;
 				if (resourceName === "__MONK_RESOURCE__") {
@@ -2195,10 +2240,10 @@ class CharacterSheetBuilder {
 				// Skip if resource was already auto-added (check both Ki and Focus for monks)
 				const isMonkResource = resourceName === "Ki Points" || resourceName === "Focus Points";
 				if (isMonkResource) {
-					if (existingResources.find(r => r.name === "Ki Points" || r.name === "Focus Points")) {
+					if (existingResources.find((/** @type {*} */ r) => r.name === "Ki Points" || r.name === "Focus Points")) {
 						return;
 					}
-				} else if (existingResources.find(r => r.name === resourceName)) {
+				} else if (existingResources.find((/** @type {*} */ r) => r.name === resourceName)) {
 					return;
 				}
 
@@ -2222,6 +2267,10 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	/**
+	 * @param {*} className
+	 * @param {*} level
+	 */
 	_getSpellSlotsForLevel (className, level) {
 		// Full casters
 		const fullCasterSlots = {
@@ -2246,9 +2295,9 @@ class CharacterSheetBuilder {
 		const halfCasters = ["Paladin", "Ranger", "Artificer"];
 
 		if (fullCasters.includes(className)) {
-			return fullCasterSlots[level] || {};
+			return (/** @type {*} */ (fullCasterSlots))[level] || {};
 		} else if (halfCasters.includes(className)) {
-			return halfCasterSlots[level] || {};
+			return (/** @type {*} */ (halfCasterSlots))[level] || {};
 		}
 
 		return {};
@@ -2280,7 +2329,7 @@ class CharacterSheetBuilder {
 			// Small delay to let the UI settle, then open Quick Build
 			setTimeout(() => {
 				void this._page._quickBuild.showFromBuilder(quickBuildLaunchData)
-					.catch(err => {
+					.catch((/** @type {*} */ err) => {
 						void err;
 						JqueryUtil.doToast({type: "warning", content: "Character created, but Quick Build could not be opened automatically."});
 					});
@@ -2293,7 +2342,7 @@ class CharacterSheetBuilder {
 	}
 
 	_renderCurrentStep () {
-		const content = document.getElementById("charsheet-builder-content");
+		const content = /** @type {*} */ (document.getElementById("charsheet-builder-content"));
 		content.innerHTML = "";
 
 		switch (this._currentStep) {
@@ -2322,6 +2371,9 @@ class CharacterSheetBuilder {
 	}
 
 	// #region Step 1: Race
+	/**
+	 * @param {*} content
+	 */
 	_renderRaceStep (content) {
 		// Get races filtered by allowed sources
 		const races = this._page.filterByAllowedSources(this._page.getRaces());
@@ -2330,7 +2382,7 @@ class CharacterSheetBuilder {
 		// Group key is "baseName|baseSource" for subraces, or "name|source" for standalone races
 		const raceGroups = new Map();
 
-		races.forEach(race => {
+		races.forEach((/** @type {*} */ race) => {
 			if (race._baseName && race._baseSource) {
 				// This is a subrace - group under the base race
 				const groupKey = `${race._baseName}|${race._baseSource}`;
@@ -2389,9 +2441,9 @@ class CharacterSheetBuilder {
 
 		content.append(container);
 
-		const list = document.getElementById("builder-race-list");
+		const list = /** @type {*} */ (document.getElementById("builder-race-list"));
 		const preview = document.getElementById("builder-race-preview");
-		const search = document.getElementById("builder-race-search");
+		const search = /** @type {*} */ (document.getElementById("builder-race-search"));
 
 		// Populate race list - show grouped races
 		const renderRaceList = (filter = "") => {
@@ -2400,16 +2452,16 @@ class CharacterSheetBuilder {
 
 			// Convert map to array and sort by base name
 			const sortedGroups = Array.from(raceGroups.entries())
-				.filter(([key, group]) => {
+				.filter(([/** @type {*} */ key, /** @type {*} */ group]) => {
 					if (!filter) return true;
 					// Search in base name and all subrace names
 					if (group.baseName.toLowerCase().includes(filterLower)) return true;
-					if (group.subraces.some(sr => sr.name.toLowerCase().includes(filterLower))) return true;
+					if (group.subraces.some((/** @type {*} */ sr) => sr.name.toLowerCase().includes(filterLower))) return true;
 					return false;
 				})
-				.sort((a, b) => a[1].baseName.localeCompare(b[1].baseName));
+				.sort((/** @type {*} */ a, /** @type {*} */ b) => a[1].baseName.localeCompare(b[1].baseName));
 
-			sortedGroups.forEach(([groupKey, group]) => {
+			sortedGroups.forEach(([/** @type {*} */ groupKey, /** @type {*} */ group]) => {
 				const hasSubraces = group.subraces.length > 0;
 				const displayName = group.baseName;
 
@@ -2428,7 +2480,7 @@ class CharacterSheetBuilder {
 				`});
 
 				item.addEventListener("click", () => {
-					[...list.querySelectorAll(".charsheet__builder-list-item")].forEach(el => el.classList.remove("active"));
+					[...list.querySelectorAll(".charsheet__builder-list-item")].forEach((/** @type {*} */ el) => el.classList.remove("active"));
 					item.classList.add("active");
 
 					// Reset racial proficiency selections when race group changes
@@ -2456,7 +2508,7 @@ class CharacterSheetBuilder {
 			});
 		};
 
-		search.addEventListener("input", (e) => renderRaceList(e.target.value));
+		search.addEventListener("input", (/** @type {*} */ e) => renderRaceList(e.target.value));
 		renderRaceList();
 
 		// If race already selected, show preview
@@ -2477,6 +2529,8 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render preview for a race group with subrace selection
+	 * @param {*} preview
+	 * @param {*} group
 	 */
 	_renderRaceGroupPreview (preview, group) {
 		preview.innerHTML = "";
@@ -2501,9 +2555,9 @@ class CharacterSheetBuilder {
 		const select = subraceSection.querySelector("select");
 
 		// Sort subraces alphabetically
-		const sortedSubraces = [...group.subraces].sort((a, b) => a.name.localeCompare(b.name));
+		const sortedSubraces = [...group.subraces].sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 
-		sortedSubraces.forEach((subrace, idx) => {
+		sortedSubraces.forEach((/** @type {*} */ subrace, /** @type {*} */ idx) => {
 			// Extract just the subrace name part from "BaseName (SubraceName)"
 			const subraceName = this._extractSubraceName(subrace.name, group.baseName);
 			const sourceAbv = Parser.sourceJsonToAbv(subrace.source);
@@ -2513,7 +2567,7 @@ class CharacterSheetBuilder {
 		// Container for subrace details
 		const detailsContainer = e_({tag: "div", id: "builder-subrace-details", clazz: "mt-3"});
 
-		select.addEventListener("change", (e) => {
+		select.addEventListener("change", (/** @type {*} */ e) => {
 			const idx = e.target.value;
 			if (idx !== "") {
 				const selectedSubrace = sortedSubraces[parseInt(idx)];
@@ -2544,7 +2598,7 @@ class CharacterSheetBuilder {
 
 		// Pre-select if already chosen
 		if (this._selectedRace) {
-			const idx = sortedSubraces.findIndex(sr =>
+			const idx = sortedSubraces.findIndex((/** @type {*} */ sr) =>
 				sr.name === this._selectedRace.name && sr.source === this._selectedRace.source,
 			);
 			if (idx >= 0) {
@@ -2561,6 +2615,8 @@ class CharacterSheetBuilder {
 	/**
 	 * Extract subrace name from full race name
 	 * e.g., "Elf (High Elf)" -> "High Elf", "Dwarf (Hill Dwarf)" -> "Hill Dwarf"
+	 * @param {*} fullName
+	 * @param {*} baseName
 	 */
 	_extractSubraceName (fullName, baseName) {
 		const match = fullName.match(/\(([^)]+)\)$/);
@@ -2574,6 +2630,9 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render details for a selected subrace
+	 * @param {*} container
+	 * @param {*} race
+	 * @param {*} baseName
 	 */
 	_renderSubraceDetails (container, race, baseName) {
 		container.innerHTML = "";
@@ -2586,21 +2645,21 @@ class CharacterSheetBuilder {
 
 		// Ability scores
 		if (race.ability?.length) {
-			const abilityOptionTexts = race.ability.map(a => {
+			const abilityOptionTexts = race.ability.map((/** @type {*} */ a) => {
 				const parts = [];
 				// Fixed entries (e.g., cha: 2) — always show
 				Object.entries(a)
 					.filter(([k]) => k !== "choose" && Parser.ABIL_ABVS.includes(k))
-					.forEach(([k, v]) => parts.push(`${k.toUpperCase()} +${v}`));
+					.forEach(([/** @type {*} */ k, /** @type {*} */ v]) => parts.push(`${k.toUpperCase()} +${v}`));
 				// Choose entries
 				if (a.choose) {
 					const c = a.choose;
 					if (c.weighted) {
 						const weights = c.weighted.weights || [2, 1];
-						const fromList = (c.weighted.from || Parser.ABIL_ABVS).map(ab => ab.toUpperCase()).join(", ");
+						const fromList = (c.weighted.from || Parser.ABIL_ABVS).map((/** @type {*} */ ab) => ab.toUpperCase()).join(", ");
 						parts.push(`Choose ${weights.length}: +${weights.join("/+")} from ${fromList}`);
 					} else {
-						const fromList = (c.from || Parser.ABIL_ABVS).map(ab => ab.toUpperCase()).join(", ");
+						const fromList = (c.from || Parser.ABIL_ABVS).map((/** @type {*} */ ab) => ab.toUpperCase()).join(", ");
 						parts.push(`Choose ${c.count || 1}: +${c.amount || 1} from ${fromList}`);
 					}
 				}
@@ -2629,14 +2688,14 @@ class CharacterSheetBuilder {
 
 		// Size
 		if (race.size) {
-			const sizeStr = race.size.map(s => Parser.sizeAbvToFull(s)).join(" or ");
+			const sizeStr = race.size.map((/** @type {*} */ s) => Parser.sizeAbvToFull(s)).join(" or ");
 			details.append(e_({tag: "p", html: `<strong>Size:</strong> ${sizeStr}`}));
 		}
 
 		// Traits
 		if (race.entries) {
 			const traits = e_({tag: "div", html: `<strong>Traits:</strong>`, clazz: "mt-2"});
-			race.entries.forEach(entry => {
+			race.entries.forEach((/** @type {*} */ entry) => {
 				if (typeof entry === "object" && entry.name) {
 					traits.append(e_({tag: "p", html: `<em>${entry.name}.</em> ${Renderer.get().render({entries: entry.entries || []})}`}));
 				}
@@ -2667,14 +2726,14 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render ability score choice dropdowns for races with choose-based ASI
-	 * @param {Object} race - The race data
+	 * @param {*} race - The race data
 	 * @returns {HTMLElement|null} Element with dropdowns, or null if no choices
 	 */
 	_renderRaceAbilityChoices (race) {
 		if (!race.ability?.length) return null;
 
 		// Check if any ability set has a choose block
-		const hasAnyChoose = race.ability.some(abiSet => abiSet.choose);
+		const hasAnyChoose = race.ability.some((/** @type {*} */ abiSet) => abiSet.choose);
 		// For multi-option ability arrays we always need the UI (for the option selector)
 		if (!hasAnyChoose && race.ability.length <= 1) return null;
 
@@ -2692,7 +2751,7 @@ class CharacterSheetBuilder {
 			const optionSelector = e_({tag: "div", clazz: "charsheet__builder-asi-option-selector mb-2"});
 			const selectedSetIdx = this._selectedRacialAbilitySetIdx[raceKey] ?? 0;
 
-			race.ability.forEach((abiSet, optIdx) => {
+			race.ability.forEach((/** @type {*} */ abiSet, /** @type {*} */ optIdx) => {
 				const label = this._describeAbilitySet(abiSet);
 				const checked = optIdx === selectedSetIdx ? "checked" : "";
 				const radio = e_({outer: `
@@ -2705,7 +2764,7 @@ class CharacterSheetBuilder {
 				radio.querySelector("input").addEventListener("change", () => {
 					this._selectedRacialAbilitySetIdx[raceKey] = optIdx;
 					// Clear previous choose selections for this race since option changed
-					Object.keys(this._selectedRacialAbilityChoices[raceKey]).forEach(k => {
+					Object.keys(this._selectedRacialAbilityChoices[raceKey]).forEach((/** @type {*} */ k) => {
 						delete this._selectedRacialAbilityChoices[raceKey][k];
 					});
 					// Re-render the dropdown section
@@ -2738,12 +2797,13 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Get a human-readable description of an ability set option
+	 * @param {*} abiSet
 	 */
 	_describeAbilitySet (abiSet) {
 		const parts = [];
 		Object.entries(abiSet)
 			.filter(([k]) => k !== "choose" && Parser.ABIL_ABVS.includes(k))
-			.forEach(([k, v]) => parts.push(`${k.toUpperCase()} +${v}`));
+			.forEach(([/** @type {*} */ k, /** @type {*} */ v]) => parts.push(`${k.toUpperCase()} +${v}`));
 		if (abiSet.choose) {
 			const c = abiSet.choose;
 			if (c.weighted) {
@@ -2760,6 +2820,10 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render dropdowns for a single ability set's choose block
+	 * @param {*} abiSet
+	 * @param {*} abiIdx
+	 * @param {*} raceKey
+	 * @param {*} container
 	 */
 	_renderAbilityChoiceDropdowns (abiSet, abiIdx, raceKey, container) {
 		if (!abiSet.choose) return;
@@ -2779,26 +2843,26 @@ class CharacterSheetBuilder {
 			const select = e_({tag: "select", clazz: "ve-form-control form-control--minimal ve-inline-block w-auto", attrs: {"data-race-asi-key": choiceKey}});
 			select.append(e_({tag: "option", val: "", txt: "-- Select --"}));
 
-			from.forEach(ab => {
+			from.forEach((/** @type {*} */ ab) => {
 				const abName = Parser.attAbvToFull(ab);
 				const opt = e_({tag: "option", val: ab, txt: abName});
 				if (this._selectedRacialAbilityChoices[raceKey]?.[choiceKey] === ab) opt.selected = true;
 				select.append(opt);
 			});
 
-			select.addEventListener("change", ((capturedAmount) => (e) => {
+			select.addEventListener("change", ((/** @type {*} */ capturedAmount) => (/** @type {*} */ e) => {
 				const val = e.target.value;
 				this._selectedRacialAbilityChoices[raceKey][choiceKey] = val || null;
 				this._selectedRacialAbilityChoices[raceKey][`${choiceKey}_amount`] = capturedAmount;
 
 				// Disable already-selected abilities in other dropdowns
-				[...container.querySelectorAll("select")].forEach(sel => {
+				[...container.querySelectorAll("select")].forEach((/** @type {*} */ sel) => {
 					const selKey = sel.dataset.raceAsiKey;
-					[...sel.querySelectorAll("option")].forEach(opt => {
+					[...sel.querySelectorAll("option")].forEach((/** @type {*} */ opt) => {
 						const optVal = opt.value;
 						if (!optVal) return;
 						const isSelectedElsewhere = Object.entries(this._selectedRacialAbilityChoices[raceKey])
-							.some(([k, v]) => k.startsWith("choose_") && !k.includes("_amount") && k !== selKey && v === optVal);
+							.some(([/** @type {*} */ k, /** @type {*} */ v]) => k.startsWith("choose_") && !k.includes("_amount") && k !== selKey && v === optVal);
 						opt.disabled = !!(optVal && isSelectedElsewhere);
 					});
 				});
@@ -2813,7 +2877,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render UI for racial proficiency choices (skills and tools)
-	 * @param {Object} race - The race data
+	 * @param {*} race - The race data
 	 * @returns {HTMLElement|null} - Element containing proficiency choices, or null if none
 	 */
 	_renderRacialProficiencyChoices (race) {
@@ -2822,7 +2886,7 @@ class CharacterSheetBuilder {
 
 		// Skill proficiency choices
 		if (race.skillProficiencies) {
-			race.skillProficiencies.forEach((skillProf, profIdx) => {
+			race.skillProficiencies.forEach((/** @type {*} */ skillProf, /** @type {*} */ profIdx) => {
 				if (skillProf.choose) {
 					hasChoices = true;
 					const chooseFrom = skillProf.choose.from || [];
@@ -2844,7 +2908,7 @@ class CharacterSheetBuilder {
 
 		// Tool proficiency choices
 		if (race.toolProficiencies) {
-			race.toolProficiencies.forEach((toolProf, profIdx) => {
+			race.toolProficiencies.forEach((/** @type {*} */ toolProf, /** @type {*} */ profIdx) => {
 				if (toolProf.choose) {
 					hasChoices = true;
 					const chooseFrom = toolProf.choose.from || [];
@@ -2881,7 +2945,7 @@ class CharacterSheetBuilder {
 			// For merged races, find feature names for subrace language proficiencies
 			const languageFeatureNames = this._findLanguageFeatureNames(race);
 
-			race.languageProficiencies.forEach((langProf, profIdx) => {
+			race.languageProficiencies.forEach((/** @type {*} */ langProf, /** @type {*} */ profIdx) => {
 				// Determine the feature name for this language proficiency entry
 				// First entry (profIdx=0) is usually base race, subsequent are from subrace features
 				const featureName = languageFeatureNames[profIdx] || "Racial Languages";
@@ -2916,11 +2980,11 @@ class CharacterSheetBuilder {
 	/**
 	 * Find feature names that grant language proficiencies from race entries
 	 * Returns an array where index corresponds to languageProficiencies index
-	 * @param {Object} race - The race data
+	 * @param {*} race - The race data
 	 * @returns {Array<string|null>} - Array of feature names
 	 */
 	_findLanguageFeatureNames (race) {
-		const names = [];
+		/** @type {*[]} */ const names = [];
 		if (!race.entries || !race.languageProficiencies) return names;
 
 		// Count how many language-granting features we need to find
@@ -2955,12 +3019,12 @@ class CharacterSheetBuilder {
 	 * @param {string[]|null} skills - Array of skill names to choose from, or null for any skill
 	 * @param {number} count - Number of skills to choose
 	 * @param {number} profIdx - Index for tracking multiple choice sections
-	 * @returns {jQuery} - jQuery element
+	 * @returns {*} - jQuery element
 	 */
 	_renderRacialSkillChoice (skills, count, profIdx) {
 		// Get skills dynamically from loaded data (supports homebrew) - fallback to Parser
-		const allSkills = this._page?.getSkillsList?.()?.map(s => s.name)
-			|| (Parser.SKILL_TO_ATB_ABV ? Object.keys(Parser.SKILL_TO_ATB_ABV).map(s => s.toTitleCase()) : [
+		const allSkills = this._page?.getSkillsList?.()?.map((/** @type {*} */ s) => s.name)
+			|| (Parser.SKILL_TO_ATB_ABV ? Object.keys(Parser.SKILL_TO_ATB_ABV).map((/** @type {*} */ s) => (/** @type {*} */ (s)).toTitleCase()) : [
 				"Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception",
 				"History", "Insight", "Intimidation", "Investigation", "Medicine",
 				"Nature", "Perception", "Performance", "Persuasion", "Religion",
@@ -2968,7 +3032,7 @@ class CharacterSheetBuilder {
 			]);
 
 		// Strip source suffix from skill names (e.g., "might|TGTT" -> "might") and title case
-		const availableSkills = skills ? skills.map(s => s.split("|")[0].toTitleCase()) : allSkills;
+		const availableSkills = skills ? skills.map((/** @type {*} */ s) => s.split("|")[0].toTitleCase()) : allSkills;
 		const label = skills ? `Choose ${count} skill${count > 1 ? "s" : ""} from:` : `Choose any ${count} skill${count > 1 ? "s" : ""}:`;
 
 		const section = e_({outer: `
@@ -2983,10 +3047,10 @@ class CharacterSheetBuilder {
 		const takenByOthers = this._getSkillsFromOtherSources("race");
 
 		// Remove any prior racial selections now taken by another source
-		this._selectedRacialSkills = this._selectedRacialSkills.filter(s => !takenByOthers.has(s));
+		this._selectedRacialSkills = this._selectedRacialSkills.filter((/** @type {*} */ s) => !takenByOthers.has(s));
 		section.querySelector(".racial-skill-count").textContent = this._selectedRacialSkills.length;
 
-		availableSkills.forEach(skill => {
+		availableSkills.forEach((/** @type {*} */ skill) => {
 			const isSelected = this._selectedRacialSkills.includes(skill);
 			const takenSource = takenByOthers.get(skill);
 			const lbl = e_({outer: `
@@ -2997,7 +3061,7 @@ class CharacterSheetBuilder {
 			`});
 
 			if (!takenSource) {
-				lbl.querySelector("input").addEventListener("change", (e) => {
+				lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
 						if (this._selectedRacialSkills.length < count) {
 							this._selectedRacialSkills.push(skill);
@@ -3006,7 +3070,7 @@ class CharacterSheetBuilder {
 							JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} skill${count > 1 ? "s" : ""}.`});
 						}
 					} else {
-						this._selectedRacialSkills = this._selectedRacialSkills.filter(s => s !== skill);
+						this._selectedRacialSkills = this._selectedRacialSkills.filter((/** @type {*} */ s) => s !== skill);
 					}
 					section.querySelector(".racial-skill-count").textContent = this._selectedRacialSkills.length;
 				});
@@ -3059,7 +3123,7 @@ class CharacterSheetBuilder {
 		let availableTools;
 		let label;
 		if (tools) {
-			availableTools = tools.map(t => t.toTitleCase());
+			availableTools = tools.map((/** @type {*} */ t) => (/** @type {*} */ (t)).toTitleCase());
 			label = `Choose ${count} tool${count > 1 ? "s" : ""} from:`;
 		} else if (toolType === "artisan") {
 			availableTools = artisanTools;
@@ -3082,7 +3146,7 @@ class CharacterSheetBuilder {
 
 		const checkboxes = section.querySelector(".charsheet__builder-tool-checkboxes");
 
-		availableTools.forEach(tool => {
+		availableTools.forEach((/** @type {*} */ tool) => {
 			const isSelected = this._selectedRacialTools.includes(tool);
 			const lbl = e_({outer: `
 				<label class="charsheet__builder-tool-checkbox mr-3 mb-1">
@@ -3091,7 +3155,7 @@ class CharacterSheetBuilder {
 				</label>
 			`});
 
-			lbl.querySelector("input").addEventListener("change", (e) => {
+			lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 				if (e.target.checked) {
 					if (this._selectedRacialTools.length < count) {
 						this._selectedRacialTools.push(tool);
@@ -3100,7 +3164,7 @@ class CharacterSheetBuilder {
 						JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} tool${count > 1 ? "s" : ""}.`});
 					}
 				} else {
-					this._selectedRacialTools = this._selectedRacialTools.filter(t => t !== tool);
+					this._selectedRacialTools = this._selectedRacialTools.filter((/** @type {*} */ t) => t !== tool);
 				}
 				section.querySelector(".racial-tool-count").textContent = this._selectedRacialTools.length;
 			});
@@ -3137,8 +3201,8 @@ class CharacterSheetBuilder {
 		}
 
 		// Ordering within each group matches the page's already-sorted lists
-		const reorder = (arr, reference) =>
-			[...reference.filter(l => arr.includes(l)), ...arr.filter(l => !reference.includes(l)).sort()];
+		const reorder = (/** @type {*} */ arr, /** @type {*} */ reference) =>
+			[...reference.filter((/** @type {*} */ l) => arr.includes(l)), ...arr.filter((/** @type {*} */ l) => !reference.includes(l)).sort()];
 
 		// Build name → source lookup (prefer priority sources)
 		const prioritySources = this._state.getPrioritySources() || [];
@@ -3152,24 +3216,26 @@ class CharacterSheetBuilder {
 			}
 		}
 
-		return {
+		return /** @type {*} */ ({
 			homebrew: homebrew.sort(),
 			standard: reorder(standard, grouped.standard),
 			exotic: reorder(exotic, grouped.exotic),
 			secret: reorder(secret, grouped.secret),
 			sourceLookup,
-		};
+		});
 	}
 
 	/**
 	 * Render grouped language checkboxes into a container element.
-	 * @param {{homebrew: string[], standard: string[], exotic: string[], secret: string[], sourceLookup: Map}} groupedLangs
+	 * @param {*} groupedLangs
 	 * @param {string[]} selectedArr - Mutable array of currently-selected language names
 	 * @param {number} maxCount - Maximum number of selections allowed
 	 * @param {HTMLElement} countEl - Span element showing the current selection count
 	 * @param {HTMLElement} container - Container to append groups into
 	 * @param {function} [onChange] - Called after every selection change
 	 * @param {{excludeGroups?: string[]}} [options]
+	 * @param {*} groupedLangs
+	 * @param {*} options
 	 */
 	_renderLanguageCheckboxGroup (groupedLangs, selectedArr, maxCount, countEl, container, onChange, options = {}) {
 		const { excludeGroups = [] } = options;
@@ -3184,12 +3250,12 @@ class CharacterSheetBuilder {
 
 		for (const key of ["homebrew", "standard", "exotic", "secret"]) {
 			if (excludeGroups.includes(key)) continue;
-			const langs = groupedLangs[key];
+			const langs = (/** @type {*} */ (groupedLangs))[key];
 			if (!langs?.length) continue;
 
 			const group = e_({outer: `
 				<div class="charsheet__builder-lang-group">
-					<div class="charsheet__builder-lang-group-header">${GROUP_LABELS[key]}</div>
+					<div class="charsheet__builder-lang-group-header">${(/** @type {*} */ (GROUP_LABELS))[key]}</div>
 					<div class="charsheet__builder-lang-group-items"></div>
 				</div>
 			`});
@@ -3205,7 +3271,7 @@ class CharacterSheetBuilder {
 						${lang}${sourceSpan}
 					</label>
 				`});
-				lbl.querySelector("input").addEventListener("change", (e) => {
+				lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
 						if (selectedArr.length < maxCount) {
 							selectedArr.push(lang);
@@ -3217,7 +3283,7 @@ class CharacterSheetBuilder {
 						const idx = selectedArr.indexOf(lang);
 						if (idx !== -1) selectedArr.splice(idx, 1);
 					}
-					countEl.textContent = selectedArr.length;
+					countEl.textContent = String(selectedArr.length);
 					if (onChange) onChange();
 				});
 				items.append(lbl);
@@ -3250,12 +3316,12 @@ class CharacterSheetBuilder {
 		let availableLanguages;
 		if (languages) {
 			// Process specific language choices (strip source suffixes like "|TGTT")
-			availableLanguages = languages.map(l => {
+			availableLanguages = languages.map((/** @type {*} */ l) => {
 				const name = l.split("|")[0];
-				return name.toTitleCase();
+				return (/** @type {*} */ (name)).toTitleCase();
 			});
 			// Sort chosen languages by priority sources too
-			availableLanguages.sort((a, b) => {
+			availableLanguages.sort((/** @type {*} */ a, /** @type {*} */ b) => {
 				// Check if language is from priority source (marked by presence in loaded data)
 				const aInAll = allLanguages.indexOf(a);
 				const bInAll = allLanguages.indexOf(b);
@@ -3297,7 +3363,7 @@ class CharacterSheetBuilder {
 			count,
 			countEl,
 			checkboxes,
-			null,
+			/** @type {*} */ (null),
 			{excludeGroups: ["secret"]},
 		);
 
@@ -3306,7 +3372,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render proficiency choice UI for subrace-specific proficiencies (e.g., Hub Residence Trilingual)
-	 * @param {Object} subrace - The subrace data
+	 * @param {*} subrace - The subrace data
 	 * @returns {HTMLElement|null} - jQuery element or null if no choices
 	 */
 	_renderSubraceProficiencyChoices (subrace) {
@@ -3321,7 +3387,7 @@ class CharacterSheetBuilder {
 
 		// Language proficiency choices (e.g., Trilingual from Hub Residence)
 		if (subrace.languageProficiencies) {
-			subrace.languageProficiencies.forEach((langProf, profIdx) => {
+			subrace.languageProficiencies.forEach((/** @type {*} */ langProf, /** @type {*} */ profIdx) => {
 				if (langProf.choose) {
 					hasChoices = true;
 					const chooseFrom = langProf.choose.from || [];
@@ -3352,7 +3418,7 @@ class CharacterSheetBuilder {
 	/**
 	 * Find the feature name for language proficiencies from subrace entries
 	 * Looks for entries mentioning "language" to find the feature name (e.g., "Trilinguals")
-	 * @param {Object} subrace - The subrace data
+	 * @param {*} subrace - The subrace data
 	 * @returns {string|null} - Feature name or null if not found
 	 */
 	_findSubraceLanguageFeatureName (subrace) {
@@ -3389,11 +3455,11 @@ class CharacterSheetBuilder {
 
 		let availableLanguages;
 		if (languages) {
-			availableLanguages = languages.map(l => {
+			availableLanguages = languages.map((/** @type {*} */ l) => {
 				const name = l.split("|")[0];
-				return name.toTitleCase();
+				return (/** @type {*} */ (name)).toTitleCase();
 			});
-			availableLanguages.sort((a, b) => {
+			availableLanguages.sort((/** @type {*} */ a, /** @type {*} */ b) => {
 				const aInAll = allLanguages.indexOf(a);
 				const bInAll = allLanguages.indexOf(b);
 				if (aInAll >= 0 && bInAll >= 0) return aInAll - bInAll;
@@ -3425,7 +3491,7 @@ class CharacterSheetBuilder {
 			count,
 			countEl,
 			checkboxes,
-			null,
+			/** @type {*} */ (null),
 			{excludeGroups: ["secret"]},
 		);
 
@@ -3434,13 +3500,13 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Get the total number of skill choices required by a race
-	 * @param {Object} race - The race data
+	 * @param {*} race - The race data
 	 * @returns {number} - Total number of skill choices required
 	 */
 	_getRacialSkillChoiceCount (race) {
 		let count = 0;
 		if (race.skillProficiencies) {
-			race.skillProficiencies.forEach(skillProf => {
+			race.skillProficiencies.forEach((/** @type {*} */ skillProf) => {
 				if (skillProf.choose) {
 					count += skillProf.choose.count || 1;
 				}
@@ -3454,13 +3520,13 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Get the total number of tool choices required by a race
-	 * @param {Object} race - The race data
+	 * @param {*} race - The race data
 	 * @returns {number} - Total number of tool choices required
 	 */
 	_getRacialToolChoiceCount (race) {
 		let count = 0;
 		if (race.toolProficiencies) {
-			race.toolProficiencies.forEach(toolProf => {
+			race.toolProficiencies.forEach((/** @type {*} */ toolProf) => {
 				if (toolProf.choose) {
 					count += toolProf.choose.count || 1;
 				}
@@ -3474,11 +3540,11 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Extract racial spell choices from additionalSpells data
-	 * @param {Object} race - The race data
-	 * @returns {Array} Array of {filter, ability, count, featureName} objects
+	 * @param {*} race - The race data
+	 * @returns {Array<*>} Array of {filter, ability, count, featureName} objects
 	 */
 	_getRacialSpellChoices (race) {
-		const choices = [];
+		/** @type {*[]} */ const choices = [];
 		if (!race.additionalSpells?.length) return choices;
 
 		for (const spellBlock of race.additionalSpells) {
@@ -3509,6 +3575,10 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Recursively extract spell choices from a spell list structure
+	 * @param {*} spellList
+	 * @param {*} ability
+	 * @param {*} sourceName
+	 * @param {*} choices
 	 */
 	_extractSpellChoices (spellList, ability, sourceName, choices) {
 		if (!spellList) return;
@@ -3528,7 +3598,7 @@ class CharacterSheetBuilder {
 				});
 			}
 		} else if (Array.isArray(spellList)) {
-			spellList.forEach(item => {
+			spellList.forEach((/** @type {*} */ item) => {
 				if (typeof item === "object" && item.choose) {
 					choices.push({
 						filter: item.choose,
@@ -3543,7 +3613,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render UI for racial spell choices
-	 * @param {Object} race - The race data
+	 * @param {*} race - The race data
 	 * @returns {HTMLElement|null} - jQuery element containing spell choices, or null if none
 	 */
 	_renderRacialSpellChoices (race) {
@@ -3552,7 +3622,7 @@ class CharacterSheetBuilder {
 
 		const container = e_({outer: `<div class="charsheet__builder-racial-spells mt-3"></div>`});
 
-		choices.forEach((choice, choiceIdx) => {
+		choices.forEach((/** @type {*} */ choice, /** @type {*} */ choiceIdx) => {
 			const section = this._renderRacialSpellChoice(choice, choiceIdx);
 			container.append(section);
 		});
@@ -3562,11 +3632,13 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render a single racial spell choice UI section
+	 * @param {*} choice
+	 * @param {*} choiceIdx
 	 */
 	_renderRacialSpellChoice (choice, choiceIdx) {
 		// Parse the filter to get a description
 		const filterParts = choice.filter.split("|");
-		const levelPart = filterParts.find(p => p.startsWith("level="));
+		const levelPart = filterParts.find((/** @type {*} */ p) => p.startsWith("level="));
 		const isCantrip = levelPart === "level=0";
 		const spellType = isCantrip ? "cantrip" : "spell";
 
@@ -3582,7 +3654,7 @@ class CharacterSheetBuilder {
 
 		const section = e_({outer: `
 			<div class="charsheet__builder-racial-spell-selection mt-2">
-				<p><strong>Racial ${spellType.toTitleCase()}:</strong> Choose ${choice.count} ${spellType}${abilityDesc}</p>
+				<p><strong>Racial ${(/** @type {*} */ (spellType)).toTitleCase()}:</strong> Choose ${choice.count} ${spellType}${abilityDesc}</p>
 				<div class="charsheet__builder-spell-choice">
 					<button class="btn btn-sm btn-outline-primary charsheet__builder-spell-btn">
 						${this._selectedRacialSpells[choiceIdx] ? this._selectedRacialSpells[choiceIdx].name : `Select ${spellType}...`}
@@ -3600,13 +3672,13 @@ class CharacterSheetBuilder {
 					<label class="ve-small">
 						Spellcasting Ability:
 						<select class="ve-form-control form-control--minimal ve-inline-block w-auto ms-1">
-							${choice.ability.map(ab => `<option value="${ab}" ${ab === currentAbility ? "selected" : ""}>${ab.toUpperCase()}</option>`).join("")}
+							${choice.ability.map((/** @type {*} */ ab) => `<option value="${ab}" ${ab === currentAbility ? "selected" : ""}>${ab.toUpperCase()}</option>`).join("")}
 						</select>
 					</label>
 				</div>
 			`});
 
-			abilityRow.querySelector("select").addEventListener("change", (e) => {
+			abilityRow.querySelector("select").addEventListener("change", (/** @type {*} */ e) => {
 				this._selectedRacialSpellAbilities[choiceIdx] = e.target.value;
 			});
 
@@ -3629,6 +3701,10 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Show spell picker modal for racial spell choice
+	 * @param {*} choice
+	 * @param {*} choiceIdx
+	 * @param {*} btn
+	 * @param {*} section
 	 */
 	async _showRacialSpellPicker (choice, choiceIdx, btn, section) {
 		if (!this._page._spells?.showFilteredSpellPicker) {
@@ -3641,7 +3717,7 @@ class CharacterSheetBuilder {
 			featureName: choice.featureName || "Racial Spell",
 		};
 
-		await this._page._spells.showFilteredSpellPicker(choiceObj, (spell) => {
+		await this._page._spells.showFilteredSpellPicker(choiceObj, (/** @type {*} */ spell) => {
 			// Store the selected spell
 			this._selectedRacialSpells[choiceIdx] = spell;
 
@@ -3661,20 +3737,20 @@ class CharacterSheetBuilder {
 	/**
 	 * Return the list of choosable optional features for a race's optionalfeatureProgression.
 	 * Excludes auto-granted features and filters by prerequisites (otherSummary pattern).
-	 * @param {Object} race
+	 * @param {*} race
 	 * @param {string[]} featureTypes - e.g. ["DW:C", "DW:S"]
-	 * @param {Object} alreadyChosen - map of featureKey → [featObj] for previously made choices
+	 * @param {*} alreadyChosen - map of featureKey → [featObj] for previously made choices
 	 * @returns {Object[]} Sorted/filtered list of available optional feature objects
 	 */
 	_getRaceOptFeatAvailableOptions (race, featureTypes, alreadyChosen) {
 		const allOptFeatures = this._page.getOptionalFeatures?.() || [];
-		const grantedNames = new Set((race.featureGrants || []).map(g => g.name));
-		const chosenNames = new Set(Object.values(alreadyChosen).flat().map(f => f.name));
+		const grantedNames = new Set((race.featureGrants || []).map((/** @type {*} */ g) => g.name));
+		const chosenNames = new Set(Object.values(alreadyChosen).flat().map((/** @type {*} */ f) => f.name));
 		const ownedNames = new Set([...grantedNames, ...chosenNames]);
 
-		const matchesType = (optFeatTypes) => optFeatTypes?.some(ft => featureTypes.some(pt => ft === pt || ft.startsWith(pt)));
+		const matchesType = (/** @type {*} */ optFeatTypes) => optFeatTypes?.some((/** @type {*} */ ft) => featureTypes.some((/** @type {*} */ pt) => ft === pt || ft.startsWith(pt)));
 
-		return allOptFeatures.filter(opt => {
+		return allOptFeatures.filter((/** @type {*} */ opt) => {
 			if (!matchesType(opt.featureType)) return false;
 			if (grantedNames.has(opt.name)) return false;
 			if (opt.prerequisite) {
@@ -3689,14 +3765,14 @@ class CharacterSheetBuilder {
 				}
 			}
 			return true;
-		}).sort((a, b) => a.name.localeCompare(b.name));
+		}).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 	}
 
 	/**
 	 * Render optional feature choice UI for races that have optionalfeatureProgression.
 	 * E.g., the Nyuidj race lets the player pick 1 Dreamwalker Ability (beyond the auto-granted Dreamwalk).
 	 * Prerequisites using otherSummary are evaluated against featureGrants + already-chosen race features.
-	 * @param {Object} race
+	 * @param {*} race
 	 * @returns {HTMLElement|null}
 	 */
 	_renderRaceOptionalFeatureChoices (race) {
@@ -3705,7 +3781,7 @@ class CharacterSheetBuilder {
 
 		const container = e_({outer: `<div class="charsheet__builder-race-opt-feats mt-3"></div>`});
 
-		progression.forEach(optFeatProg => {
+		progression.forEach((/** @type {*} */ optFeatProg) => {
 			// Determine how many choices at level 1
 			let count = 0;
 			if (Array.isArray(optFeatProg.progression)) {
@@ -3735,11 +3811,11 @@ class CharacterSheetBuilder {
 				</div>
 			`});
 
-			const list = section.querySelector(".charsheet__builder-opt-feat-list");
+			const list = /** @type {*} */ (section.querySelector(".charsheet__builder-opt-feat-list"));
 
-			availableOptions.sort((a, b) => a.name.localeCompare(b.name)).forEach(opt => {
+			availableOptions.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name)).forEach((/** @type {*} */ opt) => {
 				const isSelected = this._selectedRaceOptionalFeatures[featureKey].some(
-					s => s.name === opt.name && s.source === opt.source,
+					(/** @type {*} */ s) => s.name === opt.name && s.source === opt.source,
 				);
 				const item = e_({outer: `
 					<label class="charsheet__builder-opt-feat-item d-block mb-1" style="cursor: pointer;">
@@ -3762,7 +3838,7 @@ class CharacterSheetBuilder {
 
 				const cbInput = item.querySelector("input");
 				if (cbInput) {
-					cbInput.addEventListener("change", (ev) => {
+					cbInput.addEventListener("change", (/** @type {*} */ ev) => {
 						if (ev.target.checked) {
 							if (this._selectedRaceOptionalFeatures[featureKey].length < count) {
 								this._selectedRaceOptionalFeatures[featureKey].push(opt);
@@ -3772,7 +3848,7 @@ class CharacterSheetBuilder {
 							}
 						} else {
 							this._selectedRaceOptionalFeatures[featureKey] = this._selectedRaceOptionalFeatures[featureKey].filter(
-								s => !(s.name === opt.name && s.source === opt.source),
+								(/** @type {*} */ s) => !(s.name === opt.name && s.source === opt.source),
 							);
 						}
 						const countEl = section.querySelector(".opt-feat-count");
@@ -3789,6 +3865,10 @@ class CharacterSheetBuilder {
 		return container.children.length > 0 ? container : null;
 	}
 
+	/**
+	 * @param {*} preview
+	 * @param {*} race
+	 */
 	_renderRacePreview (preview, race) {
 		preview.innerHTML = "";
 
@@ -3801,21 +3881,21 @@ class CharacterSheetBuilder {
 
 		// Ability scores
 		if (race.ability?.length) {
-			const abilityOptionTexts = race.ability.map(a => {
+			const abilityOptionTexts = race.ability.map((/** @type {*} */ a) => {
 				const parts = [];
 				// Fixed entries (e.g., cha: 2) — always show
 				Object.entries(a)
 					.filter(([k]) => k !== "choose" && Parser.ABIL_ABVS.includes(k))
-					.forEach(([k, v]) => parts.push(`${k.toUpperCase()} +${v}`));
+					.forEach(([/** @type {*} */ k, /** @type {*} */ v]) => parts.push(`${k.toUpperCase()} +${v}`));
 				// Choose entries
 				if (a.choose) {
 					const c = a.choose;
 					if (c.weighted) {
 						const weights = c.weighted.weights || [2, 1];
-						const fromList = (c.weighted.from || Parser.ABIL_ABVS).map(ab => ab.toUpperCase()).join(", ");
+						const fromList = (c.weighted.from || Parser.ABIL_ABVS).map((/** @type {*} */ ab) => ab.toUpperCase()).join(", ");
 						parts.push(`Choose ${weights.length}: +${weights.join("/+")} from ${fromList}`);
 					} else {
-						const fromList = (c.from || Parser.ABIL_ABVS).map(ab => ab.toUpperCase()).join(", ");
+						const fromList = (c.from || Parser.ABIL_ABVS).map((/** @type {*} */ ab) => ab.toUpperCase()).join(", ");
 						parts.push(`Choose ${c.count || 1}: +${c.amount || 1} from ${fromList}`);
 					}
 				}
@@ -3844,14 +3924,14 @@ class CharacterSheetBuilder {
 
 		// Size
 		if (race.size) {
-			const sizeStr = race.size.map(s => Parser.sizeAbvToFull(s)).join(" or ");
+			const sizeStr = race.size.map((/** @type {*} */ s) => Parser.sizeAbvToFull(s)).join(" or ");
 			content.append(e_({outer: `<p><strong>Size:</strong> ${sizeStr}</p>`}));
 		}
 
 		// Traits
 		if (race.entries) {
 			const traits = e_({outer: `<div class="mt-2"><strong>Traits:</strong></div>`});
-			race.entries.forEach(entry => {
+			race.entries.forEach((/** @type {*} */ entry) => {
 				if (typeof entry === "object" && entry.name) {
 					traits.append(e_({outer: `<div class="mb-1"><em>${entry.name}.</em> ${Renderer.get().render({entries: entry.entries || []})}</div>`}));
 				}
@@ -3889,11 +3969,11 @@ class CharacterSheetBuilder {
 			`});
 
 			const select = subraces.querySelector("select");
-			race.subraces.forEach((subrace, idx) => {
+			race.subraces.forEach((/** @type {*} */ subrace, /** @type {*} */ idx) => {
 				select.append(e_({outer: `<option value="${idx}">${subrace.name}</option>`}));
 			});
 
-			select.addEventListener("change", (e) => {
+			select.addEventListener("change", (/** @type {*} */ e) => {
 				const idx = e.target.value;
 				if (idx !== "") {
 					this._selectedSubrace = race.subraces[parseInt(idx)];
@@ -3909,7 +3989,7 @@ class CharacterSheetBuilder {
 
 			// Pre-select if already chosen
 			if (this._selectedSubrace) {
-				const idx = race.subraces.findIndex(s => s.name === this._selectedSubrace.name);
+				const idx = race.subraces.findIndex((/** @type {*} */ s) => s.name === this._selectedSubrace.name);
 				if (idx >= 0) select.value = idx;
 			}
 
@@ -3929,6 +4009,9 @@ class CharacterSheetBuilder {
 	// #endregion
 
 	// #region Step 2: Class
+	/**
+	 * @param {*} content
+	 */
 	_renderClassStep (content) {
 		// Get classes filtered by allowed sources
 		const classes = this._page.filterByAllowedSources(this._page.getClasses());
@@ -3949,18 +4032,18 @@ class CharacterSheetBuilder {
 
 		content.append(container);
 
-		const list = document.getElementById("builder-class-list");
+		const list = /** @type {*} */ (document.getElementById("builder-class-list"));
 		const preview = document.getElementById("builder-class-preview");
-		const search = document.getElementById("builder-class-search");
+		const search = /** @type {*} */ (document.getElementById("builder-class-search"));
 
 		const renderClassList = (filter = "") => {
 			list.innerHTML = "";
 			const filterLower = filter.toLowerCase();
 
 			classes
-				.filter(cls => !filter || cls.name.toLowerCase().includes(filterLower))
-				.sort((a, b) => a.name.localeCompare(b.name))
-				.forEach(cls => {
+				.filter((/** @type {*} */ cls) => !filter || cls.name.toLowerCase().includes(filterLower))
+				.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name))
+				.forEach((/** @type {*} */ cls) => {
 					const isSelected = this._selectedClass?.name === cls.name && this._selectedClass?.source === cls.source;
 					const item = e_({outer: `
 						<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
@@ -3970,7 +4053,7 @@ class CharacterSheetBuilder {
 					`});
 
 					item.addEventListener("click", () => {
-						list.querySelectorAll(".charsheet__builder-list-item").forEach(el => el.classList.remove("active"));
+						list.querySelectorAll(".charsheet__builder-list-item").forEach((/** @type {*} */ el) => el.classList.remove("active"));
 						item.classList.add("active");
 						this._selectedClass = cls;
 						this._selectedSubclass = null;
@@ -4005,7 +4088,7 @@ class CharacterSheetBuilder {
 				});
 		};
 
-		search.addEventListener("input", (e) => renderClassList(e.target.value));
+		search.addEventListener("input", (/** @type {*} */ e) => renderClassList(e.target.value));
 		renderClassList();
 
 		if (this._selectedClass) {
@@ -4013,6 +4096,10 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	/**
+	 * @param {*} preview
+	 * @param {*} cls
+	 */
 	_renderClassPreview (preview, cls) {
 		preview.innerHTML = "";
 
@@ -4028,7 +4115,7 @@ class CharacterSheetBuilder {
 
 		// Primary ability
 		if (cls.primaryAbility) {
-			const abilityStr = cls.primaryAbility.map(a => {
+			const abilityStr = cls.primaryAbility.map((/** @type {*} */ a) => {
 				return Object.entries(a)
 					.filter(([k]) => Parser.ABIL_ABVS.includes(k))
 					.map(([k]) => Parser.attAbvToFull(k))
@@ -4039,27 +4126,27 @@ class CharacterSheetBuilder {
 
 		// Saving throws
 		if (cls.proficiency) {
-			const saves = cls.proficiency.map(p => Parser.attAbvToFull(p)).join(", ");
+			const saves = cls.proficiency.map((/** @type {*} */ p) => Parser.attAbvToFull(p)).join(", ");
 			content.append(e_({outer: `<p><strong>Saving Throws:</strong> ${saves}</p>`}));
 		}
 
 		// Armor
 		if (cls.startingProficiencies?.armor) {
-			const armor = cls.startingProficiencies.armor.map(a => typeof a === "string" ? a : a.full).join(", ");
+			const armor = cls.startingProficiencies.armor.map((/** @type {*} */ a) => typeof a === "string" ? a : a.full).join(", ");
 			// Render through Renderer to handle any tags
 			content.append(e_({outer: `<p><strong>Armor:</strong> ${Renderer.get().render(armor)}</p>`}));
 		}
 
 		// Weapons
 		if (cls.startingProficiencies?.weapons) {
-			const weapons = cls.startingProficiencies.weapons.map(w => typeof w === "string" ? w : w.full).join(", ");
+			const weapons = cls.startingProficiencies.weapons.map((/** @type {*} */ w) => typeof w === "string" ? w : w.full).join(", ");
 			// Render through Renderer to handle {@filter} and other tags
 			content.append(e_({outer: `<p><strong>Weapons:</strong> ${Renderer.get().render(weapons)}</p>`}));
 		}
 
 		// Tools
 		if (cls.startingProficiencies?.tools) {
-			const tools = cls.startingProficiencies.tools.map(t => typeof t === "string" ? t : t.full).join(", ");
+			const tools = cls.startingProficiencies.tools.map((/** @type {*} */ t) => typeof t === "string" ? t : t.full).join(", ");
 			content.append(e_({outer: `<p><strong>Tools:</strong> ${Renderer.get().render(tools)}</p>`}));
 		}
 
@@ -4132,7 +4219,7 @@ class CharacterSheetBuilder {
 			</div>
 		`});
 
-		quickBuildSection.querySelector("#builder-quickbuild-level-slider").addEventListener("input", (e) => {
+		quickBuildSection.querySelector("#builder-quickbuild-level-slider").addEventListener("input", (/** @type {*} */ e) => {
 			const val = parseInt(e.target.value);
 			this._quickBuildTargetLevel = val;
 			quickBuildSection.querySelector("#builder-quickbuild-level-display").textContent = val;
@@ -4152,6 +4239,7 @@ class CharacterSheetBuilder {
 	/**
 	 * Render tool proficiency choice UI for class starting proficiencies.
 	 * Handles anyArtisansTool/anyMusicalInstrument structured data.
+	 * @param {*} cls
 	 */
 	_renderClassToolProficiencyChoice (cls) {
 		const toolProfs = cls.startingProficiencies.toolProficiencies;
@@ -4186,12 +4274,12 @@ class CharacterSheetBuilder {
 			`});
 
 			// Pre-select if already chosen
-			const existing = this._selectedClassToolProficiencies.find(t => t.isArtisanOrInstrument);
-			const populateToolSelect = (category) => {
+			const existing = this._selectedClassToolProficiencies.find((/** @type {*} */ t) => t.isArtisanOrInstrument);
+			const populateToolSelect = (/** @type {*} */ category) => {
 				toolSelect.innerHTML = ""; toolSelect.append(e_({outer: `<option value="">-- Select ${category === "artisan" ? "Artisan's Tool" : "Musical Instrument"} --</option>`}));
 				const tools = category === "artisan" ? artisanTools : musicalInstruments;
-				tools.forEach(tool => {
-					toolSelect.append(e_({outer: `<option value="${tool}">${tool.toTitleCase()}</option>`}));
+				tools.forEach((/** @type {*} */ tool) => {
+					toolSelect.append(e_({outer: `<option value="${tool}">${(/** @type {*} */ (tool)).toTitleCase()}</option>`}));
 				});
 				toolSelect.style.display = "";
 			};
@@ -4203,8 +4291,8 @@ class CharacterSheetBuilder {
 				toolSelect.value = existing.tool;
 			}
 
-			categorySelect.addEventListener("change", (e) => {
-				this._selectedClassToolProficiencies = this._selectedClassToolProficiencies.filter(t => !t.isArtisanOrInstrument);
+			categorySelect.addEventListener("change", (/** @type {*} */ e) => {
+				this._selectedClassToolProficiencies = this._selectedClassToolProficiencies.filter((/** @type {*} */ t) => !t.isArtisanOrInstrument);
 				if (e.target.value) {
 					populateToolSelect(e.target.value);
 				} else {
@@ -4212,8 +4300,8 @@ class CharacterSheetBuilder {
 				}
 			});
 
-			toolSelect.addEventListener("change", (e) => {
-				this._selectedClassToolProficiencies = this._selectedClassToolProficiencies.filter(t => !t.isArtisanOrInstrument);
+			toolSelect.addEventListener("change", (/** @type {*} */ e) => {
+				this._selectedClassToolProficiencies = this._selectedClassToolProficiencies.filter((/** @type {*} */ t) => !t.isArtisanOrInstrument);
 				const category = categorySelect.value;
 				if (e.target.value) {
 					this._selectedClassToolProficiencies.push({
@@ -4237,13 +4325,13 @@ class CharacterSheetBuilder {
 			for (let i = 0; i < anyArtisanCount; i++) {
 				const tools = Renderer.generic.FEATURE__TOOLS_ARTISANS || [];
 				const select = e_({outer: `<select class="ve-form-control form-control--minimal mb-1"><option value="">-- Select Artisan's Tool --</option></select>`});
-				tools.forEach(tool => select.append(e_({outer: `<option value="${tool}">${tool.toTitleCase()}</option>`})));
+				tools.forEach((/** @type {*} */ tool) => select.append(e_({outer: `<option value="${tool}">${(/** @type {*} */ (tool)).toTitleCase()}</option>`})));
 
-				const existing = this._selectedClassToolProficiencies.find(t => t.isArtisan && t.idx === i);
+				const existing = this._selectedClassToolProficiencies.find((/** @type {*} */ t) => t.isArtisan && t.idx === i);
 				if (existing) select.value = existing.tool;
 
-				select.addEventListener("change", (e) => {
-					this._selectedClassToolProficiencies = this._selectedClassToolProficiencies.filter(t => !(t.isArtisan && t.idx === i));
+				select.addEventListener("change", (/** @type {*} */ e) => {
+					this._selectedClassToolProficiencies = this._selectedClassToolProficiencies.filter((/** @type {*} */ t) => !(t.isArtisan && t.idx === i));
 					if (e.target.value) {
 						this._selectedClassToolProficiencies.push({tool: e.target.value, isArtisan: true, idx: i});
 					}
@@ -4254,13 +4342,13 @@ class CharacterSheetBuilder {
 			for (let i = 0; i < anyMusicalCount; i++) {
 				const instruments = Renderer.generic.FEATURE__TOOLS_MUSICAL_INSTRUMENTS || [];
 				const select = e_({outer: `<select class="ve-form-control form-control--minimal mb-1"><option value="">-- Select Musical Instrument --</option></select>`});
-				instruments.forEach(tool => select.append(e_({outer: `<option value="${tool}">${tool.toTitleCase()}</option>`})));
+				instruments.forEach((/** @type {*} */ tool) => select.append(e_({outer: `<option value="${tool}">${(/** @type {*} */ (tool)).toTitleCase()}</option>`})));
 
-				const existing = this._selectedClassToolProficiencies.find(t => t.isMusicalInstrument && t.idx === i);
+				const existing = this._selectedClassToolProficiencies.find((/** @type {*} */ t) => t.isMusicalInstrument && t.idx === i);
 				if (existing) select.value = existing.tool;
 
-				select.addEventListener("change", (e) => {
-					this._selectedClassToolProficiencies = this._selectedClassToolProficiencies.filter(t => !(t.isMusicalInstrument && t.idx === i));
+				select.addEventListener("change", (/** @type {*} */ e) => {
+					this._selectedClassToolProficiencies = this._selectedClassToolProficiencies.filter((/** @type {*} */ t) => !(t.isMusicalInstrument && t.idx === i));
 					if (e.target.value) {
 						this._selectedClassToolProficiencies.push({tool: e.target.value, isMusicalInstrument: true, idx: i});
 					}
@@ -4274,16 +4362,20 @@ class CharacterSheetBuilder {
 		return null;
 	}
 
+	/**
+	 * @param {*} cls
+	 * @param {*} skillChoices
+	 */
 	_renderClassSkillSelection (cls, skillChoices) {
 		// Parse skill choices - typically like {choose: {from: ["athletics", "acrobatics"], count: 2}}
+		/** @type {*[]} */ let availableSkills = [];
 		// or {any: 3} for Bard
-		let availableSkills = [];
 		let chooseCount = 2;
 
 		// Get skills dynamically from loaded data (supports homebrew)
 		const allSkills = this._page.getSkillsList();
 
-		skillChoices.forEach(skillChoice => {
+		skillChoices.forEach((/** @type {*} */ skillChoice) => {
 			if (skillChoice.choose) {
 				if (skillChoice.choose.from) {
 					availableSkills = skillChoice.choose.from;
@@ -4294,19 +4386,19 @@ class CharacterSheetBuilder {
 			} else if (skillChoice.any) {
 				// "any" means choose from all skills (like Bard)
 				chooseCount = skillChoice.any;
-				availableSkills = allSkills.map(s => s.name.toLowerCase().replace(/\s+/g, ""));
+				availableSkills = allSkills.map((/** @type {*} */ s) => s.name.toLowerCase().replace(/\s+/g, ""));
 			} else {
 				// Fixed skills
-				availableSkills = Object.keys(skillChoice).filter(k => k !== "choose" && k !== "any");
+				availableSkills = Object.keys(skillChoice).filter((/** @type {*} */ k) => k !== "choose" && k !== "any");
 			}
 		});
 
 		// Match available skills to proper names (strip source suffix like "might|TGTT" -> "might")
-		const formattedSkills = availableSkills.map(skill => {
+		const formattedSkills = availableSkills.map((/** @type {*} */ skill) => {
 			// Remove source suffix if present (e.g., "might|TGTT" -> "might")
 			const skillNameOnly = skill.split("|")[0];
-			const match = allSkills.find(s => s.name.toLowerCase().replace(/\s+/g, "") === skillNameOnly.toLowerCase().replace(/\s+/g, ""));
-			return match?.name || skillNameOnly.toTitleCase();
+			const match = allSkills.find((/** @type {*} */ s) => s.name.toLowerCase().replace(/\s+/g, "") === skillNameOnly.toLowerCase().replace(/\s+/g, ""));
+			return match?.name || (/** @type {*} */ (skillNameOnly)).toTitleCase();
 		});
 
 		const section = e_({outer: `
@@ -4321,10 +4413,10 @@ class CharacterSheetBuilder {
 		const takenByOthers = this._getSkillsFromOtherSources("class");
 
 		// Remove any prior class selections now taken by another source
-		this._selectedSkills = this._selectedSkills.filter(s => !takenByOthers.has(s));
+		this._selectedSkills = this._selectedSkills.filter((/** @type {*} */ s) => !takenByOthers.has(s));
 		section.querySelector(".skill-count").textContent = this._selectedSkills.length;
 
-		formattedSkills.forEach(skill => {
+		formattedSkills.forEach((/** @type {*} */ skill) => {
 			const isSelected = this._selectedSkills.includes(skill);
 			const takenSource = takenByOthers.get(skill);
 			const lbl = e_({outer: `
@@ -4335,7 +4427,7 @@ class CharacterSheetBuilder {
 			`});
 
 			if (!takenSource) {
-				lbl.querySelector("input").addEventListener("change", (e) => {
+				lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
 						if (this._selectedSkills.length < chooseCount) {
 							this._selectedSkills.push(skill);
@@ -4344,9 +4436,9 @@ class CharacterSheetBuilder {
 							JqueryUtil.doToast({type: "warning", content: `You can only choose ${chooseCount} skills.`});
 						}
 					} else {
-						this._selectedSkills = this._selectedSkills.filter(s => s !== skill);
+						this._selectedSkills = this._selectedSkills.filter((/** @type {*} */ s) => s !== skill);
 						// Also remove from expertise if it was selected
-						this._selectedExpertise = this._selectedExpertise.filter(s => s !== skill);
+						this._selectedExpertise = this._selectedExpertise.filter((/** @type {*} */ s) => s !== skill);
 					}
 					section.querySelector(".skill-count").textContent = this._selectedSkills.length;
 					// Update expertise section to reflect new available skills
@@ -4362,12 +4454,13 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Update expertise section when skills change
+	 * @param {*} cls
 	 */
 	_updateExpertiseSection (cls) {
 		const expertiseInfo = this._getClassExpertiseInfoEarlyLevels(cls);
 		if (!expertiseInfo || expertiseInfo.count === 0) return;
 
-		const container = document.querySelector(".charsheet__builder-expertise-selection");
+		const container = /** @type {*} */ (document.querySelector(".charsheet__builder-expertise-selection"));
 		if (!container) return;
 
 		// Replace with new section
@@ -4379,7 +4472,7 @@ class CharacterSheetBuilder {
 	 * Get expertise info from class features at early levels (1-2)
 	 * Some classes get expertise at level 1 (Rogue), others at level 2 (XPHB Ranger).
 	 * This checks both levels during character creation.
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @returns {{count: number, allowTools: boolean, toolName: string}|null}
 	 */
 	_getClassExpertiseInfoEarlyLevels (cls) {
@@ -4395,15 +4488,16 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Get expertise info by directly scanning feature entries (fallback for homebrew)
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @returns {{count: number, allowTools: boolean, toolName: string}|null}
+	 * @param {*} maxLevel
 	 */
 	_getClassExpertiseInfoFromEntries (cls, maxLevel = 2) {
 		const classFeatures = this._page.getClassFeatures();
 		if (!classFeatures?.length) return null;
 
 		// Find all features for this class up to maxLevel
-		const earlyFeatures = classFeatures.filter(f => {
+		const earlyFeatures = classFeatures.filter((/** @type {*} */ f) => {
 			if (f.className !== cls.name) return false;
 			if (f.level > maxLevel) return false;
 			// For homebrew, classSource might not match exactly - be lenient
@@ -4431,7 +4525,7 @@ class CharacterSheetBuilder {
 	 * Get expertise info from class features (feature-based, supports homebrew)
 	 * Looks at the class's classFeatures array to find expertise grants at the specified level.
 	 * Handles both dedicated "Expertise" features and features with nested expertise entries (like Deft Explorer).
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {number} level - Level to check for expertise
 	 * @returns {{count: number, allowTools: boolean, toolName: string}|null}
 	 */
@@ -4454,13 +4548,12 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Get feature references from a class at a specific level
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {number} level - Level to check
-	 * @returns {Array} Array of feature reference strings
+	 * @returns {Array<*>} Array of feature reference strings
 	 */
 	_getClassFeatureRefsAtLevel (cls, level) {
-		const features = [];
-
+		/** @type {*[]} */ const features = [];
 		for (const f of cls.classFeatures) {
 			let featureStr;
 			if (typeof f === "string") {
@@ -4486,8 +4579,8 @@ class CharacterSheetBuilder {
 	 * Extract expertise info from a feature reference
 	 * @param {string} featureRef - Feature reference string like "Expertise|Rogue|XPHB|1" or "Deft Explorer|Ranger||1|TCE"
 	 * Format: FeatureName|ClassName|ClassSource|Level|FeatureSource
-	 * @param {Array} allFeatures - All loaded class features
-	 * @param {Object} cls - Class data for context
+	 * @param {Array<*>} allFeatures - All loaded class features
+	 * @param {*} cls - Class data for context
 	 * @returns {{count: number, allowTools: boolean, toolName: string}|null}
 	 */
 	_extractExpertiseFromFeatureRef (featureRef, allFeatures, cls) {
@@ -4500,7 +4593,7 @@ class CharacterSheetBuilder {
 		const featureSource = parts[4] || classSource;
 
 		// Find the actual feature data
-		const featureData = allFeatures.find(f => {
+		const featureData = allFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.level !== featureLevel) return false;
@@ -4525,7 +4618,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Recursively search entries for nested Expertise grants
-	 * @param {Array} entries - Feature entries
+	 * @param {Array<*>} entries - Feature entries
 	 * @returns {{count: number, allowTools: boolean, toolName: string}|null}
 	 */
 	_findExpertiseInEntries (entries) {
@@ -4551,11 +4644,11 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Check if entries text indicates an expertise grant
-	 * @param {Array} entries - Feature entries to check
+	 * @param {Array<*>} entries - Feature entries to check
 	 * @returns {boolean}
 	 */
 	_entryGrantsExpertise (entries) {
-		const entriesText = entries.map(e => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
+		const entriesText = entries.map((/** @type {*} */ e) => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
 		// Check for common expertise-granting patterns:
 		// - "proficiency bonus is doubled" (TCE wording)
 		// - "gain expertise" (XPHB wording)
@@ -4567,11 +4660,11 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Parse expertise entries to determine count and tool allowance
-	 * @param {Array} entries - Expertise feature entries
+	 * @param {Array<*>} entries - Expertise feature entries
 	 * @returns {{count: number, allowTools: boolean, toolName: string}}
 	 */
 	_parseExpertiseEntries (entries) {
-		const entriesText = entries.map(e => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
+		const entriesText = entries.map((/** @type {*} */ e) => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
 
 		// Determine count - look for expertise-specific patterns
 		// We need to be careful: "two languages" shouldn't affect expertise count
@@ -4601,14 +4694,15 @@ class CharacterSheetBuilder {
 		return {
 			count,
 			allowTools,
-			toolName: allowTools ? "Thieves' Tools" : null,
+			toolName: allowTools ? "Thieves' Tools" : /** @type {*} */ (null),
 		};
 	}
 
 	/**
 	 * Render expertise selection UI
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {{count: number, allowTools: boolean, toolName: string}} expertiseInfo - Expertise requirements
+	 * @param {*} expertiseInfo
 	 */
 	_renderExpertiseSelection (cls, expertiseInfo) {
 		const {count, allowTools, toolName} = expertiseInfo;
@@ -4631,10 +4725,10 @@ class CharacterSheetBuilder {
 		// Add skills from state (background, racial proficiencies applied in earlier steps)
 		const stateSkills = this._state.getSkillProficiencies();
 		if (stateSkills) {
-			Object.entries(stateSkills).forEach(([skill, level]) => {
+			Object.entries(stateSkills).forEach(([/** @type {*} */ skill, /** @type {*} */ level]) => {
 				if (level >= 1) {
 					// Convert skill key back to display name
-					const skillName = skill.replace(/([A-Z])/g, " $1").trim().toTitleCase();
+					const skillName = (/** @type {*} */ (skill.replace(/([A-Z])/g, " $1").trim())).toTitleCase();
 					availableSkills.add(skillName);
 				}
 			});
@@ -4642,7 +4736,7 @@ class CharacterSheetBuilder {
 
 		// Also add racial skills that were selected
 		if (this._selectedRacialSkills?.length) {
-			this._selectedRacialSkills.forEach(skill => availableSkills.add(skill));
+			this._selectedRacialSkills.forEach((/** @type {*} */ skill) => availableSkills.add(skill));
 		}
 
 		// Optionally add thieves' tools for Rogue
@@ -4655,7 +4749,7 @@ class CharacterSheetBuilder {
 		if (sortedSkills.length === 0) {
 			checkboxes.append(e_({outer: `<p class="ve-muted">Select your skill proficiencies first.</p>`}));
 		} else {
-			sortedSkills.forEach(skill => {
+			sortedSkills.forEach((/** @type {*} */ skill) => {
 				const isSelected = this._selectedExpertise.includes(skill);
 				const lbl = e_({outer: `
 					<label class="charsheet__builder-skill-checkbox mr-3 mb-1">
@@ -4664,7 +4758,7 @@ class CharacterSheetBuilder {
 					</label>
 				`});
 
-				lbl.querySelector("input").addEventListener("change", (e) => {
+				lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
 						if (this._selectedExpertise.length < count) {
 							this._selectedExpertise.push(skill);
@@ -4673,7 +4767,7 @@ class CharacterSheetBuilder {
 							JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} skills for expertise.`});
 						}
 					} else {
-						this._selectedExpertise = this._selectedExpertise.filter(s => s !== skill);
+						this._selectedExpertise = this._selectedExpertise.filter((/** @type {*} */ s) => s !== skill);
 					}
 					section.querySelector(".expertise-count").textContent = this._selectedExpertise.length;
 				});
@@ -4688,8 +4782,8 @@ class CharacterSheetBuilder {
 	/**
 	 * Get language grants from class features at early levels (1-2)
 	 * Features like Deft Explorer grant additional languages.
-	 * @param {Object} cls - Class data
-	 * @returns {{count: number, featureName: string}|null}
+	 * @param {*} cls - Class data
+	 * @returns {*}
 	 */
 	_getClassFeatureLanguageGrants (cls) {
 		// Check levels 1 and 2 for language-granting features
@@ -4702,9 +4796,9 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Get language grants from class features at a specific level
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {number} level - Level to check
-	 * @returns {{count: number, featureName: string}|null}
+	 * @returns {*}
 	 */
 	_getClassFeatureLanguageGrantsAtLevel (cls, level) {
 		const classFeatures = this._page.getClassFeatures();
@@ -4726,9 +4820,9 @@ class CharacterSheetBuilder {
 	/**
 	 * Extract language grants from a feature reference
 	 * @param {string} featureRef - Feature reference string
-	 * @param {Array} allFeatures - All loaded class features
-	 * @param {Object} cls - Class data for context
-	 * @returns {{count: number, featureName: string}|null}
+	 * @param {Array<*>} allFeatures - All loaded class features
+	 * @param {*} cls - Class data for context
+	 * @returns {*}
 	 */
 	_extractLanguageGrantsFromFeatureRef (featureRef, allFeatures, cls) {
 		const parts = featureRef.split("|");
@@ -4739,7 +4833,7 @@ class CharacterSheetBuilder {
 		const featureSource = parts[4] || classSource;
 
 		// Find the actual feature data
-		const featureData = allFeatures.find(f => {
+		const featureData = allFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.level !== featureLevel) return false;
@@ -4761,15 +4855,15 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Recursively search entries for language grants
-	 * @param {Array} entries - Feature entries
+	 * @param {Array<*>} entries - Feature entries
 	 * @param {string} featureName - Name of the feature for reference
-	 * @returns {{count: number, featureName: string}|null}
+	 * @returns {*}
 	 */
 	_findLanguageGrantsInEntries (entries, featureName) {
-		const entriesText = entries.map(e => {
+		const entriesText = entries.map((/** @type {*} */ e) => {
 			if (typeof e === "string") return e;
 			if (typeof e === "object" && e.type === "list" && e.items) {
-				return e.items.map(item => typeof item === "string" ? item : JSON.stringify(item)).join(" ");
+				return e.items.map((/** @type {*} */ item) => typeof item === "string" ? item : JSON.stringify(item)).join(" ");
 			}
 			return JSON.stringify(e);
 		}).join(" ").toLowerCase();
@@ -4819,8 +4913,9 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render language selection UI for class features
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {{count: number, featureName: string}} langInfo - Language grant info
+	 * @param {*} langInfo
 	 */
 	_renderClassFeatureLanguageSelection (cls, langInfo) {
 		const {count, featureName} = langInfo;
@@ -4852,10 +4947,10 @@ class CharacterSheetBuilder {
 			`});
 
 			// Add language options grouped by type
-			const addOptgroup = (labelText, langs) => {
+			const addOptgroup = (/** @type {*} */ labelText, /** @type {*} */ langs) => {
 				const grp = document.createElement("optgroup");
 				grp.label = labelText;
-				langs.forEach(lang => grp.append(e_({tag: "option", val: lang, txt: lang})));
+				langs.forEach((/** @type {*} */ lang) => grp.append(e_({tag: "option", val: lang, txt: lang})));
 				select.append(grp);
 			};
 
@@ -4871,10 +4966,10 @@ class CharacterSheetBuilder {
 				select.value = existingChoice;
 			}
 
-			select.addEventListener("change", (e) => {
+			select.addEventListener("change", (/** @type {*} */ e) => {
 				this._selectedClassFeatureLanguages[i] = e.target.value || null;
 				// Count non-null selections
-				const selectedCount = this._selectedClassFeatureLanguages.filter(l => l).length;
+				const selectedCount = this._selectedClassFeatureLanguages.filter((/** @type {*} */ l) => l).length;
 				section.querySelector(".class-lang-count").textContent = selectedCount;
 			});
 
@@ -4886,29 +4981,25 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Validate that all required optional features have been selected
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @returns {{valid: boolean, message: string}}
 	 */
 	_validateOptionalFeatureSelections (cls) {
 		if (!cls.optionalfeatureProgression?.length) return {valid: true, message: ""};
 
-		for (const optFeatProg of cls.optionalfeatureProgression) {
-			// Get count at level 1
-			let requiredCount = 0;
-			if (Array.isArray(optFeatProg.progression)) {
-				requiredCount = optFeatProg.progression[0] || 0;
-			} else if (typeof optFeatProg.progression === "object") {
-				requiredCount = optFeatProg.progression["1"] || 0;
-			}
+		// Use the same gain computation the renderer uses, so validation only
+		// demands selections for slots that actually surfaced in the UI.
+		const gains = CharacterSheetClassUtils.getOptionalFeatureGains(cls, 0, 1, this._state);
+
+		for (const gain of gains) {
+			const featureTypes = gain.featureTypes || [];
+			const featureKey = featureTypes.join("_");
+			const requiredCount = gain.totalCount;
 
 			if (requiredCount === 0) continue;
 
-			const featureTypes = optFeatProg.featureType || [];
-			const featureKey = featureTypes.join("_");
-			const name = optFeatProg.name || featureTypes.join(", ");
-
 			// Check for Combat Methods - also need traditions selected
-			const isCombatMethods = featureTypes.some(ft => ft.startsWith("CTM:"));
+			const isCombatMethods = featureTypes.some((/** @type {*} */ ft) => ft.startsWith("CTM:"));
 			if (isCombatMethods) {
 				// Validate traditions are selected
 				const traditionCount = CharacterSheetClassUtils.getCombatTraditionSelectionCount({
@@ -4923,7 +5014,7 @@ class CharacterSheetBuilder {
 			// Check selected count
 			const selected = this._selectedOptionalFeatures[featureKey] || [];
 			if (selected.length < requiredCount) {
-				return {valid: false, message: `Please select ${requiredCount} ${name}.`};
+				return {valid: false, message: `Please select ${requiredCount} ${gain.name}.`};
 			}
 		}
 
@@ -4932,7 +5023,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Validate that all required feature options have been selected (specialties, etc.)
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {number} level - Character level
 	 * @returns {{valid: boolean, message: string}}
 	 */
@@ -4953,7 +5044,7 @@ class CharacterSheetBuilder {
 	/**
 	 * Get feature options required at a specific level
 	 * Uses same key format as _renderClassFeatureOptions: ${featureName}_${featureSource}
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {number} level - Character level
 	 * @returns {Array<{featureKey: string, count: number, name: string}>}
 	 */
@@ -4967,7 +5058,7 @@ class CharacterSheetBuilder {
 				levelFeatures = cls.classFeatures[level - 1];
 			} else if (!Array.isArray(cls.classFeatures[0])) {
 				// Flat format - filter by level
-				levelFeatures = cls.classFeatures.filter(f => {
+				levelFeatures = cls.classFeatures.filter((/** @type {*} */ f) => {
 					if (typeof f === "string") {
 						const parts = f.split("|");
 						return parts[3] === String(level) || parts.length < 4;
@@ -5019,7 +5110,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Get weapon mastery info from class features (feature-based, supports homebrew)
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {number} level - Level to check for weapon mastery
 	 * @returns {{count: number}|null}
 	 */
@@ -5043,7 +5134,7 @@ class CharacterSheetBuilder {
 			const featureLevel = parseInt(parts[3]) || 1;
 
 			// Find the actual feature data
-			const featureData = classFeatures.find(f => {
+			const featureData = classFeatures.find((/** @type {*} */ f) => {
 				if (f.name !== featureName) return false;
 				if (f.className !== className) return false;
 				if (f.level !== featureLevel) return false;
@@ -5065,7 +5156,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Get weapon mastery count from class table groups
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {number} level - Character level
 	 * @returns {number|null}
 	 */
@@ -5074,7 +5165,7 @@ class CharacterSheetBuilder {
 
 		for (const tableGroup of cls.classTableGroups) {
 			const masteryColIndex = tableGroup.colLabels?.findIndex(
-				col => col === "Weapon Mastery" || col.toLowerCase().includes("mastery"),
+				(/** @type {*} */ col) => col === "Weapon Mastery" || col.toLowerCase().includes("mastery"),
 			);
 
 			if (masteryColIndex === -1) continue;
@@ -5093,11 +5184,11 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Parse weapon mastery count from feature entries
-	 * @param {Array} entries - Feature entries
+	 * @param {Array<*>} entries - Feature entries
 	 * @returns {number}
 	 */
 	_parseWeaponMasteryCount (entries) {
-		const entriesText = entries.map(e => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
+		const entriesText = entries.map((/** @type {*} */ e) => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
 
 		// Parse count from text
 		if (entriesText.includes("three kinds")) return 3;
@@ -5109,8 +5200,9 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render weapon mastery selection UI
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {{count: number}} masteryInfo - Weapon mastery requirements
+	 * @param {*} masteryInfo
 	 */
 	_renderWeaponMasterySelection (cls, masteryInfo) {
 		const {count} = masteryInfo;
@@ -5124,11 +5216,11 @@ class CharacterSheetBuilder {
 			</div>
 		`});
 
-		const container = section.querySelector(".charsheet__builder-mastery-select-container");
+		const container = /** @type {*} */ (section.querySelector(".charsheet__builder-mastery-select-container"));
 
 		// Get only BASE weapons with mastery properties (not magic variants)
 		const allItems = this._page.getItems();
-		const weaponsWithMastery = allItems.filter(item => {
+		const weaponsWithMastery = allItems.filter((/** @type {*} */ item) => {
 			// Must be a base item, not a magic variant
 			if (!item._isBaseItem) return false;
 			// Must be a weapon
@@ -5141,16 +5233,16 @@ class CharacterSheetBuilder {
 		});
 
 		// Group weapons by type for easier selection
-		const simpleWeapons = weaponsWithMastery.filter(w =>
+		const simpleWeapons = weaponsWithMastery.filter((/** @type {*} */ w) =>
 			w.weaponCategory === "simple" || w.type === "S",
-		).sort((a, b) => a.name.localeCompare(b.name));
+		).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 
-		const martialWeapons = weaponsWithMastery.filter(w =>
+		const martialWeapons = weaponsWithMastery.filter((/** @type {*} */ w) =>
 			w.weaponCategory === "martial" || w.type === "M",
-		).sort((a, b) => a.name.localeCompare(b.name));
+		).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 
 		// Helper function to extract mastery name from string or object format
-		const getMasteryName = (masteryEntry) => {
+		const getMasteryName = (/** @type {*} */ masteryEntry) => {
 			if (!masteryEntry) return "";
 			if (typeof masteryEntry === "string") {
 				return masteryEntry.split("|")[0];
@@ -5162,13 +5254,13 @@ class CharacterSheetBuilder {
 		};
 
 		// Create checkboxes
-		const renderWeaponGroup = (weapons, groupName) => {
+		const renderWeaponGroup = (/** @type {*} */ weapons, /** @type {*} */ groupName) => {
 			if (!weapons.length) return;
 
 			const group = e_({outer: `<div class="mb-2"><strong class="ve-small">${groupName}:</strong></div>`});
 			const checkboxes = e_({outer: `<div class="charsheet__builder-mastery-checkboxes"></div>`});
 
-			weapons.forEach(weapon => {
+			weapons.forEach((/** @type {*} */ weapon) => {
 				const masteryName = getMasteryName(weapon.mastery?.[0]);
 				const weaponKey = `${weapon.name}|${weapon.source}`;
 				const isSelected = this._selectedWeaponMasteries.includes(weaponKey);
@@ -5180,7 +5272,7 @@ class CharacterSheetBuilder {
 					</label>
 				`});
 
-				lbl.querySelector("input").addEventListener("change", (e) => {
+				lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
 						if (this._selectedWeaponMasteries.length < count) {
 							this._selectedWeaponMasteries.push(weaponKey);
@@ -5189,7 +5281,7 @@ class CharacterSheetBuilder {
 							JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} weapon masteries.`});
 						}
 					} else {
-						this._selectedWeaponMasteries = this._selectedWeaponMasteries.filter(m => m !== weaponKey);
+						this._selectedWeaponMasteries = this._selectedWeaponMasteries.filter((/** @type {*} */ m) => m !== weaponKey);
 					}
 					section.querySelector(".mastery-count").textContent = this._selectedWeaponMasteries.length;
 				});
@@ -5214,13 +5306,15 @@ class CharacterSheetBuilder {
 	/**
 	 * Get the maximum method degree available at a given level from the class table
 	 * Parses the "Method Degree" column from classTableGroups
+	 * @param {*} cls
+	 * @param {*} level
 	 */
 	_getMaxMethodDegree (cls, level) {
 		if (!cls.classTableGroups) return 0;
 
 		for (const group of cls.classTableGroups) {
 			// Look for a group with "Method Degree" column
-			const degreeColIdx = group.colLabels?.findIndex(label =>
+			const degreeColIdx = group.colLabels?.findIndex((/** @type {*} */ label) =>
 				label.toLowerCase().includes("method degree"),
 			);
 
@@ -5244,6 +5338,7 @@ class CharacterSheetBuilder {
 	/**
 	 * Get available combat traditions from optional features
 	 * Traditions are identified by feature types like "CTM:AM", "CTM:RC", etc. (no degree number)
+	 * @param {*} allFeatures
 	 */
 	_getAvailableTraditions (allFeatures) {
 		const traditions = new Map();
@@ -5260,12 +5355,14 @@ class CharacterSheetBuilder {
 			}
 		}
 
-		return Array.from(traditions.values()).sort((a, b) => a.name.localeCompare(b.name));
+		return Array.from(traditions.values()).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 	}
 
 	/**
 	 * Extract tradition codes from class feature description text.
 	 * Delegates to ClassUtils.extractTraditionsFromClassFeature.
+	 * @param {*} className
+	 * @param {*} level
 	 */
 	_extractTraditionsFromClassFeature (className, level = 2) {
 		const classFeatures = this._page.getClassFeatures();
@@ -5275,6 +5372,9 @@ class CharacterSheetBuilder {
 	/**
 	 * Get available combat traditions filtered by what the class has access to.
 	 * Delegates to ClassUtils.getAvailableTraditionsForClass.
+	 * @param {*} allFeatures
+	 * @param {*} classAllowedTypes
+	 * @param {*} className
 	 */
 	_getAvailableTraditionsForClass (allFeatures, classAllowedTypes, className) {
 		const classFeatures = this._page.getClassFeatures();
@@ -5283,6 +5383,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Get the display name for a tradition code
+	 * @param {*} tradCode
 	 */
 	_getTraditionName (tradCode) {
 		return CharacterSheetClassUtils.getTraditionName(tradCode);
@@ -5290,6 +5391,9 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Check if an optional feature matches the selected traditions and is within max degree
+	 * @param {*} opt
+	 * @param {*} selectedTraditions
+	 * @param {*} maxDegree
 	 */
 	_methodMatchesTraditionsAndDegree (opt, selectedTraditions, maxDegree) {
 		if (!CharacterSheetClassUtils.isCombatMethod(opt)) return false;
@@ -5301,40 +5405,46 @@ class CharacterSheetBuilder {
 	/**
 	 * Deduplicate optional features by source priority.
 	 * @deprecated Use CharacterSheetClassUtils.deduplicateOptFeaturesByEdition instead
+	 * @param {*} optFeatures
+	 * @param {*} classSource
 	 */
 	_filterOptFeaturesByEdition (optFeatures, classSource) {
 		const showAll = this._state?.getSettings?.()?.showAllOptFeatureVersions || false;
 		return CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(optFeatures, {showAll});
 	}
 
+	/**
+	 * @param {*} cls
+	 */
 	_renderClassOptionalFeatures (cls) {
 		const allOptFeaturesRaw = this._page.getOptionalFeatures();
 		const allOptFeatures = this._filterOptFeaturesByEdition(allOptFeaturesRaw, cls?.source);
 		const container = e_({outer: `<div class="charsheet__builder-optional-features mt-3"></div>`});
 
-		cls.optionalfeatureProgression.forEach(optFeatProg => {
-			// Get how many of this feature type at level 1
-			let count = 0;
-			if (Array.isArray(optFeatProg.progression)) {
-				count = optFeatProg.progression[0] || 0; // Level 1 is index 0
-			} else if (typeof optFeatProg.progression === "object") {
-				count = optFeatProg.progression["1"] || 0;
-			}
+		// Use the shared gain computation so the builder stays in lockstep with level-up.
+		// Builder always operates at level 1 with no existing features, so currentLevel = 0.
+		const gains = CharacterSheetClassUtils.getOptionalFeatureGains(cls, 0, 1, this._state);
 
-			if (count === 0) return; // No choices at level 1
-
-			const featureTypes = optFeatProg.featureType || [];
-			const name = optFeatProg.name || featureTypes.join(", ");
+		gains.forEach((/** @type {*} */ gain) => {
+			const featureTypes = gain.featureTypes || [];
+			const name = gain.name;
 			const featureKey = featureTypes.join("_");
+			const count = gain.totalCount;
 
 			// Check if this is a Combat Methods progression (has CTM:X feature types)
-			const isCombatMethods = featureTypes.some(ft => ft.startsWith("CTM:"));
+			const isCombatMethods = featureTypes.some((/** @type {*} */ ft) => ft.startsWith("CTM:"));
 
 			if (isCombatMethods) {
-				// Handle Combat Methods with tradition selection
+				// Find the matching progression entry to preserve existing call signature
+				const optFeatProg = cls.optionalfeatureProgression.find((/** @type {*} */ p) =>
+					(p.featureType || []).join("_") === featureKey,
+				);
 				this._renderCombatMethodsSelection(container, cls, optFeatProg, count, name, featureKey, allOptFeatures);
 			} else {
 				// Standard optional feature selection
+				const optFeatProg = cls.optionalfeatureProgression.find((/** @type {*} */ p) =>
+					(p.featureType || []).join("_") === featureKey,
+				);
 				this._renderStandardOptionalFeatures(container, optFeatProg, count, name, featureKey, allOptFeatures, featureTypes);
 			}
 		});
@@ -5344,6 +5454,13 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render Combat Methods selection with tradition choice first, then method selection
+	 * @param {*} container
+	 * @param {*} cls
+	 * @param {*} optFeatProg
+	 * @param {*} methodCount
+	 * @param {*} name
+	 * @param {*} featureKey
+	 * @param {*} allOptFeatures
 	 */
 	_renderCombatMethodsSelection (container, cls, optFeatProg, methodCount, name, featureKey, allOptFeatures) {
 		// Merge combatMethod entities into the available method pool
@@ -5391,7 +5508,7 @@ class CharacterSheetBuilder {
 		const methodList = section.querySelector(".charsheet__builder-method-list");
 
 		// Render tradition selection
-		availableTraditions.forEach(trad => {
+		availableTraditions.forEach((/** @type {*} */ trad) => {
 			const isSelected = this._selectedCombatTraditions.includes(trad.code);
 			const desc = CharacterSheetClassUtils.getTraditionDescription(trad.code);
 
@@ -5402,7 +5519,7 @@ class CharacterSheetBuilder {
 					UrlUtil.PG_VARIANTRULES,
 					"Combat Traditions",
 					Parser.SRC_TGTT || "TGTT",
-					null,
+					/** @type {*} */ (null),
 					trad.name,
 				);
 			} catch (e) {
@@ -5419,7 +5536,7 @@ class CharacterSheetBuilder {
 			`});
 			item.querySelector(".tradition-name-slot").innerHTML = tradNameHtml;
 
-			item.querySelector("input").addEventListener("change", (e) => {
+			item.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 				if (e.target.checked) {
 					if (this._selectedCombatTraditions.length < traditionCount) {
 						this._selectedCombatTraditions.push(trad.code);
@@ -5429,9 +5546,9 @@ class CharacterSheetBuilder {
 						return;
 					}
 				} else {
-					this._selectedCombatTraditions = this._selectedCombatTraditions.filter(t => t !== trad.code);
+					this._selectedCombatTraditions = this._selectedCombatTraditions.filter((/** @type {*} */ t) => t !== trad.code);
 					// Also remove any selected methods from this tradition
-					this._selectedOptionalFeatures[featureKey] = this._selectedOptionalFeatures[featureKey].filter(m => {
+					this._selectedOptionalFeatures[featureKey] = this._selectedOptionalFeatures[featureKey].filter((/** @type {*} */ m) => {
 						return CharacterSheetClassUtils.getMethodTraditionCode(m) !== trad.code;
 					});
 					section.querySelector(".method-count").textContent = this._selectedOptionalFeatures[featureKey].length;
@@ -5452,6 +5569,12 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render the list of available methods based on selected traditions and max degree
+	 * @param {*} methodList
+	 * @param {*} allMethods
+	 * @param {*} featureKey
+	 * @param {*} methodCount
+	 * @param {*} maxDegree
+	 * @param {*} section
 	 */
 	_renderMethodList (methodList, allMethods, featureKey, methodCount, maxDegree, section) {
 		methodList.innerHTML = "";
@@ -5467,7 +5590,7 @@ class CharacterSheetBuilder {
 		}
 
 		// Filter methods by selected traditions and max degree
-		const availableMethods = allMethods.filter(opt =>
+		const availableMethods = allMethods.filter((/** @type {*} */ opt) =>
 			this._methodMatchesTraditionsAndDegree(opt, this._selectedCombatTraditions, maxDegree),
 		);
 
@@ -5486,7 +5609,7 @@ class CharacterSheetBuilder {
 					methodsByTradition.set(tradCode, []);
 				}
 				// Avoid duplicates
-				if (!methodsByTradition.get(tradCode).some(m => m.name === method.name)) {
+				if (!methodsByTradition.get(tradCode).some((/** @type {*} */ m) => m.name === method.name)) {
 					methodsByTradition.get(tradCode).push({
 						...method,
 						degree,
@@ -5506,9 +5629,9 @@ class CharacterSheetBuilder {
 				</div>
 			`});
 
-			methods.sort((a, b) => a.degree - b.degree || a.name.localeCompare(b.name)).forEach(method => {
+			methods.sort((/** @type {*} */ a, /** @type {*} */ b) => a.degree - b.degree || a.name.localeCompare(b.name)).forEach((/** @type {*} */ method) => {
 				const isSelected = this._selectedOptionalFeatures[featureKey].some(
-					s => s.name === method.name && s.source === method.source,
+					(/** @type {*} */ s) => s.name === method.name && s.source === method.source,
 				);
 				const item = e_({outer: `
 					<label class="charsheet__builder-method-item d-block mb-1 ml-2" style="cursor: pointer;">
@@ -5532,7 +5655,7 @@ class CharacterSheetBuilder {
 					methodName.textContent = method.name;
 				}
 
-				item.querySelector("input").addEventListener("change", (e) => {
+				item.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
 						if (this._selectedOptionalFeatures[featureKey].length < methodCount) {
 							this._selectedOptionalFeatures[featureKey].push(method);
@@ -5542,7 +5665,7 @@ class CharacterSheetBuilder {
 						}
 					} else {
 						this._selectedOptionalFeatures[featureKey] = this._selectedOptionalFeatures[featureKey].filter(
-							s => !(s.name === method.name && s.source === method.source),
+							(/** @type {*} */ s) => !(s.name === method.name && s.source === method.source),
 						);
 					}
 					section.querySelector(".method-count").textContent = this._selectedOptionalFeatures[featureKey].length;
@@ -5555,6 +5678,9 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	/**
+	 * @param {*} n
+	 */
 	_getOrdinalSuffix (n) {
 		const s = ["th", "st", "nd", "rd"];
 		const v = n % 100;
@@ -5563,38 +5689,37 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render standard optional features (non-Combat Methods)
+	 * @param {*} container
+	 * @param {*} optFeatProg
+	 * @param {*} count
+	 * @param {*} name
+	 * @param {*} featureKey
+	 * @param {*} allOptFeatures
+	 * @param {*} featureTypes
 	 */
 	_renderStandardOptionalFeatures (container, optFeatProg, count, name, featureKey, allOptFeatures, featureTypes) {
-		// Helper to check if a feature type matches the progression requirements
-		const matchesFeatureType = (optFeatTypes) => {
-			return optFeatTypes?.some(ft =>
-				featureTypes.some(progType =>
-					ft === progType || ft.startsWith(progType),
-				),
-			);
+		// Build a level-1 prereq context. Currently-selected optional features (from
+		// other progressions in the same builder pass) feed pact / opt-feature
+		// prereqs so e.g. pact-boon-locked invocations behave correctly once a Pact
+		// Boon is chosen.
+		const cls = this._selectedClass;
+		const alreadyKnown = Object.values(this._selectedOptionalFeatures || {}).flat();
+		const prereqContext = {
+			classes: cls ? [{name: cls.name, source: cls.source, level: 1}] : [],
+			totalLevel: 1,
+			existingFeatures: alreadyKnown,
+			cantrips: this._selectedKnownCantrips || [],
+			spells: [...(this._selectedKnownSpells || []), ...(this._selectedSpellbookSpells || [])],
 		};
 
-		// Filter available options
-		const availableOptions = allOptFeatures.filter(opt => {
-			if (!matchesFeatureType(opt.featureType)) return false;
-
-			// Check prerequisites
-			if (opt.prerequisite) {
-				for (const prereq of opt.prerequisite) {
-					if (prereq.level) {
-						const reqLevel = prereq.level.level || prereq.level;
-						if (reqLevel > 1) return false;
-					}
-					// Check pact prerequisite — e.g. "Pact of Transformation" invocations
-					if (prereq.pact) {
-						const hasPact = Object.values(this._selectedOptionalFeatures).flat()
-							.some(f => f.name === prereq.pact);
-						if (!hasPact) return false;
-					}
-				}
-			}
-			return true;
+		// Use the shared eligibility filter (same one level-up uses) and keep only
+		// options that are actually selectable at L1.
+		const annotated = CharacterSheetClassUtils.getEligibleOptionalFeatures(allOptFeatures, {
+			featureTypes,
+			prereqContext,
+			alreadyKnown,
 		});
+		const availableOptions = annotated.filter((/** @type {*} */ opt) => opt._selectable);
 
 		// Initialize storage
 		if (!this._selectedOptionalFeatures[featureKey]) {
@@ -5609,11 +5734,11 @@ class CharacterSheetBuilder {
 			</div>
 		`});
 
-		const list = section.querySelector(".charsheet__builder-opt-feat-list");
+		const list = /** @type {*} */ (section.querySelector(".charsheet__builder-opt-feat-list"));
 
-		availableOptions.sort((a, b) => a.name.localeCompare(b.name)).forEach(opt => {
+		availableOptions.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name)).forEach((/** @type {*} */ opt) => {
 			const isSelected = this._selectedOptionalFeatures[featureKey].some(
-				s => s.name === opt.name && s.source === opt.source,
+				(/** @type {*} */ s) => s.name === opt.name && s.source === opt.source,
 			);
 			const item = e_({outer: `
 				<label class="charsheet__builder-opt-feat-item d-block mb-1" style="cursor: pointer;">
@@ -5638,7 +5763,7 @@ class CharacterSheetBuilder {
 				optName.textContent = opt.name;
 			}
 
-			item.querySelector("input").addEventListener("change", (e) => {
+			item.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 				if (e.target.checked) {
 					if (this._selectedOptionalFeatures[featureKey].length < count) {
 						this._selectedOptionalFeatures[featureKey].push(opt);
@@ -5648,7 +5773,7 @@ class CharacterSheetBuilder {
 					}
 				} else {
 					this._selectedOptionalFeatures[featureKey] = this._selectedOptionalFeatures[featureKey].filter(
-						s => !(s.name === opt.name && s.source === opt.source),
+						(/** @type {*} */ s) => !(s.name === opt.name && s.source === opt.source),
 					);
 				}
 				section.querySelector(".opt-feat-count").textContent = this._selectedOptionalFeatures[featureKey].length;
@@ -5663,8 +5788,8 @@ class CharacterSheetBuilder {
 	/**
 	 * Analyze a feature's text to detect if it requires a skill/expertise choice.
 	 * Returns a descriptor object or null if no choice is needed.
-	 * @param {Object} opt - The option object (with ref, name, type)
-	 * @returns {Object|null} - { type: "proficiency"|"expertise"|"bonus", count: number, from: "any_proficient"|string[] }
+	 * @param {*} opt - The option object (with ref, name, type)
+	 * @returns {*} - { type: "proficiency"|"expertise"|"bonus", count: number, from: "any_proficient"|string[] }
 	 */
 	_parseFeatureSkillChoice (opt) {
 		// Resolve feature data first to ensure we have entries
@@ -5673,8 +5798,8 @@ class CharacterSheetBuilder {
 			resolvedData = this._getClassFeatureDataFromRef(opt.ref);
 		} else if (opt.type === "optionalfeature") {
 			const allOptFeatures = this._page.getOptionalFeatures?.() || [];
-			resolvedData = allOptFeatures.find(f => f.name === opt.name && f.source === opt.source)
-				|| allOptFeatures.find(f => f.name === opt.name);
+			resolvedData = allOptFeatures.find((/** @type {*} */ f) => f.name === opt.name && f.source === opt.source)
+				|| allOptFeatures.find((/** @type {*} */ f) => f.name === opt.name);
 		}
 		return CharacterSheetClassUtils.parseFeatureSkillChoice(opt, this._page.getClassFeatures(), {
 			optionalFeatures: this._page.getOptionalFeatures?.() || [],
@@ -5685,8 +5810,8 @@ class CharacterSheetBuilder {
 	/**
 	 * Parse automatic effects from a specialty/feature that don't require user choices.
 	 * Examples: "passive Perception increases by 3", "bonus equal to proficiency bonus"
-	 * @param {Object} opt - The option object with ref, name, type
-	 * @returns {Array} Array of effect objects: [{type, value, note}]
+	 * @param {*} opt - The option object with ref, name, type
+	 * @returns {Array<*>} Array of effect objects: [{type, value, note}]
 	 */
 	_parseFeatureAutoEffects (opt) {
 		// Resolve feature data first to ensure we have entries
@@ -5695,8 +5820,8 @@ class CharacterSheetBuilder {
 			resolvedData = this._getClassFeatureDataFromRef(opt.ref);
 		} else if (opt.type === "optionalfeature") {
 			const allOptFeatures = this._page.getOptionalFeatures?.() || [];
-			resolvedData = allOptFeatures.find(f => f.name === opt.name && f.source === opt.source)
-				|| allOptFeatures.find(f => f.name === opt.name);
+			resolvedData = allOptFeatures.find((/** @type {*} */ f) => f.name === opt.name && f.source === opt.source)
+				|| allOptFeatures.find((/** @type {*} */ f) => f.name === opt.name);
 		}
 		return CharacterSheetClassUtils.parseFeatureAutoEffects(opt, this._page.getClassFeatures(), {
 			optionalFeatures: this._page.getOptionalFeatures?.() || [],
@@ -5706,7 +5831,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render a skill sub-choice UI below a specialty checkbox.
-	 * @param {Object} choice - From _parseFeatureSkillChoice: {type, count, from}
+	 * @param {*} choice - From _parseFeatureSkillChoice: {type, count, from}
 	 * @param {string} choiceKey - Unique key for storing selections (featureKey + optName)
 	 * @returns {HTMLElement}
 	 */
@@ -5722,7 +5847,7 @@ class CharacterSheetBuilder {
 		let availableSkills;
 		if (choice.from === "any_proficient") {
 			// Get currently proficient skills
-			const proficientSkills = allSkills.filter(s => {
+			const proficientSkills = allSkills.filter((/** @type {*} */ s) => {
 				const key = s.toLowerCase().replace(/\s+/g, "");
 				return this._state?.getSkillProficiency?.(key) > 0;
 			});
@@ -5760,7 +5885,7 @@ class CharacterSheetBuilder {
 				</label>
 			`});
 
-			lbl.querySelector("input").addEventListener("change", (e) => {
+			lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 				if (e.target.checked) {
 					if (this._selectedFeatureSkillChoices[choiceKey].length < choice.count) {
 						this._selectedFeatureSkillChoices[choiceKey].push(skill);
@@ -5769,7 +5894,7 @@ class CharacterSheetBuilder {
 						JqueryUtil.doToast({type: "warning", content: `You can only choose ${choice.count} skill${choice.count > 1 ? "s" : ""}.`});
 					}
 				} else {
-					this._selectedFeatureSkillChoices[choiceKey] = this._selectedFeatureSkillChoices[choiceKey].filter(s => s !== skill);
+					this._selectedFeatureSkillChoices[choiceKey] = this._selectedFeatureSkillChoices[choiceKey].filter((/** @type {*} */ s) => s !== skill);
 				}
 				wrapper.querySelector(".feat-skill-count").textContent = this._selectedFeatureSkillChoices[choiceKey].length;
 			});
@@ -5784,15 +5909,15 @@ class CharacterSheetBuilder {
 	 * Check if a feature option group is already handled by optionalfeatureProgression.
 	 * This prevents duplicate rendering for features like "Eldritch Invocation Options" which
 	 * appear both as a classFeature with {type: "options"} entries AND in optionalfeatureProgression.
-	 * @param {Object} optionGroup - {options: Array, count, featureName, ...}
-	 * @param {Object} cls - Class data with optionalfeatureProgression
+	 * @param {*} optionGroup - {options: Array, count, featureName, ...}
+	 * @param {*} cls - Class data with optionalfeatureProgression
 	 * @returns {boolean}
 	 */
 	_isOptionGroupCoveredByOptFeatProgression (optionGroup, cls) {
 		if (!cls.optionalfeatureProgression?.length) return false;
 		// Only suppress if ALL options in the group are optional features (not class features, etc.)
 		if (!optionGroup.options?.length) return false;
-		if (!optionGroup.options.every(opt => opt.type === "optionalfeature")) return false;
+		if (!optionGroup.options.every((/** @type {*} */ opt) => opt.type === "optionalfeature")) return false;
 
 		// Collect all featureTypes covered by optionalfeatureProgression
 		const progFeatureTypes = new Set();
@@ -5807,8 +5932,8 @@ class CharacterSheetBuilder {
 		const allOptFeatures = this._page.getOptionalFeatures?.() || [];
 		for (const opt of optionGroup.options) {
 			const optName = opt.name;
-			const match = allOptFeatures.find(f => f.name === optName);
-			if (match?.featureType?.some(ft => progFeatureTypes.has(ft))) return true;
+			const match = allOptFeatures.find((/** @type {*} */ f) => f.name === optName);
+			if (match?.featureType?.some((/** @type {*} */ ft) => progFeatureTypes.has(ft))) return true;
 		}
 
 		return false;
@@ -5817,6 +5942,8 @@ class CharacterSheetBuilder {
 	/**
 	 * Render selection UI for class features that have embedded options (like Specialties)
 	 * These are features with {type: "options", count: N, entries: [refClassFeature, ...]}
+	 * @param {*} cls
+	 * @param {*} level
 	 */
 	_renderClassFeatureOptions (cls, level) {
 		// Get level 1 class features
@@ -5826,7 +5953,7 @@ class CharacterSheetBuilder {
 				levelFeatures = cls.classFeatures[level - 1];
 			} else if (!Array.isArray(cls.classFeatures[0])) {
 				// Flat format - filter by level
-				levelFeatures = cls.classFeatures.filter(f => {
+				levelFeatures = cls.classFeatures.filter((/** @type {*} */ f) => {
 					if (typeof f === "string") {
 						const parts = f.split("|");
 						return parts[3] === String(level) || parts.length < 4;
@@ -5873,9 +6000,9 @@ class CharacterSheetBuilder {
 
 		// Also check subclass features for options if subclass selected
 		if (this._selectedSubclass && this._selectedSubclass.subclassFeatures) {
-			this._selectedSubclass.subclassFeatures.forEach(levelFeatures => {
+			this._selectedSubclass.subclassFeatures.forEach((/** @type {*} */ levelFeatures) => {
 				if (Array.isArray(levelFeatures)) {
-					levelFeatures.forEach(feature => {
+					levelFeatures.forEach((/** @type {*} */ feature) => {
 						if (typeof feature === "object" && feature.level === level) {
 							const featureOptions = this._findFeatureOptions(feature, level);
 							for (const optionGroup of featureOptions) {
@@ -5894,7 +6021,7 @@ class CharacterSheetBuilder {
 
 		// Filter out option groups already covered by optionalfeatureProgression
 		// (e.g. "Eldritch Invocation Options" is handled by _renderClassOptionalFeatures)
-		const filteredOptions = allOptions.filter(og => !this._isOptionGroupCoveredByOptFeatProgression(og, cls));
+		const filteredOptions = allOptions.filter((/** @type {*} */ og) => !this._isOptionGroupCoveredByOptFeatProgression(og, cls));
 
 		if (filteredOptions.length === 0) return null;
 
@@ -5919,14 +6046,14 @@ class CharacterSheetBuilder {
 				</div>
 			`});
 
-			const list = section.querySelector(".charsheet__builder-feat-opt-list");
+			const list = /** @type {*} */ (section.querySelector(".charsheet__builder-feat-opt-list"));
 
 			// Get already-selected features in other groups (for same-session deduplication)
-			const allSelectedInSession = Object.values(this._selectedFeatureOptions).flat().map(s => s.name);
+			const allSelectedInSession = Object.values(this._selectedFeatureOptions).flat().map((/** @type {*} */ s) => s.name);
 
 			for (const opt of optGroup.options) {
 				// Check if already selected in ANOTHER group (different feature key)
-				const isSelectedInOtherGroup = !this._selectedFeatureOptions[featureKey]?.some(s => s.name === opt.name)
+				const isSelectedInOtherGroup = !this._selectedFeatureOptions[featureKey]?.some((/** @type {*} */ s) => s.name === opt.name)
 					&& allSelectedInSession.includes(opt.name);
 
 				// Check if the feature can be taken multiple times
@@ -5943,7 +6070,7 @@ class CharacterSheetBuilder {
 				if (isSelectedInOtherGroup && !canRepeat) continue;
 
 				const isSelected = this._selectedFeatureOptions[featureKey].some(
-					s => s.name === opt.name && s.ref === opt.ref,
+					(/** @type {*} */ s) => s.name === opt.name && s.ref === opt.ref,
 				);
 
 				const item = e_({outer: `
@@ -5986,7 +6113,7 @@ class CharacterSheetBuilder {
 					nameSpan.textContent = opt.name;
 				}
 
-				item.querySelector("input").addEventListener("change", (e) => {
+				item.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
 						if (this._selectedFeatureOptions[featureKey].length < optGroup.count) {
 							this._selectedFeatureOptions[featureKey].push(opt);
@@ -6004,7 +6131,7 @@ class CharacterSheetBuilder {
 						}
 					} else {
 						this._selectedFeatureOptions[featureKey] = this._selectedFeatureOptions[featureKey].filter(
-							s => !(s.name === opt.name && s.ref === opt.ref),
+							(/** @type {*} */ s) => !(s.name === opt.name && s.ref === opt.ref),
 						);
 
 						// Remove skill sub-choice UI
@@ -6026,6 +6153,9 @@ class CharacterSheetBuilder {
 	// #endregion
 
 	// #region Step 3: Abilities
+	/**
+	 * @param {*} content
+	 */
 	_renderAbilitiesStep (content) {
 		const container = e_({outer: `
 			<div class="charsheet__builder-abilities">
@@ -6062,7 +6192,7 @@ class CharacterSheetBuilder {
 		content.append(container);
 
 		// Method selection
-		document.querySelectorAll("input[name=\"ability-method\"]").forEach(radio => radio.addEventListener("change", (e) => {
+		document.querySelectorAll("input[name=\"ability-method\"]").forEach((/** @type {*} */ radio) => radio.addEventListener("change", (/** @type {*} */ e) => {
 			this._abilityMethod = e.target.value;
 			this._resetAbilityScores();
 			this._renderAbilityInputs();
@@ -6077,7 +6207,7 @@ class CharacterSheetBuilder {
 	 * Render the racial bonuses section with optional Tasha's Custom Origin rules
 	 */
 	_renderRacialBonusesSection () {
-		const container = document.getElementById("builder-racial-bonuses");
+		const container = /** @type {*} */ (document.getElementById("builder-racial-bonuses"));
 		container.innerHTML = "";
 
 		if (!this._selectedRace) {
@@ -6108,7 +6238,7 @@ class CharacterSheetBuilder {
 			</label>
 		`});
 
-		tashasOption.querySelector("input").addEventListener("change", (e) => {
+		tashasOption.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 			this._useTashasRules = e.target.checked;
 			if (!this._useTashasRules) {
 				// Reset all custom choices when disabling
@@ -6137,11 +6267,11 @@ class CharacterSheetBuilder {
 	 * @returns {string[]} Array of skill keys (lowercase, no spaces)
 	 */
 	_getFixedRacialSkills () {
-		const skills = [];
-		const collectFixed = (skillProficiencies) => {
+		/** @type {*[]} */ const skills = [];
+		const collectFixed = (/** @type {*} */ skillProficiencies) => {
 			if (!skillProficiencies) return;
-			skillProficiencies.forEach(skillProf => {
-				Object.keys(skillProf).forEach(skill => {
+			skillProficiencies.forEach((/** @type {*} */ skillProf) => {
+				Object.keys(skillProf).forEach((/** @type {*} */ skill) => {
 					if (skill !== "any" && skill !== "choose") {
 						skills.push(skill);
 					}
@@ -6165,27 +6295,27 @@ class CharacterSheetBuilder {
 		if (excludeSource !== "race") {
 			const fixedRacial = this._getFixedRacialSkills();
 			if (this._useTashasRules && this._tashasSkillReplacements.length) {
-				this._tashasSkillReplacements.forEach(skill => {
-					if (skill) skills.set(skill.toTitleCase(), "Race");
+				this._tashasSkillReplacements.forEach((/** @type {*} */ skill) => {
+					if (skill) skills.set((/** @type {*} */ (skill)).toTitleCase(), "Race");
 				});
 			} else {
-				fixedRacial.forEach(skill => skills.set(skill.toTitleCase(), "Race"));
+				fixedRacial.forEach((/** @type {*} */ skill) => skills.set((/** @type {*} */ (skill)).toTitleCase(), "Race"));
 			}
-			this._selectedRacialSkills.forEach(skill => skills.set(skill, "Race"));
+			this._selectedRacialSkills.forEach((/** @type {*} */ skill) => skills.set(skill, "Race"));
 		}
 
 		if (excludeSource !== "background" && this._selectedBackground?.skillProficiencies) {
-			this._selectedBackground.skillProficiencies.forEach(skillSet => {
-				Object.keys(skillSet).forEach(skill => {
+			this._selectedBackground.skillProficiencies.forEach((/** @type {*} */ skillSet) => {
+				Object.keys(skillSet).forEach((/** @type {*} */ skill) => {
 					if (skill !== "choose" && skill !== "any") {
-						skills.set(skill.toTitleCase(), "Background");
+						skills.set((/** @type {*} */ (skill)).toTitleCase(), "Background");
 					}
 				});
 			});
 		}
 
 		if (excludeSource !== "class") {
-			this._selectedSkills.forEach(skill => skills.set(skill, "Class"));
+			this._selectedSkills.forEach((/** @type {*} */ skill) => skills.set(skill, "Class"));
 		}
 
 		return skills;
@@ -6196,11 +6326,11 @@ class CharacterSheetBuilder {
 	 * @returns {string[]} Array of language names
 	 */
 	_getFixedRacialLanguages () {
-		const languages = [];
-		const collectFixed = (langProficiencies) => {
+		/** @type {*[]} */ const languages = [];
+		const collectFixed = (/** @type {*} */ langProficiencies) => {
 			if (!langProficiencies) return;
-			langProficiencies.forEach(langProf => {
-				Object.keys(langProf).forEach(lang => {
+			langProficiencies.forEach((/** @type {*} */ langProf) => {
+				Object.keys(langProf).forEach((/** @type {*} */ lang) => {
 					if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
 					// Common cannot be replaced per Tasha's rules
 					if (lang.toLowerCase() === "common") return;
@@ -6216,16 +6346,17 @@ class CharacterSheetBuilder {
 	/**
 	 * Render Tasha's skill proficiency replacements.
 	 * Replaces fixed racial skills with "choose any N skills".
+	 * @param {*} container
 	 */
 	_renderTashasSkillReplacements (container) {
 		const fixedSkills = this._getFixedRacialSkills();
 		if (!fixedSkills.length) return;
 
 		// Use the same data source as other skill pickers (includes homebrew/custom skills)
-		const allSkills = this._page.getSkillsList().map(s => s.name);
+		const allSkills = this._page.getSkillsList().map((/** @type {*} */ s) => s.name);
 
 		const section = e_({outer: `<div class="charsheet__builder-tashas-skills mt-3"></div>`});
-		section.append(e_({outer: `<p class="ve-small ve-muted mb-1">Replace ${fixedSkills.length} fixed racial skill${fixedSkills.length > 1 ? "s" : ""} (<em>${fixedSkills.map(s => s.toTitleCase()).join(", ")}</em>) with any skill${fixedSkills.length > 1 ? "s" : ""}:</p>`}));
+		section.append(e_({outer: `<p class="ve-small ve-muted mb-1">Replace ${fixedSkills.length} fixed racial skill${fixedSkills.length > 1 ? "s" : ""} (<em>${fixedSkills.map((/** @type {*} */ s) => (/** @type {*} */ (s)).toTitleCase()).join(", ")}</em>) with any skill${fixedSkills.length > 1 ? "s" : ""}:</p>`}));
 
 		for (let i = 0; i < fixedSkills.length; i++) {
 			const selectEl = e_({outer: `
@@ -6234,7 +6365,7 @@ class CharacterSheetBuilder {
 				</select>
 			`});
 
-			allSkills.forEach(skill => {
+			allSkills.forEach((/** @type {*} */ skill) => {
 				selectEl.append(e_({outer: `<option value="${skill}">${skill}</option>`}));
 			});
 
@@ -6243,7 +6374,7 @@ class CharacterSheetBuilder {
 				selectEl.value = this._tashasSkillReplacements[i];
 			}
 
-			selectEl.addEventListener("change", (e) => {
+			selectEl.addEventListener("change", (/** @type {*} */ e) => {
 				this._tashasSkillReplacements[i] = e.target.value || null;
 			});
 
@@ -6256,6 +6387,7 @@ class CharacterSheetBuilder {
 	/**
 	 * Render Tasha's language replacements.
 	 * Replaces fixed racial languages (except Common) with "choose any N languages".
+	 * @param {*} container
 	 */
 	_renderTashasLanguageReplacements (container) {
 		const fixedLanguages = this._getFixedRacialLanguages();
@@ -6266,7 +6398,7 @@ class CharacterSheetBuilder {
 		const standardLanguages = allLanguages.length > 0 ? allLanguages : ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"];
 
 		const section = e_({outer: `<div class="charsheet__builder-tashas-languages mt-3"></div>`});
-		section.append(e_({outer: `<p class="ve-small ve-muted mb-1">Replace ${fixedLanguages.length} fixed racial language${fixedLanguages.length > 1 ? "s" : ""} (<em>${fixedLanguages.map(l => l.toTitleCase()).join(", ")}</em>) with any language${fixedLanguages.length > 1 ? "s" : ""}:</p>`}));
+		section.append(e_({outer: `<p class="ve-small ve-muted mb-1">Replace ${fixedLanguages.length} fixed racial language${fixedLanguages.length > 1 ? "s" : ""} (<em>${fixedLanguages.map((/** @type {*} */ l) => (/** @type {*} */ (l)).toTitleCase()).join(", ")}</em>) with any language${fixedLanguages.length > 1 ? "s" : ""}:</p>`}));
 
 		for (let i = 0; i < fixedLanguages.length; i++) {
 			const selectEl = e_({outer: `
@@ -6275,7 +6407,7 @@ class CharacterSheetBuilder {
 				</select>
 			`});
 
-			standardLanguages.forEach(lang => {
+			standardLanguages.forEach((/** @type {*} */ lang) => {
 				selectEl.append(e_({outer: `<option value="${lang}">${lang}</option>`}));
 			});
 
@@ -6284,7 +6416,7 @@ class CharacterSheetBuilder {
 				selectEl.value = this._tashasLanguageReplacements[i];
 			}
 
-			selectEl.addEventListener("change", (e) => {
+			selectEl.addEventListener("change", (/** @type {*} */ e) => {
 				this._tashasLanguageReplacements[i] = e.target.value || null;
 			});
 
@@ -6299,10 +6431,13 @@ class CharacterSheetBuilder {
 	 * when multiple ability options exist (VRGR lineage "choose between +2/+1 or +1/+1/+1").
 	 * Multiple ability objects in the array are alternatives (OR), not additive (AND).
 	 * Returns [{abiSet, originalIdx}] entries so callers can preserve the correct choice key indices.
+	 * @param {*} abilityArray
+	 * @param {*} raceName
+	 * @param {*} raceSource
 	 */
 	_getEffectiveAbilityEntries (abilityArray, raceName, raceSource) {
 		if (!abilityArray?.length) return [];
-		if (abilityArray.length <= 1) return abilityArray.map((abiSet, i) => ({abiSet, originalIdx: i}));
+		if (abilityArray.length <= 1) return abilityArray.map((/** @type {*} */ abiSet, /** @type {*} */ i) => ({abiSet, originalIdx: i}));
 		const raceKey = `${raceName}|${raceSource}`;
 		const selectedIdx = this._selectedRacialAbilitySetIdx[raceKey] ?? 0;
 		const idx = selectedIdx < abilityArray.length ? selectedIdx : 0;
@@ -6315,14 +6450,14 @@ class CharacterSheetBuilder {
 	_getRacialASITotal () {
 		let total = 0;
 
-		const addTotal = (entries) => {
+		const addTotal = (/** @type {*} */ entries) => {
 			for (const {abiSet} of entries) {
-				Object.entries(abiSet).forEach(([abi, bonus]) => {
+				Object.entries(abiSet).forEach(([/** @type {*} */ abi, /** @type {*} */ bonus]) => {
 					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) total += bonus;
 				});
 				if (abiSet.choose) {
 					if (abiSet.choose.weighted) {
-						total += (abiSet.choose.weighted.weights || [2, 1]).reduce((a, b) => a + b, 0);
+						total += (abiSet.choose.weighted.weights || [2, 1]).reduce((/** @type {*} */ a, /** @type {*} */ b) => a + b, 0);
 					} else {
 						total += (abiSet.choose.count || 1) * (abiSet.choose.amount || 1);
 					}
@@ -6341,11 +6476,10 @@ class CharacterSheetBuilder {
 	 * Returns [{amount: 2}, {amount: 1}] or similar
 	 */
 	_getRacialASIBonuses () {
-		const bonuses = [];
-
-		const addBonuses = (entries, sourceName) => {
+		/** @type {*[]} */ const bonuses = [];
+		const addBonuses = (/** @type {*} */ entries, /** @type {*} */ sourceName) => {
 			for (const {abiSet} of entries) {
-				Object.entries(abiSet).forEach(([abi, bonus]) => {
+				Object.entries(abiSet).forEach(([/** @type {*} */ abi, /** @type {*} */ bonus]) => {
 					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi) && typeof bonus === "number") {
 						bonuses.push({amount: bonus, source: sourceName});
 					}
@@ -6353,7 +6487,7 @@ class CharacterSheetBuilder {
 				if (abiSet.choose) {
 					if (abiSet.choose.weighted) {
 						const weights = abiSet.choose.weighted.weights || [2, 1];
-						weights.forEach(w => bonuses.push({amount: w, source: sourceName, isChoose: true}));
+						weights.forEach((/** @type {*} */ w) => bonuses.push({amount: w, source: sourceName, isChoose: true}));
 					} else {
 						const count = abiSet.choose.count || 1;
 						const amount = abiSet.choose.amount || 1;
@@ -6373,6 +6507,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render Tasha's Custom Origin ASI selection
+	 * @param {*} container
 	 */
 	_renderTashasASIChoices (container) {
 		const bonuses = this._getRacialASIBonuses();
@@ -6384,20 +6519,20 @@ class CharacterSheetBuilder {
 		const choices = e_({outer: `<div class="charsheet__builder-tashas-asi-choices"></div>`});
 		const abilities = ["str", "dex", "con", "int", "wis", "cha"];
 
-		bonuses.forEach((bonus, idx) => {
+		bonuses.forEach((/** @type {*} */ bonus, /** @type {*} */ idx) => {
 			const row = e_({outer: `<div class="ve-flex-v-center mb-1"></div>`});
 			row.append(e_({outer: `<span class="mr-2">+${bonus.amount}:</span>`}));
 
 			const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal ve-inline-block w-auto" data-tasha-idx="${idx}"></select>`});
 			selectEl.append(e_({outer: `<option value="">-- Select --</option>`}));
 
-			abilities.forEach(ab => {
+			abilities.forEach((/** @type {*} */ ab) => {
 				const abName = Parser.attAbvToFull(ab);
 				const selected = this._tashasAbilityBonuses[`tasha_${idx}`] === ab ? "selected" : "";
 				selectEl.append(e_({outer: `<option value="${ab}" ${selected}>${abName}</option>`}));
 			});
 
-			selectEl.addEventListener("change", (e) => {
+			selectEl.addEventListener("change", (/** @type {*} */ e) => {
 				const val = e.target.value;
 				this._tashasAbilityBonuses[`tasha_${idx}`] = val;
 				this._tashasAbilityBonuses[`tasha_${idx}_amount`] = bonus.amount;
@@ -6410,7 +6545,7 @@ class CharacterSheetBuilder {
 							const optVal = opt.value;
 							// Check if this option is selected in another dropdown
 							const isSelectedElsewhere = Object.entries(this._tashasAbilityBonuses)
-								.some(([k, v]) => k.startsWith("tasha_") && !k.includes("_amount") && k !== `tasha_${selIdx}` && v === optVal);
+								.some(([/** @type {*} */ k, /** @type {*} */ v]) => k.startsWith("tasha_") && !k.includes("_amount") && k !== `tasha_${selIdx}` && v === optVal);
 							opt.disabled = optVal && isSelectedElsewhere;
 						});
 					}
@@ -6438,10 +6573,10 @@ class CharacterSheetBuilder {
 	}
 
 	_renderAbilityInputs () {
-		const container = document.getElementById("builder-abilities-inputs");
+		const container = /** @type {*} */ (document.getElementById("builder-abilities-inputs"));
 		container.innerHTML = "";
 
-		const pointsDisplay = document.getElementById("builder-points-remaining");
+		const pointsDisplay = /** @type {*} */ (document.getElementById("builder-points-remaining"));
 		pointsDisplay.style.display = (this._abilityMethod === "pointbuy") ? "" : "none";
 
 		// Initialize standard array pool if needed
@@ -6449,7 +6584,7 @@ class CharacterSheetBuilder {
 			this._standardArrayPool = [15, 14, 13, 12, 10, 8];
 		}
 
-		Parser.ABIL_ABVS.forEach(abl => {
+		Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 			const score = this._abilityScores[abl];
 			const racialBonus = this._getRacialBonus(abl);
 			const total = (score || 0) + racialBonus;
@@ -6480,7 +6615,7 @@ class CharacterSheetBuilder {
 			}
 
 			if (this._abilityMethod === "manual") {
-				row.querySelector("input").addEventListener("change", (e) => {
+				row.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					// Max base score is 18 for starting characters (before racial bonuses)
 					this._abilityScores[abl] = Math.max(3, Math.min(18, parseInt(e.target.value) || 8));
 					e.target.value = this._abilityScores[abl]; // Update display if clamped
@@ -6499,6 +6634,9 @@ class CharacterSheetBuilder {
 		this._updateAbilitySummary();
 	}
 
+	/**
+	 * @param {*} container
+	 */
 	_renderStandardArrayAssignment (container) {
 		const assignment = e_({outer: `
 			<div class="mt-3">
@@ -6510,7 +6648,7 @@ class CharacterSheetBuilder {
 		const pool = assignment.querySelector("#standard-array-pool");
 
 		// Render available scores
-		this._standardArrayPool.forEach((score, idx) => {
+		this._standardArrayPool.forEach((/** @type {*} */ score, /** @type {*} */ idx) => {
 			const badge = e_({outer: `<span class="badge badge-primary mr-1 mb-1 charsheet__builder-score-badge" data-score="${score}" data-idx="${idx}" style="cursor: pointer; font-size: 1rem; padding: 0.5rem;">${score}</span>`});
 
 			badge.addEventListener("click", () => {
@@ -6519,7 +6657,7 @@ class CharacterSheetBuilder {
 					badge.classList.remove("active");
 					this._selectedStandardScore = null;
 				} else {
-					[...pool.querySelectorAll(".badge")].forEach(_el => _el.classList.remove("active"));
+					[...pool.querySelectorAll(".badge")].forEach((/** @type {*} */ _el) => _el.classList.remove("active"));
 					badge.classList.add("active");
 					this._selectedStandardScore = {score, idx};
 				}
@@ -6529,7 +6667,7 @@ class CharacterSheetBuilder {
 		});
 
 		// Add click handlers to ability dropzones
-		[...container.querySelectorAll(".charsheet__builder-ability-dropzone")].forEach(dz => dz.addEventListener("click", (e) => {
+		[...container.querySelectorAll(".charsheet__builder-ability-dropzone")].forEach((/** @type {*} */ dz) => dz.addEventListener("click", (/** @type {*} */ e) => {
 			const abl = e.target.dataset.ability;
 			// Valid standard array scores that can be returned to pool
 			const STANDARD_ARRAY_SCORES = [15, 14, 13, 12, 10, 8];
@@ -6541,14 +6679,14 @@ class CharacterSheetBuilder {
 				// If this ability already had a valid standard array score, put it back in the pool
 				if (oldScore != null && STANDARD_ARRAY_SCORES.includes(oldScore)) {
 					this._standardArrayPool.push(oldScore);
-					this._standardArrayPool.sort((a, b) => b - a);
+					this._standardArrayPool.sort((/** @type {*} */ a, /** @type {*} */ b) => b - a);
 				}
 
 				// Assign the new score
 				this._abilityScores[abl] = this._selectedStandardScore.score;
 
 				// Remove from pool
-				this._standardArrayPool = this._standardArrayPool.filter((_, i) => i !== this._standardArrayPool.indexOf(this._selectedStandardScore.score));
+				this._standardArrayPool = this._standardArrayPool.filter((/** @type {*} */ _, /** @type {*} */ i) => i !== this._standardArrayPool.indexOf((/** @type {*} */ (this._selectedStandardScore)).score));
 
 				this._selectedStandardScore = null;
 				this._renderAbilityInputs();
@@ -6556,7 +6694,7 @@ class CharacterSheetBuilder {
 				// Clicking an assigned ability with no selection - return to pool (only if valid score)
 				if (STANDARD_ARRAY_SCORES.includes(this._abilityScores[abl])) {
 					this._standardArrayPool.push(this._abilityScores[abl]);
-					this._standardArrayPool.sort((a, b) => b - a);
+					this._standardArrayPool.sort((/** @type {*} */ a, /** @type {*} */ b) => b - a);
 				}
 				this._abilityScores[abl] = null;
 				this._renderAbilityInputs();
@@ -6566,6 +6704,10 @@ class CharacterSheetBuilder {
 		container.append(assignment);
 	}
 
+	/**
+	 * @param {*} ability
+	 * @param {*} delta
+	 */
 	_adjustPointBuy (ability, delta) {
 		const currentScore = this._abilityScores[ability];
 		const newScore = currentScore + delta;
@@ -6581,10 +6723,13 @@ class CharacterSheetBuilder {
 		this._abilityScores[ability] = newScore;
 		this._pointBuyRemaining -= costDelta;
 
-		document.getElementById("points-value").textContent = this._pointBuyRemaining;
+		(/** @type {*} */ (document.getElementById("points-value"))).textContent = String(this._pointBuyRemaining);
 		this._renderAbilityInputs();
 	}
 
+	/**
+	 * @param {*} score
+	 */
 	_getPointBuyCost (score) {
 		if (score <= 8) return 0;
 		if (score <= 13) return score - 8;
@@ -6593,11 +6738,14 @@ class CharacterSheetBuilder {
 		return 0;
 	}
 
+	/**
+	 * @param {*} ability
+	 */
 	_getRacialBonus (ability) {
 		// If using Tasha's Custom Origin rules, use custom bonuses
 		if (this._useTashasRules) {
 			let bonus = 0;
-			Object.entries(this._tashasAbilityBonuses).forEach(([key, value]) => {
+			Object.entries(this._tashasAbilityBonuses).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
 				if (key.includes("_amount")) return;
 				if (value === ability) {
 					const amountKey = `${key}_amount`;
@@ -6610,7 +6758,7 @@ class CharacterSheetBuilder {
 		// Standard racial bonuses
 		let bonus = 0;
 
-		const addFromAbilityEntries = (entries, raceName, raceSource) => {
+		const addFromAbilityEntries = (/** @type {*} */ entries, /** @type {*} */ raceName, /** @type {*} */ raceSource) => {
 			for (const {abiSet, originalIdx: abiIdx} of entries) {
 				// Fixed entries (e.g., cha: 2) — always process
 				if (abiSet[ability] && ability !== "choose") {
@@ -6620,7 +6768,7 @@ class CharacterSheetBuilder {
 				if (abiSet.choose) {
 					const raceKey = `${raceName}|${raceSource}`;
 					const choices = this._selectedRacialAbilityChoices[raceKey] || {};
-					Object.entries(choices).forEach(([key, val]) => {
+					Object.entries(choices).forEach(([/** @type {*} */ key, /** @type {*} */ val]) => {
 						if (!key.startsWith(`choose_${abiIdx}_`) || key.includes("_amount") || !val) return;
 						if (val === ability) {
 							bonus += choices[`${key}_amount`] || 1;
@@ -6641,12 +6789,11 @@ class CharacterSheetBuilder {
 	}
 
 	_getRacialBonusesHtml () {
-		const bonuses = [];
-
-		const addBonusesFromEntries = (entries, raceName, raceSource, suffix) => {
+		/** @type {*[]} */ const bonuses = [];
+		const addBonusesFromEntries = (/** @type {*} */ entries, /** @type {*} */ raceName, /** @type {*} */ raceSource, /** @type {*} */ suffix) => {
 			for (const {abiSet, originalIdx: abiIdx} of entries) {
 				// Fixed entries (e.g., cha: 2) — always show
-				Object.entries(abiSet).forEach(([abi, bonus]) => {
+				Object.entries(abiSet).forEach(([/** @type {*} */ abi, /** @type {*} */ bonus]) => {
 					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
 						bonuses.push(`${Parser.attAbvToFull(abi)} +${bonus}${suffix}`);
 					}
@@ -6672,7 +6819,7 @@ class CharacterSheetBuilder {
 					if (foundChoices < count) {
 						const remaining = count - foundChoices;
 						if (isWeighted) {
-							const remainingWeights = weights.filter((_, i) => !choices[`choose_${abiIdx}_${i}`]);
+							const remainingWeights = weights.filter((/** @type {*} */ _, /** @type {*} */ i) => !choices[`choose_${abiIdx}_${i}`]);
 							bonuses.push(`Choose ${remaining} more: +${remainingWeights.join("/+")}${suffix}`);
 						} else {
 							bonuses.push(`Choose ${remaining} more: +${abiSet.choose.amount || 1}${suffix}`);
@@ -6693,12 +6840,12 @@ class CharacterSheetBuilder {
 	}
 
 	_updateAbilitySummary () {
-		const summary = document.getElementById("builder-abilities-summary");
+		const summary = /** @type {*} */ (document.getElementById("builder-abilities-summary"));
 		if (!summary) return;
 		summary.innerHTML = "";
 
 		let allAssigned = true;
-		Parser.ABIL_ABVS.forEach(abl => {
+		Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 			const base = this._abilityScores[abl];
 			const racial = this._getRacialBonus(abl);
 
@@ -6733,6 +6880,9 @@ class CharacterSheetBuilder {
 	// #endregion
 
 	// #region Step 4: Background
+	/**
+	 * @param {*} content
+	 */
 	_renderBackgroundStep (content) {
 		// Get backgrounds filtered by allowed sources
 		const backgrounds = this._page.filterByAllowedSources(this._page.getBackgrounds());
@@ -6758,12 +6908,12 @@ class CharacterSheetBuilder {
 
 		content.append(container);
 
-		const list = document.getElementById("builder-bg-list");
+		const list = /** @type {*} */ (document.getElementById("builder-bg-list"));
 		const preview = document.getElementById("builder-bg-preview");
-		const searchEl = document.getElementById("builder-bg-search");
+		const searchEl = /** @type {*} */ (document.getElementById("builder-bg-search"));
 
 		// Custom background button
-		document.getElementById("builder-custom-bg-btn").addEventListener("click", () => {
+		document.getElementById("builder-custom-bg-btn")?.addEventListener("click", () => {
 			this._showCustomBackgroundCreator(preview);
 		});
 
@@ -6781,7 +6931,7 @@ class CharacterSheetBuilder {
 					</div>
 				`});
 				customItem.addEventListener("click", () => {
-					[...list.querySelectorAll(".charsheet__builder-list-item")].forEach(_el => _el.classList.remove("active"));
+					[...list.querySelectorAll(".charsheet__builder-list-item")].forEach((/** @type {*} */ _el) => _el.classList.remove("active"));
 					customItem.classList.add("active");
 					this._selectedBackground = this._customBackground;
 					this._selectedToolProficiencies = [];
@@ -6792,9 +6942,9 @@ class CharacterSheetBuilder {
 			}
 
 			backgrounds
-				.filter(bg => !filter || bg.name.toLowerCase().includes(filterLower))
-				.sort((a, b) => a.name.localeCompare(b.name))
-				.forEach(bg => {
+				.filter((/** @type {*} */ bg) => !filter || bg.name.toLowerCase().includes(filterLower))
+				.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name))
+				.forEach((/** @type {*} */ bg) => {
 					const isSelected = this._selectedBackground?.name === bg.name && !this._selectedBackground?._isCustom;
 					const item = e_({outer: `
 						<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
@@ -6804,7 +6954,7 @@ class CharacterSheetBuilder {
 					`});
 
 					item.addEventListener("click", () => {
-						[...list.querySelectorAll(".charsheet__builder-list-item")].forEach(_el => _el.classList.remove("active"));
+						[...list.querySelectorAll(".charsheet__builder-list-item")].forEach((/** @type {*} */ _el) => _el.classList.remove("active"));
 						item.classList.add("active");
 						this._selectedBackground = bg;
 						// Reset tool and language choices when changing background
@@ -6817,7 +6967,7 @@ class CharacterSheetBuilder {
 				});
 		};
 
-		searchEl.addEventListener("input", (e) => renderBgList(e.target.value));
+		searchEl.addEventListener("input", (/** @type {*} */ e) => renderBgList(e.target.value));
 		renderBgList();
 
 		if (this._selectedBackground) {
@@ -6827,6 +6977,7 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Show the custom background creation form
+	 * @param {*} preview
 	 */
 	_showCustomBackgroundCreator (preview) {
 		preview.innerHTML = "";
@@ -6843,7 +6994,7 @@ class CharacterSheetBuilder {
 			};
 		}
 
-		const allSkills = this._page.getSkillsList().map(s => s.name);
+		const allSkills = this._page.getSkillsList().map((/** @type {*} */ s) => s.name);
 		const allTools = [
 			"Alchemist's Supplies", "Brewer's Supplies", "Calligrapher's Supplies",
 			"Carpenter's Tools", "Cartographer's Tools", "Cobbler's Tools",
@@ -6854,7 +7005,7 @@ class CharacterSheetBuilder {
 			"Potter's Tools", "Smith's Tools", "Thieves' Tools",
 			"Tinker's Tools", "Weaver's Tools", "Woodcarver's Tools",
 		];
-		const allLanguages = this._page.getLanguagesList().map(l => l.name);
+		const allLanguages = this._page.getLanguagesList().map((/** @type {*} */ l) => l.name);
 
 		const content = e_({outer: `
 			<div class="charsheet__custom-bg-creator">
@@ -6919,8 +7070,8 @@ class CharacterSheetBuilder {
 		preview.append(content);
 
 		// Populate skill checkboxes
-		const skillsContainer = document.getElementById("custom-bg-skills");
-		allSkills.forEach(skill => {
+		const skillsContainer = /** @type {*} */ (document.getElementById("custom-bg-skills"));
+		allSkills.forEach((/** @type {*} */ skill) => {
 			const isSelected = this._customBackgroundData.skills.includes(skill);
 			const cb = e_({outer: `
 				<label class="charsheet__builder-skill-checkbox">
@@ -6933,8 +7084,8 @@ class CharacterSheetBuilder {
 		});
 
 		// Populate tool dropdown
-		const toolSelectEl = document.getElementById("custom-bg-tool1");
-		allTools.forEach(tool => {
+		const toolSelectEl = /** @type {*} */ (document.getElementById("custom-bg-tool1"));
+		allTools.forEach((/** @type {*} */ tool) => {
 			toolSelectEl.append(e_({outer: `<option value="${tool}" ${this._customBackgroundData.tools[0] === tool ? "selected" : ""}>${tool}</option>`}));
 		});
 
@@ -6959,34 +7110,34 @@ class CharacterSheetBuilder {
 		}
 
 		const langSelectEl = document.getElementById("custom-bg-lang1");
-		const addCustomBgLangOptgroup = (selectEl, label, langs, valueFn, selectedFn) => {
+		const addCustomBgLangOptgroup = (/** @type {*} */ selectEl, /** @type {*} */ label, /** @type {*} */ langs, /** @type {*} */ valueFn, /** @type {*} */ selectedFn) => {
 			if (!langs.length) return;
 			const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
-			langs.forEach(lang => {
+			langs.forEach((/** @type {*} */ lang) => {
 				const src = bgSourceLookup.get(lang);
 				const display = src ? `${lang} (${src})` : lang;
 				grp.append(e_({outer: `<option value="${valueFn(lang)}" ${selectedFn(lang) ? "selected" : ""}>${display}</option>`}));
 			});
 			selectEl.append(grp);
 		};
-		const langSelectedFn = lang => this._customBackgroundData.languages[0] === lang;
-		const langValueFn = lang => lang;
+		const langSelectedFn = (/** @type {*} */ lang) => this._customBackgroundData.languages[0] === lang;
+		const langValueFn = (/** @type {*} */ lang) => lang;
 		addCustomBgLangOptgroup(langSelectEl, "──── Homebrew Languages ────", langOptions.homebrew, langValueFn, langSelectedFn);
 		addCustomBgLangOptgroup(langSelectEl, "──── Standard Languages ────", langOptions.standard, langValueFn, langSelectedFn);
 		addCustomBgLangOptgroup(langSelectEl, "──── Exotic/Rare Languages ────", langOptions.exotic, langValueFn, langSelectedFn);
 		addCustomBgLangOptgroup(langSelectEl, "──── Secret Languages ────", langOptions.secret, langValueFn, langSelectedFn);
 
 		// Populate extra dropdown (combined tools and languages)
-		const extraSelect = document.getElementById("custom-bg-extra");
-		const extraToolsGroup = document.getElementById("custom-bg-extra-tools");
-		allTools.forEach(tool => {
+		const extraSelect = /** @type {*} */ (document.getElementById("custom-bg-extra"));
+		const extraToolsGroup = /** @type {*} */ (document.getElementById("custom-bg-extra-tools"));
+		allTools.forEach((/** @type {*} */ tool) => {
 			extraToolsGroup.append(e_({outer: `<option value="tool:${tool}">${tool}</option>`}));
 		});
 		// Add language optgroups as direct children of <select> (not nested inside another optgroup)
-		const addExtraLangOptgroup = (label, langs) => {
+		const addExtraLangOptgroup = (/** @type {*} */ label, /** @type {*} */ langs) => {
 			if (!langs.length) return;
 			const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
-			langs.forEach(lang => {
+			langs.forEach((/** @type {*} */ lang) => {
 				const src = bgSourceLookup.get(lang);
 				const display = src ? `${lang} (${src})` : lang;
 				grp.append(e_({outer: `<option value="lang:${lang}">${display}</option>`}));
@@ -6999,19 +7150,19 @@ class CharacterSheetBuilder {
 		addExtraLangOptgroup("──── Secret Languages ────", langOptions.secret);
 
 		// Event handlers
-		document.getElementById("custom-bg-name").addEventListener("input", (e) => {
+		document.getElementById("custom-bg-name")?.addEventListener("input", (/** @type {*} */ e) => {
 			this._customBackgroundData.name = e.target.value || "Custom Background";
 		});
 
-		document.getElementById("custom-bg-tool1").addEventListener("change", (e) => {
+		document.getElementById("custom-bg-tool1")?.addEventListener("change", (/** @type {*} */ e) => {
 			this._customBackgroundData.tools[0] = e.target.value;
 		});
 
-		document.getElementById("custom-bg-lang1").addEventListener("change", (e) => {
+		document.getElementById("custom-bg-lang1")?.addEventListener("change", (/** @type {*} */ e) => {
 			this._customBackgroundData.languages[0] = e.target.value;
 		});
 
-		document.getElementById("custom-bg-extra").addEventListener("change", (e) => {
+		document.getElementById("custom-bg-extra")?.addEventListener("change", (/** @type {*} */ e) => {
 			const val = e.target.value;
 			if (val.startsWith("tool:")) {
 				this._customBackgroundData.tools[1] = val.replace("tool:", "");
@@ -7025,15 +7176,15 @@ class CharacterSheetBuilder {
 			}
 		});
 
-		document.getElementById("custom-bg-equipment").addEventListener("input", (e) => {
+		document.getElementById("custom-bg-equipment")?.addEventListener("input", (/** @type {*} */ e) => {
 			this._customBackgroundData.equipment = e.target.value;
 		});
 
-		document.getElementById("custom-bg-feature").addEventListener("input", (e) => {
+		document.getElementById("custom-bg-feature")?.addEventListener("input", (/** @type {*} */ e) => {
 			this._customBackgroundData.feature = e.target.value;
 		});
 
-		document.getElementById("custom-bg-cancel").addEventListener("click", () => {
+		document.getElementById("custom-bg-cancel")?.addEventListener("click", () => {
 			if (this._selectedBackground) {
 				this._renderBackgroundPreview(preview, this._selectedBackground);
 			} else {
@@ -7041,7 +7192,7 @@ class CharacterSheetBuilder {
 			}
 		});
 
-		document.getElementById("custom-bg-save").addEventListener("click", () => {
+		document.getElementById("custom-bg-save")?.addEventListener("click", () => {
 			// Validate
 			if (this._customBackgroundData.skills.length !== 2) {
 				JqueryUtil.doToast({type: "warning", content: "Please select exactly 2 skill proficiencies."});
@@ -7053,8 +7204,8 @@ class CharacterSheetBuilder {
 			this._selectedBackground = this._customBackground;
 
 			// Re-render the list to show the custom background
-			const list = document.getElementById("builder-bg-list");
-			const searchEl = document.getElementById("builder-bg-search");
+			const list = /** @type {*} */ (document.getElementById("builder-bg-list"));
+			const searchEl = /** @type {*} */ (document.getElementById("builder-bg-search"));
 			this._renderBackgroundStep_refreshList(list, searchEl.value);
 
 			// Show the preview
@@ -7063,22 +7214,26 @@ class CharacterSheetBuilder {
 	}
 
 	_updateCustomBgSkills () {
-		const selected = [];
+		/** @type {*[]} */ const selected = [];
 		[...document.querySelectorAll("#custom-bg-skills input:checked")].forEach((el) => {
-			selected.push(el.dataset.skill);
+			selected.push((/** @type {*} */ (el)).dataset.skill);
 		});
 
 		// Limit to 2 skills
 		if (selected.length > 2) {
 			// Uncheck the last one
 			const allChecked = [...document.querySelectorAll("#custom-bg-skills input:checked")];
-			if (allChecked.length > 2) allChecked.at(-1).checked = false;
+			if (allChecked.length > 2) (/** @type {*} */ (allChecked.at(-1))).checked = false;
 			selected.pop();
 		}
 
 		this._customBackgroundData.skills = selected;
 	}
 
+	/**
+	 * @param {*} list
+	 * @param {*} filter
+	 */
 	_renderBackgroundStep_refreshList (list, filter = "") {
 		const backgrounds = this._page.filterByAllowedSources(this._page.getBackgrounds());
 		list.innerHTML = "";
@@ -7094,7 +7249,7 @@ class CharacterSheetBuilder {
 				</div>
 			`});
 			customItem.addEventListener("click", () => {
-				[...list.querySelectorAll(".charsheet__builder-list-item")].forEach(_el => _el.classList.remove("active"));
+				[...list.querySelectorAll(".charsheet__builder-list-item")].forEach((/** @type {*} */ _el) => _el.classList.remove("active"));
 				customItem.classList.add("active");
 				this._selectedBackground = this._customBackground;
 				this._selectedToolProficiencies = [];
@@ -7105,9 +7260,9 @@ class CharacterSheetBuilder {
 		}
 
 		backgrounds
-			.filter(bg => !filter || bg.name.toLowerCase().includes(filterLower))
-			.sort((a, b) => a.name.localeCompare(b.name))
-			.forEach(bg => {
+			.filter((/** @type {*} */ bg) => !filter || bg.name.toLowerCase().includes(filterLower))
+			.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name))
+			.forEach((/** @type {*} */ bg) => {
 				const isSelected = this._selectedBackground?.name === bg.name && !this._selectedBackground?._isCustom;
 				const item = e_({outer: `
 					<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
@@ -7117,7 +7272,7 @@ class CharacterSheetBuilder {
 				`});
 
 				item.addEventListener("click", () => {
-					[...list.querySelectorAll(".charsheet__builder-list-item")].forEach(_el => _el.classList.remove("active"));
+					[...list.querySelectorAll(".charsheet__builder-list-item")].forEach((/** @type {*} */ _el) => _el.classList.remove("active"));
 					item.classList.add("active");
 					this._selectedBackground = bg;
 					this._selectedToolProficiencies = [];
@@ -7136,30 +7291,30 @@ class CharacterSheetBuilder {
 		const data = this._customBackgroundData;
 
 		// Build skill proficiencies array
-		const skillProfs = data.skills.map(s => s.toLowerCase().replace(/\s+/g, " "));
+		const skillProfs = data.skills.map((/** @type {*} */ s) => s.toLowerCase().replace(/\s+/g, " "));
 
 		// Build tool proficiencies - detect choice-based tools vs fixed tools
-		const toolProfs = data.tools.filter(t => t);
+		const toolProfs = data.tools.filter((/** @type {*} */ t) => t);
 		const choiceToolMap = {
 			"musical instrument": "anyMusicalInstrument",
 			"artisan's tools": "anyArtisansTool",
 			"gaming set": "anyGamingSet",
 		};
-		const fixedTools = toolProfs.filter(t => !choiceToolMap[t.toLowerCase()]);
-		const choiceTools = toolProfs.filter(t => choiceToolMap[t.toLowerCase()]);
+		const fixedTools = toolProfs.filter((/** @type {*} */ t) => !(/** @type {*} */ (choiceToolMap))[t.toLowerCase()]);
+		const choiceTools = toolProfs.filter((/** @type {*} */ t) => (/** @type {*} */ (choiceToolMap))[t.toLowerCase()]);
 
 		// Build toolProficiencies array with correct structure
 		const toolProficiencies = [];
 		if (fixedTools.length) {
-			toolProficiencies.push(Object.fromEntries(fixedTools.map(t => [t.toLowerCase(), true])));
+			toolProficiencies.push(Object.fromEntries(fixedTools.map((/** @type {*} */ t) => [t.toLowerCase(), true])));
 		}
-		choiceTools.forEach(t => {
-			const key = choiceToolMap[t.toLowerCase()];
+		choiceTools.forEach((/** @type {*} */ t) => {
+			const key = (/** @type {*} */ (choiceToolMap))[t.toLowerCase()];
 			toolProficiencies.push({[key]: 1});
 		});
 
 		// Build language proficiencies
-		const langProfs = data.languages.filter(l => l);
+		const langProfs = data.languages.filter((/** @type {*} */ l) => l);
 
 		return {
 			name: data.name || "Custom Background",
@@ -7167,7 +7322,7 @@ class CharacterSheetBuilder {
 			_isCustom: true,
 			skillProficiencies: skillProfs.length ? [{[skillProfs[0]]: true, [skillProfs[1]]: true}] : [],
 			toolProficiencies: toolProficiencies,
-			languageProficiencies: langProfs.length ? [Object.fromEntries(langProfs.map(l => [l.toLowerCase(), true]))] : [],
+			languageProficiencies: langProfs.length ? [Object.fromEntries(langProfs.map((/** @type {*} */ l) => [l.toLowerCase(), true]))] : [],
 			entries: [
 				data.feature ? {
 					type: "entries",
@@ -7183,6 +7338,10 @@ class CharacterSheetBuilder {
 		};
 	}
 
+	/**
+	 * @param {*} preview
+	 * @param {*} bg
+	 */
 	_renderBackgroundPreview (preview, bg) {
 		preview.innerHTML = "";
 
@@ -7249,16 +7408,16 @@ class CharacterSheetBuilder {
 			const takenByOthers = this._getSkillsFromOtherSources("background");
 
 			// Collect fixed skill names from this background
-			const bgFixedSkills = [];
-			bg.skillProficiencies.forEach(skillSet => {
-				Object.keys(skillSet).forEach(skill => {
+			/** @type {*[]} */ const bgFixedSkills = [];
+			bg.skillProficiencies.forEach((/** @type {*} */ skillSet) => {
+				Object.keys(skillSet).forEach((/** @type {*} */ skill) => {
 					if (skill !== "choose" && skill !== "any") {
-						bgFixedSkills.push(skill.toTitleCase());
+						bgFixedSkills.push((/** @type {*} */ (skill)).toTitleCase());
 					}
 				});
 			});
 
-			const overlaps = bgFixedSkills.filter(s => takenByOthers.has(s));
+			const overlaps = bgFixedSkills.filter((/** @type {*} */ s) => takenByOthers.has(s));
 
 			// Build skill source map so hover resolves homebrew skills correctly
 			const skillSourceMap = new Map();
@@ -7277,7 +7436,7 @@ class CharacterSheetBuilder {
 			}
 
 			if (overlaps.length) {
-				const overlapList = overlaps.map(s => `<strong>${s}</strong> (${takenByOthers.get(s)})`).join(", ");
+				const overlapList = overlaps.map((/** @type {*} */ s) => `<strong>${s}</strong> (${takenByOthers.get(s)})`).join(", ");
 				content.append(e_({outer: `
 					<div class="alert alert-warning ve-small mb-2">
 						⚠️ <strong>Skill overlap:</strong> ${overlapList} ${overlaps.length === 1 ? "is" : "are"} already chosen — picking this background wastes ${overlaps.length === 1 ? "a skill" : `${overlaps.length} skills`}. You can go back to the race step and choose a different skill to accommodate, if possible, or talk with your DM.
@@ -7300,7 +7459,7 @@ class CharacterSheetBuilder {
 		// Features
 		if (bg.entries) {
 			const features = e_({outer: `<div class="mt-2"></div>`});
-			bg.entries.forEach(entry => {
+			bg.entries.forEach((/** @type {*} */ entry) => {
 				if (typeof entry === "object" && entry.name) {
 					features.append(e_({outer: `<div class="mb-1"><strong>${entry.name}.</strong> ${Renderer.get().render({entries: entry.entries || []})}</div>`}));
 				}
@@ -7313,6 +7472,8 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render tool proficiencies section with choice UI when needed
+	 * @param {*} content
+	 * @param {*} bg
 	 */
 	_renderBackgroundToolProficiencies (content, bg) {
 		if (!bg.toolProficiencies?.length) return;
@@ -7320,14 +7481,14 @@ class CharacterSheetBuilder {
 		const toolSection = e_({outer: `<div class="charsheet__builder-tool-profs mb-2"></div>`});
 
 		// Collect fixed tools and choice options
-		const fixedTools = [];
-		const choiceOptions = [];
+		/** @type {*[]} */ const fixedTools = [];
+		/** @type {*[]} */ const choiceOptions = [];
 		let anyToolCount = 0;
 		let anyArtisanCount = 0;
 		let anyMusicalInstrumentCount = 0;
 
-		bg.toolProficiencies.forEach(toolSet => {
-			Object.entries(toolSet).forEach(([key, value]) => {
+		bg.toolProficiencies.forEach((/** @type {*} */ toolSet) => {
+			Object.entries(toolSet).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
 				if (key === "choose" && value.from) {
 					choiceOptions.push({
 						from: value.from,
@@ -7347,11 +7508,11 @@ class CharacterSheetBuilder {
 
 		// Show fixed tools
 		if (fixedTools.length) {
-			toolSection.append(e_({outer: `<p><strong>Tools:</strong> ${fixedTools.map(t => t.toTitleCase()).join(", ")}</p>`}));
+			toolSection.append(e_({outer: `<p><strong>Tools:</strong> ${fixedTools.map((/** @type {*} */ t) => (/** @type {*} */ (t)).toTitleCase()).join(", ")}</p>`}));
 		}
 
 		// Render choice dropdowns for "choose from" options
-		choiceOptions.forEach((choice, choiceIdx) => {
+		choiceOptions.forEach((/** @type {*} */ choice, /** @type {*} */ choiceIdx) => {
 			const choiceSection = e_({outer: `<div class="charsheet__builder-tool-choice mt-1"></div>`});
 			choiceSection.append(e_({outer: `<p class="mb-1"><strong>Choose ${choice.count} tool${choice.count > 1 ? "s" : ""}:</strong></p>`}));
 
@@ -7363,20 +7524,20 @@ class CharacterSheetBuilder {
 					</select>
 				`});
 
-				choice.from.forEach(tool => {
-					selectEl.append(e_({outer: `<option value="${tool}">${tool.toTitleCase()}</option>`}));
+				choice.from.forEach((/** @type {*} */ tool) => {
+					selectEl.append(e_({outer: `<option value="${tool}">${(/** @type {*} */ (tool)).toTitleCase()}</option>`}));
 				});
 
 				// Pre-select if already chosen
-				const existingChoice = this._selectedToolProficiencies.find(t => t.choiceIdx === choiceIdx && t.selectIdx === i);
+				const existingChoice = this._selectedToolProficiencies.find((/** @type {*} */ t) => t.choiceIdx === choiceIdx && t.selectIdx === i);
 				if (existingChoice) {
 					selectEl.value = existingChoice.tool;
 				}
 
-				selectEl.addEventListener("change", (e) => {
+				selectEl.addEventListener("change", (/** @type {*} */ e) => {
 					// Remove old choice for this select
 					this._selectedToolProficiencies = this._selectedToolProficiencies.filter(
-						t => !(t.choiceIdx === choiceIdx && t.selectIdx === i),
+						(/** @type {*} */ t) => !(t.choiceIdx === choiceIdx && t.selectIdx === i),
 					);
 					// Add new choice
 					if (e.target.value) {
@@ -7407,18 +7568,18 @@ class CharacterSheetBuilder {
 					</select>
 				`});
 
-				allTools.forEach(tool => {
-					selectEl.append(e_({outer: `<option value="${tool}">${tool.toTitleCase()}</option>`}));
+				allTools.forEach((/** @type {*} */ tool) => {
+					selectEl.append(e_({outer: `<option value="${tool}">${(/** @type {*} */ (tool)).toTitleCase()}</option>`}));
 				});
 
-				const existingChoice = this._selectedToolProficiencies.find(t => t.anyIdx === i && !t.isArtisan);
+				const existingChoice = this._selectedToolProficiencies.find((/** @type {*} */ t) => t.anyIdx === i && !t.isArtisan);
 				if (existingChoice) {
 					selectEl.value = existingChoice.tool;
 				}
 
-				selectEl.addEventListener("change", (e) => {
+				selectEl.addEventListener("change", (/** @type {*} */ e) => {
 					this._selectedToolProficiencies = this._selectedToolProficiencies.filter(
-						t => !(t.anyIdx === i && !t.isArtisan),
+						(/** @type {*} */ t) => !(t.anyIdx === i && !t.isArtisan),
 					);
 					if (e.target.value) {
 						this._selectedToolProficiencies.push({
@@ -7459,15 +7620,15 @@ class CharacterSheetBuilder {
 			`});
 
 			// Pre-select if already chosen
-			const existingArtisan = this._selectedToolProficiencies.find(t => t.isArtisanOrInstrument && t.isArtisan);
-			const existingInstrument = this._selectedToolProficiencies.find(t => t.isArtisanOrInstrument && t.isMusicalInstrument);
+			const existingArtisan = this._selectedToolProficiencies.find((/** @type {*} */ t) => t.isArtisanOrInstrument && t.isArtisan);
+			const existingInstrument = this._selectedToolProficiencies.find((/** @type {*} */ t) => t.isArtisanOrInstrument && t.isMusicalInstrument);
 			const existingOrChoice = existingArtisan || existingInstrument;
 
-			const populateToolSelect = (category) => {
-				toolSelectEl.innerHTML = "".append(e_({outer: `<option value="">-- Select ${category === "artisan" ? "Artisan's Tool" : "Musical Instrument"} --</option>`}));
+			const populateToolSelect = (/** @type {*} */ category) => {
+				toolSelectEl.innerHTML = /** @type {*} */ ("").append(e_({outer: `<option value="">-- Select ${category === "artisan" ? "Artisan's Tool" : "Musical Instrument"} --</option>`}));
 				const tools = category === "artisan" ? artisanTools : musicalInstruments;
-				tools.forEach(tool => {
-					toolSelectEl.append(e_({outer: `<option value="${tool}">${tool.toTitleCase()}</option>`}));
+				tools.forEach((/** @type {*} */ tool) => {
+					toolSelectEl.append(e_({outer: `<option value="${tool}">${(/** @type {*} */ (tool)).toTitleCase()}</option>`}));
 				});
 				toolSelectEl.style.display = "";
 			};
@@ -7479,9 +7640,9 @@ class CharacterSheetBuilder {
 				toolSelectEl.value = existingOrChoice.tool;
 			}
 
-			categorySelect.addEventListener("change", (e) => {
+			categorySelect.addEventListener("change", (/** @type {*} */ e) => {
 				// Clear previous or-choice
-				this._selectedToolProficiencies = this._selectedToolProficiencies.filter(t => !t.isArtisanOrInstrument);
+				this._selectedToolProficiencies = this._selectedToolProficiencies.filter((/** @type {*} */ t) => !t.isArtisanOrInstrument);
 				if (e.target.value) {
 					populateToolSelect(e.target.value);
 				} else {
@@ -7489,8 +7650,8 @@ class CharacterSheetBuilder {
 				}
 			});
 
-			toolSelectEl.addEventListener("change", (e) => {
-				this._selectedToolProficiencies = this._selectedToolProficiencies.filter(t => !t.isArtisanOrInstrument);
+			toolSelectEl.addEventListener("change", (/** @type {*} */ e) => {
+				this._selectedToolProficiencies = this._selectedToolProficiencies.filter((/** @type {*} */ t) => !t.isArtisanOrInstrument);
 				const category = categorySelect.value;
 				if (e.target.value) {
 					this._selectedToolProficiencies.push({
@@ -7525,18 +7686,18 @@ class CharacterSheetBuilder {
 					</select>
 				`});
 
-				artisanTools.forEach(tool => {
-					selectEl.append(e_({outer: `<option value="${tool}">${tool.toTitleCase()}</option>`}));
+				artisanTools.forEach((/** @type {*} */ tool) => {
+					selectEl.append(e_({outer: `<option value="${tool}">${(/** @type {*} */ (tool)).toTitleCase()}</option>`}));
 				});
 
-				const existingChoice = this._selectedToolProficiencies.find(t => t.anyIdx === i && t.isArtisan && !t.isArtisanOrInstrument);
+				const existingChoice = this._selectedToolProficiencies.find((/** @type {*} */ t) => t.anyIdx === i && t.isArtisan && !t.isArtisanOrInstrument);
 				if (existingChoice) {
 					selectEl.value = existingChoice.tool;
 				}
 
-				selectEl.addEventListener("change", (e) => {
+				selectEl.addEventListener("change", (/** @type {*} */ e) => {
 					this._selectedToolProficiencies = this._selectedToolProficiencies.filter(
-						t => !(t.anyIdx === i && t.isArtisan && !t.isArtisanOrInstrument),
+						(/** @type {*} */ t) => !(t.anyIdx === i && t.isArtisan && !t.isArtisanOrInstrument),
 					);
 					if (e.target.value) {
 						this._selectedToolProficiencies.push({
@@ -7566,18 +7727,18 @@ class CharacterSheetBuilder {
 					</select>
 				`});
 
-				musicalInstruments.forEach(instrument => {
-					selectEl.append(e_({outer: `<option value="${instrument}">${instrument.toTitleCase()}</option>`}));
+				musicalInstruments.forEach((/** @type {*} */ instrument) => {
+					selectEl.append(e_({outer: `<option value="${instrument}">${(/** @type {*} */ (instrument)).toTitleCase()}</option>`}));
 				});
 
-				const existingChoice = this._selectedToolProficiencies.find(t => t.anyIdx === i && t.isMusicalInstrument && !t.isArtisanOrInstrument);
+				const existingChoice = this._selectedToolProficiencies.find((/** @type {*} */ t) => t.anyIdx === i && t.isMusicalInstrument && !t.isArtisanOrInstrument);
 				if (existingChoice) {
 					selectEl.value = existingChoice.tool;
 				}
 
-				selectEl.addEventListener("change", (e) => {
+				selectEl.addEventListener("change", (/** @type {*} */ e) => {
 					this._selectedToolProficiencies = this._selectedToolProficiencies.filter(
-						t => !(t.anyIdx === i && t.isMusicalInstrument && !t.isArtisanOrInstrument),
+						(/** @type {*} */ t) => !(t.anyIdx === i && t.isMusicalInstrument && !t.isArtisanOrInstrument),
 					);
 					if (e.target.value) {
 						this._selectedToolProficiencies.push({
@@ -7600,6 +7761,8 @@ class CharacterSheetBuilder {
 
 	/**
 	 * Render language proficiencies section with choice UI when needed
+	 * @param {*} content
+	 * @param {*} bg
 	 */
 	_renderBackgroundLanguages (content, bg) {
 		if (!bg.languageProficiencies?.length) return;
@@ -7607,12 +7770,12 @@ class CharacterSheetBuilder {
 		const langSection = e_({outer: `<div class="charsheet__builder-lang-profs mb-2"></div>`});
 
 		// Collect fixed languages and choice options
-		const fixedLangs = [];
+		/** @type {*[]} */ const fixedLangs = [];
 		let anyStandardCount = 0;
 		let anyCount = 0;
 
-		bg.languageProficiencies.forEach(langSet => {
-			Object.entries(langSet).forEach(([key, value]) => {
+		bg.languageProficiencies.forEach((/** @type {*} */ langSet) => {
+			Object.entries(langSet).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
 				if (key === "anyStandard") {
 					anyStandardCount += (typeof value === "number" ? value : 1);
 				} else if (key === "any") {
@@ -7625,7 +7788,7 @@ class CharacterSheetBuilder {
 
 		// Show fixed languages
 		if (fixedLangs.length) {
-			langSection.append(e_({outer: `<p><strong>Languages:</strong> ${fixedLangs.map(l => l.toTitleCase()).join(", ")}</p>`}));
+			langSection.append(e_({outer: `<p><strong>Languages:</strong> ${fixedLangs.map((/** @type {*} */ l) => (/** @type {*} */ (l)).toTitleCase()).join(", ")}</p>`}));
 		}
 
 		// Render language choice dropdowns
@@ -7673,9 +7836,9 @@ class CharacterSheetBuilder {
 
 				// Add language options grouped by type - homebrew first if available
 				// Secret languages are never offered as racial or background choices
-				const addLangOptgroup = (label, langs) => {
+				const addLangOptgroup = (/** @type {*} */ label, /** @type {*} */ langs) => {
 					const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
-					langs.forEach(lang => {
+					langs.forEach((/** @type {*} */ lang) => {
 						const src = bgSourceLookup.get(lang);
 						const display = src ? `${lang} (${src})` : lang;
 						grp.append(e_({outer: `<option value="${lang}">${display}</option>`}));
@@ -7693,13 +7856,13 @@ class CharacterSheetBuilder {
 					addLangOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
 				}
 
-				const existingChoice = this._selectedLanguages.find(l => l.selectIdx === i);
+				const existingChoice = this._selectedLanguages.find((/** @type {*} */ l) => l.selectIdx === i);
 				if (existingChoice) {
 					selectEl.value = existingChoice.language;
 				}
 
-				selectEl.addEventListener("change", (e) => {
-					this._selectedLanguages = this._selectedLanguages.filter(l => l.selectIdx !== i);
+				selectEl.addEventListener("change", (/** @type {*} */ e) => {
+					this._selectedLanguages = this._selectedLanguages.filter((/** @type {*} */ l) => l.selectIdx !== i);
 					if (e.target.value) {
 						this._selectedLanguages.push({
 							selectIdx: i,
@@ -7731,14 +7894,14 @@ class CharacterSheetBuilder {
 	 */
 	_updateLanguageDropdownOptions (container) {
 		// Get all currently selected languages (from this background section and elsewhere)
-		const selectedBgLangs = this._selectedLanguages.map(l => l.language);
+		const selectedBgLangs = this._selectedLanguages.map((/** @type {*} */ l) => l.language);
 		const selectedClassLangs = this._selectedClassFeatureLanguages || [];
 		const existingLangs = this._state?.getLanguages?.() || [];
 
 		// Combine all selected/known languages
 		const allSelectedLangs = [...selectedBgLangs, ...selectedClassLangs, ...existingLangs]
-			.filter(l => l)
-			.map(l => l.toLowerCase());
+			.filter((/** @type {*} */ l) => l)
+			.map((/** @type {*} */ l) => l.toLowerCase());
 
 		// Expand with dialect conflicts (e.g. selecting "Ignan" also disables "Primordial")
 		const allDisabledLangs = new Set(allSelectedLangs);
@@ -7762,6 +7925,10 @@ class CharacterSheetBuilder {
 		});
 	}
 
+	/**
+	 * @param {*} container
+	 * @param {*} abilityChoice
+	 */
 	_renderBackgroundASIChoices (container, abilityChoice) {
 		if (!abilityChoice) return;
 
@@ -7783,14 +7950,14 @@ class CharacterSheetBuilder {
 		} else {
 			// Fixed ability bonuses
 			const bonuses = Object.entries(abilityChoice)
-				.filter(([k, v]) => typeof v === "number")
-				.map(([ab, bonus]) => `${Parser.attAbvToFull(ab)} +${bonus}`)
+				.filter(([/** @type {*} */ k, /** @type {*} */ v]) => typeof v === "number")
+				.map(([/** @type {*} */ ab, /** @type {*} */ bonus]) => `${Parser.attAbvToFull(ab)} +${bonus}`)
 				.join(", ");
 			if (bonuses) {
 				container.append(e_({outer: `<p class="ve-muted">${bonuses}</p>`}));
 				// Store fixed bonuses
 				Object.entries(abilityChoice)
-					.filter(([k, v]) => typeof v === "number")
+					.filter(([/** @type {*} */ k, /** @type {*} */ v]) => typeof v === "number")
 					.forEach(([ab, bonus], idx) => {
 						this._selectedAbilityBonuses[`bg_${idx}`] = ab;
 						this._selectedAbilityBonuses[`bg_${idx}_weight`] = bonus;
@@ -7799,6 +7966,9 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	/**
+	 * @param {*} container
+	 */
 	_renderFreeASIChoices (container) {
 		// Free choice for 2024 species + 2014 background: +2 to one ability, +1 to another
 		const abilities = ["str", "dex", "con", "int", "wis", "cha"];
@@ -7806,23 +7976,28 @@ class CharacterSheetBuilder {
 		this._renderWeightedASIChoices(container, abilities, weights);
 	}
 
+	/**
+	 * @param {*} container
+	 * @param {*} availableAbilities
+	 * @param {*} weights
+	 */
 	_renderWeightedASIChoices (container, availableAbilities, weights) {
 		const weightedChoices = e_({outer: `<div class="charsheet__builder-asi-choices"></div>`});
 
-		weights.forEach((weight, idx) => {
+		weights.forEach((/** @type {*} */ weight, /** @type {*} */ idx) => {
 			const row = e_({outer: `<div class="ve-flex-v-center mb-1"></div>`});
 			row.append(e_({outer: `<span class="mr-2">+${weight}:</span>`}));
 
 			const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${idx}"></select>`});
 			selectEl.append(e_({outer: `<option value="">-- Select --</option>`}));
 
-			availableAbilities.forEach(ab => {
+			availableAbilities.forEach((/** @type {*} */ ab) => {
 				const abName = Parser.attAbvToFull(ab);
 				const selected = this._selectedAbilityBonuses[`bg_${idx}`] === ab ? "selected" : "";
 				selectEl.append(e_({outer: `<option value="${ab}" ${selected}>${abName}</option>`}));
 			});
 
-			selectEl.addEventListener("change", (e) => {
+			selectEl.addEventListener("change", (/** @type {*} */ e) => {
 				const val = e.target.value;
 				this._selectedAbilityBonuses[`bg_${idx}`] = val;
 				this._selectedAbilityBonuses[`bg_${idx}_weight`] = weight;
@@ -7835,7 +8010,7 @@ class CharacterSheetBuilder {
 							const optVal = opt.value;
 							// Check if this option is selected in another dropdown
 							const isSelectedElsewhere = Object.entries(this._selectedAbilityBonuses)
-								.some(([k, v]) => k.startsWith("bg_") && !k.includes("weight") && k !== `bg_${selIdx}` && v === optVal);
+								.some(([/** @type {*} */ k, /** @type {*} */ v]) => k.startsWith("bg_") && !k.includes("weight") && k !== `bg_${selIdx}` && v === optVal);
 							opt.disabled = optVal && isSelectedElsewhere;
 						});
 					}
@@ -7849,6 +8024,12 @@ class CharacterSheetBuilder {
 		container.append(weightedChoices);
 	}
 
+	/**
+	 * @param {*} container
+	 * @param {*} availableAbilities
+	 * @param {*} count
+	 * @param {*} amount
+	 */
 	_renderCountASIChoices (container, availableAbilities, count, amount) {
 		const countChoices = e_({outer: `<div class="charsheet__builder-asi-choices"></div>`});
 
@@ -7859,13 +8040,13 @@ class CharacterSheetBuilder {
 			const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal ve-inline-block w-auto" data-asi-idx="${i}"></select>`});
 			selectEl.append(e_({outer: `<option value="">-- Select --</option>`}));
 
-			availableAbilities.forEach(ab => {
+			availableAbilities.forEach((/** @type {*} */ ab) => {
 				const abName = Parser.attAbvToFull(ab);
 				const selected = this._selectedAbilityBonuses[`bg_${i}`] === ab ? "selected" : "";
 				selectEl.append(e_({outer: `<option value="${ab}" ${selected}>${abName}</option>`}));
 			});
 
-			selectEl.addEventListener("change", (e) => {
+			selectEl.addEventListener("change", (/** @type {*} */ e) => {
 				this._selectedAbilityBonuses[`bg_${i}`] = e.target.value;
 				this._selectedAbilityBonuses[`bg_${i}_weight`] = amount;
 			});
@@ -7879,6 +8060,9 @@ class CharacterSheetBuilder {
 	// #endregion
 
 	// #region Step 5: Equipment
+	/**
+	 * @param {*} content
+	 */
 	_renderEquipmentStep (content) {
 		// Initialize equipment choices if not already set
 		if (!this._equipmentChoices) {
@@ -7915,6 +8099,9 @@ class CharacterSheetBuilder {
 		this._renderClassEquipmentChoices(document.getElementById("builder-class-equipment"));
 	}
 
+	/**
+	 * @param {*} container
+	 */
 	_renderClassEquipmentChoices (container) {
 		container.innerHTML = "";
 
@@ -7932,7 +8119,7 @@ class CharacterSheetBuilder {
 		// Check if this is 2024 format (has uppercase keys like A, B, C in defaultData)
 		const defaultData = startingEquip.defaultData || [];
 		const is2024Format = defaultData.length > 0 && defaultData[0]
-			&& Object.keys(defaultData[0]).some(k => /^[A-Z]$/.test(k));
+			&& Object.keys(defaultData[0]).some((/** @type {*} */ k) => /^[A-Z]$/.test(k));
 
 		if (is2024Format) {
 			// 2024 XPHB format - package choices (A, B, C)
@@ -7945,13 +8132,17 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	/**
+	 * @param {*} container
+	 * @param {*} startingEquip
+	 */
 	_render2024EquipmentChoices (container, startingEquip) {
 		// 2024 format has complete equipment packages as options A, B, C, etc.
 		const defaultData = startingEquip.defaultData || [];
 		if (!defaultData.length) return;
 
 		const choiceData = defaultData[0]; // All choices are in the first defaultData entry
-		const choiceKeys = Object.keys(choiceData).filter(k => /^[A-Z]$/.test(k)).sort();
+		const choiceKeys = Object.keys(choiceData).filter((/** @type {*} */ k) => /^[A-Z]$/.test(k)).sort();
 
 		if (!choiceKeys.length) {
 			container.append("<p class='ve-muted'>No equipment options found</p>");
@@ -7976,7 +8167,7 @@ class CharacterSheetBuilder {
 			const isSelected = this._equipmentChoices["2024"] === key;
 
 			// Build label showing what's in this package
-			const labelParts = items.map(item => {
+			const labelParts = items.map((/** @type {*} */ item) => {
 				if (item.item) {
 					const [name] = item.item.split("|");
 					return item.quantity > 1 ? `${item.quantity}× ${name}` : name;
@@ -8010,11 +8201,15 @@ class CharacterSheetBuilder {
 		container.append(choiceGroup);
 	}
 
+	/**
+	 * @param {*} container
+	 * @param {*} startingEquip
+	 */
 	_renderClassicEquipmentChoices (container, startingEquip) {
 		const equipmentEntries = startingEquip.default;
 		const defaultData = startingEquip.defaultData || [];
 
-		equipmentEntries.forEach((entry, idx) => {
+		equipmentEntries.forEach((/** @type {*} */ entry, /** @type {*} */ idx) => {
 			const row = e_({outer: `<div class="charsheet__builder-equipment-row mb-2"></div>`});
 
 			// Check if this is a choice (contains "or")
@@ -8023,19 +8218,19 @@ class CharacterSheetBuilder {
 			if (isChoice && defaultData[idx]) {
 				// Render as radio choices
 				const choiceData = defaultData[idx];
-				const choiceKeys = Object.keys(choiceData).filter(k => k !== "_");
+				const choiceKeys = Object.keys(choiceData).filter((/** @type {*} */ k) => k !== "_");
 
 				if (choiceKeys.length > 1) {
 					const choiceGroup = e_({outer: `<div class="charsheet__builder-equipment-choice"></div>`});
 					const pickerContainer = e_({outer: `<div class="charsheet__builder-equipment-type-pickers ml-3 mt-1"></div>`});
 
-					const renderPickersForKey = (key) => {
+					const renderPickersForKey = (/** @type {*} */ key) => {
 						pickerContainer.innerHTML = "";
 						const items = choiceData[key] || [];
 						this._renderEquipmentTypePickers(pickerContainer, items, `${idx}_${key}`);
 					};
 
-					choiceKeys.forEach((key, choiceIdx) => {
+					choiceKeys.forEach((/** @type {*} */ key, /** @type {*} */ choiceIdx) => {
 						const choiceLabel = this._getEquipmentChoiceLabel(choiceData[key], key);
 						const isSelected = this._equipmentChoices[idx] === key || (!this._equipmentChoices[idx] && choiceIdx === 0);
 
@@ -8098,7 +8293,7 @@ class CharacterSheetBuilder {
 				</div>
 			`});
 
-			goldOption.querySelector("input").addEventListener("change", (e) => {
+			goldOption.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 				this._useGoldAlternative = e.target.checked;
 			});
 
@@ -8109,7 +8304,7 @@ class CharacterSheetBuilder {
 	/**
 	 * Render dropdown pickers for items with equipmentType in an equipment item list.
 	 * @param {HTMLElement} container - Container to append pickers to
-	 * @param {Array} items - Equipment items array (from defaultData)
+	 * @param {Array<*>} items - Equipment items array (from defaultData)
 	 * @param {string} prefix - Unique prefix for picker keys
 	 */
 	_renderEquipmentTypePickers (container, items, prefix) {
@@ -8118,12 +8313,12 @@ class CharacterSheetBuilder {
 
 		const allItems = this._page.getItems();
 
-		items.forEach((itemEntry, itemIdx) => {
+		items.forEach((/** @type {*} */ itemEntry, /** @type {*} */ itemIdx) => {
 			if (!itemEntry.equipmentType) return;
 
 			const eqType = itemEntry.equipmentType;
 			const pickerKey = `${eqType}_${itemIdx}`;
-			const label = CharacterSheetBuilder._EQUIPMENT_TYPE_LABELS[eqType] || eqType;
+			const label = (/** @type {*} */ (CharacterSheetBuilder._EQUIPMENT_TYPE_LABELS))[eqType] || eqType;
 			const matchingItems = this._getItemsForEquipmentType(eqType, allItems);
 
 			if (matchingItems.length === 0) return;
@@ -8140,8 +8335,8 @@ class CharacterSheetBuilder {
 					</div>
 				`});
 
-				const selectEl = picker.querySelector("select");
-				matchingItems.forEach(item => {
+				const selectEl = /** @type {*} */ (picker.querySelector("select"));
+				matchingItems.forEach((/** @type {*} */ item) => {
 					selectEl.append(e_({outer: `<option value="${item.name}">${item.name}</option>`}));
 				});
 
@@ -8150,7 +8345,7 @@ class CharacterSheetBuilder {
 					selectEl.value = this._equipmentTypeChoices[selectKey];
 				}
 
-				selectEl.addEventListener("change", (e) => {
+				selectEl.addEventListener("change", (/** @type {*} */ e) => {
 					this._equipmentTypeChoices[selectKey] = e.target.value || null;
 				});
 
@@ -8180,31 +8375,31 @@ class CharacterSheetBuilder {
 	/**
 	 * Filter items matching an equipmentType value.
 	 * @param {string} equipmentType - e.g. "weaponSimple", "focusSpellcastingArcane"
-	 * @param {Array} allItems - All items from page data
-	 * @returns {Array} Matching items sorted by name
+	 * @param {Array<*>} allItems - All items from page data
+	 * @returns {Array<*>} Matching items sorted by name
 	 */
 	_getItemsForEquipmentType (equipmentType, allItems) {
 		const matchFns = {
-			"weaponSimple": (i) => i.weaponCategory === "simple",
-			"weaponMartial": (i) => i.weaponCategory === "martial",
-			"weaponSimpleMelee": (i) => i.weaponCategory === "simple" && (i.type === "M" || i.type === "M|XPHB"),
-			"weaponMartialMelee": (i) => i.weaponCategory === "martial" && (i.type === "M" || i.type === "M|XPHB"),
-			"armorLight": (i) => i.type === "LA" || i.type === "LA|XPHB",
-			"armorMedium": (i) => i.type === "MA" || i.type === "MA|XPHB",
-			"armorHeavy": (i) => i.type === "HA" || i.type === "HA|XPHB",
-			"instrumentMusical": (i) => i.type === "INS" || i.type === "INS|XPHB",
-			"toolArtisan": (i) => i.type === "AT" || i.type === "AT|XPHB",
-			"focusSpellcastingArcane": (i) => (i.type === "SCF" || i.type === "SCF|XPHB") && i.scfType === "arcane",
-			"focusSpellcastingHoly": (i) => (i.type === "SCF" || i.type === "SCF|XPHB") && i.scfType === "holy",
-			"focusSpellcastingDruidic": (i) => (i.type === "SCF" || i.type === "SCF|XPHB") && i.scfType === "druid",
+			"weaponSimple": (/** @type {*} */ i) => i.weaponCategory === "simple",
+			"weaponMartial": (/** @type {*} */ i) => i.weaponCategory === "martial",
+			"weaponSimpleMelee": (/** @type {*} */ i) => i.weaponCategory === "simple" && (i.type === "M" || i.type === "M|XPHB"),
+			"weaponMartialMelee": (/** @type {*} */ i) => i.weaponCategory === "martial" && (i.type === "M" || i.type === "M|XPHB"),
+			"armorLight": (/** @type {*} */ i) => i.type === "LA" || i.type === "LA|XPHB",
+			"armorMedium": (/** @type {*} */ i) => i.type === "MA" || i.type === "MA|XPHB",
+			"armorHeavy": (/** @type {*} */ i) => i.type === "HA" || i.type === "HA|XPHB",
+			"instrumentMusical": (/** @type {*} */ i) => i.type === "INS" || i.type === "INS|XPHB",
+			"toolArtisan": (/** @type {*} */ i) => i.type === "AT" || i.type === "AT|XPHB",
+			"focusSpellcastingArcane": (/** @type {*} */ i) => (i.type === "SCF" || i.type === "SCF|XPHB") && i.scfType === "arcane",
+			"focusSpellcastingHoly": (/** @type {*} */ i) => (i.type === "SCF" || i.type === "SCF|XPHB") && i.scfType === "holy",
+			"focusSpellcastingDruidic": (/** @type {*} */ i) => (i.type === "SCF" || i.type === "SCF|XPHB") && i.scfType === "druid",
 		};
 
-		const matchFn = matchFns[equipmentType];
+		const matchFn = (/** @type {*} */ (matchFns))[equipmentType];
 		if (!matchFn) return [];
 
 		// Deduplicate by name (prefer XPHB source over PHB)
 		// Only include base items — exclude magical items and variants
-		const matched = allItems.filter(i => i._isBaseItem && matchFn(i));
+		const matched = allItems.filter((/** @type {*} */ i) => i._isBaseItem && matchFn(i));
 		const byName = new Map();
 		for (const item of matched) {
 			const existing = byName.get(item.name);
@@ -8212,20 +8407,24 @@ class CharacterSheetBuilder {
 				byName.set(item.name, item);
 			}
 		}
-		return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+		return [...byName.values()].sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 	}
 
+	/**
+	 * @param {*} items
+	 * @param {*} key
+	 */
 	_getEquipmentChoiceLabel (items, key) {
 		if (!Array.isArray(items)) return String(items);
 
-		return items.map(item => {
+		return items.map((/** @type {*} */ item) => {
 			if (typeof item === "string") {
 				// Item reference like "chain mail|phb"
 				const [name] = item.split("|");
 				return `{@item ${item}|${name}}`;
 			} else if (item.equipmentType) {
 				// Generic equipment type
-				const label = CharacterSheetBuilder._EQUIPMENT_TYPE_LABELS[item.equipmentType] || item.equipmentType;
+				const label = (/** @type {*} */ (CharacterSheetBuilder._EQUIPMENT_TYPE_LABELS))[item.equipmentType] || item.equipmentType;
 				return item.quantity > 1 ? `${item.quantity} ${label}s` : label;
 			} else if (item.item) {
 				// Item with quantity
@@ -8315,6 +8514,9 @@ class CharacterSheetBuilder {
 		};
 	}
 
+	/**
+	 * @param {*} content
+	 */
 	_renderSpellsStep (content) {
 		const knownInfo = this._getKnownCasterInfoForBuilder();
 
@@ -8345,7 +8547,7 @@ class CharacterSheetBuilder {
 						<span class="ve-bold">Divine Soul Affinity</span>
 						<select class="ve-form-control ve-input-sm">
 							<option value="">Choose an affinity</option>
-							${affinityOptions.map(opt => `<option value="${opt.key}" ${selectedAffinity?.key === opt.key ? "selected" : ""}>${opt.name}</option>`).join("")}
+							${affinityOptions.map((/** @type {*} */ opt) => `<option value="${opt.key}" ${selectedAffinity?.key === opt.key ? "selected" : ""}>${opt.name}</option>`).join("")}
 						</select>
 						<span class="ve-small ve-muted">This affinity grants your extra Divine Soul spell and unlocks Cleric spells while you pick Sorcerer spells.</span>
 					</label>
@@ -8354,8 +8556,8 @@ class CharacterSheetBuilder {
 
 			const affinitySelect = affinitySection.querySelector("select");
 			if (affinitySelect) {
-				affinitySelect.addEventListener("change", evt => {
-					this._divineSoulAffinity = affinityOptions.find(opt => opt.key === evt.target.value) || null;
+				affinitySelect.addEventListener("change", (/** @type {*} */ evt) => {
+					this._divineSoulAffinity = affinityOptions.find((/** @type {*} */ opt) => opt.key === evt.target.value) || null;
 					this._state.setSubclassChoice(this._selectedClass?.name, this._divineSoulAffinity);
 					this._state.updateLevelChoice?.(1, {
 						subclassChoice: CharacterSheetClassUtils.normalizeDivineSoulAffinity(this._divineSoulAffinity),
@@ -8371,6 +8573,7 @@ class CharacterSheetBuilder {
 		const sourceFiltered = this._page.getFilteredSpellData();
 
 		// Re-get knownInfo to reflect the current affinity selection
+		/** @type {*} */
 		const updatedKnownInfo = this._getKnownCasterInfoForBuilder();
 		const pickerEl = container.querySelector("#builder-spell-picker");
 		if (!pickerEl) return;
@@ -8387,28 +8590,28 @@ class CharacterSheetBuilder {
 					allSpells: sourceFiltered,
 					knownSpellIds: new Set(),
 					additionalClassNames: updatedKnownInfo.additionalClassNames,
-					onSelect: (spells, cantrips) => {
+					onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
 						this._selectedKnownCantrips = cantrips;
 					},
-					getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+					getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
 					preSelectedSpells: [],
 					preSelectedCantrips: this._selectedKnownCantrips,
 				});
 				pickerEl.append(cantripSection);
 			}
 			// --- Spellbook ---
-			const spellbookSection = CharacterSheetSpellPicker.renderWizardSpellbookPicker({
+			const spellbookSection = CharacterSheetSpellPicker.renderWizardSpellbookPicker(/** @type {*} */ ({
 				className: updatedKnownInfo.className,
 				spellCount: updatedKnownInfo.spellbookCount,
 				maxSpellLevel: updatedKnownInfo.maxSpellLevel,
 				allSpells: sourceFiltered,
 				knownSpellIds: new Set(),
-				onSelect: (spells) => {
+				onSelect: (/** @type {*} */ spells) => {
 					this._selectedSpellbookSpells = spells;
 				},
-				getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
 				preSelectedSpells: this._selectedSpellbookSpells,
-			});
+			}));
 			pickerEl.append(spellbookSection);
 		} else {
 			// Known-caster (Bard, Sorcerer, Warlock, Ranger) or cantrip-only prepared caster
@@ -8422,11 +8625,11 @@ class CharacterSheetBuilder {
 				allSpells: sourceFiltered,
 				knownSpellIds: new Set(),
 				additionalClassNames: updatedKnownInfo.additionalClassNames,
-				onSelect: (spells, cantrips) => {
+				onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
 					this._selectedKnownSpells = spells;
 					this._selectedKnownCantrips = cantrips;
 				},
-				getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
 				preSelectedSpells: this._selectedKnownSpells,
 				preSelectedCantrips: this._selectedKnownCantrips,
 			});
@@ -8484,6 +8687,9 @@ class CharacterSheetBuilder {
 	// #endregion
 
 	// #region Step 7: Details
+	/**
+	 * @param {*} content
+	 */
 	_renderDetailsStep (content) {
 		const container = e_({outer: `
 			<div class="ve-flex">
@@ -8558,15 +8764,15 @@ class CharacterSheetBuilder {
 		content.append(container);
 
 		// Save values on change
-		document.getElementById("builder-name").addEventListener("change", (e) => this._state.setName(e.target.value));
-		document.getElementById("builder-personality").addEventListener("change", (e) => this._state.setNote("personality", e.target.value));
-		document.getElementById("builder-ideals").addEventListener("change", (e) => this._state.setNote("ideals", e.target.value));
-		document.getElementById("builder-bonds").addEventListener("change", (e) => this._state.setNote("bonds", e.target.value));
-		document.getElementById("builder-flaws").addEventListener("change", (e) => this._state.setNote("flaws", e.target.value));
-		document.getElementById("builder-backstory").addEventListener("change", (e) => this._state.setNote("backstory", e.target.value));
+		document.getElementById("builder-name")?.addEventListener("change", (/** @type {*} */ e) => this._state.setName(e.target.value));
+		document.getElementById("builder-personality")?.addEventListener("change", (/** @type {*} */ e) => this._state.setNote("personality", e.target.value));
+		document.getElementById("builder-ideals")?.addEventListener("change", (/** @type {*} */ e) => this._state.setNote("ideals", e.target.value));
+		document.getElementById("builder-bonds")?.addEventListener("change", (/** @type {*} */ e) => this._state.setNote("bonds", e.target.value));
+		document.getElementById("builder-flaws")?.addEventListener("change", (/** @type {*} */ e) => this._state.setNote("flaws", e.target.value));
+		document.getElementById("builder-backstory")?.addEventListener("change", (/** @type {*} */ e) => this._state.setNote("backstory", e.target.value));
 
-		["age", "height", "weight", "eyes", "skin", "hair"].forEach(field => {
-			document.getElementById(`builder-${field}`).addEventListener("change", (e) => this._state.setAppearance(field, e.target.value));
+		["age", "height", "weight", "eyes", "skin", "hair"].forEach((/** @type {*} */ field) => {
+			document.getElementById(`builder-${field}`)?.addEventListener("change", (/** @type {*} */ e) => this._state.setAppearance(field, e.target.value));
 		});
 	}
 	// #endregion

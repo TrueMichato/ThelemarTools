@@ -1,3 +1,6 @@
+// Project globals — typed via globalThis cast for TypeScript checkJs
+const {Parser, Renderer, MiscUtil, UrlUtil} = /** @type {*} */ (globalThis);
+
 /**
  * Character Sheet Class Utilities
  * Shared static helpers used by both LevelUp and QuickBuild modules.
@@ -15,22 +18,22 @@ class CharacterSheetClassUtils {
 	 * @param {string} source - The source abbreviation (e.g. "XPHB", "TGTT", "PHB")
 	 * @returns {boolean}
 	 */
-	static is2024Source (source) {
+	static is2024Source (/** @type {*} */ source) {
 		return source === "XPHB" || source === "TGTT";
 	}
 
 	/**
 	 * Check if a class level grants an Ability Score Improvement.
-	 * @param {Object} classData - The class data object
+	 * @param {*} classData - The class data object
 	 * @param {number} level - The class level
 	 * @returns {boolean}
 	 */
-	static levelGrantsAsi (classData, level) {
+	static levelGrantsAsi (/** @type {*} */ classData, /** @type {*} */ level) {
 		const standardAsiLevels = [4, 8, 12, 16, 19];
-		if (classData.name === "Fighter") {
+		if (/** @type {*} */ classData.name === "Fighter") {
 			return [...standardAsiLevels, 6, 14].includes(level);
 		}
-		if (classData.name === "Rogue") {
+		if (/** @type {*} */ classData.name === "Rogue") {
 			return [...standardAsiLevels, 10].includes(level);
 		}
 		return standardAsiLevels.includes(level);
@@ -38,28 +41,28 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Check if a class level grants a subclass feature (data-driven).
-	 * @param {Object} classData - The class data with classFeatures
+	 * @param {*} classData - The class data with classFeatures
 	 * @param {number} level - The class level
 	 * @returns {boolean}
 	 */
-	static levelGrantsSubclass (classData, level) {
+	static levelGrantsSubclass (/** @type {*} */ classData, /** @type {*} */ level) {
 		if (classData.classFeatures && Array.isArray(classData.classFeatures)) {
 			const isArrayOfArrays = Array.isArray(classData.classFeatures[0]);
 			const levelFeatures = isArrayOfArrays
 				? classData.classFeatures[level - 1] || []
-				: classData.classFeatures.filter(f => {
-					if (typeof f === "string") {
+				: classData.classFeatures.filter((/** @type {*} */ f) => {
+					if (/** @type {*} */ typeof f === "string") {
 						const parts = f.split("|");
 						return parseInt(parts[3]) === level;
 					}
-					if (typeof f === "object" && f.classFeature) {
+					if (/** @type {*} */ typeof f === "object" && f.classFeature) {
 						const parts = f.classFeature.split("|");
 						return parseInt(parts[3]) === level;
 					}
 					return f.level === level;
 				});
 
-			return levelFeatures.some(f =>
+			return levelFeatures.some((/** @type {*} */ f) =>
 				typeof f === "object" && f.gainSubclassFeature,
 			);
 		}
@@ -70,20 +73,20 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get the level at which a class gains its subclass (data-driven).
-	 * @param {Object} classData - The class data with classFeatures
+	 * @param {*} classData - The class data with classFeatures
 	 * @returns {number} The subclass level (default: 3)
 	 */
-	static getSubclassLevel (classData) {
+	static getSubclassLevel (/** @type {*} */ classData) {
 		if (classData.classFeatures && Array.isArray(classData.classFeatures)) {
 			const isArrayOfArrays = Array.isArray(classData.classFeatures[0]);
-			if (isArrayOfArrays) {
-				for (let lvl = 1; lvl <= 20; lvl++) {
+			if (/** @type {*} */ isArrayOfArrays) {
+				for (/** @type {*} */ let lvl = 1; lvl <= 20; lvl++) {
 					const features = classData.classFeatures[lvl - 1] || [];
-					if (features.some(f => typeof f === "object" && f.gainSubclassFeature)) return lvl;
+					if (features.some((/** @type {*} */ f) => typeof f === "object" && f.gainSubclassFeature)) return lvl;
 				}
 			} else {
-				for (const f of classData.classFeatures) {
-					if (typeof f === "object" && f.gainSubclassFeature) {
+				for (/** @type {*} */ const f of classData.classFeatures) {
+					if (/** @type {*} */ typeof f === "object" && f.gainSubclassFeature) {
 						const parts = f.classFeature.split("|");
 						const lvl = parseInt(parts[3]);
 						if (!isNaN(lvl)) return lvl;
@@ -97,26 +100,28 @@ class CharacterSheetClassUtils {
 	/**
 	 * Deduplicate optional features by source priority. When the same feature exists in multiple
 	 * sources, keeps only the highest-priority version (TGTT > XPHB > PHB > others alphabetical).
-	 * @param {Array} optFeatures - All optional features
+	 * @param {Array<*>} optFeatures - All optional features
 	 * @param {object} [opts] - Options
+	 * @param {object} opts
 	 * @param {boolean} [opts.showAll=false] - If true, skip deduplication and return all features
-	 * @returns {Array} Deduplicated optional features
+	 * @returns {Array<*>} Deduplicated optional features
 	 */
-	static deduplicateOptFeaturesByEdition (optFeatures, {showAll = false} = {}) {
+	static deduplicateOptFeaturesByEdition (/** @type {*} */ optFeatures, /** @type {*} */ opts = {}) {
+		const {showAll = false} = opts;
 		if (!optFeatures?.length) return optFeatures;
 		if (showAll) return optFeatures;
 
 		// Source priority: lower = higher priority
 		const SOURCE_PRIORITY = {"TGTT": 0, "XPHB": 1, "PHB": 2};
 
-		const getSourcePriority = (source) => {
-			if (source in SOURCE_PRIORITY) return SOURCE_PRIORITY[source];
+		const getSourcePriority = (/** @type {*} */ source) => {
+			if (source in SOURCE_PRIORITY) return (/** @type {*} */ (SOURCE_PRIORITY))[source];
 			return 100; // Other sources get equal low priority (kept if no higher-priority dupe)
 		};
 
 		// Group by lowercase name
 		const groups = new Map();
-		for (const opt of optFeatures) {
+		for (/** @type {*} */ const opt of optFeatures) {
 			const key = opt.name.toLowerCase();
 			if (!groups.has(key)) {
 				groups.set(key, []);
@@ -127,10 +132,10 @@ class CharacterSheetClassUtils {
 		// For each group, pick the one with highest priority (lowest number)
 		const result = [];
 		for (const group of groups.values()) {
-			if (group.length === 1) {
+			if (/** @type {*} */ group.length === 1) {
 				result.push(group[0]);
 			} else {
-				group.sort((a, b) => {
+				group.sort((/** @type {*} */ a, /** @type {*} */ b) => {
 					const prioA = getSourcePriority(a.source);
 					const prioB = getSourcePriority(b.source);
 					if (prioA !== prioB) return prioA - prioB;
@@ -146,34 +151,34 @@ class CharacterSheetClassUtils {
 	/**
 	 * @deprecated Use deduplicateOptFeaturesByEdition instead
 	 */
-	static filterOptFeaturesByEdition (optFeatures, classSource) {
+	static filterOptFeaturesByEdition (/** @type {*} */ optFeatures, /** @type {*} */ classSource) {
 		return CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(optFeatures);
 	}
 
 	/**
 	 * Check whether a character meets an optional feature's prerequisites.
-	 * @param {Array|null} prerequisite - The feature's `prerequisite` array (from data)
+	 * @param {Array<*>|null} prerequisite - The feature's `prerequisite` array (from data)
 	 * @param {object} context - Character state context
-	 * @param {Array} context.classes - Array of {name, source, level}
+	 * @param {Array<*>} context.classes - Array of {name, source, level}
 	 * @param {number} context.totalLevel - Character's total level
-	 * @param {Array} context.existingFeatures - Already-chosen optional features (with `name` field)
-	 * @param {Array} context.cantrips - Known cantrips (with `name`, optionally `sourceClass`)
-	 * @param {Array} context.spells - Known spells (with `name`, optionally `sourceClass`)
+	 * @param {Array<*>} context.existingFeatures - Already-chosen optional features (with `name` field)
+	 * @param {Array<*>} context.cantrips - Known cantrips (with `name`, optionally `sourceClass`)
+	 * @param {Array<*>} context.spells - Known spells (with `name`, optionally `sourceClass`)
 	 * @returns {{met: boolean, reasons: string[]}} Whether prerequisites are met, with unmet reasons
 	 */
-	static checkPrerequisites (prerequisite, context) {
+	static checkPrerequisites (/** @type {*} */ prerequisite, /** @type {*} */ context) {
 		if (!prerequisite?.length) return {met: true, reasons: []};
 
 		const {classes = [], totalLevel = 0, existingFeatures = [], cantrips = [], spells = []} = context;
 		const reasons = [];
 
-		for (const prereq of prerequisite) {
+		for (/** @type {*} */ const prereq of prerequisite) {
 			// Level prerequisite
-			if (prereq.level) {
+			if (/** @type {*} */ prereq.level) {
 				const reqLevel = prereq.level.level || prereq.level;
-				if (prereq.level.class) {
+				if (/** @type {*} */ prereq.level.class) {
 					const className = prereq.level.class.name?.toLowerCase();
-					const classMatch = classes.find(c => c.name.toLowerCase() === className);
+					const classMatch = classes.find((/** @type {*} */ c) => c.name.toLowerCase() === className);
 					if (!classMatch || classMatch.level < reqLevel) {
 						const classLabel = prereq.level.class.name || "class";
 						reasons.push(`Level ${reqLevel} ${classLabel}`);
@@ -184,9 +189,9 @@ class CharacterSheetClassUtils {
 			}
 
 			// Pact prerequisite (short form: "Blade", "Chain", "Tome", "Talisman")
-			if (prereq.pact) {
+			if (/** @type {*} */ prereq.pact) {
 				const pactLc = prereq.pact.toLowerCase();
-				const hasPact = existingFeatures.some(f => {
+				const hasPact = existingFeatures.some((/** @type {*} */ f) => {
 					const nameLc = f.name?.toLowerCase() || "";
 					return nameLc === `pact of the ${pactLc}`
 						|| nameLc === `pact of ${pactLc}`
@@ -199,16 +204,16 @@ class CharacterSheetClassUtils {
 			}
 
 			// Spell prerequisite
-			if (prereq.spell) {
-				for (const spellReq of prereq.spell) {
-					if (typeof spellReq === "string") {
+			if (/** @type {*} */ prereq.spell) {
+				for (/** @type {*} */ const spellReq of prereq.spell) {
+					if (/** @type {*} */ typeof spellReq === "string") {
 						// PHB format: "eldritch blast#c" — strip #c suffix, match by name
 						const spellName = spellReq.replace(/#c$/i, "").toLowerCase().trim();
 						const isCantrip = spellReq.endsWith("#c");
 						const pool = isCantrip ? cantrips : [...cantrips, ...spells];
-						const hasSpell = pool.some(s => s.name?.toLowerCase() === spellName);
+						const hasSpell = pool.some((/** @type {*} */ s) => s.name?.toLowerCase() === spellName);
 						if (!hasSpell) {
-							const displayName = spellName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+							const displayName = spellName.split(" ").map((/** @type {*} */ w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 							reasons.push(`${displayName} ${isCantrip ? "cantrip" : "spell"}`);
 						}
 					} else if (typeof spellReq === "object" && spellReq.choose) {
@@ -223,25 +228,25 @@ class CharacterSheetClassUtils {
 			}
 
 			// Optional feature prerequisite
-			if (prereq.optionalfeature) {
-				for (const ofReq of prereq.optionalfeature) {
+			if (/** @type {*} */ prereq.optionalfeature) {
+				for (/** @type {*} */ const ofReq of prereq.optionalfeature) {
 					// Format is "name|source" UID
 					const reqName = (typeof ofReq === "string" ? ofReq.split("|")[0] : ofReq.name || "").toLowerCase();
-					const hasFeature = existingFeatures.some(f => f.name?.toLowerCase() === reqName);
+					const hasFeature = existingFeatures.some((/** @type {*} */ f) => f.name?.toLowerCase() === reqName);
 					if (!hasFeature) {
-						const displayName = reqName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+						const displayName = reqName.split(" ").map((/** @type {*} */ w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 						reasons.push(displayName);
 					}
 				}
 			}
 
 			// Feature prerequisite (class/subclass feature)
-			if (prereq.feature) {
-				for (const fReq of prereq.feature) {
+			if (/** @type {*} */ prereq.feature) {
+				for (/** @type {*} */ const fReq of prereq.feature) {
 					const reqName = (typeof fReq === "string" ? fReq.split("|")[0] : fReq.name || "").toLowerCase();
-					const hasFeature = existingFeatures.some(f => f.name?.toLowerCase() === reqName);
+					const hasFeature = existingFeatures.some((/** @type {*} */ f) => f.name?.toLowerCase() === reqName);
 					if (!hasFeature) {
-						const displayName = reqName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+						const displayName = reqName.split(" ").map((/** @type {*} */ w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 						reasons.push(displayName);
 					}
 				}
@@ -256,7 +261,7 @@ class CharacterSheetClassUtils {
 	 * Format: "level=0|class=Warlock" means "has a level-0 spell from class Warlock"
 	 * @private
 	 */
-	static _checkSpellChoosePrereq (spellReq, context) {
+	static _checkSpellChoosePrereq (/** @type {*} */ spellReq, /** @type {*} */ context) {
 		const {cantrips = [], spells = []} = context;
 		const chooseStr = spellReq.choose || "";
 		const parts = chooseStr.split("|");
@@ -264,16 +269,16 @@ class CharacterSheetClassUtils {
 		let requiredLevel = null;
 		let requiredClass = null;
 
-		for (const part of parts) {
+		for (/** @type {*} */ const part of parts) {
 			const [key, val] = part.split("=");
 			if (key === "level") requiredLevel = parseInt(val);
 			if (key === "class") requiredClass = val?.toLowerCase();
 		}
 
 		const pool = requiredLevel === 0 ? cantrips : [...cantrips, ...spells];
-		return pool.some(s => {
+		return pool.some((/** @type {*} */ s) => {
 			if (requiredLevel !== null && requiredLevel === 0 && !cantrips.includes(s)) return false;
-			if (requiredLevel !== null && requiredLevel > 0) {
+			if (/** @type {*} */ requiredLevel !== null && requiredLevel > 0) {
 				if (s.level !== undefined && s.level !== requiredLevel) return false;
 			}
 			if (requiredClass && s.sourceClass?.toLowerCase() !== requiredClass) return false;
@@ -283,10 +288,10 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get the hit die size for a class.
-	 * @param {Object} classData - The class data
+	 * @param {*} classData - The class data
 	 * @returns {number} Hit die size (e.g. 6, 8, 10, 12)
 	 */
-	static getClassHitDie (classData) {
+	static getClassHitDie (/** @type {*} */ classData) {
 		const hitDieMap = {
 			"Barbarian": 12,
 			"Fighter": 10,
@@ -301,15 +306,15 @@ class CharacterSheetClassUtils {
 			"Sorcerer": 6,
 			"Wizard": 6,
 		};
-		return classData.hd?.faces || hitDieMap[classData.name] || 8;
+		return classData.hd?.faces || (/** @type {*} */ (hitDieMap))[classData.name] || 8;
 	}
 
 	/**
 	 * Get the spellcasting ability for a class.
-	 * @param {Object} classData - The class data
+	 * @param {*} classData - The class data
 	 * @returns {string|null} Ability abbreviation or null
 	 */
-	static getSpellcastingAbility (classData) {
+	static getSpellcastingAbility (/** @type {*} */ classData) {
 		const abilityMap = {
 			"Wizard": "int",
 			"Artificer": "int",
@@ -322,21 +327,21 @@ class CharacterSheetClassUtils {
 			"Ranger": "wis",
 			"Monk": "wis",
 		};
-		return classData.spellcastingAbility || abilityMap[classData.name] || null;
+		return classData.spellcastingAbility || (/** @type {*} */ (abilityMap))[classData.name] || null;
 	}
 
 	/**
 	 * Extract the degree number from a combat method (either format).
-	 * @param {Object} opt - combatMethod entity or legacy CTM optionalfeature
+	 * @param {*} opt - combatMethod entity or legacy CTM optionalfeature
 	 * @returns {number} The degree (0 if not found)
 	 */
-	static getMethodDegree (opt) {
+	static getMethodDegree (/** @type {*} */ opt) {
 		if (!opt) return 0;
 		// New entity: explicit field
 		if (opt.degree !== undefined && opt.tradition !== undefined) return opt.degree;
 		// Legacy: extract from featureType or optionalFeatureTypes
 		const types = opt.optionalFeatureTypes || (Array.isArray(opt.featureType) ? opt.featureType : []);
-		for (const ft of types) {
+		for (/** @type {*} */ const ft of types) {
 			const match = ft?.match?.(/^CTM:(\d)[A-Z]{2,3}$/);
 			if (match) return parseInt(match[1]);
 		}
@@ -345,22 +350,22 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Extract the tradition code from a combat method (either format).
-	 * @param {Object} opt - combatMethod entity or legacy CTM optionalfeature
+	 * @param {*} opt - combatMethod entity or legacy CTM optionalfeature
 	 * @returns {string|null} Two-letter tradition code or null
 	 */
-	static getMethodTraditionCode (opt) {
+	static getMethodTraditionCode (/** @type {*} */ opt) {
 		if (!opt) return null;
 		// New entity: convert full name to code
-		if (opt.tradition && typeof opt.tradition === "string" && opt.tradition.length > 2) {
+		if (/** @type {*} */ opt.tradition && typeof opt.tradition === "string" && opt.tradition.length > 2) {
 			return CharacterSheetClassUtils.getTraditionCode(opt.tradition);
 		}
 		// New entity: tradition might already be a code
-		if (opt.tradition && opt.tradition.length <= 3) {
+		if (/** @type {*} */ opt.tradition && opt.tradition.length <= 3) {
 			return opt.tradition.toUpperCase();
 		}
 		// Legacy: extract from featureType or optionalFeatureTypes
 		const types = opt.optionalFeatureTypes || (Array.isArray(opt.featureType) ? opt.featureType : []);
-		for (const ft of types) {
+		for (/** @type {*} */ const ft of types) {
 			const match = ft?.match?.(/^CTM:\d?([A-Z]{2,3})$/);
 			if (match) return match[1];
 		}
@@ -370,7 +375,7 @@ class CharacterSheetClassUtils {
 	/**
 	 * @deprecated Use getMethodTraditionCode instead
 	 */
-	static getMethodTradition (opt) {
+	static getMethodTradition (/** @type {*} */ opt) {
 		return CharacterSheetClassUtils.getMethodTraditionCode(opt);
 	}
 
@@ -390,7 +395,7 @@ class CharacterSheetClassUtils {
 	 * @param {string} school - Single-letter school abbreviation
 	 * @returns {string} Emoji
 	 */
-	static getSchoolEmoji (school) {
+	static getSchoolEmoji (/** @type {*} */ school) {
 		const schoolEmojis = {
 			"A": "✨", // Abjuration
 			"C": "🌀", // Conjuration
@@ -401,41 +406,42 @@ class CharacterSheetClassUtils {
 			"N": "💀", // Necromancy
 			"T": "🔄", // Transmutation
 		};
-		return schoolEmojis[school] || "📜";
+		return (/** @type {*} */ (schoolEmojis))[school] || "📜";
 	}
 
 	/**
 	 * Check if a spell belongs to a class's spell list (using Renderer API with fallback).
-	 * @param {Object} spell - Spell data object
+	 * @param {*} spell - Spell data object
 	 * @param {string} className - Class name to check
 	 * @returns {boolean}
 	 */
 	/**
-	 * @param {Object} spell - Spell data object
+	 * @param {*} spell - Spell data object
 	 * @param {string} className - Class name to check
-	 * @param {Object} [opts] - Options
-	 * @param {Object} [opts.subclass] - Subclass object with name/shortName to also check fromSubclass lists
+	 * @param {*} [opts] - Options
+	 * @param {object} opts
+	 * @param {*} [opts.subclass] - Subclass object with name/shortName to also check fromSubclass lists
 	 * @returns {boolean}
 	 */
-	static spellIsForClass (spell, className, opts = {}) {
+	static spellIsForClass (/** @type {*} */ spell, /** @type {*} */ className, /** @type {*} */ opts = {}) {
 		try {
 			const classList = Renderer.spell.getCombinedClasses(spell, "fromClassList");
-			if (classList?.some(c => c.name === className)) return true;
+			if (classList?.some((/** @type {*} */ c) => c.name === className)) return true;
 		} catch (e) { /* fall through */ }
-		if (spell.classes?.fromClassList?.some(c => c.name === className)) return true;
+		if (spell.classes?.fromClassList?.some((/** @type {*} */ c) => c.name === className)) return true;
 
 		// Check variant/optional class lists (e.g. spells added via XGE/TCE expanded lists)
 		try {
 			const classListVariant = Renderer.spell.getCombinedClasses(spell, "fromClassListVariant");
-			if (classListVariant?.some(c => c.name === className)) return true;
+			if (classListVariant?.some((/** @type {*} */ c) => c.name === className)) return true;
 		} catch (e) { /* fall through */ }
-		if (spell.classes?.fromClassListVariant?.some(c => c.name === className)) return true;
+		if (spell.classes?.fromClassListVariant?.some((/** @type {*} */ c) => c.name === className)) return true;
 
 		// Check subclass spell lists if subclass is provided
-		if (opts.subclass) {
+		if (/** @type {*} */ opts.subclass) {
 			const subName = (opts.subclass.name || "").toLowerCase();
 			const subShort = (opts.subclass.shortName || "").toLowerCase();
-			const matchesSub = (entry) => {
+			const matchesSub = (/** @type {*} */ entry) => {
 				if (entry.class?.name !== className) return false;
 				const eName = (entry.subclass?.name || "").toLowerCase();
 				const eShort = (entry.subclass?.shortName || "").toLowerCase();
@@ -451,11 +457,11 @@ class CharacterSheetClassUtils {
 		return false;
 	}
 
-	static isDivineSoulSubclass (subclass) {
+	static isDivineSoulSubclass (/** @type {*} */ subclass) {
 		if (!subclass?.name && !subclass?.shortName) return false;
 		return [subclass.name, subclass.shortName]
 			.filter(Boolean)
-			.some(name => String(name).toLowerCase() === "divine soul");
+			.some((/** @type {*} */ name) => String(name).toLowerCase() === "divine soul");
 	}
 
 	/**
@@ -467,14 +473,14 @@ class CharacterSheetClassUtils {
 	 * @param {number} newLevel - The level being gained
 	 * @returns {number} Number of swaps allowed (0 or 1)
 	 */
-	static getSpellSwapCount (className, classSource, newLevel) {
+	static getSpellSwapCount (/** @type {*} */ className, /** @type {*} */ classSource, /** @type {*} */ newLevel) {
 		if (newLevel < 2) return 0;
 		const knownCasters = ["Sorcerer", "Bard", "Ranger", "Warlock"];
 		if (!knownCasters.includes(className)) return 0;
 		return 1;
 	}
 
-	static normalizeDivineSoulAffinity (choice) {
+	static normalizeDivineSoulAffinity (/** @type {*} */ choice) {
 		if (!choice) return null;
 
 		const rawName = typeof choice === "string"
@@ -491,31 +497,31 @@ class CharacterSheetClassUtils {
 		};
 	}
 
-	static getDivineSoulAffinityOptions (subclass) {
+	static getDivineSoulAffinityOptions (/** @type {*} */ subclass) {
 		if (!this.isDivineSoulSubclass(subclass)) return [];
 		return (subclass.additionalSpells || [])
-			.filter(block => block?.name)
-			.map(block => this.normalizeDivineSoulAffinity(block.name))
+			.filter((/** @type {*} */ block) => block?.name)
+			.map((/** @type {*} */ block) => this.normalizeDivineSoulAffinity(block.name))
 			.filter(Boolean);
 	}
 
-	static getDivineSoulAffinityBlock (subclass, subclassChoice) {
+	static getDivineSoulAffinityBlock (/** @type {*} */ subclass, /** @type {*} */ subclassChoice) {
 		if (!this.isDivineSoulSubclass(subclass)) return null;
 		const normalized = this.normalizeDivineSoulAffinity(subclassChoice);
 		if (!normalized) return null;
 
-		return (subclass.additionalSpells || []).find(block => {
+		return (subclass.additionalSpells || []).find((/** @type {*} */ block) => {
 			const blockChoice = this.normalizeDivineSoulAffinity(block?.name);
 			return blockChoice?.key === normalized.key;
 		}) || null;
 	}
 
-	static getDivineSoulKnownSpell (subclass, subclassChoice) {
+	static getDivineSoulKnownSpell (/** @type {*} */ subclass, /** @type {*} */ subclassChoice) {
 		const block = this.getDivineSoulAffinityBlock(subclass, subclassChoice);
 		const spellRef = block?.known?.["1"]?.[0];
 		if (!spellRef) return null;
 
-		if (typeof spellRef === "string") {
+		if (/** @type {*} */ typeof spellRef === "string") {
 			const [name, source] = spellRef.split("|");
 			return {
 				name: name.trim(),
@@ -524,7 +530,7 @@ class CharacterSheetClassUtils {
 			};
 		}
 
-		if (spellRef?.name) {
+		if (/** @type {*} */ spellRef?.name) {
 			return {
 				name: spellRef.name,
 				source: spellRef.source || Parser.SRC_PHB,
@@ -535,7 +541,7 @@ class CharacterSheetClassUtils {
 		return null;
 	}
 
-	static getAdditionalSpellListClasses ({className, subclass, subclassChoice} = {}) {
+	static getAdditionalSpellListClasses ({className, subclass, subclassChoice} = /** @type {*} */ ({})) {
 		if (className === "Sorcerer" && this.isDivineSoulSubclass(subclass) && this.normalizeDivineSoulAffinity(subclassChoice)) {
 			return ["Cleric"];
 		}
@@ -548,7 +554,7 @@ class CharacterSheetClassUtils {
 	 * @param {number} classLevel - Current class level
 	 * @returns {number} Max spell level (0 if non-caster)
 	 */
-	static getMaxSpellLevelForClass (className, classLevel) {
+	static getMaxSpellLevelForClass (/** @type {*} */ className, /** @type {*} */ classLevel) {
 		const fullCasters = ["Wizard", "Cleric", "Druid", "Bard", "Sorcerer", "Warlock"];
 		const halfCasters = ["Paladin", "Ranger", "Artificer"];
 
@@ -567,10 +573,10 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get casting time string from spell data.
-	 * @param {Object} spell
+	 * @param {*} spell
 	 * @returns {string}
 	 */
-	static getSpellCastingTime (spell) {
+	static getSpellCastingTime (/** @type {*} */ spell) {
 		if (!spell.time?.length) return "";
 		const time = spell.time[0];
 		return `${time.number} ${time.unit}`;
@@ -578,13 +584,13 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get range string from spell data.
-	 * @param {Object} spell
+	 * @param {*} spell
 	 * @returns {string}
 	 */
-	static getSpellRange (spell) {
+	static getSpellRange (/** @type {*} */ spell) {
 		if (!spell.range) return "";
 		const range = spell.range;
-		if (range.type === "point") {
+		if (/** @type {*} */ range.type === "point") {
 			if (range.distance?.type === "self") return "Self";
 			if (range.distance?.type === "touch") return "Touch";
 			return `${range.distance?.amount || ""} ${range.distance?.type || ""}`.trim();
@@ -594,15 +600,15 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get components string from spell data.
-	 * @param {Object} spell
+	 * @param {*} spell
 	 * @returns {string}
 	 */
-	static getSpellComponents (spell) {
+	static getSpellComponents (/** @type {*} */ spell) {
 		if (!spell.components) return "";
 		const parts = [];
 		if (spell.components.v) parts.push("V");
 		if (spell.components.s) parts.push("S");
-		if (spell.components.m) {
+		if (/** @type {*} */ spell.components.m) {
 			const mText = typeof spell.components.m === "string" ? spell.components.m : spell.components.m?.text || "";
 			parts.push(mText ? `M (${mText})` : "M");
 		}
@@ -611,15 +617,15 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get duration string from spell data.
-	 * @param {Object} spell
+	 * @param {*} spell
 	 * @returns {string}
 	 */
-	static getSpellDuration (spell) {
+	static getSpellDuration (/** @type {*} */ spell) {
 		if (!spell.duration?.length) return "";
 		const dur = spell.duration[0];
 		if (dur.type === "instant") return "Instantaneous";
 		if (dur.type === "permanent") return "Until dispelled";
-		if (dur.concentration) {
+		if (/** @type {*} */ dur.concentration) {
 			return `Concentration, up to ${dur.duration?.amount || ""} ${dur.duration?.type || ""}`.trim();
 		}
 		return `${dur.duration?.amount || ""} ${dur.duration?.type || ""}`.trim();
@@ -627,19 +633,19 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Check if a spell requires concentration.
-	 * @param {Object} spell
+	 * @param {*} spell
 	 * @returns {boolean}
 	 */
-	static spellIsConcentration (spell) {
-		return spell.concentration || spell.duration?.some?.(d => d.concentration) || false;
+	static spellIsConcentration (/** @type {*} */ spell) {
+		return spell.concentration || spell.duration?.some?.((/** @type {*} */ d) => d.concentration) || false;
 	}
 
 	/**
 	 * Check if a spell is a ritual.
-	 * @param {Object} spell
+	 * @param {*} spell
 	 * @returns {boolean}
 	 */
-	static spellIsRitual (spell) {
+	static spellIsRitual (/** @type {*} */ spell) {
 		return spell.ritual || spell.meta?.ritual || false;
 	}
 
@@ -664,26 +670,26 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get known-spell count at a class level (for known-caster classes).
-	 * @param {Object} classData - The class data
+	 * @param {*} classData - The class data
 	 * @param {string} className - The class name
 	 * @param {number} classLevel - The class level
 	 * @returns {number|null} Known spell count, or null if not a known caster
 	 */
-	static getKnownSpellsAtLevel (classData, className, classLevel) {
-		const prog = classData.spellsKnownProgression || CharacterSheetClassUtils._SPELLS_KNOWN_TABLES[className];
+	static getKnownSpellsAtLevel (/** @type {*} */ classData, /** @type {*} */ className, /** @type {*} */ classLevel) {
+		const prog = classData.spellsKnownProgression || (/** @type {*} */ (CharacterSheetClassUtils._SPELLS_KNOWN_TABLES))[className];
 		if (!prog) return null;
 		return prog[classLevel - 1] || 0;
 	}
 
 	/**
 	 * Get cantrip count at a class level.
-	 * @param {Object} classData - The class data
+	 * @param {*} classData - The class data
 	 * @param {string} className - The class name
 	 * @param {number} classLevel - The class level
 	 * @returns {number|null} Cantrip count, or null if no cantrip progression
 	 */
-	static getCantripsAtLevel (classData, className, classLevel) {
-		const prog = classData.cantripProgression || CharacterSheetClassUtils._CANTRIP_TABLES[className];
+	static getCantripsAtLevel (/** @type {*} */ classData, /** @type {*} */ className, /** @type {*} */ classLevel) {
+		const prog = classData.cantripProgression || (/** @type {*} */ (CharacterSheetClassUtils._CANTRIP_TABLES))[className];
 		if (!prog) return null;
 		return prog[classLevel - 1] || 0;
 	}
@@ -694,8 +700,8 @@ class CharacterSheetClassUtils {
 	 * @param {number} classLevel - Current class level
 	 * @returns {number} Max spell level
 	 */
-	static getMaxSpellLevelFromProgression (casterProgression, classLevel) {
-		if (casterProgression === "full" || !casterProgression) {
+	static getMaxSpellLevelFromProgression (/** @type {*} */ casterProgression, /** @type {*} */ classLevel) {
+		if (/** @type {*} */ casterProgression === "full" || !casterProgression) {
 			return Math.min(9, Math.ceil(classLevel / 2));
 		} else if (casterProgression === "1/2") {
 			return Math.min(5, Math.ceil(classLevel / 4));
@@ -716,31 +722,31 @@ class CharacterSheetClassUtils {
 	/**
 	 * Find entries of type "options" in a feature's entries array.
 	 * These represent choices the player must make (like Specialties).
-	 * @param {Object} feature - The feature object with entries
+	 * @param {*} feature - The feature object with entries
 	 * @param {number} characterLevel - Current character level for filtering
-	 * @param {Array} [classFeatures] - All class features (for ref lookup)
-	 * @returns {Array} Array of {count, options} objects
+	 * @param {Array<*>} [classFeatures] - All class features (for ref lookup)
+	 * @returns {Array<*>} Array of {count, options} objects
 	 */
-	static findFeatureOptions (feature, characterLevel = 1, classFeatures = []) {
+	static findFeatureOptions (/** @type {*} */ feature, /** @type {*} */ characterLevel = 1, /** @type {*} */ classFeatures = []) {
 		if (!feature?.entries) return [];
 
-		const results = [];
+		/** @type {*[]} */ const results = [];
 
-		const searchEntries = (entries) => {
+		const searchEntries = (/** @type {*} */ entries) => {
 			if (!Array.isArray(entries)) return;
 
-			for (const entry of entries) {
-				if (typeof entry === "object" && entry.type === "options") {
+			for (/** @type {*} */ const entry of entries) {
+				if (/** @type {*} */ typeof entry === "object" && entry.type === "options") {
 					const count = entry.count || 1;
 					const options = [];
 
-					if (entry.entries) {
-						for (const opt of entry.entries) {
-							if (opt.type === "refClassFeature" && opt.classFeature) {
+					if (/** @type {*} */ entry.entries) {
+						for (/** @type {*} */ const opt of entry.entries) {
+							if (/** @type {*} */ opt.type === "refClassFeature" && opt.classFeature) {
 								const parts = opt.classFeature.split("|");
 								const optLevel = parseInt(parts[3]) || 1;
 
-								if (optLevel <= characterLevel) {
+								if (/** @type {*} */ optLevel <= characterLevel) {
 									options.push({
 										name: parts[0],
 										className: parts[1],
@@ -781,20 +787,20 @@ class CharacterSheetClassUtils {
 						}
 					}
 
-					if (options.length > 0) {
+					if (/** @type {*} */ options.length > 0) {
 						results.push({count, options});
 					}
 				}
 
 				// Recurse into nested entries
-				if (typeof entry === "object") {
+				if (/** @type {*} */ typeof entry === "object") {
 					if (entry.entries) searchEntries(entry.entries);
 					if (entry.items) searchEntries(entry.items);
 				}
 
 				// Check for features that reference another feature's options via {@classFeature ...}
 				// This handles higher-level Specialty features that reference the level 1 feature
-				if (typeof entry === "string") {
+				if (/** @type {*} */ typeof entry === "string") {
 					const refMatch = entry.match(/\{@classFeature\s+([^}]+)\}/);
 					if (refMatch && /another|additional|gain/i.test(entry)) {
 						const refParts = refMatch[1].split("|");
@@ -806,11 +812,11 @@ class CharacterSheetClassUtils {
 						const referencedFeature = CharacterSheetClassUtils.getClassFeatureData(
 							classFeatures, refFeatureName, refClassName, refSource, refLevel,
 						);
-						if (referencedFeature) {
+						if (/** @type {*} */ referencedFeature) {
 							const refResults = CharacterSheetClassUtils.findFeatureOptions(
 								referencedFeature, characterLevel, classFeatures,
 							);
-							for (const refResult of refResults) {
+							for (/** @type {*} */ const refResult of refResults) {
 								results.push({
 									count: 1,
 									options: refResult.options,
@@ -830,17 +836,17 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get feature options from features gained at a specific level.
-	 * @param {Array} features - Array of features gained at this level
+	 * @param {Array<*>} features - Array of features gained at this level
 	 * @param {number} level - The level being gained
-	 * @param {Array} [classFeatures] - All class features (for ref lookup)
-	 * @returns {Array} Array of {featureName, featureSource, count, options, isSubclassFeature} objects
+	 * @param {Array<*>} [classFeatures] - All class features (for ref lookup)
+	 * @returns {Array<*>} Array of {featureName, featureSource, count, options, isSubclassFeature} objects
 	 */
-	static getFeatureOptionsForLevel (features, level, classFeatures = []) {
+	static getFeatureOptionsForLevel (/** @type {*} */ features, /** @type {*} */ level, /** @type {*} */ classFeatures = []) {
 		const allOptions = [];
 
 		for (const feature of features) {
 			const featureOptions = CharacterSheetClassUtils.findFeatureOptions(feature, level, classFeatures);
-			for (const optionGroup of featureOptions) {
+			for (/** @type {*} */ const optionGroup of featureOptions) {
 				allOptions.push({
 					featureName: feature.name,
 					featureSource: feature.source,
@@ -855,21 +861,21 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Look up a class feature by reference parts.
-	 * @param {Array} classFeatures - All class features
+	 * @param {Array<*>} classFeatures - All class features
 	 * @param {string} featureName
 	 * @param {string} className
 	 * @param {string} source
 	 * @param {number} level
-	 * @returns {Object|null}
+	 * @returns {*}
 	 */
-	static getClassFeatureByRef (classFeatures, featureName, className, source, level) {
+	static getClassFeatureByRef (/** @type {*} */ classFeatures, /** @type {*} */ featureName, /** @type {*} */ className, /** @type {*} */ source, /** @type {*} */ level) {
 		if (!classFeatures?.length) return null;
 
-		return classFeatures.find(f => {
+		return classFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.level !== level) return false;
-			if (source && f.source && f.source !== source) {
+			if (/** @type {*} */ source && f.source && f.source !== source) {
 				return false;
 			}
 			return true;
@@ -878,18 +884,18 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Look up full class feature data with flexible source matching.
-	 * @param {Array} classFeatures - All class features
+	 * @param {Array<*>} classFeatures - All class features
 	 * @param {string} featureName
 	 * @param {string} className
 	 * @param {string} source
 	 * @param {number} level
-	 * @returns {Object|null}
+	 * @returns {*}
 	 */
-	static getClassFeatureData (classFeatures, featureName, className, source, level) {
+	static getClassFeatureData (/** @type {*} */ classFeatures, /** @type {*} */ featureName, /** @type {*} */ className, /** @type {*} */ source, /** @type {*} */ level) {
 		if (!classFeatures?.length) return null;
 
 		// First try exact source match
-		const exactMatch = classFeatures.find(f => {
+		const exactMatch = classFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.level !== level) return false;
@@ -899,11 +905,11 @@ class CharacterSheetClassUtils {
 		if (exactMatch) return exactMatch;
 
 		// Fall back to flexible PHB/XPHB/SRD matching
-		return classFeatures.find(f => {
+		return classFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.level !== level) return false;
-			if (source && f.source && f.source !== source) {
+			if (/** @type {*} */ source && f.source && f.source !== source) {
 				const sourcesMatch = [Parser.SRC_PHB, Parser.SRC_XPHB, "SRD"].includes(source)
 					&& [Parser.SRC_PHB, Parser.SRC_XPHB, "SRD"].includes(f.source);
 				if (!sourcesMatch) return false;
@@ -914,11 +920,11 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Look up full class feature data from a reference string.
-	 * @param {Array} classFeatures - All class features
+	 * @param {Array<*>} classFeatures - All class features
 	 * @param {string} featureRef - "FeatureName|ClassName|Source|Level" format
-	 * @returns {Object|null}
+	 * @returns {*}
 	 */
-	static getClassFeatureDataFromRef (classFeatures, featureRef) {
+	static getClassFeatureDataFromRef (/** @type {*} */ classFeatures, /** @type {*} */ featureRef) {
 		const parts = featureRef.split("|");
 		const [name, className, source, level] = parts;
 		return CharacterSheetClassUtils.getClassFeatureData(classFeatures, name, className, source, parseInt(level) || 1);
@@ -926,19 +932,19 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Look up full subclass feature data to get description/entries.
-	 * @param {Array} subclassFeatures - All loaded subclass features
+	 * @param {Array<*>} subclassFeatures - All loaded subclass features
 	 * @param {string} featureName - Name of the feature
 	 * @param {string} className - Parent class name
 	 * @param {string} subclassShortName - Subclass short name
 	 * @param {string} source - Feature source
 	 * @param {number} level - Feature level
-	 * @returns {Object|null}
+	 * @returns {*}
 	 */
-	static getSubclassFeatureData (subclassFeatures, featureName, className, subclassShortName, source, level) {
+	static getSubclassFeatureData (/** @type {*} */ subclassFeatures, /** @type {*} */ featureName, /** @type {*} */ className, /** @type {*} */ subclassShortName, /** @type {*} */ source, /** @type {*} */ level) {
 		if (!subclassFeatures?.length) return null;
 
 		// First try exact source match
-		const exactMatch = subclassFeatures.find(f => {
+		const exactMatch = subclassFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.subclassShortName !== subclassShortName) return false;
@@ -949,12 +955,12 @@ class CharacterSheetClassUtils {
 		if (exactMatch) return exactMatch;
 
 		// Fall back to flexible PHB/XPHB/SRD matching
-		return subclassFeatures.find(f => {
+		return subclassFeatures.find((/** @type {*} */ f) => {
 			if (f.name !== featureName) return false;
 			if (f.className !== className) return false;
 			if (f.subclassShortName !== subclassShortName) return false;
 			if (f.level !== level) return false;
-			if (source && f.source && f.source !== source) {
+			if (/** @type {*} */ source && f.source && f.source !== source) {
 				const sourcesMatch = [Parser.SRC_PHB, Parser.SRC_XPHB, "SRD"].includes(source)
 					&& [Parser.SRC_PHB, Parser.SRC_XPHB, "SRD"].includes(f.source);
 				if (!sourcesMatch) return false;
@@ -965,16 +971,16 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Analyze feature text to detect required skill/expertise/bonus choices.
-	 * @param {Object} opt - Feature option object
-	 * @param {Array} classFeatures - All loaded class features
+	 * @param {*} opt - Feature option object
+	 * @param {Array<*>} classFeatures - All loaded class features
 	 * @returns {{type: string, count: number, from: (string|string[])}|null}
 	 */
-	static parseFeatureSkillChoice (opt, classFeatures = [], {optionalFeatures = [], resolvedData = null} = {}) {
+	static parseFeatureSkillChoice (/** @type {*} */ opt, /** @type {*} */ classFeatures = [], {optionalFeatures = /** @type {*[]} */ ([]), resolvedData = null} = /** @type {*} */ ({})) {
 		if (!opt?.ref || (opt?.type !== "classFeature" && opt?.type !== "optionalfeature")) return null;
 
 		const fullOpt = resolvedData
 			|| (opt.type === "optionalfeature"
-				? optionalFeatures.find(f => f.name === opt.name && f.source === opt.source) || optionalFeatures.find(f => f.name === opt.name)
+				? optionalFeatures.find((/** @type {*} */ f) => f.name === opt.name && f.source === opt.source) || optionalFeatures.find((/** @type {*} */ f) => f.name === opt.name)
 				: CharacterSheetClassUtils.getClassFeatureDataFromRef(classFeatures, opt.ref));
 		if (!fullOpt?.entries) return null;
 
@@ -1016,16 +1022,16 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Parse automatic modifiers from feature text that do not require user choices.
-	 * @param {Object} opt - Feature option object
-	 * @param {Array} classFeatures - All loaded class features
+	 * @param {*} opt - Feature option object
+	 * @param {Array<*>} classFeatures - All loaded class features
 	 * @returns {Array<{type: string, value: number|string, note: string}>}
 	 */
-	static parseFeatureAutoEffects (opt, classFeatures = [], {optionalFeatures = [], resolvedData = null} = {}) {
+	static parseFeatureAutoEffects (/** @type {*} */ opt, /** @type {*} */ classFeatures = [], {optionalFeatures = /** @type {*[]} */ ([]), resolvedData = null} = /** @type {*} */ ({})) {
 		if (!opt?.ref || (opt?.type !== "classFeature" && opt?.type !== "optionalfeature")) return [];
 
 		const fullOpt = resolvedData
 			|| (opt.type === "optionalfeature"
-				? optionalFeatures.find(f => f.name === opt.name && f.source === opt.source) || optionalFeatures.find(f => f.name === opt.name)
+				? optionalFeatures.find((/** @type {*} */ f) => f.name === opt.name && f.source === opt.source) || optionalFeatures.find((/** @type {*} */ f) => f.name === opt.name)
 				: CharacterSheetClassUtils.getClassFeatureDataFromRef(classFeatures, opt.ref));
 		if (!fullOpt?.entries) return [];
 
@@ -1033,7 +1039,7 @@ class CharacterSheetClassUtils {
 		const effects = [];
 
 		const passiveIncreaseMatch = text.match(/passive\s+\w+\s*\(\{@skill\s+([^}]+)\}\)\s*(?:score\s+)?increases?\s+by\s+(\d+)/i);
-		if (passiveIncreaseMatch) {
+		if (/** @type {*} */ passiveIncreaseMatch) {
 			const skill = passiveIncreaseMatch[1].toLowerCase().replace(/\s+/g, "");
 			const value = parseInt(passiveIncreaseMatch[2]);
 			effects.push({type: `passive:${skill}`, value, note: `+${value} passive ${passiveIncreaseMatch[1]}`});
@@ -1044,39 +1050,39 @@ class CharacterSheetClassUtils {
 		// calls _processFeatureModifiers(). Parsing it here too would double-count the bonus.
 
 		const skillBonusFixedMatch = text.match(/gain\s+a?\s*\+?(\d+)\s*bonus\s+to\s+\w+\s*\(\{@skill\s+([^}]+)\}\)\s*checks?/i);
-		if (skillBonusFixedMatch) {
+		if (/** @type {*} */ skillBonusFixedMatch) {
 			const value = parseInt(skillBonusFixedMatch[1]);
 			const skill = skillBonusFixedMatch[2].toLowerCase().replace(/\s+/g, "");
 			effects.push({type: `skill:${skill}`, value, note: `+${value} to ${skillBonusFixedMatch[2]} checks`});
 		}
 
 		const speedIncreaseMatch = text.match(/(?:your\s+)?speed\s+increases?\s+by\s+(\d+)\s*(?:feet|ft)?/i);
-		if (speedIncreaseMatch) {
+		if (/** @type {*} */ speedIncreaseMatch) {
 			const value = parseInt(speedIncreaseMatch[1]);
 			effects.push({type: "speed", value, note: `+${value} ft. speed`});
 		}
 
 		const passiveSimpleMatch = text.match(/\+(\d+)\s*(?:bonus\s+)?(?:to\s+)?(?:your\s+)?passive\s+\{@skill\s+([^}]+)\}/i);
-		if (passiveSimpleMatch) {
+		if (/** @type {*} */ passiveSimpleMatch) {
 			const value = parseInt(passiveSimpleMatch[1]);
 			const skill = passiveSimpleMatch[2].toLowerCase().replace(/\s+/g, "");
 			effects.push({type: `passive:${skill}`, value, note: `+${value} passive ${passiveSimpleMatch[2]}`});
 		}
 
 		const darkvisionIncreaseMatch = text.match(/darkvision\s+(?:increases?\s+by|out\s+to)\s+(\d+)\s*(?:feet|ft)?/i);
-		if (darkvisionIncreaseMatch) {
+		if (/** @type {*} */ darkvisionIncreaseMatch) {
 			const value = parseInt(darkvisionIncreaseMatch[1]);
 			effects.push({type: "sense:darkvision", value, note: `Darkvision ${value} ft.`});
 		}
 
 		const acMatch = text.match(/(?:AC|armor\s+class)\s+increases?\s+by\s+(\d+)|\+(\d+)\s+(?:to\s+)?(?:AC|armor\s+class)/i);
-		if (acMatch) {
+		if (/** @type {*} */ acMatch) {
 			const value = parseInt(acMatch[1] || acMatch[2]);
 			effects.push({type: "ac", value, note: `+${value} AC`});
 		}
 
 		const initMatch = text.match(/\+(\d+)\s+(?:to\s+)?initiative|initiative\s+(?:bonus\s+(?:of\s+)?|increases?\s+by\s+)\+?(\d+)/i);
-		if (initMatch) {
+		if (/** @type {*} */ initMatch) {
 			const value = parseInt(initMatch[1] || initMatch[2]);
 			effects.push({type: "initiative", value, note: `+${value} initiative`});
 		}
@@ -1089,7 +1095,7 @@ class CharacterSheetClassUtils {
 	 * @param {string} text
 	 * @returns {string[]}
 	 */
-	static extractSkillListFromText (text) {
+	static extractSkillListFromText (/** @type {*} */ text) {
 		const allSkills = [
 			"Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception",
 			"History", "Insight", "Intimidation", "Investigation", "Medicine",
@@ -1100,16 +1106,16 @@ class CharacterSheetClassUtils {
 		const found = [];
 
 		const tagMatches = text.matchAll(/\{@skill\s+([^}]+)\}/gi);
-		for (const m of tagMatches) {
+		for (/** @type {*} */ const m of tagMatches) {
 			const skillName = m[1].trim();
-			if (allSkills.some(s => s.toLowerCase() === skillName.toLowerCase())) {
+			if (allSkills.some((/** @type {*} */ s) => s.toLowerCase() === skillName.toLowerCase())) {
 				found.push(skillName.toTitleCase());
 			}
 		}
 
 		if (found.length) return [...new Set(found)];
 
-		for (const skill of allSkills) {
+		for (/** @type {*} */ const skill of allSkills) {
 			if (text.includes(skill)) found.push(skill);
 		}
 
@@ -1118,15 +1124,15 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get all features gained at a specific class level (including subclass features).
-	 * @param {Object} classData - The class data
+	 * @param {*} classData - The class data
 	 * @param {number} level - The class level
-	 * @param {Object|null} subclass - The subclass object (optional)
-	 * @param {Array} classFeatures - All loaded class features (for description lookup)
-	 * @param {Array} subclassFeatures - All loaded subclass features (for homebrew fallback lookup)
-	 * @returns {Array} Array of feature objects
+	 * @param {*} subclass - The subclass object (optional)
+	 * @param {Array<*>} classFeatures - All loaded class features (for description lookup)
+	 * @param {Array<*>} subclassFeatures - All loaded subclass features (for homebrew fallback lookup)
+	 * @returns {Array<*>} Array of feature objects
 	 */
-	static getLevelFeatures (classData, level, subclass, classFeatures = [], subclassFeatures = []) {
-		const features = [];
+	static getLevelFeatures (/** @type {*} */ classData, /** @type {*} */ level, /** @type {*} */ subclass, /** @type {*} */ classFeatures = [], /** @type {*} */ subclassFeatures = []) {
+		/** @type {*[]} */ const features = [];
 
 		// Get base class features for this level
 		if (classData.classFeatures && Array.isArray(classData.classFeatures)) {
@@ -1137,20 +1143,20 @@ class CharacterSheetClassUtils {
 
 			const featureRefs = isArrayOfArrays
 				? levelFeatures
-				: levelFeatures.filter(f => {
-					if (typeof f === "string") {
+				: levelFeatures.filter((/** @type {*} */ f) => {
+					if (/** @type {*} */ typeof f === "string") {
 						const parts = f.split("|");
 						return parseInt(parts[3]) === level;
 					}
-					if (typeof f === "object" && f.classFeature) {
+					if (/** @type {*} */ typeof f === "object" && f.classFeature) {
 						const parts = f.classFeature.split("|");
 						return parseInt(parts[3]) === level;
 					}
 					return f.level === level;
 				});
 
-			featureRefs.forEach(featureRef => {
-				if (typeof featureRef === "string") {
+			featureRefs.forEach((/** @type {*} */ featureRef) => {
+				if (/** @type {*} */ typeof featureRef === "string") {
 					const parts = featureRef.split("|");
 					const featureName = parts[0];
 					const className = parts[1] || classData.name;
@@ -1210,14 +1216,14 @@ class CharacterSheetClassUtils {
 			// full classFeature objects but aren't listed in the top-level classFeatures array.
 			// IMPORTANT: Skip "options" type entries — those are player choices (Specialties, etc.)
 			// handled by findFeatureOptions/getFeatureOptionsForLevel, not automatic grants.
-			const featureNames = new Set(features.map(f => f.name));
+			const featureNames = new Set(features.map((/** @type {*} */ f) => f.name));
 			const extracted = [];
 			for (const feature of features) {
 				if (!feature.entries) continue;
-				for (const entry of feature.entries) {
+				for (/** @type {*} */ const entry of feature.entries) {
 					if (typeof entry !== "object" || !Array.isArray(entry.entries)) continue;
 					if (entry.type === "options") continue;
-					for (const sub of entry.entries) {
+					for (/** @type {*} */ const sub of entry.entries) {
 						if (sub?.type !== "refClassFeature" || !sub.classFeature) continue;
 						const refParts = sub.classFeature.split("|");
 						const refName = refParts[0];
@@ -1242,13 +1248,13 @@ class CharacterSheetClassUtils {
 		}
 
 		// Subclass features
-		if (subclass && subclass.subclassFeatures) {
-			subclass.subclassFeatures.forEach((levelFeatures, idx) => {
+		if (/** @type {*} */ subclass && subclass.subclassFeatures) {
+			subclass.subclassFeatures.forEach((/** @type {*} */ levelFeatures, /** @type {*} */ idx) => {
 				if (Array.isArray(levelFeatures)) {
-					levelFeatures.forEach(feature => {
-						if (typeof feature === "object" && feature.level === level) {
+					levelFeatures.forEach((/** @type {*} */ feature) => {
+						if (/** @type {*} */ typeof feature === "object" && feature.level === level) {
 							const featureName = feature.name || Renderer.findName(feature);
-							if (featureName) {
+							if (/** @type {*} */ featureName) {
 								features.push({
 									name: featureName,
 									className: feature.className || subclass.className || classData.name,
@@ -1265,7 +1271,7 @@ class CharacterSheetClassUtils {
 						} else if (typeof feature === "string") {
 							const parts = feature.split("|");
 							const featureLevel = parseInt(parts[parts.length - 1]);
-							if (featureLevel === level) {
+							if (/** @type {*} */ featureLevel === level) {
 								const featureName = parts[0];
 								const featureClassName = parts[1] || classData.name;
 								const featureClassSource = parts[2] || classData.source;
@@ -1300,7 +1306,7 @@ class CharacterSheetClassUtils {
 				} else if (typeof levelFeatures === "string") {
 					const parts = levelFeatures.split("|");
 					const featureLevel = parseInt(parts[parts.length - 1]);
-					if (featureLevel === level) {
+					if (/** @type {*} */ featureLevel === level) {
 						const featureName = parts[0];
 						const featureClassName = parts[1] || classData.name;
 						const featureClassSource = parts[2] || classData.source;
@@ -1337,7 +1343,7 @@ class CharacterSheetClassUtils {
 		// Fallback: If subclass exists but has no subclassFeatures inline (common with homebrew),
 		// look up features from the separate subclassFeatures array by subclass name/source
 		if (subclass && (!subclass.subclassFeatures || subclass.subclassFeatures.length === 0) && subclassFeatures?.length > 0) {
-			const matchingFeatures = subclassFeatures.filter(f => {
+			const matchingFeatures = subclassFeatures.filter((/** @type {*} */ f) => {
 				// Match by subclass name and class name
 				if (f.subclassShortName !== subclass.shortName && f.subclassShortName !== subclass.name) return false;
 				if (f.className !== (subclass.className || classData.name)) return false;
@@ -1345,7 +1351,7 @@ class CharacterSheetClassUtils {
 				return true;
 			});
 
-			matchingFeatures.forEach(feature => {
+			matchingFeatures.forEach((/** @type {*} */ feature) => {
 				features.push({
 					name: feature.name,
 					className: feature.className || subclass.className || classData.name,
@@ -1363,15 +1369,15 @@ class CharacterSheetClassUtils {
 
 		// Expand refSubclassFeature entries from wrapper features (e.g., "Thief" feature that references "Fast Hands")
 		// Many subclasses have a wrapper feature at the subclass level that contains references to actual sub-features
-		const expandedFeatures = [];
+		/** @type {*[]} */ const expandedFeatures = [];
 		for (const feature of features) {
-			if (!feature.isSubclassFeature || !feature.entries) continue;
+			if (!(/** @type {*} */ (feature)).isSubclassFeature || !(/** @type {*} */ (feature)).entries) continue;
 
 			// Look for refSubclassFeature entries in the feature's entries
-			const searchEntries = (entries) => {
+			const searchEntries = (/** @type {*} */ entries) => {
 				if (!Array.isArray(entries)) return;
-				for (const entry of entries) {
-					if (entry?.type === "refSubclassFeature" && entry.subclassFeature) {
+				for (/** @type {*} */ const entry of entries) {
+					if (/** @type {*} */ entry?.type === "refSubclassFeature" && entry.subclassFeature) {
 						// Parse "FeatureName|ClassName|ClassSource|SubclassShortName|SubclassSource|Level"
 						const parts = entry.subclassFeature.split("|");
 						const refFeatureName = parts[0];
@@ -1394,7 +1400,7 @@ class CharacterSheetClassUtils {
 							refLevel,
 						);
 
-						if (refFeature && !features.some(f => f.name === refFeatureName && f.level === refLevel)) {
+						if (refFeature && !features.some((/** @type {*} */ f) => f.name === refFeatureName && f.level === refLevel)) {
 							expandedFeatures.push({
 								name: refFeatureName,
 								className: refClassName,
@@ -1421,9 +1427,9 @@ class CharacterSheetClassUtils {
 		features.push(...expandedFeatures);
 
 		// Filter out placeholder "gain subclass feature" entries when actual subclass features exist
-		const actualSubclassFeatures = features.filter(f => f.isSubclassFeature);
-		if (actualSubclassFeatures.length > 0) {
-			return features.filter(f => !f.gainSubclassFeature);
+		const actualSubclassFeatures = features.filter((/** @type {*} */ f) => f.isSubclassFeature);
+		if (/** @type {*} */ actualSubclassFeatures.length > 0) {
+			return features.filter((/** @type {*} */ f) => !f.gainSubclassFeature);
 		}
 
 		return features;
@@ -1435,15 +1441,15 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get expertise grants from features at a level.
-	 * @param {Array} features - Features gained at the level
-	 * @returns {Array} Array of {featureName, count, allowTools, toolName}
+	 * @param {Array<*>} features - Features gained at the level
+	 * @returns {Array<*>} Array of {featureName, count, allowTools, toolName}
 	 */
-	static getExpertiseGrantsForLevel (features) {
+	static getExpertiseGrantsForLevel (/** @type {*} */ features) {
 		const grants = [];
 
 		for (const feature of features) {
 			const expertiseInfo = CharacterSheetClassUtils.findExpertiseInFeature(feature);
-			if (expertiseInfo) {
+			if (/** @type {*} */ expertiseInfo) {
 				grants.push({
 					featureName: feature.name,
 					...expertiseInfo,
@@ -1456,13 +1462,13 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Find expertise grant in a feature's entries.
-	 * @param {Object} feature - Feature with entries
+	 * @param {*} feature - Feature with entries
 	 * @returns {{count: number, allowTools: boolean, toolName: string}|null}
 	 */
-	static findExpertiseInFeature (feature) {
+	static findExpertiseInFeature (/** @type {*} */ feature) {
 		if (!feature?.entries) return null;
 
-		if (feature.name === "Expertise") {
+		if (/** @type {*} */ feature.name === "Expertise") {
 			return CharacterSheetClassUtils.parseExpertiseEntries(feature.entries);
 		}
 
@@ -1471,19 +1477,19 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Recursively search entries for nested Expertise grants.
-	 * @param {Array} entries
+	 * @param {Array<*>} entries
 	 * @returns {{count: number, allowTools: boolean, toolName: string}|null}
 	 */
-	static findExpertiseInEntries (entries) {
-		for (const entry of entries) {
-			if (typeof entry === "object" && entry.type === "entries") {
-				if (entry.name === "Expertise") {
+	static findExpertiseInEntries (/** @type {*} */ entries) {
+		for (/** @type {*} */ const entry of entries) {
+			if (/** @type {*} */ typeof entry === "object" && entry.type === "entries") {
+				if (/** @type {*} */ entry.name === "Expertise") {
 					return CharacterSheetClassUtils.parseExpertiseEntries(entry.entries || []);
 				}
 				if (CharacterSheetClassUtils.entryGrantsExpertise(entry.entries || [])) {
 					return CharacterSheetClassUtils.parseExpertiseEntries(entry.entries || []);
 				}
-				if (entry.entries) {
+				if (/** @type {*} */ entry.entries) {
 					const result = CharacterSheetClassUtils.findExpertiseInEntries(entry.entries);
 					if (result) return result;
 				}
@@ -1494,11 +1500,11 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Check if entries text indicates an expertise grant.
-	 * @param {Array} entries
+	 * @param {Array<*>} entries
 	 * @returns {boolean}
 	 */
-	static entryGrantsExpertise (entries) {
-		const entriesText = entries.map(e => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
+	static entryGrantsExpertise (/** @type {*} */ entries) {
+		const entriesText = entries.map((/** @type {*} */ e) => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
 		return entriesText.includes("proficiency bonus is doubled")
 			|| entriesText.includes("gain expertise")
 			|| entriesText.includes("double your proficiency bonus");
@@ -1506,14 +1512,14 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Parse expertise entries to determine count and tool allowance.
-	 * @param {Array} entries
+	 * @param {Array<*>} entries
 	 * @returns {{count: number, allowTools: boolean, toolName: string, fixedSkills: string[]}}
 	 */
-	static parseExpertiseEntries (entries) {
-		const entriesText = entries.map(e => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
+	static parseExpertiseEntries (/** @type {*} */ entries) {
+		const entriesText = entries.map((/** @type {*} */ e) => typeof e === "string" ? e : JSON.stringify(e)).join(" ").toLowerCase();
 
 		// Check for fixed/named skill expertise (e.g., "expertise in the Performance skill")
-		const skillNames = Object.keys(Parser.SKILL_TO_ATB_ABV || {}).map(s => s.toLowerCase());
+		const skillNames = Object.keys(Parser.SKILL_TO_ATB_ABV || {}).map((/** @type {*} */ s) => s.toLowerCase());
 		const fixedSkills = [];
 
 		// Pattern: "expertise in [the] {skill} [skill]" or "gain expertise in {skill}"
@@ -1522,19 +1528,19 @@ class CharacterSheetClassUtils {
 		while ((match = fixedSkillPattern.exec(entriesText)) !== null) {
 			const potentialSkill = match[1].toLowerCase().replace(/\s+/g, "");
 			// Check if it's a valid skill name
-			const normalizedSkillNames = skillNames.map(s => s.replace(/\s+/g, ""));
+			const normalizedSkillNames = skillNames.map((/** @type {*} */ s) => s.replace(/\s+/g, ""));
 			if (normalizedSkillNames.includes(potentialSkill)) {
 				fixedSkills.push(potentialSkill);
 			}
 		}
 
 		// If we found fixed skills, return them with count matching
-		if (fixedSkills.length > 0) {
+		if (/** @type {*} */ fixedSkills.length > 0) {
 			const allowTools = entriesText.includes("thieves' tools") && !entriesText.includes("variantrule");
 			return {
 				count: fixedSkills.length,
 				allowTools,
-				toolName: allowTools ? "Thieves' Tools" : null,
+				toolName: allowTools ? "Thieves' Tools" : /** @type {*} */ (null),
 				fixedSkills,
 			};
 		}
@@ -1558,22 +1564,22 @@ class CharacterSheetClassUtils {
 		return {
 			count,
 			allowTools,
-			toolName: allowTools ? "Thieves' Tools" : null,
+			toolName: allowTools ? "Thieves' Tools" : /** @type {*} */ (null),
 			fixedSkills: [],
 		};
 	}
 
 	/**
 	 * Get language grants from features at a level.
-	 * @param {Array} features - Features gained at the level
-	 * @returns {Array} Array of {featureName, count, autoLanguages?}
+	 * @param {Array<*>} features - Features gained at the level
+	 * @returns {Array<*>} Array of {featureName, count, autoLanguages?}
 	 */
-	static getLanguageGrantsForLevel (features) {
+	static getLanguageGrantsForLevel (/** @type {*} */ features) {
 		const grants = [];
 
 		for (const feature of features) {
 			const langInfo = CharacterSheetClassUtils.findLanguageGrantsInFeature(feature);
-			if (langInfo) {
+			if (/** @type {*} */ langInfo) {
 				grants.push({
 					featureName: feature.name,
 					count: langInfo.count,
@@ -1587,14 +1593,14 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Find language grant in a feature's entries.
-	 * @param {Object} feature
+	 * @param {*} feature
 	 * @returns {{count: number, autoLanguages?: string[]}|null}
 	 */
-	static findLanguageGrantsInFeature (feature) {
+	static findLanguageGrantsInFeature (/** @type {*} */ feature) {
 		// Special handling for Thieves' Cant - grants Thieves' Cant + 1 other language
 		// Check name BEFORE entries since features from string refs may lack entries
 		const nameLower = feature?.name?.toLowerCase() || "";
-		if (nameLower === "thieves' cant" || nameLower === "thieves cant") {
+		if (/** @type {*} */ nameLower === "thieves' cant" || nameLower === "thieves cant") {
 			return {
 				count: 1,
 				autoLanguages: ["Thieves' Cant"],
@@ -1608,15 +1614,15 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Recursively search entries for language grants.
-	 * @param {Array} entries
+	 * @param {Array<*>} entries
 	 * @param {string} featureName
 	 * @returns {{count: number}|null}
 	 */
-	static findLanguageGrantsInEntries (entries, featureName) {
-		const entriesText = entries.map(e => {
+	static findLanguageGrantsInEntries (/** @type {*} */ entries, /** @type {*} */ featureName) {
+		const entriesText = entries.map((/** @type {*} */ e) => {
 			if (typeof e === "string") return e;
-			if (typeof e === "object" && e.type === "list" && e.items) {
-				return e.items.map(item => typeof item === "string" ? item : JSON.stringify(item)).join(" ");
+			if (/** @type {*} */ typeof e === "object" && e.type === "list" && e.items) {
+				return e.items.map((/** @type {*} */ item) => typeof item === "string" ? item : JSON.stringify(item)).join(" ");
 			}
 			return JSON.stringify(e);
 		}).join(" ").toLowerCase();
@@ -1630,9 +1636,9 @@ class CharacterSheetClassUtils {
 			/\{@b Languages?\.\}\s*You\s+learn\s+(one|two|three|four|\d+)\s+languages?/i,
 		];
 
-		for (const pattern of langPatterns) {
+		for (/** @type {*} */ const pattern of langPatterns) {
 			const match = entriesText.match(pattern);
-			if (match) {
+			if (/** @type {*} */ match) {
 				let count = 0;
 				const numWord = match[1]?.toLowerCase();
 				if (numWord === "one" || numWord === "1") count = 1;
@@ -1652,8 +1658,8 @@ class CharacterSheetClassUtils {
 		}
 
 		// Recursively check nested entries
-		for (const entry of entries) {
-			if (typeof entry === "object" && entry.entries) {
+		for (/** @type {*} */ const entry of entries) {
+			if (/** @type {*} */ typeof entry === "object" && entry.entries) {
 				const result = CharacterSheetClassUtils.findLanguageGrantsInEntries(entry.entries, featureName);
 				if (result) return result;
 			}
@@ -1669,11 +1675,11 @@ class CharacterSheetClassUtils {
 	/**
 	 * Get combat traditions auto-granted by a subclass feature (e.g. "Combat Methods (Mercy)").
 	 * Used during level-up to pre-seed traditions before the effect pipeline runs.
-	 * @param {Object} subclass - The subclass object ({ shortName, source, ... })
+	 * @param {*} subclass - The subclass object ({ shortName, source, ... })
 	 * @param {string} classSource - The class source (e.g. "TGTT")
 	 * @returns {Array<{tradition: string, code: string}>} Granted traditions
 	 */
-	static getSubclassGrantedTraditions (subclass, classSource) {
+	static getSubclassGrantedTraditions (/** @type {*} */ subclass, /** @type {*} */ classSource) {
 		if (!subclass?.shortName) return [];
 		const isTGTT = classSource === "TGTT" || subclass.source === "TGTT";
 		if (!isTGTT) return [];
@@ -1707,18 +1713,18 @@ class CharacterSheetClassUtils {
 			// --- Warder (special: grants 2 fixed traditions) ---
 			"Warder": [{tradition: "Tempered Iron", code: "TI", bonusMethods: 1}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0}],
 		};
-		return GRANTS[subclass.shortName] || [];
+		return (/** @type {*} */ (GRANTS))[subclass.shortName] || [];
 	}
 
 	/**
 	 * Get the total bonus methods a subclass grants.
-	 * @param {Object} subclass
+	 * @param {*} subclass
 	 * @param {string} classSource
 	 * @returns {number}
 	 */
-	static getSubclassBonusMethodCount (subclass, classSource) {
+	static getSubclassBonusMethodCount (/** @type {*} */ subclass, /** @type {*} */ classSource) {
 		const granted = this.getSubclassGrantedTraditions(subclass, classSource);
-		return granted.reduce((sum, t) => sum + (t.bonusMethods || 0), 0);
+		return granted.reduce((/** @type {*} */ sum, /** @type {*} */ t) => sum + (t.bonusMethods || 0), 0);
 	}
 
 	// ==========================================
@@ -1772,8 +1778,8 @@ class CharacterSheetClassUtils {
 	 * @param {string} tradCode - Two-letter code
 	 * @returns {string}
 	 */
-	static getTraditionDescription (tradCode) {
-		return CharacterSheetClassUtils.TRADITION_CODE_TO_DESC[tradCode] || "";
+	static getTraditionDescription (/** @type {*} */ tradCode) {
+		return (/** @type {*} */ (CharacterSheetClassUtils.TRADITION_CODE_TO_DESC))[tradCode] || "";
 	}
 
 	/**
@@ -1800,7 +1806,7 @@ class CharacterSheetClassUtils {
 	static getAllTraditions () {
 		return Object.entries(CharacterSheetClassUtils.TRADITION_CODE_TO_NAME)
 			.map(([code, name]) => ({code, name}))
-			.sort((a, b) => a.name.localeCompare(b.name));
+			.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 	}
 
 	/**
@@ -1808,8 +1814,8 @@ class CharacterSheetClassUtils {
 	 * @param {string} tradCode - Two-letter code
 	 * @returns {string}
 	 */
-	static getTraditionName (tradCode) {
-		return CharacterSheetClassUtils.TRADITION_CODE_TO_NAME[tradCode] || tradCode;
+	static getTraditionName (/** @type {*} */ tradCode) {
+		return (/** @type {*} */ (CharacterSheetClassUtils.TRADITION_CODE_TO_NAME))[tradCode] || tradCode;
 	}
 
 	/**
@@ -1817,11 +1823,11 @@ class CharacterSheetClassUtils {
 	 * @param {string} tradName - Full tradition name
 	 * @returns {string|null} Two-letter code or null
 	 */
-	static getTraditionCode (tradName) {
+	static getTraditionCode (/** @type {*} */ tradName) {
 		if (!tradName) return null;
 		// Already a code?
-		if (CharacterSheetClassUtils.TRADITION_CODE_TO_NAME[tradName.toUpperCase()]) return tradName.toUpperCase();
-		return CharacterSheetClassUtils.TRADITION_NAME_TO_CODE[tradName.toLowerCase()] || null;
+		if ((/** @type {*} */ (CharacterSheetClassUtils.TRADITION_CODE_TO_NAME))[tradName.toUpperCase()]) return tradName.toUpperCase();
+		return (/** @type {*} */ (CharacterSheetClassUtils.TRADITION_NAME_TO_CODE))[tradName.toLowerCase()] || null;
 	}
 
 	// ==========================================
@@ -1830,25 +1836,25 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Check if a feature is a combat method (either new combatMethod entity or legacy CTM optionalfeature).
-	 * @param {Object} feature
+	 * @param {*} feature
 	 * @returns {boolean}
 	 */
-	static isCombatMethod (feature) {
+	static isCombatMethod (/** @type {*} */ feature) {
 		if (!feature) return false;
 		// New combatMethod entity type
 		if (feature._entityType === "combatMethod" || (feature.tradition !== undefined && feature.degree !== undefined && feature.staminaCost !== undefined)) return true;
 		// Legacy CTM optionalfeature
-		if (feature.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"))) return true;
-		if (feature.featureType?.some?.(ft => ft?.startsWith?.("CTM:"))) return true;
+		if (feature.optionalFeatureTypes?.some((/** @type {*} */ ft) => ft?.startsWith?.("CTM:"))) return true;
+		if (feature.featureType?.some?.((/** @type {*} */ ft) => ft?.startsWith?.("CTM:"))) return true;
 		return false;
 	}
 
 	/**
 	 * Get the full tradition name from a combat method (either format).
-	 * @param {Object} feature
+	 * @param {*} feature
 	 * @returns {string|null}
 	 */
-	static getMethodTraditionName (feature) {
+	static getMethodTraditionName (/** @type {*} */ feature) {
 		if (!feature) return null;
 		// New entity: tradition is already a full name
 		if (feature.tradition && typeof feature.tradition === "string" && feature.tradition.length > 2) return feature.tradition;
@@ -1859,10 +1865,10 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get the stamina cost from a combat method (either format).
-	 * @param {Object} feature
+	 * @param {*} feature
 	 * @returns {number}
 	 */
-	static getMethodStaminaCost (feature) {
+	static getMethodStaminaCost (/** @type {*} */ feature) {
 		if (!feature) return 0;
 		// New entity: explicit field
 		if (feature.staminaCost !== undefined) return feature.staminaCost;
@@ -1873,10 +1879,10 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get the action type from a combat method (either format).
-	 * @param {Object} feature
+	 * @param {*} feature
 	 * @returns {string|null}
 	 */
-	static getMethodActionType (feature) {
+	static getMethodActionType (/** @type {*} */ feature) {
 		if (!feature) return null;
 		// New entity: explicit field
 		if (feature.actionType) return feature.actionType;
@@ -1885,10 +1891,10 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Normalize a combat method (either format) to a common shape.
-	 * @param {Object} feature - combatMethod entity or legacy CTM optionalfeature
-	 * @returns {Object} Unified shape
+	 * @param {*} feature - combatMethod entity or legacy CTM optionalfeature
+	 * @returns {*} Unified shape
 	 */
-	static normalizeMethodToCommon (feature) {
+	static normalizeMethodToCommon (/** @type {*} */ feature) {
 		if (!feature) return null;
 
 		const traditionCode = CharacterSheetClassUtils.getMethodTraditionCode(feature);
@@ -1911,23 +1917,23 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get known combat traditions from existing optional features on the character.
-	 * @param {Array} existingOptFeatures - Character's existing optional features
-	 * @param {Object} state - Character state (for getCombatTraditions)
+	 * @param {Array<*>} existingOptFeatures - Character's existing optional features
+	 * @param {*} state - Character state (for getCombatTraditions)
 	 * @returns {Array<string>} Array of tradition codes
 	 */
-	static getKnownCombatTraditions (existingOptFeatures, state) {
+	static getKnownCombatTraditions (/** @type {*} */ existingOptFeatures, /** @type {*} */ state) {
 		// First check explicitly stored traditions
 		const storedTraditionsRaw = state.getCombatTraditions?.() || [];
 		const storedTraditions = Array.from(new Set(
 			storedTraditionsRaw
-				.map(t => typeof t === "string" ? t : t?.code)
+				.map((/** @type {*} */ t) => typeof t === "string" ? t : t?.code)
 				.filter(Boolean),
 		));
 		if (storedTraditions.length > 0) return storedTraditions;
 
 		// Fall back to inferring from existing combat method features
 		const traditions = new Set();
-		for (const feature of existingOptFeatures) {
+		for (/** @type {*} */ const feature of existingOptFeatures) {
 			if (CharacterSheetClassUtils.isCombatMethod(feature)) {
 				const code = CharacterSheetClassUtils.getMethodTraditionCode(feature);
 				if (code) traditions.add(code);
@@ -1939,17 +1945,17 @@ class CharacterSheetClassUtils {
 	/**
 	 * Get how many combat traditions a class should select.
 	 * Attempts to parse from Combat Methods feature text; falls back to default.
-	 * @param {Object} opts
-	 * @param {Object} opts.classData
-	 * @param {Array} opts.classFeatures
+	 * @param {object} opts
+	 * @param {*} opts.classData
+	 * @param {Array<*>} opts.classFeatures
 	 * @param {number} [opts.defaultCount=2]
 	 * @returns {number}
 	 */
-	static getCombatTraditionSelectionCount ({classData, classFeatures = [], defaultCount = 2} = {}) {
+	static getCombatTraditionSelectionCount ({classData, classFeatures = [], defaultCount = 2} = /** @type {*} */ ({})) {
 		const className = classData?.name;
 		if (!className || !classFeatures?.length) return defaultCount;
 
-		const combatMethodsFeature = classFeatures.find(f =>
+		const combatMethodsFeature = classFeatures.find((/** @type {*} */ f) =>
 			f.className === className
 			&& f.name === "Combat Methods"
 			&& f.level <= 5,
@@ -1966,11 +1972,11 @@ class CharacterSheetClassUtils {
 			six: 6,
 		};
 
-		const parseToken = (token) => {
+		const parseToken = (/** @type {*} */ token) => {
 			if (!token) return null;
 			const asNum = Number(token);
 			if (!Number.isNaN(asNum) && asNum > 0) return asNum;
-			return wordToNum[token] || null;
+			return (/** @type {*} */ (wordToNum))[token] || null;
 		};
 
 		const patterns = [
@@ -1979,7 +1985,7 @@ class CharacterSheetClassUtils {
 			/gain\s+proficiency\s+in\s+(\d+|one|two|three|four|five|six)\s+combat\s+traditions?\b/i,
 		];
 
-		for (const pattern of patterns) {
+		for (/** @type {*} */ const pattern of patterns) {
 			const match = text.match(pattern);
 			const parsed = parseToken(match?.[1]);
 			if (parsed) return parsed;
@@ -1990,23 +1996,23 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get the maximum method degree available at a given level from the class table.
-	 * @param {Object} cls - Class data
+	 * @param {*} cls - Class data
 	 * @param {number} level - Class level
 	 * @returns {number}
 	 */
-	static getMaxMethodDegree (cls, level) {
+	static getMaxMethodDegree (/** @type {*} */ cls, /** @type {*} */ level) {
 		if (!cls.classTableGroups) return 0;
 
-		for (const group of cls.classTableGroups) {
-			const degreeColIdx = group.colLabels?.findIndex(label =>
+		for (/** @type {*} */ const group of cls.classTableGroups) {
+			const degreeColIdx = group.colLabels?.findIndex((/** @type {*} */ label) =>
 				label.toLowerCase().includes("method degree"),
 			);
 
-			if (degreeColIdx >= 0 && group.rows) {
+			if (/** @type {*} */ degreeColIdx >= 0 && group.rows) {
 				const row = group.rows[level - 1];
-				if (row) {
+				if (/** @type {*} */ row) {
 					const degreeVal = row[degreeColIdx];
-					if (typeof degreeVal === "string") {
+					if (/** @type {*} */ typeof degreeVal === "string") {
 						const match = degreeVal.match(/^(\d)/);
 						if (match) return parseInt(match[1]);
 					} else if (typeof degreeVal === "number") {
@@ -2020,13 +2026,13 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get available combat traditions from combat method entities and/or optional features.
-	 * @param {Array} allFeatures - combatMethod entities and/or optional features
+	 * @param {Array<*>} allFeatures - combatMethod entities and/or optional features
 	 * @returns {Array<{code: string, name: string}>}
 	 */
-	static getAvailableTraditions (allFeatures) {
+	static getAvailableTraditions (/** @type {*} */ allFeatures) {
 		const traditions = new Map();
 
-		for (const feature of allFeatures) {
+		for (/** @type {*} */ const feature of allFeatures) {
 			if (!CharacterSheetClassUtils.isCombatMethod(feature)) continue;
 			const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(feature);
 			if (tradCode && !traditions.has(tradCode)) {
@@ -2037,21 +2043,21 @@ class CharacterSheetClassUtils {
 			}
 		}
 
-		return Array.from(traditions.values()).sort((a, b) => a.name.localeCompare(b.name));
+		return Array.from(traditions.values()).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 	}
 
 	/**
 	 * Extract tradition codes from a class's Combat Methods feature description.
 	 * @param {string} className
 	 * @param {number} level
-	 * @param {Array} classFeatures - All loaded class features
+	 * @param {Array<*>} classFeatures - All loaded class features
 	 * @returns {Set<string>} Set of tradition codes
 	 */
-	static extractTraditionsFromClassFeature (className, level, classFeatures) {
+	static extractTraditionsFromClassFeature (/** @type {*} */ className, /** @type {*} */ level, /** @type {*} */ classFeatures) {
 		const traditions = new Set();
 		if (!classFeatures?.length) return traditions;
 
-		const combatMethodsFeature = classFeatures.find(f =>
+		const combatMethodsFeature = classFeatures.find((/** @type {*} */ f) =>
 			f.className === className
 			&& f.name === "Combat Methods"
 			&& f.level <= 5,
@@ -2059,17 +2065,17 @@ class CharacterSheetClassUtils {
 
 		if (!combatMethodsFeature) return traditions;
 
-		const extractFromEntries = (entries) => {
+		const extractFromEntries = (/** @type {*} */ entries) => {
 			if (!entries) return;
-			if (typeof entries === "string") {
+			if (/** @type {*} */ typeof entries === "string") {
 				// Legacy format: feature type=ctm:XX
 				const ctmMatches = entries.matchAll(/feature\s+type[=:]\s*ctm:([a-z]{2,3})/gi);
-				for (const match of ctmMatches) {
+				for (/** @type {*} */ const match of ctmMatches) {
 					traditions.add(match[1].toUpperCase());
 				}
 				// New format: |combatmethods|tradition=Name
 				const newMatches = entries.matchAll(/\|combatmethods\|tradition=([^}]+)/gi);
-				for (const match of newMatches) {
+				for (/** @type {*} */ const match of newMatches) {
 					const code = CharacterSheetClassUtils.getTraditionCode(match[1].trim());
 					if (code) traditions.add(code);
 				}
@@ -2079,7 +2085,7 @@ class CharacterSheetClassUtils {
 				for (const entry of entries) extractFromEntries(entry);
 				return;
 			}
-			if (typeof entries === "object") {
+			if (/** @type {*} */ typeof entries === "object") {
 				if (entries.entries) extractFromEntries(entries.entries);
 				if (entries.items) extractFromEntries(entries.items);
 				if (entries.entry) extractFromEntries(entries.entry);
@@ -2092,19 +2098,18 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get available combat traditions filtered by what the class has access to.
-	 * @param {Array} allOptFeatures
 	 * @param {Array<string>} classAllowedTypes
 	 * @param {string} className
-	 * @param {Array} classFeatures
+	 * @param {Array<*>} classFeatures
 	 * @returns {Array<{code: string, name: string}>}
 	 */
-	static getAvailableTraditionsForClass (allFeatures, classAllowedTypes, className, classFeatures) {
+	static getAvailableTraditionsForClass (/** @type {*} */ allFeatures, /** @type {*} */ classAllowedTypes, /** @type {*} */ className, /** @type {*} */ classFeatures) {
 		const allowedTraditionCodes = new Set();
 		let hasDegreeOnlyCodes = false;
 
-		for (const ft of classAllowedTypes) {
+		for (/** @type {*} */ const ft of classAllowedTypes) {
 			const match = ft.match(/^CTM:(\d)?([A-Z]{2,3})$/);
-			if (match && match[2]) {
+			if (/** @type {*} */ match && match[2]) {
 				// Tradition-specific code like CTM:1AM → extract tradition
 				allowedTraditionCodes.add(match[2]);
 			} else if (/^CTM:\d+$/.test(ft)) {
@@ -2114,28 +2119,28 @@ class CharacterSheetClassUtils {
 		}
 
 		// Degree-only CTM codes (CTM:1, CTM:2, etc.) mean all traditions are available
-		if (hasDegreeOnlyCodes && allowedTraditionCodes.size === 0) {
+		if (/** @type {*} */ hasDegreeOnlyCodes && allowedTraditionCodes.size === 0) {
 			return CharacterSheetClassUtils.getAllTraditions();
 		}
 
-		if (allowedTraditionCodes.size === 0 && className) {
+		if (/** @type {*} */ allowedTraditionCodes.size === 0 && className) {
 			const featureTraditions = CharacterSheetClassUtils.extractTraditionsFromClassFeature(className, 2, classFeatures);
 			for (const trad of featureTraditions) allowedTraditionCodes.add(trad);
 		}
 
-		if (allowedTraditionCodes.size === 0) {
+		if (/** @type {*} */ allowedTraditionCodes.size === 0) {
 			return CharacterSheetClassUtils.getAvailableTraditions(allFeatures);
 		}
 
 		const traditions = new Map();
-		for (const tradCode of allowedTraditionCodes) {
+		for (/** @type {*} */ const tradCode of allowedTraditionCodes) {
 			traditions.set(tradCode, {
 				code: tradCode,
 				name: CharacterSheetClassUtils.getTraditionName(tradCode),
 			});
 		}
 
-		return Array.from(traditions.values()).sort((a, b) => a.name.localeCompare(b.name));
+		return Array.from(traditions.values()).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 	}
 
 	// ==========================================
@@ -2145,15 +2150,15 @@ class CharacterSheetClassUtils {
 	/**
 	 * Build a spell state object ready for state.addSpell().
 	 * Single source of truth — includes all enrichment fields.
-	 * @param {Object} spell - Raw spell data
-	 * @param {Object} opts
+	 * @param {*} spell - Raw spell data
+	 * @param {object} opts
 	 * @param {string} opts.sourceFeature - e.g. "Wizard Spellbook", "Spells Known"
 	 * @param {string} opts.sourceClass - e.g. "Wizard", "Sorcerer"
 	 * @param {boolean} [opts.prepared=false] - Whether spell is prepared
 	 * @param {boolean} [opts.inSpellbook=false] - Whether spell is in spellbook
-	 * @returns {Object} Spell state object
+	 * @returns {*} Spell state object
 	 */
-	static buildSpellStateObject (spell, {sourceFeature, sourceClass, prepared = false, inSpellbook = false}) {
+	static buildSpellStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass, prepared = false, inSpellbook = false}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -2175,13 +2180,13 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Build a cantrip state object ready for state.addCantrip().
-	 * @param {Object} spell - Raw cantrip data
-	 * @param {Object} opts
+	 * @param {*} spell - Raw cantrip data
+	 * @param {object} opts
 	 * @param {string} opts.sourceFeature
 	 * @param {string} opts.sourceClass
-	 * @returns {Object} Cantrip state object
+	 * @returns {*} Cantrip state object
 	 */
-	static buildCantripStateObject (spell, {sourceFeature, sourceClass}) {
+	static buildCantripStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -2198,15 +2203,15 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Build an innate spell state object ready for state.addInnateSpell().
-	 * @param {Object} spell - Raw spell data (full spell object from data)
-	 * @param {Object} opts
+	 * @param {*} spell - Raw spell data (full spell object from data)
+	 * @param {object} opts
 	 * @param {string} opts.sourceFeature
 	 * @param {boolean} [opts.atWill=false]
 	 * @param {number} [opts.uses]
 	 * @param {string} [opts.recharge="long"]
-	 * @returns {Object} Innate spell state object
+	 * @returns {*} Innate spell state object
 	 */
-	static buildInnateSpellStateObject (spell, {sourceFeature, atWill = false, uses, recharge = "long"}) {
+	static buildInnateSpellStateObject (/** @type {*} */ spell, {sourceFeature, atWill = false, uses, recharge = "long"}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -2229,8 +2234,8 @@ class CharacterSheetClassUtils {
 	/**
 	 * Build a normalized feature object ready for state.addFeature(), preserving
 	 * metadata-first fields while applying canonical class/level/source defaults.
-	 * @param {Object} feature - Raw feature payload
-	 * @param {Object} opts
+	 * @param {*} feature - Raw feature payload
+	 * @param {object} opts
 	 * @param {string} [opts.className]
 	 * @param {string} [opts.classSource]
 	 * @param {number} [opts.level]
@@ -2242,10 +2247,10 @@ class CharacterSheetClassUtils {
 	 * @param {boolean} [opts.isFeatureOption]
 	 * @param {string} [opts.parentFeature]
 	 * @param {Array<string>} [opts.optionalFeatureTypes]
-	 * @returns {Object}
+	 * @returns {*}
 	 */
 	static buildFeatureStateObject (
-		feature,
+		/** @type {*} */ feature,
 		{
 			className,
 			classSource,
@@ -2304,15 +2309,16 @@ class CharacterSheetClassUtils {
 	 * Build a compact, replay-safe history snapshot from a feature-like payload.
 	 * Used to persist metadata-critical fields in level history without relying on
 	 * display-only summary objects.
-	 * @param {Object} feature
-	 * @param {Object} [opts]
+	 * @param {*} feature
+	 * @param {*} [opts]
+	 * @param {object} opts
 	 * @param {string} [opts.type]
 	 * @param {string} [opts.parentFeature]
-	 * @returns {Object}
+	 * @returns {*}
 	 */
-	static buildHistoryFeatureSnapshot (feature, {type, parentFeature} = {}) {
+	static buildHistoryFeatureSnapshot (/** @type {*} */ feature, {type, parentFeature} = {}) {
 		const outFeature = feature || {};
-		const snapshot = {
+		/** @type {*} */ const snapshot = {
 			name: outFeature.name,
 			source: outFeature.source,
 			type: type || outFeature.type,
@@ -2347,14 +2353,14 @@ class CharacterSheetClassUtils {
 	 * Used to prevent player-choice option lists (Specialties, etc.) from being
 	 * rendered into feature descriptions, which would cause false modifier
 	 * detection from ALL option texts.
-	 * @param {Array} entries
-	 * @returns {Array} filtered copy (original not mutated)
+	 * @param {Array<*>} entries
+	 * @returns {Array<*>} filtered copy (original not mutated)
 	 */
-	static _stripOptionsEntries (entries) {
+	static _stripOptionsEntries (/** @type {*} */ entries) {
 		if (!Array.isArray(entries)) return entries;
 		return entries
-			.filter(e => !(typeof e === "object" && e?.type === "options"))
-			.map(e => {
+			.filter((/** @type {*} */ e) => !(typeof e === "object" && e?.type === "options"))
+			.map((/** @type {*} */ e) => {
 				if (typeof e === "object" && Array.isArray(e?.entries)) {
 					return {...e, entries: CharacterSheetClassUtils._stripOptionsEntries(e.entries)};
 				}
@@ -2364,36 +2370,36 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Remove undefined keys from a plain object.
-	 * @param {Object} obj
-	 * @returns {Object}
+	 * @param {*} obj
+	 * @returns {*}
 	 */
-	static _filterUndefinedKeys (obj) {
+	static _filterUndefinedKeys (/** @type {*} */ obj) {
 		return Object.fromEntries(Object.entries(obj || {}).filter(([, value]) => value !== undefined));
 	}
 
 	/**
 	 * Dedup features and build state objects for addFeature().
 	 * Filters out ASI placeholders, gainSubclassFeature entries, and already-existing features.
-	 * @param {Array} features - Raw features for this level
+	 * @param {Array<*>} features - Raw features for this level
 	 * @param {Array<string>} existingFeatureNames - Lowercase names already on the character
-	 * @param {Object} opts
+	 * @param {object} opts
 	 * @param {string} opts.className
 	 * @param {string} opts.classSource
 	 * @param {number} opts.level
-	 * @returns {Array} Array of feature data objects ready for state.addFeature()
+	 * @returns {Array<*>} Array of feature data objects ready for state.addFeature()
 	 */
-	static dedupAndBuildFeatures (features, existingFeatureNames, {className, classSource, level}) {
+	static dedupAndBuildFeatures (/** @type {*} */ features, /** @type {*} */ existingFeatureNames, {className, classSource, level}) {
 		const asiFeatureNames = ["ability score improvement", "ability score increase", "asi"];
 
-		const featuresToAdd = features.filter(f => {
+		const featuresToAdd = features.filter((/** @type {*} */ f) => {
 			if (f.gainSubclassFeature) return false;
 			const nameLower = f.name.toLowerCase();
-			if (asiFeatureNames.some(asi => nameLower.includes(asi))) return false;
+			if (asiFeatureNames.some((/** @type {*} */ asi) => nameLower.includes(asi))) return false;
 			if (!f.isSubclassFeature && !f.subclassName && existingFeatureNames.includes(nameLower)) return false;
 			return true;
 		});
 
-		return featuresToAdd.map(feature => CharacterSheetClassUtils.buildFeatureStateObject(feature, {
+		return featuresToAdd.map((/** @type {*} */ feature) => CharacterSheetClassUtils.buildFeatureStateObject(feature, {
 			className,
 			classSource,
 			level,
@@ -2407,35 +2413,35 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Apply feat ability/skill/language bonuses to state.
-	 * @param {Object} state - CharacterSheetState instance
-	 * @param {Object} feat - The feat object
-	 * @param {Object} [featChoices] - Optional feat choices if not stored on feat._featChoices
+	 * @param {*} state - CharacterSheetState instance
+	 * @param {*} feat - The feat object
+	 * @param {*} [featChoices] - Optional feat choices if not stored on feat._featChoices
 	 */
-	static applyFeatBonuses (state, feat, featChoices = null) {
+	static applyFeatBonuses (/** @type {*} */ state, /** @type {*} */ feat, /** @type {*} */ featChoices = null) {
 		const choices = featChoices || feat._featChoices || {};
 
 		// Apply damage immunities from feat/boon data (e.g., Epic Boons with "immune": ["radiant"])
-		if (feat.immune) {
-			feat.immune.forEach(type => {
+		if (/** @type {*} */ feat.immune) {
+			feat.immune.forEach((/** @type {*} */ type) => {
 				state.addImmunity(type);
 			});
 		}
 
 		// Apply condition immunities from feat/boon data
-		if (feat.conditionImmune) {
-			feat.conditionImmune.forEach(cond => {
+		if (/** @type {*} */ feat.conditionImmune) {
+			feat.conditionImmune.forEach((/** @type {*} */ cond) => {
 				const condition = typeof cond === "string" ? cond : cond.conditionImmune;
 				if (condition) state.addConditionImmunity(condition);
 			});
 		}
 
-		if (feat.ability) {
-			feat.ability.forEach(ablChoice => {
+		if (/** @type {*} */ feat.ability) {
+			feat.ability.forEach((/** @type {*} */ ablChoice) => {
 				const max = ablChoice.max || 20;
 
-				if (ablChoice.choose) {
+				if (/** @type {*} */ ablChoice.choose) {
 					// Check for epic boon choice first, then feat choice
-					if (feat._epicBoonAbilityChoice) {
+					if (/** @type {*} */ feat._epicBoonAbilityChoice) {
 						const {ability, amount} = feat._epicBoonAbilityChoice;
 						const current = state.getAbilityBase(ability);
 						state.setAbilityBase(ability, Math.min(max, current + amount));
@@ -2458,10 +2464,10 @@ class CharacterSheetClassUtils {
 		}
 
 		// Apply fixed skill proficiencies from feat data
-		if (feat.skillProficiencies) {
-			feat.skillProficiencies.forEach(sp => {
-				Object.keys(sp).forEach(skill => {
-					if (skill !== "choose" && skill !== "any") {
+		if (/** @type {*} */ feat.skillProficiencies) {
+			feat.skillProficiencies.forEach((/** @type {*} */ sp) => {
+				Object.keys(sp).forEach((/** @type {*} */ skill) => {
+					if (/** @type {*} */ skill !== "choose" && skill !== "any") {
 						state.addSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""));
 					}
 				});
@@ -2469,17 +2475,17 @@ class CharacterSheetClassUtils {
 		}
 
 		// Apply chosen skill proficiencies
-		if (choices.skills?.length) {
-			choices.skills.forEach(skill => {
+		if (/** @type {*} */ choices.skills?.length) {
+			choices.skills.forEach((/** @type {*} */ skill) => {
 				state.addSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""));
 			});
 		}
 
 		// Apply fixed language proficiencies from feat data
-		if (feat.languageProficiencies) {
-			feat.languageProficiencies.forEach(lp => {
-				Object.keys(lp).forEach(lang => {
-					if (lang !== "anyStandard" && lang !== "any") {
+		if (/** @type {*} */ feat.languageProficiencies) {
+			feat.languageProficiencies.forEach((/** @type {*} */ lp) => {
+				Object.keys(lp).forEach((/** @type {*} */ lang) => {
+					if (/** @type {*} */ lang !== "anyStandard" && lang !== "any") {
 						state.addLanguage(lang);
 					}
 				});
@@ -2487,17 +2493,17 @@ class CharacterSheetClassUtils {
 		}
 
 		// Apply chosen language proficiencies
-		if (choices.languages?.length) {
-			choices.languages.forEach(lang => {
+		if (/** @type {*} */ choices.languages?.length) {
+			choices.languages.forEach((/** @type {*} */ lang) => {
 				state.addLanguage(lang);
 			});
 		}
 
 		// Apply fixed tool proficiencies from feat data
-		if (feat.toolProficiencies) {
-			feat.toolProficiencies.forEach(tp => {
-				Object.keys(tp).forEach(tool => {
-					if (tool !== "anyArtisansTool" && tool !== "any" && tool !== "choose") {
+		if (/** @type {*} */ feat.toolProficiencies) {
+			feat.toolProficiencies.forEach((/** @type {*} */ tp) => {
+				Object.keys(tp).forEach((/** @type {*} */ tool) => {
+					if (/** @type {*} */ tool !== "anyArtisansTool" && tool !== "any" && tool !== "choose") {
 						state.addToolProficiency(tool);
 					}
 				});
@@ -2505,27 +2511,27 @@ class CharacterSheetClassUtils {
 		}
 
 		// Apply chosen tool proficiencies
-		if (choices.tools?.length) {
-			choices.tools.forEach(tool => {
+		if (/** @type {*} */ choices.tools?.length) {
+			choices.tools.forEach((/** @type {*} */ tool) => {
 				state.addToolProficiency(tool);
 			});
 		}
 
 		// Apply chosen expertise
-		if (choices.expertise?.length) {
-			choices.expertise.forEach(skill => {
+		if (/** @type {*} */ choices.expertise?.length) {
+			choices.expertise.forEach((/** @type {*} */ skill) => {
 				state.addExpertise(skill.toLowerCase().replace(/\s+/g, ""));
 			});
 		}
 
 		// Apply chosen cantrips
-		if (choices.cantrips?.length) {
-			choices.cantrips.forEach(cantrip => {
+		if (/** @type {*} */ choices.cantrips?.length) {
+			choices.cantrips.forEach((/** @type {*} */ cantrip) => {
 				// Check if spell is already known before adding
 				const existingSpells = state.getSpells?.() || [];
 				const existingInnate = state.getInnateSpells?.() || [];
 				const alreadyKnown = [...existingSpells, ...existingInnate].some(
-					s => s.name === cantrip.name && s.source === cantrip.source,
+					(/** @type {*} */ s) => s.name === cantrip.name && s.source === cantrip.source,
 				);
 				if (!alreadyKnown) {
 					state.addSpell({
@@ -2539,16 +2545,16 @@ class CharacterSheetClassUtils {
 		}
 
 		// Apply chosen spells
-		if (choices.spells?.length) {
-			choices.spells.forEach(spell => {
+		if (/** @type {*} */ choices.spells?.length) {
+			choices.spells.forEach((/** @type {*} */ spell) => {
 				// Check if spell is already known before adding
 				const existingSpells = state.getSpells?.() || [];
 				const existingInnate = state.getInnateSpells?.() || [];
 				const alreadyKnown = [...existingSpells, ...existingInnate].some(
-					s => s.name === spell.name && s.source === spell.source,
+					(/** @type {*} */ s) => s.name === spell.name && s.source === spell.source,
 				);
 				if (!alreadyKnown) {
-					if (spell.innate) {
+					if (/** @type {*} */ spell.innate) {
 						state.addInnateSpell({
 							name: spell.name,
 							source: spell.source,
@@ -2571,10 +2577,10 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Update hit dice tracking after gaining a level.
-	 * @param {Object} state - CharacterSheetState instance
-	 * @param {Object} classData
+	 * @param {*} state - CharacterSheetState instance
+	 * @param {*} classData
 	 */
-	static updateHitDice (state, classData) {
+	static updateHitDice (/** @type {*} */ state, /** @type {*} */ classData) {
 		const hitDie = `d${CharacterSheetClassUtils.getClassHitDie(classData)}`;
 		const hitDice = state.getHitDiceByType();
 
@@ -2590,22 +2596,22 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Update class resources (Rage, Ki, Sorcery Points, etc.) after leveling up.
-	 * @param {Object} state - CharacterSheetState instance
-	 * @param {Object} classEntry - Class entry from state {name, source}
+	 * @param {*} state - CharacterSheetState instance
+	 * @param {*} classEntry - Class entry from state {name, source}
 	 * @param {number} newLevel - New class level
-	 * @param {Object} classData - Full class data
+	 * @param {*} classData - Full class data
 	 */
-	static updateClassResources (state, classEntry, newLevel, classData) {
+	static updateClassResources (/** @type {*} */ state, /** @type {*} */ classEntry, /** @type {*} */ newLevel, /** @type {*} */ classData) {
 		const resourceDefs = {
 			"Barbarian": [
 				{name: "Rage", maxByLevel: [2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 999], recharge: "long"},
 			],
 			"Monk": [
-				{name: "__MONK_RESOURCE__", maxByLevel: lvl => lvl >= 2 ? lvl : 0, recharge: "short"},
+				{name: "__MONK_RESOURCE__", maxByLevel: (/** @type {*} */ lvl) => lvl >= 2 ? lvl : 0, recharge: "short"},
 			],
 			"Sorcerer": [
 				{name: "Sorcery Points",
-					maxByLevel: lvl => {
+					maxByLevel: (/** @type {*} */ lvl) => {
 						const isTGTT = classEntry.source === "TGTT" || classData.source === "TGTT";
 						if (isTGTT) return lvl + 1;
 						return lvl >= 2 ? lvl : 0;
@@ -2613,14 +2619,14 @@ class CharacterSheetClassUtils {
 					recharge: "long"},
 			],
 			"Paladin": [
-				{name: "Lay on Hands", maxByLevel: lvl => lvl * 5, recharge: "long"},
+				{name: "Lay on Hands", maxByLevel: (/** @type {*} */ lvl) => lvl * 5, recharge: "long"},
 			],
 			"Bard": [
 				{name: "Bardic Inspiration", maxByLevel: () => Math.max(1, state.getAbilityMod("cha")), recharge: newLevel >= 5 ? "short" : "long"},
 			],
 		};
 
-		const classResourceDefs = resourceDefs[classData.name];
+		const classResourceDefs = (/** @type {*} */ (resourceDefs))[classData.name];
 		if (!classResourceDefs) {
 			state.recalculateResourceMaximums();
 			return;
@@ -2628,14 +2634,14 @@ class CharacterSheetClassUtils {
 
 		const currentResources = state.getResources();
 
-		classResourceDefs.forEach(resourceDef => {
+		classResourceDefs.forEach((/** @type {*} */ resourceDef) => {
 			let resourceName = resourceDef.name;
-			if (resourceName === "__MONK_RESOURCE__") {
+			if (/** @type {*} */ resourceName === "__MONK_RESOURCE__") {
 				resourceName = "Focus Points";
 			}
 
 			let newMax;
-			if (typeof resourceDef.maxByLevel === "function") {
+			if (/** @type {*} */ typeof resourceDef.maxByLevel === "function") {
 				newMax = resourceDef.maxByLevel(newLevel);
 			} else if (Array.isArray(resourceDef.maxByLevel)) {
 				newMax = resourceDef.maxByLevel[newLevel - 1] || 0;
@@ -2645,15 +2651,15 @@ class CharacterSheetClassUtils {
 
 			const isMonkResource = resourceName === "Ki Points" || resourceName === "Focus Points";
 			let existingResource;
-			if (isMonkResource) {
-				existingResource = currentResources.find(r => r.name === "Ki Points" || r.name === "Focus Points");
+			if (/** @type {*} */ isMonkResource) {
+				existingResource = currentResources.find((/** @type {*} */ r) => r.name === "Ki Points" || r.name === "Focus Points");
 			} else {
-				existingResource = currentResources.find(r => r.name === resourceName);
+				existingResource = currentResources.find((/** @type {*} */ r) => r.name === resourceName);
 			}
 
-			if (existingResource) {
+			if (/** @type {*} */ existingResource) {
 				const oldMax = existingResource.max;
-				if (newMax > oldMax) {
+				if (/** @type {*} */ newMax > oldMax) {
 					existingResource.max = newMax;
 					existingResource.current += (newMax - oldMax);
 				}
@@ -2672,19 +2678,19 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Update spell slots after leveling up.
-	 * @param {Object} state - CharacterSheetState instance
-	 * @param {Object} classEntry - Class entry from state
+	 * @param {*} state - CharacterSheetState instance
+	 * @param {*} classEntry - Class entry from state
 	 * @param {number} newLevel - New class level
-	 * @param {Object} classData - Full class data
+	 * @param {*} classData - Full class data
 	 */
-	static updateSpellSlots (state, classEntry, newLevel, classData) {
+	static updateSpellSlots (/** @type {*} */ state, /** @type {*} */ classEntry, /** @type {*} */ newLevel, /** @type {*} */ classData) {
 		const spellcastingAbility = CharacterSheetClassUtils.getSpellcastingAbility(classData);
 		if (!spellcastingAbility) return;
 
 		const classes = state.getClasses();
 		const isMulticlass = classes.length > 1;
 
-		if (isMulticlass) {
+		if (/** @type {*} */ isMulticlass) {
 			state.calculateSpellSlots();
 		} else {
 			const slots = CharacterSheetClassUtils.getSpellSlotsForLevel(classData, newLevel);
@@ -2697,7 +2703,7 @@ class CharacterSheetClassUtils {
 					spellcasting.spellSlots[level] = {current: count, max: count};
 				} else {
 					const diff = count - spellcasting.spellSlots[level].max;
-					if (diff > 0) {
+					if (/** @type {*} */ diff > 0) {
 						spellcasting.spellSlots[level].max = count;
 						spellcasting.spellSlots[level].current += diff;
 					}
@@ -2708,11 +2714,11 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Get the spell slot table for a class at a given level.
-	 * @param {Object} classData
+	 * @param {*} classData
 	 * @param {number} level
-	 * @returns {Object} Map of spell level → slot count
+	 * @returns {*} Map of spell level → slot count
 	 */
-	static getSpellSlotsForLevel (classData, level) {
+	static getSpellSlotsForLevel (/** @type {*} */ classData, /** @type {*} */ level) {
 		const fullCasterSlots = {
 			1: {1: 2},
 			2: {1: 3},
@@ -2761,17 +2767,17 @@ class CharacterSheetClassUtils {
 		const fullCasters = ["Wizard", "Sorcerer", "Cleric", "Druid", "Bard"];
 		const halfCasters = ["Paladin", "Ranger"];
 
-		if (fullCasters.includes(classData.name)) return fullCasterSlots[level] || {};
-		if (halfCasters.includes(classData.name)) return halfCasterSlots[level] || {};
+		if (fullCasters.includes(classData.name)) return (/** @type {*} */ (fullCasterSlots))[level] || {};
+		if (halfCasters.includes(classData.name)) return (/** @type {*} */ (halfCasterSlots))[level] || {};
 		return {};
 	}
 
 	/**
 	 * Check for and add racial spells at the current character level.
-	 * @param {Object} state - CharacterSheetState instance
-	 * @param {Object} page - CharacterSheetPage instance (for getSpells)
+	 * @param {*} state - CharacterSheetState instance
+	 * @param {*} page - CharacterSheetPage instance (for getSpells)
 	 */
-	static updateRacialSpells (state, page) {
+	static updateRacialSpells (/** @type {*} */ state, /** @type {*} */ page) {
 		const race = state.getRace();
 		if (!race?.additionalSpells?.length) return;
 
@@ -2780,12 +2786,12 @@ class CharacterSheetClassUtils {
 		const raceName = race.name;
 		const subraceName = race._subraceName || race.subrace;
 
-		race.additionalSpells.forEach(spellBlock => {
-			if (spellBlock.name) {
+		race.additionalSpells.forEach((/** @type {*} */ spellBlock) => {
+			if (/** @type {*} */ spellBlock.name) {
 				if (!subraceName || spellBlock.name.toLowerCase() !== subraceName.toLowerCase()) return;
 			}
 
-			if (spellBlock.known) {
+			if (/** @type {*} */ spellBlock.known) {
 				Object.entries(spellBlock.known).forEach(([levelStr, spellsAtLevel]) => {
 					const charLevel = parseInt(levelStr);
 					if (charLevel !== totalLevel) return;
@@ -2793,18 +2799,18 @@ class CharacterSheetClassUtils {
 				});
 			}
 
-			if (spellBlock.innate) {
+			if (/** @type {*} */ spellBlock.innate) {
 				Object.entries(spellBlock.innate).forEach(([levelStr, spellConfig]) => {
 					const charLevel = parseInt(levelStr);
 					if (charLevel !== totalLevel) return;
 
-					if (typeof spellConfig === "object") {
-						if (spellConfig.daily) {
+					if (/** @type {*} */ typeof spellConfig === "object") {
+						if (/** @type {*} */ spellConfig.daily) {
 							Object.entries(spellConfig.daily).forEach(([uses, spellList]) => {
 								CharacterSheetClassUtils._processRacialInnateSpells(state, spellList, allSpells, raceName, parseInt(uses), "long");
 							});
 						}
-						if (spellConfig.rest) {
+						if (/** @type {*} */ spellConfig.rest) {
 							Object.entries(spellConfig.rest).forEach(([uses, spellList]) => {
 								CharacterSheetClassUtils._processRacialInnateSpells(state, spellList, allSpells, raceName, parseInt(uses), "short");
 							});
@@ -2821,18 +2827,18 @@ class CharacterSheetClassUtils {
 	}
 
 	/** @private */
-	static _processRacialSpellList (state, spellList, allSpells, sourceName) {
+	static _processRacialSpellList (/** @type {*} */ state, /** @type {*} */ spellList, /** @type {*} */ allSpells, /** @type {*} */ sourceName) {
 		if (!Array.isArray(spellList)) {
-			if (typeof spellList === "object" && spellList._) {
+			if (/** @type {*} */ typeof spellList === "object" && spellList._) {
 				CharacterSheetClassUtils._processRacialSpellList(state, spellList._, allSpells, sourceName);
 			}
 			return;
 		}
 
-		spellList.forEach(spellRef => {
+		spellList.forEach((/** @type {*} */ spellRef) => {
 			const spellData = CharacterSheetClassUtils._resolveSpellReference(spellRef, allSpells);
-			if (spellData) {
-				const existing = state.getSpells().find(s =>
+			if (/** @type {*} */ spellData) {
+				const existing = state.getSpells().find((/** @type {*} */ s) =>
 					s.name === spellData.name && s.source === spellData.source,
 				);
 				if (existing) return;
@@ -2847,13 +2853,13 @@ class CharacterSheetClassUtils {
 	}
 
 	/** @private */
-	static _processRacialInnateSpells (state, spellList, allSpells, sourceName, uses, recharge) {
+	static _processRacialInnateSpells (/** @type {*} */ state, /** @type {*} */ spellList, /** @type {*} */ allSpells, /** @type {*} */ sourceName, /** @type {*} */ uses, /** @type {*} */ recharge) {
 		if (!Array.isArray(spellList)) return;
 
-		spellList.forEach(spellRef => {
+		spellList.forEach((/** @type {*} */ spellRef) => {
 			const spellData = CharacterSheetClassUtils._resolveSpellReference(spellRef, allSpells);
-			if (spellData) {
-				const existing = state.getInnateSpells().find(s =>
+			if (/** @type {*} */ spellData) {
+				const existing = state.getInnateSpells().find((/** @type {*} */ s) =>
 					s.name === spellData.name && s.source === spellData.source,
 				);
 				if (existing) return;
@@ -2873,7 +2879,7 @@ class CharacterSheetClassUtils {
 	}
 
 	/** @private */
-	static _resolveSpellReference (spellRef, allSpells) {
+	static _resolveSpellReference (/** @type {*} */ spellRef, /** @type {*} */ allSpells) {
 		if (typeof spellRef !== "string") return null;
 
 		let spellName = spellRef.replace(/#c$/, "");
@@ -2883,7 +2889,7 @@ class CharacterSheetClassUtils {
 		spellName = parts[0].toLowerCase();
 		if (parts.length > 1) source = parts[1].toUpperCase();
 
-		return allSpells.find(s => {
+		return allSpells.find((/** @type {*} */ s) => {
 			const nameMatch = s.name.toLowerCase() === spellName;
 			if (!nameMatch) return false;
 			if (source) return s.source === source;
@@ -2896,20 +2902,85 @@ class CharacterSheetClassUtils {
 	// ------------------------------------------------------------------
 
 	/**
+	 * Detect whether an optional feature is repeatable based on its entries.
+	 * @param {object} opt - Optional feature data
+	 * @returns {boolean}
+	 */
+	static isOptionalFeatureRepeatable (/** @type {*} */ opt) {
+		if (!opt?.entries) return false;
+		const checkEntries = (/** @type {*} */ entries) => {
+			for (/** @type {*} */ const entry of entries) {
+				if (typeof entry === "string" && entry.toLowerCase().includes("repeatable")) return true;
+				if (entry?.name?.toLowerCase().includes("repeatable")) return true;
+				if (entry?.entries && checkEntries(entry.entries)) return true;
+			}
+			return false;
+		};
+		return checkEntries(opt.entries);
+	}
+
+	/**
+	 * Filter and annotate optional features eligible for selection given a feature-type
+	 * progression slot. Shared by builder (level 1 / first selection) and level-up (any
+	 * subsequent gain) so prerequisite + repeatable handling stays in one place.
+	 *
+	 * @param {Array<*>} allOptFeatures - All available optional features (already deduped by edition)
+	 * @param {object} opts
+	 * @param {string[]} opts.featureTypes - Feature type codes for this slot (e.g. ["EI"], ["MM"])
+	 * @param {object} opts.prereqContext - Context for {@link checkPrerequisites}
+	 * @param {Array<*>}  [opts.alreadyKnown=[]] - Optional features the character already has
+	 *                                          (each with {name, source}); used for repeatable
+	 *                                          handling and "Known" badge.
+	 * @returns {Array<*>} Array of options, each annotated with:
+	 *   `_meetsPrereqs`, `_prereqReasons`, `_alreadyKnown`, `_timesKnown`,
+	 *   `_repeatable`, `_selectable`.
+	 */
+	static getEligibleOptionalFeatures (/** @type {*} */ allOptFeatures, {featureTypes, prereqContext, alreadyKnown = /** @type {*[]} */ ([])} = /** @type {*} */ ({})) {
+		if (!allOptFeatures?.length || !featureTypes?.length) return [];
+
+		const matchesFeatureType = (/** @type {*} */ optFeatTypes) => {
+			return optFeatTypes?.some((/** @type {*} */ ft) =>
+				featureTypes.some((/** @type {*} */ progType) => ft === progType || ft.startsWith(progType)),
+			);
+		};
+
+		return allOptFeatures
+			.filter((/** @type {*} */ opt) => matchesFeatureType(opt.featureType))
+			.map((/** @type {*} */ opt) => {
+				const {met, reasons} = CharacterSheetClassUtils.checkPrerequisites(opt.prerequisite, prereqContext || {});
+				const timesKnown = alreadyKnown.filter(
+					(/** @type {*} */ existing) => existing.name === opt.name && existing.source === opt.source,
+				).length;
+				const alreadyHas = timesKnown > 0;
+				const repeatable = CharacterSheetClassUtils.isOptionalFeatureRepeatable(opt);
+				const selectable = met && (!alreadyHas || repeatable);
+				return {
+					...opt,
+					_meetsPrereqs: met,
+					_prereqReasons: reasons,
+					_alreadyKnown: alreadyHas,
+					_timesKnown: timesKnown,
+					_repeatable: repeatable,
+					_selectable: selectable,
+				};
+			});
+	}
+
+	/**
 	 * Compute optional feature gains between currentLevel and newLevel.
 	 * @param {object} classData - The class data object
 	 * @param {number} currentLevel - Previous class level
 	 * @param {number} newLevel - New class level
 	 * @param {object} state - Character state (needs getFeatures())
-	 * @returns {Array} Array of gain objects
+	 * @returns {Array<*>} Array of gain objects
 	 */
-	static getOptionalFeatureGains (classData, currentLevel, newLevel, state) {
-		const gains = [];
+	static getOptionalFeatureGains (/** @type {*} */ classData, /** @type {*} */ currentLevel, /** @type {*} */ newLevel, /** @type {*} */ state) {
+		/** @type {*[]} */ const gains = [];
 		if (!classData.optionalfeatureProgression?.length) return gains;
 
-		classData.optionalfeatureProgression.forEach(optFeatProg => {
+		classData.optionalfeatureProgression.forEach((/** @type {*} */ optFeatProg) => {
 			const featureTypes = optFeatProg.featureType || [];
-			const name = optFeatProg.name || featureTypes.map(ft => ft.replace(/:/g, " ")).join(", ");
+			const name = optFeatProg.name || featureTypes.map((/** @type {*} */ ft) => ft.replace(/:/g, " ")).join(", ");
 
 			let countAtCurrent = 0;
 			let countAtNew = 0;
@@ -2922,20 +2993,20 @@ class CharacterSheetClassUtils {
 				countAtNew = optFeatProg.progression[String(newLevel)] || 0;
 			}
 
-			const existingOptFeatures = state.getFeatures().filter(f => f.featureType === "Optional Feature");
+			const existingOptFeatures = state.getFeatures().filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
 
-			const matchesFeatureType = (optFeatTypes) => {
-				return optFeatTypes?.some(ft =>
-					featureTypes.some(progType => ft === progType || ft.startsWith(progType)),
+			const matchesFeatureType = (/** @type {*} */ optFeatTypes) => {
+				return optFeatTypes?.some((/** @type {*} */ ft) =>
+					featureTypes.some((/** @type {*} */ progType) => ft === progType || ft.startsWith(progType)),
 				);
 			};
 
-			const existingOfType = existingOptFeatures.filter(f =>
+			const existingOfType = existingOptFeatures.filter((/** @type {*} */ f) =>
 				matchesFeatureType(f.optionalFeatureTypes),
 			).length;
 
 			const newOptionsCount = countAtNew - existingOfType;
-			if (newOptionsCount > 0) {
+			if (/** @type {*} */ newOptionsCount > 0) {
 				gains.push({
 					featureTypes,
 					name,
@@ -3029,7 +3100,7 @@ class CharacterSheetClassUtils {
 	 * @param {string|object} [type] - Creature type string or {type: string}
 	 * @returns {string} emoji character
 	 */
-	static getCreatureEmoji (name, type) {
+	static getCreatureEmoji (/** @type {*} */ name, /** @type {*} */ type) {
 		const nameLower = (name || "").toLowerCase();
 		const typeStr = typeof type === "string" ? type : type?.type;
 
@@ -3037,7 +3108,7 @@ class CharacterSheetClassUtils {
 			if (nameLower.includes(key)) return emoji;
 		}
 
-		return CharacterSheetClassUtils._CREATURE_TYPE_EMOJI_MAP[typeStr] || "🐾";
+		return (/** @type {*} */ (CharacterSheetClassUtils._CREATURE_TYPE_EMOJI_MAP))[typeStr] || "🐾";
 	}
 
 	/**
@@ -3052,9 +3123,9 @@ class CharacterSheetClassUtils {
 	 * @param {"sm"|"md"|"lg"} [size="md"] - Size preset for dimensions
 	 * @returns {string} HTML string — either an `<img>` or a `<span>` with emoji
 	 */
-	static getCompanionIconHtml (creature, size = "md") {
+	static getCompanionIconHtml (/** @type {*} */ creature, /** @type {*} */ size = "md") {
 		const sizes = {sm: 24, md: 36, lg: 48};
-		const px = sizes[size] || sizes.md;
+		const px = (/** @type {*} */ (sizes))[size] || sizes.md;
 		const emoji = CharacterSheetClassUtils.getCreatureEmoji(creature.name, creature.type);
 		const emojiFontSize = size === "sm" ? "1.2em" : size === "lg" ? "2.2em" : "1.6em";
 
