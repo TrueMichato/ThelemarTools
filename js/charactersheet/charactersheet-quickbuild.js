@@ -776,12 +776,12 @@ class CharacterSheetQuickBuild {
 
 	async _closeWizard ({force = false} = {}) {
 		if (!force && this._currentStep > 0) {
-			const confirm = await InputUiUtil.pGetUserBoolean({
+			const confirm = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Close Quick Build?",
 				htmlDescription: "<p>You have unsaved progress. Are you sure you want to close?</p>",
 				textYes: "Close",
 				textNo: "Cancel",
-			});
+			}));
 			if (!confirm) return;
 		}
 		if (this._escapeHandler) {
@@ -1655,7 +1655,7 @@ class CharacterSheetQuickBuild {
 				if (spellList) {
 					// Check for cantrip choices in 'known' block
 					if (spellList.known) {
-						const levelKey = Object.keys(spellList.known).find(k => k === "_" || !isNaN(k));
+						const levelKey = Object.keys(spellList.known).find(k => k === "_" || !isNaN(/** @type {*} */ (k)));
 						const spellsAtLevel = levelKey ? spellList.known[levelKey] : null;
 						if (Array.isArray(spellsAtLevel)) {
 							spellsAtLevel.forEach(sp => {
@@ -1946,7 +1946,7 @@ class CharacterSheetQuickBuild {
 						<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}"
 							${isKnown ? "disabled title=\"Already known\"" : ""}
 							style="${isKnown ? "opacity: 0.5;" : ""}">
-							${lang.toTitleCase()}${isKnown ? " ✓" : ""}
+							${(/** @type {*} */ (lang)).toTitleCase()}${isKnown ? " ✓" : ""}
 						</button>
 					`});
 
@@ -2431,7 +2431,7 @@ class CharacterSheetQuickBuild {
 		const subclass = this._getSubclassForClass(gain.className, gain.classSource, 0);
 		if (subclass) {
 			const grantedTraditions = CharacterSheetClassUtils.getSubclassGrantedTraditions(subclass, gain.classSource);
-			subclassGrantedCodes = grantedTraditions.filter(t => t.code && !t.choice).map(t => t.code);
+			subclassGrantedCodes = grantedTraditions.filter(t => t.code && !(/** @type {*} */ (t)).choice).map(t => t.code);
 		}
 
 		// _combatTraditions tracks only user-chosen traditions (not subclass grants)
@@ -3056,7 +3056,7 @@ class CharacterSheetQuickBuild {
 				const item = e_({outer: `
 					<div class="charsheet__quickbuild-option ve-small ${isSelected ? "selected" : ""}" style="padding: 4px 8px; cursor: pointer;">
 						<input type="radio" name="qb-scholar" ${isSelected ? "checked" : ""}>
-						<strong class="ml-2">${skill.toTitleCase()}</strong>
+						<strong class="ml-2">${(/** @type {*} */ (skill)).toTitleCase()}</strong>
 					</div>
 				`});
 				item.addEventListener("click", () => {
@@ -3117,7 +3117,7 @@ class CharacterSheetQuickBuild {
 						const item = e_({outer: `
 							<div class="charsheet__quickbuild-option ve-small ${isSelected ? "selected" : ""}" style="padding: 4px 8px; cursor: pointer;">
 								<input type="checkbox" ${isSelected ? "checked" : ""}>
-								<strong class="ml-2">${skill.toTitleCase()}</strong>
+								<strong class="ml-2">${(/** @type {*} */ (skill)).toTitleCase()}</strong>
 							</div>
 						`});
 						item.addEventListener("click", () => {
