@@ -616,10 +616,6 @@ class FeatureModifierParser {
 			.replace(/<[^>]*>/g, " ")
 			.replace(/\s+/g, " ");
 
-		// Debug: Log the plaintext for proficiency bonus features
-		if (/proficiency\s*bonus/i.test(plainText)) {
-		}
-
 		// Helper to parse signed number from various formats
 		const parseSignedValue = (match, signGroup, numGroup) => {
 			const sign = match[signGroup];
@@ -3529,6 +3525,7 @@ class CharacterSheetState {
 			try {
 				data = JSON.parse(json);
 			} catch (e) {
+				// eslint-disable-next-line no-console
 				console.warn("[CharSheet State] Failed to parse JSON:", e);
 				return false;
 			}
@@ -3773,11 +3770,6 @@ class CharacterSheetState {
 					cleanedCount++;
 				}
 			});
-		}
-		if (cleanedCount > 0) {
-		}
-
-		if (migratedCount > 0) {
 		}
 
 		// Migrate cantrips incorrectly stored in spellsKnown (level 0 or level 1 with feat source)
@@ -4905,6 +4897,7 @@ class CharacterSheetState {
 	 */
 	recordLevelChoice (entry) {
 		if (!entry.level || !entry.class) {
+			// eslint-disable-next-line no-console
 			console.warn("[CharSheet State] recordLevelChoice: Missing required fields");
 			return;
 		}
@@ -7101,7 +7094,7 @@ class CharacterSheetState {
 
 		// Check if wearing armor or shield
 		const equippedArmor = this._data.inventory.find(item =>
-			item.equipped && item.item?.type === "LA" || item.item?.type === "MA" || item.item?.type === "HA",
+			item.equipped && (item.item?.type === "LA" || item.item?.type === "MA" || item.item?.type === "HA"),
 		);
 		const equippedShield = this._data.inventory.find(item =>
 			item.equipped && item.item?.type === "S",
@@ -8675,6 +8668,7 @@ class CharacterSheetState {
 	fulfillSpellChoice (choiceId, spell) {
 		const choice = this._data.pendingSpellChoices?.find(c => c.id === choiceId);
 		if (!choice) {
+			// eslint-disable-next-line no-console
 			console.warn(`[CharSheet State] No pending choice found with id: ${choiceId}`);
 			return;
 		}
@@ -17546,8 +17540,6 @@ class CharacterSheetState {
 		// Store applied effects for debugging/display
 		this._data.appliedClassFeatureEffects = appliedEffects;
 
-		if (appliedEffects.length > 0) {
-		}
 		return appliedEffects;
 	}
 
@@ -18608,7 +18600,7 @@ class CharacterSheetState {
 		if (!invItem) return false;
 		const item = invItem.item || invItem;
 		// Check for magic indicators: rarity, bonusWeapon, +X in name
-		return item.rarity && item.rarity !== "none" && item.rarity !== "common"
+		return (item.rarity && item.rarity !== "none" && item.rarity !== "common")
 			|| item.bonusWeapon || item.bonusWeaponDamage
 			|| /\+\d/.test(item.name || "");
 	}
@@ -21297,7 +21289,7 @@ class CharacterSheetState {
 		this._data.conditions = this._data.conditions.filter(c => {
 			const cObj = this._normalizeCondition(c);
 			return !(cObj.name.toLowerCase() === condObj.name.toLowerCase()
-			         && cObj.source === condObj.source);
+				&& cObj.source === condObj.source);
 		});
 		this._removeConditionEffects(condObj.name, condObj.source);
 	}
@@ -21407,8 +21399,8 @@ class CharacterSheetState {
 		const sourceKey = source?.toLowerCase() || "";
 		const stateIndex = this._data.activeStates.findIndex(
 			s => s.isCondition
-			     && s.conditionName?.toLowerCase().replace(/\s+/g, "_") === condKey
-			     && (s.conditionSource?.toLowerCase() === sourceKey || (!s.conditionSource && !sourceKey)),
+				&& s.conditionName?.toLowerCase().replace(/\s+/g, "_") === condKey
+				&& (s.conditionSource?.toLowerCase() === sourceKey || (!s.conditionSource && !sourceKey)),
 		);
 		if (stateIndex !== -1) {
 			this._data.activeStates.splice(stateIndex, 1);
@@ -21976,8 +21968,6 @@ class CharacterSheetState {
 			const getAbilityMod = (ability) => this.getAbilityMod(ability);
 			const getProfBonus = () => this.getProficiencyBonus();
 			uses = FeatureUsesParser.parseUses(feature.description, getAbilityMod, getProfBonus);
-			if (uses) {
-			}
 		}
 
 		const featureData = {
@@ -22316,9 +22306,6 @@ class CharacterSheetState {
 					break;
 			}
 		}
-
-		if (addedCount > 0) {
-		}
 	}
 
 	/**
@@ -22532,9 +22519,8 @@ class CharacterSheetState {
 		// First try structured additionalSpells data (from official content)
 		if (feature.additionalSpells) {
 			spells = SpellGrantParser.parseAdditionalSpells(feature.additionalSpells, feature.name);
-		}
-		// Fall back to parsing from description (for homebrew or missing data)
-		else if (feature.description && SpellGrantParser.grantsSpells(feature.description)) {
+		} else if (feature.description && SpellGrantParser.grantsSpells(feature.description)) {
+			// Fall back to parsing from description (for homebrew or missing data)
 			spells = SpellGrantParser.parseSpellsFromText(feature.description, feature.name);
 		}
 
@@ -22582,9 +22568,8 @@ class CharacterSheetState {
 						sourceFeature: feature.name,
 					});
 				}
-			}
-			// Add as cantrip
-			else if (spell.level === 0) {
+			} else if (spell.level === 0) {
+				// Add as cantrip
 				if (fullSpell) {
 					this.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(fullSpell, {
 						sourceFeature: feature.name,
@@ -22597,9 +22582,8 @@ class CharacterSheetState {
 						sourceFeature: feature.name,
 					});
 				}
-			}
-			// Otherwise add as known spell
-			else {
+			} else {
+				// Otherwise add as known spell
 				if (fullSpell) {
 					this.addSpell(CharacterSheetClassUtils.buildSpellStateObject(fullSpell, {
 						sourceFeature: feature.name,
@@ -22734,8 +22718,6 @@ class CharacterSheetState {
 			const getAbilityMod = (ability) => this.getAbilityMod(ability);
 			const getProfBonus = () => this.getProficiencyBonus();
 			uses = FeatureUsesParser.parseUses(feat.description, getAbilityMod, getProfBonus);
-			if (uses) {
-			}
 		}
 
 		const featData = {
@@ -23648,6 +23630,7 @@ class CharacterSheetState {
 		);
 
 		if (!method) {
+			// eslint-disable-next-line no-console
 			console.warn(`[CharSheet State] Cannot activate stance: method "${methodName}" not found`);
 			return false;
 		}
@@ -23655,12 +23638,9 @@ class CharacterSheetState {
 		// Verify it's actually a stance
 		const parsed = this._parseCombatMethodEffects(method);
 		if (!parsed.isStance) {
+			// eslint-disable-next-line no-console
 			console.warn(`[CharSheet State] Cannot activate stance: "${methodName}" is not a stance`);
 			return false;
-		}
-
-		// Deactivate any current stance first (mutual exclusivity)
-		if (this._data.activeStance && this._data.activeStance !== methodName) {
 		}
 
 		// Activate the new stance
@@ -23673,8 +23653,6 @@ class CharacterSheetState {
 	 * Deactivate the currently active stance
 	 */
 	deactivateStance () {
-		if (this._data.activeStance) {
-		}
 		this._data.activeStance = null;
 	}
 
@@ -23782,6 +23760,7 @@ class CharacterSheetState {
 		);
 
 		if (!method) {
+			// eslint-disable-next-line no-console
 			console.warn(`[CharSheet State] Cannot use method: "${methodName}" not found`);
 			return false;
 		}
@@ -23792,6 +23771,7 @@ class CharacterSheetState {
 		if (cost > 0) {
 			const success = this.spendStamina(cost);
 			if (!success) {
+				// eslint-disable-next-line no-console
 				console.warn(`[CharSheet State] Cannot use method: insufficient stamina (need ${cost}, have ${this.getStaminaCurrent()})`);
 				return false;
 			}
@@ -24729,6 +24709,7 @@ class CharacterSheetState {
 	setPrimalFocusMode (mode) {
 		this._ensurePrimalFocusInitialized();
 		if (mode !== "predator" && mode !== "prey") {
+			// eslint-disable-next-line no-console
 			console.warn(`[CharSheet State] Invalid Primal Focus mode: ${mode}`);
 			return;
 		}
@@ -27244,7 +27225,7 @@ class CharacterSheetState {
 			// Add any constant before this dice
 			const beforeDice = expr.substring(lastIndex, match.index);
 			if (beforeDice) {
-				const num = parseInt(beforeDice.replace(/[+\-]/g, "").trim());
+				const num = parseInt(beforeDice.replace(/[+-]/g, "").trim());
 				if (!isNaN(num)) {
 					total += beforeDice.includes("-") ? -num : num;
 				}
@@ -27659,46 +27640,40 @@ class CharacterSheetState {
 						if (abl !== "all") {
 							cm.savingThrows[abl] = (cm.savingThrows[abl] || 0) + value;
 						}
-					}
-					// Handle check:str, check:dex, etc.
-					else if (mod.type.startsWith("check:")) {
+					} else if (mod.type.startsWith("check:")) {
+						// Handle check:str, check:dex, etc.
 						const abl = mod.type.split(":")[1];
 						if (abl !== "all") {
 							cm.abilityChecks[abl] = (cm.abilityChecks[abl] || 0) + value;
 							// DEX checks include initiative
 							if (abl === "dex") cm.initiative += value;
 						}
-					}
-					// Handle skill:stealth, skill:athletics, etc.
-					else if (mod.type.startsWith("skill:")) {
+					} else if (mod.type.startsWith("skill:")) {
+						// Handle skill:stealth, skill:athletics, etc.
 						const skill = mod.type.split(":")[1];
 						if (skill === "all") {
 							cm.skills["_all"] = (cm.skills["_all"] || 0) + value;
 						} else {
 							cm.skills[skill] = (cm.skills[skill] || 0) + value;
 						}
-					}
-					// Handle attack subtypes
-					else if (mod.type.startsWith("attack:")) {
+					} else if (mod.type.startsWith("attack:")) {
+						// Handle attack subtypes
 						// Specific attack types are tracked for the aggregation system
 						// For quick totals, we only track the global attack bonus
 						cm.attackBonus += value;
-					}
-					// Handle damage subtypes
-					else if (mod.type.startsWith("damage:")) {
+					} else if (mod.type.startsWith("damage:")) {
+						// Handle damage subtypes
 						// Specific damage types are tracked for the aggregation system
 						// For quick totals, we only track the global damage bonus
 						cm.damageBonus += value;
-					}
-					// Handle speed:walk, speed:fly, etc.
-					else if (mod.type.startsWith("speed:")) {
+					} else if (mod.type.startsWith("speed:")) {
+						// Handle speed:walk, speed:fly, etc.
 						const speedType = mod.type.split(":")[1];
 						if (cm.speed[speedType] !== undefined) {
 							cm.speed[speedType] += value;
 						}
-					}
-					// Handle ability:str, ability:dex, etc.
-					else if (mod.type.startsWith("ability:")) {
+					} else if (mod.type.startsWith("ability:")) {
+						// Handle ability:str, ability:dex, etc.
 						const abl = mod.type.split(":")[1];
 						if (mod.mode === "set") {
 							// "Set to X" mode - takes the highest value
@@ -27707,9 +27682,8 @@ class CharacterSheetState {
 							// Default additive mode
 							cm.abilityScores[abl] = (cm.abilityScores[abl] || 0) + value;
 						}
-					}
-					// Handle sense:darkvision, sense:blindsight, etc.
-					else if (mod.type.startsWith("sense:")) {
+					} else if (mod.type.startsWith("sense:")) {
+						// Handle sense:darkvision, sense:blindsight, etc.
 						const sense = mod.type.split(":")[1];
 						if (cm.senses[sense] !== undefined) {
 							if (mod.setValue) {
@@ -27719,31 +27693,26 @@ class CharacterSheetState {
 								cm.senses[sense] += value;
 							}
 						}
-					}
-					// Handle passive:perception, passive:investigation, passive:insight
-					else if (mod.type.startsWith("passive:")) {
+					} else if (mod.type.startsWith("passive:")) {
+						// Handle passive:perception, passive:investigation, passive:insight
 						// Passive scores use the skill modifier system
 						// They get their own separate tracking
 						if (!cm.passives) cm.passives = {};
 						const skill = mod.type.split(":")[1];
 						cm.passives[skill] = (cm.passives[skill] || 0) + value;
-					}
-					// Handle concentration saves
-					else if (mod.type === "concentration") {
+					} else if (mod.type === "concentration") {
+						// Handle concentration saves
 						if (!cm.concentration) cm.concentration = 0;
 						cm.concentration += value;
-					}
-					// Handle death saves
-					else if (mod.type === "deathSave") {
+					} else if (mod.type === "deathSave") {
+						// Handle death saves
 						if (!cm.deathSave) cm.deathSave = 0;
 						cm.deathSave += value;
-					}
-					// Handle hp:max specifically
-					else if (mod.type === "hp:max") {
+					} else if (mod.type === "hp:max") {
+						// Handle hp:max specifically
 						cm.hp += value;
-					}
-					// Handle hp:temp - usually doesn't stack, but track additions
-					else if (mod.type === "hp:temp") {
+					} else if (mod.type === "hp:temp") {
+						// Handle hp:temp - usually doesn't stack, but track additions
 						// Temp HP is handled separately in the HP system
 						if (!cm.tempHp) cm.tempHp = 0;
 						cm.tempHp += value;
@@ -31124,9 +31093,8 @@ class CharacterSheetState {
 			// Check for explicit resource info from data-driven detection
 			if (activationInfo.isDataDriven && activationInfo.resourceName) {
 				resource = this._findResource(resources, activationInfo.resourceName, activationInfo.resourceCost);
-			}
-			// Check for stamina cost from description (e.g., "1 Stamina Point", "2 Stamina Points")
-			else if (activationInfo.staminaCost) {
+			} else if (activationInfo.staminaCost) {
+				// Check for stamina cost from description (e.g., "1 Stamina Point", "2 Stamina Points")
 				resource = {
 					id: "stamina",
 					name: "Stamina",
@@ -31135,45 +31103,40 @@ class CharacterSheetState {
 					isStamina: true,
 					cost: activationInfo.staminaCost,
 				};
-			}
-			// Check for Ki cost
-			else if (activationInfo.kiCost) {
+			} else if (activationInfo.kiCost) {
+				// Check for Ki cost
 				const kiResource = resources.find(r =>
 					r.name.toLowerCase().includes("ki") || r.name.toLowerCase().includes("focus points"),
 				);
 				if (kiResource) {
 					resource = {...kiResource, cost: activationInfo.kiCost};
 				}
-			}
-			// Check for Focus Point cost (2024 XPHB/TGTT monks use "Focus Points" instead of "Ki Points")
-			else if (activationInfo.focusPointCost) {
+			} else if (activationInfo.focusPointCost) {
+				// Check for Focus Point cost (2024 XPHB/TGTT monks use "Focus Points" instead of "Ki Points")
 				const focusResource = resources.find(r =>
 					r.name.toLowerCase().includes("focus") || r.name.toLowerCase().includes("ki"),
 				);
 				if (focusResource) {
 					resource = {...focusResource, cost: activationInfo.focusPointCost};
 				}
-			}
-			// Check for Sorcery Point cost
-			else if (activationInfo.sorceryPointCost) {
+			} else if (activationInfo.sorceryPointCost) {
+				// Check for Sorcery Point cost
 				const spResource = resources.find(r =>
 					r.name.toLowerCase().includes("sorcery") || r.name.toLowerCase().includes("sorcerer points"),
 				);
 				if (spResource) {
 					resource = {...spResource, cost: activationInfo.sorceryPointCost};
 				}
-			}
-			// Check for Bardic Inspiration cost
-			else if (activationInfo.bardicInspirationCost) {
+			} else if (activationInfo.bardicInspirationCost) {
+				// Check for Bardic Inspiration cost
 				const biResource = resources.find(r =>
 					r.name.toLowerCase().includes("bardic inspiration"),
 				);
 				if (biResource) {
 					resource = {...biResource, cost: activationInfo.bardicInspirationCost};
 				}
-			}
-			// Check state type's default resource
-			else if (stateType?.resourceName) {
+			} else if (stateType?.resourceName) {
+				// Check state type's default resource
 				// Special case: Stamina is tracked separately, not in resources array
 				if (stateType.resourceName.toLowerCase() === "stamina") {
 					resource = {
@@ -31367,6 +31330,7 @@ class CharacterSheetState {
 
 		// Handle custom states that aren't in ACTIVE_STATE_TYPES
 		if (!stateType && stateTypeId !== "custom") {
+			// eslint-disable-next-line no-console
 			console.warn(`Unknown active state type: ${stateTypeId}`);
 			return null;
 		}
@@ -33118,8 +33082,6 @@ class CharacterSheetState {
 				count++;
 			}
 		});
-		if (count > 0) {
-		}
 		return count;
 	}
 
