@@ -8721,6 +8721,74 @@
 							"5th"
 						]
 					]
+				},
+				{
+					"title": "Battle Tactics",
+					"colLabels": [
+						"Tactics Known"
+					],
+					"rows": [
+						[
+							"\u2014"
+						],
+						[
+							"\u2014"
+						],
+						[
+							"2"
+						],
+						[
+							"2"
+						],
+						[
+							"2"
+						],
+						[
+							"2"
+						],
+						[
+							"3"
+						],
+						[
+							"3"
+						],
+						[
+							"3"
+						],
+						[
+							"4"
+						],
+						[
+							"4"
+						],
+						[
+							"4"
+						],
+						[
+							"4"
+						],
+						[
+							"4"
+						],
+						[
+							"5"
+						],
+						[
+							"5"
+						],
+						[
+							"5"
+						],
+						[
+							"5"
+						],
+						[
+							"5"
+						],
+						[
+							"5"
+						]
+					]
 				}
 			],
 			"classFeatures": [
@@ -17135,55 +17203,94 @@
 					"entries": [
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Dying Surge|TGTT"
+							"optionalfeature": "Dying Surge|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Sheathing the Sword|TGTT"
+							"optionalfeature": "Sheathing the Sword|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Daring Feint|TGTT"
+							"optionalfeature": "Daring Feint|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Last Ditch Evasion|TGTT"
+							"optionalfeature": "Last Ditch Evasion|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Goading Movement|TGTT"
+							"optionalfeature": "Goading Movement|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Covering Attack|TGTT"
+							"optionalfeature": "Covering Attack|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Back to the Wall|TGTT"
+							"optionalfeature": "Back to the Wall|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Hammer and Anvil|TGTT"
+							"optionalfeature": "Hammer and Anvil|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Eye of the Storm|TGTT"
+							"optionalfeature": "Eye of the Storm|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Flanking|TGTT"
+							"optionalfeature": "Flanking|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Charging|TGTT"
+							"optionalfeature": "Charging|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "Sweeping Blows|TGTT"
+							"optionalfeature": "Sweeping Blows|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						},
 						{
 							"type": "refOptionalfeature",
-							"optionalfeature": "High Ground|TGTT"
+							"optionalfeature": "High Ground|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
 						}
 					]
 				}
