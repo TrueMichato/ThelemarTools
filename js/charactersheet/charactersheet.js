@@ -18,6 +18,8 @@ import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
 
+const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
+
 /**
  * Character Sheet - Main Controller
  * Orchestrates all character sheet functionality
@@ -39,8 +41,15 @@ class CharacterSheetPage {
 		this._quickBuild = null;
 		this._upgrades = null;
 		this._playMode = null;
+		// Forward-compat module slots (referenced by other modules; assigned externally if wired)
+		/** @type {*} */
+		this._spellsModule = null;
+		/** @type {*} */
+		this._combatModule = null;
+		/** @type {*} */
+		this._customAbilitiesPanel = null;
 
-		this._selCharacter = null;
+		this._selCharacter = /** @type {*} */ (null);
 		this._currentCharacterId = null;
 		this._isLevelUpBannerDismissed = false;
 
@@ -158,7 +167,7 @@ class CharacterSheetPage {
 		// Remove loading overlay now that init is complete
 		const elOverlay = document.querySelector("#charsheet-loading-overlay");
 		if (elOverlay) {
-			elOverlay.style.opacity = "0";
+			(/** @type {*} */ (elOverlay)).style.opacity = "0";
 			setTimeout(() => elOverlay.remove(), 300);
 		}
 
@@ -606,16 +615,16 @@ class CharacterSheetPage {
 		for (const link of tabs.querySelectorAll("a[data-toggle=\"tab\"]")) {
 			link.addEventListener("click", (e) => {
 				e.preventDefault();
-				const targetId = e.currentTarget.getAttribute("href");
+				const targetId = (/** @type {*} */ (e.currentTarget)).getAttribute("href");
 
 				// Update tab nav
 				for (const li of tabs.querySelectorAll("li")) li.classList.remove("ve-active");
-				e.currentTarget.parentElement.classList.add("ve-active");
+				(/** @type {*} */ (e.currentTarget)).parentElement.classList.add("ve-active");
 
 				// Update tab content — set inline display as belt-and-suspenders
 				for (const pane of tabContent.querySelectorAll(".tab-pane")) {
 					pane.classList.remove("ve-active", "in");
-					pane.style.display = "none";
+					(/** @type {*} */ (pane)).style.display = "none";
 				}
 				const target = document.querySelector(targetId);
 				target.classList.add("ve-active", "in");
@@ -661,7 +670,7 @@ class CharacterSheetPage {
 	_initHoverLinkSafetyNet () {
 		// Click handler: ensure hover links open in new tab
 		document.addEventListener("click", (e) => {
-			const target = e.target.closest("a[data-vet-page]");
+			const target = (/** @type {*} */ (e.target)).closest("a[data-vet-page]");
 			if (!target) return;
 			if (!target.target) {
 				target.target = "_blank";
@@ -674,7 +683,7 @@ class CharacterSheetPage {
 		// added via template.innerHTML in e_({outer:...}))
 		const hoverBound = new WeakSet();
 		document.addEventListener("mouseover", (e) => {
-			const target = e.target.closest("a[data-vet-page]");
+			const target = (/** @type {*} */ (e.target)).closest("a[data-vet-page]");
 			if (!target || hoverBound.has(target)) return;
 			hoverBound.add(target);
 
@@ -786,21 +795,21 @@ class CharacterSheetPage {
 
 		// Character name
 		document.getElementById("charsheet-ipt-name").addEventListener("change", (e) => {
-			this._state.setName(e.target.value);
+			this._state.setName((/** @type {*} */ (e.target)).value);
 			this._saveCurrentCharacter();
 			this._updateCharacterDropdown();
 		});
 
 		// HP controls
 		document.getElementById("charsheet-ipt-hp-current").addEventListener("change", (e) => {
-			this._state.setCurrentHp(parseInt(e.target.value) || 0);
+			this._state.setCurrentHp(parseInt((/** @type {*} */ (e.target)).value) || 0);
 			this._saveCurrentCharacter();
 			this._renderHp(); // Update HP bar
 			this._renderConditions(); // Update bloodied condition display
 		});
 
 		document.getElementById("charsheet-ipt-hp-temp").addEventListener("change", (e) => {
-			this._state.setTempHp(parseInt(e.target.value) || 0);
+			this._state.setTempHp(parseInt((/** @type {*} */ (e.target)).value) || 0);
 			this._saveCurrentCharacter();
 			this._renderHp(); // Update HP bar
 		});
@@ -863,7 +872,7 @@ class CharacterSheetPage {
 		// Currency
 		["cp", "sp", "ep", "gp", "pp"].forEach(currency => {
 			document.getElementById(`charsheet-ipt-${currency}`).addEventListener("change", (e) => {
-				this._state.setCurrency(currency, parseInt(e.target.value) || 0);
+				this._state.setCurrency(currency, parseInt((/** @type {*} */ (e.target)).value) || 0);
 				this._saveCurrentCharacter();
 				this._renderCurrency(); // Update total
 			});
@@ -875,7 +884,7 @@ class CharacterSheetPage {
 		// Notes
 		["personality", "ideals", "bonds", "flaws", "backstory", "notes"].forEach(field => {
 			document.getElementById(`charsheet-txt-${field}`).addEventListener("change", (e) => {
-				this._state.setNote(field, e.target.value);
+				this._state.setNote(field, (/** @type {*} */ (e.target)).value);
 				this._saveCurrentCharacter();
 			});
 		});
@@ -883,7 +892,7 @@ class CharacterSheetPage {
 		// Appearance
 		["age", "height", "weight", "eyes", "skin", "hair"].forEach(field => {
 			document.getElementById(`charsheet-ipt-${field}`).addEventListener("change", (e) => {
-				this._state.setAppearance(field, e.target.value);
+				this._state.setAppearance(field, (/** @type {*} */ (e.target)).value);
 				this._saveCurrentCharacter();
 			});
 		});
@@ -894,7 +903,7 @@ class CharacterSheetPage {
 		// Death saves
 		for (const container of document.querySelectorAll("#charsheet-deathsaves-success, #charsheet-deathsaves-failure")) {
 			container.addEventListener("change", (e) => {
-				if (!e.target.matches("input")) return;
+				if (!(/** @type {*} */ (e.target)).matches("input")) return;
 				this._updateDeathSaves();
 				this._saveCurrentCharacter();
 			});
@@ -990,7 +999,7 @@ class CharacterSheetPage {
 			}
 
 			// Update URL
-			const url = new URL(window.location);
+			const url = new URL(/** @type {*} */ (window.location));
 			url.searchParams.set("id", charId);
 			window.history.replaceState({}, "", url);
 		}
@@ -1107,7 +1116,7 @@ class CharacterSheetPage {
 				race.languageProficiencies.forEach(lp => {
 					Object.keys(lp).forEach(lang => {
 						if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-						this._state.addLanguage(lang.toTitleCase());
+						this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
 					});
 					// Random extra language choices
 					if (lp.anyStandard || lp.any) {
@@ -1163,7 +1172,7 @@ class CharacterSheetPage {
 				bg.toolProficiencies.forEach(tp => {
 					Object.entries(tp).forEach(([key, val]) => {
 						if (key === "choose" || key === "any" || key === "anyArtisansTool" || key === "anyMusicalInstrument") return;
-						if (val === true) this._state.addToolProficiency(key.toTitleCase());
+						if (val === true) this._state.addToolProficiency((/** @type {*} */ (key)).toTitleCase());
 					});
 				});
 			}
@@ -1177,7 +1186,7 @@ class CharacterSheetPage {
 							const chosen = pickN(available, count);
 							for (const lang of chosen) this._state.addLanguage(lang);
 						} else if (val === true) {
-							this._state.addLanguage(key.toTitleCase());
+							this._state.addLanguage((/** @type {*} */ (key)).toTitleCase());
 						}
 					});
 				});
@@ -1225,7 +1234,7 @@ class CharacterSheetPage {
 		if (cls.startingProficiencies?.tools) {
 			cls.startingProficiencies.tools.forEach(t => {
 				if (typeof t === "string" && !/\bany\b.*\bchoice\b|\bchoose\b/i.test(t)) {
-					const toolName = t.replace(/{@item\s+([^|}]+)[^}]*}/gi, "$1").toTitleCase();
+					const toolName = (/** @type {*} */ (t.replace(/{@item\s+([^|}]+)[^}]*}/gi, "$1"))).toTitleCase();
 					this._state.addToolProficiency(toolName);
 				}
 			});
@@ -1505,7 +1514,7 @@ class CharacterSheetPage {
 	}
 
 	_onXpAdd () {
-		const iptXpAdd = document.getElementById("charsheet-ipt-xp-add");
+		const iptXpAdd = /** @type {*} */ (document.getElementById("charsheet-ipt-xp-add"));
 		const rawXpToAdd = iptXpAdd.value;
 		const xpToAdd = Math.max(0, Math.floor(Number(rawXpToAdd) || 0));
 		if (!xpToAdd) return;
@@ -2204,10 +2213,10 @@ class CharacterSheetPage {
 		if (!selectedCreature) return;
 
 		// Add companion from bestiary
-		this._state.addCompanionFromBestiary?.(selectedCreature, {
+		this._state.addCompanionFromBestiary?.(selectedCreature, /** @type {*} */ ({
 			type,
 			origin,
-		});
+		}));
 
 		JqueryUtil.doToast({type: "success", content: `Added ${selectedCreature.name} as ${origin || "companion"}!`});
 	}
@@ -2443,7 +2452,7 @@ class CharacterSheetPage {
 	}
 
 	_renderBasicInfo () {
-		document.getElementById("charsheet-ipt-name").value = this._state.getName();
+		(/** @type {*} */ (document.getElementById("charsheet-ipt-name"))).value = this._state.getName();
 		this._renderXpTracking();
 
 		// Render race with hover link
@@ -2452,12 +2461,12 @@ class CharacterSheetPage {
 			try {
 				const raceName = this._state.getRaceName();
 				const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_RACES]({name: race.name, source: race.source});
-				document.getElementById("charsheet-disp-race").innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_RACES, raceName, race.source, hash);
+				(/** @type {*} */ (document.getElementById("charsheet-disp-race"))).innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_RACES, raceName, race.source, hash);
 			} catch (e) {
-				document.getElementById("charsheet-disp-race").textContent = this._state.getRaceName() || "—";
+				(/** @type {*} */ (document.getElementById("charsheet-disp-race"))).textContent = this._state.getRaceName() || "—";
 			}
 		} else {
-			document.getElementById("charsheet-disp-race").textContent = "—";
+			(/** @type {*} */ (document.getElementById("charsheet-disp-race"))).textContent = "—";
 		}
 
 		// Render class with hover links
@@ -2471,51 +2480,51 @@ class CharacterSheetPage {
 					return `${c.name} ${c.level}`;
 				}
 			});
-			document.getElementById("charsheet-disp-class").innerHTML = classLinks.join(" / ");
+			(/** @type {*} */ (document.getElementById("charsheet-disp-class"))).innerHTML = classLinks.join(" / ");
 		} else {
-			document.getElementById("charsheet-disp-class").textContent = "—";
+			(/** @type {*} */ (document.getElementById("charsheet-disp-class"))).textContent = "—";
 		}
 
-		document.getElementById("charsheet-disp-level").textContent = this._state.getTotalLevel();
+		(/** @type {*} */ (document.getElementById("charsheet-disp-level"))).textContent = this._state.getTotalLevel();
 
 		// Render background with hover link
 		const background = this._state.getBackground();
 		if (background?.name) {
 			// Don't create hover links for custom backgrounds (source="Custom")
 			if (background.source === "Custom") {
-				document.getElementById("charsheet-disp-background").textContent = background.name;
+				(/** @type {*} */ (document.getElementById("charsheet-disp-background"))).textContent = background.name;
 			} else {
 				try {
 					const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_BACKGROUNDS]({name: background.name, source: background.source});
-					document.getElementById("charsheet-disp-background").innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_BACKGROUNDS, background.name, background.source, hash);
+					(/** @type {*} */ (document.getElementById("charsheet-disp-background"))).innerHTML = CharacterSheetPage.getHoverLink(UrlUtil.PG_BACKGROUNDS, background.name, background.source, hash);
 				} catch (e) {
-					document.getElementById("charsheet-disp-background").textContent = this._state.getBackgroundName() || "—";
+					(/** @type {*} */ (document.getElementById("charsheet-disp-background"))).textContent = this._state.getBackgroundName() || "—";
 				}
 			}
 		} else {
-			document.getElementById("charsheet-disp-background").textContent = "—";
+			(/** @type {*} */ (document.getElementById("charsheet-disp-background"))).textContent = "—";
 		}
 
 		// Render size and reach chips
 		this._renderSizeChip();
 		this._renderReachChip();
 
-		document.getElementById("charsheet-disp-proficiency").textContent = `+${this._state.getProficiencyBonus()}`;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-proficiency"))).textContent = `+${this._state.getProficiencyBonus()}`;
 		this._renderLevelUpBanner();
 	}
 
 	_renderXpTracking () {
 		const currentXp = this._state.getXp();
-		document.getElementById("charsheet-disp-xp-current").textContent = currentXp.toLocaleString();
+		(/** @type {*} */ (document.getElementById("charsheet-disp-xp-current"))).textContent = currentXp.toLocaleString();
 
 		const totalLevel = this._state.getTotalLevel();
 		if (totalLevel <= 0) {
-			document.getElementById("charsheet-disp-xp-progress").textContent = "Add a class to track level progression.";
+			(/** @type {*} */ (document.getElementById("charsheet-disp-xp-progress"))).textContent = "Add a class to track level progression.";
 			return;
 		}
 
 		if (totalLevel >= 20) {
-			document.getElementById("charsheet-disp-xp-progress").textContent = "Maximum level reached.";
+			(/** @type {*} */ (document.getElementById("charsheet-disp-xp-progress"))).textContent = "Maximum level reached.";
 			return;
 		}
 
@@ -2523,11 +2532,11 @@ class CharacterSheetPage {
 		const xpToNext = this._state.getXpToNextLevel();
 		const xpRequired = this._state.getXpRequiredForNextLevel();
 		if (xpToNext <= 0) {
-			document.getElementById("charsheet-disp-xp-progress").textContent = `Ready for level ${nextLevel} (${currentXp.toLocaleString()}/${xpRequired.toLocaleString()} XP).`;
+			(/** @type {*} */ (document.getElementById("charsheet-disp-xp-progress"))).textContent = `Ready for level ${nextLevel} (${currentXp.toLocaleString()}/${xpRequired.toLocaleString()} XP).`;
 			return;
 		}
 
-		document.getElementById("charsheet-disp-xp-progress").textContent = `${xpToNext.toLocaleString()} XP to level ${nextLevel} (${currentXp.toLocaleString()}/${xpRequired.toLocaleString()} XP).`;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-xp-progress"))).textContent = `${xpToNext.toLocaleString()} XP to level ${nextLevel} (${currentXp.toLocaleString()}/${xpRequired.toLocaleString()} XP).`;
 	}
 
 	_renderLevelUpBanner () {
@@ -2652,8 +2661,8 @@ class CharacterSheetPage {
 		Parser.ABIL_ABVS.forEach(abl => {
 			const score = this._state.getAbilityScore(abl);
 			const mod = this._state.getAbilityMod(abl);
-			document.getElementById(`charsheet-ability-${abl}-score`).textContent = score;
-			document.getElementById(`charsheet-ability-${abl}-mod`).textContent = mod >= 0 ? `+${mod}` : mod;
+			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-score`))).textContent = score;
+			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-mod`))).textContent = mod >= 0 ? `+${mod}` : mod;
 		});
 
 		// Update prominent passive scores display
@@ -2661,9 +2670,9 @@ class CharacterSheetPage {
 	}
 
 	_renderPassiveScores () {
-		document.getElementById("charsheet-passive-perception").textContent = this._state.getPassiveScore("perception");
-		document.getElementById("charsheet-passive-investigation").textContent = this._state.getPassiveScore("investigation");
-		document.getElementById("charsheet-passive-insight").textContent = this._state.getPassiveScore("insight");
+		(/** @type {*} */ (document.getElementById("charsheet-passive-perception"))).textContent = this._state.getPassiveScore("perception");
+		(/** @type {*} */ (document.getElementById("charsheet-passive-investigation"))).textContent = this._state.getPassiveScore("investigation");
+		(/** @type {*} */ (document.getElementById("charsheet-passive-insight"))).textContent = this._state.getPassiveScore("insight");
 	}
 
 	_renderSavingThrows () {
@@ -2798,9 +2807,9 @@ class CharacterSheetPage {
 		const maxHp = this._state.getMaxHp();
 		const tempHp = this._state.getTempHp();
 
-		document.getElementById("charsheet-ipt-hp-current").value = currentHp;
-		document.getElementById("charsheet-disp-hp-max").textContent = maxHp;
-		document.getElementById("charsheet-ipt-hp-temp").value = tempHp;
+		(/** @type {*} */ (document.getElementById("charsheet-ipt-hp-current"))).value = currentHp;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-hp-max"))).textContent = maxHp;
+		(/** @type {*} */ (document.getElementById("charsheet-ipt-hp-temp"))).value = tempHp;
 
 		// Update HP bar fill width and color
 		const hpPercent = maxHp > 0 ? Math.max(0, Math.min(100, (currentHp / maxHp) * 100)) : 0;
@@ -2814,29 +2823,29 @@ class CharacterSheetPage {
 			barColor = "#ffc107"; // Yellow (bloodied)
 		}
 
-		Object.assign(document.getElementById("charsheet-hp-bar-fill").style, {
+		Object.assign((/** @type {*} */ (document.getElementById("charsheet-hp-bar-fill"))).style, {
 			"width": `${hpPercent}%`,
 			"background": barColor, // Use 'background' to override CSS gradient
 		});
 
 		// Temp HP bar (cyan/blue, positioned after regular HP)
-		Object.assign(document.getElementById("charsheet-hp-bar-temp").style, {
+		Object.assign((/** @type {*} */ (document.getElementById("charsheet-hp-bar-temp"))).style, {
 			"width": `${tempPercent}%`,
 			"left": `${hpPercent}%`,
 			"background": "#17a2b8",
 		});
 
 		// Update HP percentage text
-		document.getElementById("charsheet-hp-percent").textContent = `${Math.round(hpPercent)}%`;
+		(/** @type {*} */ (document.getElementById("charsheet-hp-percent"))).textContent = `${Math.round(hpPercent)}%`;
 	}
 
 	_renderCombatStats () {
 		// AC with breakdown
 		const acBreakdown = this._state.getAcBreakdown();
-		document.getElementById("charsheet-disp-ac").textContent = acBreakdown.total;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-ac"))).textContent = acBreakdown.total;
 		this._renderAcBreakdown(acBreakdown);
 
-		document.getElementById("charsheet-disp-initiative").textContent = this._formatMod(this._state.getInitiative());
+		(/** @type {*} */ (document.getElementById("charsheet-disp-initiative"))).textContent = this._formatMod(this._state.getInitiative());
 		this._renderStatBreakdown("#charsheet-initiative-breakdown", this._state.getInitiativeBreakdown());
 
 		// Calculate speed with exhaustion penalty
@@ -2851,7 +2860,7 @@ class CharacterSheetPage {
 				const speedPenalty = exhaustion * 5;
 				const baseWalkSpeed = this._state.getWalkSpeed();
 				const reducedSpeed = Math.max(0, baseWalkSpeed - speedPenalty);
-				speedDisplay = speedDisplay.replace(/^\d+ ft\./, `${reducedSpeed} ft.`);
+				speedDisplay = (/** @type {*} */ (speedDisplay)).replace(/^\d+ ft\./, `${reducedSpeed} ft.`);
 				if (speedPenalty > 0) {
 					speedDisplay += ` (-${speedPenalty})`;
 				}
@@ -2862,21 +2871,21 @@ class CharacterSheetPage {
 				} else if (exhaustion >= 2) {
 					const baseWalkSpeed = this._state.getWalkSpeed();
 					const halvedSpeed = Math.floor(baseWalkSpeed / 2);
-					speedDisplay = speedDisplay.replace(/^\d+ ft\./, `${halvedSpeed} ft.`);
+					speedDisplay = (/** @type {*} */ (speedDisplay)).replace(/^\d+ ft\./, `${halvedSpeed} ft.`);
 					speedDisplay += " (halved)";
 				}
 			}
 			// Thelemar rules: no speed penalty
 		}
 
-		document.getElementById("charsheet-disp-speed").textContent = speedDisplay;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-speed"))).textContent = speedDisplay;
 		this._renderStatBreakdown("#charsheet-speed-breakdown", this._state.getSpeedBreakdown("walk"));
 
 		// Jump distances
 		// Standard rules: Long jump = STR score, High jump = 3 + STR mod
 		// Thelemar rules: Long jump = 8 + Athletics mod, High jump = 2 + Athletics × 0.5
 		// Running jumps require a 10ft running start; standing jumps are half
-		const useThelemarJumping = this._state.getSettings()?.thelemar_jumping;
+		const useThelemarJumping = (/** @type {*} */ (this._state.getSettings()))?.thelemar_jumping;
 
 		let longJumpRunning, highJumpRunning;
 
@@ -2901,10 +2910,10 @@ class CharacterSheetPage {
 		const longJumpStanding = Math.floor(longJumpRunning / 2); // Standing = half of running
 		const highJumpStanding = Math.floor(Math.max(0, highJumpRunning) / 2); // Standing = half of running
 
-		document.getElementById("charsheet-disp-jump-long-run").textContent = `${longJumpRunning}`;
-		document.getElementById("charsheet-disp-jump-long-stand").textContent = `${longJumpStanding}`;
-		document.getElementById("charsheet-disp-jump-high-run").textContent = `${Math.max(0, highJumpRunning)}`;
-		document.getElementById("charsheet-disp-jump-high-stand").textContent = `${highJumpStanding}`;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-jump-long-run"))).textContent = `${longJumpRunning}`;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-jump-long-stand"))).textContent = `${longJumpStanding}`;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-jump-high-run"))).textContent = `${Math.max(0, highJumpRunning)}`;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-jump-high-stand"))).textContent = `${highJumpStanding}`;
 
 		// Update tooltips based on rules being used
 		if (useThelemarJumping) {
@@ -2928,12 +2937,12 @@ class CharacterSheetPage {
 		const items = this._state.getItems();
 		const currentWeight = items.reduce((sum, item) => sum + (item.weight || 0) * item.quantity, 0);
 
-		document.getElementById("charsheet-disp-weight").textContent = currentWeight.toFixed(1);
-		document.getElementById("charsheet-disp-carry").textContent = carryCapacity;
-		document.getElementById("charsheet-disp-push").textContent = pushDragLift;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-weight"))).textContent = currentWeight.toFixed(1);
+		(/** @type {*} */ (document.getElementById("charsheet-disp-carry"))).textContent = carryCapacity;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-push"))).textContent = pushDragLift;
 
 		// Update carrying capacity tooltip based on rules
-		const useThelemarCarry = this._state.getSettings()?.thelemar_carryWeight;
+		const useThelemarCarry = (/** @type {*} */ (this._state.getSettings()))?.thelemar_carryWeight;
 		if (useThelemarCarry) {
 			const mightMod = this._state.getSkillMod("might");
 			const carryTooltip = `Carry Capacity (Thelemar): 50 + 25 × Might mod (${mightMod >= 0 ? "+" : ""}${mightMod}) = ${carryCapacity} lb.\nPush/Drag/Lift: ${pushDragLift} lb.`;
@@ -3045,25 +3054,25 @@ class CharacterSheetPage {
 		// Resistances
 		if (defenses.resistances.length > 0) {
 			const resistanceText = defenses.resistances.map(formatType).join(", ");
-			document.getElementById("charsheet-resistances").textContent = resistanceText;
+			(/** @type {*} */ (document.getElementById("charsheet-resistances"))).textContent = resistanceText;
 		} else {
-			document.getElementById("charsheet-resistances").textContent = "—";
+			(/** @type {*} */ (document.getElementById("charsheet-resistances"))).textContent = "—";
 		}
 
 		// Immunities (damage immunities)
 		if (defenses.immunities.length > 0) {
 			const immunityText = defenses.immunities.map(formatType).join(", ");
-			document.getElementById("charsheet-immunities").textContent = immunityText;
+			(/** @type {*} */ (document.getElementById("charsheet-immunities"))).textContent = immunityText;
 		} else {
-			document.getElementById("charsheet-immunities").textContent = "—";
+			(/** @type {*} */ (document.getElementById("charsheet-immunities"))).textContent = "—";
 		}
 
 		// Vulnerabilities
 		if (defenses.vulnerabilities.length > 0) {
 			const vulnerabilityText = defenses.vulnerabilities.map(formatType).join(", ");
-			document.getElementById("charsheet-vulnerabilities").textContent = vulnerabilityText;
+			(/** @type {*} */ (document.getElementById("charsheet-vulnerabilities"))).textContent = vulnerabilityText;
 		} else {
-			document.getElementById("charsheet-vulnerabilities").textContent = "—";
+			(/** @type {*} */ (document.getElementById("charsheet-vulnerabilities"))).textContent = "—";
 		}
 
 		// Condition immunities (if there's a UI element for it)
@@ -3080,9 +3089,9 @@ class CharacterSheetPage {
 
 	_renderHitDice () {
 		const hitDice = this._state.getHitDiceSummary();
-		document.getElementById("charsheet-disp-hitdice-current").textContent = hitDice.current;
-		document.getElementById("charsheet-disp-hitdice-max").textContent = hitDice.max;
-		document.getElementById("charsheet-disp-hitdice-type").textContent = hitDice.type || "d8";
+		(/** @type {*} */ (document.getElementById("charsheet-disp-hitdice-current"))).textContent = hitDice.current;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-hitdice-max"))).textContent = hitDice.max;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-hitdice-type"))).textContent = hitDice.type || "d8";
 	}
 
 	_renderDeathSaves () {
@@ -3092,11 +3101,11 @@ class CharacterSheetPage {
 		const failure = document.querySelectorAll("#charsheet-deathsaves-failure input");
 
 		[...success].forEach((el, i) => {
-			el.checked = i < deathSaves.successes;
+			(/** @type {*} */ (el)).checked = i < deathSaves.successes;
 		});
 
 		[...failure].forEach((el, i) => {
-			el.checked = i < deathSaves.failures;
+			(/** @type {*} */ (el)).checked = i < deathSaves.failures;
 		});
 	}
 
@@ -3136,9 +3145,9 @@ class CharacterSheetPage {
 		const weapons = profs.weapons.map(w => typeof w === "string" ? w : w.full).join(", ");
 		const tools = profs.tools.map(t => typeof t === "string" ? t : t.full).join(", ");
 
-		document.getElementById("charsheet-prof-armor").innerHTML = `${Renderer.get().render(armor)}` || "—";
-		document.getElementById("charsheet-prof-weapons").innerHTML = `${Renderer.get().render(weapons)}` || "—";
-		document.getElementById("charsheet-prof-tools").innerHTML = `${Renderer.get().render(tools)}` || "—";
+		(/** @type {*} */ (document.getElementById("charsheet-prof-armor"))).innerHTML = `${Renderer.get().render(armor)}` || "—";
+		(/** @type {*} */ (document.getElementById("charsheet-prof-weapons"))).innerHTML = `${Renderer.get().render(weapons)}` || "—";
+		(/** @type {*} */ (document.getElementById("charsheet-prof-tools"))).innerHTML = `${Renderer.get().render(tools)}` || "—";
 
 		// Languages with hover links - look up correct source from language data
 		if (profs.languages?.length) {
@@ -3168,9 +3177,9 @@ class CharacterSheetPage {
 					return lang;
 				}
 			}).join(", ");
-			document.getElementById("charsheet-prof-languages").innerHTML = langHtml;
+			(/** @type {*} */ (document.getElementById("charsheet-prof-languages"))).innerHTML = langHtml;
 		} else {
-			document.getElementById("charsheet-prof-languages").textContent = "—";
+			(/** @type {*} */ (document.getElementById("charsheet-prof-languages"))).textContent = "—";
 		}
 
 		// Weapon Masteries
@@ -3248,7 +3257,7 @@ class CharacterSheetPage {
 		const values = {};
 		["cp", "sp", "ep", "gp", "pp"].forEach(currency => {
 			values[currency] = this._state.getCurrency(currency) || 0;
-			document.getElementById(`charsheet-ipt-${currency}`).value = values[currency];
+			(/** @type {*} */ (document.getElementById(`charsheet-ipt-${currency}`))).value = values[currency];
 		});
 
 		// Calculate total value in GP (standard D&D conversion rates)
@@ -3292,13 +3301,13 @@ class CharacterSheetPage {
 
 	_renderNotes () {
 		["personality", "ideals", "bonds", "flaws", "backstory", "notes"].forEach(field => {
-			document.getElementById(`charsheet-txt-${field}`).value = this._state.getNote(field);
+			(/** @type {*} */ (document.getElementById(`charsheet-txt-${field}`))).value = this._state.getNote(field);
 		});
 	}
 
 	_renderAppearance () {
 		["age", "height", "weight", "eyes", "skin", "hair"].forEach(field => {
-			document.getElementById(`charsheet-ipt-${field}`).value = this._state.getAppearance(field);
+			(/** @type {*} */ (document.getElementById(`charsheet-ipt-${field}`))).value = this._state.getAppearance(field);
 		});
 	}
 
@@ -3310,7 +3319,7 @@ class CharacterSheetPage {
 
 		// Overview tab portrait - clicking container triggers file input
 		document.getElementById("charsheet-portrait-container").addEventListener("click", (e) => {
-			if (e.target.closest("#charsheet-portrait-input")) return;
+			if ((/** @type {*} */ (e.target)).closest("#charsheet-portrait-input")) return;
 			portraitInput?.click();
 		});
 
@@ -3319,7 +3328,7 @@ class CharacterSheetPage {
 
 		// File input change handler (overview tab)
 		portraitInput.addEventListener("change", (e) => {
-			const file = e.target.files?.[0];
+			const file = (/** @type {*} */ (e.target)).files?.[0];
 			if (file) this._handlePortraitFile(file);
 		});
 
@@ -3607,7 +3616,7 @@ class CharacterSheetPage {
 		}
 
 		// Update number display
-		number.textContent = exhaustion;
+		number.textContent = String(exhaustion);
 
 		// Update color class based on level
 		number.classList.remove("exhaustion-0", "exhaustion-1", "exhaustion-2", "exhaustion-3", "exhaustion-4", "exhaustion-5", "exhaustion-6", "exhaustion-max");
@@ -4346,7 +4355,7 @@ class CharacterSheetPage {
 	/**
 	 * Render a grouped companion card (for conjured creatures)
 	 * @param {object} companion - The companion data with count and hpArray
-	 * @param {jQuery} list - The list container to append to
+	 * @param {*} list - The list container to append to
 	 */
 	_renderGroupedCompanion (companion, list) {
 		const livingCount = this._state.getLivingGroupedCreatureCount?.(companion.id) || 0;
@@ -5053,7 +5062,7 @@ class CharacterSheetPage {
 			// Click elsewhere on skill row to roll
 			card.querySelectorAll(".charsheet__ability-skill-mini").forEach(el => el.addEventListener("click", (e) => {
 				// Don't roll if clicking the proficiency indicator (handled above)
-				if (e.target.closest(".charsheet__ability-skill-prof")) return;
+				if ((/** @type {*} */ (e.target)).closest(".charsheet__ability-skill-prof")) return;
 				e.stopPropagation();
 				const skillKey = e.currentTarget.dataset.skill;
 				const skill = skills.find(s => s.name.toLowerCase().replace(/\s+/g, "") === skillKey);
@@ -5206,7 +5215,7 @@ class CharacterSheetPage {
 			const staminaMax = this._state.getStaminaMax() || 0;
 			if (staminaMax > 0) totalResourceCount++;
 		}
-		document.getElementById("charsheet-resources-count").textContent = totalResourceCount;
+		(/** @type {*} */ (document.getElementById("charsheet-resources-count"))).textContent = totalResourceCount;
 
 		// Show stamina if character uses combat methods system
 		if (usesCombatSystem) {
@@ -5251,7 +5260,7 @@ class CharacterSheetPage {
 						this._saveCurrentCharacter();
 						this._renderResources();
 						this._renderActiveStates(); // Refresh active states to update Activate button states
-						if (this._features) this._features._renderRvisibleLsources();
+						if (this._features) this._features._renderResources();
 						if (this._combat) this._combat._updateStaminaDisplay();
 					}
 				});
@@ -6699,7 +6708,7 @@ class CharacterSheetPage {
 			const dcRow = ee`<div class="ve-flex ve-flex-v-center mb-2">
 				<span class="mr-2"><strong>DC:</strong></span>
 				${dcInput}
-				<span class="glyphicon glyphicon-info-sign help ml-2" title="${dcExplanation.escapeQuotes()}"></span>
+				<span class="glyphicon glyphicon-info-sign help ml-2" title="${(/** @type {*} */ (dcExplanation)).escapeQuotes()}"></span>
 				<span class="ve-muted ml-2 ve-small">(click to edit)</span>
 			</div>`;
 			modalInner.append(dcRow);
@@ -6735,7 +6744,7 @@ class CharacterSheetPage {
 				const success = total >= currentDc;
 
 				// Show animated dice if enabled
-				if (this._state.getSettings()?.animatedDice) {
+				if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
 					await this._showAnimatedDice(20, effectiveRoll, advantage, false);
 				}
 
@@ -6751,7 +6760,8 @@ class CharacterSheetPage {
 						<div>${rollText}</div>
 						<div class="mt-1"><strong>${resultText}</strong></div>
 					</div>
-				`.classList.remove("ve-hidden");
+				`;
+				rollResult.classList.remove("ve-hidden");
 
 				if (!success) {
 					this._state.breakConcentration();
@@ -6930,7 +6940,8 @@ class CharacterSheetPage {
 		this._renderInspiration();
 	}
 
-	_toggleSecondaryHeader ({force} = {}) {
+	_toggleSecondaryHeader (opts = {}) {
+		const {force} = /** @type {*} */ (opts);
 		const secondaryRow = document.getElementById("charsheet-header-secondary");
 		const btn = document.getElementById("charsheet-btn-more");
 		if (!secondaryRow || !btn) return;
@@ -6981,7 +6992,7 @@ class CharacterSheetPage {
 		];
 
 		for (const sel of dropdownSelectors) {
-			const el = document.querySelector(sel);
+			const el = /** @type {*} */ (document.querySelector(sel));
 			if (el) {
 				el.classList.remove("active");
 				el.style.display = "";
@@ -7088,7 +7099,7 @@ class CharacterSheetPage {
 
 		// Handle swatch click (delegated)
 		content.addEventListener("click", (e) => {
-			const swatch = e.target.closest(".charsheet__theme-swatch");
+			const swatch = (/** @type {*} */ (e.target)).closest(".charsheet__theme-swatch");
 			if (!swatch) return;
 			const theme = swatch.dataset.theme;
 
@@ -7108,7 +7119,7 @@ class CharacterSheetPage {
 
 		// Close dropdown when clicking outside
 		document.addEventListener("click", (e) => {
-			if (!e.target.closest(".charsheet__header-theme-controls")) {
+			if (!(/** @type {*} */ (e.target)).closest(".charsheet__header-theme-controls")) {
 				dropdown.classList.remove("active");
 				btn.classList.remove("active");
 			}
@@ -7122,7 +7133,7 @@ class CharacterSheetPage {
 	_initTextSizePicker () {
 		const btn = document.getElementById("charsheet-btn-textsize");
 		const dropdown = document.getElementById("charsheet-textsize-dropdown");
-		const sizeInput = document.getElementById("charsheet-textsize-input");
+		const sizeInput = /** @type {*} */ (document.getElementById("charsheet-textsize-input"));
 		const decreaseBtn = document.getElementById("charsheet-textsize-decrease");
 		const increaseBtn = document.getElementById("charsheet-textsize-increase");
 		const resetBtn = document.getElementById("charsheet-textsize-reset");
@@ -7157,12 +7168,12 @@ class CharacterSheetPage {
 
 		// Apply text size to the page
 		const applyTextSize = (size) => {
-			const page = document.querySelector(".charsheet-page");
+			const page = /** @type {*} */ (document.querySelector(".charsheet-page"));
 			page.setAttribute("data-textsize", size);
 			page.style.setProperty("--cs-text-scale", size / 100);
 			// Set root font-size so ALL rem-based content scales — including modals/popups appended to body
 			document.documentElement.style.fontSize = `${size}%`;
-			document.documentElement.style.setProperty("--cs-text-scale", size / 100);
+			document.documentElement.style.setProperty("--cs-text-scale", String(size / 100));
 
 			// Update UI
 			sizeInput.value = size;
@@ -7233,7 +7244,7 @@ class CharacterSheetPage {
 
 		// Preset buttons (event delegation on container)
 		presetsContainer.addEventListener("click", (e) => {
-			const preset = e.target.closest(".charsheet__textsize-preset");
+			const preset = (/** @type {*} */ (e.target)).closest(".charsheet__textsize-preset");
 			if (!preset) return;
 			e.stopPropagation();
 			const size = parseInt(preset.dataset.size, 10);
@@ -7248,7 +7259,7 @@ class CharacterSheetPage {
 
 		// Close dropdown when clicking outside
 		document.addEventListener("click", (e) => {
-			if (!e.target.closest(".charsheet__header-textsize-controls")) {
+			if (!(/** @type {*} */ (e.target)).closest(".charsheet__header-textsize-controls")) {
 				dropdown.classList.remove("active");
 				btn.classList.remove("active");
 			}
@@ -7376,7 +7387,7 @@ class CharacterSheetPage {
 
 		// Close dropdown when clicking outside
 		document.addEventListener("click", (e) => {
-			if (!e.target.closest(".charsheet__header-font-controls")) {
+			if (!(/** @type {*} */ (e.target)).closest(".charsheet__header-font-controls")) {
 				dropdown.classList.remove("active");
 				btn.classList.remove("active");
 			}
@@ -7399,13 +7410,13 @@ class CharacterSheetPage {
 
 		// Update checkbox state from settings
 		const updateCheckbox = () => {
-			const isAnimated = this._state?.getSettings()?.animatedDice || false;
-			animatedCheckbox.checked = isAnimated;
+			const isAnimated = (/** @type {*} */ (this._state?.getSettings()))?.animatedDice || false;
+			(/** @type {*} */ (animatedCheckbox)).checked = isAnimated;
 		};
 
 		// Update theme button selection
 		const updateThemeSelection = () => {
-			const currentTheme = this._state?.getSettings()?.diceTheme || "standard";
+			const currentTheme = (/** @type {*} */ (this._state?.getSettings()))?.diceTheme || "standard";
 			themeButtons.classList.remove("active");
 			document.querySelector(`.charsheet__dice-theme-btn[data-theme="${currentTheme}"]`).classList.add("active");
 		};
@@ -7442,14 +7453,14 @@ class CharacterSheetPage {
 		// Animated dice checkbox
 		animatedCheckbox.addEventListener("change", (e) => {
 			e.stopPropagation();
-			this._state.setSetting("animatedDice", e.target.checked);
+			this._state.setSetting("animatedDice", (/** @type {*} */ (e.target)).checked);
 			this._saveCurrentCharacter();
 		});
 
 		// Theme buttons
 		themeButtons.addEventListener("click", (e) => {
 			e.stopPropagation();
-			const theme = e.currentTarget.dataset.theme;
+			const theme = (/** @type {*} */ (e.currentTarget)).dataset.theme;
 			this._state.setSetting("diceTheme", theme);
 			this._saveCurrentCharacter();
 			updateThemeSelection();
@@ -7457,7 +7468,7 @@ class CharacterSheetPage {
 
 		// Close dropdown when clicking outside
 		document.addEventListener("click", (e) => {
-			if (!e.target.closest(".charsheet__header-dice-controls")) {
+			if (!(/** @type {*} */ (e.target)).closest(".charsheet__header-dice-controls")) {
 				dropdown.classList.remove("active");
 				btn.classList.remove("active");
 			}
@@ -7660,10 +7671,10 @@ class CharacterSheetPage {
 					selectedSources.add(src);
 				}
 			});
-			[...sourceList.querySelectorAll("input")].forEach(function () {
-				const isSelected = selectedSources.has(this.value);
-				this.checked = isSelected;
-				this.parentElement.querySelector(".charsheet__source-multiselect-check").textContent = isSelected ? "✓" : "";
+			[...sourceList.querySelectorAll("input")].forEach((/** @type {*} */ input) => {
+				const isSelected = selectedSources.has(input.value);
+				input.checked = isSelected;
+				input.parentElement.querySelector(".charsheet__source-multiselect-check").textContent = isSelected ? "✓" : "";
 			});
 			updateSourceBtnText();
 			renderList(search.value);
@@ -7681,10 +7692,10 @@ class CharacterSheetPage {
 			if (selectedSources.size === 0) {
 				conditionSources.forEach(s => selectedSources.add(s));
 			}
-			[...sourceList.querySelectorAll("input")].forEach(function () {
-				const isSelected = selectedSources.has(this.value);
-				this.checked = isSelected;
-				this.parentElement.querySelector(".charsheet__source-multiselect-check").textContent = isSelected ? "✓" : "";
+			[...sourceList.querySelectorAll("input")].forEach((/** @type {*} */ input) => {
+				const isSelected = selectedSources.has(input.value);
+				input.checked = isSelected;
+				input.parentElement.querySelector(".charsheet__source-multiselect-check").textContent = isSelected ? "✓" : "";
 			});
 			updateSourceBtnText();
 			renderList(search.value);
@@ -7808,7 +7819,7 @@ class CharacterSheetPage {
 			});
 		};
 
-		search.addEventListener("input", MiscUtil.debounce((e) => renderList(e.target.value), 150));
+		search.addEventListener("input", MiscUtil.debounce((e) => renderList((/** @type {*} */ (e.target)).value), 150));
 		renderList();
 
 		const applyCondition = () => {
@@ -7869,7 +7880,7 @@ class CharacterSheetPage {
 	 */
 	_getExhaustionPenalty () {
 		const exhaustion = this._state.getExhaustion();
-		const rules = this._state.getSettings().exhaustionRules || "2024";
+		const rules = (/** @type {*} */ (this._state.getSettings())).exhaustionRules || "2024";
 		if (rules === "2024") {
 			return exhaustion * 2; // -2 per level in 2024 rules
 		}
@@ -7887,7 +7898,7 @@ class CharacterSheetPage {
 	 */
 	_getExhaustionDcPenalty () {
 		const exhaustion = this._state.getExhaustion();
-		const rules = this._state.getSettings().exhaustionRules || "2024";
+		const rules = (/** @type {*} */ (this._state.getSettings())).exhaustionRules || "2024";
 		if (rules === "thelemar") {
 			return exhaustion; // -1 per level in Thelemar rules
 		}
@@ -7900,7 +7911,7 @@ class CharacterSheetPage {
 	 * @param {Event} [opts.event] - The triggering event (to detect modifier keys)
 	 * @param {"advantage"|"disadvantage"|"normal"} [opts.mode] - Force a specific mode (from states)
 	 * @param {boolean} [opts.isAttack=false] - Whether this is an attack roll (does not use Thelemar crit rules)
-	 * @returns {{roll: number, roll1, roll2, mode, thelemar_critBonus, stateMode}} Roll result
+	 * @returns {{roll: number, roll1, roll2, mode, thelemar_critBonus}} Roll result
 	 */
 	_rollD20 ({event, mode, isAttack = false} = {}) {
 		const stateMode = mode; // Track the state-based mode separately
@@ -7908,8 +7919,8 @@ class CharacterSheetPage {
 		// Event modifier keys take priority over state-based mode
 		// This allows users to manually override advantage/disadvantage
 		if (event) {
-			if (event.shiftKey) mode = "advantage";
-			else if (event.ctrlKey || event.metaKey) mode = "disadvantage";
+			if ((/** @type {*} */ (event)).shiftKey) mode = "advantage";
+			else if ((/** @type {*} */ (event)).ctrlKey || (/** @type {*} */ (event)).metaKey) mode = "disadvantage";
 		}
 		mode = mode || "normal";
 
@@ -7927,7 +7938,7 @@ class CharacterSheetPage {
 
 		// Thelemar critical rolls rule: Nat 1 = -5, Nat 20 = +5 for non-attack rolls
 		let thelemar_critBonus = 0;
-		if (!isAttack && this._state.getSettings()?.thelemar_criticalRolls) {
+		if (!isAttack && (/** @type {*} */ (this._state.getSettings()))?.thelemar_criticalRolls) {
 			if (roll === 1) thelemar_critBonus = -5;
 			else if (roll === 20) thelemar_critBonus = 5;
 		}
@@ -7997,7 +8008,7 @@ class CharacterSheetPage {
 		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
 
-		const rollResult = this._rollD20({event, mode});
+		const rollResult = this._rollD20({event, mode: /** @type {*} */ (mode)});
 
 		// Apply minimum if set (e.g., Reliable Talent, custom abilities)
 		let effectiveRoll = rollResult.roll;
@@ -8030,7 +8041,7 @@ class CharacterSheetPage {
 		const sourcesStr = aggregated.sources.length > 0 ? ` [${aggregated.sources.join(", ")}]` : "";
 
 		// Show animated dice if enabled
-		if (this._state.getSettings()?.animatedDice) {
+		if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
 			await this._showAnimatedDice(20, rollResult.roll, rollResult.mode === "advantage", rollResult.mode === "disadvantage");
 		}
 
@@ -8110,7 +8121,7 @@ class CharacterSheetPage {
 		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
 		// If both, they cancel out - use normal (event can still override)
 
-		const rollResult = this._rollD20({event, mode});
+		const rollResult = this._rollD20({event, mode: /** @type {*} */ (mode)});
 
 		// Apply minimum if set
 		let effectiveRoll = rollResult.roll;
@@ -8141,7 +8152,7 @@ class CharacterSheetPage {
 		const sourcesStr = aggregated.sources.length > 0 ? ` [${aggregated.sources.join(", ")}]` : "";
 
 		// Show animated dice if enabled
-		if (this._state.getSettings()?.animatedDice) {
+		if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
 			await this._showAnimatedDice(20, rollResult.roll, rollResult.mode === "advantage", rollResult.mode === "disadvantage");
 		}
 
@@ -8174,7 +8185,7 @@ class CharacterSheetPage {
 		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
 
-		const rollResult = this._rollD20({event, mode});
+		const rollResult = this._rollD20({event, mode: /** @type {*} */ (mode)});
 
 		// Apply minimum if set (take the highest minimum from skill and check modifiers)
 		let effectiveRoll = rollResult.roll;
@@ -8211,7 +8222,7 @@ class CharacterSheetPage {
 		const sourcesStr = allSources.length > 0 ? ` [${allSources.join(", ")}]` : "";
 
 		// Show animated dice if enabled
-		if (this._state.getSettings()?.animatedDice) {
+		if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
 			await this._showAnimatedDice(20, rollResult.roll, rollResult.mode === "advantage", rollResult.mode === "disadvantage");
 		}
 
@@ -8310,7 +8321,7 @@ class CharacterSheetPage {
 
 		// Close menu when clicking elsewhere
 		const closeMenu = (e) => {
-			if (!e.target.closest(".charsheet__ability-menu")) {
+			if (!(/** @type {*} */ (e.target)).closest(".charsheet__ability-menu")) {
 				menu.remove();
 				document.removeEventListener("click", closeMenu);
 			}
@@ -8371,7 +8382,7 @@ class CharacterSheetPage {
 		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
 
-		const rollResult = this._rollD20({event, mode, isAttack: true});
+		const rollResult = this._rollD20({event, mode: /** @type {*} */ (mode), isAttack: true});
 		const attackTotal = rollResult.roll + attack.attackBonus - exhaustionPenalty;
 
 		// Check for crit/fumble
@@ -8461,7 +8472,7 @@ class CharacterSheetPage {
 			const breakdown = opts.subtitle || `1d20 (${opts.roll}) ${opts.modifier >= 0 ? "+" : ""}${opts.modifier}`;
 
 			// Check if animated dice is enabled and we have dice info
-			if (this._state.getSettings()?.animatedDice && opts.roll !== undefined) {
+			if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice && opts.roll !== undefined) {
 				this._showAnimatedDice(opts.diceType || 20, opts.roll, opts.isAdvantage, opts.isDisadvantage)
 					.then(() => {
 						this._showDiceResult(opts.title, opts.total, breakdown, opts.resultClass, opts.resultNote);
@@ -8481,7 +8492,7 @@ class CharacterSheetPage {
 	 * @returns {Promise} Resolves when animation is complete
 	 */
 	async _showAnimatedDice (diceType, finalValue, isAdvantage = false, isDisadvantage = false) {
-		const theme = this._state.getSettings()?.diceTheme || "standard";
+		const theme = (/** @type {*} */ (this._state.getSettings()))?.diceTheme || "standard";
 		const themeColors = {
 			// Classic themes
 			standard: {bg: "#dc3545", bgDark: "#a71d2a", pip: "#fff", text: "#fff", shadow: "rgba(220, 53, 69, 0.6)", glow: "rgba(220, 53, 69, 0.3)", accent: "#ff6b7a"},
@@ -8782,7 +8793,7 @@ class CharacterSheetPage {
 	/**
 	 * Generic stat breakdown renderer — renders components into a hover popup container
 	 * Uses same visual pattern as AC breakdown but works for any stat
-	 * @param {string} selector - jQuery selector for the breakdown container
+	 * @param {string} selector - selector for the breakdown container
 	 * @param {{total: number, components: Array<{type: string, name: string, value: number, icon: string, subtype?: string}>}} breakdown
 	 */
 	_renderStatBreakdown (selector, breakdown) {
@@ -8907,8 +8918,8 @@ class CharacterSheetPage {
 	 * @param {string} [displayName] - Optional display name override
 	 * @returns {string} HTML string for the link
 	 */
-	getHoverLink (page, name, source, hash = null, displayName = null) {
-		return CharacterSheetPage.getHoverLink(page, name, source, hash, displayName);
+	getHoverLink (page, name, source, hash = null, displayName = null, hrefOverride = null) {
+		return CharacterSheetPage.getHoverLink(page, name, source, hash, displayName, hrefOverride);
 	}
 
 	/**
@@ -9317,13 +9328,13 @@ class CharacterSheetPage {
 		</div>`;
 
 		// Thelemar homebrew rules
-		const currentThelemar_carryWeight = this._state.getSettings()?.thelemar_carryWeight || false;
-		const currentThelemar_jumping = this._state.getSettings()?.thelemar_jumping || false;
-		const currentThelemar_linguisticsBonus = this._state.getSettings()?.thelemar_linguisticsBonus || false;
-		const currentThelemar_criticalRolls = this._state.getSettings()?.thelemar_criticalRolls || false;
-		const currentThelemar_asiFeat = this._state.getSettings()?.thelemar_asiFeat || false;
-		const currentThelemar_itemUtilization = this._state.getSettings()?.thelemar_itemUtilization || false;
-		const currentThelemar_spellRarityCheck = this._state.getSettings()?.thelemar_spellRarity !== false;
+		const currentThelemar_carryWeight = (/** @type {*} */ (this._state.getSettings()))?.thelemar_carryWeight || false;
+		const currentThelemar_jumping = (/** @type {*} */ (this._state.getSettings()))?.thelemar_jumping || false;
+		const currentThelemar_linguisticsBonus = (/** @type {*} */ (this._state.getSettings()))?.thelemar_linguisticsBonus || false;
+		const currentThelemar_criticalRolls = (/** @type {*} */ (this._state.getSettings()))?.thelemar_criticalRolls || false;
+		const currentThelemar_asiFeat = (/** @type {*} */ (this._state.getSettings()))?.thelemar_asiFeat || false;
+		const currentThelemar_itemUtilization = (/** @type {*} */ (this._state.getSettings()))?.thelemar_itemUtilization || false;
+		const currentThelemar_spellRarityCheck = (/** @type {*} */ (this._state.getSettings()))?.thelemar_spellRarity !== false;
 
 		// Master toggle for all Thelemar rules (uses currentExhaustionRules from above)
 		const allThelemar = currentThelemar_carryWeight && currentThelemar_jumping && currentThelemar_linguisticsBonus && currentThelemar_criticalRolls && currentThelemar_asiFeat && currentThelemar_itemUtilization && currentThelemar_spellRarityCheck && currentExhaustionRules === "thelemar";
@@ -9400,7 +9411,7 @@ class CharacterSheetPage {
 		</div>`;
 
 		// Thelemar spell rarity/legality
-		const currentThelemar_spellRarity = this._state.getSettings()?.thelemar_spellRarity !== false;
+		const currentThelemar_spellRarity = (/** @type {*} */ (this._state.getSettings()))?.thelemar_spellRarity !== false;
 		const thelemar_spellRarity = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox charsheet__settings-option--sub">
 			<label class="charsheet__settings-checkbox-label">
 				<input type="checkbox" id="settings-thelemar-spell-rarity" ${currentThelemar_spellRarity ? "checked" : ""}>
@@ -9412,7 +9423,7 @@ class CharacterSheetPage {
 		</div>`;
 
 		// Spell list settings
-		const currentIncludeCoreSpells = this._state.getSettings()?.includeCoreSpellsForHomebrew !== false;
+		const currentIncludeCoreSpells = (/** @type {*} */ (this._state.getSettings()))?.includeCoreSpellsForHomebrew !== false;
 		const includeCoreSpells = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
 			<label class="charsheet__settings-checkbox-label">
 				<input type="checkbox" id="settings-include-core-spells" ${currentIncludeCoreSpells ? "checked" : ""}>
@@ -9424,7 +9435,7 @@ class CharacterSheetPage {
 		</div>`;
 
 		// Language settings
-		const currentAllowExoticLanguages = this._state.getSettings()?.allowExoticLanguages !== false;
+		const currentAllowExoticLanguages = (/** @type {*} */ (this._state.getSettings()))?.allowExoticLanguages !== false;
 		const allowExoticLanguages = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
 			<label class="charsheet__settings-checkbox-label">
 				<input type="checkbox" id="settings-allow-exotic-languages" ${currentAllowExoticLanguages ? "checked" : ""}>
@@ -9436,7 +9447,7 @@ class CharacterSheetPage {
 		</div>`;
 
 		// Ability score cap enforcement
-		const currentEnforceAbilityScoreCap = this._state.getSettings()?.enforceAbilityScoreCap === true;
+		const currentEnforceAbilityScoreCap = (/** @type {*} */ (this._state.getSettings()))?.enforceAbilityScoreCap === true;
 		const enforceAbilityScoreCap = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
 			<label class="charsheet__settings-checkbox-label">
 				<input type="checkbox" id="settings-enforce-ability-cap" ${currentEnforceAbilityScoreCap ? "checked" : ""}>
@@ -9448,7 +9459,7 @@ class CharacterSheetPage {
 		</div>`;
 
 		// Show all optional feature versions (no deduplication)
-		const currentShowAllOptFeatureVersions = this._state.getSettings()?.showAllOptFeatureVersions || false;
+		const currentShowAllOptFeatureVersions = (/** @type {*} */ (this._state.getSettings()))?.showAllOptFeatureVersions || false;
 		const showAllOptFeatureVersions = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
 			<label class="charsheet__settings-checkbox-label">
 				<input type="checkbox" id="settings-show-all-opt-versions" ${currentShowAllOptFeatureVersions ? "checked" : ""}>
@@ -9528,7 +9539,7 @@ class CharacterSheetPage {
 
 		// Priority source handler
 		modalInner.querySelector("#settings-priority-source").addEventListener("change", (e) => {
-			const value = e.target.value;
+			const value = (/** @type {*} */ (e.target)).value;
 			this._state.setPrioritySources(value ? [value] : null);
 		});
 
@@ -9605,7 +9616,7 @@ class CharacterSheetPage {
 
 		// Exhaustion rules handler
 		modalInner.querySelector("#settings-exhaustion-rules").addEventListener("change", (e) => {
-			this._state.setExhaustionRules(e.target.value);
+			this._state.setExhaustionRules((/** @type {*} */ (e.target)).value);
 			this._renderExhaustion();
 			this._renderCombatStats();
 			// Re-render spells tab if it exists to update spell save DC
@@ -9618,22 +9629,34 @@ class CharacterSheetPage {
 
 		// Thelemar master toggle handler
 		modalInner.querySelector("#settings-thelemar-all").addEventListener("change", (e) => {
-			const isChecked = e.target.checked;
-			// Set all sub-toggles
-			modalInner.querySelector("#settings-thelemar-carry").checked = isChecked.dispatchEvent(new Event("change"));
-			modalInner.querySelector("#settings-thelemar-jumping").checked = isChecked.dispatchEvent(new Event("change"));
-			modalInner.querySelector("#settings-thelemar-linguistics").checked = isChecked.dispatchEvent(new Event("change"));
-			modalInner.querySelector("#settings-thelemar-crits").checked = isChecked.dispatchEvent(new Event("change"));
-			modalInner.querySelector("#settings-thelemar-asifeat").checked = isChecked.dispatchEvent(new Event("change"));
-			modalInner.querySelector("#settings-thelemar-item-util").checked = isChecked.dispatchEvent(new Event("change"));
-			modalInner.querySelector("#settings-thelemar-spell-rarity").checked = isChecked.dispatchEvent(new Event("change"));
+			const isChecked = (/** @type {*} */ (e.target)).checked;
+			// Set all sub-toggles, then fire change events so per-setting handlers run
+			const subToggleIds = [
+				"#settings-thelemar-carry",
+				"#settings-thelemar-jumping",
+				"#settings-thelemar-linguistics",
+				"#settings-thelemar-crits",
+				"#settings-thelemar-asifeat",
+				"#settings-thelemar-item-util",
+				"#settings-thelemar-spell-rarity",
+			];
+			subToggleIds.forEach((sel) => {
+				const sub = /** @type {*} */ (modalInner.querySelector(sel));
+				if (!sub) return;
+				sub.checked = isChecked;
+				sub.dispatchEvent(new Event("change"));
+			});
 			// Also set exhaustion rules
-			modalInner.querySelector("#settings-exhaustion-rules").value = isChecked ? "thelemar" : "2024".dispatchEvent(new Event("change"));
+			const exhaustionSel = /** @type {*} */ (modalInner.querySelector("#settings-exhaustion-rules"));
+			if (exhaustionSel) {
+				exhaustionSel.value = isChecked ? "thelemar" : "2024";
+				exhaustionSel.dispatchEvent(new Event("change"));
+			}
 		});
 
 		// Thelemar carry weight handler
 		modalInner.querySelector("#settings-thelemar-carry").addEventListener("change", (e) => {
-			this._state.setSetting("thelemar_carryWeight", e.target.checked);
+			this._state.setSetting("thelemar_carryWeight", (/** @type {*} */ (e.target)).checked);
 			// Update encumbrance display
 			this._inventory?._updateEncumbrance?.();
 			// Also update combat stats which shows carry capacity
@@ -9643,24 +9666,24 @@ class CharacterSheetPage {
 
 		// Thelemar jumping rules handler
 		modalInner.querySelector("#settings-thelemar-jumping").addEventListener("change", (e) => {
-			this._state.setSetting("thelemar_jumping", e.target.checked);
+			this._state.setSetting("thelemar_jumping", (/** @type {*} */ (e.target)).checked);
 			this._renderCombatStats();
 			updateMasterToggleState();
 		});
 
 		// Thelemar linguistics bonus handler
 		modalInner.querySelector("#settings-thelemar-linguistics").addEventListener("change", (e) => {
-			this._state.setSetting("thelemar_linguisticsBonus", e.target.checked);
+			this._state.setSetting("thelemar_linguisticsBonus", (/** @type {*} */ (e.target)).checked);
 
 			// Auto-add/remove Linguistics custom skill when setting is toggled
 			const hasLinguisticsSkill = this._state.getCustomSkills().some(
 				s => s.name.toLowerCase() === "linguistics",
 			);
 
-			if (e.target.checked && !hasLinguisticsSkill) {
+			if ((/** @type {*} */ (e.target)).checked && !hasLinguisticsSkill) {
 				// Add Linguistics skill when setting is enabled
 				this._state.addCustomSkill("Linguistics", "int");
-			} else if (!e.target.checked && hasLinguisticsSkill) {
+			} else if (!(/** @type {*} */ (e.target)).checked && hasLinguisticsSkill) {
 				// Remove Linguistics skill when setting is disabled
 				this._state.removeCustomSkill("Linguistics");
 			}
@@ -9671,41 +9694,41 @@ class CharacterSheetPage {
 
 		// Thelemar critical rolls handler
 		modalInner.querySelector("#settings-thelemar-crits").addEventListener("change", (e) => {
-			this._state.setSetting("thelemar_criticalRolls", e.target.checked);
+			this._state.setSetting("thelemar_criticalRolls", (/** @type {*} */ (e.target)).checked);
 			updateMasterToggleState();
 		});
 
 		// Thelemar ASI+Feat at level 4 handler
 		modalInner.querySelector("#settings-thelemar-asifeat").addEventListener("change", (e) => {
-			this._state.setSetting("thelemar_asiFeat", e.target.checked);
+			this._state.setSetting("thelemar_asiFeat", (/** @type {*} */ (e.target)).checked);
 			updateMasterToggleState();
 		});
 
 		// Thelemar item utilization handler
 		modalInner.querySelector("#settings-thelemar-item-util").addEventListener("change", (e) => {
-			this._state.setSetting("thelemar_itemUtilization", e.target.checked);
+			this._state.setSetting("thelemar_itemUtilization", (/** @type {*} */ (e.target)).checked);
 			updateMasterToggleState();
 		});
 
 		// Thelemar spell rarity handler
 		modalInner.querySelector("#settings-thelemar-spell-rarity").addEventListener("change", (e) => {
-			this._state.setSetting("thelemar_spellRarity", e.target.checked);
+			this._state.setSetting("thelemar_spellRarity", (/** @type {*} */ (e.target)).checked);
 			updateMasterToggleState();
 		});
 
 		// Include core spells for homebrew classes handler
 		modalInner.querySelector("#settings-include-core-spells").addEventListener("change", (e) => {
-			this._state.setSetting("includeCoreSpellsForHomebrew", e.target.checked);
+			this._state.setSetting("includeCoreSpellsForHomebrew", (/** @type {*} */ (e.target)).checked);
 		});
 
 		// Allow exotic languages handler
 		modalInner.querySelector("#settings-allow-exotic-languages").addEventListener("change", (e) => {
-			this._state.setSetting("allowExoticLanguages", e.target.checked);
+			this._state.setSetting("allowExoticLanguages", (/** @type {*} */ (e.target)).checked);
 		});
 
 		// Ability score cap handler
 		modalInner.querySelector("#settings-enforce-ability-cap").addEventListener("change", (e) => {
-			this._state.setSetting("enforceAbilityScoreCap", e.target.checked);
+			this._state.setSetting("enforceAbilityScoreCap", (/** @type {*} */ (e.target)).checked);
 			// Re-render stats since ability scores may change
 			this._renderAbilities();
 			this._renderCombatStats();
@@ -9714,7 +9737,7 @@ class CharacterSheetPage {
 
 		// Show all optional feature versions handler
 		modalInner.querySelector("#settings-show-all-opt-versions").addEventListener("change", (e) => {
-			this._state.setSetting("showAllOptFeatureVersions", e.target.checked);
+			this._state.setSetting("showAllOptFeatureVersions", (/** @type {*} */ (e.target)).checked);
 		});
 	}
 
@@ -9810,7 +9833,7 @@ class CharacterSheetPage {
 	 * This is called when loading a character to ensure data consistency.
 	 */
 	_ensureLinguisticsSkillIfNeeded () {
-		const settings = this._state.getSettings();
+		const settings = (/** @type {*} */ (this._state.getSettings()));
 		if (!settings?.thelemar_linguisticsBonus) return;
 
 		const hasLinguisticsSkill = this._state.getCustomSkills().some(
@@ -10878,14 +10901,11 @@ class CharacterSheetPage {
 
 	/**
 	 * Show a searchable language picker modal
-	 * @param {Object} opts - Options
-	 * @param {Array} opts.exclude - Languages to exclude (already known)
-	 * @param {string} opts.title - Modal title
-	 * @param {number} opts.count - Number of languages to select (default: 1)
+	 * @param {*} [opts] - Options
 	 * @returns {Promise<Array|null>} Array of selected language names or null if cancelled
 	 */
 	async showLanguagePicker (opts = {}) {
-		const {exclude = [], title = "Choose a Language", count = 1} = opts;
+		const {exclude = [], title = "Choose a Language", count = 1} = /** @type {*} */ (opts);
 
 		// Get current languages to exclude
 		const currentLanguages = this._state.getLanguages() || [];
@@ -11539,12 +11559,12 @@ class CharacterSheetPage {
 				`});
 
 				labelEl.querySelector("input").addEventListener("change", (e) => {
-					if (e.target.checked) {
+					if ((/** @type {*} */ (e.target)).checked) {
 						if (selectedMasteries.length < maxMasteries) {
 							selectedMasteries.push(weaponKey);
 							labelEl.style.background = "var(--rgb-bg-highlight)";
 						} else {
-							e.target.checked = false;
+							(/** @type {*} */ (e.target)).checked = false;
 							JqueryUtil.doToast({type: "warning", content: `You can only choose ${maxMasteries} weapon masteries.`});
 						}
 					} else {
@@ -11552,7 +11572,7 @@ class CharacterSheetPage {
 						if (idx > -1) selectedMasteries.splice(idx, 1);
 						labelEl.style.background = "";
 					}
-					document.getElementById("mastery-count").textContent = selectedMasteries.length;
+					(/** @type {*} */ (document.getElementById("mastery-count"))).textContent = selectedMasteries.length;
 				});
 
 				checkboxesEl.append(labelEl);
@@ -11645,7 +11665,7 @@ window.addEventListener("load", async () => {
 		const charSheet = new CharacterSheetPage();
 		await charSheet.pInit();
 
-		window.charSheet = charSheet; // For debugging
+		(/** @type {*} */ (window)).charSheet = charSheet; // For debugging
 
 		window.dispatchEvent(new Event("toolsLoaded"));
 	} catch (e) {
