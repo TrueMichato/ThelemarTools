@@ -70,6 +70,7 @@ class CharacterSheetPage {
 		await this._pLoadCharacters();
 
 		// Initialize sub-modules with error handling
+		/* eslint-disable no-console */
 		try {
 			this._builder = new CharacterSheetBuilder(this);
 		} catch (e) { console.error("Failed to init builder:", e); }
@@ -135,6 +136,7 @@ class CharacterSheetPage {
 			this._respec = new CharacterSheetRespec({page: this, state: this._state});
 			this._respec.init();
 		} catch (e) { console.error("Failed to init respec:", e); }
+		/* eslint-enable no-console */
 
 		// Pass loaded data to modules
 		if (this._inventory) this._inventory.setItems(this._itemsData);
@@ -178,6 +180,7 @@ class CharacterSheetPage {
 
 					localStorage.setItem("charsheet-characters", JSON.stringify(characters));
 				} catch (err) {
+					// eslint-disable-next-line no-console
 					console.error("Emergency save on unload failed:", err);
 				}
 			}
@@ -200,6 +203,7 @@ class CharacterSheetPage {
 
 					localStorage.setItem("charsheet-characters", JSON.stringify(characters));
 				} catch (err) {
+					// eslint-disable-next-line no-console
 					console.error("Emergency save on pagehide failed:", err);
 				}
 			}
@@ -345,6 +349,7 @@ class CharacterSheetPage {
 			}
 		} catch (e) {
 			// Non-critical - just means some hover links may not work
+			// eslint-disable-next-line no-console
 			console.warn("[CharSheet] Failed to pre-cache entity data for hovers:", e);
 		}
 	}
@@ -378,6 +383,7 @@ class CharacterSheetPage {
 						version.__prop = "race";
 					}
 				} catch (e) {
+					// eslint-disable-next-line no-console
 					console.warn("[CharSheet] Failed to expand race versions for:", race.name, e);
 				}
 			}
@@ -431,6 +437,7 @@ class CharacterSheetPage {
 					}
 				} catch (e) {
 					// Log but don't fail - this subrace just won't work
+					// eslint-disable-next-line no-console
 					console.warn(`[CharSheet] Skipping orphan subrace "${subrace.name}" (${subrace.source}): parent race not found`);
 					failedSubraces.push(`${subrace.name}|${subrace.source}`);
 				}
@@ -2317,6 +2324,7 @@ class CharacterSheetPage {
 			// Show saved indicator
 			this._updateSaveIndicator("saved");
 		} catch (err) {
+			// eslint-disable-next-line no-console
 			console.error("Save error:", err);
 			this._updateSaveIndicator("error");
 		}
@@ -5967,6 +5975,7 @@ class CharacterSheetPage {
 				}
 			}
 		} catch (e) {
+			// eslint-disable-next-line no-console
 			console.warn("[CharSheet] Error creating feature hover link:", e);
 		}
 		// Fallback: plain name
@@ -7707,7 +7716,7 @@ class CharacterSheetPage {
 				// Check text filter
 				if (filter) {
 					return cond.name.toLowerCase().includes(filter.toLowerCase())
-					       || cond.sourceAbbr.toLowerCase().includes(filter.toLowerCase());
+						|| cond.sourceAbbr.toLowerCase().includes(filter.toLowerCase());
 				}
 				return true;
 			});
@@ -8938,6 +8947,7 @@ class CharacterSheetPage {
 
 			return `<a href="${href}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${name}</a>`;
 		} catch (e) {
+			// eslint-disable-next-line no-console
 			console.error("[CharSheet] getSpellHoverLink error:", e);
 			return this.getHoverLink(UrlUtil.PG_SPELLS, name, source);
 		}
@@ -9101,6 +9111,7 @@ class CharacterSheetPage {
 			const link = `<a href="${href}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${displayName || name}</a>`;
 			return link;
 		} catch (e) {
+			// eslint-disable-next-line no-console
 			console.error("[CharSheet] getHoverLink error:", e);
 			return displayName || name;
 		}
@@ -9121,6 +9132,7 @@ class CharacterSheetPage {
 			});
 			return `<a href="${UrlUtil.PG_CLASSES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${subclass.name}</a>`;
 		} catch (e) {
+			// eslint-disable-next-line no-console
 			console.error("[CharSheet] getSubclassHoverLink error:", e);
 			return subclass.name; // Fallback to just the name
 		}
@@ -9170,6 +9182,7 @@ class CharacterSheetPage {
 				hash,
 			});
 		} catch (e) {
+			// eslint-disable-next-line no-console
 			console.warn("[CharSheet] Error getting action hover attrs:", e);
 			return `title="${actionName}"`;
 		}
@@ -10189,7 +10202,6 @@ class CharacterSheetPage {
 				conditionalInput.value = "";
 				customSkillInput.value = "";
 				customSkillAbilitySelect.value = "";
-				formEl;
 				delete formEl.dataset.editingId;
 				formEl.querySelector(".charsheet__modifier-form-title-text").textContent = "Add Modifier";
 			}
@@ -10892,150 +10904,152 @@ class CharacterSheetPage {
 
 		const selectedLanguages = [];
 
-		return new Promise(async (resolve) => {
-			const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-				title: count > 1 ? `${title} (Choose ${count})` : title,
-				isMinHeight0: true,
-				isWidth100: true,
-				cbClose: () => resolve(selectedLanguages.length === count ? selectedLanguages : null),
-			});
-
-			modalInner.insertAdjacentHTML("beforeend", `
-				<div class="charsheet__language-picker-header mb-3" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.1)); border-radius: 8px; padding: 12px;">
-					<div class="ve-flex ve-flex-v-center" style="gap: 10px;">
-						<span style="font-size: 2em;">🗣️</span>
-						<div>
-							<div class="bold" style="font-size: 1.1em;">${title}</div>
-							<div class="ve-muted ve-small">Select ${count === 1 ? "a language" : `${count} languages`} to learn. Search to filter.</div>
-						</div>
-					</div>
-				</div>
-			`);
-
-			// Search filter
-			const searchContainer = e_({outer: `<div class="ve-flex ve-flex-v-center mb-3" style="gap: 8px;"></div>`}); modalInner.append(searchContainer);
-			searchContainer.insertAdjacentHTML("beforeend", `<span style="font-size: 1.2em;">🔍</span>`);
-			const searchEl = e_({outer: `<input type="text" class="ve-form-control" placeholder="Search languages..." style="flex: 1;">`}); searchContainer.append(searchEl);
-
-			// Selection status
-			const statusEl = e_({outer: `<div class="ve-flex ve-flex-v-center mb-2" style="gap: 8px;">
-				<span class="ve-muted">Selected: </span>
-				<span class="badge" style="background: rgba(var(--rgb-link-rgb), 0.15); color: var(--rgb-link);">
-					<span class="lang-count">0</span>/${count}
-				</span>
-				<span class="selected-names ve-muted ve-small"></span>
-			</div>`}); modalInner.append(statusEl);
-
-			// Languages grid
-			const listEl = e_({outer: `<div class="charsheet__language-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; max-height: 400px; overflow-y: auto; padding: 4px;"></div>`}); modalInner.append(listEl);
-
-			// Category icons/colors
-			const categoryInfo = {
-				Standard: {emoji: "📜", color: "rgba(59, 130, 246, 0.1)"},
-				Exotic: {emoji: "✨", color: "rgba(139, 92, 246, 0.1)"},
-				Secret: {emoji: "🤫", color: "rgba(239, 68, 68, 0.1)"},
-				Homebrew: {emoji: "🍺", color: "rgba(245, 158, 11, 0.1)"},
-			};
-
-			const updateStatus = () => {
-				statusEl.querySelector(".lang-count").textContent = selectedLanguages.length;
-				statusEl.querySelector(".selected-names").textContent = selectedLanguages.length ? `(${selectedLanguages.join(", ")})` : "";
-			};
-
-			const renderList = (filter = "") => {
-				listEl.innerHTML = "";
-				const filtered = allLanguages.filter(l =>
-					l.name.toLowerCase().includes(filter.toLowerCase())
-					&& !selectedLanguages.includes(l.name),
-				);
-
-				if (filtered.length === 0 && selectedLanguages.length === 0) {
-					listEl.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-text-center py-3" style="grid-column: 1 / -1;">No languages match your search</div>`);
-					return;
-				}
-
-				// Group by category
-				const byCategory = {};
-				filtered.forEach(l => {
-					if (!byCategory[l.category]) byCategory[l.category] = [];
-					byCategory[l.category].push(l);
+		return new Promise((resolve) => {
+			(async () => {
+				const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+					title: count > 1 ? `${title} (Choose ${count})` : title,
+					isMinHeight0: true,
+					isWidth100: true,
+					cbClose: () => resolve(selectedLanguages.length === count ? selectedLanguages : null),
 				});
 
-				// Render each category
-				for (const category of ["Standard", "Exotic", "Secret", "Homebrew"]) {
-					const langs = byCategory[category];
-					if (!langs?.length) continue;
-
-					const info = categoryInfo[category];
-
-					// Category header
-					listEl.insertAdjacentHTML("beforeend", `<div style="grid-column: 1 / -1; margin-top: 8px; font-weight: bold; color: var(--rgb-link); display: flex; align-items: center; gap: 6px;">
-						<span>${info.emoji}</span> ${category} Languages
-					</div>`);
-
-					langs.forEach(lang => {
-						const cardEl = e_({outer: `
-							<div class="charsheet__language-card" style="
-								border: 2px solid var(--rgb-border-grey-muted);
-								border-radius: 8px;
-								padding: 10px;
-								cursor: pointer;
-								transition: all 0.2s ease;
-								background: ${info.color};
-								display: flex;
-								align-items: center;
-								gap: 8px;
-							">
-								<span style="font-size: 1.3em;">${info.emoji}</span>
-								<span class="bold">${lang.name}</span>
+				modalInner.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__language-picker-header mb-3" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.1)); border-radius: 8px; padding: 12px;">
+						<div class="ve-flex ve-flex-v-center" style="gap: 10px;">
+							<span style="font-size: 2em;">🗣️</span>
+							<div>
+								<div class="bold" style="font-size: 1.1em;">${title}</div>
+								<div class="ve-muted ve-small">Select ${count === 1 ? "a language" : `${count} languages`} to learn. Search to filter.</div>
 							</div>
-						`});
+						</div>
+					</div>
+				`);
 
-						cardEl.addEventListener("mouseenter", function () {
-							Object.assign(this.style, {
-								"border-color": "var(--rgb-link)",
-								"transform": "translateY(-2px)",
-								"box-shadow": "0 4px 8px rgba(0, 0, 0, 0.1)",
-							});
-						});
-						cardEl.addEventListener("mouseleave", function () {
-							Object.assign(this.style, {
-								"border-color": "var(--rgb-border-grey-muted)",
-								"transform": "translateY(0)",
-								"box-shadow": "none",
-							});
-						});
-						cardEl.addEventListener("click", function () {
-							if (selectedLanguages.length < count) {
-								selectedLanguages.push(lang.name);
-								updateStatus();
-								if (selectedLanguages.length === count) {
-									doClose();
-								} else {
-									renderList(searchEl.value);
-								}
-							}
-						});
+				// Search filter
+				const searchContainer = e_({outer: `<div class="ve-flex ve-flex-v-center mb-3" style="gap: 8px;"></div>`}); modalInner.append(searchContainer);
+				searchContainer.insertAdjacentHTML("beforeend", `<span style="font-size: 1.2em;">🔍</span>`);
+				const searchEl = e_({outer: `<input type="text" class="ve-form-control" placeholder="Search languages..." style="flex: 1;">`}); searchContainer.append(searchEl);
 
-						listEl.append(cardEl);
+				// Selection status
+				const statusEl = e_({outer: `<div class="ve-flex ve-flex-v-center mb-2" style="gap: 8px;">
+					<span class="ve-muted">Selected: </span>
+					<span class="badge" style="background: rgba(var(--rgb-link-rgb), 0.15); color: var(--rgb-link);">
+						<span class="lang-count">0</span>/${count}
+					</span>
+					<span class="selected-names ve-muted ve-small"></span>
+				</div>`}); modalInner.append(statusEl);
+
+				// Languages grid
+				const listEl = e_({outer: `<div class="charsheet__language-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; max-height: 400px; overflow-y: auto; padding: 4px;"></div>`}); modalInner.append(listEl);
+
+				// Category icons/colors
+				const categoryInfo = {
+					Standard: {emoji: "📜", color: "rgba(59, 130, 246, 0.1)"},
+					Exotic: {emoji: "✨", color: "rgba(139, 92, 246, 0.1)"},
+					Secret: {emoji: "🤫", color: "rgba(239, 68, 68, 0.1)"},
+					Homebrew: {emoji: "🍺", color: "rgba(245, 158, 11, 0.1)"},
+				};
+
+				const updateStatus = () => {
+					statusEl.querySelector(".lang-count").textContent = selectedLanguages.length;
+					statusEl.querySelector(".selected-names").textContent = selectedLanguages.length ? `(${selectedLanguages.join(", ")})` : "";
+				};
+
+				const renderList = (filter = "") => {
+					listEl.innerHTML = "";
+					const filtered = allLanguages.filter(l =>
+						l.name.toLowerCase().includes(filter.toLowerCase())
+						&& !selectedLanguages.includes(l.name),
+					);
+
+					if (filtered.length === 0 && selectedLanguages.length === 0) {
+						listEl.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-text-center py-3" style="grid-column: 1 / -1;">No languages match your search</div>`);
+						return;
+					}
+
+					// Group by category
+					const byCategory = {};
+					filtered.forEach(l => {
+						if (!byCategory[l.category]) byCategory[l.category] = [];
+						byCategory[l.category].push(l);
 					});
-				}
-			};
 
-			// Confirm button
-			const footerEl = e_({outer: `<div class="ve-flex ve-flex-h-right mt-3"></div>`}); modalInner.append(footerEl);
-			const confirmBtn = e_({outer: `<button class="ve-btn ve-btn-primary" ${count > 1 ? "disabled" : ""}>Confirm Selection</button>`}); footerEl.append(confirmBtn);
-			confirmBtn.addEventListener("click", () => {
-				if (selectedLanguages.length === count || count === 1) {
-					doClose();
-				}
-			});
+					// Render each category
+					for (const category of ["Standard", "Exotic", "Secret", "Homebrew"]) {
+						const langs = byCategory[category];
+						if (!langs?.length) continue;
 
-			searchEl.addEventListener("input", () => renderList(searchEl.value));
-			renderList();
+						const info = categoryInfo[category];
 
-			// Auto-focus search
-			setTimeout(() => searchEl.focus(), 100);
+						// Category header
+						listEl.insertAdjacentHTML("beforeend", `<div style="grid-column: 1 / -1; margin-top: 8px; font-weight: bold; color: var(--rgb-link); display: flex; align-items: center; gap: 6px;">
+							<span>${info.emoji}</span> ${category} Languages
+						</div>`);
+
+						langs.forEach(lang => {
+							const cardEl = e_({outer: `
+								<div class="charsheet__language-card" style="
+									border: 2px solid var(--rgb-border-grey-muted);
+									border-radius: 8px;
+									padding: 10px;
+									cursor: pointer;
+									transition: all 0.2s ease;
+									background: ${info.color};
+									display: flex;
+									align-items: center;
+									gap: 8px;
+								">
+									<span style="font-size: 1.3em;">${info.emoji}</span>
+									<span class="bold">${lang.name}</span>
+								</div>
+							`});
+
+							cardEl.addEventListener("mouseenter", function () {
+								Object.assign(this.style, {
+									"border-color": "var(--rgb-link)",
+									"transform": "translateY(-2px)",
+									"box-shadow": "0 4px 8px rgba(0, 0, 0, 0.1)",
+								});
+							});
+							cardEl.addEventListener("mouseleave", function () {
+								Object.assign(this.style, {
+									"border-color": "var(--rgb-border-grey-muted)",
+									"transform": "translateY(0)",
+									"box-shadow": "none",
+								});
+							});
+							cardEl.addEventListener("click", function () {
+								if (selectedLanguages.length < count) {
+									selectedLanguages.push(lang.name);
+									updateStatus();
+									if (selectedLanguages.length === count) {
+										doClose();
+									} else {
+										renderList(searchEl.value);
+									}
+								}
+							});
+
+							listEl.append(cardEl);
+						});
+					}
+				};
+
+				// Confirm button
+				const footerEl = e_({outer: `<div class="ve-flex ve-flex-h-right mt-3"></div>`}); modalInner.append(footerEl);
+				const confirmBtn = e_({outer: `<button class="ve-btn ve-btn-primary" ${count > 1 ? "disabled" : ""}>Confirm Selection</button>`}); footerEl.append(confirmBtn);
+				confirmBtn.addEventListener("click", () => {
+					if (selectedLanguages.length === count || count === 1) {
+						doClose();
+					}
+				});
+
+				searchEl.addEventListener("input", () => renderList(searchEl.value));
+				renderList();
+
+				// Auto-focus search
+				setTimeout(() => searchEl.focus(), 100);
+			})();
 		});
 	}
 
@@ -11635,6 +11649,7 @@ window.addEventListener("load", async () => {
 
 		window.dispatchEvent(new Event("toolsLoaded"));
 	} catch (e) {
+		// eslint-disable-next-line no-console
 		console.error("Failed to initialize character sheet:", e);
 		document.querySelector("#charsheet-loading-overlay")?.remove();
 		JqueryUtil.doToast({type: "danger", content: `Failed to initialize: ${e.message}`});
