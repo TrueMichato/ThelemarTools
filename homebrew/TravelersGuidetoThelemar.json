@@ -27917,21 +27917,6 @@
 			]
 		},
 		{
-			"name": "Combat Methods (Heroic Soul)",
-			"source": "TGTT",
-			"className": "Sorcerer",
-			"classSource": "TGTT",
-			"subclassShortName": "Heroic Soul",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"At 3rd level, you gain the ability to use combat methods. You gain proficiency in the {@filter Arcane Knight|combatmethods|tradition=Arcane Knight}, and {@filter Gallant Heart|combatmethods|tradition=Gallant Heart} combat traditions. You learn 2 methods of your choice from these traditions.",
-				"You gain an {@variantrule stamina|tgtt} pool equal to twice your proficiency bonus, regaining any spent stamina at the end of a short or long rest. You use your methods by spending points from your stamina pool. The Methods Known column of the Combat Methods table shows when you learn more methods from a tradition you are proficient with, while the Method Degree column shows the highest degree you can select methods from at a given level.",
-				"Additionally, whenever you learn a new method, you can choose one of the methods you know and replace it with another method of the same degree from a tradition you are proficient with.",
-				"You can use your spellcasting ability modifier and your spellcasting DC in place of Strength or Dexterity and your method DC when using combat methods."
-			]
-		},
-		{
 			"name": "Combat Methods (Battle Master)",
 			"source": "TGTT",
 			"className": "Fighter",
@@ -27941,21 +27926,6 @@
 			"level": 3,
 			"entries": [
 				"At 3rd level, you gain proficiency in 2 extra {@filter combat traditions|combatmethods} of your choice. You learn one additional method from these traditions."
-			]
-		},
-		{
-			"name": "Combat Methods (Swords Bard)",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Swords Bard",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"At 3rd level, you gain the ability to use combat methods. You gain proficiency in the {@filter Comedic Jabs|combatmethods|tradition=Comedic Jabs} combat tradition. You learn 2 methods of your choice from this tradition.",
-				"You gain an {@variantrule stamina|tgtt} pool equal to twice your proficiency bonus, regaining any spent stamina at the end of a short or long rest. You use your methods by spending points from your stamina pool. The Methods Known column of the Combat Methods table shows when you learn more methods from a tradition you are proficient with, while the Method Degree column shows the highest degree you can select methods from at a given level.",
-				"Additionally, whenever you learn a new method, you can choose one of the methods you know and replace it with another method of the same degree from a tradition you are proficient with.",
-				"You can use your spellcasting ability modifier and your spellcasting DC in place of Strength or Dexterity and your method DC when using combat methods."
 			]
 		},
 		{
@@ -27995,21 +27965,6 @@
 			]
 		},
 		{
-			"name": "Combat Methods (Hexblade Warlock)",
-			"source": "TGTT",
-			"className": "Warlock",
-			"classSource": "TGTT",
-			"subclassShortName": "Hexblade Warlock",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"At 3rd level, you gain the ability to use combat methods. You gain proficiency in the {@filter Adamant Mountain|combatmethods|tradition=Adamant Mountain}, {@filter Arcane Knight|combatmethods|tradition=Arcane Knight}, {@filter Eldritch Blackguard|combatmethods|tradition=Eldritch Blackguard}, {@filter Mirror’s Glint|combatmethods|tradition=Mirror’s Glint}, {@filter Spirited Steed|combatmethods|tradition=Spirited Steed}, {@filter Tempered Iron|combatmethods|tradition=Tempered Iron}, and {@filter Unending Wheel|combatmethods|tradition=Unending Wheel} combat traditions. You learn 2 methods of your choice from these traditions.",
-				"You gain an {@variantrule stamina|tgtt} pool equal to twice your proficiency bonus, regaining any spent stamina at the end of a short or long rest. You use your methods by spending points from your stamina pool. The Methods Known column of the Combat Methods table shows when you learn more methods from a tradition you are proficient with, while the Method Degree column shows the highest degree you can select methods from at a given level.",
-				"Additionally, whenever you learn a new method, you can choose one of the methods you know and replace it with another method of the same degree from a tradition you are proficient with.",
-				"You can use your spellcasting ability modifier and your spellcasting DC in place of Strength or Dexterity and your method DC when using combat methods."
-			]
-		},
-		{
 			"name": "Combat Methods (Arcane Archer)",
 			"source": "TGTT",
 			"className": "Fighter",
@@ -28034,21 +27989,6 @@
 			]
 		},
 		{
-			"name": "Combat Methods (Valor Bard)",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Valor Bard",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"At 3rd level, you gain the ability to use combat methods. You gain proficiency in the {@filter Comedic Jabs|combatmethods|tradition=Comedic Jabs} combat tradition. You learn 2 methods of your choice from this tradition.",
-				"You gain an {@variantrule stamina|tgtt} pool equal to twice your proficiency bonus, regaining any spent stamina at the end of a short or long rest. You use your methods by spending points from your stamina pool. The Methods Known column of the Combat Methods table shows when you learn more methods from a tradition you are proficient with, while the Method Degree column shows the highest degree you can select methods from at a given level.",
-				"Additionally, whenever you learn a new method, you can choose one of the methods you know and replace it with another method of the same degree from a tradition you are proficient with.",
-				"You can use your spellcasting ability modifier and your spellcasting DC in place of Strength or Dexterity and your method DC when using combat methods."
-			]
-		},
-		{
 			"name": "Combat Methods (Cavalier)",
 			"source": "TGTT",
 			"className": "Fighter",
@@ -28058,21 +27998,6 @@
 			"level": 3,
 			"entries": [
 				"At 3rd level, you gain proficiency in the {@filter Gallant Heart|combatmethods|tradition=Gallant Heart}, and {@filter Spirited Steed|combatmethods|tradition=Spirited Steed} combat traditions. You learn one additional method from these traditions."
-			]
-		},
-		{
-			"name": "Combat Methods (College of Jesters)",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "College of Jesters",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"At 3rd level, you gain the ability to use combat methods. You gain proficiency in the {@filter Comedic Jabs|combatmethods|tradition=Comedic Jabs} combat tradition. You learn 2 methods of your choice from this tradition.",
-				"You gain an {@variantrule stamina|tgtt} pool equal to twice your proficiency bonus, regaining any spent stamina at the end of a short or long rest. You use your methods by spending points from your stamina pool. The Methods Known column of the Combat Methods table shows when you learn more methods from a tradition you are proficient with, while the Method Degree column shows the highest degree you can select methods from at a given level.",
-				"Additionally, whenever you learn a new method, you can choose one of the methods you know and replace it with another method of the same degree from a tradition you are proficient with.",
-				"You can use your spellcasting ability modifier and your spellcasting DC in place of Strength or Dexterity and your method DC when using combat methods."
 			]
 		},
 		{
@@ -28097,21 +28022,6 @@
 			"level": 3,
 			"entries": [
 				"At 3rd level, you gain proficiency in the {@filter Adamant Mountain|combatmethods|tradition=Adamant Mountain}, or {@filter Tempered Iron|combatmethods|tradition=Tempered Iron} combat traditions. You learn one additional method from this tradition."
-			]
-		},
-		{
-			"name": "Combat Methods (Bladesinger Wizard)",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"subclassShortName": "Bladesinger",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"At 3rd level, you gain the ability to use combat methods. You gain proficiency in the {@filter Arcane Knight|combatmethods|tradition=Arcane Knight} combat tradition. You learn 2 methods of your choice from this tradition.",
-				"You gain an {@variantrule stamina|tgtt} pool equal to twice your proficiency bonus, regaining any spent stamina at the end of a short or long rest. You use your methods by spending points from your stamina pool. The Methods Known column of the Combat Methods table shows when you learn more methods from a tradition you are proficient with, while the Method Degree column shows the highest degree you can select methods from at a given level.",
-				"Additionally, whenever you learn a new method, you can choose one of the methods you know and replace it with another method of the same degree from a tradition you are proficient with.",
-				"You can use your spellcasting ability modifier and your spellcasting DC in place of Strength or Dexterity and your method DC when using combat methods."
 			]
 		},
 		{

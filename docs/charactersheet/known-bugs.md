@@ -261,25 +261,7 @@ guard the upper half of the table.
 
 ### CS-BUG-011 — TGTT Heroic Soul Sorcerer "Stamina" / Combat Methods pool not surfaced as a resource
 
-**Status**: Open / suspected. The Heroic Soul Sorcerer subclass
-grants a Combat Methods Stamina pool at L3 (size = 2 × proficiency
-bonus, restores on short or long rest). The character sheet does
-not expose any resource named "Stamina" — `getResource("Stamina")`
-returns `-1` at L3.
-
-**Investigation hints**:
-- Find the actual key/name the Combat Methods feature pipeline uses
-  (could be "Combat Methods", "Stamina Points", subclass-prefixed,
-  or not registered at all).
-- If the Combat Methods pipeline is shared with the TGTT Fighter,
-  cross-reference the working Arcane Archer Fighter spec for the
-  expected resource name.
-
-**Test workaround**: Heroic Soul L3 milestone drops the
-`expectResources: {"Stamina": ...}` assertion. Re-add once the
-correct key is known.
-
----
+**Status**: Closed, not a bug but a problem in homebrew source that was fixed.
 
 ### CS-BUG-012 — TGTT Trickster Rogue "Trickster Dice" pool not surfaced as a resource
 
