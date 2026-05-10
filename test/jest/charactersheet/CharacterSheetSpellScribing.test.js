@@ -20,7 +20,6 @@ beforeAll(async () => {
 });
 
 describe("Spell Scribing Adept", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});

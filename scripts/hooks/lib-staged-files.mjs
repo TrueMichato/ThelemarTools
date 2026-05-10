@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 // Shared helpers for git pre-commit / pre-push hooks.
 // Plain Node, no extra deps — keeps hooks fast and cross-platform.
 
@@ -21,8 +22,7 @@ export const getStagedFiles = () => {
 };
 
 export const filterExisting = (files) => files.filter(f => {
-	try { return fs.existsSync(path.join(REPO_ROOT, f)); }
-	catch { return false; }
+	try { return fs.existsSync(path.join(REPO_ROOT, f)); } catch { return false; }
 });
 
 const DOC_PATTERNS = [

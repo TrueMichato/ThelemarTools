@@ -1115,12 +1115,12 @@ class FeatureModifierParser {
 		commonLanguages.forEach(language => {
 			const langPattern = new RegExp(
 				// "can speak, read, and write Dwarvish" / "you can speak and understand Dwarvish"
-				`(?:can|gain\\s+the\\s+ability\\s+to)\\s+speak(?:[,\\s]+read)?(?:[,\\s]+and\\s+write)?\\s+${language.replace(/'/g, ".?")}` +
+				`(?:can|gain\\s+the\\s+ability\\s+to)\\s+speak(?:[,\\s]+read)?(?:[,\\s]+and\\s+write)?\\s+${language.replace(/'/g, ".?")}`
 				// Or "you know Dwarvish" / "you learn Dwarvish"
-				`|(?:you\\s+)?(?:know|learn)\\s+${language.replace(/'/g, ".?")}` +
+				+ `|(?:you\\s+)?(?:know|learn)\\s+${language.replace(/'/g, ".?")}`
 				// Or "grants you the ability to speak Dwarvish"
-				`|grants?\\s+(?:you\\s+)?(?:the\\s+ability\\s+to\\s+)?speak\\s+${language.replace(/'/g, ".?")}`,
-				"gi"
+				+ `|grants?\\s+(?:you\\s+)?(?:the\\s+ability\\s+to\\s+)?speak\\s+${language.replace(/'/g, ".?")}`,
+				"gi",
 			);
 			if (langPattern.test(plainText)) {
 				modifiers.push({
@@ -3231,8 +3231,12 @@ class CharacterSheetState {
 				spellSaveDc: 0,
 				abilityCheck: 0,
 				// Per-ability saving throw bonuses
-				savingThrowStr: 0, savingThrowDex: 0, savingThrowCon: 0,
-				savingThrowInt: 0, savingThrowWis: 0, savingThrowCha: 0,
+				savingThrowStr: 0,
+				savingThrowDex: 0,
+				savingThrowCon: 0,
+				savingThrowInt: 0,
+				savingThrowWis: 0,
+				savingThrowCha: 0,
 				// Additional bonus types
 				proficiencyBonus: 0,
 				savingThrowConcentration: 0,
@@ -3880,7 +3884,6 @@ class CharacterSheetState {
 		);
 
 		if (!needsMigration) return;
-
 
 		// For each feature that has associated modifiers, re-parse and update flags
 		this._data.features.forEach(feature => {
@@ -4850,7 +4853,7 @@ class CharacterSheetState {
 	hasCompleteLevelHistory () {
 		const totalLevel = this.getTotalLevel();
 		if (totalLevel === 0) return true; // No levels = nothing to track
-		
+
 		// Check if we have history entries for all levels
 		const historyLevels = new Set(this._data.levelHistory.map(h => h.level));
 		for (let i = 1; i <= totalLevel; i++) {
@@ -5042,7 +5045,7 @@ class CharacterSheetState {
 	getSense (sense) {
 		const senseMods = this._data.customModifiers.senses || {};
 		const baseSenses = this._data.senses || {};
-		
+
 		// Get bonus from named modifiers
 		const namedBonus = this._data.namedModifiers
 			?.filter(m => m.enabled && m.type === `sense:${sense}`)
@@ -5052,7 +5055,7 @@ class CharacterSheetState {
 				}
 				return total + (m.value || 0);
 			}, 0) || 0;
-		
+
 		return Math.max(baseSenses[sense] || 0, senseMods[sense] || 0) + namedBonus;
 	}
 
@@ -5805,7 +5808,6 @@ class CharacterSheetState {
 	_hasPrimalChampion () {
 		return this._data.classes.some(cls => cls.name?.toLowerCase() === "barbarian" && cls.level >= 20);
 	}
-
 
 	// #endregion
 
@@ -11871,7 +11873,7 @@ class CharacterSheetState {
 
 					// Pact of the Chain — detect from features (PHB featureType "PB", XPHB featureType "EI")
 					const hasPactOfTheChain = this._data.features?.some(f =>
-						f.name?.toLowerCase() === "pact of the chain"
+						f.name?.toLowerCase() === "pact of the chain",
 					);
 					if (hasPactOfTheChain) {
 						calculations.hasPactOfTheChain = true;
@@ -11885,8 +11887,8 @@ class CharacterSheetState {
 					// TGTT: Pact of Transformation (level 3)
 					// Check if character has Pact of Transformation feature
 					const hasPactOfTransformation = this._data.features?.some(f =>
-						f.name?.toLowerCase()?.includes("pact of transformation") ||
-						f.name?.toLowerCase()?.includes("pact of the transformation")
+						f.name?.toLowerCase()?.includes("pact of transformation")
+						|| f.name?.toLowerCase()?.includes("pact of the transformation"),
 					);
 					if (hasPactOfTransformation && level >= 3) {
 						calculations.hasPactOfTransformation = true;
@@ -12710,7 +12712,7 @@ class CharacterSheetState {
 
 								// Sun Spells - always prepared
 								calculations.hasSunSpells = true;
-								
+
 								// Level 6: Sunlit Path (Ar2)
 								// Walking speed +15ft, radiant resistance, overland travel bonus
 								if (level >= 6) {
@@ -12722,7 +12724,7 @@ class CharacterSheetState {
 									calculations.overlandTravelBonusDay = 6; // miles per day
 									calculations.overlandTravelAllyRange = 30;
 								}
-								
+
 								// Level 14: Grasping the Sun (Ar2)
 								// Reaction: reduce damage by sorcerer level
 								// If melee attack, attacker takes radiant = sorcerer level
@@ -12731,7 +12733,7 @@ class CharacterSheetState {
 									calculations.graspingDamageReduction = level;
 									calculations.graspingRadiantDamage = level;
 								}
-								
+
 								// Level 18: Bright Zenith (Ar2)
 								// 6 SP bonus action: 40ft AoE blind, 100ft blindsight, extended targeting
 								// Duration: 1 minute
@@ -13748,7 +13750,7 @@ class CharacterSheetState {
 									// Beaver: Reaction to reduce damage to ally within 30ft
 									calculations.beaverDamageReduction = level + profBonus;
 
-									// Aurochs: Advantage on STR checks/saves, +prof to those rolls, 
+									// Aurochs: Advantage on STR checks/saves, +prof to those rolls,
 									// count as one size larger for carry/push/drag/lift
 									calculations.aurochsStrBonus = profBonus;
 									calculations.aurochsSizeBonus = 1;
@@ -13756,11 +13758,11 @@ class CharacterSheetState {
 									// Horse: Double walking speed, Dash as bonus action
 									calculations.horseSpeedMultiplier = 2;
 
-									// Octopus: Underwater breathing, swim speed = walk speed, 
+									// Octopus: Underwater breathing, swim speed = walk speed,
 									// no underwater penalties, +5ft melee reach underwater
 									calculations.octopusReachBonus = 5;
 
-									// Peacock: Creatures targeting you with attack/spell must 
+									// Peacock: Creatures targeting you with attack/spell must
 									// WIS save or choose new target (24hr immunity on success)
 									calculations.peacockSaveDc = this.getSpellSaveDC("Druid");
 
@@ -13777,7 +13779,7 @@ class CharacterSheetState {
 									// Marked has disadvantage attacking you, you always know its location
 									calculations.houndMarkRange = 60;
 
-									// Cat: +1d4 passive Perception, treat 7 or lower as 8 on 
+									// Cat: +1d4 passive Perception, treat 7 or lower as 8 on
 									// Perception/Stealth/Acrobatics
 									calculations.catPerceptionBonus = "1d4";
 									calculations.catMinRoll = 8;
@@ -13825,7 +13827,7 @@ class CharacterSheetState {
 										// Bat: Blindsight 10ft, no disadvantage from dim/darkness on Perception
 										calculations.batBlindsight = 10;
 
-										// Pseudodragon: Treat 9 or lower as 10 on INT/WIS checks and 
+										// Pseudodragon: Treat 9 or lower as 10 on INT/WIS checks and
 										// concentration saves
 										calculations.pseudodragonMinRoll = 10;
 
@@ -15499,10 +15501,10 @@ class CharacterSheetState {
 				// =========================================================
 				case "Dreamwalker": {
 					const conMod = this.getAbilityMod("con");
-					
+
 					// Dream DC: 8 + proficiency + CON modifier
 					calculations.dreamDc = 8 + profBonus + conMod - exhaustionPenalty;
-					
+
 					// Lucid Focus die scaling per TGTT:
 					// "d8 at 3rd level, d10 at 6th level, d12 at 10th level"
 					if (level >= 10) {
@@ -15518,15 +15520,15 @@ class CharacterSheetState {
 						calculations.lucidFocusDie = "1d6";
 						calculations.lucidFocusDieSize = 6;
 					}
-					
+
 					// Dreambend DC: same as Dream DC
 					calculations.dreambendDc = calculations.dreamDc;
-					
+
 					// Lucid Focus uses per long rest: equals proficiency bonus
 					// TGTT: "You can grant yourself a Lucid Focus die a number of times equal to your proficiency bonus"
 					calculations.focusPoolMax = profBonus;
 					calculations.hasFocusPool = true;
-					
+
 					// Level 1 Features: Focus, Lucid Focus, Dreamwalk, Dreamer feat
 					if (level >= 1) {
 						calculations.hasFocus = true; // Grants CON save proficiency
@@ -15534,58 +15536,58 @@ class CharacterSheetState {
 						calculations.hasDreamwalk = true;
 						calculations.hasDreamerFeat = true;
 					}
-					
+
 					// Level 2: Intuition + Control
 					if (level >= 2) {
 						calculations.hasIntuition = true; // Advantage on Insight in Dreamtime
 						calculations.hasControl = true; // Constant Effort check every 8 hours (vs 10 min)
 						calculations.constantEffortInterval = "8 hours";
 					}
-					
+
 					// Level 3: Lucid Awareness
 					if (level >= 3) {
 						calculations.hasLucidAwareness = true;
 					}
-					
+
 					// Level 4: Focus Improvement (advantage on CON checks and saves) + Dreamer feat
 					if (level >= 4) {
 						calculations.hasFocusImprovement = true;
 						calculations.hasConAdvantage = true;
 					}
-					
+
 					// Level 5: Needful Search (find objects in Dreamtime by need)
 					if (level >= 5) {
 						calculations.hasNeedfulSearch = true;
 					}
-					
+
 					// Level 6: Dreamhaven (30ft aura: allies get +CON to Concentration checks)
 					if (level >= 6) {
 						calculations.hasDreamhaven = true;
 						calculations.dreamhavenRange = 30;
 						calculations.dreamhavenBonus = Math.max(1, conMod);
 					}
-					
+
 					// Level 7: Waking Dream (enter Dreamtime in the flesh, DC 30) + Dreamer feat
 					if (level >= 7) {
 						calculations.hasWakingDream = true;
 						calculations.wakingDreamDc = 30;
 					}
-					
+
 					// Level 8: Dream Supremacy (Push/Drag creatures into Dreamtime)
 					if (level >= 8) {
 						calculations.hasDreamSupremacy = true;
 					}
-					
+
 					// Level 9: Focus Improvement upgrade (expertise on CON) + Dreamer feat
 					if (level >= 9) {
 						calculations.hasConExpertise = true;
 					}
-					
+
 					// Level 10: Just a Weave (replicate spell effects in Dreamtime)
 					if (level >= 10) {
 						calculations.hasJustAWeave = true;
 					}
-					
+
 					break;
 				}
 
@@ -15871,7 +15873,7 @@ class CharacterSheetState {
 
 			// Check if character is a TGTT Monk - they get +1 base DC and can use WIS
 			const isTgttMonk = this._data.classes?.some(c =>
-				c.name?.toLowerCase() === "monk" && c.source === "TGTT"
+				c.name?.toLowerCase() === "monk" && c.source === "TGTT",
 			);
 
 			if (isTgttMonk) {
@@ -16070,7 +16072,7 @@ class CharacterSheetState {
 			calculations.thrillMarkDuration = profBonus; // hours
 			calculations.thrillMarkRange = 30; // feet for ally reaction
 			calculations.thrillMarkUses = 1; // per long rest
-			
+
 			// Rampage: On reducing creature to 0 HP with melee attack
 			// Bonus action to move half speed and make bite attack
 			calculations.hasRampage = true;
@@ -16101,7 +16103,7 @@ class CharacterSheetState {
 			calculations.hasSpellswordTechnique = true;
 			calculations.spellswordBonusDamage = "1d6";
 			calculations.spellswordDamageTypes = {
-				evocation: "varies/force",  // Same type as spell, or force if no damage
+				evocation: "varies/force", // Same type as spell, or force if no damage
 				necromancy: "necrotic",
 				abjuration: "force",
 				conjuration: "bludgeoning/piercing/slashing",
@@ -16122,7 +16124,7 @@ class CharacterSheetState {
 			calculations.whipBonusAttack = true;
 			calculations.whipGrappleShove = true;
 			calculations.whipUtility = true;
-			calculations.whipReach = 20;  // Bullwhip reach
+			calculations.whipReach = 20; // Bullwhip reach
 		}
 
 		// Dreamer (TGTT)
@@ -18409,10 +18411,10 @@ class CharacterSheetState {
 
 		// Check if all requirements are met
 		return (
-			counts.minorBeneficial >= (requirements.minorBeneficial || 0) &&
-			counts.majorBeneficial >= (requirements.majorBeneficial || 0) &&
-			counts.minorDetrimental >= (requirements.minorDetrimental || 0) &&
-			counts.majorDetrimental >= (requirements.majorDetrimental || 0)
+			counts.minorBeneficial >= (requirements.minorBeneficial || 0)
+			&& counts.majorBeneficial >= (requirements.majorBeneficial || 0)
+			&& counts.minorDetrimental >= (requirements.minorDetrimental || 0)
+			&& counts.majorDetrimental >= (requirements.majorDetrimental || 0)
 		);
 	}
 
@@ -18799,19 +18801,19 @@ class CharacterSheetState {
 	 */
 	_detectVestigeTier (item) {
 		const name = item.name?.toLowerCase() || "";
-		
+
 		// EGW Vestiges of Divergence: Dormant → Awakened → Exalted
 		if (name.includes("(dormant)")) return "dormant";
 		if (name.includes("(awakened)")) return "awakened";
 		if (name.includes("(exalted)")) return "exalted";
 		if (item.property?.includes("Vst|EGW")) return "dormant";
-		
+
 		// FTD Dragon Items: Slumbering → Stirring → Wakened → Ascendant
 		if (name.includes("slumbering")) return "slumbering";
 		if (name.includes("stirring")) return "stirring";
 		if (name.includes("wakened")) return "wakened";
 		if (name.includes("ascendant")) return "ascendant";
-		
+
 		return null;
 	}
 
@@ -18822,19 +18824,19 @@ class CharacterSheetState {
 	 */
 	_detectItemTierType (item) {
 		const name = item.name?.toLowerCase() || "";
-		
+
 		// EGW Vestiges
 		if (name.includes("(dormant)") || name.includes("(awakened)") || name.includes("(exalted)")) {
 			return "vestige";
 		}
 		if (item.property?.includes("Vst|EGW")) return "vestige";
-		
+
 		// FTD Dragon Items
-		if (name.includes("slumbering") || name.includes("stirring") ||
-			name.includes("wakened") || name.includes("ascendant")) {
+		if (name.includes("slumbering") || name.includes("stirring")
+			|| name.includes("wakened") || name.includes("ascendant")) {
 			return "dragon";
 		}
-		
+
 		return null;
 	}
 
@@ -18846,11 +18848,11 @@ class CharacterSheetState {
 	_detectKiSaveDcBonus (item) {
 		const name = item.name?.toLowerCase() || "";
 		if (!name.includes("dragonhide belt")) return 0;
-		
+
 		// Match "+1", "+2", "+3" patterns in name
 		const match = item.name?.match(/\+(\d)/);
 		if (match) return parseInt(match[1], 10);
-		
+
 		return 0;
 	}
 
@@ -18861,7 +18863,7 @@ class CharacterSheetState {
 	 */
 	_detectResourceRestoration (item) {
 		const name = item.name?.toLowerCase() || "";
-		
+
 		// Dragonhide Belt: regain ki points equal to a roll of your Martial Arts die
 		if (name.includes("dragonhide belt")) {
 			return {
@@ -18872,7 +18874,7 @@ class CharacterSheetState {
 				used: false,
 			};
 		}
-		
+
 		// Bloodwell Vial: regain 5 sorcery points when you roll Hit Dice
 		if (name.includes("bloodwell vial")) {
 			return {
@@ -18883,7 +18885,7 @@ class CharacterSheetState {
 				used: false,
 			};
 		}
-		
+
 		// Rhythm-Maker's Drum: regain one use of Bardic Inspiration
 		if (name.includes("rhythm-maker")) {
 			return {
@@ -18894,7 +18896,7 @@ class CharacterSheetState {
 				used: false,
 			};
 		}
-		
+
 		return null;
 	}
 
@@ -18905,7 +18907,7 @@ class CharacterSheetState {
 	 */
 	_detectMentalProtection (item) {
 		const name = item.name?.toLowerCase() || "";
-		
+
 		// Ring of Mind Shielding
 		if (name.includes("ring of mind shielding")) {
 			return {
@@ -18916,7 +18918,7 @@ class CharacterSheetState {
 				soulTrapped: true,
 			};
 		}
-		
+
 		return null;
 	}
 
@@ -20633,7 +20635,7 @@ class CharacterSheetState {
 
 		// Check for Use Magic Device (Thief 13+)
 		const hasUseMagicDevice = this._data.features?.some(f =>
-			f.name?.toLowerCase()?.includes("use magic device")
+			f.name?.toLowerCase()?.includes("use magic device"),
 		);
 		if (hasUseMagicDevice) {
 			max = Math.max(max, 4);
@@ -20655,7 +20657,7 @@ class CharacterSheetState {
 	ignoresAttunementRequirements () {
 		// Check for Use Magic Device (TGTT/2024 version)
 		const hasUseMagicDevice = this._data.features?.some(f =>
-			f.name?.toLowerCase()?.includes("use magic device")
+			f.name?.toLowerCase()?.includes("use magic device"),
 		);
 		if (hasUseMagicDevice) return true;
 
@@ -20733,8 +20735,8 @@ class CharacterSheetState {
 			const [reqBgName, reqBgSource] = tag.background.split("|");
 			const bgName = this._data.background?.name?.toLowerCase() || "";
 			const bgSource = this._data.background?.source?.toUpperCase() || "";
-			const matches = bgName === reqBgName.toLowerCase() &&
-				(!reqBgSource || bgSource === reqBgSource.toUpperCase());
+			const matches = bgName === reqBgName.toLowerCase()
+				&& (!reqBgSource || bgSource === reqBgSource.toUpperCase());
 			if (!matches) {
 				failures.push(`Requires ${reqBgName} background`);
 			}
@@ -20752,12 +20754,12 @@ class CharacterSheetState {
 		if (tag.psionics === true) {
 			// Check for psionic subclasses or features
 			const hasPsionics = this._data.classes?.some(c =>
-				c.subclass?.name?.toLowerCase().includes("psi") ||
-				c.subclass?.name?.toLowerCase().includes("soul knife") ||
-				c.subclass?.name?.toLowerCase().includes("aberrant mind")
+				c.subclass?.name?.toLowerCase().includes("psi")
+				|| c.subclass?.name?.toLowerCase().includes("soul knife")
+				|| c.subclass?.name?.toLowerCase().includes("aberrant mind"),
 			) || this._data.features?.some(f =>
-				f.name?.toLowerCase().includes("psionic") ||
-				f.name?.toLowerCase().includes("psionics")
+				f.name?.toLowerCase().includes("psionic")
+				|| f.name?.toLowerCase().includes("psionics"),
 			);
 			if (!hasPsionics) {
 				failures.push("Requires psionic abilities");
@@ -20769,8 +20771,12 @@ class CharacterSheetState {
 			if (typeof tag[ability] === "number") {
 				const score = this.getAbilityScore(ability);
 				if (score < tag[ability]) {
-					const abilityName = {str: "Strength", dex: "Dexterity", con: "Constitution",
-						int: "Intelligence", wis: "Wisdom", cha: "Charisma"}[ability];
+					const abilityName = {str: "Strength",
+						dex: "Dexterity",
+						con: "Constitution",
+						int: "Intelligence",
+						wis: "Wisdom",
+						cha: "Charisma"}[ability];
 					failures.push(`Requires ${abilityName} ${tag[ability]}+`);
 				}
 			}
@@ -20871,8 +20877,8 @@ class CharacterSheetState {
 	 */
 	getUseMagicDeviceScrollAbility () {
 		const hasUseMagicDevice = this._data.features?.some(f =>
-			f.name?.toLowerCase()?.includes("use magic device") &&
-			(f.source === "TGTT" || f.source === "XPHB")
+			f.name?.toLowerCase()?.includes("use magic device")
+			&& (f.source === "TGTT" || f.source === "XPHB"),
 		);
 		if (!hasUseMagicDevice) return null;
 
@@ -23509,7 +23515,7 @@ class CharacterSheetState {
 		// Find the stance method in features
 		const stanceFeature = this._data.features?.find(f =>
 			f.name === this._data.activeStance
-			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"))
+			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")),
 		);
 
 		if (!stanceFeature) return null;
@@ -23638,7 +23644,7 @@ class CharacterSheetState {
 		// Find the method feature
 		const method = this._data.features?.find(f =>
 			f.name === methodName
-			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"))
+			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")),
 		);
 
 		if (!method) {
@@ -23772,7 +23778,7 @@ class CharacterSheetState {
 		// Find the method
 		const method = this._data.features?.find(f =>
 			f.name === methodName
-			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"))
+			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")),
 		);
 
 		if (!method) {
@@ -23807,7 +23813,7 @@ class CharacterSheetState {
 	isMethodStance (methodName) {
 		const method = this._data.features?.find(f =>
 			f.name === methodName
-			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:"))
+			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")),
 		);
 
 		if (!method) return false;
@@ -24880,14 +24886,14 @@ class CharacterSheetState {
 	spendFocusPoint (amount = 1) {
 		this._ensureFocusPoolInitialized();
 		const max = this.getFocusPoolMax();
-		
+
 		// Level 20 Dreamwalkers have unlimited focus
 		if (max === "Unlimited") return true;
-		
+
 		if ((this._data.focusPool.current || 0) < amount) {
 			return false;
 		}
-		
+
 		this._data.focusPool.current = (this._data.focusPool.current || 0) - amount;
 		return true;
 	}
@@ -24912,12 +24918,12 @@ class CharacterSheetState {
 	 */
 	activateLucidFocus () {
 		this._ensureFocusPoolInitialized();
-		
+
 		// Lucid Focus costs 1 focus point to activate
 		if (!this.spendFocusPoint(1)) {
 			return false;
 		}
-		
+
 		this._data.focusPool.lucidFocusActive = true;
 		return true;
 	}
@@ -24964,7 +24970,7 @@ class CharacterSheetState {
 	 */
 	restoreFocusPool () {
 		if (!this.hasFocusPool()) return;
-		
+
 		this._ensureFocusPoolInitialized();
 		const max = this.getFocusPoolMax();
 		this._data.focusPool.current = max === "Unlimited" ? 99 : (max || 0);
@@ -25144,7 +25150,7 @@ class CharacterSheetState {
 		// Count Dreamer feat instances (each gives 2 abilities)
 		// Multiple feats count if they have "Dreamer" in name with different numbers
 		const dreamerFeats = this._data.feats?.filter(f =>
-			f.name === "Dreamer" || /^Dreamer\s*\d*$/i.test(f.name)
+			f.name === "Dreamer" || /^Dreamer\s*\d*$/i.test(f.name),
 		) || [];
 		max += dreamerFeats.length * 2;
 
@@ -25156,7 +25162,7 @@ class CharacterSheetState {
 
 		// Dreamwalker class progression: 2 at L1, +2 at L4, +2 at L7, +2 at L9
 		const dreamwalkerClass = this._data.classes?.find(c =>
-			c.name === "Dreamwalker" && c.source === "TGTT"
+			c.name === "Dreamwalker" && c.source === "TGTT",
 		);
 		if (dreamwalkerClass) {
 			const level = dreamwalkerClass.level || 0;
@@ -25464,12 +25470,12 @@ class CharacterSheetState {
 	 */
 	isImmuneToCondition (condition) {
 		const condName = (typeof condition === "string" ? condition : condition?.name || "").toLowerCase();
-		
+
 		// Check base condition immunities (case-insensitive)
 		const hasBaseImmunity = this._data.conditionImmunities.some(
 			ci => ci.toLowerCase() === condName,
 		);
-		
+
 		return hasBaseImmunity || this.hasConditionImmunityFromStates(condName);
 	}
 	// #endregion
@@ -25955,7 +25961,7 @@ class CharacterSheetState {
 			icon: opts.icon || "⚡",
 			category: opts.category || "homebrew",
 			mode: opts.mode || "passive",
-			isActive: opts.mode === "passive" ? true : false, // Passive abilities are always active
+			isActive: opts.mode === "passive", // Passive abilities are always active
 			effects: opts.effects || [],
 			grants: opts.grants || null,
 			defensiveTraits: opts.defensiveTraits || null,
@@ -25970,7 +25976,7 @@ class CharacterSheetState {
 		// Handle limited mode uses based on resource source type
 		if (opts.mode === "limited") {
 			const sourceType = opts.resourceSource?.type || "self";
-			
+
 			if (sourceType === "self") {
 				ability.uses = {
 					current: opts.uses?.max || 1,
@@ -25982,7 +25988,7 @@ class CharacterSheetState {
 				const newResourceName = opts.resourceSource.newResourceName || `${opts.name} Charges`;
 				const newResourceMax = opts.resourceSource.newResourceMax || 3;
 				const newResourceRecharge = opts.resourceSource.newResourceRecharge || "long";
-				
+
 				// Add the new resource pool
 				const resourceId = CryptUtil.uid();
 				this._data.resources.push({
@@ -25993,7 +25999,7 @@ class CharacterSheetState {
 					recharge: newResourceRecharge,
 					customAbilityId: ability.id, // Link back to ability
 				});
-				
+
 				// Update the resource source to link to the newly created pool
 				ability.resourceSource = {
 					type: "linked",
@@ -26084,7 +26090,7 @@ class CharacterSheetState {
 		// If we're activating and there's a resource cost, deduct it first
 		if (!ability.isActive && !skipResourceCost && ability.resourceCost) {
 			const { resourceId, cost } = ability.resourceCost;
-			
+
 			if (resourceId === "stamina") {
 				const current = this.getStaminaCurrent() || 0;
 				if (current < cost) return null; // Can't afford
@@ -26141,18 +26147,18 @@ class CharacterSheetState {
 	canActivateCustomAbility (id) {
 		const ability = this._data.customAbilities.find(a => a.id === id);
 		if (!ability || ability.mode !== "toggleable") return false;
-		
+
 		// If already active, can always deactivate
 		if (ability.isActive) return true;
 
 		// Check resource cost
 		if (ability.resourceCost) {
 			const { resourceId, cost } = ability.resourceCost;
-			
+
 			if (resourceId === "stamina") {
 				return (this.getStaminaCurrent() || 0) >= cost;
 			}
-			
+
 			const resource = this._data.resources.find(r => r.id === resourceId);
 			return resource && resource.current >= cost;
 		}
@@ -26172,7 +26178,7 @@ class CharacterSheetState {
 		// Check if ability uses a linked resource pool
 		if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId) {
 			const cost = ability.resourceSource.cost || 1;
-			
+
 			// Handle stamina specially
 			if (ability.resourceSource.resourceId === "stamina") {
 				const current = this.getStaminaCurrent() || 0;
@@ -26180,7 +26186,7 @@ class CharacterSheetState {
 				this.setStaminaCurrent(current - cost);
 				return true;
 			}
-			
+
 			// Find and deduct from the linked resource
 			const resource = this._data.resources.find(r => r.id === ability.resourceSource.resourceId);
 			if (!resource || resource.current < cost) return false;
@@ -26206,11 +26212,11 @@ class CharacterSheetState {
 		// Check linked resource
 		if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId) {
 			const cost = ability.resourceSource.cost || 1;
-			
+
 			if (ability.resourceSource.resourceId === "stamina") {
 				return (this.getStaminaCurrent() || 0) >= cost;
 			}
-			
+
 			const resource = this._data.resources.find(r => r.id === ability.resourceSource.resourceId);
 			return resource && resource.current >= cost;
 		}
@@ -26237,7 +26243,7 @@ class CharacterSheetState {
 					recharge: "short",
 				};
 			}
-			
+
 			const resource = this._data.resources.find(r => r.id === ability.resourceSource.resourceId);
 			if (resource) {
 				return {
@@ -26267,7 +26273,7 @@ class CharacterSheetState {
 	restoreCustomAbilityUses (restType) {
 		for (const ability of this._data.customAbilities) {
 			if (ability.mode !== "limited" || !ability.uses) continue;
-			
+
 			if (restType === "long" || ability.uses.recharge === restType) {
 				ability.uses.current = ability.uses.max;
 			}
@@ -26293,7 +26299,7 @@ class CharacterSheetState {
 				this.setStaminaCurrent(current + 1);
 				return true;
 			}
-			
+
 			// Find and restore to the linked resource
 			const resource = this._data.resources.find(r => r.id === ability.resourceSource.resourceId);
 			if (!resource || resource.current >= resource.max) return false;
@@ -26535,7 +26541,7 @@ class CharacterSheetState {
 					const skillName = typeof skill === "string" ? skill : skill.name;
 					const hasExpertise = typeof skill === "object" && skill.expertise;
 					const normalizedSkill = skillName.toLowerCase().replace(/\s+/g, "");
-					
+
 					if (hasExpertise) {
 						this.addExpertise(normalizedSkill);
 					} else {
@@ -26658,8 +26664,8 @@ class CharacterSheetState {
 				const toolKey = typeParts[2];
 				const toolKeyLower = toolKey.toLowerCase();
 				// If tool already exists but isn't tracked, track a base source first
-				if (this._data.toolProficiencies.some(t => t.toLowerCase().replace(/['\s]+/g, "") === toolKeyLower) &&
-					!this._data.grantedProficiencies?.tools?.[toolKeyLower]?.length) {
+				if (this._data.toolProficiencies.some(t => t.toLowerCase().replace(/['\s]+/g, "") === toolKeyLower)
+					&& !this._data.grantedProficiencies?.tools?.[toolKeyLower]?.length) {
 					this._trackGrantedProficiency("tools", toolKeyLower, "base");
 				}
 				this.addToolProficiency(toolKey);
@@ -26669,8 +26675,8 @@ class CharacterSheetState {
 				const langName = mod.languageName || langKey;
 				const langNameLower = langName.toLowerCase();
 				// If language already exists but isn't tracked, track a base source first
-				if (this._data.languages.some(l => l.toLowerCase() === langNameLower) &&
-					!this._data.grantedProficiencies?.languages?.[langNameLower]?.length) {
+				if (this._data.languages.some(l => l.toLowerCase() === langNameLower)
+					&& !this._data.grantedProficiencies?.languages?.[langNameLower]?.length) {
 					this._trackGrantedProficiency("languages", langNameLower, "base");
 				}
 				if (!this._data.languages.includes(langName)) {
@@ -26680,8 +26686,8 @@ class CharacterSheetState {
 			} else if (profType === "weapon") {
 				const weaponKey = typeParts[2];
 				// If weapon already exists but isn't tracked, track a base source first
-				if (this._data.weaponProficiencies?.some(w => w.toLowerCase() === weaponKey.toLowerCase()) &&
-					!this._data.grantedProficiencies?.weapons?.[weaponKey.toLowerCase()]?.length) {
+				if (this._data.weaponProficiencies?.some(w => w.toLowerCase() === weaponKey.toLowerCase())
+					&& !this._data.grantedProficiencies?.weapons?.[weaponKey.toLowerCase()]?.length) {
 					this._trackGrantedProficiency("weapons", weaponKey.toLowerCase(), "base");
 				}
 				this.addWeaponProficiency(weaponKey);
@@ -26689,8 +26695,8 @@ class CharacterSheetState {
 			} else if (profType === "armor") {
 				const armorKey = typeParts[2];
 				// If armor already exists but isn't tracked, track a base source first
-				if (this._data.armorProficiencies?.some(a => a.toLowerCase() === armorKey.toLowerCase()) &&
-					!this._data.grantedProficiencies?.armor?.[armorKey.toLowerCase()]?.length) {
+				if (this._data.armorProficiencies?.some(a => a.toLowerCase() === armorKey.toLowerCase())
+					&& !this._data.grantedProficiencies?.armor?.[armorKey.toLowerCase()]?.length) {
 					this._trackGrantedProficiency("armor", armorKey.toLowerCase(), "base");
 				}
 				this.addArmorProficiency(armorKey);
@@ -26762,7 +26768,7 @@ class CharacterSheetState {
 
 		// Also check description
 		if (itemData.description) {
-			text += " " + itemData.description;
+			text += ` ${itemData.description}`;
 		}
 
 		// Strip HTML tags for plain text parsing
@@ -27198,7 +27204,7 @@ class CharacterSheetState {
 	 */
 	_grantTempHpFromEffect (effect, ability) {
 		let tempHp = 0;
-		
+
 		if (effect.type === "tempHp:dice") {
 			// Roll dice for temp HP
 			const diceExpression = effect.dice || "1d4+4";
@@ -27207,7 +27213,7 @@ class CharacterSheetState {
 			// Static temp HP value
 			tempHp = effect.value || 5;
 		}
-		
+
 		// Only apply if higher than current temp HP (temp HP doesn't stack per RAW)
 		const currentTempHp = this.getTempHp() || 0;
 		if (tempHp > currentTempHp) {
@@ -27227,13 +27233,13 @@ class CharacterSheetState {
 		// Handle "level" keyword
 		const totalLevel = this.getTotalLevel();
 		let expr = expression.toLowerCase().replace(/level/g, totalLevel.toString());
-		
+
 		// Parse dice expressions like "1d4+4", "2d10+5"
 		const diceRegex = /(\d+)d(\d+)/gi;
 		let total = 0;
 		let lastIndex = 0;
 		let match;
-		
+
 		while ((match = diceRegex.exec(expr)) !== null) {
 			// Add any constant before this dice
 			const beforeDice = expr.substring(lastIndex, match.index);
@@ -27243,17 +27249,17 @@ class CharacterSheetState {
 					total += beforeDice.includes("-") ? -num : num;
 				}
 			}
-			
+
 			// Roll the dice
 			const count = parseInt(match[1]);
 			const sides = parseInt(match[2]);
 			for (let i = 0; i < count; i++) {
 				total += Math.floor(Math.random() * sides) + 1;
 			}
-			
+
 			lastIndex = diceRegex.lastIndex;
 		}
-		
+
 		// Add any remaining constant
 		const remaining = expr.substring(lastIndex).trim();
 		if (remaining) {
@@ -27263,7 +27269,7 @@ class CharacterSheetState {
 				total += parseInt(constMatch[1]);
 			}
 		}
-		
+
 		return Math.max(0, total);
 	}
 
@@ -27341,7 +27347,7 @@ class CharacterSheetState {
 	 */
 	formatConditionalText (modifier) {
 		if (!modifier.conditional) return "";
-		
+
 		const cond = modifier.conditional;
 		if (cond.startsWith("against:")) {
 			const type = cond.replace("against:", "");
@@ -27366,9 +27372,9 @@ class CharacterSheetState {
 
 	/**
 	 * Add a named modifier
-	 * 
+	 *
 	 * ## Enhanced Modifier Schema
-	 * 
+	 *
 	 * ### Target Types (modifier.type):
 	 * - `ac` - Armor Class
 	 * - `initiative` - Initiative rolls
@@ -27388,7 +27394,7 @@ class CharacterSheetState {
 	 * - `sense:darkvision`, `sense:blindsight`, etc. - Senses
 	 * - `deathSave` - Death saving throws
 	 * - `concentration` - Concentration saving throws
-	 * 
+	 *
 	 * ### Effect Types (modifier properties):
 	 * - `value: number` - Numeric bonus/penalty (default)
 	 * - `advantage: true` - Grants advantage
@@ -27413,14 +27419,14 @@ class CharacterSheetState {
 	 * - `ignore: true` - Ignore effects of this type (e.g., ignore difficult terrain)
 	 * - `removeDisadvantage: true` - Remove disadvantage that would normally apply
 	 * - `removeAdvantage: true` - Remove advantage that would normally apply
-	 * 
+	 *
 	 * ### Other Properties:
 	 * - `sourceFeatureId: string` - ID of the feature granting this modifier
 	 * - `sourceType: string` - "classFeature", "raceFeature", "feat", "item", "spell", "condition"
 	 * - `conditional: string` - Text describing when modifier applies
 	 * - `enabled: boolean` - Whether modifier is currently active (default true)
 	 * - `duration: string` - Duration text for display
-	 * 
+	 *
 	 * @param {Object} modifier - The modifier object
 	 * @returns {string} The ID of the new modifier
 	 */
@@ -27953,19 +27959,19 @@ class CharacterSheetState {
 			disadvantage: false,
 			removeAdvantage: false,
 			removeDisadvantage: false,
-			minimum: null,      // Minimum roll result (Reliable Talent)
-			maximum: null,      // Maximum roll result
-			setValue: null,     // Override with set value
-			multiplier: 1,      // Result multiplier
-			bonusDice: [],      // Array of bonus dice to add (e.g., ["d4", "d6"])
-			reroll: null,       // Reroll threshold (e.g., 1 for Lucky)
+			minimum: null, // Minimum roll result (Reliable Talent)
+			maximum: null, // Maximum roll result
+			setValue: null, // Override with set value
+			multiplier: 1, // Result multiplier
+			bonusDice: [], // Array of bonus dice to add (e.g., ["d4", "d6"])
+			reroll: null, // Reroll threshold (e.g., 1 for Lucky)
 			autoCrit: false,
 			autoSuccess: false,
 			autoFail: false,
 			halfOnSave: false,
 			noneOnSave: false,
-			sources: [],        // Names of modifier sources for display
-			conditionals: [],   // Conditional text for display
+			sources: [], // Names of modifier sources for display
+			conditionals: [], // Conditional text for display
 		};
 
 		modifiers.forEach(mod => {
@@ -28199,10 +28205,23 @@ class CharacterSheetState {
 	getSkillAbility (skill) {
 		const skillMap = {
 			athletics: "str",
-			acrobatics: "dex", sleightofhand: "dex", stealth: "dex",
-			arcana: "int", history: "int", investigation: "int", nature: "int", religion: "int",
-			animalhandling: "wis", insight: "wis", medicine: "wis", perception: "wis", survival: "wis",
-			deception: "cha", intimidation: "cha", performance: "cha", persuasion: "cha",
+			acrobatics: "dex",
+			sleightofhand: "dex",
+			stealth: "dex",
+			arcana: "int",
+			history: "int",
+			investigation: "int",
+			nature: "int",
+			religion: "int",
+			animalhandling: "wis",
+			insight: "wis",
+			medicine: "wis",
+			perception: "wis",
+			survival: "wis",
+			deception: "cha",
+			intimidation: "cha",
+			performance: "cha",
+			persuasion: "cha",
 			// Homebrew/custom standard skills
 			cooking: "wis",
 			culture: "int",
@@ -28214,7 +28233,7 @@ class CharacterSheetState {
 		};
 
 		const normalizedSkill = skill?.toLowerCase().replace(/\s+/g, "");
-		
+
 		// Check standard skills first
 		if (skillMap[normalizedSkill]) {
 			return skillMap[normalizedSkill];
@@ -28435,7 +28454,7 @@ class CharacterSheetState {
 			weight: 0.01,
 			value: 0,
 			entries: [
-				"Can ricochet to ignore half cover on ranged attacks."
+				"Can ricochet to ignore half cover on ranged attacks.",
 			],
 			_isCustom: true,
 			_isGamblerWeapon: true,
@@ -31544,7 +31563,7 @@ class CharacterSheetState {
 
 	/**
 	 * Parse a duration display string or object into a number of combat rounds.
-	 * @param {string|object|null} durationStr - e.g. "1 minute", "Concentration, up to 10 minutes", 
+	 * @param {string|object|null} durationStr - e.g. "1 minute", "Concentration, up to 10 minutes",
 	 *   OR an object like {amount: 1, unit: "minute"} or {type: "instant"}
 	 * @returns {number|null} Number of rounds, or null if duration is indefinite/manual
 	 */
@@ -31951,9 +31970,9 @@ class CharacterSheetState {
 	hasConditionImmunityFromStates (condition) {
 		const condLower = condition.toLowerCase();
 		const effects = this.getActiveStateEffects();
-		return effects.some(e => 
-			e.type === "conditionImmunity" && 
-			((e.target || "").toLowerCase() === condLower || (e.condition || "").toLowerCase() === condLower),
+		return effects.some(e =>
+			e.type === "conditionImmunity"
+			&& ((e.target || "").toLowerCase() === condLower || (e.condition || "").toLowerCase() === condLower),
 		);
 	}
 
@@ -32623,15 +32642,15 @@ class CharacterSheetState {
 	// COMPANION TYPES — Categorizes companions by origin mechanic
 	// =========================================================================
 	static COMPANION_TYPES = {
-		BEAST_COMPANION: "beast_companion",  // Beast Master ranger
-		DRAKE: "drake",                      // Drakewarden ranger
-		STEEL_DEFENDER: "steel_defender",     // Battle Smith artificer
-		FAMILIAR: "familiar",                // Find Familiar / Pact of the Chain / Animal Accomplice
-		WILD_SHAPE: "wild_shape",            // Druid wild shape forms
-		SUMMON: "summon",                    // Conjure/Summon spells (concentration-linked)
-		MOUNT: "mount",                      // Find Steed / Find Greater Steed
-		INFERNAL: "infernal",                // TGTT Fiendish Bloodline summons
-		CUSTOM: "custom",                    // User-created companions
+		BEAST_COMPANION: "beast_companion", // Beast Master ranger
+		DRAKE: "drake", // Drakewarden ranger
+		STEEL_DEFENDER: "steel_defender", // Battle Smith artificer
+		FAMILIAR: "familiar", // Find Familiar / Pact of the Chain / Animal Accomplice
+		WILD_SHAPE: "wild_shape", // Druid wild shape forms
+		SUMMON: "summon", // Conjure/Summon spells (concentration-linked)
+		MOUNT: "mount", // Find Steed / Find Greater Steed
+		INFERNAL: "infernal", // TGTT Fiendish Bloodline summons
+		CUSTOM: "custom", // User-created companions
 	};
 
 	/**
@@ -33143,11 +33162,24 @@ class CharacterSheetState {
 		if (!companion) return 0;
 
 		const skillAbilities = {
-			acrobatics: "dex", animalhandling: "wis", arcana: "int", athletics: "str",
-			deception: "cha", history: "int", insight: "wis", intimidation: "cha",
-			investigation: "int", medicine: "wis", nature: "int", perception: "wis",
-			performance: "cha", persuasion: "cha", religion: "int", sleightofhand: "dex",
-			stealth: "dex", survival: "wis",
+			acrobatics: "dex",
+			animalhandling: "wis",
+			arcana: "int",
+			athletics: "str",
+			deception: "cha",
+			history: "int",
+			insight: "wis",
+			intimidation: "cha",
+			investigation: "int",
+			medicine: "wis",
+			nature: "int",
+			perception: "wis",
+			performance: "cha",
+			persuasion: "cha",
+			religion: "int",
+			sleightofhand: "dex",
+			stealth: "dex",
+			survival: "wis",
 		};
 
 		const ability = skillAbilities[skill.toLowerCase().replace(/\s+/g, "")] || "int";
@@ -33493,8 +33525,6 @@ class CharacterSheetState {
 		// Recover all resources
 		this.recoverResources("long");
 		this.recoverResources("dawn");
-
-
 
 		// Recover Mystic Arcanum (Warlock)
 		this.resetMysticArcanum();
@@ -34597,7 +34627,7 @@ class CharacterSheetState {
 
 		// Grant temporary HP equal to warlock level
 		const warlockLevel = this._data.classes?.find(c =>
-			c.name?.toLowerCase() === "warlock"
+			c.name?.toLowerCase() === "warlock",
 		)?.level || 0;
 		this._data.pactTransformationTempHp = warlockLevel * 3; // TGTT: 3 × warlock level
 

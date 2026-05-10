@@ -16,7 +16,6 @@ beforeAll(async () => {
 });
 
 describe("Source Gating — TGTT features must not appear for non-TGTT characters", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});

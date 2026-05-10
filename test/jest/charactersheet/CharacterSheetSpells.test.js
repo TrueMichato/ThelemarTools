@@ -556,7 +556,9 @@ describe("Spell tracking counter integration", () => {
 	beforeEach(() => {
 		state = new CharacterSheetState();
 		state.addClass({
-			name: "Sorcerer", source: "PHB", level: 3,
+			name: "Sorcerer",
+			source: "PHB",
+			level: 3,
 			spellsKnownProgression: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 13, 13, 14, 14, 15, 15, 15, 15],
 			cantripProgression: [4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
 		});

@@ -25,7 +25,6 @@ beforeAll(async () => {
 });
 
 describe("TGTT Arcane Archer Fighter", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -75,7 +74,6 @@ describe("TGTT Arcane Archer Fighter", () => {
 	// ARCANE SHOT — CON-based DC + prof-bonus uses (TGTT changes)
 	// =========================================================================
 	describe("Arcane Shot (TGTT Modifications)", () => {
-
 		it("should use CON-based DC for TGTT Arcane Archer", () => {
 			makeArcaneArcher(3);
 			const calcs = state.getFeatureCalculations();
@@ -86,7 +84,9 @@ describe("TGTT Arcane Archer Fighter", () => {
 
 		it("should use INT-based DC for XGE Arcane Archer", () => {
 			state.addClass({
-				name: "Fighter", source: "XGE", level: 3,
+				name: "Fighter",
+				source: "XGE",
+				level: 3,
 				hitDice: "d10",
 				subclass: {name: "Arcane Archer", shortName: "Arcane Archer", source: "XGE"},
 			});
@@ -106,7 +106,9 @@ describe("TGTT Arcane Archer Fighter", () => {
 
 		it("should grant flat 2 uses for official Arcane Archer", () => {
 			state.addClass({
-				name: "Fighter", source: "PHB", level: 5,
+				name: "Fighter",
+				source: "PHB",
+				level: 5,
 				hitDice: "d10",
 				subclass: {name: "Arcane Archer", shortName: "Arcane Archer", source: "XGE"},
 			});
@@ -116,16 +118,18 @@ describe("TGTT Arcane Archer Fighter", () => {
 
 		it("should scale TGTT Arcane Shot DC with level and CON", () => {
 			const cases = [
-				{level: 3, conBase: 16, expected: 13},  // 8+2+3
-				{level: 5, conBase: 16, expected: 14},  // 8+3+3
-				{level: 9, conBase: 18, expected: 16},  // 8+4+4
+				{level: 3, conBase: 16, expected: 13}, // 8+2+3
+				{level: 5, conBase: 16, expected: 14}, // 8+3+3
+				{level: 9, conBase: 18, expected: 16}, // 8+4+4
 				{level: 17, conBase: 20, expected: 19}, // 8+6+5
 			];
 
 			for (const {level, conBase, expected} of cases) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Fighter", source: "TGTT", level,
+					name: "Fighter",
+					source: "TGTT",
+					level,
 					hitDice: "d10",
 					subclass: {name: "Arcane Archer", shortName: "Arcane Archer", source: "TGTT"},
 				});
@@ -139,7 +143,6 @@ describe("TGTT Arcane Archer Fighter", () => {
 	// COMBAT METHODS (Fighter gets at L1)
 	// =========================================================================
 	describe("Combat Methods (Fighter at L1)", () => {
-
 		beforeEach(() => {
 			makeArcaneArcher(5);
 		});
@@ -312,7 +315,9 @@ describe("TGTT Arcane Archer Fighter", () => {
 			it(`should have ${expected} Arcane Shot options at Fighter level ${level}`, () => {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Fighter", source: "TGTT", level,
+					name: "Fighter",
+					source: "TGTT",
+					level,
 					hitDice: "d10",
 					subclass: {name: "Arcane Archer", shortName: "Arcane Archer", source: "TGTT"},
 				});
@@ -408,7 +413,9 @@ describe("TGTT Arcane Archer Fighter", () => {
 			it(`should have ${expected} Indomitable use(s) at level ${level}`, () => {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Fighter", source: "TGTT", level,
+					name: "Fighter",
+					source: "TGTT",
+					level,
 					hitDice: "d10",
 					subclass: level >= 3 ? {name: "Arcane Archer", shortName: "Arcane Archer", source: "TGTT"} : undefined,
 				});
@@ -508,7 +515,6 @@ describe("TGTT Arcane Archer Fighter", () => {
 	// ARCANE ARCHER SUBCLASS FEATURES
 	// =========================================================================
 	describe("Arcane Archer Subclass Features", () => {
-
 		describe("Magic Arrow (Level 3)", () => {
 			it("should grant Magic Arrow at level 3", () => {
 				makeArcaneArcher(3);
@@ -610,7 +616,9 @@ describe("TGTT Arcane Archer Fighter", () => {
 			for (let lvl = 1; lvl <= 20; lvl++) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Fighter", source: "TGTT", level: lvl,
+					name: "Fighter",
+					source: "TGTT",
+					level: lvl,
 					hitDice: "d10",
 					subclass: lvl >= 3
 						? {name: "Arcane Archer", shortName: "Arcane Archer", source: "TGTT"}
@@ -627,7 +635,9 @@ describe("TGTT Arcane Archer Fighter", () => {
 			for (let lvl = 3; lvl <= 20; lvl++) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Fighter", source: "TGTT", level: lvl,
+					name: "Fighter",
+					source: "TGTT",
+					level: lvl,
 					hitDice: "d10",
 					subclass: {name: "Arcane Archer", shortName: "Arcane Archer", source: "TGTT"},
 				});

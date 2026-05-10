@@ -684,8 +684,8 @@ export class PartyTrackerCharacter {
 				<option value="1" ${this._data.skillProficiencies[skill] === 1 ? "selected" : ""}>Prof</option>
 				<option value="2" ${this._data.skillProficiencies[skill] === 2 ? "selected" : ""}>Exp</option>
 			</select>`.onn("change", (e) => {
-				this._data.skillProficiencies[skill] = Number(e.target.value); this._renderExpandedForm(); this._doUpdate();
-			});
+		this._data.skillProficiencies[skill] = Number(e.target.value); this._renderExpandedForm(); this._doUpdate();
+	});
 
 			const manualVal = this._data.bonuses?.skills?.[skill] || 0;
 			const iptManual = ee`<input class="ve-form-control ve-input-xs ve-text-center dm-party__bonus-input" type="number" value="${manualVal}" title="Extra bonus to ${displayName}" aria-label="Extra ${displayName} bonus">`

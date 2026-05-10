@@ -95,33 +95,33 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		spells._allSpells = Object.values(SAMPLE_SPELLS);
 	});
 
-		it("should only offer Quickened Spell for action-cast spells", () => {
-			state.getKnownMetamagicKeys = () => ["quickened"];
-			state.setSorceryPoints(5, 5);
+	it("should only offer Quickened Spell for action-cast spells", () => {
+		state.getKnownMetamagicKeys = () => ["quickened"];
+		state.setSorceryPoints(5, 5);
 
-			const actionSpell = {
-				...SAMPLE_SPELLS.fireball,
-				time: [{number: 1, unit: "action"}],
-			};
-			const actionOptions = state.getCastableActiveMetamagics({
-				spell: {name: "Fireball", source: "XPHB", level: 3},
-				spellData: actionSpell,
-				slotLevel: 3,
-			});
-			expect(actionOptions[0].isAvailable).toBe(true);
-
-			const nonActionSpell = {
-				...actionSpell,
-				time: [{number: 10, unit: "minute"}],
-			};
-			const nonActionOptions = state.getCastableActiveMetamagics({
-				spell: {name: "Fireball", source: "XPHB", level: 3},
-				spellData: nonActionSpell,
-				slotLevel: 3,
-			});
-			expect(nonActionOptions[0].isAvailable).toBe(false);
-			expect(nonActionOptions[0].unavailableReason).toContain("casting time of 1 action");
+		const actionSpell = {
+			...SAMPLE_SPELLS.fireball,
+			time: [{number: 1, unit: "action"}],
+		};
+		const actionOptions = state.getCastableActiveMetamagics({
+			spell: {name: "Fireball", source: "XPHB", level: 3},
+			spellData: actionSpell,
+			slotLevel: 3,
 		});
+		expect(actionOptions[0].isAvailable).toBe(true);
+
+		const nonActionSpell = {
+			...actionSpell,
+			time: [{number: 10, unit: "minute"}],
+		};
+		const nonActionOptions = state.getCastableActiveMetamagics({
+			spell: {name: "Fireball", source: "XPHB", level: 3},
+			spellData: nonActionSpell,
+			slotLevel: 3,
+		});
+		expect(nonActionOptions[0].isAvailable).toBe(false);
+		expect(nonActionOptions[0].unavailableReason).toContain("casting time of 1 action");
+	});
 
 	it("should maximize base spell damage for Overcharged Spell", () => {
 		const result = spells._rollSpellDamage(SAMPLE_SPELLS.fireball, 3, 3, {key: "overcharged"});

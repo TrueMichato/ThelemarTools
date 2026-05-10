@@ -513,7 +513,7 @@ describe("Character Sheet Companions", () => {
 			state.breakConcentration();
 
 			expect(state.getCompanion(id1).active).toBe(false); // Dismissed
-			expect(state.getCompanion(id2).active).toBe(true);  // Not affected
+			expect(state.getCompanion(id2).active).toBe(true); // Not affected
 		});
 
 		test("should report correct count of dismissed companions", () => {
@@ -544,10 +544,10 @@ describe("Character Sheet Companions", () => {
 		});
 
 		test("should calculate ability modifiers", () => {
-			expect(state.getCompanionAbilityMod(companionId, "str")).toBe(2);  // 14 → +2
-			expect(state.getCompanionAbilityMod(companionId, "dex")).toBe(2);  // 15 → +2
+			expect(state.getCompanionAbilityMod(companionId, "str")).toBe(2); // 14 → +2
+			expect(state.getCompanionAbilityMod(companionId, "dex")).toBe(2); // 15 → +2
 			expect(state.getCompanionAbilityMod(companionId, "int")).toBe(-4); // 3 → -4
-			expect(state.getCompanionAbilityMod(companionId, "wis")).toBe(1);  // 12 → +1
+			expect(state.getCompanionAbilityMod(companionId, "wis")).toBe(1); // 12 → +1
 		});
 
 		test("should calculate save modifiers with proficiency", () => {
@@ -575,7 +575,9 @@ describe("Character Sheet Companions", () => {
 	describe("Steel Defender", () => {
 		test("should calculate HP based on artificer level and INT", () => {
 			// INT mod = +3 (16 INT)
-			state.addClass({name: "Artificer", source: "TCE", level: 5,
+			state.addClass({name: "Artificer",
+				source: "TCE",
+				level: 5,
 				subclass: {name: "battle smith"}});
 
 			const id = state.addCompanion({
@@ -593,7 +595,9 @@ describe("Character Sheet Companions", () => {
 		});
 
 		test("should scale HP when level increases", () => {
-			state.addClass({name: "Artificer", source: "TCE", level: 5,
+			state.addClass({name: "Artificer",
+				source: "TCE",
+				level: 5,
 				subclass: {name: "battle smith"}});
 
 			const id = state.addCompanion({
@@ -603,7 +607,9 @@ describe("Character Sheet Companions", () => {
 			});
 
 			// Level up to 10
-			state.addClass({name: "Artificer", source: "TCE", level: 10,
+			state.addClass({name: "Artificer",
+				source: "TCE",
+				level: 10,
 				subclass: {name: "battle smith"}});
 
 			const companion = state.getCompanion(id);
@@ -612,7 +618,9 @@ describe("Character Sheet Companions", () => {
 		});
 
 		test("should cap current HP at new max if max decreased", () => {
-			state.addClass({name: "Artificer", source: "TCE", level: 5,
+			state.addClass({name: "Artificer",
+				source: "TCE",
+				level: 5,
 				subclass: {name: "battle smith"}});
 
 			const id = state.addCompanion({
@@ -632,7 +640,9 @@ describe("Character Sheet Companions", () => {
 	// ===================================================================
 	describe("Beast Companion", () => {
 		test("should calculate HP based on ranger level", () => {
-			state.addClass({name: "Ranger", source: "PHB", level: 5,
+			state.addClass({name: "Ranger",
+				source: "PHB",
+				level: 5,
 				subclass: {name: "Beast Master"}});
 
 			const id = state.addCompanion({
@@ -647,7 +657,9 @@ describe("Character Sheet Companions", () => {
 		});
 
 		test("should use character proficiency bonus", () => {
-			state.addClass({name: "Ranger", source: "PHB", level: 5,
+			state.addClass({name: "Ranger",
+				source: "PHB",
+				level: 5,
 				subclass: {name: "Beast Master"}});
 
 			const id = state.addCompanion({name: "Wolf", type: "beast_companion"});
@@ -662,7 +674,9 @@ describe("Character Sheet Companions", () => {
 	// ===================================================================
 	describe("Drake Companion", () => {
 		test("should calculate HP based on ranger level", () => {
-			state.addClass({name: "Ranger", source: "PHB", level: 7,
+			state.addClass({name: "Ranger",
+				source: "PHB",
+				level: 7,
 				subclass: {name: "Drakewarden"}});
 
 			const id = state.addCompanion({
@@ -677,7 +691,9 @@ describe("Character Sheet Companions", () => {
 		});
 
 		test("should gain fly speed at level 7 (Bond of Fang and Scale)", () => {
-			state.addClass({name: "Ranger", source: "PHB", level: 7,
+			state.addClass({name: "Ranger",
+				source: "PHB",
+				level: 7,
 				subclass: {name: "Drakewarden"}});
 
 			const id = state.addCompanion({name: "Drake", type: "drake"});
@@ -687,7 +703,9 @@ describe("Character Sheet Companions", () => {
 		});
 
 		test("should become Large at level 15 (Perfected Bond)", () => {
-			state.addClass({name: "Ranger", source: "PHB", level: 15,
+			state.addClass({name: "Ranger",
+				source: "PHB",
+				level: 15,
 				subclass: {name: "Drakewarden"}});
 
 			const id = state.addCompanion({name: "Drake", type: "drake"});
@@ -702,7 +720,9 @@ describe("Character Sheet Companions", () => {
 	// ===================================================================
 	describe("Familiar (Animal Accomplice)", () => {
 		test("should calculate HP and INT based on wizard level", () => {
-			state.addClass({name: "Wizard", source: "TGTT", level: 6,
+			state.addClass({name: "Wizard",
+				source: "TGTT",
+				level: 6,
 				subclass: {name: "Order of the Animal Accomplice"}});
 
 			const id = state.addCompanion({name: "Cat", type: "familiar"});
@@ -729,7 +749,12 @@ describe("Character Sheet Companions", () => {
 				ac: [{ac: 13, from: ["natural armor"]}],
 				hp: {average: 11, formula: "2d8 + 2"},
 				speed: {walk: 40},
-				str: 12, dex: 15, con: 12, int: 3, wis: 12, cha: 6,
+				str: 12,
+				dex: 15,
+				con: 12,
+				int: 3,
+				wis: 12,
+				cha: 6,
 				skill: {perception: "+3", stealth: "+4"},
 				senses: ["darkvision 60 ft."],
 				passive: 13,
@@ -766,13 +791,20 @@ describe("Character Sheet Companions", () => {
 				ac: [{special: "15 (natural armor)"}],
 				hp: {special: "2 + your Intelligence modifier + five times your artificer level"},
 				speed: {walk: 40},
-				str: 14, dex: 12, con: 14, int: 4, wis: 10, cha: 6,
+				str: 14,
+				dex: 12,
+				con: 14,
+				int: 4,
+				wis: 10,
+				cha: 6,
 				save: {dex: "+1 plus PB", con: "+2 plus PB"},
 				immune: ["poison"],
 				conditionImmune: ["charmed", "exhaustion", "poisoned"],
 			};
 
-			state.addClass({name: "Artificer", source: "TCE", level: 5,
+			state.addClass({name: "Artificer",
+				source: "TCE",
+				level: 5,
 				subclass: {name: "battle smith"}});
 
 			const id = state.addCompanionFromBestiary(
@@ -877,7 +909,9 @@ describe("Character Sheet Companions", () => {
 	// ===================================================================
 	describe("Level Up Recalculation", () => {
 		test("addClass should trigger companion recalculation", () => {
-			state.addClass({name: "Artificer", source: "TCE", level: 3,
+			state.addClass({name: "Artificer",
+				source: "TCE",
+				level: 3,
 				subclass: {name: "battle smith"}});
 
 			const id = state.addCompanion({
@@ -889,7 +923,9 @@ describe("Character Sheet Companions", () => {
 			const hpAtL3 = state.getCompanion(id).hp.max; // 2 + 3 + 15 = 20
 
 			// Level up triggers recalculation
-			state.addClass({name: "Artificer", source: "TCE", level: 8,
+			state.addClass({name: "Artificer",
+				source: "TCE",
+				level: 8,
 				subclass: {name: "battle smith"}});
 
 			const hpAtL8 = state.getCompanion(id).hp.max; // 2 + 3 + 40 = 45
@@ -903,7 +939,9 @@ describe("Character Sheet Companions", () => {
 	// ===================================================================
 	describe("recalculateAllCompanions", () => {
 		test("should recalculate all companions", () => {
-			state.addClass({name: "Ranger", source: "PHB", level: 5,
+			state.addClass({name: "Ranger",
+				source: "PHB",
+				level: 5,
 				subclass: {name: "Drakewarden"}});
 
 			const id1 = state.addCompanion({name: "Drake", type: "drake", hp: {max: 1}});

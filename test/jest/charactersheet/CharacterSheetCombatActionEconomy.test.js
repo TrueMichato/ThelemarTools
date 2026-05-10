@@ -238,12 +238,12 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 		});
 
 		it("should parse focus cost from HTML-rendered descriptions", () => {
-			const feature = {description: 'Once per turn when you hit a creature with an <a href="variantrules.html#unarmed%20strike_xphb" class="help-subtle">Unarmed Strike</a> and deal damage, you can expend 1 Focus Point to deal extra Necrotic damage.'};
+			const feature = {description: "Once per turn when you hit a creature with an <a href=\"variantrules.html#unarmed%20strike_xphb\" class=\"help-subtle\">Unarmed Strike</a> and deal damage, you can expend 1 Focus Point to deal extra Necrotic damage."};
 			expect(combat._parseResourceCost(feature, "focus")).toBe(1);
 		});
 
 		it("should parse ki cost from description with HTML tags around other words", () => {
-			const feature = {description: 'As a <a href="actions.html#magic_xphb">Magic</a> action, you can spend 1 ki point to touch a creature.'};
+			const feature = {description: "As a <a href=\"actions.html#magic_xphb\">Magic</a> action, you can spend 1 ki point to touch a creature."};
 			expect(combat._parseResourceCost(feature, "ki")).toBe(1);
 		});
 	});

@@ -257,69 +257,69 @@ class CharacterSheetRest {
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✓ Finish Short Rest"});
 		btnConfirm.onClick(() => {
-				// Apply hit dice spending using spentDice tracker
-				Object.entries(spentDice).forEach(([dieType, count]) => {
-					for (let i = 0; i < count; i++) {
-						this._state.useHitDie(dieType);
+			// Apply hit dice spending using spentDice tracker
+			Object.entries(spentDice).forEach(([dieType, count]) => {
+				for (let i = 0; i < count; i++) {
+					this._state.useHitDie(dieType);
+				}
+			});
+
+			if (totalHealing > 0) {
+				this._state.heal(totalHealing);
+			}
+			this._restoreResources("short");
+
+			// Restore Warlock pact slots on short rest
+			const pactSlots = this._state.getPactSlots();
+			if (pactSlots && pactSlots.max > 0) {
+				this._state.setPactSlotsCurrent(pactSlots.max);
+			}
+
+			// Remove selected conditions
+			conditionsToRemove.forEach(condition => {
+				this._state.removeCondition?.(condition);
+			});
+
+			// Break concentration if requested
+			if (shouldBreakConcentration) {
+				this._state.breakConcentration?.();
+			}
+
+			// Apply Arcane/Natural Recovery slot selections
+			let slotsRecovered = 0;
+			if (hasSlotRecovery && slotRecoverySelections) {
+				const slotsToRecover = Object.entries(slotRecoverySelections)
+					.filter(([_, amount]) => amount > 0)
+					.map(([level, amount]) => ({level: parseInt(level), amount}));
+
+				if (slotsToRecover.length > 0) {
+					const method = calc.hasArcaneRecovery
+						? "useArcaneRecovery"
+						: "useNaturalRecovery";
+					if (this._state[method](slotsToRecover)) {
+						slotsRecovered = slotsToRecover.reduce((s, r) => s + r.amount, 0);
 					}
-				});
-
-				if (totalHealing > 0) {
-					this._state.heal(totalHealing);
 				}
-				this._restoreResources("short");
+			}
 
-				// Restore Warlock pact slots on short rest
-				const pactSlots = this._state.getPactSlots();
-				if (pactSlots && pactSlots.max > 0) {
-					this._state.setPactSlotsCurrent(pactSlots.max);
-				}
+			// Sorcerous Restoration is auto-applied via onShortRest → applySorcerousRestoration
+			const spRecovered = this._state.applySorcerousRestoration();
 
-				// Remove selected conditions
-				conditionsToRemove.forEach(condition => {
-					this._state.removeCondition?.(condition);
-				});
+			this._page.saveCharacter();
+			this._page.renderCharacter();
+			doClose(true);
 
-				// Break concentration if requested
-				if (shouldBreakConcentration) {
-					this._state.breakConcentration?.();
-				}
+			let message = `😴 Short rest complete!`;
+			if (totalHealing > 0) message += ` Recovered ${totalHealing} HP.`;
+			if (slotsRecovered > 0) message += ` Recovered ${slotsRecovered} spell slot(s) via ${slotRecoveryFeatureName}.`;
+			if (spRecovered > 0) message += ` Recovered ${spRecovered} sorcery point(s).`;
+			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
+			if (shouldBreakConcentration) message += ` Broke concentration.`;
 
-				// Apply Arcane/Natural Recovery slot selections
-				let slotsRecovered = 0;
-				if (hasSlotRecovery && slotRecoverySelections) {
-					const slotsToRecover = Object.entries(slotRecoverySelections)
-						.filter(([_, amount]) => amount > 0)
-						.map(([level, amount]) => ({level: parseInt(level), amount}));
-
-					if (slotsToRecover.length > 0) {
-						const method = calc.hasArcaneRecovery
-							? "useArcaneRecovery"
-							: "useNaturalRecovery";
-						if (this._state[method](slotsToRecover)) {
-							slotsRecovered = slotsToRecover.reduce((s, r) => s + r.amount, 0);
-						}
-					}
-				}
-
-				// Sorcerous Restoration is auto-applied via onShortRest → applySorcerousRestoration
-				const spRecovered = this._state.applySorcerousRestoration();
-
-				this._page.saveCharacter();
-				this._page.renderCharacter();
-				doClose(true);
-
-				let message = `😴 Short rest complete!`;
-				if (totalHealing > 0) message += ` Recovered ${totalHealing} HP.`;
-				if (slotsRecovered > 0) message += ` Recovered ${slotsRecovered} spell slot(s) via ${slotRecoveryFeatureName}.`;
-				if (spRecovered > 0) message += ` Recovered ${spRecovered} sorcery point(s).`;
-				if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
-				if (shouldBreakConcentration) message += ` Broke concentration.`;
-
-				JqueryUtil.doToast({
-					type: "success",
-					content: message,
-				});
+			JqueryUtil.doToast({
+				type: "success",
+				content: message,
+			});
 		});
 
 		ee`<div class="charsheet__modal-footer">
@@ -463,90 +463,90 @@ class CharacterSheetRest {
 		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel", click: () => doClose(false)});
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		btnConfirm.onClick(() => {
-				// Full HP recovery
-				this._state.setHp(maxHp, maxHp, cbResetTempHp.checked ? 0 : this._state.getHp().temp);
+			// Full HP recovery
+			this._state.setHp(maxHp, maxHp, cbResetTempHp.checked ? 0 : this._state.getHp().temp);
 
-				// Recover half hit dice (minimum 1)
-				hitDice.forEach(hd => {
-					const recovery = Math.max(1, Math.floor(hd.max / 2));
-					hd.current = Math.min(hd.max, hd.current + recovery);
-				});
-				this._state.setHitDice(hitDice);
+			// Recover half hit dice (minimum 1)
+			hitDice.forEach(hd => {
+				const recovery = Math.max(1, Math.floor(hd.max / 2));
+				hd.current = Math.min(hd.max, hd.current + recovery);
+			});
+			this._state.setHitDice(hitDice);
 
-				// Restore all spell slots
-				for (let level = 1; level <= 9; level++) {
-					const max = this._state.getSpellSlotsMax(level);
-					if (max > 0) {
-						this._state.setSpellSlots(level, max, max);
-					}
+			// Restore all spell slots
+			for (let level = 1; level <= 9; level++) {
+				const max = this._state.getSpellSlotsMax(level);
+				if (max > 0) {
+					this._state.setSpellSlots(level, max, max);
 				}
+			}
 
-				// Restore Warlock pact slots on long rest as well
-				const pactSlots = this._state.getPactSlots();
-				if (pactSlots && pactSlots.max > 0) {
-					this._state.setPactSlotsCurrent(pactSlots.max);
+			// Restore Warlock pact slots on long rest as well
+			const pactSlots = this._state.getPactSlots();
+			if (pactSlots && pactSlots.max > 0) {
+				this._state.setPactSlotsCurrent(pactSlots.max);
+			}
+
+			// Restore long-rest and short-rest resources
+			this._restoreResources("long");
+
+			// Clear one level of exhaustion using the dedicated exhaustion tracker
+			if (cbClearExhaustion.checked) {
+				const currentExhaustion = this._state.getExhaustion();
+				if (currentExhaustion > 0) {
+					this._state.setExhaustion(currentExhaustion - 1);
 				}
+			}
 
-				// Restore long-rest and short-rest resources
-				this._restoreResources("long");
+			// Remove selected conditions
+			conditionsToRemove.forEach(condition => {
+				this._state.removeCondition?.(condition);
+			});
 
-				// Clear one level of exhaustion using the dedicated exhaustion tracker
-				if (cbClearExhaustion.checked) {
-					const currentExhaustion = this._state.getExhaustion();
-					if (currentExhaustion > 0) {
-						this._state.setExhaustion(currentExhaustion - 1);
-					}
-				}
+			// Break concentration if requested
+			if (cbBreakConcentration?.checked) {
+				this._state.breakConcentration?.();
+			}
 
-				// Remove selected conditions
-				conditionsToRemove.forEach(condition => {
-					this._state.removeCondition?.(condition);
-				});
+			// Reset death saves
+			this._state.setDeathSaves({successes: 0, failures: 0});
 
-				// Break concentration if requested
-				if (cbBreakConcentration?.checked) {
-					this._state.breakConcentration?.();
-				}
+			// Reset Gambler prepared spell roll (TGTT Rogue subclass)
+			const calcs = this._state.getFeatureCalculations();
+			if (calcs.hasGamblerSpellcasting) {
+				// Reset the rolled prepared count - requires new roll after rest
+				this._state.resetGamblerPreparedRoll(false); // Keep current prepared spells as options
+			}
 
-				// Reset death saves
-				this._state.setDeathSaves({successes: 0, failures: 0});
+			// Reset Gambler daily resources (Extra Luck, Master of Fortune uses)
+			if (calcs.hasGamblerFolly) {
+				this._state.resetGamblerDailyResources();
+			}
 
-				// Reset Gambler prepared spell roll (TGTT Rogue subclass)
-				const calcs = this._state.getFeatureCalculations();
-				if (calcs.hasGamblerSpellcasting) {
-					// Reset the rolled prepared count - requires new roll after rest
-					this._state.resetGamblerPreparedRoll(false); // Keep current prepared spells as options
-				}
+			// Save changes
+			this._page.saveCharacter();
+			this._page.renderCharacter();
 
-				// Reset Gambler daily resources (Extra Luck, Master of Fortune uses)
-				if (calcs.hasGamblerFolly) {
-					this._state.resetGamblerDailyResources();
-				}
+			doClose(true);
 
-				// Save changes
-				this._page.saveCharacter();
-				this._page.renderCharacter();
+			let message = "🌙 Long rest complete! All resources restored.";
+			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
+			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
 
-				doClose(true);
+			JqueryUtil.doToast({
+				type: "success",
+				content: message,
+			});
 
-				let message = "🌙 Long rest complete! All resources restored.";
-				if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
-				if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
+			// Auto-popup Gambler prepared roll modal after long rest
+			if (calcs.hasGamblerSpellcasting) {
+				this._showGamblerPreparedRollModal();
+			}
 
-				JqueryUtil.doToast({
-					type: "success",
-					content: message,
-				});
-
-				// Auto-popup Gambler prepared roll modal after long rest
-				if (calcs.hasGamblerSpellcasting) {
-					this._showGamblerPreparedRollModal();
-				}
-
-				// Auto-popup scribing memorization after long rest (Spell Scribing Adept)
-				if (calcs.hasSpellScribingAdept && calcs.scribingSpellbookCount > 0) {
-					this._showScribingMemorizeModal();
-				}
+			// Auto-popup scribing memorization after long rest (Spell Scribing Adept)
+			if (calcs.hasSpellScribingAdept && calcs.scribingSpellbookCount > 0) {
+				this._showScribingMemorizeModal();
+			}
 		});
 
 		ee`<div class="charsheet__modal-footer">

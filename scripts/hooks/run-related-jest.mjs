@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable no-console */
 // Run jest only on tests related to staged JS files.
 // Also triggers a TGTT-pattern run when js/tgtt-filter.js or any TGTT test file
 // is staged, since tgtt-filter is brittle and worth re-running broadly.

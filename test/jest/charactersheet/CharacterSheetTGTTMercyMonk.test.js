@@ -23,7 +23,6 @@ beforeAll(async () => {
 });
 
 describe("TGTT Way of Mercy Monk", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -136,9 +135,9 @@ describe("TGTT Way of Mercy Monk", () => {
 
 		it("should scale stamina across levels", () => {
 			const cases = [
-				{level: 2, expected: 4},   // prof +2
-				{level: 5, expected: 6},   // prof +3
-				{level: 9, expected: 8},   // prof +4
+				{level: 2, expected: 4}, // prof +2
+				{level: 5, expected: 6}, // prof +3
+				{level: 9, expected: 8}, // prof +4
 				{level: 13, expected: 10}, // prof +5
 				{level: 17, expected: 12}, // prof +6
 			];
@@ -171,7 +170,9 @@ describe("TGTT Way of Mercy Monk", () => {
 		it("should scale DC with proficiency and ability increases", () => {
 			const s = new CharacterSheetState();
 			s.addClass({
-				name: "Monk", source: "TGTT", level: 9,
+				name: "Monk",
+				source: "TGTT",
+				level: 9,
 				subclass: {name: "Warrior of Mercy", shortName: "Mercy", source: "TGTT"},
 			});
 			s.setAbilityBase("dex", 18); // +4
@@ -240,7 +241,6 @@ describe("TGTT Way of Mercy Monk", () => {
 	// SUBCLASS FEATURES
 	// =========================================================================
 	describe("Way of Mercy SubclassFeatures", () => {
-
 		describe("Hand of Healing / Hand of Harm (Level 3)", () => {
 			it("should grant Hand of Healing at level 3", () => {
 				makeMercyMonk(3);
@@ -296,7 +296,9 @@ describe("TGTT Way of Mercy Monk", () => {
 				it(`should compute handOfHealingAmount = "${expected}" at level ${level}`, () => {
 					const s = new CharacterSheetState();
 					s.addClass({
-						name: "Monk", source: "TGTT", level,
+						name: "Monk",
+						source: "TGTT",
+						level,
 						subclass: {name: "Warrior of Mercy", shortName: "Mercy", source: "TGTT"},
 					});
 					s.setAbilityBase("wis", 16); // +3
@@ -318,7 +320,9 @@ describe("TGTT Way of Mercy Monk", () => {
 				it(`should compute handOfHarmDamage = "${expected}" at level ${level}`, () => {
 					const s = new CharacterSheetState();
 					s.addClass({
-						name: "Monk", source: "TGTT", level,
+						name: "Monk",
+						source: "TGTT",
+						level,
 						subclass: {name: "Warrior of Mercy", shortName: "Mercy", source: "TGTT"},
 					});
 					s.setAbilityBase("wis", 16); // +3
@@ -618,7 +622,9 @@ describe("TGTT Way of Mercy Monk", () => {
 			for (let lvl = 1; lvl <= 20; lvl++) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Monk", source: "TGTT", level: lvl,
+					name: "Monk",
+					source: "TGTT",
+					level: lvl,
 					subclass: lvl >= 3
 						? {name: "Warrior of Mercy", shortName: "Mercy", source: "TGTT"}
 						: undefined,

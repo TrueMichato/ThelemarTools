@@ -1164,7 +1164,7 @@ class CharacterSheetCombat {
 		if (spellDamageBonus) subtitle += ` + ${spellDamageBonus} (spell item)`;
 		if (sneakAttackDamage) subtitle += ` + ${sneakAttackDamage} (sneak attack ${sneakAttackDice})`;
 		for (const ep of extraDamageParts) {
-			subtitle += ` + ${ep.total} (${ep.source}${ep.type ? " " + ep.type : ""})`;
+			subtitle += ` + ${ep.total} (${ep.source}${ep.type ? ` ${ep.type}` : ""})`;
 		}
 		subtitle += ` ${attack.damageType}`;
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
@@ -1822,7 +1822,7 @@ class CharacterSheetCombat {
 			const gem = attack.sourceItem.socketedGemstones[0];
 			const summary = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneSummary(gem) : "";
 			const chargeStr = gem.chargesMax ? ` [${gem.chargesCurrent ?? gem.chargesMax}/${gem.chargesMax}]` : "";
-			badgeHtml += ` <span class="badge badge-success" title="${gem.name}${chargeStr}${summary ? ": " + summary : ""}">💎 ${gem.gemName || gem.name}${chargeStr}</span>`;
+			badgeHtml += ` <span class="badge badge-success" title="${gem.name}${chargeStr}${summary ? `: ${summary}` : ""}">💎 ${gem.gemName || gem.name}${chargeStr}</span>`;
 			if (summary && !upgradeNotesHtml) upgradeNotesHtml = `<div class="ve-small ve-muted charsheet__attack-upgrade-note">💎 ${summary}</div>`;
 		}
 
@@ -3580,9 +3580,7 @@ class CharacterSheetCombat {
 		const actionType = this._getFeatureActionType(feature);
 		let actionLabel = "Action";
 		let actionIcon = "⚔️";
-		if (actionType === "bonus") { actionLabel = "Bonus Action"; actionIcon = "⚡"; }
-		else if (actionType === "reaction") { actionLabel = "Reaction"; actionIcon = "🔄"; }
-		else if (actionType === "free") { actionLabel = "Free"; actionIcon = "✨"; }
+		if (actionType === "bonus") { actionLabel = "Bonus Action"; actionIcon = "⚡"; } else if (actionType === "reaction") { actionLabel = "Reaction"; actionIcon = "🔄"; } else if (actionType === "free") { actionLabel = "Free"; actionIcon = "✨"; }
 
 		// Feature type badge
 		const featureTypeBadge = feature.featureType
@@ -4144,7 +4142,7 @@ class CharacterSheetCombat {
 					const isFromState = stateConditionImmunities.includes(c) && !conditionImmunities.includes(c);
 					const conditionSource = conditionSourceMap.get(c.toLowerCase()) || Parser.SRC_XPHB;
 					const displayName = c.charAt(0).toUpperCase() + c.slice(1);
-					
+
 					// Create hoverable link
 					let conditionContent = displayName;
 					try {
@@ -4159,7 +4157,7 @@ class CharacterSheetCombat {
 						// Fall back to plain name if hover fails
 						conditionContent = displayName;
 					}
-					
+
 					return `<span class="badge ${isFromState ? "badge-warning" : "badge-info"} mr-1" title="${isFromState ? "From active state" : "Base immunity"}">${conditionContent}</span>`;
 				}).join("");
 			} else {
@@ -5614,8 +5612,8 @@ class CharacterSheetCombat {
 		// Use state-calculated Method DC (handles Monk +1 base, WIS mod, Hexblade/Bladesinger override)
 		const calcs = this._state.getFeatureCalculations();
 		const profBonus = this._state.getProficiencyBonus();
-		const methodDC = calcs.combatMethodDc
-			?? (8 + profBonus + Math.max(this._state.getAbilityMod("str"), this._state.getAbilityMod("dex")));
+		const methodDC = calcs.combatMethodDc ??
+			(8 + profBonus + Math.max(this._state.getAbilityMod("str"), this._state.getAbilityMod("dex")));
 		if (dcDisplay) dcDisplay.textContent = methodDC;
 		if (tabDcDisplay) tabDcDisplay.textContent = methodDC;
 
@@ -6156,7 +6154,7 @@ class CharacterSheetCombat {
 				: "<span class=\"glyphicon glyphicon-pencil\"></span> Edit";
 			if (!editMode) {
 				renderTradsDisplay();
-					document.getElementById("method-picker-trad-count").textContent = selectedTraditions.length;
+				document.getElementById("method-picker-trad-count").textContent = selectedTraditions.length;
 				this._renderMethodList(methodList, allMethods, selectedTraditions, maxDegree, knownMethodNames, filterTrad, filterDegree, filterStatus, searchQuery);
 			}
 		});

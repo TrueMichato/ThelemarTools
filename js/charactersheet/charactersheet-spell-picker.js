@@ -885,11 +885,11 @@ class CharacterSheetSpellPicker {
 							<span class="charsheet__spell-picker-item-source">${Parser.sourceJsonToAbv(spell.source)}</span>
 						</div>
 						${isKnown
-							? `<span class="charsheet__spell-picker-item-badge charsheet__spell-picker-item-badge--known">✓ Known</span>`
-							: isSelected
-								? `<button class="ve-btn ve-btn-danger ve-btn-xs spell-toggle">✓</button>`
-								: `<button class="ve-btn ve-btn-primary ve-btn-xs spell-toggle">+</button>`
-						}
+		? `<span class="charsheet__spell-picker-item-badge charsheet__spell-picker-item-badge--known">✓ Known</span>`
+		: isSelected
+			? `<button class="ve-btn ve-btn-danger ve-btn-xs spell-toggle">✓</button>`
+			: `<button class="ve-btn ve-btn-primary ve-btn-xs spell-toggle">+</button>`
+}
 					</div>
 				`});
 

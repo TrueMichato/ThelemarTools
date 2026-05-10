@@ -43,4 +43,4 @@ state._data.staminaCurrent = 4;
 const pdf = new CharacterSheetPdf(state);
 const html = pdf.generate();
 fs.writeFileSync("/tmp/charsheet-preview.html", html);
-console.log("Done: " + html.length + " bytes");
+console.log(`Done: ${html.length} bytes`);

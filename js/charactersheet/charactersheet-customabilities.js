@@ -102,9 +102,9 @@ class CharacterSheetCustomAbilities {
 		const categories = CharacterSheetState.CUSTOM_ABILITY_CATEGORIES;
 		categorySelect.innerHTML = `
 			<option value="all">All Categories</option>
-			${Object.entries(categories).map(([id, cat]) => 
-				`<option value="${id}">${cat.icon} ${cat.name}</option>`
-			).join("")}
+			${Object.entries(categories).map(([id, cat]) =>
+		`<option value="${id}">${cat.icon} ${cat.name}</option>`,
+	).join("")}
 		`;
 
 		// Count display
@@ -150,8 +150,8 @@ class CharacterSheetCustomAbilities {
 			filtered = filtered.filter(a => {
 				const nameMatch = a.name.toLowerCase().includes(searchTerm);
 				const descMatch = (a.description || "").toLowerCase().includes(searchTerm);
-				const effectMatch = (a.effects || []).some(e => 
-					(e.type || "").toLowerCase().includes(searchTerm)
+				const effectMatch = (a.effects || []).some(e =>
+					(e.type || "").toLowerCase().includes(searchTerm),
 				);
 				return nameMatch || descMatch || effectMatch;
 			});
@@ -231,13 +231,13 @@ class CharacterSheetCustomAbilities {
 		// Header row
 		const header = document.createElement("div");
 		header.className = "custom-abilities__card-header";
-		
+
 		// Build badges HTML
 		const badgesHtml = [];
 		badgesHtml.push(`<span class="custom-abilities__mode-badge custom-abilities__mode-badge--${ability.mode}">
 			${ability.mode === "passive" ? "Passive" : ability.mode === "toggleable" ? "Toggle" : "Limited"}
 		</span>`);
-		
+
 		// Activation action badge (for non-passive, non-free)
 		if (ability.activationAction && ability.activationAction !== "free") {
 			const actionLabels = {action: "Action", bonus: "Bonus Action", reaction: "Reaction", special: "Special"};
@@ -246,17 +246,17 @@ class CharacterSheetCustomAbilities {
 				${actionIcons[ability.activationAction] || ""} ${actionLabels[ability.activationAction] || ability.activationAction}
 			</span>`);
 		}
-		
+
 		// Duration badge (for toggleable with duration)
 		if (ability.mode === "toggleable" && ability.duration) {
 			badgesHtml.push(`<span class="custom-abilities__duration-badge">⏱️ ${ability.duration}</span>`);
 		}
-		
+
 		// Concentration badge
 		if (ability.concentration) {
 			badgesHtml.push(`<span class="custom-abilities__concentration-badge">🔮 Concentration</span>`);
 		}
-		
+
 		header.innerHTML = `
 			<span class="custom-abilities__card-icon" style="color: ${category.color}">${ability.icon || category.icon}</span>
 			<span class="custom-abilities__card-name">${ability.name}</span>
@@ -391,7 +391,7 @@ class CharacterSheetCustomAbilities {
 		if (effect.setMinimum != null) parts.push(`<span class="ve-muted">Min:${effect.setMinimum}</span>`);
 		if (effect.bonusDie) parts.push(`<span class="text-info">+${effect.bonusDie}</span>`);
 
-		return `${label}${parts.length ? " " + parts.join(" ") : ""}`;
+		return `${label}${parts.length ? ` ${parts.join(" ")}` : ""}`;
 	}
 
 	/**
@@ -693,14 +693,14 @@ class CharacterSheetCustomAbilities {
 	_getClassOptionsHtml (state, selectedClass) {
 		// Common PHB classes as fallback
 		const commonClasses = ["Artificer", "Barbarian", "Bard", "Cleric", "Druid", "Fighter", "Monk", "Paladin", "Ranger", "Rogue", "Sorcerer", "Warlock", "Wizard"];
-		
+
 		// Get character's actual classes
 		const characterClasses = (state.getClasses?.() || []).map(c => c.name).filter(Boolean);
-		
+
 		// Combine and dedupe, prioritizing character classes
 		const allClasses = [...new Set([...characterClasses, ...commonClasses])];
-		
-		return allClasses.map(className => 
+
+		return allClasses.map(className =>
 			`<option value="${className}" ${className === selectedClass ? "selected" : ""}>${className}</option>`,
 		).join("");
 	}
@@ -759,7 +759,7 @@ class CharacterSheetCustomAbilities {
 
 		// Deep clone the ability
 		const cloned = JSON.parse(JSON.stringify(original));
-		
+
 		// Remove id and reset state
 		delete cloned.id;
 		cloned.name = `${cloned.name} (Copy)`;
@@ -770,7 +770,7 @@ class CharacterSheetCustomAbilities {
 
 		// Add as new ability
 		const newId = state.addCustomAbility(cloned);
-		
+
 		if (newId) {
 			this.render();
 			this._sheet._updateAllCalculations?.();
@@ -778,7 +778,7 @@ class CharacterSheetCustomAbilities {
 			this._sheet._renderResources?.();
 			this._sheet._combat?.renderCombatActions?.();
 			this._sheet._saveCurrentCharacter?.();
-			
+
 			// Open the modal for editing the new copy
 			this._showAbilityModal(newId);
 		}
@@ -922,7 +922,7 @@ class CharacterSheetCustomAbilities {
 									<div class="custom-abilities__form-field" style="flex: 2;">
 										<label>Resource Pool</label>
 										<select class="ve-form-control" name="linkedResourceId">
-											${resourceOptionsHtml || '<option value="" disabled>No resources available</option>'}
+											${resourceOptionsHtml || "<option value=\"\" disabled>No resources available</option>"}
 										</select>
 									</div>
 									<div class="custom-abilities__form-field">
@@ -993,7 +993,7 @@ class CharacterSheetCustomAbilities {
 									<div class="custom-abilities__form-field" style="flex: 2;">
 										<label>Resource Pool</label>
 										<select class="ve-form-control" name="toggleResourceId">
-											${resourceOptionsHtml || '<option value="" disabled>No resources available</option>'}
+											${resourceOptionsHtml || "<option value=\"\" disabled>No resources available</option>"}
 										</select>
 									</div>
 									<div class="custom-abilities__form-field">
@@ -1468,7 +1468,7 @@ class CharacterSheetCustomAbilities {
 			vulnerabilities: [],
 			conditionImmunities: [],
 		};
-		
+
 		// Size, reach, bonus damage, rerolls, crit range, temp HP - extracted from effects array
 		let sizeChange = 0; // Positive = enlarge, negative = reduce
 		let reachBonus = 0; // In increments of 5 ft
@@ -1477,7 +1477,7 @@ class CharacterSheetCustomAbilities {
 		let critRangeConfig = {enabled: false, mode: "set", value: 19, expand: 1}; // Critical range config
 		let tempHpConfig = {enabled: false, mode: "static", value: 5, dice: "1d4+4", onActivation: true}; // Temp HP config
 		let effects = []; // General effects (not size/reach/damage/reroll/critRange/tempHp)
-		
+
 		// Initialize from existing effects - extract special types and keep others
 		if (existingAbility?.effects) {
 			for (const e of existingAbility.effects) {
@@ -1558,11 +1558,11 @@ class CharacterSheetCustomAbilities {
 			if (sizeValueEl) {
 				const sign = sizeChange > 0 ? "+" : "";
 				sizeValueEl.textContent = sizeChange === 0 ? "0" : `${sign}${sizeChange}`;
-				sizeValueEl.className = "custom-abilities__size-value" + 
-					(sizeChange > 0 ? " custom-abilities__size-value--positive" : "") +
-					(sizeChange < 0 ? " custom-abilities__size-value--negative" : "");
+				sizeValueEl.className = `custom-abilities__size-value${
+					sizeChange > 0 ? " custom-abilities__size-value--positive" : ""
+				}${sizeChange < 0 ? " custom-abilities__size-value--negative" : ""}`;
 			}
-			
+
 			// Update size preview
 			const state = this._sheet.getState();
 			const baseSize = state.getBaseSize();
@@ -1579,16 +1579,16 @@ class CharacterSheetCustomAbilities {
 					preview.textContent = "";
 				}
 			}
-			
+
 			// Update reach value display
 			const reachValueEl = modal.querySelector("#reach-value");
 			if (reachValueEl) {
 				const reachFt = reachBonus * 5;
 				const sign = reachFt > 0 ? "+" : "";
 				reachValueEl.textContent = reachFt === 0 ? "0" : `${sign}${reachFt}`;
-				reachValueEl.className = "custom-abilities__reach-value" + 
-					(reachBonus > 0 ? " custom-abilities__reach-value--positive" : "") +
-					(reachBonus < 0 ? " custom-abilities__reach-value--negative" : "");
+				reachValueEl.className = `custom-abilities__reach-value${
+					reachBonus > 0 ? " custom-abilities__reach-value--positive" : ""
+				}${reachBonus < 0 ? " custom-abilities__reach-value--negative" : ""}`;
 			}
 		};
 
@@ -1596,14 +1596,14 @@ class CharacterSheetCustomAbilities {
 		const renderBonusDamageList = () => {
 			const list = modal.querySelector("#bonus-damage-list");
 			list.innerHTML = "";
-			
+
 			if (!bonusDamage.length) {
 				list.innerHTML = `<div class="ve-muted ve-small py-1">No bonus damage added</div>`;
 				return;
 			}
 
 			const damageTypeOptions = damageTypesList.map(t => `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`).join("");
-			
+
 			bonusDamage.forEach((dmg, idx) => {
 				const row = document.createElement("div");
 				row.className = "custom-abilities__bonus-damage-row";
@@ -1625,18 +1625,18 @@ class CharacterSheetCustomAbilities {
 			const list = modal.querySelector("#reroll-list");
 			if (!list) return;
 			list.innerHTML = "";
-			
+
 			if (!rerolls.length) {
 				list.innerHTML = `<div class="ve-muted ve-small py-1">No reroll effects added</div>`;
 				return;
 			}
-			
+
 			rerolls.forEach((r, idx) => {
 				const row = document.createElement("div");
 				row.className = "custom-abilities__reroll-row";
-				
+
 				const isDamage = r.rollType === "damage";
-				
+
 				row.innerHTML = `
 					<span class="ve-small">Reroll</span>
 					<select class="ve-form-control custom-abilities__reroll-trigger" style="width: 100px;">
@@ -1662,7 +1662,7 @@ class CharacterSheetCustomAbilities {
 					` : ""}
 					<button type="button" class="btn btn-xs btn-danger">&times;</button>
 				`;
-				
+
 				row.querySelector(".custom-abilities__reroll-trigger").addEventListener("change", e => {
 					rerolls[idx].trigger = e.target.value;
 				});
@@ -1681,7 +1681,7 @@ class CharacterSheetCustomAbilities {
 					rerolls.splice(idx, 1);
 					renderRerollsUI();
 				});
-				
+
 				list.appendChild(row);
 			});
 		};
@@ -1696,28 +1696,28 @@ class CharacterSheetCustomAbilities {
 			const expandValue = modal.querySelector("#critrange-expand-value");
 			const expandPreview = modal.querySelector("#critrange-expand-preview");
 			const modeRadios = modal.querySelectorAll("input[name='critRangeMode']");
-			
+
 			if (!enabledCheckbox) return;
-			
+
 			// Set checkbox state
 			enabledCheckbox.checked = critRangeConfig.enabled;
-			
+
 			// Show/hide config section
 			configSection.style.display = critRangeConfig.enabled ? "block" : "none";
-			
+
 			// Set mode radio
 			modeRadios.forEach(r => {
 				r.checked = r.value === critRangeConfig.mode;
 			});
-			
+
 			// Show/hide appropriate row
 			setRow.style.display = critRangeConfig.mode === "set" ? "flex" : "none";
 			expandRow.style.display = critRangeConfig.mode === "expand" ? "flex" : "none";
-			
+
 			// Set values
 			setValue.value = critRangeConfig.value;
 			expandValue.value = critRangeConfig.expand;
-			
+
 			// Update expand preview
 			const expandedRange = 20 - critRangeConfig.expand;
 			expandPreview.textContent = `${expandedRange}-20`;
@@ -1733,24 +1733,24 @@ class CharacterSheetCustomAbilities {
 			const diceValue = modal.querySelector("#temphp-dice-value");
 			const onActivationCheckbox = modal.querySelector("#temphp-on-activation");
 			const modeRadios = modal.querySelectorAll("input[name='tempHpMode']");
-			
+
 			if (!enabledCheckbox) return;
-			
+
 			// Set checkbox state
 			enabledCheckbox.checked = tempHpConfig.enabled;
-			
+
 			// Show/hide config section
 			configSection.style.display = tempHpConfig.enabled ? "block" : "none";
-			
+
 			// Set mode radio
 			modeRadios.forEach(r => {
 				r.checked = r.value === tempHpConfig.mode;
 			});
-			
+
 			// Show/hide appropriate row
 			staticRow.style.display = tempHpConfig.mode === "static" ? "flex" : "none";
 			diceRow.style.display = tempHpConfig.mode === "dice" ? "flex" : "none";
-			
+
 			// Set values
 			staticValue.value = tempHpConfig.value;
 			diceValue.value = tempHpConfig.dice;
@@ -1888,7 +1888,6 @@ class CharacterSheetCustomAbilities {
 						const classes = state.getClasses?.() || [];
 						effects[idx].perClassLevel = classes[0]?.name || "Fighter";
 						renderEffectsList(); // Re-render to show class selector
-						return;
 					}
 				});
 
@@ -1947,29 +1946,29 @@ class CharacterSheetCustomAbilities {
 		const syncFormToJson = () => {
 			// Build complete effects array from all sources
 			const allEffects = [...effects];
-			
+
 			// Add size change effects (supports multiple increments)
 			if (sizeChange > 0) {
 				allEffects.push({type: "sizeIncrease", value: sizeChange});
 			} else if (sizeChange < 0) {
 				allEffects.push({type: "sizeDecrease", value: Math.abs(sizeChange)});
 			}
-			
+
 			// Add reach bonus effect (supports multiple increments)
 			if (reachBonus > 0) {
 				allEffects.push({type: "reach", value: reachBonus * 5});
 			}
-			
+
 			// Add bonus damage effects
 			for (const dmg of bonusDamage) {
 				allEffects.push({type: `extraDamage:${dmg.type}`, dice: dmg.dice || "1d6"});
 			}
-			
+
 			// Add reroll effects
 			for (const r of rerolls) {
 				if (r.rollType === "damage") {
 					// Format: damage:reroll:TRIGGER:RESTRICTION
-					const type = r.restriction 
+					const type = r.restriction
 						? `damage:reroll:${r.trigger}:${r.restriction}`
 						: `damage:reroll:${r.trigger}`;
 					allEffects.push({type});
@@ -1978,7 +1977,7 @@ class CharacterSheetCustomAbilities {
 					allEffects.push({type: `reroll:${r.trigger}:${r.rollType}`});
 				}
 			}
-			
+
 			// Add critical range effect
 			if (critRangeConfig.enabled) {
 				if (critRangeConfig.mode === "set") {
@@ -1987,7 +1986,7 @@ class CharacterSheetCustomAbilities {
 					allEffects.push({type: "critRange:expand", value: critRangeConfig.expand});
 				}
 			}
-			
+
 			// Add temp HP effect
 			if (tempHpConfig.enabled) {
 				if (tempHpConfig.mode === "dice") {
@@ -2004,7 +2003,7 @@ class CharacterSheetCustomAbilities {
 					});
 				}
 			}
-			
+
 			const data = {
 				name: modal.querySelector("input[name='name']").value,
 				description: modal.querySelector("textarea[name='description']").value,
@@ -2015,13 +2014,13 @@ class CharacterSheetCustomAbilities {
 			};
 
 			// Add grants if any are defined (grants object is maintained by UI handlers)
-			const hasGrants = grants.spells.length > 0 ||
-				grants.proficiencies.skills.length > 0 ||
-				grants.proficiencies.tools.length > 0 ||
-				grants.proficiencies.weapons.length > 0 ||
-				grants.proficiencies.armor.length > 0 ||
-				grants.proficiencies.languages.length > 0 ||
-				grants.features.length > 0;
+			const hasGrants = grants.spells.length > 0
+				|| grants.proficiencies.skills.length > 0
+				|| grants.proficiencies.tools.length > 0
+				|| grants.proficiencies.weapons.length > 0
+				|| grants.proficiencies.armor.length > 0
+				|| grants.proficiencies.languages.length > 0
+				|| grants.features.length > 0;
 
 			if (hasGrants) {
 				data.grants = {
@@ -2038,10 +2037,10 @@ class CharacterSheetCustomAbilities {
 			}
 
 			// Add defensive traits if any are selected
-			const hasDefensiveTraits = defensiveTraits.resistances.length > 0 ||
-				defensiveTraits.immunities.length > 0 ||
-				defensiveTraits.vulnerabilities.length > 0 ||
-				defensiveTraits.conditionImmunities.length > 0;
+			const hasDefensiveTraits = defensiveTraits.resistances.length > 0
+				|| defensiveTraits.immunities.length > 0
+				|| defensiveTraits.vulnerabilities.length > 0
+				|| defensiveTraits.conditionImmunities.length > 0;
 
 			if (hasDefensiveTraits) {
 				data.defensiveTraits = {
@@ -2055,7 +2054,7 @@ class CharacterSheetCustomAbilities {
 			if (data.mode === "limited") {
 				const resourceSource = modal.querySelector("select[name='resourceSource']").value || "self";
 				data.resourceSource = { type: resourceSource };
-				
+
 				if (resourceSource === "self") {
 					data.uses = {
 						max: parseInt(modal.querySelector("input[name='maxUses']").value) || 1,
@@ -2167,7 +2166,7 @@ class CharacterSheetCustomAbilities {
 			rerolls = [];
 			critRangeConfig = {enabled: false, mode: "set", value: 19, expand: 1};
 			effects = [];
-			
+
 			for (const e of (data.effects || [])) {
 				if (e.type === "sizeIncrease") {
 					sizeChange += (e.value || 1);
@@ -2211,7 +2210,7 @@ class CharacterSheetCustomAbilities {
 					effects.push(e);
 				}
 			}
-			
+
 			renderEffectsList();
 			renderSizeReachUI();
 			renderBonusDamageList();
@@ -2367,7 +2366,7 @@ class CharacterSheetCustomAbilities {
 				try {
 					data = JSON.parse(modal.querySelector(".custom-abilities__json-editor").value);
 				} catch (e) {
-					alert("Invalid JSON: " + e.message);
+					alert(`Invalid JSON: ${e.message}`);
 					return;
 				}
 			} else {
@@ -2761,11 +2760,11 @@ class CharacterSheetCustomAbilities {
 	 * Update proficiency count badge
 	 */
 	_updateProfCount (modal, grants) {
-		const count = grants.proficiencies.skills.length +
-			grants.proficiencies.tools.length +
-			grants.proficiencies.weapons.length +
-			grants.proficiencies.armor.length +
-			grants.proficiencies.languages.length;
+		const count = grants.proficiencies.skills.length
+			+ grants.proficiencies.tools.length
+			+ grants.proficiencies.weapons.length
+			+ grants.proficiencies.armor.length
+			+ grants.proficiencies.languages.length;
 		this._updateGrantCount(modal, "grants-prof-count", count);
 	}
 
@@ -2828,7 +2827,7 @@ class CharacterSheetCustomAbilities {
 		if (datalist && toolsList.length) {
 			datalist.innerHTML = toolsList.map(t => `<option value="${t.name}">`).join("");
 		}
-		
+
 		this._renderProficiencyInputSection(modal, grants, "tools", "grants-tools-input", "grants-tools-add", "grants-tools-selected");
 	}
 
@@ -2841,7 +2840,7 @@ class CharacterSheetCustomAbilities {
 		if (datalist && languagesList.length) {
 			datalist.innerHTML = languagesList.map(l => `<option value="${l.name}">`).join("");
 		}
-		
+
 		this._renderProficiencyInputSection(modal, grants, "languages", "grants-languages-input", "grants-languages-add", "grants-languages-selected");
 	}
 
@@ -2975,7 +2974,7 @@ class CharacterSheetCustomAbilities {
 				"OTH": "Other",
 			};
 
-			let optionsHtml = '<option value="">All Types</option>';
+			let optionsHtml = "<option value=\"\">All Types</option>";
 			// Standard types first
 			Object.entries(standardTypes).forEach(([code, name]) => {
 				if (typeSet.has(code)) {
@@ -2994,7 +2993,7 @@ class CharacterSheetCustomAbilities {
 
 		// Populate source filter
 		if (sourceFilter) {
-			let sourceOptions = '<option value="">All Sources</option>';
+			let sourceOptions = "<option value=\"\">All Sources</option>";
 			[...sourceSet].sort().forEach(src => {
 				const srcFull = Parser.sourceJsonToFull?.(src) || src;
 				sourceOptions += `<option value="${src}">${srcFull}</option>`;
@@ -3133,7 +3132,7 @@ class CharacterSheetCustomAbilities {
 		const conditionsList = this._sheet.getConditionsList?.() || [];
 		const state = this._sheet.getState?.();
 		const prioritySources = state?.getPrioritySources?.() || [];
-		
+
 		// Group conditions by name, preferring priority sources, then XPHB
 		const conditionMap = new Map();
 		conditionsList.forEach(cond => {
@@ -3152,7 +3151,7 @@ class CharacterSheetCustomAbilities {
 				conditionMap.set(cond.name.toLowerCase(), {name: cond.name, source: cond.source});
 			}
 		});
-		
+
 		return Array.from(conditionMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 	}
 
@@ -3304,10 +3303,10 @@ class CharacterSheetCustomAbilities {
 		const allConditionNames = allConditions.map(c => c.name);
 		const allConditionNamesLower = allConditionNames.map(c => c.toLowerCase());
 		const selectedLower = selectedConditions.map(c => c.toLowerCase());
-		
+
 		// Find custom conditions (selected but not in allConditions)
 		const customConditions = selectedConditions.filter(c => !allConditionNamesLower.includes(c.toLowerCase()));
-		
+
 		// Combine standard and custom
 		const allDisplayConditions = [...allConditionNames, ...customConditions].sort();
 
@@ -3316,7 +3315,7 @@ class CharacterSheetCustomAbilities {
 			const isSelected = selectedLower.includes(condName.toLowerCase());
 			const condInfo = conditionSourceMap.get(condName.toLowerCase());
 			const isCustom = !condInfo;
-			
+
 			// Build hover attributes for known conditions
 			let hoverAttrs = "";
 			if (condInfo) {
@@ -3331,7 +3330,7 @@ class CharacterSheetCustomAbilities {
 					// Ignore hover errors
 				}
 			}
-			
+
 			return `
 				<button type="button" 
 					class="custom-abilities__defensive-pill condition ${isSelected ? "selected" : ""} ${isCustom ? "custom" : ""}" 

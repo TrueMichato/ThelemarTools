@@ -24,7 +24,6 @@ beforeAll(async () => {
 });
 
 describe("TGTT Divine Soul Sorcerer", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
@@ -134,7 +133,6 @@ describe("TGTT Divine Soul Sorcerer", () => {
 	// METAMAGIC SYSTEM (TGTT: starts at L2, Active/Passive split)
 	// =========================================================================
 	describe("Metamagic System", () => {
-
 		describe("Metamagic Progression (TGTT schedule)", () => {
 			it("should have Metamagic starting at level 2 (not level 3)", () => {
 				makeDivineSoul(2);
@@ -686,7 +684,6 @@ describe("TGTT Divine Soul Sorcerer", () => {
 	// DIVINE SOUL SUBCLASS FEATURES
 	// =========================================================================
 	describe("Divine Soul Subclass Features", () => {
-
 		describe("Divine Magic (Level 3)", () => {
 			it("should grant Divine Magic feature", () => {
 				makeDivineSoul(3);
@@ -848,7 +845,9 @@ describe("TGTT Divine Soul Sorcerer", () => {
 			for (let lvl = 1; lvl <= 20; lvl++) {
 				const s = new CharacterSheetState();
 				s.addClass({
-					name: "Sorcerer", source: "TGTT", level: lvl,
+					name: "Sorcerer",
+					source: "TGTT",
+					level: lvl,
 					subclass: lvl >= 3
 						? {name: "Divine Soul", shortName: "Divine Soul", source: "TGTT"}
 						: undefined,

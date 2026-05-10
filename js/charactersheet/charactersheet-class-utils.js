@@ -1515,7 +1515,7 @@ class CharacterSheetClassUtils {
 		// Check for fixed/named skill expertise (e.g., "expertise in the Performance skill")
 		const skillNames = Object.keys(Parser.SKILL_TO_ATB_ABV || {}).map(s => s.toLowerCase());
 		const fixedSkills = [];
-		
+
 		// Pattern: "expertise in [the] {skill} [skill]" or "gain expertise in {skill}"
 		const fixedSkillPattern = /(?:gain\s+)?expertise\s+in\s+(?:the\s+)?(\w+(?:\s+\w+)?)\s*(?:skill)?/gi;
 		let match;
@@ -2604,11 +2604,13 @@ class CharacterSheetClassUtils {
 				{name: "__MONK_RESOURCE__", maxByLevel: lvl => lvl >= 2 ? lvl : 0, recharge: "short"},
 			],
 			"Sorcerer": [
-				{name: "Sorcery Points", maxByLevel: lvl => {
-					const isTGTT = classEntry.source === "TGTT" || classData.source === "TGTT";
-					if (isTGTT) return lvl + 1;
-					return lvl >= 2 ? lvl : 0;
-				}, recharge: "long"},
+				{name: "Sorcery Points",
+					maxByLevel: lvl => {
+						const isTGTT = classEntry.source === "TGTT" || classData.source === "TGTT";
+						if (isTGTT) return lvl + 1;
+						return lvl >= 2 ? lvl : 0;
+					},
+					recharge: "long"},
 			],
 			"Paladin": [
 				{name: "Lay on Hands", maxByLevel: lvl => lvl * 5, recharge: "long"},
@@ -2663,7 +2665,6 @@ class CharacterSheetClassUtils {
 					recharge: resourceDef.recharge,
 				});
 			}
-
 		});
 
 		state.recalculateResourceMaximums();
@@ -2713,24 +2714,48 @@ class CharacterSheetClassUtils {
 	 */
 	static getSpellSlotsForLevel (classData, level) {
 		const fullCasterSlots = {
-			1: {1: 2}, 2: {1: 3}, 3: {1: 4, 2: 2}, 4: {1: 4, 2: 3},
-			5: {1: 4, 2: 3, 3: 2}, 6: {1: 4, 2: 3, 3: 3}, 7: {1: 4, 2: 3, 3: 3, 4: 1},
-			8: {1: 4, 2: 3, 3: 3, 4: 2}, 9: {1: 4, 2: 3, 3: 3, 4: 3, 5: 1},
-			10: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2}, 11: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1},
-			12: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1}, 13: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1},
-			14: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1}, 15: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1},
-			16: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1}, 17: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1, 9: 1},
-			18: {1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 1, 7: 1, 8: 1, 9: 1}, 19: {1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 1, 8: 1, 9: 1},
+			1: {1: 2},
+			2: {1: 3},
+			3: {1: 4, 2: 2},
+			4: {1: 4, 2: 3},
+			5: {1: 4, 2: 3, 3: 2},
+			6: {1: 4, 2: 3, 3: 3},
+			7: {1: 4, 2: 3, 3: 3, 4: 1},
+			8: {1: 4, 2: 3, 3: 3, 4: 2},
+			9: {1: 4, 2: 3, 3: 3, 4: 3, 5: 1},
+			10: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2},
+			11: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1},
+			12: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1},
+			13: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1},
+			14: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1},
+			15: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1},
+			16: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1},
+			17: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1, 9: 1},
+			18: {1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 1, 7: 1, 8: 1, 9: 1},
+			19: {1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 1, 8: 1, 9: 1},
 			20: {1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 2, 8: 1, 9: 1},
 		};
 
 		const halfCasterSlots = {
-			2: {1: 2}, 3: {1: 3}, 4: {1: 3}, 5: {1: 4, 2: 2}, 6: {1: 4, 2: 2},
-			7: {1: 4, 2: 3}, 8: {1: 4, 2: 3}, 9: {1: 4, 2: 3, 3: 2}, 10: {1: 4, 2: 3, 3: 2},
-			11: {1: 4, 2: 3, 3: 3}, 12: {1: 4, 2: 3, 3: 3}, 13: {1: 4, 2: 3, 3: 3, 4: 1},
-			14: {1: 4, 2: 3, 3: 3, 4: 1}, 15: {1: 4, 2: 3, 3: 3, 4: 2}, 16: {1: 4, 2: 3, 3: 3, 4: 2},
-			17: {1: 4, 2: 3, 3: 3, 4: 3, 5: 1}, 18: {1: 4, 2: 3, 3: 3, 4: 3, 5: 1},
-			19: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2}, 20: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2},
+			2: {1: 2},
+			3: {1: 3},
+			4: {1: 3},
+			5: {1: 4, 2: 2},
+			6: {1: 4, 2: 2},
+			7: {1: 4, 2: 3},
+			8: {1: 4, 2: 3},
+			9: {1: 4, 2: 3, 3: 2},
+			10: {1: 4, 2: 3, 3: 2},
+			11: {1: 4, 2: 3, 3: 3},
+			12: {1: 4, 2: 3, 3: 3},
+			13: {1: 4, 2: 3, 3: 3, 4: 1},
+			14: {1: 4, 2: 3, 3: 3, 4: 1},
+			15: {1: 4, 2: 3, 3: 3, 4: 2},
+			16: {1: 4, 2: 3, 3: 3, 4: 2},
+			17: {1: 4, 2: 3, 3: 3, 4: 3, 5: 1},
+			18: {1: 4, 2: 3, 3: 3, 4: 3, 5: 1},
+			19: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2},
+			20: {1: 4, 2: 3, 3: 3, 4: 3, 5: 2},
 		};
 
 		const fullCasters = ["Wizard", "Sorcerer", "Cleric", "Druid", "Bard"];
@@ -2925,7 +2950,6 @@ class CharacterSheetClassUtils {
 		return gains;
 	}
 
-
 	// ==========================================
 	// Companion Icon Utilities
 	// ==========================================
@@ -2936,25 +2960,60 @@ class CharacterSheetClassUtils {
 	 */
 	static _CREATURE_EMOJI_MAP = {
 		// Mammals
-		wolf: "🐺", bear: "🐻", lion: "🦁", tiger: "🐅", panther: "🐆",
-		ape: "🦍", boar: "🐗", elk: "🦌", deer: "🦌", dog: "🐕", horse: "🐴",
-		cat: "🐱", rat: "🐀", weasel: "🦨",
+		wolf: "🐺",
+		bear: "🐻",
+		lion: "🦁",
+		tiger: "🐅",
+		panther: "🐆",
+		ape: "🦍",
+		boar: "🐗",
+		elk: "🦌",
+		deer: "🦌",
+		dog: "🐕",
+		horse: "🐴",
+		cat: "🐱",
+		rat: "🐀",
+		weasel: "🦨",
 		// Birds
-		eagle: "🦅", hawk: "🦅", owl: "🦉", raven: "🐦‍⬛",
+		eagle: "🦅",
+		hawk: "🦅",
+		owl: "🦉",
+		raven: "🐦‍⬛",
 		// Flying
 		bat: "🦇",
 		// Reptiles & Amphibians
-		snake: "🐍", lizard: "🦎", crocodile: "🐊", frog: "🐸", toad: "🐸",
+		snake: "🐍",
+		lizard: "🦎",
+		crocodile: "🐊",
+		frog: "🐸",
+		toad: "🐸",
 		// Arachnids & Insects
-		spider: "🕷️", scorpion: "🦂",
+		spider: "🕷️",
+		scorpion: "🦂",
 		// Aquatic
-		shark: "🦈", octopus: "🐙", crab: "🦀", fish: "🐟", seahorse: "🐴",
+		shark: "🦈",
+		octopus: "🐙",
+		crab: "🦀",
+		fish: "🐟",
+		seahorse: "🐴",
 		// Fey
-		pixie: "🧚", sprite: "🧚", dryad: "🌳", satyr: "🐐", unicorn: "🦄",
+		pixie: "🧚",
+		sprite: "🧚",
+		dryad: "🌳",
+		satyr: "🐐",
+		unicorn: "🦄",
 		// Elemental
-		fire: "🔥", air: "💨", water: "💧", earth: "🗿", ice: "❄️", magma: "🌋",
+		fire: "🔥",
+		air: "💨",
+		water: "💧",
+		earth: "🗿",
+		ice: "❄️",
+		magma: "🌋",
 		// Celestial
-		angel: "👼", celestial: "✨", couatl: "🐍", pegasus: "🐴",
+		angel: "👼",
+		celestial: "✨",
+		couatl: "🐍",
+		pegasus: "🐴",
 	};
 
 	/**
