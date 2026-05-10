@@ -3394,9 +3394,8 @@ class CharacterSheetSpells {
 		// Conjure Fey/Elemental: +1 CR per slot level above base
 		if (spell.name.toLowerCase() === "conjure fey" || spell.name.toLowerCase() === "conjure elemental") {
 			maxCR = config.crBase + (slotLevel - config.level);
-		}
-		// Conjure Celestial: CR 4 at 7th, CR 5 at 9th
-		else if (spell.name.toLowerCase() === "conjure celestial") {
+		} else if (spell.name.toLowerCase() === "conjure celestial") {
+			// Conjure Celestial: CR 4 at 7th, CR 5 at 9th
 			maxCR = slotLevel >= 9 ? 5 : 4;
 		}
 
@@ -4421,9 +4420,8 @@ class CharacterSheetSpells {
 				duration: effects.duration,
 				grantsConditions: conditionsToApply, // Track which conditions this spell grants
 			});
-		}
-		// For buff spells that DON'T grant conditions, apply the parsed buff effects
-		else if ((effects.buffs?.length > 0 || effects.registryEffects?.length > 0 || effects.duration) && conditionsToApply.length === 0) {
+		} else if ((effects.buffs?.length > 0 || effects.registryEffects?.length > 0 || effects.duration) && conditionsToApply.length === 0) {
+			// For buff spells that DON'T grant conditions, apply the parsed buff effects
 			// Prefer registry effects when available (more reliable); fall back to parsed buffs
 			let customEffects;
 			if (effects.registryEffects?.length > 0) {
@@ -6404,59 +6402,61 @@ class CharacterSheetSpells {
 			return lists.some(c => c.name === className);
 		}).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
 
-		return new Promise(async (resolve) => {
-			const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-				title,
-				isMinHeight0: true,
-				zIndex: 10002,
-				cbClose: () => resolve(null),
-			});
-
-			modalInner.insertAdjacentHTML("beforeend", `<p class="mb-2">Select a <strong>${className} spell</strong> (level 1–${maxLevel}) for your scribing spellbook:</p>`);
-
-			const search = e_({outer: `<input type="text" class="ve-form-control form-control--minimal mb-2" placeholder="Search spells...">`});
-			modalInner.append(search);
-
-			const list = e_({outer: `<div style="max-height: 350px; overflow-y: auto;"></div>`});
-			modalInner.append(list);
-
-			const renderList = (filter = "") => {
-				list.innerHTML = "";
-				const filtered = filter
-					? classSpells.filter(s => s.name.toLowerCase().includes(filter))
-					: classSpells;
-
-				if (!filtered.length) {
-					list.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center py-2">No matching spells</p>`);
-					return;
-				}
-
-				filtered.forEach(spell => {
-					const school = Parser.spSchoolAbvToFull?.(spell.school) || spell.school;
-					const spellNameRendered = Renderer.get().render(`{@spell ${spell.name}|${spell.source}}`);
-					const item = e_({outer: `
-						<div class="ve-flex-v-center p-2 clickable spell-choice-item" style="border-bottom: 1px solid var(--cs-border);">
-							<div class="ve-flex-col ve-flex-1">
-								<div>${spellNameRendered}</div>
-								<div class="ve-small ve-muted">Level ${spell.level} ${school}</div>
-							</div>
-							<button class="ve-btn ve-btn-primary ve-btn-xs">Select</button>
-						</div>
-					`});
-					item.querySelector("button").addEventListener("click", () => {
-						doClose();
-						resolve(spell);
-					});
-					list.append(item);
+		return new Promise((resolve) => {
+			(async () => {
+				const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+					title,
+					isMinHeight0: true,
+					zIndex: 10002,
+					cbClose: () => resolve(null),
 				});
-			};
 
-			search.addEventListener("input", (e) => renderList(e.target.value.toLowerCase()));
-			renderList();
+				modalInner.insertAdjacentHTML("beforeend", `<p class="mb-2">Select a <strong>${className} spell</strong> (level 1–${maxLevel}) for your scribing spellbook:</p>`);
 
-			const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default mt-2">Cancel</button>`});
-			cancelBtn.addEventListener("click", () => { doClose(); resolve(null); });
-			modalInner.append(cancelBtn);
+				const search = e_({outer: `<input type="text" class="ve-form-control form-control--minimal mb-2" placeholder="Search spells...">`});
+				modalInner.append(search);
+
+				const list = e_({outer: `<div style="max-height: 350px; overflow-y: auto;"></div>`});
+				modalInner.append(list);
+
+				const renderList = (filter = "") => {
+					list.innerHTML = "";
+					const filtered = filter
+						? classSpells.filter(s => s.name.toLowerCase().includes(filter))
+						: classSpells;
+
+					if (!filtered.length) {
+						list.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center py-2">No matching spells</p>`);
+						return;
+					}
+
+					filtered.forEach(spell => {
+						const school = Parser.spSchoolAbvToFull?.(spell.school) || spell.school;
+						const spellNameRendered = Renderer.get().render(`{@spell ${spell.name}|${spell.source}}`);
+						const item = e_({outer: `
+							<div class="ve-flex-v-center p-2 clickable spell-choice-item" style="border-bottom: 1px solid var(--cs-border);">
+								<div class="ve-flex-col ve-flex-1">
+									<div>${spellNameRendered}</div>
+									<div class="ve-small ve-muted">Level ${spell.level} ${school}</div>
+								</div>
+								<button class="ve-btn ve-btn-primary ve-btn-xs">Select</button>
+							</div>
+						`});
+						item.querySelector("button").addEventListener("click", () => {
+							doClose();
+							resolve(spell);
+						});
+						list.append(item);
+					});
+				};
+
+				search.addEventListener("input", (e) => renderList(e.target.value.toLowerCase()));
+				renderList();
+
+				const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default mt-2">Cancel</button>`});
+				cancelBtn.addEventListener("click", () => { doClose(); resolve(null); });
+				modalInner.append(cancelBtn);
+			})();
 		});
 	}
 	// #endregion
