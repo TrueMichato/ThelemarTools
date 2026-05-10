@@ -78,9 +78,9 @@ function auditSpec (specPath) {
 
 	const status =
 		entryCount === 0 ? "EMPTY"
-		: coverage >= 1 ? "FULL"
-		: coverage >= COVERAGE_WARN_THRESHOLD ? "OK"
-		: "LOW";
+			: coverage >= 1 ? "FULL"
+				: coverage >= COVERAGE_WARN_THRESHOLD ? "OK"
+					: "LOW";
 
 	return {
 		fileName,

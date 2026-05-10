@@ -137,11 +137,11 @@ const dreamwalkerSpecials = poolFor("DW:S");
 // pools for source / featureType combinations our specs actually use.
 
 const FIRSTPARTY_BUCKETS = {
-	EI: ["XPHB", "XGE", "PHB", "TCE"],     // Eldritch Invocations
-	MM: ["XPHB", "PHB", "TCE"],            // Metamagic
-	AS: ["XGE"],                            // Arcane Shot
-	"MV:B": ["XPHB", "PHB", "TCE"],        // Battle Master Maneuvers
-	PB: ["XPHB", "PHB", "TCE"],            // Pact Boons
+	EI: ["XPHB", "XGE", "PHB", "TCE"], // Eldritch Invocations
+	MM: ["XPHB", "PHB", "TCE"], // Metamagic
+	AS: ["XGE"], // Arcane Shot
+	"MV:B": ["XPHB", "PHB", "TCE"], // Battle Master Maneuvers
+	PB: ["XPHB", "PHB", "TCE"], // Pact Boons
 };
 // Generated var-name prefix per featureType (sanitized — no colons).
 const FIRSTPARTY_PREFIX = {
@@ -168,9 +168,15 @@ for (const o of firstPartyOptional) {
 // share a level.
 
 const CATALOG_SPEC = [
-	{varName: "ZODIAC_FORMS_L3",  className: "Druid", subShort: "Zodiac",      level: 3,
+	{varName: "ZODIAC_FORMS_L3",
+		className: "Druid",
+		subShort: "Zodiac",
+		level: 3,
 		exclude: [/^Zodiac Form: /i, /^Circle of the Zodiac$/i]},
-	{varName: "ZODIAC_FORMS_L10", className: "Druid", subShort: "Zodiac",      level: 10,
+	{varName: "ZODIAC_FORMS_L10",
+		className: "Druid",
+		subShort: "Zodiac",
+		level: 10,
 		exclude: [/^Zodiac Form: /i]},
 	// NOTE: Debilitation Monk Precise Strike Methods are NOT a catalog —
 	// they are `PS` optional features picked from a pool, already covered

@@ -653,7 +653,9 @@ describe("Item Upgrades", () => {
 			json.inventory = [{
 				id: "test-item",
 				item: {
-					name: "Longsword", source: "PHB", weapon: true,
+					name: "Longsword",
+					source: "PHB",
+					weapon: true,
 					appliedUpgrades: [{name: "Balanced", source: "TCAH", upgradeType: "WU:1", costPaid: 100}],
 					socketedGemstones: [{name: "Ember Strike", source: "TGTT", chargesCurrent: 2, chargesMax: 3}],
 				},

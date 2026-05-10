@@ -1174,7 +1174,6 @@ class CharacterSheetBuilder {
 		const raceName = race.name;
 		const subraceName = race._subraceName || this._selectedSubrace?.name;
 
-
 		race.additionalSpells.forEach(spellBlock => {
 			// Check if this spell block is subrace-specific
 			if (spellBlock.name) {
@@ -2165,11 +2164,13 @@ class CharacterSheetBuilder {
 				{name: "__MONK_RESOURCE__", maxByLevel: lvl => lvl >= 2 ? lvl : 0, recharge: "short"},
 			],
 			"Sorcerer": [
-				{name: "Sorcery Points", maxByLevel: lvl => {
-					const isTGTT = cls.source === "TGTT";
-					if (isTGTT) return lvl + 1;
-					return lvl >= 2 ? lvl : 0;
-				}, recharge: "long"},
+				{name: "Sorcery Points",
+					maxByLevel: lvl => {
+						const isTGTT = cls.source === "TGTT";
+						if (isTGTT) return lvl + 1;
+						return lvl >= 2 ? lvl : 0;
+					},
+					recharge: "long"},
 			],
 			"Paladin": [
 				// Lay on Hands pool = 5 * level, not parseable
@@ -6664,7 +6665,7 @@ class CharacterSheetBuilder {
 						const val = choices[choiceKey];
 						const amt = isWeighted ? weights[i] : (abiSet.choose.amount || 1);
 						if (val) {
-							bonuses.push(`${Parser.attAbvToFull(val)} +${amt}${suffix ? suffix : ""} (chosen)`);
+							bonuses.push(`${Parser.attAbvToFull(val)} +${amt}${suffix || ""} (chosen)`);
 							foundChoices++;
 						}
 					}
@@ -7733,7 +7734,7 @@ class CharacterSheetBuilder {
 		const selectedBgLangs = this._selectedLanguages.map(l => l.language);
 		const selectedClassLangs = this._selectedClassFeatureLanguages || [];
 		const existingLangs = this._state?.getLanguages?.() || [];
-		
+
 		// Combine all selected/known languages
 		const allSelectedLangs = [...selectedBgLangs, ...selectedClassLangs, ...existingLangs]
 			.filter(l => l)

@@ -17,7 +17,6 @@ beforeAll(async () => {
 });
 
 describe("Ability Score Cap", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});

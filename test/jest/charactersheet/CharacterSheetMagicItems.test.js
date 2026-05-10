@@ -12,9 +12,16 @@ const FeatureModifierParser = globalThis.FeatureModifierParser;
 
 function makeWeapon (overrides = {}) {
 	return {
-		name: overrides.name || "Magic Longsword", source: "DMG", weapon: true,
-		weaponCategory: "martial", type: "M", weight: 3, dmg1: "1d8", dmgType: "S",
-		equipped: false, attuned: false,
+		name: overrides.name || "Magic Longsword",
+		source: "DMG",
+		weapon: true,
+		weaponCategory: "martial",
+		type: "M",
+		weight: 3,
+		dmg1: "1d8",
+		dmgType: "S",
+		equipped: false,
+		attuned: false,
 		requiresAttunement: overrides.requiresAttunement || false,
 		bonusWeapon: overrides.bonusWeapon || 0,
 		bonusWeaponAttack: overrides.bonusWeaponAttack || 0,
@@ -27,8 +34,12 @@ function makeWeapon (overrides = {}) {
 
 function makeWondrous (overrides = {}) {
 	return {
-		name: overrides.name || "Wondrous Item", source: "DMG", type: "wondrous",
-		weight: 0, equipped: false, attuned: false,
+		name: overrides.name || "Wondrous Item",
+		source: "DMG",
+		type: "wondrous",
+		weight: 0,
+		equipped: false,
+		attuned: false,
 		requiresAttunement: overrides.requiresAttunement !== undefined ? overrides.requiresAttunement : true,
 		bonusAc: overrides.bonusAc || 0,
 		bonusSavingThrow: overrides.bonusSavingThrow || 0,
@@ -332,22 +343,27 @@ describe("Magic Item Bonuses", () => {
 		it("should add item resistances to getResistances()", () => {
 			state.setItemDefenses({
 				resist: [{type: "fire", source: "Ring"}],
-				immune: [], vulnerable: [], conditionImmune: [],
+				immune: [],
+				vulnerable: [],
+				conditionImmune: [],
 			});
 			expect(state.getResistances()).toContain("fire");
 		});
 
 		it("should add item immunities to getImmunities()", () => {
 			state.setItemDefenses({
-				resist: [], immune: [{type: "poison", source: "Periapt"}],
-				vulnerable: [], conditionImmune: [],
+				resist: [],
+				immune: [{type: "poison", source: "Periapt"}],
+				vulnerable: [],
+				conditionImmune: [],
 			});
 			expect(state.getImmunities()).toContain("poison");
 		});
 
 		it("should add item vulnerabilities to getVulnerabilities()", () => {
 			state.setItemDefenses({
-				resist: [], immune: [],
+				resist: [],
+				immune: [],
 				vulnerable: [{type: "fire", source: "Cursed Armor"}],
 				conditionImmune: [],
 			});
@@ -356,7 +372,9 @@ describe("Magic Item Bonuses", () => {
 
 		it("should add item condition immunities to getConditionImmunities()", () => {
 			state.setItemDefenses({
-				resist: [], immune: [], vulnerable: [],
+				resist: [],
+				immune: [],
+				vulnerable: [],
 				conditionImmune: [{type: "frightened", source: "Amulet"}],
 			});
 			expect(state.getConditionImmunities()).toContain("frightened");
@@ -366,7 +384,9 @@ describe("Magic Item Bonuses", () => {
 			state.addResistance("fire");
 			state.setItemDefenses({
 				resist: [{type: "fire", source: "Ring"}],
-				immune: [], vulnerable: [], conditionImmune: [],
+				immune: [],
+				vulnerable: [],
+				conditionImmune: [],
 			});
 			expect(state.getResistances().filter(r => r === "fire").length).toBe(1);
 		});
@@ -375,7 +395,9 @@ describe("Magic Item Bonuses", () => {
 			state.addResistance("poison");
 			state.setItemDefenses({
 				resist: [{type: "fire", source: "Ring"}],
-				immune: [], vulnerable: [], conditionImmune: [],
+				immune: [],
+				vulnerable: [],
+				conditionImmune: [],
 			});
 			const res = state.getResistances();
 			expect(res).toContain("poison");
@@ -385,7 +407,9 @@ describe("Magic Item Bonuses", () => {
 		it("should clear item defenses when set to empty", () => {
 			state.setItemDefenses({
 				resist: [{type: "fire", source: "Ring"}],
-				immune: [], vulnerable: [], conditionImmune: [],
+				immune: [],
+				vulnerable: [],
+				conditionImmune: [],
 			});
 			expect(state.getResistances()).toContain("fire");
 			state.setItemDefenses({resist: [], immune: [], vulnerable: [], conditionImmune: []});
@@ -395,7 +419,9 @@ describe("Magic Item Bonuses", () => {
 		it("should track defense sources", () => {
 			state.setItemDefenses({
 				resist: [{type: "fire", source: "Ring of Fire Resistance"}],
-				immune: [], vulnerable: [], conditionImmune: [],
+				immune: [],
+				vulnerable: [],
+				conditionImmune: [],
 			});
 			expect(state.getItemDefenses().resist[0].source).toBe("Ring of Fire Resistance");
 		});
@@ -460,7 +486,9 @@ describe("Magic Item Bonuses", () => {
 		it("should set and get item defenses", () => {
 			state.setItemDefenses({
 				resist: [{type: "fire", source: "Shield"}],
-				immune: [], vulnerable: [], conditionImmune: [],
+				immune: [],
+				vulnerable: [],
+				conditionImmune: [],
 			});
 			expect(state.getItemDefenses().resist).toHaveLength(1);
 			expect(state.getItemDefenses().resist[0].type).toBe("fire");
@@ -548,7 +576,9 @@ describe("Magic Item Bonuses", () => {
 		it("should correctly model Ring of Fire Resistance", () => {
 			state.setItemDefenses({
 				resist: [{type: "fire", source: "Ring of Fire Resistance"}],
-				immune: [], vulnerable: [], conditionImmune: [],
+				immune: [],
+				vulnerable: [],
+				conditionImmune: [],
 			});
 			expect(state.getResistances()).toContain("fire");
 			expect(state.getResistances()).toHaveLength(1);
@@ -558,7 +588,9 @@ describe("Magic Item Bonuses", () => {
 			state.setArmor({ac: 16, type: "heavy", name: "Armor of Cold Resistance", magicBonus: 0});
 			state.setItemDefenses({
 				resist: [{type: "cold", source: "Armor of Cold Resistance"}],
-				immune: [], vulnerable: [], conditionImmune: [],
+				immune: [],
+				vulnerable: [],
+				conditionImmune: [],
 			});
 			expect(state.getResistances()).toContain("cold");
 			expect(state.getAc()).toBe(16);
@@ -736,12 +768,21 @@ describe("Magic Item Bonuses", () => {
 	describe("Custom Item Bonus Support", () => {
 		it("should accept all bonus types via addItem", () => {
 			state.addItem({
-				name: "Custom Ring", type: "wondrous", source: "Custom",
-				bonusAc: 1, bonusSavingThrow: 1, bonusSpellAttack: 1,
-				bonusSpellSaveDc: 1, bonusAbilityCheck: 1, bonusProficiencyBonus: 1,
-				bonusSavingThrowConcentration: 1, bonusSpellDamage: 1,
-				bonusWeaponCritDamage: 2, critThreshold: 19,
-				resist: ["fire"], immune: ["poison"],
+				name: "Custom Ring",
+				type: "wondrous",
+				source: "Custom",
+				bonusAc: 1,
+				bonusSavingThrow: 1,
+				bonusSpellAttack: 1,
+				bonusSpellSaveDc: 1,
+				bonusAbilityCheck: 1,
+				bonusProficiencyBonus: 1,
+				bonusSavingThrowConcentration: 1,
+				bonusSpellDamage: 1,
+				bonusWeaponCritDamage: 2,
+				critThreshold: 19,
+				resist: ["fire"],
+				immune: ["poison"],
 				modifySpeed: {bonus: {walk: 10}},
 			});
 			const item = state.getItems().find(i => i.name === "Custom Ring");
@@ -1268,7 +1309,7 @@ describe("Magic Item Bonuses", () => {
 		it("should parse 'gain an additional Xth level spell slot' text", () => {
 			const modifiers = FeatureModifierParser.parseModifiers(
 				"You gain an additional 3rd level spell slot.",
-				"Test Item"
+				"Test Item",
 			);
 			const slotMod = modifiers.find(m => m.isSpellSlot);
 			expect(slotMod).toBeDefined();
@@ -1279,7 +1320,7 @@ describe("Magic Item Bonuses", () => {
 		it("should parse 'gain N additional Xth level spell slots' text", () => {
 			const modifiers = FeatureModifierParser.parseModifiers(
 				"You gain 2 additional 2nd level spell slots.",
-				"Test Item"
+				"Test Item",
 			);
 			const slotMod = modifiers.find(m => m.isSpellSlot);
 			expect(slotMod).toBeDefined();
@@ -1656,7 +1697,9 @@ describe("Magic Item Bonuses", () => {
 	describe("Item-Granted Spells", () => {
 		it("should store attachedSpells on items", () => {
 			state.addItem({
-				name: "Staff of the Magi", source: "DMG", type: "wondrous",
+				name: "Staff of the Magi",
+				source: "DMG",
+				type: "wondrous",
 				attachedSpells: ["conjure elemental", "dispel magic", "fireball"],
 			});
 			const item = state.getItems().find(i => i.name === "Staff of the Magi");
@@ -1665,7 +1708,9 @@ describe("Magic Item Bonuses", () => {
 
 		it("should store attachedSpells object format", () => {
 			state.addItem({
-				name: "Wand of Fireballs", source: "DMG", type: "wondrous",
+				name: "Wand of Fireballs",
+				source: "DMG",
+				type: "wondrous",
 				attachedSpells: {charges: {"3": ["fireball"]}},
 			});
 			const item = state.getItems().find(i => i.name === "Wand of Fireballs");

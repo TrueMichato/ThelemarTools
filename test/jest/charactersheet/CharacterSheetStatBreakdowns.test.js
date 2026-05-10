@@ -8,7 +8,6 @@ beforeAll(async () => {
 });
 
 describe("CharacterSheetStatBreakdowns", () => {
-
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});

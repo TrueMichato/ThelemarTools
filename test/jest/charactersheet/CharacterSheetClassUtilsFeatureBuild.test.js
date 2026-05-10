@@ -228,7 +228,10 @@ describe("getLevelFeatures refClassFeature extraction", () => {
 	const mockClassFeatures = [
 		{name: "Martial Arts", className: "Monk", source: "XPHB", level: 1, entries: ["You gain martial arts features."]},
 		{
-			name: "Monk's Focus", className: "Monk", source: "XPHB", level: 2,
+			name: "Monk's Focus",
+			className: "Monk",
+			source: "XPHB",
+			level: 2,
 			entries: [
 				"Your focus allows you to harness extraordinary energy.",
 				{
@@ -301,13 +304,17 @@ describe("getLevelFeatures refClassFeature extraction", () => {
 		};
 		const phbClassFeatures = [
 			{
-				name: "Ki", className: "Monk", source: "PHB", level: 2,
+				name: "Ki",
+				className: "Monk",
+				source: "PHB",
+				level: 2,
 				entries: [
 					"Ki point description.",
-					{type: "entries", entries: [
-						{type: "refClassFeature", classFeature: "Flurry of Blows|Monk||2"},
-						{type: "refClassFeature", classFeature: "Patient Defense|Monk||2"},
-					]},
+					{type: "entries",
+						entries: [
+							{type: "refClassFeature", classFeature: "Flurry of Blows|Monk||2"},
+							{type: "refClassFeature", classFeature: "Patient Defense|Monk||2"},
+						]},
 				],
 			},
 			{name: "Flurry of Blows", className: "Monk", source: "PHB", level: 2, entries: ["FoB text."]},
@@ -335,7 +342,10 @@ describe("getLevelFeatures → dedupAndBuildFeatures end-to-end pipeline", () =>
 	const mockClassFeatures = [
 		{name: "Martial Arts", className: "Monk", source: "XPHB", level: 1, entries: ["You gain martial arts features."]},
 		{
-			name: "Monk's Focus", className: "Monk", source: "XPHB", level: 2,
+			name: "Monk's Focus",
+			className: "Monk",
+			source: "XPHB",
+			level: 2,
 			entries: [
 				"Your focus allows you to harness extraordinary energy.",
 				{

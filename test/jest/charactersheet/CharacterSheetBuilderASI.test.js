@@ -402,8 +402,10 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 				racialAbilitySetIdx: {"Astral Elf|AAG": 0},
 				racialAbilityChoices: {
 					"Astral Elf|AAG": {
-						"choose_0_0": "int", "choose_0_0_amount": 2,
-						"choose_0_1": "wis", "choose_0_1_amount": 1,
+						"choose_0_0": "int",
+						"choose_0_0_amount": 2,
+						"choose_0_1": "wis",
+						"choose_0_1_amount": 1,
 					},
 				},
 			});
@@ -420,9 +422,12 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 				racialAbilitySetIdx: {"Astral Elf|AAG": 1},
 				racialAbilityChoices: {
 					"Astral Elf|AAG": {
-						"choose_1_0": "dex", "choose_1_0_amount": 1,
-						"choose_1_1": "con", "choose_1_1_amount": 1,
-						"choose_1_2": "cha", "choose_1_2_amount": 1,
+						"choose_1_0": "dex",
+						"choose_1_0_amount": 1,
+						"choose_1_1": "con",
+						"choose_1_1_amount": 1,
+						"choose_1_2": "cha",
+						"choose_1_2_amount": 1,
 					},
 				},
 			});
@@ -441,8 +446,10 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 				racialAbilitySetIdx: {"Changeling|MPMM": 0},
 				racialAbilityChoices: {
 					"Changeling|MPMM": {
-						"choose_0_0": "cha", "choose_0_0_amount": 2,
-						"choose_0_1": "dex", "choose_0_1_amount": 1,
+						"choose_0_0": "cha",
+						"choose_0_0_amount": 2,
+						"choose_0_1": "dex",
+						"choose_0_1_amount": 1,
 					},
 				},
 			});
@@ -466,9 +473,12 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 				racialAbilitySetIdx: {"Changeling|MPMM": 1},
 				racialAbilityChoices: {
 					"Changeling|MPMM": {
-						"choose_1_0": "str", "choose_1_0_amount": 1,
-						"choose_1_1": "con", "choose_1_1_amount": 1,
-						"choose_1_2": "wis", "choose_1_2_amount": 1,
+						"choose_1_0": "str",
+						"choose_1_0_amount": 1,
+						"choose_1_1": "con",
+						"choose_1_1_amount": 1,
+						"choose_1_2": "wis",
+						"choose_1_2_amount": 1,
 					},
 				},
 			});
@@ -490,8 +500,10 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 				racialAbilitySetIdx: {"Changeling|MPMM": 0},
 				racialAbilityChoices: {
 					"Changeling|MPMM": {
-						"choose_0_0": "cha", "choose_0_0_amount": 2,
-						"choose_0_1": "dex", "choose_0_1_amount": 1,
+						"choose_0_0": "cha",
+						"choose_0_0_amount": 2,
+						"choose_0_1": "dex",
+						"choose_0_1_amount": 1,
 					},
 				},
 			});
@@ -520,8 +532,10 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 				},
 				racialAbilityChoices: {
 					"Custom Lineage|TCE": {
-						"choose_0_0": "str", "choose_0_0_amount": 2,
-						"choose_0_1": "con", "choose_0_1_amount": 1,
+						"choose_0_0": "str",
+						"choose_0_0_amount": 2,
+						"choose_0_1": "con",
+						"choose_0_1_amount": 1,
 					},
 				},
 			});
@@ -577,8 +591,10 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 
 			builder._useTashasRules = true;
 			builder._tashasAbilityBonuses = {
-				tasha_0: "cha", tasha_0_amount: 2,
-				tasha_1: "dex", tasha_1_amount: 1,
+				tasha_0: "cha",
+				tasha_0_amount: 2,
+				tasha_1: "dex",
+				tasha_1_amount: 1,
 			};
 			builder._tashasSkillReplacements = [];
 			builder._tashasLanguageReplacements = [];

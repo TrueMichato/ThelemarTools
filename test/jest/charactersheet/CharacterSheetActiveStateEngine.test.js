@@ -607,7 +607,12 @@ describe("Active State Effects Engine", () => {
 				ac: [{ac: 13, from: ["natural armor"]}],
 				hp: {average: 11, formula: "2d8 + 2"},
 				speed: {walk: 40},
-				str: 12, dex: 15, con: 12, int: 3, wis: 12, cha: 6,
+				str: 12,
+				dex: 15,
+				con: 12,
+				int: 3,
+				wis: 12,
+				cha: 6,
 				skill: {perception: "+3", stealth: "+4"},
 				senses: ["darkvision 30 ft."],
 				passive: 13,
@@ -632,8 +637,16 @@ describe("Active State Effects Engine", () => {
 
 		test("should handle numeric AC format", () => {
 			const creature = {
-				name: "Cat", source: "MM", ac: 12,
-				hp: {average: 2}, str: 3, dex: 15, con: 10, int: 3, wis: 12, cha: 7,
+				name: "Cat",
+				source: "MM",
+				ac: 12,
+				hp: {average: 2},
+				str: 3,
+				dex: 15,
+				con: 10,
+				int: 3,
+				wis: 12,
+				cha: 7,
 			};
 			state.activateWildShapeFromBestiary(creature);
 			expect(state.getAc()).toBe(12);
@@ -777,7 +790,9 @@ describe("Active State Effects Engine", () => {
 		test("isInWildShape should be false after deactivation even with state object remaining", () => {
 			state.addClass({name: "Druid", source: "PHB", level: 4});
 			state.activateWildShape({
-				name: "Cat", ac: 12, hp: {max: 2},
+				name: "Cat",
+				ac: 12,
+				hp: {max: 2},
 				abilities: {str: 3, dex: 15, con: 10, int: 3, wis: 12, cha: 7},
 			});
 			expect(state.isInWildShape()).toBe(true);

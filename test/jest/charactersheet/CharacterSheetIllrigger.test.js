@@ -291,7 +291,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 	describe("Spellcasting (Level 3+)", () => {
 		it("should not have spellcasting before level 3", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 2,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 2,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -300,7 +302,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 
 		it("should have CHA-based spellcasting at level 3", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 3,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 3,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			state.setAbilityBase("cha", 16); // CHA mod +3
@@ -313,7 +317,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 
 		it("should know 2 cantrips at level 3", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 3,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 3,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -322,7 +328,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 
 		it("should know 3 cantrips at level 10", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 10,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 10,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -331,7 +339,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 
 		it("should know 3 spells at level 3", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 3,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 3,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -340,7 +350,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 
 		it("should know 13 spells at level 20", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 20,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 20,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -351,7 +363,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 	describe("Subclass Features", () => {
 		it("should have Asmodeus's Blessing at level 3", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 3,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 3,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -360,7 +374,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 
 		it("should have Hellish Versatility at level 7", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 7,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 7,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -369,7 +385,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 
 		it("should have Submit at level 11", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 11,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 11,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -378,7 +396,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 
 		it("should have Vile Transmogrification at level 15", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 15,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 15,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const calcs = state.getFeatureCalculations();
@@ -389,7 +409,9 @@ describe("Illrigger Subclass: Architect of Ruin", () => {
 	describe("Spellcasting Info (getSpellcastingInfo)", () => {
 		it("should return known-type spellcasting for Architect of Ruin", () => {
 			state.addClass({
-				name: "Illrigger", source: "IllriggerRevised", level: 5,
+				name: "Illrigger",
+				source: "IllriggerRevised",
+				level: 5,
 				subclass: {name: "Architect of Ruin", shortName: "Architect of Ruin", source: "IllriggerRevised"},
 			});
 			const info = state.getSpellcastingInfo?.("Illrigger");
@@ -414,7 +436,9 @@ describe("Illrigger Subclass: Hellspeaker", () => {
 
 	it("should have Moloch's Blessing and Charm Enemy at level 3", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 3,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 3,
 			subclass: {name: "Hellspeaker", shortName: "Hellspeaker", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -425,7 +449,9 @@ describe("Illrigger Subclass: Hellspeaker", () => {
 
 	it("should have Moloch's Interdiction at level 7", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 7,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 7,
 			subclass: {name: "Hellspeaker", shortName: "Hellspeaker", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -434,7 +460,9 @@ describe("Illrigger Subclass: Hellspeaker", () => {
 
 	it("should have Intransigent and Let's Make a Deal at level 11", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 11,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 11,
 			subclass: {name: "Hellspeaker", shortName: "Hellspeaker", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -445,7 +473,9 @@ describe("Illrigger Subclass: Hellspeaker", () => {
 
 	it("should have Quid Pro Quo at level 15", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 15,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 15,
 			subclass: {name: "Hellspeaker", shortName: "Hellspeaker", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -465,7 +495,9 @@ describe("Illrigger Subclass: Painkiller", () => {
 
 	it("should have heavy armor prof and Devastator at level 3", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 3,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 3,
 			subclass: {name: "Painkiller", shortName: "Painkiller", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -476,7 +508,9 @@ describe("Illrigger Subclass: Painkiller", () => {
 
 	it("should have Dispater's Interdiction at level 7", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 7,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 7,
 			subclass: {name: "Painkiller", shortName: "Painkiller", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -485,7 +519,9 @@ describe("Illrigger Subclass: Painkiller", () => {
 
 	it("should have You Die on My Command at level 11", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 11,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 11,
 			subclass: {name: "Painkiller", shortName: "Painkiller", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -494,7 +530,9 @@ describe("Illrigger Subclass: Painkiller", () => {
 
 	it("should have Deathstrike with doubled seal damage at level 15", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 15,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 15,
 			subclass: {name: "Painkiller", shortName: "Painkiller", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -516,7 +554,9 @@ describe("Illrigger Subclass: Sanguine Knight", () => {
 
 	it("should have Sutekh's Blessing and Exsanguinate at level 3", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 3,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 3,
 			subclass: {name: "Sanguine Knight", shortName: "Sanguine Knight", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -526,7 +566,9 @@ describe("Illrigger Subclass: Sanguine Knight", () => {
 
 	it("should have Sutekh's Interdiction at level 7", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 7,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 7,
 			subclass: {name: "Sanguine Knight", shortName: "Sanguine Knight", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -535,7 +577,9 @@ describe("Illrigger Subclass: Sanguine Knight", () => {
 
 	it("should have Bloodstroke at level 11", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 11,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 11,
 			subclass: {name: "Sanguine Knight", shortName: "Sanguine Knight", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -544,7 +588,9 @@ describe("Illrigger Subclass: Sanguine Knight", () => {
 
 	it("should have Haemal Exchange at level 15", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 15,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 15,
 			subclass: {name: "Sanguine Knight", shortName: "Sanguine Knight", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -564,7 +610,9 @@ describe("Illrigger Subclass: Shadowmaster", () => {
 
 	it("should have Marked for Death and Strike from the Dark (d4) at level 3", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 3,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 3,
 			subclass: {name: "Shadowmaster", shortName: "Shadowmaster", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -575,7 +623,9 @@ describe("Illrigger Subclass: Shadowmaster", () => {
 
 	it("should have Belial's Interdiction at level 7", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 7,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 7,
 			subclass: {name: "Shadowmaster", shortName: "Shadowmaster", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -584,7 +634,9 @@ describe("Illrigger Subclass: Shadowmaster", () => {
 
 	it("should have Umbral Killer features at level 11", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 11,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 11,
 			subclass: {name: "Shadowmaster", shortName: "Shadowmaster", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();
@@ -596,7 +648,9 @@ describe("Illrigger Subclass: Shadowmaster", () => {
 
 	it("should upgrade Strike from the Dark to d8 at level 15", () => {
 		state.addClass({
-			name: "Illrigger", source: "IllriggerRevised", level: 15,
+			name: "Illrigger",
+			source: "IllriggerRevised",
+			level: 15,
 			subclass: {name: "Shadowmaster", shortName: "Shadowmaster", source: "IllriggerRevised"},
 		});
 		const calcs = state.getFeatureCalculations();

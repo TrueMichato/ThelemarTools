@@ -983,7 +983,7 @@ class CharacterSheetLevelUp {
 			</div>
 		`});
 
-		hpContent.querySelectorAll('input[name="hp-method-wizard"]').forEach(radio => {
+		hpContent.querySelectorAll("input[name=\"hp-method-wizard\"]").forEach(radio => {
 			radio.addEventListener("change", function () {
 				hpMethod = this.value;
 				summaryItemEls.hp.setStatus(true, hpMethod === "average" ? `+${averageHp} (avg)` : `1d${hitDie}+${conMod}`);
@@ -1222,16 +1222,16 @@ class CharacterSheetLevelUp {
 		// Group by source affinity
 		const primarySubclasses = allSubclasses.filter(sc => {
 			const scClassSource = sc.classSource || Parser.SRC_PHB;
-			return scClassSource === classSource ||
-				([Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource) &&
-				 [Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource));
+			return scClassSource === classSource
+				|| ([Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource)
+				 && [Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource));
 		}).sort((a, b) => a.name.localeCompare(b.name));
 
 		const secondarySubclasses = allSubclasses.filter(sc => {
 			const scClassSource = sc.classSource || Parser.SRC_PHB;
 			if (scClassSource === classSource) return false;
-			if ([Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource) &&
-				[Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource)) return false;
+			if ([Parser.SRC_PHB, Parser.SRC_XPHB].includes(scClassSource)
+				&& [Parser.SRC_PHB, Parser.SRC_XPHB].includes(classSource)) return false;
 			return true;
 		}).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1299,8 +1299,8 @@ class CharacterSheetLevelUp {
 			const filterSubclasses = (scs) => scs.filter(sc => {
 				if (selectedSource && sc.source !== selectedSource) return false;
 				if (!textFilter) return true;
-				return sc.name.toLowerCase().includes(filterLower) ||
-					(sc.shortName && sc.shortName.toLowerCase().includes(filterLower));
+				return sc.name.toLowerCase().includes(filterLower)
+					|| (sc.shortName && sc.shortName.toLowerCase().includes(filterLower));
 			});
 
 			const filteredPrimary = filterSubclasses(primarySubclasses);
@@ -1444,7 +1444,7 @@ class CharacterSheetLevelUp {
 					}
 
 					const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
-					
+
 					// For subclass features, use subclassSource; for class features, use classSource
 					const hoverSource = hashInput.subclassSource || hashInput.classSource;
 					const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: feature.className, source: actualClassSource});
@@ -2088,20 +2088,20 @@ class CharacterSheetLevelUp {
 			const listSection = e_({outer: `<div class="mb-2"></div>`});
 			listSection.insertAdjacentHTML("beforeend", `<label class="ve-small">Choose spell list:</label>`);
 			const select = e_({outer: `<select class="ve-form-control ve-input-sm mt-1"></select>`});
-			
+
 			const spellLists = ["Arcane", "Divine", "Primal"];
 			spellLists.forEach(list => {
 				const isSelected = feat._featChoices.spellList === list;
 				select.insertAdjacentHTML("beforeend", `<option value="${list}" ${isSelected ? "selected" : ""}>${list}</option>`);
 			});
-			
+
 			select.addEventListener("change", () => {
 				feat._featChoices.spellList = select.value;
 			});
 			if (!feat._featChoices.spellList) {
 				feat._featChoices.spellList = spellLists[0];
 			}
-			
+
 			listSection.append(select);
 			container.append(listSection);
 		}
@@ -2234,7 +2234,7 @@ class CharacterSheetLevelUp {
 			const existingProf = Object.keys(this._state.getSkillProficiencies?.() || {});
 			const existingExpertise = new Set((this._state.getExpertise?.() || []).map(e => e.toLowerCase()));
 			const availableForExpertise = existingProf.filter(s => !existingExpertise.has(s.toLowerCase()));
-			
+
 			// Also include skills being added by this feat
 			const newFeatSkills = feat._featChoices.skills || [];
 			// Include fixed skill proficiencies from the feat itself (e.g., Boon of Skill grants all 18 skills)
@@ -2374,9 +2374,9 @@ class CharacterSheetLevelUp {
 		if (choices.spells?.cantrips) {
 			const cantripSection = e_({outer: `<div class="mb-2"></div>`});
 			cantripSection.insertAdjacentHTML("beforeend", `<label class="ve-small">Choose ${choices.spells.cantrips.count} cantrip${choices.spells.cantrips.count > 1 ? "s" : ""}:</label>`);
-			
+
 			const cantripList = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
-			
+
 			const renderCantrips = () => {
 				cantripList.innerHTML = "";
 				feat._featChoices.cantrips.forEach((cantrip, idx) => {
@@ -2414,9 +2414,9 @@ class CharacterSheetLevelUp {
 			const spellSection = e_({outer: `<div class="mb-2"></div>`});
 			const spellType = choices.spells.spells.innate ? "innate spell" : "spell";
 			spellSection.insertAdjacentHTML("beforeend", `<label class="ve-small">Choose ${choices.spells.spells.count} ${spellType}${choices.spells.spells.count > 1 ? "s" : ""}:</label>`);
-			
+
 			const spellList = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
-			
+
 			const renderSpells = () => {
 				spellList.innerHTML = "";
 				feat._featChoices.spells.forEach((spell, idx) => {
@@ -3472,9 +3472,9 @@ class CharacterSheetLevelUp {
 					<div class="charsheet__levelup-spell-swap-row ${isSwapped ? "charsheet__levelup-spell-swap-row--swapped" : ""}" style="display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; ${isSwapped ? "text-decoration: line-through; opacity: 0.5;" : ""}">
 						<span style="flex: 1;">${spell.name} <span class="ve-muted ve-small">(Level ${spell.level})</span></span>
 						${isSwapped
-							? `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__spell-swap-undo" title="Undo swap">Undo</button>`
-							: `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__spell-swap-btn" title="Swap this spell">🔄 Swap</button>`
-						}
+		? `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__spell-swap-undo" title="Undo swap">Undo</button>`
+		: `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__spell-swap-btn" title="Swap this spell">🔄 Swap</button>`
+}
 					</div>
 				`});
 
@@ -4693,47 +4693,47 @@ class CharacterSheetLevelUp {
 		btnCancel.addEventListener("click", () => doClose(false));
 		const btnConfirm = e_({outer: `<button class="ve-btn ve-btn-primary">Confirm & Add ${selectedClass.name}</button>`});
 		btnConfirm.addEventListener("click", async () => {
-				// Validate optional features
-				for (const gain of optionalFeatureGains) {
-					const featureKey = gain.featureTypes.join("_");
-					const selected = selectedOptionalFeatures[featureKey] || [];
-					if (selected.length < gain.newCount) {
-						JqueryUtil.doToast({type: "warning", content: `Please select ${gain.newCount} ${gain.name}.`});
-						return;
-					}
-				}
-
-				// Validate feature options
-				for (const optGroup of featureOptionGroups) {
-					const featureKey = `${optGroup.featureName}_${optGroup.featureSource || ""}`;
-					const selected = selectedFeatureOptions[featureKey] || [];
-					if (selected.length < optGroup.count) {
-						JqueryUtil.doToast({type: "warning", content: `Please select ${optGroup.count} option(s) for ${optGroup.featureName}.`});
-						return;
-					}
-				}
-
-				// Validate skill selections
-				if (skillGrant && selectedSkills.length < skillGrant.count) {
-					JqueryUtil.doToast({type: "warning", content: `Please select ${skillGrant.count} skill proficiency.`});
+			// Validate optional features
+			for (const gain of optionalFeatureGains) {
+				const featureKey = gain.featureTypes.join("_");
+				const selected = selectedOptionalFeatures[featureKey] || [];
+				if (selected.length < gain.newCount) {
+					JqueryUtil.doToast({type: "warning", content: `Please select ${gain.newCount} ${gain.name}.`});
 					return;
 				}
+			}
 
-				// Validate spell selections
-				if (multiclassSpellGain > 0 && selectedMulticlassSpells.length < multiclassSpellGain) {
-					JqueryUtil.doToast({type: "warning", content: `Please select ${multiclassSpellGain} spell${multiclassSpellGain !== 1 ? "s" : ""}.`});
+			// Validate feature options
+			for (const optGroup of featureOptionGroups) {
+				const featureKey = `${optGroup.featureName}_${optGroup.featureSource || ""}`;
+				const selected = selectedFeatureOptions[featureKey] || [];
+				if (selected.length < optGroup.count) {
+					JqueryUtil.doToast({type: "warning", content: `Please select ${optGroup.count} option(s) for ${optGroup.featureName}.`});
 					return;
 				}
-				if (multiclassCantripGain > 0 && selectedMulticlassCantrips.length < multiclassCantripGain) {
-					JqueryUtil.doToast({type: "warning", content: `Please select ${multiclassCantripGain} cantrip${multiclassCantripGain !== 1 ? "s" : ""}.`});
-					return;
-				}
+			}
 
-				// Apply multiclass with selections
-				await this._applyMulticlass(selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills, selectedMulticlassSpells, selectedMulticlassCantrips);
+			// Validate skill selections
+			if (skillGrant && selectedSkills.length < skillGrant.count) {
+				JqueryUtil.doToast({type: "warning", content: `Please select ${skillGrant.count} skill proficiency.`});
+				return;
+			}
 
-				doClose(true);
-			});
+			// Validate spell selections
+			if (multiclassSpellGain > 0 && selectedMulticlassSpells.length < multiclassSpellGain) {
+				JqueryUtil.doToast({type: "warning", content: `Please select ${multiclassSpellGain} spell${multiclassSpellGain !== 1 ? "s" : ""}.`});
+				return;
+			}
+			if (multiclassCantripGain > 0 && selectedMulticlassCantrips.length < multiclassCantripGain) {
+				JqueryUtil.doToast({type: "warning", content: `Please select ${multiclassCantripGain} cantrip${multiclassCantripGain !== 1 ? "s" : ""}.`});
+				return;
+			}
+
+			// Apply multiclass with selections
+			await this._applyMulticlass(selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills, selectedMulticlassSpells, selectedMulticlassCantrips);
+
+			doClose(true);
+		});
 
 		modalInner.append(ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			${btnCancel}

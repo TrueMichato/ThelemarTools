@@ -135,7 +135,7 @@ class CharacterSheetSpells {
 
 		// Fallback: check against known official sources
 		const officialPrefixes = ["PHB", "XGE", "TCE", "FTD", "XPHB", "MM", "DMG", "SCAG", "VGM", "MTF", "GGR", "AI", "EGW", "MOT", "TCE", "FTD", "SCC", "WBtW", "SJA", "DSotDQ", "BGG", "PAitM", "BMT", "MPMoM", "VEoR", "PHB2024", "DMG2024", "MM2024"];
-		return officialPrefixes.some(prefix => source === prefix || source.startsWith(prefix + "-"));
+		return officialPrefixes.some(prefix => source === prefix || source.startsWith(`${prefix}-`));
 	}
 
 	_initEventListeners () {
@@ -1455,16 +1455,14 @@ class CharacterSheetSpells {
 		const getCachedClassList = (spell) => {
 			const key = `${spell.name}|${spell.source}`;
 			if (!_classListCache.has(key)) {
-				try { _classListCache.set(key, Renderer.spell.getCombinedClasses(spell, "fromClassList") || []); }
-				catch (e) { _classListCache.set(key, spell.classes?.fromClassList || []); }
+				try { _classListCache.set(key, Renderer.spell.getCombinedClasses(spell, "fromClassList") || []); } catch (e) { _classListCache.set(key, spell.classes?.fromClassList || []); }
 			}
 			return _classListCache.get(key);
 		};
 		const getCachedSubclassList = (spell) => {
 			const key = `${spell.name}|${spell.source}`;
 			if (!_subclassListCache.has(key)) {
-				try { _subclassListCache.set(key, Renderer.spell.getCombinedClasses(spell, "fromSubclass") || []); }
-				catch (e) { _subclassListCache.set(key, []); }
+				try { _subclassListCache.set(key, Renderer.spell.getCombinedClasses(spell, "fromSubclass") || []); } catch (e) { _subclassListCache.set(key, []); }
 			}
 			return _subclassListCache.get(key);
 		};
@@ -1791,7 +1789,6 @@ class CharacterSheetSpells {
 	}
 
 	_addSpell (spell) {
-
 		// Check limits and warn if over
 		const limitCheck = this._checkSpellLimits(spell);
 		if (limitCheck.warning) {
@@ -1827,7 +1824,6 @@ class CharacterSheetSpells {
 			subschools: spell.subschools || [], // Include rarity/legality tags
 			...(isGambler ? {sourceClass: "Gambler", sourceSubclass: "Gambler"} : {}),
 		});
-
 
 		this._renderSpellList();
 		// Update combat spells tab (cantrips are auto-prepared)
@@ -3887,12 +3883,12 @@ class CharacterSheetSpells {
 							<div class="ve-small ve-muted mb-1">Skill Proficiencies <span class="ve-muted">(check to grant proficiency)</span></div>
 							<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; font-size: 0.9em;">
 								${SKILL_LIST.map(skill => {
-									const key = skill.toLowerCase().replace(/\s+/g, "");
-									return `<label class="ve-flex ve-flex-v-center" style="gap: 6px; cursor: pointer;">
+		const key = skill.toLowerCase().replace(/\s+/g, "");
+		return `<label class="ve-flex ve-flex-v-center" style="gap: 6px; cursor: pointer;">
 										<input type="checkbox" class="custom-fam-skill" data-skill="${key}">
 										<span>${skill}</span>
 									</label>`;
-								}).join("")}
+	}).join("")}
 							</div>
 						</div>
 					</div>
@@ -4974,7 +4970,6 @@ class CharacterSheetSpells {
 				</div>
 			`});
 
-
 			container.append(row);
 		}
 
@@ -5001,7 +4996,6 @@ class CharacterSheetSpells {
 
 			container.append(pactRow);
 		}
-
 
 		// Show if no slots
 		if (!container.children.length) {
@@ -5729,7 +5723,6 @@ class CharacterSheetSpells {
 		this.renderSlots();
 		this._renderSpellList();
 		this._renderSpellcastingStats();
-
 	}
 
 	_renderSpellcastingStats () {
@@ -5939,7 +5932,7 @@ class CharacterSheetSpells {
 				document.getElementById("charsheet-spells-known-max").textContent = totalKnownMax;
 
 				// Update hint for multiclass
-				knownInfo.querySelector(".charsheet__spell-tracking-hint").textContent = 
+				knownInfo.querySelector(".charsheet__spell-tracking-hint").textContent =
 					`From: ${knownClasses.map(c => c.className).join(", ")}`;
 			}
 
@@ -5951,7 +5944,7 @@ class CharacterSheetSpells {
 				document.getElementById("charsheet-spells-prepared-max-2014").textContent = totalPreparedMax;
 
 				// Update hint for multiclass
-				preparedInfo.querySelector(".charsheet__spell-tracking-hint").textContent = 
+				preparedInfo.querySelector(".charsheet__spell-tracking-hint").textContent =
 					`From: ${preparedClasses.map(c => c.className).join(", ")}`;
 			}
 		}

@@ -71,7 +71,7 @@ describe("Companion Icon Utilities", () => {
 			expect(html).toContain("<img");
 			expect(html).toContain("img/bestiary/tokens/MM/Cat.webp");
 			expect(html).toContain("border-radius: 50%");
-			expect(html).toContain('alt="Cat"');
+			expect(html).toContain("alt=\"Cat\"");
 		});
 
 		test("creature without source returns emoji span", () => {
@@ -128,8 +128,8 @@ describe("Companion Icon Utilities", () => {
 		});
 
 		test("special characters in name are escaped in alt attribute", () => {
-			const html = CharacterSheetClassUtils.getCompanionIconHtml({name: 'Test "Creature"', source: "MM"});
-			expect(html).toContain('alt="Test &quot;Creature&quot;"');
+			const html = CharacterSheetClassUtils.getCompanionIconHtml({name: "Test \"Creature\"", source: "MM"});
+			expect(html).toContain("alt=\"Test &quot;Creature&quot;\"");
 		});
 	});
 });
