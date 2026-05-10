@@ -3,6 +3,8 @@
  * Spells with these labels (or with no sourceFeature at all) count against known/prepared limits.
  * Feature-granted spells (racial innates, subclass always-prepared, etc.) use other labels and should NOT count.
  */
+const {e_, ee} = /** @type {*} */ (globalThis);
+
 const PLAYER_CHOSEN_SPELL_FEATURES = new Set([
 	"Spells Known",
 	"Cantrips Known",
@@ -140,7 +142,7 @@ class CharacterSheetSpells {
 
 	_initEventListeners () {
 		// Spell slot pip clicks
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const pip = e.target.closest(".charsheet__slot-pip");
 			if (!pip) return;
 			const level = parseInt(pip.closest("[data-spell-level]").dataset.spellLevel);
@@ -148,26 +150,26 @@ class CharacterSheetSpells {
 		});
 
 		// Add spell button
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			if (e.target.closest("#charsheet-btn-add-spell, #charsheet-add-spell")) this._showSpellPicker();
 		});
 
 		// Spell filter
-		document.addEventListener("input", (e) => {
+		document.addEventListener("input", (/** @type {*} */ e) => {
 			if (!e.target.matches("#charsheet-spell-search")) return;
 			this._spellFilter = e.target.value.toLowerCase();
 			this._renderSpellList();
 		});
 
 		// Level filter
-		document.addEventListener("change", (e) => {
+		document.addEventListener("change", (/** @type {*} */ e) => {
 			if (!e.target.matches("#charsheet-spell-level-filter")) return;
 			this._spellLevelFilter = e.target.value;
 			this._renderSpellList();
 		});
 
 		// Cast spell button
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-cast");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
@@ -175,7 +177,7 @@ class CharacterSheetSpells {
 		});
 
 		// Cast as ritual button (for unprepared spells in spellbook)
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-cast-ritual");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
@@ -183,7 +185,7 @@ class CharacterSheetSpells {
 		});
 
 		// Remove spell button
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-remove");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
@@ -191,7 +193,7 @@ class CharacterSheetSpells {
 		});
 
 		// Toggle prepared
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-prepared");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
@@ -199,7 +201,7 @@ class CharacterSheetSpells {
 		});
 
 		// Spell info button
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-info");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
@@ -207,7 +209,7 @@ class CharacterSheetSpells {
 		});
 
 		// Spell note button
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-note");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
@@ -223,7 +225,7 @@ class CharacterSheetSpells {
 		});
 
 		// Open Gambling Table modal (can be triggered from features panel, spell UI, or toast button)
-		document.addEventListener("click", (e) => {
+		document.addEventListener("click", (/** @type {*} */ e) => {
 			if (e.target.closest(".btn-open-gambling-table")) this._openGamblingTableModal();
 		});
 	}
@@ -504,11 +506,11 @@ class CharacterSheetSpells {
 							}
 							const rollDetails = this._state.rollGamblerPreparedSpells();
 							if (rollDetails) {
-								JqueryUtil.doToast({
+								JqueryUtil.doToast(/** @type {*} */ ({
 									content: `\u{1F3B2} Gambler: Rolled ${rollDetails.dice} = (${rollDetails.rolls.join(" + ")}) = ${rollDetails.total} spells prepared`,
 									type: "success",
 									autoHideTime: 5000,
-								});
+								}));
 								updateStatusBar();
 								this._renderSpellTrackingUI();
 								this._page.saveCharacter();
@@ -703,7 +705,7 @@ class CharacterSheetSpells {
 		const classDropdownMenu = classDropdown.querySelector(".charsheet__source-multiselect-dropdown");
 		const classText = classDropdown.querySelector(".charsheet__source-multiselect-text");
 
-		classBtn.addEventListener("click", (e) => {
+		classBtn.addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			positionDropdown(classDropdownMenu, classBtn);
 			classDropdownMenu.classList.toggle("open");
@@ -753,7 +755,7 @@ class CharacterSheetSpells {
 			updateClassText();
 		});
 
-		classDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
+		classDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
 
 		// ===== SUBCLASS FILTER (SEPARATE) =====
 		// Calculate which subclasses will be checked by default (same logic as the HTML)
@@ -820,7 +822,7 @@ class CharacterSheetSpells {
 			const subclassBtn = subclassDropdown.querySelector(".charsheet__source-multiselect-btn");
 			subclassDropdownMenu = subclassDropdown.querySelector(".charsheet__source-multiselect-dropdown");
 
-			subclassBtn.addEventListener("click", (e) => {
+			subclassBtn.addEventListener("click", (/** @type {*} */ e) => {
 				e.stopPropagation();
 				positionDropdown(subclassDropdownMenu, subclassBtn);
 				subclassDropdownMenu.classList.toggle("open");
@@ -872,7 +874,7 @@ class CharacterSheetSpells {
 				updateSubclassText();
 			});
 
-			subclassDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
+			subclassDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
 		}
 
 		// Multi-select level filter
@@ -921,7 +923,7 @@ class CharacterSheetSpells {
 		const levelDropdownMenu = levelDropdown.querySelector(".charsheet__source-multiselect-dropdown");
 		const levelText = levelDropdown.querySelector(".charsheet__source-multiselect-text");
 
-		levelBtn.addEventListener("click", (e) => {
+		levelBtn.addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			positionDropdown(levelDropdownMenu, levelBtn);
 			levelDropdownMenu.classList.toggle("open");
@@ -996,7 +998,7 @@ class CharacterSheetSpells {
 		const schoolDropdownMenu = schoolDropdown.querySelector(".charsheet__source-multiselect-dropdown");
 		const schoolText = schoolDropdown.querySelector(".charsheet__source-multiselect-text");
 
-		schoolBtn.addEventListener("click", (e) => {
+		schoolBtn.addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			positionDropdown(schoolDropdownMenu, schoolBtn);
 			schoolDropdownMenu.classList.toggle("open");
@@ -1079,7 +1081,7 @@ class CharacterSheetSpells {
 			const rarityBtn = rarityDropdown.querySelector(".charsheet__source-multiselect-btn");
 			const rarityText = rarityDropdown.querySelector(".charsheet__source-multiselect-text");
 
-			rarityBtn.addEventListener("click", (e) => {
+			rarityBtn.addEventListener("click", (/** @type {*} */ e) => {
 				e.stopPropagation();
 				positionDropdown(rarityDropdownMenu, rarityBtn);
 				rarityDropdownMenu.classList.toggle("open");
@@ -1119,7 +1121,7 @@ class CharacterSheetSpells {
 				updateRarityText();
 			});
 
-			rarityDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
+			rarityDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
 		}
 
 		// Legality multi-select filter
@@ -1158,7 +1160,7 @@ class CharacterSheetSpells {
 			const legalityBtn = legalityDropdown.querySelector(".charsheet__source-multiselect-btn");
 			const legalityText = legalityDropdown.querySelector(".charsheet__source-multiselect-text");
 
-			legalityBtn.addEventListener("click", (e) => {
+			legalityBtn.addEventListener("click", (/** @type {*} */ e) => {
 				e.stopPropagation();
 				positionDropdown(legalityDropdownMenu, legalityBtn);
 				legalityDropdownMenu.classList.toggle("open");
@@ -1198,7 +1200,7 @@ class CharacterSheetSpells {
 				updateLegalityText();
 			});
 
-			legalityDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
+			legalityDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
 		}
 
 		// Multi-select subschool/tags filter (only for non-rarity/non-legality subschools)
@@ -1247,7 +1249,7 @@ class CharacterSheetSpells {
 			const subschoolBtn = subschoolDropdown.querySelector(".charsheet__source-multiselect-btn");
 			const subschoolText = subschoolDropdown.querySelector(".charsheet__source-multiselect-text");
 
-			subschoolBtn.addEventListener("click", (e) => {
+			subschoolBtn.addEventListener("click", (/** @type {*} */ e) => {
 				e.stopPropagation();
 				positionDropdown(subschoolDropdownMenu, subschoolBtn);
 				subschoolDropdownMenu.classList.toggle("open");
@@ -1288,7 +1290,7 @@ class CharacterSheetSpells {
 				updateSubschoolText();
 			});
 
-			subschoolDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
+			subschoolDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
 		}
 
 		// Multi-select source filter (positioned on the right)
@@ -1326,7 +1328,7 @@ class CharacterSheetSpells {
 		const sourceDropdownMenu = sourceDropdown.querySelector(".charsheet__source-multiselect-dropdown");
 		const sourceText = sourceDropdown.querySelector(".charsheet__source-multiselect-text");
 
-		sourceBtn.addEventListener("click", (e) => {
+		sourceBtn.addEventListener("click", (/** @type {*} */ e) => {
 			e.stopPropagation();
 			positionDropdown(sourceDropdownMenu, sourceBtn);
 			sourceDropdownMenu.classList.toggle("open");
@@ -1349,9 +1351,9 @@ class CharacterSheetSpells {
 			legalityDropdownMenu?.classList.remove("open");
 			subschoolDropdownMenu?.classList.remove("open");
 		});
-		sourceDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
-		levelDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
-		schoolDropdownMenu.addEventListener("click", (e) => e.stopPropagation());
+		sourceDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
+		levelDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
+		schoolDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
 
 		// Update source text based on selection
 		const updateSourceText = () => {
@@ -1611,7 +1613,7 @@ class CharacterSheetSpells {
 					`});
 
 					if (!isKnown) {
-						item.querySelector(".spell-picker-add").addEventListener("click", (e) => {
+						item.querySelector(".spell-picker-add").addEventListener("click", (/** @type {*} */ e) => {
 							e.stopPropagation();
 							this._addSpell(spell);
 							knownSpellIds.push(spellId);
@@ -1724,7 +1726,7 @@ class CharacterSheetSpells {
 
 	/**
 	 * Check if adding a spell would exceed limits for known casters
-	 * @returns {{canAdd: boolean, warning?: string}}
+	 * @returns {{canAdd: boolean, warning?: string, isOverLimit?: boolean}}
 	 */
 	_checkSpellLimits (spell) {
 		const info = this._state.getSpellcastingInfo();
@@ -1889,12 +1891,12 @@ class CharacterSheetSpells {
 		// If concentrating on another spell, ask to break concentration first
 		if (requiresConcentration && this._state.isConcentrating?.()) {
 			const currentConc = this._state.getConcentration?.();
-			const confirmed = await InputUiUtil.pGetUserBoolean({
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Break Concentration?",
 				htmlDescription: `You are currently concentrating on <strong>${currentConc?.spellName || "a spell"}</strong>. Casting <strong>${spell.name}</strong> will break that concentration.`,
 				textYes: "Cast and break concentration",
 				textNo: "Cancel",
-			});
+			}));
 			if (!confirmed) return;
 			this._state.breakConcentration?.();
 		}
@@ -1956,12 +1958,12 @@ class CharacterSheetSpells {
 			// If no slots available, auto-ritual; if slots available, ask
 			let castAsRitual = !hasSlots;
 			if (hasSlots) {
-				castAsRitual = await InputUiUtil.pGetUserBoolean({
+				castAsRitual = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 					title: "Cast as Ritual?",
 					htmlDescription: `<strong>${spell.name}</strong> has the ritual tag. You can cast it as a ritual (no spell slot used, but casting takes 10 extra minutes).`,
 					textYes: "🔮 Cast as Ritual (no slot)",
 					textNo: "⚡ Cast Normally (use slot)",
-				});
+				}));
 			}
 
 			if (castAsRitual) {
@@ -2154,12 +2156,12 @@ class CharacterSheetSpells {
 
 		if (requiresConcentration && this._state.isConcentrating?.()) {
 			const currentConc = this._state.getConcentration?.();
-			const confirmed = await InputUiUtil.pGetUserBoolean({
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Break Concentration?",
 				htmlDescription: `You are currently concentrating on <strong>${currentConc?.spellName || "a spell"}</strong>. Casting <strong>${spell.name}</strong> as a ritual will break that concentration.`,
 				textYes: "Cast and break concentration",
 				textNo: "Cancel",
-			});
+			}));
 			if (!confirmed) return;
 			this._state.breakConcentration?.();
 		}
@@ -2200,14 +2202,14 @@ class CharacterSheetSpells {
 			return false;
 		}
 		if (checks.length) {
-			const confirmed = await InputUiUtil.pGetUserBoolean({
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Condition Check Required",
 				htmlDescription: `<div class="mb-2">Casting <strong>${spell.name}</strong> requires passing a check:</div>
 					<ul class="mb-2">${checks.map(c => `<li>${c}</li>`).join("")}</ul>
 					<div>Did you pass the required check(s)?</div>`,
 				textYes: "Yes — cast the spell",
 				textNo: "No — cancel",
-			});
+			}));
 			if (!confirmed) return false;
 		}
 		return true;
@@ -2576,20 +2578,24 @@ class CharacterSheetSpells {
 			e => surgeRoll >= e.min && surgeRoll <= e.max,
 		)?.effect || "The DM determines a random magical effect.";
 
-		return {roll, threshold, surged, effect, surgeRoll};
+		return /** @type {*} */ ({roll, threshold, surged, effect, surgeRoll});
 	}
 
 	// endregion
 
-	async _pMaybeApplySeekingSpell ({spell, attackRoll = 0, attackTotal = 0, castMeta = null} = {}) {
+	/**
+	 * @param {*} [opts]
+	 */
+	async _pMaybeApplySeekingSpell (opts = {}) {
+		const {spell, attackRoll = 0, attackTotal = 0, castMeta = null} = opts;
 		if (castMeta?.appliedMetamagic?.key !== "seeking") return castMeta;
 
-		const shouldReroll = await InputUiUtil.pGetUserBoolean({
+		const shouldReroll = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 			title: "Seeking Spell",
 			htmlDescription: `<div><strong>${spell?.name || "This spell"}</strong> rolled <strong>${attackTotal}</strong> to hit. If the spell attack missed, you can use Seeking Spell to reroll the d20 once.</div>`,
 			textYes: "Reroll Missed Attack",
 			textNo: "Keep Original Roll",
-		});
+		}));
 
 		if (!shouldReroll) return castMeta;
 
@@ -2718,12 +2724,12 @@ class CharacterSheetSpells {
 					?.find(f => f.active !== false);
 
 				if (activeFamiliar && !activeFamiliar.usedReaction) {
-					const deliverViaFamiliar = await InputUiUtil.pGetUserBoolean({
+					const deliverViaFamiliar = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 						title: "Touch Spell Delivery",
 						htmlDescription: `<strong>${spell.name}</strong> is a touch spell. Your familiar <strong>${activeFamiliar.customName || activeFamiliar.name}</strong> can deliver the touch for you (using its Reaction).`,
 						textYes: "🐾 Deliver via Familiar",
 						textNo: "✋ Touch Directly",
-					});
+					}));
 
 					if (deliverViaFamiliar) {
 						deliveredViaFamiliar = true;
@@ -2988,11 +2994,11 @@ class CharacterSheetSpells {
 			});
 		}
 
-		JqueryUtil.doToast({
+		JqueryUtil.doToast(/** @type {*} */ ({
 			type: "success",
 			content: toastEl,
 			...(hasGamblerFolly ? {autoHideTime: 10000} : {}),
-		});
+		}));
 
 		// Update UI to show new active states
 		if (effectsApplied.length > 0) {
@@ -3009,7 +3015,7 @@ class CharacterSheetSpells {
 	 * Handle Gambler's Folly automatic bet on spell cast (TGTT Gambler subclass)
 	 * @param {object} spell - The spell being cast
 	 * @param {number} slotLevel - The slot level used
-	 * @returns {string|null} - HTML string to append to toast, or null if not applicable
+	 * @returns {Promise<*>} - HTML/details object to append to toast, or null if not applicable
 	 */
 	async _handleGamblerFolly (spell, slotLevel) {
 		const calcs = this._state.getFeatureCalculations?.();
@@ -3147,7 +3153,7 @@ class CharacterSheetSpells {
 
 		renderTable();
 
-		searchInput.addEventListener("input", (e) => {
+		searchInput.addEventListener("input", (/** @type {*} */ e) => {
 			renderTable(e.target.value);
 		});
 
@@ -3163,7 +3169,7 @@ class CharacterSheetSpells {
 		`});
 		modalInner.append(settingRow);
 
-		settingRow.querySelector("input").addEventListener("change", (e) => {
+		settingRow.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 			this._state.setGamblerAutoRollTable?.(e.target.checked);
 		});
 	}
@@ -3177,9 +3183,9 @@ class CharacterSheetSpells {
 		// Find Familiar - show familiar picker (with Pact of the Chain expansion if applicable)
 		if (spellNameLower === "find familiar") {
 			const calculations = this._state?.getFeatureCalculations?.() || {};
-			await this._pShowFamiliarPicker({
+			await this._pShowFamiliarPicker(/** @type {*} */ ({
 				pactCreatureNames: calculations.pactOfTheChainCreatures || [],
-			});
+			}));
 			return;
 		}
 
@@ -3693,9 +3699,9 @@ class CharacterSheetSpells {
 
 	/**
 	 * Show familiar picker modal for Find Familiar spell
-	 * @param {Object} opts - Options
-	 * @param {boolean} opts.isWildCompanion - If true, familiar is summoned as Fey (Wild Companion)
-	 * @param {string[]} opts.pactCreatureNames - Additional creature names from Pact of the Chain
+	 * @param {*} [opts] - Options
+	 *   - `isWildCompanion` (boolean): If true, familiar is summoned as Fey (Wild Companion)
+	 *   - `pactCreatureNames` (string[]): Additional creature names from Pact of the Chain
 	 */
 	async _pShowFamiliarPicker (opts = {}) {
 		const {isWildCompanion = false, pactCreatureNames = []} = opts;
@@ -4216,8 +4222,8 @@ class CharacterSheetSpells {
 	 * Select a familiar and add it to companions.
 	 * Accepts a bestiary creature object, or a custom familiar object with `isCustom: true`.
 	 * @param {Object} creature - The bestiary creature data, or custom familiar data
-	 * @param {Object} opts - Options
-	 * @param {boolean} opts.isWildCompanion - If true, familiar is summoned as Fey (Wild Companion)
+	 * @param {*} [opts] - Options
+	 *   - `isWildCompanion` (boolean): If true, familiar is summoned as Fey (Wild Companion)
 	 */
 	async _selectFamiliar (creature, opts = {}) {
 		const {isWildCompanion = false} = opts;
@@ -4502,6 +4508,9 @@ class CharacterSheetSpells {
 		return appliedEffects;
 	}
 
+	/**
+	 * @returns {*}
+	 */
 	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null) {
 		// Check for cantrip scaling
 		if (spellData.scalingLevelDice) {
@@ -4562,6 +4571,9 @@ class CharacterSheetSpells {
 		}
 	}
 
+	/**
+	 * @returns {*}
+	 */
 	_rollCantripDamage (spellData, appliedMetamagic = null) {
 		const characterLevel = this._state.getTotalLevel();
 		const scaling = Array.isArray(spellData.scalingLevelDice)
@@ -4622,7 +4634,7 @@ class CharacterSheetSpells {
 	/**
 	 * Prompt the user to change damage type via Transmuted Spell (tuned passive).
 	 * @param {object} damageResult - Damage result from _rollSpellDamage/_rollCantripDamage
-	 * @returns {object|null} Modified damage result with new type, or null if unchanged
+	 * @returns {Promise<*>} Modified damage result with new type, or null if unchanged
 	 */
 	async _pMaybeApplyTransmutedDamage (damageResult) {
 		if (!damageResult?.damageType) return null;
@@ -4658,7 +4670,7 @@ class CharacterSheetSpells {
 	 * Prompt the user to reroll damage dice via Empowered Spell (tuned passive).
 	 * The sorcerer can reroll up to CHA modifier damage dice and must use the new rolls.
 	 * @param {object} damageResult - Damage result from _rollSpellDamage/_rollCantripDamage
-	 * @returns {object|null} Modified damage result with rerolled dice, or null if unchanged
+	 * @returns {Promise<*>} Modified damage result with rerolled dice, or null if unchanged
 	 */
 	async _pMaybeApplyEmpoweredReroll (damageResult) {
 		if (!damageResult?.dice) return null;
@@ -5451,7 +5463,7 @@ class CharacterSheetSpells {
 		// Bind pip clicks to restore uses (only present for spells with usage tracking)
 		const elPip = item.querySelector(".charsheet__innate-pip");
 		if (elPip) {
-			elPip.addEventListener("click", (e) => {
+			elPip.addEventListener("click", (/** @type {*} */ e) => {
 				const pip = e.currentTarget;
 				if (pip.classList.contains("used")) {
 					// Restore one use
@@ -5493,7 +5505,7 @@ class CharacterSheetSpells {
 		this._renderSpellList();
 	}
 
-	_renderSpellItem (spell) {
+	_renderSpellItem (spell, showPrepareHint = false) {
 		const schoolFull = spell.school ? Parser.spSchoolAbvToFull(spell.school) : "";
 		const isPrepared = spell.prepared;
 		const isCantrip = spell.level === 0;
@@ -5804,7 +5816,7 @@ class CharacterSheetSpells {
 			document.getElementById("charsheet-spell-attack").textContent = `+${prof} + ${calcs.gamblerModifierDice}${spellAttackBonus > 0 ? ` + ${spellAttackBonus}` : (spellAttackBonus < 0 ? ` - ${Math.abs(spellAttackBonus)}` : "")}`;
 		} else {
 			document.getElementById("charsheet-spell-ability").textContent = abilityFull;
-			document.getElementById("charsheet-spell-dc").textContent = saveDC;
+			document.getElementById("charsheet-spell-dc").textContent = String(saveDC);
 			document.getElementById("charsheet-spell-attack").textContent = `+${attackBonus}`;
 		}
 
@@ -5959,7 +5971,7 @@ class CharacterSheetSpells {
 		// Override header to show Gambler-specific labels
 		const titleEl = preparedInfo.querySelector(".charsheet__spell-tracking-title");
 		if (titleEl) titleEl.textContent = "Gambler Spells";
-		const badgeEl = preparedInfo.querySelector(".charsheet__spell-tracking-badge");
+		const badgeEl = /** @type {*} */ (preparedInfo.querySelector(".charsheet__spell-tracking-badge"));
 		if (badgeEl) { badgeEl.textContent = "\u{1F3B2}"; badgeEl.title = "Gambler (TGTT) \u2014 Roll for prepared count after each long rest"; }
 
 		const rolledMax = this._state.getGamblerPreparedCount();
@@ -6007,11 +6019,11 @@ class CharacterSheetSpells {
 					}
 					const rollDetails = this._state.rollGamblerPreparedSpells();
 					if (rollDetails) {
-						JqueryUtil.doToast({
+						JqueryUtil.doToast(/** @type {*} */ ({
 							content: `\u{1F3B2} Gambler: Rolled ${rollDetails.dice} = (${rollDetails.rolls.join(" + ")}) = ${rollDetails.total} spells prepared`,
 							type: "success",
 							autoHideTime: 5000,
-						});
+						}));
 						this._renderSpellTrackingUI();
 						this._page.saveCharacter();
 					}
@@ -6210,7 +6222,7 @@ class CharacterSheetSpells {
 					});
 
 					// Show spell info on item click (not on button)
-					item.addEventListener("click", (e) => {
+					item.addEventListener("click", (/** @type {*} */ e) => {
 						if (!e.target.matches("button")) {
 							this._showSpellInfoModal(spell);
 						}
@@ -6450,7 +6462,7 @@ class CharacterSheetSpells {
 					});
 				};
 
-				search.addEventListener("input", (e) => renderList(e.target.value.toLowerCase()));
+				search.addEventListener("input", (/** @type {*} */ e) => renderList(e.target.value.toLowerCase()));
 				renderList();
 
 				const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default mt-2">Cancel</button>`});
