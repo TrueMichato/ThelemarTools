@@ -2,7 +2,6 @@
 In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
-[] choosing spells did not become optional at the levelup screen despite the fact we wanted it to be
 [] there is a display issue where choosing metamagic at level up requires scrolling down and some of the options are hidden even when you do scroll down.
 [] Combat Traditions choosing is not pretty on levelup/builder/quickbuild, and does not filter tradition options for non-fighter classes. It also causes some scroll down display issues.
 [] choosing languages in race is not very pretty, does not allow filtering or searching, and in general not a nice experience.

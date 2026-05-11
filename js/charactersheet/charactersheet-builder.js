@@ -416,25 +416,10 @@ class CharacterSheetBuilder {
 					JqueryUtil.doToast({type: "warning", content: "Please choose a Divine Soul affinity before finishing spell selection."});
 					return false;
 				}
-				// Build a list of incomplete spell selections for a single skip confirmation
-				const missing = [];
-				if (knownInfo.isSpellbookCaster && knownInfo.spellbookCount > 0 && this._selectedSpellbookSpells.length < knownInfo.spellbookCount) {
-					missing.push(`${knownInfo.spellbookCount - this._selectedSpellbookSpells.length} spellbook spell(s)`);
-				}
-				if (!knownInfo.isSpellbookCaster && knownInfo.spellCount > 0 && this._selectedKnownSpells.length < knownInfo.spellCount) {
-					missing.push(`${knownInfo.spellCount - this._selectedKnownSpells.length} spell(s)`);
-				}
-				if (knownInfo.cantripCount > 0 && this._selectedKnownCantrips.length < knownInfo.cantripCount) {
-					missing.push(`${knownInfo.cantripCount - this._selectedKnownCantrips.length} cantrip(s)`);
-				}
-				if (missing.length === 0) return true;
-				const confirmed = await InputUiUtil.pGetUserBoolean({
-					title: "Skip Spell Selection?",
-					htmlDescription: `You still need to choose ${missing.join(" and ")}. You can pick them later on the Spells tab.`,
-					textYes: "Skip",
-					textNo: "Go Back",
-				});
-				return !!confirmed;
+				// Spell selection at character creation is intentionally optional:
+				// whatever the player picked is applied, and any remaining unspent
+				// spell/cantrip slots can be filled later from the Spells tab.
+				return true;
 			}
 
 			default:
