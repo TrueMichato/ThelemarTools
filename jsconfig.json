@@ -3,7 +3,11 @@
       "target": "ESNext",
       "module": "ESNext",
       "checkJs": true,
-      "noImplicitAny": false
+      "strict": false,
+      "noImplicitAny": false,
+      "strictNullChecks": false,
+      "noImplicitThis": false,
+      "useUnknownInCatchVariables": false
     },
     "include": [
         "js/**/*",
