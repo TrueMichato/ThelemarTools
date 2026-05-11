@@ -1164,6 +1164,13 @@ globalThis.JqueryUtil = class {
 	}
 };
 
+// Eagerly initialise so that template helpers (`ee`, `$$`) are defined before any other
+// script's top-level executes. Other `load` listeners (e.g. `omnisearch.js`, `render-dice.js`)
+// register and fire in registration order, and on heavy pages such as `charactersheet.html`
+// the order can put consumers ahead of the previous `load`-deferred init, producing
+// "ee is not a function" errors. `initEnhancements` is idempotent (guarded by
+// `_isEnhancementsInit`), so the kept `load` listener is a safe backstop.
+JqueryUtil.initEnhancements();
 if (typeof window !== "undefined") window.addEventListener("load", JqueryUtil.initEnhancements);
 
 class ElementUtil {
