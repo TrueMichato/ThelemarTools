@@ -9486,7 +9486,7 @@ body.has-quickbuild-overlay .toast__container {
 	padding: var(--cs-space-md, 0.75rem) var(--cs-space-lg, 1.25rem) var(--cs-space-lg, 1.25rem);
 	border-top: 1px solid var(--cs-border, var(--rgb-border-grey));
 	background: var(--cs-bg-surface, var(--rgb-bg-alt));
-	max-height: 55vh;
+	max-height: 65vh;
 	overflow-y: auto;
 }
 
@@ -9546,8 +9546,22 @@ body.has-quickbuild-overlay .toast__container {
 	display: flex;
 	flex-direction: column;
 	gap: var(--cs-space-xs, 0.25rem);
-	max-height: 250px;
-	overflow-y: auto;
+}
+
+/* Shared helper for inner picker lists (Combat Traditions, Feature Options,
+   etc.) so each surface uses a single, predictable scroll axis — the
+   accordion / wizard body — rather than nested scroll containers. */
+.charsheet__levelup-picker-list,
+.charsheet__quickbuild-picker-list {
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 4px);
+	padding: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__quickbuild-picker-list {
+	border-radius: var(--cs-radius-md, 8px);
+	padding: 4px;
+	margin-bottom: 8px;
 }
 
 .charsheet__levelup-opt-item {

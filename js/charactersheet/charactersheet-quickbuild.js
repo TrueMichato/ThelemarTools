@@ -2473,7 +2473,7 @@ class CharacterSheetQuickBuild {
 				tradContainer.append(e_({outer: `<div class="ve-small ve-muted mb-1" style="padding: 4px 6px;">Free from subclass: <strong>${grantedNames}</strong></div>`}));
 			}
 
-			const tradList = e_({outer: `<div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--cs-border, #ddd); border-radius: 8px; padding: 4px; margin-bottom: 8px;"></div>`});
+			const tradList = e_({outer: `<div class="charsheet__quickbuild-picker-list"></div>`});
 
 			availableTraditions.filter(trad => !subclassGrantedCodes.includes(trad.code)).forEach(trad => {
 				const isChecked = this._selections._combatTraditions.includes(trad.code);
@@ -2561,7 +2561,7 @@ class CharacterSheetQuickBuild {
 			const newMethods = availableMethods.filter(m => !existingNames.has(`${m.name}|${m.source}`));
 
 			const search = e_({outer: `<input type="text" class="ve-form-control ve-input-sm mb-1" placeholder="Search methods...">`});
-			const list = e_({outer: `<div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--cs-border, #ddd); border-radius: 8px;"></div>`});
+			const list = e_({outer: `<div class="charsheet__quickbuild-picker-list charsheet__quickbuild-picker-list--methods"></div>`});
 
 			const renderFiltered = (filter = "") => {
 				list.innerHTML = "";

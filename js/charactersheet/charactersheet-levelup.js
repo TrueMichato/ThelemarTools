@@ -2711,7 +2711,7 @@ class CharacterSheetLevelUp {
 					${CharacterSheetClassUtils.getCombatMethodsSystemSummary()}
 					<div class="charsheet__levelup-traditions mb-3">
 						<p class="ve-muted ve-small mb-2">You haven't selected Combat Traditions yet. Please choose ${traditionCount} traditions first:</p>
-						<div class="charsheet__levelup-tradition-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--rgb-border-grey); border-radius: 4px; padding: 0.5rem;"></div>
+						<div class="charsheet__levelup-tradition-list charsheet__levelup-picker-list"></div>
 						<div class="ve-small ve-muted mt-1">Selected: <span class="tradition-count">0</span>/${traditionCount}</div>
 					</div>
 					<div class="charsheet__levelup-methods-container"></div>
@@ -2830,7 +2830,7 @@ class CharacterSheetLevelUp {
 			<div class="charsheet__levelup-opt-gain mb-3">
 				<p><strong>${gain.name}:</strong> Choose ${gain.newCount} new method${gain.newCount > 1 ? "s" : ""}</p>
 				<p class="ve-small ve-muted">Max degree available: ${maxDegree}${CharacterSheetClassUtils.getOrdinalSuffix(maxDegree)} | Traditions: ${knownTraditions.map((/** @type {*} */ t) => CharacterSheetClassUtils.getTraditionName(t)).join(", ")}</p>
-				<div class="charsheet__levelup-opt-list" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--rgb-border-grey); border-radius: 4px; padding: 0.5rem;"></div>
+				<div class="charsheet__levelup-opt-list"></div>
 				<div class="ve-small ve-muted mt-1">Selected: <span class="opt-count">${selectedForType.length}</span>/${gain.newCount}</div>
 			</div>
 		`});
@@ -2942,7 +2942,7 @@ class CharacterSheetLevelUp {
 		const gainSection = e_({outer: `
 			<div class="charsheet__levelup-opt-gain mb-3">
 				<p><strong>${gain.name}:</strong> Choose ${gain.newCount} new option${gain.newCount > 1 ? "s" : ""}</p>
-				<div class="charsheet__levelup-opt-list" style="max-height: 60vh; overflow-y: auto; border: 1px solid var(--rgb-border-grey); border-radius: 4px; padding: 0.5rem;"></div>
+				<div class="charsheet__levelup-opt-list"></div>
 				<div class="ve-small ve-muted mt-1">Selected: <span class="opt-count">0</span>/${gain.newCount}</div>
 			</div>
 		`});
@@ -3159,7 +3159,7 @@ class CharacterSheetLevelUp {
 			const groupSection = e_({outer: `
 				<div class="charsheet__levelup-feat-opt-group mb-3">
 					<p><strong>${optGroup.featureName}:</strong> Choose ${optGroup.count}</p>
-					<div class="charsheet__levelup-feat-opt-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--rgb-border-grey); border-radius: 4px; padding: 0.5rem;"></div>
+					<div class="charsheet__levelup-feat-opt-list charsheet__levelup-picker-list"></div>
 					<div class="ve-small ve-muted mt-1">Selected: <span class="feat-opt-count">0</span>/${optGroup.count}</div>
 				</div>
 			`});
