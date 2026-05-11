@@ -3233,6 +3233,45 @@ class CharacterSheetBuilder {
 			secret: "Secret",
 		};
 
+		// Build a flat list of {lang, group, pillEl} so the search filter
+		// can hide/show pills (and their group headers) without re-rendering.
+		/** @type {Array<{lang: string, group: HTMLElement, pill: HTMLElement, input: HTMLInputElement}>} */
+		const pillIndex = [];
+		/** @type {HTMLElement[]} */ const groupEls = [];
+
+		// Search input — case-insensitive substring filter over language names.
+		const searchWrap = e_({outer: `
+			<div class="charsheet__builder-lang-search mb-2">
+				<span class="charsheet__builder-lang-search-icon">🔍</span>
+				<input type="text" class="ve-form-control charsheet__builder-lang-search-input" placeholder="Search languages...">
+			</div>
+		`});
+		const searchInput = /** @type {HTMLInputElement} */ (searchWrap.querySelector(".charsheet__builder-lang-search-input"));
+
+		// Selected-summary chip row ("3/4 selected — Elvish, Dwarvish, Giant")
+		const summaryEl = e_({outer: `
+			<div class="charsheet__builder-lang-summary mb-2">
+				<span class="charsheet__builder-lang-summary-count badge"><span class="lang-sel-count">${selectedArr.length}</span>/${maxCount}</span>
+				<span class="charsheet__builder-lang-summary-names ve-muted ve-small"></span>
+			</div>
+		`});
+		const summaryCountEl = summaryEl.querySelector(".lang-sel-count");
+		const summaryNamesEl = summaryEl.querySelector(".charsheet__builder-lang-summary-names");
+
+		const refreshSummary = () => {
+			summaryCountEl.textContent = String(selectedArr.length);
+			summaryNamesEl.textContent = selectedArr.length ? `— ${selectedArr.join(", ")}` : "";
+			// Update disabled state on every unchecked pill once maxCount reached.
+			const atMax = selectedArr.length >= maxCount;
+			for (const {pill, input} of pillIndex) {
+				if (input.checked) continue;
+				pill.classList.toggle("charsheet__builder-lang-pill--disabled", atMax);
+			}
+		};
+
+		container.append(searchWrap);
+		container.append(summaryEl);
+
 		for (const key of ["homebrew", "standard", "exotic", "secret"]) {
 			if (excludeGroups.includes(key)) continue;
 			const langs = (/** @type {*} */ (groupedLangs))[key];
@@ -3241,40 +3280,62 @@ class CharacterSheetBuilder {
 			const group = e_({outer: `
 				<div class="charsheet__builder-lang-group">
 					<div class="charsheet__builder-lang-group-header">${(/** @type {*} */ (GROUP_LABELS))[key]}</div>
-					<div class="charsheet__builder-lang-group-items"></div>
+					<div class="charsheet__builder-lang-grid"></div>
 				</div>
 			`});
-			const items = group.querySelector(".charsheet__builder-lang-group-items");
+			groupEls.push(group);
+			const grid = group.querySelector(".charsheet__builder-lang-grid");
 
 			for (const lang of langs) {
 				const source = sourceLookup?.get(lang);
 				const sourceSpan = source ? ` <span class="charsheet__builder-lang-source">(${source})</span>` : "";
 				const isSelected = selectedArr.includes(lang);
 				const lbl = e_({outer: `
-					<label class="charsheet__builder-lang-checkbox">
+					<label class="charsheet__builder-lang-pill">
 						<input type="checkbox" value="${lang}" ${isSelected ? "checked" : ""}>
-						${lang}${sourceSpan}
+						<span class="charsheet__builder-lang-pill-name">${lang}</span>${sourceSpan}
 					</label>
 				`});
-				lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
+				const input = /** @type {HTMLInputElement} */ (lbl.querySelector("input"));
+				input.addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
 						if (selectedArr.length < maxCount) {
 							selectedArr.push(lang);
 						} else {
 							e.target.checked = false;
 							JqueryUtil.doToast({type: "warning", content: `You can only choose ${maxCount} language${maxCount > 1 ? "s" : ""}.`});
+							return;
 						}
 					} else {
 						const idx = selectedArr.indexOf(lang);
 						if (idx !== -1) selectedArr.splice(idx, 1);
 					}
 					countEl.textContent = String(selectedArr.length);
+					refreshSummary();
 					if (onChange) onChange();
 				});
-				items.append(lbl);
+				pillIndex.push({lang, group, pill: lbl, input});
+				grid.append(lbl);
 			}
 			container.append(group);
 		}
+
+		// Search filter — hide non-matching pills, then hide whole groups that
+		// ended up empty so the layout stays tight.
+		const applyFilter = () => {
+			const q = searchInput.value.trim().toLowerCase();
+			for (const {lang, pill} of pillIndex) {
+				const match = !q || lang.toLowerCase().includes(q);
+				pill.classList.toggle("charsheet__builder-lang-pill--hidden", !match);
+			}
+			for (const groupEl of groupEls) {
+				const anyVisible = !!groupEl.querySelector(".charsheet__builder-lang-pill:not(.charsheet__builder-lang-pill--hidden)");
+				groupEl.classList.toggle("charsheet__builder-lang-group--hidden", !anyVisible);
+			}
+		};
+		searchInput.addEventListener("input", applyFilter);
+
+		refreshSummary();
 	}
 
 	/**

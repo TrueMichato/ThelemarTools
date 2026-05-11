@@ -16623,9 +16623,44 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 		display: none;
 	}
 }
-/* ========== Builder: grouped language checkbox lists ========== */
+/* ========== Builder: grouped language picker (search + pill grid) ========== */
+.charsheet__builder-lang-search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.charsheet__builder-lang-search-icon {
+	font-size: 1.1em;
+	opacity: 0.7;
+}
+
+.charsheet__builder-lang-search-input {
+	flex: 1;
+}
+
+.charsheet__builder-lang-summary {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.charsheet__builder-lang-summary-count {
+	background: rgba(99, 102, 241, 0.12);
+	color: var(--rgb-link, #6366f1);
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-weight: 600;
+	font-size: 0.85em;
+}
+
 .charsheet__builder-lang-group {
 	margin-bottom: 10px;
+}
+
+.charsheet__builder-lang-group--hidden {
+	display: none;
 }
 
 .charsheet__builder-lang-group-header {
@@ -16637,21 +16672,52 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	margin-bottom: 4px;
 }
 
-.charsheet__builder-lang-group-items {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 4px 14px;
-	align-items: center;
+.charsheet__builder-lang-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+	gap: 6px;
 }
 
-.charsheet__builder-lang-checkbox {
+.charsheet__builder-lang-pill {
 	display: inline-flex;
-	gap: 4px;
+	gap: 6px;
 	align-items: center;
 	cursor: pointer;
 	white-space: nowrap;
 	margin: 0;
+	padding: 4px 8px;
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 4px);
 	font-weight: 400;
+	transition: background var(--cs-transition-fast, 0.15s ease), border-color var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__builder-lang-pill:hover {
+	background: var(--cs-bg-hover, rgba(99, 102, 241, 0.06));
+	border-color: var(--rgb-link, #6366f1);
+}
+
+.charsheet__builder-lang-pill:has(input:checked) {
+	background: var(--rgb-link-opacity-10, rgba(99, 102, 241, 0.12));
+	border-color: var(--rgb-link, #6366f1);
+}
+
+.charsheet__builder-lang-pill--disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.charsheet__builder-lang-pill--disabled:hover {
+	background: transparent;
+	border-color: var(--cs-border, var(--rgb-border-grey));
+}
+
+.charsheet__builder-lang-pill--hidden {
+	display: none;
+}
+
+.charsheet__builder-lang-pill-name {
+	flex: 1;
 }
 
 .charsheet__builder-lang-source {
