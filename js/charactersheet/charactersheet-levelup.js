@@ -2739,7 +2739,7 @@ class CharacterSheetLevelUp {
 				}
 
 				const item = e_({outer: `
-					<label class="charsheet__builder-tradition-item d-block mb-1" style="cursor: pointer;">
+					<label class="charsheet__builder-tradition-item charsheet__tradition-row d-block mb-1">
 						<input type="checkbox" class="mr-2">
 						<strong class="tradition-name-slot"></strong>
 						<span class="ve-muted ve-small ml-1">(${trad.code})</span>

@@ -2113,19 +2113,26 @@ class CharacterSheetClassUtils {
 				// Tradition-specific code like CTM:1AM → extract tradition
 				allowedTraditionCodes.add(match[2]);
 			} else if (/^CTM:\d+$/.test(ft)) {
-				// Degree-only code like CTM:1 → class has unrestricted tradition access
+				// Degree-only code like CTM:1 → class allows any degree-1 method;
+				// the actual tradition restriction (if any) is encoded in the
+				// class-feature text via `{@filter ...|combatmethods|tradition=Name}` tags.
 				hasDegreeOnlyCodes = true;
 			}
 		}
 
-		// Degree-only CTM codes (CTM:1, CTM:2, etc.) mean all traditions are available
-		if (/** @type {*} */ hasDegreeOnlyCodes && allowedTraditionCodes.size === 0) {
-			return CharacterSheetClassUtils.getAllTraditions();
-		}
-
+		// 1. If the progression declared tradition-specific codes (CTM:NXX), use those.
+		// 2. Otherwise, prefer class-feature text extraction so non-Fighter classes
+		//    (Ranger / Monk / Paladin / Bard / Barbarian) are limited to the
+		//    traditions explicitly listed in their Combat Methods feature.
+		// 3. Only when neither yielded a list do degree-only codes mean "unrestricted".
+		// 4. Final fallback: every CTM feature in the data pool.
 		if (/** @type {*} */ allowedTraditionCodes.size === 0 && className) {
 			const featureTraditions = CharacterSheetClassUtils.extractTraditionsFromClassFeature(className, 2, classFeatures);
 			for (const trad of featureTraditions) allowedTraditionCodes.add(trad);
+		}
+
+		if (/** @type {*} */ hasDegreeOnlyCodes && allowedTraditionCodes.size === 0) {
+			return CharacterSheetClassUtils.getAllTraditions();
 		}
 
 		if (/** @type {*} */ allowedTraditionCodes.size === 0) {

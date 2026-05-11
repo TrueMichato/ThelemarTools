@@ -5463,11 +5463,28 @@ class CharacterSheetBuilder {
 			classFeatures: this._page.getClassFeatures(),
 		});
 
+		// Identify subclass-granted traditions (e.g. TGTT Mercy Monk → Sanguine Knot)
+		// so we can surface them as a free "from subclass" badge and exclude them
+		// from the user-selectable picker, mirroring quickbuild behavior.
+		let subclassGrantedCodes = [];
+		if (this._selectedSubclass) {
+			const grantedTraditions = CharacterSheetClassUtils.getSubclassGrantedTraditions(this._selectedSubclass, cls?.source);
+			subclassGrantedCodes = grantedTraditions
+				.filter(t => t.code && !(/** @type {*} */ (t)).choice)
+				.map(t => t.code);
+		}
+
 		// Initialize storage
 		if (!this._selectedCombatTraditions) this._selectedCombatTraditions = [];
 		if (!this._selectedOptionalFeatures[featureKey]) {
 			this._selectedOptionalFeatures[featureKey] = [];
 		}
+		// Drop any granted codes the user may have previously selected manually
+		this._selectedCombatTraditions = this._selectedCombatTraditions.filter(c => !subclassGrantedCodes.includes(c));
+
+		const grantedBadgeHtml = subclassGrantedCodes.length > 0
+			? `<div class="ve-small ve-muted mb-1" style="padding: 4px 6px;">Free from subclass: <strong>${subclassGrantedCodes.map(c => CharacterSheetClassUtils.getTraditionName(c)).join(", ")}</strong></div>`
+			: "";
 
 		const section = e_({outer: `
 			<div class="charsheet__builder-combat-methods mb-3">
@@ -5477,13 +5494,14 @@ class CharacterSheetBuilder {
 				
 				<div class="charsheet__builder-traditions mb-2">
 					<p><strong>Combat Traditions:</strong> Choose ${traditionCount}</p>
-					<div class="charsheet__builder-tradition-list" style="max-height: 150px; overflow-y: auto;"></div>
+					${grantedBadgeHtml}
+					<div class="charsheet__builder-tradition-list charsheet__builder-picker-list"></div>
 					<div class="ve-small ve-muted mt-1">Selected: <span class="tradition-count">${this._selectedCombatTraditions.length}</span>/${traditionCount}</div>
 				</div>
 				
 				<div class="charsheet__builder-methods">
 					<p><strong>${name}:</strong> Choose ${methodCount} (max degree: ${maxDegree > 0 ? maxDegree + this._getOrdinalSuffix(maxDegree) : "none"})</p>
-					<div class="charsheet__builder-method-list" style="max-height: 250px; overflow-y: auto;"></div>
+					<div class="charsheet__builder-method-list charsheet__builder-picker-list"></div>
 					<div class="ve-small ve-muted mt-1">Selected: <span class="method-count">${this._selectedOptionalFeatures[featureKey].length}</span>/${methodCount}</div>
 				</div>
 			</div>
@@ -5492,8 +5510,9 @@ class CharacterSheetBuilder {
 		const traditionList = section.querySelector(".charsheet__builder-tradition-list");
 		const methodList = section.querySelector(".charsheet__builder-method-list");
 
-		// Render tradition selection
-		availableTraditions.forEach((/** @type {*} */ trad) => {
+		// Render tradition selection (excluding any granted-by-subclass codes)
+		const selectableTraditions = availableTraditions.filter(trad => !subclassGrantedCodes.includes(trad.code));
+		selectableTraditions.forEach((/** @type {*} */ trad) => {
 			const isSelected = this._selectedCombatTraditions.includes(trad.code);
 			const desc = CharacterSheetClassUtils.getTraditionDescription(trad.code);
 
@@ -5512,7 +5531,7 @@ class CharacterSheetBuilder {
 			}
 
 			const item = e_({outer: `
-				<label class="charsheet__builder-tradition-item d-block mb-1" style="cursor: pointer;">
+				<label class="charsheet__builder-tradition-item charsheet__tradition-row d-block mb-1">
 					<input type="checkbox" class="mr-2" ${isSelected ? "checked" : ""}>
 					<strong class="tradition-name-slot"></strong>
 					<span class="ve-muted ve-small ml-1">(${trad.code})</span>

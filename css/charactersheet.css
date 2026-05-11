@@ -9552,7 +9552,8 @@ body.has-quickbuild-overlay .toast__container {
    etc.) so each surface uses a single, predictable scroll axis — the
    accordion / wizard body — rather than nested scroll containers. */
 .charsheet__levelup-picker-list,
-.charsheet__quickbuild-picker-list {
+.charsheet__quickbuild-picker-list,
+.charsheet__builder-picker-list {
 	border: 1px solid var(--cs-border, var(--rgb-border-grey));
 	border-radius: var(--cs-radius-sm, 4px);
 	padding: var(--cs-space-sm, 0.5rem);
@@ -9562,6 +9563,25 @@ body.has-quickbuild-overlay .toast__container {
 	border-radius: var(--cs-radius-md, 8px);
 	padding: 4px;
 	margin-bottom: 8px;
+}
+
+/* Shared row for a single combat-tradition entry across builder /
+   level-up / quick-build pickers. Provides hover + selected affordance
+   via :has(input:checked) so no JS state has to push styles into the DOM. */
+.charsheet__tradition-row {
+	display: block;
+	cursor: pointer;
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	border-radius: var(--cs-radius-sm, 4px);
+	transition: background var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__tradition-row:hover {
+	background: var(--cs-bg-hover, rgba(99, 102, 241, 0.06));
+}
+
+.charsheet__tradition-row:has(input:checked) {
+	background: var(--rgb-link-opacity-10, rgba(99, 102, 241, 0.12));
 }
 
 .charsheet__levelup-opt-item {
