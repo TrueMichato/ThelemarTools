@@ -2494,7 +2494,7 @@ class CharacterSheetQuickBuild {
 				}
 
 				const item = e_({outer: `
-					<label class="d-block ve-small mb-1" style="cursor: pointer; padding: 4px 6px;">
+					<label class="charsheet__tradition-row d-block ve-small mb-1">
 						<input type="checkbox" class="mr-2" ${isChecked ? "checked" : ""}>
 						<strong class="tradition-name-slot"></strong>
 						<span class="ve-muted ml-1">(${trad.code})</span>

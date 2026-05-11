@@ -99,4 +99,32 @@ describe("Level-up / Quick-build picker scroll containers", () => {
 		expect(CSS_SRC).toMatch(/\.charsheet__levelup-picker-list/);
 		expect(CSS_SRC).toMatch(/\.charsheet__quickbuild-picker-list/);
 	});
+
+	test("builder tradition + method picker lists have no inline scroll", () => {
+		const BUILDER_SRC = read("js/charactersheet/charactersheet-builder.js");
+		const offenders = [];
+		BUILDER_SRC.split(/\n/).forEach((line, idx) => {
+			if (!/charsheet__builder-(tradition-list|method-list)/.test(line)) return;
+			if (INLINE_NESTED_SCROLL.test(line)) offenders.push(`L${idx + 1}: ${line.trim()}`);
+		});
+		expect(offenders).toEqual([]);
+	});
+
+	test("tradition rows use shared class instead of inline cursor across all 3 surfaces", () => {
+		const BUILDER_SRC = read("js/charactersheet/charactersheet-builder.js");
+		const LEVELUP = read("js/charactersheet/charactersheet-levelup.js");
+		const QUICKBUILD = read("js/charactersheet/charactersheet-quickbuild.js");
+
+		// Every tradition row should be tagged with the shared class
+		// (cursor / hover / selected styling lives in CSS, not inline).
+		expect(BUILDER_SRC).toMatch(/charsheet__tradition-row/);
+		expect(LEVELUP).toMatch(/charsheet__tradition-row/);
+		expect(QUICKBUILD).toMatch(/charsheet__tradition-row/);
+	});
+
+	test("css defines .charsheet__tradition-row with hover + checked affordances", () => {
+		expect(CSS_SRC).toMatch(/\.charsheet__tradition-row\b/);
+		expect(CSS_SRC).toMatch(/\.charsheet__tradition-row:hover/);
+		expect(CSS_SRC).toMatch(/\.charsheet__tradition-row:has\(input:checked\)/);
+	});
 });
