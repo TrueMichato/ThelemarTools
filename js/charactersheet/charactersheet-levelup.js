@@ -572,23 +572,26 @@ class CharacterSheetLevelUp {
 						onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
 							selectedKnownSpells = spells;
 							selectedKnownCantrips = cantrips;
-							const spellComplete = spells.length >= knownSpellsGain;
-							const cantripComplete = cantrips.length >= knownCantripsGain;
-							const complete = spellComplete && cantripComplete;
+							// Known spells/cantrips are optional at level-up — always complete.
 							const parts = [];
 							if (knownSpellsGain > 0) parts.push(`${spells.length}/${knownSpellsGain} spells`);
 							if (knownCantripsGain > 0) parts.push(`${cantrips.length}/${knownCantripsGain} cantrips`);
 							const allNames = [...cantrips, ...spells].map((/** @type {*} */ s) => s.name).join(", ");
-							summaryItemEls.knownspells.setStatus(complete, allNames || parts.join(", "));
-							accordions.knownspells.setComplete(complete, parts.join(", "));
+							const summary = allNames || `${parts.join(", ")} — pick later on the Spells tab`;
+							summaryItemEls.knownspells.setStatus(true, summary);
+							accordions.knownspells.setComplete(true, parts.join(", "));
 						},
 					}));
 					body.append(updatedKnownContent);
-					// Clear previous spell selections since the spell list changed
+					// Clear previous spell selections since the spell list changed,
+					// but keep the optional contract: section stays "complete".
 					selectedKnownSpells = [];
 					selectedKnownCantrips = [];
-					summaryItemEls.knownspells?.setStatus(false, "Select spells");
-					accordions.knownspells.setComplete(false, "");
+					const resetParts = [];
+					if (knownSpellsGain > 0) resetParts.push(`0/${knownSpellsGain} spells`);
+					if (knownCantripsGain > 0) resetParts.push(`0/${knownCantripsGain} cantrips`);
+					summaryItemEls.knownspells?.setStatus(true, `${resetParts.join(", ")} — pick later on the Spells tab`);
+					accordions.knownspells.setComplete(true, resetParts.join(", "));
 				}
 
 				// Update features accordion
@@ -862,14 +865,18 @@ class CharacterSheetLevelUp {
 				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
 				onSelect: (/** @type {*} */ spells) => {
 					selectedSpellbookSpells = spells;
-					const complete = spells.length >= wizardSpellCount;
-					const summary = spells.length > 0 ? spells.map((/** @type {*} */ s) => s.name).join(", ") : "Select spells";
-					summaryItemEls.spellbook.setStatus(complete, summary);
-					accordions.spellbook.setComplete(complete, `${spells.length}/${wizardSpellCount} spells`);
+					// Spellbook picks are optional at level-up — always report complete
+					// so the accordion + summary stop flagging partial selections as red.
+					const summary = spells.length > 0 ? spells.map((/** @type {*} */ s) => s.name).join(", ") : "None — pick later on the Spells tab";
+					summaryItemEls.spellbook.setStatus(true, summary);
+					accordions.spellbook.setComplete(true, `${spells.length}/${wizardSpellCount} spells`);
 				},
 			}));
 
-			main.append(createAccordion("spellbook", "📕", `Spellbook (+${wizardSpellCount} Spells)`, spellbookContent, {required: false}));
+			main.append(createAccordion("spellbook", "📕", `Spellbook (+${wizardSpellCount} Spells, optional)`, spellbookContent, {required: false}));
+			// Initial state: optional section starts "complete" with no picks.
+			summaryItemEls.spellbook.setStatus(true, "None — pick later on the Spells tab");
+			accordions.spellbook.setComplete(true, `0/${wizardSpellCount} spells`);
 		}
 
 		// ========== 8b. KNOWN SPELLS (Sorcerer, Bard, Ranger, Warlock, etc.) ==========
@@ -901,23 +908,27 @@ class CharacterSheetLevelUp {
 				onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
 					selectedKnownSpells = spells;
 					selectedKnownCantrips = cantrips;
-					const spellComplete = spells.length >= knownSpellsGain;
-					const cantripComplete = cantrips.length >= knownCantripsGain;
-					const complete = spellComplete && cantripComplete;
+					// Known spells/cantrips are optional at level-up — always complete.
 					const parts = [];
 					if (knownSpellsGain > 0) parts.push(`${spells.length}/${knownSpellsGain} spells`);
 					if (knownCantripsGain > 0) parts.push(`${cantrips.length}/${knownCantripsGain} cantrips`);
-					const summary = parts.join(", ") || "Select spells";
 					const allNames = [...cantrips, ...spells].map((/** @type {*} */ s) => s.name).join(", ");
-					summaryItemEls.knownspells.setStatus(complete, allNames || summary);
-					accordions.knownspells.setComplete(complete, parts.join(", "));
+					const summary = allNames || `${parts.join(", ")} — pick later on the Spells tab`;
+					summaryItemEls.knownspells.setStatus(true, summary);
+					accordions.knownspells.setComplete(true, parts.join(", "));
 				},
 			}));
 
 			const sectionLabel = [];
 			if (knownSpellsGain > 0) sectionLabel.push(`+${knownSpellsGain} Spell${knownSpellsGain !== 1 ? "s" : ""}`);
 			if (knownCantripsGain > 0) sectionLabel.push(`+${knownCantripsGain} Cantrip${knownCantripsGain !== 1 ? "s" : ""}`);
-			main.append(createAccordion("knownspells", "✨", `Spells Known (${sectionLabel.join(", ")})`, knownSpellsContent, {required: false}));
+			main.append(createAccordion("knownspells", "✨", `Spells Known (${sectionLabel.join(", ")}, optional)`, knownSpellsContent, {required: false}));
+			// Initial state: optional section starts "complete" with no picks.
+			const knownInitialParts = [];
+			if (knownSpellsGain > 0) knownInitialParts.push(`0/${knownSpellsGain} spells`);
+			if (knownCantripsGain > 0) knownInitialParts.push(`0/${knownCantripsGain} cantrips`);
+			summaryItemEls.knownspells.setStatus(true, `${knownInitialParts.join(", ")} — pick later on the Spells tab`);
+			accordions.knownspells.setComplete(true, knownInitialParts.join(", "));
 		}
 
 		// ========== 8c. PREPARED SPELLS (XPHB Warlock, etc.) ==========
@@ -945,23 +956,27 @@ class CharacterSheetLevelUp {
 				onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
 					selectedPreparedSpells = spells;
 					selectedPreparedCantrips = cantrips;
-					const spellComplete = spells.length >= preparedSpellsGain;
-					const cantripComplete = cantrips.length >= preparedCantripsGain;
-					const complete = spellComplete && cantripComplete;
+					// Prepared spells/cantrips are optional at level-up — always complete.
 					const parts = [];
 					if (preparedSpellsGain > 0) parts.push(`${spells.length}/${preparedSpellsGain} spells`);
 					if (preparedCantripsGain > 0) parts.push(`${cantrips.length}/${preparedCantripsGain} cantrips`);
-					const summary = parts.join(", ") || "Select spells";
 					const allNames = [...cantrips, ...spells].map((/** @type {*} */ s) => s.name).join(", ");
-					summaryItemEls.preparedspells.setStatus(complete, allNames || summary);
-					accordions.preparedspells.setComplete(complete, parts.join(", "));
+					const summary = allNames || `${parts.join(", ")} — pick later on the Spells tab`;
+					summaryItemEls.preparedspells.setStatus(true, summary);
+					accordions.preparedspells.setComplete(true, parts.join(", "));
 				},
 			}));
 
 			const sectionLabel = [];
 			if (preparedSpellsGain > 0) sectionLabel.push(`+${preparedSpellsGain} Spell${preparedSpellsGain !== 1 ? "s" : ""}`);
 			if (preparedCantripsGain > 0) sectionLabel.push(`+${preparedCantripsGain} Cantrip${preparedCantripsGain !== 1 ? "s" : ""}`);
-			main.append(createAccordion("preparedspells", "✨", `Prepared Spells (${sectionLabel.join(", ")})`, preparedContent, {required: false}));
+			main.append(createAccordion("preparedspells", "✨", `Prepared Spells (${sectionLabel.join(", ")}, optional)`, preparedContent, {required: false}));
+			// Initial state: optional section starts "complete" with no picks.
+			const prepInitialParts = [];
+			if (preparedSpellsGain > 0) prepInitialParts.push(`0/${preparedSpellsGain} spells`);
+			if (preparedCantripsGain > 0) prepInitialParts.push(`0/${preparedCantripsGain} cantrips`);
+			summaryItemEls.preparedspells.setStatus(true, `${prepInitialParts.join(", ")} — pick later on the Spells tab`);
+			accordions.preparedspells.setComplete(true, prepInitialParts.join(", "));
 		}
 
 		// ========== 9. NEW FEATURES (Info Only) ==========
@@ -1161,32 +1176,10 @@ class CharacterSheetLevelUp {
 				return;
 			}
 
-			// Collect incomplete spell selections for a single skip confirmation
-			const spellMissing = [];
-			if (isWizard && selectedSpellbookSpells.length < wizardSpellCount) {
-				spellMissing.push(`${wizardSpellCount - selectedSpellbookSpells.length} spellbook spell(s)`);
-			}
-			if (isKnownCaster && knownSpellsGain > 0 && selectedKnownSpells.length < knownSpellsGain) {
-				spellMissing.push(`${knownSpellsGain - selectedKnownSpells.length} spell(s) to learn`);
-			}
-			if (isKnownCaster && knownCantripsGain > 0 && selectedKnownCantrips.length < knownCantripsGain) {
-				spellMissing.push(`${knownCantripsGain - selectedKnownCantrips.length} cantrip(s) to learn`);
-			}
-			if (isPreparedCaster && preparedSpellsGain > 0 && selectedPreparedSpells.length < preparedSpellsGain) {
-				spellMissing.push(`${preparedSpellsGain - selectedPreparedSpells.length} prepared spell(s)`);
-			}
-			if (isPreparedCaster && preparedCantripsGain > 0 && selectedPreparedCantrips.length < preparedCantripsGain) {
-				spellMissing.push(`${preparedCantripsGain - selectedPreparedCantrips.length} cantrip(s)`);
-			}
-			if (spellMissing.length > 0) {
-				const confirmed = await InputUiUtil.pGetUserBoolean({
-					title: "Skip Spell Selection?",
-					htmlDescription: `You still need to choose ${spellMissing.join(" and ")}. You can pick them later on the Spells tab.`,
-					textYes: "Skip",
-					textNo: "Go Back",
-				});
-				if (!confirmed) return;
-			}
+			// Spell selections are intentionally optional at level-up: whatever the
+			// player picked is applied, and any remaining unspent spell/cantrip
+			// slots can be filled later from the Spells tab. We deliberately do not
+			// gate Apply on under-filled spell pools.
 
 			// ========== APPLY LEVEL UP ==========
 			await this._applyLevelUp({

@@ -3431,42 +3431,11 @@ class CharacterSheetQuickBuild {
 	}
 
 	_validateSpellsStep ({hasSpellcasting, spellbookLevels, knownCasterInfo, preparedCasterInfo}) {
-		const warnings = [];
-
-		if (spellbookLevels.length > 0) {
-			const totalNeeded = spellbookLevels.length * 2;
-			if (this._selections.spellbookSpells.length < totalNeeded) {
-				warnings.push(`Spellbook: ${this._selections.spellbookSpells.length}/${totalNeeded} spells selected`);
-			}
-		}
-		if (knownCasterInfo) {
-			if (knownCasterInfo.totalSpells > 0 && this._selections.knownSpells.length < knownCasterInfo.totalSpells) {
-				warnings.push(`Known spells: ${this._selections.knownSpells.length}/${knownCasterInfo.totalSpells} selected`);
-			}
-			if (knownCasterInfo.totalCantrips > 0 && this._selections.knownCantrips.length < knownCasterInfo.totalCantrips) {
-				warnings.push(`Cantrips: ${this._selections.knownCantrips.length}/${knownCasterInfo.totalCantrips} selected`);
-			}
-		}
-		if (preparedCasterInfo) {
-			const prepSpells = this._selections.preparedSpells || [];
-			const prepCantrips = this._selections.preparedCantrips || [];
-			if (preparedCasterInfo.totalSpells > 0 && prepSpells.length < preparedCasterInfo.totalSpells) {
-				warnings.push(`Prepared spells: ${prepSpells.length}/${preparedCasterInfo.totalSpells} selected`);
-			}
-			if (preparedCasterInfo.totalCantrips > 0 && prepCantrips.length < preparedCasterInfo.totalCantrips) {
-				warnings.push(`Cantrips: ${prepCantrips.length}/${preparedCasterInfo.totalCantrips} selected`);
-			}
-		}
-
-		// Show warning but allow continuation
-		if (warnings.length > 0) {
-			JqueryUtil.doToast({
-				type: "warning",
-				content: `Spell selection incomplete (${warnings.join("; ")}). You can complete this later via the spells tab.`,
-			});
-		}
-
-		return true; // Always allow continuation
+		// Spell selection in Quick Build is intentionally optional: whatever the
+		// player picked is applied, and any remaining unspent spell/cantrip slots
+		// can be filled later from the Spells tab. We do not gate or warn on
+		// under-filled spell pools — the section already shows accurate counts.
+		return true;
 	}
 
 	// ==========================================
