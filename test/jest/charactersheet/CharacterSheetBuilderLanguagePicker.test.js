@@ -26,7 +26,7 @@ const read = (rel) => readFileSync(resolve(REPO_ROOT, rel), "utf8");
 const BUILDER_SRC = read("js/charactersheet/charactersheet-builder.js");
 const CSS_SRC = read("css/charactersheet.css");
 
-describe("Builder race/subrace language picker — search + pill grid", () => {
+describe("Builder race/subrace language picker — search + source filter + pill grid", () => {
 	describe("Shared helper emits search + summary + pill grid", () => {
 		test("`_renderLanguageCheckboxGroup` renders a search input", () => {
 			// Grab the helper body and check for the search input wrapper +
@@ -48,6 +48,21 @@ describe("Builder race/subrace language picker — search + pill grid", () => {
 			const body = helperMatch[0];
 			expect(body).toMatch(/charsheet__builder-lang-summary\b/);
 			expect(body).toMatch(/lang-sel-count/);
+		});
+
+		test("`_renderLanguageCheckboxGroup` renders a source filter select", () => {
+			const helperMatch = BUILDER_SRC.match(
+				/_renderLanguageCheckboxGroup[\s\S]*?\n\t\}\n/,
+			);
+			const body = helperMatch[0];
+			expect(body).toMatch(/charsheet__builder-lang-source-filter/);
+			expect(body).toMatch(/All Sources/);
+			expect(body).toMatch(/availableSources/);
+			expect(body).toMatch(/sourceFilter\.addEventListener\("change", applyFilter\)/);
+			expect(body).toMatch(/defaultSource/);
+			expect(body).toMatch(/sourceFilter\.value\s*=\s*defaultSource/);
+			expect(body).toMatch(/Parser\.SRC_TGTT/);
+			expect(body).toMatch(/applyFilter\(\)/);
 		});
 
 		test("`_renderLanguageCheckboxGroup` uses pill-grid layout instead of flat checkbox row", () => {
@@ -104,6 +119,10 @@ describe("Builder race/subrace language picker — search + pill grid", () => {
 		test(".charsheet__builder-lang-pill--disabled and --hidden classes exist", () => {
 			expect(CSS_SRC).toMatch(/\.charsheet__builder-lang-pill--disabled\s*\{/);
 			expect(CSS_SRC).toMatch(/\.charsheet__builder-lang-pill--hidden\s*\{/);
+		});
+
+		test(".charsheet__builder-lang-source-filter is defined", () => {
+			expect(CSS_SRC).toMatch(/\.charsheet__builder-lang-source-filter\s*\{/);
 		});
 
 		test("legacy `.charsheet__builder-lang-checkbox` is gone", () => {

@@ -9251,9 +9251,9 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__levelup-wizard {
 	display: flex;
 	gap: var(--cs-space-lg, 1.25rem);
-	min-height: 60vh;
-	max-height: calc(90vh - 100px);
-	overflow: auto;
+	flex: 1 1 auto;
+	min-height: 0;
+	align-items: flex-start;
 }
 
 /* Summary Sidebar */
@@ -9266,7 +9266,7 @@ body.has-quickbuild-overlay .toast__container {
 	background: var(--cs-bg-elevated, var(--rgb-bg));
 	border: 1px solid var(--cs-border, var(--rgb-border-grey));
 	border-radius: var(--cs-radius-lg, 12px);
-	overflow-y: auto;
+	overflow: visible;
 }
 
 .charsheet__levelup-sidebar-header {
@@ -9393,13 +9393,21 @@ body.has-quickbuild-overlay .toast__container {
 
 /* Main Content Area */
 .charsheet__levelup-main {
-	flex: 1;
+	flex: 1 1 auto;
 	display: flex;
 	flex-direction: column;
 	gap: var(--cs-space-sm, 0.5rem);
-	overflow-y: auto;
 	padding-right: var(--cs-space-xs, 0.25rem);
 	min-width: 0;
+	min-height: 0;
+}
+
+.charsheet__levelup-sidebar {
+	position: sticky;
+	top: 0;
+	align-self: flex-start;
+	max-height: calc(90vh - 160px);
+	overflow-y: auto;
 }
 
 /* Accordion Sections */
@@ -9486,8 +9494,6 @@ body.has-quickbuild-overlay .toast__container {
 	padding: var(--cs-space-md, 0.75rem) var(--cs-space-lg, 1.25rem) var(--cs-space-lg, 1.25rem);
 	border-top: 1px solid var(--cs-border, var(--rgb-border-grey));
 	background: var(--cs-bg-surface, var(--rgb-bg-alt));
-	max-height: 65vh;
-	overflow-y: auto;
 }
 
 .charsheet__levelup-accordion.expanded .charsheet__levelup-accordion-body {
@@ -11288,14 +11294,33 @@ body.is-charsheet-page .ve-ui-modal__inner:has(.charsheet__levelup-wizard) {
 	max-width: 95vw !important;
 	width: 95vw !important;
 	max-height: 90vh !important;
-	min-height: 70vh;
-	height: auto;
+	height: 90vh !important;
 	padding: var(--cs-space-lg, 1.25rem);
+	display: flex;
+	flex-direction: column;
 }
 
 /* Ensure modal scroller allows overflow for dropdowns — but NOT the item picker which needs to scroll */
-body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__source-multiselect):not(:has(.charsheet__modal-list)) {
+body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__source-multiselect):not(:has(.charsheet__modal-list)):not(:has(.charsheet__levelup-wizard)) {
 	overflow: visible !important;
+}
+
+/* Level-up modal scroller is the scroll container; override the source-multiselect rule above */
+body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__levelup-wizard) {
+	flex: 1 1 auto !important;
+	min-height: 0 !important;
+	overflow-y: auto !important;
+	overflow-x: hidden !important;
+	contain: none !important;
+	display: flex;
+	flex-direction: column;
+}
+
+/* Footer is rendered in UiUtil's modal-footer slot (sibling of scroller, outside scroll area) */
+.charsheet__levelup-footer {
+	padding-top: var(--cs-space-md, 0.75rem);
+	border-top: 1px solid var(--rgb-border-grey);
+	width: 100%;
 }
 
 body.is-charsheet-page .ve-ui-modal__inner h4,
@@ -16637,6 +16662,11 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .charsheet__builder-lang-search-input {
 	flex: 1;
+}
+
+.charsheet__builder-lang-source-filter {
+	flex: 0 0 140px;
+	min-width: 120px;
 }
 
 .charsheet__builder-lang-summary {
