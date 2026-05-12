@@ -2698,6 +2698,7 @@ class InputUiUtil {
 			fnRemember,
 			isSkippable,
 			isIgnoreRemembered,
+			zIndex,
 		},
 	) {
 		if (storageKey && !isIgnoreRemembered) {
@@ -2708,6 +2709,7 @@ class InputUiUtil {
 		const {eleModalInner, doClose, pGetResolved, doAutoResize: doAutoResizeModal} = await InputUiUtil._pGetShowModal({
 			title: title || "Choose",
 			isMinHeight0: true,
+			...(zIndex != null ? {zIndex} : {}),
 		});
 
 		const btns = buttons.map(btnInfo => btnInfo.getBtn({doClose, fnRemember, isGlobal, storageKey}));
@@ -2773,6 +2775,7 @@ class InputUiUtil {
 			isSkippable,
 			isAlert,
 			isIgnoreRemembered,
+			zIndex,
 		},
 	) {
 		const buttons = [];
@@ -2821,6 +2824,7 @@ class InputUiUtil {
 			fnRemember,
 			isSkippable,
 			isIgnoreRemembered,
+			zIndex,
 		});
 	}
 

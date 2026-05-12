@@ -781,6 +781,7 @@ class CharacterSheetQuickBuild {
 				htmlDescription: "<p>You have unsaved progress. Are you sure you want to close?</p>",
 				textYes: "Close",
 				textNo: "Cancel",
+				zIndex: 10000,
 			}));
 			if (!confirm) return;
 		}
