@@ -102,7 +102,7 @@
 			]
 		},
 		{
-			"name": "Gem Socket",
+			"name": "Gem Socket (Weapon)",
 			"source": "TCAH",
 			"page": 11,
 			"upgradeType": [
@@ -558,7 +558,7 @@
 			]
 		},
 		{
-			"name": "Gem Socket",
+			"name": "Gem Socket (Armor or Shield)",
 			"source": "TCAH",
 			"page": 8,
 			"upgradeType": [
