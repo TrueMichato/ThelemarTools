@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import "./test/jest/charactersheet/setup.js";
 import fs from "fs";
 

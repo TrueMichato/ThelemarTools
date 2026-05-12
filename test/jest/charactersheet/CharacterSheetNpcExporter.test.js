@@ -241,7 +241,7 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(out.save).toBeUndefined();
 		expect(out.skill).toBeUndefined();
 		expect(out.senses).toBeUndefined();
-		expect(out.hp.formula).toMatch(/^\d+d\d+(?:\s*[+\-]\s*\d+)?$/);
+		expect(out.hp.formula).toMatch(/^\d+d\d+(?:\s*[+-]\s*\d+)?$/);
 		expect(out.pbNote).toMatch(/^\+\d+$/);
 	});
 

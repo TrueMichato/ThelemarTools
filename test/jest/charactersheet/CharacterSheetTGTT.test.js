@@ -11187,7 +11187,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				const modifiers = state.getNamedModifiers();
 				const wisAdvMod = modifiers.find(m =>
 					m.type === "save:advantage:wis"
-					|| m.type?.includes("wis") && m.type?.includes("advantage"),
+					|| (m.type?.includes("wis") && m.type?.includes("advantage")),
 				);
 				expect(wisAdvMod).toBeDefined();
 				expect(wisAdvMod.enabled).toBe(true);

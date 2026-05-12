@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Convert jQuery patterns to vanilla JS in charactersheet.js
  * ONLY process lines 7800+ (0-indexed: 7799+)
