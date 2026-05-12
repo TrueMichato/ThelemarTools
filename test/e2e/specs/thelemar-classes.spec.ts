@@ -21,12 +21,21 @@ async function buildTgttCharacter (
 	await gotoWithThelemar(page);
 	await charSheet.switchToTab(charSheet.tabBuilder);
 
+	// Builder steps (current order, see js/charactersheet/charactersheet-builder.js):
+	//   1. Race  →  2. Background  →  3. Class  →  4. Abilities
+	//   5. Equipment  →  6. Spells  →  7. Details
+
 	// Step 1: Race - Aarakocra (MPMM) — simple, no extra selections
 	await builder.selectRaceExact("Aarakocra", "MPMM");
 	await page.waitForTimeout(300);
 	await builder.clickNext();
 
-	// Step 2: Class
+	// Step 2: Background
+	await builder.selectBackgroundExact(background, bgSource);
+	await builder.selectFirstAvailableFeatureOptions(10);
+	await builder.clickNext();
+
+	// Step 3: Class
 	await builder.selectClassExact(className, "TGTT");
 	await page.waitForTimeout(500);
 	if (skillCount > 0) await builder.selectFirstAvailableSkills(skillCount);
@@ -34,6 +43,7 @@ async function buildTgttCharacter (
 	await builder.selectFirstAvailableWeaponMasteries(10);
 	await builder.selectFirstAvailableOptionalFeatures(20);
 	await builder.selectFirstAvailableFeatureOptions(10);
+	await builder.selectCombatTraditionsAndMethods();
 	await builder.autoFillRemainingSelections();
 
 	// Try to advance — retry with more filling on each attempt
@@ -50,19 +60,20 @@ async function buildTgttCharacter (
 		await page.waitForTimeout(300);
 	}
 
-	// Step 3: Abilities
+	// Step 4: Abilities
 	await builder.assignStandardArrayDefaults();
-	await builder.clickNext();
-
-	// Step 4: Background
-	await builder.selectBackgroundExact(background, bgSource);
 	await builder.clickNext();
 
 	// Step 5: Equipment
 	await builder.selectEquipmentOption("gold");
 	await builder.clickNext();
 
-	// Step 6: Details
+	// Step 6: Spells — auto-fill any starting spell pickers, accept skip dialog
+	await builder.autoFillStartingSpells();
+	await builder.clickNext();
+	await builder.acceptSkipSpellsDialog();
+
+	// Step 7: Details
 	await builder.fillDetails({name: charName});
 	await builder.finishWizard();
 
@@ -171,9 +182,12 @@ test.describe("Thelemar Classes - Dreamwalker (Prestige)", () => {
 		await gotoWithThelemar(page);
 		await charSheet.switchToTab(charSheet.tabBuilder);
 
-		// Navigate to class step
+		// Navigate to class step (Race → Background → Class)
 		await builder.selectRaceExact("Aarakocra", "MPMM");
 		await page.waitForTimeout(300);
+		await builder.clickNext();
+		// Background step — pick any background to advance to Class
+		await builder.selectBackgroundExact("Soldier", "PHB'24");
 		await builder.clickNext();
 
 		// Search for Dreamwalker

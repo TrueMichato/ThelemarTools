@@ -116,6 +116,11 @@ export class LevelUpPage {
 		// Try data-accordion-id first
 		const accordion = this.page.locator(`[data-accordion-id="${accordionId}"]`);
 		if (await accordion.count() > 0 && await accordion.isVisible()) {
+			// Avoid toggling shut: if the accordion is already expanded,
+			// the header click would collapse it and downstream lookups
+			// for option rows would time out.
+			const alreadyExpanded = await accordion.evaluate(el => el.classList.contains("expanded"));
+			if (alreadyExpanded) return;
 			const header = accordion.locator(".charsheet__levelup-accordion-header");
 			if (await header.count() > 0) {
 				await header.click();
@@ -335,12 +340,19 @@ export class LevelUpPage {
 	 */
 	async selectFirstAvailableOptions (): Promise<void> {
 		await this.page.waitForTimeout(200);
-		// Try clicking first unchecked checkbox labels in the active accordion body
+		// Try clicking first unchecked checkbox labels in the active accordion body.
+		// Skip disabled options — TGTT pickers tag locked items with
+		// `charsheet__levelup-opt-item--disabled`, and clicking them would
+		// hang on Playwright's "element is not enabled" actionability check.
 		const labels = this.page.locator(".charsheet__levelup-accordion-body:visible label:has(input[type='checkbox'])");
 		const count = await labels.count();
 		for (let i = 0; i < count && i < 5; i++) {
 			const label = labels.nth(i);
 			const checkbox = label.locator("input[type='checkbox']");
+			const isDisabled = await label.evaluate(el => el.classList.contains("charsheet__levelup-opt-item--disabled")).catch(() => false);
+			if (isDisabled) continue;
+			const checkboxDisabled = await checkbox.first().isDisabled().catch(() => true);
+			if (checkboxDisabled) continue;
 			if (await label.isVisible() && await checkbox.count() > 0 && !(await checkbox.isChecked())) {
 				await label.click();
 				await this.page.waitForTimeout(100);
