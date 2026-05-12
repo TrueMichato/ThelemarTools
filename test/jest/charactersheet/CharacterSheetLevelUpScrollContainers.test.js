@@ -11,7 +11,7 @@
  * "Selected: X/Y" counter was pushed out of view.
  *
  * Fix: collapse to a single scroll axis per surface
- *   - level-up: `.charsheet__levelup-accordion-body` scrolls (65vh)
+ *   - level-up: modal scroller scrolls the whole wizard
  *   - quick-build: `.charsheet__quickbuild-content` scrolls
  *
  * Inner picker lists therefore must NOT carry inline `max-height` +
@@ -77,7 +77,7 @@ describe("Level-up / Quick-build picker scroll containers", () => {
 
 	test("css .charsheet__levelup-opt-list does not declare its own scroll axis", () => {
 		// Pull the rule body and assert neither `max-height` nor
-		// `overflow-y` is declared on it (the accordion body owns scroll).
+		// `overflow-y` is declared on it (the level-up main column owns scroll).
 		const match = CSS_SRC.match(/\.charsheet__levelup-opt-list\s*\{([\s\S]*?)\}/);
 		expect(match).not.toBeNull();
 		const body = match[1];
@@ -85,14 +85,28 @@ describe("Level-up / Quick-build picker scroll containers", () => {
 		expect(body).not.toMatch(/overflow-y\s*:/);
 	});
 
-	test("css .charsheet__levelup-accordion-body owns the single scroll axis at \u2265 60vh", () => {
+	test("css .charsheet__levelup-main has no internal scroll axis", () => {
+		const match = CSS_SRC.match(/\.charsheet__levelup-main\s*\{([\s\S]*?)\}/);
+		expect(match).not.toBeNull();
+		const body = match[1];
+		expect(body).not.toMatch(/overflow-y\s*:/);
+		expect(body).not.toMatch(/max-height\s*:/);
+	});
+
+	test("css .charsheet__levelup-accordion-body has no nested max-height/overflow scroll", () => {
 		const match = CSS_SRC.match(/\.charsheet__levelup-accordion-body\s*\{([\s\S]*?)\}/);
 		expect(match).not.toBeNull();
 		const body = match[1];
-		expect(body).toMatch(/overflow-y\s*:\s*auto/);
-		const mh = body.match(/max-height\s*:\s*(\d+)vh/);
-		expect(mh).not.toBeNull();
-		expect(parseInt(mh[1], 10)).toBeGreaterThanOrEqual(60);
+		expect(body).not.toMatch(/overflow-y\s*:/);
+		expect(body).not.toMatch(/max-height\s*:/);
+	});
+
+	test("css .charsheet__levelup-wizard does not declare its own scroll axis", () => {
+		const match = CSS_SRC.match(/\.charsheet__levelup-wizard\s*\{([\s\S]*?)\}/);
+		expect(match).not.toBeNull();
+		const body = match[1];
+		expect(body).not.toMatch(/overflow\s*:\s*auto/);
+		expect(body).not.toMatch(/max-height\s*:\s*calc\(/);
 	});
 
 	test("shared picker-list helper class is defined in css", () => {

@@ -112,12 +112,13 @@ class CharacterSheetLevelUp {
 	/** @param {*} arg */
 
 	async _pShowLevelUpModal ({classData, classEntry, newLevel, newFeatures, hasAsi, needsSubclass}) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = await UiUtil.pGetShowModal({
 			title: `🎉 Level Up: ${classEntry.name} → Level ${newLevel}`,
 			isMinHeight0: true,
 			isWidth100: true,
 			isUncappedWidth: true,
 			isUncappedHeight: true,
+			hasFooter: true,
 			cbClose: () => document.body.classList.remove("has-levelup-wizard"),
 		});
 
@@ -1038,14 +1039,14 @@ class CharacterSheetLevelUp {
 
 		// ========== FOOTER BUTTONS ==========
 		const footer = ee`
-			<div class="ve-flex-v-center ve-flex-h-right mt-3 pt-3" style="border-top: 1px solid var(--rgb-border-grey);">
+			<div class="ve-flex-v-center ve-flex-h-right charsheet__levelup-footer">
 				<button class="ve-btn ve-btn-default mr-2" data-testid="levelup-cancel">Cancel</button>
 				<button class="ve-btn ve-btn-primary ve-btn-lg" data-testid="levelup-finish">
 					<span class="glyphicon glyphicon-arrow-up"></span> Level Up to ${newLevel}
 				</button>
 			</div>
 		`;
-		modalInner.append(footer);
+		modalFooter.append(footer);
 
 		footer.querySelector(".ve-btn-default").addEventListener("click", () => doClose(false));
 		footer.querySelector(".ve-btn-primary").addEventListener("click", async () => {

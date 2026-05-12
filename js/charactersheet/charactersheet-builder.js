@@ -3233,20 +3233,33 @@ class CharacterSheetBuilder {
 			secret: "Secret",
 		};
 
-		// Build a flat list of {lang, group, pillEl} so the search filter
+		// Build a flat list of {lang, source, group, pillEl} so the filters
 		// can hide/show pills (and their group headers) without re-rendering.
-		/** @type {Array<{lang: string, group: HTMLElement, pill: HTMLElement, input: HTMLInputElement}>} */
+		/** @type {Array<{lang: string, source: string, group: HTMLElement, pill: HTMLElement, input: HTMLInputElement}>} */
 		const pillIndex = [];
 		/** @type {HTMLElement[]} */ const groupEls = [];
+
+		const availableSources = [...new Set(
+			[...sourceLookup.values()].filter(Boolean),
+		)].sort((a, b) => a.localeCompare(b));
+		const defaultSource = availableSources.includes(Parser.SRC_TGTT || "TGTT")
+			? (Parser.SRC_TGTT || "TGTT")
+			: "";
 
 		// Search input — case-insensitive substring filter over language names.
 		const searchWrap = e_({outer: `
 			<div class="charsheet__builder-lang-search mb-2">
 				<span class="charsheet__builder-lang-search-icon">🔍</span>
 				<input type="text" class="ve-form-control charsheet__builder-lang-search-input" placeholder="Search languages...">
+				<select class="ve-form-control charsheet__builder-lang-source-filter" title="Filter by source">
+					<option value="">All Sources</option>
+					${availableSources.map(src => `<option value="${src}">${src}</option>`).join("")}
+				</select>
 			</div>
 		`});
 		const searchInput = /** @type {HTMLInputElement} */ (searchWrap.querySelector(".charsheet__builder-lang-search-input"));
+		const sourceFilter = /** @type {HTMLSelectElement} */ (searchWrap.querySelector(".charsheet__builder-lang-source-filter"));
+		sourceFilter.value = defaultSource;
 
 		// Selected-summary chip row ("3/4 selected — Elvish, Dwarvish, Giant")
 		const summaryEl = e_({outer: `
@@ -3287,7 +3300,7 @@ class CharacterSheetBuilder {
 			const grid = group.querySelector(".charsheet__builder-lang-grid");
 
 			for (const lang of langs) {
-				const source = sourceLookup?.get(lang);
+				const source = sourceLookup?.get(lang) || "Unknown";
 				const sourceSpan = source ? ` <span class="charsheet__builder-lang-source">(${source})</span>` : "";
 				const isSelected = selectedArr.includes(lang);
 				const lbl = e_({outer: `
@@ -3314,7 +3327,7 @@ class CharacterSheetBuilder {
 					refreshSummary();
 					if (onChange) onChange();
 				});
-				pillIndex.push({lang, group, pill: lbl, input});
+				pillIndex.push({lang, source, group, pill: lbl, input});
 				grid.append(lbl);
 			}
 			container.append(group);
@@ -3324,8 +3337,11 @@ class CharacterSheetBuilder {
 		// ended up empty so the layout stays tight.
 		const applyFilter = () => {
 			const q = searchInput.value.trim().toLowerCase();
-			for (const {lang, pill} of pillIndex) {
-				const match = !q || lang.toLowerCase().includes(q);
+			const src = sourceFilter.value;
+			for (const {lang, source, pill} of pillIndex) {
+				const matchText = !q || lang.toLowerCase().includes(q);
+				const matchSource = !src || source === src;
+				const match = matchText && matchSource;
 				pill.classList.toggle("charsheet__builder-lang-pill--hidden", !match);
 			}
 			for (const groupEl of groupEls) {
@@ -3334,6 +3350,8 @@ class CharacterSheetBuilder {
 			}
 		};
 		searchInput.addEventListener("input", applyFilter);
+		sourceFilter.addEventListener("change", applyFilter);
+		applyFilter();
 
 		refreshSummary();
 	}
