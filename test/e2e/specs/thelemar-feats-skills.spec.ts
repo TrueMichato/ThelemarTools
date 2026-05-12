@@ -75,9 +75,12 @@ test.describe("Thelemar Custom Skills", () => {
 		await gotoWithThelemar(page);
 		await charSheet.switchToTab(charSheet.tabBuilder);
 
-		// Navigate to class step with TGTT Fighter
+		// Navigate to class step with TGTT Fighter (Race → Background → Class)
 		await builder.selectRaceExact("Aarakocra", "MPMM");
 		await page.waitForTimeout(300);
+		await builder.clickNext();
+
+		await builder.selectBackgroundExact("Soldier", "PHB'24");
 		await builder.clickNext();
 
 		await builder.selectClassExact("Fighter", "TGTT");

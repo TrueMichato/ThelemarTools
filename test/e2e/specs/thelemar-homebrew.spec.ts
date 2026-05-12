@@ -86,6 +86,10 @@ test.describe("Thelemar Homebrew - Class List", () => {
 		await page.waitForTimeout(300);
 		await builder.clickNext();
 
+		// Step 2 (new order): Background — advance through to reach Class step
+		await builder.selectBackgroundExact("Soldier", "PHB'24");
+		await builder.clickNext();
+
 		// Wait for class list and search for Fighter — should find TGTT version
 		await waitForListItems(page, "#builder-class-list");
 		await builder.classSearchInput.fill("Fighter");
@@ -119,6 +123,10 @@ test.describe("Thelemar Homebrew - Class List", () => {
 		await page.waitForTimeout(300);
 		await builder.clickNext();
 
+		// Advance through Background to reach Class step
+		await builder.selectBackgroundExact("Soldier", "PHB'24");
+		await builder.clickNext();
+
 		// Wait for class list and search for Dreamwalker — a TGTT-original class
 		await waitForListItems(page, "#builder-class-list");
 		await builder.classSearchInput.fill("Dreamwalker");
@@ -149,6 +157,10 @@ test.describe("Thelemar Homebrew - Class List", () => {
 		await waitForListItems(page, "#builder-race-list");
 		await builder.selectRaceExact("Aarakocra", "MPMM");
 		await page.waitForTimeout(300);
+		await builder.clickNext();
+
+		// Advance through Background to reach Class step
+		await builder.selectBackgroundExact("Entertainer", "PHB'24");
 		await builder.clickNext();
 
 		await waitForListItems(page, "#builder-class-list");
@@ -238,7 +250,11 @@ test.describe("Thelemar Homebrew - Character Creation", () => {
 		await page.waitForTimeout(300);
 		await builder.clickNext();
 
-		// Step 2: TGTT Bard (3 skills, any)
+		// Step 2: Background
+		await builder.selectBackgroundExact("Entertainer", "PHB'24");
+		await builder.clickNext();
+
+		// Step 3: TGTT Bard (3 skills, any)
 		await builder.selectClassExact("Bard", "TGTT");
 		await page.waitForTimeout(500);
 		await builder.selectFirstAvailableSkills(3);
@@ -247,19 +263,20 @@ test.describe("Thelemar Homebrew - Character Creation", () => {
 		await builder.autoFillRemainingSelections();
 		await builder.clickNext();
 
-		// Step 3: Abilities
+		// Step 4: Abilities
 		await builder.assignStandardArrayDefaults();
-		await builder.clickNext();
-
-		// Step 4: Background
-		await builder.selectBackgroundExact("Entertainer", "PHB'24");
 		await builder.clickNext();
 
 		// Step 5: Equipment
 		await builder.selectEquipmentOption("gold");
 		await builder.clickNext();
 
-		// Step 6: Details
+		// Step 6: Spells (Bard is a spellcaster)
+		await builder.autoFillStartingSpells();
+		await builder.clickNext();
+		await builder.acceptSkipSpellsDialog();
+
+		// Step 7: Details
 		await builder.fillDetails({name: "TGTT Bard"});
 		await builder.finishWizard();
 

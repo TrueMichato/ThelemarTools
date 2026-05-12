@@ -17,7 +17,8 @@ commit reference rather than deleting it.
 **Status**: Open
 **Surfaced by**:
 - `tgtt-bladesinger-wizard-tabaxi.spec.ts` (L3, L5, L7, MEGA — fails with `expected toggle matching /bladesong/i`)
-- `tgtt-chronurgy-wizard-nyuidj.spec.ts` (L7 — `probeToggleDelta: no feature matches /chronal|convergent|temporal|momentary/i`; activatable feature list shows zero subclass features)
+- `tgtt-chronurgy-wizard-nyuidj.spec.ts` (L7, MEGA L1→20 — `probeToggleDelta: no feature matches /chronal|convergent|temporal|momentary/i`; activatable feature list shows zero subclass features)
+- `tgtt-hexblade-divine-soul-tortle.spec.ts` multiclass MEGA — at L2 (Warlock 2) the feature list lacks any Hexblade entry (no Hex Warrior, no Hexblade's Curse); only base Warlock 2024 features (Pact Magic, Magical Cunning, Eldritch Invocations) are present.
 - Likely also affects other Wizard / 2024-style TGTT subclasses — re-triage after a clean run.
 
 **Repro**:
@@ -139,7 +140,12 @@ setters in the file (mutate `_data` only).
 ### CS-BUG-006 — Multiclass entry leaves modal overlay intercepting wizard clicks
 
 **Status**: Open. Discovered via the Hexblade 2 / Divine Soul 18 Tortle
-multiclass MEGA E2E test. Repro: build a character at L2, multiclass
+multiclass MEGA E2E test. Also re-surfaces in
+`divine-soul-affinity.spec.ts > should collect and persist Divine
+Soul affinity during Level Up` — after the affinity modal closes,
+its backdrop intercepts clicks on the L2 Sorcerer level-up HP
+accordion, same DOM signature (`.ve-ui-modal__overlay intercepts
+pointer events`). Repro: build a character at L2, multiclass
 into a second class via the `➕ Multiclass` flow, then trigger Level Up
 on the new class. The Level Up wizard renders, but a leftover
 `.ve-ui-modal__overlay` from the multiclass-entry modal stays in the
@@ -638,3 +644,154 @@ state-proficient skill regardless of source, or (b) revisit the
 currently `skip:true, skipReason:"P5 follow-up: proficientSkills
 DOM lookup needs CharacterSheetPage hardening"` — re-enable when
 fixed. Tracked as a P5 follow-up in the Phase 15 plan.
+
+
+## CS-BUG-021 — Subclass radio loses `checked` state after re-render in Level-Up wizard
+
+**Status**: Open
+**Surfaced**: MEGA triage Phase X (`levelup.spec.ts > should show subclass selection at level 3`).
+**Component**: Character Sheet · Level-Up wizard · subclass accordion render path.
+
+### Symptom
+After picking a Fighter subclass (e.g. The Warder) at L3, any
+subsequent wizard interaction that triggers a re-render of the
+`Choose Fighter Subclass` accordion (forcing a sub-picker open,
+toggling Hit Points, etc.) leaves every subclass radio with
+`checked=false` in the DOM, even though `state.subclassChoice`
+still records the user's choice. The summary header keeps showing
+"✓ Warder", but clicking **Level Up to 3** then fails the
+required-subclass validation and the wizard refuses to close.
+
+### Repro
+1. Build a TGTT Fighter at L1 via the preset helper.
+2. Level up once (L1 → L2).
+3. Open the Level Up wizard for L3.
+4. Pick **The Warder** in the subclass accordion.
+5. Pick *anything* else in the wizard that causes a re-render
+   (e.g. tick the HP "Take average" radio, or run the
+   `autoFillAllSelections` test helper).
+6. `document.querySelectorAll("input[name='subclass-choice-wizard']:checked").length`
+   → **0**.
+7. Clicking **Level Up to 3** is a no-op.
+
+### Suggested fix
+The subclass accordion re-render needs to read back from
+`state.subclassChoice` (or whatever it was just set to) and
+restore the matching radio's `checked` attribute. Alternative:
+keep the subclass accordion DOM stable across re-renders so the
+existing radio state isn't blown away.
+
+### E2E coverage
+- `test/e2e/specs/levelup.spec.ts › should show subclass selection at level 3` — `test.skip(... , "blocked on CS-BUG-021")`.
+- The "ASI option at level 4" and "1→3 sequentially" tests work around the
+  bug because their `selectSubclass` call is the LAST interaction before
+  the auto-fill pass — no subsequent re-render unchecks it.
+
+
+## CS-BUG-022 — Builder finish doesn't always make the overview pane Playwright-visible
+
+**Status**: Open (low priority — UI-only, doesn't affect actual character data)
+**Surfaced**: MEGA triage Phase X
+(`builder-wizard.spec.ts > should create a Human Fighter through the wizard`).
+**Component**: Character Sheet · Builder · `_finishCharacter` →
+`switchToTab("#charsheet-tab-overview")`.
+
+### Symptom
+After a wizard finishes successfully — character is saved,
+`_currentCharacterId` is set, `state.getName()` returns the right
+name, the overview pane has both `ve-active` and `in` classes —
+Playwright's `toBeVisible()` against `#charsheet-tab-overview` (or
+the inner `#charsheet-ipt-name`) reports `hidden`. The pane's
+content nonetheless renders correctly in the accessibility
+snapshot, so this is purely a layout/visibility ambiguity, not
+a missing render. Forcing `cs.switchToTab("#charsheet-tab-overview")`
+from the test does NOT clear it for the affected build.
+
+### Repro
+1. Run `builder-wizard.spec.ts > should create a Human Fighter
+   through the wizard` — Aarakocra (MPMM) + TGTT Fighter +
+   Standard Array + gold equipment.
+2. After `finishWizard()`, `expect(page.locator("#charsheet-tab-overview"))
+   .toBeVisible()` fails even though `cs._currentCharacterId` and
+   `cs._state.getName()` are both populated.
+3. Other builds (Dwarf Cleric, etc.) using the same flow pass.
+4. The character data IS rendered — the page snapshot shows
+   correct name, level, XP, etc.
+
+### Suggested fix
+Investigate why the `tab-pane.fade.in.ve-active` combination
+sometimes resolves as `hidden` to Playwright (likely a
+parent-container collapse during `_updateTabVisibility`). Either
+ensure the parent `.tab-content` or its ancestor has positive
+height/visibility before `_finishCharacter` returns, or add a
+post-switch repaint.
+
+### E2E coverage
+- `test/e2e/specs/builder-wizard.spec.ts > should create a Human
+  Fighter through the wizard` — `test.skip(... , "blocked on
+  CS-BUG-022")`. The Dwarf Cleric and search tests in the same
+  file are unaffected and remain enabled.
+
+
+## CS-BUG-023 — Quick Build wizard never exposes an `Apply`/`Finish`/`Complete` button after spec-flow Next clicks
+
+**Status**: Open
+**Surfaced by**: `divine-soul-affinity.spec.ts > should collect and
+persist Divine Soul affinity in Builder -> Quick Build`.
+**Component**: Character Sheet · Quick Build overlay
+(`charactersheet-quickbuild.js`).
+
+### Symptom
+After running the Quick Build flow programmatically (pick subclass,
+choose Divine Soul affinity, click Next a fixed number of times to
+walk through the auto-generated steps), the test scans for a final
+action button by role + name `/Apply|Finish|Complete/i`. The button
+never appears — Playwright times out at 60s. Quick Build seems to
+require an extra interaction (a pick that's not auto-defaulted) or
+the final button is labelled with text outside that regex (e.g.
+"Done" or an emoji-only button), or the flow has a different number
+of Next steps than the spec assumes.
+
+### Suggested fix
+- Either standardise the Quick Build final button on a consistent
+  text label (`Finish` is the convention used elsewhere) and add a
+  stable `data-testid="quickbuild-finish"`, or
+- Update the spec to drive Quick Build via its public state-side
+  API once it exists, mirroring how `createCharacterViaWizard`
+  bypasses the Builder.
+
+### E2E coverage
+`divine-soul-affinity.spec.ts > Builder -> Quick Build` —
+unchanged; left failing pending this bug entry. Re-enable
+auto-fill / final-click logic once the button is reachable.
+
+
+## CS-BUG-024 — Builder `Next` button hangs (click action never returns) for The Horror Warlock at the L1 spells step
+
+**Status**: Open
+**Surfaced by**: `tgtt-horror-warlock-theocracian.spec.ts > L1
+export round-trip preserves identity` (the round-trip variant
+specifically — full-build paths don't surface it).
+**Component**: Character Sheet · Builder · Spells step transition
+for TGTT Horror Warlock.
+
+### Symptom
+After completing the Spells step (`autoFillStartingSpells()`),
+clicking `#charsheet-builder-next` times out at 60s in Playwright
+even though the button is reported `visible, enabled and stable`.
+The click action is dispatched but the subsequent navigation /
+re-render never resolves, so Playwright keeps polling. Other
+Warlock subclasses (Hexblade, Divine Soul) in the same flow do
+finish; this is Horror-Warlock-specific.
+
+### Hypothesis
+Likely the same root cause as CS-BUG-013 (Horror Warlock pact
+slots not registered) — the Next handler may be calling into a
+spell-step finaliser that synchronously awaits a pact-magic
+configuration that's never wired up. Worth a try/catch instrumented
+around the Spells → Details transition in
+`charactersheet-builder.js`.
+
+### E2E coverage
+`tgtt-horror-warlock-theocracian.spec.ts` L1 round-trip — left
+failing; documented here so it isn't re-triaged as a new failure.

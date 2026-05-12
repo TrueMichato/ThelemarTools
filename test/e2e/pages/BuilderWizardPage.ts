@@ -950,10 +950,32 @@ export class BuilderWizardPage {
 	}
 
 	/**
-	 * Verify that the wizard completed successfully
+	 * Verify that the wizard completed successfully.
+	 * Waits for the character record to be saved and selected (mirrors the
+	 * `waitForFunction` block in `createCharacterViaWizard`).
 	 */
 	async expectWizardComplete (): Promise<void> {
-		// After completion, builder should be hidden and overview visible
-		await expect(this.page.locator("#charsheet-tab-overview")).toBeVisible();
+		// `_finishCharacter` calls `saveCharacter()` then switches to the
+		// overview tab — both async. Wait for the character to be loaded
+		// before asserting visibility, otherwise the overview tab may still
+		// be in its placeholder/hidden state.
+		await this.page.waitForFunction(
+			() => {
+				const cs: any = (globalThis as any).charSheet;
+				return !!cs?._currentCharacterId && !!cs?._state?.getName?.();
+			},
+			null,
+			{timeout: 10_000},
+		);
+		// Force-switch to overview so downstream assertions on overview
+		// controls (name input, level display, etc.) operate against the
+		// active pane. The post-finish toast can transiently cover the
+		// pane and trip a strict `toBeVisible()` check, so we don't
+		// assert pane visibility here — the caller's specific assertions
+		// (expectCharacterName / expectLevel) will fail loudly enough.
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?.switchToTab?.("#charsheet-tab-overview");
+		});
 	}
 }

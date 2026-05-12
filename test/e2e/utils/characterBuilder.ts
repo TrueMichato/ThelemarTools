@@ -39,12 +39,21 @@ export interface CharacterPreset {
 	signatureSpells?: string[];
 }
 
+// NOTE: All legacy PRESETs use `classSource: "TGTT"` because the character-sheet
+// dev fork autoloads `homebrew/TravelersGuidetoThelemar.json` via
+// `homebrew/index.json`, and the sheet's default `prioritySources: ["TGTT"]`
+// setting (CharacterSheetState._getDefaultData) hides the PHB'24/XPHB versions
+// of any class TGTT redefines (every base class). Using PHB'24 here causes
+// `selectClassExact` to throw "Could not find …" because the class isn't in
+// the deduped list. TGTT versions are mechanically identical for the L1 / L3 /
+// L5 smoke tests these PRESETs drive.
+
 /** Simple Fighter — minimal selections, fastest to create */
 export const PRESET_FIGHTER: CharacterPreset = {
 	race: "Aarakocra",
 	raceSource: "MPMM",
 	className: "Fighter",
-	classSource: "PHB'24",
+	classSource: "TGTT",
 	background: "Soldier",
 	bgSource: "PHB'24",
 	name: "Test Fighter",
@@ -58,7 +67,7 @@ export const PRESET_CLERIC: CharacterPreset = {
 	race: "Dwarf",
 	raceSource: "PHB'24",
 	className: "Cleric",
-	classSource: "PHB'24",
+	classSource: "TGTT",
 	background: "Acolyte",
 	bgSource: "PHB'24",
 	name: "Test Cleric",
@@ -71,7 +80,7 @@ export const PRESET_BARD: CharacterPreset = {
 	race: "Aarakocra",
 	raceSource: "MPMM",
 	className: "Bard",
-	classSource: "PHB'24",
+	classSource: "TGTT",
 	background: "Entertainer",
 	bgSource: "PHB'24",
 	name: "Test Bard",

@@ -159,7 +159,11 @@ test.describe("Thelemar Races - Character creation", () => {
 		await builder.autoFillRemainingSelections();
 		await builder.clickNext();
 
-		// Step 2: Simple class — TGTT Wizard (2 skills, no masteries)
+		// Step 2: Background
+		await builder.selectBackgroundExact("Sage", "PHB'24");
+		await builder.clickNext();
+
+		// Step 3: Simple class — TGTT Wizard (2 skills, no masteries)
 		await builder.selectClassExact("Wizard", "TGTT");
 		await page.waitForTimeout(500);
 		await builder.selectFirstAvailableSkills(2);
@@ -168,19 +172,20 @@ test.describe("Thelemar Races - Character creation", () => {
 		await builder.autoFillRemainingSelections();
 		await builder.clickNext();
 
-		// Step 3: Abilities
+		// Step 4: Abilities
 		await builder.assignStandardArrayDefaults();
-		await builder.clickNext();
-
-		// Step 4: Background
-		await builder.selectBackgroundExact("Sage", "PHB'24");
 		await builder.clickNext();
 
 		// Step 5: Equipment
 		await builder.selectEquipmentOption("gold");
 		await builder.clickNext();
 
-		// Step 6: Details
+		// Step 6: Spells (Wizard is a spellcaster)
+		await builder.autoFillStartingSpells();
+		await builder.clickNext();
+		await builder.acceptSkipSpellsDialog();
+
+		// Step 7: Details
 		await builder.fillDetails({name: "Dendulra Wizard"});
 		await builder.finishWizard();
 

@@ -21,8 +21,12 @@ test.describe("Divine Soul Affinity", () => {
 		const builder = new BuilderWizardPage(page);
 
 		await charSheet.switchToTab(charSheet.tabBuilder);
+		// Builder order: Race → Background → Class → Abilities → Equipment → Spells → Details
 		await builder.selectRaceExact("Aarakocra", "MPMM");
 		await page.waitForTimeout(300);
+		await builder.clickNext();
+
+		await builder.selectBackgroundExact("Acolyte", "PHB'24");
 		await builder.clickNext();
 
 		await builder.selectClassExact("Sorcerer", "TGTT");
@@ -34,9 +38,6 @@ test.describe("Divine Soul Affinity", () => {
 		await builder.clickNext();
 
 		await builder.assignStandardArrayDefaults();
-		await builder.clickNext();
-
-		await builder.selectBackgroundExact("Acolyte", "PHB'24");
 		await builder.clickNext();
 
 		await builder.selectEquipmentOption("gold");
