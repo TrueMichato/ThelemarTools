@@ -1763,15 +1763,19 @@ class CharacterSheetQuickBuild {
 				choices.ability.from.forEach(abl => {
 					const isSelected = sel.featChoices.ability === abl;
 					const currentScore = runningScores ? runningScores[abl] : this._state.getAbilityScore(abl);
-					const newScore = Math.min(20, currentScore + (choices.ability.amount || 1));
+					const amount = choices.ability.amount || 1;
+					const cap = choices.ability.max || 20;
+					const newScore = Math.min(cap, currentScore + amount);
+					const isCapped = currentScore >= cap;
 
 					const btn = e_({outer: `
-						<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}">
+						<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isCapped ? `disabled title="Already at maximum (${cap})"` : ""}>
 							${Parser.attAbvToFull(abl)} (${currentScore} → ${newScore})
 						</button>
 					`});
 
 					btn.addEventListener("click", () => {
+						if (isCapped) return;
 						sel.featChoices.ability = isSelected ? null : abl;
 						if (onFeatAbilityChanged) {
 							onFeatAbilityChanged();

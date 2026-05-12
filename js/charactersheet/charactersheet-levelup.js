@@ -1811,6 +1811,8 @@ class CharacterSheetLevelUp {
 								boon._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: []};
 							}
 							this._renderFeatChoicesUI(boon, boonChoices, featChoicesContainer, () => { _refreshAsiDisplays(); });
+							// Re-render feat ability buttons immediately so pending ASI (set before boon selection) is reflected
+							_refreshFeatAbilityChoices();
 							if (featChoicesContainer.children.length) featChoicesContainer.scrollIntoView({behavior: "smooth", block: "nearest"});
 						}
 						_refreshAsiDisplays();
@@ -2018,6 +2020,8 @@ class CharacterSheetLevelUp {
 
 					// Render feat choices UI if needed
 					this._renderFeatChoicesUI(feat, choices, featChoicesContainer, () => { _refreshAsiDisplays(); });
+					// Re-render the feat ability buttons immediately so pending ASI (set before feat selection) is reflected
+					_refreshFeatAbilityChoices();
 					if (featChoicesContainer.children.length) featChoicesContainer.scrollIntoView({behavior: "smooth", block: "nearest"});
 
 					onFeatSelect(feat);
@@ -2091,15 +2095,19 @@ class CharacterSheetLevelUp {
 		abilityChoiceSpec.from.forEach((/** @type {*} */ abl) => {
 			const isSelected = feat._featChoices.ability === abl;
 			const currentScore = pendingScores ? (/** @type {*} */ (pendingScores))[abl] : this._state.getAbilityScore(abl);
-			const newScore = Math.min(20, currentScore + (abilityChoiceSpec.amount || 1));
+			const amount = abilityChoiceSpec.amount || 1;
+			const cap = abilityChoiceSpec.max || 20;
+			const newScore = Math.min(cap, currentScore + amount);
+			const isCapped = currentScore >= cap;
 
 			const btn = e_({outer: `
-				<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}">
+				<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isCapped ? `disabled title="Already at maximum (${cap})"` : ""}>
 					${Parser.attAbvToFull(abl)} (${currentScore} → ${newScore})
 				</button>
 			`});
 
 			btn.addEventListener("click", () => {
+				if (isCapped) return;
 				feat._featChoices.ability = isSelected ? null : abl;
 				abilityGrid.querySelectorAll(".ve-btn").forEach((/** @type {*} */ el) => { el.classList.remove("ve-btn-primary"); el.classList.add("ve-btn-default"); });
 				if (!isSelected) { btn.classList.remove("ve-btn-default"); btn.classList.add("ve-btn-primary"); }
