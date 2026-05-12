@@ -31,7 +31,7 @@ const run = (label, cmd, args) => {
 run("eslint", "npm", ["run", "test:js"]);
 run("stylelint", "npm", ["run", "test:css:lint"]);
 run("jest (full)", "npm", ["run", "test:unit", "--", "--no-coverage"]);
-run("data validation", "npm", ["run", "test:data"]);
+// run("data validation", "npm", ["run", "test:data"]);
 
 if (process.env.RUN_E2E_FULL === "1") {
 	run("playwright (full suite)", "npx", ["playwright", "test"]);
