@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable no-console */
 /**
  * Auto-generates `test/e2e/utils/tgttFeaturePools.ts` from
  * `homebrew/TravelersGuidetoThelemar.json`.
@@ -61,7 +62,7 @@ try {
 
 /** Escape a name into an anchored case-insensitive RegExp literal source. */
 function nameToRegexLiteral (name) {
-	const escaped = name.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&");
+	const escaped = name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 	return `/^${escaped}$/i`;
 }
 

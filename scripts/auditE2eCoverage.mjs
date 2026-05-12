@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable no-console */
 // Audit per-spec EffectCheck coverage across TGTT comprehensive build specs.
 //
 // Walks each `test/e2e/specs/tgtt-*.spec.ts`, parses every `featuresMatrix`
