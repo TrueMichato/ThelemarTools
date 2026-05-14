@@ -2731,7 +2731,9 @@ class CharacterSheetPage {
 		`}));
 
 		// Get skills from loaded data (dynamic, supports homebrew)
-		const skills = this.getSkillsList();
+		const allSkills = this.getSkillsList();
+		const skills = allSkills.filter(s => !s.isLoreSkill);
+		const loreSkills = allSkills.filter(s => s.isLoreSkill);
 
 		// Check for Jack of All Trades (half proficiency for non-proficient skills)
 		const hasJackOfAllTrades = this._state.hasJackOfAllTrades();
@@ -2814,6 +2816,104 @@ class CharacterSheetPage {
 		`});
 		addBtn.addEventListener("click", () => this._showAddCustomSkillModal());
 		container.append(addBtn);
+
+		// Lore Skills section (TGTT variant rule)
+		this._renderLoreSkillsSection(container, loreSkills);
+	}
+
+	/**
+	 * Render the Lore Skills sub-section beneath the main skills table.
+	 * Lore skills use a flat per-skill bonus (no ability or PB scaling).
+	 * @param {HTMLElement} container
+	 * @param {Array<{name:string, isLoreSkill:boolean}>} loreSkills
+	 */
+	_renderLoreSkillsSection (container, loreSkills) {
+		const section = e_({outer: `
+			<div class="charsheet__lore-skills-section">
+				<div class="charsheet__lore-skills-header ve-flex-v-center mt-3" title="TGTT variant rule: Lore Skills">
+					<span class="mr-1">📚</span>
+					<span class="charsheet__lore-skills-title">Lore Skills</span>
+					<span class="ve-muted ve-small ml-2">flat bonus &mdash; no ability or proficiency added</span>
+				</div>
+				<div class="charsheet__lore-skills-list"></div>
+			</div>
+		`});
+		const listEl = section.querySelector(".charsheet__lore-skills-list");
+
+		if (!loreSkills.length) {
+			listEl.append(e_({outer: `
+				<div class="ve-muted ve-small charsheet__lore-skills-empty">
+					No lore skills yet. Most Thelemar characters start with 2&ndash;3 from their background &mdash;
+					gain more by reading books, tutoring, or the Lore Mastery feat.
+				</div>
+			`}));
+		} else {
+			loreSkills.forEach(skill => {
+				const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
+				const mod = this._state.getSkillMod(skillKey);
+				const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+				const breakdown = this._state.getSkillBreakdown(skillKey);
+				const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
+				tooltipLines.push(`─────────\n📚 Total: ${modStr}`);
+				const tooltip = tooltipLines.join("\n");
+
+				const row = e_({outer: `
+					<div class="charsheet__lore-skill-row" data-skill="${skillKey}" title="${tooltip.replace(/"/g, "&quot;")}">
+						<span class="charsheet__lore-skill-icon">📚</span>
+						<span class="charsheet__lore-skill-name">${skill.name}</span>
+						<span class="charsheet__lore-skill-mod">${modStr}</span>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__lore-skill-bump" data-delta="-2" title="Decrease bonus by 2">▼</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__lore-skill-bump" data-delta="2" title="Increase bonus by 2">▲</button>
+						<span class="charsheet__lore-skill-delete" title="Remove lore skill">×</span>
+					</div>
+				`});
+
+				row.querySelectorAll(".charsheet__lore-skill-bump").forEach(btn => {
+					btn.addEventListener("click", (/** @type {*} */ ev) => {
+						ev.stopPropagation();
+						const delta = Number(btn.getAttribute("data-delta")) || 0;
+						const loreEntry = this._state.getLoreSkills().find(s =>
+							s.name.toLowerCase().replace(/\s+/g, "") === skillKey,
+						);
+						if (!loreEntry) return;
+						const nextBonus = (loreEntry.bonus || 0) + delta;
+						if (nextBonus < 2) {
+							JqueryUtil.doToast({type: "info", content: "Lore skill bonus can't go below +2."});
+							return;
+						}
+						this._state.setLoreSkillBonus(skill.name, nextBonus);
+						this._renderSkills();
+						this._saveCurrentCharacter();
+					});
+				});
+
+				row.querySelector(".charsheet__lore-skill-delete").addEventListener("click", (/** @type {*} */ ev) => {
+					ev.stopPropagation();
+					this._state.removeLoreSkill(skill.name);
+					this._renderSkills();
+					this._saveCurrentCharacter();
+				});
+
+				row.addEventListener("click", (/** @type {*} */ ev) => {
+					if (ev.target.classList.contains("charsheet__lore-skill-delete")) return;
+					if (ev.target.classList.contains("charsheet__lore-skill-bump")) return;
+					this._rollSkillCheck(skillKey, skill.name, ev);
+				});
+
+				listEl.append(row);
+			});
+		}
+
+		const addLoreBtn = e_({outer: `
+			<div class="charsheet__skill-add" title="Add a lore skill (TGTT variant rule)">
+				<span class="charsheet__skill-add-icon">+</span>
+				<span class="charsheet__skill-add-text">Add Lore Skill</span>
+			</div>
+		`});
+		addLoreBtn.addEventListener("click", () => this._showAddLoreSkillModal());
+		section.append(addLoreBtn);
+
+		container.append(section);
 	}
 
 	_renderHp () {
@@ -10764,6 +10864,7 @@ class CharacterSheetPage {
 					ability: skill.ability,
 					source: "Custom",
 					isCustom: true,
+					isLoreSkill: !!skill.isLoreSkill,
 				});
 			}
 		});
@@ -11361,6 +11462,215 @@ class CharacterSheetPage {
 
 		// Focus the name input
 		nameEl.focus();
+	}
+
+	/**
+	 * Show modal for adding a lore skill (TGTT variant rule).
+	 * Lore skills use a flat per-skill bonus only (no ability or PB).
+	 * Default chips are +2/+4/+6 with a numeric override for DM discretion.
+	 */
+	async _showAddLoreSkillModal () {
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Add Lore Skill",
+			isMinHeight0: true,
+		});
+
+		const formEl = ee`<div class="ve-flex-col">
+			<div class="ve-muted ve-small mb-2">
+				Lore skills represent narrow areas of expertise (e.g. Heraldry, Architecture, Planar Geography).
+				The bonus is added directly to your roll &mdash; no ability or proficiency bonus is applied.
+			</div>
+			<div class="ve-flex-v-center mb-2">
+				<label class="mr-2 w-100p">Skill Name:</label>
+				<input type="text" class="ve-form-control" id="lore-skill-name" placeholder="e.g. Heraldry, Planar Geography">
+			</div>
+			<div class="ve-flex-v-center mb-3">
+				<label class="mr-2 w-100p">Bonus:</label>
+				<div class="ve-btn-group mr-2" role="group" id="lore-skill-bonus-chips">
+					<button type="button" class="ve-btn ve-btn-default ve-btn-sm active" data-bonus="2">+2</button>
+					<button type="button" class="ve-btn ve-btn-default ve-btn-sm" data-bonus="4">+4</button>
+					<button type="button" class="ve-btn ve-btn-default ve-btn-sm" data-bonus="6">+6</button>
+				</div>
+				<input type="number" class="ve-form-control" id="lore-skill-bonus-custom" min="1" max="20" step="1" placeholder="custom" style="width: 6em;">
+			</div>
+			<div class="ve-flex-h-right">
+				<button class="ve-btn ve-btn-default mr-2" id="lore-skill-cancel">Cancel</button>
+				<button class="ve-btn ve-btn-primary" id="lore-skill-add">Add Lore Skill</button>
+			</div>
+		</div>`;
+		modalInner.append(formEl);
+
+		const nameEl = formEl.querySelector("#lore-skill-name");
+		const customEl = formEl.querySelector("#lore-skill-bonus-custom");
+		const chipsEl = formEl.querySelector("#lore-skill-bonus-chips");
+		const addBtnEl = formEl.querySelector("#lore-skill-add");
+		const cancelBtn = formEl.querySelector("#lore-skill-cancel");
+
+		let selectedBonus = 2;
+		chipsEl.querySelectorAll("button").forEach(btn => {
+			btn.addEventListener("click", () => {
+				selectedBonus = Number(btn.getAttribute("data-bonus")) || 2;
+				chipsEl.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+				btn.classList.add("active");
+				customEl.value = "";
+			});
+		});
+		customEl.addEventListener("input", () => {
+			const v = Number(customEl.value);
+			if (Number.isFinite(v) && v > 0) {
+				selectedBonus = v;
+				chipsEl.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+			}
+		});
+
+		cancelBtn.addEventListener("click", () => doClose());
+
+		addBtnEl.addEventListener("click", () => {
+			const name = nameEl.value.trim();
+			if (!name) {
+				JqueryUtil.doToast({type: "warning", content: "Please enter a lore skill name."});
+				return;
+			}
+			const skillKey = name.toLowerCase().replace(/\s+/g, "");
+			const existingSkills = this.getSkillsList();
+			if (existingSkills.some(s => s.name.toLowerCase().replace(/\s+/g, "") === skillKey)) {
+				JqueryUtil.doToast({type: "warning", content: `A skill named "${name}" already exists.`});
+				return;
+			}
+			if (selectedBonus < 1) {
+				JqueryUtil.doToast({type: "warning", content: "Bonus must be at least +1."});
+				return;
+			}
+
+			this._state.addLoreSkill(name, selectedBonus);
+			this._renderSkills();
+			this._saveCurrentCharacter();
+
+			JqueryUtil.doToast({type: "success", content: `Added lore skill: ${name} (+${selectedBonus})`});
+			doClose();
+		});
+
+		nameEl.addEventListener("keypress", (e) => {
+			if (e.which === 13) addBtnEl.click();
+		});
+
+		nameEl.focus();
+	}
+
+	/**
+	 * Show modal for the TGTT Lore Mastery feat's RAW choice.
+	 * Per the variant rule, the player must pick one of:
+	 *   - "increase": choose 2 existing lore skills; each gains +2
+	 *   - "grant":    gain 2 new lore skills, each at +2
+	 * @returns {Promise<{mode:"increase"|"grant", skills:[string,string]}|null>} payload or null on cancel
+	 */
+	async _showLoreMasteryChoiceModal () {
+		let resolveOuter;
+		const outerPromise = new Promise(r => { resolveOuter = r; });
+		let isResolved = false;
+		const resolveOnce = (value) => {
+			if (isResolved) return;
+			isResolved = true;
+			resolveOuter(value);
+		};
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Lore Mastery — Choose",
+			isMinHeight0: true,
+			cbClose: () => resolveOnce(null),
+		});
+		const finish = (value) => {
+			resolveOnce(value);
+			doClose(true);
+		};
+
+		const existingLoreSkills = this._state.getLoreSkills();
+		const canIncrease = existingLoreSkills.length >= 2;
+
+		const formEl = ee`<div class="ve-flex-col">
+			<div class="ve-muted ve-small mb-3">
+				Choose how Lore Mastery applies. You can either deepen your existing lore expertise
+				or branch into new fields of study.
+			</div>
+			<div class="ve-flex-v-center mb-2">
+				<label class="mr-2">
+					<input type="radio" name="lore-mastery-mode" value="increase" ${canIncrease ? "checked" : "disabled"}>
+					Increase: pick 2 existing lore skills (+2 each)
+				</label>
+			</div>
+			${!canIncrease ? `<div class="ve-muted ve-small ml-4 mb-2">You need at least 2 existing lore skills to use this option.</div>` : ""}
+			<div class="ve-flex-v-center mb-3">
+				<label class="mr-2">
+					<input type="radio" name="lore-mastery-mode" value="grant" ${canIncrease ? "" : "checked"}>
+					Grant: gain 2 new lore skills (+2 each)
+				</label>
+			</div>
+			<div class="ve-flex-v-center mb-2">
+				<label class="mr-2 w-100p">Skill 1:</label>
+				<input type="text" class="ve-form-control" id="lore-mastery-skill1" list="lore-mastery-skill1-list">
+				<datalist id="lore-mastery-skill1-list">
+					${existingLoreSkills.map(s => `<option value="${s.name}">`).join("")}
+				</datalist>
+			</div>
+			<div class="ve-flex-v-center mb-3">
+				<label class="mr-2 w-100p">Skill 2:</label>
+				<input type="text" class="ve-form-control" id="lore-mastery-skill2" list="lore-mastery-skill2-list">
+				<datalist id="lore-mastery-skill2-list">
+					${existingLoreSkills.map(s => `<option value="${s.name}">`).join("")}
+				</datalist>
+			</div>
+			<div class="ve-flex-h-right">
+				<button class="ve-btn ve-btn-default mr-2" id="lore-mastery-cancel">Cancel</button>
+				<button class="ve-btn ve-btn-primary" id="lore-mastery-confirm">Confirm</button>
+			</div>
+		</div>`;
+		modalInner.append(formEl);
+
+		const skill1El = formEl.querySelector("#lore-mastery-skill1");
+		const skill2El = formEl.querySelector("#lore-mastery-skill2");
+		const confirmBtn = formEl.querySelector("#lore-mastery-confirm");
+		const cancelBtn = formEl.querySelector("#lore-mastery-cancel");
+
+		cancelBtn.addEventListener("click", () => finish(null));
+
+		confirmBtn.addEventListener("click", () => {
+			const mode = formEl.querySelector("input[name=\"lore-mastery-mode\"]:checked")?.value;
+			const s1 = skill1El.value.trim();
+			const s2 = skill2El.value.trim();
+
+			if (!mode) {
+				JqueryUtil.doToast({type: "warning", content: "Pick a mode first."});
+				return;
+			}
+			if (!s1 || !s2) {
+				JqueryUtil.doToast({type: "warning", content: "Both skill slots are required."});
+				return;
+			}
+			if (s1.toLowerCase() === s2.toLowerCase()) {
+				JqueryUtil.doToast({type: "warning", content: "The two picks must be different."});
+				return;
+			}
+
+			if (mode === "increase") {
+				const known = new Set(existingLoreSkills.map(s => s.name.toLowerCase()));
+				if (!known.has(s1.toLowerCase()) || !known.has(s2.toLowerCase())) {
+					JqueryUtil.doToast({type: "warning", content: "Increase mode requires existing lore skills."});
+					return;
+				}
+			} else if (mode === "grant") {
+				const allSkills = this.getSkillsList();
+				const collide = (n) => allSkills.some(s => s.name.toLowerCase().replace(/\s+/g, "") === n.toLowerCase().replace(/\s+/g, ""));
+				if (collide(s1) || collide(s2)) {
+					JqueryUtil.doToast({type: "warning", content: "Grant mode requires new lore skill names."});
+					return;
+				}
+			}
+
+			finish({mode, skills: [s1, s2]});
+		});
+
+		skill1El.focus();
+		return outerPromise;
 	}
 
 	/**
