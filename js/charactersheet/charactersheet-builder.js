@@ -407,6 +407,8 @@ class CharacterSheetBuilder {
 						return false;
 					}
 				}
+				// Validate Lore Skills sub-panel: filled slots must be unique and non-conflicting with standard skills
+				if (!this._validateLoreSkillAllocation()) return false;
 				return true;
 
 			case 6: { // Spells
@@ -673,6 +675,8 @@ class CharacterSheetBuilder {
 				});
 				// Re-apply racial ability bonuses with current Tasha state
 				this._applyRacialAbilityBonuses();
+				// Apply chosen Lore Skills allocation (TGTT variant rule).
+				this._applyLoreSkillAllocation();
 				break;
 
 			case 5: // Equipment
@@ -6268,6 +6272,7 @@ class CharacterSheetBuilder {
 						<h5>Summary</h5>
 						<div id="builder-abilities-summary"></div>
 					</div>
+					<div class="charsheet__section mt-3" id="builder-lore-skills-section"></div>
 				</div>
 			</div>
 		`});
@@ -6284,6 +6289,7 @@ class CharacterSheetBuilder {
 		// Render racial bonuses section with Tasha's option
 		this._renderRacialBonusesSection();
 		this._renderAbilityInputs();
+		this._renderLoreSkillsPanel();
 	}
 
 	/**
@@ -6343,6 +6349,202 @@ class CharacterSheetBuilder {
 		} else {
 			container.append(e_({outer: `<div class="mt-2">${this._getRacialBonusesHtml()}</div>`}));
 		}
+	}
+
+	/**
+	 * Render the Lore Skills sub-panel (TGTT variant rule).
+	 * Players pick a starting allocation: 2 skills @ +2/+4 or 3 skills @ +2/+2/+2.
+	 * Always visible — the variant rule is portable across settings.
+	 */
+	_renderLoreSkillsPanel () {
+		const container = /** @type {*} */ (document.getElementById("builder-lore-skills-section"));
+		if (!container) return;
+		container.innerHTML = "";
+
+		this._normalizeLoreSkillAllocation();
+
+		const presetTwoChecked = this._loreSkillAllocation.preset === "two" ? "checked" : "";
+		const presetThreeChecked = this._loreSkillAllocation.preset === "three" ? "checked" : "";
+
+		const panel = e_({outer: `
+			<div class="charsheet__builder-lore-skills">
+				<h5 class="ve-flex-v-center" title="See the Lore Skills variant rule">
+					<span class="mr-1">📚</span>Lore Skills
+					<span class="ve-muted ve-small ml-2">(optional, TGTT variant rule)</span>
+				</h5>
+				<div class="ve-muted ve-small mb-2">
+					Most Thelemar characters start with 2&ndash;3 narrow areas of knowledge from their background.
+					The bonus is a flat number per skill (no ability or proficiency bonus added).
+				</div>
+				<div class="charsheet__builder-lore-skills-presets mb-2">
+					<label class="mr-3">
+						<input type="radio" name="lore-skill-preset" value="three" ${presetThreeChecked}>
+						Three skills (+2 / +2 / +2)
+					</label>
+					<label>
+						<input type="radio" name="lore-skill-preset" value="two" ${presetTwoChecked}>
+						Two skills (+2 / +4)
+					</label>
+				</div>
+				<div id="builder-lore-skill-slots"></div>
+			</div>
+		`});
+
+		container.append(panel);
+
+		panel.querySelectorAll("input[name=\"lore-skill-preset\"]").forEach((/** @type {*} */ radio) => {
+			radio.addEventListener("change", (/** @type {*} */ e) => {
+				this._setLoreSkillPreset(e.target.value);
+				this._renderLoreSkillSlots();
+			});
+		});
+
+		this._renderLoreSkillSlots();
+	}
+
+	/**
+	 * Render the per-slot inputs for the current Lore Skills preset.
+	 */
+	_renderLoreSkillSlots () {
+		const slotsContainer = /** @type {*} */ (document.getElementById("builder-lore-skill-slots"));
+		if (!slotsContainer) return;
+		slotsContainer.innerHTML = "";
+
+		this._loreSkillAllocation.skills.forEach((slot, idx) => {
+			const row = e_({outer: `
+				<div class="ve-flex-v-center mb-1">
+					<span class="charsheet__builder-lore-skill-bonus mr-2" style="min-width: 2.5em; font-weight: 600;">+${slot.bonus}</span>
+					<input type="text"
+						class="form-control form-control--minimal"
+						placeholder="Lore skill name (e.g. Heraldry, Architecture, Planar Geography)"
+						value="${(slot.name || "").qq()}"
+						data-lore-slot-idx="${idx}">
+				</div>
+			`});
+			row.querySelector("input").addEventListener("input", (/** @type {*} */ e) => {
+				this._loreSkillAllocation.skills[idx].name = e.target.value;
+			});
+			slotsContainer.append(row);
+		});
+	}
+
+	/**
+	 * Switch the Lore Skills preset, preserving any names the player has typed.
+	 * @param {"two"|"three"} preset
+	 */
+	_setLoreSkillPreset (preset) {
+		if (preset !== "two" && preset !== "three") return;
+		const previousNames = this._loreSkillAllocation.skills.map(s => s.name);
+		if (preset === "two") {
+			this._loreSkillAllocation = {
+				preset: "two",
+				skills: [
+					{name: previousNames[0] || "", bonus: 2},
+					{name: previousNames[1] || "", bonus: 4},
+				],
+			};
+		} else {
+			this._loreSkillAllocation = {
+				preset: "three",
+				skills: [
+					{name: previousNames[0] || "", bonus: 2},
+					{name: previousNames[1] || "", bonus: 2},
+					{name: previousNames[2] || "", bonus: 2},
+				],
+			};
+		}
+	}
+
+	/**
+	 * Defensive normalization in case `_loreSkillAllocation` was mutated externally
+	 * (e.g., load-from-state path). Ensures slot count + bonuses match the preset.
+	 */
+	_normalizeLoreSkillAllocation () {
+		if (!this._loreSkillAllocation || !Array.isArray(this._loreSkillAllocation.skills)) {
+			this._loreSkillAllocation = {
+				preset: "three",
+				skills: [
+					{name: "", bonus: 2},
+					{name: "", bonus: 2},
+					{name: "", bonus: 2},
+				],
+			};
+			return;
+		}
+		const preset = this._loreSkillAllocation.preset === "two" ? "two" : "three";
+		const expectedBonuses = preset === "two" ? [2, 4] : [2, 2, 2];
+		const names = this._loreSkillAllocation.skills.map(s => s?.name || "");
+		this._loreSkillAllocation = {
+			preset,
+			skills: expectedBonuses.map((bonus, i) => ({name: names[i] || "", bonus})),
+		};
+	}
+
+	/**
+	 * Validate the Lore Skills allocation: filled slot names must be unique among
+	 * themselves and must not collide with standard skills.
+	 * Empty slots are allowed (player opts out of that lore skill).
+	 * @returns {boolean}
+	 */
+	_validateLoreSkillAllocation () {
+		this._normalizeLoreSkillAllocation();
+		const filled = this._loreSkillAllocation.skills
+			.map(s => (s.name || "").trim())
+			.filter(Boolean);
+		if (!filled.length) return true; // opt-out is fine
+
+		// Uniqueness within the allocation
+		const seen = new Set();
+		for (const name of filled) {
+			const key = name.toLowerCase().replace(/\s+/g, "");
+			if (seen.has(key)) {
+				globalThis.JqueryUtil?.doToast?.({type: "warning", content: `Duplicate lore skill name: "${name}".`});
+				return false;
+			}
+			seen.add(key);
+		}
+
+		// Collisions with standard skills (Parser.SKILL_TO_ATB_ABV is the canonical map).
+		const standardKeys = new Set(
+			(Parser.SKILL_TO_ATB_ABV ? Object.keys(Parser.SKILL_TO_ATB_ABV) : [])
+				.map(k => k.toLowerCase().replace(/\s+/g, "")),
+		);
+		for (const name of filled) {
+			const key = name.toLowerCase().replace(/\s+/g, "");
+			if (standardKeys.has(key)) {
+				globalThis.JqueryUtil?.doToast?.({type: "warning", content: `"${name}" is a standard skill — pick a narrower lore topic.`});
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Apply the Lore Skills allocation to the character state. Idempotent on
+	 * re-entry to step 4: removes any previously-applied lore skills that no
+	 * longer match the current allocation, then re-adds the current set.
+	 */
+	_applyLoreSkillAllocation () {
+		this._normalizeLoreSkillAllocation();
+		const desired = this._loreSkillAllocation.skills
+			.map(s => ({name: (s.name || "").trim(), bonus: s.bonus}))
+			.filter(s => s.name.length);
+
+		const existing = this._state.getLoreSkills ? this._state.getLoreSkills() : [];
+		const desiredKeys = new Set(desired.map(s => s.name.toLowerCase().replace(/\s+/g, "")));
+
+		// Remove any builder-managed lore skills that are no longer desired
+		// (only those without a feat-source — feat grants are handled separately).
+		existing.forEach((/** @type {*} */ skill) => {
+			const key = skill.name.toLowerCase().replace(/\s+/g, "");
+			if (!desiredKeys.has(key)) this._state.removeLoreSkill(skill.name);
+		});
+
+		desired.forEach(({name, bonus}) => {
+			// addLoreSkill is a no-op if name already exists; sync bonus afterwards
+			this._state.addLoreSkill(name, bonus);
+			this._state.setLoreSkillBonus(name, bonus);
+		});
 	}
 
 	/**

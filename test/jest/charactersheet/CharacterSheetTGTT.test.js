@@ -11568,84 +11568,59 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(calcs.hasLoreMastery).toBe(true);
 			});
 
-			it("should add +2 bonus to existing lore skills via loreSkillBonuses", () => {
-				// First add a custom lore skill
-				state.addCustomSkill("History of Dragons", "int");
-				state.setSkillProficiency("historyofdragons", 1); // proficient
+			it("should bump existing lore skill bonuses by +2 in increase mode", () => {
+				state.addLoreSkill("History of Dragons", 2);
+				state.addLoreSkill("Heraldry", 2);
 
-				// Add Lore Mastery with bonus to that skill
 				state.addFeat({
 					name: "Lore Mastery",
 					source: "TGTT",
-					loreSkillBonuses: {"historyofdragons": 2},
+					loreSkillPicks: {mode: "increase", skills: ["History of Dragons", "Heraldry"]},
 				});
 
-				// Check that the named modifier was added
-				const modifiers = state.getNamedModifiersByType("skill:historyofdragons");
-				expect(modifiers.length).toBeGreaterThan(0);
-				expect(modifiers.some(m => m.value === 2 && m.name.includes("Lore Mastery"))).toBe(true);
+				const lore = state.getLoreSkills();
+				const dragons = lore.find(s => s.name === "History of Dragons");
+				const heraldry = lore.find(s => s.name === "Heraldry");
+				expect(dragons.bonus).toBe(4);
+				expect(heraldry.bonus).toBe(4);
+				// Skill mod should reflect the flat bonus (no ability/PB)
+				expect(state.getSkillMod("historyofdragons")).toBe(4);
+				expect(state.getSkillMod("heraldry")).toBe(4);
 			});
 
-			it("should grant new lore skills at +2 via grantLoreSkills", () => {
+			it("should grant new lore skills at +2 in grant mode", () => {
 				state.addFeat({
 					name: "Lore Mastery",
 					source: "TGTT",
-					grantLoreSkills: ["Planar Geography", "Demonic Hierarchies"],
+					loreSkillPicks: {mode: "grant", skills: ["Planar Geography", "Demonic Hierarchies"]},
 				});
 
-				// Check that custom skills were added
-				const customSkills = state.getCustomSkills();
-				expect(customSkills.some(s => s.name === "Planar Geography")).toBe(true);
-				expect(customSkills.some(s => s.name === "Demonic Hierarchies")).toBe(true);
-
-				// Check that +2 modifiers were added
-				const pgModifiers = state.getNamedModifiersByType("skill:planargeography");
-				expect(pgModifiers.some(m => m.value === 2)).toBe(true);
-
-				const dhModifiers = state.getNamedModifiersByType("skill:demonichierarchies");
-				expect(dhModifiers.some(m => m.value === 2)).toBe(true);
+				const lore = state.getLoreSkills();
+				const pg = lore.find(s => s.name === "Planar Geography");
+				const dh = lore.find(s => s.name === "Demonic Hierarchies");
+				expect(pg).toBeDefined();
+				expect(pg.bonus).toBe(2);
+				expect(pg.isLoreSkill).toBe(true);
+				expect(pg.ability).toBeNull();
+				expect(dh).toBeDefined();
+				expect(dh.bonus).toBe(2);
+				// No injected named modifiers (architectural cleanliness)
+				expect(state.getNamedModifiersByType("skill:planargeography").length).toBe(0);
 			});
 
-			it("should use WIS by default for new lore skills", () => {
+			it("should be retakable (second instance with different picks)", () => {
+				state.addLoreSkill("History of Dragons", 2);
 				state.addFeat({
 					name: "Lore Mastery",
 					source: "TGTT",
-					grantLoreSkills: ["Arcane Traditions"],
+					loreSkillPicks: {mode: "grant", skills: ["Heraldry", "Planar Geography"]},
 				});
 
-				const customSkills = state.getCustomSkills();
-				const arcaneSkill = customSkills.find(s => s.name === "Arcane Traditions");
-				expect(arcaneSkill).toBeDefined();
-				expect(arcaneSkill.ability).toBe("wis");
-			});
-
-			it("should allow custom ability for new lore skills", () => {
-				state.addFeat({
-					name: "Lore Mastery",
-					source: "TGTT",
-					grantLoreSkills: ["Engineering Principles"],
-					loreSkillAbilities: {"Engineering Principles": "int"},
-				});
-
-				const customSkills = state.getCustomSkills();
-				const engSkill = customSkills.find(s => s.name === "Engineering Principles");
-				expect(engSkill).toBeDefined();
-				expect(engSkill.ability).toBe("int");
-			});
-
-			it("should be retakable (add second instance)", () => {
-				// First instance
-				state.addCustomSkill("History of Dragons", "int");
-				state.addFeat({
-					name: "Lore Mastery",
-					source: "TGTT",
-					loreSkillBonuses: {"historyofdragons": 2},
-				});
-
-				// Note: Normally you'd track this with a different ID or incrementing name
-				// The sheet prevents exact duplicates, so we test the single feat case
 				const calcs = state.getFeatureCalculations();
 				expect(calcs.hasLoreMastery).toBe(true);
+				// Both grant-mode picks landed
+				expect(state.getLoreSkills().some(s => s.name === "Heraldry")).toBe(true);
+				expect(state.getLoreSkills().some(s => s.name === "Planar Geography")).toBe(true);
 			});
 		});
 

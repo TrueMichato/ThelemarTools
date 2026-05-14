@@ -3202,7 +3202,7 @@ class CharacterSheetState {
 			// Proficiencies
 			saveProficiencies: [], // ["str", "con"]
 			skillProficiencies: {}, // {athletics: 1, stealth: 2} (1 = prof, 2 = expertise)
-			customSkills: [], // [{name, ability}] - user-added custom skills
+			customSkills: [], // [{name, ability, isLoreSkill?, bonus?}] - user-added custom skills (lore skills are flagged with isLoreSkill:true and store a flat `bonus`)
 			armorProficiencies: [],
 			weaponProficiencies: [],
 			toolProficiencies: [],
@@ -3638,6 +3638,9 @@ class CharacterSheetState {
 		// Migrate old ki backing store into the resource system
 		this._migrateKiToResource();
 
+		// Migrate legacy Lore Mastery–granted custom skills to the new lore-skill subtype
+		this._migrateLoreSkills();
+
 		// Migrate: backfill levelHistory with race/background data from state
 		this._migrateRaceBackgroundToHistory();
 
@@ -3826,6 +3829,43 @@ class CharacterSheetState {
 				}
 			});
 		}
+	}
+
+	/**
+	 * Migrate legacy Lore Mastery–granted custom skills to the new lore-skill subtype.
+	 *
+	 * Old shape (pre lore-skill subtype): Lore Mastery created a custom skill with
+	 * `ability:"wis"` (or per-skill override) and a paired named modifier of value 2
+	 * with type `skill:<key>` and a `note` mentioning "Lore Mastery".
+	 *
+	 * New shape: `{name, ability:null, isLoreSkill:true, bonus:2}`, no companion modifier
+	 * (the bonus is stored on the skill itself).
+	 *
+	 * Detection heuristic: a custom skill is convertible iff it (a) lacks `isLoreSkill`,
+	 * AND (b) has at least one named modifier of type `skill:<itsKey>` whose note
+	 * matches /lore mastery/i. Idempotent — re-running is a no-op.
+	 */
+	_migrateLoreSkills () {
+		if (!this._data.customSkills?.length) return;
+		const mods = this._data.namedModifiers || [];
+
+		this._data.customSkills.forEach(skill => {
+			if (skill.isLoreSkill) return;
+			const key = skill.name.toLowerCase().replace(/\s+/g, "");
+			const matchingModifierIndex = mods.findIndex(m =>
+				m.type === `skill:${key}` && /lore mastery/i.test(m.note || m.name || ""),
+			);
+			if (matchingModifierIndex < 0) return;
+			const matchingModifier = mods[matchingModifierIndex];
+			const carriedBonus = Number(matchingModifier.value) || 2;
+			skill.isLoreSkill = true;
+			skill.ability = null;
+			skill.bonus = (skill.bonus || 0) + carriedBonus;
+			// Drop the now-redundant named modifier
+			mods.splice(matchingModifierIndex, 1);
+			// Ensure proficiency entry exists so the skill renders correctly
+			this._data.skillProficiencies[key] = this._data.skillProficiencies[key] || 1;
+		});
 	}
 
 	/**
@@ -6086,6 +6126,18 @@ class CharacterSheetState {
 		// Normalize skill key to lowercase without spaces
 		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "");
 
+		// Lore skills (TGTT variant rule): flat per-skill bonus, no ability or PB.
+		// Item bonuses, custom mods, and stance/state bonuses still apply.
+		const loreSkill = this._getLoreSkillEntry(normalizedSkill);
+		if (loreSkill) {
+			const custom = this.getSkillCustomMod(normalizedSkill);
+			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
+			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
+			const exhaustionPenalty = this._getExhaustionD20Penalty();
+			return (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus - exhaustionPenalty;
+		}
+
 		// Use getSkillAbility() as single source of truth for skill→ability mapping
 		// Covers standard skills, hardcoded homebrew skills (cooking, culture, etc.), and custom skills
 		let ability = this.getSkillAbility(normalizedSkill);
@@ -6299,6 +6351,94 @@ class CharacterSheetState {
 	getCustomSkills () {
 		return this._data.customSkills || [];
 	}
+
+	// #region Lore Skills (TGTT variant rule)
+	// Lore skills are a flagged subtype of custom skills with a flat per-skill bonus
+	// (no ability mod, no PB doubling). Stored as {name, ability:null, isLoreSkill:true, bonus:N}.
+
+	/**
+	 * Look up a lore-skill entry by normalized name.
+	 * @param {string} normalizedSkill - already-normalized skill key
+	 * @returns {object|null}
+	 * @private
+	 */
+	_getLoreSkillEntry (normalizedSkill) {
+		if (!this._data.customSkills?.length) return null;
+		return this._data.customSkills.find(s =>
+			s.isLoreSkill && s.name.toLowerCase().replace(/\s+/g, "") === normalizedSkill,
+		) || null;
+	}
+
+	/**
+	 * Add a lore skill (PB-only flat bonus per the TGTT variant rule).
+	 * @param {string} name - The skill name
+	 * @param {number} [bonus=2] - Flat bonus (typically +2/+4/+6)
+	 * @returns {boolean} true if added, false if duplicate
+	 */
+	addLoreSkill (name, bonus = 2) {
+		if (!name || !name.trim()) return false;
+		const trimmed = name.trim();
+		const key = trimmed.toLowerCase().replace(/\s+/g, "");
+		if (this._data.customSkills.some(s => s.name.toLowerCase().replace(/\s+/g, "") === key)) {
+			return false;
+		}
+		this._data.customSkills.push({
+			name: trimmed,
+			ability: null,
+			isLoreSkill: true,
+			bonus: Number(bonus) || 0,
+		});
+		// Mark as proficient so the skills table treats it as a real entry; the
+		// flat bonus completely replaces ability+PB calc via the short-circuit.
+		this._data.skillProficiencies[key] = 1;
+		return true;
+	}
+
+	/**
+	 * Set the flat bonus on an existing lore skill.
+	 * @param {string} name - The skill name
+	 * @param {number} bonus
+	 * @returns {boolean}
+	 */
+	setLoreSkillBonus (name, bonus) {
+		const key = name.toLowerCase().replace(/\s+/g, "");
+		const entry = this._getLoreSkillEntry(key);
+		if (!entry) return false;
+		entry.bonus = Number(bonus) || 0;
+		return true;
+	}
+
+	/**
+	 * Increment the flat bonus on an existing lore skill (used by Lore Mastery).
+	 * @param {string} name - The skill name
+	 * @param {number} delta
+	 * @returns {boolean}
+	 */
+	incrementLoreSkillBonus (name, delta) {
+		const key = name.toLowerCase().replace(/\s+/g, "");
+		const entry = this._getLoreSkillEntry(key);
+		if (!entry) return false;
+		entry.bonus = (entry.bonus || 0) + (Number(delta) || 0);
+		return true;
+	}
+
+	/**
+	 * Remove a lore skill.
+	 * @param {string} name
+	 * @returns {boolean}
+	 */
+	removeLoreSkill (name) {
+		return this.removeCustomSkill(name);
+	}
+
+	/**
+	 * Get all lore skills.
+	 * @returns {Array<{name:string, ability:null, isLoreSkill:true, bonus:number}>}
+	 */
+	getLoreSkills () {
+		return (this._data.customSkills || []).filter(s => s.isLoreSkill);
+	}
+	// #endregion
 	// #endregion
 
 	// #region AC
@@ -6741,6 +6881,26 @@ class CharacterSheetState {
 	 */
 	getSkillBreakdown (skill) {
 		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "");
+
+		// Lore skills (TGTT): flat per-skill bonus only, no ability/PB components.
+		const loreSkill = this._getLoreSkillEntry(normalizedSkill);
+		if (loreSkill) {
+			const loreComponents = [];
+			loreComponents.push({type: "lore", name: "Lore bonus", value: loreSkill.bonus || 0, icon: "📚"});
+			const custom = this.getSkillCustomMod(normalizedSkill);
+			if (custom !== 0) loreComponents.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+			if (itemBonus !== 0) loreComponents.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
+			if (stateBonus !== 0) loreComponents.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
+			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
+			if (stanceBonus !== 0) loreComponents.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
+			const exhaustionPenalty = this._getExhaustionD20Penalty();
+			if (exhaustionPenalty !== 0) loreComponents.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+			const loreTotal = loreComponents.reduce((sum, comp) => sum + comp.value, 0);
+			return {total: loreTotal, components: loreComponents, ability: null};
+		}
+
 		const components = [];
 
 		// Determine ability (including swaps)
@@ -22958,43 +23118,26 @@ class CharacterSheetState {
 		this._processFeatRegistryEffects(featData);
 
 		// ====================
-		// TGTT Feat: Lore Mastery
-		// Grants +2 to specified lore skills (either existing or new)
+		// TGTT Feat: Lore Mastery (variant-rule aligned)
+		// Player picks one of two modes per RAW:
+		//   - mode "increase": pick 2 existing lore skills, each gains +2 to its bonus
+		//   - mode "grant":    add 2 new lore skills, each at +2
+		// Picks come via feat.loreSkillPicks = {mode, skills:[name, name]} from the feat-add modal
+		// or from headless callers (tests, import). When picks are absent, the controller is
+		// expected to prompt the user (see _showLoreMasteryChoiceModal in charactersheet.js).
 		// ====================
-		if (feat.name === "Lore Mastery" && feat.loreSkillBonuses) {
-			// loreSkillBonuses is an object like: { "historyofdragons": 2, "planargeography": 2 }
-			for (const [skillKey, bonus] of Object.entries(feat.loreSkillBonuses)) {
-				this.addNamedModifier({
-					name: `Lore Mastery (${skillKey})`,
-					type: `skill:${skillKey}`,
-					value: bonus,
-					sourceFeatureId: featData.id,
-					sourceType: "feat",
-					note: "Lore Mastery feat bonus",
-				});
-			}
-		}
-
-		// ====================
-		// TGTT Feat: Lore Mastery - Grant new lore skills
-		// If lore skills are granted at +2 proficiency (not proficient but with a +2 bonus)
-		// ====================
-		if (feat.name === "Lore Mastery" && feat.grantLoreSkills) {
-			// grantLoreSkills is an array like: ["Planar Geography", "Demonic Hierarchies"]
-			for (const skillName of feat.grantLoreSkills) {
-				// Add the custom skill (lore skills use WIS by default in Thelemar)
-				const ability = feat.loreSkillAbilities?.[skillName] || "wis";
-				this.addCustomSkill(skillName, ability);
-				// Add the +2 bonus
-				const skillKey = skillName.toLowerCase().replace(/\s+/g, "");
-				this.addNamedModifier({
-					name: `Lore Mastery (${skillName})`,
-					type: `skill:${skillKey}`,
-					value: 2,
-					sourceFeatureId: featData.id,
-					sourceType: "feat",
-					note: "Lore Mastery feat (new skill)",
-				});
+		if (feat.name === "Lore Mastery" && feat.loreSkillPicks) {
+			const {mode, skills} = feat.loreSkillPicks;
+			if (Array.isArray(skills)) {
+				if (mode === "increase") {
+					for (const skillName of skills) {
+						this.incrementLoreSkillBonus(skillName, 2);
+					}
+				} else if (mode === "grant") {
+					for (const skillName of skills) {
+						this.addLoreSkill(skillName, 2);
+					}
+				}
 			}
 		}
 

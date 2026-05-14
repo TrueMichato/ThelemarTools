@@ -597,12 +597,21 @@ class CharacterSheetFeatures {
 	}
 
 	async _addFeat (feat, featChoices = null) {
+		// TGTT Lore Mastery: prompt for the RAW choice (increase 2 existing OR grant 2 new)
+		// before constructing the feat payload so picks are processed by addFeat.
+		let loreSkillPicks = null;
+		if (feat.name === "Lore Mastery" && this._page._showLoreMasteryChoiceModal) {
+			loreSkillPicks = await this._page._showLoreMasteryChoiceModal();
+			if (!loreSkillPicks) return; // user cancelled
+		}
+
 		const newFeat = {
 			name: feat.name,
 			source: feat.source,
 			description: feat.entries ? Renderer.get().render({type: "entries", entries: feat.entries}) : "",
 			additionalSpells: feat.additionalSpells, // Preserve for spell processing
 			choices: featChoices || null,
+			...(loreSkillPicks ? {loreSkillPicks} : {}),
 		};
 
 		// Apply static ability score increases (non-choose)
