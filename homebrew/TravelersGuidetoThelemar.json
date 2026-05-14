@@ -42,6 +42,15 @@
 					"mcdmproductions"
 				],
 				"version": "1.0"
+			},
+			{
+				"json": "TGTT-ILL",
+				"abbreviation": "ILL",
+				"full": "Travelers Guide to Thelemar - Illrigger Content",
+				"authors": [
+					"MCDM Productions"
+				],
+				"version": "1.0"
 			}
 		],
 		"dependencies": {
@@ -73,7 +82,20 @@
 				"rogue",
 				"sorcerer",
 				"warlock",
-				"wizard"
+				"wizard",
+				"IllriggerRevised"
+			],
+			"class": [
+				"IllriggerRevised"
+			],
+			"classFeature": [
+				"IllriggerRevised"
+			],
+			"subclassFeature": [
+				"IllriggerRevised"
+			],
+			"optionalfeature": [
+				"IllriggerRevised"
 			],
 			"race": [
 				"GGR",
@@ -671,7 +693,8 @@
 					"text": "8 + your proficiency bonus + your Strength or Dexterity modifier (your choice)"
 				},
 				"{@b Spellcasters} can use their spellcasting DC instead of the standard method DC.",
-				"{@b Monks} gain a +1 bonus to their method DC, and can add their Wisdom modifier instead of Strength or Dexterity when calculating their DC"
+				"{@b Monks} gain a +1 bonus to their method DC, and can add their Wisdom modifier instead of Strength or Dexterity when calculating their DC",
+				"{@b Illriggers} can use their Interdict save DC instead of the standard method DC."
 			]
 		},
 		{
@@ -13323,6 +13346,134 @@
 			],
 			"subclassTitle": "Dreamwalker Path",
 			"edition": "one"
+		},
+		{
+			"name": "Illrigger",
+			"source": "TGTT-ILL",
+			"_copy": {
+				"name": "Illrigger",
+				"source": "IllriggerRevised",
+				"_mod": {
+					"classFeatures": [
+						{
+							"mode": "insertArr",
+							"index": 2,
+							"items": "Combat Methods|Illrigger|TGTT-ILL|2"
+						},
+						{
+							"mode": "appendArr",
+							"items": [
+								"Specialties|Illrigger|TGTT-ILL|3",
+								"Specialties|Illrigger|TGTT-ILL|5",
+								"Specialties|Illrigger|TGTT-ILL|7",
+								"Specialties|Illrigger|TGTT-ILL|9",
+								"Specialties|Illrigger|TGTT-ILL|11",
+								"Specialties|Illrigger|TGTT-ILL|14",
+								"Specialties|Illrigger|TGTT-ILL|19"
+							]
+						}
+					],
+					"classTableGroups": [
+						{
+							"mode": "appendArr",
+							"items": {
+								"title": "Combat Methods",
+								"colLabels": [
+									"Methods Known",
+									"Method Degree"
+								],
+								"rows": [
+									[0, "\u2014"],
+									[2, "1st"],
+									[2, "1st"],
+									[3, "2nd"],
+									[3, "2nd"],
+									[4, "2nd"],
+									[4, "2nd"],
+									[5, "3rd"],
+									[5, "3rd"],
+									[6, "3rd"],
+									[6, "3rd"],
+									[6, "3rd"],
+									[7, "4th"],
+									[7, "4th"],
+									[8, "4th"],
+									[8, "4th"],
+									[9, "5th"],
+									[9, "5th"],
+									[10, "5th"],
+									[10, "5th"]
+								]
+							}
+						},
+						{
+							"mode": "appendArr",
+							"items": {
+								"title": "Specialties",
+								"colLabels": [
+									"Specialties Known"
+								],
+								"rows": [
+									[0],
+									[0],
+									[1],
+									[1],
+									[2],
+									[2],
+									[3],
+									[3],
+									[4],
+									[4],
+									[5],
+									[5],
+									[5],
+									[6],
+									[6],
+									[6],
+									[6],
+									[6],
+									[7],
+									[7]
+								]
+							}
+						}
+					],
+					"optionalfeatureProgression": {
+						"mode": "appendArr",
+						"items": {
+							"name": "Combat Methods",
+							"featureType": [
+								"CTM:1",
+								"CTM:2",
+								"CTM:3",
+								"CTM:4",
+								"CTM:5"
+							],
+							"progression": {
+								"2": 2,
+								"3": 2,
+								"4": 3,
+								"5": 3,
+								"6": 4,
+								"7": 4,
+								"8": 5,
+								"9": 5,
+								"10": 6,
+								"11": 6,
+								"12": 6,
+								"13": 7,
+								"14": 7,
+								"15": 8,
+								"16": 8,
+								"17": 9,
+								"18": 9,
+								"19": 10,
+								"20": 10
+							}
+						}
+					}
+				}
+			}
 		}
 	],
 	"subclass": [
@@ -16893,6 +17044,66 @@
 				"shortName": "Swindled",
 				"className": "Warlock",
 				"classSource": "PHB"
+			}
+		},
+		{
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"_copy": {
+				"name": "Architect of Ruin",
+				"source": "IllriggerRevised",
+				"shortName": "Architect of Ruin",
+				"className": "Illrigger",
+				"classSource": "IllriggerRevised"
+			}
+		},
+		{
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"_copy": {
+				"name": "Hellspeaker",
+				"source": "IllriggerRevised",
+				"shortName": "Hellspeaker",
+				"className": "Illrigger",
+				"classSource": "IllriggerRevised"
+			}
+		},
+		{
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"_copy": {
+				"name": "Painkiller",
+				"source": "IllriggerRevised",
+				"shortName": "Painkiller",
+				"className": "Illrigger",
+				"classSource": "IllriggerRevised"
+			}
+		},
+		{
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"_copy": {
+				"name": "Sanguine Knight",
+				"source": "IllriggerRevised",
+				"shortName": "Sanguine Knight",
+				"className": "Illrigger",
+				"classSource": "IllriggerRevised"
+			}
+		},
+		{
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"_copy": {
+				"name": "Shadowmaster",
+				"source": "IllriggerRevised",
+				"shortName": "Shadowmaster",
+				"className": "Illrigger",
+				"classSource": "IllriggerRevised"
 			}
 		}
 	],
@@ -22946,6 +23157,333 @@
 				"While in the Dreamtime, you can use an action to replicate the effect of a spell you know the effect of (meaning you don't need to know how to, or be able to cast it; simply to know the effect you are trying to create). This action is the same as casting the spell, though no spell slot or material components are necessary, nor is the ability to cast a spell.",
 				"If you do, the effects of the spell are still confined to the Dreamtime—you cannot, for example, use this ability to cast {@spell plane shift} to move yourself to the Feywild, nor can you cast {@spell wish} and use it to turn your real body immortal.",
 				"This ability allows you to cast spells with casting time longer than 1 action in 1 action, but the spell is always cast at the lowest level possible."
+			]
+		},
+		{
+			"name": "Combat Methods",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 2,
+			"entries": [
+				"At 2nd level, your infernal training expands into combat methods\u2014martial techniques fueled by hellish stamina.",
+				{
+					"type": "list",
+					"items": [
+						"{@b Choose Traditions.} Gain proficiency in two combat traditions from {@filter Eldritch Blackguard|optionalfeatures|feature type=CTM:EB}, {@filter Gallant Heart|optionalfeatures|feature type=CTM:GH}, or {@filter Sanguine Knot|optionalfeatures|feature type=CTM:SK}. Learn two methods from traditions you're proficient with.",
+						"{@b Set the DC.} Apply your Method DC (see below) whenever a method requires a saving throw.",
+						"{@b Spend Stamina.} Activating a method consumes stamina (see below). Unless otherwise stated, you can use each method once per turn.",
+						"{@b Learn More.} Use the Methods Known column to track how many methods you learn and the Method Degree column for the highest degree you can select.",
+						"{@b Refresh and Replace.} Whenever you level and gain a new method, you may replace one method you know with another from a tradition you're proficient with."
+					]
+				},
+				{
+					"type": "inset",
+					"name": "Stamina",
+					"entries": [
+						"Your stamina pool equals twice your proficiency bonus and refreshes after a short or long rest.",
+						"Review {@variantrule Stamina|TGTT} for details on powering methods with stamina."
+					]
+				},
+				{
+					"type": "inset",
+					"name": "Method DC",
+					"entries": [
+						"Your Method DC equals 8 + your proficiency bonus + your Strength or Dexterity modifier (your choice). Illriggers may instead use their Interdict save DC if preferred.",
+						"Consult {@variantrule Method DC|TGTT} for comprehensive rulings."
+					]
+				},
+				{
+					"type": "inset",
+					"name": "Combat Tradition Rules",
+					"entries": [
+						"Combat traditions determine your method options. Review {@variantrule Combat Traditions|TGTT} for tradition summaries and guidelines."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Getting Started",
+					"entries": [
+						"{@b Default Traditions.} For illriggers who balance dark power with tactical martial prowess, consider {@filter Eldritch Blackguard|optionalfeatures|feature type=CTM:EB} (fiendish combat techniques enhanced by dark magic) and {@filter Sanguine Knot|optionalfeatures|feature type=CTM:SK} (sacrificial techniques and protective abilities). This pairing reflects the illrigger's mastery of both infernal and martial power.",
+						"{@b Suggested Methods.} From Eldritch Blackguard, consider methods that combine weapon strikes with infernal energy. From Sanguine Knot, consider methods like {@optfeature Shield Wall|TGTT} (tactical defense) and {@optfeature Shoulder Check|TGTT} (repositioning enemies)."
+					]
+				}
+			]
+		},
+		{
+			"name": "Specialties",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"Through your infernal training and diabolic contracts, you have developed specialized abilities that set you apart. You gain a specialty of your choice. You gain another specialty at 5th, 7th, 9th, 11th, 14th, and 19th level. Each specialty can only be selected once unless it says otherwise.",
+				{
+					"type": "options",
+					"count": 1,
+					"entries": [
+						{"type": "refClassFeature", "classFeature": "Baleful Presence|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Dark Resilience|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Diplomatic Intervention|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Do Without|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Endure Elements|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Faceless Mask|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Forked Tongue Mastery|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Infernal Constitution|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Infernal Rejuvenation|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Infernal Tracker|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Negate Fall|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Soul Reader|Illrigger|TGTT-ILL|3"},
+						{"type": "refClassFeature", "classFeature": "Hellish Avenger|Illrigger|TGTT-ILL|5"},
+						{"type": "refClassFeature", "classFeature": "Purge Toxins|Illrigger|TGTT-ILL|5"},
+						{"type": "refClassFeature", "classFeature": "Infernal Awareness|Illrigger|TGTT-ILL|7"},
+						{"type": "refClassFeature", "classFeature": "Suggestive Words|Illrigger|TGTT-ILL|7"},
+						{"type": "refClassFeature", "classFeature": "Infernal Supremacy|Illrigger|TGTT-ILL|19"}
+					]
+				}
+			]
+		},
+		{
+			"name": "Specialties",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 5,
+			"entries": [
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+			]
+		},
+		{
+			"name": "Specialties",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 7,
+			"entries": [
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+			]
+		},
+		{
+			"name": "Specialties",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 9,
+			"entries": [
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+			]
+		},
+		{
+			"name": "Specialties",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 11,
+			"entries": [
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+			]
+		},
+		{
+			"name": "Specialties",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 14,
+			"entries": [
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+			]
+		},
+		{
+			"name": "Specialties",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 19,
+			"entries": [
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+			]
+		},
+		{
+			"name": "Baleful Presence",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"Your infernal nature radiates menace. You gain a bonus to Charisma ({@skill Intimidation}) checks equal to your proficiency bonus. After successfully intimidating a creature, you have advantage on subsequent {@skill Intimidation} checks against it for the next 24 hours."
+			]
+		},
+		{
+			"name": "Dark Resilience",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"You gain resistance to fire damage. If you already have resistance to fire damage, you instead gain resistance to necrotic damage."
+			]
+		},
+		{
+			"name": "Diplomatic Intervention",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"You can spend 1 stamina and use an action to quell strong emotions within 10 feet. You choose which of the following effects to apply to each sentient creature within the area:",
+				{
+					"type": "list",
+					"items": [
+						"A target suffering the {@condition charmed} or {@condition frightened} condition makes a new saving throw against the DC of the effect that caused the condition and gains a bonus equal to your Charisma modifier on the roll.",
+						"A target that has hostile feelings towards creatures of your choice makes a Charisma saving throw against your Interdict save DC or has its hostile feelings suppressed until the end of your next turn. This suppression ends early if the target is attacked or sees its allies being attacked."
+					]
+				}
+			]
+		},
+		{
+			"name": "Do Without",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"You can go a number of days equal to your Charisma modifier without food and water before suffering any adverse effects."
+			]
+		},
+		{
+			"name": "Endure Elements",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"For one hour you can ignore environmental effects caused by extreme heat or cold. This feature does not protect you from damage. Once you have used this feature, you can't do so again until you finish a long rest."
+			]
+		},
+		{
+			"name": "Faceless Mask",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"You have honed your ability to conceal your presence from others. You have advantage on {@skill Stealth} and {@skill Deception} checks made to blend into a crowd or assume a false identity."
+			]
+		},
+		{
+			"name": "Forked Tongue Mastery",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"You gain a bonus to Charisma ({@skill Deception}) and Charisma ({@skill Persuasion}) checks equal to your proficiency bonus. After successfully deceiving or persuading a creature, you have advantage on subsequent {@skill Deception} and {@skill Persuasion} checks against it for the next 24 hours."
+			]
+		},
+		{
+			"name": "Infernal Constitution",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"You double your Strength score when determining your carrying capacity and the weight you can lift, push, or drag. During a short rest, you can participate in strenuous activity (such as scouting, sparring, or physical exercise) for up to 30 minutes and still gain the benefits of the rest. During a long rest, you can participate in strenuous activity for up to 1 hour, and your required sleep time is halved."
+			]
+		},
+		{
+			"name": "Infernal Rejuvenation",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"You can use an action to channel infernal energy to heal an injured ally within reach. Spend one or more of your ally's hit dice. Your ally recovers hit points equal to the total you roll on the expended hit dice."
+			]
+		},
+		{
+			"name": "Infernal Tracker",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"When tracking a creature you have previously interdicted, you can focus on the lingering seal energy it leaves in its wake, allowing you to use your Charisma for any ability checks made to track it."
+			]
+		},
+		{
+			"name": "Negate Fall",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"When you fall, or jump down, from a height and spend 1 or more stamina, you can treat the falling distance as 30 feet less for each stamina you spend."
+			]
+		},
+		{
+			"name": "Soul Reader",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 3,
+			"entries": [
+				"You can sense the general emotional state of any creature you can see within 30 feet. You have advantage on {@skill Insight} checks against creatures you have interdicted."
+			]
+		},
+		{
+			"name": "Hellish Avenger",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 5,
+			"entries": [
+				"{@i Prerequisite: 5th level}",
+				"Once per turn when you hit a creature with a weapon attack, you can deal an extra {@damage 1d8} fire damage. This damage increases to {@damage 2d8} at 11th level."
+			]
+		},
+		{
+			"name": "Purge Toxins",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 5,
+			"entries": [
+				"{@i Prerequisite: 5th level}",
+				"You gain resistance to poison damage and advantage on saving throws against the {@condition poisoned} condition. Additionally, as an action you can spend 2 stamina to end one poison affecting you. If more than one poison is affecting you, you end one poison you know is present (otherwise you end one at random). You can end additional poisons with the same action by spending 1 additional stamina per poison."
+			]
+		},
+		{
+			"name": "Infernal Awareness",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 7,
+			"entries": [
+				"{@i Prerequisite: 7th level}",
+				"You gain {@sense blindsight} with a range of 10 feet\u2014you can sense the presence of creatures through infernal perception. You may take this specialty a second time at 11th level or higher to extend the range to 30 feet."
+			]
+		},
+		{
+			"name": "Suggestive Words",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 7,
+			"entries": [
+				"{@i Prerequisite: 7th level}",
+				"As an action, you make a short suggestion to a creature within 10 feet that can hear and understand you. The target makes a Wisdom saving throw against your Interdict save DC. On a failed save, it follows your suggestion to the best of its ability. If the suggestion would harm the target or its allies, the target automatically succeeds on its saving throw.",
+				"You can use this specialty a number of times equal to your proficiency bonus. You regain all spent uses when you finish a long rest."
+			]
+		},
+		{
+			"name": "Infernal Supremacy",
+			"source": "TGTT-ILL",
+			"className": "Illrigger",
+			"classSource": "TGTT-ILL",
+			"level": 19,
+			"entries": [
+				"{@i Prerequisite: 19th level}",
+				"When you reduce a creature to 0 hit points, you regain one use of Invoke Hell. Additionally, your Interdict save DC increases by 1."
 			]
 		}
 	],
@@ -31274,7 +31812,128 @@
 				"name": "Yuan-Ti",
 				"source": "MPMM"
 			}
-		}
+		},
+		{
+      "name": "Nahalud",
+      "source": "TGTT",
+      "page": 0,
+      "creatureTypes": [
+        "undead"
+      ],
+      "size": [
+        "M"
+      ],
+      "speed": 30,
+      "darkvision": 60,
+      "ability": [
+        {
+          "choose": {
+            "weighted": {
+              "from": [
+                "str",
+                "dex",
+                "con",
+                "int",
+                "wis",
+                "cha"
+              ],
+              "weights": [
+                2,
+                1,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "choose": {
+            "weighted": {
+              "from": [
+                "str",
+                "dex",
+                "con",
+                "int",
+                "wis",
+                "cha"
+              ],
+              "weights": [
+                2,
+                2
+              ]
+            }
+          }
+        }
+      ],
+      "traitTags": [
+        "Improved Resting",
+        "Damage Resistance"
+      ],
+      "languageProficiencies": [
+        {
+          "common": true,
+          "mictlanian|TGTT": true,
+          "anyStandard": 1
+        }
+      ],
+      "resist": [
+        "poison",
+        "necrotic"
+      ],
+      "vulnerable": [
+        "radiant"
+      ],
+      "entries": [
+        {
+          "type": "entries",
+          "name": "Creature Type",
+          "entries": [
+            "You are an Undead. You are immune to the {@classFeature Turn Undead|Cleric||2|PHB} ability."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Darkvision",
+          "entries": [
+            "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Deathless Nature",
+          "entries": [
+            "You do not need to breathe or eat."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Sentry's Rest",
+          "entries": [
+            "You do not sleep. Instead, you can finish a long rest in 4 hours if you spend those hours in light activity, such as keeping watch or standing still. Additionally, magic cannot put you to sleep."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Spectral Fortitude",
+          "entries": [
+            "You have resistance to Poison and Necrotic damage. You also have advantage on saving throws against the {@condition poisoned} condition."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Radiant Frailty",
+          "entries": [
+            "You have vulnerability to Radiant damage."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Language of the Dead",
+          "entries": [
+            "You can speak, read, and write Common, Mictlanian, and one other language of your choice. When speaking with an undead creature, you can choose to pour supernatural intent into your words. If you do so, the undead acts as if affected by the {@spell suggestion} spell  and always understands you, regardless of language barriers."
+          ]
+        }
+      ]
+    }
 	],
 	"subrace": [
 		{
