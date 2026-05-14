@@ -3512,9 +3512,10 @@ class CharacterSheetQuickBuild {
 					hpGain = Math.ceil(hitDie / 2) + 1 + conMod;
 				} else {
 					if (!this._selections.hpRolls[levelKey]) {
-						this._selections.hpRolls[levelKey] = Math.max(1, Math.floor(Math.random() * hitDie) + 1 + conMod);
+						// Store BARE die roll (1..hitDie); conMod is added live so CON changes flow through.
+						this._selections.hpRolls[levelKey] = Math.floor(Math.random() * hitDie) + 1;
 					}
-					hpGain = this._selections.hpRolls[levelKey];
+					hpGain = this._selections.hpRolls[levelKey] + conMod;
 				}
 				hpGain = Math.max(1, hpGain);
 				totalHp += hpGain;
@@ -3532,7 +3533,8 @@ class CharacterSheetQuickBuild {
 				if (this._selections.hpMethod === "roll") {
 					const rerollTd = e_({outer: `<td><button class="ve-btn ve-btn-xs ve-btn-default" title="Re-roll">🎲</button></td>`});
 					rerollTd.querySelector("button").addEventListener("click", () => {
-						this._selections.hpRolls[levelKey] = Math.max(1, Math.floor(Math.random() * hitDie) + 1 + conMod);
+						// Bare die roll — conMod added live during apply.
+						this._selections.hpRolls[levelKey] = Math.floor(Math.random() * hitDie) + 1;
 						renderHpDetails();
 					});
 					row.append(rerollTd);
@@ -3834,7 +3836,10 @@ class CharacterSheetQuickBuild {
 			if (this._selections.hpMethod === "average") {
 				totalHp += Math.max(1, Math.ceil(hitDie / 2) + 1 + conMod);
 			} else {
-				totalHp += Math.max(1, this._selections.hpRolls[levelKey] || (Math.ceil(hitDie / 2) + 1 + conMod));
+				const rolledGain = this._selections.hpRolls[levelKey] != null
+					? this._selections.hpRolls[levelKey] + conMod
+					: (Math.ceil(hitDie / 2) + 1 + conMod);
+				totalHp += Math.max(1, rolledGain);
 			}
 		}
 
@@ -4050,20 +4055,8 @@ class CharacterSheetQuickBuild {
 				}
 			}
 
-			// 9. Apply HP
-			const hitDie = CharacterSheetClassUtils.getClassHitDie(classData);
-			let hpIncrease;
-			if (this._selections.hpMethod === "average") {
-				hpIncrease = Math.ceil(hitDie / 2) + 1 + conMod;
-			} else {
-				hpIncrease = this._selections.hpRolls[levelKey]
-					|| (Math.ceil(hitDie / 2) + 1 + conMod);
-			}
-			hpIncrease = Math.max(1, hpIncrease);
-
-			const currentMaxHp = this._state.getMaxHp();
-			this._state.setMaxHp(currentMaxHp + hpIncrease);
-			this._state.setCurrentHp(this._state.getCurrentHp() + hpIncrease);
+			// 9. HP is applied in bulk AFTER history is recorded so _calculateMaxHp can
+			// see per-level hpRoll entries and any feat/race hpPerLevel modifiers added below.
 
 			// 10. Add features
 			const existingClassFeatureNames = this._state.getFeatures()
@@ -4095,9 +4088,10 @@ class CharacterSheetQuickBuild {
 			pendingHistoryEntries.push(historyEntry);
 		}
 
-		// Recalculate HP from scratch and sync current = max
-		// This corrects any drift from incremental additions and ensures CON changes are reflected
-		this._state.recalculateHp({syncCurrent: true});
+		// Recalculate HP from scratch and sync current = max.
+		// Must happen AFTER history (so per-level hpRoll values flow into _calculateMaxHp)
+		// AND after features/feats are applied (so customModifiers.hpPerLevel from Toughness etc. are present).
+		// History recording is moved BEFORE the recalc below.
 
 		// Post-loop finalizations
 
@@ -4111,8 +4105,11 @@ class CharacterSheetQuickBuild {
 			this._state.setCombatTraditions(this._selections._combatTraditions);
 		}
 
-		// Record level history after global selections have been applied
+		// Record level history BEFORE the final HP recalc so _calculateMaxHp sees stored hpRoll values.
 		pendingHistoryEntries.forEach(entry => this._state.recordLevelChoice(entry));
+
+		// Now compute max HP from history + live CON + customModifiers, and sync current = max.
+		this._state.recalculateHp({syncCurrent: true});
 
 		// Enrich history with replay-critical global choices at selection-relevant levels
 		const finalCombatTraditions = this._state.getCombatTraditions?.() || [];
@@ -4418,6 +4415,14 @@ class CharacterSheetQuickBuild {
 			complete: true,
 			timestamp: Date.now(),
 		};
+
+		// HP roll (bare die value, no conMod). Only persisted in "roll" mode and only above L1
+		// (L1 always uses max hit die per RAW; _calculateMaxHp ignores hpRoll at the first level).
+		if (this._selections.hpMethod === "roll"
+			&& analysis.characterLevel > 1
+			&& typeof this._selections.hpRolls[levelKey] === "number") {
+			entry.choices.hpRoll = this._selections.hpRolls[levelKey];
+		}
 
 		// ASI / Feat
 		const asiSel = this._selections.asi[levelKey];

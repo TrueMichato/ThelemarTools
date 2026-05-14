@@ -4059,27 +4059,21 @@ class CharacterSheetLevelUp {
 			});
 		}
 
-		// Apply HP increase
-		let hpIncrease = 0;
+		// Roll HP if requested. The bare die roll is captured for the history entry below;
+		// max/current HP are NOT mutated here — _calculateMaxHp will consume the stored roll
+		// (with live CON mod and any feat hpPerLevel) at the end of this method.
+		let hpRollDie = null;
 		const hitDie = CharacterSheetClassUtils.getClassHitDie(classData);
 		const conMod = this._state.getAbilityMod("con");
 
 		if (hpMethod === "roll") {
-			const roll = RollerUtil.randomise(hitDie);
-			hpIncrease = Math.max(1, roll + conMod);
+			hpRollDie = RollerUtil.randomise(hitDie);
 			this._page.showDiceResult({
 				title: "HP Roll",
-				total: hpIncrease,
-				subtitle: `1d${hitDie} (${roll}) + ${conMod} CON`,
+				total: Math.max(1, hpRollDie + conMod),
+				subtitle: `1d${hitDie} (${hpRollDie}) + ${conMod} CON`,
 			});
-		} else {
-			hpIncrease = Math.ceil(hitDie / 2) + 1 + conMod;
 		}
-
-		const currentMaxHp = this._state.getMaxHp();
-		this._state.setMaxHp(currentMaxHp + hpIncrease);
-		// Always fill current HP to new max on level-up
-		this._state.setCurrentHp(this._state.getMaxHp());
 
 		// Add new features to character
 		// Filter out placeholder features and ASI features (since ASI is handled separately)
@@ -4276,8 +4270,18 @@ class CharacterSheetLevelUp {
 			historyEntry.choices.weaponMasteries = [...nextWeaponMasteries];
 		}
 
+		// Record HP roll (bare die value, no conMod). Only persisted in "roll" mode and only above L1
+		// (L1 always uses max hit die per RAW; _calculateMaxHp ignores hpRoll at the first level).
+		if (hpRollDie != null && totalLevel > 1) {
+			historyEntry.choices.hpRoll = hpRollDie;
+		}
+
 		// Record the history entry
 		this._state.recordLevelChoice(historyEntry);
+
+		// Recalculate HP from history + live CON + customModifiers (Toughness/race hpPerLevel) and sync current = max.
+		// Mirrors the multiclass branch and the builder's _finishCharacter so feat/ASI/race side-effects are reflected.
+		this._state.recalculateHp({syncCurrent: true});
 
 		// Save and re-render
 		await this._page.saveCharacter();
