@@ -817,6 +817,20 @@ class CharacterSheetPage {
 		document.getElementById("charsheet-btn-heal").addEventListener("click", () => this._onHeal());
 		document.getElementById("charsheet-btn-damage").addEventListener("click", () => this._onDamage());
 
+		// HP breakdown popover — bind on the whole HP section, but stop propagation
+		// on interactive children (inputs, heal/damage buttons) so editing/clicking them
+		// doesn't open the popover.
+		const hpSection = document.querySelector(".charsheet__section--hp");
+		if (hpSection) {
+			hpSection.classList.add("charsheet__section--hp--clickable");
+			hpSection.setAttribute("title", "Hit Points - click for breakdown");
+			hpSection.addEventListener("click", (e) => {
+				const target = /** @type {HTMLElement} */ (e.target);
+				if (target.closest("input, button, select, textarea, a")) return;
+				this._showHpBreakdownModal();
+			});
+		}
+
 		// Combat
 		document.getElementById("charsheet-box-ac").addEventListener("click", () => this._showAcBreakdownModal());
 		document.getElementById("charsheet-box-speed").addEventListener("click", () => this._showSpeedBreakdownModal());
@@ -8877,6 +8891,129 @@ class CharacterSheetPage {
 		</div>`;
 		modalInner.append(closeFooter2);
 		closeFooter2.querySelector("button").addEventListener("click", () => doClose(false));
+	}
+
+	/**
+	 * Show HP breakdown in a modal dialog (click handler for HP card).
+	 * Surfaces per-level HP gain (max/rolled/average), CON contribution per level,
+	 * and any flat or per-level HP bonuses (Toughness, racial, magic items).
+	 */
+	async _showHpBreakdownModal () {
+		const bd = this._state.getHpBreakdown();
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "❤️ Hit Points Breakdown",
+			isMinHeight0: true,
+		});
+
+		const contentEl = e_({outer: `<div class="charsheet__ac-modal-content"></div>`}); modalInner.append(contentEl);
+
+		// Top: total HP + temp HP chip
+		const tempChip = bd.tempHp > 0
+			? `<span class="charsheet__ac-modal-item-subtype">+${bd.tempHp} temp</span>`
+			: "";
+		contentEl.insertAdjacentHTML("beforeend", `
+			<div class="charsheet__ac-modal-total">
+				<div class="charsheet__ac-modal-total-value">${bd.current} / ${bd.total} ${tempChip}</div>
+				<div class="charsheet__ac-modal-total-label">Hit Points (CON ${this._formatMod(bd.conMod)})</div>
+			</div>
+		`);
+
+		// Per-level breakdown
+		contentEl.insertAdjacentHTML("beforeend", `
+			<div class="charsheet__ac-modal-equipment-title mt-2">📈 Per Level</div>
+		`);
+		const perLevelList = e_({outer: `<div class="charsheet__ac-modal-breakdown"></div>`}); contentEl.append(perLevelList);
+
+		bd.perLevel.forEach(p => {
+			const sourceLabels = {max: "Max", rolled: "Rolled", average: "Average", fallback: "Average"};
+			const sourceLabel = sourceLabels[p.source] || p.source;
+			const sourceClass = p.source === "rolled" ? "charsheet__ac-modal-item-value--positive"
+				: p.source === "max" ? "charsheet__ac-modal-item-value--positive"
+					: "";
+			const baseDescr = p.source === "rolled" && p.rolled !== p.base
+				? `${p.base} (rolled ${p.rolled}, capped at d${p.hitDie})`
+				: `${p.base} (d${p.hitDie} ${sourceLabel.toLowerCase()})`;
+			const conPart = `${this._formatMod(p.conContribution)} CON`;
+			const formula = `${baseDescr} ${conPart}`;
+			perLevelList.insertAdjacentHTML("beforeend", `
+				<div class="charsheet__ac-modal-item">
+					<span class="charsheet__ac-modal-item-name">
+						<span class="charsheet__ac-modal-item-icon">${p.isFirstLevel ? "🌟" : "❤️"}</span>
+						Level ${p.level} (${p.className || "—"})
+						<span class="charsheet__ac-modal-item-subtype ${sourceClass}">${formula}</span>
+					</span>
+					<span class="charsheet__ac-modal-item-value charsheet__ac-modal-item-value--positive">+${p.levelTotal}</span>
+				</div>
+			`);
+		});
+
+		// Bonus sections
+		const hasFlat = bd.flatBonus.value !== 0 || bd.flatBonus.sources.length > 0;
+		const hasPerLevel = bd.perLevelBonus.value !== 0 || bd.perLevelBonus.sources.length > 0;
+
+		if (hasFlat || hasPerLevel) {
+			contentEl.insertAdjacentHTML("beforeend", `
+				<div class="charsheet__ac-modal-equipment-title mt-2">✨ Bonuses</div>
+			`);
+			const bonusList = e_({outer: `<div class="charsheet__ac-modal-breakdown"></div>`}); contentEl.append(bonusList);
+
+			bd.flatBonus.sources.forEach(s => {
+				bonusList.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__ac-modal-item">
+						<span class="charsheet__ac-modal-item-name">
+							<span class="charsheet__ac-modal-item-icon">✨</span>
+							${s.name}
+							<span class="charsheet__ac-modal-item-subtype">flat</span>
+						</span>
+						<span class="charsheet__ac-modal-item-value ${s.value >= 0 ? "charsheet__ac-modal-item-value--positive" : "charsheet__ac-modal-item-value--negative"}">${this._formatMod(s.value)}</span>
+					</div>
+				`);
+			});
+
+			bd.perLevelBonus.sources.forEach(s => {
+				const aggregated = s.value * bd.totalLevel;
+				bonusList.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__ac-modal-item">
+						<span class="charsheet__ac-modal-item-name">
+							<span class="charsheet__ac-modal-item-icon">📈</span>
+							${s.name}
+							<span class="charsheet__ac-modal-item-subtype">${this._formatMod(s.value)} × ${bd.totalLevel} levels</span>
+						</span>
+						<span class="charsheet__ac-modal-item-value ${aggregated >= 0 ? "charsheet__ac-modal-item-value--positive" : "charsheet__ac-modal-item-value--negative"}">${this._formatMod(aggregated)}</span>
+					</div>
+				`);
+			});
+		}
+
+		// Total row
+		const totalList = e_({outer: `<div class="charsheet__ac-modal-breakdown mt-2"></div>`}); contentEl.append(totalList);
+		totalList.insertAdjacentHTML("beforeend", `
+			<div class="charsheet__ac-modal-item" style="border-top: 2px solid var(--cs-border, #ddd); padding-top: 0.5rem;">
+				<span class="charsheet__ac-modal-item-name">
+					<span class="charsheet__ac-modal-item-icon">❤️</span>
+					Maximum HP
+				</span>
+				<span class="charsheet__ac-modal-item-value charsheet__ac-modal-item-value--positive" style="font-size: 1.2rem; font-weight: bold;">${bd.total}</span>
+			</div>
+		`);
+
+		// Legacy fallback note
+		if (bd.legacyFallback) {
+			contentEl.insertAdjacentHTML("beforeend", `
+				<div class="charsheet__ac-modal-equipment mt-2">
+					<div class="charsheet__ac-modal-equipment-item" style="font-style: italic;">
+						⚠️ Some level entries weren't recorded — values shown use the average formula. Use Respec to lock in specific rolls.
+					</div>
+				</div>
+			`);
+		}
+
+		const closeFooter3 = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
+			<button class="ve-btn ve-btn-primary">Close</button>
+		</div>`;
+		modalInner.append(closeFooter3);
+		closeFooter3.querySelector("button").addEventListener("click", () => doClose(false));
 	}
 
 	/**

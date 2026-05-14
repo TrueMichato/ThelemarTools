@@ -5277,31 +5277,214 @@ class CharacterSheetState {
 	}
 
 	_calculateMaxHp () {
-		// Calculate based on class hit dice + CON modifier
+		// Calculate based on class hit dice + CON modifier.
+		// When a complete levelHistory exists, walk it in chronological order so per-level
+		// rolled HP (stored under choices.hpRoll) and multiclass interleaving are honoured.
+		// For levels without a history entry (legacy chars, or multiclass levels added before
+		// history-driven HP existed), fall back to the class-iteration average formula.
 		let hp = 0;
 		const conMod = this.getAbilityMod("con");
+		const totalLevel = this.getTotalLevel() || 1;
+		const history = Array.isArray(this._data.levelHistory) ? this._data.levelHistory : [];
+		const useHistory = history.length === totalLevel && history.every(h => h && h.class && h.class.name);
 
-		this._data.classes.forEach((cls, idx) => {
-			const hitDie = this._getClassHitDie(cls.name);
-			for (let i = 0; i < cls.level; i++) {
-				if (idx === 0 && i === 0) {
-					// First level of first class: max hit die
+		if (useHistory) {
+			const sorted = [...history].sort((a, b) => a.level - b.level);
+			sorted.forEach((entry, idx) => {
+				const hitDie = this._getClassHitDie(entry.class.name);
+				const hpRoll = entry.choices && entry.choices.hpRoll;
+				if (idx === 0) {
+					// First character level: max hit die (rolls don't apply at L1 per RAW)
 					hp += hitDie + conMod;
+				} else if (typeof hpRoll === "number" && hpRoll > 0) {
+					// Stored die roll (just the die — conMod added live so CON changes flow through).
+					// Clamp to the current class's hit die in case the class was respec-changed.
+					hp += Math.min(hpRoll, hitDie) + conMod;
 				} else {
-					// Subsequent levels: average (rounded up)
+					// Average (rounded up)
 					hp += Math.ceil(hitDie / 2) + 1 + conMod;
 				}
-			}
-		});
+			});
+		} else {
+			this._data.classes.forEach((cls, idx) => {
+				const hitDie = this._getClassHitDie(cls.name);
+				for (let i = 0; i < cls.level; i++) {
+					if (idx === 0 && i === 0) {
+						// First level of first class: max hit die
+						hp += hitDie + conMod;
+					} else {
+						// Subsequent levels: average (rounded up)
+						hp += Math.ceil(hitDie / 2) + 1 + conMod;
+					}
+				}
+			});
+		}
 
 		// Add flat HP bonus from features/items
 		hp += this._data.customModifiers.hp || 0;
 
 		// Add per-level HP bonus from features (like Tough feat)
-		const totalLevel = this.getTotalLevel() || 1;
 		hp += (this._data.customModifiers.hpPerLevel || 0) * totalLevel;
 
 		return Math.max(1, hp);
+	}
+
+	/**
+	 * Return the stored die roll (without CON modifier) for the given character level,
+	 * or null if no roll was recorded (i.e. average HP was used).
+	 * @param {number} level
+	 * @returns {number|null}
+	 */
+	getHpRollForLevel (level) {
+		const entry = this.getLevelHistoryEntry(level);
+		const hpRoll = entry && entry.choices && entry.choices.hpRoll;
+		return typeof hpRoll === "number" && hpRoll > 0 ? hpRoll : null;
+	}
+
+	/**
+	 * Build a structured breakdown of how max HP is calculated.
+	 * Mirrors the math in `_calculateMaxHp` but exposes the components for UI display
+	 * (popover + per-level history row). Single source of truth so the popover and the
+	 * per-level row never disagree.
+	 *
+	 * @returns {{
+	 *   total: number,
+	 *   totalLevel: number,
+	 *   conMod: number,
+	 *   perLevel: Array<{
+	 *     level: number,
+	 *     className: string|null,
+	 *     classSource: string|null,
+	 *     hitDie: number,
+	 *     rolled: number|null,
+	 *     base: number,
+	 *     conContribution: number,
+	 *     levelTotal: number,
+	 *     isFirstLevel: boolean,
+	 *     source: "max"|"rolled"|"average"|"fallback"
+	 *   }>,
+	 *   flatBonus: {value: number, sources: Array<{name: string, value: number}>},
+	 *   perLevelBonus: {perLevelValue: number, totalLevels: number, value: number, sources: Array<{name: string, value: number}>},
+	 *   tempHp: number,
+	 *   current: number,
+	 *   legacyFallback: boolean
+	 * }}
+	 */
+	getHpBreakdown () {
+		const conMod = this.getAbilityMod("con");
+		const totalLevel = this.getTotalLevel() || 1;
+		const history = Array.isArray(this._data.levelHistory) ? this._data.levelHistory : [];
+		const useHistory = history.length === totalLevel && history.every(h => h && h.class && h.class.name);
+
+		const perLevel = [];
+
+		if (useHistory) {
+			const sorted = [...history].sort((a, b) => a.level - b.level);
+			sorted.forEach((entry, idx) => {
+				const className = entry.class.name;
+				const classSource = entry.class.source || null;
+				const hitDie = this._getClassHitDie(className);
+				const hpRoll = entry.choices && entry.choices.hpRoll;
+				const isFirstLevel = idx === 0;
+				let base;
+				let source;
+				let rolled = null;
+				if (isFirstLevel) {
+					base = hitDie;
+					source = "max";
+				} else if (typeof hpRoll === "number" && hpRoll > 0) {
+					rolled = hpRoll;
+					base = Math.min(hpRoll, hitDie);
+					source = "rolled";
+				} else {
+					base = Math.ceil(hitDie / 2) + 1;
+					source = "average";
+				}
+				perLevel.push({
+					level: entry.level,
+					className,
+					classSource,
+					hitDie,
+					rolled,
+					base,
+					conContribution: conMod,
+					levelTotal: base + conMod,
+					isFirstLevel,
+					source,
+				});
+			});
+		} else {
+			// Legacy fallback: synthesize per-level rows from class iteration order so the
+			// popover always renders one row per character level.
+			let runningLevel = 0;
+			this._data.classes.forEach((cls, clsIdx) => {
+				const hitDie = this._getClassHitDie(cls.name);
+				for (let i = 0; i < cls.level; i++) {
+					runningLevel++;
+					const isFirstLevel = clsIdx === 0 && i === 0;
+					const base = isFirstLevel ? hitDie : Math.ceil(hitDie / 2) + 1;
+					perLevel.push({
+						level: runningLevel,
+						className: cls.name,
+						classSource: cls.source || null,
+						hitDie,
+						rolled: null,
+						base,
+						conContribution: conMod,
+						levelTotal: base + conMod,
+						isFirstLevel,
+						source: "fallback",
+					});
+				}
+			});
+		}
+
+		// Named modifier sources — Toughness etc. live as {type:"hp", perLevel:true|false}
+		const hpMods = this.getNamedModifiersByType("hp");
+		const flatSources = [];
+		const perLevelSources = [];
+		let flatValue = 0;
+		let perLevelValue = 0;
+		hpMods.forEach(m => {
+			const v = m.value || 0;
+			if (m.perLevel) {
+				perLevelValue += v;
+				perLevelSources.push({name: m.name || "Unnamed", value: v});
+			} else {
+				flatValue += v;
+				flatSources.push({name: m.name || "Unnamed", value: v});
+			}
+		});
+
+		// Reconcile against the live customModifiers totals — if a contribution exists in
+		// the cached totals but isn't traceable to a named modifier (e.g. legacy data), surface it.
+		const cmFlat = this._data.customModifiers.hp || 0;
+		const cmPerLevel = this._data.customModifiers.hpPerLevel || 0;
+		if (cmFlat !== flatValue) {
+			const delta = cmFlat - flatValue;
+			if (delta) flatSources.push({name: "Other", value: delta});
+			flatValue = cmFlat;
+		}
+		if (cmPerLevel !== perLevelValue) {
+			const delta = cmPerLevel - perLevelValue;
+			if (delta) perLevelSources.push({name: "Other", value: delta});
+			perLevelValue = cmPerLevel;
+		}
+
+		const perLevelBonusValue = perLevelValue * totalLevel;
+		const total = perLevel.reduce((acc, e) => acc + e.levelTotal, 0) + flatValue + perLevelBonusValue;
+
+		return {
+			total: Math.max(1, total),
+			totalLevel,
+			conMod,
+			perLevel,
+			flatBonus: {value: flatValue, sources: flatSources},
+			perLevelBonus: {perLevelValue, totalLevels: totalLevel, value: perLevelBonusValue, sources: perLevelSources},
+			tempHp: this._data.hp.temp || 0,
+			current: this._data.hp.current || 0,
+			legacyFallback: !useHistory,
+		};
 	}
 
 	_recalculateMaxHp () {

@@ -55,11 +55,16 @@ class CharacterSheetRespec {
 		const levelHistory = this._state.getLevelHistory();
 		const historyByLevel = new Map(levelHistory.map(h => [h.level, h]));
 
+		// Cache one HP breakdown call for the whole render — indexed by level so each row
+		// can show its per-level HP contribution without recomputing.
+		const hpBreakdown = this._state.getHpBreakdown();
+		const hpByLevel = new Map((hpBreakdown.perLevel || []).map(p => [p.level, p]));
+
 		this._timeline.innerHTML = "";
 
 		for (let level = 1; level <= totalLevel; level++) {
 			const history = historyByLevel.get(level);
-			const entry = this._renderLevelEntry(level, history, level === totalLevel);
+			const entry = this._renderLevelEntry(level, history, level === totalLevel, hpByLevel.get(level));
 			this._timeline.append(entry);
 		}
 	}
@@ -69,9 +74,10 @@ class CharacterSheetRespec {
 	 * @param {number} level - Character level
 	 * @param {object|null} history - History entry or null for legacy
 	 * @param {boolean} isCurrent - Whether this is the current level
+	 * @param {object|null} [hpInfo] - Per-level HP breakdown entry from getHpBreakdown()
 	 * @returns {HTMLElement} The entry element
 	 */
-	_renderLevelEntry (level, history, isCurrent) {
+	_renderLevelEntry (level, history, isCurrent, hpInfo) {
 		const isLegacy = !history;
 		const classes = this._state.getClasses();
 
@@ -311,6 +317,25 @@ class CharacterSheetRespec {
 			choices.append(e_({outer: `<span class="charsheet__level-entry-empty">No history recorded (legacy character)</span>`}));
 		} else {
 			choices.append(e_({outer: `<span class="charsheet__level-entry-empty">No choices at this level</span>`}));
+		}
+
+		// HP gain pill — always shown when we have breakdown data, so players can see
+		// rolled vs average HP at a glance per level.
+		if (hpInfo) {
+			const sourceLabels = {max: "Max", rolled: "Rolled", average: "Average", fallback: "Average"};
+			const sourceLabel = sourceLabels[hpInfo.source] || hpInfo.source;
+			const conSign = hpInfo.conContribution >= 0 ? "+" : "";
+			const rolledNote = hpInfo.source === "rolled" && hpInfo.rolled !== hpInfo.base
+				? ` (rolled ${hpInfo.rolled}, capped at d${hpInfo.hitDie})`
+				: "";
+			const label = `${sourceLabel} ${hpInfo.base} (d${hpInfo.hitDie})${rolledNote} ${conSign}${hpInfo.conContribution} CON = +${hpInfo.levelTotal} HP`;
+			const tooltip = `Hit die: d${hpInfo.hitDie} · CON mod: ${conSign}${hpInfo.conContribution} · Total at this level: +${hpInfo.levelTotal} HP`;
+			choices.append(e_({outer: `
+				<span class="charsheet__level-choice charsheet__level-choice--hp" title="${tooltip}">
+					<span class="charsheet__level-choice-icon">❤️</span>
+					${label}
+				</span>
+			`}));
 		}
 
 		card.append(choices);
@@ -1968,6 +1993,7 @@ class CharacterSheetRespec {
 		// Recalculate derived values after the swap
 		this._state.applyClassFeatureEffects();
 		this._state.calculateSpellSlots();
+		this._recalcHpPreservingHealing();
 	}
 
 	/**
@@ -2023,6 +2049,9 @@ class CharacterSheetRespec {
 				.join(", ");
 			asiFeature.description = `<p><strong>Ability Score Increases:</strong> ${increases}</p>`;
 		}
+
+		// CON ASI changes ripple to max HP via _calculateMaxHp.
+		this._recalcHpPreservingHealing();
 	}
 
 	/**
@@ -2081,6 +2110,9 @@ class CharacterSheetRespec {
 				source: newFeat.source,
 			},
 		});
+
+		// Feats may grant ability bonuses or hpPerLevel modifiers (e.g. Toughness) — recalc max HP.
+		this._recalcHpPreservingHealing();
 	}
 
 	/**
@@ -2342,6 +2374,26 @@ class CharacterSheetRespec {
 				});
 			}
 		});
+
+		// Subclass features may grant hpPerLevel — recalc max HP.
+		this._recalcHpPreservingHealing();
+	}
+
+	/**
+	 * Recalculate max HP after a respec change, preserving any healing the player
+	 * had banked (i.e. don't reset current HP to max). When max increases, bump
+	 * current by the same delta so the player feels the gain; when it drops,
+	 * _recalculateMaxHp will cap current automatically.
+	 * @private
+	 */
+	_recalcHpPreservingHealing () {
+		const oldMax = this._state.getMaxHp();
+		const oldCurrent = this._state.getCurrentHp();
+		this._state.recalculateHp({syncCurrent: false});
+		const newMax = this._state.getMaxHp();
+		if (newMax > oldMax) {
+			this._state.setCurrentHp(oldCurrent + (newMax - oldMax));
+		}
 	}
 
 	// region Race/Background Respec
