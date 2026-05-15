@@ -6160,16 +6160,20 @@ class CharacterSheetState {
 		// Normalize skill key to lowercase without spaces
 		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "");
 
-		// Lore skills (TGTT variant rule): flat per-skill bonus, no ability or PB.
-		// Item bonuses, custom mods, and stance/state bonuses still apply.
+		// Lore skills (TGTT variant rule): proficiency bonus + flat per-skill bonus,
+		// no ability mod. Item bonuses, custom mods, and stance/state bonuses still apply.
+		// Per TGTT p.29: "The bonus for each skill does not include an attribute bonus,
+		// only the proficiency bonus." The stored `bonus` is an additional flat extra
+		// (set at inception, bumped by Lore Mastery).
 		const loreSkill = this._getLoreSkillEntry(normalizedSkill);
 		if (loreSkill) {
+			const pb = this.getProficiencyBonus();
 			const custom = this.getSkillCustomMod(normalizedSkill);
 			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
 			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
 			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
 			const exhaustionPenalty = this._getExhaustionD20Penalty();
-			return (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus - exhaustionPenalty;
+			return pb + (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus - exhaustionPenalty;
 		}
 
 		// Use getSkillAbility() as single source of truth for skill→ability mapping
@@ -6404,9 +6408,16 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Add a lore skill (PB-only flat bonus per the TGTT variant rule).
+	 * Add a lore skill (TGTT variant rule).
+	 *
+	 * Roll = d20 + proficiency bonus + `bonus` (+ custom/item/state/stance modifiers).
+	 * The `bonus` argument is an extra flat amount on top of the character's PB —
+	 * set at inception (typical Builder presets +2/+2/+2 or +2/+4) and bumped
+	 * later by Lore Mastery. Pass `0` for a "PB-only" lore skill (e.g. one freshly
+	 * picked up from a book).
+	 *
 	 * @param {string} name - The skill name
-	 * @param {number} [bonus=2] - Flat bonus (typically +2/+4/+6)
+	 * @param {number} [bonus=2] - Extra flat bonus on top of PB (≥ 0)
 	 * @returns {boolean} true if added, false if duplicate
 	 */
 	addLoreSkill (name, bonus = 2) {
@@ -6959,11 +6970,14 @@ class CharacterSheetState {
 	getSkillBreakdown (skill) {
 		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "");
 
-		// Lore skills (TGTT): flat per-skill bonus only, no ability/PB components.
+		// Lore skills (TGTT): proficiency bonus + flat per-skill bonus, no ability mod.
 		const loreSkill = this._getLoreSkillEntry(normalizedSkill);
 		if (loreSkill) {
 			const loreComponents = [];
-			loreComponents.push({type: "lore", name: "Lore bonus", value: loreSkill.bonus || 0, icon: "📚"});
+			const pb = this.getProficiencyBonus();
+			loreComponents.push({type: "proficiency", name: "Proficiency", value: pb, icon: "⭐"});
+			const loreBonus = loreSkill.bonus || 0;
+			if (loreBonus !== 0) loreComponents.push({type: "lore", name: "Lore bonus", value: loreBonus, icon: "📚"});
 			const custom = this.getSkillCustomMod(normalizedSkill);
 			if (custom !== 0) loreComponents.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
 			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
