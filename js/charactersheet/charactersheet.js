@@ -991,6 +991,10 @@ class CharacterSheetPage {
 			this._isLevelUpBannerDismissed = false;
 			this._state.loadFromJson(character);
 
+			// Backfill any class features missing from `_data.features` (e.g. on
+			// saves migrated from older formats). Idempotent.
+			this._reconcileClassFeatures();
+
 			// Ensure Linguistics skill exists if Thelemar linguistics bonus is enabled
 			this._ensureLinguisticsSkillIfNeeded();
 
@@ -1502,6 +1506,7 @@ class CharacterSheetPage {
 		this._currentCharacterId = newId;
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(charData);
+		this._reconcileClassFeatures();
 		await this._saveCurrentCharacter();
 		await this._pLoadCharacters();
 		this._selCharacter.value = newId;
@@ -1524,6 +1529,7 @@ class CharacterSheetPage {
 		this._currentCharacterId = newId;
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(charData);
+		this._reconcileClassFeatures();
 		await this._pLoadCharacters();
 		this._selCharacter.value = newId;
 	}
@@ -2403,6 +2409,7 @@ class CharacterSheetPage {
 		json.id = CryptUtil.uid();
 		this._currentCharacterId = json.id;
 		this._state.loadFromJson(json);
+		this._reconcileClassFeatures();
 		await this._saveCurrentCharacter();
 		await this._pLoadCharacters();
 		this._selCharacter.value = json.id;
@@ -9081,7 +9088,10 @@ class CharacterSheetPage {
 		// Passive defensive reminders (Evasion, Last Ditch Evasion, etc.).
 		const passiveAlerts = this._state.getPassiveSaveAlerts?.(ability) || [];
 		if (passiveAlerts.length) {
-			const reminderLines = passiveAlerts.map(a => `💡 ${a.name}: ${a.summary}`);
+			const reminderLines = passiveAlerts.map(a => {
+				const text = a.shortLabel || a.summary;
+				return `💡 ${a.name} (${text})`;
+			});
 			resultNote = resultNote
 				? `${resultNote}\n${reminderLines.join("\n")}`
 				: reminderLines.join("\n");
@@ -11630,6 +11640,28 @@ class CharacterSheetPage {
 	getSkillsData () { return this._skillsData; }
 	getConditionsData () { return this._conditionsData; }
 	getState () { return this._state; }
+
+	/**
+	 * Reconcile `_data.features` against the canonical class+level feature
+	 * matrix. Idempotent. Use after loading a character or after any
+	 * non-wizard mutation that may have left the features list out of sync
+	 * with the character's class/subclass/level (e.g., a save migrated from
+	 * an older format that dropped class features). See
+	 * `CharacterSheetClassUtils.reconcileClassFeatures` for full background.
+	 */
+	_reconcileClassFeatures () {
+		try {
+			CharacterSheetClassUtils.reconcileClassFeatures(this._state, {
+				getClassData: (name, source) => this._classes?.find(c => c.name === name && c.source === source),
+				classFeatures: this._classFeatures || [],
+				subclassFeatures: this._subclassFeatures || [],
+			});
+		} catch (e) {
+			// Reconciliation is best-effort; never block render on a bad save.
+			// eslint-disable-next-line no-console
+			console.warn("[CharacterSheet] Class-feature reconciliation failed:", e);
+		}
+	}
 	getLayout () { return this._layout; }
 	getNotes () { return this._notes; }
 	getPlayMode () { return this._playMode; }

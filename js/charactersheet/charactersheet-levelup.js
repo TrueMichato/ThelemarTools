@@ -264,10 +264,15 @@ class CharacterSheetLevelUp {
 		// ========== FILTER ASI FEATURES ==========
 		const filterAsiFeatures = (/** @type {*} */ features) => {
 			if (!hasAsi) return features;
-			const asiFeatureNames = ["ability score improvement", "ability score increase", "asi", "feat"];
+			// Use the shared ASI-name predicate to avoid the historical
+			// `includes("asi")` substring trap (matched "evasion", etc.).
+			// "feat" is kept as a substring check — the wizard intentionally
+			// hides feat-grant placeholders here when the ASI step handles them.
 			return features.filter((/** @type {*} */ f) => {
 				const nameLower = f.name.toLowerCase();
-				return !asiFeatureNames.some((/** @type {*} */ asi) => nameLower.includes(asi));
+				if (CharacterSheetClassUtils._isAsiPlaceholderName(nameLower)) return false;
+				if (nameLower.includes("feat")) return false;
+				return true;
 			});
 		};
 
@@ -4205,7 +4210,10 @@ class CharacterSheetLevelUp {
 			newFeatures.filter((/** @type {*} */ f) => {
 				if (f.gainSubclassFeature) return false;
 				const nameLower = f.name.toLowerCase();
-				if (asiFeatureNames.some((/** @type {*} */ asi) => nameLower.includes(asi))) return false;
+				// Use the shared ASI-name predicate — a naive `includes("asi")`
+				// here used to match "evasion" and silently drop the Evasion
+				// class feature at Rogue/Monk 7. See _isAsiPlaceholderName.
+				if (CharacterSheetClassUtils._isAsiPlaceholderName(nameLower)) return false;
 				if (!f.isSubclassFeature && !f.subclassName && existingClassFeatureNames.includes(nameLower)) return false;
 				return true;
 			}),
