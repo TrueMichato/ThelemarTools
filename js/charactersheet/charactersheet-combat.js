@@ -5310,6 +5310,17 @@ class CharacterSheetCombat {
 			this._updateQuickButtonStates();
 		};
 
+		// Apply Buff button — opens the same picker modal that the Overview tab
+		// uses, so non-casters can track buffs cast on them by party members
+		// (Aid, Bless, Haste, …) directly from the Combat tab without having to
+		// hop back to Overview mid-fight.
+		const applyBuffBtn = document.getElementById("charsheet-combat-apply-buff");
+		if (applyBuffBtn) {
+			applyBuffBtn.onclick = () => {
+				if (typeof this._page._showApplyBuffModal === "function") this._page._showApplyBuffModal();
+			};
+		}
+
 		// Concentration button (show modal to enter spell name)
 		document.getElementById("charsheet-combat-concentrate").onclick = async () => {
 			if (this._state.isConcentrating?.()) {
