@@ -17,6 +17,7 @@ import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
+import * as CharacterSheetBuffPickerHelpers from "./charactersheet-buffpicker-helpers.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
 
@@ -6456,92 +6457,249 @@ class CharacterSheetPage {
 	 */
 	_showApplyBuffModal () {
 		const registry = CharacterSheetState.SPELL_BUFF_REGISTRY || {};
+
+		// Build display entries: title-cased name + categorisation tag, then
+		// group by category in a fixed display order so the modal scans top-to-
+		// bottom by effect kind (Defenses → Offense → Healing → Movement →
+		// Utility) rather than as one 65-row alphabet soup.
 		const entries = Object.entries(registry)
-			.map(([key, spec]) => ({key, displayName: key.replace(/\b\w/g, c => c.toUpperCase()), spec}))
+			.map(([key, spec]) => ({
+				key,
+				displayName: key.replace(/\b\w/g, c => c.toUpperCase()),
+				spec,
+				category: this._categoriseBuffEntry(spec),
+			}))
 			.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
-			title: "Apply Buff",
+		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = UiUtil.getShowModal({
+			title: "✨ Apply Buff",
 			isMinHeight0: true,
 			isHeight100: true,
+			hasFooter: true,
 		});
 
 		modalInner.insertAdjacentHTML("beforeend", `
 			<div class="ve-flex-col w-100">
 				<div class="mb-2 ve-small ve-muted">Pick a buff cast on you. Effects with mechanical handlers (HP, AC, attack/save bonuses, advantage, etc.) are applied automatically. Notes-only buffs surface as a tracked active state.</div>
 				<input type="search" class="ve-form-control mb-2 charsheet__apply-buff-search" placeholder="Search buff name…" />
+				<div class="charsheet__apply-buff-active-strip mb-2 ve-hidden"></div>
 				<div class="charsheet__apply-buff-list ve-overflow-y-auto" style="max-height: 60vh;"></div>
 			</div>
 		`);
 
+		// Footer: explicit Close button. The base modal also closes on
+		// background-click and Esc, but a visible button is needed for
+		// touch users and discoverability.
+		if (modalFooter) {
+			const footerRow = e_({outer: `
+				<div class="ve-flex-v-center ve-flex-h-right py-2">
+					<button class="ve-btn ve-btn-default charsheet__apply-buff-close">Close</button>
+				</div>
+			`});
+			footerRow.querySelector(".charsheet__apply-buff-close").addEventListener("click", () => doClose(false));
+			modalFooter.append(footerRow);
+		}
+
 		const searchInput = modalInner.querySelector(".charsheet__apply-buff-search");
 		const listEl = modalInner.querySelector(".charsheet__apply-buff-list");
+		const activeStripEl = modalInner.querySelector(".charsheet__apply-buff-active-strip");
+
+		// Per-category collapse state, keyed by category id. Persists across
+		// search-driven re-renders so users don't lose their place when
+		// typing/clearing the filter.
+		const collapsedCategories = new Set();
+
+		const refreshActiveStrip = () => {
+			activeStripEl.innerHTML = "";
+			const activeBuffs = (this._state.getActiveStates?.() || [])
+				.filter(s => s.active && s.isSpellEffect && s.name);
+			if (!activeBuffs.length) {
+				activeStripEl.classList.add("ve-hidden");
+				return;
+			}
+			activeStripEl.classList.remove("ve-hidden");
+			activeStripEl.insertAdjacentHTML("beforeend", `<span class="ve-small ve-muted mr-2">Currently active:</span>`);
+			activeBuffs.forEach(buff => {
+				const pill = e_({outer: `
+					<span class="charsheet__apply-buff-active-pill" title="Click ✕ to deactivate so you can re-cast">
+						<span class="charsheet__apply-buff-active-pill__name">${(buff.name || "").replace(/</g, "&lt;")}</span>
+						<button class="charsheet__apply-buff-active-pill__remove" aria-label="Deactivate ${(buff.name || "").replace(/"/g, "&quot;")}">✕</button>
+					</span>
+				`});
+				pill.querySelector(".charsheet__apply-buff-active-pill__remove").addEventListener("click", () => {
+					if (typeof this._state.removeActiveState === "function") this._state.removeActiveState(buff.id || buff.sourceFeatureId);
+					this._saveCurrentCharacter();
+					this._renderActiveStates();
+					this._renderCharacter();
+					refreshActiveStrip();
+					renderList(searchInput.value);
+				});
+				activeStripEl.append(pill);
+			});
+		};
 
 		const renderList = (filterText = "") => {
 			listEl.innerHTML = "";
 			const filter = filterText.trim().toLowerCase();
 			const filtered = entries.filter(e => !filter || e.displayName.toLowerCase().includes(filter));
 			if (filtered.length === 0) {
-				listEl.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-text-center py-3">No matching buffs.</div>`);
+				const empty = e_({outer: `
+					<div class="charsheet__apply-buff-empty ve-text-center py-3">
+						<div class="ve-muted mb-2">No matching buffs.</div>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__apply-buff-empty__clear">Clear search</button>
+					</div>
+				`});
+				empty.querySelector(".charsheet__apply-buff-empty__clear").addEventListener("click", () => {
+					searchInput.value = "";
+					renderList();
+					searchInput.focus();
+				});
+				listEl.append(empty);
 				return;
 			}
-			filtered.forEach(({key, displayName, spec}) => {
-				const row = this._buildApplyBuffRow({key, displayName, spec, doClose});
-				listEl.append(row);
+
+			const activeStates = this._state.getActiveStates?.() || [];
+			const grouped = CharacterSheetPage._BUFF_CATEGORY_ORDER
+				.map(cat => ({
+					category: cat,
+					meta: CharacterSheetPage._BUFF_CATEGORY_META[cat],
+					items: filtered.filter(e => e.category === cat),
+				}))
+				.filter(g => g.items.length);
+
+			grouped.forEach(group => {
+				const isCollapsed = collapsedCategories.has(group.category);
+				const groupEl = e_({outer: `
+					<section class="charsheet__apply-buff-group${isCollapsed ? " charsheet__apply-buff-group--collapsed" : ""}" data-cat="${group.category}">
+						<button type="button" class="charsheet__apply-buff-group-heading" aria-expanded="${isCollapsed ? "false" : "true"}">
+							<span class="charsheet__apply-buff-group-heading__caret">${isCollapsed ? "▸" : "▾"}</span>
+							<span class="charsheet__apply-buff-group-heading__icon">${group.meta.icon}</span>
+							<span class="charsheet__apply-buff-group-heading__label">${group.meta.label}</span>
+							<span class="charsheet__apply-buff-group-heading__count ve-muted">${group.items.length}</span>
+						</button>
+						<div class="charsheet__apply-buff-group-body"></div>
+					</section>
+				`});
+				const headingBtn = groupEl.querySelector(".charsheet__apply-buff-group-heading");
+				const bodyEl = groupEl.querySelector(".charsheet__apply-buff-group-body");
+				const caretEl = groupEl.querySelector(".charsheet__apply-buff-group-heading__caret");
+				headingBtn.addEventListener("click", () => {
+					const nowCollapsed = !groupEl.classList.contains("charsheet__apply-buff-group--collapsed");
+					groupEl.classList.toggle("charsheet__apply-buff-group--collapsed", nowCollapsed);
+					headingBtn.setAttribute("aria-expanded", nowCollapsed ? "false" : "true");
+					caretEl.textContent = nowCollapsed ? "▸" : "▾";
+					if (nowCollapsed) collapsedCategories.add(group.category);
+					else collapsedCategories.delete(group.category);
+				});
+				group.items.forEach(({key, displayName, spec, category}) => {
+					const onChange = () => {
+						refreshActiveStrip();
+						renderList(searchInput.value);
+					};
+					const row = this._buildApplyBuffRow({
+						key,
+						displayName,
+						spec,
+						category,
+						doClose,
+						activeStates,
+						onChange,
+					});
+					bodyEl.append(row);
+				});
+				listEl.append(groupEl);
 			});
 		};
 
 		searchInput.addEventListener("input", () => renderList(searchInput.value));
+		refreshActiveStrip();
 		renderList();
 		setTimeout(() => searchInput.focus(), 0);
 	}
 
 	/**
 	 * Build a single picker row for a SPELL_BUFF_REGISTRY entry.
+	 * Modernised layout: hoverable spell name (5etools tooltip), per-effect
+	 * chip row, prominent concentration badge, standardised duration line, and
+	 * an "already active" treatment that swaps Apply for ✓ Active + Unapply
+	 * so re-casting is one click.
 	 * @private
 	 */
-	_buildApplyBuffRow ({key, displayName, spec, doClose}) {
-		const selfEffects = Array.isArray(spec.selfEffects) ? spec.selfEffects : [];
-		const summary = this._summariseBuffEffects(selfEffects);
+	_buildApplyBuffRow ({key, displayName, spec, category, doClose, activeStates, onChange}) {
+		const isActive = this._isBuffSpellActive(displayName, activeStates);
+		const chips = this._getBuffEffectChips(spec);
 		const durationStr = this._formatBuffDuration(spec.duration, spec.concentration);
 		const upcastNumericKeys = spec.upcastPerLevel
 			? Object.keys(spec.upcastPerLevel).filter(k => typeof spec.upcastPerLevel[k] === "number")
 			: [];
 		const hasNumericUpcast = upcastNumericKeys.length > 0;
 
+		// Best-effort hoverable spell name. Fallback to plain text when we can't
+		// infer a source for the registry entry — never block rendering on hover.
+		const nameHtml = this._getBuffNameHtml(displayName);
+
+		const chipsHtml = chips.length
+			? chips.map(c => `<span class="charsheet__apply-buff-chip charsheet__apply-buff-chip--${c.tone}" title="${c.title?.replace(/"/g, "&quot;") || c.label.replace(/"/g, "&quot;")}">${c.icon} ${c.label.replace(/</g, "&lt;")}</span>`).join("")
+			: `<span class="charsheet__apply-buff-chip charsheet__apply-buff-chip--utility">📝 Tracks duration only</span>`;
+
+		const concBadge = spec.concentration
+			? `<span class="charsheet__apply-buff-conc-badge" title="Requires concentration — only one concentration spell at a time">🔮 Concentration</span>`
+			: "";
+
 		const row = e_({outer: `
-			<div class="charsheet__apply-buff-row p-2 mb-2 border" style="border-radius: 4px;">
-				<div class="ve-flex-v-center mb-1">
-					<strong class="mr-2">${displayName.escapeQuotes()}</strong>
-					${spec.concentration ? `<span class="ve-small ve-muted mr-2" title="Requires concentration">🔮 Conc.</span>` : ""}
-					<span class="ve-small ve-muted ml-auto">${(/** @type {*} */ (durationStr)).escapeQuotes()}</span>
+			<div class="charsheet__apply-buff-row charsheet__apply-buff-row--cat-${category}${isActive ? " charsheet__apply-buff-row--active" : ""}">
+				<div class="charsheet__apply-buff-row__title">
+					<span class="charsheet__apply-buff-row__name">${nameHtml}</span>
+					${concBadge}
+					<span class="charsheet__apply-buff-row__duration ve-small ve-muted">${(/** @type {*} */ (durationStr)).escapeQuotes()}</span>
 				</div>
-				<div class="ve-small ve-muted mb-2">${summary}</div>
-				<div class="ve-flex-v-center charsheet__apply-buff-row-controls"></div>
+				<div class="charsheet__apply-buff-row__chips">${chipsHtml}</div>
+				<div class="charsheet__apply-buff-row__controls"></div>
 			</div>
 		`});
 
-		const controls = row.querySelector(".charsheet__apply-buff-row-controls");
+		const controls = row.querySelector(".charsheet__apply-buff-row__controls");
 
 		let upcastInput = null;
-		if (hasNumericUpcast) {
+		if (hasNumericUpcast && !isActive) {
 			const upcastWrap = e_({outer: `
-				<label class="ve-flex-v-center mr-2 ve-small ve-muted mb-0">
-					Slots above base:
-					<input type="number" min="0" max="9" value="0" class="ve-form-control form-control--minimal ve-input-xs ml-1" style="width: 50px;">
+				<label class="charsheet__apply-buff-row__upcast" title="Spend a higher-level spell slot to scale numeric effects (HP / temp HP).">
+					<span class="ve-small ve-muted">Upcast +</span>
+					<input type="number" min="0" max="9" value="0" class="ve-form-control form-control--minimal ve-input-xs" style="width: 50px;">
 				</label>
 			`});
 			upcastInput = upcastWrap.querySelector("input");
 			controls.append(upcastWrap);
 		}
 
-		const applyBtn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-primary ml-auto">Apply</button>`});
-		applyBtn.addEventListener("click", () => {
-			const upcastDelta = upcastInput ? Math.max(0, parseInt(upcastInput.value, 10) || 0) : 0;
-			const ok = this._applyBuffFromRegistry({key, displayName, spec, upcastDelta});
-			if (ok) doClose();
-		});
-		controls.append(applyBtn);
+		if (isActive) {
+			const activeChip = e_({outer: `<span class="charsheet__apply-buff-row__active-chip" title="Already active — Unapply to re-cast">✓ Active</span>`});
+			controls.append(activeChip);
+
+			const unapplyBtn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__apply-buff-row__unapply">Unapply</button>`});
+			unapplyBtn.addEventListener("click", () => {
+				const existing = (this._state.getActiveStates?.() || []).find(s => s.active && s.isSpellEffect && (s.name || "").toLowerCase() === displayName.toLowerCase());
+				if (existing && typeof this._state.removeActiveState === "function") {
+					this._state.removeActiveState(existing.id || existing.sourceFeatureId);
+				}
+				this._saveCurrentCharacter();
+				this._renderActiveStates();
+				this._renderCharacter();
+				if (typeof onChange === "function") onChange();
+			});
+			controls.append(unapplyBtn);
+		} else {
+			const applyBtn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__apply-buff-row__apply">Apply</button>`});
+			applyBtn.addEventListener("click", () => {
+				const upcastDelta = upcastInput ? Math.max(0, parseInt(upcastInput.value, 10) || 0) : 0;
+				const ok = this._applyBuffFromRegistry({key, displayName, spec, upcastDelta});
+				if (!ok) return;
+				// Refresh in-modal state so the row flips to ✓ Active without closing
+				// the modal — players often apply several buffs in a row.
+				if (typeof onChange === "function") onChange();
+			});
+			controls.append(applyBtn);
+		}
 
 		return row;
 	}
@@ -6594,9 +6752,55 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Best-effort hoverable spell name for the picker. Tries to look up the
+	 * spell across loaded spell data (so users get the standard 5etools spell
+	 * tooltip), and falls back to a plain HTML-escaped string when the lookup
+	 * fails or the page-level helpers aren't available (e.g. early init).
+	 * @private
+	 */
+	_getBuffNameHtml (displayName) {
+		const escaped = String(displayName).replace(/</g, "&lt;");
+		try {
+			// Best-effort: look up by name across already-loaded spells. We only
+			// need a `source` to build a hover link; matching by name lower-case
+			// is good enough since the registry uses canonical spell names.
+			const lookupName = displayName.toLowerCase();
+			const matches = (typeof Renderer !== "undefined" && Renderer.spell?._cache?.spell)
+				? Object.values(Renderer.spell._cache.spell).filter(s => s.name?.toLowerCase() === lookupName)
+				: [];
+			const source = matches[0]?.source || Parser.SRC_PHB;
+			if (typeof this.getHoverLink === "function") {
+				return this.getHoverLink(UrlUtil.PG_SPELLS, displayName, source);
+			}
+			return escaped;
+		} catch (e) {
+			return escaped;
+		}
+	}
+
+	_categoriseBuffEntry (spec) {
+		return CharacterSheetBuffPickerHelpers.categoriseBuffEntry(spec);
+	}
+
+	_getBuffEffectChips (spec) {
+		return CharacterSheetBuffPickerHelpers.getBuffEffectChips(spec);
+	}
+
+	_isBuffSpellActive (displayName, activeStates) {
+		return CharacterSheetBuffPickerHelpers.isBuffSpellActive(displayName, activeStates);
+	}
+
+	_formatBuffDuration (duration, concentration) {
+		return CharacterSheetBuffPickerHelpers.formatBuffDuration(duration, concentration);
+	}
+
+	/**
 	 * Human-readable summary for a buff's selfEffects array. Falls back to a
 	 * generic note when no effect type is recognised by the picker — the state
 	 * still tracks duration/concentration even when the effect is opaque.
+	 *
+	 * Kept for backward compatibility with any external callers; the picker
+	 * itself now renders chips via `_getBuffEffectChips` instead.
 	 * @private
 	 */
 	_summariseBuffEffects (effects) {
@@ -6624,20 +6828,6 @@ class CharacterSheetPage {
 			}
 		}
 		return parts.filter(Boolean).join(" · ");
-	}
-
-	/**
-	 * Format a buff's duration object (or absence thereof) for display.
-	 * @private
-	 */
-	_formatBuffDuration (duration, concentration) {
-		if (!duration) return concentration ? "Concentration" : "—";
-		if (typeof duration === "object" && duration.amount && duration.unit) {
-			const unitLabel = duration.amount === 1 ? duration.unit : `${duration.unit}s`;
-			const base = `${duration.amount} ${unitLabel}`;
-			return concentration ? `Conc., up to ${base}` : base;
-		}
-		return concentration ? `Conc., ${duration}` : String(duration);
 	}
 
 	/**
@@ -12758,6 +12948,17 @@ window.addEventListener("load", async () => {
 
 // Export for other modules
 export {CharacterSheetPage};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Apply-Buff picker — static aliases
+// The implementation lives in `charactersheet-buffpicker-helpers.js` (so the
+// helper-only Jest suite can exercise it without pulling the full page).
+// We re-expose the order/meta tables on the class because the modal layout
+// code reaches them as `CharacterSheetPage._BUFF_*`.
+// ─────────────────────────────────────────────────────────────────────────────
+CharacterSheetPage._BUFF_CATEGORY_ORDER = CharacterSheetBuffPickerHelpers.BUFF_CATEGORY_ORDER;
+CharacterSheetPage._BUFF_CATEGORY_META = CharacterSheetBuffPickerHelpers.BUFF_CATEGORY_META;
+CharacterSheetPage._buildBuffEffectChip = CharacterSheetBuffPickerHelpers.buildBuffEffectChip;
 
 // Also expose on globalThis for non-module scripts
 globalThis.CharacterSheetPage = CharacterSheetPage;

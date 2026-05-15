@@ -17207,8 +17207,365 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	background: rgba(251, 191, 36, 0.32);
 }
 
-.charsheet-night-mode .charsheet__save-passive-badge {
+.ve-night-mode .charsheet__save-passive-badge {
 	color: #fcd34d;
 	background: rgba(251, 191, 36, 0.12);
 	border-color: rgba(251, 191, 36, 0.35);
+}
+
+/* ========================================================================== */
+/* Apply Buff picker modal                                                    */
+/* Grouped category list, per-effect chips, hoverable spell names, and        */
+/* "currently active" pill strip for quick re-cast / unapply.                 */
+/* ========================================================================== */
+
+.charsheet__apply-buff-search {
+	font-size: 14px;
+}
+
+.charsheet__apply-buff-active-strip {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 8px;
+	background: rgba(59, 130, 246, 0.06);
+	border: 1px solid rgba(59, 130, 246, 0.20);
+	border-radius: 4px;
+}
+
+.charsheet__apply-buff-active-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 4px 2px 8px;
+	font-size: 12px;
+	font-weight: 600;
+	color: #1d4ed8;
+	background: rgba(59, 130, 246, 0.14);
+	border: 1px solid rgba(59, 130, 246, 0.35);
+	border-radius: 999px;
+}
+
+.charsheet__apply-buff-active-pill__remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	font-size: 11px;
+	line-height: 1;
+	color: inherit;
+	background: transparent;
+	border: 0;
+	border-radius: 50%;
+	cursor: pointer;
+}
+
+.charsheet__apply-buff-active-pill__remove:hover {
+	background: rgba(59, 130, 246, 0.25);
+}
+
+.charsheet__apply-buff-group {
+	display: block;
+	margin-bottom: 4px;
+}
+
+.charsheet__apply-buff-group-body {
+	display: block;
+}
+
+.charsheet__apply-buff-group--collapsed .charsheet__apply-buff-group-body {
+	display: none;
+}
+
+.charsheet__apply-buff-group-heading {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	margin: 10px 0 4px;
+	padding: 4px 6px 4px 2px;
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: #6b7280;
+	background: transparent;
+	border: 0;
+	border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+	border-radius: 0;
+	cursor: pointer;
+	text-align: left;
+}
+
+.charsheet__apply-buff-group-heading:hover {
+	color: #374151;
+	background: rgba(0, 0, 0, 0.03);
+}
+
+.charsheet__apply-buff-group-heading:focus {
+	outline: 2px solid rgba(59, 130, 246, 0.40);
+	outline-offset: 1px;
+}
+
+.charsheet__apply-buff-group:first-child .charsheet__apply-buff-group-heading {
+	margin-top: 0;
+}
+
+.charsheet__apply-buff-group-heading__caret {
+	display: inline-block;
+	width: 10px;
+	font-size: 10px;
+	color: inherit;
+}
+
+.charsheet__apply-buff-group-heading__icon {
+	font-size: 13px;
+}
+
+.charsheet__apply-buff-group-heading__count {
+	margin-left: auto;
+	font-weight: 500;
+	font-size: 10px;
+}
+
+.charsheet__apply-buff-row {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px 10px;
+	margin-bottom: 6px;
+	background: #fff;
+	border: 1px solid rgba(0, 0, 0, 0.10);
+	border-left: 3px solid rgba(0, 0, 0, 0.10);
+	border-radius: 4px;
+	transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.charsheet__apply-buff-row:hover {
+	border-color: rgba(0, 0, 0, 0.20);
+	background: rgba(0, 0, 0, 0.02);
+}
+
+.charsheet__apply-buff-row--cat-defense { border-left-color: #3b82f6; }
+.charsheet__apply-buff-row--cat-offense { border-left-color: #ef4444; }
+.charsheet__apply-buff-row--cat-healing { border-left-color: #22c55e; }
+.charsheet__apply-buff-row--cat-movement { border-left-color: #14b8a6; }
+.charsheet__apply-buff-row--cat-utility { border-left-color: #9ca3af; }
+
+.charsheet__apply-buff-row--active {
+	background: rgba(34, 197, 94, 0.06);
+	border-color: rgba(34, 197, 94, 0.30);
+}
+
+.charsheet__apply-buff-row__title {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.charsheet__apply-buff-row__name {
+	font-weight: 600;
+}
+
+.charsheet__apply-buff-row__name a {
+	color: #337ab7;
+}
+
+.charsheet__apply-buff-row__name a:hover {
+	color: #23527c;
+	text-decoration: underline;
+}
+
+.charsheet__apply-buff-row__duration {
+	margin-left: auto;
+}
+
+.charsheet__apply-buff-conc-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 6px;
+	font-size: 10px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: #92400e;
+	background: rgba(245, 158, 11, 0.15);
+	border: 1px solid rgba(245, 158, 11, 0.35);
+	border-radius: 3px;
+}
+
+.charsheet__apply-buff-row__chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.charsheet__apply-buff-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	padding: 1px 6px;
+	font-size: 11px;
+	font-weight: 500;
+	color: #374151;
+	background: rgba(0, 0, 0, 0.05);
+	border: 1px solid rgba(0, 0, 0, 0.10);
+	border-radius: 10px;
+	white-space: nowrap;
+}
+
+.charsheet__apply-buff-chip--defense {
+	color: #1d4ed8;
+	background: rgba(59, 130, 246, 0.10);
+	border-color: rgba(59, 130, 246, 0.25);
+}
+
+.charsheet__apply-buff-chip--offense {
+	color: #b91c1c;
+	background: rgba(239, 68, 68, 0.10);
+	border-color: rgba(239, 68, 68, 0.25);
+}
+
+.charsheet__apply-buff-chip--healing {
+	color: #15803d;
+	background: rgba(34, 197, 94, 0.10);
+	border-color: rgba(34, 197, 94, 0.25);
+}
+
+.charsheet__apply-buff-chip--movement {
+	color: #0f766e;
+	background: rgba(20, 184, 166, 0.10);
+	border-color: rgba(20, 184, 166, 0.25);
+}
+
+.charsheet__apply-buff-chip--utility {
+	color: #4b5563;
+	background: rgba(0, 0, 0, 0.05);
+	border-color: rgba(0, 0, 0, 0.12);
+}
+
+.charsheet__apply-buff-row__controls {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 2px;
+}
+
+.charsheet__apply-buff-row__upcast {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-bottom: 0;
+}
+
+.charsheet__apply-buff-row__active-chip {
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 8px;
+	font-size: 11px;
+	font-weight: 700;
+	color: #15803d;
+	background: rgba(34, 197, 94, 0.15);
+	border: 1px solid rgba(34, 197, 94, 0.40);
+	border-radius: 3px;
+}
+
+.charsheet__apply-buff-row__apply,
+.charsheet__apply-buff-row__unapply {
+	margin-left: auto;
+}
+
+.charsheet__apply-buff-empty {
+	color: #6b7280;
+}
+
+/* Night mode */
+.ve-night-mode .charsheet__apply-buff-active-strip {
+	background: rgba(59, 130, 246, 0.10);
+	border-color: rgba(59, 130, 246, 0.30);
+}
+
+.ve-night-mode .charsheet__apply-buff-active-pill {
+	color: #93c5fd;
+	background: rgba(59, 130, 246, 0.20);
+	border-color: rgba(59, 130, 246, 0.45);
+}
+
+.ve-night-mode .charsheet__apply-buff-group-heading {
+	color: #9ca3af;
+	border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.ve-night-mode .charsheet__apply-buff-group-heading:hover {
+	color: #e5e7eb;
+	background: rgba(255, 255, 255, 0.04);
+}
+
+.ve-night-mode .charsheet__apply-buff-row {
+	background: rgba(255, 255, 255, 0.03);
+	border-color: rgba(255, 255, 255, 0.10);
+}
+
+.ve-night-mode .charsheet__apply-buff-row:hover {
+	border-color: rgba(255, 255, 255, 0.20);
+	background: rgba(255, 255, 255, 0.05);
+}
+
+.ve-night-mode .charsheet__apply-buff-row--active {
+	background: rgba(34, 197, 94, 0.10);
+	border-color: rgba(34, 197, 94, 0.40);
+}
+
+.ve-night-mode .charsheet__apply-buff-chip {
+	color: #d1d5db;
+	background: rgba(255, 255, 255, 0.05);
+	border-color: rgba(255, 255, 255, 0.10);
+}
+
+.ve-night-mode .charsheet__apply-buff-chip--defense {
+	color: #93c5fd;
+	background: rgba(59, 130, 246, 0.15);
+	border-color: rgba(59, 130, 246, 0.35);
+}
+
+.ve-night-mode .charsheet__apply-buff-chip--offense {
+	color: #fca5a5;
+	background: rgba(239, 68, 68, 0.15);
+	border-color: rgba(239, 68, 68, 0.35);
+}
+
+.ve-night-mode .charsheet__apply-buff-chip--healing {
+	color: #86efac;
+	background: rgba(34, 197, 94, 0.15);
+	border-color: rgba(34, 197, 94, 0.35);
+}
+
+.ve-night-mode .charsheet__apply-buff-chip--movement {
+	color: #5eead4;
+	background: rgba(20, 184, 166, 0.15);
+	border-color: rgba(20, 184, 166, 0.35);
+}
+
+.ve-night-mode .charsheet__apply-buff-conc-badge {
+	color: #fcd34d;
+	background: rgba(245, 158, 11, 0.15);
+	border-color: rgba(245, 158, 11, 0.40);
+}
+
+.ve-night-mode .charsheet__apply-buff-row__active-chip {
+	color: #86efac;
+	background: rgba(34, 197, 94, 0.20);
+	border-color: rgba(34, 197, 94, 0.50);
+}
+
+.ve-night-mode .charsheet__apply-buff-row__name a {
+	color: #60a5fa;
+}
+
+.ve-night-mode .charsheet__apply-buff-row__name a:hover {
+	color: #93c5fd;
 }
