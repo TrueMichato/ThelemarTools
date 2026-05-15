@@ -1760,7 +1760,7 @@ class CharacterSheetSpells {
 		// Check spells known limits for known casters
 		if (!isCantrip && info.type === "known") {
 			const spells = this._state.getSpells();
-			const leveledSpells = spells.filter(s => s.level > 0 && !s.sourceFeature);
+			const leveledSpells = spells.filter(s => s.level > 0 && CharacterSheetClassUtils.isPlayerChosenSpell(s));
 			const maxKnown = info.spellsKnownMax || info.max;
 			if (leveledSpells.length >= maxKnown) {
 				return {
@@ -1774,7 +1774,7 @@ class CharacterSheetSpells {
 		// For multiclass with known casters, check combined limit
 		if (!isCantrip && info.isMulticlass && info.byClass?.some(c => c.type === "known")) {
 			const spells = this._state.getSpells();
-			const leveledSpells = spells.filter(s => s.level > 0 && !s.sourceFeature);
+			const leveledSpells = spells.filter(s => s.level > 0 && CharacterSheetClassUtils.isPlayerChosenSpell(s));
 			const knownClasses = info.byClass.filter(c => c.type === "known");
 			const totalKnownMax = knownClasses.reduce((sum, c) => sum + (c.spellsKnownMax || c.max || 0), 0);
 			if (leveledSpells.length >= totalKnownMax) {
@@ -1810,6 +1810,12 @@ class CharacterSheetSpells {
 		const isGambler = classes?.some(c => c.subclass?.name === "Gambler");
 		const hasSpellbook = classes?.some(c => c.name === "Wizard");
 
+		// Stamp canonical {sourceFeature, sourceClass} so the new spell counts toward the
+		// cap (instead of being silently dropped into the "Other Cantrips" orphan group).
+		// Mirrors what Builder/LevelUp/QuickBuild stamp during their own add flows.
+		const spellcastingInfo = this._state.getSpellcastingInfo();
+		const attribution = CharacterSheetClassUtils.pickAddedSpellAttribution({spell, info: spellcastingInfo, classes});
+
 		this._state.addSpell({
 			name: spell.name,
 			source: spell.source,
@@ -1824,6 +1830,8 @@ class CharacterSheetSpells {
 			components: this._getComponents(spell),
 			duration: this._getDuration(spell),
 			subschools: spell.subschools || [], // Include rarity/legality tags
+			...(attribution.sourceFeature ? {sourceFeature: attribution.sourceFeature} : {}),
+			...(attribution.sourceClass ? {sourceClass: attribution.sourceClass} : {}),
 			...(isGambler ? {sourceClass: "Gambler", sourceSubclass: "Gambler"} : {}),
 		});
 
@@ -5201,15 +5209,19 @@ class CharacterSheetSpells {
 			grouped[0].spells = attributed;
 			const limit = spellcastingInfo.cantripsKnown;
 			const colorClass = count > limit ? "text-danger" : (count === limit ? "text-success" : "");
-			grouped[0].name = `Cantrips <span class="ve-small ve-muted">(${count}/${limit})</span>`;
+			grouped[0].name = `Class Cantrips <span class="ve-small ve-muted">(${count}/${limit})</span>`;
 			if (count > limit) {
-				grouped[0].name = `Cantrips <span class="ve-small ${colorClass}" title="You have more cantrips than your class level allows">(${count}/${limit}) <span class="glyphicon glyphicon-alert"></span></span>`;
+				grouped[0].name = `Class Cantrips <span class="ve-small ${colorClass}" title="You have more cantrips than your class level allows">(${count}/${limit}) <span class="glyphicon glyphicon-alert"></span></span>`;
 			}
 		}
 
-		// Render each group
+		// Render each group. Orphan cantrips are appended immediately after the level-0
+		// group so users see them next to the rest of their cantrips, not at the bottom.
 		Object.entries(grouped).forEach(([level, group]) => {
-			if (!group.spells.length) return;
+			if (!group.spells.length) {
+				if (level === "0") this._appendOrphanCantripsGroup(container, orphanCantrips);
+				return;
+			}
 
 			const groupEl = e_({outer: `
 				<div class="charsheet__spell-group">
@@ -5226,10 +5238,9 @@ class CharacterSheetSpells {
 			});
 
 			container.append(groupEl);
-		});
 
-		// Append orphan-cantrips group below all leveled spells, if any.
-		this._appendOrphanCantripsGroup(container, orphanCantrips);
+			if (level === "0") this._appendOrphanCantripsGroup(container, orphanCantrips);
+		});
 	}
 
 	/**
@@ -5247,11 +5258,12 @@ class CharacterSheetSpells {
 		const preparedColorClass = currentPrepared > maxPrepared ? "text-danger" : (currentPrepared === maxPrepared ? "text-success" : "");
 
 		// Render cantrips first (always "prepared"); split attributed vs orphan so the
-		// header count is canonical and orphans appear in their own group.
+		// header count is canonical and orphans appear in their own group right next to
+		// the regular class cantrips, not buried at the bottom of the spell list.
 		let orphanCantrips = [];
 		if (cantrips.length) {
 			let cantripsToRender = cantrips;
-			let cantripsHeader = "Cantrips";
+			let cantripsHeader = "Class Cantrips";
 			if (spellcastingInfo && spellcastingInfo.cantripsKnown > 0) {
 				const partition = CharacterSheetClassUtils.partitionCantripsByAttribution(cantrips);
 				const {count} = CharacterSheetClassUtils.countPlayerChosenCantrips(cantrips);
@@ -5259,7 +5271,7 @@ class CharacterSheetSpells {
 				cantripsToRender = [...partition.attributed, ...partition.featureGranted];
 				const limit = spellcastingInfo.cantripsKnown;
 				const colorClass = count > limit ? "text-danger" : (count === limit ? "text-success" : "");
-				cantripsHeader = `Cantrips <span class="ve-small ${colorClass}">(${count}/${limit})</span>`;
+				cantripsHeader = `Class Cantrips <span class="ve-small ${colorClass}">(${count}/${limit})</span>`;
 			}
 
 			if (cantripsToRender.length) {
@@ -5277,6 +5289,10 @@ class CharacterSheetSpells {
 				container.append(cantripsGroup);
 			}
 		}
+
+		// Orphan cantrips appear directly under the Class Cantrips group, before the
+		// Prepared / Spellbook sections, so they're scannable side-by-side.
+		this._appendOrphanCantripsGroup(container, orphanCantrips);
 
 		// Render PREPARED spells section
 		const preparedSection = e_({outer: `
@@ -5328,9 +5344,6 @@ class CharacterSheetSpells {
 		}
 
 		container.append(spellbookSection);
-
-		// Orphan cantrips (sourceFeature: null) — separate group, not counted toward cap.
-		this._appendOrphanCantripsGroup(container, orphanCantrips);
 	}
 
 	/**

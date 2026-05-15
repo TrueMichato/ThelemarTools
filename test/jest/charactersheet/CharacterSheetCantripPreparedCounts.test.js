@@ -238,3 +238,107 @@ describe("Annabel regression — cross-surface consistency contract", () => {
 		expect(orphans.map(c => c.name).sort()).toEqual(["Mending", "Moment to Think"]);
 	});
 });
+
+describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spells count", () => {
+	// Without this, the modal silently writes orphans (sourceFeature == null) which
+	// would dump every manually-added cantrip into the "Other Cantrips" group and
+	// leave the X/Y cap stuck at 0/N. That's the user-visible regression that
+	// made it look like cantrips "weren't being added".
+
+	it("returns null/null for missing spell or info", () => {
+		expect(C.pickAddedSpellAttribution({spell: null, info: {}})).toEqual({sourceFeature: null, sourceClass: null});
+		expect(C.pickAddedSpellAttribution({spell: {}, info: null})).toEqual({sourceFeature: null, sourceClass: null});
+	});
+
+	it("wizard cantrip → 'Cantrips Known' / 'Wizard'", () => {
+		const r = C.pickAddedSpellAttribution({
+			spell: {name: "Fire Bolt", level: 0},
+			info: {type: "prepared", className: "Wizard", byClass: [{className: "Wizard", type: "prepared"}]},
+			classes: [{name: "Wizard"}],
+		});
+		expect(r).toEqual({sourceFeature: "Cantrips Known", sourceClass: "Wizard"});
+	});
+
+	it("wizard leveled spell → 'Wizard Spellbook' / 'Wizard'", () => {
+		const r = C.pickAddedSpellAttribution({
+			spell: {name: "Magic Missile", level: 1},
+			info: {type: "prepared", className: "Wizard", byClass: [{className: "Wizard", type: "prepared"}]},
+			classes: [{name: "Wizard"}],
+		});
+		expect(r).toEqual({sourceFeature: "Wizard Spellbook", sourceClass: "Wizard"});
+	});
+
+	it("sorcerer cantrip → 'Cantrips Known' / 'Sorcerer'", () => {
+		const r = C.pickAddedSpellAttribution({
+			spell: {name: "Fire Bolt", level: 0},
+			info: {type: "known", className: "Sorcerer", byClass: [{className: "Sorcerer", type: "known"}]},
+			classes: [{name: "Sorcerer"}],
+		});
+		expect(r).toEqual({sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
+	});
+
+	it("sorcerer leveled spell → 'Spells Known' / 'Sorcerer'", () => {
+		const r = C.pickAddedSpellAttribution({
+			spell: {name: "Magic Missile", level: 1},
+			info: {type: "known", className: "Sorcerer", byClass: [{className: "Sorcerer", type: "known"}]},
+			classes: [{name: "Sorcerer"}],
+		});
+		expect(r).toEqual({sourceFeature: "Spells Known", sourceClass: "Sorcerer"});
+	});
+
+	it("cleric leveled spell → 'Prepared Spells' / 'Cleric'", () => {
+		const r = C.pickAddedSpellAttribution({
+			spell: {name: "Bless", level: 1},
+			info: {type: "prepared", className: "Cleric", byClass: [{className: "Cleric", type: "prepared"}]},
+			classes: [{name: "Cleric"}],
+		});
+		expect(r).toEqual({sourceFeature: "Prepared Spells", sourceClass: "Cleric"});
+	});
+
+	it("multiclass wizard/cleric leveled spell → prefers wizard spellbook", () => {
+		const r = C.pickAddedSpellAttribution({
+			spell: {name: "Detect Magic", level: 1},
+			info: {
+				type: "prepared",
+				isMulticlass: true,
+				byClass: [{className: "Cleric", type: "prepared"}, {className: "Wizard", type: "prepared"}],
+			},
+			classes: [{name: "Cleric"}, {name: "Wizard"}],
+		});
+		expect(r).toEqual({sourceFeature: "Wizard Spellbook", sourceClass: "Wizard"});
+	});
+
+	it("multiclass cleric/sorcerer cantrip → first byClass wins (Cleric here)", () => {
+		const r = C.pickAddedSpellAttribution({
+			spell: {name: "Sacred Flame", level: 0},
+			info: {
+				type: "prepared",
+				isMulticlass: true,
+				byClass: [{className: "Cleric", type: "prepared"}, {className: "Sorcerer", type: "known"}],
+			},
+			classes: [{name: "Cleric"}, {name: "Sorcerer"}],
+		});
+		expect(r).toEqual({sourceFeature: "Cantrips Known", sourceClass: "Cleric"});
+	});
+
+	it("falls back to info.className / classes[0] when byClass is missing", () => {
+		const r = C.pickAddedSpellAttribution({
+			spell: {name: "Fire Bolt", level: 0},
+			info: {type: "known", className: "Sorcerer"},
+			classes: [{name: "Sorcerer"}],
+		});
+		expect(r).toEqual({sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
+	});
+
+	it("stamped attribution is recognised by the canonical counter", () => {
+		// Round-trip: pickAddedSpellAttribution → stamp on spell → counted.
+		const {sourceFeature, sourceClass} = C.pickAddedSpellAttribution({
+			spell: {name: "Fire Bolt", level: 0},
+			info: {type: "prepared", className: "Wizard", byClass: [{className: "Wizard", type: "prepared"}]},
+			classes: [{name: "Wizard"}],
+		});
+		const stamped = {name: "Fire Bolt", level: 0, sourceFeature, sourceClass};
+		expect(C.isPlayerChosenSpell(stamped)).toBe(true);
+		expect(C.countPlayerChosenCantrips([stamped]).count).toBe(1);
+	});
+});
