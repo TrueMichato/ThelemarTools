@@ -153,6 +153,13 @@ globalThis.StorageUtil = globalThis.StorageUtil || {
 	setForPage: () => {},
 };
 
+// Mock JqueryUtil — some charactersheet modules destructure this at load time
+// (see charactersheet-builder.js line 8), so it must be present BEFORE the
+// module is imported. Tests that need to inspect toasts can override doToast.
+globalThis.JqueryUtil = globalThis.JqueryUtil || {
+	doToast: () => {},
+};
+
 // Mock Renderer if needed
 globalThis.Renderer = globalThis.Renderer || {
 	get: () => ({
