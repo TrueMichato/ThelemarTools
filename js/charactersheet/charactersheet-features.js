@@ -1786,6 +1786,19 @@ class CharacterSheetFeatures {
 			});
 		}
 
+		// Star (favourite) toggle — appended to the feature's action area so users
+		// can pin features to the Overview Favourites section. Optional features
+		// (invocations, metamagic, combat methods, etc.) get their own type so the
+		// favourites resolver can route them to the right hover page.
+		if (typeof this._page?._renderFavouriteStar === "function") {
+			const favType = feature.featureType === "Optional Feature" ? "optionalFeature" : "feature";
+			const star = this._page._renderFavouriteStar(favType, feature, {onToggle: () => this.render?.()});
+			if (star) {
+				const actions = featureEl.querySelector(".charsheet__feature-actions");
+				if (actions) actions.append(star);
+			}
+		}
+
 		return featureEl;
 	}
 
@@ -1858,6 +1871,15 @@ class CharacterSheetFeatures {
 				this.render();
 				this._page.saveCharacter();
 			});
+
+			// Star (favourite) toggle for feats
+			if (typeof this._page?._renderFavouriteStar === "function") {
+				const star = this._page._renderFavouriteStar("feat", feat, {onToggle: () => this.render?.()});
+				if (star) {
+					const actions = featEl.querySelector(".charsheet__feature-actions");
+					if (actions) actions.append(star);
+				}
+			}
 
 			container.append(featEl);
 		});
