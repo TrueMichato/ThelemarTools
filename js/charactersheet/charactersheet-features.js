@@ -610,7 +610,14 @@ class CharacterSheetFeatures {
 			source: feat.source,
 			description: feat.entries ? Renderer.get().render({type: "entries", entries: feat.entries}) : "",
 			additionalSpells: feat.additionalSpells, // Preserve for spell processing
-			choices: featChoices || null,
+			choices: featChoices
+				? {
+					...featChoices,
+					...(featChoices.optionalFeatures?.length
+						? {optionalFeaturePicks: featChoices.optionalFeatures.flatMap(group => group.picks || [])}
+						: {}),
+				}
+				: null,
 			...(loreSkillPicks ? {loreSkillPicks} : {}),
 		};
 
@@ -2118,6 +2125,33 @@ class CharacterSheetFeatures {
 			}
 		}
 
+		const featOptSpecs = CharacterSheetClassUtils.getFeatOptionalFeatureChoiceSpec(feat);
+		if (featOptSpecs?.length) {
+			const settings = this._state.getSettings() || {};
+			const showAll = settings.showAllOptFeatureVersions || false;
+			const enableTgtt = !!settings.enableTgtt;
+			const rawOptFeatures = this._page.filterByAllowedSources?.(this._page.getOptionalFeatures?.() || []) || [];
+			const dedupedOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(rawOptFeatures, {showAll});
+			const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(dedupedOptFeatures, {enableTgtt});
+			const prereqContext = {
+				state: this._state,
+				level: this._state.getTotalLevel?.() || 0,
+				classLevel: this._state.getTotalLevel?.() || 0,
+				features: this._state.getFeatures?.() || [],
+				feats: this._state.getFeats?.() || [],
+			};
+			const alreadyKnown = this._state.getFeatures?.().filter((/** @type {*} */ f) => f.featureType === "Optional Feature") || [];
+
+			choices.optionalFeatures = featOptSpecs.map(spec => ({
+				...spec,
+				available: CharacterSheetClassUtils.getFeatOptionalFeatureOptions(allOptFeatures, {
+					featureTypes: spec.featureTypes,
+					prereqContext,
+					alreadyKnown,
+				}),
+			}));
+		}
+
 		// Spell Scribing Adept: class choice
 		if (feat.name === "Spell Scribing Adept") {
 			const eligibleClasses = ["Bard", "Sorcerer", "Warlock"];
@@ -2126,13 +2160,13 @@ class CharacterSheetFeatures {
 			if (available.length > 0) choices.scribingClass = {from: available};
 		}
 
-		const hasChoices = choices.skills || choices.languages || choices.ability || choices.expertise || choices.scribingClass;
+		const hasChoices = choices.skills || choices.languages || choices.ability || choices.expertise || choices.scribingClass || choices.optionalFeatures?.length;
 		return hasChoices ? choices : null;
 	}
 
 	async _pShowFeatChoicesModal (feat, choices) {
 		return new Promise((resolve) => {
-			const selected = {ability: null, skills: [], expertise: [], languages: [], scribingClass: null};
+			const selected = {ability: null, skills: [], expertise: [], languages: [], scribingClass: null, optionalFeatures: []};
 			let doClose;
 			let resolved = false;
 
@@ -2149,6 +2183,15 @@ class CharacterSheetFeatures {
 				if (choices.expertise && selected.expertise.length < choices.expertise.count) canConfirm = false;
 				if (choices.languages && selected.languages.length < choices.languages.count) canConfirm = false;
 				if (choices.scribingClass && !selected.scribingClass) canConfirm = false;
+				if (choices.optionalFeatures?.length) {
+					for (const group of choices.optionalFeatures) {
+						const picked = selected.optionalFeatures.find(g => g.name === group.name && g.featureTypes.join("|") === group.featureTypes.join("|"));
+						if (!picked || picked.picks.length < group.count) {
+							canConfirm = false;
+							break;
+						}
+					}
+				}
 				confirmBtn.disabled = !canConfirm;
 			};
 
@@ -2308,6 +2351,60 @@ class CharacterSheetFeatures {
 					});
 					section.append(grid);
 					content.append(section);
+				}
+
+				if (choices.optionalFeatures?.length) {
+					choices.optionalFeatures.forEach(group => {
+						const section = e_({outer: `<div class="mb-3"><label class="ve-small ve-bold">Choose ${group.count} ${group.name}:</label></div>`});
+						const list = e_({outer: `<div class="ve-flex-col gap-1 mt-1"></div>`});
+						const counter = e_({outer: `<div class="ve-small ve-muted mt-1">Selected: 0/${group.count}</div>`});
+
+						const ensureGroup = () => {
+							let existing = selected.optionalFeatures.find(g => g.name === group.name && g.featureTypes.join("|") === group.featureTypes.join("|"));
+							if (!existing) {
+								existing = {name: group.name, featureTypes: [...group.featureTypes], picks: []};
+								selected.optionalFeatures.push(existing);
+							}
+							return existing;
+						};
+
+						const renderGroup = () => {
+							const groupState = ensureGroup();
+							list.innerHTML = "";
+							group.available.forEach(opt => {
+								const isSelected = groupState.picks.some(p => p.name === opt.name && p.source === opt.source);
+								const disabled = !opt._selectable && !isSelected;
+								const suffix = opt._alreadyKnown ? ` <span class="ve-muted">(Known${opt._repeatable ? ` x${opt._timesKnown}` : ""})</span>` : "";
+								const item = e_({outer: `<label class="ve-flex-v-center mb-1 ${disabled ? "ve-muted" : ""}" style="gap:8px; cursor:${disabled ? "not-allowed" : "pointer"};"><input type="checkbox" ${isSelected ? "checked" : ""} ${disabled ? "disabled" : ""}><span>${opt.name}${suffix}</span></label>`});
+								const input = item.querySelector("input");
+								input?.addEventListener("change", evt => {
+									if (evt.target.checked) {
+										if (groupState.picks.length >= group.count) {
+											evt.target.checked = false;
+											JqueryUtil.doToast({type: "warning", content: `You can only choose ${group.count} ${group.name}.`});
+											return;
+										}
+										groupState.picks.push({
+											name: opt.name,
+											source: this._page.resolveOptionalFeatureSource?.(opt.name, [opt.source, Parser.SRC_TGTT, Parser.SRC_XPHB, Parser.SRC_PHB]) || opt.source,
+											description: opt.entries ? Renderer.get().render({type: "entries", entries: opt.entries}) : "",
+											featureTypes: opt.featureType || [],
+										});
+									} else {
+										groupState.picks = groupState.picks.filter(p => !(p.name === opt.name && p.source === opt.source));
+									}
+									counter.textContent = `Selected: ${groupState.picks.length}/${group.count}`;
+									updateConfirmBtn();
+								});
+								list.append(item);
+							});
+							counter.textContent = `Selected: ${groupState.picks.length}/${group.count}`;
+						};
+
+						renderGroup();
+						section.append(list, counter);
+						content.append(section);
+					});
 				}
 
 				const footer = e_({outer: `<div class="ve-flex-v-center ve-flex-h-right mt-3"></div>`});

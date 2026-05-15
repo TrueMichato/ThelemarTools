@@ -22476,18 +22476,30 @@ class CharacterSheetState {
 			if (feature.featureType !== "Optional Feature") return;
 			const optTypes = feature.optionalFeatureTypes || [];
 			if (!optTypes.includes("MM")) return;
+			if ([Parser.SRC_PHB, Parser.SRC_XPHB].includes(feature.source)) return;
 
-			const key = this._getMetamagicKeyByName(feature.name);
+			const key = this._getMetamagicKeyByName(feature.name, feature.source);
 			if (key) knownKeys.add(key);
 		});
 
 		return Array.from(knownKeys);
 	}
 
-	_getMetamagicKeyByName (name) {
+	_getMetamagicKeyByName (name, source = null) {
 		if (!name) return null;
 		// Strip "(Active)" / "(Passive)" suffixes from feature names for matching
-		const targetName = name.replace(/\s*\((Active|Passive)\)$/i, "").toLowerCase().trim();
+		const targetName = name
+			.replace(/^Metamagic:\s*/i, "")
+			.replace(/\s*\((Active|Passive)\)$/i, "")
+			.toLowerCase()
+			.trim();
+
+		if (source === Parser.SRC_TGTT) {
+			const exact = Object.entries(CharacterSheetState.TGTT_METAMAGIC)
+				.find(([, meta]) => meta.name.toLowerCase() === targetName);
+			if (exact) return exact[0];
+		}
+
 		const match = Object.entries(CharacterSheetState.TGTT_METAMAGIC)
 			.find(([, meta]) => meta.name.toLowerCase() === targetName);
 		return match?.[0] || null;
@@ -23369,7 +23381,29 @@ class CharacterSheetState {
 			this.setPendingScribingPicks(2); // 2 initial 1st-level spells
 		}
 
+		if (feat.choices?.optionalFeaturePicks?.length) {
+			this.addFeatOptionalFeaturePicks(featData, feat.choices.optionalFeaturePicks, opts);
+		}
+
 		return true;
+	}
+
+	addFeatOptionalFeaturePicks (featData, picks, opts = {}) {
+		if (!featData || !Array.isArray(picks)) return;
+
+		picks.forEach(pick => {
+			if (!pick?.name || !pick?.source) return;
+
+			this.addFeature({
+				name: pick.name,
+				source: pick.source,
+				description: pick.description || "",
+				featureType: "Optional Feature",
+				optionalFeatureTypes: pick.featureTypes || pick.optionalFeatureTypes || [],
+				sourceFeatId: featData.id,
+				sourceFeatName: featData.name,
+			}, {allSpells: opts.allSpells});
+		});
 	}
 
 	removeFeat (featIdOrName, source) {
@@ -23385,6 +23419,8 @@ class CharacterSheetState {
 			this.removeInnateSpellsByFeature(feat.name);
 			// Remove associated modifiers
 			this.removeModifiersByFeature(feat.id);
+			// Remove optional features granted via feat choices
+			this._data.features = this._data.features.filter(f => f.sourceFeatId !== feat.id);
 
 			// Reverse user-selected feat choices
 			if (feat.choices) {

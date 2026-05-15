@@ -5477,8 +5477,11 @@ class CharacterSheetBuilder {
 	 * @param {*} classSource
 	 */
 	_filterOptFeaturesByEdition (optFeatures, classSource) {
-		const showAll = this._state?.getSettings?.()?.showAllOptFeatureVersions || false;
-		return CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(optFeatures, {showAll});
+		const settings = this._state?.getSettings?.() || {};
+		const showAll = settings.showAllOptFeatureVersions || false;
+		const enableTgtt = !!settings.enableTgtt;
+		const deduped = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(optFeatures, {showAll});
+		return CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(deduped, {enableTgtt});
 	}
 
 	/**

@@ -156,6 +156,25 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * When TGTT mode is enabled, restrict Metamagic (`MM`) optional features to TGTT-source
+	 * entries so PHB-only metamagics (Distant, Empowered, Subtle, Twinned, …) don't leak into
+	 * pickers that share the `MM` featureType code with the TGTT passive/active system. Other
+	 * featureType codes are returned untouched.
+	 * @param {Array<*>} optFeatures - Optional features (typically post-deduplication)
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.enableTgtt=false] - Whether the TGTT setting is on
+	 * @returns {Array<*>} Filtered optional features
+	 */
+	static filterOptFeaturesForTgttMetamagic (/** @type {*} */ optFeatures, /** @type {*} */ {enableTgtt = false} = {}) {
+		if (!optFeatures?.length || !enableTgtt) return optFeatures;
+		return optFeatures.filter((/** @type {*} */ opt) => {
+			const isMetamagic = opt?.featureType?.some?.((/** @type {*} */ ft) => ft === "MM");
+			if (!isMetamagic) return true;
+			return (opt.source || "").toUpperCase() === "TGTT";
+		});
+	}
+
+	/**
 	 * Check whether a character meets an optional feature's prerequisites.
 	 * @param {Array<*>|null} prerequisite - The feature's `prerequisite` array (from data)
 	 * @param {object} context - Character state context
@@ -3075,6 +3094,56 @@ class CharacterSheetClassUtils {
 					_selectable: selectable,
 				};
 			});
+	}
+
+	/**
+	 * Parse a feat's optionalfeatureProgression into picker specs.
+	 * @param {*} feat
+	 * @returns {Array<*>|null}
+	 */
+	static getFeatOptionalFeatureChoiceSpec (/** @type {*} */ feat) {
+		if (!feat?.optionalfeatureProgression?.length) return null;
+
+		const specs = feat.optionalfeatureProgression
+			.map((/** @type {*} */ prog) => {
+				const featureTypes = prog.featureType || [];
+				if (!featureTypes.length) return null;
+
+				let count = 0;
+				if (Array.isArray(prog.progression)) {
+					count = prog.progression[0] || 0;
+				} else if (typeof prog.progression === "object") {
+					count = prog.progression["1"] || prog.progression["*"] || 0;
+				}
+
+				if (!count) return null;
+
+				return {
+					name: prog.name || featureTypes.join(", "),
+					count,
+					featureTypes,
+				};
+			})
+			.filter(Boolean);
+
+		return specs.length ? specs : null;
+	}
+
+	/**
+	 * Get feat optional-feature options from the current optional-feature pool.
+	 * @param {Array<*>} allOptFeatures
+	 * @param {object} opts
+	 * @param {string[]} opts.featureTypes
+	 * @param {object} [opts.prereqContext]
+	 * @param {Array<*>} [opts.alreadyKnown]
+	 * @returns {Array<*>}
+	 */
+	static getFeatOptionalFeatureOptions (/** @type {*} */ allOptFeatures, {featureTypes, prereqContext = {}, alreadyKnown = []} = {}) {
+		return CharacterSheetClassUtils.getEligibleOptionalFeatures(allOptFeatures, {
+			featureTypes,
+			prereqContext,
+			alreadyKnown,
+		});
 	}
 
 	/**
