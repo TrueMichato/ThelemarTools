@@ -339,12 +339,20 @@ describe("Rogue Feature Effects", () => {
 	});
 
 	describe("Swashbuckler Subclass - Rakish Audacity", () => {
-		it("should track initiative bonus in applied effects", () => {
+		it("should apply CHA mod to initiative via the live feature aggregator", () => {
 			state.addClass({name: "Rogue", source: "PHB", level: 3});
 			state.setSubclass("Rogue", {name: "Swashbuckler", source: "XGE"});
-			const appliedEffects = state.getAppliedClassFeatureEffects();
+			state.setAbilityBase("cha", 16); // +3
+			state.setAbilityBase("dex", 14); // +2
 
-			expect(appliedEffects.some(e => e.includes("Rakish Audacity"))).toBe(true);
+			// Initiative = DEX (+2) + CHA (+3) = +5
+			expect(state.getInitiative()).toBe(5);
+
+			const breakdown = state.getInitiativeBreakdown();
+			const rakish = breakdown.components.find(c => c.name === "Rakish Audacity");
+			expect(rakish).toBeTruthy();
+			expect(rakish.value).toBe(3);
+			expect(rakish.type).toBe("feature");
 		});
 	});
 
