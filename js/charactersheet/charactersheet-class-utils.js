@@ -457,6 +457,110 @@ class CharacterSheetClassUtils {
 		return false;
 	}
 
+	static _getNormalizedSpellRefIds (/** @type {*} */ value, /** @type {*} */ out = new Set()) {
+		if (value == null) return out;
+
+		if (typeof value === "string") {
+			const [name, source = Parser.SRC_PHB] = value.split("|");
+			if (name?.trim()) out.add(`${name.trim().toLowerCase()}|${String(source).trim().toLowerCase()}`);
+			return out;
+		}
+
+		if (Array.isArray(value)) {
+			value.forEach(it => this._getNormalizedSpellRefIds(it, out));
+			return out;
+		}
+
+		if (typeof value !== "object") return out;
+
+		if (value.choose?.from) this._getNormalizedSpellRefIds(value.choose.from, out);
+		if (value.from) this._getNormalizedSpellRefIds(value.from, out);
+		if (value.all) this._getNormalizedSpellRefIds(value.all, out);
+		if (value.daily) this._getNormalizedSpellRefIds(value.daily, out);
+		if (value.rest) this._getNormalizedSpellRefIds(value.rest, out);
+		if (value.ritual) this._getNormalizedSpellRefIds(value.ritual, out);
+
+		if (value.name) {
+			const source = value.source || Parser.SRC_PHB;
+			out.add(`${String(value.name).trim().toLowerCase()}|${String(source).trim().toLowerCase()}`);
+		}
+
+		Object.entries(value).forEach(([key, nestedValue]) => {
+			if (["name", "source", "choose", "from", "all", "daily", "rest", "ritual", "ability", "resourceName"].includes(key)) return;
+			this._getNormalizedSpellRefIds(nestedValue, out);
+		});
+
+		return out;
+	}
+
+	static _getAdditionalSpellBlockSpellIds (/** @type {*} */ block) {
+		const out = new Set();
+		if (!block || typeof block !== "object") return out;
+
+		["innate", "known", "prepared", "expanded"].forEach(prop => {
+			this._getNormalizedSpellRefIds(block[prop], out);
+		});
+
+		return out;
+	}
+
+	static subclassAdditionalSpellsIncludeSpell (/** @type {*} */ spell, /** @type {*} */ subclass, /** @type {*} */ opts = {}) {
+		if (!spell?.name || !subclass?.additionalSpells?.length) return false;
+
+		const spellId = `${String(spell.name).trim().toLowerCase()}|${String(spell.source || Parser.SRC_PHB).trim().toLowerCase()}`;
+		const subclassChoice = opts.subclassChoice;
+
+		const relevantBlocks = this.isDivineSoulSubclass(subclass)
+			? (() => {
+				const affinityBlock = this.getDivineSoulAffinityBlock(subclass, subclassChoice);
+				return affinityBlock ? [affinityBlock] : [];
+			})()
+			: subclass.additionalSpells;
+
+		return relevantBlocks.some(block => this._getAdditionalSpellBlockSpellIds(block).has(spellId));
+	}
+
+	static getSpellListClassNames ({className, classSource, subclass, subclassChoice, includeCoreSpellsForHomebrew = false} = /** @type {*} */ ({})) {
+		const out = new Set();
+		if (className) out.add(className);
+
+		this.getAdditionalSpellListClasses({className, subclass, subclassChoice})
+			.forEach(it => out.add(it));
+
+		const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE", "TGTT"].includes(classSource);
+		if (includeCoreSpellsForHomebrew && isNonStandardSource && className) out.add(className);
+
+		return [...out];
+	}
+
+	static spellIsAvailableForClass (/** @type {*} */ spell, /** @type {*} */ opts = {}) {
+		const {
+			className,
+			classSource,
+			subclass,
+			subclassChoice,
+			additionalClassNames = [],
+			includeCoreSpellsForHomebrew = false,
+		} = opts;
+
+		if (!spell || !className) return false;
+
+		if (this.spellIsForClass(spell, className, {subclass})) return true;
+		if (this.subclassAdditionalSpellsIncludeSpell(spell, subclass, {subclassChoice})) return true;
+
+		const resolvedClassNames = additionalClassNames.length
+			? additionalClassNames
+			: this.getSpellListClassNames({className, classSource, subclass, subclassChoice, includeCoreSpellsForHomebrew}).filter(it => it !== className);
+
+		if (resolvedClassNames.some(it => this.spellIsForClass(spell, it))) return true;
+
+		if (includeCoreSpellsForHomebrew && classSource && !["PHB", "XPHB", "TCE", "XGE", "TGTT"].includes(classSource)) {
+			if (this.spellIsForClass(spell, className, {subclass})) return true;
+		}
+
+		return false;
+	}
+
 	static isDivineSoulSubclass (/** @type {*} */ subclass) {
 		if (!subclass?.name && !subclass?.shortName) return false;
 		return [subclass.name, subclass.shortName]

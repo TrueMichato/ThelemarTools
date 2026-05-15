@@ -3266,6 +3266,12 @@ class CharacterSheetQuickBuild {
 				knownSpellIds,
 				className: "Wizard",
 				subclass: this._state.getClasses()?.[0]?.subclass,
+				subclassChoice: this._state.getClasses()?.[0]?.subclassChoice,
+				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
+					className: "Wizard",
+					subclass: this._state.getClasses()?.[0]?.subclass,
+					subclassChoice: this._state.getClasses()?.[0]?.subclassChoice,
+				}),
 				onSelect: (spells) => {
 					this._selections.spellbookSpells = spells;
 				},
@@ -3334,6 +3340,7 @@ class CharacterSheetQuickBuild {
 			allSpells: sourceFiltered,
 			knownSpellIds,
 			subclass: resolvedSubclass,
+			subclassChoice: resolvedSubclassChoice,
 			additionalClassNames,
 			onSelect: (spells, cantrips) => {
 				this._selections.knownSpells = spells;
@@ -3414,6 +3421,15 @@ class CharacterSheetQuickBuild {
 
 		const sourceFiltered = this._page.getFilteredSpellData();
 
+		const subclassKey = `${className}_${classSource}`;
+		const resolvedSubclass = this._selections.subclasses[subclassKey] || preparedCasterInfo.subclass;
+		const resolvedSubclassChoice = this._selections.subclassChoices[subclassKey] || preparedCasterInfo.subclassChoice;
+		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+			className,
+			subclass: resolvedSubclass,
+			subclassChoice: resolvedSubclassChoice,
+		});
+
 		const section = CharacterSheetSpellPicker.renderKnownSpellPicker({
 			className,
 			classSource,
@@ -3422,7 +3438,9 @@ class CharacterSheetQuickBuild {
 			maxSpellLevel,
 			allSpells: sourceFiltered,
 			knownSpellIds,
-			subclass: preparedCasterInfo.subclass,
+			subclass: resolvedSubclass,
+			subclassChoice: resolvedSubclassChoice,
+			additionalClassNames,
 			onSelect: (spells, cantrips) => {
 				this._selections.preparedSpells = spells;
 				this._selections.preparedCantrips = cantrips;

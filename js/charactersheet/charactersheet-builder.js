@@ -8891,6 +8891,9 @@ class CharacterSheetBuilder {
 				maxSpellLevel: updatedKnownInfo.maxSpellLevel,
 				allSpells: sourceFiltered,
 				knownSpellIds: new Set(),
+				subclass: updatedKnownInfo.subclass,
+				subclassChoice: updatedKnownInfo.subclassChoice,
+				additionalClassNames: updatedKnownInfo.additionalClassNames,
 				onSelect: (/** @type {*} */ spells) => {
 					this._selectedSpellbookSpells = spells;
 				},
