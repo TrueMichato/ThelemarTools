@@ -1,0 +1,1243 @@
+(node:99790) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS test/jest/charactersheet/CharacterSheetFeatOptionalFeatures.test.js
+  CharacterSheetState feat optional features
+    ✓ adds feat-granted optional feature picks as removable optional features (62 ms)
+    ✓ tracks TGTT metamagic picks from feats through known metamagic helpers (1 ms)
+    ✓ keeps PHB metamagic names out of TGTT known-metamagic keys when TGTT feat support is enabled (1 ms)
+
+(node:99791) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS test/jest/charactersheet/CharacterSheetLevelHistory.test.js
+  CharacterSheetLevelHistory
+    Level History Storage
+      ✓ should initialize with empty level history (5 ms)
+      ✓ should not be legacy character with no levels
+      ✓ should have complete history with no levels (1 ms)
+      ✓ should record a level choice (1 ms)
+      ✓ should replace existing history entry for same level
+      ✓ should sort history entries by level (1 ms)
+      ✓ should get history entry for specific level
+      ✓ should update level choice
+      ✓ should persist combat traditions and weapon masteries in history choices (1 ms)
+      ✓ should persist additive replayData snapshots in choices (1 ms)
+      ✓ should return false when updating non-existent level
+      ✓ should clear level history (1 ms)
+    Legacy Character Detection
+      ✓ should detect legacy character when levels exist without history (11 ms)
+      ✓ should not be legacy when history matches levels
+      ✓ should be legacy when history is partial (1 ms)
+    ASI and Feat Tracking
+      ✓ should record ASI choice in history
+      ✓ should record feat choice in history (1 ms)
+      ✓ should track multiple ASI levels (1 ms)
+    Subclass Tracking
+      ✓ should record subclass choice in history
+      ✓ should track subclass for level 1 casters (1 ms)
+    Level Summary
+      ✓ should return null for non-existent level
+      ✓ should return summary with choices and features (2 ms)
+    Serialization
+      ✓ should serialize and deserialize level history (2 ms)
+      ✓ should replay optional features from history when loading a save (54 ms)
+      ✓ should keep only known passive tuned metamagics when loading a save (31 ms)
+      ✓ should handle missing level history in old saves
+    Feature Choices Recording
+      ✓ should record optional features like invocations (1 ms)
+      ✓ should record expertise selections
+    Race/Background History Migration
+      ✓ should backfill race data into levelHistory on load (1 ms)
+      ✓ should backfill subrace data
+      ✓ should not overwrite existing race data in history (1 ms)
+      ✓ should handle missing levelHistory gracefully
+      ✓ should handle missing race gracefully (1 ms)
+
+  console.warn
+    [CharSheet State] Cannot activate stance: method "Nonexistent Stance" not found
+
+      24217 | 		if (!method) {
+      24218 | 			// eslint-disable-next-line no-console
+    > 24219 | 			console.warn(`[CharSheet State] Cannot activate stance: method "${methodName}" not found`);
+            | 			        ^
+      24220 | 			return false;
+      24221 | 		}
+      24222 |
+
+      at CharacterSheetState.activateStance (js/charactersheet/charactersheet-state.js:24219:12)
+      at Object.<anonymous> (test/jest/charactersheet/CharacterSheetTGTT.test.js:2571:26)
+
+  console.warn
+    [CharSheet State] Cannot activate stance: "Lean Into It" is not a stance
+
+      24225 | 		if (!parsed.isStance) {
+      24226 | 			// eslint-disable-next-line no-console
+    > 24227 | 			console.warn(`[CharSheet State] Cannot activate stance: "${methodName}" is not a stance`);
+            | 			        ^
+      24228 | 			return false;
+      24229 | 		}
+      24230 |
+
+      at CharacterSheetState.activateStance (js/charactersheet/charactersheet-state.js:24227:12)
+      at Object.<anonymous> (test/jest/charactersheet/CharacterSheetTGTT.test.js:2586:26)
+
+  console.warn
+    [CharSheet State] Cannot use method: insufficient stamina (need 3, have 2)
+
+      24358 | 			if (!success) {
+      24359 | 				// eslint-disable-next-line no-console
+    > 24360 | 				console.warn(`[CharSheet State] Cannot use method: insufficient stamina (need ${cost}, have ${this.getStaminaCurrent()})`);
+            | 				        ^
+      24361 | 				return false;
+      24362 | 			}
+      24363 | 		}
+
+      at CharacterSheetState.useCombatMethod (js/charactersheet/charactersheet-state.js:24360:13)
+      at Object.<anonymous> (test/jest/charactersheet/CharacterSheetTGTT.test.js:2643:26)
+
+(node:99789) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS test/jest/charactersheet/CharacterSheetTGTT.test.js
+  Traveler's Guide to Thelemar (TGTT) Homebrew Support
+    Dreamwalker Class (Fully Custom Homebrew)
+      Core Class Features
+        ✓ should support adding the Dreamwalker class at level 1 (14 ms)
+        ✓ should grant CON saving throw proficiency from Focus feature (Level 1) (55 ms)
+        ✓ should have Lucid Focus die that scales with level (31 ms)
+        ✓ should grant advantage on CON checks and saves at level 4 (Focus Improvement) (1 ms)
+        ✓ should grant expertise in CON saves at level 9 (Focus Improvement upgrade) (1 ms)
+      Dreamwalker Abilities (Optional Features)
+        ✓ should support Dreamwalk ability (2 ms)
+        ✓ should support Dreamwatch ability (2 ms)
+        ✓ should support Dreambend ability (33 ms)
+        ✓ should support Dreamjump ability (required at level 4) (2 ms)
+        ✓ should support Dreamforge ability (2 ms)
+        ✓ should support Dreamsnatch ability (2 ms)
+        ✓ should support Dreamveil ability (1 ms)
+      High-Level Dreamwalker Features
+        ✓ should support Dreamhaven at level 6 (2 ms)
+        ✓ should support Waking Dream at level 7 (2 ms)
+        ✓ should support Dream Supremacy at level 8 (1 ms)
+        ✓ should support Just a Weave capstone at level 10 (2 ms)
+      Dreamwalker Full Build
+        ✓ should handle a complete level 10 Dreamwalker with all features (12 ms)
+    Dreamwalker Mechanics
+      Lucid Focus Die Progression
+        ✓ should have 1d6 Lucid Focus die at level 1
+        ✓ should have 1d6 Lucid Focus die at level 2 (1 ms)
+        ✓ should have 1d8 Lucid Focus die at level 3
+        ✓ should have 1d8 Lucid Focus die at level 5 (1 ms)
+        ✓ should have 1d10 Lucid Focus die at level 6
+        ✓ should have 1d10 Lucid Focus die at level 9
+        ✓ should have 1d12 Lucid Focus die at level 10 (1 ms)
+      Dream DC Calculation
+        ✓ should calculate Dream DC as 8 + proficiency + CON mod
+        ✓ should scale Dream DC with level and CON (1 ms)
+      Focus Pool Max Calculation
+        ✓ should calculate Focus Pool max as proficiency bonus
+        ✓ should scale Focus Pool max with level (proficiency)
+        ✓ should have minimum 2 Focus Pool at level 1 (1 ms)
+      Focus Pool State Management
+        ✓ should detect Focus Pool for Dreamwalkers
+        ✓ should track Focus Pool current and max (1 ms)
+        ✓ should spend focus points (1 ms)
+        ✓ should prevent spending more than available
+      Lucid Focus Activation
+        ✓ should activate Lucid Focus (costs 1 point) (1 ms)
+        ✓ should fail if no focus points available
+        ✓ should deactivate Lucid Focus (2 ms)
+        ✓ should get the correct Lucid Focus die
+      Focus Pool Restoration
+        ✓ should restore Focus Pool on long rest (1 ms)
+      Non-Dreamwalker Characters
+        ✓ should not have Focus Pool for other classes (1 ms)
+        ✓ should not have Focus Pool for PHB classes
+      Dreamwalker Feature Flags
+        ✓ should have correct features at max level (10) (1 ms)
+        ✓ should have only early features at level 5 (1 ms)
+    TGTT Fighter Specialties
+      ✓ should support Amphibious Combatant specialty (advantage + speed) (3 ms)
+      ✓ should support Battle Hardened specialty (HP bonus) (1 ms)
+      ✓ should support Combat Medic specialty (healing) (1 ms)
+      ✓ should support Clearsight Sentinel specialty (darkvision + advantage) (2 ms)
+      ✓ should support Mountaineer specialty (climbing speed) (1 ms)
+      ✓ should support multiple Fighter specialties
+    TGTT Monk Specialties
+      ✓ should support Adept Speed specialty (speed bonus) (1 ms)
+      ✓ should support Gale Walk specialty (advantage) (1 ms)
+      ✓ should support Hurricane Walk specialty (1 ms)
+      ✓ should support Shadow Walk specialty (2 ms)
+    TGTT Paladin Specialties
+      ✓ should support Divine Health specialty (disease immunity) (2 ms)
+      ✓ should support Divine Vision specialty (darkvision) (1 ms)
+      ✓ should support Prophetic Protection specialty (HP-related) (2 ms)
+      ✓ should support Pious Soul specialty (advantage) (1 ms)
+    TGTT Rogue Specialties
+      ✓ should support Agile Athlete specialty (speed) (1 ms)
+      ✓ should support Cat's Eyes specialty (darkvision) (2 ms)
+      ✓ should support Loot Runner specialty (speed) (1 ms)
+      ✓ should support Poison Expert specialty (immunity) (2 ms)
+      ✓ should support Keen Eye specialty (darkvision + advantage) (2 ms)
+    TGTT Use Magic Device
+      Attunement Slots
+        ✓ should grant 4 attunement slots with Use Magic Device
+        ✓ should default to 3 attunement without Use Magic Device (1 ms)
+        ✓ should stack with higher bonuses from Artificer
+      Ignore Attunement Requirements
+        ✓ should ignore attunement requirements with Use Magic Device (1 ms)
+        ✓ should respect class feature flag for ignoring requirements
+      Scroll Spellcasting
+        ✓ should use INT for spell scrolls with TGTT Use Magic Device (1 ms)
+        ✓ should return null without Use Magic Device
+      Charge Saving Roll
+        ✓ should return roll result with destroyed flag (1 ms)
+        ✓ should mark destroyed when roll is 1 (1 ms)
+        ✓ should not destroy when roll is 2-6
+    TGTT Assassinate
+      TGTT Version
+        ✓ should have hasAssassinate flag (1 ms)
+        ✓ should grant advantage on unacted targets in first round
+        ✓ should grant auto-crit without surprise requirement (1 ms)
+        ✓ should NOT have the official surprised-only advantage
+      Official Version
+        ✓ should have hasAssassinate flag (1 ms)
+        ✓ should grant advantage on surprised targets
+        ✓ should NOT have the TGTT unacted-targets advantage (1 ms)
+    TGTT Pact of Transformation
+      Feature Detection
+        ✓ should have hasPactOfTransformation flag
+        ✓ should calculate uses based on proficiency bonus (1 ms)
+        ✓ should calculate CR limit based on level
+        ✓ should increase CR limit at higher levels (1 ms)
+      Transformation State
+        ✓ should return transformation state
+        ✓ should activate transformation (1 ms)
+        ✓ should not activate if CR exceeds limit (1 ms)
+        ✓ should grant temp HP equal to 3 × warlock level
+        ✓ should decrement uses on transformation (1 ms)
+        ✓ should end transformation
+        ✓ should reset temp HP when transformation ends (1 ms)
+        ✓ should reset uses on long rest
+        ✓ should not allow transformation while already transformed (1 ms)
+      Without Feature
+        ✓ should return null without the feature
+    TGTT Ranger Specialties
+      ✓ should support Primal Focus specialty (advantage + AC) (2 ms)
+      ✓ should support Deft Explorer specialty (skill proficiency) (1 ms)
+      ✓ should support Enduring Traveler specialty (exhaustion immunity) (1 ms)
+      ✓ should support Primal Focus Upgrade specialty (resistance + speed) (1 ms)
+    TGTT Ranger Primal Focus Mechanics
+      Focus Switches Progression
+        ✓ should have 1 Focus Switch at level 1 (1 ms)
+        ✓ should have 1 Focus Switch at level 5 (1 ms)
+        ✓ should have 2 Focus Switches at level 6 (1 ms)
+        ✓ should have 2 Focus Switches at level 9
+        ✓ should have 3 Focus Switches at level 10
+        ✓ should have 3 Focus Switches at level 13 (1 ms)
+        ✓ should have 4 Focus Switches at level 14
+        ✓ should have 4 Focus Switches at level 19 (1 ms)
+        ✓ should have Unlimited Focus Switch at level 20
+      Focused Quarry Damage Progression
+        ✓ should deal 1d4 Focused Quarry damage at level 1
+        ✓ should deal 1d4 Focused Quarry damage at level 4 (1 ms)
+        ✓ should deal 1d6 Focused Quarry damage at level 5
+        ✓ should deal 1d6 Focused Quarry damage at level 9
+        ✓ should deal 1d8 Focused Quarry damage at level 10 (1 ms)
+        ✓ should deal 1d8 Focused Quarry damage at level 13
+        ✓ should deal 1d10 Focused Quarry damage at level 14
+        ✓ should deal 1d10 Focused Quarry damage at level 20 (1 ms)
+      Hunter's Dodge Uses
+        ✓ should have Hunter's Dodge uses equal to proficiency bonus (1 ms)
+      Primal Focus State Management
+        ✓ should start in predator mode by default (1 ms)
+        ✓ should allow switching between predator and prey modes
+        ✓ should track focus switches used (1 ms)
+        ✓ should prevent switching when no switches remain (non-level 20)
+        ✓ should allow unlimited switches at level 20 (2 ms)
+      Focused Quarry Target Tracking
+        ✓ should track Focused Quarry target
+        ✓ should clear Focused Quarry target
+      Hunter's Dodge Resource Tracking
+        ✓ should track Hunter's Dodge uses
+        ✓ should prevent using Hunter's Dodge when none remain
+      Primal Focus Restoration on Long Rest
+        ✓ should restore all Primal Focus resources on long rest
+      Non-TGTT Rangers should not have Primal Focus
+        ✓ should not grant Primal Focus to PHB Rangers (1 ms)
+        ✓ should not grant Primal Focus to XPHB Rangers
+      Primal Focus Stat Effects
+        ✓ should grant +10 walking speed in Predator mode at level 6+ (1 ms)
+        ✓ should NOT grant speed bonus in Prey mode
+        ✓ should NOT grant speed bonus before level 6
+        ✓ should grant AC bonus in Prey mode at level 6+ (1 ms)
+        ✓ should NOT grant AC bonus in Predator mode
+        ✓ should switch effects when mode changes (1 ms)
+    Combat Methods / Stamina System
+      Stamina Pool Basics
+        ✓ should detect combat system when character has combat traditions
+        ✓ should calculate stamina max as 2 × proficiency bonus (1 ms)
+        ✓ should scale stamina with proficiency bonus progression (1 ms)
+      Stamina Spending and Tracking
+        ✓ should track current stamina
+        ✓ should spend stamina successfully
+        ✓ should prevent spending more stamina than available (1 ms)
+        ✓ should allow spending exactly the remaining stamina
+      Stamina Restoration (Rest)
+        ✓ should restore all stamina on rest (1 ms)
+      Combat Method DC Calculation
+        ✓ should calculate Combat Method DC as 8 + prof + STR/DEX (higher)
+        ✓ should use DEX mod if higher than STR
+      Combat Traditions Management
+        ✓ should add combat traditions (1 ms)
+        ✓ should remove combat traditions
+        ✓ should store canonical code+name entries while exposing codes via getCombatTraditions (2 ms)
+        ✓ should migrate legacy settings combat traditions into canonical state entries on load (1 ms)
+      Monk Focus Points for Stamina
+        ✓ should allow Monks with combat system to use Focus for Stamina (1 ms)
+        ✓ should not allow Monks without combat system to use Focus for Stamina
+        ✓ should spend Ki/Focus points when using for stamina (1 ms)
+        ✓ should fail if not enough Ki/Focus points
+        ✓ should not affect stamina pool when using Focus (1 ms)
+      Paladin Spell Slot to Stamina Conversion
+        ✓ should allow TGTT Paladins with combat system to convert spell slots
+        ✓ should not allow PHB Paladins to convert spell slots (1 ms)
+        ✓ should convert spell slot to stamina (1 + slot level)
+        ✓ should fail if no spell slot available at level (1 ms)
+        ✓ should cap stamina at max when converting
+        ✓ should calculate correct stamina from spell slot (1 ms)
+      Stamina Resources API
+        ✓ should return all stamina resources for UI
+        ✓ should include spell slots for TGTT Paladin (1 ms)
+      Non-Combat System Characters
+        ✓ should not use combat system for standard PHB classes
+        ✓ should not have stamina for non-TGTT characters
+      Monk Combat Method DC Bonus
+        ✓ should calculate Monk DC as 9 + prof + max(STR, DEX, WIS) (1 ms)
+        ✓ should use DEX when it is highest for Monk
+        ✓ should use STR when it is highest for Monk (1 ms)
+        ✓ should use standard DC formula for non-Monk classes
+      Generic Combat Method Parsing
+        ✓ should parse stamina cost from 'Bonus Action (1 Stamina Point)' (2 ms)
+        ✓ should parse stamina cost from 'Action (3 Stamina Points)' (1 ms)
+        ✓ should parse action type 'Bonus Action' (1 ms)
+        ✓ should parse action type 'Reaction'
+        ✓ should parse save type 'Strength saving throw' (1 ms)
+        ✓ should parse save type 'Wisdom save'
+        ✓ should detect stance from 'This stance lasts until' (1 ms)
+        ✓ should extract degree and tradition from CTM:3AM
+      getCombatMethods()
+        ✓ should return array of methods with parsed effects (2 ms)
+        ✓ should return empty array when no CTM features
+        ✓ should filter only CTM features (not BT or other types) (1 ms)
+        ✓ should include all method properties (1 ms)
+      getMethodDegreeAccess()
+        ✓ should return 0 for non-CTM characters
+        ✓ should return degree 1 for Fighter level 1
+        ✓ should return degree 3 for Fighter level 8
+        ✓ should return degree 5 for Fighter level 16
+        ✓ should return degree 2 for Monk level 4 (1 ms)
+        ✓ should return degree 4 for Paladin level 19 (max for Paladin)
+        ✓ should return degree 4 for Rogue level 20 (capped at 4)
+        ✓ should return degree 5 for Barbarian level 17 (1 ms)
+      Stance Addition vs Activation
+        ✓ should NOT apply stance effects when feature is added (only added, not activated)
+        ✓ should apply stance effects ONLY after activation (1 ms)
+        ✓ should remove stance effects after deactivation (1 ms)
+        ✓ should apply skill bonuses only when stance is activated (1 ms)
+        ✓ should NOT register combat method effects as named modifiers
+        ✓ should only apply effects from the ACTIVATED stance when multiple stances are on sheet (1 ms)
+        ✓ should persist stance effects across multiple getFeatureCalculations() calls (1 ms)
+      Stance Mutual Exclusivity
+        ✓ should only allow one stance active at a time
+        ✓ should remove old stance effects when activating new stance (1 ms)
+        ✓ should clear active stance with deactivateStance()
+        ✓ should return false when activating non-existent method (46 ms)
+        ✓ should return false when activating non-stance method (14 ms)
+      Stamina Deduction on Method Use
+        ✓ should spend 1 stamina when using Heavy Stance
+        ✓ should spend 2 stamina when using Lean Into It
+        ✓ should fail if insufficient stamina (12 ms)
+        ✓ should activate stance when using a stance method (1 ms)
+      Combat Methods Integration
+        ✓ should handle full flow: Fighter L8 adds, activates, and gets stance effects
+        ✓ should handle Monk using Focus instead of Stamina for method
+        ✓ should switch stances multiple times correctly (1 ms)
+        ✓ should identify stances correctly with isMethodStance()
+    Combat Methods Deep Implementation (Phase 7)
+      Instant Strike Classification
+        ✓ should classify Instant Strike as 'combat' via override (1 ms)
+        ✓ should NOT appear as an activatable state (10 ms)
+        ✓ should route to combat action via detectActivatableFeature interactionMode (4 ms)
+        ✓ should parse as Bonus Action with 3 stamina via getCombatMethods (1 ms)
+      Whirlpool Strike
+        ✓ should classify Whirlpool Strike as 'combat' via override
+        ✓ should NOT be added as an attack when added as a feature (1 ms)
+        ✓ should parse as multi-target method
+        ✓ should parse bonus damage: +1d6 per subsequent hit (1 ms)
+        ✓ should parse as 4th degree Rapid Current with Action and 3 stamina
+      Whirlwind Strike
+        ✓ should parse as multi-target with proficiency bonus cap
+        ✓ should classify Whirlwind Strike as 'combat' via override
+      Wind Strike
+        ✓ should classify Wind Strike as 'combat' via override (1 ms)
+        ✓ should parse range 20/60
+        ✓ should parse advantage on attack rolls (1 ms)
+        ✓ should parse bonus weapon damage die on double hit
+        ✓ should parse as 4th degree UW with Action and 3 stamina (1 ms)
+        ✓ should NOT be added as a natural weapon attack
+      CTM Features Not Added as Attacks
+        ✓ should not add any CTM method as a natural weapon attack even with 'melee weapon attack' text (3 ms)
+        ✓ should still add regular natural weapon features as attacks (2 ms)
+      Combat Method DC from State
+        ✓ should use enhanced Monk DC (9 + prof + max(STR, DEX, WIS))
+        ✓ should use standard DC (8 + prof + max(STR, DEX)) for non-Monk
+        ✓ should prefer spellcasting DC for Hexblade if higher (1 ms)
+      Enhanced Method Effect Parsing
+        ✓ should parse isMultiTarget from 'any number of creatures within'
+        ✓ should not set isMultiTarget for single-target methods (1 ms)
+        ✓ should not set grantsAdvantage when no advantage text present
+        ✓ should not set range for methods without range text
+        ✓ should not set bonusDamage for methods without bonus damage text (1 ms)
+        ✓ should parse 'additional 2d8 damage' as bonusDamage.die
+    TGTT Specialties Auto-Effects
+      Fighter Specialties - Movement
+        ✓ should grant swimming speed equal to walking speed (Amphibious Combatant) (2 ms)
+        ✓ should grant climbing speed (Mountaineer) (1 ms)
+      Fighter Specialties - Senses
+        ✓ should grant 60ft darkvision (Clearsight Sentinel) (2 ms)
+        ✓ should increase existing darkvision (Clearsight Sentinel with existing) (1 ms)
+      Monk Specialties - Speed
+        ✓ should add +10 ft speed (Adept Speed) (1 ms)
+        ✓ should apply Adept Speed bonus to all speed types (fly, swim, climb, burrow) (2 ms)
+        ✓ should grant blindsight at 11th level (Sixth Sense) (1 ms)
+      Multiple Specialties Combined
+        ✓ should apply multiple movement specialties (2 ms)
+        ✓ should apply darkvision and speed together (2 ms)
+      Advanced Specialty Patterns
+        Alternative Ability for Skill Checks
+          ✓ should parse Nimble Athlete (DEX for Athletics) (2 ms)
+          ✓ should parse Power Tumble (STR for Acrobatics) (1 ms)
+        Stamina Pool Modifiers
+          ✓ should parse extra stamina points (1 ms)
+        Initiative Advantage
+          ✓ should parse advantage on initiative rolls (2 ms)
+        Condition Immunity
+          ✓ should parse disease immunity (Divine Health) (1 ms)
+          ✓ should parse poison immunity (1 ms)
+        Carrying Capacity
+          ✓ should parse doubled carrying capacity (1 ms)
+        Skill Bonuses Equal to Proficiency
+          ✓ should parse skill bonus equal to proficiency bonus (2 ms)
+          ✓ should parse single skill bonus (Seek Truths) (1 ms)
+        Advantage on Saving Throws
+          ✓ should parse advantage against frightened (1 ms)
+          ✓ should parse advantage against prone (Stable Footing) (1 ms)
+        Tool Proficiencies
+          ✓ should parse healer's kit proficiency (2 ms)
+        Skill Proficiencies
+          ✓ should parse skill proficiency (Religion) (1 ms)
+          ✓ should parse skill proficiency (Survival) (1 ms)
+        Resistance from Features
+          ✓ should parse cold resistance (Tundra Explorer) (2 ms)
+          ✓ should parse psychic resistance (Shattered Mind) (1 ms)
+        Senses from Features
+          ✓ should parse 120ft darkvision (Night Vision) (1 ms)
+          ✓ should parse tremorsense (Ear to the Ground) (1 ms)
+    TGTT Sorcerer Specialties
+      ✓ should support Hot Air specialty (fire resistance) (1 ms)
+      ✓ should support Strange Traces specialty (advantage) (1 ms)
+    TGTT Passive Metamagic System
+      Metamagic Definitions
+        ✓ should have passive metamagic definitions (1 ms)
+        ✓ should have active metamagic definitions
+        ✓ should include TGTT-only active metamagics (1 ms)
+        ✓ should have correct TGTT metamagic costs (1 ms)
+      TGTT Metamagic Options Progression
+        ✓ should have unique TGTT progression (2/3/4/5/6/7 at levels 2/3/6/10/13/17) (1 ms)
+        ✓ should differ from XPHB progression
+      Tuning Passive Metamagics
+        ✓ should tune a passive metamagic (1 ms)
+        ✓ should not allow tuning active metamagics
+        ✓ should not allow tuning same metamagic twice
+        ✓ should track multiple tuned metamagics (1 ms)
+      Detuning Passive Metamagics
+        ✓ should detune a tuned metamagic
+        ✓ should return false when detuning non-tuned metamagic (1 ms)
+        ✓ should only remove the specified metamagic
+      Sorcery Point Locking
+        ✓ should lock SP when tuning metamagics (1 ms)
+        ✓ should calculate effective SP max (1 ms)
+        ✓ should free locked SP when detuning
+        ✓ should not allow tuning if insufficient effective SP
+        ✓ should correctly track SP through tune → detune → retune cycle (1 ms)
+        ✓ should reject tuning when current SP is less than cost
+      Metamagic Info
+        ✓ should return full metamagic info (1 ms)
+        ✓ should return null for unknown metamagic
+        ✓ should include tuned status in passive metamagic list (1 ms)
+      Modified Spell Stats from Tuned Passives
+        ✓ should return no changes when no metamagic tuned
+        ✓ should return no changes with null spellData (1 ms)
+        Distant Spell
+          ✓ should double range for a 30ft spell
+          ✓ should double range for a 120ft spell
+          ✓ should change Touch to 30 feet (1 ms)
+          ✓ should not modify Self range
+          ✓ should not modify range below 5ft
+        Extended Spell
+          ✓ should double a 1-minute duration (1 ms)
+          ✓ should double a 1-hour duration
+          ✓ should double a concentration duration and format original correctly (1 ms)
+          ✓ should cap at 24 hours
+          ✓ should not modify instantaneous duration
+          ✓ should not modify permanent duration (1 ms)
+        Multiple passives tuned simultaneously
+          ✓ should modify both range and duration when Distant and Extended tuned
+        Supple Spell notes
+          ✓ should add AoE note for 20ft cone spell (1 ms)
+          ✓ should not add note for point-range spell without AoE
+        Split Spell notes
+          ✓ should add split note for 15ft AoE spell (1 ms)
+        Static helpers
+          ✓ _durationToMinutes should convert rounds
+          ✓ _durationToMinutes should convert hours
+          ✓ _formatMinutes should format days
+          ✓ _formatMinutes should format hours plural
+          ✓ _formatMinutes should format minutes plural
+          ✓ _formatDuration should format concentration
+          ✓ _formatDuration should format instantaneous (1 ms)
+          ✓ _getSpellAreaSizeFromData should detect cone range type
+          ✓ _getSpellAreaSizeFromData should parse entries fallback
+          ✓ _getSpellAreaSizeFromData should return 0 for non-AoE
+    TGTT Cleric Specialties
+      ✓ should support Devotional Integrity specialty (charm immunity) (2 ms)
+      ✓ should support Divine Spark specialty (healing) (1 ms)
+      ✓ should support Numinous Awareness specialty (advantage) (1 ms)
+    TGTT Druid Specialties
+      ✓ should support Aquatic Delver specialty (swim speed) (2 ms)
+      ✓ should support Mountain Climber specialty (climb speed) (1 ms)
+      ✓ should support Tundra Explorer specialty (cold resistance) (1 ms)
+      Magician (Primal Order) Skill Bonuses
+        ✓ should grant WIS mod bonus to arcana and nature for TGTT Druid
+        ✓ should apply minimum +1 bonus even with low WIS (1 ms)
+        ✓ should push skillBonus effects for arcana and nature
+    TGTT Bard Specialties
+      ✓ should support Song of Rest specialty (healing) (2 ms)
+      ✓ should support Expertise specialty (skill expertise) (1 ms)
+    TGTT Wizard Specialties
+      ✓ should support Eidetic Memory specialty (advantage) (1 ms)
+      ✓ should support Presto, Prestidigitation specialty (darkvision) (1 ms)
+    TGTT Barbarian Specialties
+      ✓ should support Path of Lean Winters specialty (1 ms)
+      ✓ should support Path of Scorching Summers specialty (1 ms)
+      ✓ should support Path of Drowning Springs specialty (swim speed) (1 ms)
+    TGTT Subclasses
+      Monk Subclasses
+        ✓ should support Way of The Shackled subclass
+        ✓ should support Way of Debilitation subclass
+        ✓ should support Way of the Five Animals subclass
+      Paladin Subclasses
+        ✓ should support Oath of Inquisition subclass (1 ms)
+        ✓ should support Oath of Bastion subclass
+      Bard Subclasses
+        ✓ should support College of Jesters subclass
+        ✓ should support College of Surrealism subclass (1 ms)
+        ✓ should support College of Conduction subclass
+      Cleric Subclasses
+        ✓ should support Beauty Domain subclass
+        ✓ should support Blood Domain subclass (1 ms)
+        ✓ should support Darkness Domain subclass
+        ✓ should support Time Domain subclass
+        ✓ should support Madness Domain subclass (1 ms)
+      Rogue Subclasses
+        ✓ should support The Belly Dancer subclass
+        ✓ should support Gambler subclass (3 ms)
+        ✓ should support Trickster subclass
+      Sorcerer Subclasses
+        ✓ should support Heroic Soul subclass
+        ✓ should support Fiendish Bloodline subclass (1 ms)
+      Barbarian Subclasses
+        ✓ should support Path of the Chained Fury subclass
+        Chained Fury Chain Damage Scaling
+          ✓ should have 1d8 chain damage at level 3
+          ✓ should have 1d10 chain damage at level 6
+          ✓ should have 1d12 chain damage at level 10
+          ✓ should have 2d6 chain damage at level 14 (1 ms)
+        Chained Fury Subclass Features
+          ✓ should grant Chain Imprisonment at level 6
+          ✓ should grant Chain Control at level 10 (1 ms)
+          ✓ should grant Unchained Fury at level 14
+      Warlock Subclasses
+        ✓ should support The Horror patron subclass
+      Fighter Subclasses
+        ✓ should support The Warder subclass
+      Wizard Subclasses
+        ✓ should support Order of the Animal Accomplice subclass
+    Multiclass Scenarios with TGTT Classes
+      ✓ should support Dreamwalker/Fighter multiclass (1 ms)
+      ✓ should support Dreamwalker with standard PHB class multiclass
+      ✓ should combine features from both TGTT and standard classes
+    Edge Cases and Complex Scenarios
+      ✓ should handle TGTT class with XPHB-sourced features (1 ms)
+      ✓ should handle custom homebrew feature with data-defined effects (1 ms)
+      ✓ should handle a fully custom homebrew class not based on any standard class (2 ms)
+      ✓ should handle features with complex resist objects (2 ms)
+      ✓ should handle features that grant skill proficiencies (1 ms)
+      ✓ should handle features that grant tool proficiencies (1 ms)
+      ✓ should handle features that grant language proficiencies (1 ms)
+      ✓ should handle a level 20 Dreamwalker with all features and abilities (1 ms)
+    TGTT Subclass Feature Details
+      Cleric Domain Subclasses
+        Beauty Domain
+          ✓ should calculate Potent Spellcasting bonus at level 8
+          ✓ should set Beautiful Distraction at level 3 with 1 use
+          ✓ should calculate Heavenly Beauty DC at level 17 (1 ms)
+          ✓ should NOT have Potent Spellcasting before level 8
+          ✓ should NOT have Heavenly Beauty before level 17
+        Blood Domain
+          ✓ should calculate Blood Affinity uses from WIS modifier (1 ms)
+          ✓ should set Blood Affinity uses to minimum 1 with low WIS
+          ✓ should calculate Divine Strike as 1d8 necrotic at level 8
+          ✓ should increase Divine Strike to 2d8 at level 14 (1 ms)
+          ✓ should grant martial weapon proficiency effects
+          ✓ should grant Sanguine Boost at level 6
+          ✓ should grant Vampiric Mastery at level 17 (1 ms)
+        Darkness Domain
+          ✓ should grant 90ft darkvision from Eyes of Night
+          ✓ should apply darkvision 90ft via effects pipeline
+          ✓ should calculate Shroud of Darkness uses from WIS
+          ✓ should calculate Cloying Darkness damage scaling with level
+          ✓ should grant Night Terrors at level 6 with 8d4 damage
+          ✓ should grant Potent Spellcasting at level 8 (1 ms)
+          ✓ should grant Night Supreme at level 17 with 60ft range
+        Madness Domain
+          ✓ should grant Shattered Mind (psychic resistance) at level 3
+          ✓ should apply psychic resistance via effects pipeline (1 ms)
+          ✓ should grant Words of Chaos (free vicious mockery) at level 3
+          ✓ should grant Paranoia at level 6 with 2d4 damage
+          ✓ should calculate Mantle of Insanity uses from WIS at level 17 (1 ms)
+          ✓ should NOT have Paranoia before level 6
+        Time Domain
+          ✓ should grant Right on Time (+WIS to initiative) at level 3
+          ✓ should apply initiative bonus via effects pipeline (1 ms)
+          ✓ should calculate Chronological Interference uses from proficiency bonus
+          ✓ should calculate Eyes of the Future Past uses from WIS at level 6
+          ✓ should grant Temporal Mastery at level 17 (1 ms)
+          ✓ should scale Chronological Interference uses with level
+        Lust Domain
+          ✓ should grant Deception and Persuasion proficiency
+          ✓ should calculate Deepest Desires uses from WIS (1 ms)
+          ✓ should grant Enchanting Presence at level 6
+          ✓ should grant Potent Spellcasting at level 8
+          ✓ should grant Supplicant of the Flesh at level 17 (1 ms)
+        TGTT Cleric Domain Cross-Cutting Concerns
+          ✓ should share Channel Divinity DC across all TGTT domains
+          ✓ should have Channel Divinity uses progression for TGTT clerics (1 ms)
+          ✓ should track Potent Spellcasting bonus for 5 of 6 TGTT domains (1 ms)
+          ✓ Blood Domain should use Divine Strike instead of Potent Spellcasting
+      Paladin Oath Subclasses
+        Oath of Bastion
+          ✓ should grant Armor Bond at level 3 (1 ms)
+          ✓ should grant Shield of the Helpless Channel Divinity at level 3 (2 ms)
+          ✓ should grant Fortifying Aura at level 7 (1 ms)
+          ✓ should grant Indomitable Guardian with resistances at level 15 (1 ms)
+          ✓ should grant Eternal Bastion capstone at level 20 (1 ms)
+        Oath of Inquisition
+          ✓ should grant Arcane Sense at level 3 (1 ms)
+          ✓ should grant Suppressive Aura at level 7
+          ✓ should grant Unfazed Believer at level 15 (1 ms)
+          ✓ should grant Blessed Inquisitor capstone at level 20 (1 ms)
+      Rogue Subclasses
+        Belly Dancer
+          ✓ should grant Performance proficiency at level 3 (1 ms)
+          ✓ should grant Dance of the Country at level 3 (1 ms)
+          ✓ should grant Tantalizing Shivers at level 9 (1 ms)
+          ✓ should grant Fluid Step at level 13 (1 ms)
+          ✓ should grant Percussive Strike at level 17 (1 ms)
+          ✓ should calculate Snake Charmer AC bonus from CHA mod
+          ✓ should enforce minimum of 1 for Snake Charmer AC bonus
+          ✓ should include Snake Charmer AC bonus in getBonuses() effects
+          ✓ should grant Tantalizing Shivers at level 9
+          ✓ should grant Fluid Step at level 13
+          ✓ should calculate Percussive Strike DC at level 17
+        Gambler
+          ✓ should calculate Gambler's Tools and weapon options at level 3 (2 ms)
+          ✓ should not duplicate Gambler weapons on multiple calculations (1 ms)
+          ✓ should calculate unique rolling spellcasting modifier at level 3
+          ✓ should calculate 1/3 caster spell slots progression
+          ✓ should calculate cantrips known progression (1 ms)
+          ✓ should calculate Extra Luck uses (proficiency bonus) at level 9 (1 ms)
+          ✓ should calculate Versatile Gambler upgraded dice at level 13
+          ✓ should calculate Master of Fortune uses at level 17
+          ✓ should apply gaming set proficiencies via aggregator (1 ms)
+          rollGamblerPreparedSpells
+            ✓ should roll 2d4 for prepared spells at level 3
+            ✓ should roll 3d6 for prepared spells at level 13+
+            ✓ should store rolled total in state
+            ✓ should store roll details for display (1 ms)
+            ✓ should return null if character has no Gambler spellcasting
+          getMaxPreparedSpells for Gambler
+            ✓ should return dice formula before rolling
+            ✓ should return rolled total after rolling
+            ✓ should return 3d6 formula at level 13+ before rolling
+          resetGamblerPreparedRoll
+            ✓ should clear rolled prepared count on long rest
+            ✓ should clear prepared spells by default (clearPrepared=true) (1 ms)
+            ✓ should preserve prepared spells when clearPrepared=false
+          getGamblerCurrentPreparedCount
+            ✓ should count only prepared Gambler spells (1 ms)
+            ✓ should not count cantrips (level 0)
+          setGamblerPreparedCount
+            ✓ should manually set prepared count
+          Gambler Cantrip Management
+            ✓ should add cantrips with Gambler sourceClass via addSpell (level 0) (1 ms)
+            ✓ should track multiple Gambler cantrips up to cap
+            ✓ should remove Gambler cantrips via removeSpell (1 ms)
+            ✓ should not mix Gambler cantrips with other class cantrips (1 ms)
+            ✓ should increase cantrips known to 4 at level 10
+            ✓ should clear and re-add Gambler cantrips without affecting other cantrips (1 ms)
+          Gambler Spellcasting Integration (getSpellcastingInfo)
+            ✓ should return spellcasting info with type=prepared and isRolledPrepared=true (1 ms)
+            ✓ should report cantripsKnown from Gambler progression
+            ✓ should report preparedMax as rolled total if already rolled (1 ms)
+            ✓ should report preparedDice formula if not yet rolled
+            ✓ should return null before Gambler subclass (pure Rogue)
+          Gambler calculateSpellSlots Integration
+            ✓ should grant 1/3 caster spell slots at level 3 (1 ms)
+            ✓ should grant higher spell slots at higher levels
+            ✓ should contribute 1/3 to multiclass spell slots
+        Trickster
+          ✓ should calculate Trickster Dice progression
+          ✓ should calculate Tricks Known progression (1 ms)
+          ✓ should calculate Trick DC using max of DEX or INT
+          ✓ should calculate Quick Hands feature progression (1 ms)
+          ✓ should calculate Sticky Hands at level 9
+          ✓ should calculate The Switch range at level 13
+          ✓ should calculate Master of Mischief at level 17
+          ✓ should have hasTricksterTricks method
+          ✓ should return tricksterTricks in getFeatureCalculations
+          ✓ should return empty array when no tricks prepared
+          ✓ should return prepared Trickster Tricks with effects
+          ✓ should calculate DC using max of DEX or INT (1 ms)
+          ✓ should correctly identify save types for different tricks
+          ✓ should return null DC for tricks without saves (1 ms)
+          ✓ should correctly identify timing for different tricks (1 ms)
+          ✓ should get individual DC via getTricksterTrickDc method
+          ✓ should calculate tricks known via getTricksterTricksKnown
+          ✓ should calculate dice count via getTricksterDiceCount (1 ms)
+          ✓ should calculate all 11 Trickster Tricks correctly (2 ms)
+      Monk Subclasses
+        Way of Debilitation
+          ✓ should calculate Precise Strike methods known progression (1 ms)
+          ✓ should calculate Precise Strike base DC from WIS
+          ✓ should grant Deflect Strike at level 6 (1 ms)
+          ✓ should NOT have Deflect Strike before level 6
+          ✓ should grant Brace at level 11 with 1 ki cost
+          ✓ should calculate Battlefield Terror DC and range at level 17 (1 ms)
+          ✓ should use TGTT martial arts die progression (d6/d8/d10/d12)
+          ✓ should have hasPreciseStrike method
+          ✓ should return preciseStrikeMethods in getFeatureCalculations (1 ms)
+          ✓ should return empty array when no methods selected
+          ✓ should return selected Precise Strike methods with effects
+          ✓ should calculate DC modifiers for different methods (1 ms)
+          ✓ should calculate Air Draining Strike and Heart Bursting Punch with DC -6
+          ✓ should correctly identify save types for different methods (1 ms)
+          ✓ should calculate duration based on monk level for level-scaling methods (1 ms)
+          ✓ should return Pierce Defenses with no save (dc = null)
+          ✓ should get individual DC via getPreciseStrikeDc method (1 ms)
+          ✓ should calculate methods known via getPreciseStrikeMethodsKnown
+          ✓ should calculate all 11 Precise Strike methods correctly (1 ms)
+        Way of the Five Animals
+          ✓ should set Animal Style and Versatility flags at level 3
+          ✓ should calculate Crane parry AC bonus and cost
+          ✓ should include Crane Parry AC bonus in getBonuses() effects
+          ✓ should calculate Tiger roar DC at level 6
+          ✓ should set Crane Deflect dice to 2d10 at level 11 (1 ms)
+          ✓ should calculate Feral Mastery values at level 17
+          ✓ should NOT have Primal Fury before level 6 (1 ms)
+          ✓ should have proper level gating for all tiers
+        Way of the Shackled
+          ✓ should set Hidden Arts flag and grant skill proficiencies (1 ms)
+          ✓ should apply Acrobatics and Performance proficiency via effects (1 ms)
+          ✓ should calculate Rhythmic Step cost at level 3 (1 ms)
+          ✓ should calculate Rhythmic Step AC bonus from CHA mod
+          ✓ should enforce minimum of 1 for Rhythmic Step AC bonus
+          ✓ should include Rhythmic Step AC bonus in getBonuses() effects
+          ✓ should grant Balanced Whirlwind at level 6
+          ✓ should grant Pendulum Swing at level 11 (1 ms)
+          ✓ should calculate Maestro Kick costs at level 17
+          ✓ should NOT have Maestro Kick before level 17
+        TGTT Monk Cross-Cutting Concerns
+          ✓ should share Ki/Focus DC formula across all TGTT monk subclasses (1 ms)
+          ✓ should use 2024-style ki points (Focus Points) for TGTT monks
+          ✓ should have TGTT-style Deflect Attacks (not just Missiles) for all subclasses (1 ms)
+      Fighter Subclasses
+        The Warder
+          ✓ should grant skill proficiency from Bonus Proficiency at level 3 (1 ms)
+          ✓ should grant Warder Bond at level 3 (1 ms)
+          ✓ should grant Bodyguard at level 3 (1 ms)
+          ✓ should grant Warding Senses at level 7 (1 ms)
+          ✓ should grant Warding Blow at level 10 (1 ms)
+          ✓ should grant Warder's Duty at level 15 (1 ms)
+          ✓ should grant Perfect Sync capstone at level 18 (1 ms)
+        Arcane Archer TGTT
+          ✓ should use CON-based DC for TGTT Arcane Archer
+          ✓ should use INT-based DC for official Arcane Archer
+          ✓ should grant proficiency bonus uses for TGTT Arcane Archer (1 ms)
+          ✓ should grant 2 uses for official Arcane Archer
+      Barbarian Subclasses
+        Path of the Chained Fury
+          ✓ should grant Manifest Chains at level 3 (1 ms)
+          ✓ should grant Chain Imprisonment at level 6 (1 ms)
+          ✓ should grant Chain Control at level 10 (2 ms)
+          ✓ should grant Unchained Fury capstone at level 14 (1 ms)
+      Sorcerer Subclasses
+        Fiendish Bloodline
+          ✓ should grant Summoner's Magic at level 1 (1 ms)
+          ✓ should grant Infernal Companion at level 1 (1 ms)
+          ✓ should grant Hellish Summoner at level 6 (1 ms)
+          ✓ should grant Dark Dominion at level 14 (1 ms)
+          ✓ should grant Infernal Legion capstone at level 18 (1 ms)
+        Heroic Soul
+          ✓ should grant Over Soul at level 1 (1 ms)
+          ✓ should grant Legendary Weapon at level 1 (1 ms)
+          ✓ should grant Hero's Reflex at level 6 (1 ms)
+          ✓ should grant Manifest Legend at level 14 (1 ms)
+          ✓ should grant Eternal Hero capstone at level 18 (1 ms)
+        Sun Bloodline
+          ✓ should have hasGlimpseOfTheSun flag at level 1
+          ✓ should have hasGlimpseBlind at level 1 (1 ms)
+          ✓ should have hasSummersDefiantBlood at level 1
+          ✓ should have hasSunSpells at level 1
+          Sunlit Path (Level 6)
+            ✓ should have hasSunlitPath flag
+            ✓ should grant +15 walking speed
+            ✓ should grant radiant resistance
+            ✓ should grant overland travel bonus (1 ms)
+          Grasping the Sun (Level 14)
+            ✓ should have hasGraspingTheSun flag
+            ✓ should reduce damage by sorcerer level
+            ✓ should deal radiant damage equal to sorcerer level (1 ms)
+          Bright Zenith (Level 18)
+            ✓ should have hasBrightZenith flag
+            ✓ should cost 6 sorcery points
+            ✓ should have 40ft blind range and 100ft blindsight
+            ✓ should last 1 minute (1 ms)
+          Effect Application
+            ✓ should apply +15 walking speed effect at level 6
+            ✓ should apply radiant resistance at level 6
+            ✓ should not apply Sunlit Path effects before level 6 (1 ms)
+          Subclass Spells (additionalSpells)
+            ✓ should return innate Light cantrip from getSubclassAlwaysPreparedSpells
+            ✓ should return level-gated known spells at level 3 (1 ms)
+            ✓ should not return level 5 spells at level 3 (1 ms)
+            ✓ should return all spells at level 9
+            ✓ should populate innate cantrip into cantripsKnown via populateSubclassSpells
+            ✓ should populate known spells into spellsKnown via populateSubclassSpells (1 ms)
+      Warlock Subclasses
+        The Horror
+          ✓ should grant Devastating Strike at level 1 (1 ms)
+          ✓ should grant Lone Survivor at level 6 (1 ms)
+          ✓ should grant CON save proficiency from Unearthly Manifestation at level 6 (1 ms)
+          ✓ should grant Degenerating Touch at level 10 (1 ms)
+          ✓ should grant Imploding Infestation at level 14 (1 ms)
+      Wizard Subclasses
+        Order of the Animal Accomplice
+          ✓ should calculate Improved Familiar stats at level 3 (1 ms)
+          ✓ should scale familiar Intelligence with proficiency bonus
+          ✓ should scale familiar HP with wizard level
+          ✓ should calculate Wizard's Apprentice features at level 6 (1 ms)
+          ✓ should NOT have Wizard's Apprentice before level 6
+          ✓ should calculate Shared Senses at level 10
+          ✓ should calculate Tiny Wizard at level 14 (1 ms)
+          ✓ should NOT have Tiny Wizard before level 14
+      Bard Subclasses
+        College of Jesters
+          ✓ should calculate Jester's Acts Known progression (1 ms)
+          ✓ should calculate Act DC using Performance skill bonus
+          ✓ should calculate Act DC with Performance expertise (1 ms)
+          ✓ should calculate Bonus Proficiencies at level 3
+          ✓ should calculate Gifted Acrobat features at level 6
+          ✓ should calculate Unparalleled Skill at level 6
+          ✓ should calculate Jester's Privilege at level 14
+          ✓ should apply Performance proficiency via aggregator (1 ms)
+          ✓ should apply climbing speed via aggregator at level 6
+          ✓ should have hasJesterActs method
+          ✓ should return jesterActs in getFeatureCalculations (1 ms)
+          ✓ should return empty array when no acts known
+          ✓ should return known Jester's Acts with effects
+          ✓ should calculate DC with Performance expertise
+          ✓ should correctly identify save types for different acts
+          ✓ should return null DC for acts without saves (1 ms)
+          ✓ should correctly identify timing for different acts
+          ✓ should track Bardic Inspiration cost for acts that use it (1 ms)
+          ✓ should track spells granted by acts
+          ✓ should get individual DC via getJesterActDc method (1 ms)
+          ✓ should calculate acts known via getJesterActsKnown
+          ✓ should calculate Jester's Agility AC bonus using proficiency
+          ✓ should calculate all 13 Jester's Acts correctly (2 ms)
+        College of Surrealism
+          ✓ should calculate Lucid Insight WIS save bonus at level 3
+          ✓ should scale Lucid Insight bonus with CHA
+          ✓ should calculate Warped Reality save DC at level 3 (1 ms)
+          ✓ should calculate Canvas of the Mind perception DC at level 6
+          ✓ should NOT have Canvas of the Mind before level 6
+          ✓ should calculate Guiding Whispers at level 14
+          ✓ should apply Lucid Insight save bonus via aggregator (1 ms)
+        College of Conduction
+          ✓ should calculate Maestro Principiante sub-features at level 3
+          ✓ should calculate Adagio targets at level 6 with CHA mod
+          ✓ should enforce minimum 1 target for Adagio with low CHA
+          ✓ should NOT have Adagio before level 6
+          ✓ should calculate Prestissimo targets and uses at level 14
+          ✓ should NOT have Prestissimo before level 14
+      Rogue Subclasses - Calculations
+        Belly Dancer
+          ✓ should calculate Dance of the Country uses based on proficiency bonus (1 ms)
+          ✓ should calculate Snake Charmer AC bonus based on CHA modifier
+          ✓ should grant Tantalizing Shivers at level 9 (1 ms)
+          ✓ should calculate Percussive Strike DC at level 17
+          ✓ should not grant level 9+ features before appropriate level
+      Fighter Subclasses - Calculations
+        The Warder
+          ✓ should calculate Warder Bond range progression (1 ms)
+          ✓ should grant level 3 features (Bonus Proficiency, Bodyguard, Combat Methods)
+          ✓ should calculate Warding Senses uses at level 7 (1 ms)
+          ✓ should grant Warding Blow and save advantages at level 10
+          ✓ should grant Warder's Duty and telepathic bond at level 15 (1 ms)
+          ✓ should grant Perfect Sync at level 18
+          ✓ should grant saving throw advantages progressively (1 ms)
+      Paladin Subclasses - Calculations
+        Oath of Bastion
+          ✓ should not grant level 7+ features before appropriate level
+          Level 3 Features
+            ✓ should calculate Sentry's Lingering Aura DC
+            ✓ should grant Shield of the Helpless
+            ✓ should grant Armor Bond (1 ms)
+          Level 7 Features
+            ✓ should calculate Fortifying Aura range progression
+            ✓ should grant Bastion's Sustenance
+          Level 15 Feature: Indomitable Guardian
+            ✓ should grant Indomitable Guardian with BPS resistance
+            ✓ should grant Unstoppable Advance
+            ✓ should grant shield and armor protection (1 ms)
+          Level 20 Feature: Eternal Bastion
+            ✓ should grant Eternal Bastion with immunities
+            ✓ should calculate Unyielding Ward properties
+            ✓ should grant Undying Duty
+        Oath of Inquisition
+          ✓ should calculate Defy the Heretics threshold based on level (1 ms)
+          ✓ should calculate Suppressive Aura range and damage progression
+          ✓ should grant Unfazed Believer and Divine Endurance HP boost at level 15
+          ✓ should calculate Blessed Inquisitor damage bonus at level 20
+          ✓ should grant Arcane Sense with CHA override for Arcana
+      Warlock Subclasses - Calculations
+        The Horror
+          ✓ should calculate Devastating Strike damage and push scaling (1 ms)
+          ✓ should calculate Devastating Strike uses based on CON
+          ✓ should calculate Devastating Strike AC
+          ✓ should grant level 6+ features at appropriate levels (1 ms)
+          ✓ should include Devastating Strike AC formula in getBonuses() effects (1 ms)
+          ✓ should include CON save proficiency in getBonuses() effects at level 6
+          ✓ should include magical unarmed strikes in getBonuses() effects at level 6
+          ✓ should include Lone Survivor condition immunity in getBonuses() effects
+      Sorcerer Subclasses - Calculations
+        Heroic Soul
+          ✓ should calculate Over Soul uses based on proficiency (1 ms)
+          ✓ should calculate Legendary Weapon options
+          ✓ should calculate Hero's Reflex at level 6 (1 ms)
+          ✓ should calculate Manifest Legend at level 14
+          ✓ should calculate Eternal Hero heal at level 18
+          ✓ should include Legendary Weapon property in getBonuses() effects
+          ✓ should include Manifest Legend Extra Attack in getBonuses() effects
+        Fiendish Bloodline
+          ✓ should calculate Summoned Ferocity bonus based on CHA
+          ✓ should grant Infernal Companion features (1 ms)
+          ✓ should calculate Hellish Summoner at level 6
+          ✓ should calculate Dark Dominion at level 14 (1 ms)
+          ✓ should calculate Infernal Legion at level 18
+          ✓ should not grant level 6+ features before appropriate level
+      Druid Subclasses
+        Circle of the Zodiac
+          ✓ should grant Zodiac Form at level 3 (2 ms)
+          ✓ should support Griffon zodiac with fear save advantage (1 ms)
+          ✓ should support Bulette zodiac with AC bonus (1 ms)
+          ✓ should grant Zodiac Form: Star Week at level 10 (1 ms)
+          ✓ should support Hillstep Turtle with CON save advantage (1 ms)
+          ✓ should support Bat zodiac with blindsight
+          ✓ should grant Full Zodiac capstone at level 14 (1 ms)
+        Zodiac Form Calculations (TGTT Circle of Stars)
+          Base Zodiac Form (Level 3)
+            ✓ should grant Zodiac Form for TGTT Stars druid (1 ms)
+            ✓ should grant Starry Form for official Stars druid
+          Month Constellations (Level 3)
+            ✓ should calculate Beaver damage reduction (1 ms)
+            ✓ should calculate Aurochs STR bonus and size
+            ✓ should calculate Horse speed multiplier (1 ms)
+            ✓ should calculate Octopus reach bonus
+            ✓ should calculate Peacock targeting save DC (1 ms)
+            ✓ should calculate Bee damage at low levels
+            ✓ should calculate Hound mark range
+            ✓ should calculate Cat perception bonus (1 ms)
+            ✓ should grant Griffon bonus attack
+            ✓ should calculate Bulette AC and burrow (1 ms)
+            ✓ should calculate Phoenix stabilize heal
+          Bee Damage Scaling
+            ✓ should scale Bee damage to 2d8 at level 10
+            ✓ should scale Bee damage to 3d8 at level 14
+          Star Week Constellations (Level 10)
+            ✓ should grant Star Week at level 10 (1 ms)
+            ✓ should calculate Sequoia temp HP
+            ✓ should calculate Unicorn heal bonus
+            ✓ should calculate Raven reaction range
+            ✓ should calculate Kitsune teleport distance (1 ms)
+            ✓ should grant Hillstep Turtle CON advantage
+            ✓ should calculate Owlbear extra damage
+            ✓ should calculate Almiraj recovery die
+            ✓ should calculate Bat blindsight (1 ms)
+            ✓ should calculate Pseudodragon min roll
+            ✓ should calculate Aurumvorax temp HP
+            ✓ should grant Salmon auto-succeed save (1 ms)
+            ✓ should calculate Lizard heal bonus (same as Unicorn)
+          Star Week Not Available Before Level 10
+            ✓ should not have Star Week at level 9 (1 ms)
+          Full Zodiac (Level 14)
+            ✓ should grant Full Zodiac at level 14 (1 ms)
+            ✓ should not have Full Zodiac before level 14
+          Bulette AC Scaling
+            ✓ should calculate AC bonus at various levels (1 ms)
+    Complete TGTT Character Builds
+      ✓ should support a complete level 17 Madness Domain Cleric with all features
+      ✓ should support a complete level 20 Oath of Bastion Paladin with all features
+      ✓ should support a complete level 17 Belly Dancer Rogue with all features (1 ms)
+      ✓ should support a multiclass Dreamwalker 5 / Heroic Soul Sorcerer 5 (1 ms)
+    TGTT Race Features
+      Thelemerian Dragonborn - Dragon Scales
+        ✓ should calculate natural armor AC as 13 + DEX when unarmored
+        ✓ should use armor AC when armor provides higher AC (1 ms)
+        ✓ should use natural armor when it provides higher AC than light armor
+        ✓ should scale AC with Dexterity modifier changes
+      Thelemerian Dragonborn - Ancestral Affinity
+        ✓ should grant psychic resistance
+        ✓ should grant advantage on frightened saves
+      Half-Ogre - Ogre Toughness
+        ✓ should add +1 HP per level at level 1 (1 ms)
+        ✓ should scale HP bonus with level
+        ✓ should stack with Constitution modifier
+      Half-Ogre - Powerful Build
+        ✓ should double carry capacity (1 ms)
+      Half-Ogre - Enraged
+        ✓ should have Enraged feature with crit range expansion
+        ✓ should have 1 use per long rest (1 ms)
+        ✓ should last 1 minute and cost 1 exhaustion
+        ✓ should track HP eligibility state
+      Nyuidj - Dual Mind
+        ✓ should grant advantage on Wisdom saving throws (1 ms)
+      Nyuidj - Mental Discipline
+        ✓ should grant psychic resistance
+      Gnoll - Carrion Feeder
+        ✓ should grant advantage on disease saves
+      Gnoll - Thrill of the Hunt
+        ✓ should have Thrill of the Hunt feature (1 ms)
+        ✓ should scale mark duration with proficiency bonus
+        ✓ should have 30ft ally reaction range
+        ✓ should have 1 use per long rest (1 ms)
+      Gnoll - Rampage
+        ✓ should have Rampage feature
+        ✓ should calculate move distance as half speed (1 ms)
+        ✓ should calculate bite attack bonus
+      Rangda Tiefling - Mental Fortitude
+        ✓ should grant psychic resistance
+      Rangda Tiefling - Dark Queen's Blessing
+        ✓ should grant advantage on INT, WIS, CHA saves vs magic (1 ms)
+      Mara Tiefling - Warm Embrace
+        ✓ should grant cold resistance
+      Mara Tiefling - Temptation's Guidance
+        ✓ should grant Persuasion expertise
+      Asmodeus Tiefling - Infernal Luck
+        ✓ should have Infernal Luck feature (1 ms)
+        ✓ should have 1 use per long rest
+      Combined Race Features
+        ✓ should correctly combine Dragon Scales AC with shield
+        ✓ should stack Ogre Toughness with Draconic Resilience HP bonus (1 ms)
+      Race Scaling Calculations
+        Genasi Elemental Empowerment
+          ✓ should scale damage dice with proficiency bonus
+          ✓ should scale at higher proficiency levels
+          ✓ should work with Fire Genasi subrace (1 ms)
+        Dragonborn Breath Weapon
+          ✓ should calculate Terrifying Exhalation DC correctly
+          ✓ should scale breath damage with level tiers (1 ms)
+          ✓ should unlock aura abilities at level 5
+        Nyuidj Mind Link
+          ✓ should calculate Mind Link range based on level
+          ✓ should scale Mind Link range with multiclassing
+          ✓ should work at level 1
+        Tiefling Step Abilities
+          ✓ should calculate Step of Feywild DC (CHA-based)
+          ✓ should calculate Step of Shadowfell DC (INT-based) (1 ms)
+          ✓ should not unlock Step DCs before level 3
+          ✓ should unlock Step DCs at level 3
+    TGTT Feats
+      Lore Mastery
+        ✓ should be recognized as a TGTT feat (1 ms)
+        ✓ should set hasLoreMastery flag in calculations
+        ✓ should bump existing lore skill bonuses by +2 in increase mode (1 ms)
+        ✓ should grant new lore skills at +2 in grant mode (1 ms)
+        ✓ should be retakable (second instance with different picks)
+      Spellsword Technique
+        ✓ should be recognized as a TGTT feat
+        ✓ should set hasSpellswordTechnique flag (1 ms)
+        ✓ should provide 1d6 bonus damage
+        ✓ should provide damage type lookup by spell school
+        ✓ should return physical damage types for conjuration/transmutation (1 ms)
+        ✓ should return varies/force for evocation
+      Whip Master
+        ✓ should be recognized as a TGTT feat
+        ✓ should set hasWhipMaster flag
+        ✓ should enable bonus action whip attack
+        ✓ should enable grapple/shove with whip (1 ms)
+        ✓ should enable utility actions with whip
+        ✓ should track bullwhip reach (20 feet)
+      Dreamer
+        ✓ should be recognized as a TGTT feat
+        ✓ should set hasDreamerFeat flag
+        ✓ should track maximum Dreamwalker abilities (2)
+        ✓ should support ability score increase via abilityBonus
+        ✓ should allow adding Dreamwalker abilities as features (2 ms)
+        ✓ should integrate Dreamwalker abilities with Lucid Focus Die if present
+      Dreamwalker Abilities (DW:C / DW:S)
+        Core Ability Detection (DW:C)
+          ✓ should detect Dreamwalk as a DW:C ability (2 ms)
+          ✓ should detect Dreamwatch as a DW:C ability (1 ms)
+          ✓ should detect Dreambend as a DW:C ability
+        Special Ability Detection (DW:S)
+          ✓ should detect Dreamjump as a DW:S ability
+          ✓ should detect Dreamforge as a DW:S ability (1 ms)
+        getDreamwalkerAbilities()
+          ✓ should return array of abilities with parsed effects (2 ms)
+          ✓ should correctly identify core vs special abilities (1 ms)
+          ✓ should return empty array when no DW abilities (1 ms)
+          ✓ should not include non-DW features
+        Prerequisite Validation
+          ✓ should return no prerequisites for core abilities (1 ms)
+          ✓ should check Dreamjump requires Dreamwalk (1 ms)
+          ✓ should check Dreamake requires Dreambend AND Dreamforge (2 ms)
+          ✓ should check Dreamveil requires Dreamwatch AND Dreamwalk (1 ms)
+          ✓ should validate prerequisites and report errors (1 ms)
+          ✓ should return empty errors when all prerequisites are met (2 ms)
+        Ability Counts
+          ✓ should count core and special abilities separately (3 ms)
+        Max Abilities Calculation
+          ✓ should return 2 for Dreamer feat
+          ✓ should return 2 for Nyuidj race
+          ✓ should return 2 for Dreamwalker class level 1
+          ✓ should return 4 for Dreamwalker class level 4
+          ✓ should return 6 for Dreamwalker class level 7
+          ✓ should return 8 for Dreamwalker class level 9+ (1 ms)
+          ✓ should combine sources (Dreamer + Nyuidj)
+          ✓ should combine sources (Dreamwalker class + Dreamer feat)
+        Feature Calculations Integration
+          ✓ should set hasDreamwalkerAbilities flag (1 ms)
+          ✓ should include abilities array in calculations (1 ms)
+          ✓ should track specific ability flags (2 ms)
+          ✓ should include prerequisite errors in calculations (1 ms)
+        Ability Effect Parsing
+          ✓ should detect concentration check requirement (1 ms)
+          ✓ should parse base DC from description
+          ✓ should detect familiarity modifier (1 ms)
+          ✓ should detect distance modifier (1 ms)
+          ✓ should detect relationship modifier (1 ms)
+        Integration with Dreamwalker Class
+          ✓ should work with Dreamwalker class Dream DC (1 ms)
+          ✓ should work with Lucid Focus Die (1 ms)
+      Spell Scribing Adept
+        ✓ should be recognized as a TGTT feat (basic tracking)
+    TGTT Battle Tactics
+      Detection
+        ✓ should detect BT optional features (2 ms)
+        ✓ should return false when no BT features
+        ✓ should get list of learned Battle Tactics
+      Attack Bonuses
+        ✓ should provide +2 ranged conditional from High Ground
+        ✓ should provide +2 melee conditional from Sweeping Blows (1 ms)
+        ✓ should provide +2 melee conditional from Hammer and Anvil
+        ✓ should provide +2 melee conditional from Flanking
+        ✓ should return all conditionals when attackType is null
+      Feature Calculations
+        ✓ should set hasBattleTactics flag (1 ms)
+        ✓ should track specific tactics with hasX flags
+        ✓ should collect conditional attack modifiers in calculations (1 ms)
+      Fighter Level Prerequisites
+        ✓ should check Fighter level for Daring Feint (level 9)
+        ✓ should enable Daring Feint at Fighter level 9 (1 ms)
+        ✓ should enable Eye of the Storm at Fighter level 7
+        ✓ should enable Dying Surge at Fighter level 5
+        ✓ should NOT enable Dying Surge at Fighter level 4 (1 ms)
+        ✓ should use meetsBattleTacticPrerequisite helper
+      Combat Reactions
+        ✓ should list available combat reactions
+        ✓ should exclude reactions that don't meet level prerequisites (1 ms)
+        ✓ should include reaction details
+      Critical Range
+        ✓ should return default crit range of 20
+        ✓ should return Champion Fighter crit range (1 ms)
+        ✓ should return improved crit range for high-level Champion
+      Integration
+        ✓ should work with multiclass Fighter
+        ✓ should combine with Combat Methods system (1 ms)
+    Phase 5 - Monk Specialty System
+      Adept Speed Stacking
+        ✓ should stack Adept Speed when chosen at different levels (1 ms)
+        ✓ should set correct calculation flags for multiple Adept Speed selections (2 ms)
+        ✓ should not add duplicate Adept Speed at the same level (1 ms)
+      Sixth Sense - WIS for INT Skills
+        ✓ should create abilitySwap modifiers for all INT skills (2 ms)
+        ✓ should use WIS for INT skills when WIS is higher (2 ms)
+        ✓ should keep INT when INT is higher than WIS (1 ms)
+        ✓ should not affect non-INT skills (1 ms)
+        ✓ should set calculation flags (1 ms)
+      Shadow Walk Classification
+        ✓ should classify Shadow Walk as combat, not activatable (1 ms)
+        ✓ should set calculation flags (1 ms)
+      Specialty Calculation Flags
+        ✓ should set Perfect Flow calculation flags (1 ms)
+        ✓ should set Instant Step calculation flags (1 ms)
+        ✓ should set Wall Walk calculation flags (1 ms)
+        ✓ should set Agile Acrobat calculation flags (2 ms)
+      Ability Swap - Generic Pipeline
+        ✓ should apply Nimble Athlete DEX-for-STR swap to Athletics (1 ms)
+        ✓ should apply Power Tumble STR-for-DEX swap to Acrobatics (1 ms)
+    Nyuidj Race (TGTT)
+      Auto-granted Dreamwalk feature
+        ✓ should detect dreamwalker abilities when Dreamwalk is added via raceSource
+        ✓ should include the auto-granted Dreamwalk in getDreamwalkerAbilities() (1 ms)
+      Chosen Dreamwalker Ability (DW:C/DW:S pool)
+        ✓ should detect two dreamwalker abilities with Dreamwalk auto-grant + one choice (2 ms)
+        ✓ should allow choosing Dreamjump (prereq Dreamwalk satisfied by auto-grant) (2 ms)
+        ✓ should allow choosing Daydream (prereq Dreamwalk satisfied by auto-grant) (2 ms)
+    Spell Picker TGTT Filters
+      applyThelemarSpellRarity
+        ✓ should tag official spells as common + legal when setting enabled (1 ms)
+        ✓ should tag homebrew spells as uncommon + legal
+        ✓ should not overwrite existing rarity/legality tags
+        ✓ should not mutate original spell objects (1 ms)
+        ✓ should skip tagging when setting is disabled
+        ✓ should default to enabled when setting is not explicitly set
+        ✓ should handle mix of official and homebrew spells (1 ms)
+        ✓ should handle empty array
+      getFilteredSpellData integration
+        ✓ should apply rarity tags through the centralized page method
+        ✓ should combine priority filtering with rarity tagging (1 ms)
+      double-application guard
+        ✓ applyThelemarSpellRarity should not double-apply rarity tags
+    TGTT Filter Centralization Guards
+      ✓ spell consumer files should not call filterByAllowedSources directly for spells (8 ms)
+      ✓ spell consumer files should not call applyThelemarSpellRarity inline for picker data (7 ms)
+      ✓ getFilteredSpellData calls should not use optional chaining (6 ms)
+
+Test Suites: 3 passed, 3 total
+Tests:       914 passed, 914 total
+Snapshots:   0 total
+Time:        1.895 s, estimated 2 s
+Ran all test suites matching test/jest/charactersheet/CharacterSheetFeatOptionalFeatures.test.js|test/jest/charactersheet/CharacterSheetLevelHistory.test.js|test/jest/charactersheet/CharacterSheetTGTT.test.js.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?

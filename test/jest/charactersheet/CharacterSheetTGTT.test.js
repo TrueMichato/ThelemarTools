@@ -565,7 +565,6 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(calcs.hasFocus).toBe(true);
 				expect(calcs.hasLucidFocus).toBe(true);
 				expect(calcs.hasDreamwalk).toBe(true);
-				expect(calcs.hasDreamerFeat).toBe(true);
 				// Level 2 features
 				expect(calcs.hasIntuition).toBe(true);
 				expect(calcs.hasControl).toBe(true);

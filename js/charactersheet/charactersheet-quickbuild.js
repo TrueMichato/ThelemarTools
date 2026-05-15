@@ -1543,7 +1543,7 @@ class CharacterSheetQuickBuild {
 		}
 
 		if (!sel.featChoices) {
-			sel.featChoices = {skills: [], languages: [], tools: [], ability: null, expertise: [], spellList: null, cantrips: [], spells: []};
+			sel.featChoices = {skills: [], languages: [], tools: [], ability: null, expertise: [], spellList: null, cantrips: [], spells: [], optionalFeatures: []};
 		}
 
 		const search = e_({outer: `<input type="text" class="ve-form-control ve-input-sm mb-1" placeholder="Search ${isEpicBoon ? "boons" : "feats"}...">`});
@@ -1552,7 +1552,7 @@ class CharacterSheetQuickBuild {
 
 		// Helper to detect if feat has choices
 		const getFeatChoices = (feat) => {
-			const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null, spells: null};
+			const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null, spells: null, optionalFeatures: null};
 
 			// Check skill choices
 			if (feat.skillProficiencies) {
@@ -1636,6 +1636,33 @@ class CharacterSheetQuickBuild {
 						break;
 					}
 				}
+			}
+
+			const featOptSpecs = CharacterSheetClassUtils.getFeatOptionalFeatureChoiceSpec(feat);
+			if (featOptSpecs?.length) {
+				const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
+				const settings = this._state.getSettings() || {};
+				const showAll = settings.showAllOptFeatureVersions || false;
+				const enableTgtt = !!settings.enableTgtt;
+				const dedupedOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
+				const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(dedupedOptFeatures, {enableTgtt});
+				const alreadyKnown = this._state.getFeatures().filter(f => f.featureType === "Optional Feature");
+				const prereqContext = {
+					classes: this._state.getClasses(),
+					totalLevel: this._state.getTotalLevel(),
+					existingFeatures: alreadyKnown,
+					cantrips: this._state.getCantripsKnown?.() || [],
+					spells: this._state.getSpellsKnown?.() || [],
+				};
+
+				choices.optionalFeatures = featOptSpecs.map(spec => ({
+					...spec,
+					available: CharacterSheetClassUtils.getFeatOptionalFeatureOptions(allOptFeatures, {
+						featureTypes: spec.featureTypes,
+						prereqContext,
+						alreadyKnown,
+					}),
+				}));
 			}
 
 			// Check spell choices (from additionalSpells)
@@ -1730,7 +1757,7 @@ class CharacterSheetQuickBuild {
 			if (!sel.feat) return;
 
 			const choices = getFeatChoices(sel.feat);
-			const hasChoices = choices.skills || choices.languages || choices.tools || choices.ability || choices.expertise || choices.spells;
+			const hasChoices = choices.skills || choices.languages || choices.tools || choices.ability || choices.expertise || choices.spells || choices.optionalFeatures?.length;
 			if (!hasChoices) return;
 
 			choicesContainer.append(e_({outer: `<div class="ve-small ve-bold mb-1">Additional Choices for ${sel.feat.name}:</div>`}));
@@ -1879,6 +1906,64 @@ class CharacterSheetQuickBuild {
 				toolSection.append(toolGrid);
 				toolSection.append(e_({outer: `<div class="ve-small ve-muted mt-1">Selected: ${sel.featChoices.tools.length}/${choices.tools.count}</div>`}));
 				choicesContainer.append(toolSection);
+			}
+
+			if (choices.optionalFeatures?.length) {
+				choices.optionalFeatures.forEach(group => {
+					const section = e_({outer: `<div class="mb-2"></div>`});
+					section.append(e_({outer: `<label class="ve-small">Choose ${group.count} ${group.name}:</label>`}));
+					const listEl = e_({outer: `<div class="ve-flex-col gap-1 mt-1"></div>`});
+					let groupState = sel.featChoices.optionalFeatures.find(it => it.name === group.name && it.featureTypes.join("|") === group.featureTypes.join("|"));
+					if (!groupState) {
+						groupState = {name: group.name, featureTypes: [...group.featureTypes], picks: []};
+						sel.featChoices.optionalFeatures.push(groupState);
+					}
+
+					const renderOptGroup = () => {
+						listEl.innerHTML = "";
+						group.available.forEach(opt => {
+							const isSelected = groupState.picks.some(p => p.name === opt.name && p.source === opt.source);
+							const isDisabled = !opt._selectable && !isSelected;
+							const knownBadge = opt._alreadyKnown ? ` <span class="badge badge-success ml-1">Known${opt._timesKnown > 1 ? ` ×${opt._timesKnown}` : ""}</span>` : "";
+							const repeatBadge = opt._repeatable ? ` <span class="badge badge-info ml-1">Repeatable</span>` : "";
+							const reqBadge = !opt._meetsPrereqs && opt._prereqReasons?.length ? ` <span class="badge badge-warning ml-1">${opt._prereqReasons.join(", ")}</span>` : "";
+							const row = e_({outer: `<label class="d-block mb-1${isDisabled ? " ve-muted" : ""}" style="cursor:${isDisabled ? "not-allowed" : "pointer"};"><input type="checkbox" class="mr-2" ${isSelected ? "checked" : ""} ${isDisabled ? "disabled" : ""}><span class="opt-name"></span>${knownBadge}${repeatBadge}${reqBadge} <span class="ve-muted ve-small">(${Parser.sourceJsonToAbv(opt.source)})</span></label>`});
+							const optName = row.querySelector(".opt-name");
+							try {
+								const resolvedSource = this._page.resolveOptionalFeatureSource(opt.name, [opt.source, Parser.SRC_TGTT, Parser.SRC_XPHB, Parser.SRC_PHB]);
+								const page = CharacterSheetClassUtils.isCombatMethod(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+								optName.innerHTML = CharacterSheetPage.getHoverLink(page, opt.name, resolvedSource);
+							} catch {
+								optName.innerHTML = `<strong>${opt.name}</strong>`;
+							}
+							row.querySelector("input")?.addEventListener("change", evt => {
+								if (evt.target.checked) {
+									if (groupState.picks.length >= group.count) {
+										evt.target.checked = false;
+										JqueryUtil.doToast({type: "warning", content: `You can only choose ${group.count} ${group.name}.`});
+										return;
+									}
+									groupState.picks.push({
+										name: opt.name,
+										source: this._page.resolveOptionalFeatureSource?.(opt.name, [opt.source, Parser.SRC_TGTT, Parser.SRC_XPHB, Parser.SRC_PHB]) || opt.source,
+										description: opt.entries ? Renderer.get().render({type: "entries", entries: opt.entries}) : "",
+										featureTypes: opt.featureType || [],
+									});
+								} else {
+									groupState.picks = groupState.picks.filter(p => !(p.name === opt.name && p.source === opt.source));
+								}
+								section.querySelector(".opt-count").textContent = `${groupState.picks.length}/${group.count}`;
+							});
+							listEl.append(row);
+						});
+						section.querySelector(".opt-count").textContent = `${groupState.picks.length}/${group.count}`;
+					};
+
+					section.append(listEl);
+					section.append(e_({outer: `<div class="ve-small ve-muted mt-1">Selected: <span class="opt-count">${groupState.picks.length}/${group.count}</span></div>`}));
+					renderOptGroup();
+					choicesContainer.append(section);
+				});
 			}
 
 			// Expertise choices
@@ -2285,8 +2370,13 @@ class CharacterSheetQuickBuild {
 			);
 		});
 
-		const showAll = this._state.getSettings()?.showAllOptFeatureVersions || false;
-		const editionFiltered = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(filtered, {showAll});
+		const settings = this._state.getSettings() || {};
+		const showAll = settings.showAllOptFeatureVersions || false;
+		const enableTgtt = !!settings.enableTgtt;
+		const editionFiltered = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
+			CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(filtered, {showAll}),
+			{enableTgtt},
+		);
 		const sourceFiltered = this._page.filterByAllowedSources(editionFiltered);
 
 		const existingCountMap = new Map();
@@ -4263,6 +4353,16 @@ class CharacterSheetQuickBuild {
 	// ==========================================
 
 	_applyAsiOrFeat (asiSel, classEntry, classLevel, classData) {
+		const applyFeatChoices = () => {
+			if (!asiSel.featChoices) return;
+			asiSel.feat.choices = {
+				...asiSel.featChoices,
+				...(asiSel.featChoices.optionalFeatures?.length
+					? {optionalFeaturePicks: asiSel.featChoices.optionalFeatures.flatMap(group => group.picks || [])}
+					: {}),
+			};
+		};
+
 		if (asiSel.isBoth) {
 			// Apply ASI
 			const increases = [];
@@ -4287,10 +4387,12 @@ class CharacterSheetQuickBuild {
 			}
 			// Apply feat
 			if (asiSel.feat) {
+				applyFeatChoices();
 				this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells()});
 				CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
 			}
 		} else if (asiSel.mode === "feat" && asiSel.feat) {
+			applyFeatChoices();
 			this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells()});
 			CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
 		} else if (asiSel.mode === "asi") {

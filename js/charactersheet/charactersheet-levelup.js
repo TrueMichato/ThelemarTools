@@ -1772,7 +1772,7 @@ class CharacterSheetLevelUp {
 
 					// Detect choices (same logic as regular feats)
 					const boonChoices = getFeatChoices(boon);
-					const hasChoices = boonChoices.skills || boonChoices.languages || boonChoices.ability || boonChoices.tools || boonChoices.expertise || boonChoices.spells;
+					const hasChoices = boonChoices.skills || boonChoices.languages || boonChoices.ability || boonChoices.tools || boonChoices.expertise || boonChoices.spells || boonChoices.optionalFeatures?.length;
 
 					const boonEl = e_({outer: `
 						<div class="charsheet__levelup-feat-option" data-feat="${boon.name}">
@@ -1808,7 +1808,7 @@ class CharacterSheetLevelUp {
 						// Show additional choices UI if boon has skill/spell/tool choices
 						if (hasChoices) {
 							if (!boon._featChoices) {
-								boon._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: []};
+								boon._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: [], optionalFeatures: []};
 							}
 							this._renderFeatChoicesUI(boon, boonChoices, featChoicesContainer, () => { _refreshAsiDisplays(); });
 							// Re-render feat ability buttons immediately so pending ASI (set before boon selection) is reflected
@@ -1836,7 +1836,7 @@ class CharacterSheetLevelUp {
 		// to the top of `_renderAsiSelection` — the Epic Boon section
 		// (rendered earlier in the function body) needs to call it.
 		function getFeatChoices (/** @type {*} */ feat) {
-			/** @type {*} */ const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null, spells: null};
+			/** @type {*} */ const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null, spells: null, optionalFeatures: null};
 
 			if (feat.skillProficiencies) {
 				for (const sp of feat.skillProficiencies) {
@@ -1923,6 +1923,33 @@ class CharacterSheetLevelUp {
 				}
 			}
 
+			const featOptSpecs = CharacterSheetClassUtils.getFeatOptionalFeatureChoiceSpec(feat);
+			if (featOptSpecs?.length) {
+				const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
+				const settings = this._state.getSettings() || {};
+				const showAll = settings.showAllOptFeatureVersions || false;
+				const enableTgtt = !!settings.enableTgtt;
+				const dedupedOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
+				const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(dedupedOptFeatures, {enableTgtt});
+				const alreadyKnown = this._state.getFeatures().filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
+				const prereqContext = {
+					classes: this._state.getClasses(),
+					totalLevel: this._state.getTotalLevel(),
+					existingFeatures: alreadyKnown,
+					cantrips: this._state.getCantripsKnown?.() || [],
+					spells: this._state.getSpellsKnown?.() || [],
+				};
+
+				choices.optionalFeatures = featOptSpecs.map(spec => ({
+					...spec,
+					available: CharacterSheetClassUtils.getFeatOptionalFeatureOptions(allOptFeatures, {
+						featureTypes: spec.featureTypes,
+						prereqContext,
+						alreadyKnown,
+					}),
+				}));
+			}
+
 			// Spell choices from additionalSpells
 			if (feat.additionalSpells) {
 				/** @type {*} */ const spellChoices = {cantrips: null, spells: null, list: null};
@@ -1987,7 +2014,7 @@ class CharacterSheetLevelUp {
 
 			filteredFeats.forEach((/** @type {*} */ feat) => {
 				const choices = getFeatChoices(feat);
-				const hasChoices = choices.skills || choices.languages || choices.ability || choices.tools || choices.expertise || choices.spells;
+				const hasChoices = choices.skills || choices.languages || choices.ability || choices.tools || choices.expertise || choices.spells || choices.optionalFeatures?.length;
 
 				const featEl = e_({outer: `<div class="charsheet__levelup-feat-option" data-feat="${feat.name}"></div>`});
 				featEl.insertAdjacentHTML("beforeend", `<input type="radio" name="feat-choice" value="${feat.name}">`);
@@ -2011,7 +2038,7 @@ class CharacterSheetLevelUp {
 
 					// Initialize feat choices storage
 					if (!feat._featChoices) {
-						feat._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: [], scribingClass: null};
+						feat._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: [], scribingClass: null, optionalFeatures: []};
 					}
 
 					// Track current feat for ASI↔Feat sync
@@ -2127,7 +2154,7 @@ class CharacterSheetLevelUp {
 	_renderFeatChoicesUI (/** @type {*} */ feat, /** @type {*} */ choices, /** @type {*} */ container, /** @type {*} */ onAbilityChange = null) {
 		container.innerHTML = "";
 
-		const hasChoices = choices.skills || choices.languages || choices.ability || choices.tools || choices.expertise || choices.spells;
+		const hasChoices = choices.skills || choices.languages || choices.ability || choices.tools || choices.expertise || choices.spells || choices.optionalFeatures?.length;
 		if (!hasChoices) return;
 
 		container.insertAdjacentHTML("beforeend", `<div class="ve-small ve-bold mb-2 mt-2">Additional Choices for ${feat.name}:</div>`);
@@ -2372,6 +2399,64 @@ class CharacterSheetLevelUp {
 			container.append(langSection);
 		}
 
+		if (choices.optionalFeatures?.length) {
+			choices.optionalFeatures.forEach((/** @type {*} */ group) => {
+				const section = e_({outer: `<div class="mb-2"></div>`});
+				section.insertAdjacentHTML("beforeend", `<label class="ve-small">Choose ${group.count} ${group.name}:</label>`);
+				const list = e_({outer: `<div class="ve-flex-col gap-1 mt-1"></div>`});
+				let selectedState = feat._featChoices.optionalFeatures.find((/** @type {*} */ entry) => entry.name === group.name && entry.featureTypes.join("|") === group.featureTypes.join("|"));
+				if (!selectedState) {
+					selectedState = {name: group.name, featureTypes: [...group.featureTypes], picks: []};
+					feat._featChoices.optionalFeatures.push(selectedState);
+				}
+
+				const renderOpts = () => {
+					list.innerHTML = "";
+					group.available.forEach((/** @type {*} */ opt) => {
+						const isSelected = selectedState.picks.some((/** @type {*} */ p) => p.name === opt.name && p.source === opt.source);
+						const isDisabled = !opt._selectable && !isSelected;
+						const knownBadge = opt._alreadyKnown ? ` <span class="badge badge-success ml-1">Known${opt._timesKnown > 1 ? ` ×${opt._timesKnown}` : ""}</span>` : "";
+						const repeatableBadge = opt._repeatable ? ` <span class="badge badge-info ml-1">Repeatable</span>` : "";
+						const prereqBadge = !opt._meetsPrereqs && opt._prereqReasons?.length ? ` <span class="badge badge-warning ml-1">${opt._prereqReasons.join(", ")}</span>` : "";
+						const item = e_({outer: `<label class="d-block mb-1${isDisabled ? " ve-muted" : ""}" style="cursor:${isDisabled ? "not-allowed" : "pointer"};"><input type="checkbox" class="mr-2" ${isSelected ? "checked" : ""} ${isDisabled ? "disabled" : ""}><span class="opt-name"></span>${knownBadge}${repeatableBadge}${prereqBadge} <span class="ve-muted ve-small">(${Parser.sourceJsonToAbv(opt.source)})</span></label>`});
+						const optName = item.querySelector(".opt-name");
+						try {
+							const resolvedSource = this._page.resolveOptionalFeatureSource(opt.name, [opt.source, Parser.SRC_XPHB, Parser.SRC_PHB]);
+							const page = CharacterSheetClassUtils.isCombatMethod(opt) ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES;
+							optName.innerHTML = CharacterSheetPage.getHoverLink(page, opt.name, resolvedSource);
+						} catch {
+							optName.innerHTML = `<strong>${opt.name}</strong>`;
+						}
+						item.querySelector("input").addEventListener("change", (/** @type {*} */ evt) => {
+							if (evt.target.checked) {
+								if (selectedState.picks.length >= group.count) {
+									evt.target.checked = false;
+									JqueryUtil.doToast({type: "warning", content: `You can only choose ${group.count} ${group.name}.`});
+									return;
+								}
+								selectedState.picks.push({
+									name: opt.name,
+									source: this._page.resolveOptionalFeatureSource?.(opt.name, [opt.source, Parser.SRC_TGTT, Parser.SRC_XPHB, Parser.SRC_PHB]) || opt.source,
+									description: opt.entries ? Renderer.get().render({type: "entries", entries: opt.entries}) : "",
+									featureTypes: opt.featureType || [],
+								});
+							} else {
+								selectedState.picks = selectedState.picks.filter((/** @type {*} */ p) => !(p.name === opt.name && p.source === opt.source));
+							}
+							section.querySelector(".opt-count").textContent = `${selectedState.picks.length}/${group.count}`;
+						});
+						list.append(item);
+					});
+					section.querySelector(".opt-count").textContent = `${selectedState.picks.length}/${group.count}`;
+				};
+
+				section.append(list);
+				section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mt-1">Selected: <span class="opt-count">${selectedState.picks.length}/${group.count}</span></div>`);
+				renderOpts();
+				container.append(section);
+			});
+		}
+
 		// Ability score choices
 		if (choices.ability) {
 			const abilitySection = e_({outer: `<div class="mb-2 charsheet__levelup-feat-ability-choices"></div>`});
@@ -2611,9 +2696,14 @@ class CharacterSheetLevelUp {
 	_renderOptionalFeaturesSelection (/** @type {*} */ classData, /** @type {*} */ gains, /** @type {*} */ onSelect, /** @type {*} */ newLevel, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*} */ ({})} = {}) {
 		// Filter optional features by allowed sources and deduplicate by edition priority
 		const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
-		const showAllSetting = this._state.getSettings()?.showAllOptFeatureVersions || false;
+		const settingsObj = this._state.getSettings() || {};
+		const showAllSetting = settingsObj.showAllOptFeatureVersions || false;
+		const enableTgtt = !!settingsObj.enableTgtt;
 		let showAll = showAllSetting;
-		let allOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
+		let allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
+			CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll}),
+			{enableTgtt},
+		);
 		const existingOptFeatures = this._state.getFeatures().filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
 
 		const section = e_({outer: `
@@ -2633,7 +2723,10 @@ class CharacterSheetLevelUp {
 		const container = section.querySelector(".charsheet__levelup-opt-features");
 
 		const renderFeatures = () => {
-			allOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
+			allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
+				CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll}),
+				{enableTgtt},
+			);
 			container.innerHTML = "";
 			this._renderOptFeaturesInContainer(container, classData, gains, onSelect, newLevel, allOptFeatures, existingOptFeatures, {subclassGrantedTraditionCodes, existingSelections});
 		};
@@ -3779,12 +3872,28 @@ class CharacterSheetLevelUp {
 
 			// Also apply the feat
 			if (selectedFeat) {
+				if (selectedFeat._featChoices?.optionalFeatures?.length) {
+					selectedFeat.choices = {
+						...selectedFeat._featChoices,
+						optionalFeaturePicks: selectedFeat._featChoices.optionalFeatures.flatMap((/** @type {*} */ group) => group.picks || []),
+					};
+				} else if (selectedFeat._featChoices) {
+					selectedFeat.choices = {...selectedFeat._featChoices};
+				}
 				this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells()});
 				CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
 				await this._processFeatSpellChoices();
 			}
 		} else if (selectedFeat) {
 			// Normal rules: Feat chosen instead of ASI
+			if (selectedFeat._featChoices?.optionalFeatures?.length) {
+				selectedFeat.choices = {
+					...selectedFeat._featChoices,
+					optionalFeaturePicks: selectedFeat._featChoices.optionalFeatures.flatMap((/** @type {*} */ group) => group.picks || []),
+				};
+			} else if (selectedFeat._featChoices) {
+				selectedFeat.choices = {...selectedFeat._featChoices};
+			}
 			this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells()});
 			// Apply feat bonuses if any
 			CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
