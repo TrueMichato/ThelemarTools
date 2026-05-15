@@ -1,17 +1,15 @@
 /**
  * sourceFeature values assigned to player-chosen spells by the Builder, LevelUp, and QuickBuild flows.
- * Spells with these labels (or with no sourceFeature at all) count against known/prepared limits.
- * Feature-granted spells (racial innates, subclass always-prepared, etc.) use other labels and should NOT count.
+ * Spells with these labels count against known/prepared limits; orphans (sourceFeature == null) and
+ * feature-granted spells (subclass / racial / innate) do NOT.
+ *
+ * Canonical definition lives on `CharacterSheetClassUtils.PLAYER_CHOSEN_SPELL_FEATURES`. The local
+ * alias is kept for back-compat with any consumers that imported it from this module.
  */
 const {e_, ee} = /** @type {*} */ (globalThis);
 
-const PLAYER_CHOSEN_SPELL_FEATURES = new Set([
-	"Spells Known",
-	"Cantrips Known",
-	"Wizard Spellbook",
-	"Prepared Spells",
-	"Spells Prepared",
-]);
+const PLAYER_CHOSEN_SPELL_FEATURES = /** @type {*} */ (globalThis).CharacterSheetClassUtils?.PLAYER_CHOSEN_SPELL_FEATURES
+	|| new Set(["Spells Known", "Cantrips Known", "Wizard Spellbook", "Prepared Spells", "Spells Prepared"]);
 
 /**
  * Character Sheet Spells Manager
@@ -20,10 +18,17 @@ const PLAYER_CHOSEN_SPELL_FEATURES = new Set([
 class CharacterSheetSpells {
 	/**
 	 * Returns true if the spell was chosen by the player (counts against known/prepared limit).
-	 * Returns false for feature-granted spells (racial innates, subclass always-prepared, etc.).
+	 * Returns false for feature-granted spells AND for orphans (sourceFeature == null) — orphans
+	 * are surfaced separately in the "Other Cantrips" / "Other Spells" group.
+	 *
+	 * Thin wrapper over `CharacterSheetClassUtils.isPlayerChosenSpell` (kept for back-compat).
 	 */
 	static isPlayerChosenSpell (spell) {
-		return !spell.sourceFeature || PLAYER_CHOSEN_SPELL_FEATURES.has(spell.sourceFeature);
+		const ClassUtils = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		if (ClassUtils?.isPlayerChosenSpell) return ClassUtils.isPlayerChosenSpell(spell);
+		// Fallback for environments where ClassUtils hasn't loaded yet.
+		if (!spell || !spell.sourceFeature) return false;
+		return PLAYER_CHOSEN_SPELL_FEATURES.has(spell.sourceFeature);
 	}
 
 	constructor (page) {
@@ -428,7 +433,7 @@ class CharacterSheetSpells {
 			// Cantrips
 			if (info.cantripsKnown) {
 				const allCantrips = this._state.getCantripsKnown();
-				const count = allCantrips.filter(c => CharacterSheetSpells.isPlayerChosenSpell(c)).length;
+				const {count} = CharacterSheetClassUtils.countPlayerChosenCantrips(allCantrips);
 				const limit = info.cantripsKnown;
 				const colorClass = count > limit ? "text-danger" : (count === limit ? "text-success" : "");
 				const icon = count > limit ? `<span class="glyphicon glyphicon-alert mr-1"></span>` : "⭐ ";
@@ -1732,7 +1737,7 @@ class CharacterSheetSpells {
 		// Check cantrip limits
 		if (isCantrip && info.cantripsKnown) {
 			const allCantrips = this._state.getCantripsKnown();
-			const currentCount = allCantrips.filter(c => !c.sourceFeature).length;
+			const {count: currentCount} = CharacterSheetClassUtils.countPlayerChosenCantrips(allCantrips);
 			if (currentCount >= info.cantripsKnown) {
 				return {
 					canAdd: true, // Still allow, but warn
@@ -5181,10 +5186,19 @@ class CharacterSheetSpells {
 			}
 		});
 
-		// Update Cantrips header with count
+		// Cantrips: partition into attributed (counted toward cap) vs orphans (rendered
+		// separately in "Other Cantrips" group, NOT counted). Replace grouped[0] with the
+		// attributed-only list so the level-0 group reflects the canonical count.
+		let orphanCantrips = [];
 		if (spellcastingInfo && spellcastingInfo.cantripsKnown > 0) {
-			const allCantrips = this._state.getCantripsKnown();
-			const count = allCantrips.filter(c => !c.sourceFeature).length;
+			const allCantrips = grouped[0].spells;
+			const {attributed, orphans, count} = (() => {
+				const partition = CharacterSheetClassUtils.partitionCantripsByAttribution(allCantrips);
+				const c = CharacterSheetClassUtils.countPlayerChosenCantrips(allCantrips);
+				return {attributed: [...partition.attributed, ...partition.featureGranted], orphans: partition.orphan, count: c.count};
+			})();
+			orphanCantrips = orphans;
+			grouped[0].spells = attributed;
 			const limit = spellcastingInfo.cantripsKnown;
 			const colorClass = count > limit ? "text-danger" : (count === limit ? "text-success" : "");
 			grouped[0].name = `Cantrips <span class="ve-small ve-muted">(${count}/${limit})</span>`;
@@ -5213,6 +5227,9 @@ class CharacterSheetSpells {
 
 			container.append(groupEl);
 		});
+
+		// Append orphan-cantrips group below all leveled spells, if any.
+		this._appendOrphanCantripsGroup(container, orphanCantrips);
 	}
 
 	/**
@@ -5229,29 +5246,36 @@ class CharacterSheetSpells {
 		const maxPrepared = spellcastingInfo?.preparedMax || spellcastingInfo?.max || 0;
 		const preparedColorClass = currentPrepared > maxPrepared ? "text-danger" : (currentPrepared === maxPrepared ? "text-success" : "");
 
-		// Render cantrips first (always "prepared")
+		// Render cantrips first (always "prepared"); split attributed vs orphan so the
+		// header count is canonical and orphans appear in their own group.
+		let orphanCantrips = [];
 		if (cantrips.length) {
+			let cantripsToRender = cantrips;
 			let cantripsHeader = "Cantrips";
 			if (spellcastingInfo && spellcastingInfo.cantripsKnown > 0) {
-				const allCantrips = this._state.getCantripsKnown();
-				const count = allCantrips.filter(c => !c.sourceFeature).length;
+				const partition = CharacterSheetClassUtils.partitionCantripsByAttribution(cantrips);
+				const {count} = CharacterSheetClassUtils.countPlayerChosenCantrips(cantrips);
+				orphanCantrips = partition.orphan;
+				cantripsToRender = [...partition.attributed, ...partition.featureGranted];
 				const limit = spellcastingInfo.cantripsKnown;
 				const colorClass = count > limit ? "text-danger" : (count === limit ? "text-success" : "");
 				cantripsHeader = `Cantrips <span class="ve-small ${colorClass}">(${count}/${limit})</span>`;
 			}
 
-			const cantripsGroup = e_({outer: `
-				<div class="charsheet__spell-group">
-					<h5 class="charsheet__spell-group-header">${cantripsHeader}</h5>
-					<div class="charsheet__spell-group-list"></div>
-				</div>
-			`});
+			if (cantripsToRender.length) {
+				const cantripsGroup = e_({outer: `
+					<div class="charsheet__spell-group">
+						<h5 class="charsheet__spell-group-header">${cantripsHeader}</h5>
+						<div class="charsheet__spell-group-list"></div>
+					</div>
+				`});
 
-			const list = cantripsGroup.querySelector(".charsheet__spell-group-list");
-			cantrips.sort((a, b) => a.name.localeCompare(b.name)).forEach(spell => {
-				list.append(this._renderSpellItem(spell));
-			});
-			container.append(cantripsGroup);
+				const list = cantripsGroup.querySelector(".charsheet__spell-group-list");
+				cantripsToRender.sort((a, b) => a.name.localeCompare(b.name)).forEach(spell => {
+					list.append(this._renderSpellItem(spell));
+				});
+				container.append(cantripsGroup);
+			}
 		}
 
 		// Render PREPARED spells section
@@ -5304,6 +5328,33 @@ class CharacterSheetSpells {
 		}
 
 		container.append(spellbookSection);
+
+		// Orphan cantrips (sourceFeature: null) — separate group, not counted toward cap.
+		this._appendOrphanCantripsGroup(container, orphanCantrips);
+	}
+
+	/**
+	 * Render orphan cantrips (no sourceFeature) in a separate "Other Cantrips" group
+	 * so they're visible & actionable without inflating the X/Y cantrip cap.
+	 * Orphans typically come from legacy saves or the manual Add-Spell flow before
+	 * source attribution existed.
+	 */
+	_appendOrphanCantripsGroup (container, orphanCantrips) {
+		if (!orphanCantrips?.length) return;
+		const group = e_({outer: `
+			<div class="charsheet__spell-group charsheet__spell-group--orphan">
+				<h5 class="charsheet__spell-group-header" title="These cantrips have no class attribution and do not count toward your cantrip cap. They were likely added manually or imported from an older save.">
+					Other Cantrips
+					<span class="ve-small ve-muted ml-1">(unattributed — does not count toward cap)</span>
+				</h5>
+				<div class="charsheet__spell-group-list"></div>
+			</div>
+		`});
+		const list = group.querySelector(".charsheet__spell-group-list");
+		orphanCantrips.slice().sort((a, b) => a.name.localeCompare(b.name)).forEach(spell => {
+			list.append(this._renderSpellItem(spell));
+		});
+		container.append(group);
 	}
 
 	/**
@@ -5846,8 +5897,9 @@ class CharacterSheetSpells {
 		// Player-chosen spells count against the limit; feature-granted ones do not
 		const manualLeveledSpells = leveledSpells.filter(s => CharacterSheetSpells.isPlayerChosenSpell(s));
 
-		// Cantrips count (excluding feature-granted ones)
-		const cantripsChosen = allCantrips.filter(c => CharacterSheetSpells.isPlayerChosenSpell(c)).length;
+		// Cantrips count (canonical: only player-attributed cantrips count toward the cap;
+		// orphans are surfaced in the "Other Cantrips" group below the spell list).
+		const cantripsChosen = CharacterSheetClassUtils.countPlayerChosenCantrips(allCantrips).count;
 		const cantripsMax = spellcastingInfo.cantripsKnown || 0;
 
 		// Show cantrips info if the class has cantrips

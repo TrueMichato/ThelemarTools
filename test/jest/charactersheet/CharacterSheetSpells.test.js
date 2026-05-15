@@ -507,9 +507,12 @@ describe("Spellcasting", () => {
 // isPlayerChosenSpell — counter filter logic
 // ==========================================================================
 describe("CharacterSheetSpells.isPlayerChosenSpell", () => {
-	it("should count spells with no sourceFeature (manual add from modal)", () => {
-		expect(CharacterSheetSpells.isPlayerChosenSpell({name: "Fireball", sourceFeature: null})).toBe(true);
-		expect(CharacterSheetSpells.isPlayerChosenSpell({name: "Fireball"})).toBe(true);
+	// Canonical rule (post wizard-cantrip bug fix): orphans (sourceFeature == null) do NOT
+	// count toward the cap. They are surfaced separately in the "Other Cantrips" group so
+	// the player can re-attribute or remove them. See CharacterSheetCantripPreparedCounts.
+	it("should NOT count spells with no sourceFeature (orphans go in 'Other' group)", () => {
+		expect(CharacterSheetSpells.isPlayerChosenSpell({name: "Fireball", sourceFeature: null})).toBe(false);
+		expect(CharacterSheetSpells.isPlayerChosenSpell({name: "Fireball"})).toBe(false);
 	});
 
 	it("should count spells with sourceFeature 'Spells Known' (builder/levelup)", () => {
@@ -606,11 +609,14 @@ describe("Spell tracking counter integration", () => {
 		expect(playerChosen[0].name).toBe("Fire Bolt");
 	});
 
-	it("should count manually added spells (no sourceFeature) toward the limit", () => {
+	it("should NOT count manually added spells with no sourceFeature toward the cap (orphans go in 'Other' group)", () => {
+		// Post wizard-cantrip bug fix: orphans are excluded from the count and rendered
+		// in a separate group so the user can clean them up. This prevents silent
+		// over-counting when stale/imported saves contain unattributed spells.
 		state.addSpell({name: "Magic Missile", source: "PHB", level: 1}, true);
 
 		const spells = state.getSpells();
 		const playerChosen = spells.filter(s => CharacterSheetSpells.isPlayerChosenSpell(s));
-		expect(playerChosen).toHaveLength(1);
+		expect(playerChosen).toHaveLength(0);
 	});
 });

@@ -198,6 +198,98 @@ class CharacterSheetClassUtils {
 		return "normal";
 	}
 
+	// ========================================================================
+	// Spell counting (single source of truth across all UI surfaces)
+	// ========================================================================
+	// Spells with one of these sourceFeature labels are "player-chosen" and count
+	// toward the cantrip / spell-known cap. Anything else (subclass spells, racial
+	// innates, etc.) does NOT count. A cantrip with sourceFeature == null is an
+	// "orphan" — it is shown in a separate "Other Cantrips" group and does NOT
+	// count toward the cap (per design: orphans must be visible & actionable, not
+	// silently inflate or hide the cap).
+	static PLAYER_CHOSEN_SPELL_FEATURES = Object.freeze(new Set([
+		"Spells Known",
+		"Cantrips Known",
+		"Wizard Spellbook",
+		"Prepared Spells",
+		"Spells Prepared",
+	]));
+
+	/**
+	 * Returns true iff the spell has a positive player-attribution sourceFeature.
+	 * Orphans (sourceFeature == null) and feature-granted (subclass / racial)
+	 * spells return false.
+	 * @param {*} spell
+	 * @returns {boolean}
+	 */
+	static isPlayerChosenSpell (spell) {
+		if (!spell || !spell.sourceFeature) return false;
+		return CharacterSheetClassUtils.PLAYER_CHOSEN_SPELL_FEATURES.has(spell.sourceFeature);
+	}
+
+	/**
+	 * Partition cantrips into three buckets so each can be rendered & counted
+	 * independently. Pure: no DOM, no state.
+	 * @param {Array<*>} cantrips
+	 * @returns {{attributed: Array<*>, orphan: Array<*>, featureGranted: Array<*>}}
+	 */
+	static partitionCantripsByAttribution (cantrips) {
+		const attributed = [];
+		const orphan = [];
+		const featureGranted = [];
+		if (!cantrips?.length) return {attributed, orphan, featureGranted};
+		for (const c of cantrips) {
+			if (!c) continue;
+			if (!c.sourceFeature) orphan.push(c);
+			else if (CharacterSheetClassUtils.PLAYER_CHOSEN_SPELL_FEATURES.has(c.sourceFeature)) attributed.push(c);
+			else featureGranted.push(c);
+		}
+		return {attributed, orphan, featureGranted};
+	}
+
+	/**
+	 * Canonical cantrip-count helper. Returns the count of player-attributed
+	 * cantrips (the number that appears as the numerator in "X/Y cantrips"),
+	 * the orphan list (for the "Other Cantrips" group), and a per-class
+	 * breakdown for multiclass status bars.
+	 * @param {Array<*>} cantrips
+	 * @returns {{count: number, orphans: Array<*>, featureGranted: Array<*>, byClass: Record<string, {count: number, items: Array<*>}>}}
+	 */
+	static countPlayerChosenCantrips (cantrips) {
+		const {attributed, orphan, featureGranted} = CharacterSheetClassUtils.partitionCantripsByAttribution(cantrips);
+		/** @type {Record<string, {count: number, items: Array<*>}>} */
+		const byClass = {};
+		for (const c of attributed) {
+			const key = (c.sourceClass || "").toLowerCase();
+			if (!byClass[key]) byClass[key] = {count: 0, items: []};
+			byClass[key].count += 1;
+			byClass[key].items.push(c);
+		}
+		return {count: attributed.length, orphans: orphan, featureGranted, byClass};
+	}
+
+	/**
+	 * Canonical prepared-spells count. Counts leveled spells (level > 0) that
+	 * are currently `prepared` or `alwaysPrepared`. Cantrips are excluded
+	 * (they have their own counter). Spellbook spells with `prepared:false`
+	 * are NOT counted — only the ones the player has marked prepared today.
+	 * @param {Array<*>} spells
+	 * @param {object} [opts]
+	 * @param {number} [opts.max] - If supplied, returned `isOver`/`isAt` flags are populated.
+	 * @returns {{current: number, max: number|null, isOver: boolean, isAt: boolean}}
+	 */
+	static countPreparedSpells (spells, {max = null} = {}) {
+		const leveled = (spells || []).filter(s => s && s.level > 0);
+		const current = leveled.filter(s => s.prepared || s.alwaysPrepared).length;
+		const numericMax = typeof max === "number" ? max : null;
+		return {
+			current,
+			max: numericMax,
+			isOver: numericMax != null && current > numericMax,
+			isAt: numericMax != null && current === numericMax,
+		};
+	}
+
 	/**
 	 * Check whether a character meets an optional feature's prerequisites.
 	 * @param {Array<*>|null} prerequisite - The feature's `prerequisite` array (from data)
