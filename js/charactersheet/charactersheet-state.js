@@ -7130,6 +7130,10 @@ class CharacterSheetState {
 			if (halfProf !== 0) components.push({type: "proficiency", name: "Jack of All Trades", value: halfProf, icon: "🃏"});
 		}
 
+		for (const bonus of this._getFeatureInitiativeBonuses()) {
+			components.push({type: "feature", name: bonus.name, value: bonus.value, icon: "⚡"});
+		}
+
 		const exhaustionPenalty = this._getExhaustionD20Penalty();
 		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
 
@@ -7701,12 +7705,51 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Initiative
+	/**
+	 * Aggregate passive initiative bonuses derived from feature calculations.
+	 * Live-derived (not frozen via auto-effects/customModifiers) so ability
+	 * score changes (ASI, items, etc.) propagate immediately, mirroring the
+	 * Jack-of-All-Trades pattern.
+	 * @returns {Array<{name: string, value: number}>}
+	 */
+	_getFeatureInitiativeBonuses () {
+		const calc = this.getFeatureCalculations();
+		const bonuses = [];
+
+		// Chronurgy Wizard L2 — Temporal Awareness: +INT mod to initiative
+		if (calc.hasTemporalAwareness && calc.temporalAwarenessBonus) {
+			bonuses.push({name: "Temporal Awareness", value: calc.temporalAwarenessBonus});
+		}
+
+		// Gloom Stalker Ranger L3 — Dread Ambusher: +WIS mod to initiative
+		if (calc.hasDreadAmbusher && calc.dreadAmbusherInitiativeBonus) {
+			bonuses.push({name: "Dread Ambusher", value: calc.dreadAmbusherInitiativeBonus});
+		}
+
+		// Swashbuckler Rogue L3 — Rakish Audacity: +CHA mod to initiative
+		if (calc.hasRakishAudacity && calc.initiativeBonus) {
+			bonuses.push({name: "Rakish Audacity", value: calc.initiativeBonus});
+		}
+
+		// XPHB Champion Fighter L7 — Remarkable Athlete: +PB to initiative
+		if (calc.hasRemarkableAthlete && calc.initiativeBonus) {
+			bonuses.push({name: "Remarkable Athlete", value: calc.initiativeBonus});
+		}
+
+		return bonuses;
+	}
+
 	getInitiative () {
 		let initiative = this.getAbilityMod("dex") + (this._data.customModifiers.initiative || 0);
 
 		// Jack of All Trades adds half proficiency to initiative (it's a DEX ability check)
 		if (this.hasJackOfAllTrades()) {
 			initiative += Math.floor(this.getProficiencyBonus() / 2);
+		}
+
+		// Passive initiative bonuses from class/subclass features
+		for (const bonus of this._getFeatureInitiativeBonuses()) {
+			initiative += bonus.value;
 		}
 
 		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
@@ -17203,14 +17246,11 @@ class CharacterSheetState {
 			});
 		}
 
-		// Swashbuckler - Rakish Audacity: CHA to initiative
-		if (calculations.hasRakishAudacity && calculations.initiativeBonus && !alreadyProcessed("Rakish Audacity")) {
-			effects.push({
-				type: "initiativeBonus",
-				value: calculations.initiativeBonus,
-				source: "Rakish Audacity",
-			});
-		}
+		// NOTE: Rakish Audacity (+CHA initiative) is consumed live via
+		// `_getFeatureInitiativeBonuses()` in `getInitiative()` /
+		// `getInitiativeBreakdown()`. Do not emit it through this auto-effect
+		// pipeline — that path freezes the CHA mod into customModifiers and
+		// would double-count once the live aggregator runs.
 
 		// Scout - Superior Mobility: +10 speed
 		if (calculations.hasSuperiorMobility && calculations.movementBonus && !alreadyProcessed("Superior Mobility")) {
