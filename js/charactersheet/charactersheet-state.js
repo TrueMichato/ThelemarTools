@@ -6927,14 +6927,16 @@ class CharacterSheetState {
 	 * are still applied by `processSavingThrowDamage` and the active-state /
 	 * modifier systems.
 	 *
-	 * Returns an array of `{key, name, summary, source?}` objects. v1
-	 * surfaces Evasion (Monk/Rogue/Umbral Killer) and Last Ditch Evasion
+	 * Returns an array of `{key, name, shortLabel, summary, source?}` objects.
+	 * `shortLabel` is a one-line mechanics summary used in roll-time reminders;
+	 * `summary` is the longer descriptive text used in tooltips / Overview tiles.
+	 * v1 surfaces Evasion (Monk/Rogue/Umbral Killer) and Last Ditch Evasion
 	 * (TGTT Battle Tactic) for `dex`. Designed so future passives like
 	 * Indomitable, Magic Resistance, or Aura of Protection can plug in with
 	 * one entry.
 	 *
 	 * @param {string} ability - Ability abbreviation (e.g. "dex").
-	 * @returns {Array<{key: string, name: string, summary: string, source?: string}>}
+	 * @returns {Array<{key: string, name: string, shortLabel: string, summary: string, source?: string}>}
 	 */
 	getPassiveSaveAlerts (ability) {
 		const alerts = [];
@@ -6946,6 +6948,7 @@ class CharacterSheetState {
 				alerts.push({
 					key: "evasion",
 					name: "Evasion",
+					shortLabel: "save → 0 dmg, fail → ½",
 					summary: "On a successful Dex save against an effect that deals half damage on a save, you take no damage. On a failed save, you take half damage.",
 				});
 			}
@@ -6953,6 +6956,7 @@ class CharacterSheetState {
 				alerts.push({
 					key: "lastDitchEvasion",
 					name: "Last Ditch Evasion",
+					shortLabel: "Reaction: fail → ½ instead of full",
 					summary: "Battle Tactic: when you fail a Dex save against an effect that allows half damage, you can use your reaction to take half damage instead of full.",
 					source: "TGTT",
 				});

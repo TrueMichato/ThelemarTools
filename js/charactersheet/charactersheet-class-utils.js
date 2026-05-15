@@ -2675,6 +2675,27 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * True iff the given lowercased feature name is an Ability Score
+	 * Improvement placeholder. Uses substring matching for the spelled-out
+	 * variants (covers "Ability Score Improvement (4)", etc.) and an exact
+	 * match for the "asi" abbreviation. The exact match is critical:
+	 * a naive `includes("asi")` check incorrectly matches "ev**asi**on",
+	 * "stasis", "persuasion", etc., which silently filtered out the actual
+	 * Evasion class feature when leveling Rogue/Monk past 7. See bugs.md
+	 * "Evasion not visible as a feature" for the full investigation.
+	 *
+	 * @param {string} nameLower - Lowercased feature name.
+	 * @returns {boolean}
+	 */
+	static _isAsiPlaceholderName (/** @type {string} */ nameLower) {
+		if (!nameLower) return false;
+		if (nameLower === "asi") return true;
+		if (nameLower.includes("ability score improvement")) return true;
+		if (nameLower.includes("ability score increase")) return true;
+		return false;
+	}
+
+	/**
 	 * Dedup features and build state objects for addFeature().
 	 * Filters out ASI placeholders, gainSubclassFeature entries, and already-existing features.
 	 * @param {Array<*>} features - Raw features for this level
@@ -2686,12 +2707,10 @@ class CharacterSheetClassUtils {
 	 * @returns {Array<*>} Array of feature data objects ready for state.addFeature()
 	 */
 	static dedupAndBuildFeatures (/** @type {*} */ features, /** @type {*} */ existingFeatureNames, {className, classSource, level}) {
-		const asiFeatureNames = ["ability score improvement", "ability score increase", "asi"];
-
 		const featuresToAdd = features.filter((/** @type {*} */ f) => {
 			if (f.gainSubclassFeature) return false;
 			const nameLower = f.name.toLowerCase();
-			if (asiFeatureNames.some((/** @type {*} */ asi) => nameLower.includes(asi))) return false;
+			if (CharacterSheetClassUtils._isAsiPlaceholderName(nameLower)) return false;
 			if (!f.isSubclassFeature && !f.subclassName && existingFeatureNames.includes(nameLower)) return false;
 			return true;
 		});
@@ -2702,6 +2721,98 @@ class CharacterSheetClassUtils {
 			level,
 			featureType: "Class",
 		}));
+	}
+
+	/**
+	 * Reconcile `_data.features` against the canonical class+level feature
+	 * matrix: for every (class, level) the character has, ensure every feature
+	 * that `getLevelFeatures` would produce is present on the character.
+	 *
+	 * Background: only the level-up wizard ingests features into
+	 * `_data.features`. Direct `state.addClass()` / `state.levelUp()` calls
+	 * (programmatic edits, save migrations that dropped features, etc.)
+	 * compute calculation flags but never push canonical class features.
+	 * That leaves users with mechanically-correct passives (e.g. Evasion at
+	 * Rogue 7 sets `hasEvasion = true`) but no Features-tab card.
+	 *
+	 * Idempotent: relies on `state.addFeature`'s built-in dedupe on
+	 * (name, source, className, level). Safe to call repeatedly. ASI / sub­
+	 * class-feature placeholders / `gainSubclassFeature` markers are
+	 * filtered out by `dedupAndBuildFeatures`.
+	 *
+	 * @param {*} state - CharacterSheetState instance.
+	 * @param {object} opts
+	 * @param {(name: string, source: string) => *} opts.getClassData -
+	 *   Resolver for full class JSON (typically `(n, s) => page.getClasses().find(...)`).
+	 * @param {Array<*>} [opts.classFeatures] - Class-features registry
+	 *   (typically `page.getClassFeatures()`).
+	 * @param {Array<*>} [opts.subclassFeatures] - Subclass-features registry
+	 *   (typically `page.getSubclassFeatures()`).
+	 * @returns {{added: number, classesProcessed: number}} - Summary for logging/tests.
+	 */
+	static reconcileClassFeatures (/** @type {*} */ state, {getClassData, classFeatures = [], subclassFeatures = []} = /** @type {*} */ ({})) {
+		if (!state || typeof getClassData !== "function") return {added: 0, classesProcessed: 0};
+
+		const classes = state.getClasses?.() || [];
+		let added = 0;
+		let classesProcessed = 0;
+
+		for (const classEntry of classes) {
+			const classData = getClassData(classEntry.name, classEntry.source);
+			if (!classData) continue;
+			classesProcessed++;
+
+			let fullSubclassData = null;
+			if (classEntry.subclass && classData.subclasses) {
+				fullSubclassData = classData.subclasses.find((/** @type {*} */ sc) =>
+					sc.name === classEntry.subclass.name
+					&& (sc.source === classEntry.subclass.source || !classEntry.subclass.source),
+				) || null;
+			}
+
+			const maxLevel = classEntry.level || 1;
+			for (let lvl = 1; lvl <= maxLevel; lvl++) {
+				let levelFeatures;
+				try {
+					levelFeatures = CharacterSheetClassUtils.getLevelFeatures(
+						classData,
+						lvl,
+						fullSubclassData,
+						classFeatures,
+						subclassFeatures,
+					);
+				} catch (e) {
+					continue;
+				}
+				if (!levelFeatures?.length) continue;
+
+				// Existing class-feature names for THIS class only — matches the
+				// scoping rule used by `_doLevelUp` so multiclass Evasions
+				// (Rogue 7 + Monk 7) both survive dedupe.
+				const existingForThisClass = (state.getFeatures?.() || [])
+					.filter((/** @type {*} */ f) => f.className === classEntry.name && !f.subclassName && !f.isSubclassFeature)
+					.map((/** @type {*} */ f) => (f.name || "").toLowerCase());
+
+				const builtFeatures = CharacterSheetClassUtils.dedupAndBuildFeatures(
+					levelFeatures,
+					existingForThisClass,
+					{
+						className: classEntry.name,
+						classSource: classData.source || classEntry.source,
+						level: lvl,
+					},
+				);
+
+				for (const feature of builtFeatures) {
+					const before = state.getFeatures?.().length || 0;
+					state.addFeature(feature);
+					const after = state.getFeatures?.().length || 0;
+					if (after > before) added++;
+				}
+			}
+		}
+
+		return {added, classesProcessed};
 	}
 
 	// ==========================================

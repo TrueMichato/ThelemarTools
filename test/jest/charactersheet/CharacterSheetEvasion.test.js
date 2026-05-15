@@ -93,7 +93,18 @@ describe("Character Sheet Evasion", () => {
 				expect(typeof a.name).toBe("string");
 				expect(typeof a.summary).toBe("string");
 				expect(a.summary.length).toBeGreaterThan(10);
+				expect(typeof a.shortLabel).toBe("string");
+				expect(a.shortLabel.length).toBeGreaterThan(0);
+				// Roll-time reminder string — must stay terse so the toast
+				// doesn't drown the player at the table.
+				expect(a.shortLabel.length).toBeLessThanOrEqual(60);
 			});
+		});
+
+		it("Evasion shortLabel is concise mechanics summary", () => {
+			state.addClass({name: "Rogue", level: 7, source: "XPHB"});
+			const evasion = state.getPassiveSaveAlerts("dex").find(a => a.key === "evasion");
+			expect(evasion.shortLabel).toMatch(/save|fail|½|0/i);
 		});
 	});
 
