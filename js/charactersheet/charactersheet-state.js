@@ -6902,6 +6902,49 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Get passive defensive alerts that apply to a saving throw, for use as
+	 * UI reminders (badge on the save row, note on the roll-result toast).
+	 *
+	 * Pure data — does NOT mutate calculations or apply mechanics. Mechanics
+	 * are still applied by `processSavingThrowDamage` and the active-state /
+	 * modifier systems.
+	 *
+	 * Returns an array of `{key, name, summary, source?}` objects. v1
+	 * surfaces Evasion (Monk/Rogue/Umbral Killer) and Last Ditch Evasion
+	 * (TGTT Battle Tactic) for `dex`. Designed so future passives like
+	 * Indomitable, Magic Resistance, or Aura of Protection can plug in with
+	 * one entry.
+	 *
+	 * @param {string} ability - Ability abbreviation (e.g. "dex").
+	 * @returns {Array<{key: string, name: string, summary: string, source?: string}>}
+	 */
+	getPassiveSaveAlerts (ability) {
+		const alerts = [];
+		if (!ability) return alerts;
+		const calculations = this.getFeatureCalculations() || {};
+
+		if (ability === "dex") {
+			if (calculations.hasEvasion) {
+				alerts.push({
+					key: "evasion",
+					name: "Evasion",
+					summary: "On a successful Dex save against an effect that deals half damage on a save, you take no damage. On a failed save, you take half damage.",
+				});
+			}
+			if (calculations.hasLastDitchEvasion) {
+				alerts.push({
+					key: "lastDitchEvasion",
+					name: "Last Ditch Evasion",
+					summary: "Battle Tactic: when you fail a Dex save against an effect that allows half damage, you can use your reaction to take half damage instead of full.",
+					source: "TGTT",
+				});
+			}
+		}
+
+		return alerts;
+	}
+
+	/**
 	 * Get a breakdown of skill modifier components
 	 * @param {string} skill - The skill key (e.g., "athletics", "stealth")
 	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>, ability: string|null}}

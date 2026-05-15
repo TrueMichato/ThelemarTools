@@ -2711,6 +2711,15 @@ class CharacterSheetPage {
 				</div>
 			`});
 
+			// Passive defensive alerts (Evasion, Last Ditch Evasion, etc.) — small chips next to the mod.
+			const passiveAlerts = this._state.getPassiveSaveAlerts?.(abl) || [];
+			passiveAlerts.forEach(alert => {
+				const badgeTitle = alert.source ? `${alert.name} (${alert.source})\n${alert.summary}` : `${alert.name}\n${alert.summary}`;
+				const badge = e_({outer: `<span class="charsheet__save-passive-badge" data-passive="${alert.key}" title="${badgeTitle.replace(/"/g, "&quot;")}">⚡ ${alert.name}</span>`});
+				badge.addEventListener("click", (e) => e.stopPropagation());
+				row.append(badge);
+			});
+
 			row.addEventListener("click", (e) => this._rollSavingThrow(abl, e));
 			container.append(row);
 		});
@@ -8719,6 +8728,15 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${aggregated.minimum} applied` : `Min ${aggregated.minimum} applied (rolled ${rollResult.roll})`;
+		}
+
+		// Passive defensive reminders (Evasion, Last Ditch Evasion, etc.).
+		const passiveAlerts = this._state.getPassiveSaveAlerts?.(ability) || [];
+		if (passiveAlerts.length) {
+			const reminderLines = passiveAlerts.map(a => `💡 ${a.name}: ${a.summary}`);
+			resultNote = resultNote
+				? `${resultNote}\n${reminderLines.join("\n")}`
+				: reminderLines.join("\n");
 		}
 
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
