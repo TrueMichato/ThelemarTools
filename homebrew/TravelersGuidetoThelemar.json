@@ -104,6 +104,12 @@
 				"TTP"
 			]
 		},
+		"internalCopies": [
+			"spell",
+			"class",
+			"subclass",
+			"race"
+		],
 		"optionalFeatureTypes": {
 			"PS": "Prescise Strike",
 			"JA": "Jester's Act",
