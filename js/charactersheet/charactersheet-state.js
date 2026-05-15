@@ -5366,7 +5366,32 @@ class CharacterSheetState {
 		// Add per-level HP bonus from features (like Tough feat)
 		hp += (this._data.customModifiers.hpPerLevel || 0) * totalLevel;
 
+		// Add HP bonus from active spell-buff states (e.g. Aid: +5 max HP).
+		// Each active state's `customEffects` may include {type: "hpMaxIncrease", value: N};
+		// see SPELL_BUFF_REGISTRY. Only `state.active === true` contributes (gated inside
+		// getActiveStateEffects), so toggling the state on/off updates max HP live.
+		hp += this._aggregateActiveStateHpEffects().total;
+
 		return Math.max(1, hp);
+	}
+
+	/**
+	 * Sum {type: "hpMaxIncrease"} contributions from currently-active states.
+	 * Returns the total plus a per-state breakdown for UI consumption (HP breakdown modal).
+	 * @returns {{total: number, sources: Array<{stateId: string, name: string, value: number}>}}
+	 */
+	_aggregateActiveStateHpEffects () {
+		let total = 0;
+		const sources = [];
+		const effects = this.getActiveStateEffects();
+		for (const effect of effects) {
+			if (effect.type !== "hpMaxIncrease") continue;
+			const value = +effect.value || 0;
+			if (!value) continue;
+			total += value;
+			sources.push({stateId: effect.stateId, name: effect.stateName || "Spell Effect", value});
+		}
+		return {total, sources};
 	}
 
 	/**
@@ -5512,7 +5537,8 @@ class CharacterSheetState {
 		}
 
 		const perLevelBonusValue = perLevelValue * totalLevel;
-		const total = perLevel.reduce((acc, e) => acc + e.levelTotal, 0) + flatValue + perLevelBonusValue;
+		const spellEffectsAgg = this._aggregateActiveStateHpEffects();
+		const total = perLevel.reduce((acc, e) => acc + e.levelTotal, 0) + flatValue + perLevelBonusValue + spellEffectsAgg.total;
 
 		return {
 			total: Math.max(1, total),
@@ -5521,6 +5547,7 @@ class CharacterSheetState {
 			perLevel,
 			flatBonus: {value: flatValue, sources: flatSources},
 			perLevelBonus: {perLevelValue, totalLevels: totalLevel, value: perLevelBonusValue, sources: perLevelSources},
+			spellEffects: {value: spellEffectsAgg.total, sources: spellEffectsAgg.sources},
 			tempHp: this._data.hp.temp || 0,
 			current: this._data.hp.current || 0,
 			legacyFallback: !useHistory,
@@ -31752,8 +31779,20 @@ class CharacterSheetState {
 	 * @returns {string} The state instance ID
 	 */
 	activateState (stateTypeId, options = {}) {
+		// Capture max HP before mutation so we can sync current HP to any
+		// hpMaxIncrease delta this activation introduces (RAW: Aid grants both
+		// current and max HP). See _syncCurrentHpToMaxDelta below.
+		const oldMax = this._data.hp.max || 0;
+
 		// Look up state type definition for side-effect handling
 		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
+
+		// Will this activation involve an hpMaxIncrease effect? Only then do we
+		// touch HP — otherwise we'd risk recomputing max HP for unrelated states
+		// (e.g. Wild Shape, which manages its own HP pool out-of-band).
+		const incomingEffects = options.customEffects || stateType?.effects || [];
+		const involvesHpMaxIncrease = Array.isArray(incomingEffects)
+			&& incomingEffects.some(e => e?.type === "hpMaxIncrease");
 
 		// Enforce mutual exclusivity: deactivate any exclusive states
 		if (stateType?.exclusiveWith?.length) {
@@ -31794,6 +31833,9 @@ class CharacterSheetState {
 			// Apply tempHp effects on reactivation
 			this._applyTempHpFromState(existing);
 
+			// Sync max + current HP for any hpMaxIncrease effects on this state.
+			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
+
 			return existing.id;
 		}
 		const stateId = this.addActiveState(stateTypeId, options);
@@ -31802,7 +31844,49 @@ class CharacterSheetState {
 		const newState = this._data.activeStates.find(s => s.id === stateId);
 		if (newState) this._applyTempHpFromState(newState);
 
+		// Sync max + current HP for any hpMaxIncrease effects on this state.
+		if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
+
 		return stateId;
+	}
+
+	/**
+	 * True if the given active-state instance carries any `hpMaxIncrease`
+	 * effect (via either `customEffects` or its registered state-type defaults).
+	 * Used to gate `_syncCurrentHpToMaxDelta` so unrelated state changes
+	 * (e.g. Wild Shape, which manages HP out-of-band) don't trigger a
+	 * recalculation of the character's max HP.
+	 * @private
+	 */
+	_stateContributesHpMaxIncrease (state) {
+		if (!state) return false;
+		const effects = state.customEffects
+			|| CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]?.effects
+			|| [];
+		return Array.isArray(effects) && effects.some(e => e?.type === "hpMaxIncrease");
+	}
+
+	/**
+	 * Recompute max HP and bump current HP by any positive delta introduced by
+	 * an active-state mutation (activation/deactivation). Mirrors the 5e rule
+	 * that Aid grants both max and current HP; symmetric on expiry, where
+	 * `_recalculateMaxHp` already caps current to the new (lower) max.
+	 * Skipped when the prior max was 0 (uninitialised characters during load).
+	 * @private
+	 */
+	_syncCurrentHpToMaxDelta (oldMax) {
+		if (!oldMax) {
+			// Character not yet initialised — just refresh the cache, no current-HP bump.
+			this._recalculateMaxHp();
+			return;
+		}
+		this._recalculateMaxHp();
+		const newMax = this._data.hp.max || 0;
+		const delta = newMax - oldMax;
+		if (delta > 0) {
+			this._data.hp.current = Math.min(this._data.hp.current + delta, newMax);
+		}
+		// On negative delta, _recalculateMaxHp already capped current to newMax.
 	}
 
 	/**
@@ -31834,7 +31918,11 @@ class CharacterSheetState {
 	deactivateState (stateTypeId) {
 		const state = this._data.activeStates.find(s => s.stateTypeId === stateTypeId);
 		if (state) {
+			const oldMax = this._data.hp.max || 0;
+			const involvesHpMaxIncrease = this._stateContributesHpMaxIncrease(state);
 			state.active = false;
+			// If this state contributed an hpMaxIncrease, recompute max so the cap drops.
+			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
 		}
 	}
 
@@ -31857,7 +31945,12 @@ class CharacterSheetState {
 	removeActiveState (stateId) {
 		const index = this._data.activeStates.findIndex(s => s.id === stateId);
 		if (index !== -1) {
+			const oldMax = this._data.hp.max || 0;
+			const target = this._data.activeStates[index];
+			const involvesHpMaxIncrease = this._stateContributesHpMaxIncrease(target);
 			this._data.activeStates.splice(index, 1);
+			// Recompute max in case the removed state contributed hpMaxIncrease.
+			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
 		}
 	}
 
@@ -31974,6 +32067,8 @@ class CharacterSheetState {
 
 		this._data.combatRound++;
 		const expired = [];
+		const oldMax = this._data.hp.max || 0;
+		let anyExpiredHpMaxIncrease = false;
 
 		for (const state of this._data.activeStates) {
 			if (!state.active) continue;
@@ -31984,6 +32079,7 @@ class CharacterSheetState {
 				state.active = false;
 				state.roundsRemaining = 0;
 				expired.push(state.name || state.stateTypeId);
+				if (this._stateContributesHpMaxIncrease(state)) anyExpiredHpMaxIncrease = true;
 
 				// Cleanup: remove any conditions this state granted
 				if (state.grantsConditions?.length > 0) {
@@ -32016,6 +32112,9 @@ class CharacterSheetState {
 				}
 			}
 		}
+
+		// If any expired state contributed hpMaxIncrease, recompute max HP.
+		if (anyExpiredHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
 
 		return expired;
 	}
