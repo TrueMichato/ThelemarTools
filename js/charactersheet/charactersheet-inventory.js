@@ -234,18 +234,55 @@ class CharacterSheetInventory {
 	}
 
 	/**
-	 * Toggle starred status for an item
+	 * Toggle starred status for an item.
+	 *
+	 * Bridges the legacy inventory `item.starred` flag (which drives the local
+	 * "Starred" inventory category and filter) to the centralised
+	 * `_data.favorites[]` system used by the Overview Favourites section, so
+	 * starring an item from the inventory tab also surfaces it in the Overview.
+	 * The bridge respects the 8-favourite cap: if at-cap, the inventory star
+	 * still toggles (preserving existing UX) but the favourite is not added,
+	 * and a toast explains why.
+	 *
 	 * @param {string} itemId - The item ID
 	 */
 	_toggleStarred (itemId) {
+		const item = this._state.getItems?.().find(i => i.id === itemId)
+			|| this._state._data?.inventory?.find(i => i.id === itemId);
 		const newStatus = this._state.toggleItemStarred(itemId);
+
+		// Mirror to centralised favourites so the Overview section reflects the change.
+		let capHit = false;
+		if (item && typeof this._page?._buildFavouriteData === "function") {
+			const itemName = item.item?.name || item.name || "Item";
+			const favData = this._page._buildFavouriteData("item", item, {nameOverride: itemName});
+			if (favData) {
+				const isCurrentlyFav = this._state.isFavorite("item", item.id);
+				if (newStatus && !isCurrentlyFav) {
+					if (!this._state.addFavorite(favData)) capHit = true;
+				} else if (!newStatus && isCurrentlyFav) {
+					this._state.removeFavorite(favData.id);
+				}
+				if (typeof this._page._renderFavouritesOverview === "function") {
+					this._page._renderFavouritesOverview();
+				}
+			}
+		}
+
 		this._renderItemList();
 		this._page?.saveCharacter?.();
 
-		JqueryUtil.doToast({
-			type: newStatus ? "info" : "default",
-			content: newStatus ? "Item starred!" : "Star removed",
-		});
+		if (capHit) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `Item starred (max 8 favourites — not added to Overview).`,
+			});
+		} else {
+			JqueryUtil.doToast({
+				type: newStatus ? "info" : "default",
+				content: newStatus ? "Item starred!" : "Star removed",
+			});
+		}
 	}
 
 	/**

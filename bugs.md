@@ -2,11 +2,13 @@
 In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
-[] favorite overview exists but there is no way to mark stuff as favorits - except for items, which had a seperate system beforehand which sadly does not link into this one
+[x] favorite overview exists but there is no button to mark stuff as favorits - except for items, which had a seperate system beforehand which sadly does not link into this one
+   - FIXED: Added star (☆/★) toggle buttons next to attacks, spells, features, optional features, feats, resources, and custom abilities (matches existing inventory star UX). Inventory item-star toggle now also pushes/pulls a corresponding entry in the centralised `_data.favorites[]` list, so starring an item from the Inventory tab surfaces it in the Overview Favourites section. Legacy saves auto-reconcile via `_reconcileStarredItemsToFavourites()` on load. Respects the 8-favourite cap with a toast warning. Tests: `CharacterSheetFavouriteStarButtons.test.js` (9 tests). Full charsheet suite still green (124 suites, 8226 tests).
 [] buffs window need some UI and UX improvements, and also to be discoverable in the combat tab.
 [] Hp is 0 upon building character.
 [] Lore skills are not rollable and do not benefit from proficiency bonus, do not show their passive score as well.
-[] The "Evasion" feature is not visible anywhere on the character sheet, even when it is correctly calculated and applied in combat.
+[] The "Evasion" feature is not visible as a feature in the features tab, even when it is correctly calculated and applied in combat. It is applied on dex rolls, but we want to shorthand a bit the writing of the feature, as it is a lot of text to read in the roll note every time, and players won't read it fast enough (also too much text looks bad)
+[] Dauntless Heritage is being applied to all saves, not just saves against fear - this brings up the question of how to handle conditinals in the sheet in general.
 [] Not all warlock invocations are implemented in calculations, and many have prerequisites that are not enforced in the UI (e.g. invocations that require a certain pact boon or warlock level). Also, wthe features for warlock invocations and warlock invocation options are counted as active states for some reason.
 
 ## Closed Bugs

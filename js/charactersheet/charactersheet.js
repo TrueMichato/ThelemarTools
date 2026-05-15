@@ -5552,9 +5552,9 @@ class CharacterSheetPage {
 				this._useOverviewResource(resource);
 			});
 
-			// Pin (favourite) toggle
-			const pin = this._renderFavouritePin("resource", resource);
-			if (pin) row.querySelector(".charsheet__ability-controls").append(pin);
+			// Star (favourite) toggle
+			const star = this._renderFavouriteStar("resource", resource);
+			if (star) row.querySelector(".charsheet__ability-controls").append(star);
 
 			container.append(row);
 		}
@@ -5611,9 +5611,9 @@ class CharacterSheetPage {
 				this._useOverviewAbility(ability);
 			});
 
-			// Pin (favourite) toggle
-			const pin = this._renderFavouritePin("customAbility", ability);
-			if (pin) row.querySelector(".charsheet__ability-controls").append(pin);
+			// Star (favourite) toggle
+			const star = this._renderFavouriteStar("customAbility", ability);
+			if (star) row.querySelector(".charsheet__ability-controls").append(star);
 
 			container.append(row);
 		}
@@ -5822,8 +5822,8 @@ class CharacterSheetPage {
 	// #region Favourites (Overview)
 
 	/**
-	 * Build the favourite-data payload for an entity, used by `_renderFavouritePin`
-	 * and `toggleFavorite`. Centralised so every pin/unpin/lookup uses an identical
+	 * Build the favourite-data payload for an entity, used by `_renderFavouriteStar`
+	 * and `toggleFavorite`. Centralised so every star/unstar/lookup uses an identical
 	 * `id` shape (`type:idOrName`) and consistent display fields.
 	 */
 	_buildFavouriteData (type, entity, {nameOverride = null, iconOverride = null, detailOverride = null} = {}) {
@@ -5850,28 +5850,34 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * Render a small ⭐/☆ pin button that toggles favourite state for the given
+	 * Render a small ☆/★ star button that toggles favourite state for the given
 	 * entity. Returns the button element so callers can append wherever they like.
 	 *
 	 * @param {string} type - Favourite type key (attack, spell, feature, etc.)
-	 * @param {object} entity - The entity to pin (must have id or name)
-	 * @param {object} [opts] - Optional display overrides (nameOverride, iconOverride, detailOverride)
+	 * @param {object} entity - The entity to star (must have id or name)
+	 * @param {object} [opts] - Optional display overrides + behavioural hooks
+	 * @param {string} [opts.nameOverride]
+	 * @param {string} [opts.iconOverride]
+	 * @param {string} [opts.detailOverride]
+	 * @param {Function} [opts.onToggle] - Optional callback invoked after a successful toggle
+	 * 	(after state save + Overview re-render). Use this to refresh the host surface
+	 * 	so the star badge updates without a tab switch.
 	 */
-	_renderFavouritePin (type, entity, opts = {}) {
+	_renderFavouriteStar (type, entity, opts = {}) {
 		const favData = this._buildFavouriteData(type, entity, opts);
 		if (!favData) return null;
 		const idSuffix = favData.id.slice(favData.id.indexOf(":") + 1);
-		const isPinned = this._state.isFavorite(type, idSuffix);
+		const isStarred = this._state.isFavorite(type, idSuffix);
 
 		const btn = e_({
 			tag: "button",
-			clazz: `ve-btn ve-btn-xs ve-btn-default charsheet__pin-btn${isPinned ? " charsheet__pin-btn--active" : ""}`,
+			clazz: `ve-btn ve-btn-xs ve-btn-default charsheet__fav-star${isStarred ? " charsheet__fav-star--active" : ""}`,
 			attrs: {
-				title: isPinned ? `Unpin "${favData.name}" from Favourites` : `Pin "${favData.name}" to Favourites`,
-				"aria-pressed": isPinned ? "true" : "false",
-				"aria-label": isPinned ? `Unpin ${favData.name}` : `Pin ${favData.name}`,
+				title: isStarred ? `Unstar "${favData.name}" (remove from Favourites)` : `Star "${favData.name}" (add to Favourites)`,
+				"aria-pressed": isStarred ? "true" : "false",
+				"aria-label": isStarred ? `Unstar ${favData.name}` : `Star ${favData.name}`,
 			},
-			html: isPinned ? "★" : "☆",
+			html: isStarred ? "★" : "☆",
 		});
 		btn.addEventListener("click", (e) => {
 			e.stopPropagation();
@@ -5882,12 +5888,19 @@ class CharacterSheetPage {
 			}
 			this._saveCurrentCharacter();
 			this._renderFavouritesOverview();
-			// Re-render the host panel so the pin reflects new state.
+			// Re-render the host panel so the star reflects new state.
 			this._renderResources();
 			this._renderOverviewAbilities();
+			if (typeof opts.onToggle === "function") {
+				// eslint-disable-next-line no-console
+				try { opts.onToggle(result); } catch (err) { console.error("[CharSheet] favourite-star onToggle error:", err); }
+			}
 		});
 		return btn;
 	}
+
+	// Back-compat shim: legacy callers / external code may still reference the "pin" name.
+	_renderFavouritePin (type, entity, opts = {}) { return this._renderFavouriteStar(type, entity, opts); }
 
 	_renderFavouritesOverview () {
 		const container = document.getElementById("charsheet-favourites-list");
@@ -5948,12 +5961,18 @@ class CharacterSheetPage {
 		const name = entity.name || fav.name;
 		const icon = fav.icon || "⭐";
 
+		// Build a hover-linked name when the entity has a canonical 5etools page
+		// (spells, items, feats, optional features, class features, …). Falls back
+		// to a plain escaped string for surfaces that have no underlying entry
+		// (custom abilities, ad-hoc resources, free-form attacks).
+		const nameHtml = this._getFavouriteNameHtml(fav, entity, name);
+
 		const tile = e_({outer: `
 			<div class="charsheet__favourite-tile" data-fav-type="${fav.type}" data-fav-id="${(fav.id || "").replace(/"/g, "&quot;")}">
 				<div class="charsheet__favourite-tile__main">
 					<span class="charsheet__favourite-tile__icon">${icon}</span>
 					<div class="charsheet__favourite-tile__info">
-						<span class="charsheet__favourite-tile__name">${name.replace(/</g, "&lt;")}</span>
+						<span class="charsheet__favourite-tile__name">${nameHtml}</span>
 						${detail ? `<span class="charsheet__favourite-tile__detail">${String(detail).replace(/</g, "&lt;")}</span>` : ""}
 					</div>
 				</div>
@@ -5976,15 +5995,71 @@ class CharacterSheetPage {
 		});
 		removeBtn.addEventListener("click", (e) => {
 			e.stopPropagation();
+			// For item favourites, also clear the inventory `starred` flag so the
+			// inventory tab's star icon stays in sync (the centralised favourites
+			// list and the per-item starred flag are kept consistent by this
+			// bridge — see `_toggleStarred` in charactersheet-inventory.js).
+			if (fav.type === "item") {
+				const idSuffix = fav.id?.includes(":") ? fav.id.slice(fav.id.indexOf(":") + 1) : "";
+				const entry = (this._state._data?.inventory || []).find(i => i.id === idSuffix);
+				if (entry?.starred && typeof this._state.toggleItemStarred === "function") {
+					this._state.toggleItemStarred(entry.id);
+				}
+			}
 			this._state.removeFavorite(fav.id);
 			this._saveCurrentCharacter();
 			this._renderFavouritesOverview();
 			this._renderResources();
 			this._renderOverviewAbilities();
+			// Re-render the surface that owns the unstarred entity so its ☆/★
+			// glyph flips back to "off". Without this, the star button keeps
+			// its stale "active" appearance until the next manual re-render,
+			// even though the favourites list is correct.
+			this._refreshSurfaceForFavourite(fav);
 		});
 		actions.append(removeBtn);
 
 		return tile;
+	}
+
+	/**
+	 * Re-render whichever in-page list owns the entity behind a favourite,
+	 * so that the per-row star button (☆/★) reflects the current
+	 * `_data.favorites[]` membership. Defensive — silently skips surfaces
+	 * that haven't been initialised yet (e.g. during early page boot or when
+	 * a sub-module is unavailable in a test harness).
+	 *
+	 * @param {object} fav - The favourite record (`{id, type, ...}`)
+	 */
+	_refreshSurfaceForFavourite (fav) {
+		try {
+			switch (fav?.type) {
+				case "attack":
+					this._renderAttacks?.();
+					break;
+				case "spell":
+					this._spells?._renderSpellList?.();
+					break;
+				case "feature":
+				case "optionalFeature":
+				case "feat":
+				case "combatTradition":
+					this._features?.render?.();
+					break;
+				case "item":
+					this._inventory?._renderItemList?.();
+					break;
+				case "customAbility":
+					this._customAbilities?.render?.();
+					break;
+				case "resource":
+					this._renderResources?.();
+					break;
+			}
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet Favourites] surface re-render error:", e);
+		}
 	}
 
 	/**
@@ -6049,14 +6124,76 @@ class CharacterSheetPage {
 				if ((entity.max ?? 0) <= 0) return null;
 				return make("Use", "ve-btn-primary", () => this._useOverviewResource(entity), {title: "Spend one charge"});
 			case "item":
-				return make("View", "ve-btn-default", () => this.switchToTab("#charsheet-tab-inventory"), {title: "Open Inventory tab"});
 			case "optionalFeature":
 			case "feat":
-				return make("View", "ve-btn-default", () => this.switchToTab("#charsheet-tab-features"), {title: "Open Features tab"});
 			case "combatTradition":
-				return make("View", "ve-btn-default", () => this.switchToTab("#charsheet-tab-features"), {title: "Open Features tab"});
+				// Name itself is now a hover-link to the entity's stat page (see
+				// `_getFavouriteNameHtml`), so the redundant "View" tab-switch
+				// buttons would just duplicate functionality and clutter the tile.
+				return null;
 			default:
 				return null;
+		}
+	}
+
+	/**
+	 * Build the inner HTML for a favourite tile's name. Returns a hover link
+	 * pointing at the entity's canonical 5etools page when one is available
+	 * (so users get the standard hover preview without leaving the sheet),
+	 * otherwise returns an HTML-escaped plain name. All branches are
+	 * defensive — a missing source or a thrown hash-builder error must never
+	 * prevent the tile from rendering, so failures fall back to plain text.
+	 *
+	 * @param {object} fav - The favourite record (`{id, type, name, ...}`)
+	 * @param {object} entity - The resolved entity from `_resolveFavorite`
+	 * @param {string} name - Display name (already resolved with overrides)
+	 * @returns {string} HTML string safe for innerHTML
+	 */
+	_getFavouriteNameHtml (fav, entity, name) {
+		const escaped = String(name).replace(/</g, "&lt;");
+		try {
+			switch (fav.type) {
+				case "spell": {
+					if (!entity?.source) return escaped;
+					return this.getHoverLink(UrlUtil.PG_SPELLS, entity.name, entity.source);
+				}
+				case "item": {
+					// Inventory entries wrap the underlying item under `entity.item`.
+					const itm = entity?.item || entity;
+					const itemName = itm?.name || entity?.name || name;
+					const itemSource = itm?.source || entity?.source;
+					if (!itemSource) return escaped;
+					return this.getHoverLink(UrlUtil.PG_ITEMS, itemName, itemSource, null, escaped);
+				}
+				case "feat": {
+					if (!entity?.source) return escaped;
+					return this.getHoverLink(UrlUtil.PG_FEATS, entity.name, entity.source);
+				}
+				case "feature":
+				case "optionalFeature": {
+					// Reuse the existing feature-aware hover-link builder, which
+					// handles class features (with the right class hash), species,
+					// background, and optional-feature/combat-method routing.
+					if (typeof this._getFeatureHoverLink === "function") {
+						const html = this._getFeatureHoverLink(entity);
+						if (html && html !== entity?.name) return html;
+					}
+					return escaped;
+				}
+				case "combatTradition": {
+					const source = entity?.source || Parser.SRC_XPHB;
+					try {
+						return this.getHoverLink(UrlUtil.PG_COMBAT_METHODS, entity.name, source);
+					} catch (e) { return escaped; }
+				}
+				default:
+					// attack / customAbility / resource — no canonical entry page.
+					return escaped;
+			}
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet Favourites] name-link error:", e);
+			return escaped;
 		}
 	}
 	// #endregion
@@ -7028,6 +7165,12 @@ class CharacterSheetPage {
 			`});
 
 			row.querySelector("button").addEventListener("click", () => this._rollAttack(attack));
+
+			// Star (favourite) toggle — append into the row's action area so users can
+			// pin attacks (including weapon-derived auto-attacks) to the Overview.
+			const star = this._renderFavouriteStar("attack", attack, {onToggle: () => this._renderAttacks()});
+			if (star) row.append(star);
+
 			container.append(row);
 		});
 

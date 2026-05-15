@@ -5682,7 +5682,7 @@ class CharacterSheetSpells {
 			}
 		}
 
-		return e_({outer: `
+		const el = e_({outer: `
 			<div class="charsheet__spell-item ${isPrepared || isAlwaysPrepared ? "prepared" : ""} ${isAlwaysPrepared ? "always-prepared" : ""}" data-spell-id="${spellId}">
 				<div class="charsheet__spell-item-main">
 					<div class="charsheet__spell-item-header">
@@ -5721,6 +5721,19 @@ class CharacterSheetSpells {
 				</div>
 			</div>
 		`});
+
+		// Star (favourite) toggle — appended to the spell's action area so users
+		// can pin spells to the Overview Favourites section. Re-render the spell
+		// list on toggle so the star badge reflects the new state without a tab switch.
+		if (typeof this._page?._renderFavouriteStar === "function") {
+			const star = this._page._renderFavouriteStar("spell", spell, {onToggle: () => this._renderSpellList()});
+			if (star) {
+				const actions = el.querySelector(".charsheet__spell-item-actions");
+				if (actions) actions.append(star);
+			}
+		}
+
+		return el;
 	}
 
 	/**

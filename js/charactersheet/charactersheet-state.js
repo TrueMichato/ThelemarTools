@@ -3635,6 +3635,13 @@ class CharacterSheetState {
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
 
+		// Reconcile legacy inventory `starred` flags into the centralised
+		// favourites system, so older saves where items were starred (before
+		// the inventory↔favourites bridge existed) surface those items in the
+		// Overview Favourites section. Best-effort: respects the 8-cap, never
+		// removes existing favourites, and is a no-op once consistent.
+		this._reconcileStarredItemsToFavourites();
+
 		// Migrate old ki backing store into the resource system
 		this._migrateKiToResource();
 
@@ -22195,6 +22202,41 @@ class CharacterSheetState {
 			return this.removeFavorite(favData.id) ? "removed" : null;
 		}
 		return this.addFavorite(favData, {max}) ? "added" : null;
+	}
+
+	/**
+	 * One-shot reconciliation: ensure every inventory item with `starred: true`
+	 * has a matching `_data.favorites[]` entry. Intended to run on load so that
+	 * legacy characters (saved before the inventory↔favourites bridge existed)
+	 * surface their starred items in the Overview Favourites section.
+	 *
+	 * Best-effort: respects the 8-favourite cap silently (older stars beyond
+	 * the cap remain starred locally but are not added to favourites). Never
+	 * removes existing favourites. Idempotent.
+	 *
+	 * @returns {number} Number of favourites added during reconciliation
+	 */
+	_reconcileStarredItemsToFavourites () {
+		if (!Array.isArray(this._data?.inventory)) return 0;
+		if (!this._data.favorites) this._data.favorites = [];
+
+		const ICONS_ITEM = "🎒";
+		let added = 0;
+		for (const entry of this._data.inventory) {
+			if (!entry?.starred || !entry.id) continue;
+			if (this.isFavorite("item", entry.id)) continue;
+			if (this._data.favorites.length >= 8) break; // cap reached
+			const itemName = entry.item?.name || entry.name || "Item";
+			this._data.favorites.push({
+				id: `item:${entry.id}`,
+				type: "item",
+				name: itemName,
+				icon: ICONS_ITEM,
+				detail: null,
+			});
+			added++;
+		}
+		return added;
 	}
 
 	/**

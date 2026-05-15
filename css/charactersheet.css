@@ -17098,6 +17098,31 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	text-overflow: ellipsis;
 }
 
+/* Hoverable favourite names (spell/item/feat/feature/optional-feature/etc.)
+   should match the standard 5etools entity-link look used elsewhere on the
+   site (Bestiary list, Items list, feature rows): the canonical blue link
+   colour with an underline that appears on hover. This signals "click for
+   page / hover for tooltip" with the same affordance players already learn
+   everywhere else on 5etools. */
+.charsheet__favourite-tile__name a,
+.charsheet__favourite-tile__name a:visited {
+	color: #337ab7; /* matches global 5etools link colour (.ve-roller / a) */
+	text-decoration: none;
+}
+.charsheet__favourite-tile__name a:hover,
+.charsheet__favourite-tile__name a:focus {
+	color: #23527c;
+	text-decoration: underline;
+}
+:root.ve-night-mode .charsheet__favourite-tile__name a,
+:root.ve-night-mode .charsheet__favourite-tile__name a:visited {
+	color: #6cb7ee;
+}
+:root.ve-night-mode .charsheet__favourite-tile__name a:hover,
+:root.ve-night-mode .charsheet__favourite-tile__name a:focus {
+	color: #9ccdf2;
+}
+
 .charsheet__favourite-tile__detail {
 	font-size: 0.78em;
 	opacity: 0.75;
@@ -17125,30 +17150,33 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	line-height: 1;
 }
 
-/* Pin (⭐/☆) toggle button used on resource / ability / inventory rows */
-.charsheet__pin-btn {
+/* Star (☆/★) toggle button — used on resource, ability, attack, spell, feature, feat rows.
+   Visual sibling of `.charsheet__item-star` (inventory legacy star) so all "star to favourite"
+   surfaces feel identical. Kept as a thin pill instead of a square so it nests cleanly inside
+   action button groups. */
+.charsheet__fav-star {
 	min-width: 1.75rem;
 	padding-left: 0.35rem;
 	padding-right: 0.35rem;
 	font-size: 1em;
 	line-height: 1;
-	color: var(--rgb-fg-muted, #888);
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.4));
 	background: transparent;
 	border: 1px solid transparent;
 	transition: color 0.15s ease, transform 0.15s ease;
 }
 
-.charsheet__pin-btn:hover {
-	color: var(--cs-accent, #ffb84d);
+.charsheet__fav-star:hover {
+	color: #f59e0b;
 	transform: scale(1.1);
 }
 
-.charsheet__pin-btn--active {
-	color: var(--cs-accent, #ffb84d);
+.charsheet__fav-star--active {
+	color: #f59e0b;
 }
 
-.charsheet__pin-btn--active:hover {
-	color: #cc9933;
+.charsheet__fav-star--active:hover {
+	color: #d97706;
 }
 
 .charsheet__favourites-cleanup-btn {
