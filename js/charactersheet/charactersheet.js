@@ -2417,7 +2417,8 @@ class CharacterSheetPage {
 		}
 
 		const charData = this._state.toJson();
-		const filename = `${(charData.name || "character").toLowerCase().replace(/\s+/g, "-")}.json`;
+		// Note: DataUtil.userDownload appends ".json" itself — pass bare basename.
+		const filename = `${(charData.name || "character").toLowerCase().replace(/\s+/g, "-")}`;
 		DataUtil.userDownload(filename, charData, {fileType: "character"});
 	}
 	// #endregion

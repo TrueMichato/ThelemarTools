@@ -144,9 +144,10 @@ class CharacterSheetExport {
 				if (isPdfFormat) {
 					this._openPdfPrintView();
 				} else {
-					const filename = `${characterName.replace(/[^a-zA-Z0-9]/g, "_")}.json`;
-					DataUtil.userDownload(filename, characterData, {fileType: "character"});
-					JqueryUtil.doToast({type: "success", content: `Downloaded ${filename}`});
+					// Note: DataUtil.userDownload appends ".json" itself — pass bare basename.
+					const basename = characterName.replace(/[^a-zA-Z0-9]/g, "_");
+					DataUtil.userDownload(basename, characterData, {fileType: "character"});
+					JqueryUtil.doToast({type: "success", content: `Downloaded ${basename}.json`});
 				}
 			}});
 		btnDownload.innerHTML = `<span class="glyphicon glyphicon-download"></span> Download`;
@@ -404,13 +405,14 @@ class CharacterSheetExport {
 						});
 					}
 
-					const filename = `${(monster.name || "npc").replace(/[^a-zA-Z0-9]/g, "_")}.json`;
+					// Note: DataUtil.userDownload appends ".json" itself — pass bare basename.
+					const basename = (monster.name || "npc").replace(/[^a-zA-Z0-9]/g, "_");
 					DataUtil.userDownload(
-						filename,
+						basename,
 						{_meta: {sources: [sourceMeta]}, monster: [monster]},
 						{fileType: "homebrew"},
 					);
-					JqueryUtil.doToast({type: "success", content: `Downloaded ${filename}`});
+					JqueryUtil.doToast({type: "success", content: `Downloaded ${basename}.json`});
 				}});
 			btnDownload.innerHTML = `<span class="glyphicon glyphicon-download"></span> Download JSON`;
 
