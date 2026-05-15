@@ -1485,7 +1485,10 @@ class CharacterSheetFeatures {
 		}
 
 		// Only render if we have stats to show
-		if (stats.length === 0) return;
+		if (stats.length === 0) {
+			this._renderPassiveDefenses(container);
+			return;
+		}
 
 		const statsContainer = e_({tag: "div", clazz: "charsheet__calculated-stats mb-2"});
 		statsContainer.append(e_({outer: `<div class="ve-small ve-muted mb-1"><strong>Class Statistics</strong></div>`}));
@@ -1502,6 +1505,48 @@ class CharacterSheetFeatures {
 
 		statsContainer.append(statsGrid);
 		container.append(statsContainer);
+
+		this._renderPassiveDefenses(container);
+	}
+
+	/**
+	 * Render a "Passive Defenses" mini-section for save-time passives like
+	 * Evasion. Driven by `state.getPassiveSaveAlerts(ability)` so any future
+	 * passive (Indomitable, Magic Resistance, Aura of Protection, …) shows
+	 * up here as soon as it is added to the helper.
+	 */
+	_renderPassiveDefenses (container) {
+		if (!this._state.getPassiveSaveAlerts) return;
+		const seen = new Set();
+		const entries = [];
+		Parser.ABIL_ABVS.forEach(abl => {
+			const alerts = this._state.getPassiveSaveAlerts(abl) || [];
+			alerts.forEach(alert => {
+				if (seen.has(alert.key)) return;
+				seen.add(alert.key);
+				entries.push({...alert, ability: abl});
+			});
+		});
+		if (entries.length === 0) return;
+
+		const wrap = e_({tag: "div", clazz: "charsheet__calculated-stats mb-2"});
+		wrap.append(e_({outer: `<div class="ve-small ve-muted mb-1"><strong>Passive Defenses</strong></div>`}));
+
+		const grid = e_({tag: "div", clazz: "charsheet__stats-grid"});
+		entries.forEach(entry => {
+			const ablLabel = Parser.attAbvToFull(entry.ability);
+			const valueLabel = `${ablLabel} ½ → 0`;
+			const title = entry.source ? `${entry.name} (${entry.source})\n${entry.summary}` : `${entry.name}\n${entry.summary}`;
+			grid.append(e_({outer: `
+				<div class="charsheet__stat-item" title="${title.replace(/"/g, "&quot;")}">
+					<span class="charsheet__calc-stat-label">⚡ ${entry.name}:</span>
+					<span class="charsheet__calc-stat-value">${valueLabel}</span>
+				</div>
+			`}));
+		});
+
+		wrap.append(grid);
+		container.append(wrap);
 	}
 
 	/**
