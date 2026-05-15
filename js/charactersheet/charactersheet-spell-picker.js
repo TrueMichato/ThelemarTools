@@ -291,9 +291,11 @@ class CharacterSheetSpellPicker {
 			} else {
 				if (spell.level < 1 || spell.level > maxSpellLevel) return false;
 			}
-			if (CharacterSheetClassUtils.spellIsForClass(spell, className, {subclass})) return true;
-			if (additionalClassNames.some(cls => CharacterSheetClassUtils.spellIsForClass(spell, cls))) return true;
-			return false;
+			return CharacterSheetClassUtils.spellIsAvailableForClass(spell, {
+				className,
+				subclass,
+				additionalClassNames,
+			});
 		}).sort((a, b) => {
 			if (a.level !== b.level) return a.level - b.level;
 			return a.name.localeCompare(b.name);
@@ -512,6 +514,8 @@ class CharacterSheetSpellPicker {
 			preSelectedSpells = [],
 			className,
 			subclass,
+			subclassChoice,
+			additionalClassNames = [],
 		} = opts;
 
 		const section = e_({outer: `
@@ -557,7 +561,12 @@ class CharacterSheetSpellPicker {
 		progressArea.append(summaryPanel);
 
 		const wizardSpells = allSpells.filter(spell => {
-			const isClassSpell = CharacterSheetClassUtils.spellIsForClass(spell, className || "Wizard", {subclass});
+			const isClassSpell = CharacterSheetClassUtils.spellIsAvailableForClass(spell, {
+				className: className || "Wizard",
+				subclass,
+				subclassChoice,
+				additionalClassNames,
+			});
 			return isClassSpell && spell.level >= 1 && spell.level <= maxSpellLevel;
 		}).sort((a, b) => {
 			if (a.level !== b.level) return a.level - b.level;

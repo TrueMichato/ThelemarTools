@@ -2,11 +2,11 @@
 In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
-[] A chronourgy wizard doesn't get Gift of Alacrity as an option when adding spells, which suggests there are still issues in how spell lists are being handled.
+[] A chronourgy wizard doesn't get Gift of Alacrity as an option when adding spells, which suggests there are still issues in how spell lists are being handled - we want to make this an investigation into the broader spell list handling to ensure there aren't other edge cases lurking. As a reminder - we want thelemar classes to have the same list as their XPHB counterparts, with the TGTT additions added on top - if this should require a data change instead of a code change, we can do that as well. We want subclasses to also be taken into account in spell list handling, so the chronourgy wizard should have access to the spells granted by their subclass as well.
+[] Chronourgy Wizard's should get +int mod to initiative from their Temporal Awareness feature, but this isn't being calculated correctly.
 [] when exporting characters as a json, we get a file called "name.json.json" instead of "name.json". This is a minor issue but should be fixed for better user experience.
 [] the Dreamer feat from the Traveler's Guide to Thelemar isn't granting the expected benefits, and may not be fully implemented in calculations.
 [] Nyuidj from TGTT are supposed to have an advantage in Wis Saving Throws, and they do! But when trying to roll with disadvantage, it just rolls with disadvantage instead of normal. This is a bug in the roll logic that needs to be fixed to properly handle cases where a character has both advantage and disadvantage on the same roll.
-[] Chronourgy Wizard's should get +int mod to initiative from their Temporal Awareness feature, but this isn't being calculated correctly.
 [] There is a weird bug for wizards in how cantrips are handled, which I don't quite understand. I will add the json of the character to the bug report, but basically the cantrips known and cantrips prepared are not being calculated correctly, which leads to some weird issues with spellcasting and spell preparation.
 [] Not all warlock invocations are implemented in calculations, and many have prerequisites that are not enforced in the UI (e.g. invocations that require a certain pact boon or warlock level). 
 

@@ -3580,9 +3580,12 @@ class CharacterSheetLevelUp {
 			const validSpells = allSpells.filter((/** @type {*} */ s) => {
 				if (s.level < 1 || s.level > knownMaxSpellLevel) return false;
 				if (knownIds.has(`${s.name}|${s.source}`)) return false;
-				if (CharacterSheetClassUtils.spellIsForClass(s, classEntry.name, {subclass: currentSubclass || classEntry.subclass})) return true;
-				if (additionalClasses.some((/** @type {*} */ cn) => CharacterSheetClassUtils.spellIsForClass(s, cn))) return true;
-				return false;
+				return CharacterSheetClassUtils.spellIsAvailableForClass(s, {
+					className: classEntry.name,
+					subclass: currentSubclass || classEntry.subclass,
+					subclassChoice: currentSubclassChoice,
+					additionalClassNames: additionalClasses,
+				});
 			}).sort((/** @type {*} */ a, /** @type {*} */ b) => a.level - b.level || a.name.localeCompare(b.name));
 
 			pickerContainer.insertAdjacentHTML("beforeend", `

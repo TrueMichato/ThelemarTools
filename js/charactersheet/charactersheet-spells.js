@@ -321,19 +321,14 @@ class CharacterSheetSpells {
 		});
 
 		const classSpells = filteredSpells.filter(spell => {
-			// Check base class spell list + subclass spell list via shared utility
-			if (CharacterSheetClassUtils.spellIsForClass(spell, spellListClassName, {subclass: characterSubclass})) return true;
-
-			// Check additional class spell lists granted by subclass features
-			if (additionalClassNames.some(cls => CharacterSheetClassUtils.spellIsForClass(spell, cls))) return true;
-
-			// For homebrew/third-party classes: also include spells from the equivalent core class
-			// (both base class and subclass spell lists) if the setting is enabled
-			if (includeCoreSpells && isNonStandardSource) {
-				if (CharacterSheetClassUtils.spellIsForClass(spell, className, {subclass: characterSubclass})) return true;
-			}
-
-			return false;
+			return CharacterSheetClassUtils.spellIsAvailableForClass(spell, {
+				className: spellListClassName,
+				classSource,
+				subclass: characterSubclass,
+				subclassChoice: characterClass.subclassChoice,
+				additionalClassNames,
+				includeCoreSpellsForHomebrew: includeCoreSpells && isNonStandardSource,
+			});
 		});
 
 		// Filter by level
