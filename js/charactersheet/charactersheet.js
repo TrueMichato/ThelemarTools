@@ -5999,6 +5999,9 @@ class CharacterSheetPage {
 			${hasRecklessAttack ? `<button class="ve-btn ve-btn-xs ${activeStateTypeIds.has("recklessAttack") ? "ve-btn-warning" : "ve-btn-default"} mr-1 charsheet__toggle-reckless-btn" title="Reckless Attack: You gain advantage on melee weapon attack rolls using Strength, but attack rolls against you have advantage until your next turn.">
 				⚡ ${activeStateTypeIds.has("recklessAttack") ? "End Reckless" : "Reckless"}
 			</button>` : ""}
+			<button class="ve-btn ve-btn-xs ve-btn-default charsheet__apply-buff-btn" title="Apply a buff spell cast on you (e.g. Aid, Bless, Haste). Useful for non-casters tracking party buffs.">
+				✨ Apply Buff
+			</button>
 		</div>`});
 
 		quickActions.querySelector(".charsheet__toggle-dodge-btn").addEventListener("click", () => {
@@ -6025,12 +6028,218 @@ class CharacterSheetPage {
 			});
 		}
 
+		quickActions.querySelector(".charsheet__apply-buff-btn").addEventListener("click", () => {
+			this._showApplyBuffModal();
+		});
+
 		container.append(quickActions);
 
 		// Sync combat tab's active states, defenses, and effects display
 		this._combat?.renderCombatStates?.();
 		this._combat?.renderCombatDefenses?.();
 		this._combat?.renderCombatEffects?.();
+	}
+
+	/**
+	 * Show the Apply Buff picker modal — a flat list of every spell in
+	 * `SPELL_BUFF_REGISTRY` so non-casters can track buffs cast on them by
+	 * party members (Aid, Bless, Haste, Heroes' Feast, etc.). Refusing to
+	 * stack: if a spell with the same name is already active as a spell
+	 * effect, the picker rejects activation with a toast — toggle the existing
+	 * one off first to "re-cast" it. Upcast scaling is exposed via a
+	 * "Slots above base" input that multiplies any `upcastPerLevel` numeric
+	 * effects (currently this covers `hpMaxIncrease` and `tempHp`).
+	 *
+	 * Mirrors the activateState payload built by the spell-cast flow in
+	 * charactersheet-spells.js so downstream consumers (HP calc, attacks,
+	 * AC stacking, etc.) treat picker-applied buffs identically to those
+	 * the caster applies on themselves.
+	 * @private
+	 */
+	_showApplyBuffModal () {
+		const registry = CharacterSheetState.SPELL_BUFF_REGISTRY || {};
+		const entries = Object.entries(registry)
+			.map(([key, spec]) => ({key, displayName: key.replace(/\b\w/g, c => c.toUpperCase()), spec}))
+			.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+			title: "Apply Buff",
+			isMinHeight0: true,
+			isHeight100: true,
+		});
+
+		modalInner.insertAdjacentHTML("beforeend", `
+			<div class="ve-flex-col w-100">
+				<div class="mb-2 ve-small ve-muted">Pick a buff cast on you. Effects with mechanical handlers (HP, AC, attack/save bonuses, advantage, etc.) are applied automatically. Notes-only buffs surface as a tracked active state.</div>
+				<input type="search" class="ve-form-control mb-2 charsheet__apply-buff-search" placeholder="Search buff name…" />
+				<div class="charsheet__apply-buff-list ve-overflow-y-auto" style="max-height: 60vh;"></div>
+			</div>
+		`);
+
+		const searchInput = modalInner.querySelector(".charsheet__apply-buff-search");
+		const listEl = modalInner.querySelector(".charsheet__apply-buff-list");
+
+		const renderList = (filterText = "") => {
+			listEl.innerHTML = "";
+			const filter = filterText.trim().toLowerCase();
+			const filtered = entries.filter(e => !filter || e.displayName.toLowerCase().includes(filter));
+			if (filtered.length === 0) {
+				listEl.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-text-center py-3">No matching buffs.</div>`);
+				return;
+			}
+			filtered.forEach(({key, displayName, spec}) => {
+				const row = this._buildApplyBuffRow({key, displayName, spec, doClose});
+				listEl.append(row);
+			});
+		};
+
+		searchInput.addEventListener("input", () => renderList(searchInput.value));
+		renderList();
+		setTimeout(() => searchInput.focus(), 0);
+	}
+
+	/**
+	 * Build a single picker row for a SPELL_BUFF_REGISTRY entry.
+	 * @private
+	 */
+	_buildApplyBuffRow ({key, displayName, spec, doClose}) {
+		const selfEffects = Array.isArray(spec.selfEffects) ? spec.selfEffects : [];
+		const summary = this._summariseBuffEffects(selfEffects);
+		const durationStr = this._formatBuffDuration(spec.duration, spec.concentration);
+		const upcastNumericKeys = spec.upcastPerLevel
+			? Object.keys(spec.upcastPerLevel).filter(k => typeof spec.upcastPerLevel[k] === "number")
+			: [];
+		const hasNumericUpcast = upcastNumericKeys.length > 0;
+
+		const row = e_({outer: `
+			<div class="charsheet__apply-buff-row p-2 mb-2 border" style="border-radius: 4px;">
+				<div class="ve-flex-v-center mb-1">
+					<strong class="mr-2">${displayName.escapeQuotes()}</strong>
+					${spec.concentration ? `<span class="ve-small ve-muted mr-2" title="Requires concentration">🔮 Conc.</span>` : ""}
+					<span class="ve-small ve-muted ml-auto">${(/** @type {*} */ (durationStr)).escapeQuotes()}</span>
+				</div>
+				<div class="ve-small ve-muted mb-2">${summary}</div>
+				<div class="ve-flex-v-center charsheet__apply-buff-row-controls"></div>
+			</div>
+		`});
+
+		const controls = row.querySelector(".charsheet__apply-buff-row-controls");
+
+		let upcastInput = null;
+		if (hasNumericUpcast) {
+			const upcastWrap = e_({outer: `
+				<label class="ve-flex-v-center mr-2 ve-small ve-muted mb-0">
+					Slots above base:
+					<input type="number" min="0" max="9" value="0" class="ve-form-control form-control--minimal ve-input-xs ml-1" style="width: 50px;">
+				</label>
+			`});
+			upcastInput = upcastWrap.querySelector("input");
+			controls.append(upcastWrap);
+		}
+
+		const applyBtn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-primary ml-auto">Apply</button>`});
+		applyBtn.addEventListener("click", () => {
+			const upcastDelta = upcastInput ? Math.max(0, parseInt(upcastInput.value, 10) || 0) : 0;
+			const ok = this._applyBuffFromRegistry({key, displayName, spec, upcastDelta});
+			if (ok) doClose();
+		});
+		controls.append(applyBtn);
+
+		return row;
+	}
+
+	/**
+	 * Apply a registry buff to the character by activating a custom spell-effect state.
+	 * Honours stacking-rejection: if a spell-effect state with the same name is
+	 * already active, refuses with a toast so the user must explicitly toggle off
+	 * the existing one (matching the rule that buff spells of the same name don't stack).
+	 * @returns {boolean} true on apply, false on stacking refusal
+	 * @private
+	 */
+	_applyBuffFromRegistry ({key, displayName, spec, upcastDelta = 0}) {
+		const existing = this._state.getActiveStates?.()?.find(s => s.active && s.isSpellEffect && (s.name || "").toLowerCase() === displayName.toLowerCase());
+		if (existing) {
+			JqueryUtil.doToast({type: "warning", content: `${displayName} is already active — toggle it off first to re-apply.`});
+			return false;
+		}
+
+		const customEffects = (spec.selfEffects || []).map(eff => {
+			const out = {...eff};
+			if (upcastDelta > 0 && spec.upcastPerLevel) {
+				// Apply per-level scaling for known numeric effect types.
+				if (out.type === "hpMaxIncrease" && typeof spec.upcastPerLevel.hpMaxIncrease === "number") {
+					out.value = (out.value || 0) + spec.upcastPerLevel.hpMaxIncrease * upcastDelta;
+				} else if (out.type === "tempHp" && typeof spec.upcastPerLevel.tempHp === "number") {
+					out.value = (out.value || 0) + spec.upcastPerLevel.tempHp * upcastDelta;
+				}
+				// Other upcast keys (e.g. extraDamageDice) are out of scope for this picker.
+			}
+			return out;
+		});
+
+		this._state.activateState("custom", {
+			name: displayName,
+			icon: spec.concentration ? "🔮" : "✨",
+			description: `Spell effect: ${displayName}`,
+			sourceFeatureId: `spell_${key}_${Date.now()}`,
+			customEffects,
+			isSpellEffect: true,
+			concentration: !!spec.concentration,
+			duration: spec.duration,
+		});
+
+		this._saveCurrentCharacter();
+		this._renderActiveStates();
+		this._renderCharacter();
+		JqueryUtil.doToast({type: "success", content: `Applied ${displayName}.`});
+		return true;
+	}
+
+	/**
+	 * Human-readable summary for a buff's selfEffects array. Falls back to a
+	 * generic note when no effect type is recognised by the picker — the state
+	 * still tracks duration/concentration even when the effect is opaque.
+	 * @private
+	 */
+	_summariseBuffEffects (effects) {
+		if (!effects || !effects.length) return "Tracks duration only.";
+		const parts = [];
+		for (const eff of effects) {
+			switch (eff.type) {
+				case "hpMaxIncrease": parts.push(`+${eff.value} max HP`); break;
+				case "tempHp": parts.push(`${eff.value} temp HP`); break;
+				case "bonus": parts.push(`+${eff.value} ${eff.target}`); break;
+				case "rollBonus": parts.push(`+${eff.dice} to ${eff.target} rolls`); break;
+				case "rollPenalty": parts.push(`-${eff.dice} to ${eff.target} rolls`); break;
+				case "setAc": parts.push(`AC = ${eff.baseAc}${eff.addDex ? " + DEX" : ""}`); break;
+				case "minAc": parts.push(`AC minimum ${eff.value}`); break;
+				case "advantage": parts.push(`adv. on ${eff.target}`); break;
+				case "disadvantage": parts.push(`disadv. on ${eff.target}`); break;
+				case "resistance": parts.push(`resistance to ${eff.target?.replace(/^damage:/, "")}`); break;
+				case "immunity": parts.push(`immune to ${eff.target}`); break;
+				case "speedMultiplier": parts.push(`speed ×${eff.value}`); break;
+				case "flySpeed": parts.push(`fly speed ${eff.value} ft.`); break;
+				case "extraDamage": parts.push(`+${eff.dice}${eff.damageType ? ` ${eff.damageType}` : ""} damage`); break;
+				case "sense": parts.push(`${eff.target} ${eff.value} ft.`); break;
+				case "note": parts.push(eff.value || ""); break;
+				default: parts.push(eff.type); break;
+			}
+		}
+		return parts.filter(Boolean).join(" · ");
+	}
+
+	/**
+	 * Format a buff's duration object (or absence thereof) for display.
+	 * @private
+	 */
+	_formatBuffDuration (duration, concentration) {
+		if (!duration) return concentration ? "Concentration" : "—";
+		if (typeof duration === "object" && duration.amount && duration.unit) {
+			const unitLabel = duration.amount === 1 ? duration.unit : `${duration.unit}s`;
+			const base = `${duration.amount} ${unitLabel}`;
+			return concentration ? `Conc., up to ${base}` : base;
+		}
+		return concentration ? `Conc., ${duration}` : String(duration);
 	}
 
 	/**
