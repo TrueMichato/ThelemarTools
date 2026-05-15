@@ -2445,6 +2445,7 @@ class CharacterSheetPage {
 		this._renderOverviewMetamagic();
 		this._renderOverviewAbilities();
 		this._renderActiveStates();
+		this._renderFavouritesOverview();
 		this._renderOverviewActions();
 		this._renderAttacks();
 		this._renderQuickSpells();
@@ -5541,6 +5542,10 @@ class CharacterSheetPage {
 				this._useOverviewResource(resource);
 			});
 
+			// Pin (favourite) toggle
+			const pin = this._renderFavouritePin("resource", resource);
+			if (pin) row.querySelector(".charsheet__ability-controls").append(pin);
+
 			container.append(row);
 		}
 
@@ -5595,6 +5600,10 @@ class CharacterSheetPage {
 				e.stopPropagation();
 				this._useOverviewAbility(ability);
 			});
+
+			// Pin (favourite) toggle
+			const pin = this._renderFavouritePin("customAbility", ability);
+			if (pin) row.querySelector(".charsheet__ability-controls").append(pin);
 
 			container.append(row);
 		}
@@ -5799,6 +5808,248 @@ class CharacterSheetPage {
 			container.append(row);
 		}
 	}
+
+	// #region Favourites (Overview)
+
+	/**
+	 * Build the favourite-data payload for an entity, used by `_renderFavouritePin`
+	 * and `toggleFavorite`. Centralised so every pin/unpin/lookup uses an identical
+	 * `id` shape (`type:idOrName`) and consistent display fields.
+	 */
+	_buildFavouriteData (type, entity, {nameOverride = null, iconOverride = null, detailOverride = null} = {}) {
+		if (!type || !entity) return null;
+		const idSuffix = entity.id || entity.name;
+		const ICONS = {
+			attack: "⚔️",
+			spell: "✨",
+			feature: "📜",
+			customAbility: "💫",
+			resource: "⚡",
+			item: "🎒",
+			optionalFeature: "🪄",
+			combatTradition: "🥋",
+			feat: "🌟",
+		};
+		return {
+			id: `${type}:${idSuffix}`,
+			type,
+			name: nameOverride || entity.name,
+			icon: iconOverride || ICONS[type] || "⭐",
+			detail: detailOverride || null,
+		};
+	}
+
+	/**
+	 * Render a small ⭐/☆ pin button that toggles favourite state for the given
+	 * entity. Returns the button element so callers can append wherever they like.
+	 *
+	 * @param {string} type - Favourite type key (attack, spell, feature, etc.)
+	 * @param {object} entity - The entity to pin (must have id or name)
+	 * @param {object} [opts] - Optional display overrides (nameOverride, iconOverride, detailOverride)
+	 */
+	_renderFavouritePin (type, entity, opts = {}) {
+		const favData = this._buildFavouriteData(type, entity, opts);
+		if (!favData) return null;
+		const idSuffix = favData.id.slice(favData.id.indexOf(":") + 1);
+		const isPinned = this._state.isFavorite(type, idSuffix);
+
+		const btn = e_({
+			tag: "button",
+			clazz: `ve-btn ve-btn-xs ve-btn-default charsheet__pin-btn${isPinned ? " charsheet__pin-btn--active" : ""}`,
+			attrs: {
+				title: isPinned ? `Unpin "${favData.name}" from Favourites` : `Pin "${favData.name}" to Favourites`,
+				"aria-pressed": isPinned ? "true" : "false",
+				"aria-label": isPinned ? `Unpin ${favData.name}` : `Pin ${favData.name}`,
+			},
+			html: isPinned ? "★" : "☆",
+		});
+		btn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const result = this._state.toggleFavorite(favData);
+			if (!result) {
+				JqueryUtil.doToast({type: "warning", content: "Maximum 8 favourites. Remove one first."});
+				return;
+			}
+			this._saveCurrentCharacter();
+			this._renderFavouritesOverview();
+			// Re-render the host panel so the pin reflects new state.
+			this._renderResources();
+			this._renderOverviewAbilities();
+		});
+		return btn;
+	}
+
+	_renderFavouritesOverview () {
+		const container = document.getElementById("charsheet-favourites-list");
+		const cleanupBtn = document.getElementById("charsheet-favourites-cleanup");
+		if (!container) return;
+
+		container.innerHTML = "";
+
+		const favs = this._state.getFavorites();
+		const orphans = this._state.getOrphanedFavorites();
+
+		// Cleanup button visibility (orphans only)
+		if (cleanupBtn) {
+			if (orphans.length) {
+				cleanupBtn.classList.remove("ve-hidden");
+				cleanupBtn.textContent = `Clean up ${orphans.length} missing pin${orphans.length === 1 ? "" : "s"}`;
+				if (!(/** @type {*} */ (cleanupBtn))._charsheetBound) {
+					(/** @type {*} */ (cleanupBtn))._charsheetBound = true;
+					cleanupBtn.addEventListener("click", () => {
+						const removed = this._state.cleanupOrphanedFavorites();
+						if (removed > 0) {
+							this._saveCurrentCharacter();
+							JqueryUtil.doToast({type: "info", content: `Removed ${removed} missing pin${removed === 1 ? "" : "s"}.`});
+							this._renderFavouritesOverview();
+						}
+					});
+				}
+			} else {
+				cleanupBtn.classList.add("ve-hidden");
+			}
+		}
+
+		// Filter out orphans for display (they're handled by the cleanup button)
+		const live = favs.filter(f => this._state.isFavoriteResolved(f));
+
+		if (!live.length) {
+			container.innerHTML = `
+				<div class="charsheet__empty-state">
+					<span class="charsheet__empty-icon">⭐</span>
+					<span class="charsheet__empty-text">Click ☆ on any feature, attack, spell, or item to pin it here</span>
+				</div>
+			`;
+			return;
+		}
+
+		for (const fav of live) {
+			const tile = this._renderFavouriteTile(fav);
+			if (tile) container.append(tile);
+		}
+	}
+
+	_renderFavouriteTile (fav) {
+		const resolution = this._state._resolveFavorite(fav);
+		if (!resolution?.found) return null;
+
+		const entity = resolution.entity;
+		const detail = resolution.detail || "";
+		const name = entity.name || fav.name;
+		const icon = fav.icon || "⭐";
+
+		const tile = e_({outer: `
+			<div class="charsheet__favourite-tile" data-fav-type="${fav.type}" data-fav-id="${(fav.id || "").replace(/"/g, "&quot;")}">
+				<div class="charsheet__favourite-tile__main">
+					<span class="charsheet__favourite-tile__icon">${icon}</span>
+					<div class="charsheet__favourite-tile__info">
+						<span class="charsheet__favourite-tile__name">${name.replace(/</g, "&lt;")}</span>
+						${detail ? `<span class="charsheet__favourite-tile__detail">${String(detail).replace(/</g, "&lt;")}</span>` : ""}
+					</div>
+				</div>
+				<div class="charsheet__favourite-tile__actions"></div>
+			</div>
+		`});
+
+		const actions = tile.querySelector(".charsheet__favourite-tile__actions");
+
+		// Per-type primary action button
+		const action = this._buildFavouriteActionButton(fav, entity);
+		if (action) actions.append(action);
+
+		// Always-present remove (✕) button
+		const removeBtn = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-xs ve-btn-danger charsheet__favourite-tile__remove",
+			attrs: {title: "Remove from Favourites", "aria-label": `Remove ${name} from Favourites`},
+			html: "✕",
+		});
+		removeBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._state.removeFavorite(fav.id);
+			this._saveCurrentCharacter();
+			this._renderFavouritesOverview();
+			this._renderResources();
+			this._renderOverviewAbilities();
+		});
+		actions.append(removeBtn);
+
+		return tile;
+	}
+
+	/**
+	 * Build a primary action button for a favourite tile based on its type.
+	 * Returns null for types without a meaningful one-click action — those tiles
+	 * still get the ✕ remove button.
+	 */
+	_buildFavouriteActionButton (fav, entity) {
+		const make = (label, klass, handler, {title = null} = {}) => {
+			const btn = e_({
+				tag: "button",
+				clazz: `ve-btn ve-btn-xs ${klass} charsheet__favourite-tile__action`,
+				attrs: title ? {title} : {},
+				html: label,
+			});
+			btn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				try { handler(); } catch (err) {
+					// eslint-disable-next-line no-console
+					console.warn("[CharSheet Favourites] action handler error:", err);
+				}
+			});
+			return btn;
+		};
+
+		switch (fav.type) {
+			case "attack":
+				return make("🎲 Roll", "ve-btn-primary", () => this._rollAttack(entity, null), {title: "Roll attack"});
+			case "spell":
+				return make("✨ Cast", "ve-btn-primary", () => {
+					if (this._spells?._castSpell) this._spells._castSpell(entity.id);
+					else this.switchToTab("#charsheet-tab-spells");
+				}, {title: "Cast spell"});
+			case "feature": {
+				const hasUses = entity.uses && (entity.uses.max ?? 0) > 0;
+				if (!hasUses) return null;
+				const canUse = (entity.uses.current ?? 0) > 0;
+				const btn = make("Use", "ve-btn-primary", () => {
+					if (this._state.useFeature?.(entity.id || entity.name)) {
+						this._saveCurrentCharacter();
+						this._renderFavouritesOverview();
+						this._renderOverviewAbilities();
+						if (this._features) this._features.render();
+					}
+				}, {title: "Use feature charge"});
+				if (!canUse) (/** @type {HTMLButtonElement} */ (btn)).disabled = true;
+				return btn;
+			}
+			case "customAbility": {
+				const usesDisplay = this._state.getCustomAbilityUsesDisplay?.(entity.id);
+				if (!usesDisplay) return null;
+				return make("Use", "ve-btn-primary", () => {
+					if (this._state.useCustomAbility?.(entity.id)) {
+						this._saveCurrentCharacter();
+						this._renderFavouritesOverview();
+						this._renderOverviewAbilities();
+						if (this._customAbilities) this._customAbilities.render();
+					}
+				}, {title: "Use ability charge"});
+			}
+			case "resource":
+				if ((entity.max ?? 0) <= 0) return null;
+				return make("Use", "ve-btn-primary", () => this._useOverviewResource(entity), {title: "Spend one charge"});
+			case "item":
+				return make("View", "ve-btn-default", () => this.switchToTab("#charsheet-tab-inventory"), {title: "Open Inventory tab"});
+			case "optionalFeature":
+			case "feat":
+				return make("View", "ve-btn-default", () => this.switchToTab("#charsheet-tab-features"), {title: "Open Features tab"});
+			case "combatTradition":
+				return make("View", "ve-btn-default", () => this.switchToTab("#charsheet-tab-features"), {title: "Open Features tab"});
+			default:
+				return null;
+		}
+	}
+	// #endregion
 
 	_renderActiveStates () {
 		const container = document.getElementById("charsheet-active-states");
