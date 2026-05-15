@@ -6382,7 +6382,8 @@ class CharacterSheetBuilder {
 				</h5>
 				<div class="ve-muted ve-small mb-2">
 					Most Thelemar characters start with 2&ndash;3 narrow areas of knowledge from their background.
-					The bonus is a flat number per skill (no ability or proficiency bonus added).
+					The number shown here is a flat extra <b>added on top of your proficiency bonus</b> &mdash;
+					so a +2 lore skill at L1 (PB +2) rolls at +4, and scales up automatically as you level.
 				</div>
 				<div class="charsheet__builder-lore-skills-presets mb-2">
 					<label class="mr-3">

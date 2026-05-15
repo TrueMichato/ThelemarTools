@@ -11582,9 +11582,9 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				const heraldry = lore.find(s => s.name === "Heraldry");
 				expect(dragons.bonus).toBe(4);
 				expect(heraldry.bonus).toBe(4);
-				// Skill mod should reflect the flat bonus (no ability/PB)
-				expect(state.getSkillMod("historyofdragons")).toBe(4);
-				expect(state.getSkillMod("heraldry")).toBe(4);
+				// Skill mod = PB + lore bonus (no ability). Default-state PB = +2.
+				expect(state.getSkillMod("historyofdragons")).toBe(6);
+				expect(state.getSkillMod("heraldry")).toBe(6);
 			});
 
 			it("should grant new lore skills at +2 in grant mode", () => {

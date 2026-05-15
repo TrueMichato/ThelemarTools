@@ -2845,7 +2845,7 @@ class CharacterSheetPage {
 				<div class="charsheet__lore-skills-header ve-flex-v-center mt-3" title="TGTT variant rule: Lore Skills">
 					<span class="mr-1">📚</span>
 					<span class="charsheet__lore-skills-title">Lore Skills</span>
-					<span class="ve-muted ve-small ml-2">flat bonus &mdash; no ability or proficiency added</span>
+					<span class="ve-muted ve-small ml-2">proficiency bonus + flat extra &mdash; no ability mod</span>
 				</div>
 				<div class="charsheet__lore-skills-list"></div>
 			</div>
@@ -2864,9 +2864,11 @@ class CharacterSheetPage {
 				const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
 				const mod = this._state.getSkillMod(skillKey);
 				const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+				const passive = 10 + mod;
 				const breakdown = this._state.getSkillBreakdown(skillKey);
 				const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
-				tooltipLines.push(`─────────\n📚 Total: ${modStr}`);
+				tooltipLines.push(`─────────\n📚 Total: ${modStr}    Passive: ${passive}`);
+				tooltipLines.push("Click to roll d20 + modifier");
 				const tooltip = tooltipLines.join("\n");
 
 				const row = e_({outer: `
@@ -2874,6 +2876,7 @@ class CharacterSheetPage {
 						<span class="charsheet__lore-skill-icon">📚</span>
 						<span class="charsheet__lore-skill-name">${skill.name}</span>
 						<span class="charsheet__lore-skill-mod">${modStr}</span>
+						<span class="charsheet__lore-skill-passive" title="Passive ${skill.name}: ${passive}">${passive}</span>
 						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__lore-skill-bump" data-delta="-2" title="Decrease bonus by 2">▼</button>
 						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__lore-skill-bump" data-delta="2" title="Increase bonus by 2">▲</button>
 						<span class="charsheet__lore-skill-delete" title="Remove lore skill">×</span>
@@ -2889,8 +2892,8 @@ class CharacterSheetPage {
 						);
 						if (!loreEntry) return;
 						const nextBonus = (loreEntry.bonus || 0) + delta;
-						if (nextBonus < 2) {
-							JqueryUtil.doToast({type: "info", content: "Lore skill bonus can't go below +2."});
+						if (nextBonus < 0) {
+							JqueryUtil.doToast({type: "info", content: "Lore skill bonus can't go below +0 (proficiency bonus is always added on top)."});
 							return;
 						}
 						this._state.setLoreSkillBonus(skill.name, nextBonus);
@@ -12301,20 +12304,22 @@ class CharacterSheetPage {
 		const formEl = ee`<div class="ve-flex-col">
 			<div class="ve-muted ve-small mb-2">
 				Lore skills represent narrow areas of expertise (e.g. Heraldry, Architecture, Planar Geography).
-				The bonus is added directly to your roll &mdash; no ability or proficiency bonus is applied.
+				The bonus shown here is added on top of your proficiency bonus &mdash; pick <b>+0 (PB only)</b> for
+				a freshly-learned topic, or use the +2/+4/+6 presets to match the Builder allocation.
 			</div>
 			<div class="ve-flex-v-center mb-2">
 				<label class="mr-2 w-100p">Skill Name:</label>
 				<input type="text" class="ve-form-control" id="lore-skill-name" placeholder="e.g. Heraldry, Planar Geography">
 			</div>
 			<div class="ve-flex-v-center mb-3">
-				<label class="mr-2 w-100p">Bonus:</label>
+				<label class="mr-2 w-100p">Extra bonus:</label>
 				<div class="ve-btn-group mr-2" role="group" id="lore-skill-bonus-chips">
+					<button type="button" class="ve-btn ve-btn-default ve-btn-sm" data-bonus="0">+0 (PB only)</button>
 					<button type="button" class="ve-btn ve-btn-default ve-btn-sm active" data-bonus="2">+2</button>
 					<button type="button" class="ve-btn ve-btn-default ve-btn-sm" data-bonus="4">+4</button>
 					<button type="button" class="ve-btn ve-btn-default ve-btn-sm" data-bonus="6">+6</button>
 				</div>
-				<input type="number" class="ve-form-control" id="lore-skill-bonus-custom" min="1" max="20" step="1" placeholder="custom" style="width: 6em;">
+				<input type="number" class="ve-form-control" id="lore-skill-bonus-custom" min="0" max="20" step="1" placeholder="custom" style="width: 6em;">
 			</div>
 			<div class="ve-flex-h-right">
 				<button class="ve-btn ve-btn-default mr-2" id="lore-skill-cancel">Cancel</button>
@@ -12332,7 +12337,7 @@ class CharacterSheetPage {
 		let selectedBonus = 2;
 		chipsEl.querySelectorAll("button").forEach(btn => {
 			btn.addEventListener("click", () => {
-				selectedBonus = Number(btn.getAttribute("data-bonus")) || 2;
+				selectedBonus = Number(btn.getAttribute("data-bonus")) || 0;
 				chipsEl.querySelectorAll("button").forEach(b => b.classList.remove("active"));
 				btn.classList.add("active");
 				customEl.value = "";
@@ -12340,7 +12345,7 @@ class CharacterSheetPage {
 		});
 		customEl.addEventListener("input", () => {
 			const v = Number(customEl.value);
-			if (Number.isFinite(v) && v > 0) {
+			if (Number.isFinite(v) && v >= 0) {
 				selectedBonus = v;
 				chipsEl.querySelectorAll("button").forEach(b => b.classList.remove("active"));
 			}
@@ -12360,8 +12365,8 @@ class CharacterSheetPage {
 				JqueryUtil.doToast({type: "warning", content: `A skill named "${name}" already exists.`});
 				return;
 			}
-			if (selectedBonus < 1) {
-				JqueryUtil.doToast({type: "warning", content: "Bonus must be at least +1."});
+			if (selectedBonus < 0) {
+				JqueryUtil.doToast({type: "warning", content: "Extra bonus can't be negative."});
 				return;
 			}
 
@@ -12369,7 +12374,8 @@ class CharacterSheetPage {
 			this._renderSkills();
 			this._saveCurrentCharacter();
 
-			JqueryUtil.doToast({type: "success", content: `Added lore skill: ${name} (+${selectedBonus})`});
+			const bonusLabel = selectedBonus > 0 ? ` (+${selectedBonus} on top of PB)` : " (PB only)";
+			JqueryUtil.doToast({type: "success", content: `Added lore skill: ${name}${bonusLabel}`});
 			doClose();
 		});
 
@@ -12413,19 +12419,21 @@ class CharacterSheetPage {
 		const formEl = ee`<div class="ve-flex-col">
 			<div class="ve-muted ve-small mb-3">
 				Choose how Lore Mastery applies. You can either deepen your existing lore expertise
-				or branch into new fields of study.
+				or branch into new fields of study. The +2 below is added to the lore-skill bonus,
+				which already stacks on top of your proficiency bonus &mdash; so a freshly-bumped
+				lore skill at PB +3 rolls at <b>+5</b>.
 			</div>
 			<div class="ve-flex-v-center mb-2">
 				<label class="mr-2">
 					<input type="radio" name="lore-mastery-mode" value="increase" ${canIncrease ? "checked" : "disabled"}>
-					Increase: pick 2 existing lore skills (+2 each)
+					Increase: pick 2 existing lore skills (+2 each, on top of PB)
 				</label>
 			</div>
 			${!canIncrease ? `<div class="ve-muted ve-small ml-4 mb-2">You need at least 2 existing lore skills to use this option.</div>` : ""}
 			<div class="ve-flex-v-center mb-3">
 				<label class="mr-2">
 					<input type="radio" name="lore-mastery-mode" value="grant" ${canIncrease ? "" : "checked"}>
-					Grant: gain 2 new lore skills (+2 each)
+					Grant: gain 2 new lore skills (+2 each, on top of PB)
 				</label>
 			</div>
 			<div class="ve-flex-v-center mb-2">

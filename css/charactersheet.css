@@ -3683,6 +3683,83 @@
 }
 
 /* ========================================================================
+   Lore Skills (TGTT variant) - Skills tab section
+   ======================================================================== */
+.charsheet__lore-skill-row {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	cursor: pointer;
+	border-radius: var(--cs-radius-md, 8px);
+	transition: all var(--cs-transition-fast, 0.15s ease);
+	background: transparent;
+}
+
+.charsheet__lore-skill-row:hover {
+	background: rgba(245, 158, 11, 0.08);
+	transform: translateX(4px);
+}
+
+.charsheet__lore-skill-icon {
+	flex-shrink: 0;
+	margin-right: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__lore-skill-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.charsheet__lore-skill-mod {
+	width: 36px;
+	text-align: center;
+	flex-shrink: 0;
+	font-weight: 600;
+	font-family: var(--cs-font-mono, monospace);
+}
+
+.charsheet__lore-skill-passive {
+	width: 42px;
+	text-align: center;
+	flex-shrink: 0;
+	font-size: var(--cs-text-sm, 0.85rem);
+	font-weight: 600;
+	font-family: var(--cs-font-mono, monospace);
+	color: var(--cs-accent-gold, #f59e0b);
+	background: rgba(245, 158, 11, 0.1);
+	padding: 0.15rem 0.35rem;
+	border-radius: var(--cs-radius-sm, 4px);
+	border: 1px solid rgba(245, 158, 11, 0.25);
+	cursor: default;
+	transition: all var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__lore-skill-row:hover .charsheet__lore-skill-passive {
+	background: rgba(245, 158, 11, 0.2);
+	border-color: rgba(245, 158, 11, 0.45);
+}
+
+.charsheet__lore-skill-delete {
+	flex-shrink: 0;
+	width: 20px;
+	text-align: center;
+	font-weight: 700;
+	color: var(--cs-text-muted, #6b7280);
+	cursor: pointer;
+	border-radius: var(--cs-radius-sm, 4px);
+	transition: all var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__lore-skill-delete:hover {
+	color: var(--cs-danger, #ef4444);
+	background: rgba(239, 68, 68, 0.12);
+}
+
+/* ========================================================================
    HP Section - Prominent health display with visual bar
    ======================================================================== */
 .charsheet__section--hp {
