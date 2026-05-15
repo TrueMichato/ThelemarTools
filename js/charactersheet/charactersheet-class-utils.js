@@ -291,6 +291,57 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Pick the canonical `{sourceFeature, sourceClass}` to stamp on a spell that is
+	 * being added through the manual Add-Spell modal. Mirrors what Builder, LevelUp,
+	 * and QuickBuild stamp during their own add flows so the resulting spell counts
+	 * toward the cap (and is not silently dumped into the "Other" orphan group).
+	 *
+	 * Heuristic when multiclass: the modal does not let the user pick which class
+	 * the new spell belongs to, so we pick the first spellcasting class — preferring
+	 * Wizard for leveled spells (so they go in the spellbook), and otherwise the
+	 * first byClass entry.
+	 *
+	 * @param {object} opts
+	 * @param {object} opts.spell        - The raw spell being added (needs `level`).
+	 * @param {object|null} opts.info    - The spellcasting info from `getSpellcastingInfo()`.
+	 * @param {Array<*>|null} [opts.classes] - Optional `getClasses()` snapshot for wizard/spellbook detection.
+	 * @returns {{sourceFeature: string|null, sourceClass: string|null}}
+	 */
+	static pickAddedSpellAttribution (/** @type {*} */ {spell, info, classes = null} = {}) {
+		if (!spell || !info) return {sourceFeature: null, sourceClass: null};
+
+		const isCantrip = spell.level === 0;
+
+		let sourceClass = null;
+		const byClass = Array.isArray(info.byClass) ? info.byClass : null;
+		const wizardEntry = byClass?.find(c => /wizard/i.test(c?.className || ""));
+		const hasWizardClass = !!(classes && classes.some(c => /^wizard$/i.test(c?.name || "")));
+
+		if (!isCantrip && (wizardEntry || hasWizardClass)) {
+			sourceClass = wizardEntry?.className || (classes && classes.find(c => /^wizard$/i.test(c?.name || ""))?.name) || "Wizard";
+		} else if (byClass?.length) {
+			sourceClass = byClass[0].className || null;
+		} else if (info.className) {
+			sourceClass = info.className;
+		} else if (classes?.length) {
+			sourceClass = classes[0].name || null;
+		}
+
+		let sourceFeature = null;
+		if (isCantrip) {
+			sourceFeature = "Cantrips Known";
+		} else if (sourceClass && /^wizard$/i.test(sourceClass)) {
+			sourceFeature = "Wizard Spellbook";
+		} else {
+			const entry = byClass?.find(c => c.className === sourceClass) || byClass?.[0] || null;
+			const castingType = entry?.type || info.type;
+			sourceFeature = castingType === "known" ? "Spells Known" : "Prepared Spells";
+		}
+
+		return {sourceFeature, sourceClass};
+	}
+
+	/**
 	 * Check whether a character meets an optional feature's prerequisites.
 	 * @param {Array<*>|null} prerequisite - The feature's `prerequisite` array (from data)
 	 * @param {object} context - Character state context
