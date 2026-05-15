@@ -17043,3 +17043,115 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	padding-left: 0.5rem;
 	line-height: 1.3;
 }
+
+/* ========================================================================
+   Favourites (Overview) — pinned features, attacks, spells, items, etc.
+   ======================================================================== */
+.charsheet__favourites-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-sm, 0.5rem);
+	max-height: 360px;
+	overflow-y: auto;
+}
+
+.charsheet__favourite-tile {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+	background: var(--cs-bg-base, var(--rgb-bg));
+	border: 2px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-lg, 12px);
+	transition: all var(--cs-transition-normal, 0.25s ease);
+}
+
+.charsheet__favourite-tile:hover {
+	border-color: var(--cs-accent, #ffb84d);
+	box-shadow: 0 2px 8px rgba(255, 184, 77, 0.15);
+}
+
+.charsheet__favourite-tile__main {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-sm, 0.5rem);
+	flex: 1;
+	min-width: 0;
+}
+
+.charsheet__favourite-tile__icon {
+	font-size: 1.1em;
+	flex-shrink: 0;
+}
+
+.charsheet__favourite-tile__info {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	flex: 1;
+}
+
+.charsheet__favourite-tile__name {
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.charsheet__favourite-tile__detail {
+	font-size: 0.78em;
+	opacity: 0.75;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.charsheet__favourite-tile__actions {
+	display: flex;
+	gap: 0.25rem;
+	align-items: center;
+	flex-shrink: 0;
+}
+
+.charsheet__favourite-tile__action {
+	white-space: nowrap;
+}
+
+.charsheet__favourite-tile__remove {
+	min-width: 1.75rem;
+	padding-left: 0.4rem;
+	padding-right: 0.4rem;
+	font-weight: 700;
+	line-height: 1;
+}
+
+/* Pin (⭐/☆) toggle button used on resource / ability / inventory rows */
+.charsheet__pin-btn {
+	min-width: 1.75rem;
+	padding-left: 0.35rem;
+	padding-right: 0.35rem;
+	font-size: 1em;
+	line-height: 1;
+	color: var(--rgb-fg-muted, #888);
+	background: transparent;
+	border: 1px solid transparent;
+	transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.charsheet__pin-btn:hover {
+	color: var(--cs-accent, #ffb84d);
+	transform: scale(1.1);
+}
+
+.charsheet__pin-btn--active {
+	color: var(--cs-accent, #ffb84d);
+}
+
+.charsheet__pin-btn--active:hover {
+	color: #cc9933;
+}
+
+.charsheet__favourites-cleanup-btn {
+	margin-left: auto;
+}
+

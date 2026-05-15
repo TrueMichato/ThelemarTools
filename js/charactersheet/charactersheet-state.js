@@ -22113,6 +22113,114 @@ class CharacterSheetState {
 		}
 		return this.addFavorite(favData, {max}) ? "added" : null;
 	}
+
+	/**
+	 * Resolve a favorite entry against current state, returning a fresh handle
+	 * to the underlying entity along with display-friendly fields. Used by the
+	 * Overview "Favourites" section to render live data and detect orphans
+	 * (entities removed after the favourite was pinned, e.g. respec / item drop).
+	 *
+	 * Supported types: attack, spell, feature, customAbility, resource, item,
+	 * optionalFeature, combatTradition, feat.
+	 *
+	 * @param {{id: string, type: string, name?: string}} fav
+	 * @returns {{found: boolean, entity?: any, name?: string, icon?: string, detail?: string}}
+	 */
+	_resolveFavorite (fav) {
+		if (!fav || !fav.type) return {found: false};
+		const idSuffix = fav.id?.includes(":") ? fav.id.slice(fav.id.indexOf(":") + 1) : "";
+
+		switch (fav.type) {
+			case "attack": {
+				const entity = this._data.attacks.find(a => a.id === idSuffix || a.name === idSuffix);
+				return entity ? {found: true, entity} : {found: false};
+			}
+			case "spell": {
+				const all = this.getSpells();
+				const entity = all.find(s => s.id === idSuffix || s.name === idSuffix);
+				if (!entity) return {found: false};
+				const detail = entity.level === 0 ? "Cantrip" : `Level ${entity.level}`;
+				return {found: true, entity, detail};
+			}
+			case "feature": {
+				const entity = this._data.features.find(f => f.id === idSuffix || f.name === idSuffix);
+				if (!entity) return {found: false};
+				const uses = entity.uses;
+				const detail = uses && (uses.max ?? 0) > 0 ? `${uses.current ?? 0}/${uses.max}` : null;
+				return {found: true, entity, detail};
+			}
+			case "customAbility": {
+				const entity = (this._data.customAbilities || []).find(a => a.id === idSuffix || a.name === idSuffix);
+				if (!entity) return {found: false};
+				const usesDisplay = this.getCustomAbilityUsesDisplay?.(entity.id);
+				const detail = usesDisplay || null;
+				return {found: true, entity, detail};
+			}
+			case "resource": {
+				const entity = this._data.resources.find(r => r.id === idSuffix || r.name === idSuffix);
+				if (!entity) return {found: false};
+				const detail = (entity.max ?? 0) > 0 ? `${entity.current ?? 0}/${entity.max}` : null;
+				return {found: true, entity, detail};
+			}
+			case "item": {
+				const entity = this._data.inventory.find(i => {
+					if (i.id === idSuffix) return true;
+					if (i.name === idSuffix) return true;
+					// `item` may be a string (legacy) or an object {name}
+					if (typeof i.item === "string") return i.item === idSuffix;
+					if (i.item?.name === idSuffix) return true;
+					return false;
+				});
+				if (!entity) return {found: false};
+				const qty = (entity.quantity ?? 1) > 1 ? `×${entity.quantity}` : null;
+				return {found: true, entity, detail: qty};
+			}
+			case "optionalFeature": {
+				// Optional features live in feats and features arrays (depends on type)
+				const inFeats = (this._data.feats || []).find(f => f.id === idSuffix || f.name === idSuffix);
+				if (inFeats) return {found: true, entity: inFeats};
+				const inFeatures = this._data.features.find(f => f.id === idSuffix || f.name === idSuffix);
+				if (inFeatures) return {found: true, entity: inFeatures};
+				return {found: false};
+			}
+			case "combatTradition": {
+				const entries = this._data.combatTraditions || [];
+				const entity = entries.find(t => t.code === idSuffix || t.name === idSuffix);
+				if (!entity) return {found: false};
+				return {found: true, entity, detail: entity.code};
+			}
+			case "feat": {
+				const entity = (this._data.feats || []).find(f => f.id === idSuffix || f.name === idSuffix);
+				return entity ? {found: true, entity} : {found: false};
+			}
+			default:
+				return {found: false};
+		}
+	}
+
+	/**
+	 * Check whether a favourite entry still resolves to an entity in current state.
+	 * Convenience wrapper around `_resolveFavorite` for callers that only need bool.
+	 */
+	isFavoriteResolved (fav) { return !!this._resolveFavorite(fav)?.found; }
+
+	/**
+	 * Return all favourites whose target entity no longer exists in state.
+	 * Used by the Overview "Clean up missing pins" affordance.
+	 */
+	getOrphanedFavorites () {
+		return (this._data.favorites || []).filter(f => !this._resolveFavorite(f)?.found);
+	}
+
+	/**
+	 * Remove all favourites whose target entity no longer exists in state.
+	 * @returns {number} count of favourites removed
+	 */
+	cleanupOrphanedFavorites () {
+		const before = (this._data.favorites || []).length;
+		this._data.favorites = (this._data.favorites || []).filter(f => this._resolveFavorite(f)?.found);
+		return before - this._data.favorites.length;
+	}
 	// #endregion
 
 	// #region Resources

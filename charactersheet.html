@@ -808,6 +808,21 @@
 							</div>
 						</div>
 
+						<!-- Favourites (pinned features, attacks, spells, items, etc.) -->
+						<div class="charsheet__section charsheet__section--favourites">
+							<h4 class="charsheet__section-title">
+								<span class="charsheet__section-icon">⭐</span>
+								Favourites
+								<button class="ve-btn ve-btn-xs ve-btn-default ml-auto charsheet__favourites-cleanup-btn ve-hidden" id="charsheet-favourites-cleanup" title="Remove pins whose targets no longer exist">Clean up missing pins</button>
+							</h4>
+							<div class="charsheet__favourites-list" id="charsheet-favourites-list">
+								<div class="charsheet__empty-state">
+									<span class="charsheet__empty-icon">⭐</span>
+									<span class="charsheet__empty-text">Click ⭐ on any feature, attack, spell, or item to pin it here</span>
+								</div>
+							</div>
+						</div>
+
 						<!-- Actions (combat actions, reactions from class/race/feat features) -->
 						<div class="charsheet__section charsheet__section--actions" id="charsheet-overview-actions-section" style="display:none;">
 							<h4 class="charsheet__section-title">
