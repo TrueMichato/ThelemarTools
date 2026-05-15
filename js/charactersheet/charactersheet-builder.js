@@ -2302,6 +2302,11 @@ class CharacterSheetBuilder {
 		// Update tab visibility (hide builder, show respec)
 		this._page._updateTabVisibility();
 
+		// Refresh the UI so the recalculated HP (and any other derived state)
+		// is visible immediately on the Overview tab — without this, the HP
+		// `<input>` keeps its hardcoded `value="0"` until the next render.
+		this._page.renderCharacter();
+
 		// Check if Quick Build target level is set
 		if (this._quickBuildTargetLevel > 1 && this._page._quickBuild && this._selectedClass) {
 			const quickBuildLaunchData = {
