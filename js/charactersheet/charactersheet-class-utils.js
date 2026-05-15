@@ -175,6 +175,30 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Resolve the final d20 roll mode by combining state-based advantage/disadvantage
+	 * with event-key modifiers (shift = advantage, ctrl/meta = disadvantage). Per RAW,
+	 * advantage + disadvantage cancel to a normal roll regardless of source — so a
+	 * passive Wis-save advantage (e.g. Nyuidj Dual Mind) plus a user-pressed Ctrl key
+	 * resolves to a single d20, not disadvantage.
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.stateAdvantage=false] - Advantage from passive sources (Bless, Nyuidj, Faerie Fire, …)
+	 * @param {boolean} [opts.stateDisadvantage=false] - Disadvantage from passive sources (Frightened, Poisoned, …)
+	 * @param {Event|null} [opts.event=null] - Triggering event; shiftKey adds adv, ctrlKey/metaKey adds disadv
+	 * @returns {"advantage"|"disadvantage"|"normal"}
+	 */
+	static resolveD20Mode ({stateAdvantage = false, stateDisadvantage = false, event = null} = {}) {
+		const evt = /** @type {*} */ (event);
+		const eventAdv = !!(evt && evt.shiftKey);
+		const eventDis = !!(evt && (evt.ctrlKey || evt.metaKey));
+		const adv = !!stateAdvantage || eventAdv;
+		const dis = !!stateDisadvantage || eventDis;
+		if (adv && dis) return "normal";
+		if (adv) return "advantage";
+		if (dis) return "disadvantage";
+		return "normal";
+	}
+
+	/**
 	 * Check whether a character meets an optional feature's prerequisites.
 	 * @param {Array<*>|null} prerequisite - The feature's `prerequisite` array (from data)
 	 * @param {object} context - Character state context

@@ -8493,20 +8493,26 @@ class CharacterSheetPage {
 	 * Roll a d20 with advantage/disadvantage support
 	 * @param {Object} opts - Roll options
 	 * @param {Event} [opts.event] - The triggering event (to detect modifier keys)
-	 * @param {"advantage"|"disadvantage"|"normal"} [opts.mode] - Force a specific mode (from states)
+	 * @param {"advantage"|"disadvantage"|"normal"} [opts.mode] - Legacy: precomputed mode (event keys still override). Prefer stateAdvantage/stateDisadvantage for cancel-aware resolution.
+	 * @param {boolean} [opts.stateAdvantage] - Advantage from passive sources; combined with event keys via cancel-aware resolution.
+	 * @param {boolean} [opts.stateDisadvantage] - Disadvantage from passive sources; combined with event keys via cancel-aware resolution.
 	 * @param {boolean} [opts.isAttack=false] - Whether this is an attack roll (does not use Thelemar crit rules)
 	 * @returns {{roll: number, roll1, roll2, mode, thelemar_critBonus}} Roll result
 	 */
-	_rollD20 ({event, mode, isAttack = false} = {}) {
-		const stateMode = mode; // Track the state-based mode separately
-
-		// Event modifier keys take priority over state-based mode
-		// This allows users to manually override advantage/disadvantage
-		if (event) {
-			if ((/** @type {*} */ (event)).shiftKey) mode = "advantage";
-			else if ((/** @type {*} */ (event)).ctrlKey || (/** @type {*} */ (event)).metaKey) mode = "disadvantage";
+	_rollD20 ({event, mode, stateAdvantage, stateDisadvantage, isAttack = false} = {}) {
+		// Cancel-aware path: callers pass explicit state booleans so adv + disadv (from any
+		// combination of passive state and event keys) properly cancel to a normal roll.
+		if (stateAdvantage !== undefined || stateDisadvantage !== undefined) {
+			mode = CharacterSheetClassUtils.resolveD20Mode({stateAdvantage, stateDisadvantage, event});
+		} else {
+			// Legacy path: event modifier keys override the precomputed mode (used by
+			// _rollInitiative and the public rollD20 pass-through, which have no state mode).
+			if (event) {
+				if ((/** @type {*} */ (event)).shiftKey) mode = "advantage";
+				else if ((/** @type {*} */ (event)).ctrlKey || (/** @type {*} */ (event)).metaKey) mode = "disadvantage";
+			}
+			mode = mode || "normal";
 		}
-		mode = mode || "normal";
 
 		const roll1 = RollerUtil.randomise(20);
 		const roll2 = RollerUtil.randomise(20);
@@ -8584,15 +8590,18 @@ class CharacterSheetPage {
 		const totalMod = baseMod + customBonus;
 
 		// Determine advantage/disadvantage from aggregated modifiers and active states
-		let mode;
 		const hasAdvantageFromStates = this._state.hasAdvantageFromStates(`check:${ability}`);
 		const hasDisadvantageFromStates = this._state.hasDisadvantageFromStates(`check:${ability}`);
 		const hasAdvantage = aggregated.advantage || hasAdvantageFromStates;
 		const hasDisadvantage = aggregated.disadvantage || hasDisadvantageFromStates;
-		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
-		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
 
-		const rollResult = this._rollD20({event, mode: /** @type {*} */ (mode)});
+		const rollResult = this._rollD20({event, stateAdvantage: hasAdvantage, stateDisadvantage: hasDisadvantage});
+
+		// Effective adv/dis after combining state with event keys, for the title/label.
+		const evtAdv = !!(event && (/** @type {*} */ (event)).shiftKey);
+		const evtDis = !!(event && ((/** @type {*} */ (event)).ctrlKey || (/** @type {*} */ (event)).metaKey));
+		const effAdvantage = hasAdvantage || evtAdv;
+		const effDisadvantage = hasDisadvantage || evtDis;
 
 		// Apply minimum if set (e.g., Reliable Talent, custom abilities)
 		let effectiveRoll = rollResult.roll;
@@ -8621,7 +8630,7 @@ class CharacterSheetPage {
 		// Build breakdown string
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const customBonusStr = customBonus !== 0 ? ` + ${customBonus} (custom)` : "";
-		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
+		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
 		const sourcesStr = aggregated.sources.length > 0 ? ` [${aggregated.sources.join(", ")}]` : "";
 
 		// Show animated dice if enabled
@@ -8697,15 +8706,17 @@ class CharacterSheetPage {
 		const mod = baseMod;
 
 		// Check for advantage/disadvantage from active states and aggregated modifiers
-		let mode;
 		const advState = this._state.getAdvantageState?.(`save:${ability}`);
 		const hasAdvantage = advState?.advantage || aggregated.advantage || this._state.hasAdvantageFromStates(`save:${ability}`);
 		const hasDisadvantage = advState?.disadvantage || aggregated.disadvantage || this._state.hasDisadvantageFromStates(`save:${ability}`);
-		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
-		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
-		// If both, they cancel out - use normal (event can still override)
 
-		const rollResult = this._rollD20({event, mode: /** @type {*} */ (mode)});
+		const rollResult = this._rollD20({event, stateAdvantage: hasAdvantage, stateDisadvantage: hasDisadvantage});
+
+		// Effective adv/dis after combining state with event keys, for the title/label.
+		const evtAdv = !!(event && (/** @type {*} */ (event)).shiftKey);
+		const evtDis = !!(event && ((/** @type {*} */ (event)).ctrlKey || (/** @type {*} */ (event)).metaKey));
+		const effAdvantage = hasAdvantage || evtAdv;
+		const effDisadvantage = hasDisadvantage || evtDis;
 
 		// Apply minimum if set
 		let effectiveRoll = rollResult.roll;
@@ -8741,7 +8752,7 @@ class CharacterSheetPage {
 		}
 
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
-		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
+		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
 		const sourcesStr = aggregated.sources.length > 0 ? ` [${aggregated.sources.join(", ")}]` : "";
 
 		// Show animated dice if enabled
@@ -8771,14 +8782,17 @@ class CharacterSheetPage {
 		const checkAggregated = this._state.aggregateModifiers(`check:${skillAbility}`);
 
 		// Check for advantage/disadvantage from skill and check modifiers
-		let mode;
 		const advState = this._state.getAdvantageState?.(`skill:${skillKey}`);
 		const hasAdvantage = advState?.advantage || aggregated.advantage || checkAggregated.advantage;
 		const hasDisadvantage = advState?.disadvantage || aggregated.disadvantage || checkAggregated.disadvantage;
-		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
-		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
 
-		const rollResult = this._rollD20({event, mode: /** @type {*} */ (mode)});
+		const rollResult = this._rollD20({event, stateAdvantage: hasAdvantage, stateDisadvantage: hasDisadvantage});
+
+		// Effective adv/dis after combining state with event keys, for the title/label.
+		const evtAdv = !!(event && (/** @type {*} */ (event)).shiftKey);
+		const evtDis = !!(event && ((/** @type {*} */ (event)).ctrlKey || (/** @type {*} */ (event)).metaKey));
+		const effAdvantage = hasAdvantage || evtAdv;
+		const effDisadvantage = hasDisadvantage || evtDis;
 
 		// Apply minimum if set (take the highest minimum from skill and check modifiers)
 		let effectiveRoll = rollResult.roll;
@@ -8810,7 +8824,7 @@ class CharacterSheetPage {
 
 		const abilityLabel = overrideAbility ? ` (${overrideAbility.toUpperCase()})` : "";
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
-		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
+		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
 		const allSources = [...aggregated.sources, ...checkAggregated.sources.filter(s => !aggregated.sources.includes(s))];
 		const sourcesStr = allSources.length > 0 ? ` [${allSources.join(", ")}]` : "";
 
@@ -8969,13 +8983,10 @@ class CharacterSheetPage {
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
 
 		// Check for advantage/disadvantage from active states using specific attack type
-		let mode;
 		const hasAdvantage = this._state.hasAdvantageFromStates(attackType);
 		const hasDisadvantage = this._state.hasDisadvantageFromStates(attackType);
-		if (hasAdvantage && !hasDisadvantage) mode = "advantage";
-		else if (hasDisadvantage && !hasAdvantage) mode = "disadvantage";
 
-		const rollResult = this._rollD20({event, mode: /** @type {*} */ (mode), isAttack: true});
+		const rollResult = this._rollD20({event, stateAdvantage: hasAdvantage, stateDisadvantage: hasDisadvantage, isAttack: true});
 		const attackTotal = rollResult.roll + attack.attackBonus - exhaustionPenalty;
 
 		// Check for crit/fumble
