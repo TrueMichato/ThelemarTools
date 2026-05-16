@@ -44,8 +44,8 @@
 				"version": "1.0"
 			},
 			{
-				"json": "TGTT-ILL",
-				"abbreviation": "ILL",
+				"json": "TGTT-IIIR",
+				"abbreviation": "IIIR",
 				"full": "Travelers Guide to Thelemar - Illrigger Content",
 				"authors": [
 					"MCDM Productions"
@@ -13355,7 +13355,7 @@
 		},
 		{
 			"name": "Illrigger",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"_copy": {
 				"name": "Illrigger",
 				"source": "IllriggerRevised",
@@ -13364,18 +13364,18 @@
 						{
 							"mode": "insertArr",
 							"index": 2,
-							"items": "Combat Methods|Illrigger|TGTT-ILL|2"
+							"items": "Combat Methods|Illrigger|TGTT-IIIR|2"
 						},
 						{
 							"mode": "appendArr",
 							"items": [
-								"Specialties|Illrigger|TGTT-ILL|3",
-								"Specialties|Illrigger|TGTT-ILL|5",
-								"Specialties|Illrigger|TGTT-ILL|7",
-								"Specialties|Illrigger|TGTT-ILL|9",
-								"Specialties|Illrigger|TGTT-ILL|11",
-								"Specialties|Illrigger|TGTT-ILL|14",
-								"Specialties|Illrigger|TGTT-ILL|19"
+								"Specialties|Illrigger|TGTT-IIIR|3",
+								"Specialties|Illrigger|TGTT-IIIR|5",
+								"Specialties|Illrigger|TGTT-IIIR|7",
+								"Specialties|Illrigger|TGTT-IIIR|9",
+								"Specialties|Illrigger|TGTT-IIIR|11",
+								"Specialties|Illrigger|TGTT-IIIR|14",
+								"Specialties|Illrigger|TGTT-IIIR|19"
 							]
 						}
 					],
@@ -17053,9 +17053,9 @@
 			}
 		},
 		{
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"_copy": {
 				"name": "Architect of Ruin",
 				"source": "IllriggerRevised",
@@ -17065,9 +17065,9 @@
 			}
 		},
 		{
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"_copy": {
 				"name": "Hellspeaker",
 				"source": "IllriggerRevised",
@@ -17077,9 +17077,9 @@
 			}
 		},
 		{
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"_copy": {
 				"name": "Painkiller",
 				"source": "IllriggerRevised",
@@ -17089,9 +17089,9 @@
 			}
 		},
 		{
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"_copy": {
 				"name": "Sanguine Knight",
 				"source": "IllriggerRevised",
@@ -17101,9 +17101,9 @@
 			}
 		},
 		{
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"_copy": {
 				"name": "Shadowmaster",
 				"source": "IllriggerRevised",
@@ -23167,9 +23167,9 @@
 		},
 		{
 			"name": "Combat Methods",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 2,
 			"entries": [
 				"At 2nd level, your infernal training expands into combat methods\u2014martial techniques fueled by hellish stamina.",
@@ -23218,9 +23218,9 @@
 		},
 		{
 			"name": "Specialties",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"Through your infernal training and diabolic contracts, you have developed specialized abilities that set you apart. You gain a specialty of your choice. You gain another specialty at 5th, 7th, 9th, 11th, 14th, and 19th level. Each specialty can only be selected once unless it says otherwise.",
@@ -23228,92 +23228,92 @@
 					"type": "options",
 					"count": 1,
 					"entries": [
-						{"type": "refClassFeature", "classFeature": "Baleful Presence|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Dark Resilience|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Diplomatic Intervention|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Do Without|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Endure Elements|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Faceless Mask|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Forked Tongue Mastery|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Infernal Constitution|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Infernal Rejuvenation|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Infernal Tracker|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Negate Fall|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Soul Reader|Illrigger|TGTT-ILL|3"},
-						{"type": "refClassFeature", "classFeature": "Hellish Avenger|Illrigger|TGTT-ILL|5"},
-						{"type": "refClassFeature", "classFeature": "Purge Toxins|Illrigger|TGTT-ILL|5"},
-						{"type": "refClassFeature", "classFeature": "Infernal Awareness|Illrigger|TGTT-ILL|7"},
-						{"type": "refClassFeature", "classFeature": "Suggestive Words|Illrigger|TGTT-ILL|7"},
-						{"type": "refClassFeature", "classFeature": "Infernal Supremacy|Illrigger|TGTT-ILL|19"}
+						{"type": "refClassFeature", "classFeature": "Baleful Presence|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Dark Resilience|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Diplomatic Intervention|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Do Without|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Endure Elements|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Faceless Mask|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Forked Tongue Mastery|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Infernal Constitution|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Infernal Rejuvenation|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Infernal Tracker|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Negate Fall|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Soul Reader|Illrigger|TGTT-IIIR|3"},
+						{"type": "refClassFeature", "classFeature": "Hellish Avenger|Illrigger|TGTT-IIIR|5"},
+						{"type": "refClassFeature", "classFeature": "Purge Toxins|Illrigger|TGTT-IIIR|5"},
+						{"type": "refClassFeature", "classFeature": "Infernal Awareness|Illrigger|TGTT-IIIR|7"},
+						{"type": "refClassFeature", "classFeature": "Suggestive Words|Illrigger|TGTT-IIIR|7"},
+						{"type": "refClassFeature", "classFeature": "Infernal Supremacy|Illrigger|TGTT-IIIR|19"}
 					]
 				}
 			]
 		},
 		{
 			"name": "Specialties",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 5,
 			"entries": [
-				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-IIIR|3} feature."
 			]
 		},
 		{
 			"name": "Specialties",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 7,
 			"entries": [
-				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-IIIR|3} feature."
 			]
 		},
 		{
 			"name": "Specialties",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 9,
 			"entries": [
-				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-IIIR|3} feature."
 			]
 		},
 		{
 			"name": "Specialties",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 11,
 			"entries": [
-				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-IIIR|3} feature."
 			]
 		},
 		{
 			"name": "Specialties",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 14,
 			"entries": [
-				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-IIIR|3} feature."
 			]
 		},
 		{
 			"name": "Specialties",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 19,
 			"entries": [
-				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-ILL|3} feature."
+				"You gain another specialty of your choice from the {@classFeature Specialties|Illrigger|TGTT-IIIR|3} feature."
 			]
 		},
 		{
 			"name": "Baleful Presence",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"Your infernal nature radiates menace. You gain a bonus to Charisma ({@skill Intimidation}) checks equal to your proficiency bonus. After successfully intimidating a creature, you have advantage on subsequent {@skill Intimidation} checks against it for the next 24 hours."
@@ -23321,9 +23321,9 @@
 		},
 		{
 			"name": "Dark Resilience",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"You gain resistance to fire damage. If you already have resistance to fire damage, you instead gain resistance to necrotic damage."
@@ -23331,9 +23331,9 @@
 		},
 		{
 			"name": "Diplomatic Intervention",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"You can spend 1 stamina and use an action to quell strong emotions within 10 feet. You choose which of the following effects to apply to each sentient creature within the area:",
@@ -23348,9 +23348,9 @@
 		},
 		{
 			"name": "Do Without",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"You can go a number of days equal to your Charisma modifier without food and water before suffering any adverse effects."
@@ -23358,9 +23358,9 @@
 		},
 		{
 			"name": "Endure Elements",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"For one hour you can ignore environmental effects caused by extreme heat or cold. This feature does not protect you from damage. Once you have used this feature, you can't do so again until you finish a long rest."
@@ -23368,9 +23368,9 @@
 		},
 		{
 			"name": "Faceless Mask",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"You have honed your ability to conceal your presence from others. You have advantage on {@skill Stealth} and {@skill Deception} checks made to blend into a crowd or assume a false identity."
@@ -23378,9 +23378,9 @@
 		},
 		{
 			"name": "Forked Tongue Mastery",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"You gain a bonus to Charisma ({@skill Deception}) and Charisma ({@skill Persuasion}) checks equal to your proficiency bonus. After successfully deceiving or persuading a creature, you have advantage on subsequent {@skill Deception} and {@skill Persuasion} checks against it for the next 24 hours."
@@ -23388,9 +23388,9 @@
 		},
 		{
 			"name": "Infernal Constitution",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"You double your Strength score when determining your carrying capacity and the weight you can lift, push, or drag. During a short rest, you can participate in strenuous activity (such as scouting, sparring, or physical exercise) for up to 30 minutes and still gain the benefits of the rest. During a long rest, you can participate in strenuous activity for up to 1 hour, and your required sleep time is halved."
@@ -23398,9 +23398,9 @@
 		},
 		{
 			"name": "Infernal Rejuvenation",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"You can use an action to channel infernal energy to heal an injured ally within reach. Spend one or more of your ally's hit dice. Your ally recovers hit points equal to the total you roll on the expended hit dice."
@@ -23408,9 +23408,9 @@
 		},
 		{
 			"name": "Infernal Tracker",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"When tracking a creature you have previously interdicted, you can focus on the lingering seal energy it leaves in its wake, allowing you to use your Charisma for any ability checks made to track it."
@@ -23418,9 +23418,9 @@
 		},
 		{
 			"name": "Negate Fall",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"When you fall, or jump down, from a height and spend 1 or more stamina, you can treat the falling distance as 30 feet less for each stamina you spend."
@@ -23428,9 +23428,9 @@
 		},
 		{
 			"name": "Soul Reader",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 3,
 			"entries": [
 				"You can sense the general emotional state of any creature you can see within 30 feet. You have advantage on {@skill Insight} checks against creatures you have interdicted."
@@ -23438,9 +23438,9 @@
 		},
 		{
 			"name": "Hellish Avenger",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 5,
 			"entries": [
 				"{@i Prerequisite: 5th level}",
@@ -23449,9 +23449,9 @@
 		},
 		{
 			"name": "Purge Toxins",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 5,
 			"entries": [
 				"{@i Prerequisite: 5th level}",
@@ -23460,9 +23460,9 @@
 		},
 		{
 			"name": "Infernal Awareness",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 7,
 			"entries": [
 				"{@i Prerequisite: 7th level}",
@@ -23471,9 +23471,9 @@
 		},
 		{
 			"name": "Suggestive Words",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 7,
 			"entries": [
 				"{@i Prerequisite: 7th level}",
@@ -23483,9 +23483,9 @@
 		},
 		{
 			"name": "Infernal Supremacy",
-			"source": "TGTT-ILL",
+			"source": "TGTT-IIIR",
 			"className": "Illrigger",
-			"classSource": "TGTT-ILL",
+			"classSource": "TGTT-IIIR",
 			"level": 19,
 			"entries": [
 				"{@i Prerequisite: 19th level}",
