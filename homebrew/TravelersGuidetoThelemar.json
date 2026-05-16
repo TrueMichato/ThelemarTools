@@ -50,7 +50,9 @@
 				"authors": [
 					"MCDM Productions"
 				],
-				"version": "1.0"
+				"version": "1.0",
+				"color": "933a4c",
+				"colorNight": "933a4c"
 			}
 		],
 		"dependencies": {
