@@ -11,6 +11,7 @@
 
 class TgttFilter {
 	static PRIORITY_SOURCE = "TGTT";
+	static PRIORITY_SOURCE_LONG = "Travelers Guide to Thelemar";
 	static ICON_PATH = "thelemar_symbol_wip_2_icon.ico";
 	static STORAGE_KEY = "tgttFilterState";
 	static POSITION_STORAGE_KEY = "tgttFilterButtonPosition";
@@ -455,7 +456,13 @@ class TgttFilter {
 
 			if (nameEl && sourceEl) {
 				const name = nameEl.textContent.trim();
-				const source = sourceEl.textContent.trim();
+				let source;
+				// @ts-ignore
+				if (sourceEl.title.trim().includes(TgttFilter.PRIORITY_SOURCE_LONG)) {
+					source = TgttFilter.PRIORITY_SOURCE;
+				} else {
+					source = sourceEl.textContent.trim();
+				}
 
 				if (!itemsByName[name]) itemsByName[name] = [];
 				itemsByName[name].push({element: item, source});
