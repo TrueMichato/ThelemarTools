@@ -13360,6 +13360,30 @@
 				"name": "Illrigger",
 				"source": "IllriggerRevised",
 				"_mod": {
+					"_": {
+						"mode": "setProp",
+						"prop": "startingProficiencies.skills",
+						"value": [
+							{
+								"choose": {
+									"from": [
+										"arcana",
+										"athletics",
+										"deception",
+										"insight",
+										"intimidation",
+										"investigation",
+										"persuasion",
+										"religion",
+										"stealth",
+										"might|TGTT",
+										"engineering|TGTT"
+									],
+									"count": 2
+								}
+							}
+						]
+					},
 					"classFeatures": [
 						{
 							"mode": "insertArr",
