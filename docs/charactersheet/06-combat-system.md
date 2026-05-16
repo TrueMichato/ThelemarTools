@@ -696,4 +696,40 @@ this._page._onAddCondition?.();
 
 ---
 
+## Conditional Modifier Picker (Pre-Roll Flow)
+
+Four roll sites in `charactersheet.js` use the same pre-roll picker pattern to let the player opt in to conditional modifiers:
+
+| Roll site | Line | Notes |
+|---|---|---|
+| `_rollAbilityCheck` | ~L8957 | Probes `check:<ability>` |
+| `_rollSavingThrow` | ~L9060 | Probes `save:<ability>`; preserves Evasion passive alert |
+| `_rollSkillCheck` | ~L9150 | Probes both `skill:X` and `check:<ability>`, dedupes by ID |
+| `_rollAttack` | ~L9350 | `async`; only adds the picker's bonus delta to avoid double-counting registry mods already folded into `attack.attackBonus` |
+
+### Picker UI — `_pPickConditionalModifiers({rollLabel, conditionalsAvailable})`
+
+Defined at ~L8960. Modal with one row per available conditional:
+
+- Checkbox + name + colored chip (Advantage = green, Disadvantage = red, `+N` = indigo)
+- "Apply all" / "Apply none" buttons
+- Actions: **Cancel** (abort the roll), **Skip** (roll with zero conditionals applied), **Apply selected**
+
+Skipped silently when `conditionalsAvailable` is empty **or** `settings.skipConditionalPrompt === true`. Returns `{appliedConditionalIds: Set<string>, applied: Array<Entry>, cancelled: boolean}`.
+
+### Result Note Format — `_formatAppliedConditionalsNote(applied)`
+
+Each opted-in conditional contributes one line to the roll result note, prefixed with ⚡:
+
+```
+⚡ Dauntless Heritage (Advantage, against being frightened)
+⚡ Stout Resilience (+2, against poison)
+```
+
+### Settings Toggle
+
+The dice settings dropdown (in `charactersheet.html` near L256) has a **"Skip conditional prompts"** checkbox wired to `settings.skipConditionalPrompt` (`_initDicePicker`, ~L8336). Toggled at runtime; persists with the character.
+
+---
+
 *Previous: [Feature Calculations](./05-feature-calculations.md) | Next: [Spellcasting](./07-spellcasting.md)*

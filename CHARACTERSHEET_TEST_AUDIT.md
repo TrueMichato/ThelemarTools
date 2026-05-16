@@ -231,3 +231,9 @@ Complete edition-gated feature tests (Druid Primal Order, Epic Boons, etc.).
 4. **~40% feature property coverage gap** — 665 properties untested (Priority 4)
 5. **XPHB 2024 edition-gated features** still incomplete (Priority 5)
 6. **Main TGTT test file** (12K lines) needs a table-of-contents comment for navigation
+
+## Recently Added Suites
+
+| File | Tests | Coverage |
+|---|---|---|
+| CharacterSheetConditionalModifiers.test.js | 15 | Unified conditional-modifier pipeline: `_isConditionalSaveSubtype` / `_buildConditionalModId` helpers, aggregator gating, both encodings (text-parsed + registry sub-typed `save:advantage:<sub>`), opt-in via `appliedConditionalIds`, `getAdvantageState` / `getModifierBonus` opt forwarding |

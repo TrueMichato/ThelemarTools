@@ -1,6 +1,6 @@
 ---
 name: charactersheet-development
-description: "Develop, debug, test, and extend the 5etools Character Sheet system (js/charactersheet/, test/jest/charactersheet/). Covers class/subclass feature calculations, toggle abilities and active states, combat mechanics, spell slot management, character builder, level-up wizard, quick build, inventory/attunement, NPC export, rest mechanics, save/load migrations, and XPHB 2024 parity. Includes TGTT/Thelemar homebrew integration. Use for understanding module interactions, resolving state management issues, reviewing active refactors (LevelUp to ClassUtils extraction, state modularization), or any task mentioning character sheet, charsheet, feature calculations, toggle abilities, active states, spell slots, combat tracker, rest mechanics, or D&D class/subclass implementation."
+description: "Develop, debug, test, and extend the 5etools Character Sheet system (js/charactersheet/, test/jest/charactersheet/). Covers class/subclass feature calculations, toggle abilities and active states, combat mechanics, spell slot management, character builder, level-up wizard, quick build, inventory/attunement, NPC export, rest mechanics, save/load migrations, XPHB 2024 parity, the favorites system (star/unstar across tabs, orphan resolution), the Apply Buff modal for non-casters (buffpicker helpers), TGTT lore skills (flat per-skill bonus variant rule), and the unified conditional-modifier pipeline (text-parsed + registry sub-typed encodings, pre-roll picker, skipConditionalPrompt setting). Includes TGTT/Thelemar homebrew integration. Use for understanding module interactions, resolving state management issues, reviewing active refactors (LevelUp to ClassUtils extraction, state modularization), or any task mentioning character sheet, charsheet, feature calculations, toggle abilities, active states, spell slots, combat tracker, rest mechanics, favorites, buff modal, lore skills, conditional modifiers, or D&D class/subclass implementation."
 ---
 
 # Character Sheet Development
@@ -142,3 +142,14 @@ When touching these areas: check if the method already exists in ClassUtils or i
 - **No reactive UI.** After `state.setX()`, the module must call `render()`. Forgetting to re-render is a common bug.
 - **Respec editing is partial.** ASI, feat, subclass, feature choices, combat traditions, and weapon masteries can be edited. Skills, expertise, and spells cannot.
 - **Steady Aim two-phase pattern.** Grants advantage + zero speed; after the attack, only advantage is consumed (via `_consumeOnAttackStates()`), zero speed survives until turn end.
+
+## Doc Maintenance (advisory)
+
+When closing a bug in `bugs.md` that adds **new public state methods, new modules, new UI surfaces, or new user-facing settings**, the same change set should land doc updates in:
+
+1. The relevant `docs/charactersheet/0X-*.md` reference doc
+2. `.agents/skills/charactersheet-development/references/subsystem-details.md` (concise sub-section: function name + 2–3 line description + file/line ref)
+3. `AGENTS.md` module map and/or Critical Facts (if a new module or invariant)
+4. `CHARACTERSHEET_TEST_AUDIT.md` (if a new test file was added)
+
+A bug closure narrative without these touches is incomplete — docs/skills drift fast otherwise. See [docs/charactersheet/12-contributing-guide.md](../../../docs/charactersheet/12-contributing-guide.md) for the full convention.

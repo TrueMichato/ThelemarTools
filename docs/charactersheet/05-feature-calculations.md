@@ -591,4 +591,45 @@ _getCalculationsCacheKey() {
 
 ---
 
+## Conditional Modifier Encoding
+
+Some features grant advantage / disadvantage / a bonus **only under a condition** — Dauntless Heritage ("on saves against being frightened"), Stout Resilience ("against poison"), etc. These come in two equivalent encodings that both flow through the same gating + picker pipeline.
+
+### Encoding 1 — Text-parsed conditional
+
+```javascript
+{
+    type: "save:all",
+    advantage: true,
+    conditional: "against being frightened",  // <-- free text
+    name: "Dauntless Heritage",
+}
+```
+
+### Encoding 2 — Registry sub-typed conditional
+
+```javascript
+{
+    type: "save:advantage:frightened",  // sub-type after the 2nd colon
+    name: "Dauntless Heritage",
+}
+```
+
+The sub-type slot accepts conditions (`frightened`, `poisoned`, …), damage types (`fire`, `psychic`, …), and the special keywords `magic`, `disease`, `spells`. It does **not** accept ability codes (`str`/`dex`/…) or `all` — those are non-conditional and applied automatically.
+
+### Normalization
+
+`getModifiersForType()` synthesizes a `conditional` text field on registry sub-typed entries when queried via the base type (e.g. `save:dex`), so both encodings appear identically to the aggregator. The picker dedupes on `_buildConditionalModId(mod)` = `${baseType}|${name||note||""}|${conditional}`.
+
+### Static helpers
+
+| Helper | Purpose |
+|---|---|
+| `_isConditionalSaveSubtype(subtype)` | Distinguishes conditional sub-types (`frightened`, `fire`, `magic`, …) from non-conditional ones (ability codes, `all`, standard skills) |
+| `_buildConditionalModId(mod)` | Deterministic ID for picker dedup; strips `:advantage:` / `:disadvantage:` from base type |
+
+See [State Management → Modifier Aggregation API](./04-state-management.md#modifier-aggregation-api) for `aggregateModifiers` opt forwarding and the `conditionalsAvailable` return field.
+
+---
+
 *Previous: [State Management](./04-state-management.md) | Next: [Combat System](./06-combat-system.md)*

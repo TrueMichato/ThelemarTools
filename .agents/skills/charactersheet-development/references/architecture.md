@@ -88,6 +88,10 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 ├── CharacterSheetSpellPicker (charactersheet-spell-picker.js, ~1,200 lines, all static)
 │   Reusable spell selection UI for Builder, LevelUp, QuickBuild.
 │
+├── charactersheet-buffpicker-helpers.js (~170 lines, pure functions)
+│   No-DOM helpers backing the Apply Buff modal: categorise, chip,
+│   duration format, active-detection. Imported by charactersheet.js.
+│
 └── CharacterSheetClassUtils (charactersheet-class-utils.js, ~1,800 lines, all static)
     Shared helpers: ASI levels, subclass levels, hit die, spell ability,
     feature options, expertise parsing, language grants.

@@ -113,6 +113,9 @@ Conditions (Frightened, Poisoned, etc.) create parallel active states with `isCo
 ### Conditional Effects
 Some state effects have a `conditional` field (e.g., `"while concentrating"`) that is evaluated at effect collection time. The effect only applies when the condition is met.
 
+### Conditional Modifier Picker (gated by default)
+For save/check/skill/attack modifiers that carry a `conditional` string — either text-parsed (`{type: "save:all", advantage: true, conditional: "against frightened"}`) or registry sub-typed (`{type: "save:advantage:frightened"}`) — `aggregateModifiers(type, {appliedConditionalIds})` gates them off by default and surfaces them in `result.conditionalsAvailable`. Roll handlers in `charactersheet.js` (`_rollAbilityCheck`, `_rollSavingThrow`, `_rollSkillCheck`, `_rollAttack`) probe first, show `_pPickConditionalModifiers` to the user, then re-aggregate with the opted-in IDs. Dedup key is `_buildConditionalModId(mod)` = `${baseType}|${name||note}|${conditional}` (adv/dis sub-types stripped from base). The escape hatch is `settings.skipConditionalPrompt`. `getAdvantageState(type, opts)` and `getModifierBonus(type, opts)` forward `opts` unchanged.
+
 ### FeatureEffectRegistry
 Maps feature names to effect objects. When a feature is added to the character (during build/levelup), the registry is consulted to auto-apply effects like resistances, proficiencies, and senses.
 

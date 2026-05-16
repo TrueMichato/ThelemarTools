@@ -480,3 +480,36 @@ if (raceName?.toLowerCase()?.includes("newrace") ||
 - [Combat System](./06-combat-system.md) - Stamina and methods
 - [Testing Strategy](./09-testing-strategy.md) - Test patterns
 
+---
+
+## Lore Skills
+
+TGTT variant rule: characters may have **lore skills** — narrow, character-defined knowledge skills (e.g. "Heraldry of the Northern Kingdoms", "Drow Politics"). Most Thelemar characters start with 2–3 from their background.
+
+### Mechanics
+
+- **Flat per-skill bonus** plus proficiency bonus on the roll. No ability modifier, no separate scaling.
+- Minimum bonus is **+0** (PB is always added on top by the roll handler).
+- Players add / remove lore skills freely via the **"Add Lore Skill"** button in the Skills tab.
+
+### State API
+
+```javascript
+_data.loreSkills = [
+    {name: "Heraldry of the Northern Kingdoms", bonus: 0},
+    {name: "Drow Politics", bonus: 2},
+];
+```
+
+| Method | Purpose |
+|---|---|
+| `getLoreSkills()` | Returns the array |
+| `setLoreSkillBonus(name, bonus)` | Upsert; bonus floored at 0 |
+| `removeLoreSkill(name)` | Delete by name |
+
+### UI
+
+Rendered by `_renderLoreSkillsSection()` in `charactersheet.js` (~L2849), positioned beneath the main Skills table. Each row exposes −/+ buttons (bonus increment) and an × delete handle. Skills with `isLoreSkill: true` are filtered out of the main table by the standard renderer (charactersheet.js L2754–2755).
+
+Non-TGTT characters never see the section — it's gated by the standard TGTT settings flag.
+

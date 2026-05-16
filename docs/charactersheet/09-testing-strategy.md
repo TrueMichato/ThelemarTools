@@ -483,4 +483,19 @@ test:
 
 ---
 
+## Modifier System Tests
+
+`test/jest/charactersheet/CharacterSheetConditionalModifiers.test.js` covers the unified conditional-modifier pipeline:
+
+- `_isConditionalSaveSubtype` positive/negative classification
+- `_buildConditionalModId` determinism and adv-/dis- stripping
+- `aggregateModifiers` gates conditional entries by default
+- Both encodings (text-parsed `{conditional: "…"}` and registry sub-typed `save:advantage:<sub>`) appear identically in `conditionalsAvailable`
+- Opt-in via `appliedConditionalIds` folds the right entries into `bonus` / `advantage` / `disadvantage`
+- `getAdvantageState` and `getModifierBonus` forward opts unchanged
+
+When modifying any of `_parseModifierType`, `getModifiersForType`, `aggregateModifiers`, or the two static helpers in `charactersheet-state.js`, run this suite first.
+
+---
+
 *Previous: [Toggle Abilities](./08-toggle-abilities.md) | Next: [Known Limitations](./10-known-limitations.md)*

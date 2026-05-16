@@ -307,4 +307,20 @@ See [Contributing Guide](./12-contributing-guide.md) for:
 
 ---
 
+## UX Behaviours Worth Knowing
+
+### Conditional Modifier Picker is Opt-In Per Roll
+
+Deliberate design: conditional advantage/disadvantage/bonus modifiers (e.g. Dauntless Heritage "against being frightened") do **not** auto-apply. They surface as a pre-roll picker so the player decides per roll whether the condition is actually met. Players who find the prompt repetitive can toggle **"Skip conditional prompts"** in the dice settings dropdown (persists via `settings.skipConditionalPrompt`); with the toggle on, conditionals are simply ignored — there is no "always apply" mode by design (it would re-introduce the original bug class).
+
+See [Combat System → Conditional Modifier Picker](./06-combat-system.md#conditional-modifier-picker-pre-roll-flow).
+
+### Favorites Cap = 8, Orphans Are Manual
+
+`_data.favorites` is capped at 8 entries. When a favourited entity disappears (renamed feature, removed item, source migration), the favourite becomes an "orphan" — still in state, but `_resolveFavorite` returns `{found: false}`. The Actions hub surfaces a "Remove N orphans" toast button rather than auto-pruning, to protect against transient data-load failures where the entity may reappear.
+
+See [Components Reference → Favorites System](./03-components-reference.md#favorites-system).
+
+---
+
 *Previous: [Testing Strategy](./09-testing-strategy.md) | Next: [Future Roadmap](./11-future-roadmap.md)*

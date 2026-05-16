@@ -447,4 +447,17 @@ Thank you for helping improve the character sheet!
 
 ---
 
+## Doc-Sync Checklist for Closed Bugs / New Subsystems (advisory)
+
+When closing a bug in `bugs.md` that adds **new public state methods, new modules, new UI surfaces, or new user-facing settings**, the closure entry should reference (or land alongside) doc updates in:
+
+1. The relevant `docs/charactersheet/0X-*.md` reference doc — add a section that names the new symbols and explains their role
+2. `.agents/skills/charactersheet-development/references/subsystem-details.md` — concise sub-section (function name + 2–3 line description + file/line ref) so agents loading the skill on demand have current info
+3. `AGENTS.md` (workspace root) — update the module map row if a new module landed; add a Critical Facts bullet if a new invariant or default behaviour was introduced
+4. `CHARACTERSHEET_TEST_AUDIT.md` — add a row to **Recently Added Suites** if a new test file was created
+
+This is advisory, not enforced — but a bug closure narrative without these touches is treated as incomplete during review. The cost of one extra paragraph at close-time is far less than the drift that builds up otherwise (witness the four-feature backlog this checklist was added to address: favorites, Apply Buff modal, lore skills, conditional modifiers).
+
+---
+
 *Previous: [Future Roadmap](./11-future-roadmap.md) | [Back to Index](./README.md)*
