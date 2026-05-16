@@ -374,18 +374,27 @@ class CharacterSheetClassUtils {
 				}
 			}
 
-			// Pact prerequisite (short form: "Blade", "Chain", "Tome", "Talisman")
+			// Pact prerequisite (short form: "Blade", "Chain", "Tome", "Talisman").
+			// Also handles full-name pacts like TGTT's "Pact of Transformation" or any
+			// future homebrew pact whose name is supplied verbatim.
 			if (/** @type {*} */ prereq.pact) {
-				const pactLc = prereq.pact.toLowerCase();
+				const pactLc = prereq.pact.toLowerCase().trim();
+				const isFullName = pactLc.startsWith("pact of");
 				const hasPact = existingFeatures.some((/** @type {*} */ f) => {
 					const nameLc = f.name?.toLowerCase() || "";
+					if (isFullName) {
+						return nameLc === pactLc || nameLc.includes(pactLc);
+					}
 					return nameLc === `pact of the ${pactLc}`
 						|| nameLc === `pact of ${pactLc}`
 						|| nameLc.includes(`pact of the ${pactLc}`)
 						|| nameLc.includes(`pact of ${pactLc}`);
 				});
 				if (!hasPact) {
-					reasons.push(`Pact of the ${prereq.pact.charAt(0).toUpperCase() + prereq.pact.slice(1)}`);
+					const label = isFullName
+						? prereq.pact
+						: `Pact of the ${prereq.pact.charAt(0).toUpperCase() + prereq.pact.slice(1)}`;
+					reasons.push(label);
 				}
 			}
 

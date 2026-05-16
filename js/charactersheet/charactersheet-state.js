@@ -12346,6 +12346,13 @@ class CharacterSheetState {
 						calculations.invocationsKnown = invocationsKnown;
 					}
 
+					// Apply Eldritch Invocation registry effects (calc flags, sense flags,
+					// passive-stat bonuses). Spell grants and skill profs ride the
+					// existing optional-feature ingestion pipeline.
+					this._applyWarlockInvocationEffects(calculations, {
+						tgttEnabled: !!this._data?.settings?.enableTgtt,
+					});
+
 					// Pact Boon (PHB level 3)
 					if (!is2024 && level >= 3) {
 						calculations.hasPactBoon = true;
@@ -30624,11 +30631,27 @@ class CharacterSheetState {
 			"fighting style", // Usually a passive choice
 			"expertise", // Passive skill enhancement
 			"proficiencies", // Passive
+			// Warlock invocation list/presenter features (auto-granted, not activatable)
+			"eldritch invocations",
+			"eldritch invocation options",
+			"eldritch invocation",
 		];
 		if (excludedNames.includes(name)) return null;
 
 		// Metamagic optional features are managed via the metamagic dashboard, not active states
 		if (feature.optionalFeatureTypes?.includes("MM")) return null;
+
+		// Warlock Eldritch Invocations are overwhelmingly passive (sense bonuses, spell
+		// grants, EB modifiers). A few have toggle/trigger semantics (e.g. Ghostly Gaze,
+		// Cloak of Flies); those opt in via WARLOCK_INVOCATION_REGISTRY below. Default
+		// to non-activatable to prevent every invocation from leaking into the Active
+		// States panel.
+		if (feature.optionalFeatureTypes?.includes("EI")) {
+			const invName = (feature.name || "").toLowerCase().trim();
+			const registryEntry = this.WARLOCK_INVOCATION_REGISTRY?.[invName];
+			const mode = registryEntry?.interactionMode;
+			if (mode !== "toggle" && mode !== "trigger") return null;
+		}
 
 		// ===== USE INTELLIGENT TOGGLE ANALYSIS =====
 		const toggleAnalysis = this.analyzeToggleability(text);
@@ -30808,7 +30831,9 @@ class CharacterSheetState {
 			{pattern: /channel divinity/i, stateTypeId: "custom"},
 
 			// Warlock abilities
-			{pattern: /eldritch invocation/i, stateTypeId: "custom"},
+			// (Eldritch Invocation catch-all removed — invocations are routed through
+			// WARLOCK_INVOCATION_REGISTRY and default to passive; toggle/trigger ones
+			// opt in via the registry entry.)
 			{pattern: /hex(?:blade)?.*curse/i, stateTypeId: "custom"},
 		];
 
@@ -35764,6 +35789,199 @@ class CharacterSheetState {
 	static getSpellFromRegistry (spellName) {
 		if (!spellName) return null;
 		return CharacterSheetState.SPELL_BUFF_REGISTRY[spellName.toLowerCase()] || null;
+	}
+
+	/**
+	 * Warlock Eldritch Invocation registry — keyed by lowercase invocation name.
+	 *
+	 * PHB and XPHB versions of the same invocation share an entry (the data files
+	 * reprint them under the same name; we route by name, not by source).
+	 *
+	 * An entry's mere presence means "this is a known invocation". By default
+	 * invocations are passive (just a feature card); only entries with
+	 * `interactionMode: "toggle"` or `"trigger"` opt into the Active States UI
+	 * (see `detectActivatableFeature` early-return guard above).
+	 *
+	 * Each entry may declare:
+	 * - `calcFlag` (string) — boolean flag emitted on `calculations` (e.g. `hasAgonizingBlast`)
+	 * - `calcValues` (object) — additional fields merged onto `calculations`
+	 * - `senses` (array) — sense entries (mirror the Devil's Sight pattern)
+	 * - `skills` (array of lowercase skill names) — proficiencies granted
+	 * - `interactionMode` ("passive" | "toggle" | "trigger") — only set when explicitly non-passive
+	 * - `tgtt` (bool) — gated by `settings.enableTgtt`
+	 * - `description` (string) — short note for tooltips / inline docs
+	 *
+	 * Spell grants are NOT declared here — they ride the existing
+	 * `additionalSpells` / `_processFeatureSpells` pipeline that runs when the
+	 * optional feature is ingested.
+	 *
+	 * Invocations not listed here are still recognised (treated as passive
+	 * flag-only feature cards via the early-return in `detectActivatableFeature`).
+	 * Adding an entry only matters when there's a mechanical effect to wire.
+	 */
+	static WARLOCK_INVOCATION_REGISTRY = {
+		// ===== Eldritch Blast modifiers (combat builder hooks) =====
+		"agonizing blast": {
+			calcFlag: "hasAgonizingBlast",
+			description: "Add your Charisma modifier to Eldritch Blast damage per beam.",
+		},
+		"repelling blast": {
+			calcFlag: "hasRepellingBlast",
+			description: "Eldritch Blast pushes targets 10 ft away on hit.",
+		},
+		"eldritch spear": {
+			calcFlag: "hasEldritchSpear",
+			description: "Eldritch Blast range becomes 300 ft.",
+		},
+		"lance of lethargy": {
+			calcFlag: "hasLanceOfLethargy",
+			description: "Once per turn, reduce a creature's speed by 10 ft until end of next turn on Eldritch Blast hit.",
+		},
+		"grasp of hadar": {
+			calcFlag: "hasGraspOfHadar",
+			description: "Once per turn, pull a creature 10 ft towards you on Eldritch Blast hit.",
+		},
+
+		// ===== Pact weapon modifiers =====
+		"thirsting blade": {
+			calcFlag: "hasThirstingBlade",
+			description: "Extra attack with your pact weapon on the Attack action.",
+		},
+		"lifedrinker": {
+			calcFlag: "hasLifedrinker",
+			description: "Add your Charisma modifier (min 1) to pact-weapon damage.",
+		},
+		"devouring blade": {
+			calcFlag: "hasDevouringBlade",
+			description: "Three attacks with your pact weapon on the Attack action.",
+		},
+		"improved pact weapon": {
+			calcFlag: "hasImprovedPactWeapon",
+			description: "Pact weapon is a +1 magical weapon and can be a longbow, shortbow, light crossbow, or heavy crossbow.",
+		},
+		"eldritch smite": {
+			calcFlag: "hasEldritchSmite",
+			description: "When you hit with your pact weapon, expend a spell slot to deal extra force damage and potentially knock prone.",
+		},
+
+		// ===== Senses =====
+		"devil's sight": {
+			calcFlag: "hasDevilsSight",
+			senses: [{type: "darkvision", range: 120, special: "seesInMagicalDarkness", source: "Devil's Sight"}],
+			description: "See normally in darkness, both magical and nonmagical, to a distance of 120 ft.",
+		},
+		"witch sight": {
+			calcFlag: "hasWitchSight",
+			senses: [{type: "truesight", range: 30, source: "Witch Sight"}],
+			description: "See the true form of any shapechanger or creature concealed by illusion magic within 30 ft.",
+		},
+
+		// ===== Skill / passive proficiencies =====
+		"beguiling influence": {
+			calcFlag: "hasBeguilingInfluence",
+			skills: ["deception", "persuasion"],
+			description: "Gain proficiency in the Deception and Persuasion skills.",
+		},
+
+		// ===== Concentration / save modifiers =====
+		"eldritch mind": {
+			calcFlag: "hasEldritchMind",
+			description: "Advantage on Constitution saving throws to maintain concentration on spells.",
+		},
+
+		// ===== Hit-point / healing modifiers =====
+		"gift of the ever-living ones": {
+			calcFlag: "hasGiftEverLivingOnes",
+			description: "When you regain hit points while your familiar is within 100 ft, treat each die rolled as its maximum.",
+		},
+
+		// ===== Sleep / long-rest modifiers =====
+		"aspect of the moon": {
+			calcFlag: "hasAspectOfTheMoon",
+			calcValues: {immuneToSleep: true},
+			description: "You no longer need to sleep and cannot be forced to sleep by any means. To gain a long rest, you can spend it in light activity such as reading or keeping watch.",
+		},
+
+		// ===== TGTT — Pact of Transformation invocations =====
+		"abomination's physique": {
+			tgtt: true,
+			calcFlag: "hasAbominationsPhysique",
+			calcValues: {bonusWalkSpeed: 10, bonusJumpFeet: 5, hasPowerfulBuild: true},
+			description: "TGTT: +10 ft walking speed, +5 ft jump distance, and counts as one size larger for carrying capacity (Powerful Build).",
+		},
+		"gravity defied": {
+			tgtt: true,
+			calcFlag: "hasGravityDefied",
+			description: "TGTT: Walk on walls and ceilings at half speed; grants spider climb 1/long rest.",
+		},
+		"leaper": {
+			tgtt: true,
+			calcFlag: "hasLeaper",
+			description: "TGTT: Bonus-action leap up to half your speed; uses = CON modifier per short rest.",
+		},
+		"burrower": {
+			tgtt: true,
+			calcFlag: "hasBurrower",
+			description: "TGTT: Burrow speed on appropriate terrain; uses = CON modifier per short rest.",
+		},
+		"spiked carapace": {
+			tgtt: true,
+			calcFlag: "hasSpikedCarapace",
+			description: "TGTT: Reaction-style 1d4 piercing on melee hit + advantage against grapples.",
+		},
+		"extra appendages": {
+			tgtt: true,
+			calcFlag: "hasExtraAppendages",
+			description: "TGTT: Two extra prehensile limbs (no extra attacks).",
+		},
+	};
+
+	/**
+	 * Apply Eldritch Invocation effects from the registry into the calculations
+	 * object. Iterates the character's optional features filtered to featureType
+	 * "EI", looks up each by lowercased name, and merges `calcFlag` / `calcValues`
+	 * onto calculations. Senses and skills are surfaced via aggregated getters
+	 * (`getSensesFromFeatures`, etc.) — this method only emits calc flags.
+	 *
+	 * Caller (warlock branch of `getFeatureCalculations`) supplies `calculations`
+	 * and optionally a settings flag check for TGTT gating.
+	 *
+	 * @param {object} calculations - The calculations object to mutate
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.tgttEnabled] - Whether TGTT homebrew is enabled
+	 */
+	_applyWarlockInvocationEffects (calculations, opts = {}) {
+		const {tgttEnabled = false} = opts;
+		const features = this._data.features || [];
+		for (const feature of features) {
+			if (!feature.optionalFeatureTypes?.includes("EI")) continue;
+			const name = (feature.name || "").toLowerCase().trim();
+			if (!name) continue;
+			const entry = CharacterSheetState.WARLOCK_INVOCATION_REGISTRY[name];
+			if (!entry) continue;
+			if (entry.tgtt && !tgttEnabled) continue;
+			if (entry.calcFlag) calculations[entry.calcFlag] = true;
+			if (entry.calcValues && typeof entry.calcValues === "object") {
+				for (const [k, v] of Object.entries(entry.calcValues)) {
+					// Numeric accumulation (e.g. multiple speed-bonus invocations stack)
+					if (typeof v === "number" && typeof calculations[k] === "number") {
+						calculations[k] += v;
+					} else {
+						calculations[k] = v;
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Public accessor for the warlock invocation registry entry by name.
+	 * @param {string} invocationName
+	 * @returns {object|null}
+	 */
+	static getWarlockInvocationEntry (invocationName) {
+		if (!invocationName) return null;
+		return CharacterSheetState.WARLOCK_INVOCATION_REGISTRY[invocationName.toLowerCase().trim()] || null;
 	}
 
 	/**
