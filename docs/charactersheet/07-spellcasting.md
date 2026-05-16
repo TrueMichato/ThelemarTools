@@ -721,4 +721,32 @@ this._page._combat.renderCombatStates();
 
 ---
 
+## Apply Buff Modal (Non-Caster Buff Tracking)
+
+The **"Apply Buff"** button in the Active States section (charactersheet.js ~L6411) opens a modal that lets non-casters — or anyone tracking buffs cast on them by the party — apply a buff spell directly, without going through the casting flow.
+
+### Why it exists
+
+A Barbarian whose Cleric just cast Bless still needs the +1d4 to attacks/saves tracked. Before this modal, the only way was for the caster to cast it via the character sheet, which doesn't work cross-character.
+
+### Helper module — `charactersheet-buffpicker-helpers.js`
+
+Pure helpers, no DOM. Categorise buffs into `defense / offense / healing / movement / utility`, render effect chips, format durations, detect already-active buffs. See [Components Reference → Apply Buff Modal](./03-components-reference.md#apply-buff-modal) for the full export list.
+
+### Pipeline
+
+1. Spell registry is parsed via `_parseBuffs` — **same source** the regular casting flow uses, so an applied buff is mechanically identical to a cast buff.
+2. The modal groups buffs by category and renders chips for each effect.
+3. Selecting a buff routes through `_applyBuffEffects()` in `charactersheet-spells.js` (~L4318), which:
+   - Prefers `registryEffects` when available (more reliable)
+   - Falls back to parsed `buffs` array entries
+   - Respects the standard concentration cascade (taking a new concentration buff drops the previous one)
+   - Skips buffs that are already active (badge "Currently active" shown in the picker)
+
+### Buff effect → state effect mapping
+
+The parser-to-effect mapping in `charactersheet-spells.js` (`_applyBuffEffects`, ~L4444) handles: `rollBonus`, `rollPenalty`, `extraDamage`, `resistance`, `advantage`, `formula` (set AC), `minimum` (min AC), `multiplier`/`bonus` for speed, plus generic `bonus` fallback.
+
+---
+
 *Previous: [Combat System](./06-combat-system.md) | Next: [Toggle Abilities](./08-toggle-abilities.md)*

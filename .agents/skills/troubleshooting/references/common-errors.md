@@ -666,6 +666,10 @@ Renderer.get().render({type: "entries", entries: entriesArray});
 | Active state does nothing | State type string must match `ACTIVE_STATE_TYPES` key exactly |
 | Cross-edition multiclass wrong | Barely tested area — test with mixed sources (PHB + XPHB + TGTT) |
 | Array to renderer error | Wrap in `{type: "entries", entries: [...]}` — don't pass arrays directly |
+| Conditional advantage applied to every save/check | **Fixed.** Conditionals (`{conditional: "…"}` or `save:advantage:<sub>`) now gate off by default; players opt in via the pre-roll picker. If you see this regress, check `aggregateModifiers` no longer auto-folds entries with truthy `conditional`. |
+| Favorite stars missing or stuck stale | After a save migration or data reload, call `state.cleanupOrphanedFavorites()` (or use the toast button surfaced by the Actions hub). Resolution lives in `_resolveFavorite`; check it returns `{found: true}` for the entity. |
+| Apply Buff modal shows nothing / shows wrong effects | Effect application prefers `registryEffects` over parsed `buffs`. If a buff is missing, check the spell's registry entry; if effects are wrong, check the `buff.type → effect.type` mapping in `_applyBuffEffects` (`charactersheet-spells.js` ~L4444). |
+| Lore skill renders in main skills table | Renderer filter is `skill.isLoreSkill` (charactersheet.js L2754–2755). Make sure the flag is set on the skill object before the table loop. |
 
 ---
 

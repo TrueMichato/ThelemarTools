@@ -712,4 +712,79 @@ getEffectiveItemBonuses(itemId)
 
 ---
 
+## Favorites System
+
+**Files**: state in `charactersheet-state.js` (~L22198–22365), UI in `charactersheet.js` (~L5837–6160, Actions hub).
+
+Lightweight cross-tab "star this thing" surface. Any feature/spell/attack/item/resource/ability can be favourited and surfaces in the Actions hub favourites strip.
+
+### State Shape
+
+```javascript
+_data.favorites = [
+    {
+        id: "feature:Rage",      // "type:idSuffix" — stable across renders
+        type: "feature",          // feature | spell | attack | item | resource | ability
+        name: "Rage",             // Display name (may be re-resolved on load)
+        meta: { ... },             // Optional payload (spell level, attack id, …)
+    },
+];
+```
+
+### Public API
+
+| Method | Purpose |
+|---|---|
+| `isFavorite(type, idSuffix)` | Cheap membership check (used by star icons) |
+| `addFavorite(favData, {max = 8})` | Adds; returns `true` if added, `false` if at cap |
+| `removeFavorite(id)` | Removes by full `id`; returns `true` if removed |
+| `toggleFavorite(favData, {max = 8})` | Returns `"added"`, `"removed"`, or `null` (cap hit) |
+| `_resolveFavorite(fav)` | Re-resolves the entity (handles renames, source migrations) — returns `{found, entity, …}` |
+| `isFavoriteResolved(fav)` | Bool wrapper around `_resolveFavorite` |
+| `getOrphanedFavorites()` | Returns favourites whose source entity no longer exists |
+| `cleanupOrphanedFavorites()` | Removes orphans in-place; returns removed count |
+
+### Invariants
+
+- **Cap = 8 favourites** by default (configurable per call).
+- **Stable IDs**: `id` is the canonical key. `name` may drift; resolution falls back to the entity lookup.
+- **Orphan handling is opt-in**: the page surfaces a "Remove N orphans" toast button rather than auto-pruning, to protect against transient data-load failures.
+- **Items use a parallel legacy favourites system** (item starring predates this one) — `_data.favorites` does not duplicate it.
+
+---
+
+## Apply Buff Modal
+
+**Files**: button in `charactersheet.js` (~L6411, Active States section), helpers in `js/charactersheet/charactersheet-buffpicker-helpers.js`.
+
+A modal for **non-casters** (and anyone tracking party buffs) to apply a buff spell cast on them — Aid, Bless, Haste, Mage Armor, etc. — without having to know spellcasting mechanics. Activated via the **"Apply Buff"** button in the Active States section.
+
+### Helper Module (`charactersheet-buffpicker-helpers.js`)
+
+Pure helpers, ~170 lines, no DOM dependencies — safe to unit-test.
+
+| Export | Purpose |
+|---|---|
+| `BUFF_CATEGORY_ORDER` | Display order: `["defense", "offense", "healing", "movement", "utility"]` |
+| `BUFF_CATEGORY_META` | Per-category `{label, icon, colorClass}` |
+| `categoriseBuffEntry(spec)` | Classifies a buff spec into one of the 5 categories |
+| `buildBuffEffectChip(eff)` | Renders one effect as a compact chip (e.g. `+1 AC`, `+1d4 attack`) |
+| `getBuffEffectChips(spec)` | Flattens a buff spec into an array of chip descriptors |
+| `formatBuffDuration(duration, concentration)` | Human-readable duration string |
+| `isBuffSpellActive(displayName, activeStates)` | True if the buff is already in `_data.activeStates` |
+
+### Behaviour
+
+- Buff specs come from the spell registry (`_parseBuffs`) — same source the casting flow uses, so a buff applied via this modal matches one cast normally.
+- Concentration buffs respect the existing concentration cascade (taking a new one drops the old).
+- Already-active buffs are shown disabled with a "Currently active" badge.
+
+---
+
+## Lore Skills (TGTT)
+
+Rendered inline in the **Skills** tab via `_renderLoreSkillsSection()` (charactersheet.js ~L2849). See [TGTT Homebrew → Lore Skills](./13-tgtt-thelemar-homebrew.md#lore-skills) for the rule and state methods.
+
+---
+
 *Previous: [Architecture](./02-architecture.md) | Next: [State Management](./04-state-management.md)*

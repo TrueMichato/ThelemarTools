@@ -718,4 +718,56 @@ state.on("levelChanged", (newLevel) => {
 
 ---
 
+## Auxiliary State Slices
+
+Beyond the core character data, `_data` holds several smaller slices that have their own getter/setter API.
+
+### `_data.favorites[]`
+
+User-starred features/spells/attacks/items. See [Components Reference → Favorites System](./03-components-reference.md#favorites-system) for the shape and full API (`addFavorite` / `removeFavorite` / `toggleFavorite` / `isFavorite` / `_resolveFavorite` / `getOrphanedFavorites` / `cleanupOrphanedFavorites`). Cap = 8. Stable IDs are `"type:idSuffix"`.
+
+### `_data.loreSkills[]` (TGTT)
+
+TGTT variant rule. Each entry: `{name: string, bonus: number}`. Flat per-skill bonus (PB is added on top by the roll handler, no ability/PB scaling otherwise).
+
+| Method | Purpose |
+|---|---|
+| `getLoreSkills()` | Returns the array (may be empty) |
+| `setLoreSkillBonus(name, bonus)` | Upsert; bonus floored at 0 |
+| `removeLoreSkill(name)` | Delete by name |
+
+Gated by the standard TGTT settings flag — non-TGTT characters never render the section.
+
+### `settings.skipConditionalPrompt`
+
+When `true`, the conditional-modifier picker is suppressed and no conditional modifiers auto-apply. Roll handlers still aggregate non-conditional modifiers normally. Toggled from the dice settings dropdown.
+
+## Modifier Aggregation API
+
+`aggregateModifiers(type, {appliedConditionalIds?} = {})` is the canonical entry point for combining all bonuses of a given `type` (e.g. `"save:dex"`, `"skill:perception"`, `"ac"`).
+
+### Return shape
+
+```javascript
+{
+    bonus,                  // Combined numeric bonus (deterministic)
+    advantage,              // True if any non-conditional source grants advantage
+    disadvantage,           // True if any non-conditional source grants disadvantage
+    minimum,                // Floor (e.g. Silver Tongue "minimum 10")
+    maximum,                // Cap
+    bonusDice,              // Array of "+1d4"-style entries
+    conditionalsAvailable: [ // Surfaced for the pre-roll picker
+        {id, name, conditional, advantage?, disadvantage?, bonus?, target?},
+    ],
+}
+```
+
+### `appliedConditionalIds`
+
+A `Set<string>` of conditional modifier IDs (from `_buildConditionalModId`) that the caller has opted in. Only those are folded into `bonus` / `advantage` / `disadvantage`; the rest still surface in `conditionalsAvailable` for inspection. **Default is empty** — conditionals are gated off by default to prevent the "Dauntless Heritage applies to every save" class of bug.
+
+`getAdvantageState(type, opts)` and `getModifierBonus(type, opts)` forward `opts` unchanged.
+
+---
+
 *Previous: [Components Reference](./03-components-reference.md) | Next: [Feature Calculations](./05-feature-calculations.md)*
