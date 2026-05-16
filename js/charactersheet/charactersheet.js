@@ -8333,12 +8333,14 @@ class CharacterSheetPage {
 		const btn = document.getElementById("charsheet-btn-dice");
 		const dropdown = document.getElementById("charsheet-dice-dropdown");
 		const animatedCheckbox = document.getElementById("charsheet-dice-animated");
+		const skipCondCheckbox = document.getElementById("charsheet-dice-skip-conditional");
 		const themeButtons = document.querySelector(".charsheet__dice-theme-btn");
 
 		// Update checkbox state from settings
 		const updateCheckbox = () => {
-			const isAnimated = (/** @type {*} */ (this._state?.getSettings()))?.animatedDice || false;
-			(/** @type {*} */ (animatedCheckbox)).checked = isAnimated;
+			const settings = /** @type {*} */ (this._state?.getSettings()) || {};
+			(/** @type {*} */ (animatedCheckbox)).checked = !!settings.animatedDice;
+			if (skipCondCheckbox) (/** @type {*} */ (skipCondCheckbox)).checked = !!settings.skipConditionalPrompt;
 		};
 
 		// Update theme button selection
@@ -8383,6 +8385,16 @@ class CharacterSheetPage {
 			this._state.setSetting("animatedDice", (/** @type {*} */ (e.target)).checked);
 			this._saveCurrentCharacter();
 		});
+
+		// Skip-conditional-prompt checkbox (fast-play escape hatch for the
+		// per-roll conditional modifier picker).
+		if (skipCondCheckbox) {
+			skipCondCheckbox.addEventListener("change", (e) => {
+				e.stopPropagation();
+				this._state.setSetting("skipConditionalPrompt", (/** @type {*} */ (e.target)).checked);
+				this._saveCurrentCharacter();
+			});
+		}
 
 		// Theme buttons
 		themeButtons.addEventListener("click", (e) => {
@@ -8923,12 +8935,171 @@ class CharacterSheetPage {
 		return "";
 	}
 
+	/**
+	 * Render a pre-roll picker that lets the player opt in to any
+	 * conditional modifiers that the aggregator surfaced for this roll.
+	 *
+	 * The picker is the architectural fix for the "conditional advantage
+	 * applies to every roll" bug class (see bugs.md, "Dauntless Heritage"):
+	 * conditional modifiers are gated off by default in
+	 * `CharacterSheetState.aggregateModifiers`, and the player explicitly
+	 * ticks the ones that apply to this particular roll situation.
+	 *
+	 * Skipped automatically when:
+	 *  - the available list is empty (no UI noise on normal rolls);
+	 *  - the player has disabled the prompt via
+	 *    `settings.skipConditionalPrompt` (escape hatch for fast-play tables).
+	 *
+	 * @param {object} opts
+	 * @param {string} opts.rollLabel - Human label for the title (e.g.
+	 *   "Dexterity Save").
+	 * @param {Array<object>} opts.conditionalsAvailable - Entries from
+	 *   `aggregateModifiers().conditionalsAvailable`.
+	 * @returns {Promise<{appliedConditionalIds: Set<string>, applied: Array<object>, cancelled: boolean}>}
+	 */
+	async _pPickConditionalModifiers ({rollLabel, conditionalsAvailable}) {
+		const empty = {appliedConditionalIds: new Set(), applied: [], cancelled: false};
+		if (!conditionalsAvailable || !conditionalsAvailable.length) return empty;
+		const settings = /** @type {*} */ (this._state.getSettings?.()) || {};
+		if (settings.skipConditionalPrompt) return empty;
+
+		let resolveOuter = null;
+		let isResolved = false;
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: `Conditional Modifiers — ${rollLabel}`,
+			isMinHeight0: true,
+			cbClose: () => {
+				// Modal closed via X or backdrop — treat as cancel only if no
+				// button handler has already resolved. Button handlers below
+				// call resolve() before doClose(), so this is a no-op in the
+				// normal flow.
+				if (resolveOuter && !isResolved) {
+					isResolved = true;
+					resolveOuter({appliedConditionalIds: new Set(), applied: [], cancelled: true});
+				}
+			},
+		});
+
+		return new Promise((resolve) => {
+			resolveOuter = resolve;
+			const finalize = (/** @type {Set<string>} */ ids, /** @type {boolean} */ cancelled) => {
+				if (isResolved) return;
+				isResolved = true;
+				const applied = conditionalsAvailable.filter(c => ids.has(c.id));
+				resolve({appliedConditionalIds: ids, applied, cancelled});
+			};
+
+			const rowsHtml = conditionalsAvailable.map((c, i) => {
+				const chips = [];
+				if (c.advantage) chips.push(`<span class="charsheet__cond-pick-chip charsheet__cond-pick-chip--adv">Advantage</span>`);
+				if (c.disadvantage) chips.push(`<span class="charsheet__cond-pick-chip charsheet__cond-pick-chip--dis">Disadvantage</span>`);
+				if (c.bonus) chips.push(`<span class="charsheet__cond-pick-chip">${c.bonus > 0 ? "+" : ""}${c.bonus}</span>`);
+				const chipHtml = chips.length ? chips.join(" ") : `<span class="ve-muted ve-small">applies</span>`;
+				const safeName = (c.name || "Conditional bonus").replace(/[<>]/g, "");
+				const safeCond = (c.conditional || "").replace(/[<>]/g, "");
+				return `
+					<label class="charsheet__cond-pick-row" data-idx="${i}">
+						<input type="checkbox" class="charsheet__cond-pick-cb" data-idx="${i}">
+						<div class="charsheet__cond-pick-row__body">
+							<div class="charsheet__cond-pick-row__title"><strong>${safeName}</strong> ${chipHtml}</div>
+							<div class="ve-small ve-muted">${safeCond}</div>
+						</div>
+					</label>
+				`;
+			}).join("");
+
+			modalInner.innerHTML = `
+				<div class="charsheet__cond-pick">
+					<p class="ve-small ve-muted charsheet__cond-pick__lede">
+						Tick the conditional modifiers that apply to this roll. None are applied by default.
+					</p>
+					<div class="charsheet__cond-pick__rows">${rowsHtml}</div>
+					<div class="charsheet__cond-pick__bulk ve-flex" style="gap: 8px; margin-top: 6px;">
+						<button class="ve-btn ve-btn-xs ve-btn-default" data-act="all">Apply all</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default" data-act="none">Apply none</button>
+					</div>
+					<div class="ve-flex-h-right charsheet__cond-pick__actions" style="gap: 8px; margin-top: 12px;">
+						<button class="ve-btn ve-btn-default" data-act="cancel">Cancel roll</button>
+						<button class="ve-btn ve-btn-default" data-act="skip">Roll without</button>
+						<button class="ve-btn ve-btn-primary" data-act="confirm">Apply selected &amp; Roll</button>
+					</div>
+				</div>
+			`;
+
+			const getSelected = () => {
+				const set = new Set();
+				modalInner.querySelectorAll(".charsheet__cond-pick-cb").forEach((/** @type {*} */ el) => {
+					if (el.checked) {
+						const idx = Number(el.getAttribute("data-idx"));
+						const entry = conditionalsAvailable[idx];
+						if (entry) set.add(entry.id);
+					}
+				});
+				return set;
+			};
+
+			modalInner.querySelector(`[data-act="all"]`).addEventListener("click", () => {
+				modalInner.querySelectorAll(".charsheet__cond-pick-cb").forEach((/** @type {*} */ el) => { el.checked = true; });
+			});
+			modalInner.querySelector(`[data-act="none"]`).addEventListener("click", () => {
+				modalInner.querySelectorAll(".charsheet__cond-pick-cb").forEach((/** @type {*} */ el) => { el.checked = false; });
+			});
+			modalInner.querySelector(`[data-act="cancel"]`).addEventListener("click", () => {
+				finalize(new Set(), true);
+				doClose();
+			});
+			modalInner.querySelector(`[data-act="skip"]`).addEventListener("click", () => {
+				finalize(new Set(), false);
+				doClose();
+			});
+			modalInner.querySelector(`[data-act="confirm"]`).addEventListener("click", () => {
+				finalize(getSelected(), false);
+				doClose();
+			});
+		});
+	}
+
+	/**
+	 * Build a result-note suffix for a roll that applied conditional modifiers.
+	 * Renders one ⚡-prefixed line per applied entry so the player can see at
+	 * a glance which conditionals contributed to the result.
+	 * @param {Array<object>} applied - Entries returned by `_pPickConditionalModifiers`.
+	 * @returns {string}
+	 */
+	_formatAppliedConditionalsNote (applied) {
+		if (!applied || !applied.length) return "";
+		return applied.map(c => {
+			const effect = c.advantage ? "advantage"
+				: c.disadvantage ? "disadvantage"
+					: c.bonus ? `${c.bonus > 0 ? "+" : ""}${c.bonus}`
+						: "applied";
+			return `⚡ ${c.name} (${effect}, ${c.conditional})`;
+		}).join("\n");
+	}
+
 	async _rollAbilityCheck (ability, event) {
 		const baseMod = this._state.getAbilityMod(ability);
 		const exhaustionPenalty = this._getExhaustionPenalty();
 
 		// Get aggregated modifiers for this ability check (includes custom abilities, items, etc.)
-		const aggregated = this._state.aggregateModifiers(`check:${ability}`);
+		// First pass with no opt-in: surfaces any conditional modifiers so the
+		// player can decide which (if any) apply to this particular roll.
+		const aggType = `check:${ability}`;
+		const probe = this._state.aggregateModifiers(aggType);
+		let appliedConditionalIds = new Set();
+		let appliedConditionals = [];
+		if (probe.conditionalsAvailable && probe.conditionalsAvailable.length) {
+			const picked = await this._pPickConditionalModifiers({
+				rollLabel: `${Parser.attAbvToFull(ability)} Check`,
+				conditionalsAvailable: probe.conditionalsAvailable,
+			});
+			if (picked.cancelled) return;
+			appliedConditionalIds = picked.appliedConditionalIds;
+			appliedConditionals = picked.applied;
+		}
+		const aggregated = appliedConditionalIds.size
+			? this._state.aggregateModifiers(aggType, {appliedConditionalIds})
+			: probe;
 		const customBonus = aggregated.bonus;
 		const totalMod = baseMod + customBonus;
 
@@ -8968,6 +9139,11 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${aggregated.minimum} applied` : `Min ${aggregated.minimum} applied (rolled ${rollResult.roll})`;
+		}
+
+		const appliedCondsStr = this._formatAppliedConditionalsNote(appliedConditionals);
+		if (appliedCondsStr) {
+			resultNote = resultNote ? `${resultNote}\n${appliedCondsStr}` : appliedCondsStr;
 		}
 
 		// Build breakdown string
@@ -9043,13 +9219,30 @@ class CharacterSheetPage {
 		const baseMod = this._state.getSaveMod(ability);
 		const exhaustionPenalty = this._getExhaustionPenalty();
 
-		// Get aggregated modifiers for this saving throw
-		const aggregated = this._state.aggregateModifiers(`save:${ability}`);
+		// Get aggregated modifiers for this saving throw — first pass with no
+		// opt-in to surface any conditionals (e.g. "advantage on saves against
+		// being frightened") so the player can pick which apply.
+		const aggType = `save:${ability}`;
+		const probe = this._state.aggregateModifiers(aggType);
+		let appliedConditionalIds = new Set();
+		let appliedConditionals = [];
+		if (probe.conditionalsAvailable && probe.conditionalsAvailable.length) {
+			const picked = await this._pPickConditionalModifiers({
+				rollLabel: `${Parser.attAbvToFull(ability)} Save`,
+				conditionalsAvailable: probe.conditionalsAvailable,
+			});
+			if (picked.cancelled) return;
+			appliedConditionalIds = picked.appliedConditionalIds;
+			appliedConditionals = picked.applied;
+		}
+		const aggregated = appliedConditionalIds.size
+			? this._state.aggregateModifiers(aggType, {appliedConditionalIds})
+			: probe;
 		// Note: baseMod already includes custom save modifiers, avoid double-counting
 		const mod = baseMod;
 
 		// Check for advantage/disadvantage from active states and aggregated modifiers
-		const advState = this._state.getAdvantageState?.(`save:${ability}`);
+		const advState = this._state.getAdvantageState?.(`save:${ability}`, {appliedConditionalIds});
 		const hasAdvantage = advState?.advantage || aggregated.advantage || this._state.hasAdvantageFromStates(`save:${ability}`);
 		const hasDisadvantage = advState?.disadvantage || aggregated.disadvantage || this._state.hasDisadvantageFromStates(`save:${ability}`);
 
@@ -9097,6 +9290,11 @@ class CharacterSheetPage {
 				: reminderLines.join("\n");
 		}
 
+		const appliedCondsStr = this._formatAppliedConditionalsNote(appliedConditionals);
+		if (appliedCondsStr) {
+			resultNote = resultNote ? `${resultNote}\n${appliedCondsStr}` : appliedCondsStr;
+		}
+
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
 		const sourcesStr = aggregated.sources.length > 0 ? ` [${aggregated.sources.join(", ")}]` : "";
@@ -9122,13 +9320,43 @@ class CharacterSheetPage {
 		const exhaustionPenalty = this._getExhaustionPenalty();
 
 		// Get aggregated modifiers for this skill
-		const aggregated = this._state.aggregateModifiers(`skill:${skillKey}`);
 		// Also get check: type modifiers for the underlying ability
 		const skillAbility = this._state.getSkillAbility?.(skillKey) || this._getDefaultSkillAbility(skillKey);
-		const checkAggregated = this._state.aggregateModifiers(`check:${skillAbility}`);
+		const skillType = `skill:${skillKey}`;
+		const checkType = `check:${skillAbility}`;
+
+		// Probe both pools for conditional opt-ins.
+		const skillProbe = this._state.aggregateModifiers(skillType);
+		const checkProbe = this._state.aggregateModifiers(checkType);
+		const mergedAvailable = [];
+		const seenIds = new Set();
+		[...skillProbe.conditionalsAvailable, ...checkProbe.conditionalsAvailable].forEach(c => {
+			if (!seenIds.has(c.id)) {
+				seenIds.add(c.id);
+				mergedAvailable.push(c);
+			}
+		});
+
+		let appliedConditionalIds = new Set();
+		let appliedConditionals = [];
+		if (mergedAvailable.length) {
+			const picked = await this._pPickConditionalModifiers({
+				rollLabel: `${skillName} Check`,
+				conditionalsAvailable: mergedAvailable,
+			});
+			if (picked.cancelled) return;
+			appliedConditionalIds = picked.appliedConditionalIds;
+			appliedConditionals = picked.applied;
+		}
+		const aggregated = appliedConditionalIds.size
+			? this._state.aggregateModifiers(skillType, {appliedConditionalIds})
+			: skillProbe;
+		const checkAggregated = appliedConditionalIds.size
+			? this._state.aggregateModifiers(checkType, {appliedConditionalIds})
+			: checkProbe;
 
 		// Check for advantage/disadvantage from skill and check modifiers
-		const advState = this._state.getAdvantageState?.(`skill:${skillKey}`);
+		const advState = this._state.getAdvantageState?.(`skill:${skillKey}`, {appliedConditionalIds});
 		const hasAdvantage = advState?.advantage || aggregated.advantage || checkAggregated.advantage;
 		const hasDisadvantage = advState?.disadvantage || aggregated.disadvantage || checkAggregated.disadvantage;
 
@@ -9166,6 +9394,11 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${minimumValue} applied` : `Min ${minimumValue} applied (rolled ${rollResult.roll})`;
+		}
+
+		const appliedCondsStr = this._formatAppliedConditionalsNote(appliedConditionals);
+		if (appliedCondsStr) {
+			resultNote = resultNote ? `${resultNote}\n${appliedCondsStr}` : appliedCondsStr;
 		}
 
 		const abilityLabel = overrideAbility ? ` (${overrideAbility.toUpperCase()})` : "";
@@ -9318,7 +9551,7 @@ class CharacterSheetPage {
 		}
 	}
 
-	_rollAttack (attack, event) {
+	async _rollAttack (attack, event) {
 		const exhaustionPenalty = this._getExhaustionPenalty();
 
 		// Determine attack type for advantage/disadvantage matching
@@ -9328,12 +9561,36 @@ class CharacterSheetPage {
 		const abilityUsed = attack.abilityMod || attack.ability || (isMelee ? "str" : "dex");
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
 
-		// Check for advantage/disadvantage from active states using specific attack type
-		const hasAdvantage = this._state.hasAdvantageFromStates(attackType);
-		const hasDisadvantage = this._state.hasDisadvantageFromStates(attackType);
+		// Probe for conditional attack modifiers (e.g. "advantage on attacks
+		// against frightened creatures") and let the player opt in per roll.
+		const probe = this._state.aggregateModifiers(attackType);
+		let appliedConditionalIds = new Set();
+		let appliedConditionals = [];
+		if (probe.conditionalsAvailable && probe.conditionalsAvailable.length) {
+			const picked = await this._pPickConditionalModifiers({
+				rollLabel: `${attack.name || "Attack"}`,
+				conditionalsAvailable: probe.conditionalsAvailable,
+			});
+			if (picked.cancelled) return;
+			appliedConditionalIds = picked.appliedConditionalIds;
+			appliedConditionals = picked.applied;
+		}
+		const aggregated = appliedConditionalIds.size
+			? this._state.aggregateModifiers(attackType, {appliedConditionalIds})
+			: probe;
+
+		// Check for advantage/disadvantage from active states + opted-in conditionals.
+		const hasAdvantage = this._state.hasAdvantageFromStates(attackType) || aggregated.advantage;
+		const hasDisadvantage = this._state.hasDisadvantageFromStates(attackType) || aggregated.disadvantage;
 
 		const rollResult = this._rollD20({event, stateAdvantage: hasAdvantage, stateDisadvantage: hasDisadvantage, isAttack: true});
-		const attackTotal = rollResult.roll + attack.attackBonus - exhaustionPenalty;
+		// Only add the *opted-in conditional* numeric bonus on top of the
+		// canonical attack.attackBonus (which already folds in non-conditional
+		// modifiers via the existing attack-building pipeline). Avoids double-
+		// counting registry mods while still letting players opt in to e.g.
+		// "+2 to attacks against frightened creatures".
+		const conditionalAttackBonus = appliedConditionals.reduce((acc, c) => acc + (c.bonus || 0), 0);
+		const attackTotal = rollResult.roll + attack.attackBonus + conditionalAttackBonus - exhaustionPenalty;
 
 		// Check for crit/fumble
 		let resultClass = "";
@@ -9344,6 +9601,11 @@ class CharacterSheetPage {
 		} else if (rollResult.roll === 1) {
 			resultClass = "charsheet__dice-result-total--fumble";
 			resultNote = "Critical Miss!";
+		}
+
+		const appliedCondsStr = this._formatAppliedConditionalsNote(appliedConditionals);
+		if (appliedCondsStr) {
+			resultNote = resultNote ? `${resultNote}\n${appliedCondsStr}` : appliedCondsStr;
 		}
 
 		// Parse and roll damage

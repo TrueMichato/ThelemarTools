@@ -28499,6 +28499,68 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * True iff the given sub-type token is a conditional sub-key for a save /
+	 * check / skill modifier — i.e. it describes a *condition under which* the
+	 * advantage / bonus applies, rather than naming a basic ability or skill.
+	 *
+	 * Examples that return true: "frightened", "charmed", "poisoned", "magic",
+	 * "disease", "spells", "fear", "necrotic", "fire", …
+	 * Examples that return false: "str", "dex", "con", "int", "wis", "cha",
+	 * "all", any skill name.
+	 *
+	 * This is the bridge that lets registry entries like
+	 * `save:advantage:frightened` flow through the same per-roll opt-in path
+	 * as text-parsed `{type: "save:all", conditional: "against being frightened"}`.
+	 *
+	 * @param {string} subtype - Lowercased sub-type token.
+	 * @returns {boolean}
+	 */
+	static _isConditionalSaveSubtype (/** @type {string} */ subtype) {
+		if (!subtype) return false;
+		const lower = String(subtype).toLowerCase();
+		if (lower === "all") return false;
+		// Basic abilities — not conditional.
+		if (["str", "dex", "con", "int", "wis", "cha"].includes(lower)) return false;
+		// Standard skills (when used as a check:<skill>-style conditional, this
+		// is still a *skill* selector, not a condition under which to apply).
+		const standardSkills = new Set([
+			"athletics", "acrobatics", "sleightofhand", "stealth",
+			"arcana", "history", "investigation", "nature", "religion",
+			"animalhandling", "insight", "medicine", "perception", "survival",
+			"deception", "intimidation", "performance", "persuasion",
+		]);
+		if (standardSkills.has(lower)) return false;
+		return true;
+	}
+
+	/**
+	 * Build a stable, deterministic identifier for a conditional modifier so
+	 * the same mod can be opted-in / opted-out consistently across repeated
+	 * `aggregateModifiers` calls within a single roll cycle.
+	 *
+	 * Shape: `"${baseType}|${name || note || ""}|${conditional}"`. Identical
+	 * inputs always produce identical IDs; cloning the mod in
+	 * `getModifiersForType` does not perturb the ID because all three
+	 * components are derived from preserved fields.
+	 *
+	 * @param {object} mod - A modifier object (must have at least `type` and
+	 *   `conditional`).
+	 * @returns {string}
+	 */
+	static _buildConditionalModId (/** @type {*} */ mod) {
+		if (!mod) return "";
+		let baseType = mod._baseType;
+		if (!baseType) {
+			const rawType = mod.type || "";
+			const parts = rawType.split(":").filter((/** @type {string} */ p) => p !== "advantage" && p !== "disadvantage");
+			baseType = parts.join(":") || rawType;
+		}
+		const label = mod.name || mod.note || "";
+		const condition = mod.conditional || "";
+		return `${baseType}|${label}|${condition}`;
+	}
+
+	/**
 	 * Get all enabled modifiers that apply to a specific type
 	 * Handles type hierarchies (e.g., "attack:melee" matches "attack" and "attack:melee")
 	 * Also handles advantage/disadvantage encoded in type strings (e.g., "save:advantage:wis")
@@ -28550,6 +28612,30 @@ class CharacterSheetState {
 			// Initiative is a special case - it's a DEX check
 			if (type === "initiative" && (baseType === "check:dex" || baseType === "check:all")) matches = true;
 
+			// Conditional sub-typed match: a registry entry like
+			// `save:advantage:frightened` (baseType "save:frightened",
+			// advantage=true) should *also* surface on queries like "save:dex"
+			// so the conditional opt-in picker can offer it — but only as a
+			// gated conditional. We synthesize a human-readable `conditional`
+			// field from the sub-type so it flows through the same default-off
+			// gating path as text-parsed conditionals. See _isConditionalSaveSubtype.
+			let synthesizedConditional = null;
+			if (!matches
+				&& modCategory === category
+				&& ["save", "check", "skill"].includes(category)
+				&& modSpecific
+				&& CharacterSheetState._isConditionalSaveSubtype(modSpecific)
+			) {
+				matches = true;
+				// "frightened" / "charmed" / "poisoned" read more naturally as
+				// "against being X"; "magic" / "disease" / "spells" / "fear"
+				// read as "against X".
+				const beingConditions = new Set(["frightened", "charmed", "poisoned", "paralyzed", "stunned", "petrified", "blinded", "deafened"]);
+				synthesizedConditional = beingConditions.has(modSpecific.toLowerCase())
+					? `against being ${modSpecific.toLowerCase()}`
+					: `against ${modSpecific.toLowerCase()}`;
+			}
+
 			if (matches) {
 				// Clone the modifier and add parsed advantage/disadvantage flags
 				const resultMod = {...mod};
@@ -28559,6 +28645,12 @@ class CharacterSheetState {
 				if (modExtra && !resultMod.conditional) {
 					resultMod.conditional = modExtra;
 				}
+				if (synthesizedConditional && !resultMod.conditional) {
+					resultMod.conditional = synthesizedConditional;
+				}
+				// Stash the cleaned baseType so the aggregator can build stable
+				// conditional IDs without re-parsing.
+				resultMod._baseType = baseType;
 				matchingMods.push(resultMod);
 			}
 		});
@@ -28567,12 +28659,34 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Aggregate all modifiers for a type into a combined result object
-	 * @param {string} type - The target type
-	 * @returns {Object} Aggregated result with {bonus, advantage, disadvantage, minimum, maximum, bonusDice, special}
+	 * Aggregate all modifiers for a type into a combined result object.
+	 *
+	 * Conditional modifiers (those with a truthy `conditional` text field, or
+	 * registry sub-typed entries like `save:advantage:frightened` that
+	 * `getModifiersForType` synthesizes a `conditional` for) are **opt-in by
+	 * default**: they do not contribute their bonus / advantage / disadvantage
+	 * to the result unless the caller passes their stable ID in
+	 * `opts.appliedConditionalIds`. Skipped conditionals are surfaced in
+	 * `result.conditionalsAvailable` so a pre-roll picker UI can offer them.
+	 *
+	 * This default-off gating is the architectural fix for the long-standing
+	 * "Dauntless Heritage applies to every save" class of bugs: parsed-text
+	 * traits used to land with `type: "save:all", advantage: true,
+	 * conditional: "against being frightened"` and the aggregator silently
+	 * ignored the `conditional` field. See bugs.md "Dauntless Heritage being
+	 * applied to all saves".
+	 *
+	 * @param {string} type - The target type (e.g. "save:dex").
+	 * @param {object} [opts]
+	 * @param {Set<string>} [opts.appliedConditionalIds] - Stable IDs (built by
+	 *   `_buildConditionalModId`) of conditional modifiers the caller has
+	 *   explicitly opted-in to for this roll.
+	 * @returns {Object} Aggregated result with {bonus, advantage, disadvantage,
+	 *   minimum, maximum, bonusDice, conditionalsAvailable, …}.
 	 */
-	aggregateModifiers (type) {
+	aggregateModifiers (/** @type {string} */ type, /** @type {*} */ {appliedConditionalIds} = {}) {
 		const modifiers = this.getModifiersForType(type);
+		const appliedIds = appliedConditionalIds instanceof Set ? appliedConditionalIds : null;
 
 		const result = {
 			bonus: 0,
@@ -28592,10 +28706,40 @@ class CharacterSheetState {
 			halfOnSave: false,
 			noneOnSave: false,
 			sources: [], // Names of modifier sources for display
-			conditionals: [], // Conditional text for display
+			conditionals: [], // Conditional text for display (legacy)
+			conditionalsAvailable: [], // Structured entries for the opt-in picker
 		};
 
+		// Dedup conditionalsAvailable by ID across this aggregation pass.
+		const seenConditionalIds = new Set();
+
 		modifiers.forEach(mod => {
+			// Gating: conditional mods are opt-in. Skip them entirely unless
+			// the caller has explicitly opted them in via appliedConditionalIds.
+			if (mod.conditional) {
+				const condId = CharacterSheetState._buildConditionalModId(mod);
+				const isApplied = appliedIds && appliedIds.has(condId);
+				if (!isApplied) {
+					if (!seenConditionalIds.has(condId)) {
+						seenConditionalIds.add(condId);
+						result.conditionalsAvailable.push({
+							id: condId,
+							name: mod.name || mod.note || "Conditional bonus",
+							conditional: mod.conditional,
+							advantage: !!mod.advantage,
+							disadvantage: !!mod.disadvantage,
+							bonus: typeof mod.value === "number" ? mod.value : 0,
+							target: mod._baseType || mod.type || "",
+						});
+					}
+					// Surface the condition text for tooltip display even when gated.
+					if (!result.conditionals.includes(mod.conditional)) {
+						result.conditionals.push(mod.conditional);
+					}
+					return;
+				}
+			}
+
 			// Track sources
 			if (mod.name && !result.sources.includes(mod.name)) {
 				result.sources.push(mod.name);
@@ -28744,8 +28888,8 @@ class CharacterSheetState {
 	 * @param {string} type - The roll type
 	 * @returns {{advantage: boolean, disadvantage: boolean, sources: string[]}}
 	 */
-	getAdvantageState (type) {
-		const agg = this.aggregateModifiers(type);
+	getAdvantageState (type, /** @type {*} */ {appliedConditionalIds} = {}) {
+		const agg = this.aggregateModifiers(type, {appliedConditionalIds});
 		let hasAdvantage = agg.advantage;
 		let hasDisadvantage = agg.disadvantage;
 
@@ -28788,10 +28932,12 @@ class CharacterSheetState {
 	/**
 	 * Get the total numeric bonus for a roll type
 	 * @param {string} type - The roll type
+	 * @param {object} [opts]
+	 * @param {Set<string>} [opts.appliedConditionalIds] - See aggregateModifiers.
 	 * @returns {number} Total bonus from modifiers
 	 */
-	getModifierBonus (type) {
-		const agg = this.aggregateModifiers(type);
+	getModifierBonus (type, /** @type {*} */ {appliedConditionalIds} = {}) {
+		const agg = this.aggregateModifiers(type, {appliedConditionalIds});
 		return agg.bonus;
 	}
 
