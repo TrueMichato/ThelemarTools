@@ -17646,3 +17646,99 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .ve-night-mode .charsheet__apply-buff-row__name a:hover {
 	color: #93c5fd;
 }
+
+/* ============================================================
+   Conditional Modifier Picker (pre-roll opt-in)
+   See charactersheet.js#_pPickConditionalModifiers
+   ============================================================ */
+.charsheet__cond-pick {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 4px 2px;
+}
+
+.charsheet__cond-pick__lede {
+	margin: 0 0 6px 0;
+}
+
+.charsheet__cond-pick__rows {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-height: 360px;
+	overflow-y: auto;
+}
+
+.charsheet__cond-pick-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 8px 10px;
+	border: 1px solid var(--cs-border, rgba(0,0,0,0.12));
+	border-radius: 6px;
+	cursor: pointer;
+	transition: background-color 0.12s, border-color 0.12s;
+}
+
+.charsheet__cond-pick-row:hover {
+	background-color: rgba(99,102,241,0.06);
+	border-color: var(--cs-accent, #6366f1);
+}
+
+.charsheet__cond-pick-cb {
+	margin-top: 3px;
+	width: 16px;
+	height: 16px;
+	accent-color: var(--cs-accent, #6366f1);
+	flex-shrink: 0;
+}
+
+.charsheet__cond-pick-row__body {
+	flex: 1;
+	min-width: 0;
+}
+
+.charsheet__cond-pick-row__title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+	margin-bottom: 2px;
+}
+
+.charsheet__cond-pick-chip {
+	display: inline-block;
+	padding: 1px 8px;
+	border-radius: 10px;
+	font-size: 0.75rem;
+	font-weight: 600;
+	background-color: rgba(99,102,241,0.15);
+	color: var(--cs-accent, #6366f1);
+}
+
+.charsheet__cond-pick-chip--adv {
+	background-color: rgba(34,197,94,0.18);
+	color: #16a34a;
+}
+
+.charsheet__cond-pick-chip--dis {
+	background-color: rgba(239,68,68,0.18);
+	color: #dc2626;
+}
+
+.ve-night-mode .charsheet__cond-pick-row {
+	border-color: rgba(255,255,255,0.12);
+}
+
+.ve-night-mode .charsheet__cond-pick-row:hover {
+	background-color: rgba(99,102,241,0.12);
+}
+
+.ve-night-mode .charsheet__cond-pick-chip--adv {
+	color: #4ade80;
+}
+
+.ve-night-mode .charsheet__cond-pick-chip--dis {
+	color: #f87171;
+}
