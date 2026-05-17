@@ -3,13 +3,12 @@ import {PRESET_FULL_ARCANE_ARCHER_HOCHLING} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 import {
 	TGTT_SPECIALTIES,
-	TGTT_BATTLE_TACTICS,
 	buildSpecialtyChecks,
 	buildBattleTacticChecks,
 	buildAnyArcaneShotChecks,
+	buildWeaponMasteryChecks,
+	withSkipReason,
 } from "../utils/tgttFeaturePools";
-void buildAnyArcaneShotChecks; // CS-BUG-017: temporarily unused
-void buildBattleTacticChecks; // CS-BUG-017: temporarily unused
 
 // ── Arcane Archer Fighter L1→20 features matrix ──────────────────────
 // Fighter base: Fighting Style (L1 pick), Second Wind (L1 resource —
@@ -28,9 +27,12 @@ void buildBattleTacticChecks; // CS-BUG-017: temporarily unused
 // only blocker remaining for the resource-pool entries.
 
 const FIGHTER_SPECIALTIES = TGTT_SPECIALTIES.Fighter;
-const FIGHTER_BATTLE_TACTICS = TGTT_BATTLE_TACTICS;
 
 const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
+	// XPHB Weapon Mastery — Fighter (preset default masteryCount=3) picks
+	// Club + Dagger + Dart (first three proficient simple weapons in DOM
+	// order, deterministic).
+	...buildWeaponMasteryChecks(["Club", "Dagger", "Dart"], 1),
 	// Fighting Style at L1 — pick 1 from the Fighter list.
 	// No effect probe: the +2 from Archery (the most likely pick) goes
 	// onto attack rolls, which the sheet doesn't expose as a stable,
@@ -201,10 +203,10 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// Battle Tactics at L3/7/10/15 — TGTT Fighter's curated optional
 	// feature pool (13 BT options). Cumulative count grows with the
 	// {3:2, 7:1, 10:1, 15:1} progression: 2 / 3 / 4 / 5.
-	{level: 3,  name: /battle tactics/i, kind: "pick", pickedCount: 2, skip: true, skipReason: "CS-BUG-017", pickedFrom: FIGHTER_BATTLE_TACTICS},
-	{level: 7,  name: /battle tactics/i, kind: "pick", pickedCount: 3, skip: true, skipReason: "CS-BUG-017", pickedFrom: FIGHTER_BATTLE_TACTICS},
-	{level: 10, name: /battle tactics/i, kind: "pick", pickedCount: 4, skip: true, skipReason: "CS-BUG-017", pickedFrom: FIGHTER_BATTLE_TACTICS},
-	{level: 15, name: /battle tactics/i, kind: "pick", pickedCount: 5, skip: true, skipReason: "CS-BUG-017", pickedFrom: FIGHTER_BATTLE_TACTICS},
+	// CS-BUG-017: Battle Tactics picks not registering past L3. Keep the
+	// helper in the matrix (no-blind-spots doctrine) with every emitted
+	// row marked skip+skipReason via withSkipReason.
+	...withSkipReason(buildBattleTacticChecks(), "CS-BUG-017"),
 
 	// Arcane Archer subclass.
 	// Arcane Shot resource pool (2/short-rest at L3, scales) — blocked
@@ -219,12 +221,13 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		skip: true,
 		skipReason: "CS-BUG-002",
 	},
-	// Arcane Shot pick — replaced with cross-source helper that emits
-	// `pickedFeatureGrants` per option's documented effect (Banishing /
-	// Beguiling / Bursting / Enfeebling / Grasping / Piercing / Seeking /
-	// Shadow). Progression: 2 at L3, +1 at L7/10/15/18.
-	// CS-BUG-017: Arcane Shot picks not surfacing — temporarily disabled.
-	// ...buildAnyArcaneShotChecks(),
+	// Arcane Shot pick — cross-source helper emits `pickedFeatureGrants`
+	// per option's documented effect (Banishing / Beguiling / Bursting /
+	// Enfeebling / Grasping / Piercing / Seeking / Shadow). Progression:
+	// 2 at L3, +1 at L7/10/15/18.
+	// CS-BUG-017: Arcane Shot picks not surfacing — helper rows are
+	// marked skip+skipReason via withSkipReason but stay in the matrix.
+	...withSkipReason(buildAnyArcaneShotChecks(), "CS-BUG-017"),
 	// Magic Arrow at L7 — non-magical ammo counts as magical. Passive.
 	{level: 7, name: /magic arrow/i, kind: "passive"},
 	// Curving Shot at L7 — re-roll a missed magic-arrow attack on a
@@ -236,10 +239,6 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// TGTT Specialties (Fighter: 1/5/9/13/17) — helper attaches per-pick
 	// effects for the deterministic auto-picker first choice.
 	...buildSpecialtyChecks("Fighter"),
-	// TGTT Battle Tactics (Fighter base feature) — pick + per-pick
-	// effect for the auto-picked tactic.
-	// CS-BUG-017: Battle Tactics picks not registering past L3.
-	// ...buildBattleTacticChecks(),
 ];
 
 /**

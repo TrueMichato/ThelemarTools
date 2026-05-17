@@ -1,7 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_GAMBLER_CLAIRNIAN} from "../utils/characterBuilder";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
-void buildSpecialtyChecks; // CS-BUG-017
+import {buildSpecialtyChecks, buildWeaponMasteryChecks, withSkipReason} from "../utils/tgttFeaturePools";
 
 /**
  * #11 — Gambler Rogue Clairnian (TGTT) — L1→20.
@@ -41,6 +40,9 @@ describeCharacter({
 		20: {totalLevel: 20, minMaxHp: 100, expectToggles: [/master of fortune|fortune/i]}, // CS-BUG-010
 	},
 	featuresMatrix: [
+		// XPHB Weapon Mastery — Rogue picks Club + Dagger (first two
+		// proficient simple weapons in DOM order, deterministic).
+		...buildWeaponMasteryChecks(["Club", "Dagger"], 1),
 		// ── Rogue base ────────────────────────────────────────────────
 		// Sneak Attack: damage scales 1d6/2 levels — no clean state probe
 		// (the bonus damage applies only to qualifying attacks). Use this
@@ -190,7 +192,9 @@ describeCharacter({
 		// Master of Fortune: roll twice on Gambler's Table + once-per-PB
 		// nat-1-to-nat-20 conversion. Neither effect is exposed in state.
 		{level: 17, name: /master of fortune/i, kind: "passive"},
-		// CS-BUG-017: specialty pick count short past L11; helper disabled.
-		// ...buildSpecialtyChecks("Rogue"),
+		// CS-BUG-017: specialty pick count short past L11. Keep the helper
+		// in the matrix (no-blind-spots doctrine) with every emitted row
+		// marked skip+skipReason via withSkipReason.
+		...withSkipReason(buildSpecialtyChecks("Rogue"), "CS-BUG-017"),
 	],
 });

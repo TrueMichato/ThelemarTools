@@ -1,7 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_CHILD_OF_SUN_HOCHLING} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
-import {buildSpecialtyChecks, TGTT_METAMAGIC} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildAnyMetamagicChecks, TGTT_METAMAGIC} from "../utils/tgttFeaturePools";
 
 // ── Child of the Sun Sorcerer L1→20 features matrix ──────────────────
 // Sorcerer base (PHB classic — TGTT uses PHB Sorc table):
@@ -94,9 +94,15 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			]},
 		]},
 
-	// Sorcerous Restoration capstone at L20 — short-rest recovery of
-	// up to 4 SP. Probe the short-rest restore behaviour to confirm
-	// the resource is wired up.
+	// Phase H additive coverage: helper-driven per-pick effect probes
+	// (`pickedFeatureGrants` for the auto-picker's deterministic first
+	// choice). Complements the rich rows above which assert the
+	// `pickToggleable` surface (gated by CS-BUG-018). If the per-pick
+	// grant probe turns out to be blocked by the same picker-rendering
+	// bug, wrap this spread in `withSkipReason(…, "CS-BUG-017")`.
+	...buildAnyMetamagicChecks(["TGTT"]),
+
+	// Sorcerous Restoration at L20 — short-rest recovery of up to 4 SP.
 	{level: 20, name: /sorcerous restoration/i, kind: "passive",
 		effects: [
 			{kind: "shortRestRestores", resource: "Sorcery Points"},

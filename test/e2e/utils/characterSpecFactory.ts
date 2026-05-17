@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import {fileURLToPath} from "url";
 import {test, expect, TestInfo, Page} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 import {gotoWithThelemar, clearHomebrewStorage} from "./homebrewLoader";
@@ -566,8 +567,18 @@ export interface MulticlassCharacterSpec {
  * Consumers (humans validating builds manually, CI artifact upload,
  * external tooling) can rely on the layout:
  *   test-results/exports-for-validation/<display-slug>/<title-slug>--<status>.json
+ *
+ * IMPORTANT: anchor to `__dirname` (this file lives at
+ * `test/e2e/utils/characterSpecFactory.ts`, so the repo root is three
+ * segments up), NOT `process.cwd()`. Under `--workers=N>1` Playwright
+ * spawns workers whose `process.cwd()` can be a per-test output
+ * directory (`test-results/<test-id>-chromium/`); writes there get
+ * nuked by Playwright's per-test cleanup, which is exactly why a
+ * 6-spec / 3-worker parallel run produced ~9/48 expected exports
+ * before this fix.
  */
-const EXPORTS_ROOT = path.join(process.cwd(), "test-results", "exports-for-validation");
+const EXPORTS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "test-results", "exports-for-validation");
+const EXPORT_FAILURES_LOG = path.join(EXPORTS_ROOT, "_export_failures.log");
 
 function _slug (s: string): string {
 	return (s || "untitled")
@@ -625,8 +636,24 @@ async function _exportCharacterForValidation (
 		};
 		await fs.promises.writeFile(file, JSON.stringify(payload, null, 2));
 	} catch (err) {
-		// Never fail a test because the export drop failed.
-		console.warn(`[exports-for-validation] failed for "${testInfo.title}": ${(err as Error)?.message}`);
+		// Never fail a test because the export drop failed — but DO
+		// leave a persistent breadcrumb. The previous `console.warn`
+		// was invisible in parallel runs (per-worker stdout buffering
+		// + tail truncation), so we append a JSON-line to a sentinel
+		// file inside EXPORTS_ROOT. Best-effort: if the sentinel write
+		// also fails, swallow silently — we already lost this export.
+		const entry = {
+			ts: new Date().toISOString(),
+			title: testInfo.title,
+			displayName,
+			status: testInfo.status ?? "unknown",
+			error: (err as Error)?.message ?? String(err),
+		};
+		console.warn(`[exports-for-validation] failed for "${testInfo.title}": ${entry.error}`);
+		try {
+			await fs.promises.mkdir(EXPORTS_ROOT, {recursive: true});
+			await fs.promises.appendFile(EXPORT_FAILURES_LOG, `${JSON.stringify(entry)}\n`);
+		} catch { /* ignore */ }
 	}
 }
 

@@ -1,7 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HORROR_THEOCRACIAN} from "../utils/characterBuilder";
-import {buildSpecialtyChecks, buildAnyInvocationChecks} from "../utils/tgttFeaturePools";
-void buildAnyInvocationChecks; // CS-BUG-017
+import {buildSpecialtyChecks, buildAnyInvocationChecks, withSkipReason} from "../utils/tgttFeaturePools";
 
 /**
  * #18 — The Horror Warlock Theocracian (TGTT) — L1→20.
@@ -85,12 +84,13 @@ describeCharacter({
 			],
 		},
 
-		// Eldritch Invocations — count scales with level. Replaced with
-		// buildAnyInvocationChecks across XPHB + XGE + TGTT sources so
-		// the helper attaches per-pick effect probes for the auto-picker
-		// first choice (alphabetic across the union).
-		// CS-BUG-017: Invocation picks short — disable helper.
-		// ...buildAnyInvocationChecks(["XPHB", "XGE", "TGTT"]),
+		// Eldritch Invocations — count scales with level. Cross-source
+		// helper (XPHB + XGE + TGTT) attaches per-pick effect probes for the
+		// auto-picker first choice (alphabetic across the union).
+		// CS-BUG-017: Invocation picks short. Keep the helper in the matrix
+		// (no-blind-spots doctrine) with every emitted row marked
+		// skip+skipReason via withSkipReason.
+		...withSkipReason(buildAnyInvocationChecks(["XPHB", "XGE", "TGTT"]), "CS-BUG-017"),
 
 		// Pact Boon at L3 — no clean state probe (boon-specific).
 		// Roll-button probes layered here so they fan out by level.

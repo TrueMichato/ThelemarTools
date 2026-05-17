@@ -1,7 +1,7 @@
 import {describeCharacter, describeMulticlassCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HUNTER_CENTAUR, PRESET_FULL_ZODIAC_CENTAUR} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
-import {buildSpecialtyChecks, buildZodiacFormChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildWeaponMasteryChecks, buildZodiacFormChecks} from "../utils/tgttFeaturePools";
 
 // ─────────────────────────────────────────────────────────────────────
 // Hunter Ranger L20 standalone features matrix (TGTT Ranger + XPHB
@@ -12,6 +12,9 @@ import {buildSpecialtyChecks, buildZodiacFormChecks} from "../utils/tgttFeatureP
 // shortsword, scimitar, studded leather.
 // ─────────────────────────────────────────────────────────────────────
 const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
+	// XPHB Weapon Mastery — Ranger picks Club + Dagger (first two
+	// proficient simple weapons in DOM order, deterministic).
+	...buildWeaponMasteryChecks(["Club", "Dagger"], 1),
 	// L1 Spellcasting — also our anchor for the racial walk-speed
 	// probe (Centaur is a 40-ft race), the always-prepared Hunter's
 	// Mark, and the L1 roll-button smoke probes (STR/DEX saves —
@@ -216,6 +219,8 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 // Druid 14 doesn't reach Beast Spells (Druid 18) or Archdruid /
 // Timeless Body (Druid 20), so those are intentionally omitted.
 const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
+	// XPHB Weapon Mastery (Ranger leg) — Club + Dagger picked at L1.
+	...buildWeaponMasteryChecks(["Club", "Dagger"], 1),
 	// ── Ranger leg (TGTT Ranger + XPHB-derived Hunter) ──────────────
 	{level: 1, name: /primal focus|favored enemy/i, kind: "passive"},
 	// L1 Spellcasting anchors the multi-leg's Phase-7 racial probes:

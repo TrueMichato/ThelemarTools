@@ -1,9 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_JESTER_DENDULRA} from "../utils/characterBuilder";
-// CS-BUG-017: buildJesterActChecks temporarily unused while spread is
-// commented out below. Keep the import for cheap re-enable.
-import {buildSpecialtyChecks, buildJesterActChecks} from "../utils/tgttFeaturePools";
-void buildJesterActChecks;
+import {buildSpecialtyChecks, buildJesterActChecks, withSkipReason} from "../utils/tgttFeaturePools";
 
 /**
  * #13 — College of Jesters Bard Dendulra (TGTT) — L1→20.
@@ -306,7 +303,9 @@ describeCharacter({
 		// Documented here intentionally; no effects: arrays added.
 		...buildSpecialtyChecks("Bard"),
 		// Jester Acts (JA optional features) — Bard subclass picks.
-		// CS-BUG-017: Jester Acts picks register as 0/1 instead of 3/4/5 — skip until fixed.
-		// ...buildJesterActChecks(),
+		// CS-BUG-017: Jester Acts picks register as 0/1 instead of 3/4/5.
+		// Keep the helper in the matrix (no-blind-spots doctrine) with
+		// every emitted row marked skip+skipReason via withSkipReason.
+		...withSkipReason(buildJesterActChecks(), "CS-BUG-017"),
 	],
 });
