@@ -63,6 +63,16 @@ test/e2e/
 - **Use the factory.**  Spec files should be thin: import the factory,
   declare a `CharacterSpec`, done.  Don't open-code level-up loops in a
   spec; that breaks the standard checklist and the timeouts.
+- **No blind spots.**  Every spec includes **explicit** checks for every
+  feature picked, every milestone hit, every loadout change, every
+  signature toggle, every specialty pick, every mastery pick, and every
+  battle-tactic pick (and the parallel Metamagic / Invocation /
+  Jester Act / Trickster Trick / Precise Strike / Pact Boon /
+  Dreamwalker pickers).  **Use the `build*Checks` helpers** in
+  [`test/e2e/utils/tgttFeaturePools.ts`](../../../test/e2e/utils/tgttFeaturePools.ts)
+  to stay DRY — they emit the matrix rows AND attach per-pick
+  `pickedFeatureGrants` effects for the auto-picker's first choice.
+  Don't open-code pools or per-pick probes when a helper exists.
 - **Skip with `{skip: true}` rather than dropping a probe.**  The spec
   file should always show the standard's full surface area, even when a
   particular mechanic doesn't apply — coverage gaps must be visible.
@@ -102,6 +112,24 @@ npx playwright show-report
 Acceptance bar after any factory or page-object change: rerun the full
 suite; remaining failures must all map to entries in
 `docs/charactersheet/known-bugs.md`.
+
+## Artifacts (post-test JSON export)
+
+Every generated test (single-class L1/L3/L5/L5-loadout/MEGA/USE/round-trip
+plus the multiclass plan test) auto-dumps `cs._state.toJson()` to:
+
+```
+test-results/exports-for-validation/<display-slug>/<test-title-slug>--<status>.json
+```
+
+on both pass and fail. Wired in
+[`characterSpecFactory.ts`](../../../test/e2e/utils/characterSpecFactory.ts)
+(`_exportCharacterForValidation`) as the last-registered `afterEach`
+(Playwright runs them LIFO, so the export reads state BEFORE
+`clearHomebrewStorage` wipes IndexedDB). Failures are logged and
+swallowed — the export never turns a green test red. Use the dropped
+JSON to manually load a build into the live sheet for visual /
+rendering validation that the suite can't probe directly.
 
 ## See also
 

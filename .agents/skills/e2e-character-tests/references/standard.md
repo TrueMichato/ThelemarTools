@@ -12,6 +12,41 @@ combo and playing through 20 levels of it.  The suite must validate
 the **mechanics**, not just the wiring — that means actually using the
 character: cast spells, spend resources, attack, roll skills, rest.
 
+## No blind spots
+
+Every spec must include **explicit** checks for every:
+
+- **feature picked** — class, subclass, race, feat, optional-feature,
+- **milestone hit** — Extra Attack, slot-table change, prof bump, capstone,
+- **loadout change** — gear expected to move AC / attack / DC at L5,
+- **signature toggle** — Rage / Bladesong / Channel Divinity / Wild Shape / …,
+- **specialty pick** — TGTT class-feature `Specialties` pool,
+- **mastery pick** — XPHB Weapon Mastery (martials), and
+- **battle-tactic pick** — Fighter Battle Tactics + the parallel
+  Metamagic / Invocation / Jester Act / Trickster Trick / Precise
+  Strike / Pact Boon / Dreamwalker pickers.
+
+Checks #19 (Specialties), #20 (Weapon Mastery), #21 (class-option
+pickers), and #22 (per-feature effect coverage) below operationalize
+this rule per-feature; the rule itself is the **contract**.
+
+### Use `build*Checks` — don't open-code pools
+
+The DRY surface is
+[`test/e2e/utils/tgttFeaturePools.ts`](../../../../test/e2e/utils/tgttFeaturePools.ts).
+Every picker has a matching `build*Checks(...)` helper that:
+
+1. Emits the right `featuresMatrix` rows at the right levels with the
+   correct cumulative `pickedCount`.
+2. Attaches a `pickedFeatureGrants` effect for the auto-picker's
+   deterministic first choice, so existence + effect verification land
+   in one helper call.
+
+Spec authors **spread** helper output into the matrix; they don't
+open-code pools, levels, cumulative counts, or per-pick effects when
+a helper exists. See the table under [Helpers for class-option
+pickers](#helpers-for-class-option-pickers) for the full inventory.
+
 ## Required checks (the standard)
 
 | # | Check | Where it lives | Why it matters |
@@ -290,6 +325,42 @@ effect probes for measurable features, or add explicit `// no
 measurable …` comments documenting why a row is existence-only.  The
 script is advisory by default; pass `--strict` to make it exit
 non-zero on any LOW spec (use in CI gates).
+
+## Post-test JSON export (automatic)
+
+Every generated test (single-class L1 / L3 / L5 / L5-loadout / MEGA /
+USE / round-trip, plus the multiclass plan test) dumps the final
+`cs._state.toJson()` to:
+
+```
+test-results/exports-for-validation/<displayName-slug>/<testInfo.title-slug>--<status>.json
+```
+
+on **both pass and fail**. Implemented in
+[`characterSpecFactory.ts`](../../../../test/e2e/utils/characterSpecFactory.ts)
+as `_exportCharacterForValidation`, registered as the
+last-registered `afterEach` in both `describeCharacter` and
+`describeMulticlassCharacter` so Playwright's LIFO afterEach order
+runs the export **before** `clearHomebrewStorage` wipes IndexedDB
+(without that order the read-through returns `null`).
+
+Properties of the drop:
+
+- `status` is one of `passed` / `failed` / `timedOut` / `interrupted` /
+  `skipped`. Skipped tests still write a tiny stub
+  `{status:"skipped"}` so the absence of a file is unambiguous when
+  triaging coverage gaps.
+- Payload wraps the raw `toJson()` under `character` plus metadata
+  (`status`, `displayName`, `title`, `duration`, `retry`, `errors`,
+  `exportedAt`) for triage.
+- Failures inside the export are logged and swallowed — the export
+  **never** turns a green test red.
+- `test-results/` is already gitignored.
+
+Spec authors get the artifact for free; no code changes required.
+Use it to manually load a build into the live character sheet (or
+diff two runs) when the suite-side probes can't cover the question
+(visual rendering, fluff text, layout, art).
 
 ## See also
 

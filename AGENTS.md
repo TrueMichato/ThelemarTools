@@ -265,6 +265,24 @@ Trickster Trick / Precise Strike / Pact Boon / Dreamwalker call /
 Weapon Mastery picks not only surface but actually do what they say
 they do.
 
+**No blind spots.**  Every spec includes **explicit** checks for every
+feature picked, every milestone hit, every loadout change, every
+signature toggle, every specialty / mastery / battle-tactic pick (plus
+the parallel Metamagic / Invocation / Jester Act / Trickster Trick /
+Precise Strike / Pact Boon / Dreamwalker pickers).  The `build*Checks`
+helpers in `test/e2e/utils/tgttFeaturePools.ts` are the canonical DRY
+surface — spread their output into `featuresMatrix` instead of
+open-coding pools or per-pick effect probes.
+
+**Post-test JSON export (automatic).**  The factory drops the final
+`cs._state.toJson()` for every generated test (pass and fail) to
+`test-results/exports-for-validation/<display-slug>/<title-slug>--<status>.json`
+via an `afterEach` in `characterSpecFactory.ts`
+(`_exportCharacterForValidation`).  Spec authors get the artifact for
+free — no plumbing required.  Use it to manually load a build into the
+live character sheet for visual / rendering validation the suite can't
+probe directly.
+
 ### Detailed Reference Docs — Read Before Writing or Extending E2E Specs
 
 Root: `.agents/skills/e2e-character-tests/references/`
