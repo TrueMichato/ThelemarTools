@@ -1,4 +1,6 @@
-import {test, expect} from "@playwright/test";
+import * as fs from "fs";
+import * as path from "path";
+import {test, expect, TestInfo, Page} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 import {gotoWithThelemar, clearHomebrewStorage} from "./homebrewLoader";
 import {
@@ -182,6 +184,14 @@ export function describeCharacter (spec: CharacterSpec): void {
 
 		test.afterEach(async ({page}) => {
 			await clearHomebrewStorage(page);
+		});
+
+		// Export the built character to disk for manual validation.
+		// Registered AFTER clearHomebrewStorage so that Playwright's
+		// LIFO afterEach order runs the export FIRST — the storage
+		// clear wipes the IndexedDB backing that toJson() reads from.
+		test.afterEach(async ({page}, testInfo) => {
+			await _exportCharacterForValidation(page, testInfo, displayName);
 		});
 
 		// ── L1 creation smoke ───────────────────────────────────────────
@@ -548,6 +558,79 @@ export interface MulticlassCharacterSpec {
 }
 
 /**
+ * Root directory for post-test character JSON exports. Lives under the
+ * existing `test-results/` tree (already gitignored). Per-spec
+ * subdirectories are slugged from `displayName`; per-test filenames
+ * are slugged from `testInfo.title` and suffixed with the test status.
+ *
+ * Consumers (humans validating builds manually, CI artifact upload,
+ * external tooling) can rely on the layout:
+ *   test-results/exports-for-validation/<display-slug>/<title-slug>--<status>.json
+ */
+const EXPORTS_ROOT = path.join(process.cwd(), "test-results", "exports-for-validation");
+
+function _slug (s: string): string {
+	return (s || "untitled")
+		.normalize("NFKD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 120) || "untitled";
+}
+
+/**
+ * Dump `cs._state.toJson()` to disk for manual validation. Runs in an
+ * afterEach for every generated test (single-class + multiclass), on
+ * pass AND fail, so contributors can inspect what the suite actually
+ * built. Best-effort: a failure here is logged and swallowed — export
+ * must never turn a green test red.
+ *
+ * Layout (see EXPORTS_ROOT):
+ *   <displayName-slug>/<testInfo.title-slug>--<status>.json
+ *
+ * For skipped tests we drop a tiny stub `{status:"skipped"}` so the
+ * absence-of-file stays unambiguous when triaging gaps in coverage.
+ */
+async function _exportCharacterForValidation (
+	page: Page,
+	testInfo: TestInfo,
+	displayName: string,
+): Promise<void> {
+	try {
+		const dir = path.join(EXPORTS_ROOT, _slug(displayName));
+		const status = testInfo.status ?? "unknown";
+		const file = path.join(dir, `${_slug(testInfo.title)}--${status}.json`);
+		await fs.promises.mkdir(dir, {recursive: true});
+
+		if (status === "skipped") {
+			await fs.promises.writeFile(file, JSON.stringify({status: "skipped", title: testInfo.title}, null, 2));
+			return;
+		}
+
+		const exported = await page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			return cs?._state?.toJson?.() ?? null;
+		}).catch(() => null);
+
+		const payload = {
+			status,
+			displayName,
+			title: testInfo.title,
+			duration: testInfo.duration,
+			retry: testInfo.retry,
+			errors: (testInfo.errors ?? []).map(e => ({message: e.message, value: (e as any).value})),
+			exportedAt: new Date().toISOString(),
+			character: exported,
+		};
+		await fs.promises.writeFile(file, JSON.stringify(payload, null, 2));
+	} catch (err) {
+		// Never fail a test because the export drop failed.
+		console.warn(`[exports-for-validation] failed for "${testInfo.title}": ${(err as Error)?.message}`);
+	}
+}
+
+/**
  * Internal — runs the usage probes against the current sheet state.
  * Shared between describeCharacter and describeMulticlassCharacter.
  */
@@ -610,6 +693,11 @@ export function describeMulticlassCharacter (spec: MulticlassCharacterSpec): voi
 		});
 		test.afterEach(async ({page}) => {
 			await clearHomebrewStorage(page);
+		});
+		// Export-after-clear-registration so LIFO runs export FIRST —
+		// see note in describeCharacter.
+		test.afterEach(async ({page}, testInfo) => {
+			await _exportCharacterForValidation(page, testInfo, displayName);
 		});
 
 		test(`builds full multiclass plan and reaches final milestone`, async ({page}) => {

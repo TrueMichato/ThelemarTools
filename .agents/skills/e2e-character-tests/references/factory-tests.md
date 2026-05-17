@@ -140,3 +140,38 @@ effects for the auto-picker's deterministic first choice.  See
   CS-BUG blocks a check, the spec must `{skip: true}` it.
 - Doesn't retry on infra failures.  Flakes get fixed at the page-object
   level (conservative timings, state-stable polling).
+
+## Post-test artifacts (JSON export)
+
+The factory registers an `afterEach` (`_exportCharacterForValidation`)
+in both `describeCharacter` and `describeMulticlassCharacter` that
+dumps `cs._state.toJson()` to disk for every generated test, on pass
+and fail. Layout:
+
+```
+test-results/exports-for-validation/<displayName-slug>/<testInfo.title-slug>--<status>.json
+```
+
+- **Slug rules.** Lowercase ASCII; non-alphanumerics collapse to `-`;
+  trimmed; capped at 120 chars. Predictable for `grep` / `jq` /
+  `find` workflows.
+- **Statuses.** `passed` / `failed` / `timedOut` / `interrupted` from
+  `testInfo.status`. Skipped tests write a stub
+  `{status:"skipped", title}` so the absence of a file stays
+  unambiguous when triaging gaps.
+- **Payload.** Wraps the raw `toJson()` under `character` plus
+  metadata (`status`, `displayName`, `title`, `duration`, `retry`,
+  `errors`, `exportedAt`).
+- **Ordering matters.** The export hook is registered **after**
+  `clearHomebrewStorage` so Playwright's LIFO afterEach runs the
+  export FIRST — otherwise the storage clear wipes the IndexedDB
+  backing that `toJson()` reads from and the export comes back null.
+- **Failure-safe.** Errors inside the export are logged
+  (`console.warn("[exports-for-validation] failed for …")`) and
+  swallowed. The export never turns a green test red.
+- **Disk usage.** A few KB per test (one full character record).
+  `test-results/` is already gitignored.
+
+Spec authors get the artifact for free; no spec change is required to
+opt in. To opt out, the test would have to live outside the factory
+(don't do that — extend the factory instead).

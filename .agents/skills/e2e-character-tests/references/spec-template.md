@@ -127,6 +127,34 @@ Walk through this before submitting a new spec.
     RUN_MEGA=1 npx playwright test test/e2e/specs/tgtt-<file>.spec.ts --reporter=list  # for the MEGA path
     ```
     All tests must either pass or skip with a documented reason.
+11. **No blind spots.** Before opening the PR, audit your spec against
+    the rule: every feature picked, every milestone, every loadout
+    change, every signature toggle, every specialty pick, every
+    mastery pick, and every battle-tactic pick must be explicitly
+    checked. **Use the `build*Checks` helpers** in
+    [`tgttFeaturePools.ts`](../../../../test/e2e/utils/tgttFeaturePools.ts)
+    — `buildSpecialtyChecks`, `buildBattleTacticChecks`,
+    `buildMetamagicChecks`, `buildInvocationChecks`,
+    `buildJesterActChecks`, `buildTricksterTrickChecks`,
+    `buildPreciseStrikeChecks`, `buildPactBoonChecks`,
+    `buildDreamwalkerChecks`, `buildWeaponMasteryChecks`,
+    `buildCatalogChecks`, plus the `buildAny*Checks` variants for
+    cross-source mixes. Don't open-code pools, levels, cumulative
+    counts, or per-pick effects when a helper covers it.
+
+## Manual validation via JSON export
+
+After running the spec, the factory drops the final character JSON
+to:
+
+```
+test-results/exports-for-validation/<display-slug>/<test-title-slug>--<status>.json
+```
+
+on every test (pass and fail). Load any of those JSONs into the live
+character sheet to manually validate anything the suite couldn't
+probe directly (visual rendering, layout, fluff). No spec-side
+plumbing required — the drop is wired in the factory's `afterEach`.
 
 ## Effect probe checklist (Phase 11)
 

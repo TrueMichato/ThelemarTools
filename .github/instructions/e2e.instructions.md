@@ -38,6 +38,15 @@ Reference docs (read what applies):
   `CharacterSpec` (or `MulticlassCharacterSpec`) and calls
   `describeCharacter` / `describeMulticlassCharacter`. No open-coded
   level-up loops. No raw locators. No `page.evaluate` in spec files.
+- **No blind spots.** Every spec includes explicit checks for every
+  feature picked, every milestone hit, every loadout change, every
+  signature toggle, every specialty pick, every mastery pick, and
+  every battle-tactic pick (plus the parallel Metamagic / Invocation
+  / Jester Act / Trickster Trick / Precise Strike / Pact Boon /
+  Dreamwalker pickers). Use the `build*Checks` helpers in
+  `test/e2e/utils/tgttFeaturePools.ts` to stay DRY — they attach
+  per-pick `pickedFeatureGrants` effects automatically. Don't
+  open-code pools when a helper exists.
 - **Coverage gaps stay visible.** Every spec must list every standard
   check; opt out with `{skip: true}` plus a one-line reason
   (`// monks have no concentration spell`, `// blocked by CS-BUG-NNN`).
@@ -57,6 +66,17 @@ Reference docs (read what applies):
   - DOM-mutation waits stay around 200-400 ms for accordion bodies;
     prefer state-stable polling (`waitForFunction(() => stable)`) over
     fixed `waitForTimeout` for new flows.
+
+## Artifacts
+
+The factory auto-exports the final `cs._state.toJson()` for every
+generated test (pass AND fail) to
+`test-results/exports-for-validation/<display-slug>/<title-slug>--<status>.json`.
+This is wired in `characterSpecFactory.ts` (`_exportCharacterForValidation`)
+as the last-registered `afterEach` so Playwright's LIFO order runs it
+before `clearHomebrewStorage` wipes IndexedDB. Use these dumps for
+manual validation of anything the suite can't probe directly. Don't
+duplicate the hook in spec files.
 
 ## Before opening a PR
 

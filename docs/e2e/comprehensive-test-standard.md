@@ -6,6 +6,51 @@ lives in the
 so that AI agents pick it up automatically when writing or extending
 Playwright character-build specs.
 
+## No blind spots (contract)
+
+Every `tgtt-*.spec.ts` must include **explicit** checks for every:
+
+- **feature picked** (class, subclass, race, feat, optional-feature),
+- **milestone hit** (Extra Attack, slot table change, prof bump, capstone),
+- **loadout change** (gear that should move AC / attack / DC),
+- **signature toggle** (Rage, Bladesong, Channel Divinity, Wild Shape, …),
+- **specialty pick** (TGTT class-feature `Specialties` pool),
+- **mastery pick** (XPHB Weapon Mastery for martials), and
+- **battle-tactic pick** (Fighter Battle Tactics, plus the parallel
+  Metamagic / Invocation / Jester Act / Trickster Trick / Precise
+  Strike / Pact Boon / Dreamwalker pickers).
+
+**Use the `build*Checks` helpers** in
+[`test/e2e/utils/tgttFeaturePools.ts`](../../test/e2e/utils/tgttFeaturePools.ts)
+— they are the canonical DRY surface for picker-shaped coverage.
+They emit the right `featuresMatrix` rows AND attach
+`pickedFeatureGrants` effect probes for the auto-picker's first
+choice, so existence + effect verification land together. Don't
+open-code pools or per-pick effect probes when a helper exists.
+
+"Coverage gap stays visible" still applies: when a check genuinely
+doesn't apply, `{skip: true}` with a one-line reason — don't drop the
+field.
+
+## Post-test JSON export (automatic)
+
+Every generated test (single-class L1/L3/L5/L5-loadout/MEGA/USE/round-trip
+plus the multiclass plan test) dumps `cs._state.toJson()` to:
+
+```
+test-results/exports-for-validation/<display-slug>/<test-title-slug>--<status>.json
+```
+
+on both pass and fail. The drop is wired in
+[`characterSpecFactory.ts`](../../test/e2e/utils/characterSpecFactory.ts)
+(`_exportCharacterForValidation`) as a Playwright `afterEach` and is
+transparent to spec authors — no spec change required, no extra cost
+beyond a few KB of disk per test.
+
+Use the exports to manually load a build into the live character sheet
+and sanity-check anything the suite couldn't probe directly (rendering
+quirks, layout, art, fluff). `test-results/` is already gitignored.
+
 ## Why a standard?
 
 The `test/e2e/specs/tgtt-*.spec.ts` suite drives the full character
