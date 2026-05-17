@@ -1,7 +1,7 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_BASTION_BUGBEAR} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildWeaponMasteryChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #14 — Oath of Bastion Paladin Bugbear (TGTT) — L1→20.
@@ -39,6 +39,9 @@ describeCharacter({
 		20: {totalLevel: 20, minMaxHp: 130, spellSlots: {5: 2}},
 	},
 	featuresMatrix: <FeatureCheck[]>[
+		// XPHB Weapon Mastery — wizard auto-picks Club + Dagger (first two
+		// proficient simple weapons in DOM order, deterministic).
+		...buildWeaponMasteryChecks(["Club", "Dagger"], 1),
 		// ── L1: half-caster baseline ────────────────────────────────────
 		// Lay on Hands pool (5 × paladin level) replenishes on a Long
 		// Rest only (XPHB & PHB'14 agree). Probe the long-rest restore

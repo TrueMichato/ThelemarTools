@@ -20,6 +20,23 @@ function pickedGrants (pickName: string, subEffects?: EffectCheck[]): EffectChec
 }
 
 /**
+ * Mark every FeatureCheck in `checks` as `{skip: true, skipReason}`.
+ *
+ * Use this to keep coverage visible when a helper's picks are blocked
+ * by a known product bug — see `docs/charactersheet/known-bugs.md`.
+ * Doctrine (per `.agents/skills/e2e-character-tests/references/standard.md`):
+ * the helper invocation MUST stay in the matrix even when the picks
+ * can't be asserted; `withSkipReason` carries the CS-BUG-NNN pointer
+ * so the audit tool and human reviewers can see the gap.
+ *
+ * Example:
+ *   ...withSkipReason(buildJesterActChecks(), "CS-BUG-017"),
+ */
+export function withSkipReason (checks: FeatureCheck[], skipReason: string): FeatureCheck[] {
+	return checks.map(c => ({...c, skip: true, skipReason}));
+}
+
+/**
  * Generate FeatureCheck entries for the TGTT "Specialties" pick at each
  * level the class gains a new specialty. Each entry asserts that
  * cumulative `pickedCount` distinct specialty names from the class's

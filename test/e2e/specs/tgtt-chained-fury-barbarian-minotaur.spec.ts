@@ -1,6 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_CHAINED_FURY_MINOTAUR} from "../utils/characterBuilder";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildWeaponMasteryChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #9 — Chained Fury Barbarian Minotaur (TGTT) — L1→20.
@@ -41,6 +41,9 @@ describeCharacter({
 		20: {totalLevel: 20, expectToggles: [/primal champion|persistent rage|indomitable/i]},
 	},
 	featuresMatrix: [
+		// XPHB Weapon Mastery — preset masteryCount=2 → wizard picks the
+		// first two proficient simple weapons (Club + Dagger, DOM order).
+		...buildWeaponMasteryChecks(["Club", "Dagger"], 1),
 		// ── Class features ────────────────────────────────────────
 		{
 			level: 1,

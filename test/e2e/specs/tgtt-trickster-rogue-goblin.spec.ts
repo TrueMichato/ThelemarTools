@@ -1,8 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_TRICKSTER_GOBLIN} from "../utils/characterBuilder";
-import {buildSpecialtyChecks, buildTricksterTrickChecks} from "../utils/tgttFeaturePools";
-void buildSpecialtyChecks; // CS-BUG-017
-void buildTricksterTrickChecks; // CS-BUG-017
+import {buildSpecialtyChecks, buildTricksterTrickChecks, buildWeaponMasteryChecks, withSkipReason} from "../utils/tgttFeaturePools";
 
 /**
  * #16 — Trickster Rogue Goblin (TGTT) — L1→20.
@@ -43,6 +41,9 @@ describeCharacter({
 		20: {totalLevel: 20, minMaxHp: 100},
 	},
 	featuresMatrix: [
+		// XPHB Weapon Mastery — Rogue picks Club + Dagger (first two
+		// proficient simple weapons in DOM order, deterministic).
+		...buildWeaponMasteryChecks(["Club", "Dagger"], 1),
 		// ── Rogue base ────────────────────────────────────────────────
 		// Sneak Attack carries the Rogue signature roll-button probes:
 		// signature stealth check, an attack roll (rapier/shortsword/
@@ -279,11 +280,13 @@ describeCharacter({
 				{kind: "sneakAttackDice", min: 9, skip: true, skipReason: "CS-BUG-018"},
 			],
 		},
-		// CS-BUG-017: specialty pick count short past L11; helper disabled.
-		// ...buildSpecialtyChecks("Rogue"),
+		// CS-BUG-017: specialty pick count short past L11. Keep the helper
+		// in the matrix (no-blind-spots doctrine) with every emitted row
+		// marked skip+skipReason via withSkipReason.
+		...withSkipReason(buildSpecialtyChecks("Rogue"), "CS-BUG-017"),
 		// Trickster Tricks (TT optional features) — 3 picks at L3,
 		// scaling to 7 by L19. Helper attaches per-pick effect probes.
-		// CS-BUG-017: Trickster Tricks picks not surfacing
-		// ...buildTricksterTrickChecks(),
+		// CS-BUG-017: Trickster Tricks picks not surfacing.
+		...withSkipReason(buildTricksterTrickChecks(), "CS-BUG-017"),
 	],
 });

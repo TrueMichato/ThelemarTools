@@ -1,7 +1,7 @@
 /**
  * TGTT Feature Pools — Auto-generated. Do not edit by hand.
  *
- * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:02af5c93b783)
+ * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:85673b654374)
  * Generator:     scripts/genTgttPools.mjs
  * Regenerate:    node scripts/genTgttPools.mjs
  *
@@ -107,6 +107,25 @@ export const TGTT_SPECIALTIES: Record<string, RegExp[]> = {
 		/^Stronghold Builder$/i,
 		/^Sweeping Attacker$/i,
 		/^Weather Beaten$/i,
+	],
+	Illrigger: [
+		/^Baleful Presence$/i,
+		/^Dark Resilience$/i,
+		/^Diplomatic Intervention$/i,
+		/^Do Without$/i,
+		/^Endure Elements$/i,
+		/^Faceless Mask$/i,
+		/^Forked Tongue Mastery$/i,
+		/^Hellish Avenger$/i,
+		/^Infernal Awareness$/i,
+		/^Infernal Constitution$/i,
+		/^Infernal Rejuvenation$/i,
+		/^Infernal Supremacy$/i,
+		/^Infernal Tracker$/i,
+		/^Negate Fall$/i,
+		/^Purge Toxins$/i,
+		/^Soul Reader$/i,
+		/^Suggestive Words$/i,
 	],
 	Monk: [
 		/^Adept Speed$/i,
@@ -240,6 +259,7 @@ export const TGTT_SPECIALTY_LEVELS: Record<string, number[]> = {
 	Cleric: [3, 7, 11, 15, 20],
 	Druid: [1, 5, 9, 13, 17],
 	Fighter: [1, 5, 9, 13, 17],
+	Illrigger: [3, 5, 7, 9, 11, 14, 19],
 	Monk: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
 	Paladin: [3, 5, 7, 9, 11, 14, 19],
 	Ranger: [1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
@@ -257,6 +277,7 @@ export const TGTT_SPECIALTY_FIRST_PICK: Record<string, string> = {
 	Cleric: "Ancestral Guidance",
 	Druid: "Aerial Surveyor",
 	Fighter: "Amphibious Combatant",
+	Illrigger: "Baleful Presence",
 	Monk: "Adept Speed",
 	Paladin: "Bestowed Understanding",
 	Ranger: "Beast Friend",
@@ -1049,6 +1070,23 @@ function pickedGrants (pickName: string, subEffects?: EffectCheck[]): EffectChec
 }
 
 /**
+ * Mark every FeatureCheck in `checks` as `{skip: true, skipReason}`.
+ *
+ * Use this to keep coverage visible when a helper's picks are blocked
+ * by a known product bug — see `docs/charactersheet/known-bugs.md`.
+ * Doctrine (per `.agents/skills/e2e-character-tests/references/standard.md`):
+ * the helper invocation MUST stay in the matrix even when the picks
+ * can't be asserted; `withSkipReason` carries the CS-BUG-NNN pointer
+ * so the audit tool and human reviewers can see the gap.
+ *
+ * Example:
+ *   ...withSkipReason(buildJesterActChecks(), "CS-BUG-017"),
+ */
+export function withSkipReason (checks: FeatureCheck[], skipReason: string): FeatureCheck[] {
+	return checks.map(c => ({...c, skip: true, skipReason}));
+}
+
+/**
  * Generate FeatureCheck entries for the TGTT "Specialties" pick at each
  * level the class gains a new specialty. Each entry asserts that
  * cumulative `pickedCount` distinct specialty names from the class's
@@ -1440,32 +1478,22 @@ export function buildCatalogChecks (args: {
 	return out;
 }
 
-/** Convenience wrapper for Zodiac Druid forms — emits L3 + L10 umbrella entries.
- *
- * Phase 15 P10 fix: only the *current* month/star-week form is
- * rendered on the sheet at any time (the form rotates by in-game
- * date). Asserting all 12 monthly forms as separate passives flagged
- * 11 false-positive failures every test run. Instead, assert the
- * single `Zodiac Form: <Month>` umbrella row that the renderer
- * surfaces and attach the representative effect probe to it. The
- * full 12-entry catalog still lives in `ZODIAC_FORMS_L3` /
- * `ZODIAC_FORMS_L10` for documentation and for test authors who want
- * to opt back into per-form assertions. */
+/** Convenience wrapper for Zodiac Druid forms — emits L3 + L10 catalogs. */
 export function buildZodiacFormChecks (levelMap?: Record<number, number>): FeatureCheck[] {
-	const out: FeatureCheck[] = [];
-	const subL3 = ZODIAC_FORM_EFFECTS["Roc"];
-	out.push({
-		level: applyLevelMap(ZODIAC_FORMS_L3_LEVEL, levelMap),
-		name: /Zodiac Form: Month/i,
-		kind: "passive" as const,
-		...(subL3 && subL3.length ? {effects: [{kind: "pickedFeatureGrants" as const, pickName: "Roc", subEffects: subL3}]} : {}),
-	});
-	const subL10 = ZODIAC_FORM_EFFECTS["Unicorn"];
-	out.push({
-		level: applyLevelMap(ZODIAC_FORMS_L10_LEVEL, levelMap),
-		name: /Zodiac Form: Star Week/i,
-		kind: "passive" as const,
-		...(subL10 && subL10.length ? {effects: [{kind: "pickedFeatureGrants" as const, pickName: "Unicorn", subEffects: subL10}]} : {}),
-	});
-	return out;
+	return [
+		...buildCatalogChecks({
+			pool: ZODIAC_FORMS_L3, level: ZODIAC_FORMS_L3_LEVEL,
+			featureNameRe: /Zodiac Form: Month/i,
+			repName: "Roc",
+			effectMap: ZODIAC_FORM_EFFECTS,
+			levelMap,
+		}),
+		...buildCatalogChecks({
+			pool: ZODIAC_FORMS_L10, level: ZODIAC_FORMS_L10_LEVEL,
+			featureNameRe: /Zodiac Form: Star Week/i,
+			repName: "Unicorn",
+			effectMap: ZODIAC_FORM_EFFECTS,
+			levelMap,
+		}),
+	];
 }

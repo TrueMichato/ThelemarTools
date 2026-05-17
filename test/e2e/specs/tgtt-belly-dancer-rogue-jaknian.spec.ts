@@ -1,7 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_BELLY_DANCER_JAKNIAN} from "../utils/characterBuilder";
-import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
-void buildSpecialtyChecks; // CS-BUG-017
+import {buildSpecialtyChecks, buildWeaponMasteryChecks, withSkipReason} from "../utils/tgttFeaturePools";
 
 /**
  * #12 — Belly Dancer Rogue Jaknian (TGTT) — L1→20.
@@ -39,6 +38,9 @@ describeCharacter({
 		20: {totalLevel: 20, minMaxHp: 100},
 	},
 	featuresMatrix: [
+		// XPHB Weapon Mastery — Rogue picks Club + Dagger (first two
+		// proficient simple weapons in DOM order, deterministic).
+		...buildWeaponMasteryChecks(["Club", "Dagger"], 1),
 		// ── Rogue base ────────────────────────────────────────────────
 		// Sneak Attack itself isn't a clean state probe (damage shows
 		// only inside the attack listing). Use this entry to host a
@@ -231,7 +233,9 @@ describeCharacter({
 		// the class featuresMatrix. The base Child of the Empire speed
 		// is a flat 30 with no Jaknian-specific speed bonus — no clean
 		// effect probe to add at the class-feature level.
-		// CS-BUG-017: rogue specialty pick count short past L11.
-		// ...buildSpecialtyChecks("Rogue"),
+		// CS-BUG-017: rogue specialty pick count short past L11. Keep the
+		// helper in the matrix (no-blind-spots doctrine) with every
+		// emitted row marked skip+skipReason via withSkipReason.
+		...withSkipReason(buildSpecialtyChecks("Rogue"), "CS-BUG-017"),
 	],
 });

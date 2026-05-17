@@ -3,13 +3,21 @@ import {PRESET_FULL_HEX_DIVINE_TORTLE} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 import {
 	buildSpecialtyChecks,
-	buildMetamagicChecks,
+	buildAnyMetamagicChecks,
+	buildAnyInvocationChecks,
 	TGTT_METAMAGIC,
 } from "../utils/tgttFeaturePools";
 
 // Char-level → Sorcerer-level mapping (Sorcerer 1 = char L3, 18 = L20).
 const SORC_LEVELMAP: Record<number, number> = {
 	3: 3, 10: 12, 17: 19,
+};
+
+// Char-level → Warlock-level mapping (Warlock 1–2 = char L1–2 — identity).
+// Spec only reaches Warlock 2, so Pact Boon (Warlock L3) is intentionally
+// not wired — the build never qualifies for it.
+const HEXBLADE_LEVELMAP: Record<number, number> = {
+	1: 1, 2: 2,
 };
 
 // ── Hexblade 2 / Divine Soul 18 multiclass features matrix ───────────
@@ -55,6 +63,16 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 		]},
+
+	// Phase H additive coverage: helper-driven per-pick effect probes
+	// for the Warlock-leg invocations. Only the L2 milestone applies
+	// (Warlock leg caps at level 2). Cross-source pool (XPHB ∪ XGE
+	// ∪ TGTT) matches what the picker actually exposes.
+	...buildAnyInvocationChecks(
+		["XPHB", "XGE", "TGTT"],
+		[{level: 2, cum: 2}],
+		HEXBLADE_LEVELMAP,
+	),
 
 	// ── Sorcerer leg (TGTT-2014 Divine Soul — copy of XGE Divine Soul)
 	// L3 = Sorc 1: Spellcasting + Divine Soul + Divine Magic affinity
@@ -131,7 +149,11 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// TGTT Specialties (Sorcerer: 1/5/9/13/17 → mapped through SORC_LEVELMAP).
 	...buildSpecialtyChecks("Sorcerer", SORC_LEVELMAP),
 	// Metamagic — TGTT only (TGTT specs intentionally exclude XPHB MM).
-	...buildMetamagicChecks(undefined, SORC_LEVELMAP),
+	// Doctrine update (Phase H.2): use the cross-source-capable
+	// `buildAnyMetamagicChecks(["TGTT"])` helper — functionally
+	// equivalent to the deprecated `buildMetamagicChecks` but emits
+	// `pickedFeatureGrants` probes for the auto-picker's first choice.
+	...buildAnyMetamagicChecks(["TGTT"], undefined, SORC_LEVELMAP),
 ];
 
 /**

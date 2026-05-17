@@ -10,6 +10,138 @@ commit reference rather than deleting it.
 
 ---
 
+## Phase 16 — E2E spec doctrine sweep (no-blind-spots)
+
+A doctrine sweep across the 19 TGTT E2E specs replaced every
+`void buildXChecks; // CS-BUG-NNN` suppression with the canonical
+`withSkipReason(buildXChecks(...), "CS-BUG-NNN")` wrapper added to
+`scripts/_genTgttPools.helpers.ts`. Helper invocations now stay in
+the `featuresMatrix` even when the picks they assert are blocked,
+carrying the CS-BUG pointer so `scripts/auditE2eCoverage.mjs` and
+human reviewers see the gap instead of a hidden hole.
+
+Specs touched (all still report **✓ FULL** coverage after the edit):
+- `tgtt-arcane-archer-fighter-hochling.spec.ts` (`buildBattleTacticChecks`, `buildAnyArcaneShotChecks` → CS-BUG-017)
+- `tgtt-belly-dancer-rogue-jaknian.spec.ts` (`buildSpecialtyChecks` → CS-BUG-017)
+- `tgtt-gambler-rogue-clairnian.spec.ts` (`buildSpecialtyChecks` → CS-BUG-017)
+- `tgtt-horror-warlock-theocracian.spec.ts` (`buildAnyInvocationChecks` → CS-BUG-017)
+- `tgtt-jester-bard-dendulra.spec.ts` (`buildJesterActChecks` → CS-BUG-017)
+- `tgtt-trickster-rogue-goblin.spec.ts` (`buildSpecialtyChecks`, `buildTricksterTrickChecks` → CS-BUG-017)
+
+Open bugs re-affirmed by the sweep (no new CS-BUGs filed; all
+failures encountered during validation matched existing entries):
+- **CS-BUG-017** still blocks pick-rendering for Specialties past L11,
+  Battle Tactics past L3, Trickster Tricks, Jester Acts, Eldritch
+  Invocations, Arcane Shot, Pact Boons (now visible via `skipReason`
+  on every helper-emitted row).
+- **CS-BUG-013** still blocks Horror Warlock pact-magic slots.
+- **CS-BUG-018** still blocks several class resource maxes.
+
+Infra note: three `beforeEach` hook timeouts under 3-worker parallel
+load (the original `gotoWithThelemar` flake — not a regression; the
+same specs pass under `--workers=1`). No new infra bugs filed.
+
+### Iteration 2 — export-loss fix + universal-helper coverage
+
+A follow-up iteration addressed two gaps surfaced after the first
+sweep:
+
+**Infra fix — post-test JSON exports lost under parallel workers.**
+Before: a 6-spec / 3-worker run produced only ~9 of 48 expected
+`test-results/exports-for-validation/<spec>/<test>--<status>.json`
+files; per-spec coverage was a binary "all 6 or zero". Root cause:
+`EXPORTS_ROOT` in
+[characterSpecFactory.ts](../../test/e2e/utils/characterSpecFactory.ts)
+was anchored to `process.cwd()`, which Playwright workers can rebase
+to a per-test output dir that gets nuked by the per-test cleanup.
+Fix: anchor `EXPORTS_ROOT` to `path.dirname(fileURLToPath(import.meta.url))`
+three segments up — worker-cwd-independent. Also added a sentinel
+`_export_failures.log` append-on-catch so future losses surface
+without depending on `console.warn` buffering. Verified: 36/36
+exports on the re-run; 19/19 on the Phase H follow-up; no failures
+log written in either run.
+
+**Coverage additions — 4 specs upgraded with universal helpers**
+(all four remain ✓ FULL/OK after the edits, no test regressions):
+- `tgtt-mercy-monk-changeling.spec.ts` —
+  `buildSpecialtyChecks("Monk")` (replaces 10 open-coded
+  `skipReason: "CS-BUG-017"` rows) + `buildPreciseStrikeChecks()`
+  (Mercy Monk's Precise Strike Methods picker; first use of the
+  helper in any spec).
+- `tgtt-child-of-sun-sorcerer-hochling.spec.ts` —
+  `buildAnyMetamagicChecks(["TGTT"])` appended additively to the
+  existing rich `pickToggleable` rows so the per-pick
+  `pickedFeatureGrants` probe is also exercised.
+- `tgtt-heroic-soul-sorcerer-halfogre.spec.ts` — same additive
+  pattern.
+- `tgtt-hexblade-divine-soul-tortle.spec.ts` — introduced
+  `HEXBLADE_LEVELMAP = {1:1, 2:2}`, added
+  `buildAnyInvocationChecks(["XPHB","XGE","TGTT"], …,
+  HEXBLADE_LEVELMAP)` for the Warlock leg, and migrated the
+  Sorcerer leg from the deprecated `buildMetamagicChecks` to
+  `buildAnyMetamagicChecks(["TGTT"], …, SORC_LEVELMAP)`. Pact Boon
+  (`buildAnyPactBoonChecks`) deliberately omitted: the build caps
+  at Warlock 2 and Pact Boon arrives at Warlock 3.
+
+**Deferred to a future iteration** (not blocked by any CS-BUG, but
+require non-trivial preset inspection before wiring):
+- `buildDreamwalkerChecks` — no current spec uses the Dreamwalker
+  subclass; helper waits on the first such spec being authored.
+- `buildPactBoonChecks` / `buildAnyPactBoonChecks` for the
+  Horror Warlock spec (Phase H.3 hexblade leg already skipped per
+  level cap; horror-warlock would need a `withSkipReason("CS-BUG-017")`
+  wrapper since picks don't surface).
+
+### Iteration 3 — full-suite verification + weapon-mastery coverage
+
+A third sweep validated the Iteration-2 export-loss fix at full
+suite scale and resolved the deferred weapon-mastery coverage:
+
+**Full suite verification.** A clean
+`rm -rf test-results/exports-for-validation` + full
+`tgtt-*.spec.ts` run (3 workers, 31.3 min) produced **120 passed /
+1 failed (Horror Warlock L1 export-round-trip — pre-existing 60 s
+timeout, infra) / 38 skipped**, with **every one of the 20 export
+directories populated** (56 JSON files total — every test that
+reached `afterEach` exported successfully; no
+`_export_failures.log` written).
+
+**Weapon-mastery picker is deterministic.** Extracted from the L1
+exports across all 7 martial specs: the wizard's
+`selectFirstAvailableWeaponMasteries(N)` reliably picks the first
+N proficient simple weapons in DOM order — `Club + Dagger` for the
+six 2-pick presets, `Club + Dagger + Dart` for the only 3-pick
+preset (`PRESET_FULL_ARCANE_ARCHER_HOCHLING`). All 20 spec
+directories produced exports under the same naming.
+
+**Coverage additions — 7 specs upgraded** (all FULL except
+hunter-zodiac which lands at 92% OK due to multiclass leg
+distribution; all compile clean, no test regressions on the
+single-spec re-verify of bastion-paladin: 6/6 expected exports):
+- `tgtt-arcane-archer-fighter-hochling.spec.ts` —
+  `buildWeaponMasteryChecks(["Club","Dagger","Dart"])` (Fighter
+  3 picks).
+- `tgtt-bastion-paladin-bugbear.spec.ts`,
+  `tgtt-chained-fury-barbarian-minotaur.spec.ts`,
+  `tgtt-belly-dancer-rogue-jaknian.spec.ts`,
+  `tgtt-gambler-rogue-clairnian.spec.ts`,
+  `tgtt-trickster-rogue-goblin.spec.ts` —
+  `buildWeaponMasteryChecks(["Club","Dagger"])` (2 picks each).
+- `tgtt-hunter-zodiac-centaur.spec.ts` —
+  `buildWeaponMasteryChecks(["Club","Dagger"])` added to both
+  `HUNTER_FEATURES_MATRIX` (L20 standalone leg) and
+  `HUNTER_ZODIAC_MULTI_FEATURES_MATRIX` (multiclass Ranger leg).
+
+**Intentionally LOW.** `tgtt-time-domain-cleric.spec.ts` audits
+at 65% (LOW). Every probe in this matrix is gated on CS-BUG-015
+(TGTT Time Domain prepares TGTT-flavor spells in place of
+first-party domain spells, and Channel Divinity / spell-save-DC
+helpers return 0 on the build). Adding more checks here would
+create false failures, not real coverage — leave LOW until
+CS-BUG-015 is resolved.
+
+---
+
 ## Open
 
 ### CS-BUG-002 — Subclass features not granted on level-up (TGTT 2024-style subclasses)
