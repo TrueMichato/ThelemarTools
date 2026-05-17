@@ -34,6 +34,8 @@
 		"test:tags": "node test/test-tags.js",
 		"test:unit": "node --localstorage-file test/localstorage.tmp --experimental-vm-modules node_modules/jest/bin/jest.js",
 		"test:e2e": "npx playwright test",
+		"test:e2e:fast": "PW_WORKERS=5 PW_TIMEOUT_MS=90000 npx playwright test",
+		"test:e2e:single": "PW_WORKERS=1 npx playwright test",
 		"test:e2e:ui": "npx playwright test --ui",
 		"test:e2e:debug": "npx playwright test --debug",
 		"test:e2e:report": "npx playwright show-report",

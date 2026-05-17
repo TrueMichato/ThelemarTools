@@ -2,6 +2,36 @@
 In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
+[] hover bug for bladsong related things:
+render.js:15823 Uncaught (in promise) Error: Failed to load renderable content for: page="classfeatures.html" source="TCE" hash="bladesinger%20styles_wizard_tce_bladesinging_tce_2_tce" preloadId="null" customHashId="undefined" isFluff="undefined"
+    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15823:9)
+    at Renderer.hover.pHandleLinkMouseOver (render.js:15738:9)
+_pHandleLinkMouseOver_doVerifyToRender @ render.js:15823
+pHandleLinkMouseOver @ render.js:15738
+await in pHandleLinkMouseOver
+onmouseover @ charactersheet.html:1
+render.js:15823 Uncaught (in promise) Error: Failed to load renderable content for: page="classfeatures.html" source="TCE" hash="bladesong_wizard_tce_bladesinging_tce_2_tce" preloadId="null" customHashId="undefined" isFluff="undefined"
+    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15823:9)
+    at Renderer.hover.pHandleLinkMouseOver (render.js:15738:9)
+_pHandleLinkMouseOver_doVerifyToRender @ render.js:15823
+pHandleLinkMouseOver @ render.js:15738
+await in pHandleLinkMouseOver
+onmouseover @ charactersheet.html:1
+render.js:15823 Uncaught (in promise) Error: Failed to load renderable content for: page="classfeatures.html" source="TCE" hash="training%20in%20war%20and%20song%20(bladesinging)_wizard_tce_bladesinging_tce_2_tce" preloadId="null" customHashId="undefined" isFluff="undefined"
+    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15823:9)
+    at Renderer.hover.pHandleLinkMouseOver (render.js:15738:9)
+_pHandleLinkMouseOver_doVerifyToRender @ render.js:15823
+pHandleLinkMouseOver @ render.js:15738
+await in pHandleLinkMouseOver
+onmouseover @ charactersheet.html:1
+render.js:15823 Uncaught (in promise) Error: Failed to load renderable content for: page="classfeatures.html" source="TCE" hash="bladesinging_wizard_tce_bladesinging_tce_2_tce" preloadId="null" customHashId="undefined" isFluff="undefined"
+    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15823:9)
+    at Renderer.hover.pHandleLinkMouseOver (render.js:15738:9)
+_pHandleLinkMouseOver_doVerifyToRender @ render.js:15823
+pHandleLinkMouseOver @ render.js:15738
+await in pHandleLinkMouseOver
+onmouseover @ charactersheet.html:1
+
 
 
 ## Closed Bugs

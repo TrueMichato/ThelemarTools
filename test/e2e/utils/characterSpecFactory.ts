@@ -611,8 +611,24 @@ async function _exportCharacterForValidation (
 	try {
 		const dir = path.join(EXPORTS_ROOT, _slug(displayName));
 		const status = testInfo.status ?? "unknown";
-		const file = path.join(dir, `${_slug(testInfo.title)}--${status}.json`);
+		const titleSlug = _slug(testInfo.title);
+		const file = path.join(dir, `${titleSlug}--${status}.json`);
 		await fs.promises.mkdir(dir, {recursive: true});
+
+		// Drop any prior exports for THIS test (any status suffix) so a
+		// re-run produces exactly one file per test rather than
+		// accumulating `--passed.json` + `--failed.json` siblings
+		// across consecutive runs. Cross-test exports in the same
+		// directory are untouched — only the current test's stale
+		// status-variants get pruned.
+		try {
+			const existing = await fs.promises.readdir(dir);
+			await Promise.all(
+				existing
+					.filter(f => f.startsWith(`${titleSlug}--`) && f.endsWith(".json") && f !== path.basename(file))
+					.map(f => fs.promises.unlink(path.join(dir, f)).catch(() => {})),
+			);
+		} catch { /* dir may not exist yet on very first run */ }
 
 		if (status === "skipped") {
 			await fs.promises.writeFile(file, JSON.stringify({status: "skipped", title: testInfo.title}, null, 2));
