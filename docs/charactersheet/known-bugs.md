@@ -423,65 +423,38 @@ assertion still validates one of the picked Tricks surfaces.
 
 ### CS-BUG-013 — TGTT The Horror Warlock pact-magic slots not registered
 
-**Status**: Open / suspected. The Horror Warlock subclass should
-inherit the standard Warlock pact-magic table (1 slot at L1 of
-spell-level 1; 2 slots of level 2 at L3; 2 of level 3 by L5; up to
-4 of level 5 at L17). The sheet reports `pactSlots = {level: 0}`
-across the entire 1→20 range, suggesting pact magic isn't being
-wired for this TGTT subclass — and downstream the L5 USE probe
-hangs trying to cast an L3 pact slot that doesn't exist.
-
-**Investigation hints**:
-- Diff the Horror Warlock subclass entry in
-  `homebrew/TravelersGuidetoThelemar.json` against a working
-  Warlock subclass (Hexblade / Divine Soul) — check for missing
-  spellcasting / `additionalSpells` blocks.
-- Verify `_initWarlockSlots` in the spellcasting pipeline runs for
-  TGTT Warlock subclasses.
-
-**Test workaround**: Horror Warlock spec drops all `pactSlots`
-assertions and the L5 USE probe (set `castSpellSlotLevel` to skip
-or omit). Re-enable once pact slots arrive.
+**Status**: Stale (Wave 1 triage — closing). Per
+`test-results/exports-for-validation/the-horror-warlock-theocracian/l5-extra-attack-3rd-level-slots-prof-3--passed.json`
+the L5 export now shows `spellcasting.pactSlots = {current: 2, max: 2,
+level: 3}` — the standard XPHB Warlock L5 pact table. The bug
+likely fixed itself in a downstream change to the spellcasting
+pipeline. Builder-side issue at the Spells step is tracked
+separately as **CS-BUG-024**. Re-file a new entry if a regression
+surfaces on a future MEGA run.
 
 ---
 
 ### CS-BUG-014 — Belly Dancer "Dance of the Country" grants advantage on Athletics instead of Acrobatics
 
-**Status**: Open
+**Status**: Fixed (Wave 1 triage).
 **Surfaced by**: `tgtt-belly-dancer-rogue-jaknian.spec.ts` Phase-7 toggle
 effect probe (`toggleGrantsAdvantage skill:acrobatics` on the L3 Dance
 of the Country toggle).
 
-**Repro**:
-1. Build a TGTT Rogue with subclass `The Belly Dancer` and level to 3.
-2. Activate the `Dance of the Country` feature on the Features tab.
-3. Observe the skill panel / call
-   `cs._state.getAdvantageState("skill:acrobatics")` — `advantage` is
-   `false`. Calling `getAdvantageState("skill:athletics")` instead
-   returns `advantage: true`.
+**Root cause**: `ACTIVE_STATE_TYPES.dancing.effects` in
+`js/charactersheet/charactersheet-state.js` (~L29484) declared
+`{type: "advantage", target: "skill:athletics"}`. Per the homebrew
+description ("advantage on Dexterity (Acrobatics) rolls") the target
+should be `skill:acrobatics`.
 
-**Expected** (per `homebrew/TravelersGuidetoThelemar.json`, the
-Dance of the Country feature entry: "You gain advantage on Dexterity
-(Acrobatics) rolls"): the active state should mark Acrobatics as
-having advantage while the Dance is active.
-**Actual**: The `dancing` entry in
-`CharacterSheetState.ACTIVE_STATE_TYPES`
-(`js/charactersheet/charactersheet-state.js` ~L28620) declares
-`{type: "advantage", target: "skill:athletics"}`. The wrong skill is
-boosted.
+**Fix**: One-line change in `ACTIVE_STATE_TYPES.dancing` — target
+flipped from `skill:athletics` to `skill:acrobatics`. The Snake
+Charmer AC bonus path at L17582 reads `isStateActive("dancing")` only
+(not the skill target) so no other call sites needed updating.
 
-**Suspected fix**: Change the `dancing` state's effect target from
-`"skill:athletics"` to `"skill:acrobatics"` in
-`ACTIVE_STATE_TYPES`. No other call sites reference this target — the
-generic `getAdvantageState("skill:<name>")` lookup will pick up the
-correction automatically.
-
-**Severity**: Medium — Belly Dancer's signature Acrobatics-favoring
-toggle silently buffs the wrong skill. Athletics also benefits in error.
-
-**Test workaround**: The Phase-7 `toggleGrantsAdvantage` probe on the
-L3 Dance of the Country FeatureCheck is set to
-`{skip: true, skipReason: "CS-BUG-014"}` until fixed.
+**Spec update**: `toggleGrantsAdvantage skill:acrobatics` probe in
+`tgtt-belly-dancer-rogue-jaknian.spec.ts` is no longer skipped for
+014 (still skipped under the outer 017 toggle-registration umbrella).
 
 ---
 
@@ -528,61 +501,16 @@ RUN_MATRIX=1 npx playwright test test/e2e/specs/tgtt-<spec>.spec.ts \
 
 ## CS-BUG-015 — Time Domain Cleric: cantrips not auto-prepped & Channel Divinity not surfaced as a resource
 
-**Status**: Filed (Phase 7 effect-validation matrix smoke).
-See **CS-BUG-016** for the cross-class generalisation
-(same cantripCount/spellSaveDc/TGTT-flavor pattern observed
-on every TGTT caster preset, not just Cleric).
+**Status**: Folded into **CS-BUG-016** (Wave 1 triage).
 
-**Repro**: Build a Time Domain Cleric via the TGTT preset (see
-`test/e2e/specs/tgtt-time-domain-cleric.spec.ts`). After the L1
-build completes, inspect:
-
-* `state.getKnownSpells()` — returns `Accelerate/Decelerate`,
-  `Animate Claw`, etc. (TGTT-flavor Time Domain spells), but
-  **zero spells with `level === 0`**, i.e. no cantrips. A cleric
-  should automatically know 3 cantrips at L1.
-* `state.getResource("Channel Divinity")` — returns nothing at
-  L2+, even though the matrix `featuresMatrix` previously asserted
-  `kind: "resource"` and even though the existing sheet-usage
-  probe (`useResourceName: "Channel Divinity"`) works at L5. The
-  resource is presumably registered under a different name (e.g.
-  `Channel Divinity Charges`, `cd:cleric`, or similar) — needs
-  investigation.
-
-**Symptoms in the matrix smoke run**:
-```
-- L1 /spellcasting/i (passive) effect cantripCount: cantrip count 0 < 3
-- L2 /^channel divinity$/i (resource): resource not found on sheet
-```
-
-**Test workaround**: All `cantripCount`, `spellInList` (for
-first-party Cleric spells like Sacred Flame / Cure Wounds), and
-the L2/L6 `^channel divinity$` resource probes on Time Domain
-Cleric are marked `kind: "passive"` + `skip: true,
-skipReason: "CS-BUG-015"` until the underlying issues are
-resolved. The L3/L5/L7/L9/L17 domain-spell tier entries were
-also downgraded from `kind: "spells"` to `kind: "passive"` so
-they no longer assert specific TGTT-flavor spell names (which
-also vary by cleric build).
-
-**Severity**: High — players choosing the TGTT Time Domain
-preset start with zero cantrips and have no Channel Divinity
-counter visible at L2. Both are core cleric mechanics.
-
-**Investigation hints**:
-* Compare the TGTT cleric preset against the first-party PHB
-  cleric preset (which presumably auto-preps cantrips) — the
-  delta is likely in the preset's `signatureSpells` /
-  spell-pick wiring.
-* Search for `"Channel Divinity"` usages in the state and
-  builder modules — the resource is presumably registered with
-  a different key than the human-readable label.
-* `getSpellSaveDC()` (page helper, `test/e2e/pages/CharacterSheetPage.ts`)
-  also returns 0 on this build — the `#charsheet-disp-spell-save-dc`
-  selector reads as empty even though the cleric presumably has a
-  valid spell save DC. Possibly the cleric DC is rendered under
-  a different element or on a non-Combat tab. Worth verifying as
-  part of the same fix.
+The Channel Divinity half is no longer reproducible — current Time
+Cleric L5 export shows `resources` including
+`{name: "Channel Divinity", current: 2, max: 2}`. The cantrip-
+auto-prep half is a special case of the broader CS-BUG-016 pattern
+(every TGTT caster preset writes `cantripsKnown=[]` and
+`spellsKnown=[]` at L1+). Keep CS-BUG-016 as the active tracking
+entry. Re-file a tighter Cleric-only entry only if CS-BUG-016 lands
+without restoring cleric cantrips specifically.
 
 ---
 
@@ -678,35 +606,35 @@ the missing features are their core class identity.
 
 ---
 
-### CS-BUG-018 — TGTT class resource maxes wrong on multiple presets
+### CS-BUG-018 — TGTT Heroic Soul Sorcerer: Sorcery Points formula off-by-one
 
-**Status**: Open. Phase 14 MEGA sweep umbrella entry for
-incorrect resource maximums on TGTT presets:
+**Status**: Open (narrowed in Wave 1 triage — see below for closed sub-cases).
 
-| Spec | Level | Resource | Expected | Actual |
-|---|---|---|---|---|
-| Heroic Soul Sorcerer | 2 | Sorcery Points | 2 | 4 |
-| Heroic Soul Sorcerer | 3 | Sorcery Points | 3 | 4 |
-| Chained Fury Barbarian | 1 | Rage uses/day | 2 | 3 |
-| Bastion Paladin | 1 | Lay on Hands | 5 | 15 |
-| Belly Dancer Rogue | 1 | Sneak Attack dice | ≥1 | 0 |
-| Gambler Rogue | 1 | Sneak Attack dice | ≥1 | 0 |
-| Trickster Rogue | 1 | Sneak Attack dice | ≥1 | 0 |
-| Belly Dancer / Gambler / Trickster | 3 | Sneak Attack dice | ≥2 | 0 |
+**Repro**: Heroic Soul Sorcerer exports show:
 
-The Sneak-Attack-dice entries may indicate the dice pool isn't
-even being initialised on TGTT Rogue presets (zero, not just a
-wrong value). The Lay-on-Hands max=15 may be the TGTT pool size
-from a different table — could be by-design or a setting flag
-issue.
+| Level | Sorcery Points actual | Expected (XPHB) |
+|---|---|---|
+| 1 | 2 | 0 (Font of Magic granted at L2 in XPHB; TGTT grants at L1, so 1) |
+| 3 | 4 | 3 |
 
-**Severity**: High — Rogue players with no sneak attack dice
-and Sorcerer players with the wrong SP pool will hit broken
-mechanics on every turn.
+Formula appears to be `level + 1` instead of `level`. Trace the
+Sorcery Points calculation for the TGTT Sorcerer preset and align
+with XPHB (`SP = sorcererLevel` once Font of Magic is in play).
 
-**Test workaround**: skip the affected `(resource)` / `effect
-sneakAttackDice` matrix entries with `skipReason: "CS-BUG-018"`
-until the resource-table wiring is fixed.
+**Severity**: High — every TGTT Sorcerer has one extra Sorcery
+Point at every level, which compounds with metamagic spend.
+
+#### Closed sub-cases (originally filed under CS-BUG-018)
+
+The following items from the original umbrella are no longer
+reproducible against the current exports and were dropped from this
+entry in Wave 1 triage. They remain documented here for history:
+
+| Sub-case | Current export | Verdict |
+|---|---|---|
+| Chained Fury Rage L1=3 | L1 export: `Rage: 2/2` | Stale — fixed |
+| Bastion Lay on Hands L1=15 | L1 export: `Lay on Hands: 5/5` | Stale — fixed |
+| Belly Dancer / Gambler / Trickster Sneak Attack dice = 0 | SA isn't tracked via the resources array; it's a static class config (`sneakAttackDice = ceil(rogueLevel/2)`) | Spec-side — the `getResource("Sneak Attack")` probe is checking the wrong field. Move to E2E spec triage. |
 
 ---
 

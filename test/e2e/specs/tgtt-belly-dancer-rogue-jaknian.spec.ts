@@ -135,9 +135,9 @@ describeCharacter({
 		//     `dancing` ACTIVE_STATE_TYPES entry
 		//     ({type: "bonus", target: "ac", abilityMod: "cha"}).
 		//   - toggleGrantsAdvantage skill:acrobatics — homebrew rule
-		//     grants advantage on Dexterity (Acrobatics) rolls, but
-		//     the dancing state currently buffs `skill:athletics`
-		//     instead. Skipped pending CS-BUG-014.
+		//     grants advantage on Dexterity (Acrobatics) rolls
+		//     (CS-BUG-014 fixed: dancing state now correctly targets
+		//     skill:acrobatics).
 		{
 			level: 3,
 			name: /dance of the country/i,
@@ -149,8 +149,6 @@ describeCharacter({
 				{
 					kind: "toggleGrantsAdvantage",
 					rollType: "skill:acrobatics",
-					skip: true,
-					skipReason: "CS-BUG-014",
 				},
 			],
 		},
