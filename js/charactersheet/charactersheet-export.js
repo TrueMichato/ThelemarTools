@@ -235,7 +235,15 @@ class CharacterSheetExport {
 				}
 
 				try {
-					const data = JSON.parse(jsonStr);
+					let data = JSON.parse(jsonStr);
+
+					// Accept the E2E test-export wrapper shape
+					// ({status, displayName, character: <state>, ...}) by
+					// unwrapping to the inner `character`. Spec authors
+					// load these JSONs by hand to validate open bugs.
+					if (data && typeof data === "object" && data.character && typeof data.character === "object" && (data.character.name || data.character.classes || data.character.race)) {
+						data = data.character;
+					}
 
 					// Validate basic structure
 					if (!data.name && !data.classes && !data.race) {
