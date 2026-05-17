@@ -29481,7 +29481,7 @@ class CharacterSheetState {
 			description: "Performing a traditional dance that grants combat benefits",
 			effects: [
 				{type: "bonus", target: "ac", abilityMod: "cha"}, // +CHA to AC (Snake Charmer)
-				{type: "advantage", target: "skill:athletics"},
+				{type: "advantage", target: "skill:acrobatics"}, // CS-BUG-014: Dance of the Country grants Acrobatics, not Athletics
 			],
 			duration: "1 minute",
 			endConditions: ["Incapacitated", "Wearing armor"],
