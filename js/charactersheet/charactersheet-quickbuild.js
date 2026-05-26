@@ -28,6 +28,10 @@ class CharacterSheetQuickBuild {
 		// Per-level analysis results
 		this._levelAnalysis = []; // [{level, classData, classEntry, needsSubclass, hasAsi, ...}]
 
+		// Tracks `levelKey`s whose HP roll value was edited by hand in the HP step,
+		// so "Re-roll All" doesn't clobber explicit user input.
+		this._hpRollsManual = new Set();
+
 		// Collected choices
 		this._selections = {
 			subclasses: {}, // {className: subclassData}
@@ -153,6 +157,7 @@ class CharacterSheetQuickBuild {
 		this._levelAnalysis = [];
 		this._steps = [];
 		this._currentStep = 0;
+		this._hpRollsManual = new Set();
 	}
 
 	// ==========================================
@@ -3587,10 +3592,14 @@ class CharacterSheetQuickBuild {
 
 		avgRadio.querySelector("input").addEventListener("change", () => {
 			this._selections.hpMethod = "average";
+			// Switching out of roll mode invalidates the "manually touched" tracking;
+			// users coming back in expect a fresh slate.
+			this._hpRollsManual = new Set();
 			renderHpDetails();
 		});
 		rollRadio.querySelector("input").addEventListener("change", () => {
 			this._selections.hpMethod = "roll";
+			this._hpRollsManual = new Set();
 			renderHpDetails();
 		});
 
@@ -3606,7 +3615,7 @@ class CharacterSheetQuickBuild {
 			let totalHp = 0;
 			const currentMaxHp = this._state.getMaxHp();
 			const table = e_({outer: `<table class="table table-sm table-striped ve-small">
-				<thead><tr><th>Level</th><th>Class</th><th>Hit Die</th><th>CON</th><th>HP Gain</th></tr></thead>
+				<thead><tr><th>Level</th><th>Class</th><th>Hit Die</th><th>CON</th><th>HP Gain</th>${this._selections.hpMethod === "roll" ? "<th></th>" : ""}</tr></thead>
 				<tbody></tbody>
 			</table>`});
 			const tbody = table.querySelector("tbody");
@@ -3614,10 +3623,15 @@ class CharacterSheetQuickBuild {
 			for (const analysis of this._levelAnalysis) {
 				const hitDie = CharacterSheetClassUtils.getClassHitDie(analysis.classData);
 				const levelKey = `${analysis.className}_${analysis.classLevel}`;
+				// L1 uses max hit die per RAW (`_calculateMaxHp` ignores stored hpRoll at L1).
+				const isFirstLevel = analysis.characterLevel === 1;
 
 				let hpGain;
 				if (this._selections.hpMethod === "average") {
 					hpGain = Math.ceil(hitDie / 2) + 1 + conMod;
+				} else if (isFirstLevel) {
+					// Display max hit die for L1 (matches `_calculateMaxHp` behaviour).
+					hpGain = hitDie + conMod;
 				} else {
 					if (!this._selections.hpRolls[levelKey]) {
 						// Store BARE die roll (1..hitDie); conMod is added live so CON changes flow through.
@@ -3634,18 +3648,47 @@ class CharacterSheetQuickBuild {
 						<td>${analysis.className} ${analysis.classLevel}</td>
 						<td>d${hitDie}</td>
 						<td>${conMod >= 0 ? "+" : ""}${conMod}</td>
-						<td class="ve-bold">${hpGain}</td>
 					</tr>
 				`});
 
-				if (this._selections.hpMethod === "roll") {
+				if (this._selections.hpMethod === "roll" && !isFirstLevel) {
+					// Editable bare-die input: clamped to [1, hitDie], integer-coerced.
+					const dieRoll = this._selections.hpRolls[levelKey];
+					const gainTd = e_({outer: `<td class="ve-flex-v-center gap-1">
+						<input type="number" class="form-control input-xs text-center charsheet__quickbuild-hp-roll-input" style="width: 3.5rem;" min="1" max="${hitDie}" step="1" value="${dieRoll}" aria-label="Hit-die roll for ${analysis.className} level ${analysis.classLevel}">
+						<span class="ve-muted">${conMod >= 0 ? "+" : ""}${conMod} = <strong>${hpGain}</strong></span>
+					</td>`});
+					const input = gainTd.querySelector("input");
+					const commit = () => {
+						const raw = parseInt(input.value, 10);
+						const clamped = Number.isFinite(raw)
+							? Math.max(1, Math.min(hitDie, raw))
+							: this._selections.hpRolls[levelKey];
+						this._selections.hpRolls[levelKey] = clamped;
+						this._hpRollsManual.add(levelKey);
+						renderHpDetails();
+					};
+					input.addEventListener("change", commit);
+					input.addEventListener("blur", commit);
+					input.addEventListener("keydown", (e) => {
+						if (e.key === "Enter") { e.preventDefault(); commit(); }
+					});
+					row.append(gainTd);
+
 					const rerollTd = e_({outer: `<td><button class="ve-btn ve-btn-xs ve-btn-default" title="Re-roll">🎲</button></td>`});
 					rerollTd.querySelector("button").addEventListener("click", () => {
-						// Bare die roll — conMod added live during apply.
+						// Per-row re-roll always wins, even over a manual entry.
 						this._selections.hpRolls[levelKey] = Math.floor(Math.random() * hitDie) + 1;
+						this._hpRollsManual.delete(levelKey);
 						renderHpDetails();
 					});
 					row.append(rerollTd);
+				} else {
+					row.append(e_({outer: `<td class="ve-bold">${hpGain}</td>`}));
+					if (this._selections.hpMethod === "roll" && isFirstLevel) {
+						// L1 column placeholder so the table doesn't stagger when other rows have a 🎲 cell.
+						row.append(e_({outer: `<td><span class="ve-muted ve-small" title="Level 1 always uses the maximum hit die (PHB rule).">max</span></td>`}));
+					}
 				}
 
 				tbody.append(row);
@@ -3661,9 +3704,16 @@ class CharacterSheetQuickBuild {
 			details.append(table, summary);
 
 			if (this._selections.hpMethod === "roll") {
-				const rollAllBtn = e_({outer: `<button class="ve-btn ve-btn-sm ve-btn-primary mt-2">🎲 Re-roll All</button>`});
+				const rollAllBtn = e_({outer: `<button class="ve-btn ve-btn-sm ve-btn-primary mt-2" title="Re-roll all levels you haven't edited manually">🎲 Re-roll All</button>`});
 				rollAllBtn.addEventListener("click", () => {
-					this._selections.hpRolls = {};
+					// Skip manually-touched levels so user intent is preserved.
+					for (const analysis of this._levelAnalysis) {
+						if (analysis.characterLevel === 1) continue;
+						const lk = `${analysis.className}_${analysis.classLevel}`;
+						if (this._hpRollsManual.has(lk)) continue;
+						const hd = CharacterSheetClassUtils.getClassHitDie(analysis.classData);
+						this._selections.hpRolls[lk] = Math.floor(Math.random() * hd) + 1;
+					}
 					renderHpDetails();
 				});
 				details.append(rollAllBtn);
@@ -3675,7 +3725,22 @@ class CharacterSheetQuickBuild {
 	}
 
 	_validateHpStep () {
-		return true; // HP is always valid (average or rolled)
+		if (this._selections.hpMethod !== "roll") return true;
+		/** @type {string[]} */
+		const offending = [];
+		for (const analysis of this._levelAnalysis) {
+			if (analysis.characterLevel === 1) continue; // L1 ignored — uses max hit die.
+			const hitDie = CharacterSheetClassUtils.getClassHitDie(analysis.classData);
+			const v = this._selections.hpRolls[`${analysis.className}_${analysis.classLevel}`];
+			if (!Number.isInteger(v) || v < 1 || v > hitDie) {
+				offending.push(`L${analysis.characterLevel} (${analysis.className} d${hitDie})`);
+			}
+		}
+		if (offending.length) {
+			JqueryUtil.doToast({type: "warning", content: `Invalid HP roll value at: ${offending.join(", ")}.`});
+			return false;
+		}
+		return true;
 	}
 
 	// ==========================================
