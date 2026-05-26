@@ -4001,16 +4001,21 @@ class CharacterSheetLevelUp {
 							&& f.source === parts[2],
 						);
 
+						// Strip data-defined `level` (e.g. Adept Speed's `level: 2`) so the
+						// character level of this level-up wins; otherwise repeatable picks at
+						// later Specialty levels would all be stored with the definition level
+						// and collapsed by addFeature's (name, source, className, level) dedup.
 						this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
 							{
 								...(fullOpt || {}),
 								...opt,
+								level: undefined,
 								entries: fullOpt?.entries ?? opt.entries,
 							},
 							{
 								className: opt.className || classEntry.name,
 								classSource: classEntry.source,
-								level: opt.level || newLevel,
+								level: newLevel,
 								featureType: "Class",
 								isFeatureOption: true,
 								parentFeature: featureKey.split("_")[0],
@@ -4065,12 +4070,13 @@ class CharacterSheetLevelUp {
 							{
 								...(fullSubFeature || {}),
 								...opt,
+								level: undefined,
 								entries: fullSubFeature?.entries ?? opt.entries,
 							},
 							{
 								className: opt.className || classEntry.name,
 								classSource: classEntry.source,
-								level: opt.level || newLevel,
+								level: newLevel,
 								featureType: "Class",
 								subclassName: currentSubclass?.name,
 								subclassShortName: opt.subclassShortName || currentSubclass?.shortName,
@@ -4089,6 +4095,7 @@ class CharacterSheetLevelUp {
 							{
 								...(fullOpt || {}),
 								...opt,
+								level: undefined,
 								entries: fullOpt?.entries ?? opt.entries,
 							},
 							{
