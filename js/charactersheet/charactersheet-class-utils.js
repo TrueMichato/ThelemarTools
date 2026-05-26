@@ -23,6 +23,21 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Check whether a source belongs to a priority bundle.
+	 * A source matches if it equals a priority entry exactly, or if it is a
+	 * sub-source of one (e.g. "TGTT-IllR" is a sub-source of priority "TGTT").
+	 * The "-" delimiter is required so unrelated sources sharing a prefix
+	 * (e.g. "TGTTX") do not falsely match.
+	 * @param {string} source - Entity source string
+	 * @param {Array<string>} prioritySources - Configured priority source list
+	 * @returns {boolean}
+	 */
+	static isSourceInPriority (/** @type {*} */ source, /** @type {*} */ prioritySources) {
+		if (!source || !prioritySources?.length) return false;
+		return prioritySources.some(ps => source === ps || source.startsWith(`${ps}-`));
+	}
+
+	/**
 	 * Check if a class level grants an Ability Score Improvement.
 	 * @param {*} classData - The class data object
 	 * @param {number} level - The class level
