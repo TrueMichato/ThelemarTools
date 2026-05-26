@@ -11240,18 +11240,18 @@ class CharacterSheetPage {
 	 * @returns {Array} Filtered array
 	 */
 	_applyPriorityFilter (entities, prioritySources) {
-		// Build a map of names that exist in priority sources
+		// Build a map of names that exist in priority sources (or in sub-sources of a priority bundle)
 		const priorityNames = new Set();
 		entities.forEach(e => {
-			if (prioritySources.includes(e.source)) {
+			if (CharacterSheetClassUtils.isSourceInPriority(e.source, prioritySources)) {
 				priorityNames.add(e.name?.toLowerCase());
 			}
 		});
 
 		// Filter out non-priority entities that have a priority equivalent
 		return entities.filter(e => {
-			// Always keep entities from priority sources
-			if (prioritySources.includes(e.source)) return true;
+			// Always keep entities from priority sources (including sub-sources of a priority bundle)
+			if (CharacterSheetClassUtils.isSourceInPriority(e.source, prioritySources)) return true;
 
 			// Keep non-priority entities only if no priority version exists
 			const lowerName = e.name?.toLowerCase();
