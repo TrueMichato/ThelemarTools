@@ -132,6 +132,56 @@ describe("Phase 2 Features", () => {
 	});
 
 	// ==========================================================================
+	// FeatureModifierParser - Skill proficiency (CS-BUG-019 + regression guards)
+	// ==========================================================================
+	describe("FeatureModifierParser - Skill proficiency", () => {
+		it("should grant a single skill via 'proficiency in X'", () => {
+			const mods = FeatureModifierParser.parseModifiers(
+				"You gain proficiency in Athletics.", "Test Feature",
+			);
+			const prof = mods.find(m => m.type === "proficiency:skill:athletics" && m.isProficiency);
+			expect(prof).toBeTruthy();
+		});
+
+		it("CS-BUG-019: should grant every skill in an 'and' list", () => {
+			const mods = FeatureModifierParser.parseModifiers(
+				"You gain proficiency in Deception and Persuasion.", "Lust Domain",
+			);
+			expect(mods.find(m => m.type === "proficiency:skill:deception" && m.isProficiency)).toBeTruthy();
+			expect(mods.find(m => m.type === "proficiency:skill:persuasion" && m.isProficiency)).toBeTruthy();
+		});
+
+		it("CS-BUG-019: should grant every skill in a comma/Oxford-and list", () => {
+			const mods = FeatureModifierParser.parseModifiers(
+				"You have proficiency in Stealth, Deception, Persuasion, and Athletics skills.",
+				"Test Feature",
+			);
+			expect(mods.find(m => m.type === "proficiency:skill:stealth" && m.isProficiency)).toBeTruthy();
+			expect(mods.find(m => m.type === "proficiency:skill:deception" && m.isProficiency)).toBeTruthy();
+			expect(mods.find(m => m.type === "proficiency:skill:persuasion" && m.isProficiency)).toBeTruthy();
+			expect(mods.find(m => m.type === "proficiency:skill:athletics" && m.isProficiency)).toBeTruthy();
+		});
+
+		it("regression: the proficiency regex must not catastrophically backtrack on adversarial text", () => {
+			// The pre-fix regex `(\w+\s*,?\s*(?:and\s+)?)*` had nested
+			// optional repetition (the comma and the `and ` were both
+			// optional), which made each iteration able to match a bare
+			// `\w+` ambiguously. Race-trait text that began with the word
+			// "proficiency" but did NOT actually list any standard skill
+			// produced exponential backtracking and hung the browser
+			// indefinitely. Cap each parse at 1 second; the safe regex
+			// runs in well under 10ms.
+			const adversarial = `proficiency in ${Array(60).fill("blah").join(" ")} nothing here`;
+			const start = Date.now();
+			const mods = FeatureModifierParser.parseModifiers(adversarial, "Adversarial Feature");
+			const elapsedMs = Date.now() - start;
+			expect(elapsedMs).toBeLessThan(1000);
+			// And it correctly produces zero skill proficiencies.
+			expect(mods.filter(m => m.type?.startsWith("proficiency:skill:") && m.isProficiency)).toEqual([]);
+		});
+	});
+
+	// ==========================================================================
 	// FeatureModifierParser - Condition Immunity
 	// ==========================================================================
 	describe("FeatureModifierParser - Condition Immunity", () => {

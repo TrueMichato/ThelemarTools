@@ -441,7 +441,16 @@ export function describeCharacter (spec: CharacterSpec): void {
 					// canonical breakConcentration() — proves both ends of the
 					// pipeline.
 					if (cc.thenAction === "rage") {
-						await charSheet.activateFeature("Rage").catch(() => null);
+						// Drive rage activation through state directly. The Features-tab
+						// "feature toggle" element is actually a card collapse chevron —
+						// clicking it does NOT activate rage. `activateState("rage")`
+						// (or addActiveState, after CS-BUG-007 hoist) carries the
+						// breaksConcentration guard that's the actual contract under test.
+						await charSheet.page.evaluate(() => {
+							const cs: any = (globalThis as any).charSheet;
+							cs?._state?.activateState?.("rage");
+							cs?._renderCharacter?.();
+						});
 					} else {
 						await charSheet.page.evaluate(() => {
 							const cs: any = (globalThis as any).charSheet;

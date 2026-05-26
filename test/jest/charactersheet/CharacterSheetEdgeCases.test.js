@@ -592,6 +592,38 @@ describe("Edge Cases and Stress Tests", () => {
 			expect(slots[1]?.max).toBeGreaterThanOrEqual(2);
 		});
 
+		it("CS-BUG-010: single-class third-caster uses ceil(level/3), not floor", () => {
+			// Gambler is the canonical TGTT 1/3 caster Rogue subclass. Prior
+			// behaviour used floor(level/3) unconditionally for 1/3 casters,
+			// which is the PHB MULTICLASS rounding rule. Single-class third
+			// casters use the per-class table — equivalent to ceil(level/3) —
+			// so Rogue 4, 5, and 6 should all have 3 first-level slots, not 2.
+			state.addClass({name: "Rogue", source: "TGTT", level: 5});
+			state.setSubclass("Rogue", {name: "Gambler", source: "TGTT", casterProgression: "1/3"});
+
+			state.calculateSpellSlots();
+			const slots = state.getSpellSlots();
+
+			// Rogue 5 → ceil(5/3) = 2 caster levels → 3 first-level slots.
+			expect(slots[1]?.max).toBe(3);
+		});
+
+		it("CS-BUG-010: multiclass third-caster still uses floor(level/3)", () => {
+			// PHB p.164: when multiclassing, third casters round DOWN.
+			// Wizard 1 + Fighter (EK) 5 → wizard contributes 1, EK contributes
+			// floor(5/3)=1 → caster level 2 → 3 first-level slots (not 4).
+			state.setAbilityBase("int", 14);
+			state.addClass({name: "Wizard", source: "PHB", level: 1});
+			state.addClass({name: "Fighter", source: "PHB", level: 5});
+			state.setSubclass("Fighter", {name: "Eldritch Knight", source: "PHB"});
+
+			state.calculateSpellSlots();
+			const slots = state.getSpellSlots();
+
+			// caster level 2 → 3 L1 slots
+			expect(slots[1]?.max).toBe(3);
+		});
+
 		it("should handle Artificer unique half-caster rounding (rounds up)", () => {
 			state.setAbilityBase("int", 14);
 			state.addClass({name: "Artificer", source: "TCE", level: 5});

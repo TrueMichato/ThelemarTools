@@ -927,8 +927,20 @@ class FeatureModifierParser {
 			const profPatterns = [
 				// "you gain proficiency in Athletics" / "you are proficient in Athletics"
 				{pattern: new RegExp(`(?:you\\s+)?(?:gain|have|are)\\s+proficien(?:cy|t)\\s+(?:in|with)\\s+(?:the\\s+)?${skill}(?:\\s+skill)?`, "gi"), proficiency: true},
-				// "proficiency in Athletics" / "proficiency with the Athletics skill"
-				{pattern: new RegExp(`proficien(?:cy|t)\\s+(?:in|with)\\s+(?:the\\s+)?${skill}(?:\\s+skill)?`, "gi"), proficiency: true},
+				// CS-BUG-019: list-aware "proficiency in [the] X[, Y[, and Z]] skill[s]" —
+				// matches any skill that appears in a comma/and-separated proficiency list.
+				// Without this, only the first skill in a list was granted (Lust Domain
+				// "Deception and Persuasion" granted Deception only).
+				// IMPORTANT: each list-item group uses a MANDATORY separator
+				// (`,` optionally followed by `and`/`or`, OR a bare `and`/`or`)
+				// so the `*` quantifier cannot backtrack ambiguously over the
+				// same substring. The previous form
+				// `(\w+\s*,?\s*(?:and\s+)?)*` allowed catastrophic backtracking
+				// (it could match a bare `\w+` repeatedly), which hung the
+				// browser indefinitely when parsing trait texts that began
+				// with the word "proficiency" but were not actually a skill
+				// proficiency grant.
+				{pattern: new RegExp(`proficien(?:cy|t)\\s+(?:in|with)\\s+(?:the\\s+)?(?:[A-Za-z]+(?:\\s*,\\s*(?:and|or)?\\s*|\\s+(?:and|or)\\s+))+${skill}\\b(?:(?:\\s*,\\s*(?:and|or)?\\s*|\\s+(?:and|or)\\s+)[A-Za-z]+)*(?:\\s+skills?)?|proficien(?:cy|t)\\s+(?:in|with)\\s+(?:the\\s+)?${skill}\\b(?:(?:\\s*,\\s*(?:and|or)?\\s*|\\s+(?:and|or)\\s+)[A-Za-z]+)*(?:\\s+skills?)?`, "gi"), proficiency: true},
 				// "you gain expertise in Athletics"
 				{pattern: new RegExp(`(?:you\\s+)?(?:gain|have)\\s+expertise\\s+(?:in|with)\\s+(?:the\\s+)?${skill}(?:\\s+skill)?`, "gi"), expertise: true},
 			];
@@ -8409,8 +8421,12 @@ class CharacterSheetState {
 				// Multiclass: floor per PHB p.164 multiclass rules
 				casterLevel += isMulticlassCaster ? Math.floor(level / 2) : Math.ceil(level / 2);
 			} else if (progression === "1/3") {
-				// Third casters (Eldritch Knight, Arcane Trickster): round DOWN
-				casterLevel += Math.floor(level / 3);
+				// Third casters (Eldritch Knight, Arcane Trickster, Gambler, Architect of Ruin):
+				// Single-class: ceil matches the EK/AT class spell slot table (L3=1, L4-6=2, L7-9=3, …)
+				// Multiclass: floor per PHB p.164 multiclass rules
+				// CS-BUG-010: was unconditionally floor, leaving single-class third casters
+				// stuck at 2 L1 slots from L3 through L6 instead of 2 → 3 at L4.
+				casterLevel += isMulticlassCaster ? Math.floor(level / 3) : Math.ceil(level / 3);
 			} else if (progression === "artificer") {
 				// Artificer progression: round up
 				casterLevel += Math.ceil(level / 2);
@@ -32156,6 +32172,20 @@ class CharacterSheetState {
 			// eslint-disable-next-line no-console
 			console.warn(`Unknown active state type: ${stateTypeId}`);
 			return null;
+		}
+
+		// Defense-in-depth (CS-BUG-007): mirror the exclusiveWith / breaksConcentration
+		// guards from activateState() here, so any caller that goes through the
+		// lower-level addActiveState() path (or future code paths) still honors
+		// the state-type contract. Both ops are idempotent — safe even when
+		// activateState() has already applied them above us.
+		if (stateType?.exclusiveWith?.length) {
+			for (const exclusiveId of stateType.exclusiveWith) {
+				this.deactivateState(exclusiveId);
+			}
+		}
+		if (stateType?.breaksConcentration && this._data.concentrating) {
+			this.breakConcentration();
 		}
 
 		// Check if this state type is already active (for exclusive states like Rage)

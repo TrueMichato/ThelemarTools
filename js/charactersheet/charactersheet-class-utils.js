@@ -199,6 +199,73 @@ class CharacterSheetClassUtils {
 	}
 
 	// ========================================================================
+	// Class/Subclass feature hover-link source resolution
+	// ========================================================================
+	/**
+	 * Sources considered "official" for purposes of class/subclass feature hover lookups.
+	 * NOTE: this list is intentionally small — it must NOT be used as a fallback for the
+	 * class source of a subclass feature, because subclass sources (TCE, XGE, …) are also
+	 * in this list and would mask the true class source (e.g. PHB for Bladesinging Wizard).
+	 */
+	static _HOVER_OFFICIAL_SOURCES = Object.freeze(new Set([
+		"PHB", "XPHB", "DMG", "XDMG", "MM", "XMM",
+		"TCE", "XGE", "MPMM", "FTD", "SCC", "GGR", "AI", "EGW", "MOT", "VGM", "MTF",
+	]));
+
+	static _isHoverOfficialSource (/** @type {*} */ src) {
+		if (!src) return false;
+		return CharacterSheetClassUtils._HOVER_OFFICIAL_SOURCES.has(String(src).toUpperCase());
+	}
+
+	/**
+	 * Resolve the (classSource, featureSource) pair to use when building a class/subclass
+	 * feature hover-link hash.
+	 *
+	 * For SUBCLASS features the canonical hash format is
+	 *   `name_classname_classsource_subclassshortname_subclasssource_level_featuresource`
+	 * (see `data/class/class-wizard.json` + `search/index.json`). The class source is the
+	 * class's own source (e.g. "PHB" for Wizard), NOT the subclass source (e.g. "TCE" for
+	 * Bladesinging). Older saves may have `feature.classSource` undefined and
+	 * `feature.source` set to the subclass source — in that case we MUST fall back to
+	 * `storedClass.source`, never `feature.source`, or the hash points at a non-existent
+	 * `wizard_tce` class and the hover errors out.
+	 *
+	 * For non-subclass (class) features the existing behaviour is preserved: prefer the
+	 * stored classSource, otherwise prefer an official `feature.source`, otherwise fall
+	 * back to the stored class's source.
+	 *
+	 * @param {*} feature - The stored feature object
+	 * @param {*} [storedClass] - The matching entry from `state.getClasses()`, if any
+	 * @returns {{classSource: string, featureSource: string}}
+	 */
+	static resolveFeatureHoverSources (/** @type {*} */ feature, /** @type {*} */ storedClass) {
+		const featureSource = feature?.source;
+		const isSubclassFeature = !!(feature?.subclassName || feature?.subclassShortName || feature?.isSubclassFeature);
+		const isOfficial = CharacterSheetClassUtils._isHoverOfficialSource;
+
+		let classSource = feature?.classSource;
+
+		if (!classSource) {
+			if (isSubclassFeature) {
+				// feature.source is the SUBCLASS source for subclass features — never use it
+				// as the class source. The class source must come from the stored class.
+				classSource = storedClass?.source || null;
+			} else if (isOfficial(featureSource)) {
+				classSource = featureSource;
+			} else {
+				classSource = storedClass?.source || null;
+			}
+		} else if (!isSubclassFeature && !isOfficial(classSource) && isOfficial(featureSource)) {
+			// Homebrew class storing an official feature (e.g. TGTT Warlock referencing an
+			// XPHB feature): prefer the official source for the hover lookup.
+			classSource = featureSource;
+		}
+
+		classSource = classSource || storedClass?.source || Parser.SRC_XPHB;
+		return {classSource, featureSource};
+	}
+
+	// ========================================================================
 	// Spell counting (single source of truth across all UI surfaces)
 	// ========================================================================
 	// Spells with one of these sourceFeature labels are "player-chosen" and count
@@ -3030,7 +3097,10 @@ class CharacterSheetClassUtils {
 				{name: "Sorcery Points",
 					maxByLevel: (/** @type {*} */ lvl) => {
 						const isTGTT = classEntry.source === "TGTT" || classData.source === "TGTT";
-						if (isTGTT) return lvl + 1;
+						// TGTT Sorcerer grants Font of Magic at L1 (not L2 like XPHB),
+						// so SP = sorcerer level from L1 onward. Was previously
+						// `lvl + 1` (CS-BUG-018: off-by-one — L1=2/L3=4 instead of 1/3).
+						if (isTGTT) return lvl;
 						return lvl >= 2 ? lvl : 0;
 					},
 					recharge: "long"},
@@ -3040,6 +3110,25 @@ class CharacterSheetClassUtils {
 			],
 			"Bard": [
 				{name: "Bardic Inspiration", maxByLevel: () => Math.max(1, state.getAbilityMod("cha")), recharge: newLevel >= 5 ? "short" : "long"},
+			],
+			"Rogue": [
+				// CS-BUG-012: TGTT Trickster subclass grants Trickster Dice at L3
+				// (4 dice), L9 (5), L13 (6), L17 (7). Recharges on short or long
+				// rest. The feature is declared in homebrew JSON as prose only,
+				// so we register the resource here when the active subclass is
+				// Trickster (TGTT).
+				{name: "Trickster Dice",
+					maxByLevel: (/** @type {*} */ lvl) => {
+						const isTrickster = (classEntry.subclass?.name === "Trickster" || classEntry.subclass?.shortName === "Trickster")
+							&& (classEntry.subclass?.source === "TGTT");
+						if (!isTrickster) return 0;
+						if (lvl >= 17) return 7;
+						if (lvl >= 13) return 6;
+						if (lvl >= 9) return 5;
+						if (lvl >= 3) return 4;
+						return 0;
+					},
+					recharge: "short"},
 			],
 		};
 
@@ -3079,6 +3168,13 @@ class CharacterSheetClassUtils {
 				if (/** @type {*} */ newMax > oldMax) {
 					existingResource.max = newMax;
 					existingResource.current += (newMax - oldMax);
+				}
+				// CS-BUG-008: keep recharge in sync with the resourceDef on every
+				// level-up. Bardic Inspiration in particular flips long → short at
+				// Bard L5 (Font of Inspiration); without this the resource carries
+				// the L1–L4 "long" recharge forever.
+				if (resourceDef.recharge && existingResource.recharge !== resourceDef.recharge) {
+					existingResource.recharge = resourceDef.recharge;
 				}
 			} else if (newMax > 0) {
 				state.addResource({

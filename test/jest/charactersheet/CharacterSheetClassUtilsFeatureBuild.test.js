@@ -296,6 +296,51 @@ describe("getLevelFeatures refClassFeature extraction", () => {
 		expect(features[0].name).toBe("Martial Arts");
 	});
 
+	// CS-BUG-002 / CS-BUG-017a: Subclass features declared at levels BELOW the
+	// subclass-gain level (e.g. TGTT Heroic Soul / Fiendish Bloodline / The
+	// Horror declare L1 subclass features but TGTT classes don't grant the
+	// subclass until L3) must still be reachable via getLevelFeatures when
+	// queried with their declared level + the subclass payload — that's what
+	// the backfill loop in _applyLevelUp / _applyQuickBuild consumes.
+	test("subclass features declared at L1 are returned when queried at L1 with the subclass", () => {
+		const sorcererClassData = {
+			name: "Sorcerer",
+			source: "TGTT",
+			classFeatures: [
+				"Spellcasting|Sorcerer|TGTT|1",
+				"Sorcerous Origin|Sorcerer|TGTT|3",
+			],
+		};
+		const heroicSoulSubclass = {
+			name: "Heroic Soul",
+			shortName: "Heroic Soul",
+			source: "TGTT",
+			className: "Sorcerer",
+			classSource: "TGTT",
+			subclassFeatures: [
+				"Heroic Spells|Sorcerer|TGTT|Heroic Soul|TGTT|1",
+				"Over Soul|Sorcerer|TGTT|Heroic Soul|TGTT|1",
+				"Legendary Weapon|Sorcerer|TGTT|Heroic Soul|TGTT|1",
+				"Hero's Reflex|Sorcerer|TGTT|Heroic Soul|TGTT|6",
+			],
+		};
+
+		const l1Features = CharacterSheetClassUtils.getLevelFeatures(sorcererClassData, 1, heroicSoulSubclass, [], []);
+		const l1SubclassFeatures = l1Features.filter(f => f.isSubclassFeature);
+		const l1Names = l1SubclassFeatures.map(f => f.name);
+		expect(l1Names).toEqual(expect.arrayContaining(["Heroic Spells", "Over Soul", "Legendary Weapon"]));
+		expect(l1SubclassFeatures.every(f => f.subclassShortName === "Heroic Soul")).toBe(true);
+
+		// Querying at the subclass-gain level (3) without any inherent L3 subclass
+		// feature should NOT return the L1 features — only the backfill loop in
+		// the apply path is responsible for re-importing them.
+		const l3Features = CharacterSheetClassUtils.getLevelFeatures(sorcererClassData, 3, heroicSoulSubclass, [], []);
+		const l3SubclassFeatureNames = l3Features.filter(f => f.isSubclassFeature).map(f => f.name);
+		expect(l3SubclassFeatureNames).not.toContain("Heroic Spells");
+		expect(l3SubclassFeatureNames).not.toContain("Over Soul");
+		expect(l3SubclassFeatureNames).not.toContain("Legendary Weapon");
+	});
+
 	test("should handle PHB Ki pattern identically", () => {
 		const phbClassData = {
 			name: "Monk",
