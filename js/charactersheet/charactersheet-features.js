@@ -1163,25 +1163,16 @@ class CharacterSheetFeatures {
 						}
 					// Class/Subclass features
 					} else if (feature.source && feature.className) {
-						// Determine the actual classSource for hover links
-						// Priority: 1. feature.classSource (if valid), 2. feature.source if it's a class source, 3. storedClass.source, 4. fallback
+						// Determine the actual (classSource, featureSource) for hover links.
+						// See CharacterSheetClassUtils.resolveFeatureHoverSources for the rules —
+						// in particular, for SUBCLASS features the class source must come from
+						// the stored class, not from `feature.source` (which is the subclass source).
 						const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
+						const isOfficialSource = (src) => CharacterSheetClassUtils._isHoverOfficialSource(src);
 
-						// Check if feature.source looks like a class source (official sources like PHB, XPHB)
-						// This handles existing characters where classSource wasn't stored correctly
-						const officialClassSources = [Parser.SRC_PHB, Parser.SRC_XPHB, "PHB", "XPHB", "TCE", "XGE"];
-						const isOfficialSource = (src) => officialClassSources.includes(src?.toUpperCase?.() || src);
+						let {classSource: actualClassSource, featureSource: actualFeatureSource} =
+							CharacterSheetClassUtils.resolveFeatureHoverSources(feature, storedClass);
 
-						let actualClassSource = feature.classSource;
-						let actualFeatureSource = feature.source;
-						// If classSource is not set or is a homebrew source but feature.source is official, use feature.source
-						if (!actualClassSource || (!isOfficialSource(actualClassSource) && isOfficialSource(feature.source))) {
-							actualClassSource = feature.source;
-						}
-						// Final fallback to stored class or XPHB
-						if (!actualClassSource) {
-							actualClassSource = storedClass?.source || Parser.SRC_XPHB;
-						}
 						// For homebrew classes referencing official features (e.g. TGTT Warlock using XPHB Magical Cunning):
 						// if the resolved source is still non-official, look up the feature in loaded class data
 						if (!isOfficialSource(actualClassSource) && this._page?.getClassFeatures) {

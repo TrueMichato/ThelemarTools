@@ -4073,6 +4073,20 @@ class CharacterSheetQuickBuild {
 			let levelFeatures = features;
 			if (selectedSubclass) {
 				levelFeatures = this._getLevelFeatures(classData, classLevel, selectedSubclass);
+
+				// CS-BUG-002 / CS-BUG-017a: Catch-up backfill — see the parallel
+				// fix in CharacterSheetLevelUp._applyLevelUp. Subclass payloads can
+				// declare features at levels BELOW the subclass-gain level (e.g.
+				// TGTT Heroic Soul / Fiendish Bloodline / The Horror at L1); the
+				// earlier per-level passes saw `subclass: null` so those features
+				// were never queried. `selectedSubclass` is only set on the level
+				// where the subclass is first chosen, so we won't double-apply on
+				// later levels.
+				for (let earlierLevel = 1; earlierLevel < classLevel; earlierLevel++) {
+					const earlierFeatures = this._getLevelFeatures(classData, earlierLevel, selectedSubclass);
+					const earlierSubclassFeatures = (earlierFeatures || []).filter(f => f.isSubclassFeature);
+					if (earlierSubclassFeatures.length) levelFeatures = levelFeatures.concat(earlierSubclassFeatures);
+				}
 			}
 
 			// 2. Update class level

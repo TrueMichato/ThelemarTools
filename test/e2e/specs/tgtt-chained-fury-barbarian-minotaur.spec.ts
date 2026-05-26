@@ -27,7 +27,7 @@ describeCharacter({
 		// Barbarians don't have a class-granted SR resource at L5; skip.
 		shortRestRestores: {skip: true},
 		// Activating Rage breaks any concentration the player has.
-		concentrationCheck: {skip: true}, // blocked by CS-BUG-007 (Rage doesn't break concentration)
+		concentrationCheck: {castSpell: "Bless", thenAction: "rage", expectActive: false},
 		deathSaves: true,
 		applyCondition: {skip: true}, // blocked by CS-BUG-009 (addCondition hangs render — to retest after fix)
 		featAbility: {skip: true},

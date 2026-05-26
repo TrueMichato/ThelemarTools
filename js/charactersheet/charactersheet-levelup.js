@@ -1224,7 +1224,7 @@ class CharacterSheetLevelUp {
 	 * @param {*} classData
 	 * @param {*} onSelect
 	 */
-	_renderSubclassSelectionCompact (/** @type {*} */ classData, /** @type {*} */ onSelect) {
+	_renderSubclassSelectionCompact (/** @type {*} */ classData, /** @type {*} */ onSelect, /** @type {*} */ initialSubclass = null) {
 		const allSubclassesRaw = classData.subclasses || [];
 		// Apply source filtering
 		const allSubclasses = this._page.filterByAllowedSources(allSubclassesRaw);
@@ -1257,6 +1257,9 @@ class CharacterSheetLevelUp {
 
 		let selectedSource = "";
 		let textFilter = "";
+		// CS-BUG-021: remember the current pick so re-renders (filter changes,
+		// search, etc.) don't lose the radio's checked state.
+		let currentSelectedSubclass = initialSubclass || null;
 
 		const filterRow = showFilters ? e_({tag: "div", clazz: "ve-flex gap-2 mb-2"}) : null;
 		const searchInput = showFilters
@@ -1279,10 +1282,13 @@ class CharacterSheetLevelUp {
 		const list = e_({outer: `<div style="max-height: 300px; overflow-y: auto;"></div>`});
 
 		const renderSubclassItem = (/** @type {*} */ subclass) => {
+			const isCurrentlySelected = currentSelectedSubclass
+				&& currentSelectedSubclass.name === subclass.name
+				&& currentSelectedSubclass.source === subclass.source;
 			const option = e_({outer: `
-				<div class="charsheet__levelup-option">
+				<div class="charsheet__levelup-option${isCurrentlySelected ? " selected" : ""}">
 					<div class="charsheet__levelup-option-header">
-						<input type="radio" name="subclass-choice-wizard" value="${subclass.name}">
+						<input type="radio" name="subclass-choice-wizard" value="${subclass.name}"${isCurrentlySelected ? " checked" : ""}>
 						<span class="subclass-name-link"></span>
 						<span class="ve-small ve-muted ml-auto">${Parser.sourceJsonToAbv(subclass.source)}</span>
 					</div>
@@ -1298,6 +1304,7 @@ class CharacterSheetLevelUp {
 				list.querySelectorAll(".charsheet__levelup-option").forEach((/** @type {*} */ el) => el.classList.remove("selected"));
 				option.classList.add("selected");
 				option.querySelector("input").checked = true;
+				currentSelectedSubclass = subclass;
 				onSelect(subclass);
 			});
 
@@ -3811,6 +3818,27 @@ class CharacterSheetLevelUp {
 		if (selectedSubclass) {
 			// Get the subclass features for this level (replacing placeholders like "Subclass Feature")
 			newFeatures = CharacterSheetClassUtils.getLevelFeatures(classData, newLevel, selectedSubclass, this._page.getClassFeatures(), this._page.getSubclassFeatures());
+
+			// CS-BUG-002 / CS-BUG-017a: Catch-up backfill. A subclass can declare
+			// features at levels BELOW the subclass-gain level (e.g. TGTT Heroic Soul,
+			// Fiendish Bloodline, and The Horror all declare L1 subclass features, but
+			// TGTT classes don't grant the subclass until L3). Without this pass those
+			// features are lost forever, because the earlier per-level apply runs saw
+			// `subclass: null` and so the iterator in getLevelFeatures had nothing to
+			// walk. `selectedSubclass` is only truthy on the level where the subclass
+			// is first picked, so this loop is naturally gated to a single apply and
+			// can't create duplicates on subsequent level-ups.
+			for (let earlierLevel = 1; earlierLevel < newLevel; earlierLevel++) {
+				const earlierFeatures = CharacterSheetClassUtils.getLevelFeatures(
+					classData,
+					earlierLevel,
+					selectedSubclass,
+					this._page.getClassFeatures(),
+					this._page.getSubclassFeatures(),
+				);
+				const earlierSubclassFeatures = earlierFeatures.filter((/** @type {*} */ f) => f.isSubclassFeature);
+				if (earlierSubclassFeatures.length) newFeatures.push(...earlierSubclassFeatures);
+			}
 		}
 
 		// Update class level
