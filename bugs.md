@@ -31,7 +31,7 @@ _pHandleLinkMouseOver_doVerifyToRender @ render.js:15823
 pHandleLinkMouseOver @ render.js:15738
 await in pHandleLinkMouseOver
 onmouseover @ charactersheet.html:1
-[] when adding adept speed specialty from quickbuild and choosing it multiple times the speed bonus doesn't stack and the other ones doesn't show up in the features list.
+[X] when adding adept speed specialty from quickbuild and choosing it multiple times the speed bonus doesn't stack and the other ones doesn't show up in the features list.
 [] when doing quickbuild and choosing to roll for hit points, I want the player to be able to insert the rolled value if they want to instead of having to use the default value. 
 [] In the builder/multiclassing, the Illrigger class appears both from the Illrigger source and the TGTT source, but only the TGTT version should be available for selection.
 

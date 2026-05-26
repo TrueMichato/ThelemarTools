@@ -4489,16 +4489,21 @@ class CharacterSheetQuickBuild {
 					const fullOpt = classFeatures.find(f =>
 						f.name === parts[0] && f.className === parts[1] && f.source === parts[2],
 					);
+					// Strip data-defined `level` (e.g. Adept Speed's `level: 2`) so the caller-supplied
+					// character level wins; otherwise repeatable picks at L4/L6/L8/L10 would all be
+					// stored with level 2 and collapsed by addFeature's (name, source, className,
+					// level) dedup. See bugs.md "Adept Speed stacking".
 					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
 						{
 							...(fullOpt || {}),
 							...opt,
+							level: undefined,
 							entries: fullOpt?.entries ?? opt.entries,
 						},
 						{
 							className: analysis.className,
 							classSource: analysis.classSource,
-							level: opt.level || analysis.classLevel,
+							level: analysis.classLevel,
 							featureType: "Class",
 							isFeatureOption: true,
 							parentFeature: optGroup.featureName,
@@ -4506,10 +4511,10 @@ class CharacterSheetQuickBuild {
 					));
 				} else if (opt.type === "subclassFeature" && opt.ref) {
 					const subclass = this._getSubclassForClass(analysis.className, analysis.classSource, analysis.classLevel);
-					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(opt, {
+					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject({...opt, level: undefined}, {
 						className: analysis.className,
 						classSource: analysis.classSource,
-						level: opt.level || analysis.classLevel,
+						level: analysis.classLevel,
 						featureType: "Class",
 						subclassName: subclass?.name,
 						subclassShortName: opt.subclassShortName || subclass?.shortName,
@@ -4525,6 +4530,7 @@ class CharacterSheetQuickBuild {
 						{
 							...(fullOpt || {}),
 							...opt,
+							level: undefined,
 							entries: fullOpt?.entries ?? opt.entries,
 						},
 						{
