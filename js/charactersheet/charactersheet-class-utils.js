@@ -2166,15 +2166,49 @@ class CharacterSheetClassUtils {
 	/**
 	 * Returns a short explanatory blurb about the combat methods system for use
 	 * in Builder/LevelUp/QuickBuild UIs.
+	 *
+	 * Optionally accepts class context to tailor the Method DC formula and
+	 * Stamina-resource bullets to the supplied class/subclass — mirroring the
+	 * runtime DC calc in `charactersheet-state.js`. When no context is
+	 * passed the original generic blurb is returned (backward compatible).
+	 *
+	 * @param {{className?: string, classSource?: string, subclassName?: string}} [opts]
 	 * @returns {string} HTML string
 	 */
-	static getCombatMethodsSystemSummary () {
-		return `<div class="ve-small ve-muted mb-2">`
-			+ `<p class="mb-1"><strong>Combat Methods</strong> are tactical techniques fueled by <strong>Stamina</strong> (pool = 2× your proficiency bonus; regains on short/long rest).</p>`
-			+ `<p class="mb-1"><strong>Traditions</strong> are schools of martial technique — like schools of magic for spellcasters. You must be proficient in a tradition to learn its methods.</p>`
-			+ `<p class="mb-1">Methods are organized into <strong>degrees</strong> (1st–5th). Your class level determines the highest degree you can learn.</p>`
-			+ `<p class="mb-0"><strong>Method DC</strong> = 8 + proficiency bonus + STR or DEX modifier (your choice).</p>`
-			+ `</div>`;
+	static getCombatMethodsSystemSummary (/** @type {*} */ {className, classSource, subclassName} = {}) {
+		const lcClass = className?.toLowerCase?.() || "";
+		const lcSubclass = subclassName?.toLowerCase?.() || "";
+		const isTgtt = classSource === "TGTT";
+
+		// --- Resource bullet (Stamina pool, plus any class-specific alternates) ---
+		let resourceBullet = `<p class="mb-1"><strong>Combat Methods</strong> are tactical techniques fueled by <strong>Stamina</strong> (pool = 2× your proficiency bonus; regains on short/long rest).</p>`;
+		if (lcClass === "monk") {
+			resourceBullet = `<p class="mb-1"><strong>Combat Methods</strong> are tactical techniques fueled by <strong>Stamina</strong> (pool = 2× your proficiency bonus; regains on short/long rest). As a Monk, you may spend <strong>Focus Points</strong> in place of stamina.</p>`;
+		} else if (lcClass === "paladin" && isTgtt) {
+			resourceBullet = `<p class="mb-1"><strong>Combat Methods</strong> are tactical techniques fueled by <strong>Stamina</strong> (pool = 2× your proficiency bonus; regains on short/long rest). As a Paladin, you may also <strong>sacrifice a spell slot</strong> to gain stamina equal to 1 + the slot level.</p>`;
+		}
+
+		// --- Method DC bullet (formula, plus any class-specific overrides) ---
+		let dcBullet;
+		if (lcClass === "monk" && isTgtt) {
+			dcBullet = `<p class="mb-0"><strong>Method DC</strong> = 9 + proficiency bonus + STR, DEX, or WIS modifier (your choice).</p>`;
+		} else if (lcClass === "paladin" && isTgtt) {
+			dcBullet = `<p class="mb-0"><strong>Method DC</strong> = 8 + proficiency bonus + STR or DEX modifier (your choice). Paladins may instead use their <strong>spell save DC</strong>.</p>`;
+		} else if (
+			(lcClass === "warlock" && (lcSubclass === "hexblade" || lcSubclass === "the hexblade"))
+			|| (lcClass === "wizard" && (lcSubclass === "bladesinging" || lcSubclass === "bladesinger"))
+		) {
+			dcBullet = `<p class="mb-0"><strong>Method DC</strong> = 8 + proficiency bonus + STR or DEX modifier (your choice). You may instead use your <strong>spell save DC</strong>.</p>`;
+		} else {
+			dcBullet = `<p class="mb-0"><strong>Method DC</strong> = 8 + proficiency bonus + STR or DEX modifier (your choice).</p>`;
+		}
+
+		return `<div class="ve-small ve-muted mb-2">${
+			resourceBullet
+		}<p class="mb-1"><strong>Traditions</strong> are schools of martial technique — like schools of magic for spellcasters. You must be proficient in a tradition to learn its methods.</p>`
+			+ `<p class="mb-1">Methods are organized into <strong>degrees</strong> (1st–5th). Your class level determines the highest degree you can learn.</p>${
+				dcBullet
+			}</div>`;
 	}
 
 	static TRADITION_NAME_TO_CODE = Object.entries(CharacterSheetClassUtils.TRADITION_CODE_TO_NAME)
@@ -3530,8 +3564,8 @@ class CharacterSheetClassUtils {
 	/**
 	 * Get feat optional-feature options from the current optional-feature pool.
 	 * @param {Array<*>} allOptFeatures
-	 * @param {object} opts
-	 * @param {string[]} opts.featureTypes
+	 * @param {object} [opts]
+	 * @param {string[]} [opts.featureTypes]
 	 * @param {object} [opts.prereqContext]
 	 * @param {Array<*>} [opts.alreadyKnown]
 	 * @returns {Array<*>}

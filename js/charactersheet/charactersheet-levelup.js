@@ -2822,7 +2822,7 @@ class CharacterSheetLevelUp {
 			const section = e_({outer: `
 				<div class="charsheet__levelup-opt-gain mb-3">
 					<p><strong>${gain.name}:</strong></p>
-					${CharacterSheetClassUtils.getCombatMethodsSystemSummary()}
+					${CharacterSheetClassUtils.getCombatMethodsSystemSummary({className: classData?.name, classSource: classData?.source, subclassName: classData?.subclass?.name})}
 					<div class="charsheet__levelup-traditions mb-3">
 						<p class="ve-muted ve-small mb-2">You haven't selected Combat Traditions yet. Please choose ${traditionCount} traditions first:</p>
 						<div class="charsheet__levelup-tradition-list charsheet__levelup-picker-list"></div>
