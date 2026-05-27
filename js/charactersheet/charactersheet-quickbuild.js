@@ -2546,7 +2546,7 @@ class CharacterSheetQuickBuild {
 		const section = e_({outer: `
 			<div class="charsheet__quickbuild-section mb-3">
 				<h5>${gain.name} <span class="badge badge-primary">${selectedList.length}/${gain.totalNeeded}</span></h5>
-				${CharacterSheetClassUtils.getCombatMethodsSystemSummary()}
+				${CharacterSheetClassUtils.getCombatMethodsSystemSummary({className: gain.className, classSource: gain.classSource, subclassName: subclass?.name})}
 				<p class="ve-muted ve-small">Max degree: ${maxDegree}${CharacterSheetClassUtils.getOrdinalSuffix(maxDegree)}</p>
 			</div>
 		`});

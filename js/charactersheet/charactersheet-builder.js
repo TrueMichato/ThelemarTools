@@ -5580,7 +5580,7 @@ class CharacterSheetBuilder {
 		const section = e_({outer: `
 			<div class="charsheet__builder-combat-methods mb-3">
 				<h6 class="mt-2 mb-1">Combat Traditions & Methods</h6>
-				${CharacterSheetClassUtils.getCombatMethodsSystemSummary()}
+				${CharacterSheetClassUtils.getCombatMethodsSystemSummary({className: cls?.name, classSource: cls?.source, subclassName: this._selectedSubclass?.name})}
 				<p class="ve-small ve-muted">First choose ${traditionCount} traditions you're proficient with, then select ${methodCount} methods from those traditions.</p>
 				
 				<div class="charsheet__builder-traditions mb-2">
