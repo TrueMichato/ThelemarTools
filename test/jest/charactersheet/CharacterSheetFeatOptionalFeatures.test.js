@@ -119,4 +119,30 @@ describe("CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic", () => {
 		expect(ClassUtils.filterOptFeaturesForTgttMetamagic([], {enableTgtt: true})).toEqual([]);
 		expect(ClassUtils.filterOptFeaturesForTgttMetamagic(null, {enableTgtt: true})).toBeFalsy();
 	});
+
+	it("strips non-TGTT MM features when classSource is TGTT even with enableTgtt off (Bug 6)", () => {
+		const filtered = ClassUtils.filterOptFeaturesForTgttMetamagic(POOL, {enableTgtt: false, classSource: "TGTT"});
+		const mmEntries = filtered.filter(it => it.featureType?.includes("MM"));
+		expect(mmEntries.map(it => `${it.name}|${it.source}`)).toEqual([
+			"Quickened Spell|TGTT",
+			"Warding Spell|TGTT",
+		]);
+	});
+
+	it("is case-insensitive on classSource", () => {
+		const filtered = ClassUtils.filterOptFeaturesForTgttMetamagic(POOL, {enableTgtt: false, classSource: "tgtt"});
+		const mmEntries = filtered.filter(it => it.featureType?.includes("MM"));
+		expect(mmEntries.map(it => it.source)).toEqual(["TGTT", "TGTT"]);
+	});
+
+	it("leaves the input untouched when classSource is a non-TGTT source and enableTgtt is off", () => {
+		const filtered = ClassUtils.filterOptFeaturesForTgttMetamagic(POOL, {enableTgtt: false, classSource: "PHB"});
+		expect(filtered).toBe(POOL);
+	});
+
+	it("still filters when classSource is TGTT regardless of nullish/empty enableTgtt opts", () => {
+		const filtered = ClassUtils.filterOptFeaturesForTgttMetamagic(POOL, {classSource: "TGTT"});
+		const mmEntries = filtered.filter(it => it.featureType?.includes("MM"));
+		expect(mmEntries.map(it => it.source)).toEqual(["TGTT", "TGTT"]);
+	});
 });

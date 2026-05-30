@@ -171,17 +171,24 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * When TGTT mode is enabled, restrict Metamagic (`MM`) optional features to TGTT-source
-	 * entries so PHB-only metamagics (Distant, Empowered, Subtle, Twinned, …) don't leak into
-	 * pickers that share the `MM` featureType code with the TGTT passive/active system. Other
-	 * featureType codes are returned untouched.
+	 * When TGTT mode is enabled OR the active class source is TGTT, restrict Metamagic (`MM`)
+	 * optional features to TGTT-source entries so PHB-only metamagics (Distant, Empowered,
+	 * Subtle, Twinned, …) don't leak into pickers that share the `MM` featureType code with
+	 * the TGTT passive/active system. Other featureType codes are returned untouched.
+	 *
+	 * The class-source gate ensures TGTT Sorcerer pickers correctly hide XPHB metamagics
+	 * even when the global TGTT settings flag is off, since a TGTT class is itself an
+	 * explicit opt-in to the TGTT metamagic list (Bug 6).
 	 * @param {Array<*>} optFeatures - Optional features (typically post-deduplication)
 	 * @param {object} [opts]
-	 * @param {boolean} [opts.enableTgtt=false] - Whether the TGTT setting is on
+	 * @param {boolean} [opts.enableTgtt=false] - Whether the TGTT global setting is on
+	 * @param {string|null} [opts.classSource=null] - Source of the class currently driving this picker (if any). When equal to "TGTT" (case-insensitive), the filter applies regardless of the global flag.
 	 * @returns {Array<*>} Filtered optional features
 	 */
-	static filterOptFeaturesForTgttMetamagic (/** @type {*} */ optFeatures, /** @type {*} */ {enableTgtt = false} = {}) {
-		if (!optFeatures?.length || !enableTgtt) return optFeatures;
+	static filterOptFeaturesForTgttMetamagic (/** @type {*} */ optFeatures, /** @type {*} */ {enableTgtt = false, classSource = null} = {}) {
+		if (!optFeatures?.length) return optFeatures;
+		const classSourceIsTgtt = !!classSource && String(classSource).toUpperCase() === "TGTT";
+		if (!enableTgtt && !classSourceIsTgtt) return optFeatures;
 		return optFeatures.filter((/** @type {*} */ opt) => {
 			const isMetamagic = opt?.featureType?.some?.((/** @type {*} */ ft) => ft === "MM");
 			if (!isMetamagic) return true;
@@ -2061,8 +2068,10 @@ class CharacterSheetClassUtils {
 	 * @returns {Array<{tradition: string, code: string}>} Granted traditions
 	 */
 	static getSubclassGrantedTraditions (/** @type {*} */ subclass, /** @type {*} */ classSource) {
-		if (!subclass?.shortName) return [];
-		const isTGTT = classSource === "TGTT" || subclass.source === "TGTT";
+		if (!subclass) return [];
+		const lookupKey = subclass.shortName || subclass.name;
+		if (!lookupKey) return [];
+		const isTGTT = classSource === "TGTT" || subclass.source === "TGTT" || subclass.classSource === "TGTT";
 		if (!isTGTT) return [];
 
 		// Subclass → granted tradition(s) + bonus method count
@@ -2087,14 +2096,70 @@ class CharacterSheetClassUtils {
 			// --- Fighter subclasses ---
 			"Eldritch Knight": [{tradition: "Arcane Knight", code: "AK", bonusMethods: 1}, {tradition: "Eldritch Blackguard", code: "EB", bonusMethods: 1}],
 			"Battle Master": [{tradition: null, code: null, bonusMethods: 1, choice: true}, {tradition: null, code: null, bonusMethods: 0, choice: true}],
-			"Arcane Archer": [{tradition: "Biting Zephyr", code: "BZ", bonusMethods: 1, choice: true}, {tradition: "Razor's Edge", code: "RE", bonusMethods: 0, choice: true}, {tradition: "Unending Wheel", code: "UW", bonusMethods: 0, choice: true}],
+			"Arcane Archer": [{tradition: "Biting Zephyr", code: "BZ", bonusMethods: 1, choice: true}, {tradition: "Razor's Edge", code: "RE", bonusMethods: 0, choice: true}, {tradition: "Unending Wheel", code: "UW", bonusMethods: 0, choice: true}, {tradition: "Unerring Hawk", code: "UH", bonusMethods: 0, choice: true}],
 			"Champion": [{tradition: "Adamant Mountain", code: "AM", bonusMethods: 1, choice: true}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0, choice: true}, {tradition: "Tempered Iron", code: "TI", bonusMethods: 0, choice: true}],
+			"Purple Dragon Knight (Banneret)": [{tradition: "Adamant Mountain", code: "AM", bonusMethods: 1, choice: true}, {tradition: "Sanguine Knot", code: "SK", bonusMethods: 0, choice: true}, {tradition: "Spirited Steed", code: "SS", bonusMethods: 0, choice: true}],
+			"Cavalier": [{tradition: "Gallant Heart", code: "GH", bonusMethods: 1}, {tradition: "Spirited Steed", code: "SS", bonusMethods: 0}],
+			"Samurai": [{tradition: "Razor's Edge", code: "RE", bonusMethods: 1}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0}],
+			"Echo Knight": [{tradition: "Mirror's Glint", code: "MG", bonusMethods: 1}, {tradition: "Mist and Shade", code: "MS", bonusMethods: 0}],
+			"Psi Warrior": [{tradition: "Rapid Current", code: "RC", bonusMethods: 1}, {tradition: "Mirror's Glint", code: "MG", bonusMethods: 0}],
+			"Rune Knight": [{tradition: "Adamant Mountain", code: "AM", bonusMethods: 1}, {tradition: "Tempered Iron", code: "TI", bonusMethods: 0}],
+			// --- Paladin subclasses ---
+			"Oathbreaker": [{tradition: "Eldritch Blackguard", code: "EB", bonusMethods: 1}],
 			// --- Rogue subclasses ---
 			"Swashbuckler": [{tradition: "Comedic Jabs", code: "CJ", bonusMethods: 1}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0}],
 			// --- Warder (special: grants 2 fixed traditions) ---
 			"Warder": [{tradition: "Tempered Iron", code: "TI", bonusMethods: 1}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0}],
 		};
-		return (/** @type {*} */ (GRANTS))[subclass.shortName] || [];
+		return (/** @type {*} */ (GRANTS))[lookupKey] || (/** @type {*} */ (GRANTS))[subclass.name] || [];
+	}
+
+	/**
+	 * Subclass-specific tradition CHOICE pools: when a subclass grants the
+	 * player a CHOICE of N traditions from a restricted (or unrestricted)
+	 * pool — independent of the base-class tradition picker.
+	 *
+	 * `codes: null` → unrestricted (pick `pickCount` from any tradition).
+	 * `codes: [...]` → restricted (pick `pickCount` from this specific pool).
+	 *
+	 * These choices are ADDITIONAL to any fixed (non-`choice`) entries in
+	 * `getSubclassGrantedTraditions` and are presented to the user in a
+	 * dedicated picker section at the level the subclass is selected.
+	 */
+	static SUBCLASS_TRADITION_CHOICE_POOLS = {
+		// --- Fighter subclasses (TGTT) ---
+		"Arcane Archer": {pickCount: 2, codes: ["BZ", "RE", "UW", "UH"]},
+		"Champion": {pickCount: 2, codes: ["AM", "GH", "TI"]},
+		"Purple Dragon Knight (Banneret)": {pickCount: 2, codes: ["AM", "SK", "SS"]},
+		"Battle Master": {pickCount: 2, codes: null}, // unrestricted
+		// --- Monk subclasses (TGTT) ---
+		"Open Hand": {pickCount: 1, codes: ["AM", "TI"]},
+		"Debilitation": {pickCount: 1, codes: ["AM", "TI"]},
+		"Kensei": {pickCount: 1, codes: null}, // unrestricted
+	};
+
+	/**
+	 * Return the subclass-choice tradition pool for a given subclass.
+	 * @param {*} subclass - Subclass entity (uses shortName, falls back to name).
+	 * @param {string} classSource - The classSource (must be TGTT to apply).
+	 * @returns {{kind: "none"|"restricted"|"unrestricted", pickCount?: number, codes?: string[]|null}}
+	 */
+	static getSubclassTraditionChoicePool (/** @type {*} */ subclass, /** @type {*} */ classSource) {
+		if (!subclass) return {kind: "none"};
+		const lookupKey = subclass.shortName || subclass.name;
+		if (!lookupKey) return {kind: "none"};
+		const isTGTT = classSource === "TGTT" || subclass.source === "TGTT" || subclass.classSource === "TGTT";
+		if (!isTGTT) return {kind: "none"};
+
+		const map = (/** @type {*} */ (CharacterSheetClassUtils.SUBCLASS_TRADITION_CHOICE_POOLS));
+		const entry = map[lookupKey] || map[subclass.name];
+		if (!entry) return {kind: "none"};
+
+		return {
+			kind: entry.codes === null ? "unrestricted" : "restricted",
+			pickCount: entry.pickCount,
+			codes: entry.codes,
+		};
 	}
 
 	/**
@@ -2479,6 +2544,30 @@ class CharacterSheetClassUtils {
 		);
 
 		if (!combatMethodsFeature) return traditions;
+
+		// Detect unrestricted marker: {@filter <text>|combatmethods} (no |tradition= suffix).
+		// When present anywhere in the feature, the class is NOT restricted to a
+		// specific subset — any tradition= filters elsewhere are advisory
+		// (e.g. Fighter's "Getting Started" inset suggests TI + AM but allows all 17).
+		// Returning an empty set signals "no restriction" to upstream callers,
+		// which fall back to the full tradition pool.
+		const hasUnrestrictedMarker = (/** @type {*} */ entries) => {
+			if (!entries) return false;
+			if (typeof entries === "string") {
+				// Match {@filter <text>|combatmethods} where the closing brace
+				// immediately follows `combatmethods` (no third |tradition=... segment).
+				return /\{@filter [^|}]+\|combatmethods\}/.test(entries);
+			}
+			if (Array.isArray(entries)) return entries.some(hasUnrestrictedMarker);
+			if (typeof entries === "object") {
+				return hasUnrestrictedMarker(entries.entries)
+					|| hasUnrestrictedMarker(entries.items)
+					|| hasUnrestrictedMarker(entries.entry);
+			}
+			return false;
+		};
+
+		if (hasUnrestrictedMarker(combatMethodsFeature.entries)) return traditions;
 
 		const extractFromEntries = (/** @type {*} */ entries) => {
 			if (!entries) return;
