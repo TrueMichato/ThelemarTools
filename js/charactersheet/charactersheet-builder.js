@@ -7443,6 +7443,26 @@ class CharacterSheetBuilder {
 		addExtraLangOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
 		addExtraLangOptgroup("──── Secret Languages ────", langOptions.secret);
 
+		// Helper: enforce that tool1 + lang1 + extra never sums to more than 2 selections
+		const updatePickerLimit = () => {
+			const tool1El = /** @type {HTMLSelectElement} */ (document.getElementById("custom-bg-tool1"));
+			const lang1El = /** @type {HTMLSelectElement} */ (document.getElementById("custom-bg-lang1"));
+			const extraEl = /** @type {HTMLSelectElement} */ (document.getElementById("custom-bg-extra"));
+			if (!tool1El || !lang1El || !extraEl) return;
+
+			const picks = [tool1El, lang1El, extraEl].filter(el => el.value).length;
+			[tool1El, lang1El, extraEl].forEach(el => {
+				const isEmpty = !el.value;
+				if (picks >= 2 && isEmpty) {
+					el.disabled = true;
+					el.title = "You have already chosen 2 proficiencies; clear one to pick a different combination.";
+				} else {
+					el.disabled = false;
+					el.title = "";
+				}
+			});
+		};
+
 		// Event handlers
 		document.getElementById("custom-bg-name")?.addEventListener("input", (/** @type {*} */ e) => {
 			this._customBackgroundData.name = e.target.value || "Custom Background";
@@ -7450,10 +7470,12 @@ class CharacterSheetBuilder {
 
 		document.getElementById("custom-bg-tool1")?.addEventListener("change", (/** @type {*} */ e) => {
 			this._customBackgroundData.tools[0] = e.target.value;
+			updatePickerLimit();
 		});
 
 		document.getElementById("custom-bg-lang1")?.addEventListener("change", (/** @type {*} */ e) => {
 			this._customBackgroundData.languages[0] = e.target.value;
+			updatePickerLimit();
 		});
 
 		document.getElementById("custom-bg-extra")?.addEventListener("change", (/** @type {*} */ e) => {
@@ -7468,6 +7490,7 @@ class CharacterSheetBuilder {
 				this._customBackgroundData.tools[1] = "";
 				this._customBackgroundData.languages[1] = "";
 			}
+			updatePickerLimit();
 		});
 
 		document.getElementById("custom-bg-equipment")?.addEventListener("input", (/** @type {*} */ e) => {
@@ -7490,6 +7513,14 @@ class CharacterSheetBuilder {
 			// Validate
 			if (this._customBackgroundData.skills.length !== 2) {
 				JqueryUtil.doToast({type: "warning", content: "Please select exactly 2 skill proficiencies."});
+				return;
+			}
+
+			const toolCount = (this._customBackgroundData.tools || []).filter(Boolean).length;
+			const langCount = (this._customBackgroundData.languages || []).filter(Boolean).length;
+			const profTotal = toolCount + langCount;
+			if (profTotal > 2) {
+				JqueryUtil.doToast({type: "warning", content: "Pick at most 2 total from languages and tools (2 tools, 2 languages, or 1 of each)."});
 				return;
 			}
 

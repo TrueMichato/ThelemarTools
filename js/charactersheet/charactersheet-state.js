@@ -6049,9 +6049,11 @@ class CharacterSheetState {
 		const stanceBonus = this._getStanceSaveBonus(ability);
 		// Paladin Aura of Protection (level 6+): add CHA mod to all saving throws
 		const auraBonus = this._getAuraOfProtectionBonus();
-		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus - exhaustionPenalty;
+		// Note: exhaustion is intentionally NOT applied here. The displayed save bonus
+		// stays "pure"; the exhaustion penalty is applied once at roll time by the
+		// roll handler (_rollSavingThrow). This avoids the double-application bug
+		// where both display and roll subtracted the penalty.
+		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus;
 	}
 
 	// Alias for test compatibility
@@ -6184,8 +6186,9 @@ class CharacterSheetState {
 			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
 			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
 			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
-			const exhaustionPenalty = this._getExhaustionD20Penalty();
-			return pb + (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus - exhaustionPenalty;
+			// Note: exhaustion is intentionally NOT applied here. The display stays
+			// "pure"; the penalty is applied once at roll time (_rollSkillCheck).
+			return pb + (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus;
 		}
 
 		// Use getSkillAbility() as single source of truth for skill→ability mapping
@@ -6252,13 +6255,12 @@ class CharacterSheetState {
 		// Get bonus from active states (check:ability type bonuses)
 		const stateBonus = this.getSkillBonusFromStates(skill, this.getSkillAbility(skill) || ability);
 
-		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
-
 		// Combat stance skill bonus (Thelemar homebrew)
 		const stanceBonus = this._getStanceSkillBonus(skill);
 
-		return mod + profBonus + custom + itemBonus + dynamicFeatureBonus + abilityCheckBonus + stateBonus + stanceBonus - exhaustionPenalty;
+		// Note: exhaustion is intentionally NOT applied here. The display stays
+		// "pure"; the penalty is applied once at roll time (_rollSkillCheck).
+		return mod + profBonus + custom + itemBonus + dynamicFeatureBonus + abilityCheckBonus + stateBonus + stanceBonus;
 	}
 
 	/**
@@ -6924,8 +6926,8 @@ class CharacterSheetState {
 		const stanceBonus = this._getStanceSaveBonus(ability);
 		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
 
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+		// Note: exhaustion is intentionally NOT included in the save breakdown.
+		// Exhaustion only affects rolls, not the displayed bonus (see getSaveMod).
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
 		return {total, components};
@@ -7002,8 +7004,8 @@ class CharacterSheetState {
 			if (stateBonus !== 0) loreComponents.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
 			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
 			if (stanceBonus !== 0) loreComponents.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
-			const exhaustionPenalty = this._getExhaustionD20Penalty();
-			if (exhaustionPenalty !== 0) loreComponents.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+			// Note: exhaustion is intentionally NOT included in skill breakdowns.
+			// Exhaustion only affects rolls, not the displayed bonus.
 			const loreTotal = loreComponents.reduce((sum, comp) => sum + comp.value, 0);
 			return {total: loreTotal, components: loreComponents, ability: null};
 		}
@@ -7071,8 +7073,8 @@ class CharacterSheetState {
 		const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
 		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
 
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+		// Note: exhaustion is intentionally NOT included in skill breakdowns.
+		// Exhaustion only affects rolls, not the displayed bonus.
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
 		return {total, components, ability};
@@ -7171,8 +7173,8 @@ class CharacterSheetState {
 			components.push({type: "feature", name: bonus.name, value: bonus.value, icon: "⚡"});
 		}
 
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+		// Note: exhaustion is intentionally NOT included in the initiative breakdown.
+		// Exhaustion only affects rolls, not the displayed bonus.
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
 		return {total, components};
@@ -7201,8 +7203,8 @@ class CharacterSheetState {
 		const itemBonus = this._data.itemBonuses?.spellAttack || 0;
 		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
 
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+		// Note: exhaustion is intentionally NOT included in the spell-attack breakdown.
+		// Exhaustion only affects rolls, not the displayed bonus.
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
 		return {total, components};
@@ -7789,9 +7791,8 @@ class CharacterSheetState {
 			initiative += bonus.value;
 		}
 
-		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
-		initiative -= this._getExhaustionD20Penalty();
-
+		// Note: exhaustion is intentionally NOT applied here. The display stays
+		// "pure"; the penalty is applied once at roll time (_rollInitiative).
 		return initiative;
 	}
 	// #endregion
@@ -8005,8 +8006,9 @@ class CharacterSheetState {
 	}
 
 	getSpellAttackBonus (className) {
-		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
+		// Note: exhaustion is intentionally NOT applied here. The displayed spell
+		// attack bonus stays "pure"; the penalty is applied once at roll time by
+		// the attack roll handler.
 
 		// If className specified, use that class's spellcasting ability
 		if (className) {
@@ -8024,13 +8026,13 @@ class CharacterSheetState {
 			const ability = spellcastingAbilities[className];
 			if (ability) {
 				const itemBonus = this._data.itemBonuses?.spellAttack || 0;
-				return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus - exhaustionPenalty;
+				return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus;
 			}
 		}
 		const ability = this._data.spellcasting.ability;
 		if (!ability) return null;
 		const itemBonus = this._data.itemBonuses?.spellAttack || 0;
-		return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus - exhaustionPenalty;
+		return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus;
 	}
 
 	/**
