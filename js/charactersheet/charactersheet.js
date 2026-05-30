@@ -10300,6 +10300,26 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Build a (name, source, spellData) => html closure that routes through
+	 * {@link getSpellHoverLink}, automatically resolving the matching characterSpell
+	 * (with subschools for rarity/legality) from current state when present.
+	 * Pass the returned function to spell pickers as their `getSpellHoverLink` option
+	 * so picker hovers match the rest of the sheet (Bug 7).
+	 * @returns {(name: string, source: string, spellData?: object|null) => string}
+	 */
+	buildSpellHoverLinkFn () {
+		return (name, source, spellData) => {
+			try {
+				const characterSpell = this.getState?.()?.getSpells?.()
+					.find(s => s.name === name && (s.source || Parser.SRC_XPHB) === (source || Parser.SRC_XPHB));
+				return this.getSpellHoverLink(name, source, spellData || null, characterSpell || null);
+			} catch (e) {
+				return this.getHoverLink(UrlUtil.PG_SPELLS, name, source);
+			}
+		};
+	}
+
+	/**
 	 * Custom mouseover handler for spell hovers with charsheet modifications.
 	 * Renders our pre-built rows in a proper ve-stats table element, bypassing
 	 * the generic entry rendering path.

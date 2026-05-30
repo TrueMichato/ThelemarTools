@@ -8923,6 +8923,7 @@ class CharacterSheetBuilder {
 						this._selectedKnownCantrips = cantrips;
 					},
 					getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+					getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 					preSelectedSpells: [],
 					preSelectedCantrips: this._selectedKnownCantrips,
 				});
@@ -8942,6 +8943,7 @@ class CharacterSheetBuilder {
 					this._selectedSpellbookSpells = spells;
 				},
 				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				preSelectedSpells: this._selectedSpellbookSpells,
 			}));
 			pickerEl.append(spellbookSection);
@@ -8964,6 +8966,7 @@ class CharacterSheetBuilder {
 					this._selectedKnownCantrips = cantrips;
 				},
 				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				preSelectedSpells: this._selectedKnownSpells,
 				preSelectedCantrips: this._selectedKnownCantrips,
 			});
