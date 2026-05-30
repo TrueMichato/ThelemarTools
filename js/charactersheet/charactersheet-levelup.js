@@ -1190,6 +1190,21 @@ class CharacterSheetLevelUp {
 			// slots can be filled later from the Spells tab. We deliberately do not
 			// gate Apply on under-filled spell pools.
 
+			// Bug 8: gate Apply on optional-feature feat-progression picks
+			// (e.g. an invocation that grants an Origin Feat must have its feat selected
+			// AND its sub-choices filled before the level-up can proceed).
+			const progressionValidation = this._validateOptFeatureFeatProgressionPicks(selectedOptionalFeatures);
+			if (!progressionValidation.valid) {
+				const detail = progressionValidation.missing
+					.map(m => `• ${m.optName}: ${m.slot}`)
+					.join("<br>");
+				JqueryUtil.doToast({
+					type: "warning",
+					content: `Some optional features still need a feat selection:<br>${detail}`,
+				});
+				return;
+			}
+
 			// ========== APPLY LEVEL UP ==========
 			await this._applyLevelUp({
 				classEntry,
@@ -1850,174 +1865,12 @@ class CharacterSheetLevelUp {
 		// Declared as a `function` (not `const` arrow) so it is hoisted
 		// to the top of `_renderAsiSelection` — the Epic Boon section
 		// (rendered earlier in the function body) needs to call it.
+		// We capture `this` into `self` because strict-mode `function`
+		// declarations don't inherit lexical `this`, so the optional-feature
+		// branch below previously crashed for any feat with `optionalfeatureProgression`.
+		const self = this;
 		function getFeatChoices (/** @type {*} */ feat) {
-			/** @type {*} */ const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null, spells: null, optionalFeatures: null};
-
-			if (feat.skillProficiencies) {
-				for (const sp of feat.skillProficiencies) {
-					if (sp.choose) {
-						choices.skills = {count: sp.choose.count || 1, from: sp.choose.from || Object.keys(Parser.SKILL_TO_ATB_ABV)};
-						break;
-					}
-					if (sp.any) {
-						choices.skills = {count: sp.any, from: Object.keys(Parser.SKILL_TO_ATB_ABV)};
-						break;
-					}
-				}
-			}
-
-			if (feat.languageProficiencies) {
-				for (const lp of feat.languageProficiencies) {
-					if (lp.anyStandard) {
-						choices.languages = {count: lp.anyStandard, type: "standard"};
-						break;
-					}
-					if (lp.any) {
-						choices.languages = {count: lp.any, type: "any"};
-						break;
-					}
-				}
-			}
-
-			// Tool proficiency choices
-			if (feat.toolProficiencies) {
-				for (const tp of feat.toolProficiencies) {
-					if (tp.anyArtisansTool && tp.anyMusicalInstrument) {
-						// Combined: choose artisan OR instrument (not yet handled — treat as artisan for now)
-						choices.tools = {count: tp.anyArtisansTool, type: "artisanOrInstrument"};
-						break;
-					}
-					if (tp.anyArtisansTool) {
-						choices.tools = {count: tp.anyArtisansTool, type: "artisan"};
-						break;
-					}
-					if (tp.anyMusicalInstrument) {
-						choices.tools = {count: tp.anyMusicalInstrument, type: "instrument"};
-						break;
-					}
-					if (tp.any) {
-						choices.tools = {count: tp.any, type: "any"};
-						break;
-					}
-					if (tp.choose) {
-						choices.tools = {count: tp.choose.count || 1, from: tp.choose.from || []};
-						break;
-					}
-				}
-
-				// Check for artisan+instrument combo across separate entries (Monk data format)
-				if (!choices.tools) {
-					const hasArtisan = (/** @type {*} */ toolProfs) => toolProfs.some((/** @type {*} */ tp) => tp.anyArtisansTool);
-					const hasInstrument = (/** @type {*} */ toolProfs) => toolProfs.some((/** @type {*} */ tp) => tp.anyMusicalInstrument);
-					if (hasArtisan(feat.toolProficiencies) && hasInstrument(feat.toolProficiencies)) {
-						choices.tools = {count: 1, type: "artisanOrInstrument"};
-					}
-				}
-			}
-
-			// Expertise choices
-			if (feat.expertise) {
-				for (const exp of feat.expertise) {
-					if (exp.anyProficientSkill) {
-						choices.expertise = {count: exp.anyProficientSkill, type: "proficient"};
-						break;
-					}
-					if (exp.choose) {
-						choices.expertise = {count: exp.choose.count || 1, from: exp.choose.from || []};
-						break;
-					}
-				}
-			}
-
-			if (feat.ability) {
-				for (const ab of feat.ability) {
-					if (ab.choose) {
-						choices.ability = {count: ab.choose.count || 1, amount: ab.choose.amount || 1, from: ab.choose.from || Parser.ABIL_ABVS};
-						break;
-					}
-				}
-			}
-
-			const featOptSpecs = CharacterSheetClassUtils.getFeatOptionalFeatureChoiceSpec(feat);
-			if (featOptSpecs?.length) {
-				const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
-				const settings = this._state.getSettings() || {};
-				const showAll = settings.showAllOptFeatureVersions || false;
-				const enableTgtt = !!settings.enableTgtt;
-				const dedupedOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
-				const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(dedupedOptFeatures, {enableTgtt});
-				const alreadyKnown = this._state.getFeatures().filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
-				const prereqContext = {
-					classes: this._state.getClasses(),
-					totalLevel: this._state.getTotalLevel(),
-					existingFeatures: alreadyKnown,
-					cantrips: this._state.getCantripsKnown?.() || [],
-					spells: this._state.getSpellsKnown?.() || [],
-				};
-
-				choices.optionalFeatures = featOptSpecs.map(spec => ({
-					...spec,
-					available: CharacterSheetClassUtils.getFeatOptionalFeatureOptions(allOptFeatures, {
-						featureTypes: spec.featureTypes,
-						prereqContext,
-						alreadyKnown,
-					}),
-				}));
-			}
-
-			// Spell choices from additionalSpells
-			if (feat.additionalSpells) {
-				/** @type {*} */ const spellChoices = {cantrips: null, spells: null, list: null};
-
-				for (const addSpells of feat.additionalSpells) {
-					// Check for list-based spells (Magic Initiate style)
-					if (addSpells.name && addSpells.ability) {
-						spellChoices.list = {
-							name: addSpells.name,
-							ability: addSpells.ability,
-						};
-					}
-
-					// Parse innate/known/prepared for choices
-					const parseSpellBlock = (/** @type {*} */ block, /** @type {*} */ target) => {
-						if (!block) return;
-						for (const [key, val] of Object.entries(block)) {
-							if (key === "_" || key === "daily" || key === "rest") {
-								const spells = key === "_" ? val : (val["1e"] || val["1"] || Object.values(val)[0] || []);
-								if (Array.isArray(spells)) {
-									for (const spell of spells) {
-										if (typeof spell === "object" && spell.choose && typeof spell.choose === "string") {
-											const filter = spell.choose;
-											const count = spell.count || 1;
-											const maxLevel = filter.match(/level=(\d+)/)?.[1];
-											if (maxLevel === "0" || filter.includes("level=0")) {
-												spellChoices.cantrips = {count, filter};
-											} else {
-												spellChoices.spells = {
-													count,
-													filter,
-													innate: target === "innate",
-													daily: key === "daily" ? "1" : null,
-												};
-											}
-										}
-									}
-								}
-							}
-						}
-					};
-
-					parseSpellBlock(addSpells.innate, "innate");
-					parseSpellBlock(addSpells.known, "known");
-					parseSpellBlock(addSpells.prepared, "prepared");
-				}
-
-				if (spellChoices.cantrips || spellChoices.spells || spellChoices.list) {
-					choices.spells = spellChoices;
-				}
-			}
-
-			return choices;
+			return CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {state: self._state, page: self._page});
 		}
 
 		const renderFeats = (filter = "") => {
@@ -3292,6 +3145,10 @@ class CharacterSheetLevelUp {
 					</label>
 				`});
 
+				// Sibling container (outside the <label>!) for any featProgression picker.
+				// Inputs inside the label would toggle the checkbox.
+				const progressionContainer = e_({outer: `<div class="charsheet__levelup-opt-feat-progression ml-4 mt-1" style="display: none;"></div>`});
+
 				// Create hoverable link for the optional feature name
 				const optName = item.querySelector(".opt-name");
 				try {
@@ -3312,6 +3169,16 @@ class CharacterSheetLevelUp {
 						if (selectedForType.length < gain.newCount) {
 							selectedForType.push(opt);
 							item.style.background = "var(--rgb-link-opacity-10)";
+							// Bug 8: render feat-progression picker if this opt grants any feats.
+							// Stable per-instance id so the resulting feature and its granted feat
+							// can be cleanly cascade-removed on respec/uncheck.
+							if (!opt.id) opt.id = CryptUtil.uid();
+							if (!Array.isArray(opt._progressionFeats)) opt._progressionFeats = [];
+							const picks = CharacterSheetClassUtils.getOptFeatureFeatProgressionPicks(opt, (opt._timesKnown || 0) + 1);
+							if (picks.length) {
+								progressionContainer.style.display = "";
+								this._renderOptFeatureFeatProgressionPicker(opt, picks, progressionContainer);
+							}
 						} else {
 							e.target.checked = false;
 							JqueryUtil.doToast({type: "warning", content: `You can only choose ${gain.newCount} ${gain.name}.`});
@@ -3320,16 +3187,143 @@ class CharacterSheetLevelUp {
 						const idx = selectedForType.findIndex((/** @type {*} */ s) => s.name === opt.name && s.source === opt.source);
 						if (idx >= 0) selectedForType.splice(idx, 1);
 						item.style.background = "";
+						// Clear any progression picks so an unchecked opt doesn't carry stale data
+						opt._progressionFeats = [];
+						progressionContainer.style.display = "none";
+						progressionContainer.innerHTML = "";
 					}
 					gainSection.querySelector(".opt-count").textContent = selectedForType.length;
 					onSelect(featureKey, [...selectedForType]);
 				});
 
-				list.append(item);
+				list.append(item, progressionContainer);
 			});
 		}
 
 		container.append(gainSection);
+	}
+
+	/**
+	 * Bug 8: Render a feat-progression picker UI attached to a selected optional feature
+	 * (e.g. the "Lessons of the First Ones" invocation grants an Origin Feat).
+	 *
+	 * Stores each picked feat on `opt._progressionFeats[]` so the level-up apply
+	 * handler can add them and `removeFeature` can cascade-clean them on uncheck/respec.
+	 *
+	 * @param {object} opt - The selected optional feature (already has `id` + `_progressionFeats`)
+	 * @param {Array<{progressionName: string, category: string[], count: number}>} picks - From getOptFeatureFeatProgressionPicks
+	 * @param {HTMLElement} container - Sibling container DOM node where the UI is rendered
+	 */
+	_renderOptFeatureFeatProgressionPicker (/** @type {*} */ opt, /** @type {*} */ picks, /** @type {*} */ container) {
+		container.innerHTML = "";
+
+		const allFeats = this._page.filterByAllowedSources(this._page.getFeats() || []);
+		const knownFeatNames = new Set((this._state.getFeats() || []).map((/** @type {*} */ f) => `${f.name}|${f.source}`.toLowerCase()));
+
+		picks.forEach((/** @type {*} */ pick, /** @type {*} */ pickIdx) => {
+			// Pre-allocate per-pick storage so subsequent dropdown picks land in the right slot.
+			for (let i = 0; i < pick.count; i++) {
+				if (!opt._progressionFeats[pickIdx * 100 + i]) {
+					opt._progressionFeats[pickIdx * 100 + i] = {
+						progressionName: pick.progressionName,
+						category: pick.category,
+						feat: null,
+					};
+				}
+			}
+
+			for (let slotIdx = 0; slotIdx < pick.count; slotIdx++) {
+				const storageIdx = pickIdx * 100 + slotIdx;
+				const slot = opt._progressionFeats[storageIdx];
+
+				const slotSection = e_({outer: `
+					<div class="charsheet__opt-feat-progression-slot mb-2 p-2" style="border-left: 3px solid var(--rgb-link); background: rgba(var(--rgb-link-rgb), 0.05);">
+						<div class="ve-small ve-bold mb-1">${pick.progressionName}${pick.count > 1 ? ` (${slotIdx + 1}/${pick.count})` : ""}:</div>
+					</div>
+				`});
+
+				const filteredFeats = CharacterSheetClassUtils.filterFeatsByCategory(allFeats, pick.category)
+					.filter((/** @type {*} */ f) => !knownFeatNames.has(`${f.name}|${f.source}`.toLowerCase()))
+					.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
+
+				const select = e_({outer: `<select class="ve-form-control ve-input-sm"><option value="">— Choose —</option></select>`});
+				filteredFeats.forEach((/** @type {*} */ f) => {
+					const key = `${f.name}|${f.source}`;
+					const sel = slot.feat && slot.feat.name === f.name && slot.feat.source === f.source ? " selected" : "";
+					select.insertAdjacentHTML("beforeend", `<option value="${key}"${sel}>${f.name} (${Parser.sourceJsonToAbv(f.source)})</option>`);
+				});
+
+				const featChoicesContainer = e_({outer: `<div class="charsheet__opt-feat-progression-choices mt-2"></div>`});
+
+				const renderForFeat = (/** @type {*} */ feat) => {
+					featChoicesContainer.innerHTML = "";
+					if (!feat) return;
+					if (!feat._featChoices) {
+						feat._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: [], scribingClass: null, optionalFeatures: []};
+					}
+					const choices = CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {state: this._state, page: this._page});
+					this._renderFeatChoicesUI(feat, choices, featChoicesContainer);
+				};
+
+				select.addEventListener("change", () => {
+					const val = select.value;
+					if (!val) {
+						slot.feat = null;
+						featChoicesContainer.innerHTML = "";
+						return;
+					}
+					const [name, source] = val.split("|");
+					const picked = filteredFeats.find((/** @type {*} */ f) => f.name === name && f.source === source);
+					if (picked) {
+						// Clone to keep _featChoices isolated to this slot
+						slot.feat = {...picked};
+						renderForFeat(slot.feat);
+					}
+				});
+
+				slotSection.append(select, featChoicesContainer);
+				container.append(slotSection);
+
+				// Re-render existing pick (e.g. after collapse/expand)
+				if (slot.feat) renderForFeat(slot.feat);
+			}
+		});
+
+		// Empty-state hint if pool happens to be empty
+		if (!allFeats.length) {
+			container.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-small">No feats available.</div>`);
+		}
+	}
+
+	/**
+	 * Bug 8 helper: validate that every selected optional feature with a feat-progression
+	 * has all its feat slots filled with valid + complete (sub-choice-complete) picks.
+	 * Used as a gate before allowing the level-up apply to proceed.
+	 *
+	 * @param {object} selectedOptionalFeatures - Map<featureKey, opts[]>
+	 * @returns {{valid: boolean, missing: Array<{optName: string, slot: string}>}}
+	 */
+	_validateOptFeatureFeatProgressionPicks (/** @type {*} */ selectedOptionalFeatures) {
+		/** @type {*[]} */ const missing = [];
+		if (!selectedOptionalFeatures) return {valid: true, missing};
+		const ctx = {state: this._state, page: this._page};
+		for (const opts of Object.values(selectedOptionalFeatures)) {
+			if (!Array.isArray(opts)) continue;
+			for (const opt of opts) {
+				if (!Array.isArray(opt?._progressionFeats) || !opt._progressionFeats.length) continue;
+				for (const slot of opt._progressionFeats) {
+					if (!slot) continue; // sparse slot (pre-allocated but unused)
+					if (!slot.feat) {
+						missing.push({optName: opt.name, slot: slot.progressionName || "Feat"});
+						continue;
+					}
+					if (!CharacterSheetClassUtils.isFeatChoiceSpecComplete(slot.feat, null, ctx)) {
+						missing.push({optName: opt.name, slot: `${slot.progressionName || "Feat"} (${slot.feat.name})`});
+					}
+				}
+			}
+		}
+		return {valid: !missing.length, missing};
 	}
 
 	/**
@@ -4146,13 +4140,20 @@ class CharacterSheetLevelUp {
 
 		// Apply selected optional features (invocations, metamagic, maneuvers, etc.)
 		if (selectedOptionalFeatures) {
-			Object.entries(selectedOptionalFeatures).forEach(([featureKey, opts]) => {
+			for (const [featureKey, opts] of Object.entries(selectedOptionalFeatures)) {
 				// featureKey is like "EI" or "MM" or "CTM:1_CTM:2_..." - the feature types joined
 				const featureTypes = featureKey.split("_");
-				opts.forEach((/** @type {*} */ opt) => {
+				for (const opt of opts) {
 					// Use the original feature's featureType if available (e.g., ["CTM:1AM", "CTM:2AM"])
 					// This preserves the full type info including tradition codes
 					const originalTypes = opt.featureType || featureTypes;
+
+					// Bug 8: ensure a stable id is on the opt before adding the feature.
+					// `buildFeatureStateObject` spreads `...outFeature`, so a caller-set
+					// `id` survives. `addFeature` then preserves it (its own spread runs
+					// after the auto-uid). The id is later used as the cascade-link key
+					// for any feat granted via this opt's featProgression.
+					if (!opt.id) opt.id = CryptUtil.uid();
 
 					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(opt, {
 						className: classEntry.name,
@@ -4161,8 +4162,33 @@ class CharacterSheetLevelUp {
 						featureType: "Optional Feature",
 						optionalFeatureTypes: originalTypes,
 					}));
-				});
-			});
+
+					// Bug 8: cascade-add any feats granted by this optional feature
+					// (e.g. "Lessons of the First Ones" → an Origin Feat the player just picked).
+					if (Array.isArray(opt._progressionFeats) && opt._progressionFeats.length) {
+						for (const slot of opt._progressionFeats) {
+							if (!slot || !slot.feat) continue;
+							const grantedFeat = slot.feat;
+							if (grantedFeat._featChoices?.optionalFeatures?.length) {
+								grantedFeat.choices = {
+									...grantedFeat._featChoices,
+									optionalFeaturePicks: grantedFeat._featChoices.optionalFeatures.flatMap((/** @type {*} */ group) => group.picks || []),
+								};
+							} else if (grantedFeat._featChoices) {
+								grantedFeat.choices = {...grantedFeat._featChoices};
+							}
+							const added = this._state.addFeat(grantedFeat, {
+								allSpells: this._page.getSpells(),
+								linkedToOptFeature: {id: opt.id, name: opt.name, source: opt.source},
+							});
+							if (added) {
+								CharacterSheetClassUtils.applyFeatBonuses(this._state, grantedFeat);
+								await this._processFeatSpellChoices();
+							}
+						}
+					}
+				}
+			}
 		}
 
 		// Apply selected feature options (specialties, etc. - features with embedded options)

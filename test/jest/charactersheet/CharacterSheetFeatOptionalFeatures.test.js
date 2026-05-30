@@ -146,3 +146,172 @@ describe("CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic", () => {
 		expect(mmEntries.map(it => it.source)).toEqual(["TGTT", "TGTT"]);
 	});
 });
+
+describe("CharacterSheetClassUtils.getOptFeatureFeatProgressionPicks (Bug 8)", () => {
+	const ClassUtils = globalThis.CharacterSheetClassUtils;
+
+	it("returns empty array for an opt-feature without featProgression", () => {
+		expect(ClassUtils.getOptFeatureFeatProgressionPicks({name: "X"}, 1)).toEqual([]);
+		expect(ClassUtils.getOptFeatureFeatProgressionPicks({featProgression: null}, 1)).toEqual([]);
+	});
+
+	it("returns picks for an opt-feature with `*` progression (e.g. Lessons of the First Ones)", () => {
+		const opt = {
+			name: "Lessons of the First Ones",
+			featProgression: [
+				{name: "Origin Feat", category: ["O"], progression: {"*": 1}},
+			],
+		};
+		const picks = ClassUtils.getOptFeatureFeatProgressionPicks(opt, 1);
+		expect(picks).toEqual([{progressionName: "Origin Feat", category: ["O"], count: 1}]);
+
+		// _timesKnown=1 means this is the second pick — `*` still applies
+		const picks2 = ClassUtils.getOptFeatureFeatProgressionPicks(opt, 2);
+		expect(picks2).toEqual([{progressionName: "Origin Feat", category: ["O"], count: 1}]);
+	});
+
+	it("respects numeric progression keys over `*` when both are absent for the request", () => {
+		const opt = {
+			featProgression: [
+				{name: "Feat A", category: ["G"], progression: {"1": 1, "3": 2}},
+			],
+		};
+		expect(ClassUtils.getOptFeatureFeatProgressionPicks(opt, 1)).toEqual([
+			{progressionName: "Feat A", category: ["G"], count: 1},
+		]);
+		expect(ClassUtils.getOptFeatureFeatProgressionPicks(opt, 2)).toEqual([]);
+		expect(ClassUtils.getOptFeatureFeatProgressionPicks(opt, 3)).toEqual([
+			{progressionName: "Feat A", category: ["G"], count: 2},
+		]);
+	});
+
+	it("prefers `*` over numeric keys when both are present", () => {
+		const opt = {
+			featProgression: [
+				{name: "Feat", category: ["O"], progression: {"*": 1, "1": 2}},
+			],
+		};
+		expect(ClassUtils.getOptFeatureFeatProgressionPicks(opt, 1)).toEqual([
+			{progressionName: "Feat", category: ["O"], count: 1},
+		]);
+	});
+});
+
+describe("CharacterSheetClassUtils.filterFeatsByCategory (Bug 8)", () => {
+	const ClassUtils = globalThis.CharacterSheetClassUtils;
+
+	const FEATS = [
+		{name: "Origin Feat A", category: "O"},
+		{name: "General Feat A", category: "G"},
+		{name: "Fighting Style (Generic)", category: "FS"},
+		{name: "Defense", category: "FS:P"},
+		{name: "Epic Boon", category: "EB:foo"},
+		{name: "No Category", source: "TGTT"},
+	];
+
+	it("returns all feats when categories is empty/null", () => {
+		expect(ClassUtils.filterFeatsByCategory(FEATS, [])).toEqual(FEATS);
+		expect(ClassUtils.filterFeatsByCategory(FEATS, null)).toEqual(FEATS);
+	});
+
+	it("matches exact category", () => {
+		const out = ClassUtils.filterFeatsByCategory(FEATS, ["O"]);
+		expect(out.map(f => f.name)).toEqual(["Origin Feat A"]);
+	});
+
+	it("matches subtype: FS includes FS:P (Bug 8 subtype-aware filter)", () => {
+		const out = ClassUtils.filterFeatsByCategory(FEATS, ["FS"]);
+		expect(out.map(f => f.name)).toEqual(expect.arrayContaining(["Fighting Style (Generic)", "Defense"]));
+	});
+
+	it("matches multiple categories (union)", () => {
+		const out = ClassUtils.filterFeatsByCategory(FEATS, ["O", "G"]);
+		expect(out.map(f => f.name)).toEqual(expect.arrayContaining(["Origin Feat A", "General Feat A"]));
+	});
+
+	it("excludes uncategorized feats from category filters", () => {
+		const out = ClassUtils.filterFeatsByCategory(FEATS, ["O"]);
+		expect(out.some(f => f.name === "No Category")).toBe(false);
+	});
+
+	it("matches `EB` subtype via colon prefix", () => {
+		const out = ClassUtils.filterFeatsByCategory(FEATS, ["EB"]);
+		expect(out.map(f => f.name)).toEqual(["Epic Boon"]);
+	});
+});
+
+describe("CharacterSheetClassUtils.buildFeatChoicesSpec & isFeatChoiceSpecComplete (Bug 8)", () => {
+	const ClassUtils = globalThis.CharacterSheetClassUtils;
+
+	it("returns a defensive empty spec when ctx is missing (no crash)", () => {
+		const feat = {name: "X", source: "TGTT", skillProficiencies: [{any: 1}]};
+		const spec = ClassUtils.buildFeatChoicesSpec(feat, {});
+		expect(spec).toBeTruthy();
+		// no crash is the success condition; skill choices may or may not populate without page ctx
+	});
+
+	it("isFeatChoiceSpecComplete returns true when no _featChoices needed", () => {
+		const feat = {name: "Plain Feat", source: "TGTT"};
+		expect(ClassUtils.isFeatChoiceSpecComplete(feat)).toBe(true);
+	});
+
+	it("isFeatChoiceSpecComplete returns false when _featChoices has unfilled skill picks", () => {
+		const feat = {
+			name: "Skill Feat",
+			source: "TGTT",
+			skillProficiencies: [{any: 2}],
+			_featChoices: {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: [], scribingClass: null, optionalFeatures: []},
+		};
+		// Spec requires 2 skills picked; none yet
+		expect(ClassUtils.isFeatChoiceSpecComplete(feat, null, {state: new globalThis.CharacterSheetState(), page: {getOptionalFeatures: () => []}})).toBe(false);
+
+		feat._featChoices.skills = ["Athletics", "Acrobatics"];
+		expect(ClassUtils.isFeatChoiceSpecComplete(feat, null, {state: new globalThis.CharacterSheetState(), page: {getOptionalFeatures: () => []}})).toBe(true);
+	});
+});
+
+describe("CharacterSheetState linkedToOptFeature cascade (Bug 8)", () => {
+	let state;
+
+	beforeEach(() => {
+		state = new globalThis.CharacterSheetState();
+	});
+
+	it("removes a feat linked to an optional feature by id when the feature is removed", () => {
+		// Simulate a Warlock picking "Lessons of the First Ones" which granted an Origin Feat.
+		const optId = "opt-abc-123";
+		state.addFeature({
+			id: optId,
+			name: "Lessons of the First Ones",
+			source: "XPHB",
+			featureType: "Optional Feature",
+		});
+		state.addFeat({
+			name: "Magic Initiate",
+			source: "XPHB",
+		}, {linkedToOptFeature: {id: optId, name: "Lessons of the First Ones", source: "XPHB"}});
+
+		expect(state.getFeats().some(f => f.name === "Magic Initiate")).toBe(true);
+
+		state.removeFeature("Lessons of the First Ones", "XPHB");
+
+		expect(state.getFeats().some(f => f.name === "Magic Initiate")).toBe(false);
+	});
+
+	it("falls back to name+source match when id is missing (legacy save compatibility)", () => {
+		state.addFeature({
+			name: "Some Invocation",
+			source: "TGTT",
+			featureType: "Optional Feature",
+		});
+		state.addFeat({
+			name: "Tough",
+			source: "XPHB",
+		}, {linkedToOptFeature: {name: "Some Invocation", source: "TGTT"}});
+
+		expect(state.getFeats().some(f => f.name === "Tough")).toBe(true);
+
+		state.removeFeature("Some Invocation", "TGTT");
+		expect(state.getFeats().some(f => f.name === "Tough")).toBe(false);
+	});
+});
