@@ -745,6 +745,14 @@ class CharacterSheetClassUtils {
 		if (value == null) return out;
 
 		if (typeof value === "string") {
+			// Bug 5: filter-query strings like "source=EGW" or "level=0|class=Cleric"
+			// are NOT spell references. They live in `{"all": "<query>"}` blocks (e.g.
+			// Chronurgy Magic expanded list, Divine Soul expanded list). Treating them
+			// as names creates ghost entries like "source=egw|phb" in the id-set and
+			// causes real spells from EGW (Gift of Alacrity) / the Cleric list
+			// (Guidance) to be excluded. Skip them here; they're handled by
+			// _additionalSpellBlockMatchesSpell instead.
+			if (this._isFilterQueryString(value)) return out;
 			const [name, source = Parser.SRC_PHB] = value.split("|");
 			if (name?.trim()) out.add(`${name.trim().toLowerCase()}|${String(source).trim().toLowerCase()}`);
 			return out;
@@ -788,6 +796,125 @@ class CharacterSheetClassUtils {
 		return out;
 	}
 
+	/**
+	 * Bug 5: A filter-query string contains `=` and uses spell-page filter syntax
+	 * (e.g. `"source=EGW"`, `"level=0|class=Cleric"`). These appear inside
+	 * additionalSpells `{"all": "<query>"}` shorthand and must NOT be treated as
+	 * pipe-separated `name|source` references.
+	 */
+	static _isFilterQueryString (/** @type {*} */ value) {
+		if (typeof value !== "string") return false;
+		if (!value.includes("=")) return false;
+		// Split by `|` (filter AND-clause separator) and verify every segment is `key=value`.
+		// Real spell refs are `name|source` — no `=` in either segment.
+		return value.split("|").every(seg => /^[a-zA-Z_][\w-]*\s*=\s*[^=]+$/.test(seg.trim()));
+	}
+
+	/**
+	 * Bug 5: Parse a filter-query string like `"source=EGW|class=Cleric"` into
+	 * `[{key: "source", value: "EGW"}, {key: "class", value: "Cleric"}]`.
+	 * All clauses are AND-ed together (matches 5etools filter shorthand).
+	 */
+	static _parseFilterQuery (/** @type {*} */ query) {
+		if (typeof query !== "string" || !this._isFilterQueryString(query)) return [];
+		return query.split("|")
+			.map(seg => {
+				const [rawKey, ...rest] = seg.split("=");
+				return {
+					key: String(rawKey || "").trim().toLowerCase(),
+					value: rest.join("=").trim(),
+				};
+			})
+			.filter(c => c.key && c.value);
+	}
+
+	/**
+	 * Bug 5: True if the given spell matches all clauses of the parsed filter query.
+	 * Supported keys: `source`, `level`, `class`, `subclass`, `school`.
+	 * Unknown keys conservatively fail-closed (no match) — preserves current
+	 * over-restrictive behaviour rather than silently widening pools.
+	 */
+	static _spellMatchesFilterQuery (/** @type {*} */ spell, /** @type {*} */ clauses) {
+		if (!spell || !Array.isArray(clauses) || !clauses.length) return false;
+
+		return clauses.every(({key, value}) => {
+			const v = String(value || "").toLowerCase();
+			switch (key) {
+				case "source":
+					return String(spell.source || "").toLowerCase() === v;
+				case "level": {
+					const lvl = Number(value);
+					return Number.isFinite(lvl) && Number(spell.level) === lvl;
+				}
+				case "class":
+					return this.spellIsForClass(spell, value);
+				case "subclass": {
+					// e.g. `subclass=Life Domain`. Walk fromSubclass entries.
+					const matches = (entry) => String(entry.subclass?.name || "").toLowerCase() === v
+						|| String(entry.subclass?.shortName || "").toLowerCase() === v;
+					try {
+						const fromSub = Renderer.spell.getCombinedClasses(spell, "fromSubclass");
+						if (Array.isArray(fromSub) && fromSub.some(matches)) return true;
+					} catch (e) { /* fall through */ }
+					return Array.isArray(spell.classes?.fromSubclass) && spell.classes.fromSubclass.some(matches);
+				}
+				case "school":
+					return String(spell.school || "").toLowerCase() === v;
+				default:
+					// Unknown filter key — fail closed to avoid silently broadening the pool.
+					return false;
+			}
+		});
+	}
+
+	/**
+	 * Bug 5: True if the given subclass `additionalSpells` block (innate/known/
+	 * prepared/expanded) makes `spell` available. Walks both literal name refs
+	 * (via the id-set) and filter-query refs (via {@link _spellMatchesFilterQuery}).
+	 */
+	static _additionalSpellBlockMatchesSpell (/** @type {*} */ block, /** @type {*} */ spell, /** @type {*} */ spellId) {
+		if (!block || typeof block !== "object") return false;
+		if (!spellId) return false;
+
+		// Literal name-source match (preserves existing behaviour for {"name":..., "source":...} refs)
+		if (this._getAdditionalSpellBlockSpellIds(block).has(spellId)) return true;
+
+		// Filter-query match (Bug 5: walks `{"all": "<query>"}` shorthand in any sub-list)
+		const sections = ["innate", "known", "prepared", "expanded"];
+		for (const sec of sections) {
+			const sectionValue = block[sec];
+			if (!sectionValue) continue;
+			if (this._sectionMatchesSpellViaFilter(sectionValue, spell)) return true;
+		}
+		return false;
+	}
+
+	static _sectionMatchesSpellViaFilter (/** @type {*} */ value, /** @type {*} */ spell) {
+		if (value == null) return false;
+
+		if (typeof value === "string") {
+			if (!this._isFilterQueryString(value)) return false;
+			return this._spellMatchesFilterQuery(spell, this._parseFilterQuery(value));
+		}
+
+		if (Array.isArray(value)) {
+			return value.some(it => this._sectionMatchesSpellViaFilter(it, spell));
+		}
+
+		if (typeof value !== "object") return false;
+
+		// Common shorthand: {"all": "<query>"}, {"choose": {"from": "<query>"}}, etc.
+		if (value.all && this._sectionMatchesSpellViaFilter(value.all, spell)) return true;
+		if (value.from && this._sectionMatchesSpellViaFilter(value.from, spell)) return true;
+		if (value.choose?.from && this._sectionMatchesSpellViaFilter(value.choose.from, spell)) return true;
+
+		// Walk nested level/category keys (e.g. expanded["1"], known["1e"])
+		return Object.entries(value).some(([key, nested]) => {
+			if (["name", "source", "choose", "from", "all", "ability", "resourceName"].includes(key)) return false;
+			return this._sectionMatchesSpellViaFilter(nested, spell);
+		});
+	}
+
 	static subclassAdditionalSpellsIncludeSpell (/** @type {*} */ spell, /** @type {*} */ subclass, /** @type {*} */ opts = {}) {
 		if (!spell?.name || !subclass?.additionalSpells?.length) return false;
 
@@ -801,7 +928,7 @@ class CharacterSheetClassUtils {
 			})()
 			: subclass.additionalSpells;
 
-		return relevantBlocks.some(block => this._getAdditionalSpellBlockSpellIds(block).has(spellId));
+		return relevantBlocks.some(block => this._additionalSpellBlockMatchesSpell(block, spell, spellId));
 	}
 
 	static getSpellListClassNames ({className, classSource, subclass, subclassChoice, includeCoreSpellsForHomebrew = false} = /** @type {*} */ ({})) {

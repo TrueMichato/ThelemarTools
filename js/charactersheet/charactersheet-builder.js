@@ -8836,6 +8836,8 @@ class CharacterSheetBuilder {
 			cantripCount: cantripAtLevel1 || 0,
 			maxSpellLevel,
 			additionalClassNames,
+			subclass: this._selectedSubclass,
+			subclassChoice: this._divineSoulAffinity,
 		};
 	}
 
@@ -8914,6 +8916,8 @@ class CharacterSheetBuilder {
 					maxSpellLevel: 0,
 					allSpells: sourceFiltered,
 					knownSpellIds: new Set(),
+					subclass: updatedKnownInfo.subclass,
+					subclassChoice: updatedKnownInfo.subclassChoice,
 					additionalClassNames: updatedKnownInfo.additionalClassNames,
 					onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
 						this._selectedKnownCantrips = cantrips;
@@ -8952,6 +8956,8 @@ class CharacterSheetBuilder {
 				maxSpellLevel: updatedKnownInfo.maxSpellLevel,
 				allSpells: sourceFiltered,
 				knownSpellIds: new Set(),
+				subclass: updatedKnownInfo.subclass,
+				subclassChoice: updatedKnownInfo.subclassChoice,
 				additionalClassNames: updatedKnownInfo.additionalClassNames,
 				onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
 					this._selectedKnownSpells = spells;

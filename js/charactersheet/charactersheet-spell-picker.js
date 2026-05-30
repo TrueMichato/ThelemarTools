@@ -212,6 +212,7 @@ class CharacterSheetSpellPicker {
 	 * @param {Array} [opts.preSelectedCantrips] - Pre-selected cantrips
 	 * @param {Array} [opts.additionalClassNames] - Additional class names whose spell lists to include (e.g. ["Cleric"] for Divine Soul)
 	 * @param {string} [opts.subclass] - Subclass short name (used for spell-source filtering, e.g. Divine Soul)
+	 * @param {*} [opts.subclassChoice] - Subclass choice (e.g. Divine Soul affinity) used for affinity-aware spell-list resolution
 	 * @returns {HTMLElement} The section element
 	 */
 	static renderKnownSpellPicker (opts) {
@@ -229,6 +230,7 @@ class CharacterSheetSpellPicker {
 			preSelectedCantrips = [],
 			additionalClassNames = [],
 			subclass,
+			subclassChoice,
 		} = opts;
 
 		const totalCount = spellCount + cantripCount;
@@ -294,6 +296,7 @@ class CharacterSheetSpellPicker {
 			return CharacterSheetClassUtils.spellIsAvailableForClass(spell, {
 				className,
 				subclass,
+				subclassChoice,
 				additionalClassNames,
 			});
 		}).sort((a, b) => {
