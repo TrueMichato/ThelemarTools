@@ -5486,7 +5486,7 @@ class CharacterSheetBuilder {
 		const showAll = settings.showAllOptFeatureVersions || false;
 		const enableTgtt = !!settings.enableTgtt;
 		const deduped = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(optFeatures, {showAll});
-		return CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(deduped, {enableTgtt});
+		return CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(deduped, {enableTgtt, classSource});
 	}
 
 	/**

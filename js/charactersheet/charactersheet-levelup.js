@@ -512,12 +512,12 @@ class CharacterSheetLevelUp {
 						// Re-render existing accordion body
 						const body = accordions.optfeatures.el.querySelector(".charsheet__levelup-accordion-body");
 						body.innerHTML = "";
-						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures});
+						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures, activeSubclass: selectedSubclass});
 						body.append(optContent);
 					} else {
 						// Create the accordion dynamically (wasn't needed before subclass selection)
 						summaryItems.append(createSummaryItem("optfeatures", "✨", "Class Options", {required: true}));
-						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures});
+						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures, activeSubclass: selectedSubclass});
 						// Insert after subclass accordion
 						const subclassAccordion = accordions.subclass?.el;
 						const optAccordion = createAccordion("optfeatures", "✨", "Class Options", optContent, {required: true});
@@ -694,7 +694,10 @@ class CharacterSheetLevelUp {
 		if (optionalFeatureGains.length) {
 			summaryItems.append(createSummaryItem("optfeatures", "✨", "Class Options", {required: true}));
 
-			const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel);
+			// Subclass already known from earlier level — pass it through so the
+			// subclass-tradition picker can render for choice-based subclasses.
+			const knownActiveSubclass = fullSubclassData || classEntry.subclass || null;
+			const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {activeSubclass: knownActiveSubclass});
 
 			main.append(createAccordion("optfeatures", "✨", "Class Options", optContent, {required: true}));
 		}
@@ -2705,16 +2708,17 @@ class CharacterSheetLevelUp {
 	 * @param {Function} onSelect - Callback(featureType, selectedFeatures)
 	 * @param {number} newLevel - The new level for filtering by max degree
 	 */
-	_renderOptionalFeaturesSelection (/** @type {*} */ classData, /** @type {*} */ gains, /** @type {*} */ onSelect, /** @type {*} */ newLevel, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*} */ ({})} = {}) {
+	_renderOptionalFeaturesSelection (/** @type {*} */ classData, /** @type {*} */ gains, /** @type {*} */ onSelect, /** @type {*} */ newLevel, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*} */ ({}), activeSubclass = /** @type {*} */ (null)} = {}) {
 		// Filter optional features by allowed sources and deduplicate by edition priority
 		const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
 		const settingsObj = this._state.getSettings() || {};
 		const showAllSetting = settingsObj.showAllOptFeatureVersions || false;
 		const enableTgtt = !!settingsObj.enableTgtt;
+		const classSource = classData?.source || null;
 		let showAll = showAllSetting;
 		let allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
 			CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll}),
-			{enableTgtt},
+			{enableTgtt, classSource},
 		);
 		const existingOptFeatures = this._state.getFeatures().filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
 
@@ -2737,10 +2741,10 @@ class CharacterSheetLevelUp {
 		const renderFeatures = () => {
 			allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
 				CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll}),
-				{enableTgtt},
+				{enableTgtt, classSource},
 			);
 			container.innerHTML = "";
-			this._renderOptFeaturesInContainer(container, classData, gains, onSelect, newLevel, allOptFeatures, existingOptFeatures, {subclassGrantedTraditionCodes, existingSelections});
+			this._renderOptFeaturesInContainer(container, classData, gains, onSelect, newLevel, allOptFeatures, existingOptFeatures, {subclassGrantedTraditionCodes, existingSelections, activeSubclass});
 		};
 
 		toggle.addEventListener("change", (/** @type {*} */ e) => {
@@ -2772,14 +2776,14 @@ class CharacterSheetLevelUp {
 
 	 */
 
-	_renderOptFeaturesInContainer (/** @type {*} */ container, /** @type {*} */ classData, /** @type {*} */ gains, /** @type {*} */ onSelect, /** @type {*} */ newLevel, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*} */ ({})} = {}) {
+	_renderOptFeaturesInContainer (/** @type {*} */ container, /** @type {*} */ classData, /** @type {*} */ gains, /** @type {*} */ onSelect, /** @type {*} */ newLevel, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*} */ ({}), activeSubclass = /** @type {*} */ (null)} = {}) {
 		gains.forEach((/** @type {*} */ gain) => {
 			const featureKey = gain.featureTypes.join("_");
 			const isCombatMethods = gain.featureTypes.some((/** @type {*} */ ft) => ft.startsWith("CTM:"));
 
 			if (isCombatMethods) {
 				// Use special Combat Methods rendering with tradition filtering
-				this._renderCombatMethodsLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes, existingSelections: existingSelections[featureKey] || []});
+				this._renderCombatMethodsLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes, existingSelections: existingSelections[featureKey] || [], activeSubclass});
 			} else {
 				// Standard optional feature rendering
 				this._renderStandardOptionalFeaturesLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey);
@@ -2790,7 +2794,7 @@ class CharacterSheetLevelUp {
 	/**
 	 * Render Combat Methods selection during level-up with tradition filtering
 	 */
-	_renderCombatMethodsLevelUp (/** @type {*} */ container, /** @type {*} */ classData, /** @type {*} */ gain, /** @type {*} */ newLevel, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, /** @type {*} */ onSelect, /** @type {*} */ featureKey, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*[]} */ ([])} = {}) {
+	_renderCombatMethodsLevelUp (/** @type {*} */ container, /** @type {*} */ classData, /** @type {*} */ gain, /** @type {*} */ newLevel, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, /** @type {*} */ onSelect, /** @type {*} */ featureKey, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*[]} */ ([]), activeSubclass = /** @type {*} */ (null)} = {}) {
 		const selectedForType = [...existingSelections];
 
 		// Get character's known traditions from existing Combat Methods or state
@@ -2813,6 +2817,15 @@ class CharacterSheetLevelUp {
 			classFeatures,
 		});
 
+		// Resolve subclass-choice tradition pool (e.g. Champion offers a CHOICE of 2
+		// from [AM, GH, TI]). Only applies when activeSubclass is provided AND it
+		// has an entry in SUBCLASS_TRADITION_CHOICE_POOLS — independent of the base
+		// picker and rendered in its own section.
+		const subclassChoicePool = CharacterSheetClassUtils.getSubclassTraditionChoicePool(
+			activeSubclass,
+			classData?.source,
+		);
+
 		// If no traditions set, allow selecting them now (retroactive fix)
 		if (knownTraditions.length < traditionCount) {
 			// Filter traditions to only those the class has access to
@@ -2828,12 +2841,14 @@ class CharacterSheetLevelUp {
 						<div class="charsheet__levelup-tradition-list charsheet__levelup-picker-list"></div>
 						<div class="ve-small ve-muted mt-1">Selected: <span class="tradition-count">0</span>/${traditionCount}</div>
 					</div>
+					<div class="charsheet__levelup-subclass-tradition-container"></div>
 					<div class="charsheet__levelup-methods-container"></div>
 				</div>
 			`});
 
 			const traditionList = section.querySelector(".charsheet__levelup-tradition-list");
 			const methodsContainer = section.querySelector(".charsheet__levelup-methods-container");
+			const subclassTradContainer = section.querySelector(".charsheet__levelup-subclass-tradition-container");
 
 			availableTraditions.forEach((/** @type {*} */ trad) => {
 				const desc = CharacterSheetClassUtils.getTraditionDescription(trad.code);
@@ -2890,6 +2905,26 @@ class CharacterSheetLevelUp {
 				traditionList.append(item);
 			});
 
+			// Render subclass-choice tradition picker (if applicable) below the base picker
+			this._renderSubclassTraditionChoicePickerLevelUp(
+				subclassTradContainer,
+				subclassChoicePool,
+				{
+					classData,
+					gain,
+					newLevel,
+					allOptFeatures,
+					existingOptFeatures,
+					onSelect,
+					featureKey,
+					maxDegree,
+					selectedForType,
+					getTraditions: () => tempSelectedTraditions,
+					setTraditions: (/** @type {*} */ next) => { tempSelectedTraditions = next; },
+					methodsContainer,
+				},
+			);
+
 			container.append(section);
 			return;
 		}
@@ -2899,8 +2934,154 @@ class CharacterSheetLevelUp {
 		// `container.innerHTML = ""` doesn't wipe sibling gain sections
 		// (e.g. Battle Tactics rendered earlier in the same parent).
 		const methodsWrapper = e_({outer: `<div class="charsheet__levelup-methods-container"></div>`});
+		const subclassTradWrapper = e_({outer: `<div class="charsheet__levelup-subclass-tradition-container mb-3"></div>`});
+		// Render subclass-choice picker ABOVE methods so user picks subclass
+		// traditions first, then sees the methods filtered by the combined pool.
+		container.append(subclassTradWrapper);
 		container.append(methodsWrapper);
+
+		this._renderSubclassTraditionChoicePickerLevelUp(
+			subclassTradWrapper,
+			subclassChoicePool,
+			{
+				classData,
+				gain,
+				newLevel,
+				allOptFeatures,
+				existingOptFeatures,
+				onSelect,
+				featureKey,
+				maxDegree,
+				selectedForType,
+				getTraditions: () => tempSelectedTraditions,
+				setTraditions: (/** @type {*} */ next) => { tempSelectedTraditions = next; },
+				methodsContainer: methodsWrapper,
+			},
+		);
+
 		this._renderMethodsForLevelUp(methodsWrapper, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, knownTraditions, maxDegree, selectedForType);
+	}
+
+	/**
+	 * Render the subclass-choice tradition picker (e.g. Arcane Archer offers a
+	 * choice of 2 from {BZ, RE, UW, UH}). Independent of the base-class
+	 * tradition picker; selections flow into the same combatTraditions list.
+	 *
+	 * @param {*} container - Empty container to render into (skipped if pool kind === "none")
+	 * @param {*} pool - {kind, pickCount, codes} from getSubclassTraditionChoicePool
+	 * @param {*} opts - Shared rendering opts (see _renderCombatMethodsLevelUp call site)
+	 */
+	_renderSubclassTraditionChoicePickerLevelUp (/** @type {*} */ container, /** @type {*} */ pool, /** @type {*} */ opts) {
+		if (!pool || pool.kind === "none" || !pool.pickCount) return;
+		if (!container) return;
+
+		const {
+			classData,
+			gain,
+			newLevel,
+			allOptFeatures,
+			existingOptFeatures,
+			onSelect,
+			featureKey,
+			maxDegree,
+			selectedForType,
+			getTraditions,
+			setTraditions,
+			methodsContainer,
+		} = opts;
+
+		// Pool codes: restricted list OR every tradition (unrestricted, e.g. Battle Master)
+		const allTraditionCodes = CharacterSheetClassUtils.getAllTraditions().map((/** @type {*} */ t) => t.code);
+		const poolCodes = pool.codes || allTraditionCodes;
+		// Exclude codes the character already knows from earlier levels/sources
+		const knownExisting = CharacterSheetClassUtils.getKnownCombatTraditions(existingOptFeatures, this._state);
+		const knownSet = new Set(knownExisting);
+		const availableCodes = poolCodes.filter((/** @type {*} */ c) => !knownSet.has(c));
+		if (availableCodes.length === 0) return; // Nothing left to pick
+
+		// How many can still be chosen from this pool (capped at pool.pickCount and available)
+		const tradsInPool = (/** @type {*} */ list) => list.filter((/** @type {*} */ c) => availableCodes.includes(c)).length;
+		const effectivePick = Math.min(pool.pickCount, availableCodes.length);
+
+		const subclassLabel = pool.kind === "unrestricted"
+			? `${effectivePick} tradition${effectivePick === 1 ? "" : "s"} of your choice`
+			: `${effectivePick} from this list`;
+		const subclassName = classData?.subclass?.name || "Subclass";
+
+		const section = e_({outer: `
+			<div class="charsheet__levelup-traditions mb-3 charsheet__levelup-subclass-traditions">
+				<p class="ve-muted ve-small mb-2"><strong>${subclassName} tradition${effectivePick === 1 ? "" : "s"}:</strong> Choose ${subclassLabel}.</p>
+				<div class="charsheet__levelup-subclass-tradition-list charsheet__levelup-picker-list"></div>
+				<div class="ve-small ve-muted mt-1">Selected: <span class="sub-tradition-count">0</span>/${effectivePick}</div>
+			</div>
+		`});
+		const list = section.querySelector(".charsheet__levelup-subclass-tradition-list");
+		const counter = section.querySelector(".sub-tradition-count");
+
+		const allTraditionEntities = CharacterSheetClassUtils.getAllTraditions();
+		const tradByCode = new Map(allTraditionEntities.map((/** @type {*} */ t) => [t.code, t]));
+
+		availableCodes.forEach((/** @type {*} */ code) => {
+			const trad = tradByCode.get(code) || {code, name: CharacterSheetClassUtils.getTraditionName(code) || code};
+			const desc = CharacterSheetClassUtils.getTraditionDescription(code);
+
+			let tradNameHtml;
+			try {
+				tradNameHtml = CharacterSheetPage.getHoverLink(
+					UrlUtil.PG_VARIANTRULES,
+					"Combat Traditions",
+					Parser.SRC_TGTT || "TGTT",
+					/** @type {*} */ (null),
+					trad.name,
+				);
+			} catch (e) {
+				tradNameHtml = `<strong>${trad.name}</strong>`;
+			}
+
+			const isChecked = (getTraditions() || []).includes(code);
+			const item = e_({outer: `
+				<label class="charsheet__builder-tradition-item charsheet__tradition-row d-block mb-1">
+					<input type="checkbox" class="mr-2" ${isChecked ? "checked" : ""}>
+					<strong class="tradition-name-slot"></strong>
+					<span class="ve-muted ve-small ml-1">(${trad.code})</span>
+					${desc ? `<div class="ve-muted ve-small ml-4">${desc}</div>` : ""}
+				</label>
+			`});
+			item.querySelector(".tradition-name-slot").innerHTML = tradNameHtml;
+
+			item.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
+				const current = [...(getTraditions() || [])];
+				if (e.target.checked) {
+					if (tradsInPool(current) >= effectivePick) {
+						e.target.checked = false;
+						JqueryUtil.doToast({type: "warning", content: `You can only choose ${effectivePick} subclass tradition${effectivePick === 1 ? "" : "s"}.`});
+						return;
+					}
+					if (!current.includes(code)) current.push(code);
+				} else {
+					const idx = current.indexOf(code);
+					if (idx >= 0) current.splice(idx, 1);
+					// Remove any selected methods that belonged to the removed tradition
+					for (let i = selectedForType.length - 1; i >= 0; i--) {
+						if (CharacterSheetClassUtils.getMethodTradition(selectedForType[i]) === code) {
+							selectedForType.splice(i, 1);
+						}
+					}
+				}
+				setTraditions(current);
+				counter.textContent = String(tradsInPool(current));
+				onSelect(featureKey, [...selectedForType], {combatTraditions: [...current]});
+				// Re-render methods so the new tradition's methods become available
+				if (methodsContainer) {
+					this._renderMethodsForLevelUp(methodsContainer, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, current, maxDegree, selectedForType);
+				}
+			});
+
+			list.append(item);
+		});
+
+		counter.textContent = String(tradsInPool(getTraditions() || []));
+		container.append(section);
 	}
 
 	/**
