@@ -287,6 +287,54 @@ class CharacterSheetClassUtils {
 		return {classSource, featureSource};
 	}
 
+	/**
+	 * Resolve the hover-link sources for a subclass entry.
+	 *
+	 * The `cls.subclass` slot on a character only stores `{name, source}` —
+	 * the source there is the SUBCLASS source (e.g. "EGW" for Chronurgy
+	 * Magic). The PG_CLASSES hover hash is built from the CLASS source
+	 * (`subclass.classSource`, e.g. "PHB" for the Wizard that Chronurgy
+	 * lives on) plus the subclass state portion. Using the wrong source
+	 * here builds e.g. `chronurgy magic_tgtt-2014` which doesn't resolve.
+	 *
+	 * @param {{name?: string, source?: string, className?: string, classSource?: string, shortName?: string}} subclass - Stored subclass entry.
+	 * @param {Array} [allSubclasses=[]] - Loaded subclass data (page._subclasses).
+	 * @param {{className?: string, classSource?: string}} [storedClass] - Stored class entry, used as a fallback.
+	 * @returns {{className: string, classSource: string, source: string, shortName: string, name: string}}
+	 */
+	static resolveSubclassHoverSources (/** @type {*} */ subclass, /** @type {*} */ allSubclasses = [], /** @type {*} */ storedClass = null) {
+		let className = subclass?.className || storedClass?.name || "";
+		const subclassSource = subclass?.source || Parser.SRC_XPHB;
+		const subclassName = subclass?.name || "";
+		const explicitClassSource = subclass?.classSource;
+
+		let classSource = explicitClassSource;
+		let shortName = subclass?.shortName;
+
+		if (!classSource || !shortName || !className) {
+			const match = (allSubclasses || []).find(sc =>
+				sc?.name === subclassName
+				&& sc?.source === subclassSource
+				&& (!className || sc?.className === className));
+			if (match) {
+				classSource = classSource || match.classSource;
+				shortName = shortName || match.shortName;
+				className = className || match.className || "";
+			}
+		}
+
+		classSource = classSource || storedClass?.source || Parser.SRC_PHB;
+		shortName = shortName || subclassName;
+
+		return {
+			className,
+			classSource,
+			source: subclassSource,
+			shortName,
+			name: subclassName,
+		};
+	}
+
 	// ========================================================================
 	// Spell counting (single source of truth across all UI surfaces)
 	// ========================================================================

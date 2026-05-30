@@ -3913,17 +3913,8 @@ class CharacterSheetQuickBuild {
 
 		// Helper to create hoverable subclass link
 		const makeSubclassHoverLink = (subclass) => {
-			try {
-				const hash = `${UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: subclass.className, source: subclass.classSource})}${HASH_PART_SEP}${UrlUtil.getClassesPageStatePart({subclass})}`;
-				const hoverAttrs = Renderer.hover.getHoverElementAttributes({
-					page: UrlUtil.PG_CLASSES,
-					source: subclass.source,
-					hash,
-				});
-				return `<a href="${UrlUtil.PG_CLASSES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${subclass.name}</a>`;
-			} catch (e) {
-				return subclass.name;
-			}
+			const allSubclasses = this._page?.getSubclasses?.() || null;
+			return CharacterSheetPage.getSubclassHoverLink(subclass, allSubclasses);
 		};
 
 		// Class summary with hoverable subclass links
