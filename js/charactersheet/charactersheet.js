@@ -5902,6 +5902,11 @@ class CharacterSheetPage {
 			// Re-render the host panel so the star reflects new state.
 			this._renderResources();
 			this._renderOverviewAbilities();
+			// Favourite-spell overview lives in the Overview tab — refresh when
+			// a spell favourite toggles so the pinned-spell list updates immediately.
+			if (type === "spell" && typeof this._renderQuickSpells === "function") {
+				this._renderQuickSpells();
+			}
 			if (typeof opts.onToggle === "function") {
 				// eslint-disable-next-line no-console
 				try { opts.onToggle(result); } catch (err) { console.error("[CharSheet] favourite-star onToggle error:", err); }
@@ -7417,14 +7422,6 @@ class CharacterSheetPage {
 			return;
 		}
 
-		// Get cantrips and prepared/known spells
-		const cantrips = spells.filter(s => s.level === 0);
-		const preparedSpells = spells.filter(s => s.level > 0 && s.prepared);
-
-		// Show cantrips first (max 3), then prepared spells (max 4)
-		const displayCantrips = cantrips.slice(0, 3);
-		const displayPrepared = preparedSpells.slice(0, 4);
-
 		// Show spell stats and slots summary — Gambler uses dice formula
 		const calcs = this._state.getFeatureCalculations?.();
 		const isGambler = calcs?.hasGamblerSpellcasting;
@@ -7497,9 +7494,34 @@ class CharacterSheetPage {
 			}
 		};
 
-		if (displayCantrips.length) {
+		// Resolve favourited spells against current state. Orphans (spell removed
+		// after favouriting) are filtered out — cleanup is handled by the
+		// favourites cleanup button on the main Favourites section.
+		const favSpells = this._state.getFavorites()
+			.filter(f => f.type === "spell")
+			.map(f => this._state._resolveFavorite(f))
+			.filter(r => r.found)
+			.map(r => r.entity);
+
+		if (!favSpells.length) {
+			container.insertAdjacentHTML("beforeend", `
+				<div class="charsheet__empty-state py-2">
+					<span class="charsheet__empty-icon">🔮</span>
+					<span class="charsheet__empty-text">No favourite spells. Star spells in the Spells tab to pin them here.</span>
+				</div>
+			`);
+			return;
+		}
+
+		// Sort: cantrips first, then by level, then by name
+		favSpells.sort((a, b) => (a.level - b.level) || a.name.localeCompare(b.name));
+
+		const favCantrips = favSpells.filter(s => s.level === 0);
+		const favLeveled = favSpells.filter(s => s.level > 0);
+
+		if (favCantrips.length) {
 			container.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1"><strong>Cantrips</strong></div>`);
-			displayCantrips.forEach(spell => {
+			favCantrips.forEach(spell => {
 				const castTime = spell.castingTime || "1 action";
 				const spellEl = e_({outer: `
 					<div class="charsheet__quick-spell">
@@ -7519,9 +7541,9 @@ class CharacterSheetPage {
 			});
 		}
 
-		if (displayPrepared.length) {
-			container.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1 mt-2"><strong>Prepared Spells</strong></div>`);
-			displayPrepared.forEach(spell => {
+		if (favLeveled.length) {
+			container.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1 mt-2"><strong>Spells</strong></div>`);
+			favLeveled.forEach(spell => {
 				const levelText = spell.level === 1 ? "1st" : spell.level === 2 ? "2nd" : spell.level === 3 ? "3rd" : `${spell.level}th`;
 				const castTime = spell.castingTime || "1 action";
 				const spellEl = e_({outer: `
@@ -7540,12 +7562,6 @@ class CharacterSheetPage {
 				});
 				container.append(spellEl);
 			});
-		}
-
-		const totalCantrips = cantrips.length;
-		const totalPrepared = preparedSpells.length;
-		if (totalCantrips > 3 || totalPrepared > 4) {
-			container.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-small text-center mt-2">More spells in Spells tab</div>`);
 		}
 	}
 	// #endregion
