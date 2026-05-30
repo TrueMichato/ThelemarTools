@@ -3667,6 +3667,265 @@ class CharacterSheetClassUtils {
 		});
 	}
 
+	// ==========================================
+	// featProgression on optional features
+	// (e.g. Lessons of the First Ones — invocation that grants an Origin feat)
+	// ==========================================
+
+	/**
+	 * Get feat-progression picks for an optional feature, evaluated against how many
+	 * times the user has already picked this same feature (1-based — 1 = first time).
+	 *
+	 * Each picked invocation/maneuver/etc. independently gets the picks listed by its
+	 * `progression` map. A `"*"` key always triggers. Numeric keys match exact pick
+	 * counts. The returned `count` is the number of feats the user must choose for
+	 * that progression entry on THIS selection.
+	 *
+	 * @param {object} opt - The optional feature (must have `featProgression` to return anything)
+	 * @param {number} [timesPicked=1] - 1-based count of how many times this opt has now been chosen
+	 * @returns {Array<{progressionName: string, category: string[], count: number}>}
+	 */
+	static getOptFeatureFeatProgressionPicks (/** @type {*} */ opt, /** @type {*} */ timesPicked = 1) {
+		if (!opt?.featProgression?.length) return [];
+		/** @type {*[]} */ const out = [];
+		for (const prog of opt.featProgression) {
+			const map = prog.progression;
+			if (!map || typeof map !== "object") continue;
+
+			let count = 0;
+			if (map["*"] != null) {
+				count = Number(map["*"]) || 0;
+			} else {
+				const key = String(timesPicked);
+				if (map[key] != null) count = Number(map[key]) || 0;
+			}
+
+			if (count > 0) {
+				out.push({
+					progressionName: prog.name || "Feat",
+					category: Array.isArray(prog.category) ? [...prog.category] : [],
+					count,
+				});
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Filter the full feats list by category codes (e.g. ["O"] for Origin, ["EB"] for
+	 * Epic Boon, ["G"] for General). Feats without a category are excluded unless
+	 * `categories` is empty (in which case the input is returned unfiltered).
+	 *
+	 * Sub-typed categories like `FS:P` (Fighting Style: Paladin) match the bare base
+	 * code (`FS`) — both the exact code and the `<code>:*` prefix form are accepted
+	 * so callers can either request the whole family or a specific subtype.
+	 *
+	 * @param {Array<*>} feats - The pool of feats to filter
+	 * @param {Array<string>} categories - Category codes to allow
+	 * @returns {Array<*>} Filtered feats
+	 */
+	static filterFeatsByCategory (/** @type {*} */ feats, /** @type {*} */ categories) {
+		if (!Array.isArray(feats)) return [];
+		if (!Array.isArray(categories) || !categories.length) return feats;
+		const allowed = new Set(categories);
+		return feats.filter((/** @type {*} */ f) => {
+			if (!f?.category) return false;
+			if (allowed.has(f.category)) return true;
+			// FS:P matches FS, EB:foo matches EB, etc.
+			const colon = f.category.indexOf(":");
+			if (colon > 0 && allowed.has(f.category.slice(0, colon))) return true;
+			return false;
+		});
+	}
+
+	/**
+	 * Build the "feat choices spec" describing every sub-choice a feat presents
+	 * (skill / language / tool / expertise / ability / optionalFeature / spell choices).
+	 * Pure helper — takes a context object so it can be reused from level-up, the
+	 * builder, and quickbuild without inheriting their `this`.
+	 *
+	 * @param {object} feat - The feat data
+	 * @param {object} ctx - Context for evaluating optional-feature progressions
+	 * @param {object} [ctx.state] - CharacterSheetState (optional)
+	 * @param {object} [ctx.page] - CharacterSheetPage (for filterByAllowedSources / getOptionalFeatures)
+	 * @returns {*} Choices spec object (always returns an object; fields may be null)
+	 */
+	static buildFeatChoicesSpec (/** @type {*} */ feat, /** @type {*} */ ctx = {}) {
+		/** @type {*} */ const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null, spells: null, optionalFeatures: null};
+		if (!feat || typeof feat !== "object") return choices;
+
+		// Skills
+		if (Array.isArray(feat.skillProficiencies)) {
+			for (const sp of feat.skillProficiencies) {
+				if (sp?.choose) {
+					choices.skills = {count: sp.choose.count || 1, from: sp.choose.from || Object.keys(Parser.SKILL_TO_ATB_ABV)};
+					break;
+				}
+				if (sp?.any) {
+					choices.skills = {count: sp.any, from: Object.keys(Parser.SKILL_TO_ATB_ABV)};
+					break;
+				}
+			}
+		}
+
+		// Languages
+		if (Array.isArray(feat.languageProficiencies)) {
+			for (const lp of feat.languageProficiencies) {
+				if (lp?.anyStandard) { choices.languages = {count: lp.anyStandard, type: "standard"}; break; }
+				if (lp?.any) { choices.languages = {count: lp.any, type: "any"}; break; }
+			}
+		}
+
+		// Tools
+		if (Array.isArray(feat.toolProficiencies)) {
+			for (const tp of feat.toolProficiencies) {
+				if (tp?.anyArtisansTool && tp?.anyMusicalInstrument) {
+					choices.tools = {count: tp.anyArtisansTool, type: "artisanOrInstrument"};
+					break;
+				}
+				if (tp?.anyArtisansTool) { choices.tools = {count: tp.anyArtisansTool, type: "artisan"}; break; }
+				if (tp?.anyMusicalInstrument) { choices.tools = {count: tp.anyMusicalInstrument, type: "instrument"}; break; }
+				if (tp?.any) { choices.tools = {count: tp.any, type: "any"}; break; }
+				if (tp?.choose) { choices.tools = {count: tp.choose.count || 1, from: tp.choose.from || []}; break; }
+			}
+			if (!choices.tools) {
+				const hasArtisan = feat.toolProficiencies.some((/** @type {*} */ tp) => tp?.anyArtisansTool);
+				const hasInstrument = feat.toolProficiencies.some((/** @type {*} */ tp) => tp?.anyMusicalInstrument);
+				if (hasArtisan && hasInstrument) choices.tools = {count: 1, type: "artisanOrInstrument"};
+			}
+		}
+
+		// Expertise
+		if (Array.isArray(feat.expertise)) {
+			for (const exp of feat.expertise) {
+				if (exp?.anyProficientSkill) { choices.expertise = {count: exp.anyProficientSkill, type: "proficient"}; break; }
+				if (exp?.choose) { choices.expertise = {count: exp.choose.count || 1, from: exp.choose.from || []}; break; }
+			}
+		}
+
+		// Ability score increases (choose from)
+		if (Array.isArray(feat.ability)) {
+			for (const ab of feat.ability) {
+				if (ab?.choose) {
+					choices.ability = {count: ab.choose.count || 1, amount: ab.choose.amount || 1, from: ab.choose.from || Parser.ABIL_ABVS};
+					break;
+				}
+			}
+		}
+
+		// Optional-feature picks (Eldritch Adept etc.) — only available when ctx has state+page
+		const featOptSpecs = CharacterSheetClassUtils.getFeatOptionalFeatureChoiceSpec(feat);
+		if (featOptSpecs?.length && ctx?.page && ctx?.state) {
+			try {
+				const allOptFeaturesRaw = ctx.page.filterByAllowedSources(ctx.page.getOptionalFeatures?.() || []);
+				const settings = ctx.state.getSettings?.() || {};
+				const showAll = !!settings.showAllOptFeatureVersions;
+				const enableTgtt = !!settings.enableTgtt;
+				const dedupedOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
+				const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(dedupedOptFeatures, {enableTgtt});
+				const alreadyKnown = (ctx.state.getFeatures?.() || []).filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
+				const prereqContext = {
+					classes: ctx.state.getClasses?.() || [],
+					totalLevel: ctx.state.getTotalLevel?.() || 0,
+					existingFeatures: alreadyKnown,
+					cantrips: ctx.state.getCantripsKnown?.() || [],
+					spells: ctx.state.getSpellsKnown?.() || [],
+				};
+				choices.optionalFeatures = featOptSpecs.map((/** @type {*} */ spec) => ({
+					...spec,
+					available: CharacterSheetClassUtils.getFeatOptionalFeatureOptions(allOptFeatures, {
+						featureTypes: spec.featureTypes,
+						prereqContext,
+						alreadyKnown,
+					}),
+				}));
+			} catch (e) {
+				// Defensive — if ctx is incomplete, skip optional-feature picks gracefully
+				choices.optionalFeatures = null;
+			}
+		}
+
+		// Spells (Magic Initiate–style + additionalSpells choose entries)
+		if (Array.isArray(feat.additionalSpells)) {
+			/** @type {*} */ const spellChoices = {cantrips: null, spells: null, list: null};
+			for (const addSpells of feat.additionalSpells) {
+				if (addSpells?.name && addSpells?.ability) {
+					spellChoices.list = {name: addSpells.name, ability: addSpells.ability};
+				}
+				const parseSpellBlock = (/** @type {*} */ block, /** @type {*} */ target) => {
+					if (!block) return;
+					for (const [key, val] of Object.entries(block)) {
+						if (key === "_" || key === "daily" || key === "rest") {
+							const spells = key === "_" ? val : (val?.["1e"] || val?.["1"] || Object.values(val || {})[0] || []);
+							if (Array.isArray(spells)) {
+								for (const spell of spells) {
+									if (spell && typeof spell === "object" && spell.choose && typeof spell.choose === "string") {
+										const filter = spell.choose;
+										const count = spell.count || 1;
+										const maxLevel = filter.match(/level=(\d+)/)?.[1];
+										if (maxLevel === "0" || filter.includes("level=0")) {
+											spellChoices.cantrips = {count, filter};
+										} else {
+											spellChoices.spells = {
+												count,
+												filter,
+												innate: target === "innate",
+												daily: key === "daily" ? "1" : null,
+											};
+										}
+									}
+								}
+							}
+						}
+					}
+				};
+				parseSpellBlock(addSpells.innate, "innate");
+				parseSpellBlock(addSpells.known, "known");
+				parseSpellBlock(addSpells.prepared, "prepared");
+			}
+			if (spellChoices.cantrips || spellChoices.spells || spellChoices.list) choices.spells = spellChoices;
+		}
+
+		return choices;
+	}
+
+	/**
+	 * Validate that all required sub-choices on a feat have been filled in.
+	 * Apply-button gate for Bug 8 feat-progression picks.
+	 *
+	 * @param {object} feat - The feat (after `_featChoices` mutation by the picker UI)
+	 * @param {object} [spec] - Optional pre-built spec; built from feat+ctx if omitted
+	 * @param {object} [ctx] - Context passed to buildFeatChoicesSpec if spec absent
+	 * @returns {boolean} true iff every required choice has been picked
+	 */
+	static isFeatChoiceSpecComplete (/** @type {*} */ feat, /** @type {*} */ spec = null, /** @type {*} */ ctx = {}) {
+		if (!feat || typeof feat !== "object") return true;
+		const sp = spec || CharacterSheetClassUtils.buildFeatChoicesSpec(feat, ctx);
+		const fc = feat._featChoices || {};
+
+		if (sp.skills && (!Array.isArray(fc.skills) || fc.skills.length < sp.skills.count)) return false;
+		if (sp.languages && (!Array.isArray(fc.languages) || fc.languages.length < sp.languages.count)) return false;
+		if (sp.tools && (!Array.isArray(fc.tools) || fc.tools.length < sp.tools.count)) return false;
+		if (sp.expertise && (!Array.isArray(fc.expertise) || fc.expertise.length < sp.expertise.count)) return false;
+		if (sp.ability) {
+			const picked = fc.ability && typeof fc.ability === "object" ? Object.keys(fc.ability).length : 0;
+			if (picked < sp.ability.count) return false;
+		}
+		if (Array.isArray(sp.optionalFeatures) && sp.optionalFeatures.length) {
+			const picks = Array.isArray(fc.optionalFeatures) ? fc.optionalFeatures : [];
+			for (const optSpec of sp.optionalFeatures) {
+				const match = picks.find((/** @type {*} */ p) => p?.featureName === optSpec.name) || picks.find((/** @type {*} */ p) => p?.specIndex === sp.optionalFeatures.indexOf(optSpec));
+				if (!match || !Array.isArray(match.picks) || match.picks.length < (optSpec.count || 1)) return false;
+			}
+		}
+		if (sp.spells) {
+			if (sp.spells.list && !fc.scribingClass) return false;
+			if (sp.spells.cantrips && (!Array.isArray(fc.cantrips) || fc.cantrips.length < sp.spells.cantrips.count)) return false;
+			if (sp.spells.spells && (!Array.isArray(fc.spells) || fc.spells.length < sp.spells.spells.count)) return false;
+		}
+		return true;
+	}
+
 	/**
 	 * Compute optional feature gains between currentLevel and newLevel.
 	 * @param {object} classData - The class data object

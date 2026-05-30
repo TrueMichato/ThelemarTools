@@ -23284,6 +23284,21 @@ class CharacterSheetState {
 			// Remove associated modifiers (by ID and by name for orphaned modifiers)
 			this.removeModifiersByFeature(feature.id);
 			this.removeModifiersByName(feature.name);
+
+			// Cascade-remove any feats granted by this optional feature
+			// (e.g. Lessons of the First Ones invocation → its Origin Feat).
+			// Prefer match-by-id (unique per instance — supports repeatable invocations);
+			// fall back to name+source for older saves that pre-date the id link.
+			const linkedFeats = (this._data.feats || []).filter(f => {
+				const link = f.linkedToOptFeature;
+				if (!link) return false;
+				if (link.id && feature.id && link.id === feature.id) return true;
+				if (!link.id && link.name === feature.name && link.source === feature.source) return true;
+				return false;
+			});
+			for (const lf of linkedFeats) {
+				this.removeFeat(lf.id);
+			}
 		}
 
 		// Remove the feature
@@ -23393,6 +23408,13 @@ class CharacterSheetState {
 			backgroundName: feat.backgroundName || null,
 			choices: feat.choices || null,
 		};
+
+		if (opts.linkedToOptFeature && (opts.linkedToOptFeature.id || (opts.linkedToOptFeature.name && opts.linkedToOptFeature.source))) {
+			featData.linkedToOptFeature = {};
+			if (opts.linkedToOptFeature.id) featData.linkedToOptFeature.id = opts.linkedToOptFeature.id;
+			if (opts.linkedToOptFeature.name) featData.linkedToOptFeature.name = opts.linkedToOptFeature.name;
+			if (opts.linkedToOptFeature.source) featData.linkedToOptFeature.source = opts.linkedToOptFeature.source;
+		}
 
 		// Add uses if detected
 		if (uses) {
