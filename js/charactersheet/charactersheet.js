@@ -6863,23 +6863,49 @@ class CharacterSheetPage {
 			// Class features - link to class feature page
 			if (feature.featureType === "Class" && feature.className) {
 				const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
-				const classSource = feature.classSource || feature.source || storedClass?.source || Parser.SRC_XPHB;
+				const isOfficialSource = (src) => CharacterSheetClassUtils._isHoverOfficialSource(src);
+
+				// Use the canonical (classSource, featureSource) resolver — same logic
+				// the Features tab uses — so TGTT/Bladesinging-style class-source leaks
+				// are normalised back to the original canonical source. Without this,
+				// e.g. Chronurgy Magic features on a TGTT Wizard build a hash with
+				// classSource=TGTT and the hover fails to load.
+				let {classSource: actualClassSource, featureSource: actualFeatureSource} =
+					CharacterSheetClassUtils.resolveFeatureHoverSources(feature, storedClass);
+
+				// Homebrew class referencing an official feature (TGTT Warlock w/ XPHB
+				// Magical Cunning etc.): try the loaded class-features data for an
+				// official match so the hover routes to the canonical entry.
+				if (!isOfficialSource(actualClassSource) && this._classFeatures) {
+					try {
+						const officialMatch = this._classFeatures.find(f =>
+							f.name === feature.name
+							&& f.className === feature.className
+							&& f.level === (feature.level || 1)
+							&& isOfficialSource(f.source),
+						);
+						if (officialMatch) {
+							actualClassSource = officialMatch.classSource || officialMatch.source;
+							actualFeatureSource = officialMatch.source;
+						}
+					} catch (e) { /* fall through */ }
+				}
 
 				const hashInput = {
 					name: feature.name,
 					className: feature.className,
-					classSource: classSource,
+					classSource: actualClassSource,
 					level: feature.level || 1,
-					source: feature.source || Parser.SRC_XPHB,
+					source: actualFeatureSource || Parser.SRC_XPHB,
 				};
 				if (feature.subclassName || feature.isSubclassFeature) {
 					hashInput.subclassShortName = feature.subclassShortName || feature.subclassName;
 					hashInput.subclassSource = feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
 				}
 				const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
-				const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: feature.className, source: classSource});
+				const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: feature.className, source: actualClassSource});
 				const classHref = `${UrlUtil.PG_CLASSES}#${classHash}`;
-				return this.getHoverLink(UrlUtil.PG_CLASS_SUBCLASS_FEATURES, feature.name, feature.source || Parser.SRC_XPHB, hash, null, classHref);
+				return this.getHoverLink(UrlUtil.PG_CLASS_SUBCLASS_FEATURES, feature.name, actualFeatureSource || Parser.SRC_XPHB, hash, null, classHref);
 			}
 			// Optional features (invocations, combat methods, etc.)
 			if (feature.featureType === "Optional Feature" || feature.optionalfeatureType) {
@@ -10478,28 +10504,48 @@ class CharacterSheetPage {
 			return link;
 		} catch (e) {
 			// eslint-disable-next-line no-console
-			console.error("[CharSheet] getHoverLink error:", e);
+			console.warn("[CharSheet] getHoverLink error:", e);
 			return displayName || name;
 		}
 	}
 
 	/**
 	 * Create a hoverable link for a subclass.
-	 * @param {object} subclass - Subclass object with name, source, className, classSource
+	 *
+	 * The character only stores `cls.subclass = {name, source}` — the `source`
+	 * here is the SUBCLASS source (e.g. "EGW" for Chronurgy Magic). The
+	 * PG_CLASSES hover hash and lookup both want the *class* source
+	 * (`subclass.classSource`, e.g. "PHB" for the Wizard that Chronurgy
+	 * lives on), not the subclass source. The optional `allSubclasses`
+	 * argument lets callers thread loaded class data so we can resolve the
+	 * canonical class source; without it we conservatively fall back to
+	 * `subclass.classSource || subclass.source`, preserving prior behaviour.
+	 *
+	 * @param {object} subclass - Subclass object with name/source and optionally className/classSource
+	 * @param {Array} [allSubclasses] - Loaded subclass data (used to look up missing classSource)
+	 * @param {object} [storedClass] - Stored class entry (fallback for className/classSource)
 	 * @returns {string} HTML string for the hover link
 	 */
-	static getSubclassHoverLink (subclass) {
+	static getSubclassHoverLink (subclass, allSubclasses = null, storedClass = null) {
 		try {
-			const hash = `${UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: subclass.className, source: subclass.classSource})}${HASH_PART_SEP}${UrlUtil.getClassesPageStatePart({subclass})}`;
+			const resolved = CharacterSheetClassUtils.resolveSubclassHoverSources(subclass, allSubclasses || [], storedClass);
+			const subclassForHash = {
+				name: resolved.name,
+				source: resolved.source,
+				className: resolved.className,
+				classSource: resolved.classSource,
+				shortName: resolved.shortName,
+			};
+			const hash = `${UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: resolved.className, source: resolved.classSource})}${HASH_PART_SEP}${UrlUtil.getClassesPageStatePart({subclass: subclassForHash})}`;
 			const hoverAttrs = Renderer.hover.getHoverElementAttributes({
 				page: UrlUtil.PG_CLASSES,
-				source: subclass.source,
+				source: resolved.classSource,
 				hash,
 			});
-			return `<a href="${UrlUtil.PG_CLASSES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${subclass.name}</a>`;
+			return `<a href="${UrlUtil.PG_CLASSES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${resolved.name}</a>`;
 		} catch (e) {
 			// eslint-disable-next-line no-console
-			console.error("[CharSheet] getSubclassHoverLink error:", e);
+			console.warn("[CharSheet] getSubclassHoverLink error:", e);
 			return subclass.name; // Fallback to just the name
 		}
 	}
