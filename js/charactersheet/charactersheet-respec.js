@@ -556,25 +556,47 @@ class CharacterSheetRespec {
 			}
 
 			// Ability bonuses — fixed + user-chosen
+			// If Tasha's optional rules are in effect, the player reassigns ALL racial ASI,
+			// so the race-default `ability` block must be hidden and replaced with the
+			// Tasha's-chosen distribution. Otherwise we show race defaults plus any
+			// race-defined ability choice picks (Variant Human +1/+1, etc.).
 			const raceBonusParts = [];
-			if (race.ability) {
-				race.ability.forEach(abiSet => {
-					Object.entries(abiSet).forEach(([abi, bonus]) => {
-						if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
-							raceBonusParts.push(`${Parser.attAbvToFull(abi)} +${bonus}`);
-						}
+			const totalsByAbi = {};
+			const addBonus = (abi, amount) => {
+				if (!abi || !Parser.ABIL_ABVS.includes(abi)) return;
+				const n = Number(amount) || 0;
+				if (!n) return;
+				totalsByAbi[abi] = (totalsByAbi[abi] || 0) + n;
+			};
+			if (raceUserChoices.useTashasRules && raceUserChoices.tashasAbilityBonuses) {
+				Object.entries(raceUserChoices.tashasAbilityBonuses).forEach(([key, value]) => {
+					if (key.endsWith("_amount")) return;
+					const amount = raceUserChoices.tashasAbilityBonuses[`${key}_amount`] || 0;
+					addBonus(/** @type {*} */ (value), amount);
+				});
+			} else {
+				if (race.ability) {
+					race.ability.forEach(abiSet => {
+						Object.entries(abiSet).forEach(([abi, bonus]) => {
+							addBonus(abi, bonus);
+						});
 					});
-				});
-			}
-			if (raceUserChoices.selectedAbilityChoices) {
-				Object.entries(raceUserChoices.selectedAbilityChoices).forEach(([key, value]) => {
-					if (!key.includes("_weight") && value && Parser.ABIL_ABVS.includes(value)) {
+				}
+				if (raceUserChoices.selectedAbilityChoices) {
+					Object.entries(raceUserChoices.selectedAbilityChoices).forEach(([key, value]) => {
+						if (key.includes("_weight")) return;
 						const bonus = raceUserChoices.selectedAbilityChoices[`${key}_weight`] || 0;
-						if (bonus) raceBonusParts.push(`${Parser.attAbvToFull(value)} +${bonus}`);
-					}
-				});
+						addBonus(/** @type {*} */ (value), bonus);
+					});
+				}
 			}
-			if (raceBonusParts.length) items.push(`ASI: ${raceBonusParts.join(", ")}`);
+			Object.entries(totalsByAbi).forEach(([abi, total]) => {
+				if (total) raceBonusParts.push(`${Parser.attAbvToFull(abi)} +${total}`);
+			});
+			if (raceBonusParts.length) {
+				const label = raceUserChoices.useTashasRules ? "ASI (Tasha's)" : "ASI";
+				items.push(`${label}: ${raceBonusParts.join(", ")}`);
+			}
 
 			if (items.length) {
 				raceGrants.append(e_({outer: `<div class="ve-small ve-muted ml-2">${items.join(" · ")}</div>`}));
