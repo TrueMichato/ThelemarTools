@@ -208,6 +208,7 @@ class CharacterSheetSpellPicker {
 	 * @param {Set<string>} opts.knownSpellIds - Set of "name|source" strings already known
 	 * @param {Function} opts.onSelect - Callback(spells[], cantrips[]) on selection change
 	 * @param {Function} [opts.getHoverLink] - Optional hover link builder (page, name, source) => html
+	 * @param {Function} [opts.getSpellHoverLink] - Optional rarity/legality-aware hover link builder (name, source, spellData) => html; preferred over getHoverLink for spell links when both are supplied.
 	 * @param {Array} [opts.preSelectedSpells] - Pre-selected leveled spells
 	 * @param {Array} [opts.preSelectedCantrips] - Pre-selected cantrips
 	 * @param {Array} [opts.additionalClassNames] - Additional class names whose spell lists to include (e.g. ["Cleric"] for Divine Soul)
@@ -226,6 +227,7 @@ class CharacterSheetSpellPicker {
 			knownSpellIds = new Set(),
 			onSelect,
 			getHoverLink,
+			getSpellHoverLink,
 			preSelectedSpells = [],
 			preSelectedCantrips = [],
 			additionalClassNames = [],
@@ -435,6 +437,7 @@ class CharacterSheetSpellPicker {
 				spellCount,
 				cantripCount,
 				getHoverLink,
+				getSpellHoverLink,
 				previewPane,
 				onToggle: (spell) => {
 					const isCantrip = spell.level === 0;
@@ -501,6 +504,7 @@ class CharacterSheetSpellPicker {
 	 * @param {Set<string>} opts.knownSpellIds - Set of "name|source" strings already in spellbook
 	 * @param {Function} opts.onSelect - Callback(spells[]) on selection change
 	 * @param {Function} [opts.getHoverLink] - Optional hover link builder
+	 * @param {Function} [opts.getSpellHoverLink] - Optional rarity/legality-aware hover link builder (name, source, spellData) => html; preferred over getHoverLink for spell links when both are supplied.
 	 * @param {Array} [opts.preSelectedSpells] - Pre-selected spells
 	 * @param {string} [opts.className] - Class name (for display / spell-source filtering)
 	 * @param {string} [opts.subclass] - Subclass short name (for display / spell-source filtering)
@@ -514,6 +518,7 @@ class CharacterSheetSpellPicker {
 			knownSpellIds = new Set(),
 			onSelect,
 			getHoverLink,
+			getSpellHoverLink,
 			preSelectedSpells = [],
 			className,
 			subclass,
@@ -704,6 +709,7 @@ class CharacterSheetSpellPicker {
 				spellCount,
 				cantripCount: 0,
 				getHoverLink,
+				getSpellHoverLink,
 				previewPane,
 				onToggle: (spell) => {
 					const spellId = `${spell.name}|${spell.source}`;
@@ -856,7 +862,7 @@ class CharacterSheetSpellPicker {
 	 * Shared rendering logic used by all pickers.
 	 * @private
 	 */
-	static _renderGroupedSpellList ({container, spells, knownSpellIds, selectedSpells, selectedCantrips, spellCount, cantripCount, getHoverLink, previewPane, onToggle}) {
+	static _renderGroupedSpellList ({container, spells, knownSpellIds, selectedSpells, selectedCantrips, spellCount, cantripCount, getHoverLink, getSpellHoverLink, previewPane, onToggle}) {
 		const byLevel = {};
 		spells.forEach(spell => {
 			if (!byLevel[spell.level]) byLevel[spell.level] = [];
@@ -915,7 +921,13 @@ class CharacterSheetSpellPicker {
 				// Add spell name with hover link
 				const nameEl = item.querySelector(".charsheet__spell-picker-item-name");
 				try {
-					if (getHoverLink) {
+					if (getSpellHoverLink) {
+						// Bug 7: rarity/legality-aware hover for spell pickers.
+						// Falls back to standard hover internally when the spell has no
+						// charsheet-specific metadata, so this is safe for every spell.
+						const hoverLink = getSpellHoverLink(spell.name, spell.source || Parser.SRC_XPHB, spell);
+						nameEl.innerHTML = hoverLink;
+					} else if (getHoverLink) {
 						const hoverLink = getHoverLink(UrlUtil.PG_SPELLS, spell.name, spell.source || Parser.SRC_XPHB);
 						nameEl.innerHTML = hoverLink;
 					} else {

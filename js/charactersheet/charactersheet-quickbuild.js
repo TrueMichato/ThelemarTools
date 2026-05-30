@@ -3507,6 +3507,7 @@ class CharacterSheetQuickBuild {
 					this._selections.spellbookSpells = spells;
 				},
 				getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				preSelectedSpells: this._selections.spellbookSpells,
 			});
 
@@ -3578,6 +3579,7 @@ class CharacterSheetQuickBuild {
 				this._selections.knownCantrips = cantrips;
 			},
 			getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+			getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 			preSelectedSpells: this._selections.knownSpells,
 			preSelectedCantrips: this._selections.knownCantrips,
 		});
@@ -3677,6 +3679,7 @@ class CharacterSheetQuickBuild {
 				this._selections.preparedCantrips = cantrips;
 			},
 			getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+			getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 			preSelectedSpells: this._selections.preparedSpells || [],
 			preSelectedCantrips: this._selections.preparedCantrips || [],
 		});

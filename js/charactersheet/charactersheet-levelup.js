@@ -569,6 +569,7 @@ class CharacterSheetLevelUp {
 						allSpells: knownAllSpells,
 						knownSpellIds: knownExistingIds,
 						getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+						getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 						subclass: selectedSubclass || classEntry.subclass,
 						subclassChoice: selectedSubclassChoice,
 						additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
@@ -873,6 +874,7 @@ class CharacterSheetLevelUp {
 				className: classEntry.name,
 				subclass: selectedSubclass || classEntry.subclass,
 				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				onSelect: (/** @type {*} */ spells) => {
 					selectedSpellbookSpells = spells;
 					// Spellbook picks are optional at level-up — always report complete
@@ -909,6 +911,7 @@ class CharacterSheetLevelUp {
 				allSpells: knownAllSpells,
 				knownSpellIds: knownExistingIds,
 				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				subclass: selectedSubclass || classEntry.subclass,
 				subclassChoice: selectedSubclassChoice,
 				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
@@ -963,6 +966,7 @@ class CharacterSheetLevelUp {
 				allSpells: prepAllSpells,
 				knownSpellIds: prepExistingIds,
 				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				subclass: selectedSubclass || classEntry.subclass,
 				subclassChoice: selectedSubclassChoice,
 				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
@@ -5099,6 +5103,7 @@ class CharacterSheetLevelUp {
 					className: selectedClass.name,
 					subclass: null,
 					getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+					getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 					cantripCount: multiclassCantripGain,
 					onSelect: (/** @type {*} */ spells) => { selectedMulticlassSpells = spells; },
 					onSelectCantrips: (/** @type {*} */ cantrips) => { selectedMulticlassCantrips = cantrips; },
@@ -5114,6 +5119,7 @@ class CharacterSheetLevelUp {
 					allSpells,
 					knownSpellIds,
 					getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+					getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 					subclass: null,
 					additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
 						className: selectedClass.name,
