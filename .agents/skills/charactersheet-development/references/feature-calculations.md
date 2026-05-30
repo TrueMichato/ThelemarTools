@@ -129,3 +129,17 @@ Every official PHB/XPHB class has full subclass calculations. All TGTT homebrew 
 ## Performance Note
 
 `getFeatureCalculations()` is **not memoized** — it recomputes on every call. This is a known performance concern documented in the roadmap. When calling it in tests, be aware each call traverses all classes. In a single test, call it once and assert on the result object.
+
+## Cross-Cutting Picker Helpers
+
+A few class-utils helpers gate which options are visible in the optional-feature / combat-tradition / spell pickers. Always pass them the full context (class source, subclass), not just the class name.
+
+- **`filterOptFeaturesForTgttMetamagic(features, {enableTgtt, classSource})`** — Metamagic visibility for TGTT Sorcerer. Auto-applies when `classSource === "TGTT"` regardless of the global `enableTgtt` flag, so a TGTT Thelemar Sorcerer never sees XPHB metamagic options.
+- **`getAvailableTraditionsForClass(features, allowedTypes, className, classFeatures, {subclass, subclassSource})`** — Returns the tradition pool for a Fighter/Monk/etc., factoring in subclass-specific traditions and choice-restricted pools. Used by both the builder (`_renderCombatMethodsSelection`) and level-up (`_renderTraditionPicker`).
+- **`getSubclassTraditionChoicePool(subclass, classSource)`** — Returns the codes a subclass is allowed to choose **from** when its grants list contains `choice: true` entries (e.g. Arcane Archer's 4 shots, Champion's 3 reaches). Returns `null` for "any tradition" subclasses (Battle Master). Pre-seeded traditions are subtracted from the requested count so the picker only asks for the *remainder*.
+- **`subclassAdditionalSpellsIncludeSpell(subclass, spell, characterLevel)`** — Checks whether a subclass's `additionalSpells` block makes a given spell available at the character's level. Resolves `expanded` block filter queries (e.g. `"source=EGW"`, `"level=0|class=Cleric"`) against the actual spell, not just by exact name match. This is why Chronurgy Wizards see Gift of Alacrity and Divine Soul Sorcerers see Guidance.
+- **Generic `featProgression` on optional features** — When an invocation / maneuver / fighting-style entry has a `featProgression` block, the picker queues a feat picker filtered by `category` after selection (e.g. Lessons of the First Ones → Origin Feat). The granted feat is persisted alongside the optional feature and removed if the optional feature is unselected.
+
+## Hover Routing Discipline
+
+The `_getFeatureHoverLink` and `getSubclassHoverLink` helpers (`charactersheet.js`) both route through `CharacterSheetClassUtils.resolveSubclassHoverSources(feature)`. This helper exists because TGTT-style `_copy` subclasses can leave `feature.classSource` pointing at the homebrew copy (`TGTT-2014`) when the canonical entry lives in PHB / EGW / etc. Always use the helper instead of reading `feature.classSource` raw — otherwise hovers produce broken hashes and the link silently 404s.
