@@ -5205,6 +5205,7 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	gap: 0.5rem;
 	padding: 0.5rem 0.75rem;
 	background: var(--cs-bg-card, rgba(30, 41, 59, 0.5));
 	border-radius: 0.375rem;
@@ -5221,6 +5222,13 @@
 	align-items: center;
 	gap: 0.5rem;
 	min-width: 0;
+	flex: 1 1 auto;
+}
+
+.charsheet__section-caption {
+	margin: 0.15rem 0 0.4rem;
+	font-style: italic;
+	line-height: 1.25;
 }
 
 .charsheet__ability-icon {
@@ -5230,9 +5238,12 @@
 
 .charsheet__ability-name {
 	font-weight: 500;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	white-space: normal;
+	overflow: visible;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+	min-width: 0;
+	flex: 1 1 auto;
 }
 
 .charsheet__ability-controls {
@@ -5501,10 +5512,14 @@
 }
 
 .charsheet__resource-name {
-	flex: 1;
+	flex: 1 1 auto;
+	min-width: 0;
 	font-weight: 600;
 	font-size: var(--cs-text-sm, 0.85rem);
 	color: var(--cs-text-primary, var(--rgb-text));
+	white-space: normal;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 
 .charsheet__resource-uses {

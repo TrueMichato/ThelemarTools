@@ -5332,21 +5332,13 @@ class CharacterSheetPage {
 		const resources = this._state.getResources();
 		const usesCombatSystem = this._state.usesCombatSystem?.() || false;
 
-		// Get limited-use custom abilities (displayed in Resources section)
-		const customAbilities = this._state.getCustomAbilities?.() || [];
-		const limitedAbilities = customAbilities.filter(a => a.mode === "limited");
+		// Bug 3: Custom limited-use abilities are NOT rendered here anymore —
+		// they live exclusively in the Abilities section below. Resources are
+		// system/class-granted pools only (Channel Divinity, Rage, Ki, spell
+		// slots, racial 1/day, Stamina for the combat-traditions system, etc.).
 
-		// Count abilities that will be shown (exclude those linking to existing resources)
-		const visibleLimitedAbilities = limitedAbilities.filter(a => {
-			if (a.resourceSource?.type === "linked" && a.resourceSource?.resourceId !== "stamina") {
-				const linkedResource = resources.find(r => r.id === a.resourceSource.resourceId);
-				if (linkedResource) return false; // Skip - already shown in resources
-			}
-			return true;
-		});
-
-		// Update resources count badge
-		let totalResourceCount = resources.length + visibleLimitedAbilities.length;
+		// Update resources count badge — count system resources + (optional) stamina.
+		let totalResourceCount = resources.length;
 		if (usesCombatSystem) {
 			const staminaMax = this._state.getStaminaMax() || 0;
 			if (staminaMax > 0) totalResourceCount++;
@@ -5405,8 +5397,8 @@ class CharacterSheetPage {
 			}
 		}
 
-		if (!resources.length && !usesCombatSystem && !limitedAbilities.length) {
-			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No limited-use features</div>`;
+		if (!resources.length && !usesCombatSystem) {
+			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No class-granted resources yet</div>`;
 			return;
 		}
 
@@ -5446,65 +5438,6 @@ class CharacterSheetPage {
 
 			container.append(row);
 		});
-
-		// Render limited-use custom abilities
-		limitedAbilities.forEach(ability => {
-			// Get the uses display (handles both self-contained and linked resources)
-			const uses = this._state.getCustomAbilityUsesDisplay?.(ability.id) || ability.uses;
-			if (!uses) return;
-
-			// Check if this ability links to an existing resource pool (don't show duplicate)
-			if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId !== "stamina") {
-				const linkedResource = resources.find(r => r.id === ability.resourceSource.resourceId);
-				if (linkedResource) {
-					// Skip - the linked resource is already shown in the resources list
-					return;
-				}
-			}
-
-			const canUse = this._state.canUseCustomAbility?.(ability.id) ?? uses.current > 0;
-			const canRestore = uses.current < uses.max;
-
-			const row = e_({outer: `
-				<div class="charsheet__resource-row charsheet__resource-row--custom" data-ability-id="${ability.id}">
-					<span class="charsheet__resource-icon mr-1">${ability.icon || "⚡"}</span>
-					<span class="charsheet__resource-name">${ability.name}</span>
-					<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(${uses.recharge === "short" ? "Short" : "Long"})</span>
-					<div class="charsheet__resource-uses ml-auto">
-						<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__ability-use-btn" ${!canUse ? "disabled" : ""}>Use</button>
-						<span class="charsheet__resource-current">${uses.current}</span>
-						<span class="charsheet__resource-max">/ ${uses.max}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-success ml-2 charsheet__ability-restore-btn" ${!canRestore ? "disabled" : ""}>+</button>
-					</div>
-				</div>
-			`});
-
-			row.querySelector(".charsheet__ability-use-btn").addEventListener("click", () => {
-				if (this._state.useCustomAbility(ability.id)) {
-					this._saveCurrentCharacter();
-					this._renderResources();
-					this._renderOverviewAbilities();
-					this._renderActiveStates();
-					if (this._features) this._features._renderResources();
-					if (this._customAbilities) this._customAbilities.render();
-					if (this._combat) this._combat.renderCombatActions();
-				}
-			});
-
-			row.querySelector(".charsheet__ability-restore-btn").addEventListener("click", () => {
-				if (this._state.restoreCustomAbilityUse(ability.id)) {
-					this._saveCurrentCharacter();
-					this._renderResources();
-					this._renderOverviewAbilities();
-					this._renderActiveStates();
-					if (this._features) this._features._renderResources();
-					if (this._customAbilities) this._customAbilities.render();
-					if (this._combat) this._combat.renderCombatActions();
-				}
-			});
-
-			container.append(row);
-		});
 	}
 
 	_renderOverviewMetamagic () {
@@ -5517,57 +5450,21 @@ class CharacterSheetPage {
 
 		container.innerHTML = "";
 
-		// Get limited-use custom abilities
+		// Bug 3: Class-granted resources (Channel Divinity, Rage, Ki, etc.) are
+		// no longer rendered here — they belong exclusively to the Resources
+		// section above. The Abilities section is reserved for the user's
+		// custom-defined activatable features.
 		const customAbilities = this._state.getCustomAbilities?.() || [];
 		const limitedAbilities = customAbilities.filter(a => a.mode === "limited");
 
-		// Get class resources (Channel Divinity, Rage, etc.)
-		// Exclude Focus/Ki Points — they already have a dedicated display in the resource bar
-		const META_RESOURCE_NAMES = new Set(["Focus Points", "Ki Points"]);
-		const resources = this._state.getResources?.() || [];
-		const classResources = resources.filter(r => r.max > 0 && !META_RESOURCE_NAMES.has(r.name));
-
-		if (!limitedAbilities.length && !classResources.length) {
+		if (!limitedAbilities.length) {
 			container.innerHTML = `
 				<div class="charsheet__empty-state">
 					<span class="charsheet__empty-icon">💫</span>
-					<span class="charsheet__empty-text">No useable abilities</span>
+					<span class="charsheet__empty-text">No custom abilities. Create one in the Features tab.</span>
 				</div>
 			`;
 			return;
-		}
-
-		// Render class resources first
-		for (const resource of classResources) {
-			const rechargeIcon = resource.recharge === "short" ? "☀️" : "🌙";
-			const rechargeLabel = resource.recharge === "short" ? "short rest" : "long rest";
-			const canUse = resource.current > 0;
-
-			const row = e_({outer: `
-				<div class="charsheet__ability-row charsheet__ability-row--resource" data-resource-name="${resource.name.replace(/"/g, "&quot;")}">
-					<div class="charsheet__ability-info">
-						<span class="charsheet__ability-icon" title="Class Resource">⚡</span>
-						<span class="charsheet__ability-name">${resource.name}</span>
-					</div>
-					<div class="charsheet__ability-controls">
-						<span class="charsheet__ability-uses">${resource.current}/${resource.max}</span>
-						<span class="charsheet__ability-recharge" title="${rechargeLabel}">${rechargeIcon}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__ability-use-btn"
-							${!canUse ? "disabled" : ""}>Use</button>
-					</div>
-				</div>
-			`});
-
-			row.querySelector(".charsheet__ability-use-btn").addEventListener("click", (e) => {
-				e.stopPropagation();
-				this._useOverviewResource(resource);
-			});
-
-			// Star (favourite) toggle
-			const star = this._renderFavouriteStar("resource", resource);
-			if (star) row.querySelector(".charsheet__ability-controls").append(star);
-
-			container.append(row);
 		}
 
 		// Render custom abilities
@@ -5604,8 +5501,8 @@ class CharacterSheetPage {
 					<div class="charsheet__ability-controls">
 						<span class="charsheet__ability-uses">${uses.current}/${uses.max}</span>
 						<span class="charsheet__ability-recharge" title="${uses.recharge} rest">${rechargeIcon}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__ability-use-btn" 
-							${!canUse ? "disabled" : ""}>Use</button>
+						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__ability-use-btn"${!canUse ? " disabled" : ""}>Use</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__ability-edit-btn" title="Edit ability (icon, name, uses, effects)">✏️</button>
 					</div>
 				</div>
 			`});
@@ -5613,6 +5510,7 @@ class CharacterSheetPage {
 			// Click on row to show modal
 			row.addEventListener("click", (e) => {
 				if (e.target.classList.contains("charsheet__ability-use-btn")) return;
+				if (e.target.classList.contains("charsheet__ability-edit-btn")) return;
 				this._showAbilityDetailModal(ability);
 			});
 
@@ -5620,6 +5518,17 @@ class CharacterSheetPage {
 			row.querySelector(".charsheet__ability-use-btn").addEventListener("click", (e) => {
 				e.stopPropagation();
 				this._useOverviewAbility(ability);
+			});
+
+			// Edit button — opens the existing custom-ability editor modal
+			// (icon picker, name, uses, effects, etc.).
+			row.querySelector(".charsheet__ability-edit-btn").addEventListener("click", (e) => {
+				e.stopPropagation();
+				if (this._customAbilities?._showAbilityModal) {
+					this._customAbilities._showAbilityModal(ability.id);
+				} else {
+					JqueryUtil.doToast({type: "info", content: "Open the Features tab to edit custom abilities."});
+				}
 			});
 
 			// Star (favourite) toggle
