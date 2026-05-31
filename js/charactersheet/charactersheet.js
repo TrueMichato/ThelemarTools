@@ -11392,12 +11392,73 @@ class CharacterSheetPage {
 	/**
 	 * Get spell data with source filtering, priority filtering, and Thelemar rarity/legality tags applied.
 	 * Single entry point for all spell picker consumers.
+	 *
+	 * Bug 7.1 (Phase 8): The source filter alone hides subclass-granted spells whose
+	 * source is outside the user's allowed list (e.g. a TGTT-only character can't see
+	 * Guidance/PHB granted by Divine Soul, or Gift of Alacrity/EGW granted by
+	 * Chronurgy). Augment the filtered pool with any spell from the FULL pool whose
+	 * presence is explicitly granted by one of the character's subclasses — either
+	 * via `additionalSpells` blocks (`subclassAdditionalSpellsIncludeSpell`) or via
+	 * inherited class lists (`additionalClassNames`, e.g. Cleric for Divine Soul).
+	 * This preserves source filtering for the BASE spell catalogue while honouring
+	 * explicit subclass grants regardless of source.
+	 *
 	 * @returns {Array} Fully prepared spell array
 	 */
 	getFilteredSpellData () {
-		const filtered = this.filterByAllowedSources(this._spellsData || []);
-		if (this._spells) return this._spells.applyThelemarSpellRarity(filtered);
-		return filtered;
+		const all = this._spellsData || [];
+		const filtered = this.filterByAllowedSources(all);
+		const augmented = this._augmentSpellPoolWithSubclassGrants(filtered, all);
+		if (this._spells) return this._spells.applyThelemarSpellRarity(augmented);
+		return augmented;
+	}
+
+	/**
+	 * Add back any full-pool spells whose presence is explicitly granted by one of
+	 * the character's subclasses but were dropped by the source filter. See
+	 * {@link getFilteredSpellData} for context (Bug 7.1 / Phase 8).
+	 * @param {Array} filtered - Source-filtered pool (pass-through if no augmentation needed)
+	 * @param {Array} all - Full unfiltered pool
+	 * @returns {Array}
+	 */
+	_augmentSpellPoolWithSubclassGrants (filtered, all) {
+		if (!Array.isArray(all) || !all.length) return filtered;
+		// Skip the walk entirely when no source filter is active — `filtered === all`.
+		if (filtered === all || filtered.length === all.length) return filtered;
+
+		let classes;
+		try { classes = this._state?.getClasses?.() || []; } catch (e) { classes = []; }
+		if (!classes.length) return filtered;
+
+		// Collect (subclass, subclassChoice, additionalClassNames) tuples for every class.
+		const grants = [];
+		for (const cls of classes) {
+			if (!cls?.subclass) continue;
+			const classData = (this._classes || []).find(c => c.name === cls.name && c.source === cls.source);
+			const subclass = CharacterSheetClassUtils.resolveFullSubclass(cls.subclass, classData);
+			if (!subclass) continue;
+			const subclassChoice = cls.subclassChoice || this._state.getSubclassChoice?.(cls.name) || null;
+			const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+				className: cls.name,
+				subclass,
+				subclassChoice,
+			}) || [];
+			grants.push({className: cls.name, subclass, subclassChoice, additionalClassNames});
+		}
+		if (!grants.length) return filtered;
+
+		const filteredSet = new Set(filtered);
+		const augmented = filtered.slice();
+		for (const spell of all) {
+			if (filteredSet.has(spell)) continue;
+			const isGranted = grants.some(({className, subclass, subclassChoice, additionalClassNames}) => {
+				if (subclass && CharacterSheetClassUtils.subclassAdditionalSpellsIncludeSpell(spell, subclass, {subclassChoice})) return true;
+				if (additionalClassNames.length && additionalClassNames.some(n => CharacterSheetClassUtils.spellIsForClass(spell, n))) return true;
+				return false;
+			});
+			if (isGranted) augmented.push(spell);
+		}
+		return augmented;
 	}
 
 	/**
