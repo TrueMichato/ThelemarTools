@@ -2762,18 +2762,20 @@ class CharacterSheetPage {
 
 		Parser.ABIL_ABVS.forEach(abl => {
 			const isProficient = this._state.hasSaveProficiency(abl);
-			const mod = this._state.getSaveMod(abl);
-			const modStr = mod >= 0 ? `+${mod}` : mod;
 			const breakdown = this._state.getSaveBreakdown(abl);
+			const effective = breakdown.total;
+			const canonical = breakdown.canonical ?? breakdown.total;
+			const modHtml = this._formatModWithEffective(canonical, effective);
 			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
-			tooltipLines.push(`─────────\n🎯 Total: ${modStr}`);
+			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
+			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
 			const tooltip = tooltipLines.join("\n");
 
 			const row = e_({outer: `
 				<div class="charsheet__save-row" data-save="${abl}" title="${tooltip.replace(/"/g, "&quot;")}">
 					<span class="charsheet__prof-indicator ${isProficient ? "charsheet__prof-indicator--proficient" : ""}"></span>
 					<span class="charsheet__save-name">${Parser.attAbvToFull(abl)}</span>
-					<span class="charsheet__save-mod">${modStr}</span>
+					<span class="charsheet__save-mod">${modHtml}</span>
 				</div>
 			`});
 
@@ -2817,8 +2819,10 @@ class CharacterSheetPage {
 		skills.forEach(skill => {
 			const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
 			const profLevel = this._state.getSkillProficiency(skillKey);
-			const mod = this._state.getSkillMod(skillKey);
-			const modStr = mod >= 0 ? `+${mod}` : mod;
+			const breakdown = this._state.getSkillBreakdown(skillKey);
+			const effective = breakdown.total;
+			const canonical = breakdown.canonical ?? breakdown.total;
+			const modHtml = this._formatModWithEffective(canonical, effective);
 
 			let profClass = "";
 			let profTitle = "Not proficient - Click to toggle proficiency";
@@ -2841,9 +2845,9 @@ class CharacterSheetPage {
 			const defaultAbility = skill.ability || "";
 
 			const customClass = skill.isCustom ? " charsheet__skill-row--custom" : "";
-			const breakdown = this._state.getSkillBreakdown(skillKey);
 			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
-			tooltipLines.push(`─────────\n🎯 Total: ${modStr}`);
+			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
+			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
 			const skillTooltip = tooltipLines.join("\n");
 
 			const row = e_({outer: `
@@ -2851,7 +2855,7 @@ class CharacterSheetPage {
 					<span class="charsheet__prof-indicator charsheet__prof-indicator--clickable ${profClass}" title="${profTitle}" data-skill="${skillKey}"></span>
 					<span class="charsheet__skill-name">${skill.name}${skill.isCustom ? " ✦" : ""}</span>
 					<span class="charsheet__skill-ability">(${abilityDisplay})</span>
-					<span class="charsheet__skill-mod">${modStr}</span>
+					<span class="charsheet__skill-mod">${modHtml}</span>
 					<span class="charsheet__skill-passive" title="Passive ${skill.name}: ${passiveScore}">${passiveScore}</span>
 					${skill.isCustom ? `<span class="charsheet__skill-delete" title="Remove custom skill">×</span>` : ""}
 				</div>
@@ -3038,8 +3042,11 @@ class CharacterSheetPage {
 		(/** @type {*} */ (document.getElementById("charsheet-disp-ac"))).textContent = acBreakdown.total;
 		this._renderAcBreakdown(acBreakdown);
 
-		(/** @type {*} */ (document.getElementById("charsheet-disp-initiative"))).textContent = this._formatMod(this._state.getInitiative());
-		this._renderStatBreakdown("#charsheet-initiative-breakdown", this._state.getInitiativeBreakdown());
+		const initBreakdown = this._state.getInitiativeBreakdown();
+		const initEffective = initBreakdown.total;
+		const initCanonical = initBreakdown.canonical ?? initEffective;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-initiative"))).innerHTML = this._formatModWithEffective(initCanonical, initEffective);
+		this._renderStatBreakdown("#charsheet-initiative-breakdown", initBreakdown);
 
 		// Calculate speed with exhaustion penalty
 		const exhaustion = this._state.getExhaustion();
@@ -9875,6 +9882,39 @@ class CharacterSheetPage {
 	// #region Utilities
 	_formatMod (mod) {
 		return mod >= 0 ? `+${mod}` : `${mod}`;
+	}
+
+	/**
+	 * Format an "intrinsic" character bonus alongside the effective bonus
+	 * actually used at roll time. When the two match (no situational mods
+	 * active), returns just the canonical number. When they differ, returns
+	 * `canonical (effective)` with the effective value in a smaller, colored
+	 * span — green when effective > canonical, red when effective < canonical.
+	 *
+	 * `kind` controls formatting:
+	 *   - `"mod"` (default): always emit `+N` / `-N` (e.g. saves, skills).
+	 *   - `"plain"`: emit raw numbers (e.g. spell DC, where no sign prefix is shown).
+	 *
+	 * Both values are coerced to integers before comparison so callers can
+	 * pass any numeric type. Returns a plain HTML string — caller must use
+	 * `.innerHTML` (not `.textContent`) when inserting.
+	 *
+	 * @param {number} canonical
+	 * @param {number} effective
+	 * @param {{kind?: "mod"|"plain"}} [opts]
+	 * @returns {string}
+	 */
+	_formatModWithEffective (canonical, effective, opts = {}) {
+		const kind = opts.kind || "mod";
+		const can = Math.trunc(canonical);
+		const eff = Math.trunc(effective);
+		const fmt = kind === "plain" ? (v) => `${v}` : (v) => (v >= 0 ? `+${v}` : `${v}`);
+		const canonicalStr = fmt(can);
+		if (can === eff) return canonicalStr;
+		const dirClass = eff > can ? "charsheet__mod-effective--positive" : "charsheet__mod-effective--negative";
+		const effectiveStr = fmt(eff);
+		const title = (opts.titleEffective || "Effective bonus (with active mods)").replace(/"/g, "&quot;");
+		return `${canonicalStr}<span class="charsheet__mod-effective ${dirClass}" title="${title}">(${effectiveStr})</span>`;
 	}
 
 	/**

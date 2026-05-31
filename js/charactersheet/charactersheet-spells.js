@@ -5883,11 +5883,14 @@ class CharacterSheetSpells {
 		const spellAttackBonus = itemBonuses.spellAttack || 0;
 		const spellDcBonus = itemBonuses.spellSaveDc || 0;
 
-		// Get exhaustion DC penalty (Thelemar rules only)
-		const exhaustionDcPenalty = this._state._getExhaustionDcPenalty?.() || 0;
+		// Phase 1 doctrine: exhaustion is roll-only, not applied to display.
+		const customSpellAttack = this._state._data?.customModifiers?.spellAttack || 0;
+		const customSpellDc = this._state._data?.customModifiers?.spellDc || 0;
 
-		const attackBonus = mod + prof + spellAttackBonus;
-		const saveDC = 8 + mod + prof + spellDcBonus - exhaustionDcPenalty;
+		const canonicalAttack = mod + prof;
+		const effectiveAttack = canonicalAttack + spellAttackBonus + customSpellAttack;
+		const canonicalDc = 8 + mod + prof;
+		const effectiveDc = canonicalDc + spellDcBonus + customSpellDc;
 		const abilityFull = {
 			"str": "Strength",
 			"dex": "Dexterity",
@@ -5901,17 +5904,25 @@ class CharacterSheetSpells {
 		if (hasGamblerSpellcasting) {
 			document.getElementById("charsheet-spell-ability").textContent = "Charisma (Gambler)";
 
-			// Build formula strings with item/exhaustion bonuses
+			// Build formula strings with item bonuses (exhaustion intentionally not shown — roll-only)
 			const dcBase = 8 + prof;
-			const dcBonusStr = spellDcBonus > 0 ? ` + ${spellDcBonus}` : (spellDcBonus < 0 ? ` - ${Math.abs(spellDcBonus)}` : "");
-			const dcPenaltyStr = exhaustionDcPenalty > 0 ? ` - ${exhaustionDcPenalty}` : "";
+			const dcAllStaticBonus = spellDcBonus + customSpellDc;
+			const dcBonusStr = dcAllStaticBonus > 0 ? ` + ${dcAllStaticBonus}` : (dcAllStaticBonus < 0 ? ` - ${Math.abs(dcAllStaticBonus)}` : "");
 
-			document.getElementById("charsheet-spell-dc").textContent = `${dcBase} + ${calcs.gamblerModifierDice}${dcBonusStr}${dcPenaltyStr}`;
-			document.getElementById("charsheet-spell-attack").textContent = `+${prof} + ${calcs.gamblerModifierDice}${spellAttackBonus > 0 ? ` + ${spellAttackBonus}` : (spellAttackBonus < 0 ? ` - ${Math.abs(spellAttackBonus)}` : "")}`;
+			document.getElementById("charsheet-spell-dc").textContent = `${dcBase} + ${calcs.gamblerModifierDice}${dcBonusStr}`;
+			const atkAllStaticBonus = spellAttackBonus + customSpellAttack;
+			document.getElementById("charsheet-spell-attack").textContent = `+${prof} + ${calcs.gamblerModifierDice}${atkAllStaticBonus > 0 ? ` + ${atkAllStaticBonus}` : (atkAllStaticBonus < 0 ? ` - ${Math.abs(atkAllStaticBonus)}` : "")}`;
 		} else {
 			document.getElementById("charsheet-spell-ability").textContent = abilityFull;
-			document.getElementById("charsheet-spell-dc").textContent = String(saveDC);
-			document.getElementById("charsheet-spell-attack").textContent = `+${attackBonus}`;
+			// Dual canonical / effective display via shared helper — collapses when equal.
+			const dcEl = document.getElementById("charsheet-spell-dc");
+			const atkEl = document.getElementById("charsheet-spell-attack");
+			const dcOut = this._page._formatModWithEffective(canonicalDc, effectiveDc, {kind: "plain", titleEffective: "Effective spell save DC (with item/custom mods)"});
+			const atkOut = this._page._formatModWithEffective(canonicalAttack, effectiveAttack, {kind: "mod", titleEffective: "Effective spell attack (with item/custom mods)"});
+			if (canonicalDc === effectiveDc) dcEl.textContent = dcOut;
+			else dcEl.innerHTML = dcOut;
+			if (canonicalAttack === effectiveAttack) atkEl.textContent = atkOut;
+			else atkEl.innerHTML = atkOut;
 		}
 
 		// Display spell tracking using the new enhanced UI

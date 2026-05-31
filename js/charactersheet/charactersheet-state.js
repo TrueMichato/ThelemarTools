@@ -6898,39 +6898,49 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get a breakdown of saving throw modifier components
+	 * Get a breakdown of saving throw modifier components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces of the character build (ability score modifier + proficiency)
+	 * from situational modifiers (custom user-entered mods, magic items,
+	 * active spell effects, stances) that come and go between sessions.
+	 * Consumers that want to render both a "pure" and an "effective" value
+	 * can use `canonical` (sum of canonical-tagged components) alongside
+	 * `total` (sum of all components).
+	 *
 	 * @param {string} ability - The ability abbreviation (e.g., "str", "dex")
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>}}
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}}
 	 */
 	getSaveBreakdown (ability) {
 		const components = [];
 		const mod = this.getAbilityMod(ability);
-		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲"});
+		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
 
 		const prof = this.hasSaveProficiency(ability) ? this.getProficiencyBonus() : 0;
-		if (prof !== 0) components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐"});
+		if (prof !== 0) components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐", isCanonical: true});
 
 		const custom = this._data.customModifiers.savingThrows[ability] || 0;
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		const itemBonus = this._data.itemBonuses?.savingThrow || this._data.itemBonuses?.saves || 0;
-		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		const abilityKey = `savingThrow${ability.charAt(0).toUpperCase() + ability.slice(1)}`;
 		const perAbilityItemBonus = this._data.itemBonuses?.[abilityKey] || 0;
-		if (perAbilityItemBonus !== 0) components.push({type: "item", name: `${ability.toUpperCase()} Save Item`, value: perAbilityItemBonus, icon: "💎"});
+		if (perAbilityItemBonus !== 0) components.push({type: "item", name: `${ability.toUpperCase()} Save Item`, value: perAbilityItemBonus, icon: "💎", isCanonical: false});
 
 		const stateBonus = this.getSaveBonusFromStates(ability);
-		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
+		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
 
 		const stanceBonus = this._getStanceSaveBonus(ability);
-		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
+		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
 
 		// Note: exhaustion is intentionally NOT included in the save breakdown.
 		// Exhaustion only affects rolls, not the displayed bonus (see getSaveMod).
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
 	}
 
 	/**
@@ -6981,9 +6991,16 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get a breakdown of skill modifier components
+	 * Get a breakdown of skill modifier components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces of the character build (ability mod, proficiency / expertise /
+	 * JoaT / lore-skill bonus, always-on class-feature bonuses) from
+	 * situational modifiers (custom mods, items, active states, stances)
+	 * so renderers can offer dual canonical-vs-effective displays.
+	 *
 	 * @param {string} skill - The skill key (e.g., "athletics", "stealth")
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>, ability: string|null}}
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>, ability: string|null}}
 	 */
 	getSkillBreakdown (skill) {
 		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "");
@@ -6993,21 +7010,22 @@ class CharacterSheetState {
 		if (loreSkill) {
 			const loreComponents = [];
 			const pb = this.getProficiencyBonus();
-			loreComponents.push({type: "proficiency", name: "Proficiency", value: pb, icon: "⭐"});
+			loreComponents.push({type: "proficiency", name: "Proficiency", value: pb, icon: "⭐", isCanonical: true});
 			const loreBonus = loreSkill.bonus || 0;
-			if (loreBonus !== 0) loreComponents.push({type: "lore", name: "Lore bonus", value: loreBonus, icon: "📚"});
+			if (loreBonus !== 0) loreComponents.push({type: "lore", name: "Lore bonus", value: loreBonus, icon: "📚", isCanonical: true});
 			const custom = this.getSkillCustomMod(normalizedSkill);
-			if (custom !== 0) loreComponents.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+			if (custom !== 0) loreComponents.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
-			if (itemBonus !== 0) loreComponents.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+			if (itemBonus !== 0) loreComponents.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
-			if (stateBonus !== 0) loreComponents.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
+			if (stateBonus !== 0) loreComponents.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
 			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
-			if (stanceBonus !== 0) loreComponents.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
+			if (stanceBonus !== 0) loreComponents.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
 			// Note: exhaustion is intentionally NOT included in skill breakdowns.
 			// Exhaustion only affects rolls, not the displayed bonus.
 			const loreTotal = loreComponents.reduce((sum, comp) => sum + comp.value, 0);
-			return {total: loreTotal, components: loreComponents, ability: null};
+			const loreCanonical = loreComponents.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+			return {total: loreTotal, canonical: loreCanonical, components: loreComponents, ability: null};
 		}
 
 		const components = [];
@@ -7042,42 +7060,43 @@ class CharacterSheetState {
 			const abilityLabel = swappedFrom
 				? `${ability.toUpperCase()} modifier (swapped from ${swappedFrom.toUpperCase()})`
 				: `${ability.toUpperCase()} modifier`;
-			components.push({type: "ability", name: abilityLabel, value: mod, icon: "🎲"});
+			components.push({type: "ability", name: abilityLabel, value: mod, icon: "🎲", isCanonical: true});
 		}
 
 		const profLevel = this.getSkillProficiency(normalizedSkill);
 		const profBonus = this.getProficiencyBonus();
 		if (profLevel === 2) {
-			components.push({type: "proficiency", name: "Expertise (2×)", value: profLevel * profBonus, icon: "🌟"});
+			components.push({type: "proficiency", name: "Expertise (2×)", value: profLevel * profBonus, icon: "🌟", isCanonical: true});
 		} else if (profLevel === 1) {
-			components.push({type: "proficiency", name: "Proficiency", value: profBonus, icon: "⭐"});
+			components.push({type: "proficiency", name: "Proficiency", value: profBonus, icon: "⭐", isCanonical: true});
 		} else if (this.hasJackOfAllTrades()) {
-			components.push({type: "proficiency", name: "Jack of All Trades", value: Math.floor(profBonus / 2), icon: "🃏"});
+			components.push({type: "proficiency", name: "Jack of All Trades", value: Math.floor(profBonus / 2), icon: "🃏", isCanonical: true});
 		}
 
 		const custom = this.getSkillCustomMod(normalizedSkill);
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
-		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		const dynamicFeatureBonus = this._getDynamicSkillFeatureBonus(normalizedSkill);
-		if (dynamicFeatureBonus !== 0) components.push({type: "feature", name: "Feature Bonus", value: dynamicFeatureBonus, icon: "📜"});
+		if (dynamicFeatureBonus !== 0) components.push({type: "feature", name: "Feature Bonus", value: dynamicFeatureBonus, icon: "📜", isCanonical: true});
 
 		const abilityCheckBonus = ability ? this.getAbilityCheckCustomMod(ability) : 0;
-		if (abilityCheckBonus !== 0) components.push({type: "custom", name: `${(ability || "").toUpperCase()} Check Modifier`, value: abilityCheckBonus, icon: "⚙️"});
+		if (abilityCheckBonus !== 0) components.push({type: "custom", name: `${(ability || "").toUpperCase()} Check Modifier`, value: abilityCheckBonus, icon: "⚙️", isCanonical: false});
 
 		const stateBonus = this.getSkillBonusFromStates(normalizedSkill, this.getSkillAbility(normalizedSkill) || ability);
-		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
+		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
 
 		const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
-		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
+		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
 
 		// Note: exhaustion is intentionally NOT included in skill breakdowns.
 		// Exhaustion only affects rolls, not the displayed bonus.
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components, ability};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components, ability};
 	}
 
 	/**
@@ -7152,38 +7171,50 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get a breakdown of initiative modifier components
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>}}
+	 * Get a breakdown of initiative modifier components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces of the character build (DEX modifier, JoaT, always-on class
+	 * features that grant flat initiative bonuses) from situational
+	 * modifiers (custom user-entered mods).
+	 *
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}}
 	 */
 	getInitiativeBreakdown () {
 		const components = [];
 
 		const dexMod = this.getAbilityMod("dex");
-		if (dexMod !== 0) components.push({type: "ability", name: "DEX modifier", value: dexMod, icon: "🎯"});
+		if (dexMod !== 0) components.push({type: "ability", name: "DEX modifier", value: dexMod, icon: "🎯", isCanonical: true});
 
 		const custom = this._data.customModifiers.initiative || 0;
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		if (this.hasJackOfAllTrades()) {
 			const halfProf = Math.floor(this.getProficiencyBonus() / 2);
-			if (halfProf !== 0) components.push({type: "proficiency", name: "Jack of All Trades", value: halfProf, icon: "🃏"});
+			if (halfProf !== 0) components.push({type: "proficiency", name: "Jack of All Trades", value: halfProf, icon: "🃏", isCanonical: true});
 		}
 
 		for (const bonus of this._getFeatureInitiativeBonuses()) {
-			components.push({type: "feature", name: bonus.name, value: bonus.value, icon: "⚡"});
+			components.push({type: "feature", name: bonus.name, value: bonus.value, icon: "⚡", isCanonical: true});
 		}
 
 		// Note: exhaustion is intentionally NOT included in the initiative breakdown.
 		// Exhaustion only affects rolls, not the displayed bonus.
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
 	}
 
 	/**
-	 * Get a breakdown of spell attack bonus components
+	 * Get a breakdown of spell attack bonus components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces (proficiency + spellcasting ability) from situational modifiers
+	 * (custom mods, magic-item bonuses).
+	 *
 	 * @param {string} [className] - Optional class name for class-specific ability
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>}|null}
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}|null}
 	 */
 	getSpellAttackBreakdown (className) {
 		const spellcastingAbilities = {Wizard: "int", Cleric: "wis", Druid: "wis", Sorcerer: "cha", Bard: "cha", Paladin: "cha", Ranger: "wis", Warlock: "cha", Artificer: "int"};
@@ -7192,28 +7223,40 @@ class CharacterSheetState {
 
 		const components = [];
 		const prof = this.getProficiencyBonus();
-		components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐"});
+		components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐", isCanonical: true});
 
 		const mod = this.getAbilityMod(ability);
-		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲"});
+		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
 
 		const custom = this._data.customModifiers.spellAttack || 0;
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		const itemBonus = this._data.itemBonuses?.spellAttack || 0;
-		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		// Note: exhaustion is intentionally NOT included in the spell-attack breakdown.
 		// Exhaustion only affects rolls, not the displayed bonus.
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
 	}
 
 	/**
-	 * Get a breakdown of spell save DC components
+	 * Get a breakdown of spell save DC components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces (base DC, proficiency, spellcasting ability) from situational
+	 * modifiers (custom mods, magic-item bonuses).
+	 *
+	 * Note: exhaustion is intentionally NOT included in this breakdown.
+	 * The DC is a static reference number rendered for the DM; per TGTT
+	 * rules exhaustion may reduce the effective DC, but applying that
+	 * reduction is the responsibility of the consumer (e.g. the renderer
+	 * shows it inline via the dual canonical/effective display).
+	 *
 	 * @param {string} [className] - Optional class name for class-specific ability
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>}|null}
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}|null}
 	 */
 	getSpellDcBreakdown (className) {
 		const spellcastingAbilities = {Wizard: "int", Cleric: "wis", Druid: "wis", Sorcerer: "cha", Bard: "cha", Paladin: "cha", Ranger: "wis", Warlock: "cha", Artificer: "int"};
@@ -7221,22 +7264,23 @@ class CharacterSheetState {
 		if (!ability) return null;
 
 		const components = [];
-		components.push({type: "base", name: "Base DC", value: 8, icon: "🎯"});
+		components.push({type: "base", name: "Base DC", value: 8, icon: "🎯", isCanonical: true});
 
 		const prof = this.getProficiencyBonus();
-		components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐"});
+		components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐", isCanonical: true});
 
 		const mod = this.getAbilityMod(ability);
-		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲"});
+		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
 
 		const custom = this._data.customModifiers.spellDc || 0;
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
-		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
 	}
 
 	setBaseAc (ac) { this._data.ac.base = ac; }
