@@ -3652,12 +3652,42 @@
 .charsheet__save-mod,
 .charsheet__skill-mod {
 	font-weight: 700;
-	width: 42px;
+	min-width: 42px;
+	width: auto;
+	max-width: 110px;
 	text-align: center;
 	flex-shrink: 0;
+	white-space: nowrap;
 	font-family: var(--cs-font-mono, monospace);
 	color: var(--cs-primary, var(--rgb-link));
 	padding-right: 0.5rem;
+}
+
+/* Dual canonical/effective modifier display.
+ * Used wherever a roll bonus has situational mods (custom mods, magic items,
+ * spell buffs) on top of the intrinsic ability + proficiency value.
+ *
+ *   "+5 (+7)"   ← intrinsic +5, effective +7 (positive buff → green)
+ *   "+5 (+3)"   ← intrinsic +5, effective +3 (nerf → red)
+ *
+ * Inline span hugs the parent; the smaller font and color cue distinguish
+ * the parenthetical effective value without breaking the at-a-glance read
+ * of the canonical bonus.
+ */
+.charsheet__mod-effective {
+	font-size: 0.82em;
+	font-weight: 600;
+	margin-left: 0.2em;
+	opacity: 0.95;
+	white-space: nowrap;
+}
+
+.charsheet__mod-effective--positive {
+	color: var(--cs-success, #2a8a2a);
+}
+
+.charsheet__mod-effective--negative {
+	color: var(--cs-danger, #c93030);
 }
 
 /* Passive skill score column */
