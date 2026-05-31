@@ -3692,12 +3692,22 @@
  * of the canonical bonus.
  */
 .charsheet__mod-effective {
-	font-size: 0.6em;
+	font-size: 0.75em;
 	font-weight: 600;
-	margin-left: 0.1em;
+	margin-left: 0.15em;
 	opacity: 0.95;
 	white-space: nowrap;
 	line-height: 1;
+}
+
+/* Inside the legacy ability-mod pill the canonical is rendered large
+ * (xl under [data-textsize]), so the parenthetical needs to shrink
+ * harder to keep the pill from overflowing its 1fr grid cell. Other
+ * dual-display surfaces (skill/save/spell DC/spell atk) use base text
+ * and look balanced at the default 0.75em above. */
+.charsheet__ability-mod .charsheet__mod-effective {
+	font-size: 0.6em;
+	margin-left: 0.1em;
 }
 
 .charsheet__mod-effective--positive {
