@@ -299,6 +299,53 @@ describe("CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources (Bug 12 /
 		expect(out.featureSource).toBe("HB");
 		expect(out.subclassSource).toBeNull();
 	});
+
+	// Phase 5 Round-3 follow-up: TGTT Sorcerer + Divine Soul (XGE).
+	// User reported failed hovers for Divine Magic, Divine Soul (subclass feature),
+	// Favored by the Gods, and Empowered Healing — all subclass features whose canonical
+	// home is classSource=PHB / subclassSource=XGE, but whose builder-stored shape carries
+	// classSource=TGTT (from `this._selectedClass.source`) and subclassSource=TGTT-2014
+	// (from the TGTT `_copy` wrapper). The same call path drives charactersheet-features.js
+	// (Features tab) and charactersheet.js:_getFeatureHoverLink (Combat / Spells / etc.).
+	describe.each([
+		{name: "Divine Magic", level: 1},
+		{name: "Divine Soul", level: 1},
+		{name: "Favored by the Gods", level: 1},
+		{name: "Empowered Healing", level: 6},
+	])("TGTT Sorcerer Divine Soul subclass feature: $name (level $level)", ({name, level}) => {
+		const storedTgttSorcerer = {name: "Sorcerer", source: "TGTT"};
+		const feature = {
+			name,
+			className: "Sorcerer",
+			classSource: "TGTT",
+			subclassName: "Divine Soul",
+			subclassShortName: "Divine Soul",
+			subclassSource: "TGTT-2014",
+			source: "XGE",
+			level,
+			isSubclassFeature: true,
+		};
+		const loadedSubclassFeatures = [{
+			name,
+			className: "Sorcerer",
+			classSource: "PHB",
+			subclassShortName: "Divine Soul",
+			subclassSource: "XGE",
+			source: "XGE",
+			level,
+		}];
+
+		test("canonical lookup rewrites classSource → PHB and subclassSource → XGE", () => {
+			const out = CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources(
+				feature,
+				storedTgttSorcerer,
+				{classFeatures: [], subclassFeatures: loadedSubclassFeatures},
+			);
+			expect(out.classSource).toBe("PHB");
+			expect(out.featureSource).toBe("XGE");
+			expect(out.subclassSource).toBe("XGE");
+		});
+	});
 });
 
 describe("CharacterSheetClassUtils.normalizePgClassesHashInput (Bug 12 / Phase 5.5b)", () => {

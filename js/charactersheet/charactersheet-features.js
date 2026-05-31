@@ -1591,61 +1591,37 @@ class CharacterSheetFeatures {
 		let featureNameHtml = feature.name;
 		if (this._page?.getHoverLink) {
 			try {
-				// Class/Subclass features - link to the actual class feature page
+				// Class/Subclass features - link to the actual class feature page.
+				// Delegates to the centralised helper so this site converges with
+				// `charactersheet.js:_getFeatureHoverLink` (Phase 5 Round-3 fix).
 				if (feature.featureType === "Class" && feature.className) {
-					// Determine the actual classSource for hover links
-					// Priority: 1. feature.classSource (if valid), 2. feature.source if it's a class source, 3. storedClass.source, 4. fallback
 					const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
 
-					// Check if feature.source looks like a class source (official sources like PHB, XPHB)
-					// This handles existing characters where classSource wasn't stored correctly
-					const officialClassSources = [Parser.SRC_PHB, Parser.SRC_XPHB, "PHB", "XPHB", "TCE", "XGE"];
-					const isOfficialSource = (src) => officialClassSources.includes(src?.toUpperCase?.() || src);
+					const classFeatures = this._page?.getClassFeatures?.() || [];
+					const subclassFeatures = this._page?.getSubclassFeatures?.() || [];
 
-					let actualClassSource = feature.classSource;
-					let actualFeatureSource = feature.source || Parser.SRC_XPHB;
-					// If classSource is not set or is a homebrew source but feature.source is official, use feature.source
-					if (!actualClassSource || (!isOfficialSource(actualClassSource) && isOfficialSource(feature.source))) {
-						actualClassSource = feature.source || Parser.SRC_XPHB;
-					}
-					// Final fallback to stored class or XPHB
-					if (!actualClassSource) {
-						actualClassSource = storedClass?.source || Parser.SRC_XPHB;
-					}
-					// For homebrew classes referencing official features (e.g. TGTT Warlock using XPHB Magical Cunning):
-					// if the resolved source is still non-official, look up the feature in loaded class data
-					if (!isOfficialSource(actualClassSource) && this._page?.getClassFeatures) {
-						try {
-							const classFeatures = this._page.getClassFeatures();
-							const officialMatch = classFeatures?.find(f =>
-								f.name === feature.name
-								&& f.className === feature.className
-								&& f.level === (feature.level || 1)
-								&& isOfficialSource(f.source),
-							);
-							if (officialMatch) {
-								actualClassSource = officialMatch.classSource || officialMatch.source;
-								actualFeatureSource = officialMatch.source;
-							}
-						} catch (e) { /* fall through */ }
-					}
+					const {classSource: actualClassSource, featureSource: actualFeatureSource, subclassSource: canonicalSubclassSource} =
+						CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources(feature, storedClass, {
+							classFeatures,
+							subclassFeatures,
+						});
 
 					const hashInput = {
 						name: feature.name,
 						className: feature.className,
-						classSource: actualClassSource,
+						classSource: actualClassSource || Parser.SRC_XPHB,
 						level: feature.level || 1,
-						source: actualFeatureSource,
+						source: actualFeatureSource || Parser.SRC_XPHB,
 					};
 					if (feature.subclassName || feature.isSubclassFeature) {
 						hashInput.subclassShortName = feature.subclassShortName || feature.subclassName;
-						hashInput.subclassSource = feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
+						hashInput.subclassSource = canonicalSubclassSource || feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
 					}
 					const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
 					featureNameHtml = this._page.getHoverLink(
 						UrlUtil.PG_CLASS_SUBCLASS_FEATURES,
 						feature.name,
-						actualFeatureSource,
+						actualFeatureSource || Parser.SRC_XPHB,
 						hash,
 					);
 				// Species/Race features - link to races page with hover
