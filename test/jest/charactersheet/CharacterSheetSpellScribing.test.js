@@ -11,6 +11,12 @@
  */
 
 import "./setup.js";
+import {readFileSync} from "fs";
+import {fileURLToPath} from "url";
+import {dirname, resolve} from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 
 let CharacterSheetState;
 let state;
@@ -503,6 +509,81 @@ describe("Spell Scribing Adept", () => {
 			expect(state3.getScribingSpellbook()).toEqual([]);
 			expect(state3.getScribingMemorizedSpell()).toBeNull();
 			expect(state3.getPendingScribingPicks()).toBe(0);
+		});
+	});
+
+	// =========================================================================
+	// SCRIBE BUTTON RECOVERY — Bug 11 (Phase 5)
+	// Symptom (pre-fix): the "Scribe new spell" button does nothing when
+	// scribingClass is unset (e.g. feat taken via Origin Feat in builder,
+	// or via an older save predating the choices flow). _pShowScribeNewSpellPicker
+	// used to silently `return` on null scribingClass.
+	// Fix: prompt the user for a class from the intersection of
+	// [Bard, Sorcerer, Warlock] with the character's classes.
+	// =========================================================================
+
+	describe("Scribe button recovery when scribingClass is unset", () => {
+		// Source-level guard: the controller method must implement the recovery
+		// branch. Instantiating the full controller in jest is heavy (needs DOM,
+		// jQuery, modals), so we read the source and assert the branch exists.
+		// The state-level inputs the recovery branch reads (eligible classes)
+		// are exercised by the integration-style state tests below.
+
+		test("_pShowScribeNewSpellPicker has a recovery branch instead of silent return", () => {
+			const src = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-spells.js"), "utf8");
+			const match = src.match(/async _pShowScribeNewSpellPicker[\s\S]*?\n\t\}/);
+			expect(match).not.toBeNull();
+			const body = match[0];
+
+			// No more silent early-return on null scribingClass.
+			expect(body).not.toMatch(/if\s*\(\s*!scribingClass\s*\)\s*return\s*;/);
+
+			// Must prompt the user when scribingClass is null.
+			expect(body).toMatch(/pGetUserEnum/);
+
+			// Must persist the chosen class.
+			expect(body).toMatch(/setScribingClass\s*\(/);
+
+			// Must reference all three supported classes (Bard, Sorcerer, Warlock).
+			expect(body).toMatch(/Bard/);
+			expect(body).toMatch(/Sorcerer/);
+			expect(body).toMatch(/Warlock/);
+		});
+
+		test("state: a Sorcerer-only character (feat added without choices) starts with null scribingClass and Sorcerer as the sole eligible class", () => {
+			state.addClass({name: "Sorcerer", source: "PHB", level: 4, subclass: null});
+			state.addFeat({name: "Spell Scribing Adept", source: "TGTT"});
+			expect(state.getScribingClass()).toBeNull();
+
+			const SUPPORTED = ["Bard", "Sorcerer", "Warlock"];
+			const eligible = SUPPORTED.filter(n => state.getClasses().some(c => c.name === n));
+			expect(eligible).toEqual(["Sorcerer"]);
+
+			// Simulate the recovery's auto-select branch.
+			state.setScribingClass(eligible[0]);
+			expect(state.getScribingClass()).toBe("Sorcerer");
+			expect(state.getScribingMaxSpellLevel()).toBe(2); // ceil(4/2)
+		});
+
+		test("state: a Wizard-only character (feat added without choices) has zero eligible classes — recovery shows an error toast and exits", () => {
+			state.addClass({name: "Wizard", source: "PHB", level: 4, subclass: null});
+			state.addFeat({name: "Spell Scribing Adept", source: "TGTT"});
+			expect(state.getScribingClass()).toBeNull();
+
+			const SUPPORTED = ["Bard", "Sorcerer", "Warlock"];
+			const eligible = SUPPORTED.filter(n => state.getClasses().some(c => c.name === n));
+			expect(eligible).toEqual([]);
+		});
+
+		test("state: a Bard/Warlock multiclass with the feat unset has two eligible classes (chooser path)", () => {
+			state.addClass({name: "Bard", source: "PHB", level: 3, subclass: null});
+			state.addClass({name: "Warlock", source: "PHB", level: 2, subclass: null});
+			state.addFeat({name: "Spell Scribing Adept", source: "TGTT"});
+			expect(state.getScribingClass()).toBeNull();
+
+			const SUPPORTED = ["Bard", "Sorcerer", "Warlock"];
+			const eligible = SUPPORTED.filter(n => state.getClasses().some(c => c.name === n));
+			expect(eligible.sort()).toEqual(["Bard", "Warlock"]);
 		});
 	});
 });

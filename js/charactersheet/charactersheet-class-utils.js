@@ -288,6 +288,66 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Like {@link resolveFeatureHoverSources}, but when the resolved classSource is
+	 * still a non-official (homebrew) source, also searches loaded feature data for
+	 * the canonical match. This handles two scenarios:
+	 *  - Class features: TGTT Warlock referencing an XPHB feature (already handled by
+	 *    the call-site code at charactersheet.js:6793 and charactersheet-features.js:1178).
+	 *  - Subclass features: TGTT Wizard with a Chronurgy (EGW) subclass — refSubclassFeature
+	 *    `Chronal Shift|Wizard||Chronurgy|EGW|2` produces parts[2]="" → classSource
+	 *    defaults to TGTT, but the canonical feature lives at classSource=PHB. The
+	 *    Phase-4 class-feature fallback didn't search subclassFeatures, so the
+	 *    bad hash leaked through (Bug 12 / Phase 5.5a).
+	 *
+	 * @param {*} feature - The stored feature object
+	 * @param {*} storedClass - The matching entry from state.getClasses(), if any
+	 * @param {{classFeatures?: Array, subclassFeatures?: Array}} [loadedFeatures]
+	 * @returns {{classSource: string, featureSource: string, subclassSource: string|null}}
+	 */
+	static resolveCanonicalFeatureHoverSources (/** @type {*} */ feature, /** @type {*} */ storedClass, /** @type {*} */ loadedFeatures = {}) {
+		let {classSource, featureSource} = CharacterSheetClassUtils.resolveFeatureHoverSources(feature, storedClass);
+		let subclassSource = null;
+
+		const isOfficial = CharacterSheetClassUtils._isHoverOfficialSource;
+		const isSubclassFeature = !!(feature?.subclassName || feature?.subclassShortName || feature?.isSubclassFeature);
+		const level = feature?.level || 1;
+
+		if (isOfficial(classSource)) return {classSource, featureSource, subclassSource};
+
+		// Non-official class source — try to find a canonical match in loaded data.
+		try {
+			if (isSubclassFeature && loadedFeatures.subclassFeatures?.length) {
+				const subclassShortName = feature.subclassShortName || feature.subclassName;
+				const officialMatch = loadedFeatures.subclassFeatures.find(f =>
+					f.name === feature.name
+					&& f.className === feature.className
+					&& (f.subclassShortName === subclassShortName || f.subclassShortName?.toLowerCase() === subclassShortName?.toLowerCase())
+					&& f.level === level
+					&& isOfficial(f.classSource),
+				);
+				if (officialMatch) {
+					classSource = officialMatch.classSource;
+					featureSource = officialMatch.source || featureSource;
+					subclassSource = officialMatch.subclassSource || subclassSource;
+				}
+			} else if (!isSubclassFeature && loadedFeatures.classFeatures?.length) {
+				const officialMatch = loadedFeatures.classFeatures.find(f =>
+					f.name === feature.name
+					&& f.className === feature.className
+					&& f.level === level
+					&& isOfficial(f.source),
+				);
+				if (officialMatch) {
+					classSource = officialMatch.classSource || officialMatch.source;
+					featureSource = officialMatch.source;
+				}
+			}
+		} catch (e) { /* fall through to the non-canonical result */ }
+
+		return {classSource, featureSource, subclassSource};
+	}
+
+	/**
 	 * Resolve the hover-link sources for a subclass entry.
 	 *
 	 * The `cls.subclass` slot on a character only stores `{name, source}` —
@@ -333,6 +393,106 @@ class CharacterSheetClassUtils {
 			shortName,
 			name: subclassName,
 		};
+	}
+
+	/**
+	 * Defensive PG_CLASSES hash-input normalizer.
+	 *
+	 * Catches the case where `{name, source}` does NOT resolve to a known class
+	 * but DOES resolve to a known subclass — in which case the caller likely
+	 * meant to hover the subclass's parent class. Returns the parent class
+	 * descriptor instead (and logs a single warning per `(name, source)` pair).
+	 *
+	 * Used to harden every PG_CLASSES hash-builder call site against stale
+	 * saves, malformed `{@class}` tags, and other upstream defects that would
+	 * otherwise produce hashes like `chronurgy magic_tgtt-2014` (a subclass
+	 * name in the class slot) which fail to load.
+	 *
+	 * @param {{name: string, source: string}} input - The proposed (name, source) pair
+	 * @param {{allClasses?: Array, allSubclasses?: Array}} loadedData
+	 * @returns {{name: string, source: string, wasNormalized: boolean}}
+	 */
+	static normalizePgClassesHashInput (input, loadedData = {}) {
+		const result = {name: input?.name, source: input?.source, wasNormalized: false};
+		if (!input?.name || !input?.source) return result;
+
+		const allClasses = loadedData?.allClasses || [];
+		const allSubclasses = loadedData?.allSubclasses || [];
+
+		// If it already resolves to a known class, no normalization needed.
+		const isKnownClass = allClasses.some(c =>
+			c?.name?.toLowerCase() === input.name.toLowerCase()
+			&& (c?.source === input.source || !input.source),
+		);
+		if (isKnownClass) return result;
+
+		// Look up as a subclass — if found, redirect to the parent class.
+		const subclassMatch = allSubclasses.find(sc =>
+			sc?.name?.toLowerCase() === input.name.toLowerCase()
+			&& (sc?.source === input.source || !input.source),
+		);
+		if (!subclassMatch || !subclassMatch.className) return result;
+
+		// One-time warning per unique input — surfaces stale references without log-flooding.
+		CharacterSheetClassUtils._pgClassesWarnSet = CharacterSheetClassUtils._pgClassesWarnSet || new Set();
+		const warnKey = `${input.name}|${input.source}`;
+		if (!CharacterSheetClassUtils._pgClassesWarnSet.has(warnKey)) {
+			CharacterSheetClassUtils._pgClassesWarnSet.add(warnKey);
+			// eslint-disable-next-line no-console
+			console.warn(`[CharSheet] normalizePgClassesHashInput: substituting subclass "${input.name}|${input.source}" → parent class "${subclassMatch.className}|${subclassMatch.classSource}"`);
+		}
+
+		return {
+			name: subclassMatch.className,
+			source: subclassMatch.classSource || input.source,
+			wasNormalized: true,
+		};
+	}
+
+	/**
+	 * Resolve a stored shallow subclass reference (or even a full one) to the
+	 * canonical full subclass object from `classData.subclasses`, so callers
+	 * always receive `additionalSpells`, `subclassFeatures`, etc.
+	 *
+	 * Background: `state.addClass` stores subclasses as lean `{name, source}`
+	 * refs to keep saves small. Picker call sites that need to evaluate spell
+	 * lists / filter queries (Chronurgy expanded spells, Divine Soul list,
+	 * Bladesinging expanded spells, Order Domain expanded spells, etc.) need
+	 * the full subclass object — without it, `additionalSpells` is undefined
+	 * and filter-based spell inclusion silently fails.
+	 *
+	 * @param {object|null|undefined} storedSubclass - The shallow stored ref or full subclass.
+	 * @param {object|null|undefined} classData - The parent class (with `.subclasses` array).
+	 * @returns {object|null} The full subclass object, or the input unchanged if not resolvable.
+	 */
+	static resolveFullSubclass (storedSubclass, classData) {
+		if (!storedSubclass) return storedSubclass || null;
+		if (!classData?.subclasses?.length) return storedSubclass;
+
+		// Already full? Either has additionalSpells / subclassFeatures, or is reference-equal
+		// to one of classData.subclasses (the "I came from classData.subclasses" sentinel).
+		if (storedSubclass.additionalSpells != null
+			|| storedSubclass.subclassFeatures != null
+			|| storedSubclass.subclassTableGroups != null) {
+			return storedSubclass;
+		}
+
+		// Match by (name, source). Source is optional — if missing from storedSubclass,
+		// match by name only (legacy saves may omit it).
+		const name = (storedSubclass.name || "").toLowerCase();
+		if (!name) return storedSubclass;
+
+		const exactMatch = classData.subclasses.find(sc =>
+			(sc?.name || "").toLowerCase() === name
+			&& (!storedSubclass.source || sc?.source === storedSubclass.source),
+		);
+		if (exactMatch) return exactMatch;
+
+		// Name-only fallback (legacy saves without source, or source-renamed brews).
+		const nameOnly = classData.subclasses.find(sc =>
+			(sc?.name || "").toLowerCase() === name,
+		);
+		return nameOnly || storedSubclass;
 	}
 
 	// ========================================================================

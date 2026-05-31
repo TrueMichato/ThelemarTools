@@ -316,7 +316,14 @@ class CharacterSheetSpells {
 		const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE", "TGTT"].includes(classSource);
 
 		// Get character's subclass for subclass spell list checking
-		const characterSubclass = characterClass.subclass;
+		// Resolve a (possibly shallow) stored `{name, source}` ref to the full
+		// subclass object so `additionalSpells` and other lazy properties are
+		// available — without this, expanded-spell filter blocks (Chronurgy
+		// "source=EGW", Bladesinging, Order Domain, etc.) silently match nothing.
+		const classDataForSubclass = this._page.getClasses?.()?.find(
+			c => c.name === characterClass.name && c.source === characterClass.source,
+		);
+		const characterSubclass = CharacterSheetClassUtils.resolveFullSubclass(characterClass.subclass, classDataForSubclass);
 
 		// Check for subclass-granted additional spell lists (e.g. Divine Soul → Cleric)
 		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
@@ -6384,8 +6391,42 @@ class CharacterSheetSpells {
 	 * Shows cost info (50 gp/level, 2 hr/level).
 	 */
 	async _pShowScribeNewSpellPicker () {
-		const scribingClass = this._state.getScribingClass();
-		if (!scribingClass) return;
+		let scribingClass = this._state.getScribingClass();
+
+		// The feat may have been taken via a path that didn't trigger the
+		// "pick a scribing class" choice (e.g. Origin Feat in builder, an old
+		// save predating the choices flow, etc.). Recover gracefully by
+		// prompting the user for the class now, rather than silently no-op'ing.
+		if (!scribingClass) {
+			const SUPPORTED_CLASSES = ["Bard", "Sorcerer", "Warlock"];
+			const characterClasses = (this._state.getClasses?.() || []).map(c => c.name);
+			const eligible = SUPPORTED_CLASSES.filter(n => characterClasses.includes(n));
+
+			if (eligible.length === 0) {
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "Spell Scribing Adept requires at least one level in Bard, Sorcerer, or Warlock.",
+				});
+				return;
+			}
+
+			if (eligible.length === 1) {
+				scribingClass = eligible[0];
+			} else {
+				const choice = await InputUiUtil.pGetUserEnum({
+					title: "Spell Scribing Adept — Choose Class",
+					htmlDescription: `<div>Choose which spell list to scribe from. Scribed spells use this class's spell list at up to half your level in that class (rounded up).</div>`,
+					values: eligible,
+					fnDisplay: v => v,
+					isResolveItem: true,
+				});
+				if (choice == null) return; // user cancelled
+				scribingClass = choice;
+			}
+
+			this._state.setScribingClass(scribingClass);
+			this._page.saveCharacter();
+		}
 
 		const maxLevel = this._state.getScribingMaxSpellLevel();
 		const allSpells = this._page.getFilteredSpellData() || this._page.getSpells() || [];

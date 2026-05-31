@@ -106,12 +106,13 @@ class CharacterSheetLevelUp {
 			newFeatures,
 			hasAsi,
 			needsSubclass,
+			fullSubclassData,
 		});
 	}
 
 	/** @param {*} arg */
 
-	async _pShowLevelUpModal ({classData, classEntry, newLevel, newFeatures, hasAsi, needsSubclass}) {
+	async _pShowLevelUpModal ({classData, classEntry, newLevel, newFeatures, hasAsi, needsSubclass, fullSubclassData = null}) {
 		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = await UiUtil.pGetShowModal({
 			title: `🎉 Level Up: ${classEntry.name} → Level ${newLevel}`,
 			isMinHeight0: true,
@@ -127,7 +128,16 @@ class CharacterSheetLevelUp {
 		// ========== STATE TRACKING ==========
 		let asiChoices = {str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0};
 		/** @type {*} */ let selectedFeat = null;
-		/** @type {*} */ let selectedSubclass = null;
+		// Resolve `classEntry.subclass` (a shallow `{name, source}` ref from state)
+		// to the canonical full subclass object once. Picker call sites use
+		// `selectedSubclass || fullClassSubclassData` so they always see the full
+		// entity (with `additionalSpells`, `subclassFeatures`, etc.) — without
+		// this, filter-based spell inclusion (Chronurgy expanded spells, Divine
+		// Soul list, etc.) silently fails because `additionalSpells` is undefined.
+		const fullClassSubclassData = CharacterSheetClassUtils.resolveFullSubclass(classEntry.subclass, classData);
+		// Seed with the previously-resolved full subclass (when the character already
+		// has one). `fullSubclassData` is what `_doLevelUp` computed and passed in.
+		/** @type {*} */ let selectedSubclass = fullSubclassData || null;
 		let selectedSubclassChoice = this._state.getSubclassChoice?.(classEntry.name) || null;
 		let hpMethod = "average";
 		let currentFeatures = newFeatures;
@@ -570,11 +580,11 @@ class CharacterSheetLevelUp {
 						knownSpellIds: knownExistingIds,
 						getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
 						getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
-						subclass: selectedSubclass || classEntry.subclass,
+						subclass: selectedSubclass || fullClassSubclassData,
 						subclassChoice: selectedSubclassChoice,
 						additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
 							className: classEntry.name,
-							subclass: selectedSubclass || classEntry.subclass,
+							subclass: selectedSubclass || fullClassSubclassData,
 							subclassChoice: selectedSubclassChoice,
 						}),
 						onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
@@ -844,7 +854,7 @@ class CharacterSheetLevelUp {
 					if (cp === "1/3") return Math.min(4, Math.ceil(newLevel / 7));
 					return Math.min(9, Math.ceil(newLevel / 2));
 				})(),
-				selectedSubclass: () => selectedSubclass || classEntry.subclass,
+				selectedSubclass: () => selectedSubclass || fullClassSubclassData,
 				selectedSubclassChoice: () => selectedSubclassChoice,
 				onSwap: (/** @type {*} */ oldSpell, /** @type {*} */ newSpell) => {
 					stagedSpellSwap = oldSpell && newSpell ? {oldSpell, newSpell} : null;
@@ -872,7 +882,7 @@ class CharacterSheetLevelUp {
 				allSpells,
 				knownSpellIds,
 				className: classEntry.name,
-				subclass: selectedSubclass || classEntry.subclass,
+				subclass: selectedSubclass || fullClassSubclassData,
 				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
 				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				onSelect: (/** @type {*} */ spells) => {
@@ -912,11 +922,11 @@ class CharacterSheetLevelUp {
 				knownSpellIds: knownExistingIds,
 				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
 				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
-				subclass: selectedSubclass || classEntry.subclass,
+				subclass: selectedSubclass || fullClassSubclassData,
 				subclassChoice: selectedSubclassChoice,
 				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
 					className: classEntry.name,
-					subclass: selectedSubclass || classEntry.subclass,
+					subclass: selectedSubclass || fullClassSubclassData,
 					subclassChoice: selectedSubclassChoice,
 				}),
 				onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
@@ -967,11 +977,11 @@ class CharacterSheetLevelUp {
 				knownSpellIds: prepExistingIds,
 				getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
 				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
-				subclass: selectedSubclass || classEntry.subclass,
+				subclass: selectedSubclass || fullClassSubclassData,
 				subclassChoice: selectedSubclassChoice,
 				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
 					className: classEntry.name,
-					subclass: selectedSubclass || classEntry.subclass,
+					subclass: selectedSubclass || fullClassSubclassData,
 					subclassChoice: selectedSubclassChoice,
 				}),
 				onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
@@ -1079,7 +1089,7 @@ class CharacterSheetLevelUp {
 				return;
 			}
 
-			const divineSoulSubclass = selectedSubclass || classEntry.subclass;
+			const divineSoulSubclass = selectedSubclass || fullClassSubclassData;
 			if (classEntry.name === "Sorcerer" && CharacterSheetClassUtils.isDivineSoulSubclass(divineSoulSubclass) && !CharacterSheetClassUtils.normalizeDivineSoulAffinity(selectedSubclassChoice)) {
 				const affinityOptions = CharacterSheetClassUtils.getDivineSoulAffinityOptions(selectedSubclass);
 				if (!affinityOptions.length) {
@@ -1511,7 +1521,11 @@ class CharacterSheetLevelUp {
 
 					// For subclass features, use subclassSource; for class features, use classSource
 					const hoverSource = hashInput.subclassSource || hashInput.classSource;
-					const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: feature.className, source: actualClassSource});
+					const normalizedClass = CharacterSheetClassUtils.normalizePgClassesHashInput(
+						{name: feature.className, source: actualClassSource},
+						{allClasses: this._page?.getClasses?.() || [], allSubclasses: this._page?.getSubclasses?.() || []},
+					);
+					const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalizedClass.name, source: normalizedClass.source});
 					const classHref = `${UrlUtil.PG_CLASSES}#${classHash}`;
 					const hoverLink = this._page.getHoverLink(
 						UrlUtil.PG_CLASS_SUBCLASS_FEATURES,

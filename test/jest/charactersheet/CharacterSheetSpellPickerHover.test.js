@@ -12,6 +12,12 @@
 
 import {jest} from "@jest/globals";
 import "./setup.js";
+import {readFileSync} from "fs";
+import {fileURLToPath} from "url";
+import {dirname, resolve} from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 
 // Override the setup stub so picker `_renderGroupedSpellList` can resolve the
 // `.charsheet__spell-picker-item-name` element it writes the link into.
@@ -113,6 +119,29 @@ describe("Bug 7: spell-picker hover routing", () => {
 		expect(src).toContain("getSpellHoverLink");
 		const wizardSrc = CharacterSheetSpellPicker.renderWizardSpellbookPicker.toString();
 		expect(wizardSrc).toContain("getSpellHoverLink");
+	});
+});
+
+describe("Bug 7 Phase 5: rarity/legality fallback to spellData.subschools", () => {
+	// When a picker shows a spell that ISN'T yet in the character's spells list,
+	// characterSpell is null. The fix is for getSpellHoverLink / _buildSpellHoverRows
+	// to fall back to the canonical spellData.subschools so rarity/legality still
+	// surface for un-added spells (the picker's whole purpose).
+	//
+	// Source-level guard — instantiating the full CharacterSheetPage in jest is
+	// too heavy (6.5K-line file, lots of global deps), so we assert the source
+	// contains the documented fallback.
+	test("getSpellHoverLink reads subschools from characterSpell || spellData", () => {
+		const src = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		// Match the source line that builds the subschools array inside getSpellHoverLink.
+		const match = src.match(/getSpellHoverLink \(name, source, spellData, characterSpell\)[\s\S]{0,600}?const subschools = characterSpell\?\.subschools \|\| spellData\?\.subschools \|\| \[\];/);
+		expect(match).not.toBeNull();
+	});
+
+	test("_buildSpellHoverRows reads subschools from characterSpell || spellData", () => {
+		const src = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		const match = src.match(/_buildSpellHoverRows \(spellData, characterSpell, modStats\)[\s\S]{0,2500}?const subschools = characterSpell\?\.subschools \|\| spellData\?\.subschools \|\| \[\];/);
+		expect(match).not.toBeNull();
 	});
 });
 
