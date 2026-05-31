@@ -1329,7 +1329,6 @@
 
 /* Large display values - ability scores, HP, AC, etc. */
 .charsheet-page[data-textsize] .charsheet__ability-score,
-.charsheet-page[data-textsize] .charsheet__ability-mod,
 .charsheet-page[data-textsize] .charsheet__hp-current,
 .charsheet-page[data-textsize] .charsheet__hp-max,
 .charsheet-page[data-textsize] .charsheet__hp-temp,
@@ -1340,6 +1339,14 @@
 .charsheet-page[data-textsize] .charsheet__proficiency-value,
 .charsheet-page[data-textsize] .charsheet__passive-value {
 	font-size: var(--cs-text-3xl, 2rem);
+}
+
+/* Ability modifier pill scales smaller than the score above it: the pill must
+   fit a canonical mod AND an optional effective parenthetical inside a
+   3-column grid cell, so a 2rem bump overflows. Keep it at the medium tier
+   (xl) under [data-textsize]. */
+.charsheet-page[data-textsize] .charsheet__ability-mod {
+	font-size: var(--cs-text-xl, 1.25rem);
 }
 
 /* Medium display values */
@@ -3331,11 +3338,15 @@
 	color: var(--cs-primary, var(--rgb-link));
 	background: rgba(99, 102, 241, 0.1);
 	border-radius: var(--cs-radius-full, 999px);
-	padding: 0.1rem 0.4rem;
-	display: inline-block;
+	padding: 0.1rem 0.45rem;
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.15em;
 	margin-top: 0.25rem;
 	max-width: 100%;
 	white-space: nowrap;
+	box-sizing: border-box;
+	line-height: 1.15;
 }
 
 /* ========================================================================
@@ -3681,11 +3692,12 @@
  * of the canonical bonus.
  */
 .charsheet__mod-effective {
-	font-size: 0.7em;
+	font-size: 0.6em;
 	font-weight: 600;
-	margin-left: 0.15em;
+	margin-left: 0.1em;
 	opacity: 0.95;
 	white-space: nowrap;
+	line-height: 1;
 }
 
 .charsheet__mod-effective--positive {
