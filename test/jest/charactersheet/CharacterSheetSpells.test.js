@@ -3,6 +3,7 @@
  * Tests for spell slots, spell save DC, spell attack, concentration, and spell management
  */
 
+import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-spells.js";
@@ -618,5 +619,93 @@ describe("Spell tracking counter integration", () => {
 		const spells = state.getSpells();
 		const playerChosen = spells.filter(s => CharacterSheetSpells.isPlayerChosenSpell(s));
 		expect(playerChosen).toHaveLength(0);
+	});
+
+	// ==========================================================================
+	// Spell slot pip click toggle (Phase 6 bug 6.2)
+	// ==========================================================================
+	describe("_toggleSlot (pip click)", () => {
+		let spellsModule;
+		let fakePage;
+
+		beforeEach(() => {
+			fakePage = {
+				getState: () => state,
+				saveCharacter: jest.fn(),
+				_renderQuickSpells: jest.fn(),
+			};
+			// Bypass document listener wiring; we call _toggleSlot directly.
+			spellsModule = Object.create(CharacterSheetSpells.prototype);
+			spellsModule._page = fakePage;
+			spellsModule._state = state;
+			// Stub the visual re-render — we only assert on state.
+			spellsModule.renderSlots = jest.fn();
+		});
+
+		it("spends a slot when an available pip is clicked", () => {
+			state.addClass({name: "Wizard", source: "PHB", level: 5});
+			state.setSpellSlots(1, 4, 4);
+			const pip = {classList: {contains: () => false}};
+
+			spellsModule._toggleSlot(1, pip);
+
+			expect(state.getSpellSlotsCurrent(1)).toBe(3);
+			expect(spellsModule.renderSlots).toHaveBeenCalled();
+			expect(fakePage.saveCharacter).toHaveBeenCalled();
+		});
+
+		it("restores a slot when a used pip is clicked", () => {
+			state.addClass({name: "Wizard", source: "PHB", level: 5});
+			state.setSpellSlots(1, 4, 2);
+			const pip = {classList: {contains: cls => cls === "charsheet__spell-slot-pip--used"}};
+
+			spellsModule._toggleSlot(1, pip);
+
+			expect(state.getSpellSlotsCurrent(1)).toBe(3);
+		});
+
+		it("does not spend below zero", () => {
+			state.addClass({name: "Wizard", source: "PHB", level: 5});
+			state.setSpellSlots(1, 4, 0);
+			const pip = {classList: {contains: () => false}};
+
+			spellsModule._toggleSlot(1, pip);
+
+			expect(state.getSpellSlotsCurrent(1)).toBe(0);
+		});
+
+		it("does not restore above max", () => {
+			state.addClass({name: "Wizard", source: "PHB", level: 5});
+			state.setSpellSlots(1, 4, 4);
+			const pip = {classList: {contains: cls => cls === "charsheet__spell-slot-pip--used"}};
+
+			spellsModule._toggleSlot(1, pip);
+
+			expect(state.getSpellSlotsCurrent(1)).toBe(4);
+		});
+
+		it("spends a pact slot when an available pact pip is clicked", () => {
+			state.addClass({name: "Warlock", source: "PHB", level: 3});
+			// Warlock at level 3 has 2 pact slots at level 2 spell level
+			const before = state.getPactSlots();
+			expect(before?.max).toBeGreaterThan(0);
+			expect(before.current).toBe(before.max);
+			const pip = {classList: {contains: () => false}};
+
+			spellsModule._toggleSlot("pact", pip);
+
+			expect(state.getPactSlots().current).toBe(before.max - 1);
+		});
+
+		it("restores a pact slot when a used pact pip is clicked", () => {
+			state.addClass({name: "Warlock", source: "PHB", level: 3});
+			const slots = state.getPactSlots();
+			state.setPactSlotsCurrent(0);
+			const pip = {classList: {contains: cls => cls === "charsheet__spell-slot-pip--used"}};
+
+			spellsModule._toggleSlot("pact", pip);
+
+			expect(state.getPactSlots().current).toBe(1);
+		});
 	});
 });
