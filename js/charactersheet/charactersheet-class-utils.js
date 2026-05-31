@@ -1265,7 +1265,17 @@ class CharacterSheetClassUtils {
 	}
 
 	static getAdditionalSpellListClasses ({className, subclass, subclassChoice} = /** @type {*} */ ({})) {
-		if (className === "Sorcerer" && this.isDivineSoulSubclass(subclass) && this.normalizeDivineSoulAffinity(subclassChoice)) {
+		// Divine Soul Sorcerer (XGE / TGTT): the "Divine Magic" subclass feature
+		// grants access to the entire Cleric spell list at L1 — unconditional,
+		// not gated on the affinity pick. The affinity choice only grants ONE
+		// specific 1st-level spell as always-prepared, handled via the per-block
+		// `known` list in `subclassAdditionalSpellsIncludeSpell`.
+		//
+		// Previously we gated on `normalizeDivineSoulAffinity(subclassChoice)`,
+		// which meant a freshly-created Divine Soul Sorcerer (no affinity picked
+		// yet, or affinity persisted but not migrated) couldn't see Cleric
+		// cantrips like Guidance in the spell picker — Bug 5.
+		if (className === "Sorcerer" && this.isDivineSoulSubclass(subclass)) {
 			return ["Cleric"];
 		}
 		return [];
