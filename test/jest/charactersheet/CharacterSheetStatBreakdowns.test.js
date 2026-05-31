@@ -332,4 +332,155 @@ describe("CharacterSheetStatBreakdowns", () => {
 			expect(breakdown.total).toBe(summedTotal);
 		});
 	});
+
+	// ─── Phase 5.6: canonical vs effective ─────────────────────
+
+	describe("Canonical vs effective breakdown (Phase 5.6 dual display)", () => {
+		describe("getSaveBreakdown.isCanonical", () => {
+			it("flags ability/proficiency as canonical, custom/item/state/stance as effective", () => {
+				state._data.abilities.dex = 16; // +3
+				state.addSaveProficiency("dex");
+				state._data.customModifiers.savingThrows.dex = 1;
+				state.setItemBonuses({savingThrow: 1});
+
+				const breakdown = state.getSaveBreakdown("dex");
+				const byType = Object.fromEntries(breakdown.components.map(c => [c.type, c]));
+
+				expect(byType.ability?.isCanonical).toBe(true);
+				expect(byType.proficiency?.isCanonical).toBe(true);
+				expect(byType.custom?.isCanonical).toBe(false);
+				expect(byType.item?.isCanonical).toBe(false);
+			});
+
+			it("exposes canonical field = sum of canonical components", () => {
+				state._data.abilities.wis = 16; // +3
+				state.addSaveProficiency("wis");
+				state._data.customModifiers.savingThrows.wis = 2;
+
+				const breakdown = state.getSaveBreakdown("wis");
+				expect(breakdown.canonical).toBe(3 + state.getProficiencyBonus());
+				expect(breakdown.total).toBe(3 + state.getProficiencyBonus() + 2);
+			});
+
+			it("canonical equals total when no effective-only mods are present", () => {
+				state._data.abilities.con = 14; // +2
+				state.addSaveProficiency("con");
+
+				const breakdown = state.getSaveBreakdown("con");
+				expect(breakdown.canonical).toBe(breakdown.total);
+			});
+		});
+
+		describe("getSkillBreakdown.isCanonical", () => {
+			it("flags ability/proficiency/feature/lore as canonical, custom/item as effective", () => {
+				state._data.abilities.dex = 16;
+				state.setSkillProficiency("stealth", 1);
+				state._data.customModifiers.skills.stealth = 1;
+				state.setItemBonuses({abilityCheck: 1});
+
+				const breakdown = state.getSkillBreakdown("stealth");
+				const byType = Object.fromEntries(breakdown.components.map(c => [c.type, c]));
+
+				expect(byType.ability?.isCanonical).toBe(true);
+				expect(byType.proficiency?.isCanonical).toBe(true);
+				expect(byType.custom?.isCanonical).toBe(false);
+				expect(byType.item?.isCanonical).toBe(false);
+			});
+
+			it("exposes canonical field excluding custom + item", () => {
+				state._data.abilities.dex = 16; // +3
+				state.setSkillProficiency("acrobatics", 1);
+				state._data.customModifiers.skills.acrobatics = 2;
+
+				const breakdown = state.getSkillBreakdown("acrobatics");
+				expect(breakdown.canonical).toBe(3 + state.getProficiencyBonus());
+				expect(breakdown.total).toBe(3 + state.getProficiencyBonus() + 2);
+			});
+
+			it("canonical equals total when no effective-only mods are present", () => {
+				state._data.abilities.dex = 14; // +2
+				state.setSkillProficiency("perception", 0);
+				const breakdown = state.getSkillBreakdown("perception");
+				expect(breakdown.canonical).toBe(breakdown.total);
+			});
+		});
+
+		describe("getInitiativeBreakdown.isCanonical", () => {
+			it("flags ability + JoaT as canonical, custom as effective", () => {
+				state._data.abilities.dex = 16;
+				state._data.customModifiers.initiative = 1;
+
+				const breakdown = state.getInitiativeBreakdown();
+				const byType = Object.fromEntries(breakdown.components.map(c => [c.type, c]));
+				expect(byType.ability?.isCanonical).toBe(true);
+				expect(byType.custom?.isCanonical).toBe(false);
+			});
+
+			it("exposes canonical field excluding custom", () => {
+				state._data.abilities.dex = 16; // +3
+				state._data.customModifiers.initiative = 2;
+
+				const breakdown = state.getInitiativeBreakdown();
+				expect(breakdown.canonical).toBe(3);
+				expect(breakdown.total).toBe(5);
+			});
+		});
+
+		describe("getSpellAttackBreakdown.isCanonical", () => {
+			it("flags proficiency + ability as canonical, custom + item as effective", () => {
+				state._data.abilities.int = 16;
+				state._data.spellcasting.ability = "int";
+				state._data.customModifiers.spellAttack = 1;
+				state.setItemBonuses({spellAttack: 2});
+
+				const breakdown = state.getSpellAttackBreakdown();
+				expect(breakdown).toBeTruthy();
+				const byType = Object.fromEntries(breakdown.components.map(c => [c.type, c]));
+				expect(byType.proficiency?.isCanonical).toBe(true);
+				expect(byType.ability?.isCanonical).toBe(true);
+				expect(byType.custom?.isCanonical).toBe(false);
+				expect(byType.item?.isCanonical).toBe(false);
+			});
+
+			it("exposes canonical field excluding custom + item", () => {
+				state._data.abilities.int = 16; // +3
+				state._data.spellcasting.ability = "int";
+				state._data.customModifiers.spellAttack = 1;
+				state.setItemBonuses({spellAttack: 2});
+
+				const breakdown = state.getSpellAttackBreakdown();
+				expect(breakdown.canonical).toBe(3 + state.getProficiencyBonus());
+				expect(breakdown.total).toBe(3 + state.getProficiencyBonus() + 1 + 2);
+			});
+		});
+
+		describe("getSpellDcBreakdown.isCanonical", () => {
+			it("flags base + proficiency + ability as canonical, custom + item as effective", () => {
+				state._data.abilities.int = 16;
+				state._data.spellcasting.ability = "int";
+				state._data.customModifiers.spellDc = 1;
+				state.setItemBonuses({spellSaveDc: 2});
+
+				const breakdown = state.getSpellDcBreakdown();
+				expect(breakdown).toBeTruthy();
+				const byType = Object.fromEntries(breakdown.components.map(c => [c.type, c]));
+				expect(byType.base?.isCanonical).toBe(true);
+				expect(byType.proficiency?.isCanonical).toBe(true);
+				expect(byType.ability?.isCanonical).toBe(true);
+				expect(byType.custom?.isCanonical).toBe(false);
+				expect(byType.item?.isCanonical).toBe(false);
+			});
+
+			it("exposes canonical field excluding custom + item", () => {
+				state._data.abilities.int = 16; // +3
+				state._data.spellcasting.ability = "int";
+				state._data.customModifiers.spellDc = 1;
+				state.setItemBonuses({spellSaveDc: 2});
+
+				const breakdown = state.getSpellDcBreakdown();
+				expect(breakdown.canonical).toBe(8 + state.getProficiencyBonus() + 3);
+				expect(breakdown.total).toBe(8 + state.getProficiencyBonus() + 3 + 1 + 2);
+			});
+		});
+	});
 });

@@ -6049,9 +6049,11 @@ class CharacterSheetState {
 		const stanceBonus = this._getStanceSaveBonus(ability);
 		// Paladin Aura of Protection (level 6+): add CHA mod to all saving throws
 		const auraBonus = this._getAuraOfProtectionBonus();
-		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus - exhaustionPenalty;
+		// Note: exhaustion is intentionally NOT applied here. The displayed save bonus
+		// stays "pure"; the exhaustion penalty is applied once at roll time by the
+		// roll handler (_rollSavingThrow). This avoids the double-application bug
+		// where both display and roll subtracted the penalty.
+		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus;
 	}
 
 	// Alias for test compatibility
@@ -6184,8 +6186,9 @@ class CharacterSheetState {
 			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
 			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
 			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
-			const exhaustionPenalty = this._getExhaustionD20Penalty();
-			return pb + (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus - exhaustionPenalty;
+			// Note: exhaustion is intentionally NOT applied here. The display stays
+			// "pure"; the penalty is applied once at roll time (_rollSkillCheck).
+			return pb + (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus;
 		}
 
 		// Use getSkillAbility() as single source of truth for skill→ability mapping
@@ -6252,13 +6255,12 @@ class CharacterSheetState {
 		// Get bonus from active states (check:ability type bonuses)
 		const stateBonus = this.getSkillBonusFromStates(skill, this.getSkillAbility(skill) || ability);
 
-		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
-
 		// Combat stance skill bonus (Thelemar homebrew)
 		const stanceBonus = this._getStanceSkillBonus(skill);
 
-		return mod + profBonus + custom + itemBonus + dynamicFeatureBonus + abilityCheckBonus + stateBonus + stanceBonus - exhaustionPenalty;
+		// Note: exhaustion is intentionally NOT applied here. The display stays
+		// "pure"; the penalty is applied once at roll time (_rollSkillCheck).
+		return mod + profBonus + custom + itemBonus + dynamicFeatureBonus + abilityCheckBonus + stateBonus + stanceBonus;
 	}
 
 	/**
@@ -6896,39 +6898,53 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get a breakdown of saving throw modifier components
+	 * Get a breakdown of saving throw modifier components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces of the character build (ability score modifier + proficiency)
+	 * from situational modifiers (custom user-entered mods, magic items,
+	 * active spell effects, stances) that come and go between sessions.
+	 * Consumers that want to render both a "pure" and an "effective" value
+	 * can use `canonical` (sum of canonical-tagged components) alongside
+	 * `total` (sum of all components).
+	 *
 	 * @param {string} ability - The ability abbreviation (e.g., "str", "dex")
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>}}
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}}
 	 */
 	getSaveBreakdown (ability) {
 		const components = [];
 		const mod = this.getAbilityMod(ability);
-		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲"});
+		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
 
 		const prof = this.hasSaveProficiency(ability) ? this.getProficiencyBonus() : 0;
-		if (prof !== 0) components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐"});
+		if (prof !== 0) components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐", isCanonical: true});
 
 		const custom = this._data.customModifiers.savingThrows[ability] || 0;
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		const itemBonus = this._data.itemBonuses?.savingThrow || this._data.itemBonuses?.saves || 0;
-		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		const abilityKey = `savingThrow${ability.charAt(0).toUpperCase() + ability.slice(1)}`;
 		const perAbilityItemBonus = this._data.itemBonuses?.[abilityKey] || 0;
-		if (perAbilityItemBonus !== 0) components.push({type: "item", name: `${ability.toUpperCase()} Save Item`, value: perAbilityItemBonus, icon: "💎"});
+		if (perAbilityItemBonus !== 0) components.push({type: "item", name: `${ability.toUpperCase()} Save Item`, value: perAbilityItemBonus, icon: "💎", isCanonical: false});
 
 		const stateBonus = this.getSaveBonusFromStates(ability);
-		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
+		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
 
 		const stanceBonus = this._getStanceSaveBonus(ability);
-		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
+		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
 
+		// Exhaustion: subtract from the EFFECTIVE total only. Save rolls subtract
+		// `_getExhaustionD20Penalty` at roll time (via _getExhaustionPenalty in
+		// charactersheet.js), so showing it in the effective breakdown matches
+		// what the player will actually roll. Canonical stays pure ability+prof.
 		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
 	}
 
 	/**
@@ -6979,9 +6995,16 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get a breakdown of skill modifier components
+	 * Get a breakdown of skill modifier components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces of the character build (ability mod, proficiency / expertise /
+	 * JoaT / lore-skill bonus, always-on class-feature bonuses) from
+	 * situational modifiers (custom mods, items, active states, stances)
+	 * so renderers can offer dual canonical-vs-effective displays.
+	 *
 	 * @param {string} skill - The skill key (e.g., "athletics", "stealth")
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>, ability: string|null}}
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>, ability: string|null}}
 	 */
 	getSkillBreakdown (skill) {
 		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "");
@@ -6991,21 +7014,23 @@ class CharacterSheetState {
 		if (loreSkill) {
 			const loreComponents = [];
 			const pb = this.getProficiencyBonus();
-			loreComponents.push({type: "proficiency", name: "Proficiency", value: pb, icon: "⭐"});
+			loreComponents.push({type: "proficiency", name: "Proficiency", value: pb, icon: "⭐", isCanonical: true});
 			const loreBonus = loreSkill.bonus || 0;
-			if (loreBonus !== 0) loreComponents.push({type: "lore", name: "Lore bonus", value: loreBonus, icon: "📚"});
+			if (loreBonus !== 0) loreComponents.push({type: "lore", name: "Lore bonus", value: loreBonus, icon: "📚", isCanonical: true});
 			const custom = this.getSkillCustomMod(normalizedSkill);
-			if (custom !== 0) loreComponents.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+			if (custom !== 0) loreComponents.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
-			if (itemBonus !== 0) loreComponents.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+			if (itemBonus !== 0) loreComponents.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
-			if (stateBonus !== 0) loreComponents.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
+			if (stateBonus !== 0) loreComponents.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
 			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
-			if (stanceBonus !== 0) loreComponents.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
-			const exhaustionPenalty = this._getExhaustionD20Penalty();
-			if (exhaustionPenalty !== 0) loreComponents.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+			if (stanceBonus !== 0) loreComponents.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
+			// Exhaustion: subtract from EFFECTIVE only (lore skills are still d20 rolls).
+			const loreExhaustion = this._getExhaustionD20Penalty();
+			if (loreExhaustion !== 0) loreComponents.push({type: "penalty", name: "Exhaustion", value: -loreExhaustion, icon: "😫", isCanonical: false});
 			const loreTotal = loreComponents.reduce((sum, comp) => sum + comp.value, 0);
-			return {total: loreTotal, components: loreComponents, ability: null};
+			const loreCanonical = loreComponents.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+			return {total: loreTotal, canonical: loreCanonical, components: loreComponents, ability: null};
 		}
 
 		const components = [];
@@ -7040,42 +7065,46 @@ class CharacterSheetState {
 			const abilityLabel = swappedFrom
 				? `${ability.toUpperCase()} modifier (swapped from ${swappedFrom.toUpperCase()})`
 				: `${ability.toUpperCase()} modifier`;
-			components.push({type: "ability", name: abilityLabel, value: mod, icon: "🎲"});
+			components.push({type: "ability", name: abilityLabel, value: mod, icon: "🎲", isCanonical: true});
 		}
 
 		const profLevel = this.getSkillProficiency(normalizedSkill);
 		const profBonus = this.getProficiencyBonus();
 		if (profLevel === 2) {
-			components.push({type: "proficiency", name: "Expertise (2×)", value: profLevel * profBonus, icon: "🌟"});
+			components.push({type: "proficiency", name: "Expertise (2×)", value: profLevel * profBonus, icon: "🌟", isCanonical: true});
 		} else if (profLevel === 1) {
-			components.push({type: "proficiency", name: "Proficiency", value: profBonus, icon: "⭐"});
+			components.push({type: "proficiency", name: "Proficiency", value: profBonus, icon: "⭐", isCanonical: true});
 		} else if (this.hasJackOfAllTrades()) {
-			components.push({type: "proficiency", name: "Jack of All Trades", value: Math.floor(profBonus / 2), icon: "🃏"});
+			components.push({type: "proficiency", name: "Jack of All Trades", value: Math.floor(profBonus / 2), icon: "🃏", isCanonical: true});
 		}
 
 		const custom = this.getSkillCustomMod(normalizedSkill);
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
-		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		const dynamicFeatureBonus = this._getDynamicSkillFeatureBonus(normalizedSkill);
-		if (dynamicFeatureBonus !== 0) components.push({type: "feature", name: "Feature Bonus", value: dynamicFeatureBonus, icon: "📜"});
+		if (dynamicFeatureBonus !== 0) components.push({type: "feature", name: "Feature Bonus", value: dynamicFeatureBonus, icon: "📜", isCanonical: true});
 
 		const abilityCheckBonus = ability ? this.getAbilityCheckCustomMod(ability) : 0;
-		if (abilityCheckBonus !== 0) components.push({type: "custom", name: `${(ability || "").toUpperCase()} Check Modifier`, value: abilityCheckBonus, icon: "⚙️"});
+		if (abilityCheckBonus !== 0) components.push({type: "custom", name: `${(ability || "").toUpperCase()} Check Modifier`, value: abilityCheckBonus, icon: "⚙️", isCanonical: false});
 
 		const stateBonus = this.getSkillBonusFromStates(normalizedSkill, this.getSkillAbility(normalizedSkill) || ability);
-		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
+		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
 
 		const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
-		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️"});
+		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
 
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+		// Exhaustion: subtract from EFFECTIVE only. Skill rolls subtract the
+		// d20 penalty at roll time, so showing it here keeps the effective
+		// display in sync with what the player actually rolls.
+		const skillExhaustion = this._getExhaustionD20Penalty();
+		if (skillExhaustion !== 0) components.push({type: "penalty", name: "Exhaustion", value: -skillExhaustion, icon: "😫", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components, ability};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components, ability};
 	}
 
 	/**
@@ -7150,38 +7179,91 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get a breakdown of initiative modifier components
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>}}
+	 * Get a breakdown of raw ability check modifier components for an ability.
+	 *
+	 * Used by the Abilities grid in the overview to power the dual canonical /
+	 * effective display. Distinct from `getSkillBreakdown` (which is per-skill
+	 * and includes proficiency / expertise / JoaT). Raw ability checks have NO
+	 * proficiency from the base mechanic; they include only the ability mod,
+	 * any matching custom modifiers (`check:<abl>` and `d20:all`), and the
+	 * exhaustion penalty on the effective side.
+	 *
+	 * Canonical = pure ability modifier.
+	 * Effective = canonical + ability-check custom mods - exhaustion.
+	 *
+	 * @param {string} ability - Ability abbreviation (e.g. "dex", "wis").
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}}
+	 */
+	getAbilityCheckBreakdown (ability) {
+		const components = [];
+
+		const mod = this.getAbilityMod(ability);
+		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
+
+		const customCheck = this.getAbilityCheckCustomMod(ability);
+		if (customCheck !== 0) components.push({type: "custom", name: `${ability.toUpperCase()} Check Modifier`, value: customCheck, icon: "⚙️", isCanonical: false});
+
+		const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
+
+		// Exhaustion: subtract from EFFECTIVE only. Raw ability checks are d20
+		// rolls; `_rollAbilityCheck` subtracts the penalty at roll time.
+		const exhaustionPenalty = this._getExhaustionD20Penalty();
+		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
+
+		const total = components.reduce((sum, comp) => sum + comp.value, 0);
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
+	}
+
+	/**
+	 * Get a breakdown of initiative modifier components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces of the character build (DEX modifier, JoaT, always-on class
+	 * features that grant flat initiative bonuses) from situational
+	 * modifiers (custom user-entered mods).
+	 *
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}}
 	 */
 	getInitiativeBreakdown () {
 		const components = [];
 
 		const dexMod = this.getAbilityMod("dex");
-		if (dexMod !== 0) components.push({type: "ability", name: "DEX modifier", value: dexMod, icon: "🎯"});
+		if (dexMod !== 0) components.push({type: "ability", name: "DEX modifier", value: dexMod, icon: "🎯", isCanonical: true});
 
 		const custom = this._data.customModifiers.initiative || 0;
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		if (this.hasJackOfAllTrades()) {
 			const halfProf = Math.floor(this.getProficiencyBonus() / 2);
-			if (halfProf !== 0) components.push({type: "proficiency", name: "Jack of All Trades", value: halfProf, icon: "🃏"});
+			if (halfProf !== 0) components.push({type: "proficiency", name: "Jack of All Trades", value: halfProf, icon: "🃏", isCanonical: true});
 		}
 
 		for (const bonus of this._getFeatureInitiativeBonuses()) {
-			components.push({type: "feature", name: bonus.name, value: bonus.value, icon: "⚡"});
+			components.push({type: "feature", name: bonus.name, value: bonus.value, icon: "⚡", isCanonical: true});
 		}
 
+		// Exhaustion: subtract from EFFECTIVE only. Initiative is a d20 roll and
+		// _rollInitiative subtracts _getExhaustionPenalty at roll time, so the
+		// effective breakdown should reflect that. Canonical stays pure.
 		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
 	}
 
 	/**
-	 * Get a breakdown of spell attack bonus components
+	 * Get a breakdown of spell attack bonus components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces (proficiency + spellcasting ability) from situational modifiers
+	 * (custom mods, magic-item bonuses).
+	 *
 	 * @param {string} [className] - Optional class name for class-specific ability
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>}|null}
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}|null}
 	 */
 	getSpellAttackBreakdown (className) {
 		const spellcastingAbilities = {Wizard: "int", Cleric: "wis", Druid: "wis", Sorcerer: "cha", Bard: "cha", Paladin: "cha", Ranger: "wis", Warlock: "cha", Artificer: "int"};
@@ -7190,28 +7272,43 @@ class CharacterSheetState {
 
 		const components = [];
 		const prof = this.getProficiencyBonus();
-		components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐"});
+		components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐", isCanonical: true});
 
 		const mod = this.getAbilityMod(ability);
-		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲"});
+		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
 
 		const custom = this._data.customModifiers.spellAttack || 0;
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		const itemBonus = this._data.itemBonuses?.spellAttack || 0;
-		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
+		// Exhaustion: subtract from EFFECTIVE only. Spell attacks are d20 rolls
+		// — the roll handler subtracts the penalty at roll time, so the dual
+		// display should reflect what the player will actually roll.
 		const exhaustionPenalty = this._getExhaustionD20Penalty();
-		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
+		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
 	}
 
 	/**
-	 * Get a breakdown of spell save DC components
+	 * Get a breakdown of spell save DC components.
+	 *
+	 * Each component carries an `isCanonical` flag distinguishing intrinsic
+	 * pieces (base DC, proficiency, spellcasting ability) from situational
+	 * modifiers (custom mods, magic-item bonuses).
+	 *
+	 * Note: exhaustion is intentionally NOT included in this breakdown.
+	 * The DC is a static reference number rendered for the DM; per TGTT
+	 * rules exhaustion may reduce the effective DC, but applying that
+	 * reduction is the responsibility of the consumer (e.g. the renderer
+	 * shows it inline via the dual canonical/effective display).
+	 *
 	 * @param {string} [className] - Optional class name for class-specific ability
-	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>}|null}
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}|null}
 	 */
 	getSpellDcBreakdown (className) {
 		const spellcastingAbilities = {Wizard: "int", Cleric: "wis", Druid: "wis", Sorcerer: "cha", Bard: "cha", Paladin: "cha", Ranger: "wis", Warlock: "cha", Artificer: "int"};
@@ -7219,22 +7316,23 @@ class CharacterSheetState {
 		if (!ability) return null;
 
 		const components = [];
-		components.push({type: "base", name: "Base DC", value: 8, icon: "🎯"});
+		components.push({type: "base", name: "Base DC", value: 8, icon: "🎯", isCanonical: true});
 
 		const prof = this.getProficiencyBonus();
-		components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐"});
+		components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐", isCanonical: true});
 
 		const mod = this.getAbilityMod(ability);
-		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲"});
+		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
 
 		const custom = this._data.customModifiers.spellDc || 0;
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️"});
+		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
 
 		const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
-		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
-		return {total, components};
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
 	}
 
 	setBaseAc (ac) { this._data.ac.base = ac; }
@@ -7789,9 +7887,8 @@ class CharacterSheetState {
 			initiative += bonus.value;
 		}
 
-		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
-		initiative -= this._getExhaustionD20Penalty();
-
+		// Note: exhaustion is intentionally NOT applied here. The display stays
+		// "pure"; the penalty is applied once at roll time (_rollInitiative).
 		return initiative;
 	}
 	// #endregion
@@ -8005,8 +8102,9 @@ class CharacterSheetState {
 	}
 
 	getSpellAttackBonus (className) {
-		// Exhaustion d20 penalty (2024/Thelemar: -N per level)
-		const exhaustionPenalty = this._getExhaustionD20Penalty();
+		// Note: exhaustion is intentionally NOT applied here. The displayed spell
+		// attack bonus stays "pure"; the penalty is applied once at roll time by
+		// the attack roll handler.
 
 		// If className specified, use that class's spellcasting ability
 		if (className) {
@@ -8024,13 +8122,13 @@ class CharacterSheetState {
 			const ability = spellcastingAbilities[className];
 			if (ability) {
 				const itemBonus = this._data.itemBonuses?.spellAttack || 0;
-				return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus - exhaustionPenalty;
+				return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus;
 			}
 		}
 		const ability = this._data.spellcasting.ability;
 		if (!ability) return null;
 		const itemBonus = this._data.itemBonuses?.spellAttack || 0;
-		return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus - exhaustionPenalty;
+		return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus;
 	}
 
 	/**
@@ -9813,7 +9911,8 @@ class CharacterSheetState {
 									calculations.hasSpellcasting = true;
 									calculations.spellcastingAbility = "int";
 									calculations.spellSaveDc = 8 + profBonus + this.getAbilityMod("int") - exhaustionPenalty;
-									calculations.spellAttackBonus = profBonus + this.getAbilityMod("int") - exhaustionPenalty;
+									// Spell attack bonus is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+									calculations.spellAttackBonus = profBonus + this.getAbilityMod("int");
 									// Cantrips known: 3 at level 3, 4 at level 10
 									calculations.cantripsKnown = level >= 10 ? 4 : 3;
 									// Spells known (PHB) or prepared (XPHB)
@@ -11977,7 +12076,8 @@ class CharacterSheetState {
 						// Spell save DC and attack bonus based on INT
 						const intMod = this.getAbilityMod("int");
 						calculations.ekSpellSaveDc = 8 + profBonus + intMod - exhaustionPenalty;
-						calculations.ekSpellAttackBonus = profBonus + intMod - exhaustionPenalty;
+						// EK spell attack bonus is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+						calculations.ekSpellAttackBonus = profBonus + intMod;
 
 						// War Magic (level 7): Bonus action attack after cantrip
 						if (level >= 7) {
@@ -12310,7 +12410,8 @@ class CharacterSheetState {
 					calculations.hasPactMagic = true;
 					calculations.spellcastingAbility = "cha";
 					calculations.spellSaveDc = 8 + profBonus + chaMod - exhaustionPenalty;
-					calculations.spellAttackBonus = profBonus + chaMod - exhaustionPenalty;
+					// Warlock spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+					calculations.spellAttackBonus = profBonus + chaMod;
 
 					// Cantrips known: 2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4
 					const cantripsKnown = level >= 10 ? 4 : level >= 4 ? 3 : 2;
@@ -12772,7 +12873,8 @@ class CharacterSheetState {
 					calculations.hasSpellcasting = true;
 					calculations.spellcastingAbility = "cha";
 					calculations.spellSaveDc = 8 + profBonus + this.getAbilityMod("cha") - exhaustionPenalty;
-					calculations.spellAttackBonus = profBonus + this.getAbilityMod("cha") - exhaustionPenalty;
+					// Bard spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+					calculations.spellAttackBonus = profBonus + this.getAbilityMod("cha");
 
 					// Cantrips known progression
 					const cantripsKnown = level >= 10 ? 6 : level >= 4 ? 5 : 4;
@@ -14971,7 +15073,8 @@ class CharacterSheetState {
 					if ((is2024Style && level >= 1) || (!is2024Style && level >= 2)) {
 						calculations.hasSpellcasting = true;
 						calculations.spellSaveDc = 8 + profBonus + wisMod - exhaustionPenalty;
-						calculations.spellAttackBonus = profBonus + wisMod - exhaustionPenalty;
+						// Druid spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+						calculations.spellAttackBonus = profBonus + wisMod;
 
 						// Spells known (PHB) or Prepared spells (XPHB/TGTT)
 						if (is2024Style) {
@@ -15334,7 +15437,8 @@ class CharacterSheetState {
 					calculations.hasSpellcasting = true;
 					calculations.spellcastingAbility = "int";
 					calculations.spellSaveDc = 8 + profBonus + intMod - exhaustionPenalty;
-					calculations.spellAttackBonus = profBonus + intMod - exhaustionPenalty;
+					// Wizard spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+					calculations.spellAttackBonus = profBonus + intMod;
 
 					// Cantrips known: 3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5
 					const cantripsKnown = level >= 10 ? 5 : level >= 4 ? 4 : 3;
@@ -16216,7 +16320,8 @@ class CharacterSheetState {
 								calculations.hasSpellcasting = true;
 								calculations.spellcastingAbility = "cha";
 								calculations.spellSaveDc = 8 + profBonus + chaMod - exhaustionPenalty;
-								calculations.spellAttackBonus = profBonus + chaMod - exhaustionPenalty;
+								// Architect of Ruin spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+								calculations.spellAttackBonus = profBonus + chaMod;
 
 								// Cantrips known: 2 at L3, 3 at L10
 								calculations.cantripsKnown = level >= 10 ? 3 : 2;
@@ -23282,6 +23387,21 @@ class CharacterSheetState {
 			// Remove associated modifiers (by ID and by name for orphaned modifiers)
 			this.removeModifiersByFeature(feature.id);
 			this.removeModifiersByName(feature.name);
+
+			// Cascade-remove any feats granted by this optional feature
+			// (e.g. Lessons of the First Ones invocation → its Origin Feat).
+			// Prefer match-by-id (unique per instance — supports repeatable invocations);
+			// fall back to name+source for older saves that pre-date the id link.
+			const linkedFeats = (this._data.feats || []).filter(f => {
+				const link = f.linkedToOptFeature;
+				if (!link) return false;
+				if (link.id && feature.id && link.id === feature.id) return true;
+				if (!link.id && link.name === feature.name && link.source === feature.source) return true;
+				return false;
+			});
+			for (const lf of linkedFeats) {
+				this.removeFeat(lf.id);
+			}
 		}
 
 		// Remove the feature
@@ -23391,6 +23511,13 @@ class CharacterSheetState {
 			backgroundName: feat.backgroundName || null,
 			choices: feat.choices || null,
 		};
+
+		if (opts.linkedToOptFeature && (opts.linkedToOptFeature.id || (opts.linkedToOptFeature.name && opts.linkedToOptFeature.source))) {
+			featData.linkedToOptFeature = {};
+			if (opts.linkedToOptFeature.id) featData.linkedToOptFeature.id = opts.linkedToOptFeature.id;
+			if (opts.linkedToOptFeature.name) featData.linkedToOptFeature.name = opts.linkedToOptFeature.name;
+			if (opts.linkedToOptFeature.source) featData.linkedToOptFeature.source = opts.linkedToOptFeature.source;
+		}
 
 		// Add uses if detected
 		if (uses) {
@@ -28300,13 +28427,19 @@ class CharacterSheetState {
 				case "d20:all":
 					// Global d20 modifier - applies to all d20 rolls
 					// This is used for things like exhaustion (-X to all d20 rolls)
+					// NOTE: We deliberately do NOT also write `cm.skills["_all"]` here.
+					// `getSkillModWithAbility` sums BOTH `skills[skill] + skills["_all"]`
+					// (via getSkillCustomMod) AND `abilityChecks[ability]` (via
+					// getAbilityCheckCustomMod). Since skill checks ARE ability checks,
+					// writing to both buckets double-counted a single d20:all custom mod
+					// as +2N on every skill roll (CharacterSheet bug 6.4). The
+					// `abilityChecks[abl]` write below already covers skill reads.
 					cm.attackBonus += value;
 					cm.initiative += value;
 					Parser.ABIL_ABVS.forEach(abl => {
 						cm.savingThrows[abl] = (cm.savingThrows[abl] || 0) + value;
 						cm.abilityChecks[abl] = (cm.abilityChecks[abl] || 0) + value;
 					});
-					cm.skills["_all"] = (cm.skills["_all"] || 0) + value;
 					break;
 				default:
 					// Handle save:str, save:dex, etc.

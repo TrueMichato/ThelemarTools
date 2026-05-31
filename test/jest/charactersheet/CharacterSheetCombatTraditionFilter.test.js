@@ -191,4 +191,164 @@ describe("Combat tradition filtering — getAvailableTraditionsForClass", () => 
 			expect(result.length).toBe(ClassUtils.getAllTraditions().length);
 		});
 	});
+
+	// Bug 1A: Fighter's L1 Combat Methods feature has an unrestricted main filter
+	// (`{@filter combat traditions|combatmethods}`) BUT also includes a "Getting
+	// Started" inset whose filters carry `|tradition=Name` (suggestion text).
+	// Before the fix, the extractor matched the suggestion filters and locked
+	// the pool to {TI, AM}. The fix detects the unrestricted-marker pattern and
+	// returns the full 17.
+	describe("Bug 1A — unrestricted marker beats inset tradition filters", () => {
+		test("Fighter with unrestricted main filter + restricted inset → full list", () => {
+			const feature = {
+				name: "Combat Methods",
+				source: "TGTT",
+				className: "Fighter",
+				classSource: "TGTT",
+				level: 1,
+				entries: [
+					"Your 1st-level training unlocks tactical methods.",
+					{
+						type: "list",
+						items: [
+							"{@b Choose Traditions.} Gain proficiency in two {@filter combat traditions|combatmethods} of your choice and learn three methods.",
+						],
+					},
+					{
+						type: "inset",
+						name: "Getting Started",
+						entries: [
+							"As a starting suggestion, consider picking from {@filter Tempered Iron|combatmethods|tradition=Tempered Iron} and {@filter Adamant Mountain|combatmethods|tradition=Adamant Mountain}.",
+						],
+					},
+				],
+			};
+			const result = ClassUtils.getAvailableTraditionsForClass(
+				[], DEGREE_ONLY_PROGRESSION, "Fighter", [feature],
+			);
+			// Full list — NOT just {TI, AM}.
+			expect(result.length).toBe(ClassUtils.getAllTraditions().length);
+		});
+
+		test("extractTraditionsFromClassFeature returns empty Set for unrestricted-marker features", () => {
+			const feature = {
+				name: "Combat Methods",
+				source: "TGTT",
+				className: "Fighter",
+				classSource: "TGTT",
+				level: 1,
+				entries: [
+					{
+						type: "list",
+						items: [
+							"{@b Choose Traditions.} Gain proficiency in two {@filter combat traditions|combatmethods} of your choice.",
+						],
+					},
+					{
+						type: "inset",
+						name: "Getting Started",
+						entries: [
+							"Suggestion: {@filter Tempered Iron|combatmethods|tradition=Tempered Iron} and {@filter Adamant Mountain|combatmethods|tradition=Adamant Mountain}.",
+						],
+					},
+				],
+			};
+			const extracted = ClassUtils.extractTraditionsFromClassFeature("Fighter", 5, [feature]);
+			// Unrestricted marker present → caller falls through to full pool.
+			expect(extracted instanceof Set).toBe(true);
+			expect(extracted.size).toBe(0);
+		});
+
+		test("extractTraditionsFromClassFeature returns specific codes for restricted-only features", () => {
+			// Mirror Ranger: only `|tradition=Name` filters, no unrestricted marker.
+			const feature = makeCombatMethodsFeature("Ranger", [
+				"Biting Zephyr",
+				"Mirror's Glint",
+				"Rapid Current",
+				"Razor's Edge",
+				"Spirited Steed",
+				"Unending Wheel",
+			]);
+			const extracted = ClassUtils.extractTraditionsFromClassFeature("Ranger", 5, [feature]);
+			expect(extracted instanceof Set).toBe(true);
+			expect([...extracted].sort()).toEqual(["BZ", "MG", "RC", "RE", "SS", "UW"]);
+		});
+	});
+
+	// Bug 1B: subclass-choice tradition pool — independent picker beyond the
+	// base-class picker. Arcane Archer offers 2-of-4; Champion 2-of-3; Battle
+	// Master / Kensei are unrestricted ("any tradition").
+	describe("Bug 1B — getSubclassTraditionChoicePool", () => {
+		test("Arcane Archer → restricted, 2 from [BZ, RE, UW, UH]", () => {
+			const pool = ClassUtils.getSubclassTraditionChoicePool({name: "Arcane Archer"}, "TGTT");
+			expect(pool.kind).toBe("restricted");
+			expect(pool.pickCount).toBe(2);
+			expect([...pool.codes].sort()).toEqual(["BZ", "RE", "UH", "UW"]);
+		});
+
+		test("Champion → restricted, 2 from [AM, GH, TI]", () => {
+			const pool = ClassUtils.getSubclassTraditionChoicePool({name: "Champion"}, "TGTT");
+			expect(pool.kind).toBe("restricted");
+			expect(pool.pickCount).toBe(2);
+			expect([...pool.codes].sort()).toEqual(["AM", "GH", "TI"]);
+		});
+
+		test("Battle Master → unrestricted, 2 of any tradition", () => {
+			const pool = ClassUtils.getSubclassTraditionChoicePool({name: "Battle Master"}, "TGTT");
+			expect(pool.kind).toBe("unrestricted");
+			expect(pool.pickCount).toBe(2);
+			expect(pool.codes).toBeNull();
+		});
+
+		test("Kensei → unrestricted (Monk subclass)", () => {
+			const pool = ClassUtils.getSubclassTraditionChoicePool({name: "Kensei"}, "TGTT");
+			expect(pool.kind).toBe("unrestricted");
+			expect(pool.pickCount).toBe(1);
+		});
+
+		test("Eldritch Knight → none (pre-seeds fixed AK + EB only)", () => {
+			// Eldritch Knight has fixed grants, not a choice. Pool helper must
+			// return {kind: "none"} so the picker does not render.
+			const pool = ClassUtils.getSubclassTraditionChoicePool({name: "Eldritch Knight"}, "TGTT");
+			expect(pool.kind).toBe("none");
+		});
+
+		test("missing subclass → none", () => {
+			const pool = ClassUtils.getSubclassTraditionChoicePool(null, "TGTT");
+			expect(pool.kind).toBe("none");
+		});
+
+		test("non-TGTT source → none (only TGTT subclasses participate)", () => {
+			const pool = ClassUtils.getSubclassTraditionChoicePool({name: "Arcane Archer"}, "XGE");
+			expect(pool.kind).toBe("none");
+		});
+	});
+
+	// Bug 1B: subclass-granted (fixed) tradition map must be complete. Arcane
+	// Archer's GRANTS list previously missed Unerring Hawk (UH).
+	describe("Bug 1B — getSubclassGrantedTraditions completeness", () => {
+		test("Arcane Archer choice entries include UH (Unerring Hawk)", () => {
+			const granted = ClassUtils.getSubclassGrantedTraditions({name: "Arcane Archer"}, "TGTT");
+			const codes = granted.map(t => t.code).filter(Boolean);
+			expect(codes).toContain("UH");
+		});
+
+		test("Cavalier grants GH + SS as fixed traditions", () => {
+			const granted = ClassUtils.getSubclassGrantedTraditions({name: "Cavalier"}, "TGTT");
+			const fixedCodes = granted.filter(t => !t.choice).map(t => t.code);
+			expect(fixedCodes).toEqual(expect.arrayContaining(["GH", "SS"]));
+		});
+
+		test("Echo Knight grants MG + MS as fixed traditions", () => {
+			const granted = ClassUtils.getSubclassGrantedTraditions({name: "Echo Knight"}, "TGTT");
+			const fixedCodes = granted.filter(t => !t.choice).map(t => t.code);
+			expect(fixedCodes).toEqual(expect.arrayContaining(["MG", "MS"]));
+		});
+
+		test("Rune Knight grants AM + TI as fixed traditions", () => {
+			const granted = ClassUtils.getSubclassGrantedTraditions({name: "Rune Knight"}, "TGTT");
+			const fixedCodes = granted.filter(t => !t.choice).map(t => t.code);
+			expect(fixedCodes).toEqual(expect.arrayContaining(["AM", "TI"]));
+		});
+	});
 });

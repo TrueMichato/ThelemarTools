@@ -46,7 +46,8 @@ class CharacterSheetQuickBuild {
 			spells: [], // batch spell selections
 			hpMethod: "average", // "average" or "roll"
 			hpRolls: {}, // {levelKey: rollResult}
-			_combatTraditions: [], // TGTT combat tradition selections
+			_combatTraditions: [], // TGTT combat tradition selections (base)
+			_subclassChoiceTraditions: [], // TGTT subclass-choice picks (separate cap)
 			weaponMasteries: [], // XPHB weapon mastery selections
 		};
 
@@ -152,6 +153,7 @@ class CharacterSheetQuickBuild {
 			hpMethod: "average",
 			hpRolls: {},
 			_combatTraditions: [],
+			_subclassChoiceTraditions: [],
 			weaponMasteries: [],
 		};
 		this._levelAnalysis = [];
@@ -399,6 +401,23 @@ class CharacterSheetQuickBuild {
 		// Check existing character
 		const existing = this._state.getClasses().find(c => c.name === className && c.source === classSource);
 		return existing?.subclass || null;
+	}
+
+	/**
+	 * Resolve a (possibly shallow) subclass reference to the canonical full
+	 * subclass object from the loaded classData. Returns the input unchanged
+	 * if classData can't be located. Cheap when called per picker.
+	 * @param {object|null|undefined} subclass
+	 * @param {string} className
+	 * @param {string} classSource
+	 * @returns {object|null}
+	 */
+	_resolveSubclassFull (subclass, className, classSource) {
+		if (!subclass) return subclass || null;
+		const classData = this._page.getClasses?.()?.find(
+			c => c.name === className && c.source === classSource,
+		);
+		return CharacterSheetClassUtils.resolveFullSubclass(subclass, classData);
 	}
 
 	_getLevelFeatures (classData, level, subclass = null) {
@@ -652,6 +671,11 @@ class CharacterSheetQuickBuild {
 				knownCasterSubclass = existing?.subclass || null;
 				knownCasterSubclassChoice = knownCasterSubclassChoice || existing?.subclassChoice || null;
 			}
+			// Resolve shallow `{name, source}` refs (from state.getClasses()) to the
+			// canonical full subclass so spell pickers can read `additionalSpells`
+			// and other lazy properties. Without this, expanded-spell filter blocks
+			// (e.g. Chronurgy's "source=EGW", Divine Soul's Cleric list) match nothing.
+			knownCasterSubclass = this._resolveSubclassFull(knownCasterSubclass, knownCasterClassName, knownCasterClassSource);
 		}
 		const knownCasterInfo = totalKnownSpellsGain > 0 || totalKnownCantripsGain > 0 ? {
 			className: knownCasterClassName,
@@ -2378,9 +2402,10 @@ class CharacterSheetQuickBuild {
 		const settings = this._state.getSettings() || {};
 		const showAll = settings.showAllOptFeatureVersions || false;
 		const enableTgtt = !!settings.enableTgtt;
+		const classSource = gain?.classSource || null;
 		const editionFiltered = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
 			CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(filtered, {showAll}),
-			{enableTgtt},
+			{enableTgtt, classSource},
 		);
 		const sourceFiltered = this._page.filterByAllowedSources(editionFiltered);
 
@@ -2534,13 +2559,26 @@ class CharacterSheetQuickBuild {
 			subclassGrantedCodes = grantedTraditions.filter(t => t.code && !(/** @type {*} */ (t)).choice).map(t => t.code);
 		}
 
-		// _combatTraditions tracks only user-chosen traditions (not subclass grants)
+		// Resolve subclass-choice tradition pool (e.g. Champion: 2 from [AM, GH, TI])
+		const subclassChoicePool = CharacterSheetClassUtils.getSubclassTraditionChoicePool(subclass, gain.classSource);
+
+		// _combatTraditions tracks only user-chosen base traditions (not subclass grants
+		// and not subclass-choice picks)
 		if (!this._selections._combatTraditions) {
 			this._selections._combatTraditions = knownTraditions.filter(t => !subclassGrantedCodes.includes(t));
 		}
+		// _subclassChoiceTraditions tracks subclass-choice picks separately so they
+		// can be counted against the subclass pool cap (independent of base count).
+		if (!this._selections._subclassChoiceTraditions) {
+			this._selections._subclassChoiceTraditions = [];
+		}
 
 		// Combined set for method filtering; user count for picker limit
-		const getAllTraditions = () => [...new Set([...this._selections._combatTraditions, ...subclassGrantedCodes])];
+		const getAllTraditions = () => [...new Set([
+			...this._selections._combatTraditions,
+			...this._selections._subclassChoiceTraditions,
+			...subclassGrantedCodes,
+		])];
 		const getUserChosenCount = () => this._selections._combatTraditions.length;
 
 		const section = e_({outer: `
@@ -2552,6 +2590,7 @@ class CharacterSheetQuickBuild {
 		`});
 
 		const tradContainer = e_({outer: `<div class="mb-2"></div>`});
+		const subclassTradContainer = e_({outer: `<div class="mb-2"></div>`});
 		const methodsContainer = e_({outer: `<div></div>`});
 
 		if (getUserChosenCount() < traditionCount) {
@@ -2739,8 +2778,127 @@ class CharacterSheetQuickBuild {
 		};
 
 		renderMethods();
-		section.append(tradContainer, methodsContainer);
+
+		// Render subclass-choice tradition picker (if applicable). Lives between
+		// base picker and methods so the user picks subclass traditions and sees
+		// the methods filtered by the combined pool.
+		this._renderQuickBuildSubclassTraditionPicker(subclassTradContainer, subclassChoicePool, {
+			subclass,
+			existingOptFeatures,
+			renderMethods,
+			section,
+			selectedList,
+			gain,
+		});
+
+		section.append(tradContainer, subclassTradContainer, methodsContainer);
 		step.append(section);
+	}
+
+	/**
+	 * Render the subclass-choice tradition picker for QuickBuild (e.g. Champion
+	 * lets the player pick 2 from {AM, GH, TI}). Mirror of the level-up version.
+	 *
+	 * @param {*} container - Empty container to render into (skipped if pool kind === "none")
+	 * @param {*} pool - {kind, pickCount, codes} from getSubclassTraditionChoicePool
+	 * @param {*} opts
+	 */
+	_renderQuickBuildSubclassTraditionPicker (container, pool, opts) {
+		if (!pool || pool.kind === "none" || !pool.pickCount) return;
+		if (!container) return;
+
+		const {subclass, existingOptFeatures, renderMethods, section, selectedList, gain} = opts;
+		const allTraditionCodes = CharacterSheetClassUtils.getAllTraditions().map(t => t.code);
+		const poolCodes = pool.codes || allTraditionCodes;
+		const knownExisting = CharacterSheetClassUtils.getKnownCombatTraditions(existingOptFeatures, this._state);
+		const knownSet = new Set(knownExisting);
+		// Also exclude what user already chose as base traditions
+		const baseChosen = new Set(this._selections._combatTraditions || []);
+		const availableCodes = poolCodes.filter(c => !knownSet.has(c) && !baseChosen.has(c));
+		if (availableCodes.length === 0) return;
+
+		const effectivePick = Math.min(pool.pickCount, availableCodes.length);
+		const subclassLabel = pool.kind === "unrestricted"
+			? `${effectivePick} tradition${effectivePick === 1 ? "" : "s"} of your choice`
+			: `${effectivePick} from this list`;
+		const subclassName = subclass?.name || "Subclass";
+
+		const tradsInPool = list => list.filter(c => availableCodes.includes(c)).length;
+
+		const section2 = e_({outer: `
+			<div>
+				<p class="ve-small ve-muted mb-1"><strong>${subclassName} tradition${effectivePick === 1 ? "" : "s"}:</strong> Choose ${subclassLabel}.</p>
+				<div class="ve-small ve-muted mb-1">Selected: <span class="qb-sub-trad-count">0</span>/${effectivePick}</div>
+				<div class="charsheet__quickbuild-picker-list qb-sub-trad-list"></div>
+			</div>
+		`});
+		const list = section2.querySelector(".qb-sub-trad-list");
+		const counter = section2.querySelector(".qb-sub-trad-count");
+
+		const allTraditionEntities = CharacterSheetClassUtils.getAllTraditions();
+		const tradByCode = new Map(allTraditionEntities.map(t => [t.code, t]));
+
+		availableCodes.forEach(code => {
+			const trad = tradByCode.get(code) || {code, name: CharacterSheetClassUtils.getTraditionName(code) || code};
+			const desc = CharacterSheetClassUtils.getTraditionDescription(code);
+			const isChecked = (this._selections._subclassChoiceTraditions || []).includes(code);
+
+			let tradNameHtml;
+			try {
+				tradNameHtml = CharacterSheetPage.getHoverLink(
+					UrlUtil.PG_VARIANTRULES,
+					"Combat Traditions",
+					Parser.SRC_TGTT || "TGTT",
+					null,
+					trad.name,
+				);
+			} catch (e) {
+				tradNameHtml = `<strong>${trad.name}</strong>`;
+			}
+
+			const item = e_({outer: `
+				<label class="charsheet__tradition-row d-block ve-small mb-1">
+					<input type="checkbox" class="mr-2" ${isChecked ? "checked" : ""}>
+					<strong class="tradition-name-slot"></strong>
+					<span class="ve-muted ml-1">(${trad.code})</span>
+					${desc ? `<div class="ve-muted" style="margin-left: 1.5rem; font-size: 0.85em;">${desc}</div>` : ""}
+				</label>
+			`});
+			item.querySelector(".tradition-name-slot").innerHTML = tradNameHtml;
+
+			item.querySelector("input").addEventListener("change", e => {
+				const current = [...(this._selections._subclassChoiceTraditions || [])];
+				if (e.target.checked) {
+					if (tradsInPool(current) >= effectivePick) {
+						e.target.checked = false;
+						JqueryUtil.doToast({type: "warning", content: `You can only choose ${effectivePick} subclass tradition${effectivePick === 1 ? "" : "s"}.`});
+						return;
+					}
+					if (!current.includes(code)) current.push(code);
+				} else {
+					const idx = current.indexOf(code);
+					if (idx >= 0) current.splice(idx, 1);
+					// Remove any selected methods that belonged to this tradition
+					const remaining = selectedList.filter(s => {
+						const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(s);
+						return tradCode !== code;
+					});
+					selectedList.length = 0;
+					remaining.forEach(s => selectedList.push(s));
+				}
+				this._selections._subclassChoiceTraditions = current;
+				counter.textContent = String(tradsInPool(current));
+				renderMethods();
+				if (section) {
+					section.querySelector(".badge").textContent = `${selectedList.length}/${gain.totalNeeded}`;
+				}
+			});
+
+			list.append(item);
+		});
+
+		counter.textContent = String(tradsInPool(this._selections._subclassChoiceTraditions || []));
+		container.append(section2);
 	}
 
 	// ==========================================
@@ -3354,23 +3512,34 @@ class CharacterSheetQuickBuild {
 
 			const sourceFiltered = this._page.getFilteredSpellData();
 
+			// Resolve the stored shallow subclass (if any) to the canonical full
+			// subclass for the Wizard so spell pickers can read `additionalSpells`
+			// (Chronurgy / Scribes / Bladesinger expanded spell blocks).
+			const wizardClass = this._state.getClasses()?.[0];
+			const resolvedWizardSubclass = this._resolveSubclassFull(
+				wizardClass?.subclass,
+				wizardClass?.name || "Wizard",
+				wizardClass?.source,
+			);
+
 			const section = CharacterSheetSpellPicker.renderWizardSpellbookPicker({
 				spellCount: totalSpellbookSpells,
 				maxSpellLevel,
 				allSpells: sourceFiltered,
 				knownSpellIds,
 				className: "Wizard",
-				subclass: this._state.getClasses()?.[0]?.subclass,
-				subclassChoice: this._state.getClasses()?.[0]?.subclassChoice,
+				subclass: resolvedWizardSubclass,
+				subclassChoice: wizardClass?.subclassChoice,
 				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
 					className: "Wizard",
-					subclass: this._state.getClasses()?.[0]?.subclass,
-					subclassChoice: this._state.getClasses()?.[0]?.subclassChoice,
+					subclass: resolvedWizardSubclass,
+					subclassChoice: wizardClass?.subclassChoice,
 				}),
 				onSelect: (spells) => {
 					this._selections.spellbookSpells = spells;
 				},
 				getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				preSelectedSpells: this._selections.spellbookSpells,
 			});
 
@@ -3417,7 +3586,11 @@ class CharacterSheetQuickBuild {
 		// Resolve subclass/subclassChoice from current selections (may have been updated in subclass step
 		// after knownCasterInfo was captured at step-build time)
 		const subclassKey = `${className}_${classSource}`;
-		const resolvedSubclass = this._selections.subclasses[subclassKey] || knownCasterInfo.subclass;
+		const rawResolvedSubclass = this._selections.subclasses[subclassKey] || knownCasterInfo.subclass;
+		// Ensure full subclass object (with `additionalSpells`) — shallow stored
+		// refs from `state.getClasses()` would otherwise silently lose expanded
+		// spell blocks (Chronurgy, Divine Soul list, etc.).
+		const resolvedSubclass = this._resolveSubclassFull(rawResolvedSubclass, className, classSource);
 		const resolvedSubclassChoice = this._selections.subclassChoices[subclassKey] || knownCasterInfo.subclassChoice;
 
 		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
@@ -3442,6 +3615,7 @@ class CharacterSheetQuickBuild {
 				this._selections.knownCantrips = cantrips;
 			},
 			getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+			getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 			preSelectedSpells: this._selections.knownSpells,
 			preSelectedCantrips: this._selections.knownCantrips,
 		});
@@ -3517,7 +3691,8 @@ class CharacterSheetQuickBuild {
 		const sourceFiltered = this._page.getFilteredSpellData();
 
 		const subclassKey = `${className}_${classSource}`;
-		const resolvedSubclass = this._selections.subclasses[subclassKey] || preparedCasterInfo.subclass;
+		const rawResolvedSubclass = this._selections.subclasses[subclassKey] || preparedCasterInfo.subclass;
+		const resolvedSubclass = this._resolveSubclassFull(rawResolvedSubclass, className, classSource);
 		const resolvedSubclassChoice = this._selections.subclassChoices[subclassKey] || preparedCasterInfo.subclassChoice;
 		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
 			className,
@@ -3541,6 +3716,7 @@ class CharacterSheetQuickBuild {
 				this._selections.preparedCantrips = cantrips;
 			},
 			getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+			getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 			preSelectedSpells: this._selections.preparedSpells || [],
 			preSelectedCantrips: this._selections.preparedCantrips || [],
 		});
@@ -3774,17 +3950,8 @@ class CharacterSheetQuickBuild {
 
 		// Helper to create hoverable subclass link
 		const makeSubclassHoverLink = (subclass) => {
-			try {
-				const hash = `${UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: subclass.className, source: subclass.classSource})}${HASH_PART_SEP}${UrlUtil.getClassesPageStatePart({subclass})}`;
-				const hoverAttrs = Renderer.hover.getHoverElementAttributes({
-					page: UrlUtil.PG_CLASSES,
-					source: subclass.source,
-					hash,
-				});
-				return `<a href="${UrlUtil.PG_CLASSES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${subclass.name}</a>`;
-			} catch (e) {
-				return subclass.name;
-			}
+			const allSubclasses = this._page?.getSubclasses?.() || null;
+			return CharacterSheetPage.getSubclassHoverLink(subclass, allSubclasses);
 		};
 
 		// Class summary with hoverable subclass links
@@ -4287,9 +4454,15 @@ class CharacterSheetQuickBuild {
 			this._state.setWeaponMasteries(this._selections.weaponMasteries);
 		}
 
-		// Apply combat traditions (if selected during QB)
-		if (this._selections._combatTraditions != null) {
-			this._state.setCombatTraditions(this._selections._combatTraditions);
+		// Apply combat traditions (if selected during QB). Merge base picks with
+		// subclass-choice picks before persisting; the state stores them as a
+		// single combined list.
+		if (this._selections._combatTraditions != null || this._selections._subclassChoiceTraditions != null) {
+			const merged = [...new Set([
+				...(this._selections._combatTraditions || []),
+				...(this._selections._subclassChoiceTraditions || []),
+			])];
+			this._state.setCombatTraditions(merged);
 		}
 
 		// Record level history BEFORE the final HP recalc so _calculateMaxHp sees stored hpRoll values.

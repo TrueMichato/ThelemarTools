@@ -186,7 +186,7 @@ class CharacterSheetRespec {
 						<span class="respec-hover-slot"></span>
 					</span>
 				`});
-				CharacterSheetRespec._setHoverLink(subPill.querySelector(".respec-hover-slot"), UrlUtil.PG_CLASSES, history.choices.subclass.name, history.choices.subclass.source);
+				CharacterSheetRespec._setSubclassHoverLink(subPill.querySelector(".respec-hover-slot"), this._page, history.choices.subclass, levelClass);
 				choices.append(subPill);
 			}
 
@@ -556,25 +556,47 @@ class CharacterSheetRespec {
 			}
 
 			// Ability bonuses — fixed + user-chosen
+			// If Tasha's optional rules are in effect, the player reassigns ALL racial ASI,
+			// so the race-default `ability` block must be hidden and replaced with the
+			// Tasha's-chosen distribution. Otherwise we show race defaults plus any
+			// race-defined ability choice picks (Variant Human +1/+1, etc.).
 			const raceBonusParts = [];
-			if (race.ability) {
-				race.ability.forEach(abiSet => {
-					Object.entries(abiSet).forEach(([abi, bonus]) => {
-						if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
-							raceBonusParts.push(`${Parser.attAbvToFull(abi)} +${bonus}`);
-						}
+			const totalsByAbi = {};
+			const addBonus = (abi, amount) => {
+				if (!abi || !Parser.ABIL_ABVS.includes(abi)) return;
+				const n = Number(amount) || 0;
+				if (!n) return;
+				totalsByAbi[abi] = (totalsByAbi[abi] || 0) + n;
+			};
+			if (raceUserChoices.useTashasRules && raceUserChoices.tashasAbilityBonuses) {
+				Object.entries(raceUserChoices.tashasAbilityBonuses).forEach(([key, value]) => {
+					if (key.endsWith("_amount")) return;
+					const amount = raceUserChoices.tashasAbilityBonuses[`${key}_amount`] || 0;
+					addBonus(/** @type {*} */ (value), amount);
+				});
+			} else {
+				if (race.ability) {
+					race.ability.forEach(abiSet => {
+						Object.entries(abiSet).forEach(([abi, bonus]) => {
+							addBonus(abi, bonus);
+						});
 					});
-				});
-			}
-			if (raceUserChoices.selectedAbilityChoices) {
-				Object.entries(raceUserChoices.selectedAbilityChoices).forEach(([key, value]) => {
-					if (!key.includes("_weight") && value && Parser.ABIL_ABVS.includes(value)) {
+				}
+				if (raceUserChoices.selectedAbilityChoices) {
+					Object.entries(raceUserChoices.selectedAbilityChoices).forEach(([key, value]) => {
+						if (key.includes("_weight")) return;
 						const bonus = raceUserChoices.selectedAbilityChoices[`${key}_weight`] || 0;
-						if (bonus) raceBonusParts.push(`${Parser.attAbvToFull(value)} +${bonus}`);
-					}
-				});
+						addBonus(/** @type {*} */ (value), bonus);
+					});
+				}
 			}
-			if (raceBonusParts.length) items.push(`ASI: ${raceBonusParts.join(", ")}`);
+			Object.entries(totalsByAbi).forEach(([abi, total]) => {
+				if (total) raceBonusParts.push(`${Parser.attAbvToFull(abi)} +${total}`);
+			});
+			if (raceBonusParts.length) {
+				const label = raceUserChoices.useTashasRules ? "ASI (Tasha's)" : "ASI";
+				items.push(`${label}: ${raceBonusParts.join(", ")}`);
+			}
 
 			if (items.length) {
 				raceGrants.append(e_({outer: `<div class="ve-small ve-muted ml-2">${items.join(" · ")}</div>`}));
@@ -1552,6 +1574,30 @@ class CharacterSheetRespec {
 	}
 
 	/**
+	 * Render a hoverable subclass link into the given slot.
+	 * Builds a PG_CLASSES hash from the class + subclass state so the hover
+	 * routes to the canonical class entry — using the bare subclass name
+	 * (as a top-level class) produces an unresolvable hash like
+	 * `chronurgy%20magic_tgtt-2014`.
+	 *
+	 * @param {Element} el - The element to populate with the link
+	 * @param {object} page - The CharacterSheetPage (for loaded subclass data)
+	 * @param {object} subclass - {name, source, className?, classSource?, shortName?}
+	 * @param {object} [storedClass] - Optional class entry to resolve className/classSource
+	 */
+	static _setSubclassHoverLink (el, page, subclass, storedClass = null) {
+		if (!subclass?.name) { el.textContent = "Unknown"; return; }
+		try {
+			const allSubclasses = page?.getSubclasses?.() || null;
+			const link = CharacterSheetPage.getSubclassHoverLink(subclass, allSubclasses, storedClass);
+			if (typeof link === "string") el.innerHTML = link;
+			else el.append(link);
+		} catch (e) {
+			el.textContent = subclass.name;
+		}
+	}
+
+	/**
 	 * Get a human-readable label for an optional feature type code.
 	 * @param {string} typeKey - e.g. "MM", "EI", "PB"
 	 * @returns {string} Human-readable label
@@ -2217,7 +2263,7 @@ class CharacterSheetRespec {
 						<span class="text-muted">${Parser.sourceJsonToAbv(subclass.source)}</span>
 					</div>
 				`});
-				CharacterSheetRespec._setHoverLink(item.querySelector(".respec-hover-slot"), UrlUtil.PG_CLASSES, subclass.name, subclass.source);
+				CharacterSheetRespec._setSubclassHoverLink(item.querySelector(".respec-hover-slot"), this._page, subclass);
 				item.addEventListener("click", () => {
 					selectedSubclass = subclass;
 					subclassList.querySelectorAll(".charsheet__respec-feat-selected").forEach(el => el.classList.remove("charsheet__respec-feat-selected"));

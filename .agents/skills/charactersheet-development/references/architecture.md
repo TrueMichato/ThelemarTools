@@ -104,9 +104,11 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 1. `charactersheet.html` loaded
 2. `CharacterSheetPage.pInit()` fires
 3. Parallel data load from 12+ JSON sources (races, classes, spells, items, feats, backgrounds, optional features, etc.)
-4. Sub-modules instantiated with error isolation (try/catch per module)
-5. Saved characters loaded from IndexedDB
-6. UI rendered
+4. Brew data merged into `this._classes` / `this._subclasses` / etc. (`_mergeBrewData`)
+5. **`_copy` resolution**: every entry in `this._subclasses` and `this._classes` that carries a `_copy` block is merged in place via `DataUtil.subclass.pMergeCopy` / `DataUtil.class.pMergeCopy`. This is what gives TGTT subclasses like Chronurgy Magic and Divine Soul their inherited `additionalSpells` blocks — without this step, every spell picker would silently miss subclass-granted spells (Gift of Alacrity, Guidance, etc.). Runs AFTER brew merge so brew-added entities are included, BEFORE state setup so the picker code sees fully-merged data. As defense-in-depth, `globalThis._charSheetSubclassMergePool` is set to `this._subclasses` immediately after the eager merge so `CharacterSheetClassUtils.resolveFullSubclass` can lazy-merge any entry that still arrives with an unresolved `_copy` at picker call time; the recovery is announced via a single `[CharSheet][Phase7]` console.warn so the silent failure surfaces.
+6. Sub-modules instantiated with error isolation (try/catch per module)
+7. Saved characters loaded from IndexedDB
+8. UI rendered
 
 ### Update Cycle
 ```

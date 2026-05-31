@@ -75,6 +75,7 @@ class CharacterSheetPage {
 
 	async pInit () {
 		await this._pLoadData();
+		this._installHoverNormalizationHook();
 		this._initUi();
 		this._initEventListeners();
 		await this._pLoadCharacters();
@@ -278,6 +279,38 @@ class CharacterSheetPage {
 		// Merge prerelease/homebrew data
 		this._mergeBrewData(prereleaseData);
 		this._mergeBrewData(brewData);
+
+		// Resolve `_copy` for classes and subclasses that inherit from other entries.
+		// loadRawJSON deliberately skips `_copy` merging to keep classFeature/
+		// subclassFeature arrays separate. Without this step, TGTT (and other
+		// homebrew) subclasses that `_copy` from EGW/XGE/PHB arrive WITHOUT their
+		// parent's `additionalSpells`, `subclassFeatures`, etc. — breaking the
+		// spell picker for e.g. TGTT Chronurgy (Gift of Alacrity) and TGTT Divine
+		// Soul (Guidance). Run after _mergeBrewData so brew copies see brew parents,
+		// and BEFORE _setUpStateFromData consumes the merged data.
+		await this._pResolveCopyInheritance();
+
+		// Phase 7.1 diagnostic + recovery hook:
+		//   1. Expose the merged subclass pool so `resolveFullSubclass` can run a
+		//      defensive lazy merge if a picker call site discovers a still-unmerged
+		//      subclass at runtime (i.e. eager merge above silently missed one).
+		//   2. Log a single console.warn naming any subclass that arrived with an
+		//      unresolved `_copy` after eager merge — this is the breadcrumb users
+		//      can copy back to us if Bug 1 ever resurfaces in the wild.
+		globalThis._charSheetSubclassMergePool = this._subclasses;
+		try {
+			const unresolved = (this._subclasses || []).filter(sc => sc?._copy);
+			if (unresolved.length) {
+				// eslint-disable-next-line no-console
+				console.warn(
+					`[CharSheet][Phase7] ${unresolved.length} subclass(es) still carry _copy after eager merge — picker filters that depend on additionalSpells may silently miss spells. Affected:`,
+					unresolved.map(sc => `${sc.name || sc._copy?.name}|${sc.source} (parent ${sc._copy?.name}|${sc._copy?.source})`),
+				);
+			}
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet][Phase7] subclass merge diagnostic threw:", e?.message || e);
+		}
 
 		// Build dialect→parent language lookup (e.g., "Aquan" → Primordial)
 		this._buildDialectParentMap();
@@ -540,6 +573,50 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Resolve `_copy` inheritance for classes and subclasses.
+	 *
+	 * loadRawJSON intentionally leaves `_copy` blocks unresolved on classes and
+	 * subclasses so that classFeature/subclassFeature arrays remain accessible
+	 * as flat lists. For the character sheet, however, we need the merged
+	 * subclass shape (with `additionalSpells`, `subclassFeatures`, etc.) so the
+	 * spell picker, level-up modal, and other surfaces see the expected fields.
+	 *
+	 * `DataUtil.{class,subclass}.pMergeCopy` walks the supplied list, finds the
+	 * parent by hash, recurses on parents that themselves use `_copy`, and
+	 * mutates the entry in place via `copyApplier.getCopy`. Failures are
+	 * silently skipped (no `isErrorOnMissing`) so a single misconfigured
+	 * homebrew copy does not break loading.
+	 */
+	async _pResolveCopyInheritance () {
+		const tasks = [];
+		if (this._subclasses?.length) {
+			for (const sc of this._subclasses) {
+				if (!sc._copy) continue;
+				tasks.push(
+					DataUtil.subclass.pMergeCopy(this._subclasses, sc, {})
+						.catch(e => {
+							// eslint-disable-next-line no-console
+							console.warn(`[CharSheet] Failed to resolve _copy on subclass "${sc.name || sc._copy?.name}" (${sc.source}):`, e?.message || e);
+						}),
+				);
+			}
+		}
+		if (this._classes?.length) {
+			for (const cls of this._classes) {
+				if (!cls._copy) continue;
+				tasks.push(
+					DataUtil.class.pMergeCopy(this._classes, cls, {})
+						.catch(e => {
+							// eslint-disable-next-line no-console
+							console.warn(`[CharSheet] Failed to resolve _copy on class "${cls.name || cls._copy?.name}" (${cls.source}):`, e?.message || e);
+						}),
+				);
+			}
+		}
+		if (tasks.length) await Promise.all(tasks);
+	}
+
+	/**
 	 * Build a map from dialect names to their parent language entries.
 	 * E.g., "aquan" → {name: "Primordial", source: "XPHB"} (or PHB if XPHB unavailable).
 	 */
@@ -593,6 +670,56 @@ class CharacterSheetPage {
 			}
 		});
 		return sources.size;
+	}
+
+	/**
+	 * Install a one-shot defensive hook around `Renderer.hover.pHandleLinkMouseOver`
+	 * that normalizes broken PG_CLASSES hashes (e.g. `chronurgy magic_tgtt-2014` —
+	 * a subclass name in the class slot). This catches malformed `{@class}` tags in
+	 * rendered content and stale references from outside the character-sheet code,
+	 * which would otherwise produce uncaught hover errors.
+	 *
+	 * Idempotent — only installs once per page load.
+	 */
+	_installHoverNormalizationHook () {
+		if (typeof Renderer === "undefined" || !Renderer.hover) return;
+		if (Renderer.hover._charsheetNormalizationHookInstalled) return;
+		Renderer.hover._charsheetNormalizationHookInstalled = true;
+
+		const allClasses = this._classes || [];
+		const allSubclasses = this._subclasses || [];
+		const orig = Renderer.hover.pHandleLinkMouseOver.bind(Renderer.hover);
+
+		Renderer.hover.pHandleLinkMouseOver = async function (evt, ele, opts) {
+			try {
+				const linkData = Renderer.hover.getLinkElementData(ele);
+				if (linkData?.page === UrlUtil.PG_CLASSES && linkData?.hash) {
+					// PG_CLASSES hash: `name_source[##sub_subname_subsource]`
+					const idxSubSep = linkData.hash.indexOf("##");
+					const classPart = idxSubSep === -1 ? linkData.hash : linkData.hash.substring(0, idxSubSep);
+					const subPart = idxSubSep === -1 ? "" : linkData.hash.substring(idxSubSep);
+					const [encName, encSource] = classPart.split(HASH_LIST_SEP);
+					if (encName && encSource) {
+						const name = decodeURIComponent(encName).replace(/_/g, " ");
+						const source = decodeURIComponent(encSource);
+						const normalized = CharacterSheetClassUtils.normalizePgClassesHashInput(
+							{name, source},
+							{allClasses, allSubclasses},
+						);
+						if (normalized.wasNormalized) {
+							const newClassPart = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalized.name, source: normalized.source});
+							const newHash = `${newClassPart}${subPart}`;
+							ele.setAttribute("data-vet-page", UrlUtil.PG_CLASSES);
+							ele.setAttribute("data-vet-source", normalized.source);
+							ele.setAttribute("data-vet-hash", newHash);
+						}
+					}
+				}
+			} catch (e) {
+				// Hook is best-effort — never block the underlying hover call.
+			}
+			return orig(evt, ele, opts);
+		};
 	}
 
 	_initUi () {
@@ -2496,10 +2623,16 @@ class CharacterSheetPage {
 		// Render class with hover links
 		const classes = this._state.getClasses();
 		if (classes.length) {
+			const allClasses = this._classes || [];
+			const allSubclasses = this._subclasses || [];
 			const classLinks = classes.map(c => {
 				try {
-					const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: c.name, source: c.source});
-					return CharacterSheetPage.getHoverLink(UrlUtil.PG_CLASSES, `${c.name} ${c.level}`, c.source, hash);
+					const normalized = CharacterSheetClassUtils.normalizePgClassesHashInput(
+						{name: c.name, source: c.source},
+						{allClasses, allSubclasses},
+					);
+					const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalized.name, source: normalized.source});
+					return CharacterSheetPage.getHoverLink(UrlUtil.PG_CLASSES, `${c.name} ${c.level}`, normalized.source, hash);
 				} catch (e) {
 					return `${c.name} ${c.level}`;
 				}
@@ -2684,9 +2817,16 @@ class CharacterSheetPage {
 	_renderAbilityScores () {
 		Parser.ABIL_ABVS.forEach(abl => {
 			const score = this._state.getAbilityScore(abl);
-			const mod = this._state.getAbilityMod(abl);
+			const breakdown = this._state.getAbilityCheckBreakdown(abl);
+			const canonical = breakdown.canonical ?? breakdown.total;
+			const effective = breakdown.total;
 			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-score`))).textContent = score;
-			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-mod`))).textContent = mod >= 0 ? `+${mod}` : mod;
+			const modCell = /** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-mod`));
+			modCell.innerHTML = this._formatModWithEffective(canonical, effective);
+			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
+			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
+			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
+			modCell.title = tooltipLines.join("\n");
 		});
 
 		// Update prominent passive scores display
@@ -2705,18 +2845,20 @@ class CharacterSheetPage {
 
 		Parser.ABIL_ABVS.forEach(abl => {
 			const isProficient = this._state.hasSaveProficiency(abl);
-			const mod = this._state.getSaveMod(abl);
-			const modStr = mod >= 0 ? `+${mod}` : mod;
 			const breakdown = this._state.getSaveBreakdown(abl);
+			const effective = breakdown.total;
+			const canonical = breakdown.canonical ?? breakdown.total;
+			const modHtml = this._formatModWithEffective(canonical, effective);
 			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
-			tooltipLines.push(`─────────\n🎯 Total: ${modStr}`);
+			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
+			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
 			const tooltip = tooltipLines.join("\n");
 
 			const row = e_({outer: `
 				<div class="charsheet__save-row" data-save="${abl}" title="${tooltip.replace(/"/g, "&quot;")}">
 					<span class="charsheet__prof-indicator ${isProficient ? "charsheet__prof-indicator--proficient" : ""}"></span>
 					<span class="charsheet__save-name">${Parser.attAbvToFull(abl)}</span>
-					<span class="charsheet__save-mod">${modStr}</span>
+					<span class="charsheet__save-mod">${modHtml}</span>
 				</div>
 			`});
 
@@ -2760,8 +2902,10 @@ class CharacterSheetPage {
 		skills.forEach(skill => {
 			const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
 			const profLevel = this._state.getSkillProficiency(skillKey);
-			const mod = this._state.getSkillMod(skillKey);
-			const modStr = mod >= 0 ? `+${mod}` : mod;
+			const breakdown = this._state.getSkillBreakdown(skillKey);
+			const effective = breakdown.total;
+			const canonical = breakdown.canonical ?? breakdown.total;
+			const modHtml = this._formatModWithEffective(canonical, effective);
 
 			let profClass = "";
 			let profTitle = "Not proficient - Click to toggle proficiency";
@@ -2784,9 +2928,9 @@ class CharacterSheetPage {
 			const defaultAbility = skill.ability || "";
 
 			const customClass = skill.isCustom ? " charsheet__skill-row--custom" : "";
-			const breakdown = this._state.getSkillBreakdown(skillKey);
 			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
-			tooltipLines.push(`─────────\n🎯 Total: ${modStr}`);
+			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
+			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
 			const skillTooltip = tooltipLines.join("\n");
 
 			const row = e_({outer: `
@@ -2794,7 +2938,7 @@ class CharacterSheetPage {
 					<span class="charsheet__prof-indicator charsheet__prof-indicator--clickable ${profClass}" title="${profTitle}" data-skill="${skillKey}"></span>
 					<span class="charsheet__skill-name">${skill.name}${skill.isCustom ? " ✦" : ""}</span>
 					<span class="charsheet__skill-ability">(${abilityDisplay})</span>
-					<span class="charsheet__skill-mod">${modStr}</span>
+					<span class="charsheet__skill-mod">${modHtml}</span>
 					<span class="charsheet__skill-passive" title="Passive ${skill.name}: ${passiveScore}">${passiveScore}</span>
 					${skill.isCustom ? `<span class="charsheet__skill-delete" title="Remove custom skill">×</span>` : ""}
 				</div>
@@ -2981,8 +3125,11 @@ class CharacterSheetPage {
 		(/** @type {*} */ (document.getElementById("charsheet-disp-ac"))).textContent = acBreakdown.total;
 		this._renderAcBreakdown(acBreakdown);
 
-		(/** @type {*} */ (document.getElementById("charsheet-disp-initiative"))).textContent = this._formatMod(this._state.getInitiative());
-		this._renderStatBreakdown("#charsheet-initiative-breakdown", this._state.getInitiativeBreakdown());
+		const initBreakdown = this._state.getInitiativeBreakdown();
+		const initEffective = initBreakdown.total;
+		const initCanonical = initBreakdown.canonical ?? initEffective;
+		(/** @type {*} */ (document.getElementById("charsheet-disp-initiative"))).innerHTML = this._formatModWithEffective(initCanonical, initEffective);
+		this._renderStatBreakdown("#charsheet-initiative-breakdown", initBreakdown);
 
 		// Calculate speed with exhaustion penalty
 		const exhaustion = this._state.getExhaustion();
@@ -5332,21 +5479,13 @@ class CharacterSheetPage {
 		const resources = this._state.getResources();
 		const usesCombatSystem = this._state.usesCombatSystem?.() || false;
 
-		// Get limited-use custom abilities (displayed in Resources section)
-		const customAbilities = this._state.getCustomAbilities?.() || [];
-		const limitedAbilities = customAbilities.filter(a => a.mode === "limited");
+		// Bug 3: Custom limited-use abilities are NOT rendered here anymore —
+		// they live exclusively in the Abilities section below. Resources are
+		// system/class-granted pools only (Channel Divinity, Rage, Ki, spell
+		// slots, racial 1/day, Stamina for the combat-traditions system, etc.).
 
-		// Count abilities that will be shown (exclude those linking to existing resources)
-		const visibleLimitedAbilities = limitedAbilities.filter(a => {
-			if (a.resourceSource?.type === "linked" && a.resourceSource?.resourceId !== "stamina") {
-				const linkedResource = resources.find(r => r.id === a.resourceSource.resourceId);
-				if (linkedResource) return false; // Skip - already shown in resources
-			}
-			return true;
-		});
-
-		// Update resources count badge
-		let totalResourceCount = resources.length + visibleLimitedAbilities.length;
+		// Update resources count badge — count system resources + (optional) stamina.
+		let totalResourceCount = resources.length;
 		if (usesCombatSystem) {
 			const staminaMax = this._state.getStaminaMax() || 0;
 			if (staminaMax > 0) totalResourceCount++;
@@ -5405,8 +5544,8 @@ class CharacterSheetPage {
 			}
 		}
 
-		if (!resources.length && !usesCombatSystem && !limitedAbilities.length) {
-			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No limited-use features</div>`;
+		if (!resources.length && !usesCombatSystem) {
+			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No class-granted resources yet</div>`;
 			return;
 		}
 
@@ -5446,65 +5585,6 @@ class CharacterSheetPage {
 
 			container.append(row);
 		});
-
-		// Render limited-use custom abilities
-		limitedAbilities.forEach(ability => {
-			// Get the uses display (handles both self-contained and linked resources)
-			const uses = this._state.getCustomAbilityUsesDisplay?.(ability.id) || ability.uses;
-			if (!uses) return;
-
-			// Check if this ability links to an existing resource pool (don't show duplicate)
-			if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId !== "stamina") {
-				const linkedResource = resources.find(r => r.id === ability.resourceSource.resourceId);
-				if (linkedResource) {
-					// Skip - the linked resource is already shown in the resources list
-					return;
-				}
-			}
-
-			const canUse = this._state.canUseCustomAbility?.(ability.id) ?? uses.current > 0;
-			const canRestore = uses.current < uses.max;
-
-			const row = e_({outer: `
-				<div class="charsheet__resource-row charsheet__resource-row--custom" data-ability-id="${ability.id}">
-					<span class="charsheet__resource-icon mr-1">${ability.icon || "⚡"}</span>
-					<span class="charsheet__resource-name">${ability.name}</span>
-					<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(${uses.recharge === "short" ? "Short" : "Long"})</span>
-					<div class="charsheet__resource-uses ml-auto">
-						<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__ability-use-btn" ${!canUse ? "disabled" : ""}>Use</button>
-						<span class="charsheet__resource-current">${uses.current}</span>
-						<span class="charsheet__resource-max">/ ${uses.max}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-success ml-2 charsheet__ability-restore-btn" ${!canRestore ? "disabled" : ""}>+</button>
-					</div>
-				</div>
-			`});
-
-			row.querySelector(".charsheet__ability-use-btn").addEventListener("click", () => {
-				if (this._state.useCustomAbility(ability.id)) {
-					this._saveCurrentCharacter();
-					this._renderResources();
-					this._renderOverviewAbilities();
-					this._renderActiveStates();
-					if (this._features) this._features._renderResources();
-					if (this._customAbilities) this._customAbilities.render();
-					if (this._combat) this._combat.renderCombatActions();
-				}
-			});
-
-			row.querySelector(".charsheet__ability-restore-btn").addEventListener("click", () => {
-				if (this._state.restoreCustomAbilityUse(ability.id)) {
-					this._saveCurrentCharacter();
-					this._renderResources();
-					this._renderOverviewAbilities();
-					this._renderActiveStates();
-					if (this._features) this._features._renderResources();
-					if (this._customAbilities) this._customAbilities.render();
-					if (this._combat) this._combat.renderCombatActions();
-				}
-			});
-
-			container.append(row);
-		});
 	}
 
 	_renderOverviewMetamagic () {
@@ -5517,57 +5597,21 @@ class CharacterSheetPage {
 
 		container.innerHTML = "";
 
-		// Get limited-use custom abilities
+		// Bug 3: Class-granted resources (Channel Divinity, Rage, Ki, etc.) are
+		// no longer rendered here — they belong exclusively to the Resources
+		// section above. The Abilities section is reserved for the user's
+		// custom-defined activatable features.
 		const customAbilities = this._state.getCustomAbilities?.() || [];
 		const limitedAbilities = customAbilities.filter(a => a.mode === "limited");
 
-		// Get class resources (Channel Divinity, Rage, etc.)
-		// Exclude Focus/Ki Points — they already have a dedicated display in the resource bar
-		const META_RESOURCE_NAMES = new Set(["Focus Points", "Ki Points"]);
-		const resources = this._state.getResources?.() || [];
-		const classResources = resources.filter(r => r.max > 0 && !META_RESOURCE_NAMES.has(r.name));
-
-		if (!limitedAbilities.length && !classResources.length) {
+		if (!limitedAbilities.length) {
 			container.innerHTML = `
 				<div class="charsheet__empty-state">
 					<span class="charsheet__empty-icon">💫</span>
-					<span class="charsheet__empty-text">No useable abilities</span>
+					<span class="charsheet__empty-text">No custom abilities. Create one in the Features tab.</span>
 				</div>
 			`;
 			return;
-		}
-
-		// Render class resources first
-		for (const resource of classResources) {
-			const rechargeIcon = resource.recharge === "short" ? "☀️" : "🌙";
-			const rechargeLabel = resource.recharge === "short" ? "short rest" : "long rest";
-			const canUse = resource.current > 0;
-
-			const row = e_({outer: `
-				<div class="charsheet__ability-row charsheet__ability-row--resource" data-resource-name="${resource.name.replace(/"/g, "&quot;")}">
-					<div class="charsheet__ability-info">
-						<span class="charsheet__ability-icon" title="Class Resource">⚡</span>
-						<span class="charsheet__ability-name">${resource.name}</span>
-					</div>
-					<div class="charsheet__ability-controls">
-						<span class="charsheet__ability-uses">${resource.current}/${resource.max}</span>
-						<span class="charsheet__ability-recharge" title="${rechargeLabel}">${rechargeIcon}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__ability-use-btn"
-							${!canUse ? "disabled" : ""}>Use</button>
-					</div>
-				</div>
-			`});
-
-			row.querySelector(".charsheet__ability-use-btn").addEventListener("click", (e) => {
-				e.stopPropagation();
-				this._useOverviewResource(resource);
-			});
-
-			// Star (favourite) toggle
-			const star = this._renderFavouriteStar("resource", resource);
-			if (star) row.querySelector(".charsheet__ability-controls").append(star);
-
-			container.append(row);
 		}
 
 		// Render custom abilities
@@ -5604,8 +5648,8 @@ class CharacterSheetPage {
 					<div class="charsheet__ability-controls">
 						<span class="charsheet__ability-uses">${uses.current}/${uses.max}</span>
 						<span class="charsheet__ability-recharge" title="${uses.recharge} rest">${rechargeIcon}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__ability-use-btn" 
-							${!canUse ? "disabled" : ""}>Use</button>
+						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__ability-use-btn"${!canUse ? " disabled" : ""}>Use</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__ability-edit-btn" title="Edit ability (icon, name, uses, effects)">✏️</button>
 					</div>
 				</div>
 			`});
@@ -5613,6 +5657,7 @@ class CharacterSheetPage {
 			// Click on row to show modal
 			row.addEventListener("click", (e) => {
 				if (e.target.classList.contains("charsheet__ability-use-btn")) return;
+				if (e.target.classList.contains("charsheet__ability-edit-btn")) return;
 				this._showAbilityDetailModal(ability);
 			});
 
@@ -5620,6 +5665,17 @@ class CharacterSheetPage {
 			row.querySelector(".charsheet__ability-use-btn").addEventListener("click", (e) => {
 				e.stopPropagation();
 				this._useOverviewAbility(ability);
+			});
+
+			// Edit button — opens the existing custom-ability editor modal
+			// (icon picker, name, uses, effects, etc.).
+			row.querySelector(".charsheet__ability-edit-btn").addEventListener("click", (e) => {
+				e.stopPropagation();
+				if (this._customAbilities?._showAbilityModal) {
+					this._customAbilities._showAbilityModal(ability.id);
+				} else {
+					JqueryUtil.doToast({type: "info", content: "Open the Features tab to edit custom abilities."});
+				}
 			});
 
 			// Star (favourite) toggle
@@ -5902,6 +5958,11 @@ class CharacterSheetPage {
 			// Re-render the host panel so the star reflects new state.
 			this._renderResources();
 			this._renderOverviewAbilities();
+			// Favourite-spell overview lives in the Overview tab — refresh when
+			// a spell favourite toggles so the pinned-spell list updates immediately.
+			if (type === "spell" && typeof this._renderQuickSpells === "function") {
+				this._renderQuickSpells();
+			}
 			if (typeof opts.onToggle === "function") {
 				// eslint-disable-next-line no-console
 				try { opts.onToggle(result); } catch (err) { console.error("[CharSheet] favourite-star onToggle error:", err); }
@@ -6863,23 +6924,35 @@ class CharacterSheetPage {
 			// Class features - link to class feature page
 			if (feature.featureType === "Class" && feature.className) {
 				const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
-				const classSource = feature.classSource || feature.source || storedClass?.source || Parser.SRC_XPHB;
+
+				// Resolve canonical (classSource, featureSource, subclassSource) using both
+				// classFeatures (for class-level features) AND subclassFeatures (for subclass
+				// features like Chronal Shift on TGTT-Wizard/Chronurgy — Phase 5.5a).
+				const {classSource: actualClassSource, featureSource: actualFeatureSource, subclassSource: canonicalSubclassSource} =
+					CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources(feature, storedClass, {
+						classFeatures: this._classFeatures || [],
+						subclassFeatures: this._subclassFeatures || [],
+					});
 
 				const hashInput = {
 					name: feature.name,
 					className: feature.className,
-					classSource: classSource,
+					classSource: actualClassSource,
 					level: feature.level || 1,
-					source: feature.source || Parser.SRC_XPHB,
+					source: actualFeatureSource || Parser.SRC_XPHB,
 				};
 				if (feature.subclassName || feature.isSubclassFeature) {
 					hashInput.subclassShortName = feature.subclassShortName || feature.subclassName;
-					hashInput.subclassSource = feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
+					hashInput.subclassSource = canonicalSubclassSource || feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
 				}
 				const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
-				const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: feature.className, source: classSource});
+				const normalizedClass = CharacterSheetClassUtils.normalizePgClassesHashInput(
+					{name: feature.className, source: actualClassSource},
+					{allClasses: this._classes || [], allSubclasses: this._subclasses || []},
+				);
+				const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalizedClass.name, source: normalizedClass.source});
 				const classHref = `${UrlUtil.PG_CLASSES}#${classHash}`;
-				return this.getHoverLink(UrlUtil.PG_CLASS_SUBCLASS_FEATURES, feature.name, feature.source || Parser.SRC_XPHB, hash, null, classHref);
+				return this.getHoverLink(UrlUtil.PG_CLASS_SUBCLASS_FEATURES, feature.name, actualFeatureSource || Parser.SRC_XPHB, hash, null, classHref);
 			}
 			// Optional features (invocations, combat methods, etc.)
 			if (feature.featureType === "Optional Feature" || feature.optionalfeatureType) {
@@ -7391,14 +7464,6 @@ class CharacterSheetPage {
 			return;
 		}
 
-		// Get cantrips and prepared/known spells
-		const cantrips = spells.filter(s => s.level === 0);
-		const preparedSpells = spells.filter(s => s.level > 0 && s.prepared);
-
-		// Show cantrips first (max 3), then prepared spells (max 4)
-		const displayCantrips = cantrips.slice(0, 3);
-		const displayPrepared = preparedSpells.slice(0, 4);
-
 		// Show spell stats and slots summary — Gambler uses dice formula
 		const calcs = this._state.getFeatureCalculations?.();
 		const isGambler = calcs?.hasGamblerSpellcasting;
@@ -7471,9 +7536,34 @@ class CharacterSheetPage {
 			}
 		};
 
-		if (displayCantrips.length) {
+		// Resolve favourited spells against current state. Orphans (spell removed
+		// after favouriting) are filtered out — cleanup is handled by the
+		// favourites cleanup button on the main Favourites section.
+		const favSpells = this._state.getFavorites()
+			.filter(f => f.type === "spell")
+			.map(f => this._state._resolveFavorite(f))
+			.filter(r => r.found)
+			.map(r => r.entity);
+
+		if (!favSpells.length) {
+			container.insertAdjacentHTML("beforeend", `
+				<div class="charsheet__empty-state py-2">
+					<span class="charsheet__empty-icon">🔮</span>
+					<span class="charsheet__empty-text">No favourite spells. Star spells in the Spells tab to pin them here.</span>
+				</div>
+			`);
+			return;
+		}
+
+		// Sort: cantrips first, then by level, then by name
+		favSpells.sort((a, b) => (a.level - b.level) || a.name.localeCompare(b.name));
+
+		const favCantrips = favSpells.filter(s => s.level === 0);
+		const favLeveled = favSpells.filter(s => s.level > 0);
+
+		if (favCantrips.length) {
 			container.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1"><strong>Cantrips</strong></div>`);
-			displayCantrips.forEach(spell => {
+			favCantrips.forEach(spell => {
 				const castTime = spell.castingTime || "1 action";
 				const spellEl = e_({outer: `
 					<div class="charsheet__quick-spell">
@@ -7493,9 +7583,9 @@ class CharacterSheetPage {
 			});
 		}
 
-		if (displayPrepared.length) {
-			container.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1 mt-2"><strong>Prepared Spells</strong></div>`);
-			displayPrepared.forEach(spell => {
+		if (favLeveled.length) {
+			container.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1 mt-2"><strong>Spells</strong></div>`);
+			favLeveled.forEach(spell => {
 				const levelText = spell.level === 1 ? "1st" : spell.level === 2 ? "2nd" : spell.level === 3 ? "3rd" : `${spell.level}th`;
 				const castTime = spell.castingTime || "1 action";
 				const spellEl = e_({outer: `
@@ -7514,12 +7604,6 @@ class CharacterSheetPage {
 				});
 				container.append(spellEl);
 			});
-		}
-
-		const totalCantrips = cantrips.length;
-		const totalPrepared = preparedSpells.length;
-		if (totalCantrips > 3 || totalPrepared > 4) {
-			container.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-small text-center mt-2">More spells in Spells tab</div>`);
 		}
 	}
 	// #endregion
@@ -9884,6 +9968,39 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Format an "intrinsic" character bonus alongside the effective bonus
+	 * actually used at roll time. When the two match (no situational mods
+	 * active), returns just the canonical number. When they differ, returns
+	 * `canonical (effective)` with the effective value in a smaller, colored
+	 * span — green when effective > canonical, red when effective < canonical.
+	 *
+	 * `kind` controls formatting:
+	 *   - `"mod"` (default): always emit `+N` / `-N` (e.g. saves, skills).
+	 *   - `"plain"`: emit raw numbers (e.g. spell DC, where no sign prefix is shown).
+	 *
+	 * Both values are coerced to integers before comparison so callers can
+	 * pass any numeric type. Returns a plain HTML string — caller must use
+	 * `.innerHTML` (not `.textContent`) when inserting.
+	 *
+	 * @param {number} canonical
+	 * @param {number} effective
+	 * @param {{kind?: "mod"|"plain"}} [opts]
+	 * @returns {string}
+	 */
+	_formatModWithEffective (canonical, effective, opts = {}) {
+		const kind = opts.kind || "mod";
+		const can = Math.trunc(canonical);
+		const eff = Math.trunc(effective);
+		const fmt = kind === "plain" ? (v) => `${v}` : (v) => (v >= 0 ? `+${v}` : `${v}`);
+		const canonicalStr = fmt(can);
+		if (can === eff) return canonicalStr;
+		const dirClass = eff > can ? "charsheet__mod-effective--positive" : "charsheet__mod-effective--negative";
+		const effectiveStr = fmt(eff);
+		const title = (opts.titleEffective || "Effective bonus (with active mods)").replace(/"/g, "&quot;");
+		return `${canonicalStr}<span class="charsheet__mod-effective ${dirClass}" title="${title}">(${effectiveStr})</span>`;
+	}
+
+	/**
 	 * Render AC breakdown popup content
 	 * @param {object} breakdown - Object from getAcBreakdown() with total and components
 	 */
@@ -10268,9 +10385,13 @@ class CharacterSheetPage {
 		try {
 			const state = this.getState();
 			const modStats = state?.getModifiedSpellStats?.(spellData);
+			// Read rarity/legality subschools from the character-spell when present
+			// (allows future override), otherwise from the canonical spell data —
+			// which is where the picker hover originates (Bug 7 Phase 5 fix).
+			const subschools = characterSpell?.subschools || spellData?.subschools || [];
 			const hasCharsheetMods = modStats?.range?.changed || modStats?.duration?.changed
 				|| modStats?.notes?.length
-				|| (characterSpell?.subschools || []).some(s => s.startsWith("rarity:") || s.startsWith("legality:"));
+				|| subschools.some(s => s.startsWith("rarity:") || s.startsWith("legality:"));
 
 			// If no charsheet-specific mods, use the standard hover (prettiest by default)
 			if (!hasCharsheetMods) return this.getHoverLink(UrlUtil.PG_SPELLS, name, source);
@@ -10297,6 +10418,26 @@ class CharacterSheetPage {
 			console.error("[CharSheet] getSpellHoverLink error:", e);
 			return this.getHoverLink(UrlUtil.PG_SPELLS, name, source);
 		}
+	}
+
+	/**
+	 * Build a (name, source, spellData) => html closure that routes through
+	 * {@link getSpellHoverLink}, automatically resolving the matching characterSpell
+	 * (with subschools for rarity/legality) from current state when present.
+	 * Pass the returned function to spell pickers as their `getSpellHoverLink` option
+	 * so picker hovers match the rest of the sheet (Bug 7).
+	 * @returns {(name: string, source: string, spellData?: object|null) => string}
+	 */
+	buildSpellHoverLinkFn () {
+		return (name, source, spellData) => {
+			try {
+				const characterSpell = this.getState?.()?.getSpells?.()
+					.find(s => s.name === name && (s.source || Parser.SRC_XPHB) === (source || Parser.SRC_XPHB));
+				return this.getSpellHoverLink(name, source, spellData || null, characterSpell || null);
+			} catch (e) {
+				return this.getHoverLink(UrlUtil.PG_SPELLS, name, source);
+			}
+		};
 	}
 
 	/**
@@ -10360,10 +10501,13 @@ class CharacterSheetPage {
 			htmlPtDuration += ` <span style="color: #10b981; font-weight: 600;">(${modStats.duration.modified})</span>`;
 		}
 
-		// Thelemar rarity/legality badges
+		// Thelemar rarity/legality badges — fall back to spellData.subschools when
+		// characterSpell isn't available yet (e.g. in pickers, before the spell
+		// is added to the character). Bug 7 Phase 5 fix.
 		let htmlPtRarity = "";
-		const rarity = (characterSpell?.subschools || []).find(s => s.startsWith("rarity:"))?.replace("rarity:", "");
-		const legality = (characterSpell?.subschools || []).find(s => s.startsWith("legality:"))?.replace("legality:", "");
+		const subschools = characterSpell?.subschools || spellData?.subschools || [];
+		const rarity = subschools.find(s => s.startsWith("rarity:"))?.replace("rarity:", "");
+		const legality = subschools.find(s => s.startsWith("legality:"))?.replace("legality:", "");
 		if (rarity || legality) {
 			const badges = [];
 			if (rarity) {
@@ -10458,28 +10602,52 @@ class CharacterSheetPage {
 			return link;
 		} catch (e) {
 			// eslint-disable-next-line no-console
-			console.error("[CharSheet] getHoverLink error:", e);
+			console.warn("[CharSheet] getHoverLink error:", e);
 			return displayName || name;
 		}
 	}
 
 	/**
 	 * Create a hoverable link for a subclass.
-	 * @param {object} subclass - Subclass object with name, source, className, classSource
+	 *
+	 * The character only stores `cls.subclass = {name, source}` — the `source`
+	 * here is the SUBCLASS source (e.g. "EGW" for Chronurgy Magic). The
+	 * PG_CLASSES hover hash and lookup both want the *class* source
+	 * (`subclass.classSource`, e.g. "PHB" for the Wizard that Chronurgy
+	 * lives on), not the subclass source. The optional `allSubclasses`
+	 * argument lets callers thread loaded class data so we can resolve the
+	 * canonical class source; without it we conservatively fall back to
+	 * `subclass.classSource || subclass.source`, preserving prior behaviour.
+	 *
+	 * @param {object} subclass - Subclass object with name/source and optionally className/classSource
+	 * @param {Array} [allSubclasses] - Loaded subclass data (used to look up missing classSource)
+	 * @param {object} [storedClass] - Stored class entry (fallback for className/classSource)
 	 * @returns {string} HTML string for the hover link
 	 */
-	static getSubclassHoverLink (subclass) {
+	static getSubclassHoverLink (subclass, allSubclasses = null, storedClass = null) {
 		try {
-			const hash = `${UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: subclass.className, source: subclass.classSource})}${HASH_PART_SEP}${UrlUtil.getClassesPageStatePart({subclass})}`;
+			const resolved = CharacterSheetClassUtils.resolveSubclassHoverSources(subclass, allSubclasses || [], storedClass);
+			const subclassForHash = {
+				name: resolved.name,
+				source: resolved.source,
+				className: resolved.className,
+				classSource: resolved.classSource,
+				shortName: resolved.shortName,
+			};
+			const normalizedClass = CharacterSheetClassUtils.normalizePgClassesHashInput(
+				{name: resolved.className, source: resolved.classSource},
+				{allClasses: [], allSubclasses: allSubclasses || []},
+			);
+			const hash = `${UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalizedClass.name, source: normalizedClass.source})}${HASH_PART_SEP}${UrlUtil.getClassesPageStatePart({subclass: subclassForHash})}`;
 			const hoverAttrs = Renderer.hover.getHoverElementAttributes({
 				page: UrlUtil.PG_CLASSES,
-				source: subclass.source,
+				source: normalizedClass.source,
 				hash,
 			});
-			return `<a href="${UrlUtil.PG_CLASSES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${subclass.name}</a>`;
+			return `<a href="${UrlUtil.PG_CLASSES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${resolved.name}</a>`;
 		} catch (e) {
 			// eslint-disable-next-line no-console
-			console.error("[CharSheet] getSubclassHoverLink error:", e);
+			console.warn("[CharSheet] getSubclassHoverLink error:", e);
 			return subclass.name; // Fallback to just the name
 		}
 	}
@@ -11224,12 +11392,73 @@ class CharacterSheetPage {
 	/**
 	 * Get spell data with source filtering, priority filtering, and Thelemar rarity/legality tags applied.
 	 * Single entry point for all spell picker consumers.
+	 *
+	 * Bug 7.1 (Phase 8): The source filter alone hides subclass-granted spells whose
+	 * source is outside the user's allowed list (e.g. a TGTT-only character can't see
+	 * Guidance/PHB granted by Divine Soul, or Gift of Alacrity/EGW granted by
+	 * Chronurgy). Augment the filtered pool with any spell from the FULL pool whose
+	 * presence is explicitly granted by one of the character's subclasses — either
+	 * via `additionalSpells` blocks (`subclassAdditionalSpellsIncludeSpell`) or via
+	 * inherited class lists (`additionalClassNames`, e.g. Cleric for Divine Soul).
+	 * This preserves source filtering for the BASE spell catalogue while honouring
+	 * explicit subclass grants regardless of source.
+	 *
 	 * @returns {Array} Fully prepared spell array
 	 */
 	getFilteredSpellData () {
-		const filtered = this.filterByAllowedSources(this._spellsData || []);
-		if (this._spells) return this._spells.applyThelemarSpellRarity(filtered);
-		return filtered;
+		const all = this._spellsData || [];
+		const filtered = this.filterByAllowedSources(all);
+		const augmented = this._augmentSpellPoolWithSubclassGrants(filtered, all);
+		if (this._spells) return this._spells.applyThelemarSpellRarity(augmented);
+		return augmented;
+	}
+
+	/**
+	 * Add back any full-pool spells whose presence is explicitly granted by one of
+	 * the character's subclasses but were dropped by the source filter. See
+	 * {@link getFilteredSpellData} for context (Bug 7.1 / Phase 8).
+	 * @param {Array} filtered - Source-filtered pool (pass-through if no augmentation needed)
+	 * @param {Array} all - Full unfiltered pool
+	 * @returns {Array}
+	 */
+	_augmentSpellPoolWithSubclassGrants (filtered, all) {
+		if (!Array.isArray(all) || !all.length) return filtered;
+		// Skip the walk entirely when no source filter is active — `filtered === all`.
+		if (filtered === all || filtered.length === all.length) return filtered;
+
+		let classes;
+		try { classes = this._state?.getClasses?.() || []; } catch (e) { classes = []; }
+		if (!classes.length) return filtered;
+
+		// Collect (subclass, subclassChoice, additionalClassNames) tuples for every class.
+		const grants = [];
+		for (const cls of classes) {
+			if (!cls?.subclass) continue;
+			const classData = (this._classes || []).find(c => c.name === cls.name && c.source === cls.source);
+			const subclass = CharacterSheetClassUtils.resolveFullSubclass(cls.subclass, classData);
+			if (!subclass) continue;
+			const subclassChoice = cls.subclassChoice || this._state.getSubclassChoice?.(cls.name) || null;
+			const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+				className: cls.name,
+				subclass,
+				subclassChoice,
+			}) || [];
+			grants.push({className: cls.name, subclass, subclassChoice, additionalClassNames});
+		}
+		if (!grants.length) return filtered;
+
+		const filteredSet = new Set(filtered);
+		const augmented = filtered.slice();
+		for (const spell of all) {
+			if (filteredSet.has(spell)) continue;
+			const isGranted = grants.some(({className, subclass, subclassChoice, additionalClassNames}) => {
+				if (subclass && CharacterSheetClassUtils.subclassAdditionalSpellsIncludeSpell(spell, subclass, {subclassChoice})) return true;
+				if (additionalClassNames.length && additionalClassNames.some(n => CharacterSheetClassUtils.spellIsForClass(spell, n))) return true;
+				return false;
+			});
+			if (isGranted) augmented.push(spell);
+		}
+		return augmented;
 	}
 
 	/**
