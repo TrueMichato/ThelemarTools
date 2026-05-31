@@ -6501,6 +6501,10 @@ class CharacterSheetSpells {
 				JqueryUtil.doToast({type: "danger", content: result.error || "Could not deduct cost."});
 				return;
 			}
+			// Refresh currency widgets so the new gold total appears immediately.
+			// Mirrors charactersheet-upgrades.js post-deductGold pattern.
+			this._page._renderCurrency?.();
+			this._page._inventory?.render?.();
 		}
 
 		this._state.addScribingSpell(spell);
@@ -6525,6 +6529,9 @@ class CharacterSheetSpells {
 	 * "Pay" is disabled when the character can't afford the cost — the modal
 	 * still offers "Skip cost" and "Cancel" so the player isn't trapped.
 	 *
+	 * Phase 7.3a: Replaced `InputUiUtil.pGetUserEnum` (dropdown) with explicit
+	 * buttons so players can pick the action with a single click.
+	 *
 	 * Returns one of `"pay"`, `"skip"`, or `"cancel"`. Resolves to `"cancel"`
 	 * on dismissal.
 	 *
@@ -6537,34 +6544,63 @@ class CharacterSheetSpells {
 		const totalGp = this._state.getTotalGold();
 		const canAfford = totalGp >= cost;
 
-		const labelPay = canAfford ? `Pay ${cost} gp` : `Pay ${cost} gp (insufficient)`;
-		const values = canAfford
-			? ["pay", "skip", "cancel"]
-			: ["skip", "cancel"];
-		const labels = canAfford
-			? [labelPay, "Skip cost (scribe anyway)", "Cancel"]
-			: ["Skip cost (scribe anyway)", "Cancel"];
+		let result = "cancel";
+		let resolveOuter;
+		const pResult = new Promise(resolve => { resolveOuter = resolve; });
 
-		const html = `
-			<div>
-				<p>Scribing <strong>${spell.name}</strong> (level ${spell.level}) into your spellbook.</p>
-				<ul class="mb-2">
-					<li><strong>Cost:</strong> ${cost} gp (50 gp × ${spell.level})</li>
-					<li><strong>Time:</strong> ${hours} hours (2 hours × ${spell.level})</li>
-				</ul>
-				<p class="ve-muted ve-small">You have <strong>${totalGp.toFixed(2)} gp</strong> available${canAfford ? "" : ` — not enough to pay`}.</p>
-			</div>
-		`;
-
-		const choice = await InputUiUtil.pGetUserEnum({
-			title: "Scribe Spell",
-			htmlDescription: html,
-			values,
-			fnDisplay: (v, i) => labels[i],
-			isResolveItem: true,
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "📝 Scribe Spell",
+			isMinHeight0: true,
+			cbClose: () => resolveOuter(result),
 		});
-		if (choice == null) return "cancel";
-		return choice;
+
+		modalInner.appendChild(e_({tag: "div",
+			html: `
+			<p>Scribing <strong>${spell.name}</strong> (level ${spell.level}) into your spellbook.</p>
+			<ul class="mb-2">
+				<li><strong>Cost:</strong> ${cost} gp (50 gp × ${spell.level})</li>
+				<li><strong>Time:</strong> ${hours} hours (2 hours × ${spell.level})</li>
+			</ul>
+			<p class="ve-muted ve-small mb-3">You have <strong>${totalGp.toFixed(2)} gp</strong> available${canAfford ? "" : ` — not enough to pay`}.</p>
+		`}));
+
+		const btnRow = e_({
+			tag: "div",
+			style: "display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end;",
+		});
+
+		const btnPay = e_({
+			tag: "button",
+			clazz: `ve-btn ve-btn-primary${canAfford ? "" : " disabled"}`,
+			text: canAfford ? `💰 Pay ${cost} gp & Scribe` : `Pay ${cost} gp (insufficient)`,
+		});
+		if (canAfford) {
+			btnPay.addEventListener("click", () => { result = "pay"; doClose(true); });
+		} else {
+			btnPay.setAttribute("disabled", "disabled");
+			btnPay.setAttribute("title", `Need ${(cost - totalGp).toFixed(2)} more gp`);
+		}
+
+		const btnSkip = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-default",
+			text: "Skip cost (scribe anyway)",
+		});
+		btnSkip.addEventListener("click", () => { result = "skip"; doClose(true); });
+
+		const btnCancel = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-default",
+			text: "Cancel",
+		});
+		btnCancel.addEventListener("click", () => { result = "cancel"; doClose(false); });
+
+		btnRow.appendChild(btnPay);
+		btnRow.appendChild(btnSkip);
+		btnRow.appendChild(btnCancel);
+		modalInner.appendChild(btnRow);
+
+		return pResult;
 	}
 
 	/**

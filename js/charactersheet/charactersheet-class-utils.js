@@ -486,13 +486,45 @@ class CharacterSheetClassUtils {
 			(sc?.name || "").toLowerCase() === name
 			&& (!storedSubclass.source || sc?.source === storedSubclass.source),
 		);
-		if (exactMatch) return exactMatch;
+		let found = exactMatch;
+		if (!found) {
+			// Name-only fallback (legacy saves without source, or source-renamed brews).
+			found = classData.subclasses.find(sc => (sc?.name || "").toLowerCase() === name);
+		}
+		if (!found) return storedSubclass;
 
-		// Name-only fallback (legacy saves without source, or source-renamed brews).
-		const nameOnly = classData.subclasses.find(sc =>
-			(sc?.name || "").toLowerCase() === name,
-		);
-		return nameOnly || storedSubclass;
+		// Phase 7.1 defensive lazy merge:
+		//   If the found subclass STILL has _copy and is missing additionalSpells /
+		//   subclassFeatures, the eager merge in _pLoadData missed it (race condition,
+		//   silent failure, missing parent at merge time, etc.). Kick off a lazy
+		//   merge in place — pMergeCopy mutates `found` via copyApplier.getCopy.
+		//   The merge resolves on the next microtask, so this call still returns the
+		//   unmerged object once; the NEXT picker render (or any re-call) gets the
+		//   merged version. A single console.warn surfaces the recovery for debugging.
+		if (found._copy
+			&& found.additionalSpells == null
+			&& found.subclassFeatures == null
+			&& typeof globalThis !== "undefined"
+			&& globalThis._charSheetSubclassMergePool
+			&& typeof DataUtil !== "undefined"
+			&& DataUtil.subclass?.pMergeCopy) {
+			try {
+				DataUtil.subclass.pMergeCopy(globalThis._charSheetSubclassMergePool, found, {})
+					.then(() => {
+						// eslint-disable-next-line no-console
+						console.warn(`[CharSheet][Phase7] Lazy-merged subclass "${found.name || found._copy?.name}|${found.source}" on demand (eager merge missed it).`);
+					})
+					.catch(e => {
+						// eslint-disable-next-line no-console
+						console.warn(`[CharSheet][Phase7] Lazy merge failed for "${found.name || found._copy?.name}|${found.source}":`, e?.message || e);
+					});
+			} catch (e) {
+				// eslint-disable-next-line no-console
+				console.warn(`[CharSheet][Phase7] Lazy merge threw for "${found.name || found._copy?.name}|${found.source}":`, e?.message || e);
+			}
+		}
+
+		return found;
 	}
 
 	// ========================================================================
