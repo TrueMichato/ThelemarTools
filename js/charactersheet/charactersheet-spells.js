@@ -1603,7 +1603,13 @@ class CharacterSheetSpells {
 						subschoolStr = ` • 🏷️ ${spell.subschools.map(formatSubschool).join(", ")}`;
 					}
 
-					const spellLink = this._page?.getHoverLink ? this._page.getHoverLink(UrlUtil.PG_SPELLS, spell.name, spell.source) : spell.name;
+					// Bug 7 Phase 5: use getSpellHoverLink so rarity/legality subschools
+					// (e.g. TGTT-tagged spells) surface in the picker hover. Falls back
+					// to the standard hover for spells with no charsheet-specific
+					// metadata, so it's safe for every spell.
+					const spellLink = this._page?.getSpellHoverLink
+						? this._page.getSpellHoverLink(spell.name, spell.source, spell, null)
+						: (this._page?.getHoverLink ? this._page.getHoverLink(UrlUtil.PG_SPELLS, spell.name, spell.source) : spell.name);
 
 					const item = e_({outer: `
 						<div class="charsheet__modal-list-item ${isKnown ? "ve-muted" : ""}">
@@ -5466,10 +5472,19 @@ class CharacterSheetSpells {
 	_renderInnateSpellItem (spell) {
 		const spellId = spell.id;
 
-		// Create hover link for spell name
+		// Bug 7 Phase 5: prefer getSpellHoverLink so innate-spell rows on the
+		// sheet show rarity/legality badges (e.g. TGTT-tagged innates).
+		const spellData = this._allSpells?.find(s => s.name === spell.name && s.source === spell.source);
 		let spellLink = spell.name;
 		try {
-			if (this._page?.getHoverLink) {
+			if (this._page?.getSpellHoverLink) {
+				spellLink = this._page.getSpellHoverLink(
+					spell.name,
+					spell.source || Parser.SRC_XPHB,
+					spellData || null,
+					spell,
+				);
+			} else if (this._page?.getHoverLink) {
 				spellLink = this._page.getHoverLink(
 					UrlUtil.PG_SPELLS,
 					spell.name,
@@ -6569,8 +6584,12 @@ class CharacterSheetSpells {
 							</div>
 						`});
 						item.querySelector("button").addEventListener("click", () => {
-							doClose();
+							// Bug 5.4 Phase 5: resolve BEFORE doClose so cbClose's
+							// resolve(null) becomes a no-op. doClose() invokes the
+							// modal's cbClose synchronously (inside an async function),
+							// which races and wins if we call doClose first.
 							resolve(spell);
+							doClose();
 						});
 						list.append(item);
 					});
@@ -6580,7 +6599,7 @@ class CharacterSheetSpells {
 				renderList();
 
 				const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default mt-2">Cancel</button>`});
-				cancelBtn.addEventListener("click", () => { doClose(); resolve(null); });
+				cancelBtn.addEventListener("click", () => { resolve(null); doClose(); });
 				modalInner.append(cancelBtn);
 			})();
 		});
