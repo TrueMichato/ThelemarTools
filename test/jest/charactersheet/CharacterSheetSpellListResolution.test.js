@@ -204,8 +204,14 @@ describe("CharacterSheetClassUtils.spellIsAvailableForClass", () => {
 			})).toBe(true);
 		});
 
-		it("does NOT falsely surface Divine Soul cleric spells when no affinity is chosen", () => {
-			// Without an affinity, no affinity block is active → no cleric spells leak in.
+		it("surfaces Divine Soul cleric cantrips even without an affinity chosen (Divine Magic is unconditional)", () => {
+			// Bug 5: Divine Magic grants access to the entire Cleric spell list
+			// at L1 — UNCONDITIONALLY. The affinity choice only adds one
+			// always-prepared 1st-level spell; it does not gate access to the
+			// Cleric list itself. Previously this returned false because
+			// `getAdditionalSpellListClasses` required `normalizeDivineSoulAffinity`
+			// before returning `["Cleric"]`, hiding Guidance / Sacred Flame /
+			// other cantrips in the picker.
 			const guidance = spell({
 				name: "Guidance",
 				source: "PHB",
@@ -216,7 +222,11 @@ describe("CharacterSheetClassUtils.spellIsAvailableForClass", () => {
 				className: "Sorcerer",
 				subclass: divineSoulSubclassFilterQuery,
 				// no subclassChoice
-			})).toBe(false);
+				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
+					className: "Sorcerer",
+					subclass: divineSoulSubclassFilterQuery,
+				}),
+			})).toBe(true);
 		});
 
 		it("filter-query strings are not poisoned into the literal name id-set", () => {
