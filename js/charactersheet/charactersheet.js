@@ -290,6 +290,28 @@ class CharacterSheetPage {
 		// and BEFORE _setUpStateFromData consumes the merged data.
 		await this._pResolveCopyInheritance();
 
+		// Phase 7.1 diagnostic + recovery hook:
+		//   1. Expose the merged subclass pool so `resolveFullSubclass` can run a
+		//      defensive lazy merge if a picker call site discovers a still-unmerged
+		//      subclass at runtime (i.e. eager merge above silently missed one).
+		//   2. Log a single console.warn naming any subclass that arrived with an
+		//      unresolved `_copy` after eager merge — this is the breadcrumb users
+		//      can copy back to us if Bug 1 ever resurfaces in the wild.
+		globalThis._charSheetSubclassMergePool = this._subclasses;
+		try {
+			const unresolved = (this._subclasses || []).filter(sc => sc?._copy);
+			if (unresolved.length) {
+				// eslint-disable-next-line no-console
+				console.warn(
+					`[CharSheet][Phase7] ${unresolved.length} subclass(es) still carry _copy after eager merge — picker filters that depend on additionalSpells may silently miss spells. Affected:`,
+					unresolved.map(sc => `${sc.name || sc._copy?.name}|${sc.source} (parent ${sc._copy?.name}|${sc._copy?.source})`),
+				);
+			}
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet][Phase7] subclass merge diagnostic threw:", e?.message || e);
+		}
+
 		// Build dialect→parent language lookup (e.g., "Aquan" → Primordial)
 		this._buildDialectParentMap();
 

@@ -3280,7 +3280,11 @@
 	cursor: pointer;
 	transition: all var(--cs-transition-normal, 0.2s ease);
 	position: relative;
-	overflow: hidden;
+	/* overflow visible so the canonical+effective mod pill can extend
+	   slightly past the cell without being clipped (Phase 7.2). The pseudo-
+	   element top accent uses position:absolute pinned to the inset; it
+	   doesn't need clipping. */
+	overflow: visible;
 }
 
 .charsheet__ability::before {
@@ -3327,9 +3331,11 @@
 	color: var(--cs-primary, var(--rgb-link));
 	background: rgba(99, 102, 241, 0.1);
 	border-radius: var(--cs-radius-full, 999px);
-	padding: 0.1rem 0.5rem;
+	padding: 0.1rem 0.4rem;
 	display: inline-block;
 	margin-top: 0.25rem;
+	max-width: 100%;
+	white-space: nowrap;
 }
 
 /* ========================================================================
@@ -3675,9 +3681,9 @@
  * of the canonical bonus.
  */
 .charsheet__mod-effective {
-	font-size: 0.82em;
+	font-size: 0.7em;
 	font-weight: 600;
-	margin-left: 0.2em;
+	margin-left: 0.15em;
 	opacity: 0.95;
 	white-space: nowrap;
 }
