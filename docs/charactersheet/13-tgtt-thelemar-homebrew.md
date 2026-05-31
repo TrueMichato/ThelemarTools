@@ -310,12 +310,13 @@ calculations.combatMethods = {
 | **Spellsword Technique** | `spellswordTechniqueAc` (+2 when holding melee weapon + arcane focus) |
 | **Whip Master** | `whipMasterReachBonus`, `whipMasterDisarmDc` |
 | **Dreamer** | Grants 1 Dreamwalker ability (DW:C or DW:S), tracked in `dreamwalkerAbilities` |
+| **Spell Scribing Adept** | Spells-tab "Scribe" picker respects max scribing level (½ Bard/Sorcerer/Warlock level, rounded up); scribe modal offers Pay / Skip cost / Cancel and deducts 50 gp × level from the character's currency on Pay (cross-denomination conversion). |
 
 ### ⚠️ Stub Only
 
 | Feat | Notes |
 |------|-------|
-| **Spell Scribing Adept** | Narrative feat - reduces scribing costs/time, no direct mechanical calculation |
+| _(none currently)_ | |
 
 ---
 
@@ -397,7 +398,6 @@ These features have minimal mechanical benefit and are tracked as stubs:
 |---------|--------|
 | **Bubbling Energy** (Dendulra) | Requires 4-hour rest interval tracking - narrative flavor |
 | **Shadow Affinity** (Descathi) | Requires persistent hide state tracking - mainly narrative |
-| **Spell Scribing Adept** | Cost reduction - no direct stat calculation |
 
 ### System-Level Requirements
 

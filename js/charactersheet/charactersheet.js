@@ -280,6 +280,16 @@ class CharacterSheetPage {
 		this._mergeBrewData(prereleaseData);
 		this._mergeBrewData(brewData);
 
+		// Resolve `_copy` for classes and subclasses that inherit from other entries.
+		// loadRawJSON deliberately skips `_copy` merging to keep classFeature/
+		// subclassFeature arrays separate. Without this step, TGTT (and other
+		// homebrew) subclasses that `_copy` from EGW/XGE/PHB arrive WITHOUT their
+		// parent's `additionalSpells`, `subclassFeatures`, etc. — breaking the
+		// spell picker for e.g. TGTT Chronurgy (Gift of Alacrity) and TGTT Divine
+		// Soul (Guidance). Run after _mergeBrewData so brew copies see brew parents,
+		// and BEFORE _setUpStateFromData consumes the merged data.
+		await this._pResolveCopyInheritance();
+
 		// Build dialect→parent language lookup (e.g., "Aquan" → Primordial)
 		this._buildDialectParentMap();
 
@@ -538,6 +548,50 @@ class CharacterSheetPage {
 		if (brewData.language?.length) {
 			this._languagesData = [...this._languagesData, ...MiscUtil.copyFast(brewData.language)];
 		}
+	}
+
+	/**
+	 * Resolve `_copy` inheritance for classes and subclasses.
+	 *
+	 * loadRawJSON intentionally leaves `_copy` blocks unresolved on classes and
+	 * subclasses so that classFeature/subclassFeature arrays remain accessible
+	 * as flat lists. For the character sheet, however, we need the merged
+	 * subclass shape (with `additionalSpells`, `subclassFeatures`, etc.) so the
+	 * spell picker, level-up modal, and other surfaces see the expected fields.
+	 *
+	 * `DataUtil.{class,subclass}.pMergeCopy` walks the supplied list, finds the
+	 * parent by hash, recurses on parents that themselves use `_copy`, and
+	 * mutates the entry in place via `copyApplier.getCopy`. Failures are
+	 * silently skipped (no `isErrorOnMissing`) so a single misconfigured
+	 * homebrew copy does not break loading.
+	 */
+	async _pResolveCopyInheritance () {
+		const tasks = [];
+		if (this._subclasses?.length) {
+			for (const sc of this._subclasses) {
+				if (!sc._copy) continue;
+				tasks.push(
+					DataUtil.subclass.pMergeCopy(this._subclasses, sc, {})
+						.catch(e => {
+							// eslint-disable-next-line no-console
+							console.warn(`[CharSheet] Failed to resolve _copy on subclass "${sc.name || sc._copy?.name}" (${sc.source}):`, e?.message || e);
+						}),
+				);
+			}
+		}
+		if (this._classes?.length) {
+			for (const cls of this._classes) {
+				if (!cls._copy) continue;
+				tasks.push(
+					DataUtil.class.pMergeCopy(this._classes, cls, {})
+						.catch(e => {
+							// eslint-disable-next-line no-console
+							console.warn(`[CharSheet] Failed to resolve _copy on class "${cls.name || cls._copy?.name}" (${cls.source}):`, e?.message || e);
+						}),
+				);
+			}
+		}
+		if (tasks.length) await Promise.all(tasks);
 	}
 
 	/**
@@ -2741,9 +2795,16 @@ class CharacterSheetPage {
 	_renderAbilityScores () {
 		Parser.ABIL_ABVS.forEach(abl => {
 			const score = this._state.getAbilityScore(abl);
-			const mod = this._state.getAbilityMod(abl);
+			const breakdown = this._state.getAbilityCheckBreakdown(abl);
+			const canonical = breakdown.canonical ?? breakdown.total;
+			const effective = breakdown.total;
 			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-score`))).textContent = score;
-			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-mod`))).textContent = mod >= 0 ? `+${mod}` : mod;
+			const modCell = /** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-mod`));
+			modCell.innerHTML = this._formatModWithEffective(canonical, effective);
+			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
+			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
+			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
+			modCell.title = tooltipLines.join("\n");
 		});
 
 		// Update prominent passive scores display

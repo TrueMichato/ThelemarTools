@@ -6935,8 +6935,12 @@ class CharacterSheetState {
 		const stanceBonus = this._getStanceSaveBonus(ability);
 		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
 
-		// Note: exhaustion is intentionally NOT included in the save breakdown.
-		// Exhaustion only affects rolls, not the displayed bonus (see getSaveMod).
+		// Exhaustion: subtract from the EFFECTIVE total only. Save rolls subtract
+		// `_getExhaustionD20Penalty` at roll time (via _getExhaustionPenalty in
+		// charactersheet.js), so showing it in the effective breakdown matches
+		// what the player will actually roll. Canonical stays pure ability+prof.
+		const exhaustionPenalty = this._getExhaustionD20Penalty();
+		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
 		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
@@ -7021,8 +7025,9 @@ class CharacterSheetState {
 			if (stateBonus !== 0) loreComponents.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
 			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
 			if (stanceBonus !== 0) loreComponents.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
-			// Note: exhaustion is intentionally NOT included in skill breakdowns.
-			// Exhaustion only affects rolls, not the displayed bonus.
+			// Exhaustion: subtract from EFFECTIVE only (lore skills are still d20 rolls).
+			const loreExhaustion = this._getExhaustionD20Penalty();
+			if (loreExhaustion !== 0) loreComponents.push({type: "penalty", name: "Exhaustion", value: -loreExhaustion, icon: "😫", isCanonical: false});
 			const loreTotal = loreComponents.reduce((sum, comp) => sum + comp.value, 0);
 			const loreCanonical = loreComponents.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
 			return {total: loreTotal, canonical: loreCanonical, components: loreComponents, ability: null};
@@ -7091,8 +7096,11 @@ class CharacterSheetState {
 		const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
 		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
 
-		// Note: exhaustion is intentionally NOT included in skill breakdowns.
-		// Exhaustion only affects rolls, not the displayed bonus.
+		// Exhaustion: subtract from EFFECTIVE only. Skill rolls subtract the
+		// d20 penalty at roll time, so showing it here keeps the effective
+		// display in sync with what the player actually rolls.
+		const skillExhaustion = this._getExhaustionD20Penalty();
+		if (skillExhaustion !== 0) components.push({type: "penalty", name: "Exhaustion", value: -skillExhaustion, icon: "😫", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
 		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
@@ -7171,6 +7179,44 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Get a breakdown of raw ability check modifier components for an ability.
+	 *
+	 * Used by the Abilities grid in the overview to power the dual canonical /
+	 * effective display. Distinct from `getSkillBreakdown` (which is per-skill
+	 * and includes proficiency / expertise / JoaT). Raw ability checks have NO
+	 * proficiency from the base mechanic; they include only the ability mod,
+	 * any matching custom modifiers (`check:<abl>` and `d20:all`), and the
+	 * exhaustion penalty on the effective side.
+	 *
+	 * Canonical = pure ability modifier.
+	 * Effective = canonical + ability-check custom mods - exhaustion.
+	 *
+	 * @param {string} ability - Ability abbreviation (e.g. "dex", "wis").
+	 * @returns {{total: number, canonical: number, components: Array<{type: string, name: string, value: number, icon: string, isCanonical: boolean}>}}
+	 */
+	getAbilityCheckBreakdown (ability) {
+		const components = [];
+
+		const mod = this.getAbilityMod(ability);
+		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
+
+		const customCheck = this.getAbilityCheckCustomMod(ability);
+		if (customCheck !== 0) components.push({type: "custom", name: `${ability.toUpperCase()} Check Modifier`, value: customCheck, icon: "⚙️", isCanonical: false});
+
+		const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
+
+		// Exhaustion: subtract from EFFECTIVE only. Raw ability checks are d20
+		// rolls; `_rollAbilityCheck` subtracts the penalty at roll time.
+		const exhaustionPenalty = this._getExhaustionD20Penalty();
+		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
+
+		const total = components.reduce((sum, comp) => sum + comp.value, 0);
+		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
+		return {total, canonical, components};
+	}
+
+	/**
 	 * Get a breakdown of initiative modifier components.
 	 *
 	 * Each component carries an `isCanonical` flag distinguishing intrinsic
@@ -7198,8 +7244,11 @@ class CharacterSheetState {
 			components.push({type: "feature", name: bonus.name, value: bonus.value, icon: "⚡", isCanonical: true});
 		}
 
-		// Note: exhaustion is intentionally NOT included in the initiative breakdown.
-		// Exhaustion only affects rolls, not the displayed bonus.
+		// Exhaustion: subtract from EFFECTIVE only. Initiative is a d20 roll and
+		// _rollInitiative subtracts _getExhaustionPenalty at roll time, so the
+		// effective breakdown should reflect that. Canonical stays pure.
+		const exhaustionPenalty = this._getExhaustionD20Penalty();
+		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
 		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
@@ -7234,8 +7283,11 @@ class CharacterSheetState {
 		const itemBonus = this._data.itemBonuses?.spellAttack || 0;
 		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
-		// Note: exhaustion is intentionally NOT included in the spell-attack breakdown.
-		// Exhaustion only affects rolls, not the displayed bonus.
+		// Exhaustion: subtract from EFFECTIVE only. Spell attacks are d20 rolls
+		// — the roll handler subtracts the penalty at roll time, so the dual
+		// display should reflect what the player will actually roll.
+		const exhaustionPenalty = this._getExhaustionD20Penalty();
+		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
 		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
@@ -28375,13 +28427,19 @@ class CharacterSheetState {
 				case "d20:all":
 					// Global d20 modifier - applies to all d20 rolls
 					// This is used for things like exhaustion (-X to all d20 rolls)
+					// NOTE: We deliberately do NOT also write `cm.skills["_all"]` here.
+					// `getSkillModWithAbility` sums BOTH `skills[skill] + skills["_all"]`
+					// (via getSkillCustomMod) AND `abilityChecks[ability]` (via
+					// getAbilityCheckCustomMod). Since skill checks ARE ability checks,
+					// writing to both buckets double-counted a single d20:all custom mod
+					// as +2N on every skill roll (CharacterSheet bug 6.4). The
+					// `abilityChecks[abl]` write below already covers skill reads.
 					cm.attackBonus += value;
 					cm.initiative += value;
 					Parser.ABIL_ABVS.forEach(abl => {
 						cm.savingThrows[abl] = (cm.savingThrows[abl] || 0) + value;
 						cm.abilityChecks[abl] = (cm.abilityChecks[abl] || 0) + value;
 					});
-					cm.skills["_all"] = (cm.skills["_all"] || 0) + value;
 					break;
 				default:
 					// Handle save:str, save:dex, etc.

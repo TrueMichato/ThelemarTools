@@ -146,11 +146,19 @@ class CharacterSheetSpells {
 	}
 
 	_initEventListeners () {
-		// Spell slot pip clicks
+		// Spell slot pip clicks — toggles a slot between used/available.
+		// Left-click leftmost-available pip → marks used (spends slot).
+		// Left-click rightmost-used pip → marks available (refunds slot).
+		// Supports both standard slots (data-spell-level="N") and Warlock pact
+		// slots (data-spell-level="pact"). See CharacterSheet bug 6.2.
 		document.addEventListener("click", (/** @type {*} */ e) => {
-			const pip = e.target.closest(".charsheet__slot-pip");
+			const pip = e.target.closest(".charsheet__spell-slot-pip");
 			if (!pip) return;
-			const level = parseInt(pip.closest("[data-spell-level]").dataset.spellLevel);
+			const levelContainer = pip.closest("[data-spell-level]");
+			if (!levelContainer) return;
+			const rawLevel = levelContainer.dataset.spellLevel;
+			const level = rawLevel === "pact" ? "pact" : parseInt(rawLevel);
+			if (level !== "pact" && Number.isNaN(level)) return;
 			this._toggleSlot(level, pip);
 		});
 
@@ -236,27 +244,42 @@ class CharacterSheetSpells {
 	}
 
 	_toggleSlot (level, pip) {
-		const isUsed = pip.classList.contains("used");
-		const container = pip.closest("[data-spell-level]");
-		const pips = [...container.querySelectorAll(".charsheet__slot-pip")];
+		const USED_CLS = "charsheet__spell-slot-pip--used";
+		const isUsed = pip.classList.contains(USED_CLS);
+		const isPact = level === "pact";
 
+		// Compute new current count from state (single source of truth).
+		// renderSlots() below will rebuild pip visuals from the new state.
 		if (isUsed) {
-			// Restore a slot (rightmost used pip)
-			const usedPips = pips.filter(p => p.classList.contains("used"));
-			if (usedPips.length > 0) {
-				usedPips[usedPips.length - 1].classList.remove("used");
-				const newCurrent = this._state.getSpellSlotsCurrent(level) + 1;
-				this._state.setSpellSlots(level, this._state.getSpellSlotsMax(level), newCurrent);
+			// Restore a slot
+			if (isPact) {
+				const slots = this._state.getPactSlots();
+				if (!slots) return;
+				this._state.setPactSlotsCurrent(Math.min(slots.max, (slots.current ?? 0) + 1));
+			} else {
+				const max = this._state.getSpellSlotsMax(level);
+				const cur = this._state.getSpellSlotsCurrent(level);
+				if (cur >= max) return;
+				this._state.setSpellSlots(level, max, cur + 1);
 			}
 		} else {
-			// Use a slot (leftmost available pip)
-			const availablePips = pips.filter(p => !p.classList.contains("used"));
-			if (availablePips.length > 0) {
-				availablePips[0].classList.add("used");
-				const newCurrent = this._state.getSpellSlotsCurrent(level) - 1;
-				this._state.setSpellSlots(level, this._state.getSpellSlotsMax(level), newCurrent);
+			// Spend a slot
+			if (isPact) {
+				const slots = this._state.getPactSlots();
+				if (!slots || slots.current <= 0) return;
+				this._state.setPactSlotsCurrent(slots.current - 1);
+			} else {
+				const max = this._state.getSpellSlotsMax(level);
+				const cur = this._state.getSpellSlotsCurrent(level);
+				if (cur <= 0) return;
+				this._state.setSpellSlots(level, max, cur - 1);
 			}
 		}
+
+		// Refresh the slots panel + overview so pip visuals and any
+		// numeric "current/max" labels stay in sync with the new state.
+		if (typeof this.renderSlots === "function") this.renderSlots();
+		if (typeof this._page?._renderQuickSpells === "function") this._page._renderQuickSpells();
 
 		this._page.saveCharacter();
 	}
@@ -6468,15 +6491,80 @@ class CharacterSheetSpells {
 
 		if (!spell) return;
 
-		const cost = spell.level * 50;
-		const hours = spell.level * 2;
+		const decision = await this._pConfirmScribingCost(spell);
+		if (!decision || decision === "cancel") return;
 
-		if (!confirm(`Scribe ${spell.name} (Level ${spell.level})?\n\nCost: ${cost} gp\nTime: ${hours} hours`)) return;
+		if (decision === "pay") {
+			const cost = spell.level * 50;
+			const result = this._state.deductGold(cost);
+			if (!result.success) {
+				JqueryUtil.doToast({type: "danger", content: result.error || "Could not deduct cost."});
+				return;
+			}
+		}
 
 		this._state.addScribingSpell(spell);
 		this._renderSpellList();
 		this._page.saveCharacter();
-		JqueryUtil.doToast({type: "success", content: `📝 Scribed: ${spell.name} (${cost} gp, ${hours} hrs)`});
+		const cost = spell.level * 50;
+		const hours = spell.level * 2;
+		const costNote = decision === "pay" ? `${cost} gp deducted` : "cost ignored";
+		JqueryUtil.doToast({type: "success", content: `📝 Scribed: ${spell.name} (${costNote}, ${hours} hrs)`});
+	}
+
+	/**
+	 * Three-way confirmation modal for scribing a spell (TGTT Spell Scribing Adept).
+	 *
+	 * The feat documents a cost of 50 gp × spell level plus 2 hours per level.
+	 * Players may want to:
+	 *   - Pay the cost and scribe (the canonical flow);
+	 *   - Skip the cost and scribe anyway (downtime narrative variants, DM
+	 *     fiat, characters with free access via story arcs);
+	 *   - Cancel entirely.
+	 *
+	 * "Pay" is disabled when the character can't afford the cost — the modal
+	 * still offers "Skip cost" and "Cancel" so the player isn't trapped.
+	 *
+	 * Returns one of `"pay"`, `"skip"`, or `"cancel"`. Resolves to `"cancel"`
+	 * on dismissal.
+	 *
+	 * @param {{name: string, level: number}} spell
+	 * @returns {Promise<"pay"|"skip"|"cancel">}
+	 */
+	async _pConfirmScribingCost (spell) {
+		const cost = spell.level * 50;
+		const hours = spell.level * 2;
+		const totalGp = this._state.getTotalGold();
+		const canAfford = totalGp >= cost;
+
+		const labelPay = canAfford ? `Pay ${cost} gp` : `Pay ${cost} gp (insufficient)`;
+		const values = canAfford
+			? ["pay", "skip", "cancel"]
+			: ["skip", "cancel"];
+		const labels = canAfford
+			? [labelPay, "Skip cost (scribe anyway)", "Cancel"]
+			: ["Skip cost (scribe anyway)", "Cancel"];
+
+		const html = `
+			<div>
+				<p>Scribing <strong>${spell.name}</strong> (level ${spell.level}) into your spellbook.</p>
+				<ul class="mb-2">
+					<li><strong>Cost:</strong> ${cost} gp (50 gp × ${spell.level})</li>
+					<li><strong>Time:</strong> ${hours} hours (2 hours × ${spell.level})</li>
+				</ul>
+				<p class="ve-muted ve-small">You have <strong>${totalGp.toFixed(2)} gp</strong> available${canAfford ? "" : ` — not enough to pay`}.</p>
+			</div>
+		`;
+
+		const choice = await InputUiUtil.pGetUserEnum({
+			title: "Scribe Spell",
+			htmlDescription: html,
+			values,
+			fnDisplay: (v, i) => labels[i],
+			isResolveItem: true,
+		});
+		if (choice == null) return "cancel";
+		return choice;
 	}
 
 	/**
