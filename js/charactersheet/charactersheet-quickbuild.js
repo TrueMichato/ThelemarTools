@@ -403,6 +403,23 @@ class CharacterSheetQuickBuild {
 		return existing?.subclass || null;
 	}
 
+	/**
+	 * Resolve a (possibly shallow) subclass reference to the canonical full
+	 * subclass object from the loaded classData. Returns the input unchanged
+	 * if classData can't be located. Cheap when called per picker.
+	 * @param {object|null|undefined} subclass
+	 * @param {string} className
+	 * @param {string} classSource
+	 * @returns {object|null}
+	 */
+	_resolveSubclassFull (subclass, className, classSource) {
+		if (!subclass) return subclass || null;
+		const classData = this._page.getClasses?.()?.find(
+			c => c.name === className && c.source === classSource,
+		);
+		return CharacterSheetClassUtils.resolveFullSubclass(subclass, classData);
+	}
+
 	_getLevelFeatures (classData, level, subclass = null) {
 		const classFeatures = this._page.getClassFeatures();
 		const subclassFeatures = this._page.getSubclassFeatures?.() || [];
@@ -654,6 +671,11 @@ class CharacterSheetQuickBuild {
 				knownCasterSubclass = existing?.subclass || null;
 				knownCasterSubclassChoice = knownCasterSubclassChoice || existing?.subclassChoice || null;
 			}
+			// Resolve shallow `{name, source}` refs (from state.getClasses()) to the
+			// canonical full subclass so spell pickers can read `additionalSpells`
+			// and other lazy properties. Without this, expanded-spell filter blocks
+			// (e.g. Chronurgy's "source=EGW", Divine Soul's Cleric list) match nothing.
+			knownCasterSubclass = this._resolveSubclassFull(knownCasterSubclass, knownCasterClassName, knownCasterClassSource);
 		}
 		const knownCasterInfo = totalKnownSpellsGain > 0 || totalKnownCantripsGain > 0 ? {
 			className: knownCasterClassName,
@@ -3490,18 +3512,28 @@ class CharacterSheetQuickBuild {
 
 			const sourceFiltered = this._page.getFilteredSpellData();
 
+			// Resolve the stored shallow subclass (if any) to the canonical full
+			// subclass for the Wizard so spell pickers can read `additionalSpells`
+			// (Chronurgy / Scribes / Bladesinger expanded spell blocks).
+			const wizardClass = this._state.getClasses()?.[0];
+			const resolvedWizardSubclass = this._resolveSubclassFull(
+				wizardClass?.subclass,
+				wizardClass?.name || "Wizard",
+				wizardClass?.source,
+			);
+
 			const section = CharacterSheetSpellPicker.renderWizardSpellbookPicker({
 				spellCount: totalSpellbookSpells,
 				maxSpellLevel,
 				allSpells: sourceFiltered,
 				knownSpellIds,
 				className: "Wizard",
-				subclass: this._state.getClasses()?.[0]?.subclass,
-				subclassChoice: this._state.getClasses()?.[0]?.subclassChoice,
+				subclass: resolvedWizardSubclass,
+				subclassChoice: wizardClass?.subclassChoice,
 				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
 					className: "Wizard",
-					subclass: this._state.getClasses()?.[0]?.subclass,
-					subclassChoice: this._state.getClasses()?.[0]?.subclassChoice,
+					subclass: resolvedWizardSubclass,
+					subclassChoice: wizardClass?.subclassChoice,
 				}),
 				onSelect: (spells) => {
 					this._selections.spellbookSpells = spells;
@@ -3554,7 +3586,11 @@ class CharacterSheetQuickBuild {
 		// Resolve subclass/subclassChoice from current selections (may have been updated in subclass step
 		// after knownCasterInfo was captured at step-build time)
 		const subclassKey = `${className}_${classSource}`;
-		const resolvedSubclass = this._selections.subclasses[subclassKey] || knownCasterInfo.subclass;
+		const rawResolvedSubclass = this._selections.subclasses[subclassKey] || knownCasterInfo.subclass;
+		// Ensure full subclass object (with `additionalSpells`) — shallow stored
+		// refs from `state.getClasses()` would otherwise silently lose expanded
+		// spell blocks (Chronurgy, Divine Soul list, etc.).
+		const resolvedSubclass = this._resolveSubclassFull(rawResolvedSubclass, className, classSource);
 		const resolvedSubclassChoice = this._selections.subclassChoices[subclassKey] || knownCasterInfo.subclassChoice;
 
 		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
@@ -3655,7 +3691,8 @@ class CharacterSheetQuickBuild {
 		const sourceFiltered = this._page.getFilteredSpellData();
 
 		const subclassKey = `${className}_${classSource}`;
-		const resolvedSubclass = this._selections.subclasses[subclassKey] || preparedCasterInfo.subclass;
+		const rawResolvedSubclass = this._selections.subclasses[subclassKey] || preparedCasterInfo.subclass;
+		const resolvedSubclass = this._resolveSubclassFull(rawResolvedSubclass, className, classSource);
 		const resolvedSubclassChoice = this._selections.subclassChoices[subclassKey] || preparedCasterInfo.subclassChoice;
 		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
 			className,

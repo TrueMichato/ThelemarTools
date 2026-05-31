@@ -1164,32 +1164,18 @@ class CharacterSheetFeatures {
 					// Class/Subclass features
 					} else if (feature.source && feature.className) {
 						// Determine the actual (classSource, featureSource) for hover links.
-						// See CharacterSheetClassUtils.resolveFeatureHoverSources for the rules —
-						// in particular, for SUBCLASS features the class source must come from
-						// the stored class, not from `feature.source` (which is the subclass source).
+						// See CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources for the
+						// rules — in particular, for SUBCLASS features the class source must come
+						// from the stored class or from the canonical subclassFeatures match, not
+						// from `feature.source` (which is the subclass source) and not from
+						// `storedClass?.source` for TGTT-copy-of-EGW subclasses (Bug 12 / Phase 5.5a).
 						const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
-						const isOfficialSource = (src) => CharacterSheetClassUtils._isHoverOfficialSource(src);
 
-						let {classSource: actualClassSource, featureSource: actualFeatureSource} =
-							CharacterSheetClassUtils.resolveFeatureHoverSources(feature, storedClass);
-
-						// For homebrew classes referencing official features (e.g. TGTT Warlock using XPHB Magical Cunning):
-						// if the resolved source is still non-official, look up the feature in loaded class data
-						if (!isOfficialSource(actualClassSource) && this._page?.getClassFeatures) {
-							try {
-								const classFeatures = this._page.getClassFeatures();
-								const officialMatch = classFeatures?.find(f =>
-									f.name === feature.name
-									&& f.className === feature.className
-									&& f.level === (feature.level || 1)
-									&& isOfficialSource(f.source),
-								);
-								if (officialMatch) {
-									actualClassSource = officialMatch.classSource || officialMatch.source;
-									actualFeatureSource = officialMatch.source;
-								}
-							} catch (e) { /* fall through */ }
-						}
+						const {classSource: actualClassSource, featureSource: actualFeatureSource, subclassSource: canonicalSubclassSource} =
+							CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources(feature, storedClass, {
+								classFeatures: this._page?.getClassFeatures?.() || [],
+								subclassFeatures: this._page?.getSubclassFeatures?.() || [],
+							});
 
 						const hashInput = {
 							name: feature.name,
@@ -1200,7 +1186,7 @@ class CharacterSheetFeatures {
 						};
 						if (feature.subclassName) {
 							hashInput.subclassShortName = feature.subclassShortName || feature.subclassName;
-							hashInput.subclassSource = feature.subclassSource || storedClass?.subclass?.source || feature.source;
+							hashInput.subclassSource = canonicalSubclassSource || feature.subclassSource || storedClass?.subclass?.source || feature.source;
 						}
 						const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
 						featureNameHtml = this._page.getHoverLink(

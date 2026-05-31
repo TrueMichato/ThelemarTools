@@ -75,6 +75,7 @@ class CharacterSheetPage {
 
 	async pInit () {
 		await this._pLoadData();
+		this._installHoverNormalizationHook();
 		this._initUi();
 		this._initEventListeners();
 		await this._pLoadCharacters();
@@ -593,6 +594,56 @@ class CharacterSheetPage {
 			}
 		});
 		return sources.size;
+	}
+
+	/**
+	 * Install a one-shot defensive hook around `Renderer.hover.pHandleLinkMouseOver`
+	 * that normalizes broken PG_CLASSES hashes (e.g. `chronurgy magic_tgtt-2014` —
+	 * a subclass name in the class slot). This catches malformed `{@class}` tags in
+	 * rendered content and stale references from outside the character-sheet code,
+	 * which would otherwise produce uncaught hover errors.
+	 *
+	 * Idempotent — only installs once per page load.
+	 */
+	_installHoverNormalizationHook () {
+		if (typeof Renderer === "undefined" || !Renderer.hover) return;
+		if (Renderer.hover._charsheetNormalizationHookInstalled) return;
+		Renderer.hover._charsheetNormalizationHookInstalled = true;
+
+		const allClasses = this._classes || [];
+		const allSubclasses = this._subclasses || [];
+		const orig = Renderer.hover.pHandleLinkMouseOver.bind(Renderer.hover);
+
+		Renderer.hover.pHandleLinkMouseOver = async function (evt, ele, opts) {
+			try {
+				const linkData = Renderer.hover.getLinkElementData(ele);
+				if (linkData?.page === UrlUtil.PG_CLASSES && linkData?.hash) {
+					// PG_CLASSES hash: `name_source[##sub_subname_subsource]`
+					const idxSubSep = linkData.hash.indexOf("##");
+					const classPart = idxSubSep === -1 ? linkData.hash : linkData.hash.substring(0, idxSubSep);
+					const subPart = idxSubSep === -1 ? "" : linkData.hash.substring(idxSubSep);
+					const [encName, encSource] = classPart.split(HASH_LIST_SEP);
+					if (encName && encSource) {
+						const name = decodeURIComponent(encName).replace(/_/g, " ");
+						const source = decodeURIComponent(encSource);
+						const normalized = CharacterSheetClassUtils.normalizePgClassesHashInput(
+							{name, source},
+							{allClasses, allSubclasses},
+						);
+						if (normalized.wasNormalized) {
+							const newClassPart = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalized.name, source: normalized.source});
+							const newHash = `${newClassPart}${subPart}`;
+							ele.setAttribute("data-vet-page", UrlUtil.PG_CLASSES);
+							ele.setAttribute("data-vet-source", normalized.source);
+							ele.setAttribute("data-vet-hash", newHash);
+						}
+					}
+				}
+			} catch (e) {
+				// Hook is best-effort — never block the underlying hover call.
+			}
+			return orig(evt, ele, opts);
+		};
 	}
 
 	_initUi () {
@@ -2496,10 +2547,16 @@ class CharacterSheetPage {
 		// Render class with hover links
 		const classes = this._state.getClasses();
 		if (classes.length) {
+			const allClasses = this._classes || [];
+			const allSubclasses = this._subclasses || [];
 			const classLinks = classes.map(c => {
 				try {
-					const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: c.name, source: c.source});
-					return CharacterSheetPage.getHoverLink(UrlUtil.PG_CLASSES, `${c.name} ${c.level}`, c.source, hash);
+					const normalized = CharacterSheetClassUtils.normalizePgClassesHashInput(
+						{name: c.name, source: c.source},
+						{allClasses, allSubclasses},
+					);
+					const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalized.name, source: normalized.source});
+					return CharacterSheetPage.getHoverLink(UrlUtil.PG_CLASSES, `${c.name} ${c.level}`, normalized.source, hash);
 				} catch (e) {
 					return `${c.name} ${c.level}`;
 				}
@@ -6777,33 +6834,15 @@ class CharacterSheetPage {
 			// Class features - link to class feature page
 			if (feature.featureType === "Class" && feature.className) {
 				const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
-				const isOfficialSource = (src) => CharacterSheetClassUtils._isHoverOfficialSource(src);
 
-				// Use the canonical (classSource, featureSource) resolver — same logic
-				// the Features tab uses — so TGTT/Bladesinging-style class-source leaks
-				// are normalised back to the original canonical source. Without this,
-				// e.g. Chronurgy Magic features on a TGTT Wizard build a hash with
-				// classSource=TGTT and the hover fails to load.
-				let {classSource: actualClassSource, featureSource: actualFeatureSource} =
-					CharacterSheetClassUtils.resolveFeatureHoverSources(feature, storedClass);
-
-				// Homebrew class referencing an official feature (TGTT Warlock w/ XPHB
-				// Magical Cunning etc.): try the loaded class-features data for an
-				// official match so the hover routes to the canonical entry.
-				if (!isOfficialSource(actualClassSource) && this._classFeatures) {
-					try {
-						const officialMatch = this._classFeatures.find(f =>
-							f.name === feature.name
-							&& f.className === feature.className
-							&& f.level === (feature.level || 1)
-							&& isOfficialSource(f.source),
-						);
-						if (officialMatch) {
-							actualClassSource = officialMatch.classSource || officialMatch.source;
-							actualFeatureSource = officialMatch.source;
-						}
-					} catch (e) { /* fall through */ }
-				}
+				// Resolve canonical (classSource, featureSource, subclassSource) using both
+				// classFeatures (for class-level features) AND subclassFeatures (for subclass
+				// features like Chronal Shift on TGTT-Wizard/Chronurgy — Phase 5.5a).
+				const {classSource: actualClassSource, featureSource: actualFeatureSource, subclassSource: canonicalSubclassSource} =
+					CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources(feature, storedClass, {
+						classFeatures: this._classFeatures || [],
+						subclassFeatures: this._subclassFeatures || [],
+					});
 
 				const hashInput = {
 					name: feature.name,
@@ -6814,10 +6853,14 @@ class CharacterSheetPage {
 				};
 				if (feature.subclassName || feature.isSubclassFeature) {
 					hashInput.subclassShortName = feature.subclassShortName || feature.subclassName;
-					hashInput.subclassSource = feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
+					hashInput.subclassSource = canonicalSubclassSource || feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
 				}
 				const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
-				const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: feature.className, source: actualClassSource});
+				const normalizedClass = CharacterSheetClassUtils.normalizePgClassesHashInput(
+					{name: feature.className, source: actualClassSource},
+					{allClasses: this._classes || [], allSubclasses: this._subclasses || []},
+				);
+				const classHash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalizedClass.name, source: normalizedClass.source});
 				const classHref = `${UrlUtil.PG_CLASSES}#${classHash}`;
 				return this.getHoverLink(UrlUtil.PG_CLASS_SUBCLASS_FEATURES, feature.name, actualFeatureSource || Parser.SRC_XPHB, hash, null, classHref);
 			}
@@ -10219,9 +10262,13 @@ class CharacterSheetPage {
 		try {
 			const state = this.getState();
 			const modStats = state?.getModifiedSpellStats?.(spellData);
+			// Read rarity/legality subschools from the character-spell when present
+			// (allows future override), otherwise from the canonical spell data —
+			// which is where the picker hover originates (Bug 7 Phase 5 fix).
+			const subschools = characterSpell?.subschools || spellData?.subschools || [];
 			const hasCharsheetMods = modStats?.range?.changed || modStats?.duration?.changed
 				|| modStats?.notes?.length
-				|| (characterSpell?.subschools || []).some(s => s.startsWith("rarity:") || s.startsWith("legality:"));
+				|| subschools.some(s => s.startsWith("rarity:") || s.startsWith("legality:"));
 
 			// If no charsheet-specific mods, use the standard hover (prettiest by default)
 			if (!hasCharsheetMods) return this.getHoverLink(UrlUtil.PG_SPELLS, name, source);
@@ -10331,10 +10378,13 @@ class CharacterSheetPage {
 			htmlPtDuration += ` <span style="color: #10b981; font-weight: 600;">(${modStats.duration.modified})</span>`;
 		}
 
-		// Thelemar rarity/legality badges
+		// Thelemar rarity/legality badges — fall back to spellData.subschools when
+		// characterSpell isn't available yet (e.g. in pickers, before the spell
+		// is added to the character). Bug 7 Phase 5 fix.
 		let htmlPtRarity = "";
-		const rarity = (characterSpell?.subschools || []).find(s => s.startsWith("rarity:"))?.replace("rarity:", "");
-		const legality = (characterSpell?.subschools || []).find(s => s.startsWith("legality:"))?.replace("legality:", "");
+		const subschools = characterSpell?.subschools || spellData?.subschools || [];
+		const rarity = subschools.find(s => s.startsWith("rarity:"))?.replace("rarity:", "");
+		const legality = subschools.find(s => s.startsWith("legality:"))?.replace("legality:", "");
 		if (rarity || legality) {
 			const badges = [];
 			if (rarity) {
@@ -10461,10 +10511,14 @@ class CharacterSheetPage {
 				classSource: resolved.classSource,
 				shortName: resolved.shortName,
 			};
-			const hash = `${UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: resolved.className, source: resolved.classSource})}${HASH_PART_SEP}${UrlUtil.getClassesPageStatePart({subclass: subclassForHash})}`;
+			const normalizedClass = CharacterSheetClassUtils.normalizePgClassesHashInput(
+				{name: resolved.className, source: resolved.classSource},
+				{allClasses: [], allSubclasses: allSubclasses || []},
+			);
+			const hash = `${UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalizedClass.name, source: normalizedClass.source})}${HASH_PART_SEP}${UrlUtil.getClassesPageStatePart({subclass: subclassForHash})}`;
 			const hoverAttrs = Renderer.hover.getHoverElementAttributes({
 				page: UrlUtil.PG_CLASSES,
-				source: resolved.classSource,
+				source: normalizedClass.source,
 				hash,
 			});
 			return `<a href="${UrlUtil.PG_CLASSES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${resolved.name}</a>`;
