@@ -41,7 +41,9 @@ export class PartyTrackerCharacter {
 		if (skill === "linguistics" && this._settings?.enableTgtt && this._settings?.thelemar_linguisticsBonus) {
 			bonus += this.getLinguisticsBonus();
 		}
-		bonus += this.getExhaustionD20Penalty();
+		// Note: exhaustion is intentionally NOT baked into the displayed skill bonus.
+		// Consistent with character sheet behavior — exhaustion only applies to rolls,
+		// not the "pure" bonus shown in the UI.
 		bonus += this._data.bonuses?.skills?.[skill] || 0;
 		return bonus;
 	}
@@ -51,7 +53,8 @@ export class PartyTrackerCharacter {
 		const mod = this.getAbilityMod(ability);
 		const hasProficiency = this._data.saveProficiencies?.[ability] || false;
 		let bonus = mod + (hasProficiency ? this.getProficiencyBonus() : 0);
-		bonus += this.getExhaustionD20Penalty();
+		// Note: exhaustion is intentionally NOT baked into the displayed save bonus.
+		// Consistent with character sheet behavior — exhaustion only applies to rolls.
 		bonus += this._data.bonuses?.saves?.[ability] || 0;
 		return bonus;
 	}

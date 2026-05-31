@@ -146,11 +146,19 @@ class CharacterSheetSpells {
 	}
 
 	_initEventListeners () {
-		// Spell slot pip clicks
+		// Spell slot pip clicks — toggles a slot between used/available.
+		// Left-click leftmost-available pip → marks used (spends slot).
+		// Left-click rightmost-used pip → marks available (refunds slot).
+		// Supports both standard slots (data-spell-level="N") and Warlock pact
+		// slots (data-spell-level="pact"). See CharacterSheet bug 6.2.
 		document.addEventListener("click", (/** @type {*} */ e) => {
-			const pip = e.target.closest(".charsheet__slot-pip");
+			const pip = e.target.closest(".charsheet__spell-slot-pip");
 			if (!pip) return;
-			const level = parseInt(pip.closest("[data-spell-level]").dataset.spellLevel);
+			const levelContainer = pip.closest("[data-spell-level]");
+			if (!levelContainer) return;
+			const rawLevel = levelContainer.dataset.spellLevel;
+			const level = rawLevel === "pact" ? "pact" : parseInt(rawLevel);
+			if (level !== "pact" && Number.isNaN(level)) return;
 			this._toggleSlot(level, pip);
 		});
 
@@ -236,27 +244,42 @@ class CharacterSheetSpells {
 	}
 
 	_toggleSlot (level, pip) {
-		const isUsed = pip.classList.contains("used");
-		const container = pip.closest("[data-spell-level]");
-		const pips = [...container.querySelectorAll(".charsheet__slot-pip")];
+		const USED_CLS = "charsheet__spell-slot-pip--used";
+		const isUsed = pip.classList.contains(USED_CLS);
+		const isPact = level === "pact";
 
+		// Compute new current count from state (single source of truth).
+		// renderSlots() below will rebuild pip visuals from the new state.
 		if (isUsed) {
-			// Restore a slot (rightmost used pip)
-			const usedPips = pips.filter(p => p.classList.contains("used"));
-			if (usedPips.length > 0) {
-				usedPips[usedPips.length - 1].classList.remove("used");
-				const newCurrent = this._state.getSpellSlotsCurrent(level) + 1;
-				this._state.setSpellSlots(level, this._state.getSpellSlotsMax(level), newCurrent);
+			// Restore a slot
+			if (isPact) {
+				const slots = this._state.getPactSlots();
+				if (!slots) return;
+				this._state.setPactSlotsCurrent(Math.min(slots.max, (slots.current ?? 0) + 1));
+			} else {
+				const max = this._state.getSpellSlotsMax(level);
+				const cur = this._state.getSpellSlotsCurrent(level);
+				if (cur >= max) return;
+				this._state.setSpellSlots(level, max, cur + 1);
 			}
 		} else {
-			// Use a slot (leftmost available pip)
-			const availablePips = pips.filter(p => !p.classList.contains("used"));
-			if (availablePips.length > 0) {
-				availablePips[0].classList.add("used");
-				const newCurrent = this._state.getSpellSlotsCurrent(level) - 1;
-				this._state.setSpellSlots(level, this._state.getSpellSlotsMax(level), newCurrent);
+			// Spend a slot
+			if (isPact) {
+				const slots = this._state.getPactSlots();
+				if (!slots || slots.current <= 0) return;
+				this._state.setPactSlotsCurrent(slots.current - 1);
+			} else {
+				const max = this._state.getSpellSlotsMax(level);
+				const cur = this._state.getSpellSlotsCurrent(level);
+				if (cur <= 0) return;
+				this._state.setSpellSlots(level, max, cur - 1);
 			}
 		}
+
+		// Refresh the slots panel + overview so pip visuals and any
+		// numeric "current/max" labels stay in sync with the new state.
+		if (typeof this.renderSlots === "function") this.renderSlots();
+		if (typeof this._page?._renderQuickSpells === "function") this._page._renderQuickSpells();
 
 		this._page.saveCharacter();
 	}
@@ -316,7 +339,14 @@ class CharacterSheetSpells {
 		const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE", "TGTT"].includes(classSource);
 
 		// Get character's subclass for subclass spell list checking
-		const characterSubclass = characterClass.subclass;
+		// Resolve a (possibly shallow) stored `{name, source}` ref to the full
+		// subclass object so `additionalSpells` and other lazy properties are
+		// available — without this, expanded-spell filter blocks (Chronurgy
+		// "source=EGW", Bladesinging, Order Domain, etc.) silently match nothing.
+		const classDataForSubclass = this._page.getClasses?.()?.find(
+			c => c.name === characterClass.name && c.source === characterClass.source,
+		);
+		const characterSubclass = CharacterSheetClassUtils.resolveFullSubclass(characterClass.subclass, classDataForSubclass);
 
 		// Check for subclass-granted additional spell lists (e.g. Divine Soul → Cleric)
 		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
@@ -631,9 +661,16 @@ class CharacterSheetSpells {
 			if (c.subclass?.name === "Gambler") return "Warlock";
 			return c.name;
 		});
+		// Phase 9 (Bug 7.1 follow-up): `c.subclass` is an object (`{name, source, ...}`),
+		// so the previous `${c.subclass}` coerced to `"[object Object]"` and produced
+		// keys like `"Sorcerer: [object Object]"`. That never matched the picker's
+		// `${className}: ${subclass.name}` keys, so the character's actual subclass
+		// was never auto-checked and any spell only granted via that subclass list
+		// (e.g. Guidance for Divine Soul, Gift of Alacrity for Chronurgy) was hidden
+		// behind a "No Expanded Lists" default.
 		const characterSubclassNames = characterClasses
-			.filter(c => c.subclass)
-			.map(c => `${c.name}: ${c.subclass}`);
+			.filter(c => c.subclass && (c.subclass.name || typeof c.subclass === "string"))
+			.map(c => `${c.name}: ${typeof c.subclass === "string" ? c.subclass : c.subclass.name}`);
 
 		// Sort class names - character classes first, then alphabetically
 		const sortedClassNames = [...allSpellClasses].sort((a, b) => {
@@ -1596,7 +1633,13 @@ class CharacterSheetSpells {
 						subschoolStr = ` • 🏷️ ${spell.subschools.map(formatSubschool).join(", ")}`;
 					}
 
-					const spellLink = this._page?.getHoverLink ? this._page.getHoverLink(UrlUtil.PG_SPELLS, spell.name, spell.source) : spell.name;
+					// Bug 7 Phase 5: use getSpellHoverLink so rarity/legality subschools
+					// (e.g. TGTT-tagged spells) surface in the picker hover. Falls back
+					// to the standard hover for spells with no charsheet-specific
+					// metadata, so it's safe for every spell.
+					const spellLink = this._page?.getSpellHoverLink
+						? this._page.getSpellHoverLink(spell.name, spell.source, spell, null)
+						: (this._page?.getHoverLink ? this._page.getHoverLink(UrlUtil.PG_SPELLS, spell.name, spell.source) : spell.name);
 
 					const item = e_({outer: `
 						<div class="charsheet__modal-list-item ${isKnown ? "ve-muted" : ""}">
@@ -5459,10 +5502,19 @@ class CharacterSheetSpells {
 	_renderInnateSpellItem (spell) {
 		const spellId = spell.id;
 
-		// Create hover link for spell name
+		// Bug 7 Phase 5: prefer getSpellHoverLink so innate-spell rows on the
+		// sheet show rarity/legality badges (e.g. TGTT-tagged innates).
+		const spellData = this._allSpells?.find(s => s.name === spell.name && s.source === spell.source);
 		let spellLink = spell.name;
 		try {
-			if (this._page?.getHoverLink) {
+			if (this._page?.getSpellHoverLink) {
+				spellLink = this._page.getSpellHoverLink(
+					spell.name,
+					spell.source || Parser.SRC_XPHB,
+					spellData || null,
+					spell,
+				);
+			} else if (this._page?.getHoverLink) {
 				spellLink = this._page.getHoverLink(
 					UrlUtil.PG_SPELLS,
 					spell.name,
@@ -5861,11 +5913,14 @@ class CharacterSheetSpells {
 		const spellAttackBonus = itemBonuses.spellAttack || 0;
 		const spellDcBonus = itemBonuses.spellSaveDc || 0;
 
-		// Get exhaustion DC penalty (Thelemar rules only)
-		const exhaustionDcPenalty = this._state._getExhaustionDcPenalty?.() || 0;
+		// Phase 1 doctrine: exhaustion is roll-only, not applied to display.
+		const customSpellAttack = this._state._data?.customModifiers?.spellAttack || 0;
+		const customSpellDc = this._state._data?.customModifiers?.spellDc || 0;
 
-		const attackBonus = mod + prof + spellAttackBonus;
-		const saveDC = 8 + mod + prof + spellDcBonus - exhaustionDcPenalty;
+		const canonicalAttack = mod + prof;
+		const effectiveAttack = canonicalAttack + spellAttackBonus + customSpellAttack;
+		const canonicalDc = 8 + mod + prof;
+		const effectiveDc = canonicalDc + spellDcBonus + customSpellDc;
 		const abilityFull = {
 			"str": "Strength",
 			"dex": "Dexterity",
@@ -5879,17 +5934,25 @@ class CharacterSheetSpells {
 		if (hasGamblerSpellcasting) {
 			document.getElementById("charsheet-spell-ability").textContent = "Charisma (Gambler)";
 
-			// Build formula strings with item/exhaustion bonuses
+			// Build formula strings with item bonuses (exhaustion intentionally not shown — roll-only)
 			const dcBase = 8 + prof;
-			const dcBonusStr = spellDcBonus > 0 ? ` + ${spellDcBonus}` : (spellDcBonus < 0 ? ` - ${Math.abs(spellDcBonus)}` : "");
-			const dcPenaltyStr = exhaustionDcPenalty > 0 ? ` - ${exhaustionDcPenalty}` : "";
+			const dcAllStaticBonus = spellDcBonus + customSpellDc;
+			const dcBonusStr = dcAllStaticBonus > 0 ? ` + ${dcAllStaticBonus}` : (dcAllStaticBonus < 0 ? ` - ${Math.abs(dcAllStaticBonus)}` : "");
 
-			document.getElementById("charsheet-spell-dc").textContent = `${dcBase} + ${calcs.gamblerModifierDice}${dcBonusStr}${dcPenaltyStr}`;
-			document.getElementById("charsheet-spell-attack").textContent = `+${prof} + ${calcs.gamblerModifierDice}${spellAttackBonus > 0 ? ` + ${spellAttackBonus}` : (spellAttackBonus < 0 ? ` - ${Math.abs(spellAttackBonus)}` : "")}`;
+			document.getElementById("charsheet-spell-dc").textContent = `${dcBase} + ${calcs.gamblerModifierDice}${dcBonusStr}`;
+			const atkAllStaticBonus = spellAttackBonus + customSpellAttack;
+			document.getElementById("charsheet-spell-attack").textContent = `+${prof} + ${calcs.gamblerModifierDice}${atkAllStaticBonus > 0 ? ` + ${atkAllStaticBonus}` : (atkAllStaticBonus < 0 ? ` - ${Math.abs(atkAllStaticBonus)}` : "")}`;
 		} else {
 			document.getElementById("charsheet-spell-ability").textContent = abilityFull;
-			document.getElementById("charsheet-spell-dc").textContent = String(saveDC);
-			document.getElementById("charsheet-spell-attack").textContent = `+${attackBonus}`;
+			// Dual canonical / effective display via shared helper — collapses when equal.
+			const dcEl = document.getElementById("charsheet-spell-dc");
+			const atkEl = document.getElementById("charsheet-spell-attack");
+			const dcOut = this._page._formatModWithEffective(canonicalDc, effectiveDc, {kind: "plain", titleEffective: "Effective spell save DC (with item/custom mods)"});
+			const atkOut = this._page._formatModWithEffective(canonicalAttack, effectiveAttack, {kind: "mod", titleEffective: "Effective spell attack (with item/custom mods)"});
+			if (canonicalDc === effectiveDc) dcEl.textContent = dcOut;
+			else dcEl.innerHTML = dcOut;
+			if (canonicalAttack === effectiveAttack) atkEl.textContent = atkOut;
+			else atkEl.innerHTML = atkOut;
 		}
 
 		// Display spell tracking using the new enhanced UI
@@ -6384,8 +6447,42 @@ class CharacterSheetSpells {
 	 * Shows cost info (50 gp/level, 2 hr/level).
 	 */
 	async _pShowScribeNewSpellPicker () {
-		const scribingClass = this._state.getScribingClass();
-		if (!scribingClass) return;
+		let scribingClass = this._state.getScribingClass();
+
+		// The feat may have been taken via a path that didn't trigger the
+		// "pick a scribing class" choice (e.g. Origin Feat in builder, an old
+		// save predating the choices flow, etc.). Recover gracefully by
+		// prompting the user for the class now, rather than silently no-op'ing.
+		if (!scribingClass) {
+			const SUPPORTED_CLASSES = ["Bard", "Sorcerer", "Warlock"];
+			const characterClasses = (this._state.getClasses?.() || []).map(c => c.name);
+			const eligible = SUPPORTED_CLASSES.filter(n => characterClasses.includes(n));
+
+			if (eligible.length === 0) {
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "Spell Scribing Adept requires at least one level in Bard, Sorcerer, or Warlock.",
+				});
+				return;
+			}
+
+			if (eligible.length === 1) {
+				scribingClass = eligible[0];
+			} else {
+				const choice = await InputUiUtil.pGetUserEnum({
+					title: "Spell Scribing Adept — Choose Class",
+					htmlDescription: `<div>Choose which spell list to scribe from. Scribed spells use this class's spell list at up to half your level in that class (rounded up).</div>`,
+					values: eligible,
+					fnDisplay: v => v,
+					isResolveItem: true,
+				});
+				if (choice == null) return; // user cancelled
+				scribingClass = choice;
+			}
+
+			this._state.setScribingClass(scribingClass);
+			this._page.saveCharacter();
+		}
 
 		const maxLevel = this._state.getScribingMaxSpellLevel();
 		const allSpells = this._page.getFilteredSpellData() || this._page.getSpells() || [];
@@ -6401,15 +6498,116 @@ class CharacterSheetSpells {
 
 		if (!spell) return;
 
-		const cost = spell.level * 50;
-		const hours = spell.level * 2;
+		const decision = await this._pConfirmScribingCost(spell);
+		if (!decision || decision === "cancel") return;
 
-		if (!confirm(`Scribe ${spell.name} (Level ${spell.level})?\n\nCost: ${cost} gp\nTime: ${hours} hours`)) return;
+		if (decision === "pay") {
+			const cost = spell.level * 50;
+			const result = this._state.deductGold(cost);
+			if (!result.success) {
+				JqueryUtil.doToast({type: "danger", content: result.error || "Could not deduct cost."});
+				return;
+			}
+			// Refresh currency widgets so the new gold total appears immediately.
+			// Mirrors charactersheet-upgrades.js post-deductGold pattern.
+			this._page._renderCurrency?.();
+			this._page._inventory?.render?.();
+		}
 
 		this._state.addScribingSpell(spell);
 		this._renderSpellList();
 		this._page.saveCharacter();
-		JqueryUtil.doToast({type: "success", content: `📝 Scribed: ${spell.name} (${cost} gp, ${hours} hrs)`});
+		const cost = spell.level * 50;
+		const hours = spell.level * 2;
+		const costNote = decision === "pay" ? `${cost} gp deducted` : "cost ignored";
+		JqueryUtil.doToast({type: "success", content: `📝 Scribed: ${spell.name} (${costNote}, ${hours} hrs)`});
+	}
+
+	/**
+	 * Three-way confirmation modal for scribing a spell (TGTT Spell Scribing Adept).
+	 *
+	 * The feat documents a cost of 50 gp × spell level plus 2 hours per level.
+	 * Players may want to:
+	 *   - Pay the cost and scribe (the canonical flow);
+	 *   - Skip the cost and scribe anyway (downtime narrative variants, DM
+	 *     fiat, characters with free access via story arcs);
+	 *   - Cancel entirely.
+	 *
+	 * "Pay" is disabled when the character can't afford the cost — the modal
+	 * still offers "Skip cost" and "Cancel" so the player isn't trapped.
+	 *
+	 * Phase 7.3a: Replaced `InputUiUtil.pGetUserEnum` (dropdown) with explicit
+	 * buttons so players can pick the action with a single click.
+	 *
+	 * Returns one of `"pay"`, `"skip"`, or `"cancel"`. Resolves to `"cancel"`
+	 * on dismissal.
+	 *
+	 * @param {{name: string, level: number}} spell
+	 * @returns {Promise<"pay"|"skip"|"cancel">}
+	 */
+	async _pConfirmScribingCost (spell) {
+		const cost = spell.level * 50;
+		const hours = spell.level * 2;
+		const totalGp = this._state.getTotalGold();
+		const canAfford = totalGp >= cost;
+
+		let result = "cancel";
+		let resolveOuter;
+		const pResult = new Promise(resolve => { resolveOuter = resolve; });
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "📝 Scribe Spell",
+			isMinHeight0: true,
+			cbClose: () => resolveOuter(result),
+		});
+
+		modalInner.appendChild(e_({tag: "div",
+			html: `
+			<p>Scribing <strong>${spell.name}</strong> (level ${spell.level}) into your spellbook.</p>
+			<ul class="mb-2">
+				<li><strong>Cost:</strong> ${cost} gp (50 gp × ${spell.level})</li>
+				<li><strong>Time:</strong> ${hours} hours (2 hours × ${spell.level})</li>
+			</ul>
+			<p class="ve-muted ve-small mb-3">You have <strong>${totalGp.toFixed(2)} gp</strong> available${canAfford ? "" : ` — not enough to pay`}.</p>
+		`}));
+
+		const btnRow = e_({
+			tag: "div",
+			style: "display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end;",
+		});
+
+		const btnPay = e_({
+			tag: "button",
+			clazz: `ve-btn ve-btn-primary${canAfford ? "" : " disabled"}`,
+			text: canAfford ? `💰 Pay ${cost} gp & Scribe` : `Pay ${cost} gp (insufficient)`,
+		});
+		if (canAfford) {
+			btnPay.addEventListener("click", () => { result = "pay"; doClose(true); });
+		} else {
+			btnPay.setAttribute("disabled", "disabled");
+			btnPay.setAttribute("title", `Need ${(cost - totalGp).toFixed(2)} more gp`);
+		}
+
+		const btnSkip = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-default",
+			text: "Skip cost (scribe anyway)",
+		});
+		btnSkip.addEventListener("click", () => { result = "skip"; doClose(true); });
+
+		const btnCancel = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-default",
+			text: "Cancel",
+		});
+		btnCancel.addEventListener("click", () => { result = "cancel"; doClose(false); });
+
+		btnRow.appendChild(btnPay);
+		btnRow.appendChild(btnSkip);
+		btnRow.appendChild(btnCancel);
+		modalInner.appendChild(btnRow);
+
+		return pResult;
 	}
 
 	/**
@@ -6528,8 +6726,12 @@ class CharacterSheetSpells {
 							</div>
 						`});
 						item.querySelector("button").addEventListener("click", () => {
-							doClose();
+							// Bug 5.4 Phase 5: resolve BEFORE doClose so cbClose's
+							// resolve(null) becomes a no-op. doClose() invokes the
+							// modal's cbClose synchronously (inside an async function),
+							// which races and wins if we call doClose first.
 							resolve(spell);
+							doClose();
 						});
 						list.append(item);
 					});
@@ -6539,7 +6741,7 @@ class CharacterSheetSpells {
 				renderList();
 
 				const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default mt-2">Cancel</button>`});
-				cancelBtn.addEventListener("click", () => { doClose(); resolve(null); });
+				cancelBtn.addEventListener("click", () => { resolve(null); doClose(); });
 				modalInner.append(cancelBtn);
 			})();
 		});

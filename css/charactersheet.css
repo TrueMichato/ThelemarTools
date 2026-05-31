@@ -1329,7 +1329,6 @@
 
 /* Large display values - ability scores, HP, AC, etc. */
 .charsheet-page[data-textsize] .charsheet__ability-score,
-.charsheet-page[data-textsize] .charsheet__ability-mod,
 .charsheet-page[data-textsize] .charsheet__hp-current,
 .charsheet-page[data-textsize] .charsheet__hp-max,
 .charsheet-page[data-textsize] .charsheet__hp-temp,
@@ -1340,6 +1339,14 @@
 .charsheet-page[data-textsize] .charsheet__proficiency-value,
 .charsheet-page[data-textsize] .charsheet__passive-value {
 	font-size: var(--cs-text-3xl, 2rem);
+}
+
+/* Ability modifier pill scales smaller than the score above it: the pill must
+   fit a canonical mod AND an optional effective parenthetical inside a
+   3-column grid cell, so a 2rem bump overflows. Keep it at the medium tier
+   (xl) under [data-textsize]. */
+.charsheet-page[data-textsize] .charsheet__ability-mod {
+	font-size: var(--cs-text-xl, 1.25rem);
 }
 
 /* Medium display values */
@@ -3280,7 +3287,11 @@
 	cursor: pointer;
 	transition: all var(--cs-transition-normal, 0.2s ease);
 	position: relative;
-	overflow: hidden;
+	/* overflow visible so the canonical+effective mod pill can extend
+	   slightly past the cell without being clipped (Phase 7.2). The pseudo-
+	   element top accent uses position:absolute pinned to the inset; it
+	   doesn't need clipping. */
+	overflow: visible;
 }
 
 .charsheet__ability::before {
@@ -3327,9 +3338,15 @@
 	color: var(--cs-primary, var(--rgb-link));
 	background: rgba(99, 102, 241, 0.1);
 	border-radius: var(--cs-radius-full, 999px);
-	padding: 0.1rem 0.5rem;
-	display: inline-block;
+	padding: 0.1rem 0.45rem;
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.15em;
 	margin-top: 0.25rem;
+	max-width: 100%;
+	white-space: nowrap;
+	box-sizing: border-box;
+	line-height: 1.15;
 }
 
 /* ========================================================================
@@ -3652,12 +3669,53 @@
 .charsheet__save-mod,
 .charsheet__skill-mod {
 	font-weight: 700;
-	width: 42px;
+	min-width: 42px;
+	width: auto;
+	max-width: 110px;
 	text-align: center;
 	flex-shrink: 0;
+	white-space: nowrap;
 	font-family: var(--cs-font-mono, monospace);
 	color: var(--cs-primary, var(--rgb-link));
 	padding-right: 0.5rem;
+}
+
+/* Dual canonical/effective modifier display.
+ * Used wherever a roll bonus has situational mods (custom mods, magic items,
+ * spell buffs) on top of the intrinsic ability + proficiency value.
+ *
+ *   "+5 (+7)"   ← intrinsic +5, effective +7 (positive buff → green)
+ *   "+5 (+3)"   ← intrinsic +5, effective +3 (nerf → red)
+ *
+ * Inline span hugs the parent; the smaller font and color cue distinguish
+ * the parenthetical effective value without breaking the at-a-glance read
+ * of the canonical bonus.
+ */
+.charsheet__mod-effective {
+	font-size: 0.75em;
+	font-weight: 600;
+	margin-left: 0.15em;
+	opacity: 0.95;
+	white-space: nowrap;
+	line-height: 1;
+}
+
+/* Inside the legacy ability-mod pill the canonical is rendered large
+ * (xl under [data-textsize]), so the parenthetical needs to shrink
+ * harder to keep the pill from overflowing its 1fr grid cell. Other
+ * dual-display surfaces (skill/save/spell DC/spell atk) use base text
+ * and look balanced at the default 0.75em above. */
+.charsheet__ability-mod .charsheet__mod-effective {
+	font-size: 0.6em;
+	margin-left: 0.1em;
+}
+
+.charsheet__mod-effective--positive {
+	color: var(--cs-success, #2a8a2a);
+}
+
+.charsheet__mod-effective--negative {
+	color: var(--cs-danger, #c93030);
 }
 
 /* Passive skill score column */
@@ -5205,6 +5263,7 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	gap: 0.5rem;
 	padding: 0.5rem 0.75rem;
 	background: var(--cs-bg-card, rgba(30, 41, 59, 0.5));
 	border-radius: 0.375rem;
@@ -5221,6 +5280,13 @@
 	align-items: center;
 	gap: 0.5rem;
 	min-width: 0;
+	flex: 1 1 auto;
+}
+
+.charsheet__section-caption {
+	margin: 0.15rem 0 0.4rem;
+	font-style: italic;
+	line-height: 1.25;
 }
 
 .charsheet__ability-icon {
@@ -5230,9 +5296,12 @@
 
 .charsheet__ability-name {
 	font-weight: 500;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	white-space: normal;
+	overflow: visible;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+	min-width: 0;
+	flex: 1 1 auto;
 }
 
 .charsheet__ability-controls {
@@ -5501,10 +5570,14 @@
 }
 
 .charsheet__resource-name {
-	flex: 1;
+	flex: 1 1 auto;
+	min-width: 0;
 	font-weight: 600;
 	font-size: var(--cs-text-sm, 0.85rem);
 	color: var(--cs-text-primary, var(--rgb-text));
+	white-space: normal;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 
 .charsheet__resource-uses {

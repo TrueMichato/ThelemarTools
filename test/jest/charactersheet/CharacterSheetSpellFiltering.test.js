@@ -311,13 +311,17 @@ describe("getAdditionalSpellListClasses", () => {
 		expect(result).toEqual(["Cleric"]);
 	});
 
-	it("returns [] for Divine Soul Sorcerer without affinity", () => {
+	it("returns ['Cleric'] for Divine Soul Sorcerer even without affinity (Divine Magic feature is unconditional)", () => {
+		// Bug 5: previously gated on affinity, which hid Cleric cantrips (Guidance)
+		// in the spell picker until the affinity was chosen — wrong. Divine Magic
+		// always grants the Cleric spell list at L1; the affinity choice only
+		// adds one specific always-prepared 1st-level spell.
 		const result = CharacterSheetClassUtils.getAdditionalSpellListClasses({
 			className: "Sorcerer",
 			subclass: divineSoulSubclass,
 			subclassChoice: null,
 		});
-		expect(result).toEqual([]);
+		expect(result).toEqual(["Cleric"]);
 	});
 
 	it("returns [] for non-Divine-Soul sorcerer subclass", () => {

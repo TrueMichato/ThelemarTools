@@ -171,17 +171,24 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * When TGTT mode is enabled, restrict Metamagic (`MM`) optional features to TGTT-source
-	 * entries so PHB-only metamagics (Distant, Empowered, Subtle, Twinned, …) don't leak into
-	 * pickers that share the `MM` featureType code with the TGTT passive/active system. Other
-	 * featureType codes are returned untouched.
+	 * When TGTT mode is enabled OR the active class source is TGTT, restrict Metamagic (`MM`)
+	 * optional features to TGTT-source entries so PHB-only metamagics (Distant, Empowered,
+	 * Subtle, Twinned, …) don't leak into pickers that share the `MM` featureType code with
+	 * the TGTT passive/active system. Other featureType codes are returned untouched.
+	 *
+	 * The class-source gate ensures TGTT Sorcerer pickers correctly hide XPHB metamagics
+	 * even when the global TGTT settings flag is off, since a TGTT class is itself an
+	 * explicit opt-in to the TGTT metamagic list (Bug 6).
 	 * @param {Array<*>} optFeatures - Optional features (typically post-deduplication)
 	 * @param {object} [opts]
-	 * @param {boolean} [opts.enableTgtt=false] - Whether the TGTT setting is on
+	 * @param {boolean} [opts.enableTgtt=false] - Whether the TGTT global setting is on
+	 * @param {string|null} [opts.classSource=null] - Source of the class currently driving this picker (if any). When equal to "TGTT" (case-insensitive), the filter applies regardless of the global flag.
 	 * @returns {Array<*>} Filtered optional features
 	 */
-	static filterOptFeaturesForTgttMetamagic (/** @type {*} */ optFeatures, /** @type {*} */ {enableTgtt = false} = {}) {
-		if (!optFeatures?.length || !enableTgtt) return optFeatures;
+	static filterOptFeaturesForTgttMetamagic (/** @type {*} */ optFeatures, /** @type {*} */ {enableTgtt = false, classSource = null} = {}) {
+		if (!optFeatures?.length) return optFeatures;
+		const classSourceIsTgtt = !!classSource && String(classSource).toUpperCase() === "TGTT";
+		if (!enableTgtt && !classSourceIsTgtt) return optFeatures;
 		return optFeatures.filter((/** @type {*} */ opt) => {
 			const isMetamagic = opt?.featureType?.some?.((/** @type {*} */ ft) => ft === "MM");
 			if (!isMetamagic) return true;
@@ -278,6 +285,246 @@ class CharacterSheetClassUtils {
 
 		classSource = classSource || storedClass?.source || Parser.SRC_XPHB;
 		return {classSource, featureSource};
+	}
+
+	/**
+	 * Like {@link resolveFeatureHoverSources}, but when the resolved classSource is
+	 * still a non-official (homebrew) source, also searches loaded feature data for
+	 * the canonical match. This handles two scenarios:
+	 *  - Class features: TGTT Warlock referencing an XPHB feature (already handled by
+	 *    the call-site code at charactersheet.js:6793 and charactersheet-features.js:1178).
+	 *  - Subclass features: TGTT Wizard with a Chronurgy (EGW) subclass — refSubclassFeature
+	 *    `Chronal Shift|Wizard||Chronurgy|EGW|2` produces parts[2]="" → classSource
+	 *    defaults to TGTT, but the canonical feature lives at classSource=PHB. The
+	 *    Phase-4 class-feature fallback didn't search subclassFeatures, so the
+	 *    bad hash leaked through (Bug 12 / Phase 5.5a).
+	 *
+	 * @param {*} feature - The stored feature object
+	 * @param {*} storedClass - The matching entry from state.getClasses(), if any
+	 * @param {{classFeatures?: Array, subclassFeatures?: Array}} [loadedFeatures]
+	 * @returns {{classSource: string, featureSource: string, subclassSource: string|null}}
+	 */
+	static resolveCanonicalFeatureHoverSources (/** @type {*} */ feature, /** @type {*} */ storedClass, /** @type {*} */ loadedFeatures = {}) {
+		let {classSource, featureSource} = CharacterSheetClassUtils.resolveFeatureHoverSources(feature, storedClass);
+		let subclassSource = null;
+
+		const isOfficial = CharacterSheetClassUtils._isHoverOfficialSource;
+		const isSubclassFeature = !!(feature?.subclassName || feature?.subclassShortName || feature?.isSubclassFeature);
+		const level = feature?.level || 1;
+
+		if (isOfficial(classSource)) return {classSource, featureSource, subclassSource};
+
+		// Non-official class source — try to find a canonical match in loaded data.
+		try {
+			if (isSubclassFeature && loadedFeatures.subclassFeatures?.length) {
+				const subclassShortName = feature.subclassShortName || feature.subclassName;
+				const officialMatch = loadedFeatures.subclassFeatures.find(f =>
+					f.name === feature.name
+					&& f.className === feature.className
+					&& (f.subclassShortName === subclassShortName || f.subclassShortName?.toLowerCase() === subclassShortName?.toLowerCase())
+					&& f.level === level
+					&& isOfficial(f.classSource),
+				);
+				if (officialMatch) {
+					classSource = officialMatch.classSource;
+					featureSource = officialMatch.source || featureSource;
+					subclassSource = officialMatch.subclassSource || subclassSource;
+				}
+			} else if (!isSubclassFeature && loadedFeatures.classFeatures?.length) {
+				const officialMatch = loadedFeatures.classFeatures.find(f =>
+					f.name === feature.name
+					&& f.className === feature.className
+					&& f.level === level
+					&& isOfficial(f.source),
+				);
+				if (officialMatch) {
+					classSource = officialMatch.classSource || officialMatch.source;
+					featureSource = officialMatch.source;
+				}
+			}
+		} catch (e) { /* fall through to the non-canonical result */ }
+
+		return {classSource, featureSource, subclassSource};
+	}
+
+	/**
+	 * Resolve the hover-link sources for a subclass entry.
+	 *
+	 * The `cls.subclass` slot on a character only stores `{name, source}` —
+	 * the source there is the SUBCLASS source (e.g. "EGW" for Chronurgy
+	 * Magic). The PG_CLASSES hover hash is built from the CLASS source
+	 * (`subclass.classSource`, e.g. "PHB" for the Wizard that Chronurgy
+	 * lives on) plus the subclass state portion. Using the wrong source
+	 * here builds e.g. `chronurgy magic_tgtt-2014` which doesn't resolve.
+	 *
+	 * @param {{name?: string, source?: string, className?: string, classSource?: string, shortName?: string}} subclass - Stored subclass entry.
+	 * @param {Array} [allSubclasses=[]] - Loaded subclass data (page._subclasses).
+	 * @param {{className?: string, classSource?: string}} [storedClass] - Stored class entry, used as a fallback.
+	 * @returns {{className: string, classSource: string, source: string, shortName: string, name: string}}
+	 */
+	static resolveSubclassHoverSources (/** @type {*} */ subclass, /** @type {*} */ allSubclasses = [], /** @type {*} */ storedClass = null) {
+		let className = subclass?.className || storedClass?.name || "";
+		const subclassSource = subclass?.source || Parser.SRC_XPHB;
+		const subclassName = subclass?.name || "";
+		const explicitClassSource = subclass?.classSource;
+
+		let classSource = explicitClassSource;
+		let shortName = subclass?.shortName;
+
+		if (!classSource || !shortName || !className) {
+			const match = (allSubclasses || []).find(sc =>
+				sc?.name === subclassName
+				&& sc?.source === subclassSource
+				&& (!className || sc?.className === className));
+			if (match) {
+				classSource = classSource || match.classSource;
+				shortName = shortName || match.shortName;
+				className = className || match.className || "";
+			}
+		}
+
+		classSource = classSource || storedClass?.source || Parser.SRC_PHB;
+		shortName = shortName || subclassName;
+
+		return {
+			className,
+			classSource,
+			source: subclassSource,
+			shortName,
+			name: subclassName,
+		};
+	}
+
+	/**
+	 * Defensive PG_CLASSES hash-input normalizer.
+	 *
+	 * Catches the case where `{name, source}` does NOT resolve to a known class
+	 * but DOES resolve to a known subclass — in which case the caller likely
+	 * meant to hover the subclass's parent class. Returns the parent class
+	 * descriptor instead (and logs a single warning per `(name, source)` pair).
+	 *
+	 * Used to harden every PG_CLASSES hash-builder call site against stale
+	 * saves, malformed `{@class}` tags, and other upstream defects that would
+	 * otherwise produce hashes like `chronurgy magic_tgtt-2014` (a subclass
+	 * name in the class slot) which fail to load.
+	 *
+	 * @param {{name: string, source: string}} input - The proposed (name, source) pair
+	 * @param {{allClasses?: Array, allSubclasses?: Array}} loadedData
+	 * @returns {{name: string, source: string, wasNormalized: boolean}}
+	 */
+	static normalizePgClassesHashInput (input, loadedData = {}) {
+		const result = {name: input?.name, source: input?.source, wasNormalized: false};
+		if (!input?.name || !input?.source) return result;
+
+		const allClasses = loadedData?.allClasses || [];
+		const allSubclasses = loadedData?.allSubclasses || [];
+
+		// If it already resolves to a known class, no normalization needed.
+		const isKnownClass = allClasses.some(c =>
+			c?.name?.toLowerCase() === input.name.toLowerCase()
+			&& (c?.source === input.source || !input.source),
+		);
+		if (isKnownClass) return result;
+
+		// Look up as a subclass — if found, redirect to the parent class.
+		const subclassMatch = allSubclasses.find(sc =>
+			sc?.name?.toLowerCase() === input.name.toLowerCase()
+			&& (sc?.source === input.source || !input.source),
+		);
+		if (!subclassMatch || !subclassMatch.className) return result;
+
+		// One-time warning per unique input — surfaces stale references without log-flooding.
+		CharacterSheetClassUtils._pgClassesWarnSet = CharacterSheetClassUtils._pgClassesWarnSet || new Set();
+		const warnKey = `${input.name}|${input.source}`;
+		if (!CharacterSheetClassUtils._pgClassesWarnSet.has(warnKey)) {
+			CharacterSheetClassUtils._pgClassesWarnSet.add(warnKey);
+			// eslint-disable-next-line no-console
+			console.warn(`[CharSheet] normalizePgClassesHashInput: substituting subclass "${input.name}|${input.source}" → parent class "${subclassMatch.className}|${subclassMatch.classSource}"`);
+		}
+
+		return {
+			name: subclassMatch.className,
+			source: subclassMatch.classSource || input.source,
+			wasNormalized: true,
+		};
+	}
+
+	/**
+	 * Resolve a stored shallow subclass reference (or even a full one) to the
+	 * canonical full subclass object from `classData.subclasses`, so callers
+	 * always receive `additionalSpells`, `subclassFeatures`, etc.
+	 *
+	 * Background: `state.addClass` stores subclasses as lean `{name, source}`
+	 * refs to keep saves small. Picker call sites that need to evaluate spell
+	 * lists / filter queries (Chronurgy expanded spells, Divine Soul list,
+	 * Bladesinging expanded spells, Order Domain expanded spells, etc.) need
+	 * the full subclass object — without it, `additionalSpells` is undefined
+	 * and filter-based spell inclusion silently fails.
+	 *
+	 * @param {object|null|undefined} storedSubclass - The shallow stored ref or full subclass.
+	 * @param {object|null|undefined} classData - The parent class (with `.subclasses` array).
+	 * @returns {object|null} The full subclass object, or the input unchanged if not resolvable.
+	 */
+	static resolveFullSubclass (storedSubclass, classData) {
+		if (!storedSubclass) return storedSubclass || null;
+		if (!classData?.subclasses?.length) return storedSubclass;
+
+		// Already full? Either has additionalSpells / subclassFeatures, or is reference-equal
+		// to one of classData.subclasses (the "I came from classData.subclasses" sentinel).
+		if (storedSubclass.additionalSpells != null
+			|| storedSubclass.subclassFeatures != null
+			|| storedSubclass.subclassTableGroups != null) {
+			return storedSubclass;
+		}
+
+		// Match by (name, source). Source is optional — if missing from storedSubclass,
+		// match by name only (legacy saves may omit it).
+		const name = (storedSubclass.name || "").toLowerCase();
+		if (!name) return storedSubclass;
+
+		const exactMatch = classData.subclasses.find(sc =>
+			(sc?.name || "").toLowerCase() === name
+			&& (!storedSubclass.source || sc?.source === storedSubclass.source),
+		);
+		let found = exactMatch;
+		if (!found) {
+			// Name-only fallback (legacy saves without source, or source-renamed brews).
+			found = classData.subclasses.find(sc => (sc?.name || "").toLowerCase() === name);
+		}
+		if (!found) return storedSubclass;
+
+		// Phase 7.1 defensive lazy merge:
+		//   If the found subclass STILL has _copy and is missing additionalSpells /
+		//   subclassFeatures, the eager merge in _pLoadData missed it (race condition,
+		//   silent failure, missing parent at merge time, etc.). Kick off a lazy
+		//   merge in place — pMergeCopy mutates `found` via copyApplier.getCopy.
+		//   The merge resolves on the next microtask, so this call still returns the
+		//   unmerged object once; the NEXT picker render (or any re-call) gets the
+		//   merged version. A single console.warn surfaces the recovery for debugging.
+		if (found._copy
+			&& found.additionalSpells == null
+			&& found.subclassFeatures == null
+			&& typeof globalThis !== "undefined"
+			&& globalThis._charSheetSubclassMergePool
+			&& typeof DataUtil !== "undefined"
+			&& DataUtil.subclass?.pMergeCopy) {
+			try {
+				DataUtil.subclass.pMergeCopy(globalThis._charSheetSubclassMergePool, found, {})
+					.then(() => {
+						// eslint-disable-next-line no-console
+						console.warn(`[CharSheet][Phase7] Lazy-merged subclass "${found.name || found._copy?.name}|${found.source}" on demand (eager merge missed it).`);
+					})
+					.catch(e => {
+						// eslint-disable-next-line no-console
+						console.warn(`[CharSheet][Phase7] Lazy merge failed for "${found.name || found._copy?.name}|${found.source}":`, e?.message || e);
+					});
+			} catch (e) {
+				// eslint-disable-next-line no-console
+				console.warn(`[CharSheet][Phase7] Lazy merge threw for "${found.name || found._copy?.name}|${found.source}":`, e?.message || e);
+			}
+		}
+
+		return found;
 	}
 
 	// ========================================================================
@@ -738,6 +985,14 @@ class CharacterSheetClassUtils {
 		if (value == null) return out;
 
 		if (typeof value === "string") {
+			// Bug 5: filter-query strings like "source=EGW" or "level=0|class=Cleric"
+			// are NOT spell references. They live in `{"all": "<query>"}` blocks (e.g.
+			// Chronurgy Magic expanded list, Divine Soul expanded list). Treating them
+			// as names creates ghost entries like "source=egw|phb" in the id-set and
+			// causes real spells from EGW (Gift of Alacrity) / the Cleric list
+			// (Guidance) to be excluded. Skip them here; they're handled by
+			// _additionalSpellBlockMatchesSpell instead.
+			if (this._isFilterQueryString(value)) return out;
 			const [name, source = Parser.SRC_PHB] = value.split("|");
 			if (name?.trim()) out.add(`${name.trim().toLowerCase()}|${String(source).trim().toLowerCase()}`);
 			return out;
@@ -781,6 +1036,125 @@ class CharacterSheetClassUtils {
 		return out;
 	}
 
+	/**
+	 * Bug 5: A filter-query string contains `=` and uses spell-page filter syntax
+	 * (e.g. `"source=EGW"`, `"level=0|class=Cleric"`). These appear inside
+	 * additionalSpells `{"all": "<query>"}` shorthand and must NOT be treated as
+	 * pipe-separated `name|source` references.
+	 */
+	static _isFilterQueryString (/** @type {*} */ value) {
+		if (typeof value !== "string") return false;
+		if (!value.includes("=")) return false;
+		// Split by `|` (filter AND-clause separator) and verify every segment is `key=value`.
+		// Real spell refs are `name|source` — no `=` in either segment.
+		return value.split("|").every(seg => /^[a-zA-Z_][\w-]*\s*=\s*[^=]+$/.test(seg.trim()));
+	}
+
+	/**
+	 * Bug 5: Parse a filter-query string like `"source=EGW|class=Cleric"` into
+	 * `[{key: "source", value: "EGW"}, {key: "class", value: "Cleric"}]`.
+	 * All clauses are AND-ed together (matches 5etools filter shorthand).
+	 */
+	static _parseFilterQuery (/** @type {*} */ query) {
+		if (typeof query !== "string" || !this._isFilterQueryString(query)) return [];
+		return query.split("|")
+			.map(seg => {
+				const [rawKey, ...rest] = seg.split("=");
+				return {
+					key: String(rawKey || "").trim().toLowerCase(),
+					value: rest.join("=").trim(),
+				};
+			})
+			.filter(c => c.key && c.value);
+	}
+
+	/**
+	 * Bug 5: True if the given spell matches all clauses of the parsed filter query.
+	 * Supported keys: `source`, `level`, `class`, `subclass`, `school`.
+	 * Unknown keys conservatively fail-closed (no match) — preserves current
+	 * over-restrictive behaviour rather than silently widening pools.
+	 */
+	static _spellMatchesFilterQuery (/** @type {*} */ spell, /** @type {*} */ clauses) {
+		if (!spell || !Array.isArray(clauses) || !clauses.length) return false;
+
+		return clauses.every(({key, value}) => {
+			const v = String(value || "").toLowerCase();
+			switch (key) {
+				case "source":
+					return String(spell.source || "").toLowerCase() === v;
+				case "level": {
+					const lvl = Number(value);
+					return Number.isFinite(lvl) && Number(spell.level) === lvl;
+				}
+				case "class":
+					return this.spellIsForClass(spell, value);
+				case "subclass": {
+					// e.g. `subclass=Life Domain`. Walk fromSubclass entries.
+					const matches = (entry) => String(entry.subclass?.name || "").toLowerCase() === v
+						|| String(entry.subclass?.shortName || "").toLowerCase() === v;
+					try {
+						const fromSub = Renderer.spell.getCombinedClasses(spell, "fromSubclass");
+						if (Array.isArray(fromSub) && fromSub.some(matches)) return true;
+					} catch (e) { /* fall through */ }
+					return Array.isArray(spell.classes?.fromSubclass) && spell.classes.fromSubclass.some(matches);
+				}
+				case "school":
+					return String(spell.school || "").toLowerCase() === v;
+				default:
+					// Unknown filter key — fail closed to avoid silently broadening the pool.
+					return false;
+			}
+		});
+	}
+
+	/**
+	 * Bug 5: True if the given subclass `additionalSpells` block (innate/known/
+	 * prepared/expanded) makes `spell` available. Walks both literal name refs
+	 * (via the id-set) and filter-query refs (via {@link _spellMatchesFilterQuery}).
+	 */
+	static _additionalSpellBlockMatchesSpell (/** @type {*} */ block, /** @type {*} */ spell, /** @type {*} */ spellId) {
+		if (!block || typeof block !== "object") return false;
+		if (!spellId) return false;
+
+		// Literal name-source match (preserves existing behaviour for {"name":..., "source":...} refs)
+		if (this._getAdditionalSpellBlockSpellIds(block).has(spellId)) return true;
+
+		// Filter-query match (Bug 5: walks `{"all": "<query>"}` shorthand in any sub-list)
+		const sections = ["innate", "known", "prepared", "expanded"];
+		for (const sec of sections) {
+			const sectionValue = block[sec];
+			if (!sectionValue) continue;
+			if (this._sectionMatchesSpellViaFilter(sectionValue, spell)) return true;
+		}
+		return false;
+	}
+
+	static _sectionMatchesSpellViaFilter (/** @type {*} */ value, /** @type {*} */ spell) {
+		if (value == null) return false;
+
+		if (typeof value === "string") {
+			if (!this._isFilterQueryString(value)) return false;
+			return this._spellMatchesFilterQuery(spell, this._parseFilterQuery(value));
+		}
+
+		if (Array.isArray(value)) {
+			return value.some(it => this._sectionMatchesSpellViaFilter(it, spell));
+		}
+
+		if (typeof value !== "object") return false;
+
+		// Common shorthand: {"all": "<query>"}, {"choose": {"from": "<query>"}}, etc.
+		if (value.all && this._sectionMatchesSpellViaFilter(value.all, spell)) return true;
+		if (value.from && this._sectionMatchesSpellViaFilter(value.from, spell)) return true;
+		if (value.choose?.from && this._sectionMatchesSpellViaFilter(value.choose.from, spell)) return true;
+
+		// Walk nested level/category keys (e.g. expanded["1"], known["1e"])
+		return Object.entries(value).some(([key, nested]) => {
+			if (["name", "source", "choose", "from", "all", "ability", "resourceName"].includes(key)) return false;
+			return this._sectionMatchesSpellViaFilter(nested, spell);
+		});
+	}
+
 	static subclassAdditionalSpellsIncludeSpell (/** @type {*} */ spell, /** @type {*} */ subclass, /** @type {*} */ opts = {}) {
 		if (!spell?.name || !subclass?.additionalSpells?.length) return false;
 
@@ -794,7 +1168,7 @@ class CharacterSheetClassUtils {
 			})()
 			: subclass.additionalSpells;
 
-		return relevantBlocks.some(block => this._getAdditionalSpellBlockSpellIds(block).has(spellId));
+		return relevantBlocks.some(block => this._additionalSpellBlockMatchesSpell(block, spell, spellId));
 	}
 
 	static getSpellListClassNames ({className, classSource, subclass, subclassChoice, includeCoreSpellsForHomebrew = false} = /** @type {*} */ ({})) {
@@ -923,7 +1297,17 @@ class CharacterSheetClassUtils {
 	}
 
 	static getAdditionalSpellListClasses ({className, subclass, subclassChoice} = /** @type {*} */ ({})) {
-		if (className === "Sorcerer" && this.isDivineSoulSubclass(subclass) && this.normalizeDivineSoulAffinity(subclassChoice)) {
+		// Divine Soul Sorcerer (XGE / TGTT): the "Divine Magic" subclass feature
+		// grants access to the entire Cleric spell list at L1 — unconditional,
+		// not gated on the affinity pick. The affinity choice only grants ONE
+		// specific 1st-level spell as always-prepared, handled via the per-block
+		// `known` list in `subclassAdditionalSpellsIncludeSpell`.
+		//
+		// Previously we gated on `normalizeDivineSoulAffinity(subclassChoice)`,
+		// which meant a freshly-created Divine Soul Sorcerer (no affinity picked
+		// yet, or affinity persisted but not migrated) couldn't see Cleric
+		// cantrips like Guidance in the spell picker — Bug 5.
+		if (className === "Sorcerer" && this.isDivineSoulSubclass(subclass)) {
 			return ["Cleric"];
 		}
 		return [];
@@ -2061,8 +2445,10 @@ class CharacterSheetClassUtils {
 	 * @returns {Array<{tradition: string, code: string}>} Granted traditions
 	 */
 	static getSubclassGrantedTraditions (/** @type {*} */ subclass, /** @type {*} */ classSource) {
-		if (!subclass?.shortName) return [];
-		const isTGTT = classSource === "TGTT" || subclass.source === "TGTT";
+		if (!subclass) return [];
+		const lookupKey = subclass.shortName || subclass.name;
+		if (!lookupKey) return [];
+		const isTGTT = classSource === "TGTT" || subclass.source === "TGTT" || subclass.classSource === "TGTT";
 		if (!isTGTT) return [];
 
 		// Subclass → granted tradition(s) + bonus method count
@@ -2087,14 +2473,70 @@ class CharacterSheetClassUtils {
 			// --- Fighter subclasses ---
 			"Eldritch Knight": [{tradition: "Arcane Knight", code: "AK", bonusMethods: 1}, {tradition: "Eldritch Blackguard", code: "EB", bonusMethods: 1}],
 			"Battle Master": [{tradition: null, code: null, bonusMethods: 1, choice: true}, {tradition: null, code: null, bonusMethods: 0, choice: true}],
-			"Arcane Archer": [{tradition: "Biting Zephyr", code: "BZ", bonusMethods: 1, choice: true}, {tradition: "Razor's Edge", code: "RE", bonusMethods: 0, choice: true}, {tradition: "Unending Wheel", code: "UW", bonusMethods: 0, choice: true}],
+			"Arcane Archer": [{tradition: "Biting Zephyr", code: "BZ", bonusMethods: 1, choice: true}, {tradition: "Razor's Edge", code: "RE", bonusMethods: 0, choice: true}, {tradition: "Unending Wheel", code: "UW", bonusMethods: 0, choice: true}, {tradition: "Unerring Hawk", code: "UH", bonusMethods: 0, choice: true}],
 			"Champion": [{tradition: "Adamant Mountain", code: "AM", bonusMethods: 1, choice: true}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0, choice: true}, {tradition: "Tempered Iron", code: "TI", bonusMethods: 0, choice: true}],
+			"Purple Dragon Knight (Banneret)": [{tradition: "Adamant Mountain", code: "AM", bonusMethods: 1, choice: true}, {tradition: "Sanguine Knot", code: "SK", bonusMethods: 0, choice: true}, {tradition: "Spirited Steed", code: "SS", bonusMethods: 0, choice: true}],
+			"Cavalier": [{tradition: "Gallant Heart", code: "GH", bonusMethods: 1}, {tradition: "Spirited Steed", code: "SS", bonusMethods: 0}],
+			"Samurai": [{tradition: "Razor's Edge", code: "RE", bonusMethods: 1}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0}],
+			"Echo Knight": [{tradition: "Mirror's Glint", code: "MG", bonusMethods: 1}, {tradition: "Mist and Shade", code: "MS", bonusMethods: 0}],
+			"Psi Warrior": [{tradition: "Rapid Current", code: "RC", bonusMethods: 1}, {tradition: "Mirror's Glint", code: "MG", bonusMethods: 0}],
+			"Rune Knight": [{tradition: "Adamant Mountain", code: "AM", bonusMethods: 1}, {tradition: "Tempered Iron", code: "TI", bonusMethods: 0}],
+			// --- Paladin subclasses ---
+			"Oathbreaker": [{tradition: "Eldritch Blackguard", code: "EB", bonusMethods: 1}],
 			// --- Rogue subclasses ---
 			"Swashbuckler": [{tradition: "Comedic Jabs", code: "CJ", bonusMethods: 1}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0}],
 			// --- Warder (special: grants 2 fixed traditions) ---
 			"Warder": [{tradition: "Tempered Iron", code: "TI", bonusMethods: 1}, {tradition: "Gallant Heart", code: "GH", bonusMethods: 0}],
 		};
-		return (/** @type {*} */ (GRANTS))[subclass.shortName] || [];
+		return (/** @type {*} */ (GRANTS))[lookupKey] || (/** @type {*} */ (GRANTS))[subclass.name] || [];
+	}
+
+	/**
+	 * Subclass-specific tradition CHOICE pools: when a subclass grants the
+	 * player a CHOICE of N traditions from a restricted (or unrestricted)
+	 * pool — independent of the base-class tradition picker.
+	 *
+	 * `codes: null` → unrestricted (pick `pickCount` from any tradition).
+	 * `codes: [...]` → restricted (pick `pickCount` from this specific pool).
+	 *
+	 * These choices are ADDITIONAL to any fixed (non-`choice`) entries in
+	 * `getSubclassGrantedTraditions` and are presented to the user in a
+	 * dedicated picker section at the level the subclass is selected.
+	 */
+	static SUBCLASS_TRADITION_CHOICE_POOLS = {
+		// --- Fighter subclasses (TGTT) ---
+		"Arcane Archer": {pickCount: 2, codes: ["BZ", "RE", "UW", "UH"]},
+		"Champion": {pickCount: 2, codes: ["AM", "GH", "TI"]},
+		"Purple Dragon Knight (Banneret)": {pickCount: 2, codes: ["AM", "SK", "SS"]},
+		"Battle Master": {pickCount: 2, codes: null}, // unrestricted
+		// --- Monk subclasses (TGTT) ---
+		"Open Hand": {pickCount: 1, codes: ["AM", "TI"]},
+		"Debilitation": {pickCount: 1, codes: ["AM", "TI"]},
+		"Kensei": {pickCount: 1, codes: null}, // unrestricted
+	};
+
+	/**
+	 * Return the subclass-choice tradition pool for a given subclass.
+	 * @param {*} subclass - Subclass entity (uses shortName, falls back to name).
+	 * @param {string} classSource - The classSource (must be TGTT to apply).
+	 * @returns {{kind: "none"|"restricted"|"unrestricted", pickCount?: number, codes?: string[]|null}}
+	 */
+	static getSubclassTraditionChoicePool (/** @type {*} */ subclass, /** @type {*} */ classSource) {
+		if (!subclass) return {kind: "none"};
+		const lookupKey = subclass.shortName || subclass.name;
+		if (!lookupKey) return {kind: "none"};
+		const isTGTT = classSource === "TGTT" || subclass.source === "TGTT" || subclass.classSource === "TGTT";
+		if (!isTGTT) return {kind: "none"};
+
+		const map = (/** @type {*} */ (CharacterSheetClassUtils.SUBCLASS_TRADITION_CHOICE_POOLS));
+		const entry = map[lookupKey] || map[subclass.name];
+		if (!entry) return {kind: "none"};
+
+		return {
+			kind: entry.codes === null ? "unrestricted" : "restricted",
+			pickCount: entry.pickCount,
+			codes: entry.codes,
+		};
 	}
 
 	/**
@@ -2479,6 +2921,30 @@ class CharacterSheetClassUtils {
 		);
 
 		if (!combatMethodsFeature) return traditions;
+
+		// Detect unrestricted marker: {@filter <text>|combatmethods} (no |tradition= suffix).
+		// When present anywhere in the feature, the class is NOT restricted to a
+		// specific subset — any tradition= filters elsewhere are advisory
+		// (e.g. Fighter's "Getting Started" inset suggests TI + AM but allows all 17).
+		// Returning an empty set signals "no restriction" to upstream callers,
+		// which fall back to the full tradition pool.
+		const hasUnrestrictedMarker = (/** @type {*} */ entries) => {
+			if (!entries) return false;
+			if (typeof entries === "string") {
+				// Match {@filter <text>|combatmethods} where the closing brace
+				// immediately follows `combatmethods` (no third |tradition=... segment).
+				return /\{@filter [^|}]+\|combatmethods\}/.test(entries);
+			}
+			if (Array.isArray(entries)) return entries.some(hasUnrestrictedMarker);
+			if (typeof entries === "object") {
+				return hasUnrestrictedMarker(entries.entries)
+					|| hasUnrestrictedMarker(entries.items)
+					|| hasUnrestrictedMarker(entries.entry);
+			}
+			return false;
+		};
+
+		if (hasUnrestrictedMarker(combatMethodsFeature.entries)) return traditions;
 
 		const extractFromEntries = (/** @type {*} */ entries) => {
 			if (!entries) return;
@@ -3576,6 +4042,265 @@ class CharacterSheetClassUtils {
 			prereqContext,
 			alreadyKnown,
 		});
+	}
+
+	// ==========================================
+	// featProgression on optional features
+	// (e.g. Lessons of the First Ones — invocation that grants an Origin feat)
+	// ==========================================
+
+	/**
+	 * Get feat-progression picks for an optional feature, evaluated against how many
+	 * times the user has already picked this same feature (1-based — 1 = first time).
+	 *
+	 * Each picked invocation/maneuver/etc. independently gets the picks listed by its
+	 * `progression` map. A `"*"` key always triggers. Numeric keys match exact pick
+	 * counts. The returned `count` is the number of feats the user must choose for
+	 * that progression entry on THIS selection.
+	 *
+	 * @param {object} opt - The optional feature (must have `featProgression` to return anything)
+	 * @param {number} [timesPicked=1] - 1-based count of how many times this opt has now been chosen
+	 * @returns {Array<{progressionName: string, category: string[], count: number}>}
+	 */
+	static getOptFeatureFeatProgressionPicks (/** @type {*} */ opt, /** @type {*} */ timesPicked = 1) {
+		if (!opt?.featProgression?.length) return [];
+		/** @type {*[]} */ const out = [];
+		for (const prog of opt.featProgression) {
+			const map = prog.progression;
+			if (!map || typeof map !== "object") continue;
+
+			let count = 0;
+			if (map["*"] != null) {
+				count = Number(map["*"]) || 0;
+			} else {
+				const key = String(timesPicked);
+				if (map[key] != null) count = Number(map[key]) || 0;
+			}
+
+			if (count > 0) {
+				out.push({
+					progressionName: prog.name || "Feat",
+					category: Array.isArray(prog.category) ? [...prog.category] : [],
+					count,
+				});
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Filter the full feats list by category codes (e.g. ["O"] for Origin, ["EB"] for
+	 * Epic Boon, ["G"] for General). Feats without a category are excluded unless
+	 * `categories` is empty (in which case the input is returned unfiltered).
+	 *
+	 * Sub-typed categories like `FS:P` (Fighting Style: Paladin) match the bare base
+	 * code (`FS`) — both the exact code and the `<code>:*` prefix form are accepted
+	 * so callers can either request the whole family or a specific subtype.
+	 *
+	 * @param {Array<*>} feats - The pool of feats to filter
+	 * @param {Array<string>} categories - Category codes to allow
+	 * @returns {Array<*>} Filtered feats
+	 */
+	static filterFeatsByCategory (/** @type {*} */ feats, /** @type {*} */ categories) {
+		if (!Array.isArray(feats)) return [];
+		if (!Array.isArray(categories) || !categories.length) return feats;
+		const allowed = new Set(categories);
+		return feats.filter((/** @type {*} */ f) => {
+			if (!f?.category) return false;
+			if (allowed.has(f.category)) return true;
+			// FS:P matches FS, EB:foo matches EB, etc.
+			const colon = f.category.indexOf(":");
+			if (colon > 0 && allowed.has(f.category.slice(0, colon))) return true;
+			return false;
+		});
+	}
+
+	/**
+	 * Build the "feat choices spec" describing every sub-choice a feat presents
+	 * (skill / language / tool / expertise / ability / optionalFeature / spell choices).
+	 * Pure helper — takes a context object so it can be reused from level-up, the
+	 * builder, and quickbuild without inheriting their `this`.
+	 *
+	 * @param {object} feat - The feat data
+	 * @param {object} ctx - Context for evaluating optional-feature progressions
+	 * @param {object} [ctx.state] - CharacterSheetState (optional)
+	 * @param {object} [ctx.page] - CharacterSheetPage (for filterByAllowedSources / getOptionalFeatures)
+	 * @returns {*} Choices spec object (always returns an object; fields may be null)
+	 */
+	static buildFeatChoicesSpec (/** @type {*} */ feat, /** @type {*} */ ctx = {}) {
+		/** @type {*} */ const choices = {skills: null, languages: null, tools: null, ability: null, expertise: null, spells: null, optionalFeatures: null};
+		if (!feat || typeof feat !== "object") return choices;
+
+		// Skills
+		if (Array.isArray(feat.skillProficiencies)) {
+			for (const sp of feat.skillProficiencies) {
+				if (sp?.choose) {
+					choices.skills = {count: sp.choose.count || 1, from: sp.choose.from || Object.keys(Parser.SKILL_TO_ATB_ABV)};
+					break;
+				}
+				if (sp?.any) {
+					choices.skills = {count: sp.any, from: Object.keys(Parser.SKILL_TO_ATB_ABV)};
+					break;
+				}
+			}
+		}
+
+		// Languages
+		if (Array.isArray(feat.languageProficiencies)) {
+			for (const lp of feat.languageProficiencies) {
+				if (lp?.anyStandard) { choices.languages = {count: lp.anyStandard, type: "standard"}; break; }
+				if (lp?.any) { choices.languages = {count: lp.any, type: "any"}; break; }
+			}
+		}
+
+		// Tools
+		if (Array.isArray(feat.toolProficiencies)) {
+			for (const tp of feat.toolProficiencies) {
+				if (tp?.anyArtisansTool && tp?.anyMusicalInstrument) {
+					choices.tools = {count: tp.anyArtisansTool, type: "artisanOrInstrument"};
+					break;
+				}
+				if (tp?.anyArtisansTool) { choices.tools = {count: tp.anyArtisansTool, type: "artisan"}; break; }
+				if (tp?.anyMusicalInstrument) { choices.tools = {count: tp.anyMusicalInstrument, type: "instrument"}; break; }
+				if (tp?.any) { choices.tools = {count: tp.any, type: "any"}; break; }
+				if (tp?.choose) { choices.tools = {count: tp.choose.count || 1, from: tp.choose.from || []}; break; }
+			}
+			if (!choices.tools) {
+				const hasArtisan = feat.toolProficiencies.some((/** @type {*} */ tp) => tp?.anyArtisansTool);
+				const hasInstrument = feat.toolProficiencies.some((/** @type {*} */ tp) => tp?.anyMusicalInstrument);
+				if (hasArtisan && hasInstrument) choices.tools = {count: 1, type: "artisanOrInstrument"};
+			}
+		}
+
+		// Expertise
+		if (Array.isArray(feat.expertise)) {
+			for (const exp of feat.expertise) {
+				if (exp?.anyProficientSkill) { choices.expertise = {count: exp.anyProficientSkill, type: "proficient"}; break; }
+				if (exp?.choose) { choices.expertise = {count: exp.choose.count || 1, from: exp.choose.from || []}; break; }
+			}
+		}
+
+		// Ability score increases (choose from)
+		if (Array.isArray(feat.ability)) {
+			for (const ab of feat.ability) {
+				if (ab?.choose) {
+					choices.ability = {count: ab.choose.count || 1, amount: ab.choose.amount || 1, from: ab.choose.from || Parser.ABIL_ABVS};
+					break;
+				}
+			}
+		}
+
+		// Optional-feature picks (Eldritch Adept etc.) — only available when ctx has state+page
+		const featOptSpecs = CharacterSheetClassUtils.getFeatOptionalFeatureChoiceSpec(feat);
+		if (featOptSpecs?.length && ctx?.page && ctx?.state) {
+			try {
+				const allOptFeaturesRaw = ctx.page.filterByAllowedSources(ctx.page.getOptionalFeatures?.() || []);
+				const settings = ctx.state.getSettings?.() || {};
+				const showAll = !!settings.showAllOptFeatureVersions;
+				const enableTgtt = !!settings.enableTgtt;
+				const dedupedOptFeatures = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll});
+				const allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(dedupedOptFeatures, {enableTgtt});
+				const alreadyKnown = (ctx.state.getFeatures?.() || []).filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
+				const prereqContext = {
+					classes: ctx.state.getClasses?.() || [],
+					totalLevel: ctx.state.getTotalLevel?.() || 0,
+					existingFeatures: alreadyKnown,
+					cantrips: ctx.state.getCantripsKnown?.() || [],
+					spells: ctx.state.getSpellsKnown?.() || [],
+				};
+				choices.optionalFeatures = featOptSpecs.map((/** @type {*} */ spec) => ({
+					...spec,
+					available: CharacterSheetClassUtils.getFeatOptionalFeatureOptions(allOptFeatures, {
+						featureTypes: spec.featureTypes,
+						prereqContext,
+						alreadyKnown,
+					}),
+				}));
+			} catch (e) {
+				// Defensive — if ctx is incomplete, skip optional-feature picks gracefully
+				choices.optionalFeatures = null;
+			}
+		}
+
+		// Spells (Magic Initiate–style + additionalSpells choose entries)
+		if (Array.isArray(feat.additionalSpells)) {
+			/** @type {*} */ const spellChoices = {cantrips: null, spells: null, list: null};
+			for (const addSpells of feat.additionalSpells) {
+				if (addSpells?.name && addSpells?.ability) {
+					spellChoices.list = {name: addSpells.name, ability: addSpells.ability};
+				}
+				const parseSpellBlock = (/** @type {*} */ block, /** @type {*} */ target) => {
+					if (!block) return;
+					for (const [key, val] of Object.entries(block)) {
+						if (key === "_" || key === "daily" || key === "rest") {
+							const spells = key === "_" ? val : (val?.["1e"] || val?.["1"] || Object.values(val || {})[0] || []);
+							if (Array.isArray(spells)) {
+								for (const spell of spells) {
+									if (spell && typeof spell === "object" && spell.choose && typeof spell.choose === "string") {
+										const filter = spell.choose;
+										const count = spell.count || 1;
+										const maxLevel = filter.match(/level=(\d+)/)?.[1];
+										if (maxLevel === "0" || filter.includes("level=0")) {
+											spellChoices.cantrips = {count, filter};
+										} else {
+											spellChoices.spells = {
+												count,
+												filter,
+												innate: target === "innate",
+												daily: key === "daily" ? "1" : null,
+											};
+										}
+									}
+								}
+							}
+						}
+					}
+				};
+				parseSpellBlock(addSpells.innate, "innate");
+				parseSpellBlock(addSpells.known, "known");
+				parseSpellBlock(addSpells.prepared, "prepared");
+			}
+			if (spellChoices.cantrips || spellChoices.spells || spellChoices.list) choices.spells = spellChoices;
+		}
+
+		return choices;
+	}
+
+	/**
+	 * Validate that all required sub-choices on a feat have been filled in.
+	 * Apply-button gate for Bug 8 feat-progression picks.
+	 *
+	 * @param {object} feat - The feat (after `_featChoices` mutation by the picker UI)
+	 * @param {object} [spec] - Optional pre-built spec; built from feat+ctx if omitted
+	 * @param {object} [ctx] - Context passed to buildFeatChoicesSpec if spec absent
+	 * @returns {boolean} true iff every required choice has been picked
+	 */
+	static isFeatChoiceSpecComplete (/** @type {*} */ feat, /** @type {*} */ spec = null, /** @type {*} */ ctx = {}) {
+		if (!feat || typeof feat !== "object") return true;
+		const sp = spec || CharacterSheetClassUtils.buildFeatChoicesSpec(feat, ctx);
+		const fc = feat._featChoices || {};
+
+		if (sp.skills && (!Array.isArray(fc.skills) || fc.skills.length < sp.skills.count)) return false;
+		if (sp.languages && (!Array.isArray(fc.languages) || fc.languages.length < sp.languages.count)) return false;
+		if (sp.tools && (!Array.isArray(fc.tools) || fc.tools.length < sp.tools.count)) return false;
+		if (sp.expertise && (!Array.isArray(fc.expertise) || fc.expertise.length < sp.expertise.count)) return false;
+		if (sp.ability) {
+			const picked = fc.ability && typeof fc.ability === "object" ? Object.keys(fc.ability).length : 0;
+			if (picked < sp.ability.count) return false;
+		}
+		if (Array.isArray(sp.optionalFeatures) && sp.optionalFeatures.length) {
+			const picks = Array.isArray(fc.optionalFeatures) ? fc.optionalFeatures : [];
+			for (const optSpec of sp.optionalFeatures) {
+				const match = picks.find((/** @type {*} */ p) => p?.featureName === optSpec.name) || picks.find((/** @type {*} */ p) => p?.specIndex === sp.optionalFeatures.indexOf(optSpec));
+				if (!match || !Array.isArray(match.picks) || match.picks.length < (optSpec.count || 1)) return false;
+			}
+		}
+		if (sp.spells) {
+			if (sp.spells.list && !fc.scribingClass) return false;
+			if (sp.spells.cantrips && (!Array.isArray(fc.cantrips) || fc.cantrips.length < sp.spells.cantrips.count)) return false;
+			if (sp.spells.spells && (!Array.isArray(fc.spells) || fc.spells.length < sp.spells.spells.count)) return false;
+		}
+		return true;
 	}
 
 	/**

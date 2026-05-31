@@ -52,36 +52,41 @@ describe("Exhaustion Mechanics", () => {
 			expect(state.getExhaustion()).toBe(10);
 		});
 
-		// --- d20 penalty ---
-		test("should apply -1 per level to saving throws", () => {
+		// --- d20 penalty: display methods are NOT affected (penalty applied at roll time only) ---
+		test("should NOT bake d20 penalty into displayed save mod", () => {
 			const baseSave = state.getSaveMod("dex");
 			state.setExhaustion(3);
-			expect(state.getSaveMod("dex")).toBe(baseSave - 3);
+			expect(state.getSaveMod("dex")).toBe(baseSave);
+			expect(state._getExhaustionD20Penalty()).toBe(3); // penalty still available for roll handlers
 		});
 
-		test("should apply -1 per level to skill checks", () => {
+		test("should NOT bake d20 penalty into displayed skill mod", () => {
 			const baseSkill = state.getSkillMod("perception");
 			state.setExhaustion(2);
-			expect(state.getSkillMod("perception")).toBe(baseSkill - 2);
+			expect(state.getSkillMod("perception")).toBe(baseSkill);
+			expect(state._getExhaustionD20Penalty()).toBe(2);
 		});
 
-		test("should apply -1 per level to initiative", () => {
+		test("should NOT bake d20 penalty into displayed initiative", () => {
 			const baseInit = state.getInitiative();
 			state.setExhaustion(4);
-			expect(state.getInitiative()).toBe(baseInit - 4);
+			expect(state.getInitiative()).toBe(baseInit);
+			expect(state._getExhaustionD20Penalty()).toBe(4);
 		});
 
-		test("should apply -1 per level to spell attack bonus", () => {
+		test("should NOT bake d20 penalty into displayed spell attack bonus", () => {
 			state._data.spellcasting.ability = "int";
 			const baseAttack = state.getSpellAttackBonus();
 			state.setExhaustion(2);
-			expect(state.getSpellAttackBonus()).toBe(baseAttack - 2);
+			expect(state.getSpellAttackBonus()).toBe(baseAttack);
+			expect(state._getExhaustionD20Penalty()).toBe(2);
 		});
 
-		test("should apply -1 per level to spell attack bonus by class name", () => {
+		test("should NOT bake d20 penalty into displayed spell attack bonus by class name", () => {
 			const baseAttack = state.getSpellAttackBonus("Wizard");
 			state.setExhaustion(3);
-			expect(state.getSpellAttackBonus("Wizard")).toBe(baseAttack - 3);
+			expect(state.getSpellAttackBonus("Wizard")).toBe(baseAttack);
+			expect(state._getExhaustionD20Penalty()).toBe(3);
 		});
 
 		test("should apply -1 per level to spell save DC", () => {
@@ -97,19 +102,43 @@ describe("Exhaustion Mechanics", () => {
 			expect(state.getWalkSpeed()).toBe(baseSpeed);
 		});
 
-		test("high exhaustion should heavily penalize d20 rolls", () => {
+		test("d20 penalty source returns correct magnitude regardless of display", () => {
 			state.setExhaustion(8);
 			expect(state._getExhaustionD20Penalty()).toBe(8);
-			// DEX mod = +2, save with -8 penalty
+			// Display value is "pure" — penalty NOT baked in
 			const save = state.getSaveMod("dex");
-			expect(save).toBe(state.getAbilityMod("dex") - 8); // No proficiency in DEX saves for wizard
+			expect(save).toBe(state.getAbilityMod("dex")); // No proficiency in DEX saves for wizard
 		});
 
-		test("passive perception should reflect exhaustion penalty via skill mod", () => {
+		test("passive perception is NOT reduced by exhaustion (it is a static value, not a roll)", () => {
 			const basePassive = state.getPassivePerception();
 			state.setExhaustion(3);
-			// Passive = 10 + skill mod; skill mod decreased by 3
-			expect(state.getPassivePerception()).toBe(basePassive - 3);
+			expect(state.getPassivePerception()).toBe(basePassive);
+		});
+
+		// --- Feature calc d20 bonuses: stay pure (parallel to getSpellAttackBonus) ---
+		test("getFeatureCalculations spell attack bonus stays pure (d20 bonus, not DC)", () => {
+			// Per Phase 1 doctrine: d20 bonuses (incl. calc.spellAttackBonus) are exhaustion-free
+			// at display/calc time. Roll handlers apply the penalty once via _getExhaustionD20Penalty.
+			const baseCalcs = state.getFeatureCalculations?.() || {};
+			const baseAttack = baseCalcs.spellAttackBonus;
+			// Only run the assertion if this character actually exposes spellAttackBonus
+			if (baseAttack == null) return;
+			state.setExhaustion(3);
+			const newCalcs = state.getFeatureCalculations?.() || {};
+			expect(newCalcs.spellAttackBonus).toBe(baseAttack);
+			expect(state._getExhaustionD20Penalty()).toBe(3);
+		});
+
+		test("getFeatureCalculations spell save DC IS reduced by exhaustion (DC, not d20 bonus)", () => {
+			// Per Phase 1 doctrine: DCs ARE reduced by exhaustion in Thelemar rules.
+			// This test pins the asymmetry against accidental "cleanup" of DC sites.
+			const baseCalcs = state.getFeatureCalculations?.() || {};
+			const baseDc = baseCalcs.spellSaveDc;
+			if (baseDc == null) return;
+			state.setExhaustion(2);
+			const newCalcs = state.getFeatureCalculations?.() || {};
+			expect(newCalcs.spellSaveDc).toBe(baseDc - 2);
 		});
 	});
 
@@ -135,30 +164,34 @@ describe("Exhaustion Mechanics", () => {
 			expect(state.isDead()).toBe(false);
 		});
 
-		// --- d20 penalty ---
-		test("should apply -1 per level to saving throws", () => {
+		// --- d20 penalty: display methods unaffected; penalty exposed for roll handlers ---
+		test("should NOT bake d20 penalty into displayed save mod", () => {
 			const baseSave = state.getSaveMod("wis");
 			state.setExhaustion(2);
-			expect(state.getSaveMod("wis")).toBe(baseSave - 2);
+			expect(state.getSaveMod("wis")).toBe(baseSave);
+			expect(state._getExhaustionD20Penalty()).toBe(2);
 		});
 
-		test("should apply -1 per level to skill checks", () => {
+		test("should NOT bake d20 penalty into displayed skill mod", () => {
 			const baseSkill = state.getSkillMod("athletics");
 			state.setExhaustion(3);
-			expect(state.getSkillMod("athletics")).toBe(baseSkill - 3);
+			expect(state.getSkillMod("athletics")).toBe(baseSkill);
+			expect(state._getExhaustionD20Penalty()).toBe(3);
 		});
 
-		test("should apply -1 per level to initiative", () => {
+		test("should NOT bake d20 penalty into displayed initiative", () => {
 			const baseInit = state.getInitiative();
 			state.setExhaustion(2);
-			expect(state.getInitiative()).toBe(baseInit - 2);
+			expect(state.getInitiative()).toBe(baseInit);
+			expect(state._getExhaustionD20Penalty()).toBe(2);
 		});
 
-		test("should apply -1 per level to spell attack bonus", () => {
+		test("should NOT bake d20 penalty into displayed spell attack bonus", () => {
 			state._data.spellcasting.ability = "int";
 			const baseAttack = state.getSpellAttackBonus();
 			state.setExhaustion(1);
-			expect(state.getSpellAttackBonus()).toBe(baseAttack - 1);
+			expect(state.getSpellAttackBonus()).toBe(baseAttack);
+			expect(state._getExhaustionD20Penalty()).toBe(1);
 		});
 
 		// --- Speed penalty ---
@@ -217,7 +250,7 @@ describe("Exhaustion Mechanics", () => {
 			expect(state.isDead()).toBe(true);
 		});
 
-		test("should NOT apply flat d20 penalty (2014 uses disadvantage tiers)", () => {
+		test("should NOT bake flat d20 penalty into displayed save mod (2014 uses disadvantage tiers)", () => {
 			expect(state._getExhaustionD20Penalty()).toBe(0);
 			const baseSave = state.getSaveMod("str");
 			state.setExhaustion(3);
@@ -377,13 +410,13 @@ describe("Exhaustion Mechanics", () => {
 			expect(state._getExhaustionSpeedPenalty()).toBe(0);
 		});
 
-		test("removing exhaustion should remove penalties", () => {
+		test("removing exhaustion is a no-op on displayed save mod (penalty was never baked in)", () => {
 			state.setExhaustionRules("thelemar");
 			state.setExhaustion(5);
 			const penalizedSave = state.getSaveMod("wis");
 			state.setExhaustion(0);
 			const normalSave = state.getSaveMod("wis");
-			expect(normalSave).toBe(penalizedSave + 5);
+			expect(normalSave).toBe(penalizedSave); // displayed bonus unchanged by exhaustion
 		});
 
 		test("addExhaustion should increment correctly", () => {
@@ -407,7 +440,7 @@ describe("Exhaustion Mechanics", () => {
 			expect(state.getExhaustion()).toBe(0);
 		});
 
-		test("all d20-based outputs should be affected simultaneously", () => {
+		test("no d20-based display outputs are affected by exhaustion (penalty only at roll time)", () => {
 			state.setExhaustionRules("2024");
 			state._data.spellcasting.ability = "int";
 
@@ -418,10 +451,12 @@ describe("Exhaustion Mechanics", () => {
 
 			state.setExhaustion(3);
 
-			expect(state.getSaveMod("str")).toBe(baseSave - 3);
-			expect(state.getSkillMod("athletics")).toBe(baseSkill - 3);
-			expect(state.getInitiative()).toBe(baseInit - 3);
-			expect(state.getSpellAttackBonus()).toBe(baseSpellAtk - 3);
+			expect(state.getSaveMod("str")).toBe(baseSave);
+			expect(state.getSkillMod("athletics")).toBe(baseSkill);
+			expect(state.getInitiative()).toBe(baseInit);
+			expect(state.getSpellAttackBonus()).toBe(baseSpellAtk);
+			// Penalty is still available for the roll handlers to subtract at roll time
+			expect(state._getExhaustionD20Penalty()).toBe(3);
 		});
 	});
 });

@@ -139,6 +139,8 @@ All 8 XPHB properties tracked: Cleave, Graze, Nick, Push, Sap, Slow, Topple, Vex
 }
 ```
 
+**Manual pip toggling (Phase 6.2).** The Spells tab renders each slot as a `.charsheet__spell-slot-pip` element with an additional `.charsheet__spell-slot-pip--used` modifier class when consumed. Clicking a pip toggles it through `_toggleSlot`: clicking an available pip calls `state.useSpellSlot(level)` (decrement `current`); clicking the rightmost used pip calls `state.setSpellSlots(level, current + 1)` (restore one). The selector and used-class check must use the full prefixed names (`.charsheet__spell-slot-pip` and `.charsheet__spell-slot-pip--used`) — a previous shortform regression silently broke the click handler entirely.
+
 ## Inventory Item Format
 
 ### Items (`_data.inventory[]`)
@@ -204,6 +206,17 @@ Users can configure custom source with `charsheet-npc-export-source-config` stor
 
 ### Item Charge Restoration
 Recognizes recharge types: `restLong`, `dawn`, `dusk`, `midnight` (on long rest), `restShort` (short rest only). Parses `rechargeAmount` dice notation (e.g., `"1d6 + 1"`) and rolls if present.
+
+## Exhaustion Penalty Routing
+**File**: `CharacterSheetState._getExhaustionD20Penalty` (~L9544) is the single source of truth for the per-d20 penalty. Magnitude depends on `settings.exhaustionRules`: `"thelemar"` and `"2014"` use `-1 × exhaustion`; `"2024"` uses `-2 × exhaustion`.
+
+**Invariant — displayed bonuses are unaffected by exhaustion.** Display methods (`getSaveMod`, `getSkillModWithAbility`, `getInitiative`, party-tracker `getSaveBonus`/`getSkillBonus`) return the pure modifier with no exhaustion subtraction. The penalty is applied **once**, at the roll level, by `_rollAbilityCheck`, `_rollSavingThrow`, `_rollSkillCheck`, `_rollAttack`, and `_rollInitiative` — all of which read the canonical `state._getExhaustionD20Penalty()`. Do NOT add exhaustion to any new display getter or you will reintroduce the double-application bug.
+
+**DC contract — DCs ARE reduced (Thelemar only).** Spell save DCs and feature save DCs *do* bake `_getExhaustionDcPenalty()` in at display/calc time. This is intentional and asymmetric with the d20-bonus rule above: the DC penalty getter returns 0 in `"2014"` and `"2024"` rules and returns the exhaustion level only in `"thelemar"`. Consumers of `getFeatureCalculations().spellSaveDc` / `.ekSpellSaveDc` / etc. must NOT subtract exhaustion again. Consumers of `.spellAttackBonus` / `.ekSpellAttackBonus` must NOT subtract exhaustion at all (it is applied once at roll time alongside any other d20 total). Phase 5.6.5 hygiene cleaned up 7 legacy spell-attack-bonus computations that violated this contract.
+
+**Dual canonical/effective display (Phase 5.6 + Phase 6.5).** Five d20 breakdown methods now exist: `getSaveBreakdown`, `getSkillBreakdown`, `getAbilityCheckBreakdown` (added Phase 6.5 for the abilities grid), `getInitiativeBreakdown`, and `getSpellAttackBreakdown`. Each returns `{total, canonical, components}` where `components` is an array of `{type, name, value, icon, isCanonical?}` rows. The `total` field aggregates everything (it's the "effective"); `canonical` is the pure ability + proficiency sum (no exhaustion, no custom mods, no spell buffs). Phase 6.5 added exhaustion to the breakdowns as a non-canonical penalty component (`isCanonical: false`) so the effective number visibly drops while the canonical stays pure — matching the user-facing principle that "the d20 actually loses N to exhaustion." `getSpellDcBreakdown` is intentionally NOT a d20 breakdown — DCs are target numbers, and the existing DC-side exhaustion contract (above) handles them separately. The shared helper `_formatModWithEffective(canonical, effective, opts)` in `charactersheet.js` renders only the canonical value when the two match; otherwise it inlines the effective value in a smaller, color-coded `<span class="charsheet__mod-effective charsheet__mod-effective--{positive|negative}">…</span>`. Callers must use `.innerHTML` (not `.textContent`) when the helper may return HTML. The same display contract is used for `spellSaveDc` and `spellAttackBonus` via `_renderSpellcastingStats` in `charactersheet-spells.js`. **Roll handlers never consume `breakdown.total` for the d20** — they subtract `_getExhaustionD20Penalty()` themselves exactly once. Adding exhaustion to the breakdown affects display only.
+
+**Custom modifier write contract (Phase 6.4).** `_recalculateCustomModifiers` fans a user-entered `d20:all` modifier out into the per-roll buckets that the read side consumes. `cm.abilityChecks[abl]` is set for each of the 6 abilities and is the canonical channel through which `getSkillModWithAbility` picks it up (skills *are* ability checks). The old write path **also** wrote to `cm.skills["_all"]`, which `getSkillCustomMod(skill)` reads — so a single +1 from `d20:all` ended up applied twice on every skill check (once via `abilityChecks`, once via `skills["_all"]`). Phase 6.4 dropped the `skills["_all"]` write from the `d20:all` case. The dedicated `skill:all` parser case (user-typed "+N to skill checks") still writes there and is unchanged — that is the intentional channel for skill-only modifiers. Saves and initiative were always single-channel and unaffected.
 
 ## Combat Action Effects Pipeline
 
@@ -325,6 +338,21 @@ Cross-tab "star this thing" backing the Actions hub favourites strip. `_data.fav
 API: `isFavorite(type, idSuffix)`, `addFavorite(favData, {max})`, `removeFavorite(id)`, `toggleFavorite(favData, {max})` (returns `"added"|"removed"|null`), `_resolveFavorite(fav)` (re-resolves entity, handles renames), `isFavoriteResolved(fav)`, `getOrphanedFavorites()`, `cleanupOrphanedFavorites()` (manual; orphans are NOT auto-pruned to protect against transient data-load failures).
 
 Items use a parallel legacy favourites system that predates this one — don't duplicate.
+
+### Overview "Favourite Spells" Card
+**File**: `_renderQuickSpells` in `charactersheet.js` (~L7408).
+
+The card on the overview titled "Favourite Spells" reads `state.getFavorites().filter(f => f.type === "spell")`, resolves each via `_resolveFavorite`, and renders a row per starred spell. Star buttons on rows in the **Spells tab** are the canonical way to add/remove entries. The renderer is also called from `_renderFavouriteStar` whenever a `type==="spell"` favourite toggles, so the overview refreshes immediately. No separate cap — it shares the 8-favourites cap.
+
+## Overview "Resources" vs "Abilities" Cards
+**Files**: `_renderResources` (~L5328) and `_renderOverviewAbilities` (~L5443) in `charactersheet.js`.
+
+The two overview cards are intentionally non-overlapping:
+
+- **Resources** = system / class-granted limited-use pools only — Channel Divinity, Rage, Ki, spell-resource pools, Stamina (TGTT combat-traditions pool), racial 1/day, etc. Sourced from `state.getResources()` + the stamina pool. **Custom abilities do NOT appear here.**
+- **Abilities** = user-curated custom abilities only — surfaced from `state.getCustomAbilities()`. Each row has Use / Edit (✏️) / Star buttons; Edit opens `CharacterSheetCustomAbilities._showAbilityModal(id)` which exposes the icon picker. **Class resources do NOT appear here.**
+
+CSS: `.charsheet__ability-name` and `.charsheet__resource-name` wrap with `overflow-wrap: anywhere; word-break: break-word;` so long names flow to a second line instead of being truncated by ellipsis. A `.charsheet__section-caption` element under each section title explains the split.
 
 ## Apply Buff Modal
 **Files**: button in `charactersheet.js` (~L6411, Active States section, class `charsheet__apply-buff-btn`), helpers in `charactersheet-buffpicker-helpers.js`, effect application in `charactersheet-spells.js` (`_applyBuffEffects` ~L4318).

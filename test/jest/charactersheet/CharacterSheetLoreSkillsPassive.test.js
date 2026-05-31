@@ -58,14 +58,14 @@ describe("Character Sheet — Lore Skills passive scoring", () => {
 		expect(state.getPassiveScore("heraldry")).toBe(14);
 	});
 
-	it("exhaustion penalty subtracts from the passive", () => {
+	it("exhaustion does NOT subtract from the passive (passive is a static value, not a roll)", () => {
 		state.addClass({name: "Wizard", source: "PHB", level: 1}); // PB +2
 		state.addLoreSkill("Heraldry", 2);
-		// 1 level of exhaustion = -2 to d20 tests in the active rule set
-		// (we just assert the passive responds to whatever penalty applies)
+		// Per the new contract: displayed bonuses (including passive scores) are
+		// exhaustion-free. The penalty applies only at active-roll time.
 		const baseline = state.getPassiveScore("heraldry");
-		state.setExhaustion(1);
-		const penalised = state.getPassiveScore("heraldry");
-		expect(penalised).toBeLessThanOrEqual(baseline);
+		state.setExhaustion(3);
+		const afterExhaustion = state.getPassiveScore("heraldry");
+		expect(afterExhaustion).toBe(baseline);
 	});
 });

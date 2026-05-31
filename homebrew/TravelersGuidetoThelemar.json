@@ -2011,8 +2011,13 @@
 			],
 			"entries": [
 				"You gain the ability to memorize a single spell from a spellbook, which you can cast using your spell slots.",
-				"Choose a class of which you are a member, from the following classes: bard, sorcerer or warlock. When you choose this feat, you acquire a spellbook holding two 1st-level spells of your choice from that class’s spell list. You can memorize one spell from your spellbook after you finish a long rest, by spending 10 minutes studying your spellbook and memorizing the incantations and gestures you must make to cast the spell. You can cast the spell you memorized using spell slots you have of the appropriate level. Your spellcasting ability for this spell is charisma.",
-				"If you come across a spell in written form, such as a magical spell scroll or a spellbook, you might be able to add it to your spellbook. The spell must be on the spell list for the class you chose, and the spell’s level can be no higher than half your levels in that class (rounded up). The process of copying the spell into your spellbook takes 2 hours per level of the spell, and costs 50 gp per level. The cost represents material components you expend as you experiment with the spell to master it, as well as the fine inks you need to record it."
+				{
+					"type": "list",
+					"items": [
+						"Choose a class of which you are a member, from the following classes: bard, sorcerer or warlock. When you choose this feat, you acquire a spellbook holding two 1st-level spells of your choice from that class’s spell list. You can memorize one spell from your spellbook after you finish a long rest, by spending 10 minutes studying your spellbook and memorizing the incantations and gestures you must make to cast the spell. You can cast the spell you memorized using spell slots you have of the appropriate level. Your spellcasting ability for this spell is charisma.",
+						"If you come across a spell in written form, such as a magical spell scroll or a spellbook, you might be able to add it to your spellbook. The spell must be on the spell list for the class you chose, and the spell’s level can be no higher than half your levels in that class (rounded up). The process of copying the spell into your spellbook takes 2 hours per level of the spell, and costs 50 gp per level. The cost represents material components you expend as you experiment with the spell to master it, as well as the fine inks you need to record it."
+					]
+				}
 			]
 		},
 		{

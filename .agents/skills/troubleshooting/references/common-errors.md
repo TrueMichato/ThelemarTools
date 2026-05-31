@@ -158,6 +158,45 @@ if (spell.name === "Blade Ward" && spell.source === "XPHB") {
 
 **Fix**: These characters can only be rebuilt via Quick Build. Migrations should initialize `levelHistory: []` for old saves.
 
+### B7. Exhaustion — Canonical Bonus vs Effective Bonus
+
+**Symptom**: Exhaustion penalty appears twice (visible in the displayed modifier AND subtracted again at roll), or the displayed modifier silently drifts (e.g. `+5` becomes `+3` on the sheet) so players can't tell the canonical value from the situational one.
+
+**Root Cause**: Exhaustion (and other situational mods like custom buffs / item bonuses / spell effects) was being baked into a single number used for both display and rolling. Two failure modes:
+1. Baked into the display value AND subtracted again in the roll handler → double penalty.
+2. Baked into the display value but breakdowns showed canonical → the displayed number doesn't match the "calculation breakdown" players see.
+
+**Fix**: Maintain a strict canonical/effective split.
+- **Canonical** = ability + proficiency + permanent bonuses (race, items always-on). Stays stable, used for the "intrinsic" number on the sheet.
+- **Effective** = canonical ± situational mods (exhaustion penalty, custom mods, active states, concentration buffs). Computed on demand by the breakdown methods (`getSaveBreakdown`, `getSkillBreakdown`, `getInitiativeBreakdown`, `getAbilityCheckBreakdown`, spell DC/attack).
+- Roll handlers apply situational mods **once** at roll time, never pre-baked into stored fields.
+- Surface both via `_formatModWithEffective(canonical, effective)` (see B8). The exhaustion subtraction must live inside the breakdown methods that compute `effective`, **never** in the field that produces `canonical`.
+
+Regression smell: if `spellAttackBonus`/`spellSaveDc` calc fields contain an exhaustion delta, the display and the roll will fight each other.
+
+### B8. Dual Canonical/Effective Modifier Display Contract
+
+**Symptom**: Inconsistent display of buffed/nerfed bonuses across the sheet. Some surfaces show the situational total, others show the intrinsic value, no surface shows both.
+
+**Root Cause**: No single helper to render the canonical+effective pair, so each call site invents its own format.
+
+**Fix**: Use `_formatModWithEffective(canonical, effective, opts?)` (in `charactersheet.js`). It emits the canonical alone when the two are equal, and `${canonical}<span class="charsheet__mod-effective ${pos|neg}">(${effective})</span>` otherwise. Call sites that must agree on this contract:
+- `charactersheet.js` L2825 (legacy ability mod), L2851 (hero ability mod), L2908 (skill mod), L3131 (initiative)
+- `charactersheet-spells.js` L5950–5951 (spell DC, spell attack)
+- Saves, breakdowns, anywhere a roll bonus is displayed alongside a roll button
+
+Two-direction CSS coupling: if you add a new dual-display surface, check that its container has room for the parenthetical (`inline-flex; align-items: baseline; gap` on the pill) and that the parenthetical font scales sanely under `[data-textsize]` (see **E4**).
+
+### B9. Custom Modifier Double-Count — Sub-Type Matching
+
+**Symptom**: A custom modifier "+1 to all d20 rolls" applies as **+2** to ability checks (or saves, or attacks) — the general bucket is being counted once, the per-roll-type bucket is being counted again.
+
+**Root Cause**: The modifier registry uses hierarchical sub-types — e.g. `check:str:athletics` is also matched by `check:str` and bare `check`. If `aggregateModifiers()` walks the chain naively and sums every bucket it touches, a single registered entry with target `check` gets summed once for `check`, again for `check:str`, again for `check:str:athletics`.
+
+**Fix**: De-duplicate by modifier **id**, not by bucket. Each registered modifier has a unique id; `aggregateModifiers()` must collect ids across the matching chain and sum the value only once per id. See D5 for the sibling cascade pitfall.
+
+Smell test: register a single `+1` to `check` and verify a Strength (Athletics) check rolls with `+1`, not `+3`.
+
 ---
 
 ## C. Data & Schema Errors
@@ -322,6 +361,19 @@ container.empty();
 items.forEach(item => buildElement(item).appendTo(container));
 ```
 
+### E4. Dual-Display CSS — Pill Overflow Under [data-textsize]
+
+**Symptom**: An ability/skill/save/spell-DC pill overflows its grid cell or visibly bleeds past its background once the canonical+effective dual display kicks in (e.g. `-1 (-3)` instead of just `-1`). Often only visible at larger text-size settings.
+
+**Root Cause**: `[data-textsize]` bumps a container's font-size for readability (e.g. legacy `.charsheet__ability-mod` jumps to `--cs-text-3xl` / 2rem). The dual-display parenthetical inherits via `em`, so a 0.6em–0.75em span attached to a 2rem parent renders at 1.2–1.5rem — almost as big as the canonical, and the combined token overflows the cell.
+
+**Fix**: Three coordinated CSS rules whenever a pill carries dual content:
+1. **Give the pill its own (smaller) bump under `[data-textsize]`** rather than sharing the score's 3xl rule. Example: `.charsheet__ability-mod` uses `--cs-text-xl` (1.25rem) while the score above it stays at 3xl.
+2. **Use `inline-flex; align-items: baseline; gap: 0.15em; box-sizing: border-box; line-height: 1.15`** on the pill — `inline-block` mishandles baselines when canonical and parenthetical are different sizes, and `box-sizing: border-box` makes `max-width: 100%` actually constrain.
+3. **Keep the parenthetical small enough to be subordinate**: global `.charsheet__mod-effective` at `0.75em` is comfortable in normal-text surfaces (skills, saves, spell DC); scope a tighter `0.6em` override (`.charsheet__ability-mod .charsheet__mod-effective`) only where the parent is bumped large.
+
+Safe by inspection: `.charsheet__skill-mod` (has `max-width: 110px`, parent stays at base font), `.charsheet__save-row` (base font), `.charsheet__ability-hero-mod` (only bumped to 2xl), spell DC/atk cells (no fixed pill width). Re-audit any new pill that participates in dual-display.
+
 ---
 
 ## F. Parser / Feature Detection Errors
@@ -368,6 +420,35 @@ if (typeof sp.choose === "string" && sp.choose.includes("level=0")) { ... }
 **Root Cause**: `Parser.LANGUAGES_EXOTIC` lists Ignan as standalone, but `data/languages.json` only defines it as a dialect of Primordial (no independent entry).
 
 **Fix**: Either add Ignan to `data/languages.json` as independent entry, or handle dialect→parent mapping consistently.
+
+### F6. Spell Picker — Source Filter Missing Subclass
+
+**Symptom**: A subclass-only spell (e.g. Gift of Alacrity for a Chronurgy Wizard, Guidance for a Divine Soul Sorcerer) is missing from the picker even though the character is the right subclass. Adding the subclass source to the filter manually surfaces the spell.
+
+**Root Cause**: The spell picker opens with a source filter pre-seeded from the character's classes, but the **subclass source** (e.g. `EGW` for Chronurgy, `XGE` for Divine Soul) isn't included. The class's own spell list, augmented with `additionalSpells` from the subclass, references spells in those sources — so the filter excludes them.
+
+**Fix**: When seeding the picker's source filter, include every source referenced by:
+- The character's class sources (already done)
+- Every subclass on every class (the missing piece)
+- The source of every spell granted via `additionalSpells` on those subclasses
+
+Symptom-level test: a Divine Soul Sorcerer (TGTT class, XGE subclass) opening the picker should see Cleric spells like Guidance without manually adding XGE/PHB to the source pill.
+
+### F7. Spell Picker — `[object Object]` in Default Filter Pill
+
+**Symptom**: Picker opens with `[object Object]` showing in the source/subclass filter pill instead of a readable label.
+
+**Root Cause**: Subclass filter entries are **objects** (`{class: "Wizard", source: "PHB", subclass: {name: "Chronurgy", source: "EGW"}}`), not bare strings. Code that stringifies the default filter with `String(value)` or template-literal coercion produces `[object Object]`.
+
+**Fix**: Use the canonical display helper (`Parser.getFilterSubclassDisplay(...)` or the picker's `_renderFilterPillLabel`) — never coerce raw filter entries to string. When adding a new filter dimension, define the display helper at the same time.
+
+### F8. Spell Picker — Missing `_copy` Subclass Augmentation
+
+**Symptom**: Subclass spell list looks complete in the live character sheet, but the picker omits some entries that should be inherited via `_copy`.
+
+**Root Cause**: Subclasses can use `_copy` to inherit `additionalSpells` from a sibling/parent subclass. The character-sheet render path lazy-merges `_copy` when displaying features, but the picker historically read raw subclass data and skipped the merge.
+
+**Fix**: Defensive lazy-merge — when the picker pulls subclass data for filter/spell-list purposes, call the same `_copy` resolver the sheet uses. Cache the result on the subclass instance to avoid re-merging every picker open.
 
 ---
 
@@ -423,6 +504,30 @@ CharacterSheetClassUtils.buildSpellStateObject(spell, {sourceFeature, sourceClas
 window.addEventListener("beforeunload", () => this._autoSave());
 window.addEventListener("pagehide", () => this._autoSave());
 ```
+
+### G6. Respec Shows Race Default ASI Instead of Tasha's Choice
+
+**Symptom**: Opening Respec on a character built with Tasha's "Customizing Your Origin" rules shows the **race's default** ASI (e.g. Mountain Dwarf +2 STR / +2 CON) instead of the **user-chosen** ASI from the original build.
+
+**Root Cause**: Respec was reading the race entry from the loaded data file (default ASIs) instead of from the character's `levelHistory[0]` / build snapshot (user-chosen ASIs under Tasha's rules).
+
+**Fix**: When populating the Respec ASI step, prefer `levelHistory[0].raceAbilityChoices` (or the equivalent build snapshot field) over `race.ability`. Only fall back to `race.ability` for legacy characters with no snapshot.
+
+### G7. Single-Class LevelUp Crash on Multiclass-Only Variable
+
+**Symptom**: `ReferenceError: fullSubclassData is not defined` (or similar) when leveling up a **single-class** character. Multiclass level-ups work fine.
+
+**Root Cause**: A helper added to the multiclass branch of `_pShowLevelUpModal` declared a `const`/`let` inside an `if (isMulticlass)` block, then referenced it from shared code below. Single-class flow skips the block, the var is undefined, the modal crashes.
+
+**Fix**: Hoist any variable referenced from both branches to the top of the function with a safe default (`let fullSubclassData = null;`). Audit other recent multiclass-only additions for the same pattern.
+
+### G8. Custom Background — Cap Not Enforced
+
+**Symptom**: PHB+ "Custom Background" rule says "choose two from {2 languages, 2 tools, 1 of each}" but the UI lets the user check all three.
+
+**Root Cause**: The checkbox group had no max-selection guard; backing logic accepted whatever was checked.
+
+**Fix**: Add a cap counter to the choice group with an `onChange` that disables remaining checkboxes once the cap is hit (and re-enables when one is unchecked). Surface a small "(2 of 2 chosen)" counter so the constraint is visible.
 
 ---
 
@@ -491,6 +596,24 @@ if (cls.source === "TGTT" && featureName === "Combat Methods") { ... }
 
 **Fix**: `_findFeatureOptions()` must detect `{@classFeature}` references in feature text and follow them to get option lists.
 
+### I5. Combat Traditions — Builder vs LevelUp Pool Drift
+
+**Symptom**: At Builder, a Fighter is offered only a small subset of combat traditions (instead of the full pool). At LevelUp, the subclass-granted extra tradition pick re-offers the **base Fighter** choice instead of the predetermined subclass option.
+
+**Root Cause**: Two distinct shape bugs:
+1. The Builder pool was being filtered by the *subclass's* extra-pick definition (a small list) instead of the *class's* full tradition pool.
+2. The LevelUp extra-pick handler walked back up to the class definition for its options, ignoring the `featureSource: {subclass: ...}` hint that should pin it to the subclass's predetermined pool.
+
+**Fix**: Route every tradition pick through a single resolver that takes `{class, subclass, level, pickSlot}` and returns the correct option list — base pool for the class slot, predetermined list for the subclass slot. Builder, LevelUp, and QuickBuild must all call this resolver (see G1).
+
+### I6. Metamagic Filter Leaking 2024 Options into Thelemar Sorcerer
+
+**Symptom**: Thelemar Sorcerer (TGTT) metamagic picker shows 2024 XPHB metamagic options alongside the homebrew TGTT-only list.
+
+**Root Cause**: The metamagic option pool was filtered by `featureType === "MM"` only, with no source gate. XPHB metamagic optfeatures qualify by type.
+
+**Fix**: When the class is `Sorcerer` from source `TGTT`, restrict the picker to optfeatures with `source: "TGTT"` (or the explicit Thelemar allowlist). Mirror the gating pattern used elsewhere for TGTT homebrew (see I1).
+
 ---
 
 ## J. Renderer / Site Code Errors
@@ -556,6 +679,23 @@ Renderer.get().render({type: "entries", entries: entriesArray});
 **Root Cause**: A `styleHint` value not recognized by the renderer. Present in ~10 renderer files.
 
 **Fix**: Valid style hints are typically `"classic"` or `"one"`. Check the specific renderer's switch statement.
+
+### J8. classFeature / subclassFeature Hover — Build the Hash via Canonical Helper
+
+**Symptom**: Console errors like
+```
+Failed to load renderable content for: page="classfeatures.html" source="EGW" hash="chronal%20shift_wizard_tgtt_chronurgy_egw_2_egw"
+Failed to load renderable content for: page="classes.html" source="TGTT-2014" hash="chronurgy%20magic_tgtt-2014"
+```
+when hovering a class/subclass feature link. Hover popup empty; nothing else broken.
+
+**Root Cause**: Inline hover-routing code built the hash from local variables — picking up the *subclass* source (`EGW`) as the trailing source segment instead of the canonical *class* source (`TGTT`), or using a faked source like `TGTT-2014` that never appears in the data files. The hash assembly format for `classFeature` is `name_className_classSource_subclassShortName_subclassSource_level_classSource` — every segment must come from the canonical class/subclass record.
+
+**Fix**: Route every class/subclass-feature hover through the same canonical helper the rest of the sheet uses (`Renderer.hover.pHandleLinkMouseOver` paired with `UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES]({...})`). Never assemble these hashes inline.
+
+Two regression smells:
+- The trailing source segment doesn't match the leading `classSource` segment.
+- A `-2014` / `-2024` suffix appears in a source — there's no such source code; this is fake-edition coercion that should be removed.
 
 ---
 
@@ -637,6 +777,33 @@ Renderer.get().render({type: "entries", entries: entriesArray});
 
 **Fix**: Call `parseToolData()` on custom backgrounds during creation.
 
+### L7. Feat-Triggered Action — Modal Without Mutation Pipeline
+
+**Symptom**: A feat-granted button (e.g. Spell Scribing Adept's "Scribe Spell") opens a modal, the user picks a spell / confirms cost, **and nothing happens to the sheet** — no spell added, no gold deducted, no inventory change. No console error.
+
+**Root Cause**: Feat-driven actions need three pieces wired up:
+1. **A trigger** (the feat button / action card)
+2. **A picker** (modal that gathers choices)
+3. **A mutation pipeline** (the picker's `onConfirm` writes to state, calls `render()`, persists via the auto-save handler)
+
+It's easy to ship (1) + (2) and forget (3) — the modal becomes a no-op. Equally easy to ship (3) without the cost/resource enforcement.
+
+**Fix**: For every feat-driven action, the picker's confirm handler must:
+- Validate prerequisites (funds, slots, components) **before** mutation; surface a clear failure path
+- Mutate state through the same path the sheet's other consumers use (e.g. `state.addSpell(...)`, `state.spendGold(amount)`) so calculations re-aggregate
+- Call `render()` (or the relevant section re-render) so the UI reflects the mutation
+- Trigger save (auto-save will catch it on next event, but explicit `_save()` is safer for paid actions)
+
+UX bonus pattern: buttons, not a dropdown, for short option lists ("Pay 50gp ✓ / Skip cost"). Dropdowns hide options and require an extra click to confirm.
+
+### L8. `featProgression` Ignored on Optional Features
+
+**Symptom**: An invocation / maneuver / metamagic / similar optfeature that should let the player pick a feat (e.g. Lessons of the First Ones invocation) shows no feat-choice UI when selected.
+
+**Root Cause**: The `featProgression` / `additionalFeats` hook was only honored on `class`/`subclass` entities, never on the `optfeature` type. Optfeatures that grant a feat were silently dropped.
+
+**Fix**: When iterating optfeatures for grants, check for `featProgression` (or whatever field your data uses for "this grants a feat choice") and surface a feat-picker the same way class-level feat grants do. Wire it into Builder, LevelUp, and QuickBuild (see G1).
+
 ---
 
 ## M. Debugging Quick Reference
@@ -670,6 +837,21 @@ Renderer.get().render({type: "entries", entries: entriesArray});
 | Favorite stars missing or stuck stale | After a save migration or data reload, call `state.cleanupOrphanedFavorites()` (or use the toast button surfaced by the Actions hub). Resolution lives in `_resolveFavorite`; check it returns `{found: true}` for the entity. |
 | Apply Buff modal shows nothing / shows wrong effects | Effect application prefers `registryEffects` over parsed `buffs`. If a buff is missing, check the spell's registry entry; if effects are wrong, check the `buff.type → effect.type` mapping in `_applyBuffEffects` (`charactersheet-spells.js` ~L4444). |
 | Lore skill renders in main skills table | Renderer filter is `skill.isLoreSkill` (charactersheet.js L2754–2755). Make sure the flag is set on the skill object before the table loop. |
+| Exhaustion penalty doubled or display ≠ roll | **B7** — canonical bonus must stay clean; exhaustion only inside breakdown `effective` and at roll time. Don't bake into stored calc fields. |
+| Want canonical and modified bonus side-by-side | **B8** — `_formatModWithEffective(canonical, effective)`. Surface contract is one helper; CSS coupling in **E4**. |
+| Custom modifier "+1 to all" applies as +2 | **B9** — registry sub-types (`check`, `check:str`, `check:str:athletics`) — dedupe by modifier id, not bucket. |
+| Dual-display pill overflows under [data-textsize] | **E4** — give pill its own smaller bump, `inline-flex; align-items: baseline; box-sizing: border-box`, scope `0.6em` parenthetical only where parent is bumped. |
+| Subclass spell missing from picker | **F6** — picker source filter must include every subclass source on every class. |
+| `[object Object]` in picker filter pill | **F7** — subclass filter entries are objects; use the canonical display helper, never `String(value)`. |
+| Subclass `_copy` spells missing in picker | **F8** — picker must lazy-merge `_copy` the same way the sheet does. |
+| Respec shows wrong race ASI (Tasha's) | **G6** — read `levelHistory[0].raceAbilityChoices`, not `race.ability`. |
+| `ReferenceError` in single-class LevelUp after a multiclass change | **G7** — hoist multiclass-branch vars to function top with safe defaults. |
+| Custom background lets you choose 3 of 3 | **G8** — checkbox group needs a max-selection guard plus a visible "(X of N chosen)" counter. |
+| Fighter combat traditions look wrong at Builder / LevelUp | **I5** — route every pick through one resolver keyed on `{class, subclass, level, pickSlot}`. |
+| Thelemar Sorcerer sees 2024 metamagic | **I6** — gate metamagic picker by `classSource === "TGTT"` (mirror I1). |
+| `Failed to load renderable content for: page="classfeatures.html"` | **J8** — build the hash via `UrlUtil.URL_TO_HASH_BUILDER`, not inline. Watch for fake `-2014`/`-2024` source suffixes. |
+| Feat button opens modal, sheet doesn't change | **L7** — picker confirm must validate → mutate via canonical state setter → render → save. Prefer buttons over dropdowns. |
+| Invocation/maneuver grants no feat picker | **L8** — `featProgression` must be honored on optfeature, not just class/subclass. |
 
 ---
 
