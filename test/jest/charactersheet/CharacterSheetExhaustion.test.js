@@ -115,6 +115,31 @@ describe("Exhaustion Mechanics", () => {
 			state.setExhaustion(3);
 			expect(state.getPassivePerception()).toBe(basePassive);
 		});
+
+		// --- Feature calc d20 bonuses: stay pure (parallel to getSpellAttackBonus) ---
+		test("getFeatureCalculations spell attack bonus stays pure (d20 bonus, not DC)", () => {
+			// Per Phase 1 doctrine: d20 bonuses (incl. calc.spellAttackBonus) are exhaustion-free
+			// at display/calc time. Roll handlers apply the penalty once via _getExhaustionD20Penalty.
+			const baseCalcs = state.getFeatureCalculations?.() || {};
+			const baseAttack = baseCalcs.spellAttackBonus;
+			// Only run the assertion if this character actually exposes spellAttackBonus
+			if (baseAttack == null) return;
+			state.setExhaustion(3);
+			const newCalcs = state.getFeatureCalculations?.() || {};
+			expect(newCalcs.spellAttackBonus).toBe(baseAttack);
+			expect(state._getExhaustionD20Penalty()).toBe(3);
+		});
+
+		test("getFeatureCalculations spell save DC IS reduced by exhaustion (DC, not d20 bonus)", () => {
+			// Per Phase 1 doctrine: DCs ARE reduced by exhaustion in Thelemar rules.
+			// This test pins the asymmetry against accidental "cleanup" of DC sites.
+			const baseCalcs = state.getFeatureCalculations?.() || {};
+			const baseDc = baseCalcs.spellSaveDc;
+			if (baseDc == null) return;
+			state.setExhaustion(2);
+			const newCalcs = state.getFeatureCalculations?.() || {};
+			expect(newCalcs.spellSaveDc).toBe(baseDc - 2);
+		});
 	});
 
 	// ===================================================================

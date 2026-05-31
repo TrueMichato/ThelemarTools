@@ -9859,7 +9859,8 @@ class CharacterSheetState {
 									calculations.hasSpellcasting = true;
 									calculations.spellcastingAbility = "int";
 									calculations.spellSaveDc = 8 + profBonus + this.getAbilityMod("int") - exhaustionPenalty;
-									calculations.spellAttackBonus = profBonus + this.getAbilityMod("int") - exhaustionPenalty;
+									// Spell attack bonus is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+									calculations.spellAttackBonus = profBonus + this.getAbilityMod("int");
 									// Cantrips known: 3 at level 3, 4 at level 10
 									calculations.cantripsKnown = level >= 10 ? 4 : 3;
 									// Spells known (PHB) or prepared (XPHB)
@@ -12023,7 +12024,8 @@ class CharacterSheetState {
 						// Spell save DC and attack bonus based on INT
 						const intMod = this.getAbilityMod("int");
 						calculations.ekSpellSaveDc = 8 + profBonus + intMod - exhaustionPenalty;
-						calculations.ekSpellAttackBonus = profBonus + intMod - exhaustionPenalty;
+						// EK spell attack bonus is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+						calculations.ekSpellAttackBonus = profBonus + intMod;
 
 						// War Magic (level 7): Bonus action attack after cantrip
 						if (level >= 7) {
@@ -12356,7 +12358,8 @@ class CharacterSheetState {
 					calculations.hasPactMagic = true;
 					calculations.spellcastingAbility = "cha";
 					calculations.spellSaveDc = 8 + profBonus + chaMod - exhaustionPenalty;
-					calculations.spellAttackBonus = profBonus + chaMod - exhaustionPenalty;
+					// Warlock spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+					calculations.spellAttackBonus = profBonus + chaMod;
 
 					// Cantrips known: 2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4
 					const cantripsKnown = level >= 10 ? 4 : level >= 4 ? 3 : 2;
@@ -12818,7 +12821,8 @@ class CharacterSheetState {
 					calculations.hasSpellcasting = true;
 					calculations.spellcastingAbility = "cha";
 					calculations.spellSaveDc = 8 + profBonus + this.getAbilityMod("cha") - exhaustionPenalty;
-					calculations.spellAttackBonus = profBonus + this.getAbilityMod("cha") - exhaustionPenalty;
+					// Bard spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+					calculations.spellAttackBonus = profBonus + this.getAbilityMod("cha");
 
 					// Cantrips known progression
 					const cantripsKnown = level >= 10 ? 6 : level >= 4 ? 5 : 4;
@@ -15017,7 +15021,8 @@ class CharacterSheetState {
 					if ((is2024Style && level >= 1) || (!is2024Style && level >= 2)) {
 						calculations.hasSpellcasting = true;
 						calculations.spellSaveDc = 8 + profBonus + wisMod - exhaustionPenalty;
-						calculations.spellAttackBonus = profBonus + wisMod - exhaustionPenalty;
+						// Druid spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+						calculations.spellAttackBonus = profBonus + wisMod;
 
 						// Spells known (PHB) or Prepared spells (XPHB/TGTT)
 						if (is2024Style) {
@@ -15380,7 +15385,8 @@ class CharacterSheetState {
 					calculations.hasSpellcasting = true;
 					calculations.spellcastingAbility = "int";
 					calculations.spellSaveDc = 8 + profBonus + intMod - exhaustionPenalty;
-					calculations.spellAttackBonus = profBonus + intMod - exhaustionPenalty;
+					// Wizard spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+					calculations.spellAttackBonus = profBonus + intMod;
 
 					// Cantrips known: 3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5
 					const cantripsKnown = level >= 10 ? 5 : level >= 4 ? 4 : 3;
@@ -16262,7 +16268,8 @@ class CharacterSheetState {
 								calculations.hasSpellcasting = true;
 								calculations.spellcastingAbility = "cha";
 								calculations.spellSaveDc = 8 + profBonus + chaMod - exhaustionPenalty;
-								calculations.spellAttackBonus = profBonus + chaMod - exhaustionPenalty;
+								// Architect of Ruin spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
+								calculations.spellAttackBonus = profBonus + chaMod;
 
 								// Cantrips known: 2 at L3, 3 at L10
 								calculations.cantripsKnown = level >= 10 ? 3 : 2;

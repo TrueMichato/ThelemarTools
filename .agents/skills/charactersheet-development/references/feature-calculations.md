@@ -130,6 +130,21 @@ Every official PHB/XPHB class has full subclass calculations. All TGTT homebrew 
 
 `getFeatureCalculations()` is **not memoized** — it recomputes on every call. This is a known performance concern documented in the roadmap. When calling it in tests, be aware each call traverses all classes. In a single test, call it once and assert on the result object.
 
+## Exhaustion Contract
+
+`getFeatureCalculations()` returns values that respect the project-wide Phase 1 doctrine:
+
+| Field family | Reduced by exhaustion? | Why |
+|---|---|---|
+| `spellAttackBonus`, `ekSpellAttackBonus` (any d20 *bonus*) | ❌ Never | d20 bonuses are pure at every display/calc surface. Roll handlers apply `state._getExhaustionD20Penalty()` once at roll time. |
+| `spellSaveDc`, `ekSpellSaveDc`, `*SaveDc`, `*Dc` (any *DC*) | ✅ In Thelemar rules | DC getters consume `state._getExhaustionDcPenalty()` directly and bake it in. Consumers (renderers, cast-time recompute) must NOT subtract again. |
+
+When adding a new subclass/class case to `getFeatureCalculations()`:
+- For any `calculations.*Bonus` field that represents a d20 attack bonus: compute it WITHOUT `exhaustionPenalty`. Add a one-line comment pointing at this contract.
+- For any `calculations.*Dc` field: subtract `exhaustionPenalty` exactly once (and do not add the field via more than one code path).
+
+Phase 5.6.5 cleaned up 7 legacy spell-attack-bonus sites that had baked the penalty in; the audit of every `*Dc` site confirmed they were correct as-is.
+
 ## Cross-Cutting Picker Helpers
 
 A few class-utils helpers gate which options are visible in the optional-feature / combat-tradition / spell pickers. Always pass them the full context (class source, subclass), not just the class name.

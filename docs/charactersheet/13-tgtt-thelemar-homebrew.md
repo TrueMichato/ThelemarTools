@@ -30,7 +30,7 @@ All Thelemar variant rules are implemented as toggleable settings:
 
 | Rule | Setting Key | Description |
 |------|-------------|-------------|
-| **Exhaustion** | `exhaustionRules: "thelemar"` | -1 to all rolls and DCs per level, max 10 before death (vs 6 in standard, -2/-4/etc in 2024) |
+| **Exhaustion** | `exhaustionRules: "thelemar"` | -1 to all d20 rolls and DCs per level, max 10 before death (vs 6 in standard, -2/-4/etc in 2024). **Speed is unaffected** in Thelemar rules. See [Exhaustion contract](#exhaustion-contract-phase-1-doctrine) below. |
 | **Carry Weight** | `thelemar_carryWeight` | 50 + 25 × STR modifier (min 50) instead of STR × 15 |
 | **Linguistics Bonus** | `thelemar_linguisticsBonus` | +1 Linguistics per known language except Common |
 | **Jumping** | `thelemar_jumping` | Modified high/long jump formulas |
@@ -55,6 +55,33 @@ settings: {
     thelemar_spellRarity: true,
 }
 ```
+
+### Exhaustion contract (Phase 1 doctrine)
+
+The single source of truth across **all** rule sets:
+
+| Surface | Reduced by exhaustion? | Where applied |
+|---|---|---|
+| d20 bonuses at **display** (saves, skills, init, attack, spell-attack) | ❌ No | Display methods return the pure modifier; the parenthetical "effective" mod injects the penalty at render time only (see [dual-mod display](#canonical-vs-effective-modifier-display) below) |
+| d20 totals at **roll** time | ✅ Yes (once) | Roll handlers call `state._getExhaustionD20Penalty()` exactly once on each d20 total |
+| Spell save DCs / feature DCs | ✅ Yes (Thelemar only) | DC getters subtract `state._getExhaustionDcPenalty()` directly; the value is consumed as-is by render and by the cast-time DC recompute |
+| Speed | ❌ Thelemar / ❌ 2014 / ✅ 2024 (-5ft/level) | `getSpeedBreakdown` subtracts only when `exhaustionRules === "2024"` |
+| Passive perception | ❌ No (it is a static value, not a roll) | `getPassivePerception` returns the pure value |
+
+`getFeatureCalculations()` honours the same contract: `.spellSaveDc` / `.ekSpellSaveDc` etc. **do** subtract `_getExhaustionDcPenalty()`; `.spellAttackBonus` / `.ekSpellAttackBonus` **do not** subtract anything (Phase 5.6.5 hygiene cleaned up 7 legacy sites that had baked the penalty in).
+
+Roll handlers must consume `calculations.spellAttackBonus` as-is (no further subtraction) and then apply `_getExhaustionD20Penalty()` once at the d20 total. Display code must consume `calculations.spellSaveDc` as-is (already exhaustion-reduced — do not subtract again).
+
+### Canonical vs effective modifier display
+
+Phase 5.6 introduced a dual display for every d20-rolling modifier slot:
+
+- **Canonical** = pure ability mod + proficiency (no buffs, no nerfs).
+- **Effective** = canonical + every applicable modifier (exhaustion penalty, custom modifiers, spell buffs like Bless, active-state deltas, feat passives).
+- When `canonical === effective`, only the canonical number renders (no clutter for the common case).
+- When they differ, the effective value renders inline in parentheses, smaller font, color-coded `.--positive` (green) when better than canonical or `.--negative` (red) when worse.
+
+The shared helper is `_formatModWithEffective(canonical, effective, opts)` in `charactersheet.js`. Each of the 5 breakdown methods (`getSaveModBreakdown`, `getSkillModBreakdown`, `getAbilityCheckModBreakdown`, `getInitiativeBreakdown`, `getAttackBonusBreakdown`) exposes both `canonical` and `effective` values plus an `isCanonical` flag on each contribution.
 
 ---
 
