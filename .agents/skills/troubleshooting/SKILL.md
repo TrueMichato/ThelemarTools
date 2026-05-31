@@ -62,6 +62,21 @@ Match the symptom to a category:
 | Hover shows "Failed to load" | **K2** — Reference resolution failure |
 | Part of sheet broken, no crash | **L1** — Module init try-catch isolated |
 | Active state does nothing when toggled | **L4** — State type not in `ACTIVE_STATE_TYPES` |
+| Exhaustion shows up twice / display ≠ roll | **B7** — canonical bonus clean; effective only in breakdowns & at roll time |
+| Need canonical + effective bonus side-by-side | **B8** — single helper `_formatModWithEffective` |
+| Custom modifier "+1 to all" applies as +2 | **B9** — dedupe by modifier id across sub-type cascade |
+| Dual-display pill overflows under `[data-textsize]` | **E4** — own smaller bump + `inline-flex` baseline + scoped 0.6em |
+| Subclass spell missing from spell picker | **F6** — picker source filter must include every subclass source |
+| `[object Object]` in picker filter pill | **F7** — use canonical display helper, not `String(value)` |
+| Subclass `_copy` spells missing in picker | **F8** — picker must lazy-merge `_copy` |
+| Respec shows wrong race ASI (Tasha's) | **G6** — read user choice from build snapshot, not race default |
+| Single-class LevelUp crashes after a multiclass change | **G7** — hoist branch-local vars to function top |
+| Custom Background lets you pick 3 of 3 | **G8** — checkbox group needs max-selection guard |
+| Fighter combat traditions wrong at Builder/LevelUp | **I5** — one resolver keyed on `{class, subclass, level, pickSlot}` |
+| Thelemar Sorcerer sees 2024 metamagic | **I6** — gate metamagic picker by `classSource === "TGTT"` |
+| `Failed to load renderable content for: page="classfeatures.html"` | **J8** — build hover hash via `UrlUtil.URL_TO_HASH_BUILDER`, never inline |
+| Feat button opens modal, nothing changes on sheet | **L7** — picker confirm must validate → mutate → render → save |
+| Invocation/maneuver grants no feat picker | **L8** — honor `featProgression` on optfeature, not just class |
 
 ### 2. Read the Detailed Fix
 
