@@ -661,9 +661,16 @@ class CharacterSheetSpells {
 			if (c.subclass?.name === "Gambler") return "Warlock";
 			return c.name;
 		});
+		// Phase 9 (Bug 7.1 follow-up): `c.subclass` is an object (`{name, source, ...}`),
+		// so the previous `${c.subclass}` coerced to `"[object Object]"` and produced
+		// keys like `"Sorcerer: [object Object]"`. That never matched the picker's
+		// `${className}: ${subclass.name}` keys, so the character's actual subclass
+		// was never auto-checked and any spell only granted via that subclass list
+		// (e.g. Guidance for Divine Soul, Gift of Alacrity for Chronurgy) was hidden
+		// behind a "No Expanded Lists" default.
 		const characterSubclassNames = characterClasses
-			.filter(c => c.subclass)
-			.map(c => `${c.name}: ${c.subclass}`);
+			.filter(c => c.subclass && (c.subclass.name || typeof c.subclass === "string"))
+			.map(c => `${c.name}: ${typeof c.subclass === "string" ? c.subclass : c.subclass.name}`);
 
 		// Sort class names - character classes first, then alphabetically
 		const sortedClassNames = [...allSpellClasses].sort((a, b) => {
