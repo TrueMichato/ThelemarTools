@@ -56,6 +56,7 @@
 		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/collection/MCDM%20Productions%3B%20Where%20Evil%20Lives.json",
 		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/collection/Ghostfire%20Gaming%3B%20Grim%20Hollow%20-%20Campaign%20Guide%20-%202024.json",
 		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/collection/Ghostfire%20Gaming%3B%20Grim%20Hollow%20-%20Player's%20Guide%20-%202024.json",
-		"TravelersGuidetoThelemar.json"
+		"TravelersGuidetoThelemar.json",
+		"complete_crafter.json"
 	]
 }
