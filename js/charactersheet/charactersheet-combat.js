@@ -6719,14 +6719,66 @@ class CharacterSheetCombat {
 	// #region Metamagic Dashboard
 
 	renderCombatMetamagic () {
-		CharacterSheetCombat.renderMetamagicDashboard(this._state, this._page, "#charsheet-combat-metamagic", "#charsheet-combat-metamagic-section", "#charsheet-combat-metamagic-sp");
+		CharacterSheetCombat.renderMetamagicDashboard(this._state, this._page, "#charsheet-combat-metamagic", "#charsheet-combat-metamagic-section", "#charsheet-combat-metamagic-sp", {isSorceryPointEditable: true});
 	}
 
-	static renderMetamagicDashboard (state, page, containerSel, sectionSel, spBadgeSel) {
+	static _getMetamagicDashboardTargets () {
+		return [
+			{containerSel: "#charsheet-overview-metamagic", sectionSel: "#charsheet-overview-metamagic-section", spBadgeSel: "#charsheet-overview-metamagic-sp"},
+			{containerSel: "#charsheet-combat-metamagic", sectionSel: "#charsheet-combat-metamagic-section", spBadgeSel: "#charsheet-combat-metamagic-sp", opts: {isSorceryPointEditable: true}},
+			{containerSel: "#charsheet-spells-metamagic", sectionSel: "#charsheet-spells-metamagic-section", spBadgeSel: "#charsheet-spells-metamagic-sp", opts: {isSorceryPointEditable: true}},
+		];
+	}
+
+	static _refreshMetamagicDashboards (state, page) {
+		for (const target of CharacterSheetCombat._getMetamagicDashboardTargets()) {
+			CharacterSheetCombat.renderMetamagicDashboard(state, page, target.containerSel, target.sectionSel, target.spBadgeSel, target.opts);
+		}
+	}
+
+	static _refreshMetamagicRelatedUi (state, page) {
+		CharacterSheetCombat._refreshMetamagicDashboards(state, page);
+		if (typeof page._renderResources === "function") page._renderResources();
+		if (page._spells && typeof page._spells._renderSpellList === "function") page._spells._renderSpellList();
+		if (page._combat && typeof page._combat.renderCombatSpells === "function") page._combat.renderCombatSpells();
+	}
+
+	static _getMetamagicHoverLink (page, meta) {
+		if (!meta?.name || typeof page?.getHoverLink !== "function") return meta?.name || "";
+
+		try {
+			const optFeature = CharacterSheetCombat._getMetamagicOptionalFeature(page, meta);
+			return page.getHoverLink(globalThis.UrlUtil?.PG_OPT_FEATURES || "optionalfeatures.html", optFeature.name, optFeature.source, null, meta.name);
+		} catch (e) {
+			return meta.name;
+		}
+	}
+
+	static _getMetamagicOptionalFeature (page, meta) {
+		const fallbackSource = meta.source || "TGTT";
+		const typeSuffix = meta.type === "passive" ? "Passive" : meta.type === "active" ? "Active" : null;
+		const tgttName = typeSuffix ? `${meta.name} (${typeSuffix})` : meta.name;
+		const allOptFeatures = page?.getOptionalFeatures?.() || page?._optionalFeaturesData || [];
+
+		const exactTgtt = allOptFeatures.find(it => it.name === tgttName && (it.source || "").toUpperCase() === "TGTT");
+		if (exactTgtt) return {name: exactTgtt.name, source: exactTgtt.source};
+
+		const exactSource = allOptFeatures.find(it => it.name === tgttName && (!fallbackSource || (it.source || "").toUpperCase() === fallbackSource.toUpperCase()));
+		if (exactSource) return {name: exactSource.name, source: exactSource.source};
+
+		if (typeSuffix) return {name: tgttName, source: "TGTT"};
+
+		const source = typeof page?.resolveOptionalFeatureSource === "function"
+			? page.resolveOptionalFeatureSource(meta.name, [meta.source, "TGTT", globalThis.Parser?.SRC_XPHB, globalThis.Parser?.SRC_PHB])
+			: fallbackSource;
+		return {name: meta.name, source};
+	}
+
+	static renderMetamagicDashboard (state, page, containerSel, sectionSel, spBadgeSel, opts = {}) {
 		const container = document.querySelector(containerSel);
 		const section = document.querySelector(sectionSel);
 		const spBadge = document.querySelector(spBadgeSel);
-		if (!container) return;
+		if (!container || !section) return;
 
 		const calc = state.getFeatureCalculations();
 		if (!calc.hasMetamagic) {
@@ -6765,13 +6817,28 @@ class CharacterSheetCombat {
 		const spRow = e_({outer: `
 			<div class="charsheet__mm-sp-summary">
 				<div class="charsheet__mm-sp-current">
-					<span class="charsheet__mm-sp-label">Available</span>
+					<span class="charsheet__mm-sp-label">Sorcery Points Available</span>
+					${opts.isSorceryPointEditable ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__mm-sp-adjust-btn" data-sp-delta="-1" title="Decrease sorcery points" aria-label="Decrease sorcery points" ${sp.current <= 0 ? "disabled" : ""}>-</button>` : ""}
 					<span class="charsheet__mm-sp-value">${sp.current}</span>
 					<span class="charsheet__mm-sp-max">/ ${sp.max}</span>
+					${opts.isSorceryPointEditable ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__mm-sp-adjust-btn" data-sp-delta="1" title="Increase sorcery points" aria-label="Increase sorcery points" ${sp.current >= sp.max ? "disabled" : ""}>+</button>` : ""}
 				</div>
 			</div>
 		`});
 		container.append(spRow);
+
+		container.querySelectorAll(".charsheet__mm-sp-adjust-btn").forEach((btn) => {
+			btn.addEventListener("click", () => {
+				const currentSp = state.getSorceryPoints();
+				const delta = Number(btn.dataset.spDelta) || 0;
+				const nextCurrent = Math.max(0, Math.min(currentSp.max, currentSp.current + delta));
+				if (nextCurrent === currentSp.current) return;
+
+				state.setSorceryPoints({current: nextCurrent, max: currentSp.max});
+				page.saveCharacter?.();
+				CharacterSheetCombat._refreshMetamagicRelatedUi(state, page);
+			});
+		});
 
 		// Tuned passives section
 		const tunedPassives = passiveMetamagics.filter(m => m.tuned);
@@ -6782,11 +6849,12 @@ class CharacterSheetCombat {
 			container.append(tunedHeader);
 
 			for (const meta of tunedPassives) {
+				const nameHtml = CharacterSheetCombat._getMetamagicHoverLink(page, {...meta, type: meta.type || "passive"});
 				const row = e_({outer: `
 					<div class="charsheet__mm-row charsheet__mm-row--tuned">
 						<span class="charsheet__mm-indicator charsheet__mm-indicator--active">●</span>
 						<div class="charsheet__mm-info">
-							<span class="charsheet__mm-name">${meta.name}</span>
+							<span class="charsheet__mm-name">${nameHtml}</span>
 							<span class="charsheet__mm-cost">${renderCost(meta.cost)}</span>
 						</div>
 						<span class="charsheet__mm-desc">${meta.description}</span>
@@ -6804,11 +6872,12 @@ class CharacterSheetCombat {
 
 			for (const meta of untunedPassives) {
 				const canAfford = typeof meta.cost === "number" && sp.max >= meta.cost && sp.current >= meta.cost;
+				const nameHtml = CharacterSheetCombat._getMetamagicHoverLink(page, {...meta, type: meta.type || "passive"});
 				const row = e_({outer: `
 					<div class="charsheet__mm-row charsheet__mm-row--available">
 						<span class="charsheet__mm-indicator">○</span>
 						<div class="charsheet__mm-info">
-							<span class="charsheet__mm-name">${meta.name}</span>
+							<span class="charsheet__mm-name">${nameHtml}</span>
 							<span class="charsheet__mm-cost">${renderCost(meta.cost)}</span>
 						</div>
 						<span class="charsheet__mm-desc">${meta.description}</span>
@@ -6825,11 +6894,12 @@ class CharacterSheetCombat {
 			container.append(activeHeader);
 
 			for (const meta of activeMetamagics) {
+				const nameHtml = CharacterSheetCombat._getMetamagicHoverLink(page, {...meta, type: meta.type || "active"});
 				const row = e_({outer: `
 					<div class="charsheet__mm-row charsheet__mm-row--active-info">
 						<span class="charsheet__mm-indicator charsheet__mm-indicator--cast">◆</span>
 						<div class="charsheet__mm-info">
-							<span class="charsheet__mm-name">${meta.name}</span>
+							<span class="charsheet__mm-name">${nameHtml}</span>
 							<span class="charsheet__mm-cost">${renderCost(meta.cost)}</span>
 						</div>
 						<span class="charsheet__mm-desc">${meta.description}</span>
@@ -6852,21 +6922,7 @@ class CharacterSheetCombat {
 					}
 				}
 				page.saveCharacter?.();
-				// Re-render all metamagic dashboards
-				CharacterSheetCombat.renderMetamagicDashboard(state, page, containerSel, sectionSel, spBadgeSel);
-				// Also refresh the other tab's dashboard
-				CharacterSheetCombat.renderMetamagicDashboard(
-					state, page,
-					containerSel === "#charsheet-combat-metamagic" ? "#charsheet-overview-metamagic" : "#charsheet-combat-metamagic",
-					containerSel === "#charsheet-combat-metamagic" ? "#charsheet-overview-metamagic-section" : "#charsheet-combat-metamagic-section",
-					containerSel === "#charsheet-combat-metamagic" ? "#charsheet-overview-metamagic-sp" : "#charsheet-combat-metamagic-sp",
-				);
-				// Refresh resources section so SP counter stays in sync
-				if (typeof page._renderResources === "function") page._renderResources();
-				// Refresh spell list so metamagic modifications are reflected
-				if (page._spells && typeof page._spells._renderSpellList === "function") page._spells._renderSpellList();
-				// Refresh combat spells tab so metamagic modifications are reflected
-				if (page._combat && typeof page._combat.renderCombatSpells === "function") page._combat.renderCombatSpells();
+				CharacterSheetCombat._refreshMetamagicRelatedUi(state, page);
 			});
 		});
 	}

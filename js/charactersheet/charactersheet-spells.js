@@ -45,7 +45,19 @@ class CharacterSheetSpells {
 	_refreshSorceryPointUI () {
 		if (typeof this._page._renderResources === "function") this._page._renderResources();
 		if (typeof this._page._renderOverviewMetamagic === "function") this._page._renderOverviewMetamagic();
+		this._renderMetamagic();
 		if (this._page._combat) this._page._combat.renderCombatMetamagic();
+	}
+
+	_renderMetamagic () {
+		CharacterSheetCombat.renderMetamagicDashboard(
+			this._state,
+			this._page,
+			"#charsheet-spells-metamagic",
+			"#charsheet-spells-metamagic-section",
+			"#charsheet-spells-metamagic-sp",
+			{isSorceryPointEditable: true},
+		);
 	}
 
 	_init () {
@@ -2352,6 +2364,7 @@ class CharacterSheetSpells {
 		const unavailableHtml = unavailableOptions.length
 			? `<div class="mt-2 ve-small ve-muted"><strong>Unavailable:</strong><br>${unavailableOptions.map(it => `${it.name}: ${it.unavailableReason}`).join("<br>")}</div>`
 			: "";
+		const eleMetamagicReference = this._getActiveMetamagicPickerReference(availableOptions);
 
 		const choice = await InputUiUtil.pGetUserEnum({
 			title: `Cast ${spell.name} — Metamagic`,
@@ -2359,6 +2372,7 @@ class CharacterSheetSpells {
 			values: labels,
 			fnDisplay: v => v,
 			isResolveItem: true,
+			elePost: eleMetamagicReference,
 		});
 
 		if (choice == null) return {cancelled: true, metamagic: null};
@@ -2366,6 +2380,54 @@ class CharacterSheetSpells {
 
 		const metamagic = availableOptions.find(it => `${it.name} (${it.cost} SP)` === choice) || null;
 		return {cancelled: false, metamagic};
+	}
+
+	_getMetamagicHoverLink (meta) {
+		if (!meta?.name || typeof this._page?.getHoverLink !== "function") return meta?.name || "";
+
+		try {
+			const optFeature = this._getMetamagicOptionalFeature(meta);
+			return this._page.getHoverLink(globalThis.UrlUtil?.PG_OPT_FEATURES || "optionalfeatures.html", optFeature.name, optFeature.source, null, meta.name);
+		} catch (e) {
+			return meta.name;
+		}
+	}
+
+	_getMetamagicOptionalFeature (meta) {
+		const fallbackSource = meta.source || "TGTT";
+		const typeSuffix = meta.type === "passive" ? "Passive" : meta.type === "active" ? "Active" : null;
+		const tgttName = typeSuffix ? `${meta.name} (${typeSuffix})` : meta.name;
+		const allOptFeatures = this._page?.getOptionalFeatures?.() || this._page?._optionalFeaturesData || [];
+
+		const exactTgtt = allOptFeatures.find(it => it.name === tgttName && (it.source || "").toUpperCase() === "TGTT");
+		if (exactTgtt) return {name: exactTgtt.name, source: exactTgtt.source};
+
+		const exactSource = allOptFeatures.find(it => it.name === tgttName && (!fallbackSource || (it.source || "").toUpperCase() === fallbackSource.toUpperCase()));
+		if (exactSource) return {name: exactSource.name, source: exactSource.source};
+
+		if (typeSuffix) return {name: tgttName, source: "TGTT"};
+
+		const source = typeof this._page?.resolveOptionalFeatureSource === "function"
+			? this._page.resolveOptionalFeatureSource(meta.name, [meta.source, "TGTT", globalThis.Parser?.SRC_XPHB, globalThis.Parser?.SRC_PHB])
+			: fallbackSource;
+		return {name: meta.name, source};
+	}
+
+	_getActiveMetamagicPickerReference (availableOptions) {
+		if (!availableOptions?.length) return null;
+
+		return e_({outer: `
+			<div class="charsheet__mm-picker-reference">
+				<div class="charsheet__mm-picker-reference-title">Metamagic Reference</div>
+				${availableOptions.map(meta => `
+					<div class="charsheet__mm-picker-reference-row">
+						<span class="charsheet__mm-picker-reference-name">${this._getMetamagicHoverLink(meta)}</span>
+						<span class="charsheet__mm-picker-reference-cost">${meta.cost} SP</span>
+						<span class="charsheet__mm-picker-reference-desc">${meta.description || ""}</span>
+					</div>
+				`).join("")}
+			</div>
+		`});
 	}
 
 	// region Variant Spell Components
@@ -5957,6 +6019,7 @@ class CharacterSheetSpells {
 
 		// Display spell tracking using the new enhanced UI
 		this._renderSpellTrackingUI();
+		this._renderMetamagic();
 	}
 
 	/**
