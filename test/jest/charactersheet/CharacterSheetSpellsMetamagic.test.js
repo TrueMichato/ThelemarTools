@@ -6,6 +6,7 @@ import "../../../js/charactersheet/charactersheet-combat.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetSpells = globalThis.CharacterSheetSpells;
+const CharacterSheetCombat = globalThis.CharacterSheetCombat;
 
 /** Extract toast content string from doToast mock (content may be a string or an element with innerHTML) */
 const getLastToastContent = () => {
@@ -49,6 +50,106 @@ const SAMPLE_SPELLS = {
 	},
 };
 
+const makeMetamagicTestDom = () => {
+	class FakeElement {
+		constructor ({id = null, textContent = "", disabled = false, dataset = {}} = {}) {
+			this.id = id;
+			this.textContent = textContent;
+			this.disabled = disabled;
+			this.dataset = dataset;
+			this.style = {};
+			this._children = [];
+			this._handlers = {};
+			this._innerHTML = "";
+		}
+
+		get innerHTML () { return this._innerHTML; }
+		set innerHTML (value) {
+			this._innerHTML = value;
+			if (value === "") this._children = [];
+		}
+
+		append (child) {
+			this._children.push(child);
+			this._parseHtml(child?._html || child?.outerHTML || "");
+		}
+
+		insertAdjacentHTML (position, html) {
+			this._innerHTML += html;
+			this._parseHtml(html);
+		}
+
+		addEventListener (eventName, handler) { this._handlers[eventName] = handler; }
+		click () { if (!this.disabled) this._handlers.click?.(); }
+
+		querySelector (selector) { return this.querySelectorAll(selector)[0] || null; }
+
+		querySelectorAll (selector) {
+			const classMatch = selector.match(/\.([\w-]+)/);
+			const deltaMatch = selector.match(/data-sp-delta=['"]([^'"]+)['"]/);
+			return this._children.filter(child => {
+				if (classMatch && !child.classNames?.includes(classMatch[1])) return false;
+				if (deltaMatch && child.dataset?.spDelta !== deltaMatch[1]) return false;
+				return true;
+			});
+		}
+
+		_parseHtml (html) {
+			for (const match of html.matchAll(/<button([^>]*)>(.*?)<\/button>/g)) {
+				const attrs = match[1];
+				const classAttr = attrs.match(/class="([^"]+)"/)?.[1] || "";
+				const btn = new FakeElement({
+					textContent: match[2],
+					disabled: /\sdisabled(?:\s|>|$)/.test(attrs),
+					dataset: {
+						...(attrs.match(/data-sp-delta="([^"]+)"/) ? {spDelta: attrs.match(/data-sp-delta="([^"]+)"/)[1]} : {}),
+						...(attrs.match(/data-metamagic-key="([^"]+)"/) ? {metamagicKey: attrs.match(/data-metamagic-key="([^"]+)"/)[1]} : {}),
+					},
+				});
+				btn.classNames = classAttr.split(/\s+/).filter(Boolean);
+				this._children.push(btn);
+			}
+
+			for (const match of html.matchAll(/<span class="charsheet__mm-name">(.*?)<\/span>/g)) {
+				const innerHtml = match[1];
+				const span = new FakeElement({textContent: innerHtml.replace(/<[^>]+>/g, "")});
+				span.innerHTML = innerHtml;
+				span.classNames = ["charsheet__mm-name"];
+				this._children.push(span);
+			}
+		}
+	}
+
+	const bySelector = new Map();
+	const add = (selector) => {
+		const el = new FakeElement({id: selector.slice(1)});
+		bySelector.set(selector, el);
+		return el;
+	};
+
+	for (const base of ["overview", "combat", "spells"]) {
+		add(`#charsheet-${base}-metamagic-section`);
+		add(`#charsheet-${base}-metamagic-sp`);
+		add(`#charsheet-${base}-metamagic`);
+	}
+	add("#charsheet-spell-lists");
+
+	globalThis.document = {
+		querySelector: (selector) => {
+			if (bySelector.has(selector)) return bySelector.get(selector);
+			const descendantMatch = selector.match(/^(#[\w-]+)\s+(.+)$/);
+			if (descendantMatch) return bySelector.get(descendantMatch[1])?.querySelector(descendantMatch[2]) || null;
+			return null;
+		},
+		querySelectorAll: (selector) => {
+			const descendantMatch = selector.match(/^(#[\w-]+)\s+(.+)$/);
+			if (descendantMatch) return bySelector.get(descendantMatch[1])?.querySelectorAll(descendantMatch[2]) || [];
+			return [];
+		},
+		getElementById: (id) => bySelector.get(`#${id}`) || null,
+	};
+};
+
 describe("CharacterSheetSpells Metamagic Automation", () => {
 	let state;
 	let page;
@@ -81,10 +182,17 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			rollDice: jest.fn(() => 11),
 			saveCharacter: jest.fn(),
 			_saveCurrentCharacter: jest.fn(),
+			_renderResources: jest.fn(),
 			_renderCompanions: jest.fn(),
 			_renderActiveStates: jest.fn(),
 			_renderHp: jest.fn(),
 			_renderCharacter: jest.fn(),
+			getHoverLink: jest.fn((pageName, name, source, hash = null, displayName = null) => `<a href="${pageName}#${hash || `${name}|${source}`}" data-hover="1">${displayName || name}</a>`),
+			resolveOptionalFeatureSource: jest.fn(() => "TGTT"),
+			getOptionalFeatures: jest.fn(() => [
+				{name: "Careful Spell (Passive)", source: "TGTT"},
+				{name: "Quickened Spell (Active)", source: "TGTT"},
+			]),
 			combat: {renderCombatStates: jest.fn()},
 		};
 		rollDiceMock = page.rollDice;
@@ -93,6 +201,124 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		spells._page = page;
 		spells._state = state;
 		spells._allSpells = Object.values(SAMPLE_SPELLS);
+		page._spells = spells;
+		delete globalThis.document;
+	});
+
+	const mockKnownMetamagicDashboard = ({current = 3, max = 5} = {}) => {
+		state.getFeatureCalculations = () => ({hasMetamagic: true});
+		state.getKnownMetamagicKeys = () => ["careful", "quickened"];
+		state.getPassiveMetamagics = () => [{
+			key: "careful",
+			name: "Careful Spell",
+			cost: 1,
+			description: "Protect allies from your spell.",
+			tuned: state.isMetamagicTuned?.("careful") || false,
+		}];
+		state.getActiveMetamagics = () => [{
+			key: "quickened",
+			name: "Quickened Spell",
+			cost: 2,
+			description: "Cast an action spell as a bonus action.",
+		}];
+		state.setSorceryPoints({current, max});
+	};
+
+	const renderMetamagicDom = () => {
+		makeMetamagicTestDom();
+		CharacterSheetCombat._refreshMetamagicDashboards(state, page);
+	};
+
+	it("should hide the spells-tab metamagic dashboard when no metamagic is known", () => {
+		makeMetamagicTestDom();
+		state.getFeatureCalculations = () => ({hasMetamagic: false});
+
+		spells._renderMetamagic();
+
+		expect(globalThis.document.getElementById("charsheet-spells-metamagic-section").style.display).toBe("none");
+	});
+
+	it("should render editable sorcery point controls in the spells-tab dashboard", () => {
+		mockKnownMetamagicDashboard({current: 3, max: 5});
+		renderMetamagicDom();
+
+		const spellsSection = globalThis.document.getElementById("charsheet-spells-metamagic-section");
+		expect(spellsSection.style.display).toBe("");
+		expect(globalThis.document.getElementById("charsheet-spells-metamagic-sp").textContent).toBe("3/5");
+		expect(globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-name").textContent).toBe("Careful Spell");
+		expect(globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-name").innerHTML).toContain("data-hover");
+		expect(globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-name").innerHTML).toContain("Careful Spell (Passive)|TGTT");
+		expect(globalThis.document.querySelectorAll("#charsheet-spells-metamagic .charsheet__mm-sp-adjust-btn")).toHaveLength(2);
+		expect(globalThis.document.querySelectorAll("#charsheet-overview-metamagic .charsheet__mm-sp-adjust-btn")).toHaveLength(0);
+		expect(globalThis.document.querySelectorAll("#charsheet-combat-metamagic .charsheet__mm-sp-adjust-btn")).toHaveLength(2);
+	});
+
+	it("should include hoverable metamagic references in the cast-time picker", async () => {
+		state.getKnownMetamagicKeys = () => ["quickened"];
+		state.setSorceryPoints(5, 5);
+		globalThis.InputUiUtil = {
+			pGetUserEnum: jest.fn(async () => "Cast without metamagic"),
+		};
+
+		const result = await spells._pChooseActiveMetamagic({
+			spell: {name: "Fireball", source: "XPHB", level: 3},
+			spellData: {...SAMPLE_SPELLS.fireball, time: [{number: 1, unit: "action"}]},
+			slotLevel: 3,
+		});
+
+		expect(result).toEqual({cancelled: false, metamagic: null});
+		const enumCall = globalThis.InputUiUtil.pGetUserEnum.mock.calls.at(-1)[0];
+		expect(enumCall.elePost).toBeDefined();
+		expect(enumCall.elePost.innerHTML).toContain("Metamagic Reference");
+		expect(enumCall.elePost.innerHTML).toContain("data-hover");
+		expect(enumCall.elePost.innerHTML).toContain("Quickened Spell");
+		expect(enumCall.elePost.innerHTML).toContain("Quickened Spell (Active)|TGTT");
+	});
+
+	it("should manually decrease and increase sorcery points from the spells tab and sync all dashboards", () => {
+		mockKnownMetamagicDashboard({current: 3, max: 5});
+		renderMetamagicDom();
+
+		globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-sp-adjust-btn[data-sp-delta='-1']").click();
+		expect(state.getSorceryPoints()).toEqual({current: 2, max: 5});
+		expect(globalThis.document.getElementById("charsheet-spells-metamagic-sp").textContent).toBe("2/5");
+		expect(globalThis.document.getElementById("charsheet-overview-metamagic-sp").textContent).toBe("2/5");
+		expect(globalThis.document.getElementById("charsheet-combat-metamagic-sp").textContent).toBe("2/5");
+
+		globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-sp-adjust-btn[data-sp-delta='1']").click();
+		expect(state.getSorceryPoints()).toEqual({current: 3, max: 5});
+		expect(globalThis.document.getElementById("charsheet-spells-metamagic-sp").textContent).toBe("3/5");
+		expect(page.saveCharacter).toHaveBeenCalledTimes(2);
+		expect(page._renderResources).toHaveBeenCalledTimes(2);
+	});
+
+	it("should manually decrease and increase sorcery points from the combat tab and sync all dashboards", () => {
+		mockKnownMetamagicDashboard({current: 3, max: 5});
+		renderMetamagicDom();
+
+		globalThis.document.querySelector("#charsheet-combat-metamagic .charsheet__mm-sp-adjust-btn[data-sp-delta='-1']").click();
+		expect(state.getSorceryPoints()).toEqual({current: 2, max: 5});
+		expect(globalThis.document.getElementById("charsheet-spells-metamagic-sp").textContent).toBe("2/5");
+		expect(globalThis.document.getElementById("charsheet-overview-metamagic-sp").textContent).toBe("2/5");
+		expect(globalThis.document.getElementById("charsheet-combat-metamagic-sp").textContent).toBe("2/5");
+
+		globalThis.document.querySelector("#charsheet-combat-metamagic .charsheet__mm-sp-adjust-btn[data-sp-delta='1']").click();
+		expect(state.getSorceryPoints()).toEqual({current: 3, max: 5});
+		expect(globalThis.document.getElementById("charsheet-combat-metamagic-sp").textContent).toBe("3/5");
+		expect(page.saveCharacter).toHaveBeenCalledTimes(2);
+		expect(page._renderResources).toHaveBeenCalledTimes(2);
+	});
+
+	it("should clamp manual sorcery point edits at zero and max", () => {
+		mockKnownMetamagicDashboard({current: 0, max: 1});
+		renderMetamagicDom();
+
+		const decBtn = globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-sp-adjust-btn[data-sp-delta='-1']");
+		expect(decBtn.disabled).toBe(true);
+
+		globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-sp-adjust-btn[data-sp-delta='1']").click();
+		expect(state.getSorceryPoints()).toEqual({current: 1, max: 1});
+		expect(globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-sp-adjust-btn[data-sp-delta='1']").disabled).toBe(true);
 	});
 
 	it("should only offer Quickened Spell for action-cast spells", () => {

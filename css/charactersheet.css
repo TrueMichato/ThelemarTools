@@ -15866,8 +15866,14 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .charsheet__mm-sp-current {
 	display: flex;
-	align-items: baseline;
+	align-items: center;
 	gap: 0.35rem;
+}
+
+.charsheet__mm-sp-adjust-btn {
+	min-width: 1.75rem;
+	padding-right: 0.4rem;
+	padding-left: 0.4rem;
 }
 
 .charsheet__mm-sp-label {
@@ -15975,6 +15981,10 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	white-space: nowrap;
 }
 
+.charsheet__mm-name a {
+	font-weight: inherit;
+}
+
 .charsheet__mm-cost {
 	font-size: var(--cs-text-xs, 0.75rem);
 	color: var(--cs-text-muted, var(--rgb-text-muted));
@@ -16026,6 +16036,54 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__mm-tune-btn:disabled {
 	opacity: 0.35;
 	cursor: not-allowed;
+}
+
+.charsheet__mm-picker-reference {
+	max-height: 12rem;
+	overflow-y: auto;
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-base, var(--rgb-bg));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-left: 3px solid var(--cs-primary, #6366f1);
+	border-radius: var(--cs-radius-sm, 4px);
+}
+
+.charsheet__mm-picker-reference-title {
+	margin-bottom: 0.35rem;
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 700;
+	text-transform: uppercase;
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+}
+
+.charsheet__mm-picker-reference-row {
+	display: grid;
+	grid-template-columns: minmax(8rem, max-content) max-content minmax(0, 1fr);
+	align-items: baseline;
+	gap: 0.45rem;
+	font-size: var(--cs-text-xs, 0.75rem);
+}
+
+.charsheet__mm-picker-reference-row + .charsheet__mm-picker-reference-row {
+	margin-top: 0.25rem;
+}
+
+.charsheet__mm-picker-reference-name {
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.charsheet__mm-picker-reference-cost {
+	color: var(--cs-primary, #6366f1);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.charsheet__mm-picker-reference-desc {
+	min-width: 0;
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+	font-style: italic;
 }
 
 /* ===========================================
