@@ -1,0 +1,3784 @@
+{
+  "_meta": {
+    "sources": [
+      {
+        "json": "COMCRAF",
+        "abbreviation": "CC",
+        "full": "Complete Crafter",
+        "authors": [
+          "AeronDrake"
+        ],
+        "convertedBy": [
+          "TrueMichato"
+        ],
+        "version": "1.2.0",
+        "url": "https://www.gmbinder.com/share/-L5a1DsWKL0qXvkV926b",
+        "dateReleased": "2026-05-30"
+      }
+    ],
+    "dateAdded": 1780099200,
+    "dateLastModified": 1780099200,
+    "edition": "classic"
+  },
+  "variantrule": [
+    {
+      "name": "Crafting an Item",
+      "source": "COMCRAF",
+      "page": 3,
+      "entries": [
+        "A character who has the time, the money, and the needed tools can use downtime to craft armor, weapons, clothing, or other kinds of nonmagical gear.",
+        {
+          "type": "entries",
+          "name": "Resources and Resolution",
+          "entries": [
+            "In addition to the appropriate tools for the item to be crafted, a character needs raw materials worth half of the item's selling cost. To determine how many workweeks it takes to create an item, divide its gold piece cost by 50. A character can complete multiple items in a workweek if their combined cost is 50 gp or lower. Items that cost more than 50 gp can be completed over longer periods of time, as long as the work in progress is stored in a safe location.",
+            "Multiple characters can combine their efforts. Divide the time needed to create an item by the number of characters working on it. Use your judgment when determining how many characters can collaborate on an item. A particularly tiny item, like a ring, might allow only one or two workers, whereas a large, complex item might allow four or more workers.",
+            "A character needs to be proficient with the tools needed to craft an item and have access to the appropriate equipment. Everyone who collaborates needs to have the appropriate tool proficiency.",
+            {
+              "type": "table",
+              "caption": "Example Tool Proficiencies",
+              "colLabels": [
+                "Proficiency",
+                "Items"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "Herbalism kit",
+                  "Antitoxin, {@item potion of healing}"
+                ],
+                [
+                  "Leatherworker's tools",
+                  "Leather armor, boots"
+                ],
+                [
+                  "Smith's tools",
+                  "Armor, weapons"
+                ],
+                [
+                  "Weaver's tools",
+                  "Cloaks, robes"
+                ]
+              ]
+            },
+            "If all the above requirements are met, the result of the process is an item of the desired sort. A character can sell an item crafted in this way at its listed price."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Crafting Magic Items",
+      "source": "COMCRAF",
+      "page": 3,
+      "ruleType": "O",
+      "entries": [
+        "Creating a magic item requires more than just time, effort, and materials. It is a long-term process that involves one or more adventures to track down rare materials and the lore needed to create the item.",
+        "{@i Potions of healing} and {@i spell scrolls} are exceptions; see the {@variantrule Brewing Potions of Healing|COMCRAF} and {@variantrule Scribing a Spell Scroll|COMCRAF} entries.",
+        "A character needs a formula for a magic item in order to create it. The formula lists the materials needed and the steps required to make the item.",
+        "An item invariably requires an exotic material to complete it. This material can range from the skin of a yeti to a vial of water taken from a whirlpool on the Elemental Plane of Water. Finding that material should take place as part of an adventure.",
+        "The Magic Item Ingredients table suggests the challenge rating of a creature the characters need to face to acquire materials. Facing a creature does not necessarily mean the characters must collect items from its corpse; the creature might guard a location or resource that the characters need to access.",
+        {
+          "type": "table",
+          "caption": "Magic Item Ingredients",
+          "colLabels": [
+            "Item Rarity",
+            "CR Range"
+          ],
+          "colStyles": [
+            "col-6",
+            "col-6 text-center"
+          ],
+          "rows": [
+            [
+              "Common",
+              "1-3"
+            ],
+            [
+              "Uncommon",
+              "4-8"
+            ],
+            [
+              "Rare",
+              "9-12"
+            ],
+            [
+              "Very Rare",
+              "13-18"
+            ],
+            [
+              "Legendary",
+              "19+"
+            ]
+          ]
+        },
+        "In addition to facing a specific creature, creating an item comes with a gold piece cost covering other materials, tools, and so on, based on the item's rarity. Halve the listed price and creation time for any consumable items.",
+        {
+          "type": "table",
+          "caption": "Magic Item Crafting Time and Cost",
+          "colLabels": [
+            "Item Rarity",
+            "Workweeks*",
+            "Cost*"
+          ],
+          "colStyles": [
+            "col-4",
+            "col-4 text-center",
+            "col-4 text-right"
+          ],
+          "rows": [
+            [
+              "Common",
+              "1",
+              "50 gp"
+            ],
+            [
+              "Uncommon",
+              "2",
+              "200 gp"
+            ],
+            [
+              "Rare",
+              "10",
+              "2,000 gp"
+            ],
+            [
+              "Very Rare",
+              "25",
+              "20,000 gp"
+            ],
+            [
+              "Legendary",
+              "50",
+              "100,000 gp"
+            ]
+          ],
+          "footnotes": [
+            "*Halved for a consumable item like a potion or scroll."
+          ]
+        },
+        "To complete a magic item, a character also needs whatever tool proficiency is appropriate (as for crafting a nonmagical object), or proficiency in the {@skill Arcana} skill."
+      ]
+    },
+    {
+      "name": "Crafting Complications",
+      "source": "COMCRAF",
+      "page": 4,
+      "ruleType": "O",
+      "entries": [
+        "Most of the complications involved in creating something, especially a magic item, are linked to the difficulty in finding rare ingredients or components needed to complete the work. There's a 10 percent chance for every five workweeks spent on crafting a magic item that a complication occurs.",
+        {
+          "type": "table",
+          "caption": "Crafting Complications",
+          "colLabels": [
+            "d6",
+            "Complication"
+          ],
+          "colStyles": [
+            "col-2 text-center",
+            "col-10"
+          ],
+          "rows": [
+            [
+              "1",
+              "Rumors swirl that what you're working on is unstable and a threat to the community.*"
+            ],
+            [
+              "2",
+              "Your tools are stolen, forcing you to buy new ones.*"
+            ],
+            [
+              "3",
+              "A local wizard shows keen interest in your work and insists on observing you."
+            ],
+            [
+              "4",
+              "A powerful noble offers a hefty price for your work and is not interested in hearing a no for an answer.*"
+            ],
+            [
+              "5",
+              "A dwarf clan accuses you of stealing its secret lore to fuel your work.*"
+            ],
+            [
+              "6",
+              "A competitor spreads rumors that your work is shoddy and prone to failure.*"
+            ]
+          ],
+          "footnotes": [
+            "*Might involve a rival."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Brewing Potions of Healing",
+      "source": "COMCRAF",
+      "page": 4,
+      "entries": [
+        "{@i Potions of healing} fall into a special category for item crafting. A character who has proficiency with the herbalism kit can create these potions.",
+        {
+          "type": "table",
+          "caption": "Potion of Healing Creation",
+          "colLabels": [
+            "Type",
+            "Time",
+            "Cost"
+          ],
+          "colStyles": [
+            "col-4",
+            "col-4",
+            "col-4 text-right"
+          ],
+          "rows": [
+            [
+              "Healing",
+              "1 day",
+              "25 gp"
+            ],
+            [
+              "Greater healing",
+              "1 workweek",
+              "100 gp"
+            ],
+            [
+              "Superior healing",
+              "3 workweeks",
+              "1,000 gp"
+            ],
+            [
+              "Supreme healing",
+              "4 workweeks",
+              "10,000 gp"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Scribing a Spell Scroll",
+      "source": "COMCRAF",
+      "page": 4,
+      "entries": [
+        "With time and patience, a spellcaster can transfer a spell to a scroll, creating a {@item spell scroll}.",
+        {
+          "type": "entries",
+          "name": "Resources",
+          "entries": [
+            "Scribing a {@i spell scroll} takes an amount of time and money related to the level of the spell. The character must have proficiency in the {@skill Arcana} skill and must provide any material components required for the casting of the spell. The character must also have the spell prepared, or it must be among the character's known spells, in order to scribe a scroll of that spell.",
+            "If the scribed spell is a cantrip, the version of the scroll works as if the caster were 1st level.",
+            {
+              "type": "table",
+              "caption": "Spell Scroll Costs",
+              "colLabels": [
+                "Spell Level",
+                "Time",
+                "Cost"
+              ],
+              "colStyles": [
+                "col-4 text-center",
+                "col-4",
+                "col-4 text-right"
+              ],
+              "rows": [
+                [
+                  "Cantrip",
+                  "1 day",
+                  "15 gp"
+                ],
+                [
+                  "1st",
+                  "1 day",
+                  "25 gp"
+                ],
+                [
+                  "2nd",
+                  "3 days",
+                  "250 gp"
+                ],
+                [
+                  "3rd",
+                  "1 workweek",
+                  "500 gp"
+                ],
+                [
+                  "4th",
+                  "2 workweeks",
+                  "2,500 gp"
+                ],
+                [
+                  "5th",
+                  "4 workweeks",
+                  "5,000 gp"
+                ],
+                [
+                  "6th",
+                  "8 workweeks",
+                  "15,000 gp"
+                ],
+                [
+                  "7th",
+                  "16 workweeks",
+                  "25,000 gp"
+                ],
+                [
+                  "8th",
+                  "32 workweeks",
+                  "50,000 gp"
+                ],
+                [
+                  "9th",
+                  "48 workweeks",
+                  "250,000 gp"
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Scribing Scroll Complications",
+      "source": "COMCRAF",
+      "page": 4,
+      "ruleType": "O",
+      "entries": [
+        "Crafting a {@i spell scroll} is a solitary task, unlikely to attract much attention. The complications that arise are more likely to involve the preparation needed for the activity. Every workweek spent scribing brings a 10 percent chance of a complication.",
+        {
+          "type": "table",
+          "caption": "Scribe a Scroll Complications",
+          "colLabels": [
+            "d6",
+            "Complication"
+          ],
+          "colStyles": [
+            "col-2 text-center",
+            "col-10"
+          ],
+          "rows": [
+            [
+              "1",
+              "You bought up the last of the rare ink used to craft scrolls, angering a wizard in town."
+            ],
+            [
+              "2",
+              "The priest of a temple of good accuses you of trafficking in dark magic.*"
+            ],
+            [
+              "3",
+              "A wizard eager to collect one of your spells in a book presses you to sell the scroll."
+            ],
+            [
+              "4",
+              "Due to a strange error in creating the scroll, it is instead a random spell of the same level."
+            ],
+            [
+              "5",
+              "The rare parchment you bought for your scrolls has a barely visible map on it."
+            ],
+            [
+              "6",
+              "A thief attempts to break into your workroom.*"
+            ]
+          ],
+          "footnotes": [
+            "*Might involve a rival."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Collecting Creature Parts",
+      "source": "COMCRAF",
+      "page": 5,
+      "entries": [
+        "When characters hunt down or find a dead creature, they can attempt to harvest some parts for crafting and surviving. The DC for harvesting a part equals 12 + half the creature's challenge rating (creatures with a CR lower than 2 don't add it to the DC).",
+        {
+          "type": "table",
+          "caption": "Extracting Creature Parts",
+          "colLabels": [
+            "Creature Type",
+            "Ability Check"
+          ],
+          "colStyles": [
+            "col-8",
+            "col-4"
+          ],
+          "rows": [
+            [
+              "Aberration, construct, dragon, elemental, ooze",
+              "{@skill Arcana}"
+            ],
+            [
+              "Beast, giant, humanoid, monstrosity, plant",
+              "{@skill Nature}"
+            ],
+            [
+              "Celestial, fey, fiend, undead",
+              "{@skill Religion}"
+            ]
+          ]
+        },
+        "The number of checks a character can make depends on the size of the creature. Every harvest check takes 1 hour to complete, even on a failure. Each successful check gives the character a number of units which can be used for crafting.",
+        "The DM determines the number of checks the party can make for each part they want to harvest, and the amount of units gained per check, but the number of units cannot exceed the maximum shown in the table below.",
+        {
+          "type": "table",
+          "caption": "Harvest Checks by Creature Size",
+          "colLabels": [
+            "Creature Size",
+            "Maximum Checks",
+            "Maximum Units per Check"
+          ],
+          "colStyles": [
+            "col-4",
+            "col-4 text-center",
+            "col-4"
+          ],
+          "rows": [
+            [
+              "Tiny",
+              "1",
+              "1/4 unit"
+            ],
+            [
+              "Small",
+              "2",
+              "1/2 unit"
+            ],
+            [
+              "Medium",
+              "2",
+              "1 unit"
+            ],
+            [
+              "Large",
+              "3",
+              "2 units"
+            ],
+            [
+              "Huge",
+              "4",
+              "3 units"
+            ],
+            [
+              "Gargantuan",
+              "5",
+              "4 units"
+            ]
+          ]
+        },
+        {
+          "type": "inset",
+          "name": "Creature Essence",
+          "entries": [
+            "All creatures are divided into various types, and characters can extract a unit of that essence using an {@i essence extraction device}."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Harvested Unit Values",
+      "source": "COMCRAF",
+      "page": 5,
+      "entries": [
+        "The value of each harvested unit ranges from 1% to 50% of the experience of the creature. Common creature parts are valued at 1% of the creature's XP, while the rarest are close to 50%.",
+        {
+          "type": "table",
+          "caption": "Units Value",
+          "colLabels": [
+            "CR",
+            "Creature Rarity",
+            "Unit Value"
+          ],
+          "colStyles": [
+            "col-3",
+            "col-4",
+            "col-5"
+          ],
+          "rows": [
+            [
+              "6 or less",
+              "Common",
+              "1% of the creature's XP"
+            ],
+            [
+              "7-12",
+              "Uncommon",
+              "5% of the creature's XP"
+            ],
+            [
+              "13-18",
+              "Rare",
+              "10% of the creature's XP"
+            ],
+            [
+              "19-24",
+              "Very Rare",
+              "25% of the creature's XP"
+            ],
+            [
+              "25+",
+              "Legendary",
+              "50% of the creature's XP"
+            ]
+          ]
+        },
+        "As examples: a unit of feathers from a hippogriff (CR 1, 200 XP) is worth 2 gp; a unit of pseudodragon's scales (CR 1/4) is worth 5 sp; a unit of an adult blue dragon's scales (CR 16) is worth 1,500 gp."
+      ]
+    },
+    {
+      "name": "Extracting Minerals",
+      "source": "COMCRAF",
+      "page": 6,
+      "entries": [
+        "Minerals are earthen materials used for making armor and weapons; exotic ores grant special qualities to the gear they make.",
+        "To extract minerals, a character must use a miner's pick and make a {@dc 15} Strength ({@skill Athletics}) check. On a success, the character collects 2d4 + the character's Constitution modifier ore units (minimum 1 unit).",
+        "If needed, the character must first make an Intelligence ({@skill Nature}) check to find a vein.",
+        "The time used for extracting minerals equals 1 day of downtime activity."
+      ]
+    },
+    {
+      "name": "Foraging Variant: Getting Meat",
+      "source": "COMCRAF",
+      "page": 6,
+      "ruleType": "V",
+      "entries": [
+        "While characters can forage to survive in the wilderness, they can also hunt down and kill a creature to harvest the meat. The meat spoils after a single day if uneaten. Eating spoiled meat might require a {@dc 15} Constitution saving throw to avoid sickness or disease.",
+        "A character can make a Wisdom ({@skill Survival}) check ({@dc 15}, modifiable by the DM) to collect meat as food.",
+        "Harvesting meat does not count against the maximum harvest checks a character can make, but doing so might destroy other parts such as hide and organs.",
+        {
+          "type": "table",
+          "caption": "Creature Food Yield",
+          "colLabels": [
+            "Creature Size",
+            "Food Gained"
+          ],
+          "colStyles": [
+            "col-6",
+            "col-6"
+          ],
+          "rows": [
+            [
+              "Tiny",
+              "1 lb."
+            ],
+            [
+              "Small",
+              "4 lb."
+            ],
+            [
+              "Medium",
+              "16 lb."
+            ],
+            [
+              "Large",
+              "32 lb."
+            ],
+            [
+              "Huge",
+              "64 lb."
+            ],
+            [
+              "Gargantuan",
+              "128 lb."
+            ]
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Drinking Blood",
+          "entries": [
+            "When a character makes a Wisdom ({@skill Survival}) check to collect meat as food, it can also collect a number of gallons of blood equal to half the amount of meat. A character drinking blood must make a {@dc 15} Constitution saving throw to avoid vomiting."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Cooking and Purifying",
+          "entries": [
+            "Some creature meat and blood may be poisonous, diseased, or cause other special effects if not properly prepared or cooked."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Extracting Non-Mineral Materials",
+      "source": "COMCRAF",
+      "page": 6,
+      "entries": [
+        "Materials such as wood, stone, and coral can also be used to craft weapons, armor, and other gear.",
+        "Gathering these materials requires a {@dc 15} Strength ({@skill Athletics}) or Dexterity check, depending on the material. On a success, the character collects 2d4 + the character's Constitution modifier units (minimum 1).",
+        "The time used for extraction equals 1 day of downtime activity."
+      ]
+    },
+    {
+      "name": "Gathering Plants and Herbs",
+      "source": "COMCRAF",
+      "page": 6,
+      "entries": [
+        "Plants are mostly used for creating alchemical mixtures, cooking, and dyes.",
+        "To gather plants, herbs, and similar resources, the character must succeed on a {@dc 15} Intelligence ({@skill Nature}) check. On a success, the character collects 2d4 + the character's Intelligence modifier units (minimum 1 unit).",
+        "Each check takes 1 hour, and a character can make a number of checks per day equal to the character's Intelligence modifier (minimum 1)."
+      ]
+    },
+    {
+      "name": "Buying and Selling Materials",
+      "source": "COMCRAF",
+      "page": 6,
+      "entries": [
+        "It's up to the DM to determine if collected materials can be sold (and in some cases bought). The value of each unit depends on the material; see the material descriptions for specifics.",
+        {
+          "type": "inset",
+          "name": "Keeping Parts Chilled",
+          "entries": [
+            "If characters want to keep creature parts for later use, they need to keep the parts chilled to avoid decomposition. See the {@i Bag of Colding}."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Plants and Herbs by Area",
+      "source": "COMCRAF",
+      "page": 7,
+      "entries": [
+        "When a character succeeds on a roll to gather plants and herbs, the DM can choose one of the following plants or roll a d20 to determine it randomly.",
+        {
+          "type": "entries",
+          "name": "Arctic",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Arctic",
+              "colLabels": [
+                "d20",
+                "Name",
+                "Rarity"
+              ],
+              "colStyles": [
+                "col-2 text-center",
+                "col-7",
+                "col-3"
+              ],
+              "rows": [
+                [
+                  "1-5",
+                  "Blue herb",
+                  "Common"
+                ],
+                [
+                  "6-10",
+                  "Drojos ivy",
+                  "Common"
+                ],
+                [
+                  "11-15",
+                  "Ucre bramble",
+                  "Common"
+                ],
+                [
+                  "16-18",
+                  "White poppy",
+                  "Uncommon"
+                ],
+                [
+                  "19",
+                  "Kreet paste",
+                  "Rare"
+                ],
+                [
+                  "20",
+                  "Angel flower",
+                  "Very Rare"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Caves",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Caves",
+              "colLabels": [
+                "d20",
+                "Name",
+                "Rarity"
+              ],
+              "colStyles": [
+                "col-2 text-center",
+                "col-7",
+                "col-3"
+              ],
+              "rows": [
+                [
+                  "1-5",
+                  "Twilight wormwood",
+                  "Common"
+                ],
+                [
+                  "6-10",
+                  "Blue herb",
+                  "Common"
+                ],
+                [
+                  "11-15",
+                  "Mandrake root",
+                  "Common"
+                ],
+                [
+                  "16-18",
+                  "Abyss flower",
+                  "Uncommon"
+                ],
+                [
+                  "19",
+                  "Kasuni juice",
+                  "Rare"
+                ],
+                [
+                  "20",
+                  "Blackleaf rose",
+                  "Very Rare"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Desert",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Desert",
+              "colLabels": [
+                "d20",
+                "Name",
+                "Rarity"
+              ],
+              "colStyles": [
+                "col-2 text-center",
+                "col-7",
+                "col-3"
+              ],
+              "rows": [
+                [
+                  "1-5",
+                  "Drojos ivy",
+                  "Common"
+                ],
+                [
+                  "6-10",
+                  "Ellond scrub",
+                  "Common"
+                ],
+                [
+                  "11-15",
+                  "Ucre bramble",
+                  "Common"
+                ],
+                [
+                  "16-18",
+                  "Dried ephedra",
+                  "Uncommon"
+                ],
+                [
+                  "19",
+                  "Olina petals",
+                  "Rare"
+                ],
+                [
+                  "20",
+                  "Ebrium fungus",
+                  "Very Rare"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Forests",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Forests",
+              "colLabels": [
+                "d20",
+                "Name",
+                "Rarity"
+              ],
+              "colStyles": [
+                "col-2 text-center",
+                "col-7",
+                "col-3"
+              ],
+              "rows": [
+                [
+                  "1-5",
+                  "Twilight wormwood",
+                  "Common"
+                ],
+                [
+                  "6-10",
+                  "Drojos ivy",
+                  "Common"
+                ],
+                [
+                  "11-15",
+                  "Ellond scrub",
+                  "Common"
+                ],
+                [
+                  "16-18",
+                  "Blood herb",
+                  "Uncommon"
+                ],
+                [
+                  "19",
+                  "Thunderleaf",
+                  "Rare"
+                ],
+                [
+                  "20",
+                  "Wisp stems",
+                  "Very Rare"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Lakes, Rivers, and Ocean",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Lakes, Rivers, and Ocean",
+              "colLabels": [
+                "d20",
+                "Name",
+                "Rarity"
+              ],
+              "colStyles": [
+                "col-2 text-center",
+                "col-7",
+                "col-3"
+              ],
+              "rows": [
+                [
+                  "1-5",
+                  "Twilight wormwood",
+                  "Common"
+                ],
+                [
+                  "6-10",
+                  "Blue herb",
+                  "Common"
+                ],
+                [
+                  "11-15",
+                  "Mandrake root",
+                  "Common"
+                ],
+                [
+                  "16-18",
+                  "Aniseed sap",
+                  "Uncommon"
+                ],
+                [
+                  "19",
+                  "Kreet paste",
+                  "Rare"
+                ],
+                [
+                  "20",
+                  "Chromatic mud",
+                  "Very Rare"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Mountains",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Mountains",
+              "colLabels": [
+                "d20",
+                "Name",
+                "Rarity"
+              ],
+              "colStyles": [
+                "col-2 text-center",
+                "col-7",
+                "col-3"
+              ],
+              "rows": [
+                [
+                  "1-5",
+                  "Drojos ivy",
+                  "Common"
+                ],
+                [
+                  "6-10",
+                  "Ellond scrub",
+                  "Common"
+                ],
+                [
+                  "11-15",
+                  "Mandrake root",
+                  "Common"
+                ],
+                [
+                  "16-18",
+                  "Ash chives",
+                  "Uncommon"
+                ],
+                [
+                  "19",
+                  "Kasuni juice",
+                  "Rare"
+                ],
+                [
+                  "20",
+                  "Dragontongue petals",
+                  "Very Rare"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Plains",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Plains",
+              "colLabels": [
+                "d20",
+                "Name",
+                "Rarity"
+              ],
+              "colStyles": [
+                "col-2 text-center",
+                "col-7",
+                "col-3"
+              ],
+              "rows": [
+                [
+                  "1-5",
+                  "Ellond scrub",
+                  "Common"
+                ],
+                [
+                  "6-10",
+                  "Mandrake root",
+                  "Common"
+                ],
+                [
+                  "11-15",
+                  "Ucre bramble",
+                  "Common"
+                ],
+                [
+                  "16-18",
+                  "Aniseed sap",
+                  "Uncommon"
+                ],
+                [
+                  "19",
+                  "Lunar nectar",
+                  "Rare"
+                ],
+                [
+                  "20",
+                  "Dragontongue petals",
+                  "Very Rare"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Swamps",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Swamps",
+              "colLabels": [
+                "d20",
+                "Name",
+                "Rarity"
+              ],
+              "colStyles": [
+                "col-2 text-center",
+                "col-7",
+                "col-3"
+              ],
+              "rows": [
+                [
+                  "1-5",
+                  "Twilight wormwood",
+                  "Common"
+                ],
+                [
+                  "6-10",
+                  "Blue herb",
+                  "Common"
+                ],
+                [
+                  "11-15",
+                  "Ucre bramble",
+                  "Common"
+                ],
+                [
+                  "16-18",
+                  "Frenn moss",
+                  "Uncommon"
+                ],
+                [
+                  "19",
+                  "Ecire laurel",
+                  "Rare"
+                ],
+                [
+                  "20",
+                  "Spineflower berries",
+                  "Very Rare"
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Modular Crafting",
+      "source": "COMCRAF",
+      "page": 8,
+      "entries": [
+        "While characters can craft a specific item (nonmagical or magical), they can also craft their own custom gear depending on what they want.",
+        "As a general rule, a character needs 3 units of the same material to craft a medium-sized creature's armor or clothing, and 2 units of the same material for weapons, shields, and 10 units of ammunition. For bigger creatures, the character needs twice the materials per size increment; for smaller creatures, the character needs half the materials per size below medium.",
+        "Magic items are more complex and unique, so they might require more units of the same material or some units of different materials."
+      ]
+    },
+    {
+      "name": "Crafting Material Descriptions",
+      "source": "COMCRAF",
+      "page": 8,
+      "entries": [
+        "These materials have unit values and properties that grant special qualities to the gear made from them. Unless used to craft a magic item, gear made with these materials is non-magical.",
+        {
+          "type": "entries",
+          "name": "Creature Materials",
+          "entries": [
+            {
+              "type": "entries",
+              "name": "Bone",
+              "entries": [
+                "A series of bones joined together, mostly used by shamans and wildlings.",
+                "{@b Unit value:} Determined by the creature's CR.",
+                "{@b Armor:} Replaces the metal. While wearing medium or heavy armor (non-hide) made with bones, you gain a +3 bonus to Charisma ({@skill Intimidation}) checks.",
+                "{@b Weapon:} Replaces the metal and wood."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Chitin",
+              "entries": [
+                "The flexible shells of chitinous creatures such as giant crabs or remorhaz, used to craft armors lighter than metallic armors.",
+                "{@b Unit value:} Determined by the creature's CR.",
+                "{@b Armor:} Replaces the metal. Medium armor (non-hide) made with chitin increases its Dexterity bonus by 1. Heavy armor made with chitin reduces the Strength requirement by 1."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Creature Essence",
+              "entries": [
+                "All creatures are different, but they're grouped into types that determine their fundamental nature.",
+                "{@b Unit value:} Determined by the creature's CR.",
+                "{@b Weapon:} Used to craft specific slaying weapons such as an {@item arrow of dragon slaying}.",
+                "{@b Other:} Used to craft specific potions, alchemical concoctions, and magic items such as a {@item brazier of commanding fire elementals}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Ellond Hide",
+              "entries": [
+                "A brown-orange hide harvested from creatures of desert and dry areas.",
+                "{@b Unit value:} Determined by the creature's CR.",
+                "{@b Armor:} While wearing clothing or hide armor made with ellond hide, fire damage you take is reduced by 3. Harvested ellond hide from a CR 9 or higher creature can be used to craft a {@i hide armor of fire resistance}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Monster Feathers",
+              "entries": [
+                "Hippogriffs, rocs, giant eagles, and other flying creatures have beautiful feathers used to show their majesty.",
+                "{@b Unit value:} Determined by the creature's CR.",
+                "{@b Armor:} While wearing clothing or any non-metallic armor made with monster feathers, you gain a +3 bonus to Wisdom ({@skill Animal Handling}) checks.",
+                "{@b Other:} Harvested feathers from a CR 9 or higher creature can be used to craft a {@item Quaal's feather token}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Monster Scales",
+              "entries": [
+                "Scales harvested from creatures, with a variety of colors, shapes, and sizes.",
+                "{@b Unit value:} Determined by the creature's CR.",
+                "{@b Armor:} Replaces the metal. Used to craft scale mail. Harvested scales from a CR 13 or higher dragon can be used to craft {@item dragon scale mail}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Shadowsilk",
+              "entries": [
+                "A black, semi-transparent silk carefully made by underground spiders and spider-like creatures.",
+                "{@b Unit value:} Determined by the creature's CR.",
+                "{@b Armor:} While wearing clothing or any non-metallic armor made with shadowsilk, you gain a +3 bonus to Dexterity ({@skill Stealth}) checks made in lightly obscured areas (such as tree shadows). Harvested shadowsilk from a CR 13 or higher creature can be used to craft a {@item cloak of arachnida}."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Minerals",
+          "entries": [
+            {
+              "type": "entries",
+              "name": "Adamantine",
+              "entries": [
+                "A shiny black metal, known as one of the hardest substances in existence.",
+                "{@b Unit value:} 250 gp.",
+                "{@b Armor:} Used to craft {@item adamantine armor}.",
+                "{@b Weapon:} When you hit an object with an adamantine weapon or piece of ammunition, the hit is a critical hit."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Asmoroch Steel",
+              "entries": [
+                "A black, scorched-like metal that is cold to the touch.",
+                "{@b Unit value:} 500 gp.",
+                "{@b Armor:} Used to craft an {@i armor of necrotic resistance} (metallic armor only).",
+                "{@b Weapon:} Used to craft necrotic-damage weapons, such as the {@item sword of life stealing}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Cold Iron",
+              "entries": [
+                "Iron worked entirely while cold, known for its effectiveness against fey and fiendish creatures.",
+                "{@b Unit value:} 100 gp.",
+                "{@b Weapon:} When you hit a fey or a fiend with a cold iron weapon, you can roll the damage again and use either result."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Darksteel",
+              "entries": [
+                "A darkened blue metal that only forms in areas affected by thunderstorms, holding that energy within it.",
+                "{@b Unit value:} 250 gp.",
+                "{@b Armor:} Used to craft an {@i armor of lightning resistance} (metallic armor only).",
+                "{@b Weapon:} Used to craft lightning-damage weapons, such as the {@item javelin of lightning}.",
+                "{@b Other:} Used to craft lightning-damage magic items, such as the {@i wand of lightning bolt}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Dwarvenstone",
+              "entries": [
+                "A marble-like ore used by dwarves to create ceremonial armor, heavier and bulkier than other metallic armors.",
+                "{@b Unit value:} 500 gp.",
+                "{@b Armor:} Used to craft {@item dwarven plate}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Infernal Steel",
+              "entries": [
+                "A blood-red metal found in the infernal planes, very resistant and able to capture heat and flames.",
+                "{@b Unit value:} 750 gp.",
+                "{@b Armor:} Used to craft an {@i armor of fire resistance} (metallic armor only) or a {@item demon armor}.",
+                "{@b Weapon:} Used to craft fire-damage weapons, such as the {@item flame tongue}.",
+                "{@b Other:} Used to craft fire-damage magic items, such as the {@item staff of fire}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Mithral",
+              "entries": [
+                "A white-silver metal lighter and more flexible than common steel.",
+                "{@b Unit value:} 250 gp.",
+                "{@b Armor:} Used to craft {@item mithral armor}.",
+                "{@b Weapon:} Two-handed weapons made with mithral lose the heavy property, and all other weapons gain the light property."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Orichalcum",
+              "entries": [
+                "A bronze-orange metal used to absorb the essence of magic.",
+                "{@b Unit value:} 500 gp.",
+                "{@b Armor:} Used to craft an {@i armor of force resistance} (metallic armor only).",
+                "{@b Other:} Used to craft anti-magic items, such as the {@item ring of mind shielding}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Plaguesteel",
+              "entries": [
+                "An ancient, mossy-like metal with small spores floating around it.",
+                "{@b Unit value:} 250 gp.",
+                "{@b Weapon:} Used to craft poison-damage weapons, such as the {@item dagger of venom}.",
+                "{@b Other:} Used to craft poison-damage magic items, such as the {@item staff of the adder}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Stellar Iron",
+              "entries": [
+                "A white, bright metal that is soft on touch but very resistant, used by celestial beings.",
+                "{@b Unit value:} 750 gp.",
+                "{@b Armor:} Used to craft an {@i armor of radiant resistance} (metallic armor only).",
+                "{@b Weapon:} Used to craft radiant-damage weapons, such as the {@item sun blade}."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Non-Mineral Materials",
+          "entries": [
+            {
+              "type": "entries",
+              "name": "Aerocrystal",
+              "entries": [
+                "A light blue, glass-like crystal known for creating quick, precise weapons.",
+                "{@b Unit value:} 500 gp.",
+                "{@b Weapon:} You can use your Dexterity modifier for attacks and damage made with an aerocrystal weapon."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Coral",
+              "entries": [
+                "Mostly used by sea and waterborne creatures to create their weapons and armors.",
+                "{@b Unit value:} 100 gp.",
+                "{@b Armor:} Replaces the metal. While wearing medium or heavy armor (non-hide) made with coral, your swimming speed increases by 10 feet.",
+                "{@b Weapon:} Any melee weapon made with coral doesn't have disadvantage on attack rolls while underwater."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Darkwood",
+              "entries": [
+                "A piece of wood as hard as normal wood but very light.",
+                "{@b Unit value:} 100 gp.",
+                "{@b Armor:} Replaces the metal of any medium or heavy armor."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Eternal Ice",
+              "entries": [
+                "A cold white-blue block of ice that resists high temperatures and cannot melt in normal conditions.",
+                "{@b Unit value:} 500 gp.",
+                "{@b Weapon:} Used to craft cold-damage weapons, such as the {@item frost brand}.",
+                "{@b Other:} Used to craft cold-damage magic items, such as the {@item staff of frost}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Ignum",
+              "entries": [
+                "A black, semi-translucent stone with lava-like glowing flowing inside it.",
+                "{@b Unit value:} 500 gp.",
+                "{@b Weapon:} Used to craft fire-damage weapons, such as the {@item flame tongue}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Infernal Leather",
+              "entries": [
+                "A reddish, hard leather created in the infernal planes.",
+                "{@b Unit value:} 750 gp.",
+                "{@b Armor:} Used to craft an {@i armor of fire resistance} (leather or studded leather)."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Leafweave",
+              "entries": [
+                "Alchemically processed leaves that are hard as leather, also used as camouflage.",
+                "{@b Unit value:} 100 gp.",
+                "{@b Other:} Used to craft the {@item boots of elvenkind} and the {@item cloak of elvenkind}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Obsidian",
+              "entries": [
+                "A black to deep purple glass-like stone known to be very sharp.",
+                "{@b Unit value:} 250 gp.",
+                "{@b Armor:} While wearing medium or heavy armor (non-hide) made with obsidian, when an enemy tries to grapple you, it takes 1d4 slashing damage.",
+                "{@b Weapon:} Used to craft the {@item sword of sharpness}."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Shadowfell Linen",
+              "entries": [
+                "A dark and purple linen found in the Shadowfell.",
+                "{@b Unit value:} 750 gp.",
+                "{@b Armor:} Used to craft an {@i armor of psychic resistance} (leather or studded leather)."
+              ]
+            },
+            {
+              "type": "entries",
+              "name": "Spiritual Wood",
+              "entries": [
+                "A cyan-like wood with a natural connection to magic.",
+                "{@b Unit value:} 250 gp.",
+                "{@b Armor:} Replaces the metal of any medium or heavy armor. While wearing a spiritual wood armor, you gain a +3 bonus to concentration checks to maintain a spell."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Plants and Herbs",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Plants and Herbs Summary",
+              "colLabels": [
+                "Plant",
+                "Unit Value",
+                "Alchemy Use"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-2 text-center",
+                "col-6"
+              ],
+              "rows": [
+                [
+                  "Abyss flower",
+                  "10 gp",
+                  "Poison (malice)"
+                ],
+                [
+                  "Angel flower",
+                  "40 gp",
+                  "{@i Potion of flying}"
+                ],
+                [
+                  "Aniseed sap",
+                  "10 gp",
+                  "{@i Potion of cold resistance}"
+                ],
+                [
+                  "Ash chives",
+                  "10 gp",
+                  "Poison (burnt othur fumes)"
+                ],
+                [
+                  "Blackleaf rose",
+                  "40 gp",
+                  "Poison (midnight tears)"
+                ],
+                [
+                  "Blood herb",
+                  "5 gp",
+                  "{@i Potion of poison}"
+                ],
+                [
+                  "Blue herb",
+                  "5 gp",
+                  "{@i Potion of healing}"
+                ],
+                [
+                  "Chromatic mud",
+                  "40 gp",
+                  "{@i Oil of sharpness}"
+                ],
+                [
+                  "Dragontongue petals",
+                  "10 gp",
+                  "{@i Potion of fire breath}"
+                ],
+                [
+                  "Dried ephedra",
+                  "10 gp",
+                  "{@i Potion of fire resistance}"
+                ],
+                [
+                  "Drojos ivy",
+                  "5 gp",
+                  "{@i Potion of climbing}"
+                ],
+                [
+                  "Ebrium fungus",
+                  "40 gp",
+                  "Poison (torpor)"
+                ],
+                [
+                  "Ecire laurel",
+                  "20 gp",
+                  "{@i Potion of poison resistance}"
+                ],
+                [
+                  "Ellond shrub",
+                  "5 gp",
+                  "Alchemist's fire"
+                ],
+                [
+                  "Frenn moss",
+                  "10 gp",
+                  "Poison (essence of ether)"
+                ],
+                [
+                  "Kasuni juice",
+                  "20 gp",
+                  "{@i Oil of slipperiness}"
+                ],
+                [
+                  "Kreet paste",
+                  "20 gp",
+                  "{@i Potion of greater healing}"
+                ],
+                [
+                  "Lunar flower",
+                  "20 gp",
+                  "{@i Potion of force resistance}"
+                ],
+                [
+                  "Mandrake root",
+                  "5 gp",
+                  "{@i Potion of thunder resistance}"
+                ],
+                [
+                  "Olina petals",
+                  "20 gp",
+                  "Poison (pale tincture)"
+                ],
+                [
+                  "Spineflower berries",
+                  "40 gp",
+                  "{@i Potion of superior healing}"
+                ],
+                [
+                  "Thunderleaf",
+                  "20 gp",
+                  "{@i Potion of flying}"
+                ],
+                [
+                  "Twilight wormwood",
+                  "5 gp",
+                  "Basic poison vials"
+                ],
+                [
+                  "Ucre bramble",
+                  "5 gp",
+                  "{@i Potion of radiant resistance}"
+                ],
+                [
+                  "White poppy",
+                  "10 gp",
+                  "{@i Potion of growth}"
+                ],
+                [
+                  "Wisp stems",
+                  "40 gp",
+                  "{@i Potion of vitality}"
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Optional Rule: Material Resistance",
+      "source": "COMCRAF",
+      "page": 12,
+      "ruleType": "V",
+      "entries": [
+        "Every non-magical armor or weapon made with special materials has a number of {@b resistance points}. If the points are reduced to 0, the piece of equipment is broken and must be repaired before it can be used again.",
+        "Resistance points are reduced as follows:",
+        {
+          "type": "list",
+          "items": [
+            "When you make an attack with a weapon made with a special material and you roll a 1, the weapon's resistance points are reduced by 1.",
+            "When you take a critical hit from an opponent, your armor's resistance points are reduced by 1."
+          ]
+        },
+        "Each reduced point also reduces the attack bonus and damage for weapons, or the AC for armor, by 1.",
+        "A material that replaces another (for example, a coral armor replacing metal) uses the resistance values of the replaced material.",
+        {
+          "type": "table",
+          "caption": "Resistance Points by Value",
+          "colLabels": [
+            "Material Value",
+            "Clothing, Non-Metallic",
+            "Wood",
+            "Metal"
+          ],
+          "colStyles": [
+            "col-3",
+            "col-3 text-center",
+            "col-3 text-center",
+            "col-3 text-center"
+          ],
+          "rows": [
+            [
+              "100 or less",
+              "2",
+              "3",
+              "4"
+            ],
+            [
+              "101-500",
+              "3",
+              "4",
+              "5"
+            ],
+            [
+              "501-1,000",
+              "4",
+              "5",
+              "6"
+            ],
+            [
+              "1,001 or more",
+              "5",
+              "6",
+              "7"
+            ]
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Repairing Equipment",
+          "entries": [
+            "To repair a piece of equipment made with a special material, you make a tools check using the required artisan tools. The DC equals 8 + total reduced points.",
+            {
+              "type": "table",
+              "caption": "Material Units for Repair",
+              "colLabels": [
+                "Equipment Type",
+                "Number of Material Units"
+              ],
+              "colStyles": [
+                "col-6 text-center",
+                "col-6"
+              ],
+              "rows": [
+                [
+                  "Armor",
+                  "2 units"
+                ],
+                [
+                  "Weapon",
+                  "1 unit"
+                ]
+              ]
+            },
+            "On a success, the equipment is fully repaired. On a failure, you can try again after a long rest."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Common Items Resistance",
+          "entries": [
+            "You can apply these rules to common materials like iron and wood. Determine resistance points using the market value of the items, and repair them with units of iron, wood, or other common materials."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Modular Magic Items: Item Tiers",
+      "source": "COMCRAF",
+      "page": 15,
+      "entries": [
+        "Every magic item built with these guidelines has an item tier, which determines the number and rarity of its properties.",
+        "The character level determines the recommended levels at which a character should have access to a specific tier.",
+        {
+          "type": "table",
+          "caption": "Character Level to Item Tier",
+          "colLabels": [
+            "Character Level",
+            "Item Tier",
+            "Properties' Rarity"
+          ],
+          "colStyles": [
+            "col-4",
+            "col-4 text-center",
+            "col-4"
+          ],
+          "rows": [
+            [
+              "1st-4th",
+              "Tier 1",
+              "Minor"
+            ],
+            [
+              "5th-8th",
+              "Tier 2",
+              "Uncommon"
+            ],
+            [
+              "9th-12th",
+              "Tier 3",
+              "Rare"
+            ],
+            [
+              "13th-16th",
+              "Tier 4",
+              "Very Rare"
+            ],
+            [
+              "17th-20th",
+              "Tier 5",
+              "Legendary"
+            ]
+          ]
+        },
+        "A Tier 1 item has only a minor property. Tier 2 and higher items can also have one minor property that grants a simple feature or effect for free (chosen from the What Minor Property Does It Have? table in the {@i Dungeon Master's Guide}, page 143).",
+        {
+          "type": "table",
+          "caption": "Properties Rarity per Tier",
+          "colLabels": [
+            "Tier",
+            "Property 1",
+            "Property 2",
+            "Property 3"
+          ],
+          "colStyles": [
+            "col-3",
+            "col-3",
+            "col-3",
+            "col-3"
+          ],
+          "rows": [
+            [
+              "Tier 1",
+              "Minor",
+              "—",
+              "—"
+            ],
+            [
+              "Tier 2",
+              "Uncommon",
+              "Uncommon",
+              "—"
+            ],
+            [
+              "Tier 3",
+              "Rare",
+              "Rare",
+              "—"
+            ],
+            [
+              "Tier 4",
+              "Very Rare",
+              "Rare",
+              "Uncommon"
+            ],
+            [
+              "Tier 5",
+              "Legendary",
+              "Very Rare",
+              "Rare"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Spells and Charges on Modular Items",
+      "source": "COMCRAF",
+      "page": 15,
+      "entries": [
+        "If an item has the charges or spell properties, the creator must decide which spell(s) to add when creating the item. The character must have proficiency in the {@skill Arcana} skill and provide any material components required for the casting of the spell. Moreover, the character must have the spell prepared, or it must be among the character's known spells.",
+        "For items with the Spell property, a character can choose only one spell. The spell level is determined by the property rarity. For example, an item with the Spell III property and the {@spell lightning bolt} spell casts it as a 7th-level spell.",
+        "For items with charges, a character can add multiple spells. The number of spells and maximum level depend on the rarity of the property.",
+        {
+          "type": "table",
+          "caption": "Charges Property Limits",
+          "colLabels": [
+            "Property",
+            "Number of Spells",
+            "Maximum Spell Level"
+          ],
+          "colStyles": [
+            "col-4",
+            "col-4 text-center",
+            "col-4 text-center"
+          ],
+          "rows": [
+            [
+              "Charges I",
+              "1",
+              "1st"
+            ],
+            [
+              "Charges II",
+              "2",
+              "3rd"
+            ],
+            [
+              "Charges III",
+              "3",
+              "5th"
+            ],
+            [
+              "Charges IV",
+              "4",
+              "6th"
+            ]
+          ]
+        },
+        "Each charge equals 1 spell slot level. For example, expending 1 charge casts a 1st-level spell, and expending 5 charges casts a 5th-level spell."
+      ]
+    },
+    {
+      "name": "Modular Magic Item Properties",
+      "source": "COMCRAF",
+      "page": 15,
+      "entries": [
+        "It's up to the DM to determine if an item can have the same property multiple times and if a particular property can be added to a particular item. For example, an armor can't have Armor I twice, and Weapon II or Vampiric II can't be added to an armor that isn't meant to deal damage.",
+        {
+          "type": "table",
+          "caption": "Uncommon Properties",
+          "colLabels": [
+            "Property",
+            "Description"
+          ],
+          "colStyles": [
+            "col-4",
+            "col-8"
+          ],
+          "rows": [
+            [
+              "Ability Increase I",
+              "Increase an ability score to 16."
+            ],
+            [
+              "Charges I",
+              "The item has 3 charges ({@dc 11}). It regains 1d3 expended charges daily at dawn."
+            ],
+            [
+              "Damage I",
+              "The item deals an extra 1d4 damage."
+            ],
+            [
+              "Movement I",
+              "The item grants a climbing or swimming speed equal to the walking speed."
+            ],
+            [
+              "Permaspell I",
+              "You can cast one cantrip at will ({@dc 11})."
+            ],
+            [
+              "Skill I",
+              "The item grants a +5 bonus to one skill."
+            ],
+            [
+              "Slayer I",
+              "The item deals an extra 2d6 damage against a specific creature type."
+            ],
+            [
+              "Spell I",
+              "You can cast a spell at 3rd level once per long rest ({@dc 11})."
+            ],
+            [
+              "Vampiric I",
+              "On a critical hit, you regain 1 hit point."
+            ],
+            [
+              "Weapon I",
+              "You gain a +1 bonus on attack and damage rolls."
+            ]
+          ]
+        },
+        {
+          "type": "table",
+          "caption": "Rare Properties",
+          "colLabels": [
+            "Property",
+            "Description"
+          ],
+          "colStyles": [
+            "col-4",
+            "col-8"
+          ],
+          "rows": [
+            [
+              "Ability Increase II",
+              "Increase an ability score to 18."
+            ],
+            [
+              "Armor I",
+              "The item grants you +1 AC."
+            ],
+            [
+              "Charges II",
+              "The item has 5 charges ({@dc 13}). It regains 1d4 expended charges daily at dawn."
+            ],
+            [
+              "Damage II",
+              "The item deals an extra 1d6 damage."
+            ],
+            [
+              "Defense I",
+              "Damage you take from one damage type is reduced by 3 (minimum 1)."
+            ],
+            [
+              "Light II",
+              "The item sheds bright light in a 40-foot radius and dim light for an additional 40 feet."
+            ],
+            [
+              "Permaspell II",
+              "You can cast one 1st-level spell at will ({@dc 13})."
+            ],
+            [
+              "Returning",
+              "The item has the thrown property (20/60) and flies to your hand after attacking."
+            ],
+            [
+              "Sentinel II",
+              "The item glows faintly when a creature of a specific type is near (240 feet or less)."
+            ],
+            [
+              "Skill II",
+              "The item grants advantage on one skill check."
+            ],
+            [
+              "Slayer II",
+              "The item deals an extra 3d6 damage against a specific creature type."
+            ],
+            [
+              "Spell II",
+              "You can cast a spell at 6th level once per long rest ({@dc 13})."
+            ],
+            [
+              "Vampiric II",
+              "On a critical hit, you regain hit points equal to half the damage dealt (minimum 1)."
+            ],
+            [
+              "Weapon II",
+              "You gain a +2 bonus on attack and damage rolls."
+            ]
+          ]
+        },
+        {
+          "type": "table",
+          "caption": "Very Rare Properties",
+          "colLabels": [
+            "Property",
+            "Description"
+          ],
+          "colStyles": [
+            "col-4",
+            "col-8"
+          ],
+          "rows": [
+            [
+              "Ability Increase III",
+              "Increase an ability score to 20."
+            ],
+            [
+              "Armor II",
+              "The item grants you +2 AC."
+            ],
+            [
+              "Charges III",
+              "The item has 7 charges ({@dc 15}). It regains 1d6 expended charges daily at dawn."
+            ],
+            [
+              "Damage III",
+              "The item deals an extra 1d8 damage."
+            ],
+            [
+              "Defense II",
+              "You gain resistance against one damage type."
+            ],
+            [
+              "Light III",
+              "The item sheds bright light in an 80-foot radius and dim light for an additional 80 feet."
+            ],
+            [
+              "Permaspell II (2nd-level)",
+              "You can cast one 2nd-level spell at will ({@dc 15})."
+            ],
+            [
+              "Spell III",
+              "You can cast a spell at 7th level once per long rest ({@dc 15})."
+            ],
+            [
+              "Vampiric III",
+              "On a hit, you regain hit points equal to half the damage dealt (minimum 1)."
+            ],
+            [
+              "Weapon III",
+              "You gain a +3 bonus on attack and damage rolls."
+            ]
+          ]
+        },
+        {
+          "type": "table",
+          "caption": "Legendary Properties",
+          "colLabels": [
+            "Property",
+            "Description"
+          ],
+          "colStyles": [
+            "col-4",
+            "col-8"
+          ],
+          "rows": [
+            [
+              "Ability Increase IV",
+              "Increase an ability score to 22."
+            ],
+            [
+              "Armor III",
+              "The item grants you +3 AC."
+            ],
+            [
+              "Charges IV",
+              "The item has 9 charges ({@dc 17}). It regains 1d6+2 expended charges daily at dawn."
+            ],
+            [
+              "Damage IV",
+              "The item deals an extra 1d10 damage."
+            ],
+            [
+              "Defense III",
+              "You gain immunity against one damage type."
+            ],
+            [
+              "Permaspell III (3rd-level)",
+              "You can cast one 3rd-level spell at will ({@dc 17})."
+            ],
+            [
+              "Spell IV",
+              "You can cast a spell at 8th level once per long rest ({@dc 17})."
+            ]
+          ]
+        },
+        {
+          "type": "inset",
+          "name": "Crafting Modular Magic Items",
+          "entries": [
+            "If the DM allows it, a character can craft these items. To do so, determine the item rarity first, then follow the downtime rules from {@i Xanathar's Guide to Everything} to set the CR range, workweeks, and gold cost for each item."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Evolving Magic Items",
+      "source": "COMCRAF",
+      "page": 16,
+      "ruleType": "O",
+      "entries": [
+        "You can use the modular magic item rules to create an item that evolves with a specific character. Add something to make the character the only one who can use it (such as a class prerequisite to attune), and link it to the character's story.",
+        {
+          "type": "entries",
+          "name": "Evolving Requirements",
+          "entries": [
+            "To evolve an item to a tier, the character must be at least the minimum level required by that tier. The DM also determines an additional task or triggering event that allows the item to evolve. Sample requirements:",
+            {
+              "type": "list",
+              "items": [
+                "The character must slay a number of creatures with the weapon.",
+                "The item must be placed on the altar at the top of an abandoned wizard tower.",
+                "The character must gain a deity's favor.",
+                "The character must defeat an old enemy of the weapon maker.",
+                "The item evolves after saving a group of innocents from a dark ritual.",
+                "The character must execute a light (or dark) ritual.",
+                "The item evolves when the character makes a big sacrifice for a personal cause."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Tier Advancement",
+          "entries": [
+            "{@b Tier 2.} Add two uncommon special properties to the item.",
+            "{@b Tier 3.} Upgrade the uncommon special properties to rare special properties.",
+            "{@b Tier 4.} The item gains an extra uncommon special property, and you can upgrade one rare special property to a very rare special property.",
+            "{@b Tier 5.} You can upgrade one uncommon property to rare, one rare to very rare, and one very rare to legendary."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Taking and Replacing Properties",
+          "entries": [
+            "Replacing one property with another at higher tiers is not recommended, but it is allowed at the DM's discretion (for example, replacing Damage II with Vampiric III when evolving to tier 4).",
+            "Alternatively, you can leave a property slot empty at lower tiers and pick a rarer property when the item evolves."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Parts by Creature",
+      "source": "COMCRAF",
+      "page": 18,
+      "entries": [
+        "The following tables list example materials a character can harvest from creatures. They do not include weapons, armor, or gear the creature wears or carries. Every creature also has 1 unit of its creature type essence, extractable with an {@i essence extraction device}.",
+        "Some creatures list particular organs because they grant the creature special features (such as the essential organ that powers a dragon's breath weapon). See the {@variantrule Collecting Creature Parts|COMCRAF} rules for the number of harvest checks the characters can make per creature.",
+        {
+          "type": "entries",
+          "name": "Aberrations and Oddities",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Aberrations and Oddities",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Aboleth}",
+                  "1 brain; 4 hide; 1 mucous; 1 tail; 1d4 teeth; 3 tentacles"
+                ],
+                [
+                  "{@creature Cloaker}",
+                  "1 eyes; 2 hide"
+                ],
+                [
+                  "{@creature Flumph}",
+                  "1 foul-smelling liquid; 1 tendrils"
+                ],
+                [
+                  "{@creature Gibbering Mouther}",
+                  "1 eyes; 1 spittle gland"
+                ],
+                [
+                  "{@creature Grell}",
+                  "1 beak; 1d4 tentacles"
+                ],
+                [
+                  "{@creature Intellect Devourer}",
+                  "1 brain matter; 1 claws"
+                ],
+                [
+                  "{@creature Mind Flayer}",
+                  "1 brain; 1 tentacles"
+                ],
+                [
+                  "{@creature Nothic}",
+                  "1 claws; 1 eye"
+                ],
+                [
+                  "{@creature Otyugh}",
+                  "2 teeth; 2 tentacles"
+                ],
+                [
+                  "{@creature Slithering Tracker}",
+                  "—"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Beholders",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Beholders",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Beholder}",
+                  "1 central beholder eye; 2 small beholder eyes"
+                ],
+                [
+                  "{@creature Death Tyrant}",
+                  "3 ectoplasm"
+                ],
+                [
+                  "{@creature Spectator}",
+                  "1 central spectator eye; 1 small spectator eyes"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Celestials",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Celestials",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Couatl}",
+                  "1 feathers; 1 hide; 1 venom sac"
+                ],
+                [
+                  "{@creature Deva}",
+                  "1 deva feathers"
+                ],
+                [
+                  "{@creature Planetar}",
+                  "4 planetar feathers"
+                ],
+                [
+                  "{@creature Solar}",
+                  "4 solar feathers"
+                ],
+                [
+                  "{@creature Empyrean}",
+                  "1 heart"
+                ],
+                [
+                  "{@creature Pegasus}",
+                  "2 feathers; 1 hooves"
+                ],
+                [
+                  "{@creature Unicorn}",
+                  "1 hooves; 1 horn"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Constructs",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Constructs",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Gargoyle}",
+                  "1 rocky skin"
+                ],
+                [
+                  "{@creature Galeb Duhr}",
+                  "1 rocky skin"
+                ],
+                [
+                  "{@creature Helmed Horror}",
+                  "—"
+                ],
+                [
+                  "{@creature Shield Guardian}",
+                  "—"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Dragons",
+          "entries": [
+            "All dragons share the same base parts; the only differentiator is the dragon kin (black, blue, brass, bronze, copper, gold, green, red, silver, white). Feel free to add special or unique parts to each dragon type.",
+            {
+              "type": "table",
+              "caption": "True Dragons (by Age)",
+              "colLabels": [
+                "Age Category",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "Ancient",
+                  "4d4 claws; 1 essential organ; 2 horns; 8 scales; 4d4 teeth; 8 wings"
+                ],
+                [
+                  "Adult",
+                  "4d4 claws; 1 essential organ; 2 horns; 6 scales; 4d4 teeth; 6 wings"
+                ],
+                [
+                  "Young",
+                  "1d4 claws; 1 essential organ; 2 horns; 4 scales; 2d4 teeth; 4 wings"
+                ],
+                [
+                  "Wyrmling",
+                  "2 claws; 1 essential organ; 2 horns; 2 scales; 1d4 teeth; 2 wings"
+                ]
+              ]
+            },
+            {
+              "type": "table",
+              "caption": "Other Dragons and Draconic Creatures",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "Dracolich, Adult",
+                  "Same as adult dragon, but only 1d6 units of scales"
+                ],
+                [
+                  "Dracolich, Ancient",
+                  "Same as ancient dragon, but only 1d8 units of scales"
+                ],
+                [
+                  "Shadow Dragon",
+                  "Same as base dragon plus 1 shadow dragon dust; essential organ and scales (and other parts) become 'shadow dragon' variants"
+                ],
+                [
+                  "{@creature Dragon Turtle}",
+                  "6d6 claws; 12 hide; 12 shell fragments"
+                ],
+                [
+                  "{@creature Pseudodragon}",
+                  "1/4 scales; 1/4 venom"
+                ],
+                [
+                  "{@creature Wyvern}",
+                  "2 scales; 1 stinger; 1 teeth; 2 venom; 2 wings"
+                ],
+                [
+                  "Faerie Dragon (any)",
+                  "1/4 essential organ; 1/4 scales"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Elementals",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Elementals",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Air Elemental}",
+                  "1 elemental dust"
+                ],
+                [
+                  "{@creature Earth Elemental}",
+                  "1 elemental rock shards"
+                ],
+                [
+                  "{@creature Fire Elemental}",
+                  "1 elemental molten core"
+                ],
+                [
+                  "{@creature Water Elemental}",
+                  "1 elemental water"
+                ],
+                [
+                  "{@creature Azer}",
+                  "1 heart"
+                ],
+                [
+                  "{@creature Magmin}",
+                  "1 molten skin"
+                ],
+                [
+                  "{@creature Xorn}",
+                  "1 rocky hide; 1d4 teeth"
+                ],
+                [
+                  "{@creature Mephit}",
+                  "1 mephit core (variants: dust, ice, magma, mud, smoke, steam)"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Fey",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Fey",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Blink Dog}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Dryad}",
+                  "1 heart"
+                ],
+                [
+                  "{@creature Pixie}",
+                  "1/4 dust"
+                ],
+                [
+                  "{@creature Satyr}",
+                  "—"
+                ],
+                [
+                  "{@creature Sprite}",
+                  "1/4 dust"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Fiends — Demons",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Demons",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Barlgura}",
+                  "2 hide"
+                ],
+                [
+                  "{@creature Chasme}",
+                  "2 carapace; 2 wings"
+                ],
+                [
+                  "{@creature Dretch}",
+                  "1 fetid cloud sac"
+                ],
+                [
+                  "{@creature Glabrezu}",
+                  "2 carapace; 2 claws"
+                ],
+                [
+                  "{@creature Goristro}",
+                  "6 hide; 2 horns"
+                ],
+                [
+                  "{@creature Hezrou}",
+                  "2 claws; 1 essential organ (stench)"
+                ],
+                [
+                  "{@creature Marilith}",
+                  "2 snake tail"
+                ],
+                [
+                  "{@creature Nalfeshnee}",
+                  "2 tusks; 2 wings"
+                ],
+                [
+                  "{@creature Shadow Demon}",
+                  "1 dust"
+                ],
+                [
+                  "{@creature Vrock}",
+                  "4 hide; 1 spores; 2 wings"
+                ],
+                [
+                  "{@creature Yochlol}",
+                  "1 eye; 1 slime"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Fiends — Devils",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Devils",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Barbed Devil}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Bearded Devil}",
+                  "1 beard"
+                ],
+                [
+                  "{@creature Bone Devil}",
+                  "1 poison"
+                ],
+                [
+                  "{@creature Erinyes}",
+                  "2 feathers"
+                ],
+                [
+                  "{@creature Horned Devil}",
+                  "2 horns; 2 wings"
+                ],
+                [
+                  "{@creature Ice Devil}",
+                  "4 carapace; 1 mandibles"
+                ],
+                [
+                  "{@creature Imp}",
+                  "1/4 wings"
+                ],
+                [
+                  "{@creature Pit Fiend}",
+                  "4 hide; 2 horns; 2 wings"
+                ],
+                [
+                  "{@creature Spined Devil}",
+                  "1 hide; 2 wings"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Fiends — Other",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Other Fiends",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Cambion}",
+                  "1 wings; 1 fiend heart"
+                ],
+                [
+                  "{@creature Hell Hound}",
+                  "1 essential organ; 1 hide; 1 teeth"
+                ],
+                [
+                  "{@creature Night Hag}",
+                  "1 claws; 1 heart"
+                ],
+                [
+                  "{@creature Succubus}",
+                  "1 claws; 1 wings"
+                ],
+                [
+                  "{@creature Incubus}",
+                  "1 claws; 1 wings"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Giants",
+          "entries": [
+            "All giants share the same base parts; the differentiator is the race (cloud, fire, frost, hill, stone, storm). Add special parts per race as desired.",
+            {
+              "type": "table",
+              "caption": "Giants",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "Giant (any race)",
+                  "1 heart; 2d4 toes"
+                ],
+                [
+                  "{@creature Cyclops}",
+                  "1 eye; 2d4 toes"
+                ],
+                [
+                  "{@creature Ettin}",
+                  "2 tusks; 2d4 toes"
+                ],
+                [
+                  "{@creature Fomorian}",
+                  "1 evil eye; 2d4 fingers"
+                ],
+                [
+                  "{@creature Ogre}",
+                  "2d4 toes"
+                ],
+                [
+                  "{@creature Half-Ogre}",
+                  "1d4 toes"
+                ],
+                [
+                  "{@creature Oni}",
+                  "1 claws; 1 ivory horns; 2d4 toes"
+                ],
+                [
+                  "{@creature Troll}",
+                  "—"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Monstrosities",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Monstrosities",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Aarakocra}",
+                  "1 feathers"
+                ],
+                [
+                  "{@creature Ankheg}",
+                  "1 acid; 4 carapace; 2 claws; 1 mandibles"
+                ],
+                [
+                  "{@creature Basilisk}",
+                  "2 eyes; 2 hide; 1d4 teeth"
+                ],
+                [
+                  "{@creature Behir}",
+                  "4d4 claws; 1 essential organ; 9 hide"
+                ],
+                [
+                  "{@creature Bulette}",
+                  "2 claws; 2 scales"
+                ],
+                [
+                  "{@creature Carrion Crawler}",
+                  "2 tentacles; 1 mucus"
+                ],
+                [
+                  "{@creature Chimera}",
+                  "2 claws; 1 young red dragon essential organ; 1 young red dragon scales; 4 young red dragon wings"
+                ],
+                [
+                  "{@creature Chuul}",
+                  "2 carapace; 1 tentacles; 2 pincers"
+                ],
+                [
+                  "{@creature Cockatrice}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Darkmantle}",
+                  "1 hide; 1 tentacles"
+                ],
+                [
+                  "{@creature Displacer Beast}",
+                  "4 hide; 2 tentacles"
+                ],
+                [
+                  "{@creature Doppelganger}",
+                  "1 brain; 2 flesh"
+                ],
+                [
+                  "{@creature Drider}",
+                  "1d8 legs; 1 web sac"
+                ],
+                [
+                  "{@creature Ettercap}",
+                  "1 claws; 1 poison; 1 silk gland"
+                ],
+                [
+                  "{@creature Gorgon}",
+                  "2 hide; 2 horns; 1 petrifying gas sac"
+                ],
+                [
+                  "{@creature Grick}",
+                  "1 beak; 1 hide; 1d4 tentacles"
+                ],
+                [
+                  "{@creature Grick Alpha}",
+                  "1 beak; 2 hide; 1d4 tentacles"
+                ],
+                [
+                  "{@creature Griffon}",
+                  "2 claws; 2 feathers"
+                ],
+                [
+                  "{@creature Harpy}",
+                  "1 feathers"
+                ],
+                [
+                  "{@creature Hippogriff}",
+                  "2 claws; 2 feathers"
+                ],
+                [
+                  "{@creature Hook Horror}",
+                  "2 carapace; 2 hooks"
+                ],
+                [
+                  "{@creature Hydra}",
+                  "9 scales; 4d4 teeth"
+                ],
+                [
+                  "{@creature Kenku}",
+                  "1 feathers"
+                ],
+                [
+                  "{@creature Kraken}",
+                  "15 hide; 4 ink sac; 15 scales; 6d4 teeth; 2d4 tentacles"
+                ],
+                [
+                  "{@creature Lamia}",
+                  "2 claws; 1 heart"
+                ],
+                [
+                  "{@creature Manticore}",
+                  "1 tail spike; 2 teeth; 2 wings"
+                ],
+                [
+                  "{@creature Medusa}",
+                  "1 head"
+                ],
+                [
+                  "{@creature Merfolk}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Merrow}",
+                  "2 hide"
+                ],
+                [
+                  "{@creature Minotaur}",
+                  "2 horns"
+                ],
+                [
+                  "{@creature Naga, Bone|MM|Bone Naga}",
+                  "2d4 fangs"
+                ],
+                [
+                  "{@creature Naga, Guardian|MM|Guardian Naga}",
+                  "2d4 fangs; 2 scales; 1 poison gland"
+                ],
+                [
+                  "{@creature Naga, Spirit|MM|Spirit Naga}",
+                  "2d4 fangs; 2 scales"
+                ],
+                [
+                  "{@creature Owlbear}",
+                  "1 claws; 2 feathers; 1 hide"
+                ],
+                [
+                  "{@creature Peryton}",
+                  "1 antlers; 1 feathers; 1 talons"
+                ],
+                [
+                  "{@creature Piercer}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Purple Worm}",
+                  "8 hide; 4d4 teeth; 2d4 venom"
+                ],
+                [
+                  "{@creature Quaggoth}",
+                  "1 claws; 1 hide"
+                ],
+                [
+                  "{@creature Remorhaz, Young|MM|Young Remorhaz}",
+                  "2 carapace; 1 heat organ; 2d4 legs"
+                ],
+                [
+                  "{@creature Remorhaz}",
+                  "4 carapace; 1 heat organ; 3d4 legs"
+                ],
+                [
+                  "{@creature Roc}",
+                  "8 feathers; 2d4 talons"
+                ],
+                [
+                  "{@creature Roper}",
+                  "2 hide; 1d6 tendrils; 1d4 teeth"
+                ],
+                [
+                  "{@creature Rust Monster}",
+                  "1 antennae; 1 carapace"
+                ],
+                [
+                  "{@creature Fire Snake}",
+                  "1 scales"
+                ],
+                [
+                  "{@creature Salamander}",
+                  "2 scales"
+                ],
+                [
+                  "{@creature Androsphinx}",
+                  "2 feathers; 2 hide"
+                ],
+                [
+                  "{@creature Gynosphinx}",
+                  "2 feathers; 2 hide"
+                ],
+                [
+                  "{@creature Tarrasque}",
+                  "15 carapace; 15 hide; 6d4 teeth; 6d4 horns"
+                ],
+                [
+                  "{@creature Thri-kreen}",
+                  "1 carapace; 1 venom"
+                ],
+                [
+                  "{@creature Umber Hulk}",
+                  "3 carapace; 2 mandibles"
+                ],
+                [
+                  "{@creature Yeti}",
+                  "2 hide; 2 horns; 2 eyes"
+                ],
+                [
+                  "{@creature Abominable Yeti}",
+                  "3 hide; 2 horns; 2 eyes"
+                ],
+                [
+                  "{@creature Yuan-ti Abomination}",
+                  "2 scales; 1 fangs; 1 venom"
+                ],
+                [
+                  "{@creature Yuan-ti Malison}",
+                  "1 scales; 1 venom"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Plants and Oozes",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Blights, Fungi, and Other Plants",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Awakened Shrub}",
+                  "1/2 twigs"
+                ],
+                [
+                  "{@creature Awakened Tree}",
+                  "3 wood"
+                ],
+                [
+                  "{@creature Needle Blight}",
+                  "1 roots"
+                ],
+                [
+                  "{@creature Twig Blight}",
+                  "1 roots"
+                ],
+                [
+                  "{@creature Vine Blight}",
+                  "1 roots"
+                ],
+                [
+                  "{@creature Gas Spore}",
+                  "2 poisonous gas"
+                ],
+                [
+                  "{@creature Violet Fungus}",
+                  "1 stalks"
+                ],
+                [
+                  "{@creature Myconid Sprout}",
+                  "1 spores"
+                ],
+                [
+                  "{@creature Myconid Adult}",
+                  "1 spores"
+                ],
+                [
+                  "{@creature Myconid Sovereign}",
+                  "2 spores"
+                ],
+                [
+                  "{@creature Shambling Mound}",
+                  "1 root-stem; 2 vines"
+                ],
+                [
+                  "{@creature Treant}",
+                  "6 bark; 4d4 branches; 4d4 roots"
+                ]
+              ]
+            },
+            {
+              "type": "table",
+              "caption": "Oozes",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Black Pudding}",
+                  "2 goo"
+                ],
+                [
+                  "{@creature Gelatinous Cube}",
+                  "2 gel"
+                ],
+                [
+                  "{@creature Gray Ooze}",
+                  "1 slime"
+                ],
+                [
+                  "{@creature Ochre Jelly}",
+                  "2 slime"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Undead",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Undead",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Banshee}",
+                  "1 ectoplasm; 1 dust"
+                ],
+                [
+                  "{@creature Death Knight}",
+                  "1 heart"
+                ],
+                [
+                  "{@creature Demilich}",
+                  "1/4 ectoplasm"
+                ],
+                [
+                  "{@creature Ghast}",
+                  "1 claws; 1 stench"
+                ],
+                [
+                  "{@creature Ghost}",
+                  "1 ectoplasm"
+                ],
+                [
+                  "{@creature Ghoul}",
+                  "1 claws"
+                ],
+                [
+                  "{@creature Lich}",
+                  "1 ectoplasm"
+                ],
+                [
+                  "{@creature Mummy}",
+                  "1 heart; 2 wrappings"
+                ],
+                [
+                  "{@creature Mummy Lord}",
+                  "2 dust; 2 wrappings"
+                ],
+                [
+                  "{@creature Shadow}",
+                  "1 ectoplasm; 1 dust"
+                ],
+                [
+                  "{@creature Specter}",
+                  "1 ectoplasm; 1 dust"
+                ],
+                [
+                  "{@creature Vampire}",
+                  "1 dust; 1 fangs; 1 heart"
+                ],
+                [
+                  "{@creature Vampire Spawn}",
+                  "1 dust; 1 fangs; 1 heart"
+                ],
+                [
+                  "{@creature Will-o'-Wisp}",
+                  "1/4 dust; 1/4 ectoplasm"
+                ],
+                [
+                  "{@creature Wraith}",
+                  "1 dust; 1 ectoplasm"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Slaadi",
+          "entries": [
+            "Note: a slaad only has a control gem if it was born from the Spawning Stone in Limbo.",
+            {
+              "type": "table",
+              "caption": "Slaadi",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Red Slaad}",
+                  "1 claws; 1 control gem; 1d4 eggs; 1 hide"
+                ],
+                [
+                  "{@creature Blue Slaad}",
+                  "1 claws; 1 control gem; 2 hide"
+                ],
+                [
+                  "{@creature Green Slaad}",
+                  "1 claws; 1 control gem; 2 hide"
+                ],
+                [
+                  "{@creature Gray Slaad}",
+                  "1 claws; 1 control gem; 1 hide"
+                ],
+                [
+                  "{@creature Death Slaad}",
+                  "1 claws; 1 control gem; 1 hide"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Dinosaurs",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Dinosaurs",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Allosaurus}",
+                  "2 claws; 4 hide"
+                ],
+                [
+                  "{@creature Ankylosaurus}",
+                  "6 hide"
+                ],
+                [
+                  "{@creature Plesiosaurus}",
+                  "4 hide"
+                ],
+                [
+                  "{@creature Triceratops}",
+                  "6 hide; 3 horns"
+                ],
+                [
+                  "{@creature Pteranodon}",
+                  "2 wings"
+                ],
+                [
+                  "{@creature Tyrannosaurus Rex}",
+                  "6 hide; 4d4 teeth"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Beasts (Miscellaneous Creatures)",
+          "entries": [
+            {
+              "type": "table",
+              "caption": "Beasts A–G",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Ape}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Axe Beak}",
+                  "2 feathers"
+                ],
+                [
+                  "{@creature Baboon}",
+                  "1/2 hide"
+                ],
+                [
+                  "{@creature Badger}",
+                  "1/4 pelt"
+                ],
+                [
+                  "{@creature Bat}",
+                  "1/4 wings"
+                ],
+                [
+                  "{@creature Black Bear}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Blood Hawk}",
+                  "1/2 feathers"
+                ],
+                [
+                  "{@creature Boar}",
+                  "1 hide; 1 tusks"
+                ],
+                [
+                  "{@creature Brown Bear}",
+                  "2 hide"
+                ],
+                [
+                  "{@creature Camel}",
+                  "2 hide"
+                ],
+                [
+                  "{@creature Cat}",
+                  "1/4 pelt"
+                ],
+                [
+                  "{@creature Constrictor Snake}",
+                  "2 skin"
+                ],
+                [
+                  "{@creature Crab}",
+                  "1/4 carapace"
+                ],
+                [
+                  "{@creature Crocodile}",
+                  "2 hide; 2 teeth"
+                ],
+                [
+                  "{@creature Death Dog}",
+                  "1 pelt"
+                ],
+                [
+                  "{@creature Deer}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Dire Wolf}",
+                  "2 pelt"
+                ],
+                [
+                  "{@creature Draft Horse}",
+                  "1 hooves"
+                ],
+                [
+                  "{@creature Eagle}",
+                  "1/2 feathers"
+                ],
+                [
+                  "{@creature Elephant}",
+                  "6 hide; 2 tusks"
+                ],
+                [
+                  "{@creature Elk}",
+                  "1 antlers; 2 hide"
+                ],
+                [
+                  "{@creature Flying Snake}",
+                  "1/4 feathers; 1/4 hide"
+                ],
+                [
+                  "{@creature Giant Ape}",
+                  "3 hide"
+                ],
+                [
+                  "{@creature Giant Badger}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Giant Bat}",
+                  "2 hide; 2 wings"
+                ],
+                [
+                  "{@creature Giant Boar}",
+                  "2 hide; 2 tusks"
+                ],
+                [
+                  "{@creature Giant Centipede}",
+                  "1/2 poison"
+                ],
+                [
+                  "{@creature Giant Constrictor Snake}",
+                  "4 skin"
+                ],
+                [
+                  "{@creature Giant Crab}",
+                  "1 carapace"
+                ],
+                [
+                  "{@creature Giant Crocodile}",
+                  "4 hide; 3 teeth"
+                ],
+                [
+                  "{@creature Giant Eagle}",
+                  "2 feathers"
+                ],
+                [
+                  "{@creature Giant Elk}",
+                  "1 antlers; 4 hide"
+                ],
+                [
+                  "{@creature Giant Fire Beetle}",
+                  "1 carapace; 1 glowing glands"
+                ],
+                [
+                  "{@creature Giant Frog}",
+                  "1 skin; 1 tongue"
+                ],
+                [
+                  "{@creature Giant Goat}",
+                  "2 pelt; 1 horns"
+                ],
+                [
+                  "{@creature Giant Hyena}",
+                  "2 pelt"
+                ]
+              ]
+            },
+            {
+              "type": "table",
+              "caption": "Beasts H–Z",
+              "colLabels": [
+                "Creature",
+                "Harvestable Parts"
+              ],
+              "colStyles": [
+                "col-4",
+                "col-8"
+              ],
+              "rows": [
+                [
+                  "{@creature Giant Lizard}",
+                  "2 scales"
+                ],
+                [
+                  "{@creature Giant Octopus}",
+                  "3 tentacles; 1 ink sac"
+                ],
+                [
+                  "{@creature Giant Owl}",
+                  "2 feathers"
+                ],
+                [
+                  "{@creature Giant Poisonous Snake}",
+                  "1 skin; 1 poison"
+                ],
+                [
+                  "{@creature Giant Rat}",
+                  "1/2 hide"
+                ],
+                [
+                  "{@creature Giant Scorpion}",
+                  "2 carapace; 2 claws; 1 sting; 1 venom sac"
+                ],
+                [
+                  "{@creature Giant Sea Horse}",
+                  "2 hide"
+                ],
+                [
+                  "{@creature Giant Shark}",
+                  "4 skin"
+                ],
+                [
+                  "{@creature Giant Spider}",
+                  "1 venom; 1 web sac"
+                ],
+                [
+                  "{@creature Giant Toad}",
+                  "1 tongue; 2 skin"
+                ],
+                [
+                  "{@creature Giant Vulture}",
+                  "2 feathers"
+                ],
+                [
+                  "{@creature Giant Wasp}",
+                  "1 stinger"
+                ],
+                [
+                  "{@creature Giant Weasel}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Giant Wolf Spider}",
+                  "1 venom; 1 web sac"
+                ],
+                [
+                  "{@creature Goat}",
+                  "1 pelt"
+                ],
+                [
+                  "{@creature Hawk}",
+                  "1/4 feathers"
+                ],
+                [
+                  "{@creature Hunter Shark}",
+                  "2 skin"
+                ],
+                [
+                  "{@creature Hyena}",
+                  "1 pelt"
+                ],
+                [
+                  "{@creature Jackal}",
+                  "1 pelt"
+                ],
+                [
+                  "{@creature Killer Whale}",
+                  "4 skin"
+                ],
+                [
+                  "{@creature Lion}",
+                  "2 hide"
+                ],
+                [
+                  "{@creature Lizard}",
+                  "1/4 scales"
+                ],
+                [
+                  "{@creature Mammoth}",
+                  "4 hide; 2 tusks"
+                ],
+                [
+                  "{@creature Mastiff}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Mule}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Octopus}",
+                  "1 tentacles; 1/2 ink sac"
+                ],
+                [
+                  "{@creature Owl}",
+                  "1/4 feathers"
+                ],
+                [
+                  "{@creature Panther}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Phase Spider}",
+                  "1 venom; 1 web sac"
+                ],
+                [
+                  "{@creature Poisonous Snake}",
+                  "1/4 skin; 1/4 poison"
+                ],
+                [
+                  "{@creature Polar Bear}",
+                  "2 hide"
+                ],
+                [
+                  "{@creature Pony}",
+                  "1 hooves"
+                ],
+                [
+                  "{@creature Rat}",
+                  "1/4 pelt"
+                ],
+                [
+                  "{@creature Raven}",
+                  "1/4 feathers"
+                ],
+                [
+                  "{@creature Reef Shark}",
+                  "1 skin"
+                ],
+                [
+                  "{@creature Rhinoceros}",
+                  "2 hide; 2 horns"
+                ],
+                [
+                  "{@creature Riding Horse}",
+                  "1 hooves"
+                ],
+                [
+                  "{@creature Saber-Toothed Tiger}",
+                  "2 hide; 1 fangs"
+                ],
+                [
+                  "{@creature Scorpion}",
+                  "1/4 venom"
+                ],
+                [
+                  "{@creature Spider}",
+                  "1/4 venom"
+                ],
+                [
+                  "{@creature Tiger}",
+                  "2 hide"
+                ],
+                [
+                  "{@creature Vulture}",
+                  "1 feathers"
+                ],
+                [
+                  "{@creature Warhorse}",
+                  "1 hooves"
+                ],
+                [
+                  "{@creature Weasel}",
+                  "1/4 pelt"
+                ],
+                [
+                  "{@creature Winter Wolf}",
+                  "2 hide"
+                ],
+                [
+                  "{@creature Wolf}",
+                  "1 hide"
+                ],
+                [
+                  "{@creature Worg}",
+                  "2 hide"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "type": "inset",
+          "name": "Reading Harvest Quantities",
+          "entries": [
+            "Quantities like \"2d4\" or \"1d6\" indicate a die roll the DM uses to set the maximum number of units available from that part. The unit type (e.g., {@i hide}, {@i scales}, {@i venom sac}) is named on the part listing. All counts assume the maximum number of harvest checks for the creature's size; see the {@variantrule Collecting Creature Parts|COMCRAF} rules."
+          ]
+        }
+      ]
+    }
+  ],
+  "item": [
+    {
+      "name": "Bag of Colding",
+      "source": "COMCRAF",
+      "page": 13,
+      "type": "G",
+      "rarity": "rare",
+      "wondrous": true,
+      "weight": 15,
+      "containerCapacity": {
+        "weight": [
+          250
+        ],
+        "weightless": true
+      },
+      "entries": [
+        "This white leather bag is a variant of the {@item bag of holding}. The bag itself is imbued magically to keep everything inside of it at 40 degrees Fahrenheit, allowing it to keep any perishable chilled and fresh. The bag can hold up to 250 pounds, not exceeding a volume of 64 cubic feet."
+      ]
+    },
+    {
+      "name": "Dragonbone Weapon",
+      "source": "COMCRAF",
+      "page": 13,
+      "type": "M",
+      "rarity": "rare",
+      "reqAttune": true,
+      "bonusWeapon": "+2",
+      "entries": [
+        "You gain a +2 bonus to attack and damage rolls made with this weapon.",
+        "When you hit with an attack using this magic weapon, the target takes an extra 1d6 damage. The damage type is determined by the kind of dragon that provided the bones (see the table below).",
+        {
+          "type": "table",
+          "caption": "Dragonbone Damage Type",
+          "colLabels": [
+            "Dragon",
+            "Damage Type"
+          ],
+          "colStyles": [
+            "col-6",
+            "col-6"
+          ],
+          "rows": [
+            [
+              "Black",
+              "Acid"
+            ],
+            [
+              "Blue",
+              "Lightning"
+            ],
+            [
+              "Brass",
+              "Fire"
+            ],
+            [
+              "Bronze",
+              "Lightning"
+            ],
+            [
+              "Copper",
+              "Acid"
+            ],
+            [
+              "Gold",
+              "Fire"
+            ],
+            [
+              "Green",
+              "Poison"
+            ],
+            [
+              "Red",
+              "Fire"
+            ],
+            [
+              "Silver",
+              "Cold"
+            ],
+            [
+              "White",
+              "Cold"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Dragonplate Armor",
+      "source": "COMCRAF",
+      "page": 13,
+      "type": "HA",
+      "rarity": "very rare",
+      "reqAttune": true,
+      "ac": 18,
+      "stealth": true,
+      "strength": 15,
+      "weight": 65,
+      "bonusAc": "+1",
+      "entries": [
+        "A dragonplate armor is made of the bones of one kind of dragon.",
+        "While wearing this armor, you gain a +1 bonus to AC, you have advantage on saving throws against the Frightful Presence and breath weapons of dragons, and you have resistance to one damage type that is determined by the kind of dragon that provided the bones (see the table below).",
+        "Additionally, you can focus your senses as an action to magically discern the distance and direction to the closest dragon within 30 miles of you that is of the same type as the armor. This special action can't be used again until the next dawn.",
+        {
+          "type": "table",
+          "caption": "Dragonplate Resistance",
+          "colLabels": [
+            "Dragon",
+            "Resistance"
+          ],
+          "colStyles": [
+            "col-6",
+            "col-6"
+          ],
+          "rows": [
+            [
+              "Black",
+              "Acid"
+            ],
+            [
+              "Blue",
+              "Lightning"
+            ],
+            [
+              "Brass",
+              "Fire"
+            ],
+            [
+              "Bronze",
+              "Lightning"
+            ],
+            [
+              "Copper",
+              "Acid"
+            ],
+            [
+              "Gold",
+              "Fire"
+            ],
+            [
+              "Green",
+              "Poison"
+            ],
+            [
+              "Red",
+              "Fire"
+            ],
+            [
+              "Silver",
+              "Cold"
+            ],
+            [
+              "White",
+              "Cold"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ebony Bow",
+      "source": "COMCRAF",
+      "page": 13,
+      "baseItem": "longbow|phb",
+      "type": "R",
+      "rarity": "very rare",
+      "reqAttune": true,
+      "curse": true,
+      "weaponCategory": "martial",
+      "weapon": true,
+      "property": [
+        "A",
+        "H",
+        "2H"
+      ],
+      "range": "150/600",
+      "dmg1": "1d8",
+      "dmgType": "P",
+      "weight": 2,
+      "bonusWeapon": "+2",
+      "entries": [
+        "This dark bow was created by an old vampire in a dark ritual using the blood of his ancestor.",
+        "You gain a +2 bonus to attack and damage rolls made with this weapon.",
+        "When you hit with an attack using this magic weapon, you deal an additional 1d6 necrotic damage and you regain hit points equal to half the total damage dealt (minimum 1).",
+        {
+          "type": "entries",
+          "name": "Curse",
+          "entries": [
+            "This bow is cursed, and becoming attuned to it extends the curse to you. As long as you remain cursed, you are unwilling to part with the bow, keeping it within reach at all times. You also have disadvantage on attack rolls with weapons other than this one, unless no foe is within 60 feet of you that you can see or hear.",
+            "Every day you must drink at least a gallon of humanoid fresh blood. For each day you don't drink, you gain 1 level of {@condition exhaustion}. Finishing a long rest after drinking one gallon of blood reduces your exhaustion level by 1. If you die because of exhaustion, you become a {@creature vampire spawn} on the next moonlight."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Essence Extraction Device",
+      "source": "COMCRAF",
+      "page": 13,
+      "type": "G",
+      "rarity": "uncommon",
+      "wondrous": true,
+      "weight": 1,
+      "charges": 3,
+      "recharge": "dawn",
+      "rechargeAmount": "{@dice 1d3}",
+      "entries": [
+        "This device looks like a leather bracer with a small syringe on the side. It allows its wearer to extract a creature's essence and store it in an empty glass vial connected behind the syringe.",
+        "The device has 3 charges, and it regains {@dice 1d3} expended charges daily at dawn. When you make a check for harvesting a creature, you can extract one unit of the creature's essence. Additionally, if you have a creature part, you can expend 1 charge to transform that part into one unit of the creature's essence."
+      ]
+    },
+    {
+      "name": "Ghost Weapon",
+      "source": "COMCRAF",
+      "page": 14,
+      "type": "M",
+      "rarity": "uncommon",
+      "reqAttune": true,
+      "weight": 1,
+      "entries": [
+        "These spectral blades are carried by ghosts, wraiths, and other incorporeal undead. The weapon weighs only 1 pound, and can be wielded only by the creature attuned to it.",
+        "A ghost weapon deals necrotic damage instead of its normal damage, and when you hit with an attack using this magic weapon, you deal an additional 2d4 necrotic damage."
+      ]
+    },
+    {
+      "name": "Gloves of Crafting",
+      "source": "COMCRAF",
+      "page": 14,
+      "type": "G",
+      "rarity": "uncommon",
+      "wondrous": true,
+      "entries": [
+        "These leather gloves have a hammer and an anvil embroidered on each palm, and allow their owner to craft items faster. While you're wearing the gloves, you count as two characters when you craft an item, reducing the crafting time to half (rounded up)."
+      ]
+    },
+    {
+      "name": "Mask of the Medusa",
+      "source": "COMCRAF",
+      "page": 14,
+      "type": "G",
+      "rarity": "rare",
+      "wondrous": true,
+      "reqAttune": true,
+      "attachedSpells": [
+        "flesh to stone"
+      ],
+      "entries": [
+        "While wearing this mask, you can use an action to cast the {@spell flesh to stone} spell (save {@dc 13}). You can cast the spell twice per dawn, and you regain any expended uses daily at dawn."
+      ]
+    },
+    {
+      "name": "Sunhallowed Spear",
+      "source": "COMCRAF",
+      "page": 14,
+      "baseItem": "spear|phb",
+      "type": "M",
+      "rarity": "legendary",
+      "reqAttune": "by a creature of good alignment",
+      "weaponCategory": "simple",
+      "weapon": true,
+      "property": [
+        "T",
+        "V"
+      ],
+      "range": "20/60",
+      "dmg1": "1d6",
+      "dmg2": "1d8",
+      "dmgType": "P",
+      "weight": 3,
+      "bonusWeapon": "+3",
+      "entries": [
+        "You gain a +3 bonus on attack and damage rolls made with this magic weapon. If you throw the spear, it flies back to your hand immediately after the attack.",
+        "When you hit with an attack using this magic weapon, you deal an additional 1d10 radiant damage. If the target is evil aligned, that creature takes an extra 1d10 radiant damage."
+      ]
+    },
+    {
+      "name": "Potion of Mana",
+      "source": "COMCRAF",
+      "page": 14,
+      "type": "P",
+      "rarity": "uncommon",
+      "weight": 0.5,
+      "entries": [
+        "This blue liquid is created using the essence of magic. When you drink this potion, you regain {@dice 1d4+1} mana points, which you can use to regain spell slots you have already used. See the {@i Potion of Mana} entry in {@i Complete Crafter} for the full point-cost table; in brief, recovering 1st through 5th level slots costs 2, 3, 5, 6, and 7 points respectively. When you use the potion, you must distribute the points immediately, and any leftover points are lost. You can recover only 5th-level or lower expended spell slots."
+      ]
+    },
+    {
+      "name": "Potion of Greater Mana",
+      "source": "COMCRAF",
+      "page": 14,
+      "type": "P",
+      "rarity": "rare",
+      "weight": 0.5,
+      "entries": [
+        "This blue liquid is created using the essence of magic. When you drink this potion, you regain {@dice 2d4+2} mana points, which you can use to regain spell slots you have already used. See the {@i Potion of Mana} entry in {@i Complete Crafter} for the full point-cost table; in brief, recovering 1st through 5th level slots costs 2, 3, 5, 6, and 7 points respectively. When you use the potion, you must distribute the points immediately, and any leftover points are lost. You can recover only 5th-level or lower expended spell slots."
+      ]
+    },
+    {
+      "name": "Potion of Superior Mana",
+      "source": "COMCRAF",
+      "page": 14,
+      "type": "P",
+      "rarity": "very rare",
+      "weight": 0.5,
+      "entries": [
+        "This blue liquid is created using the essence of magic. When you drink this potion, you regain {@dice 3d4+4} mana points, which you can use to regain spell slots you have already used. See the {@i Potion of Mana} entry in {@i Complete Crafter} for the full point-cost table; in brief, recovering 1st through 5th level slots costs 2, 3, 5, 6, and 7 points respectively. When you use the potion, you must distribute the points immediately, and any leftover points are lost. You can recover only 5th-level or lower expended spell slots."
+      ]
+    }
+  ]
+}
