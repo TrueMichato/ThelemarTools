@@ -7252,7 +7252,14 @@ class CharacterSheetState {
 
 		const total = components.reduce((sum, comp) => sum + comp.value, 0);
 		const canonical = components.filter(c => c.isCanonical).reduce((sum, c) => sum + c.value, 0);
-		return {total, canonical, components};
+
+		// Buff dice (e.g. Gift of Alacrity's 1d8) are rolled at roll time and
+		// can't collapse to a flat number, so surface them separately for the
+		// breakdown display. The canonical/effective numbers are unchanged.
+		const diceBonuses = this.getRollBonusDiceFromStates("initiative")
+			.map(d => ({dice: d.dice, sign: d.sign, source: d.source}));
+
+		return {total, canonical, components, diceBonuses};
 	}
 
 	/**
@@ -32952,6 +32959,62 @@ class CharacterSheetState {
 		});
 
 		return bonus;
+	}
+
+	/**
+	 * Get dice bonuses/penalties applied to a d20 roll from active states/buffs.
+	 *
+	 * Handles buff effects of type `rollBonus` (e.g. Gift of Alacrity's
+	 * {@dice 1d8} to initiative, Bless's {@dice 1d4} to attacks and saves)
+	 * and `rollPenalty` (e.g. Bane's {@dice 1d4}). Unlike the numeric
+	 * `getBonusFromStates` family, these are random dice rolled at roll time,
+	 * so the result is a descriptor list rather than a summed number.
+	 *
+	 * Target matching mirrors {@link hasAdvantageFromStates}: a generic
+	 * `check`/`save`/`attack` target matches any specific query of that family,
+	 * and an `initiative` target matches the initiative roll.
+	 *
+	 * @param {string} rollType - The roll type (e.g. "initiative", "attack",
+	 *   "attack:melee:str", "save:dex", "check:str", "check:str:athletics")
+	 * @returns {Array<{dice: string, sign: number, source: string}>} Descriptors
+	 *   where `sign` is +1 (bonus) or -1 (penalty) and `source` is the buff name.
+	 */
+	getRollBonusDiceFromStates (rollType) {
+		if (!rollType) return [];
+		const effects = this.getActiveStateEffects();
+		const out = [];
+		for (const e of effects) {
+			const sign = e.type === "rollBonus" ? 1 : e.type === "rollPenalty" ? -1 : 0;
+			if (!sign || !e.dice) continue;
+			if (!this._rollTargetMatches(e.target, rollType)) continue;
+			out.push({dice: e.dice, sign, source: e.stateName || e.source || "Buff"});
+		}
+		return out;
+	}
+
+	/**
+	 * Shared hierarchical target matcher for state-derived roll modifiers.
+	 * Mirrors the matching used by {@link hasAdvantageFromStates}.
+	 * @param {string} target - The effect's declared target.
+	 * @param {string} rollType - The roll being made.
+	 * @returns {boolean} True if the effect applies to the roll.
+	 */
+	_rollTargetMatches (target, rollType) {
+		if (!target || !rollType) return false;
+		// Skip "attacksAgainst" effects — those are for enemies attacking YOU.
+		if (target.includes("Against")) return false;
+		// Exact match
+		if (target === rollType) return true;
+		// Generic "check" applies to all ability checks (and skill checks)
+		if (target === "check" && rollType.startsWith("check:")) return true;
+		// Generic "save" applies to all saving throws
+		if (target === "save" && rollType.startsWith("save:")) return true;
+		// Hierarchical attack matching
+		if (target.startsWith("attack") && rollType.startsWith("attack")) {
+			if (rollType.startsWith(target)) return true;
+			if (target.startsWith(rollType)) return true;
+		}
+		return false;
 	}
 
 	/**

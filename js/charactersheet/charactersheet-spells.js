@@ -5273,6 +5273,14 @@ class CharacterSheetSpells {
 		if (!filtered.length && !innateSpells.length) {
 			container.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center">No spells</p>`);
 		}
+
+		// Keep the cantrip/known/prepared counters in sync with the list. The
+		// spell list and tracking box read the same underlying data, so every
+		// add/remove/prepare path that re-renders the list must also refresh the
+		// counters (otherwise e.g. charsheet-cantrips-current goes stale until a
+		// full reload). _renderSpellTrackingUI does not call back into this
+		// method, so there's no recursion.
+		this._renderSpellTrackingUI();
 	}
 
 	/**
@@ -6028,6 +6036,7 @@ class CharacterSheetSpells {
 	_renderSpellTrackingUI () {
 		const spellcastingInfo = this._state.getSpellcastingInfo();
 		const trackingContainer = document.getElementById("charsheet-spell-tracking");
+		if (!trackingContainer) return;
 
 		// Hide all tracking boxes by default
 		for (const id of ["charsheet-known-caster-info", "charsheet-prepared-caster-info-2014", "charsheet-prepared-caster-info-2024", "charsheet-cantrips-info"]) {

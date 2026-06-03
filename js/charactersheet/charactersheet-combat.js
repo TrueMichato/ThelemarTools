@@ -1392,7 +1392,18 @@ class CharacterSheetCombat {
 	_rollInitiative (event) {
 		const mod = this._state.getInitiative();
 		const rollResult = this._page.rollD20({event});
-		const total = rollResult.roll + mod;
+
+		// Buff dice (e.g. Gift of Alacrity's 1d8) rolled into the total.
+		const stateDiceList = this._state.getRollBonusDiceFromStates?.("initiative") || [];
+		let diceTotal = 0;
+		let diceStr = "";
+		for (const d of stateDiceList) {
+			const value = Renderer.dice.parseRandomise2(d.dice) * d.sign;
+			diceTotal += value;
+			diceStr += ` ${d.sign > 0 ? "+" : "-"} ${Math.abs(value)} [${d.dice} ${d.source}]`;
+		}
+
+		const total = rollResult.roll + mod + diceTotal;
 
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
 		this._page.showDiceResult({
@@ -1400,7 +1411,7 @@ class CharacterSheetCombat {
 			roll: rollResult.roll,
 			modifier: mod,
 			total,
-			subtitle: this._page.formatD20Breakdown(rollResult, mod),
+			subtitle: this._page.formatD20Breakdown(rollResult, mod) + diceStr,
 		});
 
 		// Update initiative display

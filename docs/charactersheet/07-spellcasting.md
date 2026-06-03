@@ -747,6 +747,12 @@ Pure helpers, no DOM. Categorise buffs into `defense / offense / healing / movem
 
 The parser-to-effect mapping in `charactersheet-spells.js` (`_applyBuffEffects`, ~L4444) handles: `rollBonus`, `rollPenalty`, `extraDamage`, `resistance`, `advantage`, `formula` (set AC), `minimum` (min AC), `multiplier`/`bonus` for speed, plus generic `bonus` fallback.
 
+### Buff dice on d20 rolls (`rollBonus` / `rollPenalty`)
+
+`rollBonus` / `rollPenalty` effects carry a **die** (e.g. Bless `1d4`, Gift of Alacrity `1d8`), not a flat number, so they can't be folded into the canonical stat. They are surfaced generically by `CharacterSheetState.getRollBonusDiceFromStates(rollType)`, which returns `[{dice, sign, source}]` using the same hierarchical target matching as `hasAdvantageFromStates` (`initiative`, `attack[:melee:str]`, `save[:dex]`, `check[:str]`).
+
+Every d20 roll handler (`_rollAbilityCheck`, `_rollSavingThrow`, `_rollSkillCheck`, `_rollAttack`, `_rollInitiative` in both `charactersheet.js` and `charactersheet-combat.js`) calls the page helper `_rollStateDiceBonuses(rollType)`, which rolls each die and folds the result into the roll total plus a breakdown line (e.g. `+ 6 [1d8 Gift of Alacrity]`). The initiative stat breakdown popover (`getInitiativeBreakdown().diceBonuses` → `_renderStatBreakdown`) shows the die as a `+1d8` chip while leaving the canonical/effective numbers unchanged. A generic `check`/`save`/`attack` target matches any specific roll of that family; an `initiative` target matches only the initiative roll.
+
 ---
 
 *Previous: [Combat System](./06-combat-system.md) | Next: [Toggle Abilities](./08-toggle-abilities.md)*

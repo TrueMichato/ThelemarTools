@@ -8997,6 +8997,37 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Roll any active-state dice bonuses/penalties for a d20 roll type.
+	 *
+	 * Buffs such as Gift of Alacrity ({@dice 1d8} initiative), Bless
+	 * ({@dice 1d4} attacks/saves), and Guidance ({@dice 1d4} checks) register
+	 * `rollBonus`/`rollPenalty` effects whose dice must be rolled and folded
+	 * into the roll total. Numeric state bonuses are handled separately by the
+	 * `getBonusFromStates` family.
+	 *
+	 * @param {string} rollType - The roll type (e.g. "initiative", "check:str",
+	 *   "save:dex", "attack:melee:str").
+	 * @returns {{total: number, parts: Array<{dice: string, value: number, source: string, sign: number}>, breakdownStr: string}|null}
+	 *   `null` when no dice bonuses apply.
+	 */
+	_rollStateDiceBonuses (rollType) {
+		const dice = this._state.getRollBonusDiceFromStates?.(rollType) || [];
+		if (!dice.length) return null;
+		let total = 0;
+		const parts = [];
+		for (const d of dice) {
+			const rolled = Renderer.dice.parseRandomise2(d.dice);
+			const value = rolled * d.sign;
+			total += value;
+			parts.push({dice: d.dice, value, source: d.source, sign: d.sign});
+		}
+		const breakdownStr = parts
+			.map(p => `${p.sign > 0 ? "+" : "-"} ${Math.abs(p.value)} [${p.dice} ${p.source}]`)
+			.join(" ");
+		return {total, parts, breakdownStr};
+	}
+
+	/**
 	 * Get the mode label for display
 	 */
 	_getModeLabel (mode) {
@@ -9211,6 +9242,10 @@ class CharacterSheetPage {
 
 		let total = effectiveRoll + totalMod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
+		// Buff dice (e.g. Guidance's 1d4) rolled into the total.
+		const stateDice = this._rollStateDiceBonuses(aggType);
+		if (stateDice) total += stateDice.total;
+
 		// Thelemar crit visual cues
 		let resultClass = "";
 		let resultNote = "";
@@ -9235,6 +9270,7 @@ class CharacterSheetPage {
 		const customBonusStr = customBonus !== 0 ? ` + ${customBonus} (custom)` : "";
 		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
 		const sourcesStr = aggregated.sources.length > 0 ? ` [${aggregated.sources.join(", ")}]` : "";
+		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
 		if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
@@ -9244,7 +9280,7 @@ class CharacterSheetPage {
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Check${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			total,
-			this._formatD20BreakdownWithCustom(rollResult, baseMod, customBonus, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr,
+			this._formatD20BreakdownWithCustom(rollResult, baseMod, customBonus, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr + diceBonusStr,
 			resultClass,
 			resultNote,
 		);
@@ -9348,6 +9384,10 @@ class CharacterSheetPage {
 
 		const total = effectiveRoll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
+		// Buff dice (e.g. Bless's 1d4) rolled into the total.
+		const stateDice = this._rollStateDiceBonuses(aggType);
+		const totalWithDice = total + (stateDice ? stateDice.total : 0);
+
 		// Thelemar crit visual cues
 		let resultClass = "";
 		let resultNote = "";
@@ -9382,6 +9422,7 @@ class CharacterSheetPage {
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
 		const sourcesStr = aggregated.sources.length > 0 ? ` [${aggregated.sources.join(", ")}]` : "";
+		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
 		if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
@@ -9390,8 +9431,8 @@ class CharacterSheetPage {
 
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Save${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
-			total,
-			this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr,
+			totalWithDice,
+			this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr + diceBonusStr,
 			resultClass,
 			resultNote,
 		);
@@ -9466,6 +9507,11 @@ class CharacterSheetPage {
 
 		const total = effectiveRoll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
+		// Buff dice (e.g. Guidance's 1d4) rolled into the total. Match against the
+		// underlying ability check so generic "check" buffs apply to skills.
+		const stateDice = this._rollStateDiceBonuses(checkType);
+		const totalWithDice = total + (stateDice ? stateDice.total : 0);
+
 		// Thelemar crit visual cues
 		let resultClass = "";
 		let resultNote = "";
@@ -9490,6 +9536,7 @@ class CharacterSheetPage {
 		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
 		const allSources = [...aggregated.sources, ...checkAggregated.sources.filter(s => !aggregated.sources.includes(s))];
 		const sourcesStr = allSources.length > 0 ? ` [${allSources.join(", ")}]` : "";
+		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
 		if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
@@ -9498,8 +9545,8 @@ class CharacterSheetPage {
 
 		this._showDiceResult(
 			`${skillName}${abilityLabel} Check${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
-			total,
-			this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : null) + sourcesStr,
+			totalWithDice,
+			this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : null) + sourcesStr + diceBonusStr,
 			resultClass,
 			resultNote,
 		);
@@ -9605,6 +9652,10 @@ class CharacterSheetPage {
 		const rollResult = this._rollD20({event});
 		const total = rollResult.roll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
+		// Buff dice (e.g. Gift of Alacrity's 1d8) rolled into the total.
+		const stateDice = this._rollStateDiceBonuses("initiative");
+		const totalWithDice = total + (stateDice ? stateDice.total : 0);
+
 		// Thelemar crit visual cues
 		let resultClass = "";
 		let resultNote = "";
@@ -9617,10 +9668,11 @@ class CharacterSheetPage {
 		}
 
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
+		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 		this._showDiceResult(
 			`Initiative${this._getModeLabel(rollResult.mode)}`,
-			total,
-			this._formatD20Breakdown(rollResult, mod, exhaustionStr),
+			totalWithDice,
+			this._formatD20Breakdown(rollResult, mod, exhaustionStr) + diceBonusStr,
 			resultClass,
 			resultNote,
 		);
@@ -9676,6 +9728,10 @@ class CharacterSheetPage {
 		const conditionalAttackBonus = appliedConditionals.reduce((acc, c) => acc + (c.bonus || 0), 0);
 		const attackTotal = rollResult.roll + attack.attackBonus + conditionalAttackBonus - exhaustionPenalty;
 
+		// Buff dice (e.g. Bless's 1d4) rolled into the attack total.
+		const stateDice = this._rollStateDiceBonuses(attackType);
+		const attackTotalWithDice = attackTotal + (stateDice ? stateDice.total : 0);
+
 		// Check for crit/fumble
 		let resultClass = "";
 		let resultNote = "";
@@ -9714,11 +9770,12 @@ class CharacterSheetPage {
 		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
 		const rageDamageStr = rageDamage > 0 ? ` + ${rageDamage} (rage)` : "";
 		const stateDamageStr = stateBonusDamage > 0 ? ` + ${stateBonusDamage} (states)` : "";
+		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		this._showDiceResult(
 			`${attack.name}${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
-			attackTotal,
-			`Attack: ${this._formatD20Breakdown(rollResult, attack.attackBonus, exhaustionStr)}
+			attackTotalWithDice,
+			`Attack: ${this._formatD20Breakdown(rollResult, attack.attackBonus, exhaustionStr)}${diceBonusStr}
 			 Damage: ${attack.damage} = ${damageResult}${rageDamageStr}${stateDamageStr}${totalBonusDamage > 0 ? ` → ${totalDamage}` : ""}`,
 			resultClass,
 			resultNote,
@@ -10129,7 +10186,7 @@ class CharacterSheetPage {
 		const container = document.querySelector(selector);
 		container.innerHTML = "";
 
-		if (!breakdown || !breakdown.components.length) return;
+		if (!breakdown || (!breakdown.components.length && !(breakdown.diceBonuses || []).length)) return;
 
 		breakdown.components.forEach(comp => {
 			const valueClass = comp.value > 0 && comp.type !== "base" ? "charsheet__ac-breakdown-value--positive"
@@ -10144,6 +10201,23 @@ class CharacterSheetPage {
 						${comp.name}${subtypeHtml}
 					</span>
 					<span class="charsheet__ac-breakdown-value ${valueClass}">${displayValue}</span>
+				</div>
+			`);
+		});
+
+		// Dice bonuses (e.g. Gift of Alacrity's 1d8) are rolled at roll time and
+		// can't collapse to a flat number, so display them as a die expression
+		// rather than folding into the canonical total.
+		(breakdown.diceBonuses || []).forEach(d => {
+			const sign = d.sign < 0 ? "−" : "+";
+			const valueClass = d.sign < 0 ? "charsheet__ac-breakdown-value--negative" : "charsheet__ac-breakdown-value--positive";
+			container.insertAdjacentHTML("beforeend", `
+				<div class="charsheet__ac-breakdown-item">
+					<span class="charsheet__ac-breakdown-name">
+						<span class="charsheet__ac-breakdown-icon">🎲</span>
+						${d.source}
+					</span>
+					<span class="charsheet__ac-breakdown-value ${valueClass}">${sign}${d.dice}</span>
 				</div>
 			`);
 		});
