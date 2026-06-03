@@ -293,11 +293,6 @@ getInitiativeMod() {
             : 5;
     }
     
-    // Gift of Alacrity
-    if (this._hasActiveSpellEffect("gift of alacrity")) {
-        mod += 5; // Actually adds 1d8 to roll
-    }
-    
     // Aura of the Sentinel (Watchers Paladin)
     if (calc.hasAuraOfTheSentinel) {
         mod += this.getProficiencyBonus();
@@ -306,6 +301,12 @@ getInitiativeMod() {
     return mod;
 }
 ```
+
+> **Note:** Buff *dice* bonuses such as **Gift of Alacrity** (`1d8` initiative) are
+> **not** added here as a flat number. Because they are a random die they can't
+> collapse into the canonical modifier — instead `getRollBonusDiceFromStates("initiative")`
+> surfaces them and `_rollInitiative` rolls the die into the roll total at roll
+> time (see [Spellcasting → Buff dice on d20 rolls](./07-spellcasting.md#buff-dice-on-d20-rolls-rollbonus--rollpenalty)).
 
 ---
 
