@@ -8366,7 +8366,7 @@
 						"BT"
 					],
 					"progression": {
-						"3": 2,
+						"2": 2,
 						"7": 1,
 						"10": 1,
 						"15": 1
@@ -8765,10 +8765,10 @@
 					],
 					"rows": [
 						[
-							"\u2014"
+							"—"
 						],
 						[
-							"\u2014"
+							"2"
 						],
 						[
 							"2"
@@ -8835,8 +8835,8 @@
 				"Specialties|Fighter|TGTT|1",
 				"Action Surge|Fighter|XPHB|2",
 				"Tactical Mind|Fighter|XPHB|2",
-				"Battle Tactics|Fighter|TGTT|3",
-				"Battle Tactics Options|Fighter|TGTT|3",
+				"Battle Tactics|Fighter|TGTT|2",
+				"Battle Tactics Options|Fighter|TGTT|2",
 				{
 					"classFeature": "Fighter Subclass|Fighter|XPHB|3",
 					"gainSubclassFeature": true
@@ -13420,26 +13420,86 @@
 									"Method Degree"
 								],
 								"rows": [
-									[0, "\u2014"],
-									[2, "1st"],
-									[2, "1st"],
-									[3, "2nd"],
-									[3, "2nd"],
-									[4, "2nd"],
-									[4, "2nd"],
-									[5, "3rd"],
-									[5, "3rd"],
-									[6, "3rd"],
-									[6, "3rd"],
-									[6, "3rd"],
-									[7, "4th"],
-									[7, "4th"],
-									[8, "4th"],
-									[8, "4th"],
-									[9, "5th"],
-									[9, "5th"],
-									[10, "5th"],
-									[10, "5th"]
+									[
+										0,
+										"—"
+									],
+									[
+										2,
+										"1st"
+									],
+									[
+										2,
+										"1st"
+									],
+									[
+										3,
+										"2nd"
+									],
+									[
+										3,
+										"2nd"
+									],
+									[
+										4,
+										"2nd"
+									],
+									[
+										4,
+										"2nd"
+									],
+									[
+										5,
+										"3rd"
+									],
+									[
+										5,
+										"3rd"
+									],
+									[
+										6,
+										"3rd"
+									],
+									[
+										6,
+										"3rd"
+									],
+									[
+										6,
+										"3rd"
+									],
+									[
+										7,
+										"4th"
+									],
+									[
+										7,
+										"4th"
+									],
+									[
+										8,
+										"4th"
+									],
+									[
+										8,
+										"4th"
+									],
+									[
+										9,
+										"5th"
+									],
+									[
+										9,
+										"5th"
+									],
+									[
+										10,
+										"5th"
+									],
+									[
+										10,
+										"5th"
+									]
 								]
 							}
 						},
@@ -13451,26 +13511,66 @@
 									"Specialties Known"
 								],
 								"rows": [
-									[0],
-									[0],
-									[1],
-									[1],
-									[2],
-									[2],
-									[3],
-									[3],
-									[4],
-									[4],
-									[5],
-									[5],
-									[5],
-									[6],
-									[6],
-									[6],
-									[6],
-									[6],
-									[7],
-									[7]
+									[
+										0
+									],
+									[
+										0
+									],
+									[
+										1
+									],
+									[
+										1
+									],
+									[
+										2
+									],
+									[
+										2
+									],
+									[
+										3
+									],
+									[
+										3
+									],
+									[
+										4
+									],
+									[
+										4
+									],
+									[
+										5
+									],
+									[
+										5
+									],
+									[
+										5
+									],
+									[
+										6
+									],
+									[
+										6
+									],
+									[
+										6
+									],
+									[
+										6
+									],
+									[
+										6
+									],
+									[
+										7
+									],
+									[
+										7
+									]
 								]
 							}
 						}
@@ -16283,7 +16383,14 @@
 				"source": "DMG",
 				"shortName": "Oathbreaker",
 				"className": "Paladin",
-				"classSource": "PHB"
+				"classSource": "PHB",
+				"_mod": {
+					"subclassFeatures": {
+						"mode": "insertArr",
+						"index": 1,
+						"items": "Combat Methods (Oathbreaker Paladin)|Paladin|TGTT|Oathbreaker|TGTT|3"
+					}
+				}
 			}
 		},
 		{
@@ -16505,7 +16612,14 @@
 				"source": "XGE",
 				"shortName": "Swashbuckler",
 				"className": "Rogue",
-				"classSource": "PHB"
+				"classSource": "PHB",
+				"_mod": {
+					"subclassFeatures": {
+						"mode": "insertArr",
+						"index": 1,
+						"items": "Combat Methods (Swashbuckler)|Rogue|TGTT|Swashbuckler|TGTT|3"
+					}
+				}
 			}
 		},
 		{
@@ -17430,7 +17544,7 @@
 			"source": "TGTT",
 			"className": "Fighter",
 			"classSource": "TGTT",
-			"level": 3,
+			"level": 2,
 			"entries": [
 				"You learn how to better use tactics during combat.",
 				"You learn two {@filter Battle Tactics|optionalfeatures|feature type=BT} of your choice. Many tactical moves enable you to gain benefits from certain actions or positions, or perform actions that carry additional effects.",
@@ -17442,9 +17556,9 @@
 			"source": "TGTT",
 			"className": "Fighter",
 			"classSource": "TGTT",
-			"level": 3,
+			"level": 2,
 			"entries": [
-				"The following is a list of tactical moves you can choose from. You can learn two of these moves at 3rd level, and one additional move at 7th, 10th, and 15th level.",
+				"The following is a list of tactical moves you can choose from. You can learn two of these moves at 2nd level, and one additional move at 7th, 10th, and 15th level.",
 				{
 					"type": "options",
 					"count": 2,
@@ -17542,19 +17656,6 @@
 						}
 					]
 				}
-			]
-		},
-		{
-			"name": "Bardic Inspiration",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"You can inspire others through stirring words or music. To do so, you use a bonus action on your turn to choose one creature other than yourself within 60 feet of you who can hear you. That creature gains one Bardic Inspiration die, a {@dice d6}.",
-				"Once within the next 10 minutes, the creature can roll the die and add the number rolled to one ability check, attack roll, or saving throw it makes. The creature can wait until after it rolls the {@dice d20} before deciding to use the Bardic Inspiration die, but must decide before the DM says whether the roll succeeds or fails. Once the Bardic Inspiration die is rolled, it is lost. A creature can have only one Bardic Inspiration die at a time.",
-				"You can use this feature a number of times equal to your Charisma modifier (a minimum of once). You regain any expended uses when you finish a long rest.",
-				"Your Bardic Inspiration die changes when you reach certain levels in this class. The die becomes a {@dice d8} at 5th level, a {@dice d10} at 10th level, and a {@dice d12} at 15th level."
 			]
 		},
 		{
@@ -18234,57 +18335,6 @@
 			]
 		},
 		{
-			"name": "Spellcasting",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"You have learned to untangle and reshape the fabric of reality in harmony with your wishes and music.",
-				{
-					"type": "entries",
-					"name": "Cantrips",
-					"entries": [
-						"You know two cantrips of your choice from the bard spell list. You learn additional bard cantrips of your choice at higher levels, as shown in the Bard class table.",
-						"Whenever you gain a Bard level, you can replace one of your cantrips with another cantrip of your choice from the bard spell list."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Spell Slots",
-					"entries": [
-						"The Bard class table shows how many spell slots you have to cast your spells of 1st level and higher. You regain all expended spell slots when you finish a long rest."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Prepared Spells of 1st Level and Higher",
-					"entries": [
-						"You prepare the list of spells that are available for you to cast. To start, choose four 1st-level spells from the bard spell list.",
-						"The number of spells on your list increases as you gain Bard levels, as shown in the Prepared Spells column of the Bard class table. The chosen spells must be of a level for which you have spell slots.",
-						"Whenever you gain a Bard level, you can replace one spell on your list with another Bard spell for which you have spell slots."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Spellcasting Ability",
-					"entries": [
-						"Charisma is your spellcasting ability for your bard spells. You use your Charisma whenever a spell refers to your spellcasting ability, for setting the saving throw DC, and for making a spell attack roll."
-					]
-				}
-			]
-		},
-		{
-			"name": "Jack of All Trades",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 2,
-			"entries": [
-				"Starting at 2nd level, you can add half your proficiency bonus, rounded down, to any ability check you make that doesn't already include your proficiency bonus."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Bard",
@@ -18455,56 +18505,6 @@
 			]
 		},
 		{
-			"name": "Bard College",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"At 3rd level, you delve into the advanced techniques of a bard college of your choice."
-			]
-		},
-		{
-			"name": "Expertise",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"Choose two of your skill proficiencies. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen proficiencies."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 4,
-			"entries": [
-				"When you reach 4th level, and again at 8th, 12th, 16th, and 19th level, you can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
-			"name": "Bardic Inspiration (d8)",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 5,
-			"entries": [
-				"At 5th level, your Bardic Inspiration die becomes a {@dice d8}."
-			]
-		},
-		{
-			"name": "Bard College feature",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 6,
-			"entries": [
-				"At 6th level, you gain a feature from your Bard College."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Bard",
@@ -18515,26 +18515,6 @@
 			]
 		},
 		{
-			"name": "Font of Inspiration",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 7,
-			"entries": [
-				"Beginning at 7th level, you regain one expended use of Bardic Inspiration when you finish a short rest, and you regain all expended uses when you finish a long rest."
-			]
-		},
-		{
-			"name": "Expertise",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 9,
-			"entries": [
-				"Choose two more of your skill proficiencies. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen proficiencies."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Bard",
@@ -18542,26 +18522,6 @@
 			"level": 9,
 			"entries": [
 				"You gain another specialty of your choice from the {@classFeature Specialties|Bard|TGTT|2}."
-			]
-		},
-		{
-			"name": "Bardic Inspiration (d10)",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 10,
-			"entries": [
-				"At 10th level, your Bardic Inspiration die becomes a {@dice d10}."
-			]
-		},
-		{
-			"name": "Magical Secrets",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 10,
-			"entries": [
-				"You've learned secrets from various magical traditions. Whenever you learn a new spell as you level up, you can choose the new spell from the Bard, Cleric, Druid, or Wizard spell lists. The chosen spell counts as a bard spell for you."
 			]
 		},
 		{
@@ -18575,36 +18535,6 @@
 			]
 		},
 		{
-			"name": "Bard College feature",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 14,
-			"entries": [
-				"At 14th level, you gain a feature from your Bard College."
-			]
-		},
-		{
-			"name": "Bardic Inspiration (d12)",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 15,
-			"entries": [
-				"At 15th level, your Bardic Inspiration die becomes a {@dice d12}."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 16,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Bard",
@@ -18612,36 +18542,6 @@
 			"level": 16,
 			"entries": [
 				"You gain another specialty of your choice from the {@classFeature Specialties|Bard|TGTT|2}."
-			]
-		},
-		{
-			"name": "Superior Inspiration",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 18,
-			"entries": [
-				"When you roll initiative, you regain expended uses of Bardic Inspiration until you have two if you have fewer than that."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 19,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
-			"name": "Words of Creation",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"level": 20,
-			"entries": [
-				"You have mastered two of the Words of Creation: the words of life and death. You therefore always have the {@spell Power Word Heal} and {@spell Power Word Kill} spells prepared. When you cast either spell, you can target a second creature with it if that creature is within 10 feet of the first target."
 			]
 		},
 		{
@@ -18692,104 +18592,6 @@
 						"Wisdom is your spellcasting ability for your cleric spells. The power of your spells comes from your devotion to your deity. You use your Wisdom whenever a cleric spell refers to your spellcasting ability. In addition, you use your Wisdom modifier when setting the saving throw DC for a cleric spell you cast and when making an attack roll with one."
 					]
 				}
-			]
-		},
-		{
-			"name": "Divine Order",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"You have dedicated yourself to one of the following sacred roles of your choice.",
-				{
-					"type": "options",
-					"count": 1,
-					"entries": [
-						{
-							"type": "refClassFeature",
-							"classFeature": "Protector|Cleric|TGTT|1"
-						},
-						{
-							"type": "refClassFeature",
-							"classFeature": "Thaumaturge|Cleric|TGTT|1"
-						}
-					]
-				}
-			]
-		},
-		{
-			"name": "Protector",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"Trained for battle, you gain proficiency with martial weapons and heavy armor."
-			]
-		},
-		{
-			"name": "Thaumaturge",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"You know one extra cantrip from the Cleric spell list. In addition, your mystical connection to the divine gives you a bonus to your Intelligence ({@skill Arcana}) or Intelligence ({@skill Religion}) checks (your choice). The bonus equals your Wisdom modifier (minimum of +1)."
-			]
-		},
-		{
-			"name": "Channel Divinity",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 2,
-			"entries": [
-				"You can channel divine energy directly from the Outer Planes to fuel magical effects. You start with two such effects: Divine Spark and Turn Undead, each of which is described below. Each time you use this class's Channel Divinity, choose which Channel Divinity effect from this class to create. You gain additional effect options from your subclass.",
-				"You can use this class's Channel Divinity twice. You regain one of its expended uses when you finish a short rest, and you regain all expended uses when you finish a long rest. You gain additional uses when you reach certain Cleric levels, as shown in the Channel Divinity Uses column of the Cleric table.",
-				"If a Channel Divinity effect requires a saving throw, the DC equals your cleric spell save DC.",
-				{
-					"type": "entries",
-					"entries": [
-						{
-							"type": "refClassFeature",
-							"classFeature": "Divine Spark|Cleric|TGTT|2"
-						},
-						{
-							"type": "refClassFeature",
-							"classFeature": "Turn Undead|Cleric|TGTT|2"
-						}
-					]
-				}
-			]
-		},
-		{
-			"name": "Divine Spark",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 2,
-			"header": 2,
-			"consumes": {
-				"name": "Channel Divinity"
-			},
-			"entries": [
-				"As an action, you point your holy symbol at another creature you can see within 30 feet of yourself and focus divine energy at it. Roll {@scaledice 1d8|2-17|1d8} and add your Wisdom modifier. You either restore hit points to the creature equal to that total or force the creature to make a Constitution Saving Throw. On a failed save, the creature takes necrotic or radiant damage (your choice) equal to that total. On a successful save, the creature takes half as much damage.",
-				"The damage or healing roll increases by {@scaledice 1d8|7,13,18|1d8} when you reach 7th level ({@scaledice 1d8|7|1d8}), 13th level ({@scaledice 1d8|13|2d8}), and 18th level ({@scaledice 1d8|18|3d8})."
-			]
-		},
-		{
-			"name": "Turn Undead",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 2,
-			"header": 2,
-			"consumes": {
-				"name": "Channel Divinity"
-			},
-			"entries": [
-				"As an action, you present your holy symbol and censure Undead creatures. Each Undead of your choice within 30 feet of you must make a Wisdom saving throw. If the creature fails its save, it is {@condition Frightened} and {@condition Incapacitated|tgtt} for 1 minute. For that duration, it tries to move as far from you as it can on its turns. This effect ends early on the creature if it takes any damage, if you have the {@condition Incapacitated|tgtt} condition, or if you die."
 			]
 		},
 		{
@@ -18932,16 +18734,6 @@
 			"level": 2,
 			"entries": [
 				"In exchange for speaking only to cast spells, you are able to compel other creatures to action with only a glance. When a creature within 10 feet of you makes a Persuasion check, you may add your Wisdom modifier to the result."
-			]
-		},
-		{
-			"name": "Cleric Subclass",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"You gain a Cleric subclass of your choice. A subclass is a specialty that grants you features at certain Cleric levels. For the rest of your career, you gain each of your subclass's features that are of your Cleric level or lower."
 			]
 		},
 		{
@@ -19157,82 +18949,6 @@
 			]
 		},
 		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 4,
-			"entries": [
-				"When you reach 4th level, and again at 8th, 12th, 16th, and 19th level, you can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
-			"name": "Sear Undead",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 5,
-			"entries": [
-				"Whenever you use Turn Undead, you can roll a number of d8s equal to your Wisdom modifier (minimum of {@dice 1d8}) and add the rolls together. Each Undead that fails its saving throw against that use of Turn Undead takes Radiant damage equal to the roll's total. This damage doesn't end the turn effect."
-			]
-		},
-		{
-			"name": "Subclass Feature",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 6,
-			"entries": [
-				"You gain a feature from your Divine Domain."
-			]
-		},
-		{
-			"name": "Blessed Strikes",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 7,
-			"entries": [
-				"Divine power infuses you in battle. You gain one of the following options of your choice.",
-				{
-					"type": "options",
-					"count": 1,
-					"entries": [
-						{
-							"type": "refClassFeature",
-							"classFeature": "Divine Strike (Blessed Strikes)|Cleric|TGTT|7"
-						},
-						{
-							"type": "refClassFeature",
-							"classFeature": "Potent Spellcasting (Blessed Strikes)|Cleric|TGTT|7"
-						}
-					]
-				}
-			]
-		},
-		{
-			"name": "Divine Strike (Blessed Strikes)",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 7,
-			"header": 2,
-			"entries": [
-				"Once on each of your turns when you hit a creature with a weapon attack, you can cause the target to take an extra {@damage 1d8} necrotic or radiant damage (your choice)."
-			]
-		},
-		{
-			"name": "Potent Spellcasting (Blessed Strikes)",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 7,
-			"header": 2,
-			"entries": [
-				"You add your Wisdom modifier to the damage you deal with any cleric cantrip."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Cleric",
@@ -19240,27 +18956,6 @@
 			"level": 7,
 			"entries": [
 				"You gain another specialty of your choice from the {@classFeature Specialties|Cleric|TGTT|3}."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 8,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
-			"name": "Divine Intervention",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 10,
-			"entries": [
-				"Beginning at 10th level, you can call on your deity to intervene on your behalf when your need is great.",
-				"Imploring your deity's aid requires you to use your action. Describe the assistance you seek, and roll percentile dice. If you roll a number equal to or lower than your cleric level, your deity intervenes. The DM chooses the nature of the intervention; the effect of any cleric spell or cleric domain spell would be appropriate. If your deity intervenes, you can't use this feature again for 7 days. Otherwise, you can use it again after you finish a long rest."
 			]
 		},
 		{
@@ -19274,40 +18969,6 @@
 			]
 		},
 		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 12,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
-			"name": "Improved Blessed Strikes",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 14,
-			"entries": [
-				"The option you chose for Blessed Strikes grows more powerful.",
-				{
-					"type": "entries",
-					"name": "Divine Strike",
-					"entries": [
-						"The extra damage of your Divine Strike increases to {@damage 2d8}."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Potent Spellcasting",
-					"entries": [
-						"When you cast a cleric cantrip and deal damage to a creature with it, you can give vitality to yourself or another creature within 60 feet of yourself, granting a number of temporary hit points equal to twice your Wisdom modifier."
-					]
-				}
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Cleric",
@@ -19315,46 +18976,6 @@
 			"level": 15,
 			"entries": [
 				"You gain another specialty of your choice from the {@classFeature Specialties|Cleric|TGTT|3}."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 16,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
-			"name": "Subclass Feature",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 17,
-			"entries": [
-				"You gain a feature from your Divine Domain."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 19,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
-			"name": "Divine Intervention Improvement",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"level": 20,
-			"entries": [
-				"At 20th level, your call for intervention succeeds automatically, no roll required."
 			]
 		},
 		{
@@ -19606,88 +19227,6 @@
 			]
 		},
 		{
-			"name": "Druidic",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"You know Druidic, the secret language of druids. While learning this ancient tongue, you also unlocked the magic of communicating with animals; you always have the {@spell Speak with Animals} spell prepared.",
-				"You can use Druidic to leave hidden messages. You and others who know Druidic automatically spot such a message. Others spot the message's presence with a successful {@dc 15} Investigation check but can't decipher it without magic."
-			]
-		},
-		{
-			"name": "Spellcasting",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"Drawing on the divine essence of nature itself, you can cast spells to shape that essence to your will.",
-				{
-					"type": "entries",
-					"name": "Cantrips",
-					"entries": [
-						"At 1st level, you know two cantrips of your choice from the druid spell list. You learn additional druid cantrips of your choice at higher levels, as shown in the Cantrips Known column of the Druid table.",
-						"Whenever you gain a Druid level, you can replace one of your cantrips with another cantrip of your choice from the druid spell list."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Preparing and Casting Spells",
-					"entries": [
-						"The Druid table shows how many spell slots you have to cast your druid spells of 1st level and higher. To cast one of these druid spells, you must expend a slot of the spell's level or higher. You regain all expended spell slots when you finish a long rest.",
-						"You prepare the list of druid spells that are available for you to cast, choosing from the druid spell list. When you do so, choose a number of druid spells equal to your Wisdom modifier + your druid level (minimum of one spell). The spells must be of a level for which you have spell slots.",
-						"You can also change your list of prepared spells when you finish a long rest."
-					]
-				}
-			]
-		},
-		{
-			"name": "Primal Order",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"You have dedicated yourself to one of the following sacred roles of your choice, which grants you benefits at 1st, 7th, and 15th level.",
-				{
-					"type": "options",
-					"count": 1,
-					"entries": [
-						{
-							"type": "refClassFeature",
-							"classFeature": "Magician|Druid|TGTT|1"
-						},
-						{
-							"type": "refClassFeature",
-							"classFeature": "Warden|Druid|TGTT|1"
-						}
-					]
-				}
-			]
-		},
-		{
-			"name": "Magician",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"You know one extra cantrip from the Druid spell list. In addition, your mystical connection to nature gives you a bonus to your Intelligence (Arcana) or Intelligence (Nature) checks (your choice). The bonus equals your Wisdom modifier (minimum of +1)."
-			]
-		},
-		{
-			"name": "Warden",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"Trained for battle, you gain proficiency with martial weapons and medium armor."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Druid",
@@ -19844,85 +19383,6 @@
 			]
 		},
 		{
-			"name": "Wild Shape",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 2,
-			"entries": [
-				"The power of nature allows you to assume the form of an animal. As a bonus action, you shape-shift into a Beast form that you have learned for this feature. You can use this feature twice. You regain expended uses when you finish a short or long rest.",
-				"You can stay in a beast shape for a number of hours equal to half your druid level (rounded down). You then revert to your normal form unless you expend another use of this feature. You can revert to your normal form earlier by using a bonus action on your turn. You automatically revert if you fall unconscious, drop to 0 hit points, or die.",
-				{
-					"type": "entries",
-					"name": "Known Forms",
-					"entries": [
-						"You know four Beast forms for this feature, chosen from among Beast stat blocks that have a maximum Challenge Rating of 1/4 and that lack a fly speed. Whenever you finish a long rest, you can replace one of your known forms with another eligible form.",
-						"When you reach certain Druid levels, your number of known forms and the maximum Challenge Rating for those forms increases, as shown in the Beast Shapes table. Starting at level 8, you can adopt a form that has a fly speed."
-					]
-				},
-				{
-					"type": "table",
-					"caption": "Beast Shapes",
-					"colLabels": [
-						"Druid Level",
-						"Known Forms",
-						"Max CR",
-						"Fly Speed"
-					],
-					"rows": [
-						[
-							"2nd",
-							"4",
-							"1/4",
-							"No"
-						],
-						[
-							"4th",
-							"6",
-							"1/2",
-							"No"
-						],
-						[
-							"8th",
-							"8",
-							"1",
-							"Yes"
-						]
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Rules While Transformed",
-					"entries": [
-						"While in a form, you retain your personality, memories, and ability to speak, and the following rules apply:",
-						{
-							"type": "list",
-							"items": [
-								"When you assume a Wild Shape form, you gain a number of temporary hit points equal to your Druid level.",
-								"Your game statistics are replaced by the Beast's stat block, but you retain your alignment, personality, Hit Points, Hit Dice, Intelligence, Wisdom, and Charisma scores, class features, feats, languages, and proficiencies. You also gain the proficiencies of the creature. If a skill or saving throw modifier in the Beast's stat block is higher than yours, use the one in the stat block.",
-								"You can't cast spells, but shape-shifting doesn't break your concentration or otherwise interfere with a spell you've already cast.",
-								"Your ability to handle objects is determined by the form's limbs. You choose whether your equipment falls in your space, merges into your new form, or is worn by it. Worn equipment functions as normal, but its practicality is subject to the DM's discretion. Equipment that merges with the form has no effect."
-							]
-						}
-					]
-				}
-			]
-		},
-		{
-			"name": "Wild Companion",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 2,
-			"consumes": {
-				"name": "Wild Shape"
-			},
-			"entries": [
-				"You can summon a nature spirit that assumes an animal form to aid you. As a Magic action, you can expend a spell slot or a use of Wild Shape to cast the {@spell Find Familiar} spell without material components.",
-				"When you cast the spell in this way, the familiar is a Fey and disappears when you finish a long rest."
-			]
-		},
-		{
 			"name": "Druid Circle",
 			"source": "TGTT",
 			"className": "Druid",
@@ -19930,27 +19390,6 @@
 			"level": 3,
 			"entries": [
 				"At 3rd level, you choose to identify with a circle of druids. Your choice grants you features at 3rd level and again at 6th, 10th, and 14th level."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 4,
-			"entries": [
-				"When you reach 4th level, and again at 8th, 12th, and 16th level, you can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
-			"name": "Wild Resurgence",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 5,
-			"entries": [
-				"Once on each of your turns, if you have no uses of Wild Shape left, you can give yourself one use by expending a spell slot (no action required).",
-				"In addition, you can expend one use of Wild Shape (no action required) to give yourself a 1st-level spell slot, but you can't do so again until you finish a long rest."
 			]
 		},
 		{
@@ -19974,40 +19413,6 @@
 			]
 		},
 		{
-			"name": "Elemental Fury",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 7,
-			"entries": [
-				"The might of the elements flows through you, granting you a benefit based on your Primal Order.",
-				{
-					"type": "entries",
-					"name": "Magician",
-					"entries": [
-						"You add your Wisdom modifier to the damage you deal with any Druid cantrip."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Warden",
-					"entries": [
-						"Once on each of your turns when you hit a creature with an attack roll using a weapon, you can cause the target to take an extra {@damage 1d8} cold, fire, lightning, or thunder damage (choose when you hit)."
-					]
-				}
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 8,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Druid",
@@ -20025,16 +19430,6 @@
 			"level": 10,
 			"entries": [
 				"At 10th level, you gain a feature granted by your Druid Circle."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 12,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
 			]
 		},
 		{
@@ -20058,40 +19453,6 @@
 			]
 		},
 		{
-			"name": "Improved Elemental Fury",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 15,
-			"entries": [
-				"The option you chose for Elemental Fury grows more powerful.",
-				{
-					"type": "entries",
-					"name": "Magician",
-					"entries": [
-						"When you cast a Druid cantrip with a range of 10 feet or greater, the spell's range increases by 300 feet."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Warden",
-					"entries": [
-						"The extra damage of your Primal Strike increases to {@damage 2d8}."
-					]
-				}
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 16,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Druid",
@@ -20099,47 +19460,6 @@
 			"level": 17,
 			"entries": [
 				"You gain another specialty of your choice from the {@classFeature Specialties|Druid|TGTT|1}."
-			]
-		},
-		{
-			"name": "Beast Spells",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 18,
-			"entries": [
-				"Beginning at 18th level, you can cast many of your druid spells in any shape you assume using Wild Shape. You can perform the somatic and verbal components of a druid spell while in a beast shape, but you aren't able to provide material components."
-			]
-		},
-		{
-			"name": "Epic Boon",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 19,
-			"entries": [
-				"You gain an Epic Boon feat or another feat of your choice for which you qualify."
-			]
-		},
-		{
-			"name": "Archdruid",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 20,
-			"entries": [
-				"At 20th level, you can use your Wild Shape an unlimited number of times.",
-				"Additionally, you can ignore the verbal and somatic components of your druid spells, as well as any material components that lack a cost and aren't consumed by a spell. You gain this benefit in both your normal shape and your beast shape from Wild Shape."
-			]
-		},
-		{
-			"name": "Timeless Body",
-			"source": "TGTT",
-			"className": "Druid",
-			"classSource": "TGTT",
-			"level": 20,
-			"entries": [
-				"Starting at 20th level, the primal magic that you wield causes you to age more slowly. For every 10 years that pass, your body ages only 1 year."
 			]
 		},
 		{
@@ -20308,16 +19628,6 @@
 			]
 		},
 		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Sorcerer",
-			"classSource": "TGTT",
-			"level": 4,
-			"entries": [
-				"When you reach 4th level, and again at 8th, 12th, 16th, and 19th level, you can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Sorcerer",
@@ -20480,16 +19790,6 @@
 			]
 		},
 		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Sorcerer",
-			"classSource": "TGTT",
-			"level": 8,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Sorcerer",
@@ -20507,16 +19807,6 @@
 			"level": 10,
 			"entries": [
 				"At 10th level, you learn an additional Metamagic option from \"{@filter Metamagic Options|optionalfeatures|feature type=MM|source=TGTT}\"."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Sorcerer",
-			"classSource": "TGTT",
-			"level": 12,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
 			]
 		},
 		{
@@ -20550,16 +19840,6 @@
 			]
 		},
 		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Sorcerer",
-			"classSource": "TGTT",
-			"level": 16,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Sorcerer",
@@ -20587,26 +19867,6 @@
 			"level": 18,
 			"entries": [
 				"At 18th level, you gain a feature granted by your Sorcerous Origin."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Sorcerer",
-			"classSource": "TGTT",
-			"level": 19,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
-			"name": "Sorcerous Restoration",
-			"source": "TGTT",
-			"className": "Sorcerer",
-			"classSource": "TGTT",
-			"level": 20,
-			"entries": [
-				"At 20th level, you regain 4 expended sorcery points whenever you finish a short rest."
 			]
 		},
 		{
@@ -21069,106 +20329,6 @@
 			]
 		},
 		{
-			"name": "Spellcasting",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"As a student of arcane magic, you have learned to cast spells.",
-				{
-					"type": "entries",
-					"name": "Cantrips",
-					"entries": [
-						"You know three Wizard cantrips of your choice. When you reach 4th and 10th level, you learn another Wizard cantrip of your choice.",
-						"Whenever you finish a long rest, you can replace one of your cantrips from this feature with another Wizard cantrip of your choice."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Spellbook",
-					"entries": [
-						"Your spellbook is a Tiny object that weighs 3 pounds, contains 100 pages, and can be read only by you or someone casting {@spell Identify|TGTT}. It contains the level 1+ spells you know. It starts with six level 1 Wizard spells of your choice.",
-						"Whenever you gain a Wizard level after 1, add two Wizard spells of your choice to your spellbook. Each of these spells must be of a level for which you have spell slots."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Prepared Spells of Level 1+",
-					"entries": [
-						"You prepare the list of level 1+ spells that are available for you to cast. To do so, choose four spells from your spellbook. The chosen spells must be of a level for which you have spell slots.",
-						"The number of spells on your list increases as you gain Wizard levels, as shown in the Wizard class table.",
-						"If another Wizard feature gives you spells that you always have prepared, those spells don't count against the number of spells you can prepare with this feature."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Spellcasting Ability",
-					"entries": [
-						"Intelligence is your spellcasting ability for your Wizard spells."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Spellcasting Focus",
-					"entries": [
-						"You can use an Arcane Focus or your spellbook as a Spellcasting Focus for your Wizard spells."
-					]
-				}
-			]
-		},
-		{
-			"name": "Arcane Recovery",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"You can regain some of your magical energy by studying your spellbook. When you finish a short rest, you can choose expended spell slots to recover. The spell slots can have a combined level equal to no more than half your Wizard level (round up), and none of the slots can be level 6 or higher.",
-				"Once you use this feature, you can't do so again until you finish a long rest."
-			]
-		},
-		{
-			"name": "Ritual Adept",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 1,
-			"entries": [
-				"You can cast any spell as a ritual if that spell has the ritual tag and the spell is in your spellbook. You needn't have the spell prepared, but you must read from the book to cast a spell in this way."
-			]
-		},
-		{
-			"name": "Scholar",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 2,
-			"entries": [
-				"While studying magic, you also specialized in another field of study. Choose one of the following skills in which you have proficiency: {@skill Arcana}, {@skill History}, {@skill Investigation}, {@skill Medicine}, {@skill Nature}, or {@skill Religion}. You gain expertise in the chosen skill."
-			]
-		},
-		{
-			"name": "Wizard Subclass",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"You gain a Wizard subclass of your choice. A subclass is a specialty that grants you features at certain Wizard levels."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 4,
-			"entries": [
-				"When you reach 4th level, and again at 8th, 12th, and 16th level, you can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Wizard",
@@ -21301,36 +20461,6 @@
 			]
 		},
 		{
-			"name": "Memorize Spell",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 5,
-			"entries": [
-				"Whenever you finish a short rest, you can study your spellbook and replace one of the level 1+ Wizard spells you have prepared for your Spellcasting feature with another level 1+ spell from the book."
-			]
-		},
-		{
-			"name": "Subclass Feature",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 6,
-			"entries": [
-				"You gain a feature from your Wizard Subclass."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 8,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Wizard",
@@ -21338,26 +20468,6 @@
 			"level": 8,
 			"entries": [
 				"You gain another specialty of your choice from the {@classFeature Specialties|Wizard|TGTT|4}."
-			]
-		},
-		{
-			"name": "Subclass Feature",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 10,
-			"entries": [
-				"You gain a feature from your Wizard Subclass."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 12,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
 			]
 		},
 		{
@@ -21371,26 +20481,6 @@
 			]
 		},
 		{
-			"name": "Subclass Feature",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 14,
-			"entries": [
-				"You gain a feature from your Wizard Subclass."
-			]
-		},
-		{
-			"name": "Ability Score Improvement",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 16,
-			"entries": [
-				"You can increase one ability score of your choice by 2, or you can increase two ability scores of your choice by 1. As normal, you can't increase an ability score above 20 using this feature."
-			]
-		},
-		{
 			"name": "Specialties",
 			"source": "TGTT",
 			"className": "Wizard",
@@ -21398,37 +20488,6 @@
 			"level": 16,
 			"entries": [
 				"You gain another specialty of your choice from the {@classFeature Specialties|Wizard|TGTT|4}."
-			]
-		},
-		{
-			"name": "Spell Mastery",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 18,
-			"entries": [
-				"You have achieved such mastery over certain spells that you can cast them at will. Choose a 1st-level and a 2nd-level spell in your spellbook that have a casting time of an action. You always have those spells prepared, and you can cast them at their lowest level without expending a spell slot. To cast either spell at a higher level, you must expend a spell slot.",
-				"Whenever you finish a long rest, you can study your spellbook and replace one of those spells with an eligible spell of the same level from the book."
-			]
-		},
-		{
-			"name": "Epic Boon",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 19,
-			"entries": [
-				"You gain an Epic Boon feat of your choice for which you qualify."
-			]
-		},
-		{
-			"name": "Signature Spells",
-			"source": "TGTT",
-			"className": "Wizard",
-			"classSource": "TGTT",
-			"level": 20,
-			"entries": [
-				"Choose two 3rd-level spells in your spellbook as your signature spells. You always have these spells prepared, they don't count against the number of spells you have prepared, and you can cast each of them once at 3rd level without expending a spell slot. When you do so, you can't cast them in this way again until you finish a short or long rest. To cast either spell at a higher level, you must expend a spell slot."
 			]
 		},
 		{
@@ -23203,7 +22262,7 @@
 			"classSource": "TGTT-IllR",
 			"level": 2,
 			"entries": [
-				"At 2nd level, your infernal training expands into combat methods\u2014martial techniques fueled by hellish stamina.",
+				"At 2nd level, your infernal training expands into combat methods—martial techniques fueled by hellish stamina.",
 				{
 					"type": "list",
 					"items": [
@@ -23259,23 +22318,74 @@
 					"type": "options",
 					"count": 1,
 					"entries": [
-						{"type": "refClassFeature", "classFeature": "Baleful Presence|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Dark Resilience|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Diplomatic Intervention|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Do Without|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Endure Elements|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Faceless Mask|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Forked Tongue Mastery|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Infernal Constitution|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Infernal Rejuvenation|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Infernal Tracker|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Negate Fall|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Soul Reader|Illrigger|TGTT-IllR|3"},
-						{"type": "refClassFeature", "classFeature": "Hellish Avenger|Illrigger|TGTT-IllR|5"},
-						{"type": "refClassFeature", "classFeature": "Purge Toxins|Illrigger|TGTT-IllR|5"},
-						{"type": "refClassFeature", "classFeature": "Infernal Awareness|Illrigger|TGTT-IllR|7"},
-						{"type": "refClassFeature", "classFeature": "Suggestive Words|Illrigger|TGTT-IllR|7"},
-						{"type": "refClassFeature", "classFeature": "Infernal Supremacy|Illrigger|TGTT-IllR|19"}
+						{
+							"type": "refClassFeature",
+							"classFeature": "Baleful Presence|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Dark Resilience|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Diplomatic Intervention|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Do Without|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Endure Elements|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Faceless Mask|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Forked Tongue Mastery|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Infernal Constitution|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Infernal Rejuvenation|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Infernal Tracker|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Negate Fall|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Soul Reader|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Hellish Avenger|Illrigger|TGTT-IllR|5"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Purge Toxins|Illrigger|TGTT-IllR|5"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Infernal Awareness|Illrigger|TGTT-IllR|7"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Suggestive Words|Illrigger|TGTT-IllR|7"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Infernal Supremacy|Illrigger|TGTT-IllR|19"
+						}
 					]
 				}
 			]
@@ -23497,7 +22607,7 @@
 			"level": 7,
 			"entries": [
 				"{@i Prerequisite: 7th level}",
-				"You gain {@sense blindsight} with a range of 10 feet\u2014you can sense the presence of creatures through infernal perception. You may take this specialty a second time at 11th level or higher to extend the range to 30 feet."
+				"You gain {@sense blindsight} with a range of 10 feet—you can sense the presence of creatures through infernal perception. You may take this specialty a second time at 11th level or higher to extend the range to 30 feet."
 			]
 		},
 		{
@@ -23959,447 +23069,6 @@
 			]
 		},
 		{
-			"name": "College of Lore",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Lore",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"Bards of the College of Lore know something about most things, collecting bits of knowledge from sources as diverse as scholarly tomes and peasant tales. Their loyalty lies in the pursuit of beauty and truth, not in fealty to a monarch or following the tenets of a deity.",
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Bonus Proficiencies|Bard|TGTT|Lore|TGTT|3"
-				},
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Cutting Words|Bard|TGTT|Lore|TGTT|3"
-				}
-			]
-		},
-		{
-			"name": "Bonus Proficiencies",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Lore",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 1,
-			"entries": [
-				"You gain proficiency with three skills of your choice."
-			]
-		},
-		{
-			"name": "Cutting Words",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Lore",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 1,
-			"entries": [
-				"You learn how to use your wit to distract, confuse, and otherwise sap the confidence and competence of others. When a creature that you can see within 60 feet of you makes an attack roll, an ability check, or a damage roll, you can use your reaction to expend one of your uses of Bardic Inspiration, rolling a Bardic Inspiration die and subtracting the number rolled from the creature's roll. You can choose to use this feature after the creature makes its roll, but before the DM determines whether the attack roll or ability check succeeds or fails, or before the creature deals its damage. The creature is immune if it can't hear you or if it's immune to being {@condition charmed}."
-			]
-		},
-		{
-			"name": "Magical Discoveries",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Lore",
-			"subclassSource": "TGTT",
-			"level": 6,
-			"header": 2,
-			"entries": [
-				"You learn two spells of your choice. These spells must come from the Cleric, Druid, or Wizard spell list. A spell you choose must be of a level for which you have spell slots.",
-				"You always have the chosen spells prepared, and they count as bard spells for you but don't count against the number of bard spells you can prepare."
-			]
-		},
-		{
-			"name": "Peerless Skill",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Lore",
-			"subclassSource": "TGTT",
-			"level": 14,
-			"header": 2,
-			"entries": [
-				"When you make an ability check, you can expend one use of Bardic Inspiration. Roll a Bardic Inspiration die and add the number rolled to your ability check. You can choose to do so after you roll the die for the ability check, but before the DM tells you whether you succeed or fail."
-			]
-		},
-		{
-			"name": "College of Valor",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Valor",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"Bards of the College of Valor are daring skalds whose tales keep alive the memory of the great heroes of the past, and thereby inspire a new generation of heroes.",
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Martial Training|Bard|TGTT|Valor|TGTT|3"
-				},
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Combat Inspiration|Bard|TGTT|Valor|TGTT|3"
-				}
-			]
-		},
-		{
-			"name": "Martial Training",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Valor",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 2,
-			"entries": [
-				"You gain proficiency with martial weapons, medium armor, and shields.",
-				"You can use a simple or martial weapon as a spellcasting focus for your bard spells."
-			]
-		},
-		{
-			"name": "Combat Inspiration",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Valor",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 2,
-			"entries": [
-				"A creature that has a Bardic Inspiration die from you can use it for one of the following effects.",
-				{
-					"type": "entries",
-					"name": "Defense",
-					"entries": [
-						"When the creature is hit by an attack roll, that creature can use its reaction to roll the Bardic Inspiration die and add the number rolled to its AC against that attack, potentially causing the attack to miss."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Offense",
-					"entries": [
-						"Immediately after the creature hits a target with an attack roll, the creature can roll the Bardic Inspiration die and add the number rolled to the attack's damage against the target."
-					]
-				}
-			]
-		},
-		{
-			"name": "Extra Attack",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Valor",
-			"subclassSource": "TGTT",
-			"level": 6,
-			"header": 2,
-			"entries": [
-				"You can attack twice instead of once whenever you take the Attack action on your turn.",
-				"In addition, you can cast one of your cantrips that has a casting time of an action in place of one of those attacks."
-			]
-		},
-		{
-			"name": "Battle Magic",
-			"source": "TGTT",
-			"className": "Bard",
-			"classSource": "TGTT",
-			"subclassShortName": "Valor",
-			"subclassSource": "TGTT",
-			"level": 14,
-			"header": 2,
-			"entries": [
-				"After you cast a spell that has a casting time of an action, you can make one weapon attack as a bonus action."
-			]
-		},
-		{
-			"name": "Life Domain",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Life",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"The Life Domain focuses on the vibrant positive energy that sustains all life. Clerics who tap into this domain are masters of healing, using that life force to cure many hurts.",
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Life Domain Spells|Cleric|TGTT|Life|TGTT|3"
-				},
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Disciple of Life|Cleric|TGTT|Life|TGTT|3"
-				},
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Channel Divinity: Preserve Life|Cleric|TGTT|Life|TGTT|3"
-				}
-			]
-		},
-		{
-			"name": "Life Domain Spells",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Life",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 1,
-			"entries": [
-				"Your connection to this divine domain ensures you always have certain spells ready. When you reach a Cleric level specified in the Life Domain Spells table, you thereafter always have the listed spells prepared.",
-				{
-					"type": "table",
-					"caption": "Life Domain Spells",
-					"colLabels": [
-						"Cleric Level",
-						"Spells"
-					],
-					"rows": [
-						[
-							"3rd",
-							"{@spell bless}, {@spell cure wounds}"
-						],
-						[
-							"5th",
-							"{@spell lesser restoration}, {@spell spiritual weapon|PHB}"
-						],
-						[
-							"7th",
-							"{@spell beacon of hope}, {@spell revivify}"
-						],
-						[
-							"9th",
-							"{@spell death ward}, {@spell guardian of faith}"
-						],
-						[
-							"11th",
-							"{@spell mass cure wounds}, {@spell raise dead}"
-						]
-					]
-				}
-			]
-		},
-		{
-			"name": "Disciple of Life",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Life",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 1,
-			"entries": [
-				"When a spell you cast with a spell slot restores hit points to a creature, that creature regains additional hit points on the turn you cast the spell. The additional hit points equal 2 plus the spell slot's level."
-			]
-		},
-		{
-			"name": "Channel Divinity: Preserve Life",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Life",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 2,
-			"consumes": {
-				"name": "Channel Divinity"
-			},
-			"entries": [
-				"As an action, you present your holy symbol and expend a use of your Channel Divinity to evoke healing energy that can restore a number of hit points equal to five times your cleric level. Choose creatures within 30 feet of yourself, and divide those hit points among them. This feature can restore a creature to no more than half of its hit point maximum."
-			]
-		},
-		{
-			"name": "Blessed Healer",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Life",
-			"subclassSource": "TGTT",
-			"level": 6,
-			"header": 2,
-			"entries": [
-				"The healing spells you cast on others heal you as well. Immediately after you cast a spell with a spell slot that restores hit points to one creature other than you, you regain hit points equal to 2 plus the spell slot's level."
-			]
-		},
-		{
-			"name": "Supreme Healing",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Life",
-			"subclassSource": "TGTT",
-			"level": 17,
-			"header": 2,
-			"entries": [
-				"When you would normally roll one or more dice to restore hit points to a creature with a spell or Channel Divinity, don't roll those dice for the healing; instead use the highest number possible for each die."
-			]
-		},
-		{
-			"name": "Light Domain",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Light",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"The Light Domain emphasizes the divine power to bring about blazing fire and revelation. Clerics who wield this power are enlightened souls infused with radiance and the power of their deities' discerning vision, charged with chasing away lies and burning away darkness.",
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Warding Flare|Cleric|TGTT|Light|TGTT|3"
-				},
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Channel Divinity: Radiance of the Dawn|Cleric|TGTT|Light|TGTT|3"
-				}
-			]
-		},
-		{
-			"name": "Warding Flare",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Light",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 1,
-			"entries": [
-				"You can interpose divine light between yourself and an attacking enemy. When you are attacked by a creature within 30 feet of you that you can see, you can use your reaction to impose disadvantage on the attack roll, causing light to flare before the attacker before it hits or misses.",
-				"You can use this feature a number of times equal to your Wisdom modifier (a minimum of once). You regain all expended uses when you finish a long rest."
-			]
-		},
-		{
-			"name": "Channel Divinity: Radiance of the Dawn",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Light",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 1,
-			"consumes": {
-				"name": "Channel Divinity"
-			},
-			"entries": [
-				"As an action, you present your holy symbol, and any magical darkness within 30 feet of you is dispelled. Additionally, each hostile creature within 30 feet of you must make a Constitution saving throw. A creature takes radiant damage equal to {@damage 2d10} + your cleric level on a failed saving throw, and half as much damage on a successful one. A creature that has total cover from you is not affected."
-			]
-		},
-		{
-			"name": "Improved Warding Flare",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Light",
-			"subclassSource": "TGTT",
-			"level": 6,
-			"header": 2,
-			"entries": [
-				"You can now use your Warding Flare feature when a creature that you can see within 30 feet of you attacks a creature other than you.",
-				"Additionally, when you use Warding Flare, you can give the target of the triggering attack a number of temporary hit points equal to {@dice 2d6} plus your Wisdom modifier.",
-				"You regain all expended uses of your Warding Flare when you finish a short or long rest."
-			]
-		},
-		{
-			"name": "Corona of Light",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Light",
-			"subclassSource": "TGTT",
-			"level": 17,
-			"header": 2,
-			"entries": [
-				"As an action, you can activate an aura of sunlight that lasts for 1 minute or until you dismiss it using another action. You emit bright light in a 60-foot radius and dim light 30 feet beyond that. Your enemies in the bright light have disadvantage on saving throws against your Radiance of the Dawn feature and any spell that deals fire or radiant damage.",
-				"You can use this feature a number of times equal to your Wisdom modifier (a minimum of once). You regain all expended uses when you finish a long rest."
-			]
-		},
-		{
-			"name": "Trickery Domain",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Trickery",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"The Trickery Domain offers magic of deception, illusion, and stealth. Clerics who wield this magic are a disruptive force in the world, puncturing pride, mocking tyrants, freeing captives, and flouting hollow traditions. They prefer subterfuge and pranks to direct confrontation.",
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Blessing of the Trickster|Cleric|TGTT|Trickery|TGTT|3"
-				},
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Channel Divinity: Invoke Duplicity|Cleric|TGTT|Trickery|TGTT|3"
-				}
-			]
-		},
-		{
-			"name": "Blessing of the Trickster",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Trickery",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 2,
-			"entries": [
-				"As an action, you can choose yourself or a willing creature you can see within 30 feet to have advantage on Dexterity (Stealth) checks. This blessing lasts until you finish a long rest or until you use this feature again."
-			]
-		},
-		{
-			"name": "Channel Divinity: Invoke Duplicity",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Trickery",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 2,
-			"consumes": {
-				"name": "Channel Divinity"
-			},
-			"entries": [
-				"As a bonus action, you create a perfect illusion of yourself that lasts for 1 minute, or until you dismiss it (no action required). The illusion appears in an unoccupied space that you can see within 30 feet of you. As a bonus action on your turn, you can move the illusion up to 30 feet to a space you can see, but it must remain within 120 feet of you.",
-				"For the duration, you can cast spells as though you were in the illusion's space, but you must use your own senses. Additionally, when both you and your illusion are within 5 feet of a creature that can see the illusion, you have advantage on attack rolls against that creature, given how distracting the illusion is to the target."
-			]
-		},
-		{
-			"name": "Channel Divinity: Cloak of Shadows",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Trickery",
-			"subclassSource": "TGTT",
-			"level": 6,
-			"header": 2,
-			"consumes": {
-				"name": "Channel Divinity"
-			},
-			"entries": [
-				"As an action, you become invisible until the end of your next turn. You become visible if you attack or cast a spell."
-			]
-		},
-		{
-			"name": "Trickster's Transposition",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "Trickery",
-			"subclassSource": "TGTT",
-			"level": 6,
-			"header": 2,
-			"entries": [
-				"Whenever you use your bonus action to move the illusion of your Invoke Duplicity, you can teleport, swapping places with the illusion."
-			]
-		},
-		{
 			"name": "Improved Duplicity",
 			"source": "TGTT",
 			"className": "Cleric",
@@ -24430,91 +23099,6 @@
 						}
 					]
 				}
-			]
-		},
-		{
-			"name": "War Domain",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "War",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"entries": [
-				"War has many manifestations. Clerics who tap into the magic of the War Domain excel in battle, inspiring others to fight the good fight or offering acts of violence as prayers.",
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "War Priest|Cleric|TGTT|War|TGTT|3"
-				},
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Channel Divinity: Guided Strike|Cleric|TGTT|War|TGTT|3"
-				}
-			]
-		},
-		{
-			"name": "War Priest",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "War",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 1,
-			"entries": [
-				"As a bonus action, you can make one attack with a weapon or an unarmed strike. You can use this bonus action a number of times equal to your Wisdom modifier (minimum of once). You regain all expended uses when you finish a short or long rest."
-			]
-		},
-		{
-			"name": "Channel Divinity: Guided Strike",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "War",
-			"subclassSource": "TGTT",
-			"level": 3,
-			"header": 1,
-			"consumes": {
-				"name": "Channel Divinity"
-			},
-			"entries": [
-				"When you or a creature within 30 feet of you misses with an attack roll, you can expend one use of your Channel Divinity and give that roll a +10 bonus, potentially causing it to hit. When you use this feature to benefit another creature's attack roll, you must use your reaction to do so."
-			]
-		},
-		{
-			"name": "Channel Divinity: War God's Blessing",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "War",
-			"subclassSource": "TGTT",
-			"level": 6,
-			"header": 2,
-			"consumes": {
-				"name": "Channel Divinity"
-			},
-			"entries": [
-				"You can use your Channel Divinity in the following additional ways:",
-				{
-					"type": "list",
-					"items": [
-						"When a creature within 30 feet of you makes an attack roll, you can use your reaction to grant that creature a +10 bonus to the roll. You make this choice after you see the roll, but before the DM says whether the attack hits or misses.",
-						"You can cast {@spell Shield of Faith} or {@spell Spiritual Weapon|PHB} without expending a spell slot or requiring concentration. When you cast either spell in this way, the spell lasts for 1 minute, but it ends early if you cast that spell again, have the {@condition incapacitated|tgtt} condition, or die."
-					]
-				}
-			]
-		},
-		{
-			"name": "Avatar of Battle",
-			"source": "TGTT",
-			"className": "Cleric",
-			"classSource": "TGTT",
-			"subclassShortName": "War",
-			"subclassSource": "TGTT",
-			"level": 17,
-			"header": 2,
-			"entries": [
-				"You gain resistance to bludgeoning, piercing, and slashing damage from nonmagical attacks."
 			]
 		},
 		{
@@ -31851,126 +30435,126 @@
 			}
 		},
 		{
-      "name": "Nahalud",
-      "source": "TGTT",
-      "page": 0,
-      "creatureTypes": [
-        "undead"
-      ],
-      "size": [
-        "M"
-      ],
-      "speed": 30,
-      "darkvision": 60,
-      "ability": [
-        {
-          "choose": {
-            "weighted": {
-              "from": [
-                "str",
-                "dex",
-                "con",
-                "int",
-                "wis",
-                "cha"
-              ],
-              "weights": [
-                2,
-                1,
-                1
-              ]
-            }
-          }
-        },
-        {
-          "choose": {
-            "weighted": {
-              "from": [
-                "str",
-                "dex",
-                "con",
-                "int",
-                "wis",
-                "cha"
-              ],
-              "weights": [
-                2,
-                2
-              ]
-            }
-          }
-        }
-      ],
-      "traitTags": [
-        "Improved Resting",
-        "Damage Resistance"
-      ],
-      "languageProficiencies": [
-        {
-          "common": true,
-          "mictlanian|TGTT": true,
-          "anyStandard": 1
-        }
-      ],
-      "resist": [
-        "poison",
-        "necrotic"
-      ],
-      "vulnerable": [
-        "radiant"
-      ],
-      "entries": [
-        {
-          "type": "entries",
-          "name": "Creature Type",
-          "entries": [
-            "You are an Undead. You are immune to the {@classFeature Turn Undead|Cleric||2|PHB} ability."
-          ]
-        },
-        {
-          "type": "entries",
-          "name": "Darkvision",
-          "entries": [
-            "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
-          ]
-        },
-        {
-          "type": "entries",
-          "name": "Deathless Nature",
-          "entries": [
-            "You do not need to breathe or eat."
-          ]
-        },
-        {
-          "type": "entries",
-          "name": "Sentry's Rest",
-          "entries": [
-            "You do not sleep. Instead, you can finish a long rest in 4 hours if you spend those hours in light activity, such as keeping watch or standing still. Additionally, magic cannot put you to sleep."
-          ]
-        },
-        {
-          "type": "entries",
-          "name": "Spectral Fortitude",
-          "entries": [
-            "You have resistance to Poison and Necrotic damage. You also have advantage on saving throws against the {@condition poisoned} condition."
-          ]
-        },
-        {
-          "type": "entries",
-          "name": "Radiant Frailty",
-          "entries": [
-            "You have vulnerability to Radiant damage."
-          ]
-        },
-        {
-          "type": "entries",
-          "name": "Language of the Dead",
-          "entries": [
-            "You can speak, read, and write Common, Mictlanian, and one other language of your choice. When speaking with an undead creature, you can choose to pour supernatural intent into your words. If you do so, the undead acts as if affected by the {@spell suggestion} spell  and always understands you, regardless of language barriers."
-          ]
-        }
-      ]
-    }
+			"name": "Nahalud",
+			"source": "TGTT",
+			"page": 0,
+			"creatureTypes": [
+				"undead"
+			],
+			"size": [
+				"M"
+			],
+			"speed": 30,
+			"darkvision": 60,
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"str",
+								"dex",
+								"con",
+								"int",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								2,
+								1,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"str",
+								"dex",
+								"con",
+								"int",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								2,
+								2
+							]
+						}
+					}
+				}
+			],
+			"traitTags": [
+				"Improved Resting",
+				"Damage Resistance"
+			],
+			"languageProficiencies": [
+				{
+					"common": true,
+					"mictlanian|TGTT": true,
+					"anyStandard": 1
+				}
+			],
+			"resist": [
+				"poison",
+				"necrotic"
+			],
+			"vulnerable": [
+				"radiant"
+			],
+			"entries": [
+				{
+					"type": "entries",
+					"name": "Creature Type",
+					"entries": [
+						"You are an Undead. You are immune to the {@classFeature Turn Undead|Cleric||2|PHB} ability."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Darkvision",
+					"entries": [
+						"You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light. You can't discern color in darkness, only shades of gray."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Deathless Nature",
+					"entries": [
+						"You do not need to breathe or eat."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Sentry's Rest",
+					"entries": [
+						"You do not sleep. Instead, you can finish a long rest in 4 hours if you spend those hours in light activity, such as keeping watch or standing still. Additionally, magic cannot put you to sleep."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Spectral Fortitude",
+					"entries": [
+						"You have resistance to Poison and Necrotic damage. You also have advantage on saving throws against the {@condition poisoned} condition."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Radiant Frailty",
+					"entries": [
+						"You have vulnerability to Radiant damage."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Language of the Dead",
+					"entries": [
+						"You can speak, read, and write Common, Mictlanian, and one other language of your choice. When speaking with an undead creature, you can choose to pour supernatural intent into your words. If you do so, the undead acts as if affected by the {@spell suggestion} spell  and always understands you, regardless of language barriers."
+					]
+				}
+			]
+		}
 	],
 	"subrace": [
 		{
