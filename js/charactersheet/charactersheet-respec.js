@@ -2367,6 +2367,12 @@ class CharacterSheetRespec {
 			this._state.removeFeature(f.id);
 		});
 
+		// Remove the old subclass's always-prepared spells AND innate cantrips
+		// (e.g. domain/oath/origin spells + Sun Bloodline's Light). Subclass spells
+		// are stamped with sourceFeature "<Subclass Name> Spells" in
+		// populateSubclassSpells(); without this they linger after a subclass swap.
+		if (oldSubclass?.name) this._state.removeSubclassSpells(`${oldSubclass.name} Spells`);
+
 		// Update class entry with new subclass
 		if (classEntry) {
 			classEntry.subclass = {
@@ -2420,6 +2426,14 @@ class CharacterSheetRespec {
 				});
 			}
 		});
+
+		// Re-apply class feature effects so the NEW subclass's always-prepared
+		// spells / innate cantrips are populated (populateSubclassSpells) and its
+		// passive effects (resistances, speed, etc.) take hold. The new subclass
+		// may also change caster progression (e.g. Eldritch Knight), so refresh
+		// spell slots too.
+		this._state.applyClassFeatureEffects();
+		this._state.calculateSpellSlots();
 
 		// Subclass features may grant hpPerLevel — recalc max HP.
 		this._recalcHpPreservingHealing();

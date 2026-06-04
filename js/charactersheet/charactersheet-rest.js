@@ -170,7 +170,7 @@ class CharacterSheetRest {
 
 		// --- Spell Slot Recovery Features (Arcane Recovery / Natural Recovery) ---
 		const calc = this._state.getFeatureCalculations();
-		const hasSlotRecovery = calc.hasArcaneRecovery || calc.hasNaturalRecovery;
+		let hasSlotRecovery = calc.hasArcaneRecovery || calc.hasNaturalRecovery;
 		let slotRecoverySelections = {}; // {level: amount}
 		let slotRecoveryMaxLevels = 0;
 		let slotRecoveryFeatureName = "";
@@ -181,7 +181,24 @@ class CharacterSheetRest {
 				: calc.naturalRecoverySlots;
 			slotRecoveryFeatureName = calc.hasArcaneRecovery ? "Arcane Recovery" : "Natural Recovery";
 
-			const recoverySection = e_({outer: `<div class="charsheet__rest-section">
+			// The feature is once per long rest. If it has already been spent this
+			// rest cycle, show a disabled note instead of the slot-selection controls.
+			const recoveryFeature = this._state.getFeature(slotRecoveryFeatureName);
+			const recoverySpent = !!(recoveryFeature?.uses && recoveryFeature.uses.current <= 0);
+
+			if (recoverySpent) {
+				const spentSection = e_({outer: `<div class="charsheet__rest-section">
+					<div class="charsheet__rest-section-title">✨ ${slotRecoveryFeatureName}</div>
+					<p class="ve-muted ve-small mb-0">Already used since your last long rest.</p>
+				</div>`});
+				const spentTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+				if (spentTarget?.parentNode) spentTarget.parentNode.insertBefore(spentSection, spentTarget);
+				else modalInner.append(spentSection);
+				// Disable recovery for this rest so the confirm handler skips it.
+				hasSlotRecovery = false;
+				slotRecoverySelections = null;
+			} else {
+				const recoverySection = e_({outer: `<div class="charsheet__rest-section">
 				<div class="charsheet__rest-section-title">✨ ${slotRecoveryFeatureName}</div>
 				<p class="ve-muted ve-small mb-2">Recover spell slots (max combined levels: ${slotRecoveryMaxLevels}, no 6th+ slots)</p>
 				<div id="short-rest-slot-recovery-container"></div>
@@ -191,54 +208,55 @@ class CharacterSheetRest {
 					<span class="charsheet__rest-healing-label"> / ${slotRecoveryMaxLevels}</span>
 				</div>
 			</div>`});
-			const insertTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
-			if (insertTarget?.parentNode) insertTarget.parentNode.insertBefore(recoverySection, insertTarget);
-			else modalInner.append(recoverySection);
+				const insertTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+				if (insertTarget?.parentNode) insertTarget.parentNode.insertBefore(recoverySection, insertTarget);
+				else modalInner.append(recoverySection);
 
-			const slotContainer = recoverySection.querySelector("#short-rest-slot-recovery-container");
-			const eleSlotTotal = recoverySection.querySelector("#short-rest-slot-recovery-total");
+				const slotContainer = recoverySection.querySelector("#short-rest-slot-recovery-container");
+				const eleSlotTotal = recoverySection.querySelector("#short-rest-slot-recovery-total");
 
-			const slots = this._state.getSpellSlots();
-			for (let lvl = 1; lvl <= 5; lvl++) {
-				const slot = slots[lvl];
-				if (!slot || slot.max <= 0) continue;
-				const missing = slot.max - slot.current;
-				if (missing <= 0) continue;
+				const slots = this._state.getSpellSlots();
+				for (let lvl = 1; lvl <= 5; lvl++) {
+					const slot = slots[lvl];
+					if (!slot || slot.max <= 0) continue;
+					const missing = slot.max - slot.current;
+					if (missing <= 0) continue;
 
-				slotRecoverySelections[lvl] = 0;
-				const eleCount = e_({tag: "span", txt: "0"});
-				const btnAdd = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-primary", txt: "+"});
-				const btnRemove = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default", txt: "−"});
-				btnRemove.disabled = true;
+					slotRecoverySelections[lvl] = 0;
+					const eleCount = e_({tag: "span", txt: "0"});
+					const btnAdd = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-primary", txt: "+"});
+					const btnRemove = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default", txt: "−"});
+					btnRemove.disabled = true;
 
-				const updateTotal = () => {
-					const total = Object.values(slotRecoverySelections).reduce((sum, v) => sum + v, 0);
-					eleSlotTotal.textContent = `${total}`;
-				};
+					const updateTotal = () => {
+						const total = Object.entries(slotRecoverySelections).reduce((sum, [l, a]) => sum + (parseInt(l) * a), 0);
+						eleSlotTotal.textContent = `${total}`;
+					};
 
-				btnAdd.onClick(() => {
-					const currentTotal = Object.entries(slotRecoverySelections).reduce((sum, [l, a]) => sum + (parseInt(l) * a), 0);
-					if (currentTotal + lvl > slotRecoveryMaxLevels) return;
-					if (slotRecoverySelections[lvl] >= missing) return;
-					slotRecoverySelections[lvl]++;
-					eleCount.txt(`${slotRecoverySelections[lvl]}`);
-					btnRemove.disabled = false;
-					updateTotal();
-				});
+					btnAdd.onClick(() => {
+						const currentTotal = Object.entries(slotRecoverySelections).reduce((sum, [l, a]) => sum + (parseInt(l) * a), 0);
+						if (currentTotal + lvl > slotRecoveryMaxLevels) return;
+						if (slotRecoverySelections[lvl] >= missing) return;
+						slotRecoverySelections[lvl]++;
+						eleCount.txt(`${slotRecoverySelections[lvl]}`);
+						btnRemove.disabled = false;
+						updateTotal();
+					});
 
-				btnRemove.onClick(() => {
-					if (slotRecoverySelections[lvl] <= 0) return;
-					slotRecoverySelections[lvl]--;
-					eleCount.txt(`${slotRecoverySelections[lvl]}`);
-					if (slotRecoverySelections[lvl] <= 0) btnRemove.disabled = true;
-					updateTotal();
-				});
+					btnRemove.onClick(() => {
+						if (slotRecoverySelections[lvl] <= 0) return;
+						slotRecoverySelections[lvl]--;
+						eleCount.txt(`${slotRecoverySelections[lvl]}`);
+						if (slotRecoverySelections[lvl] <= 0) btnRemove.disabled = true;
+						updateTotal();
+					});
 
-				ee`<div class="charsheet__hit-die-row">
+					ee`<div class="charsheet__hit-die-row">
 					<span>Level ${lvl} (${slot.current}/${slot.max})</span>
 					<span>Missing: ${missing}</span>
 					${btnRemove} ${eleCount} ${btnAdd}
 				</div>`.appendTo(slotContainer);
+				}
 			}
 		}
 

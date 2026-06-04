@@ -74,6 +74,7 @@ class CharacterSheetPage {
 	}
 
 	async pInit () {
+		void this._pInitLoadingTip();
 		await this._pLoadData();
 		this._installHoverNormalizationHook();
 		this._initUi();
@@ -156,6 +157,12 @@ class CharacterSheetPage {
 		if (this._spells) this._spells.setSpells(this._spellsData);
 		if (this._upgrades) this._upgrades.setUpgrades(this._itemUpgradesData);
 
+		// Inject the full spell database into state so subclass-granted spells
+		// (domain/oath/circle/origin/patron) are enriched with their real
+		// level/school instead of being stored as lean `level: null` refs that
+		// the level-grouped spell list silently drops.
+		this._state.setSpellData(this._spellsData);
+
 		// Check for character in URL
 		const urlParams = new URLSearchParams(window.location.search);
 		const charId = urlParams.get("id");
@@ -219,6 +226,23 @@ class CharacterSheetPage {
 				}
 			}
 		});
+	}
+
+	async _pInitLoadingTip () {
+		const elTip = document.querySelector("#charsheet-loading-tip");
+		if (!elTip) return;
+
+		try {
+			const tips = await DataUtil.loadJSON("data/loading-tips.json");
+			const tipList = Array.isArray(tips) ? tips.filter(Boolean) : [];
+			if (!tipList.length) return;
+
+			const tip = tipList[Math.floor(Math.random() * tipList.length)];
+			elTip.textContent = tip;
+		} catch (err) {
+			// eslint-disable-next-line no-console
+			console.warn("Failed to load character sheet loading tip:", err);
+		}
 	}
 
 	async _pLoadData () {

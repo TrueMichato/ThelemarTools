@@ -3139,6 +3139,44 @@ globalThis.FeatureEffectRegistry = FeatureEffectRegistry;
 class CharacterSheetState {
 	constructor () {
 		this._data = this._getDefaultState();
+		// Optional full spell database, injected by the controller after data
+		// load (`setSpellData`). Used to enrich subclass/feature-granted spells
+		// with their real level/school/metadata so they render and persist
+		// correctly. State works without it (degrades to lean refs), but then
+		// level-gated grouping in the spell list silently drops the spells.
+		this._allSpells = [];
+	}
+
+	/**
+	 * Inject the full spell database so subclass-granted spells (domain, oath,
+	 * circle, sorcerer origin, patron, etc.) can be enriched with their real
+	 * level/school/components instead of being stored as lean `level: null`
+	 * refs (which the level-grouped spell list silently drops).
+	 * @param {Array} allSpells - Full spell data list
+	 */
+	setSpellData (allSpells) {
+		this._allSpells = Array.isArray(allSpells) ? allSpells : [];
+	}
+
+	/**
+	 * Resolve a parsed subclass spell ref ({name, source, isCantrip}) to its
+	 * full data object from the injected spell database. Prefers an exact
+	 * source match, then falls back to the first name match (additionalSpells
+	 * refs often default to "PHB" even when the spell lives in XPHB/another
+	 * source). Returns null when no database is set or no match is found.
+	 * @param {{name: string, source?: string}} parsed
+	 * @returns {object|null}
+	 */
+	_resolveFullSpellData (parsed) {
+		if (!parsed?.name || !this._allSpells?.length) return null;
+		const nameLc = parsed.name.toLowerCase();
+		const matches = this._allSpells.filter(s => s.name?.toLowerCase() === nameLc);
+		if (!matches.length) return null;
+		if (parsed.source) {
+			const srcMatch = matches.find(s => s.source === parsed.source);
+			if (srcMatch) return srcMatch;
+		}
+		return matches[0];
 	}
 
 	_getDefaultState () {
@@ -8836,7 +8874,7 @@ class CharacterSheetState {
 					for (const spellRef of spells) {
 						const parsed = this._parseSpellReference(spellRef);
 						if (parsed) {
-							result.push({...parsed, alwaysPrepared: true, prepared: true, sourceFeature: `${subclassData.name} Spells`, sourceClass: cls.name});
+							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls));
 						}
 					}
 				}
@@ -8851,7 +8889,7 @@ class CharacterSheetState {
 					for (const spellRef of spells) {
 						const parsed = this._parseSpellReference(spellRef);
 						if (parsed) {
-							result.push({...parsed, alwaysPrepared: true, prepared: true, sourceFeature: `${subclassData.name} Spells`, sourceClass: cls.name});
+							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls));
 						}
 					}
 				}
@@ -8868,7 +8906,7 @@ class CharacterSheetState {
 					for (const spellRef of spells) {
 						const parsed = this._parseSpellReference(spellRef);
 						if (parsed) {
-							result.push({...parsed, alwaysPrepared: true, prepared: true, sourceFeature: `${subclassData.name} Spells`, sourceClass: cls.name});
+							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls));
 						}
 					}
 				}
@@ -8876,6 +8914,44 @@ class CharacterSheetState {
 		}
 
 		return result;
+	}
+
+	/**
+	 * Build a subclass always-prepared spell entry from a parsed reference,
+	 * enriching it with real level/school/metadata from the injected spell
+	 * database when available. Without enrichment the spell keeps `level: null`
+	 * and is silently dropped by the level-grouped spell list — the root cause
+	 * of subclass spells (sorcerer origin, cleric domain, etc.) not showing up.
+	 * @param {*} parsed - Output of `_parseSpellReference`
+	 * @param {*} subclassData - The subclass object (for sourceFeature naming)
+	 * @param {*} cls - The owning class entry (for sourceClass)
+	 * @returns {*} Enriched spell entry
+	 */
+	_buildSubclassSpellEntry (parsed, subclassData, cls) {
+		const full = this._resolveFullSpellData(parsed);
+		const enriched = full
+			? {
+				name: full.name,
+				source: full.source,
+				level: parsed.isCantrip ? 0 : full.level,
+				isCantrip: parsed.isCantrip || full.level === 0,
+				school: full.school,
+				ritual: CharacterSheetClassUtils.spellIsRitual(full),
+				concentration: CharacterSheetClassUtils.spellIsConcentration(full),
+				castingTime: CharacterSheetClassUtils.getSpellCastingTime(full),
+				range: CharacterSheetClassUtils.getSpellRange(full),
+				components: CharacterSheetClassUtils.getSpellComponents(full),
+				duration: CharacterSheetClassUtils.getSpellDuration(full),
+				subschools: full.subschools || [],
+			}
+			: {...parsed};
+		return {
+			...enriched,
+			alwaysPrepared: true,
+			prepared: true,
+			sourceFeature: `${subclassData.name} Spells`,
+			sourceClass: cls.name,
+		};
 	}
 
 	/**
@@ -8918,13 +8994,31 @@ class CharacterSheetState {
 							&& (s.source === spell.source || !spell.source),
 					);
 					if (!existingCantrip) {
+						// Forward the full enriched entry (school/casting metadata) so the
+						// subclass cantrip is a complete, properly-attributed spell — just
+						// like the level-gated subclass spells — rather than a bare
+						// name/source stub that renders without a school badge.
 						this.addCantrip({
 							name: spell.name,
 							source: spell.source,
+							school: spell.school,
+							castingTime: spell.castingTime,
+							range: spell.range,
+							duration: spell.duration,
+							concentration: spell.concentration,
+							components: spell.components,
+							subschools: spell.subschools,
 							sourceFeature: spell.sourceFeature,
 							sourceClass: spell.sourceClass || cls.name,
 						});
 						totalAdded++;
+					} else if (spell.sourceFeature && !existingCantrip.sourceFeature) {
+						// A cantrip that was previously added without attribution (e.g.
+						// player-picked before the subclass was chosen) is now granted by
+						// the subclass — stamp it so it's recognised as feature-granted and
+						// stops counting against the cantrip cap.
+						existingCantrip.sourceFeature = spell.sourceFeature;
+						existingCantrip.sourceClass = spell.sourceClass || cls.name;
 					}
 					continue;
 				}
@@ -8943,6 +9037,13 @@ class CharacterSheetState {
 						existing.sourceFeature = spell.sourceFeature;
 						existing.sourceClass = spell.sourceClass || cls.name;
 						totalAdded++;
+					}
+					// Self-heal saves created before subclass-spell enrichment:
+					// backfill a missing/null level (and school) so the spell is no
+					// longer dropped by the level-grouped spell list.
+					if ((existing.level == null) && (spell.level != null)) {
+						existing.level = spell.level;
+						if (spell.school && !existing.school) existing.school = spell.school;
 					}
 				} else {
 					// Add the spell
@@ -8971,6 +9072,10 @@ class CharacterSheetState {
 			if (!s.alwaysPrepared) return true;
 			return false;
 		});
+		// Also remove subclass-granted cantrips (e.g. Sun Bloodline's innate Light).
+		// Cantrips don't carry `alwaysPrepared`, so match purely on sourceFeature —
+		// without this, swapping subclasses leaves the old subclass's cantrip behind.
+		this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(c => c.sourceFeature !== sourceFeature);
 	}
 
 	/**
@@ -34838,7 +34943,13 @@ class CharacterSheetState {
 	useArcaneRecovery (slotsToRecover) {
 		// Check if we have the feature and it has uses
 		const feature = this.getFeature("Arcane Recovery");
-		if (!feature || (feature.uses && feature.uses.current <= 0)) {
+		if (!feature) return false;
+		// Backfill once-per-long-rest usage tracking for features ingested before
+		// this tracking existed (older saves / class-feature build paths that omit
+		// `uses`). Without this, the charge is never spent and the feature can be
+		// used unlimited times per rest.
+		if (!feature.uses) feature.uses = {current: 1, max: 1, recharge: "long"};
+		if (feature.uses.current <= 0) {
 			return false;
 		}
 
@@ -34866,9 +34977,7 @@ class CharacterSheetState {
 		}
 
 		// Use the feature charge
-		if (feature.uses) {
-			feature.uses.current--;
-		}
+		feature.uses.current--;
 
 		return true;
 	}
@@ -35136,6 +35245,8 @@ class CharacterSheetState {
 
 		// Check feature charge (uses getFeature for charge tracking, same pattern as Arcane Recovery)
 		const feature = this.getFeature("Natural Recovery");
+		// Backfill once-per-long-rest usage tracking for features that lack it.
+		if (feature && !feature.uses) feature.uses = {current: 1, max: 1, recharge: "long"};
 		if (feature && feature.uses && feature.uses.current <= 0) {
 			return false;
 		}

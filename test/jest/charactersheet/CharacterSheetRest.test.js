@@ -402,6 +402,50 @@ describe("Rest Mechanics", () => {
 				state.useArcaneRecovery([{level: 1, amount: 2}]);
 				expect(state.getFeature("Arcane Recovery").uses.current).toBe(0);
 			});
+
+			it("should backfill usage tracking and mark spent when feature lacks `uses`", () => {
+				// Simulate a feature ingested before per-rest usage tracking existed.
+				const fresh = new CharacterSheetState();
+				fresh.addClass({name: "Wizard", source: "PHB", level: 5});
+				fresh.addFeature({id: "ar", name: "Arcane Recovery"}); // no `uses`
+				fresh.setSpellSlots([{level: 1, current: 0, max: 4}, {level: 2, current: 0, max: 3}]);
+
+				const ok = fresh.useArcaneRecovery([{level: 1, amount: 1}]);
+				expect(ok).toBe(true);
+				const feat = fresh.getFeature("Arcane Recovery");
+				expect(feat.uses).toBeTruthy();
+				expect(feat.uses.max).toBe(1);
+				expect(feat.uses.current).toBe(0);
+			});
+
+			it("should block a second use before a long rest", () => {
+				const first = state.useArcaneRecovery([{level: 1, amount: 1}]);
+				expect(first).toBe(true);
+				expect(state.getFeature("Arcane Recovery").uses.current).toBe(0);
+
+				const second = state.useArcaneRecovery([{level: 1, amount: 1}]);
+				expect(second).toBe(false);
+			});
+
+			it("should restore the charge on a long rest", () => {
+				state.useArcaneRecovery([{level: 1, amount: 1}]);
+				expect(state.getFeature("Arcane Recovery").uses.current).toBe(0);
+				state.onLongRest();
+				expect(state.getFeature("Arcane Recovery").uses.current).toBe(1);
+			});
+
+			it("should treat a level 4 slot as 4 combined levels (not 1)", () => {
+				// Level 11 wizard => max 6 combined levels. A single level-4 slot
+				// (= 4 levels) is allowed; two level-4 slots (= 8) exceed the cap.
+				const w = new CharacterSheetState();
+				w.addClass({name: "Wizard", source: "PHB", level: 11});
+				w.addFeature({id: "ar", name: "Arcane Recovery", uses: {current: 1, max: 1, recharge: "long"}});
+				w.setSpellSlots([{level: 4, current: 0, max: 3}, {level: 5, current: 0, max: 1}]);
+
+				expect(w.useArcaneRecovery([{level: 4, amount: 2}])).toBe(false); // 8 > 6
+				expect(w.useArcaneRecovery([{level: 4, amount: 1}])).toBe(true); // 4 <= 6
+				expect(w.getSpellSlots()[4].current).toBe(1);
+			});
 		});
 
 		describe("Bard - Song of Rest", () => {
