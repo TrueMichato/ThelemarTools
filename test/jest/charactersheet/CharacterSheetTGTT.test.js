@@ -8820,6 +8820,147 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						const faerieFire = spells.find(s => s.name.toLowerCase() === "faerie fire");
 						expect(faerieFire.alwaysPrepared).toBe(true);
 					});
+
+					it("should add newly-unlocked origin spells when level increases (level-up regression)", () => {
+						// Reproduces the level-up gap: origin spells are level-gated
+						// (level 3+), so a sorcerer created at level 1 has none. The
+						// level-up wizard mutates class.level directly, so the fix calls
+						// populateSubclassSpells() afterwards to add the new spells.
+						const cls = {
+							name: "Sorcerer",
+							level: 1,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						};
+						state.addClass(cls);
+						state.populateSubclassSpells();
+						// No level-3 origin spells at level 1.
+						expect(state.getSpells().some(s => s.name.toLowerCase() === "faerie fire")).toBe(false);
+
+						// Simulate the level-up wizard bumping the class to level 3.
+						const target = state.getClasses().find(c => c.name === "Sorcerer");
+						target.level = 3;
+						state.populateSubclassSpells();
+
+						const faerieFire = state.getSpells().find(s => s.name.toLowerCase() === "faerie fire");
+						expect(faerieFire).toBeTruthy();
+						// Free / always-known: tagged with a subclass sourceFeature so it
+						// does not count against the spells-known cap.
+						expect(faerieFire.sourceFeature).toBeTruthy();
+						expect(faerieFire.alwaysPrepared).toBe(true);
+					});
+
+					it("should enrich subclass spells with real level/school when a spell database is injected", () => {
+						// Root-cause regression: without enrichment, subclass spells
+						// are stored with `level: null` and are silently dropped by the
+						// level-grouped spell list (so they never appear in known spells).
+						// Injecting the spell DB via setSpellData() must backfill the
+						// real level so the spell renders and persists correctly.
+						state.setSpellData([
+							{name: "Faerie Fire", source: "PHB", level: 1, school: "V"},
+							{name: "Flaming Sphere", source: "PHB", level: 2, school: "V"},
+							{name: "Light", source: "PHB", level: 0, school: "V"},
+						]);
+						state.addClass({
+							name: "Sorcerer",
+							level: 3,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						});
+						state.populateSubclassSpells();
+
+						const faerieFire = state.getSpells().find(s => s.name.toLowerCase() === "faerie fire");
+						expect(faerieFire).toBeTruthy();
+						expect(faerieFire.level).toBe(1); // not null
+						expect(faerieFire.school).toBe("V");
+
+						const flamingSphere = state.getSpells().find(s => s.name.toLowerCase() === "flaming sphere");
+						expect(flamingSphere.level).toBe(2);
+
+						// Innate cantrip routed to cantrips with level 0.
+						const light = state.getCantrips().find(c => c.name.toLowerCase() === "light");
+						expect(light).toBeTruthy();
+					});
+
+					it("should treat the innate cantrip as a feature-granted subclass spell (school + attribution, no cap cost)", () => {
+						// Regression: the innate Light cantrip was added with only
+						// name/source, so it rendered without a school badge and could
+						// look like an unattributed/player cantrip. It must carry the
+						// subclass sourceFeature (feature-granted, not counted toward the
+						// cantrip cap) and its full metadata.
+						state.setSpellData([
+							{name: "Light", source: "PHB", level: 0, school: "V"},
+							{name: "Faerie Fire", source: "PHB", level: 1, school: "V"},
+							{name: "Flaming Sphere", source: "PHB", level: 2, school: "V"},
+						]);
+						state.addClass({
+							name: "Sorcerer",
+							level: 3,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						});
+
+						const light = state.getCantripsKnown().find(c => c.name.toLowerCase() === "light");
+						expect(light).toBeTruthy();
+						expect(light.school).toBe("V");
+						expect(light.sourceFeature).toBe("Child of the Sun Bloodline Spells");
+
+						const ClassUtils = globalThis.CharacterSheetClassUtils;
+						const cantrips = state.getCantripsKnown();
+						const part = ClassUtils.partitionCantripsByAttribution(cantrips);
+						expect(part.featureGranted.map(c => c.name.toLowerCase())).toContain("light");
+						// Feature-granted cantrips do not count toward the cantrip cap.
+						expect(ClassUtils.countPlayerChosenCantrips(cantrips).count).toBe(0);
+					});
+
+					it("should backfill a missing level on an existing spell entry (legacy save self-heal)", () => {
+						// Simulate a save written before enrichment: the spell exists in
+						// spellsKnown but with level null. populateSubclassSpells() must
+						// repair it once a spell database is available.
+						state.setSpellData([
+							{name: "Faerie Fire", source: "PHB", level: 1, school: "V"},
+						]);
+						state.addClass({
+							name: "Sorcerer",
+							level: 3,
+							source: "TGTT",
+							subclass: {
+								name: "Child of the Sun Bloodline",
+								shortName: "Sun Bloodline",
+								source: "TGTT",
+								additionalSpells: SUN_BLOODLINE_ADDITIONAL_SPELLS,
+							},
+						});
+						state.populateSubclassSpells();
+						// Pre-seed a broken (level null) entry as an old save would have:
+						// addClass already enriched it, so corrupt the level to mimic a
+						// save written before enrichment existed.
+						const seeded = state.getSpells().find(s => s.name.toLowerCase() === "faerie fire");
+						expect(seeded).toBeTruthy();
+						const stored = state.getSpellsKnown().find(s => s.name.toLowerCase() === "faerie fire");
+						stored.level = null;
+						expect(state.getSpells().find(s => s.name.toLowerCase() === "faerie fire").level).toBeNull();
+
+						state.populateSubclassSpells();
+
+						const healed = state.getSpells().find(s => s.name.toLowerCase() === "faerie fire");
+						expect(healed.level).toBe(1);
+					});
 				});
 			});
 		});

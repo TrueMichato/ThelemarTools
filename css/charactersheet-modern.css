@@ -1589,6 +1589,14 @@ body[data-theme] {
 	text-transform: uppercase;
 }
 
+.charsheet__loading-tip {
+	max-width: 42rem;
+	font-size: 0.95rem;
+	line-height: 1.4;
+	text-align: center;
+	color: var(--cs-accent-gold, #cbd5e1);
+}
+
 /* Animated progress bar */
 .charsheet__loading-bar {
 	width: 200px;

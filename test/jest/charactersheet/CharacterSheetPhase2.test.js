@@ -510,6 +510,23 @@ describe("Phase 2 Features", () => {
 				const spells = state.getSpells().filter(s => s.name === "bless");
 				expect(spells.length).toBe(1);
 			});
+
+			it("should also remove subclass-granted cantrips (not just leveled spells)", () => {
+				// Sun Bloodline grants an innate Light cantrip stamped with the same
+				// "<Subclass> Spells" sourceFeature. Swapping subclasses must drop it
+				// too, otherwise the old cantrip lingers after a respec.
+				state.addSpell({name: "faerie fire", source: "PHB", level: 1, alwaysPrepared: true, prepared: true, sourceFeature: "Child of the Sun Bloodline Spells"});
+				state.addCantrip({name: "Light", source: "PHB", school: "V", sourceFeature: "Child of the Sun Bloodline Spells", sourceClass: "Sorcerer"});
+				state.addCantrip({name: "Fire Bolt", source: "PHB", school: "V", sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
+
+				state.removeSubclassSpells("Child of the Sun Bloodline Spells");
+
+				const cantrips = state.getCantripsKnown();
+				expect(cantrips.some(c => c.name === "Light")).toBe(false);
+				// Player-chosen cantrip from a different feature is untouched.
+				expect(cantrips.some(c => c.name === "Fire Bolt")).toBe(true);
+				expect(state.getSpellsKnown().some(s => s.name === "faerie fire")).toBe(false);
+			});
 		});
 
 		describe("_parseSpellReference", () => {

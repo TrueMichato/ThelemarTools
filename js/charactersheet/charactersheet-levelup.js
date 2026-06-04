@@ -4069,6 +4069,15 @@ class CharacterSheetLevelUp {
 		}
 		this._state.ensureXpMatchesLevel();
 
+		// Populate subclass-granted always-known/always-prepared spells (domain,
+		// oath, circle, sorcerer origin, patron spells, etc.). The level-up wizard
+		// mutates `targetClass.level` directly instead of going through
+		// `state.addClass()`/`state.levelUp()`, so `applyClassFeatureEffects()`
+		// (which normally runs `populateSubclassSpells()`) is never triggered here.
+		// Without this call, level-gated subclass spells (e.g. sorcerer origin
+		// spells unlocked at level 3/5/7/9) are not added until the next reload.
+		this._state.populateSubclassSpells();
+
 		// Update unarmed strike (monk martial arts die progression)
 		this._state.ensureUnarmedStrike();
 
