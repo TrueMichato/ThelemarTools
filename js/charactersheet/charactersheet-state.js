@@ -4612,7 +4612,14 @@ class CharacterSheetState {
 			for (const feature of subclassFeatures) {
 				this.removeFeature(feature.name, feature.source);
 			}
+			// Drop the Divine Soul affinity grant (and its override) before nulling
+			// the subclass, otherwise the always-prepared spell orphans.
+			if (CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass)) {
+				const prevEffective = CharacterSheetClassUtils.getEffectiveDivineSoulSpell(classEntry.subclass, classEntry.subclassChoice, classEntry.divineSoulSpellOverride);
+				if (prevEffective) this._removeDivineSoulAffinityEntry(classEntry.subclass, className, prevEffective);
+			}
 			classEntry.subclass = null;
+			if (classEntry.divineSoulSpellOverride) delete classEntry.divineSoulSpellOverride;
 		}
 
 		// 5. Remove optional features (invocations, metamagic, etc.)
@@ -4722,9 +4729,19 @@ class CharacterSheetState {
 	setSubclass (className, subclass) {
 		const classEntry = this._data.classes.find(c => c.name === className);
 		if (classEntry) {
+			const wasDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass);
+			const willBeDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclass);
+			// Switching away from Divine Soul: remove the orphaned affinity spell
+			// (computed from the OLD subclass) before reassigning.
+			if (wasDivineSoul && !willBeDivineSoul) {
+				const prevEffective = CharacterSheetClassUtils.getEffectiveDivineSoulSpell(classEntry.subclass, classEntry.subclassChoice, classEntry.divineSoulSpellOverride);
+				if (prevEffective) this._removeDivineSoulAffinityEntry(classEntry.subclass, className, prevEffective);
+			}
 			classEntry.subclass = subclass;
-			if (!CharacterSheetClassUtils.isDivineSoulSubclass(subclass)) {
+			if (!willBeDivineSoul) {
 				classEntry.subclassChoice = null;
+				// The affinity-spell override only makes sense for Divine Soul.
+				if (classEntry.divineSoulSpellOverride) delete classEntry.divineSoulSpellOverride;
 			}
 			// Re-apply class feature effects for new subclass
 			this.applyClassFeatureEffects();
@@ -4739,21 +4756,75 @@ class CharacterSheetState {
 	setSubclassChoice (className, subclassChoice) {
 		const classEntry = this._data.classes.find(c => c.name === className);
 		if (!classEntry) return false;
+		const prevKey = CharacterSheetClassUtils.normalizeDivineSoulAffinity(classEntry.subclassChoice)?.key;
+		// Resolve the previously-granted affinity spell BEFORE mutating so we can
+		// clean it up if the affinity actually changes.
+		const prevEffective = CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass)
+			? CharacterSheetClassUtils.getEffectiveDivineSoulSpell(classEntry.subclass, classEntry.subclassChoice, classEntry.divineSoulSpellOverride)
+			: null;
+
 		classEntry.subclassChoice = CharacterSheetClassUtils.normalizeDivineSoulAffinity(subclassChoice);
+		const newKey = classEntry.subclassChoice?.key;
+
+		if (prevKey !== newKey) {
+			// The swap override is keyed to a specific affinity's default spell; if
+			// the affinity changes, the override no longer applies.
+			if (classEntry.divineSoulSpellOverride) delete classEntry.divineSoulSpellOverride;
+			// Remove the stale affinity grant so the new affinity's spell (added by
+			// the next populateSubclassSpells) doesn't leave an orphan behind.
+			if (prevEffective) this._removeDivineSoulAffinityEntry(classEntry.subclass, className, prevEffective);
+		}
 		return true;
+	}
+
+	/**
+	 * Targeted removal of a single Divine Soul affinity (always-prepared) entry.
+	 * Never deletes a colliding player-owned spell: it only drops an entry that is
+	 * flagged `isDivineSoulAffinity`, or that exactly matches the old effective
+	 * spell under this subclass's "<sub> Spells" feature for this class.
+	 * @param {*} subclass - The Divine Soul subclass object
+	 * @param {string} className - Owning class name
+	 * @param {{name:string, source?:string}} oldEff - The affinity spell to remove
+	 */
+	_removeDivineSoulAffinityEntry (subclass, className, oldEff) {
+		if (!oldEff?.name) return;
+		const subName = subclass?.name || "Divine Soul";
+		const sourceFeatureAlways = `${subName} Spells`;
+		const sourceFeatureKnown = `${subName} Affinity`;
+		const oldName = oldEff.name.toLowerCase();
+		const oldId = `${oldName}|${(oldEff.source || Parser.SRC_PHB).toLowerCase()}`;
+		this._data.spellcasting.spellsKnown = this._data.spellcasting.spellsKnown.filter(s => {
+			const sName = (s.name || "").toLowerCase();
+			const sId = `${sName}|${(s.source || Parser.SRC_PHB).toLowerCase()}`;
+			// Tagged affinity entry: match by NAME only. Spell-data enrichment can
+			// rewrite the source (e.g. a PHB affinity ref resolving to XPHB when the
+			// loaded DB lacks PHB), so an exact id match would miss the entry and
+			// leave an orphan. The tag is unambiguous (only the affinity grant
+			// carries it), so name matching is safe.
+			if (s.alwaysPrepared && s.isDivineSoulAffinity === true && sName === oldName) return false;
+			// Untagged always-prepared legacy entry: require exact id + our feature/class.
+			if (s.alwaysPrepared && sId === oldId
+				&& s.sourceFeature === sourceFeatureAlways
+				&& (s.sourceClass === className || !s.sourceClass)) return false;
+			// Transient "<sub> Affinity" known entry (added by ensureDivineSoulKnownSpell
+			// before populate flips it) — drop it too if a save was captured mid-flow.
+			if (sName === oldName && s.sourceFeature === sourceFeatureKnown
+				&& (s.sourceClass === className || !s.sourceClass)) return false;
+			return true;
+		});
 	}
 
 	getDivineSoulKnownSpell (className = "Sorcerer") {
 		const classEntry = this._data.classes.find(c => c.name === className);
 		if (!classEntry) return null;
-		return CharacterSheetClassUtils.getDivineSoulKnownSpell(classEntry.subclass, classEntry.subclassChoice);
+		return CharacterSheetClassUtils.getEffectiveDivineSoulSpell(classEntry.subclass, classEntry.subclassChoice, classEntry.divineSoulSpellOverride);
 	}
 
 	ensureDivineSoulKnownSpell (className = "Sorcerer") {
 		const classEntry = this._data.classes.find(c => c.name === className);
 		if (!classEntry || !CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass)) return false;
 
-		const knownSpell = CharacterSheetClassUtils.getDivineSoulKnownSpell(classEntry.subclass, classEntry.subclassChoice);
+		const knownSpell = CharacterSheetClassUtils.getEffectiveDivineSoulSpell(classEntry.subclass, classEntry.subclassChoice, classEntry.divineSoulSpellOverride);
 		if (!knownSpell) return false;
 
 		const existingSpell = [
@@ -8899,7 +8970,15 @@ class CharacterSheetState {
 		const additionalSpells = subclassData.additionalSpells;
 		if (!additionalSpells?.length) return [];
 
-		const spellBlocks = CharacterSheetClassUtils.isDivineSoulSubclass(subclassData)
+		const isDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclassData);
+		// The Divine Soul affinity spell is swappable: resolve the *effective*
+		// grant (override || alignment default) and tag it so the spells tab can
+		// offer a Swap control instead of the usual "Locked" button.
+		const effectiveAffinity = isDivineSoul
+			? CharacterSheetClassUtils.getEffectiveDivineSoulSpell(subclassData, cls.subclassChoice, cls.divineSoulSpellOverride)
+			: null;
+
+		const spellBlocks = isDivineSoul
 			? (() => {
 				const chosenBlock = CharacterSheetClassUtils.getDivineSoulAffinityBlock(subclassData, cls.subclassChoice);
 				return chosenBlock ? [chosenBlock] : [];
@@ -8929,9 +9008,18 @@ class CharacterSheetState {
 					if (isNaN(reqLevel) || characterLevel < reqLevel) continue;
 
 					for (const spellRef of spells) {
-						const parsed = this._parseSpellReference(spellRef);
+						// Divine Soul's single known affinity spell is swappable — use the
+						// effective (possibly overridden) spell and flag it accordingly.
+						let parsed;
+						let extra;
+						if (isDivineSoul && effectiveAffinity) {
+							parsed = this._parseSpellReference(`${effectiveAffinity.name}|${effectiveAffinity.source}`);
+							extra = {isDivineSoulAffinity: true};
+						} else {
+							parsed = this._parseSpellReference(spellRef);
+						}
 						if (parsed) {
-							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls));
+							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls, extra));
 						}
 					}
 				}
@@ -8967,9 +9055,10 @@ class CharacterSheetState {
 	 * @param {*} parsed - Output of `_parseSpellReference`
 	 * @param {*} subclassData - The subclass object (for sourceFeature naming)
 	 * @param {*} cls - The owning class entry (for sourceClass)
+	 * @param {*} [extra] - Optional extra flags merged into the entry (e.g. `{isDivineSoulAffinity: true}`)
 	 * @returns {*} Enriched spell entry
 	 */
-	_buildSubclassSpellEntry (parsed, subclassData, cls) {
+	_buildSubclassSpellEntry (parsed, subclassData, cls, extra = {}) {
 		const full = this._resolveFullSpellData(parsed);
 		const enriched = full
 			? {
@@ -8993,6 +9082,7 @@ class CharacterSheetState {
 			prepared: true,
 			sourceFeature: `${subclassData.name} Spells`,
 			sourceClass: cls.name,
+			...extra,
 		};
 	}
 
@@ -9080,6 +9170,12 @@ class CharacterSheetState {
 						existing.sourceClass = spell.sourceClass || cls.name;
 						totalAdded++;
 					}
+					// Stamp the Divine Soul affinity flag onto pre-existing/legacy
+					// entries so old saves gain the Swap affordance on load without an
+					// explicit migration step.
+					if (spell.isDivineSoulAffinity && !existing.isDivineSoulAffinity) {
+						existing.isDivineSoulAffinity = true;
+					}
 					// Self-heal saves created before subclass-spell enrichment:
 					// backfill a missing/null level (and school) so the spell is no
 					// longer dropped by the level-grouped spell list.
@@ -9118,6 +9214,42 @@ class CharacterSheetState {
 		// Cantrips don't carry `alwaysPrepared`, so match purely on sourceFeature —
 		// without this, swapping subclasses leaves the old subclass's cantrip behind.
 		this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(c => c.sourceFeature !== sourceFeature);
+	}
+
+	/**
+	 * Swap the Divine Soul affinity (always-prepared) spell for another Cleric
+	 * spell. The affinity spell is the one always-prepared grant that the rules
+	 * allow a Divine Soul Sorcerer to choose; all other subclass spells stay
+	 * locked.
+	 *
+	 * Performs a TARGETED removal of only the current affinity grant (never a
+	 * broad `removeSubclassSpells`, which could delete a colliding player-owned
+	 * spell), records the choice as a per-class override, then repopulates so the
+	 * new spell is added as always-prepared and re-tagged.
+	 *
+	 * @param {string} className - Owning class (default "Sorcerer")
+	 * @param {{name:string, source?:string, level?:number}} newSpell - Replacement Cleric spell
+	 * @returns {boolean} True if the swap was applied
+	 */
+	swapDivineSoulAffinitySpell (className = "Sorcerer", newSpell) {
+		const classEntry = this._data.classes.find(c => c.name === className);
+		if (!classEntry || !CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass)) return false;
+		if (!newSpell?.name) return false;
+
+		const oldEff = CharacterSheetClassUtils.getEffectiveDivineSoulSpell(classEntry.subclass, classEntry.subclassChoice, classEntry.divineSoulSpellOverride);
+
+		// Targeted removal of ONLY the current affinity grant (never a broad
+		// removeSubclassSpells, which could delete a colliding player-owned spell).
+		if (oldEff) this._removeDivineSoulAffinityEntry(classEntry.subclass, className, oldEff);
+
+		classEntry.divineSoulSpellOverride = {
+			name: newSpell.name,
+			source: newSpell.source || Parser.SRC_PHB,
+			level: newSpell.level ?? 1,
+		};
+
+		this.populateSubclassSpells();
+		return true;
 	}
 
 	/**
@@ -9238,6 +9370,7 @@ class CharacterSheetState {
 				sourceFeature: spell.sourceFeature || null,
 				sourceClass: spell.sourceClass || null,
 				subschools: spell.subschools || [],
+				isDivineSoulAffinity: spell.isDivineSoulAffinity || false,
 			});
 		}
 	}

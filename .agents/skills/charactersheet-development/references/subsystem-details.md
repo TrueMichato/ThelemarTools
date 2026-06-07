@@ -141,6 +141,20 @@ All 8 XPHB properties tracked: Cleave, Graze, Nick, Push, Sap, Slow, Topple, Vex
 
 **Manual pip toggling (Phase 6.2).** The Spells tab renders each slot as a `.charsheet__spell-slot-pip` element with an additional `.charsheet__spell-slot-pip--used` modifier class when consumed. Clicking a pip toggles it through `_toggleSlot`: clicking an available pip calls `state.useSpellSlot(level)` (decrement `current`); clicking the rightmost used pip calls `state.setSpellSlots(level, current + 1)` (restore one). The selector and used-class check must use the full prefixed names (`.charsheet__spell-slot-pip` and `.charsheet__spell-slot-pip--used`) — a previous shortform regression silently broke the click handler entirely.
 
+### Divine Soul affinity spell (swappable subclass grant)
+
+A Divine Soul Sorcerer's affinity grants ONE always-prepared spell (Good → cure wounds, etc.) that — unlike every other subclass spell — the player may swap for another **Cleric** spell. The model is generic so any future "swappable subclass grant" can reuse it:
+
+- **Effective grant (single source of truth):** `CharacterSheetClassUtils.getEffectiveDivineSoulSpell(subclass, subclassChoice, override)` returns the per-class `classEntry.divineSoulSpellOverride` (`{name, source, level}`) if set, else the alignment default. `getDivineSoulKnownSpell` / `ensureDivineSoulKnownSpell` / `getSubclassAlwaysPreparedSpells` all read it — never re-derive per call site.
+- **Tagging:** the affinity entry carries `isDivineSoulAffinity: true` (set in `_buildSubclassSpellEntry`, persisted by `addSpell`, and back-stamped onto legacy/existing entries by `populateSubclassSpells` so old saves gain the Swap button with no migration).
+- **Swap:** `state.swapDivineSoulAffinitySpell(className, {name, source, level})` sets the override and does a **targeted** removal of only the current affinity entry via `_removeDivineSoulAffinityEntry` (matches the tag by name — enrichment can rewrite source PHB→XPHB — or exact `name|source` under the `"<sub> Spells"`/`"<sub> Affinity"` feature for that class). Never call `removeSubclassSpells("…")` for this — it would delete a colliding player-owned spell.
+- **Cleanup:** the override + stale spell are removed when the affinity changes (`setSubclassChoice`), on switch away from Divine Soul (`setSubclass`), and on subclass removal (`removeClassLevel`).
+- **UI:** `_renderSpellItem` renders an enabled **Swap** button (instead of the disabled "Locked") + a reminder for `isDivineSoulAffinity` entries; the handler `_pSwapDivineSoulAffinity` restricts the picker to `getAdditionalSpellListClasses` (→ `["Cleric"]`) at the affinity level.
+
+### Scribable spell pool (Spell Scribing Adept)
+
+`CharacterSheetSpells.getScribableSpells({allSpells, className, classSource, subclass, subclassChoice, maxLevel, existingIds})` builds the scribable pool via `CharacterSheetClassUtils.spellIsAvailableForClass`, so it honours expanded/granted lists (e.g. a Divine Soul Sorcerer can scribe Cleric spells). Resolve the scribing class's **full** subclass with `resolveFullSubclass` before calling so lazy `additionalSpells` are present.
+
 ## Inventory Item Format
 
 ### Items (`_data.inventory[]`)
