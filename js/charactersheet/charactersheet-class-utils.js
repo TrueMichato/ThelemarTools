@@ -714,12 +714,36 @@ class CharacterSheetClassUtils {
 	 * @param {object} opts.spell        - The raw spell being added (needs `level`).
 	 * @param {object|null} opts.info    - The spellcasting info from `getSpellcastingInfo()`.
 	 * @param {Array<*>|null} [opts.classes] - Optional `getClasses()` snapshot for wizard/spellbook detection.
-	 * @returns {{sourceFeature: string|null, sourceClass: string|null}}
+	 * @param {object|null} [opts.targetClass] - Authoritative class entry the spell is being added for (per-class card or multiclass picker prompt).
+	 * @returns {{sourceFeature: string|null, sourceClass: string|null, sourceSubclass: string|null}}
 	 */
-	static pickAddedSpellAttribution (/** @type {*} */ {spell, info, classes = null} = {}) {
-		if (!spell || !info) return {sourceFeature: null, sourceClass: null};
+	static pickAddedSpellAttribution (/** @type {*} */ {spell, info, classes = null, targetClass = null} = {}) {
+		if (!spell) return {sourceFeature: null, sourceClass: null, sourceSubclass: null};
 
 		const isCantrip = spell.level === 0;
+
+		// Authoritative path: the caller knows exactly which class this spell
+		// belongs to. Stamp it directly so attribution never relies on a guess.
+		if (targetClass) {
+			const isGamblerTarget = /^gambler$/i.test(targetClass.subclass?.name || "");
+			const isWizardTarget = /^wizard$/i.test(targetClass.name || "");
+			const sourceClass = isGamblerTarget ? "Gambler" : (targetClass.name || null);
+			const sourceSubclass = isGamblerTarget ? "Gambler" : null;
+
+			let sourceFeature;
+			if (isCantrip) sourceFeature = "Cantrips Known";
+			else if (isWizardTarget) sourceFeature = "Wizard Spellbook";
+			else {
+				const entry = Array.isArray(info?.byClass)
+					? info.byClass.find(c => (c?.className || "").toLowerCase() === (targetClass.name || "").toLowerCase())
+					: null;
+				const castingType = entry?.type || info?.type;
+				sourceFeature = castingType === "known" ? "Spells Known" : "Prepared Spells";
+			}
+			return {sourceFeature, sourceClass, sourceSubclass};
+		}
+
+		if (!info) return {sourceFeature: null, sourceClass: null, sourceSubclass: null};
 
 		let sourceClass = null;
 		const byClass = Array.isArray(info.byClass) ? info.byClass : null;
@@ -736,6 +760,17 @@ class CharacterSheetClassUtils {
 			sourceClass = classes[0].name || null;
 		}
 
+		// Gambler is a per-spell mode: only stamp Gambler when the resolved class
+		// entry is actually the Gambler subclass. This avoids the latent bug where
+		// any Wizard leveled spell on a Wizard/Gambler character got mis-stamped
+		// as a Gambler spell (and rolled Gambler dice at cast time).
+		let sourceSubclass = null;
+		const resolvedEntry = classes?.find(c => (c?.name || "").toLowerCase() === (sourceClass || "").toLowerCase());
+		if (resolvedEntry && /^gambler$/i.test(resolvedEntry.subclass?.name || "")) {
+			sourceClass = "Gambler";
+			sourceSubclass = "Gambler";
+		}
+
 		let sourceFeature = null;
 		if (isCantrip) {
 			sourceFeature = "Cantrips Known";
@@ -747,7 +782,7 @@ class CharacterSheetClassUtils {
 			sourceFeature = castingType === "known" ? "Spells Known" : "Prepared Spells";
 		}
 
-		return {sourceFeature, sourceClass};
+		return {sourceFeature, sourceClass, sourceSubclass};
 	}
 
 	/**

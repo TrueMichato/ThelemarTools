@@ -7490,31 +7490,31 @@ class CharacterSheetPage {
 			return;
 		}
 
-		// Show spell stats and slots summary — Gambler uses dice formula
+		// Show spell stats and slots summary. Each spellcasting class has its own
+		// ability/DC/attack, so for multiclass casters show the shared value when
+		// all classes agree, otherwise "Varies" (the Spells tab has the per-class
+		// breakdown). Gambler classes contribute a dice formula.
 		const calcs = this._state.getFeatureCalculations?.();
-		const isGambler = calcs?.hasGamblerSpellcasting;
-		const spellcastingAbility = this._state.getSpellcastingAbility() || (isGambler ? "cha" : null);
-		if (spellcastingAbility) {
-			let saveDCText, attackText, abilityText;
-			if (isGambler) {
-				saveDCText = calcs.gamblerSpellDcFormula;
-				attackText = `+${calcs.gamblerSpellAttackFormula}`;
-				abilityText = "CHA (Gambler)";
-			} else {
-				const spellMod = this._state.getAbilityMod(spellcastingAbility);
-				const profBonus = this._state.getProficiencyBonus();
-				const dcPenalty = this._getExhaustionDcPenalty();
-				const saveDC = 8 + spellMod + profBonus - dcPenalty;
-				const attackBonus = spellMod + profBonus;
-				const dcPenaltyStr = dcPenalty > 0 ? ` <span class="ve-muted ve-small">(−${dcPenalty} exhaustion)</span>` : "";
-				saveDCText = `${saveDC}${dcPenaltyStr}`;
-				attackText = this._formatMod(attackBonus);
-				abilityText = spellcastingAbility.toUpperCase();
-			}
+		const breakdown = this._state.getSpellcastingClassBreakdown?.() || [];
+
+		if (breakdown.length) {
+			const fmtAttack = (c) => c.isRolledPrepared && calcs?.gamblerSpellAttackFormula ? `+${calcs.gamblerSpellAttackFormula}` : this._formatMod(c.attackBonus);
+			const fmtDc = (c) => c.isRolledPrepared && calcs?.gamblerSpellDcFormula ? `${calcs.gamblerSpellDcFormula}` : `${c.saveDc}`;
+			const collapse = (cards, fmt) => {
+				const distinct = [...new Set(cards.map(fmt))];
+				return distinct.length === 1
+					? {text: distinct[0], title: ""}
+					: {text: "Varies", title: cards.map(c => `${c.displayName || c.className}: ${fmt(c)}`).join(" • ")};
+			};
+			const dc = collapse(breakdown, fmtDc);
+			const atk = collapse(breakdown, fmtAttack);
+			const abilities = [...new Set(breakdown.map(c => c.abilityLabel))];
+			const abilityText = abilities.length === 1 ? abilities[0] : "Varies";
+			const tip = (t) => t ? ` title="${t.qq()}"` : "";
 			container.insertAdjacentHTML("beforeend", `
 				<div class="charsheet__spell-stats ve-flex ve-flex-wrap mb-2">
-					<span class="ve-small mr-3"><strong>Save DC:</strong> ${saveDCText}</span>
-					<span class="ve-small mr-3"><strong>Attack:</strong> ${attackText}</span>
+					<span class="ve-small mr-3"${tip(dc.title)}><strong>Save DC:</strong> ${dc.text}</span>
+					<span class="ve-small mr-3"${tip(atk.title)}><strong>Attack:</strong> ${atk.text}</span>
 					<span class="ve-small"><strong>Ability:</strong> ${abilityText}</span>
 				</div>
 			`);
