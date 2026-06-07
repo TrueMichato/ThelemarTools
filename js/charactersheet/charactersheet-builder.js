@@ -1863,6 +1863,7 @@ class CharacterSheetBuilder {
 				}
 				const added = this._state.addFeat(grantedFeat, {
 					allSpells: this._page.getSpells(),
+					skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(grantedFeat),
 					classFeatProgression: {
 						className,
 						classSource,
