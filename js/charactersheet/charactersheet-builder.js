@@ -32,6 +32,7 @@ class CharacterSheetBuilder {
 		/** @type {string[]} */ this._selectedWeaponMasteries = []; // For weapon mastery choices (Fighter, Paladin, Ranger, Rogue)
 		/** @type {Object<string, *>} */ this._selectedAbilityBonuses = {}; // For background ASI choices
 		/** @type {Object<string, *[]>} */ this._selectedOptionalFeatures = {}; // For class optional features like invocations {featureType: [features]}
+		/** @type {*[]} */ this._selectedClassFeatProgression = []; // Synthetic opts for class-level featProgression feats (Fighting Style etc.)
 		/** @type {*[]} */ this._selectedToolProficiencies = []; // For background tool proficiency choices
 		/** @type {*[]} */ this._selectedLanguages = []; // For background language choices
 		/** @type {string[]} */ this._selectedClassFeatureLanguages = []; // For class feature language choices (like Deft Explorer)
@@ -381,6 +382,21 @@ class CharacterSheetBuilder {
 					JqueryUtil.doToast({type: "warning", content: featureOptionsValidation.message});
 					return false;
 				}
+				// Validate class-level featProgression feats (Fighting Style, etc.)
+				{
+					const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(this._selectedClass, 0, 1);
+					if (classFeatProgressionGains.length) {
+						const levelUp = this._page.getLevelUpHelper?.();
+						if (levelUp && typeof levelUp._validateOptFeatureFeatProgressionPicks === "function") {
+							const classProgValidation = levelUp._validateOptFeatureFeatProgressionPicks({classFeats: this._selectedClassFeatProgression});
+							if (!classProgValidation.valid) {
+								const first = classProgValidation.missing[0];
+								JqueryUtil.doToast({type: "warning", content: `Please complete your ${first.slot} selection.`});
+								return false;
+							}
+						}
+					}
+				}
 				return true;
 			}
 
@@ -587,6 +603,25 @@ class CharacterSheetBuilder {
 							level1History.choices.featureChoices = featureChoices;
 							level1History.choices.replayData = level1History.choices.replayData || {};
 							level1History.choices.replayData.featureChoices = featureChoiceReplay;
+						}
+					}
+
+					// Record class-level featProgression feats (Fighting Style, etc.)
+					if (this._selectedClassFeatProgression?.length) {
+						/** @type {*[]} */ const classFeatProgressionFeats = [];
+						this._selectedClassFeatProgression.forEach((/** @type {*} */ opt) => {
+							(opt._progressionFeats || []).forEach((/** @type {*} */ slot) => {
+								if (!slot?.feat) return;
+								classFeatProgressionFeats.push({
+									progressionName: slot.progressionName || opt.name,
+									name: slot.feat.name,
+									source: slot.feat.source,
+									category: slot.category,
+								});
+							});
+						});
+						if (classFeatProgressionFeats.length > 0) {
+							level1History.choices.classFeatProgressionFeats = classFeatProgressionFeats;
 						}
 					}
 
@@ -1725,6 +1760,9 @@ class CharacterSheetBuilder {
 		// Apply selected optional features (invocations, metamagic, etc.)
 		this._applySelectedOptionalFeatures();
 
+		// Apply class-level featProgression feats (Fighting Style, etc.)
+		this._applySelectedClassFeatProgression();
+
 		// Apply selected feature options (specialties, etc. - features with embedded options)
 		this._applySelectedFeatureOptions();
 	}
@@ -1799,9 +1837,46 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	/**
+	 * Apply class-level featProgression feats chosen in `_renderClassFeatProgression`.
+	 * Mirrors the quick-build apply path (modal-free): add the feat with the
+	 * `classFeatProgression` provenance tag, then apply its passive bonuses.
+	 * Sub-choices (cantrips/spells/maneuvers) collected on `_featChoices` are
+	 * forwarded so `addFeat` can grant them.
+	 */
+	_applySelectedClassFeatProgression () {
+		if (!Array.isArray(this._selectedClassFeatProgression) || !this._selectedClassFeatProgression.length) return;
+		const className = this._selectedClass?.name;
+		const classSource = this._selectedClass?.source;
+		for (const opt of this._selectedClassFeatProgression) {
+			if (!Array.isArray(opt?._progressionFeats)) continue;
+			for (const slot of opt._progressionFeats) {
+				if (!slot || !slot.feat) continue;
+				const grantedFeat = slot.feat;
+				if (grantedFeat._featChoices?.optionalFeatures?.length) {
+					grantedFeat.choices = {
+						...grantedFeat._featChoices,
+						optionalFeaturePicks: grantedFeat._featChoices.optionalFeatures.flatMap((/** @type {*} */ group) => group.picks || []),
+					};
+				} else if (grantedFeat._featChoices) {
+					grantedFeat.choices = {...grantedFeat._featChoices};
+				}
+				const added = this._state.addFeat(grantedFeat, {
+					allSpells: this._page.getSpells(),
+					classFeatProgression: {
+						className,
+						classSource,
+						level: 1,
+						progressionName: slot.progressionName || opt.name,
+					},
+				});
+				if (added) CharacterSheetClassUtils.applyFeatBonuses(this._state, grantedFeat, grantedFeat._featChoices);
+			}
+		}
+	}
+
 	_applySelectedFeatureOptions () {
 		if (!this._selectedFeatureOptions) return;
-
 		Object.entries(this._selectedFeatureOptions).forEach(([/** @type {*} */ featureKey, /** @type {*} */ options]) => {
 			options.forEach((/** @type {*} */ opt) => {
 				// For class feature options (like Specialties), look up the full feature data
@@ -2074,6 +2149,11 @@ class CharacterSheetBuilder {
 		this._state.getFeatures()
 			.filter((/** @type {*} */ f) => f.className === snapshot.className)
 			.forEach((/** @type {*} */ f) => this._state.removeFeature(f.name, f.source));
+
+		// Remove any class-level featProgression feats (Fighting Style, etc.) granted by this class
+		(this._state.getFeats?.() || [])
+			.filter((/** @type {*} */ f) => f.classFeatProgression?.className === snapshot.className)
+			.forEach((/** @type {*} */ f) => this._state.removeFeat?.(f.id || f.name, f.source));
 
 		// Clear weapon masteries (class-granted)
 		this._state.setWeaponMasteries([]);
@@ -4263,6 +4343,13 @@ class CharacterSheetBuilder {
 			content.append(optFeatSection);
 		}
 
+		// Class-level featProgression feats (Fighting Style, etc.) — e.g. XPHB Fighter at L1.
+		const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(cls, 0, 1);
+		if (classFeatProgressionGains.length) {
+			const classFeatSection = this._renderClassFeatProgression(cls, classFeatProgressionGains);
+			if (classFeatSection) content.append(classFeatSection);
+		}
+
 		// Feature options selection (specialties, etc. - features with embedded type: "options")
 		const featureOptionsSection = this._renderClassFeatureOptions(cls, 1);
 		if (featureOptionsSection) {
@@ -5487,6 +5574,52 @@ class CharacterSheetBuilder {
 		const enableTgtt = !!settings.enableTgtt;
 		const deduped = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(optFeatures, {showAll});
 		return CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(deduped, {enableTgtt, classSource});
+	}
+
+	/**
+	 * Render a picker for class-level `featProgression` feats (e.g. Fighting Style
+	 * for XPHB Fighter at L1). Reuses the level-up feat-progression picker so the
+	 * sub-choice handling (Druidic Warrior cantrips, Superior Technique maneuver,
+	 * etc.) stays in lockstep across flows. Stores synthetic opts on
+	 * `this._selectedClassFeatProgression` for apply/validation.
+	 * @param {*} cls
+	 * @param {*[]} gains - From CharacterSheetClassUtils.getClassFeatProgressionGains
+	 * @returns {?HTMLElement}
+	 */
+	_renderClassFeatProgression (cls, gains) {
+		if (!gains?.length) return null;
+
+		const levelUp = this._page.getLevelUpHelper?.();
+		// The picker lives on the level-up helper; if it failed to init we can't render.
+		if (!levelUp || typeof levelUp._renderOptFeatureFeatProgressionPicker !== "function") return null;
+
+		// Reset storage for this render pass.
+		this._selectedClassFeatProgression = [];
+
+		const container = e_({outer: `<div class="charsheet__builder-class-feats mt-3"></div>`});
+		container.insertAdjacentHTML("beforeend", `<h6 class="mt-2 mb-1">Class Feats</h6>`);
+
+		gains.forEach((/** @type {*} */ gain) => {
+			const opt = {
+				name: gain.progressionName,
+				source: cls?.source,
+				_isClassFeatProgression: true,
+				_progressionName: gain.progressionName,
+				_progressionFeats: [],
+			};
+			const picks = [{progressionName: gain.progressionName, category: gain.category, count: gain.count}];
+
+			const section = e_({outer: `<div class="charsheet__builder-class-feat-section mb-2"></div>`});
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1">${gain.progressionName}: choose ${gain.count}</div>`);
+			const picksContainer = e_({outer: `<div class="charsheet__builder-class-feat-picks"></div>`});
+			section.append(picksContainer);
+			container.append(section);
+
+			levelUp._renderOptFeatureFeatProgressionPicker(opt, picks, picksContainer);
+			this._selectedClassFeatProgression.push(opt);
+		});
+
+		return container;
 	}
 
 	/**
@@ -8790,6 +8923,11 @@ class CharacterSheetBuilder {
 		// Non-caster classes have no cantripProgression, spellsKnownProgression, or preparedSpellsProgression.
 		// Return null so step 6 shows the "no spells at level 1" message.
 		const cantripAtLevel1 = CharacterSheetClassUtils.getCantripsAtLevel(cls, className, 1);
+		// Druid "Magician" (Primal Order) grants one extra cantrip. The Magician/Warden choice is
+		// made in the earlier class step, so it's available here via _selectedFeatureOptions.
+		const magicianBonusCantrips = className === "Druid"
+			? CharacterSheetClassUtils.getMagicianBonusCantripCount(Object.values(this._selectedFeatureOptions || {}).flat())
+			: 0;
 		const isSpellbookCaster = !!cls.spellsKnownProgressionFixed; // Wizard-family: permanent spellbook
 		const isPreparedCaster = !!cls.preparedSpellsProgression && !isSpellbookCaster; // Cleric/Druid/XPHB casters
 		const isKnownCaster = !isSpellbookCaster && !isPreparedCaster;
@@ -8833,7 +8971,7 @@ class CharacterSheetBuilder {
 			isKnownCaster,
 			spellbookCount,
 			spellCount: (knownAtLevel1 || 0) + preparedAtLevel1,
-			cantripCount: cantripAtLevel1 || 0,
+			cantripCount: (cantripAtLevel1 || 0) + magicianBonusCantrips,
 			maxSpellLevel,
 			additionalClassNames,
 			subclass: this._selectedSubclass,

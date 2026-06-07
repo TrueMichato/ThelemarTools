@@ -171,6 +171,86 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Collapse same-named class variants (e.g. XPHB Druid vs TGTT Druid) down to a single
+	 * preferred entry so pickers (multiclass, random, …) don't list visually-identical rows
+	 * that differ only by source. The preferred variant is chosen so that homebrew/edition
+	 * classes a character already uses are honoured, and TGTT is preferred when enabled.
+	 *
+	 * Preference order (lower wins):
+	 *   0. Source already used by one of the character's existing classes
+	 *   1. TGTT (only when `enableTgtt`)
+	 *   2. XPHB
+	 *   3. PHB
+	 *   4. Any other source (alphabetical tie-break)
+	 *
+	 * @param {Array<*>} classes - Candidate class entities (ideally already source-filtered).
+	 * @param {object} [opts]
+	 * @param {Array<*>} [opts.existingClasses=[]] - Classes the character already has (objects with `source`).
+	 * @param {boolean} [opts.enableTgtt=false] - Whether the TGTT global setting is on.
+	 * @returns {Array<*>} One class per name, preferred-source resolved, original order preserved.
+	 */
+	static dedupeClassesBySourcePreference (/** @type {*} */ classes, /** @type {*} */ {existingClasses = [], enableTgtt = false} = {}) {
+		if (!classes?.length) return classes;
+
+		const existingSources = new Set(
+			(existingClasses || [])
+				.map((/** @type {*} */ c) => (c?.source || "").toUpperCase())
+				.filter(Boolean),
+		);
+
+		const getPriority = (/** @type {*} */ source) => {
+			const src = (source || "").toUpperCase();
+			if (existingSources.has(src)) return 0;
+			if (enableTgtt && src === "TGTT") return 1;
+			if (src === "XPHB") return 2;
+			if (src === "PHB") return 3;
+			return 4;
+		};
+
+		// Group by lowercase name, preserving first-seen order for stable output.
+		/** @type {Map<string, *[]>} */ const groups = new Map();
+		const order = [];
+		for (/** @type {*} */ const cls of classes) {
+			const key = (cls?.name || "").toLowerCase();
+			if (!groups.has(key)) {
+				groups.set(key, []);
+				order.push(key);
+			}
+			groups.get(key).push(cls);
+		}
+
+		const result = [];
+		for (const key of order) {
+			const group = groups.get(key);
+			if (group.length === 1) {
+				result.push(group[0]);
+				continue;
+			}
+			group.sort((/** @type {*} */ a, /** @type {*} */ b) => {
+				const prioA = getPriority(a.source);
+				const prioB = getPriority(b.source);
+				if (prioA !== prioB) return prioA - prioB;
+				return (a.source || "").localeCompare(b.source || "");
+			});
+			result.push(group[0]);
+		}
+
+		return result;
+	}
+
+	/**
+	 * The Druid "Magician" Primal Order option grants one extra cantrip from the Druid
+	 * spell list. Detect whether Magician is among a flat list of selected feature options
+	 * so build-time pickers can offer that extra cantrip pick at creation/level-up time.
+	 * (The ongoing spells-tab budget is handled centrally by the state's spellcasting info.)
+	 * @param {Array<*>} selectedFeatureOptions - Flat list of chosen feature-option objects (each may have `.name`).
+	 * @returns {number} Number of bonus cantrips granted (0 or 1).
+	 */
+	static getMagicianBonusCantripCount (/** @type {*} */ selectedFeatureOptions) {
+		if (!selectedFeatureOptions?.length) return 0;
+		return selectedFeatureOptions.some((/** @type {*} */ o) => (o?.name || "").toLowerCase() === "magician") ? 1 : 0;
+	}
+	/**
 	 * When TGTT mode is enabled OR the active class source is TGTT, restrict Metamagic (`MM`)
 	 * optional features to TGTT-source entries so PHB-only metamagics (Distant, Empowered,
 	 * Subtle, Twinned, …) don't leak into pickers that share the `MM` featureType code with
@@ -2707,6 +2787,49 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Resolve the combat methods granted by a feature's `grantsCombatMethods` field.
+	 *
+	 * Some features (e.g. the Ranger's Primal Focus Upgrade) grant specific combat methods
+	 * directly rather than letting the player choose them. Each grant is a `{method, focus}`
+	 * pair where `method` is a `"Name|Source"` UID and `focus` is an optional Primal Focus
+	 * mode ("predator"/"prey") that gates when the method can be used.
+	 *
+	 * @param {*} feature - The granting feature (must have `grantsCombatMethods`).
+	 * @param {Array<*>} combatMethodEntities - The combat method catalog to resolve UIDs against.
+	 * @returns {Array<*>} Resolved combat method entities (copies), tagged with `requiresFocus`
+	 *   and `_grantedBy`. Unknown UIDs are skipped.
+	 */
+	static resolveGrantedCombatMethods (/** @type {*} */ feature, /** @type {*[]} */ combatMethodEntities) {
+		const grants = feature?.grantsCombatMethods;
+		if (!Array.isArray(grants) || !grants.length) return [];
+		if (!Array.isArray(combatMethodEntities) || !combatMethodEntities.length) return [];
+
+		const resolved = [];
+		for (const grant of grants) {
+			const uid = typeof grant === "string" ? grant : grant?.method;
+			if (!uid) continue;
+			const [rawName, rawSource] = uid.split("|");
+			const name = (rawName || "").trim().toLowerCase();
+			const source = (rawSource || "").trim().toLowerCase();
+			if (!name) continue;
+
+			const entity = combatMethodEntities.find(m =>
+				m?.name?.toLowerCase() === name
+				&& (!source || (m?.source || "").toLowerCase() === source));
+			if (!entity) continue;
+
+			const focus = typeof grant === "object" && grant?.focus ? grant.focus : null;
+			resolved.push({
+				...entity,
+				_entityType: "combatMethod",
+				requiresFocus: focus,
+				_grantedBy: feature?.name || null,
+			});
+		}
+		return resolved;
+	}
+
+	/**
 	 * Get the full tradition name from a combat method (either format).
 	 * @param {*} feature
 	 * @returns {string|null}
@@ -3411,6 +3534,56 @@ class CharacterSheetClassUtils {
 	// ==========================================
 
 	/**
+	 * Resolve the saving-throw proficiencies a feat grants, given the player's choices.
+	 *
+	 * Half-feats such as Resilient tie their save proficiency to the chosen ability —
+	 * the data carries `savingThrowProficiencies: [{choose: {from: [...]}}]` alongside an
+	 * `ability: [{choose: {...}}]`, and the convention is that the chosen ability *is* the
+	 * save (one pick, implicit tie). This helper also handles pre-resolved formats
+	 * (`"con"` strings or `{con: true}` objects) used by other feats.
+	 *
+	 * @param {*} feat - The feat data
+	 * @param {*} [choices] - Resolved feat choices (`{ability}` etc.)
+	 * @returns {string[]} De-duped lowercase ability abbreviations to grant a save in
+	 */
+	static resolveFeatSaveProficiencies (/** @type {*} */ feat, /** @type {*} */ choices = {}) {
+		if (!feat || !feat.savingThrowProficiencies) return [];
+		const entries = Array.isArray(feat.savingThrowProficiencies)
+			? feat.savingThrowProficiencies
+			: [feat.savingThrowProficiencies];
+		const out = new Set();
+		const chosenAbility = choices?.ability && typeof choices.ability === "string"
+			? choices.ability.toLowerCase()
+			: null;
+		for (const entry of entries) {
+			if (!entry) continue;
+			if (typeof entry === "string") {
+				const abbr = entry.toLowerCase();
+				if (Parser.ABIL_ABVS.includes(abbr)) out.add(abbr);
+				continue;
+			}
+			if (typeof entry !== "object") continue;
+			if (entry.choose) {
+				// Tie to the chosen ability (Resilient et al.). Respect a `from` allowlist if present.
+				if (!chosenAbility) continue;
+				const from = Array.isArray(entry.choose.from)
+					? entry.choose.from.map((/** @type {*} */ a) => String(a).toLowerCase())
+					: null;
+				if (from && !from.includes(chosenAbility)) continue;
+				if (Parser.ABIL_ABVS.includes(chosenAbility)) out.add(chosenAbility);
+				continue;
+			}
+			// Pre-resolved object form: {con: true, ...}
+			for (const [key, val] of Object.entries(entry)) {
+				if (val !== true) continue;
+				const abbr = key.toLowerCase();
+				if (Parser.ABIL_ABVS.includes(abbr)) out.add(abbr);
+			}
+		}
+		return [...out];
+	}
+
+	/**
 	 * Apply feat ability/skill/language bonuses to state.
 	 * @param {*} state - CharacterSheetState instance
 	 * @param {*} feat - The feat object
@@ -3434,8 +3607,9 @@ class CharacterSheetClassUtils {
 			});
 		}
 
-		if (/** @type {*} */ feat.ability) {
-			feat.ability.forEach((/** @type {*} */ ablChoice) => {
+		const effectiveAbility = CharacterSheetClassUtils.getEffectiveFeatAbility(feat);
+		if (/** @type {*} */ effectiveAbility) {
+			effectiveAbility.forEach((/** @type {*} */ ablChoice) => {
 				const max = ablChoice.max || 20;
 
 				if (/** @type {*} */ ablChoice.choose) {
@@ -3461,6 +3635,11 @@ class CharacterSheetClassUtils {
 				}
 			});
 		}
+
+		// Apply saving-throw proficiencies (e.g., Resilient — tied to the chosen ability)
+		CharacterSheetClassUtils.resolveFeatSaveProficiencies(feat, choices).forEach((/** @type {*} */ abbr) => {
+			state.addSaveProficiency(abbr);
+		});
 
 		// Apply fixed skill proficiencies from feat data
 		if (/** @type {*} */ feat.skillProficiencies) {
@@ -4116,6 +4295,77 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Whether a feat already grants an ability score increase (fixed or "choose").
+	 * Used to decide whether an uncategorized feat should receive a synthesized
+	 * General-feat +1 ASI (we never double-grant on feats that already have one).
+	 *
+	 * @param {*} feat - The feat data
+	 * @returns {boolean} true iff `feat.ability` carries at least one real ASI grant
+	 */
+	static featHasAbilityGrant (/** @type {*} */ feat) {
+		if (!feat || !Array.isArray(feat.ability) || !feat.ability.length) return false;
+		return feat.ability.some((/** @type {*} */ ab) => {
+			if (!ab || typeof ab !== "object") return false;
+			if (ab.choose) return true;
+			return Object.keys(ab).some((/** @type {*} */ k) => k !== "max" && Parser.ABIL_ABVS.includes(k));
+		});
+	}
+
+	/**
+	 * Whether a feat should be treated as a General feat that grants a +1 ASI.
+	 *
+	 * Modern (2024) feats carry a `category` (Origin / General / Fighting Style /
+	 * Epic Boon) and General feats grant a +1 ability score increase. Some
+	 * partnered / homebrew feats (e.g. Humblewood's Plantmender) omit both the
+	 * `category` and the `ability` grant entirely. Per the design rule, a feat
+	 * with no category that does not already grant an ASI is treated as a General
+	 * feat and grants a +1 increase to an ability of the player's choice.
+	 *
+	 * Guarded by `!feat.reprintedAs` so superseded legacy 2014 feats (Alert,
+	 * Lucky, Tough, …) — which are category-less and ASI-less but carry a
+	 * `reprintedAs` pointer to their 2024 replacement — are NOT retroactively
+	 * buffed.
+	 *
+	 * @param {*} feat - The feat data
+	 * @returns {boolean}
+	 */
+	static featDefaultsToGeneralAsi (/** @type {*} */ feat) {
+		return !!feat
+			&& typeof feat === "object"
+			&& !feat.category
+			&& !feat.reprintedAs
+			&& !CharacterSheetClassUtils.featHasAbilityGrant(feat);
+	}
+
+	/**
+	 * Resolve the effective `ability` array for a feat, synthesizing a
+	 * "+1 to one ability of your choice" grant for uncategorized feats that
+	 * default to General (see {@link featDefaultsToGeneralAsi}). Feats that
+	 * already declare an ASI — or that carry a category — pass through unchanged.
+	 *
+	 * Returning the same `[{choose:{from,amount,count}}]` shape used by real
+	 * half-feats means every downstream picker / applier / validator handles
+	 * synthesized grants identically with no special-casing.
+	 *
+	 * @param {*} feat - The feat data
+	 * @returns {*} The effective ability array (may be `feat.ability`/undefined)
+	 */
+	static getEffectiveFeatAbility (/** @type {*} */ feat) {
+		if (CharacterSheetClassUtils.featHasAbilityGrant(feat)) return feat.ability;
+		if (CharacterSheetClassUtils.featDefaultsToGeneralAsi(feat)) {
+			return [{
+				choose: {
+					from: Parser.ABIL_ABVS,
+					amount: 1,
+					count: 1,
+					entry: "Increase one ability score of your choice by 1, to a maximum of 20.",
+				},
+			}];
+		}
+		return feat.ability;
+	}
+
+	/**
 	 * Build the "feat choices spec" describing every sub-choice a feat presents
 	 * (skill / language / tool / expertise / ability / optionalFeature / spell choices).
 	 * Pure helper — takes a context object so it can be reused from level-up, the
@@ -4180,9 +4430,11 @@ class CharacterSheetClassUtils {
 			}
 		}
 
-		// Ability score increases (choose from)
-		if (Array.isArray(feat.ability)) {
-			for (const ab of feat.ability) {
+		// Ability score increases (choose from) — uses the effective ability array so
+		// uncategorized feats that default to General surface a +1 ASI picker.
+		const effectiveAbility = CharacterSheetClassUtils.getEffectiveFeatAbility(feat);
+		if (Array.isArray(effectiveAbility)) {
+			for (const ab of effectiveAbility) {
 				if (ab?.choose) {
 					choices.ability = {count: ab.choose.count || 1, amount: ab.choose.amount || 1, from: ab.choose.from || Parser.ABIL_ABVS};
 					break;
@@ -4354,6 +4606,64 @@ class CharacterSheetClassUtils {
 				});
 			}
 		});
+
+		return gains;
+	}
+
+	/**
+	 * Determine the class-level `featProgression` feat picks newly granted across a level
+	 * range, e.g. the 2024/TGTT Ranger's "Fighting Style" feat at level 2.
+	 *
+	 * Classes in the 2024 ruleset express Fighting Style (and similar) as a class-level
+	 * `featProgression` entry whose `progression` map is keyed by the level at which that
+	 * many NEW feats of the given `category` are granted (e.g. `{"2": 1}` = "+1 FS feat at
+	 * level 2"). This is distinct from `optionalfeatureProgression` (optional features) and
+	 * from optional-feature-level `featProgression` (handled by
+	 * `getOptFeatureFeatProgressionPicks`).
+	 *
+	 * Epic Boon (`category` containing `"EB"`) is intentionally EXCLUDED here — it is already
+	 * handled by the dedicated ASI / Epic Boon flow at level 19, so surfacing it again would
+	 * double-prompt.
+	 *
+	 * Because picks are summed only for levels in `(prevLevel, newLevel]`, re-leveling never
+	 * re-prompts for a pick granted at an earlier level.
+	 *
+	 * @param {*} classData - The class data object (may have `featProgression`)
+	 * @param {number} prevLevel - The class level BEFORE this transition (0 for a fresh build)
+	 * @param {number} newLevel - The class level AFTER this transition
+	 * @returns {Array<{progressionName: string, category: string[], count: number}>}
+	 */
+	static getClassFeatProgressionGains (/** @type {*} */ classData, /** @type {*} */ prevLevel, /** @type {*} */ newLevel) {
+		/** @type {*[]} */ const gains = [];
+		if (!classData?.featProgression?.length) return gains;
+
+		const lo = Math.max(0, Number(prevLevel) || 0);
+		const hi = Number(newLevel) || 0;
+		if (hi <= lo) return gains;
+
+		for (const prog of classData.featProgression) {
+			const category = Array.isArray(prog.category) ? [...prog.category] : [];
+			// Epic Boon is handled by the dedicated ASI / Epic Boon flow — skip it here.
+			if (category.includes("EB")) continue;
+
+			const map = prog.progression;
+			if (!map || typeof map !== "object") continue;
+
+			let count = 0;
+			if (Array.isArray(map)) {
+				for (let lvl = lo + 1; lvl <= hi; ++lvl) count += Number(map[lvl - 1]) || 0;
+			} else {
+				for (let lvl = lo + 1; lvl <= hi; ++lvl) count += Number(map[String(lvl)]) || 0;
+			}
+
+			if (count > 0) {
+				gains.push({
+					progressionName: prog.name || "Feat",
+					category,
+					count,
+				});
+			}
+		}
 
 		return gains;
 	}

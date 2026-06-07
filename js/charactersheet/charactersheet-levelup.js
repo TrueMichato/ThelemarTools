@@ -151,6 +151,10 @@ class CharacterSheetLevelUp {
 		/** @type {Object<string, *>} */ let selectedLanguages = {};
 		let languageGrants = CharacterSheetClassUtils.getLanguageGrantsForLevel(currentFeatures);
 		/** @type {*} */ let selectedScholarSkill = null;
+		// Class-level featProgression feat picks (e.g. 2024/TGTT Fighting Style at L2).
+		// Each entry is a synthetic "opt" carrying `_progressionFeats[]` so the existing
+		// feat-progression picker UI + apply/cascade machinery can be reused verbatim.
+		/** @type {*[]} */ let selectedClassFeatProgression = [];
 		/** @type {*} */ let selectedSpellbookSpells = [];
 		// Subclass-granted combat traditions (pre-seeded during subclass selection)
 		let subclassGrantedTraditionCodes = /** @type {*[]} */ ([]);
@@ -161,6 +165,8 @@ class CharacterSheetLevelUp {
 		const isBothAsiAndFeat = this._state.shouldGrantBothAsiAndFeat((this._state.getTotalLevel() || 0) + 1);
 		const isEpicBoonLevel = newLevel === 19 && (classEntry.source === "XPHB" || classEntry.source === "TGTT");
 		const optionalFeatureGains = CharacterSheetClassUtils.getOptionalFeatureGains(classData, classEntry.level, newLevel, this._state);
+		// Class-level featProgression (2024/TGTT Fighting Style etc.); excludes Epic Boon (handled by ASI flow).
+		const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(classData, classEntry.level, newLevel);
 		featureOptionGroups = CharacterSheetClassUtils.getFeatureOptionsForLevel(currentFeatures, newLevel, this._page.getClassFeatures())
 			// Filter out option groups where ALL options are optional features — those are
 			// handled by optionalfeatureProgression in the Class Options step (e.g. Metamagic)
@@ -764,6 +770,56 @@ class CharacterSheetLevelUp {
 			main.append(createAccordion("featoptions", "🎯", "Feature Choices", featOptContent, {required: true}));
 		}
 
+		// ========== 4b. CLASS FEAT PROGRESSION (Fighting Style, etc.) ==========
+		// Class-level `featProgression` picks (2024/TGTT Fighting Style at L2, …). Reuses the
+		// same feat-progression picker UI as optional-feature feat grants; Epic Boon is excluded
+		// by the detection helper, so it never collides with the ASI / Epic Boon section.
+		if (classFeatProgressionGains.length) {
+			const classFeatsLabel = classFeatProgressionGains.length === 1 ? classFeatProgressionGains[0].progressionName : "Class Feats";
+			summaryItems.append(createSummaryItem("classfeats", "⚔️", classFeatsLabel, {required: true}));
+
+			const classFeatsContent = e_({tag: "div", clazz: "charsheet__levelup-classfeats"});
+
+			const updateClassFeatsStatus = () => {
+				if (!summaryItemEls.classfeats || !accordions.classfeats) return;
+				let allComplete = true;
+				/** @type {string[]} */ const names = [];
+				for (const opt of selectedClassFeatProgression) {
+					for (const slot of opt._progressionFeats) {
+						if (!slot) continue;
+						if (!slot.feat) allComplete = false;
+						else names.push(slot.feat.name);
+					}
+				}
+				summaryItemEls.classfeats.setStatus(allComplete, names.join(", ") || "Select feat");
+				accordions.classfeats.setComplete(allComplete, names.join(", "));
+			};
+
+			selectedClassFeatProgression = classFeatProgressionGains.map((/** @type {*} */ gain) => {
+				const opt = {
+					id: CryptUtil.uid(),
+					name: gain.progressionName,
+					source: classEntry.source,
+					_isClassFeatProgression: true,
+					_progressionFeats: /** @type {*[]} */ ([]),
+				};
+				const picksContainer = e_({tag: "div", clazz: "mb-2"});
+				this._renderOptFeatureFeatProgressionPicker(
+					opt,
+					[{progressionName: gain.progressionName, category: gain.category, count: gain.count}],
+					picksContainer,
+				);
+				// Status updates when a feat is (de)selected. The picker's own change handler
+				// runs first (it sets `slot.feat`), so reading state here is safe.
+				picksContainer.querySelectorAll("select").forEach((/** @type {*} */ sel) => sel.addEventListener("change", updateClassFeatsStatus));
+				classFeatsContent.append(picksContainer);
+				return opt;
+			});
+
+			main.append(createAccordion("classfeats", "⚔️", classFeatsLabel, classFeatsContent, {required: true}));
+			updateClassFeatsStatus();
+		}
+
 		// ========== 5. EXPERTISE ==========
 		if (expertiseGrants.length) {
 			summaryItems.append(createSummaryItem("expertise", "⭐", "Expertise", {required: true}));
@@ -1227,6 +1283,24 @@ class CharacterSheetLevelUp {
 				return;
 			}
 
+			// Class-level featProgression picks (Fighting Style, …): same gate, reusing the
+			// shared validator (each synthetic opt carries `name` + `_progressionFeats`).
+			if (selectedClassFeatProgression.length) {
+				const classProgValidation = this._validateOptFeatureFeatProgressionPicks({classFeats: selectedClassFeatProgression});
+				if (!classProgValidation.valid) {
+					const detail = classProgValidation.missing
+						.map(m => `• ${m.optName}: ${m.slot}`)
+						.join("<br>");
+					JqueryUtil.doToast({
+						type: "warning",
+						content: `Please finish your feat selection:<br>${detail}`,
+					});
+					accordions.classfeats?.el.classList.add("expanded");
+					accordions.classfeats?.el.scrollIntoView({behavior: "smooth"});
+					return;
+				}
+			}
+
 			// ========== APPLY LEVEL UP ==========
 			await this._applyLevelUp({
 				classEntry,
@@ -1238,6 +1312,7 @@ class CharacterSheetLevelUp {
 				selectedOptionalFeatures,
 				selectedCombatTraditions,
 				selectedFeatureOptions,
+				selectedClassFeatProgression,
 				selectedExpertise,
 				selectedLanguages,
 				languageGrants,
@@ -4011,7 +4086,7 @@ class CharacterSheetLevelUp {
 
 	/** @param {*} arg */
 
-	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedFeatureOptions, selectedExpertise, selectedLanguages, languageGrants, selectedScholarSkill, selectedSpellbookSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
+	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedFeatureOptions, selectedClassFeatProgression, selectedExpertise, selectedLanguages, languageGrants, selectedScholarSkill, selectedSpellbookSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
 		const prevCombatTraditions = this._state.getCombatTraditions?.() || [];
 		const prevWeaponMasteries = this._state.getWeaponMasteries?.() || [];
 
@@ -4221,6 +4296,40 @@ class CharacterSheetLevelUp {
 								await this._processFeatSpellChoices();
 							}
 						}
+					}
+				}
+			}
+		}
+
+		// Apply class-level featProgression feat picks (Fighting Style, …). Each synthetic
+		// opt carries the chosen feat(s) on `_progressionFeats[]`; add them as real feats and
+		// tag them with `classFeatProgression` so respec / removal can cascade-clean.
+		if (Array.isArray(selectedClassFeatProgression) && selectedClassFeatProgression.length) {
+			for (const opt of selectedClassFeatProgression) {
+				if (!Array.isArray(opt?._progressionFeats)) continue;
+				for (const slot of opt._progressionFeats) {
+					if (!slot || !slot.feat) continue;
+					const grantedFeat = slot.feat;
+					if (grantedFeat._featChoices?.optionalFeatures?.length) {
+						grantedFeat.choices = {
+							...grantedFeat._featChoices,
+							optionalFeaturePicks: grantedFeat._featChoices.optionalFeatures.flatMap((/** @type {*} */ group) => group.picks || []),
+						};
+					} else if (grantedFeat._featChoices) {
+						grantedFeat.choices = {...grantedFeat._featChoices};
+					}
+					const added = this._state.addFeat(grantedFeat, {
+						allSpells: this._page.getSpells(),
+						classFeatProgression: {
+							className: classEntry.name,
+							classSource: classEntry.source,
+							level: newLevel,
+							progressionName: slot.progressionName || opt.name,
+						},
+					});
+					if (added) {
+						CharacterSheetClassUtils.applyFeatBonuses(this._state, grantedFeat);
+						await this._processFeatSpellChoices();
 					}
 				}
 			}
@@ -4608,6 +4717,27 @@ class CharacterSheetLevelUp {
 			}
 		}
 
+		// Record class-level featProgression feat picks (Fighting Style, …) so respec can
+		// surface + edit them and re-leveling can replay them.
+		if (Array.isArray(selectedClassFeatProgression) && selectedClassFeatProgression.length) {
+			/** @type {*[]} */ const classFeatProgressionFeats = [];
+			for (const opt of selectedClassFeatProgression) {
+				if (!Array.isArray(opt?._progressionFeats)) continue;
+				for (const slot of opt._progressionFeats) {
+					if (!slot || !slot.feat) continue;
+					classFeatProgressionFeats.push({
+						progressionName: slot.progressionName || opt.name,
+						name: slot.feat.name,
+						source: slot.feat.source,
+						category: slot.category,
+					});
+				}
+			}
+			if (classFeatProgressionFeats.length > 0) {
+				historyEntry.choices.classFeatProgressionFeats = classFeatProgressionFeats;
+			}
+		}
+
 		// Record expertise choices
 		if (selectedExpertise && Object.keys(selectedExpertise).length > 0) {
 			/** @type {*[]} */ const expertiseList = [];
@@ -4691,8 +4821,18 @@ class CharacterSheetLevelUp {
 	 * Add multiclass to character
 	 */
 	async showMulticlass () {
-		const classes = this._page.getClasses();
 		const currentClasses = this._state.getClasses();
+
+		// Restrict to allowed sources, then collapse same-named variants (e.g. XPHB Druid vs
+		// TGTT Druid) to a single preferred entry so the picker doesn't show visually-identical
+		// rows differing only by source — and so multiclassing resolves to the variant whose
+		// class features (Specialties, Primal Order, …) actually exist.
+		const settings = this._state.getSettings?.() || {};
+		const sourceFilteredClasses = this._page.filterByAllowedSources(this._page.getClasses());
+		const classes = CharacterSheetClassUtils.dedupeClassesBySourcePreference(sourceFilteredClasses, {
+			existingClasses: currentClasses,
+			enableTgtt: !!settings.enableTgtt,
+		});
 
 		// Filter out classes character already has
 		const availableClasses = classes.filter((/** @type {*} */ c) => !currentClasses.some((/** @type {*} */ cc) => cc.name === c.name));

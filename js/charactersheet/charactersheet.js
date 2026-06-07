@@ -291,6 +291,7 @@ class CharacterSheetPage {
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
 		this._combatMethodsData = (combatMethods.combatMethod || []).map(m => ({...m, _entityType: "combatMethod"}));
+		this._state.setCombatMethodCatalog(this._combatMethodsData);
 		this._itemUpgradesData = (itemUpgrades.itemUpgrade || []).map(u => ({...u, _entityType: "itemUpgrade"}));
 		this._skillsData = skills.skill || [];
 		this._conditionsData = conditionsData.condition || [];
@@ -569,6 +570,7 @@ class CharacterSheetPage {
 		if (brewData.combatMethod?.length) {
 			const brewMethods = MiscUtil.copyFast(brewData.combatMethod).map(m => ({...m, _entityType: "combatMethod"}));
 			this._combatMethodsData = [...this._combatMethodsData, ...brewMethods];
+			this._state.setCombatMethodCatalog(this._combatMethodsData);
 		}
 
 		// Item upgrades (TGTT gemstones, etc.)
@@ -12229,6 +12231,7 @@ class CharacterSheetPage {
 	getSkillsData () { return this._skillsData; }
 	getConditionsData () { return this._conditionsData; }
 	getState () { return this._state; }
+	getLevelUpHelper () { return this._levelUp; }
 
 	/**
 	 * Reconcile `_data.features` against the canonical class+level feature

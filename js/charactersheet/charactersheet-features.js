@@ -656,6 +656,11 @@ class CharacterSheetFeatures {
 			}
 		}
 
+		// Apply saving-throw proficiencies (e.g., Resilient — tied to the chosen ability)
+		CharacterSheetClassUtils.resolveFeatSaveProficiencies(feat, featChoices || {}).forEach(abbr => {
+			this._state.addSaveProficiency(abbr);
+		});
+
 		this._state.addFeat(newFeat, {allSpells: this._page.getSpells()});
 		this.render();
 		// Re-render ability-dependent sections on main page
@@ -1664,10 +1669,37 @@ class CharacterSheetFeatures {
 		// Check if this is the Primal Focus feature (TGTT Ranger)
 		const isPrimalFocus = feature.name === "Primal Focus" && feature.classSource === "TGTT";
 		let primalFocusHtml = "";
+		// Badge fragments shown in the feature header (computed alongside the controls below)
+		let primalFocusSwitchesBadge = "";
+		let primalFocusDodgeBadge = "";
 		if (isPrimalFocus && this._state.hasPrimalFocus?.()) {
+			const calcs = this._state.getFeatureCalculations?.() || {};
 			const currentMode = this._state.getPrimalFocusMode?.() || "predator";
-			const switchesRemaining = this._state.getFocusSwitchesRemaining?.() || 0;
-			const switchText = typeof switchesRemaining === "string" ? switchesRemaining : `${switchesRemaining} remaining`;
+			const isPrey = currentMode === "prey";
+
+			// --- Focus Switches (always available) ---
+			const switchesRemaining = this._state.getFocusSwitchesRemaining?.() ?? 0;
+			const isUnlimitedSwitches = switchesRemaining === "Unlimited" || calcs.focusSwitchesMax === "Unlimited";
+			const switchesMax = calcs.focusSwitchesMaxNum ?? calcs.focusSwitchesMax ?? 1;
+			const switchText = isUnlimitedSwitches ? "Unlimited" : `${switchesRemaining} remaining`;
+			const switchesBadgeText = isUnlimitedSwitches ? "∞" : `${switchesRemaining}/${switchesMax}`;
+
+			// --- Hunter's Dodge (Prey focus only) ---
+			const dodgeRemaining = this._state.getHuntersDodgeRemaining?.() ?? 0;
+			const dodgeMax = calcs.huntersDodgeUses ?? 0;
+
+			// Header badges
+			primalFocusSwitchesBadge = `<span class="badge badge-secondary" title="Focus Switches remaining (per long rest)">🔄 ${switchesBadgeText}</span>`;
+			if (isPrey) {
+				primalFocusDodgeBadge = `<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}" title="Hunter's Dodge uses remaining (per long rest)">🛡️ ${dodgeRemaining}/${dodgeMax}</span>`;
+			}
+
+			const dodgeRowHtml = isPrey ? `
+					<div class="ve-flex-v-center gap-2 mb-2">
+						<em class="ve-muted">Hunter's Dodge: ${dodgeRemaining}/${dodgeMax} remaining</em>
+						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__hunters-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"} title="Use Hunter's Dodge">Use</button>
+					</div>
+				` : "";
 
 			primalFocusHtml = `
 				<div class="charsheet__primal-focus-controls mt-2 p-2" style="background: var(--bs-body-bg-alt, #f8f9fa); border-radius: 8px; border: 1px solid var(--bs-border-color, #dee2e6);">
@@ -1680,6 +1712,7 @@ class CharacterSheetFeatures {
 					<div class="ve-flex-v-center gap-2 mb-2">
 						<em class="ve-muted">Focus Switches: ${switchText}</em>
 					</div>
+					${dodgeRowHtml}
 					<div class="ve-flex gap-2">
 						<button class="ve-btn ve-btn-sm ${currentMode === "predator" ? "ve-btn-danger" : "ve-btn-outline-danger"} charsheet__primal-focus-btn" data-mode="predator" ${currentMode === "predator" ? "disabled" : ""}>
 							🎯 Predator
@@ -1692,6 +1725,38 @@ class CharacterSheetFeatures {
 			`;
 		}
 
+		// Check if this is the Hunter's Prey feature (Ranger Hunter subclass)
+		const isHuntersPrey = (feature.name || "").replace(/[’']/g, "'").toLowerCase() === "hunter's prey"
+			&& !!this._state.hasHuntersPrey?.();
+		let huntersPreyHtml = "";
+		let huntersPreyBadge = "";
+		if (isHuntersPrey) {
+			const options = this._state.getHuntersPreyOptions?.() || [];
+			const currentOption = this._state.getHuntersPreyOption?.() || "colossus";
+			const currentName = options.find(o => o.id === currentOption)?.name || "Colossus Slayer";
+
+			huntersPreyBadge = `<span class="badge badge-info" title="Active Hunter's Prey option">🏹 ${currentName}</span>`;
+
+			const optionsListHtml = options.map(o => `
+						<span class="badge ${o.id === currentOption ? "badge-info" : "badge-secondary"}" style="font-size: 0.95em; padding: 4px 8px;">
+							${o.id === currentOption ? "✓ " : ""}${o.name}
+						</span>
+					`).join("");
+
+			huntersPreyHtml = `
+				<div class="charsheet__hunters-prey-controls mt-2 p-2" style="background: var(--bs-body-bg-alt, #f8f9fa); border-radius: 8px; border: 1px solid var(--bs-border-color, #dee2e6);">
+					<div class="ve-flex-v-center gap-2 mb-2">
+						<strong>Active Option:</strong>
+						<span class="badge badge-info" style="font-size: 1em; padding: 5px 10px;">🏹 ${currentName}</span>
+					</div>
+					<div class="ve-flex-wrap gap-2 mb-1">
+						${optionsListHtml}
+					</div>
+					<em class="ve-muted ve-small">Swap on a short or long rest.</em>
+				</div>
+			`;
+		}
+
 		const featureEl = e_({outer: `
 			<div class="charsheet__feature" data-feature-id="${feature.id}">
 				<div class="charsheet__feature-header">
@@ -1700,6 +1765,9 @@ class CharacterSheetFeatures {
 					${feature.level ? `<span class="badge badge-secondary">Lvl ${feature.level}</span>` : ""}
 					${hasUses ? `<span class="badge badge-info">${feature.uses.current}/${feature.uses.max}</span>` : ""}
 					${isPrimalFocus && this._state.hasPrimalFocus?.() ? `<span class="badge ${this._state.getPrimalFocusMode?.() === "predator" ? "badge-danger" : "badge-info"}">${this._state.getPrimalFocusMode?.() === "predator" ? "🎯" : "🛡️"} ${(this._state.getPrimalFocusMode?.() || "predator").toTitleCase()}</span>` : ""}
+					${primalFocusSwitchesBadge}
+					${primalFocusDodgeBadge}
+					${huntersPreyBadge}
 					<div class="charsheet__feature-actions">
 						${hasUses ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="Use Feature">Use</button>` : ""}
 						<button class="ve-btn ve-btn-xs ${this._state.getFeatureNote?.(feature.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feature-note" title="${this._state.getFeatureNote?.(feature.id) ? "Edit Note" : "Add Note"}">
@@ -1712,6 +1780,7 @@ class CharacterSheetFeatures {
 				</div>
 				<div class="charsheet__feature-body" style="display: ${isExpanded ? "block" : "none"};">
 					${primalFocusHtml}
+					${huntersPreyHtml}
 					${description}
 				</div>
 			</div>
@@ -1736,6 +1805,17 @@ class CharacterSheetFeatures {
 						JqueryUtil.doToast({type: "warning", content: "No focus switches remaining! Rest to regain switches."});
 					}
 				});
+			});
+
+			// Hunter's Dodge (Prey focus) use button
+			featureEl.querySelector(".charsheet__hunters-dodge-use")?.addEventListener("click", () => {
+				const success = this._state.useHuntersDodge?.();
+				if (success) {
+					this._page._features?.render?.();
+					JqueryUtil.doToast({type: "success", content: "Used Hunter's Dodge"});
+				} else {
+					JqueryUtil.doToast({type: "warning", content: "No Hunter's Dodge uses remaining! Rest to regain uses."});
+				}
 			});
 		}
 
@@ -2091,8 +2171,9 @@ class CharacterSheetFeatures {
 			}
 		}
 
-		if (feat.ability) {
-			for (const ab of feat.ability) {
+		const effectiveAbility = CharacterSheetClassUtils.getEffectiveFeatAbility(feat);
+		if (effectiveAbility) {
+			for (const ab of effectiveAbility) {
 				if (ab.choose) {
 					choices.ability = {count: ab.choose.count || 1, amount: ab.choose.amount || 1, from: ab.choose.from || Parser.ABIL_ABVS};
 					break;

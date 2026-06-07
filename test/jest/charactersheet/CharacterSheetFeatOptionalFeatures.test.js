@@ -251,7 +251,8 @@ describe("CharacterSheetClassUtils.buildFeatChoicesSpec & isFeatChoiceSpecComple
 	});
 
 	it("isFeatChoiceSpecComplete returns true when no _featChoices needed", () => {
-		const feat = {name: "Plain Feat", source: "TGTT"};
+		// Origin feat: categorized → no synthesized General +1 ASI to fill
+		const feat = {name: "Plain Feat", source: "TGTT", category: "O"};
 		expect(ClassUtils.isFeatChoiceSpecComplete(feat)).toBe(true);
 	});
 
@@ -259,6 +260,7 @@ describe("CharacterSheetClassUtils.buildFeatChoicesSpec & isFeatChoiceSpecComple
 		const feat = {
 			name: "Skill Feat",
 			source: "TGTT",
+			category: "O",
 			skillProficiencies: [{any: 2}],
 			_featChoices: {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: [], scribingClass: null, optionalFeatures: []},
 		};
