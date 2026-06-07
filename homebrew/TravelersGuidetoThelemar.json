@@ -2841,7 +2841,7 @@
 				}
 			],
 			"entries": [
-				"This spell alters the coloration of a creature to match the surrounding background. The creature is always hiding while the spell is active, and attempting to locate the creature requires a {@skill Perception} check at disadvantage.",
+				"This spell alters the coloration of a creature to match the surrounding background. The creature is always hiding while the spell is active, and attempting to locate the creature requires a {@skill Perception} check against the caster's spell save DC at disadvantage.",
 				"If the creature attacks or casts a spell, this spell ends."
 			],
 			"subschools": [
@@ -21374,6 +21374,16 @@
 			"className": "Ranger",
 			"classSource": "TGTT",
 			"level": 6,
+			"grantsCombatMethods": [
+				{
+					"method": "Singular Focus|TGTT",
+					"focus": "predator"
+				},
+				{
+					"method": "Groundshatter|TGTT",
+					"focus": "prey"
+				}
+			],
 			"entries": [
 				{
 					"type": "entries",
@@ -21382,7 +21392,7 @@
 						{
 							"type": "list",
 							"items": [
-								"{@b Singular Focus (Bonus Action, 2 Stamina Points).} Choose a creature you can see; until the start of your next turn, your weapon attacks against it ignore disadvantage.",
+								"You gain the {@combatmethod Singular Focus|TGTT} combat method, which you can use while in Predator focus.",
 								"{@b Pursuit.} Your walking speed increases by 10 feet while in this focus.",
 								"{@b Intimidating Foe.} Once per turn when you hit with a weapon attack, force a Wisdom save vs. your spell save DC; on a failure, the creature is {@condition frightened} of you until the end of your next turn and its speed is 0 while frightened of you.",
 								"{@b Predator Eye (Bonus Action).} Make an Intelligence (Nature) check contested by the target’s Charisma (Deception) or passive Deception. On a success, learn one of the creature’s resistances or vulnerabilities."
@@ -21397,7 +21407,7 @@
 						{
 							"type": "list",
 							"items": [
-								"{@b Groundshatter (Action, 3 Stamina Points).} Strike a surface within 5 feet; a 50-foot-long, 5-foot-wide line from that point becomes difficult terrain. Creatures and objects in the line take your weapon damage. Surfaces 1 foot thick or less are destroyed.",
+								"You gain the {@combatmethod Groundshatter|TGTT} combat method, which you can use while in Prey focus.",
 								"{@b Terrain Defense.} Gain a bonus to AC and Dexterity saves equal to half your proficiency bonus (minimum +1) when benefiting from cover or standing in difficult terrain.",
 								"{@b Improvised Sanctuary (Action).} Reinforce a 5-foot section of natural terrain into a 10-foot cube Fortified Position: Half Cover counts as Three-Quarters Cover, and creatures inside have advantage on attacks against targets obscured from the Ranger’s position. Lasts until you move more than 30 feet away or create a new one."
 							]

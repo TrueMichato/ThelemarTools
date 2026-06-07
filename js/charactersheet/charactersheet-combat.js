@@ -5731,6 +5731,17 @@ class CharacterSheetCombat {
 				const rememberedWeapon = isWeaponModifier ? this._state.getCombatMethodWeapon(method.name) : null;
 				const weaponLabel = rememberedWeapon ? `<span class="ve-muted ve-small ml-1" title="Remembered weapon: ${rememberedWeapon.weaponName}">🗡️ ${rememberedWeapon.weaponName}</span>` : "";
 
+				// Focus gating: some granted methods are only usable in a matching Primal Focus mode
+				// (e.g. Singular Focus → Predator, Groundshatter → Prey).
+				const requiresFocus = method.requiresFocus || null;
+				let focusMismatch = false;
+				if (requiresFocus) {
+					const currentFocus = this._state.getPrimalFocusMode?.();
+					focusMismatch = currentFocus !== requiresFocus;
+					const focusLabel = requiresFocus.charAt(0).toUpperCase() + requiresFocus.slice(1);
+					extraBadges.push(`<span class="badge ${focusMismatch ? "badge-danger" : "badge-success"} ml-1" title="Usable only while in ${focusLabel} focus">${focusLabel} only</span>`);
+				}
+
 				const methodEl = e_({outer: `
 					<div class="charsheet__method-item mb-1 p-1 ve-flex ve-flex-v-center ve-flex-h-space-between" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
 						<div class="ve-flex ve-flex-v-center ve-flex-wrap">
@@ -5741,7 +5752,7 @@ class CharacterSheetCombat {
 							${weaponLabel}
 						</div>
 						${showUseButton ? `<div class="ve-flex ve-flex-v-center ml-2">
-							<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" title="Use this method (costs ${staminaCost} stamina)">Use</button>
+							<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" ${focusMismatch ? `disabled title="Switch to ${requiresFocus} focus to use this method"` : `title="Use this method (costs ${staminaCost} stamina)"`}>Use</button>
 							${isWeaponModifier ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__method-choose-weapon ml-1" data-method-id="${methodId}" title="Choose which weapon to use">🗡️</button>` : ""}
 						</div>` : ""}
 					</div>

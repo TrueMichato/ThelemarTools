@@ -277,6 +277,14 @@ class CharacterSheetRest {
 			}
 		}
 
+		// --- Hunter's Prey swap control ---
+		const huntersPreySwap = this._buildHuntersPreySwapSection();
+		if (huntersPreySwap) {
+			const hpTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (hpTarget?.parentNode) hpTarget.parentNode.insertBefore(huntersPreySwap.section, hpTarget);
+			else modalInner.append(huntersPreySwap.section);
+		}
+
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✓ Finish Short Rest"});
 		btnConfirm.onClick(() => {
 			// Apply hit dice spending using spentDice tracker
@@ -326,6 +334,9 @@ class CharacterSheetRest {
 
 			// Sorcerous Restoration is auto-applied via onShortRest → applySorcerousRestoration
 			const spRecovered = this._state.applySorcerousRestoration();
+
+			// Apply Hunter's Prey option swap, if changed
+			huntersPreySwap?.apply();
 
 			this._page.saveCharacter();
 			this._page.renderCharacter();
@@ -483,6 +494,15 @@ class CharacterSheetRest {
 
 		// Footer buttons
 		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel", click: () => doClose(false)});
+
+		// --- Hunter's Prey swap control ---
+		const huntersPreySwap = this._buildHuntersPreySwapSection();
+		if (huntersPreySwap) {
+			const hpTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (hpTarget?.parentNode) hpTarget.parentNode.insertBefore(huntersPreySwap.section, hpTarget);
+			else modalInner.append(huntersPreySwap.section);
+		}
+
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		btnConfirm.onClick(() => {
 			// Full HP recovery
@@ -545,6 +565,9 @@ class CharacterSheetRest {
 				this._state.resetGamblerDailyResources();
 			}
 
+			// Apply Hunter's Prey option swap, if changed
+			huntersPreySwap?.apply();
+
 			// Save changes
 			this._page.saveCharacter();
 			this._page.renderCharacter();
@@ -575,6 +598,42 @@ class CharacterSheetRest {
 			${btnCancel}
 			${btnConfirm}
 		</div>`.appendTo(modalInner);
+	}
+
+	/**
+	 * Build a Hunter's Prey swap control for the rest dialogs.
+	 * Returns null when the character lacks Hunter's Prey.
+	 * @returns {{section: HTMLElement, apply: function}|null}
+	 */
+	_buildHuntersPreySwapSection () {
+		if (!this._state.hasHuntersPrey?.()) return null;
+
+		const options = this._state.getHuntersPreyOptions?.() || [];
+		if (options.length < 2) return null;
+		const currentOption = this._state.getHuntersPreyOption?.() || "colossus";
+
+		const sel = e_({tag: "select", clazz: "form-control input-sm charsheet__hunters-prey-rest-select"});
+		options.forEach(o => {
+			const opt = e_({tag: "option", val: o.id, txt: o.name});
+			if (o.id === currentOption) opt.selected = true;
+			sel.appendChild(opt);
+		});
+
+		const section = e_({outer: `<div class="charsheet__rest-section">
+			<div class="charsheet__rest-section-title">🏹 Hunter's Prey</div>
+			<p class="ve-muted ve-small mb-2">Choose your Hunter's Prey option for the next stretch (you may swap on a rest):</p>
+		</div>`});
+		section.appendChild(sel);
+
+		return {
+			section,
+			apply: () => {
+				const chosen = sel.value;
+				if (chosen && chosen !== currentOption) {
+					this._state.setHuntersPreyOption?.(chosen);
+				}
+			},
+		};
 	}
 
 	_restoreResources (restType) {

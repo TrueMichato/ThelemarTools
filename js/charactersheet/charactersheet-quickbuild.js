@@ -38,6 +38,7 @@ class CharacterSheetQuickBuild {
 			subclassChoices: {}, // {className_source: {key, name}}
 			asi: {}, // {levelKey: {abilityChoices: {}, feat: null, isBoth: false}}
 			optionalFeatures: {}, // {levelKey: {featureTypeKey: [optionObj, ...]}}
+			classFeatProgression: {}, // {levelKey: [{progressionName, category, feat, featChoices}, ...]} — Fighting Style etc.
 			featureOptions: {}, // {levelKey: {featureKey: [optionObj, ...]}}
 			expertise: {}, // {levelKey: {featureName: [skill, ...]}}
 			languages: {}, // {levelKey: {featureName: [language, ...]}}
@@ -219,6 +220,9 @@ class CharacterSheetQuickBuild {
 				classData, classLevel, runningOptionalFeatureCounts,
 			);
 
+			// Class-level featProgression picks (2024/TGTT Fighting Style etc.); excludes Epic Boon.
+			const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(classData, classLevel - 1, classLevel);
+
 			const featureOptions = this._getFeatureOptionsForLevel(features, classLevel)
 				// Filter out option groups where ALL options are optional features — those are
 				// handled by optionalfeatureProgression in the Class Options step (e.g. Battle Tactics)
@@ -303,6 +307,7 @@ class CharacterSheetQuickBuild {
 				needsSubclass,
 				hasAsi,
 				optionalFeatureGains,
+				classFeatProgressionGains,
 				featureOptions,
 				expertiseGrants,
 				languageGrants,
@@ -589,6 +594,23 @@ class CharacterSheetQuickBuild {
 				data: optFeatLevels,
 				render: (content) => this._renderOptionalFeaturesStep(content, optFeatLevels),
 				validate: () => this._validateOptionalFeaturesStep(optFeatLevels),
+			});
+		}
+
+		// Step 4b: Class Feats (class-level featProgression — Fighting Style, etc.)
+		const classFeatLevels = analysis.filter(a => (a.classFeatProgressionGains || []).length > 0);
+		if (classFeatLevels.length > 0) {
+			const onlyName = classFeatLevels.length === 1 && classFeatLevels[0].classFeatProgressionGains.length === 1
+				? classFeatLevels[0].classFeatProgressionGains[0].progressionName
+				: "Class Feats";
+			this._steps.push({
+				id: "classfeats",
+				label: onlyName,
+				icon: "⚔️",
+				required: true,
+				data: classFeatLevels,
+				render: (content) => this._renderClassFeatProgressionStep(content, classFeatLevels),
+				validate: () => this._validateClassFeatProgressionStep(classFeatLevels),
 			});
 		}
 
@@ -1560,12 +1582,15 @@ class CharacterSheetQuickBuild {
 		return container;
 	}
 
-	_renderFeatSelector (levelKey, sel, isEpicBoon, runningScores = null, onFeatAbilityChanged = null) {
+	_renderFeatSelector (levelKey, sel, isEpicBoon, runningScores = null, onFeatAbilityChanged = null, categoryFilter = null) {
 		const container = e_({outer: `<div class="charsheet__quickbuild-feat-select mb-2"></div>`});
 		container.append(e_({outer: `<label class="ve-bold ve-small">${isEpicBoon ? "Epic Boon" : "Feat"} Selection</label>`}));
 
 		let feats = this._page.filterByAllowedSources(this._page.getFeats() || []);
-		if (isEpicBoon) {
+		if (categoryFilter && categoryFilter.length) {
+			// Class-level featProgression (e.g. Fighting Style): constrain to the given categories.
+			feats = CharacterSheetClassUtils.filterFeatsByCategory(feats, categoryFilter);
+		} else if (isEpicBoon) {
 			feats = feats.filter(f => f.category === "EB");
 		} else {
 			feats = feats.filter(f => f.category !== "EB");
@@ -1653,9 +1678,11 @@ class CharacterSheetQuickBuild {
 				}
 			}
 
-			// Check ability choices
-			if (feat.ability) {
-				for (const ab of feat.ability) {
+			// Check ability choices (effective array also covers uncategorized
+			// feats that default to General → +1 ASI of the player's choice)
+			const effectiveAbility = CharacterSheetClassUtils.getEffectiveFeatAbility(feat);
+			if (effectiveAbility) {
+				for (const ab of effectiveAbility) {
 					if (ab.choose) {
 						choices.ability = {
 							count: ab.choose.count || 1,
@@ -2359,6 +2386,102 @@ class CharacterSheetQuickBuild {
 			}
 		}
 		return true;
+	}
+
+	// ==========================================
+	// Step 4b: Class Feats (class-level featProgression — Fighting Style, etc.)
+	// ==========================================
+
+	/**
+	 * Ensure the per-level class-feat-progression selection slots exist for a given level,
+	 * one slot per granted feat (count). Each slot carries the chosen feat + its sub-choices.
+	 * @param {*} analysis - Level analysis entry
+	 * @param {string} levelKey - `${className}_${classLevel}`
+	 * @returns {*[]} The slot array for this level
+	 */
+	_ensureClassFeatProgressionSlots (analysis, levelKey) {
+		if (!this._selections.classFeatProgression[levelKey]) {
+			/** @type {*[]} */ const slots = [];
+			analysis.classFeatProgressionGains.forEach((/** @type {*} */ gain) => {
+				for (let i = 0; i < gain.count; i++) {
+					slots.push({
+						progressionName: gain.progressionName,
+						category: gain.category,
+						feat: null,
+						featChoices: null,
+					});
+				}
+			});
+			this._selections.classFeatProgression[levelKey] = slots;
+		}
+		return this._selections.classFeatProgression[levelKey];
+	}
+
+	_renderClassFeatProgressionStep (content, classFeatLevels) {
+		const step = e_({outer: `<div class="charsheet__quickbuild-step"></div>`});
+		step.append(e_({outer: `
+			<div class="charsheet__quickbuild-step-header">
+				<h4>Class Feats</h4>
+				<p class="ve-muted">Choose the feat(s) granted by your class features (e.g. Fighting Style).</p>
+			</div>
+		`}));
+
+		classFeatLevels.forEach(analysis => {
+			const levelKey = `${analysis.className}_${analysis.classLevel}`;
+			const slots = this._ensureClassFeatProgressionSlots(analysis, levelKey);
+
+			slots.forEach((slot, slotIdx) => {
+				const section = e_({outer: `
+					<div class="charsheet__quickbuild-section mb-3">
+						<h5>${analysis.className} Level ${analysis.classLevel} — ${slot.progressionName}</h5>
+					</div>
+				`});
+				const selector = this._renderFeatSelector(`${levelKey}__classfeat_${slotIdx}`, slot, false, null, null, slot.category);
+				section.append(selector);
+				step.append(section);
+			});
+		});
+
+		content.append(step);
+	}
+
+	_validateClassFeatProgressionStep (classFeatLevels) {
+		for (const analysis of classFeatLevels) {
+			const levelKey = `${analysis.className}_${analysis.classLevel}`;
+			const slots = this._selections.classFeatProgression[levelKey] || [];
+			for (const slot of slots) {
+				if (!slot.feat) {
+					JqueryUtil.doToast({type: "warning", content: `Please choose a ${slot.progressionName} for ${analysis.className} level ${analysis.classLevel}.`});
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	_applyClassFeatProgressionForLevel (analysis, levelKey) {
+		const slots = this._selections.classFeatProgression[levelKey] || [];
+		for (const slot of slots) {
+			if (!slot.feat) continue;
+			if (slot.featChoices) {
+				slot.feat.choices = {
+					...slot.featChoices,
+					...(slot.featChoices.optionalFeatures?.length
+						? {optionalFeaturePicks: slot.featChoices.optionalFeatures.flatMap(group => group.picks || [])}
+						: {}),
+				};
+			}
+			const added = this._state.addFeat(slot.feat, {
+				allSpells: this._page.getSpells(),
+				classFeatProgression: {
+					className: analysis.className,
+					classSource: analysis.classSource,
+					level: analysis.classLevel,
+					progressionName: slot.progressionName,
+				},
+			});
+			if (added) CharacterSheetClassUtils.applyFeatBonuses(this._state, slot.feat, slot.featChoices);
+		}
 	}
 
 	/**
@@ -4381,6 +4504,11 @@ class CharacterSheetQuickBuild {
 				this._applyFeatureOptionsForLevel(analysis);
 			}
 
+			// 5b. Apply class-level featProgression feats (Fighting Style, etc.)
+			if ((analysis.classFeatProgressionGains || []).length > 0) {
+				this._applyClassFeatProgressionForLevel(analysis, levelKey);
+			}
+
 			// 6. Apply Expertise
 			if (analysis.expertiseGrants.length > 0) {
 				for (const grant of analysis.expertiseGrants) {
@@ -4862,6 +4990,21 @@ class CharacterSheetQuickBuild {
 			entry.choices.featureChoices = featureChoices;
 			entry.choices.replayData = entry.choices.replayData || {};
 			entry.choices.replayData.featureChoices = featureChoiceReplay;
+		}
+
+		// Class-level featProgression feats (Fighting Style, etc.)
+		const classFeatProgressionFeats = [];
+		(this._selections.classFeatProgression[levelKey] || []).forEach(slot => {
+			if (!slot.feat) return;
+			classFeatProgressionFeats.push({
+				progressionName: slot.progressionName,
+				name: slot.feat.name,
+				source: slot.feat.source,
+				category: slot.category,
+			});
+		});
+		if (classFeatProgressionFeats.length > 0) {
+			entry.choices.classFeatProgressionFeats = classFeatProgressionFeats;
 		}
 
 		// Expertise

@@ -804,6 +804,18 @@ class CharacterSheetRespec {
 			}
 		}
 
+		// Class-level featProgression feats (Fighting Style, etc.) are editable
+		if (history.choices?.classFeatProgressionFeats?.length > 0) {
+			history.choices.classFeatProgressionFeats.forEach((cf, idx) => {
+				editable.push({
+					type: "classFeatProgressionFeat",
+					label: cf.progressionName || "Class Feat",
+					current: cf.name,
+					index: idx,
+				});
+			});
+		}
+
 		// Note: Skills and other level 1 choices are typically not editable
 		// as they would require extensive recalculation
 
@@ -898,6 +910,9 @@ class CharacterSheetRespec {
 				break;
 			case "optionalFeatures":
 				await this._editOptionalFeatures(level, history, choice, closeParentModal);
+				break;
+			case "classFeatProgressionFeat":
+				await this._editClassFeatProgressionFeat(level, history, choice, closeParentModal);
 				break;
 			default:
 				JqueryUtil.doToast({type: "warning", content: "Editing this choice type is not yet implemented."});
@@ -1818,6 +1833,140 @@ class CharacterSheetRespec {
 		content.append(btnRow);
 
 		modalInner.append(content);
+	}
+
+	/**
+	 * Edit a class-level featProgression feat (e.g. Fighting Style). Re-picks
+	 * from the same feat category, removes the previously chosen feat, and adds
+	 * the replacement through the real feat system so passive bonuses follow.
+	 * @param {number} level - The level where the feat was chosen
+	 * @param {object} history - The history entry
+	 * @param {object} choice - The choice info (includes label, current, index)
+	 * @param {Function} closeParentModal - Function to close parent modal
+	 */
+	async _editClassFeatProgressionFeat (level, history, choice, closeParentModal) {
+		const entry = history.choices?.classFeatProgressionFeats?.[choice.index];
+		if (!entry) {
+			JqueryUtil.doToast({type: "warning", content: "No class feat found at this level."});
+			return;
+		}
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: `Change ${entry.progressionName || "Class Feat"}`,
+			isMinHeight0: true,
+			isWidth100: true,
+			isUncappedWidth: true,
+			cbClose: () => {},
+		});
+
+		const content = e_({tag: "div", clazz: "charsheet__respec-feat-modal"});
+		content.append(e_({outer: `<h4>Select New ${entry.progressionName || "Class Feat"}</h4>`}));
+		content.append(e_({outer: `<p class="text-muted mb-2">Current: <strong>${entry.name || "None"}</strong></p>`}));
+
+		// Build category-filtered feat pool, excluding feats already taken (except the current one).
+		const allFeats = this._page.filterByAllowedSources?.(this._page.getFeats() || []) || (this._page.getFeats() || []);
+		const knownFeatNames = new Set((this._state.getFeats() || [])
+			.filter(f => !(f.name === entry.name && f.source === entry.source))
+			.map(f => `${f.name}|${f.source}`.toLowerCase()));
+		const pool = CharacterSheetClassUtils.filterFeatsByCategory(allFeats, entry.category || ["FS"])
+			.filter(f => !knownFeatNames.has(`${f.name}|${f.source}`.toLowerCase()))
+			.sort((a, b) => a.name.localeCompare(b.name));
+
+		const featList = e_({tag: "div", clazz: "charsheet__respec-feat-list"});
+		content.append(featList);
+
+		let selectedFeat = null;
+		if (!pool.length) {
+			featList.append(e_({outer: `<p class="text-muted">No alternative feats available in this category.</p>`}));
+		} else {
+			pool.forEach(feat => {
+				const isCurrent = feat.name === entry.name && feat.source === entry.source;
+				const item = e_({outer: `
+					<div class="charsheet__respec-feat-item ${isCurrent ? "charsheet__respec-feat-current" : ""}">
+						<span class="respec-hover-slot"></span>
+						<span class="text-muted">${Parser.sourceJsonToAbv(feat.source)}</span>
+					</div>
+				`});
+				CharacterSheetRespec._setHoverLink(item.querySelector(".respec-hover-slot"), UrlUtil.PG_FEATS, feat.name, feat.source);
+				item.addEventListener("click", () => {
+					selectedFeat = feat;
+					featList.querySelectorAll(".charsheet__respec-feat-selected").forEach(el => el.classList.remove("charsheet__respec-feat-selected"));
+					item.classList.add("charsheet__respec-feat-selected");
+				});
+				featList.append(item);
+			});
+		}
+
+		const btnRow = e_({tag: "div", clazz: "charsheet__respec-btn-row mt-3"});
+		const cancelBtn = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		cancelBtn.addEventListener("click", () => doClose());
+
+		const applyBtn = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Apply Changes"});
+		applyBtn.addEventListener("click", async () => {
+			if (!selectedFeat) {
+				JqueryUtil.doToast({type: "warning", content: "Please select a feat."});
+				return;
+			}
+			if (selectedFeat.name === entry.name && selectedFeat.source === entry.source) {
+				doClose();
+				return;
+			}
+
+			await this._applyClassFeatProgressionFeatChange(level, history, choice.index, entry, selectedFeat);
+
+			doClose();
+			closeParentModal();
+			this.render();
+			this._page.renderCharacter();
+			await this._page.saveCharacter();
+			JqueryUtil.doToast({type: "success", content: `Changed ${entry.progressionName || "feat"} to ${selectedFeat.name}.`});
+		});
+
+		btnRow.append(cancelBtn, applyBtn);
+		content.append(btnRow);
+
+		modalInner.append(content);
+	}
+
+	/**
+	 * Swap a class-level featProgression feat: remove the old feat, add the new
+	 * one with the same provenance tag, and update level history.
+	 * @param {number} level
+	 * @param {object} history
+	 * @param {number} index - Index into `history.choices.classFeatProgressionFeats`
+	 * @param {object} oldEntry - The previously chosen feat record
+	 * @param {object} newFeat - The replacement feat data
+	 */
+	async _applyClassFeatProgressionFeatChange (level, history, index, oldEntry, newFeat) {
+		// Remove the previously granted feat (cleans up its bonuses/spells/modifiers).
+		const existing = (this._state.getFeats() || []).find(f => f.name === oldEntry.name && f.source === oldEntry.source);
+		if (existing) this._state.removeFeat?.(existing.id || existing.name, existing.source);
+
+		// Add the replacement through the real feat system so passive bonuses follow.
+		const featToAdd = {...newFeat};
+		const added = this._state.addFeat(featToAdd, {
+			allSpells: this._page.getSpells?.(),
+			classFeatProgression: {
+				className: history.class?.name,
+				classSource: history.class?.source,
+				level,
+				progressionName: oldEntry.progressionName,
+			},
+		});
+		if (added) CharacterSheetClassUtils.applyFeatBonuses(this._state, featToAdd);
+
+		// Update history record for this slot.
+		const updatedList = [...(history.choices.classFeatProgressionFeats || [])];
+		updatedList[index] = {
+			progressionName: oldEntry.progressionName,
+			name: newFeat.name,
+			source: newFeat.source,
+			category: oldEntry.category,
+		};
+		this._state.updateLevelChoice(level, {classFeatProgressionFeats: updatedList});
+
+		// Feats may grant ability bonuses or hpPerLevel modifiers — recalc max HP.
+		this._recalcHpPreservingHealing();
 	}
 
 	/**

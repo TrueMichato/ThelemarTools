@@ -3388,6 +3388,11 @@ class CharacterSheetState {
 				quarryTargetId: null, // Current Focused Quarry target ID (Predator focus)
 			},
 
+			// Hunter's Prey (Ranger Hunter subclass) - toggle between options, swappable on a rest
+			huntersPrey: {
+				option: "colossus", // "colossus" | "horde" | "giantKiller" (classic only)
+			},
+
 			// Focus Pool (TGTT Dreamwalker) - Resource for dream abilities
 			focusPool: {
 				current: 0, // Current focus points
@@ -3678,6 +3683,10 @@ class CharacterSheetState {
 
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
+
+		// Migrate Hunter's Prey: older saves stored it as a consumable resource/use.
+		// Convert to the toggle model (strip uses, drop the orphan resource).
+		this._migrateHuntersPrey();
 
 		// Migrate modifiers: re-process modifiers that may be missing special flags
 		this._migrateModifiers();
@@ -4052,6 +4061,33 @@ class CharacterSheetState {
 
 			return f;
 		});
+	}
+
+	/**
+	 * Migrate Hunter's Prey from the legacy consumable-resource model to the toggle model.
+	 * Older saves auto-created a "Hunter's Prey" resource (max 1) and stamped `uses` on the
+	 * feature because the description matched the generic "once ... per rest" parser. Strip
+	 * those so the feature is treated purely as a toggle (Colossus Slayer / Horde Breaker).
+	 */
+	_migrateHuntersPrey () {
+		if (!this.hasHuntersPrey()) return;
+
+		const matchesName = (name) => (name || "").toLowerCase().replace(/[’']/g, "'").includes("hunter's prey");
+
+		// Drop the orphan resource auto-created for Hunter's Prey
+		if (Array.isArray(this._data.resources)) {
+			this._data.resources = this._data.resources.filter(r => !matchesName(r.name));
+		}
+
+		// Strip `uses` from the Hunter's Prey feature itself
+		if (Array.isArray(this._data.features)) {
+			this._data.features.forEach(f => {
+				if (matchesName(f.name) && f.uses) delete f.uses;
+			});
+		}
+
+		// Ensure the toggle state exists
+		this._ensureHuntersPreyInitialized();
 	}
 
 	_migrateRaceBackgroundToHistory () {
@@ -8285,7 +8321,11 @@ class CharacterSheetState {
 
 		// Try to get progression from class data first (supports 2024 and homebrew)
 		if (classData) {
-			const cantripsKnown = classData.cantripProgression?.[levelIndex] || 0;
+			let cantripsKnown = classData.cantripProgression?.[levelIndex] || 0;
+			// Druid "Magician" (Primal Order, XPHB/TGTT level 1) grants one extra cantrip from
+			// the Druid spell list. Surfacing it here lets the spells tab offer the extra pick
+			// regardless of how Magician was chosen (builder, multiclass, respec, or load).
+			if (className === "Druid" && this.hasFeature?.("Magician")) cantripsKnown += 1;
 
 			// 2024 rules use preparedSpellsProgression for all casters
 			if (classData.preparedSpellsProgression) {
@@ -8356,6 +8396,8 @@ class CharacterSheetState {
 		const preparedCasters = ["Cleric", "Druid", "Paladin", "Wizard", "Artificer"];
 
 		let cantripsKnown = cantripsKnownTables[className]?.[levelIndex] || 0;
+		// Druid "Magician" (Primal Order) grants one extra cantrip (see classData branch above).
+		if (className === "Druid" && this.hasFeature?.("Magician")) cantripsKnown += 1;
 
 		// 2014-only known-caster fallback. For 2024 sources the caller should supply
 		// progression arrays (handled above); falling back to 2014 math here would
@@ -15133,8 +15175,9 @@ class CharacterSheetState {
 						// Focused Quarry damage scaling: 1d4 (L1-4) → 1d6 (L5-9) → 1d8 (L10-13) → 1d10 (L14+)
 						calculations.focusedQuarryDamage = level >= 14 ? "1d10" : level >= 10 ? "1d8" : level >= 5 ? "1d6" : "1d4";
 
-						// Hunter's Dodge uses (Prey focus) = proficiency bonus per long rest
-						calculations.huntersDodgeUses = profBonus;
+						// Hunter's Dodge uses (Prey focus) = Ranger-level proficiency bonus per long rest
+						// Use the Ranger class level (not total character level) so multiclassing scales correctly.
+						calculations.huntersDodgeUses = Math.floor((level - 1) / 4) + 2;
 
 						// Focused Quarry range: 60 ft default, 90 ft at level 6
 						calculations.focusedQuarryRange = level >= 6 ? 90 : 60;
@@ -15353,9 +15396,18 @@ class CharacterSheetState {
 							}
 
 							case "Hunter": {
-								// Hunter's Prey (level 3) - choice of Colossus Slayer, Giant Killer, or Horde Breaker
+								// Hunter's Prey (level 3) - toggle between Colossus Slayer / Horde Breaker
+								// (and Giant Killer in the 2014 ruleset), swappable on a rest.
 								calculations.hasHuntersPrey = true;
-								calculations.colossusSlayerDamage = "1d8"; // Extra damage to wounded foes
+								const huntersPreyOption = this.getHuntersPreyOption();
+								calculations.huntersPreyOption = huntersPreyOption;
+								if (huntersPreyOption === "colossus") {
+									calculations.colossusSlayerDamage = "1d8"; // Extra damage to wounded foes
+								} else if (huntersPreyOption === "horde") {
+									calculations.hasHordeBreaker = true; // Extra attack vs a different creature
+								} else if (huntersPreyOption === "giantKiller") {
+									calculations.hasGiantKiller = true; // Reaction attack vs Large+ foes
+								}
 
 								// Defensive Tactics (level 7) - choice of defensive abilities
 								if (level >= 7) {
@@ -22914,6 +22966,22 @@ class CharacterSheetState {
 
 		// Check if this feature grants modifiers to rolls, AC, etc.
 		this._processFeatureModifiers(feature, featureData.id);
+
+		// Check if this feature grants specific combat methods directly (e.g. Primal Focus Upgrade).
+		// Resolve each granted method against the catalog and add it as a real combat method.
+		if (Array.isArray(feature.grantsCombatMethods) && feature.grantsCombatMethods.length && this._combatMethodCatalog?.length) {
+			const grantedMethods = CharacterSheetClassUtils.resolveGrantedCombatMethods(feature, this._combatMethodCatalog);
+			grantedMethods.forEach(method => this.addFeature(method));
+		}
+	}
+
+	/**
+	 * Provide the combat-method catalog used to resolve `grantsCombatMethods` UIDs when
+	 * features are added. The page sets this after loading site + brew combat method data.
+	 * @param {Array<*>} combatMethodEntities
+	 */
+	setCombatMethodCatalog (combatMethodEntities) {
+		this._combatMethodCatalog = Array.isArray(combatMethodEntities) ? combatMethodEntities : [];
 	}
 
 	/**
@@ -22927,6 +22995,12 @@ class CharacterSheetState {
 	_isResourceSystemFeature (feature) {
 		const name = feature.name?.toLowerCase() || "";
 
+		// Hunter's Prey (Ranger Hunter) is a toggle, not a consumable resource.
+		// Normalize apostrophe variants (straight ' and curly ’) before matching.
+		if (name.replace(/[’']/g, "'").includes("hunter's prey")) {
+			return true;
+		}
+
 		// Features that describe resource systems (stamina, ki, etc.)
 		// These mention "short rest" or "long rest" but the rest is for the resource, not the feature itself
 		const resourceSystemFeatures = [
@@ -22937,6 +23011,7 @@ class CharacterSheetState {
 			"sorcery points", // Sorcerer - describes sorcery point system
 			"superiority dice", // Battle Master - describes superiority dice
 			"psionic power", // Psi features - describes psionic power dice
+			"primal focus", // TGTT Ranger - has its own Focus Switches / Hunter's Dodge tracking + UI
 		];
 
 		// Check if the feature name matches any resource system feature
@@ -23631,6 +23706,17 @@ class CharacterSheetState {
 			if (opts.linkedToOptFeature.source) featData.linkedToOptFeature.source = opts.linkedToOptFeature.source;
 		}
 
+		// Class-level featProgression feats (Fighting Style, …): tag the feat with its
+		// originating class/level/progression so respec + cascade-removal can identify it.
+		if (opts.classFeatProgression && opts.classFeatProgression.className) {
+			featData.classFeatProgression = {
+				className: opts.classFeatProgression.className,
+				classSource: opts.classFeatProgression.classSource,
+				level: opts.classFeatProgression.level,
+				progressionName: opts.classFeatProgression.progressionName,
+			};
+		}
+
 		// Add uses if detected
 		if (uses) {
 			featData.uses = {
@@ -24065,6 +24151,7 @@ class CharacterSheetState {
 			name: m.name,
 			source: m.source,
 			description: m.description,
+			requiresFocus: m.requiresFocus ?? null,
 			...this._parseCombatMethodEffects(m),
 		}));
 	}
@@ -25734,6 +25821,98 @@ class CharacterSheetState {
 				huntersDodgeUsed: 0,
 				quarryTargetId: null,
 			};
+		}
+	}
+	// #endregion
+
+	// =========================================================================
+	// Hunter's Prey (Ranger "Hunter" subclass)
+	// =========================================================================
+	// #region Hunter's Prey
+
+	/**
+	 * Check if character has the Hunter's Prey feature (Ranger Hunter subclass, level 3+).
+	 * Works for any source (PHB classic, XPHB, TGTT copies).
+	 * @returns {boolean}
+	 */
+	hasHuntersPrey () {
+		return (this._data.classes || []).some(c => {
+			if (c.name !== "Ranger") return false;
+			const sub = c.subclass;
+			if (!sub) return false;
+			const shortName = sub.shortName || sub.name;
+			if (shortName !== "Hunter") return false;
+			return (c.level || 0) >= 3;
+		});
+	}
+
+	/**
+	 * Determine whether the character's Hunter subclass uses the 2024 (XPHB) ruleset.
+	 * 2024 Hunter's Prey has two options (Colossus Slayer, Horde Breaker); the 2014
+	 * version adds Giant Killer.
+	 * @returns {boolean}
+	 */
+	_isHuntersPrey2024 () {
+		const rangerClass = (this._data.classes || []).find(c => {
+			if (c.name !== "Ranger") return false;
+			const sub = c.subclass;
+			const shortName = sub?.shortName || sub?.name;
+			return shortName === "Hunter";
+		});
+		if (!rangerClass) return false;
+		const subSource = rangerClass.subclass?.source || rangerClass.source || "";
+		// XPHB and TGTT 2024-line Hunter copies are 2024; classic PHB/TGTT-2014 are not.
+		return /^XPHB$/i.test(subSource) || /2024/.test(subSource) || rangerClass.edition === "one";
+	}
+
+	/**
+	 * Get the available Hunter's Prey options for this character.
+	 * @returns {Array<{id: string, name: string}>}
+	 */
+	getHuntersPreyOptions () {
+		const options = [
+			{id: "colossus", name: "Colossus Slayer"},
+			{id: "horde", name: "Horde Breaker"},
+		];
+		if (!this._isHuntersPrey2024()) {
+			// 2014 Hunter additionally offers Giant Killer.
+			options.splice(1, 0, {id: "giantKiller", name: "Giant Killer"});
+		}
+		return options;
+	}
+
+	/**
+	 * Get the currently selected Hunter's Prey option id.
+	 * @returns {string} "colossus" | "horde" | "giantKiller"
+	 */
+	getHuntersPreyOption () {
+		this._ensureHuntersPreyInitialized();
+		return this._data.huntersPrey?.option || "colossus";
+	}
+
+	/**
+	 * Set the Hunter's Prey option. Validates against the available options.
+	 * @param {string} option - Option id
+	 * @returns {boolean} True if applied, false if invalid
+	 */
+	setHuntersPreyOption (option) {
+		this._ensureHuntersPreyInitialized();
+		const isValid = this.getHuntersPreyOptions().some(o => o.id === option);
+		if (!isValid) {
+			// eslint-disable-next-line no-console
+			console.warn(`[CharSheet State] Invalid Hunter's Prey option: ${option}`);
+			return false;
+		}
+		this._data.huntersPrey.option = option;
+		return true;
+	}
+
+	/**
+	 * Initialize Hunter's Prey data if needed.
+	 */
+	_ensureHuntersPreyInitialized () {
+		if (!this._data.huntersPrey) {
+			this._data.huntersPrey = {option: "colossus"};
 		}
 	}
 	// #endregion
@@ -30738,6 +30917,8 @@ class CharacterSheetState {
 		"empowered strikes": "passive",
 		"ki-empowered strikes": "passive",
 		"self-restoration": "passive",
+		// TGTT Ranger: describes focus-mode options + grants combat methods; not an activatable itself
+		"primal focus upgrade": "passive",
 		"perfect focus": "passive",
 		"body and mind": "passive",
 		"superior defense": "passive",

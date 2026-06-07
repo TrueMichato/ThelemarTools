@@ -116,10 +116,28 @@ describe("TGTT Multiclass Builds", () => {
 				expect(calcs.focusedQuarryDamage).toBe("1d6");
 			});
 
-			it("should have Hunter's Dodge uses from total proficiency", () => {
-				makeRangerDruid(7, 3); // total level 10, prof 4
+			it("should have Hunter's Dodge uses from Ranger level (not total)", () => {
+				makeRangerDruid(7, 3); // total level 10 (prof 4), but Ranger level 7 (prof 3)
 				state.applyClassFeatureEffects();
-				expect(state.getFeatureCalculations().huntersDodgeUses).toBe(4);
+				// Hunter's Dodge scales off the Ranger class level, so prof bonus = floor((7-1)/4)+2 = 3
+				expect(state.getFeatureCalculations().huntersDodgeUses).toBe(3);
+			});
+
+			it("should not auto-generate a generic uses badge on the Primal Focus feature", () => {
+				makeRangerDruid(7, 3);
+				state.addFeature({
+					name: "Primal Focus",
+					source: "TGTT",
+					classSource: "TGTT",
+					className: "Ranger",
+					level: 1,
+					description: "You can use this a number of times equal to your proficiency bonus per long rest.",
+				});
+				const primalFocus = state.getFeatures().find(f => f.name === "Primal Focus");
+				expect(primalFocus).toBeDefined();
+				// Primal Focus has its own Focus Switches / Hunter's Dodge tracking — it must not
+				// pick up a spurious parsed `uses` badge from its description.
+				expect(primalFocus.uses).toBeUndefined();
 			});
 
 			it("should have focusSwitchesMax based on Ranger level", () => {
