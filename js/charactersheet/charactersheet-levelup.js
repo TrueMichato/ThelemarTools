@@ -4779,10 +4779,19 @@ class CharacterSheetLevelUp {
 			}));
 		}
 
-		// Record spell swap in history
+		// Record spell swap in history. Persist enough metadata on the *removed* spell that respec
+		// can faithfully restore it on teardown (older saves only carried name+source → best-effort).
 		if (stagedSpellSwap) {
 			historyEntry.choices.spellSwap = {
-				removed: {name: stagedSpellSwap.oldSpell.name, source: stagedSpellSwap.oldSpell.source},
+				removed: {
+					name: stagedSpellSwap.oldSpell.name,
+					source: stagedSpellSwap.oldSpell.source,
+					level: stagedSpellSwap.oldSpell.level,
+					school: stagedSpellSwap.oldSpell.school,
+					ritual: stagedSpellSwap.oldSpell.ritual || false,
+					concentration: stagedSpellSwap.oldSpell.concentration || false,
+					prepared: stagedSpellSwap.oldSpell.prepared || false,
+				},
 				added: {name: stagedSpellSwap.newSpell.name, source: stagedSpellSwap.newSpell.source},
 			};
 		}
