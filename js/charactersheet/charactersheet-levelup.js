@@ -4198,7 +4198,7 @@ class CharacterSheetLevelUp {
 				} else if (selectedFeat._featChoices) {
 					selectedFeat.choices = {...selectedFeat._featChoices};
 				}
-				this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells()});
+				this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(selectedFeat)});
 				CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
 				await this._processFeatSpellChoices();
 			}
@@ -4212,7 +4212,7 @@ class CharacterSheetLevelUp {
 			} else if (selectedFeat._featChoices) {
 				selectedFeat.choices = {...selectedFeat._featChoices};
 			}
-			this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells()});
+			this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(selectedFeat)});
 			// Apply feat bonuses if any
 			CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
 			// Process pending spell choices from the feat
@@ -4289,6 +4289,7 @@ class CharacterSheetLevelUp {
 							}
 							const added = this._state.addFeat(grantedFeat, {
 								allSpells: this._page.getSpells(),
+								skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(grantedFeat),
 								linkedToOptFeature: {id: opt.id, name: opt.name, source: opt.source},
 							});
 							if (added) {
@@ -4320,6 +4321,7 @@ class CharacterSheetLevelUp {
 					}
 					const added = this._state.addFeat(grantedFeat, {
 						allSpells: this._page.getSpells(),
+						skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(grantedFeat),
 						classFeatProgression: {
 							className: classEntry.name,
 							classSource: classEntry.source,

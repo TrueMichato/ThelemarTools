@@ -92,6 +92,26 @@ globalThis.CryptUtil = {
 // Mock Parser if needed
 globalThis.Parser = globalThis.Parser || {
 	ABIL_ABVS: ["str", "dex", "con", "int", "wis", "cha"],
+	SKILL_TO_ATB_ABV: {
+		"athletics": "str",
+		"acrobatics": "dex",
+		"sleight of hand": "dex",
+		"stealth": "dex",
+		"arcana": "int",
+		"history": "int",
+		"investigation": "int",
+		"nature": "int",
+		"religion": "int",
+		"animal handling": "wis",
+		"insight": "wis",
+		"medicine": "wis",
+		"perception": "wis",
+		"survival": "wis",
+		"deception": "cha",
+		"intimidation": "cha",
+		"performance": "cha",
+		"persuasion": "cha",
+	},
 	ATB_ABV_TO_FULL: {
 		str: "Strength",
 		dex: "Dexterity",

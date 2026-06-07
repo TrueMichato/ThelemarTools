@@ -501,12 +501,17 @@ class SpellGrantParser {
 		if (typeof spellRef === "string") {
 			spells.push(this._parseSpellRef(spellRef, additionalProps));
 		} else if (spellRef?.choose) {
-			// Choice required - mark for UI
-			spells.push({
-				requiresChoice: true,
-				choiceFilter: spellRef.choose,
-				...additionalProps,
-			});
+			// Choice required - mark for UI. `count` (when present) means the player
+			// chooses that many spells from the same filter (e.g. Forest Sage grants a
+			// choice of TWO druid/wizard spells), so emit one pending choice per count.
+			const count = Number.isInteger(spellRef.count) && spellRef.count > 0 ? spellRef.count : 1;
+			for (let i = 0; i < count; i++) {
+				spells.push({
+					requiresChoice: true,
+					choiceFilter: spellRef.choose,
+					...additionalProps,
+				});
+			}
 		}
 	}
 
@@ -1343,6 +1348,41 @@ class FeatureModifierParser {
 				});
 			}
 		});
+
+		// "use your choice of {A} or {B} to make {skill}, {skill}, … checks"
+		// (e.g. Forest Sage: "use your choice of Intelligence or Wisdom to make
+		// Animal Handling, Arcana, Nature, or Survival checks"). Offers BOTH abilities
+		// as candidates for each listed skill; getSkillMod/getSkillBreakdown then take
+		// the player-favorable MAX of the skill's default and the offered abilities.
+		const choiceSwapMatch = plainText.match(/use\s+(?:your\s+)?choice\s+of\s+(\w+)\s+(?:or|and)\s+(\w+)\s+(?:modifiers?\s+)?(?:to\s+make|for)\b([^.]*?)\bchecks/i);
+		if (choiceSwapMatch) {
+			const abilA = choiceSwapMatch[1].toLowerCase().substring(0, 3);
+			const abilB = choiceSwapMatch[2].toLowerCase().substring(0, 3);
+			const validAbils = (Parser.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"]);
+			if (validAbils.includes(abilA) && validAbils.includes(abilB)) {
+				// Unwrap any @-tags ({@skill Arcana} → arcana) so multi-word skill
+				// names survive, then match against the canonical skill whitelist.
+				const skillBlob = choiceSwapMatch[3]
+					.replace(/\{@\w+\s+([^|}]+)(?:\|[^}]*)?\}/g, "$1")
+					.toLowerCase();
+				const skillNames = Object.keys(Parser.SKILL_TO_ATB_ABV || {});
+				skillNames.forEach(skillName => {
+					if (!skillBlob.includes(skillName)) return;
+					const skillKey = skillName.replace(/\s+/g, "");
+					const defaultAbil = Parser.SKILL_TO_ATB_ABV[skillName];
+					[abilA, abilB].forEach(newAbility => {
+						if (newAbility === defaultAbil) return; // no-op swap
+						modifiers.push({
+							type: `abilitySwap:${skillKey}`,
+							value: 0,
+							note: sourceName,
+							newAbility,
+							oldAbility: defaultAbil,
+						});
+					});
+				});
+			}
+		}
 
 		// ===================
 		// ADD ABILITY MODIFIER TO CHECKS/SAVES/DAMAGE
@@ -7092,7 +7132,16 @@ class CharacterSheetState {
 			const loreBonus = loreSkill.bonus || 0;
 			if (loreBonus !== 0) loreComponents.push({type: "lore", name: "Lore bonus", value: loreBonus, icon: "📚", isCanonical: true});
 			const custom = this.getSkillCustomMod(normalizedSkill);
-			if (custom !== 0) loreComponents.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
+			if (custom !== 0) {
+				const namedComps = this._getSkillNamedModifierComponents(normalizedSkill);
+				let itemized = 0;
+				namedComps.forEach(c => {
+					loreComponents.push({type: "custom", name: c.name, value: c.value, icon: "⚙️", isCanonical: false});
+					itemized += c.value;
+				});
+				const residual = custom - itemized;
+				if (residual !== 0) loreComponents.push({type: "custom", name: "Custom Modifier", value: residual, icon: "⚙️", isCanonical: false});
+			}
 			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
 			if (itemBonus !== 0) loreComponents.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
@@ -7153,7 +7202,19 @@ class CharacterSheetState {
 		}
 
 		const custom = this.getSkillCustomMod(normalizedSkill);
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
+		if (custom !== 0) {
+			// Itemize named feature bonuses (e.g. "Magician (Primal Order)") so each shows
+			// its source instead of a single generic "Custom Modifier" lump. A residual
+			// line covers any unnamed/manual remainder and keeps total === getSkillMod.
+			const namedComps = this._getSkillNamedModifierComponents(normalizedSkill);
+			let itemized = 0;
+			namedComps.forEach(c => {
+				components.push({type: "custom", name: c.name, value: c.value, icon: "⚙️", isCanonical: false});
+				itemized += c.value;
+			});
+			const residual = custom - itemized;
+			if (residual !== 0) components.push({type: "custom", name: "Custom Modifier", value: residual, icon: "⚙️", isCanonical: false});
+		}
 
 		const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
 		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
@@ -23450,6 +23511,19 @@ class CharacterSheetState {
 			if (mod.oldAbility) modifierData.oldAbility = mod.oldAbility;
 			if (mod.conditional) modifierData.conditional = mod.conditional;
 
+			// Idempotency guard: now that descriptions are derived from entries in more
+			// flows (addFeat), the same feature's prose could be parsed more than once.
+			// Skip if an equivalent modifier from the same source already exists so we
+			// never double-apply a parsed effect.
+			const isDuplicate = this._data.namedModifiers.some(existing =>
+				existing.sourceFeatureId === featureId
+				&& existing.type === modifierData.type
+				&& (existing.newAbility || null) === (modifierData.newAbility || null)
+				&& (existing.abilityMod || null) === (modifierData.abilityMod || null)
+				&& (existing.value || 0) === (modifierData.value || 0),
+			);
+			if (isDuplicate) return;
+
 			this.addNamedModifier(modifierData);
 
 			const valueStr = mod.setValue ? `=${mod.value}` : (mod.value >= 0 ? `+${mod.value}` : `${mod.value}`);
@@ -23465,7 +23539,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if there are pending spell choices that need UI interaction
 	 */
 	_processFeatureSpells (feature, featureId, opts = {}) {
-		const {allSpells} = opts;
+		const {allSpells, skipAdditionalSpellChoices} = opts;
 		let spells = [];
 		let hasPendingChoices = false;
 
@@ -23482,6 +23556,18 @@ class CharacterSheetState {
 		spells.forEach(spell => {
 			// Handle choice-required spells - add to pending choices
 			if (spell.requiresChoice) {
+				// Progression flows (LevelUp / QuickBuild / Builder) collect these choices
+				// up-front via their inline spell picker (buildFeatChoicesSpec +
+				// applyFeatBonuses). When they signal that, skip the pending-choice pipeline
+				// so the player isn't prompted twice for the same spells. Fixed (non-choose)
+				// grants below are unaffected and still applied.
+				//
+				// Only skip STRING-filter choose blocks: those are exactly what
+				// buildFeatChoicesSpec collects (it handles `typeof choose === "string"`).
+				// Object-shaped choose blocks (e.g. Initiate of High Sorcery's innate daily
+				// pick `{choose:{from:[…]}}`) are NOT collected inline, so they must keep
+				// flowing through the pending pipeline — otherwise they'd be zero-granted.
+				if (skipAdditionalSpellChoices && typeof spell.choiceFilter === "string") return;
 				this.addPendingSpellChoice({
 					featureName: feature.name,
 					featureId: featureId,
@@ -23680,7 +23766,23 @@ class CharacterSheetState {
 			return false;
 		}
 
-		// Auto-extract uses from feat description
+		// Derive a renderable description from entries when one isn't supplied. LevelUp /
+		// QuickBuild / Builder pass raw feat data that has `entries` but no rendered
+		// `description`; without this, the text-based parsers (uses, ability-swap and other
+		// modifiers, spell-text fallback) never run in those flows. The Features tab builds
+		// its own description, so this only fills the gap for the progression flows.
+		const description = feat.description
+			|| (feat.entries && globalThis.Renderer
+				? Renderer.get().render({type: "entries", entries: feat.entries})
+				: "");
+
+		// Auto-extract uses from feat description. Gate on the ORIGINALLY-supplied
+		// `feat.description` (not the derived one): the Features tab passes a built
+		// description and relies on this, but the progression flows pass raw feats with
+		// no description — running the generic uses-parser on a freshly-derived
+		// description there would newly fabricate "once per long rest"-style resources
+		// for official feats (Fey Touched, Magic Initiate, …) whose uses are already
+		// modeled via their spell grants. Keep that path's prior behavior unchanged.
 		let uses = feat.uses;
 		if (!uses && feat.description) {
 			const getAbilityMod = (ability) => this.getAbilityMod(ability);
@@ -23692,7 +23794,7 @@ class CharacterSheetState {
 			id: CryptUtil.uid(),
 			name: feat.name,
 			source: feat.source,
-			description: feat.description,
+			description: description,
 			additionalSpells: feat.additionalSpells, // Preserve for spell processing
 			isOriginFeat: feat.isOriginFeat || false,
 			backgroundName: feat.backgroundName || null,
@@ -23747,7 +23849,7 @@ class CharacterSheetState {
 		}
 
 		// Process spells granted by this feat
-		this._processFeatureSpells(featData, featData.id, {allSpells: opts.allSpells});
+		this._processFeatureSpells(featData, featData.id, {allSpells: opts.allSpells, skipAdditionalSpellChoices: opts.skipAdditionalSpellChoices});
 
 		// Process modifiers granted by this feat
 		this._processFeatureModifiers(featData, featData.id);
@@ -28637,6 +28739,47 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Compute the effective numeric value of a named modifier, applying the same
+	 * per-level and proficiency-bonus rules used when folding modifiers into the
+	 * cached customModifiers totals. Shared by _recalculateCustomModifiers and the
+	 * skill-breakdown itemizer so their math can never drift apart.
+	 * @param {object} mod - A named modifier
+	 * @returns {number} The effective value
+	 */
+	_getNamedModifierEffectiveValue (mod) {
+		let value = mod.value || 0;
+		if (mod.perLevel) {
+			const totalLevel = this.getTotalLevel() || 1;
+			value = value * totalLevel;
+		}
+		if (mod.proficiencyBonus) {
+			value += this.getProficiencyBonus();
+		}
+		return value;
+	}
+
+	/**
+	 * Itemize the enabled named modifiers that contribute a flat value to a skill
+	 * (type `skill:<skill>` or `skill:all`), so a breakdown can attribute each to its
+	 * source feature instead of lumping them into one generic "Custom Modifier" line.
+	 * Mirrors the skill handling in _recalculateCustomModifiers; abilityMod-based skill
+	 * modifiers contribute 0 here (they surface separately as the "Feature Bonus" line).
+	 * @param {string} normalizedSkill - Skill key (lowercase, no spaces)
+	 * @returns {Array<{name:string, value:number}>}
+	 */
+	_getSkillNamedModifierComponents (normalizedSkill) {
+		const out = [];
+		(this._data.namedModifiers || []).forEach(mod => {
+			if (!mod.enabled) return;
+			if (mod.type !== `skill:${normalizedSkill}` && mod.type !== "skill:all") return;
+			const value = this._getNamedModifierEffectiveValue(mod);
+			if (!value) return;
+			out.push({name: mod.name || "Custom Modifier", value});
+		});
+		return out;
+	}
+
+	/**
 	 * Recalculate the quick-access customModifiers totals from named modifiers
 	 * This updates the cached totals used by getSaveMod, getSkillMod, getAc, etc.
 	 */
@@ -28666,18 +28809,9 @@ class CharacterSheetState {
 		this._data.namedModifiers.forEach(mod => {
 			if (!mod.enabled) return;
 
-			let value = mod.value || 0;
-
-			// Handle per-level modifiers
-			if (mod.perLevel) {
-				const totalLevel = this.getTotalLevel() || 1;
-				value = value * totalLevel;
-			}
-
-			// Handle proficiency-bonus-as-value modifiers (e.g., XPHB Alert: +prof to initiative)
-			if (mod.proficiencyBonus) {
-				value += this.getProficiencyBonus();
-			}
+			// Effective value (per-level / proficiency-bonus rules) via shared helper
+			// so the skill-breakdown itemizer stays in lock-step with these totals.
+			let value = this._getNamedModifierEffectiveValue(mod);
 
 			switch (mod.type) {
 				case "ac": cm.ac += value; break;
