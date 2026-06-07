@@ -936,16 +936,21 @@ class CharacterSheetFeatures {
 				// Get the group key and name from optionalFeatureTypes
 				// For combat methods, use the tradition code as the key (so all AM methods group together)
 				let groupKey = f.optionalFeatureTypes?.join("_") || "other";
+				let groupName;
 
-				// Check if this is a combat method - if so, group by tradition
+				// Combat methods carry degree-only type codes (e.g. ["CTM:1",…,"CTM:5"])
+				// with the tradition in a separate `tradition` field — so derive both
+				// the key and the human name from the tradition, not the type codes
+				// (which would render as "CTM 1, CTM 2, …").
 				if (CharacterSheetClassUtils.isCombatMethod(f)) {
 					const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(f);
-					if (tradCode) {
-						groupKey = `CTM:${tradCode}`;
-					}
+					const tradName = CharacterSheetClassUtils.getMethodTraditionName(f);
+					groupKey = `CTM:${tradCode || tradName || "unknown"}`;
+					groupName = tradName ? `Combat Methods: ${tradName}` : "Combat Methods";
+				} else {
+					groupName = this._getOptionalFeatureGroupName(f.optionalFeatureTypes);
 				}
 
-				const groupName = this._getOptionalFeatureGroupName(f.optionalFeatureTypes);
 				if (!optFeatureGroups[groupKey]) {
 					optFeatureGroups[groupKey] = {name: groupName, features: []};
 				}
@@ -1152,64 +1157,15 @@ class CharacterSheetFeatures {
 		// Render calculated class statistics (Sneak Attack, Ki DC, etc.) at the top
 		this._renderCalculatedStats(container);
 
-		// Helper to create feature link - always display feature name
+		// Helper to create feature link - always display feature name.
+		// Delegates to the centralised page builder (`_getFeatureHoverLink`) so the
+		// summary stays consistent with the full feature list and inline
+		// feature-options (e.g. TGTT Specialties) resolve via a local hover.
 		const getFeatureHtml = (feature) => {
 			let featureNameHtml = feature.name;
-			if (this._page?.getHoverLink) {
+			if (this._page?._getFeatureHoverLink) {
 				try {
-					// Species/Race features link to races page - but SHOW THE FEATURE NAME
-					if (feature.featureType === "Species" || feature.featureType === "Race" || feature.featureType === "Subrace") {
-						const race = this._state.getRace();
-						if (race) {
-							// Create link that shows feature name but hovers/links to race
-							const raceHash = UrlUtil.encodeForHash([race.name, race.source || Parser.SRC_XPHB].join(HASH_LIST_SEP));
-							const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_RACES, source: race.source || Parser.SRC_XPHB, hash: raceHash});
-							featureNameHtml = `<a href="${UrlUtil.PG_RACES}#${raceHash}" ${hoverAttrs}>${feature.name}</a>`;
-						}
-					// Class/Subclass features
-					} else if (feature.source && feature.className) {
-						// Determine the actual (classSource, featureSource) for hover links.
-						// See CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources for the
-						// rules — in particular, for SUBCLASS features the class source must come
-						// from the stored class or from the canonical subclassFeatures match, not
-						// from `feature.source` (which is the subclass source) and not from
-						// `storedClass?.source` for TGTT-copy-of-EGW subclasses (Bug 12 / Phase 5.5a).
-						const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
-
-						const {classSource: actualClassSource, featureSource: actualFeatureSource, subclassSource: canonicalSubclassSource} =
-							CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources(feature, storedClass, {
-								classFeatures: this._page?.getClassFeatures?.() || [],
-								subclassFeatures: this._page?.getSubclassFeatures?.() || [],
-							});
-
-						const hashInput = {
-							name: feature.name,
-							className: feature.className,
-							classSource: actualClassSource,
-							level: feature.level || 1,
-							source: actualFeatureSource,
-						};
-						if (feature.subclassName) {
-							hashInput.subclassShortName = feature.subclassShortName || feature.subclassName;
-							hashInput.subclassSource = canonicalSubclassSource || feature.subclassSource || storedClass?.subclass?.source || feature.source;
-						}
-						const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
-						featureNameHtml = this._page.getHoverLink(
-							UrlUtil.PG_CLASS_SUBCLASS_FEATURES,
-							feature.name,
-							actualFeatureSource,
-							hash,
-						);
-					// Background features - show feature name but link to background
-					} else if (feature.featureType === "Background") {
-						const background = this._state.getBackground();
-						// Only create hover link for non-custom backgrounds
-						if (background && background.source !== "Custom") {
-							const bgHash = UrlUtil.encodeForHash([background.name, background.source || Parser.SRC_XPHB].join(HASH_LIST_SEP));
-							const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_BACKGROUNDS, source: background.source || Parser.SRC_XPHB, hash: bgHash});
-							featureNameHtml = `<a href="${UrlUtil.PG_BACKGROUNDS}#${bgHash}" ${hoverAttrs}>${feature.name}</a>`;
-						}
-					}
+					featureNameHtml = this._page._getFeatureHoverLink(feature) || feature.name;
 				} catch (e) {
 					// Fall back to plain name
 				}
@@ -1578,6 +1534,11 @@ class CharacterSheetFeatures {
 			if (tradCode) {
 				return `Combat Methods: ${CharacterSheetClassUtils.getTraditionName(tradCode)}`;
 			}
+			// Degree-only code (e.g. "CTM:1") carries no tradition — fall back to a
+			// generic label rather than leaking the raw "CTM 1" code. The grouping
+			// loop derives the precise tradition name from the feature's own
+			// `tradition` field; this is only a defensive fallback.
+			return "Combat Methods";
 		}
 
 		// Try to find a matching name
@@ -1593,69 +1554,14 @@ class CharacterSheetFeatures {
 		const isExpanded = this._expandedFeatures.has(feature.id);
 		const hasUses = feature.uses && feature.uses.max > 0;
 
+		// Feature name hover link — delegate to the single centralised builder on
+		// the page so every feature type (class/subclass, species, background,
+		// optional features/combat methods, and inline feature-options like TGTT
+		// Specialties) resolves consistently and never 404s on a missing hash.
 		let featureNameHtml = feature.name;
-		if (this._page?.getHoverLink) {
+		if (this._page?._getFeatureHoverLink) {
 			try {
-				// Class/Subclass features - link to the actual class feature page.
-				// Delegates to the centralised helper so this site converges with
-				// `charactersheet.js:_getFeatureHoverLink` (Phase 5 Round-3 fix).
-				if (feature.featureType === "Class" && feature.className) {
-					const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
-
-					const classFeatures = this._page?.getClassFeatures?.() || [];
-					const subclassFeatures = this._page?.getSubclassFeatures?.() || [];
-
-					const {classSource: actualClassSource, featureSource: actualFeatureSource, subclassSource: canonicalSubclassSource} =
-						CharacterSheetClassUtils.resolveCanonicalFeatureHoverSources(feature, storedClass, {
-							classFeatures,
-							subclassFeatures,
-						});
-
-					const hashInput = {
-						name: feature.name,
-						className: feature.className,
-						classSource: actualClassSource || Parser.SRC_XPHB,
-						level: feature.level || 1,
-						source: actualFeatureSource || Parser.SRC_XPHB,
-					};
-					if (feature.subclassName || feature.isSubclassFeature) {
-						hashInput.subclassShortName = feature.subclassShortName || feature.subclassName;
-						hashInput.subclassSource = canonicalSubclassSource || feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
-					}
-					const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
-					featureNameHtml = this._page.getHoverLink(
-						UrlUtil.PG_CLASS_SUBCLASS_FEATURES,
-						feature.name,
-						actualFeatureSource || Parser.SRC_XPHB,
-						hash,
-					);
-				// Species/Race features - link to races page with hover
-				} else if (feature.featureType === "Species" || feature.featureType === "Race" || feature.featureType === "Subrace") {
-					const race = this._state.getRace();
-					if (race) {
-						// Use getHoverLink but display the feature name
-						const raceHash = UrlUtil.encodeForHash([race.name, race.source || Parser.SRC_XPHB].join(HASH_LIST_SEP));
-						const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_RACES, source: race.source || Parser.SRC_XPHB, hash: raceHash});
-						featureNameHtml = `<a href="${UrlUtil.PG_RACES}#${raceHash}" ${hoverAttrs}>${feature.name}</a>`;
-					}
-				// Background features - link to background page with hover
-				} else if (feature.featureType === "Background") {
-					const background = this._state.getBackground();
-					// Only create hover link for non-custom backgrounds
-					if (background && background.source !== "Custom") {
-						const bgHash = UrlUtil.encodeForHash([background.name, background.source || Parser.SRC_XPHB].join(HASH_LIST_SEP));
-						const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_BACKGROUNDS, source: background.source || Parser.SRC_XPHB, hash: bgHash});
-						featureNameHtml = `<a href="${UrlUtil.PG_BACKGROUNDS}#${bgHash}" ${hoverAttrs}>${feature.name}</a>`;
-					}
-				// Optional features (invocations, combat methods, etc.) - link to appropriate page with hover
-				} else if (feature.featureType === "Optional Feature") {
-					const isCM = CharacterSheetClassUtils.isCombatMethod(feature);
-					featureNameHtml = this._page.getHoverLink(
-						isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES,
-						feature.name,
-						feature.source || Parser.SRC_XPHB,
-					);
-				}
+				featureNameHtml = this._page._getFeatureHoverLink(feature) || feature.name;
 			} catch (e) {
 				// eslint-disable-next-line no-console
 				console.error("[CharSheet Features] Error creating feature link:", e);

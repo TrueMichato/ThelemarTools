@@ -6949,6 +6949,17 @@ class CharacterSheetPage {
 		try {
 			// Class features - link to class feature page
 			if (feature.featureType === "Class" && feature.className) {
+				// Feature-options (e.g. TGTT "Specialties" picks) and any class
+				// feature that isn't present in the loaded class/subclass data pool
+				// have no resolvable `classfeatures.html` hash — building one yields
+				// "Failed to load renderable content". They are stored on the
+				// character with their own `entries`, so render a local inline hover
+				// from those instead. Real (loadable) features keep the canonical
+				// hash hover below.
+				if (feature.entries?.length && !CharacterSheetClassUtils.findLoadedFeatureEntity(feature, {classFeatures: this._classFeatures, subclassFeatures: this._subclassFeatures})) {
+					const localLink = CharacterSheetClassUtils.buildLocalFeatureHoverLink(feature);
+					if (localLink) return localLink;
+				}
 				const storedClass = this._state.getClasses().find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
 
 				// Resolve canonical (classSource, featureSource, subclassSource) using both
@@ -6986,7 +6997,7 @@ class CharacterSheetPage {
 				return this.getHoverLink(isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES, feature.name, feature.source || Parser.SRC_XPHB);
 			}
 			// Species/Race features
-			if (feature.featureType === "Species" || feature.featureType === "Race") {
+			if (feature.featureType === "Species" || feature.featureType === "Race" || feature.featureType === "Subrace") {
 				const race = this._state.getRace();
 				if (race) {
 					const hash = UrlUtil.encodeForHash([race.name, race.source || Parser.SRC_XPHB].join(HASH_LIST_SEP));

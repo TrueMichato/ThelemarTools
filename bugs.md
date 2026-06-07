@@ -3,10 +3,6 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-## Combat Methods
-* The feature name for the combat methods at the feature tab is "CTM 1, CTM 2, CTM 3, CTM 4, CTM 5"
-
-
 ## ⭐ Feats
 
 * **Forest Sage (Prepping for next level):** This feat correctly allows for a stat increase, but it only lets me choose **one** Wizard spell instead of **two**. Additionally, it fails to change the base ability score for Arcana and Nature to Wisdom.
@@ -18,28 +14,6 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 * **Skill Bonus Breakdown:** I really like the skill breakdown UI, but under Nature/Arcana, it lists the bonus from the *Magician* feature generically as a "Custom Modifier" rather than stating the feature's name explicitly.
 * In the spells tab, the display for amount of spells known/prepared is showing wrong numbers and is generally confusing. What we want is a multiclass compatible approach - you should have modals for spells and cantrips of each class you have (i.e warlock spells, warlock cantrips, sorcerer spells, sorcerer cantrips) that each count the amount of spells you have from each list. Drop the known vs prepared names (this is a mechanic side we want to remember and maybe help enforce, but is confusing. Remember - bards, sorcerers, warlocks all have a limited number of spells they know, clerics and druids have spells they prepare each morning, wizards have the spellbook mechanics which are completly different), and the 2014 vs 2024 badges. We want to be able to tell how many spells we have in each class.
 * Also regarding multiclass spellcasters, each class has its own spell save DC and spell attack modifier, it is just that if both class have the same spellcasting ability and no special modifiers it can be exactly the same. We want to display this clearly and track this clearly.
-* some specialties have a hover problem:
-render.js:15823 Uncaught (in promise) Error: Failed to load renderable content for: page="classfeatures.html" source="TGTT" hash="poisons%20and%20antidotes_ranger_tgtt_2_tgtt" preloadId="null" customHashId="undefined" isFluff="undefined"
-    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15823:9)
-    at Renderer.hover.pHandleLinkMouseOver (render.js:15738:9)
-_pHandleLinkMouseOver_doVerifyToRender @ render.js:15823
-pHandleLinkMouseOver @ render.js:15738
-render.js:15823 Uncaught (in promise) Error: Failed to load renderable content for: page="classfeatures.html" source="TGTT" hash="build%20shelter_ranger_tgtt_4_tgtt" preloadId="null" customHashId="undefined" isFluff="undefined"
-    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15823:9)
-    at Renderer.hover.pHandleLinkMouseOver (render.js:15738:9)
-_pHandleLinkMouseOver_doVerifyToRender @ render.js:15823
-pHandleLinkMouseOver @ render.js:15738
-await in pHandleLinkMouseOver
-Renderer.hover.pHandleLinkMouseOver @ charactersheet.js:747
-onmouseover @ charactersheet.html?id=100834a7-00c2-4af2-872b-74ddfe93b2fa:1
-render.js:15823 Uncaught (in promise) Error: Failed to load renderable content for: page="classfeatures.html" source="TGTT" hash="read%20the%20room_ranger_tgtt_6_tgtt" preloadId="null" customHashId="undefined" isFluff="undefined"
-    at Renderer.hover._pHandleLinkMouseOver_doVerifyToRender (render.js:15823:9)
-    at Renderer.hover.pHandleLinkMouseOver (render.js:15738:9)
-_pHandleLinkMouseOver_doVerifyToRender @ render.js:15823
-pHandleLinkMouseOver @ render.js:15738
-await in pHandleLinkMouseOver
-Renderer.hover.pHandleLinkMouseOver @ charactersheet.js:747
-onmouseover @ charactersheet.html?id=100834a7-00c2-4af2-872b-74ddfe93b2fa:1
 
 
 ## Respec
@@ -63,6 +37,10 @@ onmouseover @ charactersheet.html?id=100834a7-00c2-4af2-872b-74ddfe93b2fa:1
 
 
 ## Closed Bugs
+
+* **Combat Methods (group header showed "CTM 1, CTM 2, CTM 3, CTM 4, CTM 5"):** On the Features tab, combat-method optional features were grouped under a placeholder header reading the raw degree codes instead of the tradition name. Root cause: stored (legacy) combat-method features carry **degree-only** optional-feature type codes `["CTM:1", … , "CTM:5"]` with the actual tradition in a *separate* `tradition` field (e.g. `"Razor's Edge"`). The grouping loop in `charactersheet-features.js` (`_renderClassFeatures`) keyed the group correctly via `getMethodTraditionCode`, but took the group **name** from `_getOptionalFeatureGroupName(f.optionalFeatureTypes)`, which only extracts a tradition from a *type code* (`CTM:1RE`-style); with degree-only codes it stripped the digit → empty → fell through to the final fallback `featureTypes.map(ft => ft.replace(/:/g," ")).join(", ")` → "CTM 1, CTM 2, …", which became the header the user saw. Fixed generically (architecture-first, benefits every combat-method-granting class/flow): the grouping loop now derives both the key and the human name from the tradition via the existing `CharacterSheetClassUtils.isCombatMethod` / `getMethodTraditionCode` / `getMethodTraditionName` helpers (`getMethodTraditionName` already reads the `tradition` field for the new-entity shape and falls back to the code for the legacy shape), rendering `Combat Methods: <Tradition>` and keying `CTM:<code|name|unknown>` so the two traditions never collide. Hardened `_getOptionalFeatureGroupName` as defense-in-depth: any degree-only `CTM:` type now returns a safe `"Combat Methods"` instead of leaking raw `CTM N` codes. **No migration needed** — display-only; existing characters (e.g. Lunaria) render correctly on load. Covered by `CharacterSheetCombatMethodGroupName.test.js` (8 tests).
+
+* **Specialty hover ("Failed to load renderable content for: page=classfeatures.html"):** Hovering certain TGTT Ranger specialties (Poisons and Antidotes, Build Shelter, Read the Room) threw in `render.js` because the tooltip pointed at a `classfeatures.html` hash that doesn't resolve (`poisons and antidotes_ranger_tgtt_2_tgtt`, etc.). Root cause: these specialties are stored as `classFeature`-typed features flagged `isFeatureOption: true` / `parentFeature: "Specialties"` — **inline picks nested under a parent feature** that do NOT exist as standalone `classFeature` entities in the loadable `classfeatures.html` data pool. The feature-hover builder nonetheless built the canonical `classFeature` hash and `Renderer.hover` 404'd because nothing with that hash exists. The link was also being built in **three** duplicated places (`charactersheet.js::_getFeatureHoverLink`, and `charactersheet-features.js`'s `_renderFeature` + the summary's `getFeatureHtml`). Fixed generically (architecture-first, DRY): feature-options are stored **with their own `entries`**, so they don't need the remote pool at all. Added two static helpers to `CharacterSheetClassUtils` — `findLoadedFeatureEntity(feature, {classFeatures, subclassFeatures})` (numeric-level, case-insensitive match — incl. subclass short-name — to decide whether a canonical hash will actually resolve) and `buildLocalFeatureHoverLink(feature)` (builds a `ve-help-subtle` inline hover from the feature's own entries via `Renderer.hover.getInlineHover({type:"entries", …})` — no hash, no network/data-pool dependency, always resolves). The central `_getFeatureHoverLink` now routes any class feature that's absent from the loaded pool (and carries `entries`) through the local inline hover; real, loadable class/subclass features are unaffected and keep the canonical hash hover. The two Features-tab builders were de-duplicated to **delegate** to the single page builder, so every flow stays consistent. (Also added `"Subrace"` to the Species/Race branch for parity.) **No migration needed** — hover/display-only. Covered by `CharacterSheetFeatureOptionHover.test.js` (12 tests); the full charactersheet suite (160 suites / 8741 tests) stays green.
 
 * **Resilient (no save proficiency granted):** Taking Resilient raised the chosen ability by 1 but never granted proficiency in that ability's saving throw. Root cause: Resilient is a half-feat whose data carries `savingThrowProficiencies: [{choose: {from: […]}}]` alongside its `ability` choose-block — the save is *implicitly tied to the chosen ability* (one pick) — but **no** character-sheet code read `feat.savingThrowProficiencies`: the central `applyFeatBonuses` handled ability/skill/language/expertise/spells only, and the Features-tab inline apply (which doesn't route through `applyFeatBonuses`) likewise skipped it. A stale registry entry `register("Resilient", [{type: "saveProficiency", save: "chosen"}])` existed but its handler deliberately no-ops `"chosen"`, so nothing was applied. Fixed generically (architecture-first, DRY — benefits every save-granting feat): added `CharacterSheetClassUtils.resolveFeatSaveProficiencies(feat, choices)`, which resolves a `choose` block to the chosen ability (respecting any `from` allowlist) and also handles pre-resolved `"con"` / `{con: true}` forms, de-duped and validated against `Parser.ABIL_ABVS`. Wired it into `applyFeatBonuses` (covers **Level-Up / Quick-Build / Builder / Respec**) and the Features-tab inline apply, each calling `state.addSaveProficiency()` (which dedupes). No new picker — the save is derived from the existing ability choice, so the combined half-feat now grants both the +1 and the matching save in every flow. The harmless registry no-op was left as-is. Covered by `CharacterSheetResilientSaveProficiency.test.js` (14 tests).
 
