@@ -6,7 +6,7 @@ This document details the spellcasting management system in the character sheet.
 
 The `CharacterSheetSpells` module handles all spellcasting functionality:
 - Spell slot tracking
-- Known/prepared spell management
+- Per-class spell & cantrip tracking (multiclass-aware; see below)
 - Pact magic (Warlock)
 - Spell casting and concentration
 - Ritual casting
@@ -374,6 +374,82 @@ _getMaxPreparedSpells() {
     return Infinity; // Known casters don't have a limit
 }
 ```
+
+---
+
+## Per-Class Spell Tracking (Multiclass)
+
+The Spells-tab header and per-spell cast routing are **per spellcasting class**,
+not collapsed into a single aggregate. This is the source of truth for what the
+player sees as counts, save DC, and spell attack.
+
+### `getSpellcastingClassBreakdown()` (state)
+
+Returns one card object per caster class (including subclass casters — Eldritch
+Knight, Arcane Trickster, Gambler, Architect of Ruin):
+
+```javascript
+{
+  className, classSource, subclassName,
+  displayName,        // subclass name for subclass-derived casters, else class name
+  ability, abilityLabel,
+  saveDc, attackBonus, // per-class (uses this class's spellcasting ability)
+  mechanic,           // "known" | "prepared" | "spellbook" | "rolled"
+  is2024, isRolledPrepared, preparedDice,
+  spellsCount, spellsMax, spellsGranted,     // player-chosen vs cap; +granted feature spells
+  cantripsCount, cantripsMax, cantripsGranted,
+  matchKeys,          // lowercased class/subclass keys (incl. "gambler") for attribution
+}
+```
+
+Attribution: a spell/cantrip belongs to a card when its `sourceClass` **or**
+`sourceSubclass` is in that card's `matchKeys`. Player-chosen vs feature-granted
+is split by `isPlayerChosenSpell` — granted spells (subclass always-prepared like
+Zodiac's Guiding Bolt, the Magician bonus cantrip) are reported as `+N granted`
+and excluded from the count. Wizard spellbook classes (`mechanic === "spellbook"`)
+show a capless count. Anything matching no card is summed by
+`getUnattributedSpellCounts()` into an **"Other / Unattributed"** card so legacy
+or mis-stamped data is never lost.
+
+### Per-class ability / DC / attack
+
+- `getSpellcastingAbilityForClass(cls)` — EK/AT→`int`, Gambler/Architect→`cha`,
+  else `cls.spellcastingAbility`, else a static class→ability map.
+- `getSpellcastingAbilityForSpell(spell)` — resolves a spell's casting ability
+  from its `sourceClass`/`sourceSubclass` (fallback to the global ability).
+- `getSpellSaveDcForAbility(ability)` / `getSpellAttackBonusForAbility(ability)` —
+  the no-arg `getSpellSaveDc()` / `getSpellAttackBonus()` delegate to these with
+  the global ability (values unchanged for back-compat). DC includes item/custom
+  + exhaustion; attack is exhaustion-free (penalty applied once at roll time).
+
+Each class has its **own** save DC and spell attack; they coincide only when the
+classes share a spellcasting ability with no special modifiers. The Combat tab
+and Overview quick-spell headers show the shared value when all classes agree,
+otherwise **"Varies"** with a per-class tooltip.
+
+### UI (Spells tab)
+
+`_renderSpellTrackingUI()` renders one card per breakdown entry into
+`#charsheet-spellcasting-stats` (replacing the old single-ability header + four
+fixed known/prepared/cantrip boxes). Each card shows Ability • Save DC • Spell
+Attack and clickable **Spells**/**Cantrips** chips (`current/max`, `+N granted`,
+over-limit colouring). There are **no** "known"/"prepared" labels or 2014/2024
+badges in the UI — the mechanic is retained in the backend (and a subtle
+tooltip) for enforcement only. Clicking a chip opens a class-scoped Add-Spell
+modal; `targetClass` is threaded `_showSpellPicker → _pShowSpellPickerModal →
+_addSpell → pickAddedSpellAttribution` so the new spell is stamped with the
+correct `sourceClass`/`sourceFeature`. The primary card keeps the legacy
+`#charsheet-spell-ability/-dc/-attack` ids; all cards carry the
+`.charsheet__spell-ability/-dc/-attack` classes.
+
+### Cast-time routing
+
+`_castSpell`, `_applySpellEffectsToSelf`, and `_rollSpellHealing` route the
+casting modifier per spell via `getSpellcastingAbilityForSpell(spell)`; the
+static `calculateSpellHealing(spell, slotLevel, caster, abilityOverride)` takes
+an optional `abilityOverride`. Gambler is a per-spell mode keyed on
+`spell.sourceClass/sourceSubclass === "Gambler"`, and `_togglePrepared` enforces
+the Gambler rolled cap on Gambler-attributed spells (so it works in multiclass).
 
 ---
 
