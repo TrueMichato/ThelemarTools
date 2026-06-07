@@ -63,7 +63,7 @@ All Bard colleges are fully implemented:
 #### Ranger Conclaves ✅
 All Ranger subclasses are fully implemented:
 - **Beast Master**: `companionProfBonus`, `companionAttacks`, `hasShareSpells`
-- **Hunter**: `colossusSlayerDamage`, `multiattackDefenseBonus`, `hasSuperiorHuntersDefense`
+- **Hunter**: `colossusSlayerDamage`, `multiattackDefenseBonus`, `hasSuperiorHuntersDefense` — Hunter's Prey is option-gated (Colossus Slayer / Horde Breaker / Giant Killer) and surfaces as an interactive weapon-damage rider in combat (TGTT). TGTT Primal Focus (Predator/Prey modes + upgrades) and the level 1–20 TGTT Ranger feature line (Tireless, Enduring Traveler, Unrivaled Pioneer, Penetrating Senses, Apex Sentinel, Battle Instincts, Apex Focus, …) are mechanically wired and displayed via a dedicated overview Ranger panel.
 - **Gloom Stalker**: `dreadAmbusherInitiativeBonus`, `umbralSightDarkvisionBonus`, `hasShadowyDodge`
 - **Horizon Walker**: `planarWarriorDamage`, `distantStrikeTeleportRange`, `hasSpectralDefense`
 - **Monster Slayer**: `huntersSenseUses`, `slayersPreyDamage`, `supernaturalDefenseBonus`
