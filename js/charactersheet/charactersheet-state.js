@@ -3789,6 +3789,13 @@ class CharacterSheetState {
 		// Ensure unarmed strike exists for all characters
 		this.ensureUnarmedStrike();
 
+		// Reconcile Hit Dice from class levels: `max` is canonical (sum of class
+		// levels per die type) and `current` preserves spent dice. This repairs
+		// older saves that drifted (e.g. a multiclass off-by-one that stored a die
+		// too many) and backfills legacy saves that have no `hitDice` field, while
+		// leaving correct saves untouched.
+		this._recalculateHitDice();
+
 		// Re-apply class feature effects (proficiencies, resistances, etc.)
 		// so that saved characters get all calculation-based effects on load
 		this.applyClassFeatureEffects();
@@ -6289,19 +6296,41 @@ class CharacterSheetState {
 	}
 
 	_recalculateHitDice () {
-		const hitDice = {};
+		// `max` is canonical: the sum of class levels per die type (5e: one Hit
+		// Die per class level). `current` preserves *spent* dice — leveling up or
+		// adding a class grants a new die but never restores spent ones. This is
+		// derived (absolute), so it is idempotent: calling it repeatedly does NOT
+		// inflate the pools (unlike an incremental "+1 per level" approach).
+		const prev = (this._data.hitDice && typeof this._data.hitDice === "object" && !Array.isArray(this._data.hitDice))
+			? this._data.hitDice
+			: {};
+
+		const next = {};
 		this._data.classes.forEach(cls => {
 			const dieType = `d${this._getClassHitDie(cls.name)}`;
-			if (!hitDice[dieType]) {
-				hitDice[dieType] = {current: 0, max: 0};
-			}
-			hitDice[dieType].max += cls.level;
-			hitDice[dieType].current = Math.min(
-				hitDice[dieType].current + cls.level,
-				hitDice[dieType].max,
-			);
+			if (!next[dieType]) next[dieType] = {current: 0, max: 0};
+			next[dieType].max += (Number(cls.level) || 0);
 		});
-		this._data.hitDice = hitDice;
+
+		for (const [dieType, pool] of Object.entries(next)) {
+			const old = prev[dieType];
+			// Spent dice carried over from the previous pool (clamped ≥ 0).
+			const spent = old
+				? Math.max(0, (Math.floor(Number(old.max)) || 0) - (Math.floor(Number(old.current)) || 0))
+				: 0;
+			pool.current = Math.max(0, Math.min(pool.max, pool.max - spent));
+		}
+
+		this._data.hitDice = next;
+	}
+
+	/**
+	 * Public wrapper for {@link _recalculateHitDice}. Lets LevelUp / QuickBuild /
+	 * ClassUtils reconcile the per-die-type pools from the current class levels
+	 * (max derived, spent preserved) without reaching into a private method.
+	 */
+	recalculateHitDice () {
+		this._recalculateHitDice();
 	}
 
 	getHitDice () {
@@ -6358,6 +6387,43 @@ class CharacterSheetState {
 
 	getHitDiceByType () {
 		return {...this._data.hitDice};
+	}
+
+	/**
+	 * Manually adjust the *current* (available) Hit Dice of one die-type pool,
+	 * clamped to `[0, max]`. Does NOT heal — this is for player corrections and
+	 * the +/- controls on the Overview, distinct from spending a die to heal.
+	 * @param {string} dieType - e.g. "d8", "d10"
+	 * @param {number} delta - signed amount to add to `current`
+	 * @returns {boolean} true if the stored value changed
+	 */
+	adjustHitDieCurrent (dieType, delta) {
+		const pool = this._data.hitDice?.[dieType];
+		if (!pool || typeof pool !== "object") return false;
+		const max = Math.max(0, Math.floor(Number(pool.max)) || 0);
+		const cur = Math.max(0, Math.min(max, Math.floor(Number(pool.current)) || 0));
+		const next = Math.max(0, Math.min(max, cur + (Math.floor(Number(delta)) || 0)));
+		// Normalise even when unchanged so a malformed stored value gets repaired.
+		pool.current = next;
+		return next !== cur;
+	}
+
+	/**
+	 * Returns the die type (e.g. "d10") of the largest-faced pool that still has
+	 * dice available to spend, or null if none remain. Used by the single
+	 * Overview "Use Hit Die" button to pick a sensible die for multiclass
+	 * characters (Short Rest offers full per-type control).
+	 * @returns {string|null}
+	 */
+	getLargestSpendableHitDieType () {
+		let best = null;
+		let bestSize = 0;
+		for (const [type, pool] of Object.entries(this._data.hitDice || {})) {
+			if (!pool || (Math.floor(Number(pool.current)) || 0) <= 0) continue;
+			const size = parseInt(String(type).replace("d", ""), 10) || 0;
+			if (size > bestSize) { bestSize = size; best = type; }
+		}
+		return best;
 	}
 
 	useHitDie (dieType = null) {

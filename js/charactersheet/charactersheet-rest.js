@@ -297,10 +297,12 @@ class CharacterSheetRest {
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✓ Finish Short Rest"});
 		btnConfirm.onClick(() => {
-			// Apply hit dice spending using spentDice tracker
+			// Apply hit dice spending using spentDice tracker. The healing was
+			// already rolled into `totalHealing` above, so decrement the pools
+			// WITHOUT healing again (useHitDie() would heal a second time).
 			Object.entries(spentDice).forEach(([dieType, count]) => {
 				for (let i = 0; i < count; i++) {
-					this._state.useHitDie(dieType);
+					this._state.adjustHitDieCurrent(dieType, -1);
 				}
 			});
 
