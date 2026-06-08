@@ -54,6 +54,135 @@ class CharacterSheetClassUtils {
 		return standardAsiLevels.includes(level);
 	}
 
+	// ==========================================
+	// Overview Display: Speed & Senses
+	// ==========================================
+
+	/**
+	 * Display metadata for each movement type. `word` is the human label used for
+	 * titles / aria; `wordPrefix` reproduces the exact prefix used by
+	 * `CharacterSheetState.getSpeed()` in the legacy word display (walk has none).
+	 * @type {Record<string, {emoji: string, word: string, wordPrefix: string}>}
+	 */
+	static SPEED_DISPLAY_META = {
+		walk: {emoji: "🚶", word: "Walk", wordPrefix: ""},
+		fly: {emoji: "🦅", word: "Fly", wordPrefix: "fly "},
+		climb: {emoji: "🧗", word: "Climb", wordPrefix: "climb "},
+		swim: {emoji: "🏊", word: "Swim", wordPrefix: "swim "},
+		burrow: {emoji: "⛏️", word: "Burrow", wordPrefix: "burrow "},
+	};
+
+	/**
+	 * Parse a formatted speed string (as produced by `getSpeed()` with no
+	 * argument) into structured segments. The first comma-separated segment is
+	 * the walk speed (no label); subsequent segments are prefixed with a movement
+	 * type word ("fly "/"swim "/"climb "/"burrow "). Any trailing annotation on a
+	 * segment (e.g. exhaustion " (-5)" / " (halved)") is preserved as part of the
+	 * value so the display round-trips losslessly.
+	 * @param {string} speedStr - e.g. "40 ft., fly 60 ft., swim 30 ft."
+	 * @returns {Array<{type: string, value: string}>}
+	 */
+	static parseSpeedString (/** @type {*} */ speedStr) {
+		const raw = (speedStr == null ? "" : String(speedStr)).trim();
+		if (!raw) return [];
+		const prefixed = Object.entries(CharacterSheetClassUtils.SPEED_DISPLAY_META)
+			.filter(([type]) => type !== "walk");
+		return raw.split(",").map((segRaw, ix) => {
+			const seg = segRaw.trim();
+			if (ix > 0) {
+				for (const [type, meta] of prefixed) {
+					if (seg.toLowerCase().startsWith(meta.wordPrefix)) {
+						return {type, value: seg.slice(meta.wordPrefix.length).trim()};
+					}
+				}
+			}
+			// First segment, or an unrecognised prefix, is treated as walk.
+			return {type: "walk", value: seg};
+		});
+	}
+
+	/**
+	 * Build display-ready speed segments from a formatted speed string. In word
+	 * mode the rejoined `text` values reproduce the original input exactly so the
+	 * setting-off path is a faithful fallback; in emoji mode the label is swapped
+	 * for an icon while the `word`/`title` keep the type discoverable for a11y.
+	 * @param {string} speedStr
+	 * @param {{useEmoji?: boolean}} [opts]
+	 * @returns {Array<{type: string, value: string, emoji: string, word: string, label: string, title: string, text: string}>}
+	 */
+	static buildSpeedDisplayParts (/** @type {*} */ speedStr, /** @type {*} */ opts = {}) {
+		const useEmoji = !!opts.useEmoji;
+		return CharacterSheetClassUtils.parseSpeedString(speedStr).map((part) => {
+			const meta = CharacterSheetClassUtils.SPEED_DISPLAY_META[part.type]
+				|| {emoji: "•", word: CharacterSheetClassUtils._humanizeKey(part.type), wordPrefix: `${part.type} `};
+			const label = useEmoji ? meta.emoji : meta.word;
+			const title = `${meta.word} speed`;
+			const text = useEmoji ? `${meta.emoji} ${part.value}` : `${meta.wordPrefix}${part.value}`;
+			return {type: part.type, value: part.value, emoji: meta.emoji, word: meta.word, label, title, text};
+		});
+	}
+
+	/**
+	 * Display metadata for known sense types. Generic/unknown keys fall back to a
+	 * humanised label and a neutral icon so future senses surface automatically.
+	 * @type {Record<string, {emoji: string, label: string}>}
+	 */
+	static SENSE_DISPLAY_META = {
+		darkvision: {emoji: "🌙", label: "Darkvision"},
+		blindsight: {emoji: "👁️", label: "Blindsight"},
+		tremorsense: {emoji: "〰️", label: "Tremorsense"},
+		truesight: {emoji: "🔮", label: "Truesight"},
+	};
+
+	/** Canonical render order for known senses. */
+	static SENSE_DISPLAY_ORDER = ["darkvision", "blindsight", "tremorsense", "truesight"];
+
+	/**
+	 * Humanise a snake/camel-ish key into a Title Case label (fallback for
+	 * unknown sense/speed keys).
+	 * @param {string} key
+	 * @returns {string}
+	 */
+	static _humanizeKey (/** @type {*} */ key) {
+		const str = (key == null ? "" : String(key))
+			.replace(/([a-z])([A-Z])/g, "$1 $2")
+			.replace(/[_-]+/g, " ")
+			.trim();
+		if (!str) return "";
+		return str.replace(/\b\w/g, (c) => c.toUpperCase());
+	}
+
+	/**
+	 * Build display-ready sense rows from the object returned by
+	 * `CharacterSheetState.getSenses()`. Only senses with a positive finite range
+	 * are included. Known senses render in canonical order first, then any unknown
+	 * positive keys sorted alphabetically with a humanised label. Passive
+	 * Perception is intentionally NOT included here — passive scores live with the
+	 * other passive scores.
+	 * @param {Record<string, number>} sensesObj
+	 * @returns {Array<{type: string, range: number, emoji: string, label: string, title: string, text: string}>}
+	 */
+	static buildSensesDisplay (/** @type {*} */ sensesObj) {
+		const senses = sensesObj && typeof sensesObj === "object" ? sensesObj : {};
+		const known = CharacterSheetClassUtils.SENSE_DISPLAY_ORDER;
+		const knownSet = new Set(known);
+		const extraKeys = Object.keys(senses)
+			.filter((k) => !knownSet.has(k))
+			.sort((a, b) => a.localeCompare(b));
+		const orderedKeys = [...known, ...extraKeys];
+
+		const out = [];
+		for (const type of orderedKeys) {
+			const range = Number(senses[type]);
+			if (!Number.isFinite(range) || range <= 0) continue;
+			const meta = CharacterSheetClassUtils.SENSE_DISPLAY_META[type]
+				|| {emoji: "👁️", label: CharacterSheetClassUtils._humanizeKey(type)};
+			const text = `${meta.label} ${range} ft.`;
+			out.push({type, range, emoji: meta.emoji, label: meta.label, title: text, text});
+		}
+		return out;
+	}
+
 	/**
 	 * Check if a class level grants a subclass feature (data-driven).
 	 * @param {*} classData - The class data with classFeatures

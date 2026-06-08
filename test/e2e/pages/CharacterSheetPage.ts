@@ -177,7 +177,11 @@ export class CharacterSheetPage {
 	}
 
 	async getSpeed (): Promise<number> {
-		const text = await this.dispSpeed.textContent();
+		// The Overview speed display may render emoji labels (speedEmojiLabels
+		// setting, default ON), so prefer the canonical plain-text form exposed
+		// via data-speed-text; fall back to the visible text for word-label mode.
+		const canonical = await this.dispSpeed.getAttribute("data-speed-text");
+		const text = canonical ?? (await this.dispSpeed.textContent());
 		return parseInt(text || "30", 10);
 	}
 
