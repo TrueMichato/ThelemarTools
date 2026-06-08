@@ -3842,6 +3842,12 @@ class CharacterSheetState {
 		// Migrate modifiers: re-process modifiers that may be missing special flags
 		this._migrateModifiers();
 
+		// Migrate conditional speed modifiers: re-gate transformation-conditional
+		// speed grants (e.g. Aasimar Heavenly Wings, "until the transformation
+		// ends") that predate the conditional-gating fix and were saved enabled at
+		// base, which leaked a permanent fly speed. Runs after _migrateModifiers.
+		this._migrateConditionalSpeedModifiers();
+
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
 
@@ -4174,6 +4180,56 @@ class CharacterSheetState {
 					}
 				}
 			});
+		});
+	}
+
+	/**
+	 * Re-gate stale conditional speed modifiers on load.
+	 *
+	 * Speed grants that are only active under a transient transformation (e.g.
+	 * Aasimar "Heavenly Wings" — "Until the transformation ends, you have a Fly
+	 * Speed equal to your Speed") must be stored disabled at base and toggled on
+	 * only while the transformation is active. Characters saved BEFORE the
+	 * conditional-gating fix persisted such a modifier with `enabled: true`, and
+	 * because `loadFromJson` restores `namedModifiers` verbatim — and race
+	 * text-parsed modifiers are NOT cleared/re-applied like classFeature effects —
+	 * the leak survived the round-trip (base Aasimar kept a permanent fly speed).
+	 *
+	 * This re-parses each currently-enabled speed modifier's source feature; if the
+	 * current definition says the grant is conditional, the saved modifier is
+	 * disabled (and its `conditional` backfilled). Unconditional/permanent speed
+	 * grants are untouched. Idempotent: disabled modifiers are skipped, so a second
+	 * run is a no-op. Mirrors the re-parse approach of `_migrateModifiers`.
+	 */
+	_migrateConditionalSpeedModifiers () {
+		if (!this._data.namedModifiers?.length) return;
+		if (!this._data.features?.length) return;
+
+		// Only an ENABLED speed modifier can be a stale leak; disabled ones are
+		// already correct (and re-running this migration must be a no-op).
+		const candidates = this._data.namedModifiers.filter(m =>
+			typeof m.type === "string" && m.type.startsWith("speed:") && m.enabled !== false,
+		);
+		if (!candidates.length) return;
+
+		candidates.forEach(mod => {
+			// Locate the source feature (prefer the explicit link, fall back to the
+			// "From <name>" note or a name match — same heuristics as _migrateModifiers).
+			const feature = this._data.features.find(f =>
+				(mod.sourceFeatureId && f.id === mod.sourceFeatureId)
+				|| (f.name && mod.note && mod.note.includes(`From ${f.name}`))
+				|| (f.name && mod.name && f.name === mod.name),
+			);
+			if (!feature?.description) return;
+
+			const parsed = FeatureModifierParser.parseModifiers(feature.description, feature.name);
+			const parsedMod = parsed.find(p => p.type === mod.type);
+			// The current definition gates this speed grant behind a condition
+			// (transformation/while-clause), but it was saved enabled at base → fix.
+			if (parsedMod && parsedMod.conditional) {
+				if (!mod.conditional) mod.conditional = parsedMod.conditional;
+				mod.enabled = false;
+			}
 		});
 	}
 
@@ -9157,8 +9213,17 @@ class CharacterSheetState {
 	}
 
 	addLanguage (language) {
-		if (!this._data.languages.includes(language)) {
-			this._data.languages.push(language);
+		// Defensive UID resolution: most callers resolve language-proficiency keys
+		// via CharacterSheetClassUtils.resolveLanguageProficiencyName, but a homebrew
+		// UID ("Tabaxi|Tgtt" / "tabaxi|tgtt") slipping through any other path would
+		// otherwise be stored — and rendered — raw. Strip a "|source" suffix so only
+		// the clean name is stored. Plain names pass through unchanged.
+		let resolved = language;
+		if (typeof resolved === "string" && resolved.includes("|")) {
+			resolved = resolved.split("|")[0].trim().toTitleCase();
+		}
+		if (!this._data.languages.includes(resolved)) {
+			this._data.languages.push(resolved);
 		}
 	}
 
@@ -24753,9 +24818,17 @@ class CharacterSheetState {
 	 * @returns {{max: number, recharge: string}|null}
 	 */
 	_getCuratedFeatureUses (feature) {
+		const name = (feature.name || "").toLowerCase();
+
+		// Aasimar "Healing Hands" (DMG/VGM/MPMM/XPHB) is a single action, once per
+		// long rest. The generic parser mis-reads "roll a number of d4s equal to
+		// your Proficiency Bonus" (the heal amount) as the use COUNT, so it would
+		// size uses to PB. Curate it to the correct single use. Source-agnostic:
+		// "Healing Hands" is the Aasimar trait across every edition.
+		if (name === "healing hands") return {max: 1, recharge: "long"};
+
 		const src = feature.classSource || feature.source;
 		if (src !== "TGTT") return null;
-		const name = (feature.name || "").toLowerCase();
 		// Each entry tracks the once-per-long-rest *creation/activation* of the feature,
 		// NOT the consumable doses/servings it can produce.
 		const curated = {
@@ -33265,6 +33338,11 @@ class CharacterSheetState {
 
 		// === Race feature combat actions ===
 		"shapechanger": "combat",
+		// Aasimar Healing Hands: a single Magic-action heal (once per long rest),
+		// tracked via curated uses ({max:1, recharge:"long"}). It is an action you
+		// take, not a persistent toggle, so route it as a combat action instead of
+		// letting the pattern detector surface it in the Active States panel.
+		"healing hands": "combat",
 
 		// === Reactions wrongly detected as activatable toggle states ===
 		"deflect attacks": "reaction",

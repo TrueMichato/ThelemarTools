@@ -3873,7 +3873,7 @@ class CharacterSheetRespec {
 		data.languageProficiencies.forEach(langProf => {
 			Object.keys(langProf).forEach(lang => {
 				if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-				this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
+				this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang)));
 			});
 		});
 	}
