@@ -1131,26 +1131,26 @@ class CharacterSheetCombat {
 					? `<span class="badge badge-danger ml-1" title="Arcane Shot damage">${dmg.dice}${dmg.type ? ` ${dmg.type}` : ""}</span>`
 					: `<span class="badge badge-default ml-1" title="No direct damage — effect only">effect</span>`;
 				const srcAbbr = shot.source ? Parser.sourceJsonToAbv(shot.source) : "";
-				let effectHtml = shot.description || "";
-				if (!effectHtml && Array.isArray(shot.entries) && typeof Renderer !== "undefined") {
-					try { effectHtml = Renderer.get().render({type: "entries", entries: shot.entries}); } catch (e) { effectHtml = ""; }
+				// Hover link for the name (full effect text on hover) — kept OUTSIDE
+				// any <button> so the <a> isn't nested in interactive content.
+				let nameHtml = shot.name;
+				if (this._page?.getHoverLink && shot.source) {
+					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, shot.name, shot.source); } catch (e) { nameHtml = shot.name; }
 				}
 				return `
-					<button class="ve-btn ve-btn-default charsheet__arcaneshot-opt" data-idx="${i}" style="display:block; width:100%; text-align:left; margin-bottom:6px;">
-						<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-1">
-							<span class="bold">${shot.name}</span>
-							${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
-							${dmgBadge}
-						</div>
-						${effectHtml ? `<div class="ve-small ve-muted mt-1">${effectHtml}</div>` : ""}
-					</button>`;
+					<div class="charsheet__arcaneshot-opt-row ve-flex ve-flex-v-center ve-flex-wrap gap-1" style="margin-bottom:6px;">
+						<span class="bold">${nameHtml}</span>
+						${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
+						${dmgBadge}
+						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__arcaneshot-opt ml-auto" data-idx="${i}" title="Apply this Arcane Shot">Apply</button>
+					</div>`;
 			}).join("");
 
 			modalInner.innerHTML = `
 				<div class="charsheet__arcaneshot-pick">
 					<p class="ve-small ve-muted charsheet__arcaneshot-pick__lede">
 						Choose the Arcane Shot you loosed with this attack. Spends one use
-						(${remaining} remaining)${dc != null ? `; targets must make a DC ${dc} ${ability} save where noted` : ""}.
+						(${remaining} remaining)${dc != null ? `; targets must make a DC ${dc} ${ability} save where noted` : ""}. Hover a name for its effect.
 					</p>
 					<div class="charsheet__arcaneshot-pick__opts">${rowsHtml}</div>
 					<div class="ve-flex-h-right" style="gap: 8px; margin-top: 12px;">
@@ -1205,7 +1205,7 @@ class CharacterSheetCombat {
 		}
 
 		this._page.saveCharacter?.();
-		this.renderCombatArcaneArcher?.();
+		this.renderCombatResources();
 	}
 
 	/**
@@ -2546,7 +2546,6 @@ class CharacterSheetCombat {
 		this.renderCombatMethods();
 		this.renderCombatRanger();
 		this.renderCombatDruidResources();
-		this.renderCombatArcaneArcher();
 		this.renderCombatFlanking();
 		this.renderCombatFighter();
 		this.renderCombatDefenses();
@@ -5037,16 +5036,10 @@ class CharacterSheetCombat {
 		const container = document.getElementById("charsheet-combat-resources");
 		if (!container) return;
 
-		const resources = this._state.getResources();
-		if (!resources?.length) {
-			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No combat resources</div>`;
-			this._renderSneakAttackToggle(container);
-			this._renderWeaponDamageRiders(container);
-			return;
-		}
+		container.innerHTML = "";
 
 		// Filter to combat-relevant resources
-		const combatResources = resources.filter(r => {
+		const combatResources = (this._state.getResources() || []).filter(r => {
 			const name = r.name.toLowerCase();
 			// Include combat-relevant resources
 			return name.includes("rage")
@@ -5067,44 +5060,24 @@ class CharacterSheetCombat {
 				|| r.recharge; // Any resource with recharge is likely combat-relevant
 		});
 
-		if (!combatResources.length) {
-			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No combat resources</div>`;
-			this._renderSneakAttackToggle(container);
-			this._renderWeaponDamageRiders(container);
-			return;
-		}
-
-		container.innerHTML = "";
 		for (const resource of combatResources) {
-			// Build pips - filled = available, empty = used
+			// Build pips - filled = available, empty = used. Each pip carries its
+			// index so a single delegated listener (see _bindResourcePipClicks) can
+			// route clicks for ANY pip, not just the first.
+			const pipsHtml = Array.from({length: resource.max}, (_, i) => {
+				const isFilled = i < resource.current;
+				const title = isFilled ? `Set to ${i} (spend)` : `Set to ${i + 1} (restore)`;
+				return `<span class="charsheet__resource-pip ${isFilled ? "" : "used"}" data-pip-index="${i}" title="${title}"></span>`;
+			}).join("");
 			const resourceEl = e_({outer: `
 				<div class="charsheet__combat-resource-item mb-2" data-resource-id="${resource.id}">
 					<div class="charsheet__combat-resource-name ve-small font-weight-bold">${resource.name}</div>
-					<div class="charsheet__combat-resource-pips">
-						${Array.from({length: resource.max}, (_, i) => `
-							<span class="charsheet__resource-pip ${i < resource.current ? "" : "used"}" data-pip-index="${i}" title="Click to use/restore"></span>
-						`).join("")}
-					</div>
+					<div class="charsheet__combat-resource-pips">${pipsHtml}</div>
 					<div class="ve-small ve-muted">${resource.current}/${resource.max}${resource.recharge ? ` (${resource.recharge})` : ""}</div>
 				</div>
 			`});
 
-			// Click on pips to use/restore
-			resourceEl.querySelector(".charsheet__resource-pip")?.addEventListener("click", (/** @type {*} */ e) => {
-				const pipIndex = e.currentTarget.dataset.pipIndex;
-				const isUsed = e.currentTarget.classList.contains("used");
-				if (isUsed) {
-					// Restore one use (pip was empty/used, now fill it)
-					this._state.setResourceCurrent(resource.id, resource.current + 1);
-				} else {
-					// Use one (pip was filled/available, now empty it)
-					this._state.setResourceCurrent(resource.id, resource.current - 1);
-				}
-				this.renderCombatResources();
-				// Also update the main resources display
-				this._page._renderResources?.();
-				this._page._features?._renderResources?.();
-			});
+			this._bindResourcePipClicks(resourceEl.querySelector(".charsheet__combat-resource-pips"), resource.id);
 
 			container.append(resourceEl);
 		}
@@ -5114,6 +5087,72 @@ class CharacterSheetCombat {
 
 		// Render weapon damage rider toggles (Colossus Slayer, Focused Quarry, …)
 		this._renderWeaponDamageRiders(container);
+
+		// Render Arcane Shot controls (Arcane Archer Fighter) — folded in here so
+		// every limited-use combat surface lives under Combat Resources.
+		this._renderArcaneShotToggle(container);
+
+		// Only show the empty-state placeholder when nothing at all rendered
+		// (no resource pips and no supplemental toggle sections).
+		if (!container.children.length) {
+			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No combat resources</div>`;
+		}
+	}
+
+	/**
+	 * Compute the new `current` value for a resource after clicking the pip at
+	 * `pipIndex`. Health-bar semantics: clicking a filled pip spends down to (and
+	 * including) it; clicking an empty pip restores up to (and including) it.
+	 * Pure + clamped — returns the resource's existing current for out-of-range or
+	 * non-integer indices so callers can no-op safely.
+	 * @param {{current: number, max: number}} resource
+	 * @param {number} pipIndex
+	 * @returns {number}
+	 */
+	_computeResourcePipClickCurrent (resource, pipIndex) {
+		const max = Math.max(0, Number(resource?.max) || 0);
+		const current = Math.max(0, Math.min(Number(resource?.current) || 0, max));
+		const i = Number(pipIndex);
+		if (!Number.isInteger(i) || i < 0 || i >= max) return current;
+		// Filled pip (i < current): spend down to it. Empty pip: restore up to it.
+		const next = i < current ? i : i + 1;
+		return Math.max(0, Math.min(next, max));
+	}
+
+	/**
+	 * Handle a pip click for a resource: resolve the resource, compute the new
+	 * current via _computeResourcePipClickCurrent, persist it, and refresh the
+	 * combat-resources panel plus the main resource displays.
+	 * @param {string} resourceId
+	 * @param {number} pipIndex
+	 */
+	_onResourcePipClick (resourceId, pipIndex) {
+		const resource = (this._state.getResources() || []).find(r => r.id === resourceId);
+		if (!resource) return;
+		const next = this._computeResourcePipClickCurrent(resource, pipIndex);
+		if (next === resource.current) return;
+		this._state.setResourceCurrent(resourceId, next);
+		this.renderCombatResources();
+		// Also update the main resources display
+		this._page._renderResources?.();
+		this._page._features?._renderResources?.();
+	}
+
+	/**
+	 * Wire pip clicks for a resource using event delegation: a SINGLE listener on
+	 * the pips container handles every pip (the prior per-first-pip wiring left all
+	 * but the first pip dead). Reads the clicked pip's data-pip-index and routes to
+	 * _onResourcePipClick.
+	 * @param {*} pipsEl The `.charsheet__combat-resource-pips` container element.
+	 * @param {string} resourceId
+	 */
+	_bindResourcePipClicks (pipsEl, resourceId) {
+		if (!pipsEl) return;
+		pipsEl.addEventListener("click", (/** @type {*} */ e) => {
+			const pip = e.target?.closest?.(".charsheet__resource-pip");
+			if (!pip || (pipsEl.contains && !pipsEl.contains(pip))) return;
+			this._onResourcePipClick(resourceId, Number(pip.dataset?.pipIndex));
+		});
 	}
 
 	/**
@@ -5337,6 +5376,101 @@ class CharacterSheetCombat {
 				section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1" style="margin-left: 4px;">${rider.condition}</div>`);
 			}
 		}
+
+		container.append(section);
+	}
+
+	/**
+	 * Render Arcane Shot controls inside the Combat Resources panel (Arcane Archer
+	 * Fighter). Folded in alongside the Sneak Attack / weapon-rider toggles so all
+	 * limited-use combat surfaces live in one place. Shot names are hover links
+	 * (full effect text lives on hover, not inline). Gated on hasArcaneShot();
+	 * appends nothing when the subclass isn't present.
+	 * @param {*} container The combat-resources container (defaults to the DOM node).
+	 */
+	_renderArcaneShotToggle (container) {
+		if (!container) container = document.getElementById("charsheet-combat-resources");
+		if (!container) return;
+
+		// Remove existing Arcane Shot UI before re-rendering
+		container.querySelector(".charsheet__arcane-shot-section")?.remove();
+
+		if (!this._state.hasArcaneShot?.()) return;
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const max = this._state.getArcaneShotMax?.() ?? 0;
+		const remaining = this._state.getArcaneShotRemaining?.() ?? 0;
+		const dc = calcs.arcaneShotSaveDc;
+		const ability = (calcs.arcaneShotAbility || "int").toUpperCase();
+		const knownShots = this._state.getKnownArcaneShots?.() || [];
+		const hasEverReady = !!calcs.hasEverReadyShot;
+		const hasMagicArrow = !!calcs.hasMagicArrow;
+		const hasCurvingShot = !!calcs.hasCurvingShot;
+
+		const section = e_({outer: `<div class="charsheet__arcane-shot-section mt-3" style="border-top: 1px solid var(--rgb-border-grey, #444); padding-top: 0.5rem;"></div>`});
+
+		section.insertAdjacentHTML("beforeend", `
+			<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
+				<strong style="font-size: 1.05em;">🏹 Arcane Shot</strong>
+				${dc != null ? `<span class="badge badge-primary" title="Arcane Shot save DC (${ability})">DC ${dc}</span>` : ""}
+				<span class="badge ${remaining > 0 ? "badge-info" : "badge-danger"}" title="Arcane Shot uses remaining (recharge on short or long rest)">⚡ ${remaining}/${max}</span>
+				<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-as-use" ${remaining > 0 ? "" : "disabled"} title="Spend one Arcane Shot use">Use</button>
+				<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-as-regain" ${remaining < max ? "" : "disabled"} title="Regain one use">+</button>
+				<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-as-reset" ${remaining < max ? "" : "disabled"} title="Restore all uses">Reset</button>
+			</div>`);
+
+		if (hasEverReady) {
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-2">✦ <span class="bold">Ever-Ready Shot:</span> when you roll initiative with no uses left, regain one.${remaining === 0 ? ` <button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-as-everready ml-1">Regain (initiative)</button>` : ""}</div>`);
+		}
+
+		if (hasMagicArrow) {
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted">🏹 <span class="bold">Magic Arrow:</span> ranged weapon attacks count as magical.</div>`);
+		}
+		if (hasCurvingShot) {
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted">↪ <span class="bold">Curving Shot:</span> on a miss with a magic arrow, use a bonus action to reroll against a target in range.</div>`);
+		}
+
+		if (!knownShots.length) {
+			section.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-small mt-1">No Arcane Shot options known yet. Choose them when you gain or level up the Arcane Archer subclass.</div>`);
+		} else {
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mt-1 mb-1"><span class="glyphicon glyphicon-info-sign mr-1"></span>Roll a ranged attack with a bow to choose and apply an Arcane Shot. Hover a name for its effect.</div>`);
+			const shotsHtml = knownShots.map(shot => {
+				let nameHtml = shot.name;
+				if (this._page?.getHoverLink && shot.source) {
+					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, shot.name, shot.source); } catch (e) { nameHtml = shot.name; }
+				}
+				const srcAbbr = shot.source ? Parser.sourceJsonToAbv(shot.source) : "";
+				return `<span class="charsheet__arcane-shot-pill ve-small" style="display:inline-block; border-left: 2px solid var(--rgb-link); padding: 0 0.4rem; margin: 0 0.4rem 0.25rem 0;"><span class="bold">${nameHtml}</span>${srcAbbr ? ` <span class="ve-muted">(${srcAbbr})</span>` : ""}</span>`;
+			}).join("");
+			section.insertAdjacentHTML("beforeend", `<div class="charsheet__arcane-shot-known ve-flex ve-flex-wrap mt-1">${shotsHtml}</div>`);
+		}
+
+		const refresh = () => {
+			this._page.saveCharacter?.();
+			this.renderCombatResources();
+		};
+
+		section.querySelector(".charsheet__combat-as-use")?.addEventListener("click", () => {
+			if (this._state.useArcaneShot?.()) {
+				refresh();
+				JqueryUtil.doToast({type: "success", content: "Used an Arcane Shot"});
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "No Arcane Shot uses remaining! Rest to regain uses."});
+			}
+		});
+		section.querySelector(".charsheet__combat-as-regain")?.addEventListener("click", () => {
+			if (this._state.adjustArcaneShotRemaining?.(1)) refresh();
+		});
+		section.querySelector(".charsheet__combat-as-reset")?.addEventListener("click", () => {
+			this._state.restoreArcaneShot?.();
+			refresh();
+		});
+		section.querySelector(".charsheet__combat-as-everready")?.addEventListener("click", () => {
+			if (this._state.regainOneArcaneShot?.()) {
+				refresh();
+				JqueryUtil.doToast({type: "success", content: "Ever-Ready Shot: regained one use"});
+			}
+		});
 
 		container.append(section);
 	}
@@ -6433,123 +6567,13 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Arcane Archer "Arcane Shot" combat-tab panel: usage tracking + known shot options
-	 * with their effect text and save DC. Self-contained (own section + container) so it
-	 * does not collide with other combat-tab panels.
+	 * Back-compat shim. The Arcane Archer "Arcane Shot" panel was folded into the
+	 * Combat Resources panel (see _renderArcaneShotToggle), so this now just routes
+	 * to renderCombatResources(). Kept as a no-op-style shim so any lingering caller
+	 * (e.g. during multi-session integration) stays safe instead of crashing.
 	 */
 	renderCombatArcaneArcher () {
-		const section = document.getElementById("charsheet-combat-arcanearcher-section");
-		const container = document.getElementById("charsheet-combat-arcanearcher");
-		if (!section || !container) return;
-
-		if (!this._state.hasArcaneShot?.()) {
-			section.style.display = "none";
-			container.innerHTML = "";
-			return;
-		}
-		section.style.display = "";
-		container.innerHTML = "";
-
-		const calcs = this._state.getFeatureCalculations?.() || {};
-		const max = this._state.getArcaneShotMax?.() ?? 0;
-		const remaining = this._state.getArcaneShotRemaining?.() ?? 0;
-		const dc = calcs.arcaneShotSaveDc;
-		const ability = (calcs.arcaneShotAbility || "int").toUpperCase();
-		const knownShots = this._state.getKnownArcaneShots?.() || [];
-		const hasEverReady = !!calcs.hasEverReadyShot;
-		const hasMagicArrow = !!calcs.hasMagicArrow;
-		const hasCurvingShot = !!calcs.hasCurvingShot;
-
-		const block = e_({tag: "div", clazz: "charsheet__combat-arcanearcher"});
-
-		let html = `
-			<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
-				${dc != null ? `<span class="badge badge-primary" style="font-size: 1em; padding: 5px 10px;" title="Arcane Shot save DC (${ability})">DC ${dc}</span>` : ""}
-				<span class="badge ${remaining > 0 ? "badge-info" : "badge-danger"}" title="Arcane Shot uses remaining (recharge on short or long rest)">⚡ ${remaining}/${max}</span>
-				<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-as-use" ${remaining > 0 ? "" : "disabled"} title="Spend one Arcane Shot use">Use</button>
-				<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-as-regain" ${remaining < max ? "" : "disabled"} title="Regain one use">+</button>
-				<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-as-reset" ${remaining < max ? "" : "disabled"} title="Restore all uses">Reset</button>
-			</div>`;
-
-		if (hasEverReady) {
-			html += `<div class="ve-small ve-muted mb-2">✦ <span class="bold">Ever-Ready Shot:</span> when you roll initiative with no uses left, regain one.${remaining === 0 ? ` <button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-as-everready ml-1">Regain (initiative)</button>` : ""}</div>`;
-		}
-
-		if (hasMagicArrow || hasCurvingShot) {
-			html += `<div class="charsheet__combat-arcanearcher-passives mb-2">`;
-			if (hasMagicArrow) {
-				html += `<div class="ve-small ve-muted">🏹 <span class="bold">Magic Arrow:</span> your ranged weapon attacks count as magical for overcoming resistance/immunity.</div>`;
-			}
-			if (hasCurvingShot) {
-				html += `<div class="ve-small ve-muted">↪ <span class="bold">Curving Shot:</span> when you miss with a magic arrow, use a bonus action to reroll the attack against the same or a different target within range.</div>`;
-			}
-			html += `</div>`;
-		}
-
-		if (!knownShots.length) {
-			html += `<div class="ve-muted ve-small">No Arcane Shot options known yet. Choose them when you gain or level up the Arcane Archer subclass. (Options are sourced from XGE — check your source filters if none appear.)</div>`;
-		} else {
-			html += `<div class="ve-small ve-muted mb-1"><span class="glyphicon glyphicon-info-sign mr-1"></span>Roll a ranged attack with a bow to choose and apply an Arcane Shot.</div>`;
-			html += `<div class="charsheet__combat-arcanearcher-shots mt-1">`;
-			knownShots.forEach(shot => {
-				let nameHtml = shot.name;
-				if (this._page?.getHoverLink && shot.source) {
-					try {
-						nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, shot.name, shot.source);
-					} catch (e) {
-						nameHtml = shot.name;
-					}
-				}
-				let effectHtml = shot.description || "";
-				if (!effectHtml && Array.isArray(shot.entries) && typeof Renderer !== "undefined") {
-					try {
-						effectHtml = Renderer.get().render({type: "entries", entries: shot.entries});
-					} catch (e) {
-						effectHtml = "";
-					}
-				}
-				const srcAbbr = shot.source ? Parser.sourceJsonToAbv(shot.source) : "";
-				html += `
-					<div class="charsheet__combat-arcanearcher-shot mb-2" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
-						<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-1">
-							<span class="bold">${nameHtml}</span>
-							${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
-						</div>
-						${effectHtml ? `<div class="ve-small ve-muted mt-1">${effectHtml}</div>` : ""}
-					</div>`;
-			});
-			html += `</div>`;
-		}
-
-		block.innerHTML = html;
-		container.appendChild(block);
-
-		const refresh = () => {
-			this._page.saveCharacter();
-			this._page.renderCharacter();
-		};
-
-		block.querySelector(".charsheet__combat-as-use")?.addEventListener("click", () => {
-			if (this._state.useArcaneShot?.()) {
-				refresh();
-				JqueryUtil.doToast({type: "success", content: "Used an Arcane Shot"});
-			} else {
-				JqueryUtil.doToast({type: "warning", content: "No Arcane Shot uses remaining! Rest to regain uses."});
-			}
-		});
-		block.querySelector(".charsheet__combat-as-regain")?.addEventListener("click", () => {
-			if (this._state.adjustArcaneShotRemaining?.(1)) refresh();
-		});
-		block.querySelector(".charsheet__combat-as-reset")?.addEventListener("click", () => {
-			this._state.restoreArcaneShot?.();
-			refresh();
-		});
-		block.querySelector(".charsheet__combat-as-everready")?.addEventListener("click", () => {
-			if (this._state.regainOneArcaneShot?.()) {
-				refresh();
-				JqueryUtil.doToast({type: "success", content: "Ever-Ready Shot: regained one use"});
-			}
-		});
+		this.renderCombatResources();
 	}
 
 	// =========================================================================
