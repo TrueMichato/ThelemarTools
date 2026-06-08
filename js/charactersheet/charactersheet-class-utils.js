@@ -2285,6 +2285,27 @@ class CharacterSheetClassUtils {
 	 * @param {Array<*>} subclassFeatures - All loaded subclass features (for homebrew fallback lookup)
 	 * @returns {Array<*>} Array of feature objects
 	 */
+	/**
+	 * Parse the level a subclass-feature reference is gained at.
+	 *
+	 * The 5etools subclassFeature ref format is
+	 * `name|className|classSource|subclassShortName|subclassSource|level[|displayText]`
+	 * so the level is canonically `parts[5]`. Many modern reprints (e.g. FRHoF
+	 * Bladesinger, every Artificer EFA subclass, all PHB Cleric domains) carry an
+	 * OPTIONAL 7th display-source element, which made the previous
+	 * `parts[parts.length - 1]` parse return `NaN` and silently grant ZERO
+	 * subclass features. Read `parts[5]` first, only falling back to the last
+	 * element for malformed/legacy refs where `parts[5]` is non-numeric.
+	 * @param {string[]} parts Pipe-split subclassFeature reference parts.
+	 * @returns {number} The gained level, or `NaN` if it cannot be determined.
+	 */
+	static getSubclassFeatureRefLevel (/** @type {*} */ parts) {
+		if (!Array.isArray(parts)) return NaN;
+		const canonical = parseInt(parts[5]);
+		if (!Number.isNaN(canonical)) return canonical;
+		return parseInt(parts[parts.length - 1]);
+	}
+
 	static getLevelFeatures (/** @type {*} */ classData, /** @type {*} */ level, /** @type {*} */ subclass, /** @type {*} */ classFeatures = [], /** @type {*} */ subclassFeatures = []) {
 		/** @type {*[]} */ const features = [];
 
@@ -2424,7 +2445,7 @@ class CharacterSheetClassUtils {
 							}
 						} else if (typeof feature === "string") {
 							const parts = feature.split("|");
-							const featureLevel = parseInt(parts[parts.length - 1]);
+							const featureLevel = CharacterSheetClassUtils.getSubclassFeatureRefLevel(parts);
 							if (/** @type {*} */ featureLevel === level) {
 								const featureName = parts[0];
 								const featureClassName = parts[1] || classData.name;
@@ -2459,7 +2480,7 @@ class CharacterSheetClassUtils {
 					});
 				} else if (typeof levelFeatures === "string") {
 					const parts = levelFeatures.split("|");
-					const featureLevel = parseInt(parts[parts.length - 1]);
+					const featureLevel = CharacterSheetClassUtils.getSubclassFeatureRefLevel(parts);
 					if (/** @type {*} */ featureLevel === level) {
 						const featureName = parts[0];
 						const featureClassName = parts[1] || classData.name;
@@ -2539,7 +2560,8 @@ class CharacterSheetClassUtils {
 						const refClassSource = parts[2] || classData.source;
 						const refSubclassShortName = parts[3] || subclass?.shortName;
 						const refSubclassSource = parts[4] || subclass?.source || classData.source;
-						const refLevel = parseInt(parts[5]) || level;
+						const refLevelParsed = CharacterSheetClassUtils.getSubclassFeatureRefLevel(parts);
+						const refLevel = Number.isNaN(refLevelParsed) ? level : refLevelParsed;
 
 						// Only expand features at current level
 						if (refLevel !== level) continue;
