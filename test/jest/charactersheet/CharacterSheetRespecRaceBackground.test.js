@@ -106,8 +106,8 @@ describe("CharacterSheetRespec race/background", () => {
 
 	// region _getEditableChoices
 
-	describe("_getEditableChoices includes race and background", () => {
-		test("race appears as editable at level 1 with cascade warning", () => {
+	describe("_getEditableChoices no longer includes race/background (moved to Base card)", () => {
+		test("race does NOT appear as an editable level-1 choice", () => {
 			const respec = makeRespec({race: {name: "Elf", source: "PHB"}});
 			const history = {
 				level: 1,
@@ -119,14 +119,10 @@ describe("CharacterSheetRespec race/background", () => {
 
 			const editable = respec._getEditableChoices(1, history);
 
-			const raceEdit = editable.find(e => e.type === "race");
-			expect(raceEdit).toBeDefined();
-			expect(raceEdit.label).toBe("Species");
-			expect(raceEdit.current).toBe("Elf");
-			expect(raceEdit.hasCascade).toBe(true);
+			expect(editable.find(e => e.type === "race")).toBeUndefined();
 		});
 
-		test("background appears as editable at level 1 with cascade warning", () => {
+		test("background does NOT appear as an editable level-1 choice", () => {
 			const respec = makeRespec({background: {name: "Sage", source: "PHB"}});
 			const history = {
 				level: 1,
@@ -138,63 +134,24 @@ describe("CharacterSheetRespec race/background", () => {
 
 			const editable = respec._getEditableChoices(1, history);
 
-			const bgEdit = editable.find(e => e.type === "background");
-			expect(bgEdit).toBeDefined();
-			expect(bgEdit.label).toBe("Background");
-			expect(bgEdit.current).toBe("Sage");
-			expect(bgEdit.hasCascade).toBe(true);
-		});
-
-		test("race and background do NOT appear at levels other than 1", () => {
-			const respec = makeRespec();
-			const history = {
-				level: 4,
-				class: {name: "Fighter", source: "PHB"},
-				choices: {
-					race: {name: "Elf", source: "PHB"},
-					background: {name: "Sage", source: "PHB"},
-				},
-			};
-
-			const editable = respec._getEditableChoices(4, history);
-
-			expect(editable.find(e => e.type === "race")).toBeUndefined();
 			expect(editable.find(e => e.type === "background")).toBeUndefined();
 		});
 
-		test("race does not appear if not stored in history choices", () => {
-			const respec = makeRespec({race: {name: "Elf", source: "PHB"}});
-			const history = {
-				level: 1,
-				class: {name: "Fighter", source: "PHB"},
-				choices: {},
-			};
-
-			const editable = respec._getEditableChoices(1, history);
-
-			expect(editable.find(e => e.type === "race")).toBeUndefined();
-		});
-
-		test("race and background appear before ASI/feat entries", () => {
-			const respec = makeRespec({
-				race: {name: "Human", source: "PHB"},
-				background: {name: "Soldier", source: "PHB"},
-			});
+		test("non-origin choices (ASI) are still editable at level 1", () => {
+			const respec = makeRespec({race: {name: "Human", source: "PHB"}});
 			const history = {
 				level: 1,
 				class: {name: "Fighter", source: "PHB"},
 				choices: {
 					race: {name: "Human", source: "PHB"},
-					background: {name: "Soldier", source: "PHB"},
 					asi: {str: 2},
 				},
 			};
 
 			const editable = respec._getEditableChoices(1, history);
 
-			const types = editable.map(e => e.type);
-			expect(types.indexOf("race")).toBeLessThan(types.indexOf("asi"));
-			expect(types.indexOf("background")).toBeLessThan(types.indexOf("asi"));
+			expect(editable.find(e => e.type === "asi")).toBeDefined();
+			expect(editable.find(e => e.type === "race")).toBeUndefined();
 		});
 	});
 

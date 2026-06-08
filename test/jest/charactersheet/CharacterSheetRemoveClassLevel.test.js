@@ -157,16 +157,31 @@ describe("CharacterSheetRemoveClassLevel", () => {
 	});
 
 	describe("Guards", () => {
-		it("blocks removing the character's origin level (delete the character instead)", () => {
-			// Single class at level 1 dipped into another at level 1: Ranger 1 / Druid 1.
+		it("now ALLOWS removing the origin (total-level-1) class in a multiclass build", () => {
+			// Ranger 1 / Druid 1, Ranger at the origin slot (total level 1). Removing the origin class is
+			// no longer blocked — the character base lives outside level history, so the class peels away
+			// cleanly and the other class survives.
 			state.addClass({name: "Ranger", source: "TGTT", level: 1});
 			state.addClass({name: "Druid", source: "XPHB", level: 1});
 			recordRun(state, {name: "Ranger", source: "TGTT"}, [1]);
 			recordRun(state, {name: "Druid", source: "XPHB"}, [2]);
 
 			const result = state.removeClassLastLevel("Ranger", "TGTT");
+			expect(result.success).toBe(true);
+			expect(state.getClasses().find(c => c.name === "Ranger")).toBeUndefined();
+			expect(state.getClasses()).toHaveLength(1);
+			expect(state.getTotalLevel()).toBe(1);
+			// The character base survives the removal of the origin class.
+			expect(state.getCharacterBase().v).toBe(1);
+		});
+
+		it("blocks removing the character's ONLY level (single class at total level 1)", () => {
+			state.addClass({name: "Ranger", source: "TGTT", level: 1});
+			recordRun(state, {name: "Ranger", source: "TGTT"}, [1]);
+
+			const result = state.removeClassLastLevel("Ranger", "TGTT");
 			expect(result.success).toBe(false);
-			expect(result.reason).toMatch(/first level|only level/i);
+			expect(result.reason).toMatch(/only level/i);
 		});
 
 		it("removes a 1-level dip class entirely (non-origin)", () => {
