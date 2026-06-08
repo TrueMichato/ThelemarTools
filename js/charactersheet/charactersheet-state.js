@@ -18881,12 +18881,6 @@ class CharacterSheetState {
 				calculations.hammerAndAnvilBonus = 2;
 			}
 
-			// Flanking (+2 melee or opportunity attack)
-			if (tacticNames.includes("Flanking")) {
-				calculations.hasFlanking = true;
-				calculations.flankingBonus = 2;
-			}
-
 			// Daring Feint (Fighter 9+): advantage + crit 19-20
 			if (tacticNames.includes("Daring Feint")) {
 				calculations.hasDaringFeint = true;
@@ -27152,9 +27146,10 @@ class CharacterSheetState {
 				effects.condition = "vs enemy with solid object behind them";
 				break;
 			case "Flanking":
-				effects.attackBonus = 2;
-				effects.attackType = "melee";
-				effects.condition = "when flanking (optional rule)";
+				// Reminder/reaction ONLY. The situational +2 melee to-hit for flanking is
+				// the universal optional rule, surfaced via the combat-tab Flanking quick
+				// button (`_flankingEnabled` → `_getCombatLocalAttackBonus`) — NOT an
+				// automatic grant of this Battle Tactic. So no attackBonus here.
 				effects.reaction = {
 					name: "Flanking Opportunity",
 					trigger: "at start of flanked enemy's turn",
