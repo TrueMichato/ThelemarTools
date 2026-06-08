@@ -10,7 +10,9 @@
  *  - empty when no flags are set (low-level / non-Ranger);
  *  - each gating flag surfaces exactly its entry;
  *  - Enduring Traveler (the called-out feature) is present at L4;
- *  - Tireless source/level disambiguates TGTT (paired w/ Enduring Traveler) vs XPHB;
+ *  - applied-elsewhere features (Deft Explorer, Tireless) are EXCLUDED — their whole
+ *    mechanical benefit is already shown on other panels (Skills/Languages/Spells,
+ *    Resources, the Rest dialog), so a reminder would be redundant noise;
  *  - dynamic range/uses substitution falls back cleanly;
  *  - every returned entry carries name/note/source for attribution.
  */
@@ -43,29 +45,24 @@ describe("getRangerPassiveReminders", () => {
 		expect(entry.note).toMatch(/exhaustion/i);
 	});
 
-	test("surfaces Deft Explorer", () => {
+	test("excludes Deft Explorer — its whole benefit is applied/shown elsewhere", () => {
+		// Expertise, languages, and the extra prepared spell are baked into state and
+		// shown on the Skills / Languages / Spells panels, so it is not a reminder.
 		const out = CharacterSheetClassUtils.getRangerPassiveReminders({hasDeftExplorer: true});
-		expect(out.map(e => e.name)).toEqual(["Deft Explorer"]);
-		expect(out[0].source).toBe("TGTT");
+		expect(out.map(e => e.name)).not.toContain("Deft Explorer");
+		expect(out).toEqual([]);
 	});
 
-	test("Tireless paired with Enduring Traveler is attributed to TGTT at L5", () => {
-		const out = CharacterSheetClassUtils.getRangerPassiveReminders({hasEnduringTraveler: true, hasTireless: true});
-		const tireless = out.find(e => e.name === "Tireless");
-		expect(tireless).toBeTruthy();
-		expect(tireless.source).toBe("TGTT");
-		expect(tireless.level).toBe(5);
-		// passive exhaustion-reduction reminder, not the temp-HP grant (tracked in Resources)
-		expect(tireless.note).toMatch(/exhaustion level decreases/i);
-		expect(tireless.note).toMatch(/Resources/i);
-	});
+	test("excludes Tireless regardless of source — exhaustion reduction is applied from the Rest dialog", () => {
+		// Paired with Enduring Traveler (TGTT) the Enduring Traveler reminder still
+		// surfaces, but Tireless itself never does.
+		const tgtt = CharacterSheetClassUtils.getRangerPassiveReminders({hasEnduringTraveler: true, hasTireless: true});
+		expect(tgtt.map(e => e.name)).not.toContain("Tireless");
+		expect(tgtt.map(e => e.name)).toEqual(["Enduring Traveler"]);
 
-	test("Tireless without Enduring Traveler is attributed to XPHB at L10", () => {
-		const out = CharacterSheetClassUtils.getRangerPassiveReminders({hasTireless: true});
-		const tireless = out.find(e => e.name === "Tireless");
-		expect(tireless).toBeTruthy();
-		expect(tireless.source).toBe("XPHB");
-		expect(tireless.level).toBe(10);
+		// XPHB-only Tireless (no Enduring Traveler) yields no reminders at all.
+		const xphb = CharacterSheetClassUtils.getRangerPassiveReminders({hasTireless: true});
+		expect(xphb).toEqual([]);
 	});
 
 	test("Penetrating Senses substitutes a dynamic range and falls back to 60", () => {
@@ -93,11 +90,28 @@ describe("getRangerPassiveReminders", () => {
 		});
 	});
 
-	test("multiple active flags surface together (Lunaria: Ranger 6 Hunter)", () => {
-		// Lunaria has Deft Explorer + Enduring Traveler + Tireless active.
+	test("multiple active flags surface together, but applied-elsewhere ones are excluded (Lunaria: Ranger 6 Hunter)", () => {
+		// Lunaria has Deft Explorer + Enduring Traveler + Tireless active, but only the
+		// situational Enduring Traveler should surface as a reminder.
 		const calcs = {hasDeftExplorer: true, hasEnduringTraveler: true, hasTireless: true};
 		const out = CharacterSheetClassUtils.getRangerPassiveReminders(calcs);
-		expect(out.map(e => e.name).sort()).toEqual(["Deft Explorer", "Enduring Traveler", "Tireless"]);
+		expect(out.map(e => e.name).sort()).toEqual(["Enduring Traveler"]);
+	});
+
+	test("situational features still surface alongside excluded applied-elsewhere ones", () => {
+		const calcs = {
+			hasDeftExplorer: true, // excluded
+			hasTireless: true, // excluded
+			hasEnduringTraveler: true, // situational
+			hasPenetratingSenses: true, // situational
+			hasBattleInstincts: true, // situational
+		};
+		const names = CharacterSheetClassUtils.getRangerPassiveReminders(calcs).map(e => e.name);
+		expect(names).toContain("Enduring Traveler");
+		expect(names).toContain("Penetrating Senses");
+		expect(names).toContain("Battle Instincts");
+		expect(names).not.toContain("Deft Explorer");
+		expect(names).not.toContain("Tireless");
 	});
 
 	test("every returned entry has name, note, and source for attribution", () => {
@@ -120,8 +134,12 @@ describe("getRangerPassiveReminders", () => {
 			hasFeralSenses: true,
 			hasFoeSlayer: true,
 		};
+		// Deft Explorer + Tireless are applied-elsewhere and excluded.
+		const APPLIED_ELSEWHERE = 2;
 		const out = CharacterSheetClassUtils.getRangerPassiveReminders(allFlags);
-		expect(out.length).toBeGreaterThanOrEqual(Object.keys(allFlags).length);
+		expect(out.length).toBe(Object.keys(allFlags).length - APPLIED_ELSEWHERE);
+		expect(out.map(e => e.name)).not.toContain("Deft Explorer");
+		expect(out.map(e => e.name)).not.toContain("Tireless");
 		out.forEach(entry => {
 			expect(typeof entry.name).toBe("string");
 			expect(entry.name.length).toBeGreaterThan(0);
