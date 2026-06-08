@@ -989,7 +989,7 @@ class CharacterSheetPage {
 		document.getElementById("charsheet-box-ac").addEventListener("click", () => this._showAcBreakdownModal());
 		document.getElementById("charsheet-box-speed").addEventListener("click", () => this._showSpeedBreakdownModal());
 		document.getElementById("charsheet-box-initiative").addEventListener("click", (e) => this._rollInitiative(e));
-		document.getElementById("charsheet-btn-use-hitdie").addEventListener("click", () => this._onUseHitDie());
+		document.getElementById("charsheet-btn-use-hitdie").addEventListener("click", (e) => this._onUseHitDie(e));
 		document.getElementById("charsheet-btn-deathsave").addEventListener("click", () => this._onDeathSave());
 
 		// Rest - handled by CharacterSheetRest module
@@ -3400,10 +3400,57 @@ class CharacterSheetPage {
 	}
 
 	_renderHitDice () {
-		const hitDice = this._state.getHitDiceSummary();
-		(/** @type {*} */ (document.getElementById("charsheet-disp-hitdice-current"))).textContent = hitDice.current;
-		(/** @type {*} */ (document.getElementById("charsheet-disp-hitdice-max"))).textContent = hitDice.max;
-		(/** @type {*} */ (document.getElementById("charsheet-disp-hitdice-type"))).textContent = hitDice.type || "d8";
+		const container = document.getElementById("charsheet-hitdice-pools");
+		if (!container) return;
+		container.innerHTML = "";
+
+		const pools = this._state.getHitDice().filter(hd => (hd.max || 0) > 0);
+		if (!pools.length) {
+			container.append(e_({tag: "div", clazz: "charsheet__hitdice-empty ve-muted", txt: "—"}));
+			return;
+		}
+
+		pools.forEach(hd => {
+			const eleCurrent = e_({tag: "span", clazz: "charsheet__hitdice-current", txt: `${hd.current}`});
+
+			const btnMinus = e_({
+				tag: "button",
+				clazz: "charsheet__hitdice-adjust charsheet__hitdice-adjust--minus",
+				txt: "−",
+				title: `Spend one ${hd.type} (manual correction — no healing)`,
+				attrs: {"aria-label": `Decrease ${hd.type} hit dice`},
+			});
+			btnMinus.addEventListener("click", () => this._onAdjustHitDie(hd.type, -1));
+
+			const btnPlus = e_({
+				tag: "button",
+				clazz: "charsheet__hitdice-adjust charsheet__hitdice-adjust--plus",
+				txt: "+",
+				title: `Restore one ${hd.type} (manual correction)`,
+				attrs: {"aria-label": `Increase ${hd.type} hit dice`},
+			});
+			btnPlus.addEventListener("click", () => this._onAdjustHitDie(hd.type, 1));
+
+			const row = ee`<div class="charsheet__hitdice-pool">
+				<div class="charsheet__hitdice-pool-label">
+					<span class="charsheet__hitdice-pool-class">${hd.className}</span>
+					<span class="charsheet__hitdice-type">${hd.type}</span>
+				</div>
+				<div class="charsheet__hitdice-pool-controls">
+					${btnMinus}
+					<span class="charsheet__hitdice-pool-count">${eleCurrent}<span class="charsheet__hitdice-separator">/</span><span class="charsheet__hitdice-max">${hd.max}</span></span>
+					${btnPlus}
+				</div>
+			</div>`;
+			container.append(row);
+		});
+	}
+
+	_onAdjustHitDie (dieType, delta) {
+		const changed = this._state.adjustHitDieCurrent(dieType, delta);
+		if (!changed) return;
+		this._saveCurrentCharacter();
+		this._renderHitDice();
 	}
 
 	_renderDeathSaves () {
@@ -8075,27 +8122,28 @@ class CharacterSheetPage {
 		});
 	}
 
-	async _onUseHitDie () {
-		const hitDice = this._state.getHitDiceSummary();
-		if (hitDice.current <= 0) {
+	async _onUseHitDie (evt = null) {
+		const dieType = this._state.getLargestSpendableHitDieType();
+		if (!dieType) {
 			JqueryUtil.doToast({type: "warning", content: "No hit dice remaining!"});
 			return;
 		}
 
-		const dieType = hitDice.type || "d8";
 		const conMod = this._state.getAbilityMod("con");
-		const dieSize = parseInt(dieType.substring(1));
+		const dieSize = parseInt(dieType.substring(1), 10) || 8;
 
-		const roll = RollerUtil.randomise(dieSize);
+		// Shift-click takes the die's maximum face instead of a random roll.
+		const roll = evt?.shiftKey ? dieSize : RollerUtil.randomise(dieSize);
 		const healing = Math.max(1, roll + conMod);
 
-		// Apply healing
+		// Decrement WITHOUT healing (adjustHitDieCurrent never heals), then apply
+		// the rolled healing exactly once — avoids the previous double-heal where
+		// useHitDie() healed again on top of the manual setCurrentHp.
+		this._state.adjustHitDieCurrent(dieType, -1);
 		const currentHp = this._state.getCurrentHp();
 		const maxHp = this._state.getMaxHp();
-		const newHp = Math.min(currentHp + healing, maxHp);
+		this._state.setCurrentHp(Math.min(currentHp + healing, maxHp));
 
-		this._state.setCurrentHp(newHp);
-		this._state.useHitDie();
 		this._saveCurrentCharacter();
 		this._renderHp();
 		this._renderHitDice();
@@ -8104,7 +8152,7 @@ class CharacterSheetPage {
 		this._showDiceResult(
 			"Hit Die",
 			healing,
-			`1${dieType} (${roll}) + ${conMod} CON`,
+			`1${dieType}${evt?.shiftKey ? " (max)" : ` (${roll})`} + ${conMod} CON`,
 		);
 	}
 

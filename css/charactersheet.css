@@ -1710,7 +1710,8 @@
 
 /* Hit dice and death saves */
 .charsheet-page[data-textsize] .charsheet__hitdice-box,
-.charsheet-page[data-textsize] .charsheet__hitdice-display,
+.charsheet-page[data-textsize] .charsheet__hitdice-pools,
+.charsheet-page[data-textsize] .charsheet__hitdice-pool,
 .charsheet-page[data-textsize] .charsheet__hitdice-type,
 .charsheet-page[data-textsize] .charsheet__hitdice-btn,
 .charsheet-page[data-textsize] .charsheet__survival-header,
@@ -4484,7 +4485,7 @@
 .charsheet__hitdice-current,
 .charsheet__hitdice-max {
 	font-family: var(--cs-font-display, inherit);
-	font-size: var(--cs-text-xl, 1.25rem);
+	font-size: var(--cs-text-lg, 1.125rem);
 	font-weight: 700;
 }
 
@@ -4524,16 +4525,78 @@
 	font-size: 1.25rem;
 }
 
-.charsheet__hitdice-display {
+.charsheet__hitdice-pools {
 	display: flex;
-	align-items: center;
-	justify-content: center;
+	flex-direction: column;
 	gap: var(--cs-space-xs, 0.25rem);
+	margin-bottom: var(--cs-space-sm, 0.5rem);
 }
 
-.charsheet__hitdice-visual {
+.charsheet__hitdice-pool {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	background: rgba(139, 92, 246, 0.06);
+	border-radius: var(--cs-radius-sm, 4px);
+}
+
+.charsheet__hitdice-pool-label {
 	display: flex;
 	align-items: baseline;
+	gap: var(--cs-space-xs, 0.25rem);
+	min-width: 0;
+}
+
+.charsheet__hitdice-pool-class {
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.charsheet__hitdice-pool-controls {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+	flex-shrink: 0;
+}
+
+.charsheet__hitdice-pool-count {
+	display: inline-flex;
+	align-items: baseline;
+	min-width: 2.75rem;
+	justify-content: center;
+}
+
+.charsheet__hitdice-adjust {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.5rem;
+	height: 1.5rem;
+	padding: 0;
+	line-height: 1;
+	font-size: var(--cs-text-base, 1rem);
+	font-weight: 700;
+	border: 1px solid var(--cs-border, var(--rgb-border));
+	border-radius: var(--cs-radius-sm, 4px);
+	background: var(--cs-bg-surface, var(--rgb-bg-alt));
+	color: inherit;
+	cursor: pointer;
+	transition: all var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__hitdice-adjust:hover {
+	background: var(--cs-primary, #6366f1);
+	color: #fff;
+	border-color: var(--cs-primary, #6366f1);
+}
+
+.charsheet__hitdice-empty {
+	text-align: center;
+	padding: var(--cs-space-xs, 0.25rem) 0;
 }
 
 .charsheet__hitdice-btn {
