@@ -3785,12 +3785,23 @@
 	margin-right: var(--cs-space-xs, 0.25rem);
 }
 
+/* Lore-skill names are user-defined and frequently long ("Heraldry of the
+   Western Marches"). Truncating to an ellipsis made them illegible in the narrow
+   skills column, so wrap at word boundaries instead. The row is align-items:
+   center, so the fixed-width controls stay vertically centered against a
+   possibly two-line name. */
 .charsheet__lore-skill-name {
 	flex: 1 1 auto;
 	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	white-space: normal;
+	overflow-wrap: break-word;
+	line-height: 1.2;
+}
+
+/* Keep the reorder bump buttons from being squeezed when the name wraps. The
+   mod / passive / delete controls already declare flex-shrink:0. */
+.charsheet__lore-skill-bump {
+	flex-shrink: 0;
 }
 
 .charsheet__lore-skill-mod {
@@ -4532,6 +4543,14 @@
 /* Overview speed segments (emoji label mode). inline-flex keeps the emoji and
    value on the same baseline; the list wraps so long multi-speed displays
    (walk/fly/climb/swim/burrow) never overflow the stat box. */
+/* The speed value carries a unit ("60 ft.") and may hold several segments
+   (walk / fly / climb), unlike AC and Initiative which are 2-3 char numbers.
+   At the 3xl tier it overruns the clipped (overflow:hidden) stat box and the
+   trailing "ft." gets sheared off, especially under [data-textsize]. Drop it to
+   the 2xl tier (still rem-based, so it scales with the JS-set root) and let the
+   inline-flex value shrink/wrap inside the box instead of clipping. The ID
+   specificity here outranks both the base .charsheet__combat-stat-value rule and
+   the [data-textsize] bump, so this governs every text-size setting. */
 .charsheet__combat-stat-value#charsheet-disp-speed {
 	display: inline-flex;
 	flex-wrap: wrap;
@@ -4539,12 +4558,26 @@
 	justify-content: center;
 	gap: 0 0.15em;
 	column-gap: 0.15em;
+	row-gap: 0.1em;
+	font-size: var(--cs-text-2xl, 1.5rem);
+	min-width: 0;
+	max-width: 100%;
+	box-sizing: border-box;
+}
+
+/* Trim the speed box's horizontal padding so a wide value ("120 ft.") keeps a
+   little more room before it reaches the clipped edge. Speed-scoped so AC and
+   Initiative boxes are untouched. */
+.charsheet__combat-stat--speed {
+	padding-left: var(--cs-space-sm, 0.5rem);
+	padding-right: var(--cs-space-sm, 0.5rem);
 }
 
 .charsheet__speed-seg {
 	display: inline-flex;
 	align-items: baseline;
 	white-space: nowrap;
+	max-width: 100%;
 }
 
 .charsheet__speed-seg-emoji {
@@ -5712,7 +5745,9 @@
 
 .charsheet__resource-row {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
+	row-gap: var(--cs-space-xs, 0.25rem);
 	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
 	background: var(--cs-bg-base, var(--rgb-bg));
 	border: 2px solid var(--cs-border, var(--rgb-border-grey));
@@ -5725,20 +5760,25 @@
 	box-shadow: 0 0 8px rgba(245, 158, 11, 0.2);
 }
 
+/* Resource names must wrap at word boundaries, never mid-word ("Stamina" →
+   "Stamin a"). overflow-wrap:break-word only breaks an individual word as a last
+   resort, and dropping min-width:0 keeps the flex min-size at the longest word's
+   width so the name can't be squeezed below it; combined with flex-wrap on the
+   row, the uses block drops to a second line under pressure instead of crushing
+   the label. */
 .charsheet__resource-name {
 	flex: 1 1 auto;
-	min-width: 0;
 	font-weight: 600;
 	font-size: var(--cs-text-sm, 0.85rem);
 	color: var(--cs-text-primary, var(--rgb-text));
 	white-space: normal;
-	overflow-wrap: anywhere;
-	word-break: break-word;
+	overflow-wrap: break-word;
 }
 
 .charsheet__resource-uses {
 	display: flex;
 	align-items: center;
+	flex: 0 0 auto;
 	gap: var(--cs-space-xs, 0.25rem);
 }
 
@@ -11649,6 +11689,17 @@ body.has-quickbuild-overlay .toast__container {
 	background: var(--rgb-bg-alt);
 	border: 1px solid var(--rgb-border-grey);
 	border-radius: 4px;
+}
+
+/* Defensive clean wrap for the combat-tab resource name: in a 1fr grid track a
+   long single word ("Antidotes") could blow out the track width; min-width:0
+   keeps the card inside its track and overflow-wrap:break-word breaks an
+   over-long word only as a last resort (multi-word names still wrap at spaces,
+   never mid-word). Generic resource selector I own; S7's druid cards use the
+   prefixed .charsheet__combat-druid-* classes. */
+.charsheet__combat-resource-name {
+	min-width: 0;
+	overflow-wrap: break-word;
 }
 
 .charsheet__combat-resource-pips {

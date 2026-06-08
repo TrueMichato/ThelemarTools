@@ -1346,7 +1346,7 @@ class CharacterSheetPage {
 				race.languageProficiencies.forEach(lp => {
 					Object.keys(lp).forEach(lang => {
 						if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-						this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
+						this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang)));
 					});
 					// Random extra language choices
 					if (lp.anyStandard || lp.any) {
@@ -1416,7 +1416,7 @@ class CharacterSheetPage {
 							const chosen = pickN(available, count);
 							for (const lang of chosen) this._state.addLanguage(lang);
 						} else if (val === true) {
-							this._state.addLanguage((/** @type {*} */ (key)).toTitleCase());
+							this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (key)));
 						}
 					});
 				});
