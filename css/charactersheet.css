@@ -8521,6 +8521,52 @@ body.has-quickbuild-overlay .toast__container {
 	line-height: 1.3;
 }
 
+/* Druid Resources (Combat tab) — Wild Shape / Wild Companion / Zodiac Form panel.
+   Self-contained, prefixed classes only; does NOT touch the generic combat
+   resource/speed selectors. Each block is a labelled mini-card; action buttons
+   wrap so nothing overflows at any [data-textsize]. */
+.charsheet__combat-druid {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.charsheet__combat-druid-block {
+	padding: 0.4rem 0.5rem;
+	border-left: 2px solid var(--rgb-link);
+	background: var(--cs-bg-surface, var(--rgb-bg-alt, rgba(127, 127, 127, 0.08)));
+	border-radius: 0.25rem;
+}
+
+.charsheet__combat-druid-label {
+	font-weight: 700;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.charsheet__combat-druid-note {
+	margin-bottom: 0.35rem;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.charsheet__combat-druid-active {
+	margin-bottom: 0.35rem;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.charsheet__combat-druid-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.35rem;
+}
+
+.charsheet__combat-druid-footer {
+	margin-top: 0.15rem;
+}
+
 /* Dice Roller Integration */
 .charsheet__dice-result {
 	position: fixed;

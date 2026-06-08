@@ -6639,7 +6639,7 @@ class CharacterSheetPage {
 		// Zodiac Form are managed here rather than in the generic list below).
 		if (this._druidResourcesEnabled && this._druidResources?.isApplicable?.()) {
 			const druidBtnRow = e_({outer: `<div class="charsheet__druid-resources-entry mb-2">
-				<button class="ve-btn ve-btn-xs ve-btn-warning w-100 charsheet__druid-resources-open">🐾 Druid Resources</button>
+				<button class="ve-btn ve-btn-xs ve-btn-warning w-100 charsheet__druid-resources-open" title="Open the Druid Resources panel — track Wild Shape uses, Wild Companion, and Zodiac Form (also on the Combat tab)">🐾 Manage Druid Resources…</button>
 			</div>`});
 			druidBtnRow.querySelector(".charsheet__druid-resources-open").addEventListener("click", () => this._druidResources.openModal());
 			container.append(druidBtnRow);
