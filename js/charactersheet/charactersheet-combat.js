@@ -5986,6 +5986,15 @@ class CharacterSheetCombat {
 			return;
 		}
 
+		// Enforce Primal Focus gating at use time (not just via the disabled button) so a
+		// focus-locked method (Singular Focus → Predator, Groundshatter → Prey) can never be
+		// triggered while in the wrong focus, even if the disabled state is bypassed.
+		if (this._state.isCombatMethodFocusBlocked?.(method)) {
+			const focusLabel = method.requiresFocus.charAt(0).toUpperCase() + method.requiresFocus.slice(1);
+			JqueryUtil.doToast({type: "warning", content: `${method.name} can only be used while in ${focusLabel} focus.`});
+			return;
+		}
+
 		this._state.setStaminaCurrent(currentStamina - cost);
 		this._updateStaminaDisplay();
 
