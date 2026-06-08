@@ -33659,7 +33659,19 @@ class CharacterSheetState {
 
 		// ===== USE TOGGLE ANALYSIS FOR GENERIC DETECTION =====
 		// If the analysis indicates this is likely a toggle ability with high confidence
-		if (toggleAnalysis.isToggle && toggleAnalysis.confidence >= 5) {
+		//
+		// GENERIC RULE (limited-use innate abilities → resources, not toggle states):
+		// a feature that tracks a finite use pool (uses.max > 0) but carries NO sustained-state
+		// signal (no parsed duration, no end conditions, no "while active / until you end it /
+		// for the duration" language) is a single-use/limited-use ability — e.g. Aasimar Healing
+		// Hands (1/long-rest). It must fall through to the limited-use fallback below and surface
+		// as a tracked RESOURCE, never as a generic toggle. Genuine sustained toggles (Rage,
+		// Bladesong, Wild Shape, stances) are matched earlier by name/pattern and never reach here.
+		const hasSustainedSignal = !!toggleAnalysis.duration
+			|| (toggleAnalysis.endConditions?.length > 0)
+			|| /while[^.]*\bactive\b|while you (?:are|remain)|until you (?:end|dismiss|choose|stop)|for the duration|end it\b|deactivate/i.test(text);
+		const isBareLimitedUse = feature?.uses?.max > 0 && !hasSustainedSignal;
+		if (toggleAnalysis.isToggle && toggleAnalysis.confidence >= 5 && !isBareLimitedUse) {
 			const parsedEffects = this.parseEffectsFromDescription(rawText);
 
 			// Only consider it activatable if it actually provides some effects
@@ -34681,6 +34693,14 @@ class CharacterSheetState {
 			if (activationInfo.interactionMode === "passive") continue;
 			// Combat actions and reactions are routed to the combat tab, not active states
 			if (activationInfo.interactionMode === "combat" || activationInfo.interactionMode === "reaction") continue;
+			// Combat methods (CTM optional features / combatMethod entities) have their own
+			// dedicated combat-methods rendering surface (getCombatMethods / renderCombatMethods);
+			// stances are toggled there, not via the generic active-states list. Never surface
+			// them in the GENERIC "Available to Activate" list.
+			if (CharacterSheetClassUtils.isCombatMethod(feature)) continue;
+			// Arcane Shot options + the descriptive "Arcane Shot" feature render in the dedicated
+			// Arcane Archer combat area (getKnownArcaneShots); exclude from the generic list.
+			if (CharacterSheetState.isArcaneShotActivatable(feature)) continue;
 
 			// Find associated resource if any
 			let resource = null;
@@ -35053,6 +35073,50 @@ class CharacterSheetState {
 			return /wild shape|wild companion/i.test(af.feature?.name || "");
 		}
 		return false;
+	}
+
+	/**
+	 * Predicate: is this feature an Arcane Shot — either a picked Arcane Shot OPTION
+	 * (e.g. "Grasping Arrow") or the generic descriptive "Arcane Shot" subclass feature?
+	 *
+	 * Arcane Shots have a DEDICATED Arcane Archer combat surface (fed by
+	 * getKnownArcaneShots()), so they must never leak into the GENERIC
+	 * "Available to Activate" active-states list. The option test mirrors
+	 * getKnownArcaneShots() exactly (`optionalFeatureTypes` includes "AS") so a
+	 * feature can never be excluded from the generic list yet absent from the
+	 * dedicated renderer.
+	 *
+	 * @param {{name?: string, optionalFeatureTypes?: Array<string>}} feature
+	 * @returns {boolean}
+	 */
+	static isArcaneShotActivatable (feature) {
+		if (!feature) return false;
+		if (feature.optionalFeatureTypes?.some(ft => ft === "AS")) return true;
+		return (feature.name || "").toLowerCase().trim() === "arcane shot";
+	}
+
+	/**
+	 * GENERIC framework predicate: should this feature surface as a tracked RESOURCE
+	 * (a finite use pool) rather than a sustained toggle "active state"?
+	 *
+	 * True when the feature tracks finite uses (`uses.max > 0`) AND is not a genuine
+	 * sustained toggle state. Single-use / limited-use INNATE abilities (e.g. Aasimar
+	 * Healing Hands, 1/long-rest) have an instantaneous effect and a finite pool — they
+	 * are resources, not toggles. Sustained states (Rage, Bladesong, Wild Shape, stances)
+	 * track uses too but are ongoing, so they are excluded.
+	 *
+	 * Species-specific resource/action rendering layers on top of this predicate.
+	 *
+	 * @param {{uses?: {max?: number}}} feature
+	 * @param {object|null} [activationInfo] - Pre-computed detectActivatableFeature() result.
+	 *   Pass it to avoid a second detection pass; omit to compute on demand.
+	 * @returns {boolean}
+	 */
+	static isLimitedUseResourceAbility (feature, activationInfo) {
+		if (!(feature?.uses?.max > 0)) return false;
+		const info = activationInfo === undefined ? this.detectActivatableFeature(feature) : activationInfo;
+		if (info?.isToggle) return false;
+		return true;
 	}
 	// #endregion
 
