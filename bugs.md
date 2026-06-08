@@ -3,7 +3,27 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None. Round-3 bugs (surfaced during manual testing of the merged round-2 fixes) are all fixed — see the Round 3 entries at the top of Closed Bugs._
+_Round 4 (surfaced during manual testing of the merged round-3 fixes). Grouped by the planning session that owns each. All refer to TGTT classes unless noted._
+
+**Session 1 — Druid (load blocker + Druidic language)**
+* **Druid Resources module fails to load (regression from round-3 PR #29) — BLOCKER.** Opening the sheet (e.g. Lunaria) throws `Uncaught SyntaxError: Identifier 'e_' has already been declared (at charactersheet-druid-resources.js:1:1)` followed by `Failed to init druidResources: ReferenceError: CharacterSheetDruidResources is not defined`. Result: no Druid Resources button/modal anywhere, and Wild Shape / Wild Companion / Zodiac Form fall back to the generic active-states list. **Root cause (diagnosed):** `charactersheet-druid-resources.js` was added to `charactersheet.html` as a **classic** deferred script (`<script type="text/javascript" defer …>`, ~line 1484), copying `charactersheet-respec.js`. Classic scripts share one global lexical scope; `respec.js` already declares `const {e_, ee} = globalThis` at top level, so druid-resources' top-level `const {e_} = globalThis` is a second classic declaration of `e_` → SyntaxError → the file never parses → `CharacterSheetDruidResources` (assigned via `globalThis.…` at the file's end) is never defined → the try/catch init at charactersheet.js:154-157 swallows it and sets `_druidResourcesEnabled = false`. jsdom imports the file as an ES module (own scope) so the round-3 tests passed and could not catch this. **Fix:** load it like every other real CS module — `import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js"` in `charactersheet.js` (add `export {CharacterSheetDruidResources};` to the module), and REMOVE the classic `<script>` tag from `charactersheet.html`. Add a structural regression guard (assert druid-resources is imported by charactersheet.js and is NOT loaded as a classic non-module script) since jsdom can't catch the classic-scope collision.
+* **Druidic language not granted.** When a Druid gains the Druidic feature, "Druidic" is not added to the character's languages. Wire it through the language-granting pipeline so it appears in the character's languages.
+
+**Session 2 — Ranger feature surfacing (Primal Focus combat-tab + overview parity)**
+* **Primal Focus combat-tab display + placement.** The Primal Focus panel on the Combat tab has layout/overlap problems (action-type badges like "Bonus Action"/"Passive"/"Method" overlap the feature-name and description columns — see screenshot) and sits at the bottom of the tab; it should live in the right column with a clean, legible layout.
+* **Overview ↔ Combat-tab parity.** The Combat tab now shows much richer, more robust info than the Overview; the Overview is missing many of those fields. Bring the Overview closer to the Combat tab's level of detail.
+* **Ranger features not marked anywhere (e.g. Enduring Traveler).** Several Ranger features — Enduring Traveler called out specifically — are not surfaced anywhere for the player. Continue the deep pass so every passive/situational Ranger feature is shown as a legible reminder.
+
+**Session 3 — Quickbuild / Fighter**
+* **Fighter subclass tradition choice double-spawns in QuickBuild.** When a Fighter subclass grants a choice of combat traditions, QuickBuild spins up the whole combat-traditions choice flow a SECOND time in addition to the subclass's own choice (cf. troubleshooting I5 — one resolver keyed on `{class, subclass, level, pickSlot}`).
+* **QuickBuild Fighter immediately after Builder crashes.** Building a Fighter via QuickBuild right after using the Builder throws `Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'Fighter_2')` at `charactersheet-quickbuild.js:5066` (`_buildHistoryEntry`), called from `_applyQuickBuild` → `_nextStep`. Some per-class map is undefined on this path; guard/initialize it.
+
+**Session 4 — Arcane Archer arcane shots (TGTT Fighter subclass)**
+* **Arcane Archer subclass has no arcane-shot implementation.** The Arcane Archer subclass (TGTT, also using XPHB/PHB) lacks implementation of Arcane Shots, the shot-option choices, and a dedicated Combat-tab area to track and use this resource. Implement the arcane-shot option picks, usage/resource tracking, and a Combat-tab section to use them (analogous to the round-3 Primal Focus combat section).
+
+**Session 5 — Sheet display & species fixes**
+* **Speed breakdown modal overflows.** The speed modal overflows its container and could be laid out better. Fix the overflow and improve the layout.
+* **Aasimar innate flight speed.** Aasimar show an innate flying speed even when not in their special transformation mode (their flight should only apply while that mode is active). Correct the species speed handling so base (out-of-mode) Aasimar have no flying speed.
 
 ## Closed Bugs
 
