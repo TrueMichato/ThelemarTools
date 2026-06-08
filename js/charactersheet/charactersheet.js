@@ -2752,6 +2752,7 @@ class CharacterSheetPage {
 	_renderSizeChip () {
 		const chip = document.getElementById("charsheet-size-chip");
 		const value = document.getElementById("charsheet-disp-size");
+		if (!chip || !value) return;
 
 		const baseSize = this._state.getBaseSize();
 		const currentSize = this._state.getSize();
@@ -2791,6 +2792,7 @@ class CharacterSheetPage {
 	_renderReachChip () {
 		const chip = document.getElementById("charsheet-reach-chip");
 		const value = document.getElementById("charsheet-disp-reach");
+		if (!chip || !value) return;
 
 		const baseReach = 5; // Standard reach for Medium/Small creatures
 		const reachBonus = this._state.getReachBonus();
@@ -6656,6 +6658,13 @@ class CharacterSheetPage {
 		this._combat?.renderCombatStates?.();
 		this._combat?.renderCombatDefenses?.();
 		this._combat?.renderCombatEffects?.();
+
+		// Reach & size chips and Combat attacks are derived from active states —
+		// keep them in sync so toggling a reach/size-affecting state updates the
+		// Overview chip and attack reach immediately (no reactive framework here).
+		this._renderReachChip?.();
+		this._renderSizeChip?.();
+		this._combat?.renderAttacks?.();
 	}
 
 	/**
@@ -7613,6 +7622,12 @@ class CharacterSheetPage {
 		// Limit to 5 attacks for overview
 		const displayAttacks = attacks.slice(0, 5);
 
+		// Reach context computed once for this render pass.
+		const overviewReachCtx = {
+			meleeReach: this._state.getMeleeReach?.() ?? 5,
+			reachBonus: this._state.getReachBonus?.() ?? 0,
+		};
+
 		displayAttacks.forEach(attack => {
 			const abilityMod = this._state.getAbilityMod(attack.abilityMod || "str");
 			const profBonus = this._state.getProficiencyBonus();
@@ -7622,8 +7637,16 @@ class CharacterSheetPage {
 				? `${attack.damage}+${totalDamageBonus}`
 				: `${attack.damage}${totalDamageBonus}`;
 
-			// Format range
-			const rangeStr = attack.range || (attack.isMelee ? "5 ft." : "");
+			// Format range — reach-aware for melee attacks. Override the stored range
+			// only when reach is actually modified (character reach bonus or a Reach
+			// weapon property) and the attack is not thrown, matching the Combat tab.
+			let rangeStr = attack.range || (attack.isMelee ? "5 ft." : "");
+			const attackReach = this._state.getAttackReach?.(attack, {meleeReach: overviewReachCtx.meleeReach});
+			const isThrownRange = attack.range && String(attack.range).includes("/");
+			const hasReachProp = (attack.properties || []).some(p => String(p).split("|")[0].toUpperCase() === "R");
+			if (attackReach != null && !isThrownRange && (overviewReachCtx.reachBonus !== 0 || hasReachProp)) {
+				rangeStr = `${attackReach} ft.`;
+			}
 
 			// Format properties (abbreviated)
 			const propAbbrs = [];

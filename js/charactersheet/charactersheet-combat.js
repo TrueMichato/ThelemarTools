@@ -1766,13 +1766,20 @@ class CharacterSheetCombat {
 			return;
 		}
 
+		// Compute reach context once for this render pass (avoids re-walking
+		// features/feats/active states per attack).
+		const reachCtx = {
+			meleeReach: this._state.getMeleeReach?.() ?? 5,
+			reachBonus: this._state.getReachBonus?.() ?? 0,
+		};
+
 		attacks.forEach(attack => {
-			const item = this._renderAttackItem(attack);
+			const item = this._renderAttackItem(attack, reachCtx);
 			container.append(item);
 		});
 	}
 
-	_renderAttackItem (attack) {
+	_renderAttackItem (attack, reachCtx = {}) {
 		// Calculate ability modifier - handle special cases for natural weapons
 		let abilityMod;
 		const abilityKey = attack.abilityMod || "str";
@@ -1809,6 +1816,14 @@ class CharacterSheetCombat {
 		const propertiesHtml = propertyNames.length
 			? `<span class="ve-small ve-muted">(${propertyNames.join(", ")})</span>`
 			: "";
+
+		// Reach-aware range display. Melee attacks derive their reach from the
+		// character's current melee reach plus the weapon "Reach" property. Only
+		// override the stored range string when reach is actually modified
+		// (character reach bonus or a Reach-property weapon) and the attack isn't a
+		// thrown weapon (range like "20/60 ft."), to avoid regressions for the
+		// default 5 ft. case and ranged/thrown ranges.
+		const {rangeHtml: rangeDisplayHtml} = this._buildAttackRangeDisplay(attack, reachCtx);
 
 		// Format mastery
 		const masteryNames = (attack.mastery || [])
@@ -1891,7 +1906,7 @@ class CharacterSheetCombat {
 				<div class="charsheet__attack-info">
 					<span class="charsheet__attack-name">${nameHtml}${badgeHtml}</span>
 					<span class="charsheet__attack-details">
-						${attack.range ? `<span class="ve-muted">${attack.range}</span>` : ""}
+						${rangeDisplayHtml}
 						<span class="badge badge-primary">+${totalAttackBonus}</span>
 						<span class="badge badge-danger">${attack.damage}${totalDamageBonus >= 0 ? "+" : ""}${totalDamageBonus} ${attack.damageType}</span>
 						${critRangeHtml}
@@ -1919,6 +1934,42 @@ class CharacterSheetCombat {
 				</div>
 			</div>
 		`});
+	}
+
+	/**
+	 * Build the range/reach display for an attack row.
+	 *
+	 * For melee attacks the effective reach is derived from the character's current
+	 * melee reach (state.getAttackReach) plus the weapon "Reach" property. The stored
+	 * free-text range string is only overridden when reach is actually modified
+	 * (character reach bonus ≠ 0 OR the weapon has the Reach property) and the attack
+	 * is not a thrown weapon (range containing "/"). Otherwise the original range is
+	 * shown unchanged, so there is no regression for the default 5 ft. case, ranged
+	 * weapons, or thrown ranges.
+	 *
+	 * @param {object} attack
+	 * @param {{meleeReach?: number, reachBonus?: number}} [reachCtx]
+	 * @returns {{rangeHtml: string, reach: (number|null)}}
+	 */
+	_buildAttackRangeDisplay (attack, reachCtx = {}) {
+		const rawRange = attack.range ? `<span class="ve-muted">${attack.range}</span>` : "";
+
+		const rangeStr = attack.range != null ? String(attack.range) : "";
+		const isThrown = rangeStr.includes("/");
+		const hasReachProp = (attack.properties || []).some(p => String(p).split("|")[0].toUpperCase() === "R");
+		const reachBonus = reachCtx.reachBonus ?? (this._state.getReachBonus?.() ?? 0);
+		const reach = this._state.getAttackReach?.(attack, {meleeReach: reachCtx.meleeReach});
+
+		// Only override when melee, not thrown, and reach is actually modified.
+		if (reach == null || isThrown || (reachBonus === 0 && !hasReachProp)) {
+			return {rangeHtml: rawRange, reach};
+		}
+
+		const breakdown = [`Base ${CharacterSheetState.BASE_MELEE_REACH} ft`];
+		if (reachBonus) breakdown.push(`${reachBonus > 0 ? "+" : ""}${reachBonus} ft (reach modifiers)`);
+		if (hasReachProp) breakdown.push(`+${CharacterSheetState.REACH_PROPERTY_BONUS} ft (Reach property)`);
+		const title = `Melee reach: ${reach} ft\n${breakdown.join("\n")}`;
+		return {rangeHtml: `<span class="ve-muted" title="${title}">${reach} ft.</span>`, reach};
 	}
 
 	/**
