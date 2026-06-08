@@ -8743,8 +8743,15 @@ class CharacterSheetState {
 
 		// Static fallback by base class name.
 		const map = {
-			bard: "cha", cleric: "wis", druid: "wis", paladin: "cha", ranger: "wis",
-			sorcerer: "cha", warlock: "cha", wizard: "int", artificer: "int",
+			bard: "cha",
+			cleric: "wis",
+			druid: "wis",
+			paladin: "cha",
+			ranger: "wis",
+			sorcerer: "cha",
+			warlock: "cha",
+			wizard: "int",
+			artificer: "int",
 		};
 		return map[(cls.name || "").toLowerCase()] || null;
 	}
@@ -9402,8 +9409,12 @@ class CharacterSheetState {
 	 */
 	static _abilityLabel (ability) {
 		return ({
-			str: "Strength", dex: "Dexterity", con: "Constitution",
-			int: "Intelligence", wis: "Wisdom", cha: "Charisma",
+			str: "Strength",
+			dex: "Dexterity",
+			con: "Constitution",
+			int: "Intelligence",
+			wis: "Wisdom",
+			cha: "Charisma",
 		})[ability] || (ability || "").toUpperCase();
 	}
 
