@@ -3878,6 +3878,18 @@ class CharacterSheetClassUtils {
 	 * @param {*} classData
 	 */
 	static updateHitDice (/** @type {*} */ state, /** @type {*} */ classData) {
+		// Reconcile the per-die-type pools from the current class levels rather
+		// than incrementing by one. `recalculateHitDice()` derives `max` from the
+		// class levels and preserves spent dice, and is idempotent — so when a
+		// new multiclass is introduced via `state.addClass()` (which already
+		// recalculates), calling this afterwards no longer double-counts the new
+		// class's first Hit Die. `classData` is unused (kept for call-site compat).
+		if (typeof state.recalculateHitDice === "function") {
+			state.recalculateHitDice();
+			return;
+		}
+
+		// Fallback for older state objects without the canonical recalc.
 		const hitDie = `d${CharacterSheetClassUtils.getClassHitDie(classData)}`;
 		const hitDice = state.getHitDiceByType();
 
