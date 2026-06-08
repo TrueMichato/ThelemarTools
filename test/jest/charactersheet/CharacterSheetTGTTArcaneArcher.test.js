@@ -432,7 +432,6 @@ describe("TGTT Arcane Archer Fighter", () => {
 			{name: "High Ground", calcKey: "highGroundBonus", expected: 2},
 			{name: "Sweeping Blows", calcKey: "sweepingBlowsBonus", expected: 2},
 			{name: "Hammer and Anvil", calcKey: "hammerAndAnvilBonus", expected: 2},
-			{name: "Flanking", calcKey: "flankingBonus", expected: 2},
 		];
 
 		flatBonusTactics.forEach(({name, calcKey, expected}) => {
@@ -447,6 +446,21 @@ describe("TGTT Arcane Archer Fighter", () => {
 				const calcs = state.getFeatureCalculations();
 				expect(calcs[calcKey]).toBe(expected);
 			});
+		});
+
+		// The Battle Tactic NAMED "Flanking" must NOT advertise an automatic +2 — that
+		// situational bonus belongs solely to the combat-tab Flanking quick button.
+		it("should NOT compute a flankingBonus for the Battle Tactic Flanking", () => {
+			makeArcaneArcher(5);
+			state.addFeature({
+				name: "Flanking",
+				source: "TGTT",
+				featureType: "Optional Feature",
+				optionalFeatureTypes: ["BT"],
+			});
+			const calcs = state.getFeatureCalculations();
+			expect(calcs.flankingBonus).toBeUndefined();
+			expect(calcs.hasFlanking).toBeUndefined();
 		});
 
 		it("should compute daringFeintCritRange = 19 at Fighter level 9+", () => {
