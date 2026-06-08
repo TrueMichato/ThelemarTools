@@ -248,3 +248,140 @@ describe("legacy back-compat", () => {
 		expect(info.byClass.find(c => c.className === "Druid")).toBeTruthy();
 	});
 });
+
+describe("getSpellcastingCardForSpell — per-class favourite resolution (Bug #11)", () => {
+	test("routes a spell to its owning class card by sourceClass (distinct DC/attack/ability)", () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("int", 18); // +4
+		state.setAbilityBase("wis", 14); // +2
+		state.addClass({name: "Wizard", source: "XPHB", level: 5, preparedSpellsProgression: WIZARD_PREPARED, cantripProgression: WIZARD_CANTRIP, casterProgression: "full", spellcastingAbility: "int"});
+		state.addClass({name: "Cleric", source: "PHB", level: 3, cantripProgression: CLERIC_CANTRIP, casterProgression: "full", spellcastingAbility: "wis"});
+		// Total level 8 => proficiency +3
+
+		const wizCard = state.getSpellcastingCardForSpell({name: "Magic Missile", level: 1, sourceClass: "Wizard"});
+		const cleCard = state.getSpellcastingCardForSpell({name: "Guiding Bolt", level: 1, sourceClass: "Cleric"});
+
+		expect(wizCard.displayName).toBe("Wizard");
+		expect(wizCard.ability).toBe("int");
+		expect(wizCard.saveDc).toBe(15); // 8 + 3 + 4
+		expect(wizCard.attackBonus).toBe(7); // 3 + 4
+
+		expect(cleCard.displayName).toBe("Cleric");
+		expect(cleCard.ability).toBe("wis");
+		expect(cleCard.saveDc).toBe(13); // 8 + 3 + 2
+		expect(cleCard.attackBonus).toBe(5); // 3 + 2
+
+		// The two favourited spells genuinely resolve to different numbers.
+		expect(wizCard.saveDc).not.toBe(cleCard.saveDc);
+		expect(wizCard.attackBonus).not.toBe(cleCard.attackBonus);
+	});
+
+	test("routes cantrips the same way as leveled spells", () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("int", 18);
+		state.setAbilityBase("wis", 14);
+		state.addClass({name: "Wizard", source: "XPHB", level: 5, preparedSpellsProgression: WIZARD_PREPARED, cantripProgression: WIZARD_CANTRIP, casterProgression: "full", spellcastingAbility: "int"});
+		state.addClass({name: "Cleric", source: "PHB", level: 3, cantripProgression: CLERIC_CANTRIP, casterProgression: "full", spellcastingAbility: "wis"});
+
+		const fireBolt = state.getSpellcastingCardForSpell({name: "Fire Bolt", level: 0, sourceClass: "Wizard"});
+		const sacredFlame = state.getSpellcastingCardForSpell({name: "Sacred Flame", level: 0, sourceClass: "Cleric"});
+		expect(fireBolt.ability).toBe("int");
+		expect(sacredFlame.ability).toBe("wis");
+		expect(fireBolt.attackBonus).toBe(7);
+		expect(sacredFlame.saveDc).toBe(13);
+	});
+
+	test("Ranger/Druid (Lunaria-like, both WIS): each spell resolves its own class card", () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("wis", 16); // +3
+		state.addClass(makeRanger());
+		state.addClass(makeDruid());
+
+		const rangerCard = state.getSpellcastingCardForSpell({name: "Cure Wounds", level: 1, sourceClass: "Ranger"});
+		const druidCard = state.getSpellcastingCardForSpell({name: "Faerie Fire", level: 1, sourceClass: "Druid"});
+
+		expect(rangerCard.displayName).toBe("Ranger");
+		expect(druidCard.displayName).toBe("Druid");
+		// Both use WIS so the numbers match, but the cards are the correct identities.
+		expect(rangerCard.ability).toBe("wis");
+		expect(druidCard.ability).toBe("wis");
+		expect(rangerCard.saveDc).toBe(druidCard.saveDc);
+		expect(rangerCard.attackBonus).toBe(druidCard.attackBonus);
+		expect(rangerCard).not.toBe(druidCard);
+	});
+
+	test("subclass attribution wins, and Gambler spells match by subclass key", () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("cha", 16); // +3
+		state.setAbilityBase("int", 16);
+		state.addClass({name: "Rogue", source: "TGTT", level: 5, subclass: {name: "Gambler", source: "TGTT"}});
+		state.addClass({name: "Fighter", source: "PHB", level: 4, subclass: {name: "Eldritch Knight", source: "PHB"}});
+
+		const gamblerCard = state.getSpellcastingCardForSpell({name: "Hex", level: 1, sourceClass: "Gambler", sourceSubclass: "Gambler"});
+		expect(gamblerCard.displayName).toBe("Gambler");
+		expect(gamblerCard.ability).toBe("cha");
+
+		const ekCard = state.getSpellcastingCardForSpell({name: "Shield", level: 1, sourceClass: "Fighter", sourceSubclass: "Eldritch Knight"});
+		expect(ekCard.displayName).toBe("Eldritch Knight");
+		expect(ekCard.ability).toBe("int");
+	});
+
+	test("card DC/attack reflect item + custom modifiers (effective, not canonical)", () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("int", 18); // +4
+		state.setAbilityBase("wis", 14); // +2
+		state.addClass({name: "Wizard", source: "XPHB", level: 5, preparedSpellsProgression: WIZARD_PREPARED, cantripProgression: WIZARD_CANTRIP, casterProgression: "full", spellcastingAbility: "int"});
+		state.addClass({name: "Cleric", source: "PHB", level: 3, cantripProgression: CLERIC_CANTRIP, casterProgression: "full", spellcastingAbility: "wis"});
+		state._data.itemBonuses = {...(state._data.itemBonuses || {}), spellSaveDc: 1, spellAttack: 1};
+
+		const wizCard = state.getSpellcastingCardForSpell({name: "Magic Missile", level: 1, sourceClass: "Wizard"});
+		expect(wizCard.saveDc).toBe(16); // 15 + 1 item
+		expect(wizCard.attackBonus).toBe(8); // 7 + 1 item
+	});
+
+	test("unattributed favourite resolves the lone caster card, but is ambiguous (null) when multiclass", () => {
+		// Single caster: an un-stamped (legacy) favourite still gets that card.
+		const solo = new CharacterSheetState();
+		solo.setAbilityBase("wis", 16);
+		solo.addClass(makeDruid());
+		const soloCard = solo.getSpellcastingCardForSpell({name: "Legacy Spell", level: 1});
+		expect(soloCard).toBeTruthy();
+		expect(soloCard.displayName).toBe("Druid");
+
+		// Single caster, but an EXPLICIT stamp that matches no caster class stays
+		// ambiguous (null) — we don't blindly attribute a mis-stamped spell.
+		expect(solo.getSpellcastingCardForSpell({name: "Vicious Mockery", level: 0, sourceClass: "Bard"})).toBeNull();
+
+		// Multiclass: an un-stamped favourite cannot be attributed → null (caller
+		// omits the per-class stats line rather than guessing).
+		const multi = new CharacterSheetState();
+		multi.setAbilityBase("wis", 16);
+		multi.addClass(makeRanger());
+		multi.addClass(makeDruid());
+		expect(multi.getSpellcastingCardForSpell({name: "Legacy Spell", level: 1})).toBeNull();
+		// Also null when the stamp matches no caster class.
+		expect(multi.getSpellcastingCardForSpell({name: "Legacy Spell", level: 1, sourceClass: "Bard"})).toBeNull();
+	});
+
+	test("same spell name resolves by its owner stamp, not by spell-list availability", () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("int", 18);
+		state.setAbilityBase("wis", 14);
+		state.addClass({name: "Wizard", source: "XPHB", level: 5, preparedSpellsProgression: WIZARD_PREPARED, cantripProgression: WIZARD_CANTRIP, casterProgression: "full", spellcastingAbility: "int"});
+		state.addClass({name: "Cleric", source: "PHB", level: 3, cantripProgression: CLERIC_CANTRIP, casterProgression: "full", spellcastingAbility: "wis"});
+
+		// "Detect Magic" is on both lists; the stamp decides the owning class.
+		const asWizard = state.getSpellcastingCardForSpell({name: "Detect Magic", level: 1, sourceClass: "Wizard"});
+		const asCleric = state.getSpellcastingCardForSpell({name: "Detect Magic", level: 1, sourceClass: "Cleric"});
+		expect(asWizard.displayName).toBe("Wizard");
+		expect(asWizard.saveDc).toBe(15);
+		expect(asCleric.displayName).toBe("Cleric");
+		expect(asCleric.saveDc).toBe(13);
+	});
+
+	test("returns null when the character has no spellcasting classes", () => {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Barbarian", source: "PHB", level: 3});
+		expect(state.getSpellcastingCardForSpell({name: "Anything", level: 1, sourceClass: "Barbarian"})).toBeNull();
+	});
+});

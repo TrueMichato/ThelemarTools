@@ -7785,9 +7785,12 @@ class CharacterSheetPage {
 		const calcs = this._state.getFeatureCalculations?.();
 		const breakdown = this._state.getSpellcastingClassBreakdown?.() || [];
 
+		// Gambler-aware per-class formatters, shared by the collapsed header below
+		// and the per-spell stat lines further down (multiclass casters).
+		const fmtAttack = (c) => c.isRolledPrepared && calcs?.gamblerSpellAttackFormula ? `+${calcs.gamblerSpellAttackFormula}` : this._formatMod(c.attackBonus);
+		const fmtDc = (c) => c.isRolledPrepared && calcs?.gamblerSpellDcFormula ? `${calcs.gamblerSpellDcFormula}` : `${c.saveDc}`;
+
 		if (breakdown.length) {
-			const fmtAttack = (c) => c.isRolledPrepared && calcs?.gamblerSpellAttackFormula ? `+${calcs.gamblerSpellAttackFormula}` : this._formatMod(c.attackBonus);
-			const fmtDc = (c) => c.isRolledPrepared && calcs?.gamblerSpellDcFormula ? `${calcs.gamblerSpellDcFormula}` : `${c.saveDc}`;
 			const collapse = (cards, fmt) => {
 				const distinct = [...new Set(cards.map(fmt))];
 				return distinct.length === 1
@@ -7875,6 +7878,22 @@ class CharacterSheetPage {
 		const favCantrips = favSpells.filter(s => s.level === 0);
 		const favLeveled = favSpells.filter(s => s.level > 0);
 
+		// For multiclass casters, surface each favourite spell's owning-class save
+		// DC / attack / ability inline, since the header collapses to "Varies".
+		// Single-caster sheets keep clean rows (the header already shows the one
+		// set of values). Returns "" when attribution is ambiguous.
+		const getSpellStatsHtml = (spell) => {
+			if (breakdown.length < 2) return "";
+			const card = this._state.getSpellcastingCardForSpell?.(spell);
+			if (!card) return "";
+			const abilShort = (card.ability || "").toUpperCase();
+			const className = card.displayName || card.className || "";
+			const dcText = `${fmtDc(card)}`;
+			const atkText = `${fmtAttack(card)}`;
+			const title = `${className} · Save DC ${dcText} · Spell Attack ${atkText} · ${card.abilityLabel || abilShort}`;
+			return `<span class="ve-small charsheet__quick-spell-stats" title="${title.qq()}">${className.qq()} · DC ${dcText.qq()} · ${atkText.qq()} · ${abilShort.qq()}</span>`;
+		};
+
 		if (favCantrips.length) {
 			container.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1"><strong>Cantrips</strong></div>`);
 			favCantrips.forEach(spell => {
@@ -7884,6 +7903,7 @@ class CharacterSheetPage {
 						<div class="charsheet__quick-spell-info">
 							<span class="charsheet__quick-spell-name">${getSpellLink(spell)}</span>
 							<span class="ve-small ve-muted">${castTime}</span>
+							${getSpellStatsHtml(spell)}
 						</div>
 						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__quick-spell-btn" title="Cast ${spell.name}">
 							<span class="glyphicon glyphicon-flash"></span> Cast
@@ -7907,6 +7927,7 @@ class CharacterSheetPage {
 						<div class="charsheet__quick-spell-info">
 							<span class="charsheet__quick-spell-name">${getSpellLink(spell)}</span>
 							<span class="ve-small ve-muted">${levelText} · ${castTime}</span>
+							${getSpellStatsHtml(spell)}
 						</div>
 						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__quick-spell-btn" title="Cast ${spell.name}">
 							<span class="glyphicon glyphicon-flash"></span> Cast
