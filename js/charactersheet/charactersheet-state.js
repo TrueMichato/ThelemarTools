@@ -13485,6 +13485,14 @@ class CharacterSheetState {
 						calculations.actionSurgeUses = level >= 17 ? 2 : 1;
 					}
 
+					// Stamina Enthusiast (TGTT specialty): +2 stamina max (handled by the generic
+					// resource:stamina modifier parser) AND an alternate Second Wind mode that
+					// regains stamina equal to proficiency bonus instead of hit points.
+					if (this.hasFeature && this.hasFeature("Stamina Enthusiast")) {
+						calculations.hasStaminaEnthusiast = true;
+						calculations.staminaEnthusiastStaminaGain = profBonus;
+					}
+
 					// Extra Attack count (attacks per Attack action)
 					if (level >= 5) {
 						calculations.hasExtraAttack = true;
@@ -27789,6 +27797,152 @@ class CharacterSheetState {
 	// #endregion
 
 	// =========================================================================
+	// Fighter action-economy features (Second Wind, Action Surge)
+	// =========================================================================
+	// #region fighter-actions
+
+	/**
+	 * Whether the dedicated Combat-tab Fighter section should render — true when the
+	 * character has any Fighter levels or has learned Battle Tactics (TGTT).
+	 * @returns {boolean}
+	 */
+	hasFighterFeatures () {
+		return this.getClassLevel("Fighter") > 0 || this.hasBattleTactics();
+	}
+
+	/**
+	 * Re-derive the per-rest `max` for a Fighter action feature from the live feature
+	 * calculations and write it back to BOTH `feature.uses` and its mirrored resource.
+	 *
+	 * `addFeature` parses uses ("twice"/"once") at grant-time and never re-scales them, so a
+	 * Fighter who levels past 4/10/16/17 would otherwise keep a stale max. This idempotent
+	 * ensure fixes the scaling defect for every surface (the Combat Resources pips included).
+	 * A "full-stays-full" rule auto-fills a freshly-built high-level Fighter without
+	 * clobbering a partially-spent older save.
+	 *
+	 * @param {string} featureName Canonical feature name ("Second Wind" / "Action Surge").
+	 * @param {number} desiredMax Correct per-rest maximum (0 / null = nothing to do yet).
+	 * @private
+	 */
+	_ensureFighterFeatureUses (featureName, desiredMax) {
+		if (!desiredMax || desiredMax <= 0) return;
+		const feature = this._data.features.find(f => f.name?.toLowerCase() === featureName.toLowerCase());
+		if (!feature) return;
+
+		if (!feature.uses) {
+			feature.uses = {current: desiredMax, max: desiredMax, recharge: "short"};
+		} else {
+			const wasFull = (feature.uses.current ?? 0) >= (feature.uses.max ?? 0);
+			feature.uses.max = desiredMax;
+			feature.uses.recharge = "short";
+			feature.uses.current = wasFull ? desiredMax : Math.min(feature.uses.current ?? 0, desiredMax);
+		}
+
+		// Sync the mirrored resource that addFeature creates (Combat Resources pips read it).
+		const resource = this._data.resources.find(r => r.featureId === feature.id)
+			|| this._data.resources.find(r => r.name === feature.name);
+		if (resource) {
+			resource.max = desiredMax;
+			resource.current = Math.max(0, Math.min(feature.uses.current, desiredMax));
+			resource.recharge = "short";
+			if (!resource.featureId) resource.featureId = feature.id;
+		} else {
+			this.addResource({
+				name: feature.name,
+				max: desiredMax,
+				current: feature.uses.current,
+				recharge: "short",
+				featureId: feature.id,
+			});
+		}
+	}
+
+	/** Ensure Second Wind + Action Surge uses are scaled to the current Fighter level. */
+	ensureFighterFeatureUses () {
+		const calcs = this.getFeatureCalculations();
+		this._ensureFighterFeatureUses("Second Wind", calcs.secondWindUses);
+		this._ensureFighterFeatureUses("Action Surge", calcs.actionSurgeUses);
+	}
+
+	/** Max Second Wind uses for the current level. @returns {number} */
+	getSecondWindUsesMax () {
+		const calcs = this.getFeatureCalculations();
+		return Math.max(0, calcs.secondWindUses || 0);
+	}
+
+	/** Remaining Second Wind uses (after scaling correction). @returns {number} */
+	getSecondWindUsesRemaining () {
+		this.ensureFighterFeatureUses();
+		const f = this.getFeature("Second Wind");
+		return Math.max(0, f?.uses?.current ?? 0);
+	}
+
+	/** Max Action Surge uses for the current level. @returns {number} */
+	getActionSurgeUsesMax () {
+		const calcs = this.getFeatureCalculations();
+		return Math.max(0, calcs.actionSurgeUses || 0);
+	}
+
+	/** Remaining Action Surge uses (after scaling correction). @returns {number} */
+	getActionSurgeUsesRemaining () {
+		this.ensureFighterFeatureUses();
+		const f = this.getFeature("Action Surge");
+		return Math.max(0, f?.uses?.current ?? 0);
+	}
+
+	/**
+	 * Spend one Second Wind use. The HP heal (1d10 + Fighter level) is random and applied by
+	 * the combat module; this returns success so the caller can roll + heal. For the TGTT
+	 * Stamina Enthusiast specialty, `mode === "stamina"` regains stamina (= proficiency
+	 * bonus) instead of hit points, applied here (deterministic).
+	 * @param {("hp"|"stamina")} [mode="hp"]
+	 * @returns {boolean} True if a use was spent.
+	 */
+	useSecondWind (mode = "hp") {
+		this.ensureFighterFeatureUses();
+		const f = this.getFeature("Second Wind");
+		if (!f?.uses || f.uses.current <= 0) return false;
+		this.setFeatureUses(f.id, f.uses.current - 1);
+
+		if (mode === "stamina") {
+			const calcs = this.getFeatureCalculations();
+			if (calcs.hasStaminaEnthusiast) {
+				this.ensureStaminaInitialized();
+				const gain = calcs.staminaEnthusiastStaminaGain || this.getProficiencyBonus();
+				this.setStaminaCurrent((this.getStaminaCurrent() || 0) + gain);
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Spend one Action Surge use.
+	 * @returns {boolean} True if a use was spent.
+	 */
+	useActionSurge () {
+		this.ensureFighterFeatureUses();
+		const f = this.getFeature("Action Surge");
+		if (!f?.uses || f.uses.current <= 0) return false;
+		this.setFeatureUses(f.id, f.uses.current - 1);
+		return true;
+	}
+
+	/** Restore all Second Wind uses (short or long rest). */
+	restoreSecondWind () {
+		this.ensureFighterFeatureUses();
+		const f = this.getFeature("Second Wind");
+		if (f?.uses) this.setFeatureUses(f.id, f.uses.max);
+	}
+
+	/** Restore all Action Surge uses (short or long rest). */
+	restoreActionSurge () {
+		this.ensureFighterFeatureUses();
+		const f = this.getFeature("Action Surge");
+		if (f?.uses) this.setFeatureUses(f.id, f.uses.max);
+	}
+	// #endregion
+
+	// =========================================================================
 	// Hunter's Prey (Ranger "Hunter" subclass)
 	// =========================================================================
 	// #region Hunter's Prey
@@ -33263,6 +33417,19 @@ class CharacterSheetState {
 		"step of the wind": "combat",
 		"slow fall": "combat",
 
+		// === Fighter action-economy features (surfaced via the dedicated Combat-tab
+		// Fighter section, not as toggle states). Second Wind / Action Surge are real
+		// action-economy abilities (a Bonus Action / a special action), so they are
+		// classified "combat" — this keeps them OUT of the interactive Active-States panel
+		// (getActivatableFeatures skips combat/reaction) while still letting the static PDF
+		// list them in its action-economy section. The dedicated renderCombatFighter section
+		// owns their interactive controls, so renderCombatActions skips them by name.
+		// Tactical Mind / Stamina Enthusiast are passive riders/modifiers (no action economy).
+		"second wind": "combat",
+		"action surge": "combat",
+		"tactical mind": "passive",
+		"stamina enthusiast": "passive",
+
 		// === Race feature combat actions ===
 		"shapechanger": "combat",
 
@@ -33583,8 +33750,10 @@ class CharacterSheetState {
 			{pattern: /step of the wind/i, stateTypeId: "stepOfTheWind"},
 
 			// Fighter abilities
-			{pattern: /action surge/i, stateTypeId: "custom", isInstant: true},
-			{pattern: /second wind/i, stateTypeId: "custom", isInstant: true},
+			// NOTE: Second Wind / Action Surge are intentionally NOT pattern-matched here.
+			// They are classified "passive" via FEATURE_CLASSIFICATION_OVERRIDES and surfaced
+			// through the dedicated Combat-tab Fighter section. Pattern-matching them here also
+			// caused text-match false positives on features whose prose mentions them.
 
 			// Barbarian abilities
 			{pattern: /reckless attack/i, stateTypeId: "recklessAttack"},

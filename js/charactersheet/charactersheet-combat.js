@@ -5,6 +5,15 @@
 const {e_, ee} = /** @type {*} */ (globalThis);
 
 class CharacterSheetCombat {
+	/**
+	 * Fighter action-economy features that are owned by the dedicated `renderCombatFighter`
+	 * panel. They are classified "combat" (so the static PDF lists them and they stay out of
+	 * the interactive Active-States panel), but every OTHER interactive combat surface
+	 * (the generic "Abilities" list, the Overview Actions list) must exclude them so they
+	 * have exactly one interactive home with the correct heal / stamina / Action-Surge logic.
+	 */
+	static FIGHTER_OWNED_COMBAT_FEATURES = ["second wind", "action surge", "tactical mind", "stamina enthusiast"];
+
 	constructor (page) {
 		this._page = page;
 		this._state = page.getState();
@@ -2285,6 +2294,7 @@ class CharacterSheetCombat {
 		this.renderCombatMethods();
 		this.renderCombatRanger();
 		this.renderCombatArcaneArcher();
+		this.renderCombatFighter();
 		this.renderCombatDefenses();
 		this.renderCombatConditions();
 		this.renderCombatEffects();
@@ -2313,6 +2323,14 @@ class CharacterSheetCombat {
 		// Filter for combat-relevant features that have action economy
 		const combatActions = features.filter(f => {
 			const nameLower = f.name?.toLowerCase() || "";
+
+			// Fighter action features own their dedicated Combat-tab section
+			// (renderCombatFighter); skip them here so they don't double-render in
+			// "Abilities". This must run BEFORE the combat/reaction override short-circuit
+			// below (Second Wind / Action Surge are classified "combat") and also covers the
+			// "passive" riders (Tactical Mind / Stamina Enthusiast) that fall through to the
+			// heuristics.
+			if (CharacterSheetCombat.FIGHTER_OWNED_COMBAT_FEATURES.includes(nameLower)) return false;
 
 			// Features explicitly classified as combat actions or reactions via overrides
 			// are always included regardless of other heuristics
@@ -2380,7 +2398,7 @@ class CharacterSheetCombat {
 				"aggressive", "charge", "ram", "breath weapon", "relentless",
 				"fury of the small", "savage attacks", "hellish rebuke", "healing hands",
 				"celestial revelation", "infernal legacy", "fey step", "misty step",
-				"stone's endurance", "lucky", "second wind", "action surge",
+				"stone's endurance", "lucky",
 				"fighting spirit", "cunning action", "uncanny dodge",
 				"tantalizing shivers", // Belly Dancer (TGTT Rogue)
 				"patient defense", "step of the wind",
@@ -3996,6 +4014,10 @@ class CharacterSheetCombat {
 		const overrides = CharacterSheetState.FEATURE_CLASSIFICATION_OVERRIDES || {};
 		return features.filter(f => {
 			const nameLower = f.name?.toLowerCase() || "";
+			// Fighter action features have their own dedicated panel (renderCombatFighter);
+			// keep them out of the generic Overview Actions list so there is a single
+			// interactive surface with the correct heal / stamina / Action-Surge logic.
+			if (CharacterSheetCombat.FIGHTER_OWNED_COMBAT_FEATURES.includes(nameLower)) return false;
 			const cls = overrides[nameLower];
 			return cls === "combat" || cls === "reaction";
 		});
@@ -6143,6 +6165,182 @@ class CharacterSheetCombat {
 				refresh();
 				JqueryUtil.doToast({type: "success", content: "Ever-Ready Shot: regained one use"});
 			}
+		});
+	}
+
+	/**
+	 * Fighter combat-tab panel: Second Wind / Action Surge usage controls (action-typed,
+	 * NOT toggle states), Tactical Mind + Stamina Enthusiast reminders, and Battle Tactics
+	 * (TGTT) with their conditional attack / crit / reaction summaries. Self-contained (own
+	 * section + container) so it does not collide with other combat-tab panels. Gated on
+	 * the character actually being a Fighter (or having learned Battle Tactics).
+	 */
+	renderCombatFighter () {
+		const section = document.getElementById("charsheet-combat-fighter-section");
+		const container = document.getElementById("charsheet-combat-fighter");
+		if (!section || !container) return;
+
+		if (!this._state.hasFighterFeatures?.()) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const fighterLevel = this._state.getClassLevel?.("Fighter") ?? 0;
+		const block = e_({tag: "div", clazz: "charsheet__combat-fighter"});
+		let html = "";
+
+		// ===== Second Wind =====
+		const hasSecondWind = this._state.hasFeature?.("Second Wind");
+		if (hasSecondWind) {
+			const swMax = this._state.getSecondWindUsesMax?.() ?? 0;
+			const swRemaining = this._state.getSecondWindUsesRemaining?.() ?? 0;
+			const healing = calcs.secondWindHealing || `1d10+${fighterLevel}`;
+			const hasStaminaEnthusiast = !!calcs.hasStaminaEnthusiast;
+			const staminaGain = calcs.staminaEnthusiastStaminaGain ?? 0;
+			html += `
+				<div class="charsheet__combat-fighter-feature mb-3" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+					<div class="ve-flex-v-center gap-2 ve-flex-wrap">
+						<span class="bold">Second Wind</span>
+						<span class="badge badge-outline-secondary" title="Action economy">⚡ Bonus Action</span>
+						<span class="badge ${swRemaining > 0 ? "badge-info" : "badge-danger"}" title="Uses remaining (recharge on short or long rest)">${swRemaining}/${swMax}</span>
+					</div>
+					<div class="ve-small ve-muted mt-1">Regain <span class="bold">${healing}</span> hit points.</div>
+					<div class="ve-flex-v-center gap-1 ve-flex-wrap mt-1">
+						<button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-fighter-sw-heal" ${swRemaining > 0 ? "" : "disabled"} title="Spend a use and regain ${healing} HP">Use (heal ${healing})</button>
+						${hasStaminaEnthusiast ? `<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-fighter-sw-stamina" ${swRemaining > 0 ? "" : "disabled"} title="Stamina Enthusiast: regain ${staminaGain} stamina instead of hit points">Use (regain ${staminaGain} stamina)</button>` : ""}
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-fighter-sw-reset" ${swRemaining < swMax ? "" : "disabled"} title="Restore all Second Wind uses">Reset</button>
+					</div>`;
+			if (calcs.hasTacticalMind) {
+				html += `<div class="ve-small ve-muted mt-1">✦ <span class="bold">Tactical Mind:</span> when you fail an ability check, you can expend a use of Second Wind to add <span class="bold">1d10</span> to the check (the use isn't spent if it still fails).</div>`;
+			}
+			if (calcs.hasTacticalShift) {
+				html += `<div class="ve-small ve-muted mt-1">✦ <span class="bold">Tactical Shift:</span> when you activate Second Wind, you can move up to half your speed without provoking opportunity attacks.</div>`;
+			}
+			if (hasStaminaEnthusiast) {
+				html += `<div class="ve-small ve-muted mt-1">✦ <span class="bold">Stamina Enthusiast:</span> +2 stamina maximum, and Second Wind can regain ${staminaGain} stamina (proficiency bonus) instead of hit points.</div>`;
+			}
+			html += `</div>`;
+		}
+
+		// ===== Action Surge =====
+		const hasActionSurge = this._state.hasFeature?.("Action Surge");
+		if (hasActionSurge && fighterLevel >= 2) {
+			const asMax = this._state.getActionSurgeUsesMax?.() ?? 0;
+			const asRemaining = this._state.getActionSurgeUsesRemaining?.() ?? 0;
+			html += `
+				<div class="charsheet__combat-fighter-feature mb-3" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+					<div class="ve-flex-v-center gap-2 ve-flex-wrap">
+						<span class="bold">Action Surge</span>
+						<span class="badge badge-outline-secondary" title="Action economy">⚔️ Special (no action)</span>
+						<span class="badge ${asRemaining > 0 ? "badge-info" : "badge-danger"}" title="Uses remaining (recharge on short or long rest)">${asRemaining}/${asMax}</span>
+					</div>
+					<div class="ve-small ve-muted mt-1">On your turn, take one additional action.</div>
+					<div class="ve-flex-v-center gap-1 ve-flex-wrap mt-1">
+						<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__combat-fighter-as-use" ${asRemaining > 0 ? "" : "disabled"} title="Spend one Action Surge use">Use</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-fighter-as-reset" ${asRemaining < asMax ? "" : "disabled"} title="Restore all Action Surge uses">Reset</button>
+					</div>
+				</div>`;
+		}
+
+		// ===== Battle Tactics (TGTT) =====
+		const battleTactics = this._state.getBattleTactics?.() || [];
+		if (battleTactics.length) {
+			html += `<div class="charsheet__combat-fighter-tactics mt-1">
+				<div class="ve-flex-v-center gap-2 mb-1"><span class="bold">Battle Tactics</span><span class="ve-muted ve-small">(${battleTactics.length})</span></div>`;
+			battleTactics.forEach(tactic => {
+				let nameHtml = tactic.name;
+				if (this._page?.getHoverLink && tactic.source) {
+					try {
+						nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, tactic.name, tactic.source);
+					} catch (e) {
+						nameHtml = tactic.name;
+					}
+				}
+
+				const locked = !!tactic.fighterLevel && !this._state.meetsBattleTacticPrerequisite?.(tactic.fighterLevel);
+
+				const badges = [];
+				if (tactic.attackBonus) {
+					const typeLabel = tactic.attackType ? `${tactic.attackType} ` : "";
+					badges.push(`<span class="badge badge-success" title="Conditional ${typeLabel}attack bonus${tactic.condition ? `: ${tactic.condition}` : ""}">+${tactic.attackBonus} ${typeLabel}atk</span>`);
+				}
+				// Crit-range / advantage riders come WITH the (level-gated) reaction, so only
+				// advertise them as active once the Fighter-level prerequisite is met.
+				if (tactic.critRange && !locked) {
+					badges.push(`<span class="badge badge-danger" title="Expanded critical range">crit ${tactic.critRange}-20</span>`);
+				}
+				if (tactic.advantage && !locked) {
+					badges.push(`<span class="badge badge-info" title="Grants advantage">Adv</span>`);
+				}
+
+				let reactionHtml = "";
+				if (tactic.reaction) {
+					const lockBadge = locked
+						? `<span class="badge badge-danger ml-1" title="Requires Fighter level ${tactic.fighterLevel}">🔒 Lvl ${tactic.fighterLevel}</span>`
+						: `<span class="badge badge-outline-secondary ml-1" title="Reaction">🔄 Reaction</span>`;
+					reactionHtml = `<div class="ve-small ${locked ? "ve-muted" : ""} mt-1">${lockBadge} <span class="bold">${tactic.reaction.name}:</span> ${tactic.reaction.trigger} — ${tactic.reaction.effect}</div>`;
+				}
+
+				html += `
+					<div class="charsheet__combat-fighter-tactic mb-2" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+						<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+							<span class="bold">${nameHtml}</span>
+							${badges.join(" ")}
+						</div>
+						${tactic.condition && !tactic.reaction ? `<div class="ve-small ve-muted mt-1">Condition: ${tactic.condition}</div>` : ""}
+						${reactionHtml}
+					</div>`;
+			});
+			html += `</div>`;
+		}
+
+		block.innerHTML = html;
+		container.appendChild(block);
+
+		const refresh = () => {
+			this._page.saveCharacter();
+			this._page.renderCharacter();
+		};
+
+		block.querySelector(".charsheet__combat-fighter-sw-heal")?.addEventListener("click", () => {
+			if (this._state.useSecondWind?.("hp")) {
+				const roll = this._page.rollDice(1, 10);
+				const amount = roll + fighterLevel;
+				this._state.heal?.(amount);
+				refresh();
+				JqueryUtil.doToast({type: "success", content: `Second Wind: healed ${amount} HP (1d10 [${roll}] + ${fighterLevel})`});
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "No Second Wind uses remaining! Rest to regain uses."});
+			}
+		});
+		block.querySelector(".charsheet__combat-fighter-sw-stamina")?.addEventListener("click", () => {
+			if (this._state.useSecondWind?.("stamina")) {
+				const gain = this._state.getFeatureCalculations?.().staminaEnthusiastStaminaGain ?? 0;
+				refresh();
+				JqueryUtil.doToast({type: "success", content: `Second Wind: regained ${gain} stamina`});
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "No Second Wind uses remaining! Rest to regain uses."});
+			}
+		});
+		block.querySelector(".charsheet__combat-fighter-sw-reset")?.addEventListener("click", () => {
+			this._state.restoreSecondWind?.();
+			refresh();
+		});
+		block.querySelector(".charsheet__combat-fighter-as-use")?.addEventListener("click", () => {
+			if (this._state.useActionSurge?.()) {
+				refresh();
+				JqueryUtil.doToast({type: "success", content: "Used Action Surge"});
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "No Action Surge uses remaining! Rest to regain uses."});
+			}
+		});
+		block.querySelector(".charsheet__combat-fighter-as-reset")?.addEventListener("click", () => {
+			this._state.restoreActionSurge?.();
+			refresh();
 		});
 	}
 
