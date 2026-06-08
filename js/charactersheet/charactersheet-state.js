@@ -2051,6 +2051,13 @@ class FeatureModifierParser {
 			/(?:once|twice)\s+per\s+(?:turn|round|short\s+rest|long\s+rest)/i,
 			/(?:for|during)\s+(?:the\s+)?(?:first|next)\s+(?:\d+\s+)?(?:round|minute|hour)/i,
 			/until\s+(?:the\s+)?(?:start|end)\s+of\s+your\s+next\s+turn/i,
+			// Transformation / temporary mode (e.g. Aasimar Celestial Revelation → Heavenly Wings:
+			// "Until the transformation ends, you have a Fly Speed equal to your Speed"). Such grants
+			// must be mode-gated, not granted at base — see the equalToWalk handling in
+			// _processFeatureModifiers (conditional grants start disabled and are toggled on while
+			// the transformation is active).
+			/until\s+(?:the\s+)?(?:transformation|change)\s+ends/i,
+			/while\s+(?:you\s+(?:are|['’]re)\s+)?transformed/i,
 		];
 
 		for (const pattern of conditions) {
@@ -25155,15 +25162,23 @@ class CharacterSheetState {
 			// that type. getSpeed()/getSpeedByType() surface the speed as max(base, walk) while
 			// an enabled equalToWalk modifier exists, so display stays correct without mutation.
 			if (mod.type.startsWith("speed:") && mod.equalToWalk) {
+				// A "speed equal to walking speed" grant. If the grant is conditional
+				// (e.g. Aasimar Heavenly Wings — "Until the transformation ends, you have a
+				// Fly Speed equal to your Speed"), it must NOT be applied at base: it starts
+				// disabled and is toggled on via the Modifiers list while the mode is active,
+				// mirroring the conditional handling of the normal modifier branch below.
+				let note = `From ${feature.name} - equals walking speed`;
+				if (mod.conditional) note += ` (${mod.conditional})`;
 				const modifierData = {
 					name: feature.name,
 					type: mod.type,
 					value: 0,
-					note: `From ${feature.name} - equals walking speed`,
-					enabled: true,
+					note,
+					enabled: !mod.conditional,
 					sourceFeatureId: featureId,
 					equalToWalk: true,
 				};
+				if (mod.conditional) modifierData.conditional = mod.conditional;
 				this.addNamedModifier(modifierData);
 				return;
 			}
