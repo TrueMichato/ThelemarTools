@@ -3,7 +3,40 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 6 (surfaced during manual testing of the merged round-5 fixes)
+
+Grouped into 7 parallel planning sessions. Each branches off `character-sheet-wip`,
+produces a deep root-cause fix + Jest tests, and merges back. The orchestrator owns
+this file; sessions do NOT edit it.
+
+* **(S1 — Combat-tab modals: #6, #7, #8, #9):**
+  * **#9 Combat Resources click bug:** with one resource, use/restore works; with two or more, clicking the rightmost pip does nothing, clicking the one to its left uses the rightmost first then itself, and the rightmost becomes non-restorable. Root cause: `renderCombatResources()` wires the click handler via `querySelector(".charsheet__resource-pip")` (first pip only) while each resource renders one pip per `max` — only `pip[0]` gets a listener. Fix: event delegation / `querySelectorAll().forEach()`.
+  * **#6/#7 Arcane Shot folded into Combat Resources:** the standalone Arcane Shot combat-tab section should fold into the combat resources modal (like Focused Prey / Sneak Attack), and both the resources list and the picker popup should use hovers instead of reproducing full option text.
+  * **#8 Weapon Masteries:** the masteries display should be smaller and incorporated into the Weapons & Attacks section rather than a standalone block. DISPLAY/modal-only — must not change attack-modifier math (S7 owns roll math).
+
+* **(S2 — Flanking active-state + Fighter tactic badge: #1, #10):**
+  * **#1 Flanking → active-state button:** the optional Flanking control should be a button on the active-states quick-row (like Dodge), not its own combat-tab section. Keeps the combat-local `_flankingEnabled` / `_getCombatLocalAttackBonus` +2 strict-melee path.
+  * **#10 Fighter Battle Tactic "Flanking" false badge:** `renderCombatFighter()` shows a "+2 melee atk" badge for the Fighter Battle Tactic named "Flanking", which is misleading. INVARIANT: optional Flanking (the quick button) is the only path that grants the situational +2; the Battle Tactic "Flanking" is a reminder/reaction, not an automatic bonus.
+
+* **(S3 — Subclass respec + Training proficiency: #2, #4):**
+  * **#2 Respec subclass change grants nothing:** changing a subclass via respec does not grant all the new subclass's features. `_applySubclassChange()` filters features directly instead of reusing `getLevelFeatures()` (the prior-round-hardened helper) + feature-choice extraction. SCOPE GUARD: fix respec application + choice extraction only; do NOT refactor general feature calculation or `getLevelFeatures` itself.
+  * **#4 Training in War and Song (2024 Bladesinger):** does not grant its proficiency choice nor alter weapon proficiencies. `FeatureChoiceParser` has no weapon-proficiency-choice extraction; the `hasTrainingInWarAndSong` flag is set but never consumed.
+
+* **(S4 — Druid Wild Shape, Bee form & companions: #12, #13, #14):**
+  * **#13 Wild Shape Transform regression:** Transform does not consume a Wild Shape use and instead summons a companion (mis-wired to the Wild Companion / familiar summon path). OWNS the full Transform → beast-picker → companion-creation path (`charactersheet-druid-resources.js` + the shared `_pShowBeastPicker` / companion-creation code in `charactersheet.js`, and companion type/origin state).
+  * **#12 Bee zodiac form:** does not add its bonus-action ranged spell attack to the abilities list (Bee `getEffects()` returns only `{type:"info"}`; Octopus returns a mechanical effect and works).
+  * **#14 Familiar summoned indicator:** indicate to the player when a familiar is summoned so they don't forget. A companions system already exists (`getActiveCompanions()`, `_renderCompanionsOverviewIndicator()`); needs a clear, dedicated familiar indicator. OWNS the companion type/origin contract (familiars `FAMILIAR`, Wild Shape `WILD_SHAPE`, distinct origins).
+  * [Lunaria repro: Druid 3 Circle of the Zodiac]
+
+* **(S5 — Ranger section cleanup: #11):**
+  * **#11 Ranger reminder modal:** Singular Focus + Groundshatter (kind `method`) wrongly appear as passives; Pursuit appears despite being applied via speed calc; Hunter's Dodge is usable (use button) but has NO hover; Enduring Traveler crams three distinct mechanics into one paragraph and needs splitting/formatting.
+  * [Lunaria repro: Ranger 6 Hunter w/ Primal Focus]
+
+* **(S6 — Aasimar Celestial Revelation gating: #5):**
+  * **#5 Celestial Revelation over-granted:** added to ALL Aasimar variants even when the chosen variant (e.g. DMG14) doesn't have it / before the gating level. `_applyRacialTraits()` → `_addFeatureEntries()` adds every race entry with no variant/level gating.
+
+* **(S7 — Bladesong attack/damage INT modifier: #3):**
+  * **#3 Bladesong INT for weapon attacks/damage:** while singing, weapon attack rolls and damage rolls should use MAX(weapon's default modifier, INT). No Bladesong check exists in the attack/damage path. OWNS attack ability-mod resolution across ALL attack surfaces (`_resolveAbilityMod` / `_rollAttack` / `_rollDamage`, and the main-sheet attack path if separate). Other sessions touching attacks must keep roll-math changes out of scope.
 
 ## Closed Bugs
 
