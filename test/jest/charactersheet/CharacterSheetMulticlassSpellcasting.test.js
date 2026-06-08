@@ -27,17 +27,24 @@ const WIZARD_CANTRIP = [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
 const CLERIC_CANTRIP = [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5];
 
 const makeRanger = (over = {}) => ({
-	name: "Ranger", source: "TGTT", level: 6,
+	name: "Ranger",
+	source: "TGTT",
+	level: 6,
 	subclass: {name: "Hunter", source: "TGTT-2024"},
 	preparedSpellsProgression: RANGER_PREPARED,
-	casterProgression: "artificer", spellcastingAbility: "wis",
+	casterProgression: "artificer",
+	spellcastingAbility: "wis",
 	...over,
 });
 const makeDruid = (over = {}) => ({
-	name: "Druid", source: "XPHB", level: 3,
+	name: "Druid",
+	source: "XPHB",
+	level: 3,
 	subclass: {name: "Circle of the Zodiac", source: "TGTT"},
-	preparedSpellsProgression: DRUID_PREPARED, cantripProgression: DRUID_CANTRIP,
-	casterProgression: "full", spellcastingAbility: "wis",
+	preparedSpellsProgression: DRUID_PREPARED,
+	cantripProgression: DRUID_CANTRIP,
+	casterProgression: "full",
+	spellcastingAbility: "wis",
 	...over,
 });
 

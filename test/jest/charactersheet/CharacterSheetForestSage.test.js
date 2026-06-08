@@ -278,11 +278,12 @@ describe("Regression — official feats keep their effects via addFeat", () => {
 			source: "TCE",
 			entries: [
 				"You have honed your proficiency with particular skills granting you the following benefits:",
-				{type: "list", items: [
-					"Increase one ability score of your choice by 1, to a maximum of 20.",
-					"You gain proficiency in one skill of your choice.",
-					"Choose one skill in which you have proficiency. You gain expertise with that skill.",
-				]},
+				{type: "list",
+					items: [
+						"Increase one ability score of your choice by 1, to a maximum of 20.",
+						"You gain proficiency in one skill of your choice.",
+						"Choose one skill in which you have proficiency. You gain expertise with that skill.",
+					]},
 			],
 		});
 		// None of the abilitySwap skills should be created
