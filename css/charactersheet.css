@@ -4921,6 +4921,11 @@
 	color: var(--cs-text-primary, var(--rgb-text));
 }
 
+.charsheet__quick-spell-stats {
+	color: var(--cs-accent-amethyst, #8b5cf6);
+	font-weight: 500;
+}
+
 .charsheet__quick-spell-btn {
 	white-space: nowrap;
 	border-radius: var(--cs-radius-md, 8px);

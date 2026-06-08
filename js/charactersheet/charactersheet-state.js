@@ -8781,6 +8781,44 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Resolve the per-class spellcasting breakdown card that owns a given spell,
+	 * so callers (e.g. the Overview favourite-spell rows) can show that class's
+	 * own save DC / attack bonus / ability instead of a single global value.
+	 *
+	 * Reuses the Round-1 attribution model: a spell belongs to the card whose
+	 * `matchKeys` include the spell's `sourceSubclass` or `sourceClass`.
+	 * Resolution is deterministic:
+	 *  - subclass attribution wins over class attribution (a subclass-derived
+	 *    caster's spell stays on the subclass card);
+	 *  - then a plain class match;
+	 *  - if the spell carries no attribution at all and the character has exactly
+	 *    one caster class, that single card is used (covers legacy/un-stamped
+	 *    saves and racial/feat spells on a single caster);
+	 *  - otherwise null (ambiguous or explicitly unmatched — caller should omit
+	 *    per-class stats rather than guess).
+	 * @param {object} spell - Spell entry with optional sourceClass/sourceSubclass
+	 * @returns {object|null} A getSpellcastingClassBreakdown() card, or null
+	 */
+	getSpellcastingCardForSpell (spell) {
+		const cards = this.getSpellcastingClassBreakdown();
+		if (!cards.length) return null;
+		const ssc = spell?.sourceSubclass ? spell.sourceSubclass.toLowerCase() : null;
+		const sc = spell?.sourceClass ? spell.sourceClass.toLowerCase() : null;
+		if (ssc) {
+			const bySub = cards.find(c => c.matchKeys.includes(ssc));
+			if (bySub) return bySub;
+		}
+		if (sc) {
+			const byClass = cards.find(c => c.matchKeys.includes(sc));
+			if (byClass) return byClass;
+		}
+		// Only attribute to the lone caster when the spell is entirely un-stamped;
+		// an explicit-but-unmatched stamp stays ambiguous (null).
+		if (!ssc && !sc && cards.length === 1) return cards[0];
+		return null;
+	}
+
+	/**
 	 * Get spellcasting info for the character - whether they use spells known or prepared
 	 * Reads progression directly from class data when available
 	 * @returns {*} Spellcasting summary or null if no spellcasting
