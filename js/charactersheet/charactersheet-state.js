@@ -31025,13 +31025,17 @@ class CharacterSheetState {
 				const reachBonus = calc.octopusReachBonus ?? 5;
 				return [
 					{type: "swimSpeed", value: walk},
-					// Express the +5 ft melee reach through the shared reach data
-					// path (target: "reach") so it surfaces in getReachBonus /
-					// getMeleeReach and the Overview reach chip, composing with the
-					// general reach plumbing. `conditional` documents the
-					// "while submerged" qualifier (reach modifiers are not
-					// situationally gated today, matching Polearm Master).
-					{type: "bonus", target: "reach", value: reachBonus, conditional: "while submerged"},
+					// Contribute the +5 ft melee reach as the agreed cross-system
+					// reach effect shape `{type:"reach", value:N}` (Reach system
+					// contract, branch truemichato/reach-system-fixes). Their
+					// resolver getReachContributions() aggregates this so the
+					// Overview reach chip AND all melee attacks update reactively
+					// when the form toggles — no display/attack-range code here, and
+					// no parallel reach mechanism. The "while submerged" qualifier is
+					// documentation-only (carried in the note/entries text); reach
+					// effects are not situationally gated today (matches Polearm
+					// Master).
+					{type: "reach", value: reachBonus},
 					{type: "note", value: `While submerged you can breathe normally, ignore underwater attack and Perception penalties, and gain +${reachBonus} ft of melee reach.`},
 				];
 			},
