@@ -2605,6 +2605,7 @@ class CharacterSheetPage {
 		this._renderExhaustion();
 		this._renderResources();
 		this._renderOverviewMetamagic();
+		this._renderOverviewRanger();
 		this._renderOverviewAbilities();
 		this._renderActiveStates();
 		this._renderFavouritesOverview();
@@ -5615,6 +5616,127 @@ class CharacterSheetPage {
 
 	_renderOverviewMetamagic () {
 		CharacterSheetCombat.renderMetamagicDashboard(this._state, this, "#charsheet-overview-metamagic", "#charsheet-overview-metamagic-section", "#charsheet-overview-metamagic-sp");
+	}
+
+	/**
+	 * Render the Overview "Ranger" dashboard: Primal Focus mode (Predator/Prey) with
+	 * its switch + Hunter's Dodge controls, and the Hunter's Prey active option selector.
+	 * Hidden unless the character actually has Primal Focus or Hunter's Prey. Mode/option
+	 * changes recompute derived effects (speed, AC, damage riders) by re-rendering the sheet.
+	 */
+	_renderOverviewRanger () {
+		const section = document.getElementById("charsheet-overview-ranger-section");
+		const container = document.getElementById("charsheet-overview-ranger");
+		if (!section || !container) return;
+
+		const hasPrimalFocus = !!this._state.hasPrimalFocus?.();
+		const hasHuntersPrey = !!this._state.hasHuntersPrey?.();
+		if (!hasPrimalFocus && !hasHuntersPrey) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+
+		// ----- Primal Focus -----
+		if (hasPrimalFocus) {
+			const mode = this._state.getPrimalFocusMode?.() || "predator";
+			const isPredator = mode === "predator";
+			const switchesRemaining = this._state.getFocusSwitchesRemaining?.() ?? 0;
+			const isUnlimited = switchesRemaining === "Unlimited" || calcs.focusSwitchesMax === "Unlimited";
+			const switchesMax = calcs.focusSwitchesMaxNum ?? calcs.focusSwitchesMax ?? 1;
+			const switchesText = isUnlimited ? "∞" : `${switchesRemaining}/${switchesMax}`;
+
+			// Active mode effect summary (mode-gated, only the active mode's effects apply)
+			const effectLines = [];
+			if (isPredator) {
+				if (calcs.primalFocusUpgrade1) effectLines.push("Pursuit: +10 ft walking speed");
+				if (calcs.focusedQuarryDamage) effectLines.push(`Focused Quarry: +${calcs.focusedQuarryDamage} damage to your Quarry (once per turn)`);
+			} else {
+				if (calcs.primalFocusUpgrade1) effectLines.push("Terrain Defense: +half proficiency to AC &amp; DEX saves in cover/difficult terrain");
+			}
+
+			const block = document.createElement("div");
+			block.className = "charsheet__ranger-primal-focus mb-3";
+			let html = `
+				<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
+					<strong>Primal Focus:</strong>
+					<span class="badge ${isPredator ? "badge-danger" : "badge-info"}" style="font-size: 1em; padding: 5px 10px;">${isPredator ? "🎯 Predator" : "🛡️ Prey"}</span>
+					<span class="badge badge-secondary" title="Focus Switches remaining (per long rest)">🔄 ${switchesText}</span>
+				</div>
+				<div class="ve-flex gap-2 mb-2">
+					<button class="ve-btn ve-btn-sm ${isPredator ? "ve-btn-danger" : "ve-btn-outline-danger"} charsheet__overview-pf-btn" data-mode="predator" ${isPredator ? "disabled" : ""}>🎯 Predator</button>
+					<button class="ve-btn ve-btn-sm ${!isPredator ? "ve-btn-info" : "ve-btn-outline-info"} charsheet__overview-pf-btn" data-mode="prey" ${!isPredator ? "disabled" : ""}>🛡️ Prey</button>
+				</div>`;
+
+			if (!isPredator) {
+				const dodgeRemaining = this._state.getHuntersDodgeRemaining?.() ?? 0;
+				const dodgeMax = calcs.huntersDodgeUses ?? 0;
+				html += `
+				<div class="ve-flex-v-center gap-2 mb-2">
+					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}" title="Hunter's Dodge uses remaining (per long rest)">🛡️ Hunter's Dodge ${dodgeRemaining}/${dodgeMax}</span>
+					<button class="ve-btn ve-btn-xs ve-btn-info charsheet__overview-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
+				</div>`;
+			}
+
+			if (effectLines.length) {
+				html += `<ul class="ve-muted ve-small mb-0" style="padding-left: 18px;">${effectLines.map(l => `<li>${l}</li>`).join("")}</ul>`;
+			}
+			block.innerHTML = html;
+			container.appendChild(block);
+
+			block.querySelectorAll(".charsheet__overview-pf-btn").forEach(btn => {
+				btn.addEventListener("click", () => {
+					const targetMode = btn.dataset.mode;
+					if (targetMode === (this._state.getPrimalFocusMode?.() || "predator")) return;
+					const success = this._state.switchPrimalFocus?.();
+					if (success) {
+						this.saveCharacter();
+						this.renderCharacter();
+						JqueryUtil.doToast({type: "success", content: `Switched to ${targetMode.toTitleCase()} Focus`});
+					} else {
+						JqueryUtil.doToast({type: "warning", content: "No focus switches remaining! Rest to regain switches."});
+					}
+				});
+			});
+			block.querySelector(".charsheet__overview-dodge-use")?.addEventListener("click", () => {
+				const success = this._state.useHuntersDodge?.();
+				if (success) {
+					this.saveCharacter();
+					this.renderCharacter();
+					JqueryUtil.doToast({type: "success", content: "Used Hunter's Dodge"});
+				} else {
+					JqueryUtil.doToast({type: "warning", content: "No Hunter's Dodge uses remaining! Rest to regain uses."});
+				}
+			});
+		}
+
+		// ----- Hunter's Prey -----
+		if (hasHuntersPrey) {
+			const options = this._state.getHuntersPreyOptions?.() || [];
+			const currentOption = this._state.getHuntersPreyOption?.() || "colossus";
+			const currentName = options.find(o => o.id === currentOption)?.name || "Colossus Slayer";
+
+			const HUNTERS_PREY_EFFECT = {
+				colossus: "+1d8 damage once per turn to a creature below its hit point maximum.",
+				horde: "Make a second attack against a different creature within 5 ft of the original target.",
+				giantKiller: "Reaction attack when a Large+ creature within 5 ft hits or misses you.",
+			};
+
+			const block = document.createElement("div");
+			block.className = "charsheet__ranger-hunters-prey";
+			block.innerHTML = `
+				<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
+					<strong>Hunter's Prey:</strong>
+					<span class="badge badge-info" style="font-size: 1em; padding: 5px 10px;">🏹 ${currentName}</span>
+				</div>
+				<p class="ve-muted ve-small mb-0">${HUNTERS_PREY_EFFECT[currentOption] || ""}</p>
+				<p class="ve-muted ve-small mb-0"><em>Change your Hunter's Prey option on a short or long rest.</em></p>`;
+			container.appendChild(block);
+		}
 	}
 
 	_renderOverviewAbilities () {
