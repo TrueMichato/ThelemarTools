@@ -183,6 +183,97 @@ describe("async picker re-entrancy guard", () => {
 	});
 });
 
+describe("Bug #13 — Transform vs Summon create the correct companion type and spend correctly", () => {
+	const wolfData = {
+		name: "Dire Wolf",
+		source: "MM",
+		type: "beast",
+		ac: [{ac: 14}],
+		hp: {average: 37, formula: "5d10 + 10"},
+		speed: {walk: 50},
+		str: 17,
+		dex: 15,
+		con: 15,
+		int: 3,
+		wis: 12,
+		cha: 7,
+	};
+	const owlData = {
+		name: "Owl",
+		source: "MM",
+		type: "beast",
+		ac: [{ac: 11}],
+		hp: {average: 1, formula: "1d4 - 1"},
+		speed: {walk: 5, fly: 60},
+		str: 3,
+		dex: 13,
+		con: 8,
+		int: 2,
+		wis: 12,
+		cha: 7,
+	};
+
+	it("Transform spends exactly one Wild Shape use AND creates a WILD_SHAPE companion (NOT a familiar)", async () => {
+		const state = makeWildShapeDruid(3, {current: 2, max: 2});
+		// FAITHFUL picker: routes through the REAL state path the production picker
+		// uses (addCompanionFromBestiary with POSITIONAL type/origin), so the test
+		// exercises the type/origin contract end-to-end (this is exactly what the
+		// #13 regression broke — the old call passed an object as `type`).
+		const druid = makeModule(state, {
+			_pShowBeastPicker: async (opts) => {
+				state.addCompanionFromBestiary(wolfData, opts.type, opts.origin);
+			},
+		});
+
+		await druid.pTransform();
+
+		// One use spent.
+		expect(state.getWildShapeResource().current).toBe(1);
+		// A WILD_SHAPE companion exists...
+		const wildShapes = state.getCompanionsByType(CharacterSheetState.COMPANION_TYPES.WILD_SHAPE);
+		expect(wildShapes.length).toBe(1);
+		expect(wildShapes[0].name).toBe("Dire Wolf");
+		expect(wildShapes[0].type).toBe("wild_shape");
+		// ...and crucially it is NOT bucketed as a familiar.
+		expect(state.getCompanionsByType(CharacterSheetState.COMPANION_TYPES.FAMILIAR).length).toBe(0);
+	});
+
+	it("Transform does NOT spend a use if the picker is cancelled (no companion created)", async () => {
+		const state = makeWildShapeDruid(3, {current: 2, max: 2});
+		const druid = makeModule(state, {
+			_pShowBeastPicker: async () => { /* user cancelled — no companion added */ },
+		});
+
+		await druid.pTransform();
+
+		expect(state.getWildShapeResource().current).toBe(2);
+		expect(state.getCompanionsByType(CharacterSheetState.COMPANION_TYPES.WILD_SHAPE).length).toBe(0);
+	});
+
+	it("Summon (Wild Companion) spends one use AND creates a FAMILIAR (NOT a wild_shape companion)", async () => {
+		const state = makeWildShapeDruid(3, {current: 2, max: 2});
+		// The Wild Companion summon routes through the spells module's familiar picker.
+		const druid = makeModule(state, {
+			_spells: {
+				_pShowFamiliarPicker: async () => {
+					state.addCompanionFromBestiary(owlData, CharacterSheetState.COMPANION_TYPES.FAMILIAR, "Wild Companion");
+				},
+			},
+		});
+
+		await druid.pSummonWildCompanion();
+
+		// One use spent.
+		expect(state.getWildShapeResource().current).toBe(1);
+		// A FAMILIAR exists...
+		const familiars = state.getCompanionsByType(CharacterSheetState.COMPANION_TYPES.FAMILIAR);
+		expect(familiars.length).toBe(1);
+		expect(familiars[0].type).toBe("familiar");
+		// ...and it is NOT bucketed as a Wild Shape form.
+		expect(state.getCompanionsByType(CharacterSheetState.COMPANION_TYPES.WILD_SHAPE).length).toBe(0);
+	});
+});
+
 describe("Combat-tab Druid Resources — structural wiring", () => {
 	const combatSrc = fs.readFileSync(path.join(REPO_ROOT, "js/charactersheet/charactersheet-combat.js"), "utf8");
 	const html = fs.readFileSync(path.join(REPO_ROOT, "charactersheet.html"), "utf8");
@@ -202,5 +293,20 @@ describe("Combat-tab Druid Resources — structural wiring", () => {
 		for (const fn of ["getCombatSummary", "spendUse", "restoreUse", "pTransform", "endWildShape", "pSummonWildCompanion", "dismissZodiac"]) {
 			expect(moduleSrc).toContain(`${fn} (`);
 		}
+	});
+
+	it("_refreshSheet refreshes the Combat attacks list (so a form-granted attack appears immediately)", () => {
+		// Bee Zodiac Form grants a bonus-action attack surfaced via getActiveStateAttacks();
+		// the Druid Resources refresh must re-render combat attacks so it shows/hides at once.
+		expect(moduleSrc).toMatch(/_combat\?\.renderAttacks\?\.\(\)/);
+	});
+
+	it("combat.renderAttacks merges active-state-granted attacks and roll handlers can resolve them", () => {
+		expect(combatSrc).toMatch(/getActiveStateAttacks\?\.\(\)/);
+		// Both roll paths must fall back to active-state attacks for id resolution.
+		const rollAttackIdx = combatSrc.indexOf("_rollAttack (");
+		const rollDamageIdx = combatSrc.indexOf("_rollDamage (");
+		expect(combatSrc.slice(rollAttackIdx, rollAttackIdx + 1200)).toMatch(/getActiveStateAttacks/);
+		expect(combatSrc.slice(rollDamageIdx, rollDamageIdx + 1200)).toMatch(/getActiveStateAttacks/);
 	});
 });
