@@ -58,9 +58,31 @@ describe("Companion type/origin contract — addCompanion normalization", () => 
 		expect(c.origin).toBe("Wild Shape");
 	});
 
-	it("defaults an unknown/garbage type to CUSTOM", () => {
+	it("preserves a freeform (non-canonical) string type — Play Mode lets players type one", () => {
 		const state = new CharacterSheetState();
-		const id = state.addCompanion({name: "Thing", type: "not_a_real_type"});
+		// The Play Mode "Add Companion" modal has a freeform text `type` input
+		// (placeholder "e.g. beast, familiar, construct…"). Such labels are not in
+		// COMPANION_TYPES but ARE valid strings and MUST be preserved verbatim.
+		const id = state.addCompanion({name: "Sprite", type: "construct"});
+		expect(state.getCompanion(id).type).toBe("construct");
+	});
+
+	it("trims a whitespace-padded canonical type so lookups still match", () => {
+		const state = new CharacterSheetState();
+		const id = state.addCompanion({name: "Bear", type: "  wild_shape  ", origin: "Wild Shape"});
+		expect(state.getCompanion(id).type).toBe("wild_shape");
+		expect(state.getCompanionsByType(T().WILD_SHAPE).map(x => x.id)).toContain(id);
+	});
+
+	it("defaults an empty/whitespace string type to CUSTOM", () => {
+		const state = new CharacterSheetState();
+		const id = state.addCompanion({name: "Thing", type: "   "});
+		expect(state.getCompanion(id).type).toBe("custom");
+	});
+
+	it("defaults an object WITHOUT a string `type` to CUSTOM", () => {
+		const state = new CharacterSheetState();
+		const id = state.addCompanion({name: "Thing", type: {foo: "bar"}});
 		expect(state.getCompanion(id).type).toBe("custom");
 	});
 
@@ -68,6 +90,29 @@ describe("Companion type/origin contract — addCompanion normalization", () => 
 		const state = new CharacterSheetState();
 		const id = state.addCompanion({name: "Thing"});
 		expect(state.getCompanion(id).type).toBe("custom");
+	});
+
+	it("always stores a STRING type for EVERY direct addCompanion path", () => {
+		const state = new CharacterSheetState();
+		const cases = [
+			{name: "A", type: T().FAMILIAR},
+			{name: "B", type: T().WILD_SHAPE, origin: "Wild Shape"},
+			{name: "C", type: T().BEAST_COMPANION},
+			{name: "D", type: T().DRAKE},
+			{name: "E", type: T().STEEL_DEFENDER},
+			{name: "F", type: T().SUMMON},
+			{name: "G", type: T().MOUNT},
+			{name: "H", type: T().INFERNAL},
+			{name: "I", type: T().CUSTOM},
+			{name: "J", type: "beast"}, // freeform Play Mode label
+			{name: "K", type: {type: "wild_shape", origin: "Wild Shape"}}, // #13 object shape
+			{name: "L"}, // missing
+		];
+		for (const c of cases) {
+			const id = state.addCompanion(c);
+			expect(typeof state.getCompanion(id).type).toBe("string");
+			expect(state.getCompanion(id).type.length).toBeGreaterThan(0);
+		}
 	});
 
 	it("a normalized Wild Shape companion is found by getCompanionsByType", () => {
@@ -165,5 +210,46 @@ describe("Bug #13 — structural guard on the real beast picker call site", () =
 		// e.g. addCompanionFromBestiary(creature, {type, ...}). The fixed call passes
 		// the positional `type` (and `origin`) variables.
 		expect(region).not.toMatch(/addCompanionFromBestiary(?:\?\.)?\s*\([^,]+,\s*\{/);
+	});
+});
+
+describe("Companion contract — NO caller passes an object as addCompanionFromBestiary's 2nd arg", () => {
+	// Generic guard across EVERY page module that could call the bestiary helper.
+	// This is the regression the #13 bug slipped through: an object passed where a
+	// positional string `type` belongs. Tokenize the source and flag any call whose
+	// first argument is immediately followed by `, {` (an object literal as `type`).
+	const FILES = [
+		"js/charactersheet/charactersheet.js",
+		"js/charactersheet/charactersheet-spells.js",
+	];
+
+	for (const rel of FILES) {
+		it(`${rel} never calls addCompanionFromBestiary(creature, {…})`, () => {
+			const src = fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
+			// Match `addCompanionFromBestiary(` (optionally `?.`) then a first arg with
+			// no embedded comma, then a comma + `{` — i.e. an object literal as `type`.
+			const bad = /addCompanionFromBestiary(?:\?\.)?\s*\(\s*[^,(){}]+,\s*\{/;
+			expect(src).not.toMatch(bad);
+		});
+	}
+});
+
+describe("Bug #14 ↔ #13 agreement — familiar paths use the canonical FAMILIAR type", () => {
+	const spellsSrc = fs.readFileSync(path.join(REPO_ROOT, "js/charactersheet/charactersheet-spells.js"), "utf8");
+
+	it("the familiar summon paths register companions as COMPANION_TYPES.FAMILIAR (string)", () => {
+		// Both the bestiary and custom familiar paths must use the canonical enum so
+		// the #14 indicator (which keys off `type === 'familiar'`) lights up.
+		const occurrences = spellsSrc.match(/COMPANION_TYPES\.FAMILIAR/g) || [];
+		expect(occurrences.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("getCompanionsByType(FAMILIAR) returns familiars created via addCompanionFromBestiary", () => {
+		const state = new CharacterSheetState();
+		const owl = {name: "Owl", source: "MM", type: "beast", ac: [{ac: 11}], hp: {average: 1, formula: "1d4-1"}, speed: {walk: 5, fly: 60}, str: 3, dex: 13, con: 8, int: 2, wis: 12, cha: 7};
+		const id = state.addCompanionFromBestiary(owl, CharacterSheetState.COMPANION_TYPES.FAMILIAR, "Find Familiar");
+		const c = state.getCompanion(id);
+		expect(c.type).toBe("familiar");
+		expect(state.getCompanionsByType(CharacterSheetState.COMPANION_TYPES.FAMILIAR).map(x => x.id)).toContain(id);
 	});
 });
