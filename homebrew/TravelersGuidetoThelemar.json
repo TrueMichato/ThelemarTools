@@ -27512,10 +27512,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 1
-			},
 			"entries": [
 				"{@italic Cost: 1 sorcery point (Passive)}",
 				"When you cast a spell that forces other creatures to make a saving throw, you can protect some of those creatures from the spell's full force. To do so, choose a number of those creatures up to your Charisma modifier (minimum of one creature). A chosen creature automatically succeeds on its saving throw against the spell."
@@ -27527,10 +27523,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 1
-			},
 			"entries": [
 				"{@italic Cost: 1 sorcery point (Passive)}",
 				"When you cast a spell that has a range of 5 feet or greater, you can double the range of the spell.",
@@ -27544,10 +27536,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 1
-			},
 			"entries": [
 				"{@italic Cost: 1 sorcery point (Passive)}",
 				"When you roll damage for a spell, you can reroll a number of the damage dice up to your Charisma modifier (minimum of one).",
@@ -27560,10 +27548,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 1
-			},
 			"entries": [
 				"{@italic Cost: 1 sorcery point (Passive)}",
 				"When you cast a spell that has a duration of 1 minute or longer, you can double its duration, to a maximum duration of 24 hours."
@@ -27575,10 +27559,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 2
-			},
 			"entries": [
 				"{@italic Cost: 2 sorcery points (Passive)}",
 				"When you cast a spell, rolls made to dispel or counter it suffer disadvantage."
@@ -27590,10 +27570,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 1
-			},
 			"entries": [
 				"{@italic Cost: 1 sorcery point (Passive)}",
 				"When you cast a spell that has an area of effect of 10 feet or more, you can split the area of effect between two different points within the spell range. The split can be of any ratio you desire—50:50, 60:40 and so on, but must be in 5 feet increments."
@@ -27605,10 +27581,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 2
-			},
 			"entries": [
 				"{@italic Cost: 2 sorcery points (Passive)}",
 				"When you cast a spell that has an area of effect of 10 feet or more, you increase or decrease the area of effect by up to half of its original size, rounded up to the nearest 5 feet increment."
@@ -27620,10 +27592,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 1
-			},
 			"entries": [
 				"{@italic Cost: 1 sorcery point (Passive)}",
 				"When you cast a spell that deals a type of damage from the following list, you can change that damage type to one of the other listed types: acid, cold, fire, lightning, poison, thunder."
@@ -27635,10 +27603,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 2
-			},
 			"entries": [
 				"{@italic Cost: 2 sorcery points (Passive)}",
 				"When you are maintaining {@status concentration} on a spell, your AC increases by 1."
@@ -27650,10 +27614,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 2
-			},
 			"entries": [
 				"{@italic Cost: 2 sorcery points (Active)}",
 				"When you cast a spell that requires an attack roll, you can spend 2 sorcery points to add {@dice 1d6} to the attack roll.",
@@ -27666,9 +27626,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points"
-			},
 			"entries": [
 				"{@italic Cost: X sorcery points (Active), where X is the spell's level}",
 				"When you cast a spell with a range of self, you can spend a number of sorcery points equal to the spell's level to change the range to touch."
@@ -27680,10 +27637,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 3
-			},
 			"entries": [
 				"{@italic Cost: 3 sorcery points (Active)}",
 				"When you cast a spell that targets a single target, you can spend 3 sorcery points when the target succeeds on its initial saving throw against the spell to make it bounce to another target within range."
@@ -27695,9 +27648,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points"
-			},
 			"entries": [
 				"{@italic Cost: X sorcery points (Active), where X is the spell's level}",
 				"When you roll for {@status concentration} on a spell, you can spend a number of sorcery points equal to the spell's level to reroll one of the dice you used, potentially turning failure to a success.",
@@ -27710,10 +27660,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 3
-			},
 			"entries": [
 				"{@italic Cost: 3 sorcery points (Active)}",
 				"When you cast a spell that forces a creature to make a saving throw to resist its effects, you can spend 3 sorcery points to give one target of the spell disadvantage on its first saving throw made against the spell."
@@ -27725,9 +27671,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points"
-			},
 			"entries": [
 				"{@italic Cost: X sorcery points (Active), where X is the spell's level}",
 				"When you lose {@status concentration} on a spell, you can spend a number of sorcery points equal to the spell's level to make the spell's effect linger until the end of your next turn, without you needing to concentrate on it."
@@ -27739,10 +27682,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 4
-			},
 			"entries": [
 				"{@italic Cost: 4 sorcery points (Active)}",
 				"When you roll damage for a spell, you can spend 4 sorcery points to refrain from rolling and produce maximal damage for the spell.",
@@ -27755,10 +27694,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 2
-			},
 			"entries": [
 				"{@italic Cost: 2 sorcery points (Active)}",
 				"When you cast a spell that has a casting time of 1 action, you can spend 2 sorcery points to change the casting time to 1 bonus action for this casting."
@@ -27770,10 +27705,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 2
-			},
 			"entries": [
 				"{@italic Cost: 2 sorcery points (Active)}",
 				"If you make an attack roll for a spell and miss, you can spend 2 sorcery points to reroll the {@dice d20}, and you must use the new roll.",
@@ -27786,10 +27717,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points",
-				"amount": 1
-			},
 			"entries": [
 				"{@italic Cost: 1 sorcery point (Active)}",
 				"When you cast a spell, you can spend 1 sorcery point to cast it without any somatic or verbal components."
@@ -27801,9 +27728,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points"
-			},
 			"entries": [
 				"{@italic Cost: X sorcery points (Active), where X is the spell's level (1 if the spell is a cantrip)}",
 				"When you cast a spell that targets only one creature and doesn't have a range of self, you can spend a number of sorcery points equal to the spell's level to target a second creature in range with the same spell (1 sorcery point if the spell is a cantrip).",
@@ -27816,9 +27740,6 @@
 			"featureType": [
 				"MM"
 			],
-			"consumes": {
-				"name": "Sorcery Points"
-			},
 			"entries": [
 				"{@italic Cost: X sorcery points (Active), where X is half the spell's level rounded up}",
 				"When you cast a spell that deals damage and has no duration, you can spend sorcery points equal to half the spell's level (rounded up) to regain a number of hit points equal to the damage dealt.",

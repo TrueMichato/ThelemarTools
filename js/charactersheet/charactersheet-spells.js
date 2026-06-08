@@ -217,6 +217,15 @@ class CharacterSheetSpells {
 			this._removeSpell(spellId);
 		});
 
+		// Swap Divine Soul affinity spell (restricted to Cleric list)
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const btn = e.target.closest(".charsheet__spell-swap-affinity");
+			if (!btn) return;
+			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
+			const spell = this._state.getSpells().find(s => (s.id || `${s.name}|${s.source}`) === spellId);
+			if (spell) this._pSwapDivineSoulAffinity(spell);
+		});
+
 		// Toggle prepared
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-prepared");
@@ -5824,6 +5833,7 @@ class CharacterSheetSpells {
 					</div>
 					${fullDetailsLine ? `<div class="charsheet__spell-item-details ve-muted ve-small">${fullDetailsLine}</div>` : ""}
 					${metamagicNotes.length ? `<div class="charsheet__spell-item-details charsheet__metamagic-mod ve-small">${metamagicNotes.join(" · ")}</div>` : ""}
+					${spell.isDivineSoulAffinity ? `<div class="charsheet__spell-item-details ve-muted ve-small"><span class="glyphicon glyphicon-info-sign mr-1"></span>Divine Soul affinity spell — may be swapped for another Cleric spell.</div>` : ""}
 				</div>
 				<div class="charsheet__spell-item-actions">
 					${prepButtonHtml}
@@ -5840,6 +5850,10 @@ class CharacterSheetSpells {
 					${!isAlwaysPrepared ? `
 						<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__spell-remove" title="Remove Spell">
 							<span class="glyphicon glyphicon-trash mr-1"></span>Remove
+						</button>
+					` : spell.isDivineSoulAffinity ? `
+						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__spell-swap-affinity" title="Swap this Divine Soul spell for another Cleric spell">
+							<span class="glyphicon glyphicon-refresh mr-1"></span>Swap
 						</button>
 					` : `
 						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__spell-remove" title="Cannot remove feature spells" disabled>
@@ -6605,19 +6619,186 @@ class CharacterSheetSpells {
 	}
 
 	/**
+	 * Open a picker to swap a Divine Soul Sorcerer's affinity (always-prepared)
+	 * spell for another spell from the granted Cleric list. The candidate pool is
+	 * restricted to spells on the Cleric list at the affinity spell's level (the
+	 * affinity grant is a level-1 spell), matching the rules allowance to change
+	 * only this one always-prepared spell, and only for a Cleric spell.
+	 * @param {object} affinitySpell - The current affinity spell entry
+	 */
+	async _pSwapDivineSoulAffinity (affinitySpell) {
+		const className = affinitySpell.sourceClass || "Sorcerer";
+		const classEntry = (this._state.getClasses?.() || []).find(c => c.name === className);
+		if (!classEntry || !CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass)) return;
+
+		const classDataForSubclass = this._page?.getClasses?.()?.find(c => c.name === classEntry.name && c.source === classEntry.source);
+		const subclass = CharacterSheetClassUtils.resolveFullSubclass(classEntry.subclass, classDataForSubclass);
+
+		// Restriction source: the subclass's granted/expanded spell list (Cleric).
+		const grantedClasses = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+			className,
+			subclass,
+			subclassChoice: classEntry.subclassChoice,
+		});
+		if (!grantedClasses?.length) return;
+
+		const affinityLevel = affinitySpell.level ?? 1;
+		const currentId = `${(affinitySpell.name || "").toLowerCase()}|${(affinitySpell.source || Parser.SRC_PHB).toLowerCase()}`;
+
+		const candidates = (this._allSpells || [])
+			.filter(s => {
+				if (s.level !== affinityLevel) return false;
+				const sId = `${s.name.toLowerCase()}|${(s.source || "").toLowerCase()}`;
+				if (sId === currentId) return false;
+				return grantedClasses.some(cn => CharacterSheetClassUtils.spellIsForClass(s, cn));
+			})
+			.sort((a, b) => a.name.localeCompare(b.name));
+
+		const chosen = await this._pPickSwapSpell({
+			title: "Swap Divine Soul Spell",
+			prompt: `Choose a <strong>Cleric spell</strong> (level ${affinityLevel}) to replace <em>${affinitySpell.name}</em> as your Divine Soul affinity spell:`,
+			spells: candidates,
+		});
+		if (!chosen) return;
+
+		const ok = this._state.swapDivineSoulAffinitySpell(className, {
+			name: chosen.name,
+			source: chosen.source,
+			level: chosen.level,
+		});
+		if (!ok) return;
+
+		this._renderSpellList();
+		this._page?.saveCharacter?.();
+	}
+
+	/**
+	 * Generic single-spell picker modal used by the Divine Soul swap flow.
+	 * @param {object} opts - {title, prompt, spells}
+	 * @returns {Promise<object|null>} Selected spell or null
+	 */
+	async _pPickSwapSpell ({title, prompt, spells}) {
+		return new Promise((resolve) => {
+			(async () => {
+				const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+					title,
+					isMinHeight0: true,
+					zIndex: 10002,
+					cbClose: () => resolve(null),
+				});
+
+				modalInner.insertAdjacentHTML("beforeend", `<p class="mb-2">${prompt}</p>`);
+
+				const search = e_({outer: `<input type="text" class="ve-form-control form-control--minimal mb-2" placeholder="Search spells...">`});
+				modalInner.append(search);
+
+				const list = e_({outer: `<div style="max-height: 350px; overflow-y: auto;"></div>`});
+				modalInner.append(list);
+
+				const renderList = (filter = "") => {
+					list.innerHTML = "";
+					const filtered = filter
+						? spells.filter(s => s.name.toLowerCase().includes(filter))
+						: spells;
+
+					if (!filtered.length) {
+						list.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center py-2">No matching spells</p>`);
+						return;
+					}
+
+					filtered.forEach(spell => {
+						const school = Parser.spSchoolAbvToFull?.(spell.school) || spell.school;
+						const spellNameRendered = Renderer.get().render(`{@spell ${spell.name}|${spell.source}}`);
+						const item = e_({outer: `
+							<div class="ve-flex-v-center p-2 clickable spell-choice-item" style="border-bottom: 1px solid var(--cs-border);">
+								<div class="ve-flex-col ve-flex-1">
+									<div>${spellNameRendered}</div>
+									<div class="ve-small ve-muted">Level ${spell.level} ${school}</div>
+								</div>
+								<button class="ve-btn ve-btn-primary ve-btn-xs">Select</button>
+							</div>
+						`});
+						item.querySelector("button").addEventListener("click", () => {
+							resolve(spell);
+							doClose();
+						});
+						list.append(item);
+					});
+				};
+
+				search.addEventListener("input", (/** @type {*} */ e) => renderList(e.target.value.toLowerCase()));
+				renderList();
+
+				const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default mt-2">Cancel</button>`});
+				cancelBtn.addEventListener("click", () => { resolve(null); doClose(); });
+				modalInner.append(cancelBtn);
+			})();
+		});
+	}
+
+	/**
+	 * Build the scribable-spell pool for Spell Scribing Adept.
+	 *
+	 * Generic over expanded/granted spell lists: a Divine Soul Sorcerer's
+	 * Cleric-list access (and any other subclass that expands a class's list)
+	 * is honoured because we delegate the "is this spell available to the
+	 * class?" decision to `CharacterSheetClassUtils.spellIsAvailableForClass`,
+	 * which already aggregates the base class list, the subclass list, and the
+	 * expanded class lists from `getAdditionalSpellListClasses`.
+	 *
+	 * @param {object} opts
+	 * @param {Array} opts.allSpells - Full spell pool to filter
+	 * @param {string} opts.className - Scribing class (Bard/Sorcerer/Warlock)
+	 * @param {string} [opts.classSource] - Scribing class source
+	 * @param {object} [opts.subclass] - Resolved subclass object (full, with additionalSpells)
+	 * @param {object} [opts.subclassChoice] - Subclass sub-choice (e.g. Divine Soul affinity)
+	 * @param {number} opts.maxLevel - Maximum scribable spell level
+	 * @param {Set<string>} opts.existingIds - `name|source` ids already scribed
+	 * @returns {Array} Filtered + sorted scribable spells
+	 */
+	static getScribableSpells ({allSpells, className, classSource, subclass, subclassChoice, maxLevel, existingIds}) {
+		const existing = existingIds || new Set();
+		return (allSpells || []).filter(spell => {
+			if (spell.level < 1 || spell.level > maxLevel) return false;
+			if (existing.has(`${spell.name}|${spell.source}`)) return false;
+			return CharacterSheetClassUtils.spellIsAvailableForClass(spell, {
+				className,
+				classSource,
+				subclass,
+				subclassChoice,
+			});
+		}).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+	}
+
+	/**
 	 * Show a spell picker modal filtered for the scribing spellbook.
 	 * @param {object} opts - {title, className, maxLevel, allSpells, existingIds}
 	 * @returns {Promise<object|null>} - Selected spell or null if cancelled
 	 */
 	async _pShowScribingSpellPicker ({title, className, maxLevel, allSpells, existingIds}) {
-		// Filter spells: correct class list, level range, not already in scribing spellbook
-		const classSpells = allSpells.filter(spell => {
-			if (spell.level < 1 || spell.level > maxLevel) return false;
-			if (existingIds.has(`${spell.name}|${spell.source}`)) return false;
-			// Check if spell is on the class's spell list
-			const lists = spell.classes?.fromClassList || [];
-			return lists.some(c => c.name === className);
-		}).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+		// Resolve the scribing class's stored entry so we can honour its subclass
+		// and any expanded/granted spell lists (e.g. Divine Soul Sorcerer → Cleric)
+		// when building the scribable pool. Resolve the (possibly shallow) stored
+		// subclass ref to its full object so `additionalSpells` is available.
+		const classEntry = (this._state.getClasses?.() || []).find(c => c.name === className);
+		const classDataForSubclass = classEntry
+			? this._page?.getClasses?.()?.find(c => c.name === classEntry.name && c.source === classEntry.source)
+			: null;
+		const subclass = classEntry?.subclass
+			? CharacterSheetClassUtils.resolveFullSubclass(classEntry.subclass, classDataForSubclass)
+			: null;
+
+		// Filter spells: available to the class (base list + subclass + expanded
+		// lists), level range, not already in scribing spellbook.
+		const classSpells = CharacterSheetSpells.getScribableSpells({
+			allSpells,
+			className,
+			classSource: classEntry?.source,
+			subclass,
+			subclassChoice: classEntry?.subclassChoice,
+			maxLevel,
+			existingIds,
+		});
 
 		return new Promise((resolve) => {
 			(async () => {

@@ -1411,6 +1411,31 @@ class CharacterSheetClassUtils {
 		return null;
 	}
 
+	/**
+	 * Resolve the *effective* Divine Soul affinity spell: the player's swap
+	 * override if one is set, otherwise the alignment-derived default from the
+	 * subclass's `additionalSpells` block.
+	 *
+	 * Single source of truth so that every caller (always-prepared population,
+	 * builder/levelup ensure paths, swap UI) agrees on which spell is granted —
+	 * no per-callsite override reasoning that could drift.
+	 *
+	 * @param {*} subclass - Divine Soul subclass object
+	 * @param {*} subclassChoice - Affinity choice ({key,name} or string)
+	 * @param {*} [override] - Optional `{name, source, level}` swap override
+	 * @returns {{name:string, source:string, level:number}|null}
+	 */
+	static getEffectiveDivineSoulSpell (/** @type {*} */ subclass, /** @type {*} */ subclassChoice, /** @type {*} */ override) {
+		if (override && override.name) {
+			return {
+				name: override.name,
+				source: override.source || Parser.SRC_PHB,
+				level: override.level ?? 1,
+			};
+		}
+		return this.getDivineSoulKnownSpell(subclass, subclassChoice);
+	}
+
 	static getAdditionalSpellListClasses ({className, subclass, subclassChoice} = /** @type {*} */ ({})) {
 		// Divine Soul Sorcerer (XGE / TGTT): the "Divine Magic" subclass feature
 		// grants access to the entire Cleric spell list at L1 — unconditional,
