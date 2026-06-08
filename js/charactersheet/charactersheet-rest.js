@@ -37,7 +37,14 @@ class CharacterSheetRest {
 		const calcEarly = this._state.getFeatureCalculations?.() || {};
 		const canReduceExhaustion = calcEarly.hasTireless && (this._state.getExhaustion?.() || 0) > 0;
 
-		if (currentHp >= maxHp && !availableHitDice.length && !conditions.length && !isConcentrating && !canReduceExhaustion) {
+		// Memorize Spell (2024 Wizard) is usable on a Short Rest even at full HP, so
+		// it must keep the dialog from short-circuiting when there's a swap available.
+		const memorizeCandidates = calcEarly.hasMemorizeSpell
+			? CharacterSheetRest.getMemorizeSpellCandidates(this._state)
+			: null;
+		const canMemorizeSpell = !!(memorizeCandidates && memorizeCandidates.prepared.length && memorizeCandidates.spellbook.length);
+
+		if (currentHp >= maxHp && !availableHitDice.length && !conditions.length && !isConcentrating && !canReduceExhaustion && !canMemorizeSpell) {
 			JqueryUtil.doToast({type: "info", content: "You're already at full health with no hit dice to spend."});
 			return;
 		}
@@ -295,6 +302,14 @@ class CharacterSheetRest {
 			else modalInner.append(tirelessExhaustion.section);
 		}
 
+		// --- Memorize Spell swap control (2024 Wizard) ---
+		const memorizeSpell = this._buildMemorizeSpellSection();
+		if (memorizeSpell) {
+			const msTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (msTarget?.parentNode) msTarget.parentNode.insertBefore(memorizeSpell.section, msTarget);
+			else modalInner.append(memorizeSpell.section);
+		}
+
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✓ Finish Short Rest"});
 		btnConfirm.onClick(() => {
 			// Apply hit dice spending using spentDice tracker. The healing was
@@ -353,6 +368,9 @@ class CharacterSheetRest {
 			// Apply Tireless exhaustion reduction, if elected
 			const tirelessReduced = tirelessExhaustion?.apply() || 0;
 
+			// Apply Memorize Spell swap, if elected
+			const memorizeSwap = memorizeSpell?.apply() || false;
+
 			this._page.saveCharacter();
 			this._page.renderCharacter();
 			doClose(true);
@@ -364,6 +382,7 @@ class CharacterSheetRest {
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (shouldBreakConcentration) message += ` Broke concentration.`;
 			if (tirelessReduced > 0) message += ` Tireless reduced exhaustion by ${tirelessReduced}.`;
+			if (memorizeSwap) message += ` Memorized ${memorizeSwap}.`;
 
 			JqueryUtil.doToast({
 				type: "success",
@@ -375,6 +394,96 @@ class CharacterSheetRest {
 			${btnCancel}
 			${btnConfirm}
 		</div>`.appendTo(modalInner);
+	}
+
+	/**
+	 * Compute the spells eligible for a 2024 Wizard's "Memorize Spell" feature.
+	 *
+	 * Memorize Spell (XPHB, Wizard level 5) lets the wizard, on finishing a Short
+	 * Rest, replace one level 1+ spell they have prepared with a different level 1+
+	 * spell from their spellbook. This returns the two candidate lists for that
+	 * 1-for-1 swap, scoped to the Wizard class so multiclass spells are untouched.
+	 *
+	 * Static + state-only so it is unit-testable without any DOM.
+	 * @param {*} state The CharacterSheetState instance.
+	 * @returns {{prepared: *[], spellbook: *[], maxLevel: number}}
+	 */
+	static getMemorizeSpellCandidates (state) {
+		const empty = {prepared: [], spellbook: [], maxLevel: 0};
+		if (!state) return empty;
+
+		const wizardLevel = state.getClassLevel?.("Wizard") || 0;
+		if (wizardLevel <= 0) return empty;
+		const maxLevel = Math.min(9, Math.ceil(wizardLevel / 2));
+
+		const wizardSpells = (state.getSpells?.() || [])
+			.filter(s => s.sourceClass && s.sourceClass.toLowerCase() === "wizard" && s.level > 0);
+
+		// Outgoing: a level 1+ Wizard spell currently prepared (never an
+		// always-prepared / granted spell — those cannot be swapped away).
+		const prepared = wizardSpells.filter(s => s.prepared && !s.alwaysPrepared);
+
+		// Incoming: a different level 1+ Wizard spellbook spell not currently
+		// prepared, of a level the wizard can cast.
+		const spellbook = wizardSpells.filter(s => !s.prepared && !s.alwaysPrepared && s.level <= maxLevel);
+
+		return {prepared, spellbook, maxLevel};
+	}
+
+	/**
+	 * Build the Memorize Spell swap control for the short-rest dialog (2024 Wizard).
+	 *
+	 * Surfaces the feature at the rules-correct moment (a Short Rest) and performs a
+	 * guided 1-for-1 swap: unprepare one prepared spell, prepare one spellbook spell.
+	 * Free prepared-toggling elsewhere is unchanged — this is the reminder + helper.
+	 * Returns null when the feature is absent or there is nothing to swap.
+	 * @returns {{section: HTMLElement, apply: function}|null}
+	 */
+	_buildMemorizeSpellSection () {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		if (!calc.hasMemorizeSpell) return null;
+
+		const {prepared, spellbook} = CharacterSheetRest.getMemorizeSpellCandidates(this._state);
+		if (!prepared.length || !spellbook.length) return null;
+
+		const selOut = e_({tag: "select", clazz: "form-control input-sm charsheet__memorize-spell-out"});
+		selOut.appendChild(e_({tag: "option", val: "", txt: "— none —"}));
+		prepared.forEach(s => selOut.appendChild(e_({tag: "option", val: s.id, txt: `${s.name} (Lv ${s.level})`})));
+
+		const selIn = e_({tag: "select", clazz: "form-control input-sm charsheet__memorize-spell-in"});
+		selIn.appendChild(e_({tag: "option", val: "", txt: "— none —"}));
+		spellbook.forEach(s => selIn.appendChild(e_({tag: "option", val: s.id, txt: `${s.name} (Lv ${s.level})`})));
+
+		const section = e_({outer: `<div class="charsheet__rest-section">
+			<div class="charsheet__rest-section-title">📖 Memorize Spell</div>
+			<p class="ve-muted ve-small mb-2">Swap one prepared Wizard spell for another from your spellbook (you may do this once on a Short Rest):</p>
+		</div>`});
+		const row = e_({outer: `<div class="ve-flex-v-center gap-2 ve-flex-wrap"></div>`});
+		row.appendChild(e_({tag: "span", clazz: "ve-small ve-muted", txt: "Unprepare"}));
+		row.appendChild(selOut);
+		row.appendChild(e_({tag: "span", clazz: "ve-small ve-muted", txt: "→ Prepare"}));
+		row.appendChild(selIn);
+		section.appendChild(row);
+
+		return {
+			section,
+			// Returns the swap label when a swap occurred, else false.
+			apply: () => {
+				const outId = selOut.value;
+				const inId = selIn.value;
+				if (!outId || !inId || outId === inId) return false;
+
+				const outSpell = prepared.find(s => s.id === outId);
+				const inSpell = spellbook.find(s => s.id === inId);
+				if (!outSpell || !inSpell) return false;
+
+				// Match by (name, source) so the swap works for both real-id and
+				// legacy spells whose synthetic id is just `name|source`.
+				this._state.setSpellPrepared(outSpell.name, outSpell.source, false);
+				this._state.setSpellPrepared(inSpell.name, inSpell.source, true);
+				return `${outSpell.name} → ${inSpell.name}`;
+			},
+		};
 	}
 
 	async _showLongRestDialog () {
