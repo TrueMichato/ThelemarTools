@@ -3,7 +3,23 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None. Round-2 bugs (surfaced during manual testing of the merged round-1 fixes) are all fixed — see the Round 2 entries at the top of Closed Bugs._
+_Round 3 (surfaced during manual testing of the merged round-2 fixes). Grouped by the planning session that owns each. All refer to TGTT classes unless noted._
+
+**Session 1 — Ranger deep dive (round 3)**
+* **Speed modifiers shown as "Custom Modifier"** — In the Ranger speed breakdown, the bonuses from Rover/Roving and Pursuit are lumped under a generic "Custom Modifier" line instead of each appearing by its own feature name (cf. the round-2 "Magician shows as generic Custom Modifier" skill-breakdown fix — same pattern, applied to the speed breakdown). Each named speed modifier should surface with its source name.
+* **Ranger features still not implemented / not displayed** — Many Ranger features remain unimplemented or are not surfaced to the player. In particular, the Prey- and Predator-mode **actions** are still not granted or usable, and information from features/abilities that should be shown to the player is simply absent. Continue the deep pass so every quantifiable feature is wired and every situational/passive feature is surfaced as a legible reminder.
+* **Combat methods (from focus mode) unattributed in Features tab** — The combat methods granted by the focus mode now work mechanically, but in the Features tab they are listed as plain text with no hover, no descriptive info, and no combat-tradition attribution. They should render with the same hover/attribution treatment as other features.
+* **Focus mode missing from Combat tab** — The Primal Focus mode (Predator/Prey) is not displayed on the Combat tab and cannot be switched from there. Surface the current mode on the Combat tab and allow switching it (consuming a Focus Switch, matching the existing mechanic).
+
+**Session 2 — Druid resource modal**
+* **Wild Shape / Wild Companion / Zodiac Form need a dedicated usage modal** — These Druid abilities currently use the generic Active-states modal to track usage, which is a poor fit. They should get a purpose-built modal that tracks their uses (and form selection for Zodiac/Wild Shape) appropriately.
+
+**Session 3 — Multiclass spell-pick skippable**
+* **Forced spell pick on multiclass** — When multiclassing into (or levelling) a caster, the level-up flow forces you to pick spells; this step should be skippable like every other level-up choice flow (you can decline/defer and pick later).
+
+**Session 4 — Overview: senses + speed display**
+* **Senses not displayed anywhere** — Regular sight, darkvision, blindsight, truesight, etc. are not shown anywhere on the sheet, despite many features, abilities, and magic items granting/altering vision types. Add a fitting senses display in the Overview that reflects the computed senses (the senses pipeline already exists in state — e.g. Apex Sentinel blindsight, Penetrating Senses flags).
+* **Optional emoji speed labels** — Speeds can get long (walk/fly/climb/swim/burrow). Add an optional setting (turned ON by default) that labels speed types with emoji/icons instead of words to keep the display compact.
 
 ## Closed Bugs
 
