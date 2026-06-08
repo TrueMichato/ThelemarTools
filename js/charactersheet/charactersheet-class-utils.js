@@ -2967,6 +2967,27 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Partition a class-feature display list into the buckets the Features tab renders
+	 * separately: standalone features, parent-feature options (e.g. Specialties),
+	 * auto-granted combat methods (regular features that are combat methods — e.g. the
+	 * Ranger Primal Focus Upgrade's Singular Focus / Groundshatter), and player-picked
+	 * optional features. Auto-granted combat methods are diverted out of standalone/options
+	 * so they group under their tradition header (with hover + description) exactly once,
+	 * while the optional-feature list is kept pure so callers like the metamagic summary
+	 * are not polluted by combat methods.
+	 * @param {Array<*>} features
+	 * @returns {{regularFeatures: Array<*>, optionalFeatures: Array<*>, autoGrantedCombatMethods: Array<*>, standaloneFeatures: Array<*>, featureOptions: Array<*>}}
+	 */
+	static partitionClassFeaturesForDisplay (/** @type {*[]} */ features = []) {
+		const regularFeatures = features.filter(f => f.featureType !== "Optional Feature");
+		const optionalFeatures = features.filter(f => f.featureType === "Optional Feature");
+		const autoGrantedCombatMethods = regularFeatures.filter(f => CharacterSheetClassUtils.isCombatMethod(f));
+		const standaloneFeatures = regularFeatures.filter(f => !f.parentFeature && !CharacterSheetClassUtils.isCombatMethod(f));
+		const featureOptions = regularFeatures.filter(f => f.parentFeature && !CharacterSheetClassUtils.isCombatMethod(f));
+		return {regularFeatures, optionalFeatures, autoGrantedCombatMethods, standaloneFeatures, featureOptions};
+	}
+
+	/**
 	 * Resolve the combat methods granted by a feature's `grantsCombatMethods` field.
 	 *
 	 * Some features (e.g. the Ranger's Primal Focus Upgrade) grant specific combat methods
