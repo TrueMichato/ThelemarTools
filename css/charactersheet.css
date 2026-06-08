@@ -3380,7 +3380,22 @@
 
 .charsheet__core-stats-row {
 	display: flex;
+	flex-wrap: wrap;
 	gap: var(--cs-space-md, 0.75rem);
+}
+
+/* The flex row owns spacing via gap; drop the box margin-right inside it and
+   let the flex children shrink below their content width (min-width:0) so the
+   uppercase labels ("Proficiency Bonus" / "Inspiration") never overflow their
+   box at larger [data-textsize] settings. */
+.charsheet__core-stats-row > .charsheet__stat-box {
+	min-width: 0;
+	margin-right: 0;
+}
+
+.charsheet__core-stats-row .charsheet__stat-label,
+.charsheet__core-stats-row .charsheet__stat-value {
+	overflow-wrap: anywhere;
 }
 
 .charsheet__stat-icon {
@@ -3579,9 +3594,13 @@
 }
 
 .charsheet__skills-header-prof {
-	width: 32px;
+	/* Scale with font so the uppercased "PROF" label never overflows its
+	   column and collides with the adjacent "Skill" header at larger
+	   [data-textsize] settings. Fixed-px widths don't scale; em does. */
+	width: max(36px, 3.1em);
 	text-align: center;
 	flex-shrink: 0;
+	margin-right: 0.25rem;
 }
 
 .charsheet__skills-header-name {
@@ -3596,14 +3615,14 @@
 }
 
 .charsheet__skills-header-mod {
-	width: 42px;
+	width: max(42px, 3.2em);
 	text-align: center;
 	flex-shrink: 0;
 	padding-right: 0.5rem;
 }
 
 .charsheet__skills-header-passive {
-	width: 42px;
+	width: max(46px, 4.6em);
 	text-align: center;
 	flex-shrink: 0;
 	color: var(--cs-accent, #8b5cf6);
@@ -3669,7 +3688,7 @@
 .charsheet__save-mod,
 .charsheet__skill-mod {
 	font-weight: 700;
-	min-width: 42px;
+	min-width: max(42px, 3.2em);
 	width: auto;
 	max-width: 110px;
 	text-align: center;
@@ -3720,7 +3739,7 @@
 
 /* Passive skill score column */
 .charsheet__skill-passive {
-	width: 42px;
+	width: max(46px, 4.6em);
 	text-align: center;
 	flex-shrink: 0;
 	font-size: var(--cs-text-sm, 0.85rem);
@@ -11042,13 +11061,15 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__stats-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
 	gap: 0.25rem 0.5rem;
 }
 
 .charsheet__stat-item {
 	display: flex;
-	align-items: center;
+	align-items: baseline;
+	flex-wrap: wrap;
+	min-width: 0;
 	gap: 0.25rem;
 	padding: 0.125rem 0.25rem;
 	background: var(--rgb-bg);
@@ -11063,12 +11084,14 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__calc-stat-label {
 	color: var(--rgb-text-muted);
-	white-space: nowrap;
+	min-width: 0;
+	overflow-wrap: anywhere;
 }
 
 .charsheet__calc-stat-value {
 	font-weight: 600;
 	color: var(--rgb-link);
+	flex-shrink: 0;
 }
 
 /* Innate Spellcasting */
@@ -11388,7 +11411,31 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 /* Combat Tab Resources and States */
-.charsheet__combat-resources-list,
+/* Resources flow into a responsive grid so the section stays short and every
+   resource (plus the full-width Sneak Attack / weapon-rider blocks appended
+   below) is always reachable. No inner max-height cap — the tab scrolls — so
+   nothing is ever trapped in a tiny keyhole scroller at larger text sizes. */
+.charsheet__combat-resources-list {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr));
+	gap: 0.5rem;
+	align-items: start;
+}
+
+/* The empty-state line and the full-width interactive blocks (Sneak Attack,
+   Weapon Damage Riders) span the whole grid so they read as full-width rows
+   and remain reachable regardless of how many resource cards precede them. */
+.charsheet__combat-resources-list > .ve-muted,
+.charsheet__combat-resources-list > .charsheet__sneak-attack-section,
+.charsheet__combat-resources-list > .charsheet__weapon-riders-section {
+	grid-column: 1 / -1;
+}
+
+/* Grid gap owns the spacing; neutralize the generated mb-2 on cards. */
+.charsheet__combat-resources-list > .charsheet__combat-resource-item {
+	margin-bottom: 0;
+}
+
 .charsheet__combat-states-list {
 	max-height: 200px;
 	overflow-y: auto;
