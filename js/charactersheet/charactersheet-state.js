@@ -3192,6 +3192,11 @@ FeatureEffectRegistry.init();
 globalThis.FeatureEffectRegistry = FeatureEffectRegistry;
 
 class CharacterSheetState {
+	/** Base melee reach for Small/Medium creatures, in feet. */
+	static BASE_MELEE_REACH = 5;
+	/** Extra reach granted by a weapon's "Reach" property, in feet. */
+	static REACH_PROPERTY_BONUS = 5;
+
 	constructor () {
 		this._data = this._getDefaultState();
 		// Optional full spell database, injected by the controller after data
@@ -4442,25 +4447,90 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get reach bonus from active states and named modifiers
-	 * @returns {number} Total reach bonus in feet (default is 0, base reach is 5ft)
+	 * REACH CONTRIBUTION API
+	 * ----------------------
+	 * Single source of truth for everything that modifies the character's melee reach.
+	 *
+	 * Any feature, feat, active state, wildshape form, item, or homebrew ability
+	 * contributes a reach bonus *declaratively* by emitting one of the recognized
+	 * effect shapes below. Both the Overview reach chip and the Combat-tab attack
+	 * reach read through this resolver, so a registered contribution propagates
+	 * everywhere automatically — no consumer needs bespoke display code.
+	 *
+	 * Blessed contribution shapes (value is feet; may be negative):
+	 *   • Active state / wildshape form  →  { type: "reach", value: 5 }
+	 *       (returned from an active state's effects / getEffects(); this is what the
+	 *        Octopus/wildshape form should emit)
+	 *   • Passive feature / feat         →  { type: "modifier", modType: "reach:melee:bonus", value: 5 }
+	 *       (registered in FeatureEffectRegistry under the feature/feat name, e.g.
+	 *        Bugbear "Long-Limbed")
+	 *
+	 * Also accepted for back-compat:
+	 *   • Named modifier (toggleable)    →  { type: "reach", value, enabled: true }   (in _data.namedModifiers)
+	 *   • Active-state bonus form        →  { type: "bonus", target: "reach", value }
+	 *
+	 * NOTE: Melee attacks DERIVE their reach from getMeleeReach() + the weapon "Reach"
+	 * property. Do NOT hardcode reach into a melee attack's range string — contribute a
+	 * reach bonus instead. The character's melee reach is authoritative, which avoids
+	 * double-counting a form's reach against an attack's stored range.
+	 *
+	 * @returns {Array<{source: string, value: number}>} per-source reach deltas in feet
+	 */
+	getReachContributions () {
+		const contributions = [];
+
+		// 1) Named modifiers (user / ability toggleable reach mods)
+		for (const mod of (this._data.namedModifiers || [])) {
+			if (mod.type === "reach" && mod.enabled) {
+				contributions.push({source: mod.name || "Modifier", value: mod.value || 0});
+			}
+		}
+
+		// 2) Active state effects (wildshape forms, stances, spells, conditions)
+		for (const e of this.getActiveStateEffects()) {
+			const isReach = e.type === "reach"
+				|| (e.type === "bonus" && e.target === "reach")
+				|| e.target === "reach";
+			if (isReach) {
+				contributions.push({source: e.stateName || e.source || "Active State", value: e.value || 0});
+			}
+		}
+
+		// 3) Passive feature / feat reach modifiers from the shared effect pipeline.
+		// Uses the calc-free helper (registry + metadata) so reach reads the same
+		// source as the main aggregation without the cost of getFeatureCalculations().
+		const {effects} = this._getStoredFeatureEffects();
+		for (const e of effects) {
+			if (!CharacterSheetState._isAdditiveReachModifier(e)) continue;
+			// Conditional passive reach is not auto-applied (matches the conditional-modifier policy).
+			if (e.conditional) continue;
+			const value = typeof e.value === "number" ? e.value : parseInt(e.value, 10);
+			if (!Number.isNaN(value)) contributions.push({source: e.source || "Feature", value});
+		}
+
+		return contributions;
+	}
+
+	/**
+	 * Whether a feature-effect descriptor is an additive melee-reach modifier.
+	 * Matches modType "reach:melee:bonus" (and any future "reach:<scope>:bonus"),
+	 * but NOT non-additive operations like a hypothetical "reach:melee:set".
+	 * @param {object} e
+	 * @returns {boolean}
+	 */
+	static _isAdditiveReachModifier (e) {
+		if (!e || e.type !== "modifier" || typeof e.modType !== "string") return false;
+		const parts = e.modType.split(":");
+		return parts[0] === "reach" && parts[parts.length - 1] === "bonus";
+	}
+
+	/**
+	 * Get reach bonus from all contributors (active states, named modifiers,
+	 * passive features/feats). See {@link getReachContributions} for the contract.
+	 * @returns {number} Total reach bonus in feet (default 0; base reach is 5ft)
 	 */
 	getReachBonus () {
-		// Check named modifiers for reach bonuses
-		let total = 0;
-		for (const mod of this._data.namedModifiers) {
-			if (mod.type === "reach" && mod.enabled) {
-				total += mod.value || 0;
-			}
-		}
-		// Also check active state effects
-		const effects = this.getActiveStateEffects();
-		for (const e of effects) {
-			if (e.type === "reach" || e.target === "reach") {
-				total += e.value || 0;
-			}
-		}
-		return total;
+		return this.getReachContributions().reduce((total, c) => total + (c.value || 0), 0);
 	}
 
 	/**
@@ -4468,7 +4538,37 @@ class CharacterSheetState {
 	 * @returns {number} Total reach in feet
 	 */
 	getMeleeReach () {
-		return Math.max(0, 5 + this.getReachBonus());
+		return Math.max(0, CharacterSheetState.BASE_MELEE_REACH + this.getReachBonus());
+	}
+
+	/**
+	 * Effective melee reach for a specific attack, in feet.
+	 *
+	 * Melee attacks use the character's current reach (getMeleeReach()); the weapon
+	 * "Reach" property (code "R") adds +5 ft on top, per PHB. Ranged attacks have no
+	 * reach and return null.
+	 *
+	 * @param {object} attack - Attack object ({isMelee, type, range, properties}).
+	 * @param {object} [ctx] - Optional precomputed context to avoid recomputation
+	 *   when rendering many attacks in one pass.
+	 * @param {number} [ctx.meleeReach] - Precomputed getMeleeReach().
+	 * @returns {number|null} Reach in feet, or null for non-melee attacks.
+	 */
+	getAttackReach (attack, {meleeReach} = {}) {
+		if (!attack) return null;
+		if (attack.isMelee === false) return null; // explicitly ranged
+
+		const rangeStr = attack.range != null ? String(attack.range) : "";
+		const isThrown = rangeStr.includes("/");
+		const isMelee = attack.isMelee === true
+			|| attack.type === "melee"
+			|| attack.range === "melee"
+			|| (attack.isMelee == null && !!rangeStr && !isThrown);
+		if (!isMelee) return null;
+
+		const base = meleeReach != null ? meleeReach : this.getMeleeReach();
+		const hasReachProp = (attack.properties || []).some(p => String(p).split("|")[0].toUpperCase() === "R");
+		return base + (hasReachProp ? CharacterSheetState.REACH_PROPERTY_BONUS : 0);
 	}
 
 	getRaceName () {
@@ -17969,6 +18069,30 @@ class CharacterSheetState {
 	 * @returns {Array} Array of standardized effect objects
 	 */
 	_aggregateFeatureEffects (calculations) {
+		// PHASES 1-2: stored features + feats (calculation-independent).
+		const {effects, processedFeatures} = this._getStoredFeatureEffects();
+
+		// =========================================================
+		// PHASE 3: Process calculation flags (backward compatibility)
+		// Only process if not already handled via stored features
+		// =========================================================
+		this._aggregateCalculationBasedEffects(calculations, effects, processedFeatures);
+
+		return effects;
+	}
+
+	/**
+	 * Gather passive feature/feat effects that do NOT depend on `getFeatureCalculations()`.
+	 *
+	 * This is Phase 1 (stored features) + Phase 2 (stored feats) of
+	 * {@link _aggregateFeatureEffects}, extracted so cheap consumers (e.g. the reach
+	 * resolver) can read the SAME normalized passive-effect pipeline — registry
+	 * effects, data-derived effects, and metadata `feature.effects` — without paying
+	 * the cost of (or risking recursion through) the full calculation aggregation.
+	 *
+	 * @returns {{effects: Array<object>, processedFeatures: Set<string>}}
+	 */
+	_getStoredFeatureEffects () {
 		const effects = [];
 		const processedFeatures = new Set(); // Track which features we've processed to avoid duplicates
 
@@ -18031,13 +18155,7 @@ class CharacterSheetState {
 			});
 		}
 
-		// =========================================================
-		// PHASE 3: Process calculation flags (backward compatibility)
-		// Only process if not already handled via stored features
-		// =========================================================
-		this._aggregateCalculationBasedEffects(calculations, effects, processedFeatures);
-
-		return effects;
+		return {effects, processedFeatures};
 	}
 
 	/**
