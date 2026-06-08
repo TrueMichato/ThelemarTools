@@ -33,8 +33,10 @@ function makeCombat (stateOverrides = {}) {
 		renderCharacter: () => {},
 		showDiceResult: () => {},
 	};
-	// `_applyArcaneShot` refreshes the AA section, which touches the DOM; stub it
-	// out in the node test environment (no jsdom).
+	// `_applyArcaneShot` refreshes the Combat Resources panel (Arcane Shot was
+	// folded in there), which touches the DOM; stub it out in the node test
+	// environment (no jsdom). The legacy shim is also stubbed for safety.
+	combat.renderCombatResources = () => {};
 	combat.renderCombatArcaneArcher = () => {};
 	return combat;
 }
