@@ -5025,31 +5025,79 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Read the cumulative count granted by an optionalfeature progression at a given
+	 * level. Object progressions are keyed by threshold level (e.g. {3:2,7:3,10:4}); we
+	 * resolve to the highest threshold key <= level so jump/rebuild paths (0->8, 3->10)
+	 * are correct, not just single-level transitions.
+	 * @param {*} progression
+	 * @param {number} level
+	 * @returns {number}
+	 */
+	static _readOptFeatureProgressionCount (/** @type {*} */ progression, /** @type {*} */ level) {
+		if (Array.isArray(progression)) return progression[level - 1] || 0;
+		if (progression && typeof progression === "object") {
+			let bestLevel = 0;
+			let count = 0;
+			for (const [lvlStr, c] of Object.entries(progression)) {
+				const lvl = parseInt(lvlStr);
+				if (!Number.isNaN(lvl) && lvl <= level && lvl > bestLevel) {
+					bestLevel = lvl;
+					count = /** @type {*} */ (c);
+				}
+			}
+			return count;
+		}
+		return 0;
+	}
+
+	/**
 	 * Compute optional feature gains between currentLevel and newLevel.
+	 *
+	 * Reads both the CLASS-level `optionalfeatureProgression` and the active subclass's
+	 * progression (e.g. Arcane Archer "AS", Battle Master "MV:B"). A subclass progression
+	 * is merged only when its featureType set does NOT intersect any class-level
+	 * progression featureType — this prevents miscounting shared types (e.g. Champion's
+	 * subclass "FS:F" vs the Fighter class "FS:F", where a shared global count would
+	 * cancel the gain). CTM:* (TGTT combat methods) are skipped here; they are augmented
+	 * separately by the bonus-method path.
+	 *
 	 * @param {object} classData - The class data object
 	 * @param {number} currentLevel - Previous class level
 	 * @param {number} newLevel - New class level
 	 * @param {object} state - Character state (needs getFeatures())
+	 * @param {object} [subclassData] - Resolved full subclass data (with optionalfeatureProgression)
 	 * @returns {Array<*>} Array of gain objects
 	 */
-	static getOptionalFeatureGains (/** @type {*} */ classData, /** @type {*} */ currentLevel, /** @type {*} */ newLevel, /** @type {*} */ state) {
+	static getOptionalFeatureGains (/** @type {*} */ classData, /** @type {*} */ currentLevel, /** @type {*} */ newLevel, /** @type {*} */ state, /** @type {*} */ subclassData = null) {
 		/** @type {*[]} */ const gains = [];
-		if (!classData.optionalfeatureProgression?.length) return gains;
 
-		classData.optionalfeatureProgression.forEach((/** @type {*} */ optFeatProg) => {
+		const classProgressions = classData.optionalfeatureProgression || [];
+		const classFeatureTypeSet = new Set(
+			classProgressions.flatMap((/** @type {*} */ p) => p.featureType || []),
+		);
+
+		/** @type {*[]} */ const progressions = [...classProgressions];
+
+		// Merge subclass-level progressions (Arcane Shot, Maneuvers, Runes, Disciplines).
+		const subclassProgressions = subclassData?.optionalfeatureProgression || [];
+		for (const p of subclassProgressions) {
+			const types = p.featureType || [];
+			// Skip combat methods (handled by the bonus-method augmentation path).
+			if (types.some((/** @type {*} */ ft) => ft.startsWith?.("CTM:"))) continue;
+			// Overlap-guard: skip if this type also exists at class level (shared-count hazard).
+			if (types.some((/** @type {*} */ ft) => classFeatureTypeSet.has(ft))) continue;
+			progressions.push(p);
+		}
+
+		if (!progressions.length) return gains;
+
+		progressions.forEach((/** @type {*} */ optFeatProg) => {
 			const featureTypes = optFeatProg.featureType || [];
 			const name = optFeatProg.name || featureTypes.map((/** @type {*} */ ft) => ft.replace(/:/g, " ")).join(", ");
 
-			let countAtCurrent = 0;
-			let countAtNew = 0;
-
-			if (Array.isArray(optFeatProg.progression)) {
-				countAtCurrent = optFeatProg.progression[currentLevel - 1] || 0;
-				countAtNew = optFeatProg.progression[newLevel - 1] || 0;
-			} else if (typeof optFeatProg.progression === "object") {
-				countAtCurrent = optFeatProg.progression[String(currentLevel)] || 0;
-				countAtNew = optFeatProg.progression[String(newLevel)] || 0;
-			}
+			const countAtCurrent = CharacterSheetClassUtils._readOptFeatureProgressionCount(optFeatProg.progression, currentLevel);
+			const countAtNew = CharacterSheetClassUtils._readOptFeatureProgressionCount(optFeatProg.progression, newLevel);
+			void countAtCurrent;
 
 			const existingOptFeatures = state.getFeatures().filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
 
