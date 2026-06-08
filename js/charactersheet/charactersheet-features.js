@@ -1607,6 +1607,48 @@ class CharacterSheetFeatures {
 					</div>
 				` : "";
 
+			// --- Mode abilities (usable controls + passive reminders for the current focus) ---
+			// Declarative, gated by the unlocked Primal Focus upgrades (levels 6/10/14).
+			const modeAbilities = CharacterSheetClassUtils.getPrimalFocusModeAbilities?.(currentMode, {
+				upgrade1: !!calcs.primalFocusUpgrade1,
+				upgrade2: !!calcs.primalFocusUpgrade2,
+				upgrade3: !!calcs.primalFocusUpgrade3,
+			}) || [];
+			const actionIcon = (actionType) => {
+				if (actionType === "bonus") return "⚡ Bonus";
+				if (actionType === "action") return "⚔️ Action";
+				if (actionType === "reaction") return "🔄 Reaction";
+				return "";
+			};
+			const quarryDesignated = !!this._state.getFocusedQuarry?.();
+			const abilityRowsHtml = modeAbilities
+				// Hunter's Dodge has its own dedicated row (with use counter) above.
+				.filter(a => a.name !== "Hunter's Dodge")
+				.map(a => {
+					const kindBadge = a.kind === "usable"
+						? `<span class="badge badge-outline-primary" title="${actionIcon(a.actionType)}">${actionIcon(a.actionType) || "Usable"}</span>`
+						: a.kind === "method"
+							? `<span class="badge badge-outline-info" title="Combat method">⚔️ Method</span>`
+							: `<span class="badge badge-outline-secondary" title="Always-on passive">✦ Passive</span>`;
+					const quarryBtn = a.name === "Focused Quarry"
+						? `<button class="ve-btn ve-btn-xxs ${quarryDesignated ? "ve-btn-warning" : "ve-btn-outline-danger"} charsheet__focused-quarry-toggle ml-1" title="${quarryDesignated ? "Clear your designated Quarry" : "Mark that you have designated a Quarry"}">${quarryDesignated ? "Clear Quarry" : "Designate Quarry"}</button>`
+						: "";
+					return `
+						<div class="ve-flex-v-center gap-2 mb-1" style="flex-wrap: wrap;">
+							${kindBadge}
+							<strong class="ve-small">${a.name}</strong>
+							${quarryBtn}
+							<span class="ve-muted ve-small" style="flex-basis: 100%;">${a.note}</span>
+						</div>
+					`;
+				}).join("");
+			const abilitiesSectionHtml = abilityRowsHtml ? `
+					<div class="charsheet__primal-focus-abilities mt-2 pt-2" style="border-top: 1px dashed var(--bs-border-color, #dee2e6);">
+						<em class="ve-muted ve-small">${currentMode === "predator" ? "🎯 Predator" : "🛡️ Prey"} abilities:</em>
+						${abilityRowsHtml}
+					</div>
+				` : "";
+
 			primalFocusHtml = `
 				<div class="charsheet__primal-focus-controls mt-2 p-2" style="background: var(--bs-body-bg-alt, #f8f9fa); border-radius: 8px; border: 1px solid var(--bs-border-color, #dee2e6);">
 					<div class="ve-flex-v-center gap-2 mb-2">
@@ -1627,6 +1669,7 @@ class CharacterSheetFeatures {
 							🛡️ Prey
 						</button>
 					</div>
+					${abilitiesSectionHtml}
 				</div>
 			`;
 		}
@@ -1722,6 +1765,17 @@ class CharacterSheetFeatures {
 				} else {
 					JqueryUtil.doToast({type: "warning", content: "No Hunter's Dodge uses remaining! Rest to regain uses."});
 				}
+			});
+
+			// Focused Quarry (Predator focus) designate / clear toggle. We track a simple
+			// "designated" marker so the player has a visible reminder of whether their
+			// once-per-turn Quarry rider is active; the rider itself is applied in combat.
+			featureEl.querySelector(".charsheet__focused-quarry-toggle")?.addEventListener("click", () => {
+				const isDesignated = !!this._state.getFocusedQuarry?.();
+				this._state.setFocusedQuarry?.(isDesignated ? null : "designated");
+				this._page.saveCharacter?.();
+				this._page._features?.render?.();
+				JqueryUtil.doToast({type: "success", content: isDesignated ? "Cleared Focused Quarry" : "Designated a Focused Quarry"});
 			});
 		}
 
