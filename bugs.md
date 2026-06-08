@@ -3,46 +3,31 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-Round 5 (surfaced during manual testing of the merged round-4 fixes). Grouped into 8 parallel sessions + 1 integration-time pass (combat-tab layout). All refer to TGTT classes unless noted.
-
-**S1 — Active-states classification (foundation):**
-* (#10 generic) Many abilities are wrongly classified as toggle "active states": combat methods (Perceptive Stance, Shoulder Check, Legion Stance, Exploit Footing, Thread the Needle), Grasping Arrow (an arcane-shot option), and the generic "Arcane Shot" name. Fix generically: combat methods (`isCombatMethod()`) and arcane shots / shot options must never surface as generic active states; establish a generic rule that single-use / limited-use innate abilities surface as tracked resources, not toggle states.
-
-**S2 — Hover resolution failures:**
-* (#5) Many hovers throw `Failed to load renderable content for:` — TGTT subclasses (`classes.html ... state:sub_<sub>_tgtt...=b1`: banneret, bladesinger, chronurgy, bladesinging, blood magic, graviturgy, enchantment, necromancy), TGTT optionalfeatures (`optionalfeatures.html` "stamina enthusiast"), and KaW combat methods (`combatmethods.html` "iron will"). Root cause is data resolution (brew entities not registered in the hover DataLoader cache), not hash construction.
-
-**S3 — Fighter features + Battle Tactics:**
-* (#11) Battle Tactics are not surfaced anywhere accessible — incorporate them into the Combat tab.
-* (#10 Fighter) Second Wind (Bonus Action), Action Surge (Action), Tactical Mind (Second Wind rider — needs a reminder), and Stamina Enthusiast (Second Wind modifier — needs implementation) are mis-handled / unimplemented. Own these Fighter feature names end-to-end (classification + implementation + surfacing).
-
-**S4 — Arcane Archer deep completion + Flanking:**
-* (#6) Arcane Archer "Lore" is not implemented — gives neither the proficiency choice nor the cantrip choice; investigate why the general feature parsers missed it.
-* (#7) Arcane shots should apply AFTER a ranged attack roll (choose which option was used, auto-roll its damage/effects); reconsider for best UX; the modal is likely better as a Sneak-Attack-style area with per-arrow hovers. Owns the `_rollAttack` post-roll extension point.
-* (#8) Other Arcane Archer features need implementing / verifying.
-* (#12) Flanking (+2 to hit while flanking) as an applied buff / its own button — feeds the `_rollAttack` modifier pipeline (owned here for single-owner safety).
-
-**S5 — Wizard:**
-* (#16) Wizard's Memorize Spell ability does not work.
-* (#17) Wizard Specialties — verify all are implemented or at least surfaced/reminded to the player.
-* (#18) Bladesinging (2014) and Bladesinger (2024) subclasses add none of their abilities when chosen; their abilities are likely unimplemented (near-identical in name/implementation). Owns the subclass feature-application pipeline.
-
-**S7 — Druid resources rework:**
-* (#4) Druid resource handling is not good enough — location too hidden, no Combat-tab area, unclear what the button does. Add a discoverable Druid Combat-tab area (own render method + container, prefixed classes), improve the modal clarity.
-
-**S8 — Display + species:**
-* (#3) Speed display and the Resources panel overflow at some font sizes (emoji speed "60 FT" clipped; resource names like "Stamina" / "Poisons and Antidotes" wrap mid-word). Owns generic resource/speed overflow CSS.
-* (#9 Aasimar) Aasimar speed gating still doesn't work; Healing Hands appears as an active state despite being single-use (own the species resource/action behavior).
-* (#14) Lore skill names are almost always truncated to "…" — the skills area needs improvement.
-* (#15) TGTT Tabaxi language choice shows broken non-hoverable text "Tabaxi|Tgtt" instead of the Tabaxi language link.
-
-**S9 — Ranger follow-ups:**
-* (#1) Deft Explorer and Tireless wrongly appear in the Ranger passive/situational reminders (their abilities already affect the sheet) — round-4 reminder over-inclusion regression.
-* (#2) Ranger focus abilities still appear in the Combat tab but not the Overview (parity gap).
-
-**Integration-time pass (orchestrator, after S3/S4/S7 land):**
-* (#13) Combat tab visual improvement — optimize dead space (moderately) to better surface class/subclass-specific things, reconciling the new sections added by S3/S4/S7.
+_None._
 
 ## Closed Bugs
+
+### Round 5 (surfaced during manual testing of the merged round-4 fixes)
+
+* **(#10 generic) Limited-use / combat abilities misclassified as toggle "active states" (S1 — foundation):** Combat methods (Perceptive Stance, Shoulder Check, Legion Stance, Exploit Footing, Thread the Needle), arcane-shot options (Grasping Arrow), and the generic "Arcane Shot" name surfaced as toggle states. Established a generic taxonomy: `isCombatMethod()` and arcane shots/options never surface as generic toggles, and single/limited-use innate abilities surface as tracked resources (`interactionMode: "limited"`) via a new limited-use fallback, not toggles. New predicates `isArcaneShotActivatable` / `isLimitedUseResourceAbility` + hardened `detectActivatableFeature` toggle-gate.
+
+* **(#5) Hover resolution failures (S2):** Many hovers threw `Failed to load renderable content for:` — TGTT subclasses (banneret, bladesinger, chronurgy, bladesinging, blood/graviturgy/enchantment/necromancy), TGTT optionalfeatures ("stamina enthusiast"), KaW combat methods ("iron will"). Root cause was DATA resolution (brew entities absent from the hover DataLoader cache), not hash construction. Fixed by `_registerLoadedHoverEntities()` (registers loaded brew entities post-copy-inheritance), source canonicalization (KaW→TGTT alias), and registering subclasses under their SUBCLASS source so hovers query the right source. Genuinely-unresolvable entries get a graceful inline-hover fallback (no thrown error / console spam).
+
+* **(#11) Battle Tactics surfaced + (#10 Fighter) Fighter action economy (S3):** New dedicated Combat-tab Fighter section lists each Battle Tactic with optional-feature hovers, conditional attack/crit/advantage badges, and level-gated reaction rows. Second Wind / Action Surge reclassified as usable "combat" actions (no longer toggle states) with level-scaled uses and short/long-rest restoration; Tactical Mind classified passive (reminder row); Stamina Enthusiast implemented (+2 stamina max + alternate Second Wind stamina-regain mode at +PB).
+
+* **(#6/#7/#8) Arcane Archer deep completion + (#12) Flanking (S4):** Arcane Archer "Lore" now grants both the prose "Arcana or Nature" skill choice and the cantrip choice via a generic `FeatureChoiceParser` → `pendingFeatureChoices` → option-button modal (identity-based suppression prevents double-granting). Arcane Shot reworked to a post-roll, Sneak-Attack-style per-option picker (auto-rolls damage/effects) via a new generic `_runPostAttackHooks` extension point on `_rollAttack`. Magic Arrow + Curving Shot surfaced as info notes. Flanking added as a strict-melee +2-to-hit toggle feeding the same `_rollAttack` bonus pipeline (`_getCombatLocalAttackBonus`), never leaking onto ranged.
+
+* **(#16/#17/#18) Wizard features + subclasses (S5):** Root-caused #18 (Bladesinger/Bladesinging and 31 other subclasses granted ZERO features): `getLevelFeatures` parsed the subclass-feature level from `parts[last]`, but modern 7-part refs carry a display source (e.g. "FRHoF") → `parseInt`→NaN→0 features. New shared `getSubclassFeatureRefLevel(parts[5])` with NaN-guarded fallback routes all level-parse sites. Memorize Spell (#16) surfaced as a guided Short-Rest 1-for-1 swap. Wizard Specialties (#17) verified surfaced + granted at all 5 tiers (+ regression tests).
+
+* **(#4) Druid resources rework (S7):** New discoverable Combat-tab Druid panel (Wild Shape uses + recharge + in-form beast; Transform/End; −/+; Wild Companion Summon; Zodiac active form + Choose/Dismiss; Manage → full modal). Every control has an explicit label + tooltip describing effect + use cost; modal clarity improved (helper text, clearer +/− tooltips). Active-States entry button relabelled "🐾 Manage Druid Resources…". Async picker re-entrancy guards prevent double-grants.
+
+* **(#3/#9/#14/#15) Display overflow + species (S8):** Speed display + Resources panel overflow fixed (speed-scoped smaller font tier + `min-width:0`/`box-sizing`; resource/lore names break on word boundaries; rows wrap; bounded scroll). Aasimar speed gating healed via idempotent `_migrateConditionalSpeedModifiers()` (re-gates stale transformation-conditional fly mods on load). Healing Hands tracked as a curated single use (`{max:1, recharge:"long"}`) and classified as a limited-use resource (integration-reconciled with S1's taxonomy). Lore skill names wrap instead of truncating to "…". TGTT Tabaxi language UID "tabaxi|tgtt" resolves to a clean hoverable name via `resolveLanguageProficiencyName` at every grant site.
+
+* **(#1/#2) Ranger follow-ups (S9):** Deft Explorer and Tireless no longer appear in the Ranger passive/situational reminders (round-4 over-inclusion regression — their effects already apply to the sheet). Ranger focus abilities now reach Overview ↔ Combat-tab parity.
+
+* **(#13) Combat-tab layout pass (orchestrator integration-time):** Reconciled the four new Combat-tab sections (Fighter + Flanking LEFT, Druid RIGHT, plus existing Ranger/Arcane Archer) added by S3/S4/S7. Moved the always-visible Flanking toggle to sit directly beneath Weapons & Attacks (a to-hit modifier belongs with the attacks it modifies) instead of dominating the top of the column; sections remain user-reorderable via the layout system.
+
+
 
 ### Round 4 (manual-testing follow-ups)
 
