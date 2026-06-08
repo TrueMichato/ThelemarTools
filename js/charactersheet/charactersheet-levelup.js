@@ -4641,6 +4641,10 @@ class CharacterSheetLevelUp {
 		// Check for racial spells at the new character level
 		CharacterSheetClassUtils.updateRacialSpells(this._state, this._page);
 
+		// Re-apply racial trait entries that unlock at the new character level
+		// (e.g. Aasimar "Celestial Revelation" at level 3). Mirrors updateRacialSpells.
+		CharacterSheetClassUtils.updateRacialFeatures(this._state, this._page);
+
 		// Record level-up choices in history
 		const totalLevel = this._state.getTotalLevel();
 		/** @type {*} */ const historyEntry = {

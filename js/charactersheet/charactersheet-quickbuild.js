@@ -4771,6 +4771,10 @@ class CharacterSheetQuickBuild {
 		// Check racial spells
 		CharacterSheetClassUtils.updateRacialSpells(this._state, this._page);
 
+		// Re-apply racial trait entries unlocked by the new total level
+		// (e.g. Aasimar "Celestial Revelation" at level 3). Mirrors updateRacialSpells.
+		CharacterSheetClassUtils.updateRacialFeatures(this._state, this._page);
+
 		// Process any pending spell choices from feats or features that grant selectable spells
 		if (this._page._spells?.processPendingSpellChoices) {
 			await this._page._spells.processPendingSpellChoices();
