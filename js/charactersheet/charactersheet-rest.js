@@ -777,6 +777,14 @@ class CharacterSheetRest {
 			this._state.restoreArcaneShot?.();
 		}
 
+		// Restore Fighter Second Wind / Action Surge - recharge on short OR long rest.
+		// Explicit (in addition to the generic feature-uses loop above) so the per-rest max
+		// is re-scaled to the current Fighter level before refilling.
+		if (this._state.hasFighterFeatures?.()) {
+			this._state.restoreSecondWind?.();
+			this._state.restoreActionSurge?.();
+		}
+
 		// Restore Focus Pool (TGTT Dreamwalker) - only on long rest
 		if (restType === "long" && this._state.hasFocusPool?.()) {
 			this._state.restoreFocusPool?.();

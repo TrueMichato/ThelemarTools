@@ -307,9 +307,11 @@ describe("CharacterSheetPdf", () => {
 			expect(html).toContain("Second Wind");
 			expect(html).toContain("Darkvision");
 			expect(html).toContain("1/1");
-			// Race should appear before Class features
+			// Race should appear before Class features in the Feature Details grouping.
+			// (Second Wind also appears earlier in the action-economy section, so scope the
+			// ordering check to its Feature Details occurrence via lastIndexOf.)
 			const raceIdx = html.indexOf("Darkvision");
-			const classIdx = html.indexOf("Second Wind");
+			const classIdx = html.lastIndexOf("Second Wind");
 			expect(raceIdx).toBeLessThan(classIdx);
 		});
 
