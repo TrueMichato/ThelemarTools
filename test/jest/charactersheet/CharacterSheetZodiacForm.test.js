@@ -251,8 +251,8 @@ describe("Zodiac Form — load migration heals older saves", () => {
 		// Simulate an older persisted snapshot lacking the reach effect.
 		const json = state.toJson();
 		const zodiac = json.activeStates.find(s => s.stateTypeId === "zodiacForm");
-		zodiac.customEffects = zodiac.customEffects.filter(e => e.target !== "reach");
-		expect(zodiac.customEffects.some(e => e.target === "reach")).toBe(false);
+		zodiac.customEffects = zodiac.customEffects.filter(e => e.type !== "reach" && e.target !== "reach");
+		expect(zodiac.customEffects.some(e => e.type === "reach" || e.target === "reach")).toBe(false);
 
 		const reloaded = new CharacterSheetState();
 		reloaded.loadFromJson(json);
@@ -313,9 +313,10 @@ describe("Zodiac Form — load migration heals older saves", () => {
 		expect(reloaded.getReachBonus()).toBe(0);
 
 		// The inactive Octopus record has been re-derived to include the reach
-		// effect, so toggling it on later will grant reach.
+		// effect (agreed `{type:"reach", value:N}` shape), so toggling it on
+		// later will grant reach.
 		const octRec = reloaded._data.activeStates.find(s => s.zodiacForm?.formId === "octopus");
-		expect(octRec.customEffects.some(e => e.target === "reach" && e.value === 5)).toBe(true);
+		expect(octRec.customEffects.some(e => e.type === "reach" && e.value === 5)).toBe(true);
 	});
 });
 
