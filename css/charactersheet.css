@@ -4350,6 +4350,33 @@
 	letter-spacing: 0.03em;
 }
 
+/* Restore inter-element spacing for the unit/label (markup relies on ml-1
+   utility classes that are not defined in the loaded stylesheets). Applying
+   the margin to just the unit/label keeps the "10/5" value ratio tight. em
+   units scale the gap with the text size. */
+.charsheet__physical-stat-item > .charsheet__physical-stat-unit,
+.charsheet__physical-stat-item > .charsheet__physical-stat-label {
+	margin-left: 0.5em;
+}
+
+/* Combat Methods mini-stat header (overview + combat tab). The markup relies
+   on mr-3/ml-1 utility classes that are not defined in the loaded
+   stylesheets, so without this the stats render flush ("Method DC: 15Stamina
+   Pool: 8"). row-gap keeps them readable when the row wraps at large text. */
+#charsheet-combat-methods-stats,
+#charsheet-combat-methods-tab-stats {
+	row-gap: 0.35em;
+}
+
+#charsheet-combat-methods-stats > .charsheet__mini-stat,
+#charsheet-combat-methods-tab-stats > .charsheet__mini-stat {
+	margin-right: 1em;
+}
+
+#charsheet-combat-methods-tab-stats > #charsheet-stamina-remove {
+	margin-left: 0.35em;
+}
+
 /* Mini carry bar */
 .charsheet__carry-bar-mini {
 	display: flex;
@@ -4854,6 +4881,10 @@
 }
 
 .charsheet__spell-stats {
+	display: flex;
+	flex-wrap: wrap;
+	column-gap: 1em;
+	row-gap: 0.25em;
 	padding: var(--cs-space-md, 0.75rem);
 	background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(99, 102, 241, 0.05) 100%);
 	border: 1px solid rgba(139, 92, 246, 0.2);
