@@ -23603,11 +23603,13 @@ class CharacterSheetState {
 	getCarryingCapacity () {
 		let baseCapacity;
 
-		// Thelemar rules: 50 + 25 * Might modifier (minimum 50)
-		// Might is a custom TGTT homebrew skill based on STR
+		// Thelemar rules: passive Might * 10 (base for Small/Medium creatures)
+		// Passive Might = 10 + Might modifier (+ passive bonuses). Might is a
+		// custom TGTT homebrew skill based on STR. Size scaling is applied below
+		// via getSizeCarryMultiplier (Small/Medium = ×1).
 		if (this._data.settings?.thelemar_carryWeight) {
-			const mightMod = this.getSkillMod("might");
-			baseCapacity = Math.max(50, 50 + 25 * mightMod);
+			const passiveMight = this.getPassiveScore("might");
+			baseCapacity = passiveMight * 10;
 		} else {
 			// Standard rules: STR score * 15
 			baseCapacity = this.getAbilityScore("str") * 15;

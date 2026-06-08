@@ -3306,8 +3306,8 @@ class CharacterSheetPage {
 		// Update carrying capacity tooltip based on rules
 		const useThelemarCarry = (/** @type {*} */ (this._state.getSettings()))?.thelemar_carryWeight;
 		if (useThelemarCarry) {
-			const mightMod = this._state.getSkillMod("might");
-			const carryTooltip = `Carry Capacity (Thelemar): 50 + 25 × Might mod (${mightMod >= 0 ? "+" : ""}${mightMod}) = ${carryCapacity} lb.\nPush/Drag/Lift: ${pushDragLift} lb.`;
+			const passiveMight = this._state.getPassiveScore("might");
+			const carryTooltip = `Carry Capacity (Thelemar): passive Might (${passiveMight}) × 10 = ${carryCapacity} lb.\nPush/Drag/Lift: ${pushDragLift} lb.`;
 			document.querySelector(".charsheet__physical-stat-group--carry").setAttribute("title", carryTooltip);
 		} else {
 			const strScore = this._state.getAbilityScore("str");
@@ -11679,7 +11679,7 @@ class CharacterSheetPage {
 				<input type="checkbox" id="settings-thelemar-carry" ${currentThelemar_carryWeight ? "checked" : ""}>
 				<span class="charsheet__settings-checkbox-text">
 					<span class="charsheet__settings-checkbox-title">🎒 Carry Weight</span>
-					<span class="charsheet__settings-checkbox-desc">50 + 25 × Might modifier (minimum 50)</span>
+					<span class="charsheet__settings-checkbox-desc">passive Might × 10</span>
 				</span>
 			</label>
 		</div>`;
