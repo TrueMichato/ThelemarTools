@@ -690,6 +690,15 @@ class CharacterSheetFeatures {
 				this.render(); // Re-render after spell selection
 			}
 		}
+
+		// Check for pending prose "either A or B" feature choices (e.g. Arcane Archer Lore)
+		if (this._state.hasPendingFeatureChoices?.()) {
+			await MiscUtil.pDelay(100);
+			if (this._page.processPendingFeatureChoices) {
+				await this._page.processPendingFeatureChoices();
+				this.render();
+			}
+		}
 	}
 
 	_formatFeatChoices (choices) {
