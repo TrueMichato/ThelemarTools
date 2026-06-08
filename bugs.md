@@ -3,42 +3,34 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 6 (surfaced during manual testing of the merged round-5 fixes)
-
-Grouped into 7 parallel planning sessions. Each branches off `character-sheet-wip`,
-produces a deep root-cause fix + Jest tests, and merges back. The orchestrator owns
-this file; sessions do NOT edit it.
-
-* **(S1 — Combat-tab modals: #6, #7, #8, #9):**
-  * **#9 Combat Resources click bug:** with one resource, use/restore works; with two or more, clicking the rightmost pip does nothing, clicking the one to its left uses the rightmost first then itself, and the rightmost becomes non-restorable. Root cause: `renderCombatResources()` wires the click handler via `querySelector(".charsheet__resource-pip")` (first pip only) while each resource renders one pip per `max` — only `pip[0]` gets a listener. Fix: event delegation / `querySelectorAll().forEach()`.
-  * **#6/#7 Arcane Shot folded into Combat Resources:** the standalone Arcane Shot combat-tab section should fold into the combat resources modal (like Focused Prey / Sneak Attack), and both the resources list and the picker popup should use hovers instead of reproducing full option text.
-  * **#8 Weapon Masteries:** the masteries display should be smaller and incorporated into the Weapons & Attacks section rather than a standalone block. DISPLAY/modal-only — must not change attack-modifier math (S7 owns roll math).
-
-* **(S2 — Flanking active-state + Fighter tactic badge: #1, #10):**
-  * **#1 Flanking → active-state button:** the optional Flanking control should be a button on the active-states quick-row (like Dodge), not its own combat-tab section. Keeps the combat-local `_flankingEnabled` / `_getCombatLocalAttackBonus` +2 strict-melee path.
-  * **#10 Fighter Battle Tactic "Flanking" false badge:** `renderCombatFighter()` shows a "+2 melee atk" badge for the Fighter Battle Tactic named "Flanking", which is misleading. INVARIANT: optional Flanking (the quick button) is the only path that grants the situational +2; the Battle Tactic "Flanking" is a reminder/reaction, not an automatic bonus.
-
-* **(S3 — Subclass respec + Training proficiency: #2, #4):**
-  * **#2 Respec subclass change grants nothing:** changing a subclass via respec does not grant all the new subclass's features. `_applySubclassChange()` filters features directly instead of reusing `getLevelFeatures()` (the prior-round-hardened helper) + feature-choice extraction. SCOPE GUARD: fix respec application + choice extraction only; do NOT refactor general feature calculation or `getLevelFeatures` itself.
-  * **#4 Training in War and Song (2024 Bladesinger):** does not grant its proficiency choice nor alter weapon proficiencies. `FeatureChoiceParser` has no weapon-proficiency-choice extraction; the `hasTrainingInWarAndSong` flag is set but never consumed.
-
-* **(S4 — Druid Wild Shape, Bee form & companions: #12, #13, #14):**
-  * **#13 Wild Shape Transform regression:** Transform does not consume a Wild Shape use and instead summons a companion (mis-wired to the Wild Companion / familiar summon path). OWNS the full Transform → beast-picker → companion-creation path (`charactersheet-druid-resources.js` + the shared `_pShowBeastPicker` / companion-creation code in `charactersheet.js`, and companion type/origin state).
-  * **#12 Bee zodiac form:** does not add its bonus-action ranged spell attack to the abilities list (Bee `getEffects()` returns only `{type:"info"}`; Octopus returns a mechanical effect and works).
-  * **#14 Familiar summoned indicator:** indicate to the player when a familiar is summoned so they don't forget. A companions system already exists (`getActiveCompanions()`, `_renderCompanionsOverviewIndicator()`); needs a clear, dedicated familiar indicator. OWNS the companion type/origin contract (familiars `FAMILIAR`, Wild Shape `WILD_SHAPE`, distinct origins).
-  * [Lunaria repro: Druid 3 Circle of the Zodiac]
-
-* **(S5 — Ranger section cleanup: #11):**
-  * **#11 Ranger reminder modal:** Singular Focus + Groundshatter (kind `method`) wrongly appear as passives; Pursuit appears despite being applied via speed calc; Hunter's Dodge is usable (use button) but has NO hover; Enduring Traveler crams three distinct mechanics into one paragraph and needs splitting/formatting.
-  * [Lunaria repro: Ranger 6 Hunter w/ Primal Focus]
-
-* **(S6 — Aasimar Celestial Revelation gating: #5):**
-  * **#5 Celestial Revelation over-granted:** added to ALL Aasimar variants even when the chosen variant (e.g. DMG14) doesn't have it / before the gating level. `_applyRacialTraits()` → `_addFeatureEntries()` adds every race entry with no variant/level gating.
-
-* **(S7 — Bladesong attack/damage INT modifier: #3):**
-  * **#3 Bladesong INT for weapon attacks/damage:** while singing, weapon attack rolls and damage rolls should use MAX(weapon's default modifier, INT). No Bladesong check exists in the attack/damage path. OWNS attack ability-mod resolution across ALL attack surfaces (`_resolveAbilityMod` / `_rollAttack` / `_rollDamage`, and the main-sheet attack path if separate). Other sessions touching attacks must keep roll-math changes out of scope.
+_None._
 
 ## Closed Bugs
+
+### Round 6 (surfaced during manual testing of the merged round-5 fixes)
+
+Integrated from 7 parallel sessions into `character-sheet-wip`. Full suite green (227 suites / 9576 tests); eslint + stylelint clean.
+
+* **(#9) Combat Resources pip clicks (S1):** With 2+ resources, only the first pip of each got a click listener (`renderCombatResources()` used `querySelector(".charsheet__resource-pip")` — first match only), so the rightmost pip did nothing and use/restore semantics were wrong. Fixed with event delegation on the pip container (`_bindResourcePipClicks` → `e.target.closest(...)`) + a pure index-aware semantics helper (`_computeResourcePipClickCurrent`: filled pip i→current=i, empty pip i→current=i+1, clamped). Every pip is now usable and restorable.
+* **(#6/#7) Arcane Shot folded into Combat Resources + hovers (S1):** The standalone Arcane Shot combat-tab section now folds into the resources modal via `_renderArcaneShotToggle()` (modeled on `_renderSneakAttackToggle`), rendering known shots as `getHoverLink(PG_OPT_FEATURES)` hovers with the inline effect text dropped. The post-attack `_pPickArcaneShot` picker uses hover-link names + a dedicated Apply button (no full descriptions). `renderCombatArcaneArcher()` kept as a 1-line shim; its call removed from `render()`.
+* **(#8) Weapon Masteries folded into Weapons & Attacks (S1):** Masteries nested into the Weapons & Attacks section as lighter inline pills (shrunk badges), no longer a standalone block; ids preserved; no attack-math change.
+* **(#1) Flanking → active-state button (S2):** The optional Flanking +2-melee control is now a button on the `.charsheet__quick-states` row (like Dodge) toggling the transient `_flankingEnabled`; the standalone section + `renderCombatFlanking()` were removed. `_getCombatLocalAttackBonus()`/`_isStrictMelee()` remain the sole +2 path.
+* **(#10) Fighter Battle Tactic "Flanking" false badge (S2):** Stripped the misleading always-on `+2 melee atk` badge (removed `attackBonus`/`attackType`/`condition` from the Flanking tactic effects + the `hasFlanking`/`flankingBonus` calc block); the Flanking Opportunity reaction still renders. INVARIANT enforced + tested: a Fighter with the tactic gets +2 ONLY when the quick-states Flanking button is active, never from the tactic alone.
+* **(#2) Respec subclass change grants all features (S3):** `_applySubclassChange()` filtered the flat feature catalog directly (missing 7-part `refSubclassFeature` strings → level=NaN → zero features) and skipped the choice pipeline. Re-routed through `CharacterSheetClassUtils.getLevelFeatures()` + `addFeature()` (mirrors Level-Up) so ref levels resolve and prose choices queue; old-feature removal is class-scoped (multiclass-safe); pending choices process after the modal closes; passive effects re-aggregate.
+* **(#4) Training in War and Song proficiency (S3):** The `hasTrainingInWarAndSong` flag was set but never consumed and `FeatureChoiceParser` had no list-choice extraction. Added generic single-pick "one of the following … of your choice: A, B, C, or D" skill-list parsing, plus an FRHoF-gated Martial Melee (no Two-Handed/Heavy) weapon-proficiency grant through the class-feature-effect lifecycle (resolved by a new `_weaponMatchesProficiencyDescriptor`; Ammunition property excludes ranged weapons). 2014 TCE Bladesinging + TGTT unaffected.
+* **(#13) Wild Shape Transform regression (S4):** Root cause: the shared `_pShowBeastPicker` passed `{type, origin}` as the 2nd *positional* arg to `addCompanionFromBestiary(creature, type, origin, options)`, so `companion.type` became an object, never matched `"wild_shape"`, the before/after diff saw no new companion → Wild Shape use never spent (and Beast Master/Mount were silently mis-typed). Fixed in 3 layers: corrected the positional call site; defensive `_normalizeCompanionType()` in `addCompanion` (collapses objects/non-strings/empty → custom, preserves freeform labels); `_migrateCompanions()` repairs old saves on load. Transform now creates a WILD_SHAPE companion and spends exactly one use; Summon creates a FAMILIAR.
+* **(#12) Bee zodiac bonus-action attack (S4):** Bee `getEffects()` returned only `{type:"info"}`. It now also emits a generic mechanical `{type:"attack", isRanged, isSpell, abilityMod:"wis", damage, damageType:"radiant", range:"60 ft.", actionType:"bonus"}` surfaced via a new `getActiveStateAttacks()` resolver merged into the Combat-tab attack list (dice-only `beeDamageDice` avoids Wis double-count; scales 1d8/2d8/3d8 at L3/10/14; survives save-load; disappears on deactivate).
+* **(#14) Familiar summoned indicator (S4):** New pure `CharacterSheetClassUtils.getCompanionBadgeMeta()` drives a type-specific chip in `_renderCompanionsOverviewIndicator`; familiars get a distinct teal chip (border + uppercase label + reduced-motion-gated pulse) so a summoned familiar is unmistakable. Companion type/origin contract hardened and shared with #13.
+* **(#11) Ranger reminder/section cleanup (S5):** New generic whitelist predicate `isPrimalFocusReminderAbility` (`kind ∈ {usable,passive}` && !`appliedElsewhere`) filters every reminder surface (Overview, Combat, and the Features card — a third leaking consumer) so methods (Singular Focus, Groundshatter) and already-applied effects (Pursuit, tagged `appliedElsewhere`) no longer show as "remember to use" reminders. Hunter's Dodge (and all ability names) now hoverable via `buildInlineEntriesHoverLink`. Enduring Traveler split into three bulleted notes.
+* **(#5) Aasimar Celestial Revelation gating (S6):** `_addFeatureEntries()` dumped every race entry with no level gate, so a level-1 Aasimar got the level-3 Celestial Revelation immediately (the variant dimension was already correct — DataUtil flattens `_versions`/subraces). Added a generic anchored level-gate parser + bidirectional reconciler (`getFeatureUnlockLevel`/`updateRacialFeatures`); the builder gates by total level and Level-Up/Quick-Build re-apply newly-unlocked racial entries (no under-grant). Anchoring to the first text entry avoids false-gating L1 features whose prose mentions higher levels (Dragonborn Breath Weapon, Simic Animal Enhancement); correctly gates Goliath Large Form.
+* **(#3) Bladesong INT for weapon attacks/damage (S7):** Weapon attack/damage ability mods were resolved without consulting active states. New single-source `getWeaponAbilityMod(attack)`/`getBladesongWeaponBonus(attack)` → MAX(weapon's normally-resolved mod, INT) when Bladesong is active, composing with finesse and gating out spell attacks. Applied at every attack surface, including the second main-sheet attack path in `charactersheet.js` and unarmed strikes; inactive behavior unchanged.
+
+#### Integration notes (orchestrator)
+
+* combat.js `render()` call-list: removed both `renderCombatArcaneArcher()` (S1, folded into resources) and `renderCombatFlanking()` (S2, folded into quick-states) — the one merge conflict, resolved as the union of two removals.
+* combat.js attack functions (`_rollAttack`/`_rollDamage`/`_renderAttackItem`/`renderAttacks`) were touched by S7 (Bladesong mod), S4 (Bee active-state attack) and S1 (masteries display); auto-merged and verified coherent — `getWeaponAbilityMod` is the single ability-mod resolver at all sites and `getActiveStateAttacks` (Bee) is wired alongside.
+* Known latent follow-up (out of round-6 scope, flagged by S6): `charactersheet-respec.js` species-change and `charactersheet.js` `_addRandomFeatureEntries` can still over-grant a level-gated race entry — candidates for adopting S6's `getFeatureUnlockLevel`/`updateRacialFeatures` helpers in a future pass.
+
 
 ### Round 5 (surfaced during manual testing of the merged round-4 fixes)
 
