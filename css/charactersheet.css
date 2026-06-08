@@ -11307,23 +11307,45 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--rgb-name-red, #dc3545);
 }
 
-/* Weapon Masteries Display */
+/* Weapon Masteries Display — folded into Weapons & Attacks (compact, display-only) */
+.charsheet__masteries-group {
+	margin-bottom: 10px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--rgb-border-grey, rgba(128, 128, 128, 0.25));
+}
+
+.charsheet__masteries-header {
+	display: flex;
+	align-items: center;
+	margin-bottom: 4px;
+}
+
+.charsheet__masteries-label {
+	font-size: 0.75rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: var(--rgb-muted, #888);
+}
+
 .charsheet__masteries-display {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 8px;
+	gap: 6px;
 	align-items: center;
 }
 
 .charsheet__mastery-badge {
 	display: inline-flex;
-	flex-direction: column;
-	align-items: center;
-	padding: 6px 12px;
+	flex-direction: row;
+	align-items: baseline;
+	gap: 5px;
+	padding: 2px 8px;
 	background: linear-gradient(135deg, var(--rgb-bg-alt) 0%, rgba(255, 193, 7, 0.15) 100%);
 	border: 1px solid rgba(255, 193, 7, 0.4);
-	border-radius: 6px;
-	font-size: 0.85rem;
+	border-radius: 10px;
+	font-size: 0.72rem;
+	line-height: 1.3;
 	cursor: default;
 }
 
@@ -11333,12 +11355,12 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 .charsheet__mastery-prop {
-	font-size: 0.7rem;
+	font-size: 0.62rem;
 	color: var(--rgb-name-gold, #d4a700);
 	font-weight: 600;
 	text-transform: uppercase;
-	letter-spacing: 0.5px;
-	margin-top: 2px;
+	letter-spacing: 0.4px;
+	margin-top: 0;
 }
 
 /* Calculated Class Statistics Grid */

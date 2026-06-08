@@ -961,17 +961,6 @@
 			<div id="charsheet-tab-combat" class="tab-pane fade">
 				<div class="ve-flex">
 					<div class="ve-flex-col charsheet__col-half">
-						<!-- Weapon Masteries Section -->
-						<div class="charsheet__section" id="charsheet-masteries-group" style="display: none;">
-							<h4 class="charsheet__section-title">
-								Weapon Masteries
-								<span class="charsheet__section-edit glyphicon glyphicon-pencil ml-2" id="charsheet-edit-masteries" title="Change weapon masteries (after Long Rest)"></span>
-							</h4>
-							<div id="charsheet-combat-masteries" class="charsheet__masteries-display">
-								<!-- Mastery badges will be rendered here -->
-							</div>
-						</div>
-
 						<!-- Combat Methods Section (Thelemar homebrew) -->
 						<div class="charsheet__section" id="charsheet-combat-methods-tab-section" style="display: none;">
 							<h4 class="charsheet__section-title">
@@ -999,14 +988,6 @@
 							</div>
 						</div>
 
-						<!-- Arcane Shot Section (Arcane Archer Fighter) -->
-						<div class="charsheet__section" id="charsheet-combat-arcanearcher-section" style="display: none;">
-							<h4 class="charsheet__section-title">🏹 Arcane Shot</h4>
-							<div id="charsheet-combat-arcanearcher">
-								<!-- Arcane Shot uses + known shot options rendered here -->
-							</div>
-						</div>
-
 						<!-- Fighter Features Section (Second Wind / Action Surge / Battle Tactics) -->
 						<div class="charsheet__section" id="charsheet-combat-fighter-section" style="display: none;">
 							<h4 class="charsheet__section-title">⚔️ Fighter Features</h4>
@@ -1017,6 +998,16 @@
 
 						<div class="charsheet__section">
 							<h4 class="charsheet__section-title">Weapons & Attacks</h4>
+							<!-- Weapon Masteries (folded in — display only; ids preserved for JS bindings) -->
+							<div id="charsheet-masteries-group" class="charsheet__masteries-group" style="display: none;">
+								<div class="charsheet__masteries-header">
+									<span class="charsheet__masteries-label">Weapon Masteries</span>
+									<span class="charsheet__section-edit glyphicon glyphicon-pencil ml-2" id="charsheet-edit-masteries" title="Change weapon masteries (after Long Rest)"></span>
+								</div>
+								<div id="charsheet-combat-masteries" class="charsheet__masteries-display">
+									<!-- Mastery badges will be rendered here -->
+								</div>
+							</div>
 							<div id="charsheet-combat-attacks">
 								<!-- Attack list with roll buttons -->
 							</div>
