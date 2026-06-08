@@ -3380,6 +3380,15 @@ class CharacterSheetClassUtils {
 	 * surfaced elsewhere (senses, resources, saving throws) — they highlight the
 	 * situational reminder, not the numbers shown on those panels.
 	 *
+	 * Inclusion rule: a feature is surfaced ONLY when it carries a situational /
+	 * conditional benefit that the player must actively invoke or watch for, with no
+	 * dedicated home elsewhere on the sheet. Features whose ENTIRE mechanical benefit
+	 * is already concretely applied and visible on another panel (Skills/Expertise,
+	 * Languages, Spells, Resources, the Rest dialog) would be redundant noise, so they
+	 * are tagged `appliedElsewhere: true` in the catalog and filtered out. This keeps
+	 * the rule data-driven and self-documenting (a new fully-applied feature just sets
+	 * the flag) rather than maintaining a separate denylist.
+	 *
 	 * @param {*} calcs - Output of `state.getFeatureCalculations()`.
 	 * @returns {Array<{name: string, note: string, source: string, level: (number|null), icon: string}>}
 	 */
@@ -3389,14 +3398,18 @@ class CharacterSheetClassUtils {
 		const add = (cond, entry) => { if (cond) out.push(entry); };
 
 		// --- Core / always-on Ranger line ---
-		add(c.hasDeftExplorer, {name: "Deft Explorer", note: "Expertise in a skill, two extra languages, and an extra prepared spell from your Canny/Tracker benefits.", source: "TGTT", level: 1, icon: "🧭"});
+		// Deft Explorer: Expertise, extra languages, and the extra prepared spell are
+		// all baked into state and shown on the Skills / Languages / Spells panels —
+		// nothing situational remains, so it is excluded from the reminder list.
+		add(c.hasDeftExplorer, {name: "Deft Explorer", note: "Expertise in a skill, two extra languages, and an extra prepared spell from your Canny/Tracker benefits.", source: "TGTT", level: 1, icon: "🧭", appliedElsewhere: true});
 
 		// --- TGTT mid-level passives ---
 		add(c.hasEnduringTraveler, {name: "Enduring Traveler", note: "Immune to extreme cold, extreme heat, and high altitude; auto-succeed saves vs. exhaustion from natural travel/environment. You can perform a second camp/journey activity in the same segment.", source: "TGTT", level: 4, icon: "⛰️"});
 
-		// Tireless: temp-HP grant is already an action/resource — surface only the
-		// passive exhaustion-reduction reminder here.
-		add(c.hasTireless, {name: "Tireless", note: "Your exhaustion level decreases by 1 whenever you finish a short rest. (Temp-HP grant is tracked in Resources.)", source: c.hasEnduringTraveler ? "TGTT" : "XPHB", level: c.hasEnduringTraveler ? 5 : 10, icon: "💪"});
+		// Tireless: the exhaustion-reduction is applied interactively in the short-rest
+		// dialog and the temp-HP grant is tracked in Resources — its whole benefit lives
+		// on other surfaces, so it is excluded from the reminder list.
+		add(c.hasTireless, {name: "Tireless", note: "Exhaustion reduction is applied from the short-rest dialog; the temp-HP grant is tracked in Resources.", source: "XPHB", level: 10, icon: "💪", appliedElsewhere: true});
 
 		add(c.hasEphemeralInsight, {name: "Ephemeral Insight", note: "After studying a subject for 1 hour, gain a relevant skill or tool proficiency until you use this feature again.", source: "TGTT", level: 8, icon: "📖"});
 
@@ -3422,7 +3435,9 @@ class CharacterSheetClassUtils {
 		add(c.hasFeralSenses, {name: "Feral Senses", note: `You can attack creatures you can't see without disadvantage and sense invisible creatures within ${c.feralSensesRange || 30} feet.`, source: "PHB", level: 18, icon: "👂"});
 		add(c.hasFoeSlayer, {name: "Foe Slayer", note: `Once per turn, add +${c.foeSlayerBonus ?? "WIS"} to an attack or damage roll against your favored enemy.`, source: "PHB", level: 20, icon: "⚔️"});
 
-		return out;
+		// Surface only genuinely situational reminders; features whose entire benefit is
+		// already applied/shown on another panel are tagged `appliedElsewhere` and dropped.
+		return out.filter(e => !e.appliedElsewhere);
 	}
 
 	/**
