@@ -51,6 +51,18 @@ class CharacterSheetRespec {
 		const isLegacy = this._state.isLegacyCharacter();
 		this._legacyBadge.classList.toggle("ve-hidden", !isLegacy);
 
+		this._timeline.innerHTML = "";
+
+		// Multiclass characters render one branch per class so the player can change/remove the last
+		// level of EITHER class independently. Single-class keeps the original linear timeline.
+		const classes = this._state.getClasses();
+		if (classes.length > 1) {
+			this._timeline.classList.add("charsheet__level-history-timeline--branched");
+			this._timeline.append(this._renderBranches(classes));
+			return;
+		}
+		this._timeline.classList.remove("charsheet__level-history-timeline--branched");
+
 		// Build timeline entries
 		const levelHistory = this._state.getLevelHistory();
 		const historyByLevel = new Map(levelHistory.map(h => [h.level, h]));
@@ -60,8 +72,6 @@ class CharacterSheetRespec {
 		const hpBreakdown = this._state.getHpBreakdown();
 		const hpByLevel = new Map((hpBreakdown.perLevel || []).map(p => [p.level, p]));
 
-		this._timeline.innerHTML = "";
-
 		for (let level = 1; level <= totalLevel; level++) {
 			const history = historyByLevel.get(level);
 			const entry = this._renderLevelEntry(level, history, level === totalLevel, hpByLevel.get(level));
@@ -70,16 +80,96 @@ class CharacterSheetRespec {
 	}
 
 	/**
+	 * Render the multiclass branch view: one column per class, each listing that class's levels
+	 * 1..K with a Remove button on its last level (when safely removable).
+	 * @param {Array} classes - The character's classes (from getClasses())
+	 * @returns {HTMLElement}
+	 */
+	_renderBranches (classes) {
+		const wrap = e_({tag: "div", clazz: "charsheet__level-branches"});
+
+		const levelHistory = this._state.getLevelHistory();
+		const hpBreakdown = this._state.getHpBreakdown();
+		const hpByLevel = new Map((hpBreakdown.perLevel || []).map(p => [p.level, p]));
+
+		for (const cls of classes) {
+			wrap.append(this._renderClassBranch(cls, levelHistory, hpByLevel));
+		}
+
+		return wrap;
+	}
+
+	/**
+	 * Render a single class branch.
+	 *
+	 * Recorded history entries are assigned to the class's TOP class levels (a suffix mapping that is
+	 * exact when the class history is complete, and best-effort for partial/legacy histories — earlier
+	 * unrecorded class levels render as "no history recorded" cards). Only the class's last level gets
+	 * a Remove button, gated by getRemoveClassLastLevelPreview().
+	 * @param {object} cls - A class entry {name, source, level, subclass}
+	 * @param {Array} levelHistory - Full level history
+	 * @param {Map} hpByLevel - Per-total-level HP breakdown
+	 * @returns {HTMLElement}
+	 */
+	_renderClassBranch (cls, levelHistory, hpByLevel) {
+		const classLevels = cls.level || 1;
+		const entries = levelHistory
+			.filter(h => h.class?.name === cls.name && h.class?.source === cls.source)
+			.sort((a, b) => a.level - b.level);
+		const offset = classLevels - entries.length; // class levels 1..offset have no recorded history
+
+		const preview = this._state.getRemoveClassLastLevelPreview(cls.name, cls.source);
+		const removableLast = !!preview;
+
+		const branch = e_({tag: "div", clazz: "charsheet__level-branch"});
+		branch.dataset.className = cls.name;
+
+		const subName = cls.subclass?.name ? ` · ${cls.subclass.name}` : "";
+		branch.append(e_({outer: `
+			<div class="charsheet__level-branch-header">
+				<span class="charsheet__level-branch-name">${cls.name}</span>
+				<span class="charsheet__level-branch-sub">Levels 1–${classLevels}${subName}</span>
+			</div>
+		`}));
+
+		const list = e_({tag: "div", clazz: "charsheet__level-branch-entries"});
+		for (let classLevel = 1; classLevel <= classLevels; classLevel++) {
+			const history = classLevel > offset ? entries[classLevel - offset - 1] : null;
+			const hpInfo = history ? hpByLevel.get(history.level) : null;
+			const isLast = classLevel === classLevels;
+			list.append(this._renderLevelEntry(classLevel, history, isLast, hpInfo, {
+				levelLabel: `${cls.name} ${classLevel}`,
+				showGrants: history?.level === 1,
+				removable: isLast && removableLast,
+				onRemove: () => this._onRemoveClassLevel(cls.name, cls.source),
+			}));
+		}
+		branch.append(list);
+
+		return branch;
+	}
+
+	/**
 	 * Render a single level entry in the timeline
-	 * @param {number} level - Character level
+	 * @param {number} displayLevel - Level number to display (character level for single-class, class level for branches)
 	 * @param {object|null} history - History entry or null for legacy
-	 * @param {boolean} isCurrent - Whether this is the current level
+	 * @param {boolean} isCurrent - Whether this is the current (last) level of its track
 	 * @param {object|null} [hpInfo] - Per-level HP breakdown entry from getHpBreakdown()
+	 * @param {object} [opts] - Branch-mode overrides
+	 * @param {string} [opts.levelLabel] - Custom label (e.g. "Druid 3"); defaults to "Level {displayLevel}"
+	 * @param {boolean} [opts.showGrants] - Whether to show race/background grants; defaults to displayLevel === 1
+	 * @param {boolean} [opts.removable] - Force-enable/disable the remove button (branch mode)
+	 * @param {Function} [opts.onRemove] - Remove handler (branch mode); falls back to last-level removal
 	 * @returns {HTMLElement} The entry element
 	 */
-	_renderLevelEntry (level, history, isCurrent, hpInfo) {
+	_renderLevelEntry (displayLevel, history, isCurrent, hpInfo, opts = {}) {
 		const isLegacy = !history;
 		const classes = this._state.getClasses();
+
+		// Real character (total) level for edit/remove keys — history.level is authoritative when present.
+		const totalLevel = history?.level ?? displayLevel;
+		const levelLabel = opts.levelLabel || `Level ${displayLevel}`;
+		const showGrants = opts.showGrants != null ? opts.showGrants : (displayLevel === 1);
 
 		// Determine which class this level was in
 		let levelClass = null;
@@ -98,7 +188,7 @@ class CharacterSheetRespec {
 		].filter(Boolean).join(" ");
 
 		const entry = e_({tag: "div", clazz: entryClasses});
-		entry.dataset.level = level;
+		entry.dataset.level = totalLevel;
 
 		const card = e_({tag: "div", clazz: "charsheet__level-entry-card"});
 
@@ -109,7 +199,7 @@ class CharacterSheetRespec {
 		const classInfo = e_({outer: `
 			<div class="charsheet__level-entry-class">
 				<span class="charsheet__level-entry-class-name">${className}</span>
-				<span class="charsheet__level-entry-class-level">Level ${level}</span>
+				<span class="charsheet__level-entry-class-level">${levelLabel}</span>
 			</div>
 		`});
 
@@ -123,28 +213,32 @@ class CharacterSheetRespec {
 		if (isLegacy) {
 			editBtn.disabled = true;
 		} else {
-			editBtn.addEventListener("click", () => this._onEditLevel(level, history));
+			editBtn.addEventListener("click", () => this._onEditLevel(totalLevel, history));
 		}
 
 		const headerActions = e_({tag: "div", clazz: "charsheet__level-entry-actions"});
 		headerActions.append(editBtn);
 
-		// Remove button - only on current (last) level, non-legacy, and level > 1
-		if (isCurrent && !isLegacy && level > 1) {
+		// Remove button. In branch mode the caller decides removability + handler; in single-class
+		// mode it shows on the current (last) non-legacy level above 1, as before.
+		const showRemove = opts.removable != null
+			? opts.removable
+			: (isCurrent && !isLegacy && displayLevel > 1);
+		if (showRemove) {
 			const removeBtn = e_({outer: `
 				<button class="charsheet__level-entry-remove" title="Remove this level">
 					<span class="glyphicon glyphicon-minus"></span>
 				</button>
 			`});
-			removeBtn.addEventListener("click", () => this._onRemoveLevel(level, history));
+			removeBtn.addEventListener("click", () => (opts.onRemove ? opts.onRemove() : this._onRemoveLevel(totalLevel, history)));
 			headerActions.append(removeBtn);
 		}
 
 		header.append(classInfo, headerActions);
 		card.append(header);
 
-		// Show race/background grants at level 1
-		if (level === 1) {
+		// Show race/background grants at the character's first level
+		if (showGrants) {
 			const grants = this._renderRaceBackgroundGrants(history);
 			if (grants) card.append(grants);
 		}
@@ -355,16 +449,31 @@ class CharacterSheetRespec {
 			JqueryUtil.doToast({type: "warning", content: "Cannot remove this level."});
 			return;
 		}
-		await this._showRemoveLevelModal(preview);
+		await this._showRemoveLevelModal(preview, () => this._state.removeLastLevel());
 	}
 
 	/**
-	 * Show a confirmation modal for removing the last level
-	 * @param {object} preview - The preview object from getRemoveLastLevelPreview()
+	 * Handle remove button click for a class branch's last level
+	 * @param {string} name - Class name
+	 * @param {string} source - Class source
 	 */
-	async _showRemoveLevelModal (preview) {
+	async _onRemoveClassLevel (name, source) {
+		const preview = this._state.getRemoveClassLastLevelPreview(name, source);
+		if (!preview) {
+			JqueryUtil.doToast({type: "warning", content: "Cannot remove this level."});
+			return;
+		}
+		await this._showRemoveLevelModal(preview, () => this._state.removeClassLastLevel(name, source));
+	}
+
+	/**
+	 * Show a confirmation modal for removing a level
+	 * @param {object} preview - The preview object (from getRemoveLastLevelPreview / getRemoveClassLastLevelPreview)
+	 * @param {Function} doRemove - Callback that performs the removal and returns {success, reason?}
+	 */
+	async _showRemoveLevelModal (preview, doRemove) {
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: `Remove Level ${preview.level}?`,
+			title: `Remove ${preview.className} Level ${preview.classLevel}?`,
 			isMinHeight0: true,
 			cbClose: () => {},
 		});
@@ -382,6 +491,9 @@ class CharacterSheetRespec {
 		if (preview.feat) {
 			items.push(`Feat: ${preview.feat.name}`);
 		}
+		if (preview.classFeatProgressionFeats?.length) {
+			items.push(`Class Feats: ${preview.classFeatProgressionFeats.map(f => f.name).join(", ")}`);
+		}
 		if (preview.asi) {
 			const asiParts = Object.entries(preview.asi)
 				.filter(([, v]) => v)
@@ -396,6 +508,9 @@ class CharacterSheetRespec {
 		}
 		if (preview.spells.length) {
 			items.push(`Spells: ${preview.spells.map(s => s.name).join(", ")}`);
+		}
+		if (preview.spellSwap) {
+			items.push(`Spell Swap: undo ${preview.spellSwap.added?.name} → ${preview.spellSwap.removed?.name}`);
 		}
 		if (preview.expertise.length) {
 			items.push(`Expertise: ${preview.expertise.map(s => (/** @type {*} */ (s)).toTitleCase()).join(", ")}`);
@@ -431,7 +546,7 @@ class CharacterSheetRespec {
 
 		const btnRemove = e_({tag: "button", clazz: "ve-btn ve-btn-danger mr-2", txt: "Remove Level"});
 		btnRemove.addEventListener("click", () => {
-			const result = this._state.removeLastLevel();
+			const result = doRemove();
 			if (result.success) {
 				doClose();
 				this._page.renderCharacter();

@@ -4689,7 +4689,17 @@ class CharacterSheetState {
 		if (totalLevel <= 1) return null;
 		if (this.isLegacyCharacter()) return null;
 
-		const history = this.getLevelHistoryEntry(totalLevel);
+		return this._buildRemovePreview(this.getLevelHistoryEntry(totalLevel));
+	}
+
+	/**
+	 * Build the removal preview for an arbitrary level-history entry (the entry that represents
+	 * the *current top class level* of its class). Shared by the global "remove last level" flow
+	 * and the per-class branch removal flow so both modals describe exactly what will be torn down.
+	 * @param {object|null} history - A level-history entry
+	 * @returns {object|null}
+	 */
+	_buildRemovePreview (history) {
 		if (!history) return null;
 
 		const className = history.class?.name;
@@ -4705,15 +4715,17 @@ class CharacterSheetState {
 		const subclassLevel = this._getSubclassSelectionLevel(className, classSource);
 		const willRemoveSubclass = !!classEntry.subclass && (willRemoveClass || (classLevel - 1) < subclassLevel);
 
-		// Features at this class level (features store class level, not total level)
+		// Features at this class level (features store class level, not total level). Match
+		// classSource too where stored, to avoid removing a same-named feature from another class
+		// (e.g. PHB vs XPHB vs TGTT variants in a multiclass build).
 		const features = this._data.features
-			.filter(f => f.level === classLevel && f.className === className)
+			.filter(f => f.level === classLevel && f.className === className && (!classSource || !f.classSource || f.classSource === classSource))
 			.map(f => ({name: f.name, source: f.source}));
 
 		const choices = history.choices || {};
 
 		return {
-			level: totalLevel,
+			level: history.level,
 			className,
 			classSource,
 			classLevel,
@@ -4725,12 +4737,100 @@ class CharacterSheetState {
 			asi: choices.asi || null,
 			optionalFeatures: (choices.optionalFeatures || []).map(of => ({name: of.name})),
 			featureChoices: (choices.featureChoices || []).map(fc => ({name: fc.choice, featureName: fc.featureName})),
+			classFeatProgressionFeats: (choices.classFeatProgressionFeats || []).map(f => ({name: f.name, progressionName: f.progressionName})),
 			spells: (choices.spellbookSpells || []).map(s => ({name: s.name})),
+			spellSwap: choices.spellSwap || null,
 			expertise: choices.expertise || [],
 			languages: (choices.languages || []).map(l => typeof l === "string" ? l : l.language),
 			combatTraditions: choices.combatTraditions || [],
 			weaponMasteries: choices.weaponMasteries || [],
 		};
+	}
+
+	/**
+	 * Find the level-history entry representing a class's current top class level.
+	 * In a multiclass character the class's levels are interleaved across the total-level
+	 * timeline, so its "last level" is the history entry with the greatest total level.
+	 * @param {string} name - Class name
+	 * @param {string} source - Class source
+	 * @returns {object|null}
+	 */
+	_getClassTopLevelEntry (name, source) {
+		const entries = this._data.levelHistory
+			.filter(h => h.class?.name === name && h.class?.source === source)
+			.sort((a, b) => a.level - b.level);
+		return entries.length ? entries[entries.length - 1] : null;
+	}
+
+	/**
+	 * Decide whether a class's current top level can be safely removed via respec.
+	 *
+	 * Unlike the global "remove last level" flow, per-class removal must work on
+	 * partially-historied multiclass characters (e.g. an imported character whose earlier
+	 * levels predate history tracking). We therefore do NOT use the global isLegacyCharacter()
+	 * gate. Instead we verify — per target — that the class's recorded entries provably END at
+	 * its current top class level, so we are reversing the correct choices.
+	 *
+	 * Allowed when EITHER condition holds:
+	 *   (a) the class's recorded-entry count === its current class level (complete class history), OR
+	 *   (b) every total level above the class's top recorded entry is itself recorded
+	 *       (complete tail — nothing unrecorded was layered on top of this class).
+	 *
+	 * Blocked otherwise (e.g. a Fighter 5 whose only recorded levels are totals 1–3: its max
+	 * recorded entry maps to the wrong class level, so removal would reverse the wrong choices).
+	 *
+	 * @param {string} name - Class name
+	 * @param {string} source - Class source
+	 * @returns {{ok: boolean, reason?: string, targetEntry?: object, classEntry?: object}}
+	 */
+	_canRemoveClassLevel (name, source) {
+		const totalLevel = this.getTotalLevel();
+		if (totalLevel <= 1) {
+			return {ok: false, reason: "Cannot remove the character's only level. Delete the character instead."};
+		}
+
+		const classEntry = this._data.classes.find(c => c.name === name && c.source === source);
+		if (!classEntry) {
+			return {ok: false, reason: `Class ${name} not found on character.`};
+		}
+
+		const targetEntry = this._getClassTopLevelEntry(name, source);
+		if (!targetEntry) {
+			return {ok: false, reason: `No recorded level history for ${name}; its levels cannot be safely removed.`};
+		}
+
+		// Origin guard: the very first character level holds race/background origin and cannot be peeled.
+		if (targetEntry.level <= 1) {
+			return {ok: false, reason: "Cannot remove the character's first level. Delete the character instead."};
+		}
+
+		const recordedCount = this._data.levelHistory
+			.filter(h => h.class?.name === name && h.class?.source === source).length;
+		const completeClassHistory = recordedCount === (classEntry.level || 0);
+
+		let completeTail = true;
+		for (let lvl = targetEntry.level + 1; lvl <= totalLevel; lvl++) {
+			if (!this.getLevelHistoryEntry(lvl)) { completeTail = false; break; }
+		}
+
+		if (!completeClassHistory && !completeTail) {
+			return {ok: false, reason: `${name}'s level history is incomplete above its most recent level, so it cannot be safely removed.`};
+		}
+
+		return {ok: true, targetEntry, classEntry};
+	}
+
+	/**
+	 * Get a removal preview for a class's current top level (drives the per-class confirm modal).
+	 * Returns null when the class's top level cannot be safely removed.
+	 * @param {string} name - Class name
+	 * @param {string} source - Class source
+	 * @returns {object|null}
+	 */
+	getRemoveClassLastLevelPreview (name, source) {
+		const check = this._canRemoveClassLevel(name, source);
+		if (!check.ok) return null;
+		return this._buildRemovePreview(check.targetEntry);
 	}
 
 	/**
@@ -4757,16 +4857,54 @@ class CharacterSheetState {
 			return {success: false, reason: `No level history entry found for level ${totalLevel}.`};
 		}
 
-		const className = history.class?.name;
-		const classSource = history.class?.source;
+		return this._removeLevelEntry(history);
+	}
+
+	/**
+	 * Remove a specific class's current top level, reversing the choices recorded for it.
+	 *
+	 * This is the multiclass-aware entry point: each class is treated as its own branch, so the
+	 * player can peel back the most recent level of EITHER class independently (e.g. drop the last
+	 * Druid level while keeping Ranger intact). Works on partially-historied characters as long as
+	 * the target class's top level is provably reversible (see {@link _canRemoveClassLevel}).
+	 *
+	 * @param {string} name - Class name
+	 * @param {string} source - Class source
+	 * @returns {{success: boolean, reason?: string, removed?: object}}
+	 */
+	removeClassLastLevel (name, source) {
+		const check = this._canRemoveClassLevel(name, source);
+		if (!check.ok) {
+			return {success: false, reason: check.reason};
+		}
+		return this._removeLevelEntry(check.targetEntry);
+	}
+
+	/**
+	 * Core teardown: remove the given level-history entry (which must represent its class's current
+	 * top class level), reverse every recorded choice, tear down a subclass when the class drops
+	 * below its subclass-selection level, decrement/remove the class, drop the history entry, then
+	 * re-index every higher total level down by one so a clean character stays contiguous/non-legacy.
+	 *
+	 * @param {object} targetEntry - A level-history entry
+	 * @returns {{success: boolean, reason?: string, removed?: object}}
+	 */
+	_removeLevelEntry (targetEntry) {
+		if (!targetEntry) {
+			return {success: false, reason: "No level history entry to remove."};
+		}
+
+		const className = targetEntry.class?.name;
+		const classSource = targetEntry.class?.source;
 		const classEntry = this._data.classes.find(c => c.name === className && c.source === classSource);
 		if (!classEntry) {
 			return {success: false, reason: `Class ${className} not found on character.`};
 		}
 
-		const choices = history.choices || {};
+		const targetLevel = targetEntry.level;
+		const choices = targetEntry.choices || {};
 		const removedInfo = {
-			level: totalLevel,
+			level: targetLevel,
 			className,
 			classSource,
 			classLevel: classEntry.level,
@@ -4776,8 +4914,13 @@ class CharacterSheetState {
 			subclass: null,
 		};
 
-		// 1. Remove features gained at this class level (features store class level, not total level)
-		const featuresAtLevel = this._data.features.filter(f => f.level === classEntry.level && f.className === className);
+		// 1. Remove features gained at this class level (features store class level, not total level).
+		//    Match classSource where stored to avoid clobbering a same-named feature from another class.
+		const featuresAtLevel = this._data.features.filter(f =>
+			f.level === classEntry.level
+			&& f.className === className
+			&& (!classSource || !f.classSource || f.classSource === classSource),
+		);
 		for (const feature of featuresAtLevel) {
 			this.removeFeature(feature.name, feature.source);
 			removedInfo.features.push({name: feature.name, source: feature.source});
@@ -4798,14 +4941,23 @@ class CharacterSheetState {
 			removedInfo.asi = choices.asi;
 		}
 
+		// 3b. Remove class-level featProgression feats (Fighting Style, …) granted at this level.
+		//     These are real feats added via addFeat; removeFeat cascades their own choices.
+		if (choices.classFeatProgressionFeats?.length) {
+			for (const cf of choices.classFeatProgressionFeats) {
+				this.removeFeat(cf.name, cf.source);
+			}
+		}
+
 		// 4. Handle subclass: remove if class is being removed entirely or level drops below subclass level
 		const subclassLevel = this._getSubclassSelectionLevel(className, classSource);
 		if (classEntry.subclass && (classEntry.level <= 1 || (classEntry.level - 1) < subclassLevel)) {
 			removedInfo.subclass = classEntry.subclass;
-			// Remove subclass features (features associated with this subclass)
+			// Remove subclass features. Match className (when stored) so two subclasses that share a
+			// short name across different classes don't clobber each other's features in a multiclass.
 			const subclassFeatures = this._data.features.filter(f =>
-				f.subclassShortName === classEntry.subclass.name
-				|| f.subclassShortName === classEntry.subclass.shortName,
+				(f.subclassShortName === classEntry.subclass.name || f.subclassShortName === classEntry.subclass.shortName)
+				&& (!f.className || f.className === className),
 			);
 			for (const feature of subclassFeatures) {
 				this.removeFeature(feature.name, feature.source);
@@ -4818,6 +4970,8 @@ class CharacterSheetState {
 			}
 			classEntry.subclass = null;
 			if (classEntry.divineSoulSpellOverride) delete classEntry.divineSoulSpellOverride;
+			// Clear any per-subclass selection (e.g. Divine Soul affinity) so re-leveling re-prompts cleanly.
+			classEntry.subclassChoice = null;
 		}
 
 		// 5. Remove optional features (invocations, metamagic, etc.)
@@ -4877,6 +5031,25 @@ class CharacterSheetState {
 			}
 		}
 
+		// 11b. Reverse a spell swap made at this level: drop the spell that was added and restore the
+		//      one that was swapped out. Older saves only persisted name+source for the removed spell,
+		//      so restoration is best-effort (level defaults to 1) — newer saves carry full metadata.
+		if (choices.spellSwap) {
+			const {added, removed} = choices.spellSwap;
+			if (added?.name) this.removeSpell(added.name, added.source);
+			if (removed?.name) {
+				this.addSpell({
+					name: removed.name,
+					source: removed.source,
+					level: removed.level != null ? removed.level : 1,
+					school: removed.school,
+					ritual: removed.ritual || false,
+					concentration: removed.concentration || false,
+					sourceFeature: "Spells Known",
+				}, removed.prepared || false);
+			}
+		}
+
 		// 12. Decrement class level or remove class entirely
 		if (classEntry.level <= 1) {
 			this._data.classes = this._data.classes.filter(c => !(c.name === className && c.source === classSource));
@@ -4885,7 +5058,20 @@ class CharacterSheetState {
 		}
 
 		// 13. Remove history entry
-		this.removeLevelHistoryEntry(totalLevel);
+		this.removeLevelHistoryEntry(targetLevel);
+
+		// 13b. Re-index higher total levels down by one so an otherwise-complete history stays
+		//      contiguous (1..N) and the character is not flipped to "legacy". No-op for the
+		//      global-last entry (nothing is above it).
+		//
+		//      NOTE: only `levelHistory[].level` is a TOTAL character level and needs shifting.
+		//      `feat.classFeatProgression.level` is a CLASS level (set from the class's own
+		//      newLevel at level-up) and is therefore stable when total levels shift — it must NOT
+		//      be re-indexed here.
+		for (const h of this._data.levelHistory) {
+			if (h.level > targetLevel) h.level -= 1;
+		}
+		this._data.levelHistory.sort((a, b) => a.level - b.level);
 
 		// 14. Recalculate derived values
 		this._recalculateMaxHp();
