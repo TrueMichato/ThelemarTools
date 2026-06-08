@@ -3168,29 +3168,30 @@ class CharacterSheetPage {
 
 		if (exhaustion > 0 && exhaustion < maxExhaustion) {
 			if (rules === "2024") {
-				// 2024: -5 ft per level of exhaustion
+				// 2024: -5 ft per level of exhaustion. getSpeed() already applies
+				// this penalty to every movement segment, so here we only annotate
+				// the walk segment with the magnitude (no re-subtraction) and fold
+				// the "(-N)" into the walk segment itself (not the end of the full
+				// string) so the emoji formatter attributes it to the right type.
 				const speedPenalty = exhaustion * 5;
-				const baseWalkSpeed = this._state.getWalkSpeed();
-				const reducedSpeed = Math.max(0, baseWalkSpeed - speedPenalty);
-				speedDisplay = (/** @type {*} */ (speedDisplay)).replace(/^\d+ ft\./, `${reducedSpeed} ft.`);
 				if (speedPenalty > 0) {
-					speedDisplay += ` (-${speedPenalty})`;
+					speedDisplay = (/** @type {*} */ (speedDisplay)).replace(/^(\d+ ft\.)/, `$1 (-${speedPenalty})`);
 				}
 			} else if (rules === "2014") {
 				// 2014: Speed halved at level 2, reduced to 0 at level 5
 				if (exhaustion >= 5) {
+					// 2014 exhaustion 5 halts all movement entirely.
 					speedDisplay = "0 ft.";
 				} else if (exhaustion >= 2) {
 					const baseWalkSpeed = this._state.getWalkSpeed();
 					const halvedSpeed = Math.floor(baseWalkSpeed / 2);
-					speedDisplay = (/** @type {*} */ (speedDisplay)).replace(/^\d+ ft\./, `${halvedSpeed} ft.`);
-					speedDisplay += " (halved)";
+					speedDisplay = (/** @type {*} */ (speedDisplay)).replace(/^\d+ ft\./, `${halvedSpeed} ft. (halved)`);
 				}
 			}
 			// Thelemar rules: no speed penalty
 		}
 
-		(/** @type {*} */ (document.getElementById("charsheet-disp-speed"))).textContent = speedDisplay;
+		this._renderSpeedDisplay(/** @type {*} */ (speedDisplay));
 		this._renderStatBreakdown("#charsheet-speed-breakdown", this._state.getSpeedBreakdown("walk"));
 
 		// Jump distances
@@ -3283,57 +3284,119 @@ class CharacterSheetPage {
 		this._renderSenses();
 	}
 
-	_renderSenses () {
-		const section = document.getElementById("charsheet-senses-section");
-		const container = document.getElementById("charsheet-senses");
+	/**
+	 * Render the Overview speed value, optionally swapping the word labels
+	 * (walk/fly/climb/swim/burrow) for compact emoji icons when the
+	 * `speedEmojiLabels` setting is on (default ON). Nodes are built via DOM APIs
+	 * (no innerHTML) so dynamic values are inert. Decorative emoji are
+	 * `aria-hidden`; each segment keeps an `aria-label`/`title` with the full word
+	 * so the movement type stays discoverable. A canonical `data-speed-text`
+	 * attribute preserves the plain-text form for any consumer that needs it.
+	 * @param {string} speedDisplay - The (exhaustion-adjusted) word speed string.
+	 */
+	_renderSpeedDisplay (speedDisplay) {
+		const el = document.getElementById("charsheet-disp-speed");
+		if (!el) return;
 
-		// Get senses from features (like Darkvision)
-		const features = this._state.getFeatures();
-		const race = this._state.getRace();
+		const str = speedDisplay == null ? "" : String(speedDisplay);
+		el.setAttribute("data-speed-text", str);
 
-		const senses = [];
-
-		// Check for Darkvision in race
-		if (race?.darkvision) {
-			senses.push({name: "Darkvision", range: `${race.darkvision} ft.`});
-		}
-
-		// Check for senses in features
-		features.forEach(f => {
-			const nameLower = f.name.toLowerCase();
-			if (nameLower.includes("darkvision")) {
-				// Extract range from description if possible
-				const match = f.description?.match(/(\d+)\s*(?:feet|ft)/i);
-				if (match && !senses.some(s => s.name === "Darkvision")) {
-					senses.push({name: "Darkvision", range: `${match[1]} ft.`});
-				}
-			} else if (nameLower.includes("blindsight")) {
-				const match = f.description?.match(/(\d+)\s*(?:feet|ft)/i);
-				senses.push({name: "Blindsight", range: match ? `${match[1]} ft.` : ""});
-			} else if (nameLower.includes("tremorsense")) {
-				const match = f.description?.match(/(\d+)\s*(?:feet|ft)/i);
-				senses.push({name: "Tremorsense", range: match ? `${match[1]} ft.` : ""});
-			} else if (nameLower.includes("truesight")) {
-				const match = f.description?.match(/(\d+)\s*(?:feet|ft)/i);
-				senses.push({name: "Truesight", range: match ? `${match[1]} ft.` : ""});
-			}
-		});
-
-		if (senses.length === 0) {
-			section.style.display = "none";
+		const useEmoji = (/** @type {*} */ (this._state.getSettings()))?.speedEmojiLabels !== false;
+		if (!useEmoji) {
+			// Faithful fallback to the legacy plain-text word display.
+			el.textContent = str;
+			el.removeAttribute("aria-label");
 			return;
 		}
 
-		section.style.display = "";
-		container.innerHTML = "";
+		const parts = CharacterSheetClassUtils.buildSpeedDisplayParts(str, {useEmoji: true});
+		el.textContent = "";
+		// Accessible summary in words for the whole value.
+		const ariaParts = parts.map(p => `${p.word} ${p.value}`);
+		el.setAttribute("aria-label", ariaParts.length ? `Speed: ${ariaParts.join(", ")}` : "Speed");
+
+		parts.forEach((p, ix) => {
+			if (ix > 0) {
+				const sep = document.createElement("span");
+				sep.className = "charsheet__speed-sep";
+				sep.setAttribute("aria-hidden", "true");
+				sep.textContent = " ";
+				el.append(sep);
+			}
+			const seg = document.createElement("span");
+			seg.className = "charsheet__speed-seg";
+			seg.title = `${p.word} speed`;
+			seg.setAttribute("aria-label", `${p.word} ${p.value}`);
+
+			const emoji = document.createElement("span");
+			emoji.className = "charsheet__speed-seg-emoji";
+			emoji.setAttribute("aria-hidden", "true");
+			emoji.textContent = p.emoji;
+			seg.append(emoji);
+
+			const val = document.createElement("span");
+			val.className = "charsheet__speed-seg-value";
+			val.textContent = `\u00A0${p.value}`;
+			seg.append(val);
+
+			el.append(seg);
+		});
+	}
+
+	/**
+	 * Render the Overview Senses section from the canonical `getSenses()`
+	 * pipeline (base + items + custom modifiers + active states + named
+	 * `sense:*` modifiers). Renders generically over whatever sense types/ranges
+	 * are returned, so features that grant new senses surface automatically.
+	 * Passive Perception is intentionally not shown here — it lives with the
+	 * other passive scores. Falls back to a muted "Normal vision" row when no
+	 * special senses are present so regular sight is always represented.
+	 */
+	_renderSenses () {
+		const section = document.getElementById("charsheet-senses-section");
+		const container = document.getElementById("charsheet-senses");
+		if (!container) return;
+
+		const senses = CharacterSheetClassUtils.buildSensesDisplay(this._state.getSenses());
+
+		if (section) section.style.display = "";
+		container.textContent = "";
+
+		if (!senses.length) {
+			const empty = document.createElement("div");
+			empty.className = "charsheet__sense-item charsheet__sense-item--normal";
+			const icon = document.createElement("span");
+			icon.className = "charsheet__sense-icon";
+			icon.setAttribute("aria-hidden", "true");
+			icon.textContent = "👁️";
+			const name = document.createElement("span");
+			name.className = "charsheet__sense-name";
+			name.textContent = "Normal vision";
+			empty.append(icon, name);
+			container.append(empty);
+			return;
+		}
 
 		senses.forEach(sense => {
-			container.append(e_({outer: `
-				<div class="charsheet__sense-item">
-					<span class="charsheet__sense-name">${sense.name}</span>
-					<span class="charsheet__sense-range">${sense.range}</span>
-				</div>
-			`}));
+			const item = document.createElement("div");
+			item.className = "charsheet__sense-item";
+			item.title = sense.title;
+
+			const icon = document.createElement("span");
+			icon.className = "charsheet__sense-icon";
+			icon.setAttribute("aria-hidden", "true");
+			icon.textContent = sense.emoji;
+
+			const name = document.createElement("span");
+			name.className = "charsheet__sense-name";
+			name.textContent = sense.label;
+
+			const range = document.createElement("span");
+			range.className = "charsheet__sense-range";
+			range.textContent = `${sense.range} ft.`;
+
+			item.append(icon, name, range);
+			container.append(item);
 		});
 	}
 
@@ -11371,6 +11434,18 @@ class CharacterSheetPage {
 			</label>
 		</div>`;
 
+		// Speed emoji labels (display) — default ON
+		const currentSpeedEmojiLabels = (/** @type {*} */ (this._state.getSettings()))?.speedEmojiLabels !== false;
+		const speedEmojiLabels = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-speed-emoji" ${currentSpeedEmojiLabels ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">🏃 Emoji Speed Labels</span>
+					<span class="charsheet__settings-checkbox-desc">Label movement types with compact emoji (🚶 walk, 🦅 fly, 🧗 climb, 🏊 swim, ⛏️ burrow) instead of words to keep the Speed display short. Turn off to show word labels.</span>
+				</span>
+			</label>
+		</div>`;
+
 		// Show all optional feature versions (no deduplication)
 		const currentShowAllOptFeatureVersions = (/** @type {*} */ (this._state.getSettings()))?.showAllOptFeatureVersions || false;
 		const showAllOptFeatureVersions = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
@@ -11423,6 +11498,11 @@ class CharacterSheetPage {
 			</div>
 			
 			${prioritySection || ""}
+			
+			<div class="charsheet__settings-section">
+				<div class="charsheet__settings-section-title">🎨 Display</div>
+				${speedEmojiLabels}
+			</div>
 			
 			<div class="charsheet__settings-section">
 				<div class="charsheet__settings-section-title">🎮 Game Rules</div>
@@ -11651,6 +11731,13 @@ class CharacterSheetPage {
 		// Show all optional feature versions handler
 		modalInner.querySelector("#settings-show-all-opt-versions").addEventListener("change", (e) => {
 			this._state.setSetting("showAllOptFeatureVersions", (/** @type {*} */ (e.target)).checked);
+		});
+
+		// Emoji speed labels handler (display) — re-render the speed line immediately
+		modalInner.querySelector("#settings-speed-emoji").addEventListener("change", (e) => {
+			this._state.setSetting("speedEmojiLabels", (/** @type {*} */ (e.target)).checked);
+			this._renderCombatStats();
+			this._saveCurrentCharacter();
 		});
 	}
 

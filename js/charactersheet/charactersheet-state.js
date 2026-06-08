@@ -3674,6 +3674,8 @@ class CharacterSheetState {
 				enforceAbilityScoreCap: false, // When true, cap ability scores at maximum (default 20)
 				// Ammunition tracking - disabled by default
 				ammunitionTracking: false,
+				// Overview display: label speed types with emoji instead of words (compact). Default ON.
+				speedEmojiLabels: true,
 			},
 
 			// Ammunition consumption tracking for current combat
