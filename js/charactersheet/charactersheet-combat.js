@@ -2532,7 +2532,6 @@ class CharacterSheetCombat {
 		this.renderCombatRanger();
 		this.renderCombatDruidResources();
 		this.renderCombatArcaneArcher();
-		this.renderCombatFlanking();
 		this.renderCombatFighter();
 		this.renderCombatDefenses();
 		this.renderCombatConditions();
@@ -5824,6 +5823,16 @@ class CharacterSheetCombat {
 			this._updateQuickButtonStates();
 		};
 
+		// Flanking button (optional rule). Deliberately a transient combat-tab toggle
+		// (`_flankingEnabled`), NOT routed through the active-state system — this keeps
+		// it separate from the TGTT Fighter Battle Tactic NAMED "Flanking". It is the
+		// ONLY source of the situational +2 melee to-hit (via `_getCombatLocalAttackBonus`,
+		// applied at roll time in `_rollAttack`). Not serialized, like the sneak-attack toggle.
+		document.getElementById("charsheet-combat-flanking").onclick = () => {
+			this._flankingEnabled = !this._flankingEnabled;
+			this._updateQuickButtonStates();
+		};
+
 		// Apply Buff button — opens the same picker modal that the Overview tab
 		// uses, so non-casters can track buffs cast on them by party members
 		// (Aid, Bless, Haste, …) directly from the Combat tab without having to
@@ -6005,6 +6014,15 @@ class CharacterSheetCombat {
 		dodgeBtn.classList.toggle("ve-btn-warning", dodgeActive); dodgeBtn.classList.toggle("ve-btn-primary", !dodgeActive);
 		dodgeBtn.textContent = dodgeActive ? "End Dodge" : "Dodge";
 
+		// Flanking (transient optional-rule toggle, not an active state)
+		const flankingActive = !!this._flankingEnabled;
+		const flankingBtn = document.getElementById("charsheet-combat-flanking");
+		if (flankingBtn) {
+			flankingBtn.classList.toggle("active", flankingActive);
+			flankingBtn.classList.toggle("ve-btn-warning", flankingActive); flankingBtn.classList.toggle("ve-btn-default", !flankingActive);
+			flankingBtn.textContent = flankingActive ? "Flanking: ON" : "Flanking";
+		}
+
 		const concentrating = this._state.isConcentrating?.() || false;
 		const concBtn = document.getElementById("charsheet-combat-concentrate");
 		concBtn.classList.toggle("active", concentrating);
@@ -6060,6 +6078,7 @@ class CharacterSheetCombat {
 				this._sneakAttackHasAdjacentAlly = false;
 				this._lastAttackContext = null;
 				this._handOfHarmUsedThisTurn = false;
+				this._flankingEnabled = false;
 				this._resetTurnActionUsage();
 				this._resetCunningStrikeSelections();
 				JqueryUtil.doToast({type: "info", content: "Combat ended."});
@@ -6070,6 +6089,7 @@ class CharacterSheetCombat {
 				this._sneakAttackHasAdjacentAlly = false;
 				this._lastAttackContext = null;
 				this._handOfHarmUsedThisTurn = false;
+				this._flankingEnabled = false;
 				this._resetTurnActionUsage();
 				this._resetCunningStrikeSelections();
 				JqueryUtil.doToast({type: "success", content: "Combat started — Round 1!"});
@@ -6539,9 +6559,11 @@ class CharacterSheetCombat {
 
 	// =========================================================================
 	// Flanking (#12) — an optional +2-to-hit melee toggle that feeds the SAME
-	// combat `_rollAttack` total via `_getCombatLocalAttackBonus`. Self-contained:
-	// own container/classes, transient `_flankingEnabled`, no edits to the shared
-	// active-states rendering.
+	// combat `_rollAttack` total via `_getCombatLocalAttackBonus`. Surfaced as a
+	// quick-states button (see `_initQuickStateButtons` / `_updateQuickButtonStates`)
+	// backed by the transient `_flankingEnabled` field. This is the ONLY path that
+	// grants the situational +2 — kept deliberately separate from the TGTT Fighter
+	// Battle Tactic NAMED "Flanking", which is reminder/reaction only.
 	// =========================================================================
 
 	/**
@@ -6576,31 +6598,6 @@ class CharacterSheetCombat {
 		const range = typeof attack.range === "string" ? attack.range.toLowerCase() : "";
 		if (range === "melee" || range.includes("reach") || range.includes("touch")) return true;
 		return false;
-	}
-
-	renderCombatFlanking () {
-		const container = document.getElementById("charsheet-combat-flanking");
-		const section = document.getElementById("charsheet-combat-flanking-section");
-		if (!container) return;
-		if (section) section.style.display = "";
-		container.innerHTML = "";
-
-		const on = !!this._flankingEnabled;
-		const block = e_({tag: "div", clazz: "charsheet__combat-flanking"});
-		block.innerHTML = `
-			<div class="ve-flex-v-center gap-2 ve-flex-wrap">
-				<button class="ve-btn ve-btn-xs ${on ? "ve-btn-success" : "ve-btn-default"} charsheet__combat-flanking-toggle"
-					title="Toggle Flanking. While on, melee attack rolls gain +2 to hit (optional rule).">
-					<span class="glyphicon glyphicon-screenshot mr-1"></span>${on ? "Flanking: ON (+2 melee)" : "Flanking: OFF"}
-				</button>
-			</div>
-			<div class="ve-small ve-muted mt-1">Optional rule: when you and an ally flank a target, melee attacks gain +2 to hit. Ranged attacks are unaffected.</div>`;
-		container.appendChild(block);
-
-		block.querySelector(".charsheet__combat-flanking-toggle")?.addEventListener("click", () => {
-			this._flankingEnabled = !this._flankingEnabled;
-			this.renderCombatFlanking();
-		});
 	}
 
 	/**
