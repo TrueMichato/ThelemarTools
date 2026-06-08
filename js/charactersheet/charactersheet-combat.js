@@ -2283,6 +2283,7 @@ class CharacterSheetCombat {
 		this.renderDeathSaves();
 		this.renderCombatSpells();
 		this.renderCombatMethods();
+		this.renderCombatRanger();
 		this.renderCombatDefenses();
 		this.renderCombatConditions();
 		this.renderCombatEffects();
@@ -5909,6 +5910,133 @@ class CharacterSheetCombat {
 		// Render methods grouped by tradition to both containers
 		this._renderMethodsToContainer(container, methodsByTradition, {showUseButton: false});
 		this._renderMethodsToContainer(tabContainer, methodsByTradition, {showUseButton: true});
+	}
+
+	/**
+	 * Render the Primal Focus control block on the Combat tab (TGTT Ranger).
+	 * Surfaces the active focus mode, a Predator/Prey switch (consuming a Focus Switch),
+	 * the stateful in-play actions (Hunter's Dodge uses, Focused Quarry toggle), and the
+	 * full mode-ability catalog as focus-gated reminder rows. The granted combat methods
+	 * themselves remain in (and are usable from) the Combat Methods section above.
+	 */
+	renderCombatRanger () {
+		const section = document.getElementById("charsheet-combat-ranger-section");
+		const container = document.getElementById("charsheet-combat-ranger");
+		if (!section || !container) return;
+
+		if (!this._state.hasPrimalFocus?.()) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const mode = this._state.getPrimalFocusMode?.() || "predator";
+		const isPredator = mode === "predator";
+		const switchesRemaining = this._state.getFocusSwitchesRemaining?.() ?? 0;
+		const isUnlimited = switchesRemaining === "Unlimited" || calcs.focusSwitchesMax === "Unlimited";
+		const switchesMax = calcs.focusSwitchesMaxNum ?? calcs.focusSwitchesMax ?? 1;
+		const switchesText = isUnlimited ? "∞" : `${switchesRemaining}/${switchesMax}`;
+
+		const block = e_({tag: "div", clazz: "charsheet__combat-ranger"});
+
+		let html = `
+			<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
+				<span class="badge ${isPredator ? "badge-danger" : "badge-info"}" style="font-size: 1em; padding: 5px 10px;">${isPredator ? "🎯 Predator" : "🛡️ Prey"}</span>
+				<span class="badge badge-secondary" title="Focus Switches remaining (per long rest)">🔄 ${switchesText}</span>
+			</div>
+			<div class="ve-flex gap-2 mb-2">
+				<button class="ve-btn ve-btn-sm ${isPredator ? "ve-btn-danger" : "ve-btn-outline-danger"} charsheet__combat-pf-btn" data-mode="predator" ${isPredator ? "disabled" : ""}>🎯 Predator</button>
+				<button class="ve-btn ve-btn-sm ${!isPredator ? "ve-btn-info" : "ve-btn-outline-info"} charsheet__combat-pf-btn" data-mode="prey" ${!isPredator ? "disabled" : ""}>🛡️ Prey</button>
+			</div>`;
+
+		// Stateful in-play actions for the active mode
+		if (isPredator) {
+			const quarrySet = !!this._state.getFocusedQuarry?.();
+			html += `
+				<div class="ve-flex-v-center gap-2 mb-2">
+					<span class="badge ${quarrySet ? "badge-danger" : "badge-secondary"}" title="Focused Quarry (Predator focus)">🎯 Focused Quarry: ${quarrySet ? "Set" : "None"}</span>
+					<button class="ve-btn ve-btn-xs ${quarrySet ? "ve-btn-default" : "ve-btn-danger"} charsheet__combat-quarry-toggle">${quarrySet ? "Clear" : "Designate"}</button>
+				</div>`;
+		} else {
+			const dodgeRemaining = this._state.getHuntersDodgeRemaining?.() ?? 0;
+			const dodgeMax = calcs.huntersDodgeUses ?? 0;
+			if (dodgeMax > 0) {
+				html += `
+				<div class="ve-flex-v-center gap-2 mb-2">
+					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}" title="Hunter's Dodge uses remaining (per long rest)">🛡️ Hunter's Dodge ${dodgeRemaining}/${dodgeMax}</span>
+					<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
+				</div>`;
+			}
+		}
+
+		// Full mode-ability catalog as focus-gated reminder rows (no fabricated numbers)
+		const abilities = CharacterSheetClassUtils.getPrimalFocusModeAbilities?.(mode, {
+			upgrade1: !!calcs.primalFocusUpgrade1,
+			upgrade2: !!calcs.primalFocusUpgrade2,
+			upgrade3: !!calcs.primalFocusUpgrade3,
+		}) || [];
+		if (abilities.length) {
+			html += `<div class="charsheet__combat-ranger-abilities mt-1">`;
+			abilities.forEach(ab => {
+				let badge;
+				if (ab.kind === "usable") {
+					const at = ab.actionType;
+					const icon = at === "action" ? "⚔️" : at === "bonus" ? "⚡" : at === "reaction" ? "🔄" : "✨";
+					const label = at === "action" ? "Action" : at === "bonus" ? "Bonus Action" : at === "reaction" ? "Reaction" : "Action";
+					badge = `<span class="badge badge-outline-secondary" title="${label}">${icon} ${label}</span>`;
+				} else if (ab.kind === "method") {
+					badge = `<span class="badge badge-outline-info" title="Combat method (see Combat Methods above)">⚔️ Method</span>`;
+				} else {
+					badge = `<span class="badge badge-outline-secondary" title="Passive / situational">✦ Passive</span>`;
+				}
+				html += `
+					<div class="charsheet__combat-ranger-ability mb-1 ve-flex ve-flex-v-center gap-2" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+						<span class="bold">${ab.name}</span>
+						${badge}
+						<span class="ve-muted ve-small">${ab.note}</span>
+					</div>`;
+			});
+			html += `</div>`;
+		}
+
+		block.innerHTML = html;
+		container.appendChild(block);
+
+		// Attach listeners to the freshly-created elements (avoids handler pileup across renders)
+		block.querySelectorAll(".charsheet__combat-pf-btn").forEach(btn => {
+			btn.addEventListener("click", () => {
+				const targetMode = btn.dataset.mode;
+				if (targetMode === (this._state.getPrimalFocusMode?.() || "predator")) return;
+				const success = this._state.switchPrimalFocus?.();
+				if (success) {
+					this._page.saveCharacter();
+					this._page.renderCharacter();
+					JqueryUtil.doToast({type: "success", content: `Switched to ${targetMode.toTitleCase()} Focus`});
+				} else {
+					JqueryUtil.doToast({type: "warning", content: "No focus switches remaining! Rest to regain switches."});
+				}
+			});
+		});
+		block.querySelector(".charsheet__combat-dodge-use")?.addEventListener("click", () => {
+			const success = this._state.useHuntersDodge?.();
+			if (success) {
+				this._page.saveCharacter();
+				this._page.renderCharacter();
+				JqueryUtil.doToast({type: "success", content: "Used Hunter's Dodge"});
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "No Hunter's Dodge uses remaining! Rest to regain uses."});
+			}
+		});
+		block.querySelector(".charsheet__combat-quarry-toggle")?.addEventListener("click", () => {
+			const quarrySet = !!this._state.getFocusedQuarry?.();
+			this._state.setFocusedQuarry?.(quarrySet ? null : "manual");
+			this._page.saveCharacter();
+			this._page.renderCharacter();
+			JqueryUtil.doToast({type: "success", content: quarrySet ? "Cleared Focused Quarry" : "Designated Focused Quarry"});
+		});
 	}
 
 	_renderMethodsToContainer (container, methodsByTradition, {showUseButton = false} = {}) {
