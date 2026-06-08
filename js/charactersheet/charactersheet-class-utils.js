@@ -4556,6 +4556,26 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Did the inline feat spell picker (LevelUp / QuickBuild / Builder) actually collect
+	 * spell or cantrip choices for this feat? When true, those flows should pass
+	 * `skipAdditionalSpellChoices` to `addFeat` so the pending-choice pipeline doesn't
+	 * re-prompt for the same `additionalSpells` choices (double-grant). When false (e.g.
+	 * respec / optional-feature / fallback paths where the picker never ran), the flag must
+	 * NOT be passed, or the chosen spells would be silently dropped.
+	 *
+	 * @param {object} feat - The feat (with inline picks on `_featChoices` and/or `choices`)
+	 * @returns {boolean}
+	 */
+	static hasCollectedInlineSpellChoices (/** @type {*} */ feat) {
+		if (!feat || typeof feat !== "object") return false;
+		const sources = [feat.choices, feat._featChoices];
+		return sources.some((/** @type {*} */ src) =>
+			!!src && ((Array.isArray(src.spells) && src.spells.length > 0)
+				|| (Array.isArray(src.cantrips) && src.cantrips.length > 0)),
+		);
+	}
+
+	/**
 	 * Compute optional feature gains between currentLevel and newLevel.
 	 * @param {object} classData - The class data object
 	 * @param {number} currentLevel - Previous class level
