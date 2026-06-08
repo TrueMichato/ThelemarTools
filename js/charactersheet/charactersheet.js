@@ -42,6 +42,8 @@ class CharacterSheetPage {
 		this._quickBuild = null;
 		this._upgrades = null;
 		this._playMode = null;
+		this._druidResources = null;
+		this._druidResourcesEnabled = false;
 		// Forward-compat module slots (referenced by other modules; assigned externally if wired)
 		/** @type {*} */
 		this._spellsModule = null;
@@ -148,6 +150,11 @@ class CharacterSheetPage {
 			this._respec = new CharacterSheetRespec({page: this, state: this._state});
 			this._respec.init();
 		} catch (e) { console.error("Failed to init respec:", e); }
+
+		try {
+			this._druidResources = new CharacterSheetDruidResources(this);
+			this._druidResourcesEnabled = true;
+		} catch (e) { console.error("Failed to init druidResources:", e); this._druidResourcesEnabled = false; }
 		/* eslint-enable no-console */
 
 		// Pass loaded data to modules
@@ -1880,23 +1887,14 @@ class CharacterSheetPage {
 			container.append(btn);
 		}
 
-		// Druid - Wild Shape
-		if (calculations.wildShapeUses > 0) {
-			const uses = calculations.wildShapeUses === Infinity ? "∞" : calculations.wildShapeUses;
-			const btn = e_({outer: `<button class="ve-btn ve-btn-warning" style="white-space: nowrap;">
-				<span class="glyphicon glyphicon-refresh mr-1"></span>🐻 Wild Shape (${uses})
+		// Druid - Wild Shape / Wild Companion / Zodiac Form are managed via the
+		// dedicated Druid Resources modal (proper uses/recharge + form selection)
+		// instead of individual buttons or the generic active-states list.
+		if (this._druidResources?.isApplicable?.()) {
+			const btn = e_({outer: `<button class="ve-btn ve-btn-warning" style="white-space: nowrap;" title="Wild Shape uses, Wild Companion, and Zodiac Forms">
+				<span class="glyphicon glyphicon-refresh mr-1"></span>🐾 Druid Resources
 			</button>`});
-			btn.addEventListener("click", () => this._onWildShape());
-			container.append(btn);
-		}
-
-		// Druid - Wild Companion (Fey familiar via Wild Shape use)
-		if (calculations.hasWildCompanion) {
-			const duration = calculations.wildCompanionDuration || "";
-			const btn = e_({outer: `<button class="ve-btn ve-btn-info" style="white-space: nowrap;" title="Summon a Fey familiar for ${duration}">
-				<span class="glyphicon glyphicon-plus mr-1"></span>🧚 Wild Companion
-			</button>`});
-			btn.addEventListener("click", () => this._onWildCompanion());
+			btn.addEventListener("click", () => this._druidResources.openModal());
 			container.append(btn);
 		}
 
@@ -6475,6 +6473,16 @@ class CharacterSheetPage {
 		const activatableFeatures = this._state.getActivatableFeatures();
 		const concentration = this._state.getConcentration();
 
+		// Dedicated Druid Resources entry point (Wild Shape / Wild Companion /
+		// Zodiac Form are managed here rather than in the generic list below).
+		if (this._druidResourcesEnabled && this._druidResources?.isApplicable?.()) {
+			const druidBtnRow = e_({outer: `<div class="charsheet__druid-resources-entry mb-2">
+				<button class="ve-btn ve-btn-xs ve-btn-warning w-100 charsheet__druid-resources-open">🐾 Druid Resources</button>
+			</div>`});
+			druidBtnRow.querySelector(".charsheet__druid-resources-open").addEventListener("click", () => this._druidResources.openModal());
+			container.append(druidBtnRow);
+		}
+
 		// Filter out condition-derived states (they're shown in the Conditions section)
 		const nonConditionStates = activeStates.filter(s => !s.isCondition);
 
@@ -6525,6 +6533,10 @@ class CharacterSheetPage {
 		// Filter out limited-use custom abilities - they're shown in Resources section
 		const availableFeatures = activatableFeatures.filter(af => {
 			if (af.isActive) return false;
+			// Druid Wild Shape / Wild Companion / Zodiac Form are handled by the
+			// dedicated Druid Resources modal — drop them from the generic list
+			// (only once that module is available, so a failure never strands them).
+			if (this._druidResourcesEnabled && CharacterSheetState.isDruidResourceActivatable(af)) return false;
 			// Exclude limited-use custom abilities (shown in Resources)
 			if (af.feature?.isCustomAbility) {
 				const customAbility = this._state.getCustomAbility?.(af.feature.id);
