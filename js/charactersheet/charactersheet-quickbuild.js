@@ -141,6 +141,7 @@ class CharacterSheetQuickBuild {
 			subclassChoices: {},
 			asi: {},
 			optionalFeatures: {},
+			classFeatProgression: {}, // {levelKey: [{progressionName, category, feat, featChoices}, ...]} — Fighting Style etc.
 			featureOptions: {},
 			expertise: {},
 			languages: {},
@@ -2727,6 +2728,9 @@ class CharacterSheetQuickBuild {
 
 		// Resolve subclass-choice tradition pool (e.g. Champion: 2 from [AM, GH, TI])
 		const subclassChoicePool = CharacterSheetClassUtils.getSubclassTraditionChoicePool(subclass, gain.classSource);
+		// When the subclass choice replaces the base Fighter tradition pick, suppress
+		// the base picker so the same tradition isn't offered in two flows.
+		const suppressBasePicker = CharacterSheetClassUtils.shouldSuppressBaseTraditionPicker(subclass, gain.classSource);
 
 		// _combatTraditions tracks only user-chosen base traditions (not subclass grants
 		// and not subclass-choice picks)
@@ -2759,7 +2763,10 @@ class CharacterSheetQuickBuild {
 		const subclassTradContainer = e_({outer: `<div class="mb-2"></div>`});
 		const methodsContainer = e_({outer: `<div></div>`});
 
-		if (getUserChosenCount() < traditionCount) {
+		if (suppressBasePicker) {
+			// Base tradition picker suppressed: the subclass-choice picker below is
+			// the sole tradition flow for this Fighter subclass (no double-offer).
+		} else if (getUserChosenCount() < traditionCount) {
 			const availableTraditions = CharacterSheetClassUtils.getAvailableTraditionsForClass(
 				allOptFeatures,
 				gain.featureTypes || [],
