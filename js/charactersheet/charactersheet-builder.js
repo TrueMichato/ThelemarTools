@@ -1124,13 +1124,17 @@ class CharacterSheetBuilder {
 		// Auto-granted optional features (e.g., Nyuidj Dreamwalk)
 		this._applyRaceFeatureGrants();
 
-		// Add racial features
+		// Add racial features (level-gated: e.g. Aasimar "Celestial Revelation"
+		// unlocks at character level 3 and must NOT be granted on a fresh level-1
+		// build). Progression re-applies newly-unlocked entries on level-up via
+		// CharacterSheetClassUtils.updateRacialFeatures.
+		const characterLevel = this._state.getTotalLevel?.() || 1;
 		if (this._selectedRace.entries) {
-			this._addFeatureEntries(this._selectedRace.entries, this._selectedRace.source, "Species");
+			this._addFeatureEntries(this._selectedRace.entries, this._selectedRace.source, "Species", characterLevel);
 		}
 
 		if (this._selectedSubrace?.entries) {
-			this._addFeatureEntries(this._selectedSubrace.entries, this._selectedSubrace.source, "Subrace");
+			this._addFeatureEntries(this._selectedSubrace.entries, this._selectedSubrace.source, "Subrace", characterLevel);
 		}
 	}
 
@@ -2191,10 +2195,12 @@ class CharacterSheetBuilder {
 	 * @param {*} entries
 	 * @param {*} source
 	 * @param {*} featureType
+	 * @param {number} [characterLevel] - skip entries whose unlock level exceeds this
 	 */
-	_addFeatureEntries (entries, source, featureType) {
+	_addFeatureEntries (entries, source, featureType, characterLevel = 1) {
 		entries.forEach((/** @type {*} */ entry) => {
 			if (typeof entry === "object" && entry.name) {
+				if (CharacterSheetClassUtils.getFeatureUnlockLevel(entry) > characterLevel) return;
 				this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
 					{
 						...entry,
