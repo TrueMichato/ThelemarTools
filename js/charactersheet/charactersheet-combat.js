@@ -6403,12 +6403,15 @@ class CharacterSheetCombat {
 			}
 		}
 
-		// Full mode-ability catalog as focus-gated reminder rows (no fabricated numbers)
-		const abilities = CharacterSheetClassUtils.getPrimalFocusModeAbilities?.(mode, {
+		// Full mode-ability catalog as focus-gated reminder rows (no fabricated numbers).
+		// Methods (granted combat methods) and applied-elsewhere passives are filtered
+		// out generically — methods are usable from the Combat Methods section above and
+		// applied-elsewhere effects are already baked into other panels.
+		const abilities = (CharacterSheetClassUtils.getPrimalFocusModeAbilities?.(mode, {
 			upgrade1: !!calcs.primalFocusUpgrade1,
 			upgrade2: !!calcs.primalFocusUpgrade2,
 			upgrade3: !!calcs.primalFocusUpgrade3,
-		}) || [];
+		}) || []).filter(ab => CharacterSheetClassUtils.isPrimalFocusReminderAbility?.(ab));
 		if (abilities.length) {
 			html += `<div class="charsheet__combat-ranger-abilities mt-1">`;
 			abilities.forEach(ab => {
@@ -6418,14 +6421,15 @@ class CharacterSheetCombat {
 					const icon = at === "action" ? "⚔️" : at === "bonus" ? "⚡" : at === "reaction" ? "🔄" : "✨";
 					const label = at === "action" ? "Action" : at === "bonus" ? "Bonus Action" : at === "reaction" ? "Reaction" : "Action";
 					badge = `<span class="badge badge-outline-secondary" title="${label}">${icon} ${label}</span>`;
-				} else if (ab.kind === "method") {
-					badge = `<span class="badge badge-outline-info" title="Combat method (see Combat Methods above)">⚔️ Method</span>`;
 				} else {
 					badge = `<span class="badge badge-outline-secondary" title="Passive / situational">✦ Passive</span>`;
 				}
+				// Hoverable name (renders the note as an inline-hover entry, like the
+				// Combat-method rows above); falls back to plain text.
+				const nameHtml = CharacterSheetClassUtils.buildInlineEntriesHoverLink?.(ab.name, ab.name, [ab.note]) || ab.name;
 				html += `
 					<div class="charsheet__ranger-ability-row">
-						<span class="charsheet__ranger-ability-name">${ab.name}</span>
+						<span class="charsheet__ranger-ability-name">${nameHtml}</span>
 						<span class="charsheet__ranger-ability-badge">${badge}</span>
 						<span class="charsheet__ranger-ability-note">${ab.note}</span>
 					</div>`;

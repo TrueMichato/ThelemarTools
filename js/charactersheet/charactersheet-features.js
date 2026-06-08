@@ -1661,12 +1661,14 @@ class CharacterSheetFeatures {
 			const abilityRowsHtml = modeAbilities
 				// Hunter's Dodge has its own dedicated row (with use counter) above.
 				.filter(a => a.name !== "Hunter's Dodge")
+				// Methods live in the Combat Methods section and applied-elsewhere passives
+				// (e.g. Pursuit's speed) are already shown on other panels — keep them out
+				// of this control/reminder list generically (by kind/flag, not by name).
+				.filter(a => CharacterSheetClassUtils.isPrimalFocusReminderAbility?.(a))
 				.map(a => {
 					const kindBadge = a.kind === "usable"
 						? `<span class="badge badge-outline-primary" title="${actionIcon(a.actionType)}">${actionIcon(a.actionType) || "Usable"}</span>`
-						: a.kind === "method"
-							? `<span class="badge badge-outline-info" title="Combat method">⚔️ Method</span>`
-							: `<span class="badge badge-outline-secondary" title="Always-on passive">✦ Passive</span>`;
+						: `<span class="badge badge-outline-secondary" title="Always-on passive">✦ Passive</span>`;
 					const quarryBtn = a.name === "Focused Quarry"
 						? `<button class="ve-btn ve-btn-xxs ${quarryDesignated ? "ve-btn-warning" : "ve-btn-outline-danger"} charsheet__focused-quarry-toggle ml-1" title="${quarryDesignated ? "Clear your designated Quarry" : "Mark that you have designated a Quarry"}">${quarryDesignated ? "Clear Quarry" : "Designate Quarry"}</button>`
 						: "";

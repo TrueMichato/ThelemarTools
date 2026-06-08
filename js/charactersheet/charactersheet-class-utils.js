@@ -3346,7 +3346,7 @@ class CharacterSheetClassUtils {
 	 *
 	 * @param {"predator"|"prey"} mode
 	 * @param {{upgrade1?: boolean, upgrade2?: boolean, upgrade3?: boolean}} [flags]
-	 * @returns {Array<{name: string, kind: "usable"|"passive"|"method", actionType?: string, note: string}>}
+	 * @returns {Array<{name: string, kind: "usable"|"passive"|"method", actionType?: string, appliedElsewhere?: boolean, note: string}>}
 	 */
 	static getPrimalFocusModeAbilities (/** @type {*} */ mode, /** @type {*} */ flags = {}) {
 		const upgrade1 = !!flags.upgrade1; // level 6
@@ -3359,7 +3359,11 @@ class CharacterSheetClassUtils {
 			out.push({name: "Hunter's Insight", kind: "passive", note: "Advantage on Survival/Perception checks to track or spot your Quarry; learn its creature type when you designate it."});
 			if (upgrade1) {
 				out.push({name: "Singular Focus", kind: "method", note: "Combat method usable only while in Predator focus (see Combat Methods)."});
-				out.push({name: "Pursuit", kind: "passive", note: "Your walking speed increases by 10 feet while in Predator focus."});
+				// Pursuit's +10 ft is already APPLIED as a real `speed:walk` named modifier
+				// (and shown in the Speed breakdown), so it is flagged appliedElsewhere and
+				// kept out of the "remember to use" reminder rows — it is not something the
+				// player has to actively invoke.
+				out.push({name: "Pursuit", kind: "passive", appliedElsewhere: true, note: "Your walking speed increases by 10 feet while in Predator focus."});
 				out.push({name: "Intimidating Foe", kind: "passive", note: "Once per turn when you hit with a weapon attack, force a Wisdom save vs. your spell save DC; on a failure the creature is frightened (speed 0) until the end of your next turn."});
 				out.push({name: "Predator Eye", kind: "usable", actionType: "bonus", note: "Intelligence (Nature) check vs. the target's Deception; on a success, learn one of its resistances or vulnerabilities."});
 			}
@@ -3391,6 +3395,31 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Generic classification predicate: should a Primal-Focus mode ability (from
+	 * `getPrimalFocusModeAbilities`) be surfaced on an at-a-glance reminder list?
+	 *
+	 * Reminder surfaces (Overview Primal Focus block, Combat focus panel, the Primal
+	 * Focus feature card) only want actionable controls (`usable`) and watch-for
+	 * passives (`passive`). Two categories are deliberately excluded, BY KIND/FLAG
+	 * (never by name) so the rule stays data-driven:
+	 *  - `kind: "method"` — granted combat methods live in (and are actioned from) the
+	 *    Combat Methods section; echoing them here is duplicative noise.
+	 *  - `appliedElsewhere: true` — the entire effect is already concretely applied and
+	 *    shown on another panel (e.g. Pursuit's +10 ft is a real speed modifier in the
+	 *    Speed breakdown), so a "remember to use" reminder would double-surface it.
+	 *
+	 * Uses a positive whitelist so any future/unknown `kind` is excluded by default.
+	 *
+	 * @param {*} ability - One entry from `getPrimalFocusModeAbilities`.
+	 * @returns {boolean}
+	 */
+	static isPrimalFocusReminderAbility (/** @type {*} */ ability) {
+		return !!ability
+			&& ["usable", "passive"].includes(ability.kind)
+			&& !ability.appliedElsewhere;
+	}
+
+	/**
 	 * Build a list of the Ranger's active passive / situational feature reminders
 	 * from the flat `getFeatureCalculations()` output. These features grant
 	 * always-on or situational benefits that previously had no at-a-glance home on
@@ -3412,7 +3441,7 @@ class CharacterSheetClassUtils {
 	 * the flag) rather than maintaining a separate denylist.
 	 *
 	 * @param {*} calcs - Output of `state.getFeatureCalculations()`.
-	 * @returns {Array<{name: string, note: string, source: string, level: (number|null), icon: string}>}
+	 * @returns {Array<{name: string, note: string, notes?: string[], source: string, level: (number|null), icon: string}>}
 	 */
 	static getRangerPassiveReminders (/** @type {*} */ calcs = {}) {
 		const c = calcs || {};
@@ -3426,7 +3455,22 @@ class CharacterSheetClassUtils {
 		add(c.hasDeftExplorer, {name: "Deft Explorer", note: "Expertise in a skill, two extra languages, and an extra prepared spell from your Canny/Tracker benefits.", source: "TGTT", level: 1, icon: "🧭", appliedElsewhere: true});
 
 		// --- TGTT mid-level passives ---
-		add(c.hasEnduringTraveler, {name: "Enduring Traveler", note: "Immune to extreme cold, extreme heat, and high altitude; auto-succeed saves vs. exhaustion from natural travel/environment. You can perform a second camp/journey activity in the same segment.", source: "TGTT", level: 4, icon: "⛰️"});
+		// Enduring Traveler bundles three mechanically-distinct benefits; surface them as
+		// separate `notes` bullets so each reads cleanly (the renderer falls back to the
+		// joined `note` string when `notes` is absent, and the string is kept for
+		// at-a-glance/title text + backward compatibility).
+		add(c.hasEnduringTraveler, {
+			name: "Enduring Traveler",
+			notes: [
+				"Immune to extreme cold, extreme heat, and high altitude.",
+				"Automatically succeed on saving throws against exhaustion caused by natural travel or your environment.",
+				"You can perform a second camp or journey activity in the same segment.",
+			],
+			note: "Immune to extreme cold, extreme heat, and high altitude; auto-succeed saves vs. exhaustion from natural travel/environment. You can perform a second camp/journey activity in the same segment.",
+			source: "TGTT",
+			level: 4,
+			icon: "⛰️",
+		});
 
 		// Tireless: the exhaustion-reduction is applied interactively in the short-rest
 		// dialog and the temp-HP grant is tracked in Resources — its whole benefit lives
