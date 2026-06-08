@@ -5159,7 +5159,14 @@ class CharacterSheetCombat {
 			for (const state of activeStates) {
 				const stateType = CharacterSheetState.ACTIVE_STATE_TYPES?.[state.stateTypeId];
 				const tooltipParts = [];
-				if (stateType?.description) tooltipParts.push(stateType.description);
+				// Zodiac Form: prefer the CHOSEN constellation's summary over the
+				// generic "Zodiac Form" description so the tooltip reflects the
+				// active form.
+				const zodiacDef = state.stateTypeId === "zodiacForm" && state.zodiacForm?.formId
+					? CharacterSheetState.getZodiacFormDef?.(state.zodiacForm.formId)
+					: null;
+				if (zodiacDef?.summary) tooltipParts.push(zodiacDef.summary);
+				else if (stateType?.description) tooltipParts.push(stateType.description);
 				if (stateType?.effects?.length) {
 					const effectsStr = stateType.effects.map(e => e.type && e.target ? `${e.type} → ${e.target}` : e.type || "").filter(Boolean).join("; ");
 					if (effectsStr) tooltipParts.push(`Effects: ${effectsStr}`);
@@ -5190,9 +5197,15 @@ class CharacterSheetCombat {
 						// Fall back to plain name
 						stateNameHtml = state.name;
 					}
-				} else if (state.sourceFeatureId && state.stateTypeId !== "zodiacForm") {
+				} else if (state.stateTypeId === "zodiacForm" && state.zodiacForm?.formId) {
 					// Zodiac Form keeps the chosen constellation in state.name
-					// (e.g. "Zodiac Form: Bulette") rather than the generic feature name.
+					// (e.g. "Zodiac Form: Octopus"); resolve the hover to that
+					// specific form's own entry rather than the generic feature.
+					const formEntity = CharacterSheetClassUtils.getZodiacFormHoverEntity(state);
+					if (formEntity) {
+						stateNameHtml = CharacterSheetClassUtils.buildInlineEntriesHoverLink(state.name, formEntity.name, formEntity.entries) || stateNameHtml;
+					}
+				} else if (state.sourceFeatureId) {
 					const feature = this._state.getFeatures?.().find(f => f.id === state.sourceFeatureId);
 					if (feature) {
 						stateNameHtml = this._page._getFeatureHoverLink?.(feature) || stateNameHtml;

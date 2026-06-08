@@ -473,17 +473,55 @@ class CharacterSheetClassUtils {
 	 * @returns {string|null} `<span>` HTML, or null if the feature has no entries.
 	 */
 	static buildLocalFeatureHoverLink (/** @type {*} */ feature) {
+		const entries = Array.isArray(feature?.entries) && feature.entries.length ? feature.entries : null;
+		if (!entries) return null;
+		return CharacterSheetClassUtils.buildInlineEntriesHoverLink(feature.name, feature.name, entries);
+	}
+
+	/**
+	 * Build a hoverable `<span>` whose visible label may differ from the hovered
+	 * entry's heading. Used when the on-sheet label (e.g. an active-state name
+	 * like "Zodiac Form: Octopus") should stay verbatim but the floating hover
+	 * should show a specific entry (e.g. the "Octopus" constellation's own text).
+	 *
+	 * @param {string} displayLabel - Visible text of the link (HTML-escaped).
+	 * @param {string} entryName - Heading shown inside the hover tooltip.
+	 * @param {Array} entries - 5etools entry array rendered in the hover.
+	 * @returns {string|null} `<span>` HTML, or null if entries/renderer unavailable.
+	 */
+	static buildInlineEntriesHoverLink (/** @type {*} */ displayLabel, /** @type {*} */ entryName, /** @type {*} */ entries) {
 		try {
 			if (typeof Renderer === "undefined" || !Renderer.hover?.getInlineHover) return null;
-			const entries = Array.isArray(feature?.entries) && feature.entries.length ? feature.entries : null;
-			if (!entries) return null;
-			const hoverMeta = Renderer.hover.getInlineHover({type: "entries", name: feature.name, entries});
-			return `<span class="ve-help-subtle" ${hoverMeta.html}>${feature.name}</span>`;
+			if (!Array.isArray(entries) || !entries.length) return null;
+			const hoverMeta = Renderer.hover.getInlineHover({type: "entries", name: entryName, entries});
+			// displayLabel is sourced from save data (state.name); escape it.
+			const safeLabel = String(displayLabel ?? entryName ?? "")
+				.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+			return `<span class="ve-help-subtle" ${hoverMeta.html}>${safeLabel}</span>`;
 		} catch (e) {
 			// eslint-disable-next-line no-console
-			console.warn("[CharSheet] buildLocalFeatureHoverLink error:", e);
+			console.warn("[CharSheet] buildInlineEntriesHoverLink error:", e);
 			return null;
 		}
+	}
+
+	/**
+	 * Resolve the hover entity for a chosen Zodiac Form (Circle of the Zodiac).
+	 * Given an active-state record carrying `zodiacForm.formId`, returns the
+	 * SPECIFIC constellation's `{type:"entries", name, entries}` (e.g. Octopus),
+	 * so its active-state hover references the chosen form rather than the generic
+	 * "Zodiac Form: Month" feature. Pure; null if not a zodiac form or no entries.
+	 *
+	 * @param {*} state - An active-state record.
+	 * @returns {{type:string, name:string, entries:Array}|null}
+	 */
+	static getZodiacFormHoverEntity (/** @type {*} */ state) {
+		const formId = state?.zodiacForm?.formId;
+		if (!formId) return null;
+		const Cls = (typeof globalThis !== "undefined" && globalThis.CharacterSheetState) || null;
+		const def = Cls?.getZodiacFormDef?.(formId);
+		if (!def || !Array.isArray(def.entries) || !def.entries.length) return null;
+		return {type: "entries", name: def.name, entries: def.entries};
 	}
 
 	/**
