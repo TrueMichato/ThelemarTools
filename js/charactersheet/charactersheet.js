@@ -10668,14 +10668,18 @@ class CharacterSheetPage {
 			.map(type => ({type, breakdown: this._state.getSpeedBreakdown(type)}))
 			.filter(({breakdown}) => breakdown.total > 0 || breakdown.components.length > 0);
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = await UiUtil.pGetShowModal({
 			title: "🏃 Speed Breakdown",
 			isMinHeight0: true,
+			hasFooter: true,
 		});
 
-		const contentEl = e_({outer: `<div class="charsheet__ac-modal-content"></div>`}); modalInner.append(contentEl);
+		// The `charsheet__speed-modal-content` marker lets the CSS turn the modal scroller into a
+		// bounded, scrollable region (the breakdown can list walk + fly + swim + climb + burrow,
+		// each with several components, which previously overflowed the modal box).
+		const contentEl = e_({outer: `<div class="charsheet__ac-modal-content charsheet__speed-modal-content"></div>`}); modalInner.append(contentEl);
 
-		// Walk speed display
+		// Walk speed — primary/hero display.
 		contentEl.insertAdjacentHTML("beforeend", `
 			<div class="charsheet__ac-modal-total">
 				<div class="charsheet__ac-modal-total-value">${walkBreakdown.total} ft.</div>
@@ -10687,23 +10691,26 @@ class CharacterSheetPage {
 		const walkList = e_({outer: `<div class="charsheet__ac-modal-breakdown"></div>`}); contentEl.append(walkList);
 		this._renderModalBreakdownItems(walkList, walkBreakdown, "ft.");
 
-		// Other movement types
+		// Other movement types — compact secondary totals (no inline style; uses a modifier class).
 		for (const {type, breakdown} of otherBreakdowns) {
 			const label = type.charAt(0).toUpperCase() + type.slice(1);
-			contentEl.insertAdjacentHTML("beforeend", `
-				<div class="charsheet__ac-modal-total mt-3">
-					<div class="charsheet__ac-modal-total-value" style="font-size: 1.5rem;">${breakdown.total} ft.</div>
+			const section = e_({outer: `<div class="charsheet__speed-modal-section"></div>`}); contentEl.append(section);
+			section.insertAdjacentHTML("beforeend", `
+				<div class="charsheet__ac-modal-total charsheet__ac-modal-total--secondary">
+					<div class="charsheet__ac-modal-total-value">${breakdown.total} ft.</div>
 					<div class="charsheet__ac-modal-total-label">${label} Speed</div>
 				</div>
 			`);
-			const listEl = e_({outer: `<div class="charsheet__ac-modal-breakdown"></div>`}); contentEl.append(listEl);
+			const listEl = e_({outer: `<div class="charsheet__ac-modal-breakdown"></div>`}); section.append(listEl);
 			this._renderModalBreakdownItems(listEl, breakdown, "ft.");
 		}
 
-		const closeFooter2 = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
+		// Close button lives in the pinned footer slot (a sibling of the scroller, outside the
+		// scroll area) so it stays visible no matter how long the breakdown gets.
+		const closeFooter2 = ee`<div class="ve-flex-v-center ve-flex-h-right ve-py-1 ve-px-1">
 			<button class="ve-btn ve-btn-primary">Close</button>
 		</div>`;
-		modalInner.append(closeFooter2);
+		(modalFooter || modalInner).append(closeFooter2);
 		closeFooter2.querySelector("button").addEventListener("click", () => doClose(false));
 	}
 

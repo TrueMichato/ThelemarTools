@@ -11824,6 +11824,27 @@ body.is-charsheet-page .ve-ui-modal__inner.ve-w-100 > .ve-ui-modal__scroller {
 	overflow-y: auto;
 }
 
+/* Speed breakdown modal: the breakdown can list walk + fly + swim + climb + burrow, each with
+   several components. Without a scrollable scroller the content overflowed the modal box (the
+   inner is capped at max-height with overflow:visible). Make the scroller the bounded scroll
+   region — mirrors the .ve-w-100 pattern above — so long breakdowns scroll gracefully while the
+   header and footer Close button stay pinned. */
+body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__speed-modal-content) {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	overflow-x: hidden;
+}
+
+/* Spacing between secondary movement-type sections in the speed modal. The parent
+   `.charsheet__ac-modal-content` already supplies the gap between sections; here we just keep
+   each section's own total + breakdown list tightly grouped. */
+.charsheet__speed-modal-section {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+
 /* Performance: isolate modal scroller paint/layout from page */
 body.is-charsheet-page .ve-ui-modal__scroller {
 	will-change: transform;
@@ -13335,6 +13356,16 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	color: var(--cs-primary, #6366f1);
 	line-height: 1;
 	text-shadow: 0 2px 12px rgba(99, 102, 241, 0.3);
+}
+
+/* Secondary movement-type totals in the speed breakdown modal (fly/swim/climb/burrow).
+   Compact variant so a many-speed character's modal stays legible and doesn't tower. */
+.charsheet__ac-modal-total--secondary {
+	padding: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__ac-modal-total--secondary .charsheet__ac-modal-total-value {
+	font-size: 1.75rem;
 }
 
 .charsheet__ac-modal-total-label {
