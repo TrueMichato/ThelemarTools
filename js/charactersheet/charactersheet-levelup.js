@@ -2779,9 +2779,16 @@ class CharacterSheetLevelUp {
 			activeSubclass,
 			classData?.source,
 		);
+		// When the subclass choice replaces the base Fighter tradition pick, suppress
+		// the base picker so the same tradition isn't offered in two flows. Falls
+		// through to the "normal flow" below, which renders only the subclass picker.
+		const suppressBasePicker = CharacterSheetClassUtils.shouldSuppressBaseTraditionPicker(
+			activeSubclass,
+			classData?.source,
+		);
 
 		// If no traditions set, allow selecting them now (retroactive fix)
-		if (knownTraditions.length < traditionCount) {
+		if (knownTraditions.length < traditionCount && !suppressBasePicker) {
 			// Filter traditions to only those the class has access to
 			const classAllowedTypes = gain.featureTypes || [];
 			const availableTraditions = CharacterSheetClassUtils.getAvailableTraditionsForClass(allOptFeatures, classAllowedTypes, classData?.name, classFeatures);
