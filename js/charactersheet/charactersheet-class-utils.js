@@ -428,6 +428,65 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Find a stored class/subclass feature in the loaded data pool that matches
+	 * `feature` (by name + class + level, plus subclass short-name for subclass
+	 * features). Used to decide whether a canonical `classfeatures.html` hover hash
+	 * will actually resolve.
+	 *
+	 * Feature-options (inline picks like TGTT Specialties) and homebrew features
+	 * that aren't present in the pool return `undefined` — signalling that a local
+	 * inline hover (built from the feature's own stored entries) should be used
+	 * instead of a hash that would 404 ("Failed to load renderable content").
+	 *
+	 * @param {*} feature - The stored character feature.
+	 * @param {{classFeatures?: Array<*>, subclassFeatures?: Array<*>}} [pool] - Loaded data pools.
+	 * @returns {*} The matching loaded feature, or undefined.
+	 */
+	static findLoadedFeatureEntity (/** @type {*} */ feature, /** @type {*} */ pool = {}) {
+		if (!feature?.name || !feature?.className) return undefined;
+		const nm = feature.name.toLowerCase();
+		const cn = feature.className.toLowerCase();
+		const lvl = Number(feature.level) || 1;
+		const isSubclassFeature = !!(feature.subclassName || feature.subclassShortName || feature.isSubclassFeature);
+
+		if (isSubclassFeature) {
+			const ssn = (feature.subclassShortName || feature.subclassName || "").toLowerCase();
+			return (pool.subclassFeatures || []).find((/** @type {*} */ f) =>
+				(f.name || "").toLowerCase() === nm
+				&& (f.className || "").toLowerCase() === cn
+				&& (f.subclassShortName || "").toLowerCase() === ssn
+				&& (Number(f.level) || 1) === lvl);
+		}
+		return (pool.classFeatures || []).find((/** @type {*} */ f) =>
+			(f.name || "").toLowerCase() === nm
+			&& (f.className || "").toLowerCase() === cn
+			&& (Number(f.level) || 1) === lvl);
+	}
+
+	/**
+	 * Build a hoverable link for a feature using its own locally-stored `entries`,
+	 * via the renderer's inline-hover mechanism. No hash / data-pool dependency, so
+	 * it always resolves — used for feature-options (e.g. TGTT Specialties) and any
+	 * feature missing from the loaded class data.
+	 *
+	 * @param {*} feature - The stored character feature (must carry `entries`).
+	 * @returns {string|null} `<span>` HTML, or null if the feature has no entries.
+	 */
+	static buildLocalFeatureHoverLink (/** @type {*} */ feature) {
+		try {
+			if (typeof Renderer === "undefined" || !Renderer.hover?.getInlineHover) return null;
+			const entries = Array.isArray(feature?.entries) && feature.entries.length ? feature.entries : null;
+			if (!entries) return null;
+			const hoverMeta = Renderer.hover.getInlineHover({type: "entries", name: feature.name, entries});
+			return `<span class="ve-help-subtle" ${hoverMeta.html}>${feature.name}</span>`;
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] buildLocalFeatureHoverLink error:", e);
+			return null;
+		}
+	}
+
+	/**
 	 * Resolve the hover-link sources for a subclass entry.
 	 *
 	 * The `cls.subclass` slot on a character only stores `{name, source}` —
