@@ -614,6 +614,122 @@ class SpellGrantParser {
 globalThis.SpellGrantParser = SpellGrantParser;
 
 /**
+ * Parse player "either A or B" CHOICES embedded in feature prose.
+ *
+ * Some features grant a *choice* rather than a fixed bonus — e.g. Arcane Archer
+ * Lore: "gain proficiency in either the {@skill Arcana} or the {@skill Nature}
+ * skill, and ... learn either the {@spell prestidigitation} or the
+ * {@spell druidcraft} cantrip." The generic proficiency/spell parsers either miss
+ * these (the interspersed "the" breaks contiguous matching) or greedily grant
+ * EVERY listed option. This parser recognizes the choice phrasing so the sheet can
+ * surface a single pick instead, and reports the claimed identities so the greedy
+ * parsers can be suppressed for exactly those skills/spells (identity-based, no
+ * fragile text surgery).
+ */
+class FeatureChoiceParser {
+	/**
+	 * @param {*} feature A feature-like object with `entries` (preferred, tags intact) and/or `description`.
+	 * @returns {{skillChoices: Array<{options: string[], count: number}>, cantripChoices: Array<{options: Array<{name: string, source: string}>, count: number}>}}
+	 */
+	static extractChoices (feature) {
+		const result = {skillChoices: [], cantripChoices: []};
+		if (!feature) return result;
+		const text = this._getRawText(feature);
+		if (!text) return result;
+
+		const skill = this._extractSkillProficiencyChoice(text);
+		if (skill) result.skillChoices.push(skill);
+
+		const cantrip = this._extractCantripChoice(text);
+		if (cantrip) result.cantripChoices.push(cantrip);
+
+		return result;
+	}
+
+	/** Prefer raw entries (retain {@skill}/{@spell} tags); fall back to rendered description. */
+	static _getRawText (feature) {
+		const entries = feature.entries;
+		if (Array.isArray(entries)) {
+			const strings = entries.filter(e => typeof e === "string");
+			if (strings.length) return strings.join(" ");
+		}
+		return typeof feature.description === "string" ? feature.description : "";
+	}
+
+	/** Find a "proficiency in either A or B [skill]" choice clause and pull out the skills. */
+	static _extractSkillProficiencyChoice (text) {
+		// Primary: clause terminated by the word "skill"/"skills".
+		let m = /proficien(?:cy|t)\s+(?:in|with)\s+either\s+(.*?)\s+skills?\b/i.exec(text);
+		// Fallback: "proficiency in either X or Y" with no trailing "skill", up to sentence end.
+		if (!m) m = /proficien(?:cy|t)\s+(?:in|with)\s+either\s+([^.]*?\bor\b[^.]*?)(?=[.,]|$)/i.exec(text);
+		if (!m) return null;
+
+		const options = this._extractSkillsFromClause(m[1]);
+		if (options.length < 2) return null;
+		return {options, count: 1};
+	}
+
+	/** Find a "learn either X or Y cantrip" choice clause and pull out the spells. */
+	static _extractCantripChoice (text) {
+		const m = /\blearn\s+either\s+(.*?)\s+cantrips?\b/i.exec(text);
+		if (!m) return null;
+
+		const options = this._extractSpellsFromClause(m[1]);
+		if (options.length < 2) return null;
+		return {options, count: 1};
+	}
+
+	/**
+	 * Extract normalized skill keys (lowercase, no spaces — matching state's
+	 * skillProficiencies keys) from a clause. Prefers {@skill ...} tags; falls back
+	 * to scanning for bare known skill names.
+	 */
+	static _extractSkillsFromClause (clause) {
+		const out = [];
+		const seen = new Set();
+		const push = (raw) => {
+			const key = String(raw).toLowerCase().trim().replace(/\s+/g, "");
+			if (key && !seen.has(key)) { seen.add(key); out.push(key); }
+		};
+
+		const tagRe = /\{@skill\s+([^}|]+)(?:\|[^}]*)?\}/gi;
+		let tag;
+		let foundTag = false;
+		while ((tag = tagRe.exec(clause)) !== null) { foundTag = true; push(tag[1]); }
+		if (foundTag) return out;
+
+		// No tags — scan for bare canonical skill names (longest-first to catch "animal handling").
+		const skillNames = Object.keys(Parser.SKILL_TO_ATB_ABV).sort((a, b) => b.length - a.length);
+		const lower = clause.toLowerCase();
+		skillNames.forEach(name => {
+			if (new RegExp(`\\b${name.replace(/\s+/g, "\\s+")}\\b`, "i").test(lower)) push(name);
+		});
+		return out;
+	}
+
+	/**
+	 * Extract spell options ({name, source}) from a clause. Requires {@spell ...}
+	 * tags (so the source is reliable); returns [] otherwise.
+	 */
+	static _extractSpellsFromClause (clause) {
+		const out = [];
+		const seen = new Set();
+		const tagRe = /\{@spell\s+([^}|]+)(?:\|([^}]+))?\}/gi;
+		let tag;
+		while ((tag = tagRe.exec(clause)) !== null) {
+			const name = (/** @type {*} */ (tag[1].trim())).toTitleCase();
+			const source = tag[2]?.trim()?.toUpperCase() || Parser.SRC_PHB;
+			const key = `${name}|${source}`.toLowerCase();
+			if (!seen.has(key)) { seen.add(key); out.push({name, source}); }
+		}
+		return out;
+	}
+}
+
+// Make available globally
+globalThis.FeatureChoiceParser = FeatureChoiceParser;
+
+/**
  * Utility to parse feature text and extract modifiers to rolls, AC, saves, etc.
  * Works with both official and homebrew content
  */
@@ -3664,6 +3780,10 @@ class CharacterSheetState {
 			// Pending spell choices (from feats/features that grant spell selection)
 			// Each choice: {id, featureName, featureId, filter, innate, uses, recharge, ability}
 			pendingSpellChoices: [],
+			// Pending feature choices parsed from prose "either A or B" grants
+			// (e.g. Arcane Archer Lore: pick a skill proficiency + a cantrip).
+			// Each choice: {id, featureName, featureId, kind: "skill"|"cantrip", options, count}
+			pendingFeatureChoices: [],
 			// TGTT passive metamagic tuning state
 			tunedMetamagics: [],
 
@@ -10894,6 +11014,147 @@ class CharacterSheetState {
 		this.removePendingSpellChoice(choiceId);
 	}
 
+	// =========================================================================
+	// Pending feature choices (prose "either A or B" grants — e.g. Arcane Archer
+	// Lore's skill-proficiency + cantrip picks). Kept separate from
+	// pendingSpellChoices (which are filter-based spell grants from feats).
+	// =========================================================================
+
+	getPendingFeatureChoices () {
+		return [...(this._data.pendingFeatureChoices || [])];
+	}
+
+	hasPendingFeatureChoices () {
+		return (this._data.pendingFeatureChoices?.length || 0) > 0;
+	}
+
+	/**
+	 * Queue a prose-parsed feature choice. Deduped by featureId + kind + option
+	 * signature so respec/level-up replays don't stack duplicate prompts.
+	 * @param {{featureName?: string, featureId?: string, kind: "skill"|"cantrip", options: Array, count?: number}} choice
+	 * @returns {boolean} True if a new choice was queued.
+	 */
+	addPendingFeatureChoice (choice) {
+		if (!choice || !choice.kind || !Array.isArray(choice.options) || choice.options.length < 2) return false;
+		if (!this._data.pendingFeatureChoices) this._data.pendingFeatureChoices = [];
+
+		const sig = this._featureChoiceSignature(choice);
+		const exists = this._data.pendingFeatureChoices.some(c => this._featureChoiceSignature(c) === sig);
+		if (exists) return false;
+
+		this._data.pendingFeatureChoices.push({
+			id: CryptUtil.uid(),
+			featureName: choice.featureName,
+			featureId: choice.featureId,
+			kind: choice.kind,
+			options: choice.options,
+			count: choice.count || 1,
+		});
+		return true;
+	}
+
+	_featureChoiceSignature (choice) {
+		const opts = (choice.options || []).map(o => (typeof o === "string" ? o : `${o.name}|${o.source}`).toLowerCase()).sort().join(",");
+		return `${choice.featureId || choice.featureName || ""}|${choice.kind}|${opts}`;
+	}
+
+	removePendingFeatureChoice (choiceId) {
+		if (!this._data.pendingFeatureChoices) return;
+		this._data.pendingFeatureChoices = this._data.pendingFeatureChoices.filter(c => c.id !== choiceId);
+	}
+
+	clearPendingFeatureChoicesByFeature (featureIdOrName) {
+		if (!this._data.pendingFeatureChoices) return;
+		this._data.pendingFeatureChoices = this._data.pendingFeatureChoices.filter(
+			c => c.featureId !== featureIdOrName && c.featureName !== featureIdOrName,
+		);
+	}
+
+	/**
+	 * Fulfill a pending feature choice with the player's selection.
+	 * @param {string} choiceId
+	 * @param {string|{name: string, source: string, level?: number, school?: string}} selection
+	 *   For kind "skill": the normalized skill key. For kind "cantrip": a spell object.
+	 * @param {Array} [allSpells] Optional full spell list for cantrip metadata enrichment.
+	 * @returns {boolean} True if fulfilled.
+	 */
+	fulfillFeatureChoice (choiceId, selection, allSpells = null) {
+		const choice = this._data.pendingFeatureChoices?.find(c => c.id === choiceId);
+		if (!choice) return false;
+
+		if (choice.kind === "skill") {
+			const skillKey = String(selection).toLowerCase().replace(/\s+/g, "");
+			this.addSkillProficiency(skillKey);
+		} else if (choice.kind === "cantrip") {
+			const sel = typeof selection === "string"
+				? choice.options.find(o => o.name?.toLowerCase() === selection.toLowerCase())
+				: selection;
+			if (!sel) return false;
+			const fullSpell = allSpells?.length
+				? (/** @type {*} */ (CharacterSheetClassUtils))._resolveSpellReference(`${sel.name}|${sel.source}`, allSpells)
+				: null;
+			if (fullSpell) {
+				this.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(fullSpell, {
+					sourceFeature: choice.featureName,
+					sourceClass: null,
+				}));
+			} else {
+				this.addCantrip({
+					name: sel.name,
+					source: sel.source,
+					school: sel.school,
+					sourceFeature: choice.featureName,
+				});
+			}
+		} else {
+			return false;
+		}
+
+		this.removePendingFeatureChoice(choiceId);
+		return true;
+	}
+
+	/**
+	 * Parse prose "either A or B" choices from a feature and queue them. Returns the
+	 * skill/spell identities claimed by those choices so the greedy proficiency/spell
+	 * parsers can skip them (preventing double-granting). Identity-based — no text
+	 * surgery on the description.
+	 * @param {*} feature
+	 * @param {string} featureId
+	 * @returns {{claimedSkills: Set<string>, claimedSpells: Set<string>}}
+	 */
+	_processFeatureChoices (feature, featureId) {
+		const claimedSkills = new Set();
+		const claimedSpells = new Set();
+		if (!feature) return {claimedSkills, claimedSpells};
+
+		const {skillChoices, cantripChoices} = FeatureChoiceParser.extractChoices(feature);
+
+		skillChoices.forEach(choice => {
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId,
+				kind: "skill",
+				options: choice.options,
+				count: choice.count,
+			});
+			choice.options.forEach(s => claimedSkills.add(s));
+		});
+
+		cantripChoices.forEach(choice => {
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId,
+				kind: "cantrip",
+				options: choice.options,
+				count: choice.count,
+			});
+			choice.options.forEach(s => claimedSpells.add(s.name.toLowerCase()));
+		});
+
+		return {claimedSkills, claimedSpells};
+	}
+
 	setSpellPrepared (spellIdOrName, sourceOrPrepared, prepared) {
 		// Support both (id, prepared) and (name, source, prepared) signatures
 		let spell;
@@ -13749,6 +14010,8 @@ class CharacterSheetState {
 						// Curving Shot (level 7): Redirect missed arrow
 						if (level >= 7) {
 							calculations.hasCurvingShot = true;
+							// Magic Arrow (level 7): ranged weapon attacks count as magical
+							calculations.hasMagicArrow = true;
 						}
 
 						// Ever-Ready Shot (level 15): Regain use on initiative if none
@@ -24681,11 +24944,16 @@ class CharacterSheetState {
 			}
 		}
 
+		// Parse prose "either A or B" player choices (e.g. Arcane Archer Lore's skill +
+		// cantrip picks) into pending feature choices, and collect the skill/spell
+		// identities they claim so the greedy parsers below don't also grant them.
+		const {claimedSkills, claimedSpells} = this._processFeatureChoices(feature, featureData.id);
+
 		// Check if this feature grants spells (innate or known)
-		this._processFeatureSpells(feature, featureData.id, {allSpells: opts?.allSpells});
+		this._processFeatureSpells(feature, featureData.id, {allSpells: opts?.allSpells, claimedSpells});
 
 		// Check if this feature grants modifiers to rolls, AC, etc.
-		this._processFeatureModifiers(feature, featureData.id);
+		this._processFeatureModifiers(feature, featureData.id, {claimedSkills});
 
 		// Check if this feature grants specific combat methods directly (e.g. Primal Focus Upgrade).
 		// Resolve each granted method against the catalog and add it as a real combat method.
@@ -25123,11 +25391,15 @@ class CharacterSheetState {
 	 * Process modifiers granted by a feature (AC bonuses, save bonuses, etc.)
 	 * @param {object} feature - Feature data
 	 * @param {string} featureId - ID of the feature in state
+	 * @param {object} [opts]
+	 * @param {Set<string>} [opts.claimedSkills] - Skill keys handled by a pending feature
+	 *   CHOICE (e.g. Arcane Archer Lore's "Arcana or Nature"); skip auto-granting them.
 	 */
-	_processFeatureModifiers (feature, featureId) {
+	_processFeatureModifiers (feature, featureId, opts = {}) {
 		if (!feature.description) {
 			return;
 		}
+		const claimedSkills = opts.claimedSkills;
 
 		// Skip combat methods (stances) - their effects are handled dynamically by the stance system
 		// (activateStance, _getActiveStanceEffects, getSkillBonusFromStates, etc.)
@@ -25153,6 +25425,7 @@ class CharacterSheetState {
 				const profTarget = parts[2]; // skillname, ability, armortype, weaponname, toolname
 
 				if (profType === "skill") {
+					if (claimedSkills?.has(profTarget)) return; // handled as a player choice
 					const currentLevel = this.getSkillProficiency(profTarget);
 					if (mod.value > currentLevel) {
 						this.setSkillProficiency(profTarget, mod.value);
@@ -25343,7 +25616,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if there are pending spell choices that need UI interaction
 	 */
 	_processFeatureSpells (feature, featureId, opts = {}) {
-		const {allSpells, skipAdditionalSpellChoices} = opts;
+		const {allSpells, skipAdditionalSpellChoices, claimedSpells} = opts;
 		let spells = [];
 		let hasPendingChoices = false;
 
@@ -25353,6 +25626,12 @@ class CharacterSheetState {
 		} else if (feature.description && SpellGrantParser.grantsSpells(feature.description)) {
 			// Fall back to parsing from description (for homebrew or missing data)
 			spells = SpellGrantParser.parseSpellsFromText(feature.description, feature.name);
+		}
+
+		// Drop spells already handled as a player CHOICE (e.g. Arcane Archer Lore's
+		// "prestidigitation or druidcraft" cantrip) so they aren't auto-granted too.
+		if (claimedSpells?.size) {
+			spells = spells.filter(s => !(s?.name && claimedSpells.has(s.name.toLowerCase())));
 		}
 
 		if (!spells.length) return false;
@@ -25461,6 +25740,16 @@ class CharacterSheetState {
 			this._data.attacks = this._data.attacks.filter(a => a.featureId !== feature.id && a.sourceFeature !== feature.name);
 			// Remove associated innate spells
 			this.removeInnateSpellsByFeature(feature.name);
+			// Remove any unresolved prose "either A or B" choices queued by this feature
+			this.clearPendingFeatureChoicesByFeature(feature.id);
+			this.clearPendingFeatureChoicesByFeature(feature.name);
+			// Remove any cantrip this feature granted as a player choice (sourceFeature is
+			// unique to the granting feature — e.g. Arcane Archer Lore's chosen cantrip).
+			if (this._data.spellcasting?.cantripsKnown?.length) {
+				this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(
+					c => c.sourceFeature !== feature.name,
+				);
+			}
 			// Remove associated modifiers (by ID and by name for orphaned modifiers)
 			this.removeModifiersByFeature(feature.id);
 			this.removeModifiersByName(feature.name);

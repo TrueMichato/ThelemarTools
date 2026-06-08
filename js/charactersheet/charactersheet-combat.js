@@ -19,6 +19,7 @@ class CharacterSheetCombat {
 		this._lastRiderRoundUsed = {}; // riderId -> combat round: per-rider once-per-turn bookkeeping
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
 		this._handOfHarmUsedThisTurn = false;
+		this._flankingEnabled = false; // Toggle: add +2 to-hit on melee attacks while flanking (RAW optional rule)
 
 		this._init();
 	}
@@ -927,7 +928,12 @@ class CharacterSheetCombat {
 		// Get bonus from active states (activated abilities like combat stances)
 		const stateAttackBonus = this._state.getBonusFromStates?.("attack") || 0;
 
-		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus;
+		// Combat-tab-local contributors (e.g. Flanking) feed the SAME total via a
+		// generic pre-roll hook so other positional/tactical modifiers can plug in.
+		const localContribution = this._getCombatLocalAttackBonus({isMelee, attack});
+		const localAttackBonus = localContribution.bonus || 0;
+
+		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus + localAttackBonus;
 
 		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
 		const rollResult = this._page.rollD20({event, mode: stateMode});
@@ -947,11 +953,14 @@ class CharacterSheetCombat {
 
 		// Build state effect label for display
 		const stateEffectLabel = this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
+		const localLabel = localContribution.parts?.length
+			? ` <span class="ve-muted">(${localContribution.parts.map(p => `${p.label} ${p.value >= 0 ? "+" : ""}${p.value}`).join(", ")})</span>`
+			: "";
 
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
 		this._page.showDiceResult({
-			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}`,
+			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}`,
 			roll: rollResult.roll,
 			modifier: totalBonus,
 			total,
@@ -983,6 +992,234 @@ class CharacterSheetCombat {
 
 		// Consume "next attack only" states (e.g. Steady Aim grants advantage on ONE attack)
 		this._consumeOnAttackStates();
+
+		// Generic post-attack extension point. Captured context is passed to each
+		// registered hook (Arcane Shot picker, etc.). Hooks are async and
+		// fire-and-forget so the synchronous roll/display path above is never blocked.
+		const postCtx = {
+			attack,
+			attackId,
+			isMelee,
+			isRanged: !isMelee,
+			hasAdvantage,
+			hasDisadvantage,
+			rollResult,
+			total,
+			totalBonus,
+			isCrit: rollResult.roll >= critRange,
+			isFumble: rollResult.roll === 1,
+		};
+		void this._runPostAttackHooks(postCtx).catch(e => {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet Combat] post-attack hook error", e);
+		});
+	}
+
+	// =========================================================================
+	// Generic post-attack hook pipeline (#7). Each hook is {id, predicate, handler}.
+	// `predicate(ctx)` is a cheap sync gate; `handler(ctx)` is async (may show a
+	// modal, roll damage, spend a resource). Kept feature-agnostic — feature logic
+	// lives entirely in the hook handlers, not in `_rollAttack`.
+	// =========================================================================
+
+	/**
+	 * @returns {Array<{id: string, predicate: (ctx: *) => boolean, handler: (ctx: *) => Promise<void>}>}
+	 */
+	_getPostAttackHooks () {
+		return [
+			{
+				id: "arcaneShot",
+				predicate: (ctx) => ctx.isRanged
+					&& this._state.hasArcaneShot?.()
+					&& (this._state.getArcaneShotRemaining?.() || 0) > 0
+					&& (this._state.getKnownArcaneShots?.()?.length || 0) > 0
+					&& this._isArcaneArcherWeapon(ctx.attack),
+				handler: (ctx) => this._pPickArcaneShot(ctx),
+			},
+		];
+	}
+
+	/**
+	 * Run all post-attack hooks in order. Hooks whose predicate fails are skipped.
+	 * Errors in one hook never abort the others (or the roll).
+	 * @param {*} ctx
+	 * @returns {Promise<void>}
+	 */
+	async _runPostAttackHooks (ctx) {
+		const hooks = this._getPostAttackHooks();
+		for (const hook of hooks) {
+			let applies = false;
+			try { applies = !!hook.predicate(ctx); } catch (e) { applies = false; }
+			if (!applies) continue;
+			try {
+				// eslint-disable-next-line no-await-in-loop
+				await hook.handler(ctx);
+			} catch (e) {
+				// eslint-disable-next-line no-console
+				console.error(`[CharSheet Combat] post-attack hook "${hook.id}" failed`, e);
+			}
+		}
+	}
+
+	/**
+	 * Is this attack made with a bow eligible for Arcane Shot? RAW: shortbow or
+	 * longbow only (crossbows excluded). Generous on name so homebrew bows qualify,
+	 * but explicitly excludes crossbows.
+	 * @param {*} attack
+	 * @returns {boolean}
+	 */
+	_isArcaneArcherWeapon (attack) {
+		if (!attack || attack.isSpell) return false;
+		const name = `${attack.name || ""} ${attack.sourceItem?.name || ""} ${attack.sourceItem?.baseItem || ""}`.toLowerCase();
+		if (/crossbow/.test(name)) return false;
+		return /\bbow\b/.test(name) || /\b(short|long)bow\b/.test(name);
+	}
+
+	/**
+	 * Post-roll Arcane Shot picker. Sneak-attack-style list of known shot options
+	 * (each hoverable). Selecting one spends a use, rolls any `{@damage}` found in
+	 * the option's entries, and shows the result with the save DC. Control-only
+	 * options (no damage) still apply — their effect text is shown instead.
+	 * @param {*} ctx Post-attack context from `_rollAttack`.
+	 * @returns {Promise<void>}
+	 */
+	async _pPickArcaneShot (ctx) {
+		// Re-validate at prompt time (state may have changed between roll and modal).
+		if (!this._state.hasArcaneShot?.() || (this._state.getArcaneShotRemaining?.() || 0) <= 0) return;
+		const shots = this._state.getKnownArcaneShots?.() || [];
+		if (!shots.length) return;
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const dc = calcs.arcaneShotSaveDc;
+		const ability = (calcs.arcaneShotAbility || "int").toUpperCase();
+
+		let resolveOuter = null;
+		let isResolved = false;
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: `Arcane Shot — ${ctx.attack?.name || "Ranged Attack"}`,
+			isMinHeight0: true,
+			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
+		});
+
+		await new Promise((resolve) => {
+			resolveOuter = resolve;
+			const finalize = () => { if (isResolved) return false; isResolved = true; resolve(); return true; };
+
+			const remaining = this._state.getArcaneShotRemaining?.() || 0;
+			const rowsHtml = shots.map((shot, i) => {
+				const dmg = this._extractArcaneShotDamage(shot);
+				const dmgBadge = dmg
+					? `<span class="badge badge-danger ml-1" title="Arcane Shot damage">${dmg.dice}${dmg.type ? ` ${dmg.type}` : ""}</span>`
+					: `<span class="badge badge-default ml-1" title="No direct damage — effect only">effect</span>`;
+				const srcAbbr = shot.source ? Parser.sourceJsonToAbv(shot.source) : "";
+				let effectHtml = shot.description || "";
+				if (!effectHtml && Array.isArray(shot.entries) && typeof Renderer !== "undefined") {
+					try { effectHtml = Renderer.get().render({type: "entries", entries: shot.entries}); } catch (e) { effectHtml = ""; }
+				}
+				return `
+					<button class="ve-btn ve-btn-default charsheet__arcaneshot-opt" data-idx="${i}" style="display:block; width:100%; text-align:left; margin-bottom:6px;">
+						<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+							<span class="bold">${shot.name}</span>
+							${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
+							${dmgBadge}
+						</div>
+						${effectHtml ? `<div class="ve-small ve-muted mt-1">${effectHtml}</div>` : ""}
+					</button>`;
+			}).join("");
+
+			modalInner.innerHTML = `
+				<div class="charsheet__arcaneshot-pick">
+					<p class="ve-small ve-muted charsheet__arcaneshot-pick__lede">
+						Choose the Arcane Shot you loosed with this attack. Spends one use
+						(${remaining} remaining)${dc != null ? `; targets must make a DC ${dc} ${ability} save where noted` : ""}.
+					</p>
+					<div class="charsheet__arcaneshot-pick__opts">${rowsHtml}</div>
+					<div class="ve-flex-h-right" style="gap: 8px; margin-top: 12px;">
+						<button class="ve-btn ve-btn-default" data-act="none">None / cancel</button>
+					</div>
+				</div>
+			`;
+
+			modalInner.querySelectorAll(".charsheet__arcaneshot-opt").forEach((/** @type {*} */ el) => {
+				el.addEventListener("click", () => {
+					const idx = Number(el.getAttribute("data-idx"));
+					const shot = shots[idx];
+					if (!finalize()) return; // guard against rapid double-click double-spend
+					doClose();
+					this._applyArcaneShot(shot, ctx, {dc, ability});
+				});
+			});
+			modalInner.querySelector(`[data-act="none"]`).addEventListener("click", () => { finalize(); doClose(); });
+		});
+	}
+
+	/**
+	 * Spend a use and resolve the chosen Arcane Shot: roll its damage (if any) and
+	 * surface the result + save DC. Data-driven (parses the option's own `{@damage}`),
+	 * so homebrew shots work without per-option code.
+	 * @param {*} shot
+	 * @param {*} ctx
+	 * @param {{dc: number, ability: string}} saveInfo
+	 */
+	_applyArcaneShot (shot, ctx, saveInfo) {
+		if (!shot) return;
+		if (!this._state.useArcaneShot?.()) {
+			JqueryUtil.doToast({type: "warning", content: "No Arcane Shot uses remaining!"});
+			return;
+		}
+
+		const dmg = this._extractArcaneShotDamage(shot);
+		const dcNote = saveInfo?.dc != null ? ` — DC ${saveInfo.dc} ${saveInfo.ability} save` : "";
+		if (dmg) {
+			let total = 0;
+			try { total = Renderer.dice.parseRandomise2(dmg.dice) || 0; } catch (e) { total = 0; }
+			this._page.showDiceResult?.({
+				title: `${shot.name}${dcNote}`,
+				roll: total,
+				modifier: 0,
+				total,
+				resultNote: dmg.type ? `${dmg.type} damage` : "",
+				subtitle: dmg.dice,
+			});
+		} else {
+			JqueryUtil.doToast({type: "info", content: `${shot.name} applied${dcNote}.`});
+		}
+
+		this._page.saveCharacter?.();
+		this.renderCombatArcaneArcher?.();
+	}
+
+	/**
+	 * Pull the first `{@damage ...}`/`{@dice ...}` expression from an Arcane Shot
+	 * option's entries/description, plus a trailing damage-type word if present.
+	 * @param {{entries?: *, description?: string}} shot
+	 * @returns {{dice: string, type: string}|null}
+	 */
+	_extractArcaneShotDamage (shot) {
+		const text = this._getArcaneShotRawText(shot);
+		if (!text) return null;
+		const m = /\{@(?:damage|dice)\s+([^}|]+)(?:\|[^}]*)?\}\s*([a-z]+)?\s*(damage)?/i.exec(text);
+		if (!m) return null;
+		const dice = m[1].trim();
+		// Damage type is the word immediately following the dice when it precedes "damage".
+		let type = "";
+		if (m[3] && m[2]) type = m[2].toLowerCase();
+		return {dice, type};
+	}
+
+	/** Raw text (tags intact) for an Arcane Shot option. */
+	_getArcaneShotRawText (shot) {
+		if (Array.isArray(shot.entries)) {
+			const collect = (entry) => {
+				if (typeof entry === "string") return entry;
+				if (Array.isArray(entry)) return entry.map(collect).join(" ");
+				if (entry && typeof entry === "object" && Array.isArray(entry.entries)) return entry.entries.map(collect).join(" ");
+				return "";
+			};
+			const joined = shot.entries.map(collect).join(" ");
+			if (joined.trim()) return joined;
+		}
+		return typeof shot.description === "string" ? shot.description : "";
 	}
 
 	/**
@@ -2285,6 +2522,7 @@ class CharacterSheetCombat {
 		this.renderCombatMethods();
 		this.renderCombatRanger();
 		this.renderCombatArcaneArcher();
+		this.renderCombatFlanking();
 		this.renderCombatDefenses();
 		this.renderCombatConditions();
 		this.renderCombatEffects();
@@ -6065,6 +6303,8 @@ class CharacterSheetCombat {
 		const ability = (calcs.arcaneShotAbility || "int").toUpperCase();
 		const knownShots = this._state.getKnownArcaneShots?.() || [];
 		const hasEverReady = !!calcs.hasEverReadyShot;
+		const hasMagicArrow = !!calcs.hasMagicArrow;
+		const hasCurvingShot = !!calcs.hasCurvingShot;
 
 		const block = e_({tag: "div", clazz: "charsheet__combat-arcanearcher"});
 
@@ -6081,9 +6321,21 @@ class CharacterSheetCombat {
 			html += `<div class="ve-small ve-muted mb-2">✦ <span class="bold">Ever-Ready Shot:</span> when you roll initiative with no uses left, regain one.${remaining === 0 ? ` <button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-as-everready ml-1">Regain (initiative)</button>` : ""}</div>`;
 		}
 
+		if (hasMagicArrow || hasCurvingShot) {
+			html += `<div class="charsheet__combat-arcanearcher-passives mb-2">`;
+			if (hasMagicArrow) {
+				html += `<div class="ve-small ve-muted">🏹 <span class="bold">Magic Arrow:</span> your ranged weapon attacks count as magical for overcoming resistance/immunity.</div>`;
+			}
+			if (hasCurvingShot) {
+				html += `<div class="ve-small ve-muted">↪ <span class="bold">Curving Shot:</span> when you miss with a magic arrow, use a bonus action to reroll the attack against the same or a different target within range.</div>`;
+			}
+			html += `</div>`;
+		}
+
 		if (!knownShots.length) {
 			html += `<div class="ve-muted ve-small">No Arcane Shot options known yet. Choose them when you gain or level up the Arcane Archer subclass. (Options are sourced from XGE — check your source filters if none appear.)</div>`;
 		} else {
+			html += `<div class="ve-small ve-muted mb-1"><span class="glyphicon glyphicon-info-sign mr-1"></span>Roll a ranged attack with a bow to choose and apply an Arcane Shot.</div>`;
 			html += `<div class="charsheet__combat-arcanearcher-shots mt-1">`;
 			knownShots.forEach(shot => {
 				let nameHtml = shot.name;
@@ -6143,6 +6395,72 @@ class CharacterSheetCombat {
 				refresh();
 				JqueryUtil.doToast({type: "success", content: "Ever-Ready Shot: regained one use"});
 			}
+		});
+	}
+
+	// =========================================================================
+	// Flanking (#12) — an optional +2-to-hit melee toggle that feeds the SAME
+	// combat `_rollAttack` total via `_getCombatLocalAttackBonus`. Self-contained:
+	// own container/classes, transient `_flankingEnabled`, no edits to the shared
+	// active-states rendering.
+	// =========================================================================
+
+	/**
+	 * Combat-tab-local pre-roll attack contributors (currently just Flanking).
+	 * Returns the summed bonus plus labelled parts for the result breakdown.
+	 * Generic so future positional modifiers can be added in one place.
+	 * @param {{isMelee: boolean, attack: *}} ctx
+	 * @returns {{bonus: number, parts: Array<{label: string, value: number}>}}
+	 */
+	_getCombatLocalAttackBonus (ctx) {
+		const parts = [];
+		// Flanking (RAW optional rule): +2 to hit, melee attacks only.
+		if (this._flankingEnabled && this._isStrictMelee(ctx?.attack)) {
+			parts.push({label: "Flanking", value: 2});
+		}
+		const bonus = parts.reduce((sum, p) => sum + p.value, 0);
+		return {bonus, parts};
+	}
+
+	/**
+	 * Strict melee test for positional modifiers (Flanking). Only EXPLICIT melee
+	 * signals qualify — never the loose "range has no slash" heuristic — so ranged
+	 * attacks with a numeric range (e.g. "60 ft.") can never receive flanking.
+	 * @param {*} attack
+	 * @returns {boolean}
+	 */
+	_isStrictMelee (attack) {
+		if (!attack || attack.isSpell) return false;
+		if (attack.isRanged === true) return false;
+		if (attack.isMelee === true) return true;
+		if (attack.type === "melee") return true;
+		const range = typeof attack.range === "string" ? attack.range.toLowerCase() : "";
+		if (range === "melee" || range.includes("reach") || range.includes("touch")) return true;
+		return false;
+	}
+
+	renderCombatFlanking () {
+		const container = document.getElementById("charsheet-combat-flanking");
+		const section = document.getElementById("charsheet-combat-flanking-section");
+		if (!container) return;
+		if (section) section.style.display = "";
+		container.innerHTML = "";
+
+		const on = !!this._flankingEnabled;
+		const block = e_({tag: "div", clazz: "charsheet__combat-flanking"});
+		block.innerHTML = `
+			<div class="ve-flex-v-center gap-2 ve-flex-wrap">
+				<button class="ve-btn ve-btn-xs ${on ? "ve-btn-success" : "ve-btn-default"} charsheet__combat-flanking-toggle"
+					title="Toggle Flanking. While on, melee attack rolls gain +2 to hit (optional rule).">
+					<span class="glyphicon glyphicon-screenshot mr-1"></span>${on ? "Flanking: ON (+2 melee)" : "Flanking: OFF"}
+				</button>
+			</div>
+			<div class="ve-small ve-muted mt-1">Optional rule: when you and an ally flank a target, melee attacks gain +2 to hit. Ranged attacks are unaffected.</div>`;
+		container.appendChild(block);
+
+		block.querySelector(".charsheet__combat-flanking-toggle")?.addEventListener("click", () => {
+			this._flankingEnabled = !this._flankingEnabled;
+			this.renderCombatFlanking();
 		});
 	}
 
