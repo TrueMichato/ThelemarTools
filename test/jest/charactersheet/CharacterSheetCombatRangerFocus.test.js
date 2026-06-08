@@ -276,3 +276,46 @@ describe("Bug — Overview/Combat Primal Focus ability parity", () => {
 		expect(overviewBody).not.toContain("effectLines");
 	});
 });
+
+describe("Bug #11 — reminder surfaces filter methods/applied-elsewhere + hover the names", () => {
+	const charsheetSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+	const combatSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-combat.js"), "utf8");
+	const featuresSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-features.js"), "utf8");
+
+	const overviewBody = (() => {
+		const m = charsheetSrc.match(/_renderOverviewRanger\s*\(\)\s*\{[\s\S]*?\n\t_renderOverviewAbilities\s*\(\)/);
+		return m ? m[0] : "";
+	})();
+	const combatBody = (() => {
+		const m = combatSrc.match(/renderCombatRanger\s*\(\)\s*\{[\s\S]*?\n\trenderCombatArcaneArcher\s*\(\)/);
+		return m ? m[0] : "";
+	})();
+
+	it("Overview and Combat both filter the catalog through the generic predicate (a + b)", () => {
+		expect(overviewBody).toContain("isPrimalFocusReminderAbility");
+		expect(combatBody).toContain("isPrimalFocusReminderAbility");
+	});
+
+	it("Overview and Combat both wrap ability/reminder names in the inline-entries hover (c)", () => {
+		expect(overviewBody).toContain("buildInlineEntriesHoverLink");
+		expect(combatBody).toContain("buildInlineEntriesHoverLink");
+	});
+
+	it("Combat no longer renders the dead 'Method' badge branch in the ability rows (a)", () => {
+		// Methods are filtered out before render, so the method-kind badge is gone.
+		expect(combatBody).not.toContain("⚔️ Method");
+	});
+
+	it("Overview renders the bulleted notes list for multi-mechanic reminders (d)", () => {
+		expect(overviewBody).toContain("charsheet__ranger-ability-notes");
+	});
+
+	it("Features-tab Primal Focus card also filters through the predicate (3rd surface)", () => {
+		const m = featuresSrc.match(/const abilityRowsHtml = modeAbilities[\s\S]*?\.join\(""\);/);
+		const block = m ? m[0] : "";
+		expect(block.length).toBeGreaterThan(0);
+		expect(block).toContain("isPrimalFocusReminderAbility");
+		// The dead method badge branch is gone here too.
+		expect(block).not.toContain("⚔️ Method");
+	});
+});

@@ -45,6 +45,29 @@ describe("getRangerPassiveReminders", () => {
 		expect(entry.note).toMatch(/exhaustion/i);
 	});
 
+	test("Enduring Traveler splits its three mechanics into distinct notes bullets (BUG #11)", () => {
+		// The three benefits used to cram into one paragraph; they now ship as a
+		// structured `notes` array so the renderer can bullet them, while `note` stays
+		// a non-empty joined string for at-a-glance/title text + backward compatibility.
+		const entry = CharacterSheetClassUtils.getRangerPassiveReminders({hasEnduringTraveler: true})[0];
+		expect(Array.isArray(entry.notes)).toBe(true);
+		expect(entry.notes).toHaveLength(3);
+		// Each bullet covers exactly one distinct mechanic.
+		expect(entry.notes[0]).toMatch(/extreme cold/i);
+		expect(entry.notes[0]).toMatch(/extreme heat/i);
+		expect(entry.notes[1]).toMatch(/exhaustion/i);
+		expect(entry.notes[2]).toMatch(/camp|journey/i);
+		// No single bullet crams everything together.
+		entry.notes.forEach(n => {
+			expect(typeof n).toBe("string");
+			expect(n.length).toBeGreaterThan(0);
+		});
+		// `note` remains a non-empty string covering the same ground (backward compat).
+		expect(typeof entry.note).toBe("string");
+		expect(entry.note).toMatch(/extreme cold/i);
+		expect(entry.note).toMatch(/exhaustion/i);
+	});
+
 	test("excludes Deft Explorer — its whole benefit is applied/shown elsewhere", () => {
 		// Expertise, languages, and the extra prepared spell are baked into state and
 		// shown on the Skills / Languages / Spells panels, so it is not a reminder.
