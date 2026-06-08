@@ -1700,7 +1700,7 @@ class CharacterSheetBuilder {
 						} else if (typeof feature === "string") {
 							// Fallback for raw string format - look up description from subclass features data
 							const parts = feature.split("|");
-							const featureLevel = parseInt(parts[parts.length - 1]);
+							const featureLevel = CharacterSheetClassUtils.getSubclassFeatureRefLevel(parts);
 							if (featureLevel === 1) {
 								const fullFeatureData = this._getSubclassFeatureData(
 									parts[0],
@@ -1737,7 +1737,7 @@ class CharacterSheetBuilder {
 				} else if (typeof levelFeatures === "string") {
 					// Raw string format (pre-DataLoader format)
 					const parts = levelFeatures.split("|");
-					const featureLevel = parseInt(parts[parts.length - 1]);
+					const featureLevel = CharacterSheetClassUtils.getSubclassFeatureRefLevel(parts);
 					if (featureLevel === 1) {
 						const fullFeatureData = this._getSubclassFeatureData(
 							parts[0],
