@@ -7197,6 +7197,15 @@ class CharacterSheetPage {
 				// Fall back to plain name if hover fails
 				nameHtml = state.name;
 			}
+		} else if (state.stateTypeId === "zodiacForm" && state.zodiacForm?.formId) {
+			// Zodiac Form (Circle of the Zodiac): resolve the hover to the CHOSEN
+			// constellation's own entry, not the generic "Zodiac Form: Month"
+			// feature. The visible label stays the full state name
+			// (e.g. "Zodiac Form: Octopus").
+			const formEntity = CharacterSheetClassUtils.getZodiacFormHoverEntity(state);
+			if (formEntity) {
+				nameHtml = CharacterSheetClassUtils.buildInlineEntriesHoverLink(state.name, formEntity.name, formEntity.entries) || nameHtml;
+			}
 		} else if (state.sourceFeatureId) {
 			const feature = this._state.getFeatures().find(f => f.id === state.sourceFeatureId);
 			if (feature) {

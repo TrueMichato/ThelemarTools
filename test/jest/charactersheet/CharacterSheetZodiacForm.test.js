@@ -64,9 +64,259 @@ describe("Zodiac Form — definitions", () => {
 		}
 	});
 
-	it("getZodiacFormDef resolves by id", () => {
-		expect(CharacterSheetState.getZodiacFormDef("bulette").name).toBe("Bulette");
-		expect(CharacterSheetState.getZodiacFormDef("nope")).toBeNull();
+	it("every month form definition carries non-empty entries for hovers", () => {
+		const months = CharacterSheetState.ZODIAC_FORM_DEFS.filter(d => d.tier === "month");
+		for (const def of months) {
+			expect(Array.isArray(def.entries)).toBe(true);
+			expect(def.entries.length).toBeGreaterThan(0);
+			expect(def.entries.every(e => typeof e === "string" && e.length)).toBe(true);
+		}
+	});
+});
+
+describe("Zodiac Form — per-form effect matrix", () => {
+	// Each month form must surface its primary declared effect: a passive that
+	// mutates derived stats, or a readable info label for triggered abilities.
+	const cases = [
+		["beaver", (s) => {
+			const labels = s.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label);
+			// Druid level 9 + proficiency +4 = 13; guard against bad interpolation.
+			const label = labels.find(l => /reduce the damage/i.test(l));
+			expect(label).toBeDefined();
+			expect(label).not.toMatch(/undefined|NaN/i);
+			expect(label).toContain("13");
+		}],
+		["aurochs", (s) => {
+			expect(s.hasAdvantageFromStates("check:str")).toBe(true);
+			expect(s.hasAdvantageFromStates("save:str")).toBe(true);
+			expect(s.getCarrySizeBonusFromStates()).toBe(1);
+		}],
+		["horse", (s) => {
+			s.setSpeed("walk", 30);
+			s.deactivateState("zodiacForm");
+			s.activateZodiacForm("horse");
+			expect(s.getWalkSpeed()).toBe(60);
+		}],
+		["octopus", (s) => {
+			s.setSpeed("walk", 30);
+			s.deactivateState("zodiacForm");
+			s.activateZodiacForm("octopus");
+			expect(s.getSpeed("swim")).toBe(30);
+			expect(s.getReachBonus()).toBe(5);
+		}],
+		["peacock", (s) => {
+			s.setSpellcastingAbility("wis");
+			const dc = s.getFeatureCalculations().peacockSaveDc;
+			const label = s.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label)
+				.find(l => /Wisdom save/i.test(l));
+			expect(label).toBeDefined();
+			expect(label).not.toMatch(/undefined|NaN/i);
+			expect(label).toContain(String(dc));
+		}],
+		["roc", (s) => {
+			const label = s.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label)
+				.find(l => /Gust of Wind|Warding Wind/i.test(l));
+			expect(label).toBeDefined();
+			expect(label).not.toMatch(/undefined|NaN/i);
+			expect(label).toMatch(/without expending a spell slot/i);
+		}],
+		["bee", (s) => {
+			const dmg = s.getFeatureCalculations().beeDamage;
+			const label = s.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label)
+				.find(l => /radiant damage/i.test(l));
+			expect(label).toBeDefined();
+			expect(label).not.toMatch(/undefined|NaN/i);
+			expect(label).toContain(dmg);
+		}],
+		["hound", (s) => {
+			const label = s.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label)
+				.find(l => /mark a creature/i.test(l));
+			expect(label).toBeDefined();
+			expect(label).not.toMatch(/undefined|NaN/i);
+			expect(label).toMatch(/disadvantage/i);
+		}],
+		["cat", (s) => {
+			expect(s.aggregateModifiers("skill:stealth").minimum).toBe(8);
+		}],
+		["griffon", (s) => {
+			const label = s.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label)
+				.find(l => /frightened/i.test(l));
+			expect(label).toBeDefined();
+			expect(label).not.toMatch(/undefined|NaN/i);
+			// Surfaces both halves: frightened-save advantage and the bonus melee attack.
+			expect(label).toMatch(/extra melee attack|additional melee attack/i);
+		}],
+		["bulette", (s) => {
+			s.setSpeed("walk", 30);
+			s.deactivateState("zodiacForm");
+			s.activateZodiacForm("bulette");
+			expect(s.getBonusFromStates("ac")).toBeGreaterThan(0);
+			expect(s.getSpeed("burrow")).toBe(15);
+		}],
+		["phoenix", (s) => {
+			const heal = s.getFeatureCalculations().phoenixStabilizeHeal;
+			const label = s.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label)
+				.find(l => /regain/i.test(l));
+			expect(label).toBeDefined();
+			expect(label).not.toMatch(/undefined|NaN/i);
+			expect(label).toContain(heal);
+		}],
+	];
+
+	it.each(cases)("%s applies its primary declared effect", (formId, assertEffect) => {
+		const state = makeZodiacDruid(9, 16);
+		state.setSpeed("walk", 30);
+		state.setSpellcastingAbility("wis");
+		activateForm(state, formId);
+		assertEffect(state);
+	});
+});
+
+describe("Zodiac Form — specific-form hover resolution", () => {
+	let CharacterSheetClassUtils;
+	beforeAll(async () => {
+		await import("../../../js/charactersheet/charactersheet-class-utils.js");
+		CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+	});
+
+	it("resolves the hover entity to the CHOSEN form, not the generic feature", () => {
+		const state = makeZodiacDruid(3, 16);
+		activateForm(state, "octopus");
+		const stateRec = state._data.activeStates.find(s => s.stateTypeId === "zodiacForm");
+		const entity = CharacterSheetClassUtils.getZodiacFormHoverEntity(stateRec);
+		expect(entity).not.toBeNull();
+		// Hover heading is the specific constellation, not "Zodiac Form: Month".
+		expect(entity.name).toBe("Octopus");
+		expect(entity.type).toBe("entries");
+		expect(entity.entries.join(" ")).toMatch(/reach increases by 5 feet/i);
+	});
+
+	it("returns null for a non-zodiac active state", () => {
+		const state = makeZodiacDruid(3, 16);
+		state.activateState("wildShape", {name: "Wild Shape"});
+		const stateRec = state._data.activeStates.find(s => s.stateTypeId === "wildShape");
+		expect(CharacterSheetClassUtils.getZodiacFormHoverEntity(stateRec)).toBeNull();
+	});
+
+	it("renders the hover with the SPECIFIC form's name while keeping the full state label visible", () => {
+		// Both render paths (Overview + Combat) call buildInlineEntriesHoverLink
+		// with (state.name, formEntity.name, formEntity.entries). Stub the
+		// Renderer's hover so we can assert the label/name separation Bug 2 needs.
+		// NB: class-utils captures `Renderer` from globalThis at import, so we
+		// must MUTATE the existing object's `hover`, not replace `Renderer`.
+		const prevHover = globalThis.Renderer.hover;
+		const calls = [];
+		globalThis.Renderer.hover = {getInlineHover: (entity) => { calls.push(entity); return {html: `data-vet-stub="1"`}; }};
+		try {
+			const html = CharacterSheetClassUtils.buildInlineEntriesHoverLink(
+				"Zodiac Form: Octopus",
+				"Octopus",
+				CharacterSheetState.getZodiacFormDef("octopus").entries,
+			);
+			// Visible label stays the full active-state name...
+			expect(html).toContain(">Zodiac Form: Octopus<");
+			// ...but the hovered entry heading is the SPECIFIC constellation.
+			expect(calls).toHaveLength(1);
+			expect(calls[0].name).toBe("Octopus");
+			expect(calls[0].entries.join(" ")).toMatch(/reach increases by 5 feet/i);
+		} finally {
+			globalThis.Renderer.hover = prevHover;
+		}
+	});
+
+	it("HTML-escapes the visible label (sourced from save data)", () => {
+		const prevHover = globalThis.Renderer.hover;
+		globalThis.Renderer.hover = {getInlineHover: () => ({html: `data-vet-stub="1"`})};
+		try {
+			const html = CharacterSheetClassUtils.buildInlineEntriesHoverLink(
+				`Zodiac <script> & "Form"`,
+				"Octopus",
+				["x"],
+			);
+			expect(html).toContain("&lt;script&gt;");
+			expect(html).toContain("&amp;");
+			expect(html).not.toContain("<script>");
+		} finally {
+			globalThis.Renderer.hover = prevHover;
+		}
+	});
+});
+
+describe("Zodiac Form — load migration heals older saves", () => {
+	it("re-derives Octopus reach for a save whose snapshot predates the fix", () => {
+		const state = makeZodiacDruid(3, 16);
+		state.setSpeed("walk", 30);
+		activateForm(state, "octopus");
+
+		// Simulate an older persisted snapshot lacking the reach effect.
+		const json = state.toJson();
+		const zodiac = json.activeStates.find(s => s.stateTypeId === "zodiacForm");
+		zodiac.customEffects = zodiac.customEffects.filter(e => e.type !== "reach" && e.target !== "reach");
+		expect(zodiac.customEffects.some(e => e.type === "reach" || e.target === "reach")).toBe(false);
+
+		const reloaded = new CharacterSheetState();
+		reloaded.loadFromJson(json);
+
+		// Migration restores the reach bonus without disturbing the swim speed.
+		expect(reloaded.getReachBonus()).toBe(5);
+		expect(reloaded.getMeleeReach()).toBe(10);
+		expect(reloaded.getSpeed("swim")).toBe(30);
+	});
+
+	it("does not compound a speed-doubling form on reload", () => {
+		const state = makeZodiacDruid(3, 16);
+		state.setSpeed("walk", 30);
+		activateForm(state, "horse");
+		expect(state.getWalkSpeed()).toBe(60);
+
+		const json = state.toJson();
+		const reloaded = new CharacterSheetState();
+		reloaded.loadFromJson(json);
+		// Re-derivation must snapshot from base 30, not the persisted 60.
+		expect(reloaded.getWalkSpeed()).toBe(60);
+	});
+
+	it("heals an INACTIVE zodiac record alongside an active one without leaking effects", () => {
+		// Hand-built save with two zodiac records: an ACTIVE Horse and an
+		// INACTIVE Octopus whose persisted snapshot predates the reach fix.
+		// (Runtime keeps a single record, but loadFromJson trusts the array;
+		// the migration must heal every zodiac record it finds.)
+		const seed = makeZodiacDruid(3, 16);
+		seed.setSpeed("walk", 30);
+		const json = seed.toJson();
+		json.activeStates = [
+			{
+				id: "zodiacForm_horse",
+				stateTypeId: "zodiacForm",
+				name: "Zodiac Form: Horse",
+				active: true,
+				customEffects: [{type: "bonus", target: "speed:walk", value: 30}],
+				zodiacForm: {tier: "month", formId: "horse", formName: "Horse"},
+			},
+			{
+				id: "zodiacForm_octopus",
+				stateTypeId: "zodiacForm",
+				name: "Zodiac Form: Octopus",
+				active: false,
+				// Stale snapshot: swim only, no reach effect.
+				customEffects: [{type: "swimSpeed", value: 30}],
+				zodiacForm: {tier: "month", formId: "octopus", formName: "Octopus"},
+			},
+		];
+
+		const reloaded = new CharacterSheetState();
+		reloaded.loadFromJson(json);
+
+		// Active Horse still applies (walk doubled, not compounded); the inactive
+		// Octopus contributes nothing to the live reach.
+		expect(reloaded.getWalkSpeed()).toBe(60);
+		expect(reloaded.getReachBonus()).toBe(0);
+
+		// The inactive Octopus record has been re-derived to include the reach
+		// effect (agreed `{type:"reach", value:N}` shape), so toggling it on
+		// later will grant reach.
+		const octRec = reloaded._data.activeStates.find(s => s.zodiacForm?.formId === "octopus");
+		expect(octRec.customEffects.some(e => e.type === "reach" && e.value === 5)).toBe(true);
 	});
 });
 
@@ -130,6 +380,42 @@ describe("Zodiac Form — passive form effects", () => {
 		expect(state.getSpeed("swim")).toBe(30);
 	});
 
+	it("Octopus increases melee reach by 5 ft and reverts on toggle-off", () => {
+		const state = makeZodiacDruid(3, 16);
+		state.setSpeed("walk", 30);
+		expect(state.getReachBonus()).toBe(0);
+		expect(state.getMeleeReach()).toBe(5);
+
+		activateForm(state, "octopus");
+		expect(state.getReachBonus()).toBe(5);
+		expect(state.getMeleeReach()).toBe(10);
+		// Swim is still granted alongside the reach bonus.
+		expect(state.getSpeed("swim")).toBe(30);
+
+		// Toggling the form off reverts reach to the base.
+		state.deactivateState("zodiacForm");
+		expect(state.getReachBonus()).toBe(0);
+		expect(state.getMeleeReach()).toBe(5);
+	});
+
+	it("Aurochs counts as one size larger for carrying capacity and reverts", () => {
+		const state = makeZodiacDruid(3, 16);
+		// Medium creature -> carry multiplier 1.
+		expect(state.getSizeCarryMultiplier()).toBe(1);
+		expect(state.getCarrySizeBonusFromStates()).toBe(0);
+
+		activateForm(state, "aurochs");
+		// One size larger (Medium -> Large) doubles the carry multiplier; the
+		// combat size is unchanged (carry-only step).
+		expect(state.getCarrySizeBonusFromStates()).toBe(1);
+		expect(state.getSizeCarryMultiplier()).toBe(2);
+		expect(state.getSize()).toBe("medium");
+
+		state.deactivateState("zodiacForm");
+		expect(state.getCarrySizeBonusFromStates()).toBe(0);
+		expect(state.getSizeCarryMultiplier()).toBe(1);
+	});
+
 	it("Cat sets a roll floor of 8 on Perception/Stealth/Acrobatics that clears on deactivation", () => {
 		const state = makeZodiacDruid(3, 16);
 		expect(state.aggregateModifiers("skill:perception").minimum).toBeNull();
@@ -143,6 +429,26 @@ describe("Zodiac Form — passive form effects", () => {
 
 		state.deactivateState("zodiacForm");
 		expect(state.aggregateModifiers("skill:perception").minimum).toBeNull();
+	});
+
+	// Every passive plumbing path must fully revert when the form toggles off.
+	const revertCases = [
+		["horse", (s) => s.getWalkSpeed(), 30, 60, "horse"],
+		["octopus-swim", (s) => s.getSpeed("swim"), 0, 30, "octopus"],
+		["octopus-reach", (s) => s.getReachBonus(), 0, 5, "octopus"],
+		["bulette-ac", (s) => s.getBonusFromStates("ac"), 0, 2, "bulette"],
+		["bulette-burrow", (s) => s.getSpeed("burrow"), 0, 15, "bulette"],
+		["aurochs-adv", (s) => s.hasAdvantageFromStates("check:str"), false, true, "aurochs"],
+		["aurochs-carry", (s) => s.getCarrySizeBonusFromStates(), 0, 1, "aurochs"],
+	];
+	it.each(revertCases)("%s applies while active and reverts on toggle-off", (_label, read, base, active, formId) => {
+		const state = makeZodiacDruid(9, 16); // prof +4 -> Bulette AC +2
+		state.setSpeed("walk", 30);
+		expect(read(state)).toBe(base);
+		activateForm(state, formId);
+		expect(read(state)).toBe(active);
+		state.deactivateState("zodiacForm");
+		expect(read(state)).toBe(base);
 	});
 });
 
@@ -159,11 +465,14 @@ describe("Zodiac Form — triggered/info form effects", () => {
 	});
 
 	it("Phoenix surfaces a label with the stabilize heal value", () => {
-		const state = makeZodiacDruid(3, 16);
+		const state = makeZodiacDruid(3, 16); // WIS +3 -> 2d8+3
 		activateForm(state, "phoenix");
 		const heal = state.getFeatureCalculations().phoenixStabilizeHeal;
-		const infoLabels = state.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label);
-		expect(infoLabels.some(l => l.includes(String(heal)))).toBe(true);
+		expect(heal).toBe("2d8+3");
+		const label = state.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label)
+			.find(l => l.includes(heal));
+		expect(label).toBeDefined();
+		expect(label).not.toMatch(/undefined|NaN/i);
 	});
 
 	it("Peacock surfaces a label with the Wisdom save DC", () => {
@@ -171,8 +480,11 @@ describe("Zodiac Form — triggered/info form effects", () => {
 		state.setSpellcastingAbility("wis");
 		activateForm(state, "peacock");
 		const dc = state.getFeatureCalculations().peacockSaveDc;
-		const infoLabels = state.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label);
-		expect(infoLabels.some(l => l.includes(String(dc)))).toBe(true);
+		expect(Number.isFinite(dc)).toBe(true);
+		const label = state.getActiveStateEffects().filter(e => e.type === "info").map(e => e.label)
+			.find(l => l.includes(String(dc)));
+		expect(label).toBeDefined();
+		expect(label).not.toMatch(/undefined|NaN/i);
 	});
 });
 
