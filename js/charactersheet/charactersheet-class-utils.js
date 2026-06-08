@@ -1,5 +1,5 @@
 // Project globals — typed via globalThis cast for TypeScript checkJs
-const {Parser, Renderer, MiscUtil, UrlUtil} = /** @type {*} */ (globalThis);
+const {Parser, Renderer, MiscUtil, UrlUtil, SourceUtil} = /** @type {*} */ (globalThis);
 
 /**
  * Character Sheet Class Utilities
@@ -722,6 +722,108 @@ class CharacterSheetClassUtils {
 			shortName,
 			name: subclassName,
 		};
+	}
+
+	/**
+	 * Build the canonical hover target for a subclass so a link-style hover
+	 * resolves against the DataLoader cache.
+	 *
+	 * The PG_CLASSES subclass hover is keyed in `DataLoader` under the
+	 * **subclass** source (via `SourceUtil.getEntitySource`) with the hash
+	 * produced by `UrlUtil.URL_TO_HASH_BUILDER["subclass"]`
+	 * (`classHash,state:sub_<shortName>_<subclassSource>=b1`). The standard
+	 * `{@subclass}` renderer queries the cache with that same subclass source —
+	 * but the character sheet historically queried with the *class* source,
+	 * producing a guaranteed cache miss for any homebrew subclass whose source
+	 * differs from its parent class (e.g. Banneret `TGTT-2024` on Fighter
+	 * `TGTT`). This helper realigns the sheet with the renderer.
+	 *
+	 * When the actual loaded subclass entity is available we derive the source
+	 * and hash from THAT object, so the link target is byte-identical to the
+	 * cache key registered via `DataLoader._pCache_addToCache` (same entity →
+	 * same `getEntitySource` + same hash builder). Otherwise we fall back to a
+	 * synthetic descriptor built from the resolved sources.
+	 *
+	 * @param {object} subclass - Stored subclass (`{name, source}` plus optional className/classSource/shortName)
+	 * @param {object} [opts]
+	 * @param {Array} [opts.allSubclasses] - Loaded subclass pool (to locate the canonical entity)
+	 * @param {object} [opts.storedClass] - Stored class entry (fallback for className/classSource)
+	 * @returns {{page: string, source: string, hash: string, href: string, displayName: string}}
+	 */
+	static buildSubclassHoverTarget (/** @type {*} */ subclass, /** @type {*} */ {allSubclasses = [], storedClass = null} = {}) {
+		const resolved = CharacterSheetClassUtils.resolveSubclassHoverSources(subclass, allSubclasses || [], storedClass);
+		const nameLc = (resolved.name || "").toLowerCase();
+		const classNameLc = (resolved.className || "").toLowerCase();
+
+		// Prefer the real loaded entity so the hash + source exactly match the
+		// registered DataLoader cache key.
+		const entity = (allSubclasses || []).find(sc =>
+			(sc?.name || "").toLowerCase() === nameLc
+			&& sc?.source === resolved.source
+			&& (!classNameLc || (sc?.className || "").toLowerCase() === classNameLc));
+
+		const hashEnt = entity || {
+			name: resolved.name,
+			source: resolved.source,
+			className: resolved.className,
+			classSource: resolved.classSource,
+			shortName: resolved.shortName,
+		};
+
+		const source = (SourceUtil ? SourceUtil.getEntitySource(hashEnt) : hashEnt.source) || resolved.source;
+		const hash = UrlUtil.URL_TO_HASH_BUILDER["subclass"](hashEnt);
+
+		return {
+			page: UrlUtil.PG_CLASSES,
+			source,
+			hash,
+			href: `${UrlUtil.PG_CLASSES}#${hash}`,
+			displayName: resolved.name,
+		};
+	}
+
+	/**
+	 * Canonicalize the source for a single-source catalog entity (optional
+	 * feature / combat method) so a hover resolves against the loaded data.
+	 *
+	 * A feature stored on the character may carry a stale or alias source
+	 * (e.g. "KaW") that differs from the canonical catalog source (e.g.
+	 * "TGTT"), causing a cache miss even after the catalog is registered.
+	 * Resolution is uniqueness-guarded to avoid ever silently picking the
+	 * wrong same-name entry:
+	 *   - exact name+source match → keep the stored source;
+	 *   - else exactly one name-only match → adopt that entity's source;
+	 *   - multiple ambiguous matches, or none → leave the source unchanged.
+	 *
+	 * `isInCatalog` lets callers decide between a real link (resolvable) and a
+	 * graceful inline fallback (genuinely unknown entity).
+	 *
+	 * @param {string} name - Entity name
+	 * @param {string} source - Stored source
+	 * @param {Array} [catalog] - Loaded catalog (`_optionalFeaturesData` / `_combatMethodsData`)
+	 * @returns {{source: string, isInCatalog: boolean}}
+	 */
+	static resolveCatalogEntitySource (/** @type {*} */ name, /** @type {*} */ source, /** @type {*} */ catalog = []) {
+		const out = {source, isInCatalog: false};
+		if (!name) return out;
+
+		const nameLc = `${name}`.toLowerCase();
+		const matches = (catalog || []).filter(e => (e?.name || "").toLowerCase() === nameLc);
+		if (!matches.length) return out;
+
+		out.isInCatalog = true;
+
+		// Exact name+source match — keep the stored source.
+		if (source && matches.some(e => e?.source === source)) return out;
+
+		// Exactly one name-only match — safe to adopt its canonical source.
+		if (matches.length === 1) {
+			out.source = matches[0].source || source;
+			return out;
+		}
+
+		// Ambiguous (several same-name entries, none matching) — do not guess.
+		return out;
 	}
 
 	/**
