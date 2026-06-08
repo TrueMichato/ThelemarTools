@@ -5121,6 +5121,10 @@ class CharacterSheetCombat {
 		// Filter out limited-use custom abilities - they're shown in Resources section
 		const availableFeatures = activatableFeatures.filter(af => {
 			if (af.isActive) return false;
+			// Druid Wild Shape / Wild Companion / Zodiac Form are handled by the
+			// dedicated Druid Resources modal — drop them from the generic list
+			// (only once that module is available, so a failure never strands them).
+			if (this._page?._druidResourcesEnabled && CharacterSheetState.isDruidResourceActivatable(af)) return false;
 			// Exclude limited-use custom abilities (shown in Resources)
 			if (af.feature?.isCustomAbility) {
 				const customAbility = this._state.getCustomAbility?.(af.feature.id);
