@@ -27656,6 +27656,121 @@ class CharacterSheetState {
 	// #endregion
 
 	// =========================================================================
+	// Arcane Shot (Arcane Archer Fighter — official XGE/PHB/XPHB + TGTT)
+	// =========================================================================
+	// #region arcane-shot
+
+	/**
+	 * Whether the character has the Arcane Archer subclass (any edition/source).
+	 * @returns {boolean}
+	 */
+	hasArcaneShot () {
+		return !!this._data.classes?.some(c => c.subclass?.shortName === "Arcane Archer");
+	}
+
+	/** Initialize Arcane Shot resource data if needed. */
+	_ensureArcaneShotInitialized () {
+		if (!this._data.arcaneShot) {
+			this._data.arcaneShot = {used: 0};
+		}
+	}
+
+	/**
+	 * Maximum Arcane Shot uses (from feature calculations — TGTT = prof bonus, official = 2).
+	 * @returns {number}
+	 */
+	getArcaneShotMax () {
+		if (!this.hasArcaneShot()) return 0;
+		const calcs = this.getFeatureCalculations();
+		return Math.max(0, calcs.arcaneShotUses || 0);
+	}
+
+	/**
+	 * Spent Arcane Shot uses, clamped to [0, max].
+	 * @returns {number}
+	 */
+	getArcaneShotUsed () {
+		this._ensureArcaneShotInitialized();
+		const max = this.getArcaneShotMax();
+		return Math.min(Math.max(0, this._data.arcaneShot.used || 0), max);
+	}
+
+	/**
+	 * Remaining Arcane Shot uses (never negative).
+	 * @returns {number}
+	 */
+	getArcaneShotRemaining () {
+		return Math.max(0, this.getArcaneShotMax() - this.getArcaneShotUsed());
+	}
+
+	/**
+	 * Spend one Arcane Shot use.
+	 * @returns {boolean} True if a use was spent, false if none remained.
+	 */
+	useArcaneShot () {
+		this._ensureArcaneShotInitialized();
+		if (this.getArcaneShotRemaining() <= 0) return false;
+		this._data.arcaneShot.used = this.getArcaneShotUsed() + 1;
+		return true;
+	}
+
+	/**
+	 * Manually adjust remaining uses by a signed delta (UI +/- controls). Clamped.
+	 * @param {number} delta - Positive restores uses, negative spends them.
+	 * @returns {boolean} True if the spent count changed.
+	 */
+	adjustArcaneShotRemaining (delta) {
+		this._ensureArcaneShotInitialized();
+		const max = this.getArcaneShotMax();
+		const prevUsed = this.getArcaneShotUsed();
+		const nextUsed = Math.min(Math.max(0, prevUsed - (delta || 0)), max);
+		this._data.arcaneShot.used = nextUsed;
+		return nextUsed !== prevUsed;
+	}
+
+	/**
+	 * Restore all Arcane Shot uses (short or long rest).
+	 */
+	restoreArcaneShot () {
+		if (!this.hasArcaneShot()) return;
+		this._ensureArcaneShotInitialized();
+		this._data.arcaneShot.used = 0;
+	}
+
+	/**
+	 * Ever-Ready Shot (level 15): if you roll initiative with no uses remaining,
+	 * regain one use. Gated on the feature and only fires at zero remaining.
+	 * @returns {boolean} True if a use was regained.
+	 */
+	regainOneArcaneShot () {
+		if (!this.hasArcaneShot()) return false;
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasEverReadyShot) return false;
+		if (this.getArcaneShotRemaining() > 0) return false;
+		this._ensureArcaneShotInitialized();
+		this._data.arcaneShot.used = Math.max(0, this.getArcaneShotUsed() - 1);
+		return true;
+	}
+
+	/**
+	 * Known Arcane Shot options (optional features with featureType "AS").
+	 * @returns {Array<{name: string, source: string, description: string, entries: *}>}
+	 */
+	getKnownArcaneShots () {
+		const shots = this._data.features?.filter(f =>
+			f.featureType === "Optional Feature"
+			&& f.optionalFeatureTypes?.some(ft => ft === "AS"),
+		) ?? [];
+		return shots.map(s => ({
+			name: s.name,
+			source: s.source,
+			description: s.description || "",
+			entries: s.entries || null,
+		}));
+	}
+	// #endregion
+
+	// =========================================================================
 	// Hunter's Prey (Ranger "Hunter" subclass)
 	// =========================================================================
 	// #region Hunter's Prey
