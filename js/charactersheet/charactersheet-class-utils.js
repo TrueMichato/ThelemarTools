@@ -447,20 +447,43 @@ class CharacterSheetClassUtils {
 		const nm = feature.name.toLowerCase();
 		const cn = feature.className.toLowerCase();
 		const lvl = Number(feature.level) || 1;
+		const src = (feature.source || "").toLowerCase();
 		const isSubclassFeature = !!(feature.subclassName || feature.subclassShortName || feature.isSubclassFeature);
+		// Feature-options (inline picks like TGTT Specialties) are stored with the
+		// LEVEL THEY WERE PICKED AT, not the canonical level the entry is defined at
+		// (e.g. Build Shelter is a level-1 classFeature but picked at level 4). For
+		// those we allow a level-agnostic fallback so the canonical hover still
+		// resolves; ordinary features keep strict level matching so a genuinely wrong
+		// level (e.g. Extra Attack stored at level 11) is treated as not-found.
+		const isFeatureOption = !!(feature.isFeatureOption || feature.parentFeature);
 
 		if (isSubclassFeature) {
 			const ssn = (feature.subclassShortName || feature.subclassName || "").toLowerCase();
-			return (pool.subclassFeatures || []).find((/** @type {*} */ f) =>
+			const subFeats = pool.subclassFeatures || [];
+			const nameClassSub = (/** @type {*} */ f) =>
 				(f.name || "").toLowerCase() === nm
 				&& (f.className || "").toLowerCase() === cn
-				&& (f.subclassShortName || "").toLowerCase() === ssn
-				&& (Number(f.level) || 1) === lvl);
+				&& (f.subclassShortName || "").toLowerCase() === ssn;
+			const exact = subFeats.find((/** @type {*} */ f) => nameClassSub(f) && (Number(f.level) || 1) === lvl);
+			if (exact) return exact;
+			if (!isFeatureOption) return undefined;
+			// Source-aware, level-agnostic fallback: resolve only when exactly one
+			// same-source entry exists, so a same-named feature from a different source
+			// (e.g. PHB vs TGTT) is never crossed.
+			const candidates = subFeats.filter((/** @type {*} */ f) =>
+				nameClassSub(f) && (!src || (f.source || "").toLowerCase() === src));
+			return candidates.length === 1 ? candidates[0] : undefined;
 		}
-		return (pool.classFeatures || []).find((/** @type {*} */ f) =>
+		const clsFeats = pool.classFeatures || [];
+		const nameClass = (/** @type {*} */ f) =>
 			(f.name || "").toLowerCase() === nm
-			&& (f.className || "").toLowerCase() === cn
-			&& (Number(f.level) || 1) === lvl);
+			&& (f.className || "").toLowerCase() === cn;
+		const exact = clsFeats.find((/** @type {*} */ f) => nameClass(f) && (Number(f.level) || 1) === lvl);
+		if (exact) return exact;
+		if (!isFeatureOption) return undefined;
+		const candidates = clsFeats.filter((/** @type {*} */ f) =>
+			nameClass(f) && (!src || (f.source || "").toLowerCase() === src));
+		return candidates.length === 1 ? candidates[0] : undefined;
 	}
 
 	/**
@@ -2961,6 +2984,7 @@ class CharacterSheetClassUtils {
 		if (!Array.isArray(grants) || !grants.length) return [];
 		if (!Array.isArray(combatMethodEntities) || !combatMethodEntities.length) return [];
 
+		const grantedByUid = CharacterSheetClassUtils.getFeatureUid(feature);
 		const resolved = [];
 		for (const grant of grants) {
 			const uid = typeof grant === "string" ? grant : grant?.method;
@@ -2981,9 +3005,91 @@ class CharacterSheetClassUtils {
 				_entityType: "combatMethod",
 				requiresFocus: focus,
 				_grantedBy: feature?.name || null,
+				// Ownership metadata for safe teardown: these methods were granted
+				// automatically by a feature (not manually learned), so reconciliation
+				// may remove them when the granting feature/level is gone — without ever
+				// touching a player's manually-learned combat methods.
+				_autoGranted: true,
+				_grantedByFeatureUid: grantedByUid,
 			});
 		}
 		return resolved;
+	}
+
+	/**
+	 * Stable identity string for a class/feature object, used to link auto-granted
+	 * artifacts (e.g. combat methods) back to the feature that granted them so they
+	 * can be torn down precisely. Mirrors the classFeature UID ordering
+	 * (name|className|classSource|level|source) but tolerates missing parts.
+	 *
+	 * @param {*} feature
+	 * @returns {string}
+	 */
+	static getFeatureUid (/** @type {*} */ feature) {
+		if (!feature) return "";
+		return [
+			feature.name || "",
+			feature.className || "",
+			feature.classSource || "",
+			feature.level != null ? feature.level : "",
+			feature.source || "",
+		].join("|");
+	}
+
+	/**
+	 * Declarative catalog of TGTT Ranger Primal Focus mode abilities, for UI display.
+	 *
+	 * Returns the abilities available in the given focus `mode`, gated by which Primal
+	 * Focus upgrades are unlocked (the `upgrade1/2/3` flags from getFeatureCalculations'
+	 * `primalFocusUpgrade1/2/3`, which correspond to levels 6 / 10 / 14). This is UI
+	 * METADATA ONLY — the mechanical source of truth stays in the feature entries /
+	 * getFeatureCalculations effects; this helper just tells the renderer what actionable
+	 * controls (usable) and reminders (passive) to surface, and with what action type.
+	 *
+	 * @param {"predator"|"prey"} mode
+	 * @param {{upgrade1?: boolean, upgrade2?: boolean, upgrade3?: boolean}} [flags]
+	 * @returns {Array<{name: string, kind: "usable"|"passive"|"method", actionType?: string, note: string}>}
+	 */
+	static getPrimalFocusModeAbilities (/** @type {*} */ mode, /** @type {*} */ flags = {}) {
+		const upgrade1 = !!flags.upgrade1; // level 6
+		const upgrade2 = !!flags.upgrade2; // level 10
+		const upgrade3 = !!flags.upgrade3; // level 14
+		const out = [];
+
+		if (mode === "predator") {
+			out.push({name: "Focused Quarry", kind: "usable", actionType: "bonus", note: "Designate a creature you can sense within range as your Quarry; once per turn, deal extra damage when you hit it."});
+			out.push({name: "Hunter's Insight", kind: "passive", note: "Advantage on Survival/Perception checks to track or spot your Quarry; learn its creature type when you designate it."});
+			if (upgrade1) {
+				out.push({name: "Singular Focus", kind: "method", note: "Combat method usable only while in Predator focus (see Combat Methods)."});
+				out.push({name: "Pursuit", kind: "passive", note: "Your walking speed increases by 10 feet while in Predator focus."});
+				out.push({name: "Intimidating Foe", kind: "passive", note: "Once per turn when you hit with a weapon attack, force a Wisdom save vs. your spell save DC; on a failure the creature is frightened (speed 0) until the end of your next turn."});
+				out.push({name: "Predator Eye", kind: "usable", actionType: "bonus", note: "Intelligence (Nature) check vs. the target's Deception; on a success, learn one of its resistances or vulnerabilities."});
+			}
+			if (upgrade2) {
+				out.push({name: "Relentless Momentum", kind: "passive", note: "Ignore speed reduction from damage, spells, or magical effects."});
+				out.push({name: "Charging Strike", kind: "passive", note: "When you move at least 10 feet straight toward a creature, your first weapon attack against it that turn has advantage."});
+				out.push({name: "Deflection", kind: "passive", note: "Creatures other than your Quarry have disadvantage on opportunity attacks against you."});
+			}
+			if (upgrade3) {
+				out.push({name: "Blood Scent", kind: "passive", note: "After you deal damage to a target, you know its exact direction and distance for 1 hour, ignoring invisibility and magical concealment."});
+			}
+			return out;
+		}
+
+		// Prey focus
+		out.push({name: "Hunter's Dodge", kind: "usable", actionType: "reaction", note: "When a creature you can see attacks you or an ally within 30 feet, grant the target a bonus to AC equal to your proficiency bonus for that attack."});
+		if (upgrade1) {
+			out.push({name: "Groundshatter", kind: "method", note: "Combat method usable only while in Prey focus (see Combat Methods)."});
+			out.push({name: "Terrain Defense", kind: "passive", note: "Bonus to AC and Dexterity saves equal to half your proficiency bonus (min +1) when benefiting from cover or standing in difficult terrain."});
+			out.push({name: "Improvised Sanctuary", kind: "usable", actionType: "action", note: "Reinforce a 5-foot section of natural terrain into protective cover."});
+		}
+		if (upgrade2) {
+			out.push({name: "Unimpeded", kind: "passive", note: "You ignore difficult terrain up to a distance equal to your speed when moving."});
+		}
+		if (upgrade3) {
+			out.push({name: "Inescapable Sight", kind: "usable", actionType: "bonus", note: "Sense the exact location of all hostile or obscured creatures within 60 feet until the end of your next turn."});
+		}
+		return out;
 	}
 
 	/**
