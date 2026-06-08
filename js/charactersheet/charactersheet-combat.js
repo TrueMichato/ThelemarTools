@@ -2284,6 +2284,7 @@ class CharacterSheetCombat {
 		this.renderCombatSpells();
 		this.renderCombatMethods();
 		this.renderCombatRanger();
+		this.renderCombatArcaneArcher();
 		this.renderCombatDefenses();
 		this.renderCombatConditions();
 		this.renderCombatEffects();
@@ -6036,6 +6037,112 @@ class CharacterSheetCombat {
 			this._page.saveCharacter();
 			this._page.renderCharacter();
 			JqueryUtil.doToast({type: "success", content: quarrySet ? "Cleared Focused Quarry" : "Designated Focused Quarry"});
+		});
+	}
+
+	/**
+	 * Arcane Archer "Arcane Shot" combat-tab panel: usage tracking + known shot options
+	 * with their effect text and save DC. Self-contained (own section + container) so it
+	 * does not collide with other combat-tab panels.
+	 */
+	renderCombatArcaneArcher () {
+		const section = document.getElementById("charsheet-combat-arcanearcher-section");
+		const container = document.getElementById("charsheet-combat-arcanearcher");
+		if (!section || !container) return;
+
+		if (!this._state.hasArcaneShot?.()) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const max = this._state.getArcaneShotMax?.() ?? 0;
+		const remaining = this._state.getArcaneShotRemaining?.() ?? 0;
+		const dc = calcs.arcaneShotSaveDc;
+		const ability = (calcs.arcaneShotAbility || "int").toUpperCase();
+		const knownShots = this._state.getKnownArcaneShots?.() || [];
+		const hasEverReady = !!calcs.hasEverReadyShot;
+
+		const block = e_({tag: "div", clazz: "charsheet__combat-arcanearcher"});
+
+		let html = `
+			<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
+				${dc != null ? `<span class="badge badge-primary" style="font-size: 1em; padding: 5px 10px;" title="Arcane Shot save DC (${ability})">DC ${dc}</span>` : ""}
+				<span class="badge ${remaining > 0 ? "badge-info" : "badge-danger"}" title="Arcane Shot uses remaining (recharge on short or long rest)">⚡ ${remaining}/${max}</span>
+				<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-as-use" ${remaining > 0 ? "" : "disabled"} title="Spend one Arcane Shot use">Use</button>
+				<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-as-regain" ${remaining < max ? "" : "disabled"} title="Regain one use">+</button>
+				<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-as-reset" ${remaining < max ? "" : "disabled"} title="Restore all uses">Reset</button>
+			</div>`;
+
+		if (hasEverReady) {
+			html += `<div class="ve-small ve-muted mb-2">✦ <span class="bold">Ever-Ready Shot:</span> when you roll initiative with no uses left, regain one.${remaining === 0 ? ` <button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-as-everready ml-1">Regain (initiative)</button>` : ""}</div>`;
+		}
+
+		if (!knownShots.length) {
+			html += `<div class="ve-muted ve-small">No Arcane Shot options known yet. Choose them when you gain or level up the Arcane Archer subclass. (Options are sourced from XGE — check your source filters if none appear.)</div>`;
+		} else {
+			html += `<div class="charsheet__combat-arcanearcher-shots mt-1">`;
+			knownShots.forEach(shot => {
+				let nameHtml = shot.name;
+				if (this._page?.getHoverLink && shot.source) {
+					try {
+						nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, shot.name, shot.source);
+					} catch (e) {
+						nameHtml = shot.name;
+					}
+				}
+				let effectHtml = shot.description || "";
+				if (!effectHtml && Array.isArray(shot.entries) && typeof Renderer !== "undefined") {
+					try {
+						effectHtml = Renderer.get().render({type: "entries", entries: shot.entries});
+					} catch (e) {
+						effectHtml = "";
+					}
+				}
+				const srcAbbr = shot.source ? Parser.sourceJsonToAbv(shot.source) : "";
+				html += `
+					<div class="charsheet__combat-arcanearcher-shot mb-2" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+						<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+							<span class="bold">${nameHtml}</span>
+							${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
+						</div>
+						${effectHtml ? `<div class="ve-small ve-muted mt-1">${effectHtml}</div>` : ""}
+					</div>`;
+			});
+			html += `</div>`;
+		}
+
+		block.innerHTML = html;
+		container.appendChild(block);
+
+		const refresh = () => {
+			this._page.saveCharacter();
+			this._page.renderCharacter();
+		};
+
+		block.querySelector(".charsheet__combat-as-use")?.addEventListener("click", () => {
+			if (this._state.useArcaneShot?.()) {
+				refresh();
+				JqueryUtil.doToast({type: "success", content: "Used an Arcane Shot"});
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "No Arcane Shot uses remaining! Rest to regain uses."});
+			}
+		});
+		block.querySelector(".charsheet__combat-as-regain")?.addEventListener("click", () => {
+			if (this._state.adjustArcaneShotRemaining?.(1)) refresh();
+		});
+		block.querySelector(".charsheet__combat-as-reset")?.addEventListener("click", () => {
+			this._state.restoreArcaneShot?.();
+			refresh();
+		});
+		block.querySelector(".charsheet__combat-as-everready")?.addEventListener("click", () => {
+			if (this._state.regainOneArcaneShot?.()) {
+				refresh();
+				JqueryUtil.doToast({type: "success", content: "Ever-Ready Shot: regained one use"});
+			}
 		});
 	}
 

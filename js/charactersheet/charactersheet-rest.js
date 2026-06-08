@@ -772,6 +772,11 @@ class CharacterSheetRest {
 			this._state.restorePrimalFocus?.();
 		}
 
+		// Restore Arcane Shot (Arcane Archer) - recharges on short OR long rest
+		if (this._state.hasArcaneShot?.()) {
+			this._state.restoreArcaneShot?.();
+		}
+
 		// Restore Focus Pool (TGTT Dreamwalker) - only on long rest
 		if (restType === "long" && this._state.hasFocusPool?.()) {
 			this._state.restoreFocusPool?.();
