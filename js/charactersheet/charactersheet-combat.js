@@ -2530,6 +2530,7 @@ class CharacterSheetCombat {
 		this.renderCombatSpells();
 		this.renderCombatMethods();
 		this.renderCombatRanger();
+		this.renderCombatDruidResources();
 		this.renderCombatArcaneArcher();
 		this.renderCombatFlanking();
 		this.renderCombatFighter();
@@ -6298,6 +6299,122 @@ class CharacterSheetCombat {
 			this._page.renderCharacter();
 			JqueryUtil.doToast({type: "success", content: quarrySet ? "Cleared Focused Quarry" : "Designated Focused Quarry"});
 		});
+	}
+
+	/**
+	 * Druid Resources combat-tab panel (Wild Shape / Wild Companion / Zodiac Form).
+	 *
+	 * Self-contained (own `#charsheet-combat-druid-section` + inner container) so it does
+	 * not collide with the generic Resources panel or any other combat-tab panel. The
+	 * panel is a thin VIEW: its data model comes from the dedicated Druid Resources
+	 * module (`page._druidResources.getCombatSummary()`, single source of truth) and every
+	 * action delegates to that module's public methods — so picker/spend logic is never
+	 * duplicated and the modal + combat tab stay in sync. Gated on the module being
+	 * available AND applicable (parallels `renderCombatRanger`'s `hasPrimalFocus` gate);
+	 * if the module failed to load, the panel hides and the generic Active-States list
+	 * still surfaces the rows (no stranding).
+	 */
+	renderCombatDruidResources () {
+		const section = document.getElementById("charsheet-combat-druid-section");
+		const container = document.getElementById("charsheet-combat-druid");
+		if (!section || !container) return;
+
+		const druid = this._page?._druidResources;
+		const summary = (this._page?._druidResourcesEnabled && druid?.getCombatSummary)
+			? druid.getCombatSummary()
+			: null;
+
+		if (!summary || !summary.applicable) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const block = e_({tag: "div", clazz: "charsheet__combat-druid"});
+		let html = "";
+
+		// --- Wild Shape ---
+		const ws = summary.wildShape;
+		if (ws.has) {
+			html += `
+				<div class="charsheet__combat-druid-block">
+					<div class="ve-flex-v-center ve-flex-h-between mb-1">
+						<span class="charsheet__combat-druid-label">🐻 Wild Shape</span>
+						<span class="badge ${ws.current > 0 ? "badge-info" : "badge-danger"}" title="Wild Shape uses remaining">${ws.current}/${ws.max}</span>
+					</div>
+					${ws.rechargeLabel ? `<div class="ve-small ve-muted charsheet__combat-druid-note">${ws.rechargeLabel}</div>` : ""}
+					${ws.inForm ? `<div class="ve-small charsheet__combat-druid-active">Currently: <span class="ve-bold charsheet__combat-druid-beast"></span></div>` : ""}
+					<div class="charsheet__combat-druid-actions">
+						${ws.inForm
+		? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__combat-druid-end" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
+		: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__combat-druid-transform" ${ws.canTransform ? "title=\"Pick a beast to assume; spends 1 use after you choose\"" : "disabled title=\"No Wild Shape uses remaining\""}>Transform…</button>`}
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-minus" ${ws.current > 0 ? "title=\"Spend 1 Wild Shape use\"" : "disabled title=\"No uses to spend\""}>−</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-plus" ${ws.current < ws.max ? "title=\"Restore 1 Wild Shape use\"" : "disabled title=\"Already at maximum\""}>+</button>
+					</div>
+				</div>`;
+		}
+
+		// --- Wild Companion ---
+		const wc = summary.wildCompanion;
+		if (wc.has) {
+			html += `
+				<div class="charsheet__combat-druid-block">
+					<div class="ve-flex-v-center ve-flex-h-between mb-1">
+						<span class="charsheet__combat-druid-label">🧚 Wild Companion</span>
+					</div>
+					<div class="ve-small ve-muted charsheet__combat-druid-note">Spends 1 Wild Shape use to summon a Fey familiar${wc.duration ? ` (${wc.duration})` : ""}.</div>
+					<div class="charsheet__combat-druid-actions">
+						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-druid-summon" ${wc.canSummon ? "title=\"Open the familiar picker; spends 1 Wild Shape use\"" : "disabled title=\"No Wild Shape uses remaining\""}>Summon Familiar</button>
+					</div>
+				</div>`;
+		}
+
+		// --- Zodiac Form ---
+		const zo = summary.zodiac;
+		if (zo.has) {
+			html += `
+				<div class="charsheet__combat-druid-block">
+					<div class="ve-flex-v-center ve-flex-h-between mb-1">
+						<span class="charsheet__combat-druid-label">🌟 Zodiac Form</span>
+					</div>
+					${zo.activeFormName
+		? `<div class="ve-small charsheet__combat-druid-active">Active: <span class="ve-bold charsheet__combat-druid-zodiac-name"></span></div>`
+		: `<div class="ve-small ve-muted charsheet__combat-druid-note">No constellation assumed.</div>`}
+					<div class="charsheet__combat-druid-actions">
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-zodiac-choose" ${zo.canChoose ? "title=\"Open the constellation picker; spends 1 Wild Shape use\"" : "disabled title=\"No Wild Shape uses remaining\""}>Choose Zodiac Form…</button>
+						${zo.activeFormName ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-zodiac-dismiss" title="Dismiss the active Zodiac Form (no use refunded)">Dismiss</button>` : ""}
+					</div>
+				</div>`;
+		}
+
+		// --- Footer: full modal ---
+		html += `
+			<div class="charsheet__combat-druid-footer">
+				<button class="ve-btn ve-btn-xs ve-btn-default w-100 charsheet__combat-druid-manage" title="Open the full Druid Resources panel">⚙️ Manage Druid Resources</button>
+			</div>`;
+
+		block.innerHTML = html;
+		// Names rendered via textContent (never interpolated into the HTML string) to
+		// avoid injection from imported/user-supplied companion or form names.
+		if (ws.inForm) { const el = block.querySelector(".charsheet__combat-druid-beast"); if (el) el.textContent = ws.beastName; }
+		if (zo.activeFormName) { const el = block.querySelector(".charsheet__combat-druid-zodiac-name"); if (el) el.textContent = zo.activeFormName; }
+		container.appendChild(block);
+
+		// Listeners attach to the freshly-created elements each render (no pileup).
+		block.querySelector(".charsheet__combat-druid-transform")?.addEventListener("click", () => druid.pTransform());
+		block.querySelector(".charsheet__combat-druid-end")?.addEventListener("click", () => druid.endWildShape());
+		block.querySelector(".charsheet__combat-druid-minus")?.addEventListener("click", () => {
+			if (!druid.spendUse()) JqueryUtil.doToast({type: "warning", content: "No Wild Shape uses to spend."});
+		});
+		block.querySelector(".charsheet__combat-druid-plus")?.addEventListener("click", () => {
+			druid.restoreUse();
+		});
+		block.querySelector(".charsheet__combat-druid-summon")?.addEventListener("click", () => druid.pSummonWildCompanion());
+		block.querySelector(".charsheet__combat-druid-zodiac-choose")?.addEventListener("click", () => druid.openModal());
+		block.querySelector(".charsheet__combat-druid-zodiac-dismiss")?.addEventListener("click", () => druid.dismissZodiac());
+		block.querySelector(".charsheet__combat-druid-manage")?.addEventListener("click", () => druid.openModal());
 	}
 
 	/**
