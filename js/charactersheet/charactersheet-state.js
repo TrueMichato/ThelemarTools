@@ -26,19 +26,20 @@ class FeatureUsesParser {
 		let uses = null;
 		let recharge = null;
 
-		// Determine recharge type first.
-		// Prefer the canonical use-recovery clause (e.g. "regain all
-		// expended uses when you finish a Long Rest") so that an incidental
-		// earlier mention of a different rest type — such as a replacement
-		// or maintenance ceremony that "can be performed during a Short or
-		// Long Rest" — does not mis-set the recharge. The recovery clause is
-		// bounded to a single sentence ([^.]) so it never bleeds into a
-		// following sentence.
-		const recoveryMatch = plainText.match(/regain[^.]*?(?:expended|all|uses?|charges?)[^.]*?\b(?:short|long) rest/);
-		if (recoveryMatch) {
-			// Within the recovery clause, "short or long rest" / "short rest"
-			// recharges on the shorter rest; otherwise it's a long-rest feature.
-			recharge = /short or long rest|short rest/.test(recoveryMatch[0]) ? "short" : "long";
+		// Determine recharge type first. Prefer the rest type explicitly tied to
+		// *regaining uses*, so an unrelated rest mention elsewhere in the text
+		// (e.g. Tireless's separate exhaustion clause, or "restore hit points on a
+		// short rest") doesn't mis-set the recharge. We require a uses-noun in the
+		// regain clause and `[^.]*` keeps the match within the same sentence.
+		const regainNoun = "(?:uses?|expended|charges?|spent|them|all of them)";
+		const regainShort = new RegExp(`(?:regain|recover|restore)[^.]*\\b${regainNoun}\\b[^.]*\\b(?:short rest|short or long rest)\\b`, "i").test(plainText)
+			|| new RegExp(`(?:short rest|short or long rest)\\b[^.]*\\b(?:regain|recover|restore)[^.]*\\b${regainNoun}\\b`, "i").test(plainText);
+		const regainLong = new RegExp(`(?:regain|recover|restore)[^.]*\\b${regainNoun}\\b[^.]*\\blong rest\\b`, "i").test(plainText)
+			|| new RegExp(`\\blong rest\\b[^.]*\\b(?:regain|recover|restore)[^.]*\\b${regainNoun}\\b`, "i").test(plainText);
+		if (regainShort) {
+			recharge = "short";
+		} else if (regainLong) {
+			recharge = "long";
 		} else if (/short or long rest|short rest/i.test(plainText)) {
 			recharge = "short";
 		} else if (/long rest|dawn|dusk|midnight/i.test(plainText)) {
@@ -55,7 +56,8 @@ class FeatureUsesParser {
 		}
 
 		// Pattern: "a number of times equal to your proficiency bonus"
-		if (!uses && /(?:times|uses)?\s*equal\s*to\s*(?:your\s*)?proficiency\s*bonus/i.test(plainText)) {
+		// ("to" is optional so phrasings like "Uses equal your proficiency bonus" also match)
+		if (!uses && /(?:times|uses)?\s*equal\s*(?:to\s*)?(?:your\s*)?proficiency\s*bonus/i.test(plainText)) {
 			uses = getProfBonus ? getProfBonus() : 2;
 		}
 
@@ -71,7 +73,8 @@ class FeatureUsesParser {
 		}
 
 		// Pattern: "equal to your [ability] modifier"
-		const abilityModMatch = plainText.match(/(?:times|uses)?\s*equal\s*to\s*(?:your\s*)?(\w+)\s*modifier/i);
+		// ("to" is optional so phrasings like "Uses equal your Wisdom modifier" also match)
+		const abilityModMatch = plainText.match(/(?:times|uses)?\s*equal\s*(?:to\s*)?(?:your\s*)?(\w+)\s*modifier/i);
 		if (!uses && abilityModMatch && getAbilityMod) {
 			const abilityMap = {
 				strength: "str",
@@ -3745,6 +3748,14 @@ class CharacterSheetState {
 		// bonus. Correct to long-rest recharge and a max of the Wisdom modifier.
 		this._migrateStarMap();
 
+		// Migrate Primal Focus: older saves stored it as a consumable resource/use and
+		// the text parser attached junk speed modifiers. Convert to the mode-toggle model.
+		this._migratePrimalFocus();
+
+		// Migrate Tireless: older saves failed to parse its WIS-mod uses (the parser
+		// required "equal to your … modifier"; TGTT phrases it "equal your … modifier").
+		this._migrateTirelessUses();
+
 		// Migrate modifiers: re-process modifiers that may be missing special flags
 		this._migrateModifiers();
 
@@ -4182,6 +4193,97 @@ class CharacterSheetState {
 					resource.max = newMax;
 					resource.current = Math.min(resource.current ?? newMax, newMax);
 				}
+			}
+		}
+	}
+
+	/**
+	 * Migrate Primal Focus (TGTT Ranger) away from the legacy consumable-resource model.
+	 * Older saves auto-created a "Primal Focus" resource and stamped `uses` on the
+	 * feature (its description matched the generic "… per long rest" parser), and the
+	 * feature-text parser also mis-attached junk speed modifiers (e.g.
+	 * "Primal Focus Upgrade: once per turn"). Primal Focus is a mode toggle
+	 * (Predator/Prey), not a spendable resource, so strip those artefacts. The legit
+	 * mode-gated effects (Pursuit walking speed, Terrain Defense AC/DEX saves, …) come
+	 * exclusively from the classFeature effect pipeline and are re-emitted by
+	 * applyClassFeatureEffects(), which runs after migrations on load. Idempotent.
+	 */
+	_migratePrimalFocus () {
+		if (!this.hasPrimalFocus()) return;
+
+		const matchesName = (name) => (name || "").toLowerCase().includes("primal focus");
+
+		// Drop the orphan resource auto-created for Primal Focus
+		if (Array.isArray(this._data.resources)) {
+			this._data.resources = this._data.resources.filter(r => !matchesName(r.name));
+		}
+
+		// Strip `uses` from Primal Focus features (the feature itself is kept; its
+		// switches / Hunter's Dodge uses live in _data.primalFocus, not feature.uses)
+		if (Array.isArray(this._data.features)) {
+			this._data.features.forEach(f => {
+				if (matchesName(f.name) && f.uses) delete f.uses;
+			});
+		}
+
+		// Remove junk modifiers the feature-text parser attached to Primal Focus
+		// features. Only text-parsed modifiers (sourceType !== "classFeature") are
+		// pruned — classFeature-sourced modifiers are cleared & re-applied on load,
+		// and unrelated text-parsed modifiers (e.g. Roving's speed bonus) are kept.
+		if (Array.isArray(this._data.namedModifiers)) {
+			this._data.namedModifiers = this._data.namedModifiers.filter(m => {
+				if (m.sourceType === "classFeature") return true;
+				return !matchesName(m.name);
+			});
+		}
+
+		// Ensure the toggle state exists
+		this._ensurePrimalFocusInitialized();
+	}
+
+	/**
+	 * Backfill Tireless (TGTT/XPHB Ranger) limited uses on older saves.
+	 * The uses parser previously required the phrasing "equal **to** your … modifier",
+	 * but TGTT Tireless reads "Uses equal your Wisdom modifier (minimum 1)", so existing
+	 * saves persisted the feature with no `uses` (and thus no trackable resource). Re-derive
+	 * uses from the description now that the parser accepts the phrasing. Guarded by
+	 * hasTireless and idempotent (skips features that already carry uses). New characters
+	 * get uses at addFeature time and never reach this path.
+	 */
+	_migrateTirelessUses () {
+		const calc = this.getFeatureCalculations?.();
+		if (!calc?.hasTireless) return;
+		if (!Array.isArray(this._data.features)) return;
+
+		const feature = this._data.features.find(f => (f.name || "").toLowerCase() === "tireless");
+		if (!feature || feature.uses || !feature.description) return;
+
+		const getAbilityMod = (ability) => this.getAbilityMod(ability);
+		const getProfBonus = () => this.getProficiencyBonus();
+		const uses = FeatureUsesParser.parseUses(feature.description, getAbilityMod, getProfBonus);
+		if (!uses || !(uses.max > 0)) return;
+
+		feature.uses = {current: uses.max, max: uses.max, recharge: uses.recharge || "long"};
+
+		// Mirror addFeature(): surface a trackable resource if one doesn't already exist
+		if (Array.isArray(this._data.resources)) {
+			const existing = this._data.resources.find(r => r.name === feature.name);
+			if (!existing) {
+				this.addResource({
+					name: feature.name,
+					max: uses.max,
+					current: uses.max,
+					recharge: uses.recharge || "long",
+					featureId: feature.id,
+				});
+			} else {
+				// A mirrored resource already exists (manual/legacy): keep the
+				// freshly-parsed max but adopt its tracked current so the two agree.
+				existing.max = uses.max;
+				const cur = Math.max(0, Math.min(existing.current ?? uses.max, uses.max));
+				existing.current = cur;
+				feature.uses.current = cur;
+				if (existing.featureId == null) existing.featureId = feature.id;
 			}
 		}
 	}
@@ -15666,6 +15768,20 @@ class CharacterSheetState {
 						// Focused Quarry damage scaling: 1d4 (L1-4) → 1d6 (L5-9) → 1d8 (L10-13) → 1d10 (L14+)
 						calculations.focusedQuarryDamage = level >= 14 ? "1d10" : level >= 10 ? "1d8" : level >= 5 ? "1d6" : "1d4";
 
+						// Focused Quarry is a once-per-turn weapon damage rider, available only
+						// while in Predator focus (and after you designate a Quarry). Surface it as
+						// a manual combat toggle (the "is this my Quarry?" condition isn't knowable
+						// from attack data, so it is never auto-applied).
+						if (this.getPrimalFocusMode() === "predator") {
+							(calculations.weaponDamageRiders = calculations.weaponDamageRiders || []).push({
+								id: "focusedQuarry",
+								name: "Focused Quarry",
+								dice: calculations.focusedQuarryDamage,
+								condition: "when you hit your designated Quarry",
+								note: "once per turn",
+							});
+						}
+
 						// Hunter's Dodge uses (Prey focus) = Ranger-level proficiency bonus per long rest
 						// Use the Ranger class level (not total character level) so multiclassing scales correctly.
 						calculations.huntersDodgeUses = Math.floor((level - 1) / 4) + 2;
@@ -15687,6 +15803,13 @@ class CharacterSheetState {
 						// Level 20: Apex Focus (unlimited switches, enhanced abilities)
 						if (level >= 20) {
 							calculations.hasApexFocus = true;
+							// Perfect Hunter: speed doubled + no disadvantage on weapon attacks (display flags;
+							// the additive speed pipeline can't cleanly express a ×2 multiplier).
+							calculations.apexFocusSpeedDoubled = true;
+							calculations.apexFocusNoWeaponDisadvantage = true;
+							// Perfect Survivor: temp HP per turn = Ranger level; +2 AC while not in heavy armor.
+							calculations.apexFocusTempHpPerTurn = level;
+							calculations.apexFocusAcBonus = 2;
 						}
 
 						// TGTT Deft Explorer at level 1 (expertise + languages)
@@ -15781,10 +15904,17 @@ class CharacterSheetState {
 						calculations.expertiseCount = 2;
 					}
 
-					// TGTT Unrivaled Pioneer (level 9) - advantage on initiative, can't be surprised
+					// TGTT Unrivaled Pioneer (level 9):
+					//  - Expertise in two skills (user-selected — surfaced as a pending pick, NOT auto-granted)
+					//  - Mental Fortitude: proficiency in INT and WIS saving throws
+					//  - Reliable Survivalist: treat a d20 of 9 or lower as a 10 on Nature/Survival
+					//    checks and navigation/tracking checks
 					if (isTGTT && level >= 9) {
 						calculations.hasUnrivaledPioneer = true;
 						calculations.initiativeAdvantage = true;
+						calculations.unrivaledPioneerSaveProficiencies = ["int", "wis"];
+						calculations.unrivaledPioneerExpertisePending = true;
+						calculations.reliableSurvivalistMinimum = 10;
 					}
 
 					// Hide in Plain Sight (PHB level 10) / Nature's Veil (TCE/XPHB level 10/14)
@@ -15792,11 +15922,30 @@ class CharacterSheetState {
 						calculations.hasHideInPlainSight = true;
 					}
 
+					// TGTT Enduring Traveler (level 4) - environmental immunities + camp efficiency
+					if (isTGTT && level >= 4) {
+						calculations.hasEnduringTraveler = true;
+						calculations.immuneExtremeCold = true;
+						calculations.immuneExtremeHeat = true;
+						calculations.immuneHighAltitude = true;
+						calculations.autoSucceedTravelExhaustionSaves = true;
+						calculations.enduringTravelerSecondActivity = true;
+					}
+
 					// Tireless (XPHB level 10, TGTT level 5) - temp HP and reduce exhaustion
 					if ((isXPHB && level >= 10) || (isTGTT && level >= 5)) {
 						calculations.hasTireless = true;
 						calculations.tirelessTempHp = `1d8 + ${wisMod}`;
-						calculations.tirelessUses = profBonus;
+						// TGTT: uses = Wisdom modifier (min 1); XPHB: uses = proficiency bonus
+						calculations.tirelessUses = isTGTT ? Math.max(1, wisMod) : profBonus;
+						// Expose an activatable temp-HP grant so combat surfaces a "Use" action
+						calculations.tirelessEffects = {grantTempHp: {formula: `1d8+${wisMod}`}};
+					}
+
+					// TGTT Ephemeral Insight (level 8) - gain a relevant skill/tool proficiency
+					// after 1 hour of study (user-selected; surfaced as a reminder, not auto-granted)
+					if (isTGTT && level >= 8) {
+						calculations.hasEphemeralInsight = true;
 					}
 
 					// Relentless Hunter (XPHB level 13) - no concentration on Hunter's Mark
@@ -15815,9 +15964,14 @@ class CharacterSheetState {
 						calculations.hasVanish = true;
 					}
 
-					// TGTT Penetrating Senses (level 14) - enhanced senses
+					// TGTT Penetrating Senses (level 14) - see invisible/illusions/shapechangers
+					// within 60 ft. NOT truesight (no darkvision-in-magical-darkness, etc.).
 					if (isTGTT && level >= 14) {
 						calculations.hasPenetratingSenses = true;
+						calculations.penetratingSensesRange = 60;
+						calculations.canSeeInvisible = true;
+						calculations.detectVisualIllusions = true;
+						calculations.perceiveShapechangerTrueForm = true;
 					}
 
 					// Nature's Veil (XPHB level 14) - uses per long rest equal to prof bonus
@@ -15833,26 +15987,34 @@ class CharacterSheetState {
 						calculations.hasPreciseHunter = true;
 					}
 
-					// TGTT Apex Sentinel (level 17) - enhanced tracking and combat
+					// TGTT Apex Sentinel (level 17) - blindsight 60 + ally aura (display) + tracking
 					if (isTGTT && level >= 17) {
 						calculations.hasApexSentinel = true;
+						calculations.apexSentinelBlindsight = 60;
+						calculations.apexSentinelAuraBonus = Math.max(1, wisMod);
+						calculations.apexSentinelAuraRange = 30;
 					}
 
-					// TGTT Battle Instincts (level 18) - can't be surprised, advantage on initiative
+					// TGTT Battle Instincts (level 18) - can't be surprised, damage can't break
+					// concentration, and a once-per-round retaliation reaction on a miss.
 					if (isTGTT && level >= 18) {
 						calculations.hasBattleInstincts = true;
 						calculations.surpriseImmunity = true;
+						calculations.concentrationUnbreakableByDamage = true;
+						calculations.hasRetaliationReaction = true;
 					}
 
 					// Feral Senses (level 18) - attack unseen creatures without disadvantage
-					if (level >= 18) {
+					// (Classic/XPHB only; TGTT replaces this with Apex Sentinel/Battle Instincts)
+					if (!isTGTT && level >= 18) {
 						calculations.hasFeralSenses = true;
 						calculations.blindsightRange = 30;
 						calculations.feralSensesRange = 30;
 					}
 
 					// Foe Slayer (level 20) - add WIS to attack/damage vs favored enemy
-					if (level >= 20) {
+					// (Classic/XPHB only; TGTT replaces this with Apex Focus)
+					if (!isTGTT && level >= 20) {
 						calculations.hasFoeSlayer = true;
 						calculations.foeSlayerBonus = wisMod;
 					}
@@ -15894,6 +16056,16 @@ class CharacterSheetState {
 								calculations.huntersPreyOption = huntersPreyOption;
 								if (huntersPreyOption === "colossus") {
 									calculations.colossusSlayerDamage = "1d8"; // Extra damage to wounded foes
+									// Once-per-turn weapon damage rider, surfaced as a manual combat
+									// toggle (whether the target is below its HP max isn't knowable
+									// from attack data, so it is never auto-applied).
+									(calculations.weaponDamageRiders = calculations.weaponDamageRiders || []).push({
+										id: "colossusSlayer",
+										name: "Colossus Slayer",
+										dice: "1d8",
+										condition: "if the target is below its hit point maximum",
+										note: "once per turn",
+									});
 								} else if (huntersPreyOption === "horde") {
 									calculations.hasHordeBreaker = true; // Extra attack vs a different creature
 								} else if (huntersPreyOption === "giantKiller") {
@@ -18115,7 +18287,11 @@ class CharacterSheetState {
 		// RANGER FEATURES
 		// =========================================================
 
-		// Primal Focus — Pursuit (Predator L6+): +10 walking speed
+		// Primal Focus — Pursuit (Predator Focus, L6+): +10 walking speed.
+		// Emitted ONLY while in Predator focus, so within that mode it is an
+		// unconditional bonus — deliberately no "while …" conditional string, which
+		// would otherwise trip the auto-disable heuristic in the speed effect handler.
+		// Switching focus re-runs applyClassFeatureEffects(), which clears and re-emits.
 		if (calculations.hasPrimalFocus && calculations.primalFocusUpgrade1
 			&& this.getPrimalFocusMode() === "predator" && !alreadyProcessed("Pursuit")) {
 			effects.push({
@@ -18123,11 +18299,12 @@ class CharacterSheetState {
 				speedType: "walk",
 				value: 10,
 				source: "Pursuit (Predator Focus)",
-				conditional: "while in Predator focus",
 			});
 		}
 
-		// Primal Focus — Terrain Defense (Prey L6+): +half proficiency to AC (conditional)
+		// Primal Focus — Terrain Defense (Prey Focus, L6+): +half proficiency (min 1)
+		// to AC AND Dexterity saves when benefiting from cover or in difficult terrain.
+		// Situational → emitted as disabled toggles the player enables when it applies.
 		if (calculations.hasPrimalFocus && calculations.primalFocusUpgrade1
 			&& this.getPrimalFocusMode() === "prey" && !alreadyProcessed("Terrain Defense")) {
 			const halfProf = Math.max(1, Math.floor(this.getProficiencyBonus() / 2));
@@ -18137,11 +18314,54 @@ class CharacterSheetState {
 				source: "Terrain Defense (Prey Focus)",
 				conditional: "when benefiting from cover or in difficult terrain",
 			});
+			effects.push({
+				type: "saveBonus",
+				ability: "dex",
+				value: halfProf,
+				source: "Terrain Defense (Prey Focus)",
+				conditional: "when benefiting from cover or in difficult terrain",
+			});
 		}
 
 		// Feral Senses (Ranger 18): 30ft blindsight
 		if (calculations.hasFeralSenses && calculations.feralSensesRange && !alreadyProcessed("Feral Senses")) {
 			effects.push({ type: "sense", sense: "blindsight", range: calculations.feralSensesRange, source: "Feral Senses" });
+		}
+
+		// Apex Sentinel — Primal Sight (TGTT Ranger 17): 60ft blindsight.
+		// The sense pipeline takes the max range, so this supersedes Feral Senses' 30ft.
+		if (calculations.hasApexSentinel && calculations.apexSentinelBlindsight && !alreadyProcessed("Apex Sentinel")) {
+			effects.push({ type: "sense", sense: "blindsight", range: calculations.apexSentinelBlindsight, source: "Apex Sentinel" });
+		}
+
+		// Unrivaled Pioneer — Mental Fortitude (TGTT Ranger 9): INT & WIS save proficiency.
+		if (Array.isArray(calculations.unrivaledPioneerSaveProficiencies) && !alreadyProcessed("Unrivaled Pioneer")) {
+			calculations.unrivaledPioneerSaveProficiencies.forEach(ability => {
+				effects.push({ type: "saveProficiency", ability, source: "Unrivaled Pioneer" });
+			});
+		}
+
+		// Unrivaled Pioneer — Reliable Survivalist (TGTT Ranger 9): treat a d20 of 9 or
+		// lower as a 10 on Nature and Survival checks (and navigation/tracking checks).
+		if (calculations.reliableSurvivalistMinimum && !alreadyProcessed("Reliable Survivalist")) {
+			["nature", "survival"].forEach(skill => {
+				effects.push({
+					type: "skillMinimum",
+					skill,
+					minimum: calculations.reliableSurvivalistMinimum,
+					source: "Reliable Survivalist",
+				});
+			});
+		}
+
+		// Apex Focus — Perfect Survivor (TGTT Ranger 20): +2 AC while not wearing heavy armor.
+		if (calculations.apexFocusAcBonus && !alreadyProcessed("Apex Focus")) {
+			effects.push({
+				type: "acBonus",
+				value: calculations.apexFocusAcBonus,
+				source: "Apex Focus (Perfect Survivor)",
+				conditional: "while not wearing heavy armor",
+			});
 		}
 
 		// Land's Stride (Ranger 8): ignore nonmagical difficult terrain
@@ -18864,16 +19084,19 @@ class CharacterSheetState {
 			}
 
 			case "saveBonus": {
-				// Add a bonus to a specific saving throw (e.g., Lucid Insight: CHA to WIS saves)
+				// Add a bonus to a specific saving throw (e.g., Lucid Insight: CHA to WIS saves).
+				// A `conditional` marks the bonus as situational → stored as a disabled toggle
+				// the player enables when it applies (e.g. Terrain Defense in cover/difficult terrain).
 				const saveTarget = `save:${effect.ability}`;
 				this._addClassFeatureModifier({
 					name: effect.source,
 					type: saveTarget,
 					value: effect.value,
-					note: `From ${effect.source}`,
-					enabled: true,
+					note: effect.conditional ? `From ${effect.source} - ${effect.conditional}` : `From ${effect.source}`,
+					enabled: effect.enabled !== false && !effect.conditional,
+					conditional: effect.conditional,
 				});
-				return `${effect.source}: +${effect.value} to ${effect.ability.toUpperCase()} saves`;
+				return `${effect.source}: +${effect.value} to ${effect.ability.toUpperCase()} saves${effect.conditional ? ` (${effect.conditional})` : ""}`;
 			}
 
 			// ===== SKILLS =====
@@ -26278,7 +26501,9 @@ class CharacterSheetState {
 			console.warn(`[CharSheet State] Invalid Primal Focus mode: ${mode}`);
 			return;
 		}
+		if (this._data.primalFocus.mode === mode) return;
 		this._data.primalFocus.mode = mode;
+		this._recomputePrimalFocusEffects();
 	}
 
 	/**
@@ -26292,6 +26517,7 @@ class CharacterSheetState {
 		// Check if we have unlimited switches
 		if (calcs.focusSwitchesMax === "Unlimited") {
 			this._data.primalFocus.mode = this._data.primalFocus.mode === "predator" ? "prey" : "predator";
+			this._recomputePrimalFocusEffects();
 			return true;
 		}
 
@@ -26304,7 +26530,19 @@ class CharacterSheetState {
 		// Perform switch
 		this._data.primalFocus.mode = this._data.primalFocus.mode === "predator" ? "prey" : "predator";
 		this._data.primalFocus.switchesUsed = (this._data.primalFocus.switchesUsed || 0) + 1;
+		this._recomputePrimalFocusEffects();
 		return true;
+	}
+
+	/**
+	 * Re-apply derived class-feature effects after a Primal Focus mode change.
+	 * Mode-specific bonuses (Pursuit walking speed in Predator, Terrain Defense AC/DEX
+	 * saves in Prey, etc.) are emitted per-mode by getFeatureCalculations(), so the
+	 * persisted modifier pipeline must be refreshed whenever the active focus changes.
+	 */
+	_recomputePrimalFocusEffects () {
+		if (!this.hasPrimalFocus()) return;
+		this.applyClassFeatureEffects();
 	}
 
 	/**

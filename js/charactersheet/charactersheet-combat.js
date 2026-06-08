@@ -15,6 +15,8 @@ class CharacterSheetCombat {
 		this._lastAttackContext = null;
 		this._sneakAttackHasAdjacentAlly = false;
 		this._selectedCunningStrikes = []; // Active CS option selections for current attack
+		this._weaponRiderEnabled = {}; // riderId -> bool: include this weapon damage rider in next damage roll
+		this._lastRiderRoundUsed = {}; // riderId -> combat round: per-rider once-per-turn bookkeeping
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
 		this._handOfHarmUsedThisTurn = false;
 
@@ -1121,6 +1123,27 @@ class CharacterSheetCombat {
 			this._markSneakAttackUsedThisTurn();
 		}
 
+		// Weapon damage riders (Colossus Slayer, Focused Quarry, …) — generic per-rider
+		// manual toggles, each once per turn, gated by the active Hunter's Prey option /
+		// Primal Focus mode via getFeatureCalculations().weaponDamageRiders. Never
+		// auto-applied: the trigger conditions ("target below max HP", "is your Quarry")
+		// aren't knowable from attack data, so the player opts in per rider.
+		let riderDamageTotal = 0;
+		const riderParts = [];
+		const usedRiderIds = [];
+		if (!attack.isSpell) {
+			const weaponRiders = this._state.getFeatureCalculations?.()?.weaponDamageRiders || [];
+			for (const rider of weaponRiders) {
+				if (!this._weaponRiderEnabled[rider.id]) continue;
+				if (!this._isRiderAvailableThisTurn(rider.id)) continue;
+				const riderRoll = this._parseDamage(rider.dice, isCrit);
+				riderDamageTotal += riderRoll.total;
+				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total});
+				usedRiderIds.push(rider.id);
+				this._markRiderUsedThisTurn(rider.id);
+			}
+		}
+
 		// Magic item crit damage bonus (e.g., bonusWeaponCritDamage on the weapon)
 		let critDamageBonus = 0;
 		if (isCrit && attack.sourceItem?.bonusWeaponCritDamage) {
@@ -1154,7 +1177,7 @@ class CharacterSheetCombat {
 			methodEffectDamage = methodRoll.total;
 		}
 
-		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal;
+		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderDamageTotal;
 		const total = baseDamageTotal + handOfHarmDamage + methodEffectDamage;
 
 		// Build subtitle with breakdown
@@ -1166,6 +1189,9 @@ class CharacterSheetCombat {
 		if (critDamageBonus) subtitle += ` + ${critDamageBonus} (crit bonus)`;
 		if (spellDamageBonus) subtitle += ` + ${spellDamageBonus} (spell item)`;
 		if (sneakAttackDamage) subtitle += ` + ${sneakAttackDamage} (sneak attack ${sneakAttackDice})`;
+		for (const rp of riderParts) {
+			subtitle += ` + ${rp.total} (${rp.name} ${rp.dice})`;
+		}
 		for (const ep of extraDamageParts) {
 			subtitle += ` + ${ep.total} (${ep.source}${ep.type ? ` ${ep.type}` : ""})`;
 		}
@@ -1193,7 +1219,7 @@ class CharacterSheetCombat {
 		}
 		this._page.showDiceResult({
 			title: `${attack.name} Damage`,
-			roll: damageRoll.total + sneakAttackDamage,
+			roll: damageRoll.total + sneakAttackDamage + riderDamageTotal,
 			modifier: totalBonus,
 			total: totalTitle || total,
 			subtitle,
@@ -1205,6 +1231,12 @@ class CharacterSheetCombat {
 			this._sneakAttackHasAdjacentAlly = false;
 			this._resetCunningStrikeSelections();
 			this._renderSneakAttackToggle?.();
+		}
+
+		// Auto-disable used weapon damage riders after the roll (each is once per turn)
+		if (usedRiderIds.length) {
+			usedRiderIds.forEach(id => { this._weaponRiderEnabled[id] = false; });
+			this._renderWeaponDamageRiders?.();
 		}
 	}
 
@@ -1232,6 +1264,20 @@ class CharacterSheetCombat {
 		const round = this._state.getCombatRound?.() || 0;
 		if (!round) return;
 		this._lastSneakAttackRoundUsed = round;
+	}
+
+	_isRiderAvailableThisTurn (riderId) {
+		if (!this._state?.isInCombat?.()) return true;
+		const round = this._state.getCombatRound?.() || 0;
+		if (!round) return true;
+		return this._lastRiderRoundUsed[riderId] !== round;
+	}
+
+	_markRiderUsedThisTurn (riderId) {
+		if (!this._state?.isInCombat?.()) return;
+		const round = this._state.getCombatRound?.() || 0;
+		if (!round) return;
+		this._lastRiderRoundUsed[riderId] = round;
 	}
 
 	_isSneakAttackContextDisadvantaged (attackId) {
@@ -2292,6 +2338,7 @@ class CharacterSheetCombat {
 				"rage", "reckless attack",
 				"bardic inspiration",
 				"arcane recovery",
+				"tireless",
 			];
 
 			const hasCombatKeyword = combatKeywords.some(kw => nameLower.includes(kw));
@@ -2350,6 +2397,9 @@ class CharacterSheetCombat {
 			}
 			if (nameLower === "instant step" && calc.instantStepEffects) {
 				feature.combatActionEffects = {...(feature.combatActionEffects || {}), ...calc.instantStepEffects};
+			}
+			if (nameLower === "tireless" && calc.tirelessEffects) {
+				feature.combatActionEffects = {...(feature.combatActionEffects || {}), ...calc.tirelessEffects};
 			}
 
 			const actionEl = this._createCombatActionElement(feature);
@@ -2754,6 +2804,9 @@ class CharacterSheetCombat {
 			const idx = features.findIndex(f => f.name === feature.name && f.source === feature.source);
 			if (idx >= 0 && feature.uses) {
 				features[idx].uses = feature.uses;
+				// Keep any mirrored resource (e.g. Tireless) in sync with feature uses
+				const fid = features[idx].id;
+				if (fid) this._state.setFeatureUses(fid, feature.uses.current);
 			}
 
 			// Apply combat action effects (conditions, temp HP, state activation)
@@ -4659,6 +4712,7 @@ class CharacterSheetCombat {
 		if (!resources?.length) {
 			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No combat resources</div>`;
 			this._renderSneakAttackToggle(container);
+			this._renderWeaponDamageRiders(container);
 			return;
 		}
 
@@ -4687,6 +4741,7 @@ class CharacterSheetCombat {
 		if (!combatResources.length) {
 			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No combat resources</div>`;
 			this._renderSneakAttackToggle(container);
+			this._renderWeaponDamageRiders(container);
 			return;
 		}
 
@@ -4727,6 +4782,9 @@ class CharacterSheetCombat {
 
 		// Render Sneak Attack toggle if character is a Rogue
 		this._renderSneakAttackToggle(container);
+
+		// Render weapon damage rider toggles (Colossus Slayer, Focused Quarry, …)
+		this._renderWeaponDamageRiders(container);
 	}
 
 	/**
@@ -4880,6 +4938,75 @@ class CharacterSheetCombat {
 			}
 
 			section.append(cs);
+		}
+
+		container.append(section);
+	}
+
+	/**
+	 * Render Weapon Damage Rider toggles (Colossus Slayer, Focused Quarry, …).
+	 * Generic, data-driven from getFeatureCalculations().weaponDamageRiders. Each rider
+	 * is a manual once-per-turn toggle whose dice are added to the next weapon damage
+	 * roll. Riders are gated upstream by the active Hunter's Prey option / Primal Focus
+	 * mode, so this method simply renders whatever riders are currently available.
+	 */
+	_renderWeaponDamageRiders (container) {
+		if (!container) container = document.getElementById("charsheet-combat-resources");
+		if (!container) return;
+
+		// Remove existing rider UI before re-rendering
+		container.querySelector(".charsheet__weapon-riders-section")?.remove();
+
+		const calcs = this._state.getFeatureCalculations?.();
+		const riders = calcs?.weaponDamageRiders || [];
+
+		// Prune enabled flags for riders no longer available (e.g. after a Primal
+		// Focus / Hunter's Prey change) so they can't reappear pre-enabled.
+		const riderIds = new Set(riders.map(r => r.id));
+		for (const id of Object.keys(this._weaponRiderEnabled)) {
+			if (!riderIds.has(id)) delete this._weaponRiderEnabled[id];
+		}
+
+		if (!riders.length) return;
+
+		const section = e_({outer: `<div class="charsheet__weapon-riders-section mt-3" style="border-top: 1px solid var(--rgb-border-grey, #444); padding-top: 0.5rem;"></div>`});
+		section.insertAdjacentHTML("beforeend", `<div class="ve-flex-v-center mb-1"><strong style="font-size: 1.05em;">Weapon Damage Riders</strong></div>`);
+
+		const colors = {ready: "ve-btn-success", off: "ve-btn-default", used: "ve-btn-danger"};
+		const labels = {ready: "READY", off: "OFF", used: "USED"};
+
+		for (const rider of riders) {
+			const isSpent = !this._isRiderAvailableThisTurn(rider.id);
+			if (isSpent && this._weaponRiderEnabled[rider.id]) this._weaponRiderEnabled[rider.id] = false;
+			const toggleState = isSpent ? "used" : this._weaponRiderEnabled[rider.id] ? "ready" : "off";
+			const title = isSpent
+				? `${rider.name} already used this round`
+				: this._weaponRiderEnabled[rider.id]
+					? `Click to disable ${rider.name} for next damage roll`
+					: `Click to enable ${rider.name} for next damage roll`;
+
+			const row = e_({outer: `
+				<div class="ve-flex-v-center mb-1 gap-2">
+					<button class="ve-btn ve-btn-xs ${colors[toggleState]} charsheet__weapon-rider-toggle mr-2" data-rider-id="${rider.id}" title="${title}" ${isSpent ? "disabled" : ""}>
+						<span class="glyphicon glyphicon-flash mr-1"></span>${labels[toggleState]}
+					</button>
+					<span class="ve-small"><strong>${rider.name}</strong> ${rider.dice}${rider.note ? ` <span class="ve-muted">(${rider.note})</span>` : ""}</span>
+				</div>
+			`});
+
+			row.querySelector(".charsheet__weapon-rider-toggle")?.addEventListener("click", () => {
+				if (!this._isRiderAvailableThisTurn(rider.id)) {
+					JqueryUtil.doToast({type: "warning", content: `${rider.name} has already been used this round.`});
+					return;
+				}
+				this._weaponRiderEnabled[rider.id] = !this._weaponRiderEnabled[rider.id];
+				this._renderWeaponDamageRiders();
+			});
+			section.append(row);
+
+			if (rider.condition) {
+				section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1" style="margin-left: 4px;">${rider.condition}</div>`);
+			}
 		}
 
 		container.append(section);

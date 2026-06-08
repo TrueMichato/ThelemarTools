@@ -34,8 +34,10 @@ class CharacterSheetRest {
 		const conditions = this._state.getConditionNames?.() || [];
 		const isConcentrating = this._state.isConcentrating?.();
 		const concentration = this._state.getConcentration?.();
+		const calcEarly = this._state.getFeatureCalculations?.() || {};
+		const canReduceExhaustion = calcEarly.hasTireless && (this._state.getExhaustion?.() || 0) > 0;
 
-		if (currentHp >= maxHp && !availableHitDice.length && !conditions.length && !isConcentrating) {
+		if (currentHp >= maxHp && !availableHitDice.length && !conditions.length && !isConcentrating && !canReduceExhaustion) {
 			JqueryUtil.doToast({type: "info", content: "You're already at full health with no hit dice to spend."});
 			return;
 		}
@@ -285,6 +287,14 @@ class CharacterSheetRest {
 			else modalInner.append(huntersPreySwap.section);
 		}
 
+		// --- Tireless exhaustion reduction (TGTT Ranger) ---
+		const tirelessExhaustion = this._buildTirelessExhaustionSection();
+		if (tirelessExhaustion) {
+			const teTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (teTarget?.parentNode) teTarget.parentNode.insertBefore(tirelessExhaustion.section, teTarget);
+			else modalInner.append(tirelessExhaustion.section);
+		}
+
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✓ Finish Short Rest"});
 		btnConfirm.onClick(() => {
 			// Apply hit dice spending using spentDice tracker
@@ -338,6 +348,9 @@ class CharacterSheetRest {
 			// Apply Hunter's Prey option swap, if changed
 			huntersPreySwap?.apply();
 
+			// Apply Tireless exhaustion reduction, if elected
+			const tirelessReduced = tirelessExhaustion?.apply() || 0;
+
 			this._page.saveCharacter();
 			this._page.renderCharacter();
 			doClose(true);
@@ -348,6 +361,7 @@ class CharacterSheetRest {
 			if (spRecovered > 0) message += ` Recovered ${spRecovered} sorcery point(s).`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (shouldBreakConcentration) message += ` Broke concentration.`;
+			if (tirelessReduced > 0) message += ` Tireless reduced exhaustion by ${tirelessReduced}.`;
 
 			JqueryUtil.doToast({
 				type: "success",
@@ -503,6 +517,14 @@ class CharacterSheetRest {
 			else modalInner.append(huntersPreySwap.section);
 		}
 
+		// --- Primal Focus mode selector (TGTT Ranger) ---
+		const primalFocusSelect = this._buildPrimalFocusModeSection();
+		if (primalFocusSelect) {
+			const pfTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (pfTarget?.parentNode) pfTarget.parentNode.insertBefore(primalFocusSelect.section, pfTarget);
+			else modalInner.append(primalFocusSelect.section);
+		}
+
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		btnConfirm.onClick(() => {
 			// Full HP recovery
@@ -568,6 +590,9 @@ class CharacterSheetRest {
 			// Apply Hunter's Prey option swap, if changed
 			huntersPreySwap?.apply();
 
+			// Apply Primal Focus mode selection, if changed (free on a long rest)
+			const primalFocusChanged = primalFocusSelect?.apply() || false;
+
 			// Save changes
 			this._page.saveCharacter();
 			this._page.renderCharacter();
@@ -575,6 +600,7 @@ class CharacterSheetRest {
 			doClose(true);
 
 			let message = "🌙 Long rest complete! All resources restored.";
+			if (primalFocusChanged) message += ` Primal Focus set to ${primalFocusChanged}.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
 
@@ -632,6 +658,83 @@ class CharacterSheetRest {
 				if (chosen && chosen !== currentOption) {
 					this._state.setHuntersPreyOption?.(chosen);
 				}
+			},
+		};
+	}
+
+	/**
+	 * Build a Primal Focus mode selector for the long-rest dialog (TGTT Ranger).
+	 * Choosing a mode on a long rest is free (does not consume a Focus Switch).
+	 * Returns null when the character lacks Primal Focus.
+	 * @returns {{section: HTMLElement, apply: function}|null}
+	 */
+	_buildPrimalFocusModeSection () {
+		if (!this._state.hasPrimalFocus?.()) return null;
+
+		const currentMode = this._state.getPrimalFocusMode?.() || "predator";
+		const modes = [
+			{id: "predator", name: "🎯 Predator"},
+			{id: "prey", name: "🛡️ Prey"},
+		];
+
+		const sel = e_({tag: "select", clazz: "form-control input-sm charsheet__primal-focus-rest-select"});
+		modes.forEach(m => {
+			const opt = e_({tag: "option", val: m.id, txt: m.name});
+			if (m.id === currentMode) opt.selected = true;
+			sel.appendChild(opt);
+		});
+
+		const section = e_({outer: `<div class="charsheet__rest-section">
+			<div class="charsheet__rest-section-title">🐺 Primal Focus</div>
+			<p class="ve-muted ve-small mb-2">Choose your Primal Focus mode (free on a long rest — no Focus Switch spent):</p>
+		</div>`});
+		section.appendChild(sel);
+
+		return {
+			section,
+			// Returns the new mode's label when changed, else false.
+			apply: () => {
+				const chosen = sel.value;
+				if (chosen && chosen !== currentMode) {
+					this._state.setPrimalFocusMode?.(chosen);
+					return chosen === "predator" ? "Predator" : "Prey";
+				}
+				return false;
+			},
+		};
+	}
+
+	/**
+	 * Build a Tireless exhaustion-reduction control for the short-rest dialog.
+	 * TGTT Ranger Tireless reduces exhaustion by 1 on every short rest.
+	 * Returns null when the character lacks Tireless or has no exhaustion.
+	 * @returns {{section: HTMLElement, apply: function}|null}
+	 */
+	_buildTirelessExhaustionSection () {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		if (!calc.hasTireless) return null;
+		const currentExhaustion = this._state.getExhaustion?.() || 0;
+		if (currentExhaustion <= 0) return null;
+
+		const cb = e_({tag: "input", attrs: {type: "checkbox", checked: ""}});
+		cb.checked = true;
+		const section = e_({outer: `<div class="charsheet__rest-section">
+			<div class="charsheet__rest-section-title">💪 Tireless</div>
+			<p class="ve-muted ve-small mb-2">Finishing a short rest reduces your exhaustion by 1 (currently ${currentExhaustion}).</p>
+		</div>`});
+		const label = e_({tag: "label", clazz: "ve-flex-v-center", attrs: {style: "gap: 6px; cursor: pointer;"}});
+		label.appendChild(cb);
+		label.appendChild(e_({tag: "span", txt: "Reduce exhaustion by 1"}));
+		section.appendChild(label);
+
+		return {
+			section,
+			apply: () => {
+				if (!cb.checked) return 0;
+				const cur = this._state.getExhaustion?.() || 0;
+				if (cur <= 0) return 0;
+				this._state.setExhaustion(cur - 1);
+				return 1;
 			},
 		};
 	}
