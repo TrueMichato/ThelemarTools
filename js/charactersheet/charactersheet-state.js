@@ -34766,6 +34766,110 @@ class CharacterSheetState {
 		});
 	}
 
+	// #region Druid resource tracking (Wild Shape uses / Wild Companion / Zodiac Form)
+	// These power the purpose-built Druid Resources modal. They are intentionally
+	// additive and DO NOT change the generic active-state / Zodiac / Wild Shape
+	// mechanics that the Ranger work, combat display, and existing tests rely on.
+
+	/**
+	 * Resolve the "Wild Shape" uses resource. Prefers the resource linked by
+	 * `featureId` to the Wild Shape feature (edition/multiclass-safe), then falls
+	 * back to a normalized name match. Returns null when the druid has no Wild
+	 * Shape uses resource (e.g. pre-level-2, or legacy data).
+	 * @returns {object|null}
+	 */
+	getWildShapeResource () {
+		const resources = this._data.resources || [];
+		const wsFeature = (this._data.features || []).find(f => /^wild shape$/i.test((f.name || "").trim()));
+		if (wsFeature) {
+			const byFeature = resources.find(r => r.featureId === wsFeature.id);
+			if (byFeature) return byFeature;
+		}
+		return resources.find(r => (r.name || "").trim().toLowerCase() === "wild shape") || null;
+	}
+
+	/**
+	 * @param {number} [count=1]
+	 * @returns {boolean} True if a Wild Shape resource exists with at least `count` uses left.
+	 */
+	canSpendWildShapeUse (count = 1) {
+		const res = this.getWildShapeResource();
+		return !!res && res.current >= count;
+	}
+
+	/**
+	 * Spend Wild Shape uses. Routes through setResourceCurrent so the linked
+	 * feature's `uses.current` stays in sync.
+	 * @param {number} [count=1]
+	 * @returns {boolean} True if the uses were spent; false if insufficient.
+	 */
+	spendWildShapeUse (count = 1) {
+		const res = this.getWildShapeResource();
+		if (!res || res.current < count) return false;
+		this.setResourceCurrent(res.id, res.current - count);
+		return true;
+	}
+
+	/**
+	 * Restore Wild Shape uses (e.g. the modal's "+" control / manual correction).
+	 * Clamped to the resource max by setResourceCurrent.
+	 * @param {number} [count=1]
+	 * @returns {boolean} True if a Wild Shape resource exists.
+	 */
+	restoreWildShapeUse (count = 1) {
+		const res = this.getWildShapeResource();
+		if (!res) return false;
+		this.setResourceCurrent(res.id, res.current + count);
+		return true;
+	}
+
+	/**
+	 * Activate a Zodiac Form by spending one Wild Shape use, atomically.
+	 *
+	 * Validates the form, re-reads the LIVE Wild Shape resource, and aborts
+	 * without mutation if no use is available. Activation (sync) happens first,
+	 * then the use is spent — so a failed activation never burns a use. Leaves
+	 * the plain `activateZodiacForm` untouched (no auto-spend) so existing
+	 * resource-free zodiac tests/setups keep working.
+	 *
+	 * @param {string} formId - Form id from ZODIAC_FORM_DEFS.
+	 * @param {object} [options] - Extra activateZodiacForm options.
+	 * @returns {{id:string, name:string, tier:string}|null} The form def, or null if the
+	 *   form is unknown or no Wild Shape use is available.
+	 */
+	activateZodiacFormUsingWildShape (formId, options = {}) {
+		const def = CharacterSheetState.getZodiacFormDef(formId);
+		if (!def) return null;
+		const res = this.getWildShapeResource();
+		if (!res || res.current < 1) return null;
+		this.activateZodiacForm(formId, {...options, resourceId: res.id});
+		this.setResourceCurrent(res.id, res.current - 1);
+		return def;
+	}
+
+	/**
+	 * Predicate: should this activatable feature be handled by the dedicated
+	 * Druid Resources modal (and therefore excluded from the GENERIC
+	 * "Available to Activate" list)?
+	 *
+	 * Narrowed so unrelated homebrew that happens to be detected as `wildShape`
+	 * is NOT over-filtered: Wild Shape is only matched when the feature name is
+	 * Wild Shape / Wild Companion. Zodiac Form (a Circle-of-the-Zodiac-only
+	 * state type) always qualifies.
+	 *
+	 * @param {{stateTypeId?: string, feature?: {name?: string}}} af - An entry from getActivatableFeatures().
+	 * @returns {boolean}
+	 */
+	static isDruidResourceActivatable (af) {
+		if (!af) return false;
+		if (af.stateTypeId === "zodiacForm") return true;
+		if (af.stateTypeId === "wildShape") {
+			return /wild shape|wild companion/i.test(af.feature?.name || "");
+		}
+		return false;
+	}
+	// #endregion
+
 	/**
 	 * Add a new active state
 	 * @param {string} stateTypeId - The state type ID from ACTIVE_STATE_TYPES, or "custom" for custom states
