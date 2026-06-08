@@ -129,6 +129,63 @@ describe("getPrimalFocusModeAbilities — mode-gated ability catalog", () => {
 });
 
 // ==========================================================================
+// PART 1b: reminder classification (BUG #11 — methods + applied-elsewhere are
+// filtered out of the at-a-glance reminder surfaces generically, by kind/flag)
+// ==========================================================================
+describe("isPrimalFocusReminderAbility — generic reminder classification", () => {
+	it("excludes combat methods (kind: method) — they live in the Combat Methods section", () => {
+		expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility({name: "Singular Focus", kind: "method"})).toBe(false);
+		expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility({name: "Groundshatter", kind: "method"})).toBe(false);
+	});
+
+	it("excludes applied-elsewhere passives (their whole effect is already applied/shown)", () => {
+		expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility({name: "Pursuit", kind: "passive", appliedElsewhere: true})).toBe(false);
+	});
+
+	it("includes genuine usable controls and watch-for passives", () => {
+		expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility({name: "Focused Quarry", kind: "usable", actionType: "bonus"})).toBe(true);
+		expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility({name: "Hunter's Insight", kind: "passive"})).toBe(true);
+		expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility({name: "Hunter's Dodge", kind: "usable", actionType: "reaction"})).toBe(true);
+	});
+
+	it("is a positive whitelist — null / unknown future kinds are excluded by default", () => {
+		expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility(null)).toBe(false);
+		expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility(undefined)).toBe(false);
+		expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility({name: "X", kind: "resource"})).toBe(false);
+	});
+
+	it("Pursuit is tagged appliedElsewhere in the catalog (its +10 ft is a real speed modifier)", () => {
+		const predator = CharacterSheetClassUtils.getPrimalFocusModeAbilities("predator", {upgrade1: true});
+		const pursuit = predator.find(a => a.name === "Pursuit");
+		expect(pursuit).toBeTruthy();
+		expect(pursuit.kind).toBe("passive");
+		expect(pursuit.appliedElsewhere).toBe(true);
+	});
+
+	it("filtering the predator catalog drops Singular Focus + Pursuit but keeps usables/passives", () => {
+		const filtered = CharacterSheetClassUtils.getPrimalFocusModeAbilities("predator", {upgrade1: true})
+			.filter(a => CharacterSheetClassUtils.isPrimalFocusReminderAbility(a));
+		const names = filtered.map(a => a.name);
+		expect(names).not.toContain("Singular Focus"); // method
+		expect(names).not.toContain("Pursuit"); // applied elsewhere
+		expect(names).toContain("Focused Quarry");
+		expect(names).toContain("Hunter's Insight");
+		expect(names).toContain("Intimidating Foe");
+		expect(names).toContain("Predator Eye");
+	});
+
+	it("filtering the prey catalog drops Groundshatter but keeps Hunter's Dodge + Terrain Defense", () => {
+		const filtered = CharacterSheetClassUtils.getPrimalFocusModeAbilities("prey", {upgrade1: true})
+			.filter(a => CharacterSheetClassUtils.isPrimalFocusReminderAbility(a));
+		const names = filtered.map(a => a.name);
+		expect(names).not.toContain("Groundshatter"); // method
+		expect(names).toContain("Hunter's Dodge");
+		expect(names).toContain("Terrain Defense");
+		expect(names).toContain("Improvised Sanctuary");
+	});
+});
+
+// ==========================================================================
 // PART 2: Level-6 combat-method grant lifecycle
 // ==========================================================================
 describe("reconcileGrantedCombatMethods — Primal Focus Upgrade lifecycle", () => {

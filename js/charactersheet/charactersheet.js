@@ -5901,11 +5901,11 @@ class CharacterSheetPage {
 			// declarative source so the two surfaces never drift). Reminder-only here —
 			// usable abilities/methods are actioned from the Combat tab. The Focused
 			// Quarry row keeps the only unique numeric info the old summary showed.
-			const abilities = CharacterSheetClassUtils.getPrimalFocusModeAbilities?.(mode, {
+			const abilities = (CharacterSheetClassUtils.getPrimalFocusModeAbilities?.(mode, {
 				upgrade1: !!calcs.primalFocusUpgrade1,
 				upgrade2: !!calcs.primalFocusUpgrade2,
 				upgrade3: !!calcs.primalFocusUpgrade3,
-			}) || [];
+			}) || []).filter(ab => CharacterSheetClassUtils.isPrimalFocusReminderAbility?.(ab));
 			if (abilities.length) {
 				html += `<div class="charsheet__overview-ranger-abilities mt-1">`;
 				abilities.forEach(ab => {
@@ -5915,17 +5915,18 @@ class CharacterSheetPage {
 						const icon = at === "action" ? "⚔️" : at === "bonus" ? "⚡" : at === "reaction" ? "🔄" : "✨";
 						const label = at === "action" ? "Action" : at === "bonus" ? "Bonus Action" : at === "reaction" ? "Reaction" : "Action";
 						badge = `<span class="badge badge-outline-secondary" title="${label}">${icon} ${label}</span>`;
-					} else if (ab.kind === "method") {
-						badge = `<span class="badge badge-outline-info" title="Combat method (see Combat Methods)">⚔️ Method</span>`;
 					} else {
 						badge = `<span class="badge badge-outline-secondary" title="Passive / situational">✦ Passive</span>`;
 					}
 					const extra = (ab.name === "Focused Quarry" && calcs.focusedQuarryDamage)
 						? ` <span class="badge badge-outline-danger" title="Extra damage to your Quarry (once per turn)">+${calcs.focusedQuarryDamage} dmg</span>`
 						: "";
+					// Hoverable name (renders the note as an inline-hover entry, like the
+					// Combat-method and Zodiac-form surfaces); falls back to plain text.
+					const nameHtml = CharacterSheetClassUtils.buildInlineEntriesHoverLink?.(ab.name, ab.name, [ab.note]) || ab.name;
 					html += `
 						<div class="charsheet__ranger-ability-row">
-							<span class="charsheet__ranger-ability-name">${ab.name}</span>
+							<span class="charsheet__ranger-ability-name">${nameHtml}</span>
 							<span class="charsheet__ranger-ability-badge">${badge}${extra}</span>
 							<span class="charsheet__ranger-ability-note">${ab.note}</span>
 						</div>`;
@@ -6007,7 +6008,15 @@ class CharacterSheetPage {
 
 				const name = document.createElement("span");
 				name.className = "charsheet__ranger-ability-name";
-				name.textContent = `${rem.icon ? `${rem.icon} ` : ""}${rem.name}`;
+				// Hoverable name; the hover renders the bulleted `notes` (when present) as a
+				// list so multi-mechanic reminders read cleanly, else the single note string.
+				const hoverEntries = Array.isArray(rem.notes) && rem.notes.length
+					? [{type: "list", items: rem.notes}]
+					: [rem.note];
+				const nameLabel = `${rem.icon ? `${rem.icon} ` : ""}${rem.name}`;
+				const nameHtml = CharacterSheetClassUtils.buildInlineEntriesHoverLink?.(nameLabel, rem.name, hoverEntries);
+				if (nameHtml) name.innerHTML = nameHtml;
+				else name.textContent = nameLabel;
 
 				const badge = document.createElement("span");
 				badge.className = "charsheet__ranger-ability-badge";
@@ -6015,7 +6024,20 @@ class CharacterSheetPage {
 
 				const note = document.createElement("span");
 				note.className = "charsheet__ranger-ability-note";
-				note.textContent = rem.note;
+				// Distinct mechanics are rendered as separate bullets; single-note features
+				// fall back to a plain sentence.
+				if (Array.isArray(rem.notes) && rem.notes.length) {
+					const ul = document.createElement("ul");
+					ul.className = "charsheet__ranger-ability-notes";
+					rem.notes.forEach(n => {
+						const li = document.createElement("li");
+						li.textContent = n;
+						ul.appendChild(li);
+					});
+					note.appendChild(ul);
+				} else {
+					note.textContent = rem.note;
+				}
 
 				row.append(name, badge, note);
 				block.appendChild(row);

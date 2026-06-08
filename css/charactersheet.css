@@ -8561,6 +8561,18 @@ body.has-quickbuild-overlay .toast__container {
 	line-height: 1.3;
 }
 
+/* Multi-mechanic reminder notes (e.g. Enduring Traveler): each distinct benefit on
+   its own compact bullet so they no longer cram into one paragraph. */
+.charsheet__ranger-ability-notes {
+	margin: 0;
+	padding-left: 1.1em;
+	list-style: disc;
+}
+
+.charsheet__ranger-ability-notes li {
+	margin-bottom: 0.1rem;
+}
+
 /* Druid Resources (Combat tab) — Wild Shape / Wild Companion / Zodiac Form panel.
    Self-contained, prefixed classes only; does NOT touch the generic combat
    resource/speed selectors. Each block is a labelled mini-card; action buttons
