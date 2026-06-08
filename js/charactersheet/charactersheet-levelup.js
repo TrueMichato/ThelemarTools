@@ -5190,10 +5190,10 @@ class CharacterSheetLevelUp {
 			choicesList.push(`${skillGrant.count} skill proficiency`);
 		}
 		if (multiclassSpellGain > 0) {
-			choicesList.push(`${multiclassSpellGain} spell${multiclassSpellGain !== 1 ? "s" : ""}`);
+			choicesList.push(`${multiclassSpellGain} spell${multiclassSpellGain !== 1 ? "s" : ""} (optional)`);
 		}
 		if (multiclassCantripGain > 0) {
-			choicesList.push(`${multiclassCantripGain} cantrip${multiclassCantripGain !== 1 ? "s" : ""}`);
+			choicesList.push(`${multiclassCantripGain} cantrip${multiclassCantripGain !== 1 ? "s" : ""} (optional)`);
 		}
 
 		content.insertAdjacentHTML("beforeend", `
@@ -5341,15 +5341,11 @@ class CharacterSheetLevelUp {
 				return;
 			}
 
-			// Validate spell selections
-			if (multiclassSpellGain > 0 && selectedMulticlassSpells.length < multiclassSpellGain) {
-				JqueryUtil.doToast({type: "warning", content: `Please select ${multiclassSpellGain} spell${multiclassSpellGain !== 1 ? "s" : ""}.`});
-				return;
-			}
-			if (multiclassCantripGain > 0 && selectedMulticlassCantrips.length < multiclassCantripGain) {
-				JqueryUtil.doToast({type: "warning", content: `Please select ${multiclassCantripGain} cantrip${multiclassCantripGain !== 1 ? "s" : ""}.`});
-				return;
-			}
+			// Spell/cantrip selections are intentionally optional, matching the
+			// regular level-up, Builder, and Quick Build flows: whatever the player
+			// picked is applied, and any remaining unspent spell/cantrip slots can be
+			// filled later from the Spells tab (the per-class card shows count/max
+			// room). We deliberately do not gate Confirm on under-filled spell pools.
 
 			// Apply multiclass with selections
 			await this._applyMulticlass(selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills, selectedMulticlassSpells, selectedMulticlassCantrips);
