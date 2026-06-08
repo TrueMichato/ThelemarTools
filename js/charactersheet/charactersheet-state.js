@@ -4023,14 +4023,17 @@ class CharacterSheetState {
 
 	/**
 	 * Repair companions saved with a malformed `type` (an object instead of a
-	 * COMPANION_TYPES string), recovering the intended type/origin. Idempotent —
-	 * well-formed companions are left untouched.
+	 * string — the historic `addCompanionFromBestiary` arg-order bug), recovering
+	 * the intended type/origin. Idempotent, and conservative: any companion whose
+	 * `type` is already a non-empty string (canonical OR a freeform Play Mode label)
+	 * is left untouched — only object/missing types are repaired.
 	 */
 	_migrateCompanions () {
 		if (!Array.isArray(this._data.companions)) return;
 		for (const c of this._data.companions) {
 			if (!c) continue;
-			if (typeof c.type === "string" && Object.values(CharacterSheetState.COMPANION_TYPES).includes(c.type)) continue;
+			// Already a usable string type (canonical or freeform) → leave as-is.
+			if (typeof c.type === "string" && c.type.trim() !== "") continue;
 			const {type, origin} = CharacterSheetState._normalizeCompanionType(c.type, c.origin);
 			c.type = type;
 			if (origin && !c.origin) c.origin = origin;
@@ -37199,34 +37202,50 @@ class CharacterSheetState {
 	};
 
 	/**
-	 * Normalize a companion `type` (and recover `origin`) to honor the type/origin contract.
+	 * Normalize a companion `type` (and recover `origin`) to honor the type/origin
+	 * contract: `companion.type` is ALWAYS a non-empty string.
 	 *
 	 * Accepts:
-	 *  - a valid COMPANION_TYPES string → returned as-is.
+	 *  - any non-empty string → returned as-is. This deliberately preserves both the
+	 *    canonical COMPANION_TYPES values (so `getCompanionsByType` / the familiar
+	 *    indicator match exactly) AND user-entered freeform labels (the Play Mode
+	 *    "Add Companion" modal lets players type an arbitrary type, e.g. "beast").
 	 *  - a malformed object `{type, origin}` (from the historic
-	 *    `addCompanionFromBestiary(creature, {type, origin})` arg-order bug) → unpacked.
-	 *  - anything else / unknown string → defaults to CUSTOM.
+	 *    `addCompanionFromBestiary(creature, {type, origin})` arg-order bug) → unpacked
+	 *    to its inner string `type` (and `origin` recovered).
+	 *  - anything else (object without a string `type`, null, undefined, non-string,
+	 *    empty/whitespace string) → defaults to CUSTOM.
+	 *
+	 * The fix for the #13 arg-order bug is the OBJECT-unpacking + non-string guard;
+	 * unknown strings are intentionally NOT coerced to CUSTOM so freeform types survive.
 	 *
 	 * @param {*} type - The raw type value (string or malformed object).
 	 * @param {*} [origin] - The caller-provided origin (used when the object lacks one).
 	 * @returns {{type: string, origin: (string|null)}}
 	 */
 	static _normalizeCompanionType (type, origin = null) {
-		const valid = new Set(Object.values(CharacterSheetState.COMPANION_TYPES));
 		let resolvedType = type;
 		let resolvedOrigin = origin;
 
-		// Unpack a malformed object passed as `type`.
+		// Unpack a malformed object passed as `type` (the #13 bug shape).
 		if (resolvedType && typeof resolvedType === "object") {
 			if (resolvedOrigin == null && typeof resolvedType.origin === "string") resolvedOrigin = resolvedType.origin;
 			resolvedType = resolvedType.type;
 		}
 
-		if (typeof resolvedType !== "string" || !valid.has(resolvedType)) {
+		// Any non-empty string is a valid type (canonical OR freeform); everything
+		// else collapses to CUSTOM so the stored type is always a usable string.
+		// Trim so stray whitespace (" wild_shape ") still matches canonical lookups.
+		if (typeof resolvedType !== "string" || resolvedType.trim() === "") {
 			resolvedType = CharacterSheetState.COMPANION_TYPES.CUSTOM;
+		} else {
+			resolvedType = resolvedType.trim();
 		}
 
-		return {type: resolvedType, origin: resolvedOrigin || null};
+		const cleanOrigin = (typeof resolvedOrigin === "string" && resolvedOrigin.trim() !== "")
+			? resolvedOrigin
+			: null;
+		return {type: resolvedType, origin: cleanOrigin};
 	}
 
 	/**
