@@ -323,6 +323,15 @@ class CharacterSheetPage {
 		// and BEFORE _setUpStateFromData consumes the merged data.
 		await this._pResolveCopyInheritance();
 
+		// Register the sheet's loaded (brew-merged + _copy-resolved) class,
+		// subclass, optional-feature and combat-method entities directly into the
+		// DataLoader hover cache. These brew entities aren't reachable through the
+		// standard `pCacheAndGet` brew pipeline (the sheet loads them via its own
+		// path), so link-style hovers would otherwise throw "Failed to load
+		// renderable content". Synchronous + run here (after copy-resolution, before
+		// any render) so the first hover can never race ahead of registration.
+		this._registerLoadedHoverEntities();
+
 		// Phase 7.1 diagnostic + recovery hook:
 		//   1. Expose the merged subclass pool so `resolveFullSubclass` can run a
 		//      defensive lazy merge if a picker call site discovers a still-unmerged
@@ -427,6 +436,47 @@ class CharacterSheetPage {
 			// Non-critical - just means some hover links may not work
 			// eslint-disable-next-line no-console
 			console.warn("[CharSheet] Failed to pre-cache entity data for hovers:", e);
+		}
+	}
+
+	/**
+	 * Register the sheet's already-loaded class / subclass / optional-feature /
+	 * combat-method entities into the DataLoader hover cache so link-style hovers
+	 * resolve to the real entity (the user's preferred hover style).
+	 *
+	 * Unlike `_pPreCacheEntityData` (which re-loads site/prerelease/brew data
+	 * through the async `pCacheAndGet*` pipeline), this seeds the cache directly
+	 * from `this._classes/_subclasses/_optionalFeaturesData/_combatMethodsData`
+	 * via the same synchronous `DataLoader._pCache_addToCache` mechanism already
+	 * used for Ar8 variant-component items. This is deliberate:
+	 *   - the sheet's brew entities are NOT visible to the brew loader, so the
+	 *     async pipeline can't cache them;
+	 *   - these arrays are already `_copy`-resolved, so render quality is preserved;
+	 *   - it is synchronous, so there is no first-hover race.
+	 *
+	 * `_pCache_addToCache` keys each entity by `SourceUtil.getEntitySource` +
+	 * `URL_TO_HASH_BUILDER[prop]`; subclasses are therefore cached under the
+	 * SUBCLASS source with the `classHash,state:sub_…=b1` hash — exactly what
+	 * `buildSubclassHoverTarget` / the `{@subclass}` renderer query.
+	 */
+	_registerLoadedHoverEntities () {
+		try {
+			const allDataMerged = {
+				class: this._classes || [],
+				subclass: this._subclasses || [],
+				optionalfeature: this._optionalFeaturesData || [],
+				combatMethod: this._combatMethodsData || [],
+			};
+			const propAllowlist = new Set(
+				Object.keys(allDataMerged).filter(prop => allDataMerged[prop]?.length),
+			);
+			if (!propAllowlist.size) return;
+			DataLoader._pCache_addToCache({allDataMerged, propAllowlist});
+		} catch (e) {
+			// Non-critical - just means some hover links may not resolve to the
+			// real entity (they fall back to plain text / inline hovers).
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] Failed to register loaded entities for hovers:", e);
 		}
 	}
 
@@ -7293,6 +7343,35 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Resolve a single-source catalog feature (optional feature / combat method)
+	 * to a hover link, preferring the real linked entity.
+	 *
+	 * Canonicalizes the stored source against the loaded catalog (handles
+	 * stale/alias sources like "KaW" vs "TGTT") so the link resolves against the
+	 * registered DataLoader cache. When the entity is genuinely absent from the
+	 * catalog and the feature carries its own `entries`, falls back to an inline
+	 * hover (no thrown error / no console spam) rather than emitting a dead
+	 * canonical link.
+	 *
+	 * @param {object} feature - The feature object
+	 * @param {string} page - Target hover page (PG_COMBAT_METHODS / PG_OPT_FEATURES)
+	 * @param {Array} catalog - Loaded catalog (`_combatMethodsData` / `_optionalFeaturesData`)
+	 * @returns {string} HTML string for the hover link (or inline/plain fallback)
+	 */
+	_getCatalogHoverLinkOrLocal (feature, page, catalog) {
+		const {source: canonicalSource, isInCatalog} = CharacterSheetClassUtils.resolveCatalogEntitySource(
+			feature.name,
+			feature.source,
+			catalog || [],
+		);
+		if (!isInCatalog && feature.entries?.length) {
+			const localLink = CharacterSheetClassUtils.buildLocalFeatureHoverLink(feature);
+			if (localLink) return localLink;
+		}
+		return this.getHoverLink(page, feature.name, canonicalSource || feature.source || Parser.SRC_XPHB);
+	}
+
+	/**
 	 * Create a hover link for an activatable feature
 	 * @param {object} feature - The feature object
 	 * @returns {string} HTML string with hover attributes
@@ -7310,7 +7389,7 @@ class CharacterSheetPage {
 				&& (feature._entityType === "combatMethod"
 					|| (Array.isArray(feature.optionalFeatureTypes) && feature.optionalFeatureTypes.some(t => t?.startsWith?.("CTM:"))));
 			if (isDefiniteCombatMethod) {
-				return this.getHoverLink(UrlUtil.PG_COMBAT_METHODS, feature.name, feature.source || Parser.SRC_XPHB);
+				return this._getCatalogHoverLinkOrLocal(feature, UrlUtil.PG_COMBAT_METHODS, this._combatMethodsData);
 			}
 
 			// Class features - link to class feature page
@@ -7367,7 +7446,11 @@ class CharacterSheetPage {
 			// Optional features (invocations, combat methods, etc.)
 			if (feature.featureType === "Optional Feature" || feature.optionalfeatureType) {
 				const isCM = CharacterSheetClassUtils.isCombatMethod(feature);
-				return this.getHoverLink(isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES, feature.name, feature.source || Parser.SRC_XPHB);
+				return this._getCatalogHoverLinkOrLocal(
+					feature,
+					isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES,
+					isCM ? this._combatMethodsData : this._optionalFeaturesData,
+				);
 			}
 			// Species/Race features
 			if (feature.featureType === "Species" || feature.featureType === "Race" || feature.featureType === "Subrace") {
@@ -11215,41 +11298,33 @@ class CharacterSheetPage {
 	/**
 	 * Create a hoverable link for a subclass.
 	 *
-	 * The character only stores `cls.subclass = {name, source}` — the `source`
-	 * here is the SUBCLASS source (e.g. "EGW" for Chronurgy Magic). The
-	 * PG_CLASSES hover hash and lookup both want the *class* source
-	 * (`subclass.classSource`, e.g. "PHB" for the Wizard that Chronurgy
-	 * lives on), not the subclass source. The optional `allSubclasses`
-	 * argument lets callers thread loaded class data so we can resolve the
-	 * canonical class source; without it we conservatively fall back to
-	 * `subclass.classSource || subclass.source`, preserving prior behaviour.
+	 * The character only stores `cls.subclass = {name, source}` where `source`
+	 * is the SUBCLASS source (e.g. "TGTT-2024" for Banneret). The PG_CLASSES
+	 * subclass hover is keyed in the DataLoader cache under that subclass source
+	 * with the `URL_TO_HASH_BUILDER["subclass"]` hash — matching the standard
+	 * `{@subclass}` renderer. Delegates to
+	 * `CharacterSheetClassUtils.buildSubclassHoverTarget`, which derives the
+	 * `{page, source, hash}` from the loaded subclass entity (so the link target
+	 * is identical to the registered cache key) and threads `allSubclasses` to
+	 * recover any missing className/classSource/shortName.
 	 *
 	 * @param {object} subclass - Subclass object with name/source and optionally className/classSource
-	 * @param {Array} [allSubclasses] - Loaded subclass data (used to look up missing classSource)
+	 * @param {Array} [allSubclasses] - Loaded subclass data (used to locate the canonical entity)
 	 * @param {object} [storedClass] - Stored class entry (fallback for className/classSource)
 	 * @returns {string} HTML string for the hover link
 	 */
 	static getSubclassHoverLink (subclass, allSubclasses = null, storedClass = null) {
 		try {
-			const resolved = CharacterSheetClassUtils.resolveSubclassHoverSources(subclass, allSubclasses || [], storedClass);
-			const subclassForHash = {
-				name: resolved.name,
-				source: resolved.source,
-				className: resolved.className,
-				classSource: resolved.classSource,
-				shortName: resolved.shortName,
-			};
-			const normalizedClass = CharacterSheetClassUtils.normalizePgClassesHashInput(
-				{name: resolved.className, source: resolved.classSource},
-				{allClasses: [], allSubclasses: allSubclasses || []},
-			);
-			const hash = `${UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASSES]({name: normalizedClass.name, source: normalizedClass.source})}${HASH_PART_SEP}${UrlUtil.getClassesPageStatePart({subclass: subclassForHash})}`;
-			const hoverAttrs = Renderer.hover.getHoverElementAttributes({
-				page: UrlUtil.PG_CLASSES,
-				source: normalizedClass.source,
-				hash,
+			const target = CharacterSheetClassUtils.buildSubclassHoverTarget(subclass, {
+				allSubclasses: allSubclasses || [],
+				storedClass,
 			});
-			return `<a href="${UrlUtil.PG_CLASSES}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${resolved.name}</a>`;
+			const hoverAttrs = Renderer.hover.getHoverElementAttributes({
+				page: target.page,
+				source: target.source,
+				hash: target.hash,
+			});
+			return `<a href="${target.href}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${target.displayName}</a>`;
 		} catch (e) {
 			// eslint-disable-next-line no-console
 			console.warn("[CharSheet] getSubclassHoverLink error:", e);
