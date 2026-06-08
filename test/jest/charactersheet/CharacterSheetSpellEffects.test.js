@@ -544,6 +544,16 @@ describe("CharacterSheetSpellEffects", () => {
 			// Mass Cure Wounds adds spellcasting modifier
 			expect(result.modifier).toBe(3);
 		});
+
+		it("honors abilityOverride so a multiclass heal uses the casting class's ability", () => {
+			// Default (Wizard) → INT mod +3. Override to WIS (14 → +2) as if the
+			// heal was cast via a WIS-based class (e.g. Druid/Cleric in a multiclass).
+			const def = CharacterSheetState.calculateSpellHealing(SAMPLE_SPELLS.cureWounds, 1, state);
+			expect(def.modifier).toBe(3);
+
+			const overridden = CharacterSheetState.calculateSpellHealing(SAMPLE_SPELLS.cureWounds, 1, state, "wis");
+			expect(overridden.modifier).toBe(2);
+		});
 	});
 
 	// ==========================================================================

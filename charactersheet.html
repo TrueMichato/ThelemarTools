@@ -1085,86 +1085,10 @@
 				<div class="charsheet__spells-container" id="charsheet-spells-container">
 					<!-- Spellcasting header -->
 					<div class="charsheet__section">
-						<div class="ve-flex ve-flex-v-center ve-flex-wrap mb-3" style="gap: 12px;">
-							<div class="charsheet__spell-stat">
-								<span class="charsheet__spell-stat-label">Spellcasting Ability:</span>
-								<span class="charsheet__spell-stat-value" id="charsheet-spell-ability">—</span>
-							</div>
-							<div class="charsheet__spell-stat">
-								<span class="charsheet__spell-stat-label">Spell Save DC:</span>
-								<span class="charsheet__spell-stat-value" id="charsheet-spell-dc">—</span>
-							</div>
-							<div class="charsheet__spell-stat">
-								<span class="charsheet__spell-stat-label">Spell Attack:</span>
-								<span class="charsheet__spell-stat-value" id="charsheet-spell-attack">—</span>
-							</div>
-						</div>
-						<!-- Spell tracking summary - shows based on caster type -->
-						<div id="charsheet-spell-tracking" class="charsheet__spell-tracking" style="display: none;">
-							<!-- Known caster info -->
-							<div id="charsheet-known-caster-info" class="charsheet__spell-tracking-box charsheet__spell-tracking-box--known" style="display: none;">
-								<div class="charsheet__spell-tracking-header">
-									<span class="charsheet__spell-tracking-icon">📖</span>
-									<span class="charsheet__spell-tracking-title">Spells Known</span>
-									<span class="charsheet__spell-tracking-badge" title="2014 Known Caster - You learn a fixed number of spells permanently. Swap spells on level up.">2014</span>
-								</div>
-								<div class="charsheet__spell-tracking-body">
-									<div class="charsheet__spell-tracking-count">
-										<span id="charsheet-spells-known-current">0</span>
-										<span class="charsheet__spell-tracking-separator">/</span>
-										<span id="charsheet-spells-known-max">0</span>
-									</div>
-									<div class="charsheet__spell-tracking-hint">Permanent choices • Swap on level up</div>
-								</div>
-							</div>
-							<!-- Prepared caster info (2014) -->
-							<div id="charsheet-prepared-caster-info-2014" class="charsheet__spell-tracking-box charsheet__spell-tracking-box--prepared" style="display: none;">
-								<div class="charsheet__spell-tracking-header">
-									<span class="charsheet__spell-tracking-icon">📚</span>
-									<span class="charsheet__spell-tracking-title">Spells Prepared</span>
-									<span class="charsheet__spell-tracking-badge" title="2014 Prepared Caster - Prepare spells from entire class list each day.">2014</span>
-								</div>
-								<div class="charsheet__spell-tracking-body">
-									<div class="charsheet__spell-tracking-count">
-										<span id="charsheet-spells-prepared-current-2014">0</span>
-										<span class="charsheet__spell-tracking-separator">/</span>
-										<span id="charsheet-spells-prepared-max-2014">0</span>
-									</div>
-									<div class="charsheet__spell-tracking-hint">Change daily • Full class list access</div>
-								</div>
-							</div>
-							<!-- Prepared caster info (2024) -->
-							<div id="charsheet-prepared-caster-info-2024" class="charsheet__spell-tracking-box charsheet__spell-tracking-box--prepared charsheet__spell-tracking-box--2024" style="display: none;">
-								<div class="charsheet__spell-tracking-header">
-									<span class="charsheet__spell-tracking-icon">✨</span>
-									<span class="charsheet__spell-tracking-title">Spells Prepared</span>
-									<span class="charsheet__spell-tracking-badge charsheet__spell-tracking-badge--2024" title="2024 Prepared Caster - All casters prepare spells, changed on long rest.">2024</span>
-								</div>
-								<div class="charsheet__spell-tracking-body">
-									<div class="charsheet__spell-tracking-count">
-										<span id="charsheet-spells-prepared-current-2024">0</span>
-										<span class="charsheet__spell-tracking-separator">/</span>
-										<span id="charsheet-spells-prepared-max-2024">0</span>
-									</div>
-									<div class="charsheet__spell-tracking-hint">Change on long rest • Full class list access</div>
-								</div>
-							</div>
-							<!-- Cantrips info (always shown for casters) -->
-							<div id="charsheet-cantrips-info" class="charsheet__spell-tracking-box charsheet__spell-tracking-box--cantrips" style="display: none;">
-								<div class="charsheet__spell-tracking-header">
-									<span class="charsheet__spell-tracking-icon">⭐</span>
-									<span class="charsheet__spell-tracking-title">Cantrips</span>
-								</div>
-								<div class="charsheet__spell-tracking-body">
-									<div class="charsheet__spell-tracking-count">
-										<span id="charsheet-cantrips-current">0</span>
-										<span class="charsheet__spell-tracking-separator">/</span>
-										<span id="charsheet-cantrips-max">0</span>
-									</div>
-									<div class="charsheet__spell-tracking-hint">Always prepared • No slots</div>
-								</div>
-							</div>
-						</div>
+						<!-- Per-class spellcasting cards (ability / save DC / spell attack / spell + cantrip counts).
+						     Rendered by CharacterSheetSpells._renderSpellTrackingUI(). The primary card carries
+						     the legacy #charsheet-spell-ability/-dc/-attack ids for back-compat. -->
+						<div id="charsheet-spellcasting-stats" class="charsheet__spellcasting-stats"></div>
 
 						<div class="charsheet__section charsheet__section--metamagic" id="charsheet-spells-metamagic-section" style="display: none;">
 							<div class="charsheet__section-header">

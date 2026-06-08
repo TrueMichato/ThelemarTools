@@ -1979,20 +1979,55 @@ class CharacterSheetCombat {
 		}
 		if (section) section.style.display = "";
 
-		// Get spell attack and save DC — Gambler uses dice formula instead of static value
+		// Spell attack / save DC. Each spellcasting class has its own ability,
+		// so for multiclass casters these can differ — show the shared value when
+		// all classes agree, otherwise "Varies" with a per-class tooltip. Gambler
+		// uses a dice formula rather than a static value.
 		const calcs = this._state.getFeatureCalculations?.();
-		const isGambler = calcs?.hasGamblerSpellcasting;
+		const breakdown = this._state.getSpellcastingClassBreakdown?.() || [];
 
 		const elSpellAttack = document.getElementById("charsheet-combat-spell-attack");
 		const elSpellDc = document.getElementById("charsheet-combat-spell-dc");
-		if (isGambler) {
-			if (elSpellAttack) elSpellAttack.textContent = calcs.gamblerSpellAttackFormula;
-			if (elSpellDc) elSpellDc.textContent = calcs.gamblerSpellDcFormula;
+
+		const fmtAttack = (card) => card.isRolledPrepared && calcs?.gamblerSpellAttackFormula
+			? calcs.gamblerSpellAttackFormula
+			: `+${card.attackBonus}`;
+		const fmtDc = (card) => card.isRolledPrepared && calcs?.gamblerSpellDcFormula
+			? calcs.gamblerSpellDcFormula
+			: `${card.saveDc}`;
+
+		const applyStat = (el, cards, fmt, fallback) => {
+			if (!el) return;
+			if (!cards.length) {
+				el.textContent = fallback;
+				el.removeAttribute("title");
+				return;
+			}
+			const labelled = cards.map(c => `${c.displayName || c.className}: ${fmt(c)}`);
+			const distinct = [...new Set(cards.map(fmt))];
+			if (distinct.length === 1) {
+				el.textContent = distinct[0];
+				el.title = cards.length > 1 ? labelled.join(" • ") : "";
+			} else {
+				el.textContent = "Varies";
+				el.title = labelled.join(" • ");
+			}
+		};
+
+		if (breakdown.length) {
+			applyStat(elSpellAttack, breakdown, fmtAttack, "+0");
+			applyStat(elSpellDc, breakdown, fmtDc, "10");
 		} else {
-			const spellAttack = this._state.getSpellAttackBonus?.() || 0;
-			const spellDC = this._state.getSpellSaveDc?.() || 10;
-			if (elSpellAttack) elSpellAttack.textContent = `+${spellAttack}`;
-			if (elSpellDc) elSpellDc.textContent = spellDC;
+			const isGambler = calcs?.hasGamblerSpellcasting;
+			if (isGambler) {
+				if (elSpellAttack) elSpellAttack.textContent = calcs.gamblerSpellAttackFormula;
+				if (elSpellDc) elSpellDc.textContent = calcs.gamblerSpellDcFormula;
+			} else {
+				const spellAttack = this._state.getSpellAttackBonus?.() || 0;
+				const spellDC = this._state.getSpellSaveDc?.() || 10;
+				if (elSpellAttack) elSpellAttack.textContent = `+${spellAttack}`;
+				if (elSpellDc) elSpellDc.textContent = spellDC;
+			}
 		}
 
 		// Filter to combat-relevant spells: cantrips + prepared leveled spells

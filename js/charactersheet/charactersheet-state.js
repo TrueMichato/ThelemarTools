@@ -8197,14 +8197,27 @@ class CharacterSheetState {
 	getSpellcastingAbility () { return this._data.spellcasting.ability; }
 	setSpellcastingAbility (ability) { this._data.spellcasting.ability = ability; }
 
-	getSpellSaveDc () {
-		const ability = this._data.spellcasting.ability;
+	/**
+	 * Compute the spell save DC for an explicit spellcasting ability. Includes
+	 * magic-item + custom modifiers and the Thelemar exhaustion DC penalty.
+	 * The no-arg getSpellSaveDc() delegates here with the global ability so
+	 * existing callers and tests see identical values.
+	 * @param {string} ability - Ability abbreviation (e.g. "wis")
+	 * @returns {number|null}
+	 */
+	getSpellSaveDcForAbility (ability) {
 		if (!ability) return null;
 		// Add item bonuses (spell save DC bonus from magic items)
 		const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
 		// Apply exhaustion DC penalty (Thelemar rules only)
 		const exhaustionPenalty = this._getExhaustionDcPenalty();
 		return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus - exhaustionPenalty;
+	}
+
+	getSpellSaveDc () {
+		const ability = this._data.spellcasting.ability;
+		if (!ability) return null;
+		return this.getSpellSaveDcForAbility(ability);
 	}
 
 	/**
@@ -8243,6 +8256,20 @@ class CharacterSheetState {
 		return this.getSpellSaveDc();
 	}
 
+	/**
+	 * Compute the spell attack bonus for an explicit spellcasting ability.
+	 * Includes magic-item + custom modifiers. Exhaustion is intentionally NOT
+	 * applied (d20 bonuses stay pure; the penalty is applied once at roll time).
+	 * The no-arg getSpellAttackBonus() delegates here with the global ability.
+	 * @param {string} ability - Ability abbreviation (e.g. "wis")
+	 * @returns {number|null}
+	 */
+	getSpellAttackBonusForAbility (ability) {
+		if (!ability) return null;
+		const itemBonus = this._data.itemBonuses?.spellAttack || 0;
+		return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus;
+	}
+
 	getSpellAttackBonus (className) {
 		// Note: exhaustion is intentionally NOT applied here. The displayed spell
 		// attack bonus stays "pure"; the penalty is applied once at roll time by
@@ -8269,8 +8296,66 @@ class CharacterSheetState {
 		}
 		const ability = this._data.spellcasting.ability;
 		if (!ability) return null;
-		const itemBonus = this._data.itemBonuses?.spellAttack || 0;
-		return this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellAttack || 0) + itemBonus;
+		return this.getSpellAttackBonusForAbility(ability);
+	}
+
+	/**
+	 * Resolve the spellcasting ability abbreviation for a class entry (or class
+	 * name). Subclass-derived casters override the base class ability.
+	 * @param {object|string} clsOrName - Class entry ({name, source, subclass, spellcastingAbility}) or class name
+	 * @returns {string|null} Ability abbreviation, or null if the class is a non-caster
+	 */
+	getSpellcastingAbilityForClass (clsOrName) {
+		if (!clsOrName) return null;
+		let cls = null;
+		if (typeof clsOrName === "string") {
+			cls = (this._data.classes || []).find(c => c.name?.toLowerCase() === clsOrName.toLowerCase()) || {name: clsOrName};
+		} else {
+			cls = clsOrName;
+		}
+
+		const subclassName = cls.subclass?.name;
+		// Subclass-derived casters override the base class spellcasting ability.
+		switch (subclassName) {
+			case "Eldritch Knight":
+			case "Arcane Trickster": return "int";
+			case "Gambler":
+			case "Architect of Ruin": return "cha";
+		}
+
+		// Prefer the ability stored on the class data (covers 2024 + homebrew).
+		if (cls.spellcastingAbility) return cls.spellcastingAbility;
+
+		// Static fallback by base class name.
+		const map = {
+			bard: "cha", cleric: "wis", druid: "wis", paladin: "cha", ranger: "wis",
+			sorcerer: "cha", warlock: "cha", wizard: "int", artificer: "int",
+		};
+		return map[(cls.name || "").toLowerCase()] || null;
+	}
+
+	/**
+	 * Resolve the spellcasting ability for a specific spell, based on which class
+	 * it belongs to (its `sourceClass` / `sourceSubclass`). Falls back to the
+	 * global spellcasting ability when attribution is missing or unmatched.
+	 * @param {object} spell - Spell entry with optional sourceClass/sourceSubclass
+	 * @returns {string|null}
+	 */
+	getSpellcastingAbilityForSpell (spell) {
+		if (!spell) return this.getSpellcastingAbility() || null;
+		const keys = [spell.sourceClass, spell.sourceSubclass].filter(Boolean).map(s => s.toLowerCase());
+		if (keys.length) {
+			for (const cls of this._data.classes || []) {
+				const clsKeys = [cls.name, cls.subclass?.name].filter(Boolean).map(s => s.toLowerCase());
+				// Gambler spells are stamped sourceClass:"Gambler"; match the subclass.
+				if (cls.subclass?.name === "Gambler") clsKeys.push("gambler");
+				if (clsKeys.some(k => keys.includes(k))) {
+					const ability = this.getSpellcastingAbilityForClass(cls);
+					if (ability) return ability;
+				}
+			}
+		}
+		return this.getSpellcastingAbility() || null;
 	}
 
 	/**
@@ -8893,6 +8978,144 @@ class CharacterSheetState {
 			counts[cls].cantrips++;
 		}
 		return counts;
+	}
+
+	/**
+	 * Map an ability abbreviation to its full label.
+	 * @param {string} ability
+	 * @returns {string}
+	 */
+	static _abilityLabel (ability) {
+		return ({
+			str: "Strength", dex: "Dexterity", con: "Constitution",
+			int: "Intelligence", wis: "Wisdom", cha: "Charisma",
+		})[ability] || (ability || "").toUpperCase();
+	}
+
+	/**
+	 * Build the lowercased attribution keys for a class entry. A spell/cantrip
+	 * belongs to the class card when its sourceClass or sourceSubclass matches
+	 * one of these keys.
+	 * @param {object} cls
+	 * @returns {string[]}
+	 */
+	_getClassMatchKeys (cls) {
+		const keys = [cls.name, cls.subclass?.name].filter(Boolean).map(s => s.toLowerCase());
+		// Gambler spells are stamped sourceClass:"Gambler" regardless of the base class.
+		if (cls.subclass?.name === "Gambler") keys.push("gambler");
+		return [...new Set(keys)];
+	}
+
+	/**
+	 * Resolve the player-facing heading name for a caster class. Subclass-derived
+	 * casters (Gambler, Eldritch Knight, Arcane Trickster, Architect of Ruin) are
+	 * headed by their subclass name; everything else by the class name.
+	 * @param {object} cls
+	 * @returns {string}
+	 */
+	static _getCasterDisplayName (cls) {
+		const SUBCLASS_HEADED = new Set(["Gambler", "Eldritch Knight", "Arcane Trickster", "Architect of Ruin"]);
+		if (cls.subclass?.name && SUBCLASS_HEADED.has(cls.subclass.name)) return cls.subclass.name;
+		return cls.name;
+	}
+
+	/**
+	 * Per-class spellcasting breakdown for the Spells tab. Returns one rich card
+	 * per spellcasting class, each with its own spellcasting ability, save DC,
+	 * spell attack bonus, and player-chosen vs feature-granted spell/cantrip
+	 * counts (attributed by sourceClass/sourceSubclass via matchKeys).
+	 *
+	 * Counting rules:
+	 * - `spellsCount` / `cantripsCount` = player-chosen entries of that class.
+	 * - `spellsGranted` / `cantripsGranted` = feature-granted (e.g. subclass
+	 *   always-prepared) entries of that class — surfaced as "+N granted".
+	 * - `spellsMax` is null for spellbook (Wizard) casters (no fixed cap shown).
+	 *
+	 * Does NOT alter the legacy getSpellcastingInfo() shape.
+	 * @returns {Array<object>} Array of per-class card objects
+	 */
+	getSpellcastingClassBreakdown () {
+		const classes = this._data.classes || [];
+		if (!classes.length) return [];
+
+		const allSpells = this._data.spellcasting.spellsKnown || [];
+		const allCantrips = this._data.spellcasting.cantripsKnown || [];
+
+		const cards = [];
+		for (const cls of classes) {
+			const info = this._getClassSpellcastingInfo(cls);
+			if (!info) continue;
+
+			const matchKeys = this._getClassMatchKeys(cls);
+			const belongs = (entry) => {
+				const k = [entry.sourceClass, entry.sourceSubclass].filter(Boolean).map(s => s.toLowerCase());
+				return k.some(x => matchKeys.includes(x));
+			};
+
+			// Leveled spells attributed to this class, split chosen vs granted.
+			const classSpells = allSpells.filter(s => s.level > 0 && belongs(s));
+			const chosenSpells = classSpells.filter(s => CharacterSheetClassUtils.isPlayerChosenSpell(s));
+			const grantedSpells = classSpells.filter(s => !CharacterSheetClassUtils.isPlayerChosenSpell(s));
+
+			// Cantrips attributed to this class, split chosen vs granted.
+			const classCantrips = allCantrips.filter(c => belongs(c));
+			const {attributed: chosenCantrips, featureGranted: grantedCantrips} = CharacterSheetClassUtils.partitionCantripsByAttribution(classCantrips);
+
+			const ability = this.getSpellcastingAbilityForClass(cls);
+			const isSpellbook = /^wizard$/i.test(cls.name || "");
+
+			let spellsMax;
+			if (isSpellbook) spellsMax = null; // spellbook size is uncapped — show count only
+			else if (info.isRolledPrepared) spellsMax = this.getGamblerPreparedCount();
+			else spellsMax = info.spellsKnownMax || info.preparedMax || info.max || 0;
+
+			const mechanic = isSpellbook ? "spellbook" : (info.isRolledPrepared ? "rolled" : info.type);
+
+			cards.push({
+				className: cls.name,
+				classSource: cls.source || null,
+				subclassName: cls.subclass?.name || null,
+				displayName: CharacterSheetState._getCasterDisplayName(cls),
+				ability,
+				abilityLabel: CharacterSheetState._abilityLabel(ability),
+				saveDc: this.getSpellSaveDcForAbility(ability),
+				attackBonus: this.getSpellAttackBonusForAbility(ability),
+				mechanic,
+				is2024: !!info.is2024,
+				isRolledPrepared: !!info.isRolledPrepared,
+				preparedDice: info.preparedDice || null,
+				spellsCount: chosenSpells.length,
+				spellsMax,
+				spellsGranted: grantedSpells.length,
+				cantripsCount: chosenCantrips.length,
+				cantripsMax: info.cantripsKnown || 0,
+				cantripsGranted: grantedCantrips.length,
+				matchKeys,
+			});
+		}
+
+		return cards;
+	}
+
+	/**
+	 * Count leveled spells and cantrips that are NOT attributed to any
+	 * spellcasting class card (null/orphan/non-caster sourceClass), so legacy or
+	 * mis-stamped data is surfaced rather than silently lost.
+	 * @returns {{spellsCount: number, cantripsCount: number}}
+	 */
+	getUnattributedSpellCounts () {
+		const cards = this.getSpellcastingClassBreakdown();
+		const allKeys = new Set();
+		for (const c of cards) for (const k of c.matchKeys) allKeys.add(k);
+
+		const isAttributed = (entry) => {
+			const k = [entry.sourceClass, entry.sourceSubclass].filter(Boolean).map(s => s.toLowerCase());
+			return k.some(x => allKeys.has(x));
+		};
+
+		const spellsCount = (this._data.spellcasting.spellsKnown || []).filter(s => s.level > 0 && !isAttributed(s)).length;
+		const cantripsCount = (this._data.spellcasting.cantripsKnown || []).filter(c => !isAttributed(c)).length;
+		return {spellsCount, cantripsCount};
 	}
 
 	/**
@@ -37304,7 +37527,7 @@ class CharacterSheetState {
 	 * @param {CharacterSheetState} caster - The caster's state
 	 * @returns {object} Healing result with dice, modifier, and total
 	 */
-	static calculateSpellHealing (spell, slotLevel, caster) {
+	static calculateSpellHealing (spell, slotLevel, caster, abilityOverride = null) {
 		const parsed = CharacterSheetState.parseSpellEffects(spell);
 		const result = {};
 
@@ -37335,13 +37558,13 @@ class CharacterSheetState {
 
 		// Add spellcasting modifier if applicable
 		if (parsed.healing.addModifier) {
-			const ability = caster.getSpellcastingAbility();
+			const ability = abilityOverride || caster.getSpellcastingAbility();
 			result.modifier = ability ? caster.getAbilityMod(ability) : 0;
 		} else {
 			// Check if spell explicitly adds modifier
 			const text = JSON.stringify(spell.entries || []).toLowerCase();
 			if (text.includes("spellcasting ability modifier")) {
-				const ability = caster.getSpellcastingAbility();
+				const ability = abilityOverride || caster.getSpellcastingAbility();
 				result.modifier = ability ? caster.getAbilityMod(ability) : 0;
 			} else {
 				result.modifier = 0;
