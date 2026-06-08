@@ -926,8 +926,9 @@ class CharacterSheetCombat {
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
 
-		// Calculate total attack bonus - resolve finesse to use higher of STR/DEX
-		const abilityMod = this._resolveAbilityMod(attack.abilityMod || "str");
+		// Calculate total attack bonus - resolve weapon ability mod (finesse → max
+		// STR/DEX; Bladesong → max(weapon mod, INT) while active)
+		const abilityMod = this._state.getWeaponAbilityMod(attack);
 		const profBonus = this._state.getProficiencyBonus();
 
 		// Get attack modifiers from named modifiers (from features like Battle Tactics, magic items, etc.)
@@ -1316,7 +1317,7 @@ class CharacterSheetCombat {
 
 		// Parse damage dice
 		const damageRoll = this._parseDamage(attack.damage, isCrit);
-		const abilityMod = this._resolveAbilityMod(attack.abilityMod || "str");
+		const abilityMod = this._state.getWeaponAbilityMod(attack);
 
 		// Get damage modifiers from named modifiers (from features, magic items, etc.)
 		const damageModifiers = this._state.getNamedModifiersByType("damage");
@@ -2026,22 +2027,10 @@ class CharacterSheetCombat {
 	}
 
 	_renderAttackItem (attack, reachCtx = {}) {
-		// Calculate ability modifier - handle special cases for natural weapons
-		let abilityMod;
-		const abilityKey = attack.abilityMod || "str";
-		if (abilityKey === "finesse") {
-			// Use higher of STR or DEX
-			abilityMod = Math.max(this._state.getAbilityMod("str"), this._state.getAbilityMod("dex"));
-		} else if (abilityKey === "spellcasting") {
-			// Use highest mental stat as approximation for spellcasting ability
-			abilityMod = Math.max(
-				this._state.getAbilityMod("int"),
-				this._state.getAbilityMod("wis"),
-				this._state.getAbilityMod("cha"),
-			);
-		} else {
-			abilityMod = this._state.getAbilityMod(abilityKey);
-		}
+		// Calculate ability modifier — handles finesse (max STR/DEX), spellcasting
+		// (max INT/WIS/CHA for natural weapons), and Bladesong (max(weapon mod, INT)
+		// while active) so the displayed bonus matches the roll.
+		const abilityMod = this._state.getWeaponAbilityMod(attack);
 
 		const profBonus = this._state.getProficiencyBonus();
 		const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0);
@@ -3501,7 +3490,7 @@ class CharacterSheetCombat {
 		}
 
 		// Resolve attack parameters once
-		const abilityMod = this._resolveAbilityMod(unarmedStrike.abilityMod || "str");
+		const abilityMod = this._state.getWeaponAbilityMod(unarmedStrike);
 		const profBonus = this._state.getProficiencyBonus();
 		const attackModifiers = this._state.getNamedModifiersByType("attack");
 		const featureAttackBonus = attackModifiers.reduce((sum, mod) => sum + (mod.value || 0), 0);

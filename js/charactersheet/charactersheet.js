@@ -7993,7 +7993,7 @@ class CharacterSheetPage {
 		};
 
 		displayAttacks.forEach(attack => {
-			const abilityMod = this._state.getAbilityMod(attack.abilityMod || "str");
+			const abilityMod = this._state.getWeaponAbilityMod(attack);
 			const profBonus = this._state.getProficiencyBonus();
 			const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0);
 			const totalDamageBonus = abilityMod + (attack.damageBonus || 0);
@@ -10476,7 +10476,11 @@ class CharacterSheetPage {
 		// counting registry mods while still letting players opt in to e.g.
 		// "+2 to attacks against frightened creatures".
 		const conditionalAttackBonus = appliedConditionals.reduce((acc, c) => acc + (c.bonus || 0), 0);
-		const attackTotal = rollResult.roll + attack.attackBonus + conditionalAttackBonus - exhaustionPenalty;
+		// Bladesong: while active, a weapon attack/damage roll uses MAX(weapon mod,
+		// INT). The weapon's normal mod is already baked into attack.attackBonus /
+		// attack.damage, so add only the (additive, never-baked-in) Bladesong delta.
+		const bladesongBonus = this._state.getBladesongWeaponBonus?.(attack) || 0;
+		const attackTotal = rollResult.roll + attack.attackBonus + conditionalAttackBonus + bladesongBonus - exhaustionPenalty;
 
 		// Buff dice (e.g. Bless's 1d4) rolled into the attack total.
 		const stateDice = this._rollStateDiceBonuses(attackType);
@@ -10506,7 +10510,7 @@ class CharacterSheetPage {
 
 		// Add any bonus damage from active states
 		const stateBonusDamage = this._state.getBonusFromStates("damage");
-		const totalBonusDamage = rageDamage + stateBonusDamage;
+		const totalBonusDamage = rageDamage + stateBonusDamage + bladesongBonus;
 
 		let damageStr = attack.damage;
 		if (totalBonusDamage > 0) {
@@ -10520,13 +10524,14 @@ class CharacterSheetPage {
 		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
 		const rageDamageStr = rageDamage > 0 ? ` + ${rageDamage} (rage)` : "";
 		const stateDamageStr = stateBonusDamage > 0 ? ` + ${stateBonusDamage} (states)` : "";
+		const bladesongDamageStr = bladesongBonus > 0 ? ` + ${bladesongBonus} (Bladesong INT)` : "";
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		this._showDiceResult(
 			`${attack.name}${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			attackTotalWithDice,
-			`Attack: ${this._formatD20Breakdown(rollResult, attack.attackBonus, exhaustionStr)}${diceBonusStr}
-			 Damage: ${attack.damage} = ${damageResult}${rageDamageStr}${stateDamageStr}${totalBonusDamage > 0 ? ` → ${totalDamage}` : ""}`,
+			`Attack: ${this._formatD20Breakdown(rollResult, attack.attackBonus + bladesongBonus, exhaustionStr)}${diceBonusStr}
+			 Damage: ${attack.damage} = ${damageResult}${rageDamageStr}${stateDamageStr}${bladesongDamageStr}${totalBonusDamage > 0 ? ` → ${totalDamage}` : ""}`,
 			resultClass,
 			resultNote,
 		);
