@@ -192,6 +192,7 @@ class CharacterSheetDruidResources {
 		page._renderActiveStates?.();
 		page._combat?.renderCombatStates?.();
 		page._combatModule?.renderCombatStates?.();
+		page._combat?.renderAttacks?.();
 		page._renderCompanions?.();
 		page._renderCompanionButtons?.();
 		page._renderCharacter?.();
