@@ -73,8 +73,8 @@ export class PartyTrackerCharacter {
 		if (this._data.overrides?.carryCapacity != null) return this._data.overrides.carryCapacity;
 		const mult = this._data.powerfulBuild ? 2 : 1;
 		if (this._settings?.enableTgtt && this._settings?.thelemar_carryWeight) {
-			const mightMod = this.getSkillBonusRaw("might");
-			return Math.max(50, 50 + 25 * mightMod) * mult;
+			const passiveMight = this.getPassiveScore("might");
+			return passiveMight * 10 * mult;
 		}
 		return (this._data.abilities?.str ?? 10) * 15 * mult;
 	}

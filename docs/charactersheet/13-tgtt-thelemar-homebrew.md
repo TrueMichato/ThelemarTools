@@ -31,7 +31,7 @@ All Thelemar variant rules are implemented as toggleable settings:
 | Rule | Setting Key | Description |
 |------|-------------|-------------|
 | **Exhaustion** | `exhaustionRules: "thelemar"` | -1 to all d20 rolls and DCs per level, max 10 before death (vs 6 in standard, -2/-4/etc in 2024). **Speed is unaffected** in Thelemar rules. See [Exhaustion contract](#exhaustion-contract-phase-1-doctrine) below. |
-| **Carry Weight** | `thelemar_carryWeight` | 50 + 25 × STR modifier (min 50) instead of STR × 15 |
+| **Carry Weight** | `thelemar_carryWeight` | passive Might × 10 instead of STR × 15 |
 | **Linguistics Bonus** | `thelemar_linguisticsBonus` | +1 Linguistics per known language except Common |
 | **Jumping** | `thelemar_jumping` | Modified high/long jump formulas |
 | **Critical Rolls** | `thelemar_criticalRolls` | Nat 1 auto-fails, nat 20 auto-succeeds (all checks) |

@@ -144,10 +144,10 @@ getPassiveScore(skill) = 10 + getSkillBonus(skill) + bonuses.passives[skill]
 | Rule Set | Formula |
 |----------|---------|
 | Standard 5e | `STR × 15` |
-| TGTT (Might-based) | `max(50, 50 + 25 × mightModRaw)` |
+| TGTT (Might-based) | `getPassiveScore("might") × 10` |
 | Override | Direct value from `overrides.carryCapacity` |
 
-`mightModRaw` = `getSkillBonusRaw("might")` which is the raw skill bonus *without* exhaustion penalty or manual bonuses.
+`getPassiveScore("might")` = `10 + getSkillBonus("might")` plus any passive bonuses (the raw skill bonus *without* exhaustion penalty).
 
 ### Jump Distances
 

@@ -102,7 +102,7 @@ Settings are accessed via the gear icon button, which opens a positioned dropdow
 | Setting | Key | Default | Description |
 |---------|-----|---------|-------------|
 | Enable Thelemar (TGTT) | `enableTgtt` | `false` | Master toggle for all TGTT homebrew rules |
-| Carry Weight | `thelemar_carryWeight` | `true` | Might-based carry capacity instead of STR×15 |
+| Carry Weight | `thelemar_carryWeight` | `true` | Passive-Might-based carry capacity (passive Might × 10) instead of STR×15 |
 | Jump Distances | `thelemar_jumping` | `true` | Athletics-based jump instead of STR-based |
 | Linguistics Bonus | `thelemar_linguisticsBonus` | `true` | +1 per non-Common language to Linguistics |
 | Critical Rolls | `thelemar_criticalRolls` | `true` | Nat 1: −5 effective, Nat 20: +5 effective |

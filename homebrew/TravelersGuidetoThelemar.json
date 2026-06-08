@@ -763,11 +763,11 @@
 			"page": 0,
 			"ruleType": "V",
 			"entries": [
-				"Your size and Might modifier determine the maximum weight in pounds that you can carry, as shown in the Carrying Capacity (Might) table. The table also shows the maximum weight you can drag, lift, or push.",
+				"Your size and passive Might determine the maximum weight in pounds that you can carry, as shown in the Carrying Capacity (Passive Might) table. The table also shows the maximum weight you can drag, lift, or push. Your passive Might equals 10 + your Might modifier (plus any other bonuses to passive scores).",
 				"While dragging, lifting, or pushing weight in excess of the maximum weight you can carry, your Speed can be no more than 5 feet.",
 				{
 					"type": "table",
-					"caption": "Carrying Capacity (Might)",
+					"caption": "Carrying Capacity (Passive Might)",
 					"colLabels": [
 						"Creature Size",
 						"Carry",
@@ -781,28 +781,28 @@
 					"rows": [
 						[
 							"Tiny",
-							"{@dice 25 + #$prompt_number:title=Enter Might Modifier$# × 12.5|25 + Might Mod × 12.5} lb.",
-							"{@dice 50 + #$prompt_number:title=Enter Might Modifier$# × 25|50 + Might Mod × 25} lb."
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 5|Passive Might × 5} lb.",
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 10|Passive Might × 10} lb."
 						],
 						[
 							"Small/Medium",
-							"{@dice 50 + #$prompt_number:title=Enter Might Modifier$# × 25|50 + Might Mod × 25} lb.",
-							"{@dice 100 + #$prompt_number:title=Enter Might Modifier$# × 50|100 + Might Mod × 50} lb."
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 10|Passive Might × 10} lb.",
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 20|Passive Might × 20} lb."
 						],
 						[
 							"Large",
-							"{@dice 100 + #$prompt_number:title=Enter Might Modifier$# × 50|100 + Might Mod × 50} lb.",
-							"{@dice 200 + #$prompt_number:title=Enter Might Modifier$# × 100|200 + Might Mod × 100} lb."
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 20|Passive Might × 20} lb.",
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 40|Passive Might × 40} lb."
 						],
 						[
 							"Huge",
-							"{@dice 200 + #$prompt_number:title=Enter Might Modifier$# × 100|200 + Might Mod × 100} lb.",
-							"{@dice 400 + #$prompt_number:title=Enter Might Modifier$# × 200|400 + Might Mod × 200} lb."
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 40|Passive Might × 40} lb.",
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 80|Passive Might × 80} lb."
 						],
 						[
 							"Gargantuan",
-							"{@dice 400 + #$prompt_number:title=Enter Might Modifier$# × 200|400 + Might Mod × 200} lb.",
-							"{@dice 800 + #$prompt_number:title=Enter Might Modifier$# × 400|800 + Might Mod × 400} lb."
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 80|Passive Might × 80} lb.",
+							"{@dice #$prompt_number:title=Enter Passive Might$# × 160|Passive Might × 160} lb."
 						]
 					]
 				}
@@ -1818,14 +1818,14 @@
 					"type": "inset",
 					"name": "Carrying Capacity",
 					"entries": [
-						"Your carrying capacity (in pounds) equals 50 + 25 × your Might modifier."
+						"Your carrying capacity (in pounds) equals 10 × your passive Might score."
 					]
 				},
 				{
 					"type": "inset",
 					"name": "Push, Drag, or Lift",
 					"entries": [
-						"You can push, drag, or lift a weight in pounds up to twice your carrying capacity (100 + 50 × your Might modifier)."
+						"You can push, drag, or lift a weight in pounds up to twice your carrying capacity (20 × your passive Might score)."
 					]
 				}
 			]
