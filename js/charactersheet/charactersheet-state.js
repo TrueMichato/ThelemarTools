@@ -2198,6 +2198,9 @@ const FeatureEffectRegistry = {
 		// (Most cleric features are domain-specific, see subclasses)
 
 		// ======= DRUID =======
+		this.register("Druidic", [
+			{type: "language", language: "Druidic"},
+		]);
 		this.register("Beast Spells", [
 			{type: "spellcastingProperty", property: "castWhileWildShaped"},
 		]);

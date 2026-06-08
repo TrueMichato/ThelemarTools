@@ -322,3 +322,5 @@ class CharacterSheetDruidResources {
 }
 
 globalThis.CharacterSheetDruidResources = CharacterSheetDruidResources;
+
+export {CharacterSheetDruidResources};

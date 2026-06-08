@@ -18,6 +18,7 @@ import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
 import * as CharacterSheetBuffPickerHelpers from "./charactersheet-buffpicker-helpers.js";
+import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
 
