@@ -466,56 +466,94 @@ describe("CharacterSheetLevelHistory", () => {
 		});
 	});
 
-	describe("Race/Background History Migration", () => {
-		it("should backfill race data into levelHistory on load", () => {
+	describe("Character Base Migration (origin choices split out of level 1)", () => {
+		it("strips legacy race/background keys from the level-1 entry on load", () => {
 			const json = {
 				race: {name: "Elf", source: "PHB"},
 				background: {name: "Sage", source: "PHB"},
 				classes: [{name: "Wizard", source: "PHB", level: 3}],
 				levelHistory: [
-					{level: 1, class: {name: "Wizard", source: "PHB"}, choices: {skills: ["arcana"]}},
+					{level: 1,
+						class: {name: "Wizard", source: "PHB"},
+						choices: {
+							skills: ["arcana"],
+							race: {name: "Elf", source: "PHB"},
+							raceUserChoices: {selectedSkills: ["Perception"]},
+							background: {name: "Sage", source: "PHB"},
+							backgroundUserChoices: {selectedLanguages: [{language: "Elvish"}]},
+						}},
 					{level: 2, class: {name: "Wizard", source: "PHB"}, choices: {}},
 				],
 			};
 			state.loadFromJson(json);
 
 			const entry = state.getLevelHistoryEntry(1);
-			expect(entry.choices.race).toBeDefined();
-			expect(entry.choices.race.name).toBe("Elf");
-			expect(entry.choices.race.source).toBe("PHB");
-			expect(entry.choices.background).toBeDefined();
-			expect(entry.choices.background.name).toBe("Sage");
+			// Base-only keys are stripped from the class-level entry (single source of truth = base node)
+			expect(entry.choices.race).toBeUndefined();
+			expect(entry.choices.raceUserChoices).toBeUndefined();
+			expect(entry.choices.background).toBeUndefined();
+			expect(entry.choices.backgroundUserChoices).toBeUndefined();
+			// Non-origin choices on the entry are preserved
+			expect(entry.choices.skills).toEqual(["arcana"]);
+			// Canonical race/background entity objects are untouched
+			expect(state.getRace().name).toBe("Elf");
+			expect(state.getBackground().name).toBe("Sage");
 		});
 
-		it("should backfill subrace data", () => {
+		it("promotes legacy origin user-choices into the character base node", () => {
+			const json = {
+				race: {name: "Elf", source: "PHB"},
+				background: {name: "Sage", source: "PHB"},
+				classes: [{name: "Wizard", source: "PHB", level: 1}],
+				levelHistory: [
+					{level: 1,
+						class: {name: "Wizard", source: "PHB"},
+						choices: {
+							raceUserChoices: {selectedSkills: ["Perception"]},
+							backgroundUserChoices: {selectedLanguages: [{language: "Elvish"}]},
+						}},
+				],
+			};
+			state.loadFromJson(json);
+
+			const base = state.getCharacterBase();
+			expect(base.v).toBe(1);
+			expect(base.raceUserChoices.selectedSkills).toEqual(["Perception"]);
+			expect(base.backgroundUserChoices.selectedLanguages).toEqual([{language: "Elvish"}]);
+		});
+
+		it("keeps subrace canonical and out of the level-1 entry", () => {
 			const json = {
 				race: {name: "High Elf", source: "PHB"},
 				subrace: {name: "High Elf", source: "PHB"},
 				classes: [{name: "Wizard", source: "PHB", level: 1}],
 				levelHistory: [
-					{level: 1, class: {name: "Wizard", source: "PHB"}, choices: {}},
+					{level: 1, class: {name: "Wizard", source: "PHB"}, choices: {race: {name: "High Elf", source: "PHB", subrace: {name: "High Elf", source: "PHB"}}}},
 				],
 			};
 			state.loadFromJson(json);
 
 			const entry = state.getLevelHistoryEntry(1);
-			expect(entry.choices.race.subrace).toBeDefined();
-			expect(entry.choices.race.subrace.name).toBe("High Elf");
+			expect(entry.choices.race).toBeUndefined();
+			expect(state.getSubrace().name).toBe("High Elf");
 		});
 
-		it("should not overwrite existing race data in history", () => {
+		it("is idempotent — an already-migrated save with a base node is not re-derived", () => {
 			const json = {
 				race: {name: "Elf", source: "PHB"},
+				characterBase: {v: 1, raceUserChoices: {selectedSkills: ["Stealth"]}, backgroundUserChoices: {}},
 				classes: [{name: "Wizard", source: "PHB", level: 1}],
 				levelHistory: [
-					{level: 1, class: {name: "Wizard", source: "PHB"}, choices: {race: {name: "Dwarf", source: "PHB"}}},
+					// A stale legacy payload that must NOT clobber the existing base node
+					{level: 1, class: {name: "Wizard", source: "PHB"}, choices: {raceUserChoices: {selectedSkills: ["Perception"]}}},
 				],
 			};
 			state.loadFromJson(json);
 
-			const entry = state.getLevelHistoryEntry(1);
-			// Should keep the existing (already-stored) race, not overwrite
-			expect(entry.choices.race.name).toBe("Dwarf");
+			const base = state.getCharacterBase();
+			expect(base.raceUserChoices.selectedSkills).toEqual(["Stealth"]);
+			// Legacy key still stripped from the level-1 entry
+			expect(state.getLevelHistoryEntry(1).choices.raceUserChoices).toBeUndefined();
 		});
 
 		it("should handle missing levelHistory gracefully", () => {
@@ -525,8 +563,9 @@ describe("CharacterSheetLevelHistory", () => {
 			};
 			state.loadFromJson(json);
 
-			// Should not crash — no level 1 entry to backfill into
 			expect(state.getLevelHistory()).toEqual([]);
+			// Base node still synthesizes (empty user-choices) without crashing
+			expect(state.getCharacterBase().v).toBe(1);
 		});
 
 		it("should handle missing race gracefully", () => {
@@ -540,6 +579,7 @@ describe("CharacterSheetLevelHistory", () => {
 
 			const entry = state.getLevelHistoryEntry(1);
 			expect(entry.choices.race).toBeUndefined();
+			expect(state.getCharacterBase().raceUserChoices).toEqual({});
 		});
 	});
 });
