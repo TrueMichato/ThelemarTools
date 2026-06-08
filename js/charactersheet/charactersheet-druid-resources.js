@@ -32,6 +32,12 @@ class CharacterSheetDruidResources {
 		this._modalBody = null;
 		/** @type {(() => void)|null} */
 		this._doClose = null;
+		// In-flight guards: the Transform / Summon workflows spend a use only AFTER
+		// an async picker resolves, so a double-click (or modal + combat-tab racing)
+		// could create a second companion/familiar without a second use being paid.
+		// These flags make both workflows single-shot until the picker settles.
+		this._isTransforming = false;
+		this._isSummoning = false;
 	}
 
 	/** Refresh the live state reference (state object can be swapped on load). */
@@ -73,6 +79,105 @@ class CharacterSheetDruidResources {
 	_getFamiliarCompanions () {
 		const T = CharacterSheetState.COMPANION_TYPES?.FAMILIAR;
 		return this._state.getCompanionsByType?.(T) || [];
+	}
+	// #endregion
+
+	// #region combat-tab summary (single source of truth for the Combat-tab panel)
+	/**
+	 * Build the DOM-free display model the Combat-tab Druid Resources panel renders.
+	 * Computes `getFeatureCalculations()` ONCE and derives every flag from it (the
+	 * combat render gates on `.applicable`, so this is the only summary call per render).
+	 *
+	 * @returns {{
+	 *   applicable: boolean,
+	 *   wildShape: {has: boolean, current: number, max: number, rechargeLabel: string, inForm: boolean, beastName: string, canTransform: boolean},
+	 *   wildCompanion: {has: boolean, canSummon: boolean, duration: string},
+	 *   zodiac: {has: boolean, activeFormId: (string|null), activeFormName: (string|null), canChoose: boolean},
+	 * }}
+	 */
+	getCombatSummary () {
+		this._refreshState();
+		const calc = this._state.getFeatureCalculations?.() || {};
+		const res = this._state.getWildShapeResource?.() || null;
+
+		const hasWildShape = !!res || (calc.wildShapeUses || 0) > 0;
+		const current = res ? res.current : 0;
+		const max = res ? res.max : 0;
+		const inFormCompanions = this._getWildShapeCompanions();
+		const inForm = inFormCompanions.length > 0;
+		const canSpend = !!res && res.current >= 1;
+
+		const hasWildCompanion = !!calc.hasWildCompanion;
+
+		const activeZodiac = this._state.getActiveZodiacForm?.() || null;
+		const hasZodiac = !!calc.hasZodiacForm
+			|| !!activeZodiac
+			|| (this._state.getFeatures?.() || []).some(f => /^zodiac form\b/i.test((f.name || "").trim()));
+
+		return {
+			applicable: hasWildShape || hasWildCompanion || hasZodiac,
+			wildShape: {
+				has: hasWildShape,
+				current,
+				max,
+				rechargeLabel: res ? this._rechargeLabel(res.recharge) : "",
+				inForm,
+				beastName: inForm ? (inFormCompanions[0].name || "Beast") : "",
+				canTransform: canSpend,
+			},
+			wildCompanion: {
+				has: hasWildCompanion,
+				canSummon: canSpend,
+				duration: calc.wildCompanionDuration || "",
+			},
+			zodiac: {
+				has: hasZodiac,
+				activeFormId: activeZodiac ? activeZodiac.formId : null,
+				activeFormName: activeZodiac ? (activeZodiac.formName || activeZodiac.formId || null) : null,
+				canChoose: canSpend,
+			},
+		};
+	}
+	// #endregion
+
+	// #region public actions (combat-tab entry points; modal-safe)
+	// These let the Combat-tab panel drive the SAME mutation/refresh paths as the
+	// modal without duplicating picker logic. Each routes through the centralised
+	// `_refreshSheet()` (re-renders the combat panel) and `_renderModalBody()`
+	// (a no-op when the modal is closed), so the surfaces never drift or go stale.
+
+	/** Spend one Wild Shape use (manual −). @returns {boolean} */
+	spendUse () {
+		this._refreshState();
+		const ok = !!this._state.spendWildShapeUse?.(1);
+		if (ok) { this._refreshSheet(); this._renderModalBody(); }
+		return ok;
+	}
+
+	/** Restore one Wild Shape use (manual +). @returns {boolean} */
+	restoreUse () {
+		this._refreshState();
+		const ok = !!this._state.restoreWildShapeUse?.(1);
+		if (ok) { this._refreshSheet(); this._renderModalBody(); }
+		return ok;
+	}
+
+	/** Public Transform entry point (re-entrancy guarded). */
+	async pTransform () { await this._pTransformWildShape(); }
+
+	/** Public End-Wild-Shape entry point. */
+	endWildShape () { this._endWildShape(); }
+
+	/** Public Summon-Familiar entry point (re-entrancy guarded). */
+	async pSummonWildCompanion () { await this._pSummonWildCompanion(); }
+
+	/** Dismiss the active Zodiac Form (no Wild Shape use refunded, per the modal). */
+	dismissZodiac () {
+		this._refreshState();
+		this._state.deactivateState?.("zodiacForm");
+		JqueryUtil.doToast({type: "info", content: "Zodiac Form dismissed."});
+		this._refreshSheet();
+		this._renderModalBody();
 	}
 	// #endregion
 
@@ -149,13 +254,15 @@ class CharacterSheetDruidResources {
 				</div>
 				${recharge ? `<div class="ve-small ve-muted mb-2">${recharge}</div>` : ""}
 				<div class="ve-flex-v-center" style="gap: 6px; flex-wrap: wrap;">
-					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__druid-ws-minus" title="Spend one use">−</button>
-					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__druid-ws-plus" title="Restore one use">+</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__druid-ws-minus" title="Spend 1 Wild Shape use">−</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__druid-ws-plus" title="Restore 1 Wild Shape use">+</button>
 					${inForm.length
-		? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__druid-ws-end ml-2">End Wild Shape</button>`
-		: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__druid-ws-transform ml-2" ${current < 1 ? "disabled title=\"No Wild Shape uses remaining\"" : ""}>Transform…</button>`}
+		? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__druid-ws-end ml-2" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
+		: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__druid-ws-transform ml-2" ${current < 1 ? "disabled title=\"No Wild Shape uses remaining\"" : "title=\"Pick a beast to assume; a use is spent only after you choose\""}>Transform…</button>`}
 				</div>
-				${inForm.length ? `<div class="ve-small mt-2">Currently: <span class="ve-bold">${(inForm[0].name || "Beast")}</span></div>` : ""}
+				${inForm.length
+		? `<div class="ve-small mt-2">Currently: <span class="ve-bold">${(inForm[0].name || "Beast")}</span></div>`
+		: `<div class="ve-small ve-muted mt-2">Transform… opens the beast picker. A use is spent only after you choose a form.</div>`}
 			</div>
 		`});
 
@@ -172,26 +279,33 @@ class CharacterSheetDruidResources {
 	}
 
 	async _pTransformWildShape () {
+		if (this._isTransforming) return;
 		this._refreshState();
 		if (!this._state.canSpendWildShapeUse?.(1)) {
 			JqueryUtil.doToast({type: "warning", content: "No Wild Shape uses remaining."});
 			return;
 		}
+		this._isTransforming = true;
 		const calc = this._state.getFeatureCalculations?.() || {};
 		const druidLevel = this._state.getClassLevel?.("druid") || 0;
 		const before = new Set(this._getWildShapeCompanions().map(c => c.id));
 
-		await this._page._pShowBeastPicker?.({
-			maxCr: calc.wildShapeCr || (druidLevel >= 8 ? 1 : druidLevel >= 4 ? 0.5 : 0.25),
-			canSwim: calc.wildShapeCanSwim ?? (druidLevel >= 4),
-			canFly: calc.wildShapeCanFly ?? (druidLevel >= 8),
-			type: CharacterSheetState.COMPANION_TYPES.WILD_SHAPE,
-			origin: "Wild Shape",
-		});
+		try {
+			await this._page._pShowBeastPicker?.({
+				maxCr: calc.wildShapeCr || (druidLevel >= 8 ? 1 : druidLevel >= 4 ? 0.5 : 0.25),
+				canSwim: calc.wildShapeCanSwim ?? (druidLevel >= 4),
+				canFly: calc.wildShapeCanFly ?? (druidLevel >= 8),
+				type: CharacterSheetState.COMPANION_TYPES.WILD_SHAPE,
+				origin: "Wild Shape",
+			});
+		} finally {
+			this._isTransforming = false;
+		}
 
-		// Spend a use ONLY if a new Wild Shape companion was actually created.
+		// Spend a use ONLY if a new Wild Shape companion was actually created AND a
+		// use is still available (re-checked post-await to survive a racing spend).
 		const added = this._getWildShapeCompanions().some(c => !before.has(c.id));
-		if (added) this._state.spendWildShapeUse?.(1);
+		if (added && this._state.canSpendWildShapeUse?.(1)) this._state.spendWildShapeUse?.(1);
 		this._refreshSheet();
 		this._renderModalBody();
 	}
@@ -225,6 +339,7 @@ class CharacterSheetDruidResources {
 	}
 
 	async _pSummonWildCompanion () {
+		if (this._isSummoning) return;
 		this._refreshState();
 		if (!this._state.canSpendWildShapeUse?.(1)) {
 			JqueryUtil.doToast({type: "warning", content: "No Wild Shape uses remaining."});
@@ -232,16 +347,21 @@ class CharacterSheetDruidResources {
 		}
 		const before = new Set(this._getFamiliarCompanions().map(c => c.id));
 
-		if (this._page._spells?._pShowFamiliarPicker) {
-			await this._page._spells._pShowFamiliarPicker({isWildCompanion: true});
-		} else {
+		if (!this._page._spells?._pShowFamiliarPicker) {
 			JqueryUtil.doToast({type: "warning", content: "Familiar picker not available."});
 			return;
 		}
+		this._isSummoning = true;
+		try {
+			await this._page._spells._pShowFamiliarPicker({isWildCompanion: true});
+		} finally {
+			this._isSummoning = false;
+		}
 
-		// Spend a use ONLY if a new familiar was actually summoned.
+		// Spend a use ONLY if a new familiar was actually summoned AND a use is still
+		// available (re-checked post-await to survive a racing spend).
 		const added = this._getFamiliarCompanions().some(c => !before.has(c.id));
-		if (added) this._state.spendWildShapeUse?.(1);
+		if (added && this._state.canSpendWildShapeUse?.(1)) this._state.spendWildShapeUse?.(1);
 		this._refreshSheet();
 		this._renderModalBody();
 	}
