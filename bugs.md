@@ -21,6 +21,9 @@ _Round 3 (surfaced during manual testing of the merged round-2 fixes). Grouped b
 * **Senses not displayed anywhere** — Regular sight, darkvision, blindsight, truesight, etc. are not shown anywhere on the sheet, despite many features, abilities, and magic items granting/altering vision types. Add a fitting senses display in the Overview that reflects the computed senses (the senses pipeline already exists in state — e.g. Apex Sentinel blindsight, Penetrating Senses flags).
 * **Optional emoji speed labels** — Speeds can get long (walk/fly/climb/swim/burrow). Add an optional setting (turned ON by default) that labels speed types with emoji/icons instead of words to keep the display compact.
 
+**Session 5 — Ability score max modification**
+* **No way to raise / set an ability score's max** — Custom abilities offer no option to increase an ability score's maximum or set it to a specific value, and there is no general channel for this on the sheet. Many classes interact with this in their capstones (e.g. Barbarian's Primal Champion raises STR & CON max to 24; 2024 Epic Boons). Add a generic mechanism — an ability-max effect consumed by the ability-score cap so `getAbilityScore` clamps to the effective max — exposed both through custom abilities (increase-max / set-max option) and through the feature/effect pipeline so class capstones and items can use it the right way. Default cap stays 20 with a hard ceiling (e.g. 30) unless raised.
+
 ## Closed Bugs
 
 ### Round 2 (manual-testing follow-ups)
