@@ -2473,6 +2473,7 @@ class CharacterSheetQuickBuild {
 			}
 			const added = this._state.addFeat(slot.feat, {
 				allSpells: this._page.getSpells(),
+				skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(slot.feat),
 				classFeatProgression: {
 					className: analysis.className,
 					classSource: analysis.classSource,
@@ -4768,12 +4769,12 @@ class CharacterSheetQuickBuild {
 			// Apply feat
 			if (asiSel.feat) {
 				applyFeatChoices();
-				this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells()});
+				this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(asiSel.feat)});
 				CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
 			}
 		} else if (asiSel.mode === "feat" && asiSel.feat) {
 			applyFeatChoices();
-			this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells()});
+			this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(asiSel.feat)});
 			CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
 		} else if (asiSel.mode === "asi") {
 			const increases = [];
