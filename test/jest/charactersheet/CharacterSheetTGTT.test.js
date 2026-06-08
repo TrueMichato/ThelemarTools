@@ -12539,7 +12539,10 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(mods[0].source).toBe("Hammer and Anvil");
 			});
 
-			it("should provide +2 melee conditional from Flanking", () => {
+			it("should NOT provide an automatic +2 melee conditional from the Battle Tactic Flanking", () => {
+				// The Battle Tactic NAMED "Flanking" is a reminder/reaction only. The
+				// situational +2 melee to-hit comes solely from the combat-tab Flanking
+				// quick button (the universal optional rule), never from this tactic.
 				state.addFeature({
 					name: "Flanking",
 					source: "TGTT",
@@ -12548,9 +12551,11 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				});
 
 				const mods = state.getConditionalAttackModifiers("melee");
-				expect(mods.length).toBe(1);
-				expect(mods[0].value).toBe(2);
-				expect(mods[0].source).toBe("Flanking");
+				expect(mods.some(m => m.source === "Flanking")).toBe(false);
+
+				// …but it DOES grant the Flanking Opportunity reaction.
+				const reactions = state.getAvailableCombatReactions();
+				expect(reactions.some(r => r.source === "Flanking" && r.name === "Flanking Opportunity")).toBe(true);
 			});
 
 			it("should return all conditionals when attackType is null", () => {
