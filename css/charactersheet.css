@@ -7811,6 +7811,65 @@ body.has-quickbuild-overlay .toast__container {
 	margin-bottom: var(--cs-space-md, 0.75rem);
 }
 
+/* Multiclass branch view — one column per class, each with its own mini-timeline */
+.charsheet__level-history-timeline--branched::before {
+	display: none;
+}
+
+.charsheet__level-branches {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-lg, 1rem);
+	align-items: flex-start;
+}
+
+.charsheet__level-branch {
+	flex: 1 1 280px;
+	min-width: 260px;
+	background: var(--cs-bg-surface, var(--rgb-bg-alt));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-lg, 12px);
+	padding: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__level-branch-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 0.5rem);
+	margin-bottom: var(--cs-space-md, 0.75rem);
+	padding-bottom: var(--cs-space-sm, 0.5rem);
+	border-bottom: 2px solid var(--cs-border, var(--rgb-border-grey));
+}
+
+.charsheet__level-branch-name {
+	font-weight: 800;
+	font-size: 1rem;
+	color: var(--cs-primary, #6366f1);
+}
+
+.charsheet__level-branch-sub {
+	font-size: 0.75rem;
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+}
+
+.charsheet__level-branch-entries {
+	position: relative;
+	padding-left: var(--cs-space-xl, 1.5rem);
+}
+
+/* Per-branch connecting line, mirroring the single-class timeline line */
+.charsheet__level-branch-entries::before {
+	content: '';
+	position: absolute;
+	left: 12px;
+	top: 0;
+	bottom: 0;
+	width: 3px;
+	background: linear-gradient(180deg, var(--cs-primary, #6366f1), var(--cs-accent, #8b5cf6));
+	border-radius: var(--cs-radius-full, 9999px);
+}
+
 .charsheet__level-entry:last-child {
 	padding-bottom: 0;
 	margin-bottom: 0;
