@@ -217,7 +217,7 @@ class CharacterSheetQuickBuild {
 			const hasAsi = CharacterSheetClassUtils.levelGrantsAsi(classData, classLevel);
 
 			const optionalFeatureGains = this._getOptionalFeatureGains(
-				classData, classLevel, runningOptionalFeatureCounts,
+				classData, classLevel, runningOptionalFeatureCounts, subclass,
 			);
 
 			// Class-level featProgression picks (2024/TGTT Fighting Style etc.); excludes Epic Boon.
@@ -431,11 +431,27 @@ class CharacterSheetQuickBuild {
 		return CharacterSheetClassUtils.getLevelFeatures(classData, level, subclass, classFeatures, subclassFeatures);
 	}
 
-	_getOptionalFeatureGains (classData, classLevel, runningCounts) {
+	_getOptionalFeatureGains (classData, classLevel, runningCounts, subclassData = null) {
 		const gains = [];
-		if (!classData.optionalfeatureProgression?.length) return gains;
 
-		classData.optionalfeatureProgression.forEach(optFeatProg => {
+		const classProgressions = classData.optionalfeatureProgression || [];
+		const classFeatureTypeSet = new Set(classProgressions.flatMap(p => p.featureType || []));
+		const progressions = [...classProgressions];
+
+		// Merge subclass-level progressions (Arcane Shot "AS", Maneuvers "MV:B", etc.),
+		// skipping CTM:* (handled elsewhere) and any type shared with a class-level
+		// progression (shared-count hazard, e.g. Champion "FS:F").
+		const subclassProgressions = subclassData?.optionalfeatureProgression || [];
+		for (const p of subclassProgressions) {
+			const types = p.featureType || [];
+			if (types.some(ft => ft.startsWith?.("CTM:"))) continue;
+			if (types.some(ft => classFeatureTypeSet.has(ft))) continue;
+			progressions.push(p);
+		}
+
+		if (!progressions.length) return gains;
+
+		progressions.forEach(optFeatProg => {
 			const featureTypes = optFeatProg.featureType || [];
 			const name = optFeatProg.name || featureTypes.map(ft => ft.replace(/:/g, " ")).join(", ");
 			const key = featureTypes.join("_");

@@ -164,7 +164,10 @@ class CharacterSheetLevelUp {
 		// At this point the new class level has not yet been written, so getTotalLevel()+1 = new character level.
 		const isBothAsiAndFeat = this._state.shouldGrantBothAsiAndFeat((this._state.getTotalLevel() || 0) + 1);
 		const isEpicBoonLevel = newLevel === 19 && (classEntry.source === "XPHB" || classEntry.source === "TGTT");
-		const optionalFeatureGains = CharacterSheetClassUtils.getOptionalFeatureGains(classData, classEntry.level, newLevel, this._state);
+		// Subclass-aware: at L7/10/15/18 the subclass already exists on classEntry, so its
+		// optionalfeatureProgression (e.g. Arcane Shot) is resolved here. At the subclass-
+		// granting level (L3) it is null until chosen, then recomputed in the picker below.
+		let optionalFeatureGains = CharacterSheetClassUtils.getOptionalFeatureGains(classData, classEntry.level, newLevel, this._state, fullClassSubclassData);
 		// Class-level featProgression (2024/TGTT Fighting Style etc.); excludes Epic Boon (handled by ASI flow).
 		const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(classData, classEntry.level, newLevel);
 		featureOptionGroups = CharacterSheetClassUtils.getFeatureOptionsForLevel(currentFeatures, newLevel, this._page.getClassFeatures())
@@ -464,6 +467,12 @@ class CharacterSheetLevelUp {
 			const subclassContent = this._renderSubclassSelectionCompact(classData, async (/** @type {*} */ subclass) => {
 				selectedSubclass = subclass;
 				currentFeatures = CharacterSheetClassUtils.getLevelFeatures(classData, newLevel, subclass, this._page.getClassFeatures(), this._page.getSubclassFeatures());
+
+				// Recompute optional-feature gains now that the subclass is known, so its
+				// optionalfeatureProgression (e.g. Arcane Archer "Arcane Shots") surfaces a
+				// picker. This fully replaces the array (CTM augmentation below re-applies),
+				// avoiding duplicate gains across repeated subclass selections.
+				optionalFeatureGains = CharacterSheetClassUtils.getOptionalFeatureGains(classData, classEntry.level, newLevel, this._state, subclass);
 
 				// Update dependent sections
 				featureOptionGroups = CharacterSheetClassUtils.getFeatureOptionsForLevel(currentFeatures, newLevel, this._page.getClassFeatures())
