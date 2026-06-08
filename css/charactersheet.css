@@ -8484,6 +8484,43 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--rgb-text-dim);
 }
 
+/* Primal Focus (TGTT Ranger) — Combat-tab mode-ability rows.
+   Two-line grid: name + action-type badge share row 1 (badge right-aligned),
+   the description spans the full width on row 2. min-width:0 + overflow-wrap let
+   the text columns shrink/wrap so name, badge, and note never collide or overflow
+   at any [data-textsize]. */
+.charsheet__ranger-ability-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	column-gap: 0.5rem;
+	row-gap: 0.15rem;
+	padding: 0.35rem 0 0.35rem 0.5rem;
+	border-left: 2px solid var(--rgb-link);
+	margin-bottom: 0.35rem;
+}
+
+.charsheet__ranger-ability-name {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	font-weight: 700;
+}
+
+.charsheet__ranger-ability-badge {
+	grid-column: 2;
+	justify-self: end;
+	white-space: nowrap;
+}
+
+.charsheet__ranger-ability-note {
+	grid-column: 1 / -1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	color: var(--rgb-text-dim);
+	font-size: 0.85em;
+	line-height: 1.3;
+}
+
 /* Dice Roller Integration */
 .charsheet__dice-result {
 	position: fixed;
