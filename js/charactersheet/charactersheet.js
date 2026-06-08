@@ -5870,14 +5870,9 @@ class CharacterSheetPage {
 			const switchesMax = calcs.focusSwitchesMaxNum ?? calcs.focusSwitchesMax ?? 1;
 			const switchesText = isUnlimited ? "∞" : `${switchesRemaining}/${switchesMax}`;
 
-			// Active mode effect summary (mode-gated, only the active mode's effects apply)
-			const effectLines = [];
-			if (isPredator) {
-				if (calcs.primalFocusUpgrade1) effectLines.push("Pursuit: +10 ft walking speed");
-				if (calcs.focusedQuarryDamage) effectLines.push(`Focused Quarry: +${calcs.focusedQuarryDamage} damage to your Quarry (once per turn)`);
-			} else {
-				if (calcs.primalFocusUpgrade1) effectLines.push("Terrain Defense: +half proficiency to AC &amp; DEX saves in cover/difficult terrain");
-			}
+			// Active mode effect summary is rendered below from the canonical
+			// getPrimalFocusModeAbilities catalog (parity with the Combat tab), so the
+			// two surfaces share one source of truth and never drift.
 
 			const block = document.createElement("div");
 			block.className = "charsheet__ranger-primal-focus mb-3";
@@ -5902,8 +5897,40 @@ class CharacterSheetPage {
 				</div>`;
 			}
 
-			if (effectLines.length) {
-				html += `<ul class="ve-muted ve-small mb-0" style="padding-left: 18px;">${effectLines.map(l => `<li>${l}</li>`).join("")}</ul>`;
+			// Canonical focus-mode ability catalog (parity with the Combat tab; same
+			// declarative source so the two surfaces never drift). Reminder-only here —
+			// usable abilities/methods are actioned from the Combat tab. The Focused
+			// Quarry row keeps the only unique numeric info the old summary showed.
+			const abilities = CharacterSheetClassUtils.getPrimalFocusModeAbilities?.(mode, {
+				upgrade1: !!calcs.primalFocusUpgrade1,
+				upgrade2: !!calcs.primalFocusUpgrade2,
+				upgrade3: !!calcs.primalFocusUpgrade3,
+			}) || [];
+			if (abilities.length) {
+				html += `<div class="charsheet__overview-ranger-abilities mt-1">`;
+				abilities.forEach(ab => {
+					let badge;
+					if (ab.kind === "usable") {
+						const at = ab.actionType;
+						const icon = at === "action" ? "⚔️" : at === "bonus" ? "⚡" : at === "reaction" ? "🔄" : "✨";
+						const label = at === "action" ? "Action" : at === "bonus" ? "Bonus Action" : at === "reaction" ? "Reaction" : "Action";
+						badge = `<span class="badge badge-outline-secondary" title="${label}">${icon} ${label}</span>`;
+					} else if (ab.kind === "method") {
+						badge = `<span class="badge badge-outline-info" title="Combat method (see Combat Methods)">⚔️ Method</span>`;
+					} else {
+						badge = `<span class="badge badge-outline-secondary" title="Passive / situational">✦ Passive</span>`;
+					}
+					const extra = (ab.name === "Focused Quarry" && calcs.focusedQuarryDamage)
+						? ` <span class="badge badge-outline-danger" title="Extra damage to your Quarry (once per turn)">+${calcs.focusedQuarryDamage} dmg</span>`
+						: "";
+					html += `
+						<div class="charsheet__ranger-ability-row">
+							<span class="charsheet__ranger-ability-name">${ab.name}</span>
+							<span class="charsheet__ranger-ability-badge">${badge}${extra}</span>
+							<span class="charsheet__ranger-ability-note">${ab.note}</span>
+						</div>`;
+				});
+				html += `</div>`;
 			}
 			block.innerHTML = html;
 			container.appendChild(block);
