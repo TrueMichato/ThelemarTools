@@ -5376,6 +5376,28 @@ class CharacterSheetClassUtils {
 			return emojiHtml;
 		}
 	}
+
+	/**
+	 * Resolve a language-proficiency KEY to a clean, displayable language name.
+	 *
+	 * Race / subrace / background `languageProficiencies` entries are keyed either
+	 * by a plain language name ("common", "elvish") or — for homebrew languages —
+	 * by a 5etools entity UID of the form `name|source` (e.g. "tabaxi|tgtt").
+	 * Title-casing the raw key produced broken display text like "Tabaxi|Tgtt".
+	 * This strips any `|source` suffix and title-cases the name part, so any
+	 * homebrew language UID resolves to its proper name. Generic — not Tabaxi- or
+	 * TGTT-specific.
+	 *
+	 * @param {string} key - A languageProficiencies key, plain name, or `name|source` UID.
+	 * @returns {string} The displayable language name (title-cased).
+	 */
+	static resolveLanguageProficiencyName (key) {
+		if (key == null) return "";
+		const raw = String(key);
+		// A UID is "name|source"; take the name part before the first pipe.
+		const namePart = raw.includes("|") ? raw.split("|")[0] : raw;
+		return namePart.trim().toTitleCase();
+	}
 }
 
 // Export

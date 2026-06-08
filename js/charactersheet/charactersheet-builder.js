@@ -950,14 +950,14 @@ class CharacterSheetBuilder {
 
 			// Add user-chosen replacement languages
 			this._tashasLanguageReplacements.forEach((/** @type {*} */ lang) => {
-				if (lang) this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
+				if (lang) this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang)));
 			});
 		} else {
 			if (this._selectedRace.languageProficiencies) {
 				this._selectedRace.languageProficiencies.forEach((/** @type {*} */ langProf) => {
 					Object.keys(langProf).forEach((/** @type {*} */ lang) => {
 						if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-						this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
+						this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang)));
 					});
 				});
 			}
@@ -967,7 +967,7 @@ class CharacterSheetBuilder {
 				this._selectedSubrace.languageProficiencies.forEach((/** @type {*} */ langProf) => {
 					Object.keys(langProf).forEach((/** @type {*} */ lang) => {
 						if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-						this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
+						this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang)));
 					});
 				});
 			}
@@ -978,7 +978,7 @@ class CharacterSheetBuilder {
 			Object.values(this._selectedRacialLanguages).forEach((/** @type {*} */ langArray) => {
 				if (Array.isArray(langArray)) {
 					langArray.forEach((/** @type {*} */ lang) => {
-						this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
+						this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang)));
 					});
 				}
 			});
@@ -987,7 +987,7 @@ class CharacterSheetBuilder {
 		// Apply selected subrace language choices (e.g., Hub Residence Trilingual)
 		if (this._selectedSubraceLanguages.length) {
 			this._selectedSubraceLanguages.forEach((/** @type {*} */ lang) => {
-				this._state.addLanguage((/** @type {*} */ (lang)).toTitleCase());
+				this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang)));
 			});
 		}
 
@@ -2104,7 +2104,7 @@ class CharacterSheetBuilder {
 				Object.entries(langSet).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
 					// Only add fixed language proficiencies here (not anyStandard/any)
 					if (key !== "anyStandard" && key !== "any" && value === true) {
-						this._state.addLanguage((/** @type {*} */ (key)).toTitleCase());
+						this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (key)));
 					}
 				});
 			});
