@@ -3243,6 +3243,63 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Build a list of the Ranger's active passive / situational feature reminders
+	 * from the flat `getFeatureCalculations()` output. These features grant
+	 * always-on or situational benefits that previously had no at-a-glance home on
+	 * a play surface (they only existed as Feature-tab encyclopedia cards). The list
+	 * is purely derived from the calc flags, so it stays in sync with the feature
+	 * pipeline and is easy to extend.
+	 *
+	 * Notes are intentionally worded to AVOID duplicating information already
+	 * surfaced elsewhere (senses, resources, saving throws) — they highlight the
+	 * situational reminder, not the numbers shown on those panels.
+	 *
+	 * @param {*} calcs - Output of `state.getFeatureCalculations()`.
+	 * @returns {Array<{name: string, note: string, source: string, level: (number|null), icon: string}>}
+	 */
+	static getRangerPassiveReminders (/** @type {*} */ calcs = {}) {
+		const c = calcs || {};
+		const out = [];
+		const add = (cond, entry) => { if (cond) out.push(entry); };
+
+		// --- Core / always-on Ranger line ---
+		add(c.hasDeftExplorer, {name: "Deft Explorer", note: "Expertise in a skill, two extra languages, and an extra prepared spell from your Canny/Tracker benefits.", source: "TGTT", level: 1, icon: "🧭"});
+
+		// --- TGTT mid-level passives ---
+		add(c.hasEnduringTraveler, {name: "Enduring Traveler", note: "Immune to extreme cold, extreme heat, and high altitude; auto-succeed saves vs. exhaustion from natural travel/environment. You can perform a second camp/journey activity in the same segment.", source: "TGTT", level: 4, icon: "⛰️"});
+
+		// Tireless: temp-HP grant is already an action/resource — surface only the
+		// passive exhaustion-reduction reminder here.
+		add(c.hasTireless, {name: "Tireless", note: "Your exhaustion level decreases by 1 whenever you finish a short rest. (Temp-HP grant is tracked in Resources.)", source: c.hasEnduringTraveler ? "TGTT" : "XPHB", level: c.hasEnduringTraveler ? 5 : 10, icon: "💪"});
+
+		add(c.hasEphemeralInsight, {name: "Ephemeral Insight", note: "After studying a subject for 1 hour, gain a relevant skill or tool proficiency until you use this feature again.", source: "TGTT", level: 8, icon: "📖"});
+
+		add(c.hasUnrivaledPioneer, {name: "Unrivaled Pioneer", note: "Reliable Survivalist: treat a d20 of 9 or lower as a 10 on Nature/Survival and navigation/tracking checks. Pick two skills to gain Expertise in. (Advantage on initiative; INT & WIS save proficiency shown on your saves.)", source: "TGTT", level: 9, icon: "🗺️"});
+
+		add(c.hasInfallibleBearing, {name: "Infallible Bearing", note: "You always know the direction and approximate distance to the last creature you marked as your Quarry.", source: "TGTT", level: 13, icon: "🧲"});
+
+		add(c.hasPenetratingSenses, {name: "Penetrating Senses", note: `Within ${c.penetratingSensesRange || 60} feet you can see invisible creatures, see through visual illusions, and perceive a shapechanger's true form. (Not truesight.)`, source: "TGTT", level: 14, icon: "🔮"});
+
+		// Apex Sentinel: blindsight is already shown in Senses — surface the aura + tracking reminder.
+		add(c.hasApexSentinel, {name: "Apex Sentinel", note: `Allies within ${c.apexSentinelAuraRange || 30} feet gain a bonus to their tracking/perception while you guide them, and you can track with uncanny precision. (Blindsight is shown in Senses.)`, source: "TGTT", level: 17, icon: "👁️"});
+
+		add(c.hasBattleInstincts, {name: "Battle Instincts", note: "You can't be surprised while conscious, damage can't break your concentration, and you can retaliate with a reaction attack when a creature misses you (once per round).", source: "TGTT", level: 18, icon: "⚡"});
+
+		add(c.hasApexFocus, {name: "Apex Focus", note: "Your speed is doubled, you never have disadvantage on weapon attacks, and you gain temporary hit points at the start of each of your turns. (Toggle the +2 AC option in combat when not in heavy armor.)", source: "TGTT", level: 20, icon: "🌟"});
+
+		// --- Classic / XPHB-only passives (gated off for TGTT in the calc pipeline) ---
+		add(c.hasHideInPlainSight, {name: "Hide in Plain Sight", note: "Spend 1 minute to camouflage yourself; gain a bonus to Stealth checks while you remain in place.", source: "PHB", level: 10, icon: "🌿"});
+		add(c.hasRelentlessHunter, {name: "Relentless Hunter", note: "Taking damage can't break your concentration on Hunter's Mark.", source: "XPHB", level: 13, icon: "🎯"});
+		add(c.hasVanish, {name: "Vanish", note: "You can Hide as a Bonus Action and can't be tracked by nonmagical means.", source: "PHB", level: 14, icon: "💨"});
+		add(c.hasNaturesVeil, {name: "Nature's Veil", note: `As a Bonus Action, become invisible until the end of your next turn (${c.naturesVeilUses ?? "prof."}/long rest).`, source: "XPHB", level: 14, icon: "🍃"});
+		add(c.hasPreciseHunter, {name: "Precise Hunter", note: "You have advantage on attack rolls against the creature currently marked by your Hunter's Mark.", source: "XPHB", level: 17, icon: "🏹"});
+		add(c.hasFeralSenses, {name: "Feral Senses", note: `You can attack creatures you can't see without disadvantage and sense invisible creatures within ${c.feralSensesRange || 30} feet.`, source: "PHB", level: 18, icon: "👂"});
+		add(c.hasFoeSlayer, {name: "Foe Slayer", note: `Once per turn, add +${c.foeSlayerBonus ?? "WIS"} to an attack or damage roll against your favored enemy.`, source: "PHB", level: 20, icon: "⚔️"});
+
+		return out;
+	}
+
+	/**
 	 * Get the full tradition name from a combat method (either format).
 	 * @param {*} feature
 	 * @returns {string|null}

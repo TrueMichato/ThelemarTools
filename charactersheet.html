@@ -411,6 +411,32 @@
 							</div>
 						</div>
 
+						<!-- Defenses (resistances / immunities / vulnerabilities) — mirrors the Combat tab -->
+						<div class="charsheet__section charsheet__section--defenses" id="charsheet-overview-defenses-section" style="display:none;">
+							<h4 class="charsheet__section-title">
+								<span class="charsheet__section-icon">🛡️</span>
+								Defenses
+							</h4>
+							<div class="charsheet__defenses" id="charsheet-overview-defenses">
+								<div class="charsheet__defense-row" id="charsheet-overview-resistances-row">
+									<span class="charsheet__defense-label">Resistances:</span>
+									<span class="charsheet__defense-value" id="charsheet-overview-resistances">—</span>
+								</div>
+								<div class="charsheet__defense-row" id="charsheet-overview-immunities-row">
+									<span class="charsheet__defense-label">Immunities:</span>
+									<span class="charsheet__defense-value" id="charsheet-overview-immunities">—</span>
+								</div>
+								<div class="charsheet__defense-row" id="charsheet-overview-vulnerabilities-row">
+									<span class="charsheet__defense-label">Vulnerabilities:</span>
+									<span class="charsheet__defense-value" id="charsheet-overview-vulnerabilities">—</span>
+								</div>
+								<div class="charsheet__defense-row" id="charsheet-overview-condition-immunities-row">
+									<span class="charsheet__defense-label">Condition Immunities:</span>
+									<span class="charsheet__defense-value" id="charsheet-overview-condition-immunities">—</span>
+								</div>
+							</div>
+						</div>
+
 						<!-- Saving Throws -->
 						<div class="charsheet__section charsheet__section--saves">
 							<h4 class="charsheet__section-title">
@@ -946,14 +972,6 @@
 							</div>
 						</div>
 
-						<!-- Primal Focus Section (TGTT Ranger) -->
-						<div class="charsheet__section" id="charsheet-combat-ranger-section" style="display: none;">
-							<h4 class="charsheet__section-title">Primal Focus</h4>
-							<div id="charsheet-combat-ranger">
-								<!-- Primal Focus mode controls + ability list rendered here -->
-							</div>
-						</div>
-
 						<!-- Combat Methods Section (Thelemar homebrew) -->
 						<div class="charsheet__section" id="charsheet-combat-methods-tab-section" style="display: none;">
 							<h4 class="charsheet__section-title">
@@ -1009,6 +1027,14 @@
 						</div>
 					</div>
 					<div class="ve-flex-col charsheet__col-half">
+						<!-- Primal Focus Section (TGTT Ranger) -->
+						<div class="charsheet__section" id="charsheet-combat-ranger-section" style="display: none;">
+							<h4 class="charsheet__section-title">Primal Focus</h4>
+							<div id="charsheet-combat-ranger">
+								<!-- Primal Focus mode controls + ability list rendered here -->
+							</div>
+						</div>
+
 						<div class="charsheet__section">
 							<h4 class="charsheet__section-title">Defenses</h4>
 							<div id="charsheet-combat-defenses">

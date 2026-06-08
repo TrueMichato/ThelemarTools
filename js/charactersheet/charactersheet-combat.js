@@ -5993,10 +5993,10 @@ class CharacterSheetCombat {
 					badge = `<span class="badge badge-outline-secondary" title="Passive / situational">✦ Passive</span>`;
 				}
 				html += `
-					<div class="charsheet__combat-ranger-ability mb-1 ve-flex ve-flex-v-center gap-2" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
-						<span class="bold">${ab.name}</span>
-						${badge}
-						<span class="ve-muted ve-small">${ab.note}</span>
+					<div class="charsheet__ranger-ability-row">
+						<span class="charsheet__ranger-ability-name">${ab.name}</span>
+						<span class="charsheet__ranger-ability-badge">${badge}</span>
+						<span class="charsheet__ranger-ability-note">${ab.note}</span>
 					</div>`;
 			});
 			html += `</div>`;

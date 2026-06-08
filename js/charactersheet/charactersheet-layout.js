@@ -512,25 +512,41 @@ class CharacterSheetLayout {
 			sectionMap.set(id, section);
 		});
 
-		// Reorder based on saved order
+		// Sections present in the DOM but absent from the saved order — e.g. a
+		// section added or relocated by an app update after the layout was saved.
+		// Without explicit handling these would be left in place and interleaved
+		// unpredictably by the inserts below. Append them, in their current DOM
+		// order, after the known/ordered sections so they land deterministically
+		// at the end of the container instead of drifting to arbitrary positions.
+		const orderedSet = new Set(order);
+		const unknownSections = sections.filter(section => !orderedSet.has(this._getSectionId(section)));
+
+		// Reorder based on saved order, then append the unknown sections.
 		let lastInserted = null;
 
-		for (const sectionId of order) {
-			const section = sectionMap.get(sectionId);
-			if (!section) continue;
-
+		const placeSection = (section) => {
 			if (lastInserted) {
 				// Insert after last inserted
 				lastInserted.after(section);
 			} else {
 				// Insert at beginning of container
-				const firstChild = container.querySelector(".charsheet__section");
+				const firstChild = container.querySelector(":scope > .charsheet__section");
 				if (firstChild && firstChild !== section) {
 					container.insertBefore(section, firstChild);
 				}
 			}
 
 			lastInserted = section;
+		};
+
+		for (const sectionId of order) {
+			const section = sectionMap.get(sectionId);
+			if (!section) continue;
+			placeSection(section);
+		}
+
+		for (const section of unknownSections) {
+			placeSection(section);
 		}
 	}
 
