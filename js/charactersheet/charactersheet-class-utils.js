@@ -4722,6 +4722,130 @@ class CharacterSheetClassUtils {
 		});
 	}
 
+	/**
+	 * Determine the character level at which a race/subrace (or similar) feature
+	 * ENTRY becomes available. Honors an explicit numeric `level`; otherwise parses
+	 * the leading "unlock" sentence of the feature's first text entry using the
+	 * "When you reach character level N" / "Starting at Nth level" prose convention
+	 * already used elsewhere in the codebase. Defaults to 1 (always-on) when no
+	 * leading gate is present.
+	 *
+	 * IMPORTANT: the match is anchored to the START of the first text entry, so
+	 * later in-sentence scaling text ("...the damage increases when you reach 5th
+	 * level...", e.g. Dragonborn Breath Weapon — a level-1 feature) never falsely
+	 * gates the whole feature. When in doubt it returns 1, i.e. it never hides a
+	 * feature that lacks an explicit leading level gate.
+	 * @param {*} feature
+	 * @returns {number}
+	 */
+	static getFeatureUnlockLevel (/** @type {*} */ feature) {
+		if (!feature) return 1;
+		if (typeof feature.level === "number" && feature.level > 0) return feature.level;
+
+		const lead = CharacterSheetClassUtils._getFeatureLeadText(feature);
+		if (!lead) return 1;
+
+		const m = lead.match(/^when you reach (?:character\s+)?level\s+(\d+)\b/i)
+			|| lead.match(/^when you reach (?:the\s+)?(\d+)(?:st|nd|rd|th)\s+level\b/i)
+			|| lead.match(/^once you reach (?:character\s+)?level\s+(\d+)\b/i)
+			|| lead.match(/^once you reach (?:the\s+)?(\d+)(?:st|nd|rd|th)\s+level\b/i)
+			|| lead.match(/^(?:starting|beginning) at (?:character\s+)?level\s+(\d+)\b/i)
+			|| lead.match(/^(?:starting|beginning) at (?:the\s+)?(\d+)(?:st|nd|rd|th)\s+level\b/i)
+			|| lead.match(/^at (?:character\s+)?level\s+(\d+)\b/i)
+			|| lead.match(/^at (?:the\s+)?(\d+)(?:st|nd|rd|th)\s+level\b/i);
+		if (m) {
+			const lvl = parseInt(m[1], 10);
+			if (lvl >= 1 && lvl <= 20) return lvl;
+		}
+		return 1;
+	}
+
+	/**
+	 * Extract the plain-text first text entry of a feature, with 5etools @tags and
+	 * any HTML stripped, for leading level-gate detection.
+	 * @private
+	 * @param {*} feature
+	 * @returns {string}
+	 */
+	static _getFeatureLeadText (/** @type {*} */ feature) {
+		let raw = null;
+		const entries = feature.entries;
+		if (Array.isArray(entries)) {
+			raw = entries.find((/** @type {*} */ e) => typeof e === "string") || null;
+			if (!raw) {
+				const objWithStr = entries.find((/** @type {*} */ e) =>
+					e && typeof e === "object" && Array.isArray(e.entries) && e.entries.some((/** @type {*} */ se) => typeof se === "string"));
+				if (objWithStr) raw = objWithStr.entries.find((/** @type {*} */ se) => typeof se === "string");
+			}
+		}
+		if (!raw && typeof feature.description === "string") raw = feature.description;
+		if (!raw || typeof raw !== "string") return "";
+
+		let txt = raw;
+		try { if (typeof Renderer !== "undefined" && Renderer.stripTags) txt = Renderer.stripTags(txt); } catch (e) { /* fall through to regex strip */ }
+		txt = txt.replace(/<[^>]+>/g, " ");
+		return txt.trim();
+	}
+
+	/**
+	 * Reconcile race + subrace ENTRY features against the current total character
+	 * level. Adds entry features whose unlock level has been reached and removes
+	 * race/subrace entry features that are now above the character's level (e.g.
+	 * after a level-down / respec). Idempotent — safe to call on every level change.
+	 *
+	 * Mirrors {@link updateRacialSpells} (which only handles `additionalSpells`);
+	 * this handles the descriptive/level-gated trait entries — most notably the
+	 * Aasimar "Celestial Revelation" trait, which unlocks at character level 3.
+	 * @param {*} state - CharacterSheetState instance
+	 * @param {*} [page] - unused; accepted for call-site parity with updateRacialSpells
+	 */
+	static updateRacialFeatures (/** @type {*} */ state, /** @type {*} */ page) {
+		const race = state.getRace?.();
+		const subrace = state.getSubrace?.();
+		if (!race && !subrace) return;
+
+		const totalLevel = state.getTotalLevel?.() || 1;
+
+		/** @type {{entry:*, featureType:string, fallbackSource:string}[]} */
+		const sources = [];
+		const collect = (/** @type {*} */ data, /** @type {string} */ featureType) => {
+			if (!Array.isArray(data?.entries)) return;
+			data.entries.forEach((/** @type {*} */ entry) => {
+				if (entry && typeof entry === "object" && entry.name) {
+					sources.push({entry, featureType, fallbackSource: data.source});
+				}
+			});
+		};
+		collect(race, "Species");
+		collect(subrace, "Subrace");
+		if (!sources.length) return;
+
+		// Remove race/subrace entry features now gated ABOVE the current level
+		// (handles over-grant cleanup and level-down / respec).
+		const overLevelKeys = new Set();
+		sources.forEach(({entry, featureType, fallbackSource}) => {
+			if (CharacterSheetClassUtils.getFeatureUnlockLevel(entry) > totalLevel) {
+				overLevelKeys.add(`${featureType}|${entry.name}|${entry.source || fallbackSource}`);
+			}
+		});
+		if (overLevelKeys.size) {
+			(state.getFeatures?.() || [])
+				.filter((/** @type {*} */ f) => (f.featureType === "Species" || f.featureType === "Subrace")
+					&& overLevelKeys.has(`${f.featureType}|${f.name}|${f.source}`))
+				.forEach((/** @type {*} */ f) => state.removeFeature(f.id));
+		}
+
+		// Add entries whose unlock level has been reached. addFeature dedups by
+		// name+source, so already-present features are skipped.
+		sources.forEach(({entry, featureType, fallbackSource}) => {
+			if (CharacterSheetClassUtils.getFeatureUnlockLevel(entry) > totalLevel) return;
+			state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
+				{...entry, source: entry.source || fallbackSource},
+				{featureType},
+			));
+		});
+	}
+
 	/** @private */
 	static _processRacialSpellList (/** @type {*} */ state, /** @type {*} */ spellList, /** @type {*} */ allSpells, /** @type {*} */ sourceName) {
 		if (!Array.isArray(spellList)) {
