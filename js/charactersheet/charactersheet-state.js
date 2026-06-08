@@ -656,12 +656,22 @@ class FeatureChoiceParser {
 		return typeof feature.description === "string" ? feature.description : "";
 	}
 
-	/** Find a "proficiency in either A or B [skill]" choice clause and pull out the skills. */
+	/** Find a "proficiency in either A or B [skill]" or "one of the following skills … of your choice: A, B, C, or D" choice clause and pull out the skills. */
 	static _extractSkillProficiencyChoice (text) {
 		// Primary: clause terminated by the word "skill"/"skills".
 		let m = /proficien(?:cy|t)\s+(?:in|with)\s+either\s+(.*?)\s+skills?\b/i.exec(text);
 		// Fallback: "proficiency in either X or Y" with no trailing "skill", up to sentence end.
 		if (!m) m = /proficien(?:cy|t)\s+(?:in|with)\s+either\s+([^.]*?\bor\b[^.]*?)(?=[.,]|$)/i.exec(text);
+
+		// List phrasing (2024): "proficiency in one of the following skills [of your
+		// choice]: {@skill A}, {@skill B}, or {@skill C}". The clause is everything after
+		// the colon up to the sentence end. Scoped to the SINGLE-pick "one" form because
+		// the choice picker / fulfillFeatureChoice only resolve one option; "two of the
+		// following" is intentionally left untouched (no half-fulfilled multi-pick).
+		if (!m) {
+			const list = /proficien(?:cy|t)\s+(?:in|with)\s+one\s+of\s+the\s+following[^:]*:\s*([^.]*)/i.exec(text);
+			if (list) m = [list[0], list[1]];
+		}
 		if (!m) return null;
 
 		const options = this._extractSkillsFromClause(m[1]);
@@ -17806,6 +17816,15 @@ class CharacterSheetState {
 								// Training in War and Song (level 2/3)
 								calculations.hasTrainingInWarAndSong = true;
 
+								// The 2024 (FRHoF) Bladesinger's version additionally grants a
+								// FIXED proficiency with all Melee Martial weapons lacking the
+								// Two-Handed/Heavy property. Gate strictly on the FRHoF subclass
+								// source so neither the 2014 TCE "Bladesinging" nor TGTT variants
+								// pick up the bundle.
+								if (cls.subclass?.source === "FRHoF") {
+									calculations.hasTrainingInWarAndSongMartialMelee = true;
+								}
+
 								// Bladesong (level 2/3)
 								calculations.hasBladesong = true;
 								calculations.bladesongAcBonus = intMod;
@@ -19984,6 +20003,19 @@ class CharacterSheetState {
 				source: "Bladesong",
 				conditional: "while Bladesong is active",
 				enabled: false,
+			});
+		}
+
+		// Training in War and Song (2024 FRHoF Bladesinger): proficiency with all
+		// Melee Martial weapons that lack the Two-Handed or Heavy property. Modeled as a
+		// generic weapon-proficiency descriptor token so _isWeaponProficient resolves it
+		// against each weapon's metadata; tracked + torn down via the class-feature
+		// effect lifecycle so a subclass swap removes it cleanly.
+		if (calculations.hasTrainingInWarAndSongMartialMelee && !alreadyProcessed("Training in War and Song")) {
+			effects.push({
+				type: "weaponProficiency",
+				weapon: "Martial Melee (no Two-Handed or Heavy)",
+				source: "Training in War and Song",
 			});
 		}
 
@@ -23992,9 +24024,63 @@ class CharacterSheetState {
 			return true;
 		}
 		// Check specific weapon proficiency
-		return this._data.weaponProficiencies.some(
+		if (this._data.weaponProficiencies.some(
 			p => p.toLowerCase() === weapon.name?.toLowerCase(),
+		)) {
+			return true;
+		}
+		// Check descriptor-token proficiencies (e.g. "Martial Melee (no Two-Handed or
+		// Heavy)" from the 2024 Bladesinger). Generic — resolved against the weapon's
+		// category/reach/properties so any such grant works, not just one feature.
+		return this._data.weaponProficiencies.some(
+			p => this._weaponMatchesProficiencyDescriptor(weapon, p),
 		);
+	}
+
+	/**
+	 * Evaluate a free-text weapon-proficiency descriptor token against a weapon's
+	 * metadata. Generic: understands a weapon category (simple/martial), a reach
+	 * (melee/ranged), and property exclusions ("no/without/don't have <two-handed|2H|
+	 * heavy|special>"). Only tokens that name a reach qualify as descriptors, so plain
+	 * "martial"/"simple"/weapon-name tokens (handled by the exact checks above) and
+	 * damage-typed tokens like "Martial (slashing)" are NOT clobbered here.
+	 * @param {*} weapon - A raw 5etools item or normalized inventory weapon.
+	 * @param {string} token - The stored proficiency string.
+	 * @returns {boolean}
+	 */
+	_weaponMatchesProficiencyDescriptor (weapon, token) {
+		if (!weapon || !token) return false;
+		const t = String(token).toLowerCase();
+
+		const wantsMelee = /\bmelee\b/.test(t);
+		const wantsRanged = /\branged\b/.test(t);
+		if (!wantsMelee && !wantsRanged) return false; // not a reach descriptor
+
+		// Category gate (only enforce a category the token actually names).
+		if (/\bmartial\b/.test(t) && weapon.weaponCategory !== "martial") return false;
+		if (/\bsimple\b/.test(t) && weapon.weaponCategory !== "simple") return false;
+
+		const props = weapon.property || weapon.properties || [];
+		const hasProp = (code) => props.some(p => p === code || (typeof p === "string" && p.startsWith(`${code}|`)));
+		const itemType = (weapon.type || "").split("|")[0];
+		// Reach: prefer an explicit melee/ranged item type; otherwise the Ammunition (A)
+		// property is a definitive ranged signal, and `isMelee === false` marks a
+		// normalized ranged weapon. A normalized weapon (type "weapon", no reach hint)
+		// only counts as melee when nothing flags it ranged — so e.g. a hand crossbow
+		// (Ammunition) is NOT swept up by a "Melee" descriptor.
+		const isRanged = itemType === "R" || itemType === "RW" || weapon.isMelee === false || hasProp("A");
+		const isMelee = itemType === "M" || itemType === "MW" || (!!weapon.weapon && !isRanged && weapon.isMelee !== false);
+		if (wantsMelee && !isMelee) return false;
+		if (wantsRanged && !isRanged) return false;
+
+		// Exclusions: a weapon carrying an excluded property is NOT covered.
+		const excludes = /\b(?:no|without|not|don'?t\s+have|that\s+don'?t\s+have|lacking)\b/.test(t);
+		if (excludes) {
+			if (/\b(?:two-handed|2h)\b/.test(t) && hasProp("2H")) return false;
+			if (/\bheavy\b/.test(t) && hasProp("H")) return false;
+			if (/\bspecial\b/.test(t) && hasProp("S")) return false;
+		}
+		return true;
 	}
 	// #endregion
 

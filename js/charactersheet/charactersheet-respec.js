@@ -2535,7 +2535,7 @@ class CharacterSheetRespec {
 		}
 
 		// Calculate what will be removed
-		const featuresToRemove = this._getSubclassFeatures(currentSubclass);
+		const featuresToRemove = this._getSubclassFeatures(currentSubclass, history.class);
 		const willRemoveCount = featuresToRemove.length;
 
 		// Show cascade warning
@@ -2645,6 +2645,11 @@ class CharacterSheetRespec {
 			this._page.renderCharacter();
 			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Changed subclass to ${selectedSubclass.name}.`});
+
+			// Surface any prose choices the new subclass queued (e.g. the 2024
+			// Bladesinger's skill pick) AFTER the respec modals have closed, so the
+			// picker doesn't stack on top of the respec UI. Self-saves/re-renders.
+			await this._page.processPendingFeatureChoices?.();
 		});
 
 		btnRow.append(cancelBtn, applyBtn);
@@ -2658,9 +2663,17 @@ class CharacterSheetRespec {
 	 * @param {object} subclass - The subclass {name, shortName, source}
 	 * @returns {Array} Array of features to remove
 	 */
-	_getSubclassFeatures (subclass) {
+	_getSubclassFeatures (subclass, classContext = null) {
 		const features = this._state.getFeatures();
 		return features.filter(f => {
+			// When a class context is supplied, only consider features belonging to that
+			// class so a subclass swap on one class of a multiclass character never
+			// removes another class's features (subclass shortNames can collide).
+			// Scope by className only — a feature's classSource (e.g. "PHB") legitimately
+			// differs from the class entry's source (e.g. "XPHB"), so it is not a safe
+			// discriminator.
+			if (classContext?.name && f.className && f.className !== classContext.name) return false;
+
 			// Check if feature is explicitly a subclass feature
 			if (f.isSubclassFeature) {
 				// Match by subclass name or short name
@@ -2689,8 +2702,8 @@ class CharacterSheetRespec {
 		const classEntry = classes.find(c => c.name === history.class.name);
 		const classLevel = classEntry?.level || 1;
 
-		// Remove old subclass features using proper API
-		const featuresToRemove = this._getSubclassFeatures(oldSubclass);
+		// Remove old subclass features using proper API (scoped to the changed class)
+		const featuresToRemove = this._getSubclassFeatures(oldSubclass, history.class);
 		featuresToRemove.forEach(f => {
 			this._state.removeFeature(f.id);
 		});
@@ -2713,33 +2726,50 @@ class CharacterSheetRespec {
 			};
 		}
 
-		// Get new subclass features up to current level
-		const subclassFeatures = this._page.getSubclassFeatures?.() || [];
-		const newFeatures = subclassFeatures.filter(f => {
-			if (f.subclassShortName !== newSubclass.shortName) return false;
-			if (f.subclassSource !== newSubclass.source) return false;
-			if (f.className !== history.class.name) return false;
-			if (f.level > classLevel) return false;
+		// Acquire the NEW subclass's features the SAME way Level-Up does, so that
+		// (a) features whose level is encoded in a ref string resolve via
+		// getSubclassFeatureRefLevel, and (b) addFeature runs the full effect/choice
+		// pipeline (prose "either A/B" + "one of the following …" picks reach
+		// pendingFeatureChoices; proficiency/modifier grants are applied). Iterate every
+		// level up to the current class level and collect this subclass's features.
+		const allClassFeatures = this._page.getClassFeatures?.() || [];
+		const allSubclassFeatures = this._page.getSubclassFeatures?.() || [];
+		const classDataLike = {name: history.class.name, source: history.class.source};
+		const matchesNew = (f) => {
+			if (!f.isSubclassFeature) return false;
+			if (f.subclassShortName && newSubclass.shortName && f.subclassShortName !== newSubclass.shortName) return false;
+			if (f.subclassSource && newSubclass.source && f.subclassSource !== newSubclass.source) return false;
 			return true;
-		});
-
-		// Add new subclass features
-		newFeatures.forEach(f => {
-			this._state.addFeature({
-				name: f.name,
-				source: f.source,
-				level: f.level,
-				className: f.className,
-				classSource: f.classSource,
-				subclassName: newSubclass.name,
-				subclassShortName: newSubclass.shortName,
-				subclassSource: newSubclass.source,
-				featureType: "Subclass",
-				entries: f.entries,
-				description: f.entries ? Renderer.get().render({entries: f.entries}) : "",
-				isSubclassFeature: true,
+		};
+		const seen = new Set();
+		for (let lvl = 1; lvl <= classLevel; lvl++) {
+			const levelFeatures = CharacterSheetClassUtils.getLevelFeatures(
+				classDataLike,
+				lvl,
+				newSubclass,
+				allClassFeatures,
+				allSubclassFeatures,
+			);
+			levelFeatures.filter(matchesNew).forEach(f => {
+				const key = `${(f.name || "").toLowerCase()}|${f.level}`;
+				if (seen.has(key)) return;
+				seen.add(key);
+				this._state.addFeature({
+					name: f.name,
+					source: f.source,
+					level: f.level,
+					className: f.className,
+					classSource: f.classSource,
+					subclassName: newSubclass.name,
+					subclassShortName: newSubclass.shortName,
+					subclassSource: newSubclass.source,
+					featureType: "Subclass",
+					entries: f.entries,
+					description: f.entries ? Renderer.get().render({entries: f.entries}) : "",
+					isSubclassFeature: true,
+				});
 			});
-		});
+		}
 
 		// Update all level history entries that had the old subclass
 		const levelHistory = this._state.getLevelHistory();
