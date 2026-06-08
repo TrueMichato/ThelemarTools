@@ -114,8 +114,27 @@ All 8 XPHB properties tracked: Cleave, Graze, Nick, Push, Sap, Slow, Topple, Vex
     prepared: false,       // For prepared casters
     concentration: false,  // MUST be boolean (migrated on load)
     ritual: false,         // MUST be boolean
+    sourceClass: "Wizard",      // attribution — which class's list this is from
+    sourceSubclass: null,       // e.g. "Gambler" for subclass casters
+    sourceFeature: "Wizard Spellbook", // "Spells Known"|"Cantrips Known"|"Prepared Spells"|"Wizard Spellbook" = player-chosen
 }
 ```
+
+**Per-class tracking (multiclass).** Counts, save DC, and spell attack are computed
+**per spellcasting class** via `getSpellcastingClassBreakdown()` — never collapsed
+to one aggregate. Each spell/cantrip is attributed to a class card by matching its
+`sourceClass`/`sourceSubclass` against the card's lowercased `matchKeys` (class
+name, subclass name, plus the `"gambler"` alias); unmatched spells go to an
+"Other / Unattributed" bucket (`getUnattributedSpellCounts()`). Player-chosen
+(`isPlayerChosenSpell` — `sourceFeature ∈ {Spells Known, Cantrips Known, Prepared
+Spells, Spells Prepared, Wizard Spellbook}`) vs feature-granted is split so granted
+spells show as `+N granted` and don't count against the cap. Each class's DC/attack
+uses its own ability via `getSpellcastingAbilityForClass` /
+`getSpellSaveDcForAbility` / `getSpellAttackBonusForAbility`; cast-time routing uses
+`getSpellcastingAbilityForSpell(spell)`. The Spells tab shows one card per class
+(`#charsheet-spellcasting-stats`) with **no** known/prepared labels or 2014/2024
+badges (mechanic kept backend-only for enforcement). See
+`docs/charactersheet/07-spellcasting.md` → "Per-Class Spell Tracking (Multiclass)".
 
 ### Innate Spells
 ```javascript

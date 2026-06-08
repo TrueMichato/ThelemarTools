@@ -246,8 +246,8 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 	// made it look like cantrips "weren't being added".
 
 	it("returns null/null for missing spell or info", () => {
-		expect(C.pickAddedSpellAttribution({spell: null, info: {}})).toEqual({sourceFeature: null, sourceClass: null});
-		expect(C.pickAddedSpellAttribution({spell: {}, info: null})).toEqual({sourceFeature: null, sourceClass: null});
+		expect(C.pickAddedSpellAttribution({spell: null, info: {}})).toMatchObject({sourceFeature: null, sourceClass: null});
+		expect(C.pickAddedSpellAttribution({spell: {}, info: null})).toMatchObject({sourceFeature: null, sourceClass: null});
 	});
 
 	it("wizard cantrip → 'Cantrips Known' / 'Wizard'", () => {
@@ -256,7 +256,7 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 			info: {type: "prepared", className: "Wizard", byClass: [{className: "Wizard", type: "prepared"}]},
 			classes: [{name: "Wizard"}],
 		});
-		expect(r).toEqual({sourceFeature: "Cantrips Known", sourceClass: "Wizard"});
+		expect(r).toMatchObject({sourceFeature: "Cantrips Known", sourceClass: "Wizard"});
 	});
 
 	it("wizard leveled spell → 'Wizard Spellbook' / 'Wizard'", () => {
@@ -265,7 +265,7 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 			info: {type: "prepared", className: "Wizard", byClass: [{className: "Wizard", type: "prepared"}]},
 			classes: [{name: "Wizard"}],
 		});
-		expect(r).toEqual({sourceFeature: "Wizard Spellbook", sourceClass: "Wizard"});
+		expect(r).toMatchObject({sourceFeature: "Wizard Spellbook", sourceClass: "Wizard"});
 	});
 
 	it("sorcerer cantrip → 'Cantrips Known' / 'Sorcerer'", () => {
@@ -274,7 +274,7 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 			info: {type: "known", className: "Sorcerer", byClass: [{className: "Sorcerer", type: "known"}]},
 			classes: [{name: "Sorcerer"}],
 		});
-		expect(r).toEqual({sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
+		expect(r).toMatchObject({sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
 	});
 
 	it("sorcerer leveled spell → 'Spells Known' / 'Sorcerer'", () => {
@@ -283,7 +283,7 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 			info: {type: "known", className: "Sorcerer", byClass: [{className: "Sorcerer", type: "known"}]},
 			classes: [{name: "Sorcerer"}],
 		});
-		expect(r).toEqual({sourceFeature: "Spells Known", sourceClass: "Sorcerer"});
+		expect(r).toMatchObject({sourceFeature: "Spells Known", sourceClass: "Sorcerer"});
 	});
 
 	it("cleric leveled spell → 'Prepared Spells' / 'Cleric'", () => {
@@ -292,7 +292,7 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 			info: {type: "prepared", className: "Cleric", byClass: [{className: "Cleric", type: "prepared"}]},
 			classes: [{name: "Cleric"}],
 		});
-		expect(r).toEqual({sourceFeature: "Prepared Spells", sourceClass: "Cleric"});
+		expect(r).toMatchObject({sourceFeature: "Prepared Spells", sourceClass: "Cleric"});
 	});
 
 	it("multiclass wizard/cleric leveled spell → prefers wizard spellbook", () => {
@@ -305,7 +305,7 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 			},
 			classes: [{name: "Cleric"}, {name: "Wizard"}],
 		});
-		expect(r).toEqual({sourceFeature: "Wizard Spellbook", sourceClass: "Wizard"});
+		expect(r).toMatchObject({sourceFeature: "Wizard Spellbook", sourceClass: "Wizard"});
 	});
 
 	it("multiclass cleric/sorcerer cantrip → first byClass wins (Cleric here)", () => {
@@ -318,7 +318,7 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 			},
 			classes: [{name: "Cleric"}, {name: "Sorcerer"}],
 		});
-		expect(r).toEqual({sourceFeature: "Cantrips Known", sourceClass: "Cleric"});
+		expect(r).toMatchObject({sourceFeature: "Cantrips Known", sourceClass: "Cleric"});
 	});
 
 	it("falls back to info.className / classes[0] when byClass is missing", () => {
@@ -327,7 +327,7 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 			info: {type: "known", className: "Sorcerer"},
 			classes: [{name: "Sorcerer"}],
 		});
-		expect(r).toEqual({sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
+		expect(r).toMatchObject({sourceFeature: "Cantrips Known", sourceClass: "Sorcerer"});
 	});
 
 	it("stamped attribution is recognised by the canonical counter", () => {
@@ -340,5 +340,70 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 		const stamped = {name: "Fire Bolt", level: 0, sourceFeature, sourceClass};
 		expect(C.isPlayerChosenSpell(stamped)).toBe(true);
 		expect(C.countPlayerChosenCantrips([stamped]).count).toBe(1);
+	});
+
+	describe("targetClass is authoritative (per-class card / multiclass prompt)", () => {
+		it("Druid prepared leveled spell → 'Prepared Spells' / 'Druid'", () => {
+			const r = C.pickAddedSpellAttribution({
+				spell: {name: "Entangle", level: 1},
+				info: {type: "prepared", byClass: [{className: "Druid", type: "prepared"}]},
+				classes: [{name: "Druid"}, {name: "Ranger"}],
+				targetClass: {name: "Druid", source: "XPHB"},
+			});
+			expect(r).toMatchObject({sourceFeature: "Prepared Spells", sourceClass: "Druid", sourceSubclass: null});
+		});
+
+		it("Ranger known leveled spell → 'Spells Known' / 'Ranger' even when Wizard is present", () => {
+			// Without targetClass the heuristic would prefer the Wizard spellbook;
+			// the explicit target overrides that.
+			const r = C.pickAddedSpellAttribution({
+				spell: {name: "Hunter's Mark", level: 1},
+				info: {type: "prepared", byClass: [{className: "Ranger", type: "known"}, {className: "Wizard", type: "prepared"}]},
+				classes: [{name: "Ranger"}, {name: "Wizard"}],
+				targetClass: {name: "Ranger", source: "XPHB"},
+			});
+			expect(r).toMatchObject({sourceFeature: "Spells Known", sourceClass: "Ranger", sourceSubclass: null});
+		});
+
+		it("explicit Wizard target leveled spell → 'Wizard Spellbook' / 'Wizard'", () => {
+			const r = C.pickAddedSpellAttribution({
+				spell: {name: "Shield", level: 1},
+				info: {type: "prepared", byClass: [{className: "Wizard", type: "prepared"}]},
+				classes: [{name: "Wizard"}],
+				targetClass: {name: "Wizard", source: "PHB"},
+			});
+			expect(r).toMatchObject({sourceFeature: "Wizard Spellbook", sourceClass: "Wizard", sourceSubclass: null});
+		});
+
+		it("Gambler-subclass target stamps sourceClass + sourceSubclass = 'Gambler'", () => {
+			const r = C.pickAddedSpellAttribution({
+				spell: {name: "Bane", level: 1},
+				info: {type: "prepared", byClass: [{className: "Rogue", type: "prepared"}]},
+				classes: [{name: "Rogue", subclass: {name: "Gambler"}}],
+				targetClass: {name: "Rogue", source: "TGTT", subclass: {name: "Gambler"}},
+			});
+			expect(r).toMatchObject({sourceClass: "Gambler", sourceSubclass: "Gambler"});
+		});
+
+		it("cantrip with targetClass → 'Cantrips Known' for that class", () => {
+			const r = C.pickAddedSpellAttribution({
+				spell: {name: "Druidcraft", level: 0},
+				info: {type: "prepared", byClass: [{className: "Druid", type: "prepared"}]},
+				classes: [{name: "Druid"}, {name: "Wizard"}],
+				targetClass: {name: "Druid", source: "XPHB"},
+			});
+			expect(r).toMatchObject({sourceFeature: "Cantrips Known", sourceClass: "Druid"});
+		});
+	});
+
+	it("Wizard leveled spell on a Wizard/Gambler character is NOT mis-stamped as Gambler", () => {
+		// Latent bug guard: the conditional-Gambler fallback must only fire when the
+		// resolved class entry actually IS the Gambler subclass.
+		const r = C.pickAddedSpellAttribution({
+			spell: {name: "Magic Missile", level: 1},
+			info: {type: "prepared", byClass: [{className: "Wizard", type: "prepared"}, {className: "Rogue", type: "prepared"}]},
+			classes: [{name: "Wizard"}, {name: "Rogue", subclass: {name: "Gambler"}}],
+		});
+		expect(r).toMatchObject({sourceFeature: "Wizard Spellbook", sourceClass: "Wizard", sourceSubclass: null});
 	});
 });
