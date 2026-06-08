@@ -2894,11 +2894,16 @@ class CharacterSheetClassUtils {
 	 */
 	static SUBCLASS_TRADITION_CHOICE_POOLS = {
 		// --- Fighter subclasses (TGTT) ---
-		"Arcane Archer": {pickCount: 2, codes: ["BZ", "RE", "UW", "UH"]},
-		"Champion": {pickCount: 2, codes: ["AM", "GH", "TI"]},
-		"Purple Dragon Knight (Banneret)": {pickCount: 2, codes: ["AM", "SK", "SS"]},
-		"Battle Master": {pickCount: 2, codes: null}, // unrestricted
+		// `replacesBase: true` → this subclass choice IS the Fighter's sole tradition
+		// flow; the base "Combat Methods" tradition picker is suppressed so the same
+		// pick isn't offered twice (see shouldSuppressBaseTraditionPicker).
+		"Arcane Archer": {pickCount: 2, codes: ["BZ", "RE", "UW", "UH"], replacesBase: true},
+		"Champion": {pickCount: 2, codes: ["AM", "GH", "TI"], replacesBase: true},
+		"Purple Dragon Knight (Banneret)": {pickCount: 2, codes: ["AM", "SK", "SS"], replacesBase: true},
+		"Battle Master": {pickCount: 2, codes: null, replacesBase: true}, // unrestricted
 		// --- Monk subclasses (TGTT) ---
+		// No `replacesBase`: these are ADDITIVE on top of the Monk's base tradition
+		// picks (pickCount 1 < base count 2), so the base picker stays.
 		"Open Hand": {pickCount: 1, codes: ["AM", "TI"]},
 		"Debilitation": {pickCount: 1, codes: ["AM", "TI"]},
 		"Kensei": {pickCount: 1, codes: null}, // unrestricted
@@ -2925,7 +2930,26 @@ class CharacterSheetClassUtils {
 			kind: entry.codes === null ? "unrestricted" : "restricted",
 			pickCount: entry.pickCount,
 			codes: entry.codes,
+			replacesBase: !!entry.replacesBase,
 		};
+	}
+
+	/**
+	 * Single resolver (used by QuickBuild + LevelUp) deciding whether the base
+	 * class combat-tradition picker should be SUPPRESSED in favour of the
+	 * subclass-choice picker. True only when the active subclass has a
+	 * tradition-choice pool flagged `replacesBase` (the Fighter subclasses,
+	 * whose 2-pick choice fully stands in for the base Fighter tradition pick).
+	 * Monk-style additive pools (no flag) return false so the base picker stays.
+	 * Centralising this keeps both progression modules from offering the same
+	 * tradition pick twice.
+	 * @param {*} subclass - Subclass entity (uses shortName, falls back to name).
+	 * @param {string} classSource - The classSource (must be TGTT to apply).
+	 * @returns {boolean}
+	 */
+	static shouldSuppressBaseTraditionPicker (/** @type {*} */ subclass, /** @type {*} */ classSource) {
+		const pool = CharacterSheetClassUtils.getSubclassTraditionChoicePool(subclass, classSource);
+		return !!(pool && pool.replacesBase);
 	}
 
 	/**
