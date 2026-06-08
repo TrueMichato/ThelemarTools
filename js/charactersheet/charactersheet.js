@@ -3458,6 +3458,65 @@ class CharacterSheetPage {
 				conditionImmunities.textContent = "—";
 			}
 		}
+
+		this._renderOverviewDefenses();
+	}
+
+	/**
+	 * Mirror the Combat-tab Defenses onto the Overview so combat-relevant defensive
+	 * info is visible at a glance there too (Overview ↔ Combat parity). Kept fully
+	 * decoupled from the Combat-tab renderer (`renderCombatDefenses`) — it owns its
+	 * own element ids and reads the same canonical `getEffectiveDefenses()` pipeline
+	 * (base + active states). The section is hidden when the character has no
+	 * resistances/immunities/vulnerabilities/condition-immunities, to keep the
+	 * Overview uncluttered for characters with no defenses.
+	 */
+	_renderOverviewDefenses () {
+		const section = document.getElementById("charsheet-overview-defenses-section");
+		if (!section) return;
+
+		const defenses = this._state.getEffectiveDefenses?.() || {};
+		const resistances = defenses.resistances || [];
+		const immunities = defenses.immunities || [];
+		const vulnerabilities = defenses.vulnerabilities || [];
+		const conditionImmunities = defenses.conditionImmunities || [];
+
+		const hasAny = resistances.length || immunities.length || vulnerabilities.length || conditionImmunities.length;
+		if (!hasAny) {
+			section.style.display = "none";
+			return;
+		}
+		section.style.display = "";
+
+		const formatType = (type) => {
+			const clean = String(type).replace(/^damage:/i, "").trim();
+			return clean.charAt(0).toUpperCase() + clean.slice(1);
+		};
+
+		const fill = (rowId, valueId, list, badgeClass) => {
+			const row = document.getElementById(rowId);
+			const valueEl = document.getElementById(valueId);
+			if (!valueEl) return;
+			if (!list.length) {
+				if (row) row.style.display = "none";
+				valueEl.textContent = "—";
+				return;
+			}
+			if (row) row.style.display = "";
+			valueEl.textContent = "";
+			list.forEach(entry => {
+				valueEl.appendChild(e_({
+					tag: "span",
+					clazz: `badge ${badgeClass} mr-1`,
+					txt: formatType(entry),
+				}));
+			});
+		};
+
+		fill("charsheet-overview-resistances-row", "charsheet-overview-resistances", resistances, "badge-success");
+		fill("charsheet-overview-immunities-row", "charsheet-overview-immunities", immunities, "badge-primary");
+		fill("charsheet-overview-vulnerabilities-row", "charsheet-overview-vulnerabilities", vulnerabilities, "badge-danger");
+		fill("charsheet-overview-condition-immunities-row", "charsheet-overview-condition-immunities", conditionImmunities, "badge-secondary");
 	}
 
 	_renderHitDice () {
@@ -5741,15 +5800,15 @@ class CharacterSheetPage {
 
 		const hasPrimalFocus = !!this._state.hasPrimalFocus?.();
 		const hasHuntersPrey = !!this._state.hasHuntersPrey?.();
-		if (!hasPrimalFocus && !hasHuntersPrey) {
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const reminders = CharacterSheetClassUtils.getRangerPassiveReminders?.(calcs) || [];
+		if (!hasPrimalFocus && !hasHuntersPrey && !reminders.length) {
 			section.style.display = "none";
 			container.innerHTML = "";
 			return;
 		}
 		section.style.display = "";
 		container.innerHTML = "";
-
-		const calcs = this._state.getFeatureCalculations?.() || {};
 
 		// ----- Primal Focus -----
 		if (hasPrimalFocus) {
@@ -5845,6 +5904,45 @@ class CharacterSheetPage {
 				</div>
 				<p class="ve-muted ve-small mb-0">${HUNTERS_PREY_EFFECT[currentOption] || ""}</p>
 				<p class="ve-muted ve-small mb-0"><em>Change your Hunter's Prey option on a short or long rest.</em></p>`;
+			container.appendChild(block);
+		}
+
+		// ----- Passive & situational feature reminders -----
+		// Surface always-on / situational Ranger features (Enduring Traveler,
+		// Tireless, Unrivaled Pioneer, Penetrating Senses, …) that otherwise only
+		// existed as Feature-tab cards, as a legible at-a-glance reminder list.
+		if (reminders.length) {
+			const block = document.createElement("div");
+			block.className = "charsheet__ranger-passives mt-2 pt-2";
+			block.style.borderTop = "1px dashed var(--rgb-border, #dee2e6)";
+
+			const heading = document.createElement("div");
+			heading.className = "ve-flex-v-center gap-2 mb-1";
+			heading.innerHTML = `<strong>Passive &amp; Situational</strong><span class="badge badge-secondary" title="Always-on or situational features — reminders only">${reminders.length}</span>`;
+			block.appendChild(heading);
+
+			reminders.forEach(rem => {
+				const row = document.createElement("div");
+				row.className = "charsheet__ranger-ability-row";
+				const srcText = rem.source ? `${rem.source}${rem.level ? ` · Lvl ${rem.level}` : ""}` : "";
+				row.title = srcText ? `${rem.name} (${srcText})` : rem.name;
+
+				const name = document.createElement("span");
+				name.className = "charsheet__ranger-ability-name";
+				name.textContent = `${rem.icon ? `${rem.icon} ` : ""}${rem.name}`;
+
+				const badge = document.createElement("span");
+				badge.className = "charsheet__ranger-ability-badge";
+				badge.innerHTML = `<span class="badge badge-outline-secondary" title="Always-on / situational">✦ Passive</span>`;
+
+				const note = document.createElement("span");
+				note.className = "charsheet__ranger-ability-note";
+				note.textContent = rem.note;
+
+				row.append(name, badge, note);
+				block.appendChild(row);
+			});
+
 			container.appendChild(block);
 		}
 	}
