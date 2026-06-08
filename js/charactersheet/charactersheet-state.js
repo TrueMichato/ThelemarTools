@@ -3610,6 +3610,8 @@ class CharacterSheetState {
 				abilityChecks: {}, // {str: 1, dex: 2, ...} - raw ability checks
 				abilityScores: {}, // {str: 2, dex: 1, ...} - ability score bonuses (additive)
 				abilityScoreStatic: {}, // {str: 19, ...} - "set score to X" (takes highest)
+				abilityScoreMaxIncrease: {}, // {str: 4, ...} - "raise the maximum by N" (additive)
+				abilityScoreMaxSet: {}, // {str: 24, ...} - "set the maximum to N" (takes highest)
 				hp: 0, // Hit point maximum bonus
 				hpPerLevel: 0, // HP bonus per character level
 				proficiencyBonus: 0, // Proficiency bonus modifier
@@ -6032,7 +6034,9 @@ class CharacterSheetState {
 	}
 
 	getAbilityScore (ability) {
-		// Wild Shape: replace physical stats (STR/DEX/CON) with beast's scores
+		// Wild Shape: replace physical stats (STR/DEX/CON) with beast's scores.
+		// Beast scores are not subject to the character's ability-score maximum — they are the
+		// creature's own stats — so this intentionally returns before any cap enforcement.
 		const wildShapeState = this._getActiveWildShapeState();
 		if (wildShapeState?.beastData?.abilities) {
 			const physicalStats = ["str", "dex", "con"];
@@ -6047,9 +6051,15 @@ class CharacterSheetState {
 		const directBonus = this._data.directAbilityBonuses?.[ability] || 0;
 		let computed = base + racialBonus + featureBonus + directBonus;
 
-		// Primal Champion (Barbarian 20): +4 STR and CON, max 24 for the natural score
+		const enforceCap = !!this._data.settings?.enforceAbilityScoreCap;
+
+		// Primal Champion (Barbarian 20): +4 STR and CON.
+		// When the cap is enforced, apply the raw +4 and let getAbilityScoreMax() handle the
+		// ceiling (≥24 for Primal Champion, higher if a feature/item further raises the cap).
+		// When the cap is NOT enforced there is no later clamp, so preserve the legacy max-24
+		// behavior of the natural Primal Champion score.
 		if ((ability === "str" || ability === "con") && this._hasPrimalChampion()) {
-			computed = Math.min(computed + 4, 24);
+			computed = enforceCap ? computed + 4 : Math.min(computed + 4, 24);
 		}
 
 		// Apply item ability bonuses (e.g., Belt of Dwarvenkind +2 CON)
@@ -6069,16 +6079,11 @@ class CharacterSheetState {
 			computed = customStatic;
 		}
 
-		// Enforce ability score cap when setting is enabled
-		if (this._data.settings?.enforceAbilityScoreCap) {
-			const defaultMax = 20;
-			let perAbilityMax = this._data.abilityScoreMaximums?.[ability];
-			// Primal Champion auto-raises STR/CON cap to 24
-			if (perAbilityMax == null && (ability === "str" || ability === "con") && this._hasPrimalChampion()) {
-				perAbilityMax = 24;
-			}
-			const effectiveMax = perAbilityMax ?? defaultMax;
-			computed = Math.min(computed, effectiveMax);
+		// Enforce ability score cap when the setting is enabled. The effective maximum is
+		// data-driven via getAbilityScoreMax() (default 20, raised by abilityMax effects,
+		// manual overrides, and Primal Champion; hard ceiling 30).
+		if (enforceCap) {
+			computed = Math.min(computed, this.getAbilityScoreMax(ability));
 		}
 
 		return computed;
@@ -6170,15 +6175,56 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get the effective maximum for an ability score.
-	 * Returns the per-ability override if set, otherwise the default of 20.
-	 * Returns null if ability score cap is not enforced.
+	 * Get the effective maximum for an ability score, honoring the enforcement setting.
+	 * Returns null when the ability score cap is not enforced (legacy contract used by
+	 * increaseAbility and existing callers). When enforced, delegates to getAbilityScoreMax().
 	 * @param {string} ability - The ability name
 	 * @returns {number|null}
 	 */
 	getAbilityScoreMaximum (ability) {
 		if (!this._data.settings?.enforceAbilityScoreCap) return null;
-		return this._data.abilityScoreMaximums?.[ability] ?? 20;
+		return this.getAbilityScoreMax(ability);
+	}
+
+	/**
+	 * Get the effective maximum cap for an ability score, independent of the enforcement
+	 * setting. This is the generic, data-driven cap used everywhere a maximum is needed.
+	 *
+	 * Sources, combined as "highest set wins, increases add on top, hard ceiling 30":
+	 *   - Default maximum of 20.
+	 *   - Primal Champion (Barbarian 20): raises STR/CON to at least 24.
+	 *   - Manual per-ability override (setAbilityScoreMaximum) — treated as a "set" candidate.
+	 *   - abilityMax effects with mode "set" (from custom abilities, features, items).
+	 *   - abilityMax effects with mode "increase" — summed and added on top of the resolved set.
+	 *
+	 * This is a raise-only mechanism: "set" values below the default 20 floor have no effect.
+	 * The result never exceeds the hard ceiling of 30.
+	 * @param {string} ability - The ability name (str, dex, con, int, wis, cha)
+	 * @returns {number} The effective maximum (20–30)
+	 */
+	getAbilityScoreMax (ability) {
+		const DEFAULT_MAX = 20;
+		const HARD_CEILING = 30;
+
+		let setCandidate = DEFAULT_MAX;
+
+		// Primal Champion auto-raises STR/CON cap to 24
+		if ((ability === "str" || ability === "con") && this._hasPrimalChampion()) {
+			setCandidate = Math.max(setCandidate, 24);
+		}
+
+		// Manual imperative override (setAbilityScoreMaximum)
+		const manual = this._data.abilityScoreMaximums?.[ability];
+		if (manual != null) setCandidate = Math.max(setCandidate, manual);
+
+		// Effect-driven "set" (abilityMax:<abl> mode:set) — highest wins
+		const effectSet = this._data.customModifiers?.abilityScoreMaxSet?.[ability];
+		if (effectSet != null) setCandidate = Math.max(setCandidate, effectSet);
+
+		// Effect-driven "increase" (abilityMax:<abl> mode:increase) — additive on top
+		const effectIncrease = this._data.customModifiers?.abilityScoreMaxIncrease?.[ability] || 0;
+
+		return Math.min(setCandidate + effectIncrease, HARD_CEILING);
 	}
 	// #endregion
 
@@ -19833,6 +19879,26 @@ class CharacterSheetState {
 				return `${effect.source}: +${effect.value} to ${effect.ability.toUpperCase()} saves${effect.conditional ? ` (${effect.conditional})` : ""}`;
 			}
 
+			// ===== ABILITY SCORE MAXIMUM =====
+			case "abilityMax": {
+				// Raise or set an ability score's maximum (e.g., Primal Champion, 2024 Epic
+				// Boons, magic items). Flows through the generic named-modifier pipeline so the
+				// cap is aggregated by getAbilityScoreMax() and reverts cleanly on teardown.
+				const abl = effect.ability;
+				const mode = effect.mode === "set" ? "set" : "increase";
+				this._addClassFeatureModifier({
+					name: effect.source,
+					type: `abilityMax:${abl}`,
+					mode,
+					value: effect.value,
+					note: `From ${effect.source}`,
+					enabled: true,
+				});
+				return mode === "set"
+					? `${effect.source}: sets ${abl.toUpperCase()} maximum to ${effect.value}`
+					: `${effect.source}: raises ${abl.toUpperCase()} maximum by ${effect.value}`;
+			}
+
 			// ===== SKILLS =====
 			case "skillProficiency": {
 				const level = effect.level || 1;
@@ -29233,6 +29299,8 @@ class CharacterSheetState {
 					sourceFeatureId: ability.id,
 					sourceType: "customAbility",
 					note: ability.description ? `From custom ability: ${ability.name}` : "",
+					// Set/increase mode for ability:* and abilityMax:* effects
+					mode: effect.mode,
 					// Pass through any special flags
 					advantage: effect.advantage,
 					disadvantage: effect.disadvantage,
@@ -30267,6 +30335,8 @@ class CharacterSheetState {
 		if (modifier.perClassLevel) newModifier.perClassLevel = modifier.perClassLevel;
 		if (modifier.multiplier) newModifier.multiplier = modifier.multiplier;
 		if (modifier.abilityMod) newModifier.abilityMod = modifier.abilityMod;
+		// Set/increase mode for ability:* and abilityMax:* modifiers
+		if (modifier.mode) newModifier.mode = modifier.mode;
 		if (hasProfBonus) newModifier.proficiencyBonus = true;
 		if (modifier.halfProficiency) newModifier.halfProficiency = true;
 		if (modifier.bonusDie) newModifier.bonusDie = modifier.bonusDie;
@@ -30427,6 +30497,9 @@ class CharacterSheetState {
 		cm.skills = {};
 		cm.abilityChecks = {};
 		cm.abilityScores = {};
+		cm.abilityScoreStatic = {};
+		cm.abilityScoreMaxIncrease = {};
+		cm.abilityScoreMaxSet = {};
 		cm.hp = 0;
 		cm.hpPerLevel = 0;
 		cm.proficiencyBonus = 0;
@@ -30544,6 +30617,17 @@ class CharacterSheetState {
 						} else {
 							// Default additive mode
 							cm.abilityScores[abl] = (cm.abilityScores[abl] || 0) + value;
+						}
+					} else if (mod.type.startsWith("abilityMax:")) {
+						// Handle abilityMax:str, abilityMax:con, etc. — raise/set an ability's maximum.
+						// Aggregated here; getAbilityScoreMax() resolves the final cap.
+						const abl = mod.type.split(":")[1];
+						if (mod.mode === "set") {
+							// "Set the maximum to X" — highest wins
+							cm.abilityScoreMaxSet[abl] = Math.max(cm.abilityScoreMaxSet[abl] || 0, value);
+						} else {
+							// "Raise the maximum by N" — additive
+							cm.abilityScoreMaxIncrease[abl] = (cm.abilityScoreMaxIncrease[abl] || 0) + value;
 						}
 					} else if (mod.type.startsWith("sense:")) {
 						// Handle sense:darkvision, sense:blindsight, etc.

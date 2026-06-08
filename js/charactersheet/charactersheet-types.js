@@ -462,7 +462,7 @@ void globalThis;
  * @property {LevelHistoryEntry[]} levelHistory
  * @property {Record<AbilityKey, number>} abilities
  * @property {Record<AbilityKey, number>} abilityBonuses
- * @property {Partial<Record<AbilityKey, number>>} abilityScoreMaximums
+ * @property {Partial<Record<AbilityKey, number>>} abilityScoreMaximums - Manual per-ability max overrides; effect-driven raises live in customModifiers.abilityScoreMaxIncrease/Set
  * @property {{current: number, max: number, temp: number}} hp
  * @property {Object<string, SpellSlotBlock>} hitDice
  * @property {{successes: number, failures: number}} deathSaves
