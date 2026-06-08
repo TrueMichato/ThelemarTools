@@ -4661,6 +4661,7 @@
 
 .charsheet__deathsaves {
 	margin: var(--cs-space-sm, 0.5rem) 0;
+	margin-left: -1.5rem;
 }
 
 .charsheet__deathsaves-row {
