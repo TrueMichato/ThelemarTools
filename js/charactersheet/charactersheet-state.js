@@ -33794,11 +33794,6 @@ class CharacterSheetState {
 
 		// === Race feature combat actions ===
 		"shapechanger": "combat",
-		// Aasimar Healing Hands: a single Magic-action heal (once per long rest),
-		// tracked via curated uses ({max:1, recharge:"long"}). It is an action you
-		// take, not a persistent toggle, so route it as a combat action instead of
-		// letting the pattern detector surface it in the Active States panel.
-		"healing hands": "combat",
 
 		// === Reactions wrongly detected as activatable toggle states ===
 		"deflect attacks": "reaction",
