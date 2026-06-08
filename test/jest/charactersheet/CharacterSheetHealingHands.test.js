@@ -10,8 +10,12 @@
  * FIX (species, using existing mechanisms):
  *   - curated uses {max: 1, recharge: "long"} via `_getCuratedFeatureUses` (wins
  *     over the generic parser), so it's a correctly-sized single-use resource.
- *   - `"healing hands": "combat"` in FEATURE_CLASSIFICATION_OVERRIDES routes it as
- *     an action, NOT a toggle (precedent: race feature "shapechanger": "combat").
+ *   - classified as a limited-use resource (interactionMode "limited", isToggle
+ *     false): with curated uses present, the active-states classifier routes it
+ *     through the LIMITED-USE FEATURE FALLBACK so it surfaces as a use-tracked
+ *     resource (spend affordance + recharge), NOT a persistent toggle. (Round-5
+ *     integration: this supersedes the earlier "combat" override, deferring to the
+ *     foundation session's richer limited-use taxonomy.)
  */
 
 import "./setup.js";
@@ -55,16 +59,19 @@ describe("Healing Hands is a single-use action, not a toggle", () => {
 		}
 	});
 
-	test("is classified as a combat action, not a toggle active state", () => {
+	test("is classified as a limited-use resource (not a toggle), with use tracking", () => {
 		const result = CharacterSheetState.detectActivatableFeature({
 			name: "Healing Hands",
 			source: "XPHB",
 			description: HEALING_HANDS_DESC,
+			uses: {current: 1, max: 1, recharge: "long"},
 		});
 		expect(result).toBeTruthy();
 		expect(result.isToggle).toBe(false);
 		expect(result.isInstant).toBe(true);
-		expect(result.interactionMode).toBe("combat");
+		expect(result.interactionMode).toBe("limited");
+		expect(result.resourceName).toBe("Healing Hands");
+		expect(result.resourceCost).toBe(1);
 	});
 
 	test("does not appear among the toggleable active-state features", () => {
