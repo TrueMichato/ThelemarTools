@@ -596,6 +596,17 @@ class CharacterSheetCustomAbilities {
 				],
 			},
 			{
+				group: "📈 Ability Maximums",
+				options: [
+					{value: "abilityMax:str", label: "Strength Maximum"},
+					{value: "abilityMax:dex", label: "Dexterity Maximum"},
+					{value: "abilityMax:con", label: "Constitution Maximum"},
+					{value: "abilityMax:int", label: "Intelligence Maximum"},
+					{value: "abilityMax:wis", label: "Wisdom Maximum"},
+					{value: "abilityMax:cha", label: "Charisma Maximum"},
+				],
+			},
+			{
 				group: "🌙 Senses",
 				options: [
 					{value: "sense:darkvision", label: "Darkvision"},
@@ -1428,7 +1439,7 @@ class CharacterSheetCustomAbilities {
 									</ul>
 
 									<h5>Effect Types</h5>
-									<p class="ve-small ve-muted">ac, initiative, attack, attack:melee, attack:ranged, attack:spell, damage, damage:melee, damage:ranged, damage:spell, critRange (set absolute, e.g. 19), critRange:expand (expand by amount), tempHp (static amount), tempHp:dice (roll dice like "1d4+4"), speed, speed:fly, speed:swim, speed:climb, spellDc, spellAttack, save:all, save:str/dex/con/int/wis/cha, check:all, check:str/dex/con/int/wis/cha, skill:all, skill:[skillname], passive:[skillname], hp:max, ability:str/dex/con/int/wis/cha, sense:darkvision/blindsight/tremorsense/truesight, resistance:[damage type], proficiencyBonus, carryCapacity, deathSave</p>
+									<p class="ve-small ve-muted">ac, initiative, attack, attack:melee, attack:ranged, attack:spell, damage, damage:melee, damage:ranged, damage:spell, critRange (set absolute, e.g. 19), critRange:expand (expand by amount), tempHp (static amount), tempHp:dice (roll dice like "1d4+4"), speed, speed:fly, speed:swim, speed:climb, spellDc, spellAttack, save:all, save:str/dex/con/int/wis/cha, check:all, check:str/dex/con/int/wis/cha, skill:all, skill:[skillname], passive:[skillname], hp:max, ability:str/dex/con/int/wis/cha, abilityMax:str/dex/con/int/wis/cha (raise/set an ability's maximum; use Set To for an absolute cap up to 30), sense:darkvision/blindsight/tremorsense/truesight, resistance:[damage type], proficiencyBonus, carryCapacity, deathSave</p>
 
 									<h5>Example</h5>
 									<pre>{
@@ -1768,7 +1779,8 @@ class CharacterSheetCustomAbilities {
 			}
 
 			effects.forEach((effect, idx) => {
-				const isAbilityType = effect.type?.startsWith("ability:");
+				const isAbilityMaxType = effect.type?.startsWith("abilityMax:");
+				const isAbilityType = effect.type?.startsWith("ability:") || isAbilityMaxType;
 				const row = document.createElement("div");
 				row.className = "custom-abilities__effect-row";
 				row.innerHTML = `
@@ -1778,7 +1790,7 @@ class CharacterSheetCustomAbilities {
 							<option value="" ${!effect.mode ? "selected" : ""}>Add</option>
 							<option value="set" ${effect.mode === "set" ? "selected" : ""}>Set To</option>
 						</select>
-						<input type="number" class="ve-form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? "19" : "±0"}" value="${effect.value || 0}" style="width: 70px;">
+						<input type="number" class="ve-form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? (isAbilityMaxType ? "24" : "19") : "±0"}" value="${effect.value || 0}" style="width: 70px;">
 						<select class="ve-form-control custom-abilities__effect-scaling" style="width: 145px;" title="Add a stat-based bonus">
 							<option value="">Fixed Only</option>
 							<optgroup label="Proficiency">
@@ -1846,7 +1858,7 @@ class CharacterSheetCustomAbilities {
 				typeEl.addEventListener("change", (/** @type {*} */ e) => {
 					effects[idx].type = e.target.value;
 					// Show/hide mode dropdown based on type
-					const isAbility = e.target.value.startsWith("ability:");
+					const isAbility = e.target.value.startsWith("ability:") || e.target.value.startsWith("abilityMax:");
 					modeEl.style.display = isAbility ? "" : "none";
 					if (!isAbility) {
 						delete effects[idx].mode;
