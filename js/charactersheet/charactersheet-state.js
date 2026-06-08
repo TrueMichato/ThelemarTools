@@ -3264,6 +3264,18 @@ class CharacterSheetState {
 			// }
 			levelHistory: [],
 
+			// Character base ("root of the tree"): origin choices that are NOT owned by any class level.
+			// Holds only the user-choice payloads (race/background entity objects stay canonical in
+			// _data.race/_data.subrace/_data.background). Populated by the Builder and by the load-time
+			// migration _migrateBaseChoices(). `v` is a version sentinel so _ensureCharacterBase() never
+			// re-synthesizes once it has been established.
+			characterBase: null, // {v: 1, raceUserChoices: {}, backgroundUserChoices: {}}
+
+			// Provenance for the chronological-first class's starting proficiencies (saves + starting
+			// armor/weapons). Lets respec reverse them and promote a new first class when the original
+			// first class is removed from a multiclass character. Mirrors _classFeatureSaveProficiencies.
+			_firstClassStartGrants: null, // {className, classSource, saves: [], armor: [], weapons: []}
+
 			// Ability scores (base values before racial bonuses)
 			abilities: {
 				str: 10,
@@ -3775,8 +3787,8 @@ class CharacterSheetState {
 		// Migrate legacy Lore Mastery–granted custom skills to the new lore-skill subtype
 		this._migrateLoreSkills();
 
-		// Migrate: backfill levelHistory with race/background data from state
-		this._migrateRaceBackgroundToHistory();
+		// Migrate: promote origin (race/background) choices out of the level-1 entry into the base node
+		this._migrateBaseChoices();
 
 		// Re-register custom ability effects after loading — run after migrations so effects reference up-to-date data
 		this._reapplyCustomAbilityEffects();
@@ -4288,33 +4300,40 @@ class CharacterSheetState {
 		}
 	}
 
-	_migrateRaceBackgroundToHistory () {
-		if (!this._data.levelHistory?.length) return;
-		const entry = this._data.levelHistory.find(h => h.level === 1);
-		if (!entry) return;
-		// Already has race data in history
-		if (entry.choices?.race) return;
+	/**
+	 * Promote origin choices out of the level-1 history entry into the dedicated character base node.
+	 *
+	 * Before this redesign, race/background + their user-choices were stored on the level-1 history
+	 * entry, conflating the character base with whichever class happened to be taken at total level 1.
+	 * That made it impossible to remove that first class's first level. This migration moves the origin
+	 * user-choices into `_data.characterBase` and STRIPS the base-only keys from the level-1 entry so the
+	 * entry becomes a pure class-level record that can be removed like any other.
+	 *
+	 * One-way and idempotent: once `characterBase.v` is set it is never re-derived (guarded by
+	 * `_ensureCharacterBase`). Race/background entity objects stay canonical in `_data.race`/`background`.
+	 */
+	_migrateBaseChoices () {
+		const lvl1 = Array.isArray(this._data.levelHistory)
+			? this._data.levelHistory.find(h => h.level === 1)
+			: null;
 
-		entry.choices = entry.choices || {};
-
-		if (this._data.race) {
-			entry.choices.race = {
-				name: this._data.race.name,
-				source: this._data.race.source,
-			};
-			if (this._data.subrace) {
-				entry.choices.race.subrace = {
-					name: this._data.subrace.name,
-					source: this._data.subrace.source,
-				};
+		// Capture origin user-choices into the base node (idempotent; reads the legacy level-1 entry).
+		this._ensureCharacterBase();
+		if (lvl1?.choices) {
+			const c = lvl1.choices;
+			// Adopt any legacy payloads that pre-date the base node (only when base is still empty so we
+			// never clobber a base populated by a newer save or by the Builder).
+			if (c.raceUserChoices && !Object.keys(this._data.characterBase.raceUserChoices).length) {
+				this._data.characterBase.raceUserChoices = MiscUtil.copyFast(c.raceUserChoices);
 			}
-		}
-
-		if (this._data.background) {
-			entry.choices.background = {
-				name: this._data.background.name,
-				source: this._data.background.source,
-			};
+			if (c.backgroundUserChoices && !Object.keys(this._data.characterBase.backgroundUserChoices).length) {
+				this._data.characterBase.backgroundUserChoices = MiscUtil.copyFast(c.backgroundUserChoices);
+			}
+			// Strip base-only keys from the level-1 class entry (single source of truth).
+			delete c.race;
+			delete c.raceUserChoices;
+			delete c.background;
+			delete c.backgroundUserChoices;
 		}
 	}
 
@@ -4799,10 +4818,11 @@ class CharacterSheetState {
 			return {ok: false, reason: `No recorded level history for ${name}; its levels cannot be safely removed.`};
 		}
 
-		// Origin guard: the very first character level holds race/background origin and cannot be peeled.
-		if (targetEntry.level <= 1) {
-			return {ok: false, reason: "Cannot remove the character's first level. Delete the character instead."};
-		}
+		// NOTE: there is intentionally no `targetEntry.level <= 1` guard here. The character base
+		// (race/background/origin choices) lives in `_data.characterBase` — separate from class levels —
+		// so a class branch can be peeled down to and INCLUDING its first level (total level 1) without
+		// destroying the base or the other class. The only hard floor is the character's single remaining
+		// level, enforced by the `totalLevel <= 1` guard above.
 
 		const recordedCount = this._data.levelHistory
 			.filter(h => h.class?.name === name && h.class?.source === source).length;
@@ -4881,6 +4901,23 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * The character's chronological-first ("primary") class — the class of the lowest total-level history
+	 * entry. This is the class whose STARTING saving-throw + armor/weapon proficiencies the character has
+	 * (5e: only the first class grants starting saves). Used by Respec to detect when removing a class
+	 * vacates the first slot so a new primary can be promoted.
+	 * @returns {{name: string, source: string}|null}
+	 */
+	getChronologicalFirstClass () {
+		if (!Array.isArray(this._data.levelHistory) || !this._data.levelHistory.length) return null;
+		let lowest = null;
+		for (const h of this._data.levelHistory) {
+			if (!h.class) continue;
+			if (lowest == null || h.level < lowest.level) lowest = h;
+		}
+		return lowest?.class ? {name: lowest.class.name, source: lowest.class.source} : null;
+	}
+
+	/**
 	 * Core teardown: remove the given level-history entry (which must represent its class's current
 	 * top class level), reverse every recorded choice, tear down a subclass when the class drops
 	 * below its subclass-selection level, decrement/remove the class, drop the history entry, then
@@ -4893,6 +4930,11 @@ class CharacterSheetState {
 		if (!targetEntry) {
 			return {success: false, reason: "No level history entry to remove."};
 		}
+
+		// Promote the character base out of the level-history BEFORE any entry is dropped. This guarantees
+		// race/background origin choices survive even when the entry being removed is the level-1 entry
+		// (the chronological-first class's first level). Idempotent + versioned, so a no-op once set.
+		this._ensureCharacterBase();
 
 		const className = targetEntry.class?.name;
 		const classSource = targetEntry.class?.source;
@@ -5048,6 +5090,18 @@ class CharacterSheetState {
 					sourceFeature: "Spells Known",
 				}, removed.prepared || false);
 			}
+		}
+
+		// 11c. Reverse multiclass-in starting proficiencies recorded when this class was multiclassed into
+		//      (partial armor/weapon profs granted by `_applyMulticlassProficiencies`). Only present on the
+		//      multiclass-in level of a secondary class; best-effort skip for older saves that never
+		//      recorded them. The chronological-first class's starting profs are handled separately via
+		//      `_firstClassStartGrants` / `applyFirstClassStartingProficiencies` (promotion path).
+		if (choices.multiclassProficiencies) {
+			const mcp = choices.multiclassProficiencies;
+			(mcp.armor || []).forEach(a => this.removeArmorProficiency(a));
+			(mcp.weapons || []).forEach(w => this.removeWeaponProficiency(w));
+			(mcp.tools || []).forEach(t => this.removeToolProficiency(t));
 		}
 
 		// 12. Decrement class level or remove class entirely
@@ -5589,6 +5643,86 @@ class CharacterSheetState {
 				class: h.class,
 				subclass: h.choices.subclass,
 			}));
+	}
+	// #endregion
+
+	// #region Character Base (origin node)
+	/**
+	 * The character base is the "root of the tree": race/background origin user-choices that are NOT
+	 * owned by any class level, so a class branch can be removed down to and including its first level
+	 * without destroying these. Race/background entity objects remain canonical in
+	 * _data.race/_data.subrace/_data.background; the base node only carries the user-choice payloads.
+	 * @returns {{v: number, raceUserChoices: object, backgroundUserChoices: object}}
+	 */
+	getCharacterBase () {
+		this._ensureCharacterBase();
+		return this._data.characterBase;
+	}
+
+	/**
+	 * Idempotent, versioned synthesiser for the character base node. When absent, it captures the origin
+	 * user-choices ONCE from the legacy level-1 history entry (older saves / directly-constructed test
+	 * states). It NEVER overwrites an existing base, so it is safe to call repeatedly and after level
+	 * removals (where the level-1 entry may belong to a different, promoted class).
+	 * @returns {{v: number, raceUserChoices: object, backgroundUserChoices: object}}
+	 */
+	_ensureCharacterBase () {
+		if (this._data.characterBase && this._data.characterBase.v) return this._data.characterBase;
+
+		const lvl1 = Array.isArray(this._data.levelHistory)
+			? this._data.levelHistory.find(h => h.level === 1)
+			: null;
+		const legacy = lvl1?.choices || {};
+
+		this._data.characterBase = {
+			v: 1,
+			raceUserChoices: legacy.raceUserChoices ? MiscUtil.copyFast(legacy.raceUserChoices) : {},
+			backgroundUserChoices: legacy.backgroundUserChoices ? MiscUtil.copyFast(legacy.backgroundUserChoices) : {},
+		};
+		return this._data.characterBase;
+	}
+
+	/**
+	 * Get the race origin user-choices from the base node, falling back to the legacy level-1 entry for
+	 * directly-constructed states that never ran the load migration.
+	 * @returns {object}
+	 */
+	getBaseRaceUserChoices () {
+		const base = this._data.characterBase;
+		if (base?.raceUserChoices && Object.keys(base.raceUserChoices).length) return base.raceUserChoices;
+		if (base?.raceUserChoices) return base.raceUserChoices;
+		const lvl1 = this.getLevelHistoryEntry(1);
+		return lvl1?.choices?.raceUserChoices || {};
+	}
+
+	/**
+	 * Get the background origin user-choices from the base node, falling back to the legacy level-1 entry.
+	 * @returns {object}
+	 */
+	getBaseBackgroundUserChoices () {
+		const base = this._data.characterBase;
+		if (base?.backgroundUserChoices && Object.keys(base.backgroundUserChoices).length) return base.backgroundUserChoices;
+		if (base?.backgroundUserChoices) return base.backgroundUserChoices;
+		const lvl1 = this.getLevelHistoryEntry(1);
+		return lvl1?.choices?.backgroundUserChoices || {};
+	}
+
+	/**
+	 * Set the race origin user-choices on the base node.
+	 * @param {object} userChoices
+	 */
+	setBaseRaceUserChoices (userChoices) {
+		this._ensureCharacterBase();
+		this._data.characterBase.raceUserChoices = userChoices ? MiscUtil.copyFast(userChoices) : {};
+	}
+
+	/**
+	 * Set the background origin user-choices on the base node.
+	 * @param {object} userChoices
+	 */
+	setBaseBackgroundUserChoices (userChoices) {
+		this._ensureCharacterBase();
+		this._data.characterBase.backgroundUserChoices = userChoices ? MiscUtil.copyFast(userChoices) : {};
 	}
 	// #endregion
 
@@ -6561,6 +6695,83 @@ class CharacterSheetState {
 	hasSaveProficiency (ability) {
 		return this._data.saveProficiencies.includes(ability);
 	}
+
+	// #region First-class starting proficiencies (provenance)
+	/**
+	 * Whether a saving-throw proficiency is independently granted by something OTHER than the
+	 * chronological-first class's starting grants — i.e. a class feature (Slippery Mind, etc.) tracked in
+	 * `_classFeatureSaveProficiencies`, or a feat/feature that registered a `proficiency:save:<abl>` named
+	 * modifier (e.g. Resilient). Used so promotion never strips a save the character still legitimately has.
+	 * @param {string} ability lower-case ability abbreviation (e.g. "con")
+	 * @returns {boolean}
+	 */
+	_isSaveGrantedByNonFirstClassSource (ability) {
+		if ((this._data._classFeatureSaveProficiencies || []).includes(ability)) return true;
+		const modType = `proficiency:save:${ability}`;
+		return (this._data.namedModifiers || []).some(m => m.enabled && (m.type === modType || m.type?.startsWith(`${modType}:`)));
+	}
+
+	/**
+	 * Establish the given class as the character's chronological-first ("primary") class for the purposes
+	 * of starting proficiencies: reverse the previously-tracked first-class starting grants (saves +
+	 * starting armor/weapons), then apply this class's. Tracked in `_data._firstClassStartGrants` so the
+	 * operation is idempotent and reversible — mirroring the `_classFeatureSaveProficiencies` pattern.
+	 *
+	 * Saves that are independently granted by a class feature or feat are NOT stripped on reversal
+	 * (see `_isSaveGrantedByNonFirstClassSource`). Pass `null`/no class to only reverse (not used today;
+	 * the character always retains at least one class).
+	 *
+	 * Requires class DATA (`proficiency`, `startingProficiencies`) which lives at the controller layer, so
+	 * call this from the Builder / Respec (which have `this._page.getClasses()`), not from deep in state.
+	 *
+	 * @param {object|null} classData raw class data object (with `name`, `source`, `proficiency`,
+	 *   `startingProficiencies`)
+	 */
+	applyFirstClassStartingProficiencies (classData) {
+		// 1. Reverse previously-tracked grants
+		const prev = this._data._firstClassStartGrants;
+		if (prev) {
+			(prev.saves || []).forEach(s => {
+				if (this._isSaveGrantedByNonFirstClassSource(s)) return; // keep feat/feature saves
+				const idx = this._data.saveProficiencies.indexOf(s);
+				if (idx >= 0) this._data.saveProficiencies.splice(idx, 1);
+			});
+			(prev.armor || []).forEach(a => this.removeArmorProficiency(a));
+			(prev.weapons || []).forEach(w => this.removeWeaponProficiency(w));
+		}
+		this._data._firstClassStartGrants = null;
+
+		if (!classData) return;
+
+		// 2. Apply the new first class's starting grants, recording provenance
+		const grants = {className: classData.name, classSource: classData.source, saves: [], armor: [], weapons: []};
+
+		(classData.proficiency || []).forEach(prof => {
+			if (Parser.ABIL_ABVS.includes(prof)) {
+				if (!this._data.saveProficiencies.includes(prof)) this._data.saveProficiencies.push(prof);
+				grants.saves.push(prof);
+			}
+		});
+
+		const startingProfs = classData.startingProficiencies || {};
+		(startingProfs.armor || []).forEach(armor => {
+			const name = typeof armor === "string" ? armor : armor?.full;
+			if (name) {
+				this.addArmorProficiency(name);
+				grants.armor.push(name);
+			}
+		});
+		(startingProfs.weapons || []).forEach(weapon => {
+			const name = typeof weapon === "string" ? weapon : weapon?.full;
+			if (name) {
+				this.addWeaponProficiency(name);
+				grants.weapons.push(name);
+			}
+		});
+
+		this._data._firstClassStartGrants = grants;
+	}
+	// #endregion
 
 	getSaveMod (ability) {
 		const mod = this.getAbilityMod(ability);

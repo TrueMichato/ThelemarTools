@@ -53,6 +53,11 @@ class CharacterSheetRespec {
 
 		this._timeline.innerHTML = "";
 
+		// The character base (species, background, origin ability choices) lives OUTSIDE the per-class
+		// level history, so it survives removing any class — including a class's first level. Render it as
+		// a dedicated, non-removable card at the root of the tree. Origin editing flows through here.
+		this._timeline.append(this._renderBaseCard());
+
 		// Multiclass characters render one branch per class so the player can change/remove the last
 		// level of EITHER class independently. Single-class keeps the original linear timeline.
 		const classes = this._state.getClasses();
@@ -77,6 +82,59 @@ class CharacterSheetRespec {
 			const entry = this._renderLevelEntry(level, history, level === totalLevel, hpByLevel.get(level));
 			this._timeline.append(entry);
 		}
+	}
+
+	/**
+	 * Render the non-removable "character base" card at the root of the respec tree: species, background,
+	 * and the origin grants/ability choices that are NOT owned by any class. This is the structural
+	 * counterpart to the data-model split — the base survives removing any class (including a class's
+	 * first level). Origin editing (species/background) flows through this card's Edit buttons.
+	 * @returns {HTMLElement}
+	 */
+	_renderBaseCard () {
+		const race = this._state.getRace();
+		const background = this._state.getBackground();
+		// Use the level-1 history entry only as a legacy fallback for grant rendering; the authoritative
+		// origin user-choices now come from the character base node.
+		const level1History = this._state.getLevelHistoryEntry?.(1) || null;
+
+		const card = e_({tag: "div", clazz: "charsheet__level-entry charsheet__respec-base-card"});
+
+		const header = e_({tag: "div", clazz: "charsheet__level-entry-header"});
+		header.append(e_({outer: `
+			<div class="charsheet__level-entry-class">
+				<span class="charsheet__level-entry-class-name">Character Base</span>
+				<span class="charsheet__level-entry-class-level">Species, background &amp; origin</span>
+			</div>
+		`}));
+		card.append(header);
+
+		// Species + background rows with Edit buttons
+		const rows = e_({tag: "div", clazz: "charsheet__respec-base-rows"});
+
+		const mkRow = (icon, label, value, onEdit) => {
+			const row = e_({tag: "div", clazz: "charsheet__respec-base-row ve-flex-v-center"});
+			row.append(e_({outer: `<span class="charsheet__respec-base-row-label">${icon} ${label}:</span>`}));
+			row.append(e_({outer: `<span class="charsheet__respec-base-row-value ml-1">${value ? Renderer.stripTags(value) : "—"}</span>`}));
+			if (onEdit) {
+				const editBtn = e_({tag: "button", clazz: "charsheet__level-entry-edit ml-auto", title: `Edit ${label.toLowerCase()}`});
+				editBtn.append(e_({outer: `<span class="glyphicon glyphicon-pencil"></span>`}));
+				editBtn.addEventListener("click", () => onEdit());
+				row.append(editBtn);
+			}
+			return row;
+		};
+
+		const raceName = this._state.getRaceName?.() || race?.name || "";
+		rows.append(mkRow("🧬", "Species", raceName, race ? () => this._editRace(1, level1History || {level: 1, choices: {}}, null) : null));
+		rows.append(mkRow("🎒", "Background", background?.name || "", background ? () => this._editBackground(1, level1History || {level: 1, choices: {}}, null) : null));
+		card.append(rows);
+
+		// Origin grants summary (speed/darkvision/skills/languages/ASI), reused from the level-1 renderer
+		const grants = this._renderRaceBackgroundGrants(level1History);
+		if (grants) card.append(grants);
+
+		return card;
 	}
 
 	/**
@@ -139,7 +197,7 @@ class CharacterSheetRespec {
 			const isLast = classLevel === classLevels;
 			list.append(this._renderLevelEntry(classLevel, history, isLast, hpInfo, {
 				levelLabel: `${cls.name} ${classLevel}`,
-				showGrants: history?.level === 1,
+				showGrants: false,
 				removable: isLast && removableLast,
 				onRemove: () => this._onRemoveClassLevel(cls.name, cls.source),
 			}));
@@ -169,7 +227,8 @@ class CharacterSheetRespec {
 		// Real character (total) level for edit/remove keys — history.level is authoritative when present.
 		const totalLevel = history?.level ?? displayLevel;
 		const levelLabel = opts.levelLabel || `Level ${displayLevel}`;
-		const showGrants = opts.showGrants != null ? opts.showGrants : (displayLevel === 1);
+		// Origin grants now live on the dedicated Base card; per-level grant rendering is opt-in only.
+		const showGrants = opts.showGrants != null ? opts.showGrants : false;
 
 		// Determine which class this level was in
 		let levelClass = null;
@@ -463,7 +522,28 @@ class CharacterSheetRespec {
 			JqueryUtil.doToast({type: "warning", content: "Cannot remove this level."});
 			return;
 		}
-		await this._showRemoveLevelModal(preview, () => this._state.removeClassLastLevel(name, source));
+
+		// Capture the chronological-first ("primary") class BEFORE removal. If peeling this level vacates
+		// the first slot (i.e. removes the total-level-1 entry), a different class becomes primary and must
+		// be granted its starting saving-throw + armor/weapon proficiencies (reversing the old primary's).
+		const firstBefore = this._state.getChronologicalFirstClass();
+
+		await this._showRemoveLevelModal(preview, () => {
+			const result = this._state.removeClassLastLevel(name, source);
+			if (result.success) {
+				const firstAfter = this._state.getChronologicalFirstClass();
+				const changed = firstAfter && (!firstBefore || firstAfter.name !== firstBefore.name || firstAfter.source !== firstBefore.source);
+				if (changed) {
+					const newClassData = this._page.getClasses()?.find(c => c.name === firstAfter.name && c.source === firstAfter.source)
+						|| this._page.getClasses()?.find(c => c.name === firstAfter.name);
+					if (newClassData) {
+						this._state.applyFirstClassStartingProficiencies(newClassData);
+						JqueryUtil.doToast({type: "info", content: `${firstAfter.name} is now your primary class; saving throws and starting proficiencies updated.`});
+					}
+				}
+			}
+			return result;
+		});
 	}
 
 	/**
@@ -598,8 +678,8 @@ class CharacterSheetRespec {
 		if (!race && !background) return null;
 
 		const grants = e_({tag: "div", clazz: "charsheet__level-entry-grants mt-1 mb-1"});
-		const raceUserChoices = history?.choices?.raceUserChoices || {};
-		const bgUserChoices = history?.choices?.backgroundUserChoices || {};
+		const raceUserChoices = (this._state.getBaseRaceUserChoices ? this._state.getBaseRaceUserChoices() : null) || history?.choices?.raceUserChoices || {};
+		const bgUserChoices = (this._state.getBaseBackgroundUserChoices ? this._state.getBaseBackgroundUserChoices() : null) || history?.choices?.backgroundUserChoices || {};
 
 		// Race grants
 		if (race) {
@@ -817,26 +897,10 @@ class CharacterSheetRespec {
 	_getEditableChoices (level, history) {
 		const editable = [];
 
-		// Race is editable at level 1 (with cascade warning)
-		if (level === 1 && history.choices?.race) {
-			const raceName = this._state.getRaceName() || history.choices.race.name;
-			editable.push({
-				type: "race",
-				label: "Species",
-				current: raceName,
-				hasCascade: true,
-			});
-		}
-
-		// Background is editable at level 1 (with cascade warning)
-		if (level === 1 && history.choices?.background) {
-			editable.push({
-				type: "background",
-				label: "Background",
-				current: history.choices.background.name,
-				hasCascade: true,
-			});
-		}
+		// NOTE: Species and Background are NOT edited here. They belong to the character base (rendered as
+		// the non-removable Base card), so origin editing flows through that card's Edit buttons instead of
+		// the level-1 entry. This keeps the base a single source of truth even after the origin class is
+		// removed and a different class is promoted into the level-1 slot.
 
 		// ASI is editable (separate from feat for Thelemar rule support)
 		if (history.choices?.asi) {
@@ -3033,7 +3097,7 @@ class CharacterSheetRespec {
 	_applyRaceChange (history, newRace, userChoices = {}) {
 		const oldRace = this._state.getRace();
 		const oldSubrace = this._state.getSubrace();
-		const oldUserChoices = history.choices?.raceUserChoices || {};
+		const oldUserChoices = (this._state.getBaseRaceUserChoices ? this._state.getBaseRaceUserChoices() : null) || history.choices?.raceUserChoices || {};
 
 		// --- CLEAR OLD RACE GRANTS ---
 
@@ -3167,14 +3231,20 @@ class CharacterSheetRespec {
 			});
 		}
 
-		// Update level history
-		this._state.updateLevelChoice(1, {
-			race: {
-				name: newRace.name,
-				source: newRace.source,
-			},
-			raceUserChoices: userChoices,
-		});
+		// Persist the origin choices to the character base node (single source of truth used by Respec).
+		// The race entity object itself was already set via setRace() above. For older mock states without
+		// the base API, fall back to the legacy level-1 history write.
+		if (this._state.setBaseRaceUserChoices) {
+			this._state.setBaseRaceUserChoices(userChoices);
+		} else {
+			this._state.updateLevelChoice(1, {
+				race: {
+					name: newRace.name,
+					source: newRace.source,
+				},
+				raceUserChoices: userChoices,
+			});
+		}
 	}
 
 	/**
@@ -3183,7 +3253,7 @@ class CharacterSheetRespec {
 	 */
 	_applyBackgroundChange (history, newBg, userChoices = {}) {
 		const oldBg = this._state.getBackground();
-		const oldUserChoices = history.choices?.backgroundUserChoices || {};
+		const oldUserChoices = (this._state.getBaseBackgroundUserChoices ? this._state.getBaseBackgroundUserChoices() : null) || history.choices?.backgroundUserChoices || {};
 
 		// --- CLEAR OLD BACKGROUND GRANTS ---
 
@@ -3296,13 +3366,19 @@ class CharacterSheetRespec {
 			storedUserChoices.selectedAbilityBonuses = userChoices.selectedAbilityBonuses;
 		}
 
-		this._state.updateLevelChoice(1, {
-			background: {
-				name: newBg.name,
-				source: newBg.source,
-			},
-			backgroundUserChoices: storedUserChoices,
-		});
+		// Persist origin choices to the character base node (single source of truth). Fall back to the
+		// legacy level-1 history write for older mock states without the base API.
+		if (this._state.setBaseBackgroundUserChoices) {
+			this._state.setBaseBackgroundUserChoices(storedUserChoices);
+		} else {
+			this._state.updateLevelChoice(1, {
+				background: {
+					name: newBg.name,
+					source: newBg.source,
+				},
+				backgroundUserChoices: storedUserChoices,
+			});
+		}
 	}
 
 	// region Choice Picker Helpers
@@ -3861,8 +3937,8 @@ class CharacterSheetRespec {
 			});
 		}
 
-		// Also reapply user-chosen racial ability bonuses from history
-		const raceUserChoices = history?.choices?.raceUserChoices;
+		// Also reapply user-chosen racial ability bonuses from the character base node (fallback: history)
+		const raceUserChoices = (this._state.getBaseRaceUserChoices ? this._state.getBaseRaceUserChoices() : null) || history?.choices?.raceUserChoices;
 		if (raceUserChoices?.selectedAbilityChoices) {
 			Object.entries(raceUserChoices.selectedAbilityChoices).forEach(([key, value]) => {
 				if (!key.includes("_weight") && value) {
@@ -3882,7 +3958,7 @@ class CharacterSheetRespec {
 	 * Uses stored user choices from level history.
 	 */
 	_reapplyBackgroundAbilityBonuses (history) {
-		const bgUserChoices = history.choices?.backgroundUserChoices;
+		const bgUserChoices = (this._state.getBaseBackgroundUserChoices ? this._state.getBaseBackgroundUserChoices() : null) || history.choices?.backgroundUserChoices;
 		if (!bgUserChoices?.selectedAbilityBonuses) return;
 		Object.entries(bgUserChoices.selectedAbilityBonuses).forEach(([key, value]) => {
 			if (key.startsWith("bg_") && !key.includes("weight") && value) {

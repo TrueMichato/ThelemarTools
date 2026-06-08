@@ -7811,6 +7811,35 @@ body.has-quickbuild-overlay .toast__container {
 	margin-bottom: var(--cs-space-md, 0.75rem);
 }
 
+/* Character base card — the non-removable root of the respec tree (species/background/origin) */
+.charsheet__respec-base-card {
+	background: var(--cs-bg-surface, var(--rgb-bg-alt));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-left: 3px solid var(--cs-accent, #7b6cd9);
+	border-radius: var(--cs-radius-lg, 12px);
+	padding: var(--cs-space-md, 0.75rem);
+	margin-bottom: var(--cs-space-lg, 1rem);
+}
+
+.charsheet__respec-base-rows {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	margin-top: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__respec-base-row {
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__respec-base-row-label {
+	font-weight: 600;
+}
+
+.charsheet__respec-base-row .charsheet__level-entry-edit {
+	opacity: 1;
+}
+
 /* Multiclass branch view — one column per class, each with its own mini-timeline */
 .charsheet__level-history-timeline--branched::before {
 	display: none;

@@ -5462,8 +5462,8 @@ class CharacterSheetLevelUp {
 		// Add hit die
 		CharacterSheetClassUtils.updateHitDice(this._state, selectedClass);
 
-		// Add proficiencies from multiclass (armor/weapons)
-		this._applyMulticlassProficiencies(selectedClass);
+		// Add proficiencies from multiclass (armor/weapons); capture grants for reversal on level removal
+		const grantedMulticlassProfs = this._applyMulticlassProficiencies(selectedClass);
 
 		// Add selected skill proficiencies
 		if (selectedSkills && selectedSkills.length) {
@@ -5500,6 +5500,30 @@ class CharacterSheetLevelUp {
 		// the spellcasting info display to show correct multiclass caster level
 		this._state.calculateSpellSlots();
 
+		// Record the multiclass-in level in history so this class can later be peeled back like any
+		// other branch (per-class removal), down to and including this first level. Captures the
+		// reversible choices: optional features, feature options, and the granted multiclass profs.
+		const mcTotalLevel = this._state.getTotalLevel();
+		/** @type {*} */ const mcHistory = {
+			level: mcTotalLevel,
+			class: {name: selectedClass.name, source: selectedClass.source},
+			choices: {multiclassProficiencies: grantedMulticlassProfs},
+			complete: true,
+			timestamp: Date.now(),
+		};
+		const mcOptionalFeatures = [];
+		for (const optFeatures of Object.values(selectedOptionalFeatures)) {
+			for (const of_ of (/** @type {*} */ (optFeatures))) mcOptionalFeatures.push({name: of_.name, source: of_.source});
+		}
+		if (mcOptionalFeatures.length) mcHistory.choices.optionalFeatures = mcOptionalFeatures;
+		const mcFeatureChoices = [];
+		for (const options of Object.values(selectedFeatureOptions)) {
+			for (const option of (/** @type {*} */ (options))) mcFeatureChoices.push({choice: option.name, source: option.source});
+		}
+		if (mcFeatureChoices.length) mcHistory.choices.featureChoices = mcFeatureChoices;
+		if (selectedSkills?.length) mcHistory.choices.skills = [...selectedSkills];
+		this._state.recordLevelChoice(mcHistory);
+
 		await this._page.saveCharacter();
 		this._page.renderCharacter();
 
@@ -5527,13 +5551,24 @@ class CharacterSheetLevelUp {
 
 		const profs = (/** @type {*} */ (multiclassProfs))[classData.name] || {};
 
+		// Track exactly what we grant so the level-removal path can reverse it (recorded into the
+		// multiclass-in level's history as `choices.multiclassProficiencies`).
+		const granted = {armor: [], weapons: [], tools: []};
+
 		if (profs.armor) {
-			profs.armor.forEach((/** @type {*} */ a) => this._state.addArmorProficiency(a));
+			profs.armor.forEach((/** @type {*} */ a) => {
+				this._state.addArmorProficiency(a);
+				granted.armor.push(a);
+			});
 		}
 		if (profs.weapons) {
-			profs.weapons.forEach((/** @type {*} */ w) => this._state.addWeaponProficiency(w));
+			profs.weapons.forEach((/** @type {*} */ w) => {
+				this._state.addWeaponProficiency(w);
+				granted.weapons.push(w);
+			});
 		}
 		// Skills would need UI selection - skip for now
+		return granted;
 	}
 
 	/**

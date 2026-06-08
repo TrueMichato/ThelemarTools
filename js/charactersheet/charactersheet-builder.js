@@ -694,6 +694,16 @@ class CharacterSheetBuilder {
 					}
 
 					this._state.recordLevelChoice(level1History);
+
+					// Mirror the origin user-choices into the dedicated character base node (single source of
+					// truth used by Respec). The level-1 copies above remain for backward compatibility and
+					// are stripped on the next load by `_migrateBaseChoices()`.
+					if (this._selectedRace && level1History.choices.raceUserChoices && this._state.setBaseRaceUserChoices) {
+						this._state.setBaseRaceUserChoices(level1History.choices.raceUserChoices);
+					}
+					if (this._selectedBackground && level1History.choices.backgroundUserChoices && this._state.setBaseBackgroundUserChoices) {
+						this._state.setBaseBackgroundUserChoices(level1History.choices.backgroundUserChoices);
+					}
 				}
 				break;
 			}
@@ -1523,6 +1533,15 @@ class CharacterSheetBuilder {
 					this._state.addWeaponProficiency(weapon.full);
 				}
 			});
+		}
+
+		// Record provenance for the chronological-first class's starting proficiencies (saves + starting
+		// armor/weapons). The loops above already applied them; this re-applies idempotently and stores
+		// `_firstClassStartGrants` so Respec can reverse them and promote a new primary class when the
+		// original first class is later removed from a multiclass character.
+		// Guarded: optional new state method (older/mock states without it keep working).
+		if (this._state.applyFirstClassStartingProficiencies) {
+			this._state.applyFirstClassStartingProficiencies(this._selectedClass);
 		}
 
 		// Tool proficiencies — user-selected class tool choices (e.g., Monk artisan/instrument)
