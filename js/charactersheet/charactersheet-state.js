@@ -780,11 +780,21 @@ class FeatureModifierParser {
 				{pattern: new RegExp(`([+\\-−])(\\d+)\\s*(?:feet|ft\\.?)\\s*to\\s*(?:your\\s*)?(?:${aliasPattern})`, "gi"), signed: true},
 				// speed is increased/reduced by X
 				{pattern: new RegExp(`(?:${aliasPattern})\\s*(?:bonus|penalty)\\s*of\\s*([+\\-−])?(\\d+)\\s*(?:feet|ft\\.?)`, "gi"), signed: true, defaultPositive: true},
-				// gain a swimming/climbing speed equal to your walking speed (Amphibious Combatant, Mountaineer, etc.)
-				{pattern: new RegExp(`(?:you\\s*)?gain\\s*(?:a\\s*)?(?:${aliasPattern})\\s*equal\\s*to\\s*(?:your\\s*)?(?:walking\\s*speed|speed|movement)`, "gi"), equalToWalk: true},
+				// NOTE: "{type} speed equal to your walking speed" is intentionally NOT parsed
+				// per-type here — a naive per-type regex lets the walking-speed alias ("speed")
+				// self-match phrasings like "…equal to your Speed" and emit a bogus
+				// speed:walk modifier. Equal-to-walk grants are handled by the dedicated
+				// clause scanner below, which only ever emits NON-walk speed types.
 			];
 			this._applyPatterns(plainText, speedPatterns, speedType.type, sourceName, modifiers, parseSignedValue);
 		});
+
+		// Equal-to-walk speed grants (e.g. Roving: "You also have a Climb Speed and a Swim
+		// Speed equal to your Speed"; Amphibious Combatant: "gain a swimming speed equal to
+		// your walking speed"). A single clause can grant multiple conjoined movement types
+		// ("a Climb Speed and a Swim Speed equal to …"). Only non-walk types are emitted, so
+		// the walking-speed alias can never self-reference.
+		this._applyEqualToWalkClauses(plainText, sourceName, modifiers);
 
 		// General speed (applies to all movement)
 		const generalSpeedPatterns = [
@@ -1972,6 +1982,48 @@ class FeatureModifierParser {
 				}
 			}
 		});
+	}
+
+	/**
+	 * Parse "equal-to-walk" speed grants from feature text.
+	 *
+	 * Handles single-type ("gain a swimming speed equal to your walking speed") and
+	 * conjoined ("You also have a Climb Speed and a Swim Speed equal to your Speed")
+	 * phrasings, with either verb (gain / have / you also have). Only NON-walk movement
+	 * types (climb / swim / fly / burrow) are ever emitted, so the walking-speed alias
+	 * can never produce a self-referential speed:walk modifier.
+	 *
+	 * @param {string} text - Plain (tag-stripped) feature text.
+	 * @param {string} sourceName - Feature name, used as the modifier note.
+	 * @param {Array<object>} modifiers - Output array to push parsed modifiers into.
+	 */
+	static _applyEqualToWalkClauses (text, sourceName, modifiers) {
+		if (!text) return;
+		// Match a "<verb> <stuff> equal to your [walking] speed/movement" clause. The stuff
+		// is captured non-greedily so the clause stays within one grant phrase.
+		const clauseRe = /(?:you\s+)?(?:also\s+)?(?:gain|have)\s+(.{0,80}?)\s+equal\s+to\s+(?:your\s+)?(?:walking\s+speed|speed|movement)/gi;
+		const nonWalkTypes = [
+			{type: "speed:climb", re: /climb(?:ing)?\s+speed/i},
+			{type: "speed:swim", re: /swim(?:ming)?\s+speed/i},
+			{type: "speed:fly", re: /(?:fly(?:ing)?|flight)\s+speed/i},
+			{type: "speed:burrow", re: /burrow(?:ing)?\s+speed/i},
+		];
+		let match;
+		while ((match = clauseRe.exec(text)) !== null) {
+			const clause = match[1] || "";
+			const conditional = this._extractCondition(text, match.index);
+			nonWalkTypes.forEach(({type, re}) => {
+				if (re.test(clause)) {
+					modifiers.push({
+						type,
+						value: 0,
+						note: sourceName,
+						equalToWalk: true,
+						conditional,
+					});
+				}
+			});
+		}
 	}
 
 	/**
@@ -8257,11 +8309,11 @@ class CharacterSheetState {
 		const parts = [`${walk} ft.`];
 
 		// Check for "equal to walk" modifiers for each speed type
+		const hasEqualToWalkMod = (speedType) => !!this._data.namedModifiers?.some(m =>
+			m.type === `speed:${speedType}` && m.equalToWalk && m.enabled,
+		);
 		const getSpeedWithEqualToWalk = (speedType, base, bonus) => {
-			const equalToWalkMod = this._data.namedModifiers?.find(m =>
-				m.type === `speed:${speedType}` && m.equalToWalk && m.enabled,
-			);
-			if (equalToWalkMod) {
+			if (hasEqualToWalkMod(speedType)) {
 				return Math.max(base + bonus, rawWalk);
 			}
 			return base + bonus;
@@ -8311,10 +8363,10 @@ class CharacterSheetState {
 		// Compute each movement type with per-type multipliers
 		const getTypeMultiplier = (speedType) => (itemSpeedMultiply[speedType] || 1) * (itemSpeedMultiply["*"] || 1);
 
-		const fly = effectiveFly > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("fly", effectiveFly, (speedMods.fly || 0) + this.getSpeedBonusFromStates("fly") + adeptSpeedBonus + (itemSpeedBonus.fly || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("fly") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const swim = effectiveSwim > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("swim", effectiveSwim, (speedMods.swim || 0) + this.getSpeedBonusFromStates("swim") + adeptSpeedBonus + (itemSpeedBonus.swim || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("swim") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const climb = effectiveClimb > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("climb", effectiveClimb, (speedMods.climb || 0) + this.getSpeedBonusFromStates("climb") + adeptSpeedBonus + (itemSpeedBonus.climb || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("climb") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const burrow = effectiveBurrow > 0 ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("burrow", effectiveBurrow, (speedMods.burrow || 0) + this.getSpeedBonusFromStates("burrow") + adeptSpeedBonus + (itemSpeedBonus.burrow || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("burrow") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const fly = (effectiveFly > 0 || hasEqualToWalkMod("fly")) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("fly", effectiveFly, (speedMods.fly || 0) + this.getSpeedBonusFromStates("fly") + adeptSpeedBonus + (itemSpeedBonus.fly || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("fly") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const swim = (effectiveSwim > 0 || hasEqualToWalkMod("swim")) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("swim", effectiveSwim, (speedMods.swim || 0) + this.getSpeedBonusFromStates("swim") + adeptSpeedBonus + (itemSpeedBonus.swim || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("swim") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const climb = (effectiveClimb > 0 || hasEqualToWalkMod("climb")) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("climb", effectiveClimb, (speedMods.climb || 0) + this.getSpeedBonusFromStates("climb") + adeptSpeedBonus + (itemSpeedBonus.climb || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("climb") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const burrow = (effectiveBurrow > 0 || hasEqualToWalkMod("burrow")) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("burrow", effectiveBurrow, (speedMods.burrow || 0) + this.getSpeedBonusFromStates("burrow") + adeptSpeedBonus + (itemSpeedBonus.burrow || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("burrow") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
 
 		if (fly > 0) parts.push(`fly ${fly} ft.`);
 		if (swim > 0) parts.push(`swim ${swim} ft.`);
@@ -19223,6 +19275,12 @@ class CharacterSheetState {
 		// Store applied effects for debugging/display
 		this._data.appliedClassFeatureEffects = appliedEffects;
 
+		// Keep auto-granted combat methods (e.g. Primal Focus Upgrade → Singular Focus /
+		// Groundshatter) in sync with the current feature/level set. Idempotent and
+		// no-ops until the combat-method catalog is available, so it is safe to run on
+		// every effect application (load, level-up, level-down, focus-mode change).
+		this.reconcileGrantedCombatMethods();
+
 		return appliedEffects;
 	}
 
@@ -19351,6 +19409,21 @@ class CharacterSheetState {
 
 			// ===== SPEED =====
 			case "speed": {
+				// Derived "equal to walking speed" grant: store as a live equalToWalk modifier
+				// (value 0) so getSpeed()/getSpeedByType() compute max(base, walk) dynamically and
+				// teardown is clean. Distinct from the legacy value:"walk" numeric-freeze path below.
+				if (effect.equalToWalk) {
+					this._addClassFeatureModifier({
+						name: effect.source,
+						type: `speed:${effect.speedType}`,
+						value: 0,
+						note: effect.conditional ? `From ${effect.source} - ${effect.conditional}` : `From ${effect.source} - equals walking speed`,
+						enabled: effect.enabled !== false && !effect.conditional,
+						conditional: effect.conditional,
+						equalToWalk: true,
+					});
+					return `${effect.source}: ${effect.speedType} speed equal to walking speed${effect.conditional ? ` (${effect.conditional})` : ""}`;
+				}
 				const speedValue = effect.value === "walk" ? this.getWalkSpeed() : effect.value;
 				if (effect.conditional) {
 					this._addClassFeatureModifier({
@@ -23695,7 +23768,11 @@ class CharacterSheetState {
 
 			const getAbilityMod = (ability) => this.getAbilityMod(ability);
 			const getProfBonus = () => this.getProficiencyBonus();
-			const newUses = FeatureUsesParser.parseUses(item.description, getAbilityMod, getProfBonus);
+			// Curated TGTT overrides win over the generic parser here too, so a later
+			// ability/level recalculation can't silently re-inflate a curated tracker
+			// (e.g. Healing Salves back to 1 + WIS doses).
+			const newUses = this._getCuratedFeatureUses(item)
+				|| FeatureUsesParser.parseUses(item.description, getAbilityMod, getProfBonus);
 
 			if (newUses) {
 				// Update feature/feat uses
@@ -23825,7 +23902,7 @@ class CharacterSheetState {
 
 	addFeature (feature, opts = {}) {
 		// Deduplicate: don't add if feature with same name, source, and className/level combo exists
-		const isDuplicate = this._data.features.some(f => {
+		const duplicate = this._data.features.find(f => {
 			if (f.name !== feature.name) return false;
 			if (f.source !== feature.source) return false;
 			// For class features, also check className and level
@@ -23836,7 +23913,18 @@ class CharacterSheetState {
 			return true;
 		});
 
-		if (isDuplicate) {
+		if (duplicate) {
+			// Co-ownership reconciliation for combat methods: a method can be BOTH
+			// auto-granted (e.g. Primal Focus Upgrade) and manually learned. If a player
+			// manually learns a method that is currently auto-granted, tag the existing
+			// one as manually owned too, so a later teardown (granter removed on level-down)
+			// never deletes the player's manual copy.
+			if (feature._entityType === "combatMethod"
+				&& duplicate._entityType === "combatMethod"
+				&& duplicate._autoGranted
+				&& !feature._autoGranted) {
+				duplicate._manualGranted = true;
+			}
 			return;
 		}
 
@@ -23844,10 +23932,17 @@ class CharacterSheetState {
 		// Skip use detection for meta-features that describe resource systems rather than having their own uses
 		const isMetaFeature = this._isResourceSystemFeature(feature);
 		let uses = feature.uses;
-		if (!uses && feature.description && !isMetaFeature) {
-			const getAbilityMod = (ability) => this.getAbilityMod(ability);
-			const getProfBonus = () => this.getProficiencyBonus();
-			uses = FeatureUsesParser.parseUses(feature.description, getAbilityMod, getProfBonus);
+		if (!uses) {
+			// Curated TGTT overrides win over the generic parser (e.g. Healing Salves'
+			// once/long-rest creation vs. its 1+WIS doses; Ephemeral Insight's untracked count).
+			const curated = this._getCuratedFeatureUses(feature);
+			if (curated) {
+				uses = curated;
+			} else if (feature.description && !isMetaFeature) {
+				const getAbilityMod = (ability) => this.getAbilityMod(ability);
+				const getProfBonus = () => this.getProficiencyBonus();
+				uses = FeatureUsesParser.parseUses(feature.description, getAbilityMod, getProfBonus);
+			}
 		}
 
 		const featureData = {
@@ -23932,6 +24027,136 @@ class CharacterSheetState {
 	 */
 	setCombatMethodCatalog (combatMethodEntities) {
 		this._combatMethodCatalog = Array.isArray(combatMethodEntities) ? combatMethodEntities : [];
+	}
+
+	/**
+	 * Provide the canonical class/subclass feature catalog used to re-hydrate stored
+	 * features that are missing data fields (e.g. an old save whose Primal Focus Upgrade
+	 * lost its `grantsCombatMethods`). Set by the page after loading site + brew data.
+	 * @param {Array<*>} classFeatures
+	 * @param {Array<*>} [subclassFeatures]
+	 */
+	setClassFeatureCatalog (classFeatures, subclassFeatures) {
+		this._classFeatureCatalog = Array.isArray(classFeatures) ? classFeatures : [];
+		this._subclassFeatureCatalog = Array.isArray(subclassFeatures) ? subclassFeatures : [];
+	}
+
+	/**
+	 * Reconcile auto-granted combat methods (e.g. the Ranger Primal Focus Upgrade's
+	 * Singular Focus / Groundshatter) against the current feature list. Generic and
+	 * idempotent — safe to call after every load / level change. It:
+	 *   1. Re-hydrates a stored granting feature's missing `grantsCombatMethods` from the
+	 *      canonical class-feature catalog (covers old saves that dropped the field).
+	 *   2. Adds any granted methods that aren't present yet — never duplicating, and never
+	 *      overriding a manually-learned method of the same name/source.
+	 *   3. Removes ONLY methods tagged `_autoGranted` whose granting feature is no longer
+	 *      present (teardown on level-down) — manually-learned methods are untouched.
+	 *
+	 * Requires the combat-method catalog to be set; no-ops gracefully until then so an
+	 * early call (before brew merge) does nothing and a later call completes the work.
+	 */
+	reconcileGrantedCombatMethods () {
+		if (!this._combatMethodCatalog?.length) return;
+		if (!Array.isArray(this._data.features)) return;
+
+		const pool = [...(this._classFeatureCatalog || []), ...(this._subclassFeatureCatalog || [])];
+		const desiredMethods = [];
+
+		const sameCanonical = (canon, f) =>
+			(canon.name || "").toLowerCase() === (f.name || "").toLowerCase()
+			&& (canon.className || "").toLowerCase() === (f.className || "").toLowerCase()
+			&& (canon.classSource || "").toLowerCase() === (f.classSource || "").toLowerCase()
+			&& (Number(canon.level) || 0) === (Number(f.level) || 0);
+
+		for (const f of this._data.features) {
+			if (f._entityType === "combatMethod") continue;
+			let grants = Array.isArray(f.grantsCombatMethods) && f.grantsCombatMethods.length ? f.grantsCombatMethods : null;
+			if (!grants && pool.length) {
+				const canon = pool.find(c => sameCanonical(c, f));
+				if (canon && Array.isArray(canon.grantsCombatMethods) && canon.grantsCombatMethods.length) {
+					grants = canon.grantsCombatMethods;
+					f.grantsCombatMethods = grants; // persist the re-hydration onto the stored feature
+				}
+			}
+			if (!grants) continue;
+			const resolved = CharacterSheetClassUtils.resolveGrantedCombatMethods({...f, grantsCombatMethods: grants}, this._combatMethodCatalog);
+			desiredMethods.push(...resolved);
+		}
+
+		// Stable key identifying a specific granted method from a specific granter, so
+		// teardown survives both granter removal (level-down) AND a granter whose
+		// grants list changed (content/homebrew migration).
+		const methodKey = (granterUid, name, source) =>
+			`${granterUid}|${(name || "").toLowerCase()}|${(source || "").toLowerCase()}`;
+		const desiredKeys = new Set(desiredMethods.map(m => methodKey(m._grantedByFeatureUid, m.name, m.source)));
+
+		// Add any missing granted methods (idempotent — addFeature dedups by name+source,
+		// so a manually-learned method of the same name is preserved and not duplicated).
+		// For an already-present auto-granted method whose grant metadata changed (e.g. a
+		// different `requiresFocus`), refresh it in place.
+		for (const method of desiredMethods) {
+			const existing = this._data.features.find(x =>
+				x._entityType === "combatMethod"
+				&& (x.name || "").toLowerCase() === (method.name || "").toLowerCase()
+				&& (x.source || "").toLowerCase() === (method.source || "").toLowerCase());
+			if (!existing) {
+				this.addFeature(method);
+			} else if (existing._autoGranted && !existing._manualGranted && existing.requiresFocus !== method.requiresFocus) {
+				existing.requiresFocus = method.requiresFocus;
+			}
+		}
+
+		// Teardown: drop auto-granted methods whose exact grant is no longer desired
+		// (granting feature gone, or no longer granting this method). Never touch a
+		// method that is also manually owned, and never touch purely manual methods.
+		const orphaned = this._data.features.filter(x =>
+			x._autoGranted && !x._manualGranted && x._entityType === "combatMethod"
+			&& x._grantedByFeatureUid
+			&& !desiredKeys.has(methodKey(x._grantedByFeatureUid, x.name, x.source)));
+		for (const m of orphaned) this.removeFeature(m.id);
+	}
+
+	/**
+	 * Whether a combat method is currently blocked by Primal Focus gating — i.e. it
+	 * requires a specific focus (predator/prey) that is not the active one. Pure and
+	 * testable; the combat UI uses this both to disable the button and to reject a
+	 * bypassed use at activation time.
+	 * @param {*} method
+	 * @returns {boolean}
+	 */
+	isCombatMethodFocusBlocked (method) {
+		if (!method || !method.requiresFocus) return false;
+		return this.getPrimalFocusMode() !== method.requiresFocus;
+	}
+
+	/**
+	 * Curated use-tracking for TGTT Ranger features whose limited-use cadence the
+	 * generic uses-parser reads incorrectly (or not at all). The parser, for example,
+	 * reads Healing Salves' "uses equal to 1 + your Wisdom modifier" as the feature's
+	 * own uses — but that number is the produced *doses*; the feature itself is a
+	 * once-per-long-rest *creation*. Ephemeral Insight has no numeric count the parser
+	 * can latch onto. Rather than trusting auto-detection for these, we encode the
+	 * intended tracking explicitly here. Gated to TGTT-sourced features so it never
+	 * touches same-named features from other sources.
+	 *
+	 * @param {object} feature
+	 * @returns {{max: number, recharge: string}|null}
+	 */
+	_getCuratedFeatureUses (feature) {
+		const src = feature.classSource || feature.source;
+		if (src !== "TGTT") return null;
+		const name = (feature.name || "").toLowerCase();
+		// Each entry tracks the once-per-long-rest *creation/activation* of the feature,
+		// NOT the consumable doses/servings it can produce.
+		const curated = {
+			"healing salves": {max: 1, recharge: "long"}, // 1 creation/long rest (doses are separate)
+			"expert foraging": {max: 1, recharge: "long"}, // 1 creation/long rest (food = PB is the yield, not uses)
+			"poisons and antidotes": {max: 1, recharge: "long"}, // 1 creation/long rest
+			"see the unseen": {max: 1, recharge: "long"}, // 1 activation/long rest
+			"master tracker": {max: 1, recharge: "long"}, // explicit once/long rest
+			"ephemeral insight": {max: 1, recharge: "long"}, // one active insight/long rest
+		};
+		return curated[name] || null;
 	}
 
 	/**
@@ -24321,13 +24546,12 @@ class CharacterSheetState {
 			}
 
 			// Special handling: Speed equal to walking speed (e.g., "swimming speed equal to your walking speed")
-			// Store as a special modifier that links to walking speed
+			// Stored ONLY as a derived named modifier — never mutate base _data.speed here.
+			// Mutating the base would (a) leave a phantom climb/swim behind when the feature is
+			// removed (teardown can't know the prior value) and (b) clobber an innate speed of
+			// that type. getSpeed()/getSpeedByType() surface the speed as max(base, walk) while
+			// an enabled equalToWalk modifier exists, so display stays correct without mutation.
 			if (mod.type.startsWith("speed:") && mod.equalToWalk) {
-				const speedType = mod.type.split(":")[1];
-				const walkSpeed = this.getWalkSpeed();
-				// Set this speed type to match walking speed
-				this.setSpeed(speedType, walkSpeed);
-				// Also store as named modifier so it updates when walking speed changes
 				const modifierData = {
 					name: feature.name,
 					type: mod.type,

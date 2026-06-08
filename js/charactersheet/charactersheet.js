@@ -7078,7 +7078,8 @@ class CharacterSheetPage {
 				// character with their own `entries`, so render a local inline hover
 				// from those instead. Real (loadable) features keep the canonical
 				// hash hover below.
-				if (feature.entries?.length && !CharacterSheetClassUtils.findLoadedFeatureEntity(feature, {classFeatures: this._classFeatures, subclassFeatures: this._subclassFeatures})) {
+				const loadedEntity = CharacterSheetClassUtils.findLoadedFeatureEntity(feature, {classFeatures: this._classFeatures, subclassFeatures: this._subclassFeatures});
+				if (feature.entries?.length && !loadedEntity) {
 					const localLink = CharacterSheetClassUtils.buildLocalFeatureHoverLink(feature);
 					if (localLink) return localLink;
 				}
@@ -7093,11 +7094,17 @@ class CharacterSheetPage {
 						subclassFeatures: this._subclassFeatures || [],
 					});
 
+				// Use the resolved loaded entity's CANONICAL level for the hash, not the stored
+				// pick-level. A TGTT Specialty defined at L1 but picked at L4 is stored with
+				// level 4; the canonical `classfeatures.html` hash is keyed on level 1, so
+				// building it from `feature.level` would 404. Falls back to feature.level when
+				// no loaded entity matched (genuine local-hover features already returned above).
+				const canonicalLevel = Number(loadedEntity?.level) || feature.level || 1;
 				const hashInput = {
 					name: feature.name,
 					className: feature.className,
 					classSource: actualClassSource,
-					level: feature.level || 1,
+					level: canonicalLevel,
 					source: actualFeatureSource || Parser.SRC_XPHB,
 				};
 				if (feature.subclassName || feature.isSubclassFeature) {
@@ -12450,6 +12457,11 @@ class CharacterSheetPage {
 				classFeatures: this._classFeatures || [],
 				subclassFeatures: this._subclassFeatures || [],
 			});
+			// Re-hydrate + reconcile auto-granted combat methods (e.g. Ranger Primal Focus
+			// Upgrade's Singular Focus / Groundshatter), now that the class-feature catalog
+			// and combat-method catalog are both available.
+			this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || []);
+			this._state.reconcileGrantedCombatMethods();
 		} catch (e) {
 			// Reconciliation is best-effort; never block render on a bad save.
 			// eslint-disable-next-line no-console
