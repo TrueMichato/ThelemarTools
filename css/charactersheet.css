@@ -1563,6 +1563,7 @@
 /* Senses */
 .charsheet-page[data-textsize] .charsheet__sense-item,
 .charsheet-page[data-textsize] .charsheet__sense-name,
+.charsheet-page[data-textsize] .charsheet__sense-icon,
 .charsheet-page[data-textsize] .charsheet__sense-range {
 	font-size: calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1));
 }
@@ -4516,6 +4517,42 @@
 
 .charsheet__sense-range {
 	color: var(--rgb-text-muted);
+}
+
+.charsheet__sense-icon {
+	font-size: 0.95em;
+	line-height: 1;
+}
+
+.charsheet__sense-item--normal {
+	opacity: 0.75;
+	font-style: italic;
+}
+
+/* Overview speed segments (emoji label mode). inline-flex keeps the emoji and
+   value on the same baseline; the list wraps so long multi-speed displays
+   (walk/fly/climb/swim/burrow) never overflow the stat box. */
+.charsheet__combat-stat-value#charsheet-disp-speed {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	justify-content: center;
+	gap: 0 0.15em;
+	column-gap: 0.15em;
+}
+
+.charsheet__speed-seg {
+	display: inline-flex;
+	align-items: baseline;
+	white-space: nowrap;
+}
+
+.charsheet__speed-seg-emoji {
+	font-size: 0.85em;
+}
+
+.charsheet__speed-sep {
+	width: 0.2em;
 }
 
 /* ========================================================================
