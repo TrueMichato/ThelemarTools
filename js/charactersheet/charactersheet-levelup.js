@@ -5587,13 +5587,21 @@ class CharacterSheetLevelUp {
 	 * Process pending spell choices from a recently added feat
 	 */
 	async _processFeatSpellChoices () {
-		if (!this._state.hasPendingSpellChoices()) return;
+		if (this._state.hasPendingSpellChoices()) {
+			// Give UI time to update before showing modal
+			await MiscUtil.pDelay(100);
 
-		// Give UI time to update before showing modal
-		await MiscUtil.pDelay(100);
+			if (this._page._spells) {
+				await this._page._spells.processPendingSpellChoices();
+			}
+		}
 
-		if (this._page._spells) {
-			await this._page._spells.processPendingSpellChoices();
+		// Resolve prose "either A or B" feature choices (e.g. Arcane Archer Lore)
+		if (this._state.hasPendingFeatureChoices?.()) {
+			await MiscUtil.pDelay(100);
+			if (this._page.processPendingFeatureChoices) {
+				await this._page.processPendingFeatureChoices();
+			}
 		}
 	}
 }

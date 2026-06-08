@@ -4776,6 +4776,11 @@ class CharacterSheetQuickBuild {
 			await this._page._spells.processPendingSpellChoices();
 		}
 
+		// Resolve prose "either A or B" feature choices (e.g. Arcane Archer Lore)
+		if (this._page.processPendingFeatureChoices) {
+			await this._page.processPendingFeatureChoices();
+		}
+
 		// Final recalculations
 		this._state.ensureXpMatchesLevel();
 		this._state.applyClassFeatureEffects();

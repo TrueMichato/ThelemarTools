@@ -9809,6 +9809,119 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Resolve any queued prose "either A or B" feature choices (e.g. Arcane Archer
+	 * Lore's skill-proficiency + cantrip picks). Generic: drives a single small
+	 * option-button modal per pending choice. Mirrors the invocation contract of
+	 * {@link CharacterSheetSpells#processPendingSpellChoices} and is called at the
+	 * same lifecycle points (Builder finalize / LevelUp / QuickBuild).
+	 * @returns {Promise<boolean>} True if at least one choice was resolved.
+	 */
+	async processPendingFeatureChoices () {
+		if (!this._state?.hasPendingFeatureChoices?.()) return false;
+		const allSpells = this.getFilteredSpellData?.() || this.getSpells?.() || [];
+		let resolvedAny = false;
+
+		// Snapshot then re-validate each choice against live state (a choice may have
+		// been cleared by a concurrent feature removal / respec between iterations).
+		const queued = this._state.getPendingFeatureChoices();
+		for (const snapshot of queued) {
+			const live = this._state.getPendingFeatureChoices().find(c => c.id === snapshot.id);
+			if (!live) continue;
+			// eslint-disable-next-line no-await-in-loop
+			const selection = await this._pPickFeatureChoice(live);
+			if (selection == null) continue; // player deferred — leave it queued
+			if (this._state.fulfillFeatureChoice(live.id, selection, allSpells)) resolvedAny = true;
+		}
+
+		if (resolvedAny) {
+			await this.saveCharacter?.();
+			this.renderCharacter?.();
+		}
+		return resolvedAny;
+	}
+
+	/**
+	 * Show a small modal asking the player to pick ONE option for a pending feature
+	 * choice. Returns the selection (skill key string for kind "skill", or a
+	 * `{name, source}` spell object for kind "cantrip"), or `null` if deferred.
+	 * @param {{id: string, featureName?: string, kind: "skill"|"cantrip", options: Array}} choice
+	 * @returns {Promise<string|{name: string, source: string}|null>}
+	 */
+	async _pPickFeatureChoice (choice) {
+		if (!choice || !Array.isArray(choice.options) || !choice.options.length) return null;
+		const isSkill = choice.kind === "skill";
+		const kindLabel = isSkill ? "a Skill Proficiency" : "a Cantrip";
+
+		const optionLabel = (opt) => {
+			if (isSkill) return this._formatSkillKeyLabel(opt);
+			const src = opt.source ? ` <span class="ve-muted ve-small">(${(Parser.sourceJsonToAbv?.(opt.source) || opt.source)})</span>` : "";
+			return `${(opt.name || "")}${src}`;
+		};
+
+		let resolveOuter = null;
+		let isResolved = false;
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: `${choice.featureName || "Feature"} — Choose ${kindLabel}`,
+			isMinHeight0: true,
+			cbClose: () => {
+				if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(null); }
+			},
+		});
+
+		return new Promise((resolve) => {
+			resolveOuter = resolve;
+			const finalize = (val) => {
+				if (isResolved) return;
+				isResolved = true;
+				resolve(val);
+			};
+
+			const btnsHtml = choice.options.map((opt, i) => `
+				<button class="ve-btn ve-btn-default charsheet__feature-choice-opt" data-idx="${i}" style="display:block; width:100%; text-align:left; margin-bottom:6px;">
+					${optionLabel(opt)}
+				</button>
+			`).join("");
+
+			modalInner.innerHTML = `
+				<div class="charsheet__feature-choice">
+					<p class="ve-small ve-muted charsheet__feature-choice__lede">
+						This feature lets you choose ${kindLabel}. Pick one option below.
+					</p>
+					<div class="charsheet__feature-choice__opts">${btnsHtml}</div>
+					<div class="ve-flex-h-right" style="gap: 8px; margin-top: 12px;">
+						<button class="ve-btn ve-btn-default" data-act="defer">Decide later</button>
+					</div>
+				</div>
+			`;
+
+			modalInner.querySelectorAll(".charsheet__feature-choice-opt").forEach((/** @type {*} */ el) => {
+				el.addEventListener("click", () => {
+					const idx = Number(el.getAttribute("data-idx"));
+					const opt = choice.options[idx];
+					finalize(isSkill ? opt : {name: opt.name, source: opt.source});
+					doClose();
+				});
+			});
+			modalInner.querySelector(`[data-act="defer"]`).addEventListener("click", () => {
+				finalize(null);
+				doClose();
+			});
+		});
+	}
+
+	/**
+	 * Convert a normalized skill key (lowercase, no spaces — e.g. "animalhandling")
+	 * to a display label (e.g. "Animal Handling"). Falls back to title-casing.
+	 * @param {string} key
+	 * @returns {string}
+	 */
+	_formatSkillKeyLabel (key) {
+		const canonical = Object.keys(Parser.SKILL_TO_ATB_ABV || {})
+			.find(name => name.toLowerCase().replace(/\s+/g, "") === String(key).toLowerCase());
+		return (canonical || String(key)).toTitleCase();
+	}
+
+	/**
 	 * Build a result-note suffix for a roll that applied conditional modifiers.
 	 * Renders one ⚡-prefixed line per applied entry so the player can see at
 	 * a glance which conditionals contributed to the result.
