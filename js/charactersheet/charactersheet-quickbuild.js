@@ -2385,6 +2385,18 @@ class CharacterSheetQuickBuild {
 				return false;
 			}
 		}
+
+		// Gate on any feat-progression grants (e.g. Lessons of the First Ones → Origin feat):
+		// every selected invocation that grants a feat must have its feat slot(s) filled.
+		const levelUp = this._page.getLevelUpHelper?.();
+		if (levelUp && typeof levelUp._validateOptFeatureFeatProgressionPicks === "function") {
+			const progValidation = levelUp._validateOptFeatureFeatProgressionPicks(this._selections.optionalFeatures);
+			if (!progValidation.valid) {
+				const first = progValidation.missing[0];
+				JqueryUtil.doToast({type: "warning", content: `Please choose a ${first.slot} for ${first.optName}.`});
+				return false;
+			}
+		}
 		return true;
 	}
 
@@ -2558,6 +2570,31 @@ class CharacterSheetQuickBuild {
 		const search = e_({outer: `<input type="text" class="ve-form-control ve-input-sm mb-1" placeholder="Search...">`});
 		const listEl = e_({outer: `<div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--cs-border, #ddd); border-radius: 8px;"></div>`});
 
+		// Sibling container for any feat-progression pickers (e.g. "Lessons of the First
+		// Ones" → an Origin feat). Lives outside the constantly-rebuilt `listEl` so picks
+		// survive list re-renders; reuses the level-up picker so sub-choice handling stays
+		// in lockstep across flows.
+		const progressionContainer = e_({outer: `<div class="charsheet__quickbuild-opt-feat-progression-wrap mt-2"></div>`});
+		const levelUp = this._page.getLevelUpHelper?.();
+		const renderProgressionPickers = () => {
+			progressionContainer.innerHTML = "";
+			if (!levelUp || typeof levelUp._renderOptFeatureFeatProgressionPicker !== "function") return;
+			selectedList.forEach(opt => {
+				const picks = CharacterSheetClassUtils.getOptFeatureFeatProgressionPicks(opt, (opt._timesKnown || 0) + 1);
+				if (!picks.length) return;
+				// Stable per-instance id + storage so the granted feat can be cascade-removed
+				// when the invocation is later removed/swapped. Never reset existing picks.
+				if (!opt.id) opt.id = CryptUtil.uid();
+				if (!Array.isArray(opt._progressionFeats)) opt._progressionFeats = [];
+				const wrap = e_({outer: `<div class="charsheet__quickbuild-opt-feat-progression mb-2 p-2" style="border-left: 3px solid var(--rgb-link); background: rgba(var(--rgb-link-rgb), 0.05); border-radius: 4px;"></div>`});
+				wrap.insertAdjacentHTML("beforeend", `<div class="ve-small ve-bold mb-1">${opt.name} — feat choice:</div>`);
+				const inner = e_({outer: `<div></div>`});
+				wrap.append(inner);
+				levelUp._renderOptFeatureFeatProgressionPicker(opt, picks, inner);
+				progressionContainer.append(wrap);
+			});
+		};
+
 		const renderList = (filter = "") => {
 			listEl.innerHTML = "";
 
@@ -2629,6 +2666,9 @@ class CharacterSheetQuickBuild {
 						if (isSelected) {
 							const idx = selectedList.findIndex(s => s.name === opt.name && s.source === opt.source);
 							if (idx >= 0) selectedList.splice(idx, 1);
+							// Drop any in-progress feat picks so a deselected invocation doesn't
+							// carry stale grants into validation/apply.
+							opt._progressionFeats = [];
 						} else {
 							if (selectedList.length >= gain.totalNeeded) {
 								JqueryUtil.doToast({type: "warning", content: `You can only select ${gain.totalNeeded} ${gain.name}.`});
@@ -2638,6 +2678,7 @@ class CharacterSheetQuickBuild {
 						}
 						renderList(filter);
 						section.querySelector(".qb-opt-counter").textContent = `${selectedList.length}/${gain.totalNeeded}`;
+						renderProgressionPickers();
 					});
 					listEl.append(item);
 				});
@@ -2646,8 +2687,9 @@ class CharacterSheetQuickBuild {
 		const renderListDebounced = MiscUtil.debounce(() => renderList(search.value), 100);
 		search.addEventListener("input", renderListDebounced);
 		renderList();
+		renderProgressionPickers();
 
-		section.append(search, listEl);
+		section.append(search, listEl, progressionContainer);
 		step.append(section);
 	}
 
@@ -4820,6 +4862,9 @@ class CharacterSheetQuickBuild {
 			const assigned = allSelected.slice(startIdx, endIdx);
 
 			assigned.forEach(opt => {
+				// Stable id shared between the optional feature and any feat it grants, so
+				// `removeFeature` can cascade-remove the linked feat (and its effects).
+				if (!opt.id) opt.id = CryptUtil.uid();
 				this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(opt, {
 					className: analysis.className,
 					classSource: analysis.classSource,
@@ -4827,6 +4872,29 @@ class CharacterSheetQuickBuild {
 					featureType: "Optional Feature",
 					optionalFeatureTypes: opt.featureType || gain.featureTypes,
 				}));
+
+				// Cascade-add any feats granted by this invocation via featProgression
+				// (e.g. "Lessons of the First Ones" → the Origin feat the player picked).
+				if (Array.isArray(opt._progressionFeats) && opt._progressionFeats.length) {
+					for (const slot of opt._progressionFeats) {
+						if (!slot || !slot.feat) continue;
+						const grantedFeat = slot.feat;
+						if (grantedFeat._featChoices?.optionalFeatures?.length) {
+							grantedFeat.choices = {
+								...grantedFeat._featChoices,
+								optionalFeaturePicks: grantedFeat._featChoices.optionalFeatures.flatMap(group => group.picks || []),
+							};
+						} else if (grantedFeat._featChoices) {
+							grantedFeat.choices = {...grantedFeat._featChoices};
+						}
+						const added = this._state.addFeat(grantedFeat, {
+							allSpells: this._page.getSpells(),
+							skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(grantedFeat),
+							linkedToOptFeature: {id: opt.id, name: opt.name, source: opt.source},
+						});
+						if (added) CharacterSheetClassUtils.applyFeatBonuses(this._state, grantedFeat, grantedFeat._featChoices);
+					}
+				}
 			});
 		});
 	}
