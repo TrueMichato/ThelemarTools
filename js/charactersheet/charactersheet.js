@@ -6257,11 +6257,14 @@ class CharacterSheetPage {
 		if (this._combat?.getCombatClassifiedFeatures) {
 			combatFeatures = this._combat.getCombatClassifiedFeatures();
 		} else {
-			// Fallback: derive from overrides directly
+			// Fallback: derive from overrides directly (excluding Fighter-owned features,
+			// which have their own dedicated Combat-tab panel).
 			const features = this._state.getFeatures();
 			const overrides = CharacterSheetState?.FEATURE_CLASSIFICATION_OVERRIDES || {};
+			const fighterOwned = globalThis.CharacterSheetCombat?.FIGHTER_OWNED_COMBAT_FEATURES || [];
 			combatFeatures = features.filter(f => {
 				const nameLower = f.name?.toLowerCase() || "";
+				if (fighterOwned.includes(nameLower)) return false;
 				const cls = overrides[nameLower];
 				return cls === "combat" || cls === "reaction";
 			});
