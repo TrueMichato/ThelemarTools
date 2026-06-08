@@ -6291,6 +6291,63 @@ class CharacterSheetState {
 		return this.getAbilityMod(ability);
 	}
 
+	/**
+	 * Resolve a weapon attack/damage ability key to a modifier WITHOUT any
+	 * active-state overrides. Handles the "finesse" (max STR/DEX) and
+	 * "spellcasting" (max INT/WIS/CHA) pseudo-keys; otherwise the plain mod.
+	 * @param {string} abilityKey - "str"|"dex"|...|"finesse"|"spellcasting"
+	 * @returns {number}
+	 */
+	_resolveBaseWeaponAbilityMod (abilityKey) {
+		if (abilityKey === "finesse") return Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex"));
+		if (abilityKey === "spellcasting") return Math.max(this.getAbilityMod("int"), this.getAbilityMod("wis"), this.getAbilityMod("cha"));
+		return this.getAbilityMod(abilityKey);
+	}
+
+	/**
+	 * Whether an attack is a weapon attack eligible for Bladesong's INT override.
+	 * Spell attacks (and the "spellcasting" pseudo-ability) are excluded so a
+	 * custom/temp spell attack never silently gains INT scaling.
+	 * @param {object} attack
+	 * @returns {boolean}
+	 */
+	_isBladesongWeaponAttack (attack) {
+		if (!attack || typeof attack !== "object") return false;
+		if (attack.isSpell || attack.isSpellAttack) return false;
+		if (attack.abilityMod === "spellcasting") return false;
+		return true;
+	}
+
+	/**
+	 * Additive bonus Bladesong contributes to a weapon attack/damage roll.
+	 * While Bladesong is active a Bladesinger may use Intelligence in place of the
+	 * weapon's normal ability when it is higher, so the bonus is the
+	 * (player-favorable) positive difference between INT and the weapon's
+	 * normally-resolved modifier. 0 when Bladesong is inactive, the attack is not
+	 * a weapon attack, or INT does not exceed the weapon's mod.
+	 * @param {object} attack - Attack object (uses attack.abilityMod, attack.isSpell)
+	 * @returns {number}
+	 */
+	getBladesongWeaponBonus (attack) {
+		if (!this.isStateTypeActive?.("bladesong")) return 0;
+		if (!this._isBladesongWeaponAttack(attack)) return 0;
+		const base = this._resolveBaseWeaponAbilityMod(attack.abilityMod || "str");
+		return Math.max(0, this.getAbilityMod("int") - base);
+	}
+
+	/**
+	 * Effective ability modifier for a weapon attack/damage roll, accounting for
+	 * active-state overrides (currently Bladesong: MAX(weapon mod, INT)). Composes
+	 * with finesse — the weapon's own mod is resolved first (which may itself be
+	 * MAX(STR, DEX)), then the override is applied.
+	 * @param {object} attack - Attack object (uses attack.abilityMod, attack.isSpell)
+	 * @returns {number}
+	 */
+	getWeaponAbilityMod (attack) {
+		const base = this._resolveBaseWeaponAbilityMod(attack?.abilityMod || "str");
+		return base + this.getBladesongWeaponBonus(attack);
+	}
+
 	getAbilityBase (ability) {
 		return this._data.abilities[ability] || 10;
 	}

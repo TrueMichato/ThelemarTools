@@ -1276,7 +1276,7 @@ export class CharacterSheetPlayMode {
 		const customAttackIds = new Set(this._state.getAttacks().map(a => a.id));
 
 		attacks.forEach(attack => {
-			const abilityMod = this._state.getAbilityMod(attack.abilityMod || "str");
+			const abilityMod = this._state.getWeaponAbilityMod(attack);
 			const profBonus = this._state.getProficiencyBonus();
 			const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0);
 			const totalDmgBonus = abilityMod + (attack.damageBonus || 0);
