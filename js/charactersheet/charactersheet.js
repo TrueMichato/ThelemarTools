@@ -7216,11 +7216,80 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Open a modal letting the player choose a Zodiac Form (Circle of the Zodiac).
+	 * @param {string} tier - The form tier to offer ("month" | "starWeek").
+	 * @returns {Promise<string|null>} The chosen form id, or null if cancelled.
+	 */
+	async _pChooseZodiacForm (tier = "month") {
+		const defs = (CharacterSheetState.ZODIAC_FORM_DEFS || []).filter(d => d.tier === tier);
+		if (!defs.length) return null;
+		const chosen = await InputUiUtil.pGetUserEnum({
+			title: "Choose a Zodiac Form",
+			placeholder: "Select a constellation...",
+			values: defs.map(d => d.id),
+			fnDisplay: (id) => {
+				const def = defs.find(d => d.id === id);
+				if (!def) return id;
+				return `${def.icon ? `${def.icon} ` : ""}${def.name}${def.summary ? ` — ${def.summary}` : ""}`;
+			},
+			isResolveItem: true,
+		});
+		return chosen || null;
+	}
+
+	/**
 	 * Activate a feature's state, deducting resource cost if applicable
 	 */
-	_activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
 		// Use passed cost, or fall back to state type default
 		const cost = resourceCost || stateType?.resourceCost || 1;
+
+		// ===== ZODIAC FORM (Circle of the Zodiac): choose-before-deduct =====
+		// Open the constellation picker FIRST; only spend a Wild Shape use once
+		// the player commits to a form. Cancelling costs nothing.
+		if (activationInfo?.needsFormChoice && stateTypeId === "zodiacForm") {
+			if (resource && resource.current < cost) {
+				JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
+				return;
+			}
+			const formId = await this._pChooseZodiacForm(activationInfo.formTier || "month");
+			if (!formId) return; // Cancelled — zero mutation
+			const def = CharacterSheetState.getZodiacFormDef(formId);
+			if (!def) return;
+
+			// Re-read the resource by id after the modal: a concurrent action may
+			// have spent it while the picker was open. Abort without mutation if
+			// it's no longer available.
+			let liveResource = null;
+			if (resource) {
+				liveResource = resource.isStamina
+					? {isStamina: true, current: this._state.getStaminaCurrent(), id: "stamina"}
+					: this._state.getResources().find(r => r.id === resource.id);
+				if (!liveResource || liveResource.current < cost) {
+					JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
+					return;
+				}
+			}
+
+			// Commit: spend the Wild Shape use now.
+			if (liveResource) {
+				if (liveResource.isStamina) this._state.setStaminaCurrent(liveResource.current - cost);
+				else this._state.setResourceCurrent(liveResource.id, liveResource.current - cost);
+			}
+
+			this._state.activateZodiacForm(formId, {
+				sourceFeatureId: feature.id,
+				resourceId: resource?.id,
+				description: feature.description,
+			});
+
+			this._saveCurrentCharacter();
+			this._renderResources();
+			this._renderActiveStates();
+			this._combatModule?.renderCombatStates?.();
+			this._renderCharacter();
+			return;
+		}
 
 		// Deduct resource cost if applicable
 		if (resource && resource.current >= cost) {
@@ -13182,11 +13251,15 @@ class CharacterSheetPage {
 			isMinHeight0: true,
 			isWidth100: true,
 			cbClose: () => {
+				// Ability totals can change resource maximums (e.g. Star Map =
+				// WIS modifier), so re-derive them before re-rendering.
+				this._state.recalculateResourceMaximums();
 				this._renderAbilities();
 				this._renderAbilityScores();
 				this._renderAbilitiesDetailed();
 				this._renderSavingThrows();
 				this._renderSkills();
+				this._renderResources();
 				this._saveCurrentCharacter();
 			},
 		});

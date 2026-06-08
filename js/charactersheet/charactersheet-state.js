@@ -26,8 +26,20 @@ class FeatureUsesParser {
 		let uses = null;
 		let recharge = null;
 
-		// Determine recharge type first
-		if (/short or long rest|short rest/i.test(plainText)) {
+		// Determine recharge type first.
+		// Prefer the canonical use-recovery clause (e.g. "regain all
+		// expended uses when you finish a Long Rest") so that an incidental
+		// earlier mention of a different rest type — such as a replacement
+		// or maintenance ceremony that "can be performed during a Short or
+		// Long Rest" — does not mis-set the recharge. The recovery clause is
+		// bounded to a single sentence ([^.]) so it never bleeds into a
+		// following sentence.
+		const recoveryMatch = plainText.match(/regain[^.]*?(?:expended|all|uses?|charges?)[^.]*?\b(?:short|long) rest/);
+		if (recoveryMatch) {
+			// Within the recovery clause, "short or long rest" / "short rest"
+			// recharges on the shorter rest; otherwise it's a long-rest feature.
+			recharge = /short or long rest|short rest/.test(recoveryMatch[0]) ? "short" : "long";
+		} else if (/short or long rest|short rest/i.test(plainText)) {
 			recharge = "short";
 		} else if (/long rest|dawn|dusk|midnight/i.test(plainText)) {
 			recharge = "long";
@@ -3728,6 +3740,11 @@ class CharacterSheetState {
 		// Convert to the toggle model (strip uses, drop the orphan resource).
 		this._migrateHuntersPrey();
 
+		// Migrate Star Map (Stars/Zodiac Druid): older saves parsed its recharge as
+		// "short" (the replacement-ceremony sentence) and/or its max from proficiency
+		// bonus. Correct to long-rest recharge and a max of the Wisdom modifier.
+		this._migrateStarMap();
+
 		// Migrate modifiers: re-process modifiers that may be missing special flags
 		this._migrateModifiers();
 
@@ -4128,6 +4145,45 @@ class CharacterSheetState {
 
 		// Ensure the toggle state exists
 		this._ensureHuntersPreyInitialized();
+	}
+
+	/**
+	 * Migrate the Star Map feature (Circle of Stars / Circle of the Zodiac).
+	 * Older saves may have stored the wrong recharge ("short", picked up from the
+	 * replacement-ceremony sentence) and/or the wrong max (proficiency bonus rather
+	 * than Wisdom modifier). This narrowly fixes only the Star Map feature/resource:
+	 * recharge → "long", max → max(1, WIS mod), clamping current down without ever
+	 * resetting it up. Idempotent and guarded.
+	 */
+	_migrateStarMap () {
+		const isStarMap = (name) => (name || "").trim().toLowerCase() === "star map";
+		const features = Array.isArray(this._data.features) ? this._data.features : [];
+		const starMapFeature = features.find(f => isStarMap(f.name));
+		if (!starMapFeature) return;
+
+		const newMax = Math.max(1, this.getAbilityMod("wis"));
+
+		// Fix the feature's own uses block.
+		if (starMapFeature.uses) {
+			if (starMapFeature.uses.recharge === "short") starMapFeature.uses.recharge = "long";
+			if (starMapFeature.uses.max !== newMax) {
+				starMapFeature.uses.max = newMax;
+				starMapFeature.uses.current = Math.min(starMapFeature.uses.current ?? newMax, newMax);
+			}
+		}
+
+		// Fix the linked resource (prefer featureId linkage, fall back to name).
+		if (Array.isArray(this._data.resources)) {
+			const resource = this._data.resources.find(r => r.featureId === starMapFeature.id)
+				|| this._data.resources.find(r => isStarMap(r.name));
+			if (resource) {
+				if (resource.recharge === "short") resource.recharge = "long";
+				if (resource.max !== newMax) {
+					resource.max = newMax;
+					resource.current = Math.min(resource.current ?? newMax, newMax);
+				}
+			}
+		}
 	}
 
 	_migrateRaceBackgroundToHistory () {
@@ -14910,7 +14966,14 @@ class CharacterSheetState {
 									// =====================================================
 									// Star Map (level 3) - from official, but TGTT references it
 									calculations.hasStarMap = true;
-									calculations.guidingBoltFreeUses = profBonus;
+									calculations.guidingBoltFreeUses = Math.max(1, wisMod);
+									// Generic, data-driven descriptor consumed by the
+									// casting flow so Guiding Bolt can be cast without a
+									// spell slot by spending the Star Map resource.
+									calculations.noSlotCasts = [
+										...(calculations.noSlotCasts || []),
+										{spell: "Guiding Bolt", sources: ["XPHB", "PHB"], resourceName: "Star Map", castLevel: 1},
+									];
 
 									// Zodiac Form (level 3) - replaces Starry Form
 									// Uses Wild Shape, lasts 10 minutes, sheds light
@@ -15029,9 +15092,20 @@ class CharacterSheetState {
 									// =====================================================
 									// OFFICIAL STARRY FORM (PHB/TCE/XPHB)
 									// =====================================================
-									// Star Map (level 2) - free Guidance, Guiding Bolt uses
+									// Star Map: free Guidance + slot-free Guiding Bolt.
+									// The number of free casts differs by edition: the
+									// 2024 (XPHB) Star Map uses the Wisdom modifier, while
+									// the 2014 (TCE) version uses the proficiency bonus.
+									const isXphbStars = cls.subclass?.source === "XPHB"
+										|| cls.subclass?.edition === "one";
 									calculations.hasStarMap = true;
-									calculations.guidingBoltFreeUses = profBonus;
+									calculations.guidingBoltFreeUses = isXphbStars
+										? Math.max(1, wisMod)
+										: profBonus;
+									calculations.noSlotCasts = [
+										...(calculations.noSlotCasts || []),
+										{spell: "Guiding Bolt", sources: ["XPHB", "PHB"], resourceName: "Star Map", castLevel: 1},
+									];
 
 									// Starry Form (level 2) - Archer, Chalice, or Dragon
 									calculations.hasStarryForm = true;
@@ -23122,6 +23196,45 @@ class CharacterSheetState {
 		}
 	}
 
+	/**
+	 * Resolve "cast without a spell slot" resources that apply to a given spell.
+	 * Driven by getFeatureCalculations().noSlotCasts (a generic, data-driven
+	 * descriptor), so any feature granting slot-free casts of a specific spell
+	 * (e.g. Star Map → Guiding Bolt) participates in the casting flow without
+	 * special-casing it. Returns only options that still have charges.
+	 * @param {object} spell Spell object (expects .name, optional .source, .level)
+	 * @returns {Array<{resourceId:string, name:string, current:number, max:number, castLevel:number}>}
+	 */
+	getNoSlotCastResourcesForSpell (spell) {
+		if (!spell?.name) return [];
+		const calc = this.getFeatureCalculations() || {};
+		const descriptors = calc.noSlotCasts || [];
+		if (!descriptors.length) return [];
+
+		const spellName = spell.name.toLowerCase().trim();
+		const spellSource = spell.source ? String(spell.source).toLowerCase() : null;
+
+		const out = [];
+		for (const desc of descriptors) {
+			if (!desc?.spell || desc.spell.toLowerCase().trim() !== spellName) continue;
+			// If the descriptor constrains sources and the spell has a source, enforce it.
+			if (spellSource && Array.isArray(desc.sources) && desc.sources.length) {
+				if (!desc.sources.some(s => String(s).toLowerCase() === spellSource)) continue;
+			}
+			const resource = this.getResource(desc.resourceName);
+			if (!resource) continue; // granting feature/resource must exist
+			if ((resource.current || 0) <= 0) continue;
+			out.push({
+				resourceId: resource.id,
+				name: resource.name,
+				current: resource.current,
+				max: resource.max,
+				castLevel: desc.castLevel || spell.level || 1,
+			});
+		}
+		return out;
+	}
+
 	recoverResources (rechargeType) {
 		this._data.resources.forEach(r => {
 			if (r.recharge === rechargeType || (rechargeType === "long" && r.recharge === "short")) {
@@ -29778,12 +29891,35 @@ class CharacterSheetState {
 			}
 		}
 
+		// Apply roll floors granted by active states (e.g. the Cat Zodiac Form:
+		// "treat a d20 of 7 or lower as 8" on Perception/Stealth/Acrobatics).
+		// Sourcing these from active-state effects means they auto-clear when the
+		// state ends, with no orphaned mutation of `_data.rollFloors`.
+		{
+			const parts = type.split(":");
+			const category = parts[0];
+			const specific = parts[1];
+			if (category === "skill" && specific) {
+				for (const e of this.getActiveStateEffects()) {
+					if (e.type !== "rollFloor") continue;
+					const skills = e.skills || (e.skill ? [e.skill] : null);
+					const appliesAll = !skills || skills.includes("all");
+					if (!appliesAll && !skills.includes(specific)) continue;
+					const floorMin = e.minimum ?? e.value;
+					if (floorMin == null) continue;
+					result.minimum = result.minimum == null ? floorMin : Math.max(result.minimum, floorMin);
+					const src = e.source || e.stateName;
+					if (src && !result.sources.includes(src)) result.sources.push(src);
+				}
+			}
+		}
+
 		return result;
 	}
 
 	/**
-	 * Aggregate all modifiers that match a given prefix (e.g., "passive:", "skill:")
-	 * @param {string} prefix - The type prefix to match (e.g., "passive:", "skill:")
+	 * Aggregate enabled named modifiers grouped by the suffix after a given prefix.
+	 * @param {string} prefix - The modifier type prefix (e.g., "skill:").
 	 * @returns {Object} Map of suffix → value (e.g., {"perception": 3, "insight": 2})
 	 */
 	aggregateModifiersByPrefix (prefix) {
@@ -30303,6 +30439,170 @@ class CharacterSheetState {
 	];
 
 	/**
+	 * Zodiac Form constellation definitions (Circle of the Zodiac, TGTT).
+	 * Each entry describes one constellation form the druid can assume while in
+	 * their Zodiac Form. `getEffects(state)` returns active-state customEffects
+	 * using the existing effect vocabulary (bonus / advantage / swimSpeed /
+	 * burrowSpeed / rollFloor) plus `note` / `info` lines for triggered or
+	 * situational abilities that aren't passive stat deltas. The framework is
+	 * generic: Star Week (level 10) and Full Zodiac (level 14) forms wire in by
+	 * adding entries with the appropriate `tier`.
+	 */
+	static ZODIAC_FORM_DEFS = [
+		{
+			id: "beaver",
+			name: "Beaver",
+			icon: "🦫",
+			tier: "month",
+			summary: "Reaction: reduce damage to an ally within 30 ft.",
+			getEffects: (state) => {
+				const calc = state.getFeatureCalculations() || {};
+				return [{type: "info", label: `Reaction: when a creature you can see within 30 ft is hit, reduce the damage it takes by ${calc.beaverDamageReduction} (druid level + proficiency bonus).`}];
+			},
+		},
+		{
+			id: "aurochs",
+			name: "Aurochs",
+			icon: "🐂",
+			tier: "month",
+			summary: "Advantage + proficiency on Strength checks/saves; carry as one size larger.",
+			getEffects: (state) => {
+				const prof = state.getProficiencyBonus();
+				return [
+					{type: "advantage", target: "check:str"},
+					{type: "advantage", target: "save:str"},
+					{type: "bonus", target: "check:str", useProficiency: true},
+					{type: "bonus", target: "save:str", useProficiency: true},
+					{type: "note", value: `Add your proficiency bonus (+${prof}) to Strength checks and saves; count as one size larger for carrying capacity.`},
+				];
+			},
+		},
+		{
+			id: "horse",
+			name: "Horse",
+			icon: "🐎",
+			tier: "month",
+			summary: "Walking speed doubled; Dash as a bonus action.",
+			getEffects: (state) => {
+				const walk = state.getWalkSpeed ? state.getWalkSpeed() : 30;
+				return [
+					{type: "bonus", target: "speed:walk", value: walk},
+					{type: "note", value: "Your walking speed is doubled, and you can take the Dash action as a bonus action."},
+				];
+			},
+		},
+		{
+			id: "octopus",
+			name: "Octopus",
+			icon: "🐙",
+			tier: "month",
+			summary: "Swim speed = walk; underwater breathing and +5 ft reach.",
+			getEffects: (state) => {
+				const calc = state.getFeatureCalculations() || {};
+				const walk = state.getWalkSpeed ? state.getWalkSpeed() : 30;
+				return [
+					{type: "swimSpeed", value: walk},
+					{type: "note", value: `While submerged you can breathe normally, ignore underwater attack and Perception penalties, and gain +${calc.octopusReachBonus ?? 5} ft of melee reach.`},
+				];
+			},
+		},
+		{
+			id: "peacock",
+			name: "Peacock",
+			icon: "🦚",
+			tier: "month",
+			summary: "Attackers must save or choose a new target.",
+			getEffects: (state) => {
+				const calc = state.getFeatureCalculations() || {};
+				return [{type: "info", label: `A creature targeting you with an attack must succeed on a DC ${calc.peacockSaveDc} Wisdom save or choose a new target.`}];
+			},
+		},
+		{
+			id: "roc",
+			name: "Roc",
+			icon: "🦅",
+			tier: "month",
+			summary: "Cast Gust of Wind or Warding Wind without a slot.",
+			getEffects: () => [{type: "info", label: "As an action, cast Gust of Wind or Warding Wind without expending a spell slot."}],
+		},
+		{
+			id: "bee",
+			name: "Bee",
+			icon: "🐝",
+			tier: "month",
+			summary: "Bonus-action ranged radiant spell attack.",
+			getEffects: (state) => {
+				const calc = state.getFeatureCalculations() || {};
+				return [{type: "info", label: `Bonus action: make a ranged spell attack (range ${calc.beeRange ?? 60} ft) dealing ${calc.beeDamage} radiant damage.`}];
+			},
+		},
+		{
+			id: "hound",
+			name: "Hound",
+			icon: "🐕",
+			tier: "month",
+			summary: "Bonus-action mark a creature within 60 ft.",
+			getEffects: (state) => {
+				const calc = state.getFeatureCalculations() || {};
+				return [{type: "info", label: `Bonus action: mark a creature within ${calc.houndMarkRange ?? 60} ft. It has disadvantage on attacks against anyone but you, and you always know its location.`}];
+			},
+		},
+		{
+			id: "cat",
+			name: "Cat",
+			icon: "🐈",
+			tier: "month",
+			summary: "Roll floor 8 on Perception/Stealth/Acrobatics; +1d4 passive Perception.",
+			getEffects: (state) => {
+				const calc = state.getFeatureCalculations() || {};
+				return [
+					{type: "rollFloor", skills: ["perception", "stealth", "acrobatics"], minimum: calc.catMinRoll ?? 8, source: "Cat Form"},
+					{type: "note", value: "You gain a +1d4 bonus to passive Perception, and treat a d20 roll of 7 or lower as an 8 on Perception, Stealth, and Acrobatics checks."},
+				];
+			},
+		},
+		{
+			id: "griffon",
+			name: "Griffon",
+			icon: "🦅",
+			tier: "month",
+			summary: "Advantage vs frightened; bonus-action extra melee attack.",
+			getEffects: () => [{type: "info", label: "You have advantage on saving throws to avoid or end the frightened condition. After you hit with a melee attack on your turn, you can make one extra melee attack as a bonus action."}],
+		},
+		{
+			id: "bulette",
+			name: "Bulette",
+			icon: "🦏",
+			tier: "month",
+			summary: "AC bonus and a burrow speed.",
+			getEffects: (state) => {
+				const calc = state.getFeatureCalculations() || {};
+				const walk = state.getWalkSpeed ? state.getWalkSpeed() : 30;
+				return [
+					{type: "bonus", target: "ac", value: calc.buletteAcBonus ?? Math.ceil(state.getProficiencyBonus() / 2)},
+					{type: "burrowSpeed", value: Math.floor(walk / 2)},
+				];
+			},
+		},
+		{
+			id: "phoenix",
+			name: "Phoenix",
+			icon: "🔥",
+			tier: "month",
+			summary: "Revive when stabilized while in form.",
+			getEffects: (state) => {
+				const calc = state.getFeatureCalculations() || {};
+				return [{type: "info", label: `If you are stabilized while unconscious in this form, you immediately regain ${calc.phoenixStabilizeHeal} hit points.`}];
+			},
+		},
+	];
+
+	/** Get a Zodiac Form definition by its id. */
+	static getZodiacFormDef (formId) {
+		return CharacterSheetState.ZODIAC_FORM_DEFS.find(f => f.id === formId) || null;
+	}
+
+	/**
 	 * State type definitions with their effects
 	 * Each state defines what effects it provides when active
 	 */
@@ -30351,6 +30651,7 @@ class CharacterSheetState {
 			duration: "Hours based on druid level",
 			endConditions: ["Drop to 0 HP", "Ended as bonus action", "Duration expires"],
 			resourceId: null, // Will be linked to Wild Shape resource
+			exclusiveWith: ["zodiacForm"], // Wild Shape and Zodiac Form share the same resource/body
 		},
 		defensiveStance: {
 			id: "defensiveStance",
@@ -30434,6 +30735,23 @@ class CharacterSheetState {
 			isGeneric: true, // Will be customized per feature
 			useFeatureDescription: true, // Show the actual feature description instead of generic
 			activationAction: "bonus",
+		},
+		zodiacForm: {
+			id: "zodiacForm",
+			name: "Zodiac Form",
+			icon: "🌟",
+			description: "A luminous constellation form assumed using Wild Shape (Circle of the Zodiac). Choose a constellation when you transform; its effects apply for the duration.",
+			effects: [], // Per-form effects supplied as customEffects at activation
+			duration: "10 minutes",
+			endConditions: ["Dismissed (no action)", "Incapacitated", "Use this feature again", "Duration expires"],
+			resourceName: "Wild Shape",
+			resourceCost: 1,
+			detectPatterns: [], // Detection handled explicitly in detectActivatableFeature
+			isGeneric: true, // Effects depend on the chosen constellation
+			useFeatureDescription: true,
+			activationAction: "bonus",
+			needsFormChoice: true, // Activation opens a form-selection modal
+			exclusiveWith: ["wildShape"], // Zodiac Form and Wild Shape share the same resource/body
 		},
 		patientDefense: {
 			id: "patientDefense",
@@ -31709,6 +32027,33 @@ class CharacterSheetState {
 						};
 					}
 				}
+			}
+		}
+
+		// ===== ZODIAC FORM (Circle of the Zodiac, TGTT) =====
+		// Detected BEFORE the generic pattern list because its description mentions
+		// "your Wild Shape feature", which would otherwise be caught by the
+		// /wild shape/i pattern and mis-classified as a Wild Shape transform.
+		// Returns `stateType` (so getActivatableFeatures can resolve the Wild Shape
+		// resource) and `needsFormChoice` (so activation opens the form modal).
+		{
+			const zodiacMatch = name.match(/^zodiac form:\s*(month|star week)/i)
+				|| (/^zodiac form\b/i.test(name) ? [null, "month"] : null);
+			if (zodiacMatch) {
+				const formTier = /star week/i.test(zodiacMatch[1] || "") ? "starWeek" : "month";
+				const zodiacStateType = this.ACTIVE_STATE_TYPES.zodiacForm;
+				return {
+					stateTypeId: "zodiacForm",
+					stateType: zodiacStateType,
+					matchedBy: "name",
+					activationAction: activationAction || zodiacStateType.activationAction,
+					effects: zodiacStateType.effects,
+					duration: zodiacStateType.duration,
+					endConditions: zodiacStateType.endConditions,
+					isToggle: true,
+					needsFormChoice: true,
+					formTier,
+				};
 			}
 		}
 
@@ -33075,6 +33420,42 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Get the currently-active Zodiac Form descriptor, or null.
+	 * @returns {{tier:string, formId:string, formName:string}|null}
+	 */
+	getActiveZodiacForm () {
+		const state = this._data.activeStates.find(s => s.stateTypeId === "zodiacForm" && s.active);
+		return state?.zodiacForm || null;
+	}
+
+	/**
+	 * Activate a Zodiac Form (Circle of the Zodiac) by id, snapshotting its
+	 * effects against the base sheet. Any previously-active Zodiac Form is
+	 * deactivated FIRST so that snapshot-based effects (e.g. Horse doubling the
+	 * walking speed) are computed from the unmodified speed rather than stacking
+	 * on top of the prior form.
+	 * @param {string} formId - The form id from ZODIAC_FORM_DEFS.
+	 * @param {object} [options] - Extra activateState options (sourceFeatureId, resourceId, description).
+	 * @returns {string|null} The active-state instance id, or null if the form is unknown.
+	 */
+	activateZodiacForm (formId, options = {}) {
+		const def = CharacterSheetState.getZodiacFormDef(formId);
+		if (!def) return null;
+		// Clear any existing Zodiac Form before snapshotting the new form's
+		// effects so doubling/equal-to-walk effects don't compound.
+		this.deactivateState("zodiacForm");
+		const customEffects = def.getEffects?.(this) || [];
+		return this.activateState("zodiacForm", {
+			...options,
+			name: `Zodiac Form: ${def.name}`,
+			icon: def.icon,
+			customEffects,
+			duration: CharacterSheetState.ACTIVE_STATE_TYPES.zodiacForm?.duration,
+			zodiacForm: {tier: def.tier, formId: def.id, formName: def.name},
+		});
+	}
+
+	/**
 	 * Add a new active state
 	 * @param {string} stateTypeId - The state type ID from ACTIVE_STATE_TYPES, or "custom" for custom states
 	 * @param {object} options - Additional options for this state instance
@@ -33117,8 +33498,10 @@ class CharacterSheetState {
 			if (options.name) existing.name = options.name;
 			if (options.description) existing.description = options.description;
 			if (options.sourceFeatureId) existing.sourceFeatureId = options.sourceFeatureId;
+			if (options.icon) existing.icon = options.icon;
 			if (options.customEffects) existing.customEffects = options.customEffects;
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
+			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -33151,6 +33534,8 @@ class CharacterSheetState {
 			grantsConditions: options.grantsConditions || null,
 			// For Wild Shape
 			beastData: options.beastData || null,
+			// For Zodiac Form (Circle of the Zodiac): the chosen constellation
+			zodiacForm: options.zodiacForm || null,
 		};
 
 		this._data.activeStates.push(state);
@@ -33228,8 +33613,10 @@ class CharacterSheetState {
 			if (options.name) existing.name = options.name;
 			if (options.description) existing.description = options.description;
 			if (options.sourceFeatureId) existing.sourceFeatureId = options.sourceFeatureId;
+			if (options.icon) existing.icon = options.icon;
 			if (options.customEffects) existing.customEffects = options.customEffects;
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
+			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;

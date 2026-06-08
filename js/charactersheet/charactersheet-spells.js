@@ -2085,25 +2085,40 @@ class CharacterSheetSpells {
 			}
 		}
 
-		if (availableSlotLevels.length === 0) {
+		// No-slot cast resources (e.g. Star Map → Guiding Bolt). These let the
+		// player spend a feature resource instead of a spell slot. They are
+		// first-class cast options unified with the slot options below.
+		const noSlotOptions = (this._state.getNoSlotCastResourcesForSpell?.(spell) || []).map(r => ({
+			isNoSlotResource: true,
+			resourceId: r.resourceId,
+			resourceName: r.name,
+			level: r.castLevel,
+			isPact: false,
+			label: `${r.name} — cast at level ${r.castLevel}, no slot (${r.current}/${r.max})`,
+		}));
+
+		// Unified cast options: no-slot resources first, then pact/leveled slots.
+		const castOptions = [...noSlotOptions, ...availableSlotLevels];
+
+		if (castOptions.length === 0) {
 			JqueryUtil.doToast({type: "warning", content: "No spell slots available!"});
 			return;
 		}
 
-		// If only one option (or only base-level), auto-select; otherwise show picker
+		// If only one option, auto-select; otherwise show picker
 		let selectedSlot;
-		if (availableSlotLevels.length === 1) {
-			selectedSlot = availableSlotLevels[0];
+		if (castOptions.length === 1) {
+			selectedSlot = castOptions[0];
 		} else {
 			const chosenIdx = await InputUiUtil.pGetUserEnum({
 				title: `Cast ${spell.name} — Choose Slot Level`,
 				htmlDescription: `<div><strong>${spell.name}</strong> is a level ${spell.level} spell. Choose which spell slot to use:</div>`,
-				values: availableSlotLevels.map(s => s.label),
+				values: castOptions.map(s => s.label),
 				fnDisplay: v => v,
 				isResolveItem: true,
 			});
 			if (chosenIdx == null) return; // User cancelled
-			selectedSlot = availableSlotLevels.find(s => s.label === chosenIdx);
+			selectedSlot = castOptions.find(s => s.label === chosenIdx);
 			if (!selectedSlot) return;
 		}
 
@@ -2138,7 +2153,7 @@ class CharacterSheetSpells {
 				skipSlotConsumption = true;
 			} else {
 				const lowerSlotEffect = vcEffects.find(e => e.type === "lowerSlot");
-				if (lowerSlotEffect) {
+				if (lowerSlotEffect && !selectedSlot.isNoSlotResource) {
 					const reducedLevel = Math.max(1, selectedSlot.level - (lowerSlotEffect.reduction || 1));
 					if (reducedLevel < selectedSlot.level) {
 						selectedSlot = {...selectedSlot, level: reducedLevel};
@@ -2151,8 +2166,18 @@ class CharacterSheetSpells {
 			}
 		}
 
-		// Consume the selected slot
-		if (!skipSlotConsumption) {
+		// Consume the selected slot (or no-slot resource).
+		// A no-slot resource (e.g. Star Map) is the player's chosen cast vehicle,
+		// so it is always spent — a variant component's "noSlot" effect waives
+		// spell *slots*, not feature resources.
+		if (selectedSlot.isNoSlotResource) {
+			const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
+			if (!res || (res.current || 0) <= 0) {
+				JqueryUtil.doToast({type: "warning", content: `No ${selectedSlot.resourceName || "resource"} charges remaining.`});
+				return;
+			}
+			this._state.setResourceCurrent(selectedSlot.resourceId, res.current - 1);
+		} else if (!skipSlotConsumption) {
 			if (selectedSlot.isPact) {
 				this._state.setPactSlotsCurrent(pactSlots.current - 1);
 			} else {
@@ -2169,9 +2194,12 @@ class CharacterSheetSpells {
 			castMeta,
 		);
 
-		// If user cancelled (e.g. target selection), refund the slot
+		// If user cancelled (e.g. target selection), refund the slot / resource
 		if (castResult?.cancelled) {
-			if (!skipSlotConsumption) {
+			if (selectedSlot.isNoSlotResource) {
+				const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
+				if (res) this._state.setResourceCurrent(selectedSlot.resourceId, (res.current || 0) + 1);
+			} else if (!skipSlotConsumption) {
 				if (selectedSlot.isPact) {
 					this._state.setPactSlotsCurrent(pactSlots.current);
 				} else {
@@ -2191,6 +2219,7 @@ class CharacterSheetSpells {
 
 		this.renderSlots();
 		this._page._renderQuickSpells(); // Update overview spell slots
+		if (selectedSlot.isNoSlotResource) this._page._renderResources?.(); // Refresh resource tracker (e.g. Star Map)
 		this._page.saveCharacter();
 	}
 
