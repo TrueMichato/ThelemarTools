@@ -234,3 +234,45 @@ describe("Bug 4 — Primal Focus on the Combat tab", () => {
 		expect(dodge.actionType).toBe("reaction");
 	});
 });
+
+describe("Bug — Overview/Combat Primal Focus ability parity", () => {
+	// The main controller (charactersheet.js) is not importable in the node test env
+	// (`window is not defined`), so — like the J8 source-pin above — we pin the wiring
+	// of `_renderOverviewRanger` to the canonical catalog. This guards the parity fix:
+	// the Overview must render the same getPrimalFocusModeAbilities catalog the Combat
+	// tab does (single source of truth), and must NOT regress to the removed ad-hoc
+	// `effectLines` summary, while still preserving the Focused Quarry damage number.
+	const source = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+	const overviewBody = (() => {
+		const m = source.match(/_renderOverviewRanger\s*\(\)\s*\{[\s\S]*?\n\t_renderOverviewAbilities\s*\(\)/);
+		return m ? m[0] : "";
+	})();
+	const combatBody = (() => {
+		const combatSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-combat.js"), "utf8");
+		const m = combatSrc.match(/renderCombatRanger\s*\(\)\s*\{[\s\S]*?\n\trenderCombatArcaneArcher\s*\(\)/);
+		return m ? m[0] : "";
+	})();
+
+	it("locates the _renderOverviewRanger and renderCombatRanger bodies", () => {
+		expect(overviewBody.length).toBeGreaterThan(0);
+		expect(combatBody.length).toBeGreaterThan(0);
+	});
+
+	it("Overview renders the canonical getPrimalFocusModeAbilities catalog (parity with Combat)", () => {
+		expect(combatBody).toContain("getPrimalFocusModeAbilities");
+		expect(overviewBody).toContain("getPrimalFocusModeAbilities");
+		// Passes the same upgrade gating the combat tab reads.
+		expect(overviewBody).toContain("primalFocusUpgrade1");
+		expect(overviewBody).toContain("primalFocusUpgrade2");
+		expect(overviewBody).toContain("primalFocusUpgrade3");
+	});
+
+	it("Overview preserves the Focused Quarry damage number (no info regression)", () => {
+		expect(overviewBody).toContain("focusedQuarryDamage");
+		expect(overviewBody).toMatch(/Focused Quarry/);
+	});
+
+	it("Overview no longer uses the removed ad-hoc effectLines summary", () => {
+		expect(overviewBody).not.toContain("effectLines");
+	});
+});
