@@ -3792,6 +3792,12 @@ class CharacterSheetState {
 		// Re-apply class feature effects (proficiencies, resistances, etc.)
 		// so that saved characters get all calculation-based effects on load
 		this.applyClassFeatureEffects();
+
+		// Re-derive Zodiac Form (Circle of the Zodiac) per-form effects from the
+		// current form definitions so older saves pick up effect fixes/additions
+		// (e.g. the Octopus reach bonus). Runs AFTER applyClassFeatureEffects so
+		// speed-relative effects snapshot against current derived speeds.
+		this._migrateZodiacForms();
 	}
 
 	/**
@@ -4198,7 +4204,47 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Migrate Primal Focus (TGTT Ranger) away from the legacy consumable-resource model.
+	 * Re-derive Zodiac Form (Circle of the Zodiac, TGTT) per-form `customEffects`
+	 * for every saved zodiac-form active state from its current definition. This
+	 * heals older saves whose persisted snapshot predates an effect fix/addition
+	 * (e.g. the Octopus melee-reach bonus). Migrating ALL zodiac states (not just
+	 * the active one) matters because toggling an inactive form back on simply
+	 * flips `active` without re-deriving its effects.
+	 *
+	 * Speed-relative effects (Horse doubling walk, Octopus swim = walk, Bulette
+	 * burrow) snapshot against the live speed, so each zodiac state is temporarily
+	 * marked inactive while its replacement effects are derived — otherwise its
+	 * own current effects would compound (the same precaution activateZodiacForm
+	 * takes by deactivating first). Active flags are restored in `finally`.
+	 * Idempotent and guarded.
+	 */
+	_migrateZodiacForms () {
+		const states = Array.isArray(this._data.activeStates) ? this._data.activeStates : [];
+		const zodiacStates = states.filter(s => s.stateTypeId === "zodiacForm" && s.zodiacForm?.formId);
+		if (!zodiacStates.length) return;
+
+		// Snapshot and clear active flags so derivation reads base (unmodified)
+		// speeds rather than the speeds inflated by the forms' own effects.
+		const activeFlags = new Map(zodiacStates.map(s => [s, s.active]));
+		try {
+			for (const st of zodiacStates) st.active = false;
+			for (const st of zodiacStates) {
+				const def = CharacterSheetState.getZodiacFormDef(st.zodiacForm.formId);
+				if (!def?.getEffects) continue;
+				try {
+					st.customEffects = def.getEffects(this) || [];
+				} catch (e) {
+					// Leave the existing snapshot intact if derivation fails.
+					// eslint-disable-next-line no-console
+					console.warn("[CharSheet] _migrateZodiacForms: failed to re-derive", st.zodiacForm?.formId, e);
+				}
+			}
+		} finally {
+			for (const st of zodiacStates) st.active = activeFlags.get(st) ?? st.active;
+		}
+	}
+
+	/**
 	 * Older saves auto-created a "Primal Focus" resource and stamped `uses` on the
 	 * feature (its description matched the generic "… per long rest" parser), and the
 	 * feature-text parser also mis-attached junk speed modifiers (e.g.
@@ -22617,7 +22663,9 @@ class CharacterSheetState {
 			baseCapacity = this.getAbilityScore("str") * 15;
 		}
 
-		// Apply size multiplier (RAW 5e rules)
+		// Apply size multiplier (RAW 5e rules). Active states may grant a
+		// carry-only size step (e.g. Aurochs Zodiac Form: "count as one size
+		// larger" for carry/push/drag/lift) without changing combat size.
 		const sizeMultiplier = this.getSizeCarryMultiplier();
 
 		const flatBonus = this._data.customModifiers.carryCapacity || 0;
@@ -22631,7 +22679,7 @@ class CharacterSheetState {
 	 * @returns {number} The size multiplier for carry capacity
 	 */
 	getSizeCarryMultiplier () {
-		const size = this.getSize();
+		const sizeOrder = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 		const multipliers = {
 			"tiny": 0.5,
 			"small": 1,
@@ -22640,7 +22688,28 @@ class CharacterSheetState {
 			"huge": 4,
 			"gargantuan": 8,
 		};
-		return multipliers[size] || 1;
+		const size = this.getSize();
+		// Carry-only size steps from active states (e.g. Aurochs Zodiac Form).
+		// These shift the carry multiplier up without altering combat size.
+		const carryStep = this.getCarrySizeBonusFromStates();
+		let idx = sizeOrder.indexOf(size);
+		if (idx < 0) return multipliers[size] || 1;
+		idx = Math.max(0, Math.min(idx + carryStep, sizeOrder.length - 1));
+		return multipliers[sizeOrder[idx]] || 1;
+	}
+
+	/**
+	 * Get carry-only size step bonus from active states. Distinct from
+	 * getSizeIncreaseFromStates (which changes combat size): this only feeds
+	 * carrying-capacity calculations (e.g. Aurochs "count as one size larger").
+	 * @returns {number} Total carry size steps (e.g., 1 = one size larger)
+	 */
+	getCarrySizeBonusFromStates () {
+		let bonus = 0;
+		for (const e of this.getActiveStateEffects()) {
+			if (e.type === "carrySizeBonus") bonus += e.value || 1;
+		}
+		return bonus;
 	}
 
 	/**
@@ -30890,6 +30959,9 @@ class CharacterSheetState {
 			icon: "🦫",
 			tier: "month",
 			summary: "Reaction: reduce damage to an ally within 30 ft.",
+			entries: [
+				"When a creature you can see within 30 feet of you is hit by an attack, you can use your {@variantrule Reaction|XPHB} to reduce the damage it takes by an amount equal to your druid level + your proficiency bonus.",
+			],
 			getEffects: (state) => {
 				const calc = state.getFeatureCalculations() || {};
 				return [{type: "info", label: `Reaction: when a creature you can see within 30 ft is hit, reduce the damage it takes by ${calc.beaverDamageReduction} (druid level + proficiency bonus).`}];
@@ -30901,6 +30973,10 @@ class CharacterSheetState {
 			icon: "🐂",
 			tier: "month",
 			summary: "Advantage + proficiency on Strength checks/saves; carry as one size larger.",
+			entries: [
+				"You have {@variantrule Advantage|XPHB} on Strength checks and Strength saving throws, and you add your proficiency bonus to those rolls.",
+				"You also count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.",
+			],
 			getEffects: (state) => {
 				const prof = state.getProficiencyBonus();
 				return [
@@ -30908,6 +30984,10 @@ class CharacterSheetState {
 					{type: "advantage", target: "save:str"},
 					{type: "bonus", target: "check:str", useProficiency: true},
 					{type: "bonus", target: "save:str", useProficiency: true},
+					// Count as one size larger for carrying capacity / push-drag-lift
+					// (carry-only; does not change combat size). Consumed by
+					// getSizeCarryMultiplier via getCarrySizeBonusFromStates.
+					{type: "carrySizeBonus", value: 1},
 					{type: "note", value: `Add your proficiency bonus (+${prof}) to Strength checks and saves; count as one size larger for carrying capacity.`},
 				];
 			},
@@ -30918,6 +30998,9 @@ class CharacterSheetState {
 			icon: "🐎",
 			tier: "month",
 			summary: "Walking speed doubled; Dash as a bonus action.",
+			entries: [
+				"Your walking speed is doubled, and you can take the {@action Dash} action as a {@variantrule Bonus Action|XPHB}.",
+			],
 			getEffects: (state) => {
 				const walk = state.getWalkSpeed ? state.getWalkSpeed() : 30;
 				return [
@@ -30932,12 +31015,24 @@ class CharacterSheetState {
 			icon: "🐙",
 			tier: "month",
 			summary: "Swim speed = walk; underwater breathing and +5 ft reach.",
+			entries: [
+				"While submerged in water, you can breathe normally, gain a swimming speed equal to your walking speed, and suffer no penalties to attack rolls or vision.",
+				"Additionally, your melee reach increases by 5 feet while submerged.",
+			],
 			getEffects: (state) => {
 				const calc = state.getFeatureCalculations() || {};
 				const walk = state.getWalkSpeed ? state.getWalkSpeed() : 30;
+				const reachBonus = calc.octopusReachBonus ?? 5;
 				return [
 					{type: "swimSpeed", value: walk},
-					{type: "note", value: `While submerged you can breathe normally, ignore underwater attack and Perception penalties, and gain +${calc.octopusReachBonus ?? 5} ft of melee reach.`},
+					// Express the +5 ft melee reach through the shared reach data
+					// path (target: "reach") so it surfaces in getReachBonus /
+					// getMeleeReach and the Overview reach chip, composing with the
+					// general reach plumbing. `conditional` documents the
+					// "while submerged" qualifier (reach modifiers are not
+					// situationally gated today, matching Polearm Master).
+					{type: "bonus", target: "reach", value: reachBonus, conditional: "while submerged"},
+					{type: "note", value: `While submerged you can breathe normally, ignore underwater attack and Perception penalties, and gain +${reachBonus} ft of melee reach.`},
 				];
 			},
 		},
@@ -30947,6 +31042,11 @@ class CharacterSheetState {
 			icon: "🦚",
 			tier: "month",
 			summary: "Attackers must save or choose a new target.",
+			entries: [
+				"When a creature targets you directly with an attack or a harmful spell, it must succeed on a Wisdom saving throw against your spell save DC.",
+				"On a failed save, the creature must choose a new target or forfeit the attack or spell.",
+				"On a successful save, the creature is immune to this effect for 24 hours.",
+			],
 			getEffects: (state) => {
 				const calc = state.getFeatureCalculations() || {};
 				return [{type: "info", label: `A creature targeting you with an attack must succeed on a DC ${calc.peacockSaveDc} Wisdom save or choose a new target.`}];
@@ -30958,6 +31058,9 @@ class CharacterSheetState {
 			icon: "🦅",
 			tier: "month",
 			summary: "Cast Gust of Wind or Warding Wind without a slot.",
+			entries: [
+				"You can use your action to cast {@spell gust of wind} or {@spell warding wind|xge} without expending a spell slot.",
+			],
 			getEffects: () => [{type: "info", label: "As an action, cast Gust of Wind or Warding Wind without expending a spell slot."}],
 		},
 		{
@@ -30966,6 +31069,10 @@ class CharacterSheetState {
 			icon: "🐝",
 			tier: "month",
 			summary: "Bonus-action ranged radiant spell attack.",
+			entries: [
+				"When you activate this form, and as a {@variantrule Bonus Action|XPHB} on subsequent turns while it lasts, you can make a ranged spell attack against one creature within 60 feet. On a hit, the attack deals radiant damage equal to {@damage 1d8} + your Wisdom modifier.",
+				"The damage increases to {@damage 2d8} at 10th level and {@damage 3d8} at 14th level.",
+			],
 			getEffects: (state) => {
 				const calc = state.getFeatureCalculations() || {};
 				return [{type: "info", label: `Bonus action: make a ranged spell attack (range ${calc.beeRange ?? 60} ft) dealing ${calc.beeDamage} radiant damage.`}];
@@ -30977,6 +31084,10 @@ class CharacterSheetState {
 			icon: "🐕",
 			tier: "month",
 			summary: "Bonus-action mark a creature within 60 ft.",
+			entries: [
+				"As a {@variantrule Bonus Action|XPHB}, you can mark one creature you can see within 60 feet. The marked creature has {@variantrule Disadvantage|XPHB} on attack rolls against you, and you always know its location while the form lasts.",
+				"You can have only one creature marked at a time.",
+			],
 			getEffects: (state) => {
 				const calc = state.getFeatureCalculations() || {};
 				return [{type: "info", label: `Bonus action: mark a creature within ${calc.houndMarkRange ?? 60} ft. It has disadvantage on attacks against anyone but you, and you always know its location.`}];
@@ -30988,10 +31099,17 @@ class CharacterSheetState {
 			icon: "🐈",
 			tier: "month",
 			summary: "Roll floor 8 on Perception/Stealth/Acrobatics; +1d4 passive Perception.",
+			entries: [
+				"You gain a +{@dice 1d4} bonus to your passive Perception.",
+				"Additionally, when you make a Wisdom ({@skill Perception}) check or a Dexterity ({@skill Stealth} or {@skill Acrobatics}) check, you can treat a roll of 7 or lower on the {@dice d20} as an 8.",
+			],
 			getEffects: (state) => {
 				const calc = state.getFeatureCalculations() || {};
 				return [
 					{type: "rollFloor", skills: ["perception", "stealth", "acrobatics"], minimum: calc.catMinRoll ?? 8, source: "Cat Form"},
+					// The +1d4 passive Perception is a random die, not a deterministic
+					// passive score, so it is surfaced as a readable note rather than
+					// folded into the numeric passive score.
 					{type: "note", value: "You gain a +1d4 bonus to passive Perception, and treat a d20 roll of 7 or lower as an 8 on Perception, Stealth, and Acrobatics checks."},
 				];
 			},
@@ -31002,6 +31120,10 @@ class CharacterSheetState {
 			icon: "🦅",
 			tier: "month",
 			summary: "Advantage vs frightened; bonus-action extra melee attack.",
+			entries: [
+				"You have {@variantrule Advantage|XPHB} on saving throws against being frightened.",
+				"Additionally, when you hit a creature with a melee attack using your action, you can make one additional melee attack as a {@variantrule Bonus Action|XPHB}.",
+			],
 			getEffects: () => [{type: "info", label: "You have advantage on saving throws to avoid or end the frightened condition. After you hit with a melee attack on your turn, you can make one extra melee attack as a bonus action."}],
 		},
 		{
@@ -31010,6 +31132,10 @@ class CharacterSheetState {
 			icon: "🦏",
 			tier: "month",
 			summary: "AC bonus and a burrow speed.",
+			entries: [
+				"Your Armor Class increases by half your proficiency bonus (rounded up).",
+				"You also gain a burrowing speed equal to half your walking speed.",
+			],
 			getEffects: (state) => {
 				const calc = state.getFeatureCalculations() || {};
 				const walk = state.getWalkSpeed ? state.getWalkSpeed() : 30;
@@ -31025,6 +31151,9 @@ class CharacterSheetState {
 			icon: "🔥",
 			tier: "month",
 			summary: "Revive when stabilized while in form.",
+			entries: [
+				"If you are knocked unconscious while in this form and become stable through a successful {@skill Medicine} check or by succeeding on death saving throws, you regain hit points equal to {@dice 2d8} + your Wisdom modifier.",
+			],
 			getEffects: (state) => {
 				const calc = state.getFeatureCalculations() || {};
 				return [{type: "info", label: `If you are stabilized while unconscious in this form, you immediately regain ${calc.phoenixStabilizeHeal} hit points.`}];
