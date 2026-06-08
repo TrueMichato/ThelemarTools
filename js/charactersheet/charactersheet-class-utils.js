@@ -5517,6 +5517,52 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Resolve display metadata for a companion's TYPE so the overview indicator can
+	 * render a clear, type-specific badge (and make a summoned Familiar unmistakable —
+	 * bug #14). Pure and self-contained: it uses literal companion-type strings (the
+	 * canonical values of `CharacterSheetState.COMPANION_TYPES`) rather than importing
+	 * the State class, so it is safe to call before State loads (e.g. in unit tests).
+	 *
+	 * The type/origin contract: familiars are `"familiar"`, Wild Shape forms are
+	 * `"wild_shape"`, etc. A malformed object `type` (historic arg-order bug) is
+	 * tolerated by reading its `.type`, defaulting to `"custom"`.
+	 *
+	 * @param {{type?: string|object}} companion
+	 * @returns {{type: string, label: string, isFamiliar: boolean, icon: string, colorRgb: string, cssClass: string}}
+	 */
+	static getCompanionBadgeMeta (/** @type {*} */ companion) {
+		const rawType = companion?.type;
+		let type = typeof rawType === "string"
+			? rawType
+			: (rawType && typeof rawType === "object" && typeof rawType.type === "string" ? rawType.type : "custom");
+
+		// colorRgb is an "r, g, b" triple consumed as `rgba(<triple>, a)` by the indicator.
+		const META = {
+			familiar: {label: "Familiar", icon: "🧚", colorRgb: "20, 184, 166"}, // teal — deliberately distinct
+			wild_shape: {label: "Wild Shape", icon: "🐾", colorRgb: "34, 197, 94"}, // green
+			beast_companion: {label: "Companion", icon: "🦅", colorRgb: "139, 92, 246"},
+			drake: {label: "Drake", icon: "🐉", colorRgb: "239, 68, 68"},
+			steel_defender: {label: "Steel Defender", icon: "🛡️", colorRgb: "100, 116, 139"},
+			summon: {label: "Summon", icon: "✨", colorRgb: "168, 85, 247"},
+			mount: {label: "Mount", icon: "🐎", colorRgb: "180, 130, 80"},
+			infernal: {label: "Infernal", icon: "😈", colorRgb: "220, 38, 38"},
+			custom: {label: "Companion", icon: "🐾", colorRgb: "139, 92, 246"},
+		};
+		// Unrecognized types collapse to "custom" so `type`, `cssClass`, and the
+		// rendered label/colour all stay coherent.
+		if (!Object.prototype.hasOwnProperty.call(META, type)) type = "custom";
+		const meta = (/** @type {*} */ (META))[type];
+		return {
+			type,
+			label: meta.label,
+			isFamiliar: type === "familiar",
+			icon: meta.icon,
+			colorRgb: meta.colorRgb,
+			cssClass: `charsheet__companion-badge--${type}`,
+		};
+	}
+
+	/**
 	 * Resolve a language-proficiency KEY to a clean, displayable language name.
 	 *
 	 * Race / subrace / background `languageProficiencies` entries are keyed either

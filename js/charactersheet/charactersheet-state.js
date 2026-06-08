@@ -4014,6 +4014,30 @@ class CharacterSheetState {
 		// (e.g. the Octopus reach bonus). Runs AFTER applyClassFeatureEffects so
 		// speed-relative effects snapshot against current derived speeds.
 		this._migrateZodiacForms();
+
+		// Repair companions whose `type` was stored as a malformed object (historic
+		// addCompanionFromBestiary arg-order bug) so they re-register under the correct
+		// string type. Idempotent.
+		this._migrateCompanions();
+	}
+
+	/**
+	 * Repair companions saved with a malformed `type` (an object instead of a
+	 * string — the historic `addCompanionFromBestiary` arg-order bug), recovering
+	 * the intended type/origin. Idempotent, and conservative: any companion whose
+	 * `type` is already a non-empty string (canonical OR a freeform Play Mode label)
+	 * is left untouched — only object/missing types are repaired.
+	 */
+	_migrateCompanions () {
+		if (!Array.isArray(this._data.companions)) return;
+		for (const c of this._data.companions) {
+			if (!c) continue;
+			// Already a usable string type (canonical or freeform) → leave as-is.
+			if (typeof c.type === "string" && c.type.trim() !== "") continue;
+			const {type, origin} = CharacterSheetState._normalizeCompanionType(c.type, c.origin);
+			c.type = type;
+			if (origin && !c.origin) c.origin = origin;
+		}
 	}
 
 	/**
@@ -16305,6 +16329,10 @@ class CharacterSheetState {
 									// Scales: 1d8 at 3, 2d8 at 10, 3d8 at 14
 									const beeDice = level >= 14 ? 3 : level >= 10 ? 2 : 1;
 									calculations.beeDamage = `${beeDice}d8+${wisMod}`;
+									// Dice-only form for the surfaced attack: the attack renderer/roller
+									// adds the Wis ability mod as the damage bonus, so the rollable attack
+									// must NOT also bake in `+wisMod` (that would double-count Wis).
+									calculations.beeDamageDice = `${beeDice}d8`;
 									calculations.beeRange = 60;
 
 									// Hound: Bonus action to mark creature within 60ft
@@ -32583,7 +32611,28 @@ class CharacterSheetState {
 			],
 			getEffects: (state) => {
 				const calc = state.getFeatureCalculations() || {};
-				return [{type: "info", label: `Bonus action: make a ranged spell attack (range ${calc.beeRange ?? 60} ft) dealing ${calc.beeDamage} radiant damage.`}];
+				const range = calc.beeRange ?? 60;
+				const dice = calc.beeDamageDice || "1d8";
+				return [
+					// Surface the bonus-action ranged radiant spell attack as a real,
+					// rollable attack (mirrors Octopus's mechanical {type:"reach"} effect).
+					// `getActiveStateAttacks()` consumes this; combat's renderAttacks merges it
+					// while the form is active. Dice-only damage + abilityMod "wis" so the
+					// attack system adds Wis once to both the spell attack roll and the damage.
+					{
+						type: "attack",
+						name: "Bee Form (Zodiac)",
+						isMelee: false,
+						isRanged: true,
+						isSpell: true,
+						abilityMod: "wis",
+						damage: dice,
+						damageType: "radiant",
+						range: `${range} ft.`,
+						actionType: "bonus",
+					},
+					{type: "info", label: `Bonus action: make a ranged spell attack (range ${range} ft) dealing ${calc.beeDamage} radiant damage.`},
+				];
 			},
 		},
 		{
@@ -36224,6 +36273,59 @@ class CharacterSheetState {
 		return effects;
 	}
 
+	/**
+	 * Resolve attacks granted by currently-active states (e.g. the Bee Zodiac Form's
+	 * bonus-action ranged spell attack). Generic: ANY active state/form whose effects
+	 * include `{type:"attack", ...}` surfaces a rollable attack here, mirroring the
+	 * `getReachContributions()` resolver for `{type:"reach"}` effects.
+	 *
+	 * Only DAMAGING attack effects are surfaced (an effect must carry `damage`): the
+	 * combat Attacks list is a roll-attack-and-damage surface, so a damage-less effect
+	 * has nothing to roll here. Non-damaging form abilities stay as `{type:"info"}`
+	 * labels (and/or their own mechanical resolvers).
+	 *
+	 * The returned descriptors share the same shape the combat Attacks list / roll
+	 * handlers consume (configured + auto + temporary attacks), plus:
+	 *  - a STABLE id (`as_<stateId>_<slug>_<index>`) so render and roll agree across
+	 *    re-renders even if a single state ever grants two same-named attacks;
+	 *  - `isActiveStateAttack: true` so the row hides edit/remove (it is owned by the
+	 *    form, not independently removable) and shows a form badge.
+	 *
+	 * @returns {Array<object>} attack descriptors for active-state-granted attacks
+	 */
+	getActiveStateAttacks () {
+		const out = [];
+		const effects = this.getActiveStateEffects();
+		for (let ix = 0; ix < effects.length; ++ix) {
+			const e = effects[ix];
+			if (e.type !== "attack" || !e.damage) continue;
+			const name = e.name || e.stateName || "Form Attack";
+			const slug = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+			out.push({
+				// Index disambiguates the rare case of one state granting two
+				// same-named attacks; iteration order of getActiveStateEffects is
+				// deterministic so the id is stable across re-renders.
+				id: `as_${e.stateId || "state"}_${slug}_${ix}`,
+				name,
+				isMelee: e.isMelee ?? false,
+				isRanged: e.isRanged ?? !e.isMelee,
+				isSpell: e.isSpell ?? true,
+				abilityMod: e.abilityMod || "spellcasting",
+				damage: e.damage,
+				damageType: e.damageType || "",
+				range: e.range || "",
+				attackBonus: e.attackBonus || 0,
+				damageBonus: e.damageBonus || 0,
+				properties: e.properties || [],
+				actionType: e.actionType || null,
+				isActiveStateAttack: true,
+				sourceState: e.stateName || "",
+				sourceStateIcon: e.stateIcon || "🌟",
+			});
+		}
+		return out;
+	}
+
 	_isActiveStateEffectConditionMet (effect) {
 		if (!effect?.conditional) return true;
 
@@ -37157,6 +37259,53 @@ class CharacterSheetState {
 	};
 
 	/**
+	 * Normalize a companion `type` (and recover `origin`) to honor the type/origin
+	 * contract: `companion.type` is ALWAYS a non-empty string.
+	 *
+	 * Accepts:
+	 *  - any non-empty string → returned as-is. This deliberately preserves both the
+	 *    canonical COMPANION_TYPES values (so `getCompanionsByType` / the familiar
+	 *    indicator match exactly) AND user-entered freeform labels (the Play Mode
+	 *    "Add Companion" modal lets players type an arbitrary type, e.g. "beast").
+	 *  - a malformed object `{type, origin}` (from the historic
+	 *    `addCompanionFromBestiary(creature, {type, origin})` arg-order bug) → unpacked
+	 *    to its inner string `type` (and `origin` recovered).
+	 *  - anything else (object without a string `type`, null, undefined, non-string,
+	 *    empty/whitespace string) → defaults to CUSTOM.
+	 *
+	 * The fix for the #13 arg-order bug is the OBJECT-unpacking + non-string guard;
+	 * unknown strings are intentionally NOT coerced to CUSTOM so freeform types survive.
+	 *
+	 * @param {*} type - The raw type value (string or malformed object).
+	 * @param {*} [origin] - The caller-provided origin (used when the object lacks one).
+	 * @returns {{type: string, origin: (string|null)}}
+	 */
+	static _normalizeCompanionType (type, origin = null) {
+		let resolvedType = type;
+		let resolvedOrigin = origin;
+
+		// Unpack a malformed object passed as `type` (the #13 bug shape).
+		if (resolvedType && typeof resolvedType === "object") {
+			if (resolvedOrigin == null && typeof resolvedType.origin === "string") resolvedOrigin = resolvedType.origin;
+			resolvedType = resolvedType.type;
+		}
+
+		// Any non-empty string is a valid type (canonical OR freeform); everything
+		// else collapses to CUSTOM so the stored type is always a usable string.
+		// Trim so stray whitespace (" wild_shape ") still matches canonical lookups.
+		if (typeof resolvedType !== "string" || resolvedType.trim() === "") {
+			resolvedType = CharacterSheetState.COMPANION_TYPES.CUSTOM;
+		} else {
+			resolvedType = resolvedType.trim();
+		}
+
+		const cleanOrigin = (typeof resolvedOrigin === "string" && resolvedOrigin.trim() !== "")
+			? resolvedOrigin
+			: null;
+		return {type: resolvedType, origin: cleanOrigin};
+	}
+
+	/**
 	 * Get all companions
 	 * @returns {Array} Copy of the companions array
 	 */
@@ -37230,13 +37379,20 @@ class CharacterSheetState {
 	addCompanion (companionData) {
 		if (!this._data.companions) this._data.companions = [];
 
+		// Defensive: a caller that passes an object where a string `type` is expected
+		// (e.g. the old `addCompanionFromBestiary(creature, {type, origin})` bug) would
+		// otherwise store an object as `companion.type`, which never matches the string
+		// COMPANION_TYPES constants — silently mis-typing the companion. Normalize here so
+		// the type/origin contract holds regardless of caller.
+		const {type: normType, origin: normOrigin} = CharacterSheetState._normalizeCompanionType(companionData.type, companionData.origin);
+
 		const id = CryptUtil.uid();
 		const companion = {
 			id,
 			name: companionData.name,
 			source: companionData.source || null,
-			type: companionData.type || CharacterSheetState.COMPANION_TYPES.CUSTOM,
-			origin: companionData.origin || null,
+			type: normType,
+			origin: normOrigin,
 			customName: companionData.customName || null,
 
 			// Ability scores

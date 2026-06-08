@@ -18427,3 +18427,21 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .ve-night-mode .charsheet__cond-pick-chip--dis {
 	color: #f87171;
 }
+
+/* Familiar companion indicator — a gentle pulse so a summoned familiar isn't
+   forgotten (bug #14). Additive: the badge's static colours stay inline; this
+   only animates the outer glow. Respects reduced-motion preferences. */
+@keyframes charsheet-familiar-pulse {
+0%, 100% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0); }
+50% { box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.25); }
+}
+
+.charsheet__companion-badge--familiar {
+animation: charsheet-familiar-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+.charsheet__companion-badge--familiar {
+	animation: none;
+}
+}

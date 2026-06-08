@@ -2435,11 +2435,13 @@ class CharacterSheetPage {
 		const selectedCreature = validCreatures.find(c => c.name === selectedName);
 		if (!selectedCreature) return;
 
-		// Add companion from bestiary
-		this._state.addCompanionFromBestiary?.(selectedCreature, /** @type {*} */ ({
-			type,
-			origin,
-		}));
+		// Add companion from bestiary.
+		// NOTE: addCompanionFromBestiary's signature is (creature, type, origin, options) —
+		// POSITIONAL. Passing an object here (e.g. {type, origin}) silently stores an object as
+		// `companion.type`, which never matches the string COMPANION_TYPES constants, so the
+		// companion is mis-typed (Wild Shape forms then never register, the use is never spent,
+		// and Beast Master / Mount companions are mis-bucketed too).
+		this._state.addCompanionFromBestiary?.(selectedCreature, type, origin);
 
 		JqueryUtil.doToast({type: "success", content: `Added ${selectedCreature.name} as ${origin || "companion"}!`});
 	}
@@ -4649,6 +4651,9 @@ class CharacterSheetPage {
 			const hpPercent = Math.round((hp.current / hp.max) * 100);
 			const hpColor = hpPercent > 50 ? "#22c55e" : hpPercent > 25 ? "#f59e0b" : "#ef4444";
 
+			// Type-specific badge styling/label so a summoned Familiar is unmistakable (#14).
+			const meta = CharacterSheetClassUtils.getCompanionBadgeMeta(companion);
+
 			// Get companion icon (token image with emoji fallback)
 			const companionIconHtml = CharacterSheetClassUtils.getCompanionIconHtml(companion, "sm");
 
@@ -4666,20 +4671,38 @@ class CharacterSheetPage {
 				nameHtml = companion.customName || companion.name;
 			}
 
+			// A familiar gets a stronger, pulsing accent (and a bolder border) so the
+			// player can't forget it's summoned; other types use a subtle type tint.
+			const typeChip = `<span class="charsheet__companion-type-chip${meta.isFamiliar ? " charsheet__companion-type-chip--familiar" : ""}" style="
+						display: inline-flex;
+						align-items: center;
+						gap: 3px;
+						padding: 1px 7px;
+						background: rgba(${meta.colorRgb}, ${meta.isFamiliar ? "0.22" : "0.16"});
+						border: 1px solid rgba(${meta.colorRgb}, ${meta.isFamiliar ? "0.6" : "0.35"});
+						border-radius: 10px;
+						font-size: 0.72em;
+						font-weight: 700;
+						letter-spacing: 0.02em;
+						color: rgb(${meta.colorRgb});
+						text-transform: uppercase;
+					" title="${meta.isFamiliar ? "A familiar is currently summoned" : meta.label}">${meta.icon} ${meta.label}</span>`;
+
 			const badge = e_({outer: `
-				<div class="charsheet__companion-badge" style="
+				<div class="charsheet__companion-badge ${meta.cssClass}${meta.isFamiliar ? " charsheet__companion-badge--familiar" : ""}" style="
 					display: inline-flex;
 					align-items: center;
 					gap: 8px;
 					padding: 6px 12px;
-					background: rgba(139, 92, 246, 0.1);
-					border: 1px solid rgba(139, 92, 246, 0.3);
+					background: rgba(${meta.colorRgb}, 0.1);
+					border: ${meta.isFamiliar ? "2px" : "1px"} solid rgba(${meta.colorRgb}, ${meta.isFamiliar ? "0.55" : "0.3"});
 					border-radius: 20px;
 					margin-right: 8px;
 					margin-bottom: 4px;
 				">
 					${companionIconHtml}
 					<span class="bold">${nameHtml}</span>
+					${typeChip}
 					<span style="
 						display: inline-flex;
 						align-items: center;
