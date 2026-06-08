@@ -8143,18 +8143,48 @@ class CharacterSheetState {
 		const base = this._data.speed[type] || (type === "walk" ? 30 : 0);
 		if (base > 0) components.push({type: "base", name: type === "walk" ? "Base Speed" : `Base ${type.charAt(0).toUpperCase() + type.slice(1)} Speed`, value: base, icon: "🏃"});
 
+		// Enabled "equal to walking speed" grants (e.g. Roving's climb/swim) raise this
+		// speed's floor to the walking speed. Detect them up-front so a non-walk speed that
+		// exists ONLY because of such a grant still yields a breakdown — and so the total
+		// stays in sync with getSpeedByType()'s max(base, walkingSpeed) handling.
+		const equalToWalkMods = (this._data.namedModifiers || []).filter(m => m.type === `speed:${type}` && m.equalToWalk && m.enabled);
+
 		// For non-walk speeds that are 0, return empty breakdown
 		if (type !== "walk" && base === 0) {
 			const itemSpeedStatic = this._data.itemBonuses?.speedStatic || {};
 			const itemSpeedEqual = this._data.itemBonuses?.speedEqual || {};
-			if (!itemSpeedStatic[type] && !itemSpeedEqual[type]) {
+			if (!itemSpeedStatic[type] && !itemSpeedEqual[type] && !equalToWalkMods.length) {
 				return {total: 0, components: []};
+			}
+		}
+
+		// Equal-to-walk grant: add a component raising the running base to the walking speed,
+		// itemized by the granting feature's name. Mirrors getSpeedByType()'s max(base, walk).
+		if (equalToWalkMods.length) {
+			const runningBase = components.reduce((sum, c) => sum + c.value, 0);
+			const walkFloor = this.getWalkSpeed();
+			if (walkFloor > runningBase) {
+				components.push({type: "feature", name: `${equalToWalkMods[0].name || "Equal to Walking Speed"} (= walking speed)`, value: walkFloor - runningBase, icon: "🏃"});
 			}
 		}
 
 		const speedMods = this._data.customModifiers.speed || {};
 		const customMod = speedMods[type] || 0;
-		if (customMod !== 0) components.push({type: "custom", name: "Custom Modifier", value: customMod, icon: "⚙️"});
+		// Itemize named feature speed bonuses (e.g. "Roving", "Pursuit (Predator Focus)")
+		// so each shows its source instead of a single generic "Custom Modifier" lump.
+		// A residual line covers any unnamed/manual remainder and keeps the breakdown
+		// total exactly equal to getSpeed()/getSpeedByType(). Itemize whenever there are
+		// named components OR a non-zero aggregate (so offsetting named mods still show).
+		const namedComps = this._getSpeedNamedModifierComponents(type);
+		if (customMod !== 0 || namedComps.length) {
+			let itemized = 0;
+			namedComps.forEach(c => {
+				components.push({type: "custom", name: c.name, value: c.value, icon: "⚙️"});
+				itemized += c.value;
+			});
+			const residual = customMod - itemized;
+			if (residual !== 0) components.push({type: "custom", name: "Custom Modifier", value: residual, icon: "⚙️"});
+		}
 
 		const stateBonus = this.getSpeedBonusFromStates(type);
 		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
@@ -30402,6 +30432,29 @@ class CharacterSheetState {
 		(this._data.namedModifiers || []).forEach(mod => {
 			if (!mod.enabled) return;
 			if (mod.type !== `skill:${normalizedSkill}` && mod.type !== "skill:all") return;
+			const value = this._getNamedModifierEffectiveValue(mod);
+			if (!value) return;
+			out.push({name: mod.name || "Custom Modifier", value});
+		});
+		return out;
+	}
+
+	/**
+	 * Itemize the enabled named modifiers that contribute a flat value to a movement
+	 * speed (type `speed:<type>`), so a breakdown can attribute each to its source
+	 * feature (e.g. "Roving", "Pursuit (Predator Focus)") instead of lumping them into
+	 * one generic "Custom Modifier" line. Mirrors the speed handling in
+	 * _recalculateCustomModifiers; `equalToWalk` derived grants contribute value 0 and
+	 * are surfaced elsewhere, so they are skipped here.
+	 * @param {string} type - Speed type (walk, fly, swim, climb, burrow)
+	 * @returns {Array<{name:string, value:number}>}
+	 */
+	_getSpeedNamedModifierComponents (type) {
+		const out = [];
+		(this._data.namedModifiers || []).forEach(mod => {
+			if (!mod.enabled) return;
+			if (mod.type !== `speed:${type}`) return;
+			if (mod.equalToWalk) return;
 			const value = this._getNamedModifierEffectiveValue(mod);
 			if (!value) return;
 			out.push({name: mod.name || "Custom Modifier", value});

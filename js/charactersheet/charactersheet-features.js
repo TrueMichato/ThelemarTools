@@ -94,6 +94,17 @@ class CharacterSheetFeatures {
 			return this._getClassFeatureDescription(feature);
 		}
 
+		// Combat methods (e.g. auto-granted Singular Focus / Groundshatter) ship with
+		// `entries` but no rendered `description`; render them so the body isn't blank.
+		if (CharacterSheetClassUtils.isCombatMethod(feature) && Array.isArray(feature.entries) && feature.entries.length) {
+			try {
+				return Renderer.get().render({type: "entries", entries: feature.entries});
+			} catch (e) {
+				// eslint-disable-next-line no-console
+				console.error("[CharSheet Features] Error rendering combat method entries:", e);
+			}
+		}
+
 		return null;
 	}
 
@@ -879,13 +890,14 @@ class CharacterSheetFeatures {
 			return;
 		}
 
-		// Separate regular class features from optional features (invocations, metamagic, etc.)
-		const regularFeatures = features.filter(f => f.featureType !== "Optional Feature");
-		const optionalFeatures = features.filter(f => f.featureType === "Optional Feature");
-
-		// Separate feature options (like Specialties) from standalone features
-		const standaloneFeatures = regularFeatures.filter(f => !f.parentFeature);
-		const featureOptions = regularFeatures.filter(f => f.parentFeature);
+		// Separate regular class features from optional features (invocations, metamagic, etc.),
+		// diverting auto-granted combat methods (e.g. the Ranger Primal Focus Upgrade's Singular
+		// Focus / Groundshatter — regular features with `_entityType: "combatMethod"` and no
+		// `featureType`) into the combat-methods grouping so they get the same tradition header +
+		// hover + description treatment as player-picked methods, without disturbing the
+		// optional-feature combat methods (which already group correctly).
+		const {optionalFeatures, autoGrantedCombatMethods, standaloneFeatures, featureOptions} =
+			CharacterSheetClassUtils.partitionClassFeaturesForDisplay(features);
 
 		// Render standalone class features
 		standaloneFeatures.forEach(feature => {
@@ -926,13 +938,15 @@ class CharacterSheetFeatures {
 			});
 		}
 
-		// Group and render optional features by type
-		if (optionalFeatures.length > 0) {
+		// Group and render optional features by type (plus any auto-granted combat methods,
+		// which the loop routes into the "Combat Methods: <tradition>" group by isCombatMethod).
+		const groupableOptionalFeatures = [...optionalFeatures, ...autoGrantedCombatMethods];
+		if (groupableOptionalFeatures.length > 0) {
 			this._renderTgttMetamagicSummary(container, optionalFeatures);
 
 			// Group by optional feature types
 			const optFeatureGroups = {};
-			optionalFeatures.forEach(f => {
+			groupableOptionalFeatures.forEach(f => {
 				// Get the group key and name from optionalFeatureTypes
 				// For combat methods, use the tradition code as the key (so all AM methods group together)
 				let groupKey = f.optionalFeatureTypes?.join("_") || "other";
@@ -1572,6 +1586,20 @@ class CharacterSheetFeatures {
 		// Get description - look it up if not stored
 		const description = this._getFeatureDescription(feature) || "<em class='ve-muted'>No description available</em>";
 
+		// Combat-method attribution badge (tradition + focus gate). Surfaced for combat-method
+		// features — especially auto-granted ones (Singular Focus / Groundshatter) that would
+		// otherwise render with no indication of their tradition or the focus they require.
+		let combatMethodBadge = "";
+		if (CharacterSheetClassUtils.isCombatMethod(feature)) {
+			const tradName = CharacterSheetClassUtils.getMethodTraditionName?.(feature);
+			if (tradName) combatMethodBadge += `<span class="badge badge-outline-info" title="Combat tradition">⚔️ ${tradName}</span>`;
+			if (feature.requiresFocus) {
+				const focusLabel = feature.requiresFocus.charAt(0).toUpperCase() + feature.requiresFocus.slice(1);
+				const inFocus = this._state.getPrimalFocusMode?.() === feature.requiresFocus;
+				combatMethodBadge += `<span class="badge ${inFocus ? "badge-success" : "badge-secondary"}" title="Usable only while in ${focusLabel} focus">${feature.requiresFocus === "predator" ? "🎯" : "🛡️"} ${focusLabel} only</span>`;
+			}
+		}
+
 		// Check if this is the Primal Focus feature (TGTT Ranger)
 		const isPrimalFocus = feature.name === "Primal Focus" && feature.classSource === "TGTT";
 		let primalFocusHtml = "";
@@ -1717,6 +1745,7 @@ class CharacterSheetFeatures {
 					${primalFocusSwitchesBadge}
 					${primalFocusDodgeBadge}
 					${huntersPreyBadge}
+					${combatMethodBadge}
 					<div class="charsheet__feature-actions">
 						${hasUses ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="Use Feature">Use</button>` : ""}
 						<button class="ve-btn ve-btn-xs ${this._state.getFeatureNote?.(feature.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feature-note" title="${this._state.getFeatureNote?.(feature.id) ? "Edit Note" : "Add Note"}">

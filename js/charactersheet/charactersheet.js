@@ -7125,6 +7125,20 @@ class CharacterSheetPage {
 	 */
 	_getFeatureHoverLink (feature) {
 		try {
+			// Combat methods (granted OR optional). Auto-granted methods (e.g. the Ranger
+			// Primal Focus Upgrade's Singular Focus / Groundshatter) carry no `featureType`,
+			// so the opt-feature branch below misses them and they render as plain text.
+			// Route any definite combat-method shape to the combat-methods hover page first.
+			// Guarded to explicit CM markers — the `combatMethod` entity type or a CTM:
+			// optional-feature code — never the loose tradition/degree/stamina structural
+			// fallback, so a real class feature can't be misrouted.
+			const isDefiniteCombatMethod = feature
+				&& (feature._entityType === "combatMethod"
+					|| (Array.isArray(feature.optionalFeatureTypes) && feature.optionalFeatureTypes.some(t => t?.startsWith?.("CTM:"))));
+			if (isDefiniteCombatMethod) {
+				return this.getHoverLink(UrlUtil.PG_COMBAT_METHODS, feature.name, feature.source || Parser.SRC_XPHB);
+			}
+
 			// Class features - link to class feature page
 			if (feature.featureType === "Class" && feature.className) {
 				// Feature-options (e.g. TGTT "Specialties" picks) and any class
