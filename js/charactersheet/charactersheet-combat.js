@@ -4986,6 +4986,14 @@ class CharacterSheetCombat {
 					const effectsStr = stateType.effects.map(e => e.type && e.target ? `${e.type} → ${e.target}` : e.type || "").filter(Boolean).join("; ");
 					if (effectsStr) tooltipParts.push(`Effects: ${effectsStr}`);
 				}
+				// Surface human-readable info/note effect lines (e.g. Zodiac Form
+				// triggered abilities that carry a precomputed value to display).
+				if (Array.isArray(state.customEffects)) {
+					const infoLines = state.customEffects
+						.filter(e => e && (e.type === "info" || e.type === "note") && (e.label || e.text || e.value))
+						.map(e => e.label || e.text || e.value);
+					if (infoLines.length) tooltipParts.push(...infoLines);
+				}
 				const tooltip = tooltipParts.join("\n");
 
 				// Check if this is a spell effect
@@ -5004,7 +5012,9 @@ class CharacterSheetCombat {
 						// Fall back to plain name
 						stateNameHtml = state.name;
 					}
-				} else if (state.sourceFeatureId) {
+				} else if (state.sourceFeatureId && state.stateTypeId !== "zodiacForm") {
+					// Zodiac Form keeps the chosen constellation in state.name
+					// (e.g. "Zodiac Form: Bulette") rather than the generic feature name.
 					const feature = this._state.getFeatures?.().find(f => f.id === state.sourceFeatureId);
 					if (feature) {
 						stateNameHtml = this._page._getFeatureHoverLink?.(feature) || stateNameHtml;
