@@ -3,7 +3,33 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_All previously-tracked bugs in this list have been resolved — see **Closed Bugs** below._
+_Round 2 (surfaced during manual testing of the merged round-1 fixes). Grouped by the planning session that owns each. All refer to TGTT classes unless noted._
+
+**Session 1 — Ranger features deep dive**
+* **Roving speed** — Ranger's Roving does not grant the swim and climb speeds it should.
+* **Specialty hover style** — The round-1 specialty hover fix uses an inline `ve-help-subtle`/`data-vet-entry` span (e.g. Build Shelter). The preferred style is the regular link hover that points to the class-feature page (e.g. Beast Friend → `data-vet-page="classfeatures.html"` link). Convert specialty hovers to the Beast-Friend-style link hover.
+* **Primal Focus abilities not implemented** — The level-1 feature's mode abilities and the level-6 upgrade methods are not implemented or offered to the player. Active/usable abilities to implement: Focused Query, Intimidating Foe, Predator Eye (Bonus Action) [Predator Focus]; Hunter's Dodge, Terrain Defense, Improvised Sanctuary (Action), Inescapable Sight (Bonus Action) [Prey Focus]. Passive/reminder features to surface so the player remembers they exist: Hunter's Insight, Relentless Momentum, Charging Strike, Deflection, Unimpeded, Blood Scent. The level-6 upgrade's granted methods are not granted (and thus not removed on mode change).
+* **Other Ranger features** — Many other Ranger features are not implemented or are not displayed to the player in a useful manner.
+
+**Session 2 — Zodiac Druid month forms**
+* **Month forms incomplete** — Several Zodiac month forms don't fully work (e.g. Octopus does not increase reach). Needs a deep pass so every form's effects apply.
+* **Form Active-state hover** — When you pick a month form the Active state has the correct icon, but its hover points to the general feature instead of the specific form, making it hard to reference. Hover should resolve to the chosen form's entry.
+
+**Session 3 — Reach system**
+* **Reach not live / not used in combat** — Abilities that modify reach don't update the Overview display immediately, and attacks with reach on the Combat tab don't account for the character's reach. (Octopus-form reach in Session 2 depends on this plumbing.)
+
+**Session 4 — Respec multiclass tree**
+* **Cannot remove a class's first level when multiclassed** — e.g. Ranger 5 / Druid 2: there is no way to remove the first Ranger level, nor the first Druid level. The first level currently conflates all build choices (class, race, background, ASI). Restructure so the base of the tree holds only race / background / ASI, with fully-removable per-class branches.
+
+**Session 5 — Invocation feat-granting**
+* **Lesson of the First Ones** — This Eldritch Invocation does not grant the feat choice it should. Audit the other invocations to confirm they each behave correctly.
+
+**Session 6 — Overview & combat UI polish**
+* **Combat Resource modal scroll** — With many combat resources the modal requires scrolling; resources at the bottom (e.g. Sneak Attack, Focused Quarry) become hidden/inaccessible. Needs a layout that keeps all resources reachable.
+* **Overview overflow & spacing** — At certain font sizes some Overview elements overflow / break layout (Inspiration box, the "PASSIVE" label in skills, class statistics in the active-features modal, etc.). Also some Overview text is missing spaces in display that exist in the source.
+
+**Session 7 — Favourite spells multiclass**
+* **Single DC/attack for favourited spells** — Favourite spells in the Overview show only one save DC, attack bonus, and ability even for a multiclass spellcaster. Should resolve per the spell's own class.
 
 ## Closed Bugs
 
