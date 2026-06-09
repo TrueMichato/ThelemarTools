@@ -3,7 +3,34 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 7 (surfaced during manual testing of the merged round-6 fixes)
+
+Grouped into 4 parallel planning sessions. Each branches off `character-sheet-wip`,
+produces a deep root-cause fix + Jest tests, and merges back. The orchestrator owns
+this file; sessions do NOT edit it.
+
+* **(S1 — Items & magic-item effects: #1, #2):**
+  * **#1 Magic items do not apply mechanical effects:** Goggles of the Night grants/raises no darkvision; many magic items' abilities never affect the sheet. Items express effects either structurally (`senses`, `modifySpeed`, `resist`, `bonusAc`, `ability`…) OR only in prose `entries`; the aggregation pipeline (`_getItemSenses`/`_getItemDefenses`/`_getItemSpeedModifications` in inventory.js, `getSenses` in state.js) reads ONLY structured fields. A `FeatureModifierParser` with sense/effect regex exists in state.js but is used only for item spell-slots. Fix: parse prose item effects into the structured pipeline; audit a representative spread of magic items (darkvision, ability-score, speed, AC, resistance) verifying their effects show + are usable.
+  * **#2 Unified custom-item create/modify flow:** route all custom items through a single source where creating a custom item can OPTIONALLY start from a base item of the chosen category, then modify its stats; "modify an existing item" starts that flow with the item as base and replaces it in inventory while PRESERVING notes, favorite/starred status and similar metadata. `_addCustomItem` already writes structured effect fields; `editItemById` is view-only; no base-item clone exists.
+  * OWNS: `charactersheet-inventory.js` (whole module), the item-effect aggregation + parser usage in `charactersheet-state.js` (`_getItem*`/`_updateItemBonuses`/`getSenses`/`setItemSenses`/`addItem`/`getItems` + `FeatureModifierParser` item path), the custom-item modal + new edit/base-clone flow + item metadata preservation.
+
+* **(S2 — Druid Wild Shape / familiar / zodiac + active-state cleanup: #5, #6, #8, #9):**
+  * **#5 Wild Shape current-form display:** druid-resources shows "Currently: \<Creature\>" but no creature stats and the name is not hoverable. The current form is a `WILD_SHAPE` companion carrying only `.name` (no statblock). Make the name hoverable to the creature's statblock + surface its stats.
+  * **#6 Summon Familiar:** does not consume a Wild Shape use and does not disappear on long rest. The familiar path (`_pSummonWildCompanion` + the familiar picker in spells.js) never calls `spendWildShapeUse`; long-rest (`charactersheet-rest.js`) never removes `FAMILIAR`/`WILD_SHAPE` companions. Mirror the Transform path (which spends correctly).
+  * **#8 Combat-tab druid buttons:** `charsheet__combat-druid-zodiac-choose` and `charsheet__combat-druid-manage` both call `druid.openModal()` (full management). The zodiac button should open a zodiac-forms-ONLY view; the manage button should be removed from the combat tab.
+  * **#9 Active-state effects not cleaned up on cancel:** Zodiac Form Aurochs grants STR save/check bonuses (and `carrySizeBonus`) that PERSIST after the form is dismissed. `deactivateState` only flips `state.active=false`; effects are meant to compute live from active states. Make teardown generic so ALL active-state effects drop on deactivate. SCOPE GUARD: S2 is the sole owner of `deactivateState` + active-state cleanup; it MUST add a non-druid active-state regression test (e.g. Rage/Bladesong stays sane after deactivate).
+  * OWNS: `charactersheet-druid-resources.js`; the `renderCombatDruidResources` region of `charactersheet-combat.js` ONLY; the active-state effect path in `charactersheet-state.js` (`getActiveStateEffects`/`deactivateState`/`getSaveBonusFromStates` + zodiac form defs incl. Aurochs + `spendWildShapeUse`); the familiar-picker spend in `charactersheet-spells.js`; long-rest companion cleanup in `charactersheet-rest.js`.
+  * [Lunaria repro: Druid 3 Circle of the Zodiac / Ranger 6 Hunter]
+
+* **(S3 — Carry capacity + Hunter's Dodge: #3, #4):**
+  * **#3 Thelemar/TGTT carry capacity miscalc:** a TGTT Tortle with STR 8 shows 400 base / 800 push-drag-lift (should be ~90/180 under the rule `passiveMight × 10`). `getCarryingCapacity` (thelemar branch = `passiveMight × 10`; standard = STR × 15) + `getPassiveScore("might")` + `getSizeCarryMultiplier`. `passiveMight` appears to resolve far too high — root-cause it. SCOPE GUARD: do NOT edit active-state effects / `getCarrySizeBonusFromStates` / Aurochs (owned by S2).
+  * **#4 Ranger Hunter's Dodge duplicated:** appears as BOTH a use-button row "🛡️ Hunter's Dodge 3/3" (name NOT hoverable) AND a `charsheet__ranger-ability-row` (name hoverable). The Features tab already filters the ability-row duplicate (`.filter(a => a.name !== "Hunter's Dodge")`); the Combat tab and Overview tab miss that filter. Drop the ability-row duplicate everywhere AND make the use-button row name hoverable (via `buildInlineEntriesHoverLink`).
+  * OWNS: `getCarryingCapacity`/`getPassiveScore`/`getSizeCarryMultiplier` region of `charactersheet-state.js`; ALL Hunter's Dodge rendering — `charactersheet.js` overview rows, `charactersheet-combat.js` ranger Primal Focus region ONLY, `charactersheet-features.js` — including the use-button hover.
+
+* **(S4 — Layout compactness: #7, #10):**
+  * **#7 Header/tabs wasted space:** `ve-flex-col w-100 charsheet__main-header` has a lot of wasted vertical space that pushes the sheet down and should be more compact; `nav nav-tabs charsheet__main-tabs mb-3 no-print` is also too tall to a lesser degree (each carries `margin-bottom: 1.5rem` + row paddings).
+  * **#10 Arcane Shot section layout:** `charsheet__arcane-shot-section` renders as a column while siblings `charsheet__weapon-riders-section` / `charsheet__sneak-attack-section` render as full-width rows; the CSS `grid-column: 1 / -1` span rule lists the latter two but not arcane-shot. Make arcane-shot match the row layout.
+  * OWNS: `css/charactersheet.css` header/tabs spacing rules + the combat-resources grid-column span rule. CSS-only; must not change combat-tab JS or other sessions' regions.
 
 ## Closed Bugs
 
