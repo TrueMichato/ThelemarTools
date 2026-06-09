@@ -237,13 +237,18 @@ class CharacterSheetQuickBuild {
 			const isScholarLevel = isXPHBWizard && classLevel === 2;
 			const isSpellbookLevel = isWizard && classLevel >= 2;
 
+			// Spellcasting model is resolved once via the shared resolver so the known/prepared
+			// split agrees with the state classifier. In 2024 the canonical known casters
+			// (Bard/Ranger/Sorcerer/Warlock) carry preparedSpellsProgression but remain "known".
+			const spellModel = CharacterSheetClassUtils.getClassSpellcastingModel({name: className, source: classSource, classData});
+
 			// Known-spell caster detection (Sorcerer, Bard, Ranger, Warlock, etc.)
 			let isKnownCaster = false;
 			let knownSpellsGainAtLevel = 0;
 			let knownCantripsGainAtLevel = 0;
 			let knownMaxSpellLevel = 0;
 
-			if (!isWizard && !classData.preparedSpellsProgression) {
+			if (!isWizard && spellModel === "known") {
 				const newKnown = CharacterSheetClassUtils.getKnownSpellsAtLevel(classData, className, classLevel);
 				if (newKnown !== null) {
 					isKnownCaster = true;
@@ -269,7 +274,7 @@ class CharacterSheetQuickBuild {
 			let preparedCantripsGainAtLevel = 0;
 			let preparedMaxSpellLevel = 0;
 
-			if (!isWizard && !isKnownCaster && classData.preparedSpellsProgression) {
+			if (!isWizard && !isKnownCaster && spellModel === "prepared" && classData.preparedSpellsProgression) {
 				isPreparedCaster = true;
 				const prog = classData.preparedSpellsProgression;
 				const newPrepared = prog[classLevel - 1] || 0;
@@ -4735,7 +4740,7 @@ class CharacterSheetQuickBuild {
 		// Apply known spells (Sorcerer, Bard, Ranger, Warlock, etc.)
 		if (this._selections.knownSpells.length > 0) {
 			const knownClassName = this._classAllocations.find(a =>
-				!a.classData?.preparedSpellsProgression && a.classData?.name !== "Wizard",
+				CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "known",
 			)?.className;
 			this._selections.knownSpells.forEach(spell => {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
@@ -4748,7 +4753,7 @@ class CharacterSheetQuickBuild {
 		// Apply known cantrips
 		if (this._selections.knownCantrips.length > 0) {
 			const knownClassName = this._classAllocations.find(a =>
-				!a.classData?.preparedSpellsProgression && a.classData?.name !== "Wizard",
+				CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "known",
 			)?.className;
 			this._selections.knownCantrips.forEach(spell => {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
@@ -4767,7 +4772,8 @@ class CharacterSheetQuickBuild {
 		// Apply prepared spells (XPHB Warlock, etc.)
 		if (this._selections.preparedSpells?.length > 0) {
 			const prepClassName = this._classAllocations.find(a =>
-				a.classData?.preparedSpellsProgression,
+				a.classData?.preparedSpellsProgression
+				&& CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "prepared",
 			)?.className;
 			this._selections.preparedSpells.forEach(spell => {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
@@ -4781,7 +4787,8 @@ class CharacterSheetQuickBuild {
 		// Apply prepared cantrips
 		if (this._selections.preparedCantrips?.length > 0) {
 			const prepClassName = this._classAllocations.find(a =>
-				a.classData?.preparedSpellsProgression,
+				a.classData?.preparedSpellsProgression
+				&& CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "prepared",
 			)?.className;
 			this._selections.preparedCantrips.forEach(spell => {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
