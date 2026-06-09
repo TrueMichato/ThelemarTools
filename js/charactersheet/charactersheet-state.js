@@ -32153,6 +32153,16 @@ class CharacterSheetState {
 		// Also check active states for advantage/disadvantage
 		const activeStates = this.getActiveStates() || [];
 		activeStates.forEach(state => {
+			// Only currently-active states contribute effects. getActiveStates()
+			// returns ALL state instances (including deactivated ones, which are
+			// retained for history/re-activation), so without this guard a
+			// cancelled state (e.g. a dismissed Zodiac Form or ended Rage) would
+			// keep leaking its advantage/disadvantage here — even though the
+			// canonical getActiveStateEffects() filters on state.active. This is
+			// the generic teardown fix: ALL active-state advantage drops the
+			// moment the state is deactivated. (See bug: Aurochs STR advantage
+			// inflating passive scores / carrying capacity after dismiss.)
+			if (!state.active) return;
 			// Check built-in effects from ACTIVE_STATE_TYPES
 			const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
 			const builtInEffects = stateType?.effects || [];

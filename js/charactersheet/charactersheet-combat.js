@@ -6510,6 +6510,8 @@ class CharacterSheetCombat {
 
 		// --- Wild Shape ---
 		const ws = summary.wildShape;
+		const beastNameHtml = ws.inForm ? CharacterSheetClassUtils.buildCreatureHoverNameHtml(ws.beast, "ve-bold charsheet__combat-druid-beast") : "";
+		const beastStatsHtml = ws.inForm ? CharacterSheetClassUtils.buildCreatureStatLineHtml(ws.beast) : "";
 		if (ws.has) {
 			html += `
 				<div class="charsheet__combat-druid-block">
@@ -6518,7 +6520,7 @@ class CharacterSheetCombat {
 						<span class="badge ${ws.current > 0 ? "badge-info" : "badge-danger"}" title="Wild Shape uses remaining">${ws.current}/${ws.max}</span>
 					</div>
 					${ws.rechargeLabel ? `<div class="ve-small ve-muted charsheet__combat-druid-note">${ws.rechargeLabel}</div>` : ""}
-					${ws.inForm ? `<div class="ve-small charsheet__combat-druid-active">Currently: <span class="ve-bold charsheet__combat-druid-beast"></span></div>` : ""}
+					${ws.inForm ? `<div class="ve-small charsheet__combat-druid-active">Currently: ${beastNameHtml}</div>${beastStatsHtml ? `<div class="ve-small ve-muted charsheet__combat-druid-beaststats">${beastStatsHtml}</div>` : ""}` : ""}
 					<div class="charsheet__combat-druid-actions">
 						${ws.inForm
 		? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__combat-druid-end" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
@@ -6562,16 +6564,10 @@ class CharacterSheetCombat {
 				</div>`;
 		}
 
-		// --- Footer: full modal ---
-		html += `
-			<div class="charsheet__combat-druid-footer">
-				<button class="ve-btn ve-btn-xs ve-btn-default w-100 charsheet__combat-druid-manage" title="Open the full Druid Resources panel">⚙️ Manage Druid Resources</button>
-			</div>`;
-
 		block.innerHTML = html;
-		// Names rendered via textContent (never interpolated into the HTML string) to
-		// avoid injection from imported/user-supplied companion or form names.
-		if (ws.inForm) { const el = block.querySelector(".charsheet__combat-druid-beast"); if (el) el.textContent = ws.beastName; }
+		// Form/creature NAMES are HTML-escaped inside the class-utils helpers (beast
+		// name) or set via textContent (zodiac) — never raw-interpolated — to avoid
+		// injection from imported/user-supplied companion or form names.
 		if (zo.activeFormName) { const el = block.querySelector(".charsheet__combat-druid-zodiac-name"); if (el) el.textContent = zo.activeFormName; }
 		container.appendChild(block);
 
@@ -6585,9 +6581,8 @@ class CharacterSheetCombat {
 			druid.restoreUse();
 		});
 		block.querySelector(".charsheet__combat-druid-summon")?.addEventListener("click", () => druid.pSummonWildCompanion());
-		block.querySelector(".charsheet__combat-druid-zodiac-choose")?.addEventListener("click", () => druid.openModal());
+		block.querySelector(".charsheet__combat-druid-zodiac-choose")?.addEventListener("click", () => druid.openZodiacPicker());
 		block.querySelector(".charsheet__combat-druid-zodiac-dismiss")?.addEventListener("click", () => druid.dismissZodiac());
-		block.querySelector(".charsheet__combat-druid-manage")?.addEventListener("click", () => druid.openModal());
 	}
 
 	/**
