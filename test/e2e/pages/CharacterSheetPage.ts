@@ -120,8 +120,28 @@ export class CharacterSheetPage {
 	}
 
 	async switchToTab (tab: Locator): Promise<void> {
+		// The optional top-level "Abilities" tab is hidden by default (the
+		// `showAbilitiesTab` setting is off — Overview already surfaces ability
+		// scores). Reveal it on demand so flows that read ability/skill rows from
+		// that tab can click its otherwise-hidden nav link.
+		if (tab === this.tabAbilities) await this.ensureAbilitiesTabVisible();
 		await tab.click();
 		await this.page.waitForTimeout(100);
+	}
+
+	/**
+	 * Enable the optional "Abilities" tab via the page controller and refresh tab
+	 * visibility, so its nav link becomes clickable. Best-effort and idempotent.
+	 */
+	async ensureAbilitiesTabVisible (): Promise<void> {
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			try {
+				cs?._state?.setShowAbilitiesTab?.(true);
+				cs?._updateAbilitiesTabVisibility?.();
+			} catch (_) { /* best-effort */ }
+		});
+		await this.page.waitForTimeout(50);
 	}
 
 	// ========== ABILITY SCORES ==========

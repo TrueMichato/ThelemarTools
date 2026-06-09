@@ -3818,6 +3818,8 @@ class CharacterSheetState {
 				ammunitionTracking: false,
 				// Overview display: label speed types with emoji instead of words (compact). Default ON.
 				speedEmojiLabels: true,
+				// Show the redundant top-level "Abilities" tab (Overview already shows scores). Default OFF.
+				showAbilitiesTab: false,
 			},
 
 			// Ammunition consumption tracking for current combat
@@ -24546,6 +24548,15 @@ class CharacterSheetState {
 			});
 		}
 		this._data.settings[key] = value;
+	}
+
+	/** Whether the optional top-level "Abilities" tab is shown (default false). */
+	getShowAbilitiesTab () {
+		return this._data.settings?.showAbilitiesTab === true;
+	}
+
+	setShowAbilitiesTab (val) {
+		this.setSetting("showAbilitiesTab", !!val);
 	}
 
 	getExhaustionRules () {

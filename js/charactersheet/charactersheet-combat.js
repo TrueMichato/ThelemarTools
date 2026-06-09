@@ -6400,7 +6400,7 @@ class CharacterSheetCombat {
 				// Combat-method rows; falls back to plain text if unavailable.
 				const dodgeName = CharacterSheetClassUtils.buildInlineEntriesHoverLink?.("Hunter's Dodge", "Hunter's Dodge", [CharacterSheetClassUtils.getHuntersDodgeNote?.()]) || "Hunter's Dodge";
 				html += `
-				<div class="ve-flex-v-center gap-2 mb-2">
+				<div class="charsheet__ranger-ability-row--action">
 					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}">🛡️ ${dodgeName} ${dodgeRemaining}/${dodgeMax}</span>
 					<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
 				</div>`;
