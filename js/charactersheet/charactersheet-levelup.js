@@ -4179,17 +4179,13 @@ class CharacterSheetLevelUp {
 		// Apply ASI and/or feat
 		if (isBothAsiAndFeat) {
 			// Thelemar rule: Apply BOTH ASI and Feat at level 4
-			// Apply ability score increases
+			// Apply ability score increases. Add the tracking feature FIRST and gate the
+			// non-idempotent base-score writes on a fresh add, so a re-run can never double
+			// the base (addFeature dedupes by name+source+className+level).
 			/** @type {*[]} */ const increases = [];
 			Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
-				if ((/** @type {*} */ (asiChoices))[abl]) {
-					const currentBase = this._state.getAbilityBase(abl);
-					this._state.setAbilityBase(abl, Math.min(20, currentBase + (/** @type {*} */ (asiChoices))[abl]));
-					increases.push(`${Parser.attAbvToFull(abl)} +${(/** @type {*} */ (asiChoices))[abl]}`);
-				}
+				if ((/** @type {*} */ (asiChoices))[abl]) increases.push(`${Parser.attAbvToFull(abl)} +${(/** @type {*} */ (asiChoices))[abl]}`);
 			});
-
-			// Add a tracking feature for the ASI choice
 			if (increases.length > 0) {
 				const asiFeature = {
 					name: "Ability Score Improvement",
@@ -4201,7 +4197,14 @@ class CharacterSheetLevelUp {
 					description: `<p><strong>Ability Score Increases:</strong> ${increases.join(", ")}</p>`,
 					isAsiChoice: true,
 				};
-				this._state.addFeature(asiFeature);
+				if (this._state.addFeature(asiFeature)) {
+					Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
+						if ((/** @type {*} */ (asiChoices))[abl]) {
+							const currentBase = this._state.getAbilityBase(abl);
+							this._state.setAbilityBase(abl, Math.min(20, currentBase + (/** @type {*} */ (asiChoices))[abl]));
+						}
+					});
+				}
 			}
 
 			// Also apply the feat
@@ -4214,8 +4217,8 @@ class CharacterSheetLevelUp {
 				} else if (selectedFeat._featChoices) {
 					selectedFeat.choices = {...selectedFeat._featChoices};
 				}
-				this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(selectedFeat)});
-				CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
+				const featAdded = this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(selectedFeat)});
+				if (featAdded) CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
 				await this._processFeatSpellChoices();
 			}
 		} else if (selectedFeat) {
@@ -4228,20 +4231,17 @@ class CharacterSheetLevelUp {
 			} else if (selectedFeat._featChoices) {
 				selectedFeat.choices = {...selectedFeat._featChoices};
 			}
-			this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(selectedFeat)});
-			// Apply feat bonuses if any
-			CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
+			const featAdded = this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(selectedFeat)});
+			// Apply feat bonuses only on a fresh add (applyFeatBonuses writes BASE non-idempotently)
+			if (featAdded) CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
 			// Process pending spell choices from the feat
 			await this._processFeatSpellChoices();
 		} else if (asiChoices) {
-			// Apply ability score increases
+			// Apply ability score increases. Add the tracking feature FIRST and gate the
+			// non-idempotent base-score writes on a fresh add (see isBothAsiAndFeat above).
 			/** @type {*[]} */ const increases = [];
 			Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
-				if ((/** @type {*} */ (asiChoices))[abl]) {
-					const currentBase = this._state.getAbilityBase(abl);
-					this._state.setAbilityBase(abl, Math.min(20, currentBase + (/** @type {*} */ (asiChoices))[abl]));
-					increases.push(`${Parser.attAbvToFull(abl)} +${(/** @type {*} */ (asiChoices))[abl]}`);
-				}
+				if ((/** @type {*} */ (asiChoices))[abl]) increases.push(`${Parser.attAbvToFull(abl)} +${(/** @type {*} */ (asiChoices))[abl]}`);
 			});
 
 			// Add a tracking feature for the ASI choice
@@ -4256,7 +4256,14 @@ class CharacterSheetLevelUp {
 					description: `<p><strong>Ability Score Increases:</strong> ${increases.join(", ")}</p>`,
 					isAsiChoice: true, // Mark as ASI choice for special handling
 				};
-				this._state.addFeature(asiFeature);
+				if (this._state.addFeature(asiFeature)) {
+					Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
+						if ((/** @type {*} */ (asiChoices))[abl]) {
+							const currentBase = this._state.getAbilityBase(abl);
+							this._state.setAbilityBase(abl, Math.min(20, currentBase + (/** @type {*} */ (asiChoices))[abl]));
+						}
+					});
+				}
 			}
 		}
 

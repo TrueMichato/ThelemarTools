@@ -932,6 +932,7 @@ class CharacterSheetQuickBuild {
 	}
 
 	async _nextStep () {
+		if (this._isApplying) return;
 		const currentStep = this._steps[this._currentStep];
 		if (currentStep?.validate && !currentStep.validate()) return;
 
@@ -942,8 +943,16 @@ class CharacterSheetQuickBuild {
 		}
 
 		if (this._currentStep >= this._steps.length - 1) {
-			// Final step — apply the build
-			await this._applyQuickBuild();
+			// Final step — apply the build. Disable the Finish button for the duration so a
+			// second click can't kick off a concurrent apply pass (belt-and-braces with the
+			// _isApplying lock inside _applyQuickBuild).
+			const nextBtn = this._overlay?.querySelector("#quickbuild-next");
+			if (nextBtn) nextBtn.disabled = true;
+			try {
+				await this._applyQuickBuild();
+			} finally {
+				if (nextBtn) nextBtn.disabled = false;
+			}
 			this._closeWizard({force: true});
 		} else {
 			this._goToStep(this._currentStep + 1);
@@ -4476,6 +4485,20 @@ class CharacterSheetQuickBuild {
 	 * Mirrors _applyLevelUp() from CharacterSheetLevelUp but processes multiple levels at once.
 	 */
 	async _applyQuickBuild () {
+		// Re-entrancy guard: a double-click on Finish (or any re-trigger) must not run the
+		// apply pass twice. The ASI/feat base-score writes are now idempotent on their own,
+		// but a concurrent second pass could still race racial-choice/spell prompts and leave
+		// orphaned modals (CS-BUG #10/#12). Hold a synchronous lock around the whole apply.
+		if (this._isApplying) return;
+		this._isApplying = true;
+		try {
+			await this._applyQuickBuildInner();
+		} finally {
+			this._isApplying = false;
+		}
+	}
+
+	async _applyQuickBuildInner () {
 		const conMod = this._state.getAbilityMod("con");
 		const pendingHistoryEntries = [];
 
@@ -4818,59 +4841,54 @@ class CharacterSheetQuickBuild {
 			};
 		};
 
-		if (asiSel.isBoth) {
-			// Apply ASI
+		// Apply the ASI portion idempotently. `setAbilityBase` is a non-idempotent
+		// `+= delta` write, but `addFeature` dedupes the "Ability Score Improvement"
+		// tracking record by name+source+className+level. Gating the base writes on a
+		// FRESH feature add means a re-run (double-finish, second pass, re-analyze) can
+		// never silently double the base score (CS-BUG: DEX/CON base inflation).
+		const applyAsi = () => {
 			const increases = [];
+			Parser.ABIL_ABVS.forEach(abl => {
+				if (asiSel.abilityChoices?.[abl]) increases.push(`${Parser.attAbvToFull(abl)} +${asiSel.abilityChoices[abl]}`);
+			});
+			if (!increases.length) return;
+			const added = this._state.addFeature({
+				name: "Ability Score Improvement",
+				source: classData.source,
+				className: classEntry.name,
+				classSource: classEntry.source,
+				level: classLevel,
+				featureType: "Class",
+				description: `<p><strong>Ability Score Increases:</strong> ${increases.join(", ")}</p>`,
+				isAsiChoice: true,
+			});
+			if (!added) return; // already recorded for this slot — base already reflects it
 			Parser.ABIL_ABVS.forEach(abl => {
 				if (asiSel.abilityChoices?.[abl]) {
 					const currentBase = this._state.getAbilityBase(abl);
 					this._state.setAbilityBase(abl, Math.min(20, currentBase + asiSel.abilityChoices[abl]));
-					increases.push(`${Parser.attAbvToFull(abl)} +${asiSel.abilityChoices[abl]}`);
 				}
 			});
-			if (increases.length > 0) {
-				this._state.addFeature({
-					name: "Ability Score Improvement",
-					source: classData.source,
-					className: classEntry.name,
-					classSource: classEntry.source,
-					level: classLevel,
-					featureType: "Class",
-					description: `<p><strong>Ability Score Increases:</strong> ${increases.join(", ")}</p>`,
-					isAsiChoice: true,
-				});
-			}
-			// Apply feat
-			if (asiSel.feat) {
-				applyFeatChoices();
-				this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(asiSel.feat)});
-				CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
-			}
-		} else if (asiSel.mode === "feat" && asiSel.feat) {
+		};
+
+		// Apply the feat portion idempotently. `applyFeatBonuses` writes BASE ability
+		// scores non-idempotently; `addFeat` dedupes by name+source and returns whether a
+		// NEW feat was recorded. Only apply the bonuses on a fresh add so a re-run is a
+		// no-op (mirrors the granted-feat path in CharacterSheetLevelUp).
+		const applyFeat = () => {
+			if (!asiSel.feat) return;
 			applyFeatChoices();
-			this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(asiSel.feat)});
-			CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
+			const added = this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(asiSel.feat)});
+			if (added) CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
+		};
+
+		if (asiSel.isBoth) {
+			applyAsi();
+			applyFeat();
+		} else if (asiSel.mode === "feat" && asiSel.feat) {
+			applyFeat();
 		} else if (asiSel.mode === "asi") {
-			const increases = [];
-			Parser.ABIL_ABVS.forEach(abl => {
-				if (asiSel.abilityChoices?.[abl]) {
-					const currentBase = this._state.getAbilityBase(abl);
-					this._state.setAbilityBase(abl, Math.min(20, currentBase + asiSel.abilityChoices[abl]));
-					increases.push(`${Parser.attAbvToFull(abl)} +${asiSel.abilityChoices[abl]}`);
-				}
-			});
-			if (increases.length > 0) {
-				this._state.addFeature({
-					name: "Ability Score Improvement",
-					source: classData.source,
-					className: classEntry.name,
-					classSource: classEntry.source,
-					level: classLevel,
-					featureType: "Class",
-					description: `<p><strong>Ability Score Increases:</strong> ${increases.join(", ")}</p>`,
-					isAsiChoice: true,
-				});
-			}
+			applyAsi();
 		}
 	}
 
