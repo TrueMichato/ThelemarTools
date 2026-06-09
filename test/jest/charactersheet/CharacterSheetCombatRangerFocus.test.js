@@ -292,8 +292,13 @@ describe("Bug #11 — reminder surfaces filter methods/applied-elsewhere + hover
 	})();
 
 	it("Overview and Combat both filter the catalog through the generic predicate (a + b)", () => {
-		expect(overviewBody).toContain("isPrimalFocusReminderAbility");
-		expect(combatBody).toContain("isPrimalFocusReminderAbility");
+		// Dedicated-row abilities (Hunter's Dodge) are excluded via the shared
+		// isPrimalFocusAbilityRowEligible predicate so they're not double-listed.
+		expect(overviewBody).toMatch(/\.filter\(\s*\w+\s*=>\s*CharacterSheetClassUtils\.isPrimalFocusAbilityRowEligible/);
+		expect(combatBody).toMatch(/\.filter\(\s*\w+\s*=>\s*CharacterSheetClassUtils\.isPrimalFocusAbilityRowEligible/);
+		// The old direct-reminder filter (which leaked the Hunter's Dodge duplicate) is gone.
+		expect(overviewBody).not.toMatch(/\.filter\(\s*\w+\s*=>\s*CharacterSheetClassUtils\.isPrimalFocusReminderAbility/);
+		expect(combatBody).not.toMatch(/\.filter\(\s*\w+\s*=>\s*CharacterSheetClassUtils\.isPrimalFocusReminderAbility/);
 	});
 
 	it("Overview and Combat both wrap ability/reminder names in the inline-entries hover (c)", () => {
@@ -314,8 +319,102 @@ describe("Bug #11 — reminder surfaces filter methods/applied-elsewhere + hover
 		const m = featuresSrc.match(/const abilityRowsHtml = modeAbilities[\s\S]*?\.join\(""\);/);
 		const block = m ? m[0] : "";
 		expect(block.length).toBeGreaterThan(0);
-		expect(block).toContain("isPrimalFocusReminderAbility");
+		expect(block).toMatch(/\.filter\(\s*\w+\s*=>\s*CharacterSheetClassUtils\.isPrimalFocusAbilityRowEligible/);
+		expect(block).not.toMatch(/\.filter\(\s*\w+\s*=>\s*CharacterSheetClassUtils\.isPrimalFocusReminderAbility/);
 		// The dead method badge branch is gone here too.
 		expect(block).not.toContain("⚔️ Method");
+	});
+});
+
+describe("Bug #4 — Hunter's Dodge appears exactly once (the use-button row) and its name is hoverable", () => {
+	const charsheetSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+	const combatSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-combat.js"), "utf8");
+	const featuresSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-features.js"), "utf8");
+
+	describe("shared de-dupe predicate (so it can't regress on one surface)", () => {
+		it("isPrimalFocusAbilityRowEligible excludes Hunter's Dodge (it has a dedicated row)", () => {
+			const dodge = {name: "Hunter's Dodge", kind: "usable", actionType: "reaction"};
+			// It IS a valid reminder ability...
+			expect(CharacterSheetClassUtils.isPrimalFocusReminderAbility(dodge)).toBe(true);
+			// ...but it is NOT eligible for the generic ability-row list.
+			expect(CharacterSheetClassUtils.isPrimalFocusAbilityRowEligible(dodge)).toBe(false);
+		});
+
+		it("isPrimalFocusAbilityRowEligible still admits ordinary reminder abilities", () => {
+			expect(CharacterSheetClassUtils.isPrimalFocusAbilityRowEligible({name: "Focused Quarry", kind: "usable", actionType: "bonus"})).toBe(true);
+			expect(CharacterSheetClassUtils.isPrimalFocusAbilityRowEligible({name: "Terrain Defense", kind: "passive"})).toBe(true);
+			// ...and still excludes methods / applied-elsewhere passives.
+			expect(CharacterSheetClassUtils.isPrimalFocusAbilityRowEligible({name: "Groundshatter", kind: "method"})).toBe(false);
+			expect(CharacterSheetClassUtils.isPrimalFocusAbilityRowEligible({name: "Pursuit", kind: "passive", appliedElsewhere: true})).toBe(false);
+		});
+
+		it("the catalog lists Hunter's Dodge once, and the ability-row list omits it entirely (data-level)", () => {
+			// Proves the de-dupe at the data layer that the three render surfaces rely on:
+			// Hunter's Dodge is present in the catalog (it has a dedicated use-button row)
+			// but is NEVER part of the generic ability-row list (which would be the duplicate).
+			const prey = CharacterSheetClassUtils.getPrimalFocusModeAbilities("prey", {});
+			expect(prey.filter(a => a.name === "Hunter's Dodge")).toHaveLength(1);
+			const rowAbilities = prey.filter(a => CharacterSheetClassUtils.isPrimalFocusAbilityRowEligible(a));
+			expect(rowAbilities.map(a => a.name)).not.toContain("Hunter's Dodge");
+		});
+
+		it("Hunter's Dodge is the only dedicated-row ability, and its note is the single source", () => {
+			expect(CharacterSheetClassUtils.PRIMAL_FOCUS_DEDICATED_ROW_ABILITIES).toEqual(["Hunter's Dodge"]);
+			const note = CharacterSheetClassUtils.getHuntersDodgeNote();
+			expect(typeof note).toBe("string");
+			expect(note.length).toBeGreaterThan(0);
+			// The catalog entry's note is sourced from getHuntersDodgeNote() (no drift).
+			const prey = CharacterSheetClassUtils.getPrimalFocusModeAbilities("prey", {});
+			const dodge = prey.find(a => a.name === "Hunter's Dodge");
+			expect(dodge.note).toBe(note);
+		});
+	});
+
+	// The dedicated Hunter's Dodge use-button rows live in three surfaces. Source-pin
+	// (like the J8 pins above; the controller can't be imported in node) that each
+	// renders ONE dodge row, that the row's name is wrapped in the inline-entries
+	// hover (sourced from getHuntersDodgeNote), and that it is excluded from the
+	// generic ability-row list (so it never appears twice).
+	const combatPreyBlock = (() => {
+		const m = combatSrc.match(/const dodgeRemaining[\s\S]*?charsheet__combat-dodge-use[\s\S]*?<\/div>`;/);
+		return m ? m[0] : "";
+	})();
+	const overviewDodgeBlock = (() => {
+		const m = charsheetSrc.match(/const dodgeRemaining[\s\S]*?charsheet__overview-dodge-use[\s\S]*?<\/div>`;/);
+		return m ? m[0] : "";
+	})();
+	const featuresDodgeRow = (() => {
+		const m = featuresSrc.match(/const dodgeRowHtml = isPrey[\s\S]*?: "";/);
+		return m ? m[0] : "";
+	})();
+
+	it("Combat use-button row exists once and its name is hoverable via getHuntersDodgeNote", () => {
+		expect(combatPreyBlock.length).toBeGreaterThan(0);
+		// Exactly one dodge use-button is RENDERED (the class also appears once more in
+		// the click-handler binding, so count within the render block only).
+		expect((combatPreyBlock.match(/charsheet__combat-dodge-use/g) || []).length).toBe(1);
+		// The name is computed from the inline-entries hover (sourced from the canonical note)...
+		expect(combatPreyBlock).toMatch(/const dodgeName\s*=[\s\S]*?buildInlineEntriesHoverLink/);
+		expect(combatPreyBlock).toContain("getHuntersDodgeNote");
+		// ...and that hover var is ACTUALLY rendered into the badge (not just computed).
+		expect(combatPreyBlock).toMatch(/🛡️ \$\{dodgeName\}/);
+		// No bare plain-text "🛡️ Hunter's Dodge" badge — the name comes from the hover var.
+		expect(combatPreyBlock).not.toMatch(/🛡️ Hunter's Dodge \$\{/);
+	});
+
+	it("Overview use-button row exists once and its name is hoverable via getHuntersDodgeNote", () => {
+		expect(overviewDodgeBlock.length).toBeGreaterThan(0);
+		expect((overviewDodgeBlock.match(/charsheet__overview-dodge-use/g) || []).length).toBe(1);
+		expect(overviewDodgeBlock).toMatch(/const dodgeName\s*=[\s\S]*?buildInlineEntriesHoverLink/);
+		expect(overviewDodgeBlock).toContain("getHuntersDodgeNote");
+		expect(overviewDodgeBlock).toMatch(/🛡️ \$\{dodgeName\}/);
+		expect(overviewDodgeBlock).not.toMatch(/🛡️ Hunter's Dodge \$\{/);
+	});
+
+	it("Features dedicated dodge row name is hoverable too (consistency)", () => {
+		expect(featuresDodgeRow.length).toBeGreaterThan(0);
+		// The inline-entries hover wraps the Hunter's Dodge name INSIDE the row's <em>.
+		expect(featuresDodgeRow).toMatch(/buildInlineEntriesHoverLink\?\.\("Hunter's Dodge"/);
+		expect(featuresDodgeRow).toContain("getHuntersDodgeNote");
 	});
 });
