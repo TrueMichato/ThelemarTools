@@ -10,6 +10,7 @@
  *   - a custom/edited item survives a save → load round-trip
  */
 
+import {jest} from "@jest/globals";
 import "./setup.js";
 
 if (typeof globalThis.document === "undefined") {
@@ -18,6 +19,18 @@ if (typeof globalThis.document === "undefined") {
 		getElementById () { return null; },
 		querySelector () { return null; },
 		querySelectorAll () { return []; },
+	};
+}
+
+// Minimal CharacterSheetUpgrades stub — _renderItemRow probes these statics for upgrade badges.
+// A plain item exercises only the is{Weapon,Armor,Shield} guards.
+if (typeof globalThis.CharacterSheetUpgrades === "undefined") {
+	globalThis.CharacterSheetUpgrades = {
+		isWeapon: () => false,
+		isArmor: () => false,
+		isShield: () => false,
+		getUpgradeEffects: () => ({tags: [], notes: []}),
+		getGemstoneSummary: () => "",
 	};
 }
 
@@ -277,5 +290,195 @@ describe("Custom item survives save → load round-trip", () => {
 		// Effect re-aggregates after load
 		inv2._updateItemBonuses(state2.getItems());
 		expect(state2.getSenses().darkvision).toBe(90);
+	});
+});
+
+/**
+ * Bug #2 (Round 8) — discoverable in-row "Edit" affordance.
+ *
+ * The edit pipeline (_modifyItemById -> _showAddCustomItem -> replaceItem) was already covered
+ * above; these tests pin the NEW discoverability surface: a per-row edit button wired through the
+ * delegated click handler to _modifyItemById, plus the charge-preservation fix on the edit path.
+ */
+
+// A minimal capturing document so we can grab the delegated "click" handler bound in the
+// CharacterSheetInventory constructor and invoke it with synthetic events (test env is `node`).
+function makeInventoryWithCapturedClick (state, catalog = []) {
+	const prevDoc = globalThis.document;
+	const clickHandlers = [];
+	globalThis.document = {
+		addEventListener (type, handler) { if (type === "click") clickHandlers.push(handler); },
+		getElementById () { return null; },
+		querySelector () { return null; },
+		querySelectorAll () { return []; },
+	};
+	let inv;
+	try {
+		inv = new CharacterSheetInventory({getState: () => state});
+	} finally {
+		globalThis.document = prevDoc;
+	}
+	const page = {getState: () => state, renderCharacter: () => inv.syncItemDerivedState(), saveCharacter: () => {}};
+	inv._page = page;
+	inv.setItems(catalog);
+	const fireClick = (closestMap) => {
+		const target = {closest: (sel) => closestMap[sel] || null};
+		for (const handler of clickHandlers) handler({target});
+	};
+	return {inv, fireClick};
+}
+
+describe("Row edit affordance (Bug #2 discoverability)", () => {
+	test("_renderItemRow renders a .charsheet__item-edit button bound to the item id", () => {
+		const state = newState();
+		const inv = makeInventory(state);
+		state.addItem(inv._buildCustomItem("Editable Gizmo", 1, 1, {type: "wondrous"}));
+		const id = lastItemId(state);
+		const item = state.getItems().find(i => i.id === id);
+
+		const html = inv._renderItemRow(item).outerHTML;
+		expect(html).toContain("charsheet__item-edit");
+		// The row must carry the id so the delegated handler can resolve which item to edit.
+		expect(html).toContain(`data-item-id="${id}"`);
+	});
+
+	test("clicking the row edit button dispatches _modifyItemById with that row's id", () => {
+		const state = newState();
+		const {inv, fireClick} = makeInventoryWithCapturedClick(state);
+		state.addItem(inv._buildCustomItem("Click Target", 1, 0, {type: "gear"}));
+		const id = lastItemId(state);
+
+		const spy = jest.spyOn(inv, "_modifyItemById").mockImplementation(() => {});
+
+		// Simulate a real click on the inner glyphicon inside the edit button, inside the row.
+		const editBtn = {};
+		const row = {dataset: {itemId: id}};
+		fireClick({
+			".charsheet__item-edit": editBtn,
+			".charsheet__item": row,
+		});
+
+		expect(spy).toHaveBeenCalledTimes(1);
+		expect(spy).toHaveBeenCalledWith(id);
+		spy.mockRestore();
+	});
+
+	test("a non-edit row click does NOT trigger _modifyItemById", () => {
+		const state = newState();
+		const {inv, fireClick} = makeInventoryWithCapturedClick(state);
+		state.addItem(inv._buildCustomItem("Info Target", 1, 0, {type: "gear"}));
+		const id = lastItemId(state);
+
+		const modifySpy = jest.spyOn(inv, "_modifyItemById").mockImplementation(() => {});
+		const infoSpy = jest.spyOn(inv, "_showItemInfo").mockImplementation(() => {});
+
+		// An info-button click resolves the info branch (which returns) before reaching edit.
+		fireClick({
+			".charsheet__item-info": {},
+			".charsheet__item": {dataset: {itemId: id}},
+		});
+
+		expect(infoSpy).toHaveBeenCalledWith(id);
+		expect(modifySpy).not.toHaveBeenCalled();
+		modifySpy.mockRestore();
+		infoSpy.mockRestore();
+	});
+});
+
+describe("Editing a catalog item converts it to custom in place", () => {
+	test("catalog -> custom preserves id/quantity/equipped/attuned/starred/note and creates no duplicate", () => {
+		const state = newState();
+		const inv = makeInventory(state);
+
+		// Catalog-origin wrapper (NOT custom): raw DMG shape with reqAttune + string bonus.
+		state.addItem({
+			name: "Cloak of Protection",
+			source: "DMG",
+			type: "wondrous",
+			reqAttune: true,
+			requiresAttunement: true,
+			bonusSavingThrow: "+1",
+			entries: ["You gain a +1 bonus to AC and saving throws while wearing this cloak."],
+		});
+		const id = lastItemId(state);
+		state.setItemEquipped(id, true);
+		state.setItemAttuned(id, true);
+		state.setItemQuantity(id, 2);
+		state.setItemStarred(id, true);
+		state.updateItemNote(id, "heirloom");
+
+		const before = state.getInventory().find(w => w.id === id);
+		expect(before.item._isCustom).toBeFalsy(); // catalog origin
+
+		// Emulate the modify modal: prefill from the item, then save in edit mode.
+		const flat = state.getItems().find(i => i.id === id);
+		const seed = inv._seedOptionsFromItem(flat);
+		inv._saveCustomItem(seed.name, flat.quantity, flat.weight, seed.options, id);
+
+		const after = state.getInventory().find(w => w.id === id);
+		expect(after).toBeTruthy();
+		expect(after.item._isCustom).toBe(true); // converted to custom
+		expect(after.item.source).toBe("Custom");
+		expect(after.item.name).toBe("Cloak of Protection");
+		// Wrapper metadata preserved
+		expect(after.quantity).toBe(2);
+		expect(after.equipped).toBe(true);
+		expect(after.attuned).toBe(true); // still requires attunement
+		expect(after.starred).toBe(true);
+		expect(state.getItemNote(id)).toBe("heirloom");
+		// No duplicate stack
+		expect(state.getInventory().filter(w => w.id === id)).toHaveLength(1);
+		expect(state.getItems()).toHaveLength(1);
+
+		// Effect still applies once attuned (normalized "+1" -> numeric 1).
+		inv._updateItemBonuses(state.getItems());
+		expect(state.getItemBonuses().savingThrow).toBe(1);
+	});
+});
+
+describe("Charge handling on edit (no silent refill; clamp to new max)", () => {
+	function addCharged (state, inv, max) {
+		state.addItem(inv._buildCustomItem("Wand", 1, 0, {type: "wand", charges: max}));
+		return lastItemId(state);
+	}
+
+	test("editing unrelated metadata keeps remaining charges (no refill)", () => {
+		const state = newState();
+		const inv = makeInventory(state);
+		const id = addCharged(state, inv, 5);
+		state.setItemCharges(id, 2); // deplete to 2/5
+
+		inv._saveCustomItem("Wand (renamed)", 1, 0, {type: "wand", charges: 5}, id);
+
+		const w = state.getInventory().find(x => x.id === id);
+		expect(w.item.charges).toBe(5);
+		expect(w.item.chargesCurrent).toBe(2); // preserved, NOT refilled to 5
+	});
+
+	test("reducing max clamps remaining charges down to the new max", () => {
+		const state = newState();
+		const inv = makeInventory(state);
+		const id = addCharged(state, inv, 5);
+		state.setItemCharges(id, 4); // 4/5
+
+		inv._saveCustomItem("Wand", 1, 0, {type: "wand", charges: 3}, id);
+
+		const w = state.getInventory().find(x => x.id === id);
+		expect(w.item.charges).toBe(3);
+		expect(w.item.chargesCurrent).toBe(3); // clamped from 4 -> 3
+		expect(w.item.chargesCurrent).toBeLessThanOrEqual(w.item.charges);
+	});
+
+	test("increasing max does NOT inflate remaining charges", () => {
+		const state = newState();
+		const inv = makeInventory(state);
+		const id = addCharged(state, inv, 5);
+		state.setItemCharges(id, 2); // 2/5
+
+		inv._saveCustomItem("Wand", 1, 0, {type: "wand", charges: 7}, id);
+
+		const w = state.getInventory().find(x => x.id === id);
+		expect(w.item.charges).toBe(7);
+		expect(w.item.chargesCurrent).toBe(2); // stays 2, not refilled to 7
 	});
 });
