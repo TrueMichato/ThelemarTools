@@ -14,7 +14,7 @@ class CharacterSheetBuilder {
 	constructor (page) {
 		/** @type {*} */ this._page = page;
 		/** @type {*} */ this._state = page.getState();
-		/** @type {number} */ this._currentStep = 1;
+		/** @type {number} */ this._currentStep = 0;
 		/** @type {number} */ this._maxSteps = 7;
 
 		/** @type {*} */ this._selectedRace = null;
@@ -254,7 +254,7 @@ class CharacterSheetBuilder {
 
 		// Update nav buttons
 		const prevBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById("charsheet-builder-prev"));
-		if (prevBtn) prevBtn.disabled = this._currentStep <= 1;
+		if (prevBtn) prevBtn.disabled = this._currentStep <= 0;
 		const nextBtn = /** @type {*} */ (document.getElementById("charsheet-builder-next"));
 		if (!nextBtn) return;
 
@@ -273,7 +273,7 @@ class CharacterSheetBuilder {
 	}
 
 	_prevStep () {
-		if (this._currentStep > 1) {
+		if (this._currentStep > 0) {
 			this._goToStep(this._currentStep - 1);
 		}
 	}
@@ -295,6 +295,21 @@ class CharacterSheetBuilder {
 
 	async _validateCurrentStep () {
 		switch (this._currentStep) {
+			case 0: { // Name
+				// Read the live input first (covers autofill / a fast Next where the input
+				// event hasn't fired yet), persist, then validate.
+				if (typeof document !== "undefined") {
+					const input = /** @type {HTMLInputElement|null} */ (document.getElementById("builder-name-step"));
+					if (input) this._state.setName(input.value.trim());
+				}
+				const nm = (this._state.getName() || "").trim();
+				if (!nm) {
+					JqueryUtil.doToast({type: "warning", content: "Please enter a character name."});
+					return false;
+				}
+				return true;
+			}
+
 			case 1: // Race
 				if (!this._selectedRace) {
 					JqueryUtil.doToast({type: "warning", content: "Please select a species."});
@@ -447,6 +462,15 @@ class CharacterSheetBuilder {
 
 	_applyCurrentStep () {
 		switch (this._currentStep) {
+			case 0: { // Name — persist whatever is in the input (the change/input listener
+				// normally keeps state in sync, but read the live value to catch a fast Next).
+				const input = typeof document !== "undefined"
+					? /** @type {HTMLInputElement|null} */ (document.getElementById("builder-name-step"))
+					: null;
+				if (input) this._state.setName(input.value.trim());
+				break;
+			}
+
 			case 1: // Race
 				this._state.setRace(this._selectedRace, this._selectedSubrace);
 				// Clear ability bonuses before applying racial traits to prevent
@@ -2446,6 +2470,9 @@ class CharacterSheetBuilder {
 		content.innerHTML = "";
 
 		switch (this._currentStep) {
+			case 0:
+				this._renderNameStep(content);
+				break;
 			case 1:
 				this._renderRaceStep(content);
 				break;
@@ -2469,6 +2496,37 @@ class CharacterSheetBuilder {
 				break;
 		}
 	}
+
+	// #region Step 0: Name
+	/**
+	 * First builder step — capture just the character's name so an in-progress save is
+	 * identifiable. The name remains editable in the final Details step. Persists to
+	 * state on input so a mid-build save always carries the chosen name.
+	 * @param {*} content
+	 */
+	_renderNameStep (content) {
+		const currentName = this._state.getName() || "";
+		const container = e_({outer: `
+			<div class="charsheet__section">
+				<h4>Name Your Character</h4>
+				<p class="ve-muted ve-small mb-2">Start by naming your character. You can refine everything else as you go — naming them first makes an in-progress save easy to identify. You can rename them later in the Details step.</p>
+				<input type="text" class="ve-form-control" id="builder-name-step" placeholder="Enter character name" maxlength="120">
+			</div>
+		`});
+		content.append(container);
+
+		const input = /** @type {HTMLInputElement|null} */ (document.getElementById("builder-name-step"));
+		if (input) {
+			input.value = currentName;
+			input.addEventListener("input", (/** @type {*} */ e) => this._state.setName(e.target.value));
+			// Pressing Enter in the name field advances to the next step.
+			input.addEventListener("keydown", (/** @type {*} */ e) => {
+				if (e.key === "Enter") { e.preventDefault(); void this._nextStep(); }
+			});
+			input.focus();
+		}
+	}
+	// #endregion
 
 	// #region Step 1: Race
 	/**
