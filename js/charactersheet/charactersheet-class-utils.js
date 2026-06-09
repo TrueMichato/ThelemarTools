@@ -1761,6 +1761,20 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Canonical "spells known" casters. In both 2014 and 2024 these classes use a fixed
+	 * personal spell list (swap one on level-up), unlike prepared casters who re-prepare
+	 * freely. 2024 stores their counts in `preparedSpellsProgression` despite the rename.
+	 * @type {string[]}
+	 */
+	static KNOWN_CASTER_NAMES = ["Bard", "Ranger", "Sorcerer", "Warlock"];
+
+	/**
+	 * Canonical prepared casters — re-prepare from the full class list (Wizard from spellbook).
+	 * @type {string[]}
+	 */
+	static PREPARED_CASTER_NAMES = ["Cleric", "Druid", "Paladin", "Wizard", "Artificer"];
+
+	/**
 	 * Get the number of spells a known-caster can swap on level-up at the given level.
 	 * Per RAW, Sorcerer/Bard/Ranger/Warlock can swap 1 spell per level-up starting at level 2.
 	 * Prepared casters don't use this — they freely swap via the Spells tab.
@@ -1771,9 +1785,48 @@ class CharacterSheetClassUtils {
 	 */
 	static getSpellSwapCount (/** @type {*} */ className, /** @type {*} */ classSource, /** @type {*} */ newLevel) {
 		if (newLevel < 2) return 0;
-		const knownCasters = ["Sorcerer", "Bard", "Ranger", "Warlock"];
-		if (!knownCasters.includes(className)) return 0;
+		if (!CharacterSheetClassUtils.KNOWN_CASTER_NAMES.includes(className)) return 0;
 		return 1;
+	}
+
+	/**
+	 * Resolve a class's spellcasting model: "known" | "prepared" | "none".
+	 *
+	 * Edition-agnostic. Bard, Ranger, Sorcerer, and Warlock are KNOWN casters in BOTH
+	 * editions — the 2024 rules only renamed "spells known" to "prepared spells" while
+	 * keeping the mechanic (a fixed personal list, swapping one spell on level-up). The
+	 * 2024 data therefore stores `preparedSpellsProgression` for EVERY caster, so the
+	 * canonical known-caster set must be classified by NAME *before* the
+	 * `preparedSpellsProgression` check. The genuine prepared casters (Cleric, Druid,
+	 * Paladin, Wizard, Artificer) re-prepare freely from the whole list each long rest.
+	 *
+	 * This is the single source of truth shared by the state classifier
+	 * (`_getClassSpellcastingInfo`) and the QuickBuild known/prepared detection.
+	 *
+	 * @param {{name?: string, source?: string, classData?: *}} [opts]
+	 * @returns {"known"|"prepared"|"none"}
+	 */
+	static getClassSpellcastingModel (/** @type {*} */ {name, source, classData} = {}) {
+		const cd = classData || {};
+		const className = name || cd.name;
+
+		// 1. Explicit 2014-style known progression (Bard/Ranger/Sorcerer/Warlock + homebrew).
+		if (cd.spellsKnownProgression) return "known";
+
+		// 2. Canonical known casters by name — covers 2024, where they share the
+		//    `preparedSpellsProgression` field with genuine prepared casters.
+		if (className && CharacterSheetClassUtils.KNOWN_CASTER_NAMES.includes(className)) return "known";
+
+		// 3. Prepared progression / formula (Cleric/Druid/Paladin/Wizard, both editions).
+		//    `spellsKnownProgressionFixed` is the Wizard spellbook (a prepared caster).
+		if (cd.preparedSpellsProgression || cd.preparedSpells || cd.spellsKnownProgressionFixed) return "prepared";
+
+		// 4. Canonical prepared casters by name (minimal class objects lacking progression).
+		if (className && CharacterSheetClassUtils.PREPARED_CASTER_NAMES.includes(className)) return "prepared";
+
+		// 5. Any other spellcaster defaults to prepared; non-casters have no model.
+		if (cd.casterProgression || cd.spellcastingAbility) return "prepared";
+		return "none";
 	}
 
 	static normalizeDivineSoulAffinity (/** @type {*} */ choice) {
@@ -2000,14 +2053,22 @@ class CharacterSheetClassUtils {
 	};
 
 	/**
-	 * Get known-spell count at a class level (for known-caster classes).
+	 * Get known-spell count at a class level (for known-caster classes only).
+	 *
+	 * Returns null for any class that is not a "known" spellcasting model, so callers can
+	 * safely use it as both a detector and a count source. For 2024 known casters
+	 * (Ranger/Bard/Sorcerer/Warlock), whose data carries `preparedSpellsProgression`
+	 * instead of `spellsKnownProgression`, the count comes from that progression.
 	 * @param {*} classData - The class data
 	 * @param {string} className - The class name
 	 * @param {number} classLevel - The class level
 	 * @returns {number|null} Known spell count, or null if not a known caster
 	 */
 	static getKnownSpellsAtLevel (/** @type {*} */ classData, /** @type {*} */ className, /** @type {*} */ classLevel) {
-		const prog = classData.spellsKnownProgression || (/** @type {*} */ (CharacterSheetClassUtils._SPELLS_KNOWN_TABLES))[className];
+		if (CharacterSheetClassUtils.getClassSpellcastingModel({name: className, classData}) !== "known") return null;
+		const prog = classData.spellsKnownProgression
+			|| classData.preparedSpellsProgression
+			|| (/** @type {*} */ (CharacterSheetClassUtils._SPELLS_KNOWN_TABLES))[className];
 		if (!prog) return null;
 		return prog[classLevel - 1] || 0;
 	}

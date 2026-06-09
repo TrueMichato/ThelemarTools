@@ -5730,6 +5730,60 @@ class CharacterSheetSpells {
 		this._renderSpellList();
 	}
 
+	/**
+	 * Resolve the human-readable SOURCE of a spell for the source badge.
+	 * Fallback order: explicit feature → originating feat → owning class → granting item → "Manual".
+	 * @param {*} spell
+	 * @returns {string}
+	 */
+	_getSpellSourceLabel (spell) {
+		return spell.sourceFeature
+			|| spell.fromFeat
+			|| spell.sourceClass
+			|| spell.sourceSubclass
+			|| spell.sourceItem
+			|| spell.itemName
+			|| "Manual";
+	}
+
+	/**
+	 * Resolve the spellcasting model ("known" | "prepared" | ...) of the class that owns a
+	 * spell, subclass-aware. Reuses the state classifier (which itself routes through the
+	 * shared getClassSpellcastingModel resolver and handles Gambler/EK/AT specials), so the
+	 * Prepare button only appears for spells owned by a genuinely prepared caster.
+	 * @param {*} spell
+	 * @returns {string|null} The owner's spellcasting type, or null when the owner can't be resolved
+	 */
+	_resolveOwnerSpellcastingType (spell) {
+		const classes = this._state.getClasses?.() || [];
+		if (!classes.length) return null;
+		const sc = spell.sourceClass;
+		const ssc = spell.sourceSubclass;
+		const owner = classes.find(c =>
+			(sc && (c.name === sc || c.subclass?.name === sc))
+			|| (ssc && (c.subclass?.name === ssc || c.name === ssc)));
+		if (!owner) return null;
+		return this._state._getClassSpellcastingInfo?.(owner)?.type || null;
+	}
+
+	/**
+	 * Decide whether the per-spell "Prepare" toggle should render. Only prepared casters get
+	 * to prepare/unprepare; known casters (Bard/Ranger/Sorcerer/Warlock, EK/AT) do not, even
+	 * if a legacy save stamped the spell prepared. Cantrips and always-prepared spells never
+	 * show the toggle. Spells whose owner can't be resolved (feat/item/race/orphan) fall back
+	 * to the legacy prepared flags so older saves keep working.
+	 * @param {*} spell
+	 * @returns {boolean}
+	 */
+	_shouldShowPrepareToggle (spell) {
+		if (spell.level === 0 || spell.alwaysPrepared) return false;
+		const ownerType = this._resolveOwnerSpellcastingType(spell);
+		if (ownerType === "known") return false;
+		if (ownerType === "prepared") return true;
+		// Unknown owner: rescue legacy prepared spells (feat/item/race/orphan attribution).
+		return spell.prepared === true || spell.sourceFeature === "Prepared Spells";
+	}
+
 	_renderSpellItem (spell, showPrepareHint = false) {
 		const schoolFull = spell.school ? Parser.spSchoolAbvToFull(spell.school) : "";
 		const isPrepared = spell.prepared;
@@ -5809,30 +5863,31 @@ class CharacterSheetSpells {
 			? (detailsLine ? `${detailsLine} · ${rarityParts}` : rarityParts)
 			: detailsLine;
 
-		// Determine preparation button state and text
+		// Determine preparation button state and text. Only prepared casters can prepare;
+		// known casters never show the toggle (see _shouldShowPrepareToggle).
 		let prepButtonHtml = "";
-		if (!isCantrip) {
-			if (isAlwaysPrepared) {
-				// Always prepared spells (from domain, subclass features, etc.) can't be unprepared
-				const featureSource = sourceFeature || "class feature";
-				prepButtonHtml = `
-					<span class="ve-btn ve-btn-xs ve-btn-warning charsheet__spell-always-prepared" title="Always prepared from ${featureSource}">
-						<span class="glyphicon glyphicon-star mr-1"></span>Always
-					</span>
-				`;
-			} else {
-				// Normal prepared toggle
-				prepButtonHtml = `
-					<button class="ve-btn ve-btn-xs ${isPrepared ? "ve-btn-primary" : "ve-btn-default"} charsheet__spell-prepared" title="Toggle Prepared">
-						<span class="glyphicon glyphicon-book mr-1"></span>${isPrepared ? "Prepared" : "Prepare"}
-					</button>
-				`;
-			}
+		if (!isCantrip && isAlwaysPrepared) {
+			// Always prepared spells (from domain, subclass features, etc.) can't be unprepared
+			const featureSource = sourceFeature || "class feature";
+			prepButtonHtml = `
+				<span class="ve-btn ve-btn-xs ve-btn-warning charsheet__spell-always-prepared" title="Always prepared from ${featureSource}">
+					<span class="glyphicon glyphicon-star mr-1"></span>Always
+				</span>
+			`;
+		} else if (this._shouldShowPrepareToggle(spell)) {
+			// Normal prepared toggle
+			prepButtonHtml = `
+				<button class="ve-btn ve-btn-xs ${isPrepared ? "ve-btn-primary" : "ve-btn-default"} charsheet__spell-prepared" title="Toggle Prepared">
+					<span class="glyphicon glyphicon-book mr-1"></span>${isPrepared ? "Prepared" : "Prepare"}
+				</button>
+			`;
 		}
 
-		// Build source badge if from a feature
-		const sourceBadge = sourceFeature
-			? `<span class="badge badge-warning charsheet__spell-source-badge" title="From: ${sourceFeature}">${this._truncateFeatureName(sourceFeature)}</span>`
+		// Build source badge: show where the spell comes from (feature / feat / class /
+		// subclass / item), with a sensible fallback chain ending in "Manual".
+		const sourceLabel = this._getSpellSourceLabel(spell);
+		const sourceBadge = sourceLabel
+			? `<span class="badge badge-warning charsheet__spell-source-badge" title="Source: ${sourceLabel}">${this._truncateFeatureName(sourceLabel)}</span>`
 			: "";
 
 		// Determine if spell can be cast as ritual (show ritual button when not prepared but ritual-eligible)
