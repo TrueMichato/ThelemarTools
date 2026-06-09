@@ -1415,30 +1415,33 @@ class CharacterSheetInventory {
 			mastery: options.mastery,
 			range: options.range,
 			// Armor stats
-			armor: options.armor,
+			armor: options.armor || false,
+			shield: options.shield || false,
+			armorType: options.armorType || null,
+			dexterityMax: options.dexterityMax,
 			ac: options.ac,
 			strength: options.strength,
 			stealth: options.stealth,
 			// Magic properties
 			rarity: options.rarity,
-			bonusAc: options.bonusAc || 0,
-			bonusWeapon: options.bonusWeapon || 0,
-			bonusWeaponAttack: options.bonusWeaponAttack || 0,
-			bonusWeaponDamage: options.bonusWeaponDamage || 0,
+			bonusAc: this._parseBonus(options.bonusAc),
+			bonusWeapon: this._parseBonus(options.bonusWeapon),
+			bonusWeaponAttack: this._parseBonus(options.bonusWeaponAttack),
+			bonusWeaponDamage: this._parseBonus(options.bonusWeaponDamage),
 			bonusWeaponCritDamage: options.bonusWeaponCritDamage || 0,
-			bonusSpellAttack: options.bonusSpellAttack || 0,
-			bonusSpellSaveDc: options.bonusSpellSaveDc || 0,
-			bonusSpellDamage: options.bonusSpellDamage || 0,
-			bonusSavingThrow: options.bonusSavingThrow || 0,
-			bonusSavingThrowStr: options.bonusSavingThrowStr || 0,
-			bonusSavingThrowDex: options.bonusSavingThrowDex || 0,
-			bonusSavingThrowCon: options.bonusSavingThrowCon || 0,
-			bonusSavingThrowInt: options.bonusSavingThrowInt || 0,
-			bonusSavingThrowWis: options.bonusSavingThrowWis || 0,
-			bonusSavingThrowCha: options.bonusSavingThrowCha || 0,
-			bonusAbilityCheck: options.bonusAbilityCheck || 0,
-			bonusProficiencyBonus: options.bonusProficiencyBonus || 0,
-			bonusSavingThrowConcentration: options.bonusSavingThrowConcentration || 0,
+			bonusSpellAttack: this._parseBonus(options.bonusSpellAttack),
+			bonusSpellSaveDc: this._parseBonus(options.bonusSpellSaveDc),
+			bonusSpellDamage: this._parseBonus(options.bonusSpellDamage),
+			bonusSavingThrow: this._parseBonus(options.bonusSavingThrow),
+			bonusSavingThrowStr: this._parseBonus(options.bonusSavingThrowStr),
+			bonusSavingThrowDex: this._parseBonus(options.bonusSavingThrowDex),
+			bonusSavingThrowCon: this._parseBonus(options.bonusSavingThrowCon),
+			bonusSavingThrowInt: this._parseBonus(options.bonusSavingThrowInt),
+			bonusSavingThrowWis: this._parseBonus(options.bonusSavingThrowWis),
+			bonusSavingThrowCha: this._parseBonus(options.bonusSavingThrowCha),
+			bonusAbilityCheck: this._parseBonus(options.bonusAbilityCheck),
+			bonusProficiencyBonus: this._parseBonus(options.bonusProficiencyBonus),
+			bonusSavingThrowConcentration: this._parseBonus(options.bonusSavingThrowConcentration),
 			critThreshold: options.critThreshold || null,
 			// Defenses
 			resist: options.resist || null,
@@ -1553,8 +1556,18 @@ class CharacterSheetInventory {
 		}
 
 		// Armor / shield
-		if (type === "armor" || type === "shield") {
+		if (type === "shield") {
+			options.shield = true;
+			if (item.ac != null) options.ac = item.ac;
+			if (item.bonusAc) options.bonusAc = this._parseBonus(item.bonusAc);
+		} else if (type === "armor") {
 			options.armor = true;
+			const _tb = (item.type || "").split("|")[0];
+			const _derived = _tb === "HA" ? "heavy" : _tb === "MA" ? "medium" : _tb === "LA" ? "light" : null;
+			options.armorType = item.armorType || _derived || "light";
+			options.dexterityMax = item.dexterityMax !== undefined
+				? item.dexterityMax
+				: (options.armorType === "medium" ? 2 : options.armorType === "heavy" ? 0 : null);
 			if (item.ac != null) options.ac = item.ac;
 			if (item.strength) options.strength = item.strength;
 			if (item.stealth) options.stealth = item.stealth;
@@ -1900,7 +1913,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Value (gp)</label>
-						<input type="number" id="custom-item-value" class="ve-form-control" value="0" min="0">
+						<input type="number" id="custom-item-value" class="ve-form-control" value="0" min="0" step="0.01">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Rarity</label>
@@ -2745,7 +2758,8 @@ class CharacterSheetInventory {
 
 			const options = {
 				type: selectedType,
-				value: parseInt(form.querySelector("#custom-item-value")?.value) || 0,
+				// Field is entered in gp; store in copper to match catalog items and _formatValue().
+				value: Math.round((parseFloat(form.querySelector("#custom-item-value")?.value) || 0) * 100),
 				rarity: form.querySelector("#custom-item-rarity")?.value || undefined,
 				requiresAttunement: form.querySelector("#custom-item-attunement")?.checked,
 				entries: form.querySelector("#custom-item-desc")?.value?.trim() || undefined,
@@ -2759,11 +2773,11 @@ class CharacterSheetInventory {
 				const range = form.querySelector("#custom-item-range")?.value?.trim();
 				if (range) options.range = range;
 				const bonus = parseInt(form.querySelector("#custom-item-weapon-bonus")?.value);
-				if (bonus > 0) options.bonusWeapon = `+${bonus}`;
+				if (bonus > 0) options.bonusWeapon = bonus;
 				const bonusAttack = parseInt(form.querySelector("#custom-item-bonus-attack")?.value) || 0;
-				if (bonusAttack) options.bonusWeaponAttack = `+${bonusAttack}`;
+				if (bonusAttack) options.bonusWeaponAttack = bonusAttack;
 				const bonusDamage = parseInt(form.querySelector("#custom-item-bonus-damage")?.value) || 0;
-				if (bonusDamage) options.bonusWeaponDamage = `+${bonusDamage}`;
+				if (bonusDamage) options.bonusWeaponDamage = bonusDamage;
 				const critDamage = form.querySelector("#custom-item-crit-damage")?.value?.trim();
 				if (critDamage) options.bonusWeaponCritDamage = critDamage;
 				const masteries = [];
@@ -2781,9 +2795,11 @@ class CharacterSheetInventory {
 			// Armor stats
 			if (selectedType === "armor") {
 				options.armor = true;
+				options.armorType = form.querySelector("#custom-item-armor-type")?.value || "light";
+				options.dexterityMax = options.armorType === "medium" ? 2 : options.armorType === "heavy" ? 0 : null;
 				options.ac = parseInt(form.querySelector("#custom-item-ac")?.value) || 10;
 				const bonus = parseInt(form.querySelector("#custom-item-armor-bonus")?.value);
-				if (bonus > 0) options.bonusAc = `+${bonus}`;
+				if (bonus > 0) options.bonusAc = bonus;
 				const strReq = parseInt(form.querySelector("#custom-item-str-req")?.value);
 				if (strReq > 0) options.strength = strReq;
 				if (form.querySelector("#custom-item-stealth-dis")?.checked) options.stealth = true;
@@ -2791,10 +2807,10 @@ class CharacterSheetInventory {
 
 			// Shield stats
 			if (selectedType === "shield") {
-				options.armor = true;
+				options.shield = true;
 				options.ac = parseInt(form.querySelector("#custom-item-shield-ac")?.value) || 2;
 				const bonus = parseInt(form.querySelector("#custom-item-shield-bonus")?.value);
-				if (bonus > 0) options.bonusAc = `+${bonus}`;
+				if (bonus > 0) options.bonusAc = bonus;
 			}
 
 			// Magic item properties
@@ -2814,15 +2830,15 @@ class CharacterSheetInventory {
 
 			// Bonuses
 			const bonusSpellAttack = parseInt(form.querySelector("#custom-item-bonus-spell-attack")?.value) || 0;
-			if (bonusSpellAttack) options.bonusSpellAttack = `+${bonusSpellAttack}`;
+			if (bonusSpellAttack) options.bonusSpellAttack = bonusSpellAttack;
 			const bonusSpellDc = parseInt(form.querySelector("#custom-item-bonus-spell-dc")?.value) || 0;
-			if (bonusSpellDc) options.bonusSpellSaveDc = `+${bonusSpellDc}`;
+			if (bonusSpellDc) options.bonusSpellSaveDc = bonusSpellDc;
 			const bonusSaveAll = parseInt(form.querySelector("#custom-item-bonus-save-all")?.value) || 0;
-			if (bonusSaveAll) options.bonusSavingThrow = `+${bonusSaveAll}`;
+			if (bonusSaveAll) options.bonusSavingThrow = bonusSaveAll;
 			const bonusConcentration = parseInt(form.querySelector("#custom-item-bonus-concentration")?.value) || 0;
-			if (bonusConcentration) options.bonusSavingThrowConcentration = `+${bonusConcentration}`;
+			if (bonusConcentration) options.bonusSavingThrowConcentration = bonusConcentration;
 			const bonusChecks = parseInt(form.querySelector("#custom-item-bonus-checks")?.value) || 0;
-			if (bonusChecks) options.bonusAbilityCheck = `+${bonusChecks}`;
+			if (bonusChecks) options.bonusAbilityCheck = bonusChecks;
 			const critThreshold = parseInt(form.querySelector("#custom-item-crit-threshold")?.value);
 			if (critThreshold && critThreshold < 20) options.critThreshold = critThreshold;
 
@@ -3022,7 +3038,7 @@ class CharacterSheetInventory {
 		setVal("#custom-item-name", seed.name);
 		setVal("#custom-item-qty", seed.quantity || 1);
 		setVal("#custom-item-weight", seed.weight || 0);
-		setVal("#custom-item-value", o.value);
+		setVal("#custom-item-value", o.value != null ? o.value / 100 : "");
 		setVal("#custom-item-rarity", o.rarity);
 		setChk("#custom-item-attunement", o.requiresAttunement);
 		setVal("#custom-item-desc", o.entries);
@@ -3039,6 +3055,7 @@ class CharacterSheetInventory {
 
 		// Armor / shield
 		if (seed.type === "armor") {
+			setVal("#custom-item-armor-type", o.armorType);
 			setVal("#custom-item-ac", o.ac);
 			setVal("#custom-item-armor-bonus", numOf(o.bonusAc));
 			setVal("#custom-item-str-req", o.strength);
