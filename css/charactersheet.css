@@ -8619,6 +8619,24 @@ body.has-quickbuild-overlay .toast__container {
 	margin-top: 0.15rem;
 }
 
+/* Wild Shape current-form inline stat line (#5) */
+.charsheet__combat-druid-beaststats,
+.charsheet__druid-ws-currentstats {
+	margin-bottom: 0.35rem;
+	line-height: 1.5;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.charsheet__combat-druid-beaststats .charsheet__beast-abilities,
+.charsheet__druid-ws-currentstats .charsheet__beast-abilities {
+	white-space: nowrap;
+}
+
+.charsheet__beast-sep {
+	opacity: 0.5;
+}
+
 /* Dice Roller Integration */
 .charsheet__dice-result {
 	position: fixed;

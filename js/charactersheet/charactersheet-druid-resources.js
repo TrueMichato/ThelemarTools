@@ -32,6 +32,10 @@ class CharacterSheetDruidResources {
 		this._modalBody = null;
 		/** @type {(() => void)|null} */
 		this._doClose = null;
+		// Which modal view is open: "full" (all Druid resources) or "zodiac"
+		// (a focused constellation picker). Drives _renderModalBody so the
+		// in-place re-render after a selection stays scoped to the open view.
+		this._modalMode = "full";
 		// In-flight guards: the Transform / Summon workflows spend a use only AFTER
 		// an async picker resolves, so a double-click (or modal + combat-tab racing)
 		// could create a second companion/familiar without a second use being paid.
@@ -80,6 +84,81 @@ class CharacterSheetDruidResources {
 		const T = CharacterSheetState.COMPANION_TYPES?.FAMILIAR;
 		return this._state.getCompanionsByType?.(T) || [];
 	}
+
+	/**
+	 * Build a DOM-free display model for the creature a druid is currently shaped
+	 * into, sourced ENTIRELY from the stored WILD_SHAPE companion record (so it
+	 * survives save/load for free). Used by the Combat-tab panel and the modal to
+	 * render a hoverable name + an inline key-stats line (#5).
+	 *
+	 * @param {*} c The WILD_SHAPE companion record.
+	 * @returns {(null|{
+	 *   id: string, name: string, customName: (string|null), source: (string|null),
+	 *   ac: (number|null), hpCurrent: (number|null), hpMax: (number|null),
+	 *   speedLabel: string, senses: string[], size: (string|null),
+	 *   creatureType: (string|null), abilityMods: object, hoverEntries: Array
+	 * })}
+	 * @private
+	 */
+	_buildBeastModel (c) {
+		if (!c) return null;
+		const fmtMod = (score) => {
+			const m = Math.floor((((score ?? 10)) - 10) / 2);
+			return m >= 0 ? `+${m}` : `${m}`;
+		};
+		const ab = c.abilities || {};
+		const speed = c.speed || {};
+		// Bestiary speed values are usually plain numbers, but can be objects
+		// (e.g. {number: 60, condition: "(hover)"}); coerce to a finite number so
+		// the label never renders "[object Object] ft.".
+		const speedNum = (v) => {
+			if (typeof v === "number") return v;
+			if (v && typeof v === "object" && typeof v.number === "number") return v.number;
+			const n = parseInt(v, 10);
+			return Number.isFinite(n) ? n : 0;
+		};
+		const speedParts = [];
+		if (speedNum(speed.walk)) speedParts.push(`${speedNum(speed.walk)} ft.`);
+		for (const k of ["fly", "swim", "climb", "burrow"]) {
+			if (speedNum(speed[k])) speedParts.push(`${k} ${speedNum(speed[k])} ft.`);
+		}
+		const senses = (Array.isArray(c.senses) ? c.senses : []).filter(Boolean).map(s => String(s));
+
+		// Combined named entries for an inline-hover fallback when no bestiary source.
+		const hoverEntries = [];
+		const pushEntries = (arr) => {
+			(Array.isArray(arr) ? arr : []).forEach(t => {
+				if (t && t.name && Array.isArray(t.entries)) hoverEntries.push({type: "entries", name: t.name, entries: t.entries});
+			});
+		};
+		pushEntries(c.traits);
+		pushEntries(c.actions);
+		pushEntries(c.bonusActions);
+		pushEntries(c.reactions);
+
+		return {
+			id: c.id,
+			name: c.name || "Beast",
+			customName: c.customName || null,
+			source: c.source || null,
+			ac: (typeof c.ac === "number") ? c.ac : null,
+			hpCurrent: (c.hp && typeof c.hp.current === "number") ? c.hp.current : null,
+			hpMax: (c.hp && typeof c.hp.max === "number") ? c.hp.max : null,
+			speedLabel: speedParts.join(", "),
+			senses,
+			size: c.size || null,
+			creatureType: c.creatureType || null,
+			abilityMods: {
+				str: fmtMod(ab.str),
+				dex: fmtMod(ab.dex),
+				con: fmtMod(ab.con),
+				int: fmtMod(ab.int),
+				wis: fmtMod(ab.wis),
+				cha: fmtMod(ab.cha),
+			},
+			hoverEntries,
+		};
+	}
 	// #endregion
 
 	// #region combat-tab summary (single source of truth for the Combat-tab panel)
@@ -90,7 +169,7 @@ class CharacterSheetDruidResources {
 	 *
 	 * @returns {{
 	 *   applicable: boolean,
-	 *   wildShape: {has: boolean, current: number, max: number, rechargeLabel: string, inForm: boolean, beastName: string, canTransform: boolean},
+	 *   wildShape: {has: boolean, current: number, max: number, rechargeLabel: string, inForm: boolean, beastName: string, beast: (object|null), canTransform: boolean},
 	 *   wildCompanion: {has: boolean, canSummon: boolean, duration: string},
 	 *   zodiac: {has: boolean, activeFormId: (string|null), activeFormName: (string|null), canChoose: boolean},
 	 * }}
@@ -123,6 +202,7 @@ class CharacterSheetDruidResources {
 				rechargeLabel: res ? this._rechargeLabel(res.recharge) : "",
 				inForm,
 				beastName: inForm ? (inFormCompanions[0].name || "Beast") : "",
+				beast: inForm ? this._buildBeastModel(inFormCompanions[0]) : null,
 				canTransform: canSpend,
 			},
 			wildCompanion: {
@@ -202,6 +282,7 @@ class CharacterSheetDruidResources {
 	/** Open (or focus) the Druid Resources modal. */
 	openModal () {
 		this._refreshState();
+		this._modalMode = "full";
 		const {eleModalInner, doClose} = UiUtil.getShowModal({
 			title: "🐾 Druid Resources",
 			isMinHeight0: true,
@@ -214,12 +295,45 @@ class CharacterSheetDruidResources {
 		this._renderModalBody();
 	}
 
+	/**
+	 * Open a focused Zodiac Form picker — only the constellation selection, NOT
+	 * the full Druid Resources panel. Drives the SAME zodiac render/selection
+	 * path as the full modal (so picking a form spends a Wild Shape use and
+	 * re-renders both surfaces), but presents just the forms grid so the
+	 * combat-tab "Choose Zodiac Form…" button isn't a backdoor into the whole
+	 * panel (bug #8).
+	 */
+	openZodiacPicker () {
+		this._refreshState();
+		this._modalMode = "zodiac";
+		const {eleModalInner, doClose} = UiUtil.getShowModal({
+			title: "🌟 Zodiac Form",
+			isMinHeight0: true,
+			isWidth100: true,
+			cbClose: () => { this._modalBody = null; this._doClose = null; },
+		});
+		this._doClose = doClose;
+		this._modalBody = e_({tag: "div", clazz: "ve-flex-col w-100 charsheet__druid-resources charsheet__druid-resources--zodiac"});
+		eleModalInner.appendChild(this._modalBody);
+		this._renderModalBody();
+	}
+
 	/** (Re)render the modal body in place after a mutation. */
 	_renderModalBody () {
 		const body = this._modalBody;
 		if (!body) return;
 		this._refreshState();
 		body.innerHTML = "";
+
+		// Focused Zodiac-only view: render just the constellation picker.
+		if (this._modalMode === "zodiac") {
+			if (this.hasZodiacForm()) {
+				body.appendChild(this._renderZodiacSection());
+			} else {
+				body.appendChild(e_({outer: `<div class="ve-muted ve-small ve-text-center py-3">No Zodiac Form available.</div>`}));
+			}
+			return;
+		}
 
 		let any = false;
 		if (this.hasWildShape()) { body.appendChild(this._renderWildShapeSection()); any = true; }
@@ -247,6 +361,10 @@ class CharacterSheetDruidResources {
 		const recharge = res ? this._rechargeLabel(res.recharge) : "";
 		const inForm = this._getWildShapeCompanions();
 
+		const beast = inForm.length ? this._buildBeastModel(inForm[0]) : null;
+		const beastNameHtml = beast ? CharacterSheetClassUtils.buildCreatureHoverNameHtml(beast, "ve-bold") : "";
+		const beastStatsHtml = beast ? CharacterSheetClassUtils.buildCreatureStatLineHtml(beast) : "";
+
 		const section = e_({outer: `
 			<div class="charsheet__druid-section mb-3 p-2 rounded" style="background: var(--cs-bg-surface, var(--rgb-bg-alt, #1e293b));">
 				<div class="ve-flex-v-center ve-flex-h-between mb-1">
@@ -261,8 +379,8 @@ class CharacterSheetDruidResources {
 		? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__druid-ws-end ml-2" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
 		: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__druid-ws-transform ml-2" ${current < 1 ? "disabled title=\"No Wild Shape uses remaining\"" : "title=\"Pick a beast to assume; a use is spent only after you choose\""}>Transform…</button>`}
 				</div>
-				${inForm.length
-		? `<div class="ve-small mt-2">Currently: <span class="ve-bold">${(inForm[0].name || "Beast")}</span></div>`
+				${beast
+		? `<div class="ve-small mt-2 charsheet__druid-ws-current">Currently: ${beastNameHtml}</div>${beastStatsHtml ? `<div class="ve-small ve-muted charsheet__druid-ws-currentstats">${beastStatsHtml}</div>` : ""}`
 		: `<div class="ve-small ve-muted mt-2">Transform… opens the beast picker. A use is spent only after you choose a form.</div>`}
 			</div>
 		`});
