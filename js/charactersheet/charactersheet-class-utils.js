@@ -658,6 +658,81 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * HTML-escape an arbitrary string for safe interpolation into innerHTML.
+	 * @param {*} str
+	 * @returns {string}
+	 */
+	static escapeHtml (str) {
+		return String(str ?? "")
+			.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+	}
+
+	/**
+	 * Build a hoverable name link for a creature display model (e.g. a druid's
+	 * current Wild Shape beast). Prefers the canonical bestiary statblock hover
+	 * (when the model carries a `source`); falls back to an inline-entries hover
+	 * built from the creature's traits/actions, then to a plain escaped span.
+	 *
+	 * The visible label is ALWAYS HTML-escaped (names may come from imported save
+	 * data), so the returned string is safe to inject via innerHTML.
+	 *
+	 * @param {*} beast - A model with `{name, customName?, source?, hoverEntries?}`.
+	 * @param {string} [extraClass] - Extra CSS class for the anchor/span.
+	 * @returns {string} Safe HTML for the hoverable name, or "" when no model.
+	 */
+	static buildCreatureHoverNameHtml (/** @type {*} */ beast, /** @type {string} */ extraClass = "") {
+		if (!beast) return "";
+		const label = CharacterSheetClassUtils.escapeHtml(beast.customName || beast.name || "Beast");
+		const cls = extraClass ? ` ${CharacterSheetClassUtils.escapeHtml(extraClass)}` : "";
+		// Preferred: canonical bestiary statblock hover.
+		if (beast.source && typeof UrlUtil !== "undefined" && typeof Renderer !== "undefined" && Renderer.hover?.getHoverElementAttributes) {
+			try {
+				const sep = typeof HASH_LIST_SEP !== "undefined" ? HASH_LIST_SEP : "_";
+				const hash = UrlUtil.encodeForHash([beast.name, beast.source].join(sep));
+				const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_BESTIARY, source: beast.source, hash});
+				return `<a href="${UrlUtil.PG_BESTIARY}#${hash}" ${hoverAttrs} class="ve-help-subtle${cls}">${label}</a>`;
+			} catch (e) { /* fall through to inline / plain */ }
+		}
+		// Fallback: inline-entries hover from the creature's own traits/actions.
+		if (Array.isArray(beast.hoverEntries) && beast.hoverEntries.length) {
+			const inline = CharacterSheetClassUtils.buildInlineEntriesHoverLink(beast.customName || beast.name, beast.name, beast.hoverEntries);
+			if (inline) return inline;
+		}
+		return `<span class="${cls.trim()}">${label}</span>`;
+	}
+
+	/**
+	 * Build a compact, single-line key-stats string for a creature display model
+	 * (AC / HP / speed / senses / ability mods). All dynamic text is HTML-escaped,
+	 * so the result is safe to inject via innerHTML.
+	 *
+	 * @param {*} beast - A model from `_buildBeastModel` (druid-resources).
+	 * @returns {string} Safe HTML stat line, or "" when no model.
+	 */
+	static buildCreatureStatLineHtml (/** @type {*} */ beast) {
+		if (!beast) return "";
+		const esc = CharacterSheetClassUtils.escapeHtml;
+		const parts = [];
+		if (beast.ac != null) parts.push(`<span><strong>AC</strong> ${esc(beast.ac)}</span>`);
+		if (beast.hpMax != null) {
+			const hp = (beast.hpCurrent != null && beast.hpCurrent !== beast.hpMax)
+				? `${esc(beast.hpCurrent)}/${esc(beast.hpMax)}`
+				: `${esc(beast.hpMax)}`;
+			parts.push(`<span><strong>HP</strong> ${hp}</span>`);
+		}
+		if (beast.speedLabel) parts.push(`<span><strong>Speed</strong> ${esc(beast.speedLabel)}</span>`);
+		if (Array.isArray(beast.senses) && beast.senses.length) parts.push(`<span><strong>Senses</strong> ${esc(beast.senses.join(", "))}</span>`);
+		if (beast.abilityMods) {
+			const m = beast.abilityMods;
+			const abil = ["str", "dex", "con", "int", "wis", "cha"]
+				.map(k => `${k.toUpperCase()} ${esc(m[k])}`).join(" ");
+			parts.push(`<span class="charsheet__beast-abilities">${abil}</span>`);
+		}
+		return parts.join(`<span class="charsheet__beast-sep"> • </span>`);
+	}
+
+	/**
 	 * Resolve the hover entity for a chosen Zodiac Form (Circle of the Zodiac).
 	 * Given an active-state record carrying `zodiacForm.formId`, returns the
 	 * SPECIFIC constellation's `{type:"entries", name, entries}` (e.g. Octopus),
