@@ -6525,10 +6525,12 @@ class CharacterSheetCombat {
 					</div>
 					${ws.rechargeLabel ? `<div class="ve-small ve-muted charsheet__combat-druid-note">${ws.rechargeLabel}</div>` : ""}
 					${ws.inForm ? `<div class="ve-small charsheet__combat-druid-active">Currently: ${beastNameHtml}</div>${beastStatsHtml ? `<div class="ve-small ve-muted charsheet__combat-druid-beaststats">${beastStatsHtml}</div>` : ""}` : ""}
+					${ws.usesKnownForms ? `<div class="ve-small ve-muted charsheet__combat-druid-knownforms">Known Forms: ${ws.knownForms.length}/${ws.knownFormsMax}</div>` : ""}
 					<div class="charsheet__combat-druid-actions">
 						${ws.inForm
 		? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__combat-druid-end" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
 		: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__combat-druid-transform" ${ws.canTransform ? "title=\"Pick a beast to assume; spends 1 use after you choose\"" : "disabled title=\"No Wild Shape uses remaining\""}>Transform…</button>`}
+						${ws.usesKnownForms ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__combat-druid-addform" ${ws.canAddForm ? "title=\"Learn a new Beast form\"" : "disabled title=\"You already know the maximum number of forms\""}>Add Form…</button>` : ""}
 						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-minus" ${ws.current > 0 ? "title=\"Spend 1 Wild Shape use\"" : "disabled title=\"No uses to spend\""}>−</button>
 						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-plus" ${ws.current < ws.max ? "title=\"Restore 1 Wild Shape use\"" : "disabled title=\"Already at maximum\""}>+</button>
 					</div>
@@ -6577,6 +6579,7 @@ class CharacterSheetCombat {
 
 		// Listeners attach to the freshly-created elements each render (no pileup).
 		block.querySelector(".charsheet__combat-druid-transform")?.addEventListener("click", () => druid.pTransform());
+		block.querySelector(".charsheet__combat-druid-addform")?.addEventListener("click", () => druid.pAddKnownForm());
 		block.querySelector(".charsheet__combat-druid-end")?.addEventListener("click", () => druid.endWildShape());
 		block.querySelector(".charsheet__combat-druid-minus")?.addEventListener("click", () => {
 			if (!druid.spendUse()) JqueryUtil.doToast({type: "warning", content: "No Wild Shape uses to spend."});

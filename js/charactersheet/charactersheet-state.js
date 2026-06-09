@@ -3780,6 +3780,19 @@ class CharacterSheetState {
 			//   active: true, conditions: [], exhaustion: 0 }
 			companions: [],
 
+			// Druid 2024 Wild Shape "Known Forms" roster — the persistent list of
+			// Beast forms a druid has learned (official 2024 model). Each entry is a
+			// normalized beast TEMPLATE (not an active companion instance): no live
+			// HP/conditions, only `hp.max`, so a damaged transform never writes back.
+			// Curated freely (add/remove) within the level-gated CR/movement limits;
+			// transforming picks FROM this roster. Active transforms remain WILD_SHAPE
+			// companions. Each form: { id, name, source, cr, crNumber, hasFly,
+			//   abilities, hp:{max}, ac, speed, senses, passive, languages,
+			//   traits, actions, reactions, bonusActions, saveProficiencies,
+			//   skillProficiencies, resistances, immunities, conditionImmunities,
+			//   size, creatureType, attacks }
+			wildShapeKnownForms: [],
+
 			// Combat round tracking
 			inCombat: false,
 			combatRound: 0,
@@ -3916,6 +3929,13 @@ class CharacterSheetState {
 		// Ensure customAbilities array exists
 		if (!Array.isArray(this._data.customAbilities)) {
 			this._data.customAbilities = [];
+		}
+
+		// Ensure the Druid 2024 Wild Shape "Known Forms" roster exists (old saves
+		// predate the known-forms model). Backward-compatible default: empty roster,
+		// so loading never crashes and existing WILD_SHAPE companions still work.
+		if (!Array.isArray(this._data.wildShapeKnownForms)) {
+			this._data.wildShapeKnownForms = [];
 		}
 
 		// Ensure activeCombatMethodEffects array exists
@@ -16230,7 +16250,7 @@ class CharacterSheetState {
 						}
 					}
 
-					// Wild Shape CR limits (PHB) - based on druid level
+					// Wild Shape CR limits (PHB 2014) - based on druid level
 					// Level 2: CR 1/4, no flying/swimming
 					// Level 4: CR 1/2, no flying
 					// Level 8: CR 1
@@ -16239,6 +16259,25 @@ class CharacterSheetState {
 						calculations.wildShapeCr = wildShapeCr;
 						calculations.wildShapeCanSwim = level >= 4;
 						calculations.wildShapeCanFly = level >= 8;
+					}
+
+					// Wild Shape "Known Forms" limits (official 2024 model). Gated on a
+					// BROADENED 2024 predicate (XPHB or the whole TGTT source family,
+					// e.g. "TGTT" / "TGTT-2024") — NOT the inline exact-match `isXPHB` —
+					// so TGTT sub-source druids (which use the 2024 rules) are covered.
+					// Per the 2024 "Beast Shapes" table:
+					//   Level 2: 4 forms, CR 1/4, no Fly
+					//   Level 4: 6 forms, CR 1/2, no Fly
+					//   Level 8: 8 forms, CR 1,   Fly allowed
+					// 2024 does NOT restrict a Swim Speed (only Fly is gated, at L8+).
+					const usesKnownForms2024 = source === "XPHB"
+						|| CharacterSheetClassUtils.isSourceInPriority(source, ["TGTT"]);
+					if (usesKnownForms2024 && level >= 2) {
+						calculations.wildShapeUsesKnownForms = true;
+						calculations.wildShapeKnownFormsMax = level >= 8 ? 8 : level >= 4 ? 6 : 4;
+						calculations.wildShapeCr = level >= 8 ? 1 : level >= 4 ? 0.5 : 0.25;
+						calculations.wildShapeCanFly = level >= 8;
+						calculations.wildShapeCanSwim = true;
 					}
 
 					// XPHB Wild Shape uses different stat blocks with temp HP
@@ -36020,6 +36059,161 @@ class CharacterSheetState {
 		return true;
 	}
 
+	// #region Druid 2024 Wild Shape "Known Forms" roster
+	// The official 2024 model: the druid curates a persistent roster of learned
+	// Beast forms (within level-gated CR/Fly limits) and transforms by picking
+	// FROM that roster. The roster is stored on `_data.wildShapeKnownForms` as
+	// normalized TEMPLATES (see `_parseBestiaryCreatureToBeastRecord`); active
+	// transforms remain WILD_SHAPE companions. Legality is enforced HERE (not
+	// only in the picker UI) so the API is safe for tests/UI/future callers.
+
+	/**
+	 * @returns {boolean} Whether this druid uses the 2024 Known Forms Wild Shape
+	 *   model. True for an XPHB druid or any TGTT-family source (e.g. "TGTT",
+	 *   "TGTT-2024") — the latter use the 2024 rules but would be missed by the
+	 *   exact-match `is2024Source`. Genuine 2014 PHB druids return false.
+	 */
+	usesKnownFormsWildShape () {
+		const druid = (this._data.classes || []).find(c => (c.name || "").toLowerCase() === "druid");
+		if (!druid) return false;
+		const source = druid.source || "";
+		return source === "XPHB" || CharacterSheetClassUtils.isSourceInPriority(source, ["TGTT"]);
+	}
+
+	/** @returns {Array} A copy of the Known Forms roster. */
+	getKnownWildShapeForms () {
+		return [...(this._data.wildShapeKnownForms || [])];
+	}
+
+	/**
+	 * @param {string} id - A known-form id.
+	 * @returns {object|null} The stored form template, or null.
+	 */
+	getKnownWildShapeForm (id) {
+		return (this._data.wildShapeKnownForms || []).find(f => f.id === id) || null;
+	}
+
+	/**
+	 * @returns {number} The maximum number of Known Forms at the current Druid
+	 *   level (4/6/8 by the 2024 Beast Shapes table; 0 below level 2 / non-2024).
+	 */
+	getKnownWildShapeFormsMax () {
+		const calc = this.getFeatureCalculations?.() || {};
+		return calc.wildShapeKnownFormsMax || 0;
+	}
+
+	/** @returns {boolean} Whether another form can be learned (roster under cap). */
+	canAddKnownWildShapeForm () {
+		return (this._data.wildShapeKnownForms || []).length < this.getKnownWildShapeFormsMax();
+	}
+
+	/**
+	 * Revalidate a stored form against the CURRENT level limits (handles
+	 * level-down: a form learned at a higher level may now exceed the CR / Fly
+	 * limits and must not be transformable, though it is never auto-deleted).
+	 * @param {object} form - A stored known-form template.
+	 * @returns {boolean}
+	 */
+	isKnownWildShapeFormLegalNow (form) {
+		if (!form) return false;
+		const calc = this.getFeatureCalculations?.() || {};
+		// Known Forms must actually be active (2024 druid, level >= 2). If the CR
+		// limit isn't a number the roster model doesn't apply, so nothing is legal
+		// (defends against a stale Wild Shape resource on a non-2024 / sub-L2 druid).
+		if (typeof calc.wildShapeCr !== "number") return false;
+		if ((form.crNumber || 0) > calc.wildShapeCr) return false;
+		if (form.hasFly && !calc.wildShapeCanFly) return false;
+		return true;
+	}
+
+	/**
+	 * Learn a Beast form into the Known Forms roster from a bestiary creature.
+	 * Validates legality state-side (beast type, CR within the level limit, Fly
+	 * gating, roster cap, and no duplicate `{name, source}`), independent of any
+	 * UI picker filtering.
+	 * @param {object} creature - The bestiary creature JSON.
+	 * @returns {string|null} The new known-form id, or null if rejected.
+	 */
+	addKnownWildShapeForm (creature) {
+		if (!creature) return null;
+		if (!Array.isArray(this._data.wildShapeKnownForms)) this._data.wildShapeKnownForms = [];
+
+		const rec = this._parseBestiaryCreatureToBeastRecord(creature);
+
+		// Only Beasts are eligible.
+		if ((rec.creatureType || "").toLowerCase() !== "beast") return null;
+
+		// CR and Fly gating against the current level limits. A non-numeric CR
+		// limit means Known Forms isn't active (non-2024 / sub-L2) → reject.
+		const calc = this.getFeatureCalculations?.() || {};
+		const maxCr = calc.wildShapeCr;
+		if (typeof maxCr !== "number" || rec.crNumber > maxCr) return null;
+		if (rec.hasFly && !calc.wildShapeCanFly) return null;
+
+		// Roster cap.
+		if (!this.canAddKnownWildShapeForm()) return null;
+
+		// No duplicates (same creature, same source).
+		const dup = this._data.wildShapeKnownForms.some(f =>
+			(f.name || "").toLowerCase() === (rec.name || "").toLowerCase()
+			&& (f.source || "").toLowerCase() === (rec.source || "").toLowerCase());
+		if (dup) return null;
+
+		const id = CryptUtil.uid();
+		this._data.wildShapeKnownForms.push({id, ...rec});
+		return id;
+	}
+
+	/**
+	 * Remove a form from the Known Forms roster.
+	 * @param {string} id - The known-form id.
+	 * @returns {boolean} True if a form was removed.
+	 */
+	removeKnownWildShapeForm (id) {
+		if (!Array.isArray(this._data.wildShapeKnownForms)) return false;
+		const before = this._data.wildShapeKnownForms.length;
+		this._data.wildShapeKnownForms = this._data.wildShapeKnownForms.filter(f => f.id !== id);
+		return this._data.wildShapeKnownForms.length < before;
+	}
+
+	/**
+	 * Transform into a Known Form, ATOMICALLY: validates the form is legal at the
+	 * current level and a Wild Shape use is available (returns null otherwise,
+	 * with no mutation), replaces any existing Wild Shape companion (one form at a
+	 * time), creates a FRESH WILD_SHAPE companion from the stored template (fresh
+	 * HP = max; a new companion id distinct from the known-form id), and spends
+	 * exactly one Wild Shape use.
+	 * @param {string} id - The known-form id.
+	 * @param {object} [options] - { origin? }
+	 * @returns {string|null} The new companion id, or null if blocked.
+	 */
+	transformIntoKnownForm (id, options = {}) {
+		const form = this.getKnownWildShapeForm(id);
+		if (!form) return null;
+		if (!this.isKnownWildShapeFormLegalNow(form)) return null;
+		if (!this.canSpendWildShapeUse(1)) return null;
+
+		const T = CharacterSheetState.COMPANION_TYPES.WILD_SHAPE;
+		const payload = {
+			...form,
+			type: T,
+			origin: options.origin || "Wild Shape",
+			hp: {max: form.hp?.max || 1, current: form.hp?.max || 1, temp: 0},
+		};
+		// Never carry the persistent knownFormId as the active companion identity
+		// (addCompanion generates its own id, but be explicit).
+		delete payload.id;
+
+		// One form at a time: drop any existing Wild Shape companions first.
+		for (const ws of this.getCompanionsByType(T)) this.removeCompanion(ws.id);
+
+		const companionId = this.addCompanion(payload);
+		this.recalculateCompanion(companionId);
+		this.spendWildShapeUse(1);
+		return companionId;
+	}
+	// #endregion
+
 	/**
 	 * Activate a Zodiac Form by spending one Wild Shape use, atomically.
 	 *
@@ -38310,7 +38504,21 @@ class CharacterSheetState {
 	 * @param {string} [options.sourceFeatureId] - Source feature ID
 	 * @returns {string} The new companion's ID
 	 */
-	addCompanionFromBestiary (creature, type, origin, options = {}) {
+	/**
+	 * Parse a 5etools bestiary creature stat block into a normalized beast record
+	 * (the companion/known-form data shape). Single source of truth for both
+	 * `addCompanionFromBestiary` (active companions) and `addKnownWildShapeForm`
+	 * (the Druid 2024 Wild Shape "Known Forms" roster), so the two never drift.
+	 *
+	 * The returned record is a TEMPLATE: `hp` carries only `max` (no live
+	 * `current`/conditions), plus rule-gating metadata (`cr`, `crNumber`,
+	 * `hasFly`) that companions ignore but known forms need for legality checks.
+	 *
+	 * @param {object} creature - The bestiary creature JSON.
+	 * @returns {object} Normalized beast record.
+	 * @private
+	 */
+	_parseBestiaryCreatureToBeastRecord (creature) {
 		// Parse AC (can be number, array of objects, or special formula)
 		let ac = 10;
 		if (creature.ac) {
@@ -38420,12 +38628,20 @@ class CharacterSheetState {
 			});
 		}
 
-		const companionId = this.addCompanion({
+		// Challenge Rating (display + numeric) and Fly-Speed metadata for the
+		// Known Forms legality checks (companions ignore these extra fields).
+		let crRaw = creature.cr;
+		if (crRaw && typeof crRaw === "object") crRaw = crRaw.cr;
+		const crNumber = (typeof Parser !== "undefined" && Parser.crToNumber)
+			? Parser.crToNumber(crRaw)
+			: Number(crRaw);
+
+		return {
 			name: creature.name,
-			source: creature.source,
-			type,
-			origin,
-			customName: options.customName || null,
+			source: creature.source || null,
+			cr: crRaw ?? null,
+			crNumber: Number.isFinite(crNumber) ? crNumber : 0,
+			hasFly: !!speed.fly,
 			abilities: {
 				str: creature.str || 10,
 				dex: creature.dex || 10,
@@ -38434,7 +38650,7 @@ class CharacterSheetState {
 				wis: creature.wis || 10,
 				cha: creature.cha || 10,
 			},
-			hp: {max: hpMax, current: hpMax, temp: 0},
+			hp: {max: hpMax},
 			ac,
 			speed,
 			senses,
@@ -38451,9 +38667,23 @@ class CharacterSheetState {
 			conditionImmunities,
 			size,
 			creatureType,
+			attacks,
+		};
+	}
+
+	addCompanionFromBestiary (creature, type, origin, options = {}) {
+		// Parse the raw stat block via the shared normalizer, then add an active
+		// companion (fresh HP = max). Behaviour-preserving wrapper.
+		const rec = this._parseBestiaryCreatureToBeastRecord(creature);
+
+		const companionId = this.addCompanion({
+			...rec,
+			type,
+			origin,
+			customName: options.customName || null,
+			hp: {max: rec.hp.max, current: rec.hp.max, temp: 0},
 			concentrationLinked: options.concentrationLinked || false,
 			sourceFeatureId: options.sourceFeatureId || null,
-			attacks,
 		});
 
 		// Recalculate if it's a scaling companion

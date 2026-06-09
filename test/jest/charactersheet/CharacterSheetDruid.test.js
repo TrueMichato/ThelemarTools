@@ -1182,10 +1182,18 @@ describe("Druid Core Class Features (XPHB 2024)", () => {
 			expect(calculations.wildShapeTempHp).toBe(40);
 		});
 
-		it("should not have PHB CR limits (uses stat blocks instead)", () => {
+		it("should not set the 2014 PHB swim/fly gating; uses the 2024 Known Forms CR limit instead", () => {
+			// 2024 (XPHB) Wild Shape uses the official "Known Forms" model: a curated
+			// roster within a level-gated CR limit (CR 1/4 at L2), NOT the legacy 2014
+			// swim@L4 / fly@L8 movement gating. The CR is now SET (it caps the roster),
+			// while Swim is unrestricted in 2024.
 			state.addClass({name: "Druid", source: "XPHB", level: 2});
 			const calculations = state.getFeatureCalculations();
-			expect(calculations.wildShapeCr).toBeUndefined();
+			expect(calculations.wildShapeUsesKnownForms).toBe(true);
+			expect(calculations.wildShapeKnownFormsMax).toBe(4);
+			expect(calculations.wildShapeCr).toBe(0.25);
+			expect(calculations.wildShapeCanSwim).toBe(true);
+			expect(calculations.wildShapeCanFly).toBe(false);
 		});
 	});
 
@@ -1647,7 +1655,7 @@ describe("PHB vs XPHB Druid Feature Comparison", () => {
 			expect(xphbState.getClasses()[0].subclass?.name).toBe("Circle of the Land");
 		});
 
-		it("should have PHB Wild Shape CR limits, XPHB uses stat blocks", () => {
+		it("should set Wild Shape CR limits for both PHB and the 2024 Known Forms model", () => {
 			const phbState = new CharacterSheetState();
 			phbState.addClass({name: "Druid", source: "PHB", level: 8});
 			phbState.setSpellcastingAbility("wis");
@@ -1656,8 +1664,11 @@ describe("PHB vs XPHB Druid Feature Comparison", () => {
 			xphbState.addClass({name: "Druid", source: "XPHB", level: 8});
 			xphbState.setSpellcastingAbility("wis");
 
+			// PHB: CR 1 at L8 (legacy free-pick limit).
 			expect(phbState.getFeatureCalculations().wildShapeCr).toBe(1);
-			expect(xphbState.getFeatureCalculations().wildShapeCr).toBeUndefined();
+			// XPHB 2024: CR 1 at L8 too, but as the Known Forms roster cap.
+			expect(xphbState.getFeatureCalculations().wildShapeCr).toBe(1);
+			expect(xphbState.getFeatureCalculations().wildShapeUsesKnownForms).toBe(true);
 		});
 
 		it("should have Timeless Body in PHB only", () => {
