@@ -843,6 +843,33 @@ class CharacterSheetPage {
 				target.style.display = "";
 			});
 		}
+
+		// Abilities tab is hidden by default (Overview already surfaces scores);
+		// reveal it only when the optional setting is enabled.
+		this._updateAbilitiesTabVisibility();
+	}
+
+	/**
+	 * Show/hide the optional top-level "Abilities" tab based on the
+	 * `showAbilitiesTab` setting (default off). The tab pane and its render code
+	 * are left intact so the tab can be re-enabled at any time. When the tab is
+	 * being hidden while it is the active tab, fall back to Overview (clicking the
+	 * Overview nav link reuses the canonical tab-switch handler, which also
+	 * restores the pane's inline display).
+	 */
+	_updateAbilitiesTabVisibility () {
+		const show = !!this._state?.getShowAbilitiesTab?.();
+		if (show) {
+			this._showTab("#charsheet-tab-abilities");
+			return;
+		}
+
+		const abilitiesLi = document.querySelector("#charsheet-tabs a[href=\"#charsheet-tab-abilities\"]")?.parentElement;
+		const wasActive = !!abilitiesLi?.classList.contains("ve-active");
+		this._hideTab("#charsheet-tab-abilities");
+		if (wasActive) {
+			(/** @type {*} */ (document.querySelector("#charsheet-tabs a[href=\"#charsheet-tab-overview\"]")))?.click();
+		}
 	}
 
 	/**
@@ -1002,6 +1029,9 @@ class CharacterSheetPage {
 		} else {
 			this._hideTab("#charsheet-tab-respec");
 		}
+
+		// Abilities: optional, gated by the showAbilitiesTab setting (default off).
+		this._updateAbilitiesTabVisibility();
 	}
 
 	_initEventListeners () {
@@ -3980,23 +4010,18 @@ class CharacterSheetPage {
 
 	/**
 	 * Render visual indicators for active modifiers
-	 * Updates the button badge and adds visual cues to affected stats
+	 * Toggles the button's green outline and adds visual cues to affected stats
 	 */
 	_renderModifierIndicators () {
 		const modifiers = this._state.getNamedModifiers();
 		const activeModifiers = modifiers.filter(m => m.enabled);
 		const activeCount = activeModifiers.length;
 
-		// Update button badge
+		// Update button: show active state via the green outline only (no count badge).
 		const btn = document.getElementById("charsheet-btn-modifiers");
+		// Remove any legacy count badge left over from older render passes/saves.
 		btn?.querySelector(".charsheet__modifier-badge")?.remove();
-
-		if (activeCount > 0) {
-			btn.append(e_({outer: `<span class="charsheet__modifier-badge">${activeCount}</span>`}));
-			btn.classList.add("charsheet__btn--has-modifiers");
-		} else {
-			btn.classList.remove("charsheet__btn--has-modifiers");
-		}
+		btn?.classList.toggle("charsheet__btn--has-modifiers", activeCount > 0);
 
 		// Add/remove indicator classes on affected stat displays
 		const acMod = this._state.getCustomModifier("ac");
@@ -5938,7 +5963,7 @@ class CharacterSheetPage {
 				const dodgeMax = calcs.huntersDodgeUses ?? 0;
 				const dodgeName = CharacterSheetClassUtils.buildInlineEntriesHoverLink?.("Hunter's Dodge", "Hunter's Dodge", [CharacterSheetClassUtils.getHuntersDodgeNote?.()]) || "Hunter's Dodge";
 				html += `
-				<div class="ve-flex-v-center gap-2 mb-2">
+				<div class="charsheet__ranger-ability-row--action">
 					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}">🛡️ ${dodgeName} ${dodgeRemaining}/${dodgeMax}</span>
 					<button class="ve-btn ve-btn-xs ve-btn-info charsheet__overview-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
 				</div>`;
@@ -11858,6 +11883,18 @@ class CharacterSheetPage {
 			</label>
 		</div>`;
 
+		// Show optional top-level Abilities tab (display) — default OFF (Overview already shows scores)
+		const currentShowAbilitiesTab = (/** @type {*} */ (this._state.getSettings()))?.showAbilitiesTab === true;
+		const showAbilitiesTab = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-show-abilities-tab" ${currentShowAbilitiesTab ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">💪 Show Abilities Tab</span>
+					<span class="charsheet__settings-checkbox-desc">Show the dedicated top-level "Abilities" tab. It is hidden by default because the Overview tab already surfaces ability scores, saves, and skills.</span>
+				</span>
+			</label>
+		</div>`;
+
 		// Speed emoji labels (display) — default ON
 		const currentSpeedEmojiLabels = (/** @type {*} */ (this._state.getSettings()))?.speedEmojiLabels !== false;
 		const speedEmojiLabels = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
@@ -11926,6 +11963,7 @@ class CharacterSheetPage {
 			<div class="charsheet__settings-section">
 				<div class="charsheet__settings-section-title">🎨 Display</div>
 				${speedEmojiLabels}
+				${showAbilitiesTab}
 			</div>
 			
 			<div class="charsheet__settings-section">
@@ -12161,6 +12199,13 @@ class CharacterSheetPage {
 		modalInner.querySelector("#settings-speed-emoji").addEventListener("change", (e) => {
 			this._state.setSetting("speedEmojiLabels", (/** @type {*} */ (e.target)).checked);
 			this._renderCombatStats();
+			this._saveCurrentCharacter();
+		});
+
+		// Show Abilities tab handler (display) — toggle the optional top-level tab
+		modalInner.querySelector("#settings-show-abilities-tab").addEventListener("change", (e) => {
+			this._state.setShowAbilitiesTab((/** @type {*} */ (e.target)).checked);
+			this._updateAbilitiesTabVisibility();
 			this._saveCurrentCharacter();
 		});
 	}
