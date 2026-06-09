@@ -137,6 +137,42 @@ describe("Item prose → sense effects (Bug #1)", () => {
 
 		expect(state.getSenses().darkvision).toBe(0);
 	});
+
+	// Regression guards using the EXACT shipping entries text from data/items.json so the
+	// headline Goggles-of-Night case keeps working against real data, not just synthetic prose.
+	test("REAL Goggles of Night (DMG) wording: 60 with none, 120 with existing 60", () => {
+		const dmgText = "While wearing these dark lenses, you have {@sense darkvision} out to a range of 60 feet. If you already have {@sense darkvision}, wearing the goggles increases its range by 60 feet.";
+
+		const s1 = newState();
+		const i1 = makeInventory(s1);
+		addEquip(s1, proseItem("Goggles of Night", dmgText)); // no attunement on real item
+		i1._updateItemBonuses(s1.getItems());
+		expect(s1.getSenses().darkvision).toBe(60);
+
+		const s2 = newState();
+		s2.setSense("darkvision", 60);
+		const i2 = makeInventory(s2);
+		addEquip(s2, proseItem("Goggles of Night", dmgText));
+		i2._updateItemBonuses(s2.getItems());
+		expect(s2.getSenses().darkvision).toBe(120);
+	});
+
+	test("REAL Goggles of Night (XDMG) wording with tag source + 'out to 60 feet'", () => {
+		const xdmgText = "While wearing these dark lenses, you have {@sense Darkvision|XPHB} out to 60 feet. If you already have {@sense Darkvision|XPHB}, wearing the goggles increases its range by 60 feet.";
+
+		const s1 = newState();
+		const i1 = makeInventory(s1);
+		addEquip(s1, proseItem("Goggles of Night", xdmgText, {source: "XDMG"}));
+		i1._updateItemBonuses(s1.getItems());
+		expect(s1.getSenses().darkvision).toBe(60);
+
+		const s2 = newState();
+		s2.setSense("darkvision", 90);
+		const i2 = makeInventory(s2);
+		addEquip(s2, proseItem("Goggles of Night", xdmgText, {source: "XDMG"}));
+		i2._updateItemBonuses(s2.getItems());
+		expect(s2.getSenses().darkvision).toBe(150);
+	});
 });
 
 describe("Item prose → ability / speed / defense / save effects (Bug #1)", () => {
