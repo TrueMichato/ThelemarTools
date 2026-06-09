@@ -3454,7 +3454,7 @@ class CharacterSheetClassUtils {
 		}
 
 		// Prey focus
-		out.push({name: "Hunter's Dodge", kind: "usable", actionType: "reaction", note: "When a creature you can see attacks you or an ally within 30 feet, grant the target a bonus to AC equal to your proficiency bonus for that attack."});
+		out.push({name: "Hunter's Dodge", kind: "usable", actionType: "reaction", note: CharacterSheetClassUtils.getHuntersDodgeNote()});
 		if (upgrade1) {
 			out.push({name: "Groundshatter", kind: "method", note: "Combat method usable only while in Prey focus (see Combat Methods)."});
 			out.push({name: "Terrain Defense", kind: "passive", note: "Bonus to AC and Dexterity saves equal to half your proficiency bonus (min +1) when benefiting from cover or standing in difficult terrain."});
@@ -3492,6 +3492,41 @@ class CharacterSheetClassUtils {
 		return !!ability
 			&& ["usable", "passive"].includes(ability.kind)
 			&& !ability.appliedElsewhere;
+	}
+
+	/**
+	 * Primal-Focus abilities that have their OWN dedicated control row (with a use
+	 * counter) on every play surface, and therefore must NOT also be echoed in the
+	 * generic focus-mode ability-row list. Kept as a named list (not an inline
+	 * `!== "Hunter's Dodge"` check scattered across surfaces) so the de-dupe rule is
+	 * shared and can't silently regress on one tab. Hunter's Dodge renders as a
+	 * "🛡️ Hunter's Dodge N/M + Use" row on Overview, Combat, and the Features card.
+	 * @type {string[]}
+	 */
+	static PRIMAL_FOCUS_DEDICATED_ROW_ABILITIES = ["Hunter's Dodge"];
+
+	/**
+	 * Should a Primal-Focus mode ability appear in the GENERIC reminder ability-row
+	 * list? True when it's a reminder ability AND it doesn't already have its own
+	 * dedicated control row (see {@link PRIMAL_FOCUS_DEDICATED_ROW_ABILITIES}).
+	 * Use this on every surface that renders `charsheet__ranger-ability-row`s so the
+	 * dedicated-row abilities are never double-listed.
+	 * @param {*} ability - One entry from `getPrimalFocusModeAbilities`.
+	 * @returns {boolean}
+	 */
+	static isPrimalFocusAbilityRowEligible (/** @type {*} */ ability) {
+		return CharacterSheetClassUtils.isPrimalFocusReminderAbility(ability)
+			&& !CharacterSheetClassUtils.PRIMAL_FOCUS_DEDICATED_ROW_ABILITIES.includes(ability?.name);
+	}
+
+	/**
+	 * Canonical Hunter's Dodge (Ranger Prey focus) reminder note. Single source of
+	 * truth shared by the focus-mode ability catalog and the dedicated use-button
+	 * row's hover, so the two never drift.
+	 * @returns {string}
+	 */
+	static getHuntersDodgeNote () {
+		return "When a creature you can see attacks you or an ally within 30 feet, grant the target a bonus to AC equal to your proficiency bonus for that attack.";
 	}
 
 	/**

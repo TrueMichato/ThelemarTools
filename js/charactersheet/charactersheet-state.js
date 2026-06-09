@@ -23779,19 +23779,43 @@ class CharacterSheetState {
 	}
 
 	getCarryingCapacity () {
-		let baseCapacity;
+		return this.getCarryingCapacityBreakdown().total;
+	}
 
-		// Thelemar rules: passive Might * 10 (base for Small/Medium creatures)
+	/**
+	 * Itemized carrying-capacity calculation. Single source of truth for both
+	 * {@link getCarryingCapacity} and the carry tooltip, so the displayed
+	 * breakdown can never disagree with the total it claims to add up to.
+	 *
+	 * @returns {{
+	 *   rule: ("thelemar"|"standard"),
+	 *   sourceValue: number,    // passive Might (Thelemar) or STR score (standard)
+	 *   perPoint: number,       // ×10 (Thelemar) or ×15 (standard)
+	 *   base: number,           // sourceValue * perPoint, before bonuses/multipliers
+	 *   flatBonus: number,      // customModifiers.carryCapacity
+	 *   carryMultiplier: number,// customModifiers.carryCapacityMultiplier (e.g. Powerful Build ×2)
+	 *   sizeMultiplier: number, // getSizeCarryMultiplier()
+	 *   total: number,          // final carrying capacity
+	 *   pushDragLift: number    // RAW: 2 × carrying capacity
+	 * }}
+	 */
+	getCarryingCapacityBreakdown () {
+		// Thelemar rules: passive Might * 10 (base for Small/Medium creatures).
 		// Passive Might = 10 + Might modifier (+ passive bonuses). Might is a
 		// custom TGTT homebrew skill based on STR. Size scaling is applied below
 		// via getSizeCarryMultiplier (Small/Medium = ×1).
-		if (this._data.settings?.thelemar_carryWeight) {
-			const passiveMight = this.getPassiveScore("might");
-			baseCapacity = passiveMight * 10;
+		const isThelemar = !!this._data.settings?.thelemar_carryWeight;
+		let sourceValue;
+		let perPoint;
+		if (isThelemar) {
+			sourceValue = this.getPassiveScore("might");
+			perPoint = 10;
 		} else {
 			// Standard rules: STR score * 15
-			baseCapacity = this.getAbilityScore("str") * 15;
+			sourceValue = this.getAbilityScore("str");
+			perPoint = 15;
 		}
+		const base = sourceValue * perPoint;
 
 		// Apply size multiplier (RAW 5e rules). Active states may grant a
 		// carry-only size step (e.g. Aurochs Zodiac Form: "count as one size
@@ -23799,8 +23823,20 @@ class CharacterSheetState {
 		const sizeMultiplier = this.getSizeCarryMultiplier();
 
 		const flatBonus = this._data.customModifiers.carryCapacity || 0;
-		const multiplier = this._data.customModifiers.carryCapacityMultiplier || 1;
-		return (baseCapacity + flatBonus) * multiplier * sizeMultiplier;
+		const carryMultiplier = this._data.customModifiers.carryCapacityMultiplier || 1;
+		const total = (base + flatBonus) * carryMultiplier * sizeMultiplier;
+
+		return {
+			rule: isThelemar ? "thelemar" : "standard",
+			sourceValue,
+			perPoint,
+			base,
+			flatBonus,
+			carryMultiplier,
+			sizeMultiplier,
+			total,
+			pushDragLift: total * 2,
+		};
 	}
 
 	/**

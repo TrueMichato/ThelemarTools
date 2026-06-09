@@ -1639,7 +1639,7 @@ class CharacterSheetFeatures {
 
 			const dodgeRowHtml = isPrey ? `
 					<div class="ve-flex-v-center gap-2 mb-2">
-						<em class="ve-muted">Hunter's Dodge: ${dodgeRemaining}/${dodgeMax} remaining</em>
+						<em class="ve-muted">${CharacterSheetClassUtils.buildInlineEntriesHoverLink?.("Hunter's Dodge", "Hunter's Dodge", [CharacterSheetClassUtils.getHuntersDodgeNote?.()]) || "Hunter's Dodge"}: ${dodgeRemaining}/${dodgeMax} remaining</em>
 						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__hunters-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"} title="Use Hunter's Dodge">Use</button>
 					</div>
 				` : "";
@@ -1659,12 +1659,12 @@ class CharacterSheetFeatures {
 			};
 			const quarryDesignated = !!this._state.getFocusedQuarry?.();
 			const abilityRowsHtml = modeAbilities
-				// Hunter's Dodge has its own dedicated row (with use counter) above.
-				.filter(a => a.name !== "Hunter's Dodge")
 				// Methods live in the Combat Methods section and applied-elsewhere passives
 				// (e.g. Pursuit's speed) are already shown on other panels — keep them out
 				// of this control/reminder list generically (by kind/flag, not by name).
-				.filter(a => CharacterSheetClassUtils.isPrimalFocusReminderAbility?.(a))
+				// The shared predicate also excludes dedicated-row abilities (Hunter's
+				// Dodge has its own use-counter row above) so they're never double-listed.
+				.filter(a => CharacterSheetClassUtils.isPrimalFocusAbilityRowEligible?.(a))
 				.map(a => {
 					const kindBadge = a.kind === "usable"
 						? `<span class="badge badge-outline-primary" title="${actionIcon(a.actionType)}">${actionIcon(a.actionType) || "Usable"}</span>`

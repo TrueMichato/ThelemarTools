@@ -852,6 +852,30 @@ class CharacterSheetPage {
 	 */
 	static _isModalHoverCleanupInit = false;
 
+	/**
+	 * Build the carrying-capacity tooltip string from a
+	 * {@link CharacterSheetState#getCarryingCapacityBreakdown} result. Shows the
+	 * base derivation (passive Might ×10 for Thelemar, STR ×15 otherwise) and only
+	 * appends the flat bonus / carry multiplier / size multiplier factors that are
+	 * actually in play, then the final total — so the displayed math always adds up.
+	 * @param {*} b - breakdown object
+	 * @returns {string}
+	 */
+	static _buildCarryTooltip (b) {
+		const head = b.rule === "thelemar"
+			? `passive Might ${b.sourceValue} × 10`
+			: `STR ${b.sourceValue} × 15`;
+		const factors = [];
+		if (b.flatBonus) factors.push(`+ ${b.flatBonus} lb. bonus`);
+		if (b.carryMultiplier !== 1) factors.push(`× ${b.carryMultiplier} (size/build bonus)`);
+		if (b.sizeMultiplier !== 1) factors.push(`× ${b.sizeMultiplier} (size)`);
+		const label = b.rule === "thelemar" ? "Carry Capacity (Thelemar)" : "Carry Capacity";
+		const line = factors.length
+			? `${label}: (${head} = ${b.base} lb.) ${factors.join(" ")} = ${b.total} lb.`
+			: `${label}: ${head} = ${b.total} lb.`;
+		return `${line}\nPush/Drag/Lift: ${b.pushDragLift} lb.`;
+	}
+
 	static _initModalHoverCleanup () {
 		if (CharacterSheetPage._isModalHoverCleanupInit) return;
 		CharacterSheetPage._isModalHoverCleanupInit = true;
@@ -3309,17 +3333,12 @@ class CharacterSheetPage {
 		(/** @type {*} */ (document.getElementById("charsheet-disp-carry"))).textContent = carryCapacity;
 		(/** @type {*} */ (document.getElementById("charsheet-disp-push"))).textContent = pushDragLift;
 
-		// Update carrying capacity tooltip based on rules
-		const useThelemarCarry = (/** @type {*} */ (this._state.getSettings()))?.thelemar_carryWeight;
-		if (useThelemarCarry) {
-			const passiveMight = this._state.getPassiveScore("might");
-			const carryTooltip = `Carry Capacity (Thelemar): passive Might (${passiveMight}) × 10 = ${carryCapacity} lb.\nPush/Drag/Lift: ${pushDragLift} lb.`;
-			document.querySelector(".charsheet__physical-stat-group--carry").setAttribute("title", carryTooltip);
-		} else {
-			const strScore = this._state.getAbilityScore("str");
-			const carryTooltip = `Carry Capacity: STR (${strScore}) × 15 = ${carryCapacity} lb.\nPush/Drag/Lift: ${pushDragLift} lb.`;
-			document.querySelector(".charsheet__physical-stat-group--carry").setAttribute("title", carryTooltip);
-		}
+		// Update carrying capacity tooltip based on rules. Build the breakdown from
+		// the single source of truth so the displayed math always adds up to the
+		// shown total (flat bonus / carry multiplier / size multiplier included).
+		const carryBreakdown = this._state.getCarryingCapacityBreakdown();
+		const carryTooltip = this.constructor._buildCarryTooltip(carryBreakdown);
+		document.querySelector(".charsheet__physical-stat-group--carry").setAttribute("title", carryTooltip);
 
 		// Update carry bar visualization
 		const carryPercent = carryCapacity > 0 ? Math.min(100, (currentWeight / carryCapacity) * 100) : 0;
@@ -5917,9 +5936,10 @@ class CharacterSheetPage {
 			if (!isPredator) {
 				const dodgeRemaining = this._state.getHuntersDodgeRemaining?.() ?? 0;
 				const dodgeMax = calcs.huntersDodgeUses ?? 0;
+				const dodgeName = CharacterSheetClassUtils.buildInlineEntriesHoverLink?.("Hunter's Dodge", "Hunter's Dodge", [CharacterSheetClassUtils.getHuntersDodgeNote?.()]) || "Hunter's Dodge";
 				html += `
 				<div class="ve-flex-v-center gap-2 mb-2">
-					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}" title="Hunter's Dodge uses remaining (per long rest)">🛡️ Hunter's Dodge ${dodgeRemaining}/${dodgeMax}</span>
+					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}">🛡️ ${dodgeName} ${dodgeRemaining}/${dodgeMax}</span>
 					<button class="ve-btn ve-btn-xs ve-btn-info charsheet__overview-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
 				</div>`;
 			}
@@ -5932,7 +5952,7 @@ class CharacterSheetPage {
 				upgrade1: !!calcs.primalFocusUpgrade1,
 				upgrade2: !!calcs.primalFocusUpgrade2,
 				upgrade3: !!calcs.primalFocusUpgrade3,
-			}) || []).filter(ab => CharacterSheetClassUtils.isPrimalFocusReminderAbility?.(ab));
+			}) || []).filter(ab => CharacterSheetClassUtils.isPrimalFocusAbilityRowEligible?.(ab));
 			if (abilities.length) {
 				html += `<div class="charsheet__overview-ranger-abilities mt-1">`;
 				abilities.forEach(ab => {
