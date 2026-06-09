@@ -6395,9 +6395,13 @@ class CharacterSheetCombat {
 			const dodgeRemaining = this._state.getHuntersDodgeRemaining?.() ?? 0;
 			const dodgeMax = calcs.huntersDodgeUses ?? 0;
 			if (dodgeMax > 0) {
+				// Dedicated use-button row. The name is hoverable (renders the
+				// reminder note via the renderer's inline-hover), matching the
+				// Combat-method rows; falls back to plain text if unavailable.
+				const dodgeName = CharacterSheetClassUtils.buildInlineEntriesHoverLink?.("Hunter's Dodge", "Hunter's Dodge", [CharacterSheetClassUtils.getHuntersDodgeNote?.()]) || "Hunter's Dodge";
 				html += `
 				<div class="ve-flex-v-center gap-2 mb-2">
-					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}" title="Hunter's Dodge uses remaining (per long rest)">🛡️ Hunter's Dodge ${dodgeRemaining}/${dodgeMax}</span>
+					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}">🛡️ ${dodgeName} ${dodgeRemaining}/${dodgeMax}</span>
 					<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
 				</div>`;
 			}
@@ -6411,7 +6415,7 @@ class CharacterSheetCombat {
 			upgrade1: !!calcs.primalFocusUpgrade1,
 			upgrade2: !!calcs.primalFocusUpgrade2,
 			upgrade3: !!calcs.primalFocusUpgrade3,
-		}) || []).filter(ab => CharacterSheetClassUtils.isPrimalFocusReminderAbility?.(ab));
+		}) || []).filter(ab => CharacterSheetClassUtils.isPrimalFocusAbilityRowEligible?.(ab));
 		if (abilities.length) {
 			html += `<div class="charsheet__combat-ranger-abilities mt-1">`;
 			abilities.forEach(ab => {
