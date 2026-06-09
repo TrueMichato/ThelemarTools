@@ -2637,6 +2637,10 @@ class CharacterSheetPage {
 
 	// #region Rendering
 	_renderCharacter () {
+		// Refresh item-derived state (senses, defenses, AC, ability overrides, speed) BEFORE
+		// painting dependent sections, so equipped/attuned item effects are not a render behind.
+		if (this._inventory?.syncItemDerivedState) this._inventory.syncItemDerivedState();
+
 		this._renderBasicInfo();
 		this._renderAbilityScores();
 		this._renderSavingThrows();
