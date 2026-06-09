@@ -3484,9 +3484,30 @@ font-style: italic;
 }
 
 .pm-edit-abilities__bonus {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px 6px;
 	font-size: 0.75rem;
 	color: var(--cs-text-muted, #94a3b8);
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.pm-edit-abilities__bonus-src {
+	display: inline-flex;
+	align-items: baseline;
+	padding: 1px 6px;
+	border-radius: 999px;
 	white-space: nowrap;
+	background: var(--cs-surface-2, rgba(148, 163, 184, 0.14));
+	color: var(--cs-text-secondary, #cbd5e1);
+}
+
+.pm-edit-abilities__bonus-total {
+	font-weight: 700;
+	white-space: nowrap;
+	color: var(--cs-text-primary, #e2e8f0);
 }
 
 /* D5: Uses sub-section inside custom ability modal */
