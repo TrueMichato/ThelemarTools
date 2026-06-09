@@ -9890,26 +9890,37 @@ class CharacterSheetPage {
 	 */
 	async processPendingFeatureChoices () {
 		if (!this._state?.hasPendingFeatureChoices?.()) return false;
-		const allSpells = this.getFilteredSpellData?.() || this.getSpells?.() || [];
-		let resolvedAny = false;
+		// Single-owner processing: the Features-tab render auto-prompts pending choices
+		// fire-and-forget, which can race an explicit wizard-driven resolution (Builder /
+		// QuickBuild / LevelUp) and pop a SECOND modal over the same choice that survives
+		// teardown ("won't close" orphan; see CS-BUG #10 Centaur "Survivor"). Hold a
+		// re-entrancy lock so only one processor drains the queue at a time.
+		if (this._isProcessingFeatureChoices) return false;
+		this._isProcessingFeatureChoices = true;
+		try {
+			const allSpells = this.getFilteredSpellData?.() || this.getSpells?.() || [];
+			let resolvedAny = false;
 
-		// Snapshot then re-validate each choice against live state (a choice may have
-		// been cleared by a concurrent feature removal / respec between iterations).
-		const queued = this._state.getPendingFeatureChoices();
-		for (const snapshot of queued) {
-			const live = this._state.getPendingFeatureChoices().find(c => c.id === snapshot.id);
-			if (!live) continue;
-			// eslint-disable-next-line no-await-in-loop
-			const selection = await this._pPickFeatureChoice(live);
-			if (selection == null) continue; // player deferred — leave it queued
-			if (this._state.fulfillFeatureChoice(live.id, selection, allSpells)) resolvedAny = true;
-		}
+			// Snapshot then re-validate each choice against live state (a choice may have
+			// been cleared by a concurrent feature removal / respec between iterations).
+			const queued = this._state.getPendingFeatureChoices();
+			for (const snapshot of queued) {
+				const live = this._state.getPendingFeatureChoices().find(c => c.id === snapshot.id);
+				if (!live) continue;
+				// eslint-disable-next-line no-await-in-loop
+				const selection = await this._pPickFeatureChoice(live);
+				if (selection == null) continue; // player deferred — leave it queued
+				if (this._state.fulfillFeatureChoice(live.id, selection, allSpells)) resolvedAny = true;
+			}
 
-		if (resolvedAny) {
-			await this.saveCharacter?.();
-			this.renderCharacter?.();
+			if (resolvedAny) {
+				await this.saveCharacter?.();
+				this.renderCharacter?.();
+			}
+			return resolvedAny;
+		} finally {
+			this._isProcessingFeatureChoices = false;
 		}
-		return resolvedAny;
 	}
 
 	/**
@@ -9932,9 +9943,15 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		// When a wizard overlay is up (QuickBuild z-index 9999), a default-z-index modal
+		// renders BEHIND it — invisible and unclickable ("Finish does nothing" + orphan;
+		// CS-BUG #10). Stack above the overlay so the pick is always reachable. Mirrors the
+		// 10000+ values the QuickBuild flow uses for its own modals.
+		const isOverlayUp = typeof document !== "undefined" && document.body?.classList?.contains("has-quickbuild-overlay");
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: `${choice.featureName || "Feature"} — Choose ${kindLabel}`,
 			isMinHeight0: true,
+			...(isOverlayUp ? {zIndex: 10001} : {}),
 			cbClose: () => {
 				if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(null); }
 			},

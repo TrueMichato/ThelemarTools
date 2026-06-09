@@ -11237,14 +11237,32 @@ class CharacterSheetState {
 
 		const {skillChoices, cantripChoices} = FeatureChoiceParser.extractChoices(feature);
 
+		// A racial trait's prose may restate a skill choice that is ALSO encoded
+		// structurally on the race as `skillProficiencies.choose` — the authoritative
+		// form applied by the Builder / respec skill picker. Queueing the prose copy too
+		// produces a duplicate "choose a skill" prompt that gets orphaned (CS-BUG #10
+		// Centaur "Survivor"). Suppress the prose copy when a structured racial choice
+		// covers the same options, but still claim the skills so the greedy proficiency
+		// parser below doesn't grant every listed option.
+		const isRacialFeature = ["species", "subrace", "race", "lineage"].includes(String(feature.featureType || "").toLowerCase());
+		const racialSkillSets = isRacialFeature ? this._getRacialStructuredSkillChoiceSets() : [];
+
 		skillChoices.forEach(choice => {
-			this.addPendingFeatureChoice({
-				featureName: feature.name,
-				featureId,
-				kind: "skill",
-				options: choice.options,
-				count: choice.count,
-			});
+			const optionKeys = (choice.options || []).map(o => String(o).toLowerCase().replace(/\s+/g, ""));
+			// Suppress only on an EXACT option-set match with a structured racial choose
+			// set (not a mere subset) so an independent narrower racial choice that happens
+			// to share options is never wrongly dropped.
+			const coveredByStructured = optionKeys.length >= 2
+				&& racialSkillSets.some(set => set.size === optionKeys.length && optionKeys.every(k => set.has(k)));
+			if (!coveredByStructured) {
+				this.addPendingFeatureChoice({
+					featureName: feature.name,
+					featureId,
+					kind: "skill",
+					options: choice.options,
+					count: choice.count,
+				});
+			}
 			choice.options.forEach(s => claimedSkills.add(s));
 		});
 
@@ -11260,6 +11278,33 @@ class CharacterSheetState {
 		});
 
 		return {claimedSkills, claimedSpells};
+	}
+
+	/**
+	 * Collect the option-sets (normalized skill keys: lowercase, no spaces) of every
+	 * structured racial `skillProficiencies.choose.from` on the current race/subrace.
+	 * These structured choices are the authoritative racial skill picks (surfaced by the
+	 * Builder/respec picker), so a prose feature-choice that merely restates the same
+	 * options must not be queued a second time. See {@link _processFeatureChoices}.
+	 * @returns {Array<Set<string>>}
+	 */
+	_getRacialStructuredSkillChoiceSets () {
+		const sets = [];
+		const collect = (race) => {
+			const sp = race?.skillProficiencies;
+			if (!Array.isArray(sp)) return;
+			sp.forEach(entry => {
+				const from = entry?.choose?.from;
+				if (!Array.isArray(from) || !from.length) return;
+				const keys = from
+					.filter(s => typeof s === "string")
+					.map(s => s.toLowerCase().replace(/\s+/g, ""));
+				if (keys.length) sets.push(new Set(keys));
+			});
+		};
+		collect(this.getRace());
+		collect(this.getSubrace());
+		return sets;
 	}
 
 	setSpellPrepared (spellIdOrName, sourceOrPrepared, prepared) {
@@ -25141,7 +25186,7 @@ class CharacterSheetState {
 				&& !feature._autoGranted) {
 				duplicate._manualGranted = true;
 			}
-			return;
+			return false;
 		}
 
 		// Auto-extract uses from feature description if not already provided
@@ -25239,6 +25284,12 @@ class CharacterSheetState {
 			const grantedMethods = CharacterSheetClassUtils.resolveGrantedCombatMethods(feature, this._combatMethodCatalog);
 			grantedMethods.forEach(method => this.addFeature(method));
 		}
+
+		// Return true when a NEW feature was added (false above on dedupe). Callers that
+		// pair a non-idempotent side effect with the add (e.g. ASI base-score writes in the
+		// progression flows) gate on this so a re-run cannot double-apply — the feature is
+		// deduped here while the paired mutation would otherwise stack. See _applyAsiOrFeat.
+		return true;
 	}
 
 	/**
