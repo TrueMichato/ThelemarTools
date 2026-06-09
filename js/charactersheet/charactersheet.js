@@ -2383,7 +2383,7 @@ class CharacterSheetPage {
 	 * Generic beast picker from bestiary
 	 */
 	async _pShowBeastPicker (options = {}) {
-		const {maxCr = 1, canSwim = true, canFly = false, type, origin, creatureTypes = ["beast"], minSize = null} = options;
+		const {maxCr = 1, canSwim = true, canFly = false, type, origin, creatureTypes = ["beast"], minSize = null, onSelectCreature = null} = options;
 
 		// Try to load bestiary data
 		let allCreatures = [];
@@ -2458,6 +2458,16 @@ class CharacterSheetPage {
 		const selectedName = choice.split(" (CR")[0];
 		const selectedCreature = validCreatures.find(c => c.name === selectedName);
 		if (!selectedCreature) return;
+
+		// Select-mode: when an onSelectCreature callback is supplied (e.g. the Druid
+		// 2024 "Known Forms" roster), route the chosen raw creature to it and SKIP
+		// the default addCompanionFromBestiary + success toast. The callback owns
+		// any state mutation / messaging. Returning here keeps the existing
+		// positional addCompanionFromBestiary contract intact for the other callers.
+		if (typeof onSelectCreature === "function") {
+			onSelectCreature(selectedCreature);
+			return;
+		}
 
 		// Add companion from bestiary.
 		// NOTE: addCompanionFromBestiary's signature is (creature, type, origin, options) —
