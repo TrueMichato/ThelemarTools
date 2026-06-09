@@ -90,6 +90,11 @@ class CharacterSheetInventory {
 				if (itemId) this._showItemInfo(itemId);
 				return;
 			}
+			if (e.target.closest(".charsheet__item-edit")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._modifyItemById(itemId);
+				return;
+			}
 			if (e.target.closest(".charsheet__item-note")) {
 				const itemEl = e.target.closest(".charsheet__item");
 				const itemId = itemEl?.dataset.itemId;
@@ -1498,10 +1503,19 @@ class CharacterSheetInventory {
 		const newItem = this._buildCustomItem(name, quantity, weight, options);
 
 		if (editItemId) {
+			// Capture remaining charges BEFORE replacing — _buildCustomItem resets chargesCurrent to
+			// full, which would silently refill a depleted item on edit.
+			const oldItem = this._state.getItems().find(i => i.id === editItemId);
+			const oldChargesCurrent = oldItem?.chargesCurrent;
+
 			// Preserve the original quantity unless the form explicitly changed it
 			this._state.replaceItem(editItemId, newItem);
 			// Keep the quantity the user set in the form
 			if (typeof this._state.setItemQuantity === "function") this._state.setItemQuantity(editItemId, quantity);
+			// Restore remaining charges, clamped to the new max (setItemCharges clamps to [0, charges]).
+			if (oldChargesCurrent != null && typeof this._state.setItemCharges === "function") {
+				this._state.setItemCharges(editItemId, oldChargesCurrent);
+			}
 			this._syncArmorState();
 			this._page.renderCharacter?.();
 			this._page.saveCharacter?.();
@@ -1870,6 +1884,20 @@ class CharacterSheetInventory {
 				</div>
 			</div>
 		`}));
+
+		// Top action slot — holds "Start from Base Item" so a base can be chosen BEFORE filling
+		// fields. Only meaningful when creating (edit mode is already seeded from the item).
+		let topActions = null;
+		if (!isEdit) {
+			topActions = e_({outer: `
+				<div class="charsheet__custom-item-top-actions">
+					<div class="charsheet__custom-item-top-actions-caption ve-small ve-muted">
+						Want to base this on an existing item? Start from a catalog item, then tweak it.
+					</div>
+				</div>
+			`});
+			form.append(topActions);
+		}
 
 		// Item Type Selection
 		const typeGrid = e_({outer: `<div class="charsheet__custom-item-types"></div>`});
@@ -2730,10 +2758,11 @@ class CharacterSheetInventory {
 		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
 		btnCancel.addEventListener("click", () => doClose(false));
 
-		// "Start from base item" — only meaningful when creating (edit already starts from the item)
+		// "Start from base item" — only meaningful when creating (edit already starts from the item).
+		// Lives at the TOP of the modal (in topActions) so a base can be picked before editing fields.
 		let btnFromBase = null;
 		if (!isEdit) {
-			btnFromBase = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "📦 Start from Base Item"});
+			btnFromBase = e_({tag: "button", clazz: "ve-btn ve-btn-default charsheet__custom-item-from-base-btn", txt: "📦 Start from Base Item"});
 			btnFromBase.addEventListener("click", async () => {
 				await this._pShowItemPickerModal({
 					title: "📦 Choose a Base Item",
@@ -2746,6 +2775,7 @@ class CharacterSheetInventory {
 					},
 				});
 			});
+			if (topActions) topActions.append(btnFromBase);
 		}
 
 		const btnCreate = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: isEdit ? "💾 Save Changes" : "✨ Create Item"});
@@ -3003,7 +3033,6 @@ class CharacterSheetInventory {
 		});
 
 		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3 gap-2">
-			${btnFromBase || ""}
 			${btnCancel}
 			${btnCreate}
 		</div>`;
@@ -5059,6 +5088,9 @@ class CharacterSheetInventory {
 						` : ""}
 						<button type="button" class="ve-btn ve-btn-xs ${hasNote ? "ve-btn-primary" : "ve-btn-default"} charsheet__item-note" title="${hasNote ? "View/Edit Note" : "Add Note"}">
 							<span class="glyphicon glyphicon-${hasNote ? "comment" : "edit"}"></span>
+						</button>
+						<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-edit" title="Edit item">
+							<span class="glyphicon glyphicon-pencil"></span>
 						</button>
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-info" title="Item details">
 							<span class="glyphicon glyphicon-info-sign"></span>
