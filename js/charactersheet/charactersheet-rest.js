@@ -686,6 +686,14 @@ class CharacterSheetRest {
 			// Reset death saves
 			this._state.setDeathSaves({successes: 0, failures: 0});
 
+			// Clear transient Druid Wild Shape forms and Wild-Companion familiars.
+			// Wild Shape uses recharge on a rest, so any assumed beast form reverts
+			// and a Wild-Companion-summoned familiar (which cost a Wild Shape use)
+			// disappears — re-summoning after the rest costs a fresh use. Regular
+			// Find Familiar / Pact of the Chain familiars are NOT removed (only the
+			// Wild-Companion-origin ones), and other companion types are untouched.
+			const removedCompanions = this._removeWildShapeCompanionsOnLongRest();
+
 			// Reset Gambler prepared spell roll (TGTT Rogue subclass)
 			const calcs = this._state.getFeatureCalculations();
 			if (calcs.hasGamblerSpellcasting) {
@@ -714,6 +722,7 @@ class CharacterSheetRest {
 			if (primalFocusChanged) message += ` Primal Focus set to ${primalFocusChanged}.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
+			if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
 
 			JqueryUtil.doToast({
 				type: "success",
@@ -735,6 +744,40 @@ class CharacterSheetRest {
 			${btnCancel}
 			${btnConfirm}
 		</div>`.appendTo(modalInner);
+	}
+
+	/**
+	 * Remove transient Druid Wild Shape companions on a long rest.
+	 *
+	 * Clears:
+	 *  - every WILD_SHAPE companion (an assumed beast form reverts on a rest), and
+	 *  - every FAMILIAR companion summoned via Wild Companion (origin begins with
+	 *    "Wild Companion") — that familiar cost a Wild Shape use, which recharges
+	 *    on the rest, so re-summoning afterwards costs a fresh use.
+	 *
+	 * Regular Find Familiar / Pact of the Chain familiars (and all other companion
+	 * types) are intentionally LEFT in place. Also deactivates the lingering
+	 * `wildShape` active state, if any.
+	 *
+	 * @returns {number} How many companions were removed.
+	 * @private
+	 */
+	_removeWildShapeCompanionsOnLongRest () {
+		const T = CharacterSheetState.COMPANION_TYPES || {};
+		const companions = this._state.getCompanions?.() || [];
+		let removed = 0;
+		for (const c of companions) {
+			const isWildShapeForm = c.type === T.WILD_SHAPE;
+			const isWildCompanionFamiliar = c.type === T.FAMILIAR && /^wild companion\b/i.test(c.origin || "");
+			if (isWildShapeForm || isWildCompanionFamiliar) {
+				if (this._state.removeCompanion?.(c.id)) removed++;
+			}
+		}
+		// Drop any lingering Wild Shape active state so derived stats reset too.
+		if (this._state.isStateTypeActive?.("wildShape")) {
+			this._state.deactivateState?.("wildShape");
+		}
+		return removed;
 	}
 
 	/**
