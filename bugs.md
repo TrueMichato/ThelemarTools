@@ -3,7 +3,37 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 8 (surfaced during manual testing of the merged round-7 fixes)
+
+14 bugs/tweaks grouped into 6 parallel planning sessions (each branches off
+`character-sheet-wip`, deep fix + Jest tests). Sessions do NOT touch this file;
+the orchestrator reconciles it at integration.
+
+**S1 — Inventory custom-item flow** (owns `charactersheet-inventory.js`)
+* [ ] #1 Move the "📦 Start from Base Item" button to the TOP of the custom-item modal (currently in the footer) so players save time.
+* [ ] #2 No discoverable way to edit an existing inventory item via the custom-item flow. (`_modifyItemById` already handles catalog+custom items; the gap is a missing obvious edit affordance on the inventory row — add one that reuses `_modifyItemById`.)
+
+**S2 — Spells: known/prepared, badges, feat cantrips** (owns `charactersheet-spells.js` spell render; `charactersheet-class-utils.js` feat-spell + spellcasting-model; `_getClassSpellcastingInfo` in state.js; QuickBuild known/prepared DETECTION region only)
+* [ ] #4 Ranger (TGTT/2024) spells are treated as "prepared" but should be "known". Fix via a shared spellcasting-model resolver used by BOTH `_getClassSpellcastingInfo` and QuickBuild's `!preparedSpellsProgression` detection.
+* [ ] #5 Replace the prepared/known spell badge with one showing the spell's SOURCE (class/subclass/feat/race/item); only prepared casters get the Prepare button (gate by attribution + owning-class model, not badge text). Fallback label order: sourceFeature → fromFeat → sourceClass → sourceItem → "Manual".
+* [ ] #7 Plantmender feat (HumblewoodTales) grants 2 cantrips (shillelagh + mend plants) but doesn't — root cause: `applyFeatToCharacter` does `choices.spells?.length` on an OBJECT `{cantrips,spells,list}` → always falsy → feat spells dropped. Generic fix (affects every feat with `additionalSpells`).
+
+**S3 — Druid 2024 Wild Shape "known forms"** (owns `charactersheet-druid-resources.js`; `_pShowBeastPicker` in charactersheet.js; wildshape/zodiac region of state.js; `renderCombatDruidResources` in combat.js)
+* [ ] #9 Rework Wild Shape from free-bestiary-choice-every-time to the official 2024 model: a persistent per-character curated roster of "known forms" (any Beast within the level-gated CR/stat limits), picked from at transform time, with hover UX to preview each form. Reuse the beast picker to ADD a form to the roster; transform picks from the roster.
+
+**S4 — Builder / QuickBuild / ability-base** (owns `charactersheet-builder.js`; `charactersheet-quickbuild.js` ASI/racial/finish region; ability-base WRITE paths in state.js)
+* [ ] #10 Centaur(TGTT) Ranger(TGTT) builder→quickbuild: Finish button does nothing (no console error) and leaves an unresponsive "Survivor — Choose a Skill Proficiency" modal. Root cause: `_applyQuickBuild` processes pending spell/feature choices but NOT racial `skillProficiencies.choose` choices.
+* [ ] #11 Make the builder's FIRST step "choose a character name" (name only), still renamable in the final Details step — so mid-build saves are identifiable. Avoid fragile switch-case renumbering (prefer a pre-step name prompt or a step-descriptor array).
+* [ ] #12 DEX/CON BASE scores inflated (repro Lunaria(2): base dex=19, con=20; Centaur Ranger6/Druid3 via builder→quickbuild). Likely ASI double-application or stale base in `_applyAsiOrFeat` (`currentBase + asiChoice`). Tests must assert each ASI applies exactly once and is not replayed on re-run/save-load.
+
+**S5 — Play-mode display** (owns `charactersheet-playmode.js`)
+* [ ] #6 Drop the "ft." suffix from speed display (always feet) — `_renderVitalChip` speed calls + companion speed.
+* [ ] #8 Ability-scores EDIT modal needs richer bonus breakdown (ASIs are baked into base, racial/item/feat bonuses shown only as generic "bonus" without source). Add a read-only `getAbilityBonusBreakdown()` helper (S5 owns read-only; S4 owns base writes) and name each source.
+
+**S6 — UI tweaks** (owns Hunter's Dodge CSS+render; modifiers badge; Abilities-tab toggle)
+* [ ] #3 Hunter's Dodge ranger-section row needs better font/spacing to match the section (`.charsheet__ranger-ability-row` CSS + render in charactersheet.js L5975 and combat.js Hunter's Dodge row ONLY).
+* [ ] #13 Modifiers button: remove the number badge, keep only the green outline when modifiers are active (the `charsheet__btn--has-modifiers` outline class is already toggled).
+* [ ] #14 Remove the redundant "Abilities" top-level tab by HIDING it behind a `showAbilitiesTab` setting (default off) — do NOT delete the pane/render code, so re-enable stays cheap.
 
 ## Closed Bugs
 
