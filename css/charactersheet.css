@@ -8561,6 +8561,25 @@ body.has-quickbuild-overlay .toast__container {
 	line-height: 1.3;
 }
 
+/* Interactive ranger-section row (e.g. the Hunter's Dodge use-button row). A
+   single-line flex variant — status badge + action button — that shares the
+   reminder rows' left-accent, padding, margin, and compact font/line-height so it
+   reads as part of the ranger section instead of a detached utility-class row.
+   Self-contained (does not rely on the base grid row class) so it never matches
+   selectors/queries scoped to the generic reminder rows. */
+.charsheet__ranger-ability-row--action {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	column-gap: 0.5rem;
+	row-gap: 0.15rem;
+	padding: 0.35rem 0 0.35rem 0.5rem;
+	border-left: 2px solid var(--rgb-link);
+	margin-bottom: 0.35rem;
+	font-size: 0.9em;
+	line-height: 1.3;
+}
+
 /* Multi-mechanic reminder notes (e.g. Enduring Traveler): each distinct benefit on
    its own compact bullet so they no longer cram into one paragraph. */
 .charsheet__ranger-ability-notes {
@@ -11207,26 +11226,7 @@ body.has-quickbuild-overlay .toast__container {
 	font-size: var(--cs-text-sm, 0.85rem);
 }
 
-/* Modifier badge on button */
-.charsheet__modifier-badge {
-	position: absolute;
-	top: -5px;
-	right: -5px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	min-width: 16px;
-	height: 16px;
-	padding: 0 4px;
-	font-size: 0.65rem;
-	font-weight: 700;
-	color: #fff;
-	background: var(--rgb-name-green, #28a745);
-	border-radius: 8px;
-	line-height: 1;
-	pointer-events: none;
-	z-index: 1;
-}
+/* Modifier active-state is shown via the green outline below only — no count badge. */
 
 .charsheet__btn--has-modifiers {
 	border-color: var(--rgb-name-green, #28a745) !important;
