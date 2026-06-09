@@ -6331,6 +6331,97 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * READ-ONLY. Itemized, per-source breakdown of the bonus an ability score
+	 * receives on TOP of its base (the base — `getAbilityBase` — already bakes in
+	 * any ASIs, which are applied via `setAbilityBase`, so ASIs are intentionally
+	 * NOT a "bonus" line here).
+	 *
+	 * The implementation mirrors `getAbilityScore` stage-by-stage so each entry is
+	 * honestly attributed, and it GUARANTEES the invariant
+	 *   sum(contributions[].amount) === total - base   (=== returned `bonus`)
+	 * via a final defensive "Other" reconciliation entry (normally absent).
+	 *
+	 * @param {string} ability - "str"|"dex"|"con"|"int"|"wis"|"cha"
+	 * @returns {{ability: string, base: number, total: number, bonus: number,
+	 *   contributions: Array<{source: string, label: string, amount: number, isReplacement?: boolean}>}}
+	 */
+	getAbilityBonusBreakdown (ability) {
+		const base = this.getAbilityBase(ability);
+		const total = this.getAbilityScore(ability);
+		const contributions = [];
+		const push = (source, label, amount, extra) => {
+			if (amount || extra?.isReplacement) contributions.push({source, label, amount, ...(extra || {})});
+		};
+
+		// Wild Shape replaces physical stats (STR/DEX/CON) entirely with the beast's
+		// scores — mirror the early return in getAbilityScore. The whole delta is a
+		// single replacement entry (shown even when the delta happens to be 0).
+		const wildShapeState = this._getActiveWildShapeState?.();
+		if (wildShapeState?.beastData?.abilities && ["str", "dex", "con"].includes(ability)) {
+			push("wildShape", "Wild Shape", total - base, {isReplacement: true});
+			return {ability, base, total, bonus: total - base, contributions};
+		}
+
+		// Additive channels racial/custom/direct first — these mirror getAbilityScore's
+		// initial sum. The item additive bonus is applied LATER (after Primal Champion),
+		// exactly as getAbilityScore does.
+		const racial = this._data.abilityBonuses?.[ability] || 0;
+		const feature = this._data.customModifiers?.abilityScores?.[ability] || 0;
+		const direct = this._data.directAbilityBonuses?.[ability] || 0;
+		const itemBonus = this._data.itemAbilityOverrides?.bonus?.[ability] || 0;
+		push("racial", "Racial", racial);
+		push("custom", "Custom Modifier", feature);
+		push("feat", "Feat / Feature", direct);
+
+		// Track a running total so each non-additive stage is attributed by its
+		// actual delta (honest even when caps/overrides interact).
+		let running = base + racial + feature + direct;
+
+		// Primal Champion (Barbarian 20): +4 STR/CON, clamped to 24 when the cap is
+		// not enforced (matches getAbilityScore — applied BEFORE the item bonus).
+		if ((ability === "str" || ability === "con") && this._hasPrimalChampion?.()) {
+			const enforceCap = !!this._data.settings?.enforceAbilityScoreCap;
+			const after = enforceCap ? running + 4 : Math.min(running + 4, 24);
+			push("primalChampion", "Primal Champion", after - running);
+			running = after;
+		}
+
+		// Item additive bonus (e.g. Belt of Giant Strength) — added after Primal Champion.
+		push("item", "Item", itemBonus);
+		running += itemBonus;
+
+		// Item static override ("score becomes X" — only if higher).
+		const itemStatic = this._data.itemAbilityOverrides?.static?.[ability];
+		if (itemStatic && itemStatic > running) {
+			push("itemStatic", "Item (set score)", itemStatic - running);
+			running = itemStatic;
+		}
+
+		// Custom static override (same "set score" semantics).
+		const customStatic = this._data.customModifiers?.abilityScoreStatic?.[ability];
+		if (customStatic && customStatic > running) {
+			push("customStatic", "Custom (set score)", customStatic - running);
+			running = customStatic;
+		}
+
+		// Ability score cap clamp.
+		if (this._data.settings?.enforceAbilityScoreCap) {
+			const capped = Math.min(running, this.getAbilityScoreMax(ability));
+			if (capped !== running) {
+				push("cap", "Ability Score Cap", capped - running);
+				running = capped;
+			}
+		}
+
+		// Defensive reconciliation: should be a no-op, but guarantees the invariant
+		// even if getAbilityScore gains a channel this method does not yet mirror.
+		const diff = total - running;
+		if (diff !== 0) push("other", "Other", diff);
+
+		return {ability, base, total, bonus: total - base, contributions};
+	}
+
+	/**
 	 * Resolve a weapon attack/damage ability key to a modifier WITHOUT any
 	 * active-state overrides. Handles the "finesse" (max STR/DEX) and
 	 * "spellcasting" (max INT/WIS/CHA) pseudo-keys; otherwise the plain mod.
