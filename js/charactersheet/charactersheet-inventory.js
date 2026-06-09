@@ -302,12 +302,14 @@ class CharacterSheetInventory {
 		await this._pShowItemPickerModal();
 	}
 
-	async _pShowItemPickerModal () {
+	async _pShowItemPickerModal (opts = {}) {
+		const {onSelect = null, title = "🎒 Add Item"} = opts;
+		const isSelectMode = typeof onSelect === "function";
 		// Filter items by allowed sources
 		const items = this._page.filterByAllowedSources(this._allItems);
 
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: "🎒 Add Item",
+			title,
 			isMinHeight0: true,
 			isWidth100: true,
 		});
@@ -948,18 +950,28 @@ class CharacterSheetInventory {
 								</div>
 								${vcSpellLine}
 							</div>
-							<button class="ve-btn ve-btn-primary ve-btn-xs item-picker-add">+ Add</button>
+							<button class="ve-btn ve-btn-primary ve-btn-xs item-picker-add">${isSelectMode ? "Select" : "+ Add"}</button>
 						</div>
 					`});
 
 					itemEl.querySelector(".item-picker-add").addEventListener("click", (/** @type {*} */ e) => {
 						e.stopPropagation();
+						if (isSelectMode) {
+							onSelect(item);
+							doClose(true);
+							return;
+						}
 						this._addItem(item);
 						JqueryUtil.doToast({type: "success", content: `Added ${item.name} to your inventory!`});
 					});
 
 					itemEl.addEventListener("click", (/** @type {*} */ e) => {
 						if (e.target.closest("a")) return;
+						if (isSelectMode) {
+							onSelect(item);
+							doClose(true);
+							return;
+						}
 						this._showItemInfoFromData(item);
 					});
 
@@ -1320,6 +1332,8 @@ class CharacterSheetInventory {
 			conditionImmune: item.conditionImmune || null,
 			// Speed modification
 			modifySpeed: item.modifySpeed || null,
+			// Senses granted by the item (e.g., structured darkvision); prose senses are parsed from entries
+			senses: item.senses || null,
 			// Ability score modifications from items (e.g., Gauntlets of Ogre Power, Belt of Giant Strength)
 			ability: item.ability || null,
 			// Item-granted spells (e.g., Staff of the Magi, Wand of Fireballs)
@@ -1351,6 +1365,10 @@ class CharacterSheetInventory {
 			socketedGemstones: [], // [{name, source, gemName, rarity, upgradeType, entries, charges, chargesCurrent, chargesMax, recharge, socketedAt}]
 			// Variant spell component data (Arcadia 8)
 			variantComponent: item.variantComponent || null,
+			// Prose description — needed so prose-expressed effects (senses, defenses, speed,
+			// ability, save bonuses) can be parsed and applied. Without this, prose-only items
+			// (e.g. Goggles of Night) would lose all of their mechanical text once in inventory.
+			entries: item.entries || null,
 		};
 
 		this._state.addItem(newItem);
@@ -1360,9 +1378,28 @@ class CharacterSheetInventory {
 	}
 
 	_addCustomItem (name, quantity = 1, weight = 0, options = {}) {
+		const newItem = this._buildCustomItem(name, quantity, weight, options);
+
+		this._state.addItem(newItem);
+		this._renderItemList();
+		this._page.saveCharacter();
+	}
+
+	/**
+	 * Build a flat custom-item object from the custom-item form options. Extracted from
+	 * _addCustomItem so the same construction is reused by the create AND the modify/replace
+	 * paths (and is unit-testable without a modal).
+	 * @param {string} name
+	 * @param {number} quantity
+	 * @param {number} weight
+	 * @param {object} options
+	 * @returns {object} The flat custom item
+	 */
+	_buildCustomItem (name, quantity = 1, weight = 0, options = {}) {
 		const newItem = {
 			name,
 			source: "Custom",
+			_isCustom: true,
 			quantity,
 			equipped: false,
 			attuned: false,
@@ -1426,17 +1463,179 @@ class CharacterSheetInventory {
 			// Attached spells
 			attachedSpells: options.attachedSpells || null,
 			// Misc
-			entries: options.entries ? [options.entries] : undefined,
+			entries: this._normalizeCustomEntries(options.entries),
 		};
 
-		this._state.addItem(newItem);
-		this._renderItemList();
-		this._page.saveCharacter();
+		return newItem;
 	}
 
-	async _showAddCustomItem () {
+	/**
+	 * Normalize a free-text or array description into an item `entries` array (or undefined).
+	 * @param {string|Array|undefined} entries
+	 * @returns {Array|undefined}
+	 */
+	_normalizeCustomEntries (entries) {
+		if (!entries) return undefined;
+		if (Array.isArray(entries)) return entries.length ? entries : undefined;
+		const str = String(entries).trim();
+		return str ? [str] : undefined;
+	}
+
+	/**
+	 * Persist a custom item built from the form options — either ADDING a new item, or REPLACING
+	 * an existing inventory item in place (preserving id/quantity/equipped/starred/note).
+	 * @param {string} name
+	 * @param {number} quantity
+	 * @param {number} weight
+	 * @param {object} options
+	 * @param {string|null} [editItemId] - When set, replace this inventory item instead of adding
+	 * @returns {string|undefined} The inventory id of the saved item, when known
+	 */
+	_saveCustomItem (name, quantity, weight, options, editItemId = null) {
+		const newItem = this._buildCustomItem(name, quantity, weight, options);
+
+		if (editItemId) {
+			// Preserve the original quantity unless the form explicitly changed it
+			this._state.replaceItem(editItemId, newItem);
+			// Keep the quantity the user set in the form
+			if (typeof this._state.setItemQuantity === "function") this._state.setItemQuantity(editItemId, quantity);
+			this._syncArmorState();
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+			return editItemId;
+		}
+
+		this._state.addItem(newItem);
+		this._syncArmorState();
+		this._renderItemList();
+		this._page.saveCharacter?.();
+		return undefined;
+	}
+
+	/**
+	 * Map an inventory/base item (flat shape) onto the custom-item form's {name, quantity, weight,
+	 * type, options} seed, so "start from base item" and "modify item" can prefill the editor and
+	 * round-trip through _buildCustomItem. Inverse of _buildCustomItem's option handling.
+	 * @param {object} item - A flat inventory item or catalog item
+	 * @returns {{name: string, quantity: number, weight: number, type: string, options: object}}
+	 */
+	_seedOptionsFromItem (item) {
+		const type = this._getCustomTypeForItem(item);
+		const options = {type};
+
+		if (item.value != null) options.value = item.value;
+		if (item.rarity) options.rarity = item.rarity;
+		// Catalog items use `reqAttune`; normalized inventory items use `requiresAttunement`.
+		if (item.requiresAttunement || item.reqAttune) options.requiresAttunement = true;
+
+		// Description / entries (prefer explicit entries; re-hydrate from catalog if missing)
+		const entries = this._getEffectiveItemEntries(item);
+		if (entries?.length) {
+			options.entries = entries
+				.map(e => typeof e === "string" ? e : (e?.entries ? e.entries.join("\n") : ""))
+				.filter(Boolean)
+				.join("\n\n");
+		}
+
+		// Weapon
+		if (type === "weapon") {
+			if (item.weaponCategory) options.weaponCategory = item.weaponCategory;
+			if (item.dmg1) options.dmg1 = item.dmg1;
+			if (item.dmgType) options.dmgType = item.dmgType;
+			if (item.range) options.range = item.range;
+			if (item.property) options.property = item.property;
+			if (item.mastery) options.mastery = item.mastery;
+			// Catalog bonuses may be strings like "+1"; normalize to numbers.
+			if (item.bonusWeapon) options.bonusWeapon = this._parseBonus(item.bonusWeapon);
+			if (item.bonusWeaponAttack) options.bonusWeaponAttack = this._parseBonus(item.bonusWeaponAttack);
+			if (item.bonusWeaponDamage) options.bonusWeaponDamage = this._parseBonus(item.bonusWeaponDamage);
+			if (item.bonusWeaponCritDamage) options.bonusWeaponCritDamage = this._parseBonus(item.bonusWeaponCritDamage);
+		}
+
+		// Armor / shield
+		if (type === "armor" || type === "shield") {
+			options.armor = true;
+			if (item.ac != null) options.ac = item.ac;
+			if (item.strength) options.strength = item.strength;
+			if (item.stealth) options.stealth = item.stealth;
+			if (item.bonusAc) options.bonusAc = this._parseBonus(item.bonusAc);
+		}
+
+		// Universal magic bonuses — normalize string bonuses ("+1") to numbers.
+		for (const k of [
+			"bonusAc", "bonusSpellAttack", "bonusSpellSaveDc", "bonusSpellDamage",
+			"bonusSavingThrow", "bonusSavingThrowStr", "bonusSavingThrowDex", "bonusSavingThrowCon",
+			"bonusSavingThrowInt", "bonusSavingThrowWis", "bonusSavingThrowCha", "bonusAbilityCheck",
+			"bonusProficiencyBonus", "bonusSavingThrowConcentration",
+		]) {
+			if (item[k] != null) {
+				const v = this._parseBonus(item[k]);
+				if (v) options[k] = v;
+			}
+		}
+		if (item.critThreshold) options.critThreshold = item.critThreshold;
+
+		// Defenses, speed, ability, senses, spells, charges
+		if (item.resist) options.resist = item.resist;
+		if (item.immune) options.immune = item.immune;
+		if (item.vulnerable) options.vulnerable = item.vulnerable;
+		if (item.conditionImmune) options.conditionImmune = item.conditionImmune;
+		if (item.modifySpeed) options.modifySpeed = item.modifySpeed;
+		if (item.ability) options.ability = item.ability;
+		if (item.senses) options.senses = item.senses;
+		if (item.attachedSpells) options.attachedSpells = item.attachedSpells;
+		if (item.charges) options.charges = item.charges;
+		if (item.recharge) options.recharge = item.recharge;
+		if (item.rechargeAmount) options.rechargeAmount = item.rechargeAmount;
+		if (item.focus) options.focus = true;
+		if (item.curse) options.curse = true;
+		if (item.sentient) options.sentient = true;
+
+		return {
+			name: item.name || "",
+			quantity: item.quantity || 1,
+			weight: item.weight || 0,
+			type,
+			options,
+		};
+	}
+
+	/**
+	 * Map an item's type code / flags to one of the custom-item modal's type keys.
+	 * @param {object} item
+	 * @returns {string} One of: gear|weapon|armor|shield|wondrous|potion|scroll|ring|wand
+	 */
+	_getCustomTypeForItem (item) {
+		if (item.shield) return "shield";
+		if (item.armor) return "armor";
+		if (this._isWeapon(item) || item.weaponCategory || item.dmg1) return "weapon";
+		const base = (item.type || "").split("|")[0];
+		switch (base) {
+			case "S": return "shield";
+			case "LA": case "MA": case "HA": return "armor";
+			case "M": case "R": case "A": return "weapon";
+			case "P": return "potion";
+			case "SC": return "scroll";
+			case "RG": return "ring";
+			case "WD": case "RD": case "ST": return "wand";
+			case "wondrous": case "W": return "wondrous";
+			default:
+				// Raw catalog wondrous items carry a `wondrous: true` flag and no `type`.
+				if (item.wondrous) return "wondrous";
+				if (item.type === "wondrous") return "wondrous";
+				if (item.type === "potion") return "potion";
+				if (item.type === "scroll") return "scroll";
+				if (item.type === "ring") return "ring";
+				if (item.type === "wand") return "wand";
+				return "gear";
+		}
+	}
+
+	async _showAddCustomItem (opts = {}) {
+		const {prefillItem = null, editItemId = null} = opts;
+		const isEdit = !!editItemId;
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: "✨ Create Custom Item",
+			title: isEdit ? "✏️ Modify Item" : "✨ Create Custom Item",
 			isMinHeight0: true,
 			isWidth100: true,
 		});
@@ -2500,10 +2699,43 @@ class CharacterSheetInventory {
 		};
 		updateFieldVisibility();
 
+		// Apply a seed (base-item clone or edit pre-seed) into the form fields + selected type.
+		const applySeed = (seed) => {
+			if (!seed) return;
+			selectedType = seed.type || "gear";
+			typeGrid.querySelectorAll(".charsheet__custom-item-type-btn").forEach(b => {
+				b.classList.toggle("selected", b.getAttribute("data-type") === selectedType);
+			});
+			updateFieldVisibility();
+			this._prefillCustomItemForm(form, seed);
+		};
+
+		// Pre-seed for edit mode, or an explicitly supplied base item.
+		if (prefillItem) applySeed(this._seedOptionsFromItem(prefillItem));
+
 		// Footer buttons
 		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
 		btnCancel.addEventListener("click", () => doClose(false));
-		const btnCreate = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✨ Create Item"});
+
+		// "Start from base item" — only meaningful when creating (edit already starts from the item)
+		let btnFromBase = null;
+		if (!isEdit) {
+			btnFromBase = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "📦 Start from Base Item"});
+			btnFromBase.addEventListener("click", async () => {
+				await this._pShowItemPickerModal({
+					title: "📦 Choose a Base Item",
+					onSelect: (baseItem) => {
+						applySeed(this._seedOptionsFromItem(baseItem));
+						// Ensure the chosen name is populated if blank
+						const nameEl = form.querySelector("#custom-item-name");
+						if (nameEl && !nameEl.value) nameEl.value = baseItem.name || "";
+						JqueryUtil.doToast({type: "info", content: `Loaded "${baseItem.name}" — edit and save as a custom item.`});
+					},
+				});
+			});
+		}
+
+		const btnCreate = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: isEdit ? "💾 Save Changes" : "✨ Create Item"});
 		btnCreate.addEventListener("click", () => {
 			const name = form.querySelector("#custom-item-name")?.value?.trim();
 			if (!name) {
@@ -2749,16 +2981,147 @@ class CharacterSheetInventory {
 			const quantity = parseInt(form.querySelector("#custom-item-qty")?.value) || 1;
 			const weight = parseFloat(form.querySelector("#custom-item-weight")?.value) || 0;
 
-			this._addCustomItem(name, quantity, weight, options);
-			JqueryUtil.doToast({type: "success", content: `Created ${name}!`});
+			this._saveCustomItem(name, quantity, weight, options, editItemId);
+			JqueryUtil.doToast({type: "success", content: isEdit ? `Updated ${name}!` : `Created ${name}!`});
 			doClose(true);
 		});
 
 		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3 gap-2">
+			${btnFromBase || ""}
 			${btnCancel}
 			${btnCreate}
 		</div>`;
 		modalInner.append(footer);
+	}
+
+	/**
+	 * Prefill the custom-item form's DOM fields from a {type, options} seed produced by
+	 * _seedOptionsFromItem(). Best-effort and defensive: every field access is guarded so a
+	 * partially-rendered form (or missing optional sections) never throws.
+	 * @param {HTMLElement} form
+	 * @param {{name?: string, quantity?: number, weight?: number, type?: string, options?: object}} seed
+	 */
+	_prefillCustomItemForm (form, seed) {
+		if (!form || !seed) return;
+		const o = seed.options || {};
+		const numOf = (v) => {
+			if (v == null) return "";
+			const n = parseInt(String(v).replace("+", ""));
+			return isNaN(n) ? "" : n;
+		};
+		const setVal = (sel, val) => {
+			const el = form.querySelector(sel);
+			if (el != null && val != null && val !== "") el.value = String(val);
+		};
+		const setChk = (sel, val) => {
+			const el = form.querySelector(sel);
+			if (el) el.checked = !!val;
+		};
+
+		// Basic info
+		setVal("#custom-item-name", seed.name);
+		setVal("#custom-item-qty", seed.quantity || 1);
+		setVal("#custom-item-weight", seed.weight || 0);
+		setVal("#custom-item-value", o.value);
+		setVal("#custom-item-rarity", o.rarity);
+		setChk("#custom-item-attunement", o.requiresAttunement);
+		setVal("#custom-item-desc", o.entries);
+
+		// Weapon
+		setVal("#custom-item-weapon-cat", o.weaponCategory);
+		setVal("#custom-item-damage", o.dmg1);
+		setVal("#custom-item-dmg-type", o.dmgType);
+		setVal("#custom-item-range", o.range);
+		setVal("#custom-item-weapon-bonus", numOf(o.bonusWeapon));
+		setVal("#custom-item-bonus-attack", numOf(o.bonusWeaponAttack));
+		setVal("#custom-item-bonus-damage", numOf(o.bonusWeaponDamage));
+		setVal("#custom-item-crit-damage", o.bonusWeaponCritDamage);
+
+		// Armor / shield
+		if (seed.type === "armor") {
+			setVal("#custom-item-ac", o.ac);
+			setVal("#custom-item-armor-bonus", numOf(o.bonusAc));
+			setVal("#custom-item-str-req", o.strength);
+			setChk("#custom-item-stealth-dis", o.stealth);
+		} else if (seed.type === "shield") {
+			setVal("#custom-item-shield-ac", o.ac);
+			setVal("#custom-item-shield-bonus", numOf(o.bonusAc));
+		}
+
+		// Magic bonuses
+		setVal("#custom-item-bonus-spell-attack", numOf(o.bonusSpellAttack));
+		setVal("#custom-item-bonus-spell-dc", numOf(o.bonusSpellSaveDc));
+		setVal("#custom-item-bonus-save-all", numOf(o.bonusSavingThrow));
+		setVal("#custom-item-bonus-concentration", numOf(o.bonusSavingThrowConcentration));
+		setVal("#custom-item-bonus-checks", numOf(o.bonusAbilityCheck));
+		if (o.critThreshold) setVal("#custom-item-crit-threshold", o.critThreshold);
+		setVal("#custom-item-bonus-save-str", numOf(o.bonusSavingThrowStr));
+		setVal("#custom-item-bonus-save-dex", numOf(o.bonusSavingThrowDex));
+		setVal("#custom-item-bonus-save-con", numOf(o.bonusSavingThrowCon));
+		setVal("#custom-item-bonus-save-int", numOf(o.bonusSavingThrowInt));
+		setVal("#custom-item-bonus-save-wis", numOf(o.bonusSavingThrowWis));
+		setVal("#custom-item-bonus-save-cha", numOf(o.bonusSavingThrowCha));
+
+		// Charges
+		if (o.charges) {
+			setVal("#custom-item-charges", o.charges);
+			setVal("#custom-item-recharge", o.recharge);
+			setVal("#custom-item-recharge-amount", o.rechargeAmount);
+		}
+		setChk("#custom-item-focus", o.focus);
+		setChk("#custom-item-cursed", o.curse);
+		setChk("#custom-item-sentient", o.sentient);
+
+		// Defenses (checkboxes)
+		const checkList = (selBase, values, accessor) => {
+			if (!values?.length) return;
+			const wanted = new Set(values.map(accessor).filter(Boolean).map(s => String(s).toLowerCase()));
+			(form.querySelectorAll?.(selBase) || []).forEach?.(cb => {
+				if (wanted.has(String(cb.value).toLowerCase())) cb.checked = true;
+			});
+		};
+		const dmgAccessor = (d) => typeof d === "string" ? d : (d?.resist || d?.immune || d?.vulnerable || d?.type || "");
+		checkList(".resist-check", o.resist, dmgAccessor);
+		checkList(".immune-check", o.immune, dmgAccessor);
+		checkList(".condition-immune-check", o.conditionImmune, (c) => {
+			const name = typeof c === "string" ? c : (c?.conditionImmune || c?.type || "");
+			return name;
+		});
+
+		// Speed
+		const ms = o.modifySpeed || {};
+		setVal("#custom-item-speed-walk", ms.bonus?.walk);
+		setVal("#custom-item-speed-fly", ms.bonus?.fly);
+		setVal("#custom-item-speed-swim", ms.bonus?.swim);
+		setVal("#custom-item-speed-climb", ms.bonus?.climb);
+		setVal("#custom-item-speed-burrow", ms.bonus?.burrow);
+		setVal("#custom-item-grant-fly", ms.static?.fly);
+		setVal("#custom-item-grant-swim", ms.static?.swim);
+		setVal("#custom-item-grant-climb", ms.static?.climb);
+		setVal("#custom-item-grant-burrow", ms.static?.burrow);
+		setVal("#custom-item-equal-fly", ms.equal?.fly);
+		setVal("#custom-item-equal-swim", ms.equal?.swim);
+		setVal("#custom-item-equal-climb", ms.equal?.climb);
+		setVal("#custom-item-multiply-walk", ms.multiply?.walk);
+
+		// Ability scores
+		const ab = o.ability || {};
+		setVal("#custom-item-ability-set-str", ab.static?.str);
+		setVal("#custom-item-ability-set-dex", ab.static?.dex);
+		setVal("#custom-item-ability-set-con", ab.static?.con);
+		setVal("#custom-item-ability-set-int", ab.static?.int);
+		setVal("#custom-item-ability-set-wis", ab.static?.wis);
+		setVal("#custom-item-ability-set-cha", ab.static?.cha);
+		for (const abbr of ["str", "dex", "con", "int", "wis", "cha"]) {
+			if (typeof ab[abbr] === "number" && ab[abbr]) setVal(`#custom-item-ability-bonus-${abbr}`, ab[abbr]);
+		}
+
+		// Senses
+		const s = o.senses || {};
+		setVal("#custom-item-sense-darkvision", s.darkvision);
+		setVal("#custom-item-sense-blindsight", s.blindsight);
+		setVal("#custom-item-sense-tremorsense", s.tremorsense);
+		setVal("#custom-item-sense-truesight", s.truesight);
 	}
 
 	_changeQuantity (itemId, delta) {
@@ -3154,11 +3517,28 @@ class CharacterSheetInventory {
 			}
 		}
 
-		const closeFooter = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
-			<button class="ve-btn ve-btn-default">Close</button>
+		const closeFooter = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3 gap-2">
+			<button class="ve-btn ve-btn-primary charsheet__item-info-modify">✏️ Modify Item</button>
+			<button class="ve-btn ve-btn-default charsheet__item-info-close">Close</button>
 		</div>`;
 		modalInner.append(closeFooter);
-		closeFooter.querySelector("button").addEventListener("click", () => doClose(false));
+		closeFooter.querySelector(".charsheet__item-info-close").addEventListener("click", () => doClose(false));
+		closeFooter.querySelector(".charsheet__item-info-modify").addEventListener("click", () => {
+			doClose(false);
+			this._modifyItemById(itemId);
+		});
+	}
+
+	/**
+	 * Open the unified custom-item editor pre-seeded from an existing inventory item, in EDIT mode.
+	 * On save, the item is replaced in place (preserving id/quantity/equipped/starred/note).
+	 * @param {string} itemId - The inventory item id to modify
+	 */
+	async _modifyItemById (itemId) {
+		const items = this._state.getItems();
+		const item = items.find(i => i.id === itemId);
+		if (!item) return;
+		await this._showAddCustomItem({prefillItem: item, editItemId: itemId});
 	}
 
 	/**
@@ -3652,6 +4032,11 @@ class CharacterSheetInventory {
 
 		// Collect senses from equipped/attuned items
 		const itemSenses = this._getItemSenses(items);
+		const itemSenseBonuses = this._getItemSenseBonuses(items);
+
+		// Add prose-derived saving-throw bonuses (structured bonuses already counted above)
+		const proseSaveBonus = this._getItemProseSaveBonus(items);
+		if (proseSaveBonus) bonuses.savingThrow = (bonuses.savingThrow || 0) + proseSaveBonus;
 
 		// Store bonuses and defenses in state for use by other modules
 		this._state.setItemBonuses(bonuses);
@@ -3659,6 +4044,26 @@ class CharacterSheetInventory {
 		this._state.setItemAbilityOverrides(abilityOverrides);
 		this._state.setItemGrantedSpells(itemSpells);
 		this._state.setItemSenses(itemSenses);
+		if (typeof this._state.setItemSenseBonuses === "function") this._state.setItemSenseBonuses(itemSenseBonuses);
+	}
+
+	/**
+	 * Sum passive saving-throw bonuses expressed only in item prose (e.g. Cloak of Protection:
+	 * "+1 bonus to AC and saving throws"). Items that express the same effect structurally via
+	 * `bonusSavingThrow` are skipped to avoid double-counting.
+	 * @param {Array} items - All inventory items
+	 * @returns {number} Total prose-derived saving-throw bonus
+	 */
+	_getItemProseSaveBonus (items) {
+		let total = 0;
+		for (const item of items) {
+			if (!item.equipped) continue;
+			if (item.requiresAttunement && !item.attuned) continue;
+			if (item.bonusSavingThrow) continue; // structured wins
+			const prose = this._parseItemEffectProse(item);
+			total += prose.saveBonus || 0;
+		}
+		return total;
 	}
 
 	/**
@@ -3700,6 +4105,19 @@ class CharacterSheetInventory {
 					if (type && typeof type === "string") defenses.conditionImmune.push({type, source});
 				}
 			}
+
+			// Prose defenses fill gaps where the matching structured field is absent
+			const prose = this._parseItemEffectProse(item);
+			const addProse = (bucket, structuredPresent) => {
+				if (structuredPresent) return; // structured wins for this class
+				for (const type of prose.defenses[bucket]) {
+					if (!defenses[bucket].some(d => d.type === type)) defenses[bucket].push({type, source});
+				}
+			};
+			addProse("resist", item.resist?.length);
+			addProse("immune", item.immune?.length);
+			addProse("vulnerable", item.vulnerable?.length);
+			addProse("conditionImmune", item.conditionImmune?.length);
 		}
 
 		return defenses;
@@ -3716,16 +4134,48 @@ class CharacterSheetInventory {
 		for (const item of items) {
 			if (!item.equipped) continue;
 			if (item.requiresAttunement && !item.attuned) continue;
-			if (!item.senses) continue;
 
-			// Take the highest value for each sense type
-			if (item.senses.darkvision) senses.darkvision = Math.max(senses.darkvision, item.senses.darkvision);
-			if (item.senses.blindsight) senses.blindsight = Math.max(senses.blindsight, item.senses.blindsight);
-			if (item.senses.tremorsense) senses.tremorsense = Math.max(senses.tremorsense, item.senses.tremorsense);
-			if (item.senses.truesight) senses.truesight = Math.max(senses.truesight, item.senses.truesight);
+			// Structured senses take precedence
+			if (item.senses) {
+				if (item.senses.darkvision) senses.darkvision = Math.max(senses.darkvision, item.senses.darkvision);
+				if (item.senses.blindsight) senses.blindsight = Math.max(senses.blindsight, item.senses.blindsight);
+				if (item.senses.tremorsense) senses.tremorsense = Math.max(senses.tremorsense, item.senses.tremorsense);
+				if (item.senses.truesight) senses.truesight = Math.max(senses.truesight, item.senses.truesight);
+			}
+
+			// Prose "set/grant" senses fill gaps where no structured value exists for that type
+			const prose = this._parseItemEffectProse(item);
+			for (const [type, value] of Object.entries(prose.senses.set)) {
+				if (item.senses?.[type]) continue; // structured wins
+				senses[type] = Math.max(senses[type] || 0, value);
+			}
 		}
 
 		return senses;
+	}
+
+	/**
+	 * Collect ADDITIVE sense-range bonuses from prose (e.g. Goggles of Night: "if you already
+	 * have darkvision, increases its range by 60 feet"). Modeled additively so an item with no
+	 * base sense yields the bonus as the effective range, and one with a base adds on top.
+	 * @param {Array} items - All inventory items
+	 * @returns {object} { darkvision: N, blindsight: N, tremorsense: N, truesight: N }
+	 */
+	_getItemSenseBonuses (items) {
+		const bonuses = {darkvision: 0, blindsight: 0, tremorsense: 0, truesight: 0};
+
+		for (const item of items) {
+			if (!item.equipped) continue;
+			if (item.requiresAttunement && !item.attuned) continue;
+
+			const prose = this._parseItemEffectProse(item);
+			for (const [type, value] of Object.entries(prose.senses.increase)) {
+				if (item.senses?.[type]) continue; // structured wins
+				bonuses[type] = (bonuses[type] || 0) + value;
+			}
+		}
+
+		return bonuses;
 	}
 
 	/**
@@ -3745,36 +4195,60 @@ class CharacterSheetInventory {
 		for (const item of items) {
 			if (!item.equipped) continue;
 			if (item.requiresAttunement && !item.attuned) continue;
-			if (!item.modifySpeed) continue;
 
-			hasAny = true;
+			if (item.modifySpeed) {
+				hasAny = true;
 
-			// Process bonus speeds (additive)
-			if (item.modifySpeed.bonus) {
-				for (const [type, value] of Object.entries(item.modifySpeed.bonus)) {
-					bonus[type] = (bonus[type] || 0) + value;
+				// Process bonus speeds (additive)
+				if (item.modifySpeed.bonus) {
+					for (const [type, value] of Object.entries(item.modifySpeed.bonus)) {
+						bonus[type] = (bonus[type] || 0) + value;
+					}
+				}
+
+				// Process static speeds (take the highest)
+				if (item.modifySpeed.static) {
+					for (const [type, value] of Object.entries(item.modifySpeed.static)) {
+						staticSpeeds[type] = Math.max(staticSpeeds[type] || 0, value);
+					}
+				}
+
+				// Process equal speeds (e.g., fly = walk) — store target type
+				if (item.modifySpeed.equal) {
+					for (const [type, equalTo] of Object.entries(item.modifySpeed.equal)) {
+						equal[type] = equalTo; // e.g., {fly: "walk", swim: "walk"}
+					}
+				}
+
+				// Process multiply speeds (e.g., walk x2) — take highest multiplier
+				if (item.modifySpeed.multiply) {
+					for (const [type, value] of Object.entries(item.modifySpeed.multiply)) {
+						multiply[type] = Math.max(multiply[type] || 1, value);
+					}
 				}
 			}
 
-			// Process static speeds (take the highest)
-			if (item.modifySpeed.static) {
-				for (const [type, value] of Object.entries(item.modifySpeed.static)) {
-					staticSpeeds[type] = Math.max(staticSpeeds[type] || 0, value);
-				}
+			// Prose speed fills gaps where no structured modifySpeed entry exists for that type
+			const prose = this._parseItemEffectProse(item);
+			const structuredHas = (type) => item.modifySpeed && (
+				item.modifySpeed.bonus?.[type] != null
+				|| item.modifySpeed.static?.[type] != null
+				|| item.modifySpeed.equal?.[type] != null
+				|| item.modifySpeed.multiply?.[type] != null);
+			for (const [type, value] of Object.entries(prose.speed.bonus)) {
+				if (structuredHas(type)) continue;
+				bonus[type] = (bonus[type] || 0) + value;
+				hasAny = true;
 			}
-
-			// Process equal speeds (e.g., fly = walk) — store target type
-			if (item.modifySpeed.equal) {
-				for (const [type, equalTo] of Object.entries(item.modifySpeed.equal)) {
-					equal[type] = equalTo; // e.g., {fly: "walk", swim: "walk"}
-				}
+			for (const [type, value] of Object.entries(prose.speed.static)) {
+				if (structuredHas(type)) continue;
+				staticSpeeds[type] = Math.max(staticSpeeds[type] || 0, value);
+				hasAny = true;
 			}
-
-			// Process multiply speeds (e.g., walk x2) — take highest multiplier
-			if (item.modifySpeed.multiply) {
-				for (const [type, value] of Object.entries(item.modifySpeed.multiply)) {
-					multiply[type] = Math.max(multiply[type] || 1, value);
-				}
+			for (const [type, equalTo] of Object.entries(prose.speed.equal)) {
+				if (structuredHas(type)) continue;
+				equal[type] = equalTo;
+				hasAny = true;
 			}
 		}
 
@@ -3815,16 +4289,186 @@ class CharacterSheetInventory {
 	 * @returns {string} Plain text from entries
 	 */
 	_getItemEntriesTextForParsing (item) {
-		if (!item.entries?.length) return "";
+		const entries = this._getEffectiveItemEntries(item);
+		if (!entries?.length) return "";
 
 		// Convert entries to plain text
-		return item.entries
+		return entries
 			.map(e => typeof e === "string" ? e : (e?.entries ? e.entries.join(" ") : JSON.stringify(e)))
 			.join(" ")
 			.replace(/<[^>]*>/g, " ")
 			.replace(/\{@[^}]+\s+([^}|]+)(?:\|[^}]*)?\}/g, "$1") // Strip {@tag text|...} to text
 			.replace(/\s+/g, " ")
 			.trim();
+	}
+
+	/**
+	 * Get the effective entries for an item, re-hydrating from the loaded item catalog when an
+	 * inventory item is missing its `entries` (e.g. items added before entries were preserved, or
+	 * older saved characters). Custom items are never re-hydrated. Lookup is by name|source.
+	 * @param {object} item - The item object (flat inventory shape)
+	 * @returns {Array|null} The entries array, or null if none available
+	 */
+	_getEffectiveItemEntries (item) {
+		if (item?.entries?.length) return item.entries;
+		if (!item?.name) return null;
+		// Don't re-hydrate custom items — their text is authoritative as stored.
+		if (item._isCustom || item.source === "Custom") return null;
+		if (!this._allItems?.length) return null;
+		const nameLower = item.name.toLowerCase();
+		const sourceLower = (item.source || "").toLowerCase();
+		const match = this._allItems.find(i =>
+			i.name?.toLowerCase() === nameLower
+			&& (!sourceLower || (i.source || "").toLowerCase() === sourceLower));
+		return match?.entries?.length ? match.entries : null;
+	}
+
+	/**
+	 * Parse an equipped/attuned item's prose `entries` for mechanical effects that are not (or not
+	 * fully) expressed in structured fields. This is a deliberately item-focused, local parser
+	 * (separate from the shared FeatureModifierParser) so item behaviour can be tuned and tested
+	 * without affecting feature parsing.
+	 *
+	 * Precedence: callers apply structured fields first and use prose only to fill gaps.
+	 *
+	 * @param {object} item - The flat inventory item
+	 * @returns {{senses: {set: object, increase: object}, defenses: {resist: string[], immune: string[], vulnerable: string[], conditionImmune: string[]}, speed: {bonus: object, static: object, equal: object}, ability: {static: object, bonus: object}, saveBonus: number}}
+	 */
+	_parseItemEffectProse (item) {
+		const result = {
+			senses: {set: {}, increase: {}},
+			defenses: {resist: [], immune: [], vulnerable: [], conditionImmune: []},
+			speed: {bonus: {}, static: {}, equal: {}},
+			ability: {static: {}, bonus: {}},
+			saveBonus: 0,
+		};
+
+		const text = this._getItemEntriesTextForParsing(item);
+		if (!text) return result;
+		const lower = text.toLowerCase();
+
+		// ---- Senses (always treated as passive) ----
+		const senseNames = ["darkvision", "blindsight", "tremorsense", "truesight"];
+		for (const sense of senseNames) {
+			// "increase(s) [its/the/your] range by N feet" — Goggles-style conditional grant.
+			// Modeled as an additive bonus so: no base => 0 + N; existing base => base + N.
+			const increaseRe = new RegExp(`${sense}[^.]*?increases?(?:\\s+(?:its|the|your))?\\s+range\\s+by\\s+(\\d+)\\s*(?:feet|ft)`, "i");
+			// Also catch the simpler "{sense} increases by N feet".
+			const increaseRe2 = new RegExp(`${sense}\\s+(?:increases?|extends?)\\s+by\\s+(\\d+)\\s*(?:feet|ft)`, "i");
+			const incM = increaseRe.exec(lower) || increaseRe2.exec(lower);
+			if (incM) result.senses.increase[sense] = Math.max(result.senses.increase[sense] || 0, parseInt(incM[1]));
+
+			// "you have/gain {sense} out to [a range/distance of] N feet" / "{sense} of N feet" /
+			// "N feet of {sense}". A plain grant — modeled as a floor (max).
+			const setPatterns = [
+				new RegExp(`(?:have|gain|grants?|with)\\s+${sense}\\s+(?:out\\s+to\\s+)?(?:a\\s+(?:range|distance)\\s+of\\s+)?(\\d+)\\s*(?:feet|ft)`, "i"),
+				new RegExp(`${sense}\\s+(?:with\\s+a\\s+range\\s+of\\s+|range\\s+of\\s+|of\\s+|to\\s+)(\\d+)\\s*(?:feet|ft)`, "i"),
+				new RegExp(`(\\d+)\\s*(?:feet|ft)\\.?\\s+of\\s+${sense}`, "i"),
+			];
+			for (const re of setPatterns) {
+				const m = re.exec(lower);
+				if (m) { result.senses.set[sense] = Math.max(result.senses.set[sense] || 0, parseInt(m[1])); break; }
+			}
+			// Self-dedup: if this item describes an "increase" for the sense, that single clause
+			// fully captures the effect; drop any floor parsed from the accompanying grant clause.
+			if (result.senses.increase[sense]) delete result.senses.set[sense];
+		}
+
+		// ---- Passive gate for non-sense effects ----
+		// Only apply speed/defense/ability/save prose when it reads as an always-on (passive)
+		// property, and never from sentences describing activated/limited use. Gating is done
+		// PER SENTENCE so a single activated sentence (e.g. "you can use an action to cast X")
+		// does not suppress a passive effect described in a different sentence of the same item.
+		const hasPassivePhrase = /\bwhile\s+(?:wearing|wielding|holding|carrying|you\s+wear|you\s+hold|you\s+wield|you\s+carry|attuned)|\bwhile\s+you\s+(?:wear|hold|wield|carry)|\bas\s+long\s+as\s+you\s+wear/.test(lower);
+		const activationRe = /\byou\s+can\s+use\b|\bas\s+a\s+(?:bonus\s+)?action\b|\bbonus\s+action\b|\bcommand\s+word\b|\bexpend(?:s|ing)?\s+\d*\s*charges?\b|\bfor\s+\d+\s+(?:minute|hour|round)s?\b/;
+		// Passive text = sentences that are NOT activated. Gated by the item having a passive
+		// phrase at all (so purely-activated items contribute nothing).
+		const passiveText = hasPassivePhrase
+			? lower.split(/(?<=[.!?])\s+|\n+/).filter(s => !activationRe.test(s)).join(" ")
+			: "";
+		const passiveOk = !!passiveText;
+
+		// ---- Saving throw bonus (passive) ----
+		// "+N bonus to ... saving throws" and the combined "+N bonus to AC and saving throws".
+		if (passiveOk) {
+			const saveM = /([+-])\s*(\d+)\s+bonus\s+to\s+(?:[^.]*?\band\s+)?(?:all\s+)?saving\s+throws/i.exec(passiveText);
+			if (saveM) {
+				const v = parseInt(saveM[2]);
+				result.saveBonus += saveM[1] === "-" ? -v : v;
+			}
+		}
+
+		// ---- Resistances / immunities / vulnerabilities (passive) ----
+		if (passiveOk) {
+			const dmgTypes = (typeof Parser !== "undefined" && Parser.DMG_TYPES) ? Parser.DMG_TYPES : [
+				"acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic",
+				"piercing", "poison", "psychic", "radiant", "slashing", "thunder",
+			];
+			const collectDamage = (verbRe, bucket) => {
+				let m;
+				const re = new RegExp(verbRe, "gi");
+				while ((m = re.exec(passiveText)) !== null) {
+					const segment = m[1];
+					for (const dt of dmgTypes) {
+						if (new RegExp(`\\b${dt}\\b`, "i").test(segment) && !result.defenses[bucket].includes(dt)) {
+							result.defenses[bucket].push(dt);
+						}
+					}
+				}
+			};
+			// "you have resistance to fire [and cold] damage"
+			collectDamage("resistance\\s+to\\s+([a-z,\\s]+?)\\s+damage", "resist");
+			collectDamage("(?:have|gain)\\s+immunity\\s+to\\s+([a-z,\\s]+?)\\s+damage", "immune");
+			collectDamage("vulnerability\\s+to\\s+([a-z,\\s]+?)\\s+damage", "vulnerable");
+
+			const condList = ["charmed", "frightened", "poisoned", "paralyzed", "stunned", "petrified", "blinded", "deafened", "prone", "grappled", "restrained", "incapacitated", "exhaustion"];
+			for (const c of condList) {
+				if (new RegExp(`(?:immune|immunity)\\s+to\\s+(?:the\\s+|being\\s+)?${c}`, "i").test(passiveText)
+					&& !result.defenses.conditionImmune.includes(c)) {
+					result.defenses.conditionImmune.push(c);
+				}
+			}
+		}
+
+		// ---- Speed (passive) ----
+		if (passiveOk) {
+			const speedTypes = [
+				{name: "walking", key: "walk"}, {name: "flying", key: "fly"},
+				{name: "swimming", key: "swim"}, {name: "climbing", key: "climb"},
+				{name: "burrowing", key: "burrow"},
+			];
+			for (const st of speedTypes) {
+				// "your {type} speed increases by N feet"
+				const incM = new RegExp(`${st.name}\\s+speed\\s+(?:increases?|is\\s+increased)\\s+by\\s+(\\d+)\\s*(?:feet|ft)`, "i").exec(passiveText);
+				if (incM) result.speed.bonus[st.key] = (result.speed.bonus[st.key] || 0) + parseInt(incM[1]);
+				// "you have a {type} speed of N feet" / "gain a {type} speed of N feet"
+				const grantM = new RegExp(`(?:have|gain)\\s+a\\s+${st.name}\\s+speed\\s+of\\s+(\\d+)\\s*(?:feet|ft)`, "i").exec(passiveText);
+				if (grantM && st.key !== "walk") result.speed.static[st.key] = Math.max(result.speed.static[st.key] || 0, parseInt(grantM[1]));
+				// "{type} speed equal to your walking speed"
+				if (st.key !== "walk" && new RegExp(`${st.name}\\s+speed\\s+equal\\s+to\\s+your\\s+(?:walking\\s+)?speed`, "i").test(passiveText)) {
+					result.speed.equal[st.key] = "walk";
+				}
+			}
+		}
+
+		// ---- Ability scores (passive) ----
+		if (passiveOk) {
+			const abilMap = {strength: "str", dexterity: "dex", constitution: "con", intelligence: "int", wisdom: "wis", charisma: "cha"};
+			for (const [full, abbr] of Object.entries(abilMap)) {
+				// "your {ability} score is N" — a set (Headband-style prose; structured usually wins)
+				const setM = new RegExp(`${full}\\s+score\\s+is\\s+(\\d+)`, "i").exec(passiveText);
+				if (setM) result.ability.static[abbr] = Math.max(result.ability.static[abbr] || 0, parseInt(setM[1]));
+				// "+N to your {ability} score" / "{ability} score increases by N"
+				const bonM = new RegExp(`([+-])\\s*(\\d+)\\s+to\\s+(?:your\\s+)?${full}(?:\\s+score)?\\b`, "i").exec(passiveText)
+					|| new RegExp(`${full}\\s+score\\s+increases?\\s+by\\s+(\\d+)`, "i").exec(passiveText);
+				if (bonM) {
+					const v = bonM.length === 3 ? (bonM[1] === "-" ? -parseInt(bonM[2]) : parseInt(bonM[2])) : parseInt(bonM[1]);
+					if (v) result.ability.bonus[abbr] = (result.ability.bonus[abbr] || 0) + v;
+				}
+			}
+		}
+
+		return result;
 	}
 
 	/**
@@ -3840,22 +4484,34 @@ class CharacterSheetInventory {
 		for (const item of items) {
 			if (!item.equipped) continue;
 			if (item.requiresAttunement && !item.attuned) continue;
-			if (!item.ability) continue;
 
-			// Handle static overrides: ability.static = {str: 19}
-			if (item.ability.static) {
-				for (const [ab, value] of Object.entries(item.ability.static)) {
-					staticOverrides[ab] = Math.max(staticOverrides[ab] || 0, value);
+			if (item.ability) {
+				// Handle static overrides: ability.static = {str: 19}
+				if (item.ability.static) {
+					for (const [ab, value] of Object.entries(item.ability.static)) {
+						staticOverrides[ab] = Math.max(staticOverrides[ab] || 0, value);
+					}
+				}
+
+				// Handle direct bonuses: ability.str = 2 (top-level ability keys)
+				// These stack with static overrides
+				const abilityKeys = ["str", "dex", "con", "int", "wis", "cha"];
+				for (const ab of abilityKeys) {
+					if (item.ability[ab] && typeof item.ability[ab] === "number") {
+						bonuses[ab] = (bonuses[ab] || 0) + item.ability[ab];
+					}
 				}
 			}
 
-			// Handle direct bonuses: ability.str = 2 (top-level ability keys)
-			// These stack with static overrides
-			const abilityKeys = ["str", "dex", "con", "int", "wis", "cha"];
-			for (const ab of abilityKeys) {
-				if (item.ability[ab] && typeof item.ability[ab] === "number") {
-					bonuses[ab] = (bonuses[ab] || 0) + item.ability[ab];
-				}
+			// Prose ability effects fill gaps where structured `ability` is absent for that score
+			const prose = this._parseItemEffectProse(item);
+			for (const [ab, value] of Object.entries(prose.ability.static)) {
+				if (item.ability?.static?.[ab] != null) continue; // structured wins
+				staticOverrides[ab] = Math.max(staticOverrides[ab] || 0, value);
+			}
+			for (const [ab, value] of Object.entries(prose.ability.bonus)) {
+				if (item.ability?.[ab] != null) continue; // structured wins
+				bonuses[ab] = (bonuses[ab] || 0) + value;
 			}
 		}
 
@@ -4779,6 +5435,19 @@ class CharacterSheetInventory {
 
 		// Calculate other bonuses from equipped items
 		this._updateItemBonuses(items);
+	}
+
+	/**
+	 * Recompute all item-derived state (armor, AC, senses, defenses, ability overrides, speed,
+	 * granted spells) WITHOUT triggering any DOM rendering. Safe to call at the very start of a
+	 * full character render so derived values are fresh before senses/defenses/AC paint.
+	 *
+	 * This exists so the controller can avoid a stale first-paint where senses/defenses render
+	 * before the inventory module's own render() (which calls _syncArmorState) has run.
+	 */
+	syncItemDerivedState () {
+		if (!this._state) return;
+		this._syncArmorState();
 	}
 
 	/**

@@ -6164,6 +6164,7 @@ class CharacterSheetState {
 		const senseMods = /** @type {*} */ (this._data.customModifiers.senses || {});
 		const baseSenses = /** @type {*} */ (this._data.senses || {});
 		const itemSenses = /** @type {*} */ (this._data.itemSenses || {});
+		const itemSenseBonuses = /** @type {*} */ (this._data.itemSenseBonuses || {});
 
 		// Also check named modifiers for sense bonuses
 		const getNamedModifierBonus = (senseType) => {
@@ -6179,10 +6180,10 @@ class CharacterSheetState {
 		};
 
 		return {
-			darkvision: Math.max(baseSenses.darkvision || 0, senseMods.darkvision || 0, itemSenses.darkvision || 0, this.getSenseBonusFromStates("darkvision")) + getNamedModifierBonus("darkvision"),
-			blindsight: Math.max(baseSenses.blindsight || 0, senseMods.blindsight || 0, itemSenses.blindsight || 0, this.getSenseBonusFromStates("blindsight")) + getNamedModifierBonus("blindsight"),
-			tremorsense: Math.max(baseSenses.tremorsense || 0, senseMods.tremorsense || 0, itemSenses.tremorsense || 0, this.getSenseBonusFromStates("tremorsense")) + getNamedModifierBonus("tremorsense"),
-			truesight: Math.max(baseSenses.truesight || 0, senseMods.truesight || 0, itemSenses.truesight || 0, this.getSenseBonusFromStates("truesight")) + getNamedModifierBonus("truesight"),
+			darkvision: Math.max(baseSenses.darkvision || 0, senseMods.darkvision || 0, itemSenses.darkvision || 0, this.getSenseBonusFromStates("darkvision")) + getNamedModifierBonus("darkvision") + (itemSenseBonuses.darkvision || 0),
+			blindsight: Math.max(baseSenses.blindsight || 0, senseMods.blindsight || 0, itemSenses.blindsight || 0, this.getSenseBonusFromStates("blindsight")) + getNamedModifierBonus("blindsight") + (itemSenseBonuses.blindsight || 0),
+			tremorsense: Math.max(baseSenses.tremorsense || 0, senseMods.tremorsense || 0, itemSenses.tremorsense || 0, this.getSenseBonusFromStates("tremorsense")) + getNamedModifierBonus("tremorsense") + (itemSenseBonuses.tremorsense || 0),
+			truesight: Math.max(baseSenses.truesight || 0, senseMods.truesight || 0, itemSenses.truesight || 0, this.getSenseBonusFromStates("truesight")) + getNamedModifierBonus("truesight") + (itemSenseBonuses.truesight || 0),
 		};
 	}
 
@@ -6194,6 +6195,8 @@ class CharacterSheetState {
 	getSense (sense) {
 		const senseMods = /** @type {*} */ (this._data.customModifiers.senses || {});
 		const baseSenses = /** @type {*} */ (this._data.senses || {});
+		const itemSenses = /** @type {*} */ (this._data.itemSenses || {});
+		const itemSenseBonuses = /** @type {*} */ (this._data.itemSenseBonuses || {});
 
 		// Get bonus from named modifiers
 		const namedBonus = this._data.namedModifiers
@@ -6205,7 +6208,9 @@ class CharacterSheetState {
 				return total + (m.value || 0);
 			}, 0) || 0;
 
-		return Math.max(baseSenses[sense] || 0, senseMods[sense] || 0) + namedBonus;
+		// Mirror getSenses(): floor across base/custom/item/state, plus additive named + item bonuses
+		return Math.max(baseSenses[sense] || 0, senseMods[sense] || 0, itemSenses[sense] || 0, this.getSenseBonusFromStates(sense))
+			+ namedBonus + (itemSenseBonuses[sense] || 0);
 	}
 
 	/**
@@ -8868,6 +8873,17 @@ class CharacterSheetState {
 
 	getItemSenses () {
 		return this._data.itemSenses || {darkvision: 0, blindsight: 0, tremorsense: 0, truesight: 0};
+	}
+
+	// Additive sense-range bonuses from item prose (e.g. Goggles of Night: increases darkvision
+	// range by 60 ft). Kept separate from setItemSenses (floors) so they stack additively in
+	// getSenses()/getSense().
+	setItemSenseBonuses (bonuses) {
+		this._data.itemSenseBonuses = bonuses || {darkvision: 0, blindsight: 0, tremorsense: 0, truesight: 0};
+	}
+
+	getItemSenseBonuses () {
+		return this._data.itemSenseBonuses || {darkvision: 0, blindsight: 0, tremorsense: 0, truesight: 0};
 	}
 
 	/**
@@ -22042,6 +22058,57 @@ class CharacterSheetState {
 		}
 
 		this._data.inventory = this._data.inventory.filter(i => i.id !== itemId);
+	}
+
+	/**
+	 * Replace the item payload of an existing inventory entry IN PLACE, preserving the inventory
+	 * wrapper identity and its metadata (id, quantity, equipped, starred, note). Used by the
+	 * unified "modify item" flow so editing an item keeps it linked to favourites/notes and does
+	 * not create a duplicate.
+	 *
+	 * The replacement is always treated as a custom item (`_isCustom: true`) so it won't be merged
+	 * into a stack of the original catalog item. Attunement is dropped if the new item no longer
+	 * requires it.
+	 *
+	 * @param {string} itemId - The inventory wrapper id to replace
+	 * @param {object} newItemProps - The new (flat) item properties
+	 * @returns {boolean} True if the item was found and replaced
+	 */
+	replaceItem (itemId, newItemProps) {
+		const wrapper = this._data.inventory.find(i => i.id === itemId);
+		if (!wrapper) return false;
+
+		// Strip any wrapper-level props that might be present on the incoming object
+		const {quantity: _q, equipped: _e, attuned: _a, starred: _s, note: _n, id: _id, ...itemProps} = newItemProps;
+
+		// Edited items are user-authored customs (prevents stack-merge with the catalog original)
+		itemProps._isCustom = true;
+
+		// Preserve complex-feature containers carried by the old payload when not re-supplied
+		if (!itemProps.containedItems) itemProps.containedItems = wrapper.item?.containedItems || [];
+		if (!itemProps.storedSpells) itemProps.storedSpells = wrapper.item?.storedSpells || [];
+		if (!itemProps.appliedUpgrades) itemProps.appliedUpgrades = wrapper.item?.appliedUpgrades || [];
+		if (!itemProps.socketedGemstones) itemProps.socketedGemstones = wrapper.item?.socketedGemstones || [];
+
+		// Derive shield/armor flags from raw type codes when not explicitly set
+		const _typeBase = itemProps.type?.split("|")[0];
+		if (itemProps.shield === undefined) itemProps.shield = _typeBase === "S";
+		if (itemProps.armor === undefined) itemProps.armor = ["LA", "MA", "HA"].includes(_typeBase);
+		if (itemProps.armorType === undefined && itemProps.armor) {
+			if (_typeBase === "HA") itemProps.armorType = "heavy";
+			else if (_typeBase === "MA") itemProps.armorType = "medium";
+			else if (_typeBase === "LA") itemProps.armorType = "light";
+		}
+
+		wrapper.item = {...itemProps};
+
+		// Drop attunement if the replacement no longer requires it
+		if (!itemProps.requiresAttunement) wrapper.attuned = false;
+
+		// id / quantity / equipped / starred / note are intentionally left untouched on the wrapper
+
+		this._recalculateItemBonuses();
+		return true;
 	}
 
 	setItemQuantity (itemId, quantity) {
