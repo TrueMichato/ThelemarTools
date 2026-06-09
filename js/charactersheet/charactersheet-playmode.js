@@ -202,7 +202,7 @@ export class CharacterSheetPlayMode {
 
 		// Speed (use getSpeed("walk") for number, not getSpeed() which returns formatted string)
 		const walkSpeed = this._state.getSpeed("walk") || 30;
-		this._renderVitalChip(wrap, "🏃", `${walkSpeed}ft`, "Speed", () => this._showBreakdown("speed"));
+		this._renderVitalChip(wrap, "🏃", this._fmtSpeed(walkSpeed), "Speed", () => this._showBreakdown("speed"));
 
 		// Additional speed types (fly, swim, climb, burrow)
 		const speedTypes = [
@@ -214,7 +214,7 @@ export class CharacterSheetPlayMode {
 		speedTypes.forEach(({type, icon, label}) => {
 			const val = this._state.getSpeed?.(type);
 			if (val && val > 0) {
-				this._renderVitalChip(wrap, icon, `${val}ft`, label);
+				this._renderVitalChip(wrap, icon, this._fmtSpeed(val), label);
 			}
 		});
 
@@ -1089,10 +1089,9 @@ export class CharacterSheetPlayMode {
 		});
 
 		// Movement
-		const speed = this._state.getSpeed();
-		const walkSpeed = typeof speed === "object" ? speed.walk : speed;
+		const walkSpeed = this._state.getSpeed("walk") || 30;
 		const mvEl = this._ce("div", `pm-economy__slot pm-economy__slot--${this._actionEconomy.movement ? "available" : "used"}`, row);
-		mvEl.textContent = `🏃 ${walkSpeed || 30}ft`;
+		mvEl.textContent = `🏃 ${this._fmtSpeed(walkSpeed)}`;
 		this._makeClickable(mvEl, `${this._actionEconomy.movement ? "Use" : "Restore"} Movement`, () => {
 			this._actionEconomy.movement = !this._actionEconomy.movement;
 			this._renderActionEconomy();
@@ -2546,7 +2545,7 @@ export class CharacterSheetPlayMode {
 				const spdCell = this._ce("div", "pm-passive", stats);
 				const spdVal = this._ce("span", "pm-passive__value", spdCell);
 				const walkSpeed = typeof comp.speed === "object" ? (comp.speed.walk || 0) : comp.speed;
-				spdVal.textContent = `${walkSpeed}ft`;
+				spdVal.textContent = this._fmtSpeed(walkSpeed);
 				const spdLbl = this._ce("span", "pm-passive__label", spdCell);
 				spdLbl.textContent = "Speed";
 
@@ -2555,7 +2554,7 @@ export class CharacterSheetPlayMode {
 						if (comp.speed[type] > 0) {
 							const extraCell = this._ce("div", "pm-passive", stats);
 							const extraVal = this._ce("span", "pm-passive__value", extraCell);
-							extraVal.textContent = `${comp.speed[type]}ft`;
+							extraVal.textContent = this._fmtSpeed(comp.speed[type]);
 							const extraLbl = this._ce("span", "pm-passive__label", extraCell);
 							extraLbl.textContent = type.charAt(0).toUpperCase() + type.slice(1);
 						}
@@ -3712,7 +3711,7 @@ export class CharacterSheetPlayMode {
 		if (comp.ac != null) statCells.push(["AC", String(comp.ac)]);
 		if (comp.speed != null) {
 			const walk = typeof comp.speed === "object" ? (comp.speed.walk || 0) : comp.speed;
-			statCells.push(["Speed", `${walk}ft`]);
+			statCells.push(["Speed", this._fmtSpeed(walk)]);
 		}
 		statCells.forEach(([lbl, val]) => {
 			const cell = this._ce("div", "pm-statblock__stat-cell", stats);
@@ -3982,12 +3981,19 @@ export class CharacterSheetPlayMode {
 				lines.push(`AC: ${this._state.getAc()?.total ?? this._state.getAc()}`);
 			}
 		} else if (type === "speed") {
-			const speed = this._state.getSpeed();
-			if (typeof speed === "object") {
-				Object.entries(speed).forEach(([k, v]) => { if (v) lines.push(`${k}: ${v}ft`); });
-			} else {
-				lines.push(`Walk: ${speed}ft`);
-			}
+			// Walk is always shown (matches the vital chip's `|| 30` default, so a
+			// default character still gets a breakdown). Other movement types only
+			// appear when the character actually has them.
+			lines.push(`Walk: ${this._fmtSpeed(this._state.getSpeed("walk") || 30)}`);
+			[
+				{type: "fly", label: "Fly"},
+				{type: "swim", label: "Swim"},
+				{type: "climb", label: "Climb"},
+				{type: "burrow", label: "Burrow"},
+			].forEach(({type: t, label}) => {
+				const val = this._state.getSpeed(t);
+				if (val > 0) lines.push(`${label}: ${this._fmtSpeed(val)}`);
+			});
 		}
 
 		if (!lines.length) return;
@@ -4054,6 +4060,17 @@ export class CharacterSheetPlayMode {
 
 	_fmtMod (n) {
 		return n >= 0 ? `+${n}` : `${n}`;
+	}
+
+	/**
+	 * Format a speed value for display. Speed is always in feet, so the unit
+	 * suffix is redundant noise — this is the single source of truth that drops
+	 * it. Accepts a number (the normal case) and defensively strips a trailing
+	 * "ft"/"ft." should a pre-formatted value ever reach it.
+	 */
+	_fmtSpeed (val) {
+		if (val == null) return "";
+		return `${val}`.replace(/\s*ft\.?$/i, "").trim();
 	}
 
 	/** Convenience: create element, set className, append to parent */
@@ -4748,13 +4765,12 @@ export class CharacterSheetPlayMode {
 		titleEl.textContent = "💪 Edit Ability Scores";
 
 		const subtitle = this._ce("div", "pm-modal__subtitle", panel);
-		subtitle.textContent = "Edit base scores. Racial, ASI, and item bonuses are applied separately.";
+		subtitle.textContent = "Edit base scores — these already include any ASIs you've taken. Racial, item, and feature bonuses are shown separately and added on top.";
 
 		const inputs = {};
 		ABILITIES.forEach(abl => {
-			const baseScore = this._state.getAbilityBase(abl);
-			const totalScore = this._state.getAbilityScore(abl);
-			const bonus = totalScore - baseScore;
+			const breakdown = this._state.getAbilityBonusBreakdown(abl);
+			const baseScore = breakdown.base;
 
 			const row = this._ce("div", "pm-modal__row pm-edit-abilities__row", panel);
 			const lbl = this._ce("label", "pm-modal__label pm-edit-abilities__label", row);
@@ -4767,9 +4783,8 @@ export class CharacterSheetPlayMode {
 			input.value = baseScore;
 			inputs[abl] = input;
 
-			if (bonus !== 0) {
-				const bonusEl = this._ce("span", "pm-edit-abilities__bonus", row);
-				bonusEl.textContent = `(${bonus > 0 ? "+" : ""}${bonus} bonus → ${totalScore})`;
+			if (breakdown.contributions.length) {
+				this._renderAbilityBonusBreakdown(row, breakdown);
 			}
 		});
 
@@ -4802,6 +4817,26 @@ export class CharacterSheetPlayMode {
 
 		document.body.appendChild(overlay);
 		inputs.str.focus();
+	}
+
+	/**
+	 * Render a clean, wrap-friendly per-source bonus breakdown into an ability row,
+	 * e.g. "Racial +2 · Item +1 → 16". Each source is its own token so the layout
+	 * scales gracefully with the [data-textsize] setting. Consumes the read-only
+	 * CharacterSheetState.getAbilityBonusBreakdown() helper.
+	 */
+	_renderAbilityBonusBreakdown (row, breakdown) {
+		const wrap = this._ce("span", "pm-edit-abilities__bonus", row);
+		const readable = breakdown.contributions
+			.map(c => c.isReplacement ? `${c.label}` : `${c.label} ${this._fmtMod(c.amount)}`)
+			.join(", ");
+		wrap.setAttribute("aria-label", `${readable}, total ${breakdown.total}`);
+		breakdown.contributions.forEach(c => {
+			const token = this._ce("span", "pm-edit-abilities__bonus-src", wrap);
+			token.textContent = c.isReplacement ? c.label : `${c.label} ${this._fmtMod(c.amount)}`;
+		});
+		const total = this._ce("span", "pm-edit-abilities__bonus-total", wrap);
+		total.textContent = `→ ${breakdown.total}`;
 	}
 
 	// ─── Phase D2: Add Custom Skill Modal ───────────────────────
