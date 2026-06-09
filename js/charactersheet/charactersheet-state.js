@@ -9788,13 +9788,29 @@ class CharacterSheetState {
 			// regardless of how Magician was chosen (builder, multiclass, respec, or load).
 			if (className === "Druid" && this.hasFeature?.("Magician")) cantripsKnown += 1;
 
-			// 2024 rules use preparedSpellsProgression for all casters
+			// 2024 rules store counts in preparedSpellsProgression for ALL casters. But the
+			// canonical known casters (Bard/Ranger/Sorcerer/Warlock) only renamed "spells
+			// known" to "prepared spells" — mechanically they remain known casters (fixed
+			// personal list, swap one on level-up), unlike Cleric/Druid/Paladin/Wizard who
+			// re-prepare freely. Route through the shared resolver so both editions agree.
 			if (classData.preparedSpellsProgression) {
+				const max = classData.preparedSpellsProgression[levelIndex] || 0;
+				const model = CharacterSheetClassUtils.getClassSpellcastingModel({name: className, source, classData});
+				if (model === "known") {
+					return {
+						type: "known",
+						max,
+						cantripsKnown,
+						spellsKnownMax: max,
+						hasFullAccess: false, // Known casters can only cast what they know
+						is2024: true,
+					};
+				}
 				return {
 					type: "prepared",
-					max: classData.preparedSpellsProgression[levelIndex] || 0,
+					max,
 					cantripsKnown,
-					preparedMax: classData.preparedSpellsProgression[levelIndex] || 0,
+					preparedMax: max,
 					hasFullAccess: true, // 2024 prepared casters can prepare from full class list
 					is2024: true,
 				};
