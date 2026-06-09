@@ -32,11 +32,11 @@ beforeAll(async () => {
 });
 
 /** Druid with a Wild Shape feature (auto-creates a featureId-linked resource). */
-function makeWildShapeDruid (level = 3, {current = 2, max = 2, recharge = "short"} = {}) {
+function makeWildShapeDruid (level = 3, {current = 2, max = 2, recharge = "short", source = "TGTT"} = {}) {
 	const state = new CharacterSheetState();
 	state.addClass({
 		name: "Druid",
-		source: "TGTT",
+		source,
 		level,
 		subclass: level >= 3 ? {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"} : undefined,
 	});
@@ -153,9 +153,11 @@ describe("public action wrappers route through state", () => {
 	});
 });
 
-describe("async picker re-entrancy guard", () => {
+describe("async picker re-entrancy guard (legacy 2014 free-pick path)", () => {
 	it("pTransform is single-shot: a second call while in flight is a no-op (no double spend)", async () => {
-		const state = makeWildShapeDruid(3, {current: 2, max: 2});
+		// 2014 PHB druid → legacy free-pick path (_pTransformWildShapeFree). 2024
+		// druids use the Known Forms path, covered in CharacterSheetWildShapeKnownForms.
+		const state = makeWildShapeDruid(3, {current: 2, max: 2, source: "PHB"});
 		let pickerCalls = 0;
 		let releasePicker;
 		const pickerGate = new Promise((res) => { releasePicker = res; });
@@ -214,7 +216,8 @@ describe("Bug #13 — Transform vs Summon create the correct companion type and 
 	};
 
 	it("Transform spends exactly one Wild Shape use AND creates a WILD_SHAPE companion (NOT a familiar)", async () => {
-		const state = makeWildShapeDruid(3, {current: 2, max: 2});
+		// 2014 PHB druid → legacy free-pick path (positional addCompanionFromBestiary).
+		const state = makeWildShapeDruid(3, {current: 2, max: 2, source: "PHB"});
 		// FAITHFUL picker: routes through the REAL state path the production picker
 		// uses (addCompanionFromBestiary with POSITIONAL type/origin), so the test
 		// exercises the type/origin contract end-to-end (this is exactly what the
@@ -239,7 +242,7 @@ describe("Bug #13 — Transform vs Summon create the correct companion type and 
 	});
 
 	it("Transform does NOT spend a use if the picker is cancelled (no companion created)", async () => {
-		const state = makeWildShapeDruid(3, {current: 2, max: 2});
+		const state = makeWildShapeDruid(3, {current: 2, max: 2, source: "PHB"});
 		const druid = makeModule(state, {
 			_pShowBeastPicker: async () => { /* user cancelled — no companion added */ },
 		});

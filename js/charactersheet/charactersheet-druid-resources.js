@@ -60,6 +60,16 @@ class CharacterSheetDruidResources {
 		return !!calc.hasWildCompanion;
 	}
 
+	/**
+	 * @returns {boolean} Whether this druid uses the 2024 "Known Forms" Wild Shape
+	 *   model (XPHB or any TGTT-family source). Drives the edition-aware modal and
+	 *   combat-tab UI, and `pTransform` routing. Genuine 2014 PHB druids → false
+	 *   (legacy free-pick path, zero regression).
+	 */
+	_usesKnownForms () {
+		return !!this._state.usesKnownFormsWildShape?.();
+	}
+
 	/** @returns {boolean} The character has a Zodiac Form (Circle of the Zodiac) feature. */
 	hasZodiacForm () {
 		const calc = this._state.getFeatureCalculations?.() || {};
@@ -159,6 +169,25 @@ class CharacterSheetDruidResources {
 			hoverEntries,
 		};
 	}
+
+	/**
+	 * Build display models for every Known Form in the roster, reusing
+	 * `_buildBeastModel` (templates have `hp.max` only → statline shows max HP).
+	 * Each model gains `knownFormId` (the persistent roster id, distinct from any
+	 * active companion id) and `isLegalNow` (false when a level-down put the form
+	 * over the current CR / Fly limits — it persists but can't be transformed into).
+	 * @returns {Array} Display models for the Known Forms sub-list.
+	 * @private
+	 */
+	_buildKnownFormModels () {
+		const forms = this._state.getKnownWildShapeForms?.() || [];
+		return forms.map(f => {
+			const model = this._buildBeastModel(f) || {};
+			model.knownFormId = f.id;
+			model.isLegalNow = !!this._state.isKnownWildShapeFormLegalNow?.(f);
+			return model;
+		});
+	}
 	// #endregion
 
 	// #region combat-tab summary (single source of truth for the Combat-tab panel)
@@ -188,6 +217,11 @@ class CharacterSheetDruidResources {
 
 		const hasWildCompanion = !!calc.hasWildCompanion;
 
+		const usesKnownForms = this._usesKnownForms();
+		const knownForms = usesKnownForms ? this._buildKnownFormModels() : [];
+		const knownFormsMax = usesKnownForms ? (this._state.getKnownWildShapeFormsMax?.() || 0) : 0;
+		const canAddForm = usesKnownForms && !!this._state.canAddKnownWildShapeForm?.();
+
 		const activeZodiac = this._state.getActiveZodiacForm?.() || null;
 		const hasZodiac = !!calc.hasZodiacForm
 			|| !!activeZodiac
@@ -204,6 +238,10 @@ class CharacterSheetDruidResources {
 				beastName: inForm ? (inFormCompanions[0].name || "Beast") : "",
 				beast: inForm ? this._buildBeastModel(inFormCompanions[0]) : null,
 				canTransform: canSpend,
+				usesKnownForms,
+				knownForms,
+				knownFormsMax,
+				canAddForm,
 			},
 			wildCompanion: {
 				has: hasWildCompanion,
@@ -242,14 +280,21 @@ class CharacterSheetDruidResources {
 		return ok;
 	}
 
-	/** Public Transform entry point (re-entrancy guarded). */
-	async pTransform () { await this._pTransformWildShape(); }
+	/** Public Transform entry point (re-entrancy guarded; edition-aware). */
+	async pTransform () {
+		this._refreshState();
+		if (this._usesKnownForms()) { await this._openTransformPicker(); return; }
+		await this._pTransformWildShapeFree();
+	}
 
 	/** Public End-Wild-Shape entry point. */
 	endWildShape () { this._endWildShape(); }
 
 	/** Public Summon-Familiar entry point (re-entrancy guarded). */
 	async pSummonWildCompanion () { await this._pSummonWildCompanion(); }
+
+	/** Public Add-Known-Form entry point (2024 model; combat-tab + modal). */
+	async pAddKnownForm () { await this._pAddKnownForm(); }
 
 	/** Dismiss the active Zodiac Form (no Wild Shape use refunded, per the modal). */
 	dismissZodiac () {
@@ -335,6 +380,17 @@ class CharacterSheetDruidResources {
 			return;
 		}
 
+		// Focused 2024 transform view: render just the Known Forms roster so the
+		// player can pick a learned form to transform into.
+		if (this._modalMode === "wsTransform") {
+			if (this.hasWildShape() && this._usesKnownForms()) {
+				body.appendChild(this._renderKnownFormsRoster());
+			} else {
+				body.appendChild(e_({outer: `<div class="ve-muted ve-small ve-text-center py-3">No Wild Shape forms available.</div>`}));
+			}
+			return;
+		}
+
 		let any = false;
 		if (this.hasWildShape()) { body.appendChild(this._renderWildShapeSection()); any = true; }
 		if (this.hasWildCompanion()) { body.appendChild(this._renderWildCompanionSection()); any = true; }
@@ -360,10 +416,29 @@ class CharacterSheetDruidResources {
 		const max = res ? res.max : 0;
 		const recharge = res ? this._rechargeLabel(res.recharge) : "";
 		const inForm = this._getWildShapeCompanions();
+		const usesKnownForms = this._usesKnownForms();
 
 		const beast = inForm.length ? this._buildBeastModel(inForm[0]) : null;
 		const beastNameHtml = beast ? CharacterSheetClassUtils.buildCreatureHoverNameHtml(beast, "ve-bold") : "";
 		const beastStatsHtml = beast ? CharacterSheetClassUtils.buildCreatureStatLineHtml(beast) : "";
+
+		// 2024 "Known Forms": the player curates a persistent roster and transforms
+		// FROM it (no fresh bestiary search each time). The legacy 2014 path keeps
+		// the free-pick "Transform…" button.
+		const transformBtnHtml = usesKnownForms
+			? ""
+			: (inForm.length
+				? ""
+				: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__druid-ws-transform ml-2" ${current < 1 ? "disabled title=\"No Wild Shape uses remaining\"" : "title=\"Pick a beast to assume; a use is spent only after you choose\""}>Transform…</button>`);
+		const endBtnHtml = inForm.length
+			? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__druid-ws-end ml-2" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
+			: "";
+
+		const hintHtml = beast
+			? `<div class="ve-small mt-2 charsheet__druid-ws-current">Currently: ${beastNameHtml}</div>${beastStatsHtml ? `<div class="ve-small ve-muted charsheet__druid-ws-currentstats">${beastStatsHtml}</div>` : ""}`
+			: (usesKnownForms
+				? `<div class="ve-small ve-muted mt-2">Learn Beast forms below, then Transform into one. A use is spent only when you transform.</div>`
+				: `<div class="ve-small ve-muted mt-2">Transform… opens the beast picker. A use is spent only after you choose a form.</div>`);
 
 		const section = e_({outer: `
 			<div class="charsheet__druid-section mb-3 p-2 rounded" style="background: var(--cs-bg-surface, var(--rgb-bg-alt, #1e293b));">
@@ -375,13 +450,10 @@ class CharacterSheetDruidResources {
 				<div class="ve-flex-v-center" style="gap: 6px; flex-wrap: wrap;">
 					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__druid-ws-minus" title="Spend 1 Wild Shape use">−</button>
 					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__druid-ws-plus" title="Restore 1 Wild Shape use">+</button>
-					${inForm.length
-		? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__druid-ws-end ml-2" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
-		: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__druid-ws-transform ml-2" ${current < 1 ? "disabled title=\"No Wild Shape uses remaining\"" : "title=\"Pick a beast to assume; a use is spent only after you choose\""}>Transform…</button>`}
+					${transformBtnHtml}${endBtnHtml}
 				</div>
-				${beast
-		? `<div class="ve-small mt-2 charsheet__druid-ws-current">Currently: ${beastNameHtml}</div>${beastStatsHtml ? `<div class="ve-small ve-muted charsheet__druid-ws-currentstats">${beastStatsHtml}</div>` : ""}`
-		: `<div class="ve-small ve-muted mt-2">Transform… opens the beast picker. A use is spent only after you choose a form.</div>`}
+				${hintHtml}
+				<div class="charsheet__druid-ws-knownforms"></div>
 			</div>
 		`});
 
@@ -391,13 +463,180 @@ class CharacterSheetDruidResources {
 		section.querySelector(".charsheet__druid-ws-plus")?.addEventListener("click", () => {
 			if (this._state.restoreWildShapeUse?.(1)) { this._refreshSheet(); this._renderModalBody(); }
 		});
-		section.querySelector(".charsheet__druid-ws-transform")?.addEventListener("click", () => this._pTransformWildShape());
+		section.querySelector(".charsheet__druid-ws-transform")?.addEventListener("click", () => this._pTransformWildShapeFree());
 		section.querySelector(".charsheet__druid-ws-end")?.addEventListener("click", () => this._endWildShape());
+
+		if (usesKnownForms) {
+			const host = section.querySelector(".charsheet__druid-ws-knownforms");
+			if (host) host.appendChild(this._renderKnownFormsRoster());
+		}
 
 		return section;
 	}
 
-	async _pTransformWildShape () {
+	/**
+	 * Render the persistent "Known Forms" roster sub-list (2024 model). Each card
+	 * shows a hover-linked creature name + key-stats line (built via the shared
+	 * class-utils helpers), a Transform button (→ `transformIntoKnownForm`, which
+	 * spends a use atomically), and a remove ×. An "Add Form…" button (→ the beast
+	 * picker in select-mode) is disabled at the level-gated cap with an "n/max"
+	 * badge.
+	 * @returns {HTMLElement}
+	 * @private
+	 */
+	_renderKnownFormsRoster () {
+		const models = this._buildKnownFormModels();
+		const maxForms = this._state.getKnownWildShapeFormsMax?.() || 0;
+		const canAdd = !!this._state.canAddKnownWildShapeForm?.();
+		const canSpend = !!this._state.canSpendWildShapeUse?.(1);
+
+		const wrap = e_({outer: `
+			<div class="charsheet__druid-ws-roster mt-3">
+				<div class="ve-flex-v-center ve-flex-h-between mb-1">
+					<span class="ve-small ve-bold">Known Forms</span>
+					<span class="ve-small ve-muted charsheet__druid-ws-roster-count">${models.length} / ${maxForms}</span>
+				</div>
+				<div class="charsheet__druid-ws-roster-list ve-flex-col" style="gap: 6px;"></div>
+				<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__druid-ws-add mt-2" ${canAdd ? "title=\"Learn a new Beast form\"" : "disabled title=\"You already know the maximum number of forms\""}>+ Add Form…</button>
+			</div>
+		`});
+
+		const list = wrap.querySelector(".charsheet__druid-ws-roster-list");
+		if (!models.length) {
+			list?.appendChild(e_({outer: `<div class="ve-small ve-muted ve-italic">No forms learned yet. Add a Beast form to transform into it later.</div>`}));
+		}
+		for (const model of models) {
+			const nameHtml = CharacterSheetClassUtils.buildCreatureHoverNameHtml(model, "ve-bold");
+			const statsHtml = CharacterSheetClassUtils.buildCreatureStatLineHtml(model);
+			const legal = model.isLegalNow;
+			const card = e_({outer: `
+				<div class="charsheet__druid-ws-roster-card p-2 rounded ve-flex-v-center ve-flex-h-between" style="gap: 8px; background: var(--cs-bg-surface-2, var(--rgb-bg, #0f172a));">
+					<div class="ve-flex-col" style="min-width: 0;">
+						<div class="ve-small charsheet__druid-ws-roster-name">${nameHtml}</div>
+						${statsHtml ? `<div class="ve-small ve-muted charsheet__druid-ws-roster-stats">${statsHtml}</div>` : ""}
+						${legal ? "" : `<div class="ve-small ve-destructive charsheet__druid-ws-roster-illegal">Exceeds your current Wild Shape limits</div>`}
+					</div>
+					<div class="ve-flex-v-center" style="gap: 4px;">
+						<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__druid-ws-roster-transform" ${(legal && canSpend) ? "title=\"Transform into this form (spends 1 use)\"" : `disabled title="${legal ? "No Wild Shape uses remaining" : "This form exceeds your current limits"}"`}>Transform</button>
+						<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__druid-ws-roster-remove" title="Forget this form">×</button>
+					</div>
+				</div>
+			`});
+			card.querySelector(".charsheet__druid-ws-roster-transform")?.addEventListener("click", (evt) => {
+				if (/** @type {*} */ (evt.target)?.closest?.(".ve-help-subtle")) return;
+				this._transformIntoKnownForm(model.knownFormId);
+			});
+			card.querySelector(".charsheet__druid-ws-roster-remove")?.addEventListener("click", () => this._removeKnownForm(model.knownFormId));
+			list?.appendChild(card);
+		}
+
+		wrap.querySelector(".charsheet__druid-ws-add")?.addEventListener("click", () => this._pAddKnownForm());
+		return wrap;
+	}
+
+	/**
+	 * Open the beast picker in select-mode to learn a new Known Form. The picker
+	 * is filtered by the current level-gated CR / Fly limits; the chosen creature
+	 * is routed to `addKnownWildShapeForm` (which re-validates legality state-side).
+	 * @private
+	 */
+	async _pAddKnownForm () {
+		if (this._isTransforming) return;
+		this._refreshState();
+		if (!this._state.canAddKnownWildShapeForm?.()) {
+			JqueryUtil.doToast({type: "warning", content: "You already know the maximum number of forms."});
+			return;
+		}
+		const calc = this._state.getFeatureCalculations?.() || {};
+		const druidLevel = this._state.getClassLevel?.("druid") || 0;
+		this._isTransforming = true;
+		try {
+			await this._page._pShowBeastPicker?.({
+				maxCr: calc.wildShapeCr || (druidLevel >= 8 ? 1 : druidLevel >= 4 ? 0.5 : 0.25),
+				canSwim: calc.wildShapeCanSwim ?? true,
+				canFly: calc.wildShapeCanFly ?? (druidLevel >= 8),
+				origin: "Known Form",
+				onSelectCreature: (creature) => {
+					const id = this._state.addKnownWildShapeForm?.(creature);
+					if (id) {
+						JqueryUtil.doToast({type: "success", content: `Learned ${creature.name} as a Wild Shape form.`});
+						this._refreshSheet();
+						this._renderModalBody();
+					} else {
+						JqueryUtil.doToast({type: "warning", content: `Could not learn ${creature.name} (already known or exceeds your limits).`});
+					}
+				},
+			});
+		} finally {
+			this._isTransforming = false;
+		}
+	}
+
+	/**
+	 * Transform into a Known Form by id. State spends the use atomically, so the
+	 * module never diff-spends here (no double-spend).
+	 * @param {string} knownFormId
+	 * @private
+	 */
+	_transformIntoKnownForm (knownFormId) {
+		this._refreshState();
+		const companionId = this._state.transformIntoKnownForm?.(knownFormId);
+		if (!companionId) {
+			JqueryUtil.doToast({type: "warning", content: "Couldn't transform (no uses left or the form exceeds your limits)."});
+			return;
+		}
+		const form = this._state.getKnownWildShapeForm?.(knownFormId);
+		JqueryUtil.doToast({type: "success", content: `Wild Shape: ${form?.name || "Beast"} assumed.`});
+		this._refreshSheet();
+		this._renderModalBody();
+	}
+
+	/**
+	 * Remove a Known Form from the roster (does not affect an active transform).
+	 * @param {string} knownFormId
+	 * @private
+	 */
+	_removeKnownForm (knownFormId) {
+		this._refreshState();
+		if (this._state.removeKnownWildShapeForm?.(knownFormId)) {
+			this._refreshSheet();
+			this._renderModalBody();
+		}
+	}
+
+	/**
+	 * Focused transform picker (2024) — a roster modal mirroring `openZodiacPicker`,
+	 * so the combat-tab "Transform…" button isn't a backdoor into the full Druid
+	 * panel. Empty roster → offer to add a form instead.
+	 * @private
+	 */
+	async _openTransformPicker () {
+		this._refreshState();
+		if (!(this._state.getKnownWildShapeForms?.() || []).length) {
+			JqueryUtil.doToast({type: "info", content: "No Wild Shape forms learned yet — add one first."});
+			await this._pAddKnownForm();
+			return;
+		}
+		this._modalMode = "wsTransform";
+		const {eleModalInner, doClose} = UiUtil.getShowModal({
+			title: "🐻 Transform — Wild Shape",
+			isMinHeight0: true,
+			isWidth100: true,
+			cbClose: () => { this._modalBody = null; this._doClose = null; },
+		});
+		this._doClose = doClose;
+		this._modalBody = e_({tag: "div", clazz: "ve-flex-col w-100 charsheet__druid-resources charsheet__druid-resources--wstransform"});
+		eleModalInner.appendChild(this._modalBody);
+		this._renderModalBody();
+	}
+
+	/**
+	 * Legacy 2014 free-pick transform: opens the bestiary picker filtered by the
+	 * level-gated limits and diff-spends a use only if a new companion was created.
+	 * Used only for genuine 2014 PHB druids (2024 druids use the Known Forms path).
+	 * @private
+	 */
+	async _pTransformWildShapeFree () {
 		if (this._isTransforming) return;
 		this._refreshState();
 		if (!this._state.canSpendWildShapeUse?.(1)) {
