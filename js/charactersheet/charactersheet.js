@@ -9179,7 +9179,7 @@ class CharacterSheetPage {
 		const dropdown = document.getElementById("charsheet-dice-dropdown");
 		const animatedCheckbox = document.getElementById("charsheet-dice-animated");
 		const skipCondCheckbox = document.getElementById("charsheet-dice-skip-conditional");
-		const themeButtons = document.querySelector(".charsheet__dice-theme-btn");
+		const themeButtons = document.querySelectorAll(".charsheet__dice-theme-btn");
 
 		// Update checkbox state from settings
 		const updateCheckbox = () => {
@@ -9191,8 +9191,8 @@ class CharacterSheetPage {
 		// Update theme button selection
 		const updateThemeSelection = () => {
 			const currentTheme = (/** @type {*} */ (this._state?.getSettings()))?.diceTheme || "standard";
-			themeButtons.classList.remove("active");
-			document.querySelector(`.charsheet__dice-theme-btn[data-theme="${currentTheme}"]`).classList.add("active");
+			themeButtons.forEach(b => b.classList.remove("active"));
+			document.querySelector(`.charsheet__dice-theme-btn[data-theme="${currentTheme}"]`)?.classList.add("active");
 		};
 
 		// Position dropdown relative to button
@@ -9242,13 +9242,13 @@ class CharacterSheetPage {
 		}
 
 		// Theme buttons
-		themeButtons.addEventListener("click", (e) => {
+		themeButtons.forEach(themeBtn => themeBtn.addEventListener("click", (e) => {
 			e.stopPropagation();
 			const theme = (/** @type {*} */ (e.currentTarget)).dataset.theme;
 			this._state.setSetting("diceTheme", theme);
 			this._saveCurrentCharacter();
 			updateThemeSelection();
-		});
+		}));
 
 		// Close dropdown when clicking outside
 		document.addEventListener("click", (e) => {
@@ -10733,7 +10733,29 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * Show animated dice rolling overlay
+	 * Lazily build (once) the shared 3D dice roller helper.
+	 * @returns {*} the CharacterSheetDice3d singleton, or null if unavailable
+	 */
+	_getDice3d () {
+		const Ctor = (/** @type {*} */ (globalThis)).CharacterSheetDice3d;
+		if (typeof Ctor !== "function") return null;
+		if (!this._dice3d) this._dice3d = new Ctor({});
+		return this._dice3d;
+	}
+
+	/**
+	 * Show an animated dice roll that lands on a precomputed value.
+	 *
+	 * Boundary contract (do NOT change): returns a Promise that resolves when
+	 * the animation is done. Callers `await` this from the roll handlers.
+	 *
+	 * Behaviour:
+	 *  - `prefers-reduced-motion: reduce` -> resolve immediately (no render).
+	 *  - Otherwise attempt the vendored 3D physics roller; on ANY failure (no
+	 *    WebGL, library missing, asset/init error, unsupported die such as
+	 *    d100) fall back to the legacy CSS animation. A roll never blocks or
+	 *    throws, and the result toast always follows.
+	 *
 	 * @param {number} diceType - The type of die (4, 6, 8, 10, 12, 20, 100)
 	 * @param {number} finalValue - The value the die should land on
 	 * @param {boolean} isAdvantage - Whether rolling with advantage
@@ -10741,6 +10763,38 @@ class CharacterSheetPage {
 	 * @returns {Promise} Resolves when animation is complete
 	 */
 	async _showAnimatedDice (diceType, finalValue, isAdvantage = false, isDisadvantage = false) {
+		const Dice3d = (/** @type {*} */ (globalThis)).CharacterSheetDice3d;
+
+		// Honour reduced-motion: skip the animation entirely.
+		if (Dice3d && typeof Dice3d.isReducedMotion === "function" && Dice3d.isReducedMotion()) {
+			return;
+		}
+
+		const theme = (/** @type {*} */ (this._state.getSettings()))?.diceTheme || "standard";
+
+		// Preferred path: real 3D physics dice, landing on our exact value.
+		try {
+			const dice3d = this._getDice3d();
+			if (dice3d && dice3d.canRender(diceType)) {
+				await dice3d.pRoll({diceType, finalValue, theme});
+				return;
+			}
+		} catch (e) {
+			// Fall through to the legacy animation on any 3D failure.
+			// eslint-disable-next-line no-console
+			console.warn("3D dice unavailable, falling back to legacy animation", e);
+		}
+
+		await this._showLegacyDice(diceType, finalValue, isAdvantage, isDisadvantage);
+	}
+
+	/**
+	 * Legacy fake-3D CSS dice animation. Retained as the graceful fallback for
+	 * when the 3D roller can't initialise (no WebGL, asset load failure, etc.)
+	 * or for dice the 3D roller can't represent deterministically (e.g. d100).
+	 * @returns {Promise} Resolves when animation is complete
+	 */
+	async _showLegacyDice (diceType, finalValue, isAdvantage = false, isDisadvantage = false) {
 		const theme = (/** @type {*} */ (this._state.getSettings()))?.diceTheme || "standard";
 		const themeColors = {
 			// Classic themes
