@@ -2949,11 +2949,18 @@ class CharacterSheetPage {
 		container.innerHTML = "";
 
 		Parser.ABIL_ABVS.forEach(abl => {
+			// Paint the REAL current score/mod up front (not a literal 10/+0 placeholder).
+			// _renderAbilityScores() later enriches these with effective-mod formatting and
+			// tooltips, but several callers run _renderAbilities() WITHOUT an immediate
+			// _renderAbilityScores() pass — painting real values here prevents the
+			// transient "all scores show 10" flash. Defaults to 10/+0 for an empty sheet.
+			const score = this._state.getAbilityScore(abl);
+			const mod = this._formatMod(this._state.getAbilityMod(abl));
 			const ability = e_({outer: `
 				<div class="charsheet__ability" data-ability="${abl}" title="Click to roll ${Parser.attAbvToFull(abl)} (Shift=Adv, Ctrl=Dis)">
 					<div class="charsheet__ability-name">${abl.toUpperCase()}</div>
-					<div class="charsheet__ability-score" id="charsheet-ability-${abl}-score">10</div>
-					<div class="charsheet__ability-mod" id="charsheet-ability-${abl}-mod">+0</div>
+					<div class="charsheet__ability-score" id="charsheet-ability-${abl}-score">${score}</div>
+					<div class="charsheet__ability-mod" id="charsheet-ability-${abl}-mod">${mod}</div>
 				</div>
 			`});
 
@@ -3524,6 +3531,7 @@ class CharacterSheetPage {
 	 */
 	_updateAllCalculations () {
 		this._renderAbilities();
+		this._renderAbilityScores();
 		this._renderSavingThrows();
 		this._renderSkills();
 		this._renderPassiveScores();
@@ -12215,9 +12223,10 @@ class CharacterSheetPage {
 		// Ability score cap handler
 		modalInner.querySelector("#settings-enforce-ability-cap").addEventListener("change", (e) => {
 			this._state.setSetting("enforceAbilityScoreCap", (/** @type {*} */ (e.target)).checked);
-			// Re-render stats since ability scores may change
-			this._renderAbilities();
-			this._renderCombatStats();
+			// Re-render stats since ability scores may change. Toggling the cap can ripple
+			// into saves/skills/passives/combat, so re-derive the full calculation set
+			// (which also paints real ability scores, avoiding the transient "10" flash).
+			this._updateAllCalculations();
 			if (this._spellsModule) this._spellsModule.render();
 		});
 

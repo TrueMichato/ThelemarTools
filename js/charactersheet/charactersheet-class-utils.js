@@ -54,6 +54,28 @@ class CharacterSheetClassUtils {
 		return standardAsiLevels.includes(level);
 	}
 
+	/**
+	 * Apply a POSITIVE "increase up to a maximum" ability bump without ever lowering
+	 * an existing score. A "max <cap>" increase must never become a way to REDUCE a
+	 * score that is already at or above the cap (e.g. a base of 22 from Primal Champion
+	 * or a custom modifier). Applied to a score already ≥ cap this is a no-op.
+	 *
+	 * Replaces the naive `Math.min(cap, current + amount)` clamp used across the ASI /
+	 * feat apply paths, which silently dropped a >cap score down to the cap.
+	 *
+	 * Positive-only: `amount` is expected to be ≥ 0. Reversions (removing an ASI) must
+	 * subtract directly and must NOT go through this helper.
+	 *
+	 * @param {number} current - The current (base) ability score.
+	 * @param {number} amount - The increase to apply (≥ 0).
+	 * @param {number} [cap] - The maximum the increase may raise the score to (default 20).
+	 * @returns {number} The new score: never below `current`, never above `cap` unless
+	 *   `current` already exceeds `cap` (in which case `current` is preserved).
+	 */
+	static capAbilityIncrease (/** @type {*} */ current, /** @type {*} */ amount, /** @type {*} */ cap = 20) {
+		return Math.max(current, Math.min(cap, current + amount));
+	}
+
 	// ==========================================
 	// Overview Display: Speed & Senses
 	// ==========================================
@@ -4490,19 +4512,19 @@ class CharacterSheetClassUtils {
 					if (/** @type {*} */ feat._epicBoonAbilityChoice) {
 						const {ability, amount} = feat._epicBoonAbilityChoice;
 						const current = state.getAbilityBase(ability);
-						state.setAbilityBase(ability, Math.min(max, current + amount));
+						state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, max));
 					} else if (choices.ability) {
 						// Apply chosen ability from feat choices
 						const amount = ablChoice.choose.amount || 1;
 						const current = state.getAbilityBase(choices.ability);
-						state.setAbilityBase(choices.ability, Math.min(max, current + amount));
+						state.setAbilityBase(choices.ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, max));
 					}
 				} else {
 					Object.entries(ablChoice).forEach(([abl, bonus]) => {
 						if (abl === "max") return;
 						if (Parser.ABIL_ABVS.includes(abl)) {
 							const current = state.getAbilityBase(abl);
-							state.setAbilityBase(abl, Math.min(max, current + bonus));
+							state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(current, bonus, max));
 						}
 					});
 				}
