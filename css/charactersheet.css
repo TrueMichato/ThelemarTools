@@ -8783,6 +8783,91 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 /* Animated Dice Overlay */
+/* ============================================================
+ * 3D dice roller (vendored @3d-dice/dice-box-threejs) overlay.
+ * Fullscreen physics-dice stage. Inert (hidden + non-interactive)
+ * while idle so it can never block the sheet; the canvas is
+ * managed by the library. Stays within the `.charsheet__dice*`
+ * ownership scope.
+ * ============================================================ */
+.charsheet__dice3d-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+	background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.78) 100%);
+	visibility: hidden;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.18s ease-out;
+}
+
+.charsheet__dice3d-overlay--active {
+	visibility: visible;
+	opacity: 1;
+	pointer-events: auto;
+	cursor: pointer;
+}
+
+.charsheet__dice3d-overlay--fade {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.charsheet__dice3d-stage {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+}
+
+.charsheet__dice3d-stage canvas {
+	display: block;
+	width: 100% !important;
+	height: 100% !important;
+}
+
+.charsheet__dice3d-badge {
+	position: absolute;
+	left: 50%;
+	bottom: 12%;
+	transform: translateX(-50%) scale(0.6);
+	padding: 0.35em 1.1em;
+	border-radius: 999px;
+	font-size: 1.9rem;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: #fff;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+	text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.charsheet__dice3d-badge--show {
+	opacity: 1;
+	transform: translateX(-50%) scale(1);
+}
+
+.charsheet__dice3d-badge--crit {
+	background: linear-gradient(135deg, #ffd700, #ff9d00);
+	color: #3a2400;
+	box-shadow: 0 0 28px rgba(255, 196, 0, 0.75);
+}
+
+.charsheet__dice3d-badge--fumble {
+	background: linear-gradient(135deg, #b22222, #6a0000);
+	color: #ffe0e0;
+	box-shadow: 0 0 28px rgba(178, 34, 34, 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.charsheet__dice3d-overlay,
+	.charsheet__dice3d-badge {
+		transition: none;
+	}
+}
+
 .charsheet__dice-overlay {
 	position: fixed;
 	top: 0;
