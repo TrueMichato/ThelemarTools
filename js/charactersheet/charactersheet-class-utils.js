@@ -102,6 +102,31 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Strip the distance UNIT ("ft"/"ft."/"feet") from a formatted speed string while
+	 * preserving the numeric value AND any trailing annotation (exhaustion " (-5)",
+	 * " (halved)") and movement-type word prefixes. Display-only: the canonical
+	 * `state.getSpeed()` string (and the exhaustion regex that reads it) keep the unit;
+	 * callers strip purely for the overview/companion presentation the user reads.
+	 *   "40 ft."                 -> "40"
+	 *   "40 ft., fly 60 ft."     -> "40, fly 60"
+	 *   "35 ft. (-5)"            -> "35 (-5)"
+	 *   "15 feet (halved)"       -> "15 (halved)"
+	 * @param {string} speedStr
+	 * @returns {string}
+	 */
+	static stripSpeedUnit (/** @type {*} */ speedStr) {
+		if (speedStr == null) return "";
+		return String(speedStr)
+			// Remove a standalone "ft"/"ft."/"feet" unit token (case-insensitive) plus the
+			// space that precedes it, leaving the value and any following annotation intact.
+			.replace(/\s*\b(?:ft|feet)\b\.?/gi, "")
+			// Collapse any double spaces left behind (e.g. before a "(-5)" annotation).
+			.replace(/\s{2,}/g, " ")
+			.replace(/\s+,/g, ",")
+			.trim();
+	}
+
+	/**
 	 * Build display-ready speed segments from a formatted speed string. In word
 	 * mode the rejoined `text` values reproduce the original input exactly so the
 	 * setting-off path is a faithful fallback; in emoji mode the label is swapped

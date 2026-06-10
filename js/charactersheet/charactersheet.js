@@ -3414,16 +3414,20 @@ class CharacterSheetPage {
 
 		const str = speedDisplay == null ? "" : String(speedDisplay);
 		el.setAttribute("data-speed-text", str);
+		// Drop the "ft" unit for the overview presentation (both emoji and word
+		// modes) — the canonical getSpeed() string keeps the unit for the
+		// exhaustion regex; we strip only at this display layer.
+		const strDisplay = CharacterSheetClassUtils.stripSpeedUnit(str);
 
 		const useEmoji = (/** @type {*} */ (this._state.getSettings()))?.speedEmojiLabels !== false;
 		if (!useEmoji) {
 			// Faithful fallback to the legacy plain-text word display.
-			el.textContent = str;
+			el.textContent = strDisplay;
 			el.removeAttribute("aria-label");
 			return;
 		}
 
-		const parts = CharacterSheetClassUtils.buildSpeedDisplayParts(str, {useEmoji: true});
+		const parts = CharacterSheetClassUtils.buildSpeedDisplayParts(strDisplay, {useEmoji: true});
 		el.textContent = "";
 		// Accessible summary in words for the whole value.
 		const ariaParts = parts.map(p => `${p.word} ${p.value}`);

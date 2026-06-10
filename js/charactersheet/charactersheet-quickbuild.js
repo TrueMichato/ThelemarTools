@@ -3886,6 +3886,12 @@ class CharacterSheetQuickBuild {
 	_renderPreparedSpellPicker (step, preparedCasterInfo) {
 		const {className, classSource, totalSpells, totalCantrips, maxSpellLevel} = preparedCasterInfo;
 
+		// Druid "Magician" (Primal Order) grants one extra cantrip from the Druid list. The
+		// Magician/Warden choice is made in the earlier Feature Options step, so it's available
+		// here via the recorded selections; mirror the Builder so the bonus pick is offered.
+		const magicianBonus = className === "Druid" ? this._getMagicianBonusCantrips() : 0;
+		const cantripCount = (totalCantrips || 0) + magicianBonus;
+
 		const knownSpells = this._state.getSpells?.() || [];
 		const knownCantrips = this._state.getCantripsKnown?.() || [];
 		const preparedSpells = this._state.getPreparedSpells?.() || [];
@@ -3907,7 +3913,7 @@ class CharacterSheetQuickBuild {
 			className,
 			classSource,
 			spellCount: totalSpells,
-			cantripCount: totalCantrips,
+			cantripCount,
 			maxSpellLevel,
 			allSpells: sourceFiltered,
 			knownSpellIds,
@@ -3925,6 +3931,18 @@ class CharacterSheetQuickBuild {
 		});
 
 		step.append(section);
+	}
+
+	/**
+	 * Count bonus cantrips granted by chosen feature options recorded across the build (currently
+	 * only the Druid "Magician" Primal Order, +1). Reads the flat list of selected feature-option
+	 * objects so the spells step can offer the extra cantrip pick deterministically (the Feature
+	 * Options step precedes the Spells step, so the selection is always available here).
+	 * @returns {number}
+	 */
+	_getMagicianBonusCantrips () {
+		const allSelected = Object.values(this._selections.featureOptions || {}).flat();
+		return CharacterSheetClassUtils.getMagicianBonusCantripCount(allSelected);
 	}
 
 	_validateSpellsStep ({hasSpellcasting, spellbookLevels, knownCasterInfo, preparedCasterInfo}) {

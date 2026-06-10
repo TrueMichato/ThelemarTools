@@ -5732,17 +5732,24 @@ class CharacterSheetSpells {
 
 	/**
 	 * Resolve the human-readable SOURCE of a spell for the source badge.
-	 * Fallback order: explicit feature → originating feat → owning class → granting item → "Manual".
+	 * Generic acquisition-method labels ("Spells Known", "Prepared Spells", …) are NOT a
+	 * meaningful source — they describe how the spell was picked, not where it came from —
+	 * so when `sourceFeature` is one of those we prefer the owning class/subclass name. A
+	 * specific feature name (e.g. a subclass feature that grants a spell) is kept as-is.
+	 * Fallback order: specific feature → feat → class → subclass → item → generic label → "Manual".
 	 * @param {*} spell
 	 * @returns {string}
 	 */
 	_getSpellSourceLabel (spell) {
-		return spell.sourceFeature
-			|| spell.fromFeat
+		const sf = spell.sourceFeature;
+		const sfIsGeneric = sf && PLAYER_CHOSEN_SPELL_FEATURES.has(sf);
+		if (sf && !sfIsGeneric) return sf;
+		return spell.fromFeat
 			|| spell.sourceClass
 			|| spell.sourceSubclass
 			|| spell.sourceItem
 			|| spell.itemName
+			|| sf
 			|| "Manual";
 	}
 
