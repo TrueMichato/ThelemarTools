@@ -253,26 +253,49 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		expect(globalThis.document.querySelectorAll("#charsheet-combat-metamagic .charsheet__mm-sp-adjust-btn")).toHaveLength(2);
 	});
 
-	it("should include hoverable metamagic references in the cast-time picker", async () => {
+	it("renders clickable, hoverable metamagic options in the cast-time picker", async () => {
 		state.getKnownMetamagicKeys = () => ["quickened"];
 		state.setSorceryPoints(5, 5);
-		globalThis.InputUiUtil = {
-			pGetUserEnum: jest.fn(async () => "Cast without metamagic"),
+
+		const flatten = (el) => {
+			const out = [];
+			for (const c of (el.children || [])) {
+				if (c && typeof c === "object") { out.push(c); out.push(...flatten(c)); }
+			}
+			return out;
+		};
+		const findByData = (root, key, val) => flatten(root).find(e => e.dataset?.[key] === val);
+
+		const origUiUtil = globalThis.UiUtil;
+		let capturedInner;
+		globalThis.UiUtil = {
+			pGetShowModal: async ({cbClose}) => {
+				capturedInner = globalThis.e_({tag: "div"});
+				return {eleModalInner: capturedInner, doClose: val => cbClose?.(val)};
+			},
 		};
 
-		const result = await spells._pChooseActiveMetamagic({
-			spell: {name: "Fireball", source: "XPHB", level: 3},
-			spellData: {...SAMPLE_SPELLS.fireball, time: [{number: 1, unit: "action"}]},
-			slotLevel: 3,
-		});
+		try {
+			const p = spells._pChooseActiveMetamagic({
+				spell: {name: "Fireball", source: "XPHB", level: 3},
+				spellData: {...SAMPLE_SPELLS.fireball, time: [{number: 1, unit: "action"}]},
+				slotLevel: 3,
+			});
+			await new Promise(r => setTimeout(r, 0));
 
-		expect(result).toEqual({cancelled: false, metamagic: null});
-		const enumCall = globalThis.InputUiUtil.pGetUserEnum.mock.calls.at(-1)[0];
-		expect(enumCall.elePost).toBeDefined();
-		expect(enumCall.elePost.innerHTML).toContain("Metamagic Reference");
-		expect(enumCall.elePost.innerHTML).toContain("data-hover");
-		expect(enumCall.elePost.innerHTML).toContain("Quickened Spell");
-		expect(enumCall.elePost.innerHTML).toContain("Quickened Spell (Active)|TGTT");
+			const optionRow = findByData(capturedInner, "metamagicKey", "quickened");
+			expect(optionRow).toBeDefined();
+			expect(optionRow._html).toContain("data-hover");
+			expect(optionRow._html).toContain("Quickened Spell");
+			expect(optionRow._html).toContain("Quickened Spell (Active)|TGTT");
+
+			// Choosing "Cast without metamagic" yields a null metamagic
+			findByData(capturedInner, "mmAction", "none").click();
+			const result = await p;
+			expect(result).toEqual({cancelled: false, metamagic: null});
+		} finally {
+			globalThis.UiUtil = origUiUtil;
+		}
 	});
 
 	it("should manually decrease and increase sorcery points from the spells tab and sync all dashboards", () => {
