@@ -7,6 +7,15 @@ _None._
 
 ## Closed Bugs
 
+### Round 9 (follow-ups — round-8 fixes that hadn't reached the surfaces the user reads)
+
+Fixed directly by the orchestrator on a single branch (`truemichato/round9-followup-fixes`) and merged into `character-sheet-wip` via PR #64. New `CharacterSheetRound9Followups.test.js` (20 tests); full charactersheet gate green (236 suites / 9801 tests), full-repo pre-push gate green (245 suites / 9839 tests); eslint clean.
+
+* **(#1) Overview speed still showed the "ft." unit:** The round-8 `_fmtSpeed` fix lived in play-mode only; the overview speed line still rendered the unit because the pure parser (`parseSpeedString` / `buildSpeedDisplayParts`) keeps "ft." by contract (`state.getSpeed()` and the exhaustion regex both depend on it). Added `CharacterSheetClassUtils.stripSpeedUnit()` and applied it at the **display layer** in `_renderSpeedDisplay` (both emoji and word modes). It strips a standalone `ft`/`ft.`/`feet` token per segment while preserving values, multi-speed segments, and trailing annotations ("(-5)", "(halved)"); the canonical parser stays unchanged so its tests + the exhaustion regex remain green.
+* **(#2) Spell source badge showed the generic pool label:** Badges still read "Spells Known" / "Prepared Spells" / "Spells Prepared" instead of the owning class. `_getSpellSourceLabel` now skips a generic `PLAYER_CHOSEN_SPELL_FEATURES` label and falls through to feat → class → subclass → item → "Manual" (existing feat-before-class precedence and specific-feature labels preserved).
+* **(#3) Hunter's Dodge spacing + un-editable Primal Focus resources:** Refined the `.charsheet__ranger-ability-row--action` CSS (tighter gaps, compact font, badge/button child rules) and added ✏️ manual-edit affordances for both Primal Focus resources (Focus Switches + Hunter's Dodge) in the combat tab, backed by new state setters `setFocusSwitchesRemaining` / `setHuntersDodgeRemaining` (clamp to `[0, max]`, no-op on Unlimited switches / zero-max uses, stored as `*Used = max − remaining`).
+* **(#4) Magician bonus cantrip missing from level-up / QuickBuild:** The builder already added the +1 Druid cantrip from the Magician (Primal Order) option, but QuickBuild and the multiclass-add level-up picker did not. QuickBuild's prepared-spell picker now adds it via `_getMagicianBonusCantrips()` (flattens selected `featureOptions`, reuses `getMagicianBonusCantripCount`); the multiclass-add level-up picker recomputes the cantrip budget reactively when Magician/Warden is toggled.
+
 ### Round 8 (surfaced during manual testing of the merged round-7 fixes)
 
 Integrated from 6 parallel sessions into `character-sheet-wip` via the orchestrator. Full unit gate green (**244 suites / 9819 tests**); eslint clean; stylelint clean; **zero merge conflicts**. PRs #58–#63.
