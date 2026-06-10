@@ -4573,9 +4573,15 @@
 	padding-right: var(--cs-space-sm, 0.5rem);
 }
 
+/* Center-align the emoji and value within each segment. The runner/swim/climb
+   glyphs sit on different baselines, so `align-items: baseline` shifted the value
+   column's vertical position from row to row (ragged numbers). Center alignment
+   pins every value to the same vertical position regardless of glyph metrics,
+   while the fixed emoji column + left-aligned value column keep them aligned on
+   the x-axis. */
 .charsheet__speed-seg {
 	display: inline-flex;
-	align-items: baseline;
+	align-items: center;
 	white-space: nowrap;
 	max-width: 100%;
 }
@@ -8588,6 +8594,14 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--rgb-text-dim);
 	font-size: 0.85em;
 	line-height: 1.3;
+}
+
+/* The Hunter's Prey block renders its effect/reminder text in `<p class="ve-muted">`
+   children, which inherit the generic muted grey (#777). Match the sibling ranger
+   ability notes (--rgb-text-dim) so the two read as the same kind of note. The
+   class+element selector outranks the single `.ve-muted` class. */
+.charsheet__ranger-hunters-prey p {
+	color: var(--rgb-text-dim);
 }
 
 /* Multi-mechanic reminder notes (e.g. Enduring Traveler): each distinct benefit on
