@@ -1880,7 +1880,7 @@ class CharacterSheetQuickBuild {
 					const currentScore = runningScores ? runningScores[abl] : this._state.getAbilityScore(abl);
 					const amount = choices.ability.amount || 1;
 					const cap = choices.ability.max || 20;
-					const newScore = Math.min(cap, currentScore + amount);
+					const newScore = CharacterSheetClassUtils.capAbilityIncrease(currentScore, amount, cap);
 					const isCapped = currentScore >= cap;
 
 					const btn = e_({outer: `
@@ -4891,7 +4891,7 @@ class CharacterSheetQuickBuild {
 			Parser.ABIL_ABVS.forEach(abl => {
 				if (asiSel.abilityChoices?.[abl]) {
 					const currentBase = this._state.getAbilityBase(abl);
-					this._state.setAbilityBase(abl, Math.min(20, currentBase + asiSel.abilityChoices[abl]));
+					this._state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(currentBase, asiSel.abilityChoices[abl], 20));
 				}
 			});
 		};

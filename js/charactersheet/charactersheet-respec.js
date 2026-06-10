@@ -2406,7 +2406,7 @@ class CharacterSheetRespec {
 		// Apply new ASI bonuses
 		Object.entries(newAsi).forEach(([abl, bonus]) => {
 			const current = this._state.getAbilityBase(abl);
-			this._state.setAbilityBase(abl, Math.min(20, current + bonus));
+			this._state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(current, bonus, 20));
 		});
 
 		// Update history - only update ASI, preserve feat (Thelemar rule support)
@@ -2469,7 +2469,7 @@ class CharacterSheetRespec {
 					Parser.ABIL_ABVS.forEach(abl => {
 						if (abilityOption[abl] && !applied) {
 							const current = this._state.getAbilityBase(abl);
-							this._state.setAbilityBase(abl, Math.min(20, current + abilityOption[abl]));
+							this._state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(current, abilityOption[abl], 20));
 							applied = true;
 						}
 					});
