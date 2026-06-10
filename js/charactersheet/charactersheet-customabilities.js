@@ -487,7 +487,18 @@ class CharacterSheetCustomAbilities {
 	 * Get modifier groups (same as modifiers modal)
 	 */
 	_getModifierGroups () {
-		const skills = this._sheet.getSkillsList?.() || [];
+		return CharacterSheetCustomAbilities.getModifierGroups(this._sheet);
+	}
+
+	/**
+	 * Shared catalog of modifier/effect groups — the single source of truth used by BOTH the
+	 * custom-ability modal and the custom-item modal (Bug #8). Static so the inventory module can
+	 * reuse it without instantiating the abilities controller.
+	 * @param {object} sheet - The character sheet (provides getSkillsList()).
+	 * @returns {Array<{group: string, options: Array<{value: string, label: string}>}>}
+	 */
+	static getModifierGroups (sheet) {
+		const skills = sheet?.getSkillsList?.() || [];
 		return [
 			{
 				group: "⭐ Global",
@@ -699,21 +710,255 @@ class CharacterSheetCustomAbilities {
 	}
 
 	/**
-	 * Get HTML options for class level selector
+	 * Build the `<optgroup>` HTML for an effect-type `<select>` from the shared catalog.
+	 * @param {object} sheet
+	 * @param {{forItems?: boolean}} [opts] - When `forItems`, drops active-state-only effect types
+	 *   (critical-hit-range toggles) that an item cannot realise, so the item modal never offers a
+	 *   silently-ignored option.
+	 * @returns {string}
 	 */
-	_getClassOptionsHtml (state, selectedClass) {
-		// Common PHB classes as fallback
+	static getEffectTypeOptionsHtml (sheet, {forItems = false} = {}) {
+		let groups = this.getModifierGroups(sheet);
+		if (forItems) {
+			const ACTIVE_STATE_ONLY = new Set(["critRange", "critRange:expand"]);
+			groups = groups
+				.map(g => ({...g, options: g.options.filter(o => !ACTIVE_STATE_ONLY.has(o.value))}))
+				.filter(g => g.options.length);
+		}
+		return groups.map(group => {
+			const opts = group.options.map(o => `<option value="${o.value}">${o.label}</option>`).join("");
+			return `<optgroup label="${group.group}">${opts}</optgroup>`;
+		}).join("");
+	}
+
+	/**
+	 * Static class-level options builder (shared with the static effects editor).
+	 * @param {object} state
+	 * @param {string} selectedClass
+	 * @returns {string}
+	 */
+	static getClassOptionsHtml (state, selectedClass) {
 		const commonClasses = ["Artificer", "Barbarian", "Bard", "Cleric", "Druid", "Fighter", "Monk", "Paladin", "Ranger", "Rogue", "Sorcerer", "Warlock", "Wizard"];
-
-		// Get character's actual classes
 		const characterClasses = (state.getClasses?.() || []).map(c => c.name).filter(Boolean);
-
-		// Combine and dedupe, prioritizing character classes
 		const allClasses = [...new Set([...characterClasses, ...commonClasses])];
-
 		return allClasses.map(className =>
 			`<option value="${className}" ${className === selectedClass ? "selected" : ""}>${className}</option>`,
 		).join("");
+	}
+
+	/**
+	 * Mount the shared "effect rows" editor into a container element. Renders one row per entry in
+	 * the `effects` array (each `{type, value, mode, advantage, ...scaling}`) and binds change
+	 * handlers that mutate the array in place. Re-renders itself when rows are added/removed or when
+	 * a control that changes row layout (perClassLevel / custom conditional) is selected.
+	 *
+	 * This is the SINGLE editor implementation shared by the custom-ability modal and the
+	 * custom-item modal (Bug #8) so both produce the identical effect schema.
+	 *
+	 * @param {object} args
+	 * @param {object} args.sheet
+	 * @param {object} args.state
+	 * @param {HTMLElement} args.listEl - Container to render rows into.
+	 * @param {Array<object>} args.effects - The effects array (mutated in place).
+	 * @param {string} [args.typeOptionsHtml] - Pre-built optgroup HTML; built from the catalog if omitted.
+	 * @param {string} [args.emptyText] - Placeholder shown when there are no effects.
+	 * @returns {Function} A `render()` function that re-renders the list on demand.
+	 */
+	static mountEffectsEditor ({sheet, state, listEl, effects, typeOptionsHtml, emptyText}) {
+		if (!listEl) return () => {};
+		if (!typeOptionsHtml) typeOptionsHtml = this.getEffectTypeOptionsHtml(sheet);
+		const placeholder = emptyText || "No effects added.";
+
+		const render = () => {
+			listEl.innerHTML = "";
+
+			if (!effects.length) {
+				listEl.innerHTML = `<div class="ve-muted ve-text-center py-2">${placeholder}</div>`;
+				return;
+			}
+
+			effects.forEach((effect, idx) => {
+				const isAbilityMaxType = effect.type?.startsWith("abilityMax:");
+				const isAbilityType = effect.type?.startsWith("ability:") || isAbilityMaxType;
+				const row = document.createElement("div");
+				row.className = "custom-abilities__effect-row";
+				row.innerHTML = `
+					<div class="custom-abilities__effect-row-main">
+						<select class="ve-form-control custom-abilities__effect-type">${typeOptionsHtml}</select>
+						<select class="ve-form-control custom-abilities__effect-mode" style="width: 85px; ${isAbilityType ? "" : "display: none;"}" title="Add to score or set score to value">
+							<option value="" ${!effect.mode ? "selected" : ""}>Add</option>
+							<option value="set" ${effect.mode === "set" ? "selected" : ""}>Set To</option>
+						</select>
+						<input type="number" class="ve-form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? (isAbilityMaxType ? "24" : "19") : "±0"}" value="${effect.value || 0}" style="width: 70px;">
+						<select class="ve-form-control custom-abilities__effect-scaling" style="width: 145px;" title="Add a stat-based bonus">
+							<option value="">Fixed Only</option>
+							<optgroup label="Proficiency">
+								<option value="proficiencyBonus" ${effect.proficiencyBonus ? "selected" : ""}>+ Prof Bonus</option>
+								<option value="halfProficiency" ${effect.halfProficiency ? "selected" : ""}>+ Half Prof</option>
+								<option value="doubleProficiency" ${effect.doubleProficiency ? "selected" : ""}>+ Double Prof</option>
+							</optgroup>
+							<optgroup label="Ability Modifier">
+								<option value="abilityMod:str" ${effect.abilityMod === "str" ? "selected" : ""}>+ STR mod</option>
+								<option value="abilityMod:dex" ${effect.abilityMod === "dex" ? "selected" : ""}>+ DEX mod</option>
+								<option value="abilityMod:con" ${effect.abilityMod === "con" ? "selected" : ""}>+ CON mod</option>
+								<option value="abilityMod:int" ${effect.abilityMod === "int" ? "selected" : ""}>+ INT mod</option>
+								<option value="abilityMod:wis" ${effect.abilityMod === "wis" ? "selected" : ""}>+ WIS mod</option>
+								<option value="abilityMod:cha" ${effect.abilityMod === "cha" ? "selected" : ""}>+ CHA mod</option>
+							</optgroup>
+							<optgroup label="Level Scaling">
+								<option value="perLevel" ${effect.perLevel ? "selected" : ""}>× Character Level</option>
+								<option value="perClassLevel" ${effect.perClassLevel ? "selected" : ""}>× Class Level...</option>
+							</optgroup>
+						</select>
+						${effect.perClassLevel ? `<select class="ve-form-control custom-abilities__effect-class-level" style="width: 110px;">${this.getClassOptionsHtml(state, effect.perClassLevel)}</select>` : ""}
+					</div>
+					<div class="custom-abilities__effect-row-extra">
+						<select class="ve-form-control custom-abilities__effect-advdis" style="width: 120px;">
+							<option value="">Normal</option>
+							<option value="advantage" ${effect.advantage ? "selected" : ""}>Advantage</option>
+							<option value="disadvantage" ${effect.disadvantage ? "selected" : ""}>Disadvantage</option>
+						</select>
+						<input type="number" class="ve-form-control custom-abilities__effect-minimum" placeholder="Min" value="${effect.setMinimum ?? ""}" style="width: 65px;" title="Minimum roll (like Reliable Talent)">
+						<input type="text" class="ve-form-control custom-abilities__effect-bonusdie" placeholder="e.g. 1d4" value="${effect.bonusDie || ""}" style="width: 75px;" title="Bonus dice">
+						<select class="ve-form-control custom-abilities__effect-conditional" style="width: 140px;" title="When does this effect apply?">
+							<option value="">Always</option>
+							<option value="against:undead" ${effect.conditional === "against:undead" ? "selected" : ""}>vs Undead</option>
+							<option value="against:fiend" ${effect.conditional === "against:fiend" ? "selected" : ""}>vs Fiends</option>
+							<option value="against:aberration" ${effect.conditional === "against:aberration" ? "selected" : ""}>vs Aberrations</option>
+							<option value="against:fey" ${effect.conditional === "against:fey" ? "selected" : ""}>vs Fey</option>
+							<option value="against:dragon" ${effect.conditional === "against:dragon" ? "selected" : ""}>vs Dragons</option>
+							<option value="against:giant" ${effect.conditional === "against:giant" ? "selected" : ""}>vs Giants</option>
+							<option value="against:beast" ${effect.conditional === "against:beast" ? "selected" : ""}>vs Beasts</option>
+							<option value="against:humanoid" ${effect.conditional === "against:humanoid" ? "selected" : ""}>vs Humanoids</option>
+							<option value="in:dim" ${effect.conditional === "in:dim" ? "selected" : ""}>In Dim Light</option>
+							<option value="in:darkness" ${effect.conditional === "in:darkness" ? "selected" : ""}>In Darkness</option>
+							<option value="while:bloodied" ${effect.conditional === "while:bloodied" ? "selected" : ""}>While Bloodied</option>
+							<option value="while:hidden" ${effect.conditional === "while:hidden" ? "selected" : ""}>While Hidden</option>
+							<option value="first:attack" ${effect.conditional === "first:attack" ? "selected" : ""}>First Attack/Turn</option>
+							<option value="custom" ${effect.conditional?.startsWith("custom:") ? "selected" : ""}>Custom...</option>
+						</select>
+						<button class="btn btn-sm btn-danger custom-abilities__effect-remove" title="Remove">&times;</button>
+					</div>
+					${effect.conditional?.startsWith("custom:") ? `
+						<div class="custom-abilities__effect-row-conditional">
+							<input type="text" class="ve-form-control custom-abilities__effect-conditional-text" placeholder="Custom condition..." value="${effect.conditional.replace("custom:", "")}" style="flex: 1;">
+						</div>
+					` : ""}
+				`;
+
+				// Set selected type
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-type"))).value = effect.type || "ac";
+
+				// Bind change handlers
+				const typeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-type"));
+				const modeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-mode"));
+				const valueEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-value"));
+
+				typeEl.addEventListener("change", (/** @type {*} */ e) => {
+					effects[idx].type = e.target.value;
+					const isAbility = e.target.value.startsWith("ability:") || e.target.value.startsWith("abilityMax:");
+					modeEl.style.display = isAbility ? "" : "none";
+					if (!isAbility) {
+						delete effects[idx].mode;
+						valueEl.placeholder = "±0";
+					}
+				});
+				modeEl.addEventListener("change", (/** @type {*} */ e) => {
+					if (e.target.value === "set") {
+						effects[idx].mode = "set";
+						valueEl.placeholder = "19";
+					} else {
+						delete effects[idx].mode;
+						valueEl.placeholder = "±0";
+					}
+				});
+				valueEl.addEventListener("change", (/** @type {*} */ e) => {
+					effects[idx].value = parseInt(e.target.value) || 0;
+				});
+
+				// Scaling dropdown handler
+				const scalingEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-scaling"));
+				scalingEl.addEventListener("change", (/** @type {*} */ e) => {
+					delete effects[idx].proficiencyBonus;
+					delete effects[idx].halfProficiency;
+					delete effects[idx].doubleProficiency;
+					delete effects[idx].abilityMod;
+					delete effects[idx].perLevel;
+					delete effects[idx].perClassLevel;
+
+					const val = e.target.value;
+					if (val === "proficiencyBonus") effects[idx].proficiencyBonus = true;
+					else if (val === "halfProficiency") effects[idx].halfProficiency = true;
+					else if (val === "doubleProficiency") effects[idx].doubleProficiency = true;
+					else if (val.startsWith("abilityMod:")) effects[idx].abilityMod = val.replace("abilityMod:", "");
+					else if (val === "perLevel") effects[idx].perLevel = true;
+					else if (val === "perClassLevel") {
+						const classes = state.getClasses?.() || [];
+						effects[idx].perClassLevel = classes[0]?.name || "Fighter";
+						render(); // Re-render to show class selector
+					}
+				});
+
+				// Class level dropdown handler (if present)
+				const classLevelEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-class-level"));
+				if (classLevelEl) {
+					classLevelEl.addEventListener("change", (/** @type {*} */ e) => {
+						effects[idx].perClassLevel = e.target.value;
+					});
+				}
+
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-advdis"))).addEventListener("change", (/** @type {*} */ e) => {
+					delete effects[idx].advantage;
+					delete effects[idx].disadvantage;
+					if (e.target.value === "advantage") effects[idx].advantage = true;
+					if (e.target.value === "disadvantage") effects[idx].disadvantage = true;
+				});
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-minimum"))).addEventListener("change", (/** @type {*} */ e) => {
+					const val = parseInt(e.target.value);
+					if (!isNaN(val)) effects[idx].setMinimum = val;
+					else delete effects[idx].setMinimum;
+				});
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-bonusdie"))).addEventListener("change", (/** @type {*} */ e) => {
+					const val = e.target.value.trim();
+					if (val) effects[idx].bonusDie = val;
+					else delete effects[idx].bonusDie;
+				});
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-conditional"))).addEventListener("change", (/** @type {*} */ e) => {
+					const val = e.target.value;
+					if (val === "custom") {
+						effects[idx].conditional = "custom:";
+						render(); // Re-render to show custom input
+					} else if (val) {
+						effects[idx].conditional = val;
+					} else {
+						delete effects[idx].conditional;
+					}
+				});
+				const conditionalText = /** @type {*} */ (row.querySelector(".custom-abilities__effect-conditional-text"));
+				if (conditionalText) {
+					conditionalText.addEventListener("change", (/** @type {*} */ e) => {
+						const val = e.target.value.trim();
+						effects[idx].conditional = val ? `custom:${val}` : "";
+					});
+				}
+				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-remove"))).addEventListener("click", () => {
+					effects.splice(idx, 1);
+					render();
+				});
+
+				listEl.appendChild(row);
+			});
+		};
+
+		render();
+		return render;
+	}
+
+	/**
+	 * Get HTML options for class level selector (instance alias for the shared static helper)
+	 */
+	_getClassOptionsHtml (state, selectedClass) {
+		return CharacterSheetCustomAbilities.getClassOptionsHtml(state, selectedClass);
 	}
 
 	_toggleAbility (id) {
@@ -1769,188 +2014,16 @@ class CharacterSheetCustomAbilities {
 		};
 
 		// Helper to render effects list
+		// Delegate row rendering to the shared editor (also used by the custom-item modal, Bug #8).
+		// Returns a render() fn; the closure re-renders by re-invoking mountEffectsEditor.
 		const renderEffectsList = () => {
-			const list = /** @type {*} */ (modal.querySelector("#ability-effects-list"));
-			list.innerHTML = "";
-
-			if (!effects.length) {
-				list.innerHTML = `<div class="ve-muted ve-text-center py-2">No effects added. This ability will be flavor-only.</div>`;
-				return;
-			}
-
-			effects.forEach((effect, idx) => {
-				const isAbilityMaxType = effect.type?.startsWith("abilityMax:");
-				const isAbilityType = effect.type?.startsWith("ability:") || isAbilityMaxType;
-				const row = document.createElement("div");
-				row.className = "custom-abilities__effect-row";
-				row.innerHTML = `
-					<div class="custom-abilities__effect-row-main">
-						<select class="ve-form-control custom-abilities__effect-type">${typeOptionsHtml}</select>
-						<select class="ve-form-control custom-abilities__effect-mode" style="width: 85px; ${isAbilityType ? "" : "display: none;"}" title="Add to score or set score to value">
-							<option value="" ${!effect.mode ? "selected" : ""}>Add</option>
-							<option value="set" ${effect.mode === "set" ? "selected" : ""}>Set To</option>
-						</select>
-						<input type="number" class="ve-form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? (isAbilityMaxType ? "24" : "19") : "±0"}" value="${effect.value || 0}" style="width: 70px;">
-						<select class="ve-form-control custom-abilities__effect-scaling" style="width: 145px;" title="Add a stat-based bonus">
-							<option value="">Fixed Only</option>
-							<optgroup label="Proficiency">
-								<option value="proficiencyBonus" ${effect.proficiencyBonus ? "selected" : ""}>+ Prof Bonus</option>
-								<option value="halfProficiency" ${effect.halfProficiency ? "selected" : ""}>+ Half Prof</option>
-								<option value="doubleProficiency" ${effect.doubleProficiency ? "selected" : ""}>+ Double Prof</option>
-							</optgroup>
-							<optgroup label="Ability Modifier">
-								<option value="abilityMod:str" ${effect.abilityMod === "str" ? "selected" : ""}>+ STR mod</option>
-								<option value="abilityMod:dex" ${effect.abilityMod === "dex" ? "selected" : ""}>+ DEX mod</option>
-								<option value="abilityMod:con" ${effect.abilityMod === "con" ? "selected" : ""}>+ CON mod</option>
-								<option value="abilityMod:int" ${effect.abilityMod === "int" ? "selected" : ""}>+ INT mod</option>
-								<option value="abilityMod:wis" ${effect.abilityMod === "wis" ? "selected" : ""}>+ WIS mod</option>
-								<option value="abilityMod:cha" ${effect.abilityMod === "cha" ? "selected" : ""}>+ CHA mod</option>
-							</optgroup>
-							<optgroup label="Level Scaling">
-								<option value="perLevel" ${effect.perLevel ? "selected" : ""}>× Character Level</option>
-								<option value="perClassLevel" ${effect.perClassLevel ? "selected" : ""}>× Class Level...</option>
-							</optgroup>
-						</select>
-						${effect.perClassLevel ? `<select class="ve-form-control custom-abilities__effect-class-level" style="width: 110px;">${this._getClassOptionsHtml(state, effect.perClassLevel)}</select>` : ""}
-					</div>
-					<div class="custom-abilities__effect-row-extra">
-						<select class="ve-form-control custom-abilities__effect-advdis" style="width: 120px;">
-							<option value="">Normal</option>
-							<option value="advantage" ${effect.advantage ? "selected" : ""}>Advantage</option>
-							<option value="disadvantage" ${effect.disadvantage ? "selected" : ""}>Disadvantage</option>
-						</select>
-						<input type="number" class="ve-form-control custom-abilities__effect-minimum" placeholder="Min" value="${effect.setMinimum ?? ""}" style="width: 65px;" title="Minimum roll (like Reliable Talent)">
-						<input type="text" class="ve-form-control custom-abilities__effect-bonusdie" placeholder="e.g. 1d4" value="${effect.bonusDie || ""}" style="width: 75px;" title="Bonus dice">
-						<select class="ve-form-control custom-abilities__effect-conditional" style="width: 140px;" title="When does this effect apply?">
-							<option value="">Always</option>
-							<option value="against:undead" ${effect.conditional === "against:undead" ? "selected" : ""}>vs Undead</option>
-							<option value="against:fiend" ${effect.conditional === "against:fiend" ? "selected" : ""}>vs Fiends</option>
-							<option value="against:aberration" ${effect.conditional === "against:aberration" ? "selected" : ""}>vs Aberrations</option>
-							<option value="against:fey" ${effect.conditional === "against:fey" ? "selected" : ""}>vs Fey</option>
-							<option value="against:dragon" ${effect.conditional === "against:dragon" ? "selected" : ""}>vs Dragons</option>
-							<option value="against:giant" ${effect.conditional === "against:giant" ? "selected" : ""}>vs Giants</option>
-							<option value="against:beast" ${effect.conditional === "against:beast" ? "selected" : ""}>vs Beasts</option>
-							<option value="against:humanoid" ${effect.conditional === "against:humanoid" ? "selected" : ""}>vs Humanoids</option>
-							<option value="in:dim" ${effect.conditional === "in:dim" ? "selected" : ""}>In Dim Light</option>
-							<option value="in:darkness" ${effect.conditional === "in:darkness" ? "selected" : ""}>In Darkness</option>
-							<option value="while:bloodied" ${effect.conditional === "while:bloodied" ? "selected" : ""}>While Bloodied</option>
-							<option value="while:hidden" ${effect.conditional === "while:hidden" ? "selected" : ""}>While Hidden</option>
-							<option value="first:attack" ${effect.conditional === "first:attack" ? "selected" : ""}>First Attack/Turn</option>
-							<option value="custom" ${effect.conditional?.startsWith("custom:") ? "selected" : ""}>Custom...</option>
-						</select>
-						<button class="btn btn-sm btn-danger custom-abilities__effect-remove" title="Remove">&times;</button>
-					</div>
-					${effect.conditional?.startsWith("custom:") ? `
-						<div class="custom-abilities__effect-row-conditional">
-							<input type="text" class="ve-form-control custom-abilities__effect-conditional-text" placeholder="Custom condition..." value="${effect.conditional.replace("custom:", "")}" style="flex: 1;">
-						</div>
-					` : ""}
-				`;
-
-				// Set selected type
-				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-type"))).value = effect.type || "ac";
-
-				// Bind change handlers
-				const typeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-type"));
-				const modeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-mode"));
-				const valueEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-value"));
-
-				typeEl.addEventListener("change", (/** @type {*} */ e) => {
-					effects[idx].type = e.target.value;
-					// Show/hide mode dropdown based on type
-					const isAbility = e.target.value.startsWith("ability:") || e.target.value.startsWith("abilityMax:");
-					modeEl.style.display = isAbility ? "" : "none";
-					if (!isAbility) {
-						delete effects[idx].mode;
-						valueEl.placeholder = "±0";
-					}
-				});
-				modeEl.addEventListener("change", (/** @type {*} */ e) => {
-					if (e.target.value === "set") {
-						effects[idx].mode = "set";
-						valueEl.placeholder = "19";
-					} else {
-						delete effects[idx].mode;
-						valueEl.placeholder = "±0";
-					}
-				});
-				valueEl.addEventListener("change", (/** @type {*} */ e) => {
-					effects[idx].value = parseInt(e.target.value) || 0;
-				});
-
-				// Scaling dropdown handler
-				const scalingEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-scaling"));
-				scalingEl.addEventListener("change", (/** @type {*} */ e) => {
-					// Clear all scaling properties first
-					delete effects[idx].proficiencyBonus;
-					delete effects[idx].halfProficiency;
-					delete effects[idx].doubleProficiency;
-					delete effects[idx].abilityMod;
-					delete effects[idx].perLevel;
-					delete effects[idx].perClassLevel;
-
-					const val = e.target.value;
-					if (val === "proficiencyBonus") effects[idx].proficiencyBonus = true;
-					else if (val === "halfProficiency") effects[idx].halfProficiency = true;
-					else if (val === "doubleProficiency") effects[idx].doubleProficiency = true;
-					else if (val.startsWith("abilityMod:")) effects[idx].abilityMod = val.replace("abilityMod:", "");
-					else if (val === "perLevel") effects[idx].perLevel = true;
-					else if (val === "perClassLevel") {
-						// Default to first class or "Fighter"
-						const classes = state.getClasses?.() || [];
-						effects[idx].perClassLevel = classes[0]?.name || "Fighter";
-						renderEffectsList(); // Re-render to show class selector
-					}
-				});
-
-				// Class level dropdown handler (if present)
-				const classLevelEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-class-level"));
-				if (classLevelEl) {
-					classLevelEl.addEventListener("change", (/** @type {*} */ e) => {
-						effects[idx].perClassLevel = e.target.value;
-					});
-				}
-
-				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-advdis"))).addEventListener("change", (/** @type {*} */ e) => {
-					delete effects[idx].advantage;
-					delete effects[idx].disadvantage;
-					if (e.target.value === "advantage") effects[idx].advantage = true;
-					if (e.target.value === "disadvantage") effects[idx].disadvantage = true;
-				});
-				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-minimum"))).addEventListener("change", (/** @type {*} */ e) => {
-					const val = parseInt(e.target.value);
-					if (!isNaN(val)) effects[idx].setMinimum = val;
-					else delete effects[idx].setMinimum;
-				});
-				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-bonusdie"))).addEventListener("change", (/** @type {*} */ e) => {
-					const val = e.target.value.trim();
-					if (val) effects[idx].bonusDie = val;
-					else delete effects[idx].bonusDie;
-				});
-				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-conditional"))).addEventListener("change", (/** @type {*} */ e) => {
-					const val = e.target.value;
-					if (val === "custom") {
-						effects[idx].conditional = "custom:";
-						renderEffectsList(); // Re-render to show custom input
-					} else if (val) {
-						effects[idx].conditional = val;
-					} else {
-						delete effects[idx].conditional;
-					}
-				});
-				const conditionalText = /** @type {*} */ (row.querySelector(".custom-abilities__effect-conditional-text"));
-				if (conditionalText) {
-					conditionalText.addEventListener("change", (/** @type {*} */ e) => {
-						const val = e.target.value.trim();
-						effects[idx].conditional = val ? `custom:${val}` : "";
-					});
-				}
-				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-remove"))).addEventListener("click", () => {
-					effects.splice(idx, 1);
-					renderEffectsList();
-				});
-
-				list.appendChild(row);
+			CharacterSheetCustomAbilities.mountEffectsEditor({
+				sheet: this._sheet,
+				state,
+				listEl: modal.querySelector("#ability-effects-list"),
+				effects,
+				typeOptionsHtml,
+				emptyText: "No effects added. This ability will be flavor-only.",
 			});
 		};
 
@@ -3409,3 +3482,7 @@ class CharacterSheetCustomAbilities {
 
 // Export for ES modules
 export {CharacterSheetCustomAbilities};
+
+// Also expose globally so sibling modules (e.g. the custom-item modal in charactersheet-inventory.js,
+// Bug #8) can reuse the shared catalog + effects editor without an ES import cycle.
+globalThis.CharacterSheetCustomAbilities = CharacterSheetCustomAbilities;

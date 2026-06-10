@@ -1468,6 +1468,8 @@ class CharacterSheetInventory {
 			sentient: options.sentient || false,
 			// Senses
 			senses: options.senses || null,
+			// Structured modifiers & effects (Bug #8) — applied while equipped via _registerItemEffects
+			effects: Array.isArray(options.effects) && options.effects.length ? options.effects : undefined,
 			// Attached spells
 			attachedSpells: options.attachedSpells || null,
 			// Misc
@@ -1617,6 +1619,10 @@ class CharacterSheetInventory {
 		if (item.focus) options.focus = true;
 		if (item.curse) options.curse = true;
 		if (item.sentient) options.sentient = true;
+		// Structured modifiers & effects (Bug #8) — round-trip the effects[] catalog.
+		if (Array.isArray(item.effects) && item.effects.length) {
+			options.effects = JSON.parse(JSON.stringify(item.effects));
+		}
 
 		return {
 			name: item.name || "",
@@ -2512,6 +2518,47 @@ class CharacterSheetInventory {
 		`});
 		form.append(sensesSection);
 
+		// ── Modifiers & Effects Section (Bug #8) ───────────────────────────────────────────────
+		// Reuses the SAME catalog + effect-row editor as the custom-ability modal so items and
+		// abilities produce one identical effect schema and flow through one modifier pipeline.
+		// Effects are applied while the item is equipped (and attuned, if it requires attunement).
+		const itemEffects = Array.isArray(prefillItem?.effects) ? JSON.parse(JSON.stringify(prefillItem.effects)) : [];
+		const effectsSection = e_({outer: `
+			<div class="charsheet__custom-item-section charsheet__custom-item-section--effects">
+				<div class="charsheet__custom-item-section-title">⚙️ Modifiers &amp; Effects (Optional)</div>
+				<div class="charsheet__custom-item-fields">
+					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
+						<div class="ve-muted ve-small mb-2">Bonuses/effects that apply while this item is equipped${""} (and attuned, if it requires attunement). Uses the same catalog as custom abilities.</div>
+						<div id="custom-item-effects-list" class="custom-abilities__effects-list"></div>
+						<button type="button" id="custom-item-add-effect" class="ve-btn ve-btn-default ve-btn-xs mt-2">+ Add Effect</button>
+					</div>
+				</div>
+			</div>
+		`});
+		form.append(effectsSection);
+
+		const CustomAbilities = globalThis.CharacterSheetCustomAbilities;
+		const effectsListEl = effectsSection.querySelector("#custom-item-effects-list");
+		const itemEffectTypeOptionsHtml = CustomAbilities
+			? CustomAbilities.getEffectTypeOptionsHtml(this._page, {forItems: true})
+			: "";
+		const renderItemEffects = () => {
+			if (!CustomAbilities || !effectsListEl) return;
+			CustomAbilities.mountEffectsEditor({
+				sheet: this._page,
+				state: this._state,
+				listEl: effectsListEl,
+				effects: itemEffects,
+				typeOptionsHtml: itemEffectTypeOptionsHtml,
+				emptyText: "No effects added. Add bonuses (AC, saves, carry capacity, resistances, …) that apply while equipped.",
+			});
+		};
+		renderItemEffects();
+		effectsSection.querySelector("#custom-item-add-effect")?.addEventListener("click", () => {
+			itemEffects.push({type: "ac", value: 1});
+			renderItemEffects();
+		});
+
 		// Attached Spells Section
 		const allSpells = this._page.getSpells?.() || [];
 		const selectedSpells = [];
@@ -2749,6 +2796,14 @@ class CharacterSheetInventory {
 			});
 			updateFieldVisibility();
 			this._prefillCustomItemForm(form, seed);
+			// Re-seed the Modifiers & Effects editor from the seed's effects[] (Bug #8), so cloning
+			// a custom item via "Start from Base Item" also carries its structured effects.
+			const seedEffects = seed.options?.effects;
+			if (Array.isArray(seedEffects)) {
+				itemEffects.length = 0;
+				for (const eff of seedEffects) itemEffects.push(JSON.parse(JSON.stringify(eff)));
+				renderItemEffects();
+			}
 		};
 
 		// Pre-seed for edit mode, or an explicitly supplied base item.
@@ -3026,6 +3081,13 @@ class CharacterSheetInventory {
 
 			const quantity = parseInt(form.querySelector("#custom-item-qty")?.value) || 1;
 			const weight = parseFloat(form.querySelector("#custom-item-weight")?.value) || 0;
+
+			// Structured modifiers & effects (Bug #8) — same schema as custom abilities.
+			// Drop empty/no-op rows so we never persist meaningless effects.
+			const cleanedEffects = itemEffects
+				.filter(eff => eff && eff.type)
+				.map(eff => JSON.parse(JSON.stringify(eff)));
+			if (cleanedEffects.length) options.effects = cleanedEffects;
 
 			this._saveCustomItem(name, quantity, weight, options, editItemId);
 			JqueryUtil.doToast({type: "success", content: isEdit ? `Updated ${name}!` : `Created ${name}!`});
