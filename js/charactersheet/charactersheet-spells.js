@@ -193,12 +193,28 @@ class CharacterSheetSpells {
 			this._renderSpellList();
 		});
 
-		// Cast spell button
+		// Cast spell button (normal — skips the metamagic prompt for metamagic casters)
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-cast");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
-			this._castSpell(spellId);
+			this._castSpell(spellId, {withMetamagic: false});
+		});
+
+		// Cast w/ Metamagic button (offers the active-metamagic picker before casting)
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const btn = e.target.closest(".charsheet__spell-cast-metamagic");
+			if (!btn) return;
+			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
+			this._castSpell(spellId, {withMetamagic: true});
+		});
+
+		// Cast w/ Feywild Shard button (casts normally + rolls a PHB Wild Magic Surge)
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const btn = e.target.closest(".charsheet__spell-cast-feywild");
+			if (!btn) return;
+			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
+			this._castSpell(spellId, {withMetamagic: false, feywildShard: true});
 		});
 
 		// Cast as ritual button (for unprepared spells in spellbook)
@@ -1934,7 +1950,16 @@ class CharacterSheetSpells {
 		return `${dur.duration?.amount || ""} ${dur.duration?.type || ""}`.trim();
 	}
 
-	async _castSpell (spellId) {
+	async _castSpell (spellId, {withMetamagic, feywildShard = false} = {}) {
+		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
+		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId
+		// (combat / overview / favourites quick-cast surfaces).
+		const shouldPromptMetamagic = withMetamagic !== false;
+		// When the player explicitly chose "Cast w/ Metamagic" (withMetamagic === true),
+		// always show the picker — even if every known metamagic is currently unavailable
+		// (e.g. not enough sorcery points) — so they get an explanation rather than a
+		// silent normal cast. Legacy/auto prompts (undefined) keep the quiet early-return.
+		const isExplicitMetamagic = withMetamagic === true;
 		const spells = this._state.getSpells();
 		const spell = spells.find(s => s.id === spellId);
 		if (!spell) return;
@@ -1962,7 +1987,9 @@ class CharacterSheetSpells {
 
 		// Cantrips don't use slots
 		if (spell.level === 0) {
-			const activeMetamagicChoice = await this._pChooseActiveMetamagic({spell, spellData, slotLevel: 0});
+			const activeMetamagicChoice = shouldPromptMetamagic
+				? await this._pChooseActiveMetamagic({spell, spellData, slotLevel: 0, isExplicit: isExplicitMetamagic})
+				: {cancelled: false, metamagic: null};
 			if (activeMetamagicChoice?.cancelled) return;
 			if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
 			if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
@@ -1987,6 +2014,7 @@ class CharacterSheetSpells {
 				castMeta: {
 					...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
 					...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
+					...(feywildShard ? {feywildShard: true} : {}),
 				},
 			});
 
@@ -2026,7 +2054,9 @@ class CharacterSheetSpells {
 			}
 
 			if (castAsRitual) {
-				const activeMetamagicChoice = await this._pChooseActiveMetamagic({spell, spellData, slotLevel: spell.level});
+				const activeMetamagicChoice = shouldPromptMetamagic
+					? await this._pChooseActiveMetamagic({spell, spellData, slotLevel: spell.level, isExplicit: isExplicitMetamagic})
+					: {cancelled: false, metamagic: null};
 				if (activeMetamagicChoice?.cancelled) return;
 				if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
 				if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
@@ -2051,6 +2081,7 @@ class CharacterSheetSpells {
 					castMeta: {
 						...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
 						...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
+						...(feywildShard ? {feywildShard: true} : {}),
 					},
 				});
 
@@ -2122,7 +2153,9 @@ class CharacterSheetSpells {
 			if (!selectedSlot) return;
 		}
 
-		const activeMetamagicChoice = await this._pChooseActiveMetamagic({spell, spellData, slotLevel: selectedSlot.level});
+		const activeMetamagicChoice = shouldPromptMetamagic
+			? await this._pChooseActiveMetamagic({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic})
+			: {cancelled: false, metamagic: null};
 		if (activeMetamagicChoice?.cancelled) return;
 		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
 		if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
@@ -2142,6 +2175,7 @@ class CharacterSheetSpells {
 			castMeta: {
 				...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
 				...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
+				...(feywildShard ? {feywildShard: true} : {}),
 			},
 		});
 
@@ -2196,12 +2230,23 @@ class CharacterSheetSpells {
 
 		// If user cancelled (e.g. target selection), refund the slot / resource
 		if (castResult?.cancelled) {
+			// Refund any sorcery points spent on metamagic for this cast.
+			// setSorceryPoints takes an object — passing a bare number would set
+			// BOTH current and max, corrupting the pool's max on a non-full refund.
+			if (activeMetamagicChoice?.metamagic?.cost) {
+				const sp = this._state.getSorceryPoints();
+				this._state.setSorceryPoints({current: Math.min(sp.max, sp.current + activeMetamagicChoice.metamagic.cost), max: sp.max});
+				this._refreshSorceryPointUI();
+			}
 			if (selectedSlot.isNoSlotResource) {
 				const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
 				if (res) this._state.setResourceCurrent(selectedSlot.resourceId, (res.current || 0) + 1);
 			} else if (!skipSlotConsumption) {
 				if (selectedSlot.isPact) {
-					this._state.setPactSlotsCurrent(pactSlots.current);
+					// getPactSlots() returns the live object, so `pactSlots.current`
+					// was already decremented by the spend above — read it fresh and +1.
+					const slots = this._state.getPactSlots();
+					this._state.setPactSlotsCurrent((slots.current ?? 0) + 1);
 				} else {
 					const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
 					this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current + 1);
@@ -2311,6 +2356,14 @@ class CharacterSheetSpells {
 	 * @returns {{block: string|null, checks: string[]}} block = hard block message, checks = conditions requiring confirmation
 	 */
 	_checkCastingConstraints (spell, spellData, appliedMetamagic = null) {
+		// Advanced opt-in escape hatch: when enabled, skip every condition/component
+		// casting gate (incapacitated, verbal/somatic banned-or-check, wild shape).
+		// This intentionally does NOT affect slot/sorcery-point/charge spending or
+		// concentration bookkeeping — those are handled in `_castSpell`, not here.
+		if (this._state.getSettings?.()?.ignoreSpellcastingRestrictions) {
+			return {block: null, checks: []};
+		}
+
 		// Check for incapacitation via active effects (covers all conditions with incapacitated flag)
 		if (this._state.isIncapacitated?.()) {
 			// Find which condition(s) are causing it for a clear message
@@ -2377,34 +2430,101 @@ class CharacterSheetSpells {
 		return this._handleSpellEffects(spell, slotLevel, isPactSlot, isRitual, castMeta);
 	}
 
-	async _pChooseActiveMetamagic ({spell, spellData, slotLevel}) {
+	/**
+	 * Show the active-metamagic picker for a cast.
+	 *
+	 * Phase (Round 11): replaced the `InputUiUtil.pGetUserEnum` dropdown with a
+	 * modal of directly-clickable options. Each available metamagic is its own
+	 * row (hover-link name + sorcery-point cost + inline description) that the
+	 * player clicks to pick. A "Cast without metamagic" row and a "Cancel"
+	 * button round out the choices; unavailable options are listed (muted, with
+	 * reasons) so the player understands why they can't be used.
+	 *
+	 * @param {object} opts
+	 * @param {object} opts.spell
+	 * @param {object} [opts.spellData]
+	 * @param {number} [opts.slotLevel]
+	 * @param {boolean} [opts.isExplicit] When true (player clicked "Cast w/ Metamagic"),
+	 *        show the modal even if no metamagic is currently available, so the reason is
+	 *        explained rather than silently casting normally.
+	 * @returns {Promise<{cancelled: boolean, metamagic: object|null}>}
+	 */
+	async _pChooseActiveMetamagic ({spell, spellData, slotLevel, isExplicit = false}) {
 		const metamagicOptions = this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel}) || [];
 		if (!metamagicOptions.length) return {cancelled: false, metamagic: null};
 
 		const availableOptions = metamagicOptions.filter(it => it.isAvailable);
-		if (!availableOptions.length) return {cancelled: false, metamagic: null};
+		// No available options: for auto prompts, quietly proceed with a normal cast.
+		// For an explicit metamagic cast, fall through and show the modal (with the
+		// unavailable reasons) so the player understands why nothing can be applied.
+		if (!availableOptions.length && !isExplicit) return {cancelled: false, metamagic: null};
 
 		const unavailableOptions = metamagicOptions.filter(it => !it.isAvailable);
-		const labels = ["Cast without metamagic", ...availableOptions.map(it => `${it.name} (${it.cost} SP)`)];
-		const unavailableHtml = unavailableOptions.length
-			? `<div class="mt-2 ve-small ve-muted"><strong>Unavailable:</strong><br>${unavailableOptions.map(it => `${it.name}: ${it.unavailableReason}`).join("<br>")}</div>`
-			: "";
-		const eleMetamagicReference = this._getActiveMetamagicPickerReference(availableOptions);
 
-		const choice = await InputUiUtil.pGetUserEnum({
+		let result = {cancelled: true, metamagic: null};
+		let resolveOuter;
+		const pResult = new Promise(resolve => { resolveOuter = resolve; });
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: `Cast ${spell.name} — Metamagic`,
-			htmlDescription: `<div>Select an active metamagic for this cast. You currently have <strong>${this._state.getSorceryPoints().current}</strong> sorcery points.</div>${unavailableHtml}`,
-			values: labels,
-			fnDisplay: v => v,
-			isResolveItem: true,
-			elePost: eleMetamagicReference,
+			isMinHeight0: true,
+			cbClose: () => resolveOuter(result),
 		});
 
-		if (choice == null) return {cancelled: true, metamagic: null};
-		if (choice === labels[0]) return {cancelled: false, metamagic: null};
+		modalInner.appendChild(e_({tag: "div",
+			clazz: "mb-2",
+			html: `Select an active metamagic for this cast. You currently have <strong>${this._state.getSorceryPoints().current}</strong> sorcery points.`,
+		}));
 
-		const metamagic = availableOptions.find(it => `${it.name} (${it.cost} SP)` === choice) || null;
-		return {cancelled: false, metamagic};
+		const optionList = e_({tag: "div", clazz: "charsheet__mm-picker-options ve-flex-col"});
+
+		// Clickable metamagic rows
+		availableOptions.forEach(meta => {
+			const row = e_({
+				tag: "button",
+				clazz: "ve-btn ve-btn-default charsheet__mm-picker-option ve-text-left mb-1",
+				html: `
+					<span class="charsheet__mm-picker-option-head split-v-center">
+						<span class="charsheet__mm-picker-reference-name bold">${this._getMetamagicHoverLink(meta)}</span>
+						<span class="charsheet__mm-picker-reference-cost ml-2">${meta.cost} SP</span>
+					</span>
+					${meta.description ? `<span class="charsheet__mm-picker-reference-desc ve-muted ve-small ve-block">${meta.description}</span>` : ""}
+				`,
+			});
+			row.dataset.metamagicKey = meta.key;
+			row.addEventListener("click", () => { result = {cancelled: false, metamagic: meta}; doClose(true); });
+			optionList.appendChild(row);
+		});
+
+		// "No metamagic" row
+		const rowNone = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-primary charsheet__mm-picker-option charsheet__mm-picker-option--none mb-1",
+			text: "Cast without metamagic",
+		});
+		rowNone.dataset.mmAction = "none";
+		rowNone.addEventListener("click", () => { result = {cancelled: false, metamagic: null}; doClose(true); });
+		optionList.appendChild(rowNone);
+
+		modalInner.appendChild(optionList);
+
+		// Unavailable options (informational)
+		if (unavailableOptions.length) {
+			const eleUnavail = e_({tag: "div",
+				clazz: "mt-2 ve-small ve-muted charsheet__mm-picker-unavailable",
+				html: `<strong>Unavailable:</strong><br>${unavailableOptions.map(it => `${it.name}: ${it.unavailableReason}`).join("<br>")}`,
+			});
+			eleUnavail.dataset.mmSection = "unavailable";
+			modalInner.appendChild(eleUnavail);
+		}
+
+		// Cancel
+		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default mt-2 charsheet__mm-picker-cancel", text: "Cancel"});
+		btnCancel.dataset.mmAction = "cancel";
+		btnCancel.addEventListener("click", () => { result = {cancelled: true, metamagic: null}; doClose(false); });
+		modalInner.appendChild(btnCancel);
+
+		return pResult;
 	}
 
 	_getMetamagicHoverLink (meta) {
@@ -2436,23 +2556,6 @@ class CharacterSheetSpells {
 			? this._page.resolveOptionalFeatureSource(meta.name, [meta.source, "TGTT", globalThis.Parser?.SRC_XPHB, globalThis.Parser?.SRC_PHB])
 			: fallbackSource;
 		return {name: meta.name, source};
-	}
-
-	_getActiveMetamagicPickerReference (availableOptions) {
-		if (!availableOptions?.length) return null;
-
-		return e_({outer: `
-			<div class="charsheet__mm-picker-reference">
-				<div class="charsheet__mm-picker-reference-title">Metamagic Reference</div>
-				${availableOptions.map(meta => `
-					<div class="charsheet__mm-picker-reference-row">
-						<span class="charsheet__mm-picker-reference-name">${this._getMetamagicHoverLink(meta)}</span>
-						<span class="charsheet__mm-picker-reference-cost">${meta.cost} SP</span>
-						<span class="charsheet__mm-picker-reference-desc">${meta.description || ""}</span>
-					</div>
-				`).join("")}
-			</div>
-		`});
 	}
 
 	// region Variant Spell Components
@@ -2717,6 +2820,21 @@ class CharacterSheetSpells {
 		)?.effect || "The DM determines a random magical effect.";
 
 		return /** @type {*} */ ({roll, threshold, surged, effect, surgeRoll});
+	}
+
+	/**
+	 * Roll on the 2014 PHB Wild Magic Surge table (d100). Used by the Feywild Shard
+	 * (TCE) item, which lets an attuned sorcerer roll on this table when casting a
+	 * spell of 1st level or higher. This is the *real* PHB surge table — distinct
+	 * from `_VARIANT_WILD_MAGIC_TABLE`, which is the homebrew variant-component table.
+	 * @returns {{roll: number, effect: string}}
+	 */
+	_rollPhbWildMagicSurge () {
+		const roll = RollerUtil.randomise(100);
+		const effect = CharacterSheetSpells.PHB_WILD_MAGIC_SURGE_TABLE.find(
+			e => roll >= e.min && roll <= e.max,
+		)?.effect || "The DM determines a random magical effect.";
+		return {roll, effect};
 	}
 
 	// endregion
@@ -3073,6 +3191,14 @@ class CharacterSheetSpells {
 			wildMagicSurgeResult = this._rollVariantWildMagicSurge(normalizedCastMeta.variantComponent.componentCount);
 		}
 
+		// Feywild Shard (TCE): casting a leveled spell while attuned rolls on the 2014
+		// PHB Wild Magic Surge table. The spell still resolves normally; this is purely
+		// an additional surge roll reported in the result toast.
+		let feywildSurgeResult = null;
+		if (normalizedCastMeta.feywildShard && (slotLevel || spell.level) > 0) {
+			feywildSurgeResult = this._rollPhbWildMagicSurge();
+		}
+
 		// Build the toast message
 		let toastContent = `Cast ${spell.name}${upcast}${slotType}`;
 		if (normalizedCastMeta.appliedMetamagic) {
@@ -3108,6 +3234,12 @@ class CharacterSheetSpells {
 			}
 		}
 
+		// Feywild Shard surge result (2014 PHB Wild Magic Surge table)
+		if (feywildSurgeResult) {
+			toastContent += `<br><span class="text-danger">🌀 <strong>Feywild Shard — Wild Magic Surge!</strong> Rolled ${feywildSurgeResult.roll}</span>`;
+			toastContent += `<br><span class="text-warning">⚡ ${feywildSurgeResult.effect}</span>`;
+		}
+
 		// Gambler's Folly - automatic bet roll on spell cast (TGTT Gambler subclass)
 		const gamblerFollyResult = await this._handleGamblerFolly(spell, slotLevel);
 		let hasGamblerFolly = false;
@@ -3127,6 +3259,9 @@ class CharacterSheetSpells {
 			}
 			if (gamblerFollyResult) {
 				this._page._rollHistory.addRoll({title: `Gambler's Folly: ${spell.name}`, total: gamblerFollyResult.roll, breakdown: `d${gamblerFollyResult.die}: ${gamblerFollyResult.roll} \u2014 ${gamblerFollyResult.won ? "Won" : "Lost"}`});
+			}
+			if (feywildSurgeResult) {
+				this._page._rollHistory.addRoll({title: `Feywild Shard — Wild Magic Surge: ${spell.name}`, total: feywildSurgeResult.roll, breakdown: `d100: ${feywildSurgeResult.roll} \u2014 ${feywildSurgeResult.effect}`});
 			}
 		}
 
@@ -5910,6 +6045,37 @@ class CharacterSheetSpells {
 			}
 		}
 
+		// Cast buttons. Metamagic-capable characters get a dedicated "Cast w/ Metamagic"
+		// button so the plain "Cast" can skip the picker entirely. Visibility keys off
+		// whether the character knows any active metamagic (SP-stable — no flicker as
+		// sorcery points change); per-spell applicability/affordability is surfaced in the
+		// picker itself.
+		const hasActiveMetamagic = (this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel: spell.level}) || []).length > 0;
+		let castButtonsHtml = `
+			<button class="ve-btn ve-btn-xs ve-btn-success charsheet__spell-cast" title="Cast Spell">
+				<span class="glyphicon glyphicon-flash mr-1"></span>Cast
+			</button>
+		`;
+		if (hasActiveMetamagic) {
+			castButtonsHtml += `
+				<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__spell-cast-metamagic" title="Cast with an active Metamagic option">
+					<span class="glyphicon glyphicon-fire mr-1"></span>Cast w/ Metamagic
+				</button>
+			`;
+		}
+
+		// Feywild Shard (TCE): while attuned by a sorcerer, casting a leveled spell can
+		// trigger a roll on the 2014 PHB Wild Magic Surge table. Surface an extra cast
+		// button on non-cantrip spells that casts normally and rolls the surge.
+		const isFeywildShardAttuned = (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
+		if (!isCantrip && isFeywildShardAttuned) {
+			castButtonsHtml += `
+				<button class="ve-btn ve-btn-xs ve-btn-info charsheet__spell-cast-feywild" title="Cast normally and roll on the PHB Wild Magic Surge table (Feywild Shard)">
+					<span class="mr-1">🌀</span>Cast w/ Feywild Shard
+				</button>
+			`;
+		}
+
 		const el = e_({outer: `
 			<div class="charsheet__spell-item ${isPrepared || isAlwaysPrepared ? "prepared" : ""} ${isAlwaysPrepared ? "always-prepared" : ""}" data-spell-id="${spellId}">
 				<div class="charsheet__spell-item-main">
@@ -5929,9 +6095,7 @@ class CharacterSheetSpells {
 				<div class="charsheet__spell-item-actions">
 					${prepButtonHtml}
 					${ritualButtonHtml}
-					<button class="ve-btn ve-btn-xs ve-btn-success charsheet__spell-cast" title="Cast Spell">
-						<span class="glyphicon glyphicon-flash mr-1"></span>Cast
-					</button>
+					${castButtonsHtml}
 					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__spell-info" title="Spell Info">
 						<span class="glyphicon glyphicon-info-sign mr-1"></span>Info
 					</button>
@@ -6985,6 +7149,68 @@ CharacterSheetSpells._VARIANT_WILD_MAGIC_TABLE = [
 	{min: 89, max: 92, effect: "A random creature within 30 ft is polymorphed into a sheep for 1 round (DM's choice)."},
 	{min: 93, max: 96, effect: "Your spell slot expenditure is refunded, but the component is still consumed."},
 	{min: 97, max: 100, effect: "The DM determines a unique magical effect appropriate to the situation."},
+];
+
+/**
+ * The 2014 Player's Handbook Wild Magic Surge table (d100), transcribed from
+ * `data/class/class-sorcerer.json` (Wild Magic origin). Tags are stripped to plain
+ * text for toast display. This is the canonical PHB surge table referenced as
+ * `{@table Wild Magic Surge|PHB}` and is used by the Feywild Shard (TCE) item.
+ *
+ * NOTE: This is intentionally separate from `_VARIANT_WILD_MAGIC_TABLE`, which is a
+ * homebrew table for variant-component overuse and is NOT the PHB surge table.
+ */
+CharacterSheetSpells.PHB_WILD_MAGIC_SURGE_TABLE = [
+	{min: 1, max: 2, effect: "Roll on this table at the start of each of your turns for the next minute, ignoring this result on subsequent rolls."},
+	{min: 3, max: 4, effect: "For the next minute, you can see any invisible creature if you have line of sight to it."},
+	{min: 5, max: 6, effect: "A modron chosen and controlled by the DM appears in an unoccupied space within 5 feet of you, then disappears 1 minute later."},
+	{min: 7, max: 8, effect: "You cast fireball as a 3rd-level spell centered on yourself."},
+	{min: 9, max: 10, effect: "You cast magic missile as a 5th-level spell."},
+	{min: 11, max: 12, effect: "Roll a d10. Your height changes by a number of inches equal to the roll. If the roll is odd, you shrink. If the roll is even, you grow."},
+	{min: 13, max: 14, effect: "You cast confusion centered on yourself."},
+	{min: 15, max: 16, effect: "For the next minute, you regain 5 hit points at the start of each of your turns."},
+	{min: 17, max: 18, effect: "You grow a long beard made of feathers that remains until you sneeze, at which point the feathers explode out from your face."},
+	{min: 19, max: 20, effect: "You cast grease centered on yourself."},
+	{min: 21, max: 22, effect: "Creatures have disadvantage on saving throws against the next spell you cast in the next minute that involves a saving throw."},
+	{min: 23, max: 24, effect: "Your skin turns a vibrant shade of blue. A remove curse spell can end this effect."},
+	{min: 25, max: 26, effect: "An eye appears on your forehead for the next minute. During that time, you have advantage on Wisdom (Perception) checks that rely on sight."},
+	{min: 27, max: 28, effect: "For the next minute, all your spells with a casting time of 1 action have a casting time of 1 bonus action."},
+	{min: 29, max: 30, effect: "You teleport up to 60 feet to an unoccupied space of your choice that you can see."},
+	{min: 31, max: 32, effect: "You are transported to the Astral Plane until the end of your next turn, after which time you return to the space you previously occupied or the nearest unoccupied space if that space is occupied."},
+	{min: 33, max: 34, effect: "Maximize the damage of the next damaging spell you cast within the next minute."},
+	{min: 35, max: 36, effect: "Roll a d10. Your age changes by a number of years equal to the roll. If the roll is odd, you get younger (minimum 1 year old). If the roll is even, you get older."},
+	{min: 37, max: 38, effect: "1d6 flumphs controlled by the DM appear in unoccupied spaces within 60 feet of you and are frightened of you. They vanish after 1 minute."},
+	{min: 39, max: 40, effect: "You regain 2d10 hit points."},
+	{min: 41, max: 42, effect: "You turn into a potted plant until the start of your next turn. While a plant, you are incapacitated and have vulnerability to all damage. If you drop to 0 hit points, your pot breaks, and your form reverts."},
+	{min: 43, max: 44, effect: "For the next minute, you can teleport up to 20 feet as a bonus action on each of your turns."},
+	{min: 45, max: 46, effect: "You cast levitate on yourself."},
+	{min: 47, max: 48, effect: "A unicorn controlled by the DM appears in a space within 5 feet of you, then disappears 1 minute later."},
+	{min: 49, max: 50, effect: "You can't speak for the next minute. Whenever you try, pink bubbles float out of your mouth."},
+	{min: 51, max: 52, effect: "A spectral shield hovers near you for the next minute, granting you a +2 bonus to AC and immunity to magic missile."},
+	{min: 53, max: 54, effect: "You are immune to being intoxicated by alcohol for the next 5d6 days."},
+	{min: 55, max: 56, effect: "Your hair falls out but grows back within 24 hours."},
+	{min: 57, max: 58, effect: "For the next minute, any flammable object you touch that isn't being worn or carried by another creature bursts into flame."},
+	{min: 59, max: 60, effect: "You regain your lowest-level expended spell slot."},
+	{min: 61, max: 62, effect: "For the next minute, you must shout when you speak."},
+	{min: 63, max: 64, effect: "You cast fog cloud centered on yourself."},
+	{min: 65, max: 66, effect: "Up to three creatures you choose within 30 feet of you take 4d10 lightning damage."},
+	{min: 67, max: 68, effect: "You are frightened by the nearest creature until the end of your next turn."},
+	{min: 69, max: 70, effect: "Each creature within 30 feet of you becomes invisible for the next minute. The invisibility ends on a creature when it attacks or casts a spell."},
+	{min: 71, max: 72, effect: "You gain resistance to all damage for the next minute."},
+	{min: 73, max: 74, effect: "A random creature within 60 feet of you becomes poisoned for 1d4 hours."},
+	{min: 75, max: 76, effect: "You glow with bright light in a 30-foot radius for the next minute. Any creature that ends its turn within 5 feet of you is blinded until the end of its next turn."},
+	{min: 77, max: 78, effect: "You cast polymorph on yourself. If you fail the saving throw, you turn into a sheep for the spell's duration."},
+	{min: 79, max: 80, effect: "Illusory butterflies and flower petals flutter in the air within 10 feet of you for the next minute."},
+	{min: 81, max: 82, effect: "You can take one additional action immediately."},
+	{min: 83, max: 84, effect: "Each creature within 30 feet of you takes 1d10 necrotic damage. You regain hit points equal to the sum of the necrotic damage dealt."},
+	{min: 85, max: 86, effect: "You cast mirror image."},
+	{min: 87, max: 88, effect: "You cast fly on a random creature within 60 feet of you."},
+	{min: 89, max: 90, effect: "You become invisible for the next minute. During that time, other creatures can't hear you. The invisibility ends if you attack or cast a spell."},
+	{min: 91, max: 92, effect: "If you die within the next minute, you immediately come back to life as if by the reincarnate spell."},
+	{min: 93, max: 94, effect: "Your size increases by one size category for the next minute."},
+	{min: 95, max: 96, effect: "You and all creatures within 30 feet of you gain vulnerability to piercing damage for the next minute."},
+	{min: 97, max: 98, effect: "You are surrounded by faint, ethereal music for the next minute."},
+	{min: 99, max: 100, effect: "You regain all expended sorcery points."},
 ];
 
 globalThis.CharacterSheetSpells = CharacterSheetSpells;

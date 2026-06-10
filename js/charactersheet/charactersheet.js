@@ -12011,6 +12011,18 @@ class CharacterSheetPage {
 			</label>
 		</div>`;
 
+		// Spellcasting restriction enforcement (advanced opt-in escape hatch)
+		const currentIgnoreSpellcastingRestrictions = (/** @type {*} */ (this._state.getSettings()))?.ignoreSpellcastingRestrictions === true;
+		const ignoreSpellcastingRestrictions = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-ignore-spellcasting-restrictions" ${currentIgnoreSpellcastingRestrictions ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">🚫 Ignore Spellcasting Restrictions</span>
+					<span class="charsheet__settings-checkbox-desc">Advanced/opt-in: bypass condition &amp; component casting gates (incapacitated, silenced/verbal, restrained/somatic, wild shape) so casts always go through. Does NOT skip spell slots, sorcery points, charges, or concentration. Most players should leave this off.</span>
+				</span>
+			</label>
+		</div>`;
+
 		// Show all optional feature versions (no deduplication)
 		const currentShowAllOptFeatureVersions = (/** @type {*} */ (this._state.getSettings()))?.showAllOptFeatureVersions || false;
 		const showAllOptFeatureVersions = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
@@ -12076,6 +12088,7 @@ class CharacterSheetPage {
 				${includeCoreSpells}
 				${allowExoticLanguages}
 				${enforceAbilityScoreCap}
+				${ignoreSpellcastingRestrictions}
 				${showAllOptFeatureVersions}
 			</div>
 			
@@ -12298,6 +12311,11 @@ class CharacterSheetPage {
 		// Show all optional feature versions handler
 		modalInner.querySelector("#settings-show-all-opt-versions").addEventListener("change", (e) => {
 			this._state.setSetting("showAllOptFeatureVersions", (/** @type {*} */ (e.target)).checked);
+		});
+
+		// Ignore spellcasting restrictions handler (advanced opt-in escape hatch)
+		modalInner.querySelector("#settings-ignore-spellcasting-restrictions").addEventListener("change", (e) => {
+			this._state.setSetting("ignoreSpellcastingRestrictions", (/** @type {*} */ (e.target)).checked);
 		});
 
 		// Emoji speed labels handler (display) — re-render the speed line immediately
