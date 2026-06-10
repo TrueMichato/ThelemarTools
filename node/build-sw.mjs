@@ -37,6 +37,7 @@ const workboxPrecacheBuildResult = await injectManifest({
 	globPatterns: [
 		"js/**/*.js", // all js needs to be loaded
 		"lib/**/*.js", // js in lib needs to be loaded
+		"lib/**/*.webp", // vendored runtime assets (e.g. 3D dice textures) needed offline
 		"css/**/*.css", // all css needs to be loaded
 		"homebrew/**/*.json", // presumably if there is homebrew data it should also be loaded
 		"prerelease/**/*.json", // as above
