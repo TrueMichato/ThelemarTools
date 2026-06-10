@@ -2685,7 +2685,11 @@ const FeatureEffectRegistry = {
 			// different races have different natural armor formulas
 		]);
 		this.register("Shell Defense", [
-			{type: "toggle", effect: "acBonus", value: 4, conditional: "withdraw into shell (prone, speed 0)"},
+			// Shell Defense is NOT a passive/always-on modifier — it is an
+			// ACTIVATABLE state (see ACTIVE_STATE_TYPES.shellDefense and the explicit
+			// detection block in detectActivatableFeature). Its effects (+4 AC, speed 0,
+			// advantage on STR/CON saves, disadvantage on DEX saves, prone) apply ONLY
+			// while the player withdraws into the shell, so nothing is registered here.
 		]);
 		this.register("Claws", [
 			{type: "unarmedStrike", damage: "1d6", damageType: "slashing"},
@@ -25896,6 +25900,15 @@ class CharacterSheetState {
 			return;
 		}
 
+		// Shell Defense (Tortle) is modeled as an ACTIVATABLE state (ACTIVE_STATE_TYPES.shellDefense):
+		// its +4 AC and save effects apply ONLY while the creature is withdrawn into its shell. Skip
+		// the passive description parser so it never registers an always-on AC modifier (the parser
+		// extracts "+4 bonus to AC" without recognizing the "while in your shell" gating). Mirrors the
+		// per-feature skips below (Adept Speed, Unarmored Movement) that avoid double-/passive-counting.
+		if (feature.name === "Shell Defense" || /withdraw into your shell/i.test(feature.description)) {
+			return;
+		}
+
 		const modifiers = FeatureModifierParser.parseModifiers(feature.description, feature.name);
 		if (!modifiers.length) return;
 
@@ -33388,6 +33401,30 @@ class CharacterSheetState {
 			requiresClassLevel: 3,
 			consumeOnAttack: true, // Deactivate advantage after next attack roll (speed stays 0)
 		},
+		// ===== RACE TRAIT ACTIVATABLE STATES =====
+		shellDefense: {
+			id: "shellDefense",
+			name: "Shell Defense",
+			icon: "🐢",
+			description: "Withdrawn into your shell: +4 AC and advantage on STR/CON saving throws, but you are prone, your speed is 0, you have disadvantage on DEX saving throws, and you can't take reactions. The only action you can take is a bonus action to emerge.",
+			effects: [
+				{type: "bonus", target: "ac", value: 4},
+				{type: "advantage", target: "save:str"},
+				{type: "advantage", target: "save:con"},
+				{type: "setSpeed", target: "all", value: 0},
+				{type: "disadvantage", target: "save:dex"},
+				// While withdrawn you are prone (rules-correct prone effect set).
+				{type: "disadvantage", target: "attack"},
+				{type: "advantage", target: "meleeAttacksAgainst"},
+				{type: "disadvantage", target: "rangedAttacksAgainst"},
+				{type: "note", value: "You can't take reactions. The only action you can take is a bonus action to emerge from your shell."},
+			],
+			duration: "Until you emerge (bonus action)",
+			endConditions: ["Emerge from shell (bonus action)"],
+			resourceName: null,
+			detectPatterns: ["shell defense", "withdraw into your shell"],
+			activationAction: "action",
+		},
 		// ===== TGTT/HOMEBREW ACTIVATABLE STATE TYPES =====
 		// These support homebrew toggle abilities from sources like Level Up A5E, Grim Hollow, TGTT
 
@@ -34562,6 +34599,27 @@ class CharacterSheetState {
 			} else if (/no action required|free action|at the start of (?:each of )?your turns?/i.test(text)) {
 				activationAction = "free";
 			}
+		}
+
+		// ===== SHELL DEFENSE (Tortle race trait) =====
+		// Explicit detection placed BEFORE the generic ACTIVE_STATE_TYPES loop so the
+		// complete effect set is applied verbatim from the state type. The generic loop
+		// would substitute parseEffectsFromDescription output, which can extract "+4 AC"
+		// and the STR/CON save advantage but CANNOT extract "speed is 0" or "disadvantage
+		// on Dexterity saving throws" — dropping two required effects. Mirrors the explicit
+		// Zodiac Form block below.
+		if (name === "shell defense" || /withdraw into your shell/i.test(text)) {
+			const shellStateType = this.ACTIVE_STATE_TYPES.shellDefense;
+			return {
+				stateTypeId: "shellDefense",
+				stateType: shellStateType,
+				matchedBy: "name",
+				activationAction: activationAction || shellStateType.activationAction,
+				effects: shellStateType.effects,
+				duration: toggleAnalysis.duration || shellStateType.duration,
+				endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : shellStateType.endConditions,
+				isToggle: true,
+			};
 		}
 
 		// ===== CHECK AGAINST KNOWN STATE TYPES =====
