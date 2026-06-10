@@ -173,7 +173,7 @@ describe("#12 LevelUp main ASI/feat path is gated the same way (source guard)", 
 
 	test("ASI base writes are gated on a fresh addFeature(...) in the main path", () => {
 		// The increases loop that calls setAbilityBase must sit INSIDE an addFeature(...) gate.
-		expect(LEVELUP_SRC).toMatch(/if \(this\._state\.addFeature\(asiFeature\)\) \{[\s\S]*?setAbilityBase\(abl, Math\.min\(20, currentBase/);
+		expect(LEVELUP_SRC).toMatch(/if \(this\._state\.addFeature\(asiFeature\)\) \{[\s\S]*?setAbilityBase\(abl, CharacterSheetClassUtils\.capAbilityIncrease\(currentBase/);
 	});
 
 	test("feat bonuses are gated on a fresh addFeat(...) in the main path", () => {

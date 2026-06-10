@@ -1775,11 +1775,12 @@ class CharacterSheetLevelUp {
 		const _computePendingScores = () => {
 			const scores = {};
 			Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
-				let score = this._state.getAbilityScore(abl) + ((/** @type {*} */ (asiValues))[abl] || 0);
+				const baseScore = this._state.getAbilityScore(abl);
+				let increase = (/** @type {*} */ (asiValues))[abl] || 0;
 				if (_currentSelectedFeat?._featChoices?.ability === abl && _currentFeatChoices?.ability) {
-					score += _currentFeatChoices.ability.amount || 1;
+					increase += _currentFeatChoices.ability.amount || 1;
 				}
-				(/** @type {*} */ (scores))[abl] = Math.min(20, score);
+				(/** @type {*} */ (scores))[abl] = CharacterSheetClassUtils.capAbilityIncrease(baseScore, increase, 20);
 			});
 			return scores;
 		};
@@ -1795,7 +1796,7 @@ class CharacterSheetLevelUp {
 				if (_currentSelectedFeat?._featChoices?.ability === abl && _currentFeatChoices?.ability) {
 					featBonus = _currentFeatChoices.ability.amount || 1;
 				}
-				const newScore = Math.min(20, baseScore + ((/** @type {*} */ (asiValues))[abl] || 0) + featBonus);
+				const newScore = CharacterSheetClassUtils.capAbilityIncrease(baseScore, ((/** @type {*} */ (asiValues))[abl] || 0) + featBonus, 20);
 				const newEl = abilitiesContainer.querySelector(`#asi-new-${abl}`);
 				if (newEl) newEl.textContent = newScore;
 			});
@@ -2102,7 +2103,7 @@ class CharacterSheetLevelUp {
 			const currentScore = pendingScores ? (/** @type {*} */ (pendingScores))[abl] : this._state.getAbilityScore(abl);
 			const amount = abilityChoiceSpec.amount || 1;
 			const cap = abilityChoiceSpec.max || 20;
-			const newScore = Math.min(cap, currentScore + amount);
+			const newScore = CharacterSheetClassUtils.capAbilityIncrease(currentScore, amount, cap);
 			const isCapped = currentScore >= cap;
 
 			const btn = e_({outer: `
@@ -4201,7 +4202,7 @@ class CharacterSheetLevelUp {
 					Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 						if ((/** @type {*} */ (asiChoices))[abl]) {
 							const currentBase = this._state.getAbilityBase(abl);
-							this._state.setAbilityBase(abl, Math.min(20, currentBase + (/** @type {*} */ (asiChoices))[abl]));
+							this._state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(currentBase, (/** @type {*} */ (asiChoices))[abl], 20));
 						}
 					});
 				}
@@ -4260,7 +4261,7 @@ class CharacterSheetLevelUp {
 					Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 						if ((/** @type {*} */ (asiChoices))[abl]) {
 							const currentBase = this._state.getAbilityBase(abl);
-							this._state.setAbilityBase(abl, Math.min(20, currentBase + (/** @type {*} */ (asiChoices))[abl]));
+							this._state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(currentBase, (/** @type {*} */ (asiChoices))[abl], 20));
 						}
 					});
 				}

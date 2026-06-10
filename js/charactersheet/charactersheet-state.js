@@ -5928,7 +5928,8 @@ class CharacterSheetState {
 	 */
 	applyASI (ability, amount = 1, maxScore = 20) {
 		const currentBase = this._data.abilities[ability] || 10;
-		this._data.abilities[ability] = Math.min(maxScore, currentBase + amount);
+		// "Increase up to maxScore" must never LOWER a score already at/above the cap.
+		this._data.abilities[ability] = Math.max(currentBase, Math.min(maxScore, currentBase + amount));
 	}
 	// #endregion
 
@@ -6551,7 +6552,8 @@ class CharacterSheetState {
 	increaseAbility (ability, amount, maxScore = 20) {
 		const effectiveMax = this.getAbilityScoreMaximum(ability) ?? maxScore;
 		const currentBase = this.getAbilityBase(ability);
-		const newBase = Math.min(effectiveMax, currentBase + amount);
+		// "Increase up to the maximum" must never LOWER a score already above the cap.
+		const newBase = Math.max(currentBase, Math.min(effectiveMax, currentBase + amount));
 		this.setAbilityBase(ability, newBase);
 	}
 
@@ -31715,10 +31717,16 @@ class CharacterSheetState {
 		cm.savingThrows = {};
 		cm.skills = {};
 		cm.abilityChecks = {};
-		cm.abilityScores = {};
-		cm.abilityScoreStatic = {};
-		cm.abilityScoreMaxIncrease = {};
-		cm.abilityScoreMaxSet = {};
+		// Ability-score maps are rebuilt into LOCAL temps and assigned to `cm` atomically
+		// at the END of this method (see below). The live `cm.*` maps are intentionally
+		// NOT cleared up front: getAbilityScore() reads them, and a read that races a
+		// half-cleared map (e.g. via _getNamedModifierEffectiveValue() below) would
+		// momentarily report base-only scores. Keeping the previous, consistent maps in
+		// place until the new ones are fully built prevents that transient.
+		const nextAbilityScores = {};
+		const nextAbilityScoreStatic = {};
+		const nextAbilityScoreMaxIncrease = {};
+		const nextAbilityScoreMaxSet = {};
 		cm.hp = 0;
 		cm.hpPerLevel = 0;
 		cm.proficiencyBonus = 0;
@@ -31832,10 +31840,10 @@ class CharacterSheetState {
 						const abl = mod.type.split(":")[1];
 						if (mod.mode === "set") {
 							// "Set to X" mode - takes the highest value
-							cm.abilityScoreStatic[abl] = Math.max(cm.abilityScoreStatic[abl] || 0, value);
+							nextAbilityScoreStatic[abl] = Math.max(nextAbilityScoreStatic[abl] || 0, value);
 						} else {
 							// Default additive mode
-							cm.abilityScores[abl] = (cm.abilityScores[abl] || 0) + value;
+							nextAbilityScores[abl] = (nextAbilityScores[abl] || 0) + value;
 						}
 					} else if (mod.type.startsWith("abilityMax:")) {
 						// Handle abilityMax:str, abilityMax:con, etc. — raise/set an ability's maximum.
@@ -31843,10 +31851,10 @@ class CharacterSheetState {
 						const abl = mod.type.split(":")[1];
 						if (mod.mode === "set") {
 							// "Set the maximum to X" — highest wins
-							cm.abilityScoreMaxSet[abl] = Math.max(cm.abilityScoreMaxSet[abl] || 0, value);
+							nextAbilityScoreMaxSet[abl] = Math.max(nextAbilityScoreMaxSet[abl] || 0, value);
 						} else {
 							// "Raise the maximum by N" — additive
-							cm.abilityScoreMaxIncrease[abl] = (cm.abilityScoreMaxIncrease[abl] || 0) + value;
+							nextAbilityScoreMaxIncrease[abl] = (nextAbilityScoreMaxIncrease[abl] || 0) + value;
 						}
 					} else if (mod.type.startsWith("sense:")) {
 						// Handle sense:darkvision, sense:blindsight, etc.
@@ -31886,6 +31894,14 @@ class CharacterSheetState {
 					break;
 			}
 		});
+
+		// Atomically swap in the freshly-built ability-score maps. Until this point the
+		// previous maps remained live, so any getAbilityScore() read during the loop saw
+		// consistent values rather than a half-cleared map.
+		cm.abilityScores = nextAbilityScores;
+		cm.abilityScoreStatic = nextAbilityScoreStatic;
+		cm.abilityScoreMaxIncrease = nextAbilityScoreMaxIncrease;
+		cm.abilityScoreMaxSet = nextAbilityScoreMaxSet;
 
 		// Recalculate max HP if it was previously cached (HP modifiers may have changed)
 		if (this._data.hp.max > 0) {
