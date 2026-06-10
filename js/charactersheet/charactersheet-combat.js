@@ -7054,6 +7054,27 @@ class CharacterSheetCombat {
 					customEffects: parsedEffects.length > 0 ? parsedEffects : null,
 				});
 
+				// Bridge to the stance-specific system so mechanical effects
+				// (passive/skill/save/speed bonuses) actually apply. Without this
+				// the badge shows active but _data.activeStance stays null and
+				// _getActiveStanceEffects() returns null. Mirrors the Features-tab
+				// path in charactersheet.js::_activateFeatureState.
+				const stanceActivated = this._state.activateStance(method.name);
+				if (!stanceActivated) {
+					// Stance couldn't be resolved/activated — don't leave a stale badge
+					// or claim success.
+					this._state.deactivateState("combatStance");
+					this.renderCombatStates();
+					this.renderCombatEffects();
+					this._page._renderActiveStates?.();
+					this._page._saveCurrentCharacter?.();
+					this._page._renderCharacter?.();
+					JqueryUtil.doToast({type: "warning", content: `Could not activate ${method.name}.`});
+					btn.classList.add("ve-btn-success");
+					setTimeout(() => btn.classList.remove("ve-btn-success"), 200);
+					return;
+				}
+
 				this.renderCombatStates();
 				this.renderCombatEffects();
 				this._page._renderActiveStates?.();

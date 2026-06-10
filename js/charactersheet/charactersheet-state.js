@@ -27163,17 +27163,29 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Find a learned combat-method feature by name, matching BOTH the legacy
+	 * `CTM:` optionalFeature shape and the new `combatMethod` entity shape
+	 * (which may carry `_entityType:"combatMethod"` with no optionalFeatureTypes).
+	 * @param {string} methodName - Name of the combat method/stance
+	 * @returns {object|null} The matching feature or null
+	 */
+	_findCombatMethodFeature (methodName) {
+		if (!methodName) return null;
+		return this._data.features?.find(f =>
+			f.name === methodName
+			&& CharacterSheetClassUtils.isCombatMethod(f),
+		) || null;
+	}
+
+	/**
 	 * Get the effects of the currently active stance
 	 * @returns {object|null} The stance effects or null if no stance active
 	 */
 	_getActiveStanceEffects () {
 		if (!this._data.activeStance) return null;
 
-		// Find the stance method in features
-		const stanceFeature = this._data.features?.find(f =>
-			f.name === this._data.activeStance
-			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")),
-		);
+		// Find the stance method in features (legacy CTM or new combatMethod entity)
+		const stanceFeature = this._findCombatMethodFeature(this._data.activeStance);
 
 		if (!stanceFeature) return null;
 
@@ -27298,11 +27310,8 @@ class CharacterSheetState {
 	 * @returns {boolean} True if activation successful, false otherwise
 	 */
 	activateStance (methodName) {
-		// Find the method feature
-		const method = this._data.features?.find(f =>
-			f.name === methodName
-			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")),
-		);
+		// Find the method feature (legacy CTM or new combatMethod entity)
+		const method = this._findCombatMethodFeature(methodName);
 
 		if (!method) {
 			// eslint-disable-next-line no-console
@@ -27428,11 +27437,8 @@ class CharacterSheetState {
 	 * @returns {boolean} True if method used successfully, false if insufficient stamina or method not found
 	 */
 	useCombatMethod (methodName) {
-		// Find the method
-		const method = this._data.features?.find(f =>
-			f.name === methodName
-			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")),
-		);
+		// Find the method (legacy CTM or new combatMethod entity)
+		const method = this._findCombatMethodFeature(methodName);
 
 		if (!method) {
 			// eslint-disable-next-line no-console
@@ -27466,10 +27472,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	isMethodStance (methodName) {
-		const method = this._data.features?.find(f =>
-			f.name === methodName
-			&& f.optionalFeatureTypes?.some(ft => ft?.startsWith?.("CTM:")),
-		);
+		const method = this._findCombatMethodFeature(methodName);
 
 		if (!method) return false;
 
