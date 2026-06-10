@@ -28496,6 +28496,39 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Manually set the remaining Focus Switches (for in-play corrections). Clamped to
+	 * [0, max]; no-op when the switch budget is Unlimited (nothing to track). Stored as
+	 * `switchesUsed = max - remaining` so it round-trips through the existing getters.
+	 * @param {number} remaining
+	 * @returns {boolean} True if applied
+	 */
+	setFocusSwitchesRemaining (remaining) {
+		this._ensurePrimalFocusInitialized();
+		const calcs = this.getFeatureCalculations();
+		if (calcs.focusSwitchesMax === "Unlimited") return false;
+		const maxSwitches = calcs.focusSwitchesMaxNum || 1;
+		const clamped = Math.max(0, Math.min(maxSwitches, Math.round(Number(remaining) || 0)));
+		this._data.primalFocus.switchesUsed = maxSwitches - clamped;
+		return true;
+	}
+
+	/**
+	 * Manually set the remaining Hunter's Dodge uses (for in-play corrections). Clamped to
+	 * [0, max]. Stored as `huntersDodgeUsed = max - remaining`.
+	 * @param {number} remaining
+	 * @returns {boolean} True if applied
+	 */
+	setHuntersDodgeRemaining (remaining) {
+		this._ensurePrimalFocusInitialized();
+		const calcs = this.getFeatureCalculations();
+		const maxUses = calcs.huntersDodgeUses || 0;
+		if (maxUses <= 0) return false;
+		const clamped = Math.max(0, Math.min(maxUses, Math.round(Number(remaining) || 0)));
+		this._data.primalFocus.huntersDodgeUsed = maxUses - clamped;
+		return true;
+	}
+
+	/**
 	 * Restore Primal Focus on long rest
 	 */
 	restorePrimalFocus () {

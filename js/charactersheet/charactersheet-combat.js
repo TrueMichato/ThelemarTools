@@ -6377,6 +6377,7 @@ class CharacterSheetCombat {
 			<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
 				<span class="badge ${isPredator ? "badge-danger" : "badge-info"}" style="font-size: 1em; padding: 5px 10px;">${isPredator ? "🎯 Predator" : "🛡️ Prey"}</span>
 				<span class="badge badge-secondary" title="Focus Switches remaining (per long rest)">🔄 ${switchesText}</span>
+				${isUnlimited ? "" : `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-pf-switches-edit" title="Manually set remaining Focus Switches">✏️</button>`}
 			</div>
 			<div class="ve-flex gap-2 mb-2">
 				<button class="ve-btn ve-btn-sm ${isPredator ? "ve-btn-danger" : "ve-btn-outline-danger"} charsheet__combat-pf-btn" data-mode="predator" ${isPredator ? "disabled" : ""}>🎯 Predator</button>
@@ -6403,6 +6404,7 @@ class CharacterSheetCombat {
 				<div class="charsheet__ranger-ability-row--action">
 					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}">🛡️ ${dodgeName} ${dodgeRemaining}/${dodgeMax}</span>
 					<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-dodge-edit" title="Manually set remaining Hunter's Dodge uses">✏️</button>
 				</div>`;
 			}
 		}
@@ -6467,6 +6469,38 @@ class CharacterSheetCombat {
 				JqueryUtil.doToast({type: "success", content: "Used Hunter's Dodge"});
 			} else {
 				JqueryUtil.doToast({type: "warning", content: "No Hunter's Dodge uses remaining! Rest to regain uses."});
+			}
+		});
+		block.querySelector(".charsheet__combat-pf-switches-edit")?.addEventListener("click", async () => {
+			const max = calcs.focusSwitchesMaxNum ?? calcs.focusSwitchesMax ?? 1;
+			const cur = this._state.getFocusSwitchesRemaining?.();
+			const next = await InputUiUtil.pGetUserNumber({
+				title: "Set remaining Focus Switches",
+				min: 0,
+				max,
+				int: true,
+				default: typeof cur === "number" ? cur : max,
+			});
+			if (next == null || typeof next === "symbol") return;
+			if (this._state.setFocusSwitchesRemaining?.(next)) {
+				this._page.saveCharacter();
+				this._page.renderCharacter();
+			}
+		});
+		block.querySelector(".charsheet__combat-dodge-edit")?.addEventListener("click", async () => {
+			const max = calcs.huntersDodgeUses ?? 0;
+			const cur = this._state.getHuntersDodgeRemaining?.() ?? 0;
+			const next = await InputUiUtil.pGetUserNumber({
+				title: "Set remaining Hunter's Dodge uses",
+				min: 0,
+				max,
+				int: true,
+				default: cur,
+			});
+			if (next == null || typeof next === "symbol") return;
+			if (this._state.setHuntersDodgeRemaining?.(next)) {
+				this._page.saveCharacter();
+				this._page.renderCharacter();
 			}
 		});
 		block.querySelector(".charsheet__combat-quarry-toggle")?.addEventListener("click", () => {

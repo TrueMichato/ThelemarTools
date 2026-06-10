@@ -5283,11 +5283,17 @@ class CharacterSheetLevelUp {
 		if (featureOptionGroups.length) {
 			const featOptSection = this._renderFeatureOptionsSelection(featureOptionGroups, (/** @type {*} */ featureKey, /** @type {*} */ options) => {
 				selectedFeatureOptions[featureKey] = options;
+				// Druid "Magician" (Primal Order) grants one extra cantrip — re-render the
+				// spell picker so the bonus pick appears/disappears as the choice changes.
+				if (selectedClass.name === "Druid") renderMcSpellPicker?.();
 			});
 			content.append(featOptSection);
 		}
 
-		// Render spell selection for multiclass casters
+		// Render spell selection for multiclass casters. The picker lives in a stable host so
+		// it can be re-rendered reactively when a feature option (Druid Magician) changes the
+		// cantrip budget, preserving any already-picked spells/cantrips.
+		/** @type {(() => void)|null} */ let renderMcSpellPicker = null;
 		if (hasSpellChoices) {
 			const allSpells = this._page.getFilteredSpellData();
 			const knownSpellIds = new Set([
@@ -5295,44 +5301,61 @@ class CharacterSheetLevelUp {
 				...(this._state.getCantripsKnown?.() || []),
 			].map((/** @type {*} */ s) => `${s.name}|${s.source}`));
 
-			if (isWizardMulticlass) {
-				const spellbookContent = CharacterSheetSpellPicker.renderWizardSpellbookPicker(/** @type {*} */ ({
-					spellCount: multiclassSpellGain,
-					maxSpellLevel: multiclassMaxSpellLevel,
-					allSpells,
-					knownSpellIds,
-					className: selectedClass.name,
-					subclass: null,
-					getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
-					getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
-					cantripCount: multiclassCantripGain,
-					onSelect: (/** @type {*} */ spells) => { selectedMulticlassSpells = spells; },
-					onSelectCantrips: (/** @type {*} */ cantrips) => { selectedMulticlassCantrips = cantrips; },
-				}));
-				content.append(spellbookContent);
-			} else {
-				const spellPickerContent = CharacterSheetSpellPicker.renderKnownSpellPicker(/** @type {*} */ ({
-					className: selectedClass.name,
-					classSource: selectedClass.source,
-					spellCount: multiclassSpellGain,
-					cantripCount: multiclassCantripGain,
-					maxSpellLevel: multiclassMaxSpellLevel,
-					allSpells,
-					knownSpellIds,
-					getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
-					getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
-					subclass: null,
-					additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
+			const spellPickerHost = e_({outer: `<div></div>`});
+			content.append(spellPickerHost);
+
+			renderMcSpellPicker = () => {
+				const magicianBonus = selectedClass.name === "Druid"
+					? CharacterSheetClassUtils.getMagicianBonusCantripCount(Object.values(selectedFeatureOptions).flat())
+					: 0;
+				const effectiveCantripGain = multiclassCantripGain + magicianBonus;
+				spellPickerHost.innerHTML = "";
+
+				if (isWizardMulticlass) {
+					const spellbookContent = CharacterSheetSpellPicker.renderWizardSpellbookPicker(/** @type {*} */ ({
+						spellCount: multiclassSpellGain,
+						maxSpellLevel: multiclassMaxSpellLevel,
+						allSpells,
+						knownSpellIds,
 						className: selectedClass.name,
 						subclass: null,
-					}),
-					onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
-						selectedMulticlassSpells = spells;
-						selectedMulticlassCantrips = cantrips;
-					},
-				}));
-				content.append(spellPickerContent);
-			}
+						getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+						getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
+						cantripCount: effectiveCantripGain,
+						onSelect: (/** @type {*} */ spells) => { selectedMulticlassSpells = spells; },
+						onSelectCantrips: (/** @type {*} */ cantrips) => { selectedMulticlassCantrips = cantrips; },
+						preSelectedSpells: selectedMulticlassSpells,
+						preSelectedCantrips: selectedMulticlassCantrips,
+					}));
+					spellPickerHost.append(spellbookContent);
+				} else {
+					const spellPickerContent = CharacterSheetSpellPicker.renderKnownSpellPicker(/** @type {*} */ ({
+						className: selectedClass.name,
+						classSource: selectedClass.source,
+						spellCount: multiclassSpellGain,
+						cantripCount: effectiveCantripGain,
+						maxSpellLevel: multiclassMaxSpellLevel,
+						allSpells,
+						knownSpellIds,
+						getHoverLink: (/** @type {*} */ page, /** @type {*} */ name, /** @type {*} */ source) => CharacterSheetPage.getHoverLink(page, name, source),
+						getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
+						subclass: null,
+						additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
+							className: selectedClass.name,
+							subclass: null,
+						}),
+						onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
+							selectedMulticlassSpells = spells;
+							selectedMulticlassCantrips = cantrips;
+						},
+						preSelectedSpells: selectedMulticlassSpells,
+						preSelectedCantrips: selectedMulticlassCantrips,
+					}));
+					spellPickerHost.append(spellPickerContent);
+				}
+			};
+
+			renderMcSpellPicker();
 		}
 
 		modalInner.append(content);
