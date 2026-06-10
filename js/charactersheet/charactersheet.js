@@ -896,6 +896,9 @@ class CharacterSheetPage {
 		if (b.flatBonus) factors.push(`+ ${b.flatBonus} lb. bonus`);
 		if (b.carryMultiplier !== 1) factors.push(`× ${b.carryMultiplier} (size/build bonus)`);
 		if (b.sizeMultiplier !== 1) factors.push(`× ${b.sizeMultiplier} (size)`);
+		// External capacity (Bag of Holding etc.) is added AFTER the multipliers, so it
+		// appears as a trailing "+ N lb. (containers)" term rather than a scaling factor.
+		if (b.externalCapacity) factors.push(`+ ${b.externalCapacity} lb. (containers)`);
 		const label = b.rule === "thelemar" ? "Carry Capacity (Thelemar)" : "Carry Capacity";
 		const line = factors.length
 			? `${label}: (${head} = ${b.base} lb.) ${factors.join(" ")} = ${b.total} lb.`
