@@ -680,6 +680,9 @@ class CharacterSheetFeatures {
 		this._page._renderSavingThrows?.();
 		this._page._renderSkills?.();
 		this._page.saveCharacter();
+		// State has been mutated; refresh the Spells tab so fixed (non-choice)
+		// granted cantrips/innate spells appear immediately without a reload.
+		this._page._spells?.render();
 
 		// Check for pending spell choices and trigger the picker
 		if (this._state.hasPendingSpellChoices()) {
