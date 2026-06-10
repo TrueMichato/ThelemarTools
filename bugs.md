@@ -3,7 +3,19 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 10 (surfaced during manual testing of the merged round-9 fixes)
+
+Decomposed into 5 parallel sessions. Ownership map below is authoritative for integration (one owner per shared surface).
+
+**S1 — combat-stances (#1):** Perceptive Stance (and other combat-method stances) no longer apply their mechanical benefits. Root cause: the stance lookups in `charactersheet-state.js` (`_getActiveStanceEffects`, `activateStance`, `useCombatMethod`, `isMethodStance`) only match the legacy `optionalFeatureTypes "CTM:"` shape and miss new `combatMethod` entities. OWNS the stance/combat-method resolver + effect application in `charactersheet-state.js` AND the combat-tab activation bridge in `charactersheet-combat.js` (`_activateMethodEffect`/`_isMethodStance`). MUST NOT touch the Hunter's Dodge / primal-focus render blocks (S4) or `_recalculateCustomModifiers`/ability code (S3). Keep stance effects read-time transient (not custom modifiers). Verify all wired stances (skill/save/passive/speed) apply.
+
+**S2 — feat-spell-reactive (#2):** Plantmender feat's granted cantrips/spells appear only after a page refresh. Root cause: `_addFeat` (`charactersheet-features.js`) re-renders the Features tab but only re-renders the Spells tab when there are *pending spell choices*; fixed grants never trigger `_spells.render()`. OWNS only the post-`addFeat` render flow in `_addFeat`. MUST NOT touch the ability-cap mutation lines in `_addFeat` (S3) or spells.js internals beyond calling `render()`.
+
+**S3 — ability-integrity (#4, #5):** (#4) Transient bug where all ability scores momentarily show 10, fixed by refresh — `_renderAbilities` paints literal "10" placeholders and `_renderAbilityScores`/`_recalculateCustomModifiers` can render mid-mutation. (#5) A feat that increases an ability "up to a maximum of 20" lets you DECREASE a score that is already above 20 — the ASI stepper's minus handler lacks a floor guard. OWNS the ability render path (`charactersheet.js` `_renderAbilities`/`_renderAbilityScores`), `_recalculateCustomModifiers`/ability defaults, and ALL ability-cap mutation paths (LevelUp/QuickBuild/Builder steppers + the ability-clamp lines inside `_addFeat`). Coordinate with S2 on `_addFeat` (different line regions).
+
+**S4 — ui-speed-dodge (#3, #6):** (#3) With multiple speeds the values don't align — `.charsheet__speed-seg-value` has no CSS rule. (#6) Hunter's Dodge row uses a bespoke `--action` flex class instead of the standard `.charsheet__ranger-ability-row` grid markup; should look like the other ranger rows but keep its uses badge + Use button (+ combat-tab ✏️ edit). OWNS `.charsheet__speed*` CSS + `_renderSpeedDisplay` markup, the Hunter's Dodge row markup in both `charactersheet.js` and `charactersheet-combat.js`, and the `.charsheet__ranger-ability-row*` CSS. MUST NOT touch combat-method activation (S1) or `.charsheet__dice*` (S5).
+
+**S5 — dice-roller (#7):** The 3D dice roller is buggy and ugly (hand-rolled fake-3D CSS/JS). Replace with a maintained open-source 3D dice library behind the existing `async _showAnimatedDice(diceType, finalValue, isAdvantage, isDisadvantage)` signature. OWNS `_showAnimatedDice`, `.charsheet__dice*` CSS, `_initDicePicker`, and the dice HTML/settings; may vendor a dependency under `lib/`. MUST preserve the roll call sites untouched, keep the non-animated path intact, and add a graceful fallback if the library fails to load. Integrates LAST (largest blast radius).
 
 ## Closed Bugs
 
