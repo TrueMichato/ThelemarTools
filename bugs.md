@@ -3,7 +3,34 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 11 (surfaced during manual testing of the merged round-10 fixes)
+
+Decomposed into 6 parallel sessions (single owner per shared surface). Merge order: **S2 → S5 → S1 → S3/S4/S6**.
+
+**S1 — Spellcasting flow, metamagic & Feywild Shard** (`charactersheet-spells.js` casting flow + the spellcasting-restriction setting toggle)
+* **(#1)** Opt-in setting to ignore spellcasting restrictions (e.g. "can't cast while incapacitated"). Scoped narrowly (`ignoreSpellcastingRestrictions`), applied only in `_checkCastingConstraints`/`_pHandleCastingConstraints`. Must NOT skip slot/sorcery/charge spending or concentration bookkeeping.
+* **(#2)** Split casting into "Cast" (normal, no metamagic) + "Cast with Metamagic" for metamagic-capable characters.
+* **(#3a)** Metamagic window: show each option as a clickable choice instead of a dropdown.
+* **(#9)** "Feywild Shard" item: when attuned, add a "Cast with Feywild Shard" button that also rolls 1d100 on the **2014 PHB** Wild Magic Surge table (NOT the variant-component table) and reports the result.
+
+**S2 — Items, bonuses & carry capacity** (foundation; merge first)
+* **(#8)** Custom ITEM modal should support all bonus/effect types the custom ABILITY modal supports (incl. carryCapacity).
+* **(#10)** Bag of Holding must affect carry capacity when equipped — wired through the same carryCapacity item-bonus channel into `getCarryingCapacityBreakdown` (equipped, not attunement-gated).
+* **(#11)** Tortle (TGTT, has Powerful Build) carry capacity inflated — Powerful Build applied twice. Dedupe carry-size sources by source/semantic key; do NOT delete `register("Powerful Build")`. Validate Goliath = ×2, TGTT Tortle = ×2 (not ×4).
+
+**S3 — Spell-attack quick roll** (`charactersheet-combat.js`)
+* **(#3b)** Make the Combat-tab spell-attack number (`#charsheet-combat-spell-attack`) clickable → quick spell-attack roll.
+
+**S4 — Skills hover & XP set** (`charactersheet.js` controller, distinct regions)
+* **(#5)** Skill hover breakdown should also work over the EFFECTIVE modifier, not just the regular one.
+* **(#4)** Allow setting XP to a total, not just adding to it.
+
+**S5 — Tortle Shell Defense** (active-states classification + `register("Shell Defense")`)
+* **(#7)** Shell Defense is on by default, has no activation action, and grants no DEX-save disadvantage. Model as an activatable state with effects only while active (AC +4, prone/speed 0, disadvantage on DEX saves); remove passive treatment.
+
+**S6 — Visual/CSS** (`css/charactersheet.css`, hand-written, CSS-only)
+* **(#6)** `.charsheet__ranger-hunters-prey` text should match `.charsheet__ranger-ability-note` color (`var(--rgb-text-dim)`).
+* **(#12)** Speed values still misaligned — `.charsheet__speed-seg` uses `align-items: baseline` (emoji baselines differ); fix to center/flex-start.
 
 ## Closed Bugs
 
