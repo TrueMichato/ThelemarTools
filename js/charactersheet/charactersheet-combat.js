@@ -6400,11 +6400,19 @@ class CharacterSheetCombat {
 				// reminder note via the renderer's inline-hover), matching the
 				// Combat-method rows; falls back to plain text if unavailable.
 				const dodgeName = CharacterSheetClassUtils.buildInlineEntriesHoverLink?.("Hunter's Dodge", "Hunter's Dodge", [CharacterSheetClassUtils.getHuntersDodgeNote?.()]) || "Hunter's Dodge";
+				const dodgeNote = CharacterSheetClassUtils.getHuntersDodgeNote?.() || "";
+				// Standard ranger-ability grid (name / badge column / note) so the row
+				// matches its sibling focus-mode reminder rows, while the badge column
+				// keeps the interactive uses badge + Use button + ✏️ manual-edit (Combat).
 				html += `
-				<div class="charsheet__ranger-ability-row--action">
-					<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}">🛡️ ${dodgeName} ${dodgeRemaining}/${dodgeMax}</span>
-					<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
-					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-dodge-edit" title="Manually set remaining Hunter's Dodge uses">✏️</button>
+				<div class="charsheet__ranger-ability-row">
+					<span class="charsheet__ranger-ability-name">🛡️ ${dodgeName}</span>
+					<span class="charsheet__ranger-ability-badge">
+						<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}">${dodgeRemaining}/${dodgeMax}</span>
+						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-dodge-edit" title="Manually set remaining Hunter's Dodge uses">✏️</button>
+					</span>
+					<span class="charsheet__ranger-ability-note">${dodgeNote}</span>
 				</div>`;
 			}
 		}

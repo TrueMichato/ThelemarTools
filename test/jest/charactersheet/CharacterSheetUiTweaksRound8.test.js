@@ -74,41 +74,77 @@ function makeEl () {
 }
 
 // ───────────────────────────── #3 ─────────────────────────────
-describe("#3 Hunter's Dodge row shares the ranger-section styling", () => {
+describe("#3 Hunter's Dodge row matches the standard ranger-section rows", () => {
 	const overviewDodgeBlock = (charsheetSrc.match(/const dodgeRemaining[\s\S]*?charsheet__overview-dodge-use[\s\S]*?<\/div>`;/) || [""])[0];
 	const combatDodgeBlock = (combatSrc.match(/const dodgeRemaining[\s\S]*?charsheet__combat-dodge-use[\s\S]*?<\/div>`;/) || [""])[0];
 
-	it("defines a self-contained .charsheet__ranger-ability-row--action rule", () => {
-		const body = cssRuleBody(".charsheet__ranger-ability-row--action {");
-		expect(body).not.toBeNull();
-		expect(body).toMatch(/display:\s*flex/);
-		expect(body).toMatch(/border-left:\s*2px solid var\(--rgb-link\)/);
-		expect(body).toMatch(/font-size:/);
-		expect(body).toMatch(/line-height:/);
-		expect(body).toMatch(/padding:/);
-		expect(body).toMatch(/margin-bottom:/);
+	it("retires the bespoke .charsheet__ranger-ability-row--action CSS rule", () => {
+		expect(css).not.toContain(".charsheet__ranger-ability-row--action");
 	});
 
-	it("keeps the base reminder-row class (border-left accent) intact", () => {
+	it("keeps the standard reminder-row grid (border-left accent) intact", () => {
 		const body = cssRuleBody(".charsheet__ranger-ability-row {");
 		expect(body).not.toBeNull();
 		expect(body).toMatch(/border-left:\s*2px solid var\(--rgb-link\)/);
 		expect(body).toMatch(/display:\s*grid/);
 	});
 
-	it("Overview dodge row uses the shared action class and drops the old utility classes", () => {
+	it("lays the badge column out so the dodge controls space and wrap safely", () => {
+		const body = cssRuleBody(".charsheet__ranger-ability-badge {");
+		expect(body).not.toBeNull();
+		expect(body).toMatch(/display:\s*inline-flex/);
+		expect(body).toMatch(/flex-wrap:\s*wrap/);
+		expect(body).toMatch(/gap:/);
+		expect(body).toMatch(/min-width:\s*0/);
+	});
+
+	it("Overview dodge row uses the standard grid markup (not the old --action class)", () => {
 		expect(overviewDodgeBlock.length).toBeGreaterThan(0);
-		expect(overviewDodgeBlock).toContain("charsheet__ranger-ability-row--action");
+		expect(overviewDodgeBlock).not.toContain("charsheet__ranger-ability-row--action");
+		expect(overviewDodgeBlock).toContain("charsheet__ranger-ability-row");
+		expect(overviewDodgeBlock).toContain("charsheet__ranger-ability-name");
+		expect(overviewDodgeBlock).toContain("charsheet__ranger-ability-badge");
+		expect(overviewDodgeBlock).toContain("charsheet__ranger-ability-note");
 		expect(overviewDodgeBlock).not.toContain("ve-flex-v-center gap-2 mb-2");
-		// Bug #4 invariant: still exactly one dodge use-button rendered.
+		// Keeps the interactive uses badge + exactly one Use button.
+		expect(overviewDodgeBlock).toMatch(/<span class="badge[\s\S]*?\$\{dodgeRemaining\}\/\$\{dodgeMax\}/);
 		expect((overviewDodgeBlock.match(/charsheet__overview-dodge-use/g) || []).length).toBe(1);
 	});
 
-	it("Combat dodge row uses the shared action class and drops the old utility classes", () => {
+	it("Combat dodge row uses the standard grid markup and keeps Use + ✏️ edit", () => {
 		expect(combatDodgeBlock.length).toBeGreaterThan(0);
-		expect(combatDodgeBlock).toContain("charsheet__ranger-ability-row--action");
+		expect(combatDodgeBlock).not.toContain("charsheet__ranger-ability-row--action");
+		expect(combatDodgeBlock).toContain("charsheet__ranger-ability-row");
+		expect(combatDodgeBlock).toContain("charsheet__ranger-ability-name");
+		expect(combatDodgeBlock).toContain("charsheet__ranger-ability-badge");
+		expect(combatDodgeBlock).toContain("charsheet__ranger-ability-note");
 		expect(combatDodgeBlock).not.toContain("ve-flex-v-center gap-2 mb-2");
+		expect(combatDodgeBlock).toMatch(/<span class="badge[\s\S]*?\$\{dodgeRemaining\}\/\$\{dodgeMax\}/);
 		expect((combatDodgeBlock.match(/charsheet__combat-dodge-use/g) || []).length).toBe(1);
+		expect((combatDodgeBlock.match(/charsheet__combat-dodge-edit/g) || []).length).toBe(1);
+	});
+});
+
+// ──────────────────────── #3 (speed alignment) ────────────────
+describe("#3 Speed segment values share a consistent column", () => {
+	const speedBlock = extractMethodInner(charsheetSrc, "_renderSpeedDisplay (speedDisplay) {", "_renderSenses");
+
+	it("renders a dedicated .charsheet__speed-seg-value span per segment", () => {
+		expect(speedBlock).toContain("charsheet__speed-seg-value");
+	});
+
+	it("defines a .charsheet__speed-seg-value CSS rule with a stable value column", () => {
+		const body = cssRuleBody(".charsheet__speed-seg-value {");
+		expect(body).not.toBeNull();
+		expect(body).toMatch(/min-width:/);
+		expect(body).toMatch(/display:\s*inline-block/);
+	});
+
+	it("gives the emoji a fixed-width column so values align across glyph widths", () => {
+		const body = cssRuleBody(".charsheet__speed-seg-emoji {");
+		expect(body).not.toBeNull();
+		expect(body).toMatch(/display:\s*inline-block/);
+		expect(body).toMatch(/width:/);
 	});
 });
 
