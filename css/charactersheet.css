@@ -4580,8 +4580,30 @@
 	max-width: 100%;
 }
 
+/* Fixed-width emoji column: runner/swim/climb glyphs render at different widths,
+   so without a fixed box the trailing value column starts at a different x for
+   each speed, giving a ragged left edge when speeds wrap onto their own lines.
+   A fixed inline-block makes every emoji occupy an identical column. */
 .charsheet__speed-seg-emoji {
+	display: inline-block;
+	flex: 0 0 auto;
+	width: 1.4em;
+	text-align: center;
 	font-size: 0.85em;
+}
+
+/* Value column. A consistent min-width keeps 1-/2-/3-digit values the same box
+   width so, paired with the fixed emoji column, every segment has an identical
+   footprint and the numbers line up vertically across wrapped lines (and stay
+   aligned under [data-textsize] scaling since both columns are em-based). The
+   leading &nbsp; in the markup supplies the emoji-to-value gap. */
+.charsheet__speed-seg-value {
+	display: inline-block;
+	flex: 0 0 auto;
+	min-width: 1.75em;
+	text-align: left;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
 }
 
 .charsheet__speed-sep {
@@ -8549,6 +8571,13 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__ranger-ability-badge {
 	grid-column: 2;
 	justify-self: end;
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 0.3rem;
+	min-width: 0;
+	max-width: 100%;
 	white-space: nowrap;
 }
 
@@ -8559,39 +8588,6 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--rgb-text-dim);
 	font-size: 0.85em;
 	line-height: 1.3;
-}
-
-/* Interactive ranger-section row (e.g. the Hunter's Dodge use-button row). A
-   single-line flex variant — status badge + action button — that shares the
-   reminder rows' left-accent, padding, margin, and compact font/line-height so it
-   reads as part of the ranger section instead of a detached utility-class row.
-   Self-contained (does not rely on the base grid row class) so it never matches
-   selectors/queries scoped to the generic reminder rows. */
-.charsheet__ranger-ability-row--action {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	column-gap: 0.4rem;
-	row-gap: 0.2rem;
-	padding: 0.35rem 0 0.35rem 0.5rem;
-	border-left: 2px solid var(--rgb-link);
-	margin-bottom: 0.35rem;
-	font-size: 0.85em;
-	line-height: 1.3;
-}
-
-/* Keep the status badge readable but in scale with the reminder rows, and let the
-   action buttons sit tight against it so the row reads as one compact control. */
-.charsheet__ranger-ability-row--action .badge {
-	font-size: 0.95em;
-	font-weight: 600;
-	white-space: normal;
-	overflow-wrap: anywhere;
-}
-
-.charsheet__ranger-ability-row--action .ve-btn {
-	flex: 0 0 auto;
-	line-height: 1.1;
 }
 
 /* Multi-mechanic reminder notes (e.g. Enduring Traveler): each distinct benefit on
