@@ -4022,6 +4022,10 @@ class CharacterSheetState {
 		// Re-register custom ability effects after loading — run after migrations so effects reference up-to-date data
 		this._reapplyCustomAbilityEffects();
 
+		// Re-register equipped-item custom effects (Bug #8) after loading. Idempotent: clears any
+		// item-sourced modifiers restored verbatim from the save, then re-registers active items.
+		this._reapplyItemEffects();
+
 		// Reapply history-backed optional features for saves which persisted history
 		// but did not fully reconstruct runtime feature state.
 		this._reapplyHistoryOptionalFeatures();
@@ -21758,6 +21762,12 @@ class CharacterSheetState {
 			// Update aggregated item bonuses
 			this._recalculateItemBonuses();
 
+			// Register any custom-item effects (Bug #8) if the item is active on add
+			const _addedWrapper = this._data.inventory[this._data.inventory.length - 1];
+			if (this._isItemEffectsActive(_addedWrapper)) {
+				this._registerItemEffects(_addedWrapper);
+			}
+
 			// If item is equipped, also set it in appropriate AC slot
 			if (equipped && item.type === "armor") {
 				if (item.acBonus !== undefined) {
@@ -22243,6 +22253,10 @@ class CharacterSheetState {
 	}
 
 	removeItem (itemId) {
+		// Remove any effects/modifiers this item contributed BEFORE it leaves the inventory
+		// (defensive-trait cleanup needs to read the item's effects[] while it is still present).
+		this._unregisterItemEffects(itemId);
+
 		// Remove item from any container it might be in
 		this.removeItemFromContainer(itemId);
 
@@ -22295,12 +22309,19 @@ class CharacterSheetState {
 			else if (_typeBase === "LA") itemProps.armorType = "light";
 		}
 
+		// Purge the OLD payload's custom-item effects (Bug #8) BEFORE swapping in the new payload,
+		// so defensive-trait cleanup reads the old effects[] (named modifiers clear by sourceId).
+		this._unregisterItemEffects(itemId);
+
 		wrapper.item = {...itemProps};
 
 		// Drop attunement if the replacement no longer requires it
 		if (!itemProps.requiresAttunement) wrapper.attuned = false;
 
 		// id / quantity / equipped / starred / note are intentionally left untouched on the wrapper
+
+		// Re-register the NEW payload's effects if the item is currently active.
+		if (this._isItemEffectsActive(wrapper)) this._registerItemEffects(wrapper);
 
 		this._recalculateItemBonuses();
 		return true;
@@ -22323,11 +22344,13 @@ class CharacterSheetState {
 			const wasActive = this._isItemProficienciesActive(item);
 			item.equipped = equipped;
 			const isActive = this._isItemProficienciesActive(item);
-			// Apply or remove proficiencies if activation state changed
+			// Apply or remove proficiencies + item effects if activation state changed
 			if (!wasActive && isActive) {
 				this._applyItemProficiencies(itemId);
+				this._registerItemEffects(item);
 			} else if (wasActive && !isActive) {
 				this._removeItemProficiencies(itemId);
+				this._unregisterItemEffects(itemId);
 			}
 		}
 	}
@@ -22355,6 +22378,9 @@ class CharacterSheetState {
 				}
 			}
 
+			// Apply item effects now that it is equipped (if attunement gate also satisfied)
+			if (this._isItemEffectsActive(invItem)) this._registerItemEffects(invItem);
+
 			return true;
 		}
 		return false;
@@ -22369,6 +22395,8 @@ class CharacterSheetState {
 		const item = this._data.inventory.find(i => i.id === itemId);
 		if (item) {
 			item.equipped = false;
+			// Remove any effects the item was contributing while equipped
+			this._unregisterItemEffects(itemId);
 			return true;
 		}
 		return false;
@@ -22380,11 +22408,13 @@ class CharacterSheetState {
 			const wasActive = this._isItemProficienciesActive(item);
 			item.attuned = attuned;
 			const isActive = this._isItemProficienciesActive(item);
-			// Apply or remove proficiencies if activation state changed
+			// Apply or remove proficiencies + item effects if activation state changed
 			if (!wasActive && isActive) {
 				this._applyItemProficiencies(itemId);
+				this._registerItemEffects(item);
 			} else if (wasActive && !isActive) {
 				this._removeItemProficiencies(itemId);
+				this._unregisterItemEffects(itemId);
 			}
 		}
 	}
@@ -23990,10 +24020,40 @@ class CharacterSheetState {
 	 *   flatBonus: number,      // customModifiers.carryCapacity
 	 *   carryMultiplier: number,// customModifiers.carryCapacityMultiplier (e.g. Powerful Build ×2)
 	 *   sizeMultiplier: number, // getSizeCarryMultiplier()
+	 *   externalCapacity: number, // fixed magic-container capacity (Bag of Holding), post-multiplier
 	 *   total: number,          // final carrying capacity
-	 *   pushDragLift: number    // RAW: 2 × carrying capacity
+	 *   pushDragLift: number    // RAW: 2 × body capacity (+ external, undoubled)
 	 * }}
 	 */
+	/**
+	 * External carrying capacity granted by equipped magic containers whose
+	 * contents do not count against the bearer's own carrying capacity (e.g.
+	 * Bag of Holding, Heward's Handy Haversack). RAW these let you haul a fixed
+	 * weight of goods regardless of your Strength, so the capacity is added to
+	 * the carry total AFTER the body multipliers (size / Powerful Build) — a
+	 * Bag of Holding holds 500 lb whether you are a Halfling or a Goliath.
+	 *
+	 * Detection is data-driven: items.json marks such containers with
+	 * `containerCapacity.weightless === true` and a `containerCapacity.weight`
+	 * array (summed across compartments). Equipped-gated (Bag of Holding needs
+	 * no attunement); quantity-scaled (two equipped bags = 2× capacity).
+	 *
+	 * @returns {number} Total external capacity in pounds (0 if none equipped).
+	 */
+	getExternalCarryCapacity () {
+		let total = 0;
+		for (const invItem of (this._data.inventory || [])) {
+			if (!invItem?.equipped) continue;
+			const cc = invItem.item?.containerCapacity;
+			if (!cc || cc.weightless !== true || !Array.isArray(cc.weight)) continue;
+			const perItem = cc.weight.reduce((acc, w) => acc + (Number(w) || 0), 0);
+			if (perItem <= 0) continue;
+			const qty = Math.max(1, Number(invItem.quantity) || 1);
+			total += perItem * qty;
+		}
+		return total;
+	}
+
 	getCarryingCapacityBreakdown () {
 		// Thelemar rules: passive Might * 10 (base for Small/Medium creatures).
 		// Passive Might = 10 + Might modifier (+ passive bonuses). Might is a
@@ -24019,7 +24079,12 @@ class CharacterSheetState {
 
 		const flatBonus = this._data.customModifiers.carryCapacity || 0;
 		const carryMultiplier = this._data.customModifiers.carryCapacityMultiplier || 1;
-		const total = (base + flatBonus) * carryMultiplier * sizeMultiplier;
+		// External capacity (Bag of Holding etc.) is added AFTER the body multipliers:
+		// a magic container holds a fixed weight regardless of the bearer's size or
+		// Powerful Build, so it must NOT be scaled by carryMultiplier / sizeMultiplier.
+		const externalCapacity = this.getExternalCarryCapacity();
+		const bodyCapacity = (base + flatBonus) * carryMultiplier * sizeMultiplier;
+		const total = bodyCapacity + externalCapacity;
 
 		return {
 			rule: isThelemar ? "thelemar" : "standard",
@@ -24029,8 +24094,11 @@ class CharacterSheetState {
 			flatBonus,
 			carryMultiplier,
 			sizeMultiplier,
+			externalCapacity,
 			total,
-			pushDragLift: total * 2,
+			// Push/drag/lift is the bearer's RAW Strength-based limit (2× body capacity).
+			// Fixed external storage adds the same flat amount but is not itself doubled.
+			pushDragLift: bodyCapacity * 2 + externalCapacity,
 		};
 	}
 
@@ -30384,6 +30452,156 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Effect types that are realised as ACTIVE STATES (combat/size toggles) rather than as a
+	 * passive named-modifier or a defensive-array entry. These are owned by the custom-ability
+	 * active-state system and are NOT applied by the shared catalog applier (`_applyCatalogEffect`),
+	 * so equipped items skip them.
+	 * @param {string} effectType
+	 * @returns {boolean}
+	 * @private
+	 */
+	_isActiveStateEffectType (effectType) {
+		if (!effectType) return false;
+		return effectType.startsWith("advantage:")
+			|| effectType.startsWith("disadvantage:")
+			|| effectType.startsWith("extraDamage:")
+			|| effectType === "sizeIncrease" || effectType === "sizeDecrease"
+			|| effectType.startsWith("reroll:") || effectType.startsWith("damage:reroll:")
+			|| effectType === "critRange" || effectType === "critRange:expand"
+			|| effectType === "tempHp" || effectType === "tempHp:dice";
+	}
+
+	/**
+	 * Apply a single SOURCE-AGNOSTIC catalog effect — i.e. one realised as a defensive-array entry
+	 * (resistance / immunity / vulnerability / conditionImmunity), a reach modifier, or a standard
+	 * numeric named-modifier (everything in `_getModifierGroups()` except the active-state-only
+	 * types). Shared by custom abilities AND equipped items so both flow through ONE modifier
+	 * pipeline (`_recalculateCustomModifiers` + the defensive-array readers).
+	 *
+	 * Returns `false` (without applying anything) for ACTIVE-STATE effect types — the caller is
+	 * responsible for routing those to the active-state system (custom abilities) or skipping them
+	 * (items, which do not support combat/size toggles).
+	 *
+	 * @param {object} effect - Effect descriptor ({type, value, name, mode, conditional, ...scaling}).
+	 * @param {{sourceFeatureId: string, sourceType: string, name: string, description?: string, sourceLabel?: string}} ctx
+	 * @returns {boolean} True if the effect was handled here; false if it is an active-state type.
+	 * @private
+	 */
+	_applyCatalogEffect (effect, ctx) {
+		const effectType = effect?.type;
+		if (!effectType) return true;
+
+		// Defensive-array families
+		if (effectType.startsWith("resistance:")) {
+			const damageType = effectType.replace("resistance:", "");
+			this.addResistance(damageType);
+			this._trackGrantedDefensiveTrait("resistances", damageType, ctx.sourceFeatureId);
+			return true;
+		}
+		if (effectType.startsWith("immunity:")) {
+			const damageType = effectType.replace("immunity:", "");
+			this.addImmunity(damageType);
+			this._trackGrantedDefensiveTrait("immunities", damageType, ctx.sourceFeatureId);
+			return true;
+		}
+		if (effectType.startsWith("vulnerability:")) {
+			const damageType = effectType.replace("vulnerability:", "");
+			this.addVulnerability(damageType);
+			this._trackGrantedDefensiveTrait("vulnerabilities", damageType, ctx.sourceFeatureId);
+			return true;
+		}
+		if (effectType.startsWith("conditionImmunity:")) {
+			const condition = effectType.replace("conditionImmunity:", "");
+			this.addConditionImmunity(condition);
+			this._trackGrantedDefensiveTrait("conditionImmunities", condition, ctx.sourceFeatureId);
+			return true;
+		}
+
+		// Active-state effect types are NOT handled by the shared applier.
+		if (this._isActiveStateEffectType(effectType)) return false;
+
+		// Reach modifier
+		if (effectType === "reach") {
+			this.addNamedModifier({
+				name: `${ctx.name}: Reach`,
+				type: "reach",
+				value: effect.value || 5,
+				enabled: true,
+				sourceFeatureId: ctx.sourceFeatureId,
+				sourceType: ctx.sourceType,
+			});
+			return true;
+		}
+
+		// Standard numeric modifier (full passthrough of the shared effect schema)
+		this.addNamedModifier({
+			name: `${ctx.name}: ${effect.name || effectType}`,
+			type: effectType,
+			value: effect.value || 0,
+			enabled: true,
+			sourceFeatureId: ctx.sourceFeatureId,
+			sourceType: ctx.sourceType,
+			note: ctx.description ? `From ${ctx.sourceLabel || "custom ability"}: ${ctx.name}` : "",
+			// Set/increase mode for ability:* and abilityMax:* effects
+			mode: effect.mode,
+			// Pass through any special flags
+			advantage: effect.advantage,
+			disadvantage: effect.disadvantage,
+			setMinimum: effect.setMinimum,
+			setMaximum: effect.setMaximum,
+			conditional: effect.conditional, // Conditional trigger (e.g., "against:undead", "in:darkness")
+			bonusDie: effect.bonusDie,
+			// Pass through scaling properties
+			proficiencyBonus: effect.proficiencyBonus,
+			halfProficiency: effect.halfProficiency,
+			doubleProficiency: effect.doubleProficiency,
+			abilityMod: effect.abilityMod,
+			perLevel: effect.perLevel,
+			perClassLevel: effect.perClassLevel,
+		});
+		return true;
+	}
+
+	/**
+	 * Reverse the defensive-array contribution of a single catalog effect (resistance / immunity /
+	 * vulnerability / conditionImmunity). Named modifiers are removed separately via
+	 * `removeModifiersByFeature(sourceFeatureId)`, so this only handles the ref-counted defensive
+	 * traits. Shared by custom abilities and items.
+	 * @param {object} effect
+	 * @param {string} sourceFeatureId
+	 * @private
+	 */
+	_unapplyCatalogDefensive (effect, sourceFeatureId) {
+		const effectType = effect?.type;
+		if (!effectType) return;
+		if (effectType.startsWith("resistance:")) {
+			const damageType = effectType.replace("resistance:", "");
+			if (this._untrackGrantedDefensiveTrait("resistances", damageType, sourceFeatureId)) {
+				const idx = this._data.resistances.indexOf(damageType);
+				if (idx !== -1) this._data.resistances.splice(idx, 1);
+			}
+		} else if (effectType.startsWith("immunity:")) {
+			const damageType = effectType.replace("immunity:", "");
+			if (this._untrackGrantedDefensiveTrait("immunities", damageType, sourceFeatureId)) {
+				const idx = this._data.immunities.indexOf(damageType);
+				if (idx !== -1) this._data.immunities.splice(idx, 1);
+			}
+		} else if (effectType.startsWith("vulnerability:")) {
+			const damageType = effectType.replace("vulnerability:", "");
+			if (this._untrackGrantedDefensiveTrait("vulnerabilities", damageType, sourceFeatureId)) {
+				const idx = this._data.vulnerabilities.indexOf(damageType);
+				if (idx !== -1) this._data.vulnerabilities.splice(idx, 1);
+			}
+		} else if (effectType.startsWith("conditionImmunity:")) {
+			const condition = effectType.replace("conditionImmunity:", "");
+			if (this._untrackGrantedDefensiveTrait("conditionImmunities", condition, sourceFeatureId)) {
+				const idx = this._data.conditionImmunities.indexOf(condition);
+				if (idx !== -1) this._data.conditionImmunities.splice(idx, 1);
+			}
+		}
+	}
+
+	/**
 	 * Register effects from a custom ability as named modifiers
 	 * @param {object} ability - The custom ability object
 	 * @private
@@ -30392,40 +30610,18 @@ class CharacterSheetState {
 		// Handle effects (numeric modifiers, resistances, etc.)
 		if (ability.effects?.length) {
 			for (const effect of ability.effects) {
-				// Parse the effect type to determine how to register it
 				const effectType = effect.type;
 
-				// Handle resistance effects - add to resistances array
-				if (effectType.startsWith("resistance:")) {
-					const damageType = effectType.replace("resistance:", "");
-					this.addResistance(damageType);
-					this._trackGrantedDefensiveTrait("resistances", damageType, ability.id);
-					continue;
-				}
-
-				// Handle immunity effects - add to immunities array
-				if (effectType.startsWith("immunity:")) {
-					const damageType = effectType.replace("immunity:", "");
-					this.addImmunity(damageType);
-					this._trackGrantedDefensiveTrait("immunities", damageType, ability.id);
-					continue;
-				}
-
-				// Handle vulnerability effects - add to vulnerabilities array
-				if (effectType.startsWith("vulnerability:")) {
-					const damageType = effectType.replace("vulnerability:", "");
-					this.addVulnerability(damageType);
-					this._trackGrantedDefensiveTrait("vulnerabilities", damageType, ability.id);
-					continue;
-				}
-
-				// Handle condition immunity effects
-				if (effectType.startsWith("conditionImmunity:")) {
-					const condition = effectType.replace("conditionImmunity:", "");
-					this.addConditionImmunity(condition);
-					this._trackGrantedDefensiveTrait("conditionImmunities", condition, ability.id);
-					continue;
-				}
+				// Source-agnostic families (defensive arrays, reach, numeric named-modifiers) are
+				// applied by the shared catalog applier. It returns false for active-state types,
+				// which are routed to the custom-ability active-state system below.
+				if (this._applyCatalogEffect(effect, {
+					sourceFeatureId: ability.id,
+					sourceType: "customAbility",
+					name: ability.name,
+					description: ability.description,
+					sourceLabel: "custom ability",
+				})) continue;
 
 				// Handle advantage/disadvantage - these go to active states
 				if (effectType.startsWith("advantage:") || effectType.startsWith("disadvantage:")) {
@@ -30438,7 +30634,6 @@ class CharacterSheetState {
 
 				// Handle extra damage effects - these go to active states for combat integration
 				if (effectType.startsWith("extraDamage:")) {
-					const damageType = effectType.replace("extraDamage:", "");
 					// These need to be in active states to work with combat calculations
 					this._ensureCustomAbilityActiveState(ability);
 					continue;
@@ -30473,47 +30668,6 @@ class CharacterSheetState {
 					}
 					continue;
 				}
-
-				// Handle reach modifier
-				if (effectType === "reach") {
-					// Register as a named modifier that can be picked up
-					this.addNamedModifier({
-						name: `${ability.name}: Reach`,
-						type: "reach",
-						value: effect.value || 5,
-						enabled: true,
-						sourceFeatureId: ability.id,
-						sourceType: "customAbility",
-					});
-					continue;
-				}
-
-				// Standard numeric modifiers
-				this.addNamedModifier({
-					name: `${ability.name}: ${effect.name || effectType}`,
-					type: effectType,
-					value: effect.value || 0,
-					enabled: true,
-					sourceFeatureId: ability.id,
-					sourceType: "customAbility",
-					note: ability.description ? `From custom ability: ${ability.name}` : "",
-					// Set/increase mode for ability:* and abilityMax:* effects
-					mode: effect.mode,
-					// Pass through any special flags
-					advantage: effect.advantage,
-					disadvantage: effect.disadvantage,
-					setMinimum: effect.setMinimum,
-					setMaximum: effect.setMaximum,
-					conditional: effect.conditional, // Conditional trigger (e.g., "against:undead", "in:darkness")
-					bonusDie: effect.bonusDie,
-					// Pass through scaling properties
-					proficiencyBonus: effect.proficiencyBonus,
-					halfProficiency: effect.halfProficiency,
-					doubleProficiency: effect.doubleProficiency,
-					abilityMod: effect.abilityMod,
-					perLevel: effect.perLevel,
-					perClassLevel: effect.perClassLevel,
-				});
 			}
 		}
 
@@ -30813,6 +30967,95 @@ class CharacterSheetState {
 		}
 	}
 
+	// =========================================================================
+	// Item-Granted Effects (custom-item "Modifiers & Effects" — Bug #8)
+	//
+	// Equipped items can carry a `item.effects[]` array using the SAME effect schema as custom
+	// abilities (`_getModifierGroups()`), routed through the SAME `_applyCatalogEffect` pipeline so
+	// items and abilities aggregate identically. Effects are gated on the same activation predicate
+	// as item proficiencies: equipped AND (no attunement required OR attuned). Active-state-only
+	// effect types (combat/size toggles) are intentionally NOT supported for items.
+	// =========================================================================
+
+	/**
+	 * Whether an item's `effects[]` should currently be applied.
+	 * Equipped AND (does not require attunement OR is attuned) — same gate as item proficiencies.
+	 * @param {object} invItem - The inventory wrapper (has `.item`, `.equipped`, `.attuned`).
+	 * @returns {boolean}
+	 * @private
+	 */
+	_isItemEffectsActive (invItem) {
+		return this._isItemProficienciesActive(invItem);
+	}
+
+	/**
+	 * Register an equipped item's catalog effects as named modifiers / defensive traits.
+	 * Idempotent when paired with `_unregisterItemEffects` (called by `_reapplyItemEffects`).
+	 * @param {object} invItem - The inventory wrapper.
+	 * @private
+	 */
+	_registerItemEffects (invItem) {
+		const effects = invItem?.item?.effects;
+		if (!Array.isArray(effects) || !effects.length) return;
+		const itemName = invItem.item?.name || "Item";
+		const sourceId = `item:${invItem.id}`;
+		// Idempotent: clear any prior contribution from THIS item first, so callers that
+		// don't gate on an activation transition (e.g. the equip() alias, or a re-register
+		// after replaceItem) can never double-apply the same item's modifiers.
+		this._unregisterItemEffects(invItem.id);
+		const hasNote = !!(invItem.item?.entries || invItem.item?.description);
+		for (const effect of effects) {
+			// Items support only the source-agnostic catalog families (numeric named-modifiers,
+			// reach, senses, resistances/immunities/etc.). Active-state effect types return false
+			// and are silently skipped (the item modal does not offer them).
+			this._applyCatalogEffect(effect, {
+				sourceFeatureId: sourceId,
+				sourceType: "item",
+				name: itemName,
+				description: hasNote ? itemName : "",
+				sourceLabel: "item",
+			});
+		}
+	}
+
+	/**
+	 * Remove the named modifiers + defensive traits a given item contributed.
+	 * Safe to call even if the item is no longer in inventory (defensive cleanup is skipped then,
+	 * but named modifiers are still purged by sourceFeatureId).
+	 * @param {string} itemId - The inventory wrapper id.
+	 * @private
+	 */
+	_unregisterItemEffects (itemId) {
+		const sourceId = `item:${itemId}`;
+		this.removeModifiersByFeature(sourceId);
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const effects = invItem?.item?.effects;
+		if (Array.isArray(effects)) {
+			for (const effect of effects) {
+				this._unapplyCatalogDefensive(effect, sourceId);
+			}
+		}
+	}
+
+	/**
+	 * Re-derive ALL item-sourced effects from scratch: unregister every item's contribution
+	 * (clearing verbatim-restored named modifiers from a save), then re-register the active ones.
+	 * Called on load and whenever a bulk inventory change may have invalidated the registrations.
+	 * @private
+	 */
+	_reapplyItemEffects () {
+		if (!Array.isArray(this._data.inventory)) return;
+		// Clear first so namedModifiers restored verbatim from a save don't double-apply.
+		for (const inv of this._data.inventory) {
+			this._unregisterItemEffects(inv.id);
+		}
+		for (const inv of this._data.inventory) {
+			if (this._isItemEffectsActive(inv)) {
+				this._registerItemEffects(inv);
+			}
+		}
+	}
+
 	/**
 	 * Get rendered text from item entries for parsing
 	 * @param {object} itemData - The item data object
@@ -30952,31 +31195,7 @@ class CharacterSheetState {
 		const ability = this.getCustomAbility(abilityId);
 		if (ability?.effects) {
 			for (const effect of ability.effects) {
-				if (effect.type.startsWith("resistance:")) {
-					const damageType = effect.type.replace("resistance:", "");
-					if (this._untrackGrantedDefensiveTrait("resistances", damageType, abilityId)) {
-						const idx = this._data.resistances.indexOf(damageType);
-						if (idx !== -1) this._data.resistances.splice(idx, 1);
-					}
-				} else if (effect.type.startsWith("immunity:")) {
-					const damageType = effect.type.replace("immunity:", "");
-					if (this._untrackGrantedDefensiveTrait("immunities", damageType, abilityId)) {
-						const idx = this._data.immunities.indexOf(damageType);
-						if (idx !== -1) this._data.immunities.splice(idx, 1);
-					}
-				} else if (effect.type.startsWith("vulnerability:")) {
-					const damageType = effect.type.replace("vulnerability:", "");
-					if (this._untrackGrantedDefensiveTrait("vulnerabilities", damageType, abilityId)) {
-						const idx = this._data.vulnerabilities.indexOf(damageType);
-						if (idx !== -1) this._data.vulnerabilities.splice(idx, 1);
-					}
-				} else if (effect.type.startsWith("conditionImmunity:")) {
-					const condition = effect.type.replace("conditionImmunity:", "");
-					if (this._untrackGrantedDefensiveTrait("conditionImmunities", condition, abilityId)) {
-						const idx = this._data.conditionImmunities.indexOf(condition);
-						if (idx !== -1) this._data.conditionImmunities.splice(idx, 1);
-					}
-				}
+				this._unapplyCatalogDefensive(effect, abilityId);
 			}
 		}
 
@@ -31735,6 +31954,16 @@ class CharacterSheetState {
 		cm.carryCapacity = 0;
 		cm.carryCapacityMultiplier = 1;
 
+		// Tracks which carryCapacity "size increase" sources have already doubled the
+		// multiplier this pass. A single feature (e.g. "Powerful Build") can be captured
+		// by BOTH the feat registry AND its description text-parse, producing two separate
+		// named-modifiers that share a name but differ in id/sourceFeatureId. Without this
+		// dedupe each one applied `×2`, inflating carry capacity to ×4 (CharacterSheet
+		// bug #11 — TGTT Tortle). Keyed by semantic source (name/note) so the two paths
+		// collapse; truly distinct sources (e.g. Powerful Build + a separate carry-size
+		// feature) still stack. Goliath/Half-Ogre relying solely on the registry keep ×2.
+		const carrySizeIncreaseKeys = new Set();
+
 		// Sum up enabled modifiers
 		this._data.namedModifiers.forEach(mod => {
 			if (!mod.enabled) return;
@@ -31762,7 +31991,14 @@ class CharacterSheetState {
 					if (mod.multiplier) {
 						cm.carryCapacityMultiplier *= mod.multiplier;
 					} else if (mod.sizeIncrease) {
-						cm.carryCapacityMultiplier *= 2; // Each size category doubles capacity
+						// Dedupe by semantic source so a feature captured by both the
+						// registry and its text-parse only doubles once (bug #11).
+						let sizeKey = (mod.name || mod.note || "").toLowerCase().trim();
+						if (!sizeKey) sizeKey = mod.id; // anonymous: cannot be a cross-path dup
+						if (!carrySizeIncreaseKeys.has(sizeKey)) {
+							carrySizeIncreaseKeys.add(sizeKey);
+							cm.carryCapacityMultiplier *= 2; // Each size category doubles capacity
+						}
 					} else {
 						cm.carryCapacity += value;
 					}

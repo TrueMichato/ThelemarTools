@@ -177,6 +177,151 @@ describe("Carrying-capacity breakdown — backs a tooltip whose math adds up", (
 	});
 });
 
+describe("Bug #11 — Powerful Build dedupe (registry + text-parse must not double-count)", () => {
+	// A real TGTT Tortle's "Powerful Build" trait is captured by BOTH the feat registry
+	// (register("Powerful Build")) AND its description text-parse ("count as one size
+	// larger ... for ... carrying capacity"), producing two carryCapacity sizeIncrease
+	// modifiers. Before the fix each doubled capacity → ×4. They must collapse to ×2.
+	const PB_DESC = "You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.";
+
+	it("a Tortle whose Powerful Build has the carry description is ×2, NOT ×4 (standard rule)", () => {
+		const state = mkChar({str: 10, thelemar: false}); // base 150
+		state.addFeature({name: "Powerful Build", source: "TGTT", sourceType: "raceFeature", description: PB_DESC});
+		state.applyClassFeatureEffects();
+		const b = state.getCarryingCapacityBreakdown();
+		expect(b.carryMultiplier).toBe(2); // collapsed, not 4
+		expect(b.total).toBe(300); // 150 × 2 — the user's "400" was a typo
+	});
+
+	it("a Tortle whose Powerful Build has the carry description is ×2, NOT ×4 (Thelemar rule)", () => {
+		const state = mkChar({str: 10, thelemar: true}); // passive Might 10 → base 100
+		state.addFeature({name: "Powerful Build", source: "TGTT", sourceType: "raceFeature", description: PB_DESC});
+		state.applyClassFeatureEffects();
+		const b = state.getCarryingCapacityBreakdown();
+		expect(b.carryMultiplier).toBe(2);
+		expect(b.total).toBe(200); // 100 × 2
+	});
+
+	it("a Goliath relying on the registry alone (no parseable description) stays ×2", () => {
+		const state = mkChar({str: 10, thelemar: false});
+		state.addFeature({name: "Powerful Build", source: "PHB", sourceType: "raceFeature"});
+		state.applyClassFeatureEffects();
+		const b = state.getCarryingCapacityBreakdown();
+		expect(b.carryMultiplier).toBe(2);
+		expect(b.total).toBe(300);
+	});
+
+	it("two genuinely distinct carry-size sources still stack (dedupe is by source, not blanket)", () => {
+		const state = mkChar({str: 10, thelemar: false});
+		state.addFeature({name: "Powerful Build", source: "TGTT", sourceType: "raceFeature", description: PB_DESC});
+		state.addFeature({name: "Titanic Frame", source: "HB", sourceType: "raceFeature", description: "You count as one size larger when determining your carrying capacity."});
+		state.applyClassFeatureEffects();
+		const b = state.getCarryingCapacityBreakdown();
+		// Powerful Build (collapsed ×2) × Titanic Frame (×2) = ×4
+		expect(b.carryMultiplier).toBe(4);
+		expect(b.total).toBe(600);
+	});
+});
+
+describe("Bug #10 — Bag of Holding raises carrying capacity (equipped-gated, post-multiplier)", () => {
+	function bagOfHolding ({equipped = true, quantity = 1} = {}) {
+		return {
+			name: "Bag of Holding",
+			source: "XDMG",
+			_isCustom: false,
+			weight: 15,
+			containerCapacity: {weight: [500], weightless: true},
+			equipped,
+			attuned: false,
+			quantity,
+		};
+	}
+
+	it("an equipped Bag of Holding adds +500 lb of EXTERNAL capacity (not size/PB-multiplied)", () => {
+		const state = mkChar({str: 10, thelemar: false}); // base 150
+		state.addItem(bagOfHolding({equipped: true}));
+		const b = state.getCarryingCapacityBreakdown();
+		expect(b.externalCapacity).toBe(500);
+		expect(b.total).toBe(650); // 150 + 500
+	});
+
+	it("an UNEQUIPPED Bag of Holding contributes nothing", () => {
+		const state = mkChar({str: 10, thelemar: false});
+		state.addItem(bagOfHolding({equipped: false}));
+		const b = state.getCarryingCapacityBreakdown();
+		expect(b.externalCapacity).toBe(0);
+		expect(b.total).toBe(150);
+	});
+
+	it("equipping then unequipping a Bag of Holding adds then reverts the external capacity", () => {
+		const state = mkChar({str: 10, thelemar: false});
+		state.addItem(bagOfHolding({equipped: false}));
+		const itemId = state.getItems()[0].id;
+		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(0);
+		state.setItemEquipped(itemId, true);
+		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(500);
+		state.setItemEquipped(itemId, false);
+		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(0);
+	});
+
+	it("two equipped Bags of Holding stack their external capacity by quantity", () => {
+		const state = mkChar({str: 10, thelemar: false});
+		state.addItem(bagOfHolding({equipped: true, quantity: 2}));
+		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(1000);
+	});
+
+	it("two SEPARATE equipped weightless containers each contribute (summed across entries)", () => {
+		const state = mkChar({str: 10, thelemar: false});
+		state.addItem(bagOfHolding({equipped: true})); // +500
+		state.addItem({
+			name: "Heward's Handy Haversack",
+			source: "XDMG",
+			_isCustom: true,
+			weight: 5,
+			containerCapacity: {weight: [120], weightless: true},
+			equipped: true,
+			quantity: 1,
+		}); // +120
+		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(620);
+	});
+
+	it("CRITICAL: Powerful Build does NOT double the Bag of Holding — (150×2)+500 = 800, not 1300", () => {
+		const state = mkChar({str: 10, thelemar: false}); // base 150
+		state.addFeature({name: "Powerful Build", source: "TGTT", sourceType: "raceFeature", description: "You count as one size larger when determining your carrying capacity."});
+		state.applyClassFeatureEffects();
+		state.addItem(bagOfHolding({equipped: true}));
+		const b = state.getCarryingCapacityBreakdown();
+		expect(b.carryMultiplier).toBe(2);
+		expect(b.externalCapacity).toBe(500);
+		// Body (300) is doubled; the bag's 500 is added AFTER, undoubled.
+		expect(b.total).toBe(800);
+		expect(b.total).not.toBe(1300); // (150 + 500) × 2 would be the bug
+		// push/drag/lift doubles ONLY the body (300×2=600), then adds the undoubled bag (500).
+		expect(b.pushDragLift).toBe(1100);
+		expect(b.pushDragLift).not.toBe(1600); // total×2 would wrongly double the bag
+	});
+
+	it("push/drag/lift doubles only the body capacity, then adds the (undoubled) external capacity", () => {
+		const state = mkChar({str: 10, thelemar: false}); // base 150
+		state.addItem(bagOfHolding({equipped: true}));
+		const b = state.getCarryingCapacityBreakdown();
+		// pushDragLift = body(150)×2 + external(500) = 800
+		expect(b.pushDragLift).toBe(800);
+	});
+
+	it("a mundane (non-weightless) container does NOT grant external capacity", () => {
+		const state = mkChar({str: 10, thelemar: false});
+		state.addItem({
+			name: "Backpack",
+			source: "PHB",
+			weight: 5,
+			containerCapacity: {weight: [30], weightless: false},
+			equipped: true,
+		});
+		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(0);
+	});
+});
+
 describe("Carry tooltip source — itemized, base != total under multipliers", () => {
 	const charsheetSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
 
@@ -212,5 +357,13 @@ describe("Carry tooltip source — itemized, base != total under multipliers", (
 		// And the old misleading template that equated base with the final capacity is gone.
 		expect(charsheetSrc).not.toContain("× 10 = $" + "{carryCapacity}");
 		expect(charsheetSrc).not.toContain("× 15 = $" + "{carryCapacity}");
+	});
+
+	it("Bug #10: the tooltip surfaces external container capacity as a trailing additive term", () => {
+		// Bag of Holding capacity is post-multiplier, so it must render as "+ N lb. (containers)"
+		// rather than a scaling factor — otherwise the displayed math wouldn't add up.
+		expect(tooltipBody).toContain("b.externalCapacity");
+		expect(tooltipBody).toMatch(/if \(b\.externalCapacity\)/);
+		expect(tooltipBody).toMatch(/\(containers\)/);
 	});
 });
