@@ -1054,6 +1054,7 @@ class CharacterSheetPage {
 		document.getElementById("charsheet-btn-multiclass").addEventListener("click", () => this._levelUp?.showMulticlass());
 		document.getElementById("charsheet-btn-quickbuild").addEventListener("click", () => this._quickBuild?.showQuickBuild());
 		document.getElementById("charsheet-btn-xp-add").addEventListener("click", () => this._onXpAdd());
+		document.getElementById("charsheet-btn-xp-set").addEventListener("click", () => this._onXpSet());
 		document.getElementById("charsheet-ipt-xp-add").addEventListener("keydown", (e) => {
 			if (e.key !== "Enter") return;
 			e.preventDefault();
@@ -1809,6 +1810,20 @@ class CharacterSheetPage {
 		if (!xpToAdd) return;
 
 		this._state.addXp(xpToAdd);
+		iptXpAdd.value = 0;
+		this._saveCurrentCharacter();
+		this._renderXpTracking();
+		this._renderLevelUpBanner();
+	}
+
+	_onXpSet () {
+		const iptXpAdd = /** @type {*} */ (document.getElementById("charsheet-ipt-xp-add"));
+		const rawXp = `${iptXpAdd.value}`.trim();
+		// Guard against an empty field clearing XP by accident; an explicit "0" is allowed.
+		if (rawXp === "") return;
+		const xp = Math.max(0, Math.floor(Number(rawXp) || 0));
+
+		this._state.setXp(xp);
 		iptXpAdd.value = 0;
 		this._saveCurrentCharacter();
 		this._renderXpTracking();
@@ -2980,11 +2995,15 @@ class CharacterSheetPage {
 			const effective = breakdown.total;
 			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-score`))).textContent = score;
 			const modCell = /** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-mod`));
-			modCell.innerHTML = this._formatModWithEffective(canonical, effective);
 			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
 			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
 			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
-			modCell.title = tooltipLines.join("\n");
+			const tooltip = tooltipLines.join("\n");
+			// Pass the breakdown as the effective span's tooltip so hovering the
+			// effective (+N) value shows the SAME breakdown as the canonical value
+			// (the inner span title would otherwise override the cell's title).
+			modCell.innerHTML = this._formatModWithEffective(canonical, effective, {titleEffective: tooltip});
+			modCell.title = tooltip;
 		});
 
 		// Update prominent passive scores display
@@ -3006,11 +3025,13 @@ class CharacterSheetPage {
 			const breakdown = this._state.getSaveBreakdown(abl);
 			const effective = breakdown.total;
 			const canonical = breakdown.canonical ?? breakdown.total;
-			const modHtml = this._formatModWithEffective(canonical, effective);
 			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
 			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
 			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
 			const tooltip = tooltipLines.join("\n");
+			// Pass the breakdown as the effective span's tooltip so hovering the
+			// effective (+N) value shows the SAME breakdown as the row title.
+			const modHtml = this._formatModWithEffective(canonical, effective, {titleEffective: tooltip});
 
 			const row = e_({outer: `
 				<div class="charsheet__save-row" data-save="${abl}" title="${tooltip.replace(/"/g, "&quot;")}">
@@ -3063,7 +3084,13 @@ class CharacterSheetPage {
 			const breakdown = this._state.getSkillBreakdown(skillKey);
 			const effective = breakdown.total;
 			const canonical = breakdown.canonical ?? breakdown.total;
-			const modHtml = this._formatModWithEffective(canonical, effective);
+			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
+			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
+			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
+			const skillTooltip = tooltipLines.join("\n");
+			// Pass the breakdown as the effective span's tooltip so hovering the
+			// effective (+N) value shows the SAME breakdown as the row title.
+			const modHtml = this._formatModWithEffective(canonical, effective, {titleEffective: skillTooltip});
 
 			let profClass = "";
 			let profTitle = "Not proficient - Click to toggle proficiency";
@@ -3086,10 +3113,6 @@ class CharacterSheetPage {
 			const defaultAbility = skill.ability || "";
 
 			const customClass = skill.isCustom ? " charsheet__skill-row--custom" : "";
-			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
-			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
-			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
-			const skillTooltip = tooltipLines.join("\n");
 
 			const row = e_({outer: `
 				<div class="charsheet__skill-row${customClass}" data-skill="${skillKey}" data-default-ability="${defaultAbility}" title="${skillTooltip.replace(/"/g, "&quot;")}">
