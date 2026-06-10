@@ -640,7 +640,7 @@ class CharacterSheetFeatures {
 					if (abi === "max" || abi === "choose") return;
 					if (Parser.ABIL_ABVS.includes(abi) && typeof bonus === "number") {
 						const current = this._state.getAbilityBase(abi);
-						this._state.setAbilityBase(abi, Math.min(max, current + bonus));
+						this._state.setAbilityBase(abi, CharacterSheetClassUtils.capAbilityIncrease(current, bonus, max));
 					}
 				});
 			});
@@ -650,8 +650,9 @@ class CharacterSheetFeatures {
 		if (featChoices) {
 			if (featChoices.ability) {
 				const amount = feat.ability?.find(a => a.choose)?.choose?.amount || 1;
+				const cap = feat.ability?.find(a => a.choose)?.max || 20;
 				const current = this._state.getAbilityBase(featChoices.ability);
-				this._state.setAbilityBase(featChoices.ability, Math.min(20, current + amount));
+				this._state.setAbilityBase(featChoices.ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, cap));
 			}
 			if (featChoices.skills?.length) {
 				featChoices.skills.forEach(skill => {
@@ -2275,7 +2276,8 @@ class CharacterSheetFeatures {
 
 					choices.ability.from.forEach(abl => {
 						const currentScore = this._state.getAbilityScore(abl);
-						const newScore = Math.min(20, currentScore + (choices.ability.amount || 1));
+						const cap = choices.ability.max || 20;
+						const newScore = CharacterSheetClassUtils.capAbilityIncrease(currentScore, choices.ability.amount || 1, cap);
 						const btn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-default">${Parser.attAbvToFull(abl)} (${currentScore} → ${newScore})</button>`});
 						btn.addEventListener("click", () => {
 							selected.ability = selected.ability === abl ? null : abl;

@@ -73,8 +73,8 @@ describe("Level-up ASI ↔ Half-Feat score sync", () => {
 			expect(click).not.toBeNull();
 		});
 
-		test("`_renderFeatAbilityButtons` uses cap variable (not hardcoded 20) in the Math.min", () => {
-			expect(LEVELUP_SRC).toMatch(/Math\.min\(cap,\s*currentScore\s*\+\s*amount\)/);
+		test("`_renderFeatAbilityButtons` caps the preview via capAbilityIncrease (no-lower, not a raw Math.min)", () => {
+			expect(LEVELUP_SRC).toMatch(/CharacterSheetClassUtils\.capAbilityIncrease\(currentScore,\s*amount,\s*cap\)/);
 		});
 	});
 });
