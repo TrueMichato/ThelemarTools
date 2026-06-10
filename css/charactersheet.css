@@ -5259,6 +5259,20 @@
 	gap: 0.5rem;
 }
 
+/* S3 (bug #3b): clickable quick-roll affordance for the spell-attack badge.
+   FLAG: css/charactersheet.css is S6-owned; this is the one added rule. */
+.charsheet__spell-attack--clickable {
+	cursor: pointer;
+	transition: filter var(--cs-transition-fast, 0.15s ease), box-shadow var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__spell-attack--clickable:hover,
+.charsheet__spell-attack--clickable:focus-visible {
+	filter: brightness(1.15);
+	box-shadow: 0 0 0 2px var(--cs-primary, var(--rgb-link));
+	outline: none;
+}
+
 .charsheet__combat-spell-group {
 	border-left: 2px solid var(--rgb-border-grey);
 	padding-left: 0.5rem;

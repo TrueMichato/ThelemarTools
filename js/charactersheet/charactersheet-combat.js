@@ -97,6 +97,18 @@ class CharacterSheetCombat {
 		// Initiative roll (Shift=Advantage, Ctrl=Disadvantage)
 		document.getElementById("charsheet-roll-initiative")?.addEventListener("click", (/** @type {*} */ e) => this._rollInitiative(e));
 
+		// Quick spell-attack roll from the Combat-tab "Spell Attack" badge
+		// (Shift=Advantage, Ctrl=Disadvantage). The badge is a static element whose
+		// text/title/class are re-rendered in place, so a single direct listener is safe.
+		const elSpellAttack = document.getElementById("charsheet-combat-spell-attack");
+		elSpellAttack?.addEventListener("click", (/** @type {*} */ e) => this._rollSpellAttack(e));
+		elSpellAttack?.addEventListener("keydown", (/** @type {*} */ e) => {
+			if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+			if (e.repeat) return;
+			e.preventDefault();
+			this._rollSpellAttack(e);
+		});
+
 		// Death save buttons
 		document.getElementById("charsheet-death-save-success")?.addEventListener("click", () => this._rollDeathSave(true));
 		document.getElementById("charsheet-death-save-failure")?.addEventListener("click", () => this._rollDeathSave(false));
@@ -1032,6 +1044,129 @@ class CharacterSheetCombat {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet Combat] post-attack hook error", e);
 		});
+	}
+
+	/**
+	 * Resolve whether the Combat-tab "Spell Attack" badge can perform a flat
+	 * `d20 + bonus` quick roll, and what numeric bonus to use. Mirrors the badge
+	 * display logic in `renderCombatSpells` so the affordance and the roll agree.
+	 *
+	 * @returns {{bonus: (number|null), varies: boolean, gambler: boolean}}
+	 *   - `bonus`: the flat spell-attack bonus to roll (null when not rollable).
+	 *   - `varies`: true for multiclass casters whose classes disagree (no single
+	 *     value to roll — caller should roll from the specific spell/attack entry).
+	 *   - `gambler`: true when spell attacks use a dice formula (Gambler) rather
+	 *     than a flat bonus, so a `d20 + bonus` quick roll does not apply.
+	 */
+	_getSpellAttackRollInfo () {
+		const calcs = this._state.getFeatureCalculations?.();
+		if (calcs?.hasGamblerSpellcasting) return {bonus: null, varies: false, gambler: true};
+
+		const breakdown = this._state.getSpellcastingClassBreakdown?.() || [];
+		if (breakdown.length) {
+			// Gambler cards carry a dice formula rather than a flat bonus — exclude them.
+			const numeric = breakdown
+				.filter(c => !(c.isRolledPrepared && calcs?.gamblerSpellAttackFormula))
+				.map(c => c.attackBonus)
+				.filter(v => Number.isFinite(v));
+			const distinct = [...new Set(numeric)];
+			if (distinct.length === 1) return {bonus: distinct[0], varies: false, gambler: false};
+			if (distinct.length > 1) return {bonus: null, varies: true, gambler: false};
+			return {bonus: null, varies: false, gambler: true};
+		}
+
+		const bonus = this._state.getSpellAttackBonus?.();
+		return {bonus: Number.isFinite(bonus) ? bonus : null, varies: false, gambler: false};
+	}
+
+	/**
+	 * Quick spell-attack roll triggered from the Combat-tab "Spell Attack" badge.
+	 * Mirrors `_rollAttack`'s roll path (advantage/disadvantage from active states +
+	 * shift/ctrl keys, crit/fumble notes, shared dice animation + toast) but uses the
+	 * character's spell attack bonus instead of a weapon's.
+	 * @param {*} event - The triggering click/keyboard event (for shift/ctrl modifiers).
+	 */
+	_rollSpellAttack (event) {
+		const info = this._getSpellAttackRollInfo();
+		if (info.gambler) {
+			JqueryUtil?.doToast?.({type: "info", content: "Spell attacks use a dice formula — roll it from the spell entry."});
+			return;
+		}
+		if (info.varies) {
+			JqueryUtil?.doToast?.({type: "info", content: "Spell attack bonus varies by class — roll from the specific spell or attack."});
+			return;
+		}
+		if (info.bonus == null) return;
+
+		// Advantage/disadvantage from active states/conditions. "attack:spell" is matched
+		// hierarchically by the state engine, so a generic "attack" effect applies too; the
+		// explicit "attack" query is a harmless belt-and-braces mirror of `_rollAttack`.
+		const hasAdvantage = this._state.hasAdvantageFromStates?.("attack:spell")
+			|| this._state.hasAdvantageFromStates?.("attack");
+		const hasDisadvantage = this._state.hasDisadvantageFromStates?.("attack:spell")
+			|| this._state.hasDisadvantageFromStates?.("attack");
+		let stateMode;
+		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
+		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
+
+		// Numeric "+N to attacks" bonuses from active states (generic + spell-specific).
+		const stateAttackBonus = (this._state.getBonusFromStates?.("attack") || 0)
+			+ (this._state.getBonusFromStates?.("attack:spell") || 0);
+		const totalBonus = info.bonus + stateAttackBonus;
+
+		// Spell attacks ARE attacks: pass isAttack so the Thelemar Nat1/Nat20 ±5
+		// check/save rule does not leak into the breakdown.
+		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
+		const total = rollResult.roll + totalBonus;
+
+		const critRange = this._state.getCriticalRange?.() || 20;
+		let resultClass = "";
+		let resultNote = "";
+		if (rollResult.roll >= critRange) {
+			resultClass = "charsheet__dice-result-total--crit";
+			resultNote = "Critical Hit!";
+		} else if (rollResult.roll === 1) {
+			resultClass = "charsheet__dice-result-total--fumble";
+			resultNote = "Critical Miss!";
+		}
+
+		const stateEffectLabel = this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
+		const modeLabel = this._page.getModeLabel(rollResult.mode);
+		this._page.showDiceResult({
+			title: `Spell Attack${modeLabel}${stateEffectLabel}`,
+			roll: rollResult.roll,
+			modifier: totalBonus,
+			total,
+			resultClass,
+			resultNote,
+			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus),
+		});
+	}
+
+	/**
+	 * Toggle the interactive quick-roll affordance on the Combat-tab spell-attack
+	 * badge. Adds button semantics + a roll hint when a flat `d20 + bonus` roll is
+	 * available; removes them (and restores plain-badge semantics) otherwise.
+	 * @param {HTMLElement|null} el - The `#charsheet-combat-spell-attack` element.
+	 */
+	_applySpellAttackRollAffordance (el) {
+		if (!el) return;
+		const info = this._getSpellAttackRollInfo();
+		const isRollable = info.bonus != null;
+		el.classList.toggle("charsheet__spell-attack--clickable", isRollable);
+		if (isRollable) {
+			el.setAttribute("role", "button");
+			el.setAttribute("tabindex", "0");
+			el.style.cursor = "pointer";
+			// Preserve any multiclass breakdown title while signalling the roll action.
+			const baseTitle = el.title && !el.title.includes("Roll spell attack") ? `${el.title} • ` : "";
+			el.title = `${baseTitle}Roll spell attack (Shift = Advantage, Ctrl = Disadvantage)`;
+		} else {
+			el.classList.remove("charsheet__spell-attack--clickable");
+			el.removeAttribute("role");
+			el.removeAttribute("tabindex");
+			el.style.cursor = "";
+		}
 	}
 
 	// =========================================================================
@@ -2387,6 +2522,10 @@ class CharacterSheetCombat {
 				if (elSpellDc) elSpellDc.textContent = spellDC;
 			}
 		}
+
+		// Make the spell-attack badge a clickable quick-roll when a flat bonus is
+		// rollable (single-class / agreeing multiclass; not Gambler/"Varies").
+		this._applySpellAttackRollAffordance(elSpellAttack);
 
 		// Filter to combat-relevant spells: cantrips + prepared leveled spells
 		const combatSpells = spells.filter(spell => {
