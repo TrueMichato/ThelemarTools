@@ -5,11 +5,11 @@
  *  - OFF by default (no AC/speed/save effect until the player withdraws into the shell);
  *  - surfaced as an activation affordance via getActivatableFeatures();
  *  - while ACTIVE: +4 AC, advantage on STR/CON saves, speed 0, disadvantage on DEX saves,
- *    prone (defensive attack effects), and no reactions;
- *  - deactivating reverts every effect.
+ *    the real Prone condition (defensive attack effects + Conditions UI), and no reactions;
+ *  - deactivating reverts every effect (and removes the Prone condition it added).
  *
- * These assert REAL mechanics (AC delta, walk speed, advantage/disadvantage flags), not
- * existence-only / level counts.
+ * These assert REAL mechanics (AC delta, walk speed, advantage/disadvantage flags,
+ * the Prone condition), not existence-only / level counts.
  */
 
 import "./setup.js";
@@ -57,12 +57,13 @@ describe("Shell Defense — detection & affordance", () => {
 		expect(effs.some(e => e.type === "advantage" && e.target === "save:con")).toBe(true);
 		expect(effs.some(e => e.type === "setSpeed" && e.value === 0)).toBe(true);
 		expect(effs.some(e => e.type === "disadvantage" && e.target === "save:dex")).toBe(true);
-		// Prone (defensive attack effects) while withdrawn.
-		expect(effs.some(e => e.type === "disadvantage" && e.target === "attack")).toBe(true);
-		expect(effs.some(e => e.type === "advantage" && e.target === "meleeAttacksAgainst")).toBe(true);
-		expect(effs.some(e => e.type === "disadvantage" && e.target === "rangedAttacksAgainst")).toBe(true);
 		// "Can't take reactions" surfaced as a note.
 		expect(effs.some(e => e.type === "note" && /reaction/i.test(e.value || ""))).toBe(true);
+		// Prone is modeled as the REAL condition (addsConditions), not inlined attack effects,
+		// so it surfaces in the Conditions UI rather than being a hidden side effect.
+		expect(CharacterSheetState.ACTIVE_STATE_TYPES.shellDefense.addsConditions).toContain("Prone");
+		expect(effs.some(e => e.target === "attack")).toBe(false);
+		expect(effs.some(e => /Against$/.test(e.target || ""))).toBe(false);
 	});
 
 	test("appears in getActivatableFeatures() so the sheet exposes an activation affordance", () => {
@@ -113,6 +114,17 @@ describe("Shell Defense — effects WHILE ACTIVE", () => {
 		expect(state.hasAdvantageFromStates("save:con")).toBe(true);
 	});
 
+	test("activating adds the real Prone condition (surfaced in Conditions), giving attack disadvantage", () => {
+		expect(state.getConditionNames().map(n => n.toLowerCase())).not.toContain("prone");
+
+		state.activateState("shellDefense");
+
+		// The actual condition is present (Conditions UI), not just hidden attack effects.
+		expect(state.getConditionNames().map(n => n.toLowerCase())).toContain("prone");
+		// Prone's own effects compose: disadvantage on your attacks.
+		expect(state.hasDisadvantageFromStates("attack")).toBe(true);
+	});
+
 	test("does NOT grant advantage on DEX saves or disadvantage on STR/CON saves", () => {
 		state.activateState("shellDefense");
 		expect(state.hasAdvantageFromStates("save:dex")).toBe(false);
@@ -157,12 +169,13 @@ describe("Shell Defense — activation through the sheet's affordance path", () 
 });
 
 describe("Shell Defense — deactivation reverts everything", () => {
-	test("deactivating removes the AC, speed, and save effects", () => {
+	test("deactivating removes the AC, speed, save effects, and the Prone condition", () => {
 		const baseAc = state.getAc();
 		const baseWalk = state.getWalkSpeed();
 
 		state.activateState("shellDefense");
 		expect(state.getAc()).toBe(baseAc + 4);
+		expect(state.getConditionNames().map(n => n.toLowerCase())).toContain("prone");
 
 		state.deactivateState("shellDefense");
 
@@ -172,6 +185,81 @@ describe("Shell Defense — deactivation reverts everything", () => {
 		expect(state.hasDisadvantageFromStates("save:dex")).toBe(false);
 		expect(state.hasAdvantageFromStates("save:str")).toBe(false);
 		expect(state.hasAdvantageFromStates("save:con")).toBe(false);
+		// The Prone condition Shell Defense added is gone.
+		expect(state.getConditionNames().map(n => n.toLowerCase())).not.toContain("prone");
+		expect(state.hasDisadvantageFromStates("attack")).toBe(false);
+	});
+
+	test("deactivating does NOT remove a Prone condition the character already had", () => {
+		// Knocked prone independently, BEFORE shell defense.
+		state.addCondition("Prone");
+		expect(state.getConditionNames().map(n => n.toLowerCase())).toContain("prone");
+
+		state.activateState("shellDefense");
+		state.deactivateState("shellDefense");
+
+		// Shell Defense only manages the condition IT added; the pre-existing prone stays.
+		expect(state.getConditionNames().map(n => n.toLowerCase())).toContain("prone");
+	});
+});
+
+describe("Shell Defense — part a: stale persisted passive modifier is migrated away on load", () => {
+	test("a pre-fix save with an enabled Shell Defense AC modifier loads with that modifier stripped", () => {
+		// Simulate a character SAVED before Shell Defense became activatable: the
+		// description's "+4 bonus to AC" was registered as an ENABLED passive named
+		// modifier and persisted. loadFromJson restores namedModifiers verbatim, so
+		// without a migration the +4 AC would leak while the toggle is OFF.
+		const json = state.toJson();
+		json.namedModifiers = [
+			...(json.namedModifiers || []),
+			{name: "Shell Defense", type: "ac", value: 4, enabled: true, note: "From Shell Defense"},
+		];
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(json);
+
+		// The stale modifier is gone…
+		expect(loaded.getNamedModifiers().some(m => m.name === "Shell Defense")).toBe(false);
+		// …and the state is OFF, so AC matches an identical character WITHOUT the trait.
+		const baseline = new CharacterSheetState();
+		baseline.setAbilityBase("str", 12);
+		baseline.setAbilityBase("dex", 12);
+		baseline.setAbilityBase("con", 12);
+		expect(loaded.isStateTypeActive("shellDefense")).toBe(false);
+		expect(loaded.getAc()).toBe(baseline.getAc());
+	});
+
+	test("the migration is idempotent and leaves unrelated modifiers untouched", () => {
+		const json = state.toJson();
+		json.namedModifiers = [
+			{name: "Shell Defense", type: "ac", value: 4, enabled: true, note: "From Shell Defense"},
+			{name: "Ring of Protection", type: "ac", value: 1, enabled: true, note: "From Ring of Protection"},
+		];
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(json);
+		// Running load again must be a no-op (no resurrection, no double-strip side effects).
+		loaded.loadFromJson(loaded.toJson());
+
+		const names = loaded.getNamedModifiers().map(m => m.name);
+		expect(names).not.toContain("Shell Defense");
+		expect(names).toContain("Ring of Protection");
+	});
+});
+
+describe("Shell Defense — round-trip while active", () => {
+	test("saving while active then loading and deactivating still removes the Prone condition", () => {
+		state.activateState("shellDefense");
+		expect(state.getConditionNames().map(n => n.toLowerCase())).toContain("prone");
+
+		// Round-trip: the _managedConditions tracking rides on the active-state object.
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		expect(loaded.isStateTypeActive("shellDefense")).toBe(true);
+		expect(loaded.getConditionNames().map(n => n.toLowerCase())).toContain("prone");
+
+		loaded.deactivateState("shellDefense");
+		expect(loaded.getConditionNames().map(n => n.toLowerCase())).not.toContain("prone");
 	});
 });
 
