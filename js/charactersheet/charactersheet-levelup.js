@@ -4597,6 +4597,7 @@ class CharacterSheetLevelUp {
 
 		if (hpMethod === "roll") {
 			hpRollDie = RollerUtil.randomise(hitDie);
+			void this._page.pAnimateDamageDice?.([{sides: hitDie, values: [hpRollDie]}]);
 			this._page.showDiceResult({
 				title: "HP Roll",
 				total: Math.max(1, hpRollDie + conMod),

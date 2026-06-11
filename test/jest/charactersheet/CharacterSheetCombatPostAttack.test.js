@@ -32,6 +32,10 @@ function makeCombat (stateOverrides = {}) {
 		saveCharacter: () => {},
 		renderCharacter: () => {},
 		showDiceResult: () => {},
+		// Arcane Shot damage now rolls the REAL dice (so the animation shows the
+		// correct dice, not a phantom d20); the parser uses `_page.rollDice`.
+		rollDice: (n, sides) => n * Math.ceil(sides / 2),
+		pAnimateDamageDice: () => {},
 	};
 	// `_applyArcaneShot` refreshes the Combat Resources panel (Arcane Shot was
 	// folded in there), which touches the DOM; stub it out in the node test

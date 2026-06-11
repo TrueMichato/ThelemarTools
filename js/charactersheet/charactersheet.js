@@ -8332,10 +8332,8 @@ class CharacterSheetPage {
 				const total = effectiveRoll + bonus;
 				const success = total >= currentDc;
 
-				// Show animated dice if enabled
-				if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
-					await this._showAnimatedDice(20, effectiveRoll, advantage, false);
-				}
+				// Show animated dice — adv shows both physical d20s.
+				await this.pAnimateD20({roll: effectiveRoll, roll1, roll2: roll2 ?? roll1, mode: advantage ? "advantage" : "normal"});
 
 				const rollText = advantage
 					? `Rolls: ${roll1}, ${roll2} (took ${effectiveRoll}) + ${bonus} = <strong>${total}</strong> vs DC ${currentDc}`
@@ -8463,6 +8461,7 @@ class CharacterSheetPage {
 		this._renderDeathSaves();
 		this._renderConditions(); // Update bloodied condition display
 
+		await this.pAnimateD20({roll, mode: "normal"});
 		this._showDiceResult("Death Save", roll, result);
 	}
 
@@ -8999,6 +8998,15 @@ class CharacterSheetPage {
 		const soundCheckbox = document.getElementById("charsheet-dice-sound");
 		const skipCondCheckbox = document.getElementById("charsheet-dice-skip-conditional");
 		const themeButtons = document.querySelectorAll(".charsheet__dice-theme-btn");
+		const materialSel = document.getElementById("charsheet-dice-material");
+		const textureSel = document.getElementById("charsheet-dice-texture");
+		const customColorCb = document.getElementById("charsheet-dice-custom-color");
+		const colorInput = document.getElementById("charsheet-dice-color");
+		const colorTextInput = document.getElementById("charsheet-dice-color-text");
+		const volumeInput = document.getElementById("charsheet-dice-volume");
+		const resetCustomBtn = document.getElementById("charsheet-dice-reset-custom");
+
+		const Dice3d = (/** @type {*} */ (globalThis)).CharacterSheetDice3d;
 
 		// Update checkbox state from settings
 		const updateCheckbox = () => {
@@ -9007,6 +9015,15 @@ class CharacterSheetPage {
 			// Roll sound defaults ON (only off when explicitly disabled).
 			if (soundCheckbox) (/** @type {*} */ (soundCheckbox)).checked = settings.diceSound !== false;
 			if (skipCondCheckbox) (/** @type {*} */ (skipCondCheckbox)).checked = !!settings.skipConditionalPrompt;
+			if (materialSel) (/** @type {*} */ (materialSel)).value = settings.diceMaterial || "";
+			if (textureSel) (/** @type {*} */ (textureSel)).value = settings.diceTexture || "";
+			if (customColorCb) (/** @type {*} */ (customColorCb)).checked = !!settings.diceCustomColor;
+			if (colorInput && settings.diceColor) (/** @type {*} */ (colorInput)).value = settings.diceColor;
+			if (colorTextInput && settings.diceColorText) (/** @type {*} */ (colorTextInput)).value = settings.diceColorText;
+			if (volumeInput) {
+				const vol = Number.isFinite(Number(settings.diceSoundVolume)) ? Number(settings.diceSoundVolume) : 0.35;
+				(/** @type {*} */ (volumeInput)).value = String(Math.round(vol * 100));
+			}
 		};
 
 		// Update theme button selection
@@ -9040,6 +9057,10 @@ class CharacterSheetPage {
 				updateCheckbox();
 				updateThemeSelection();
 				positionDropdown();
+				// Warm the audio engine off the roll critical path so the first
+				// real roll-with-sound doesn't jank constructing the AudioContext
+				// and synthesising the noise buffer synchronously.
+				try { Dice3d?.warmAudio?.(); } catch (ignored) { /* best-effort */ }
 			}
 			dropdown.classList.toggle("active", !isOpen);
 			btn.classList.toggle("active", !isOpen);
@@ -9079,6 +9100,81 @@ class CharacterSheetPage {
 			this._saveCurrentCharacter();
 			updateThemeSelection();
 		}));
+
+		// Material / texture selects (3D-only appearance overrides; legacy ignores).
+		if (materialSel) {
+			materialSel.addEventListener("change", (e) => {
+				e.stopPropagation();
+				this._state.setSetting("diceMaterial", (/** @type {*} */ (e.target)).value || null);
+				this._saveCurrentCharacter();
+			});
+		}
+		if (textureSel) {
+			textureSel.addEventListener("change", (e) => {
+				e.stopPropagation();
+				this._state.setSetting("diceTexture", (/** @type {*} */ (e.target)).value || null);
+				this._saveCurrentCharacter();
+			});
+		}
+
+		// Custom-colour toggle + face/number colour pickers.
+		if (customColorCb) {
+			customColorCb.addEventListener("change", (e) => {
+				e.stopPropagation();
+				this._state.setSetting("diceCustomColor", (/** @type {*} */ (e.target)).checked);
+				this._saveCurrentCharacter();
+			});
+		}
+		if (colorInput) {
+			colorInput.addEventListener("change", (e) => {
+				e.stopPropagation();
+				this._state.setSetting("diceColor", (/** @type {*} */ (e.target)).value);
+				this._saveCurrentCharacter();
+			});
+		}
+		if (colorTextInput) {
+			colorTextInput.addEventListener("change", (e) => {
+				e.stopPropagation();
+				this._state.setSetting("diceColorText", (/** @type {*} */ (e.target)).value);
+				this._saveCurrentCharacter();
+			});
+		}
+
+		// Sound volume slider (0..1 stored).
+		if (volumeInput) {
+			volumeInput.addEventListener("input", (e) => {
+				e.stopPropagation();
+				const pct = Number((/** @type {*} */ (e.target)).value);
+				const vol = Number.isFinite(pct) ? Math.max(0, Math.min(1, pct / 100)) : 0.35;
+				this._state.setSetting("diceSoundVolume", vol);
+				this._saveCurrentCharacter();
+			});
+		}
+
+		// Reset all customisation back to theme defaults.
+		if (resetCustomBtn) {
+			resetCustomBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._state.setSetting("diceMaterial", null);
+				this._state.setSetting("diceTexture", null);
+				this._state.setSetting("diceCustomColor", false);
+				this._state.setSetting("diceColor", null);
+				this._state.setSetting("diceColorText", null);
+				this._state.setSetting("diceSoundVolume", 0.35);
+				this._saveCurrentCharacter();
+				updateCheckbox();
+			});
+		}
+
+		// One-time first-gesture audio warm-up: covers the case where the player
+		// rolls (e.g. via a hotkey/button) before ever opening the dice dropdown.
+		const warmOnce = () => {
+			try { Dice3d?.warmAudio?.(); } catch (ignored) { /* best-effort */ }
+			window.removeEventListener("pointerdown", warmOnce);
+			window.removeEventListener("keydown", warmOnce);
+		};
+		window.addEventListener("pointerdown", warmOnce, {once: false});
+		window.addEventListener("keydown", warmOnce, {once: false});
 
 		// Close dropdown when clicking outside
 		document.addEventListener("click", (e) => {
@@ -9994,9 +10090,7 @@ class CharacterSheetPage {
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
-		if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
-			await this._showAnimatedDice(20, rollResult.roll, rollResult.mode === "advantage", rollResult.mode === "disadvantage");
-		}
+		await this.pAnimateD20(rollResult);
 
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Check${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
@@ -10146,9 +10240,7 @@ class CharacterSheetPage {
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
-		if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
-			await this._showAnimatedDice(20, rollResult.roll, rollResult.mode === "advantage", rollResult.mode === "disadvantage");
-		}
+		await this.pAnimateD20(rollResult);
 
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Save${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
@@ -10260,9 +10352,7 @@ class CharacterSheetPage {
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
-		if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice) {
-			await this._showAnimatedDice(20, rollResult.roll, rollResult.mode === "advantage", rollResult.mode === "disadvantage");
-		}
+		await this.pAnimateD20(rollResult);
 
 		this._showDiceResult(
 			`${skillName}${abilityLabel} Check${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
@@ -10390,6 +10480,7 @@ class CharacterSheetPage {
 
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
+		await this.pAnimateD20(rollResult);
 		this._showDiceResult(
 			`Initiative${this._getModeLabel(rollResult.mode)}`,
 			totalWithDice,
@@ -10497,6 +10588,7 @@ class CharacterSheetPage {
 		const bladesongDamageStr = bladesongBonus > 0 ? ` + ${bladesongBonus} (Bladesong INT)` : "";
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
+		await this.pAnimateD20(rollResult);
 		this._showDiceResult(
 			`${attack.name}${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			attackTotalWithDice,
@@ -10541,24 +10633,51 @@ class CharacterSheetPage {
 		return this._getModeLabel(mode);
 	}
 
+	/**
+	 * Show a roll-result toast. This is a PURE result toast and never animates
+	 * dice on its own — roll handlers are responsible for animating the CORRECT
+	 * dice exactly once (via {@link pAnimateD20} / {@link pAnimateDamageDice})
+	 * BEFORE calling this. (Previously the object form auto-fired a single d20
+	 * animation, which force-settled and replaced the real roll's animation —
+	 * the "phantom trailing d20".)
+	 */
 	showDiceResult (opts) {
 		if (typeof opts === "string") {
 			// Legacy call: showDiceResult(title, total, breakdown)
 			this._showDiceResult(...arguments);
 		} else {
-			// New object format
+			// New object format — pure toast.
 			const breakdown = opts.subtitle || `1d20 (${opts.roll}) ${opts.modifier >= 0 ? "+" : ""}${opts.modifier}`;
-
-			// Check if animated dice is enabled and we have dice info
-			if ((/** @type {*} */ (this._state.getSettings()))?.animatedDice && opts.roll !== undefined) {
-				this._showAnimatedDice(opts.diceType || 20, opts.roll, opts.isAdvantage, opts.isDisadvantage)
-					.then(() => {
-						this._showDiceResult(opts.title, opts.total, breakdown, opts.resultClass, opts.resultNote);
-					});
-			} else {
-				this._showDiceResult(opts.title, opts.total, breakdown, opts.resultClass, opts.resultNote);
-			}
+			this._showDiceResult(opts.title, opts.total, breakdown, opts.resultClass, opts.resultNote);
 		}
+	}
+
+	/**
+	 * Animate a d20 roll, honouring advantage/disadvantage by showing BOTH
+	 * physical dice (`roll1` and `roll2`) rather than just the kept value.
+	 *
+	 * Every d20 roll handler should funnel through this so the visual reflects
+	 * the real roll. Settings-gated, sound + reduced-motion + 3D→legacy
+	 * fallback handled by {@link pAnimateDiceSpec}. Never throws.
+	 *
+	 * @param {{roll:number, roll1?:number, roll2?:number, mode?:string}} rollResult
+	 * @returns {Promise} Resolves when the animation is complete.
+	 */
+	async pAnimateD20 (rollResult) {
+		if (!rollResult || typeof rollResult.roll !== "number") return;
+		const isAdvantage = rollResult.mode === "advantage";
+		const isDisadvantage = rollResult.mode === "disadvantage";
+		// Adv/dis physically rolls two dice; show both so the count is honest.
+		const values = (isAdvantage || isDisadvantage)
+			&& typeof rollResult.roll1 === "number"
+			&& typeof rollResult.roll2 === "number"
+			? [rollResult.roll1, rollResult.roll2]
+			: [rollResult.roll];
+		return this.pAnimateDiceSpec({
+			groups: [{sides: 20, values}],
+			isAdvantage,
+			isDisadvantage,
+		});
 	}
 
 	/**
@@ -10633,10 +10752,11 @@ class CharacterSheetPage {
 
 		const Dice3d = (/** @type {*} */ (globalThis)).CharacterSheetDice3d;
 
-		// Roll sound (default on). Best-effort; never blocks the animation.
+		// Roll sound (default on, player-tunable volume). Best-effort; never blocks.
 		if (settings.diceSound !== false && Dice3d && typeof Dice3d.playRollSound === "function") {
 			const dieCount = cleanGroups.reduce((acc, g) => acc + g.values.length, 0);
-			Dice3d.playRollSound(0.35, dieCount);
+			const volume = Number.isFinite(Number(settings.diceSoundVolume)) ? Number(settings.diceSoundVolume) : 0.35;
+			Dice3d.playRollSound(volume, dieCount);
 		}
 
 		// Honour reduced-motion: skip the visual entirely (sound already played).
@@ -10645,12 +10765,13 @@ class CharacterSheetPage {
 		}
 
 		const theme = settings.diceTheme || "standard";
+		const appearance = this._buildDiceAppearance(settings);
 
 		// Preferred path: real 3D physics dice, landing on our exact values.
 		try {
 			const dice3d = this._getDice3d();
 			if (dice3d && cleanGroups.every(g => dice3d.canRender(g.sides))) {
-				await dice3d.pRollMany({groups: cleanGroups, theme});
+				await dice3d.pRollMany({groups: cleanGroups, theme, appearance});
 				return;
 			}
 		} catch (e) {
@@ -10674,6 +10795,45 @@ class CharacterSheetPage {
 	 */
 	async pAnimateDamageDice (groups) {
 		return this.pAnimateDiceSpec({groups});
+	}
+
+	/**
+	 * Translate the player's dice-customisation settings into a `CharacterSheetDice3d`
+	 * appearance override, or `null` when nothing is customised (use the theme as-is).
+	 * All keys are optional so a partial customisation (e.g. only a material) layers
+	 * cleanly on top of the selected theme.
+	 * @param {*} settings
+	 * @returns {{background?:string, foreground?:string, outline?:string, texture?:string, material?:string}|null}
+	 */
+	_buildDiceAppearance (settings) {
+		const s = settings || {};
+		const a = {};
+		// Custom face/number colours only apply when explicitly enabled, so the
+		// stored colour values don't silently override every theme.
+		if (s.diceCustomColor && s.diceColor) {
+			a.background = s.diceColor;
+			a.outline = this._darkenHex(s.diceColor, 0.45);
+		}
+		if (s.diceCustomColor && s.diceColorText) a.foreground = s.diceColorText;
+		if (s.diceTexture) a.texture = s.diceTexture;
+		if (s.diceMaterial) a.material = s.diceMaterial;
+		return Object.keys(a).length ? a : null;
+	}
+
+	/**
+	 * Darken a `#rrggbb` hex colour by `factor` (0..1). Returns the input unchanged
+	 * if it isn't a parseable 6-digit hex. Used to derive a sensible die outline
+	 * from a custom face colour.
+	 */
+	_darkenHex (hex, factor = 0.4) {
+		const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+		if (!m) return hex;
+		const n = parseInt(m[1], 16);
+		const f = Math.max(0, Math.min(1, 1 - factor));
+		const r = Math.round(((n >> 16) & 0xff) * f);
+		const g = Math.round(((n >> 8) & 0xff) * f);
+		const b = Math.round((n & 0xff) * f);
+		return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 	}
 
 	/**

@@ -990,6 +990,7 @@ class CharacterSheetCombat {
 
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
+		void this._page.pAnimateD20?.(rollResult);
 		this._page.showDiceResult({
 			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}`,
 			roll: rollResult.roll,
@@ -1132,6 +1133,7 @@ class CharacterSheetCombat {
 
 		const stateEffectLabel = this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
+		void this._page.pAnimateD20?.(rollResult);
 		this._page.showDiceResult({
 			title: `Spell Attack${modeLabel}${stateEffectLabel}`,
 			roll: rollResult.roll,
@@ -1325,15 +1327,19 @@ class CharacterSheetCombat {
 		const dmg = this._extractArcaneShotDamage(shot);
 		const dcNote = saveInfo?.dc != null ? ` — DC ${saveInfo.dc} ${saveInfo.ability} save` : "";
 		if (dmg) {
-			let total = 0;
-			try { total = Renderer.dice.parseRandomise2(dmg.dice) || 0; } catch (e) { total = 0; }
+			// Roll the actual dice so the animation shows the real dice (not a d20).
+			const roll = this._parseDamage(dmg.dice);
+			const total = roll.total || 0;
+			const animGroups = [];
+			this._pushDiceGroup(animGroups, roll);
+			void this._page.pAnimateDamageDice?.(animGroups);
 			this._page.showDiceResult?.({
 				title: `${shot.name}${dcNote}`,
 				roll: total,
 				modifier: 0,
 				total,
 				resultNote: dmg.type ? `${dmg.type} damage` : "",
-				subtitle: dmg.dice,
+				subtitle: roll.rolls?.length ? `${dmg.dice} → [${roll.rolls.join(", ")}] = ${total}` : dmg.dice,
 			});
 		} else {
 			JqueryUtil.doToast({type: "info", content: `${shot.name} applied${dcNote}.`});
@@ -1892,6 +1898,7 @@ class CharacterSheetCombat {
 		const total = rollResult.roll + mod + diceTotal;
 
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
+		void this._page.pAnimateD20?.(rollResult);
 		this._page.showDiceResult({
 			title: `Initiative${modeLabel}`,
 			roll: rollResult.roll,
@@ -2031,6 +2038,7 @@ class CharacterSheetCombat {
 		} else {
 			// Roll death save
 			const roll = this._page.rollDice(1, 20);
+			void this._page.pAnimateD20?.({roll, mode: "normal"});
 
 			// C9: Disciplined Survivor adds proficiency bonus to death saves
 			const calc = this._state.getFeatureCalculations?.() || {};
@@ -3514,6 +3522,7 @@ class CharacterSheetCombat {
 			const total = result.roll + bonus;
 			const bonusStr = bonus >= 0 ? `+${bonus}` : `${bonus}`;
 			const modeNote = mode !== "normal" ? ` (${mode})` : "";
+			void this._page.pAnimateD20?.(result);
 			this._page._showDiceResult?.(
 				`${feature.name} — Attack Roll`,
 				total,

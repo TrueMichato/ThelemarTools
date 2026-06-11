@@ -288,6 +288,56 @@
 									<button class="charsheet__dice-theme-btn charsheet__dice-theme-btn--radiant" data-theme="radiant" title="Radiant Holy"></button>
 								</div>
 							</div>
+							<div class="charsheet__dice-customize" id="charsheet-dice-customize">
+								<div class="charsheet__dice-theme-label">Customize (3D)</div>
+								<label class="charsheet__dice-custom-row" title="Surface finish of the 3D dice.">
+									<span>Material</span>
+									<select id="charsheet-dice-material">
+										<option value="">Theme default</option>
+										<option value="plastic">Plastic</option>
+										<option value="metal">Metal</option>
+										<option value="glass">Glass</option>
+										<option value="wood">Wood</option>
+										<option value="none">Matte</option>
+									</select>
+								</label>
+								<label class="charsheet__dice-custom-row" title="Surface pattern of the 3D dice.">
+									<span>Texture</span>
+									<select id="charsheet-dice-texture">
+										<option value="">Theme default</option>
+										<option value="none">Smooth</option>
+										<option value="marble">Marble</option>
+										<option value="glitter">Glitter</option>
+										<option value="stars">Stars</option>
+										<option value="ice">Ice</option>
+										<option value="fire">Fire</option>
+										<option value="water">Water</option>
+										<option value="skulls">Skulls</option>
+										<option value="stainedglass">Stained Glass</option>
+										<option value="speckles">Speckles</option>
+										<option value="paper">Paper</option>
+										<option value="leopard">Leopard</option>
+										<option value="cloudy">Cloudy</option>
+									</select>
+								</label>
+								<label class="charsheet__dice-toggle-option" title="Override the theme's colours with your own.">
+									<input type="checkbox" id="charsheet-dice-custom-color">
+									<span>Custom colours</span>
+								</label>
+								<label class="charsheet__dice-custom-row" title="Face colour of the dice.">
+									<span>Face</span>
+									<input type="color" id="charsheet-dice-color" value="#c0392b">
+								</label>
+								<label class="charsheet__dice-custom-row" title="Number / pip colour of the dice.">
+									<span>Numbers</span>
+									<input type="color" id="charsheet-dice-color-text" value="#ffffff">
+								</label>
+								<label class="charsheet__dice-custom-row" title="Volume of the dice roll sound.">
+									<span>Volume</span>
+									<input type="range" id="charsheet-dice-volume" min="0" max="100" value="35">
+								</label>
+								<button class="charsheet__dice-custom-reset" id="charsheet-dice-reset-custom">Reset customization</button>
+							</div>
 						</div>
 					</div>
 				</div>

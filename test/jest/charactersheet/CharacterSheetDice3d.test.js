@@ -221,6 +221,60 @@ describe("CharacterSheetDice3d", () => {
 			expect(d._buildColorset("does-not-exist").background)
 				.toBe(CharacterSheetDice3d.THEMES.standard.background);
 		});
+
+		test("appearance override replaces only the supplied fields (#5)", () => {
+			const d = new CharacterSheetDice3d({});
+			const cs = d._buildColorset("standard", {
+				background: "#123456",
+				foreground: "#abcdef",
+				outline: "#000000",
+				texture: "stars",
+				material: "metal",
+			});
+			expect(cs.background).toBe("#123456");
+			expect(cs.foreground).toBe("#abcdef");
+			expect(cs.outline).toBe("#000000");
+			expect(cs.edge).toBe("#000000");
+			expect(cs.texture).toBe("stars");
+			expect(cs.material).toBe("metal");
+			// Tagged as a customised colorset so the signature differs from the bare theme.
+			expect(cs.name).toContain("custom");
+		});
+
+		test("partial appearance override keeps the theme's other fields (#5)", () => {
+			const d = new CharacterSheetDice3d({});
+			const base = CharacterSheetDice3d.THEMES.standard;
+			const cs = d._buildColorset("standard", {material: "glass"});
+			expect(cs.material).toBe("glass");
+			// Untouched fields still come from the theme.
+			expect(cs.background).toBe(base.background);
+			expect(cs.foreground).toBe(base.foreground);
+			expect(cs.texture).toBe(base.texture);
+		});
+
+		test("_colorsetSig differs when appearance changes (drives updateConfig) (#5)", () => {
+			const d = new CharacterSheetDice3d({});
+			const a = CharacterSheetDice3d._colorsetSig(d._buildColorset("standard"));
+			const b = CharacterSheetDice3d._colorsetSig(d._buildColorset("standard", {background: "#010203"}));
+			expect(a).not.toBe(b);
+		});
+	});
+
+	// --- appearance threading through pRollMany (#5) -------------------------
+	describe("appearance threading", () => {
+		test("pRollMany applies a custom appearance via updateConfig", async () => {
+			const factory = makeFakeFactory();
+			const d = new CharacterSheetDice3d({diceBoxFactory: factory});
+			await d.pRollMany({
+				groups: [{sides: 20, values: [11]}],
+				theme: "standard",
+				appearance: {background: "#0a0b0c", material: "metal"},
+			});
+			const applied = factory._calls.updateConfig.find(c => c.theme_customColorset);
+			expect(applied).toBeTruthy();
+			expect(applied.theme_customColorset.background).toBe("#0a0b0c");
+			expect(applied.theme_customColorset.material).toBe("metal");
+		});
 	});
 
 	// --- happy path ---------------------------------------------------------
@@ -336,6 +390,100 @@ describe("CharacterSheetDice3d", () => {
 			expect(() => d.destroy()).not.toThrow();
 		});
 	});
+
+	// --- audio caching / warming (#6 — first-roll jank) ---------------------
+	describe("roll sound audio (cached + warmed)", () => {
+		let origAudio;
+		let origWebkit;
+		let createBufferCalls;
+
+		function installFakeAudio () {
+			createBufferCalls = 0;
+			class FakeBufferSource {
+				constructor () { this.buffer = null; }
+				connect () {}
+				start () {}
+				stop () {}
+			}
+			class FakeAudioContext {
+				constructor () {
+					this.state = "running";
+					this.currentTime = 0;
+					this.sampleRate = 44100;
+					this.destination = {};
+				}
+
+				createBuffer (channels, frames) {
+					createBufferCalls++;
+					const data = new Float32Array(frames);
+					return {getChannelData: () => data};
+				}
+
+				createBufferSource () { return new FakeBufferSource(); }
+				createBiquadFilter () { return {type: "", frequency: {value: 0}, Q: {value: 0}, connect: () => {}}; }
+				createGain () { return {gain: {value: 0}, connect: () => {}}; }
+				resume () {}
+			}
+			origAudio = global.AudioContext;
+			origWebkit = global.webkitAudioContext;
+			global.AudioContext = FakeAudioContext;
+			globalThis.AudioContext = FakeAudioContext;
+			global.webkitAudioContext = FakeAudioContext;
+			globalThis.webkitAudioContext = FakeAudioContext;
+		}
+
+		beforeEach(() => {
+			// Reset the static audio cache so each test starts cold.
+			CharacterSheetDice3d._audioCtx = null;
+			CharacterSheetDice3d._noiseBuffer = null;
+			CharacterSheetDice3d._noiseBufferCtx = null;
+			installFakeAudio();
+		});
+
+		afterEach(() => {
+			global.AudioContext = origAudio;
+			globalThis.AudioContext = origAudio;
+			global.webkitAudioContext = origWebkit;
+			globalThis.webkitAudioContext = origWebkit;
+			CharacterSheetDice3d._audioCtx = null;
+			CharacterSheetDice3d._noiseBuffer = null;
+			CharacterSheetDice3d._noiseBufferCtx = null;
+		});
+
+		test("warmAudio creates the context + noise buffer exactly once", () => {
+			CharacterSheetDice3d.warmAudio();
+			CharacterSheetDice3d.warmAudio();
+			expect(createBufferCalls).toBe(1);
+			expect(CharacterSheetDice3d._audioCtx).toBeTruthy();
+			expect(CharacterSheetDice3d._noiseBuffer).toBeTruthy();
+		});
+
+		test("playRollSound reuses the cached buffer across many rolls (no regen)", () => {
+			CharacterSheetDice3d.playRollSound(0.4, 3);
+			CharacterSheetDice3d.playRollSound(0.4, 5);
+			CharacterSheetDice3d.playRollSound(0.4, 1);
+			// The synthesized noise buffer is built ONCE and reused — the fix for
+			// the first-roll jank (was: regenerated per die, per roll).
+			expect(createBufferCalls).toBe(1);
+		});
+
+		test("warming then rolling does not rebuild the buffer", () => {
+			CharacterSheetDice3d.warmAudio();
+			expect(createBufferCalls).toBe(1);
+			CharacterSheetDice3d.playRollSound(0.35, 2);
+			expect(createBufferCalls).toBe(1);
+		});
+
+		test("playRollSound never throws when audio is unavailable", () => {
+			global.AudioContext = undefined;
+			globalThis.AudioContext = undefined;
+			global.webkitAudioContext = undefined;
+			globalThis.webkitAudioContext = undefined;
+			CharacterSheetDice3d._audioCtx = null;
+			expect(() => CharacterSheetDice3d.playRollSound(0.5, 4)).not.toThrow();
+			expect(() => CharacterSheetDice3d.warmAudio()).not.toThrow();
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -362,15 +510,17 @@ async function _pAnimateDiceSpecReplica ({groups, isAdvantage = false, isDisadva
 	const Dice3d = globalThis.CharacterSheetDice3d;
 	if (settings.diceSound !== false && Dice3d && typeof Dice3d.playRollSound === "function") {
 		const dieCount = cleanGroups.reduce((acc, g) => acc + g.values.length, 0);
-		Dice3d.playRollSound(0.35, dieCount);
+		const volume = Number.isFinite(Number(settings.diceSoundVolume)) ? Number(settings.diceSoundVolume) : 0.35;
+		Dice3d.playRollSound(volume, dieCount);
 	}
 	if (Dice3d && typeof Dice3d.isReducedMotion === "function" && Dice3d.isReducedMotion()) return;
 
 	const theme = settings.diceTheme || "standard";
+	const appearance = this._buildDiceAppearance(settings);
 	try {
 		const dice3d = this._getDice3d();
 		if (dice3d && cleanGroups.every(g => dice3d.canRender(g.sides))) {
-			await dice3d.pRollMany({groups: cleanGroups, theme});
+			await dice3d.pRollMany({groups: cleanGroups, theme, appearance});
 			return;
 		}
 	} catch (e) {
@@ -380,12 +530,27 @@ async function _pAnimateDiceSpecReplica ({groups, isAdvantage = false, isDisadva
 	await this._showLegacyDice(primary.sides, primary.values[0], isAdvantage, isDisadvantage);
 }
 
-function makeHarness ({dice3d = undefined, getDice3dThrows = false, theme = "gold", animatedDice = true, diceSound = undefined} = {}) {
+// Faithful replica of the production `_buildDiceAppearance(settings)` helper.
+function _buildDiceAppearanceReplica (settings) {
+	const s = settings || {};
+	const a = {};
+	if (s.diceCustomColor && s.diceColor) {
+		a.background = s.diceColor;
+		a.outline = "#000000"; // production derives via _darkenHex; value irrelevant here
+	}
+	if (s.diceCustomColor && s.diceColorText) a.foreground = s.diceColorText;
+	if (s.diceTexture) a.texture = s.diceTexture;
+	if (s.diceMaterial) a.material = s.diceMaterial;
+	return Object.keys(a).length ? a : null;
+}
+
+function makeHarness ({dice3d = undefined, getDice3dThrows = false, theme = "gold", animatedDice = true, diceSound = undefined, extraSettings = {}} = {}) {
 	const calls = {getDice3d: 0, pRollMany: [], legacy: [], sound: []};
-	const settings = {diceTheme: theme, animatedDice};
+	const settings = {diceTheme: theme, animatedDice, ...extraSettings};
 	if (diceSound !== undefined) settings.diceSound = diceSound;
 	const harness = {
 		_state: {getSettings: () => settings},
+		_buildDiceAppearance: _buildDiceAppearanceReplica,
 		_getDice3d () {
 			calls.getDice3d++;
 			if (getDice3dThrows) throw new Error("getDice3d threw");
@@ -436,6 +601,37 @@ describe("CharacterSheet.pAnimateDiceSpec boundary contract", () => {
 		expect(body).toMatch(/pRollMany/);
 		expect(body).toMatch(/catch/);
 		expect(body).toMatch(/_showLegacyDice/);
+		// #5 — settings-driven appearance + tunable sound volume are threaded.
+		expect(body).toMatch(/_buildDiceAppearance/);
+		expect(body).toMatch(/appearance/);
+		expect(body).toMatch(/diceSoundVolume/);
+	});
+
+	test("source-pin: showDiceResult is a PURE toast (no animation) (#1)", () => {
+		const src = readFileSync(resolve(_REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		const match = src.match(/\n\tshowDiceResult \(opts\) \{[\s\S]*?\n\t\}/);
+		expect(match).not.toBeNull();
+		const body = match[0];
+		// Must NOT animate dice on its own — that was the phantom-d20 bug.
+		expect(body).not.toMatch(/_showAnimatedDice/);
+		expect(body).not.toMatch(/pAnimateD20/);
+		expect(body).not.toMatch(/pAnimateDiceSpec/);
+		expect(body).not.toMatch(/pAnimateDamageDice/);
+		// Still routes to the toast renderer.
+		expect(body).toMatch(/_showDiceResult/);
+	});
+
+	test("source-pin: pAnimateD20 builds a 2-value group for adv/dis else 1 (#2)", () => {
+		const src = readFileSync(resolve(_REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		const match = src.match(/async pAnimateD20 \(rollResult\) \{[\s\S]*?\n\t\}/);
+		expect(match).not.toBeNull();
+		const body = match[0];
+		expect(body).toMatch(/advantage/);
+		expect(body).toMatch(/disadvantage/);
+		expect(body).toMatch(/roll1/);
+		expect(body).toMatch(/roll2/);
+		expect(body).toMatch(/sides: 20/);
+		expect(body).toMatch(/pAnimateDiceSpec/);
 	});
 
 	test("no-op (no 3D, no legacy, no sound) when animatedDice is off", async () => {
@@ -476,8 +672,47 @@ describe("CharacterSheet.pAnimateDiceSpec boundary contract", () => {
 		const {harness, calls} = makeHarness({dice3d, theme: "gold"});
 		const groups = [{sides: 4, values: [1, 3, 2]}];
 		await expect(_pAnimateDiceSpecReplica.call(harness, {groups})).resolves.toBeUndefined();
-		expect(rollCalls).toEqual([{groups: [{sides: 4, values: [1, 3, 2]}], theme: "gold"}]);
+		expect(rollCalls).toEqual([{groups: [{sides: 4, values: [1, 3, 2]}], theme: "gold", appearance: null}]);
 		expect(calls.legacy.length).toBe(0);
+	});
+
+	test("threads a custom appearance + sound volume from settings (#5)", async () => {
+		const rollCalls = [];
+		const dice3d = {canRender: () => true, pRollMany: async (a) => { rollCalls.push(a); }};
+		const {harness} = makeHarness({
+			dice3d,
+			theme: "standard",
+			extraSettings: {
+				diceSoundVolume: 0.8,
+				diceCustomColor: true,
+				diceColor: "#112233",
+				diceColorText: "#ffeedd",
+				diceMaterial: "metal",
+				diceTexture: "stars",
+			},
+		});
+		await _pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 20, values: [12]}]});
+		expect(rollCalls).toHaveLength(1);
+		expect(rollCalls[0].appearance).toEqual({
+			background: "#112233",
+			outline: "#000000",
+			foreground: "#ffeedd",
+			material: "metal",
+			texture: "stars",
+		});
+		expect(soundCalls[0].vol).toBe(0.8);
+	});
+
+	test("custom colours are ignored unless diceCustomColor is enabled (#5)", async () => {
+		const rollCalls = [];
+		const dice3d = {canRender: () => true, pRollMany: async (a) => { rollCalls.push(a); }};
+		const {harness} = makeHarness({
+			dice3d,
+			extraSettings: {diceColor: "#112233", diceColorText: "#ffeedd", diceMaterial: "wood"},
+		});
+		await _pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 20, values: [12]}]});
+		// Material still applies; colours suppressed because the toggle is off.
+		expect(rollCalls[0].appearance).toEqual({material: "wood"});
 	});
 
 	test("missing 3D helper falls back to legacy with the primary die and resolves", async () => {
@@ -497,5 +732,65 @@ describe("CharacterSheet.pAnimateDiceSpec boundary contract", () => {
 		const {harness, calls} = makeHarness({getDice3dThrows: true});
 		await expect(_pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 8, values: [5]}]})).resolves.toBeUndefined();
 		expect(calls.legacy.length).toBe(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// pAnimateD20 (#2): advantage/disadvantage must show TWO physical dice.
+// Faithful replica + source-pin (above) keep this honest against production.
+// ---------------------------------------------------------------------------
+async function _pAnimateD20Replica (rollResult) {
+	if (!rollResult || typeof rollResult.roll !== "number") return;
+	const isAdvantage = rollResult.mode === "advantage";
+	const isDisadvantage = rollResult.mode === "disadvantage";
+	const values = (isAdvantage || isDisadvantage)
+		&& typeof rollResult.roll1 === "number"
+		&& typeof rollResult.roll2 === "number"
+		? [rollResult.roll1, rollResult.roll2]
+		: [rollResult.roll];
+	return this.pAnimateDiceSpec({groups: [{sides: 20, values}], isAdvantage, isDisadvantage});
+}
+
+describe("CharacterSheet.pAnimateD20 (advantage/disadvantage → 2 dice)", () => {
+	function makeD20Harness () {
+		const specCalls = [];
+		const harness = {pAnimateDiceSpec: async (spec) => { specCalls.push(spec); }};
+		return {harness, specCalls};
+	}
+
+	test("normal roll → single d20 value", async () => {
+		const {harness, specCalls} = makeD20Harness();
+		await _pAnimateD20Replica.call(harness, {roll: 14, roll1: 14, roll2: 9, mode: "normal"});
+		expect(specCalls).toHaveLength(1);
+		expect(specCalls[0].groups).toEqual([{sides: 20, values: [14]}]);
+		expect(specCalls[0].isAdvantage).toBe(false);
+		expect(specCalls[0].isDisadvantage).toBe(false);
+	});
+
+	test("advantage → both dice, flagged advantage", async () => {
+		const {harness, specCalls} = makeD20Harness();
+		await _pAnimateD20Replica.call(harness, {roll: 18, roll1: 18, roll2: 7, mode: "advantage"});
+		expect(specCalls[0].groups).toEqual([{sides: 20, values: [18, 7]}]);
+		expect(specCalls[0].isAdvantage).toBe(true);
+	});
+
+	test("disadvantage → both dice, flagged disadvantage", async () => {
+		const {harness, specCalls} = makeD20Harness();
+		await _pAnimateD20Replica.call(harness, {roll: 5, roll1: 5, roll2: 16, mode: "disadvantage"});
+		expect(specCalls[0].groups).toEqual([{sides: 20, values: [5, 16]}]);
+		expect(specCalls[0].isDisadvantage).toBe(true);
+	});
+
+	test("adv/dis with a missing second die falls back to one value", async () => {
+		const {harness, specCalls} = makeD20Harness();
+		await _pAnimateD20Replica.call(harness, {roll: 11, mode: "advantage"});
+		expect(specCalls[0].groups).toEqual([{sides: 20, values: [11]}]);
+	});
+
+	test("no-op for a non-numeric roll", async () => {
+		const {harness, specCalls} = makeD20Harness();
+		await _pAnimateD20Replica.call(harness, {mode: "advantage"});
+		await _pAnimateD20Replica.call(harness, null);
+		expect(specCalls).toHaveLength(0);
 	});
 });
