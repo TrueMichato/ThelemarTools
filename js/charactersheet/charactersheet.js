@@ -6109,8 +6109,8 @@ class CharacterSheetPage {
 					<strong>Hunter's Prey:</strong>
 					<span class="badge badge-info" style="font-size: 1em; padding: 5px 10px;">🏹 ${currentName}</span>
 				</div>
-				<p class="ve-muted ve-small mb-0">${HUNTERS_PREY_EFFECT[currentOption] || ""}</p>
-				<p class="ve-muted ve-small mb-0"><em>Change your Hunter's Prey option on a short or long rest.</em></p>`;
+				<p class="ve-small mb-0">${HUNTERS_PREY_EFFECT[currentOption] || ""}</p>
+				<p class="ve-small mb-0"><em>Change your Hunter's Prey option on a short or long rest.</em></p>`;
 			container.appendChild(block);
 		}
 
