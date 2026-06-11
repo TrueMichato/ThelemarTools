@@ -967,7 +967,6 @@ class CharacterSheetCustomAbilities {
 		this.render();
 		this._sheet._updateAllCalculations?.();
 		this._sheet._renderActiveStates?.();
-		this._sheet._renderOverviewAbilities?.();
 		this._sheet._combatModule?.renderCombatStates?.();
 		this._sheet._combat?.renderCombatActions?.();
 		this._sheet._renderCharacter?.(); // Update size/reach display
@@ -979,7 +978,6 @@ class CharacterSheetCustomAbilities {
 		if (state.useCustomAbility(id)) {
 			this.render();
 			this._sheet._updateAllCalculations?.();
-			this._sheet._renderOverviewAbilities?.();
 			this._sheet._renderResources?.();
 			this._sheet._combat?.renderCombatActions?.();
 			this._sheet._saveCurrentCharacter?.();
@@ -998,7 +996,6 @@ class CharacterSheetCustomAbilities {
 		if (state.removeCustomAbility(id)) {
 			this.render();
 			this._sheet._updateAllCalculations?.();
-			this._sheet._renderOverviewAbilities?.();
 			this._sheet._renderResources?.();
 			this._sheet._combat?.renderCombatActions?.();
 			this._sheet._saveCurrentCharacter?.();
@@ -1030,7 +1027,6 @@ class CharacterSheetCustomAbilities {
 		if (newId) {
 			this.render();
 			this._sheet._updateAllCalculations?.();
-			this._sheet._renderOverviewAbilities?.();
 			this._sheet._renderResources?.();
 			this._sheet._combat?.renderCombatActions?.();
 			this._sheet._saveCurrentCharacter?.();
@@ -2472,7 +2468,6 @@ class CharacterSheetCustomAbilities {
 			closeModal();
 			this.render();
 			this._sheet._updateAllCalculations?.();
-			this._sheet._renderOverviewAbilities?.();
 			this._sheet._renderResources?.();
 			this._sheet._combat?.renderCombatActions?.();
 			this._sheet._saveCurrentCharacter?.();
