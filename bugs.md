@@ -3,7 +3,70 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 15 — Dice dropdown polish, more effects, Thelemar Dice, preset fixes
+
+All four items live on the single cohesive **dice customization surface** (the 🎲 header
+dropdown). One session owns all of them. Files: `charactersheet.html` (dice dropdown
+markup ~L245-360), `css/charactersheet.css` (`.charsheet__dice-*` rules ~L1074-1300+),
+`js/charactersheet/charactersheet.js` (`_initDicePicker` ~L8999-9230, preset methods
+`_getDicePresets`/`_saveDicePreset`/`_applyDicePreset`/`_deleteDicePreset`/`_renderDicePresets`
+~L10933-11043, `_buildDiceAppearance` ~L10887, `_showLegacyDice` themeColors ~L11051),
+`js/charactersheet/charactersheet-dice3d.js` (`THEMES` ~L52-74).
+
+- **R15-1 (CSS/JS) — Dropdown clips at bottom + doesn't follow on scroll.** The 🎲
+  dropdown (`.charsheet__dice-dropdown`) is `position: fixed` with NO `max-height` /
+  `overflow-y`, and is positioned ONCE on open via `positionDropdown()` (`_initDicePicker`,
+  top = `btnRect.bottom + 8`). Two symptoms: (a) it has grown tall enough (themes +
+  customize + presets) that its bottom can extend below the viewport and is unreachable
+  ("hides the bottom"); (b) being `fixed` and positioned only at open-time, it stays at a
+  stale screen coordinate when the page scrolls (disconnected from the button).
+  FIX: give the dropdown a `max-height` bounded by the viewport (`calc(100vh - …)`) with
+  `overflow-y: auto`, and reposition/clamp it intelligently — clamp `top` so the dropdown
+  never overflows the bottom (open upward / shift up when there isn't room below), and
+  reposition (or close) on scroll/resize so it tracks the button. Verify in-browser at a
+  short viewport that the full dropdown (incl. presets + Save) is reachable, and that
+  scrolling keeps it anchored to the 🎲 button.
+
+- **R15-2 (CSS/markup) — Special-Effects theme rows ordered/laid-out weirdly.** Under the
+  "Special Effects" label the buttons are split across THREE separate
+  `.charsheet__dice-theme-options` flex rows of uneven counts (6, then 4, then the 4 R14
+  additions), producing a ragged grid. FIX: present the special-effect swatches as ONE
+  uniform flow (single `flex-wrap` container or a fixed-column grid) so they wrap evenly,
+  and give them a sensible, stable order. Keep the "Theme" (solid colours) row separate
+  from "Special Effects". Don't break the `data-theme` attributes or the
+  `updateThemeSelection()` active-swatch query.
+
+- **R15-3 (JS/CSS) — Add "Thelemar Dice" + more dice/effects.** Add a new built-in theme
+  **`thelemar`**: body/background `#005E66`, numbers/foreground `#d9b257`, **metallic
+  material** (`material: "metal"`), with a sensible `outline` (darker teal, e.g. derived
+  from `#005E66`) and a fitting `texture`. Register it in BOTH:
+  `CharacterSheetDice3d.THEMES` (3D) AND `_showLegacyDice` `themeColors` (2D fallback), add
+  a swatch button in `charactersheet.html` (with `data-theme="thelemar"`, gold-on-teal
+  swatch) + swatch CSS class in `css/charactersheet.css`. Also add a handful MORE
+  themes/special effects (the user wants "many more dice / more special effects") — propose
+  3-5 additional cohesive themes built on the already-vendored textures/materials, each
+  wired the same three places (THEMES + legacy + swatch + CSS). Keep names/titles tasteful.
+
+- **R15-4 (JS) — Preset list should PREPEND, and the "stuck custom dice" selection bug.**
+  Two parts:
+  (a) **Prepend on save.** `_saveDicePreset` does `presets.push(entry)` so new presets land
+  at the BOTTOM. Change so a newly-saved preset is added at the TOP of the list (and
+  `_renderDicePresets` renders newest-first), "with its colours and name above". (Upsert by
+  name should still work — on re-save of an existing name, move it to the top.)
+  (b) **REAL BUG — custom dice "always chosen", can't pick another.** Once custom colours
+  are enabled (creating/applying a custom dice sets `diceCustomColor: true`),
+  `_buildDiceAppearance` ALWAYS applies the custom face/number colours regardless of which
+  theme swatch is clicked — so after making a custom die, clicking a different theme has no
+  visible effect (the custom override wins). The theme-swatch click handler
+  (`_initDicePicker` ~L9110) sets `diceTheme` but never clears `diceCustomColor`. FIX:
+  selecting a normal theme/special-effect swatch must turn OFF the custom-colour override
+  (`setSetting("diceCustomColor", false)`, uncheck the box, refresh controls) so the chosen
+  theme actually takes effect. Picking a preset that itself carries custom colours should
+  still apply them (preset is an explicit choice). Net behaviour: theme swatch = use theme
+  (clears custom); custom-colour checkbox / preset-with-custom = use custom. Verify
+  in-browser: make a custom red die, then click the green swatch → dice render green.
+
+bugs.md is orchestrator-owned — the session must NOT edit it.
 
 ## Closed Bugs
 
