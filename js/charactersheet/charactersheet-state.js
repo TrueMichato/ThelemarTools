@@ -2688,8 +2688,10 @@ const FeatureEffectRegistry = {
 			// Shell Defense is NOT a passive/always-on modifier — it is an
 			// ACTIVATABLE state (see ACTIVE_STATE_TYPES.shellDefense and the explicit
 			// detection block in detectActivatableFeature). Its effects (+4 AC, speed 0,
-			// advantage on STR/CON saves, disadvantage on DEX saves, prone) apply ONLY
-			// while the player withdraws into the shell, so nothing is registered here.
+			// advantage on STR/CON saves, disadvantage on DEX saves, and the Prone
+			// condition) apply ONLY while the player withdraws into the shell, so
+			// nothing is registered here. A load migration (_migrateShellDefenseModifiers)
+			// also strips any passive AC modifier persisted by pre-fix saves.
 		]);
 		this.register("Claws", [
 			{type: "unarmedStrike", damage: "1d6", damageType: "slashing"},
@@ -4004,6 +4006,14 @@ class CharacterSheetState {
 		// base, which leaked a permanent fly speed. Runs after _migrateModifiers.
 		this._migrateConditionalSpeedModifiers();
 
+		// Migrate Shell Defense (Tortle): older saves persisted its "+4 bonus to AC"
+		// as an ENABLED passive named modifier. Shell Defense is now a fully
+		// activatable state (ACTIVE_STATE_TYPES.shellDefense) that registers ZERO
+		// passive modifiers, so any such persisted modifier is a stale always-on
+		// leak that survives the load round-trip (namedModifiers are restored
+		// verbatim). Strip it so the trait contributes nothing until activated.
+		this._migrateShellDefenseModifiers();
+
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
 
@@ -4414,6 +4424,41 @@ class CharacterSheetState {
 				if (!mod.conditional) mod.conditional = parsedMod.conditional;
 				mod.enabled = false;
 			}
+		});
+	}
+
+	/**
+	 * Strip stale passive Shell Defense (Tortle) modifiers on load.
+	 *
+	 * Shell Defense is now modeled exclusively as an activatable state
+	 * (ACTIVE_STATE_TYPES.shellDefense): its +4 AC, save, speed-0, and prone
+	 * effects apply ONLY while the creature is withdrawn into its shell, and
+	 * `_processFeatureModifiers` skips the trait so no passive modifier is ever
+	 * registered. Characters saved BEFORE that fix persisted the description's
+	 * "+4 bonus to AC" as an ENABLED named modifier, and because `loadFromJson`
+	 * restores `namedModifiers` verbatim the always-on AC leak survived the
+	 * round-trip (the trait kept buffing AC while the toggle was OFF).
+	 *
+	 * Remove every named modifier originating from the Shell Defense feature
+	 * (matched by the feature link, the "From Shell Defense" note, or the
+	 * modifier name). Idempotent: once stripped there is nothing left to match,
+	 * and fresh builds never create such a modifier in the first place.
+	 */
+	_migrateShellDefenseModifiers () {
+		if (!this._data.namedModifiers?.length) return;
+
+		const shellFeatureIds = new Set(
+			(this._data.features || [])
+				.filter(f => f.name === "Shell Defense")
+				.map(f => f.id),
+		);
+
+		this._data.namedModifiers = this._data.namedModifiers.filter(mod => {
+			const isShellDefense = (mod.sourceFeatureId && shellFeatureIds.has(mod.sourceFeatureId))
+				|| mod.name === "Shell Defense"
+				|| /^Shell Defense\b/.test(mod.name || "")
+				|| /\bFrom Shell Defense\b/.test(mod.note || "");
+			return !isShellDefense;
 		});
 	}
 
@@ -33649,12 +33694,14 @@ class CharacterSheetState {
 				{type: "advantage", target: "save:con"},
 				{type: "setSpeed", target: "all", value: 0},
 				{type: "disadvantage", target: "save:dex"},
-				// While withdrawn you are prone (rules-correct prone effect set).
-				{type: "disadvantage", target: "attack"},
-				{type: "advantage", target: "meleeAttacksAgainst"},
-				{type: "disadvantage", target: "rangedAttacksAgainst"},
 				{type: "note", value: "You can't take reactions. The only action you can take is a bonus action to emerge from your shell."},
 			],
+			// While withdrawn you are genuinely prone: apply the real Prone condition
+			// (surfaced in the Conditions UI) rather than inlining its attack effects.
+			// Prone's own CONDITION_EFFECTS supply disadvantage on your attacks and the
+			// melee-advantage / ranged-disadvantage against you, so they compose here
+			// without double-counting. Added on activate, removed on deactivate.
+			addsConditions: ["Prone"],
 			duration: "Until you emerge (bonus action)",
 			endConditions: ["Emerge from shell (bonus action)"],
 			resourceName: null,
@@ -36831,6 +36878,9 @@ class CharacterSheetState {
 			// Apply tempHp effects on reactivation
 			this._applyTempHpFromState(existing);
 
+			// Re-apply any conditions this state grants (e.g. Shell Defense → Prone).
+			this._applyStateAddedConditions(existing, stateType);
+
 			// Sync max + current HP for any hpMaxIncrease effects on this state.
 			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
 
@@ -36841,6 +36891,9 @@ class CharacterSheetState {
 		// Apply tempHp effects on initial activation
 		const newState = this._data.activeStates.find(s => s.id === stateId);
 		if (newState) this._applyTempHpFromState(newState);
+
+		// Apply any conditions this state grants (e.g. Shell Defense → Prone).
+		if (newState) this._applyStateAddedConditions(newState, stateType);
 
 		// Sync max + current HP for any hpMaxIncrease effects on this state.
 		if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
@@ -36888,6 +36941,48 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Apply any conditions an active state grants on activation (e.g. Shell
+	 * Defense → Prone). Only conditions this activation ACTUALLY added (i.e.
+	 * `addCondition` returned true — the condition wasn't already present) are
+	 * recorded on the state instance's `_managedConditions`, so deactivation
+	 * never strips a condition the character already had by other means (e.g.
+	 * being knocked prone). `_managedConditions` rides on the active-state object
+	 * and therefore round-trips through `toJson`/`loadFromJson`.
+	 * @param {object} stateInstance - The active-state instance being activated.
+	 * @param {object} stateType - The ACTIVE_STATE_TYPES definition (may carry addsConditions).
+	 * @private
+	 */
+	_applyStateAddedConditions (stateInstance, stateType) {
+		if (!stateInstance || !Array.isArray(stateType?.addsConditions) || !stateType.addsConditions.length) return;
+		if (!Array.isArray(stateInstance._managedConditions)) stateInstance._managedConditions = [];
+		for (const cond of stateType.addsConditions) {
+			const condObj = this._normalizeCondition(cond);
+			// Don't double-track a condition this state already owns (re-activation).
+			const alreadyManaged = stateInstance._managedConditions.some(c =>
+				c.name?.toLowerCase() === condObj.name.toLowerCase() && c.source === condObj.source,
+			);
+			if (alreadyManaged) continue;
+			const added = this.addCondition(condObj);
+			if (added) stateInstance._managedConditions.push(condObj);
+		}
+	}
+
+	/**
+	 * Remove the conditions an active state added (see `_applyStateAddedConditions`).
+	 * Removes ONLY the conditions tracked on `_managedConditions`, leaving any
+	 * pre-existing/independently-applied conditions intact, then clears the list.
+	 * @param {object} stateInstance - The active-state instance being deactivated/removed.
+	 * @private
+	 */
+	_removeStateAddedConditions (stateInstance) {
+		if (!Array.isArray(stateInstance?._managedConditions) || !stateInstance._managedConditions.length) return;
+		for (const condObj of stateInstance._managedConditions) {
+			this.removeCondition(condObj);
+		}
+		stateInstance._managedConditions = [];
+	}
+
+	/**
 	 * Apply temporary HP from a state's effects when it activates.
 	 * Temp HP doesn't stack — only take the higher value.
 	 * @param {object} state - The active state object
@@ -36919,6 +37014,8 @@ class CharacterSheetState {
 			const oldMax = this._data.hp.max || 0;
 			const involvesHpMaxIncrease = this._stateContributesHpMaxIncrease(state);
 			state.active = false;
+			// Remove any conditions this state added (e.g. Shell Defense → Prone).
+			this._removeStateAddedConditions(state);
 			// If this state contributed an hpMaxIncrease, recompute max so the cap drops.
 			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
 		}
@@ -36946,6 +37043,8 @@ class CharacterSheetState {
 			const oldMax = this._data.hp.max || 0;
 			const target = this._data.activeStates[index];
 			const involvesHpMaxIncrease = this._stateContributesHpMaxIncrease(target);
+			// Remove any conditions this state added (e.g. Shell Defense → Prone).
+			this._removeStateAddedConditions(target);
 			this._data.activeStates.splice(index, 1);
 			// Recompute max in case the removed state contributed hpMaxIncrease.
 			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
