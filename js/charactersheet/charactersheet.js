@@ -1139,6 +1139,9 @@ class CharacterSheetPage {
 		// Dice settings picker
 		this._initDicePicker();
 
+		// Mirror core-rollbox rolls into the sheet's 3D dice + roll log
+		this._initRollboxDiceHook();
+
 		// Secondary header collapse state
 		this._initSecondaryHeader();
 
@@ -9005,6 +9008,8 @@ class CharacterSheetPage {
 		const colorTextInput = document.getElementById("charsheet-dice-color-text");
 		const volumeInput = document.getElementById("charsheet-dice-volume");
 		const resetCustomBtn = document.getElementById("charsheet-dice-reset-custom");
+		const presetNameInput = document.getElementById("charsheet-dice-preset-name");
+		const presetSaveBtn = document.getElementById("charsheet-dice-preset-save");
 
 		const Dice3d = (/** @type {*} */ (globalThis)).CharacterSheetDice3d;
 
@@ -9033,6 +9038,14 @@ class CharacterSheetPage {
 			document.querySelector(`.charsheet__dice-theme-btn[data-theme="${currentTheme}"]`)?.classList.add("active");
 		};
 
+		// Expose a single refresh hook so preset application (which mutates several
+		// settings at once) can re-sync every dropdown control in one call.
+		this._refreshDicePickerControls = () => {
+			updateCheckbox();
+			updateThemeSelection();
+			this._renderDicePresets();
+		};
+
 		// Position dropdown relative to button
 		const positionDropdown = () => {
 			const btnRect = btn.getBoundingClientRect();
@@ -9056,6 +9069,7 @@ class CharacterSheetPage {
 			if (!isOpen) {
 				updateCheckbox();
 				updateThemeSelection();
+				this._renderDicePresets();
 				positionDropdown();
 				// Warm the audio engine off the roll critical path so the first
 				// real roll-with-sound doesn't jank constructing the AudioContext
@@ -9166,6 +9180,28 @@ class CharacterSheetPage {
 			});
 		}
 
+		// Save the current customisation as a named preset.
+		if (presetSaveBtn) {
+			const doSavePreset = (e) => {
+				e?.stopPropagation?.();
+				const name = String(presetNameInput?.value || "").trim();
+				if (!name) {
+					presetNameInput?.focus();
+					return;
+				}
+				if (this._saveDicePreset(name) && presetNameInput) presetNameInput.value = "";
+			};
+			presetSaveBtn.addEventListener("click", doSavePreset);
+			if (presetNameInput) {
+				presetNameInput.addEventListener("keydown", (e) => {
+					if (e.key === "Enter") {
+						e.preventDefault();
+						doSavePreset(e);
+					}
+				});
+			}
+		}
+
 		// One-time first-gesture audio warm-up: covers the case where the player
 		// rolls (e.g. via a hotkey/button) before ever opening the dice dropdown.
 		const warmOnce = () => {
@@ -9187,6 +9223,7 @@ class CharacterSheetPage {
 		// Initial update
 		updateCheckbox();
 		updateThemeSelection();
+		this._renderDicePresets();
 	}
 
 	/**
@@ -10798,6 +10835,48 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Bridge the core 5etools rollbox (the floating dice roller at the bottom of
+	 * the page — `Renderer.dice`) into this sheet's 3D dice animation + roll log.
+	 *
+	 * Rolls made in the rollbox (typing a notation like `3d6`, or clicking a
+	 * rendered `@dice`/`@damage` tag) go through `Renderer.dice` and never touch
+	 * the sheet's 3D engine, so no 3D dice appear. We register a roll-rendered
+	 * hook that maps the ACTUAL per-die faces the roller produced (`meta.dice`,
+	 * recorded by the core dice AST) into our `{sides, values}` groups and
+	 * animates them, then mirrors the total into the Roll Log.
+	 *
+	 * The sheet's own rolls use `RollerUtil.randomise` directly (NOT
+	 * `Renderer.dice`), so this never double-animates them. Idempotent.
+	 */
+	_initRollboxDiceHook () {
+		const R = /** @type {*} */ (globalThis).Renderer;
+		if (!R?.dice || typeof R.dice.addRollRenderedHook !== "function") return;
+		if (this._rollboxHookRegistered) return;
+		this._rollboxHookRegistered = true;
+
+		R.dice.addRollRenderedHook(({result, meta, rolledBy} = {}) => {
+			// Hidden/utility rolls (e.g. average lookups) carry no structured dice.
+			const diceMeta = meta && Array.isArray(meta.dice) ? meta.dice : null;
+			if (!diceMeta || !diceMeta.length) return;
+
+			const groups = diceMeta
+				.map(d => ({sides: Number(d.faces), values: (Array.isArray(d.vals) ? d.vals : []).map(Number).filter(Number.isFinite)}))
+				.filter(g => Number.isFinite(g.sides) && g.values.length);
+			if (!groups.length) return;
+
+			// Animate the real dice (settings-gated + 3D→legacy fallback inside).
+			void this.pAnimateDiceSpec({groups});
+
+			// Mirror into the Roll Log, best-effort.
+			try {
+				const label = rolledBy && rolledBy.label ? rolledBy.label : "Roll";
+				const breakdown = groups.map(g => `${g.values.length}d${g.sides} [${g.values.join(", ")}]`).join(" + ");
+				this._rollHistory?.addRoll({title: `🎲 ${label}`, total: result, breakdown});
+			} catch (e) { /* roll-log mirroring is best-effort */ }
+		});
+	}
+
+	/**
 	 * Translate the player's dice-customisation settings into a `CharacterSheetDice3d`
 	 * appearance override, or `null` when nothing is customised (use the theme as-is).
 	 * All keys are optional so a partial customisation (e.g. only a material) layers
@@ -10812,11 +10891,23 @@ class CharacterSheetPage {
 		// stored colour values don't silently override every theme.
 		if (s.diceCustomColor && s.diceColor) {
 			a.background = s.diceColor;
-			a.outline = this._darkenHex(s.diceColor, 0.45);
+			// Gentle outline darkening so the die edge reads as the same hue, not
+			// a near-black border that muddies a bright custom colour.
+			a.outline = this._darkenHex(s.diceColor, 0.25);
 		}
 		if (s.diceCustomColor && s.diceColorText) a.foreground = s.diceColorText;
 		if (s.diceTexture) a.texture = s.diceTexture;
 		if (s.diceMaterial) a.material = s.diceMaterial;
+		// When custom colours are on but the player left texture/material on
+		// "Theme default", fall back to a NEUTRAL look rather than the theme's:
+		// every library texture composites with "multiply" (which darkens the
+		// base colour) and some theme materials (metal/glass) further dull it, so
+		// a chosen bright colour would otherwise render muddy. `none` texture is a
+		// no-op composite and `plastic` is a flat, faithful material.
+		if (s.diceCustomColor && s.diceColor) {
+			if (!s.diceTexture) a.texture = "none";
+			if (!s.diceMaterial) a.material = "plastic";
+		}
 		return Object.keys(a).length ? a : null;
 	}
 
@@ -10834,6 +10925,121 @@ class CharacterSheetPage {
 		const g = Math.round(((n >> 8) & 0xff) * f);
 		const b = Math.round((n & 0xff) * f);
 		return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+	}
+
+	/* ----- Dice customization presets (#3) ----------------------------------- */
+
+	/** The list of dice setting keys captured by a preset (the full customisable look). */
+	static _DICE_PRESET_KEYS = ["diceTheme", "diceMaterial", "diceTexture", "diceCustomColor", "diceColor", "diceColorText", "diceSoundVolume"];
+
+	/**
+	 * Read the saved dice presets, always returning an array (backward-compatible
+	 * default `[]` for characters saved before this feature existed).
+	 * @returns {Array<{name:string, settings:object}>}
+	 */
+	_getDicePresets () {
+		const settings = /** @type {*} */ (this._state?.getSettings?.()) || {};
+		return Array.isArray(settings.dicePresets) ? settings.dicePresets : [];
+	}
+
+	/**
+	 * Save the CURRENT dice customisation (theme + material + texture + custom
+	 * colours + sound volume) as a named preset. Upserts by case-insensitive name.
+	 * @param {string} rawName
+	 * @returns {boolean} whether a preset was saved
+	 */
+	_saveDicePreset (rawName) {
+		const name = String(rawName || "").trim();
+		if (!name) return false;
+		const settings = /** @type {*} */ (this._state?.getSettings?.()) || {};
+		const captured = {};
+		for (const k of CharacterSheetPage._DICE_PRESET_KEYS) captured[k] = settings[k] ?? null;
+		const presets = this._getDicePresets().slice();
+		const ix = presets.findIndex(p => p && String(p.name).trim().toLowerCase() === name.toLowerCase());
+		const entry = {name, settings: captured};
+		if (~ix) presets[ix] = entry;
+		else presets.push(entry);
+		this._state.setSetting("dicePresets", presets);
+		this._saveCurrentCharacter();
+		this._renderDicePresets();
+		return true;
+	}
+
+	/**
+	 * Apply a saved preset by name: restore every captured dice setting, then
+	 * refresh the dropdown controls to reflect them.
+	 * @param {string} name
+	 * @returns {boolean} whether a preset was applied
+	 */
+	_applyDicePreset (name) {
+		const preset = this._getDicePresets().find(p => p && String(p.name).trim().toLowerCase() === String(name || "").trim().toLowerCase());
+		if (!preset || !preset.settings) return false;
+		for (const k of CharacterSheetPage._DICE_PRESET_KEYS) {
+			this._state.setSetting(k, preset.settings[k] ?? null);
+		}
+		this._saveCurrentCharacter();
+		this._refreshDicePickerControls?.();
+		return true;
+	}
+
+	/**
+	 * Delete a saved preset by name.
+	 * @param {string} name
+	 * @returns {boolean} whether a preset was removed
+	 */
+	_deleteDicePreset (name) {
+		const presets = this._getDicePresets();
+		const next = presets.filter(p => !(p && String(p.name).trim().toLowerCase() === String(name || "").trim().toLowerCase()));
+		if (next.length === presets.length) return false;
+		this._state.setSetting("dicePresets", next);
+		this._saveCurrentCharacter();
+		this._renderDicePresets();
+		return true;
+	}
+
+	/** (Re)render the preset chip list in the 🎲 dropdown. No-op if the list isn't mounted. */
+	_renderDicePresets () {
+		const list = document.getElementById("charsheet-dice-preset-list");
+		if (!list) return;
+		const presets = this._getDicePresets();
+		list.innerHTML = "";
+		if (!presets.length) {
+			const empty = document.createElement("div");
+			empty.className = "charsheet__dice-preset-empty";
+			empty.textContent = "No saved presets yet.";
+			list.appendChild(empty);
+			return;
+		}
+		for (const preset of presets) {
+			const name = String(preset?.name || "").trim();
+			if (!name) continue;
+			const chip = document.createElement("div");
+			chip.className = "charsheet__dice-preset-chip";
+
+			const applyBtn = document.createElement("button");
+			applyBtn.className = "charsheet__dice-preset-apply";
+			applyBtn.type = "button";
+			applyBtn.textContent = name;
+			applyBtn.title = `Apply preset "${name}"`;
+			applyBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._applyDicePreset(name);
+			});
+
+			const delBtn = document.createElement("button");
+			delBtn.className = "charsheet__dice-preset-delete";
+			delBtn.type = "button";
+			delBtn.textContent = "✕";
+			delBtn.title = `Delete preset "${name}"`;
+			delBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this._deleteDicePreset(name);
+			});
+
+			chip.appendChild(applyBtn);
+			chip.appendChild(delBtn);
+			list.appendChild(chip);
+		}
 	}
 
 	/**
@@ -10863,6 +11069,11 @@ class CharacterSheetPage {
 			storm: {bg: "linear-gradient(135deg, #1c1c3c 0%, #2f2f5f 50%, #1a1a2e 100%)", bgDark: "#0a0a15", pip: "#ffff99", text: "#ffff99", shadow: "rgba(255, 255, 0, 0.5)", glow: "rgba(135, 206, 250, 0.6)", accent: "#87cefa", special: "storm"},
 			void: {bg: "linear-gradient(135deg, #0d0d0d 0%, #1a1a2e 50%, #000000 100%)", bgDark: "#000000", pip: "#9966cc", text: "#9966cc", shadow: "rgba(75, 0, 130, 0.6)", glow: "rgba(138, 43, 226, 0.3)", accent: "#8a2be2", special: "void"},
 			radiant: {bg: "linear-gradient(135deg, #fffacd 0%, #ffd700 50%, #daa520 100%)", bgDark: "#b8860b", pip: "#fff8dc", text: "#4a3000", shadow: "rgba(255, 215, 0, 0.8)", glow: "rgba(255, 255, 224, 0.7)", accent: "#ffffe0", special: "radiant"},
+			// R14 additions
+			dragon: {bg: "linear-gradient(135deg, #1b5e20 0%, #0d3d12 50%, #08300f 100%)", bgDark: "#062108", pip: "#dcffd6", text: "#dcffd6", shadow: "rgba(27, 94, 32, 0.7)", glow: "rgba(76, 175, 80, 0.4)", accent: "#4caf50", special: "dragon"},
+			astral: {bg: "linear-gradient(135deg, #3a5088 0%, #2a3d66 50%, #101b33 100%)", bgDark: "#0b1226", pip: "#eaf2ff", text: "#eaf2ff", shadow: "rgba(42, 61, 102, 0.7)", glow: "rgba(150, 180, 255, 0.5)", accent: "#96b4ff", special: "astral"},
+			tiger: {bg: "linear-gradient(135deg, #ff9a00 0%, #e07b00 50%, #a85800 100%)", bgDark: "#5c3000", pip: "#1a0d00", text: "#1a0d00", shadow: "rgba(224, 123, 0, 0.7)", glow: "rgba(255, 180, 60, 0.5)", accent: "#ffb43c", special: "tiger"},
+			toxic: {bg: "linear-gradient(135deg, #a6f000 0%, #76c000 50%, #4d8000 100%)", bgDark: "#2f4d00", pip: "#0c1a00", text: "#0c1a00", shadow: "rgba(118, 192, 0, 0.7)", glow: "rgba(180, 255, 80, 0.5)", accent: "#b4ff50", special: "toxic"},
 		};
 		const colors = themeColors[theme] || themeColors.standard;
 

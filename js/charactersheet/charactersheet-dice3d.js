@@ -66,6 +66,11 @@ class CharacterSheetDice3d {
 		storm: {background: "#23234a", foreground: "#fdf36b", outline: "#0c0c1f", texture: "cloudy", material: "metal"},
 		void: {background: "#0d0d14", foreground: "#9b6cff", outline: "#000000", texture: "stars", material: "metal"},
 		radiant: {background: "#e8c24a", foreground: "#4a3000", outline: "#9a7400", texture: "glitter", material: "metal"},
+		// R14 additions — new looks built on vendored textures.
+		dragon: {background: "#1b5e20", foreground: "#dcffd6", outline: "#082f0c", texture: "dragon", material: "metal"},
+		astral: {background: "#2a3d66", foreground: "#eaf2ff", outline: "#101b33", texture: "astral", material: "glass"},
+		tiger: {background: "#e07b00", foreground: "#1a0d00", outline: "#7a3d00", texture: "tiger", material: "wood"},
+		toxic: {background: "#76c000", foreground: "#0c1a00", outline: "#2f4d00", texture: "lizard", material: "metal"},
 	};
 
 	constructor ({diceBoxFactory = null} = {}) {
@@ -152,8 +157,16 @@ class CharacterSheetDice3d {
 		const outline = a.outline || t.outline;
 		const texture = a.texture || t.texture;
 		const material = a.material || t.material;
+		// The library's `makeColorSet` caches colorsets BY NAME, returning the
+		// cached entry verbatim on a name hit. A name that's constant per theme
+		// (e.g. `charsheet-standard-custom`) therefore makes a changed custom
+		// colour silently no-op (the stale colorset is reused). Fold a short hash
+		// of the actual appearance into the name so every distinct look gets its
+		// own cache entry and always applies.
+		const sig = `${background}|${foreground}|${outline}|${texture}|${material}`;
+		const hash = CharacterSheetDice3d._hashString(sig);
 		return {
-			name: `charsheet-${theme || "standard"}${appearance ? "-custom" : ""}`,
+			name: `charsheet-${theme || "standard"}${appearance ? "-custom" : ""}-${hash}`,
 			foreground,
 			background,
 			outline,
@@ -161,6 +174,16 @@ class CharacterSheetDice3d {
 			texture,
 			material,
 		};
+	}
+
+	/** Tiny stable non-cryptographic string hash (FNV-1a), as a base36 string. */
+	static _hashString (str) {
+		let h = 0x811c9dc5;
+		for (let i = 0; i < str.length; ++i) {
+			h ^= str.charCodeAt(i);
+			h = Math.imul(h, 0x01000193);
+		}
+		return (h >>> 0).toString(36);
 	}
 
 	/** Stable signature of a colorset, used to skip redundant updateConfig calls. */
@@ -212,6 +235,10 @@ class CharacterSheetDice3d {
 				gravity_multiplier: 400,
 				baseScale: 110,
 				strength: 1.4,
+				// Brighter than the library default (0.7) so saturated/custom
+				// colours read true rather than muddy; still gentle enough not to
+				// blow out textured themes.
+				light_intensity: 0.9,
 				onRollComplete: () => {},
 			});
 			await box.initialize();
@@ -345,13 +372,25 @@ class CharacterSheetDice3d {
 
 	/**
 	 * Build the library notation for a set of groups, e.g.
-	 * `[{sides:4,values:[2,3,1]},{sides:20,values:[15]}]` -> `3d4@2,3,1+1d20@15`.
+	 * `[{sides:4,values:[2,3,1]},{sides:20,values:[15]}]` -> `3d4+1d20@2,3,1,15`.
+	 *
+	 * IMPORTANT: the vendored `dice-box-threejs` parser splits the WHOLE notation
+	 * string on the FIRST `@` only, parsing dice terms from the segment before it
+	 * and the forced-value list from the segment after it. A per-group form like
+	 * `3d4@2,3,1+1d20@15` therefore loses every dice term after the first `@` (the
+	 * `+1d20` is swallowed into the value segment) and reads garbage forced values.
+	 * The canonical, correctly-parsed form is ALL dice terms first, then a SINGLE
+	 * trailing `@` listing every value in dice order. (This was the root cause of
+	 * multi-component damage — e.g. weapon die + sneak dice — landing on the wrong
+	 * faces / dropping dice.)
 	 * @returns {string}
 	 */
 	static buildNotation (groups) {
-		return groups
-			.map(g => `${g.values.length}d${g.sides}@${g.values.join(",")}`)
+		const dicePart = groups
+			.map(g => `${g.values.length}d${g.sides}`)
 			.join("+");
+		const values = groups.flatMap(g => g.values);
+		return `${dicePart}@${values.join(",")}`;
 	}
 
 	/**

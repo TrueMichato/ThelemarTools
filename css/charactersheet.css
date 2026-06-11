@@ -1260,6 +1260,22 @@
 	background: linear-gradient(135deg, #fffacd, #ffd700, #daa520);
 	border-color: rgba(255, 255, 224, 0.6);
 }
+.charsheet__dice-theme-btn--dragon {
+	background: linear-gradient(135deg, #7a1f1f, #c0392b, #3d0c0c);
+	border-color: rgba(255, 120, 80, 0.5);
+}
+.charsheet__dice-theme-btn--astral {
+	background: linear-gradient(135deg, #1b2a6b, #6d4bb8, #0b1233);
+	border-color: rgba(160, 130, 255, 0.5);
+}
+.charsheet__dice-theme-btn--tiger {
+	background: linear-gradient(135deg, #e08a1e, #b5651d, #5a2e0c);
+	border-color: rgba(255, 190, 90, 0.5);
+}
+.charsheet__dice-theme-btn--toxic {
+	background: linear-gradient(135deg, #4caf17, #76d934, #1f3d08);
+	border-color: rgba(150, 255, 90, 0.5);
+}
 
 /* Dice customization (3D appearance + volume) */
 .charsheet__dice-customize {
@@ -1326,6 +1342,99 @@
 .charsheet__dice-custom-reset:hover {
 	color: var(--cs-text-primary, #e2e8f0);
 	border-color: var(--cs-accent, #6366f1);
+}
+
+/* Dice customization presets (#3) */
+.charsheet__dice-presets {
+	margin-top: 12px;
+	padding-top: 12px;
+	border-top: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+}
+
+.charsheet__dice-preset-save {
+	display: flex;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+.charsheet__dice-preset-save input {
+	flex: 1 1 auto;
+	min-width: 0;
+	background: var(--cs-bg-input, rgba(15, 23, 42, 0.6));
+	color: var(--cs-text-primary, #e2e8f0);
+	border: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+	border-radius: var(--cs-radius, 4px);
+	padding: 4px 6px;
+	font-size: 0.8125rem;
+}
+
+.charsheet__dice-preset-save-btn {
+	flex: 0 0 auto;
+	padding: 4px 12px;
+	background: var(--cs-accent, #6366f1);
+	color: #fff;
+	border: 1px solid var(--cs-accent, #6366f1);
+	border-radius: var(--cs-radius, 4px);
+	font-size: 0.8125rem;
+	cursor: pointer;
+	transition: opacity 0.15s;
+}
+
+.charsheet__dice-preset-save-btn:hover {
+	opacity: 0.85;
+}
+
+.charsheet__dice-preset-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 8px;
+}
+
+.charsheet__dice-preset-empty {
+	color: var(--cs-text-secondary, #94a3b8);
+	font-size: 0.75rem;
+	font-style: italic;
+}
+
+.charsheet__dice-preset-chip {
+	display: inline-flex;
+	align-items: stretch;
+	border: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+	border-radius: var(--cs-radius, 4px);
+	overflow: hidden;
+	background: var(--cs-bg-input, rgba(15, 23, 42, 0.6));
+}
+
+.charsheet__dice-preset-apply {
+	padding: 3px 8px;
+	background: transparent;
+	color: var(--cs-text-primary, #e2e8f0);
+	border: none;
+	font-size: 0.8125rem;
+	cursor: pointer;
+	max-width: 120px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.charsheet__dice-preset-apply:hover {
+	color: var(--cs-accent, #6366f1);
+}
+
+.charsheet__dice-preset-delete {
+	padding: 3px 7px;
+	background: transparent;
+	color: var(--cs-text-secondary, #94a3b8);
+	border: none;
+	border-left: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+	font-size: 0.75rem;
+	cursor: pointer;
+}
+
+.charsheet__dice-preset-delete:hover {
+	color: var(--cs-danger, #ef4444);
 }
 
 /* Font family application */

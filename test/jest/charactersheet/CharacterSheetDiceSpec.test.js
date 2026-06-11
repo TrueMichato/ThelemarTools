@@ -60,11 +60,25 @@ describe("CharacterSheetDice3d.buildNotation", () => {
 			.toBe("3d4@2,3,1");
 	});
 
-	test("multiple groups are joined with '+'", () => {
+	// Regression (#1): the vendored dice-box `parseNotation` splits the whole
+	// string on the FIRST "@", so per-group "@" (e.g. "3d4@2,3,1+1d20@15") loses
+	// every dice term after the first and mis-reads the forced values. The
+	// canonical, parseable form is all dice terms first, then ONE trailing "@"
+	// carrying every value in dice order.
+	test("multiple groups -> single trailing '@' with all values in order (#1)", () => {
 		expect(CharacterSheetDice3d.buildNotation([
 			{sides: 4, values: [2, 3, 1]},
 			{sides: 20, values: [15]},
-		])).toBe("3d4@2,3,1+1d20@15");
+		])).toBe("3d4+1d20@2,3,1,15");
+	});
+
+	test("emits exactly one '@' regardless of group count (#1)", () => {
+		const notation = CharacterSheetDice3d.buildNotation([
+			{sides: 6, values: [5, 2]},
+			{sides: 8, values: [7]},
+			{sides: 6, values: [1]},
+		]);
+		expect((notation.match(/@/g) || []).length).toBe(1);
 	});
 
 	test("a lone d20 builds the legacy single-die notation (back-compat)", () => {
@@ -72,12 +86,25 @@ describe("CharacterSheetDice3d.buildNotation", () => {
 			.toBe("1d20@17");
 	});
 
-	test("end-to-end: normalize then build for a 2d6 + 1d8 roll", () => {
+	test("end-to-end: normalize then build for a 2d6 + 1d8 roll (#1)", () => {
 		const groups = CharacterSheetDice3d.normalizeGroups([
 			{sides: 6, values: [5, 2]},
 			{sides: 8, values: [7]},
 		]);
-		expect(CharacterSheetDice3d.buildNotation(groups)).toBe("2d6@5,2+1d8@7");
+		expect(CharacterSheetDice3d.buildNotation(groups)).toBe("2d6+1d8@5,2,7");
+	});
+
+	test("the trailing values are exactly the rolled values, in dice order (#1)", () => {
+		// Models a Sneak Attack: weapon 1d8 (=8) + sneak 2d6 (=3,5) → total 16.
+		const groups = [
+			{sides: 8, values: [8]},
+			{sides: 6, values: [3, 5]},
+		];
+		const notation = CharacterSheetDice3d.buildNotation(groups);
+		expect(notation).toBe("1d8+2d6@8,3,5");
+		const vals = notation.split("@")[1].split(",").map(Number);
+		expect(vals).toEqual([8, 3, 5]);
+		expect(vals.reduce((a, b) => a + b, 0)).toBe(16);
 	});
 });
 
