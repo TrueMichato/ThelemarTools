@@ -3169,6 +3169,9 @@ export class CharacterSheetPlayMode {
 		let total = naturalRoll + bonus;
 		let passed = total >= dc;
 
+		// Animate the concentration save d20 (advantage shows both dice).
+		void this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: advantage ? [roll1, roll2] : [naturalRoll]}], isAdvantage: !!advantage});
+
 		// Build result description
 		const rollDesc = advantage
 			? `d20(${roll1}, ${roll2}) → ${naturalRoll}`
@@ -3229,6 +3232,8 @@ export class CharacterSheetPlayMode {
 			const naturalRoll = advantage ? Math.max(roll1, roll2) : roll1;
 			const total = naturalRoll + bonus;
 			const passed = total >= dc;
+			// Animate the reroll d20 (advantage shows both dice).
+			void this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: advantage ? [roll1, roll2] : [naturalRoll]}], isAdvantage: !!advantage});
 			const rerollDesc = advantage
 				? `d20(${roll1}, ${roll2}) → ${naturalRoll}`
 				: `d20(${naturalRoll})`;
