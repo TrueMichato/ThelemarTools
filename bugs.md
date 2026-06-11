@@ -5,7 +5,7 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ### Round 12 (manual-testing follow-ups + two Round-11 fixes that did not take effect at runtime)
 
-Decomposed into 4 parallel sessions (single owner per shared surface). Sessions branch off `character-sheet-wip` @ `81f5aa1a` and never touch `bugs.md` (orchestrator-owned). Merge order: **D → I → S → V** (D is foundational because it owns every roll/dice surface). Two Round-11 fixes (S3 spell-attack, S6 CSS) shipped to source but the user reports **no runtime effect** — the relevant sessions must reproduce in-browser FIRST and find the real reason before re-fixing.
+Decomposed into 5 parallel sessions (single owner per shared surface). Sessions branch off `character-sheet-wip` and never touch `bugs.md` (orchestrator-owned). Merge order: **D → I → S → V → O** (D is foundational because it owns every roll/dice surface). Two Round-11 fixes (S3 spell-attack, S6 CSS) shipped to source but the user reports **no runtime effect** — the relevant sessions must reproduce in-browser FIRST and find the real reason before re-fixing.
 
 **D — Dice & all roll routing** (owns every roll/animation surface: `charactersheet-dice3d.js`, the central dispatch in `charactersheet.js`, and the roll call-sites in `charactersheet-combat.js` / `charactersheet-spells.js` / `charactersheet-playmode.js`)
 * **(#3)** Dice animation overhaul: the 3D dice always render a single d20 regardless of the real roll. `pRoll({diceType, finalValue})` only animates one die and `_setBadge` only fires for d20. Make the animation reflect the actual dice **count and type**, add a **roll sound**, expose **more dice options** in the 🎲 Dice settings, and route **all** roll paths through it — including **spellcasting** and **custom dice rolls** (currently many call-sites bypass it or force 1×d20).
@@ -23,6 +23,9 @@ Decomposed into 4 parallel sessions (single owner per shared surface). Sessions 
 **V — Visual/CSS re-fix** (Round-11 S6 redo; owns `css/charactersheet.css` + any view-specific CSS/markup, e.g. playmode)
 * **(#6 re-fix)** `.charsheet__ranger-hunters-prey` note color fix shipped to CSS but the user reports no change. Reproduce in-browser; confirm which element actually renders the note and make it match `.charsheet__ranger-ability-note` (`var(--rgb-text-dim)`).
 * **(#12 re-fix)** Speed values still misaligned. The Round-11 fix only touched the **Overview** `.charsheet__speed-seg` markup, but **Alt View / playmode** renders speed via `_renderVitalChip`/`_fmtSpeed` (different markup). Reproduce in the view shown in the user's screenshot and fix the alignment there (likely playmode chips, not the overview).
+
+**O — Overview Abilities section removal** (owns the overview Abilities section: `charactersheet.html` markup + `_renderOverviewAbilities` in `charactersheet.js` + leftover CSS/layout)
+* **(#13)** The Overview tab's `.charsheet__section--abilities` ("✨ Abilities") section is effectively always empty (it only ever holds custom abilities, which are also managed in the Features tab). Remove it to reclaim Overview space. Delete the static markup (`charactersheet.html` ~818-831, `#charsheet-overview-abilities`), the `_renderOverviewAbilities()` method (`charactersheet.js` ~6178) and its call-site, any now-orphaned CSS (`.charsheet__section--abilities`, `.charsheet__abilities-list`), and update the layout/section registry if it enumerates this section. Confirm custom abilities remain fully accessible in the Features tab and nothing else depends on the removed render.
 
 ## Closed Bugs
 
