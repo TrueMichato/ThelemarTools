@@ -1412,10 +1412,16 @@ class CharacterSheetInventory {
 			value: options.value || 0,
 			type: options.type || "gear",
 			requiresAttunement: options.requiresAttunement || false,
-			// Weapon stats
+			// Weapon stats. `weapon` is the boolean both the inventory categorizer
+			// (_getItemCategory) and Combat attack-detection (filter(i => i.weapon)) key off,
+			// so it MUST be set or an edited/created weapon falls into "Other" and loses its attack.
+			weapon: options.type === "weapon" || !!options.weaponCategory || !!options.dmg1,
 			weaponCategory: options.weaponCategory,
 			dmg1: options.dmg1,
 			dmgType: options.dmgType,
+			// Friendly damage string used by the inventory row + the Combat "add from inventory"
+			// prefill. Derived here so custom weapons (and edited weapons) keep showing damage.
+			damage: options.dmg1 ? `${options.dmg1}${options.dmgType ? ` ${Parser.dmgTypeToFull(options.dmgType)}` : ""}` : undefined,
 			property: options.property,
 			mastery: options.mastery,
 			range: options.range,
@@ -1457,21 +1463,25 @@ class CharacterSheetInventory {
 			modifySpeed: options.modifySpeed || null,
 			// Ability score modifications
 			ability: options.ability || null,
-			// Charges & recharge
+			// Charges & recharge. Bare (undefined when absent) so an edit whose form section is
+			// HIDDEN for this item type (charges live in the "magic" section) doesn't clobber the
+			// original via the skip-undefined merge in _saveCustomItem.
 			charges: options.charges,
 			chargesCurrent: options.charges,
-			recharge: options.recharge || null,
-			rechargeAmount: options.rechargeAmount || null,
-			// Special properties
-			focus: options.focus || false,
-			curse: options.curse || false,
-			sentient: options.sentient || false,
+			recharge: options.recharge,
+			rechargeAmount: options.rechargeAmount,
+			// Special properties. Bare for the same hidden-section reason: editing a cursed/focus/
+			// sentient weapon or armor must not silently strip these (the checkboxes are hidden for
+			// non-magic types). The save handler emits explicit booleans where the section is shown.
+			focus: options.focus,
+			curse: options.curse,
+			sentient: options.sentient,
 			// Senses
 			senses: options.senses || null,
 			// Structured modifiers & effects (Bug #8) — applied while equipped via _registerItemEffects
 			effects: Array.isArray(options.effects) && options.effects.length ? options.effects : undefined,
-			// Attached spells
-			attachedSpells: options.attachedSpells || null,
+			// Attached spells. Bare so editing a non-spell-section item preserves item-granted spells.
+			attachedSpells: options.attachedSpells,
 			// Misc
 			entries: this._normalizeCustomEntries(options.entries),
 		};
@@ -1510,8 +1520,17 @@ class CharacterSheetInventory {
 			const oldItem = this._state.getItems().find(i => i.id === editItemId);
 			const oldChargesCurrent = oldItem?.chargesCurrent;
 
+			// Merge the rebuilt payload onto the ORIGINAL item rather than replacing it wholesale.
+			// The custom-item form does not model every field (raw type code, weapon `properties[]`,
+			// `damage`, addItem-detection fields, container arrays, …) and HIDES whole sections for
+			// some types (charges/curse/focus/sentient for weapons/armor). A from-scratch rebuild
+			// would drop or clear all of those. _mergeEditedItem keeps the original value for any
+			// field the form did not supply (undefined), while letting explicit clears (null / false
+			// / 0 / []) through. See bug #2 (+ #8 continuation).
+			const merged = this._mergeEditedItem(oldItem, newItem);
+
 			// Preserve the original quantity unless the form explicitly changed it
-			this._state.replaceItem(editItemId, newItem);
+			this._state.replaceItem(editItemId, merged);
 			// Keep the quantity the user set in the form
 			if (typeof this._state.setItemQuantity === "function") this._state.setItemQuantity(editItemId, quantity);
 			// Restore remaining charges, clamped to the new max (setItemCharges clamps to [0, charges]).
@@ -1529,6 +1548,26 @@ class CharacterSheetInventory {
 		this._renderItemList();
 		this._page.saveCharacter?.();
 		return undefined;
+	}
+
+	/**
+	 * Overlay a rebuilt custom-item payload onto a clone of the original item, SKIPPING any key
+	 * whose new value is `undefined`. Semantics:
+	 *   - `undefined` in newItem  => "the form did not supply this" => keep the original value
+	 *     (preserves catalog/detection fields + fields whose form section is hidden for the type).
+	 *   - explicit `null` / `false` / `0` / `[]` => "the form cleared this" => overlay it.
+	 * Wrapper-level props (id/quantity/equipped/attuned/starred/note) are stripped by replaceItem,
+	 * so passing the flattened original through is safe.
+	 * @param {object|undefined} oldItem - The original flattened inventory item (from getItems())
+	 * @param {object} newItem - The payload built by _buildCustomItem from the edit form
+	 * @returns {object} The merged item payload
+	 */
+	_mergeEditedItem (oldItem, newItem) {
+		const merged = {...(oldItem || {})};
+		for (const [k, v] of Object.entries(newItem)) {
+			if (v !== undefined) merged[k] = v;
+		}
+		return merged;
 	}
 
 	/**
@@ -1563,6 +1602,7 @@ class CharacterSheetInventory {
 			if (item.dmgType) options.dmgType = item.dmgType;
 			if (item.range) options.range = item.range;
 			if (item.property) options.property = item.property;
+			else if (item.properties) options.property = item.properties;
 			if (item.mastery) options.mastery = item.mastery;
 			// Catalog bonuses may be strings like "+1"; normalize to numbers.
 			if (item.bonusWeapon) options.bonusWeapon = this._parseBonus(item.bonusWeapon);
@@ -2869,12 +2909,13 @@ class CharacterSheetInventory {
 				form.querySelectorAll(".weapon-mastery-check:checked").forEach(cb => {
 					masteries.push(cb.value);
 				});
-				if (masteries.length) options.mastery = masteries;
+				// Always emit (even empty) so unchecking the last mastery clears it via the merge.
+				options.mastery = masteries;
 				const props = [];
 				form.querySelectorAll(".weapon-prop-check:checked").forEach(cb => {
 					props.push(cb.value);
 				});
-				if (props.length) options.property = props;
+				options.property = props;
 			}
 
 			// Armor stats
@@ -2908,9 +2949,12 @@ class CharacterSheetInventory {
 					const rechargeAmount = form.querySelector("#custom-item-recharge-amount")?.value?.trim();
 					if (rechargeAmount) options.rechargeAmount = rechargeAmount;
 				}
-				if (form.querySelector("#custom-item-focus")?.checked) options.focus = true;
-				if (form.querySelector("#custom-item-cursed")?.checked) options.curse = true;
-				if (form.querySelector("#custom-item-sentient")?.checked) options.sentient = true;
+				// Section is visible for these types, so the checkboxes are authoritative — emit
+				// explicit booleans so a magic item can be toggled OFF (non-magic types leave these
+				// undefined, which the edit merge preserves from the original).
+				options.focus = !!form.querySelector("#custom-item-focus")?.checked;
+				options.curse = !!form.querySelector("#custom-item-cursed")?.checked;
+				options.sentient = !!form.querySelector("#custom-item-sentient")?.checked;
 			}
 
 			// Bonuses
@@ -3143,6 +3187,17 @@ class CharacterSheetInventory {
 		setVal("#custom-item-bonus-attack", numOf(o.bonusWeaponAttack));
 		setVal("#custom-item-bonus-damage", numOf(o.bonusWeaponDamage));
 		setVal("#custom-item-crit-damage", o.bonusWeaponCritDamage);
+		// Weapon mastery + properties are checkbox grids — tick the boxes the item carries so the
+		// editor faithfully reflects (and on save re-emits) them instead of silently clearing.
+		const checkValues = (selBase, values) => {
+			if (!values?.length) return;
+			const wanted = new Set(values.map(v => String(v).toLowerCase()));
+			(form.querySelectorAll?.(selBase) || []).forEach?.(cb => {
+				if (wanted.has(String(cb.value).toLowerCase())) cb.checked = true;
+			});
+		};
+		checkValues(".weapon-mastery-check", o.mastery);
+		checkValues(".weapon-prop-check", o.property);
 
 		// Armor / shield
 		if (seed.type === "armor") {
