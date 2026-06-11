@@ -71,8 +71,14 @@ describe("#3a — inline speed display no longer clips its unit", () => {
 		expect(body).toMatch(/min-width:\s*0/);
 		expect(body).toMatch(/max-width:\s*100%/);
 		expect(body).toMatch(/box-sizing:\s*border-box/);
-		// Still wraps multi-segment (walk/fly/climb) values onto new lines.
-		expect(body).toMatch(/flex-wrap:\s*wrap/);
+		// Bug #12 fix: a centered *wrapping* flexbox centred each wrapped line
+		// independently, so a trailing short row drifted right. Replaced with an
+		// auto-fit grid whose columns line up across rows; multi-segment
+		// (walk/fly/climb) values still wrap onto new lines via row-gap.
+		expect(body).toMatch(/display:\s*grid/);
+		expect(body).toMatch(/grid-template-columns:\s*repeat\(auto-fit/);
+		expect(body).toMatch(/row-gap:/);
+		expect(body).not.toMatch(/flex-wrap:\s*wrap/);
 	});
 
 	test("the speed box trims its horizontal padding (speed-scoped; AC/Init untouched)", () => {
