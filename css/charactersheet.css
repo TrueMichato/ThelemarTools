@@ -1115,6 +1115,12 @@
 	z-index: 10001;
 	min-width: 220px;
 	max-width: 240px;
+	/* Bound the dropdown to the viewport so a tall list (themes + customize +
+	   presets) never extends past the bottom edge unreachably; JS clamps/flips
+	   `top` so this cap rarely engages, but it's the hard safety net. */
+	max-height: calc(100vh - 24px);
+	overflow-y: auto;
+	overflow-x: hidden;
 	display: none;
 }
 
@@ -1275,6 +1281,27 @@
 .charsheet__dice-theme-btn--toxic {
 	background: linear-gradient(135deg, #4caf17, #76d934, #1f3d08);
 	border-color: rgba(150, 255, 90, 0.5);
+}
+.charsheet__dice-theme-btn--thelemar {
+	background: linear-gradient(135deg, #d9b257, #005e66, #00343a);
+	border-color: rgba(217, 178, 87, 0.6);
+	box-shadow: inset 0 0 5px rgba(217, 178, 87, 0.5);
+}
+.charsheet__dice-theme-btn--bone {
+	background: linear-gradient(135deg, #efe7d2, #d8cdb0, #b3a585);
+	border-color: rgba(58, 42, 24, 0.4);
+}
+.charsheet__dice-theme-btn--obsidian {
+	background: linear-gradient(135deg, #2a2a36, #15151c, #000000);
+	border-color: rgba(199, 201, 214, 0.4);
+}
+.charsheet__dice-theme-btn--jade {
+	background: linear-gradient(135deg, #16a986, #0f7d62, #063d30);
+	border-color: rgba(244, 243, 212, 0.5);
+}
+.charsheet__dice-theme-btn--copper {
+	background: linear-gradient(135deg, #c47a3e, #9a5b2e, #4a2a12);
+	border-color: rgba(255, 230, 194, 0.5);
 }
 
 /* Dice customization (3D appearance + volume) */
