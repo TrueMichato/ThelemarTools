@@ -2968,7 +2968,6 @@ class CharacterSheetCombat {
 			this.renderCombatActions();
 			this.renderCombatResources();
 			this._page?._renderResources?.();
-			this._page?._renderOverviewAbilities?.();
 			this._page?._customAbilities?.render?.();
 			this._page?._saveCurrentCharacter?.();
 

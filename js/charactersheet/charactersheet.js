@@ -2743,7 +2743,6 @@ class CharacterSheetPage {
 		this._renderResources();
 		this._renderOverviewMetamagic();
 		this._renderOverviewRanger();
-		this._renderOverviewAbilities();
 		this._renderActiveStates();
 		this._renderFavouritesOverview();
 		this._renderOverviewActions();
@@ -6175,120 +6174,6 @@ class CharacterSheetPage {
 		}
 	}
 
-	_renderOverviewAbilities () {
-		const container = document.getElementById("charsheet-overview-abilities");
-		if (!container) return;
-
-		container.innerHTML = "";
-
-		// Bug 3: Class-granted resources (Channel Divinity, Rage, Ki, etc.) are
-		// no longer rendered here — they belong exclusively to the Resources
-		// section above. The Abilities section is reserved for the user's
-		// custom-defined activatable features.
-		const customAbilities = this._state.getCustomAbilities?.() || [];
-		const limitedAbilities = customAbilities.filter(a => a.mode === "limited");
-
-		if (!limitedAbilities.length) {
-			container.innerHTML = `
-				<div class="charsheet__empty-state">
-					<span class="charsheet__empty-icon">💫</span>
-					<span class="charsheet__empty-text">No custom abilities. Create one in the Features tab.</span>
-				</div>
-			`;
-			return;
-		}
-
-		// Render custom abilities
-		for (const ability of limitedAbilities) {
-			const uses = this._state.getCustomAbilityUsesDisplay?.(ability.id);
-			if (!uses) continue;
-
-			const canUse = this._state.canUseCustomAbility?.(ability.id) ?? uses.current > 0;
-
-			// Determine action type
-			const activationAction = ability.activationAction || "free";
-			let actionIcon = "✨";
-			let actionType = "Free";
-			if (activationAction === "action") {
-				actionIcon = "⚔️";
-				actionType = "Action";
-			} else if (activationAction === "bonus") {
-				actionIcon = "⚡";
-				actionType = "Bonus Action";
-			} else if (activationAction === "reaction") {
-				actionIcon = "🔄";
-				actionType = "Reaction";
-			}
-
-			// Recharge icon
-			const rechargeIcon = uses.recharge === "short" ? "☀️" : "🌙";
-
-			const row = e_({outer: `
-				<div class="charsheet__ability-row" data-ability-id="${ability.id}">
-					<div class="charsheet__ability-info">
-						<span class="charsheet__ability-icon" title="${actionType}">${ability.icon || actionIcon}</span>
-						<span class="charsheet__ability-name">${ability.name}</span>
-					</div>
-					<div class="charsheet__ability-controls">
-						<span class="charsheet__ability-uses">${uses.current}/${uses.max}</span>
-						<span class="charsheet__ability-recharge" title="${uses.recharge} rest">${rechargeIcon}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__ability-use-btn"${!canUse ? " disabled" : ""}>Use</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__ability-edit-btn" title="Edit ability (icon, name, uses, effects)">✏️</button>
-					</div>
-				</div>
-			`});
-
-			// Click on row to show modal
-			row.addEventListener("click", (e) => {
-				if (e.target.classList.contains("charsheet__ability-use-btn")) return;
-				if (e.target.classList.contains("charsheet__ability-edit-btn")) return;
-				this._showAbilityDetailModal(ability);
-			});
-
-			// Use button
-			row.querySelector(".charsheet__ability-use-btn").addEventListener("click", (e) => {
-				e.stopPropagation();
-				this._useOverviewAbility(ability);
-			});
-
-			// Edit button — opens the existing custom-ability editor modal
-			// (icon picker, name, uses, effects, etc.).
-			row.querySelector(".charsheet__ability-edit-btn").addEventListener("click", (e) => {
-				e.stopPropagation();
-				if (this._customAbilities?._showAbilityModal) {
-					this._customAbilities._showAbilityModal(ability.id);
-				} else {
-					JqueryUtil.doToast({type: "info", content: "Open the Features tab to edit custom abilities."});
-				}
-			});
-
-			// Star (favourite) toggle
-			const star = this._renderFavouriteStar("customAbility", ability);
-			if (star) row.querySelector(".charsheet__ability-controls").append(star);
-
-			container.append(row);
-		}
-	}
-
-	_useOverviewAbility (ability) {
-		if (!this._state.canUseCustomAbility?.(ability.id)) {
-			JqueryUtil.doToast({type: "warning", content: `No uses remaining for ${ability.name}!`});
-			return;
-		}
-
-		if (this._state.useCustomAbility(ability.id)) {
-			this._saveCurrentCharacter();
-			this._renderResources();
-			this._renderOverviewAbilities();
-			this._renderActiveStates();
-			if (this._features) this._features._renderResources();
-			if (this._customAbilities) this._customAbilities.render();
-			if (this._combat) this._combat.renderCombatActions();
-
-			JqueryUtil.doToast({type: "success", content: `Used ${ability.name}!`});
-		}
-	}
-
 	_useOverviewResource (resource) {
 		if (resource.current <= 0) {
 			JqueryUtil.doToast({type: "warning", content: `No uses remaining for ${resource.name}!`});
@@ -6298,96 +6183,7 @@ class CharacterSheetPage {
 		this._state.useResourceCharge?.(resource.name);
 		this._saveCurrentCharacter();
 		this._renderResources();
-		this._renderOverviewAbilities();
 		if (this._features) this._features._renderResources();
-	}
-
-	_showAbilityDetailModal (ability) {
-		const uses = this._state.getCustomAbilityUsesDisplay?.(ability.id);
-		const categories = CharacterSheetState?.CUSTOM_ABILITY_CATEGORIES || {};
-		const category = categories[ability.category];
-
-		// Build effects summary
-		let effectsSummary = "";
-		if (ability.effects?.length) {
-			const effectsList = ability.effects.map(e => {
-				if (e.type === "sizeIncrease") return `Size +${e.value || 1} category`;
-				if (e.type === "sizeDecrease") return `Size -${e.value || 1} category`;
-				if (e.type === "reach") return `Reach +${e.value || 5} ft.`;
-				if (e.type?.startsWith("extraDamage:")) return `+${e.dice || "1d6"} ${e.type.replace("extraDamage:", "")} damage`;
-				if (e.type?.startsWith("reroll:")) return `Reroll ${e.type.replace("reroll:", "")}`;
-				return `${e.type}: ${e.value > 0 ? "+" : ""}${e.value}`;
-			});
-			effectsSummary = `<div class="mt-2"><strong>Effects:</strong> ${effectsList.join(", ")}</div>`;
-		}
-
-		// Build defensive traits summary
-		let defenseSummary = "";
-		if (ability.defensiveTraits) {
-			const parts = [];
-			if (ability.defensiveTraits.resistances?.length) {
-				parts.push(`Resist: ${ability.defensiveTraits.resistances.join(", ")}`);
-			}
-			if (ability.defensiveTraits.immunities?.length) {
-				parts.push(`Immune: ${ability.defensiveTraits.immunities.join(", ")}`);
-			}
-			if (parts) {
-				defenseSummary = `<div class="mt-2"><strong>Defenses:</strong> ${parts.join("; ")}</div>`;
-			}
-		}
-
-		const modalContent = `
-			<div class="charsheet__ability-modal-header">
-				<span class="charsheet__ability-modal-icon">${ability.icon || "⚡"}</span>
-				<h4 class="charsheet__ability-modal-title">${ability.name}</h4>
-				${category ? `<span class="badge badge-secondary ml-2">${category.icon} ${category.name}</span>` : ""}
-			</div>
-			<div class="charsheet__ability-modal-body">
-				<div class="charsheet__ability-modal-description">
-					${Renderer.get().render(ability.description || "No description.")}
-				</div>
-				${effectsSummary}
-				${defenseSummary}
-				${uses ? `<div class="mt-2"><strong>Uses:</strong> ${uses.current}/${uses.max} (${uses.recharge} rest)</div>` : ""}
-			</div>
-		`;
-
-		// Create and show modal
-		const modal = e_({outer: `
-			<div class="modal-overlay charsheet__ability-detail-modal">
-				<div class="modal-content charsheet__ability-detail-content">
-					<div class="modal-header">
-						<button class="modal-close" title="Close">&times;</button>
-					</div>
-					<div class="modal-body">
-						${modalContent}
-					</div>
-					<div class="modal-footer">
-						<button class="ve-btn ve-btn-primary charsheet__ability-modal-use" 
-							${!this._state.canUseCustomAbility?.(ability.id) ? "disabled" : ""}>Use Ability</button>
-						<button class="ve-btn ve-btn-default charsheet__ability-modal-close">Close</button>
-					</div>
-				</div>
-			</div>
-		`});
-
-		modal.querySelectorAll(".modal-close, .charsheet__ability-modal-close").forEach(el => el.addEventListener("click", () => {
-			modal.remove();
-		}));
-
-		modal.querySelector(".charsheet__ability-modal-use").addEventListener("click", () => {
-			this._useOverviewAbility(ability);
-			modal.remove();
-		});
-
-		// Close on background click
-		modal.addEventListener("click", (e) => {
-			if (e.target.classList.contains("modal-overlay")) {
-				modal.remove();
-			}
-		});
-
-		document.body.append(modal);
 	}
 
 	/**
@@ -6544,7 +6340,6 @@ class CharacterSheetPage {
 			this._renderFavouritesOverview();
 			// Re-render the host panel so the star reflects new state.
 			this._renderResources();
-			this._renderOverviewAbilities();
 			// Favourite-spell overview lives in the Overview tab — refresh when
 			// a spell favourite toggles so the pinned-spell list updates immediately.
 			if (type === "spell" && typeof this._renderQuickSpells === "function") {
@@ -6669,7 +6464,6 @@ class CharacterSheetPage {
 			this._saveCurrentCharacter();
 			this._renderFavouritesOverview();
 			this._renderResources();
-			this._renderOverviewAbilities();
 			// Re-render the surface that owns the unstarred entity so its ☆/★
 			// glyph flips back to "off". Without this, the star button keeps
 			// its stale "active" appearance until the next manual re-render,
@@ -6760,7 +6554,6 @@ class CharacterSheetPage {
 					if (this._state.useFeature?.(entity.id || entity.name)) {
 						this._saveCurrentCharacter();
 						this._renderFavouritesOverview();
-						this._renderOverviewAbilities();
 						if (this._features) this._features.render();
 					}
 				}, {title: "Use feature charge"});
@@ -6774,7 +6567,6 @@ class CharacterSheetPage {
 					if (this._state.useCustomAbility?.(entity.id)) {
 						this._saveCurrentCharacter();
 						this._renderFavouritesOverview();
-						this._renderOverviewAbilities();
 						if (this._customAbilities) this._customAbilities.render();
 					}
 				}, {title: "Use ability charge"});
@@ -10599,7 +10391,6 @@ class CharacterSheetPage {
 			await this._combat._triggerInitiativeRecovery();
 			this._renderHp();
 			this._renderResources();
-			this._renderOverviewAbilities();
 			if (this._features) this._features._renderResources();
 		}
 	}
