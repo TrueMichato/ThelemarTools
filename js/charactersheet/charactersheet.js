@@ -9046,20 +9046,51 @@ class CharacterSheetPage {
 			this._renderDicePresets();
 		};
 
-		// Position dropdown relative to button
+		// Position dropdown relative to button. The dropdown is `position: fixed`,
+		// so we clamp it to the viewport: keep it within the left/right edges, and
+		// open it below the button when there's room, otherwise flip it above (and
+		// finally clamp `top` so a very tall list never runs off the bottom — the
+		// CSS `max-height`/`overflow-y` then makes the overflow scrollable).
 		const positionDropdown = () => {
 			const btnRect = btn.getBoundingClientRect();
-			const dropdownWidth = 180;
+			const rect = dropdown.getBoundingClientRect();
+			const margin = 8;
+			const vw = window.innerWidth;
+			const vh = window.innerHeight;
+			const width = rect.width || 220;
+			const height = rect.height || 0;
 
-			let left = btnRect.right - dropdownWidth;
-			const top = btnRect.bottom + 8;
+			let left = btnRect.right - width;
+			if (left + width > vw - margin) left = vw - margin - width;
+			if (left < margin) left = margin;
 
-			if (left < 8) left = 8;
+			let top = btnRect.bottom + margin;
+			const fitsBelow = top + height <= vh - margin;
+			if (!fitsBelow) {
+				const aboveTop = btnRect.top - height - margin;
+				if (aboveTop >= margin) top = aboveTop;
+				else top = Math.max(margin, vh - margin - height);
+			}
 
 			Object.assign(dropdown.style, {
 				top: `${top}px`,
 				left: `${left}px`,
 			});
+		};
+
+		// While the dropdown is open it must track the 🎲 button (it's `fixed`, so a
+		// page scroll would otherwise leave it at a stale screen coordinate). Bind
+		// scroll (capture, to catch nested scrollers) + resize only while open.
+		const repositionWhileOpen = () => {
+			if (dropdown.classList.contains("active")) positionDropdown();
+		};
+		const bindReposition = () => {
+			window.addEventListener("scroll", repositionWhileOpen, true);
+			window.addEventListener("resize", repositionWhileOpen);
+		};
+		const unbindReposition = () => {
+			window.removeEventListener("scroll", repositionWhileOpen, true);
+			window.removeEventListener("resize", repositionWhileOpen);
 		};
 
 		// Toggle dropdown
@@ -9070,14 +9101,21 @@ class CharacterSheetPage {
 				updateCheckbox();
 				updateThemeSelection();
 				this._renderDicePresets();
+				// Show first so the dropdown has a measurable height, then position
+				// (clamp/flip) and start tracking the button on scroll/resize.
+				dropdown.classList.add("active");
+				btn.classList.add("active");
 				positionDropdown();
+				bindReposition();
 				// Warm the audio engine off the roll critical path so the first
 				// real roll-with-sound doesn't jank constructing the AudioContext
 				// and synthesising the noise buffer synchronously.
 				try { Dice3d?.warmAudio?.(); } catch (ignored) { /* best-effort */ }
+			} else {
+				dropdown.classList.remove("active");
+				btn.classList.remove("active");
+				unbindReposition();
 			}
-			dropdown.classList.toggle("active", !isOpen);
-			btn.classList.toggle("active", !isOpen);
 		});
 
 		// Animated dice checkbox
@@ -9111,7 +9149,13 @@ class CharacterSheetPage {
 			e.stopPropagation();
 			const theme = (/** @type {*} */ (e.currentTarget)).dataset.theme;
 			this._state.setSetting("diceTheme", theme);
+			// Picking a theme/special-effect swatch is an explicit "use this theme"
+			// choice, so turn OFF any custom-colour override — otherwise
+			// `_buildDiceAppearance` keeps applying the stored custom face/number
+			// colours and the chosen theme never visibly takes effect.
+			this._state.setSetting("diceCustomColor", false);
 			this._saveCurrentCharacter();
+			updateCheckbox();
 			updateThemeSelection();
 		}));
 
@@ -9217,6 +9261,7 @@ class CharacterSheetPage {
 			if (!(/** @type {*} */ (e.target)).closest(".charsheet__header-dice-controls")) {
 				dropdown.classList.remove("active");
 				btn.classList.remove("active");
+				unbindReposition();
 			}
 		});
 
@@ -10957,8 +11002,10 @@ class CharacterSheetPage {
 		const presets = this._getDicePresets().slice();
 		const ix = presets.findIndex(p => p && String(p.name).trim().toLowerCase() === name.toLowerCase());
 		const entry = {name, settings: captured};
-		if (~ix) presets[ix] = entry;
-		else presets.push(entry);
+		// Prepend so the newest preset sits at the TOP of the list. On re-save of
+		// an existing name, drop the old entry first so the upsert also moves it up.
+		if (~ix) presets.splice(ix, 1);
+		presets.unshift(entry);
 		this._state.setSetting("dicePresets", presets);
 		this._saveCurrentCharacter();
 		this._renderDicePresets();
@@ -11074,6 +11121,12 @@ class CharacterSheetPage {
 			astral: {bg: "linear-gradient(135deg, #3a5088 0%, #2a3d66 50%, #101b33 100%)", bgDark: "#0b1226", pip: "#eaf2ff", text: "#eaf2ff", shadow: "rgba(42, 61, 102, 0.7)", glow: "rgba(150, 180, 255, 0.5)", accent: "#96b4ff", special: "astral"},
 			tiger: {bg: "linear-gradient(135deg, #ff9a00 0%, #e07b00 50%, #a85800 100%)", bgDark: "#5c3000", pip: "#1a0d00", text: "#1a0d00", shadow: "rgba(224, 123, 0, 0.7)", glow: "rgba(255, 180, 60, 0.5)", accent: "#ffb43c", special: "tiger"},
 			toxic: {bg: "linear-gradient(135deg, #a6f000 0%, #76c000 50%, #4d8000 100%)", bgDark: "#2f4d00", pip: "#0c1a00", text: "#0c1a00", shadow: "rgba(118, 192, 0, 0.7)", glow: "rgba(180, 255, 80, 0.5)", accent: "#b4ff50", special: "toxic"},
+			// R15 additions
+			thelemar: {bg: "linear-gradient(135deg, #008791 0%, #005e66 50%, #00343a 100%)", bgDark: "#00242a", pip: "#d9b257", text: "#d9b257", shadow: "rgba(0, 94, 102, 0.7)", glow: "rgba(217, 178, 87, 0.5)", accent: "#d9b257", special: "thelemar"},
+			bone: {bg: "linear-gradient(135deg, #efe7d2 0%, #d8cdb0 50%, #b3a585 100%)", bgDark: "#8a7d5c", pip: "#3a2a18", text: "#3a2a18", shadow: "rgba(216, 205, 176, 0.7)", glow: "rgba(120, 100, 70, 0.4)", accent: "#5a4a30", special: "bone"},
+			obsidian: {bg: "linear-gradient(135deg, #2a2a36 0%, #15151c 50%, #000000 100%)", bgDark: "#000000", pip: "#c7c9d6", text: "#c7c9d6", shadow: "rgba(21, 21, 28, 0.8)", glow: "rgba(160, 165, 190, 0.3)", accent: "#9aa0b4", special: "obsidian"},
+			jade: {bg: "linear-gradient(135deg, #16a986 0%, #0f7d62 50%, #063d30 100%)", bgDark: "#042820", pip: "#f4f3d4", text: "#f4f3d4", shadow: "rgba(15, 125, 98, 0.7)", glow: "rgba(180, 240, 200, 0.4)", accent: "#9fe8c8", special: "jade"},
+			copper: {bg: "linear-gradient(135deg, #c47a3e 0%, #9a5b2e 50%, #4a2a12 100%)", bgDark: "#3a200d", pip: "#ffe6c2", text: "#ffe6c2", shadow: "rgba(154, 91, 46, 0.7)", glow: "rgba(255, 200, 140, 0.5)", accent: "#ffcf9e", special: "copper"},
 		};
 		const colors = themeColors[theme] || themeColors.standard;
 
