@@ -287,6 +287,12 @@
 									<button class="charsheet__dice-theme-btn charsheet__dice-theme-btn--void" data-theme="void" title="Void Walker"></button>
 									<button class="charsheet__dice-theme-btn charsheet__dice-theme-btn--radiant" data-theme="radiant" title="Radiant Holy"></button>
 								</div>
+								<div class="charsheet__dice-theme-options">
+									<button class="charsheet__dice-theme-btn charsheet__dice-theme-btn--dragon" data-theme="dragon" title="Dragon Scale"></button>
+									<button class="charsheet__dice-theme-btn charsheet__dice-theme-btn--astral" data-theme="astral" title="Astral Sea"></button>
+									<button class="charsheet__dice-theme-btn charsheet__dice-theme-btn--tiger" data-theme="tiger" title="Tiger's Eye"></button>
+									<button class="charsheet__dice-theme-btn charsheet__dice-theme-btn--toxic" data-theme="toxic" title="Toxic Ooze"></button>
+								</div>
 							</div>
 							<div class="charsheet__dice-customize" id="charsheet-dice-customize">
 								<div class="charsheet__dice-theme-label">Customize (3D)</div>
@@ -318,6 +324,11 @@
 										<option value="paper">Paper</option>
 										<option value="leopard">Leopard</option>
 										<option value="cloudy">Cloudy</option>
+										<option value="dragon">Dragon</option>
+										<option value="astral">Astral</option>
+										<option value="tiger">Tiger</option>
+										<option value="cheetah">Cheetah</option>
+										<option value="lizard">Lizard</option>
 									</select>
 								</label>
 								<label class="charsheet__dice-toggle-option" title="Override the theme's colours with your own.">
@@ -337,6 +348,14 @@
 									<input type="range" id="charsheet-dice-volume" min="0" max="100" value="35">
 								</label>
 								<button class="charsheet__dice-custom-reset" id="charsheet-dice-reset-custom">Reset customization</button>
+							</div>
+							<div class="charsheet__dice-presets" id="charsheet-dice-presets">
+								<div class="charsheet__dice-theme-label">Presets</div>
+								<div class="charsheet__dice-preset-save">
+									<input type="text" id="charsheet-dice-preset-name" maxlength="32" placeholder="Preset name…">
+									<button class="charsheet__dice-preset-save-btn" id="charsheet-dice-preset-save" title="Save the current theme, material, texture, colours and volume as a named preset.">Save</button>
+								</div>
+								<div class="charsheet__dice-preset-list" id="charsheet-dice-preset-list"></div>
 							</div>
 						</div>
 					</div>
