@@ -302,12 +302,12 @@ describe("CharacterSheetDice3d", () => {
 		});
 	});
 
-	// --- new appearance themes (#4) -----------------------------------------
-	describe("new themes (#4)", () => {
-		test("the four new themes are registered with valid texture/material", () => {
+	// --- new appearance themes (#4 + R15) -----------------------------------
+	describe("new themes (#4 + R15)", () => {
+		test("the new themes are registered with valid texture/material", () => {
 			const validTextures = ["acleaf", "astral", "bird", "cheetah", "cloudy", "dragon", "fire", "glitter", "ice", "isabelle", "leopard", "lizard", "marble", "metal", "none", "paper", "skulls", "speckles", "stainedglass", "stars", "thecage", "tiger", "water", "wood"];
 			const validMaterials = ["none", "metal", "wood", "glass", "plastic"];
-			for (const key of ["dragon", "astral", "tiger", "toxic"]) {
+			for (const key of ["dragon", "astral", "tiger", "toxic", "thelemar", "bone", "obsidian", "jade", "copper"]) {
 				const t = CharacterSheetDice3d.THEMES[key];
 				expect(t).toBeTruthy();
 				expect(t.background).toMatch(/^#[0-9a-fA-F]{6}$/);
@@ -315,6 +315,13 @@ describe("CharacterSheetDice3d", () => {
 				expect(validTextures).toContain(t.texture);
 				expect(validMaterials).toContain(t.material);
 			}
+		});
+
+		test("Thelemar Dice uses the spec'd teal body, gold numbers, and metal material", () => {
+			const t = CharacterSheetDice3d.THEMES.thelemar;
+			expect(t.background).toBe("#005e66");
+			expect(t.foreground).toBe("#d9b257");
+			expect(t.material).toBe("metal");
 		});
 	});
 
