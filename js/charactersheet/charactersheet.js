@@ -9204,6 +9204,7 @@ class CharacterSheetPage {
 		const btn = document.getElementById("charsheet-btn-dice");
 		const dropdown = document.getElementById("charsheet-dice-dropdown");
 		const animatedCheckbox = document.getElementById("charsheet-dice-animated");
+		const soundCheckbox = document.getElementById("charsheet-dice-sound");
 		const skipCondCheckbox = document.getElementById("charsheet-dice-skip-conditional");
 		const themeButtons = document.querySelectorAll(".charsheet__dice-theme-btn");
 
@@ -9211,6 +9212,8 @@ class CharacterSheetPage {
 		const updateCheckbox = () => {
 			const settings = /** @type {*} */ (this._state?.getSettings()) || {};
 			(/** @type {*} */ (animatedCheckbox)).checked = !!settings.animatedDice;
+			// Roll sound defaults ON (only off when explicitly disabled).
+			if (soundCheckbox) (/** @type {*} */ (soundCheckbox)).checked = settings.diceSound !== false;
 			if (skipCondCheckbox) (/** @type {*} */ (skipCondCheckbox)).checked = !!settings.skipConditionalPrompt;
 		};
 
@@ -9256,6 +9259,15 @@ class CharacterSheetPage {
 			this._state.setSetting("animatedDice", (/** @type {*} */ (e.target)).checked);
 			this._saveCurrentCharacter();
 		});
+
+		// Roll sound checkbox
+		if (soundCheckbox) {
+			soundCheckbox.addEventListener("change", (e) => {
+				e.stopPropagation();
+				this._state.setSetting("diceSound", (/** @type {*} */ (e.target)).checked);
+				this._saveCurrentCharacter();
+			});
+		}
 
 		// Skip-conditional-prompt checkbox (fast-play escape hatch for the
 		// per-roll conditional modifier picker).
@@ -10789,20 +10801,65 @@ class CharacterSheetPage {
 	 * @returns {Promise} Resolves when animation is complete
 	 */
 	async _showAnimatedDice (diceType, finalValue, isAdvantage = false, isDisadvantage = false) {
+		return this.pAnimateDiceSpec({
+			groups: [{sides: Number(diceType), values: [Number(finalValue)]}],
+			isAdvantage,
+			isDisadvantage,
+		});
+	}
+
+	/**
+	 * Central animated-dice dispatch. Animates an arbitrary set of dice groups
+	 * (count + type + the precomputed value each die lands on) and plays the
+	 * roll sound, honouring the user's settings.
+	 *
+	 * This is the single API every roll path should funnel through so the
+	 * animation reflects the ACTUAL dice rolled (e.g. `3d4`, `2d6 + 1d8`),
+	 * never a hard-coded d20.
+	 *
+	 * Behaviour / guarantees (mirrors the old `_showAnimatedDice` contract):
+	 *  - No-op (resolves immediately) when the `animatedDice` setting is off.
+	 *  - Honours `prefers-reduced-motion: reduce` (skips the visual; sound, if
+	 *    enabled, still plays as a lightweight cue).
+	 *  - Tries the vendored 3D physics roller for the renderable groups; on ANY
+	 *    failure falls back to the legacy CSS animation (single representative
+	 *    die). Never blocks or throws.
+	 *
+	 * @param {object} opts
+	 * @param {Array<{sides:number, values:number[]}>} opts.groups
+	 * @param {boolean} [opts.isAdvantage]
+	 * @param {boolean} [opts.isDisadvantage]
+	 * @returns {Promise} Resolves when the animation is complete.
+	 */
+	async pAnimateDiceSpec ({groups, isAdvantage = false, isDisadvantage = false} = {}) {
+		const settings = /** @type {*} */ (this._state?.getSettings?.()) || {};
+		if (!settings.animatedDice) return;
+
+		const cleanGroups = (Array.isArray(groups) ? groups : [])
+			.map(g => g ? {sides: Number(g.sides), values: (Array.isArray(g.values) ? g.values : []).map(Number).filter(Number.isFinite)} : null)
+			.filter(g => g && Number.isFinite(g.sides) && g.values.length);
+		if (!cleanGroups.length) return;
+
 		const Dice3d = (/** @type {*} */ (globalThis)).CharacterSheetDice3d;
 
-		// Honour reduced-motion: skip the animation entirely.
+		// Roll sound (default on). Best-effort; never blocks the animation.
+		if (settings.diceSound !== false && Dice3d && typeof Dice3d.playRollSound === "function") {
+			const dieCount = cleanGroups.reduce((acc, g) => acc + g.values.length, 0);
+			Dice3d.playRollSound(0.35, dieCount);
+		}
+
+		// Honour reduced-motion: skip the visual entirely (sound already played).
 		if (Dice3d && typeof Dice3d.isReducedMotion === "function" && Dice3d.isReducedMotion()) {
 			return;
 		}
 
-		const theme = (/** @type {*} */ (this._state.getSettings()))?.diceTheme || "standard";
+		const theme = settings.diceTheme || "standard";
 
-		// Preferred path: real 3D physics dice, landing on our exact value.
+		// Preferred path: real 3D physics dice, landing on our exact values.
 		try {
 			const dice3d = this._getDice3d();
-			if (dice3d && dice3d.canRender(diceType)) {
-				await dice3d.pRoll({diceType, finalValue, theme});
+			if (dice3d && cleanGroups.every(g => dice3d.canRender(g.sides))) {
+				await dice3d.pRollMany({groups: cleanGroups, theme});
 				return;
 			}
 		} catch (e) {
@@ -10811,7 +10868,21 @@ class CharacterSheetPage {
 			console.warn("3D dice unavailable, falling back to legacy animation", e);
 		}
 
-		await this._showLegacyDice(diceType, finalValue, isAdvantage, isDisadvantage);
+		// Legacy fallback: animate a single representative die (the first one of
+		// the first renderable-or-any group). Multi-die fidelity is a 3D-only win.
+		const primary = cleanGroups.find(g => g.sides !== 100) || cleanGroups[0];
+		await this._showLegacyDice(primary.sides, primary.values[0], isAdvantage, isDisadvantage);
+	}
+
+	/**
+	 * Convenience wrapper for damage/healing call-sites: animate a set of dice
+	 * groups (no advantage semantics). Accepts the same `{sides, values}` group
+	 * shape as {@link pAnimateDiceSpec}.
+	 * @param {Array<{sides:number, values:number[]}>} groups
+	 * @returns {Promise}
+	 */
+	async pAnimateDamageDice (groups) {
+		return this.pAnimateDiceSpec({groups});
 	}
 
 	/**
