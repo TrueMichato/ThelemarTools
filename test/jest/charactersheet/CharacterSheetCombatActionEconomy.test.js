@@ -35,7 +35,6 @@ describe("CharacterSheetCombat action economy gating", () => {
 		combat._page = {
 			_renderFeatures: () => {},
 			_renderResources: () => {},
-			_renderOverviewAbilities: () => {},
 			_customAbilities: {render: () => {}},
 			_saveCurrentCharacter: () => {},
 		};
@@ -193,7 +192,6 @@ describe("CharacterSheetCombat — Combat Action Modal & Resource Deduction", ()
 		combat._page = {
 			_renderFeatures: () => {},
 			_renderResources: () => {},
-			_renderOverviewAbilities: () => {},
 			_customAbilities: {render: () => {}},
 			_saveCurrentCharacter: () => {},
 		};

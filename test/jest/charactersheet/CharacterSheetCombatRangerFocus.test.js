@@ -244,7 +244,7 @@ describe("Bug — Overview/Combat Primal Focus ability parity", () => {
 	// `effectLines` summary, while still preserving the Focused Quarry damage number.
 	const source = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
 	const overviewBody = (() => {
-		const m = source.match(/_renderOverviewRanger\s*\(\)\s*\{[\s\S]*?\n\t_renderOverviewAbilities\s*\(\)/);
+		const m = source.match(/_renderOverviewRanger\s*\(\)\s*\{[\s\S]*?\n\t_useOverviewResource\s*\(/);
 		return m ? m[0] : "";
 	})();
 	const combatBody = (() => {
@@ -283,7 +283,7 @@ describe("Bug #11 — reminder surfaces filter methods/applied-elsewhere + hover
 	const featuresSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-features.js"), "utf8");
 
 	const overviewBody = (() => {
-		const m = charsheetSrc.match(/_renderOverviewRanger\s*\(\)\s*\{[\s\S]*?\n\t_renderOverviewAbilities\s*\(\)/);
+		const m = charsheetSrc.match(/_renderOverviewRanger\s*\(\)\s*\{[\s\S]*?\n\t_useOverviewResource\s*\(/);
 		return m ? m[0] : "";
 	})();
 	const combatBody = (() => {
