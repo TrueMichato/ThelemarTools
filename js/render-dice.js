@@ -19,6 +19,40 @@ Renderer.dice = class {
 
 	static _isManualMode = false;
 
+	/**
+	 * Optional listeners invoked after a roll is rendered to the rollbox (see
+	 * {@link Renderer.dice._notifyRollRendered}). Empty by default so non-consumer
+	 * pages are unaffected; consumers register via {@link Renderer.dice.addRollRenderedHook}.
+	 */
+	static _rollRenderedHooks = [];
+
+	/**
+	 * Register a hook called after each (non-manual) rollbox roll is rendered.
+	 * The hook receives `{tree, result, meta, rolledBy, opts}` — `meta.dice` holds
+	 * the structured per-die faces actually rolled (`[{faces, vals:[…]}]`). Safe
+	 * to register the same hook twice (deduped). Returns an unsubscribe fn.
+	 * @param {(payload:{tree:*, result:number, meta:*, rolledBy:*, opts:*}) => void} fn
+	 */
+	static addRollRenderedHook (fn) {
+		if (typeof fn !== "function") return () => {};
+		if (!Renderer.dice._rollRenderedHooks.includes(fn)) Renderer.dice._rollRenderedHooks.push(fn);
+		return () => Renderer.dice.removeRollRenderedHook(fn);
+	}
+
+	/** Unregister a previously-added roll-rendered hook. */
+	static removeRollRenderedHook (fn) {
+		const ix = Renderer.dice._rollRenderedHooks.indexOf(fn);
+		if (~ix) Renderer.dice._rollRenderedHooks.splice(ix, 1);
+	}
+
+	/** Best-effort fan-out to roll-rendered hooks; never throws. */
+	static _notifyRollRendered (payload) {
+		if (!Renderer.dice._rollRenderedHooks.length) return;
+		for (const fn of Renderer.dice._rollRenderedHooks) {
+			try { fn(payload); } catch (e) { setTimeout(() => { throw e; }); }
+		}
+	}
+
 	/* -------------------------------------------- */
 
 	// region Utilities
@@ -767,6 +801,12 @@ Renderer.dice = class {
 
 				Renderer.dice._scrollBottom();
 			}
+
+			// Notify any registered roll-rendered hooks (default: none, so other
+			// pages are unaffected). The character sheet registers one to mirror
+			// rollbox rolls into its 3D dice animation + roll log. Best-effort:
+			// a throwing hook must never break the roll itself.
+			Renderer.dice._notifyRollRendered({tree, result, meta, rolledBy, opts});
 
 			return result;
 		} else {
@@ -2148,6 +2188,15 @@ Renderer.dice.parsed = class {
 				meta.allMin = meta.allMin || [];
 				meta.allMax.push(maxRolls.length && maxRolls.length === rolls.length);
 				meta.allMin.push(minRolls.length && minRolls.length === rolls.length);
+
+				// Record the actual per-die faces (kept, i.e. non-dropped) grouped by
+				// die size, so a downstream consumer (e.g. the character sheet's 3D
+				// dice roller) can animate the real roll. Purely additive metadata:
+				// it does not affect the result, HTML, or any existing behaviour.
+				const keptVals = rolls.filter(it => !it.isDropped).map(it => it.val);
+				if (keptVals.length) {
+					(meta.dice = meta.dice || []).push({faces, vals: keptVals});
+				}
 			}
 
 			if (isSuccessMode) {
