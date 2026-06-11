@@ -71,6 +71,12 @@ class CharacterSheetDice3d {
 		astral: {background: "#2a3d66", foreground: "#eaf2ff", outline: "#101b33", texture: "astral", material: "glass"},
 		tiger: {background: "#e07b00", foreground: "#1a0d00", outline: "#7a3d00", texture: "tiger", material: "wood"},
 		toxic: {background: "#76c000", foreground: "#0c1a00", outline: "#2f4d00", texture: "lizard", material: "metal"},
+		// R15 additions — Thelemar Dice (teal + gold metal) + cohesive companions.
+		thelemar: {background: "#005e66", foreground: "#d9b257", outline: "#00343a", texture: "marble", material: "metal"},
+		bone: {background: "#d8cdb0", foreground: "#3a2a18", outline: "#5a4a30", texture: "skulls", material: "wood"},
+		obsidian: {background: "#15151c", foreground: "#c7c9d6", outline: "#000000", texture: "speckles", material: "glass"},
+		jade: {background: "#0f7d62", foreground: "#f4f3d4", outline: "#063d30", texture: "marble", material: "glass"},
+		copper: {background: "#9a5b2e", foreground: "#ffe6c2", outline: "#4a2a12", texture: "metal", material: "metal"},
 	};
 
 	constructor ({diceBoxFactory = null} = {}) {

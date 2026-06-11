@@ -50,8 +50,8 @@ function makeHarness () {
 			const presets = this._getDicePresets().slice();
 			const ix = presets.findIndex(p => p && String(p.name).trim().toLowerCase() === name.toLowerCase());
 			const entry = {name, settings: captured};
-			if (~ix) presets[ix] = entry;
-			else presets.push(entry);
+			if (~ix) presets.splice(ix, 1);
+			presets.unshift(entry);
 			this._state.setSetting("dicePresets", presets);
 			this._saveCurrentCharacter();
 			this._renderDicePresets();
@@ -132,6 +132,32 @@ describe("#3 — dice customization presets", () => {
 		expect(presets.length).toBe(1);
 		expect(presets[0].name).toBe("crimson");
 		expect(presets[0].settings.diceColor).toBe("#00ff00");
+	});
+
+	test("new presets are PREPENDED (newest-first ordering)", () => {
+		const {state, ctx} = makeHarness();
+		state.setSetting("diceColor", "#111111");
+		ctx._saveDicePreset("First");
+		ctx._saveDicePreset("Second");
+		ctx._saveDicePreset("Third");
+		expect(ctx._getDicePresets().map(p => p.name)).toEqual(["Third", "Second", "First"]);
+	});
+
+	test("re-saving an existing name moves it to the TOP (upsert + reorder)", () => {
+		const {state, ctx} = makeHarness();
+		state.setSetting("diceColor", "#111111");
+		ctx._saveDicePreset("A");
+		ctx._saveDicePreset("B");
+		ctx._saveDicePreset("C");
+		expect(ctx._getDicePresets().map(p => p.name)).toEqual(["C", "B", "A"]);
+
+		// Re-save "A" with a new colour: it should jump to the top, not duplicate.
+		state.setSetting("diceColor", "#222222");
+		ctx._saveDicePreset("a"); // case-insensitive match
+		const presets = ctx._getDicePresets();
+		expect(presets.map(p => p.name)).toEqual(["a", "C", "B"]);
+		expect(presets.length).toBe(3);
+		expect(presets[0].settings.diceColor).toBe("#222222");
 	});
 
 	test("applyDicePreset restores every captured setting", () => {
@@ -222,5 +248,13 @@ describe("#3 — source-pin: production methods exist", () => {
 
 	test("presets persist under the 'dicePresets' settings key", () => {
 		expect(SOURCE).toContain(`setSetting("dicePresets"`);
+	});
+
+	test("saveDicePreset PREPENDS new presets (unshift, not push)", () => {
+		// The save path must drop any same-name entry then unshift, so the newest
+		// preset lands at the TOP of the list and re-saves move to the top too.
+		expect(SOURCE).toContain(`if (~ix) presets.splice(ix, 1);`);
+		expect(SOURCE).toContain(`presets.unshift(entry);`);
+		expect(SOURCE).not.toContain(`else presets.push(entry);`);
 	});
 });
