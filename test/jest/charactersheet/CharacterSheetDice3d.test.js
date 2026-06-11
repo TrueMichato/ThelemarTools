@@ -258,6 +258,64 @@ describe("CharacterSheetDice3d", () => {
 			const b = CharacterSheetDice3d._colorsetSig(d._buildColorset("standard", {background: "#010203"}));
 			expect(a).not.toBe(b);
 		});
+
+		// Regression (#2): the vendored `DiceColors.makeColorSet` caches BY NAME and
+		// returns the cached entry verbatim on a name hit. A name that's constant
+		// per theme made a changed custom colour silently no-op. The colorset name
+		// must fold a hash of the actual appearance so distinct looks → distinct
+		// names → the new colour always applies.
+		test("distinct custom colours produce distinct colorset names (#2)", () => {
+			const d = new CharacterSheetDice3d({});
+			const red = d._buildColorset("standard", {background: "#ff0000"});
+			const green = d._buildColorset("standard", {background: "#00ff00"});
+			expect(red.name).not.toBe(green.name);
+			expect(red.background).toBe("#ff0000");
+			expect(green.background).toBe("#00ff00");
+		});
+
+		test("the same appearance is stable (same name) so caching still works (#2)", () => {
+			const d = new CharacterSheetDice3d({});
+			const a = d._buildColorset("standard", {background: "#abcdef", material: "glass"});
+			const b = d._buildColorset("standard", {background: "#abcdef", material: "glass"});
+			expect(a.name).toBe(b.name);
+		});
+
+		test("any appearance field change shifts the name (#2)", () => {
+			const d = new CharacterSheetDice3d({});
+			const base = d._buildColorset("standard", {background: "#112233", foreground: "#ffffff", outline: "#000000", texture: "none", material: "plastic"});
+			for (const change of [
+				{background: "#113233"},
+				{foreground: "#eeeeee"},
+				{outline: "#010101"},
+				{texture: "marble"},
+				{material: "metal"},
+			]) {
+				const variant = d._buildColorset("standard", {background: "#112233", foreground: "#ffffff", outline: "#000000", texture: "none", material: "plastic", ...change});
+				expect(variant.name).not.toBe(base.name);
+			}
+		});
+
+		test("_hashString is stable and collision-resistant for close inputs (#2)", () => {
+			expect(CharacterSheetDice3d._hashString("abc")).toBe(CharacterSheetDice3d._hashString("abc"));
+			expect(CharacterSheetDice3d._hashString("abc")).not.toBe(CharacterSheetDice3d._hashString("abd"));
+			expect(typeof CharacterSheetDice3d._hashString("x")).toBe("string");
+		});
+	});
+
+	// --- new appearance themes (#4) -----------------------------------------
+	describe("new themes (#4)", () => {
+		test("the four new themes are registered with valid texture/material", () => {
+			const validTextures = ["acleaf", "astral", "bird", "cheetah", "cloudy", "dragon", "fire", "glitter", "ice", "isabelle", "leopard", "lizard", "marble", "metal", "none", "paper", "skulls", "speckles", "stainedglass", "stars", "thecage", "tiger", "water", "wood"];
+			const validMaterials = ["none", "metal", "wood", "glass", "plastic"];
+			for (const key of ["dragon", "astral", "tiger", "toxic"]) {
+				const t = CharacterSheetDice3d.THEMES[key];
+				expect(t).toBeTruthy();
+				expect(t.background).toMatch(/^#[0-9a-fA-F]{6}$/);
+				expect(t.foreground).toMatch(/^#[0-9a-fA-F]{6}$/);
+				expect(validTextures).toContain(t.texture);
+				expect(validMaterials).toContain(t.material);
+			}
+		});
 	});
 
 	// --- appearance threading through pRollMany (#5) -------------------------
@@ -536,11 +594,17 @@ function _buildDiceAppearanceReplica (settings) {
 	const a = {};
 	if (s.diceCustomColor && s.diceColor) {
 		a.background = s.diceColor;
-		a.outline = "#000000"; // production derives via _darkenHex; value irrelevant here
+		a.outline = "#000000"; // production derives via _darkenHex(0.25); value irrelevant here
 	}
 	if (s.diceCustomColor && s.diceColorText) a.foreground = s.diceColorText;
 	if (s.diceTexture) a.texture = s.diceTexture;
 	if (s.diceMaterial) a.material = s.diceMaterial;
+	// #2 — when custom colours are on but texture/material were left on "Theme
+	// default", fall back to a NEUTRAL look so the bright colour reads true.
+	if (s.diceCustomColor && s.diceColor) {
+		if (!s.diceTexture) a.texture = "none";
+		if (!s.diceMaterial) a.material = "plastic";
+	}
 	return Object.keys(a).length ? a : null;
 }
 
@@ -732,6 +796,56 @@ describe("CharacterSheet.pAnimateDiceSpec boundary contract", () => {
 		const {harness, calls} = makeHarness({getDice3dThrows: true});
 		await expect(_pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 8, values: [5]}]})).resolves.toBeUndefined();
 		expect(calls.legacy.length).toBe(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #2 — a bright custom colour must READ TRUE. When the player turns on custom
+// colours but leaves texture/material on "Theme default", the appearance falls
+// back to a NEUTRAL look (texture "none" = no multiply-darkening, material
+// "plastic" = flat) instead of the theme's (often dark) texture/material.
+// ---------------------------------------------------------------------------
+describe("CharacterSheet._buildDiceAppearance custom-colour neutral fallback (#2)", () => {
+	test("custom colour with default texture/material → none + plastic", () => {
+		const a = _buildDiceAppearanceReplica({diceCustomColor: true, diceColor: "#00ff00"});
+		expect(a.background).toBe("#00ff00");
+		expect(a.texture).toBe("none");
+		expect(a.material).toBe("plastic");
+	});
+
+	test("an explicit texture/material override is respected (no neutral clobber)", () => {
+		const a = _buildDiceAppearanceReplica({diceCustomColor: true, diceColor: "#00ff00", diceTexture: "marble", diceMaterial: "metal"});
+		expect(a.texture).toBe("marble");
+		expect(a.material).toBe("metal");
+	});
+
+	test("no neutral fallback when custom colour is OFF (theme drives the look)", () => {
+		const a = _buildDiceAppearanceReplica({diceCustomColor: false, diceColor: "#00ff00"});
+		// Colour suppressed; nothing forces texture/material → returns null (use theme).
+		expect(a).toBeNull();
+	});
+
+	test("source-pin: production forces neutral texture/material under custom colour (#2)", () => {
+		const src = readFileSync(resolve(_REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		const match = src.match(/_buildDiceAppearance \(settings\) \{[\s\S]*?\n\t\}/);
+		expect(match).not.toBeNull();
+		const body = match[0];
+		expect(body).toMatch(/if \(!s\.diceTexture\) a\.texture = "none";/);
+		expect(body).toMatch(/if \(!s\.diceMaterial\) a\.material = "plastic";/);
+		// Outline darkening is softened (0.25, not the old harsh 0.45).
+		expect(body).toMatch(/_darkenHex\(s\.diceColor, 0\.25\)/);
+	});
+
+	test("source-pin: init raises light_intensity so colours read brighter (#2)", () => {
+		const src = readFileSync(resolve(_REPO_ROOT, "js/charactersheet/charactersheet-dice3d.js"), "utf8");
+		expect(src).toMatch(/light_intensity:\s*0\.9/);
+	});
+
+	test("source-pin: _buildColorset folds an appearance hash into the name (#2)", () => {
+		const src = readFileSync(resolve(_REPO_ROOT, "js/charactersheet/charactersheet-dice3d.js"), "utf8");
+		const match = src.match(/_buildColorset \(theme, appearance = null\) \{[\s\S]*?\n\t\}/);
+		expect(match).not.toBeNull();
+		expect(match[0]).toMatch(/_hashString/);
 	});
 });
 
