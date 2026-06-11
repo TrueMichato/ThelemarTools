@@ -418,7 +418,6 @@ describe("CharacterSheetCombat._useCombatAction — effect pipeline integration"
 		combat._page = {
 			_renderFeatures: () => {},
 			_renderResources: () => {},
-			_renderOverviewAbilities: () => {},
 			_saveCurrentCharacter: () => {},
 			_activateState: () => {},
 			rollD20: () => ({roll: 15, roll1: 15, roll2: 12, mode: "normal"}),

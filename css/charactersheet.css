@@ -5479,50 +5479,10 @@
 	border-left: 3px solid var(--cs-primary, #3b82f6);
 }
 
-/* Overview Abilities Section */
-.charsheet__section--abilities {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(139, 92, 246, 0.05) 100%);
-}
-
-.charsheet__abilities-list {
-	display: flex;
-	flex-direction: column;
-	gap: 0.5rem;
-}
-
-.charsheet__ability-row {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 0.5rem;
-	padding: 0.5rem 0.75rem;
-	background: var(--cs-bg-card, rgba(30, 41, 59, 0.5));
-	border-radius: 0.375rem;
-	cursor: pointer;
-	transition: background 0.15s ease;
-}
-
-.charsheet__ability-row:hover {
-	background: var(--cs-bg-card-hover, rgba(30, 41, 59, 0.7));
-}
-
-.charsheet__ability-info {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	min-width: 0;
-	flex: 1 1 auto;
-}
-
 .charsheet__section-caption {
 	margin: 0.15rem 0 0.4rem;
 	font-style: italic;
 	line-height: 1.25;
-}
-
-.charsheet__ability-icon {
-	font-size: 1rem;
-	flex-shrink: 0;
 }
 
 .charsheet__ability-name {
@@ -5533,22 +5493,6 @@
 	word-break: break-word;
 	min-width: 0;
 	flex: 1 1 auto;
-}
-
-.charsheet__ability-controls {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	flex-shrink: 0;
-}
-
-.charsheet__ability-uses {
-	font-weight: 600;
-	font-size: 0.85rem;
-}
-
-.charsheet__ability-recharge {
-	font-size: 0.7rem;
 }
 
 /* Ability Detail Modal */
