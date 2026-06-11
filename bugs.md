@@ -3,7 +3,26 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 12 (manual-testing follow-ups + two Round-11 fixes that did not take effect at runtime)
+
+Decomposed into 4 parallel sessions (single owner per shared surface). Sessions branch off `character-sheet-wip` @ `81f5aa1a` and never touch `bugs.md` (orchestrator-owned). Merge order: **D → I → S → V** (D is foundational because it owns every roll/dice surface). Two Round-11 fixes (S3 spell-attack, S6 CSS) shipped to source but the user reports **no runtime effect** — the relevant sessions must reproduce in-browser FIRST and find the real reason before re-fixing.
+
+**D — Dice & all roll routing** (owns every roll/animation surface: `charactersheet-dice3d.js`, the central dispatch in `charactersheet.js`, and the roll call-sites in `charactersheet-combat.js` / `charactersheet-spells.js` / `charactersheet-playmode.js`)
+* **(#3)** Dice animation overhaul: the 3D dice always render a single d20 regardless of the real roll. `pRoll({diceType, finalValue})` only animates one die and `_setBadge` only fires for d20. Make the animation reflect the actual dice **count and type**, add a **roll sound**, expose **more dice options** in the 🎲 Dice settings, and route **all** roll paths through it — including **spellcasting** and **custom dice rolls** (currently many call-sites bypass it or force 1×d20).
+* **(#3b — Round-11 S3 re-fix)** The Combat-tab spell-attack badge (`#charsheet-combat-spell-attack`) clickable quick-roll did not take effect for the user. Reproduce in-browser with a real caster; determine why (hidden/non-rollable section, wrong element, listener not firing, or the user expected the Spells-tab spell-attack), and make the spell-attack roll actually work and route through the new animation.
+* **(#4)** Magic Missile rolls the wrong amount of damage. Fix `_rollSpellDamage` so Magic Missile fires the correct number of darts (3 at 1st level, +1 per slot level above 1st), each `1d4 + 1`, and reflect that in the animation.
+
+**I — Inventory item editing** (owns `charactersheet-inventory.js` edit flow; coordinate on `charactersheet-state.js` `replaceItem` if needed)
+* **(#2)** Editing an existing item (e.g. a weapon) re-saves it through the custom-item editor, which drops its type/category — the item becomes "Other", loses weapon recognition, and its attack disappears from Combat. Preserve the original item's type/category/weapon data (and attack wiring) across an edit.
+* **(#8 continuation)** While here, ensure the custom-item editor's full bonus/effect support (added in Round 11) is preserved through the edit→save round-trip.
+
+**S — Tortle Shell Defense follow-up** (owns Shell Defense in `charactersheet-state.js`; continuation of Round-11 S5)
+* **(#1, part a)** A Shell Defense modifier is **still applied before the state is activated** (residual passive effect). Ensure NO Shell Defense effect (AC or otherwise) exists until the state is toggled on.
+* **(#1, part b)** Activating Shell Defense should also apply the **prone** condition (in addition to the existing AC/speed/save effects).
+
+**V — Visual/CSS re-fix** (Round-11 S6 redo; owns `css/charactersheet.css` + any view-specific CSS/markup, e.g. playmode)
+* **(#6 re-fix)** `.charsheet__ranger-hunters-prey` note color fix shipped to CSS but the user reports no change. Reproduce in-browser; confirm which element actually renders the note and make it match `.charsheet__ranger-ability-note` (`var(--rgb-text-dim)`).
+* **(#12 re-fix)** Speed values still misaligned. The Round-11 fix only touched the **Overview** `.charsheet__speed-seg` markup, but **Alt View / playmode** renders speed via `_renderVitalChip`/`_fmtSpeed` (different markup). Reproduce in the view shown in the user's screenshot and fix the alignment there (likely playmode chips, not the overview).
 
 ## Closed Bugs
 
