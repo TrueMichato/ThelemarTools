@@ -3,72 +3,20 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 15 — Dice dropdown polish, more effects, Thelemar Dice, preset fixes
-
-All four items live on the single cohesive **dice customization surface** (the 🎲 header
-dropdown). One session owns all of them. Files: `charactersheet.html` (dice dropdown
-markup ~L245-360), `css/charactersheet.css` (`.charsheet__dice-*` rules ~L1074-1300+),
-`js/charactersheet/charactersheet.js` (`_initDicePicker` ~L8999-9230, preset methods
-`_getDicePresets`/`_saveDicePreset`/`_applyDicePreset`/`_deleteDicePreset`/`_renderDicePresets`
-~L10933-11043, `_buildDiceAppearance` ~L10887, `_showLegacyDice` themeColors ~L11051),
-`js/charactersheet/charactersheet-dice3d.js` (`THEMES` ~L52-74).
-
-- **R15-1 (CSS/JS) — Dropdown clips at bottom + doesn't follow on scroll.** The 🎲
-  dropdown (`.charsheet__dice-dropdown`) is `position: fixed` with NO `max-height` /
-  `overflow-y`, and is positioned ONCE on open via `positionDropdown()` (`_initDicePicker`,
-  top = `btnRect.bottom + 8`). Two symptoms: (a) it has grown tall enough (themes +
-  customize + presets) that its bottom can extend below the viewport and is unreachable
-  ("hides the bottom"); (b) being `fixed` and positioned only at open-time, it stays at a
-  stale screen coordinate when the page scrolls (disconnected from the button).
-  FIX: give the dropdown a `max-height` bounded by the viewport (`calc(100vh - …)`) with
-  `overflow-y: auto`, and reposition/clamp it intelligently — clamp `top` so the dropdown
-  never overflows the bottom (open upward / shift up when there isn't room below), and
-  reposition (or close) on scroll/resize so it tracks the button. Verify in-browser at a
-  short viewport that the full dropdown (incl. presets + Save) is reachable, and that
-  scrolling keeps it anchored to the 🎲 button.
-
-- **R15-2 (CSS/markup) — Special-Effects theme rows ordered/laid-out weirdly.** Under the
-  "Special Effects" label the buttons are split across THREE separate
-  `.charsheet__dice-theme-options` flex rows of uneven counts (6, then 4, then the 4 R14
-  additions), producing a ragged grid. FIX: present the special-effect swatches as ONE
-  uniform flow (single `flex-wrap` container or a fixed-column grid) so they wrap evenly,
-  and give them a sensible, stable order. Keep the "Theme" (solid colours) row separate
-  from "Special Effects". Don't break the `data-theme` attributes or the
-  `updateThemeSelection()` active-swatch query.
-
-- **R15-3 (JS/CSS) — Add "Thelemar Dice" + more dice/effects.** Add a new built-in theme
-  **`thelemar`**: body/background `#005E66`, numbers/foreground `#d9b257`, **metallic
-  material** (`material: "metal"`), with a sensible `outline` (darker teal, e.g. derived
-  from `#005E66`) and a fitting `texture`. Register it in BOTH:
-  `CharacterSheetDice3d.THEMES` (3D) AND `_showLegacyDice` `themeColors` (2D fallback), add
-  a swatch button in `charactersheet.html` (with `data-theme="thelemar"`, gold-on-teal
-  swatch) + swatch CSS class in `css/charactersheet.css`. Also add a handful MORE
-  themes/special effects (the user wants "many more dice / more special effects") — propose
-  3-5 additional cohesive themes built on the already-vendored textures/materials, each
-  wired the same three places (THEMES + legacy + swatch + CSS). Keep names/titles tasteful.
-
-- **R15-4 (JS) — Preset list should PREPEND, and the "stuck custom dice" selection bug.**
-  Two parts:
-  (a) **Prepend on save.** `_saveDicePreset` does `presets.push(entry)` so new presets land
-  at the BOTTOM. Change so a newly-saved preset is added at the TOP of the list (and
-  `_renderDicePresets` renders newest-first), "with its colours and name above". (Upsert by
-  name should still work — on re-save of an existing name, move it to the top.)
-  (b) **REAL BUG — custom dice "always chosen", can't pick another.** Once custom colours
-  are enabled (creating/applying a custom dice sets `diceCustomColor: true`),
-  `_buildDiceAppearance` ALWAYS applies the custom face/number colours regardless of which
-  theme swatch is clicked — so after making a custom die, clicking a different theme has no
-  visible effect (the custom override wins). The theme-swatch click handler
-  (`_initDicePicker` ~L9110) sets `diceTheme` but never clears `diceCustomColor`. FIX:
-  selecting a normal theme/special-effect swatch must turn OFF the custom-colour override
-  (`setSetting("diceCustomColor", false)`, uncheck the box, refresh controls) so the chosen
-  theme actually takes effect. Picking a preset that itself carries custom colours should
-  still apply them (preset is an explicit choice). Net behaviour: theme swatch = use theme
-  (clears custom); custom-colour checkbox / preset-with-custom = use custom. Verify
-  in-browser: make a custom red die, then click the green swatch → dice render green.
-
-bugs.md is orchestrator-owned — the session must NOT edit it.
+_None._
 
 ## Closed Bugs
+
+### Round 15 (dice dropdown polish, more themes, Thelemar Dice, preset fixes) — FIXED (commit `7ee091c7`, merged via `33f4836f`)
+
+Single cohesive dice-customization surface (the 🎲 header dropdown), one owner (session R15). No core files touched (`js/render-dice.js` untouched).
+
+* **(#1) Dropdown clips at bottom + doesn't follow on scroll — FIXED.** Root cause: `.charsheet__dice-dropdown` was `position:fixed` with no `max-height`/`overflow-y`, positioned once at open (`positionDropdown()` top = `btnRect.bottom + 8`), so the now-tall dropdown overflowed the viewport and stayed at a stale coord on scroll. Fix: CSS `max-height:calc(100vh - 24px)` + `overflow-y:auto`; rewrote `positionDropdown()` to clamp horizontally and flip-above / clamp-top when no room below (show-then-measure); bound `scroll`(capture)+`resize` listeners while open, unbound on close. Verified live: `max-height:476px`, `overflow-y:auto`; at a short viewport the dropdown opens upward with the full presets+Save reachable, and tracks the button on scroll.
+* **(#2) Special-Effects rows ordered weirdly — FIXED.** Root cause: the special-effect swatches were split across THREE ragged `.charsheet__dice-theme-options` flex rows (6/4/4). Fix: merged into ONE `flex-wrap` container (19 swatches), keeping the solid-colour "Theme" row separate. Verified live: 2 option rows total (solid + special), 25 swatches, uniform grid; `data-theme` attrs + `updateThemeSelection()` query intact.
+* **(#3) Add "Thelemar Dice" + more themes — DONE.** Added `thelemar` (background `#005E66`, foreground `#d9b257`, `material:"metal"`, outline `#00343a`, marble texture) plus four companions `bone`, `obsidian`, `jade`, `copper`. Each wired in all four places: `CharacterSheetDice3d.THEMES`, `_showLegacyDice` `themeColors` (2D fallback), an HTML swatch button (`data-theme`), and a `.charsheet__dice-theme-btn--<name>` CSS class. Verified live: all 5 build valid colorsets; Thelemar exact-match (`#005e66`/`#d9b257`/metal).
+* **(#4) Preset prepend + "stuck custom dice" selection bug — FIXED.** (a) `_saveDicePreset` now prepends (newest-first; upsert of an existing name moves it to the top). (b) Root cause of the stuck-dice bug: the theme-swatch click handler set `diceTheme` but never cleared `diceCustomColor`, so `_buildDiceAppearance` kept applying the custom override and clicking another theme had no visible effect. Fix: swatch click now `setSetting("diceCustomColor", false)` + unchecks the box + refreshes controls, so the picked theme renders; `_applyDicePreset` left intact (a preset carrying custom colours still applies them). Verified live: custom red die → click green swatch → `diceCustomColor:false`, theme `green`, checkbox unchecked, appearance falls back to theme; presets save `Gamma,Beta,Alpha` (newest-first), re-save `alpha` → `alpha,Gamma,Beta`.
+
+Tests: extended `CharacterSheetDicePresets.test.js` (prepend ordering + upsert-moves-to-top + source-pin) and `CharacterSheetDice3d.test.js` (5 new themes incl. Thelemar spec); new `CharacterSheetDiceDropdownR15.test.js` (dropdown CSS + positionDropdown clamp/flip + scroll/resize pins, single special-effects container, swatch CSS, legacy themeColors, swatch-clears-custom behaviour + source-pin, preset-keeps-custom guard). Full `jest charactersheet` gate: 254 suites / 10114 tests green; ESLint clean.
 
 ### Round 14 (dice polish — follow-ups to Round 13) — FIXED (commit `0f0aee6d`, merged via `d28424c5`)
 
