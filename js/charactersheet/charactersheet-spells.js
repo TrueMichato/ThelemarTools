@@ -6464,6 +6464,7 @@ class CharacterSheetSpells {
 		}
 
 		const modeLabel = this._page.getModeLabel?.(rollResult.mode) || "";
+		void this._page.pAnimateD20?.(rollResult);
 		this._page.showDiceResult({
 			title: `${className ? `${className} ` : ""}Spell Attack${modeLabel}`,
 			roll: rollResult.roll,

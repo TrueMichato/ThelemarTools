@@ -36,6 +36,12 @@ class CharacterSheetDice3d {
 
 	/** Lazily-created shared AudioContext for the synthesized roll sound. */
 	static _audioCtx = null;
+	/** Cached synthesized noise buffer (reused across every clack/roll). */
+	static _noiseBuffer = null;
+	/** The AudioContext the cached buffer was built for (cache-invalidation key). */
+	static _noiseBufferCtx = null;
+	/** Duration (s) of a single "clack" noise burst. */
+	static _NOISE_DUR = 0.05;
 
 	/**
 	 * Per-theme dice appearance. Keys match the persisted `diceTheme` setting
@@ -73,6 +79,12 @@ class CharacterSheetDice3d {
 		// WebGL context loss; never auto-cleared (avoids re-init thrash).
 		this._unavailable = false;
 		this._lastThemeKey = null;
+		// Signature of the currently-applied appearance (theme + overrides) so we
+		// only call updateConfig when the look actually changes.
+		this._appearanceSig = null;
+		// Theme/appearance to use for the next (re)initialisation, set by pRollMany.
+		this._pendingTheme = null;
+		this._pendingAppearance = null;
 		this._rollToken = 0;
 		// Settle fn for the in-flight roll, used to force-resolve a previous
 		// roll if a new one starts while it is still animating.
@@ -124,17 +136,36 @@ class CharacterSheetDice3d {
 		return CharacterSheetDice3d.THEMES[theme] || CharacterSheetDice3d.THEMES.standard;
 	}
 
-	_buildColorset (theme) {
+	/**
+	 * Build the library colorset for a theme, optionally overridden by a
+	 * player-customised `appearance` (`{background, foreground, outline, texture,
+	 * material}` — any subset). Missing keys fall back to the theme's values, so
+	 * a partial override (e.g. just a custom material) keeps the rest of the look.
+	 * @param {string} theme
+	 * @param {{background?:string, foreground?:string, outline?:string, texture?:string, material?:string}|null} [appearance]
+	 */
+	_buildColorset (theme, appearance = null) {
 		const t = this._resolveTheme(theme);
+		const a = appearance || {};
+		const background = a.background || t.background;
+		const foreground = a.foreground || t.foreground;
+		const outline = a.outline || t.outline;
+		const texture = a.texture || t.texture;
+		const material = a.material || t.material;
 		return {
-			name: `charsheet-${theme || "standard"}`,
-			foreground: t.foreground,
-			background: t.background,
-			outline: t.outline,
-			edge: t.outline,
-			texture: t.texture,
-			material: t.material,
+			name: `charsheet-${theme || "standard"}${appearance ? "-custom" : ""}`,
+			foreground,
+			background,
+			outline,
+			edge: outline,
+			texture,
+			material,
 		};
+	}
+
+	/** Stable signature of a colorset, used to skip redundant updateConfig calls. */
+	static _colorsetSig (cs) {
+		return `${cs.name}|${cs.background}|${cs.foreground}|${cs.outline}|${cs.texture}|${cs.material}`;
 	}
 
 	_ensureOverlay () {
@@ -169,7 +200,8 @@ class CharacterSheetDice3d {
 
 			this._ensureOverlay();
 
-			const colorset = this._buildColorset(this._lastThemeKey || "standard");
+			const themeKey = this._pendingTheme || this._lastThemeKey || "standard";
+			const colorset = this._buildColorset(themeKey, this._pendingAppearance);
 			const box = new Factory(`#${this._stage.id}`, {
 				assetPath: CharacterSheetDice3d.ASSET_PATH,
 				sounds: false,
@@ -185,7 +217,11 @@ class CharacterSheetDice3d {
 			await box.initialize();
 
 			this._box = box;
-			this._lastThemeKey = this._lastThemeKey || "standard";
+			this._lastThemeKey = themeKey;
+			// Intentionally do NOT seed `_appearanceSig` here: the first
+			// `_applyTheme` after init should always run `updateConfig` so the
+			// requested look is guaranteed applied (and the contract test that
+			// pins this stays honest). The redundant re-apply is cheap.
 			this._attachContextLossGuard();
 			return box;
 		})();
@@ -231,15 +267,17 @@ class CharacterSheetDice3d {
 		this._badge = null;
 	}
 
-	async _applyTheme (theme) {
+	async _applyTheme (theme, appearance = null) {
 		const key = CharacterSheetDice3d.THEMES[theme] ? theme : "standard";
-		if (key === this._lastThemeKey) return;
-		const colorset = this._buildColorset(key);
+		const colorset = this._buildColorset(key, appearance);
+		const sig = CharacterSheetDice3d._colorsetSig(colorset);
+		if (sig === this._appearanceSig) return;
 		await this._box.updateConfig({
 			theme_customColorset: colorset,
 			theme_material: colorset.material,
 		});
 		this._lastThemeKey = key;
+		this._appearanceSig = sig;
 	}
 
 	/**
@@ -317,33 +355,84 @@ class CharacterSheetDice3d {
 	}
 
 	/**
+	 * Resolve (creating once) the shared AudioContext, or null when Web Audio is
+	 * unavailable. Never throws.
+	 */
+	static _getAudioContext () {
+		try {
+			const g = (typeof globalThis !== "undefined") ? globalThis : window;
+			const Ctx = g.AudioContext || g.webkitAudioContext;
+			if (!Ctx) return null;
+			if (!CharacterSheetDice3d._audioCtx) CharacterSheetDice3d._audioCtx = new Ctx();
+			return CharacterSheetDice3d._audioCtx;
+		} catch (e) {
+			return null;
+		}
+	}
+
+	/**
+	 * Build (once per AudioContext) and cache the short noise buffer used for the
+	 * clack. AudioBuffers are immutable and reusable across many BufferSource
+	 * nodes, so we synthesise the noise ONCE rather than on every roll — this is
+	 * the fix for the first-roll jank (per-die buffer regeneration on the roll
+	 * critical path).
+	 */
+	static _getNoiseBuffer (ctx) {
+		if (CharacterSheetDice3d._noiseBuffer && CharacterSheetDice3d._noiseBufferCtx === ctx) {
+			return CharacterSheetDice3d._noiseBuffer;
+		}
+		const dur = CharacterSheetDice3d._NOISE_DUR;
+		const frames = Math.floor(ctx.sampleRate * dur);
+		const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+		const data = buffer.getChannelData(0);
+		for (let s = 0; s < frames; ++s) {
+			const env = Math.pow(1 - s / frames, 3);
+			data[s] = (Math.random() * 2 - 1) * env;
+		}
+		CharacterSheetDice3d._noiseBuffer = buffer;
+		CharacterSheetDice3d._noiseBufferCtx = ctx;
+		return buffer;
+	}
+
+	/**
+	 * Warm the audio path OFF the roll critical path: create the AudioContext and
+	 * pre-synthesise + cache the noise buffer so the first actual roll doesn't pay
+	 * for it. Best-effort; safe to call repeatedly (e.g. on the dice dropdown
+	 * opening or the first user gesture). Never throws.
+	 */
+	static warmAudio () {
+		try {
+			const ctx = CharacterSheetDice3d._getAudioContext();
+			if (!ctx) return;
+			if (ctx.state === "suspended" && typeof ctx.resume === "function") { try { ctx.resume(); } catch (e) { /* ignore */ } }
+			CharacterSheetDice3d._getNoiseBuffer(ctx);
+		} catch (e) {
+			/* audio warming is best-effort */
+		}
+	}
+
+	/**
 	 * Play a lightweight, synthesized "dice clack" via the Web Audio API. No
 	 * audio assets are needed (none are vendored) and it is a no-op when audio
 	 * is unavailable (no AudioContext, autoplay-blocked, etc.). Never throws.
+	 *
+	 * Reuses the cached noise buffer (see {@link warmAudio}) so it stays cheap on
+	 * the roll critical path.
 	 * @param {number} [volume] 0..1 master gain (default 0.35)
 	 * @param {number} [dieCount] number of dice — drives a few staggered clacks
 	 */
 	static playRollSound (volume = 0.35, dieCount = 1) {
 		try {
-			const g = (typeof globalThis !== "undefined") ? globalThis : window;
-			const Ctx = g.AudioContext || g.webkitAudioContext;
-			if (!Ctx) return;
-			if (!CharacterSheetDice3d._audioCtx) CharacterSheetDice3d._audioCtx = new Ctx();
-			const ctx = CharacterSheetDice3d._audioCtx;
+			const ctx = CharacterSheetDice3d._getAudioContext();
+			if (!ctx) return;
 			if (ctx.state === "suspended" && typeof ctx.resume === "function") { try { ctx.resume(); } catch (e) { /* ignore */ } }
+			const buffer = CharacterSheetDice3d._getNoiseBuffer(ctx);
 			const now = ctx.currentTime;
+			const dur = CharacterSheetDice3d._NOISE_DUR;
+			const vol = Math.max(0, Math.min(1, Number.isFinite(Number(volume)) ? Number(volume) : 0.35));
 			const clacks = Math.min(6, Math.max(1, Number(dieCount) || 1));
 			for (let i = 0; i < clacks; ++i) {
 				const t = now + i * 0.055 + Math.random() * 0.02;
-				// Short noise burst shaped by a fast-decay envelope = a "clack".
-				const dur = 0.05;
-				const frames = Math.floor(ctx.sampleRate * dur);
-				const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
-				const data = buffer.getChannelData(0);
-				for (let s = 0; s < frames; ++s) {
-					const env = Math.pow(1 - s / frames, 3);
-					data[s] = (Math.random() * 2 - 1) * env;
-				}
 				const src = ctx.createBufferSource();
 				src.buffer = buffer;
 				const bp = ctx.createBiquadFilter();
@@ -351,7 +440,7 @@ class CharacterSheetDice3d {
 				bp.frequency.value = 1800 + Math.random() * 1200;
 				bp.Q.value = 0.8;
 				const gain = ctx.createGain();
-				gain.gain.value = Math.max(0, Math.min(1, volume)) * (0.7 + Math.random() * 0.3);
+				gain.gain.value = vol * (0.7 + Math.random() * 0.3);
 				src.connect(bp); bp.connect(gain); gain.connect(ctx.destination);
 				src.start(t);
 				src.stop(t + dur);
@@ -371,8 +460,8 @@ class CharacterSheetDice3d {
 	 * @param {string} [opts.theme]
 	 * @returns {Promise<void>}
 	 */
-	async pRoll ({diceType, finalValue, theme} = {}) {
-		return this.pRollMany({groups: [{sides: diceType, values: [finalValue]}], theme});
+	async pRoll ({diceType, finalValue, theme, appearance} = {}) {
+		return this.pRollMany({groups: [{sides: diceType, values: [finalValue]}], theme, appearance});
 	}
 
 	/**
@@ -384,9 +473,10 @@ class CharacterSheetDice3d {
 	 * @param {object} opts
 	 * @param {Array<{sides:number, values:number[]}>} opts.groups
 	 * @param {string} [opts.theme]
+	 * @param {{background?:string, foreground?:string, outline?:string, texture?:string, material?:string}} [opts.appearance]
 	 * @returns {Promise<void>}
 	 */
-	async pRollMany ({groups, theme} = {}) {
+	async pRollMany ({groups, theme, appearance} = {}) {
 		const normalized = CharacterSheetDice3d.normalizeGroups(groups);
 		if (!normalized.length) throw new Error("No renderable dice groups");
 		for (const g of normalized) {
@@ -400,8 +490,12 @@ class CharacterSheetDice3d {
 			prev();
 		}
 
+		// Remember the requested look so a fresh init (if needed) builds with it.
+		this._pendingTheme = CharacterSheetDice3d.THEMES[theme] ? theme : "standard";
+		this._pendingAppearance = appearance || null;
+
 		await this._pInit(); // may throw -> caller falls back
-		await this._applyTheme(theme);
+		await this._applyTheme(theme, appearance);
 
 		const token = ++this._rollToken;
 
