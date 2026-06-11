@@ -4540,29 +4540,45 @@
 	font-style: italic;
 }
 
-/* Overview speed segments (emoji label mode). inline-flex keeps the emoji and
-   value on the same baseline; the list wraps so long multi-speed displays
-   (walk/fly/climb/swim/burrow) never overflow the stat box. */
-/* The speed value carries a unit ("60 ft.") and may hold several segments
-   (walk / fly / climb), unlike AC and Initiative which are 2-3 char numbers.
-   At the 3xl tier it overruns the clipped (overflow:hidden) stat box and the
-   trailing "ft." gets sheared off, especially under [data-textsize]. Drop it to
-   the 2xl tier (still rem-based, so it scales with the JS-set root) and let the
-   inline-flex value shrink/wrap inside the box instead of clipping. The ID
-   specificity here outranks both the base .charsheet__combat-stat-value rule and
-   the [data-textsize] bump, so this governs every text-size setting. */
+/* Overview speed segments (emoji label mode). The value box lays its segments
+   out as a centred CSS grid so long multi-speed displays
+   (walk/fly/climb/swim/burrow) wrap into aligned columns without overflowing the
+   stat box. */
+/* The speed value can hold several segments (walk + fly + swim + …). A wrapping
+   inline-flex with `justify-content: center` centred every wrapped line
+   independently, so a trailing row with fewer segments drifted right of the
+   first row ("one row more to the right than the other"). A CSS grid is the
+   correct tool: `repeat(auto-fit, …)` lays the segments into shared columns, so
+   the values line up vertically across rows, while `justify-content: center`
+   centres the whole column group inside the box. The em-based min track shrinks
+   the column count as the value font grows under [data-textsize], so it never
+   overflows the clipped (overflow:hidden) box. The ID specificity here outranks
+   both the base .charsheet__combat-stat-value rule and the [data-textsize]
+   font-size bump. */
 .charsheet__combat-stat-value#charsheet-disp-speed {
-	display: inline-flex;
-	flex-wrap: wrap;
-	align-items: baseline;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(3.2em, max-content));
 	justify-content: center;
-	gap: 0 0.15em;
-	column-gap: 0.15em;
-	row-gap: 0.1em;
+	align-items: center;
+	column-gap: 0.5em;
+	row-gap: 0.15em;
 	font-size: var(--cs-text-2xl, 1.5rem);
 	min-width: 0;
 	max-width: 100%;
 	box-sizing: border-box;
+}
+
+/* Left-align each segment within its grid cell so the emoji columns share a
+   common left edge across wrapped rows. */
+.charsheet__combat-stat-value#charsheet-disp-speed .charsheet__speed-seg {
+	justify-self: start;
+}
+
+/* The inter-segment separators only supplied spacing for the old inline-flex
+   layout; the grid's column-gap now owns that spacing, so the separators would
+   otherwise become stray empty grid cells that throw the columns off. */
+.charsheet__combat-stat-value#charsheet-disp-speed .charsheet__speed-sep {
+	display: none;
 }
 
 /* Trim the speed box's horizontal padding so a wide value ("120 ft.") keeps a
@@ -8610,10 +8626,14 @@ body.has-quickbuild-overlay .toast__container {
 	line-height: 1.3;
 }
 
-/* The Hunter's Prey block renders its effect/reminder text in `<p class="ve-muted">`
-   children, which inherit the generic muted grey (#777). Match the sibling ranger
-   ability notes (--rgb-text-dim) so the two read as the same kind of note. The
-   class+element selector outranks the single `.ve-muted` class. */
+/* The Hunter's Prey block renders its effect/reminder text in small `<p>`
+   children. They previously carried `ve-muted`, whose `color:#777 !important`
+   lives in the `vetools` cascade layer — and layered `!important` outranks any
+   unlayered declaration (even an unlayered `!important`), so styling the colour
+   from here was impossible while that class stayed on the markup. The class has
+   been dropped in `_renderRangerAbilities`, so this plain rule now supplies the
+   colour, matching the sibling `.charsheet__ranger-ability-note` so the two read
+   as the same kind of note. */
 .charsheet__ranger-hunters-prey p {
 	color: var(--rgb-text-dim);
 }
