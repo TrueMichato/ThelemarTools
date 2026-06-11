@@ -339,36 +339,53 @@ describe("CharacterSheetDice3d", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Boundary contract: CharacterSheet._showAnimatedDice(...)
+// Boundary contract: CharacterSheet.pAnimateDiceSpec(...) + _showAnimatedDice
 //
-// The roll handlers `await this._showAnimatedDice(...)`. The contract is that
-// it ALWAYS resolves, honours reduced-motion, attempts the 3D roller, and
-// falls back to the legacy CSS animation on ANY failure. We cannot import the
-// 14k-line controller, so per the repo's source-pin convention
-// (cf. CharacterSheetFormatModEffective.test.js) we exercise a faithful
-// replica of the method body and pin it against production with a regex so the
-// two cannot silently drift.
+// The roll handlers funnel through `pAnimateDiceSpec({groups})` (and the
+// `_showAnimatedDice(diceType, finalValue)` thin wrapper). The contract is that
+// it ALWAYS resolves, no-ops when the `animatedDice` setting is off, plays the
+// roll sound when enabled, honours reduced-motion, attempts the 3D roller for
+// the renderable groups, and falls back to the legacy CSS animation on ANY
+// failure. We cannot import the 14k-line controller, so per the repo's
+// source-pin convention we exercise a faithful replica of the method body and
+// pin it against production with a regex so the two cannot silently drift.
 // ---------------------------------------------------------------------------
-async function _showAnimatedDiceReplica (diceType, finalValue, isAdvantage = false, isDisadvantage = false) {
+async function _pAnimateDiceSpecReplica ({groups, isAdvantage = false, isDisadvantage = false} = {}) {
+	const settings = this._state?.getSettings?.() || {};
+	if (!settings.animatedDice) return;
+
+	const cleanGroups = (Array.isArray(groups) ? groups : [])
+		.map(g => g ? {sides: Number(g.sides), values: (Array.isArray(g.values) ? g.values : []).map(Number).filter(Number.isFinite)} : null)
+		.filter(g => g && Number.isFinite(g.sides) && g.values.length);
+	if (!cleanGroups.length) return;
+
 	const Dice3d = globalThis.CharacterSheetDice3d;
+	if (settings.diceSound !== false && Dice3d && typeof Dice3d.playRollSound === "function") {
+		const dieCount = cleanGroups.reduce((acc, g) => acc + g.values.length, 0);
+		Dice3d.playRollSound(0.35, dieCount);
+	}
 	if (Dice3d && typeof Dice3d.isReducedMotion === "function" && Dice3d.isReducedMotion()) return;
-	const theme = this._state.getSettings()?.diceTheme || "standard";
+
+	const theme = settings.diceTheme || "standard";
 	try {
 		const dice3d = this._getDice3d();
-		if (dice3d && dice3d.canRender(diceType)) {
-			await dice3d.pRoll({diceType, finalValue, theme});
+		if (dice3d && cleanGroups.every(g => dice3d.canRender(g.sides))) {
+			await dice3d.pRollMany({groups: cleanGroups, theme});
 			return;
 		}
 	} catch (e) {
 		/* fall through to legacy */
 	}
-	await this._showLegacyDice(diceType, finalValue, isAdvantage, isDisadvantage);
+	const primary = cleanGroups.find(g => g.sides !== 100) || cleanGroups[0];
+	await this._showLegacyDice(primary.sides, primary.values[0], isAdvantage, isDisadvantage);
 }
 
-function makeHarness ({dice3d = undefined, getDice3dThrows = false, theme = "gold"} = {}) {
-	const calls = {getDice3d: 0, pRoll: [], legacy: []};
+function makeHarness ({dice3d = undefined, getDice3dThrows = false, theme = "gold", animatedDice = true, diceSound = undefined} = {}) {
+	const calls = {getDice3d: 0, pRollMany: [], legacy: [], sound: []};
+	const settings = {diceTheme: theme, animatedDice};
+	if (diceSound !== undefined) settings.diceSound = diceSound;
 	const harness = {
-		_state: {getSettings: () => ({diceTheme: theme})},
+		_state: {getSettings: () => settings},
 		_getDice3d () {
 			calls.getDice3d++;
 			if (getDice3dThrows) throw new Error("getDice3d threw");
@@ -378,72 +395,107 @@ function makeHarness ({dice3d = undefined, getDice3dThrows = false, theme = "gol
 			calls.legacy.push({diceType, finalValue, isAdvantage, isDisadvantage});
 		},
 	};
-	return {harness, calls};
+	return {harness, calls, settings};
 }
 
-describe("CharacterSheet._showAnimatedDice boundary contract", () => {
+describe("CharacterSheet.pAnimateDiceSpec boundary contract", () => {
+	let _origPlaySound;
+	const soundCalls = [];
+
 	beforeEach(() => {
 		installMatchMedia(false);
 		globalThis.CharacterSheetDice3d = CharacterSheetDice3d;
+		soundCalls.length = 0;
+		_origPlaySound = CharacterSheetDice3d.playRollSound;
+		CharacterSheetDice3d.playRollSound = (vol, n) => soundCalls.push({vol, n});
 	});
 
 	afterEach(() => {
+		CharacterSheetDice3d.playRollSound = _origPlaySound;
 		globalThis.CharacterSheetDice3d = CharacterSheetDice3d;
 	});
 
-	test("source-pin: production body keeps the reduced-motion / 3D / legacy branches", () => {
+	test("source-pin: _showAnimatedDice delegates to pAnimateDiceSpec", () => {
 		const src = readFileSync(resolve(_REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
 		const match = src.match(/async _showAnimatedDice \(diceType, finalValue[\s\S]*?\n\t\}/);
 		expect(match).not.toBeNull();
+		expect(match[0]).toMatch(/pAnimateDiceSpec/);
+		expect(match[0]).toMatch(/groups/);
+	});
+
+	test("source-pin: pAnimateDiceSpec keeps the gate / sound / 3D / legacy branches", () => {
+		const src = readFileSync(resolve(_REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		const match = src.match(/async pAnimateDiceSpec \(\{groups[\s\S]*?\n\t\}/);
+		expect(match).not.toBeNull();
 		const body = match[0];
+		expect(body).toMatch(/animatedDice/);
+		expect(body).toMatch(/playRollSound/);
 		expect(body).toMatch(/isReducedMotion/);
 		expect(body).toMatch(/_getDice3d\(\)/);
-		expect(body).toMatch(/canRender\(diceType\)/);
-		expect(body).toMatch(/pRoll\(\{diceType, finalValue, theme\}\)/);
+		expect(body).toMatch(/canRender/);
+		expect(body).toMatch(/pRollMany/);
 		expect(body).toMatch(/catch/);
-		expect(body).toMatch(/_showLegacyDice\(diceType, finalValue/);
+		expect(body).toMatch(/_showLegacyDice/);
 	});
 
-	test("prefers-reduced-motion short-circuits: no 3D, no legacy, still resolves", async () => {
-		installMatchMedia(true);
-		const {harness, calls} = makeHarness();
-		await expect(_showAnimatedDiceReplica.call(harness, 20, 17)).resolves.toBeUndefined();
+	test("no-op (no 3D, no legacy, no sound) when animatedDice is off", async () => {
+		const {harness, calls} = makeHarness({animatedDice: false});
+		await expect(_pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 20, values: [17]}]})).resolves.toBeUndefined();
 		expect(calls.getDice3d).toBe(0);
 		expect(calls.legacy.length).toBe(0);
+		expect(soundCalls.length).toBe(0);
 	});
 
-	test("happy path: rolls 3D with our exact value+theme, skips legacy", async () => {
-		const pRollCalls = [];
-		const dice3d = {canRender: () => true, pRoll: async (a) => { pRollCalls.push(a); }};
+	test("plays the roll sound (die count = total dice) when enabled", async () => {
+		const dice3d = {canRender: () => true, pRollMany: async () => {}};
+		const {harness} = makeHarness({dice3d});
+		await _pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 4, values: [1, 2, 3]}, {sides: 6, values: [5]}]});
+		expect(soundCalls.length).toBe(1);
+		expect(soundCalls[0].n).toBe(4);
+	});
+
+	test("does not play the roll sound when diceSound is false", async () => {
+		const dice3d = {canRender: () => true, pRollMany: async () => {}};
+		const {harness} = makeHarness({dice3d, diceSound: false});
+		await _pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 20, values: [10]}]});
+		expect(soundCalls.length).toBe(0);
+	});
+
+	test("prefers-reduced-motion short-circuits the visual but sound still plays", async () => {
+		installMatchMedia(true);
+		const {harness, calls} = makeHarness();
+		await expect(_pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 20, values: [17]}]})).resolves.toBeUndefined();
+		expect(calls.getDice3d).toBe(0);
+		expect(calls.legacy.length).toBe(0);
+		expect(soundCalls.length).toBe(1);
+	});
+
+	test("happy path: rolls the multi-die groups in 3D, skips legacy", async () => {
+		const rollCalls = [];
+		const dice3d = {canRender: () => true, pRollMany: async (a) => { rollCalls.push(a); }};
 		const {harness, calls} = makeHarness({dice3d, theme: "gold"});
-		await expect(_showAnimatedDiceReplica.call(harness, 20, 17)).resolves.toBeUndefined();
-		expect(pRollCalls).toEqual([{diceType: 20, finalValue: 17, theme: "gold"}]);
+		const groups = [{sides: 4, values: [1, 3, 2]}];
+		await expect(_pAnimateDiceSpecReplica.call(harness, {groups})).resolves.toBeUndefined();
+		expect(rollCalls).toEqual([{groups: [{sides: 4, values: [1, 3, 2]}], theme: "gold"}]);
 		expect(calls.legacy.length).toBe(0);
 	});
 
-	test("missing 3D helper falls back to legacy and resolves", async () => {
+	test("missing 3D helper falls back to legacy with the primary die and resolves", async () => {
 		const {harness, calls} = makeHarness({dice3d: null});
-		await expect(_showAnimatedDiceReplica.call(harness, 6, 4)).resolves.toBeUndefined();
+		await expect(_pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 6, values: [4, 2]}]})).resolves.toBeUndefined();
 		expect(calls.legacy).toEqual([{diceType: 6, finalValue: 4, isAdvantage: false, isDisadvantage: false}]);
 	});
 
-	test("canRender=false (e.g. d100) falls back to legacy with the exact value", async () => {
-		const dice3d = {canRender: () => false, pRoll: async () => { throw new Error("should not roll"); }};
+	test("pRollMany rejection is caught and falls back to legacy (never throws)", async () => {
+		const dice3d = {canRender: () => true, pRollMany: async () => { throw new Error("3D blew up"); }};
 		const {harness, calls} = makeHarness({dice3d});
-		await expect(_showAnimatedDiceReplica.call(harness, 100, 37)).resolves.toBeUndefined();
-		expect(calls.legacy).toEqual([{diceType: 100, finalValue: 37, isAdvantage: false, isDisadvantage: false}]);
-	});
-
-	test("pRoll rejection is caught and falls back to legacy (never throws)", async () => {
-		const dice3d = {canRender: () => true, pRoll: async () => { throw new Error("3D blew up"); }};
-		const {harness, calls} = makeHarness({dice3d});
-		await expect(_showAnimatedDiceReplica.call(harness, 20, 1, true, false)).resolves.toBeUndefined();
+		await expect(_pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 20, values: [1]}], isAdvantage: true})).resolves.toBeUndefined();
 		expect(calls.legacy).toEqual([{diceType: 20, finalValue: 1, isAdvantage: true, isDisadvantage: false}]);
 	});
 
 	test("a throw from _getDice3d is caught and falls back to legacy", async () => {
 		const {harness, calls} = makeHarness({getDice3dThrows: true});
-		await expect(_showAnimatedDiceReplica.call(harness, 8, 5)).resolves.toBeUndefined();
+		await expect(_pAnimateDiceSpecReplica.call(harness, {groups: [{sides: 8, values: [5]}]})).resolves.toBeUndefined();
 		expect(calls.legacy.length).toBe(1);
 	});
 });

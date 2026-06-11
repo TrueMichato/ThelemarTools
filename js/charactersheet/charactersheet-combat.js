@@ -1433,6 +1433,14 @@ class CharacterSheetCombat {
 		}
 		if (!attack || !attack.damage) return;
 
+		// Per-component roll objects captured for the dice animation (each carries
+		// {sides, rolls:[…]}). Populated as each damage component is rolled below.
+		let sneakRollForAnim = null;
+		const riderRollsForAnim = [];
+		const extraRollsForAnim = [];
+		let handOfHarmRollForAnim = null;
+		let methodRollForAnim = null;
+
 		// Monk: Hand of Harm — prompt BEFORE rolling damage for unarmed strikes
 		// Per-turn limit only applies during active combat; outside combat always allow
 		let handOfHarmDamage = 0;
@@ -1447,6 +1455,7 @@ class CharacterSheetCombat {
 					handOfHarmFormula = harmCalc.handOfHarmDamage;
 					const harmRoll = this._parseDamage(handOfHarmFormula);
 					handOfHarmDamage = harmRoll.total;
+					handOfHarmRollForAnim = harmRoll;
 				}
 			}
 		}
@@ -1502,6 +1511,7 @@ class CharacterSheetCombat {
 				const sneakRoll = this._parseDamage(effectiveDiceStr, isCrit);
 				sneakAttackDamage = sneakRoll.total;
 				sneakAttackDice = effectiveDiceStr;
+				sneakRollForAnim = sneakRoll;
 			}
 
 			// Record CS effects for display
@@ -1535,6 +1545,7 @@ class CharacterSheetCombat {
 				const riderRoll = this._parseDamage(rider.dice, isCrit);
 				riderDamageTotal += riderRoll.total;
 				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total});
+				riderRollsForAnim.push(riderRoll);
 				usedRiderIds.push(rider.id);
 				this._markRiderUsedThisTurn(rider.id);
 			}
@@ -1562,6 +1573,7 @@ class CharacterSheetCombat {
 			const extraRoll = this._parseDamage(entry.dice, isCrit);
 			extraDamageTotal += extraRoll.total;
 			extraDamageParts.push({dice: entry.dice, total: extraRoll.total, type: entry.damageType, source: entry.source});
+			extraRollsForAnim.push(extraRoll);
 		}
 
 		// Roll ongoing damage from combat method effect (e.g. Wounding Strike 1d4)
@@ -1571,6 +1583,7 @@ class CharacterSheetCombat {
 			methodEffectFormula = methodEffectApplied.ongoingDamage;
 			const methodRoll = this._parseDamage(methodEffectFormula);
 			methodEffectDamage = methodRoll.total;
+			methodRollForAnim = methodRoll;
 		}
 
 		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderDamageTotal;
@@ -1613,6 +1626,18 @@ class CharacterSheetCombat {
 		} else if (methodEffectDamage) {
 			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${methodEffectDamage} ongoing = ${total}`;
 		}
+		// Collect the actual dice rolled (count + type + per-die values) so the
+		// animation reflects the real roll (e.g. 1d8 + 2d6 sneak) rather than a
+		// single hard-coded d20. Each damage component contributes a group.
+		const diceGroups = [];
+		this._pushDiceGroup(diceGroups, damageRoll);
+		this._pushDiceGroup(diceGroups, sneakRollForAnim);
+		for (const rr of riderRollsForAnim) this._pushDiceGroup(diceGroups, rr);
+		for (const er of extraRollsForAnim) this._pushDiceGroup(diceGroups, er);
+		this._pushDiceGroup(diceGroups, handOfHarmRollForAnim);
+		this._pushDiceGroup(diceGroups, methodRollForAnim);
+		await this._page.pAnimateDamageDice?.(diceGroups);
+
 		this._page.showDiceResult({
 			title: `${attack.name} Damage`,
 			roll: damageRoll.total + sneakAttackDamage + riderDamageTotal,
@@ -1790,7 +1815,26 @@ class CharacterSheetCombat {
 
 		total += modifier;
 
-		return {total, rolls, modifier};
+		return {total, rolls, modifier, sides: dieSize, numDice};
+	}
+
+	/**
+	 * Push a damage-roll's dice into an animation groups accumulator. Accepts a
+	 * `_parseDamage` result (`{sides, rolls:[…]}`); no-op for null/empty rolls or
+	 * static-only components (no dice). Merges into an existing same-sides group
+	 * so the notation stays compact.
+	 * @param {Array<{sides:number, values:number[]}>} groups
+	 * @param {{sides?:number, rolls?:number[]}|null} roll
+	 */
+	_pushDiceGroup (groups, roll) {
+		if (!roll || !Array.isArray(roll.rolls) || !roll.rolls.length) return;
+		const sides = Number(roll.sides);
+		if (!Number.isFinite(sides) || sides < 2) return;
+		const values = roll.rolls.map(Number).filter(Number.isFinite);
+		if (!values.length) return;
+		const existing = groups.find(g => g.sides === sides);
+		if (existing) existing.values.push(...values);
+		else groups.push({sides, values});
 	}
 
 	/**
@@ -3497,6 +3541,9 @@ class CharacterSheetCombat {
 			if (!formula) return null;
 			const result = this._parseDamage(formula);
 			const label = diceConfig.label || (type === "healing" ? "Healing" : "Damage");
+			const animGroups = [];
+			this._pushDiceGroup(animGroups, result);
+			void this._page.pAnimateDamageDice?.(animGroups);
 			this._page._showDiceResult?.(
 				`${feature.name} — ${label}`,
 				result.total,
@@ -3697,7 +3744,7 @@ class CharacterSheetCombat {
 				handOfHarmApplied = true;
 			}
 
-			results.push({roll: rollResult.roll, attackTotal, isCrit, isFumble, baseDamage, harmDamage: harmOnThisStrike, damageRolls: damageRoll.rolls});
+			results.push({roll: rollResult.roll, attackTotal, isCrit, isFumble, baseDamage, harmDamage: harmOnThisStrike, damageRolls: damageRoll.rolls, damageSides: damageRoll.sides});
 		}
 
 		// Build consolidated display with separated damage types
@@ -3741,6 +3788,11 @@ class CharacterSheetCombat {
 			breakdown,
 			"", "", {duration: 12000},
 		);
+
+		// Animate the aggregate damage dice across all strikes.
+		const flurryGroups = [];
+		for (const r of results) this._pushDiceGroup(flurryGroups, {sides: r.damageSides, rolls: r.damageRolls});
+		void this._page.pAnimateDamageDice?.(flurryGroups);
 
 		return true;
 	}
@@ -3907,6 +3959,9 @@ class CharacterSheetCombat {
 		// Roll healing
 		const healRoll = this._parseDamage(formula);
 		const total = healRoll.total;
+		const healGroups = [];
+		this._pushDiceGroup(healGroups, healRoll);
+		void this._page.pAnimateDamageDice?.(healGroups);
 
 		// Physician's Touch condition note
 		let conditionNote = "";
@@ -3964,6 +4019,9 @@ class CharacterSheetCombat {
 		// Roll necrotic damage
 		const damageRoll = this._parseDamage(formula);
 		const total = damageRoll.total;
+		const harmGroups = [];
+		this._pushDiceGroup(harmGroups, damageRoll);
+		void this._page.pAnimateDamageDice?.(harmGroups);
 
 		// Mark used this turn
 		this._handOfHarmUsedThisTurn = true;
@@ -5087,6 +5145,9 @@ class CharacterSheetCombat {
 				card.querySelector(".charsheet__method-effect-roll-damage")?.addEventListener("click", () => {
 					const roll = this._parseDamage(effect.ongoingDamage);
 					const rollBreakdown = roll.rolls.join(" + ") + (roll.modifier ? ` ${roll.modifier >= 0 ? "+" : ""}${roll.modifier}` : "");
+					const ongoingGroups = [];
+					this._pushDiceGroup(ongoingGroups, roll);
+					void this._page.pAnimateDamageDice?.(ongoingGroups);
 					this._page.showDiceResult({
 						title: `${effect.name} — Ongoing Damage (${effect.weaponName || "weapon"})`,
 						total: roll.total,

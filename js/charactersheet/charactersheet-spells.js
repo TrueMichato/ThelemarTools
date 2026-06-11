@@ -3045,6 +3045,8 @@ class CharacterSheetSpells {
 				const finalRoll = normalizedCastMeta.attackMeta?.seekingRerollUsed
 					? normalizedCastMeta.attackMeta.rerolledRoll
 					: initialRoll;
+				// Animate the spell-attack d20 (lands on the resolved roll).
+				await this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: [finalRoll]}]});
 				const aimedText = aimedBonus ? ` + ${aimedBonus.total} aimed` : "";
 				const seekingText = normalizedCastMeta.attackMeta?.seekingRerollUsed
 					? ` <span class="ve-muted">(rerolled from ${normalizedCastMeta.attackMeta.originalRoll})</span>`
@@ -4794,6 +4796,80 @@ class CharacterSheetSpells {
 	/**
 	 * @returns {*}
 	 */
+	/**
+	 * Roll a dice expression (e.g. "8d6", "1d4 + 1", "2d10 - 1") returning both
+	 * the total and the per-die values grouped by die size — so the dice
+	 * animation can show the ACTUAL dice rolled rather than a single d20.
+	 *
+	 * @param {string} diceStr
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.maximize] - Treat every die as its max face (e.g. Overcharged).
+	 * @param {number} [opts.diceMultiplier] - Repeat the dice term N times (e.g. Magic
+	 *   Missile's dart count). The flat modifier is also multiplied (per-dart bonus).
+	 * @returns {{total:number, groups:Array<{sides:number, values:number[]}>, modifier:number}}
+	 */
+	_rollDamageDiceDetailed (diceStr, {maximize = false, diceMultiplier = 1} = {}) {
+		const groups = [];
+		const m = String(diceStr || "").match(/(\d+)\s*d\s*(\d+)\s*(?:([+-])\s*(\d+))?/i);
+		if (!m) {
+			let total = 0;
+			try { total = Renderer.dice.parseRandomise2(diceStr) || 0; } catch (e) { total = 0; }
+			return {total, groups, modifier: 0};
+		}
+		const mult = Math.max(1, Number(diceMultiplier) || 1);
+		const numDice = parseInt(m[1], 10) * mult;
+		const sides = parseInt(m[2], 10);
+		const perTermMod = m[4] ? parseInt(m[4], 10) * (m[3] === "-" ? -1 : 1) : 0;
+		const modifier = perTermMod * mult;
+
+		const values = [];
+		let diceTotal = 0;
+		for (let i = 0; i < numDice; ++i) {
+			const r = maximize ? sides : (this._page.rollDice?.(1, sides) ?? (Math.floor(Math.random() * sides) + 1));
+			values.push(r);
+			diceTotal += r;
+		}
+		if (values.length) groups.push({sides, values});
+		return {total: diceTotal + modifier, groups, modifier};
+	}
+
+	/**
+	 * Detect "projectile" spells (Magic Missile and homebrew clones) that fire a
+	 * fixed number of auto-hitting darts/missiles, each dealing the SAME dice,
+	 * with one extra projectile per slot level above the base level. Returns the
+	 * resolved projectile count and per-projectile dice, or null for normal spells.
+	 *
+	 * @param {object} spellData
+	 * @param {string} baseDice - The `{@damage …}` expression for a single projectile.
+	 * @param {number} slotLevel
+	 * @param {number} baseLevel
+	 * @returns {{count:number, perDartDice:string}|null}
+	 */
+	_getProjectileSpellInfo (spellData, baseDice, slotLevel, baseLevel) {
+		const entries = JSON.stringify(spellData?.entries || []);
+		// Must describe darts/missiles/projectiles to qualify (keeps this generic
+		// without misfiring on ray/beam spells that need attack rolls).
+		const projMatch = entries.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b[^.]{0,40}?\b(darts?|missiles?|projectiles?)\b/i);
+		if (!projMatch) return null;
+
+		const WORD_TO_NUM = {one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10};
+		const raw = projMatch[1].toLowerCase();
+		const baseCount = WORD_TO_NUM[raw] || parseInt(raw, 10);
+		if (!Number.isFinite(baseCount) || baseCount < 1) return null;
+
+		// Confirm the spell adds projectiles when upcast (e.g. "one more dart for
+		// each slot level above 1st"). If not, treat the base count as fixed.
+		const higher = JSON.stringify(spellData?.entriesHigherLevel || []);
+		const scalesPerLevel = /more\s+(?:darts?|missiles?|projectiles?)/i.test(higher)
+			|| /(?:darts?|missiles?|projectiles?)[^.]{0,40}?(?:each|per)\s+slot\s+level/i.test(higher);
+
+		const levelsAbove = (Number.isFinite(slotLevel) && Number.isFinite(baseLevel) && slotLevel > baseLevel)
+			? slotLevel - baseLevel
+			: 0;
+		const count = baseCount + (scalesPerLevel ? levelsAbove : 0);
+		return {count, perDartDice: baseDice};
+	}
+
 	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null) {
 		// Check for cantrip scaling
 		if (spellData.scalingLevelDice) {
@@ -4832,21 +4908,31 @@ class CharacterSheetSpells {
 			}
 		}
 
+		// Magic Missile & projectile clones: N auto-hitting darts, each dealing
+		// the same dice (e.g. 3 × (1d4 + 1) at L1, +1 dart per slot level above base).
+		const projectile = this._getProjectileSpellInfo(spellData, baseDice, slotLevel, baseLevel);
+
 		// Roll the damage
 		try {
 			const isOvercharged = appliedMetamagic?.key === "overcharged";
-			const baseDamage = isOvercharged
-				? this._getMaximizedDiceTotal(baseDice)
-				: Renderer.dice.parseRandomise2(baseDice);
+			const detail = this._rollDamageDiceDetailed(baseDice, {
+				maximize: isOvercharged,
+				diceMultiplier: projectile ? projectile.count : 1,
+			});
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
-			const total = baseDamage + spellDamageBonus;
+			const total = detail.total + spellDamageBonus;
 			const damageType = damageTypes[0] || "damage";
 			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
 			const metamagicLabel = isOvercharged ? " maximized" : "";
+			const diceLabel = projectile ? `${projectile.count}× ${baseDice}` : baseDice;
+
+			// Animate the actual dice that were rolled.
+			void this._page.pAnimateDamageDice?.(detail.groups);
+
 			return {
-				text: `<br>Damage: <strong>${total}</strong> ${damageType} (${baseDice}${bonusStr}${metamagicLabel})`,
+				text: `<br>Damage: <strong>${total}</strong> ${damageType} (${diceLabel}${bonusStr}${metamagicLabel})`,
 				total,
-				dice: baseDice,
+				dice: diceLabel,
 				damageType,
 			};
 		} catch (e) {
@@ -4876,15 +4962,17 @@ class CharacterSheetSpells {
 
 		try {
 			const isOvercharged = appliedMetamagic?.key === "overcharged";
-			const baseDamage = isOvercharged
-				? this._getMaximizedDiceTotal(dice)
-				: Renderer.dice.parseRandomise2(dice);
+			const detail = this._rollDamageDiceDetailed(dice, {maximize: isOvercharged});
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
-			const total = baseDamage + spellDamageBonus;
+			const total = detail.total + spellDamageBonus;
 			const damageTypes = spellData.damageInflict || [];
 			const damageType = damageTypes[0] || "damage";
 			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
 			const metamagicLabel = isOvercharged ? " maximized" : "";
+
+			// Animate the actual dice that were rolled.
+			void this._page.pAnimateDamageDice?.(detail.groups);
+
 			return {
 				text: `<br>Damage: <strong>${total}</strong> ${damageType} (${dice}${bonusStr}${metamagicLabel})`,
 				total,
@@ -6273,6 +6361,11 @@ class CharacterSheetSpells {
 			const atkOut = this._page._formatModWithEffective(canonicalAttack, effectiveAttack, {kind: "mod", titleEffective: "Effective spell attack (with item/custom mods)"});
 			if (canonicalDc === effectiveDc) dcEl.textContent = dcOut; else dcEl.innerHTML = dcOut;
 			if (canonicalAttack === effectiveAttack) atkEl.textContent = atkOut; else atkEl.innerHTML = atkOut;
+
+			// #3b: make the per-class spell-attack value a discoverable quick-roll.
+			// Rolls THIS class's specific bonus, so multiclass casters (whose combined
+			// Combat-tab badge can't pick one value) still get a working roll here.
+			this._applySpellsTabAttackAffordance(atkEl, card.displayName || card.className, effectiveAttack);
 		}
 
 		// Count chips (Spells, then Cantrips). Clicking opens a class-scoped picker.
@@ -6302,6 +6395,84 @@ class CharacterSheetSpells {
 		if (card.isRolledPrepared) this._appendGamblerRollControl(cardEl, card);
 
 		return cardEl;
+	}
+
+	/**
+	 * Make a Spells-tab per-class spell-attack value a discoverable quick-roll
+	 * (button semantics + click/keyboard), rolling `d20 + bonus` through the
+	 * shared animated dispatch. No-op when the bonus is not a finite number.
+	 * @param {HTMLElement|null} el - The `.charsheet__spell-attack` element.
+	 * @param {string} className - Display name for the roll title.
+	 * @param {number} bonus - The (effective) flat spell-attack bonus to roll.
+	 */
+	_applySpellsTabAttackAffordance (el, className, bonus) {
+		if (!el || !Number.isFinite(bonus)) return;
+		el.classList.add("charsheet__spell-attack--clickable");
+		el.setAttribute("role", "button");
+		el.setAttribute("tabindex", "0");
+		el.style.cursor = "pointer";
+		const baseTitle = el.title && !el.title.includes("Roll spell attack") ? `${el.title} • ` : "";
+		el.title = `${baseTitle}Roll spell attack (Shift = Advantage, Ctrl = Disadvantage)`;
+
+		const handler = (event) => this._rollSpellsTabAttack(event, className, bonus);
+		el.addEventListener("click", handler);
+		el.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" || event.key === " ") {
+				event.preventDefault();
+				handler(event);
+			}
+		});
+	}
+
+	/**
+	 * Roll a Spells-tab spell attack for a specific class's flat bonus. Mirrors
+	 * the Combat-tab badge roll (advantage/disadvantage from active states +
+	 * shift/ctrl, crit/fumble notes) and routes through the shared animation.
+	 * @param {*} event
+	 * @param {string} className
+	 * @param {number} bonus
+	 */
+	_rollSpellsTabAttack (event, className, bonus) {
+		if (!Number.isFinite(bonus)) return;
+
+		const hasAdvantage = this._state.hasAdvantageFromStates?.("attack:spell")
+			|| this._state.hasAdvantageFromStates?.("attack");
+		const hasDisadvantage = this._state.hasDisadvantageFromStates?.("attack:spell")
+			|| this._state.hasDisadvantageFromStates?.("attack");
+		let stateMode;
+		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
+		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
+
+		const stateAttackBonus = (this._state.getBonusFromStates?.("attack") || 0)
+			+ (this._state.getBonusFromStates?.("attack:spell") || 0);
+		const totalBonus = bonus + stateAttackBonus;
+
+		// Spell attacks ARE attacks: pass isAttack so any Nat1/Nat20 check/save rule
+		// does not leak into the breakdown.
+		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
+		const total = rollResult.roll + totalBonus;
+
+		const critRange = this._state.getCriticalRange?.() || 20;
+		let resultClass = "";
+		let resultNote = "";
+		if (rollResult.roll >= critRange) {
+			resultClass = "charsheet__dice-result-total--crit";
+			resultNote = "Critical Hit!";
+		} else if (rollResult.roll === 1) {
+			resultClass = "charsheet__dice-result-total--fumble";
+			resultNote = "Critical Miss!";
+		}
+
+		const modeLabel = this._page.getModeLabel?.(rollResult.mode) || "";
+		this._page.showDiceResult({
+			title: `${className ? `${className} ` : ""}Spell Attack${modeLabel}`,
+			roll: rollResult.roll,
+			modifier: totalBonus,
+			total,
+			resultClass,
+			resultNote,
+			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus),
+		});
 	}
 
 	/**
