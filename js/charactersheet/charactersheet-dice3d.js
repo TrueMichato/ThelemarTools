@@ -34,6 +34,9 @@ class CharacterSheetDice3d {
 	static _CRIT_SETTLE_MS = 1000;
 	static _FADE_MS = 220;
 
+	/** Lazily-created shared AudioContext for the synthesized roll sound. */
+	static _audioCtx = null;
+
 	/**
 	 * Per-theme dice appearance. Keys match the persisted `diceTheme` setting
 	 * values. Colors are plain hex (never CSS gradients — WebGL can't parse
@@ -239,17 +242,26 @@ class CharacterSheetDice3d {
 		this._lastThemeKey = key;
 	}
 
-	_setBadge (diceType, finalValue) {
+	/**
+	 * Update the crit/fumble badge. Only a lone d20 (a single group of one
+	 * d20) can be a crit or fumble — multi-die or non-d20 rolls clear the badge.
+	 * @param {Array<{sides:number, values:number[]}>} groups
+	 * @returns {boolean} whether a badge was shown
+	 */
+	_setBadge (groups) {
 		if (!this._badge) return false;
 		this._badge.className = "charsheet__dice3d-badge";
 		this._badge.textContent = "";
-		if (Number(diceType) !== 20) return false;
-		if (Number(finalValue) === 20) {
+		if (!Array.isArray(groups) || groups.length !== 1) return false;
+		const g = groups[0];
+		if (Number(g.sides) !== 20 || !Array.isArray(g.values) || g.values.length !== 1) return false;
+		const finalValue = Number(g.values[0]);
+		if (finalValue === 20) {
 			this._badge.textContent = "Critical!";
 			this._badge.classList.add("charsheet__dice3d-badge--crit", "charsheet__dice3d-badge--show");
 			return true;
 		}
-		if (Number(finalValue) === 1) {
+		if (finalValue === 1) {
 			this._badge.textContent = "Fumble!";
 			this._badge.classList.add("charsheet__dice3d-badge--fumble", "charsheet__dice3d-badge--show");
 			return true;
@@ -273,9 +285,85 @@ class CharacterSheetDice3d {
 	}
 
 	/**
-	 * Roll a single die in 3D, landing on `finalValue`. Resolves only once the
-	 * overlay has been faded out and made inert. Rejects if 3D cannot be used
-	 * (so callers can fall back); never rejects mid-animation.
+	 * Normalise a dice spec into an array of `{sides, values:number[]}` groups,
+	 * keeping only groups this engine can render (drops d100 etc.). Accepts
+	 * either an array of groups or a single `{diceType, finalValue}` legacy spec.
+	 * @returns {Array<{sides:number, values:number[]}>}
+	 */
+	static normalizeGroups (groups) {
+		if (!Array.isArray(groups)) return [];
+		const out = [];
+		for (const g of groups) {
+			if (!g) continue;
+			const sides = Number(g.sides ?? g.diceType);
+			if (!CharacterSheetDice3d.SUPPORTED_DICE.has(sides)) continue;
+			let values = Array.isArray(g.values) ? g.values : (g.finalValue != null ? [g.finalValue] : []);
+			values = values.map(v => Number(v)).filter(v => Number.isFinite(v) && v >= 1 && v <= sides);
+			if (!values.length) continue;
+			out.push({sides, values});
+		}
+		return out;
+	}
+
+	/**
+	 * Build the library notation for a set of groups, e.g.
+	 * `[{sides:4,values:[2,3,1]},{sides:20,values:[15]}]` -> `3d4@2,3,1+1d20@15`.
+	 * @returns {string}
+	 */
+	static buildNotation (groups) {
+		return groups
+			.map(g => `${g.values.length}d${g.sides}@${g.values.join(",")}`)
+			.join("+");
+	}
+
+	/**
+	 * Play a lightweight, synthesized "dice clack" via the Web Audio API. No
+	 * audio assets are needed (none are vendored) and it is a no-op when audio
+	 * is unavailable (no AudioContext, autoplay-blocked, etc.). Never throws.
+	 * @param {number} [volume] 0..1 master gain (default 0.35)
+	 * @param {number} [dieCount] number of dice — drives a few staggered clacks
+	 */
+	static playRollSound (volume = 0.35, dieCount = 1) {
+		try {
+			const g = (typeof globalThis !== "undefined") ? globalThis : window;
+			const Ctx = g.AudioContext || g.webkitAudioContext;
+			if (!Ctx) return;
+			if (!CharacterSheetDice3d._audioCtx) CharacterSheetDice3d._audioCtx = new Ctx();
+			const ctx = CharacterSheetDice3d._audioCtx;
+			if (ctx.state === "suspended" && typeof ctx.resume === "function") { try { ctx.resume(); } catch (e) { /* ignore */ } }
+			const now = ctx.currentTime;
+			const clacks = Math.min(6, Math.max(1, Number(dieCount) || 1));
+			for (let i = 0; i < clacks; ++i) {
+				const t = now + i * 0.055 + Math.random() * 0.02;
+				// Short noise burst shaped by a fast-decay envelope = a "clack".
+				const dur = 0.05;
+				const frames = Math.floor(ctx.sampleRate * dur);
+				const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+				const data = buffer.getChannelData(0);
+				for (let s = 0; s < frames; ++s) {
+					const env = Math.pow(1 - s / frames, 3);
+					data[s] = (Math.random() * 2 - 1) * env;
+				}
+				const src = ctx.createBufferSource();
+				src.buffer = buffer;
+				const bp = ctx.createBiquadFilter();
+				bp.type = "bandpass";
+				bp.frequency.value = 1800 + Math.random() * 1200;
+				bp.Q.value = 0.8;
+				const gain = ctx.createGain();
+				gain.gain.value = Math.max(0, Math.min(1, volume)) * (0.7 + Math.random() * 0.3);
+				src.connect(bp); bp.connect(gain); gain.connect(ctx.destination);
+				src.start(t);
+				src.stop(t + dur);
+			}
+		} catch (e) {
+			/* audio is best-effort; never break a roll */
+		}
+	}
+
+	/**
+	 * Roll a single die in 3D, landing on `finalValue`. Thin back-compat wrapper
+	 * over {@link CharacterSheetDice3d#pRollMany}.
 	 *
 	 * @param {object} opts
 	 * @param {number} opts.diceType
@@ -284,7 +372,26 @@ class CharacterSheetDice3d {
 	 * @returns {Promise<void>}
 	 */
 	async pRoll ({diceType, finalValue, theme} = {}) {
-		if (!this.isSupportedDie(diceType)) throw new Error(`Unsupported die: d${diceType}`);
+		return this.pRollMany({groups: [{sides: diceType, values: [finalValue]}], theme});
+	}
+
+	/**
+	 * Roll one or more groups of dice in 3D, each landing on its precomputed
+	 * values. Resolves only once the overlay has been faded out and made inert.
+	 * Rejects if 3D cannot be used for ANY requested group (so callers can fall
+	 * back); never rejects mid-animation.
+	 *
+	 * @param {object} opts
+	 * @param {Array<{sides:number, values:number[]}>} opts.groups
+	 * @param {string} [opts.theme]
+	 * @returns {Promise<void>}
+	 */
+	async pRollMany ({groups, theme} = {}) {
+		const normalized = CharacterSheetDice3d.normalizeGroups(groups);
+		if (!normalized.length) throw new Error("No renderable dice groups");
+		for (const g of normalized) {
+			if (!this.isSupportedDie(g.sides)) throw new Error(`Unsupported die: d${g.sides}`);
+		}
 
 		// Force-settle any roll still in flight so overlays never stack.
 		if (this._activeSettle) {
@@ -331,11 +438,14 @@ class CharacterSheetDice3d {
 			const onClick = () => settle();
 
 			this._activeSettle = settle;
-			this._setBadge(diceType, finalValue);
+			this._setBadge(normalized);
 			this._showOverlay();
 			if (this._overlay) this._overlay.addEventListener("click", onClick);
 
-			const isCrit = Number(diceType) === 20 && (Number(finalValue) === 20 || Number(finalValue) === 1);
+			const isCrit = normalized.length === 1
+				&& Number(normalized[0].sides) === 20
+				&& normalized[0].values.length === 1
+				&& (Number(normalized[0].values[0]) === 20 || Number(normalized[0].values[0]) === 1);
 			const settleDelay = isCrit ? CharacterSheetDice3d._CRIT_SETTLE_MS : CharacterSheetDice3d._SETTLE_MS;
 
 			// Hard timeout: guarantees the Promise resolves even if the physics
@@ -343,7 +453,7 @@ class CharacterSheetDice3d {
 			timeoutId = setTimeout(settle, CharacterSheetDice3d._ROLL_TIMEOUT_MS);
 			if (timeoutId && typeof timeoutId === "object" && typeof timeoutId.unref === "function") timeoutId.unref();
 
-			const notation = `1d${Number(diceType)}@${Number(finalValue)}`;
+			const notation = CharacterSheetDice3d.buildNotation(normalized);
 			let rollPromise;
 			try {
 				rollPromise = this._box.roll(notation);
