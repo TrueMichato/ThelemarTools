@@ -3998,11 +3998,16 @@ class CharacterSheetInventory {
 	}
 
 	_updateEncumbrance () {
-		const items = this._state.getItems();
-		const totalWeight = items.reduce((sum, item) => sum + (item.weight || 0) * item.quantity, 0);
+		// Carried weight via the state helper: items stowed in weightless containers
+		// (Bag of Holding) are excluded, but the empty container's own weight counts.
+		const totalWeight = this._state.getTotalWeight();
 
-		// Calculate carrying capacity using state method (respects Thelemar homebrew rules)
-		const carryingCapacity = this._state.getCarryingCapacity();
+		// Carry breakdown (respects Thelemar homebrew rules) separates the bearer's
+		// physical body capacity from extradimensional magic-container storage.
+		const carryBreakdown = this._state.getCarryingCapacityBreakdown();
+		const carryingCapacity = carryBreakdown.total; // body + extradimensional storage
+		const bodyCapacity = carryBreakdown.bodyCapacity;
+		const externalCapacity = carryBreakdown.externalCapacity;
 
 		// For encumbrance thresholds, use standard STR-based calculation
 		const strScore = this._state.getAbilityTotal("str");
@@ -4019,15 +4024,24 @@ class CharacterSheetInventory {
 			if (el) el.textContent = carryingCapacity;
 		}
 
-		// Update carrying bar
-		const fillPercent = Math.min((totalWeight / carryingCapacity) * 100, 100);
+		// Extradimensional storage segment (right-aligned) shows the magic-container
+		// share of the combined total; the fill below shows on-body carried weight.
+		const externalEl = document.getElementById("charsheet-carrying-external");
+		if (externalEl) {
+			const externalPercent = carryingCapacity > 0 ? Math.min((externalCapacity / carryingCapacity) * 100, 100) : 0;
+			externalEl.style.width = `${externalPercent}%`;
+		}
+
+		// Update carrying bar (fill = on-body weight over the combined total)
+		const fillPercent = carryingCapacity > 0 ? Math.min((totalWeight / carryingCapacity) * 100, 100) : 0;
 		const fillEl = document.getElementById("charsheet-carrying-fill");
 		if (fillEl) {
 			fillEl.style.width = `${fillPercent}%`;
 
-			// Update bar color based on encumbrance
+			// Update bar color based on encumbrance (on-body weight vs BODY capacity —
+			// extradimensional storage must not mask physical overload).
 			fillEl.classList.remove("encumbered", "heavily-encumbered", "over-capacity");
-			if (totalWeight > carryingCapacity) {
+			if (totalWeight > bodyCapacity) {
 				fillEl.classList.add("over-capacity");
 			} else if (totalWeight > heavilyEncumberedThreshold) {
 				fillEl.classList.add("heavily-encumbered");
@@ -4041,7 +4055,7 @@ class CharacterSheetInventory {
 		if (encumbranceStatus) {
 			encumbranceStatus.classList.remove("text-success", "text-warning", "text-danger");
 
-			if (totalWeight > carryingCapacity) {
+			if (totalWeight > bodyCapacity) {
 				encumbranceStatus.classList.add("text-danger");
 				encumbranceStatus.textContent = "Over Capacity!";
 			} else if (totalWeight > heavilyEncumberedThreshold) {
