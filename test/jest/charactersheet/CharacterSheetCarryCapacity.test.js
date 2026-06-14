@@ -223,7 +223,7 @@ describe("Bug #11 — Powerful Build dedupe (registry + text-parse must not doub
 	});
 });
 
-describe("Bug #10 — Bag of Holding raises carrying capacity (equipped-gated, post-multiplier)", () => {
+describe("Bug #5 — Bag of Holding: counts toward carry total, but NEVER inflates push/drag/lift", () => {
 	function bagOfHolding ({equipped = true, quantity = 1} = {}) {
 		return {
 			name: "Bag of Holding",
@@ -237,12 +237,26 @@ describe("Bug #10 — Bag of Holding raises carrying capacity (equipped-gated, p
 		};
 	}
 
-	it("an equipped Bag of Holding adds +500 lb of EXTERNAL capacity (not size/PB-multiplied)", () => {
-		const state = mkChar({str: 10, thelemar: false}); // base 150
+	it("an equipped Bag of Holding adds +500 lb of EXTERNAL capacity to the combined total (not size/PB-multiplied)", () => {
+		const state = mkChar({str: 10, thelemar: false}); // body 150
 		state.addItem(bagOfHolding({equipped: true}));
 		const b = state.getCarryingCapacityBreakdown();
+		expect(b.bodyCapacity).toBe(150);
 		expect(b.externalCapacity).toBe(500);
-		expect(b.total).toBe(650); // 150 + 500
+		expect(b.total).toBe(650); // 150 body + 500 extradimensional
+	});
+
+	it("CORE FIX: equipping a Bag of Holding does NOT change push/drag/lift (body ×2 only)", () => {
+		const state = mkChar({str: 10, thelemar: false}); // body 150
+		const before = state.getCarryingCapacityBreakdown();
+		expect(before.pushDragLift).toBe(300); // 150 × 2
+		state.addItem(bagOfHolding({equipped: true}));
+		const after = state.getCarryingCapacityBreakdown();
+		// Carry total grows (storage), but the physical push/drag/lift limit is unchanged.
+		expect(after.total).toBe(650);
+		expect(after.pushDragLift).toBe(300);
+		expect(after.pushDragLift).toBe(before.pushDragLift);
+		expect(after.pushDragLift).not.toBe(800); // the old (body×2 + external) bug
 	});
 
 	it("an UNEQUIPPED Bag of Holding contributes nothing", () => {
@@ -251,23 +265,30 @@ describe("Bug #10 — Bag of Holding raises carrying capacity (equipped-gated, p
 		const b = state.getCarryingCapacityBreakdown();
 		expect(b.externalCapacity).toBe(0);
 		expect(b.total).toBe(150);
+		expect(b.pushDragLift).toBe(300);
 	});
 
-	it("equipping then unequipping a Bag of Holding adds then reverts the external capacity", () => {
+	it("equipping then unequipping a Bag of Holding adds then reverts the external capacity (push/drag/lift stays put)", () => {
 		const state = mkChar({str: 10, thelemar: false});
 		state.addItem(bagOfHolding({equipped: false}));
 		const itemId = state.getItems()[0].id;
 		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(0);
+		expect(state.getCarryingCapacityBreakdown().pushDragLift).toBe(300);
 		state.setItemEquipped(itemId, true);
 		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(500);
+		expect(state.getCarryingCapacityBreakdown().pushDragLift).toBe(300); // unchanged by the bag
 		state.setItemEquipped(itemId, false);
 		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(0);
+		expect(state.getCarryingCapacityBreakdown().pushDragLift).toBe(300);
 	});
 
-	it("two equipped Bags of Holding stack their external capacity by quantity", () => {
+	it("two equipped Bags of Holding stack their external capacity by quantity (push/drag/lift still body-only)", () => {
 		const state = mkChar({str: 10, thelemar: false});
 		state.addItem(bagOfHolding({equipped: true, quantity: 2}));
-		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(1000);
+		const b = state.getCarryingCapacityBreakdown();
+		expect(b.externalCapacity).toBe(1000);
+		expect(b.total).toBe(1150);
+		expect(b.pushDragLift).toBe(300);
 	});
 
 	it("two SEPARATE equipped weightless containers each contribute (summed across entries)", () => {
@@ -285,28 +306,61 @@ describe("Bug #10 — Bag of Holding raises carrying capacity (equipped-gated, p
 		expect(state.getCarryingCapacityBreakdown().externalCapacity).toBe(620);
 	});
 
-	it("CRITICAL: Powerful Build does NOT double the Bag of Holding — (150×2)+500 = 800, not 1300", () => {
+	it("CRITICAL: Powerful Build doubles the BODY only — (150×2)+500 = 800 total, push/drag/lift 600", () => {
 		const state = mkChar({str: 10, thelemar: false}); // base 150
 		state.addFeature({name: "Powerful Build", source: "TGTT", sourceType: "raceFeature", description: "You count as one size larger when determining your carrying capacity."});
 		state.applyClassFeatureEffects();
 		state.addItem(bagOfHolding({equipped: true}));
 		const b = state.getCarryingCapacityBreakdown();
 		expect(b.carryMultiplier).toBe(2);
+		expect(b.bodyCapacity).toBe(300); // 150 × 2
 		expect(b.externalCapacity).toBe(500);
 		// Body (300) is doubled; the bag's 500 is added AFTER, undoubled.
 		expect(b.total).toBe(800);
 		expect(b.total).not.toBe(1300); // (150 + 500) × 2 would be the bug
-		// push/drag/lift doubles ONLY the body (300×2=600), then adds the undoubled bag (500).
-		expect(b.pushDragLift).toBe(1100);
+		// push/drag/lift doubles ONLY the body (300×2=600); the bag adds nothing.
+		expect(b.pushDragLift).toBe(600);
+		expect(b.pushDragLift).not.toBe(1100); // body×2 + external (old bug)
 		expect(b.pushDragLift).not.toBe(1600); // total×2 would wrongly double the bag
 	});
 
-	it("push/drag/lift doubles only the body capacity, then adds the (undoubled) external capacity", () => {
-		const state = mkChar({str: 10, thelemar: false}); // base 150
+	it("the bag's contents are weightless but the empty bag's own weight still counts", () => {
+		const state = mkChar({str: 10, thelemar: false});
+		state.addItem(bagOfHolding({equipped: true})); // 15 lb
+		const bagId = state.getItems()[0].id;
+		state.addItem({name: "Anvil", source: "PHB", weight: 100, quantity: 1, equipped: false});
+		const anvilId = state.getItems()[1].id;
+		// Before stowing: both the bag (15) and the anvil (100) count.
+		expect(state.getTotalWeight()).toBe(115);
+		const stow = state.putItemInContainer(anvilId, bagId);
+		expect(stow.success).toBe(true);
+		// After stowing in the weightless bag: only the bag's own 15 lb counts.
+		expect(state.getTotalWeight()).toBe(15);
+	});
+
+	it("Thelemar rule + Bag of Holding: total = body+external, push/drag/lift body-only, overload not masked", () => {
+		const state = mkChar({str: 10, thelemar: true}); // passive Might 10 → body 100
 		state.addItem(bagOfHolding({equipped: true}));
 		const b = state.getCarryingCapacityBreakdown();
-		// pushDragLift = body(150)×2 + external(500) = 800
-		expect(b.pushDragLift).toBe(800);
+		expect(b.rule).toBe("thelemar");
+		expect(b.bodyCapacity).toBe(100);
+		expect(b.externalCapacity).toBe(500);
+		expect(b.total).toBe(600);
+		expect(b.pushDragLift).toBe(200); // 100 × 2, bag excluded
+		// 120 lb carried on-body exceeds the 100 body capacity even with the bag equipped.
+		state.addItem({name: "Boulder", source: "PHB", weight: 120, quantity: 1, equipped: false});
+		expect(state.getEncumbranceLevel()).toBe("over_capacity");
+	});
+
+	it("encumbrance is judged against BODY capacity — a Bag of Holding cannot mask physical overload", () => {
+		const state = mkChar({str: 10, thelemar: false}); // body 150
+		// 200 lb carried ON BODY (not stowed) exceeds the 150 body capacity.
+		state.addItem({name: "Statue", source: "PHB", weight: 200, quantity: 1, equipped: false});
+		expect(state.getEncumbranceLevel()).toBe("over_capacity");
+		// Equipping a Bag of Holding (whose contents are empty) must NOT rescue them.
+		state.addItem(bagOfHolding({equipped: true}));
+		expect(state.getCarryingCapacityBreakdown().total).toBe(650);
+		expect(state.getEncumbranceLevel()).toBe("over_capacity");
 	});
 
 	it("a mundane (non-weightless) container does NOT grant external capacity", () => {
@@ -338,12 +392,13 @@ describe("Carry tooltip source — itemized, base != total under multipliers", (
 		expect(charsheetSrc).toMatch(/_buildCarryTooltip\(carryBreakdown\)/);
 	});
 
-	it("_buildCarryTooltip itemizes every breakdown factor (base, flat, build, size)", () => {
+	it("_buildCarryTooltip itemizes every body factor (base, flat, build, size) and the body subtotal", () => {
 		expect(tooltipBody.length).toBeGreaterThan(0);
 		expect(tooltipBody).toContain("b.base");
 		expect(tooltipBody).toContain("b.flatBonus");
 		expect(tooltipBody).toContain("b.carryMultiplier");
 		expect(tooltipBody).toContain("b.sizeMultiplier");
+		expect(tooltipBody).toContain("b.bodyCapacity");
 		expect(tooltipBody).toContain("b.pushDragLift");
 		// Factors are only appended when actually in play (so the math stays honest).
 		expect(tooltipBody).toMatch(/if \(b\.flatBonus\)/);
@@ -351,19 +406,51 @@ describe("Carry tooltip source — itemized, base != total under multipliers", (
 		expect(tooltipBody).toMatch(/b\.sizeMultiplier !== 1/);
 	});
 
-	it("the displayed equation resolves to the TOTAL, not the pre-multiplier base", () => {
-		// The fix: the final "= N lb." must be b.total. The bug was "= <base>" presented as total.
-		expect(tooltipBody).toMatch(/= \$\{b\.total\} lb\./);
+	it("the body equation resolves to the BODY subtotal, not the combined total", () => {
+		// The Strength-based equation must end at b.bodyCapacity — the combined total
+		// (incl. extradimensional storage) is shown on its own line, never as the body sum.
+		expect(tooltipBody).toMatch(/= \$\{b\.bodyCapacity\} lb\./);
 		// And the old misleading template that equated base with the final capacity is gone.
 		expect(charsheetSrc).not.toContain("× 10 = $" + "{carryCapacity}");
 		expect(charsheetSrc).not.toContain("× 15 = $" + "{carryCapacity}");
 	});
 
-	it("Bug #10: the tooltip surfaces external container capacity as a trailing additive term", () => {
-		// Bag of Holding capacity is post-multiplier, so it must render as "+ N lb. (containers)"
-		// rather than a scaling factor — otherwise the displayed math wouldn't add up.
+	it("Bug #5: external storage is a SEPARATE line and push/drag/lift is flagged Strength-only", () => {
+		// Extradimensional storage must render as its own additive line (not a body
+		// equation term), with the combined total on a distinct line.
 		expect(tooltipBody).toContain("b.externalCapacity");
 		expect(tooltipBody).toMatch(/if \(b\.externalCapacity\)/);
-		expect(tooltipBody).toMatch(/\(containers\)/);
+		expect(tooltipBody).toMatch(/Extradimensional storage/);
+		expect(tooltipBody).toMatch(/Total carrying capacity: \$\{b\.total\} lb\./);
+		// The external term is NOT folded into the body equation as "(containers)".
+		expect(tooltipBody).not.toMatch(/\(containers\)/);
+		// Push/drag/lift line states it excludes extradimensional storage.
+		expect(tooltipBody).toMatch(/Push\/Drag\/Lift: \$\{b\.pushDragLift\} lb\./);
+		expect(tooltipBody).toMatch(/Strength only/);
+	});
+});
+
+describe("Carry display reads route through state helpers (no local recompute)", () => {
+	const charsheetSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+	const inventorySrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-inventory.js"), "utf8");
+
+	it("the overview carry panel reads weight / push / capacity from state, not a local items.reduce", () => {
+		// Current weight comes from getTotalWeight() (excludes weightless-container contents).
+		expect(charsheetSrc).toMatch(/const currentWeight = this\._state\.getTotalWeight\(\)/);
+		// Push/drag/lift comes from the breakdown, never recomputed as carry × 2 here.
+		expect(charsheetSrc).toMatch(/const pushDragLift = carryBreakdown\.pushDragLift/);
+		expect(charsheetSrc).not.toMatch(/const pushDragLift = carryCapacity \* 2/);
+		// The old local weight reduce in the physical-stats render is gone.
+		expect(charsheetSrc).not.toMatch(/const currentWeight = items\.reduce/);
+		// The extradimensional bar segment is driven from externalCapacity.
+		expect(charsheetSrc).toMatch(/charsheet-carry-bar-external/);
+	});
+
+	it("the inventory encumbrance panel reads weight from getTotalWeight() and judges overload vs body capacity", () => {
+		expect(inventorySrc).toMatch(/const totalWeight = this\._state\.getTotalWeight\(\)/);
+		expect(inventorySrc).not.toMatch(/const totalWeight = items\.reduce/);
+		expect(inventorySrc).toMatch(/const bodyCapacity = carryBreakdown\.bodyCapacity/);
+		expect(inventorySrc).toMatch(/totalWeight > bodyCapacity/);
+		expect(inventorySrc).toMatch(/charsheet-carrying-external/);
 	});
 });
