@@ -3998,55 +3998,68 @@ class CharacterSheetInventory {
 	}
 
 	_updateEncumbrance () {
-		// Carried weight via the state helper: items stowed in weightless containers
-		// (Bag of Holding) are excluded, but the empty container's own weight counts.
-		const totalWeight = this._state.getTotalWeight();
-
-		// Carry breakdown (respects Thelemar homebrew rules) separates the bearer's
-		// physical body capacity from extradimensional magic-container storage.
+		// Carry breakdown (respects Thelemar homebrew rules) is the single source of
+		// truth. It separates the bearer's physical body capacity from the implicit
+		// Bag-of-Holding split: stowable gear fills the bag first (bagLoad), the body
+		// carries the overflow plus worn gear and the bag's own weight (bodyLoad).
 		const carryBreakdown = this._state.getCarryingCapacityBreakdown();
-		const carryingCapacity = carryBreakdown.total; // body + extradimensional storage
 		const bodyCapacity = carryBreakdown.bodyCapacity;
-		const externalCapacity = carryBreakdown.externalCapacity;
+		const bodyLoad = carryBreakdown.bodyLoad; // on-body weight after filling the bag
+		const bagCapacity = carryBreakdown.bagCapacity;
+		const bagLoad = carryBreakdown.bagLoad; // weight notionally inside the bag
+		const hasBag = carryBreakdown.hasExtradimensional;
 
 		// For encumbrance thresholds, use standard STR-based calculation
 		const strScore = this._state.getAbilityTotal("str");
 		const encumberedThreshold = strScore * 5;
 		const heavilyEncumberedThreshold = strScore * 10;
 
-		// Update UI - support both ID variants
+		// Physical-carry readout: on-body load over body capacity. With no bag this
+		// equals total weight over total capacity (unchanged behaviour).
 		for (const id of ["charsheet-total-weight", "charsheet-carrying-current"]) {
 			const el = document.getElementById(id);
-			if (el) el.textContent = totalWeight.toFixed(1);
+			if (el) el.textContent = bodyLoad.toFixed(1);
 		}
 		for (const id of ["charsheet-carrying-capacity", "charsheet-carrying-max"]) {
 			const el = document.getElementById(id);
-			if (el) el.textContent = carryingCapacity;
+			if (el) el.textContent = bodyCapacity;
 		}
 
-		// Extradimensional storage segment (right-aligned) shows the magic-container
-		// share of the combined total; the fill below shows on-body carried weight.
-		const externalEl = document.getElementById("charsheet-carrying-external");
-		if (externalEl) {
-			const externalPercent = carryingCapacity > 0 ? Math.min((externalCapacity / carryingCapacity) * 100, 100) : 0;
-			externalEl.style.width = `${externalPercent}%`;
-		}
-
-		// Update carrying bar (fill = on-body weight over the combined total)
-		const fillPercent = carryingCapacity > 0 ? Math.min((totalWeight / carryingCapacity) * 100, 100) : 0;
+		// Physical-carry bar (fill = on-body load over body capacity)
+		const fillPercent = bodyCapacity > 0 ? Math.min((bodyLoad / bodyCapacity) * 100, 100) : 0;
 		const fillEl = document.getElementById("charsheet-carrying-fill");
 		if (fillEl) {
 			fillEl.style.width = `${fillPercent}%`;
 
-			// Update bar color based on encumbrance (on-body weight vs BODY capacity —
+			// Update bar colour based on encumbrance (on-body load vs BODY capacity —
 			// extradimensional storage must not mask physical overload).
 			fillEl.classList.remove("encumbered", "heavily-encumbered", "over-capacity");
-			if (totalWeight > bodyCapacity) {
+			if (bodyLoad > bodyCapacity) {
 				fillEl.classList.add("over-capacity");
-			} else if (totalWeight > heavilyEncumberedThreshold) {
+			} else if (bodyLoad > heavilyEncumberedThreshold) {
 				fillEl.classList.add("heavily-encumbered");
-			} else if (totalWeight > encumberedThreshold) {
+			} else if (bodyLoad > encumberedThreshold) {
 				fillEl.classList.add("encumbered");
+			}
+		}
+
+		// Separate Bag-of-Holding bar: only shown when an extradimensional container
+		// is equipped, so it is OBVIOUS which bar is the bag. Distinct violet styling.
+		const bagWrap = document.getElementById("charsheet-carrying-bag");
+		if (bagWrap) {
+			if (hasBag) {
+				bagWrap.hidden = false;
+				const bagFill = document.getElementById("charsheet-carrying-bagfill");
+				if (bagFill) {
+					const bagPercent = bagCapacity > 0 ? Math.min((bagLoad / bagCapacity) * 100, 100) : 0;
+					bagFill.style.width = `${bagPercent}%`;
+				}
+				const bagCur = document.getElementById("charsheet-carrying-bag-current");
+				if (bagCur) bagCur.textContent = bagLoad.toFixed(1);
+				const bagMax = document.getElementById("charsheet-carrying-bag-max");
+				if (bagMax) bagMax.textContent = bagCapacity;
+			} else {
+				bagWrap.hidden = true;
 			}
 		}
 
@@ -4055,13 +4068,13 @@ class CharacterSheetInventory {
 		if (encumbranceStatus) {
 			encumbranceStatus.classList.remove("text-success", "text-warning", "text-danger");
 
-			if (totalWeight > bodyCapacity) {
+			if (bodyLoad > bodyCapacity) {
 				encumbranceStatus.classList.add("text-danger");
 				encumbranceStatus.textContent = "Over Capacity!";
-			} else if (totalWeight > heavilyEncumberedThreshold) {
+			} else if (bodyLoad > heavilyEncumberedThreshold) {
 				encumbranceStatus.classList.add("text-danger");
 				encumbranceStatus.textContent = "Heavily Encumbered";
-			} else if (totalWeight > encumberedThreshold) {
+			} else if (bodyLoad > encumberedThreshold) {
 				encumbranceStatus.classList.add("text-warning");
 				encumbranceStatus.textContent = "Encumbered";
 			} else {
