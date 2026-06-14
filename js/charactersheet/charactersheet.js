@@ -6447,7 +6447,8 @@ class CharacterSheetPage {
 		const nameHtml = this._getFavouriteNameHtml(fav, entity, name);
 
 		const tile = e_({outer: `
-			<div class="charsheet__favourite-tile" data-fav-type="${fav.type}" data-fav-id="${(fav.id || "").replace(/"/g, "&quot;")}">
+			<div class="charsheet__favourite-tile" draggable="true" data-fav-type="${fav.type}" data-fav-id="${(fav.id || "").replace(/"/g, "&quot;")}">
+				<button class="charsheet__favourite-tile__drag-handle" type="button" tabindex="0" title="Drag to reorder (or focus and use ↑/↓)" aria-label="Reorder ${String(name).replace(/"/g, "&quot;")}">⠿</button>
 				<div class="charsheet__favourite-tile__main">
 					<span class="charsheet__favourite-tile__icon">${icon}</span>
 					<div class="charsheet__favourite-tile__info">
@@ -6458,6 +6459,8 @@ class CharacterSheetPage {
 				<div class="charsheet__favourite-tile__actions"></div>
 			</div>
 		`});
+
+		this._bindFavouriteDrag(tile);
 
 		const actions = tile.querySelector(".charsheet__favourite-tile__actions");
 
@@ -6498,6 +6501,141 @@ class CharacterSheetPage {
 		actions.append(removeBtn);
 
 		return tile;
+	}
+
+	/**
+	 * Wire HTML5 drag-and-drop reordering onto a single favourite tile.
+	 *
+	 * Mirrors the section-reorder pattern in `charactersheet-layout.js`: a tile
+	 * is `draggable`, but a drag is only honoured when it originates from the
+	 * dedicated drag handle (so the per-tile action / remove buttons and the
+	 * hover-linked name stay clickable). On drop the dragged tile is physically
+	 * moved within the list, the new DOM order is read back, and the persisted
+	 * `_data.favorites` order is updated + saved.
+	 *
+	 * Keyboard accessibility: focusing the handle and pressing ↑/↓ moves the
+	 * tile one slot, re-rendering and restoring focus to the moved handle.
+	 *
+	 * @param {HTMLElement} tile - The favourite tile element.
+	 */
+	_bindFavouriteDrag (tile) {
+		const handle = tile.querySelector(".charsheet__favourite-tile__drag-handle");
+
+		// Only allow a drag to begin from the handle. Without this the whole
+		// tile is draggable and players fumble drags while clicking actions.
+		let handlePressed = false;
+		if (handle) {
+			handle.addEventListener("mousedown", () => { handlePressed = true; });
+			handle.addEventListener("touchstart", () => { handlePressed = true; }, {passive: true});
+			handle.addEventListener("keydown", (e) => this._onFavouriteHandleKeydown(e, tile));
+		}
+		document.addEventListener("mouseup", () => { handlePressed = false; });
+
+		tile.addEventListener("dragstart", (e) => {
+			if (!handlePressed) { e.preventDefault(); return; }
+			this._favDraggedTile = tile;
+			e.dataTransfer.effectAllowed = "move";
+			try { e.dataTransfer.setData("text/plain", tile.getAttribute("data-fav-id") || ""); } catch (ignored) { /* some browsers restrict setData */ }
+			requestAnimationFrame(() => tile.classList.add("charsheet__favourite-tile--dragging"));
+		});
+
+		tile.addEventListener("dragover", (e) => {
+			if (!this._favDraggedTile || this._favDraggedTile === tile) return;
+			e.preventDefault();
+			e.dataTransfer.dropEffect = "move";
+			const rect = tile.getBoundingClientRect();
+			const isAbove = e.clientY < rect.top + rect.height / 2;
+			tile.classList.toggle("charsheet__favourite-tile--drag-over-top", isAbove);
+			tile.classList.toggle("charsheet__favourite-tile--drag-over-bottom", !isAbove);
+		});
+
+		tile.addEventListener("dragleave", (e) => {
+			if (!tile.contains(e.relatedTarget)) {
+				tile.classList.remove("charsheet__favourite-tile--drag-over-top", "charsheet__favourite-tile--drag-over-bottom");
+			}
+		});
+
+		tile.addEventListener("drop", (e) => {
+			if (!this._favDraggedTile || this._favDraggedTile === tile) return;
+			e.preventDefault();
+			e.stopPropagation();
+			const rect = tile.getBoundingClientRect();
+			const insertBefore = e.clientY < rect.top + rect.height / 2;
+			const container = tile.parentNode;
+			if (container) {
+				if (insertBefore) container.insertBefore(this._favDraggedTile, tile);
+				else container.insertBefore(this._favDraggedTile, tile.nextSibling);
+			}
+			tile.classList.remove("charsheet__favourite-tile--drag-over-top", "charsheet__favourite-tile--drag-over-bottom");
+			this._persistFavouriteOrderFromDom(container);
+		});
+
+		tile.addEventListener("dragend", () => {
+			tile.classList.remove("charsheet__favourite-tile--dragging");
+			document.querySelectorAll(".charsheet__favourite-tile--drag-over-top, .charsheet__favourite-tile--drag-over-bottom")
+				.forEach(el => el.classList.remove("charsheet__favourite-tile--drag-over-top", "charsheet__favourite-tile--drag-over-bottom"));
+			this._favDraggedTile = null;
+			handlePressed = false;
+		});
+	}
+
+	/**
+	 * Keyboard reorder: ↑/↓ on a focused drag handle moves the tile one slot.
+	 * @param {KeyboardEvent} e
+	 * @param {HTMLElement} tile
+	 */
+	_onFavouriteHandleKeydown (e, tile) {
+		if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+		e.preventDefault();
+		const favId = tile.getAttribute("data-fav-id");
+		if (!favId) return;
+		const moved = this._moveFavourite(favId, e.key === "ArrowUp" ? -1 : 1);
+		if (!moved) return;
+		// Re-render rebuilds tiles; restore focus to the moved handle.
+		const sel = `.charsheet__favourite-tile[data-fav-id="${favId.replace(/"/g, "\\\"")}"] .charsheet__favourite-tile__drag-handle`;
+		const next = document.querySelector(sel);
+		if (next) (/** @type {HTMLElement} */ (next)).focus();
+	}
+
+	/**
+	 * Move a favourite by `dir` slots among the currently visible favourites,
+	 * persist, and re-render. Returns whether a move actually happened.
+	 * @param {string} favId
+	 * @param {number} dir -1 = up, +1 = down
+	 * @returns {boolean}
+	 */
+	_moveFavourite (favId, dir) {
+		const container = document.getElementById("charsheet-favourites-list");
+		if (!container) return false;
+		const ids = this._readFavouriteDomOrder(container);
+		const from = ids.indexOf(favId);
+		const to = from + dir;
+		if (from === -1 || to < 0 || to >= ids.length) return false;
+		ids.splice(to, 0, ids.splice(from, 1)[0]);
+		if (!this._state.reorderFavorites(ids)) return false;
+		this._saveCurrentCharacter();
+		this._renderFavouritesOverview();
+		return true;
+	}
+
+	/** Read favourite ids in current DOM order from the list container. */
+	_readFavouriteDomOrder (container) {
+		return Array.from(container.querySelectorAll(".charsheet__favourite-tile[data-fav-id]"))
+			.map(el => el.getAttribute("data-fav-id"))
+			.filter(Boolean);
+	}
+
+	/**
+	 * Persist the favourites order implied by the current DOM, then re-render
+	 * to keep state and view in lock-step. No-op when nothing changed.
+	 * @param {HTMLElement} container
+	 */
+	_persistFavouriteOrderFromDom (container) {
+		if (!container) return;
+		const order = this._readFavouriteDomOrder(container);
+		if (!this._state.reorderFavorites(order)) return;
+		this._saveCurrentCharacter();
+		this._renderFavouritesOverview();
 	}
 
 	/**
