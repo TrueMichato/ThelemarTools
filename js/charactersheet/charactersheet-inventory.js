@@ -1430,6 +1430,18 @@ class CharacterSheetInventory {
 	 * @returns {object} The flat custom item
 	 */
 	_buildCustomItem (name, quantity = 1, weight = 0, options = {}) {
+		// Sanitize ability SET-to scores to their hard domain (1-30). Unlike the freely relaxed
+		// +/- bonus fields (Bug #1), a "set ability score to" value has a real floor and ceiling,
+		// so guard it here at the data layer — a stray 0/negative/huge value must never be applied.
+		let abilityOpt = options.ability || null;
+		if (abilityOpt && abilityOpt.static && typeof abilityOpt.static === "object") {
+			const cleanStatic = {};
+			for (const [abbr, raw] of Object.entries(abilityOpt.static)) {
+				const n = parseInt(raw, 10);
+				if (Number.isFinite(n) && n >= 1) cleanStatic[abbr] = Math.min(n, 30);
+			}
+			abilityOpt = {...abilityOpt, static: cleanStatic};
+		}
 		const newItem = {
 			name,
 			source: "Custom",
@@ -1491,7 +1503,7 @@ class CharacterSheetInventory {
 			// Speed modifications
 			modifySpeed: options.modifySpeed || null,
 			// Ability score modifications
-			ability: options.ability || null,
+			ability: abilityOpt,
 			// Charges & recharge. Bare (undefined when absent) so an edit whose form section is
 			// HIDDEN for this item type (charges live in the "magic" section) doesn't clobber the
 			// original via the skip-undefined merge in _saveCustomItem.
@@ -2066,20 +2078,15 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Magic Bonus (Attack & Damage)</label>
-						<select id="custom-item-weapon-bonus" class="ve-form-control">
-							<option value="0">None</option>
-							<option value="1">+1</option>
-							<option value="2">+2</option>
-							<option value="3">+3</option>
-						</select>
+						<input type="number" id="custom-item-weapon-bonus" class="ve-form-control charsheet__signed-input" value="0" min="0" placeholder="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Attack Only Bonus</label>
-						<input type="number" id="custom-item-bonus-attack" class="ve-form-control" value="0" min="-5" max="10">
+						<input type="number" id="custom-item-bonus-attack" class="ve-form-control charsheet__signed-input" value="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Damage Only Bonus</label>
-						<input type="number" id="custom-item-bonus-damage" class="ve-form-control" value="0" min="-5" max="10">
+						<input type="number" id="custom-item-bonus-damage" class="ve-form-control charsheet__signed-input" value="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Bonus Crit Damage</label>
@@ -2131,12 +2138,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Magic Bonus</label>
-						<select id="custom-item-armor-bonus" class="ve-form-control">
-							<option value="0">None</option>
-							<option value="1">+1</option>
-							<option value="2">+2</option>
-							<option value="3">+3</option>
-						</select>
+						<input type="number" id="custom-item-armor-bonus" class="ve-form-control charsheet__signed-input" value="0" min="0" placeholder="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>STR Requirement</label>
@@ -2164,12 +2166,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Magic Bonus</label>
-						<select id="custom-item-shield-bonus" class="ve-form-control">
-							<option value="0">None</option>
-							<option value="1">+1</option>
-							<option value="2">+2</option>
-							<option value="3">+3</option>
-						</select>
+						<input type="number" id="custom-item-shield-bonus" class="ve-form-control charsheet__signed-input" value="0" min="0" placeholder="0">
 					</div>
 				</div>
 			</div>
@@ -2274,54 +2271,29 @@ class CharacterSheetInventory {
 
 		// Bonuses Section (spell, saves, checks)
 		const bonusesSection = e_({outer: `
-			<div class="charsheet__custom-item-section charsheet__custom-item-section--bonuses">
-				<div class="charsheet__custom-item-section-title">📈 Bonuses (Optional)</div>
+			<div class="charsheet__custom-item-section charsheet__custom-item-section--bonuses charsheet__custom-item-section--legacy">
+				<div class="charsheet__custom-item-section-title">📈 Quick Bonuses (Optional)</div>
+				<div class="ve-muted ve-small mb-2">Shortcut fields for the most common flat bonuses. Negative and larger values are allowed. For anything beyond these (resistances, conditional bonuses, scaling, advantage…) use <b>⚙️ Modifiers &amp; Effects</b> below.</div>
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field">
 						<label>Spell Attack</label>
-						<select id="custom-item-bonus-spell-attack" class="ve-form-control">
-							<option value="0">+0</option>
-							<option value="1">+1</option>
-							<option value="2">+2</option>
-							<option value="3">+3</option>
-						</select>
+						<input type="number" id="custom-item-bonus-spell-attack" class="ve-form-control charsheet__signed-input" value="0" placeholder="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Spell Save DC</label>
-						<select id="custom-item-bonus-spell-dc" class="ve-form-control">
-							<option value="0">+0</option>
-							<option value="1">+1</option>
-							<option value="2">+2</option>
-							<option value="3">+3</option>
-						</select>
+						<input type="number" id="custom-item-bonus-spell-dc" class="ve-form-control charsheet__signed-input" value="0" placeholder="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>All Saving Throws</label>
-						<select id="custom-item-bonus-save-all" class="ve-form-control">
-							<option value="0">+0</option>
-							<option value="1">+1</option>
-							<option value="2">+2</option>
-							<option value="3">+3</option>
-						</select>
+						<input type="number" id="custom-item-bonus-save-all" class="ve-form-control charsheet__signed-input" value="0" placeholder="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Concentration Saves</label>
-						<select id="custom-item-bonus-concentration" class="ve-form-control">
-							<option value="0">+0</option>
-							<option value="1">+1</option>
-							<option value="2">+2</option>
-							<option value="3">+3</option>
-							<option value="5">+5</option>
-						</select>
+						<input type="number" id="custom-item-bonus-concentration" class="ve-form-control charsheet__signed-input" value="0" placeholder="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>All Ability Checks</label>
-						<select id="custom-item-bonus-checks" class="ve-form-control">
-							<option value="0">+0</option>
-							<option value="1">+1</option>
-							<option value="2">+2</option>
-							<option value="3">+3</option>
-						</select>
+						<input type="number" id="custom-item-bonus-checks" class="ve-form-control charsheet__signed-input" value="0" placeholder="0">
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Crit on X or higher</label>
@@ -2333,27 +2305,27 @@ class CharacterSheetInventory {
 					<div class="charsheet__custom-item-fields">
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>STR</label>
-							<input type="number" id="custom-item-bonus-save-str" class="ve-form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-str" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>DEX</label>
-							<input type="number" id="custom-item-bonus-save-dex" class="ve-form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-dex" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>CON</label>
-							<input type="number" id="custom-item-bonus-save-con" class="ve-form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-con" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>INT</label>
-							<input type="number" id="custom-item-bonus-save-int" class="ve-form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-int" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>WIS</label>
-							<input type="number" id="custom-item-bonus-save-wis" class="ve-form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-wis" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>CHA</label>
-							<input type="number" id="custom-item-bonus-save-cha" class="ve-form-control" value="0" min="-5" max="10">
+							<input type="number" id="custom-item-bonus-save-cha" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 					</div>
 				</div>
@@ -2533,27 +2505,27 @@ class CharacterSheetInventory {
 					<div class="charsheet__custom-item-fields">
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>STR +/-</label>
-							<input type="number" id="custom-item-ability-bonus-str" class="ve-form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-str" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>DEX +/-</label>
-							<input type="number" id="custom-item-ability-bonus-dex" class="ve-form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-dex" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>CON +/-</label>
-							<input type="number" id="custom-item-ability-bonus-con" class="ve-form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-con" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>INT +/-</label>
-							<input type="number" id="custom-item-ability-bonus-int" class="ve-form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-int" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>WIS +/-</label>
-							<input type="number" id="custom-item-ability-bonus-wis" class="ve-form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-wis" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 						<div class="charsheet__custom-item-field" style="width: 90px;">
 							<label>CHA +/-</label>
-							<input type="number" id="custom-item-ability-bonus-cha" class="ve-form-control" value="0" min="-10" max="10">
+							<input type="number" id="custom-item-ability-bonus-cha" class="ve-form-control charsheet__signed-input" value="0">
 						</div>
 					</div>
 				</div>
@@ -2594,10 +2566,10 @@ class CharacterSheetInventory {
 		const itemEffects = Array.isArray(prefillItem?.effects) ? JSON.parse(JSON.stringify(prefillItem.effects)) : [];
 		const effectsSection = e_({outer: `
 			<div class="charsheet__custom-item-section charsheet__custom-item-section--effects">
-				<div class="charsheet__custom-item-section-title">⚙️ Modifiers &amp; Effects (Optional)</div>
+				<div class="charsheet__custom-item-section-title">⚙️ Modifiers &amp; Effects <span class="charsheet__custom-item-recommended-badge">Recommended</span></div>
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
-						<div class="ve-muted ve-small mb-2">Bonuses/effects that apply while this item is equipped${""} (and attuned, if it requires attunement). Uses the same catalog as custom abilities.</div>
+						<div class="ve-muted ve-small mb-2">The flexible, primary way to add bonuses/effects that apply while this item is equipped${""} (and attuned, if it requires attunement). Supports AC, saves, skills, carry capacity, resistances, advantage, scaling and more — positive or negative. Uses the same catalog as custom abilities.</div>
 						<div id="custom-item-effects-list" class="custom-abilities__effects-list"></div>
 						<button type="button" id="custom-item-add-effect" class="ve-btn ve-btn-default ve-btn-xs mt-2">+ Add Effect</button>
 					</div>
@@ -2767,7 +2739,7 @@ class CharacterSheetInventory {
 									<option value="charges" ${s.usageType === "charges" ? "selected" : ""}>Charges</option>
 								</select>
 								${s.usageType !== "will" ? `
-									<input type="number" class="ve-form-control spell-uses" value="${s.uses || 1}" min="1" max="20" style="width: 50px;" title="${s.usageType === "charges" ? "Charge cost" : "Uses per day"}">
+									<input type="number" class="ve-form-control spell-uses" value="${s.uses || 1}" min="1" style="width: 50px;" title="${s.usageType === "charges" ? "Charge cost" : "Uses per day"}">
 									${s.usageType === "daily" ? `
 										<select class="ve-form-control spell-recharge" style="width: 70px;">
 											<option value="long" ${s.recharge !== "short" ? "selected" : ""}>Long</option>
@@ -2846,6 +2818,10 @@ class CharacterSheetInventory {
 		form.append(descSection);
 
 		modalInner.append(form);
+
+		// Decorate legacy numeric bonus fields with a live signed preview (e.g. "+3" / "-2") so
+		// players can tell at a glance that positive AND negative values are accepted (Bug #1).
+		this._decorateSignedBonusInputs(form);
 
 		// Field visibility logic
 		const updateFieldVisibility = () => {
@@ -3181,6 +3157,33 @@ class CharacterSheetInventory {
 	}
 
 	/**
+	 * Attach a live, signed numeric preview (e.g. "+3" / "-2") next to every legacy bonus input
+	 * tagged with `.charsheet__signed-input` in the custom-item modal (Bug #1). The preview makes
+	 * it obvious that these fields accept negatives as well as larger positives now that their
+	 * artificial min/max caps have been relaxed. Pure DOM decoration — it never mutates the input
+	 * value, only mirrors it, so save/restore logic is untouched.
+	 * @param {HTMLElement} form
+	 */
+	_decorateSignedBonusInputs (form) {
+		if (!form?.querySelectorAll) return;
+		const fmt = globalThis.CharacterSheetCustomAbilities?.formatEffectBonus
+			|| ((v) => { const n = parseInt(v, 10); return !Number.isFinite(n) || n === 0 ? "0" : (n > 0 ? `+${n}` : `${n}`); });
+		form.querySelectorAll(".charsheet__signed-input").forEach(input => {
+			if (input.nextElementSibling?.classList?.contains("charsheet__signed-preview")) return;
+			const preview = document.createElement("span");
+			preview.className = "charsheet__signed-preview ve-muted";
+			preview.title = "Signed value — negatives and larger bonuses are allowed";
+			const update = () => {
+				const raw = input.value;
+				preview.textContent = (raw === "" || raw == null) ? "" : fmt(raw);
+			};
+			input.after(preview);
+			input.addEventListener("input", update);
+			update();
+		});
+	}
+
+	/**
 	 * Prefill the custom-item form's DOM fields from a {type, options} seed produced by
 	 * _seedOptionsFromItem(). Best-effort and defensive: every field access is guarded so a
 	 * partially-rendered form (or missing optional sections) never throws.
@@ -3197,7 +3200,11 @@ class CharacterSheetInventory {
 		};
 		const setVal = (sel, val) => {
 			const el = form.querySelector(sel);
-			if (el != null && val != null && val !== "") el.value = String(val);
+			if (el != null && val != null && val !== "") {
+				el.value = String(val);
+				// Notify any live decorations (e.g. the signed-bonus preview) bound to this input.
+				el.dispatchEvent?.(new Event("input", {bubbles: true}));
+			}
 		};
 		const setChk = (sel, val) => {
 			const el = form.querySelector(sel);
