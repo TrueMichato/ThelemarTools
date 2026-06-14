@@ -4607,9 +4607,30 @@
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.3));
 	border-radius: var(--cs-radius-full, 999px);
 	overflow: hidden;
+	position: relative;
+}
+
+/* Extradimensional storage segment (e.g. Bag of Holding): right-aligned, distinct
+   "magic container" violet tint, sits behind the on-body carried-weight fill. */
+.charsheet__carry-bar-external {
+	position: absolute;
+	top: 0;
+	right: 0;
+	height: 100%;
+	background: repeating-linear-gradient(
+		45deg,
+		var(--cs-accent, #8b5cf6) 0,
+		var(--cs-accent, #8b5cf6) 4px,
+		#7c3aed 4px,
+		#7c3aed 8px
+	);
+	opacity: 0.55;
+	border-radius: 0 var(--cs-radius-full, 999px) var(--cs-radius-full, 999px) 0;
+	transition: width 0.3s ease;
 }
 
 .charsheet__carry-bar-fill {
+	position: relative;
 	height: 100%;
 	background: linear-gradient(90deg, var(--cs-success, #10b981) 0%, #059669 100%);
 	border-radius: var(--cs-radius-full, 999px);
@@ -7193,9 +7214,29 @@
 	overflow: hidden;
 	margin-bottom: var(--cs-space-sm, 0.5rem);
 	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	position: relative;
+}
+
+/* Extradimensional storage segment (e.g. Bag of Holding): right-aligned, distinct
+   "magic container" violet tint, sits behind the on-body carried-weight fill. */
+.charsheet__carrying-external {
+	position: absolute;
+	top: 0;
+	right: 0;
+	height: 100%;
+	background: repeating-linear-gradient(
+		45deg,
+		var(--cs-accent, #8b5cf6) 0,
+		var(--cs-accent, #8b5cf6) 5px,
+		#7c3aed 5px,
+		#7c3aed 10px
+	);
+	opacity: 0.55;
+	transition: width 0.3s ease;
 }
 
 .charsheet__carrying-fill {
+	position: relative;
 	height: 100%;
 	background: linear-gradient(90deg, var(--cs-success, #10b981) 0%, #059669 100%);
 	transition: width 0.3s ease, background 0.3s ease;

@@ -24069,9 +24069,11 @@ class CharacterSheetState {
 	 *   flatBonus: number,      // customModifiers.carryCapacity
 	 *   carryMultiplier: number,// customModifiers.carryCapacityMultiplier (e.g. Powerful Build ×2)
 	 *   sizeMultiplier: number, // getSizeCarryMultiplier()
-	 *   externalCapacity: number, // fixed magic-container capacity (Bag of Holding), post-multiplier
-	 *   total: number,          // final carrying capacity
-	 *   pushDragLift: number    // RAW: 2 × body capacity (+ external, undoubled)
+	 *   bodyCapacity: number,   // physical Strength-based capacity (base+bonus, ×multipliers)
+	 *   externalCapacity: number, // extradimensional magic-container storage (Bag of Holding)
+	 *   total: number,          // bodyCapacity + externalCapacity (combined carrying capacity)
+	 *   pushDragLift: number    // RAW: 2 × body capacity ONLY — extradimensional storage
+	 *                           //      never inflates a physical push/drag/lift limit
 	 * }}
 	 */
 	/**
@@ -24128,9 +24130,11 @@ class CharacterSheetState {
 
 		const flatBonus = this._data.customModifiers.carryCapacity || 0;
 		const carryMultiplier = this._data.customModifiers.carryCapacityMultiplier || 1;
-		// External capacity (Bag of Holding etc.) is added AFTER the body multipliers:
-		// a magic container holds a fixed weight regardless of the bearer's size or
-		// Powerful Build, so it must NOT be scaled by carryMultiplier / sizeMultiplier.
+		// External capacity (Bag of Holding etc.) is extradimensional storage. It is
+		// added to the COMBINED carrying-capacity total for display, but it is NOT
+		// scaled by carryMultiplier / sizeMultiplier (a magic container holds a fixed
+		// weight regardless of the bearer's size or Powerful Build) and — critically —
+		// it must NOT inflate the bearer's physical push/drag/lift (see below).
 		const externalCapacity = this.getExternalCarryCapacity();
 		const bodyCapacity = (base + flatBonus) * carryMultiplier * sizeMultiplier;
 		const total = bodyCapacity + externalCapacity;
@@ -24143,11 +24147,13 @@ class CharacterSheetState {
 			flatBonus,
 			carryMultiplier,
 			sizeMultiplier,
+			bodyCapacity,
 			externalCapacity,
 			total,
-			// Push/drag/lift is the bearer's RAW Strength-based limit (2× body capacity).
-			// Fixed external storage adds the same flat amount but is not itself doubled.
-			pushDragLift: bodyCapacity * 2 + externalCapacity,
+			// Push/drag/lift is the bearer's RAW Strength-based physical limit
+			// (2× body capacity). Extradimensional storage (Bag of Holding) is NOT a
+			// physical lifting aid, so it never contributes here.
+			pushDragLift: bodyCapacity * 2,
 		};
 	}
 
@@ -24196,7 +24202,11 @@ class CharacterSheetState {
 	 */
 	getEncumbranceLevel () {
 		const weight = this.getTotalWeight();
-		const capacity = this.getCarryingCapacity();
+		// Encumbrance is a measure of physical strain, so it is judged against the
+		// bearer's BODY capacity only. Items stowed in extradimensional containers
+		// (Bag of Holding) are already weightless in getTotalWeight(), so adding the
+		// container's external capacity here would double-count and mask real overload.
+		const capacity = this.getCarryingCapacityBreakdown().bodyCapacity;
 
 		if (weight > capacity) return "over_capacity";
 		if (weight > capacity * 0.75) return "heavily_encumbered";
