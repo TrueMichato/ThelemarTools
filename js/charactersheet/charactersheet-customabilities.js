@@ -491,6 +491,66 @@ class CharacterSheetCustomAbilities {
 	}
 
 	/**
+	 * Build a fresh, no-op default effect row for the shared editor. Used by BOTH the
+	 * custom-ability and custom-item "+ Add Effect" buttons so a new row starts at a neutral
+	 * `+0` bonus (Bug #2a) — the player must opt into an actual value, advantage, etc. A row left
+	 * untouched is filtered out by `effectHasBehavior` on save, so it never persists as a no-op.
+	 * @returns {{type: string, value: number}}
+	 */
+	static createDefaultEffect () {
+		return {type: "ac", value: 0};
+	}
+
+	/**
+	 * Format a numeric effect bonus as a signed string for display (Bug #2b): positive values get
+	 * a leading `+`, negatives keep their `-`, and `0` is shown bare. Pure + side-effect free so it
+	 * can be unit-tested and reused by any preview UI.
+	 * @param {number|string} value
+	 * @returns {string}
+	 */
+	static formatEffectBonus (value) {
+		const n = typeof value === "number" ? value : parseInt(value, 10);
+		if (!Number.isFinite(n) || n === 0) return "0";
+		return n > 0 ? `+${n}` : `${n}`;
+	}
+
+	/**
+	 * Whether an effect row actually does something. With the new neutral `+0` default
+	 * (`createDefaultEffect`), a player can click "+ Add Effect" and save without configuring the
+	 * row; we must not persist (or treat as a bonus for equippability) such no-op rows. An effect
+	 * has behaviour when it carries a non-zero numeric value, advantage/disadvantage, a roll
+	 * floor/ceiling, bonus dice, any stat-scaling flag, a `set` mode, or a type-only family
+	 * (resistance/immunity/vulnerability/conditionImmunity, or `reach` which defaults to +5). Numeric
+	 * families (senses, ability/abilityMax) are NOT type-only — a value-0 row for them is a no-op.
+	 * @param {object} eff
+	 * @returns {boolean}
+	 */
+	static effectHasBehavior (eff) {
+		if (!eff || !eff.type) return false;
+		const type = String(eff.type);
+
+		// Type-only families: their mere presence is meaningful regardless of `value`. Defensive
+		// arrays grant the trait by type; `reach` defaults to +5 when value is absent/0
+		// (see _applyCatalogEffect: `effect.value || 5`). Senses and ability:*/abilityMax:* are
+		// deliberately NOT here — they are numeric (a sense range / a score delta) and a value-0
+		// row is a genuine no-op, so they must qualify through the value/mode/scaling checks below.
+		const BEHAVIORAL_PREFIXES = ["resistance:", "immunity:", "vulnerability:", "conditionImmunity:"];
+		if (type === "reach") return true;
+		if (BEHAVIORAL_PREFIXES.some(p => type.startsWith(p))) return true;
+
+		if (eff.advantage || eff.disadvantage) return true;
+		if (eff.setMinimum != null || eff.setMaximum != null) return true;
+		if (eff.bonusDie) return true;
+		if (eff.mode === "set") return true;
+		if (eff.proficiencyBonus || eff.halfProficiency || eff.doubleProficiency) return true;
+		if (eff.abilityMod) return true;
+		if (eff.perLevel || eff.perClassLevel) return true;
+
+		const n = typeof eff.value === "number" ? eff.value : parseInt(eff.value, 10);
+		return Number.isFinite(n) && n !== 0;
+	}
+
+	/**
 	 * Shared catalog of modifier/effect groups — the single source of truth used by BOTH the
 	 * custom-ability modal and the custom-item modal (Bug #8). Static so the inventory module can
 	 * reuse it without instantiating the abilities controller.
@@ -777,6 +837,11 @@ class CharacterSheetCustomAbilities {
 				return;
 			}
 
+			const legend = document.createElement("div");
+			legend.className = "custom-abilities__effect-legend ve-muted ve-small mb-1";
+			legend.innerHTML = `<b>Bonus</b> is added to the roll/score (e.g. <code>+2</code>). <b>Min roll</b> is a d20 floor like Reliable Talent — not a bonus. Leave <b>Adv/Dis</b> on “Normal” unless the effect grants advantage.`;
+			listEl.appendChild(legend);
+
 			effects.forEach((effect, idx) => {
 				const isAbilityMaxType = effect.type?.startsWith("abilityMax:");
 				const isAbilityType = effect.type?.startsWith("ability:") || isAbilityMaxType;
@@ -789,7 +854,8 @@ class CharacterSheetCustomAbilities {
 							<option value="" ${!effect.mode ? "selected" : ""}>Add</option>
 							<option value="set" ${effect.mode === "set" ? "selected" : ""}>Set To</option>
 						</select>
-						<input type="number" class="ve-form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? (isAbilityMaxType ? "24" : "19") : "±0"}" value="${effect.value || 0}" style="width: 70px;">
+						<input type="number" class="ve-form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? (isAbilityMaxType ? "24" : "19") : "±0"}" value="${effect.value || 0}" style="width: 70px;" title="Bonus added to the roll/score">
+						<span class="custom-abilities__effect-preview ve-muted" title="How this bonus is applied">${effect.mode === "set" ? `= ${effect.value || 0}` : CharacterSheetCustomAbilities.formatEffectBonus(effect.value || 0)}</span>
 						<select class="ve-form-control custom-abilities__effect-scaling" style="width: 145px;" title="Add a stat-based bonus">
 							<option value="">Fixed Only</option>
 							<optgroup label="Proficiency">
@@ -818,7 +884,10 @@ class CharacterSheetCustomAbilities {
 							<option value="advantage" ${effect.advantage ? "selected" : ""}>Advantage</option>
 							<option value="disadvantage" ${effect.disadvantage ? "selected" : ""}>Disadvantage</option>
 						</select>
-						<input type="number" class="ve-form-control custom-abilities__effect-minimum" placeholder="Min" value="${effect.setMinimum ?? ""}" style="width: 65px;" title="Minimum roll (like Reliable Talent)">
+						<label class="custom-abilities__effect-minfield" title="Roll floor: treat any d20 result below this number as this number (like a Rogue's Reliable Talent). Leave blank for none. This is NOT a bonus.">
+							<span class="custom-abilities__effect-minlabel ve-muted">Min roll</span>
+							<input type="number" class="ve-form-control custom-abilities__effect-minimum" placeholder="—" value="${effect.setMinimum ?? ""}" style="width: 55px;">
+						</label>
 						<input type="text" class="ve-form-control custom-abilities__effect-bonusdie" placeholder="e.g. 1d4" value="${effect.bonusDie || ""}" style="width: 75px;" title="Bonus dice">
 						<select class="ve-form-control custom-abilities__effect-conditional" style="width: 140px;" title="When does this effect apply?">
 							<option value="">Always</option>
@@ -853,6 +922,15 @@ class CharacterSheetCustomAbilities {
 				const typeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-type"));
 				const modeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-mode"));
 				const valueEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-value"));
+				const previewEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-preview"));
+
+				const updatePreview = () => {
+					if (!previewEl) return;
+					const cur = effects[idx];
+					previewEl.textContent = cur.mode === "set"
+						? `= ${cur.value || 0}`
+						: CharacterSheetCustomAbilities.formatEffectBonus(cur.value || 0);
+				};
 
 				typeEl.addEventListener("change", (/** @type {*} */ e) => {
 					effects[idx].type = e.target.value;
@@ -862,6 +940,7 @@ class CharacterSheetCustomAbilities {
 						delete effects[idx].mode;
 						valueEl.placeholder = "±0";
 					}
+					updatePreview();
 				});
 				modeEl.addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.value === "set") {
@@ -871,9 +950,11 @@ class CharacterSheetCustomAbilities {
 						delete effects[idx].mode;
 						valueEl.placeholder = "±0";
 					}
+					updatePreview();
 				});
-				valueEl.addEventListener("change", (/** @type {*} */ e) => {
+				valueEl.addEventListener("input", (/** @type {*} */ e) => {
 					effects[idx].value = parseInt(e.target.value) || 0;
+					updatePreview();
 				});
 
 				// Scaling dropdown handler
@@ -907,7 +988,12 @@ class CharacterSheetCustomAbilities {
 					});
 				}
 
-				(/** @type {*} */ (row.querySelector(".custom-abilities__effect-advdis"))).addEventListener("change", (/** @type {*} */ e) => {
+				const advdisEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-advdis"));
+				// Explicitly resolve the default to "Normal" so a fresh effect can never render as
+				// advantage (Bug #2d). The data default (no advantage/disadvantage key) is correct;
+				// this just locks the UI to match it regardless of option ordering.
+				advdisEl.value = effect.advantage ? "advantage" : effect.disadvantage ? "disadvantage" : "";
+				advdisEl.addEventListener("change", (/** @type {*} */ e) => {
 					delete effects[idx].advantage;
 					delete effects[idx].disadvantage;
 					if (e.target.value === "advantage") effects[idx].advantage = true;
@@ -2427,7 +2513,7 @@ class CharacterSheetCustomAbilities {
 
 		// Add effect
 		(/** @type {*} */ (modal.querySelector(".custom-abilities__add-effect-btn"))).addEventListener("click", () => {
-			effects.push({type: "ac", value: 0});
+			effects.push(CharacterSheetCustomAbilities.createDefaultEffect());
 			renderEffectsList();
 		});
 
