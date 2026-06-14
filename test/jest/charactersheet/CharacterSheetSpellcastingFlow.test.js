@@ -188,10 +188,10 @@ describe("Spellcasting flow — Bug #2/#9: spell-row cast buttons", () => {
 		expect(html).toContain("charsheet__spell-cast-metamagic");
 	});
 
-	it("renders a Cast w/ Feywild Shard button for a leveled spell when the shard is attuned", () => {
+	it("does NOT render a standalone Feywild Shard button even when the shard is attuned (now a metamagic sub-option)", () => {
 		spells._state.getAttunedItems = () => [{item: {name: "Feywild Shard", source: "TCE"}, attuned: true}];
 		const html = render({id: "fb", name: "Fireball", source: "XPHB", level: 3});
-		expect(html).toContain("charsheet__spell-cast-feywild");
+		expect(html).not.toContain("charsheet__spell-cast-feywild");
 	});
 
 	it("does NOT render the Feywild Shard button on a cantrip", () => {
