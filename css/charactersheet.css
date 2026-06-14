@@ -4610,12 +4610,27 @@
 	position: relative;
 }
 
-/* Extradimensional storage segment (e.g. Bag of Holding): right-aligned, distinct
-   "magic container" violet tint, sits behind the on-body carried-weight fill. */
-.charsheet__carry-bar-external {
-	position: absolute;
-	top: 0;
-	right: 0;
+/* Separate Bag-of-Holding row (overview mini). Only rendered when an
+   extradimensional container is equipped, so it is obvious which bar is the bag. */
+.charsheet__carry-bar-mini--bag {
+	margin-top: var(--cs-space-2xs, 0.15rem);
+}
+
+.charsheet__carry-bar-bag-icon {
+	font-size: var(--cs-text-xs, 0.7rem);
+	line-height: 1;
+}
+
+/* The bag track gets a faint violet tint so the empty portion still reads as
+   "the bag", distinct from the physical-carry track above it. */
+.charsheet__carry-bar-track--bag {
+	background: var(--cs-accent-bg, rgba(139, 92, 246, 0.18));
+}
+
+/* Bag-of-Holding fill: distinct "magic container" violet stripes, never
+   encumbrance-coloured (the bag does not strain the body). */
+.charsheet__carry-bar-bagfill {
+	position: relative;
 	height: 100%;
 	background: repeating-linear-gradient(
 		45deg,
@@ -4624,8 +4639,7 @@
 		#7c3aed 4px,
 		#7c3aed 8px
 	);
-	opacity: 0.55;
-	border-radius: 0 var(--cs-radius-full, 999px) var(--cs-radius-full, 999px) 0;
+	border-radius: var(--cs-radius-full, 999px);
 	transition: width 0.3s ease;
 }
 
@@ -7217,12 +7231,31 @@
 	position: relative;
 }
 
-/* Extradimensional storage segment (e.g. Bag of Holding): right-aligned, distinct
-   "magic container" violet tint, sits behind the on-body carried-weight fill. */
-.charsheet__carrying-external {
-	position: absolute;
-	top: 0;
-	right: 0;
+/* Separate Bag-of-Holding block (inventory panel). Only rendered when an
+   extradimensional container is equipped, with a clear label so it is obvious
+   which bar is the bag. */
+.charsheet__carrying-bag {
+	margin-top: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__carrying-bag-label {
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: var(--cs-accent, #8b5cf6);
+	margin-bottom: var(--cs-space-2xs, 0.15rem);
+}
+
+/* The bag track gets a faint violet tint so the empty portion still reads as
+   "the bag", distinct from the encumbrance-coloured physical-carry bar. */
+.charsheet__carrying-bar--bag {
+	background: var(--cs-accent-bg, rgba(139, 92, 246, 0.18));
+	border-color: var(--cs-accent, #8b5cf6);
+}
+
+/* Bag-of-Holding fill: distinct "magic container" violet stripes, never
+   encumbrance-coloured (the bag does not strain the body). */
+.charsheet__carrying-bagfill {
+	position: relative;
 	height: 100%;
 	background: repeating-linear-gradient(
 		45deg,
@@ -7231,8 +7264,8 @@
 		#7c3aed 5px,
 		#7c3aed 10px
 	);
-	opacity: 0.55;
 	transition: width 0.3s ease;
+	border-radius: var(--cs-radius-full, 999px);
 }
 
 .charsheet__carrying-fill {

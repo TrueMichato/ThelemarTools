@@ -24083,6 +24083,48 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Weight of carried gear that could notionally be stowed in an
+	 * extradimensional container (Bag of Holding, Heward's Handy Haversack).
+	 *
+	 * The carry split is IMPLICIT — there is no manual "put this item in the bag"
+	 * UI. We assume stowable gear fills the bag FIRST, so this is the pool that
+	 * notionally goes into the bag before any overflow lands back on the body.
+	 *
+	 * Deliberately EXCLUDED from the fillable pool (each stays on the body):
+	 *   - items already manually stowed in a weightless container via the legacy
+	 *     `containedItems[]` model (they are already "in a bag" and are weightless
+	 *     in {@link getTotalWeight}; counting them again would double-dip);
+	 *   - the weightless containers themselves — a bag cannot stow itself, so its
+	 *     own physical weight always rides on the body;
+	 *   - equipped / worn gear (armour, wielded weapons, attuned items) — you do
+	 *     not cram what you are wearing into a sack, and keeping it on the body is
+	 *     what lets a Bag of Holding never mask the strain of heavy worn armour.
+	 *
+	 * @returns {number} Stowable weight in pounds (0 if nothing is bag-eligible).
+	 */
+	getFillableWeight () {
+		// Items already stowed in a weightless container are weightless and must
+		// not be re-counted as "fillable".
+		const itemsInWeightlessContainers = new Set();
+		for (const entry of (this._data.inventory || [])) {
+			const item = entry.item || entry;
+			if (item.containerCapacity?.weightless && item.containedItems?.length) {
+				item.containedItems.forEach(id => itemsInWeightlessContainers.add(id));
+			}
+		}
+
+		let total = 0;
+		for (const i of (this._data.inventory || [])) {
+			if (itemsInWeightlessContainers.has(i.id)) continue; // already bagged
+			if (i.equipped) continue; // worn / wielded gear stays on the body
+			if (i.item?.containerCapacity?.weightless) continue; // a bag cannot stow itself
+			const weight = i.item?.weight || 0;
+			total += weight * (i.quantity || 1);
+		}
+		return total;
+	}
+
+	/**
 	 * Itemized carrying-capacity calculation. Single source of truth for both
 	 * {@link getCarryingCapacity} and the carry tooltip, so the displayed
 	 * breakdown can never disagree with the total it claims to add up to.
@@ -24097,6 +24139,12 @@ class CharacterSheetState {
 	 *   sizeMultiplier: number, // getSizeCarryMultiplier()
 	 *   bodyCapacity: number,   // physical Strength-based capacity (base+bonus, ×multipliers)
 	 *   externalCapacity: number, // extradimensional magic-container storage (Bag of Holding)
+	 *   bagCapacity: number,    // alias of externalCapacity (the bag's own capacity bar max)
+	 *   grossWeight: number,    // all carried weight (getTotalWeight) before the implicit split
+	 *   fillableWeight: number, // stowable gear that could go in the bag (getFillableWeight)
+	 *   bagLoad: number,        // weight notionally IN the bag = min(fillableWeight, bagCapacity)
+	 *   bodyLoad: number,       // weight ON the body after the bag is filled = grossWeight - bagLoad
+	 *   hasExtradimensional: boolean, // true when an extradimensional container is equipped
 	 *   total: number,          // bodyCapacity + externalCapacity (combined carrying capacity)
 	 *   pushDragLift: number    // RAW: 2 × body capacity ONLY — extradimensional storage
 	 *                           //      never inflates a physical push/drag/lift limit
@@ -24165,6 +24213,20 @@ class CharacterSheetState {
 		const bodyCapacity = (base + flatBonus) * carryMultiplier * sizeMultiplier;
 		const total = bodyCapacity + externalCapacity;
 
+		// Implicit carry split (NO manual item assignment). We assume stowable gear
+		// fills the extradimensional container (Bag of Holding) FIRST: the bag holds
+		// up to its capacity worth of fillable gear (bagLoad), and the body carries
+		// the OVERFLOW plus everything that can't be bagged — worn/equipped gear and
+		// the bag's own physical weight (bodyLoad). With no bag equipped the split is
+		// a no-op (bagCapacity 0 → bagLoad 0 → bodyLoad == grossWeight), so behaviour
+		// is identical to a character without any extradimensional storage.
+		const bagCapacity = externalCapacity;
+		const hasExtradimensional = bagCapacity > 0;
+		const grossWeight = this.getTotalWeight();
+		const fillableWeight = hasExtradimensional ? this.getFillableWeight() : 0;
+		const bagLoad = Math.min(fillableWeight, bagCapacity);
+		const bodyLoad = grossWeight - bagLoad;
+
 		return {
 			rule: isThelemar ? "thelemar" : "standard",
 			sourceValue,
@@ -24175,6 +24237,12 @@ class CharacterSheetState {
 			sizeMultiplier,
 			bodyCapacity,
 			externalCapacity,
+			bagCapacity,
+			grossWeight,
+			fillableWeight,
+			bagLoad,
+			bodyLoad,
+			hasExtradimensional,
 			total,
 			// Push/drag/lift is the bearer's RAW Strength-based physical limit
 			// (2× body capacity). Extradimensional storage (Bag of Holding) is NOT a
@@ -24227,12 +24295,15 @@ class CharacterSheetState {
 	 * @returns {string} "normal", "encumbered", "heavily_encumbered", or "over_capacity"
 	 */
 	getEncumbranceLevel () {
-		const weight = this.getTotalWeight();
 		// Encumbrance is a measure of physical strain, so it is judged against the
-		// bearer's BODY capacity only. Items stowed in extradimensional containers
-		// (Bag of Holding) are already weightless in getTotalWeight(), so adding the
-		// container's external capacity here would double-count and mask real overload.
-		const capacity = this.getCarryingCapacityBreakdown().bodyCapacity;
+		// bearer's BODY capacity using the load actually ON the body (bodyLoad). With
+		// the implicit fill-bag-first split, stowable gear notionally rides in the
+		// Bag of Holding and does NOT strain the body; only the overflow plus
+		// worn/equipped gear and the bag's own weight count here. With no bag
+		// equipped, bodyLoad == getTotalWeight(), so behaviour is unchanged.
+		const breakdown = this.getCarryingCapacityBreakdown();
+		const weight = breakdown.bodyLoad;
+		const capacity = breakdown.bodyCapacity;
 
 		if (weight > capacity) return "over_capacity";
 		if (weight > capacity * 0.75) return "heavily_encumbered";
