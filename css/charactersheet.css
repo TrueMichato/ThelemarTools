@@ -18255,6 +18255,47 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	line-height: 1;
 }
 
+/* Drag handle — the only grab affordance for reordering a favourite tile.
+   Keeps the rest of the tile (name link, action + remove buttons) clickable. */
+.charsheet__favourite-tile__drag-handle {
+	flex-shrink: 0;
+	cursor: grab;
+	border: none;
+	background: transparent;
+	padding: 0 0.15rem;
+	font-size: 1em;
+	line-height: 1;
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.4));
+	transition: color 0.15s ease;
+	touch-action: none;
+}
+
+.charsheet__favourite-tile__drag-handle:hover,
+.charsheet__favourite-tile__drag-handle:focus-visible {
+	color: var(--cs-accent, #ffb84d);
+	outline: none;
+}
+
+.charsheet__favourite-tile__drag-handle:active {
+	cursor: grabbing;
+}
+
+/* Tile currently being dragged. */
+.charsheet__favourite-tile--dragging {
+	opacity: 0.5;
+	cursor: grabbing;
+}
+
+/* Insertion indicators (drop above / below). Inset box-shadow avoids needing a
+   positioned ancestor, so it never disturbs tile layout. */
+.charsheet__favourite-tile--drag-over-top {
+	box-shadow: inset 0 3px 0 0 var(--cs-accent, #ffb84d);
+}
+
+.charsheet__favourite-tile--drag-over-bottom {
+	box-shadow: inset 0 -3px 0 0 var(--cs-accent, #ffb84d);
+}
+
 /* Star (☆/★) toggle button — used on resource, ability, attack, spell, feature, feat rows.
    Visual sibling of `.charsheet__item-star` (inventory legacy star) so all "star to favourite"
    surfaces feel identical. Kept as a thin pill instead of a square so it nests cleanly inside

@@ -25008,6 +25008,48 @@ class CharacterSheetState {
 	getFavorites () { return [...(this._data.favorites || [])]; }
 	setFavorites (favorites) { this._data.favorites = favorites || []; }
 
+	/**
+	 * Reorder `_data.favorites` to match the supplied list of favourite ids.
+	 *
+	 * Only the display-visible (resolved) favourites are ever passed in here —
+	 * hidden "orphan" favourites (whose target entity no longer exists) are not
+	 * rendered, so they cannot appear in `orderedIds`. To avoid silently losing
+	 * those entries they are preserved, in their original relative order, at the
+	 * end of the array. They remain cleanup-able via the existing orphan path.
+	 *
+	 * Defensive: de-duplicates `orderedIds`, ignores ids that don't match any
+	 * favourite, and consumes the source array (so accidental duplicate records
+	 * are never collapsed). Returns `true` only when the resulting order differs
+	 * from the current one, letting callers skip an unnecessary save + re-render.
+	 *
+	 * @param {string[]} orderedIds - Favourite ids (`type:idSuffix`) in the
+	 *   desired new order.
+	 * @returns {boolean} Whether the favourites order actually changed.
+	 */
+	reorderFavorites (orderedIds) {
+		const current = this._data.favorites || [];
+		if (current.length <= 1 || !Array.isArray(orderedIds) || !orderedIds.length) return false;
+
+		const remaining = [...current];
+		const reordered = [];
+		const seen = new Set();
+		for (const id of orderedIds) {
+			if (seen.has(id)) continue;
+			seen.add(id);
+			const idx = remaining.findIndex(f => f.id === id);
+			if (idx === -1) continue;
+			reordered.push(remaining[idx]);
+			remaining.splice(idx, 1);
+		}
+		// Preserve any favourites not referenced in `orderedIds` (e.g. orphans).
+		const next = [...reordered, ...remaining];
+
+		const changed = next.some((f, i) => f !== current[i]);
+		if (!changed) return false;
+		this._data.favorites = next;
+		return true;
+	}
+
 	isFavorite (type, id) {
 		const key = `${type}:${id}`;
 		return (this._data.favorites || []).some(f => f.id === key);
