@@ -510,7 +510,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		expect(toast).toContain("Bestowed Spell changed range from Self to Touch for this cast");
 	});
 
-	it("should allow Bestowed Spell to target another creature instead of auto-targeting self", async () => {
+	it("should NOT auto-apply a beneficial spell to self — offers a non-blocking apply-to-self affordance instead", async () => {
 		const selfHealingSpell = {
 			name: "Renewing Ward",
 			source: "TGTT",
@@ -535,11 +535,13 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 			{appliedMetamagic: {key: "bestowed", name: "Bestowed Spell", cost: 2}},
 		);
 
-		expect(globalThis.InputUiUtil.pGetUserEnum).toHaveBeenCalled();
+		// No blocking target prompt — apply-to-self is now a post-cast opt-in, so HP is unchanged.
+		expect(globalThis.InputUiUtil.pGetUserEnum).not.toHaveBeenCalled();
 		expect(state.getHp().current).toBe(10);
 		const toast = getLastToastContent();
 		expect(toast).toContain("Cast Renewing Ward");
 		expect(toast).toContain("Bestowed Spell changed range from Self to Touch for this cast");
+		expect(toast).toContain("Apply Renewing Ward to Self");
 	});
 
 	it("should annotate Heightened Spell disadvantage on the first save", async () => {
