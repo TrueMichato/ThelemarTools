@@ -3,7 +3,24 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 16 (manual-testing follow-ups: favourites reorder, custom-item/modifier UX, carry, casting/booming-blade)
+
+Grouped into four parallel sessions. Ownership boundaries below; merge order **S2 → S3 → S1 → S4** (foundations first).
+
+**Session S1 — Favourites reordering (owns: favourites ordering/rendering + `.charsheet__favourite-*` CSS + `setFavorites` region; NOT favourite cast-action semantics — those belong to S4)**
+* **(#1) Manual reorder of favourites.** Players want to drag-reorder the spells/features (and other entries) in the Favourites list on the overview tab. Reuse the existing drag-reorder pattern from `charactersheet-layout.js`; persist new order via `setFavorites`.
+
+**Session S2 — Custom item/ability modifiers, ring equip, effect application (owns: custom-item/ability modal, `canEquip`, `_toggleEquipped`, `mountEffectsEditor`, and the modifier pipeline `aggregateModifiers`/`getModifiersForType` + `_registerItemEffects` + initiative-roll advantage consumption)**
+* **(#2) Modifiers & Effects UI/UX.** In the custom-item creation modal (and the custom-ability modal, which shares `mountEffectsEditor`): the default bonus is `1` and should be `0`; positive modifiers need a leading `+` (negatives exist); the "Min" field is only meaningful for things like Reliable Talent and needs explanation; the advantage control has a default that grants advantage when it shouldn't. General UI/UX cleanup of this area.
+* **(#3) Custom ring can't be equipped.** The `canEquip` predicate omits ring types, so a custom ring has no equip control.
+* **(#4) Custom item effects don't reach the sheet.** A custom ring granting "advantage on initiative" shows in the modifiers window once equipped but the initiative roll gains no advantage — trace registration → aggregation → roll-time consumption and make the effect actually apply.
+
+**Session S3 — Carry capacity / Bag of Holding (owns: carry state logic + all carry display reads)**
+* **(#5) Bag of Holding wrongly affects drag/push/lift.** Equipping a Bag of Holding changes carry/encumbrance numbers it shouldn't. Fix `getTotalWeight`/breakdown and make the carry display (push/drag/lift + current-weight) read from the breakdown instead of recomputing locally.
+
+**Session S4 — Casting UX + Booming Blade (owns: full casting flow, cast-options abstraction, favourite-spell cast path, combat attack rider + new combat section, casting/context-menu CSS)**
+* **(#6) Booming Blade reimplementation.** Add a button near weapons to make a weapon attack that carries the spell; casting the spell by itself rolls only the secondary (movement) damage; the on-hit weapon-attached spell damage rides the NEXT weapon damage roll (with clear "if it hits" indicators) and is discarded if a new attack roll happens before a damage roll. Build a generic cast-options abstraction first, then implement Booming/Green-Flame Blade on top.
+* **(#7) Casting-menu UX overhaul.** Replace the chained modal prompts (upcast level, metamagic, apply-to-self target) with a friendlier flow — e.g. right-click/long-press context menu for cast options and a briefly-lingering, highly-visible post-cast "apply to self" popup. Design is exploratory; propose before implementing.
 
 ## Closed Bugs
 
