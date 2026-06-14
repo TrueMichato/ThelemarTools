@@ -29,6 +29,12 @@ class CharacterSheetCombat {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
 		this._handOfHarmUsedThisTurn = false;
 		this._flankingEnabled = false; // Toggle: add +2 to-hit on melee attacks while flanking (RAW optional rule)
+		// TRANSIENT channeled-spell rider (Booming/Green-Flame Blade). Lives only on the
+		// combat instance — never persisted. Armed by the per-weapon ✨ button AFTER its
+		// attack roll, consumed by the next matching weapon damage roll, and discarded by
+		// any fresh attack roll or re-render.
+		this._pendingSpellRider = null;
+		this._channelCantripsCache = null; // per-render cache of known weapon-channel cantrips
 
 		this._init();
 	}
@@ -60,6 +66,23 @@ class CharacterSheetCombat {
 			if (!target) return;
 			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
 			this._rollDamage(attackId);
+		});
+
+		// Channel a weapon-attack spell (Booming/Green-Flame Blade) into a weapon attack.
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const target = e.target.closest(".charsheet__attack-channel-spell");
+			if (!target) return;
+			e.preventDefault();
+			e.stopPropagation();
+			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
+			this._onChannelSpellButton(attackId, e);
+		});
+
+		// Clear a pending channeled-spell rider from its section.
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const target = e.target.closest(".charsheet__channeled-spell-clear");
+			if (!target) return;
+			this._clearPendingSpellRider();
 		});
 
 		// Edit attack
@@ -859,6 +882,10 @@ class CharacterSheetCombat {
 	}
 
 	_removeAttack (attackId) {
+		// If the weapon being removed/unequipped is the one a channeled-spell rider is armed
+		// for, discard the rider so its "if it hits" indicator can't outlive the weapon.
+		if (this._pendingSpellRider?.attackId === attackId) this._clearPendingSpellRider();
+
 		// Check if it's a temporary attack
 		const tempAttacks = this._state.getTemporaryAttacks?.() || [];
 		const tempAttack = tempAttacks.find(a => a.id === attackId);
@@ -908,6 +935,12 @@ class CharacterSheetCombat {
 			attack = stateAttacks.find(a => a.id === attackId);
 		}
 		if (!attack) return;
+
+		// A fresh attack roll discards any pending channeled-spell on-hit rider that has
+		// not yet been consumed by a damage roll (Booming/Green-Flame Blade timing: the
+		// on-hit damage must ride the SAME attack's damage roll). The ✨ button arms the
+		// rider AFTER calling this method, so its own roll is never self-cleared.
+		if (this._pendingSpellRider) this._clearPendingSpellRider();
 
 		// Ammunition consumption (if enabled and weapon uses ammo)
 		let ammoNote = "";
@@ -1592,8 +1625,13 @@ class CharacterSheetCombat {
 			methodRollForAnim = methodRoll;
 		}
 
+		// Channeled-spell on-hit rider (Booming/Green-Flame Blade). Armed by the per-weapon
+		// ✨ button AFTER its attack roll; consumed by the FIRST matching weapon damage roll.
+		// Added as a SEPARATE damage type (its own crit handling + display), like Hand of Harm.
+		const {channelSpell, channelSpellRoll, channelSpellDamage, riderMatched} = this._resolveChannelRiderDamage(attack, attackId, isCrit);
+
 		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderDamageTotal;
-		const total = baseDamageTotal + handOfHarmDamage + methodEffectDamage;
+		const total = baseDamageTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
 
 		// Build subtitle with breakdown
 		let subtitle = `${attack.damage}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
@@ -1613,6 +1651,7 @@ class CharacterSheetCombat {
 		subtitle += ` ${attack.damageType}`;
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
+		if (channelSpellDamage) subtitle += ` | <strong style="color:#e056fd">+${channelSpellDamage} ${channelSpell.damageType}</strong> (${channelSpell.spellName} on hit ${channelSpell.dice})`;
 
 		// Append Cunning Strike effects to subtitle
 		if (cunningStrikeEffects.length) {
@@ -1624,13 +1663,13 @@ class CharacterSheetCombat {
 		}
 
 		// Show result — separate damage types in title when multi-type damage is present
+		const typedExtras = [];
+		if (handOfHarmDamage) typedExtras.push(`${handOfHarmDamage} necrotic`);
+		if (methodEffectDamage) typedExtras.push(`${methodEffectDamage} ongoing`);
+		if (channelSpellDamage) typedExtras.push(`${channelSpellDamage} ${channelSpell.damageType}`);
 		let totalTitle;
-		if (handOfHarmDamage && methodEffectDamage) {
-			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${handOfHarmDamage} necrotic + ${methodEffectDamage} ongoing = ${total}`;
-		} else if (handOfHarmDamage) {
-			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${handOfHarmDamage} necrotic = ${total}`;
-		} else if (methodEffectDamage) {
-			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${methodEffectDamage} ongoing = ${total}`;
+		if (typedExtras.length) {
+			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${typedExtras.join(" + ")} = ${total}`;
 		}
 		// Collect the actual dice rolled (count + type + per-die values) so the
 		// animation reflects the real roll (e.g. 1d8 + 2d6 sneak) rather than a
@@ -1642,6 +1681,7 @@ class CharacterSheetCombat {
 		for (const er of extraRollsForAnim) this._pushDiceGroup(diceGroups, er);
 		this._pushDiceGroup(diceGroups, handOfHarmRollForAnim);
 		this._pushDiceGroup(diceGroups, methodRollForAnim);
+		this._pushDiceGroup(diceGroups, channelSpellRoll);
 		await this._page.pAnimateDamageDice?.(diceGroups);
 
 		this._page.showDiceResult({
@@ -1665,6 +1705,10 @@ class CharacterSheetCombat {
 			usedRiderIds.forEach(id => { this._weaponRiderEnabled[id] = false; });
 			this._renderWeaponDamageRiders?.();
 		}
+
+		// Consume the channeled-spell on-hit rider — it rides exactly ONE damage roll for its
+		// weapon. Clear whenever it matched this attack, even below level 5 (no on-hit dice yet).
+		if (riderMatched) this._clearPendingSpellRider();
 	}
 
 	_isSneakAttackWeaponEligible (attack) {
@@ -2230,6 +2274,10 @@ class CharacterSheetCombat {
 			reachBonus: this._state.getReachBonus?.() ?? 0,
 		};
 
+		// Cache known weapon-channel cantrips (Booming/Green-Flame Blade) once per render
+		// so the per-weapon ✨ button can be gated without re-scanning per attack.
+		this._channelCantripsCache = this._page._spells?.getKnownWeaponChannelCantrips?.() || [];
+
 		attacks.forEach(attack => {
 			const item = this._renderAttackItem(attack, reachCtx);
 			container.append(item);
@@ -2373,6 +2421,7 @@ class CharacterSheetCombat {
 					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage">
 						<span class="glyphicon glyphicon-fire"></span> Damage
 					</button>
+					${this._renderChannelSpellButton(attack)}
 					<button class="ve-btn ve-btn-sm ${this._state.getAttackNote?.(attack.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__attack-note" title="${this._state.getAttackNote?.(attack.id) ? "Edit Note" : "Add Note"}">
 						<span class="glyphicon glyphicon-comment"></span>
 					</button>
@@ -2385,6 +2434,151 @@ class CharacterSheetCombat {
 				</div>
 			</div>
 		`});
+	}
+
+	/* -------------------------------------------------------------------------- */
+	/* Channeled weapon-attack spells (Booming/Green-Flame Blade)                  */
+	/* -------------------------------------------------------------------------- */
+
+	/**
+	 * Whether an attack is a melee weapon attack eligible to channel a blade cantrip.
+	 * (Spell attacks, ranged-only weapons and thrown ranges are excluded.)
+	 * @returns {boolean}
+	 */
+	_isMeleeWeaponAttack (attack) {
+		if (!attack || attack.isSpell) return false;
+		if (attack.isRanged === true) return false;
+		const rangeStr = attack.range != null ? String(attack.range) : "";
+		if (rangeStr.includes("/")) return false; // thrown
+		return attack.isMelee || attack.type === "melee" || attack.range === "melee" || (rangeStr !== "" && !rangeStr.includes("/")) || rangeStr === "";
+	}
+
+	/**
+	 * Render the per-weapon "✨ Channel" button shown on melee weapon attacks when the
+	 * character knows at least one weapon-channel cantrip. Empty string otherwise.
+	 * @returns {string}
+	 */
+	_renderChannelSpellButton (attack) {
+		const cantrips = this._channelCantripsCache || [];
+		if (!cantrips.length) return "";
+		if (!this._isMeleeWeaponAttack(attack)) return "";
+		const label = cantrips.length === 1 ? cantrips[0].spell.name : "Channel Spell";
+		return `<button class="ve-btn ve-btn-sm ve-btn-default charsheet__attack-channel-spell" title="Make this attack and channel ${label} into it (carries the spell's on-hit damage)">
+			<span>✨</span>
+		</button>`;
+	}
+
+	/**
+	 * Handle the per-weapon ✨ button: pick the cantrip (if more than one is known), roll
+	 * the weapon attack, then arm the on-hit rider so the next damage roll carries it.
+	 */
+	async _onChannelSpellButton (attackId, event) {
+		const cantrips = (this._channelCantripsCache && this._channelCantripsCache.length)
+			? this._channelCantripsCache
+			: (this._page._spells?.getKnownWeaponChannelCantrips?.() || []);
+		if (!cantrips.length) return;
+
+		let choice = cantrips[0];
+		if (cantrips.length > 1) {
+			const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+				title: "Channel Which Spell?",
+				values: cantrips.map(c => c.spell.name),
+				isResolveItem: false,
+			}));
+			if (picked == null) return;
+			choice = cantrips[picked];
+		}
+
+		// Roll the weapon attack first (this clears any stale rider), THEN arm the new one.
+		this._rollAttack(attackId, event);
+		this._armChannelSpellRider(attackId, choice);
+	}
+
+	/**
+	 * Clear the transient channeled-spell rider and refresh its section. Single source of
+	 * truth for discard (fresh attack roll, post-consume, manual Clear button).
+	 */
+	_clearPendingSpellRider () {
+		this._pendingSpellRider = null;
+		this.renderCombatChanneledSpell?.();
+	}
+
+	/**
+	 * Resolve the channeled-spell on-hit rider damage for a weapon damage roll. Returns the
+	 * matching rider (+ its rolled damage) only when an armed rider targets THIS weapon attack
+	 * and actually has on-hit dice (≥ level 5); otherwise nulls/zero. Pure aside from the
+	 * dice roll — does NOT clear the rider (the caller does, after the roll/animation).
+	 * @returns {{channelSpell: (object|null), channelSpellRoll: (object|null), channelSpellDamage: number}}
+	 */
+	_resolveChannelRiderDamage (attack, attackId, isCrit) {
+		const rider = this._pendingSpellRider;
+		// A rider "matches" this weapon damage roll if it was armed for this weapon attack
+		// (regardless of whether it carries on-hit dice — below level 5 there is none yet).
+		const riderMatched = !!(attack && !attack.isSpell && rider?.attackId === attackId);
+		const channelSpell = (riderMatched && rider?.dice) ? rider : null;
+		if (!channelSpell) return {channelSpell: null, channelSpellRoll: null, channelSpellDamage: 0, riderMatched};
+		const channelSpellRoll = this._parseDamage(channelSpell.dice, isCrit);
+		return {channelSpell, channelSpellRoll, channelSpellDamage: channelSpellRoll.total, riderMatched};
+	}
+
+	/**
+	 * Arm the transient on-hit rider for a channeled blade cantrip on a specific weapon.
+	 * The rider lives only on the combat instance; it is consumed by the next matching
+	 * damage roll and discarded by any fresh attack roll / re-render.
+	 */
+	_armChannelSpellRider (attackId, choice) {
+		const channel = this._page._spells?.getWeaponChannelCantripForCharacter?.(choice.spell, choice.spellData);
+		if (!channel) return;
+
+		this._pendingSpellRider = {
+			attackId,
+			spellName: choice.spell.name,
+			dice: channel.onHitDice || null, // null below level 5 (no extra on-hit damage yet)
+			damageType: channel.onHitDamageType,
+			secondaryLabel: channel.secondaryLabel,
+			armedRound: this._state.getCombatRound?.() ?? null,
+		};
+		this.renderCombatChanneledSpell();
+
+		const onHitStr = channel.onHitDice
+			? `+${channel.onHitDice} ${channel.onHitDamageType} on hit`
+			: "no extra on-hit damage yet (gained at 5th level)";
+		if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "info",
+				content: `✨ ${choice.spell.name} channeled — if the attack hits, roll Damage to add ${onHitStr}.`,
+			}));
+		}
+	}
+
+	/**
+	 * Additive combat section: shows the currently-armed channeled-spell on-hit rider with
+	 * an "if the attack hits" indicator and a manual clear button. Hidden when no rider is
+	 * armed. Reads/clears a transient combat-instance field only (never persisted).
+	 */
+	renderCombatChanneledSpell () {
+		const section = document.getElementById("charsheet-combat-channeled-spell-section");
+		const container = document.getElementById("charsheet-combat-channeled-spell");
+		if (!container) return;
+
+		const rider = this._pendingSpellRider;
+		if (!rider) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+
+		if (section) section.style.display = "";
+		const onHitStr = rider.dice
+			? `<span class="badge badge-danger">+${rider.dice} ${rider.damageType}</span> on hit`
+			: `<span class="ve-muted">no extra on-hit damage yet (gained at 5th level)</span>`;
+		container.innerHTML = `
+			<div class="charsheet__channeled-spell-row ve-flex-v-center ve-flex-wrap">
+				<span class="mr-2">✨ <strong>${rider.spellName}</strong> is channeled into your next damage roll — ${onHitStr}.</span>
+				<span class="ve-muted ve-small mr-2">⚔ if the attack hits</span>
+				<button class="ve-btn ve-btn-xxs ve-btn-default charsheet__channeled-spell-clear" type="button" title="Clear channeled spell">Clear</button>
+			</div>
+		`;
 	}
 
 	/**
@@ -2734,8 +2928,15 @@ class CharacterSheetCombat {
 		// Always refresh state reference from page at start of render
 		this._state = this._page.getState();
 
+		// A full re-render means we've left the in-the-moment attack→damage flow (tab switch,
+		// long rest, condition toggle, etc.). Discard any armed channeled-spell rider so a
+		// stale "if it hits" indicator can't linger across unrelated UI. The arm→damage flow
+		// itself never triggers a full render(), so a just-armed rider is never lost mid-cast.
+		this._clearPendingSpellRider();
+
 		this.renderAttacks();
 		this.renderDeathSaves();
+		this.renderCombatChanneledSpell();
 		this.renderCombatSpells();
 		this.renderCombatMethods();
 		this.renderCombatRanger();
