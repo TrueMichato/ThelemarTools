@@ -18928,3 +18928,79 @@ animation: charsheet-familiar-pulse 2.4s ease-in-out infinite;
 	flex: 0 0 auto;
 	white-space: nowrap;
 }
+
+/* ==========================================================================
+   Cast-options context menu (right-click desktop / long-press mobile) + the
+   channeled-spell (Booming/Green-Flame Blade) rider row. Bugs #6 / #7.
+   ========================================================================== */
+
+.charsheet__cast-menu {
+/* Inherits the base look from .charsheet__ability-menu; widen + scroll-guard. */
+min-width: 220px;
+max-width: 320px;
+max-height: 70vh;
+overflow-y: auto;
+padding: 0.25rem 0;
+}
+
+.charsheet__cast-menu-title {
+padding: 0.4rem 0.75rem 0.3rem;
+font-weight: 600;
+border-bottom: 1px solid var(--rgb-border-grey, #444);
+position: sticky;
+top: 0;
+background: var(--rgb-bg-alt, #1e1e1e);
+}
+
+.charsheet__cast-menu-option {
+display: flex;
+flex-direction: column;
+align-items: flex-start;
+gap: 0.1rem;
+padding: 0.45rem 0.75rem;
+cursor: pointer;
+transition: background 0.15s;
+}
+
+.charsheet__cast-menu-option:hover {
+background: var(--rgb-bg-hover, #333);
+}
+
+.charsheet__cast-menu-option--disabled {
+opacity: 0.5;
+cursor: default;
+}
+
+.charsheet__cast-menu-option--disabled:hover {
+background: none;
+}
+
+.charsheet__cast-menu-label {
+font-weight: 500;
+}
+
+.charsheet__cast-menu-sublabel {
+font-size: 0.78rem;
+line-height: 1.2;
+color: var(--rgb-text-muted, #999);
+}
+
+/* Channeled-spell rider (Booming / Green-Flame Blade) ---------------------- */
+
+.charsheet__attack-channel-spell {
+color: #e056fd;
+border-color: rgba(224, 86, 253, 0.5) !important;
+}
+
+.charsheet__attack-channel-spell:hover {
+background: rgba(224, 86, 253, 0.15) !important;
+}
+
+.charsheet__channeled-spell-row {
+gap: 0.5rem;
+padding: 0.5rem 0.75rem;
+border: 1px solid rgba(224, 86, 253, 0.5);
+border-left: 3px solid #e056fd;
+border-radius: 4px;
+background: rgba(224, 86, 253, 0.08);
+}
