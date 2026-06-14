@@ -3,7 +3,15 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 17 (follow-ups to Round 16 — modifier UX, BOH bar, casting UX) — IN PROGRESS
+
+Three parallel sessions, refinements on top of Round 16.
+
+* **(#1) Custom-item / custom-ability modifier UX — relax caps + polish.** The generic "Modifiers & Effects" editor is already free-form numeric, but the custom-item modal's *legacy dedicated* fields impose artificial caps (Bonus Attack/Damage `-5…10`, Bonus Saves `-5…10`, Ability Bonus `-10…10`) and some ability-modal clamps; values should be able to go higher and negative where sensible. Also: visual/UX polish of the custom-item modal and de-emphasis of the legacy fields vs the unified effects editor (kept both — light touch, save back-compat preserved).
+* **(#2) Bag of Holding — separate carry bar.** Today the bag folds a flat `externalCapacity` into one combined bar with a violet segment; it isn't obvious it's the bag. Move to TWO distinct bars: physical carry (encumbrance-coloured) and a clearly-labelled "Bag of Holding" bar shown only when a bag is equipped. Implicit auto-split — items notionally **fill the bag first** (`bagLoad = min(fillableWeight, bagCapacity)`, body carries the overflow + the bag's own weight); no manual item-into-bag assignment.
+* **(#3) Casting UX — quick left-click + Feywild under Metamagic.** Left-click "Cast" still falls through to the blocking slot-picker modal in all cases; it should be a quick auto-cast (lowest base-level slot, no modal). The chained slot→metamagic modal stays only for the explicit "Cast with Metamagic…" (upcast+metamagic) path. Feywild Shard must stop being a standalone button + standalone context entry; instead it is offered **inside the metamagic flow** (a toggle in the metamagic picker, only when a shard is attuned), firing the Wild Magic Surge only when metamagic is actually applied.
+
+## Closed Bugs
 
 ## Closed Bugs
 
