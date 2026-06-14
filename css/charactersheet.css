@@ -13654,6 +13654,46 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	border-bottom: 1px solid var(--cs-border, rgba(99, 102, 241, 0.15));
 }
 
+/* Bug #1: de-emphasise the legacy "Quick Bonuses" shortcuts and promote the unified
+   "Modifiers & Effects" editor as the primary path. */
+.charsheet__custom-item-section--legacy {
+	opacity: 0.92;
+	border-style: dashed;
+}
+
+.charsheet__custom-item-section--legacy .charsheet__custom-item-section-title {
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.7));
+	font-weight: 500;
+}
+
+.charsheet__custom-item-section--effects {
+	border-color: var(--cs-primary, #6366f1);
+	box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.25);
+}
+
+.charsheet__custom-item-recommended-badge {
+	display: inline-block;
+	margin-left: var(--cs-space-sm, 0.5rem);
+	padding: 0.05rem 0.4rem;
+	font-size: var(--cs-text-xs, 0.7rem);
+	font-weight: 600;
+	line-height: 1.4;
+	color: #fff;
+	background: var(--cs-primary, #6366f1);
+	border-radius: var(--cs-radius-sm, 4px);
+	vertical-align: middle;
+}
+
+/* Bug #1: live signed preview ("+3" / "-2") shown beneath relaxed bonus inputs so it is
+   clear that negative and larger values are accepted. */
+.charsheet__signed-preview {
+	font-size: var(--cs-text-xs, 0.7rem);
+	font-weight: 600;
+	text-align: right;
+	min-height: 0.9rem;
+	line-height: 0.9rem;
+}
+
 .charsheet__custom-item-types {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
