@@ -242,3 +242,94 @@ describe("CharacterSheetFavourites — Round-trip", () => {
 		expect(restored.isFavorite("customAbility", "ca1")).toBe(true);
 	});
 });
+
+describe("CharacterSheetFavourites — Reorder", () => {
+	let state;
+	const ids = () => state.getFavorites().map(f => f.id);
+
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		state.addFavorite(fav("attack", "a"));
+		state.addFavorite(fav("attack", "b"));
+		state.addFavorite(fav("attack", "c"));
+	});
+
+	it("reorders favourites to match the supplied id order", () => {
+		const changed = state.reorderFavorites(["attack:c", "attack:a", "attack:b"]);
+		expect(changed).toBe(true);
+		expect(ids()).toEqual(["attack:c", "attack:a", "attack:b"]);
+	});
+
+	it("moves the first favourite to last", () => {
+		state.reorderFavorites(["attack:b", "attack:c", "attack:a"]);
+		expect(ids()).toEqual(["attack:b", "attack:c", "attack:a"]);
+	});
+
+	it("returns false (no mutation) when the order is unchanged", () => {
+		const changed = state.reorderFavorites(["attack:a", "attack:b", "attack:c"]);
+		expect(changed).toBe(false);
+		expect(ids()).toEqual(["attack:a", "attack:b", "attack:c"]);
+	});
+
+	it("returns false for empty / invalid input", () => {
+		expect(state.reorderFavorites([])).toBe(false);
+		expect(state.reorderFavorites(null)).toBe(false);
+		expect(state.reorderFavorites(undefined)).toBe(false);
+		expect(ids()).toEqual(["attack:a", "attack:b", "attack:c"]);
+	});
+
+	it("ignores unknown ids while still reordering the known ones", () => {
+		state.reorderFavorites(["attack:c", "attack:missing", "attack:a"]);
+		// "attack:b" was not referenced → preserved at the end.
+		expect(ids()).toEqual(["attack:c", "attack:a", "attack:b"]);
+	});
+
+	it("hoists an unlisted (orphan) favourite to the end even when the visible order is unchanged", () => {
+		// Visible order [a,b] is unchanged, but an orphan `c` sits between them
+		// in storage. The UI only ever passes the live ids, so the orphan must
+		// be pushed to the end — and that counts as a change.
+		state.setFavorites([fav("attack", "a"), fav("attack", "c"), fav("attack", "b")]);
+		const changed = state.reorderFavorites(["attack:a", "attack:b"]);
+		expect(changed).toBe(true);
+		expect(ids()).toEqual(["attack:a", "attack:b", "attack:c"]);
+	});
+
+	it("preserves duplicate-id records (de-dupes the id list, not the data)", () => {
+		// Defensive: corrupt/legacy data with two records sharing an id must not
+		// lose a record during reorder.
+		state.setFavorites([fav("attack", "a", {name: "a1"}), fav("attack", "a", {name: "a2"}), fav("attack", "b")]);
+		state.reorderFavorites(["attack:a", "attack:b"]);
+		expect(state.getFavorites()).toHaveLength(3);
+		expect(state.getFavorites().map(f => f.name)).toEqual(["a1", "b", "a2"]);
+	});
+
+	it("de-duplicates repeated ids without dropping favourites", () => {
+		state.reorderFavorites(["attack:c", "attack:c", "attack:a", "attack:b"]);
+		expect(ids()).toEqual(["attack:c", "attack:a", "attack:b"]);
+		expect(state.getFavorites()).toHaveLength(3);
+	});
+
+	it("preserves unlisted (orphan) favourites at the end in original relative order", () => {
+		// d and e are never rendered (no resolvable target) so the UI would only
+		// pass the live ids — they must survive the reorder, after the live ones.
+		state.addFavorite(fav("attack", "d"));
+		state.addFavorite(fav("attack", "e"));
+		state.reorderFavorites(["attack:c", "attack:b", "attack:a"]);
+		expect(ids()).toEqual(["attack:c", "attack:b", "attack:a", "attack:d", "attack:e"]);
+	});
+
+	it("is a no-op for 0- or 1-element favourite lists", () => {
+		const empty = new CharacterSheetState();
+		expect(empty.reorderFavorites(["x"])).toBe(false);
+		const one = new CharacterSheetState();
+		one.addFavorite(fav("attack", "solo"));
+		expect(one.reorderFavorites(["attack:solo"])).toBe(false);
+	});
+
+	it("round-trips the new order through toJson / loadFromJson", () => {
+		state.reorderFavorites(["attack:c", "attack:a", "attack:b"]);
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(state.toJson());
+		expect(restored.getFavorites().map(f => f.id)).toEqual(["attack:c", "attack:a", "attack:b"]);
+	});
+});
