@@ -325,3 +325,34 @@ describe("resolveSelfTargetingMode (apply-to-self gating)", () => {
 		expect(CharacterSheetSpells.resolveSelfTargetingMode({selfOnly: false}, {damage: {dice: "8d6"}})).toBe("none");
 	});
 });
+
+// --- Apply-to-self toast replace-don't-stack (Bug #7 note 1) -------------------
+
+describe("_replacePriorApplyToSelfToast (rapid casts replace, don't stack)", () => {
+	// Minimal fake toast node: tracks whether its `.toast` ancestor was removed.
+	function makeFakeToast () {
+		const ancestor = {removed: false, remove () { this.removed = true; }};
+		return {ancestor, closest: (sel) => (sel === ".toast" ? ancestor : null)};
+	}
+
+	it("removes the prior apply-to-self toast when a new one is shown", () => {
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		const first = makeFakeToast();
+		const second = makeFakeToast();
+		spells._replacePriorApplyToSelfToast(first);
+		expect(first.ancestor.removed).toBe(false); // nothing prior to remove
+		spells._replacePriorApplyToSelfToast(second);
+		expect(first.ancestor.removed).toBe(true); // prior removed
+		expect(second.ancestor.removed).toBe(false); // current kept
+		expect(spells._activeApplyToSelfToastEl).toBe(second);
+	});
+
+	it("does not remove the node it is currently tracking (idempotent)", () => {
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		const only = makeFakeToast();
+		spells._replacePriorApplyToSelfToast(only);
+		spells._replacePriorApplyToSelfToast(only);
+		expect(only.ancestor.removed).toBe(false);
+		expect(spells._activeApplyToSelfToastEl).toBe(only);
+	});
+});

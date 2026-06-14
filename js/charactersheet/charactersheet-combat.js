@@ -882,6 +882,10 @@ class CharacterSheetCombat {
 	}
 
 	_removeAttack (attackId) {
+		// If the weapon being removed/unequipped is the one a channeled-spell rider is armed
+		// for, discard the rider so its "if it hits" indicator can't outlive the weapon.
+		if (this._pendingSpellRider?.attackId === attackId) this._clearPendingSpellRider();
+
 		// Check if it's a temporary attack
 		const tempAttacks = this._state.getTemporaryAttacks?.() || [];
 		const tempAttack = tempAttacks.find(a => a.id === attackId);
@@ -2920,6 +2924,12 @@ class CharacterSheetCombat {
 	render () {
 		// Always refresh state reference from page at start of render
 		this._state = this._page.getState();
+
+		// A full re-render means we've left the in-the-moment attack→damage flow (tab switch,
+		// long rest, condition toggle, etc.). Discard any armed channeled-spell rider so a
+		// stale "if it hits" indicator can't linger across unrelated UI. The arm→damage flow
+		// itself never triggers a full render(), so a just-armed rider is never lost mid-cast.
+		this._clearPendingSpellRider();
 
 		this.renderAttacks();
 		this.renderDeathSaves();

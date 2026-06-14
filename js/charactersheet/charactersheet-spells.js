@@ -3521,6 +3521,9 @@ class CharacterSheetSpells {
 		// Wire the non-blocking "apply to self" button — rolls/applies the payload ONCE.
 		const applyToSelfBtn = toastEl.querySelector(".btn-apply-to-self");
 		if (applyToSelfBtn && offerApplyToSelf) {
+			// Replace any still-visible apply-to-self toast from a previous cast so rapid casts
+			// don't pile up a stack of competing "Apply to Self" prompts (the latest cast wins).
+			this._replacePriorApplyToSelfToast(toastEl);
 			applyToSelfBtn.addEventListener("click", async (evt) => {
 				evt.stopPropagation();
 				if (applyToSelfBtn.disabled) return;
@@ -4863,6 +4866,21 @@ class CharacterSheetSpells {
 		if (!targetInfo?.selfOnly && hasBeneficial) return "offer";
 		if (targetInfo?.selfOnly) return "auto";
 		return "none";
+	}
+
+	/**
+	 * Replace any still-visible "Apply to Self" toast from a previous cast with the newly
+	 * created one, so rapid back-to-back casts don't stack competing opt-in prompts. Removes
+	 * the prior toast's `.toast` ancestor (if still in the DOM) and tracks the new node.
+	 * Self-contained and DOM-light so it can be unit-tested with fake elements.
+	 */
+	_replacePriorApplyToSelfToast (newToastEl) {
+		const prior = this._activeApplyToSelfToastEl;
+		if (prior && prior !== newToastEl) {
+			const priorToast = prior.closest?.(".toast");
+			if (priorToast) priorToast.remove();
+		}
+		this._activeApplyToSelfToastEl = newToastEl || null;
 	}
 
 	/**
