@@ -225,6 +225,18 @@ class CharacterSheetSpells {
 			this._castSpellAsRitual(spellId);
 		});
 
+		// Right-click (desktop) cast-options context menu on a spell row.
+		// Long-press (mobile) routes through charactersheet-mobile.js → _openSpellCastMenu.
+		document.addEventListener("contextmenu", (/** @type {*} */ e) => {
+			const item = e.target.closest(".charsheet__spell-item");
+			if (!item) return;
+			// Let normal context menus work on real links (open spell reference, etc.).
+			if (e.target.closest("a")) return;
+			const spellId = item.dataset.spellId;
+			if (!spellId) return;
+			this._openSpellCastMenu(spellId, e);
+		});
+
 		// Remove spell button
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-remove");
@@ -1950,7 +1962,7 @@ class CharacterSheetSpells {
 		return `${dur.duration?.amount || ""} ${dur.duration?.type || ""}`.trim();
 	}
 
-	async _castSpell (spellId, {withMetamagic, feywildShard = false} = {}) {
+	async _castSpell (spellId, {withMetamagic, feywildShard = false, decision = null} = {}) {
 		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
 		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId
 		// (combat / overview / favourites quick-cast surfaces).
@@ -1987,9 +1999,7 @@ class CharacterSheetSpells {
 
 		// Cantrips don't use slots
 		if (spell.level === 0) {
-			const activeMetamagicChoice = shouldPromptMetamagic
-				? await this._pChooseActiveMetamagic({spell, spellData, slotLevel: 0, isExplicit: isExplicitMetamagic})
-				: {cancelled: false, metamagic: null};
+			const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: 0, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 			if (activeMetamagicChoice?.cancelled) return;
 			if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
 			if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
@@ -1999,7 +2009,7 @@ class CharacterSheetSpells {
 			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 			// Variant spell component selection (cantrips)
-			const variantComponentChoice = await this._pChooseVariantComponent({spell, spellData});
+			const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
 			if (variantComponentChoice?.cancelled) return;
 			if (variantComponentChoice?.variantComponent) {
 				for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
@@ -2042,21 +2052,26 @@ class CharacterSheetSpells {
 				}
 			}
 
-			// If no slots available, auto-ritual; if slots available, ask
+			// If no slots available, auto-ritual; if slots available, ask — unless the cast
+			// came from the context menu, which resolves the ritual choice up front
+			// (decision.castAsRitual: false = the plain "Cast" item; the menu has a separate
+			// "Cast as Ritual" entry that routes through _castSpellAsRitual).
 			let castAsRitual = !hasSlots;
 			if (hasSlots) {
-				castAsRitual = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
-					title: "Cast as Ritual?",
-					htmlDescription: `<strong>${spell.name}</strong> has the ritual tag. You can cast it as a ritual (no spell slot used, but casting takes 10 extra minutes).`,
-					textYes: "🔮 Cast as Ritual (no slot)",
-					textNo: "⚡ Cast Normally (use slot)",
-				}));
+				if (decision && decision.castAsRitual != null) {
+					castAsRitual = decision.castAsRitual;
+				} else {
+					castAsRitual = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+						title: "Cast as Ritual?",
+						htmlDescription: `<strong>${spell.name}</strong> has the ritual tag. You can cast it as a ritual (no spell slot used, but casting takes 10 extra minutes).`,
+						textYes: "🔮 Cast as Ritual (no slot)",
+						textNo: "⚡ Cast Normally (use slot)",
+					}));
+				}
 			}
 
 			if (castAsRitual) {
-				const activeMetamagicChoice = shouldPromptMetamagic
-					? await this._pChooseActiveMetamagic({spell, spellData, slotLevel: spell.level, isExplicit: isExplicitMetamagic})
-					: {cancelled: false, metamagic: null};
+				const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: spell.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 				if (activeMetamagicChoice?.cancelled) return;
 				if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
 				if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
@@ -2066,7 +2081,7 @@ class CharacterSheetSpells {
 				if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 				// Variant spell component selection (ritual)
-				const variantComponentChoice = await this._pChooseVariantComponent({spell, spellData});
+				const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
 				if (variantComponentChoice?.cancelled) return;
 				if (variantComponentChoice?.variantComponent) {
 					for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
@@ -2136,9 +2151,21 @@ class CharacterSheetSpells {
 			return;
 		}
 
-		// If only one option, auto-select; otherwise show picker
+		// If only one option, auto-select; otherwise show picker (or honor a pre-resolved
+		// upcast choice from the cast-options context menu — revalidated against current slots).
 		let selectedSlot;
-		if (castOptions.length === 1) {
+		if (decision && decision.slotLevel != null) {
+			selectedSlot = castOptions.find(s => !s.isNoSlotResource && !s.isPact && s.level === decision.slotLevel)
+				|| castOptions.find(s => s.level === decision.slotLevel);
+			if (!selectedSlot) {
+				JqueryUtil.doToast({type: "warning", content: `No level ${decision.slotLevel} slot available.`});
+				return;
+			}
+		} else if (decision && decision.autoSlot) {
+			// One-click "Cast" from the cast-options menu: pick a slot WITHOUT prompting —
+			// prefer a base-level slot/pact, else the first available option.
+			selectedSlot = castOptions.find(s => s.level === spell.level) || castOptions[0];
+		} else if (castOptions.length === 1) {
 			selectedSlot = castOptions[0];
 		} else {
 			const chosenIdx = await InputUiUtil.pGetUserEnum({
@@ -2153,9 +2180,7 @@ class CharacterSheetSpells {
 			if (!selectedSlot) return;
 		}
 
-		const activeMetamagicChoice = shouldPromptMetamagic
-			? await this._pChooseActiveMetamagic({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic})
-			: {cancelled: false, metamagic: null};
+		const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 		if (activeMetamagicChoice?.cancelled) return;
 		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
 		if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
@@ -2165,7 +2190,7 @@ class CharacterSheetSpells {
 		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 		// Variant spell component selection
-		const variantComponentChoice = await this._pChooseVariantComponent({spell, spellData});
+		const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
 		if (variantComponentChoice?.cancelled) return;
 
 		const castMeta = this._getNormalizedCastMeta({
@@ -2449,6 +2474,227 @@ class CharacterSheetSpells {
 	 *        explained rather than silently casting normally.
 	 * @returns {Promise<{cancelled: boolean, metamagic: object|null}>}
 	 */
+	/**
+	 * Resolve the metamagic choice for a cast. When the cast-options context menu has
+	 * pre-selected a metamagic (`decision.metamagic`), revalidate it is still castable at
+	 * the ACTUAL slot level before applying (guards against a stale menu / changed SP) —
+	 * never under-charges. Otherwise falls back to the interactive picker (or none).
+	 * @returns {Promise<{cancelled: boolean, metamagic: (object|null)}>}
+	 */
+	async _resolveMetamagicChoice ({spell, spellData, slotLevel, isExplicit = false, shouldPrompt = true, decision = null}) {
+		if (decision && Object.prototype.hasOwnProperty.call(decision, "metamagic")) {
+			if (!decision.metamagic) return {cancelled: false, metamagic: null};
+			const options = this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel}) || [];
+			const match = options.find(o => o.key === decision.metamagic.key && o.isAvailable);
+			if (!match) {
+				JqueryUtil.doToast({type: "warning", content: `${decision.metamagic.name || "That metamagic"} is not available for this cast.`});
+				return {cancelled: true, metamagic: null};
+			}
+			return {cancelled: false, metamagic: match};
+		}
+		if (!shouldPrompt) return {cancelled: false, metamagic: null};
+		return this._pChooseActiveMetamagic({spell, spellData, slotLevel, isExplicit});
+	}
+
+	/**
+	 * Resolve the variant-component choice. One-click cast-options menu entries pass
+	 * `decision.skipComponentPrompt` to bypass the (multi-select) component picker; the
+	 * dedicated "Cast with components…" entry leaves it enabled.
+	 * @returns {Promise<{cancelled: boolean, variantComponent: (object|null)}>}
+	 */
+	async _resolveVariantComponentChoice ({spell, spellData, decision = null}) {
+		if (decision && decision.skipComponentPrompt) return {cancelled: false, variantComponent: null};
+		return this._pChooseVariantComponent({spell, spellData});
+	}
+
+	/* -------------------------------------------------------------------------- */
+	/* Cast-options context menu (right-click desktop / long-press mobile)         */
+	/* -------------------------------------------------------------------------- */
+
+	/**
+	 * Build the list of concrete, one-click cast choices for a spell — the data behind the
+	 * right-click / long-press cast menu. Each item resolves to a `_castSpell(...)` call
+	 * with a pre-resolved `decision` so NO further chained prompts are needed (slot level,
+	 * metamagic and components are decided up front). Availability is re-checked at execution
+	 * time inside `_castSpell`, so a stale menu can never overspend.
+	 * @returns {Array<{label: string, sublabel?: string, onSelect: Function}>}
+	 */
+	_buildCastOptionItems (spell, spellData) {
+		const items = [];
+		const spellId = spell.id;
+		const isCantrip = spell.level === 0;
+
+		// Blade cantrips: the weapon ✨ button is the primary action; the menu only offers
+		// the standalone secondary/movement damage roll.
+		const channelInfo = isCantrip ? CharacterSheetSpells.getWeaponChannelCantripInfo(spellData) : null;
+		if (channelInfo) {
+			const channel = this.getWeaponChannelCantripForCharacter(spell, spellData);
+			const secLabel = channel?.secondaryLabel || "secondary damage";
+			items.push({
+				label: `⚔ Roll ${secLabel}`,
+				sublabel: "On-hit damage rides your weapon attack (use the ✨ button by your weapon)",
+				onSelect: () => this._castSpell(spellId, {withMetamagic: false, decision: {skipComponentPrompt: true}}),
+			});
+			return items;
+		}
+
+		// Basic cast (no metamagic, no component/ritual/slot prompt → a true one-click cast).
+		// `autoSlot` picks a base-level slot without prompting; `castAsRitual:false` skips the
+		// ritual prompt (the menu has a dedicated ritual entry below).
+		const baseDecision = isCantrip
+			? {skipComponentPrompt: true}
+			: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true};
+		items.push({
+			label: isCantrip ? "⚡ Cast" : `⚡ Cast (level ${spell.level})`,
+			onSelect: () => this._castSpell(spellId, {withMetamagic: false, decision: {...baseDecision}}),
+		});
+
+		// Upcast options — one per available higher slot level.
+		if (!isCantrip) {
+			for (let lvl = spell.level + 1; lvl <= 9; lvl++) {
+				const current = this._state.getSpellSlotsCurrent?.(lvl) || 0;
+				if (current <= 0) continue;
+				items.push({
+					label: `⬆ Upcast to level ${lvl}`,
+					sublabel: `${current} slot${current === 1 ? "" : "s"} remaining`,
+					onSelect: () => this._castSpell(spellId, {withMetamagic: false, decision: {slotLevel: lvl, castAsRitual: false, skipComponentPrompt: true}}),
+				});
+			}
+		}
+
+		// Metamagic — one entry per currently-available active metamagic (at base level).
+		const metamagics = this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel: isCantrip ? 0 : spell.level}) || [];
+		const availableMm = metamagics.filter(m => m.isAvailable);
+		for (const meta of availableMm) {
+			items.push({
+				label: `🌀 ${meta.name}`,
+				sublabel: `${meta.cost} SP`,
+				onSelect: () => this._castSpell(spellId, {decision: {...baseDecision, metamagic: {key: meta.key, name: meta.name, cost: meta.cost}}}),
+			});
+		}
+		// Upcast+metamagic combos and unavailable-reason display fall back to the full picker.
+		if (metamagics.length) {
+			items.push({
+				label: "🌀 Cast with Metamagic…",
+				sublabel: "Choose metamagic (supports upcast combos)",
+				onSelect: () => this._castSpell(spellId, {withMetamagic: true}),
+			});
+		}
+
+		// Ritual.
+		if (this._state.canCastAsRitual?.(spell)) {
+			items.push({
+				label: "🔮 Cast as Ritual",
+				sublabel: "No slot, +10 min casting time",
+				onSelect: () => this._castSpellAsRitual(spellId),
+			});
+		}
+
+		// Feywild Shard (TCE).
+		const isFeywildShardAttuned = (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
+		if (!isCantrip && isFeywildShardAttuned) {
+			items.push({
+				label: "✨ Cast with Feywild Shard",
+				sublabel: "Casts normally + rolls a Wild Magic Surge",
+				onSelect: () => this._castSpell(spellId, {withMetamagic: false, feywildShard: true, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}}),
+			});
+		}
+
+		// Variant components (kept as a multi-select picker entry, not flattened).
+		const hasComponents = (this._state.getMatchingVariantComponents?.(spell, spellData) || []).length > 0;
+		if (hasComponents) {
+			items.push({
+				label: "🧪 Cast with components…",
+				sublabel: "Choose variant spell components",
+				onSelect: () => this._castSpell(spellId, {withMetamagic: false}),
+			});
+		}
+
+		return items;
+	}
+
+	/**
+	 * Open the cast-options menu for a spell id near a pointer event. Shared entry point for
+	 * the desktop right-click handler and the mobile long-press handler.
+	 */
+	_openSpellCastMenu (spellId, event) {
+		const spell = this._state.getSpells().find(s => s.id === spellId);
+		if (!spell) return;
+		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source);
+		const items = this._buildCastOptionItems(spell, spellData);
+		if (!items.length) return;
+		this._showCastOptionsMenu(event, `Cast ${spell.name}`, items);
+	}
+
+	/**
+	 * SELF-CONTAINED generic context-menu helper (FLAGGED for merge — new local helper).
+	 * Renders a fixed-position popup of `{label, sublabel, disabled, onSelect}` items near
+	 * the pointer, dismissed on outside-click / Escape. Mirrors the DOM/positioning pattern
+	 * of charactersheet.js `_showSkillAbilityMenu` (and reuses its `.charsheet__ability-menu`
+	 * base class) but is parameterised by an item list. Kept local to the spells module to
+	 * avoid cross-module coupling.
+	 */
+	_showCastOptionsMenu (event, title, items) {
+		if (event) {
+			event.preventDefault?.();
+			event.stopPropagation?.();
+		}
+		// Tear down any previously-open cast menu (and its document listeners) before opening
+		// a new one, so stale click/keydown handlers can't accumulate.
+		this._activeCastMenuCleanup?.();
+		this._activeCastMenuCleanup = null;
+		document.querySelector(".charsheet__cast-menu")?.remove();
+		if (!items || !items.length) return;
+
+		const menu = e_({outer: `<div class="charsheet__cast-menu charsheet__ability-menu"></div>`});
+
+		let closeMenu;
+		let onKey;
+		const cleanup = () => {
+			menu.remove();
+			document.removeEventListener("click", closeMenu);
+			document.removeEventListener("keydown", onKey);
+			if (this._activeCastMenuCleanup === cleanup) this._activeCastMenuCleanup = null;
+		};
+		this._activeCastMenuCleanup = cleanup;
+		closeMenu = (e) => { if (!(/** @type {*} */ (e.target)).closest?.(".charsheet__cast-menu")) cleanup(); };
+		onKey = (e) => { if (e.key === "Escape") cleanup(); };
+
+		if (title) menu.append(e_({outer: `<div class="charsheet__cast-menu-title ve-muted ve-small">${title}</div>`}));
+
+		items.forEach(item => {
+			const optionEl = e_({outer: `
+				<div class="charsheet__cast-menu-option charsheet__ability-menu-option ${item.disabled ? "charsheet__cast-menu-option--disabled" : ""}">
+					<span class="charsheet__cast-menu-label">${item.label}</span>
+					${item.sublabel ? `<span class="charsheet__cast-menu-sublabel ve-muted ve-small ve-block">${item.sublabel}</span>` : ""}
+				</div>
+			`});
+			if (!item.disabled) {
+				optionEl.addEventListener("click", (e) => {
+					e.stopPropagation();
+					cleanup();
+					item.onSelect?.();
+				});
+			}
+			menu.append(optionEl);
+		});
+
+		const clientX = event?.clientX ?? (window.innerWidth / 2);
+		const clientY = event?.clientY ?? (window.innerHeight / 2);
+		Object.assign(menu.style, {position: "fixed", left: `${clientX}px`, top: `${clientY}px`, zIndex: 10000});
+		document.body.append(menu);
+
+		// Clamp into the viewport.
+		const rect = menu.getBoundingClientRect();
+		if (rect.right > window.innerWidth) menu.style.left = `${Math.max(0, window.innerWidth - rect.width - 8)}px`;
+		if (rect.bottom > window.innerHeight) menu.style.top = `${Math.max(0, window.innerHeight - rect.height - 8)}px`;
+
+		setTimeout(() => {
+			document.addEventListener("click", closeMenu);
+			document.addEventListener("keydown", onKey);
+		}, 10);
+	}
+
 	async _pChooseActiveMetamagic ({spell, spellData, slotLevel, isExplicit = false}) {
 		const metamagicOptions = this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel}) || [];
 		if (!metamagicOptions.length) return {cancelled: false, metamagic: null};
@@ -2965,6 +3211,7 @@ class CharacterSheetSpells {
 		let effectsApplied = [];
 		let metamagicNotes = [];
 		let deliveredViaFamiliar = false;
+		let offerApplyToSelf = null;
 
 		// Roll history tracking for spell components
 		const _rollMeta = {attack: null, dc: null};
@@ -3086,35 +3333,23 @@ class CharacterSheetSpells {
 			};
 
 			// Determine if we should ask for a target
-			const needsTargetSelection = !targetInfo.selfOnly && (
-				effects.healing
-				|| effects.buffs?.length > 0
-				|| effects.tempHp
-				|| effects.conditions?.length > 0
-				|| effects.registryEffects?.length > 0
-			);
+			const selfTargetMode = CharacterSheetSpells.resolveSelfTargetingMode(targetInfo, effects);
 
-			// Handle target selection for beneficial effects
-			if (needsTargetSelection) {
-				const targetChoice = await this._promptSpellTarget(spell, spellData, effects, targetInfo);
-
-				if (targetChoice == null) {
-					// User cancelled target selection — abort the cast
-					return {cancelled: true};
-				} else if (targetChoice === "self") {
-					effectsApplied = await this._applySpellEffectsToSelf(spell, spellData, effects, slotLevel);
-				} else if (targetChoice === "other") {
-					// For others, just show the roll results - we can't track their HP
-					const healAbility = this._state.getSpellcastingAbilityForSpell?.(spell) || this._state.getSpellcastingAbility() || "int";
-					damageInfo = this._rollSpellHealing(spellData, slotLevel, spell.level, healAbility)
-						|| ((damageResult = this._rollSpellDamage(spellData, slotLevel, spell.level, appliedMetamagic))?.text || "");
-				}
-			} else if (targetInfo.selfOnly) {
+			// Apply-to-self is now a POST-cast, non-blocking affordance (see toast below)
+			// instead of a blocking pre-roll target prompt. Beneficial, non-self-only spells
+			// resolve immediately; the player opts into applying the effect to themselves via
+			// a bright button in the result toast (which rolls/applies the payload ONCE).
+			if (selfTargetMode === "offer") {
+				offerApplyToSelf = {spell, spellData, effects, slotLevel};
+				// Informational only — do NOT pre-roll healing here (apply-to-self rolls once
+				// on click, so the applied amount always matches what is shown).
+				damageInfo = this._describeBeneficialEffects(effects);
+			} else if (selfTargetMode === "auto") {
 				// Self-only spells automatically target self
 				effectsApplied = await this._applySpellEffectsToSelf(spell, spellData, effects, slotLevel);
 			} else {
 				// Damage or other effects targeting enemies
-				damageResult = this._rollSpellDamage(spellData, slotLevel, spell.level, appliedMetamagic);
+				damageResult = this._rollSpellDamage(spellData, slotLevel, spell.level, appliedMetamagic, spell);
 				damageInfo = damageResult?.text || "";
 
 				// Roll healing if spell heals but targets others by default (like Mass Cure Wounds)
@@ -3226,6 +3461,11 @@ class CharacterSheetSpells {
 			toastContent += `<br><span class="text-info">${metamagicNotes.join("<br>")}</span>`;
 		}
 
+		// Non-blocking "apply to self" affordance for beneficial, non-self-only spells.
+		if (offerApplyToSelf) {
+			toastContent += `<br><button class="ve-btn ve-btn-xs ve-btn-primary btn-apply-to-self mt-1" type="button">✨ Apply ${spell.name} to Self</button>`;
+		}
+
 		// Wild Magic surge result from multi-component usage
 		if (wildMagicSurgeResult) {
 			if (wildMagicSurgeResult.surged) {
@@ -3278,10 +3518,33 @@ class CharacterSheetSpells {
 			});
 		}
 
+		// Wire the non-blocking "apply to self" button — rolls/applies the payload ONCE.
+		const applyToSelfBtn = toastEl.querySelector(".btn-apply-to-self");
+		if (applyToSelfBtn && offerApplyToSelf) {
+			applyToSelfBtn.addEventListener("click", async (evt) => {
+				evt.stopPropagation();
+				if (applyToSelfBtn.disabled) return;
+				applyToSelfBtn.disabled = true;
+				const applied = await this._applySpellEffectsToSelf(
+					offerApplyToSelf.spell,
+					offerApplyToSelf.spellData,
+					offerApplyToSelf.effects,
+					offerApplyToSelf.slotLevel,
+				);
+				applyToSelfBtn.textContent = applied.length ? "✓ Applied to Self" : "✓ Done";
+				this._page._renderActiveStates?.();
+				this._page._combat?.renderCombatStates?.();
+				this._page._renderHp?.();
+				if (applied.length) {
+					JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `✨ Applied to self: ${applied.join(", ")}`}));
+				}
+			});
+		}
+
 		JqueryUtil.doToast(/** @type {*} */ ({
 			type: "success",
 			content: toastEl,
-			...(hasGamblerFolly ? {autoHideTime: 10000} : {}),
+			...(hasGamblerFolly || offerApplyToSelf ? {autoHideTime: 12000} : {}),
 		}));
 
 		// Update UI to show new active states
@@ -4581,6 +4844,54 @@ class CharacterSheetSpells {
 	/**
 	 * Prompt user to select a target for the spell
 	 */
+	/**
+	 * Decide how a beneficial spell's self-targeting is handled post-cast (pure — no
+	 * rolling or side effects):
+	 *  - "offer": non-self-only beneficial spell → show the opt-in "Apply to Self" toast button.
+	 *  - "auto":  self-only spell → apply to self automatically.
+	 *  - "none":  neither (damage / enemy-targeted / no beneficial payload).
+	 * @returns {"offer"|"auto"|"none"}
+	 */
+	static resolveSelfTargetingMode (targetInfo, effects) {
+		const hasBeneficial = !!(
+			effects?.healing
+			|| effects?.buffs?.length > 0
+			|| effects?.tempHp
+			|| effects?.conditions?.length > 0
+			|| effects?.registryEffects?.length > 0
+		);
+		if (!targetInfo?.selfOnly && hasBeneficial) return "offer";
+		if (targetInfo?.selfOnly) return "auto";
+		return "none";
+	}
+
+	/**
+	 * Build a compact, informational summary of a beneficial spell's effects for the
+	 * result toast — WITHOUT rolling any dice (the apply-to-self button rolls once on
+	 * click, so the applied amount always matches what is then shown).
+	 * @returns {string}
+	 */
+	_describeBeneficialEffects (effects) {
+		const parts = [];
+		if (effects.healing) {
+			const healDice = effects.healing.dice || "healing";
+			parts.push(`Heal ${healDice}${effects.healing.addModifier ? " + mod" : ""}`);
+		}
+		if (effects.tempHp) parts.push(`+${effects.tempHp.amount} temp HP`);
+		if (effects.buffs?.length) {
+			for (const buff of effects.buffs) {
+				if (buff.target === "ac") parts.push(`+${buff.value} AC`);
+				else if (buff.type === "rollBonus") parts.push(`+${buff.dice} to rolls`);
+			}
+		}
+		if (effects.conditions?.length) {
+			parts.push(effects.conditions.map(c => c.charAt(0).toUpperCase() + c.slice(1)).join(", "));
+		}
+		const concentration = effects.concentration ? ` <span class="text-warning">⚠ Concentration</span>` : "";
+		if (!parts.length) return `<br><span class="ve-muted">Beneficial spell — apply to yourself or another creature.</span>${concentration}`;
+		return `<br><span class="ve-muted">Effects: ${parts.join(", ")}</span>${concentration}`;
+	}
+
 	async _promptSpellTarget (spell, spellData, effects, targetInfo) {
 		const effectDescriptions = [];
 
@@ -4870,7 +5181,12 @@ class CharacterSheetSpells {
 		return {count, perDartDice: baseDice};
 	}
 
-	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null) {
+	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null, spell = null) {
+		// Weapon-channel cantrips (Booming/Green-Flame Blade) cast on their own roll ONLY
+		// the secondary/movement damage; the on-hit damage rides the weapon attack instead.
+		const channel = this.getWeaponChannelCantripForCharacter(spell, spellData);
+		if (channel) return this._rollWeaponChannelSecondary(spellData, channel, appliedMetamagic);
+
 		// Check for cantrip scaling
 		if (spellData.scalingLevelDice) {
 			return this._rollCantripDamage(spellData, appliedMetamagic);
@@ -4982,6 +5298,194 @@ class CharacterSheetSpells {
 		} catch (e) {
 			return null;
 		}
+	}
+
+	/* -------------------------------------------------------------------------- */
+	/* Weapon-channel cantrips (Booming Blade / Green-Flame Blade)                 */
+	/* -------------------------------------------------------------------------- */
+
+	/**
+	 * Detect a "weapon-channel" cantrip — one you cast by making a melee weapon attack
+	 * that carries the spell (Booming Blade, Green-Flame Blade, SCAG/homebrew clones).
+	 *
+	 * The split is data-driven from `scalingLevelDice` labels so it generalises beyond
+	 * the two PHB/TCE cantrips:
+	 *   - the component whose label reads "…on hit" rides the weapon's *damage* roll
+	 *     (the on-hit extra damage; absent below level 5, so 0 at low levels), and
+	 *   - the remaining component is the secondary / movement damage that is rolled when
+	 *     the spell is "cast" on its own (Booming Blade's move trigger, Green-Flame's
+	 *     splash to a second creature).
+	 *
+	 * @param {object} spellData Full spell data (NOT the lightweight character spell).
+	 * @returns {null | {
+	 *   onHitScaling: (object|null),
+	 *   secondaryScaling: object,
+	 *   secondaryLabel: string,
+	 *   onHitDamageType: string,
+	 *   secondaryDamageType: string,
+	 * }}
+	 */
+	static getWeaponChannelCantripInfo (spellData) {
+		if (!spellData) return null;
+		if (spellData.level !== 0) return null;
+		const scalings = Array.isArray(spellData.scalingLevelDice) ? spellData.scalingLevelDice : null;
+		if (!scalings || scalings.length < 2) return null;
+
+		// Must actually be cast via a melee weapon attack ("…make a melee attack with it…").
+		const entryText = (spellData.entries || [])
+			.filter(e => typeof e === "string")
+			.join(" ")
+			.toLowerCase();
+		if (!/melee attack with it/.test(entryText)) return null;
+
+		const onHitScaling = scalings.find(s => /on\s+(?:a\s+)?hit/i.test(s.label || "")) || null;
+		// Secondary = the first component that is NOT the on-hit one.
+		const secondaryScaling = scalings.find(s => s !== onHitScaling) || null;
+		if (!secondaryScaling?.scaling) return null;
+
+		const damageInflict = spellData.damageInflict || [];
+		const typeFromLabel = (label) => {
+			const m = String(label || "").match(/\b(acid|cold|fire|force|lightning|necrotic|poison|psychic|radiant|thunder)\b/i);
+			return m ? m[1].toLowerCase() : null;
+		};
+
+		return {
+			onHitScaling,
+			secondaryScaling,
+			secondaryLabel: secondaryScaling.label || "secondary damage",
+			onHitDamageType: typeFromLabel(onHitScaling?.label) || damageInflict[0] || "force",
+			secondaryDamageType: typeFromLabel(secondaryScaling.label) || damageInflict[0] || "force",
+		};
+	}
+
+	/**
+	 * Resolve a `scalingLevelDice` scaling map to the dice string for a character level.
+	 * Returns `null` when the character is below the lowest keyed level (e.g. the on-hit
+	 * component of a blade cantrip is absent before level 5).
+	 * @param {object} scalingMap e.g. {"1": "1d8", "5": "2d8"}
+	 * @param {number} characterLevel
+	 * @returns {string|null}
+	 */
+	static resolveScalingDiceForLevel (scalingMap, characterLevel) {
+		if (!scalingMap) return null;
+		const levels = Object.keys(scalingMap).map(Number).sort((a, b) => a - b);
+		let dice = null;
+		for (const lvl of levels) {
+			if (characterLevel >= lvl) dice = scalingMap[lvl];
+		}
+		return dice;
+	}
+
+	/**
+	 * Substitute the `{{spellcasting_mod}}` template in a scaling dice string with a number,
+	 * collapsing it to a clean dice expression (e.g. "1d8 + {{spellcasting_mod}}" → "1d8 + 3",
+	 * bare "{{spellcasting_mod}}" → "3"). Negative/zero mods are handled.
+	 * @param {string} diceStr
+	 * @param {number} mod
+	 * @returns {string}
+	 */
+	static applySpellcastingModTemplate (diceStr, mod) {
+		if (typeof diceStr !== "string") return diceStr;
+		if (!diceStr.includes("{{spellcasting_mod}}")) return diceStr;
+		// Bare template (e.g. Green-Flame Blade at low levels): just the modifier.
+		if (diceStr.trim() === "{{spellcasting_mod}}") return String(mod);
+		// "1d8 + {{spellcasting_mod}}" → strip the "+ template" and append a signed mod.
+		const base = diceStr.replace(/\s*\+\s*\{\{spellcasting_mod\}\}\s*/g, "").trim();
+		if (mod === 0) return base;
+		return `${base} ${mod > 0 ? "+" : "-"} ${Math.abs(mod)}`;
+	}
+
+	/**
+	 * Instance wrapper that resolves a blade cantrip's split for the CURRENT character —
+	 * computing concrete dice strings (with `{{spellcasting_mod}}` substituted) for the
+	 * on-hit rider and the secondary/movement damage at the character's level.
+	 * @param {object} spell Lightweight character spell (for ability routing).
+	 * @param {object} spellData Full spell data.
+	 * @returns {null | {
+	 *   onHitDice: (string|null), onHitDamageType: string,
+	 *   secondaryDice: (string|null), secondaryDamageType: string, secondaryLabel: string,
+	 * }}
+	 */
+	getWeaponChannelCantripForCharacter (spell, spellData) {
+		const info = CharacterSheetSpells.getWeaponChannelCantripInfo(spellData);
+		if (!info) return null;
+
+		const characterLevel = this._state.getTotalLevel();
+		const castingAbility = (spell && this._state.getSpellcastingAbilityForSpell?.(spell))
+			|| this._state.getSpellcastingAbility()
+			|| "int";
+		const spellcastingMod = this._state.getAbilityMod(castingAbility);
+
+		const onHitRaw = info.onHitScaling
+			? CharacterSheetSpells.resolveScalingDiceForLevel(info.onHitScaling.scaling, characterLevel)
+			: null;
+		const secondaryRaw = CharacterSheetSpells.resolveScalingDiceForLevel(info.secondaryScaling.scaling, characterLevel);
+
+		return {
+			onHitDice: onHitRaw ? CharacterSheetSpells.applySpellcastingModTemplate(onHitRaw, spellcastingMod) : null,
+			onHitDamageType: info.onHitDamageType,
+			secondaryDice: secondaryRaw != null ? CharacterSheetSpells.applySpellcastingModTemplate(secondaryRaw, spellcastingMod) : null,
+			secondaryDamageType: info.secondaryDamageType,
+			secondaryLabel: info.secondaryLabel,
+		};
+	}
+
+	/**
+	 * Roll the secondary/movement damage of a weapon-channel cantrip cast on its own.
+	 * (For Booming Blade this is the damage when the target moves; for Green-Flame Blade
+	 * the splash to a second creature.) Returns `null`/empty when there is no secondary
+	 * damage at the character's level (e.g. nothing to roll).
+	 * @returns {*}
+	 */
+	_rollWeaponChannelSecondary (spellData, channel, appliedMetamagic = null) {
+		if (!channel?.secondaryDice) {
+			return {
+				text: `<br><span class="ve-muted">On-hit damage rides your weapon attack — use the ✨ button by your weapon.</span>`,
+				total: 0,
+				dice: "",
+				damageType: channel?.secondaryDamageType || "damage",
+				isWeaponChannel: true,
+			};
+		}
+		try {
+			const isOvercharged = appliedMetamagic?.key === "overcharged";
+			const detail = this._rollDamageDiceDetailed(channel.secondaryDice, {maximize: isOvercharged});
+			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
+			const total = detail.total + spellDamageBonus;
+			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
+			const metamagicLabel = isOvercharged ? " maximized" : "";
+
+			void this._page.pAnimateDamageDice?.(detail.groups);
+
+			return {
+				text: `<br>${channel.secondaryLabel}: <strong>${total}</strong> ${channel.secondaryDamageType} (${channel.secondaryDice}${bonusStr}${metamagicLabel})`
+					+ `<br><span class="ve-muted">On-hit damage rides your weapon attack — use the ✨ button by your weapon.</span>`,
+				total,
+				dice: channel.secondaryDice,
+				damageType: channel.secondaryDamageType,
+				isWeaponChannel: true,
+			};
+		} catch (e) {
+			return null;
+		}
+	}
+
+	/**
+	 * List the character's KNOWN weapon-channel cantrips (Booming/Green-Flame Blade and
+	 * clones), each paired with its full spell data. Used by the combat tab to offer a
+	 * per-weapon "channel" button.
+	 * @returns {Array<{spell: object, spellData: object}>}
+	 */
+	getKnownWeaponChannelCantrips () {
+		const spells = this._state.getSpells?.() || [];
+		const out = [];
+		for (const spell of spells) {
+			if (spell.level !== 0) continue;
+			const spellData = this._allSpells?.find(s => s.name === spell.name && s.source === spell.source);
+			if (!spellData) continue;
+			if (CharacterSheetSpells.getWeaponChannelCantripInfo(spellData)) out.push({spell, spellData});
+		}
+		return out;
 	}
 
 	_getMaximizedDiceTotal (diceExpression) {

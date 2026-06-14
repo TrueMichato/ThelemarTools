@@ -358,7 +358,8 @@ class CharacterSheetMobile {
 		const target = e.target.closest(
 			".charsheet__skill-row, .charsheet__save-row, .charsheet__attack-item, "
 			+ ".charsheet__ability, .charsheet__combat-stat--clickable, "
-			+ ".charsheet__inventory-item, .charsheet__resource-item",
+			+ ".charsheet__inventory-item, .charsheet__resource-item, "
+			+ ".charsheet__spell-item",
 		);
 		if (!target) return;
 
@@ -520,6 +521,10 @@ class CharacterSheetMobile {
 		const statLabel = target.querySelector(".charsheet__combat-stat-label");
 		if (statLabel) return statLabel.textContent.trim();
 
+		// Spell item
+		const spellName = target.querySelector(".charsheet__spell-item-name");
+		if (spellName) return `Cast ${spellName.textContent.trim()}`;
+
 		return null;
 	}
 
@@ -583,6 +588,28 @@ class CharacterSheetMobile {
 				{icon: "⬆️", label: "Roll (Advantage)", action: () => this._simulateModifiedClick(target, {shiftKey: true})},
 				{icon: "⬇️", label: "Roll (Disadvantage)", action: () => this._simulateModifiedClick(target, {ctrlKey: true})},
 			);
+		}
+
+		// Spell item — reuse the shared cast-options builder so desktop right-click
+		// and mobile long-press offer the exact same choices.
+		if (target.matches(".charsheet__spell-item")) {
+			const spellId = target.dataset.spellId;
+			const spellsCtrl = this._page?._spells;
+			if (spellId && spellsCtrl?._buildCastOptionItems) {
+				const spell = spellsCtrl._state.getSpells().find(s => s.id === spellId);
+				const spellData = spell
+					? spellsCtrl._allSpells.find(s => s.name === spell.name && s.source === spell.source)
+					: null;
+				if (spell) {
+					const castItems = spellsCtrl._buildCastOptionItems(spell, spellData);
+					castItems.forEach(ci => {
+						const spaceIdx = ci.label.indexOf(" ");
+						const icon = spaceIdx > 0 ? ci.label.slice(0, spaceIdx) : "✨";
+						const label = spaceIdx > 0 ? ci.label.slice(spaceIdx + 1) : ci.label;
+						items.push({icon, label, action: () => ci.onSelect?.()});
+					});
+				}
+			}
 		}
 
 		return items;
