@@ -651,11 +651,19 @@
 											</div>
 											<div class="charsheet__carry-bar-mini">
 												<div class="charsheet__carry-bar-track">
-													<div class="charsheet__carry-bar-external" id="charsheet-carry-bar-external" style="width: 0%;"></div>
 													<div class="charsheet__carry-bar-fill" id="charsheet-carry-bar-fill"></div>
 												</div>
 												<span class="charsheet__carry-bar-text">
 													<span id="charsheet-disp-weight">0</span>/<span id="charsheet-disp-carry">150</span> lb.
+												</span>
+											</div>
+											<div class="charsheet__carry-bar-mini charsheet__carry-bar-mini--bag" id="charsheet-carry-bag-row" hidden>
+												<span class="charsheet__carry-bar-bag-icon" title="Bag of Holding" aria-label="Bag of Holding">🎒</span>
+												<div class="charsheet__carry-bar-track charsheet__carry-bar-track--bag">
+													<div class="charsheet__carry-bar-bagfill" id="charsheet-carry-bar-bagfill"></div>
+												</div>
+												<span class="charsheet__carry-bar-text">
+													<span id="charsheet-disp-bagload">0</span>/<span id="charsheet-disp-bagcap">0</span> lb.
 												</span>
 											</div>
 											<div class="charsheet__physical-stat-grid">
@@ -1268,11 +1276,19 @@
 							<h4 class="charsheet__section-title">Carrying Capacity</h4>
 							<div class="charsheet__carrying">
 								<div class="charsheet__carrying-bar">
-									<div class="charsheet__carrying-external" id="charsheet-carrying-external" style="width: 0%;"></div>
 									<div class="charsheet__carrying-fill" id="charsheet-carrying-fill" style="width: 0%;"></div>
 								</div>
 								<div class="charsheet__carrying-text">
 									<span id="charsheet-carrying-current">0</span> / <span id="charsheet-carrying-max">150</span> lbs
+								</div>
+								<div class="charsheet__carrying-bag" id="charsheet-carrying-bag" hidden>
+									<div class="charsheet__carrying-bag-label"><span aria-hidden="true">🎒</span> Bag of Holding</div>
+									<div class="charsheet__carrying-bar charsheet__carrying-bar--bag">
+										<div class="charsheet__carrying-bagfill" id="charsheet-carrying-bagfill" style="width: 0%;"></div>
+									</div>
+									<div class="charsheet__carrying-text">
+										<span id="charsheet-carrying-bag-current">0</span> / <span id="charsheet-carrying-bag-max">0</span> lbs
+									</div>
 								</div>
 							</div>
 						</div>

@@ -906,9 +906,11 @@ class CharacterSheetPage {
 		const lines = [bodyLine];
 		// Extradimensional storage (Bag of Holding etc.) is presented as a SEPARATE
 		// additive line — never folded into the body equation — and is explicitly
-		// flagged as not affecting push/drag/lift.
-		if (b.externalCapacity) {
-			lines.push(`+ Extradimensional storage: ${b.externalCapacity} lb. (magic containers)`);
+		// flagged as not affecting push/drag/lift. We also describe the implicit
+		// fill-bag-first split so it is clear which load sits where.
+		if (b.hasExtradimensional) {
+			lines.push(`+ Bag of Holding: ${b.bagLoad} / ${b.bagCapacity} lb. (extradimensional — fills first)`);
+			lines.push(`On the body: ${b.bodyLoad} / ${b.bodyCapacity} lb. (overflow + worn gear + bag weight)`);
 			lines.push(`Total carrying capacity: ${b.total} lb.`);
 		}
 		lines.push(`Push/Drag/Lift: ${b.pushDragLift} lb. (Strength only — extradimensional storage excluded)`);
@@ -3408,19 +3410,21 @@ class CharacterSheetPage {
 		}
 
 		// Carrying capacity (uses state breakdown which respects Thelemar homebrew
-		// rules and separates body capacity from extradimensional storage). Read
-		// every carry figure from the single source of truth — never recompute here.
+		// rules and separates the bearer's physical body capacity from the implicit
+		// Bag-of-Holding split). Read every carry figure from the single source of
+		// truth — never recompute here.
 		const carryBreakdown = this._state.getCarryingCapacityBreakdown();
-		const carryCapacity = carryBreakdown.total; // body + extradimensional storage
 		const bodyCapacity = carryBreakdown.bodyCapacity;
-		const externalCapacity = carryBreakdown.externalCapacity;
+		const bodyLoad = carryBreakdown.bodyLoad; // on-body weight after filling the bag
+		const bagCapacity = carryBreakdown.bagCapacity;
+		const bagLoad = carryBreakdown.bagLoad; // weight notionally inside the bag
+		const hasBag = carryBreakdown.hasExtradimensional;
 		const pushDragLift = carryBreakdown.pushDragLift; // body only (bag excluded)
-		// Carried weight excludes items stowed in weightless containers (Bag of
-		// Holding) but counts the empty container's own weight.
-		const currentWeight = this._state.getTotalWeight();
 
-		(/** @type {*} */ (document.getElementById("charsheet-disp-weight"))).textContent = currentWeight.toFixed(1);
-		(/** @type {*} */ (document.getElementById("charsheet-disp-carry"))).textContent = carryCapacity;
+		// The physical-carry readout shows the on-body load over body capacity. With
+		// no bag this equals total weight over total capacity (unchanged behaviour).
+		(/** @type {*} */ (document.getElementById("charsheet-disp-weight"))).textContent = bodyLoad.toFixed(1);
+		(/** @type {*} */ (document.getElementById("charsheet-disp-carry"))).textContent = bodyCapacity;
 		(/** @type {*} */ (document.getElementById("charsheet-disp-push"))).textContent = pushDragLift;
 
 		// Update carrying capacity tooltip based on rules. Build the breakdown from
@@ -3429,26 +3433,37 @@ class CharacterSheetPage {
 		const carryTooltip = this.constructor._buildCarryTooltip(carryBreakdown);
 		document.querySelector(".charsheet__physical-stat-group--carry").setAttribute("title", carryTooltip);
 
-		// Update carry bar visualization. The track represents the COMBINED total; a
-		// distinct extradimensional segment (right-aligned) shows the magic-container
-		// share, while the fill shows on-body carried weight. Encumbrance colouring is
-		// judged against BODY capacity (extradimensional storage must not mask overload).
-		const externalPercent = carryCapacity > 0 ? Math.min(100, (externalCapacity / carryCapacity) * 100) : 0;
-		const carryExternal = document.getElementById("charsheet-carry-bar-external");
-		if (carryExternal) carryExternal.style["width"] = `${externalPercent}%`;
-
-		const carryPercent = carryCapacity > 0 ? Math.min(100, (currentWeight / carryCapacity) * 100) : 0;
+		// Physical-carry bar: on-body load vs body capacity, encumbrance-coloured.
+		const carryPercent = bodyCapacity > 0 ? Math.min(100, (bodyLoad / bodyCapacity) * 100) : 0;
 		const carryFill = document.getElementById("charsheet-carry-bar-fill");
 		carryFill.style["width"] = `${carryPercent}%`;
 
-		// Color coding based on encumbrance (on-body weight vs body capacity).
-		const bodyPercent = bodyCapacity > 0 ? (currentWeight / bodyCapacity) * 100 : 0;
+		// Colour coding based on encumbrance (on-body load vs body capacity).
+		const bodyPercent = bodyCapacity > 0 ? (bodyLoad / bodyCapacity) * 100 : 0;
 		if (bodyPercent >= 100) {
 			carryFill.style["background"] = "var(--color-danger, #dc3545)"; // Over capacity
 		} else if (bodyPercent >= 66) {
 			carryFill.style["background"] = "var(--color-warning, #ffc107)"; // Heavy load
 		} else {
 			carryFill.style["background"] = "var(--color-success, #28a745)"; // Light load
+		}
+
+		// Separate Bag-of-Holding bar: only shown when an extradimensional container
+		// is equipped, so it is OBVIOUS which bar is the bag. Distinct violet styling.
+		const bagRow = document.getElementById("charsheet-carry-bag-row");
+		if (bagRow) {
+			if (hasBag) {
+				bagRow.hidden = false;
+				const bagPercent = bagCapacity > 0 ? Math.min(100, (bagLoad / bagCapacity) * 100) : 0;
+				const bagFill = document.getElementById("charsheet-carry-bar-bagfill");
+				if (bagFill) bagFill.style["width"] = `${bagPercent}%`;
+				const bagLoadEl = document.getElementById("charsheet-disp-bagload");
+				if (bagLoadEl) bagLoadEl.textContent = bagLoad.toFixed(1);
+				const bagCapEl = document.getElementById("charsheet-disp-bagcap");
+				if (bagCapEl) bagCapEl.textContent = `${bagCapacity}`;
+			} else {
+				bagRow.hidden = true;
+			}
 		}
 
 		// Render senses
