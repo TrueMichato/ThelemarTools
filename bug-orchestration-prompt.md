@@ -1,12 +1,3 @@
-# Bug-Fix Orchestration Prompt (5etools character-sheet, TGTT homebrew)
-
-Paste everything below the line into a fresh chat. Then either paste a bug list,
-or tell it "the bugs are in `bugs.md`". The orchestrator will run the full
-parallel-session → integration → merge-back workflow exactly as established in
-rounds 1–5.
-
----
-
 ## ROLE
 
 You are the **orchestrator** for a multi-bug fix effort on the 5etools
