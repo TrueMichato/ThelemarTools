@@ -157,3 +157,75 @@ describe("_onChannelSpellButton arms AFTER rolling the attack", () => {
 		expect(order).toEqual(["attack", "arm"]);
 	});
 });
+
+describe("rider is discarded on unrelated re-renders / weapon removal", () => {
+	const RENDER_SUBS = [
+		"renderAttacks", "renderDeathSaves", "renderCombatChanneledSpell", "renderCombatSpells",
+		"renderCombatMethods", "renderCombatRanger", "renderCombatDruidResources", "renderCombatFighter",
+		"renderCombatDefenses", "renderCombatConditions", "renderCombatEffects", "renderCombatResources",
+		"renderCombatActions", "renderCombatMetamagic", "renderCombatStates",
+	];
+
+	it("a full combat render() (tab switch / long rest) clears a pending rider", () => {
+		const combat = makeCombat();
+		// Stub every sub-render render() fans out to, plus the DOM/state it reads.
+		for (const m of RENDER_SUBS) combat[m] = jest.fn();
+		combat._state.getInitiative = () => 0;
+		combat._page.getState = () => combat._state;
+		const priorDoc = globalThis.document;
+		globalThis.document = {getElementById: () => null};
+		try {
+			combat._pendingSpellRider = {attackId: "atk-1", dice: "1d8"};
+			combat.render();
+			expect(combat._pendingSpellRider).toBeNull();
+		} finally {
+			globalThis.document = priorDoc;
+		}
+	});
+
+	it("removing the rider's own weapon clears the rider", () => {
+		const combat = makeCombat();
+		combat.renderAttacks = jest.fn();
+		combat._state.getTemporaryAttacks = () => [];
+		combat._state.removeAttack = jest.fn();
+		combat._page.saveCharacter = jest.fn();
+		combat._pendingSpellRider = {attackId: "atk-1", dice: "1d8"};
+		combat._removeAttack("atk-1");
+		expect(combat._pendingSpellRider).toBeNull();
+	});
+
+	it("removing a DIFFERENT weapon keeps the rider armed", () => {
+		const combat = makeCombat();
+		combat.renderAttacks = jest.fn();
+		combat._state.getTemporaryAttacks = () => [];
+		combat._state.removeAttack = jest.fn();
+		combat._page.saveCharacter = jest.fn();
+		combat._pendingSpellRider = {attackId: "atk-1", dice: "1d8"};
+		combat._removeAttack("atk-OTHER");
+		expect(combat._pendingSpellRider).toMatchObject({attackId: "atk-1"});
+	});
+
+	it("clears the rider when dismissing a matching TEMPORARY attack", () => {
+		const combat = makeCombat();
+		combat.renderAttacks = jest.fn();
+		combat._state.getTemporaryAttacks = () => [{id: "tmp-1", name: "Spiritual Weapon"}];
+		combat._state.removeTemporaryAttack = jest.fn();
+		combat._page.saveCharacter = jest.fn();
+		combat._pendingSpellRider = {attackId: "tmp-1", dice: "1d8"};
+		combat._removeAttack("tmp-1");
+		expect(combat._pendingSpellRider).toBeNull();
+	});
+
+	it("clears the rider when UNEQUIPPING a matching auto_ weapon", () => {
+		const combat = makeCombat();
+		combat.renderAttacks = jest.fn();
+		combat._state.getTemporaryAttacks = () => [];
+		combat._state.getInventory = () => [{id: "w1", item: {name: "Rapier"}}];
+		combat._state.unequip = jest.fn();
+		combat._page._inventory = {render: jest.fn()};
+		combat._page._saveCurrentCharacter = jest.fn();
+		combat._pendingSpellRider = {attackId: "auto_w1", dice: "1d8"};
+		combat._removeAttack("auto_w1");
+		expect(combat._pendingSpellRider).toBeNull();
+	});
+});
