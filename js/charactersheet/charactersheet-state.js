@@ -8816,6 +8816,32 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Resolve the advantage/disadvantage mode for an initiative roll.
+	 *
+	 * Initiative is a d20 roll but its handlers historically dropped
+	 * advantage/disadvantage from the modifier pipeline (custom items granting
+	 * "advantage on initiative", Feral Instinct's `initiative:advantage`, etc.),
+	 * so only the numeric bonus reached the sheet. This thin wrapper delegates to
+	 * `getAdvantageState("initiative")` so the roll handlers inherit the full
+	 * semantics: named-modifier advantage (incl. `check:dex` / `check:all` /
+	 * `d20:all` via `getModifiersForType`), active-state advantage, the
+	 * `removeAdvantage` / `removeDisadvantage` escape hatches, and adv/dis
+	 * cancellation. DOM-free and unit-testable.
+	 *
+	 * NOTE: active-state effects targeting "advantage on DEX checks"
+	 * (`check:dex`) still do NOT map to initiative — `_effectMatchesType` only
+	 * maps `check:*` active-state targets to skills, not initiative. That is a
+	 * pre-existing limitation outside this method's scope; named modifiers
+	 * (which DO special-case initiative) are unaffected.
+	 *
+	 * @returns {{advantage: boolean, disadvantage: boolean}}
+	 */
+	getInitiativeRollMode () {
+		const adv = this.getAdvantageState("initiative");
+		return {advantage: !!adv.advantage, disadvantage: !!adv.disadvantage};
+	}
+
+	/**
 	 * Get a breakdown of spell attack bonus components.
 	 *
 	 * Each component carries an `isCanonical` flag distinguishing intrinsic

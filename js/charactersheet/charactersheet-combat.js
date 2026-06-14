@@ -1883,7 +1883,10 @@ class CharacterSheetCombat {
 
 	_rollInitiative (event) {
 		const mod = this._state.getInitiative();
-		const rollResult = this._page.rollD20({event});
+		// Consume initiative advantage/disadvantage from the modifier pipeline (Bug #4) — mirrors
+		// the primary handler in charactersheet.js. rollD20 combines this with event keys.
+		const initMode = this._state.getInitiativeRollMode?.() || {advantage: false, disadvantage: false};
+		const rollResult = this._page.rollD20({event, stateAdvantage: initMode.advantage, stateDisadvantage: initMode.disadvantage});
 
 		// Buff dice (e.g. Gift of Alacrity's 1d8) rolled into the total.
 		const stateDiceList = this._state.getRollBonusDiceFromStates?.("initiative") || [];

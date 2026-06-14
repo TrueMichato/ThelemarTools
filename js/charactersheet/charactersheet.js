@@ -10542,7 +10542,12 @@ class CharacterSheetPage {
 	async _rollInitiative (event) {
 		const mod = this._state.getInitiative();
 		const exhaustionPenalty = this._getExhaustionPenalty();
-		const rollResult = this._rollD20({event});
+		// Initiative advantage/disadvantage from the modifier pipeline (custom items granting
+		// "advantage on initiative", Feral Instinct, active states, …). Previously dropped here —
+		// only the numeric bonus reached the roll (Bug #4). getInitiativeRollMode() resolves the
+		// cancel-aware adv/dis state; event keys still combine via _rollD20.
+		const initMode = this._state.getInitiativeRollMode?.() || {advantage: false, disadvantage: false};
+		const rollResult = this._rollD20({event, stateAdvantage: initMode.advantage, stateDisadvantage: initMode.disadvantage});
 		const total = rollResult.roll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Buff dice (e.g. Gift of Alacrity's 1d8) rolled into the total.

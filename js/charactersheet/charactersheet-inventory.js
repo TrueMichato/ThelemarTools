@@ -21,6 +21,35 @@ class CharacterSheetInventory {
 		this._init();
 	}
 
+	/**
+	 * Whether an item can show an equip control. Pure (item-only) so the equip affordance can be
+	 * unit-tested without DOM. Equippable: weapons, armor, shields, gear, wondrous items, rings,
+	 * wands/rods/staves, anything requiring attunement, and anything carrying a bonus — either a
+	 * legacy flat bonus or a behavioural entry in the structured `effects[]` array (custom-item
+	 * Modifiers & Effects, Bug #8). Bug #3: `ring` (and `wand`) were previously omitted, leaving
+	 * custom rings with no way to equip them and so no way to activate their effects.
+	 * @param {object} item
+	 * @returns {boolean}
+	 */
+	static canEquipItem (item) {
+		if (!item) return false;
+		const CustomAbilities = globalThis.CharacterSheetCustomAbilities;
+		const hasEffectBehavior = Array.isArray(item.effects) && item.effects.some(eff =>
+			CustomAbilities?.effectHasBehavior ? CustomAbilities.effectHasBehavior(eff) : !!(eff && eff.type),
+		);
+		const hasBonus = item.bonusAc || item.bonusSavingThrow || item.bonusSpellAttack
+			|| item.bonusSpellSaveDc || item.bonusAbilityCheck || item.bonusWeapon
+			|| item.bonusWeaponAttack || item.bonusWeaponDamage || item.bonusProficiencyBonus
+			|| item.bonusSavingThrowConcentration || item.bonusSpellDamage
+			|| item.bonusWeaponCritDamage || item.critThreshold
+			|| item.resist?.length || item.immune?.length || item.vulnerable?.length
+			|| item.conditionImmune?.length || item.modifySpeed
+			|| hasEffectBehavior;
+		return !!(item.weapon || item.armor || item.shield || item.type === "gear"
+			|| item.type === "wondrous" || item.type === "ring" || item.type === "wand"
+			|| item.requiresAttunement || hasBonus);
+	}
+
 	_init () {
 		this._initEventListeners();
 	}
@@ -2595,7 +2624,7 @@ class CharacterSheetInventory {
 		};
 		renderItemEffects();
 		effectsSection.querySelector("#custom-item-add-effect")?.addEventListener("click", () => {
-			itemEffects.push({type: "ac", value: 1});
+			itemEffects.push(CustomAbilities ? CustomAbilities.createDefaultEffect() : {type: "ac", value: 0});
 			renderItemEffects();
 		});
 
@@ -3127,9 +3156,15 @@ class CharacterSheetInventory {
 			const weight = parseFloat(form.querySelector("#custom-item-weight")?.value) || 0;
 
 			// Structured modifiers & effects (Bug #8) — same schema as custom abilities.
-			// Drop empty/no-op rows so we never persist meaningless effects.
+			// Drop empty/no-op rows so we never persist meaningless effects. A row needs both a
+			// type AND actual behaviour (non-zero value, advantage, a roll floor, a behavioural
+			// family, …) — the neutral `+0` default from createDefaultEffect must never survive
+			// (Bug #2a). effectHasBehavior is the single predicate shared with canEquip.
+			const hasBehavior = CustomAbilities?.effectHasBehavior
+				? (eff) => CustomAbilities.effectHasBehavior(eff)
+				: (eff) => eff && eff.type;
 			const cleanedEffects = itemEffects
-				.filter(eff => eff && eff.type)
+				.filter(eff => eff && eff.type && hasBehavior(eff))
 				.map(eff => JSON.parse(JSON.stringify(eff)));
 			if (cleanedEffects.length) options.effects = cleanedEffects;
 
@@ -5033,17 +5068,7 @@ class CharacterSheetInventory {
 
 	_renderItemRow (item) {
 		const typeTag = this._getItemTypeTagFromStoredType(item.type);
-		// Items that can be equipped: weapons, armor, gear, wondrous items,
-		// items requiring attunement, and items with any bonus properties
-		const hasBonus = item.bonusAc || item.bonusSavingThrow || item.bonusSpellAttack
-			|| item.bonusSpellSaveDc || item.bonusAbilityCheck || item.bonusWeapon
-			|| item.bonusWeaponAttack || item.bonusWeaponDamage || item.bonusProficiencyBonus
-			|| item.bonusSavingThrowConcentration || item.bonusSpellDamage
-			|| item.bonusWeaponCritDamage || item.critThreshold
-			|| item.resist?.length || item.immune?.length || item.vulnerable?.length
-			|| item.conditionImmune?.length || item.modifySpeed;
-		const canEquip = item.weapon || item.armor || item.shield || item.type === "gear"
-			|| item.type === "wondrous" || item.requiresAttunement || hasBonus;
+		const canEquip = CharacterSheetInventory.canEquipItem(item);
 		const canAttune = item.requiresAttunement;
 		const hasCharges = item.charges && item.charges > 0;
 		const hasNote = !!this._state.getItemNote(item.id);
