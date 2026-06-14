@@ -15653,6 +15653,40 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	text-align: center;
 }
 
+/* Live signed preview of the bonus (Bug #2b): "+2" / "-1" / "= 19". */
+.custom-abilities__effect-preview {
+	min-width: 2.5em;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	text-align: center;
+	white-space: nowrap;
+}
+
+/* Min-roll field wrapper carries an inline label so the floor isn't mistaken for the bonus (Bug #2c). */
+.custom-abilities__effect-minfield {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin: 0;
+	cursor: help;
+}
+
+.custom-abilities__effect-minlabel {
+	font-size: calc(var(--cs-font-base, 14px) * 0.8);
+	white-space: nowrap;
+}
+
+/* Column legend above the effect rows (Bug #2 general cleanup). */
+.custom-abilities__effect-legend {
+	line-height: 1.35;
+}
+
+.custom-abilities__effect-legend code {
+	padding: 0 3px;
+	border-radius: 3px;
+	background: rgba(148, 163, 184, 0.2);
+}
+
 .custom-abilities__effect-remove {
 	padding: 4px 10px;
 	font-size: calc(var(--cs-font-base, 14px) * 0.9);
