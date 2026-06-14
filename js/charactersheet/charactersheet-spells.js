@@ -193,28 +193,25 @@ class CharacterSheetSpells {
 			this._renderSpellList();
 		});
 
-		// Cast spell button (normal — skips the metamagic prompt for metamagic casters)
+		// Cast spell button = quick auto-cast: no "Choose Slot Level" / component / metamagic
+		// prompts. Mirrors the right-click "⚡ Cast" entry — auto-selects a base-level slot
+		// (cantrips at level 0). The chained slot→metamagic modal is reserved for the explicit
+		// "Cast w/ Metamagic" button below.
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-cast");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
-			this._castSpell(spellId, {withMetamagic: false});
+			this._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
 		});
 
-		// Cast w/ Metamagic button (offers the active-metamagic picker before casting)
+		// Cast w/ Metamagic button (offers the active-metamagic picker before casting — the one
+		// path that legitimately needs slot/upcast + metamagic selection, plus the optional
+		// Feywild Shard discharge toggle when a shard is attuned)
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-cast-metamagic");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
 			this._castSpell(spellId, {withMetamagic: true});
-		});
-
-		// Cast w/ Feywild Shard button (casts normally + rolls a PHB Wild Magic Surge)
-		document.addEventListener("click", (/** @type {*} */ e) => {
-			const btn = e.target.closest(".charsheet__spell-cast-feywild");
-			if (!btn) return;
-			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
-			this._castSpell(spellId, {withMetamagic: false, feywildShard: true});
 		});
 
 		// Cast as ritual button (for unprepared spells in spellbook)
@@ -1962,7 +1959,7 @@ class CharacterSheetSpells {
 		return `${dur.duration?.amount || ""} ${dur.duration?.type || ""}`.trim();
 	}
 
-	async _castSpell (spellId, {withMetamagic, feywildShard = false, decision = null} = {}) {
+	async _castSpell (spellId, {withMetamagic, decision = null} = {}) {
 		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
 		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId
 		// (combat / overview / favourites quick-cast surfaces).
@@ -2024,7 +2021,7 @@ class CharacterSheetSpells {
 				castMeta: {
 					...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
 					...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
-					...(feywildShard ? {feywildShard: true} : {}),
+					...(activeMetamagicChoice?.feywildShard ? {feywildShard: true} : {}),
 				},
 			});
 
@@ -2096,7 +2093,7 @@ class CharacterSheetSpells {
 					castMeta: {
 						...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
 						...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
-						...(feywildShard ? {feywildShard: true} : {}),
+						...(activeMetamagicChoice?.feywildShard ? {feywildShard: true} : {}),
 					},
 				});
 
@@ -2161,9 +2158,12 @@ class CharacterSheetSpells {
 				JqueryUtil.doToast({type: "warning", content: `No level ${decision.slotLevel} slot available.`});
 				return;
 			}
-		} else if (decision && decision.autoSlot) {
-			// One-click "Cast" from the cast-options menu: pick a slot WITHOUT prompting —
-			// prefer a base-level slot/pact, else the first available option.
+		} else if ((decision && decision.autoSlot) || !isExplicitMetamagic) {
+			// Quick auto-cast (left-click, combat/overview/favourites quick-cast, and the
+			// context-menu "⚡ Cast" entry): pick a slot WITHOUT prompting — prefer a
+			// base-level slot/pact, else the first available option. The "Choose Slot Level"
+			// modal below is reserved for the explicit "Cast w/ Metamagic" path, which
+			// legitimately needs slot + upcast selection alongside the metamagic picker.
 			selectedSlot = castOptions.find(s => s.level === spell.level) || castOptions[0];
 		} else if (castOptions.length === 1) {
 			selectedSlot = castOptions[0];
@@ -2200,7 +2200,7 @@ class CharacterSheetSpells {
 			castMeta: {
 				...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
 				...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
-				...(feywildShard ? {feywildShard: true} : {}),
+				...(activeMetamagicChoice?.feywildShard ? {feywildShard: true} : {}),
 			},
 		});
 
@@ -2490,7 +2490,7 @@ class CharacterSheetSpells {
 				JqueryUtil.doToast({type: "warning", content: `${decision.metamagic.name || "That metamagic"} is not available for this cast.`});
 				return {cancelled: true, metamagic: null};
 			}
-			return {cancelled: false, metamagic: match};
+			return {cancelled: false, metamagic: match, feywildShard: !!decision.feywildShard};
 		}
 		if (!shouldPrompt) return {cancelled: false, metamagic: null};
 		return this._pChooseActiveMetamagic({spell, spellData, slotLevel, isExplicit});
@@ -2563,6 +2563,10 @@ class CharacterSheetSpells {
 		}
 
 		// Metamagic — one entry per currently-available active metamagic (at base level).
+		// Feywild Shard (TCE): when attuned, a metamagic cast of a leveled spell can also
+		// discharge the shard to roll a PHB Wild Magic Surge — surfaced as a metamagic-gated
+		// variant (never on a plain cast), mirroring the toggle in the metamagic picker modal.
+		const isFeywildShardAttuned = !isCantrip && (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
 		const metamagics = this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel: isCantrip ? 0 : spell.level}) || [];
 		const availableMm = metamagics.filter(m => m.isAvailable);
 		for (const meta of availableMm) {
@@ -2571,6 +2575,13 @@ class CharacterSheetSpells {
 				sublabel: `${meta.cost} SP`,
 				onSelect: () => this._castSpell(spellId, {decision: {...baseDecision, metamagic: {key: meta.key, name: meta.name, cost: meta.cost}}}),
 			});
+			if (isFeywildShardAttuned) {
+				items.push({
+					label: `🌀 ${meta.name} + ✨ Feywild Shard`,
+					sublabel: `${meta.cost} SP · discharge shard (Wild Magic Surge)`,
+					onSelect: () => this._castSpell(spellId, {decision: {...baseDecision, metamagic: {key: meta.key, name: meta.name, cost: meta.cost}, feywildShard: true}}),
+				});
+			}
 		}
 		// Upcast+metamagic combos and unavailable-reason display fall back to the full picker.
 		if (metamagics.length) {
@@ -2587,16 +2598,6 @@ class CharacterSheetSpells {
 				label: "🔮 Cast as Ritual",
 				sublabel: "No slot, +10 min casting time",
 				onSelect: () => this._castSpellAsRitual(spellId),
-			});
-		}
-
-		// Feywild Shard (TCE).
-		const isFeywildShardAttuned = (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
-		if (!isCantrip && isFeywildShardAttuned) {
-			items.push({
-				label: "✨ Cast with Feywild Shard",
-				sublabel: "Casts normally + rolls a Wild Magic Surge",
-				onSelect: () => this._castSpell(spellId, {withMetamagic: false, feywildShard: true, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}}),
 			});
 		}
 
@@ -2722,6 +2723,20 @@ class CharacterSheetSpells {
 			html: `Select an active metamagic for this cast. You currently have <strong>${this._state.getSorceryPoints().current}</strong> sorcery points.`,
 		}));
 
+		// Feywild Shard (TCE): a metamagic cast of a leveled spell can also discharge an
+		// attuned shard to roll a PHB Wild Magic Surge. Opt-in only — and only honoured when
+		// a metamagic is actually applied (the "Cast without metamagic" row ignores it).
+		const isFeywildShardAttuned = slotLevel > 0 && (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
+		let feywildToggle = null;
+		if (isFeywildShardAttuned) {
+			const feywildWrap = e_({tag: "label",
+				clazz: "ve-flex-v-center mb-2 charsheet__mm-picker-feywild",
+				html: `<input type="checkbox" class="mr-2"><span>✨ Discharge <strong>Feywild Shard</strong> — roll a Wild Magic Surge (only with an applied metamagic)</span>`,
+			});
+			feywildToggle = feywildWrap.querySelector("input[type=checkbox]");
+			modalInner.appendChild(feywildWrap);
+		}
+
 		const optionList = e_({tag: "div", clazz: "charsheet__mm-picker-options ve-flex-col"});
 
 		// Clickable metamagic rows
@@ -2738,7 +2753,7 @@ class CharacterSheetSpells {
 				`,
 			});
 			row.dataset.metamagicKey = meta.key;
-			row.addEventListener("click", () => { result = {cancelled: false, metamagic: meta}; doClose(true); });
+			row.addEventListener("click", () => { result = {cancelled: false, metamagic: meta, ...(feywildToggle ? {feywildShard: !!feywildToggle.checked} : {})}; doClose(true); });
 			optionList.appendChild(row);
 		});
 
@@ -6670,18 +6685,6 @@ class CharacterSheetSpells {
 			castButtonsHtml += `
 				<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__spell-cast-metamagic" title="Cast with an active Metamagic option">
 					<span class="glyphicon glyphicon-fire mr-1"></span>Cast w/ Metamagic
-				</button>
-			`;
-		}
-
-		// Feywild Shard (TCE): while attuned by a sorcerer, casting a leveled spell can
-		// trigger a roll on the 2014 PHB Wild Magic Surge table. Surface an extra cast
-		// button on non-cantrip spells that casts normally and rolls the surge.
-		const isFeywildShardAttuned = (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
-		if (!isCantrip && isFeywildShardAttuned) {
-			castButtonsHtml += `
-				<button class="ve-btn ve-btn-xs ve-btn-info charsheet__spell-cast-feywild" title="Cast normally and roll on the PHB Wild Magic Surge table (Feywild Shard)">
-					<span class="mr-1">🌀</span>Cast w/ Feywild Shard
 				</button>
 			`;
 		}

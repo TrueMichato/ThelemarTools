@@ -257,7 +257,7 @@ describe("_buildCastOptionItems", () => {
 		expect(labels).toContain("🌀 Cast with Metamagic…");
 	});
 
-	it("shows ritual / feywild / components entries only when applicable", () => {
+	it("shows ritual / components entries only when applicable (Feywild requires a metamagic)", () => {
 		const spells = makeMenuShell({
 			canCastAsRitual: () => true,
 			getAttunedItems: () => [{item: {name: "Feywild Shard"}}],
@@ -266,8 +266,20 @@ describe("_buildCastOptionItems", () => {
 		const items = spells._buildCastOptionItems({id: "s1", name: "Detect Magic", source: "XPHB", level: 1}, {level: 1});
 		const labels = items.map(i => i.label);
 		expect(labels.some(l => /Cast as Ritual/.test(l))).toBe(true);
-		expect(labels.some(l => /Feywild Shard/.test(l))).toBe(true);
 		expect(labels.some(l => /Cast with components/.test(l))).toBe(true);
+		// No metamagic available → Feywild Shard is NOT offered as a standalone entry.
+		expect(labels.some(l => /Feywild Shard/.test(l))).toBe(false);
+	});
+
+	it("offers a Feywild Shard discharge variant per metamagic when the shard is attuned", () => {
+		const spells = makeMenuShell({
+			getAttunedItems: () => [{item: {name: "Feywild Shard"}}],
+			getCastableActiveMetamagics: () => [{key: "twinned", name: "Twinned Spell", cost: 2, isAvailable: true}],
+		});
+		const items = spells._buildCastOptionItems({id: "s1", name: "Fireball", source: "XPHB", level: 3}, {level: 3});
+		const labels = items.map(i => i.label);
+		expect(labels).toContain("🌀 Twinned Spell");
+		expect(labels.some(l => /Twinned Spell \+ ✨ Feywild Shard/.test(l))).toBe(true);
 	});
 
 	it("basic cast + upcast + metamagic items resolve slot/ritual up front (no chained prompts)", () => {
