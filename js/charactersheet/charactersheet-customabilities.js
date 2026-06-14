@@ -2561,21 +2561,21 @@ class CharacterSheetCustomAbilities {
 
 		// Size increment/decrement handlers
 		(/** @type {*} */ (modal.querySelector(".custom-abilities__size-inc")))?.addEventListener("click", () => {
-			sizeChange = Math.min(sizeChange + 1, 5); // Max 5 size categories
+			sizeChange = Math.min(sizeChange + 1, 10); // Allow large size swings (display clamps to real categories)
 			renderSizeReachUI();
 		});
 		(/** @type {*} */ (modal.querySelector(".custom-abilities__size-dec")))?.addEventListener("click", () => {
-			sizeChange = Math.max(sizeChange - 1, -5); // Min -5 size categories
+			sizeChange = Math.max(sizeChange - 1, -10);
 			renderSizeReachUI();
 		});
 
 		// Reach increment/decrement handlers
 		(/** @type {*} */ (modal.querySelector(".custom-abilities__reach-inc")))?.addEventListener("click", () => {
-			reachBonus = Math.min(reachBonus + 1, 10); // Max +50 ft reach
+			reachBonus = Math.min(reachBonus + 1, 20); // Allow long reach bonuses
 			renderSizeReachUI();
 		});
 		(/** @type {*} */ (modal.querySelector(".custom-abilities__reach-dec")))?.addEventListener("click", () => {
-			reachBonus = Math.max(reachBonus - 1, -10); // Min -50 ft (for curses)
+			reachBonus = Math.max(reachBonus - 1, -20); // Allow large reach penalties (for curses)
 			renderSizeReachUI();
 		});
 
