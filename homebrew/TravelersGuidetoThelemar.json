@@ -30371,6 +30371,24 @@
 					"celestial": true
 				}
 			],
+			"additionalSpells": [
+				{
+					"ability": {
+						"choose": [
+							"wis",
+							"int",
+							"cha"
+						]
+					},
+					"known": {
+						"1": [
+							{
+								"choose": "level=0|class=Cleric"
+							}
+						]
+					}
+				}
+			],
 			"entries": [
 				{
 					"type": "quote",

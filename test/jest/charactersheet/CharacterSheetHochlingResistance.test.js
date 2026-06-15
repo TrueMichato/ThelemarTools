@@ -45,6 +45,7 @@ function makeBuilder () {
 	builder._selectedRacialAbilitySetIdx = {};
 	builder._selectedRacialSpells = [];
 	builder._selectedRacialSpellAbilities = {};
+	builder._selectedRacialFeatureChoices = {};
 	builder._selectedRace = null;
 	builder._selectedSubrace = null;
 	return builder;

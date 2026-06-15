@@ -4882,6 +4882,12 @@ class CharacterSheetState {
 	getRace () { return this._data.race; }
 	getSubrace () { return this._data.subrace; }
 
+	// Race "feature manifestation" choice (e.g. the Hochling "Divine Manifestation"
+	// trait, which lets the player pick a single working manifestation option). The
+	// stored value is the option id ("war" | "aasimar") or null when unchosen.
+	setRaceManifestationChoice (choice) { this._data.raceManifestationChoice = choice || null; }
+	getRaceManifestationChoice () { return this._data.raceManifestationChoice || null; }
+
 	setSize (size) { this._data.size = size?.toLowerCase() || "medium"; }
 	getSize () {
 		const baseSize = this._data.size || "medium";
@@ -9981,6 +9987,11 @@ class CharacterSheetState {
 	 */
 	getSpellcastingAbilityForSpell (spell) {
 		if (!spell) return this.getSpellcastingAbility() || null;
+		// A per-cantrip/per-spell ability override wins (e.g. a racial cantrip such as
+		// the Hochling "Divine Spark" whose casting ability the player chose).
+		if (spell.spellcastingAbility && Parser.ABIL_ABVS.includes(spell.spellcastingAbility)) {
+			return spell.spellcastingAbility;
+		}
 		const keys = [spell.sourceClass, spell.sourceSubclass].filter(Boolean).map(s => s.toLowerCase());
 		if (keys.length) {
 			for (const cls of this._data.classes || []) {
@@ -11297,6 +11308,11 @@ class CharacterSheetState {
 			if (spell.sourceClass && !existing.sourceClass) {
 				existing.sourceClass = spell.sourceClass;
 			}
+			// Carry a per-cantrip spellcasting ability override (e.g. a racial cantrip
+			// whose casting ability the player chose) onto a pre-existing entry.
+			if (spell.spellcastingAbility && !existing.spellcastingAbility) {
+				existing.spellcastingAbility = spell.spellcastingAbility;
+			}
 		} else {
 			this._data.spellcasting.cantripsKnown.push({
 				id: CryptUtil.uid(),
@@ -11310,6 +11326,7 @@ class CharacterSheetState {
 				components: spell.components || "",
 				sourceFeature: spell.sourceFeature || null,
 				sourceClass: spell.sourceClass || null,
+				spellcastingAbility: spell.spellcastingAbility || null,
 				subschools: spell.subschools || [],
 			});
 		}

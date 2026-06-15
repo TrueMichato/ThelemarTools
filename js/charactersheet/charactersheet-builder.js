@@ -39,6 +39,7 @@ class CharacterSheetBuilder {
 		/** @type {Object<string, *[]>} */ this._selectedFeatureOptions = {}; // For class/subclass features with embedded options (like Specialties)
 		/** @type {Object<string, *>} */ this._selectedFeatureSkillChoices = {}; // For specialty features that require skill/expertise choices
 		/** @type {Object<string, *>} */ this._selectedRaceOptionalFeatures = {}; // For race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
+		/** @type {Object<string, string>} */ this._selectedRacialFeatureChoices = {}; // For race-level single-select feature choices (e.g., Hochling Divine Manifestation)
 		/** @type {string[]} */ this._selectedCombatTraditions = []; // For combat tradition proficiency choices (Thelemar homebrew)
 		/** @type {*[]} */ this._selectedClassToolProficiencies = []; // For class tool proficiency choices (e.g., Monk artisan/instrument)
 		/** @type {*} */ this._lastAppliedClassSnapshot = null; // Snapshot of what case 3 applied; used to undo on class change
@@ -693,6 +694,9 @@ class CharacterSheetBuilder {
 								level1History.choices.raceUserChoices.selectedAbilityChoices[k] = typeof v === "object" && v !== null ? {...v} : v;
 							}
 						}
+						if (Object.keys(this._selectedRacialFeatureChoices).length) {
+							level1History.choices.raceUserChoices.selectedFeatureChoices = {...this._selectedRacialFeatureChoices};
+						}
 						if (this._useTashasRules) {
 							level1History.choices.raceUserChoices.useTashasRules = true;
 							level1History.choices.raceUserChoices.tashasAbilityBonuses = {...this._tashasAbilityBonuses};
@@ -1160,6 +1164,18 @@ class CharacterSheetBuilder {
 		if (this._selectedSubrace?.entries) {
 			this._addFeatureEntries(this._selectedSubrace.entries, this._selectedSubrace.source, "Subrace", characterLevel);
 		}
+
+		// Race-level single-select feature choice (e.g., Hochling Divine Manifestation).
+		// Persist the choice on state, then apply it through the shared, level-aware,
+		// idempotent helper (which also re-fires on level-up via updateRacialFeatures).
+		const featureChoice = this._getRacialFeatureChoices(this._selectedRace);
+		if (featureChoice) {
+			const selected = this._selectedRacialFeatureChoices?.[featureChoice.traitName] || null;
+			this._state.setRaceManifestationChoice?.(selected);
+		} else {
+			this._state.setRaceManifestationChoice?.(null);
+		}
+		CharacterSheetClassUtils.applyRaceManifestation(this._state, this._page);
 	}
 
 	/**
@@ -1383,6 +1399,7 @@ class CharacterSheetBuilder {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: sourceName,
 					sourceClass: null,
+					ability: spellAbility || null,
 				}));
 			} else {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
@@ -2879,6 +2896,12 @@ class CharacterSheetBuilder {
 			details.append(optFeatureChoices);
 		}
 
+		// Race-level single-select feature choices (e.g., Hochling Divine Manifestation)
+		const featureChoices = this._renderRacialFeatureChoices(race);
+		if (featureChoices) {
+			details.append(featureChoices);
+		}
+
 		container.append(details);
 	}
 
@@ -4103,6 +4126,87 @@ class CharacterSheetBuilder {
 	}
 
 	/**
+	 * Detect a race's single-select "feature manifestation" choice. Currently scoped to
+	 * the Hochling "Divine Manifestation" trait, which lets the player pick exactly one
+	 * working manifestation option. Returns null when the race has no such trait.
+	 * @param {*} race - The race data
+	 * @returns {{traitName:string, options:{id:string, label:string, desc:string}[]}|null}
+	 */
+	_getRacialFeatureChoices (race) {
+		if (!race?.entries?.length) return null;
+		const trait = race.entries.find(
+			(/** @type {*} */ e) => e && typeof e === "object" && e.name === "Divine Manifestation",
+		);
+		if (!trait) return null;
+
+		return {
+			traitName: trait.name,
+			options: [
+				{
+					id: "war",
+					label: "War Domain \u2014 Channel Divinity",
+					desc: "Gain the War Domain's Channel Divinity: Guided Strike (and War God's Blessing at character level 6).",
+				},
+				{
+					id: "aasimar",
+					label: "Celestial Revelation (Aasimar Transformation)",
+					desc: "Gain the Aasimar Celestial Revelation transformation (available at character level 3).",
+				},
+			],
+		};
+	}
+
+	/**
+	 * Render the race-level single-select feature picker (e.g., Hochling Divine
+	 * Manifestation). Stores the chosen option id in `_selectedRacialFeatureChoices`
+	 * keyed by trait name. Returns null when the race has no such choice.
+	 * @param {*} race - The race data
+	 * @returns {HTMLElement|null}
+	 */
+	_renderRacialFeatureChoices (race) {
+		const choice = this._getRacialFeatureChoices(race);
+		if (!choice) return null;
+
+		const groupName = `builder-race-feature-${choice.traitName.replace(/\s+/g, "-").toLowerCase()}`;
+		const selected = this._selectedRacialFeatureChoices[choice.traitName] || null;
+
+		const container = e_({outer: `
+			<div class="charsheet__builder-race-feature-choice mt-3">
+				<p><strong>${choice.traitName}:</strong> Choose one</p>
+				<div class="charsheet__builder-race-feature-list"></div>
+			</div>
+		`});
+
+		const list = /** @type {*} */ (container.querySelector(".charsheet__builder-race-feature-list"));
+
+		choice.options.forEach((/** @type {*} */ opt) => {
+			const item = e_({outer: `
+				<label class="charsheet__builder-race-feature-item d-block mb-1" style="cursor: pointer;">
+					<input type="radio" name="${groupName}" class="mr-2" ${selected === opt.id ? "checked" : ""}>
+					<span class="race-feature-name"></span>
+					<span class="ve-muted ve-small d-block ml-4"></span>
+				</label>
+			`});
+
+			const nameEl = item.querySelector(".race-feature-name");
+			if (nameEl) nameEl.textContent = opt.label;
+			const descEl = item.querySelector(".ve-muted");
+			if (descEl) descEl.textContent = opt.desc;
+
+			const input = item.querySelector("input");
+			if (input) {
+				input.addEventListener("change", (/** @type {*} */ ev) => {
+					if (ev.target.checked) this._selectedRacialFeatureChoices[choice.traitName] = opt.id;
+				});
+			}
+
+			if (list) list.append(item);
+		});
+
+		return container;
+	}
+
+	/**
 	 * @param {*} preview
 	 * @param {*} race
 	 */
@@ -4192,6 +4296,12 @@ class CharacterSheetBuilder {
 		const optFeatureChoices = this._renderRaceOptionalFeatureChoices(race);
 		if (optFeatureChoices) {
 			content.append(optFeatureChoices);
+		}
+
+		// Race-level single-select feature choices (e.g., Hochling Divine Manifestation)
+		const featureChoices = this._renderRacialFeatureChoices(race);
+		if (featureChoices) {
+			content.append(featureChoices);
 		}
 
 		// Subraces
