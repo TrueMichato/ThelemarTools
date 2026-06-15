@@ -1456,6 +1456,23 @@ class CharacterSheetFeatures {
 			});
 		}
 
+		// Illrigger Hellspeaker (Moloch) save DCs.
+		if (calculations.charmEnemyDc) {
+			stats.push({
+				label: "Charm Enemy DC",
+				value: calculations.charmEnemyDc,
+				title: `8 + Proficiency + Charisma modifier${calculations.charmEnemyUses ? ` — ${calculations.charmEnemyUses} use${calculations.charmEnemyUses === 1 ? "" : "s"}/long rest` : ""}`,
+			});
+		}
+
+		if (calculations.quidProQuoDc) {
+			stats.push({
+				label: "Quid Pro Quo DC",
+				value: calculations.quidProQuoDc,
+				title: "8 + Proficiency + Charisma modifier — 1/long rest",
+			});
+		}
+
 		// Only render if we have stats to show
 		if (stats.length === 0) {
 			this._renderPassiveDefenses(container);

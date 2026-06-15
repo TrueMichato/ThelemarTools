@@ -672,11 +672,25 @@ class FeatureChoiceParser {
 			const list = /proficien(?:cy|t)\s+(?:in|with)\s+one\s+of\s+the\s+following[^:]*:\s*([^.]*)/i.exec(text);
 			if (list) m = [list[0], list[1]];
 		}
+
+		// "proficiency in the {@skill A} or {@skill B} skill (your choice)" phrasing
+		// (e.g. Illrigger Hellspeaker — Moloch's Blessing). Distinct from the "either"
+		// form above; requires the leading "the" + a trailing "skill" to stay tightly
+		// scoped to an explicit single-pick A-or-B choice.
+		if (!m) m = /proficien(?:cy|t)\s+(?:in|with)\s+the\s+([^.]*?\bor\b[^.]*?)\s+skills?\b/i.exec(text);
+
 		if (!m) return null;
 
 		const options = this._extractSkillsFromClause(m[1]);
 		if (options.length < 2) return null;
-		return {options, count: 1};
+		const choice = {options, count: 1};
+
+		// Some grants upgrade an already-proficient choice to expertise (e.g. Moloch's
+		// Blessing: "If you already have proficiency … your proficiency bonus is doubled").
+		if (/already\s+(?:have|has|are)\b[\s\S]{0,140}?\bdoubl/i.test(text)) {
+			choice.expertiseIfProficient = true;
+		}
+		return choice;
 	}
 
 	/** Find a "learn either X or Y cantrip" choice clause and pull out the spells. */
@@ -9731,13 +9745,16 @@ class CharacterSheetState {
 	/**
 	 * Maximum number of swappable spoken languages the character may have:
 	 * 2 with Forked Tongue (L1), 3 once Forked Tongue Improvement is gained (L9),
-	 * 0 if the character does not have Forked Tongue at all.
+	 * 0 if the character does not have Forked Tongue at all. The Hellspeaker subclass's
+	 * Moloch's Blessing (L3) grants one additional language through Forked Tongue, for a
+	 * total of 3 at 3rd level and 4 at 9th level.
 	 * @returns {number}
 	 */
 	getForkedTongueMaxSwappable () {
 		const calc = this.getFeatureCalculations();
 		if (!calc.hasForkedTongue) return 0;
-		return calc.hasForkedTongueImprovement ? 3 : 2;
+		const base = calc.hasForkedTongueImprovement ? 3 : 2;
+		return base + (calc.hasMolochBlessing ? 1 : 0);
 	}
 
 	/**
@@ -11550,6 +11567,7 @@ class CharacterSheetState {
 			kind: choice.kind,
 			options: choice.options,
 			count: choice.count || 1,
+			...(choice.expertiseIfProficient ? {expertiseIfProficient: true} : {}),
 		});
 		return true;
 	}
@@ -11585,7 +11603,13 @@ class CharacterSheetState {
 
 		if (choice.kind === "skill") {
 			const skillKey = String(selection).toLowerCase().replace(/\s+/g, "");
-			this.addSkillProficiency(skillKey);
+			// Some grants (e.g. Moloch's Blessing) upgrade an already-proficient choice to
+			// expertise instead of granting a redundant proficiency.
+			if (choice.expertiseIfProficient && (this._data.skillProficiencies?.[skillKey] || 0) >= 1) {
+				this.setSkillProficiency(skillKey, 2);
+			} else {
+				this.addSkillProficiency(skillKey);
+			}
 		} else if (choice.kind === "cantrip") {
 			const sel = typeof selection === "string"
 				? choice.options.find(o => o.name?.toLowerCase() === selection.toLowerCase())
@@ -11655,6 +11679,7 @@ class CharacterSheetState {
 					kind: "skill",
 					options: choice.options,
 					count: choice.count,
+					expertiseIfProficient: !!choice.expertiseIfProficient,
 				});
 			}
 			choice.options.forEach(s => claimedSkills.add(s));
@@ -18908,6 +18933,8 @@ class CharacterSheetState {
 								calculations.hasMolochBlessing = true;
 								calculations.hasCharmEnemy = true;
 								calculations.charmEnemyDc = calculations.interdictDc;
+								// Charm Enemy uses = CHA modifier (minimum once), regained on a long rest.
+								calculations.charmEnemyUses = Math.max(1, chaMod);
 							}
 
 							// Level 7: Moloch's Interdiction (free boons)
@@ -18925,6 +18952,9 @@ class CharacterSheetState {
 							// Level 15: Quid Pro Quo (banish + summon devil)
 							if (level >= 15) {
 								calculations.hasQuidProQuo = true;
+								// Quid Pro Quo forces a Charisma save (8 + prof + CHA, same as the
+								// Interdict/Charm Enemy DC). Exhaustion is already baked into interdictDc.
+								calculations.quidProQuoDc = calculations.interdictDc;
 							}
 
 							break;
@@ -20748,6 +20778,33 @@ class CharacterSheetState {
 				value: 1,
 				source: "Forked Tongue",
 				conditional: "to ascertain a creature's true intentions or sincerity",
+			});
+		}
+
+		// Moloch's Blessing (Hellspeaker L3): when you speak a language granted by this
+		// feature, you have advantage on Charisma checks to influence creatures who can
+		// hear and understand you. Modeled as a conditional CHA-check advantage modifier
+		// (mirrors Forked Tongue Improvement). It gates off by default and surfaces in the
+		// per-roll prompt. (The skill-proficiency and extra-language grants are handled by
+		// the pending-feature-choice pipeline and getForkedTongueMaxSwappable respectively.)
+		if (calculations.hasMolochBlessing && !alreadyProcessed("Moloch's Blessing")) {
+			effects.push({
+				type: "modifier",
+				modType: "check:cha:advantage",
+				value: 1,
+				source: "Moloch's Blessing",
+				conditional: "to influence creatures who can hear and understand a language granted by Moloch's Blessing",
+			});
+		}
+
+		// Intransigent (Hellspeaker L11): you (and chosen creatures within 10 ft) are
+		// immune to the charmed condition while you are conscious. The self-immunity is
+		// modeled mechanically; the 10-ft aura for allies is narrative.
+		if (calculations.hasIntransigent && !alreadyProcessed("Intransigent")) {
+			effects.push({
+				type: "conditionImmunity",
+				condition: "charmed",
+				source: "Intransigent",
 			});
 		}
 
@@ -26304,6 +26361,20 @@ class CharacterSheetState {
 		if (name === "baleful interdict" && (feature.classSource || feature.source) === "IllriggerRevised") {
 			const sealsMax = (this.getFeatureCalculations?.() || {}).sealsMax || 3;
 			return {max: sealsMax, recharge: "short"};
+		}
+
+		// Hellspeaker (Moloch) limited-use features (IllriggerRevised). The generic parser
+		// mis-sizes these because their prose mentions seals / charmed durations; curate to
+		// the correct pool + long-rest recharge. Apostrophe-normalized and source-checked so
+		// a same-named feature from another source is never touched.
+		const nameNorm = name.replace(/[’']/g, "'");
+		if ((feature.classSource || feature.source) === "IllriggerRevised") {
+			// Charm Enemy (L3): uses = Charisma modifier (minimum once), per long rest.
+			if (nameNorm === "charm enemy") return {max: Math.max(1, this.getAbilityMod("cha")), recharge: "long"};
+			// Let's Make a Deal (L11): uses = proficiency bonus, per long rest.
+			if (nameNorm === "let's make a deal") return {max: this.getProficiencyBonus(), recharge: "long"};
+			// Quid Pro Quo (L15): once per long rest.
+			if (nameNorm === "quid pro quo") return {max: 1, recharge: "long"};
 		}
 
 		const src = feature.classSource || feature.source;
