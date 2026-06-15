@@ -3053,6 +3053,31 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Number of NEW *swappable* Forked Tongue spoken languages a character gains when their
+	 * Illrigger level crosses the given range. Detection mirrors the name-based signal used by
+	 * CharacterSheetState (`hasForkedTongue` @ class level 1, `hasForkedTongueImprovement` @ 9) —
+	 * the base "Forked Tongue" feature lives in the external MCDM "IllriggerRevised" homebrew and
+	 * its prose does not match the generic language-grant regex, so we key off the class name.
+	 *
+	 * - 2 when the range first reaches Illrigger level 1 (the initial Forked Tongue choices).
+	 * - +1 when the range first reaches Illrigger level 9 (Forked Tongue Improvement).
+	 *
+	 * @param {string} className - The class being levelled (case-insensitive match on "Illrigger").
+	 * @param {number} prevLevel - The class level BEFORE this change (0 at first level).
+	 * @param {number} newLevel - The class level AFTER this change.
+	 * @returns {{count: number}} New swappable languages granted across (prevLevel, newLevel].
+	 */
+	static getForkedTongueSwappableGrant (/** @type {*} */ className, /** @type {*} */ prevLevel, /** @type {*} */ newLevel) {
+		if (!className || String(className).toLowerCase() !== "illrigger") return {count: 0};
+		const prev = Number.isFinite(prevLevel) ? prevLevel : 0;
+		const next = Number.isFinite(newLevel) ? newLevel : 0;
+		let count = 0;
+		if (prev < 1 && next >= 1) count += 2; // initial Forked Tongue (2 swappable)
+		if (prev < 9 && next >= 9) count += 1; // Forked Tongue Improvement (+1)
+		return {count};
+	}
+
+	/**
 	 * Find language grant in a feature's entries.
 	 * @param {*} feature
 	 * @returns {{count: number, autoLanguages?: string[]}|null}
