@@ -3665,6 +3665,17 @@ class CharacterSheetState {
 				lucidFocusActive: false, // Whether Lucid Focus die is currently active
 			},
 
+			// Illrigger Seals (Baleful Interdict, L1) — short/long-rest seal pool.
+			// `available` is the remaining placeable seals (lazy-initialised to the
+			// `sealsMax` calculation on first read so a fresh Illrigger starts full).
+			// `placements` tracks live seals on creatures: [{id, target, count}].
+			// `lastPlacedRound` enforces the once-per-turn placement gate in combat.
+			illriggerSeals: {
+				available: null,
+				placements: [],
+				lastPlacedRound: null,
+			},
+
 			// Scholar expertise (Wizard XPHB level 2 feature)
 			scholarExpertise: null, // The skill chosen for Scholar expertise
 
@@ -25497,6 +25508,222 @@ class CharacterSheetState {
 	}
 	// #endregion
 
+	// #region Illrigger Seals (Baleful Interdict)
+	/**
+	 * The Baleful Interdict feature object on the sheet, if present. Tests that build a
+	 * character via `addClass` alone will NOT have it — the seal pool falls back to its
+	 * own `_data.illriggerSeals` store in that case.
+	 * @returns {object|null}
+	 */
+	_getBalefulInterdictFeature () {
+		return (this._data.features || []).find(f => (f.name || "").toLowerCase() === "baleful interdict") || null;
+	}
+
+	/** @returns {object} the lazily-initialised seal store (back-compat for old saves). */
+	_ensureSealStore () {
+		if (!this._data.illriggerSeals || typeof this._data.illriggerSeals !== "object") {
+			this._data.illriggerSeals = {available: null, placements: [], lastPlacedRound: null};
+		}
+		if (!Array.isArray(this._data.illriggerSeals.placements)) this._data.illriggerSeals.placements = [];
+		return this._data.illriggerSeals;
+	}
+
+	/** @returns {boolean} whether the character has the L1 Baleful Interdict feature. */
+	hasBalefulInterdict () {
+		return !!(this.getFeatureCalculations?.() || {}).hasBalefulInterdict;
+	}
+
+	/** @returns {number} the seal POOL size (sealsMax calc), 0 if not an Illrigger. */
+	getSealsMax () {
+		return (this.getFeatureCalculations?.() || {}).sealsMax || 0;
+	}
+
+	/**
+	 * Remaining placeable seals. Prefers the Baleful Interdict feature's `uses.current`
+	 * (so the Features tab and the combat panel never drift) and falls back to the
+	 * internal store, lazily seeding it to the pool max on first read.
+	 * @returns {number}
+	 */
+	getSealsAvailable () {
+		const max = this.getSealsMax();
+		if (max <= 0) return 0;
+		const feat = this._getBalefulInterdictFeature();
+		if (feat?.uses && typeof feat.uses.current === "number") {
+			return Math.max(0, Math.min(feat.uses.current, max));
+		}
+		const store = this._ensureSealStore();
+		if (store.available == null) store.available = max;
+		return Math.max(0, Math.min(store.available, max));
+	}
+
+	/**
+	 * Set the remaining placeable seals (clamped to 0..max). Writes through to the
+	 * feature uses and linked resource when present so every surface stays in sync.
+	 * @param {number} n
+	 * @returns {number} the clamped value actually stored.
+	 */
+	_setSealsAvailable (n) {
+		const max = this.getSealsMax();
+		const v = Math.max(0, Math.min(Math.floor(Number(n) || 0), max));
+		const store = this._ensureSealStore();
+		store.available = v;
+		const feat = this._getBalefulInterdictFeature();
+		if (feat?.uses) feat.uses.current = v;
+		const res = (this._data.resources || []).find(r => r.name === "Baleful Interdict");
+		if (res) res.current = v;
+		return v;
+	}
+
+	/** @returns {Array<{id:string, target:string, count:number}>} a copy of live seal placements. */
+	getSealPlacements () {
+		return this._ensureSealStore().placements.map(p => ({...p}));
+	}
+
+	/** @returns {boolean} whether `target` currently carries at least one of your seals. */
+	isInterdicted (target) {
+		const tgt = (target || "").trim().toLowerCase();
+		if (!tgt) return false;
+		return this._ensureSealStore().placements.some(p => p.count > 0 && p.target.toLowerCase() === tgt);
+	}
+
+	/**
+	 * The current combat round for once-per-turn gating, or null when the per-turn gate
+	 * should not apply. Only an ACTIVE combat (inCombat) yields a round — the default
+	 * `combatRound: 0` of an out-of-combat sheet must NOT gate placements.
+	 * @returns {number|null}
+	 */
+	_currentCombatRoundOrNull () {
+		const inCombat = (this.isInCombat?.() ?? this._data.inCombat) === true;
+		if (!inCombat) return null;
+		const round = this.getCombatRound?.() ?? this._data.combatRound;
+		return (typeof round === "number") ? round : null;
+	}
+
+	/**
+	 * Once-per-turn placement gate. When a combat round is being tracked, a seal may be
+	 * placed at most once per round; outside combat (no round) placement is never gated
+	 * (the available-pool count is the only limit).
+	 * @param {number} [round]
+	 * @returns {boolean}
+	 */
+	canPlaceSealThisTurn (round) {
+		if (this.getSealsAvailable() <= 0) return false;
+		const cur = round != null ? round : this._currentCombatRoundOrNull();
+		if (cur == null) return true;
+		return this._ensureSealStore().lastPlacedRound !== cur;
+	}
+
+	/**
+	 * Place one seal on a creature (spends one from the pool). Merges into an existing
+	 * placement on the same target. Respects the once-per-turn gate.
+	 * @param {string} target
+	 * @param {{round?: number, force?: boolean}} [opts] `force` bypasses the per-turn gate.
+	 * @returns {{id:string, target:string, count:number}|null} the placement, or null if blocked.
+	 */
+	placeSeal (target, opts = {}) {
+		if (!this.hasBalefulInterdict()) return null;
+		const avail = this.getSealsAvailable();
+		if (avail <= 0) return null;
+		const round = opts.round != null ? opts.round : this._currentCombatRoundOrNull();
+		if (!opts.force && !this.canPlaceSealThisTurn(round)) return null;
+
+		const store = this._ensureSealStore();
+		const tgt = (target || "").trim() || "Target";
+		let placement = store.placements.find(p => p.target.toLowerCase() === tgt.toLowerCase());
+		if (placement) placement.count += 1;
+		else { placement = {id: CryptUtil.uid(), target: tgt, count: 1}; store.placements.push(placement); }
+
+		this._setSealsAvailable(avail - 1);
+		store.lastPlacedRound = round;
+		return {...placement};
+	}
+
+	/**
+	 * Burn N seals on an interdicted creature. Burned seals are CONSUMED (they do not
+	 * return to the pool until a rest), so `available` is unchanged. Returns the rolled
+	 * damage descriptor for the caller to display/apply.
+	 * @param {string} placementIdOrTarget placement id, or the creature name.
+	 * @param {number} count how many seals to burn.
+	 * @param {string} [damageType] "fire" or "necrotic" (player choice).
+	 * @returns {{count:number, damageType:string, dice:string, target:string}|null}
+	 */
+	burnSeals (placementIdOrTarget, count, damageType) {
+		const store = this._ensureSealStore();
+		const key = (placementIdOrTarget || "").toLowerCase();
+		const placement = store.placements.find(p => p.id === placementIdOrTarget)
+			|| store.placements.find(p => p.target.toLowerCase() === key);
+		if (!placement || placement.count <= 0) return null;
+
+		const n = Math.max(1, Math.min(Math.floor(Number(count) || 1), placement.count));
+		placement.count -= n;
+
+		const calcs = this.getFeatureCalculations?.() || {};
+		const perSeal = calcs.sealDamageDieCount || 1;
+		const die = calcs.sealDamageDie || 6;
+		const result = {
+			count: n,
+			damageType: damageType === "necrotic" ? "necrotic" : "fire",
+			dice: `${perSeal * n}d${die}`,
+			target: placement.target,
+		};
+		if (placement.count <= 0) store.placements = store.placements.filter(p => p.id !== placement.id);
+		return result;
+	}
+
+	/**
+	 * Move all of a dying creature's seals onto a new creature (bonus action on the
+	 * interdicted creature's death). Merges into an existing placement on the new target.
+	 * @param {string} placementId
+	 * @param {string} newTarget
+	 * @returns {{id:string, target:string, count:number}|null} the resulting placement.
+	 */
+	moveSeals (placementId, newTarget) {
+		const store = this._ensureSealStore();
+		const placement = store.placements.find(p => p.id === placementId);
+		if (!placement) return null;
+		const tgt = (newTarget || "").trim();
+		if (!tgt) return null;
+
+		const existing = store.placements.find(p => p.id !== placement.id && p.target.toLowerCase() === tgt.toLowerCase());
+		if (existing) {
+			existing.count += placement.count;
+			store.placements = store.placements.filter(p => p.id !== placement.id);
+			return {...existing};
+		}
+		placement.target = tgt;
+		return {...placement};
+	}
+
+	/**
+	 * Restore the full seal pool and clear all live placements (seals last 1 minute, so
+	 * they always expire over a rest). Recharges on BOTH a short and a long rest.
+	 */
+	restoreSeals () {
+		const store = this._ensureSealStore();
+		store.placements = [];
+		store.lastPlacedRound = null;
+		store.available = this.getSealsMax();
+		const feat = this._getBalefulInterdictFeature();
+		if (feat?.uses) feat.uses.current = feat.uses.max;
+		const res = (this._data.resources || []).find(r => r.name === "Baleful Interdict");
+		if (res) res.current = res.max;
+	}
+
+	/**
+	 * The character's KNOWN interdict boons (selected via the ItdBoon optional-feature
+	 * type). Used by the combat-tab Interdiction panel to list boons with a Passive/Active
+	 * tag. Per-boon mechanical effects are intentionally NOT wired here (deferred round).
+	 * @returns {Array<object>}
+	 */
+	getInterdictBoons () {
+		return (this._data.features || []).filter(f => {
+			const types = f.optionalFeatureTypes || f.featureType;
+			if (Array.isArray(types)) return types.includes("ItdBoon");
+			return types === "ItdBoon";
+		});
+	}
+	// #endregion
+
 	// #region Features
 	getFeatures () {
 		return this._data.features.map(f => ({
@@ -25856,6 +26083,17 @@ class CharacterSheetState {
 		// size uses to PB. Curate it to the correct single use. Source-agnostic:
 		// "Healing Hands" is the Aasimar trait across every edition.
 		if (name === "healing hands") return {max: 1, recharge: "long"};
+
+		// Illrigger "Baleful Interdict" (IllriggerRevised) — the generic parser reads
+		// "Once on your turn you place a magical seal..." as a single use (max 1), which
+		// is the per-turn placement cadence, NOT the seal POOL size. The real pool is the
+		// `sealsMax` calculation (min 3 at L1, scaling to 7) and it refreshes on a SHORT
+		// or LONG rest. Curate it so the Features tab / linked resource reflect the pool.
+		// Source-checked so a same-named feature from another source is never touched.
+		if (name === "baleful interdict" && (feature.classSource || feature.source) === "IllriggerRevised") {
+			const sealsMax = (this.getFeatureCalculations?.() || {}).sealsMax || 3;
+			return {max: sealsMax, recharge: "short"};
+		}
 
 		const src = feature.classSource || feature.source;
 		if (src !== "TGTT") return null;

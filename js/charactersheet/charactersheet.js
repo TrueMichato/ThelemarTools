@@ -2771,7 +2771,11 @@ class CharacterSheetPage {
 		if (this._inventory) this._inventory.render();
 		if (this._features) this._features.render();
 		if (this._customAbilities) this._customAbilities.render();
-		if (this._combat) this._combat.render();
+		if (this._combat) {
+			this._combat.render();
+			// Additive Illrigger Baleful Interdict panel (gated; self-hides when absent).
+			this._combat.renderCombatInterdiction?.();
+		}
 		if (this._respec) this._respec.render();
 		if (this._playMode && this._state.getViewMode() === "play") this._playMode.render();
 

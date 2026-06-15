@@ -1225,6 +1225,17 @@ class CharacterSheetCombat {
 					&& this._isArcaneArcherWeapon(ctx.attack),
 				handler: (ctx) => this._pPickArcaneShot(ctx),
 			},
+			{
+				// Illrigger Baleful Interdict: on a weapon-attack hit, once per turn, offer
+				// to place a seal (no action). Non-blocking and purely additive — it never
+				// alters the attack/damage math. Spell attacks are excluded (weapon only).
+				id: "balefulInterdict",
+				predicate: (ctx) => !ctx.attack?.isSpell
+					&& this._state.hasBalefulInterdict?.()
+					&& this._state.canPlaceSealThisTurn?.()
+					&& (this._state.getSealsAvailable?.() || 0) > 0,
+				handler: (ctx) => this._pPlaceBalefulInterdictSeal(ctx),
+			},
 		];
 	}
 
@@ -2579,6 +2590,236 @@ class CharacterSheetCombat {
 				<button class="ve-btn ve-btn-xxs ve-btn-default charsheet__channeled-spell-clear" type="button" title="Clear channeled spell">Clear</button>
 			</div>
 		`;
+	}
+
+	/**
+	 * Illrigger Baleful Interdict — post-hit "place a seal?" prompt. Surfaced by the
+	 * generic post-attack hook pipeline AFTER a weapon attack roll (never alters the
+	 * attack/damage math). The player names the creature hit and confirms; placement
+	 * spends one seal from the pool and is gated to once per turn. Fully skippable.
+	 * @param {*} ctx Post-attack context from `_rollAttack`.
+	 * @returns {Promise<void>}
+	 */
+	async _pPlaceBalefulInterdictSeal (ctx) {
+		// Re-validate at prompt time (state may have changed between roll and modal).
+		if (!this._state.hasBalefulInterdict?.() || (this._state.getSealsAvailable?.() || 0) <= 0) return;
+		if (!this._state.canPlaceSealThisTurn?.()) return;
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const dc = calcs.interdictDc;
+		const avail = this._state.getSealsAvailable?.() || 0;
+
+		let resolveOuter = null;
+		let isResolved = false;
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: `Baleful Interdict — ${ctx.attack?.name || "Weapon Attack"}`,
+			isMinHeight0: true,
+			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
+		});
+
+		await new Promise((resolve) => {
+			resolveOuter = resolve;
+			const finalize = () => { if (isResolved) return; isResolved = true; resolve(); };
+
+			const placeholder = ctx.attack?.name ? `creature hit by ${ctx.attack.name}` : "creature";
+			modalInner.innerHTML = `
+				<div class="charsheet__interdict-place">
+					<p class="mb-2">On a hit you may place a <strong>magical seal</strong> on the target (no action, once per turn). The seal lasts 1 minute or until burned.</p>
+					<div class="ve-flex ve-flex-v-center mb-2">
+						<label class="mr-2 mb-0">Target:</label>
+						<input type="text" class="form-control input-sm charsheet__interdict-target-ipt" placeholder="${placeholder}" style="max-width: 16rem;">
+					</div>
+					<div class="ve-muted ve-small mb-2">Seals available: <strong>${avail}</strong>${dc != null ? ` &middot; Interdict save DC <strong>${dc}</strong>` : ""}</div>
+					<div class="ve-flex ve-flex-h-right gap-2">
+						<button class="ve-btn ve-btn-default ve-btn-sm charsheet__interdict-skip" type="button">Skip</button>
+						<button class="ve-btn ve-btn-primary ve-btn-sm charsheet__interdict-confirm" type="button">Place Seal</button>
+					</div>
+				</div>`;
+
+			const ipt = /** @type {HTMLInputElement} */ (modalInner.querySelector(".charsheet__interdict-target-ipt"));
+			modalInner.querySelector(".charsheet__interdict-skip")?.addEventListener("click", () => { finalize(); doClose(false); });
+			modalInner.querySelector(".charsheet__interdict-confirm")?.addEventListener("click", () => {
+				const target = (ipt?.value || "").trim() || (ctx.attack?.name ? `Target of ${ctx.attack.name}` : "Target");
+				const placed = this._state.placeSeal?.(target);
+				if (placed) {
+					JqueryUtil.doToast({type: "success", content: `🔥 Baleful Interdict seal placed on ${placed.target}. Seals left: ${this._state.getSealsAvailable?.()}`});
+					this.renderCombatInterdiction();
+					this._page.saveCharacter?.();
+				} else {
+					JqueryUtil.doToast({type: "warning", content: "Could not place a seal (none available, or already placed this turn)."});
+				}
+				finalize();
+				doClose(true);
+			});
+			setTimeout(() => { try { ipt?.focus(); } catch (e) { /* ignore */ } }, 50);
+		});
+	}
+
+	/**
+	 * Best-effort Passive/Active classification for an interdict boon, from its entry
+	 * text. Per-boon mechanical effects are intentionally NOT implemented yet (deferred
+	 * round); this only drives the display tag in the panel.
+	 * @param {object} boon
+	 * @returns {"Active"|"Passive"}
+	 */
+	_getInterdictBoonActivation (boon) {
+		const text = JSON.stringify(boon?.entries || boon?.description || "").toLowerCase();
+		if (/\b(bonus action|reaction|as an action|you can|when you|you may)\b/.test(text)) return "Active";
+		return "Passive";
+	}
+
+	/**
+	 * Additive combat-tab Interdiction panel (Illrigger Baleful Interdict). Shows the
+	 * seal pool (available / max), the Interdict save DC, controls to place / burn / move
+	 * seals, and the list of KNOWN interdict boons (name + Passive/Active tag + an
+	 * "expend seal" affordance stub). Hidden entirely unless the character has Baleful
+	 * Interdict. Per-boon mechanical effects are deferred to a later round.
+	 */
+	renderCombatInterdiction () {
+		const section = document.getElementById("charsheet-combat-interdiction-section");
+		const container = document.getElementById("charsheet-combat-interdiction");
+		if (!container) return;
+
+		if (!this._state.hasBalefulInterdict?.()) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const dc = calcs.interdictDc;
+		const sealDamage = calcs.sealDamage || "1d6";
+		const max = this._state.getSealsMax?.() || 0;
+		const avail = this._state.getSealsAvailable?.() || 0;
+		const placements = this._state.getSealPlacements?.() || [];
+		const boons = this._state.getInterdictBoons?.() || [];
+
+		const placementsHtml = placements.length
+			? placements.map(p => `
+				<div class="charsheet__interdict-seal-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-1" data-placement-id="${p.id}">
+					<span class="bold mr-1">${p.target}</span>
+					<span class="badge badge-danger" title="Seals on this creature">${p.count} seal${p.count === 1 ? "" : "s"}</span>
+					<input type="number" class="form-control input-sm charsheet__interdict-burn-count" min="1" max="${p.count}" value="${p.count}" style="width: 4rem;" title="Seals to burn">
+					<select class="form-control input-sm charsheet__interdict-burn-type" style="width: 7rem;" title="Damage type">
+						<option value="fire">fire</option>
+						<option value="necrotic">necrotic</option>
+					</select>
+					<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__interdict-burn" type="button" title="Burn seals: ${sealDamage} per seal when the creature takes damage from another source">🔥 Burn</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__interdict-move" type="button" title="On this creature's death, move all its seals to a new creature within 30 ft (bonus action)">↪ Move</button>
+				</div>`).join("")
+			: `<div class="ve-muted ve-small">No creatures are currently interdicted.</div>`;
+
+		const boonsHtml = boons.length
+			? boons.map(b => {
+				const activation = this._getInterdictBoonActivation(b);
+				const badgeCls = activation === "Active" ? "badge-primary" : "badge-secondary";
+				let nameHtml = b.name;
+				if (this._page?.getHoverLink && b.source) {
+					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, b.name, b.source); } catch (e) { nameHtml = b.name; }
+				}
+				return `
+					<div class="charsheet__interdict-boon-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-1">
+						<span class="bold mr-1">${nameHtml}</span>
+						<span class="badge ${badgeCls}" title="${activation === "Active" ? "Requires an action/trigger to use" : "Always-on benefit"}">${activation}</span>
+						<button class="ve-btn ve-btn-xxs ve-btn-default charsheet__interdict-boon-expend ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" title="Expend a seal for this boon (effect wiring coming in a later update)">Expend seal</button>
+					</div>`;
+			}).join("")
+			: `<div class="ve-muted ve-small">No interdict boons known yet.</div>`;
+
+		container.innerHTML = `
+			<div class="charsheet__interdict-panel">
+				<div class="charsheet__interdict-summary ve-flex ve-flex-v-center ve-flex-wrap gap-2 mb-2">
+					<span class="charsheet__interdict-dc" title="Interdict save DC = 8 + proficiency + CHA">🛡️ Save DC <strong>${dc != null ? dc : "—"}</strong></span>
+					<span class="charsheet__interdict-pool" title="Seals refresh on a short or long rest">🔥 Seals <strong>${avail}</strong> / ${max}</span>
+					<span class="ve-muted ve-small" title="Burn damage per seal">${sealDamage} per seal</span>
+					<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__interdict-place-btn ml-auto" type="button" ${avail > 0 ? "" : "disabled"} title="Place a seal on a creature (bonus action, or no action on a weapon hit)">Place seal</button>
+				</div>
+				<div class="charsheet__interdict-seals mb-2">
+					<div class="ve-muted ve-small mb-1">Interdicted creatures</div>
+					${placementsHtml}
+				</div>
+				<div class="charsheet__interdict-boons">
+					<div class="ve-muted ve-small mb-1">Known interdict boons</div>
+					${boonsHtml}
+				</div>
+			</div>`;
+
+		// --- Place seal ---
+		container.querySelector(".charsheet__interdict-place-btn")?.addEventListener("click", async () => {
+			if ((this._state.getSealsAvailable?.() || 0) <= 0) {
+				JqueryUtil.doToast({type: "warning", content: "No seals available — take a short or long rest to recover them."});
+				return;
+			}
+			let target = "Target";
+			try {
+				target = await InputUiUtil.pGetUserString({title: "Place Baleful Interdict Seal", default: ""});
+			} catch (e) { target = null; }
+			if (target == null) return; // cancelled
+			const placed = this._state.placeSeal?.((target || "").trim() || "Target", {force: true});
+			if (placed) {
+				JqueryUtil.doToast({type: "success", content: `🔥 Seal placed on ${placed.target}. Seals left: ${this._state.getSealsAvailable?.()}`});
+				this.renderCombatInterdiction();
+				this._page.saveCharacter?.();
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "Could not place a seal."});
+			}
+		});
+
+		// --- Burn seals ---
+		container.querySelectorAll(".charsheet__interdict-burn").forEach((btn) => {
+			btn.addEventListener("click", () => {
+				const row = btn.closest(".charsheet__interdict-seal-row");
+				const id = row?.dataset.placementId;
+				const count = parseInt(/** @type {HTMLInputElement} */ (row?.querySelector(".charsheet__interdict-burn-count"))?.value || "1", 10);
+				const type = /** @type {HTMLSelectElement} */ (row?.querySelector(".charsheet__interdict-burn-type"))?.value || "fire";
+				const result = this._state.burnSeals?.(id, count, type);
+				if (!result) { JqueryUtil.doToast({type: "warning", content: "Could not burn seals."}); return; }
+				let rolled = null;
+				try { rolled = this._parseDamage(result.dice, false); } catch (e) { rolled = null; }
+				if (rolled && typeof rolled.total === "number") {
+					this._page.showDiceResult?.({
+						title: `Baleful Interdict — Burn ${result.count} Seal${result.count === 1 ? "" : "s"}`,
+						roll: rolled.total,
+						total: rolled.total,
+						resultClass: "text-danger",
+						resultNote: ` ${result.dice} ${result.damageType} on ${result.target}`,
+					});
+				}
+				JqueryUtil.doToast({type: "info", content: `🔥 Burned ${result.count} seal${result.count === 1 ? "" : "s"} on ${result.target}: ${result.dice} ${result.damageType}${rolled && typeof rolled.total === "number" ? ` → ${rolled.total}` : ""} damage.`});
+				this.renderCombatInterdiction();
+				this._page.saveCharacter?.();
+			});
+		});
+
+		// --- Move seals (on death) ---
+		container.querySelectorAll(".charsheet__interdict-move").forEach((btn) => {
+			btn.addEventListener("click", async () => {
+				const row = btn.closest(".charsheet__interdict-seal-row");
+				const id = row?.dataset.placementId;
+				let newTarget = null;
+				try {
+					newTarget = await InputUiUtil.pGetUserString({title: "Move Seals to New Creature (within 30 ft)", default: ""});
+				} catch (e) { newTarget = null; }
+				if (newTarget == null) return;
+				const moved = this._state.moveSeals?.(id, (newTarget || "").trim());
+				if (moved) {
+					JqueryUtil.doToast({type: "success", content: `↪ Seals moved to ${moved.target}.`});
+					this.renderCombatInterdiction();
+					this._page.saveCharacter?.();
+				} else {
+					JqueryUtil.doToast({type: "warning", content: "Could not move seals."});
+				}
+			});
+		});
+
+		// --- Expend-seal boon stub (per-boon mechanics deferred) ---
+		container.querySelectorAll(".charsheet__interdict-boon-expend").forEach((btn) => {
+			btn.addEventListener("click", () => {
+				const boonName = btn.dataset.boonName || "this boon";
+				JqueryUtil.doToast({type: "info", content: `Expend-seal effect for "${boonName}" is not wired yet — burn/place seals manually above for now.`});
+			});
+		});
 	}
 
 	/**
