@@ -1018,6 +1018,12 @@ class CharacterSheetRest {
 			this._state.restoreSeals?.();
 		}
 
+		// Restore Illrigger Infernal Conduit dice (Baleful Interdict) - the d10 pool
+		// recovers on a LONG rest only.
+		if (restType === "long" && this._state.hasInfernalConduit?.()) {
+			this._state.restoreInfernalConduit?.();
+		}
+
 		// Restore Fighter Second Wind / Action Surge - recharge on short OR long rest.
 		// Explicit (in addition to the generic feature-uses loop above) so the per-rest max
 		// is re-scaled to the current Fighter level before refilling.
