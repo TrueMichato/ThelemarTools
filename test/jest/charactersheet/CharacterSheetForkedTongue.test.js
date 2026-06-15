@@ -75,21 +75,22 @@ describe("Illrigger Forked Tongue", () => {
 			const calcs = state.getFeatureCalculations();
 			expect(calcs.hasForkedTongueImprovement).toBe(true);
 
-			// Read through the public type-indexed accessor the roll handlers use.
-			const mods = state.getNamedModifiersByType("check:wis:advantage");
-			const mod = mods.find(m => m.name === "Forked Tongue");
-			expect(mod).toBeDefined();
-			expect(mod.conditional).toMatch(/intentions|sincerity/i);
-			// Conditional modifiers gate off by default and surface in the per-roll prompt.
-			expect(mod.enabled).toBe(false);
-			expect(mod.sourceType).toBe("classFeature");
+			// The advantage is a per-roll opt-in conditional: it must NOT auto-apply,
+			// but it must surface in aggregateModifiers().conditionalsAvailable so the
+			// roll handler's pre-roll picker can offer it (same path as Danger Sense /
+			// Dauntless Heritage). A modifier stored disabled would be invisible there.
+			const agg = state.aggregateModifiers("check:wis");
+			expect(agg.advantage).toBe(false); // gated off by default
+			const cond = agg.conditionalsAvailable.find(c => c.name === "Forked Tongue");
+			expect(cond).toBeDefined();
+			expect(cond.advantage).toBe(true);
+			expect(cond.conditional).toMatch(/intentions|sincerity/i);
 		});
 
 		it("does NOT register the Insight advantage modifier before L9", () => {
 			addIllrigger(state, 8);
-			const mods = state.getNamedModifiersByType("check:wis:advantage");
-			const mod = mods.find(m => m.name === "Forked Tongue");
-			expect(mod).toBeUndefined();
+			const agg = state.aggregateModifiers("check:wis");
+			expect(agg.conditionalsAvailable.find(c => c.name === "Forked Tongue")).toBeUndefined();
 		});
 	});
 
