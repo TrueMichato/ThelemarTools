@@ -19077,3 +19077,38 @@ border-left: 3px solid #e056fd;
 border-radius: 4px;
 background: rgba(224, 86, 253, 0.08);
 }
+
+/* Interdiction panel (Illrigger Baleful Interdict) ------------------------- */
+
+.charsheet__interdict-panel {
+display: flex;
+flex-direction: column;
+gap: 0.5rem;
+}
+
+.charsheet__interdict-summary {
+gap: 0.5rem;
+padding: 0.4rem 0.6rem;
+border: 1px solid rgba(229, 57, 53, 0.45);
+border-left: 3px solid #e53935;
+border-radius: 4px;
+background: rgba(229, 57, 53, 0.08);
+}
+
+.charsheet__interdict-dc strong,
+.charsheet__interdict-pool strong {
+font-weight: 700;
+}
+
+.charsheet__interdict-seal-row,
+.charsheet__interdict-boon-row {
+gap: 0.4rem;
+padding: 0.3rem 0.5rem;
+border: 1px solid rgba(0, 0, 0, 0.12);
+border-radius: 4px;
+background: rgba(229, 57, 53, 0.04);
+}
+
+.charsheet__interdict-boon-row {
+background: rgba(0, 0, 0, 0.02);
+}
