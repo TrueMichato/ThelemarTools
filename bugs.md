@@ -3,7 +3,23 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 18 (Illrigger homebrew deep-dive + Bag-of-Holding display) — IN PROGRESS
+
+Context discovered during scoping: the TGTT Illrigger class is a `_copy` of the external `IllriggerRevised` brew (MCDM "The Illrigger Revised", listed in `homebrew/index.json` `toImport`). At runtime the `_copy`/`_mod` resolves (via `DataUtil.class.pMergeCopy`) and exposes `optionalfeatureProgression` (`ItdBoon` × 34, `IllMastery` × 6), the appended Weapon Mastery + Specialties (× 17) class features, and the 5 Diabolic-Contract subclasses' features. **The data is present** — the gaps are character-sheet *logic*: the existing Illrigger calcs are hardcoded by class name in `charactersheet-state.js` (passive numbers only — DC, seals, dice), so the option-pool **effects**, the **picker wiring** for those featureTypes, the **seal/Interdict resource UI**, dynamic languages, race choices, subclass rendering, and Infernal Conduit are unimplemented. Full mechanical wiring requested → split across two rounds.
+
+**This batch (4 parallel sessions + orchestrator-fixed #1):**
+
+* **(#1) Bag-of-Holding carry row shows when no bag equipped — FIXED** (orchestrator, `409cf996`). Root cause: `.charsheet__carry-bar-mini { display: flex }` outranks the user-agent `[hidden]` rule on specificity, so the overview mini Bag-of-Holding row (`#charsheet-carry-bag-row`) stayed visible even when the render logic set `hidden = true` (`hasExtradimensional` false). Re-asserted `display: none` at matching specificity via `.charsheet__carry-bar-mini[hidden]`. (Inventory `.charsheet__carrying-bag` only sets `margin-top`, so its `hidden` already worked.)
+* **(#2) Illrigger Weapon Masteries not implemented** — _S1 (Foundation)._ 2024 weapon-mastery engine already exists for 2024 classes (`WEAPON_MASTERY_EFFECTS`, `getMasteryEffectsForAttack`); Illrigger L2 block just needs `hasWeaponMastery`/`weaponMasteryCount` + picker wiring.
+* **(#3) Forked Tongue not implemented (dynamic languages + Linguistics)** — _S3._ L1 grants Infernal + 2 spoken languages swappable on a long rest (3 at L9, + Insight advantage). Mirror the Hunter's-Prey / Primal-Focus per-rest swap pattern; Linguistics auto-reads the language array.
+* **(#4) Baleful Interdict not implemented (seal management/burning UI, weapon-attack "place seal" popup, shows 1 use but min is 3)** — _S2 (Interdiction resource)._ Adds the seal/uses resource + DC view + combat-tab management UI; framework for boon interactions.
+* **(#5) Interdict Boons not choosable at level-up to L2** — _S1._ `ItdBoon` optionalfeatureProgression picker wiring in builder/levelup/quickbuild.
+* **(#6) Combat Masteries (Bravado etc.) don't work / don't affect the sheet** — _S1 (selection) + follow-up round (effects)._ `IllMastery` × 6 (Bravado AC, Inexorable saves, Lies ability-swap, Unfettered ranges, Brutal/Lissome movement).
+* **(#7) Interdict Boons don't affect the sheet (no choosing/management/DC view)** — _S2 (framework/DC/management) + follow-up round (per-boon effects × 34)._
+* **(#8) Hochlings: cantrip choice, Healing Hands, Divine Manifestation broken** — _S4 (Hochling race)._ Scope: Divine Spark cantrip choice (+ WIS/INT/CHA), Healing Hands long-rest use, Divine Manifestation picker limited to War Domain Channel Divinity + Celestial Revelation / Aasimar Transformation.
+* **(#9) Hellspeaker features (Moloch's Blessing, Charm Enemy, higher-level) not implemented** — _follow-up round._ Calc flags are set in `state.js` (`case "Hellspeaker"`) but nothing renders/consumes them.
+* **(#10) Not all Illrigger specialties implemented** — _S1 (selection) + follow-up round (effects × 17)._ "Specialties" = a distinct TGTT feature-picker pool (L3–19), not the subclasses/masteries/boons.
+* **(#11) Infernal Conduit not implemented** — _follow-up round._ L6 (+ L11 improvement); dice are counted but there is no spend/interaction mechanic.
 
 ## Closed Bugs
 
