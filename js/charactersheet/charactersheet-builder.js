@@ -36,6 +36,7 @@ class CharacterSheetBuilder {
 		/** @type {*[]} */ this._selectedToolProficiencies = []; // For background tool proficiency choices
 		/** @type {*[]} */ this._selectedLanguages = []; // For background language choices
 		/** @type {string[]} */ this._selectedClassFeatureLanguages = []; // For class feature language choices (like Deft Explorer)
+		/** @type {string[]} */ this._selectedForkedTongueLanguages = []; // For Illrigger Forked Tongue swappable spoken-language choices (L1)
 		/** @type {Object<string, *[]>} */ this._selectedFeatureOptions = {}; // For class/subclass features with embedded options (like Specialties)
 		/** @type {Object<string, *>} */ this._selectedFeatureSkillChoices = {}; // For specialty features that require skill/expertise choices
 		/** @type {Object<string, *>} */ this._selectedRaceOptionalFeatures = {}; // For race-level optional feature choices (e.g., Nyuidj Dreamwalker Ability)
@@ -372,6 +373,16 @@ class CharacterSheetBuilder {
 					const selectedCount = this._selectedClassFeatureLanguages.filter((/** @type {*} */ l) => l).length;
 					if (selectedCount < classLangInfo.count) {
 						JqueryUtil.doToast({type: "warning", content: `Please select ${classLangInfo.count} languages from ${classLangInfo.featureName}.`});
+						return false;
+					}
+				}
+				// Validate Illrigger Forked Tongue swappable-language selection (2 at level 1)
+				const ftCount = CharacterSheetClassUtils.getForkedTongueSwappableGrant(this._selectedClass.name, 0, 1).count;
+				if (ftCount > 0) {
+					const ftSelected = this._selectedForkedTongueLanguages.filter((/** @type {*} */ l) => l);
+					const ftDistinct = new Set(ftSelected.map((/** @type {*} */ l) => l.toLowerCase()));
+					if (ftSelected.length < ftCount || ftDistinct.size < ftCount) {
+						JqueryUtil.doToast({type: "warning", content: `Please choose ${ftCount} distinct languages for Forked Tongue.`});
 						return false;
 					}
 				}
@@ -1541,6 +1552,16 @@ class CharacterSheetBuilder {
 			});
 		}
 
+		// Illrigger Forked Tongue: apply the chosen swappable spoken languages. This runs after
+		// addClass(), so getForkedTongueMaxSwappable() is already 2 and the adds succeed. The state
+		// API mirrors each pick into _data.languages and rejects Infernal/dupes/over-max, so it is
+		// idempotent on revisit.
+		if (this._selectedForkedTongueLanguages?.length && this._state.addForkedTongueSwappableLanguage) {
+			this._selectedForkedTongueLanguages.forEach((/** @type {*} */ lang) => {
+				if (lang) this._state.addForkedTongueSwappableLanguage(lang);
+			});
+		}
+
 		// Armor proficiencies
 		if (this._selectedClass.startingProficiencies?.armor) {
 			this._selectedClass.startingProficiencies.armor.forEach((/** @type {*} */ armor) => {
@@ -2192,6 +2213,11 @@ class CharacterSheetBuilder {
 
 		// Remove class feature languages
 		(snapshot.languages || []).forEach((/** @type {*} */ l) => { if (l) this._state.removeLanguage(l); });
+
+		// Remove Illrigger Forked Tongue swappable spoken languages (also drops them from
+		// _data.languages). Guarded so fake test states without the API are unaffected.
+		(this._state.getForkedTongueSwappableLanguages?.() || [])
+			.forEach((/** @type {*} */ l) => this._state.removeForkedTongueSwappableLanguage?.(l));
 
 		// Remove all features belonging to this class
 		this._state.getFeatures()
@@ -4300,6 +4326,8 @@ class CharacterSheetBuilder {
 						this._selectedExpertise = [];
 						// Reset class feature language selections when changing class
 						this._selectedClassFeatureLanguages = [];
+						// Reset Illrigger Forked Tongue swappable-language selections when changing class
+						this._selectedForkedTongueLanguages = [];
 						// Reset weapon mastery selections when changing class
 						this._selectedWeaponMasteries = [];
 						// Reset equipment choices when changing class
@@ -4412,6 +4440,14 @@ class CharacterSheetBuilder {
 		if (classLangInfo && classLangInfo.count > 0) {
 			const langSection = this._renderClassFeatureLanguageSelection(cls, classLangInfo);
 			content.append(langSection);
+		}
+
+		// Illrigger Forked Tongue: choose the swappable spoken languages (2 at level 1).
+		// Detected by class name (mirrors the state-layer signal), not feature text.
+		const forkedTongueCount = CharacterSheetClassUtils.getForkedTongueSwappableGrant(cls.name, 0, 1).count;
+		if (forkedTongueCount > 0) {
+			const ftSection = this._renderForkedTongueLanguageSelection(cls, forkedTongueCount);
+			content.append(ftSection);
 		}
 
 		// Weapon Mastery selection (for Fighter, Paladin, Ranger, Rogue at level 1)
@@ -5219,6 +5255,99 @@ class CharacterSheetBuilder {
 
 			dropdowns.append(select);
 		}
+
+		return section;
+	}
+
+	/**
+	 * Render the Illrigger Forked Tongue swappable spoken-language picker (level 1).
+	 *
+	 * Forked Tongue grants Infernal automatically (handled by the effect pipeline); here the
+	 * player chooses the `count` *swappable* spoken-only languages. Infernal and any already-known
+	 * language are excluded, and the dropdowns cross-filter so the same language can't be picked
+	 * twice. Selections are stored in `this._selectedForkedTongueLanguages` and applied (after the
+	 * class is committed) via `state.addForkedTongueSwappableLanguage`.
+	 *
+	 * @param {*} cls - Class data
+	 * @param {number} count - Number of swappable languages to choose (2 at level 1)
+	 * @returns {*}
+	 */
+	_renderForkedTongueLanguageSelection (cls, count) {
+		const section = e_({outer: `
+			<div class="charsheet__builder-class-lang-selection charsheet__builder-forked-tongue-selection mt-3">
+				<p><strong>Forked Tongue:</strong> You can speak, read, and write <em>Infernal</em>. Choose ${count} other language${count > 1 ? "s" : ""} you can speak (you can swap one on a long rest):</p>
+				<div class="charsheet__builder-forked-tongue-dropdowns"></div>
+				<div class="ve-small ve-muted mt-1">Selected: <span class="forked-tongue-count">${this._selectedForkedTongueLanguages.filter(Boolean).length}</span>/${count}</div>
+			</div>
+		`});
+
+		const dropdowns = section.querySelector(".charsheet__builder-forked-tongue-dropdowns");
+
+		const langOptions = this._page.getLanguageOptionsGrouped?.() || {
+			standard: Parser.LANGUAGES_STANDARD,
+			exotic: Parser.LANGUAGES_EXOTIC,
+			secret: Parser.LANGUAGES_SECRET,
+			homebrew: [],
+		};
+
+		// Languages already known (e.g. from race/background) plus Infernal are not selectable.
+		const knownLangs = new Set((this._state.getLanguages?.() || []).map((/** @type {*} */ l) => l.toLowerCase()));
+		knownLangs.add("infernal");
+
+		const selects = [];
+
+		const renderOptions = () => {
+			selects.forEach((/** @type {*} */ select, /** @type {*} */ idx) => {
+				// Languages chosen in the OTHER dropdowns are excluded from this one.
+				const chosenElsewhere = new Set(
+					this._selectedForkedTongueLanguages
+						.filter((/** @type {*} */ l, /** @type {*} */ j) => l && j !== idx)
+						.map((/** @type {*} */ l) => l.toLowerCase()),
+				);
+				const current = this._selectedForkedTongueLanguages[idx] || "";
+
+				select.innerHTML = "";
+				select.append(e_({tag: "option", val: "", txt: "-- Select Language --"}));
+
+				const addOptgroup = (/** @type {*} */ labelText, /** @type {*} */ langs) => {
+					const usable = langs.filter((/** @type {*} */ lang) => {
+						const low = lang.toLowerCase();
+						if (knownLangs.has(low)) return false;
+						if (chosenElsewhere.has(low)) return false;
+						return true;
+					});
+					if (!usable.length) return;
+					const grp = document.createElement("optgroup");
+					grp.label = labelText;
+					usable.forEach((/** @type {*} */ lang) => grp.append(e_({tag: "option", val: lang, txt: lang})));
+					select.append(grp);
+				};
+
+				if (langOptions.homebrew.length) addOptgroup("──── Homebrew Languages ────", langOptions.homebrew);
+				addOptgroup("──── Standard Languages ────", langOptions.standard);
+				addOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
+				addOptgroup("──── Secret Languages ────", langOptions.secret);
+
+				select.value = current;
+			});
+		};
+
+		for (let i = 0; i < count; i++) {
+			const select = e_({outer: `<select class="ve-form-control form-control--minimal mb-1 charsheet__builder-forked-tongue-select"></select>`});
+
+			select.addEventListener("change", (/** @type {*} */ e) => {
+				this._selectedForkedTongueLanguages[i] = e.target.value || null;
+				const selectedCount = this._selectedForkedTongueLanguages.filter((/** @type {*} */ l) => l).length;
+				section.querySelector(".forked-tongue-count").textContent = selectedCount;
+				// Re-render so the just-picked language disappears from the sibling dropdowns.
+				renderOptions();
+			});
+
+			selects.push(select);
+			dropdowns.append(select);
+		}
+
+		renderOptions();
 
 		return section;
 	}
