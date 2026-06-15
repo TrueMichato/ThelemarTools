@@ -692,3 +692,284 @@ describe("Infernal Majesty Active State", () => {
 		expect(stateType.duration).toBe("10 minutes");
 	});
 });
+
+// ==========================================================================
+// PART 8: BALEFUL INTERDICT — SEAL POOL & INTERDICTION FRAMEWORK
+// ==========================================================================
+describe("Baleful Interdict — Seal Pool", () => {
+	let state;
+	const BALEFUL_DESC = "Once on your turn you place a magical seal on a creature within 30 feet of you that you can see, either when you hit it with a weapon attack or as a bonus action.";
+	const addBalefulFeature = (st) => st.addFeature({
+		name: "Baleful Interdict",
+		source: "IllriggerRevised",
+		classSource: "IllriggerRevised",
+		description: BALEFUL_DESC,
+	});
+
+	beforeEach(() => { state = new CharacterSheetState(); });
+
+	// ----------------------------------------------------------------------
+	// Seal pool size == sealsMax at every level
+	// ----------------------------------------------------------------------
+	describe("Seal pool size matches sealsMax (L1-20)", () => {
+		for (let level = 1; level <= 20; level++) {
+			it(`available seals == sealsMax at level ${level}`, () => {
+				state.addClass({name: "Illrigger", source: "IllriggerRevised", level});
+				const calcs = state.getFeatureCalculations();
+				expect(state.getSealsMax()).toBe(calcs.sealsMax);
+				expect(state.getSealsAvailable()).toBe(calcs.sealsMax);
+			});
+		}
+
+		it("starts at the minimum of 3 at level 1", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
+			expect(state.getSealsAvailable()).toBe(3);
+		});
+	});
+
+	it("returns no seals and no Baleful Interdict for a non-Illrigger", () => {
+		state.addClass({name: "Fighter", source: "PHB", level: 5});
+		expect(state.hasBalefulInterdict()).toBe(false);
+		expect(state.getSealsMax()).toBe(0);
+		expect(state.getSealsAvailable()).toBe(0);
+		expect(state.placeSeal("Anyone")).toBeNull();
+	});
+
+	// ----------------------------------------------------------------------
+	// Bug #4 — feature uses reflect sealsMax, not the parsed "1"
+	// ----------------------------------------------------------------------
+	describe("Bug #4 — feature uses reflect sealsMax (not 1)", () => {
+		it("sizes the Baleful Interdict feature to sealsMax (3), not 1, at L1", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
+			addBalefulFeature(state);
+			const feat = state.getFeatures().find(f => f.name === "Baleful Interdict");
+			expect(feat).toBeDefined();
+			expect(feat.uses.max).toBe(3);
+			expect(feat.uses.max).not.toBe(1);
+			expect(feat.uses.current).toBe(3);
+			expect(feat.uses.recharge).toBe("short");
+		});
+
+		it("creates the linked resource at sealsMax, not 1", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
+			addBalefulFeature(state);
+			const res = state.getResources().find(r => r.name === "Baleful Interdict");
+			expect(res).toBeDefined();
+			expect(res.max).toBe(3);
+		});
+
+		it("scales the feature uses to 5 at level 7", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 7});
+			addBalefulFeature(state);
+			const feat = state.getFeatures().find(f => f.name === "Baleful Interdict");
+			expect(feat.uses.max).toBe(5);
+		});
+
+		it("curates the feature to {max: sealsMax, recharge: short}", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
+			const curated = state._getCuratedFeatureUses({name: "Baleful Interdict", classSource: "IllriggerRevised"});
+			expect(curated).toEqual({max: 3, recharge: "short"});
+		});
+
+		it("does NOT curate a same-named feature from another source", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
+			expect(state._getCuratedFeatureUses({name: "Baleful Interdict", classSource: "PHB"})).toBeNull();
+		});
+	});
+
+	// ----------------------------------------------------------------------
+	// Place / burn / move state transitions
+	// ----------------------------------------------------------------------
+	describe("place / burn / move transitions", () => {
+		beforeEach(() => { state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 5}); });
+
+		it("placeSeal spends one seal and marks the target interdicted", () => {
+			const max = state.getSealsMax(); // 4 at L5
+			const placed = state.placeSeal("Goblin A");
+			expect(placed).toBeTruthy();
+			expect(placed.count).toBe(1);
+			expect(state.getSealsAvailable()).toBe(max - 1);
+			expect(state.isInterdicted("Goblin A")).toBe(true);
+			expect(state.isInterdicted("Goblin B")).toBe(false);
+		});
+
+		it("stacks seals on a single placement when targeting the same creature", () => {
+			state.placeSeal("Ogre", {force: true});
+			state.placeSeal("Ogre", {force: true});
+			const placements = state.getSealPlacements();
+			expect(placements).toHaveLength(1);
+			expect(placements[0].count).toBe(2);
+			expect(state.getSealsAvailable()).toBe(state.getSealsMax() - 2);
+		});
+
+		it("cannot place when no seals remain", () => {
+			const max = state.getSealsMax();
+			for (let i = 0; i < max; i++) state.placeSeal(`T${i}`, {force: true});
+			expect(state.getSealsAvailable()).toBe(0);
+			expect(state.placeSeal("Extra", {force: true})).toBeNull();
+		});
+
+		it("burnSeals consumes seals (no refund) and returns scaled damage", () => {
+			const placed = state.placeSeal("Dragon", {force: true});
+			state.placeSeal("Dragon", {force: true}); // 2 seals on Dragon
+			const availBefore = state.getSealsAvailable();
+			const result = state.burnSeals(placed.id, 2, "necrotic");
+			expect(result).toBeTruthy();
+			expect(result.count).toBe(2);
+			expect(result.damageType).toBe("necrotic");
+			expect(result.dice).toBe("4d6"); // 2 seals × sealDamageDieCount(2 at L5)
+			expect(state.isInterdicted("Dragon")).toBe(false); // all burned
+			expect(state.getSealsAvailable()).toBe(availBefore); // burning never refunds the pool
+		});
+
+		it("burning fewer seals than present leaves the remainder", () => {
+			const placed = state.placeSeal("Lich", {force: true});
+			state.placeSeal("Lich", {force: true});
+			state.placeSeal("Lich", {force: true}); // 3 on Lich
+			const result = state.burnSeals(placed.id, 1, "fire");
+			expect(result.count).toBe(1);
+			expect(result.dice).toBe("2d6"); // 1 seal × 2
+			expect(state.getSealPlacements()[0].count).toBe(2);
+		});
+
+		it("defaults the burn damage type to fire", () => {
+			const placed = state.placeSeal("Skeleton", {force: true});
+			expect(state.burnSeals(placed.id, 1).damageType).toBe("fire");
+		});
+
+		it("can burn by target name as well as placement id", () => {
+			state.placeSeal("Wraith", {force: true});
+			const result = state.burnSeals("Wraith", 1, "necrotic");
+			expect(result).toBeTruthy();
+			expect(result.target).toBe("Wraith");
+		});
+
+		it("moveSeals relocates all of a dying creature's seals to a new creature", () => {
+			const placed = state.placeSeal("Cultist", {force: true});
+			state.placeSeal("Cultist", {force: true}); // 2 on Cultist
+			const moved = state.moveSeals(placed.id, "Acolyte");
+			expect(moved.target).toBe("Acolyte");
+			expect(moved.count).toBe(2);
+			expect(state.isInterdicted("Cultist")).toBe(false);
+			expect(state.isInterdicted("Acolyte")).toBe(true);
+		});
+
+		it("moveSeals merges into an existing placement on the new target", () => {
+			const p1 = state.placeSeal("A", {force: true});
+			state.placeSeal("B", {force: true});
+			const moved = state.moveSeals(p1.id, "B");
+			expect(moved.target).toBe("B");
+			expect(moved.count).toBe(2);
+			expect(state.getSealPlacements()).toHaveLength(1);
+		});
+	});
+
+	// ----------------------------------------------------------------------
+	// Recharge on a SHORT and a LONG rest
+	// ----------------------------------------------------------------------
+	describe("recharge (short & long rest semantics)", () => {
+		it("restoreSeals refills the pool and clears all placements", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 3});
+			state.placeSeal("X", {force: true});
+			state.placeSeal("Y", {force: true});
+			expect(state.getSealsAvailable()).toBeLessThan(state.getSealsMax());
+			state.restoreSeals();
+			expect(state.getSealsAvailable()).toBe(state.getSealsMax());
+			expect(state.getSealPlacements()).toHaveLength(0);
+		});
+
+		it("syncs the Baleful Interdict feature uses on restore", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
+			addBalefulFeature(state);
+			state.placeSeal("Z", {force: true});
+			expect(state.getFeatures().find(f => f.name === "Baleful Interdict").uses.current).toBe(2);
+			state.restoreSeals();
+			expect(state.getFeatures().find(f => f.name === "Baleful Interdict").uses.current).toBe(3);
+		});
+
+		it("uses a short-rest recharge tag, so the rest engine restores it on BOTH rests", () => {
+			// rest.js restores any feature whose uses.recharge === "short" on a short OR
+			// long rest; the curated tag therefore guarantees seals come back on both.
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
+			addBalefulFeature(state);
+			expect(state.getFeatures().find(f => f.name === "Baleful Interdict").uses.recharge).toBe("short");
+		});
+	});
+
+	// ----------------------------------------------------------------------
+	// Once-per-turn placement gate
+	// ----------------------------------------------------------------------
+	describe("once-per-turn placement gate", () => {
+		beforeEach(() => { state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 5}); });
+
+		it("blocks a second placement in the same round but allows it the next round", () => {
+			expect(state.placeSeal("R1", {round: 1})).toBeTruthy();
+			expect(state.canPlaceSealThisTurn(1)).toBe(false);
+			expect(state.placeSeal("R1b", {round: 1})).toBeNull();
+			expect(state.canPlaceSealThisTurn(2)).toBe(true);
+			expect(state.placeSeal("R2", {round: 2})).toBeTruthy();
+		});
+
+		it("is not gated outside combat (no active round)", () => {
+			expect(state.placeSeal("A")).toBeTruthy();
+			expect(state.placeSeal("B")).toBeTruthy();
+		});
+	});
+
+	// ----------------------------------------------------------------------
+	// DC display
+	// ----------------------------------------------------------------------
+	it("exposes the interdict save DC for the panel (8 + prof + CHA)", () => {
+		state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
+		state.setAbilityBase("cha", 16);
+		expect(state.getFeatureCalculations().interdictDc).toBe(13);
+	});
+
+	// ----------------------------------------------------------------------
+	// Known interdict boons (#7 framework)
+	// ----------------------------------------------------------------------
+	describe("known interdict boons (#7 framework)", () => {
+		it("getInterdictBoons returns features tagged with the ItdBoon optional-feature type", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 7});
+			state.addFeature({name: "Boon of Vengeance", source: "IllriggerRevised", optionalFeatureTypes: ["ItdBoon"], description: "When a creature dies..."});
+			state.addFeature({name: "Some Other Feature", source: "IllriggerRevised", description: "A passive thing."});
+			const boons = state.getInterdictBoons();
+			expect(boons).toHaveLength(1);
+			expect(boons[0].name).toBe("Boon of Vengeance");
+		});
+
+		it("also recognises the ItdBoon tag stored on featureType", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 7});
+			state.addFeature({name: "Boon of Flame", source: "IllriggerRevised", featureType: "ItdBoon", description: "Passive."});
+			expect(state.getInterdictBoons().map(b => b.name)).toContain("Boon of Flame");
+		});
+
+		it("returns an empty list when no boons are known", () => {
+			state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
+			expect(state.getInterdictBoons()).toEqual([]);
+		});
+	});
+
+	// ----------------------------------------------------------------------
+	// Serialization round-trip
+	// ----------------------------------------------------------------------
+	it("persists the seal pool across toJson / loadFromJson", () => {
+		state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 5});
+		state.placeSeal("Persisted", {force: true});
+		const json = state.toJson();
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(json);
+		expect(restored.isInterdicted("Persisted")).toBe(true);
+		expect(restored.getSealsAvailable()).toBe(state.getSealsAvailable());
+	});
+
+	it("self-heals a legacy save with no illriggerSeals block", () => {
+		state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 5});
+		const json = state.toJson();
+		delete json.illriggerSeals; // legacy save predates the seal pool
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(json);
+		expect(restored.getSealsAvailable()).toBe(restored.getSealsMax());
+		expect(restored.getSealPlacements()).toEqual([]);
+	});
+});

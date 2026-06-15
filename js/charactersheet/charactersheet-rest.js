@@ -929,6 +929,13 @@ class CharacterSheetRest {
 			this._state.restoreArcaneShot?.();
 		}
 
+		// Restore Illrigger Seals (Baleful Interdict) - the seal pool refreshes on a
+		// SHORT or LONG rest, so it is restored unconditionally here (placements always
+		// clear too, since seals last only 1 minute and never survive a rest).
+		if (this._state.hasBalefulInterdict?.()) {
+			this._state.restoreSeals?.();
+		}
+
 		// Restore Fighter Second Wind / Action Surge - recharge on short OR long rest.
 		// Explicit (in addition to the generic feature-uses loop above) so the per-rest max
 		// is re-scaled to the current Fighter level before refilling.
