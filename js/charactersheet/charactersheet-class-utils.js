@@ -4090,15 +4090,17 @@ class CharacterSheetClassUtils {
 	 * @param {object} opts
 	 * @param {string} opts.sourceFeature
 	 * @param {string} opts.sourceClass
+	 * @param {string|null} [opts.ability] - Per-cantrip spellcasting ability override (e.g. a racial cantrip whose ability is chosen by the player)
 	 * @returns {*} Cantrip state object
 	 */
-	static buildCantripStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass}) {
+	static buildCantripStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass, ability = null}) {
 		return {
 			name: spell.name,
 			source: spell.source,
 			school: spell.school,
 			sourceFeature,
 			sourceClass,
+			spellcastingAbility: ability || null,
 			castingTime: CharacterSheetClassUtils.getSpellCastingTime(spell),
 			range: CharacterSheetClassUtils.getSpellRange(spell),
 			components: CharacterSheetClassUtils.getSpellComponents(spell),
@@ -5062,6 +5064,93 @@ class CharacterSheetClassUtils {
 				{featureType},
 			));
 		});
+
+		// Re-apply the Hochling "Divine Manifestation" choice so its level-gated
+		// options (Aasimar transformation @ L3, War God's Blessing @ L6) surface as
+		// the character levels up past the builder's L1 race step.
+		CharacterSheetClassUtils.applyRaceManifestation(state, page);
+	}
+
+	/**
+	 * Synthesised feature objects for the two working Hochling "Divine Manifestation"
+	 * options. Kept here (deterministic, no data-lookup) so the grant is testable and
+	 * has no `_page` dependency. Each carries a `_raceManifestation` tag and a `level`
+	 * unlock gate; `addFeature` dedups by name+source and honours the explicit `uses`.
+	 * @returns {Object<string, *[]>}
+	 */
+	static getRaceManifestationFeatures () {
+		return {
+			war: [
+				{
+					name: "Guided Strike",
+					source: "TGTT",
+					featureType: "Species",
+					level: 1,
+					_raceManifestation: "war",
+					uses: {max: 1, recharge: "short"},
+					description: "You can use your Channel Divinity to strike with supernatural accuracy. "
+						+ "When you make an attack roll, you can use your Channel Divinity to gain a +10 bonus to the roll. "
+						+ "You make this choice after you see the roll, but before the DM says whether the attack hits or misses.",
+				},
+				{
+					name: "War God's Blessing",
+					source: "TGTT",
+					featureType: "Species",
+					level: 6,
+					_raceManifestation: "war",
+					uses: {max: 1, recharge: "short"},
+					description: "When a creature within 30 feet of you makes an attack roll, you can use your reaction "
+						+ "to grant a +10 bonus to the roll, using your Channel Divinity. You make this choice after you see "
+						+ "the roll, but before the DM says whether the attack hits or misses.",
+				},
+			],
+			aasimar: [
+				{
+					name: "Celestial Revelation",
+					source: "TGTT",
+					featureType: "Species",
+					level: 3,
+					_raceManifestation: "aasimar",
+					description: "When you reach character level 3, you can transform as a Bonus Action using one of the "
+						+ "options below (choose the option each time you transform). The transformation lasts for 1 minute or "
+						+ "until you end it (no action required). Once you transform, you can't do so again until you finish a "
+						+ "Long Rest. Here are the transformation options: Heavenly Wings. Two spectral wings sprout from your "
+						+ "back temporarily. Until the transformation ends, you have a Fly Speed equal to your Speed.",
+				},
+			],
+		};
+	}
+
+	/**
+	 * Apply the Hochling "Divine Manifestation" race choice. Idempotent and
+	 * level-aware: removes features belonging to the non-chosen option (or now gated
+	 * above the current level), then grants the chosen option's features whose unlock
+	 * level has been reached. Safe to call at any rebuild point (builder apply,
+	 * level-up, quick-build) because `state.getTotalLevel()` is authoritative there.
+	 * @param {*} state
+	 * @param {*} [page] - unused; accepted for call-site parity
+	 */
+	static applyRaceManifestation (/** @type {*} */ state, /** @type {*} */ page) {
+		const choice = state.getRaceManifestationChoice?.() || null;
+		const totalLevel = state.getTotalLevel?.() || 1;
+		const all = CharacterSheetClassUtils.getRaceManifestationFeatures();
+
+		// Tear down any previously-granted manifestation feature that no longer
+		// belongs (different choice, no choice, or now above the current level).
+		(state.getFeatures?.() || [])
+			.filter((/** @type {*} */ f) => f && f._raceManifestation)
+			.forEach((/** @type {*} */ f) => {
+				const keep = choice
+					&& f._raceManifestation === choice
+					&& (all[choice] || []).some((/** @type {*} */ def) => def.name === f.name && (def.level || 1) <= totalLevel);
+				if (!keep) state.removeFeature(f.id);
+			});
+
+		if (!choice || !all[choice]) return;
+
+		all[choice]
+			.filter((/** @type {*} */ def) => (def.level || 1) <= totalLevel)
+			.forEach((/** @type {*} */ def) => state.addFeature({...def}));
 	}
 
 	/** @private */
