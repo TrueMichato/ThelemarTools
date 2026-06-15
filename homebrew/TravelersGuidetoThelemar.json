@@ -13400,6 +13400,7 @@
 						{
 							"mode": "appendArr",
 							"items": [
+								"Weapon Mastery|Illrigger|TGTT-IllR|2",
 								"Specialties|Illrigger|TGTT-IllR|3",
 								"Specialties|Illrigger|TGTT-IllR|5",
 								"Specialties|Illrigger|TGTT-IllR|7",
@@ -13408,6 +13409,16 @@
 								"Specialties|Illrigger|TGTT-IllR|14",
 								"Specialties|Illrigger|TGTT-IllR|19"
 							]
+						},
+						{
+							"mode": "replaceArr",
+							"replace": "Invoke Hell|Illrigger|IllriggerRevised|3",
+							"items": "Invoke Hell|Illrigger|TGTT-IllR|3"
+						},
+						{
+							"mode": "replaceArr",
+							"replace": "Ability Score Improvement|Illrigger|IllriggerRevised|19",
+							"items": "Epic Boon|Illrigger|TGTT-IllR|19"
 						}
 					],
 					"classTableGroups": [
@@ -22317,6 +22328,39 @@
 			]
 		},
 		{
+			"name": "Weapon Mastery",
+			"source": "TGTT-IllR",
+			"className": "Illrigger",
+			"classSource": "TGTT-IllR",
+			"level": 2,
+			"entries": [
+				"Your training with weapons allows you to use the {@variantrule weapon mastery properties|XPHB|mastery properties} of two kinds of {@filter weapons|items|type=simple weapon;martial weapon} of your choice with which you have proficiency, such as {@item Longsword|XPHB|Longswords} and {@item Javelin|XPHB|Javelins}.",
+				"Whenever you finish a {@variantrule Long Rest|XPHB}, you can change the kinds of weapons you chose. For example, you could switch to using the {@variantrule weapon mastery properties|XPHB|mastery properties} of {@item Halberd|XPHB|Halberds} and {@item Flail|XPHB|Flails}."
+			]
+		},
+		{
+			"name": "Invoke Hell",
+			"source": "TGTT-IllR",
+			"className": "Illrigger",
+			"classSource": "TGTT-IllR",
+			"level": 3,
+			"entries": [
+				"Your diabolic connection allows you to channel infernal energy to fuel magical effects. Each Invoke Hell option provided by your archdevil contract describes how to use it. When you use your Invoke Hell, you choose which option to use.",
+				"You can use Invoke Hell twice. You regain one expended use when you finish a {@variantrule Short Rest|XPHB}, and you regain all expended uses when you finish a {@variantrule Long Rest|XPHB}. You gain an additional use when you reach 11th level in this class.",
+				"Some Invoke Hell effects require a saving throw. When you use such an effect, the DC equals your interdict save DC."
+			]
+		},
+		{
+			"name": "Epic Boon",
+			"source": "TGTT-IllR",
+			"className": "Illrigger",
+			"classSource": "TGTT-IllR",
+			"level": 19,
+			"entries": [
+				"You gain an {@filter Epic Boon feat|feats|category=EB} or another {@5etools feat|feats.html} of your choice for which you qualify."
+			]
+		},
+		{
 			"name": "Specialties",
 			"source": "TGTT-IllR",
 			"className": "Illrigger",
@@ -29019,12 +29063,36 @@
 	],
 	"language": [
 		{
+			"name": "Common",
+			"source": "TGTT",
+			"type": "standard",
+			"script": "common",
+			"dialects": [
+				"Lexalian",
+				"Olympian",
+				"Jaknian",
+				"Clairnian",
+				"Hubian"
+			],
+			"typicalSpeakers": [
+				"Children of the Empire"
+			],
+			"entries": [
+				"Common is the language spoken throughout the lands of Thelemar, with each country using a different dialect in addition to the general, \"common\" use. It evolved from the old language of the empire, which is found today only in ancient texts and artifacts.",
+				"The five recognised dialects of Common\u2014Lexalian, Olympian, Jaknian, Clairnian and Hubian\u2014share a common root, yet a speaker of one will have a hard time understanding a speaker of another. Different dialects also colour the accent each speaker brings to the general common.",
+				"Reading and writing are quite widespread throughout Thelemar, with the majority of the population, even in rural villages, being able to read and write in Common. The writing in common has a unique property of including Tone Indicators as an integral part of the writing."
+			]
+		},
+		{
 			"name": "Lexalian",
 			"source": "TGTT",
 			"type": "standard",
 			"script": "common",
 			"typicalSpeakers": [
 				"Children of the Empire (Lexalia)"
+			],
+			"entries": [
+				"The mercantile dialect of the Lexalian Republic, polished by guild charters, dock-ledgers and the close-clipped haggling of its bazaars. Lexalian trims the lilt of older Common into something precise and contractual: phrases run short, vowels stay clean, and idioms leave little room for mistaking a price."
 			]
 		},
 		{
@@ -29034,6 +29102,9 @@
 			"script": "common",
 			"typicalSpeakers": [
 				"Children of the Empire (Theocracy)"
+			],
+			"entries": [
+				"The dialect of the Theocracy, shaped by liturgy and recitation. Olympian carries long, rolling vowels and a fondness for elevated registers borrowed from celestial hymnals, and even casual speech can sound like a sermon. Public oratory is a prized craft, and Olympian-speakers tend to gesture broadly as they talk."
 			]
 		},
 		{
@@ -29043,6 +29114,9 @@
 			"script": "common",
 			"typicalSpeakers": [
 				"Children of the Empire (Jaknia)"
+			],
+			"entries": [
+				"The dialect of the Jaknian Conglomerate, hammered into shape by decades of military command and frontier garrison duty at the edge of the Black Desert. Jaknian is terse and consonant-heavy, with a habit of compounding nouns into single battlefield commands; its Tone Indicators are used sparingly and to brutal effect."
 			]
 		},
 		{
@@ -29052,6 +29126,9 @@
 			"script": "common",
 			"typicalSpeakers": [
 				"Children of the Empire (Clairnia)"
+			],
+			"entries": [
+				"The dialect of Clairnia, sung as much as it is spoken. Born of farming hamlets and jungle-edge settlements, Clairnian uses musical pitch in a way no other dialect does, and its Tone Indicators have grown into something closer to a notation system than a punctuation mark."
 			]
 		},
 		{
@@ -29061,6 +29138,9 @@
 			"script": "common",
 			"typicalSpeakers": [
 				"Children of the Empire (Hub)"
+			],
+			"entries": [
+				"The traders' creole of the Hub, where all four nations meet and none rule alone. Hubian borrows freely from every other dialect of Common, peppered with loan-words from J\u00f6tunn, Gob and even Sylvan picked up on the docks. It is the easiest dialect for an outsider to learn, and the hardest to speak with any pride of place."
 			]
 		},
 		{
@@ -29070,6 +29150,9 @@
 			"script": "common",
 			"typicalSpeakers": [
 				"Monks"
+			],
+			"entries": [
+				"The colloquial term for the language spoken in the times of The Empire, from which modern day common and its dialects evolved. While the language is mostly dead, it has its uses in the Monasteries of the Old Gods and in the hands of archaeologists studying the fallen empire. In addition, partly due to tradition, newer Teleportation Circles are still manufactured using Old Common glyphs."
 			]
 		},
 		{
@@ -29080,6 +29163,9 @@
 			"typicalSpeakers": [
 				"Descathi",
 				"Shadowfell denizens"
+			],
+			"entries": [
+				"A corruption of Sylvan, this language is spoken in the Shadow Realm, the home of the enigmatic Lord of Spiders and various shadowy beings. It sounds very similar to Sylvan, but does not exhibit the same property of preventing the speaker from uttering lies\u2014a fact its Descathi speakers above all have learned to turn into a weapon."
 			]
 		},
 		{
@@ -29091,56 +29177,74 @@
 				"Fiends of Mictlān",
 				"Tieflings",
 				"Gnolls"
+			],
+			"entries": [
+				"Originating in the place called Mictl\u0101n, this harsh and guttural language is associated with darkness and despair, though it does not have any properties other than its origin that enforce this perception. It is spoken by tieflings and gnolls, and its written form borrows its harshest strokes from infernal contracts."
 			]
 		},
 		{
 			"name": "Jotunn",
 			"source": "TGTT",
 			"type": "exotic",
-			"script": "giant",
+			"script": "runic",
 			"typicalSpeakers": [
 				"Ogres",
 				"Goliaths",
 				"Giants"
+			],
+			"entries": [
+				"Often called \"Language of Giants\", for its origins are rumored to be related to the mythical frost giants who opposed the norse gods. J\u00f6tunn is spoken by ogres, firbolgs and goliath, and is tailored to big lungs and mouths, making it difficult for smaller creatures to speak without sounding like they are whispering or mumbling the words."
 			]
 		},
 		{
-			"name": "Avian",
+			"name": "Skyspeak",
 			"source": "TGTT",
 			"type": "exotic",
 			"script": "auran",
 			"typicalSpeakers": [
 				"Tengu",
 				"Kenku"
+			],
+			"entries": [
+				"The clipped, whistling tongue of the bird-folk, set down in the coiling glyphs the air elementals share. Skyspeak is built around mimicry and short repeated motifs, and its Tengu and Kenku speakers often weave whole conversations out of borrowed phrases and remembered sounds. To an outsider it can read as nonsense; to a fluent speaker every imitation carries intent."
 			]
 		},
 		{
 			"name": "Gob",
 			"source": "TGTT",
 			"type": "exotic",
-			"script": "goblin",
+			"script": "gob",
 			"typicalSpeakers": [
 				"Goblins",
 				"Hobgoblins",
 				"Bugbears"
+			],
+			"entries": [
+				"Spoken by goblins, hobgoblins and bugbears, this language is highly structured and relies heavily on honorific speech, making it quite easy for those who are studying the language to make innocent mistakes in referring to themselves or their peers. A slip in Gob can mean a slip in rank, and outsiders are forgiven less often than they hope."
 			]
 		},
 		{
-			"name": "Loxodon",
+			"name": "Trunkodon",
 			"source": "TGTT",
 			"type": "exotic",
-			"script": "common",
+			"script": "terran",
 			"typicalSpeakers": [
 				"Loxodons"
+			],
+			"entries": [
+				"The ancestral tongue of the Loxodons of the Boundless Jungle, written in the common script but spoken with the deep resonance only their lungs allow. Trunkodon is a language of memory\u2014verbs carry tense markers that reach generations back, and even casual conversation can name the speaker's matriarchal line. It is rarely taught to outsiders, but rarely refused to a guest who asks with respect."
 			]
 		},
 		{
-			"name": "Tabaxi",
+			"name": "Felis",
 			"source": "TGTT",
 			"type": "exotic",
-			"script": "common",
+			"script": "terran",
 			"typicalSpeakers": [
 				"Tabaxi"
+			],
+			"entries": [
+				"The nomad tongue of the Tabaxi of Clairnia's Boundless Jungle. Long suppressed under Clairnian slavery, Felis survived by hiding inside dance and song, and it still carries the rhythm of the martial performances that preserved it. Its speakers favour quick, percussive syllables and a fondness for storytelling phrases that have no clean rendering in Common."
 			]
 		},
 		{
@@ -29150,6 +29254,68 @@
 			"script": "common",
 			"typicalSpeakers": [
 				"Minotaurs"
+			],
+			"entries": [
+				"The herd tongue of the Minotaur clans, one of the Twisted Races that emerged after The Collapse. Minotaur uses the common script but renders it with long, drawn-out vowels and stamping cadences suited to open ground and large gatherings. Oaths spoken in Minotaur are taken with unusual seriousness\u2014to break one is to be cast out of the herd."
+			]
+		},
+		{
+			"name": "Draconic",
+			"source": "TGTT",
+			"type": "exotic",
+			"script": "draconic",
+			"typicalSpeakers": [
+				"Dragonborn",
+				"Kobolds"
+			],
+			"entries": [
+				"Thought to be one of the oldest languages, and often used in the study of magic, since some of the greatest mages (like Netz the Transmuter and Arani the Evoker) were taught magic by ancient dragons. It sounds harsh to most other creatures and includes numerous hard consonants and sibilants, and is often spoken by dragonborn and kobolds."
+			]
+		},
+		{
+			"name": "Sylvan",
+			"source": "TGTT",
+			"type": "exotic",
+			"script": "sylvan",
+			"typicalSpeakers": [
+				"Fey creatures",
+				"Centaurs",
+				"Satyrs",
+				"Firbolgs"
+			],
+			"entries": [
+				"The language of fey creatures is elusive and often perplexing, and it is said no amount of studies allows one to speak it fluently. It sounds flowery, with song-like qualities, and a unique trait\u2014lying in Sylvan (by intention) is quite impossible. Clever wordplays and trickery of words still pass, but any attempt to utter a clear falsehood stops in its tracks. Spoken throughout the Feywyld, and also by Centaurs, Satyrs and Firbolgs, all of whom have their origins tied to the Feywyld."
+			]
+		},
+		{
+			"name": "Primordial",
+			"source": "TGTT",
+			"type": "exotic",
+			"script": "primordial",
+			"dialects": [
+				"Ignan",
+				"Auran",
+				"Aquan",
+				"Terran"
+			],
+			"typicalSpeakers": [
+				"Elementals"
+			],
+			"entries": [
+				"The language of the elemental planes, actually an umbrella term for 4 dialects: Ignan (Fire), Auran (Air), Aquan (Water), and Terran (Earth). These 4 languages are dialects only by linguistic origin, and hardly any word spoken in one can be understood by another."
+			]
+		},
+		{
+			"name": "Celestial",
+			"source": "TGTT",
+			"type": "exotic",
+			"script": "celestial",
+			"typicalSpeakers": [
+				"Gods",
+				"Celestials"
+			],
+			"entries": [
+				"More of a blanket term for the languages of the gods. These languages carry an air of gravitas to them that no other language can convey. They are often mixed together by those learning them, and though gods choose their own dialect to communicate in, the differences are not big enough to create confusion."
 			]
 		}
 	],
@@ -29770,6 +29936,32 @@
 			],
 			"entries": [
 				{
+					"type": "quote",
+					"entries": [
+						"While they all suffer from the pride of their ancestors, all the great stories will tell you that their pride stands on a firm base. It is a great thing for us mortals, that they are born wingless; if they weren't, I believe we wouldn't have been the rulers of these lands."
+					],
+					"by": "Dimbaal Noretso Grim, Old Storyteller"
+				},
+				"Thelemerian Dragonborn are a tough breed, inheriting much more from their dragon ancestors than usual D&D dragonborn. Born of dragons, as their name proclaims, the Dragonborn walk proudly through a world that greets them with fearful incomprehension. Whether growing estranged from their dragonic ancestors or close with them, dragonborn live with their heritage shaping every step of their lives.",
+				{
+					"type": "entries",
+					"name": "Offsprings of Dragons",
+					"entries": [
+						"Dragonborn look very much like dragons standing erect in humanoid form, though they lack wings.",
+						"The dragonborn have scales of vibrant hues matching the colors of their dragon ancestors, though this trait weakens with interbreeding and creates a more uniform appearance of small, fine scales that are usually brass or bronze in color, sometimes ranging to scarlet, rust, gold, or copper-green. This trait separates first generation dragonborn from the rest of their cousins.",
+						"Dragonborn are tall and strongly built, often standing close to 6½ feet tall and weighing 300 pounds or more. Their hands and feet are strong, talonlike claws with three fingers and a thumb on each hand."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Self-Sufficient And Driven",
+					"entries": [
+						"The dragonborn inherit their dragonic ancestors' sense of dignity and power. They all strive to live up to the legacy of their dragon ancestors, to live up to their immense potential. This drive becomes more powerful as the dragonborn ages, in line with how real dragons grow more powerful with age.",
+						"Dragonborns exhibit a continual drive for self-improvement. They value skill and excellence in all endeavors, hate to fail, and push themselves to extreme efforts before they give up on something. A dragonborn holds mastery of a particular skill as a lifetime goal. Members of other races who share the same commitment find it easy to earn the respect of a dragonborn.",
+						"Dragonborn often believe themselves to be immensely capable, and strive to be as self-sufficient as they can in all walks of life, struggling to accept help from creatures they deem to be weaker than they are."
+					]
+				},
+				{
 					"type": "entries",
 					"name": "Dragon Scales",
 					"entries": [
@@ -30159,13 +30351,143 @@
 		{
 			"name": "Hochling",
 			"source": "TGTT",
-			"alias": [
-				"Hochling"
+			"page": 0,
+			"creatureTypes": [
+				"humanoid"
 			],
-			"_copy": {
-				"name": "Aasimar",
-				"source": "MPMM"
-			}
+			"size": [
+				"S",
+				"M"
+			],
+			"speed": 30,
+			"darkvision": 60,
+			"resist": [
+				"radiant",
+				"necrotic"
+			],
+			"languageProficiencies": [
+				{
+					"common": true,
+					"celestial": true
+				}
+			],
+			"entries": [
+				{
+					"type": "quote",
+					"entries": [
+						"Many of you dream of being touched by the gods, of walking in their gaze. Few understand the burden of living under such pressure."
+					],
+					"by": "Dimbaal Noretso Grim, Old Storyteller"
+				},
+				"The gods rarely walk among mortals \u2014 Their power is too great, their concerns too vast, their existence too distant from the world they safeguard. Yet from time to time a fragment of divine essence finds its way into a mortal bloodline.",
+				"Some Hochlings descend from ancient unions between gods and mortals. Others are the descendants of saints, prophets, kings, or heroes who earned divine favor. In rare cases a child may be born a Hochling after generations of apparently mundane ancestry, the divine spark lying dormant until suddenly reawakening.",
+				"Though many people regard them with reverence, envy, or awe, Hochlings quickly learn that admiration can be as heavy as hatred; Every mistake \u2014 a scandal; Every failure \u2014 proof that they have lost the favor of their god.",
+				{
+					"type": "entries",
+					"name": "Divine Heritage",
+					"entries": [
+						"Most Hochlings appear largely human, though subtle signs reveal their divine ancestry.",
+						"Their eyes often possess unusual qualities: pupils shaped like stars, eyes of solid gold or silver, or irises that glow faintly in darkness. Their hair can also signal their heritage, sometimes displaying impossible colors or shining with an otherworldly luster.",
+						"Many Hochlings also unconsciously manifest signs of divine favor when experiencing strong emotions. Their eyes may glow, faint music may accompany their presence, flowers may bloom in their footsteps, or shadows may bend away from them.",
+						"A Hochling descended from a beast-headed deity may inherit more obvious traits. A child of Horus god might possess golden eyes and feathers growing among their hair, and descendants of Sekhmet may display feline ears, elongated canines, or tawny fur upon their skin. Such traits vary widely between bloodlines and individuals, and may even become pronounced enough to produce hochling that appear as their gods do, half beast and half man."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Burden of Divinity",
+					"entries": [
+						"The common folk often treat Hochlings very differently from Tieflings \u2014 it is widely assumed a Hochling must be wise, virtuous, and favored by the gods. The common folk often treats them as messengers of the gods, expecting miracles at every step and seeing every word out of their mouth as gospel.",
+						"Yet a Hochling is no more perfect than any other mortal. Some embrace the expectations placed upon them and strive to become living examples of their deity's ideals, while others reject such burdens entirely. Many spend their lives trying to determine whether their divine ancestry grants them a purpose\u2014or merely a reputation."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Mortal Nature",
+					"entries": [
+						"Your creature type is Humanoid."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Darkvision",
+					"entries": [
+						"Blessed by divine power, you can see in dim light within 60 feet of you as if it were bright light and in darkness as if it were dim light."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Age",
+					"entries": [
+						"Hochlings mature at the same rate as Children but often live slightly longer."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Alignment",
+					"entries": [
+						"The blood of the gods does not dictate destiny. Hochlings can be found among every alignment, though many feel pressure to embody the ideals associated with their divine ancestor."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Size",
+					"entries": [
+						"Hochlings are about the same size and build as Children. Your size is Medium or Small."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Speed",
+					"entries": [
+						"Your base walking speed is 30 feet."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Celestial Resistance",
+					"entries": [
+						"You have resistance to radiant and necrotic damage."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Healing Hands",
+					"entries": [
+						"As an action, you can touch a creature and restore a number of d4s equal to your proficiency bonus. The creature regains a number of hit points equal to the total rolled. Once you use this trait, you can't use it again until you finish a long rest."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Divine Spark",
+					"entries": [
+						"Choose one Cleric cantrip. The cantrip should reflect the nature of the deity or divine power from which your bloodline descends. Wisdom, Intelligence, or Charisma (chosen when you gain this trait) is your spellcasting ability for it."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Languages",
+					"entries": [
+						"You can speak, read, and write Common (General and one dialect) and Celestial."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Divine Manifestation",
+					"entries": [
+						"The divine essence within every Hochling manifests differently. The manifestation reflects the deity, divine domain, or divine power from which your lineage descends.",
+						"You gain one Channel Divinity option from an approved Cleric Domain. You can use that Channel Divinity once, and regain the ability to do so when you finish a short or long rest.",
+						{
+							"type": "list",
+							"items": [
+								"If the Channel Divinity refers to your Cleric level, use your character level instead.",
+								"If the Channel Divinity requires a saving throw, the DC equals: {@b 8 + your proficiency bonus + your choice of Wisdom, Intelligence, or Charisma} (chosen when you gain this trait)."
+							]
+						},
+						"Examples of suitable manifestations include those associated with the Trickery, Light, Grave, War, Peace, Order, Knowledge, Nature, Forge, Death, Beauty, Blood, Time, Madness, Lust, and Darkness domains.",
+						"Alternatively, you may choose the traditional Aasimar transformation feature instead of a Channel Divinity."
+					]
+				}
+			]
 		},
 		{
 			"name": "Tengu",
@@ -31191,18 +31513,13 @@
 			"raceSource": "TGTT",
 			"traitTags": [],
 			"entries": [
+				"You carry the lineage of dragons who embody the world's primal fears. A subtle dread often precedes you, and your actions, whether intentional or not, can sow unease. Your scales might be the color of deepest shadow, withered bone, or chilling blight, and your eyes might gleam with unsettling light.",
 				{
 					"type": "entries",
 					"name": "Terrifying Exhalation",
 					"entries": [
-						"When you take the Attack action on your turn, you can replace one of your attacks with an exhalation of terrifying energy in a 15-foot cone. Each creature in that area must make a Wisdom saving throw (DC 8 + your Constitution modifier + your proficiency bonus). On a failed save, the creature takes {@damage 1d10} psychic damage and has disadvantage on the first attack roll or saving throw it makes before the start of your next turn. On a successful save, the creature takes half damage. The damage increases to {@damage 2d10} at 5th level, {@damage 3d10} at 11th level, and {@damage 4d10} at 17th level. You can use this trait a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Aura of Dread",
-					"entries": [
-						"Starting at 5th level, as an action, you can emanate an aura of subtle dread in a 15-foot radius for 1 minute. Hostile creatures that start their turn in the aura must make a Wisdom saving throw (DC 8 + your Charisma modifier + your proficiency bonus) or be frightened of you until the end of your next turn. A creature that succeeds is immune to the aura for 24 hours. You can use this trait once per short or long rest."
+						"When you take the Attack action on your turn, you can replace one of your attacks with an exhalation of terrifying energy in a 15-foot cone. Each creature in that area must make a Wisdom saving throw (DC 8 + your Constitution modifier + your proficiency bonus). On a failed save, the creature takes {@damage 1d10} psychic damage and is frightened of you until the start of your next turn. On a successful save, the creature takes half the damage and is not frightened.",
+						"The damage increases to {@damage 2d10} at 5th level, {@damage 3d10} at 11th level, and {@damage 4d10} at 17th level. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest."
 					]
 				}
 			]
@@ -31213,18 +31530,13 @@
 			"raceName": "Thelemerian Dragonborn",
 			"raceSource": "TGTT",
 			"entries": [
+				"You are descended from dragons who embody the world's fundamental securities. Your presence can soothe anxieties and inspire courage in others. Your scales might be the color of pure dawn, shimmering gold, or verdant harmony, and your eyes might radiate a comforting glow.",
 				{
 					"type": "entries",
 					"name": "Resonant Ward",
 					"entries": [
-						"When you take the Attack action on your turn, you can replace one of your attacks with an exhalation of resonant energy in a 15-foot cone. Each creature in that area must make a Wisdom saving throw (DC 8 + your Constitution modifier + your proficiency bonus). On a failed save, the creature takes {@damage 1d10} psychic damage and has disadvantage on the first attack roll or saving throw it makes before the start of your next turn. On a successful save, the creature takes half damage. The damage increases to {@damage 2d10} at 5th level, {@damage 3d10} at 11th level, and {@damage 4d10} at 17th level. You can use this trait a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Aura of Protection",
-					"entries": [
-						"Starting at 5th level, as a bonus action, you can emanate an aura of bolstering energy in a 15-foot radius for 1 minute. You and friendly creatures that start their turn in the aura gain temporary hit points equal to your proficiency bonus. These temporary hit points last until the start of their next turn. You can use this trait once per short or long rest."
+						"As an action, you can project a wave of resonant energy in a 15-foot cone. Choose up to three creatures in that area (which can include yourself). Each chosen creature gains a number of temporary hit points equal to {@dice 1d8} + your Constitution modifier and has advantage on the next saving throw they make before the end of their next turn.",
+						"The temporary hit points die increases to {@dice 2d8} at 5th level, {@dice 3d8} at 11th level, and {@dice 4d8} at 17th level. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest."
 					]
 				}
 			]
