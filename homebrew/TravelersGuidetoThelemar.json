@@ -6056,7 +6056,7 @@
 								"perception",
 								"survival"
 							],
-							"count": 2
+							"count": 3
 						}
 					}
 				]
@@ -6603,7 +6603,7 @@
 				],
 				"skills": [
 					{
-						"any": 3
+						"any": 4
 					}
 				]
 			},
@@ -7194,7 +7194,7 @@
 								"persuasion",
 								"religion"
 							],
-							"count": 2
+							"count": 3
 						}
 					}
 				]
@@ -7811,7 +7811,7 @@
 								"religion",
 								"survival"
 							],
-							"count": 2
+							"count": 3
 						}
 					}
 				]
@@ -8434,7 +8434,7 @@
 								"perception",
 								"survival"
 							],
-							"count": 2
+							"count": 3
 						}
 					}
 				]
@@ -8949,7 +8949,7 @@
 								"religion",
 								"stealth"
 							],
-							"count": 2
+							"count": 3
 						}
 					}
 				]
@@ -9691,7 +9691,7 @@
 								"persuasion",
 								"religion"
 							],
-							"count": 2
+							"count": 3
 						}
 					}
 				]
@@ -10327,7 +10327,7 @@
 								"stealth",
 								"survival"
 							],
-							"count": 3
+							"count": 4
 						}
 					}
 				]
@@ -10965,7 +10965,7 @@
 								"sleight of hand",
 								"stealth"
 							],
-							"count": 4
+							"count": 5
 						}
 					}
 				]
@@ -11649,7 +11649,7 @@
 								"persuasion",
 								"religion"
 							],
-							"count": 2
+							"count": 3
 						}
 					}
 				]
@@ -12361,7 +12361,7 @@
 								"nature",
 								"religion"
 							],
-							"count": 2
+							"count": 3
 						}
 					}
 				]
@@ -12788,7 +12788,7 @@
 								"medicine",
 								"religion"
 							],
-							"count": 2
+							"count": 3
 						}
 					}
 				]
@@ -13386,7 +13386,7 @@
 										"might|TGTT",
 										"engineering|TGTT"
 									],
-									"count": 2
+									"count": 3
 								}
 							}
 						]
