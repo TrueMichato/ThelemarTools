@@ -3659,6 +3659,15 @@ class CharacterSheetState {
 				option: "colossus", // "colossus" | "horde" | "giantKiller" (classic only)
 			},
 
+			// Forked Tongue (Illrigger L1/L9) - chosen spoken-only languages that can be
+			// swapped on a long rest (once per rest). Infernal is granted automatically via
+			// the class-feature effect pipeline; these are the player-chosen *swappable*
+			// spoken languages (2 at L1, 3 once Forked Tongue Improvement is gained at L9).
+			forkedTongue: {
+				swappableLanguages: [], // player-chosen spoken-only languages
+				swappedSinceLongRest: false, // once-per-long-rest swap gate
+			},
+
 			// Focus Pool (TGTT Dreamwalker) - Resource for dream abilities
 			focusPool: {
 				current: 0, // Current focus points
@@ -3975,6 +3984,19 @@ class CharacterSheetState {
 		// Ensure grantedProficiencies tracking object exists
 		if (!this._data.grantedProficiencies) {
 			this._data.grantedProficiencies = {skills: {}, tools: {}, weapons: {}, armor: {}, languages: {}};
+		}
+
+		// Ensure Forked Tongue (Illrigger) state exists. Older saves predate this
+		// feature-state block; backward-compatible default keeps load crash-free and
+		// leaves any persisted swappable-language choices intact.
+		if (!this._data.forkedTongue || typeof this._data.forkedTongue !== "object") {
+			this._data.forkedTongue = {swappableLanguages: [], swappedSinceLongRest: false};
+		}
+		if (!Array.isArray(this._data.forkedTongue.swappableLanguages)) {
+			this._data.forkedTongue.swappableLanguages = [];
+		}
+		if (typeof this._data.forkedTongue.swappedSinceLongRest !== "boolean") {
+			this._data.forkedTongue.swappedSinceLongRest = false;
 		}
 
 		// Migrate features: infer featureType for old saves that don't have it
@@ -9655,6 +9677,141 @@ class CharacterSheetState {
 		if (idx >= 0) this._data.languages.splice(idx, 1);
 	}
 	// #endregion
+
+	// #region Forked Tongue (Illrigger)
+	// Forked Tongue (L1) grants Infernal (speak/read/write) automatically via the
+	// class-feature effect pipeline, plus a number of *swappable* spoken-only languages
+	// the player chooses (2 at L1, 3 once Forked Tongue Improvement is gained at L9).
+	// On a long rest the player may replace ONE swappable spoken language with another
+	// (once per long rest). All chosen swappable languages are mirrored into
+	// `_data.languages` so the Thelemar Linguistics bonus counts them.
+
+	/**
+	 * Normalized accessor for the Forked Tongue state block. Repairs malformed/legacy
+	 * shapes in place so callers always get a valid `{swappableLanguages, swappedSinceLongRest}`.
+	 * @returns {{swappableLanguages: string[], swappedSinceLongRest: boolean}}
+	 */
+	getForkedTongueState () {
+		if (!this._data.forkedTongue || typeof this._data.forkedTongue !== "object") {
+			this._data.forkedTongue = {swappableLanguages: [], swappedSinceLongRest: false};
+		}
+		if (!Array.isArray(this._data.forkedTongue.swappableLanguages)) {
+			this._data.forkedTongue.swappableLanguages = [];
+		}
+		if (typeof this._data.forkedTongue.swappedSinceLongRest !== "boolean") {
+			this._data.forkedTongue.swappedSinceLongRest = false;
+		}
+		return this._data.forkedTongue;
+	}
+
+	/**
+	 * @returns {string[]} A copy of the chosen swappable spoken languages.
+	 */
+	getForkedTongueSwappableLanguages () {
+		return [...this.getForkedTongueState().swappableLanguages];
+	}
+
+	/**
+	 * Maximum number of swappable spoken languages the character may have:
+	 * 2 with Forked Tongue (L1), 3 once Forked Tongue Improvement is gained (L9),
+	 * 0 if the character does not have Forked Tongue at all.
+	 * @returns {number}
+	 */
+	getForkedTongueMaxSwappable () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasForkedTongue) return 0;
+		return calc.hasForkedTongueImprovement ? 3 : 2;
+	}
+
+	/**
+	 * @returns {boolean} Whether the once-per-long-rest swap has been used.
+	 */
+	hasSwappedForkedTongueSinceLongRest () {
+		return !!this.getForkedTongueState().swappedSinceLongRest;
+	}
+
+	/**
+	 * Add a swappable spoken language. Mirrors it into `_data.languages` so the
+	 * Linguistics bonus counts it. Rejects duplicates, Infernal (the fixed grant),
+	 * and additions beyond the current maximum.
+	 * @param {string} language
+	 * @returns {boolean} true if added
+	 */
+	addForkedTongueSwappableLanguage (language) {
+		if (!language || !String(language).trim()) return false;
+		const lang = String(language).trim();
+		if (lang.toLowerCase() === "infernal") return false;
+		const ft = this.getForkedTongueState();
+		if (ft.swappableLanguages.some(l => l.toLowerCase() === lang.toLowerCase())) return false;
+		if (ft.swappableLanguages.length >= this.getForkedTongueMaxSwappable()) return false;
+		ft.swappableLanguages.push(lang);
+		this.addLanguage(lang);
+		return true;
+	}
+
+	/**
+	 * Remove a swappable spoken language (and drop it from `_data.languages` unless it
+	 * is otherwise granted).
+	 * @param {string} language
+	 * @returns {boolean} true if removed
+	 */
+	removeForkedTongueSwappableLanguage (language) {
+		const ft = this.getForkedTongueState();
+		const idx = ft.swappableLanguages.findIndex(l => l.toLowerCase() === String(language).toLowerCase());
+		if (idx < 0) return false;
+		const [removed] = ft.swappableLanguages.splice(idx, 1);
+		this._removeForkedTongueLanguageFromList(removed);
+		return true;
+	}
+
+	/**
+	 * Replace ONE swappable spoken language with another, enforcing once-per-long-rest.
+	 * Updates both `_data.forkedTongue.swappableLanguages` and `_data.languages`.
+	 * @param {string} oldLang - a currently-chosen swappable language
+	 * @param {string} newLang - the replacement language
+	 * @returns {boolean} true if the swap happened
+	 */
+	swapForkedTongueLanguage (oldLang, newLang) {
+		const ft = this.getForkedTongueState();
+		if (ft.swappedSinceLongRest) return false; // once per long rest
+		if (!newLang || !String(newLang).trim()) return false;
+		const newName = String(newLang).trim();
+		if (newName.toLowerCase() === "infernal") return false;
+		const idx = ft.swappableLanguages.findIndex(l => l.toLowerCase() === String(oldLang).toLowerCase());
+		if (idx < 0) return false;
+		// Reject a no-op / duplicate swap (new language already chosen elsewhere).
+		if (ft.swappableLanguages.some((l, i) => i !== idx && l.toLowerCase() === newName.toLowerCase())) return false;
+		const [removed] = ft.swappableLanguages.splice(idx, 1);
+		this._removeForkedTongueLanguageFromList(removed);
+		ft.swappableLanguages.push(newName);
+		this.addLanguage(newName);
+		ft.swappedSinceLongRest = true;
+		return true;
+	}
+
+	/**
+	 * Clear the once-per-long-rest swap gate. Called on a long rest.
+	 */
+	resetForkedTongueSwap () {
+		this.getForkedTongueState().swappedSinceLongRest = false;
+	}
+
+	/**
+	 * Remove a former swappable language from `_data.languages`, but only if it is not
+	 * Infernal (the fixed grant) and not otherwise granted by a class feature.
+	 * @param {string} language
+	 * @private
+	 */
+	_removeForkedTongueLanguageFromList (language) {
+		if (!language) return;
+		if (String(language).toLowerCase() === "infernal") return;
+		const classGranted = (this._data._classFeatureLanguages || [])
+			.some(l => l.toLowerCase() === String(language).toLowerCase());
+		if (classGranted) return;
+		this.removeLanguage(language);
+	}
+	// #endregion
+
 
 	// #region Spellcasting
 	getSpellcasting () { return this._data.spellcasting; }
@@ -20528,6 +20685,34 @@ class CharacterSheetState {
 				type: "attackCount",
 				count: calculations.extraAttackCount || 2,
 				source: "Extra Attack",
+			});
+		}
+
+		// =========================================================
+		// ILLRIGGER FEATURES (MCDM — The Illrigger Revised)
+		// =========================================================
+
+		// Forked Tongue (L1): grant Infernal (speak/read/write). The swappable
+		// spoken languages are player choices managed via addForkedTongueSwappableLanguage.
+		if (calculations.hasForkedTongue && !alreadyProcessed("Forked Tongue")) {
+			effects.push({
+				type: "language",
+				language: "Infernal",
+				source: "Forked Tongue",
+			});
+		}
+
+		// Forked Tongue Improvement (L9): advantage on Wisdom (Insight) checks made to
+		// ascertain a creature's true intentions or sincerity. Modeled as a conditional
+		// WIS-check advantage modifier (mirrors Danger Sense's save:dex:advantage). It is
+		// conditional, so it gates off by default and surfaces in the per-roll prompt.
+		if (calculations.hasForkedTongueImprovement && !alreadyProcessed("Forked Tongue Improvement")) {
+			effects.push({
+				type: "modifier",
+				modType: "check:wis:advantage",
+				value: 1,
+				source: "Forked Tongue",
+				conditional: "to ascertain a creature's true intentions or sincerity",
 			});
 		}
 

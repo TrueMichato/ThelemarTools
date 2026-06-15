@@ -636,6 +636,14 @@ class CharacterSheetRest {
 			else modalInner.append(primalFocusSelect.section);
 		}
 
+		// --- Forked Tongue language swap (Illrigger) ---
+		const forkedTongueSwap = this._buildForkedTongueLanguageSwapSection();
+		if (forkedTongueSwap) {
+			const ftTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (ftTarget?.parentNode) ftTarget.parentNode.insertBefore(forkedTongueSwap.section, ftTarget);
+			else modalInner.append(forkedTongueSwap.section);
+		}
+
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		btnConfirm.onClick(() => {
 			// Full HP recovery
@@ -712,6 +720,11 @@ class CharacterSheetRest {
 			// Apply Primal Focus mode selection, if changed (free on a long rest)
 			const primalFocusChanged = primalFocusSelect?.apply() || false;
 
+			// Forked Tongue: a new long rest re-enables the once-per-rest swap, then we
+			// apply any language swap the player chose in this dialog.
+			this._state.resetForkedTongueSwap?.();
+			const forkedTongueChanged = forkedTongueSwap?.apply() || false;
+
 			// Save changes
 			this._page.saveCharacter();
 			this._page.renderCharacter();
@@ -720,6 +733,7 @@ class CharacterSheetRest {
 
 			let message = "🌙 Long rest complete! All resources restored.";
 			if (primalFocusChanged) message += ` Primal Focus set to ${primalFocusChanged}.`;
+			if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
 			if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
@@ -852,6 +866,74 @@ class CharacterSheetRest {
 				if (chosen && chosen !== currentMode) {
 					this._state.setPrimalFocusMode?.(chosen);
 					return chosen === "predator" ? "Predator" : "Prey";
+				}
+				return false;
+			},
+		};
+	}
+
+	/**
+	 * Build a Forked Tongue language-swap control for the long-rest dialog (Illrigger).
+	 * On a long rest the character may replace ONE of their swappable spoken languages
+	 * with another (once per long rest). Returns null when the character lacks Forked
+	 * Tongue or has not yet chosen any swappable languages.
+	 * @returns {{section: HTMLElement, apply: function}|null}
+	 */
+	_buildForkedTongueLanguageSwapSection () {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		if (!calc.hasForkedTongue) return null;
+
+		const swappable = this._state.getForkedTongueSwappableLanguages?.() || [];
+		if (!swappable.length) return null;
+
+		// Candidate replacement languages: a standard spread minus anything already known.
+		const STANDARD_LANGUAGES = [
+			"Abyssal", "Aquan", "Auran", "Celestial", "Deep Speech", "Draconic", "Dwarvish",
+			"Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Ignan", "Orc", "Primordial",
+			"Sylvan", "Terran", "Undercommon",
+		];
+		const known = new Set((this._state.getLanguages?.() || []).map(l => l.toLowerCase()));
+		const replacements = STANDARD_LANGUAGES.filter(l => !known.has(l.toLowerCase()));
+
+		const cbEnable = e_({tag: "input", attrs: {type: "checkbox"}});
+		cbEnable.checked = false;
+
+		const selOld = e_({tag: "select", clazz: "form-control input-sm charsheet__forked-tongue-old-select"});
+		swappable.forEach(lang => {
+			const opt = e_({tag: "option", val: lang, txt: lang});
+			selOld.appendChild(opt);
+		});
+
+		const selNew = e_({tag: "select", clazz: "form-control input-sm charsheet__forked-tongue-new-select"});
+		replacements.forEach(lang => {
+			const opt = e_({tag: "option", val: lang, txt: lang});
+			selNew.appendChild(opt);
+		});
+
+		const section = e_({outer: `<div class="charsheet__rest-section">
+			<div class="charsheet__rest-section-title">👅 Forked Tongue</div>
+			<p class="ve-muted ve-small mb-2">You may replace one of your swappable spoken languages with another (once per long rest):</p>
+		</div>`});
+		const enableLabel = e_({tag: "label", clazz: "charsheet__rest-option"});
+		enableLabel.appendChild(cbEnable);
+		enableLabel.appendChild(e_({tag: "span", txt: " Swap a spoken language"}));
+		section.appendChild(enableLabel);
+		const swapRow = e_({tag: "div", clazz: "ve-flex-v-center", attrs: {style: "gap: 6px; margin-top: 4px;"}});
+		swapRow.appendChild(selOld);
+		swapRow.appendChild(e_({tag: "span", txt: "→"}));
+		swapRow.appendChild(selNew);
+		section.appendChild(swapRow);
+
+		return {
+			section,
+			// Returns the "old → new" label when a swap happened, else false.
+			apply: () => {
+				if (!cbEnable.checked) return false;
+				const oldLang = selOld.value;
+				const newLang = selNew.value;
+				if (!oldLang || !newLang || oldLang.toLowerCase() === newLang.toLowerCase()) return false;
+				if (this._state.swapForkedTongueLanguage?.(oldLang, newLang)) {
+					return `${oldLang} → ${newLang}`;
 				}
 				return false;
 			},
