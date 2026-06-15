@@ -2775,6 +2775,9 @@ class CharacterSheetPage {
 			this._combat.render();
 			// Additive Illrigger Baleful Interdict panel (gated; self-hides when absent).
 			this._combat.renderCombatInterdiction?.();
+			// Additive Illrigger Infernal Conduit + Combat Masteries panels (gated).
+			this._combat.renderCombatConduit?.();
+			this._combat.renderCombatMasteries?.();
 		}
 		if (this._respec) this._respec.render();
 		if (this._playMode && this._state.getViewMode() === "play") this._playMode.render();
