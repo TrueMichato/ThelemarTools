@@ -73,10 +73,12 @@ describe("Hochling Celestial Resistance — data invariants", () => {
 		expect(tgtt._meta.dependencies.race).toContain("MPMM");
 	});
 
-	it("Hochling exists and is a _copy of MPMM Aasimar", () => {
+	it("Hochling exists and carries the Celestial Resistance (necrotic + radiant) directly", () => {
 		const hochling = tgtt.race.find(r => r.name === "Hochling" && r.source === "TGTT");
 		expect(hochling).toBeDefined();
-		expect(hochling._copy).toEqual({name: "Aasimar", source: "MPMM"});
+		// Hochling is a self-contained race (no longer a _copy of MPMM Aasimar);
+		// it must declare the radiant + necrotic resistances on its own `resist`.
+		expect(hochling.resist).toEqual(expect.arrayContaining(["necrotic", "radiant"]));
 	});
 
 	it("MPMM Aasimar (the copy source) actually carries the necrotic + radiant resistances", () => {
