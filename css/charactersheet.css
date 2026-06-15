@@ -4601,6 +4601,13 @@
 	margin-bottom: var(--cs-space-xs, 0.25rem);
 }
 
+/* The `display: flex` rule above outranks the user-agent `[hidden]` rule, so the
+   Bag-of-Holding row would stay visible even when JS sets `hidden = true` (no bag
+   equipped). Re-assert hiding at matching specificity so the gating actually works. */
+.charsheet__carry-bar-mini[hidden] {
+	display: none;
+}
+
 .charsheet__carry-bar-track {
 	flex: 1;
 	height: 6px;
