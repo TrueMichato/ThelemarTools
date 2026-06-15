@@ -9823,7 +9823,6 @@ class CharacterSheetState {
 	}
 	// #endregion
 
-
 	// #region Spellcasting
 	getSpellcasting () { return this._data.spellcasting; }
 	getSpellcastingAbility () { return this._data.spellcasting.ability; }
@@ -21050,12 +21049,22 @@ class CharacterSheetState {
 
 			// ===== GENERIC MODIFIERS =====
 			case "modifier": {
+				// Conditional advantage/disadvantage modifiers (e.g. Danger Sense's
+				// "save:dex:advantage … against effects you can see", Forked Tongue's
+				// "check:wis:advantage … to ascertain true intentions") must stay
+				// ENABLED so getModifiersForType() can see them; aggregateModifiers()
+				// then gates them off by default and surfaces them in
+				// conditionalsAvailable for the per-roll opt-in picker. Disabling them
+				// here hid them from the picker entirely. A purely numeric conditional
+				// bonus keeps the original disabled-by-default behaviour.
+				const {advantage: advFromType, disadvantage: disFromType} = this._parseModifierType(effect.modType);
+				const carriesAdvFlag = advFromType || disFromType || effect.advantage || effect.disadvantage;
 				this._addClassFeatureModifier({
 					name: effect.source,
 					type: effect.modType,
 					value: effect.value,
 					note: effect.conditional ? `From ${effect.source} - ${effect.conditional}` : `From ${effect.source}`,
-					enabled: effect.enabled !== false && !effect.conditional,
+					enabled: effect.enabled !== false && (carriesAdvFlag || !effect.conditional),
 					conditional: effect.conditional,
 					// Pass through special modifier properties
 					sizeIncrease: effect.sizeIncrease,
