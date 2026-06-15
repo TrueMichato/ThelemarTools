@@ -18603,10 +18603,18 @@ class CharacterSheetState {
 						calculations.hasForkedTongue = true;
 					}
 
-					// Level 2: Combat Mastery, Interdiction
+					// Level 2: Combat Mastery, Interdiction, Weapon Mastery (TGTT)
 					if (level >= 2) {
 						calculations.hasCombatMastery = true;
 						calculations.hasInterdiction = true;
+
+						// Weapon Mastery (TGTT "Weapon Mastery|Illrigger|TGTT-IllR|2"):
+						// gain the mastery properties of TWO kinds of weapons you're
+						// proficient with; changeable on a Long Rest. Drives the generic
+						// 2024 weapon-mastery picker UI (calculations.hasWeaponMastery /
+						// weaponMasteryCount). Count is fixed at 2 (the feature does not scale).
+						calculations.hasWeaponMastery = true;
+						calculations.weaponMasteryCount = 2;
 					}
 
 					// Level 3: Diabolic Contract (subclass), Invoke Hell
