@@ -9812,7 +9812,6 @@ class CharacterSheetState {
 	}
 	// #endregion
 
-
 	// #region Spellcasting
 	getSpellcasting () { return this._data.spellcasting; }
 	getSpellcastingAbility () { return this._data.spellcasting.ability; }
