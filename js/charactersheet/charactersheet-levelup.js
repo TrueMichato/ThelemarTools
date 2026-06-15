@@ -150,6 +150,11 @@ class CharacterSheetLevelUp {
 		let expertiseGrants = CharacterSheetClassUtils.getExpertiseGrantsForLevel(currentFeatures);
 		/** @type {Object<string, *>} */ let selectedLanguages = {};
 		let languageGrants = CharacterSheetClassUtils.getLanguageGrantsForLevel(currentFeatures);
+		// Illrigger Forked Tongue Improvement (level 9): one additional swappable spoken language.
+		// Detected by class name + level crossing (mirrors the state-layer signal); the feature
+		// prose lives in external homebrew and won't match the generic language-grant regex.
+		const forkedTongueGrant = CharacterSheetClassUtils.getForkedTongueSwappableGrant(classEntry.name, classEntry.level, newLevel);
+		/** @type {string|null} */ let forkedTongueLevelUpPick = null;
 		/** @type {*} */ let selectedScholarSkill = null;
 		// Class-level featProgression feat picks (e.g. 2024/TGTT Fighting Style at L2).
 		// Each entry is a synthetic "opt" carrying `_progressionFeats[]` so the existing
@@ -889,6 +894,21 @@ class CharacterSheetLevelUp {
 			main.append(createAccordion("languages", "🗣️", "Languages", langContent, {required: true}));
 		}
 
+		// ========== 6b. FORKED TONGUE (Illrigger level 9) ==========
+		if (forkedTongueGrant.count > 0) {
+			summaryItems.append(createSummaryItem("forkedTongue", "👅", "Forked Tongue", {required: true}));
+
+			const ftContent = this._renderForkedTongueLevelUpSelection((/** @type {*} */ lang) => {
+				forkedTongueLevelUpPick = lang || null;
+				const label = forkedTongueLevelUpPick || "Select language";
+				summaryItemEls.forkedTongue.setStatus(!!forkedTongueLevelUpPick, label);
+				accordions.forkedTongue.setComplete(!!forkedTongueLevelUpPick, forkedTongueLevelUpPick || "");
+				if (forkedTongueLevelUpPick) expandNextIncomplete();
+			});
+
+			main.append(createAccordion("forkedTongue", "👅", "Forked Tongue", ftContent, {required: true}));
+		}
+
 		// ========== 7. SCHOLAR EXPERTISE (Wizard) ==========
 		if (needsScholarChoice) {
 			summaryItems.append(createSummaryItem("scholar", "📖", "Scholar", {required: true}));
@@ -1265,6 +1285,13 @@ class CharacterSheetLevelUp {
 				}
 			}
 
+			if (forkedTongueGrant.count > 0 && !forkedTongueLevelUpPick) {
+				JqueryUtil.doToast({type: "warning", content: "Please choose a language for Forked Tongue."});
+				accordions.forkedTongue?.el.classList.add("expanded");
+				accordions.forkedTongue?.el.scrollIntoView({behavior: "smooth"});
+				return;
+			}
+
 			if (needsScholarChoice && !selectedScholarSkill) {
 				JqueryUtil.doToast({type: "warning", content: "Please select a skill for Scholar expertise."});
 				accordions.scholar?.el.classList.add("expanded");
@@ -1325,6 +1352,7 @@ class CharacterSheetLevelUp {
 				selectedExpertise,
 				selectedLanguages,
 				languageGrants,
+				forkedTongueLevelUpPick,
 				selectedScholarSkill,
 				selectedSpellbookSpells,
 				selectedKnownSpells,
@@ -3886,6 +3914,74 @@ class CharacterSheetLevelUp {
 	}
 
 	/**
+	 * Render the Illrigger Forked Tongue Improvement (level 9) swappable-language picker.
+	 *
+	 * Grants one additional swappable spoken language. Reuses the shared language picker modal,
+	 * which already excludes the character's current languages (Infernal and any existing swappable
+	 * spoken languages are therefore unavailable). The pick is reported via `onSelect(lang)` and the
+	 * caller applies it through `state.addForkedTongueSwappableLanguage`.
+	 *
+	 * @param {Function} onSelect - Callback(language) when a language is chosen (or null when removed)
+	 * @returns {*} The section element
+	 */
+	_renderForkedTongueLevelUpSelection (/** @type {*} */ onSelect) {
+		const section = e_({outer: `
+			<div class="charsheet__levelup-section">
+				<h5 class="charsheet__levelup-section-title">
+					<span class="glyphicon glyphicon-comment"></span> Forked Tongue Improvement
+				</h5>
+				<div class="charsheet__levelup-forked-tongue mb-3">
+					<p><strong>Forked Tongue Improvement:</strong> Choose 1 additional language you can speak (it joins your swappable spoken languages and you gain advantage on Wisdom (Insight) checks to read true intentions):</p>
+					<div class="charsheet__levelup-forked-tongue-selection ve-flex ve-flex-wrap" style="gap: 8px;"></div>
+				</div>
+			</div>
+		`});
+
+		const selection = section.querySelector(".charsheet__levelup-forked-tongue-selection");
+		/** @type {string|null} */ let picked = null;
+
+		const render = () => {
+			selection.innerHTML = "";
+
+			if (picked) {
+				const tag = e_({outer: `
+					<span class="badge" style="background: rgba(var(--rgb-link-rgb), 0.15); color: var(--rgb-link); display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 0.9em;">
+						👅 ${picked}
+						<span class="clickable" style="cursor: pointer; opacity: 0.7;" title="Remove">&times;</span>
+					</span>
+				`});
+				tag.querySelector(".clickable").addEventListener("click", () => {
+					picked = null;
+					render();
+					onSelect(null);
+				});
+				selection.append(tag);
+				return;
+			}
+
+			const addBtn = e_({outer: `<button class="ve-btn ve-btn-sm ve-btn-primary" style="display: inline-flex; align-items: center; gap: 4px;">
+				<span class="glyphicon glyphicon-plus"></span> Choose Language
+			</button>`});
+			addBtn.addEventListener("click", async () => {
+				const result = await this._page.showLanguagePicker?.({
+					title: "Forked Tongue Improvement",
+					count: 1,
+				});
+				if (result?.length) {
+					picked = result[0];
+					render();
+					onSelect(picked);
+				}
+			});
+			selection.append(addBtn);
+		};
+
+		render();
+
+		return section;
+	}
+
+	/**
 	 * Render Scholar expertise selection UI for level up (Wizard XPHB level 2)
 	 * @param {Function} onSelect - Callback(skill) when a skill is selected
 	 * @returns {*} The section element
@@ -4103,7 +4199,7 @@ class CharacterSheetLevelUp {
 
 	/** @param {*} arg */
 
-	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedFeatureOptions, selectedClassFeatProgression, selectedExpertise, selectedLanguages, languageGrants, selectedScholarSkill, selectedSpellbookSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
+	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedFeatureOptions, selectedClassFeatProgression, selectedExpertise, selectedLanguages, languageGrants, forkedTongueLevelUpPick, selectedScholarSkill, selectedSpellbookSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
 		const prevCombatTraditions = this._state.getCombatTraditions?.() || [];
 		const prevWeaponMasteries = this._state.getWeaponMasteries?.() || [];
 
@@ -4588,6 +4684,13 @@ class CharacterSheetLevelUp {
 			});
 		}
 
+		// Apply the Illrigger Forked Tongue Improvement (level 9) swappable language pick. The level
+		// is already committed above, so getForkedTongueMaxSwappable() is 3 and the add succeeds; the
+		// state API mirrors it into _data.languages and rejects Infernal/dupes/over-max.
+		if (forkedTongueLevelUpPick && this._state.addForkedTongueSwappableLanguage) {
+			this._state.addForkedTongueSwappableLanguage(forkedTongueLevelUpPick);
+		}
+
 		// Roll HP if requested. The bare die roll is captured for the history entry below;
 		// max/current HP are NOT mutated here — _calculateMaxHp will consume the stored roll
 		// (with live CON mod and any feat hpPerLevel) at the end of this method.
@@ -4799,6 +4902,11 @@ class CharacterSheetLevelUp {
 		// Record scholar skill choice (Sage/Knowledge domain expertise)
 		if (selectedScholarSkill) {
 			historyEntry.choices.scholarSkill = selectedScholarSkill;
+		}
+
+		// Record the Forked Tongue Improvement (level 9) swappable-language pick
+		if (forkedTongueLevelUpPick) {
+			historyEntry.choices.forkedTongueLanguage = forkedTongueLevelUpPick;
 		}
 
 		// Record spellbook spell choices (Wizard)
