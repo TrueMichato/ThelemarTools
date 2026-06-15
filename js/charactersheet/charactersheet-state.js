@@ -2247,6 +2247,7 @@ const FeatureEffectRegistry = {
 		this._registerSubclassFeatures();
 		this._registerRaceFeatures();
 		this._registerFeatEffects();
+		this._registerInterdictBoonEffects();
 	},
 
 	/**
@@ -3125,6 +3126,31 @@ const FeatureEffectRegistry = {
 		]);
 		this.register("Two-Weapon Fighting", [
 			{type: "modifier", modType: "damage:offhand:addAbility", value: 1},
+		]);
+	},
+
+	/**
+	 * Register FeatureEffectRegistry entries for Illrigger Interdict Boons (the 34 `ItdBoon`
+	 * optional features — MCDM "The Illrigger Revised").
+	 *
+	 * This is intentionally THIN. After auditing all 34 boons, the overwhelming majority are
+	 * reactions, seal-triggered actions, or effects imposed on enemies — none of which map to
+	 * a persistent passive *player* modifier. Those are surfaced instead via:
+	 *   - `getFeatureCalculations()` per-boon flags/numbers (see `INTERDICT_BOON_FIELDS`),
+	 *   - `ACTIVE_STATE_TYPES` toggles (Hellish Frenzy, Shadow Shroud, Veil of Lies, Hellsight),
+	 *   - `burnSeals()` integration (Axiomatic Seals' +CHA seal damage).
+	 *
+	 * Only boons that genuinely map to a supported, safe registry effect live here. Today that
+	 * is Hell's Assassin, whose damage reroll mirrors the Great Weapon Fighting convention
+	 * (`damage:reroll:*:1or2`) and is gated `conditional` so it surfaces in the per-roll
+	 * conditional-modifier picker rather than auto-applying.
+	 */
+	_registerInterdictBoonEffects () {
+		// Hell's Assassin: reroll 1s and 2s on seal / weapon damage vs interdicted creatures.
+		// Registered under the exact boon name ("(Passive)" suffix included) because the
+		// registry key normalizer only lower-cases/trims — it does not strip qualifiers.
+		this.register("Hell's Assassin (Passive)", [
+			{type: "modifier", modType: "damage:reroll:interdicted:1or2", value: 1, conditional: "against interdicted creatures", enabled: true},
 		]);
 	},
 
@@ -18857,6 +18883,11 @@ class CharacterSheetState {
 						calculations.hasMasterOfHell = true;
 					}
 
+					// Interdict Boons (ItdBoon optional features) — per-boon mechanical
+					// effects (R19). Single call site keeps this shared switch lean; all the
+					// derivation lives in the disjoint #region Illrigger Interdict Boons.
+					this._applyInterdictBoonCalculations(calculations, {level, profBonus, chaMod});
+
 					// ----- Subclass Features (Diabolic Contract) -----
 					const illSubclass = cls.subclass?.shortName || cls.subclass?.name;
 					switch (illSubclass) {
@@ -25856,7 +25887,7 @@ class CharacterSheetState {
 	 * @param {string} placementIdOrTarget placement id, or the creature name.
 	 * @param {number} count how many seals to burn.
 	 * @param {string} [damageType] "fire" or "necrotic" (player choice).
-	 * @returns {{count:number, damageType:string, dice:string, target:string}|null}
+	 * @returns {{count:number, damageType:string, dice:string, bonus:number, target:string}|null}
 	 */
 	burnSeals (placementIdOrTarget, count, damageType) {
 		const store = this._ensureSealStore();
@@ -25871,10 +25902,13 @@ class CharacterSheetState {
 		const calcs = this.getFeatureCalculations?.() || {};
 		const perSeal = calcs.sealDamageDieCount || 1;
 		const die = calcs.sealDamageDie || 6;
+		// Axiomatic Seals boon: add CHA modifier (min 1) to EACH burned seal's damage roll.
+		const flatBonus = (calcs.hasAxiomaticSeals ? (calcs.sealDamageBonus || 0) : 0) * n;
 		const result = {
 			count: n,
 			damageType: damageType === "necrotic" ? "necrotic" : "fire",
-			dice: `${perSeal * n}d${die}`,
+			dice: flatBonus > 0 ? `${perSeal * n}d${die} + ${flatBonus}` : `${perSeal * n}d${die}`,
+			bonus: flatBonus,
 			target: placement.target,
 		};
 		if (placement.count <= 0) store.placements = store.placements.filter(p => p.id !== placement.id);
@@ -25932,6 +25966,94 @@ class CharacterSheetState {
 			if (Array.isArray(types)) return types.includes("ItdBoon");
 			return types === "ItdBoon";
 		});
+	}
+	// #endregion
+
+	// #region Illrigger Interdict Boons (per-boon mechanical effects)
+	/**
+	 * Normalize an interdict-boon name for matching: lower-case, drop the
+	 * "(Passive)" qualifier and collapse any non-alphanumeric noise (so
+	 * "Hell's Assassin (Passive)" → "hell s assassin").
+	 * @param {string} name
+	 * @returns {string}
+	 */
+	static _normalizeInterdictBoonName (name) {
+		return (name || "")
+			.toLowerCase()
+			.replace(/\(passive\)/g, "")
+			.replace(/[^a-z0-9]+/g, " ")
+			.trim();
+	}
+
+	/**
+	 * Per-boon mechanical-effect derivation for the 34 `ItdBoon` options, keyed by
+	 * normalized boon name. Each entry sets a `has{Boon}` flag plus any sheet-derivable
+	 * number/string (damage, save DC, range, bonus, temp-HP, seal cost). Saves that use
+	 * the Interdict DC read `calculations.interdictDc` (already computed upstream).
+	 *
+	 * Four boons (Hellish Frenzy, Shadow Shroud, Veil of Lies, Hellsight) are live toggles
+	 * — they carry a flag here, but their ongoing effects are applied via
+	 * {@link CharacterSheetState.ACTIVE_STATE_TYPES} (auto-detected by name). Axiomatic
+	 * Seals' `sealDamageBonus` is consumed by {@link burnSeals}. Two boons are purely
+	 * narrative / enemy-side (Dark Malediction, Incontrovertible) and carry only a flag.
+	 *
+	 * @type {Object<string, function(object, {level:number, profBonus:number, chaMod:number}): void>}
+	 */
+	static INTERDICT_BOON_FIELDS = {
+		"abating seal": (c, {level}) => {
+			c.hasAbatingSeal = true;
+			c.abatingSealReductionFlat = Math.floor(level / 2);
+			c.abatingSealReduction = `1d10 + ${Math.floor(level / 2)}`;
+		},
+		"acheron s chain": (c) => { c.hasAcheronsChain = true; c.acheronsChainDc = c.interdictDc; },
+		"axiomatic seals": (c, {chaMod}) => { c.hasAxiomaticSeals = true; c.sealDamageBonus = Math.max(1, chaMod); },
+		"bedevil": (c, {profBonus}) => { c.hasBedevil = true; c.bedevilSavePenalty = profBonus; },
+		"blood for blood": (c, {profBonus}) => { c.hasBloodForBlood = true; c.bloodForBloodDamage = profBonus; },
+		"by the throat": (c) => { c.hasByTheThroat = true; c.byTheThroatDc = c.interdictDc; },
+		"conflagrant channel": (c) => { c.hasConflagrantChannel = true; c.conflagrantChannelRange = 60; },
+		"dark malediction": (c) => { c.hasDarkMalediction = true; },
+		"dis s onslaught": (c) => { c.hasDissOnslaught = true; },
+		"dispater s supremacy": (c) => { c.hasDispatersSupremacy = true; c.interdictedCritRange = 18; },
+		"eyes of the gate": (c) => { c.hasEyesOfTheGate = true; c.eyesOfTheGateDc = c.interdictDc; },
+		"flash of brimstone": (c) => { c.hasFlashOfBrimstone = true; c.flashOfBrimstoneRange = 5; },
+		"foul interchange": (c) => { c.hasFoulInterchange = true; c.foulInterchangeDc = c.interdictDc; },
+		"hell mage": (c, {profBonus}) => { c.hasHellMage = true; c.hellMageSeals = profBonus; },
+		"hell s assassin": (c) => { c.hasHellsAssassin = true; },
+		"hellish frenzy": (c) => { c.hasHellishFrenzy = true; c.frenzyAcBonus = 2; },
+		"hellsight": (c) => { c.hasHellsight = true; c.hellsightSenseRange = 60; },
+		"impaling shot": (c, {profBonus}) => { c.hasImpalingShot = true; c.impalingShotAcPenalty = profBonus; },
+		"incontrovertible": (c) => { c.hasIncontrovertible = true; },
+		"iron gaol": (c) => { c.hasIronGaol = true; c.ironGaolSealCost = 4; c.ironGaolDc = c.interdictDc; },
+		"last word": (c) => { c.hasLastWord = true; c.lastWordDicePerSeal = "3d6"; c.lastWordMaxSeals = 3; },
+		"red cant": (c) => { c.hasRedCant = true; c.redCantFloor = 10; },
+		"sanguine gift": (c, {level}) => { c.hasSanguineGift = true; c.sanguineGiftHeal = level; },
+		"shadow shroud": (c) => { c.hasShadowShroud = true; c.shadowShroudAcBonus = 2; },
+		"slippery ploy": (c) => { c.hasSlipperyPloy = true; c.slipperyPloyDc = c.interdictDc; },
+		"soul eater": (c, {level}) => { c.hasSoulEater = true; c.soulEaterTempHp = level; },
+		"soul s doom": (c, {profBonus}) => { c.hasSoulsDoom = true; c.soulsDoomDamage = profBonus; },
+		"spellbreaker": (c) => { c.hasSpellbreaker = true; },
+		"styx s apathy": (c) => { c.hasStyxsApathy = true; },
+		"swift retribution": (c) => { c.hasSwiftRetribution = true; },
+		"telekinetic seal": (c) => { c.hasTelekineticSeal = true; c.telekineticSealDc = c.interdictDc; },
+		"unleash hell": (c) => { c.hasUnleashHell = true; },
+		"veil of lies": (c) => { c.hasVeilOfLies = true; },
+		"vengeful shot": (c, {level}) => { c.hasVengefulShot = true; c.vengefulShotBonus = Math.floor(level / 2); },
+	};
+
+	/**
+	 * Apply per-boon mechanical effects for every selected `ItdBoon` optional feature to the
+	 * in-progress `getFeatureCalculations()` result. Called once from the Illrigger case.
+	 * @param {object} calculations - The calculations object being built (mutated in place).
+	 * @param {{level:number, profBonus:number, chaMod:number}} ctx
+	 */
+	_applyInterdictBoonCalculations (calculations, ctx) {
+		const boons = this.getInterdictBoons?.() || [];
+		if (!boons.length) return;
+		const defs = CharacterSheetState.INTERDICT_BOON_FIELDS;
+		for (const boon of boons) {
+			const apply = defs[CharacterSheetState._normalizeInterdictBoonName(boon.name)];
+			if (apply) apply(calculations, ctx);
+		}
 	}
 	// #endregion
 
@@ -34566,6 +34688,73 @@ class CharacterSheetState {
 			resourceName: "Infernal Majesty",
 			resourceCost: 1,
 			detectPatterns: ["infernal majesty", "infernal\\s+majesty"],
+			activationAction: "action",
+		},
+		// ===== ILLRIGGER INTERDICT BOON TOGGLES (R19) =====
+		// Auto-detected by exact name when the boon is taken as an ItdBoon optional feature.
+		// Each expends a seal (resourceName "Baleful Interdict"); their derived numbers are
+		// also surfaced via getFeatureCalculations (has{Boon} flags).
+		hellishFrenzy: {
+			id: "hellishFrenzy",
+			name: "Hellish Frenzy",
+			icon: "😈",
+			description: "Frenzied by Hell: movement speed doubled, +2 AC, and an extra weapon attack on the Attack action.",
+			effects: [
+				{type: "speedMultiplier", value: 2},
+				{type: "bonus", target: "ac", value: 2},
+				{type: "note", value: "Extra weapon attack when you take the Attack action."},
+			],
+			duration: "Until the start of your next turn",
+			endConditions: ["Start of your next turn"],
+			resourceName: "Baleful Interdict",
+			resourceCost: 1,
+			detectPatterns: ["hellish frenzy"],
+			activationAction: "free",
+		},
+		shadowShroud: {
+			id: "shadowShroud",
+			name: "Shadow Shroud",
+			icon: "🌑",
+			description: "A mantle of semisolid shadows grants the target a +2 bonus to AC.",
+			effects: [
+				{type: "bonus", target: "ac", value: 2},
+			],
+			duration: "1 minute",
+			endConditions: ["Duration expires"],
+			resourceName: "Baleful Interdict",
+			resourceCost: 1,
+			detectPatterns: ["shadow shroud"],
+			activationAction: "bonus",
+		},
+		veilOfLies: {
+			id: "veilOfLies",
+			name: "Veil of Lies",
+			icon: "🫥",
+			description: "You become invisible for 10 minutes or until you attack or cast a spell.",
+			effects: [
+				{type: "note", value: "Invisible until you attack or cast a spell."},
+			],
+			addsConditions: ["Invisible"],
+			duration: "10 minutes",
+			endConditions: ["You attack", "You cast a spell", "Duration expires"],
+			resourceName: "Baleful Interdict",
+			resourceCost: 1,
+			detectPatterns: ["veil of lies"],
+			activationAction: "bonus",
+		},
+		hellsight: {
+			id: "hellsight",
+			name: "Hellsight",
+			icon: "👁️",
+			description: "Gain truesight out to 60 feet for 1 hour.",
+			effects: [
+				{type: "note", value: "Truesight out to 60 feet."},
+			],
+			duration: "1 hour",
+			endConditions: ["Duration expires"],
+			resourceName: "Baleful Interdict",
+			resourceCost: 1,
+			detectPatterns: ["hellsight"],
 			activationAction: "action",
 		},
 		// Generic homebrew toggle - catch-all for data-driven features
