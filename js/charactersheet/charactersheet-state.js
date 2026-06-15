@@ -2247,6 +2247,7 @@ const FeatureEffectRegistry = {
 		this._registerSubclassFeatures();
 		this._registerRaceFeatures();
 		this._registerFeatEffects();
+		this._registerIllriggerSpecialtyEffects();
 	},
 
 	/**
@@ -3125,6 +3126,81 @@ const FeatureEffectRegistry = {
 		]);
 		this.register("Two-Weapon Fighting", [
 			{type: "modifier", modType: "damage:offhand:addAbility", value: 1},
+		]);
+	},
+
+	/**
+	 * Register per-option mechanical effects for the TGTT Illrigger "Specialties"
+	 * feature (R19 #10). When a player picks a specialty (L3/5/7/9/11/14/19), the
+	 * chosen option is added as a stored feature whose NAME is matched here.
+	 *
+	 * IMPORTANT — disjoint from sibling R19 regions (Mastery/Conduit,
+	 * Interdict-boon, Hellspeaker, Forked-Tongue, Hochling). This method ONLY
+	 * registers effects the generic `FeatureModifierParser` (run on the option's
+	 * own description at addFeature time) does NOT already extract, to avoid
+	 * double-counting. Effects the parser ALREADY handles and that are therefore
+	 * deliberately NOT registered here:
+	 *   - Baleful Presence / Forked Tongue Mastery: the flat "+proficiency bonus
+	 *     to <skill> checks" component (parser emits `skill:<skill>` proficiencyBonus).
+	 *   - Hellish Avenger: the base +1d8 fire weapon rider (parser emits a damage die).
+	 *   - Infernal Awareness: the base 10-ft blindsight (parser emits a sense).
+	 * Level-scaling upgrades for the last two (2d8 at L11, 30 ft on a 2nd pick) and
+	 * the Interdict-DC bump are handled in `_applyIllriggerSpecialtyCalculations`.
+	 *
+	 * Specialties with purely activatable/narrative/DM-adjudicated effects
+	 * (Diplomatic Intervention, Do Without, Endure Elements, Infernal
+	 * Rejuvenation, Infernal Tracker, Negate Fall, Suggestive Words) are
+	 * intentionally absent — they have no passive sheet modifier. Their per-use
+	 * tracking (e.g. Endure Elements 1/long rest, Suggestive Words PB/long rest)
+	 * is auto-detected by the generic uses parser at addFeature time.
+	 */
+	_registerIllriggerSpecialtyEffects () {
+		// === DARK RESILIENCE (L3) — resistance to fire ===
+		// (Necrotic-instead-if-already-fire-resistant swap is not auto-detected;
+		// documented as a known limitation.)
+		this.register("Dark Resilience", [
+			{type: "resistance", damageType: "fire"},
+		]);
+
+		// === PURGE TOXINS (L5) — poison resistance + adv. vs the poisoned condition ===
+		// (The stamina-fuelled "end a poison" action is activatable, not a passive mod.)
+		this.register("Purge Toxins", [
+			{type: "resistance", damageType: "poison"},
+			{type: "modifier", modType: "save:advantage:poisoned", value: 1},
+		]);
+
+		// === INFERNAL CONSTITUTION (L3) — double STR for carrying capacity ===
+		// Doubling the Strength score for carry/lift/push/drag == doubling capacity.
+		// (Strenuous-activity-during-rests clauses are narrative.)
+		this.register("Infernal Constitution", [
+			{type: "modifier", modType: "carryCapacity", multiplier: 2},
+		]);
+
+		// === FACELESS MASK (L3) — situational advantage on Stealth & Deception ===
+		this.register("Faceless Mask", [
+			{type: "skillAdvantage", skill: "stealth", conditional: "to blend into a crowd or assume a false identity"},
+			{type: "skillAdvantage", skill: "deception", conditional: "to blend into a crowd or assume a false identity"},
+		]);
+
+		// === SOUL READER (L3) — advantage on Insight vs interdicted creatures ===
+		// (The 30-ft emotion sense is narrative — not a standard sheet sense.)
+		this.register("Soul Reader", [
+			{type: "skillAdvantage", skill: "insight", conditional: "against creatures you have interdicted"},
+		]);
+
+		// === BALEFUL PRESENCE (L3) — advantage on follow-up Intimidation ===
+		// (The flat +PB Intimidation bonus is already parsed; only the conditional
+		// "advantage on subsequent checks for 24 hours" rider is added here.)
+		this.register("Baleful Presence", [
+			{type: "skillAdvantage", skill: "intimidation", conditional: "against a creature you have intimidated (24 hours)"},
+		]);
+
+		// === FORKED TONGUE MASTERY (L3) — advantage on follow-up Deception/Persuasion ===
+		// (Flat +PB to Deception & Persuasion already parsed; only the conditional
+		// "advantage on subsequent checks for 24 hours" rider is added here.)
+		this.register("Forked Tongue Mastery", [
+			{type: "skillAdvantage", skill: "deception", conditional: "against a creature you have deceived or persuaded (24 hours)"},
+			{type: "skillAdvantage", skill: "persuasion", conditional: "against a creature you have deceived or persuaded (24 hours)"},
 		]);
 	},
 
@@ -19446,6 +19522,13 @@ class CharacterSheetState {
 		}
 
 		// =====================================================
+		// TGTT ILLRIGGER SPECIALTIES — calc-dependent upgrades (R19 #10)
+		// Level-scaling / Interdict-DC effects that the per-option description
+		// parser cannot express. Disjoint from the `case "Illrigger"` block above.
+		// =====================================================
+		this._applyIllriggerSpecialtyCalculations(calculations);
+
+		// =====================================================
 		// AGGREGATE ALL EFFECTS FROM CALCULATIONS
 		// This allows features to declare their effects in a
 		// standardized format that gets auto-processed
@@ -19453,6 +19536,53 @@ class CharacterSheetState {
 		calculations._effects = this._aggregateFeatureEffects(calculations);
 
 		return calculations;
+	}
+
+	/**
+	 * Apply calc-dependent TGTT Illrigger specialty effects (R19 #10) that cannot
+	 * be expressed as static registry entries or extracted by the description
+	 * parser. Kept in a dedicated method (called once near the end of
+	 * `getFeatureCalculations`) so it stays disjoint from the shared `case
+	 * "Illrigger"` block that sibling R19 sessions edit.
+	 *
+	 * - Infernal Supremacy (L19): genuinely missing — bumps the Interdict save DC
+	 *   by 1 (the "regain Invoke Hell on a kill" clause is narrative).
+	 * - Hellish Avenger (L5): the base +1d8 fire rider is applied by the parser;
+	 *   these flags expose the L11 → 2d8 scaling for display/tests.
+	 * - Infernal Awareness (L7): the base 10-ft blindsight is applied by the
+	 *   parser; these flags expose the 30-ft range when the specialty is taken a
+	 *   second time at L11+.
+	 *
+	 * @param {object} calculations - The in-progress feature-calculations object.
+	 */
+	_applyIllriggerSpecialtyCalculations (calculations) {
+		if (!this.hasFeature) return;
+
+		// --- Infernal Supremacy (L19): +1 Interdict save DC ---
+		if (this.hasFeature("Infernal Supremacy")) {
+			calculations.hasInfernalSupremacy = true;
+			if (typeof calculations.interdictDc === "number") {
+				calculations.interdictDc += 1;
+			}
+		}
+
+		// --- Hellish Avenger (L5): +1d8 fire (→ 2d8 at L11) once/turn on weapon hit ---
+		if (this.hasFeature("Hellish Avenger")) {
+			const illriggerLevel = this.getClassLevel?.("Illrigger") || 0;
+			calculations.hasHellishAvenger = true;
+			calculations.hellishAvengerDamageDie = 8;
+			calculations.hellishAvengerDamageDieCount = illriggerLevel >= 11 ? 2 : 1;
+			calculations.hellishAvengerDamage = `${calculations.hellishAvengerDamageDieCount}d8`;
+		}
+
+		// --- Infernal Awareness (L7): blindsight 10 ft (→ 30 ft if taken twice, L11+) ---
+		if (this.hasFeature("Infernal Awareness")) {
+			const illriggerLevel = this.getClassLevel?.("Illrigger") || 0;
+			const pickCount = (this._data.features || [])
+				.filter(f => f && f.name === "Infernal Awareness").length;
+			calculations.hasInfernalAwareness = true;
+			calculations.infernalAwarenessRange = (pickCount >= 2 && illriggerLevel >= 11) ? 30 : 10;
+		}
 	}
 
 	/**
@@ -20939,6 +21069,26 @@ class CharacterSheetState {
 					return `${effect.source}: +${effect.value} to ${effect.skill} checks`;
 				}
 				return null;
+			}
+
+			// ===== CONDITIONAL SKILL ADVANTAGE =====
+			// Situational advantage on a specific skill (e.g. Illrigger specialties
+			// Faceless Mask / Soul Reader / Baleful Presence follow-up). Stored as an
+			// ENABLED `skill:<skill>` modifier carrying `advantage:true` + `conditional`
+			// text — `getModifiersForType("skill:<skill>")` matches it exactly and
+			// `aggregateModifiers()` gates it into `conditionalsAvailable` for the
+			// per-roll opt-in picker (mirrors the text-parser's conditional-advantage shape).
+			case "skillAdvantage": {
+				this._addClassFeatureModifier({
+					name: effect.source,
+					type: `skill:${effect.skill}`,
+					value: 0,
+					advantage: true,
+					note: effect.conditional ? `From ${effect.source} - ${effect.conditional}` : `From ${effect.source}`,
+					enabled: true,
+					conditional: effect.conditional,
+				});
+				return `${effect.source}: advantage on ${effect.skill} checks${effect.conditional ? ` (${effect.conditional})` : ""}`;
 			}
 
 			// ===== SENSES =====
