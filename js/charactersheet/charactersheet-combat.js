@@ -2823,6 +2823,192 @@ class CharacterSheetCombat {
 	}
 
 	/**
+	 * Additive combat-tab Infernal Conduit panel (Illrigger L6). Shows the d10 dice pool
+	 * (available / max), the interdict save DC, the conduit range, and controls to spend
+	 * dice on the Invigorate or Devour effect. The self-side HP swing is applied to the
+	 * sheet; the target-side numbers are surfaced for the player/DM to apply manually
+	 * (no target entity exists on the character sheet). Hidden unless the character has
+	 * Infernal Conduit.
+	 */
+	renderCombatConduit () {
+		const section = document.getElementById("charsheet-combat-conduit-section");
+		const container = document.getElementById("charsheet-combat-conduit");
+		if (!container) return;
+
+		if (!this._state.hasInfernalConduit?.()) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const dc = calcs.interdictDc;
+		const die = this._state.getInfernalConduitDie?.() || 10;
+		const max = this._state.getInfernalConduitMax?.() || 0;
+		const avail = this._state.getInfernalConduitAvailable?.() || 0;
+		const range = this._state.getInfernalConduitRange?.() || "Touch";
+		const improved = this._state.hasInfernalConduitImprovement?.();
+
+		container.innerHTML = `
+			<div class="charsheet__conduit-panel">
+				<div class="charsheet__conduit-summary ve-flex ve-flex-v-center ve-flex-wrap gap-2 mb-2">
+					<span title="Conduit dice refresh on a long rest">🩸 Dice <strong>${avail}</strong> / ${max} <span class="ve-muted">d${die}</span></span>
+					<span title="Constitution save DC = 8 + proficiency + CHA">🛡️ Save DC <strong>${dc != null ? dc : "—"}</strong></span>
+					<span class="ve-muted ve-small" title="Range to touch/affect a creature">Range: <strong>${range}</strong></span>
+				</div>
+				<div class="charsheet__conduit-controls ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">
+					<label class="ve-small mb-0">Dice
+						<input type="number" class="form-control input-sm charsheet__conduit-count" min="1" max="${Math.max(1, avail)}" value="1" style="width: 4rem;" ${avail > 0 ? "" : "disabled"}>
+					</label>
+					<select class="form-control input-sm charsheet__conduit-effect" style="width: 9rem;" title="Choose the conduit effect">
+						<option value="invigorate">Invigorate (heal ally)</option>
+						<option value="devour">Devour (drain enemy)</option>
+					</select>
+					<select class="form-control input-sm charsheet__conduit-save" style="width: 9rem;" title="Target's Constitution save result">
+						<option value="fail">Save failed</option>
+						<option value="success">Save succeeded</option>
+					</select>
+					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__conduit-spend" type="button" ${avail > 0 ? "" : "disabled"} title="Spend conduit dice and resolve the effect">Spend</button>
+				</div>
+				<div class="ve-muted ve-small">
+					<strong>Invigorate:</strong> target heals (fail: full, success: half); you take that-roll necrotic (unpreventable; 0 HP → unconscious &amp; stabilized).
+					<strong>Devour:</strong> target takes necrotic (fail: full, success: half); you heal the damage dealt${improved ? "; on a failed save the target gains 1 level of exhaustion" : ""}.
+				</div>
+			</div>`;
+
+		container.querySelector(".charsheet__conduit-spend")?.addEventListener("click", () => {
+			if ((this._state.getInfernalConduitAvailable?.() || 0) <= 0) {
+				JqueryUtil.doToast({type: "warning", content: "No conduit dice left — take a long rest to recover them."});
+				return;
+			}
+			const count = parseInt(/** @type {HTMLInputElement} */ (container.querySelector(".charsheet__conduit-count"))?.value || "1", 10);
+			const effect = /** @type {HTMLSelectElement} */ (container.querySelector(".charsheet__conduit-effect"))?.value || "invigorate";
+			const saveResult = /** @type {HTMLSelectElement} */ (container.querySelector(".charsheet__conduit-save"))?.value || "fail";
+
+			// Roll the dice for real in the UI; pass the rolled total to the state so its
+			// deterministic-average default is only used in headless/test contexts.
+			const n = Math.max(1, Math.min(count || 1, this._state.getInfernalConduitAvailable?.() || 1));
+			let rolled = null;
+			try { rolled = this._parseDamage(`${n}d${die}`, false); } catch (e) { rolled = null; }
+			const rollTotal = rolled && typeof rolled.total === "number" ? rolled.total : undefined;
+
+			const res = this._state.spendInfernalConduitDice?.(n, effect, {saveResult, roll: rollTotal});
+			if (!res) { JqueryUtil.doToast({type: "warning", content: "Could not spend conduit dice."}); return; }
+
+			const isInvig = res.effect === "invigorate";
+			const targetWord = isInvig ? "heals" : "takes";
+			const targetAmt = Math.abs(res.targetHpDelta);
+			const selfWord = res.selfHpDelta < 0 ? "take" : "regain";
+			const selfAmt = Math.abs(res.selfHpDelta);
+
+			this._page.showDiceResult?.({
+				title: `Infernal Conduit — ${isInvig ? "Invigorate" : "Devour"} (${res.dice})`,
+				roll: res.total,
+				total: res.total,
+				resultClass: isInvig ? "text-success" : "text-danger",
+				resultNote: ` Target ${targetWord} ${targetAmt} HP · you ${selfWord} ${selfAmt} HP`,
+			});
+
+			let toast = `🩸 ${isInvig ? "Invigorate" : "Devour"} (${res.dice} → ${res.total}, save ${res.saveResult}): target ${targetWord} ${targetAmt} HP, you ${selfWord} ${selfAmt} HP.`;
+			if (res.appliesExhaustion) toast += " Target gains 1 level of exhaustion.";
+			if (res.selfDroppedToZero) toast += " You drop to 0 HP — unconscious and stabilized.";
+			JqueryUtil.doToast({type: isInvig ? "info" : "success", content: toast});
+
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+		});
+	}
+
+	/**
+	 * Additive combat-tab Combat Masteries panel (Illrigger IllMastery). Surfaces the
+	 * interactive masteries — the Lies weapon-type choice and the Inexorable adjacent-hostile
+	 * count — plus informational notes for the narrative masteries (Brutal, Lissome) and the
+	 * Unfettered range changes. Hidden unless the character has at least one mastery.
+	 */
+	renderCombatMasteries () {
+		const section = document.getElementById("charsheet-combat-masteries-section");
+		const container = document.getElementById("charsheet-combat-masteries");
+		if (!container) return;
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const masteries = this._state.getIllriggerMasteries?.() || [];
+		if (!masteries.length) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+
+		const rows = [];
+
+		// Lies — weapon-type choice (CHA for attack/damage)
+		if (calcs.hasLiesMastery) {
+			const weapons = (this._state.getAttacks?.() || [])
+				.filter(a => !a.isSpell && !a.isSpellAttack)
+				.map(a => a.name)
+				.filter((v, i, arr) => v && arr.indexOf(v) === i);
+			const chosen = this._state.getLiesWeaponType?.() || "";
+			const opts = [`<option value="">— none —</option>`]
+				.concat(weapons.map(w => `<option value="${(w || "").replace(/"/g, "&quot;")}"${w.toLowerCase() === chosen.toLowerCase() ? " selected" : ""}>${w}</option>`))
+				.join("");
+			rows.push(`
+				<div class="charsheet__mastery-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">
+					<span class="bold mr-1">🗡️ Lies</span>
+					<span class="ve-muted ve-small mr-1">use CHA for attack &amp; damage with</span>
+					<select class="form-control input-sm charsheet__mastery-lies" style="width: 12rem;" title="Choose a melee weapon type (changeable on a long rest)">${opts}</select>
+					<input type="text" class="form-control input-sm charsheet__mastery-lies-custom" placeholder="or type a weapon" value="" style="width: 10rem;" title="Free-text weapon type (overrides the dropdown)">
+				</div>`);
+		}
+
+		// Inexorable — adjacent-hostile count (+1 save each, max +5)
+		if (calcs.hasInexorableMastery) {
+			const cur = this._state.getIllriggerAdjacentHostiles?.() || 0;
+			const bonus = this._state.getInexorableSaveBonus?.() || 0;
+			rows.push(`
+				<div class="charsheet__mastery-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">
+					<span class="bold mr-1">🛡️ Inexorable</span>
+					<span class="ve-muted ve-small mr-1">hostiles within 5 ft</span>
+					<input type="number" class="form-control input-sm charsheet__mastery-inexorable" min="0" max="5" value="${cur}" style="width: 4rem;" title="+1 to all saves per hostile within 5 ft (max +5)">
+					<span class="badge badge-info" title="Current bonus to all saving throws">+${bonus} to saves</span>
+				</div>`);
+		}
+
+		// Informational / narrative masteries
+		const notes = [];
+		if (calcs.hasBravadoMastery) notes.push(`<strong>Bravado:</strong> while unarmored, AC = 10 + DEX + CHA (shield allowed) — applied automatically to your AC.`);
+		if (calcs.hasBrutalMastery) notes.push(`<strong>Brutal:</strong> on a two-handed melee hit vs a creature no more than one size larger, you may shove it 5 ft and follow into its space.`);
+		if (calcs.hasLissomeMastery) notes.push(`<strong>Lissome:</strong> on a melee hit, you may spend your movement to move 5 ft without provoking opportunity attacks.`);
+		if (calcs.hasUnfetteredMastery) notes.push(`<strong>Unfettered:</strong> Baleful Interdict range is 60 ft (was 30 ft) and Infernal Conduit range is 30 ft (was touch); ranged attacks within 5 ft of a hostile suffer no disadvantage.`);
+		const notesHtml = notes.length ? `<div class="ve-muted ve-small">${notes.map(n => `<div class="mb-1">${n}</div>`).join("")}</div>` : "";
+
+		container.innerHTML = `<div class="charsheet__mastery-panel">${rows.join("")}${notesHtml}</div>`;
+
+		// --- Lies dropdown ---
+		container.querySelector(".charsheet__mastery-lies")?.addEventListener("change", (e) => {
+			const val = /** @type {HTMLSelectElement} */ (e.target).value || "";
+			this._state.setLiesWeaponType?.(val);
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+		});
+		// --- Lies free-text override ---
+		container.querySelector(".charsheet__mastery-lies-custom")?.addEventListener("change", (e) => {
+			const val = /** @type {HTMLInputElement} */ (e.target).value || "";
+			if (!val.trim()) return;
+			this._state.setLiesWeaponType?.(val.trim());
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+		});
+		// --- Inexorable count ---
+		container.querySelector(".charsheet__mastery-inexorable")?.addEventListener("change", (e) => {
+			const val = parseInt(/** @type {HTMLInputElement} */ (e.target).value || "0", 10);
+			this._state.setIllriggerAdjacentHostiles?.(val);
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+		});
+	}
+
+	/**
 	 * Build the range/reach display for an attack row.
 	 *
 	 * For melee attacks the effective reach is derived from the character's current

@@ -2247,6 +2247,7 @@ const FeatureEffectRegistry = {
 		this._registerSubclassFeatures();
 		this._registerRaceFeatures();
 		this._registerFeatEffects();
+		this._registerIllriggerMasteryEffects();
 	},
 
 	/**
@@ -2522,6 +2523,27 @@ const FeatureEffectRegistry = {
 	/**
 	 * Register race/species-specific features
 	 */
+	/**
+	 * Register Illrigger Combat Mastery (IllMastery) effects.
+	 *
+	 * The six masteries (Bravado, Brutal, Inexorable, Lies, Lissome, Unfettered) are almost
+	 * entirely battlefield-conditional or choice-driven, so they do NOT map onto the passive
+	 * name→effect registry model. They are instead wired via `getFeatureCalculations()` flags
+	 * (`has{Name}Mastery`) plus dedicated state helpers:
+	 *   - Bravado   → unarmored AC 10 + DEX + CHA via the Unarmored-Defense AC path.
+	 *   - Lies      → CHA attack/damage swap via getLiesWeaponBonus() composed into getWeaponAbilityMod().
+	 *   - Inexorable→ +1/hostile within 5 ft (max +5) via a live `save:all` named modifier.
+	 *   - Unfettered→ Interdict/Conduit range changes (surfaced in the combat panels).
+	 *   - Brutal / Lissome → narrative forced-movement riders (informational only).
+	 *
+	 * This method is kept as the dedicated registry hook the architecture reserves for the
+	 * masteries; it intentionally registers no passive effects today.
+	 */
+	_registerIllriggerMasteryEffects () {
+		// No passive name→effect entries: every mastery is handled via calc flags + helpers
+		// (see method doc). Present so future passive mastery effects have a disjoint home.
+	},
+
 	_registerRaceFeatures () {
 		// Dwarven features
 		this.register("Dwarven Resilience", [
@@ -6590,7 +6612,10 @@ class CharacterSheetState {
 	 */
 	getWeaponAbilityMod (attack) {
 		const base = this._resolveBaseWeaponAbilityMod(attack?.abilityMod || "str");
-		return base + this.getBladesongWeaponBonus(attack);
+		// Bladesong (INT) and Lies (CHA) are alternate-ability overrides; you may use only
+		// one at a time, so compose via MAX of their positive deltas (never additive).
+		const override = Math.max(this.getBladesongWeaponBonus(attack), this.getLiesWeaponBonus(attack));
+		return base + override;
 	}
 
 	getAbilityBase (ability) {
@@ -8193,7 +8218,7 @@ class CharacterSheetState {
 	}
 
 	_hasUnarmoredDefense () {
-		return this._hasBarbarianUnarmoredDefense() || this._hasMonkUnarmoredDefense();
+		return this._hasBarbarianUnarmoredDefense() || this._hasMonkUnarmoredDefense() || this._hasBravadoUnarmoredDefense();
 	}
 
 	_hasBarbarianUnarmoredDefense () {
@@ -8204,6 +8229,15 @@ class CharacterSheetState {
 	_hasMonkUnarmoredDefense () {
 		if (this._data.manualUnarmoredDefense === "monk") return true;
 		return this._data.classes.some(c => c.name === "Monk");
+	}
+
+	/**
+	 * Whether the character has the Bravado combat mastery (Illrigger), which grants an
+	 * unarmored AC of 10 + DEX + CHA (shield allowed). Gated on the mastery calc flag.
+	 * @returns {boolean}
+	 */
+	_hasBravadoUnarmoredDefense () {
+		return !!(this.getFeatureCalculations?.() || {}).hasBravadoMastery;
 	}
 
 	_calculateUnarmoredDefenseAc () {
@@ -8222,6 +8256,13 @@ class CharacterSheetState {
 			const wisMod = this.getAbilityMod("wis");
 			const monkAc = 10 + dexMod + wisMod;
 			bestAc = Math.max(bestAc, monkAc);
+		}
+
+		// Bravado (Illrigger mastery): 10 + DEX + CHA (shield allowed)
+		if (this._hasBravadoUnarmoredDefense()) {
+			const chaMod = this.getAbilityMod("cha");
+			const bravadoAc = 10 + dexMod + chaMod;
+			bestAc = Math.max(bestAc, bravadoAc);
 		}
 
 		// As per rules: "If you have multiple ways to calculate your Armor Class,
@@ -8315,6 +8356,12 @@ class CharacterSheetState {
 					components.push({type: "base", name: "Unarmored Defense", value: 10, icon: "🧘", subtype: "Monk"});
 					if (dexMod !== 0) components.push({type: "dex", name: "DEX modifier", value: dexMod, icon: "🎯"});
 					if (wisMod !== 0) components.push({type: "ability", name: "WIS modifier", value: wisMod, icon: "👁️"});
+					usedDex = true;
+				} else if (this._hasBravadoUnarmoredDefense()) {
+					const chaMod = this.getAbilityMod("cha");
+					components.push({type: "base", name: "Bravado", value: 10, icon: "🎭", subtype: "Illrigger"});
+					if (dexMod !== 0) components.push({type: "dex", name: "DEX modifier", value: dexMod, icon: "🎯"});
+					if (chaMod !== 0) components.push({type: "ability", name: "CHA modifier", value: chaMod, icon: "✨"});
 					usedDex = true;
 				}
 			} else if (formulaAc >= standardAc) {
@@ -18799,6 +18846,19 @@ class CharacterSheetState {
 						// weaponMasteryCount). Count is fixed at 2 (the feature does not scale).
 						calculations.hasWeaponMastery = true;
 						calculations.weaponMasteryCount = 2;
+
+						// Combat Masteries (IllMastery options): per-option mechanical
+						// effects. Most are battlefield-conditional/choice-driven so they are
+						// wired via these flags + dedicated state helpers rather than the
+						// passive FeatureEffectRegistry. Detect the chosen mastery features by
+						// name (mirrors getInterdictBoons' optionalFeatureTypes filter).
+						const masteryNames = this._getIllriggerMasteryNames();
+						calculations.hasBravadoMastery = masteryNames.has("bravado");
+						calculations.hasBrutalMastery = masteryNames.has("brutal");
+						calculations.hasInexorableMastery = masteryNames.has("inexorable");
+						calculations.hasLiesMastery = masteryNames.has("lies");
+						calculations.hasLissomeMastery = masteryNames.has("lissome");
+						calculations.hasUnfetteredMastery = masteryNames.has("unfettered");
 					}
 
 					// Level 3: Diabolic Contract (subclass), Invoke Hell
@@ -20804,6 +20864,11 @@ class CharacterSheetState {
 		// no-ops until the combat-method catalog is available, so it is safe to run on
 		// every effect application (load, level-up, level-down, focus-mode change).
 		this.reconcileGrantedCombatMethods();
+
+		// Rebuild the Inexorable (IllMastery) save modifier from its persisted adjacent-
+		// hostile count — _clearClassFeatureEffects() sweeps all classFeature named modifiers,
+		// so it must be re-emitted here on every reapply (load, level-up, focus change).
+		this._syncInexorableModifier();
 
 		return appliedEffects;
 	}
@@ -25932,6 +25997,272 @@ class CharacterSheetState {
 			if (Array.isArray(types)) return types.includes("ItdBoon");
 			return types === "ItdBoon";
 		});
+	}
+	// #endregion
+
+	// #region Illrigger Combat Masteries (IllMastery)
+	/**
+	 * The character's selected Combat Mastery features (IllMastery optional-feature type),
+	 * detected by the same `optionalFeatureTypes`/`featureType` convention as interdict boons.
+	 * @returns {Array<object>}
+	 */
+	getIllriggerMasteries () {
+		return (this._data.features || []).filter(f => {
+			const types = f.optionalFeatureTypes || f.featureType;
+			if (Array.isArray(types)) return types.includes("IllMastery");
+			return types === "IllMastery";
+		});
+	}
+
+	/** @returns {Set<string>} lower-cased names of the selected combat masteries. */
+	_getIllriggerMasteryNames () {
+		return new Set(this.getIllriggerMasteries().map(f => (f.name || "").trim().toLowerCase()));
+	}
+
+	/**
+	 * The chosen melee weapon type for the Lies mastery (e.g. "Greatsword"). When set,
+	 * attacks whose name matches this type may use Charisma for attack/damage rolls.
+	 * @returns {string}
+	 */
+	getLiesWeaponType () {
+		return this._data.illriggerLiesWeapon || "";
+	}
+
+	/**
+	 * Set (or clear) the Lies mastery weapon-type choice. No-op when the character does not
+	 * have the Lies mastery, so a stale choice never silently boosts attacks.
+	 * @param {string} name
+	 * @returns {string} the value actually stored.
+	 */
+	setLiesWeaponType (name) {
+		if (!(this.getFeatureCalculations?.() || {}).hasLiesMastery) {
+			this._data.illriggerLiesWeapon = "";
+			return "";
+		}
+		this._data.illriggerLiesWeapon = (name || "").trim();
+		return this._data.illriggerLiesWeapon;
+	}
+
+	/**
+	 * Whether an attack matches the Lies mastery weapon-type choice. Matching is a
+	 * case-insensitive containment test on the attack/weapon name (so "Greatsword +1" or
+	 * "Greatsword" both match a choice of "greatsword"). Spell attacks never match.
+	 * @param {object} attack
+	 * @returns {boolean}
+	 */
+	_isLiesWeaponAttack (attack) {
+		if (!attack || typeof attack !== "object") return false;
+		if (attack.isSpell || attack.isSpellAttack) return false;
+		if (attack.abilityMod === "spellcasting") return false;
+		const choice = this.getLiesWeaponType().toLowerCase();
+		if (!choice) return false;
+		const name = (attack.name || "").toLowerCase();
+		if (!name) return false;
+		return name.includes(choice) || choice.includes(name);
+	}
+
+	/**
+	 * Additive bonus the Lies mastery contributes to a weapon attack/damage roll: the
+	 * (player-favourable) positive difference between CHA and the weapon's normally-resolved
+	 * modifier, but only for the chosen weapon type. 0 otherwise. Mirrors the Bladesong
+	 * override pattern so the two compose via MAX (you may use only one alternate ability).
+	 * @param {object} attack
+	 * @returns {number}
+	 */
+	getLiesWeaponBonus (attack) {
+		if (!(this.getFeatureCalculations?.() || {}).hasLiesMastery) return 0;
+		if (!this._isLiesWeaponAttack(attack)) return 0;
+		const base = this._resolveBaseWeaponAbilityMod(attack.abilityMod || "str");
+		return Math.max(0, this.getAbilityMod("cha") - base);
+	}
+
+	/**
+	 * Set the number of hostile creatures within 5 ft of the character, for the Inexorable
+	 * mastery (+1 to all saves per hostile, max +5). Maintains a single live `save:all`
+	 * named modifier so the bonus surfaces through aggregateModifiers() and applies at roll
+	 * time. Clears the modifier when the count is 0 or the mastery is absent.
+	 * @param {number} n
+	 * @returns {number} the clamped adjacent-hostile count actually stored.
+	 */
+	setIllriggerAdjacentHostiles (n) {
+		const hasInexorable = !!(this.getFeatureCalculations?.() || {}).hasInexorableMastery;
+		const count = hasInexorable ? Math.max(0, Math.floor(Number(n) || 0)) : 0;
+		this._data.illriggerInexorableAdjacent = count;
+		this._syncInexorableModifier();
+		return count;
+	}
+
+	/** @returns {number} the stored adjacent-hostile count for the Inexorable mastery. */
+	getIllriggerAdjacentHostiles () {
+		return this._data.illriggerInexorableAdjacent || 0;
+	}
+
+	/** @returns {number} the current Inexorable save bonus (min(5, adjacent hostiles)). */
+	getInexorableSaveBonus () {
+		if (!(this.getFeatureCalculations?.() || {}).hasInexorableMastery) return 0;
+		return Math.min(5, Math.max(0, this.getIllriggerAdjacentHostiles()));
+	}
+
+	/**
+	 * Reconcile the live `save:all` named modifier that represents the Inexorable bonus.
+	 * Idempotent: removes any prior Inexorable modifier, then re-adds one when the bonus is
+	 * positive. Called from setIllriggerAdjacentHostiles and on load/recalc.
+	 */
+	_syncInexorableModifier () {
+		const NAME = "Inexorable";
+		this._data.namedModifiers = (this._data.namedModifiers || []).filter(m => !(m.name === NAME && m.type === "save:all"));
+		const bonus = this.getInexorableSaveBonus();
+		if (bonus > 0) {
+			this.addNamedModifier({
+				name: NAME,
+				type: "save:all",
+				value: bonus,
+				note: `From Inexorable - +1 per hostile within 5 ft (max +5)`,
+				enabled: true,
+				sourceType: "classFeature",
+			});
+		}
+	}
+	// #endregion
+
+	// #region Illrigger Infernal Conduit
+	/** @returns {boolean} whether the character has the L6 Infernal Conduit feature. */
+	hasInfernalConduit () {
+		return !!(this.getFeatureCalculations?.() || {}).hasInfernalConduit;
+	}
+
+	/** @returns {boolean} whether the L11 Infernal Conduit Improvement (Devour exhaustion) is active. */
+	hasInfernalConduitImprovement () {
+		return !!(this.getFeatureCalculations?.() || {}).hasInfernalConduitImprovement;
+	}
+
+	/** @returns {number} the size of the Infernal Conduit dice pool (number of d10s). */
+	getInfernalConduitMax () {
+		return (this.getFeatureCalculations?.() || {}).infernalConduitDice || 0;
+	}
+
+	/** @returns {number} the die size of an Infernal Conduit die (10). */
+	getInfernalConduitDie () {
+		return (this.getFeatureCalculations?.() || {}).infernalConduitDie || 10;
+	}
+
+	/**
+	 * The Infernal Conduit range. Touch by default; the Unfettered mastery upgrades it to
+	 * 30 ft. Returned as a display string.
+	 * @returns {string}
+	 */
+	getInfernalConduitRange () {
+		return (this.getFeatureCalculations?.() || {}).hasUnfetteredMastery ? "30 ft" : "Touch";
+	}
+
+	/** @returns {object} the lazily-initialised Infernal Conduit store (back-compat for old saves). */
+	_ensureInfernalConduitStore () {
+		if (!this._data.infernalConduit || typeof this._data.infernalConduit !== "object") {
+			this._data.infernalConduit = {available: null};
+		}
+		return this._data.infernalConduit;
+	}
+
+	/**
+	 * Remaining Infernal Conduit dice. Lazily seeds the store to the pool max on first read.
+	 * @returns {number}
+	 */
+	getInfernalConduitAvailable () {
+		const max = this.getInfernalConduitMax();
+		if (max <= 0) return 0;
+		const store = this._ensureInfernalConduitStore();
+		if (store.available == null) store.available = max;
+		return Math.max(0, Math.min(store.available, max));
+	}
+
+	/**
+	 * Set the remaining Infernal Conduit dice (clamped to 0..max).
+	 * @param {number} n
+	 * @returns {number} the clamped value actually stored.
+	 */
+	_setInfernalConduitAvailable (n) {
+		const max = this.getInfernalConduitMax();
+		const v = Math.max(0, Math.min(Math.floor(Number(n) || 0), max));
+		this._ensureInfernalConduitStore().available = v;
+		return v;
+	}
+
+	/** Restore the full Infernal Conduit pool (recovers on a LONG rest only). */
+	restoreInfernalConduit () {
+		this._ensureInfernalConduitStore().available = this.getInfernalConduitMax();
+	}
+
+	/**
+	 * Spend Infernal Conduit dice on the Invigorate or Devour effect. Spends `count` dice
+	 * (deterministic average roll for headless/test stability — `count * (die+1)/2` rounded
+	 * down), applies the SELF-side hit-point swing, and returns a descriptor of both sides so
+	 * the caller can surface the target-side numbers (no target entity exists on the sheet).
+	 *
+	 * Rules (MCDM Illrigger Revised):
+	 *   - Invigorate: target heals (fail: total, success: half); YOU take `total` necrotic
+	 *     (unpreventable). If that drops you to 0 HP you fall unconscious and are stabilised.
+	 *   - Devour: target takes necrotic (fail: total, success: half); YOU regain HP equal to
+	 *     the damage the target took (fail: total, success: half). On a failed save at L11+
+	 *     the target also gains a level of exhaustion.
+	 *
+	 * @param {number} count number of dice to spend.
+	 * @param {"invigorate"|"devour"} effect which effect to resolve.
+	 * @param {{saveResult?: "fail"|"success", roll?: number}} [opts] `saveResult` defaults to
+	 *   "fail"; `roll` overrides the dice total (for tests / manual entry).
+	 * @returns {object|null} descriptor, or null if nothing could be spent.
+	 */
+	spendInfernalConduitDice (count, effect, opts = {}) {
+		if (!this.hasInfernalConduit()) return null;
+		const avail = this.getInfernalConduitAvailable();
+		if (avail <= 0) return null;
+
+		const die = this.getInfernalConduitDie();
+		const n = Math.max(1, Math.min(Math.floor(Number(count) || 1), avail));
+		const saveResult = opts.saveResult === "success" ? "success" : "fail";
+		const total = typeof opts.roll === "number" && opts.roll >= 0
+			? Math.floor(opts.roll)
+			: n * Math.floor((die + 1) / 2); // deterministic average
+
+		this._setInfernalConduitAvailable(avail - n);
+
+		const half = Math.floor(total / 2);
+		const result = {
+			effect: effect === "devour" ? "devour" : "invigorate",
+			diceSpent: n,
+			dice: `${n}d${die}`,
+			total,
+			saveResult,
+			diceRemaining: this.getInfernalConduitAvailable(),
+			selfHpDelta: 0,
+			targetHpDelta: 0,
+			appliesExhaustion: false,
+			selfDroppedToZero: false,
+		};
+
+		if (result.effect === "invigorate") {
+			// Target heals; you take `total` necrotic regardless of save.
+			result.targetHpDelta = saveResult === "fail" ? total : half;
+			result.selfHpDelta = -total;
+			const hpBefore = this.getCurrentHp();
+			this.takeDamage(total);
+			if (hpBefore > 0 && this.getCurrentHp() === 0) {
+				result.selfDroppedToZero = true;
+				// "you fall unconscious and are stabilized" — 3 death-save successes at 0 HP
+				// is exactly the stabilised state (isStabilized()).
+				this.setDeathSaveSuccesses(3);
+			}
+		} else {
+			// Devour: target takes necrotic; you heal the damage the target took.
+			const dealt = saveResult === "fail" ? total : half;
+			result.targetHpDelta = -dealt;
+			result.selfHpDelta = dealt;
+			this.heal(dealt);
+			if (saveResult === "fail" && this.hasInfernalConduitImprovement()) {
+				result.appliesExhaustion = true;
+			}
+		}
+
+		return result;
 	}
 	// #endregion
 
