@@ -30361,6 +30361,22 @@
 			],
 			"speed": 30,
 			"darkvision": 60,
+			"ability": [
+				{
+					"cha": 2,
+					"choose": {
+						"from": [
+							"str",
+							"dex",
+							"con",
+							"int",
+							"wis"
+						],
+						"count": 1,
+						"amount": 1
+					}
+				}
+			],
 			"resist": [
 				"radiant",
 				"necrotic"
@@ -30390,34 +30406,6 @@
 				}
 			],
 			"entries": [
-				{
-					"type": "quote",
-					"entries": [
-						"Many of you dream of being touched by the gods, of walking in their gaze. Few understand the burden of living under such pressure."
-					],
-					"by": "Dimbaal Noretso Grim, Old Storyteller"
-				},
-				"The gods rarely walk among mortals \u2014 Their power is too great, their concerns too vast, their existence too distant from the world they safeguard. Yet from time to time a fragment of divine essence finds its way into a mortal bloodline.",
-				"Some Hochlings descend from ancient unions between gods and mortals. Others are the descendants of saints, prophets, kings, or heroes who earned divine favor. In rare cases a child may be born a Hochling after generations of apparently mundane ancestry, the divine spark lying dormant until suddenly reawakening.",
-				"Though many people regard them with reverence, envy, or awe, Hochlings quickly learn that admiration can be as heavy as hatred; Every mistake \u2014 a scandal; Every failure \u2014 proof that they have lost the favor of their god.",
-				{
-					"type": "entries",
-					"name": "Divine Heritage",
-					"entries": [
-						"Most Hochlings appear largely human, though subtle signs reveal their divine ancestry.",
-						"Their eyes often possess unusual qualities: pupils shaped like stars, eyes of solid gold or silver, or irises that glow faintly in darkness. Their hair can also signal their heritage, sometimes displaying impossible colors or shining with an otherworldly luster.",
-						"Many Hochlings also unconsciously manifest signs of divine favor when experiencing strong emotions. Their eyes may glow, faint music may accompany their presence, flowers may bloom in their footsteps, or shadows may bend away from them.",
-						"A Hochling descended from a beast-headed deity may inherit more obvious traits. A child of Horus god might possess golden eyes and feathers growing among their hair, and descendants of Sekhmet may display feline ears, elongated canines, or tawny fur upon their skin. Such traits vary widely between bloodlines and individuals, and may even become pronounced enough to produce hochling that appear as their gods do, half beast and half man."
-					]
-				},
-				{
-					"type": "entries",
-					"name": "Burden of Divinity",
-					"entries": [
-						"The common folk often treat Hochlings very differently from Tieflings \u2014 it is widely assumed a Hochling must be wise, virtuous, and favored by the gods. The common folk often treats them as messengers of the gods, expecting miracles at every step and seeing every word out of their mouth as gospel.",
-						"Yet a Hochling is no more perfect than any other mortal. Some embrace the expectations placed upon them and strive to become living examples of their deity's ideals, while others reject such burdens entirely. Many spend their lives trying to determine whether their divine ancestry grants them a purpose\u2014or merely a reputation."
-					]
-				},
 				{
 					"type": "entries",
 					"name": "Mortal Nature",
