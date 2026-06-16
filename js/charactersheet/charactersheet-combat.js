@@ -3038,8 +3038,19 @@ class CharacterSheetCombat {
 			const selfWord = res.selfHpDelta < 0 ? "take" : "regain";
 			const selfAmt = Math.abs(res.selfHpDelta);
 
+			// Animate the ACTUAL NdN conduit dice (e.g. 5d10) and pass an explicit `subtitle`
+			// so the result popup's breakdown shows the conduit roll. Without a subtitle,
+			// showDiceResult defaults the breakdown to a hardcoded "1d20", which is the d20
+			// players were seeing here (same class as the R20-S4 seal-burn fix).
+			if (rolled) {
+				const diceGroups = [];
+				this._pushDiceGroup(diceGroups, rolled);
+				if (diceGroups.length) void this._page.pAnimateDamageDice?.(diceGroups);
+			}
+
 			this._page.showDiceResult?.({
 				title: `Infernal Conduit — ${isInvig ? "Invigorate" : "Devour"} (${res.dice})`,
+				subtitle: `${res.dice} necrotic`,
 				roll: res.total,
 				total: res.total,
 				resultClass: isInvig ? "text-success" : "text-danger",

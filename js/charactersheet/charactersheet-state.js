@@ -19109,9 +19109,16 @@ class CharacterSheetState {
 								calculations.charmEnemyUses = Math.max(1, chaMod);
 							}
 
-							// Level 7: Moloch's Interdiction (free boons)
+							// Level 7: Moloch's Interdiction (free, level-gated interdict boons)
 							if (level >= 7) {
 								calculations.hasMolochInterdiction = true;
+								// Auto-grant each Moloch's Interdiction boon as its prereq level is
+								// reached (Red Cant @7, Slippery Ploy @13, Incontrovertible @18).
+								// These are always-known and DON'T count against interdictBoonsKnown,
+								// so they are applied here directly rather than via the player's
+								// selected-boon list. Re-evaluated from the current level so the
+								// higher tiers light up automatically on level-up.
+								this._applyMolochInterdictionBoons(calculations, {level, profBonus, chaMod});
 							}
 
 							// Level 11: Intransigent (charmed immunity 10ft aura), Let's Make a Deal
@@ -26512,6 +26519,43 @@ class CharacterSheetState {
 	}
 	// #endregion
 
+	// #region Illrigger Blood Price (L10)
+	/** @returns {boolean} whether the character has the Hellspeaker L10 Blood Price feature. */
+	hasBloodPrice () {
+		return !!(this.getFeatureCalculations?.() || {}).hasBloodPrice;
+	}
+
+	/**
+	 * Blood Price (Hellspeaker L10): after failing a saving throw, spend one Hit Die and add
+	 * the rolled value to the save result. This SPENDS a Hit Die but — unlike a short-rest
+	 * recovery — does NOT heal. Returns a descriptor with the rolled value so the caller can
+	 * add it to the displayed save total, or null if nothing could be spent.
+	 *
+	 * @param {string|null} [dieType] preferred die-type pool (e.g. "d10"); falls back to the
+	 *   largest spendable pool when omitted.
+	 * @param {{roll?: number}} [opts] `roll` overrides the rolled value (for tests / manual entry).
+	 * @returns {{dieType:string, die:number, roll:number, remaining:number}|null}
+	 */
+	applyBloodPrice (dieType = null, opts = {}) {
+		if (!this.hasBloodPrice()) return null;
+		const type = dieType && this._data.hitDice?.[dieType]?.current > 0
+			? dieType
+			: this.getLargestSpendableHitDieType();
+		if (!type) return null;
+		const pool = this._data.hitDice?.[type];
+		if (!pool || (Math.floor(Number(pool.current)) || 0) <= 0) return null;
+
+		pool.current = Math.max(0, (Math.floor(Number(pool.current)) || 0) - 1);
+
+		const die = parseInt(String(type).replace("d", ""), 10) || 8;
+		const roll = typeof opts.roll === "number" && opts.roll >= 0
+			? Math.floor(opts.roll)
+			: Math.ceil(die / 2) + 1; // deterministic average for headless/test contexts
+
+		return {dieType: type, die, roll, remaining: pool.current};
+	}
+	// #endregion
+
 	// #region Illrigger Interdict Boons (per-boon mechanical effects)
 	/**
 	 * Normalize an interdict-boon name for matching: lower-case, drop the
@@ -26653,6 +26697,27 @@ class CharacterSheetState {
 	};
 
 	/**
+	 * Calc-only display summaries for named Illrigger features whose mechanical effect the
+	 * static description can't fully express (R21). Keyed by exact (lower-cased) feature name.
+	 *
+	 * @type {Object<string, function(object, object=): (string|null)>}
+	 */
+	static ILLRIGGER_FEATURE_SUMMARIES = {
+		"moloch's interdiction": (c) => {
+			const names = c.molochInterdictionBoonNames || [];
+			return names.length ? `Free boons: ${names.join(", ")}` : null;
+		},
+		"blood price": (c, self) => {
+			if (!c.hasBloodPrice) return null;
+			const hd = self?.getHitDiceSummary?.();
+			const avail = hd ? hd.current : null;
+			return avail != null
+				? `Spend 1 Hit Die to add to a failed save (${avail} available)`
+				: "Spend 1 Hit Die to add to a failed save";
+		},
+	};
+
+	/**
 	 * Build a short, computed effect label for a stored feature so the Features panel can
 	 * surface level/PB/DC-resolved numbers that the static description can't show (R20
 	 * #15/#16). Covers selected Interdict Boons (`ItdBoon`) and calc-only Illrigger
@@ -26681,6 +26746,11 @@ class CharacterSheetState {
 		const specFn = CharacterSheetState.ILLRIGGER_SPECIALTY_SUMMARIES[(feature.name || "").trim().toLowerCase()];
 		if (specFn) return specFn(calcs, this) || "";
 
+		// Named Illrigger features whose computed effect can't be expressed by the static
+		// description (R21). Keyed by exact (lower-cased) feature name.
+		const namedFn = CharacterSheetState.ILLRIGGER_FEATURE_SUMMARIES[(feature.name || "").trim().toLowerCase()];
+		if (namedFn) return namedFn(calcs, this) || "";
+
 		return "";
 	}
 
@@ -26698,6 +26768,41 @@ class CharacterSheetState {
 			const apply = defs[CharacterSheetState._normalizeInterdictBoonName(boon.name)];
 			if (apply) apply(calculations, ctx);
 		}
+	}
+
+	/**
+	 * Free interdict boons granted by Moloch's Interdiction (Hellspeaker), keyed by the
+	 * minimum illrigger level at which each is learned (per the source's prerequisites).
+	 * Each value is the display name + its normalized key into
+	 * {@link CharacterSheetState.INTERDICT_BOON_FIELDS}.
+	 * @type {Array<{level:number, name:string, key:string}>}
+	 */
+	static MOLOCH_INTERDICTION_BOONS = [
+		{level: 7, name: "Red Cant", key: "red cant"},
+		{level: 13, name: "Slippery Ploy", key: "slippery ploy"},
+		{level: 18, name: "Incontrovertible", key: "incontrovertible"},
+	];
+
+	/**
+	 * Apply the Moloch's Interdiction free boons whose prereq level the character has
+	 * reached. These are always-known boons that do NOT count against interdictBoonsKnown,
+	 * so they re-use the same per-boon {@link CharacterSheetState.INTERDICT_BOON_FIELDS}
+	 * effect derivation as selected boons but are applied independently of the player's
+	 * selected-boon list. Records the granted boon names on
+	 * `calculations.molochInterdictionBoonNames` for surfacing.
+	 * @param {object} calculations - The calculations object being built (mutated in place).
+	 * @param {{level:number, profBonus:number, chaMod:number}} ctx
+	 */
+	_applyMolochInterdictionBoons (calculations, ctx) {
+		const defs = CharacterSheetState.INTERDICT_BOON_FIELDS;
+		const granted = [];
+		for (const boon of CharacterSheetState.MOLOCH_INTERDICTION_BOONS) {
+			if ((ctx?.level || 0) < boon.level) continue;
+			const apply = defs[boon.key];
+			if (apply) apply(calculations, ctx);
+			granted.push(boon.name);
+		}
+		calculations.molochInterdictionBoonNames = granted;
 	}
 	// #endregion
 
@@ -33918,6 +34023,12 @@ class CharacterSheetState {
 			if (matches) {
 				// Clone the modifier and add parsed advantage/disadvantage flags
 				const resultMod = {...mod};
+				// Provenance: advantage/disadvantage parsed out of the modType *string*
+				// (e.g. "check:cha:advantage") carries `value:1` as a presence sentinel,
+				// not a numeric bonus. Mark it so the aggregator zeroes that sentinel —
+				// without clobbering modifiers that carry an explicit `advantage` field
+				// alongside a real `value` (e.g. custom abilities {value:5, advantage:true}).
+				if (advantage || disadvantage) resultMod._advFromType = true;
 				if (advantage && !resultMod.advantage) resultMod.advantage = true;
 				if (disadvantage && !resultMod.disadvantage) resultMod.disadvantage = true;
 				// Store extra qualifiers for conditional display
@@ -34007,7 +34118,12 @@ class CharacterSheetState {
 							conditional: mod.conditional,
 							advantage: !!mod.advantage,
 							disadvantage: !!mod.disadvantage,
-							bonus: typeof mod.value === "number" ? mod.value : 0,
+							// Advantage/disadvantage modifiers whose effect is encoded in the
+							// modType string carry value:1 as a *presence sentinel* (the effect
+							// lives in the ":advantage"/":disadvantage" modType), so the picker
+							// must NOT show a phantom "+1" chip for them. Modifiers that carry an
+							// explicit numeric `value` alongside an `advantage` field still show it.
+							bonus: mod._advFromType ? 0 : (typeof mod.value === "number" ? mod.value : 0),
 							target: mod._baseType || mod.type || "",
 						});
 					}
@@ -34027,8 +34143,14 @@ class CharacterSheetState {
 				result.conditionals.push(mod.conditional);
 			}
 
-			// Numeric bonus calculation
-			let value = mod.value || 0;
+			// Numeric bonus calculation. Advantage/disadvantage modifiers whose effect is
+			// encoded in the modType string (":advantage"/":disadvantage") carry value:1 as a
+			// *presence sentinel* — that sentinel must NOT leak into the numeric total, otherwise
+			// an advantage-only modifier reads as a flat +1 (e.g. Moloch's Blessing / Forked
+			// Tongue Improvement giving +1 instead of advantage). Modifiers that carry an explicit
+			// numeric `value` alongside an `advantage` field (e.g. custom abilities) keep it. The
+			// advantage flag itself is still honoured below and via getAdvantageState().
+			let value = mod._advFromType ? 0 : (mod.value || 0);
 
 			// Per-level modifiers
 			if (mod.perLevel) {
