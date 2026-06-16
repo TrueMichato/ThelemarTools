@@ -2873,6 +2873,11 @@ class CharacterSheetClassUtils {
 								level: refLevel,
 								entries: refFeature.entries,
 								isSubclassFeature: true,
+								// (R20 #17) Preserve activation markers so the option classifies/links
+								// correctly downstream (e.g. Invoke Hell options carry
+								// `consumes: {name: "Invoke Hell"}` and draw on the shared short-rest pool).
+								...(refFeature.consumes ? {consumes: refFeature.consumes} : {}),
+								...(refFeature.uses ? {uses: refFeature.uses} : {}),
 							});
 						}
 					}
