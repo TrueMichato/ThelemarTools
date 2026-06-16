@@ -1456,12 +1456,13 @@ class CharacterSheetFeatures {
 			});
 		}
 
-		// Illrigger Hellspeaker (Moloch) save DCs.
-		if (calculations.charmEnemyDc) {
+		// Illrigger Baleful Interdict — the class's single save DC, also used by
+		// Charm Enemy, Quid Pro Quo, and other Illrigger features (8 + prof + CHA).
+		if (calculations.interdictDc) {
 			stats.push({
-				label: "Charm Enemy DC",
-				value: calculations.charmEnemyDc,
-				title: `8 + Proficiency + Charisma modifier${calculations.charmEnemyUses ? ` — ${calculations.charmEnemyUses} use${calculations.charmEnemyUses === 1 ? "" : "s"}/long rest` : ""}`,
+				label: "Interdict DC",
+				value: calculations.interdictDc,
+				title: "8 + Proficiency + Charisma modifier — used by Baleful Interdict, Charm Enemy, and other Illrigger features",
 			});
 		}
 
