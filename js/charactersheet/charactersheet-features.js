@@ -801,13 +801,24 @@ class CharacterSheetFeatures {
 	}
 
 	_useFeature (featureId) {
-		// For features with limited uses, decrement the use count
 		const features = this._state.getFeatures();
 		const feature = features.find(f => f.id === featureId);
-		if (!feature || !feature.uses) return;
+		if (!feature) return;
 
+		// (R21) Canonical path: if this feature is a classified activatable ABILITY, route the
+		// click through the page's real activation pipeline (rolls/applies effects, consumes
+		// the right resource, opens the right modal) instead of a bare use decrement.
+		if (this._page?._getActivatableAbilityForFeature?.(feature)) {
+			Promise.resolve(this._page._pUseFeatureAbility(feature)).catch(e => {
+				// eslint-disable-next-line no-console
+				console.error("[CharSheet Features] Error using ability:", e);
+			});
+			return;
+		}
+
+		// Plain uses-tracking features (not classified abilities): decrement the use count.
+		if (!feature.uses) return;
 		if (feature.uses.current > 0) {
-			// Use state method to persist the change
 			this._state.setFeatureUses(featureId, feature.uses.current - 1);
 			this.render();
 			this._page.saveCharacter();
@@ -1598,6 +1609,13 @@ class CharacterSheetFeatures {
 	_renderFeature (feature) {
 		const isExpanded = this._expandedFeatures.has(feature.id);
 		const hasUses = feature.uses && feature.uses.max > 0;
+		// (R21) Classified limited-use abilities (e.g. Healing Hands, Guided Strike, Forked
+		// Tongue) get a working Use button here even when they carry no `uses` pool of their
+		// own (Guided Strike spends Channel Divinity; Forked Tongue opens the swap modal).
+		// This features-area button is the single canonical "use this ability" path.
+		const abilityEntry = this._page?._getActivatableAbilityForFeature?.(feature) || null;
+		const isAbility = !!abilityEntry;
+		const showUseBtn = hasUses || isAbility;
 
 		// Feature name hover link — delegate to the single centralised builder on
 		// the page so every feature type (class/subclass, species, background,
@@ -1792,7 +1810,7 @@ class CharacterSheetFeatures {
 					${combatMethodBadge}
 					${derivedEffectBadge}
 					<div class="charsheet__feature-actions">
-						${hasUses ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="Use Feature">Use</button>` : ""}
+						${showUseBtn ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="${isAbility ? "Use this ability" : "Use Feature"}">Use</button>` : ""}
 						<button class="ve-btn ve-btn-xs ${this._state.getFeatureNote?.(feature.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feature-note" title="${this._state.getFeatureNote?.(feature.id) ? "Edit Note" : "Add Note"}">
 							<span class="glyphicon glyphicon-comment"></span>
 						</button>

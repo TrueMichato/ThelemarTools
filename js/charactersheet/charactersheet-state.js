@@ -36414,6 +36414,25 @@ class CharacterSheetState {
 			});
 		}
 
+		// ===== INTERDICT BOON ABILITIES (R21 #14) =====
+		// Active Illrigger interdict boons (ItdBoon optional features that "expend a seal")
+		// are limited-use ABILITIES drawing on the Baleful Interdict seal pool — NOT live
+		// toggle states. Classifying them here (BEFORE the ACTIVE_STATE_TYPES name loop) keeps
+		// them out of the generic active-states "Available to Activate" panel and surfaces them
+		// in the features/abilities area with a Use button, consistent with every other
+		// limited-use ability. Generic across all expend-a-seal boons (Hellish Frenzy, Shadow
+		// Shroud, Veil of Lies, Hellsight, Bedevil, …). Passive boons fall through to the
+		// existing passive/no-op handling. The boons' ongoing effect surfacing (Invisible, +2
+		// AC, truesight) is owned by the interdict-boon effect layer, not this classifier.
+		const isInterdictBoon = feature.optionalFeatureTypes?.includes("ItdBoon")
+			|| (Array.isArray(feature.featureType) && feature.featureType.includes("ItdBoon"));
+		if (isInterdictBoon && /\bexpend (?:a|an|one|\d+) seals?\b/i.test(text)) {
+			return this._buildAbilityActivationInfo(feature, rawText, text, {
+				resourceName: "Baleful Interdict",
+				resourceCost: 1,
+			});
+		}
+
 		// Exclude non-activatable features that might match patterns
 		const excludedNames = [
 			"suggested characteristics",
@@ -38350,6 +38369,34 @@ class CharacterSheetState {
 		const info = activationInfo === undefined ? this.detectActivatableFeature(feature) : activationInfo;
 		if (info?.isToggle) return false;
 		return true;
+	}
+
+	/**
+	 * GENERIC split predicate (R21): is this {@link getActivatableFeatures} entry a
+	 * limited-use ABILITY (one-shot / trigger / instant — "Use it") rather than a sustained
+	 * TOGGLE state (Rage, Bladesong, a stance — "turn it on/off")?
+	 *
+	 * This is the single source of truth for the abilities-area vs active-states-panel
+	 * boundary. Such abilities surface ONLY in the features/abilities area (with a working
+	 * Use button routed to the canonical activation pipeline); they must NEVER appear in the
+	 * generic active-states "Available to Activate" list. Genuine toggles/stances stay in the
+	 * active-states panel.
+	 *
+	 * Custom homebrew abilities are deliberately excluded here — they have their own
+	 * Resources/Custom-Abilities surfaces and filtering paths.
+	 *
+	 * @param {{interactionMode?: string, activationInfo?: object, feature?: {isCustomAbility?: boolean}}} af
+	 *   An entry from getActivatableFeatures().
+	 * @returns {boolean}
+	 */
+	static isActivatableAbilityEntry (af) {
+		if (!af) return false;
+		if (af.feature?.isCustomAbility) return false;
+		const info = af.activationInfo || {};
+		if (info.isToggle === true) return false;
+		const mode = af.interactionMode || info.interactionMode || (info.isToggle ? "toggle" : "");
+		if (mode === "toggle") return false;
+		return mode === "limited" || mode === "trigger" || mode === "instant" || info.isInstant === true;
 	}
 	// #endregion
 
