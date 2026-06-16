@@ -170,10 +170,22 @@ describe("R20 #16 — Interdict Boon effect summaries surface", () => {
 			.toBe(`Save DC ${expectedDc}`);
 	});
 
-	test("toggle & purely-narrative boons surface no derived label", () => {
+	test("toggle boons surface a derived label (so they remain visible once the active-state toggle is removed)", () => {
+		// R21 #8: the four live-toggle boons previously returned "" because their effect was
+		// only conveyed via the active-state toggle; they now carry a real summary label.
 		const state = buildIllrigger(10);
-		addBoon(state, "Hellish Frenzy"); // live toggle (active state)
+		addBoon(state, "Hellish Frenzy");
+		addBoon(state, "Shadow Shroud");
+		addBoon(state, "Hellsight");
+		addBoon(state, "Veil of Lies");
+		const boons = state.getInterdictBoons();
+		boons.forEach(b => expect(state.getFeatureEffectSummary(b)).toBeTruthy());
+	});
+
+	test("purely-narrative / enemy-side boons surface no derived label", () => {
+		const state = buildIllrigger(10);
 		addBoon(state, "Dark Malediction (Passive)"); // narrative aura
+		addBoon(state, "Unleash Hell"); // enemy-side / narrative
 		const boons = state.getInterdictBoons();
 		boons.forEach(b => expect(state.getFeatureEffectSummary(b)).toBe(""));
 	});

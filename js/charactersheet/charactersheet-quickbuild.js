@@ -1462,11 +1462,11 @@ class CharacterSheetQuickBuild {
 		};
 
 		asiLevels.forEach((analysis, idx) => {
-			const {characterLevel, className, classLevel, classData} = analysis;
+			const {characterLevel, className, classSource, classLevel, classData} = analysis;
 			const levelKey = `${className}_${classLevel}`;
 			// Thelemar rule fires at CHARACTER level 4 (matters for multiclass).
 			const isBoth = this._state.shouldGrantBothAsiAndFeat(characterLevel);
-			const isEpicBoon = classLevel === 19;
+			const isEpicBoon = CharacterSheetClassUtils.isEpicBoonLevel(classSource, classLevel);
 
 			if (!this._selections.asi[levelKey]) {
 				this._selections.asi[levelKey] = {
@@ -1617,7 +1617,8 @@ class CharacterSheetQuickBuild {
 		const container = e_({outer: `<div class="charsheet__quickbuild-feat-select mb-2"></div>`});
 		container.append(e_({outer: `<label class="ve-bold ve-small">${isEpicBoon ? "Epic Boon" : "Feat"} Selection</label>`}));
 
-		let feats = this._page.filterByAllowedSources(this._page.getFeats() || []);
+		let feats = this._page.filterByAllowedSources(this._page.getFeats() || [])
+			.filter(f => !CharacterSheetClassUtils.isInterdictBoonEntry(f));
 		if (categoryFilter && categoryFilter.length) {
 			// Class-level featProgression (e.g. Fighting Style): constrain to the given categories.
 			feats = CharacterSheetClassUtils.filterFeatsByCategory(feats, categoryFilter);

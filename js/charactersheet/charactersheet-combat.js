@@ -2657,8 +2657,10 @@ class CharacterSheetCombat {
 
 	/**
 	 * Best-effort Passive/Active classification for an interdict boon, from its entry
-	 * text. Per-boon mechanical effects are intentionally NOT implemented yet (deferred
-	 * round); this only drives the display tag in the panel.
+	 * text; drives the display tag in the panel. Each boon's computed effect is surfaced
+	 * separately via {@link CharacterSheetState#getFeatureEffectSummary}, and boons with a
+	 * discrete on-sheet effect expose an Apply button (see
+	 * {@link CharacterSheetState#applyInterdictBoonActivation}).
 	 * @param {object} boon
 	 * @returns {"Active"|"Passive"}
 	 */
@@ -2671,9 +2673,9 @@ class CharacterSheetCombat {
 	/**
 	 * Additive combat-tab Interdiction panel (Illrigger Baleful Interdict). Shows the
 	 * seal pool (available / max), the Interdict save DC, controls to place / burn / move
-	 * seals, and the list of KNOWN interdict boons (name + Passive/Active tag + an
-	 * "expend seal" affordance stub). Hidden entirely unless the character has Baleful
-	 * Interdict. Per-boon mechanical effects are deferred to a later round.
+	 * seals, and the list of KNOWN interdict boons (name + Passive/Active tag + the boon's
+	 * computed effect summary + an Apply button for boons with a discrete on-sheet effect,
+	 * e.g. Soul Eater temp HP). Hidden entirely unless the character has Baleful Interdict.
 	 */
 	renderCombatInterdiction () {
 		const section = document.getElementById("charsheet-combat-interdiction-section");
@@ -2718,11 +2720,20 @@ class CharacterSheetCombat {
 				if (this._page?.getHoverLink && b.source) {
 					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, b.name, b.source); } catch (e) { nameHtml = b.name; }
 				}
+				const summary = this._state.getFeatureEffectSummary?.(b, calcs) || "";
+				const summaryHtml = summary
+					? `<span class="badge badge-success charsheet__interdict-boon-effect" title="Computed effect">${summary}</span>`
+					: "";
+				const canActivate = this._state.hasInterdictBoonActivation?.(b.name);
+				const activateBtn = canActivate
+					? `<button class="ve-btn ve-btn-xxs ve-btn-primary charsheet__interdict-boon-activate ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" title="Apply this boon's effect to your sheet">Apply</button>`
+					: "";
 				return `
 					<div class="charsheet__interdict-boon-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-1">
 						<span class="bold mr-1">${nameHtml}</span>
 						<span class="badge ${badgeCls}" title="${activation === "Active" ? "Requires an action/trigger to use" : "Always-on benefit"}">${activation}</span>
-						<button class="ve-btn ve-btn-xxs ve-btn-default charsheet__interdict-boon-expend ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" title="Expend a seal for this boon (effect wiring coming in a later update)">Expend seal</button>
+						${summaryHtml}
+						${activateBtn}
 					</div>`;
 			}).join("")
 			: `<div class="ve-muted ve-small">No interdict boons known yet.</div>`;
@@ -2793,11 +2804,16 @@ class CharacterSheetCombat {
 			});
 		});
 
-		// --- Expend-seal boon stub (per-boon mechanics deferred) ---
-		container.querySelectorAll(".charsheet__interdict-boon-expend").forEach((btn) => {
+		// --- Apply a boon's discrete on-sheet effect (e.g. Soul Eater temp HP) ---
+		container.querySelectorAll(".charsheet__interdict-boon-activate").forEach((btn) => {
 			btn.addEventListener("click", () => {
-				const boonName = btn.dataset.boonName || "this boon";
-				JqueryUtil.doToast({type: "info", content: `Expend-seal effect for "${boonName}" is not wired yet — burn/place seals manually above for now.`});
+				const boonName = btn.dataset.boonName || "";
+				const result = this._state.applyInterdictBoonActivation?.(boonName);
+				if (!result) { JqueryUtil.doToast({type: "warning", content: `No on-sheet effect to apply for "${boonName || "this boon"}".`}); return; }
+				JqueryUtil.doToast({type: "success", content: result.label});
+				this._page._renderHp?.();
+				this.renderCombatInterdiction();
+				this._page.saveCharacter?.();
 			});
 		});
 	}

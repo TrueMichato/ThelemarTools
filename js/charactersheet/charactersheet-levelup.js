@@ -182,7 +182,7 @@ class CharacterSheetLevelUp {
 		// Thelemar rule: applies at CHARACTER level 4, not per-class level 4 (matters for multiclass).
 		// At this point the new class level has not yet been written, so getTotalLevel()+1 = new character level.
 		const isBothAsiAndFeat = this._state.shouldGrantBothAsiAndFeat((this._state.getTotalLevel() || 0) + 1);
-		const isEpicBoonLevel = newLevel === 19 && (classEntry.source === "XPHB" || classEntry.source === "TGTT");
+		const isEpicBoonLevel = CharacterSheetClassUtils.isEpicBoonLevel(classEntry.source, newLevel);
 		// Subclass-aware: at L7/10/15/18 the subclass already exists on classEntry, so its
 		// optionalfeatureProgression (e.g. Arcane Shot) is resolved here. At the subclass-
 		// granting level (L3) it is null until chosen, then recomputed in the picker below.
@@ -2049,8 +2049,10 @@ class CharacterSheetLevelUp {
 
 		abilitiesContainer.append(abilitiesGrid);
 
-		// Feats list - filtered by allowed sources
-		const feats = this._page.filterByAllowedSources(this._page.getFeats() || []);
+		// Feats list - filtered by allowed sources; Interdict Boons (ItdBoon) are chosen via
+		// the Illrigger Interdict-boon progression, never the generic feat/epic-boon slot.
+		const feats = this._page.filterByAllowedSources(this._page.getFeats() || [])
+			.filter((/** @type {*} */ f) => !CharacterSheetClassUtils.isInterdictBoonEntry(f));
 
 		// === Epic Boon section (level 19 for XPHB / TGTT classes) ===
 		if (isEpicBoonLevel) {
