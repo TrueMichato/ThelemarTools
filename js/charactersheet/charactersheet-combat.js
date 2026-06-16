@@ -2727,6 +2727,29 @@ class CharacterSheetCombat {
 			}).join("")
 			: `<div class="ve-muted ve-small">No interdict boons known yet.</div>`;
 
+		// Charm Enemy (Illrigger L3): when seal-placing on a Humanoid the target makes a
+		// Charisma save or is charmed. The charmed condition lands on the TARGET, never the
+		// caster, so it is surfaced here as a tracked target-effect (not a self condition).
+		const charmEnemyHtml = calcs.hasCharmEnemy
+			? (() => {
+				const ceDc = calcs.charmEnemyDc != null ? calcs.charmEnemyDc : dc;
+				const ce = (this._state.getResources?.() || []).find(r => (r.name || "").toLowerCase() === "charm enemy");
+				const ceMax = ce?.max != null ? ce.max : (calcs.charmEnemyUses != null ? calcs.charmEnemyUses : null);
+				const ceCur = ce?.current;
+				const usesStr = ceMax != null
+					? (ceCur != null ? `${ceCur} / ${ceMax}` : `${ceMax}`)
+					: "—";
+				return `
+				<div class="charsheet__interdict-charm mb-2">
+					<div class="ve-muted ve-small mb-1">Charm Enemy</div>
+					<div class="charsheet__interdict-charm-row ve-flex ve-flex-v-center ve-flex-wrap gap-2">
+						<span title="When you seal a Humanoid you may attempt to charm it">🎭 Target makes a <strong>DC ${ceDc != null ? ceDc : "—"}</strong> Charisma save or is <strong>charmed</strong> (1 hour)</span>
+						<span class="charsheet__interdict-charm-uses ve-muted ve-small" title="Uses = Charisma modifier (min 1); regained on a long rest">Uses <strong>${usesStr}</strong></span>
+					</div>
+				</div>`;
+			})()
+			: "";
+
 		container.innerHTML = `
 			<div class="charsheet__interdict-panel">
 				<div class="charsheet__interdict-summary ve-flex ve-flex-v-center ve-flex-wrap gap-2 mb-2">
@@ -2739,6 +2762,7 @@ class CharacterSheetCombat {
 					<div class="ve-muted ve-small mb-1">Interdicted creatures</div>
 					${placementsHtml}
 				</div>
+				${charmEnemyHtml}
 				<div class="charsheet__interdict-boons">
 					<div class="ve-muted ve-small mb-1">Known interdict boons</div>
 					${boonsHtml}
@@ -4179,16 +4203,29 @@ class CharacterSheetCombat {
 		// Apply condition (e.g., Instant Step → invisible)
 		if (effects.applyCondition) {
 			const cond = effects.applyCondition;
-			const added = this._state.addCondition?.({
-				name: cond.name,
-				source: feature.name,
-			});
-			if (added) {
+			// Only conditions the action inflicts on the CASTER are tracked on this
+			// sheet. Target-applied conditions (cond.self === false, e.g. Charm Enemy's
+			// "the target ... or be charmed") must NOT be added to the character — that
+			// would wrongly charm/stun/etc. the Illrigger themselves. Surface them as an
+			// informational prompt instead so the player can enforce the target's save.
+			if (cond.self === false) {
 				const durationText = cond.duration ? ` (${cond.duration})` : "";
 				JqueryUtil.doToast({
 					type: "info",
-					content: `${feature.name}: Applied ${cond.name}${durationText}`,
+					content: `${feature.name}: Target is ${cond.name}${durationText} on a failed save.`,
 				});
+			} else {
+				const added = this._state.addCondition?.({
+					name: cond.name,
+					source: feature.name,
+				});
+				if (added) {
+					const durationText = cond.duration ? ` (${cond.duration})` : "";
+					JqueryUtil.doToast({
+						type: "info",
+						content: `${feature.name}: Applied ${cond.name}${durationText}`,
+					});
+				}
 			}
 		}
 
