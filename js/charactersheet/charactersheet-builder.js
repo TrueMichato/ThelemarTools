@@ -1571,7 +1571,7 @@ class CharacterSheetBuilder {
 
 		// Illrigger Forked Tongue: apply the chosen swappable spoken languages. This runs after
 		// addClass(), so getForkedTongueMaxSwappable() is already 2 and the adds succeed. The state
-		// API mirrors each pick into _data.languages and rejects Infernal/dupes/over-max, so it is
+		// API mirrors each pick into _data.languages and rejects Mictlanian/dupes/over-max, so it is
 		// idempotent on revisit.
 		if (this._selectedForkedTongueLanguages?.length && this._state.addForkedTongueSwappableLanguage) {
 			this._selectedForkedTongueLanguages.forEach((/** @type {*} */ lang) => {
@@ -5372,8 +5372,8 @@ class CharacterSheetBuilder {
 	/**
 	 * Render the Illrigger Forked Tongue swappable spoken-language picker (level 1).
 	 *
-	 * Forked Tongue grants Infernal automatically (handled by the effect pipeline); here the
-	 * player chooses the `count` *swappable* spoken-only languages. Infernal and any already-known
+	 * Forked Tongue grants Mictlanian automatically (handled by the effect pipeline); here the
+	 * player chooses the `count` *swappable* spoken-only languages. Mictlanian and any already-known
 	 * language are excluded, and the dropdowns cross-filter so the same language can't be picked
 	 * twice. Selections are stored in `this._selectedForkedTongueLanguages` and applied (after the
 	 * class is committed) via `state.addForkedTongueSwappableLanguage`.
@@ -5385,7 +5385,7 @@ class CharacterSheetBuilder {
 	_renderForkedTongueLanguageSelection (cls, count) {
 		const section = e_({outer: `
 			<div class="charsheet__builder-class-lang-selection charsheet__builder-forked-tongue-selection mt-3">
-				<p><strong>Forked Tongue:</strong> You can speak, read, and write <em>Infernal</em>. Choose ${count} other language${count > 1 ? "s" : ""} you can speak (you can swap one on a long rest):</p>
+				<p><strong>Forked Tongue:</strong> You can speak, read, and write <em>Mictlanian</em>. Choose ${count} other language${count > 1 ? "s" : ""} you can speak (you can swap one on a long rest):</p>
 				<div class="charsheet__builder-forked-tongue-dropdowns"></div>
 				<div class="ve-small ve-muted mt-1">Selected: <span class="forked-tongue-count">${this._selectedForkedTongueLanguages.filter(Boolean).length}</span>/${count}</div>
 			</div>
@@ -5400,9 +5400,9 @@ class CharacterSheetBuilder {
 			homebrew: [],
 		};
 
-		// Languages already known (e.g. from race/background) plus Infernal are not selectable.
+		// Languages already known (e.g. from race/background) plus Mictlanian are not selectable.
 		const knownLangs = new Set((this._state.getLanguages?.() || []).map((/** @type {*} */ l) => l.toLowerCase()));
-		knownLangs.add("infernal");
+		knownLangs.add("mictlanian");
 
 		const selects = [];
 
@@ -8572,7 +8572,10 @@ class CharacterSheetBuilder {
 			langSection.append(e_({outer: `<p><strong>Languages:</strong> ${fixedLangs.map((/** @type {*} */ l) => (/** @type {*} */ (l)).toTitleCase()).join(", ")}</p>`}));
 		}
 
-		// Render language choice dropdowns
+		// Render language choices using the shared checkbox-group picker (same UI/behavior as the
+		// racial language picker: grouped checkbox pills, search box, source-filter dropdown, live
+		// "n/max" counter, disable-at-max). The saved data shape (`this._selectedLanguages` =
+		// [{selectIdx, language}]) is preserved via a backing name array kept in sync on change.
 		const totalLangChoices = anyStandardCount + anyCount;
 		if (totalLangChoices > 0) {
 			const choiceSection = e_({outer: `<div class="charsheet__builder-lang-choice mt-1"></div>`});
@@ -8585,125 +8588,55 @@ class CharacterSheetBuilder {
 			// If only anyStandardCount, check setting - if allowExoticByDefault, still allow all
 			const allowAllLanguages = anyCount > 0 || allowExoticByDefault;
 			const choiceLabel = anyCount > 0 ? "any language" : (allowExoticByDefault ? "any language" : "standard language");
-			choiceSection.append(e_({outer: `<p class="mb-1"><strong>Choose ${totalLangChoices} ${choiceLabel}${totalLangChoices > 1 ? "s" : ""}:</strong></p>`}));
 
-			for (let i = 0; i < totalLangChoices; i++) {
-				// Get grouped languages including homebrew
-				const langOptions = this._page.getLanguageOptionsGrouped?.() || {
-					standard: Parser.LANGUAGES_STANDARD,
-					exotic: Parser.LANGUAGES_EXOTIC,
-					secret: Parser.LANGUAGES_SECRET,
-					homebrew: [],
-				};
+			choiceSection.append(e_({outer: `
+				<p class="mb-1"><strong>Choose ${totalLangChoices} ${choiceLabel}${totalLangChoices > 1 ? "s" : ""}:</strong>
+					<span class="ve-small ve-muted ml-2">Selected: <span class="bg-lang-count">${this._selectedLanguages.length}</span>/${totalLangChoices}</span>
+				</p>
+			`}));
+			const checkboxes = e_({outer: `<div class="charsheet__builder-lang-checkboxes"></div>`});
+			choiceSection.append(checkboxes);
 
-				const selectId = `bg-lang-choice-${i}`;
-				const selectEl = e_({outer: `
-					<select class="ve-form-control form-control--minimal mb-1" id="${selectId}">
-						<option value="">-- Select Language --</option>
-					</select>
-				`});
+			// Backing name array (preserves order); normalize the saved shape to match.
+			const selectedNames = [...this._selectedLanguages]
+				.sort((/** @type {*} */ a, /** @type {*} */ b) => a.selectIdx - b.selectIdx)
+				.map((/** @type {*} */ l) => l.language);
+			this._selectedLanguages = selectedNames.map((/** @type {*} */ language, /** @type {*} */ idx) => ({selectIdx: idx, language}));
 
-				// Build source lookup for display (priority sources preferred)
-				const bgPrioritySources = this._state.getPrioritySources() || [];
-				const bgSourceLookup = new Map();
-				for (const lang of (this._page._languagesData || [])) {
-					const existing = bgSourceLookup.get(lang.name);
-					if (!existing) {
-						bgSourceLookup.set(lang.name, lang.source);
-					} else if (bgPrioritySources.includes(lang.source) && !bgPrioritySources.includes(existing)) {
-						bgSourceLookup.set(lang.name, lang.source);
-					}
-				}
+			// Standard languages as fallback if no languages loaded
+			const standardFallback = [
+				"Common", "Dwarvish", "Elvish", "Giant", "Gnomish",
+				"Goblin", "Halfling", "Orc", "Abyssal", "Celestial",
+				"Draconic", "Deep Speech", "Primordial", "Sylvan", "Undercommon",
+			];
+			const allLanguages = this._page.getLanguageNamesSorted?.() || [];
+			const availableLanguages = allLanguages.length ? allLanguages : standardFallback;
+			const grouped = this._groupLanguagesByType(availableLanguages);
 
-				// Add language options grouped by type - homebrew first if available
-				// Secret languages are never offered as racial or background choices
-				const addLangOptgroup = (/** @type {*} */ label, /** @type {*} */ langs) => {
-					const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
-					langs.forEach((/** @type {*} */ lang) => {
-						const src = bgSourceLookup.get(lang);
-						const display = src ? `${lang} (${src})` : lang;
-						grp.append(e_({outer: `<option value="${lang}">${display}</option>`}));
-					});
-					selectEl.append(grp);
-				};
+			// Secret languages are never offered as background choices; exotic languages are gated
+			// off unless the character may choose any language (matches the prior dropdown behavior).
+			const excludeGroups = ["secret"];
+			if (!allowAllLanguages) excludeGroups.push("exotic");
 
-				if (langOptions.homebrew.length) {
-					addLangOptgroup("──── Homebrew Languages ────", langOptions.homebrew);
-				}
+			const countEl = choiceSection.querySelector(".bg-lang-count");
+			this._renderLanguageCheckboxGroup(
+				grouped,
+				selectedNames,
+				totalLangChoices,
+				countEl,
+				checkboxes,
+				() => {
+					this._selectedLanguages = selectedNames.map((/** @type {*} */ language, /** @type {*} */ idx) => ({selectIdx: idx, language}));
+				},
+				{excludeGroups},
+			);
 
-				addLangOptgroup("──── Standard Languages ────", langOptions.standard);
-
-				if (allowAllLanguages) {
-					addLangOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
-				}
-
-				const existingChoice = this._selectedLanguages.find((/** @type {*} */ l) => l.selectIdx === i);
-				if (existingChoice) {
-					selectEl.value = existingChoice.language;
-				}
-
-				selectEl.addEventListener("change", (/** @type {*} */ e) => {
-					this._selectedLanguages = this._selectedLanguages.filter((/** @type {*} */ l) => l.selectIdx !== i);
-					if (e.target.value) {
-						this._selectedLanguages.push({
-							selectIdx: i,
-							language: e.target.value,
-						});
-					}
-					// Update all dropdowns to disable already-selected languages
-					this._updateLanguageDropdownOptions(choiceSection);
-				});
-
-				choiceSection.append(selectEl);
-			}
 			langSection.append(choiceSection);
 		}
 
 		if (fixedLangs.length || totalLangChoices > 0) {
 			content.append(langSection);
 		}
-
-		// Initial update of dropdown options
-		if (totalLangChoices > 0) {
-			this._updateLanguageDropdownOptions(langSection.querySelector(".charsheet__builder-lang-choice"));
-		}
-	}
-
-	/**
-	 * Update language dropdown options to disable already-selected languages
-	 * @param {HTMLElement} container - The container with language select elements
-	 */
-	_updateLanguageDropdownOptions (container) {
-		// Get all currently selected languages (from this background section and elsewhere)
-		const selectedBgLangs = this._selectedLanguages.map((/** @type {*} */ l) => l.language);
-		const selectedClassLangs = this._selectedClassFeatureLanguages || [];
-		const existingLangs = this._state?.getLanguages?.() || [];
-
-		// Combine all selected/known languages
-		const allSelectedLangs = [...selectedBgLangs, ...selectedClassLangs, ...existingLangs]
-			.filter((/** @type {*} */ l) => l)
-			.map((/** @type {*} */ l) => l.toLowerCase());
-
-		// Expand with dialect conflicts (e.g. selecting "Ignan" also disables "Primordial")
-		const allDisabledLangs = new Set(allSelectedLangs);
-		for (const lang of allSelectedLangs) {
-			const conflicts = this._page?.getDialectConflicts?.(lang) || [];
-			for (const c of conflicts) allDisabledLangs.add(c.toLowerCase());
-		}
-
-		// Update each select element
-		[...container.querySelectorAll("select")].forEach((selectEl) => {
-			const currentVal = selectEl.value;
-
-			[...selectEl.querySelectorAll("option")].forEach((opt) => {
-				const val = opt.value;
-				if (!val) return; // Skip placeholder option
-
-				// Disable if selected elsewhere (or dialect-conflicting), but not if it's the current selection
-				const isSelectedElsewhere = allDisabledLangs.has(val.toLowerCase()) && val !== currentVal;
-				opt.disabled = isSelectedElsewhere;
-			});
-		});
 	}
 
 	/**
