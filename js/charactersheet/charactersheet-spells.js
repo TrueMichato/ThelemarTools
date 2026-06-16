@@ -6371,6 +6371,40 @@ class CharacterSheetSpells {
 	}
 
 	/**
+	 * Resolve a spell's own save DC + attack bonus from its (possibly per-spell) casting
+	 * ability. Works even when the character has no spellcasting class — e.g. a Hochling
+	 * whose only cantrip is the racial Divine Spark cantrip cast with a chosen WIS/INT/CHA.
+	 * Returns null when no ability can be attributed (so callers omit the badge).
+	 * @param {*} spell
+	 * @returns {{ability:string, saveDc:(number|null), attackBonus:(number|null)}|null}
+	 */
+	_getSpellAbilityStats (spell) {
+		const ability = this._state.getSpellcastingAbilityForSpell?.(spell);
+		if (!ability) return null;
+		const saveDc = this._state.getSpellSaveDcForAbility?.(ability);
+		const attackBonus = this._state.getSpellAttackBonusForAbility?.(ability);
+		if (saveDc == null && attackBonus == null) return null;
+		return {ability, saveDc, attackBonus};
+	}
+
+	/**
+	 * Build the inline "Save DC N · +M to hit" badge for a spell, from its own casting
+	 * ability. Returns "" when no ability can be attributed.
+	 * @param {*} spell
+	 * @returns {string}
+	 */
+	_renderSpellDcAttackBadge (spell) {
+		const stats = this._getSpellAbilityStats(spell);
+		if (!stats) return "";
+		const parts = [];
+		if (stats.saveDc != null) parts.push(`Save DC ${stats.saveDc}`);
+		if (stats.attackBonus != null) parts.push(`${stats.attackBonus >= 0 ? "+" : ""}${stats.attackBonus} to hit`);
+		if (!parts.length) return "";
+		const abilityFull = (typeof Parser !== "undefined" && Parser.attAbvToFull) ? Parser.attAbvToFull(stats.ability) : stats.ability;
+		return `<span class="charsheet__spell-item-dc ve-muted ve-small" title="Spell save DC / attack bonus (${abilityFull})">${parts.join(" \u00b7 ")}</span>`;
+	}
+
+	/**
 	 * Render a single innate spell item
 	 */
 	_renderInnateSpellItem (spell) {
@@ -6417,11 +6451,14 @@ class CharacterSheetSpells {
 			? `<span class="ve-muted ve-small">(${spell.sourceFeature})</span>`
 			: "";
 
+		const dcBadge = this._renderSpellDcAttackBadge(spell);
+
 		const item = e_({outer: `
 			<div class="charsheet__spell-item charsheet__spell-item--innate" data-innate-spell-id="${spellId}">
 				<div class="charsheet__spell-item-main">
 					<span class="charsheet__spell-item-name">${spellLink}</span>
 					${sourceInfo}
+					${dcBadge ? `<div class="charsheet__spell-item-details ve-muted ve-small">${dcBadge}</div>` : ""}
 				</div>
 				<div class="charsheet__spell-item-actions">
 					${usageInfo}
@@ -6657,6 +6694,14 @@ class CharacterSheetSpells {
 			? `<span class="badge badge-warning charsheet__spell-source-badge" title="Source: ${sourceLabel}">${this._truncateFeatureName(sourceLabel)}</span>`
 			: "";
 
+		// Bug #13: surface a spell's own save DC / attack bonus when it carries an explicit
+		// per-spell casting ability (e.g. the Hochling Divine Spark racial cantrip cast with
+		// a chosen WIS/INT/CHA). Gated to the override case so ordinary class spell cards —
+		// which already show DC/attack on their per-class breakdown card — are left untouched.
+		const dcBadge = (spell.spellcastingAbility && Parser.ABIL_ABVS?.includes(spell.spellcastingAbility))
+			? this._renderSpellDcAttackBadge(spell)
+			: "";
+
 		// Determine if spell can be cast as ritual (show ritual button when not prepared but ritual-eligible)
 		let ritualButtonHtml = "";
 		if (!isCantrip && spell.ritual && !isPrepared && !isAlwaysPrepared) {
@@ -6702,6 +6747,7 @@ class CharacterSheetSpells {
 						</span>
 					</div>
 					${fullDetailsLine ? `<div class="charsheet__spell-item-details ve-muted ve-small">${fullDetailsLine}</div>` : ""}
+					${dcBadge ? `<div class="charsheet__spell-item-details ve-muted ve-small">${dcBadge}</div>` : ""}
 					${metamagicNotes.length ? `<div class="charsheet__spell-item-details charsheet__metamagic-mod ve-small">${metamagicNotes.join(" · ")}</div>` : ""}
 					${spell.isDivineSoulAffinity ? `<div class="charsheet__spell-item-details ve-muted ve-small"><span class="glyphicon glyphicon-info-sign mr-1"></span>Divine Soul affinity spell — may be swapped for another Cleric spell.</div>` : ""}
 				</div>
