@@ -164,6 +164,20 @@ class CharacterSheetLevelUp {
 		// Subclass-granted combat traditions (pre-seeded during subclass selection)
 		let subclassGrantedTraditionCodes = /** @type {*[]} */ ([]);
 
+		// Bug #12: weapon-mastery picker. Some classes first grant (or increase) their
+		// weapon-mastery allotment on level-up (e.g. an Illrigger gains 2 masteries at L2
+		// via the appended TGTT "Weapon Mastery" feature). Builder/QuickBuild already offer
+		// the picker; the level-up flow did not. Detect the grant for this exact crossing
+		// and seed the selection with any masteries the character already chose so a
+		// re-pick (on a later scaling level) keeps them.
+		const weaponMasteryGain = CharacterSheetClassUtils.getWeaponMasteryGainForLevelUp(
+			classData,
+			classEntry.level,
+			newLevel,
+			this._page.getClassFeatures(),
+		);
+		/** @type {string[]} */ let selectedWeaponMasteries = [...(this._state.getWeaponMasteries?.() || [])];
+
 		// ========== DETERMINE WHAT SECTIONS ARE NEEDED ==========
 		// Thelemar rule: applies at CHARACTER level 4, not per-class level 4 (matters for multiclass).
 		// At this point the new class level has not yet been written, so getTotalLevel()+1 = new character level.
@@ -542,12 +556,12 @@ class CharacterSheetLevelUp {
 						// Re-render existing accordion body
 						const body = accordions.optfeatures.el.querySelector(".charsheet__levelup-accordion-body");
 						body.innerHTML = "";
-						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures, activeSubclass: selectedSubclass});
+						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures, activeSubclass: selectedSubclass, levelContext: {className: classEntry.name, classSource: classEntry.source, newClassLevel: newLevel}});
 						body.append(optContent);
 					} else {
 						// Create the accordion dynamically (wasn't needed before subclass selection)
 						summaryItems.append(createSummaryItem("optfeatures", "✨", "Class Options", {required: true}));
-						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures, activeSubclass: selectedSubclass});
+						const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {subclassGrantedTraditionCodes, existingSelections: selectedOptionalFeatures, activeSubclass: selectedSubclass, levelContext: {className: classEntry.name, classSource: classEntry.source, newClassLevel: newLevel}});
 						// Insert after subclass accordion
 						const subclassAccordion = accordions.subclass?.el;
 						const optAccordion = createAccordion("optfeatures", "✨", "Class Options", optContent, {required: true});
@@ -729,9 +743,28 @@ class CharacterSheetLevelUp {
 			// Subclass already known from earlier level — pass it through so the
 			// subclass-tradition picker can render for choice-based subclasses.
 			const knownActiveSubclass = fullSubclassData || classEntry.subclass || null;
-			const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {activeSubclass: knownActiveSubclass});
+			const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {activeSubclass: knownActiveSubclass, levelContext: {className: classEntry.name, classSource: classEntry.source, newClassLevel: newLevel}});
 
 			main.append(createAccordion("optfeatures", "✨", "Class Options", optContent, {required: true}));
+		}
+
+		// ========== 3b. WEAPON MASTERY (bug #12) ==========
+		if (weaponMasteryGain && weaponMasteryGain.count > 0) {
+			summaryItems.append(createSummaryItem("weaponmastery", "🗡️", "Weapon Mastery", {required: true}));
+
+			const updateWeaponMasteryStatus = () => {
+				if (!summaryItemEls.weaponmastery || !accordions.weaponmastery) return;
+				const complete = selectedWeaponMasteries.length >= weaponMasteryGain.count;
+				const summary = selectedWeaponMasteries
+					.map((/** @type {*} */ k) => String(k).split("|")[0])
+					.join(", ");
+				summaryItemEls.weaponmastery.setStatus(complete, complete ? summary : `${selectedWeaponMasteries.length}/${weaponMasteryGain.count} chosen`);
+				accordions.weaponmastery.setComplete(complete, complete ? `${selectedWeaponMasteries.length} chosen` : "");
+			};
+
+			const masteryContent = this._renderWeaponMasteryLevelUp(weaponMasteryGain, selectedWeaponMasteries, updateWeaponMasteryStatus);
+			main.append(createAccordion("weaponmastery", "🗡️", "Weapon Mastery", masteryContent, {required: true}));
+			updateWeaponMasteryStatus();
 		}
 
 		// ========== 4. FEATURE OPTIONS (Specialties, etc.) ==========
@@ -1231,6 +1264,14 @@ class CharacterSheetLevelUp {
 				}
 			}
 
+			// Weapon mastery validation (bug #12)
+			if (weaponMasteryGain && weaponMasteryGain.count > 0 && selectedWeaponMasteries.length < weaponMasteryGain.count) {
+				JqueryUtil.doToast({type: "warning", content: `Please choose ${weaponMasteryGain.count} weapon${weaponMasteryGain.count > 1 ? "s" : ""} to master.`});
+				accordions.weaponmastery?.el.classList.add("expanded");
+				accordions.weaponmastery?.el.scrollIntoView({behavior: "smooth"});
+				return;
+			}
+
 			// Feature options validation
 			const existingFeatures = this._state.getFeatures?.() || [];
 			const existingFeatureNames = new Set(existingFeatures.map((/** @type {*} */ f) => f.name));
@@ -1347,6 +1388,7 @@ class CharacterSheetLevelUp {
 				selectedSubclassChoice,
 				selectedOptionalFeatures,
 				selectedCombatTraditions,
+				selectedWeaponMasteries,
 				selectedFeatureOptions,
 				selectedClassFeatProgression,
 				selectedExpertise,
@@ -1367,6 +1409,102 @@ class CharacterSheetLevelUp {
 
 			doClose(true);
 		});
+	}
+
+	/**
+	 * Render the weapon-mastery picker for the level-up flow (bug #12). Mirrors the
+	 * Builder/QuickBuild pickers: base weapons that carry a `mastery` property, grouped
+	 * into Simple/Martial, capped at `masteryInfo.count`. The picker mutates the shared
+	 * `selected` array in place (pre-seeded with already-known masteries) and calls
+	 * `onChange` after each toggle so the accordion/summary status can refresh.
+	 * @param {{count: number}} masteryInfo
+	 * @param {string[]} selected - selection array (mutated in place)
+	 * @param {() => void} [onChange]
+	 * @returns {HTMLElement}
+	 */
+	_renderWeaponMasteryLevelUp (/** @type {*} */ masteryInfo, /** @type {string[]} */ selected, /** @type {*} */ onChange = null) {
+		const count = masteryInfo.count;
+		const section = e_({outer: `
+			<div class="charsheet__levelup-mastery-selection">
+				<p><strong>Weapon Mastery:</strong> Choose ${count} weapon${count > 1 ? "s" : ""} to master.</p>
+				<p class="ve-small ve-muted">You can use the mastery property of your chosen weapons. You can change these after a long rest.</p>
+				<div class="ve-small ve-muted mb-2">Selected: <span class="mastery-count">${selected.length}</span>/${count}</div>
+				<div class="charsheet__levelup-mastery-container"></div>
+			</div>
+		`});
+
+		const container = /** @type {*} */ (section.querySelector(".charsheet__levelup-mastery-container"));
+		const countEl = /** @type {*} */ (section.querySelector(".mastery-count"));
+
+		const allItems = this._page.getItems?.() || [];
+		const weaponsWithMastery = allItems.filter((/** @type {*} */ item) => {
+			if (!item._isBaseItem) return false;
+			if (!item.weaponCategory && !["M", "R", "S"].includes(item.type)) return false;
+			return item.mastery?.length > 0;
+		});
+
+		const getMasteryName = (/** @type {*} */ entry) => {
+			if (!entry) return "";
+			if (typeof entry === "string") return entry.split("|")[0];
+			if (typeof entry === "object" && entry.uid) return entry.uid.split("|")[0];
+			return "";
+		};
+
+		const simpleWeapons = weaponsWithMastery
+			.filter((/** @type {*} */ w) => w.weaponCategory === "simple" || w.type === "S")
+			.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
+		const martialWeapons = weaponsWithMastery
+			.filter((/** @type {*} */ w) => w.weaponCategory === "martial" || w.type === "M")
+			.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
+
+		const renderGroup = (/** @type {*} */ weapons, /** @type {*} */ groupName) => {
+			if (!weapons.length) return;
+			const group = e_({outer: `<div class="mb-2"><strong class="ve-small">${groupName}:</strong></div>`});
+			const checkboxes = e_({outer: `<div class="charsheet__levelup-mastery-checkboxes"></div>`});
+
+			weapons.forEach((/** @type {*} */ weapon) => {
+				const masteryName = getMasteryName(weapon.mastery?.[0]);
+				const weaponKey = `${weapon.name}|${weapon.source}`;
+				const isSelected = selected.includes(weaponKey);
+
+				const lbl = e_({outer: `
+					<label class="charsheet__levelup-skill-checkbox mr-3 mb-1" title="${masteryName ? `Mastery: ${masteryName}` : ""}">
+						<input type="checkbox" value="${weaponKey}" ${isSelected ? "checked" : ""}>
+						${weapon.name} ${masteryName ? `<span class="ve-small text-muted">(${masteryName})</span>` : ""}
+					</label>
+				`});
+
+				lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
+					if (e.target.checked) {
+						if (selected.length < count) {
+							selected.push(weaponKey);
+						} else {
+							e.target.checked = false;
+							JqueryUtil.doToast({type: "warning", content: `You can only choose ${count} weapon masteries.`});
+						}
+					} else {
+						const idx = selected.indexOf(weaponKey);
+						if (idx >= 0) selected.splice(idx, 1);
+					}
+					countEl.textContent = selected.length;
+					if (onChange) onChange();
+				});
+
+				checkboxes.append(lbl);
+			});
+
+			group.append(checkboxes);
+			container.append(group);
+		};
+
+		renderGroup(simpleWeapons, "Simple Weapons");
+		renderGroup(martialWeapons, "Martial Weapons");
+
+		if (!simpleWeapons.length && !martialWeapons.length) {
+			container.append(e_({outer: `<p class="ve-muted">No weapons with mastery properties found.</p>`}));
+		}
+
+		return section;
 	}
 
 	/**
@@ -2700,7 +2838,7 @@ class CharacterSheetLevelUp {
 	 * @param {Function} onSelect - Callback(featureType, selectedFeatures)
 	 * @param {number} newLevel - The new level for filtering by max degree
 	 */
-	_renderOptionalFeaturesSelection (/** @type {*} */ classData, /** @type {*} */ gains, /** @type {*} */ onSelect, /** @type {*} */ newLevel, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*} */ ({}), activeSubclass = /** @type {*} */ (null)} = {}) {
+	_renderOptionalFeaturesSelection (/** @type {*} */ classData, /** @type {*} */ gains, /** @type {*} */ onSelect, /** @type {*} */ newLevel, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*} */ ({}), activeSubclass = /** @type {*} */ (null), levelContext = /** @type {*} */ (null)} = {}) {
 		// Filter optional features by allowed sources and deduplicate by edition priority
 		const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures() || []);
 		const settingsObj = this._state.getSettings() || {};
@@ -2736,7 +2874,7 @@ class CharacterSheetLevelUp {
 				{enableTgtt, classSource},
 			);
 			container.innerHTML = "";
-			this._renderOptFeaturesInContainer(container, classData, gains, onSelect, newLevel, allOptFeatures, existingOptFeatures, {subclassGrantedTraditionCodes, existingSelections, activeSubclass});
+			this._renderOptFeaturesInContainer(container, classData, gains, onSelect, newLevel, allOptFeatures, existingOptFeatures, {subclassGrantedTraditionCodes, existingSelections, activeSubclass, levelContext});
 		};
 
 		toggle.addEventListener("change", (/** @type {*} */ e) => {
@@ -2768,7 +2906,7 @@ class CharacterSheetLevelUp {
 
 	 */
 
-	_renderOptFeaturesInContainer (/** @type {*} */ container, /** @type {*} */ classData, /** @type {*} */ gains, /** @type {*} */ onSelect, /** @type {*} */ newLevel, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*} */ ({}), activeSubclass = /** @type {*} */ (null)} = {}) {
+	_renderOptFeaturesInContainer (/** @type {*} */ container, /** @type {*} */ classData, /** @type {*} */ gains, /** @type {*} */ onSelect, /** @type {*} */ newLevel, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, {subclassGrantedTraditionCodes = /** @type {*[]} */ ([]), existingSelections = /** @type {*} */ ({}), activeSubclass = /** @type {*} */ (null), levelContext = /** @type {*} */ (null)} = {}) {
 		gains.forEach((/** @type {*} */ gain) => {
 			const featureKey = gain.featureTypes.join("_");
 			const isCombatMethods = gain.featureTypes.some((/** @type {*} */ ft) => ft.startsWith("CTM:"));
@@ -2778,7 +2916,7 @@ class CharacterSheetLevelUp {
 				this._renderCombatMethodsLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes, existingSelections: existingSelections[featureKey] || [], activeSubclass});
 			} else {
 				// Standard optional feature rendering
-				this._renderStandardOptionalFeaturesLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey);
+				this._renderStandardOptionalFeaturesLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey, levelContext);
 			}
 		});
 	}
@@ -3214,14 +3352,35 @@ class CharacterSheetLevelUp {
 	/**
 	 * Render standard optional features (non-Combat Methods) during level-up
 	 */
-	_renderStandardOptionalFeaturesLevelUp (/** @type {*} */ container, /** @type {*} */ gain, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, /** @type {*} */ onSelect, /** @type {*} */ featureKey) {
+	_renderStandardOptionalFeaturesLevelUp (/** @type {*} */ container, /** @type {*} */ gain, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, /** @type {*} */ onSelect, /** @type {*} */ featureKey, /** @type {*} */ levelContext = null) {
 		/** @type {*[]} */ const selectedForType = [];
 
 		// Build prereq context and delegate to the shared eligibility filter so the
 		// builder (level 1) and level-up paths agree on what counts as selectable.
+		//
+		// Bug #9: during level-up the new class level is NOT yet committed to state
+		// (the wizard mutates `targetClass.level` only in `_applyLevelUp`). Reading the
+		// live `getTotalLevel()`/`getClasses()` here yields the PRE-increment level, so a
+		// feature gained AT the new level (e.g. an Illrigger Interdict Boon whose
+		// prerequisite is "Illrigger level 2", offered while leveling 1→2) fails its own
+		// level prerequisite and is wrongly greyed out. Build the context against the
+		// POST-increment state instead: bump the total character level by one and raise
+		// the leveling class to its new class level (covers both generic `{level:N}` and
+		// class-scoped `{level:{level:N,class:...}}` prerequisites, single- or multiclass).
+		const liveClasses = this._state.getClasses();
+		const ctxClasses = levelContext
+			? liveClasses.map((/** @type {*} */ c) => (
+				c.name === levelContext.className && (c.source === levelContext.classSource || !levelContext.classSource)
+					? {...c, level: levelContext.newClassLevel}
+					: c
+			))
+			: liveClasses;
+		const ctxTotalLevel = levelContext
+			? (this._state.getTotalLevel() || 0) + 1
+			: this._state.getTotalLevel();
 		const prereqContext = {
-			classes: this._state.getClasses(),
-			totalLevel: this._state.getTotalLevel(),
+			classes: ctxClasses,
+			totalLevel: ctxTotalLevel,
 			existingFeatures: existingOptFeatures,
 			cantrips: this._state.getCantripsKnown?.() || [],
 			spells: this._state.getSpellsKnown?.() || [],
@@ -4199,7 +4358,7 @@ class CharacterSheetLevelUp {
 
 	/** @param {*} arg */
 
-	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedFeatureOptions, selectedClassFeatProgression, selectedExpertise, selectedLanguages, languageGrants, forkedTongueLevelUpPick, selectedScholarSkill, selectedSpellbookSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
+	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedWeaponMasteries, selectedFeatureOptions, selectedClassFeatProgression, selectedExpertise, selectedLanguages, languageGrants, forkedTongueLevelUpPick, selectedScholarSkill, selectedSpellbookSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
 		const prevCombatTraditions = this._state.getCombatTraditions?.() || [];
 		const prevWeaponMasteries = this._state.getWeaponMasteries?.() || [];
 
@@ -4366,6 +4525,12 @@ class CharacterSheetLevelUp {
 
 		if (selectedCombatTraditions != null) {
 			this._state.setCombatTraditions([...selectedCombatTraditions]);
+		}
+
+		// Apply weapon-mastery selections (bug #12). The picker pre-seeds with any
+		// already-known masteries, so this is the full intended set; persist it whole.
+		if (Array.isArray(selectedWeaponMasteries)) {
+			this._state.setWeaponMasteries([...selectedWeaponMasteries]);
 		}
 
 		// Apply selected optional features (invocations, metamagic, maneuvers, etc.)
@@ -4957,6 +5122,14 @@ class CharacterSheetLevelUp {
 		// Recalculate HP from history + live CON + customModifiers (Toughness/race hpPerLevel) and sync current = max.
 		// Mirrors the multiclass branch and the builder's _finishCharacter so feat/ASI/race side-effects are reflected.
 		this._state.recalculateHp({syncCurrent: true});
+
+		// Bug #18: surface feature choices queued while adding this level's features
+		// (e.g. Moloch's Blessing skill pick from Hellspeaker L3). addFeature →
+		// _processFeatureChoices enqueues them during the newFeatures loop above; the
+		// earlier _processFeatSpellChoices calls ran before that loop, so without this
+		// flush the choice would slip to the *next* level-up. Drain it now so it appears
+		// at the level it is gained.
+		await this._processFeatSpellChoices();
 
 		// Save and re-render
 		await this._page.saveCharacter();
@@ -5679,6 +5852,11 @@ class CharacterSheetLevelUp {
 		if (mcFeatureChoices.length) mcHistory.choices.featureChoices = mcFeatureChoices;
 		if (selectedSkills?.length) mcHistory.choices.skills = [...selectedSkills];
 		this._state.recordLevelChoice(mcHistory);
+
+		// Bug #18 (multiclass parity): drain feature choices queued while adding the
+		// multiclass-in features so a granted choice surfaces now rather than slipping
+		// to the next level-up.
+		await this._processFeatSpellChoices();
 
 		await this._page.saveCharacter();
 		this._page.renderCharacter();
