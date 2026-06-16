@@ -208,6 +208,19 @@ describe("CharacterSheetCombat._applyCombatActionEffects", () => {
 		expect(toasts.some(t => t.type === "info" && /invisible/i.test(t.content))).toBe(true);
 	});
 
+	it("does NOT apply a target-only condition (self:false) to the caster", () => {
+		// Regression (R21 #7): Charm Enemy parses to {name:"charmed", self:false}. The
+		// charmed condition belongs on the TARGET — it must never be added to the caster.
+		combat._applyCombatActionEffects(
+			{name: "Charm Enemy", source: "IllriggerRevised"},
+			{applyCondition: {name: "charmed", duration: "for 1 hour", self: false}},
+		);
+
+		expect(conditions).toHaveLength(0);
+		// Surfaced as an informational target-effect prompt instead.
+		expect(toasts.some(t => t.type === "info" && /target/i.test(t.content) && /charmed/i.test(t.content))).toBe(true);
+	});
+
 	it("grants temp HP from static value", () => {
 		combat._applyCombatActionEffects(feature, {
 			grantTempHp: {value: 8},
