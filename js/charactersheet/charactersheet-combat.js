@@ -1591,13 +1591,16 @@ class CharacterSheetCombat {
 			const weaponRiders = this._state.getFeatureCalculations?.()?.weaponDamageRiders || [];
 			for (const rider of weaponRiders) {
 				if (!this._weaponRiderEnabled[rider.id]) continue;
-				if (!this._isRiderAvailableThisTurn(rider.id)) continue;
+				// Most riders are once-per-turn; some (e.g. Terrorizing Force) apply on EVERY
+				// hit (rider.perTurn === false) and are never marked used.
+				const oncePerTurn = rider.perTurn !== false;
+				if (oncePerTurn && !this._isRiderAvailableThisTurn(rider.id)) continue;
 				const riderRoll = this._parseDamage(rider.dice, isCrit);
 				riderDamageTotal += riderRoll.total;
 				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total});
 				riderRollsForAnim.push(riderRoll);
 				usedRiderIds.push(rider.id);
-				this._markRiderUsedThisTurn(rider.id);
+				if (oncePerTurn) this._markRiderUsedThisTurn(rider.id);
 			}
 		}
 
@@ -1711,10 +1714,17 @@ class CharacterSheetCombat {
 			this._renderSneakAttackToggle?.();
 		}
 
-		// Auto-disable used weapon damage riders after the roll (each is once per turn)
+		// Auto-disable used weapon damage riders after the roll (once-per-turn riders only;
+		// every-hit riders like Terrorizing Force stay enabled so they keep applying).
 		if (usedRiderIds.length) {
-			usedRiderIds.forEach(id => { this._weaponRiderEnabled[id] = false; });
-			this._renderWeaponDamageRiders?.();
+			const ridersById = Object.fromEntries((this._state.getFeatureCalculations?.()?.weaponDamageRiders || []).map(r => [r.id, r]));
+			let changed = false;
+			usedRiderIds.forEach(id => {
+				if (ridersById[id]?.perTurn === false) return;
+				this._weaponRiderEnabled[id] = false;
+				changed = true;
+			});
+			if (changed) this._renderWeaponDamageRiders?.();
 		}
 
 		// Consume the channeled-spell on-hit rider — it rides exactly ONE damage roll for its
@@ -2708,7 +2718,13 @@ class CharacterSheetCombat {
 		const max = this._state.getSealsMax?.() || 0;
 		const avail = this._state.getSealsAvailable?.() || 0;
 		const placements = this._state.getSealPlacements?.() || [];
-		const boons = this._state.getInterdictBoons?.() || [];
+		const selectedBoons = this._state.getInterdictBoons?.() || [];
+		// (R22 #8) Moloch's Interdiction free boons are always-known and budget-free, so they
+		// live OUTSIDE getInterdictBoons() (which feeds the known-boon budget). Surface them
+		// in the panel alongside selected boons, deduped, flagged via `_molochGranted`.
+		const molochBoons = this._state.getMolochInterdictionBoons?.() || [];
+		const seenBoonNames = new Set(selectedBoons.map(b => (b.name || "").toLowerCase()));
+		const boons = [...selectedBoons, ...molochBoons.filter(b => !seenBoonNames.has((b.name || "").toLowerCase()))];
 
 		const placementsHtml = placements.length
 			? placements.map(p => `
@@ -2725,6 +2741,7 @@ class CharacterSheetCombat {
 				</div>`).join("")
 			: `<div class="ve-muted ve-small">No creatures are currently interdicted.</div>`;
 
+		const activatableBoonEntries = this._state.getActivatableFeatures?.() || [];
 		const boonsHtml = boons.length
 			? boons.map(b => {
 				const activation = this._getInterdictBoonActivation(b);
@@ -2733,6 +2750,12 @@ class CharacterSheetCombat {
 				if (this._page?.getHoverLink && b.source) {
 					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, b.name, b.source); } catch (e) { nameHtml = b.name; }
 				}
+				// (R22 #8) Free boons granted by Moloch's Interdiction are always known and
+				// don't count against the boon budget — flag them so the player can tell them
+				// apart from selected boons.
+				const grantedHtml = b._molochGranted
+					? `<span class="badge badge-info charsheet__interdict-boon-granted" title="Free boon granted by Moloch's Interdiction — always known, doesn't count against the boons you know">Moloch's Interdiction</span>`
+					: "";
 				const summary = this._state.getFeatureEffectSummary?.(b, calcs) || "";
 				const summaryHtml = summary
 					? `<span class="badge badge-success charsheet__interdict-boon-effect" title="Computed effect">${summary}</span>`
@@ -2741,12 +2764,29 @@ class CharacterSheetCombat {
 				const activateBtn = canActivate
 					? `<button class="ve-btn ve-btn-xxs ve-btn-primary charsheet__interdict-boon-activate ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" title="Apply this boon's effect to your sheet">Apply</button>`
 					: "";
+				// (R22 #6) Durational boons (Veil of Lies, Shadow Shroud, Hellish Frenzy,
+				// Hellsight) are named toggle states that expend a seal. Surface a one-click
+				// Invoke/End button here so they are usable directly from the Interdiction
+				// panel (the canonical home), routed through the same seal-spend + state
+				// activation path as the abilities area.
+				const boonAf = activatableBoonEntries.find(a => a.feature?.name === b.name && CharacterSheetState.isInterdictBoonEntry?.(a));
+				let toggleBtn = "";
+				if (boonAf) {
+					const nm = (b.name || "").replace(/"/g, "&quot;");
+					if (boonAf.isActive) {
+						toggleBtn = `<button class="ve-btn ve-btn-xxs ve-btn-danger charsheet__interdict-boon-toggle ml-auto" type="button" data-boon-name="${nm}" title="End this boon's effect">End</button>`;
+					} else {
+						const canAfford = avail > 0;
+						toggleBtn = `<button class="ve-btn ve-btn-xxs ve-btn-primary charsheet__interdict-boon-toggle ml-auto" type="button" data-boon-name="${nm}" ${canAfford ? "" : "disabled"} title="${canAfford ? "Expend a seal to activate this boon" : "No seals available"}">Invoke (1 seal)</button>`;
+					}
+				}
 				return `
 					<div class="charsheet__interdict-boon-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-1">
 						<span class="bold mr-1">${nameHtml}</span>
+						${grantedHtml}
 						<span class="badge ${badgeCls}" title="${activation === "Active" ? "Requires an action/trigger to use" : "Always-on benefit"}">${activation}</span>
 						${summaryHtml}
-						${activateBtn}
+						${toggleBtn || activateBtn}
 					</div>`;
 			}).join("")
 			: `<div class="ve-muted ve-small">No interdict boons known yet.</div>`;
@@ -2763,12 +2803,38 @@ class CharacterSheetCombat {
 				const usesStr = ceMax != null
 					? (ceCur != null ? `${ceCur} / ${ceMax}` : `${ceMax}`)
 					: "—";
+				const canCharm = ceCur == null || ceCur > 0;
 				return `
 				<div class="charsheet__interdict-charm mb-2">
 					<div class="ve-muted ve-small mb-1">Charm Enemy</div>
 					<div class="charsheet__interdict-charm-row ve-flex ve-flex-v-center ve-flex-wrap gap-2">
 						<span title="When you seal a Humanoid you may attempt to charm it">🎭 Target makes a <strong>DC ${ceDc != null ? ceDc : "—"}</strong> Charisma save or is <strong>charmed</strong> (1 hour)</span>
 						<span class="charsheet__interdict-charm-uses ve-muted ve-small" title="Uses = Charisma modifier (min 1); regained on a long rest">Uses <strong>${usesStr}</strong></span>
+						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__interdict-charm-use ml-auto" type="button" ${canCharm ? "" : "disabled"} title="${canCharm ? "Spend a use to attempt to charm a sealed Humanoid" : "No uses remaining (regained on a long rest)"}">🎭 Charm a target</button>
+					</div>
+				</div>`;
+			})()
+			: "";
+
+		// Superior Interdict (Illrigger L14): seal damage ignores resistance + a
+		// bonus-action seal regain (1/long rest, only when you have none). Surface both in
+		// the panel — the passive note plus a usable Regain button — so the feature isn't a
+		// dead "does nothing" entry (R22 #11).
+		const superiorInterdictHtml = calcs.hasSuperiorInterdict
+			? (() => {
+				const canRegain = this._state.canRegainSealViaSuperiorInterdict?.();
+				const usedUp = avail <= 0 && !canRegain;
+				const title = avail > 0
+					? "You can only regain a seal with Superior Interdict when you have none remaining"
+					: usedUp
+						? "Already used since your last long rest"
+						: "Bonus action: regain 1 seal (once per long rest)";
+				return `
+				<div class="charsheet__interdict-superior mb-2">
+					<div class="ve-muted ve-small mb-1">Superior Interdict</div>
+					<div class="charsheet__interdict-superior-row ve-flex ve-flex-v-center ve-flex-wrap gap-2">
+						<span title="Your seal damage ignores the target's resistances">⚔️ Seal damage <strong>ignores resistance</strong></span>
+						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__interdict-superior-regain ml-auto" type="button" ${canRegain ? "" : "disabled"} title="${title}">♻️ Regain a seal (bonus action)</button>
 					</div>
 				</div>`;
 			})()
@@ -2787,11 +2853,21 @@ class CharacterSheetCombat {
 					${placementsHtml}
 				</div>
 				${charmEnemyHtml}
+				${superiorInterdictHtml}
 				<div class="charsheet__interdict-boons">
 					<div class="ve-muted ve-small mb-1">Known interdict boons</div>
 					${boonsHtml}
 				</div>
 			</div>`;
+
+		// --- Superior Interdict: regain a seal (bonus action, 1/long rest) ---
+		container.querySelector(".charsheet__interdict-superior-regain")?.addEventListener("click", () => {
+			const result = this._state.regainSealViaSuperiorInterdict?.();
+			if (!result?.ok) { JqueryUtil.doToast({type: "warning", content: result?.label || "Could not regain a seal."}); return; }
+			JqueryUtil.doToast({type: "success", content: result.label});
+			this.renderCombatInterdiction();
+			this._page.saveCharacter?.();
+		});
 
 		// --- Place seal ---
 		container.querySelector(".charsheet__interdict-place-btn")?.addEventListener("click", () => {
@@ -2852,6 +2928,44 @@ class CharacterSheetCombat {
 				this.renderCombatInterdiction();
 				this._page.saveCharacter?.();
 			});
+		});
+
+		// --- (R22 #6) Invoke / End a durational interdict boon (spend a seal + toggle the
+		// named buff state) directly from the panel. Reuses the canonical features-area
+		// invoke path so the seal spend + state activation stay identical everywhere. ---
+		container.querySelectorAll(".charsheet__interdict-boon-toggle").forEach((btn) => {
+			btn.addEventListener("click", async () => {
+				const boonName = btn.dataset.boonName || "";
+				const feature = (this._state.getFeatures?.() || []).find(f => (f.name || "") === boonName);
+				if (!feature) { JqueryUtil.doToast({type: "warning", content: `Could not find "${boonName}".`}); return; }
+				const af = (this._state.getActivatableFeatures?.() || []).find(a => a.feature?.id === feature.id && CharacterSheetState.isInterdictBoonEntry?.(a));
+				if (af?.isActive) {
+					if (af.stateTypeId) this._state.deactivateState?.(af.stateTypeId);
+					JqueryUtil.doToast({type: "info", content: `${boonName} ended.`});
+				} else {
+					const ok = await this._page._pUseFeatureAbility?.(feature);
+					if (!ok) { JqueryUtil.doToast({type: "warning", content: `Could not invoke ${boonName}.`}); return; }
+				}
+				this._page._renderActiveStates?.();
+				this.renderCombatStates?.();
+				this.renderCombatInterdiction();
+				this._page.saveCharacter?.();
+			});
+		});
+
+		// --- (R22 #5) Charm Enemy: spend a use and prompt for the sealed Humanoid target,
+		// surfacing the save it must make. The charmed condition lands on the TARGET, so we
+		// report it rather than apply a self condition. ---
+		container.querySelector(".charsheet__interdict-charm-use")?.addEventListener("click", async () => {
+			const ce = (this._state.getResources?.() || []).find(r => (r.name || "").toLowerCase() === "charm enemy");
+			if (ce && ce.current <= 0) { JqueryUtil.doToast({type: "warning", content: "Charm Enemy has no uses remaining (regained on a long rest)."}); return; }
+			const target = await InputUiUtil.pGetUserString({title: "Charm Enemy — name the sealed Humanoid"});
+			if (target == null) return;
+			if (ce) this._state.setResourceCurrent(ce.id, Math.max(0, ce.current - 1));
+			const ceDc = calcs.charmEnemyDc != null ? calcs.charmEnemyDc : dc;
+			JqueryUtil.doToast({type: "info", content: `🎭 ${target || "The target"} must make a DC ${ceDc != null ? ceDc : "—"} Charisma save or be charmed by you for 1 hour.`, autoHideTime: 10000});
+			this.renderCombatInterdiction();
+			this._page.saveCharacter?.();
 		});
 	}
 
@@ -3616,6 +3730,11 @@ class CharacterSheetCombat {
 		// Filter for combat-relevant features that have action economy
 		const combatActions = features.filter(f => {
 			const nameLower = f.name?.toLowerCase() || "";
+
+			// (R22 #4) Features with a dedicated panel (Interdiction: Baleful Interdict /
+			// Charm Enemy / boons) or passive "<X> Improvement" riders must not also appear
+			// in the generic "Abilities" list — they have a canonical home elsewhere.
+			if (CharacterSheetState.isHiddenFromGenericAbilitySurfaces(f, features)) return false;
 
 			// Fighter action features own their dedicated Combat-tab section
 			// (renderCombatFighter); skip them here so they don't double-render in
@@ -6109,8 +6228,21 @@ class CharacterSheetCombat {
 		container.innerHTML = "";
 
 		// Filter to combat-relevant resources
+		const allFeaturesForRes = this._state.getFeatures?.() || [];
 		const combatResources = (this._state.getResources() || []).filter(r => {
 			const name = r.name.toLowerCase();
+			// (R22 #4) Skip per-ability use pools and interdiction-managed / passive-rider
+			// resources — they surface with their ability (Abilities area) or dedicated panel
+			// (Interdiction), not as bare combat-resource pips. Many were leaking in here via
+			// the catch-all `r.recharge` rule below.
+			const linked = r.featureId
+				? allFeaturesForRes.find(f => f.id === r.featureId)
+				: allFeaturesForRes.find(f => (f.name || "") === (r.name || ""));
+			if (linked) {
+				const info = CharacterSheetState.detectActivatableFeature?.(linked);
+				const isAbility = CharacterSheetState.isActivatableAbilityEntry?.({feature: linked, activationInfo: info, interactionMode: info?.interactionMode});
+				if (isAbility || CharacterSheetState.isHiddenFromGenericAbilitySurfaces?.(linked, allFeaturesForRes)) return false;
+			}
 			// Include combat-relevant resources
 			return name.includes("rage")
 				|| name.includes("ki")
@@ -6414,7 +6546,8 @@ class CharacterSheetCombat {
 		const labels = {ready: "READY", off: "OFF", used: "USED"};
 
 		for (const rider of riders) {
-			const isSpent = !this._isRiderAvailableThisTurn(rider.id);
+			const oncePerTurn = rider.perTurn !== false;
+			const isSpent = oncePerTurn && !this._isRiderAvailableThisTurn(rider.id);
 			if (isSpent && this._weaponRiderEnabled[rider.id]) this._weaponRiderEnabled[rider.id] = false;
 			const toggleState = isSpent ? "used" : this._weaponRiderEnabled[rider.id] ? "ready" : "off";
 			const title = isSpent
@@ -6423,22 +6556,40 @@ class CharacterSheetCombat {
 					? `Click to disable ${rider.name} for next damage roll`
 					: `Click to enable ${rider.name} for next damage roll`;
 
+			// Optional per-rider damage-type chooser (e.g. Terrorizing Force — changeable on
+			// a long rest). Rendered only when the rider exposes `damageTypeChoices`.
+			let typeSelectHtml = "";
+			if (Array.isArray(rider.damageTypeChoices) && rider.damageTypeChoices.length) {
+				const cur = (rider.damageType || "").toLowerCase();
+				const opts = rider.damageTypeChoices
+					.map(t => `<option value="${t}"${t === cur ? " selected" : ""}>${t}</option>`)
+					.join("");
+				typeSelectHtml = `<select class="form-control input-sm charsheet__weapon-rider-dmgtype ml-2" data-rider-id="${rider.id}" style="width: 8rem;" title="Damage type (changeable on a long rest)">${opts}</select>`;
+			}
+
 			const row = e_({outer: `
 				<div class="ve-flex-v-center mb-1 gap-2">
 					<button class="ve-btn ve-btn-xs ${colors[toggleState]} charsheet__weapon-rider-toggle mr-2" data-rider-id="${rider.id}" title="${title}" ${isSpent ? "disabled" : ""}>
 						<span class="glyphicon glyphicon-flash mr-1"></span>${labels[toggleState]}
 					</button>
 					<span class="ve-small"><strong>${rider.name}</strong> ${rider.dice}${rider.note ? ` <span class="ve-muted">(${rider.note})</span>` : ""}</span>
+					${typeSelectHtml}
 				</div>
 			`});
 
 			row.querySelector(".charsheet__weapon-rider-toggle")?.addEventListener("click", () => {
-				if (!this._isRiderAvailableThisTurn(rider.id)) {
+				if (rider.perTurn !== false && !this._isRiderAvailableThisTurn(rider.id)) {
 					JqueryUtil.doToast({type: "warning", content: `${rider.name} has already been used this round.`});
 					return;
 				}
 				this._weaponRiderEnabled[rider.id] = !this._weaponRiderEnabled[rider.id];
 				this._renderWeaponDamageRiders();
+			});
+			row.querySelector(".charsheet__weapon-rider-dmgtype")?.addEventListener("change", (e) => {
+				const val = /** @type {HTMLSelectElement} */ (e.target).value || "";
+				this._state.setWeaponRiderDamageType?.(rider.id, val);
+				this._page.renderCharacter?.();
+				this._page.saveCharacter?.();
 			});
 			section.append(row);
 
@@ -6603,6 +6754,18 @@ class CharacterSheetCombat {
 		// Filter out limited-use custom abilities - they're shown in Resources section
 		const availableFeatures = activatableFeatures.filter(af => {
 			if (af.isActive) return false;
+			// (R21/R22) Classified limited-use ABILITIES (Healing Hands, Guided Strike,
+			// Baleful Interdict, Forked Tongue, Charm Enemy, …) surface ONLY in the
+			// features/abilities area with a canonical Use button — NEVER as activatable
+			// "states". This MUST mirror the Overview _renderActiveStates() filter; the
+			// Combat-tab States list previously omitted it, leaking abilities here (#4).
+			if (CharacterSheetState.isActivatableAbilityEntry(af)) return false;
+			// (R21 #14) Interdict boons are invoked from the abilities area / interdict
+			// panel (expend a seal to turn on a durational buff) — not as un-flipped toggles.
+			if (CharacterSheetState.isInterdictBoonEntry(af)) return false;
+			// (R22 #4) Interdiction-managed (Baleful Interdict / Charm Enemy) and passive
+			// "<X> Improvement" riders never belong in the activatable-states list either.
+			if (CharacterSheetState.isHiddenFromGenericAbilitySurfaces(af.feature, this._state.getFeatures?.() || [])) return false;
 			// Druid Wild Shape / Wild Companion / Zodiac Form are handled by the
 			// dedicated Druid Resources modal — drop them from the generic list
 			// (only once that module is available, so a failure never strands them).
