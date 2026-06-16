@@ -19716,6 +19716,36 @@ class CharacterSheetState {
 			calculations.hellishAvengerDamageDie = 8;
 			calculations.hellishAvengerDamageDieCount = illriggerLevel >= 11 ? 2 : 1;
 			calculations.hellishAvengerDamage = `${calculations.hellishAvengerDamageDieCount}d8`;
+			// Surface as a once-per-turn weapon damage rider so the extra fire damage is
+			// actually rolled into (and crit-doubled with) the next weapon damage roll,
+			// rather than being a number that never reaches the dice. Player opts in per
+			// hit (the "once per turn" trigger isn't knowable from attack data).
+			(calculations.weaponDamageRiders = calculations.weaponDamageRiders || []).push({
+				id: "hellishAvenger",
+				name: "Hellish Avenger",
+				dice: calculations.hellishAvengerDamage,
+				damageType: "fire",
+				condition: "when you hit a creature with a weapon attack",
+				note: "once per turn",
+			});
+		}
+
+		// --- Terrorizing Force (Illrigger L11): +1d8 (→2d8 at L17) of a CHOSEN damage type
+		// on a weapon hit, applies on EVERY hit (perTurn:false), changeable on a long rest. ---
+		if (calculations.hasTerrorizingForce) {
+			const tfType = this.getTerrorizingForceDamageType();
+			const tfDice = calculations.terrorForceExtraDamage || "1d8";
+			calculations.terrorizingForceDamageType = tfType;
+			(calculations.weaponDamageRiders = calculations.weaponDamageRiders || []).push({
+				id: "terrorizingForce",
+				name: "Terrorizing Force",
+				dice: tfDice,
+				damageType: tfType,
+				damageTypeChoices: CharacterSheetState.TERRORIZING_FORCE_DAMAGE_TYPES,
+				perTurn: false,
+				condition: "when you hit a creature with a weapon attack",
+				note: `${tfType} · changeable on a long rest`,
+			});
 		}
 
 		// --- Infernal Awareness (L7): blindsight 10 ft (→ 30 ft if taken twice, L11+) ---
@@ -26248,6 +26278,44 @@ class CharacterSheetState {
 		if (res) res.current = res.max;
 	}
 
+	/** @returns {boolean} whether the character has the L14 Superior Interdict feature. */
+	hasSuperiorInterdict () {
+		return !!(this.getFeatureCalculations?.() || {}).hasSuperiorInterdict;
+	}
+
+	/**
+	 * Whether Superior Interdict's bonus-action seal regain is currently usable: the
+	 * character has the feature, has NO seals remaining, and hasn't used it since their
+	 * last long rest.
+	 * @returns {boolean}
+	 */
+	canRegainSealViaSuperiorInterdict () {
+		if (!this.hasSuperiorInterdict()) return false;
+		if (this.getSealsAvailable() > 0) return false;
+		return !this._ensureSealStore().superiorInterdictUsed;
+	}
+
+	/**
+	 * Superior Interdict (Illrigger L14): as a bonus action, regain one seal if you have
+	 * none remaining. Usable once per long rest. Mutates the seal pool and returns a
+	 * `{ok, label}` result for the caller's toast.
+	 * @returns {{ok:boolean, label:string}}
+	 */
+	regainSealViaSuperiorInterdict () {
+		if (!this.hasSuperiorInterdict()) return {ok: false, label: "You don't have Superior Interdict."};
+		if (this.getSealsAvailable() > 0) return {ok: false, label: "Superior Interdict only regains a seal when you have none remaining."};
+		const store = this._ensureSealStore();
+		if (store.superiorInterdictUsed) return {ok: false, label: "Superior Interdict has already been used since your last long rest."};
+		this._setSealsAvailable(1);
+		store.superiorInterdictUsed = true;
+		return {ok: true, label: "Superior Interdict: regained 1 seal (bonus action)."};
+	}
+
+	/** Reset Superior Interdict's 1/long-rest seal regain (called on a long rest). */
+	resetSuperiorInterdict () {
+		this._ensureSealStore().superiorInterdictUsed = false;
+	}
+
 	/**
 	 * The character's KNOWN interdict boons (selected via the ItdBoon optional-feature
 	 * type). Used by the combat-tab Interdiction panel to list boons with a Passive/Active
@@ -26260,6 +26328,33 @@ class CharacterSheetState {
 			if (Array.isArray(types)) return types.includes("ItdBoon");
 			return types === "ItdBoon";
 		});
+	}
+
+	/**
+	 * The Moloch's Interdiction free boons (Hellspeaker) the character currently qualifies
+	 * for, resolved as `ItdBoon` feature-like objects so every boon-consuming surface (the
+	 * Interdiction panel, the Features tab, effect summaries) shows them as KNOWN boons.
+	 * Always-known and budget-free, so they live OUTSIDE `_data.features` and are derived on
+	 * read from the character's Illrigger level + Hellspeaker subclass — no persisted field
+	 * and no recursion into {@link getFeatureCalculations}. Returns `[]` for non-Hellspeaker
+	 * or sub-level-7 characters.
+	 * @returns {Array<object>}
+	 */
+	getMolochInterdictionBoons () {
+		const illLevel = this.getClassLevel?.("Illrigger") || 0;
+		if (illLevel < 7) return [];
+		const cls = (this._data.classes || []).find(c => c.name === "Illrigger");
+		const sub = cls?.subclass?.shortName || cls?.subclass?.name;
+		if (sub !== "Hellspeaker") return [];
+		return CharacterSheetState.MOLOCH_INTERDICTION_BOONS
+			.filter(b => illLevel >= b.level)
+			.map(b => ({
+				name: b.name,
+				optionalFeatureTypes: ["ItdBoon"],
+				featureType: ["ItdBoon"],
+				entries: Array.isArray(b.entries) ? [...b.entries] : [],
+				_molochGranted: true,
+			}));
 	}
 	// #endregion
 
@@ -26304,6 +26399,41 @@ class CharacterSheetState {
 		}
 		this._data.illriggerLiesWeapon = (name || "").trim();
 		return this._data.illriggerLiesWeapon;
+	}
+
+	/**
+	 * The chosen damage type for the Terrorizing Force feature (Illrigger L11). Defaults to
+	 * "fire" when unset or invalid. Changeable on a long rest (the choice persists).
+	 * @returns {string}
+	 */
+	getTerrorizingForceDamageType () {
+		const v = (this._data.illriggerTerrorizingForceType || "").toLowerCase();
+		return CharacterSheetState.TERRORIZING_FORCE_DAMAGE_TYPES.includes(v) ? v : "fire";
+	}
+
+	/**
+	 * Set the Terrorizing Force damage type (must be one of cold/fire/necrotic/poison).
+	 * Invalid values are ignored and the current value is returned.
+	 * @param {string} type
+	 * @returns {string} the value actually stored.
+	 */
+	setTerrorizingForceDamageType (type) {
+		const v = (type || "").toLowerCase();
+		if (!CharacterSheetState.TERRORIZING_FORCE_DAMAGE_TYPES.includes(v)) return this.getTerrorizingForceDamageType();
+		this._data.illriggerTerrorizingForceType = v;
+		return v;
+	}
+
+	/**
+	 * Generic dispatch for changing a weapon-damage-rider's damage type from the combat UI.
+	 * Keeps the renderer agnostic of which feature owns the rider.
+	 * @param {string} riderId
+	 * @param {string} type
+	 * @returns {?string}
+	 */
+	setWeaponRiderDamageType (riderId, type) {
+		if (riderId === "terrorizingForce") return this.setTerrorizingForceDamageType(type);
+		return null;
 	}
 
 	/**
@@ -26583,6 +26713,13 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Valid damage types for the Terrorizing Force feature (Illrigger L11). The player chooses
+	 * one (changeable on a long rest); the +1d8/+2d8 weapon rider uses it.
+	 * @type {string[]}
+	 */
+	static TERRORIZING_FORCE_DAMAGE_TYPES = ["cold", "fire", "necrotic", "poison"];
+
+	/**
 	 * Per-boon mechanical-effect derivation for the 34 `ItdBoon` options, keyed by
 	 * normalized boon name. Each entry sets a `has{Boon}` flag plus any sheet-derivable
 	 * number/string (damage, save DC, range, bonus, temp-HP, seal cost). Saves that use
@@ -26753,6 +26890,23 @@ class CharacterSheetState {
 				? `Spend 1 Hit Die to add to a failed save (${avail} available)`
 				: "Spend 1 Hit Die to add to a failed save";
 		},
+		"intransigent": (c) => {
+			if (!c.hasIntransigent) return null;
+			const r = c.intransigentRange || 10;
+			// Signal that the charmed-immunity can be EXTENDED to allies you choose — not
+			// just yourself (R22 #10).
+			return `You + chosen creatures within ${r} ft are immune to charmed`;
+		},
+		"superior interdict": (c) => {
+			if (!c.hasSuperiorInterdict) return null;
+			return "Seal damage ignores resistance · regain 1 seal (bonus action, 1/long rest)";
+		},
+		"terrorizing force": (c) => {
+			if (!c.hasTerrorizingForce) return null;
+			const dice = c.terrorForceExtraDamage || "1d8";
+			const type = c.terrorizingForceDamageType || "fire";
+			return `+${dice} ${type} on weapon hits (type changeable on a long rest)`;
+		},
 	};
 
 	/**
@@ -26816,9 +26970,9 @@ class CharacterSheetState {
 	 * @type {Array<{level:number, name:string, key:string}>}
 	 */
 	static MOLOCH_INTERDICTION_BOONS = [
-		{level: 7, name: "Red Cant", key: "red cant"},
-		{level: 13, name: "Slippery Ploy", key: "slippery ploy"},
-		{level: 18, name: "Incontrovertible", key: "incontrovertible"},
+		{level: 7, name: "Red Cant", key: "red cant", entries: ["When you make a Charisma check, you can expend a seal to treat a {@dice d20} roll of 9 or lower as a 10."]},
+		{level: 13, name: "Slippery Ploy", key: "slippery ploy", entries: ["When a creature targets you with an attack, spell, or other magical effect, you can place a seal on them as a reaction and force the creature to make a Charisma saving throw. On a failed save, the creature must choose a new target or lose the attack or effect."]},
+		{level: 18, name: "Incontrovertible", key: "incontrovertible", entries: ["Interdicted creatures have disadvantage on Wisdom and Charisma saving throws."]},
 	];
 
 	/**
@@ -38595,6 +38749,63 @@ class CharacterSheetState {
 	 */
 	static isInterdictBoonEntry (af) {
 		return !!af && CharacterSheetState.isInterdictBoonFeature(af.feature);
+	}
+
+	/**
+	 * (R22 #4/#5/#6) Is this feature wholly managed by the dedicated Interdiction combat
+	 * panel (renderCombatInterdiction) and therefore must NEVER also leak into the generic
+	 * Resources / Abilities / Active-States surfaces?
+	 *
+	 * Covers the seal pool itself ("Baleful Interdict"), the seal-charm action ("Charm
+	 * Enemy" — invoked from the Interdiction panel, R22 #5), and every interdict boon
+	 * (durational seal-expending buffs invoked from the Interdiction panel, R22 #6). These
+	 * each have a first-class home in the Interdiction panel; surfacing them again as bare
+	 * resource rows / generic abilities is the multi-surface duplication players reported.
+	 * @param {object} feature
+	 * @returns {boolean}
+	 */
+	static isInterdictionManagedFeature (feature) {
+		if (!feature) return false;
+		if (CharacterSheetState.isInterdictBoonFeature(feature)) return true;
+		const nm = (feature.name || "").toLowerCase().trim();
+		return nm === "baleful interdict" || nm === "charm enemy";
+	}
+
+	/**
+	 * (R22 #4) Is this feature a passive "<Base> Improvement" rider that merely enhances an
+	 * already-owned base feature (e.g. "Forked Tongue Improvement" improving "Forked
+	 * Tongue") and is NOT independently invokable? Such riders are sometimes mis-tagged with
+	 * a spurious use pool by the feature parser, which makes the generic classifier surface
+	 * them as fake abilities/resources. They have no standalone activation, so they belong
+	 * only in the Features list — never as an ability, resource row, or active state.
+	 *
+	 * Generic by the "<X> Improvement" naming pattern paired with the presence of the base
+	 * "<X>" feature, so it is not hard-coded to any single homebrew entry.
+	 * @param {object} feature
+	 * @param {Array<{name?: string}>} allFeatures the full owned-feature list.
+	 * @returns {boolean}
+	 */
+	static isRedundantImprovementFeature (feature, allFeatures) {
+		const nm = (feature?.name || "").trim();
+		if (!/\bimprovement$/i.test(nm)) return false;
+		const base = nm.replace(/\s*improvement$/i, "").trim().toLowerCase();
+		if (!base) return false;
+		return (allFeatures || []).some(f => (f?.name || "").trim().toLowerCase() === base);
+	}
+
+	/**
+	 * (R22 #4) Single boundary predicate: should this feature be HIDDEN from the generic
+	 * ability/resource/active-state surfaces because it is either wholly managed by a
+	 * dedicated panel (Interdiction) or a passive non-invokable improvement rider? Used by
+	 * the Resources panel, the Combat "Abilities" list, and the Active-States lists so a
+	 * feature surfaces in exactly one canonical home.
+	 * @param {object} feature
+	 * @param {Array<{name?: string}>} [allFeatures]
+	 * @returns {boolean}
+	 */
+	static isHiddenFromGenericAbilitySurfaces (feature, allFeatures) {
+		return CharacterSheetState.isInterdictionManagedFeature(feature)
+			|| CharacterSheetState.isRedundantImprovementFeature(feature, allFeatures);
 	}
 	// #endregion
 

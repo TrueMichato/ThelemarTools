@@ -6911,6 +6911,10 @@ class CharacterSheetPage {
 			// turn on a durational buff). They must NOT sit in "Available to Activate" as an
 			// un-flipped toggle; once active they reappear in "Currently Active" (Section 1).
 			if (CharacterSheetState.isInterdictBoonEntry(af)) return false;
+			// (R22 #4) Interdiction-managed (Baleful Interdict / Charm Enemy) and passive
+			// "<X> Improvement" riders are surfaced by their dedicated panel / Features list,
+			// never as activatable states.
+			if (CharacterSheetState.isHiddenFromGenericAbilitySurfaces(af.feature, this._state.getFeatures?.() || [])) return false;
 			// Druid Wild Shape / Wild Companion / Zodiac Form are handled by the
 			// dedicated Druid Resources modal — drop them from the generic list
 			// (only once that module is available, so a failure never strands them).
@@ -13554,14 +13558,21 @@ class CharacterSheetPage {
 					typeLabel = mod.type.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/:/, " › ");
 				}
 
-				// Build effect description
+				// Build effect description. Advantage/disadvantage can be encoded either
+				// as an explicit `advantage`/`disadvantage` field OR inside the type string
+				// (e.g. "check:cha:advantage"), in which case `value:1` is just a presence
+				// sentinel and must NOT render as a flat "+1" (the long-standing Moloch's
+				// Blessing / Forked Tongue "+1 instead of Advantage" display bug).
+				const {advantage: advFromType, disadvantage: disFromType} = this._state._parseModifierType(mod.type);
+				const isAdvantage = mod.advantage || advFromType;
+				const isDisadvantage = mod.disadvantage || disFromType;
 				const effects = [];
-				if (mod.value && !mod.advantage && !mod.disadvantage && !mod.setMinimum && !mod.setMaximum) {
+				if (mod.value && !isAdvantage && !isDisadvantage && !mod.setMinimum && !mod.setMaximum) {
 					const valueStr = mod.value >= 0 ? `+${mod.value}` : mod.value;
 					effects.push(`<span class="${mod.value >= 0 ? "text-success" : "text-danger"}">${valueStr}</span>`);
 				}
-				if (mod.advantage) effects.push(`<span class="text-success">Advantage</span>`);
-				if (mod.disadvantage) effects.push(`<span class="text-danger">Disadvantage</span>`);
+				if (isAdvantage) effects.push(`<span class="text-success">Advantage</span>`);
+				if (isDisadvantage) effects.push(`<span class="text-danger">Disadvantage</span>`);
 				if (mod.setMinimum != null) effects.push(`<span class="ve-muted">Min: ${mod.setMinimum}</span>`);
 				if (mod.setMaximum != null) effects.push(`<span class="ve-muted">Max: ${mod.setMaximum}</span>`);
 				if (mod.bonusDie) effects.push(`<span class="text-info">+${mod.bonusDie}</span>`);

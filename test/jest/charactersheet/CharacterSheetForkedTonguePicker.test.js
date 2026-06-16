@@ -159,7 +159,10 @@ describe("Builder source wiring for Forked Tongue picker", () => {
 		const m = BUILDER_SRC.match(/_renderForkedTongueLanguageSelection \(cls, count\) \{[\s\S]*?\n\t\}\n/);
 		expect(m).not.toBeNull();
 		expect(m[0]).toMatch(/knownLangs\.add\("mictlanian"\)/);
-		expect(m[0]).toMatch(/this\._selectedForkedTongueLanguages\[i\]/);
+		// Picker now routes through the shared race-style checkbox-pill helper
+		// (search + source filter + counter) instead of legacy indexed dropdowns.
+		expect(m[0]).toMatch(/_renderLanguageCheckboxGroup\s*\(/);
+		expect(m[0]).toMatch(/this\._selectedForkedTongueLanguages = selectedNames/);
 	});
 
 	it("gates the Next button until distinct picks are chosen", () => {
