@@ -22,7 +22,7 @@ import {fileURLToPath} from "url";
 const CharacterSheetState = globalThis.CharacterSheetState;
 
 const __dirnameLocal = path.dirname(fileURLToPath(import.meta.url));
-const REAL_CHAR_PATH = path.join(__dirnameLocal, "fixtures", "r21-hellspeaker-illrigger-l10.json");
+const REAL_CHAR_PATH = path.join(__dirnameLocal, "fixtures", "r21-hochling-illrigger-l10.json");
 
 const addHellspeaker = (state, level, {cha = 16} = {}) => {
 	state._data.abilities.cha = cha;
