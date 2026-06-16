@@ -1134,6 +1134,12 @@ class CharacterSheetRest {
 			this._state.restoreSeals?.();
 		}
 
+		// Reset Superior Interdict's bonus-action seal regain (Illrigger L14) — once per
+		// LONG rest only.
+		if (restType === "long" && this._state.hasSuperiorInterdict?.()) {
+			this._state.resetSuperiorInterdict?.();
+		}
+
 		// Restore Illrigger Infernal Conduit dice (Baleful Interdict) - the d10 pool
 		// recovers on a LONG rest only.
 		if (restType === "long" && this._state.hasInfernalConduit?.()) {

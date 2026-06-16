@@ -2583,16 +2583,32 @@ class CharacterSheetQuickBuild {
 			existingCountMap.set(key, (existingCountMap.get(key) || 0) + 1);
 		}
 
+		// (R22 #2) Evaluate each option's own prerequisites (e.g. Interdict Boons gated
+		// "Illrigger level 7") against the build's level for THIS class so higher-level boons
+		// are not selectable before the character reaches their level — mirroring the
+		// level-up flow, which already gates them. Boon prereqs are class-scoped, so the
+		// gaining class at its build level is the binding context.
+		const prereqContext = {
+			classes: [{name: gain.className, source: gain.classSource, level: gain.maxClassLevel}],
+			totalLevel: gain.maxClassLevel,
+			existingFeatures: existingOptFeatures,
+			cantrips: this._state.getCantripsKnown?.() || [],
+			spells: this._state.getSpellsKnown?.() || [],
+		};
+
 		const enrichedOptions = sourceFiltered.map(opt => {
 			const key = `${opt.name}|${opt.source}`;
 			const timesKnown = existingCountMap.get(key) || 0;
 			const alreadyKnown = timesKnown > 0;
 			const repeatable = isRepeatable(opt);
+			const {met, reasons} = CharacterSheetClassUtils.checkPrerequisites(opt.prerequisite, prereqContext);
 			return {
 				...opt,
 				_alreadyKnown: alreadyKnown,
 				_timesKnown: timesKnown,
-				_selectable: !alreadyKnown || repeatable,
+				_meetsPrereqs: met,
+				_prereqReasons: reasons,
+				_selectable: met && (!alreadyKnown || repeatable),
 				_repeatable: repeatable,
 			};
 		});
@@ -2663,6 +2679,9 @@ class CharacterSheetQuickBuild {
 					const repeatableBadge = opt._repeatable
 						? `<span class="badge badge-info ml-1" title="Can be taken multiple times">↺ Repeatable</span>`
 						: "";
+					const prereqBadge = !opt._meetsPrereqs && opt._prereqReasons?.length
+						? `<span class="badge badge-warning ml-1" title="Prerequisite not met">${opt._prereqReasons.join(", ")}</span>`
+						: "";
 
 					const itemStyle = `padding: 6px 8px; cursor: ${isDisabled ? "not-allowed" : "pointer"};${isDisabled ? " opacity: 0.5;" : ""}${isSelected && !opt._alreadyKnown ? " background: rgba(13, 110, 253, 0.1); border-left: 3px solid #0d6efd;" : ""}${opt._alreadyKnown && opt._selectable ? " background: rgba(40, 167, 69, 0.1); border-left: 3px solid #28a745;" : ""}${opt._alreadyKnown && !opt._selectable ? " background: rgba(128, 128, 128, 0.1);" : ""}`;
 
@@ -2671,7 +2690,7 @@ class CharacterSheetQuickBuild {
 							<div class="ve-flex-v-center">
 								<input type="checkbox" ${isSelected ? "checked" : ""}${isDisabled ? " disabled" : ""}>
 								<span class="qb-opt-name ml-2"></span>
-								${knownBadge}${selectedBadge}${repeatableBadge}
+								${knownBadge}${selectedBadge}${repeatableBadge}${prereqBadge}
 								<span class="ve-muted ml-1">(${Parser.sourceJsonToAbv(opt.source)})</span>
 							</div>
 						</div>

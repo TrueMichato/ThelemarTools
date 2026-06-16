@@ -5308,59 +5308,34 @@ class CharacterSheetBuilder {
 
 		const section = e_({outer: `
 			<div class="charsheet__builder-class-lang-selection mt-3">
-				<p><strong>Languages (${featureName}):</strong> Choose ${count} language${count > 1 ? "s" : ""}:</p>
-				<div class="charsheet__builder-class-lang-dropdowns"></div>
-				<div class="ve-small ve-muted mt-1">Selected: <span class="class-lang-count">${this._selectedClassFeatureLanguages.length}</span>/${count}</div>
+				<p><strong>Languages (${featureName}):</strong> Choose ${count} language${count > 1 ? "s" : ""}:
+					<span class="ve-small ve-muted ml-2">Selected: <span class="class-lang-count">${this._selectedClassFeatureLanguages.filter(Boolean).length}</span>/${count}</span>
+				</p>
+				<div class="charsheet__builder-class-lang-checkboxes"></div>
 			</div>
 		`});
 
-		const dropdowns = section.querySelector(".charsheet__builder-class-lang-dropdowns");
+		const checkboxes = section.querySelector(".charsheet__builder-class-lang-checkboxes");
+		const countEl = section.querySelector(".class-lang-count");
 
-		// Get grouped languages including homebrew
-		const langOptions = this._page.getLanguageOptionsGrouped?.() || {
-			standard: Parser.LANGUAGES_STANDARD,
-			exotic: Parser.LANGUAGES_EXOTIC,
-			secret: Parser.LANGUAGES_SECRET,
-			homebrew: [],
-		};
+		// Use the SAME grouped checkbox-pill picker as the race / regular-background language
+		// choosers (search box, source filter, live counter, disable-at-max). The backing
+		// `_selectedClassFeatureLanguages` is kept as a dense array of chosen names — the shape
+		// the validators (`.filter(Boolean)`) and the apply path already consume.
+		const selectedNames = this._selectedClassFeatureLanguages.filter(Boolean);
+		this._selectedClassFeatureLanguages = selectedNames;
 
-		for (let i = 0; i < count; i++) {
-			const selectId = `class-lang-choice-${i}`;
-			const select = e_({outer: `
-				<select class="ve-form-control form-control--minimal mb-1" id="${selectId}">
-					<option value="">-- Select Language --</option>
-				</select>
-			`});
+		const allLanguages = this._page.getLanguageNamesSorted?.() || [];
+		const grouped = this._groupLanguagesByType(allLanguages);
 
-			// Add language options grouped by type
-			const addOptgroup = (/** @type {*} */ labelText, /** @type {*} */ langs) => {
-				const grp = document.createElement("optgroup");
-				grp.label = labelText;
-				langs.forEach((/** @type {*} */ lang) => grp.append(e_({tag: "option", val: lang, txt: lang})));
-				select.append(grp);
-			};
-
-			if (langOptions.homebrew.length) {
-				addOptgroup("──── Homebrew Languages ────", langOptions.homebrew);
-			}
-			addOptgroup("──── Standard Languages ────", langOptions.standard);
-			addOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
-			addOptgroup("──── Secret Languages ────", langOptions.secret);
-
-			const existingChoice = this._selectedClassFeatureLanguages[i];
-			if (existingChoice) {
-				select.value = existingChoice;
-			}
-
-			select.addEventListener("change", (/** @type {*} */ e) => {
-				this._selectedClassFeatureLanguages[i] = e.target.value || null;
-				// Count non-null selections
-				const selectedCount = this._selectedClassFeatureLanguages.filter((/** @type {*} */ l) => l).length;
-				section.querySelector(".class-lang-count").textContent = selectedCount;
-			});
-
-			dropdowns.append(select);
-		}
+		this._renderLanguageCheckboxGroup(
+			grouped,
+			selectedNames,
+			count,
+			countEl,
+			checkboxes,
+			() => { this._selectedClassFeatureLanguages = selectedNames; },
+		);
 
 		return section;
 	}
@@ -5381,79 +5356,39 @@ class CharacterSheetBuilder {
 	_renderForkedTongueLanguageSelection (cls, count) {
 		const section = e_({outer: `
 			<div class="charsheet__builder-class-lang-selection charsheet__builder-forked-tongue-selection mt-3">
-				<p><strong>Forked Tongue:</strong> You can speak, read, and write <em>Mictlanian</em>. Choose ${count} other language${count > 1 ? "s" : ""} you can speak (you can swap one on a long rest):</p>
-				<div class="charsheet__builder-forked-tongue-dropdowns"></div>
-				<div class="ve-small ve-muted mt-1">Selected: <span class="forked-tongue-count">${this._selectedForkedTongueLanguages.filter(Boolean).length}</span>/${count}</div>
+				<p><strong>Forked Tongue:</strong> You can speak, read, and write <em>Mictlanian</em>. Choose ${count} other language${count > 1 ? "s" : ""} you can speak (you can swap one on a long rest):
+					<span class="ve-small ve-muted ml-2">Selected: <span class="forked-tongue-count">${this._selectedForkedTongueLanguages.filter(Boolean).length}</span>/${count}</span>
+				</p>
+				<div class="charsheet__builder-forked-tongue-checkboxes"></div>
 			</div>
 		`});
 
-		const dropdowns = section.querySelector(".charsheet__builder-forked-tongue-dropdowns");
+		const checkboxes = section.querySelector(".charsheet__builder-forked-tongue-checkboxes");
+		const countEl = section.querySelector(".forked-tongue-count");
 
-		const langOptions = this._page.getLanguageOptionsGrouped?.() || {
-			standard: Parser.LANGUAGES_STANDARD,
-			exotic: Parser.LANGUAGES_EXOTIC,
-			secret: Parser.LANGUAGES_SECRET,
-			homebrew: [],
-		};
-
-		// Languages already known (e.g. from race/background) plus Mictlanian are not selectable.
+		// Languages already known (e.g. from race/background) plus Mictlanian are not selectable
+		// (Mictlanian is auto-granted). Pre-filter them out of the option pool so the shared
+		// checkbox-pill picker (search + source filter + counter) never offers them — except any
+		// already-stored pick, which we keep so a saved selection round-trips cleanly.
 		const knownLangs = new Set((this._state.getLanguages?.() || []).map((/** @type {*} */ l) => l.toLowerCase()));
 		knownLangs.add("mictlanian");
 
-		const selects = [];
+		const selectedNames = this._selectedForkedTongueLanguages.filter(Boolean);
+		this._selectedForkedTongueLanguages = selectedNames;
 
-		const renderOptions = () => {
-			selects.forEach((/** @type {*} */ select, /** @type {*} */ idx) => {
-				// Languages chosen in the OTHER dropdowns are excluded from this one.
-				const chosenElsewhere = new Set(
-					this._selectedForkedTongueLanguages
-						.filter((/** @type {*} */ l, /** @type {*} */ j) => l && j !== idx)
-						.map((/** @type {*} */ l) => l.toLowerCase()),
-				);
-				const current = this._selectedForkedTongueLanguages[idx] || "";
+		const selectedLower = new Set(selectedNames.map((/** @type {*} */ l) => l.toLowerCase()));
+		const allLanguages = (this._page.getLanguageNamesSorted?.() || [])
+			.filter((/** @type {*} */ l) => !knownLangs.has(l.toLowerCase()) || selectedLower.has(l.toLowerCase()));
+		const grouped = this._groupLanguagesByType(allLanguages);
 
-				select.innerHTML = "";
-				select.append(e_({tag: "option", val: "", txt: "-- Select Language --"}));
-
-				const addOptgroup = (/** @type {*} */ labelText, /** @type {*} */ langs) => {
-					const usable = langs.filter((/** @type {*} */ lang) => {
-						const low = lang.toLowerCase();
-						if (knownLangs.has(low)) return false;
-						if (chosenElsewhere.has(low)) return false;
-						return true;
-					});
-					if (!usable.length) return;
-					const grp = document.createElement("optgroup");
-					grp.label = labelText;
-					usable.forEach((/** @type {*} */ lang) => grp.append(e_({tag: "option", val: lang, txt: lang})));
-					select.append(grp);
-				};
-
-				if (langOptions.homebrew.length) addOptgroup("──── Homebrew Languages ────", langOptions.homebrew);
-				addOptgroup("──── Standard Languages ────", langOptions.standard);
-				addOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
-				addOptgroup("──── Secret Languages ────", langOptions.secret);
-
-				select.value = current;
-			});
-		};
-
-		for (let i = 0; i < count; i++) {
-			const select = e_({outer: `<select class="ve-form-control form-control--minimal mb-1 charsheet__builder-forked-tongue-select"></select>`});
-
-			select.addEventListener("change", (/** @type {*} */ e) => {
-				this._selectedForkedTongueLanguages[i] = e.target.value || null;
-				const selectedCount = this._selectedForkedTongueLanguages.filter((/** @type {*} */ l) => l).length;
-				section.querySelector(".forked-tongue-count").textContent = selectedCount;
-				// Re-render so the just-picked language disappears from the sibling dropdowns.
-				renderOptions();
-			});
-
-			selects.push(select);
-			dropdowns.append(select);
-		}
-
-		renderOptions();
+		this._renderLanguageCheckboxGroup(
+			grouped,
+			selectedNames,
+			count,
+			countEl,
+			checkboxes,
+			() => { this._selectedForkedTongueLanguages = selectedNames; },
+		);
 
 		return section;
 	}
@@ -7751,7 +7686,6 @@ class CharacterSheetBuilder {
 			"Potter's Tools", "Smith's Tools", "Thieves' Tools",
 			"Tinker's Tools", "Weaver's Tools", "Woodcarver's Tools",
 		];
-		const allLanguages = this._page.getLanguagesList().map((/** @type {*} */ l) => l.name);
 
 		const content = e_({outer: `
 			<div class="charsheet__custom-bg-creator">
@@ -7770,26 +7704,20 @@ class CharacterSheetBuilder {
 				</div>
 
 				<div class="charsheet__section mb-3">
-					<label class="ve-block mb-1"><strong>Tool/Language Proficiencies:</strong> <span class="ve-muted">(choose 2 total)</span></label>
+					<label class="ve-block mb-1"><strong>Tool/Language Proficiencies:</strong> <span class="ve-muted">(choose 2 total)</span>
+						<span class="ve-small ve-muted ml-2">Selected: <span class="custom-bg-prof-count">0</span>/2</span>
+					</label>
 					<div class="ve-flex-col">
 						<div class="mb-2">
-							<label class="ve-muted ve-small">Tools:</label>
-							<select class="ve-form-control form-control--minimal" id="custom-bg-tool1">
-								<option value="">-- None --</option>
-							</select>
-						</div>
-						<div class="mb-2">
-							<label class="ve-muted ve-small">Languages:</label>
-							<select class="ve-form-control form-control--minimal" id="custom-bg-lang1">
-								<option value="">-- None --</option>
+							<label class="ve-muted ve-small ve-block mb-1">Tools:</label>
+							<div id="custom-bg-tool-chips" class="ve-flex-wrap gap-1 mb-1"></div>
+							<select class="ve-form-control form-control--minimal" id="custom-bg-tool-add">
+								<option value="">+ Add a tool…</option>
 							</select>
 						</div>
 						<div>
-							<label class="ve-muted ve-small">Additional (Tool or Language):</label>
-							<select class="ve-form-control form-control--minimal" id="custom-bg-extra">
-								<option value="">-- None --</option>
-								<optgroup label="──── Tools ────" id="custom-bg-extra-tools"></optgroup>
-							</select>
+							<label class="ve-muted ve-small ve-block mb-1">Languages:</label>
+							<div id="custom-bg-lang-checkboxes"></div>
 						</div>
 					</div>
 				</div>
@@ -7829,128 +7757,104 @@ class CharacterSheetBuilder {
 			skillsContainer.append(cb);
 		});
 
-		// Populate tool dropdown
-		const toolSelectEl = /** @type {*} */ (document.getElementById("custom-bg-tool1"));
-		allTools.forEach((/** @type {*} */ tool) => {
-			toolSelectEl.append(e_({outer: `<option value="${tool}" ${this._customBackgroundData.tools[0] === tool ? "selected" : ""}>${tool}</option>`}));
-		});
+		// Normalize any previously-stored picks to dense arrays (old saves used sparse slots).
+		this._customBackgroundData.tools = (this._customBackgroundData.tools || []).filter(Boolean);
+		this._customBackgroundData.languages = (this._customBackgroundData.languages || []).filter(Boolean);
 
-		// Populate language dropdown with grouped options
-		const langOptions = this._page.getLanguageOptionsGrouped?.() || {
-			standard: Parser.LANGUAGES_STANDARD,
-			exotic: Parser.LANGUAGES_EXOTIC,
-			secret: Parser.LANGUAGES_SECRET,
-			homebrew: [],
+		const PROF_BUDGET = 2;
+		const toolAddEl = /** @type {HTMLSelectElement} */ (document.getElementById("custom-bg-tool-add"));
+		const toolChipsEl = /** @type {*} */ (document.getElementById("custom-bg-tool-chips"));
+		const langCheckboxesEl = /** @type {*} */ (document.getElementById("custom-bg-lang-checkboxes"));
+		const profCountEl = /** @type {*} */ (document.querySelector(".custom-bg-prof-count"));
+
+		// Race / regular-background-style language pill picker (search, source filter, live
+		// counter, disable-at-max). The 2-total budget is shared with tools, so the picker's
+		// max is (2 − tools chosen) and it is re-rendered whenever the tool set changes.
+		const allLanguages = this._page.getLanguageNamesSorted?.() || [];
+		const groupedLangs = this._groupLanguagesByType(allLanguages);
+
+		const refreshProfCount = () => {
+			const used = this._customBackgroundData.tools.length + this._customBackgroundData.languages.length;
+			if (profCountEl) profCountEl.textContent = String(used);
+			// Disable the "add tool" control once the 2-total budget is spent.
+			const atMax = used >= PROF_BUDGET;
+			toolAddEl.disabled = atMax;
+			toolAddEl.title = atMax ? "You have already chosen 2 proficiencies; remove one to change your selection." : "";
 		};
 
-		// Build source lookup for language display
-		const bgPrioritySources = this._state.getPrioritySources() || [];
-		const bgSourceLookup = new Map();
-		for (const lang of (this._page._languagesData || [])) {
-			const existing = bgSourceLookup.get(lang.name);
-			if (!existing) {
-				bgSourceLookup.set(lang.name, lang.source);
-			} else if (bgPrioritySources.includes(lang.source) && !bgPrioritySources.includes(existing)) {
-				bgSourceLookup.set(lang.name, lang.source);
+		const renderLangPicker = () => {
+			langCheckboxesEl.innerHTML = "";
+			const langMax = Math.max(0, PROF_BUDGET - this._customBackgroundData.tools.length);
+			// Keep any already-selected languages even if they momentarily exceed the reduced max
+			// (so adding a tool doesn't silently drop a pick); the budget guard handles over-pick.
+			this._renderLanguageCheckboxGroup(
+				groupedLangs,
+				this._customBackgroundData.languages,
+				Math.max(langMax, this._customBackgroundData.languages.length),
+				e_({tag: "span"}), // counter handled by refreshProfCount
+				langCheckboxesEl,
+				() => refreshProfCount(),
+				{excludeGroups: ["secret"]},
+			);
+			refreshProfCount();
+		};
+
+		const renderToolChips = () => {
+			toolChipsEl.innerHTML = "";
+			this._customBackgroundData.tools.forEach((/** @type {*} */ tool) => {
+				const chip = e_({outer: `
+					<span class="ve-pill ve-flex-v-center mr-1 mb-1" style="padding: 2px 8px;">
+						${tool}
+						<button class="ve-btn ve-btn-xs ve-btn-default ml-1 custom-bg-tool-remove" data-tool="${tool.replace(/"/g, "&quot;")}" title="Remove">×</button>
+					</span>
+				`});
+				chip.querySelector(".custom-bg-tool-remove")?.addEventListener("click", () => {
+					this._customBackgroundData.tools = this._customBackgroundData.tools.filter((/** @type {*} */ t) => t !== tool);
+					renderToolChips();
+					renderLangPicker();
+				});
+				toolChipsEl.append(chip);
+			});
+		};
+
+		// Populate the "add tool" dropdown (excluding already-chosen tools).
+		const refreshToolAddOptions = () => {
+			toolAddEl.innerHTML = `<option value="">+ Add a tool…</option>`;
+			allTools
+				.filter((/** @type {*} */ t) => !this._customBackgroundData.tools.includes(t))
+				.forEach((/** @type {*} */ tool) => toolAddEl.append(e_({outer: `<option value="${tool}">${tool}</option>`})));
+		};
+		refreshToolAddOptions();
+
+		toolAddEl.addEventListener("change", (/** @type {*} */ e) => {
+			const val = e.target.value;
+			if (!val) return;
+			const used = this._customBackgroundData.tools.length + this._customBackgroundData.languages.length;
+			if (used >= PROF_BUDGET) {
+				JqueryUtil.doToast({type: "warning", content: "Pick at most 2 total from languages and tools."});
+				e.target.value = "";
+				return;
 			}
-		}
-
-		const langSelectEl = document.getElementById("custom-bg-lang1");
-		const addCustomBgLangOptgroup = (/** @type {*} */ selectEl, /** @type {*} */ label, /** @type {*} */ langs, /** @type {*} */ valueFn, /** @type {*} */ selectedFn) => {
-			if (!langs.length) return;
-			const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
-			langs.forEach((/** @type {*} */ lang) => {
-				const src = bgSourceLookup.get(lang);
-				const display = src ? `${lang} (${src})` : lang;
-				grp.append(e_({outer: `<option value="${valueFn(lang)}" ${selectedFn(lang) ? "selected" : ""}>${display}</option>`}));
-			});
-			selectEl.append(grp);
-		};
-		const langSelectedFn = (/** @type {*} */ lang) => this._customBackgroundData.languages[0] === lang;
-		const langValueFn = (/** @type {*} */ lang) => lang;
-		addCustomBgLangOptgroup(langSelectEl, "──── Homebrew Languages ────", langOptions.homebrew, langValueFn, langSelectedFn);
-		addCustomBgLangOptgroup(langSelectEl, "──── Standard Languages ────", langOptions.standard, langValueFn, langSelectedFn);
-		addCustomBgLangOptgroup(langSelectEl, "──── Exotic/Rare Languages ────", langOptions.exotic, langValueFn, langSelectedFn);
-		addCustomBgLangOptgroup(langSelectEl, "──── Secret Languages ────", langOptions.secret, langValueFn, langSelectedFn);
-
-		// Populate extra dropdown (combined tools and languages)
-		const extraSelect = /** @type {*} */ (document.getElementById("custom-bg-extra"));
-		const extraToolsGroup = /** @type {*} */ (document.getElementById("custom-bg-extra-tools"));
-		allTools.forEach((/** @type {*} */ tool) => {
-			extraToolsGroup.append(e_({outer: `<option value="tool:${tool}">${tool}</option>`}));
+			this._customBackgroundData.tools.push(val);
+			refreshToolAddOptions();
+			renderToolChips();
+			renderLangPicker();
 		});
-		// Add language optgroups as direct children of <select> (not nested inside another optgroup)
-		const addExtraLangOptgroup = (/** @type {*} */ label, /** @type {*} */ langs) => {
-			if (!langs.length) return;
-			const grp = e_({outer: `<optgroup label="${label}"></optgroup>`});
-			langs.forEach((/** @type {*} */ lang) => {
-				const src = bgSourceLookup.get(lang);
-				const display = src ? `${lang} (${src})` : lang;
-				grp.append(e_({outer: `<option value="lang:${lang}">${display}</option>`}));
-			});
-			extraSelect.append(grp);
-		};
-		addExtraLangOptgroup("──── Homebrew Languages ────", langOptions.homebrew);
-		addExtraLangOptgroup("──── Standard Languages ────", langOptions.standard);
-		addExtraLangOptgroup("──── Exotic/Rare Languages ────", langOptions.exotic);
-		addExtraLangOptgroup("──── Secret Languages ────", langOptions.secret);
 
-		// Helper: enforce that tool1 + lang1 + extra never sums to more than 2 selections
-		const updatePickerLimit = () => {
-			const tool1El = /** @type {HTMLSelectElement} */ (document.getElementById("custom-bg-tool1"));
-			const lang1El = /** @type {HTMLSelectElement} */ (document.getElementById("custom-bg-lang1"));
-			const extraEl = /** @type {HTMLSelectElement} */ (document.getElementById("custom-bg-extra"));
-			if (!tool1El || !lang1El || !extraEl) return;
-
-			const picks = [tool1El, lang1El, extraEl].filter(el => el.value).length;
-			[tool1El, lang1El, extraEl].forEach(el => {
-				const isEmpty = !el.value;
-				if (picks >= 2 && isEmpty) {
-					el.disabled = true;
-					el.title = "You have already chosen 2 proficiencies; clear one to pick a different combination.";
-				} else {
-					el.disabled = false;
-					el.title = "";
-				}
-			});
-		};
+		renderToolChips();
+		renderLangPicker();
 
 		// Event handlers
 		document.getElementById("custom-bg-name")?.addEventListener("input", (/** @type {*} */ e) => {
 			this._customBackgroundData.name = e.target.value || "Custom Background";
 		});
 
-		document.getElementById("custom-bg-tool1")?.addEventListener("change", (/** @type {*} */ e) => {
-			this._customBackgroundData.tools[0] = e.target.value;
-			updatePickerLimit();
-		});
-
-		document.getElementById("custom-bg-lang1")?.addEventListener("change", (/** @type {*} */ e) => {
-			this._customBackgroundData.languages[0] = e.target.value;
-			updatePickerLimit();
-		});
-
-		document.getElementById("custom-bg-extra")?.addEventListener("change", (/** @type {*} */ e) => {
-			const val = e.target.value;
-			if (val.startsWith("tool:")) {
-				this._customBackgroundData.tools[1] = val.replace("tool:", "");
-				this._customBackgroundData.languages[1] = "";
-			} else if (val.startsWith("lang:")) {
-				this._customBackgroundData.languages[1] = val.replace("lang:", "");
-				this._customBackgroundData.tools[1] = "";
-			} else {
-				this._customBackgroundData.tools[1] = "";
-				this._customBackgroundData.languages[1] = "";
-			}
-			updatePickerLimit();
+		document.getElementById("custom-bg-feature")?.addEventListener("input", (/** @type {*} */ e) => {
+			this._customBackgroundData.feature = e.target.value;
 		});
 
 		document.getElementById("custom-bg-equipment")?.addEventListener("input", (/** @type {*} */ e) => {
 			this._customBackgroundData.equipment = e.target.value;
-		});
-
-		document.getElementById("custom-bg-feature")?.addEventListener("input", (/** @type {*} */ e) => {
-			this._customBackgroundData.feature = e.target.value;
 		});
 
 		document.getElementById("custom-bg-cancel")?.addEventListener("click", () => {
