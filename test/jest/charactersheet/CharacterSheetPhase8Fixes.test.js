@@ -132,7 +132,9 @@ describe("Phase 8: Standalone Simple Fixes", () => {
 		});
 
 		test("all override values should be valid interaction modes", () => {
-			const validModes = new Set(["passive", "combat", "reaction"]);
+			// "ability" (R20): clickable + hoverable limited-use instant, routed through
+			// detectActivatableFeature as interactionMode "limited".
+			const validModes = new Set(["passive", "combat", "reaction", "ability"]);
 			const overrides = CharacterSheetState.FEATURE_CLASSIFICATION_OVERRIDES;
 			Object.entries(overrides).forEach(([key, value]) => {
 				expect(validModes.has(value)).toBe(true);

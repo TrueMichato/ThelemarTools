@@ -27006,6 +27006,15 @@ class CharacterSheetState {
 	_isResourceSystemFeature (feature) {
 		const name = feature.name?.toLowerCase() || "";
 
+		// (R20 #17) Options that consume a NAMED shared pool (other than Stamina, which
+		// combat methods handle on their own surface) must NOT mint their own resource —
+		// they draw on the shared pool (e.g. Invoke Hell options share the "Invoke Hell"
+		// short-rest pool). Without this, parsing their text (e.g. Turncoat's "up to your
+		// proficiency bonus") could spawn a bogus per-option resource.
+		if (feature.consumes?.name && feature.consumes.name !== "Stamina") {
+			return true;
+		}
+
 		// Hunter's Prey (Ranger Hunter) is a toggle, not a consumable resource.
 		// Normalize apostrophe variants (straight ' and curly ’) before matching.
 		if (name.replace(/[’']/g, "'").includes("hunter's prey")) {
@@ -27023,6 +27032,12 @@ class CharacterSheetState {
 			"superiority dice", // Battle Master - describes superiority dice
 			"psionic power", // Psi features - describes psionic power dice
 			"primal focus", // TGTT Ranger - has its own Focus Switches / Hunter's Dodge tracking + UI
+			// R20 #4/#17: wrapper / "choose an option" features. They describe a system
+			// (the Invoke Hell short-rest pool; the Divine Manifestation choice) but do not
+			// own a use pool themselves — their chosen child options carry the uses. Suppress
+			// use-detection so the wrapper never mints a bare resource row.
+			"divine manifestation",
+			"invoke hell",
 		];
 
 		// Check if the feature name matches any resource system feature
@@ -30147,6 +30162,60 @@ class CharacterSheetState {
 		const calcs = this.getFeatureCalculations();
 		this._ensureFighterFeatureUses("Second Wind", calcs.secondWindUses);
 		this._ensureFighterFeatureUses("Action Surge", calcs.actionSurgeUses);
+	}
+
+	/**
+	 * (R20 #17) Ensure the single shared "Invoke Hell" pool exists when the character has
+	 * the Invoke Hell feature. The wrapper features ("Invoke Hell") are passive; their
+	 * chosen options (which carry `consumes: {name: "Invoke Hell"}`) draw from this one
+	 * short-rest pool. getActivatableFeatures() links each option's `resourceName` to it,
+	 * so the options share the uses and the wrapper itself never mints a resource.
+	 */
+	ensureInvokeHellPool () {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasInvokeHell) return;
+		const max = calcs.invokeHellUses || 1;
+		const resource = this._data.resources.find(r => r.name === "Invoke Hell");
+		if (resource) {
+			const wasFull = (resource.current ?? 0) >= (resource.max ?? 0);
+			resource.max = max;
+			resource.recharge = "short";
+			resource.current = wasFull ? max : Math.min(resource.current ?? 0, max);
+		} else {
+			this.addResource({name: "Invoke Hell", max, current: max, recharge: "short"});
+		}
+	}
+
+	/**
+	 * (R20 #1) Roll Healing Hands healing: proficiency-bonus d4s. Aasimar/Hochling trait
+	 * that heals a creature you touch for PB×d4 HP (1/long rest). Pure-ish: rolls dice and
+	 * returns the detail object; the controller offers an "apply to self" action that adds
+	 * the rolled total to current HP and consumes the use.
+	 * @returns {{dice: string, rolls: number[], total: number, pb: number}}
+	 */
+	calculateHealingHandsHealing () {
+		const pb = Math.max(1, this.getProficiencyBonus());
+		const rolls = [];
+		for (let i = 0; i < pb; i++) {
+			rolls.push(Math.floor(Math.random() * 4) + 1);
+		}
+		const total = rolls.reduce((sum, r) => sum + r, 0);
+		return {dice: `${pb}d4`, rolls, total, pb};
+	}
+
+	/**
+	 * (R20 #6) Compute the Guided Strike application: War Domain / Hochling "war"
+	 * manifestation Channel Divinity — after an attack roll, add +10 to it (1/short rest).
+	 * Pure: given the most recent attack roll's current total, returns the new total with
+	 * the bonus applied. The controller is responsible for persisting the new total,
+	 * showing the toast, and consuming the use.
+	 * @param {number} currentTotal - the attack roll's current total (before the bonus)
+	 * @returns {{bonus: number, previousTotal: number, newTotal: number, used: boolean}}
+	 */
+	static buildGuidedStrikeApplication (currentTotal) {
+		const bonus = 10;
+		const prev = Number.isFinite(currentTotal) ? currentTotal : 0;
+		return {bonus, previousTotal: prev, newTotal: prev + bonus, used: true};
 	}
 
 	/** Max Second Wind uses for the current level. @returns {number} */
@@ -36027,7 +36096,87 @@ class CharacterSheetState {
 		// === Reactions wrongly detected as activatable toggle states ===
 		"deflect attacks": "reaction",
 		"deflect missiles": "reaction",
+
+		// === Wrapper / "choose an option" features that are passive themselves ===
+		// (R20 #4/#17) The wrapper trait only presents sub-options; it is not itself a
+		// state or a resource. Its chosen child options carry the real mechanics/uses.
+		// Name-keyed so both the base classFeature and the per-subclass granter (both
+		// literally named "Invoke Hell") are covered, and the Hochling race wrapper.
+		"divine manifestation": "passive",
+		"invoke hell": "passive",
+
+		// === Limited-use ABILITIES wrongly detected as toggle states / nothing ===
+		// (R20 #5) These are clickable + hoverable single abilities, NOT persistent
+		// toggle states. "ability" routes them through detectActivatableFeature as
+		// interactionMode "limited" (instant, hoverable). Their click effects are wired
+		// in charactersheet.js `_activateFeatureState` (name-keyed, isolated).
+		"baleful interdict": "ability", // Illrigger L1 — seal mechanics owned by S4 (Combat tab)
+		"forked tongue": "ability", // Illrigger L1 — click opens the language-swap UI (S1)
 	};
+
+	/**
+	 * Build the activation info for a clickable + hoverable, limited-use instant ABILITY
+	 * (R20 #5). Shared by the "ability" classification override, the generic `consumes`
+	 * rule (#17), and the race-manifestation child rule (#6). The returned shape mirrors
+	 * the limited-use fallback so getActivatableFeatures()/the renderer treat it as a Use
+	 * button rather than a persistent toggle.
+	 * @param {object} feature
+	 * @param {string} rawText - the feature's raw (HTML) description
+	 * @param {string} text - the lowercased, tag-stripped description
+	 * @param {{resourceName?: string|null, resourceCost?: number}} [opts]
+	 * @returns {object}
+	 */
+	static _buildAbilityActivationInfo (feature, rawText, text, opts = {}) {
+		let activationAction = "special";
+		if (/as a bonus action|bonus action[,:]|use (?:a |your )?bonus action/i.test(text)) {
+			activationAction = "bonus";
+		} else if (/as an action(?!\s*surge)|use (?:a |your )?action(?! surge)/i.test(text)) {
+			activationAction = "action";
+		} else if (/as a reaction|use (?:a |your )?reaction/i.test(text)) {
+			activationAction = "reaction";
+		}
+		return {
+			stateTypeId: "custom",
+			isCustom: true,
+			matchedBy: "classificationOverride",
+			interactionMode: "limited",
+			activationAction,
+			effects: this.parseEffectsFromDescription(rawText),
+			isToggle: false,
+			isInstant: true,
+			// isDataDriven lets getActivatableFeatures() link `resourceName` to a shared
+			// pool (e.g. the Invoke Hell short-rest pool for its options). When resourceName
+			// is null (e.g. Forked Tongue), the link is simply skipped.
+			isDataDriven: true,
+			resourceName: opts.resourceName !== undefined ? opts.resourceName : (feature.uses?.max > 0 ? feature.name : null),
+			resourceCost: opts.resourceCost || 1,
+		};
+	}
+
+	/**
+	 * (R20) Flatten a feature's `entries` to a plain-text blob for activation-pattern
+	 * analysis when no rendered `description` is available (e.g. options expanded from
+	 * refSubclassFeature carry only `entries`). Strings are kept; entry objects contribute
+	 * their nested `entries`/`items`. Returns "" when there is nothing usable.
+	 * @param {object} feature
+	 * @returns {string}
+	 */
+	static _featureTextFromEntries (feature) {
+		const out = [];
+		const walk = (node) => {
+			if (node == null) return;
+			if (typeof node === "string") { out.push(node); return; }
+			if (Array.isArray(node)) { node.forEach(walk); return; }
+			if (typeof node === "object") {
+				if (node.name) out.push(node.name);
+				if (node.entries) walk(node.entries);
+				if (node.items) walk(node.items);
+				if (node.entry) walk(node.entry);
+			}
+		};
+		walk(feature?.entries);
+		return out.join(" ");
+	}
 
 	/**
 	 * Detect activatable features from a feature's description
@@ -36036,9 +36185,13 @@ class CharacterSheetState {
 	 * @returns {object|null} Activation info if this feature is activatable
 	 */
 	static detectActivatableFeature (feature) {
-		if (!feature?.description && !feature?.activatable) return null;
+		// (R20) Allow features that carry classification-relevant markers to be processed
+		// even when they only have `entries` (no rendered `description`) — e.g. Invoke Hell
+		// options expanded from refSubclassFeature, or synthesized manifestation children.
+		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation);
+		if (!feature?.description && !feature?.activatable && !hasMarkers) return null;
 
-		const rawText = feature.description || "";
+		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const name = feature.name?.toLowerCase() || "";
 
@@ -36085,6 +36238,15 @@ class CharacterSheetState {
 				return null;
 			}
 
+			// "ability" override (R20 #5): a clickable + hoverable, limited-use instant
+			// ability — NOT a persistent toggle. Surfaces in the generic "Available to
+			// Activate" list with a Use button; its click effect (if any) is wired by
+			// name in charactersheet.js. Links to its own use pool when the feature
+			// carries `uses` (e.g. Baleful Interdict's seal pool).
+			if (classificationOverride === "ability") {
+				return this._buildAbilityActivationInfo(feature, rawText, text);
+			}
+
 			// "combat" and "reaction" overrides: parse description for resource costs and effects,
 			// then return with the correct interactionMode so getActivatableFeatures() can route them.
 			const parsedEffects = this.parseEffectsFromDescription(rawText);
@@ -36118,6 +36280,32 @@ class CharacterSheetState {
 				isToggle: false,
 				isInstant: true,
 			};
+		}
+
+		// ===== GENERIC `consumes` ABILITIES (R20 #17) =====
+		// A feature that declares it consumes a NAMED resource pool (other than Stamina,
+		// which combat methods handle on their own surface) is a clickable + hoverable
+		// limited-use ability that draws on that shared pool. This is the generic,
+		// data-driven hook for Invoke Hell options (`consumes: {name: "Invoke Hell"}`) —
+		// and any future option that uses the same convention — so the wrapper stays
+		// passive while its options carry the uses.
+		if (feature.consumes?.name && feature.consumes.name !== "Stamina") {
+			return this._buildAbilityActivationInfo(feature, rawText, text, {
+				resourceName: feature.consumes.name,
+				resourceCost: feature.consumes.amount || 1,
+			});
+		}
+
+		// ===== RACE-MANIFESTATION CHILD ABILITIES (R20 #5/#6, S2 contract) =====
+		// Synthesized "Divine Manifestation" child options (tagged `_raceManifestation`)
+		// that present an action / track a use pool are clickable + hoverable abilities,
+		// never toggle states. Kept generic so any NEW manifestation option S2 adds is
+		// classified correctly with no extra work; only Guided Strike's +10 effect is
+		// name-keyed (in charactersheet.js).
+		if (feature._raceManifestation && (feature.uses?.max > 0 || /\byou can\b|\bas an?\s+(?:action|bonus action|reaction)\b|\bwhen you\b/i.test(text))) {
+			return this._buildAbilityActivationInfo(feature, rawText, text, {
+				resourceName: feature.uses?.max > 0 ? feature.name : null,
+			});
 		}
 
 		// Exclude non-activatable features that might match patterns
@@ -37466,6 +37654,9 @@ class CharacterSheetState {
 	 */
 	getActivatableFeatures () {
 		const activatables = [];
+		// (R20 #17) Make sure the shared Invoke Hell pool exists before we read resources,
+		// so its options can link to it below.
+		this.ensureInvokeHellPool();
 		const resources = this.getResources();
 
 		for (const feature of this._data.features) {
