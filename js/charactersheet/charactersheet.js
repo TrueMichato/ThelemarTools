@@ -7903,8 +7903,34 @@ class CharacterSheetPage {
 			case "guided strike": return this._pUseGuidedStrike(feature, resource, resourceCost);
 			case "forked tongue": return this._pOpenForkedTongueSwap(feature);
 			case "baleful interdict": return this._pUseBalefulInterdict(feature);
-			default: return false;
 		}
+		// (S2 contract) Generic save-prompt for any synthesized Divine Manifestation option that
+		// carries a save (_manifestationRequiresSave). Surfaces the DC + ability so the player
+		// knows what to enforce, and consumes the shared use. Non-save manifestation children
+		// (e.g. damage bursts) fall through to the generic limited-use pipeline unchanged.
+		if (feature?._manifestationRequiresSave) return this._pUseManifestationSaveOption(feature, resource, resourceCost);
+		return false;
+	}
+
+	/** (S2 contract) Spend a save-requiring Divine Manifestation option and surface its save DC. */
+	_pUseManifestationSaveOption (feature, resource, resourceCost = 1) {
+		if (resource && resource.current < resourceCost) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: `${feature.name} has no uses remaining.`}));
+			return true;
+		}
+
+		if (resource) this._state.setResourceCurrent(resource.id, resource.current - resourceCost);
+		else if (feature?.id) this._state.useFeature?.(feature.id);
+
+		const dc = feature._manifestationSaveDc;
+		const abil = feature._manifestationSaveAbility ? Parser.attAbvToFull(feature._manifestationSaveAbility) : null;
+		const saveStr = (dc != null && abil) ? `Targets make a DC ${dc} ${abil} saving throw.` : "Targets make a saving throw.";
+		JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: `⚜️ ${feature.name}: ${saveStr}`, autoHideTime: 10000}));
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		return true;
 	}
 
 	/** (R20 #1) Spend Healing Hands (PB×d4) and offer to apply the healing to yourself. */
@@ -7983,11 +8009,20 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * (R20, S1 contract) Open the language-swap UI for Forked Tongue. Reuses the rest
-	 * module's builder (read-only) so the standalone opener and the long-rest dialog share
-	 * the exact same control. Does NOT edit the language lists or the rest swap menu.
+	 * (R20, S1 contract) Open the language-swap UI for Forked Tongue. Prefers S1's dedicated
+	 * `CharacterSheetRest.openForkedTongueLanguageSwapModal()` once that branch integrates;
+	 * until then falls back to the rest module's builder (read-only) so the standalone opener
+	 * and the long-rest dialog share the exact same control. Does NOT edit the language lists
+	 * or the rest swap menu.
 	 */
-	_pOpenForkedTongueSwap (feature) {
+	async _pOpenForkedTongueSwap (feature) {
+		// Preferred path (S1): single canonical opener that enforces once-per-long-rest +
+		// TGTT candidate languages and owns its own toasts.
+		if (typeof this._rest?.openForkedTongueLanguageSwapModal === "function") {
+			await this._rest.openForkedTongueLanguageSwapModal();
+			return true;
+		}
+
 		const built = this._rest?._buildForkedTongueLanguageSwapSection?.();
 		if (!built) {
 			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Forked Tongue: choose your swappable spoken languages first, then you can swap one (once per long rest)."}));
