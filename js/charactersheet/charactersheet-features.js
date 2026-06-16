@@ -1619,7 +1619,15 @@ class CharacterSheetFeatures {
 		// "Currently Active" section (turn it off there); don't offer a second invoke here that
 		// would double-spend a seal. Limited abilities stay re-usable.
 		const isActiveBoon = !!abilityEntry?.isActive && CharacterSheetState.isInterdictBoonEntry?.(abilityEntry);
-		const showUseBtn = (hasUses || isAbility) && !isActiveBoon;
+		// (R22 #4/#5/#6) Interdiction-managed features (Baleful Interdict, Charm Enemy, and the
+		// durational boons) and redundant "<X> Improvement" passive riders must NOT carry a
+		// features-area Use button — even though several still own a spurious `uses` pool.
+		// Baleful Interdict is driven from the Combat → Interdiction panel display; Charm Enemy
+		// and the boons are invoked from that same panel (#5/#6); the Improvement riders are
+		// passive and not usable at all. Suppress the button here generically.
+		const allFeaturesForUse = this._state.getFeatures?.() || [];
+		const isHiddenAbilitySurface = CharacterSheetState.isHiddenFromGenericAbilitySurfaces?.(feature, allFeaturesForUse);
+		const showUseBtn = (hasUses || isAbility) && !isActiveBoon && !isHiddenAbilitySurface;
 
 		// Feature name hover link — delegate to the single centralised builder on
 		// the page so every feature type (class/subclass, species, background,
@@ -2044,6 +2052,26 @@ class CharacterSheetFeatures {
 		}
 
 		resources.forEach(resource => {
+			// (R22 #4) The generic Resources panel lists true shared pools (Stamina, Ki,
+			// slots). Per-ability use pools (Healing Hands, Guided Strike, …) belong with
+			// their ability in the Abilities area — where the Use button actually rolls and
+			// applies the effect — not as a bare decrement row here. Interdiction-managed
+			// features (Baleful Interdict, Charm Enemy, boons) live in the Interdiction
+			// panel, and passive "<X> Improvement" riders are not invokable at all. Skip all
+			// of these so each surfaces in exactly one canonical home.
+			const linkedFeature = resource.featureId
+				? (this._state.getFeatures?.() || []).find(f => f.id === resource.featureId)
+				: (this._state.getFeatures?.() || []).find(f => (f.name || "") === (resource.name || ""));
+			if (linkedFeature) {
+				const activationInfo = CharacterSheetState.detectActivatableFeature?.(linkedFeature);
+				const isAbility = CharacterSheetState.isActivatableAbilityEntry?.({
+					feature: linkedFeature,
+					activationInfo,
+					interactionMode: activationInfo?.interactionMode,
+				});
+				if (isAbility || CharacterSheetState.isHiddenFromGenericAbilitySurfaces?.(linkedFeature, this._state.getFeatures?.() || [])) return;
+			}
+
 			const row = e_({outer: `
 				<div class="charsheet__resource-row" data-resource-id="${resource.id}">
 					<span class="charsheet__resource-name">${resource.name}</span>
