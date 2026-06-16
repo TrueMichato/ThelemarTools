@@ -55,6 +55,42 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Whether a class level is the one at which a generic Epic Boon feat is offered in the
+	 * ASI/feat slot. Epic Boons are a 2024 (PHB'24 / TGTT) construct granted at class level
+	 * 19; classes from other sources do NOT get the generic epic-boon slot.
+	 *
+	 * Uses EXACT source matching (via {@link CharacterSheetClassUtils.is2024Source}) so a
+	 * 2024 sub-source such as "TGTT-IllR" — an Illrigger that grants its own Interdict Boons
+	 * through `optionalfeatureProgression`, not epic-boon feats — is excluded and offered a
+	 * normal ASI/Feat instead. This is the single source of truth shared by both the
+	 * level-up and quick-build flows so their L19 behaviour can never drift.
+	 *
+	 * @param {string} source - The class entry source (e.g. "XPHB", "TGTT", "TGTT-IllR").
+	 * @param {number} classLevel - The class level being gained.
+	 * @returns {boolean}
+	 */
+	static isEpicBoonLevel (/** @type {*} */ source, /** @type {*} */ classLevel) {
+		return classLevel === 19 && CharacterSheetClassUtils.is2024Source(source);
+	}
+
+	/**
+	 * Whether a feat-list entry is actually an Illrigger Interdict Boon (`ItdBoon` optional
+	 * feature) that has leaked into the feat pool. Interdict Boons are chosen via the
+	 * Illrigger Interdict-boon `optionalfeatureProgression`, NOT the generic feat / epic-boon
+	 * slot, so the feat and epic-boon pickers defensively exclude any such entry. Today the
+	 * feat pool (`getFeats()`) never contains optional features, but this guard keeps a
+	 * future data merge from surfacing boons as pickable feats.
+	 * @param {*} entry - A candidate feat / optional-feature entry.
+	 * @returns {boolean}
+	 */
+	static isInterdictBoonEntry (/** @type {*} */ entry) {
+		if (!entry) return false;
+		const types = entry.optionalfeatureType || entry.optionalFeatureTypes || entry.featureType;
+		if (Array.isArray(types)) return types.includes("ItdBoon");
+		return types === "ItdBoon";
+	}
+
+	/**
 	 * Apply a POSITIVE "increase up to a maximum" ability bump without ever lowering
 	 * an existing score. A "max <cap>" increase must never become a way to REDUCE a
 	 * score that is already at or above the cap (e.g. a base of 22 from Primal Champion

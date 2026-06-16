@@ -26667,15 +26667,15 @@ class CharacterSheetState {
 		"foul interchange": (c) => `Save DC ${c.foulInterchangeDc}`,
 		"hell mage": (c) => `Place up to ${c.hellMageSeals} seals`,
 		"hell s assassin": () => "Reroll 1s & 2s on damage vs. interdicted",
-		"hellish frenzy": () => null,
-		"hellsight": () => null,
+		"hellish frenzy": (c) => `+${c.frenzyAcBonus} AC, ×2 speed & extra attack while frenzied`,
+		"hellsight": (c) => `Truesight ${c.hellsightSenseRange} ft. (expend a seal)`,
 		"impaling shot": (c) => `Imposes −${c.impalingShotAcPenalty} AC`,
 		"incontrovertible": () => null,
 		"iron gaol": (c) => `${c.ironGaolSealCost} seals · Save DC ${c.ironGaolDc}`,
 		"last word": (c) => `${c.lastWordDicePerSeal} per seal (up to ${c.lastWordMaxSeals})`,
 		"red cant": (c) => `Roll floor ${c.redCantFloor}`,
 		"sanguine gift": (c) => `Heal ${c.sanguineGiftHeal} HP`,
-		"shadow shroud": () => null,
+		"shadow shroud": (c) => `+${c.shadowShroudAcBonus} AC for 1 min (expend a seal)`,
 		"slippery ploy": (c) => `Save DC ${c.slipperyPloyDc}`,
 		"soul eater": (c) => `Temp HP ${c.soulEaterTempHp}`,
 		"soul s doom": (c) => `+${c.soulsDoomDamage} damage`,
@@ -26684,8 +26684,36 @@ class CharacterSheetState {
 		"swift retribution": () => null,
 		"telekinetic seal": (c) => `Save DC ${c.telekineticSealDc}`,
 		"unleash hell": () => null,
-		"veil of lies": () => null,
+		"veil of lies": () => "Invisible 10 min (expend a seal)",
 		"vengeful shot": (c) => `+${c.vengefulShotBonus} damage`,
+	};
+
+	/**
+	 * Player-triggerable discrete activations for the Interdict Boons whose mechanical
+	 * effect lands on the CHARACTER'S OWN sheet (so it can actually be applied from here).
+	 * Keyed by the same normalized boon name as {@link CharacterSheetState.INTERDICT_BOON_FIELDS}.
+	 * Each `apply(state, calcs)` performs the on-sheet mutation and returns a short result
+	 * `{label}` for the toast, or `null` when nothing could be applied.
+	 *
+	 * Boons whose effect targets another creature (e.g. Sanguine Gift) or is a duration /
+	 * narrative state (Veil of Lies, Hellsight, …) are intentionally ABSENT — those are
+	 * surfaced read-only via {@link CharacterSheetState.INTERDICT_BOON_SUMMARIES}; only
+	 * effects that resolve to a number on this sheet are applied.
+	 *
+	 * @type {Object<string, {actionLabel: string, apply: function(CharacterSheetState, object): ({label:string}|null)}>}
+	 */
+	static INTERDICT_BOON_ACTIVATIONS = {
+		"soul eater": {
+			actionLabel: "Gain temp HP",
+			apply: (state, calcs) => {
+				const amt = calcs.soulEaterTempHp || 0;
+				if (amt <= 0) return null;
+				// Temp HP don't stack (PHB) — keep the higher of current vs. granted.
+				const next = Math.max(state.getTempHp() || 0, amt);
+				state.setTempHp(next);
+				return {label: `Soul Eater: gained ${amt} temporary HP (now ${next}).`};
+			},
+		},
 	};
 
 	/**
@@ -26813,6 +26841,34 @@ class CharacterSheetState {
 			granted.push(boon.name);
 		}
 		calculations.molochInterdictionBoonNames = granted;
+	}
+
+	/**
+	 * Whether an Interdict Boon exposes a player-triggerable on-sheet activation
+	 * (see {@link CharacterSheetState.INTERDICT_BOON_ACTIVATIONS}).
+	 * @param {string} boonName
+	 * @returns {boolean}
+	 */
+	hasInterdictBoonActivation (boonName) {
+		return !!CharacterSheetState.INTERDICT_BOON_ACTIVATIONS[
+			CharacterSheetState._normalizeInterdictBoonName(boonName)
+		];
+	}
+
+	/**
+	 * Apply an Interdict Boon's discrete on-sheet activation (e.g. Soul Eater temp HP).
+	 * No-op (returns null) for boons without one.
+	 * @param {string} boonName
+	 * @param {object} [calculations] - Pre-computed `getFeatureCalculations()` (optional).
+	 * @returns {{label:string}|null}
+	 */
+	applyInterdictBoonActivation (boonName, calculations = null) {
+		const def = CharacterSheetState.INTERDICT_BOON_ACTIVATIONS[
+			CharacterSheetState._normalizeInterdictBoonName(boonName)
+		];
+		if (!def) return null;
+		const calcs = calculations || this.getFeatureCalculations?.() || {};
+		return def.apply(this, calcs) || null;
 	}
 	// #endregion
 
