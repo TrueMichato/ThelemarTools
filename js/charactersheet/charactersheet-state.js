@@ -26579,6 +26579,107 @@ class CharacterSheetState {
 	};
 
 	/**
+	 * Per-boon DISPLAY summary for the 34 `ItdBoon` options (R20 #16). Keyed by the same
+	 * normalized boon name as {@link CharacterSheetState.INTERDICT_BOON_FIELDS}, each entry
+	 * turns the boon's already-computed `getFeatureCalculations()` numbers into a short,
+	 * level/PB/DC-resolved label shown on the feature card (e.g. "Temp HP 13", "Save DC 15",
+	 * "+3 damage"). This is the SURFACING layer: the field map computes the numbers but
+	 * nothing rendered them, so a selected boon appeared to "do nothing".
+	 *
+	 * Returns `null` for boons whose effect is either a live toggle (surfaced via
+	 * {@link CharacterSheetState.ACTIVE_STATE_TYPES}) or purely narrative/enemy-side — those
+	 * are fully conveyed by the feature's own description and need no derived number.
+	 *
+	 * @type {Object<string, function(object): (string|null)>}
+	 */
+	static INTERDICT_BOON_SUMMARIES = {
+		"abating seal": (c) => `Damage reduction 1d10 + ${c.abatingSealReductionFlat}`,
+		"acheron s chain": (c) => `Save DC ${c.acheronsChainDc}`,
+		"axiomatic seals": (c) => `+${c.sealDamageBonus} damage per burned seal`,
+		"bedevil": (c) => `Imposes −${c.bedevilSavePenalty} to a save`,
+		"blood for blood": (c) => `+${c.bloodForBloodDamage} damage`,
+		"by the throat": (c) => `Save DC ${c.byTheThroatDc}`,
+		"conflagrant channel": (c) => `Range ${c.conflagrantChannelRange} ft.`,
+		"dark malediction": () => null,
+		"dis s onslaught": () => null,
+		"dispater s supremacy": (c) => `Crits on ${c.interdictedCritRange}–20 vs. interdicted`,
+		"eyes of the gate": (c) => `Save DC ${c.eyesOfTheGateDc}`,
+		"flash of brimstone": (c) => `Range ${c.flashOfBrimstoneRange} ft.`,
+		"foul interchange": (c) => `Save DC ${c.foulInterchangeDc}`,
+		"hell mage": (c) => `Place up to ${c.hellMageSeals} seals`,
+		"hell s assassin": () => "Reroll 1s & 2s on damage vs. interdicted",
+		"hellish frenzy": () => null,
+		"hellsight": () => null,
+		"impaling shot": (c) => `Imposes −${c.impalingShotAcPenalty} AC`,
+		"incontrovertible": () => null,
+		"iron gaol": (c) => `${c.ironGaolSealCost} seals · Save DC ${c.ironGaolDc}`,
+		"last word": (c) => `${c.lastWordDicePerSeal} per seal (up to ${c.lastWordMaxSeals})`,
+		"red cant": (c) => `Roll floor ${c.redCantFloor}`,
+		"sanguine gift": (c) => `Heal ${c.sanguineGiftHeal} HP`,
+		"shadow shroud": () => null,
+		"slippery ploy": (c) => `Save DC ${c.slipperyPloyDc}`,
+		"soul eater": (c) => `Temp HP ${c.soulEaterTempHp}`,
+		"soul s doom": (c) => `+${c.soulsDoomDamage} damage`,
+		"spellbreaker": () => null,
+		"styx s apathy": () => null,
+		"swift retribution": () => null,
+		"telekinetic seal": (c) => `Save DC ${c.telekineticSealDc}`,
+		"unleash hell": () => null,
+		"veil of lies": () => null,
+		"vengeful shot": (c) => `+${c.vengefulShotBonus} damage`,
+	};
+
+	/**
+	 * Calc-only Illrigger SPECIALTY display summaries (R20 #15). These specialties are stored
+	 * as features whose passive component the registry/parser cannot fully express; their
+	 * level-scaled value is computed in {@link _applyIllriggerSpecialtyCalculations} but was
+	 * never rendered. Keyed by exact (lower-cased) specialty feature name.
+	 *
+	 * @type {Object<string, function(object): (string|null)>}
+	 */
+	static ILLRIGGER_SPECIALTY_SUMMARIES = {
+		"hellish avenger": (c) => c.hellishAvengerDamage ? `+${c.hellishAvengerDamage} fire (1/turn)` : null,
+		"infernal awareness": (c) => c.infernalAwarenessRange ? `Blindsight ${c.infernalAwarenessRange} ft.` : null,
+		"infernal supremacy": (c) => c.hasInfernalSupremacy ? "+1 Interdict save DC" : null,
+		"do without": (c, self) => {
+			const days = Math.max(0, self?.getAbilityMod?.("cha") ?? 0);
+			return `Endure ${days} day${days === 1 ? "" : "s"} without food/water`;
+		},
+	};
+
+	/**
+	 * Build a short, computed effect label for a stored feature so the Features panel can
+	 * surface level/PB/DC-resolved numbers that the static description can't show (R20
+	 * #15/#16). Covers selected Interdict Boons (`ItdBoon`) and calc-only Illrigger
+	 * specialties. Returns "" when the feature has no derivable on-sheet number.
+	 *
+	 * @param {object} feature - A stored feature (from `_data.features`).
+	 * @param {object} [calculations] - Pre-computed `getFeatureCalculations()` (optional; computed if omitted).
+	 * @returns {string} A concise effect label, or "" if none.
+	 */
+	getFeatureEffectSummary (feature, calculations = null) {
+		if (!feature?.name) return "";
+		const calcs = calculations || this.getFeatureCalculations?.() || {};
+
+		// Interdict Boons (identified by optionalFeatureTypes/featureType, like getInterdictBoons).
+		const types = feature.optionalFeatureTypes || feature.featureType;
+		const isBoon = Array.isArray(types) ? types.includes("ItdBoon") : types === "ItdBoon";
+		if (isBoon) {
+			const fn = CharacterSheetState.INTERDICT_BOON_SUMMARIES[
+				CharacterSheetState._normalizeInterdictBoonName(feature.name)
+			];
+			const label = fn ? fn(calcs) : null;
+			return label || "";
+		}
+
+		// Calc-only Illrigger specialties.
+		const specFn = CharacterSheetState.ILLRIGGER_SPECIALTY_SUMMARIES[(feature.name || "").trim().toLowerCase()];
+		if (specFn) return specFn(calcs, this) || "";
+
+		return "";
+	}
+
+	/**
 	 * Apply per-boon mechanical effects for every selected `ItdBoon` optional feature to the
 	 * in-progress `getFeatureCalculations()` result. Called once from the Illrigger case.
 	 * @param {object} calculations - The calculations object being built (mutated in place).
