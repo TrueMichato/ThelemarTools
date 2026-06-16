@@ -7611,6 +7611,20 @@ class CharacterSheetPage {
 			}
 			// Species/Race features
 			if (feature.featureType === "Species" || feature.featureType === "Race" || feature.featureType === "Subrace") {
+				// (R20) Synthesized "Divine Manifestation" child options (`_raceManifestation`,
+				// e.g. Guided Strike) are not present in the race's own entry list, so the
+				// generic race-page hover below would show the wrong text. They carry their own
+				// `entries`/`description`; build a local inline hover from that so they stay
+				// hoverable with their OWN rules text. Generic for any future S2 option.
+				if (feature._raceManifestation) {
+					const entries = Array.isArray(feature.entries) && feature.entries.length
+						? feature.entries
+						: (feature.description ? [feature.description] : null);
+					if (entries) {
+						const localLink = CharacterSheetClassUtils.buildInlineEntriesHoverLink(feature.name, feature.name, entries);
+						if (localLink) return localLink;
+					}
+				}
 				const race = this._state.getRace();
 				if (race) {
 					const hash = UrlUtil.encodeForHash([race.name, race.source || Parser.SRC_XPHB].join(HASH_LIST_SEP));
@@ -7871,9 +7885,160 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * (R20) Dispatch name-keyed homebrew ability activations. Returns true when the click
+	 * was fully handled here (so the generic activation pipeline is skipped).
+	 *  - Healing Hands (#1): roll PB×d4 healing + offer "Apply to Self".
+	 *  - Guided Strike (#6): add +10 to the most recent attack roll.
+	 *  - Forked Tongue (S1 contract): open the long-rest language-swap UI.
+	 *  - Baleful Interdict (S4 contract): point the user to the Combat tab (seals live there).
+	 * @param {object} feature
+	 * @param {object|null} resource - the linked resource (if any), already resolved by the caller
+	 * @param {number} [resourceCost]
+	 * @returns {Promise<boolean>} true if handled
+	 */
+	async _pHandleR20FeatureActivation (feature, resource, resourceCost = 1) {
+		const name = (feature?.name || "").toLowerCase();
+		switch (name) {
+			case "healing hands": return this._pUseHealingHands(feature, resource, resourceCost);
+			case "guided strike": return this._pUseGuidedStrike(feature, resource, resourceCost);
+			case "forked tongue": return this._pOpenForkedTongueSwap(feature);
+			case "baleful interdict": return this._pUseBalefulInterdict(feature);
+			default: return false;
+		}
+	}
+
+	/** (R20 #1) Spend Healing Hands (PB×d4) and offer to apply the healing to yourself. */
+	_pUseHealingHands (feature, resource, resourceCost = 1) {
+		// Block if the single use is already spent.
+		if (resource && resource.current < resourceCost) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Healing Hands has no uses remaining (recharges on a long rest)."}));
+			return true;
+		}
+
+		const heal = this._state.calculateHealingHandsHealing();
+
+		// Consume the use up-front (using the feature is the action; applying HP is optional).
+		if (resource) this._state.setResourceCurrent(resource.id, resource.current - resourceCost);
+		else if (feature?.id) this._state.useFeature?.(feature.id);
+
+		this._rollHistory?.addRoll({title: "Healing Hands", total: heal.total, breakdown: `${heal.dice}: [${heal.rolls.join(", ")}]`});
+
+		const toastEl = e_({tag: "span", html: `<span>👐 <strong>Healing Hands</strong>: rolled <strong>${heal.total}</strong> HP (${heal.dice}: ${heal.rolls.join(", ")}). Touch a creature to heal it, or:</span> <button class="ve-btn ve-btn-xs ve-btn-primary btn-apply-to-self ml-2">Apply to Self</button>`});
+		const applyBtn = toastEl.querySelector(".btn-apply-to-self");
+		if (applyBtn) {
+			applyBtn.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				if (applyBtn.disabled) return;
+				applyBtn.disabled = true;
+				const hp = this._state.getHp();
+				const newHp = Math.min(hp.max, hp.current + heal.total);
+				const healed = newHp - hp.current;
+				this._state.setHp(newHp, hp.max);
+				applyBtn.textContent = "✓ Applied to Self";
+				this._saveCurrentCharacter();
+				this._renderHp?.();
+				this._renderActiveStates?.();
+				JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `👐 Healed ${healed} HP`}));
+			});
+		}
+		JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: toastEl, autoHideTime: 12000}));
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		return true;
+	}
+
+	/** (R20 #6) Apply Guided Strike's +10 to the most recent attack roll (1/short rest). */
+	_pUseGuidedStrike (feature, resource, resourceCost = 1) {
+		if (resource && resource.current < resourceCost) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Guided Strike has no uses remaining (recharges on a short rest)."}));
+			return true;
+		}
+
+		const rolls = this._rollHistory?.getRolls?.() || [];
+		const lastAttack = rolls.find(r => r.rollType === "ATTACK" || r.rollType === "SPELL_ATTACK");
+		if (!lastAttack) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Make an attack roll first, then activate Guided Strike to add +10 to it."}));
+			return true; // handled — do NOT consume the use
+		}
+
+		const app = CharacterSheetState.buildGuidedStrikeApplication(Number(lastAttack.total));
+
+		if (resource) this._state.setResourceCurrent(resource.id, resource.current - resourceCost);
+		else if (feature?.id) this._state.useFeature?.(feature.id);
+
+		this._rollHistory?.addRoll({
+			title: `Guided Strike (+${app.bonus}): ${lastAttack.title}`,
+			total: app.newTotal,
+			breakdown: `${app.previousTotal} + ${app.bonus}`,
+			resultNote: "Channel Divinity",
+		});
+		JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `⚔️ Guided Strike: +${app.bonus} → attack total ${app.newTotal}.`}));
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		return true;
+	}
+
+	/**
+	 * (R20, S1 contract) Open the language-swap UI for Forked Tongue. Reuses the rest
+	 * module's builder (read-only) so the standalone opener and the long-rest dialog share
+	 * the exact same control. Does NOT edit the language lists or the rest swap menu.
+	 */
+	_pOpenForkedTongueSwap (feature) {
+		const built = this._rest?._buildForkedTongueLanguageSwapSection?.();
+		if (!built) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Forked Tongue: choose your swappable spoken languages first, then you can swap one (once per long rest)."}));
+			return true;
+		}
+
+		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+			title: "👅 Forked Tongue — Swap a Language",
+			isMinHeight0: true,
+		});
+		// Force the swap control visible/enabled in the standalone modal.
+		const enableCb = built.section.querySelector("input[type=checkbox]");
+		if (enableCb) { enableCb.checked = true; enableCb.closest("label")?.classList.add("ve-hidden"); }
+		modalInner.appendChild(built.section);
+
+		const btnRow = e_({outer: `<div class="ve-flex-h-right mt-3"></div>`});
+		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary ve-btn-sm", text: "Swap Language"});
+		btnConfirm.addEventListener("click", () => {
+			const label = built.apply();
+			if (label) {
+				this._saveCurrentCharacter();
+				this._renderCharacter();
+				JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `👅 Forked Tongue: swapped ${label}`}));
+			}
+			doClose();
+		});
+		btnRow.appendChild(btnConfirm);
+		modalInner.appendChild(btnRow);
+		return true;
+	}
+
+	/**
+	 * (R20, S4 contract) Baleful Interdict is hoverable/clickable here, but its seal
+	 * placement/burning lives on the Combat tab (owned by S4). The Use button just routes
+	 * the player there — it never spends a seal from this surface.
+	 */
+	_pUseBalefulInterdict (feature) {
+		JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Baleful Interdict seals are placed and burned from the Combat tab."}));
+		return true;
+	}
+
+	/**
 	 * Activate a feature's state, deducting resource cost if applicable
 	 */
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+		// ===== R20: name-keyed homebrew ability "Use" behaviors =====
+		// Intercept the Illrigger/Hochling abilities that need bespoke effects BEFORE the
+		// generic resource/toggle pipeline. Each handler owns its own resource consumption
+		// and UI, then returns true to short-circuit. Generic features fall through unchanged.
+		if (await this._pHandleR20FeatureActivation(feature, resource, resourceCost)) return;
+
 		// Use passed cost, or fall back to state type default
 		const cost = resourceCost || stateType?.resourceCost || 1;
 
