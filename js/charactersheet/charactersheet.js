@@ -8009,11 +8009,20 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * (R20, S1 contract) Open the language-swap UI for Forked Tongue. Reuses the rest
-	 * module's builder (read-only) so the standalone opener and the long-rest dialog share
-	 * the exact same control. Does NOT edit the language lists or the rest swap menu.
+	 * (R20, S1 contract) Open the language-swap UI for Forked Tongue. Prefers S1's dedicated
+	 * `CharacterSheetRest.openForkedTongueLanguageSwapModal()` once that branch integrates;
+	 * until then falls back to the rest module's builder (read-only) so the standalone opener
+	 * and the long-rest dialog share the exact same control. Does NOT edit the language lists
+	 * or the rest swap menu.
 	 */
-	_pOpenForkedTongueSwap (feature) {
+	async _pOpenForkedTongueSwap (feature) {
+		// Preferred path (S1): single canonical opener that enforces once-per-long-rest +
+		// TGTT candidate languages and owns its own toasts.
+		if (typeof this._rest?.openForkedTongueLanguageSwapModal === "function") {
+			await this._rest.openForkedTongueLanguageSwapModal();
+			return true;
+		}
+
 		const built = this._rest?._buildForkedTongueLanguageSwapSection?.();
 		if (!built) {
 			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Forked Tongue: choose your swappable spoken languages first, then you can swap one (once per long rest)."}));
