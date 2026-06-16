@@ -10772,6 +10772,66 @@ class CharacterSheetPage {
 			resultClass,
 			resultNote,
 		);
+
+		// Blood Price (Hellspeaker L10): after a save is rolled, offer to spend a Hit Die and
+		// add the rolled value to the result. Reactive and player-driven — prompted here rather
+		// than auto-applied. Only offered when the feature is present and a Hit Die remains.
+		await this._pMaybeApplyBloodPrice({
+			ability,
+			mode: rollResult.mode,
+			stateEffectStr,
+			baseTotal: totalWithDice,
+			breakdown: this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr + diceBonusStr,
+			resultNote,
+		});
+	}
+
+	/**
+	 * Prompt for and apply Blood Price (Hellspeaker L10) after a saving throw. Spends one Hit
+	 * Die (no healing) and re-displays the save with the rolled value added. No-op when the
+	 * character lacks the feature or has no Hit Dice left.
+	 * @private
+	 */
+	async _pMaybeApplyBloodPrice ({ability, mode, stateEffectStr, baseTotal, breakdown, resultNote}) {
+		if (!this._state.hasBloodPrice?.()) return;
+		const hd = this._state.getHitDiceSummary?.();
+		if (!hd || (hd.current || 0) <= 0) return;
+
+		const confirmed = await InputUiUtil.pGetUserBoolean({
+			title: "Blood Price",
+			htmlDescription: `You rolled a total of <strong>${baseTotal}</strong>. Spend a Hit Die to add its roll to this save? (${hd.current} Hit Di${hd.current === 1 ? "e" : "ce"} left)`,
+			textYes: "Spend Hit Die",
+			textNo: "No",
+		});
+		if (!confirmed) return;
+
+		const die = this._state.getLargestSpendableHitDieType?.() || null;
+		let rolledTotal = null;
+		try {
+			const r = die ? Renderer.dice.parseRandomise2(`1${die}`) : null;
+			rolledTotal = typeof r === "number" ? r : null;
+		} catch (e) { rolledTotal = null; }
+
+		const res = this._state.applyBloodPrice?.(die, rolledTotal != null ? {roll: rolledTotal} : {});
+		if (!res) {
+			JqueryUtil.doToast({type: "warning", content: "No Hit Dice left to spend on Blood Price."});
+			return;
+		}
+
+		const newTotal = baseTotal + res.roll;
+		const bloodNote = `🩸 Blood Price: spent 1${res.dieType} (rolled ${res.roll}) → save total ${newTotal} (${res.remaining} Hit Di${res.remaining === 1 ? "e" : "ce"} left)`;
+		const mergedNote = resultNote ? `${resultNote}\n${bloodNote}` : bloodNote;
+
+		this._showDiceResult(
+			`${Parser.attAbvToFull(ability)} Save${this._getModeLabel(mode)}${stateEffectStr}`,
+			newTotal,
+			`${breakdown} + ${res.roll} (Blood Price 1${res.dieType})`,
+			"",
+			mergedNote,
+		);
+		JqueryUtil.doToast({type: "info", content: bloodNote});
+		this._renderCharacter?.();
+		await this._saveCurrentCharacter?.();
 	}
 
 	async _rollSkillCheck (skillKey, skillName, event, overrideAbility = null) {
