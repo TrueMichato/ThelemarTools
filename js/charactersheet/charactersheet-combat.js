@@ -2289,6 +2289,19 @@ class CharacterSheetCombat {
 		// so the per-weapon ✨ button can be gated without re-scanning per attack.
 		this._channelCantripsCache = this._page._spells?.getKnownWeaponChannelCantrips?.() || [];
 
+		// Attacks-per-action banner (Extra Attack and scaling variants). Surfaces how many
+		// attacks the character can make with the Attack action, near the weapon list.
+		const attackCount = this._state.getFeatureCalculations?.()?.attackCount || 1;
+		if (attackCount > 1) {
+			const banner = e_({outer: `
+				<div class="charsheet__attacks-per-action ve-flex ve-flex-v-center gap-1 mb-2" title="Number of attacks you can make when you take the Attack action (Extra Attack)">
+					<span>⚔️</span>
+					<span class="bold">${attackCount} attacks</span>
+					<span class="ve-muted ve-small">per Attack action</span>
+				</div>`});
+			container.append(banner);
+		}
+
 		attacks.forEach(attack => {
 			const item = this._renderAttackItem(attack, reachCtx);
 			container.append(item);
@@ -3088,7 +3101,7 @@ class CharacterSheetCombat {
 	 */
 	renderCombatMasteries () {
 		const section = document.getElementById("charsheet-combat-masteries-section");
-		const container = document.getElementById("charsheet-combat-masteries");
+		const container = document.getElementById("charsheet-combat-masteries-panel");
 		if (!container) return;
 
 		const calcs = this._state.getFeatureCalculations?.() || {};
@@ -3104,10 +3117,29 @@ class CharacterSheetCombat {
 
 		// Lies — weapon-type choice (CHA for attack/damage)
 		if (calcs.hasLiesMastery) {
-			const weapons = (this._state.getAttacks?.() || [])
+			// Offer ALL the character's melee weapons: configured non-spell attacks PLUS
+			// equipped melee weapons (which may not yet be configured attacks). Ranged-only
+			// weapons are excluded since Lies applies to melee weapons. Deduped by name.
+			const fromAttacks = (this._state.getAttacks?.() || [])
 				.filter(a => !a.isSpell && !a.isSpellAttack)
-				.map(a => a.name)
-				.filter((v, i, arr) => v && arr.indexOf(v) === i);
+				.map(a => a.name);
+			const fromEquipped = (this._state.getItems?.() || [])
+				.filter(i => i.weapon && i.equipped)
+				.filter(i => {
+					const props = i.property || i.properties || [];
+					const isRangedOnly = props.some(p => p === "A" || (typeof p === "string" && p.startsWith("A|")))
+						&& !props.some(p => p === "T" || (typeof p === "string" && p.startsWith("T|")));
+					return !isRangedOnly;
+				})
+				.map(i => i.name);
+			const seen = new Set();
+			const weapons = [...fromAttacks, ...fromEquipped].filter(w => {
+				if (!w) return false;
+				const key = w.toLowerCase();
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			});
 			const chosen = this._state.getLiesWeaponType?.() || "";
 			const opts = [`<option value="">— none —</option>`]
 				.concat(weapons.map(w => `<option value="${(w || "").replace(/"/g, "&quot;")}"${w.toLowerCase() === chosen.toLowerCase() ? " selected" : ""}>${w}</option>`))
