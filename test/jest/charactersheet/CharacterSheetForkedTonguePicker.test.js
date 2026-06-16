@@ -10,7 +10,7 @@
  *    (class-name + level-crossing based, because the base feature lives in external
  *    homebrew and its prose won't match the generic language-grant regex).
  *  - Builder L1 functional: chosen languages flow through _applyClassFeatures into the
- *    state (swappable + mirrored into _data.languages), reject Infernal/dupes, and are
+ *    state (swappable + mirrored into _data.languages), reject Mictlanian/dupes, and are
  *    cleared when switching class.
  *  - Source-level guards that the builder + level-up wiring (render, validation, apply)
  *    is present.
@@ -95,24 +95,24 @@ describe("Builder L1 Forked Tongue language application", () => {
 		expect(builder._state.getForkedTongueSwappableLanguages()).toEqual(["Elvish", "Draconic"]);
 	});
 
-	it("mirrors the chosen languages (plus Infernal) into _data.languages for Linguistics", () => {
+	it("mirrors the chosen languages (plus Mictlanian) into _data.languages for Linguistics", () => {
 		const builder = makeBuilder(["Elvish", "Draconic"]);
 		builder._state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
-		builder._state.applyClassFeatureEffects(); // grants Infernal
+		builder._state.applyClassFeatureEffects(); // grants Mictlanian
 		builder._applyClassFeatures();
 
 		const langs = builder._state.getLanguages().map(l => l.toLowerCase());
-		expect(langs).toContain("infernal");
+		expect(langs).toContain("mictlanian");
 		expect(langs).toContain("elvish");
 		expect(langs).toContain("draconic");
 	});
 
 	it("does not exceed the max or duplicate when an invalid pick sneaks through", () => {
-		const builder = makeBuilder(["Infernal", "Elvish", "Elvish"]);
+		const builder = makeBuilder(["Mictlanian", "Elvish", "Elvish"]);
 		builder._state.addClass({name: "Illrigger", source: "IllriggerRevised", level: 1});
 		builder._applyClassFeatures();
 
-		// Infernal + the duplicate are rejected by the state API; only Elvish lands.
+		// Mictlanian + the duplicate are rejected by the state API; only Elvish lands.
 		expect(builder._state.getForkedTongueSwappableLanguages()).toEqual(["Elvish"]);
 	});
 
@@ -155,10 +155,10 @@ describe("Builder source wiring for Forked Tongue picker", () => {
 		expect(BUILDER_SRC).toMatch(/_renderForkedTongueLanguageSelection\s*\(/);
 	});
 
-	it("defines the dedicated render method that excludes Infernal", () => {
+	it("defines the dedicated render method that excludes Mictlanian", () => {
 		const m = BUILDER_SRC.match(/_renderForkedTongueLanguageSelection \(cls, count\) \{[\s\S]*?\n\t\}\n/);
 		expect(m).not.toBeNull();
-		expect(m[0]).toMatch(/knownLangs\.add\("infernal"\)/);
+		expect(m[0]).toMatch(/knownLangs\.add\("mictlanian"\)/);
 		expect(m[0]).toMatch(/this\._selectedForkedTongueLanguages\[i\]/);
 	});
 
