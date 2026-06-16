@@ -5102,53 +5102,276 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * Synthesised feature objects for the two working Hochling "Divine Manifestation"
-	 * options. Kept here (deterministic, no data-lookup) so the grant is testable and
-	 * has no `_page` dependency. Each carries a `_raceManifestation` tag and a `level`
-	 * unlock gate; `addFeature` dedups by name+source and honours the explicit `uses`.
+	 * Curated definition of every Hochling "Divine Manifestation" option. Each option is
+	 * either the special Aasimar transformation or one or more Cleric Channel-Divinity
+	 * features from an approved domain. Only identifiers + a concise fallback description
+	 * are stored here — the real rules `entries` are resolved at apply time from the loaded
+	 * Cleric subclass-feature catalog (so this stays data-driven, not 16 hand-authored
+	 * features). `requiresSave` marks options whose DC equals 8 + your proficiency bonus +
+	 * your chosen Wisdom/Intelligence/Charisma modifier (the Divine Spark ability).
+	 *
+	 * The order of this object is also the order the builder picker presents the options.
+	 * @returns {Object<string, {label:string, desc:string, aasimar?:boolean, description?:string, cd?:{cdName:string, sub:string, level:number, requiresSave?:boolean, description:string}[]}>}
+	 */
+	static getRaceManifestationOptionDefs () {
+		return {
+			trickery: {
+				label: "Trickery Domain \u2014 Channel Divinity",
+				desc: "Invoke Duplicity (illusory duplicate), and Cloak of Shadows (invisibility) at character level 6.",
+				cd: [
+					{cdName: "Channel Divinity: Invoke Duplicity", sub: "Trickery", level: 1, description: "As an action, create a perfect illusory duplicate of yourself in an unoccupied space within 30 feet for 1 minute (concentration). On your turn you can move it (bonus action), and you have advantage on attack rolls against any creature within 5 feet of both you and the illusion."},
+					{cdName: "Channel Divinity: Cloak of Shadows", sub: "Trickery", level: 6, description: "As an action, become invisible until the end of your next turn or until you attack, make a damage roll, or cast a spell."},
+				],
+			},
+			light: {
+				label: "Light Domain \u2014 Channel Divinity",
+				desc: "Radiance of the Dawn: dispel magical darkness and deal radiant damage (Constitution save).",
+				cd: [
+					{cdName: "Channel Divinity: Radiance of the Dawn", sub: "Light", level: 1, requiresSave: true, description: "As an action, dispel magical darkness within 30 feet and deal radiant damage to hostile creatures there: 2d10 + your character level, halved on a successful Constitution saving throw."},
+				],
+			},
+			grave: {
+				label: "Grave Domain \u2014 Channel Divinity",
+				desc: "Path to the Grave: curse a creature so the next hit against it has vulnerability.",
+				cd: [
+					{cdName: "Channel Divinity: Path to the Grave", sub: "Grave", level: 1, description: "As an action, curse a creature you can see within 30 feet until the end of your next turn. The next time you or an ally hits it with an attack, it has vulnerability to all of that attack's damage, then the curse ends."},
+				],
+			},
+			war: {
+				label: "War Domain \u2014 Channel Divinity",
+				desc: "Guided Strike (+10 to one attack roll), and War God's Blessing at character level 6.",
+				cd: [
+					{cdName: "Channel Divinity: Guided Strike", sub: "War", level: 1, description: "You can use your Channel Divinity to strike with supernatural accuracy. When you make an attack roll, you can use your Channel Divinity to gain a +10 bonus to the roll. You make this choice after you see the roll, but before the DM says whether the attack hits or misses."},
+					{cdName: "Channel Divinity: War God's Blessing", sub: "War", level: 6, description: "When a creature within 30 feet of you makes an attack roll, you can use your reaction to grant a +10 bonus to the roll, using your Channel Divinity. You make this choice after you see the roll, but before the DM says whether the attack hits or misses."},
+				],
+			},
+			peace: {
+				label: "Peace Domain \u2014 Channel Divinity",
+				desc: "Balm of Peace: move without provoking opportunity attacks and heal creatures you pass.",
+				cd: [
+					{cdName: "Channel Divinity: Balm of Peace", sub: "Peace", level: 1, description: "As an action, move up to your Speed without provoking opportunity attacks. When you come within 5 feet of another creature during this move, you can restore 2d6 + your Wisdom modifier hit points to it (minimum 1); a creature can benefit only once per use."},
+				],
+			},
+			order: {
+				label: "Order Domain \u2014 Channel Divinity",
+				desc: "Order's Demand: charm creatures around you (Wisdom save).",
+				cd: [
+					{cdName: "Channel Divinity: Order's Demand", sub: "Order", level: 1, requiresSave: true, description: "As an action, each creature of your choice that you can see within 30 feet must succeed on a Wisdom saving throw or be charmed by you until the end of your next turn or until it takes damage. You can also make each charmed creature drop what it's holding."},
+				],
+			},
+			knowledge: {
+				label: "Knowledge Domain \u2014 Channel Divinity",
+				desc: "Knowledge of the Ages (gain a proficiency), and Read Thoughts (Wisdom save) at character level 6.",
+				cd: [
+					{cdName: "Channel Divinity: Knowledge of the Ages", sub: "Knowledge", level: 1, description: "As an action, gain proficiency with one skill or tool of your choice for 10 minutes."},
+					{cdName: "Channel Divinity: Read Thoughts", sub: "Knowledge", level: 6, requiresSave: true, description: "As an action, choose one creature within 60 feet. It must succeed on a Wisdom saving throw or you can read its surface thoughts and gain advantage on Wisdom (Insight) and Charisma checks against it for 1 minute."},
+				],
+			},
+			nature: {
+				label: "Nature Domain \u2014 Channel Divinity",
+				desc: "Charm Animals and Plants: charm nearby beasts and plant creatures (Wisdom save).",
+				cd: [
+					{cdName: "Channel Divinity: Charm Animals and Plants", sub: "Nature", level: 1, requiresSave: true, description: "As an action, each beast or plant creature of your choice that you can see within 30 feet must succeed on a Wisdom saving throw or be charmed by you for 1 minute or until it takes damage."},
+				],
+			},
+			forge: {
+				label: "Forge Domain \u2014 Channel Divinity",
+				desc: "Artisan's Blessing: craft a nonmagical item through an hour-long ritual.",
+				cd: [
+					{cdName: "Channel Divinity: Artisan's Blessing", sub: "Forge", level: 1, description: "Through a 1-hour ritual you can create one nonmagical item \u2014 a simple or martial weapon, a suit of armor, ten pieces of ammunition, or a similar object \u2014 worth no more than 100 gp, requiring an amount of metal in raw materials."},
+				],
+			},
+			death: {
+				label: "Death Domain \u2014 Channel Divinity",
+				desc: "Touch of Death: deal extra necrotic damage when you hit with a melee attack.",
+				cd: [
+					{cdName: "Channel Divinity: Touch of Death", sub: "Death", level: 1, description: "When you hit a creature with a melee attack, you can use your Channel Divinity to deal extra necrotic damage to the target equal to 5 + twice your character level."},
+				],
+			},
+			beauty: {
+				label: "Beauty Domain \u2014 Channel Divinity",
+				desc: "All Eyes on Me: force creatures to fixate on you (Wisdom save).",
+				cd: [
+					{cdName: "Channel Divinity: All Eyes on Me", sub: "Beauty", level: 1, requiresSave: true, description: "As an action, present your holy symbol and force up to five creatures of your choice that can see you within 30 feet to make a Wisdom saving throw. On a failure, their attention fixes on you, giving them disadvantage on attack rolls, ability checks, and saving throws against creatures other than you."},
+				],
+			},
+			blood: {
+				label: "Blood Domain \u2014 Channel Divinity",
+				desc: "Blood Curse: congeal a wounded creature's blood, restraining it (Constitution save).",
+				cd: [
+					{cdName: "Channel Divinity: Blood Curse", sub: "Blood", level: 1, requiresSave: true, description: "As an action, curse a creature within 60 feet that has blood and that you have damaged. It must succeed on a Constitution saving throw or be restrained for 1 minute as its blood congeals, repeating the save at the end of each of its turns to end the effect."},
+				],
+			},
+			time: {
+				label: "Time Domain \u2014 Channel Divinity",
+				desc: "Temporal Manipulation: speed up or slow time to grant advantage or disadvantage.",
+				cd: [
+					{cdName: "Channel Divinity: Temporal Manipulation", sub: "Time", level: 1, description: "When a creature you can see within 60 feet uses its action in a way that requires a d20 roll, you can use your reaction to grant it advantage (by speeding up time) or impose disadvantage (by slowing time) on that action."},
+				],
+			},
+			madness: {
+				label: "Madness Domain \u2014 Channel Divinity",
+				desc: "Touch of Madness (incapacitate, Wisdom save), and Paranoia at character level 6.",
+				cd: [
+					{cdName: "Channel Divinity: Touch of Madness", sub: "Madness", level: 1, requiresSave: true, description: "As an action, force a creature within 30 feet to make a Wisdom saving throw. On a failure, divine madness infects its mind and it is incapacitated for up to 1 minute, babbling incoherently and repeating the save at the end of each of its turns to end the effect."},
+					{cdName: "Channel Divinity: Paranoia", sub: "Madness", level: 6, requiresSave: true, description: "As an action, present your holy symbol toward a creature within 30 feet. It must succeed on a Wisdom saving throw or become frightened of the nearest visible creature within 30 feet for 1 minute."},
+				],
+			},
+			lust: {
+				label: "Lust Domain \u2014 Channel Divinity",
+				desc: "Impulsive Infatuation: charm a creature into rash action in your defense (Wisdom save).",
+				cd: [
+					{cdName: "Channel Divinity: Impulsive Infatuation", sub: "Lust", level: 1, requiresSave: true, description: "As an action, present your holy symbol and force one creature you can see within 30 feet to make a Wisdom saving throw. On a failure, it is charmed by you until the start of your next turn and must immediately use its reaction to move toward and defend you."},
+				],
+			},
+			darkness: {
+				label: "Darkness Domain \u2014 Channel Divinity",
+				desc: "Cloying Darkness (extinguish light, Constitution save), and Night Terrors at character level 6.",
+				cd: [
+					{cdName: "Channel Divinity: Cloying Darkness", sub: "Darkness", level: 1, requiresSave: true, description: "As an action, conjure a sphere of darkness: light sources within 30 feet are extinguished and lower-level magical lights dispelled, and creatures of your choice within 30 feet must make a Constitution saving throw or be affected by the smothering dark."},
+					{cdName: "Channel Divinity: Night Terrors", sub: "Darkness", level: 6, requiresSave: true, description: "As an action, conjure a 10-foot-radius cloud of darkness centered on a creature within 30 feet. The target must make a Wisdom saving throw, taking 8d4 psychic damage and becoming frightened on a failure."},
+				],
+			},
+			aasimar: {
+				label: "Celestial Revelation (Aasimar Transformation)",
+				desc: "Gain the Aasimar Celestial Revelation transformation (available at character level 3).",
+				aasimar: true,
+				description: "When you reach character level 3, you can transform as a Bonus Action using one of the "
+					+ "options below (choose the option each time you transform). The transformation lasts for 1 minute or "
+					+ "until you end it (no action required). Once you transform, you can't do so again until you finish a "
+					+ "Long Rest. Here are the transformation options: Heavenly Wings. Two spectral wings sprout from your "
+					+ "back temporarily. Until the transformation ends, you have a Fly Speed equal to your Speed.",
+			},
+		};
+	}
+
+	/**
+	 * Resolve the chosen Wisdom/Intelligence/Charisma ability that powers a Hochling's
+	 * Divine Manifestation saving-throw DC. Reuses the Divine Spark cantrip's chosen
+	 * casting ability (the first cantrip carrying an explicit per-spell ability), falling
+	 * back to any innate spell's override, then the global spellcasting ability, then WIS.
+	 * @param {*} state
+	 * @returns {string} An ability abbreviation (e.g. "wis").
+	 */
+	static getRaceManifestationAbility (/** @type {*} */ state) {
+		const abv = ["wis", "int", "cha"];
+		const isWisIntCha = (/** @type {*} */ a) => typeof a === "string" && abv.includes(a.toLowerCase());
+
+		const cantrip = (state?.getCantrips?.() || []).find((/** @type {*} */ c) => isWisIntCha(c.spellcastingAbility));
+		if (cantrip) return cantrip.spellcastingAbility.toLowerCase();
+
+		const innate = (state?.getInnateSpells?.() || []).find((/** @type {*} */ s) => isWisIntCha(s.spellcastingAbility));
+		if (innate) return innate.spellcastingAbility.toLowerCase();
+
+		const global = state?.getSpellcastingAbility?.();
+		if (isWisIntCha(global)) return global.toLowerCase();
+		return "wis";
+	}
+
+	/**
+	 * Compute a Hochling's Divine Manifestation saving-throw DC: 8 + proficiency bonus +
+	 * the modifier of the chosen Wisdom/Intelligence/Charisma ability (the Divine Spark
+	 * ability). Works with no spellcasting class present.
+	 * @param {*} state
+	 * @returns {number}
+	 */
+	static computeRaceManifestationDc (/** @type {*} */ state) {
+		const ability = CharacterSheetClassUtils.getRaceManifestationAbility(state);
+		const prof = state?.getProficiencyBonus?.() || 0;
+		const mod = state?.getAbilityMod?.(ability) || 0;
+		return 8 + prof + mod;
+	}
+
+	/**
+	 * Resolve the real rules `entries` for a Cleric Channel-Divinity feature from the loaded
+	 * subclass-feature catalog (set on the state via setClassFeatureCatalog). Prefers a
+	 * candidate that actually carries text — the classic PHB entry over the 2024 `_copy`
+	 * stub whose `entries` are unresolved in the raw catalog.
+	 * @param {*} state
+	 * @param {string} cdName - Full feature name (e.g. "Channel Divinity: Guided Strike").
+	 * @param {string} sub - Cleric subclass short name / domain (e.g. "War").
+	 * @returns {Array<*>|null}
+	 * @private
+	 */
+	static _resolveRaceManifestationCdEntries (/** @type {*} */ state, /** @type {*} */ cdName, /** @type {*} */ sub) {
+		const pool = state?._subclassFeatureCatalog;
+		if (!Array.isArray(pool) || !pool.length) return null;
+		const nm = (cdName || "").toLowerCase();
+		const sn = (sub || "").toLowerCase();
+		const matches = pool.filter((/** @type {*} */ f) =>
+			(f.name || "").toLowerCase() === nm
+			&& (f.className || "").toLowerCase() === "cleric"
+			&& (f.subclassShortName || "").toLowerCase() === sn);
+		if (!matches.length) return null;
+		const withText = matches.find((/** @type {*} */ f) => Array.isArray(f.entries) && f.entries.length);
+		const chosen = withText || matches[0];
+		return Array.isArray(chosen.entries) && chosen.entries.length ? chosen.entries : null;
+	}
+
+	/**
+	 * Build the per-option list of synthesised manifestation feature objects. Each carries
+	 * a `_raceManifestation` tag and a `level` unlock gate; `addFeature` dedups by
+	 * name+source and honours the explicit `uses`. When `state` is supplied, real rules
+	 * `entries` are pulled from its loaded Cleric subclass-feature catalog (so the child
+	 * features hover with full text) and save-requiring options are stamped with the chosen
+	 * save ability + computed DC. Falls back to the curated descriptions with no `state`.
+	 * @param {*} [state]
 	 * @returns {Object<string, *[]>}
 	 */
-	static getRaceManifestationFeatures () {
-		return {
-			war: [
-				{
-					name: "Guided Strike",
-					source: "TGTT",
-					featureType: "Species",
-					level: 1,
-					_raceManifestation: "war",
-					uses: {max: 1, recharge: "short"},
-					description: "You can use your Channel Divinity to strike with supernatural accuracy. "
-						+ "When you make an attack roll, you can use your Channel Divinity to gain a +10 bonus to the roll. "
-						+ "You make this choice after you see the roll, but before the DM says whether the attack hits or misses.",
-				},
-				{
-					name: "War God's Blessing",
-					source: "TGTT",
-					featureType: "Species",
-					level: 6,
-					_raceManifestation: "war",
-					uses: {max: 1, recharge: "short"},
-					description: "When a creature within 30 feet of you makes an attack roll, you can use your reaction "
-						+ "to grant a +10 bonus to the roll, using your Channel Divinity. You make this choice after you see "
-						+ "the roll, but before the DM says whether the attack hits or misses.",
-				},
-			],
-			aasimar: [
-				{
+	static getRaceManifestationFeatures (/** @type {*} */ state) {
+		const defs = CharacterSheetClassUtils.getRaceManifestationOptionDefs();
+		const out = {};
+		const saveAbility = state ? CharacterSheetClassUtils.getRaceManifestationAbility(state) : null;
+		const saveDc = state ? CharacterSheetClassUtils.computeRaceManifestationDc(state) : null;
+
+		Object.entries(defs).forEach(([/** @type {*} */ id, /** @type {*} */ def]) => {
+			if (def.aasimar) {
+				out[id] = [{
 					name: "Celestial Revelation",
 					source: "TGTT",
 					featureType: "Species",
 					level: 3,
-					_raceManifestation: "aasimar",
-					description: "When you reach character level 3, you can transform as a Bonus Action using one of the "
-						+ "options below (choose the option each time you transform). The transformation lasts for 1 minute or "
-						+ "until you end it (no action required). Once you transform, you can't do so again until you finish a "
-						+ "Long Rest. Here are the transformation options: Heavenly Wings. Two spectral wings sprout from your "
-						+ "back temporarily. Until the transformation ends, you have a Fly Speed equal to your Speed.",
-				},
-			],
-		};
+					_raceManifestation: id,
+					description: def.description,
+				}];
+				return;
+			}
+
+			out[id] = (def.cd || []).map((/** @type {*} */ cd) => {
+				const name = cd.cdName.replace(/^Channel Divinity:\s*/i, "");
+				/** @type {*} */
+				const feature = {
+					name,
+					source: "TGTT",
+					featureType: "Species",
+					level: cd.level,
+					_raceManifestation: id,
+					uses: {max: 1, recharge: "short"},
+					description: cd.description,
+				};
+
+				const entries = state
+					? CharacterSheetClassUtils._resolveRaceManifestationCdEntries(state, cd.cdName, cd.sub)
+					: null;
+				if (entries) feature.entries = MiscUtil.copyFast(entries);
+
+				if (cd.requiresSave) {
+					feature._manifestationRequiresSave = true;
+					if (saveAbility) feature._manifestationSaveAbility = saveAbility;
+					if (saveDc != null) {
+						feature._manifestationSaveDc = saveDc;
+						const abilFull = (saveAbility || "wis").toUpperCase();
+						const note = `Saving throw DC = 8 + your proficiency bonus + your ${abilFull} modifier (currently DC ${saveDc}).`;
+						feature.description = `${feature.description} ${note}`;
+						if (feature.entries) feature.entries = [...feature.entries, note];
+					}
+				}
+
+				return feature;
+			});
+		});
+
+		return out;
 	}
 
 	/**
@@ -5163,7 +5386,7 @@ class CharacterSheetClassUtils {
 	static applyRaceManifestation (/** @type {*} */ state, /** @type {*} */ page) {
 		const choice = state.getRaceManifestationChoice?.() || null;
 		const totalLevel = state.getTotalLevel?.() || 1;
-		const all = CharacterSheetClassUtils.getRaceManifestationFeatures();
+		const all = CharacterSheetClassUtils.getRaceManifestationFeatures(state);
 
 		// Tear down any previously-granted manifestation feature that no longer
 		// belongs (different choice, no choice, or now above the current level).
