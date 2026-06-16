@@ -4954,6 +4954,18 @@ class CharacterSheetLevelUp {
 		// Record the history entry
 		this._state.recordLevelChoice(historyEntry);
 
+		// Surface passive feature effects picked this level-up (R20 #15). The wizard
+		// mutates `targetClass.level` directly instead of going through
+		// `state.addClass()`/`state.levelUp()`, so the registry-driven effect pipeline
+		// (`applyClassFeatureEffects()` → resistances / skill-advantage / carry / save
+		// modifiers) is otherwise NOT triggered until the next reload. Without this call,
+		// freshly-picked specialties that grant a passive effect (e.g. Dark Resilience's
+		// fire resistance, Faceless Mask's Stealth/Deception advantage) appear to "do
+		// nothing" until the character is reloaded. This is idempotent (clear + reapply)
+		// and mirrors what QuickBuild (`charactersheet-quickbuild.js`) and Respec already
+		// do; it must run BEFORE `recalculateHp` so any `hpBonus` effects are reflected.
+		this._state.applyClassFeatureEffects();
+
 		// Recalculate HP from history + live CON + customModifiers (Toughness/race hpPerLevel) and sync current = max.
 		// Mirrors the multiclass branch and the builder's _finishCharacter so feat/ASI/race side-effects are reflected.
 		this._state.recalculateHp({syncCurrent: true});
