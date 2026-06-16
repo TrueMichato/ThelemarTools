@@ -2902,6 +2902,105 @@ class CharacterSheetClassUtils {
 	}
 
 	// ==========================================
+	// Weapon Mastery (level-up detection)
+	// ==========================================
+
+	/**
+	 * Parse the number of weapon masteries a "Weapon Mastery" feature grants from its
+	 * prose entries (e.g. 2024 Fighter "two kinds", Illrigger TGTT "two kinds of weapons").
+	 * Mirrors the builder's `_parseWeaponMasteryCount` so all flows agree.
+	 * @param {Array<*>} entries
+	 * @returns {number} parsed count, defaulting to 2
+	 */
+	static parseWeaponMasteryCountFromEntries (/** @type {*} */ entries) {
+		if (!Array.isArray(entries) || !entries.length) return 2;
+		const text = entries
+			.map((/** @type {*} */ e) => (typeof e === "string" ? e : JSON.stringify(e)))
+			.join(" ")
+			.toLowerCase();
+		if (text.includes("four kinds")) return 4;
+		if (text.includes("three kinds")) return 3;
+		if (text.includes("two kinds")) return 2;
+		if (text.includes("one kind")) return 1;
+		return 2;
+	}
+
+	/**
+	 * Read the weapon-mastery count for a class at a given level from its
+	 * `classTableGroups` (the authoritative source for the generic 2024 classes whose
+	 * count scales by level). Returns 0 when no mastery column is present.
+	 * @param {*} classData
+	 * @param {number} level
+	 * @returns {number}
+	 */
+	static getWeaponMasteryCountFromTable (/** @type {*} */ classData, /** @type {*} */ level) {
+		if (!classData?.classTableGroups?.length || !level) return 0;
+		for (const tableGroup of classData.classTableGroups) {
+			const masteryColIndex = tableGroup.colLabels?.findIndex(
+				(/** @type {*} */ col) => typeof col === "string" && (col === "Weapon Mastery" || col.toLowerCase().includes("mastery")),
+			);
+			if (masteryColIndex == null || masteryColIndex === -1) continue;
+			const row = tableGroup.rows?.[level - 1];
+			if (!row) continue;
+			const value = row[masteryColIndex];
+			if (typeof value === "number") return value;
+			if (typeof value === "string") return parseInt(value) || 0;
+		}
+		return 0;
+	}
+
+	/**
+	 * Compute the weapon-mastery count granted by a class at a single character level,
+	 * combining the class table (scaling 2024 classes) with the prose of any "Weapon
+	 * Mastery" feature listed at/below that level (homebrew like the Illrigger TGTT
+	 * feature, which has no table column). Returns 0 when the class never grants masteries
+	 * at or below `level`.
+	 * @param {*} classData
+	 * @param {number} level
+	 * @param {Array<*>} [classFeatures=[]]
+	 * @returns {number}
+	 */
+	static getWeaponMasteryCountAtLevel (/** @type {*} */ classData, /** @type {*} */ level, /** @type {*} */ classFeatures = []) {
+		if (!classData || !level || level < 1) return 0;
+		let count = CharacterSheetClassUtils.getWeaponMasteryCountFromTable(classData, level);
+
+		// Walk each level up to `level` for a "Weapon Mastery" class feature and take the
+		// highest prose-parsed count (covers fixed-count homebrew with no table column).
+		for (let lvl = 1; lvl <= level; lvl++) {
+			const levelFeatures = CharacterSheetClassUtils.getLevelFeatures(classData, lvl, null, classFeatures, []);
+			const masteryFeature = levelFeatures.find((/** @type {*} */ f) => f.name === "Weapon Mastery");
+			if (masteryFeature) {
+				const parsed = CharacterSheetClassUtils.parseWeaponMasteryCountFromEntries(masteryFeature.entries || []);
+				if (parsed > count) count = parsed;
+			}
+		}
+		return count;
+	}
+
+	/**
+	 * Detect whether crossing from `prevLevel` → `newLevel` first grants OR increases a
+	 * class's weapon-mastery allotment, so the level-up flow can offer the picker at the
+	 * exact level the masteries are gained (bug #12). Returns the NEW total count to
+	 * choose, or null when nothing changed.
+	 * @param {*} classData
+	 * @param {number} prevLevel - class level before this level-up
+	 * @param {number} newLevel - class level after this level-up
+	 * @param {Array<*>} [classFeatures=[]]
+	 * @returns {{count: number}|null}
+	 */
+	static getWeaponMasteryGainForLevelUp (/** @type {*} */ classData, /** @type {*} */ prevLevel, /** @type {*} */ newLevel, /** @type {*} */ classFeatures = []) {
+		if (!classData || !newLevel) return null;
+		const countAtNew = CharacterSheetClassUtils.getWeaponMasteryCountAtLevel(classData, newLevel, classFeatures);
+		if (countAtNew <= 0) return null;
+		const countAtPrev = prevLevel > 0
+			? CharacterSheetClassUtils.getWeaponMasteryCountAtLevel(classData, prevLevel, classFeatures)
+			: 0;
+		// Offer the picker on first grant or any increase (re-pick the full set).
+		if (countAtNew > countAtPrev) return {count: countAtNew};
+		return null;
+	}
+
+	// ==========================================
 	// Expertise & Language Detection
 	// ==========================================
 
