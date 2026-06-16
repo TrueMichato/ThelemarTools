@@ -11736,6 +11736,15 @@ body.has-quickbuild-overlay .toast__container {
 	align-items: center;
 }
 
+.charsheet__attacks-per-action {
+	padding: 2px 8px;
+	background: var(--rgb-bg-alt);
+	border: 1px solid rgba(255, 193, 7, 0.4);
+	border-radius: 10px;
+	font-size: 0.78rem;
+	width: fit-content;
+}
+
 .charsheet__mastery-badge {
 	display: inline-flex;
 	flex-direction: row;
