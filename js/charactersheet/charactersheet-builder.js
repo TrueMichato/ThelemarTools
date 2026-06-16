@@ -4165,20 +4165,16 @@ class CharacterSheetBuilder {
 		);
 		if (!trait) return null;
 
+		// Single source of truth: the curated manifestation option definitions in
+		// class-utils (also used to grant the features), so picker and grant never drift.
+		const defs = CharacterSheetClassUtils.getRaceManifestationOptionDefs();
 		return {
 			traitName: trait.name,
-			options: [
-				{
-					id: "war",
-					label: "War Domain \u2014 Channel Divinity",
-					desc: "Gain the War Domain's Channel Divinity: Guided Strike (and War God's Blessing at character level 6).",
-				},
-				{
-					id: "aasimar",
-					label: "Celestial Revelation (Aasimar Transformation)",
-					desc: "Gain the Aasimar Celestial Revelation transformation (available at character level 3).",
-				},
-			],
+			options: Object.entries(defs).map(([/** @type {*} */ id, /** @type {*} */ def]) => ({
+				id,
+				label: def.label,
+				desc: def.desc,
+			})),
 		};
 	}
 
