@@ -6118,7 +6118,7 @@ class CharacterSheetState {
 
 		// Check for Extra Attack feature directly
 		const extraAttackFeature = this._data.features.find(f =>
-			f.name.toLowerCase().includes("extra attack"),
+			(f.name || "").toLowerCase().includes("extra attack"),
 		);
 		if (extraAttackFeature) return 2;
 
@@ -19653,6 +19653,16 @@ class CharacterSheetState {
 		// parser cannot express. Disjoint from the `case "Illrigger"` block above.
 		// =====================================================
 		this._applyIllriggerSpecialtyCalculations(calculations);
+
+		// Attacks per Attack action — single source of truth for the combat tab. Combines
+		// the legacy getNumberOfAttacks() resolver (Fighter 2/3/4 scaling, martial classes,
+		// generic "Extra Attack" feature) with the calc flags so Illrigger (hasExtraAttack
+		// with no explicit scaling) and any class that only sets extraAttackCount are covered.
+		calculations.attackCount = Math.max(
+			this.getNumberOfAttacks?.() || 1,
+			calculations.extraAttackCount || 1,
+			calculations.hasExtraAttack ? 2 : 1,
+		);
 
 		// =====================================================
 		// AGGREGATE ALL EFFECTS FROM CALCULATIONS
