@@ -2746,24 +2746,8 @@ class CharacterSheetCombat {
 			</div>`;
 
 		// --- Place seal ---
-		container.querySelector(".charsheet__interdict-place-btn")?.addEventListener("click", async () => {
-			if ((this._state.getSealsAvailable?.() || 0) <= 0) {
-				JqueryUtil.doToast({type: "warning", content: "No seals available — take a short or long rest to recover them."});
-				return;
-			}
-			let target = "Target";
-			try {
-				target = await InputUiUtil.pGetUserString({title: "Place Baleful Interdict Seal", default: ""});
-			} catch (e) { target = null; }
-			if (target == null) return; // cancelled
-			const placed = this._state.placeSeal?.((target || "").trim() || "Target", {force: true});
-			if (placed) {
-				JqueryUtil.doToast({type: "success", content: `🔥 Seal placed on ${placed.target}. Seals left: ${this._state.getSealsAvailable?.()}`});
-				this.renderCombatInterdiction();
-				this._page.saveCharacter?.();
-			} else {
-				JqueryUtil.doToast({type: "warning", content: "Could not place a seal."});
-			}
+		container.querySelector(".charsheet__interdict-place-btn")?.addEventListener("click", () => {
+			void this._pPlaceSealFromPanel();
 		});
 
 		// --- Burn seals ---
@@ -2778,12 +2762,20 @@ class CharacterSheetCombat {
 				let rolled = null;
 				try { rolled = this._parseDamage(result.dice, false); } catch (e) { rolled = null; }
 				if (rolled && typeof rolled.total === "number") {
+					// Animate the ACTUAL seal-damage dice (NdN d6) — not a phantom d20 — and
+					// pass an explicit `subtitle` so the result popup's breakdown shows the
+					// damage roll. Without a subtitle, showDiceResult defaults the breakdown
+					// to a hardcoded "1d20 (…)", which is the d20 players were seeing here.
+					const diceGroups = [];
+					this._pushDiceGroup(diceGroups, rolled);
+					if (diceGroups.length) void this._page.pAnimateDamageDice?.(diceGroups);
 					this._page.showDiceResult?.({
 						title: `Baleful Interdict — Burn ${result.count} Seal${result.count === 1 ? "" : "s"}`,
+						subtitle: `${result.dice} ${result.damageType}`,
 						roll: rolled.total,
 						total: rolled.total,
 						resultClass: "text-danger",
-						resultNote: ` ${result.dice} ${result.damageType} on ${result.target}`,
+						resultNote: `${result.damageType} damage on ${result.target}`,
 					});
 				}
 				JqueryUtil.doToast({type: "info", content: `🔥 Burned ${result.count} seal${result.count === 1 ? "" : "s"} on ${result.target}: ${result.dice} ${result.damageType}${rolled && typeof rolled.total === "number" ? ` → ${rolled.total}` : ""} damage.`});
@@ -2794,22 +2786,10 @@ class CharacterSheetCombat {
 
 		// --- Move seals (on death) ---
 		container.querySelectorAll(".charsheet__interdict-move").forEach((btn) => {
-			btn.addEventListener("click", async () => {
+			btn.addEventListener("click", () => {
 				const row = btn.closest(".charsheet__interdict-seal-row");
 				const id = row?.dataset.placementId;
-				let newTarget = null;
-				try {
-					newTarget = await InputUiUtil.pGetUserString({title: "Move Seals to New Creature (within 30 ft)", default: ""});
-				} catch (e) { newTarget = null; }
-				if (newTarget == null) return;
-				const moved = this._state.moveSeals?.(id, (newTarget || "").trim());
-				if (moved) {
-					JqueryUtil.doToast({type: "success", content: `↪ Seals moved to ${moved.target}.`});
-					this.renderCombatInterdiction();
-					this._page.saveCharacter?.();
-				} else {
-					JqueryUtil.doToast({type: "warning", content: "Could not move seals."});
-				}
+				void this._pMoveSealFromPanel(id);
 			});
 		});
 
@@ -2820,6 +2800,162 @@ class CharacterSheetCombat {
 				JqueryUtil.doToast({type: "info", content: `Expend-seal effect for "${boonName}" is not wired yet — burn/place seals manually above for now.`});
 			});
 		});
+	}
+
+	/**
+	 * Build the selectable destination list for the Place-seal modal: every currently
+	 * interdicted creature (so the player can stack another seal) is offered, and the
+	 * caller always also exposes a "new creature" free-text entry. Pure (no DOM) so the
+	 * option set is unit-testable.
+	 * @returns {Array<{id:string, target:string, count:number}>}
+	 */
+	_getSealPlaceTargets () {
+		return (this._state.getSealPlacements?.() || []).map(p => ({id: p.id, target: p.target, count: p.count}));
+	}
+
+	/**
+	 * Build the selectable destination list for the Move-seal modal: every interdicted
+	 * creature EXCEPT the source placement (you cannot move a creature's seals onto
+	 * itself). Pure (no DOM) so the option set is unit-testable.
+	 * @param {string} sourceId the placement id whose seals are being moved.
+	 * @returns {Array<{id:string, target:string, count:number}>}
+	 */
+	_getSealMoveTargets (sourceId) {
+		return (this._state.getSealPlacements?.() || [])
+			.filter(p => p.id !== sourceId)
+			.map(p => ({id: p.id, target: p.target, count: p.count}));
+	}
+
+	/**
+	 * Interdiction-panel "Place seal" flow. Replaces the old bare name-prompt with a
+	 * clear modal that explains the action, lists already-interdicted creatures as
+	 * one-click "add another seal" options, and offers a free-text field for a new
+	 * creature. Placement here is out-of-combat housekeeping, so it bypasses the
+	 * once-per-turn gate (force: true), matching the previous panel behaviour.
+	 * @returns {Promise<void>}
+	 */
+	async _pPlaceSealFromPanel () {
+		if ((this._state.getSealsAvailable?.() || 0) <= 0) {
+			JqueryUtil.doToast({type: "warning", content: "No seals available — take a short or long rest to recover them."});
+			return;
+		}
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const dc = calcs.interdictDc;
+		const avail = this._state.getSealsAvailable?.() || 0;
+		const existing = this._getSealPlaceTargets();
+
+		const place = (target) => {
+			const placed = this._state.placeSeal?.((target || "").trim() || "Target", {force: true});
+			if (placed) {
+				JqueryUtil.doToast({type: "success", content: `🔥 Seal placed on ${placed.target}. Seals left: ${this._state.getSealsAvailable?.()}`});
+				this.renderCombatInterdiction();
+				this._page.saveCharacter?.();
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "Could not place a seal."});
+			}
+		};
+
+		const existingHtml = existing.length
+			? `<div class="ve-muted ve-small mb-1">Add a seal to an already-interdicted creature:</div>
+				<div class="ve-flex ve-flex-wrap gap-1 mb-2">
+					${existing.map(p => `<button class="ve-btn ve-btn-default ve-btn-xs charsheet__interdict-place-existing" type="button" data-target="${(p.target || "").replace(/"/g, "&quot;")}">${p.target} <span class="ve-muted">(${p.count})</span></button>`).join("")}
+				</div>`
+			: "";
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Place Baleful Interdict Seal",
+			isMinHeight0: true,
+		});
+
+		modalInner.innerHTML = `
+			<div class="charsheet__interdict-place">
+				<p class="mb-2">Place a <strong>magical seal</strong> on a creature. The seal lasts 1 minute or until burned for ${calcs.sealDamage || "1d6"} fire or necrotic damage.</p>
+				${existingHtml}
+				<div class="ve-muted ve-small mb-1">${existing.length ? "…or seal a new creature:" : "Name the creature to seal:"}</div>
+				<div class="ve-flex ve-flex-v-center mb-2">
+					<input type="text" class="form-control input-sm charsheet__interdict-target-ipt" placeholder="creature name" style="max-width: 16rem;">
+					<button class="ve-btn ve-btn-primary ve-btn-sm ml-2 charsheet__interdict-confirm" type="button">Place Seal</button>
+				</div>
+				<div class="ve-muted ve-small">Seals available: <strong>${avail}</strong>${dc != null ? ` &middot; Interdict save DC <strong>${dc}</strong>` : ""}</div>
+			</div>`;
+
+		modalInner.querySelectorAll(".charsheet__interdict-place-existing").forEach((btn) => {
+			btn.addEventListener("click", () => { place(btn.dataset.target); doClose(true); });
+		});
+		const ipt = /** @type {HTMLInputElement} */ (modalInner.querySelector(".charsheet__interdict-target-ipt"));
+		const confirm = () => {
+			const target = (ipt?.value || "").trim();
+			if (!target) { JqueryUtil.doToast({type: "warning", content: "Enter a creature name (or pick an existing one)."}); return; }
+			place(target);
+			doClose(true);
+		};
+		modalInner.querySelector(".charsheet__interdict-confirm")?.addEventListener("click", confirm);
+		ipt?.addEventListener("keydown", (e) => { if (e.key === "Enter") confirm(); });
+		setTimeout(() => { try { ipt?.focus(); } catch (e) { /* ignore */ } }, 50);
+	}
+
+	/**
+	 * Interdiction-panel "Move seals" flow (on a sealed creature's death, move all its
+	 * seals to a new creature within 30 ft). Replaces the old bare name-prompt with a
+	 * modal that names the source creature, lists the OTHER interdicted creatures as
+	 * one-click destinations, and offers a free-text field for a brand-new creature.
+	 * @param {string} sourceId the placement id whose seals are moving.
+	 * @returns {Promise<void>}
+	 */
+	async _pMoveSealFromPanel (sourceId) {
+		const source = (this._state.getSealPlacements?.() || []).find(p => p.id === sourceId);
+		if (!source) { JqueryUtil.doToast({type: "warning", content: "Could not find the seals to move."}); return; }
+
+		const destinations = this._getSealMoveTargets(sourceId);
+
+		const move = (target) => {
+			const moved = this._state.moveSeals?.(sourceId, (target || "").trim());
+			if (moved) {
+				JqueryUtil.doToast({type: "success", content: `↪ Seals moved to ${moved.target}.`});
+				this.renderCombatInterdiction();
+				this._page.saveCharacter?.();
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "Could not move seals."});
+			}
+		};
+
+		const destHtml = destinations.length
+			? `<div class="ve-muted ve-small mb-1">Move to another interdicted creature:</div>
+				<div class="ve-flex ve-flex-wrap gap-1 mb-2">
+					${destinations.map(p => `<button class="ve-btn ve-btn-default ve-btn-xs charsheet__interdict-move-existing" type="button" data-target="${(p.target || "").replace(/"/g, "&quot;")}">${p.target} <span class="ve-muted">(${p.count})</span></button>`).join("")}
+				</div>`
+			: "";
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Move Seals (within 30 ft)",
+			isMinHeight0: true,
+		});
+
+		modalInner.innerHTML = `
+			<div class="charsheet__interdict-place">
+				<p class="mb-2">Move all <strong>${source.count} seal${source.count === 1 ? "" : "s"}</strong> from <strong>${source.target}</strong> to another creature within 30 ft (a bonus action on that creature's death).</p>
+				${destHtml}
+				<div class="ve-muted ve-small mb-1">${destinations.length ? "…or move to a new creature:" : "Name the new creature:"}</div>
+				<div class="ve-flex ve-flex-v-center mb-2">
+					<input type="text" class="form-control input-sm charsheet__interdict-target-ipt" placeholder="creature name" style="max-width: 16rem;">
+					<button class="ve-btn ve-btn-primary ve-btn-sm ml-2 charsheet__interdict-confirm" type="button">Move Seals</button>
+				</div>
+			</div>`;
+
+		modalInner.querySelectorAll(".charsheet__interdict-move-existing").forEach((btn) => {
+			btn.addEventListener("click", () => { move(btn.dataset.target); doClose(true); });
+		});
+		const ipt = /** @type {HTMLInputElement} */ (modalInner.querySelector(".charsheet__interdict-target-ipt"));
+		const confirm = () => {
+			const target = (ipt?.value || "").trim();
+			if (!target) { JqueryUtil.doToast({type: "warning", content: "Enter a creature name (or pick an existing one)."}); return; }
+			move(target);
+			doClose(true);
+		};
+		modalInner.querySelector(".charsheet__interdict-confirm")?.addEventListener("click", confirm);
+		ipt?.addEventListener("keydown", (e) => { if (e.key === "Enter") confirm(); });
+		setTimeout(() => { try { ipt?.focus(); } catch (e) { /* ignore */ } }, 50);
 	}
 
 	/**
