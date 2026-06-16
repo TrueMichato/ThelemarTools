@@ -1616,6 +1616,17 @@ class CharacterSheetFeatures {
 		// Get description - look it up if not stored
 		const description = this._getFeatureDescription(feature) || "<em class='ve-muted'>No description available</em>";
 
+		// Computed effect label (R20 #15/#16): surface level/PB/DC-resolved numbers for
+		// Interdict Boons and calc-only Illrigger specialties that the static description
+		// cannot show (e.g. Soul Eater → "Temp HP 13", Hellish Avenger → "+1d8 fire").
+		let derivedEffectBadge = "";
+		let derivedEffectRow = "";
+		const effectSummary = this._state.getFeatureEffectSummary?.(feature) || "";
+		if (effectSummary) {
+			derivedEffectBadge = `<span class="badge badge-outline-success" title="Computed effect">${effectSummary}</span>`;
+			derivedEffectRow = `<div class="ve-small mb-1"><span class="ve-muted">Effect:</span> <strong>${effectSummary}</strong></div>`;
+		}
+
 		// Combat-method attribution badge (tradition + focus gate). Surfaced for combat-method
 		// features — especially auto-granted ones (Singular Focus / Groundshatter) that would
 		// otherwise render with no indication of their tradition or the focus they require.
@@ -1778,6 +1789,7 @@ class CharacterSheetFeatures {
 					${primalFocusDodgeBadge}
 					${huntersPreyBadge}
 					${combatMethodBadge}
+					${derivedEffectBadge}
 					<div class="charsheet__feature-actions">
 						${hasUses ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="Use Feature">Use</button>` : ""}
 						<button class="ve-btn ve-btn-xs ${this._state.getFeatureNote?.(feature.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feature-note" title="${this._state.getFeatureNote?.(feature.id) ? "Edit Note" : "Add Note"}">
@@ -1791,6 +1803,7 @@ class CharacterSheetFeatures {
 				<div class="charsheet__feature-body" style="display: ${isExpanded ? "block" : "none"};">
 					${primalFocusHtml}
 					${huntersPreyHtml}
+					${derivedEffectRow}
 					${description}
 				</div>
 			</div>
