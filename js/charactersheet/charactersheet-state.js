@@ -11550,6 +11550,11 @@ class CharacterSheetState {
 			ritual: spell.ritual || false,
 		};
 
+		// Bug #13: preserve a per-spell chosen casting ability (e.g. a racial innate spell
+		// cast with a chosen WIS/INT/CHA) so its save DC / attack bonus can be resolved even
+		// when the character has no spellcasting class.
+		if (spell.spellcastingAbility) innateSpell.spellcastingAbility = spell.spellcastingAbility;
+
 		// Add uses tracking if not at-will
 		if (!spell.atWill && spell.uses) {
 			innateSpell.uses = {
