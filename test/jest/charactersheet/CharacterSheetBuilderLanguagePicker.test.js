@@ -103,6 +103,28 @@ describe("Builder race/subrace language picker — search + source filter + pill
 			const window = BUILDER_SRC.slice(startIdx, startIdx + 6000);
 			expect(window).toMatch(/this\._renderLanguageCheckboxGroup\(/);
 		});
+
+		test("`_renderBackgroundLanguages` calls `_renderLanguageCheckboxGroup` (not `<select>` dropdowns)", () => {
+			const startIdx = BUILDER_SRC.indexOf("_renderBackgroundLanguages (");
+			expect(startIdx).toBeGreaterThan(-1);
+			const window = BUILDER_SRC.slice(startIdx, startIdx + 6000);
+			// Bug #2: background languages now use the same checkbox-group picker as the race step.
+			expect(window).toMatch(/this\._renderLanguageCheckboxGroup\(/);
+			// The legacy plain-<select> dropdown markup + its disabling helper must be gone.
+			expect(window).not.toMatch(/-- Select Language --/);
+			expect(window).not.toMatch(/_updateLanguageDropdownOptions/);
+		});
+
+		test("the dead `_updateLanguageDropdownOptions` dropdown helper is removed", () => {
+			expect(BUILDER_SRC).not.toMatch(/_updateLanguageDropdownOptions\s*\(/);
+		});
+
+		test("`_renderBackgroundLanguages` preserves the saved `{selectIdx, language}` data shape", () => {
+			const startIdx = BUILDER_SRC.indexOf("_renderBackgroundLanguages (");
+			const window = BUILDER_SRC.slice(startIdx, startIdx + 6000);
+			expect(window).toMatch(/this\._selectedLanguages = selectedNames\.map\(/);
+			expect(window).toMatch(/selectIdx: idx, language/);
+		});
 	});
 
 	describe("CSS contract", () => {

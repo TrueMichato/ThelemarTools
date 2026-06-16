@@ -2,7 +2,7 @@
  * Character Sheet — Illrigger "Forked Tongue" feature tests
  * (MCDM Productions — The Illrigger Revised)
  *
- * Forked Tongue (L1): speak/read/write Infernal (granted automatically) plus a number
+ * Forked Tongue (L1): speak/read/write Mictlanian (granted automatically) plus a number
  * of *swappable* spoken-only languages the player chooses (2 at L1, 3 once Forked
  * Tongue Improvement is gained at L9). On a long rest the player may replace ONE
  * swappable spoken language with another (once per long rest). All swappable languages
@@ -29,9 +29,9 @@ describe("Illrigger Forked Tongue", () => {
 	});
 
 	describe("L1 grants", () => {
-		it("auto-grants Infernal in languages", () => {
+		it("auto-grants Mictlanian in languages", () => {
 			addIllrigger(state, 1);
-			expect(state._data.languages.map(l => l.toLowerCase())).toContain("infernal");
+			expect(state._data.languages.map(l => l.toLowerCase())).toContain("mictlanian");
 		});
 
 		it("allows exactly 2 swappable spoken languages at L1", () => {
@@ -52,9 +52,9 @@ describe("Illrigger Forked Tongue", () => {
 			expect(state._data.languages.map(l => l.toLowerCase())).toContain("elvish");
 		});
 
-		it("rejects Infernal and duplicates as swappable choices", () => {
+		it("rejects Mictlanian and duplicates as swappable choices", () => {
 			addIllrigger(state, 1);
-			expect(state.addForkedTongueSwappableLanguage("Infernal")).toBe(false);
+			expect(state.addForkedTongueSwappableLanguage("Mictlanian")).toBe(false);
 			expect(state.addForkedTongueSwappableLanguage("Elvish")).toBe(true);
 			expect(state.addForkedTongueSwappableLanguage("elvish")).toBe(false); // case-insensitive dup
 		});
@@ -128,21 +128,21 @@ describe("Illrigger Forked Tongue", () => {
 			expect(state.swapForkedTongueLanguage("Draconic", "Goblin")).toBe(true);
 		});
 
-		it("rejects swapping an unknown language or swapping to Infernal", () => {
+		it("rejects swapping an unknown language or swapping to Mictlanian", () => {
 			expect(state.swapForkedTongueLanguage("Orcish", "Goblin")).toBe(false);
 			expect(state.hasSwappedForkedTongueSinceLongRest()).toBe(false);
-			expect(state.swapForkedTongueLanguage("Elvish", "Infernal")).toBe(false);
+			expect(state.swapForkedTongueLanguage("Elvish", "Mictlanian")).toBe(false);
 			expect(state.hasSwappedForkedTongueSinceLongRest()).toBe(false);
 		});
 	});
 
 	describe("Linguistics integration (Thelemar)", () => {
-		it("counts Infernal + swappable languages toward the Linguistics bonus", () => {
+		it("counts Mictlanian + swappable languages toward the Linguistics bonus", () => {
 			addIllrigger(state, 1);
 			state._data.settings = state._data.settings || {};
 			state._data.settings.thelemar_linguisticsBonus = true;
 
-			// Only Infernal so far (1 non-Common language).
+			// Only Mictlanian so far (1 non-Common language).
 			const base = state._getDynamicSkillFeatureBonus("linguistics");
 
 			state.addForkedTongueSwappableLanguage("Elvish");

@@ -3917,7 +3917,7 @@ class CharacterSheetLevelUp {
 	 * Render the Illrigger Forked Tongue Improvement (level 9) swappable-language picker.
 	 *
 	 * Grants one additional swappable spoken language. Reuses the shared language picker modal,
-	 * which already excludes the character's current languages (Infernal and any existing swappable
+	 * which already excludes the character's current languages (Mictlanian and any existing swappable
 	 * spoken languages are therefore unavailable). The pick is reported via `onSelect(lang)` and the
 	 * caller applies it through `state.addForkedTongueSwappableLanguage`.
 	 *
@@ -4686,7 +4686,7 @@ class CharacterSheetLevelUp {
 
 		// Apply the Illrigger Forked Tongue Improvement (level 9) swappable language pick. The level
 		// is already committed above, so getForkedTongueMaxSwappable() is 3 and the add succeeds; the
-		// state API mirrors it into _data.languages and rejects Infernal/dupes/over-max.
+		// state API mirrors it into _data.languages and rejects Mictlanian/dupes/over-max.
 		if (forkedTongueLevelUpPick && this._state.addForkedTongueSwappableLanguage) {
 			this._state.addForkedTongueSwappableLanguage(forkedTongueLevelUpPick);
 		}
