@@ -2289,6 +2289,19 @@ class CharacterSheetCombat {
 		// so the per-weapon ✨ button can be gated without re-scanning per attack.
 		this._channelCantripsCache = this._page._spells?.getKnownWeaponChannelCantrips?.() || [];
 
+		// Attacks-per-action banner (Extra Attack and scaling variants). Surfaces how many
+		// attacks the character can make with the Attack action, near the weapon list.
+		const attackCount = this._state.getFeatureCalculations?.()?.attackCount || 1;
+		if (attackCount > 1) {
+			const banner = e_({outer: `
+				<div class="charsheet__attacks-per-action ve-flex ve-flex-v-center gap-1 mb-2" title="Number of attacks you can make when you take the Attack action (Extra Attack)">
+					<span>⚔️</span>
+					<span class="bold">${attackCount} attacks</span>
+					<span class="ve-muted ve-small">per Attack action</span>
+				</div>`});
+			container.append(banner);
+		}
+
 		attacks.forEach(attack => {
 			const item = this._renderAttackItem(attack, reachCtx);
 			container.append(item);
@@ -2657,8 +2670,10 @@ class CharacterSheetCombat {
 
 	/**
 	 * Best-effort Passive/Active classification for an interdict boon, from its entry
-	 * text. Per-boon mechanical effects are intentionally NOT implemented yet (deferred
-	 * round); this only drives the display tag in the panel.
+	 * text; drives the display tag in the panel. Each boon's computed effect is surfaced
+	 * separately via {@link CharacterSheetState#getFeatureEffectSummary}, and boons with a
+	 * discrete on-sheet effect expose an Apply button (see
+	 * {@link CharacterSheetState#applyInterdictBoonActivation}).
 	 * @param {object} boon
 	 * @returns {"Active"|"Passive"}
 	 */
@@ -2671,9 +2686,9 @@ class CharacterSheetCombat {
 	/**
 	 * Additive combat-tab Interdiction panel (Illrigger Baleful Interdict). Shows the
 	 * seal pool (available / max), the Interdict save DC, controls to place / burn / move
-	 * seals, and the list of KNOWN interdict boons (name + Passive/Active tag + an
-	 * "expend seal" affordance stub). Hidden entirely unless the character has Baleful
-	 * Interdict. Per-boon mechanical effects are deferred to a later round.
+	 * seals, and the list of KNOWN interdict boons (name + Passive/Active tag + the boon's
+	 * computed effect summary + an Apply button for boons with a discrete on-sheet effect,
+	 * e.g. Soul Eater temp HP). Hidden entirely unless the character has Baleful Interdict.
 	 */
 	renderCombatInterdiction () {
 		const section = document.getElementById("charsheet-combat-interdiction-section");
@@ -2718,14 +2733,46 @@ class CharacterSheetCombat {
 				if (this._page?.getHoverLink && b.source) {
 					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, b.name, b.source); } catch (e) { nameHtml = b.name; }
 				}
+				const summary = this._state.getFeatureEffectSummary?.(b, calcs) || "";
+				const summaryHtml = summary
+					? `<span class="badge badge-success charsheet__interdict-boon-effect" title="Computed effect">${summary}</span>`
+					: "";
+				const canActivate = this._state.hasInterdictBoonActivation?.(b.name);
+				const activateBtn = canActivate
+					? `<button class="ve-btn ve-btn-xxs ve-btn-primary charsheet__interdict-boon-activate ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" title="Apply this boon's effect to your sheet">Apply</button>`
+					: "";
 				return `
 					<div class="charsheet__interdict-boon-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-1">
 						<span class="bold mr-1">${nameHtml}</span>
 						<span class="badge ${badgeCls}" title="${activation === "Active" ? "Requires an action/trigger to use" : "Always-on benefit"}">${activation}</span>
-						<button class="ve-btn ve-btn-xxs ve-btn-default charsheet__interdict-boon-expend ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" title="Expend a seal for this boon (effect wiring coming in a later update)">Expend seal</button>
+						${summaryHtml}
+						${activateBtn}
 					</div>`;
 			}).join("")
 			: `<div class="ve-muted ve-small">No interdict boons known yet.</div>`;
+
+		// Charm Enemy (Illrigger L3): when seal-placing on a Humanoid the target makes a
+		// Charisma save or is charmed. The charmed condition lands on the TARGET, never the
+		// caster, so it is surfaced here as a tracked target-effect (not a self condition).
+		const charmEnemyHtml = calcs.hasCharmEnemy
+			? (() => {
+				const ceDc = calcs.charmEnemyDc != null ? calcs.charmEnemyDc : dc;
+				const ce = (this._state.getResources?.() || []).find(r => (r.name || "").toLowerCase() === "charm enemy");
+				const ceMax = ce?.max != null ? ce.max : (calcs.charmEnemyUses != null ? calcs.charmEnemyUses : null);
+				const ceCur = ce?.current;
+				const usesStr = ceMax != null
+					? (ceCur != null ? `${ceCur} / ${ceMax}` : `${ceMax}`)
+					: "—";
+				return `
+				<div class="charsheet__interdict-charm mb-2">
+					<div class="ve-muted ve-small mb-1">Charm Enemy</div>
+					<div class="charsheet__interdict-charm-row ve-flex ve-flex-v-center ve-flex-wrap gap-2">
+						<span title="When you seal a Humanoid you may attempt to charm it">🎭 Target makes a <strong>DC ${ceDc != null ? ceDc : "—"}</strong> Charisma save or is <strong>charmed</strong> (1 hour)</span>
+						<span class="charsheet__interdict-charm-uses ve-muted ve-small" title="Uses = Charisma modifier (min 1); regained on a long rest">Uses <strong>${usesStr}</strong></span>
+					</div>
+				</div>`;
+			})()
+			: "";
 
 		container.innerHTML = `
 			<div class="charsheet__interdict-panel">
@@ -2739,6 +2786,7 @@ class CharacterSheetCombat {
 					<div class="ve-muted ve-small mb-1">Interdicted creatures</div>
 					${placementsHtml}
 				</div>
+				${charmEnemyHtml}
 				<div class="charsheet__interdict-boons">
 					<div class="ve-muted ve-small mb-1">Known interdict boons</div>
 					${boonsHtml}
@@ -2793,11 +2841,16 @@ class CharacterSheetCombat {
 			});
 		});
 
-		// --- Expend-seal boon stub (per-boon mechanics deferred) ---
-		container.querySelectorAll(".charsheet__interdict-boon-expend").forEach((btn) => {
+		// --- Apply a boon's discrete on-sheet effect (e.g. Soul Eater temp HP) ---
+		container.querySelectorAll(".charsheet__interdict-boon-activate").forEach((btn) => {
 			btn.addEventListener("click", () => {
-				const boonName = btn.dataset.boonName || "this boon";
-				JqueryUtil.doToast({type: "info", content: `Expend-seal effect for "${boonName}" is not wired yet — burn/place seals manually above for now.`});
+				const boonName = btn.dataset.boonName || "";
+				const result = this._state.applyInterdictBoonActivation?.(boonName);
+				if (!result) { JqueryUtil.doToast({type: "warning", content: `No on-sheet effect to apply for "${boonName || "this boon"}".`}); return; }
+				JqueryUtil.doToast({type: "success", content: result.label});
+				this._page._renderHp?.();
+				this.renderCombatInterdiction();
+				this._page.saveCharacter?.();
 			});
 		});
 	}
@@ -3038,8 +3091,19 @@ class CharacterSheetCombat {
 			const selfWord = res.selfHpDelta < 0 ? "take" : "regain";
 			const selfAmt = Math.abs(res.selfHpDelta);
 
+			// Animate the ACTUAL NdN conduit dice (e.g. 5d10) and pass an explicit `subtitle`
+			// so the result popup's breakdown shows the conduit roll. Without a subtitle,
+			// showDiceResult defaults the breakdown to a hardcoded "1d20", which is the d20
+			// players were seeing here (same class as the R20-S4 seal-burn fix).
+			if (rolled) {
+				const diceGroups = [];
+				this._pushDiceGroup(diceGroups, rolled);
+				if (diceGroups.length) void this._page.pAnimateDamageDice?.(diceGroups);
+			}
+
 			this._page.showDiceResult?.({
 				title: `Infernal Conduit — ${isInvig ? "Invigorate" : "Devour"} (${res.dice})`,
+				subtitle: `${res.dice} necrotic`,
 				roll: res.total,
 				total: res.total,
 				resultClass: isInvig ? "text-success" : "text-danger",
@@ -3064,7 +3128,7 @@ class CharacterSheetCombat {
 	 */
 	renderCombatMasteries () {
 		const section = document.getElementById("charsheet-combat-masteries-section");
-		const container = document.getElementById("charsheet-combat-masteries");
+		const container = document.getElementById("charsheet-combat-masteries-panel");
 		if (!container) return;
 
 		const calcs = this._state.getFeatureCalculations?.() || {};
@@ -3080,10 +3144,29 @@ class CharacterSheetCombat {
 
 		// Lies — weapon-type choice (CHA for attack/damage)
 		if (calcs.hasLiesMastery) {
-			const weapons = (this._state.getAttacks?.() || [])
+			// Offer ALL the character's melee weapons: configured non-spell attacks PLUS
+			// equipped melee weapons (which may not yet be configured attacks). Ranged-only
+			// weapons are excluded since Lies applies to melee weapons. Deduped by name.
+			const fromAttacks = (this._state.getAttacks?.() || [])
 				.filter(a => !a.isSpell && !a.isSpellAttack)
-				.map(a => a.name)
-				.filter((v, i, arr) => v && arr.indexOf(v) === i);
+				.map(a => a.name);
+			const fromEquipped = (this._state.getItems?.() || [])
+				.filter(i => i.weapon && i.equipped)
+				.filter(i => {
+					const props = i.property || i.properties || [];
+					const isRangedOnly = props.some(p => p === "A" || (typeof p === "string" && p.startsWith("A|")))
+						&& !props.some(p => p === "T" || (typeof p === "string" && p.startsWith("T|")));
+					return !isRangedOnly;
+				})
+				.map(i => i.name);
+			const seen = new Set();
+			const weapons = [...fromAttacks, ...fromEquipped].filter(w => {
+				if (!w) return false;
+				const key = w.toLowerCase();
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			});
 			const chosen = this._state.getLiesWeaponType?.() || "";
 			const opts = [`<option value="">— none —</option>`]
 				.concat(weapons.map(w => `<option value="${(w || "").replace(/"/g, "&quot;")}"${w.toLowerCase() === chosen.toLowerCase() ? " selected" : ""}>${w}</option>`))
@@ -4179,16 +4262,29 @@ class CharacterSheetCombat {
 		// Apply condition (e.g., Instant Step → invisible)
 		if (effects.applyCondition) {
 			const cond = effects.applyCondition;
-			const added = this._state.addCondition?.({
-				name: cond.name,
-				source: feature.name,
-			});
-			if (added) {
+			// Only conditions the action inflicts on the CASTER are tracked on this
+			// sheet. Target-applied conditions (cond.self === false, e.g. Charm Enemy's
+			// "the target ... or be charmed") must NOT be added to the character — that
+			// would wrongly charm/stun/etc. the Illrigger themselves. Surface them as an
+			// informational prompt instead so the player can enforce the target's save.
+			if (cond.self === false) {
 				const durationText = cond.duration ? ` (${cond.duration})` : "";
 				JqueryUtil.doToast({
 					type: "info",
-					content: `${feature.name}: Applied ${cond.name}${durationText}`,
+					content: `${feature.name}: Target is ${cond.name}${durationText} on a failed save.`,
 				});
+			} else {
+				const added = this._state.addCondition?.({
+					name: cond.name,
+					source: feature.name,
+				});
+				if (added) {
+					const durationText = cond.duration ? ` (${cond.duration})` : "";
+					JqueryUtil.doToast({
+						type: "info",
+						content: `${feature.name}: Applied ${cond.name}${durationText}`,
+					});
+				}
 			}
 		}
 

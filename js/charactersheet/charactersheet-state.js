@@ -6118,7 +6118,7 @@ class CharacterSheetState {
 
 		// Check for Extra Attack feature directly
 		const extraAttackFeature = this._data.features.find(f =>
-			f.name.toLowerCase().includes("extra attack"),
+			(f.name || "").toLowerCase().includes("extra attack"),
 		);
 		if (extraAttackFeature) return 2;
 
@@ -19109,9 +19109,16 @@ class CharacterSheetState {
 								calculations.charmEnemyUses = Math.max(1, chaMod);
 							}
 
-							// Level 7: Moloch's Interdiction (free boons)
+							// Level 7: Moloch's Interdiction (free, level-gated interdict boons)
 							if (level >= 7) {
 								calculations.hasMolochInterdiction = true;
+								// Auto-grant each Moloch's Interdiction boon as its prereq level is
+								// reached (Red Cant @7, Slippery Ploy @13, Incontrovertible @18).
+								// These are always-known and DON'T count against interdictBoonsKnown,
+								// so they are applied here directly rather than via the player's
+								// selected-boon list. Re-evaluated from the current level so the
+								// higher tiers light up automatically on level-up.
+								this._applyMolochInterdictionBoons(calculations, {level, profBonus, chaMod});
 							}
 
 							// Level 11: Intransigent (charmed immunity 10ft aura), Let's Make a Deal
@@ -19653,6 +19660,16 @@ class CharacterSheetState {
 		// parser cannot express. Disjoint from the `case "Illrigger"` block above.
 		// =====================================================
 		this._applyIllriggerSpecialtyCalculations(calculations);
+
+		// Attacks per Attack action — single source of truth for the combat tab. Combines
+		// the legacy getNumberOfAttacks() resolver (Fighter 2/3/4 scaling, martial classes,
+		// generic "Extra Attack" feature) with the calc flags so Illrigger (hasExtraAttack
+		// with no explicit scaling) and any class that only sets extraAttackCount are covered.
+		calculations.attackCount = Math.max(
+			this.getNumberOfAttacks?.() || 1,
+			calculations.extraAttackCount || 1,
+			calculations.hasExtraAttack ? 2 : 1,
+		);
 
 		// =====================================================
 		// AGGREGATE ALL EFFECTS FROM CALCULATIONS
@@ -26512,6 +26529,43 @@ class CharacterSheetState {
 	}
 	// #endregion
 
+	// #region Illrigger Blood Price (L10)
+	/** @returns {boolean} whether the character has the Hellspeaker L10 Blood Price feature. */
+	hasBloodPrice () {
+		return !!(this.getFeatureCalculations?.() || {}).hasBloodPrice;
+	}
+
+	/**
+	 * Blood Price (Hellspeaker L10): after failing a saving throw, spend one Hit Die and add
+	 * the rolled value to the save result. This SPENDS a Hit Die but — unlike a short-rest
+	 * recovery — does NOT heal. Returns a descriptor with the rolled value so the caller can
+	 * add it to the displayed save total, or null if nothing could be spent.
+	 *
+	 * @param {string|null} [dieType] preferred die-type pool (e.g. "d10"); falls back to the
+	 *   largest spendable pool when omitted.
+	 * @param {{roll?: number}} [opts] `roll` overrides the rolled value (for tests / manual entry).
+	 * @returns {{dieType:string, die:number, roll:number, remaining:number}|null}
+	 */
+	applyBloodPrice (dieType = null, opts = {}) {
+		if (!this.hasBloodPrice()) return null;
+		const type = dieType && this._data.hitDice?.[dieType]?.current > 0
+			? dieType
+			: this.getLargestSpendableHitDieType();
+		if (!type) return null;
+		const pool = this._data.hitDice?.[type];
+		if (!pool || (Math.floor(Number(pool.current)) || 0) <= 0) return null;
+
+		pool.current = Math.max(0, (Math.floor(Number(pool.current)) || 0) - 1);
+
+		const die = parseInt(String(type).replace("d", ""), 10) || 8;
+		const roll = typeof opts.roll === "number" && opts.roll >= 0
+			? Math.floor(opts.roll)
+			: Math.ceil(die / 2) + 1; // deterministic average for headless/test contexts
+
+		return {dieType: type, die, roll, remaining: pool.current};
+	}
+	// #endregion
+
 	// #region Illrigger Interdict Boons (per-boon mechanical effects)
 	/**
 	 * Normalize an interdict-boon name for matching: lower-case, drop the
@@ -26613,15 +26667,15 @@ class CharacterSheetState {
 		"foul interchange": (c) => `Save DC ${c.foulInterchangeDc}`,
 		"hell mage": (c) => `Place up to ${c.hellMageSeals} seals`,
 		"hell s assassin": () => "Reroll 1s & 2s on damage vs. interdicted",
-		"hellish frenzy": () => null,
-		"hellsight": () => null,
+		"hellish frenzy": (c) => `+${c.frenzyAcBonus} AC, ×2 speed & extra attack while frenzied`,
+		"hellsight": (c) => `Truesight ${c.hellsightSenseRange} ft. (expend a seal)`,
 		"impaling shot": (c) => `Imposes −${c.impalingShotAcPenalty} AC`,
 		"incontrovertible": () => null,
 		"iron gaol": (c) => `${c.ironGaolSealCost} seals · Save DC ${c.ironGaolDc}`,
 		"last word": (c) => `${c.lastWordDicePerSeal} per seal (up to ${c.lastWordMaxSeals})`,
 		"red cant": (c) => `Roll floor ${c.redCantFloor}`,
 		"sanguine gift": (c) => `Heal ${c.sanguineGiftHeal} HP`,
-		"shadow shroud": () => null,
+		"shadow shroud": (c) => `+${c.shadowShroudAcBonus} AC for 1 min (expend a seal)`,
 		"slippery ploy": (c) => `Save DC ${c.slipperyPloyDc}`,
 		"soul eater": (c) => `Temp HP ${c.soulEaterTempHp}`,
 		"soul s doom": (c) => `+${c.soulsDoomDamage} damage`,
@@ -26630,8 +26684,36 @@ class CharacterSheetState {
 		"swift retribution": () => null,
 		"telekinetic seal": (c) => `Save DC ${c.telekineticSealDc}`,
 		"unleash hell": () => null,
-		"veil of lies": () => null,
+		"veil of lies": () => "Invisible 10 min (expend a seal)",
 		"vengeful shot": (c) => `+${c.vengefulShotBonus} damage`,
+	};
+
+	/**
+	 * Player-triggerable discrete activations for the Interdict Boons whose mechanical
+	 * effect lands on the CHARACTER'S OWN sheet (so it can actually be applied from here).
+	 * Keyed by the same normalized boon name as {@link CharacterSheetState.INTERDICT_BOON_FIELDS}.
+	 * Each `apply(state, calcs)` performs the on-sheet mutation and returns a short result
+	 * `{label}` for the toast, or `null` when nothing could be applied.
+	 *
+	 * Boons whose effect targets another creature (e.g. Sanguine Gift) or is a duration /
+	 * narrative state (Veil of Lies, Hellsight, …) are intentionally ABSENT — those are
+	 * surfaced read-only via {@link CharacterSheetState.INTERDICT_BOON_SUMMARIES}; only
+	 * effects that resolve to a number on this sheet are applied.
+	 *
+	 * @type {Object<string, {actionLabel: string, apply: function(CharacterSheetState, object): ({label:string}|null)}>}
+	 */
+	static INTERDICT_BOON_ACTIVATIONS = {
+		"soul eater": {
+			actionLabel: "Gain temp HP",
+			apply: (state, calcs) => {
+				const amt = calcs.soulEaterTempHp || 0;
+				if (amt <= 0) return null;
+				// Temp HP don't stack (PHB) — keep the higher of current vs. granted.
+				const next = Math.max(state.getTempHp() || 0, amt);
+				state.setTempHp(next);
+				return {label: `Soul Eater: gained ${amt} temporary HP (now ${next}).`};
+			},
+		},
 	};
 
 	/**
@@ -26649,6 +26731,27 @@ class CharacterSheetState {
 		"do without": (c, self) => {
 			const days = Math.max(0, self?.getAbilityMod?.("cha") ?? 0);
 			return `Endure ${days} day${days === 1 ? "" : "s"} without food/water`;
+		},
+	};
+
+	/**
+	 * Calc-only display summaries for named Illrigger features whose mechanical effect the
+	 * static description can't fully express (R21). Keyed by exact (lower-cased) feature name.
+	 *
+	 * @type {Object<string, function(object, object=): (string|null)>}
+	 */
+	static ILLRIGGER_FEATURE_SUMMARIES = {
+		"moloch's interdiction": (c) => {
+			const names = c.molochInterdictionBoonNames || [];
+			return names.length ? `Free boons: ${names.join(", ")}` : null;
+		},
+		"blood price": (c, self) => {
+			if (!c.hasBloodPrice) return null;
+			const hd = self?.getHitDiceSummary?.();
+			const avail = hd ? hd.current : null;
+			return avail != null
+				? `Spend 1 Hit Die to add to a failed save (${avail} available)`
+				: "Spend 1 Hit Die to add to a failed save";
 		},
 	};
 
@@ -26681,6 +26784,11 @@ class CharacterSheetState {
 		const specFn = CharacterSheetState.ILLRIGGER_SPECIALTY_SUMMARIES[(feature.name || "").trim().toLowerCase()];
 		if (specFn) return specFn(calcs, this) || "";
 
+		// Named Illrigger features whose computed effect can't be expressed by the static
+		// description (R21). Keyed by exact (lower-cased) feature name.
+		const namedFn = CharacterSheetState.ILLRIGGER_FEATURE_SUMMARIES[(feature.name || "").trim().toLowerCase()];
+		if (namedFn) return namedFn(calcs, this) || "";
+
 		return "";
 	}
 
@@ -26698,6 +26806,69 @@ class CharacterSheetState {
 			const apply = defs[CharacterSheetState._normalizeInterdictBoonName(boon.name)];
 			if (apply) apply(calculations, ctx);
 		}
+	}
+
+	/**
+	 * Free interdict boons granted by Moloch's Interdiction (Hellspeaker), keyed by the
+	 * minimum illrigger level at which each is learned (per the source's prerequisites).
+	 * Each value is the display name + its normalized key into
+	 * {@link CharacterSheetState.INTERDICT_BOON_FIELDS}.
+	 * @type {Array<{level:number, name:string, key:string}>}
+	 */
+	static MOLOCH_INTERDICTION_BOONS = [
+		{level: 7, name: "Red Cant", key: "red cant"},
+		{level: 13, name: "Slippery Ploy", key: "slippery ploy"},
+		{level: 18, name: "Incontrovertible", key: "incontrovertible"},
+	];
+
+	/**
+	 * Apply the Moloch's Interdiction free boons whose prereq level the character has
+	 * reached. These are always-known boons that do NOT count against interdictBoonsKnown,
+	 * so they re-use the same per-boon {@link CharacterSheetState.INTERDICT_BOON_FIELDS}
+	 * effect derivation as selected boons but are applied independently of the player's
+	 * selected-boon list. Records the granted boon names on
+	 * `calculations.molochInterdictionBoonNames` for surfacing.
+	 * @param {object} calculations - The calculations object being built (mutated in place).
+	 * @param {{level:number, profBonus:number, chaMod:number}} ctx
+	 */
+	_applyMolochInterdictionBoons (calculations, ctx) {
+		const defs = CharacterSheetState.INTERDICT_BOON_FIELDS;
+		const granted = [];
+		for (const boon of CharacterSheetState.MOLOCH_INTERDICTION_BOONS) {
+			if ((ctx?.level || 0) < boon.level) continue;
+			const apply = defs[boon.key];
+			if (apply) apply(calculations, ctx);
+			granted.push(boon.name);
+		}
+		calculations.molochInterdictionBoonNames = granted;
+	}
+
+	/**
+	 * Whether an Interdict Boon exposes a player-triggerable on-sheet activation
+	 * (see {@link CharacterSheetState.INTERDICT_BOON_ACTIVATIONS}).
+	 * @param {string} boonName
+	 * @returns {boolean}
+	 */
+	hasInterdictBoonActivation (boonName) {
+		return !!CharacterSheetState.INTERDICT_BOON_ACTIVATIONS[
+			CharacterSheetState._normalizeInterdictBoonName(boonName)
+		];
+	}
+
+	/**
+	 * Apply an Interdict Boon's discrete on-sheet activation (e.g. Soul Eater temp HP).
+	 * No-op (returns null) for boons without one.
+	 * @param {string} boonName
+	 * @param {object} [calculations] - Pre-computed `getFeatureCalculations()` (optional).
+	 * @returns {{label:string}|null}
+	 */
+	applyInterdictBoonActivation (boonName, calculations = null) {
+		const def = CharacterSheetState.INTERDICT_BOON_ACTIVATIONS[
+			CharacterSheetState._normalizeInterdictBoonName(boonName)
+		];
+		if (!def) return null;
+		const calcs = calculations || this.getFeatureCalculations?.() || {};
+		return def.apply(this, calcs) || null;
 	}
 	// #endregion
 
@@ -33918,6 +34089,12 @@ class CharacterSheetState {
 			if (matches) {
 				// Clone the modifier and add parsed advantage/disadvantage flags
 				const resultMod = {...mod};
+				// Provenance: advantage/disadvantage parsed out of the modType *string*
+				// (e.g. "check:cha:advantage") carries `value:1` as a presence sentinel,
+				// not a numeric bonus. Mark it so the aggregator zeroes that sentinel —
+				// without clobbering modifiers that carry an explicit `advantage` field
+				// alongside a real `value` (e.g. custom abilities {value:5, advantage:true}).
+				if (advantage || disadvantage) resultMod._advFromType = true;
 				if (advantage && !resultMod.advantage) resultMod.advantage = true;
 				if (disadvantage && !resultMod.disadvantage) resultMod.disadvantage = true;
 				// Store extra qualifiers for conditional display
@@ -34007,7 +34184,12 @@ class CharacterSheetState {
 							conditional: mod.conditional,
 							advantage: !!mod.advantage,
 							disadvantage: !!mod.disadvantage,
-							bonus: typeof mod.value === "number" ? mod.value : 0,
+							// Advantage/disadvantage modifiers whose effect is encoded in the
+							// modType string carry value:1 as a *presence sentinel* (the effect
+							// lives in the ":advantage"/":disadvantage" modType), so the picker
+							// must NOT show a phantom "+1" chip for them. Modifiers that carry an
+							// explicit numeric `value` alongside an `advantage` field still show it.
+							bonus: mod._advFromType ? 0 : (typeof mod.value === "number" ? mod.value : 0),
 							target: mod._baseType || mod.type || "",
 						});
 					}
@@ -34027,8 +34209,14 @@ class CharacterSheetState {
 				result.conditionals.push(mod.conditional);
 			}
 
-			// Numeric bonus calculation
-			let value = mod.value || 0;
+			// Numeric bonus calculation. Advantage/disadvantage modifiers whose effect is
+			// encoded in the modType string (":advantage"/":disadvantage") carry value:1 as a
+			// *presence sentinel* — that sentinel must NOT leak into the numeric total, otherwise
+			// an advantage-only modifier reads as a flat +1 (e.g. Moloch's Blessing / Forked
+			// Tongue Improvement giving +1 instead of advantage). Modifiers that carry an explicit
+			// numeric `value` alongside an `advantage` field (e.g. custom abilities) keep it. The
+			// advantage flag itself is still honoured below and via getAdvantageState().
+			let value = mod._advFromType ? 0 : (mod.value || 0);
 
 			// Per-level modifiers
 			if (mod.perLevel) {
@@ -38350,6 +38538,63 @@ class CharacterSheetState {
 		const info = activationInfo === undefined ? this.detectActivatableFeature(feature) : activationInfo;
 		if (info?.isToggle) return false;
 		return true;
+	}
+
+	/**
+	 * GENERIC split predicate (R21): is this {@link getActivatableFeatures} entry a
+	 * limited-use ABILITY (one-shot / trigger / instant — "Use it") rather than a sustained
+	 * TOGGLE state (Rage, Bladesong, a stance — "turn it on/off")?
+	 *
+	 * This is the single source of truth for the abilities-area vs active-states-panel
+	 * boundary. Such abilities surface ONLY in the features/abilities area (with a working
+	 * Use button routed to the canonical activation pipeline); they must NEVER appear in the
+	 * generic active-states "Available to Activate" list. Genuine toggles/stances stay in the
+	 * active-states panel.
+	 *
+	 * Custom homebrew abilities are deliberately excluded here — they have their own
+	 * Resources/Custom-Abilities surfaces and filtering paths.
+	 *
+	 * @param {{interactionMode?: string, activationInfo?: object, feature?: {isCustomAbility?: boolean}}} af
+	 *   An entry from getActivatableFeatures().
+	 * @returns {boolean}
+	 */
+	static isActivatableAbilityEntry (af) {
+		if (!af) return false;
+		if (af.feature?.isCustomAbility) return false;
+		const info = af.activationInfo || {};
+		if (info.isToggle === true) return false;
+		const mode = af.interactionMode || info.interactionMode || (info.isToggle ? "toggle" : "");
+		if (mode === "toggle") return false;
+		return mode === "limited" || mode === "trigger" || mode === "instant" || info.isInstant === true;
+	}
+
+	/**
+	 * (R21 #14) Is this feature an Illrigger Interdict Boon (`ItdBoon` optional feature)?
+	 * Generic, by featureType — mirrors {@link getInterdictBoons}. Boons are durational
+	 * seal-expending buffs (Hellish Frenzy, Shadow Shroud, Veil of Lies, Hellsight, …) that
+	 * the player INVOKES from the abilities area, not free on/off toggles; they must never sit
+	 * in the active-states "Available to Activate" list. The 4 with on-sheet effects keep their
+	 * named ACTIVE_STATE_TYPES binding so invoking turns on the real buff (+2 AC / Invisible /
+	 * truesight + duration) and surfaces it in "Currently Active".
+	 * @param {object} feature
+	 * @returns {boolean}
+	 */
+	static isInterdictBoonFeature (feature) {
+		const types = feature?.optionalFeatureTypes || feature?.featureType;
+		if (Array.isArray(types)) return types.includes("ItdBoon");
+		return types === "ItdBoon";
+	}
+
+	/**
+	 * (R21 #14) Companion to {@link isActivatableAbilityEntry} for {@link getActivatableFeatures}
+	 * entries that are interdict boons. Boons surface in the abilities area (with an invoke
+	 * button) and are filtered out of the generic active-states list — same boundary, but a
+	 * boon keeps its named toggle stateType so invoking applies its curated effect.
+	 * @param {{feature?: object}} af An entry from getActivatableFeatures().
+	 * @returns {boolean}
+	 */
+	static isInterdictBoonEntry (af) {
+		return !!af && CharacterSheetState.isInterdictBoonFeature(af.feature);
 	}
 	// #endregion
 
