@@ -7903,8 +7903,34 @@ class CharacterSheetPage {
 			case "guided strike": return this._pUseGuidedStrike(feature, resource, resourceCost);
 			case "forked tongue": return this._pOpenForkedTongueSwap(feature);
 			case "baleful interdict": return this._pUseBalefulInterdict(feature);
-			default: return false;
 		}
+		// (S2 contract) Generic save-prompt for any synthesized Divine Manifestation option that
+		// carries a save (_manifestationRequiresSave). Surfaces the DC + ability so the player
+		// knows what to enforce, and consumes the shared use. Non-save manifestation children
+		// (e.g. damage bursts) fall through to the generic limited-use pipeline unchanged.
+		if (feature?._manifestationRequiresSave) return this._pUseManifestationSaveOption(feature, resource, resourceCost);
+		return false;
+	}
+
+	/** (S2 contract) Spend a save-requiring Divine Manifestation option and surface its save DC. */
+	_pUseManifestationSaveOption (feature, resource, resourceCost = 1) {
+		if (resource && resource.current < resourceCost) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: `${feature.name} has no uses remaining.`}));
+			return true;
+		}
+
+		if (resource) this._state.setResourceCurrent(resource.id, resource.current - resourceCost);
+		else if (feature?.id) this._state.useFeature?.(feature.id);
+
+		const dc = feature._manifestationSaveDc;
+		const abil = feature._manifestationSaveAbility ? Parser.attAbvToFull(feature._manifestationSaveAbility) : null;
+		const saveStr = (dc != null && abil) ? `Targets make a DC ${dc} ${abil} saving throw.` : "Targets make a saving throw.";
+		JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: `⚜️ ${feature.name}: ${saveStr}`, autoHideTime: 10000}));
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		return true;
 	}
 
 	/** (R20 #1) Spend Healing Hands (PB×d4) and offer to apply the healing to yourself. */

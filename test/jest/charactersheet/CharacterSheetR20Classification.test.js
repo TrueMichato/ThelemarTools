@@ -245,6 +245,25 @@ describe("R20 — race-manifestation children classify generically (#5/#6, S2 co
 		expect(info?.resourceName).toBe("Tempest Surge");
 	});
 
+	test("a save-requiring manifestation option (S2 _manifestationRequiresSave) still classifies as a limited ABILITY", () => {
+		const saveOpt = {
+			name: "Order’s Demand",
+			source: "TGTT",
+			featureType: "Species",
+			level: 1,
+			_raceManifestation: "order",
+			uses: {max: 1, recharge: "short"},
+			_manifestationRequiresSave: true,
+			_manifestationSaveAbility: "wis",
+			_manifestationSaveDc: 14,
+			entries: ["Each creature of your choice within 30 feet must make a DC 14 Wisdom saving throw."],
+		};
+		const info = detect(saveOpt);
+		expect(info?.interactionMode).toBe("limited");
+		expect(info?.isToggle).toBe(false);
+		expect(info?.resourceName).toBe("Order’s Demand");
+	});
+
 	test("buildGuidedStrikeApplication applies +10 to an attack roll's total", () => {
 		const app = CharacterSheetState.buildGuidedStrikeApplication(13);
 		expect(app.bonus).toBe(10);
