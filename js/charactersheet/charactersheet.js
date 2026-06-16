@@ -6907,6 +6907,10 @@ class CharacterSheetPage {
 			// area with a canonical Use button — never in the generic active-states list.
 			// Genuine toggles/stances (Rage, stances, Purge Toxins) fall through and remain.
 			if (CharacterSheetState.isActivatableAbilityEntry(af)) return false;
+			// (R21 #14) Interdict boons are invoked from the abilities area (expend a seal to
+			// turn on a durational buff). They must NOT sit in "Available to Activate" as an
+			// un-flipped toggle; once active they reappear in "Currently Active" (Section 1).
+			if (CharacterSheetState.isInterdictBoonEntry(af)) return false;
 			// Druid Wild Shape / Wild Companion / Zodiac Form are handled by the
 			// dedicated Druid Resources modal — drop them from the generic list
 			// (only once that module is available, so a failure never strands them).
@@ -8081,17 +8085,19 @@ class CharacterSheetPage {
 
 	/**
 	 * (R21) Resolve the {@link CharacterSheetState.getActivatableFeatures} entry for a feature
-	 * when that feature is a classified limited-use ABILITY (the abilities-area "Use" surface).
-	 * Returns null for sustained toggles/stances, custom abilities, and non-activatable
-	 * features — those are NOT driven from the features area.
+	 * when that feature is invoked from the abilities area — either a classified limited-use
+	 * ABILITY (Healing Hands, Guided Strike, …) or an interdict BOON (expend a seal to turn on
+	 * a durational buff). Returns null for sustained non-boon toggles/stances, custom
+	 * abilities, and non-activatable features — those are NOT driven from the features area.
 	 * @param {object} feature
 	 * @returns {object|null}
 	 */
 	_getActivatableAbilityForFeature (feature) {
 		if (!feature?.id) return null;
 		const af = this._state.getActivatableFeatures().find(a => a.feature?.id === feature.id);
-		if (!af || !CharacterSheetState.isActivatableAbilityEntry(af)) return null;
-		return af;
+		if (!af) return null;
+		if (CharacterSheetState.isActivatableAbilityEntry(af) || CharacterSheetState.isInterdictBoonEntry(af)) return af;
+		return null;
 	}
 
 	/**
@@ -8099,13 +8105,17 @@ class CharacterSheetPage {
 	 * resolved activatable entry through {@link _activateFeatureState} (which dispatches to the
 	 * bespoke R20 handlers — Healing Hands roll+apply, Guided Strike +10, Forked Tongue swap,
 	 * Baleful Interdict → Combat tab, manifestation save — then the generic limited-use
-	 * consumption), and refreshes the features area so its use badge stays current.
+	 * consumption, or for an interdict boon: spend a seal + activate its named buff state),
+	 * and refreshes the features area so its use badge stays current.
 	 * @param {object} feature
 	 * @returns {Promise<boolean>} true if handled as an ability
 	 */
 	async _pUseFeatureAbility (feature) {
 		const af = this._getActivatableAbilityForFeature(feature);
 		if (!af) return false;
+		// An already-running interdict boon is managed from "Currently Active" (Section 1);
+		// re-invoking from the abilities area would double-spend a seal and stack the buff.
+		if (af.isActive && CharacterSheetState.isInterdictBoonEntry(af)) return true;
 		const stateType = af.activationInfo?.stateType || CharacterSheetState.ACTIVE_STATE_TYPES[af.stateTypeId];
 		const resourceCost = af.resource?.cost || af.activationInfo?.resourceCost || stateType?.resourceCost || 1;
 		await this._activateFeatureState(af.feature, af.stateTypeId, stateType, af.resource, resourceCost, af.activationInfo);

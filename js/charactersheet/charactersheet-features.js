@@ -1615,7 +1615,11 @@ class CharacterSheetFeatures {
 		// This features-area button is the single canonical "use this ability" path.
 		const abilityEntry = this._page?._getActivatableAbilityForFeature?.(feature) || null;
 		const isAbility = !!abilityEntry;
-		const showUseBtn = hasUses || isAbility;
+		// (R21 #14) An interdict boon that is already running is managed from the active-states
+		// "Currently Active" section (turn it off there); don't offer a second invoke here that
+		// would double-spend a seal. Limited abilities stay re-usable.
+		const isActiveBoon = !!abilityEntry?.isActive && CharacterSheetState.isInterdictBoonEntry?.(abilityEntry);
+		const showUseBtn = (hasUses || isAbility) && !isActiveBoon;
 
 		// Feature name hover link — delegate to the single centralised builder on
 		// the page so every feature type (class/subclass, species, background,

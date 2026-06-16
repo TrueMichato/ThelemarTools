@@ -36414,25 +36414,6 @@ class CharacterSheetState {
 			});
 		}
 
-		// ===== INTERDICT BOON ABILITIES (R21 #14) =====
-		// Active Illrigger interdict boons (ItdBoon optional features that "expend a seal")
-		// are limited-use ABILITIES drawing on the Baleful Interdict seal pool — NOT live
-		// toggle states. Classifying them here (BEFORE the ACTIVE_STATE_TYPES name loop) keeps
-		// them out of the generic active-states "Available to Activate" panel and surfaces them
-		// in the features/abilities area with a Use button, consistent with every other
-		// limited-use ability. Generic across all expend-a-seal boons (Hellish Frenzy, Shadow
-		// Shroud, Veil of Lies, Hellsight, Bedevil, …). Passive boons fall through to the
-		// existing passive/no-op handling. The boons' ongoing effect surfacing (Invisible, +2
-		// AC, truesight) is owned by the interdict-boon effect layer, not this classifier.
-		const isInterdictBoon = feature.optionalFeatureTypes?.includes("ItdBoon")
-			|| (Array.isArray(feature.featureType) && feature.featureType.includes("ItdBoon"));
-		if (isInterdictBoon && /\bexpend (?:a|an|one|\d+) seals?\b/i.test(text)) {
-			return this._buildAbilityActivationInfo(feature, rawText, text, {
-				resourceName: "Baleful Interdict",
-				resourceCost: 1,
-			});
-		}
-
 		// Exclude non-activatable features that might match patterns
 		const excludedNames = [
 			"suggested characteristics",
@@ -38397,6 +38378,35 @@ class CharacterSheetState {
 		const mode = af.interactionMode || info.interactionMode || (info.isToggle ? "toggle" : "");
 		if (mode === "toggle") return false;
 		return mode === "limited" || mode === "trigger" || mode === "instant" || info.isInstant === true;
+	}
+
+	/**
+	 * (R21 #14) Is this feature an Illrigger Interdict Boon (`ItdBoon` optional feature)?
+	 * Generic, by featureType — mirrors {@link getInterdictBoons}. Boons are durational
+	 * seal-expending buffs (Hellish Frenzy, Shadow Shroud, Veil of Lies, Hellsight, …) that
+	 * the player INVOKES from the abilities area, not free on/off toggles; they must never sit
+	 * in the active-states "Available to Activate" list. The 4 with on-sheet effects keep their
+	 * named ACTIVE_STATE_TYPES binding so invoking turns on the real buff (+2 AC / Invisible /
+	 * truesight + duration) and surfaces it in "Currently Active".
+	 * @param {object} feature
+	 * @returns {boolean}
+	 */
+	static isInterdictBoonFeature (feature) {
+		const types = feature?.optionalFeatureTypes || feature?.featureType;
+		if (Array.isArray(types)) return types.includes("ItdBoon");
+		return types === "ItdBoon";
+	}
+
+	/**
+	 * (R21 #14) Companion to {@link isActivatableAbilityEntry} for {@link getActivatableFeatures}
+	 * entries that are interdict boons. Boons surface in the abilities area (with an invoke
+	 * button) and are filtered out of the generic active-states list — same boundary, but a
+	 * boon keeps its named toggle stateType so invoking applies its curated effect.
+	 * @param {{feature?: object}} af An entry from getActivatableFeatures().
+	 * @returns {boolean}
+	 */
+	static isInterdictBoonEntry (af) {
+		return !!af && CharacterSheetState.isInterdictBoonFeature(af.feature);
 	}
 	// #endregion
 
