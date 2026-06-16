@@ -872,6 +872,41 @@ class CharacterSheetRest {
 		};
 	}
 
+	// Canonical TGTT (Traveler's Guide to Thelemar) language set, used as a fallback when the
+	// homebrew language data isn't loaded. Kept in sync with homebrew/TravelersGuidetoThelemar.json.
+	static _TGTT_LANGUAGES_FALLBACK = [
+		"Common", "Lexalian", "Olympian", "Jaknian", "Clairnian", "Hubian", "Old Common", "Stygian",
+		"Mictlanian", "Jotunn", "Skyspeak", "Gob", "Trunkodon", "Felis", "Minotaur", "Draconic",
+		"Sylvan", "Primordial", "Celestial",
+	];
+
+	/**
+	 * Compute the candidate replacement languages for a Forked Tongue swap. Sources the TGTT
+	 * language set from loaded homebrew data (`page._languagesData`, source "TGTT") so it stays in
+	 * sync, falling back to the hardcoded canonical list when the data isn't available. Excludes any
+	 * language the character already knows.
+	 * @returns {string[]}
+	 */
+	_getForkedTongueReplacementCandidates () {
+		const langData = this._page?._languagesData || [];
+		let tgttLangs = langData
+			.filter(l => l && l.source === "TGTT" && l.name)
+			.map(l => l.name);
+		if (!tgttLangs.length) tgttLangs = [...CharacterSheetRest._TGTT_LANGUAGES_FALLBACK];
+
+		// De-duplicate (preserving order) and drop anything already known.
+		const known = new Set((this._state.getLanguages?.() || []).map(l => l.toLowerCase()));
+		const seen = new Set();
+		const out = [];
+		for (const lang of tgttLangs) {
+			const key = lang.toLowerCase();
+			if (seen.has(key) || known.has(key)) continue;
+			seen.add(key);
+			out.push(lang);
+		}
+		return out;
+	}
+
 	/**
 	 * Build a Forked Tongue language-swap control for the long-rest dialog (Illrigger).
 	 * On a long rest the character may replace ONE of their swappable spoken languages
@@ -886,14 +921,8 @@ class CharacterSheetRest {
 		const swappable = this._state.getForkedTongueSwappableLanguages?.() || [];
 		if (!swappable.length) return null;
 
-		// Candidate replacement languages: a standard spread minus anything already known.
-		const STANDARD_LANGUAGES = [
-			"Abyssal", "Aquan", "Auran", "Celestial", "Deep Speech", "Draconic", "Dwarvish",
-			"Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Ignan", "Orc", "Primordial",
-			"Sylvan", "Terran", "Undercommon",
-		];
-		const known = new Set((this._state.getLanguages?.() || []).map(l => l.toLowerCase()));
-		const replacements = STANDARD_LANGUAGES.filter(l => !known.has(l.toLowerCase()));
+		// Candidate replacement languages: the TGTT set minus anything already known.
+		const replacements = this._getForkedTongueReplacementCandidates();
 
 		const cbEnable = e_({tag: "input", attrs: {type: "checkbox"}});
 		cbEnable.checked = false;
@@ -938,6 +967,93 @@ class CharacterSheetRest {
 				return false;
 			},
 		};
+	}
+
+	/**
+	 * Open the standalone Forked Tongue language-swap modal (Illrigger).
+	 *
+	 * STABLE PUBLIC ENTRY POINT — reachable as `page._rest.openForkedTongueLanguageSwapModal()`.
+	 * The Foundation session (F) routes the "Use Forked Tongue" ability click here. Do not rename
+	 * without coordinating with F.
+	 *
+	 * On a long rest the once-per-rest swap gate is cleared, but the swap itself can be performed at
+	 * any time via this modal (it still enforces once-per-long-rest through
+	 * `state.swapForkedTongueLanguage`). The replacement candidates are TGTT languages only,
+	 * excluding ones the character already knows.
+	 * @returns {Promise<void>}
+	 */
+	async openForkedTongueLanguageSwapModal () {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		if (!calc.hasForkedTongue) {
+			JqueryUtil.doToast({type: "warning", content: "This character doesn't have Forked Tongue."});
+			return;
+		}
+
+		const swappable = this._state.getForkedTongueSwappableLanguages?.() || [];
+		if (!swappable.length) {
+			JqueryUtil.doToast({type: "warning", content: "Forked Tongue: no swappable spoken languages to swap yet."});
+			return;
+		}
+
+		if (this._state.hasSwappedForkedTongueSinceLongRest?.()) {
+			JqueryUtil.doToast({type: "warning", content: "Forked Tongue: you've already swapped a language since your last long rest."});
+			return;
+		}
+
+		const replacements = this._getForkedTongueReplacementCandidates();
+		if (!replacements.length) {
+			JqueryUtil.doToast({type: "warning", content: "Forked Tongue: no available TGTT languages left to swap into."});
+			return;
+		}
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "👅 Forked Tongue — Swap Language",
+			isMinHeight0: true,
+			isWidth100: true,
+		});
+
+		const selOld = e_({tag: "select", clazz: "form-control input-sm charsheet__forked-tongue-old-select"});
+		swappable.forEach(lang => selOld.appendChild(e_({tag: "option", val: lang, txt: lang})));
+
+		const selNew = e_({tag: "select", clazz: "form-control input-sm charsheet__forked-tongue-new-select"});
+		replacements.forEach(lang => selNew.appendChild(e_({tag: "option", val: lang, txt: lang})));
+
+		const body = e_({outer: `<div class="charsheet__rest-modal">
+			<div class="charsheet__rest-section">
+				<p class="ve-muted ve-small mb-2">Replace one of your swappable spoken languages with a Traveler's Guide to Thelemar language (once per long rest):</p>
+			</div>
+		</div>`});
+		const swapRow = e_({tag: "div", clazz: "ve-flex-v-center", attrs: {style: "gap: 6px; margin: 4px 0;"}});
+		swapRow.appendChild(selOld);
+		swapRow.appendChild(e_({tag: "span", txt: "→"}));
+		swapRow.appendChild(selNew);
+		body.querySelector(".charsheet__rest-section").appendChild(swapRow);
+
+		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel", click: () => doClose(false)});
+		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Swap Language"});
+		btnConfirm.onClick(() => {
+			const oldLang = selOld.value;
+			const newLang = selNew.value;
+			if (!oldLang || !newLang || oldLang.toLowerCase() === newLang.toLowerCase()) {
+				JqueryUtil.doToast({type: "warning", content: "Choose two different languages to swap."});
+				return;
+			}
+			if (this._state.swapForkedTongueLanguage?.(oldLang, newLang)) {
+				this._page.saveCharacter();
+				this._page.renderCharacter();
+				doClose(true);
+				JqueryUtil.doToast({type: "success", content: `Forked Tongue: swapped ${oldLang} → ${newLang}.`});
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "Forked Tongue: unable to swap that language."});
+			}
+		});
+
+		const footer = e_({tag: "div", clazz: "ve-flex-v-center ve-flex-h-right", attrs: {style: "gap: 8px; margin-top: 12px;"}});
+		footer.appendChild(btnCancel);
+		footer.appendChild(btnConfirm);
+		body.appendChild(footer);
+
+		modalInner.appendChild(body);
 	}
 
 	/**

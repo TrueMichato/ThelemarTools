@@ -3798,7 +3798,7 @@ class CharacterSheetState {
 			},
 
 			// Forked Tongue (Illrigger L1/L9) - chosen spoken-only languages that can be
-			// swapped on a long rest (once per rest). Infernal is granted automatically via
+			// swapped on a long rest (once per rest). Mictlanian is granted automatically via
 			// the class-feature effect pipeline; these are the player-chosen *swappable*
 			// spoken languages (2 at L1, 3 once Forked Tongue Improvement is gained at L9).
 			forkedTongue: {
@@ -9859,7 +9859,7 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Forked Tongue (Illrigger)
-	// Forked Tongue (L1) grants Infernal (speak/read/write) automatically via the
+	// Forked Tongue (L1) grants Mictlanian (speak/read/write) automatically via the
 	// class-feature effect pipeline, plus a number of *swappable* spoken-only languages
 	// the player chooses (2 at L1, 3 once Forked Tongue Improvement is gained at L9).
 	// On a long rest the player may replace ONE swappable spoken language with another
@@ -9915,7 +9915,7 @@ class CharacterSheetState {
 
 	/**
 	 * Add a swappable spoken language. Mirrors it into `_data.languages` so the
-	 * Linguistics bonus counts it. Rejects duplicates, Infernal (the fixed grant),
+	 * Linguistics bonus counts it. Rejects duplicates, Mictlanian (the fixed grant),
 	 * and additions beyond the current maximum.
 	 * @param {string} language
 	 * @returns {boolean} true if added
@@ -9923,7 +9923,7 @@ class CharacterSheetState {
 	addForkedTongueSwappableLanguage (language) {
 		if (!language || !String(language).trim()) return false;
 		const lang = String(language).trim();
-		if (lang.toLowerCase() === "infernal") return false;
+		if (lang.toLowerCase() === "mictlanian") return false;
 		const ft = this.getForkedTongueState();
 		if (ft.swappableLanguages.some(l => l.toLowerCase() === lang.toLowerCase())) return false;
 		if (ft.swappableLanguages.length >= this.getForkedTongueMaxSwappable()) return false;
@@ -9959,7 +9959,7 @@ class CharacterSheetState {
 		if (ft.swappedSinceLongRest) return false; // once per long rest
 		if (!newLang || !String(newLang).trim()) return false;
 		const newName = String(newLang).trim();
-		if (newName.toLowerCase() === "infernal") return false;
+		if (newName.toLowerCase() === "mictlanian") return false;
 		const idx = ft.swappableLanguages.findIndex(l => l.toLowerCase() === String(oldLang).toLowerCase());
 		if (idx < 0) return false;
 		// Reject a no-op / duplicate swap (new language already chosen elsewhere).
@@ -9981,13 +9981,13 @@ class CharacterSheetState {
 
 	/**
 	 * Remove a former swappable language from `_data.languages`, but only if it is not
-	 * Infernal (the fixed grant) and not otherwise granted by a class feature.
+	 * Mictlanian (the fixed grant) and not otherwise granted by a class feature.
 	 * @param {string} language
 	 * @private
 	 */
 	_removeForkedTongueLanguageFromList (language) {
 		if (!language) return;
-		if (String(language).toLowerCase() === "infernal") return;
+		if (String(language).toLowerCase() === "mictlanian") return;
 		const classGranted = (this._data._classFeatureLanguages || [])
 			.some(l => l.toLowerCase() === String(language).toLowerCase());
 		if (classGranted) return;
@@ -20978,12 +20978,12 @@ class CharacterSheetState {
 		// ILLRIGGER FEATURES (MCDM — The Illrigger Revised)
 		// =========================================================
 
-		// Forked Tongue (L1): grant Infernal (speak/read/write). The swappable
+		// Forked Tongue (L1): grant Mictlanian (speak/read/write). The swappable
 		// spoken languages are player choices managed via addForkedTongueSwappableLanguage.
 		if (calculations.hasForkedTongue && !alreadyProcessed("Forked Tongue")) {
 			effects.push({
 				type: "language",
-				language: "Infernal",
+				language: "Mictlanian",
 				source: "Forked Tongue",
 			});
 		}
