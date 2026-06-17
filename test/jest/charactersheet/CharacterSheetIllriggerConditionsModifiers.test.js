@@ -309,3 +309,184 @@ describe("#11 Intransigent ally-count chooser drives the feature summary", () =>
 		expect(summaryFn(calcs, self3)).toBe("You + 3 chosen creatures within 10 ft are immune to charmed (while conscious)");
 	});
 });
+
+// =============================================================================
+// #7 — Thelemar condition resolver: abilities APPLY the Thelemar variant
+//      (identity, not just effects), and feature TEXT links/hovers the Thelemar
+//      condition rather than the 2014/2024 one.
+// =============================================================================
+describe("#7 Thelemar condition identity resolver (mechanical application)", () => {
+	it("getThelemarConditionVariant returns the _tgtt def only when it exists", () => {
+		expect(CharacterSheetState.getThelemarConditionVariant("invisible")?.source).toBe("TGTT");
+		expect(CharacterSheetState.getThelemarConditionVariant("Invisible")?.name).toBe("Invisible");
+		expect(CharacterSheetState.getThelemarConditionVariant("prone")?.source).toBe("TGTT");
+		// No variant for these — must NOT be invented.
+		expect(CharacterSheetState.getThelemarConditionVariant("charmed")).toBeNull();
+		expect(CharacterSheetState.getThelemarConditionVariant("exhaustion")).toBeNull();
+		expect(CharacterSheetState.getThelemarConditionVariant("")).toBeNull();
+	});
+
+	it("a Thelemar character self-applying Invisible BY NAME stores the Thelemar identity (name+source)", () => {
+		const state = makeThelemarCharacter();
+		// How abilities self-apply (string name / no explicit source: addsConditions,
+		// spell & play-mode buttons).
+		state.addCondition("Invisible");
+
+		const stored = state.getConditions().find(c => c.name.toLowerCase() === "invisible");
+		expect(stored).toBeTruthy();
+		expect(stored.source).toBe("TGTT"); // identity, not just effects
+
+		const active = state._data.activeStates.find(s => s.isCondition && s.conditionName.toLowerCase() === "invisible");
+		expect(active.conditionSource).toBe("TGTT");
+		// Effects are the Thelemar variant (Hidden-to-sight note present).
+		expect(active.customEffects.some(e => e.type === "note" && /hidden/i.test(e.value || ""))).toBe(true);
+	});
+
+	it("the resolved Thelemar condition removes cleanly when removed BY NAME (source agreement)", () => {
+		const state = makeThelemarCharacter();
+		state.addCondition("Frightened");
+		expect(state.hasCondition("frightened")).toBe(true);
+		// Removal paths (rest, play mode) pass a bare name — must still match the
+		// stored Thelemar-sourced condition.
+		state.removeCondition("Frightened");
+		expect(state.hasCondition("frightened")).toBe(false);
+		expect(state._data.activeStates.some(s => s.isCondition && s.conditionName.toLowerCase() === "frightened")).toBe(false);
+	});
+
+	it("a combat action self-applying a condition resolves the Thelemar identity via the option", () => {
+		const state = makeThelemarCharacter();
+		// Combat self-conditions carry the granting feature's NAME as source.
+		const added = state.addCondition({name: "Invisible", source: "Veil of Lies"}, {resolveThelemarVariant: true});
+		expect(added).toBe(true);
+		const stored = state.getConditions().find(c => c.name.toLowerCase() === "invisible");
+		expect(stored.source).toBe("TGTT");
+	});
+
+	it("conditions without a Thelemar variant keep their given identity (charmed stays generic)", () => {
+		const state = makeThelemarCharacter();
+		state.addCondition("Charmed");
+		const stored = state.getConditions().find(c => c.name.toLowerCase() === "charmed");
+		expect(stored.source).not.toBe("TGTT"); // no charmed_tgtt → not remapped
+	});
+
+	it("explicit-source callers (Add Condition modal) are respected, not overridden", () => {
+		const state = makeThelemarCharacter();
+		// Modal passes a deliberately chosen source object.
+		state.addCondition({name: "Invisible", source: "XPHB"});
+		const stored = state.getConditions().find(c => c.name.toLowerCase() === "invisible");
+		expect(stored.source).toBe("XPHB");
+	});
+
+	it("non-Thelemar characters are never remapped (no leak)", () => {
+		const state = makeBaseCharacter();
+		state.addCondition("Invisible");
+		const stored = state.getConditions().find(c => c.name.toLowerCase() === "invisible");
+		expect(stored.source).not.toBe("TGTT");
+	});
+});
+
+describe("#7 Thelemar feature-text rewrite (display / hover)", () => {
+	it("thelemarizeConditionTags promotes bare {@condition X} only for conditions with a Thelemar variant", () => {
+		const out = CharacterSheetState.thelemarizeConditionTags([
+			"You become {@condition invisible} and your foe is {@condition poisoned}.",
+			{type: "entries", entries: ["The target is {@condition charmed} and {@condition prone}."]},
+		]);
+		const flat = JSON.stringify(out);
+		expect(flat).toContain("{@condition invisible|TGTT}");
+		expect(flat).toContain("{@condition poisoned|TGTT}");
+		expect(flat).toContain("{@condition prone|TGTT}");
+		// charmed has no Thelemar variant → untouched.
+		expect(flat).toContain("{@condition charmed}");
+		expect(flat).not.toContain("{@condition charmed|TGTT}");
+	});
+
+	it("already-sourced condition tags are left untouched (idempotent)", () => {
+		const input = "Already {@condition incapacitated|tgtt} and {@condition invisible|xphb}.";
+		expect(CharacterSheetState.thelemarizeConditionTagString(input)).toBe(input);
+	});
+
+	it("thelemarizeConditionLinkHtml repoints a rendered condition link to the Thelemar variant", () => {
+		// Mirrors a real cached description (Baleful Interdict) rendered to PHB.
+		const html = `<p>become <a href="conditionsdiseases.html#invisible_phb" data-vet-page="conditionsdiseases.html" data-vet-source="PHB" data-vet-hash="invisible_phb">invisible</a></p>`;
+		const out = CharacterSheetState.thelemarizeConditionLinkHtml(html);
+		expect(out).toContain("conditionsdiseases.html#invisible_tgtt");
+		expect(out).toContain(`data-vet-source="TGTT"`);
+		expect(out).toContain(`data-vet-hash="invisible_tgtt"`);
+		expect(out).not.toContain("invisible_phb");
+	});
+
+	it("thelemarizeConditionLinkHtml leaves variant-less condition links (charmed) alone", () => {
+		const html = `<a href="conditionsdiseases.html#charmed_phb" data-vet-page="conditionsdiseases.html" data-vet-source="PHB" data-vet-hash="charmed_phb">charmed</a>`;
+		expect(CharacterSheetState.thelemarizeConditionLinkHtml(html)).toBe(html);
+	});
+
+	it("the load migration rewrites both entries and the cached description for a Thelemar character", () => {
+		const state = makeThelemarCharacter();
+		// Feature with bare entries AND a stale PHB-rendered description (the real bug).
+		state._data.features = [
+			{
+				name: "Veil of Lies",
+				className: "Illrigger",
+				entries: ["become {@condition invisible} for 10 minutes."],
+				description: `<p>become <a href="conditionsdiseases.html#invisible_phb" data-vet-page="conditionsdiseases.html" data-vet-source="PHB" data-vet-hash="invisible_phb">invisible</a></p>`,
+			},
+			// Description-only feature (no entries) — must still be HTML-rewritten.
+			{
+				name: "Baleful Interdict",
+				className: "Illrigger",
+				description: `<a href="conditionsdiseases.html#incapacitated_phb" data-vet-page="conditionsdiseases.html" data-vet-source="PHB" data-vet-hash="incapacitated_phb">incapacitated</a>`,
+			},
+			// Variant-less reference — must be untouched.
+			{name: "Charm Enemy", className: "Illrigger", entries: ["the target is {@condition charmed}."]},
+		];
+
+		state._migrateThelemarConditionTags();
+
+		expect(JSON.stringify(state._data.features[0].entries)).toContain("{@condition invisible|TGTT}");
+		// The cached description is refreshed: re-rendered from the rewritten entries
+		// when a Renderer is available, else HTML-rewritten in place. Either way it no
+		// longer points at the stale PHB condition.
+		expect(state._data.features[0].description).not.toContain("invisible_phb");
+		expect(/invisible(_tgtt|\|TGTT)/i.test(state._data.features[0].description)).toBe(true);
+		// Description-only feature has no entries to re-render → HTML rewriter repoints it.
+		expect(state._data.features[1].description).toContain("incapacitated_tgtt");
+		expect(JSON.stringify(state._data.features[2].entries)).toContain("{@condition charmed}");
+		expect(JSON.stringify(state._data.features[2].entries)).not.toContain("TGTT");
+	});
+
+	it("the migration is a no-op for non-Thelemar characters", () => {
+		const state = makeBaseCharacter();
+		state._data.features = [{name: "F", entries: ["become {@condition invisible}."]}];
+		state._migrateThelemarConditionTags();
+		expect(JSON.stringify(state._data.features[0].entries)).toContain("{@condition invisible}");
+		expect(JSON.stringify(state._data.features[0].entries)).not.toContain("TGTT");
+	});
+
+	it("re-applies after reconciliation re-syncs bare entries from source (Baleful Interdict clobber)", () => {
+		const state = makeThelemarCharacter();
+		state._data.features = [
+			{name: "Veil of Lies", className: "Illrigger", entries: ["become {@condition invisible}."]},
+		];
+		// Load migration thelemarizes the entries.
+		state._migrateThelemarConditionTags();
+		expect(JSON.stringify(state._data.features[0].entries)).toContain("{@condition invisible|TGTT}");
+
+		// Reconciliation re-syncs the feature from brew/source data, reintroducing the
+		// generic tag. The post-reconcile re-apply must restore the TGTT variant.
+		state._data.features[0].entries = ["become {@condition invisible}."];
+		state._applyThelemarConditionTags();
+		expect(JSON.stringify(state._data.features[0].entries)).toContain("{@condition invisible|TGTT}");
+		expect(JSON.stringify(state._data.features[0].entries)).not.toMatch(/\{@condition invisible\}/);
+	});
+
+	it("_applyThelemarConditionTags is idempotent (stable across repeated calls)", () => {
+		const state = makeThelemarCharacter();
+		state._data.features = [
+			{name: "Veil of Lies", className: "Illrigger", entries: ["become {@condition invisible}."]},
+		];
+		state._applyThelemarConditionTags();
+		const once = JSON.stringify(state._data.features[0].entries);
+		state._applyThelemarConditionTags();
+		expect(JSON.stringify(state._data.features[0].entries)).toBe(once);
+	});
+});

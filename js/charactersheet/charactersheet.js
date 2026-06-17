@@ -14262,6 +14262,10 @@ class CharacterSheetPage {
 			// and combat-method catalog are both available.
 			this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || []);
 			this._state.reconcileGrantedCombatMethods();
+			// Reconciliation re-syncs feature entries from brew/source data, which
+			// reintroduces generic `{@condition X}` tags. Re-apply the Thelemar
+			// condition rewrite so feature hovers stay on the TGTT variant. Idempotent.
+			this._state._applyThelemarConditionTags();
 		} catch (e) {
 			// Reconciliation is best-effort; never block render on a bad save.
 			// eslint-disable-next-line no-console
