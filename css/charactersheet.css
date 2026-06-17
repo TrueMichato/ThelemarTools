@@ -8868,10 +8868,12 @@ body.has-quickbuild-overlay .toast__container {
 
 /* Intransigent (Hellspeaker L11) extend-to-allies chooser. The card must make the
    "you may extend your charmed immunity to creatures of your choice" affordance
-   unmistakable, so the control gets a titled panel with a left accent stripe, a clear
-   inline label, a compact numeric stepper, and a live one-line effect summary. The
-   panel adopts the dark --cs-* design tokens (with literal fallbacks) so it reads as an
-   elevated surface inside the dark feature card rather than a jarring light box. */
+   unmistakable at a glance, so the panel leads with a high-contrast titled heading and
+   a prominent, accent-bordered live summary (the glance affordance), followed by a clear
+   inline label + compact numeric stepper. The live summary's left accent shifts from gold
+   (zero allies — advertises the extend call-to-action) to emerald (allies chosen — the
+   extension is active). The panel adopts the dark --cs-* design tokens (with literal
+   fallbacks) so it reads as an elevated surface inside the dark feature card. */
 .charsheet__intransigent-controls {
 	background: var(--cs-bg-surface, #1e293b);
 	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
@@ -8881,9 +8883,17 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 .charsheet__intransigent-title {
+	display: flex;
+	align-items: center;
+	gap: 0.4em;
+	font-size: 1.05em;
 	font-weight: 700;
-	color: var(--cs-accent-ruby-light, #fca5a5);
-	margin-bottom: 0.35em;
+	letter-spacing: 0.01em;
+	/* Use the SOLID ruby token — the "-light" token is a ~15% transparent background
+	   tint and renders nearly invisible as text, which previously buried this heading
+	   (the very affordance that announces the charmed immunity extends to others). */
+	color: var(--cs-accent-ruby, #ef4444);
+	margin-bottom: 0.4em;
 }
 
 .charsheet__intransigent-row {
@@ -8899,9 +8909,26 @@ body.has-quickbuild-overlay .toast__container {
 	width: 5rem;
 }
 
+/* The live one-line summary is the glance affordance: a prominent, accent-bordered pill
+   that states the current effect (and, at zero allies, advertises the extend option). */
 .charsheet__intransigent-live {
+	padding: 0.4em 0.6em;
+	border-radius: 6px;
+	border-left: 4px solid var(--cs-accent-ruby, #ef4444);
+	background: var(--cs-bg-elevated, #334155);
+	font-size: 0.95em;
 	font-weight: 600;
 	color: var(--cs-text-primary, #f1f5f9);
+}
+
+/* Zero allies → gold call-to-action accent that advertises the extend option. */
+.charsheet__intransigent-live--extend {
+	border-left-color: var(--cs-accent-gold, #f59e0b);
+}
+
+/* Allies chosen → emerald accent confirming the extension is active. */
+.charsheet__intransigent-live--active {
+	border-left-color: var(--cs-accent-emerald, #10b981);
 }
 
 .charsheet__intransigent-controls .ve-muted,

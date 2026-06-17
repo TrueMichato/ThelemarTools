@@ -27193,7 +27193,7 @@ class CharacterSheetState {
 			if (allies > 0) {
 				return `You + ${allies} chosen creature${allies === 1 ? "" : "s"} within ${r} ft are immune to charmed (while conscious)`;
 			}
-			return `You are immune to charmed (while conscious); may extend to creatures of your choice within ${r} ft`;
+			return `You are immune to charmed (while conscious); may also extend to creatures of your choice within ${r} ft`;
 		},
 		"superior interdict": (c) => {
 			if (!c.hasSuperiorInterdict) return null;
