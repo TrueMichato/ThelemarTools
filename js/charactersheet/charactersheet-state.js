@@ -38118,6 +38118,39 @@ class CharacterSheetState {
 			],
 		},
 
+		// TGTT Invisible - You are *Hidden* to sight-reliant creatures (not the generic
+		// "flat advantage/disadvantage" 2014/2024 Invisible). Mirrors hidden_tgtt's combat
+		// benefit but with the TGTT sight/true-seeing caveat. (#13: Illrigger Veil of Lies
+		// and Baleful Interdict reference {@condition invisible}; under Thelemar this must
+		// resolve to the TGTT Invisible, not the generic one.)
+		invisible_tgtt: {
+			name: "Invisible",
+			icon: "👻",
+			source: "TGTT",
+			description: "Hidden to creatures that rely on sight (unless they can see invisible creatures): advantage on attacks, disadvantage on attacks against you",
+			effects: [
+				{type: "advantage", target: "attack"},
+				{type: "disadvantage", target: "attacksAgainst"},
+				{type: "note", value: "You are Hidden to creatures that rely on sight, unless they can see invisible creatures (truesight, blindsight, etc.)"},
+			],
+		},
+
+		// TGTT Prone - Same attack profile as generic Prone, but knocking you prone forces
+		// a concentration check (Concentration Disruption).
+		prone_tgtt: {
+			name: "Prone",
+			icon: "⬇️",
+			source: "TGTT",
+			description: "Disadvantage on attacks; melee attacks against have advantage, ranged attacks against have disadvantage; concentration check when knocked prone",
+			effects: [
+				{type: "disadvantage", target: "attack"},
+				{type: "advantage", target: "meleeAttacksAgainst"},
+				{type: "disadvantage", target: "rangedAttacksAgainst"},
+				{type: "note", value: "Restricted movement: crawl, or spend half your Speed to stand up and end the condition"},
+				{type: "note", value: "When knocked prone, you must make a concentration check if concentrating on a spell"},
+			],
+		},
+
 		// Custom/Homebrew condition placeholder
 		// Homebrew conditions can be added dynamically
 	};
