@@ -215,13 +215,13 @@ describe("CharacterSheetClassUtils.reconcileClassFeatures", () => {
 	describe("safety / robustness", () => {
 		test("returns 0/0 when state is missing", () => {
 			const result = CharacterSheetClassUtils.reconcileClassFeatures(null, buildOpts());
-			expect(result).toEqual({added: 0, classesProcessed: 0});
+			expect(result).toEqual({added: 0, backfilled: 0, classesProcessed: 0});
 		});
 
 		test("returns 0/0 when getClassData is not a function", () => {
 			state.addClass({name: "Rogue", source: "XPHB", level: 7});
 			const result = CharacterSheetClassUtils.reconcileClassFeatures(state, {});
-			expect(result).toEqual({added: 0, classesProcessed: 0});
+			expect(result).toEqual({added: 0, backfilled: 0, classesProcessed: 0});
 		});
 
 		test("skips classes whose data cannot be resolved (homebrew not loaded)", () => {
