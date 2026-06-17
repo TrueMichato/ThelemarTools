@@ -3,56 +3,51 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 23 (Illrigger/Hochling — real character `vaa` = Hochling Illrigger 15 Hellspeaker) — IN PROGRESS
-
-Many of these are **repeat bugs** from Rounds 20–22 that recurred because prior fixes were
-**false greens**: synthetic Jest passed but the LIVE rendered DOM on the real character failed.
-Two structural root causes confirmed this round:
-1. **Parallel code paths, only one patched** (e.g. advantage→+1 fixed in `aggregateModifiers`
-   but NOT in `_recalculateCustomModifiers`).
-2. **The Illrigger class data requires a SECOND homebrew dependency, `IllriggerRevised`**
-   (TGTT `_meta.dependencies`), which the e2e harness never loaded — so Illrigger was tested
-   without its catalog and the granting/catalog bugs stayed invisible. Every session this round
-   MUST load BOTH `TravelersGuidetoThelemar.json` + `IllriggerRevised` and validate against the
-   real `vaa.json` in the live DOM.
-
-Ownership rule (single-owner classification): **S-A owns "what feature exists and where it
-generically surfaces"; S-B/S-C own "what happens when an already-existing feature mechanically
-applies."** S-A's feature-granting fix (#13) is a foundation that #8/#9/#11/#14 depend on.
-
-**S-A — feature granting + classification + abilities surfacing + hover + features tab (FOUNDATION)**
-* #13 — Some subclass abilities (Quid Pro Quo, Let's Make a Deal, Moloch's Interdiction, Intransigent)
-  have NO feature card in the features tab; validate top-level subclass-feature granting across ALL
-  classes/subclasses (real cause: top-level Hellspeaker subclassFeatures at L7/11/15 absent from `vaa.features`).
-* #3 — Purge Toxins should be an ability, not an active state.
-* #4 — Healing Hands + War God's Blessing (and ALL abilities) must be hoverable.
-* #5 — Guided Strike must be an ability; Use should ask which weapon attack to roll; right-clicking a
-  weapon attack should offer it.
-* #7 — Forked Tongue must be an ability.
-* #8 — Let's Make a Deal must be an ability (depends on #13 granting it first).
-* #14 — Quid Pro Quo must be an ability surfaced with its DC (= Interdict DC); depends on #13.
-
-**S-B — modifiers + conditions + damage-type rolls**
-* #2 — Phantom +1 to WIS/CHA rolls (`check:wis:advantage`/`check:cha:advantage` val=1 leak through
-  `_recalculateCustomModifiers`; also `save:advantage:poisoned`).
-* #10 — Terrorizing Force: no long-rest re-choice of damage type; wrong damage type written on rolls.
-* #12 — Hellish Avenger: wrong damage type written on rolls.
-* #16 — Many Illrigger abilities reference 2014/2024 conditions instead of Thelemar conditions.
-* #11 — Intransigent: condition-immunity mechanics + signal/chooser that it can extend to chosen allies
-  (S-A grants+classifies the feature; S-B owns the condition mechanics).
-
-**S-C — interdiction system: resources, Moloch boons, Hellsight, modals UX**
-* #6 — Resource mismatch between overview and combat tab (combat missing some; overview has stale
-  entries that must be deleted, e.g. passive riders persisted as resources).
-* #9 — Moloch's Interdiction doesn't add the free boons at the needed levels; the ones it adds are not
-  hoverable, don't affect the sheet, and have no Use button.
-* #15 — Hellsight boon: no way to remove the granted truesight afterward.
-* #17 — UI/UX upgrades for the Infernal Conduit modal, Interdiction modal, and Combat Masteries modal.
-
-**S-D — quickbuild**
-* #1 — QuickBuild doesn't allow the weapon-mastery choice (at least for Illrigger).
+_None._
 
 ## Closed Bugs
+
+### Round 23 (Illrigger/Hochling — real character `vaa` = Hochling Illrigger 15 Hellspeaker) — COMPLETE
+
+Repeat bugs from Rounds 20–22 that recurred because prior fixes were **false greens** (synthetic
+Jest passed; the LIVE rendered DOM on the real character failed). Cured this round by (a) loading
+BOTH `TravelersGuidetoThelemar.json` + `IllriggerRevised` (the TGTT `_meta.dependencies` second
+brew the e2e harness never loaded) and (b) verifying every fix in the live DOM against the real
+`vaa.json` — not just Jest. Fixed across three clusters (S-A foundation, S-B modifiers/conditions,
+S-C interdiction), integrated foundation-first; full gate green (eslint 0 / stylelint 0 / jest
+charactersheet 287 suites · 10,758 tests) and all 17 live-verified on vaa.
+
+* #1 — QuickBuild now offers the weapon-mastery picker for Illrigger. `_getWeaponMasteryCountAtLevel`
+  delegates to `CharacterSheetClassUtils.getWeaponMasteryCountAtLevel` (classFeature fallback).
+  LIVE (TGTT-IllR class): 0 → 2.
+* #2 — Phantom +1 to WIS/CHA gone. `_recalculateCustomModifiers` no longer adds the value:1 presence
+  sentinel of advantage/disadvantage-encoded modtypes as a flat bonus. LIVE: WIS check −1, CHA check 5.
+* #3 — Purge Toxins classified as an ability (FEATURE_CLASSIFICATION_OVERRIDES), not a toggle.
+  LIVE: `isToggle:false`, absent from ACTIVE_STATE_TYPES.
+* #4 — All classified abilities hoverable. `_getFeatureHoverLink` falls back to `feature.entries`.
+  LIVE: Healing Hands / War God's Blessing / Guided Strike render inline-entries hovers; none "Failed to load".
+* #5 — Guided Strike is an ability; Use prompts which weapon attack (one-shot +10), consumes only on a
+  real roll; right-click weapon-attack offers it. (`_pUseGuidedStrike*` present + live-verified.)
+* #6 — Overview and Combat resources match via shared `getGenericPoolResources()`; stale "<X> Improvement"
+  rider rows migrated away. LIVE: both surfaces == ["Invoke Hell"].
+* #7 — Forked Tongue is an ability with entries (backfilled via #13); hovers.
+* #8 — Let's Make a Deal surfaces as an ability (granted by #13).
+* #9 — Moloch's Interdiction free boons (Red Cant, Slippery Ploy) carry `source`, hover, and a seal-spend
+  Use ("Expend a seal", gated on seals>0). LIVE: both present with activation + canApply.
+* #10 — Terrorizing Force: long-rest damage-type re-choice added (rest dialog); roll prints the rider's own
+  damage type. #12 — Hellish Avenger likewise. `_rollDamage` splits differently-typed riders into typed extras.
+* #11 — Intransigent: charmed-immunity mechanics (conscious-gated, S-B) + a numeric ally-count chooser in the
+  feature card (S-A) that extends the immunity to chosen creatures. LIVE: input → summary updates, value persists.
+* #13 — Top-level Hellspeaker subclassFeatures (Moloch's Interdiction L7, Intransigent L11, Let's Make a
+  Deal L11, Quid Pro Quo L15) now granted + entries-backfilled on load; reconcile persists. Generic across
+  classes (TGTT `_copy` subclass whose subclassSource ≠ character subclass source). LIVE: 52 → 56 features.
+* #14 — Quid Pro Quo is an ability surfaced with "Save DC 18 (= Interdict DC)". LIVE: quidProQuoDc == interdictDc == 18.
+* #15 — Hellsight truesight removable: the boon is a `sense` state effect (truesight 60) added/removed by
+  toggle; stale baked base sense migrated away. LIVE: 0 → 60 → 0.
+* #16 — Illrigger self-applied conditions resolve to Thelemar `_tgtt` variants via `_resolveConditionEffects`
+  (gated on TGTT class/subclass source). LIVE: frightened/poisoned resolve `_tgtt` effects.
+* #17 — Interdiction / Infernal Conduit / Combat Masteries panels restyled on `--cs-*` design tokens
+  (readable on the dark sheet; carded rows, section headers, accent strips).
 
 ### Round 22 (Illrigger/Hochling real-character regressions — language pickers, ability surfacing, Hellspeaker/Moloch, Terrorizing Force) — COMPLETE
 
