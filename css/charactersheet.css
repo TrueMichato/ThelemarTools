@@ -8868,22 +8868,21 @@ body.has-quickbuild-overlay .toast__container {
 
 /* Intransigent (Hellspeaker L11) extend-to-allies chooser. The card must make the
    "you may extend your charmed immunity to creatures of your choice" affordance
-   unmistakable, so the control gets a titled, light panel (matching the proven-
-   readable original) with a left accent stripe, a clear inline label, a compact
-   numeric stepper, and a live one-line effect summary. Colours are explicit (rather
-   than theme vars, which resolve empty on this page) so the dark text always reads
-   against the light panel in both site themes. */
+   unmistakable, so the control gets a titled panel with a left accent stripe, a clear
+   inline label, a compact numeric stepper, and a live one-line effect summary. The
+   panel adopts the dark --cs-* design tokens (with literal fallbacks) so it reads as an
+   elevated surface inside the dark feature card rather than a jarring light box. */
 .charsheet__intransigent-controls {
-	background: var(--bs-body-bg-alt, #f8f9fa);
-	border: 1px solid var(--bs-border-color, #dee2e6);
-	border-left: 4px solid #7d2a2a;
+	background: var(--cs-bg-surface, #1e293b);
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+	border-left: 4px solid var(--cs-accent-ruby, #ef4444);
 	border-radius: 8px;
-	color: #212529;
+	color: var(--cs-text-primary, #f1f5f9);
 }
 
 .charsheet__intransigent-title {
 	font-weight: 700;
-	color: #7d2a2a;
+	color: var(--cs-accent-ruby-light, #fca5a5);
 	margin-bottom: 0.35em;
 }
 
@@ -8893,7 +8892,7 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__intransigent-label {
 	font-weight: 600;
-	color: #212529;
+	color: var(--cs-text-primary, #f1f5f9);
 }
 
 .charsheet__intransigent-ally-count {
@@ -8902,12 +8901,12 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__intransigent-live {
 	font-weight: 600;
-	color: #212529;
+	color: var(--cs-text-primary, #f1f5f9);
 }
 
 .charsheet__intransigent-controls .ve-muted,
 .charsheet__intransigent-controls em {
-	color: #5a6169 !important;
+	color: var(--cs-text-secondary, #94a3b8) !important;
 }
 
 /* Multi-mechanic reminder notes (e.g. Enduring Traveler): each distinct benefit on
