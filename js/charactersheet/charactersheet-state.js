@@ -4190,6 +4190,16 @@ class CharacterSheetState {
 		// verbatim). Strip it so the trait contributes nothing until activated.
 		this._migrateShellDefenseModifiers();
 
+		// Migrate Circle of the Zodiac constellation FORM features: older saves
+		// persisted their parsed effects (Aurochs carrying-capacity size bump,
+		// Octopus swim speed, …) as ENABLED always-on named modifiers. These
+		// forms are now modelled by the active Zodiac Form state (effects apply
+		// only while transformed into that form), so any persisted form-sourced
+		// named modifier is a stale always-on leak that survives the load
+		// round-trip (namedModifiers are restored verbatim). Strip them so a
+		// form contributes nothing until the druid actually transforms into it.
+		this._migrateZodiacFormFeatureModifiers();
+
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
 
@@ -4762,6 +4772,37 @@ class CharacterSheetState {
 				|| /\bFrom Shell Defense\b/.test(mod.note || "");
 			return !isShellDefense;
 		});
+	}
+
+	/**
+	 * Strip stale always-on named modifiers sourced from Circle of the Zodiac
+	 * constellation FORM features (Aurochs, Octopus, Griffon, …). These forms'
+	 * effects are owned by the active Zodiac Form state and must apply only
+	 * while the druid is transformed into that specific form; an enabled,
+	 * persisted form-sourced named modifier is a residue from older saves (or
+	 * pre-fix parsing) that leaks the bonus permanently. Identified by the
+	 * modifier's `sourceFeatureId` pointing at a form feature, so it is robust
+	 * to the modifier's own (sometimes annotated) name. Recalculates derived
+	 * custom modifiers afterwards so carrying capacity etc. drop back to base.
+	 */
+	_migrateZodiacFormFeatureModifiers () {
+		if (!this._data.namedModifiers?.length) return;
+
+		const formFeatureIds = new Set(
+			(this._data.features || [])
+				.filter(f => CharacterSheetState.isZodiacFormFeature(f))
+				.map(f => f.id)
+				.filter(Boolean),
+		);
+		if (!formFeatureIds.size) return;
+
+		const before = this._data.namedModifiers.length;
+		this._data.namedModifiers = this._data.namedModifiers.filter(
+			mod => !(mod.sourceFeatureId && formFeatureIds.has(mod.sourceFeatureId)),
+		);
+		if (this._data.namedModifiers.length !== before) {
+			this._recalculateCustomModifiers();
+		}
 	}
 
 	_migrateFeatures () {
@@ -8140,7 +8181,10 @@ class CharacterSheetState {
 			// Only handle abilityMod-based effects here
 			// value-based and proficiencyBonus-based are already in customModifiers via _recalculateCustomModifiers
 			if (mod.abilityMod) {
-				total += this.getAbilityMod(mod.abilityMod);
+				let v = this.getAbilityMod(mod.abilityMod);
+				// Optional floor (e.g. Magician grants minimum +1 even at low WIS)
+				if (mod.minValue != null) v = Math.max(mod.minValue, v);
+				total += v;
 			}
 		});
 
@@ -8187,7 +8231,9 @@ class CharacterSheetState {
 			if (mod.proficiencyBonus) {
 				total += this.getProficiencyBonus();
 			} else if (mod.abilityMod) {
-				total += this.getAbilityMod(mod.abilityMod);
+				let v = this.getAbilityMod(mod.abilityMod);
+				if (mod.minValue != null) v = Math.max(mod.minValue, v);
+				total += v;
 			} else {
 				total += mod.value || 0;
 			}
@@ -20935,17 +20981,23 @@ class CharacterSheetState {
 		}
 
 		// Primal Order: Magician (XPHB Druid 1) - Arcana/Nature skill bonus
-		if (calculations.hasMagician && calculations.magicianSkillBonus && !alreadyProcessed("Magician")) {
+		// Grants a bonus equal to the LIVE Wisdom modifier (minimum +1) to Arcana
+		// and Nature checks. Emitted as an abilityMod-based effect (not a baked
+		// numeric value) so the bonus tracks WIS as the score changes instead of
+		// drifting from a value snapshotted at registration time.
+		if (calculations.hasMagician && !alreadyProcessed("Magician")) {
 			effects.push({
 				type: "skillBonus",
 				skill: "arcana",
-				value: calculations.magicianSkillBonus,
+				abilityMod: "wis",
+				minValue: 1,
 				source: "Magician (Primal Order)",
 			});
 			effects.push({
 				type: "skillBonus",
 				skill: "nature",
-				value: calculations.magicianSkillBonus,
+				abilityMod: "wis",
+				minValue: 1,
 				source: "Magician (Primal Order)",
 			});
 		}
@@ -21455,7 +21507,27 @@ class CharacterSheetState {
 					// Jack of All Trades style - handled in skill calculations
 					return `${effect.source}: +half proficiency to unproficient checks`;
 				}
-				// Value-based skill bonuses (e.g., Magician: +WIS to Arcana/Nature)
+				// AbilityMod-based skill bonus (e.g. Magician: +WIS modifier to
+				// Arcana/Nature, minimum +1). Registered as a LIVE abilityMod
+				// modifier (value 0) so it follows the ability score and never
+				// bakes a numeric value that drifts when the score changes. The
+				// live value is summed by _getDynamicSkillFeatureBonus, which
+				// applies the optional `minValue` floor.
+				if (effect.skill && effect.abilityMod) {
+					this._addClassFeatureModifier({
+						name: effect.source,
+						type: `skill:${effect.skill}`,
+						value: 0,
+						abilityMod: effect.abilityMod,
+						minValue: effect.minValue,
+						note: `From ${effect.source}`,
+						enabled: true,
+					});
+					let live = this.getAbilityMod(effect.abilityMod);
+					if (effect.minValue != null) live = Math.max(effect.minValue, live);
+					return `${effect.source}: +${live} (${effect.abilityMod.toUpperCase()} modifier) to ${effect.skill} checks`;
+				}
+				// Value-based skill bonuses
 				if (effect.skill && effect.value) {
 					const skillTarget = `skill:${effect.skill}`;
 					this._addClassFeatureModifier({
@@ -28271,6 +28343,18 @@ class CharacterSheetState {
 			return;
 		}
 
+		// Circle of the Zodiac constellation FORM features (Aurochs, Octopus, …)
+		// are modelled as the active Zodiac Form state: their mechanical effects
+		// apply ONLY while transformed into that specific form (getEffects →
+		// customEffects gated to the active form, removed on revert). Skip the
+		// passive description parser so it never registers always-on named
+		// modifiers — those would leak permanently (e.g. Aurochs counting you as
+		// one size larger for carrying capacity while NOT in form, doubling it).
+		// Mirrors the Shell Defense / combat-method skips above.
+		if (CharacterSheetState.isZodiacFormFeature(feature)) {
+			return;
+		}
+
 		const modifiers = FeatureModifierParser.parseModifiers(feature.description, feature.name);
 		if (!modifiers.length) return;
 
@@ -34184,6 +34268,8 @@ class CharacterSheetState {
 		if (modifier.perClassLevel) newModifier.perClassLevel = modifier.perClassLevel;
 		if (modifier.multiplier) newModifier.multiplier = modifier.multiplier;
 		if (modifier.abilityMod) newModifier.abilityMod = modifier.abilityMod;
+		// Optional floor for abilityMod-based bonuses (e.g. Magician: min +1)
+		if (modifier.minValue != null) newModifier.minValue = modifier.minValue;
 		// Set/increase mode for ability:* and abilityMax:* modifiers
 		if (modifier.mode) newModifier.mode = modifier.mode;
 		if (hasProfBonus) newModifier.proficiencyBonus = true;
@@ -35874,6 +35960,32 @@ class CharacterSheetState {
 	/** Get a Zodiac Form definition by its id. */
 	static getZodiacFormDef (formId) {
 		return CharacterSheetState.ZODIAC_FORM_DEFS.find(f => f.id === formId) || null;
+	}
+
+	/**
+	 * True if `feature` is a Circle of the Zodiac constellation FORM feature
+	 * (one of the ZODIAC_FORM_DEFS entries, e.g. Aurochs / Octopus / Griffon),
+	 * as opposed to the subclass's framework features (Circle of the Zodiac,
+	 * Star Map, Zodiac Form: Month).
+	 *
+	 * The mechanical effects of a constellation form (carrying-capacity size
+	 * bump, swim speed, save advantage, …) apply ONLY while the druid is
+	 * transformed into THAT form, and are modelled by the active Zodiac Form
+	 * state (getEffects → customEffects, gated to the active form). The generic
+	 * description parser (_processFeatureModifiers) must therefore NOT register
+	 * always-on named modifiers for these features, or their bonuses would leak
+	 * permanently (e.g. Aurochs doubling carrying capacity while NOT in form).
+	 * Self-maintaining: matches by form name against ZODIAC_FORM_DEFS, so new
+	 * tiers (Star Week / Full Zodiac) are covered as their defs are added.
+	 */
+	static isZodiacFormFeature (feature) {
+		if (!feature) return false;
+		const isZodiacSubclass = /circle of the zodiac/i.test(feature.subclassName || "")
+			|| (feature.subclassShortName || "").toLowerCase() === "zodiac";
+		if (!isZodiacSubclass) return false;
+		const name = (feature.name || "").trim().toLowerCase();
+		if (!name) return false;
+		return CharacterSheetState.ZODIAC_FORM_DEFS.some(def => (def.name || "").toLowerCase() === name);
 	}
 
 	/**
