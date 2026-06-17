@@ -3802,6 +3802,25 @@ class CharacterSheetCombat {
 			const classificationOverride = CharacterSheetState.FEATURE_CLASSIFICATION_OVERRIDES?.[nameLower];
 			if (classificationOverride === "combat" || classificationOverride === "reaction") return true;
 
+			// (S1) Features the sheet classifies as activatable ABILITIES (Healing Hands,
+			// War God's Blessing, Guided Strike, Forked Tongue, Purge Toxins, …) must ALSO
+			// surface in this generic "Abilities" list. The legacy heuristic below keys off a
+			// fragile hardcoded `combatKeywords` roster plus action-economy phrasing, so genuine
+			// one-shot abilities whose name isn't hardcoded (Purge Toxins, Guided Strike, Forked
+			// Tongue) were silently dropped. Key off the REAL classification instead: an
+			// "ability" override, or a resolved limited-use / interdict-boon activatable entry
+			// (_getActivatableAbilityForFeature). The panel-hidden (Interdiction-managed /
+			// redundant-improvement) and Fighter-owned exclusions already ran above, and combat
+			// methods / metamagic are re-checked here, so this surfaces abilities by genuine
+			// classification without flooding the list with passive features.
+			const isClassifiedAbility = classificationOverride === "ability"
+				|| !!this._page?._getActivatableAbilityForFeature?.(f);
+			if (isClassifiedAbility) {
+				if (CharacterSheetClassUtils.isCombatMethod(f)) return false;
+				if (f.optionalFeatureTypes?.includes("MM")) return false;
+				return true;
+			}
+
 			// Get description - render entries as fallback if description missing
 			let desc = f.description;
 			if (!desc && f.entries) {
