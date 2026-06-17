@@ -3,58 +3,62 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 24 (Illrigger/Hochling — real character `vaa` = Hochling Illrigger 15 Hellspeaker) — IN PROGRESS
-
-**8 of these are REPEATS of Round 23** that recurred because R23 fixes were **false greens**:
-they verified state/logic flags (`isToggle:false`, `activatable:true`, "function exists") instead
-of the **rendered, interactive UI the user actually touches**. Orchestrator re-diagnosed every
-repeat in the live DOM (both brews loaded, real `vaa.json`) and found the true root causes below.
-**Mandatory this round: every fix is verified by driving the real rendered UI** — assert the actual
-`.charsheet__combat-action-item` Abilities list, trigger real hover windows, click the Use button,
-inspect the real active-condition list — never state flags or function existence.
-
-Single-owner decomposition (7 focused sessions, grouped only by shared root cause/subsystem):
-
-**S1 — Abilities surfacing & hover** (owns `renderCombatActions` in charactersheet-combat.js + hover)
-* #1 — Purge Toxins must appear in the Abilities list as an ability. ROOT: `renderCombatActions`
-  only honors `FEATURE_CLASSIFICATION_OVERRIDES === "combat"|"reaction"`; it ignores `"ability"`
-  and `_getActivatableAbilityForFeature`, so ability-classified features never enter the list.
-* #2 — Healing Hands + War God's Blessing must appear hoverable in Abilities (currently Healing
-  Hands only surfaces via a hardcoded `combatKeywords` entry — fragile). Unify on the ability
-  classification so all Hochling/ability features surface with a working inline-entries hover.
-* #4 — Forked Tongue must appear as an ability (same surfacing gap).
-* #3 (surfacing half) — Guided Strike must appear in the Abilities list.
-
-**S2 — Guided Strike interaction + Divine Manifestation** (owns the use-handler + resource model)
-* #3 (interaction half) — Using Guided Strike must prompt which weapon attack to roll (one-shot
-  +10, consume only on a real roll); right-clicking a weapon attack must offer it. Verify by real UI.
-* #15 — Guided Strike and War God's Blessing must share one resource called **Divine Manifestation**.
-
-**S3 — Interdiction boons & lifecycle** (owns the boon panel + activations + roll integration)
-* #9 — Red Cant: when you roll a relevant roll lower than 10, offer to expend it to turn the roll
-  into a 10 (needs a hook into the roll-result pipeline, not just a passive seal-spend).
-* #10 — Slippery Ploy must actually place a seal (R23 left it a no-placement seal-spend).
-* #12 — Hellsight: ending it must remove the truesight. State toggle works (0→60→0); the UI end
-  path never calls `deactivateState("hellsight")` / no end control is rendered.
-
-**S4 — Invoke Hell options & uses**
-* #16 — Hellspeaker's Invoke Hell options must be written as features, given as actions, and
-  actually implemented on the sheet; and Invoke Hell must have **2 uses**, not 1.
-
-**S5 — Thelemar condition variants**
-* #13 — Many Illrigger abilities reference 2014/2024 conditions instead of Thelemar ones (e.g.
-  Veil of Lies → 2024 invisible). ROOT: `CONDITION_EFFECTS` is missing `_tgtt` variants for
-  invisible/undetected/dazed/choked/prone/exhaustion (which DO exist in the TGTT brew), so the
-  resolver falls back to generic. Add the missing variants and audit all Illrigger condition refs.
-
-**S6 — Intransigent signifier**
-* #11 — Intransigent grants charmed immunity; the feature must clearly signify it can also extend
-  that immunity to chosen creatures.
-
-**S7 — Modal UX upgrades**
-* #14 — Infernal Conduit, Interdiction, and Combat Masteries modals need UI/UX upgrades.
+_None._
 
 ## Closed Bugs
+
+### Round 24 (Illrigger/Hochling — real character `vaa` = Hochling Illrigger 15 Hellspeaker) — COMPLETE
+
+**8 of these were REPEATS of Round 23** that recurred because R23 fixes were **false greens**: they
+verified state/logic flags (`isToggle:false`, `activatable:true`, "function exists") instead of the
+**rendered, interactive UI the user actually touches**. Cured by re-diagnosing every repeat in the
+live DOM (both brews loaded, real `vaa.json`), decomposing into 7 single-owner sessions, and — the
+non-negotiable standard this round — **independently re-verifying every fix by driving the real
+rendered UI** (the `.charsheet__combat-action-item` Abilities list, real hover windows, the real
+boon Invoke/End toggle + senses display, the live Red Cant prompt, the rendered Features-tab card),
+never state flags or function existence. Integrated foundation-first; full gate green (eslint 0 /
+stylelint 0 / jest charactersheet **289 suites · 10,797 tests**).
+
+* #1 — Purge Toxins now surfaces in the Abilities list as an ability. ROOT: `renderCombatActions`
+  only honored `FEATURE_CLASSIFICATION_OVERRIDES === "combat"|"reaction"` and a hardcoded
+  `combatKeywords` list — it ignored `"ability"`-classified features and `_getActivatableAbilityForFeature`.
+  Fix: additive inclusion branch keyed on the genuine ability classification (S1). Live: present.
+* #2 — Healing Hands + War God's Blessing surface and hover robustly (all 10 surfaced abilities now
+  carry a working inline-entries hover anchor, not the old fragile keyword path) (S1). Live-verified.
+* #3 — Guided Strike is an ability: surfaces in the list (S1), and using it prompts **which weapon
+  attack** (one-shot +10, consumed only on a real roll); right-clicking a weapon attack offers it
+  (S2). Live: both the Use button and the right-click context path drive the real roll.
+* #4 — Forked Tongue surfaces as an ability (same surfacing fix) (S1). Live: present + hovers.
+* #9 — Red Cant now hooks the d20 roll pipeline: a CHA roll whose die is < 10 raises a real
+  prompt ("Expend a seal to treat it as a 10?") that floors the roll and spends a seal (S3).
+  Live-verified: natural 7 → prompt → "Expend a seal → 10" → seals 3→2.
+* #10 — Slippery Ploy now actually places a seal (was a no-placement seal-spend); the combat-tab
+  modal prompts for the attacker and routes through the real `placeSeal` path with `opts.target`
+  plumbed through (S3). Live-verified: placement created on the chosen target.
+* #11 — Intransigent clearly signifies the extend-to-allies option: titled "Extend charmed immunity
+  to chosen allies" panel, labelled stepper, live effect summary, header badge (S6). Orchestrator
+  follow-up: re-themed the panel from a hardcoded light box to the dark `--cs-*` tokens so it reads
+  as an elevated dark surface consistent with the sheet. Live-verified.
+* #12 — Hellsight: ending it removes the truesight **in the rendered senses display**. The state
+  toggle already worked (0→60→0); the fix refreshes the senses display in the boon-toggle handler
+  (S3). Live-verified by clicking the real Invoke → End control: display gains then loses Truesight.
+* #13 — Illrigger conditions resolve to Thelemar variants. ROOT: `CONDITION_EFFECTS` lacked `_tgtt`
+  variants for `invisible` and `prone` (the others already existed; exhaustion correctly stays with
+  the dedicated level-penalty system). Added `invisible_tgtt` + `prone_tgtt` mirrored from the brew
+  (S5). Live-verified: Veil of Lies self-applies the TGTT Invisible (extra "Hidden to sight" note),
+  Telekinetic Seal's prone resolves to TGTT.
+* #14 — Infernal Conduit / Interdiction / Combat Masteries panels rebuilt on the dark `--cs-*`
+  tokens: readable status strips, uppercase section headers, carded rows, dark-themed form controls,
+  restyled seal place/move modals (S7). Live-verified by screenshots on the dark sheet.
+* #15 — Guided Strike and War God's Blessing share one **Divine Manifestation** pool (max 1, short
+  rest), mirroring the Invoke Hell shared-pool pattern; legacy per-option pools are migrated/folded
+  (S2). Live-verified: one shared pool, decrements once across either ability.
+* #16 — Hellspeaker's Invoke Hell options (Honey-Sweet Blades, Turncoat) now surface as features
+  and actions and draw from one shared Invoke Hell pool. ROOT: `getLevelFeatures` expanded
+  `refSubclassFeature` only one level deep and dropped child options of a name-colliding wrapper —
+  fixed with multi-level, cycle-guarded recursion (S4). Uses are source-aware: TGTT-IllR = 2 base
+  **+1 at level 11 = 3 at L15** (user-confirmed data-correct; the "two" in the data is the option
+  count, not the use cap). Live-verified: options usable, pool max 3.
 
 ### Round 23 (Illrigger/Hochling — real character `vaa` = Hochling Illrigger 15 Hellspeaker) — COMPLETE
 
