@@ -517,27 +517,21 @@ class CharacterSheetQuickBuild {
 	}
 
 	/**
-	 * Get weapon mastery count at a given class level from classTableGroups.
+	 * Get weapon mastery count at a given class level.
+	 *
+	 * Delegates to {@link CharacterSheetClassUtils.getWeaponMasteryCountAtLevel}, which
+	 * combines the table-column count with a classFeature fallback. The previous TABLE-ONLY
+	 * implementation returned 0 for classes (e.g. Illrigger) that grant Weapon Mastery via a
+	 * class FEATURE rather than a "Weapon Mastery" table column, so QuickBuild silently
+	 * skipped the mastery-picker step that level-up and the builder both offer (R22 #1).
 	 * Returns 0 if the class doesn't have a Weapon Mastery progression.
 	 */
 	_getWeaponMasteryCountAtLevel (classData, level) {
-		if (!classData.classTableGroups?.length) return 0;
-
-		for (const tableGroup of classData.classTableGroups) {
-			const masteryColIndex = tableGroup.colLabels?.findIndex(
-				col => typeof col === "string" && (col === "Weapon Mastery" || col.toLowerCase().includes("mastery")),
-			);
-			if (masteryColIndex == null || masteryColIndex === -1) continue;
-
-			const row = tableGroup.rows?.[level - 1];
-			if (!row) continue;
-
-			const value = row[masteryColIndex];
-			if (typeof value === "number") return value;
-			if (typeof value === "string") return parseInt(value) || 0;
-		}
-
-		return 0;
+		return CharacterSheetClassUtils.getWeaponMasteryCountAtLevel(
+			classData,
+			level,
+			this._page.getClassFeatures?.() || [],
+		);
 	}
 
 	/**
