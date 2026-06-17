@@ -18058,6 +18058,16 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	transition: background var(--cs-transition-fast, 0.15s ease), border-color var(--cs-transition-fast, 0.15s ease);
 }
 
+/* Keep every checkbox a uniform, fixed size regardless of label length: as a
+   flex child it must not shrink (long names) or stretch (emoji/line-height). */
+.charsheet__builder-lang-pill > input[type="checkbox"] {
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	margin: 0;
+	cursor: pointer;
+}
+
 .charsheet__builder-lang-pill:hover {
 	background: var(--cs-bg-hover, rgba(99, 102, 241, 0.06));
 	border-color: var(--rgb-link, #6366f1);
@@ -18084,6 +18094,16 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .charsheet__builder-lang-pill-name {
 	flex: 1;
+	min-width: 0;
+}
+
+/* Hoverable language entries (wired with data-vet-* attributes) get a subtle
+   dotted underline to hint that hovering reveals the language's info tooltip. */
+.charsheet__builder-lang-pill-name[data-vet-page],
+.charsheet__language-card-name[data-vet-page] {
+	text-decoration: underline dotted var(--rgb-link, #6366f1);
+	text-underline-offset: 2px;
+	text-decoration-thickness: 1px;
 }
 
 .charsheet__builder-lang-source {

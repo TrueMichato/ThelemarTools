@@ -14633,6 +14633,58 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Resolve the best display source for a language name so it can be linked to
+	 * its `languages.html` entry. Prefers priority (e.g. homebrew/TGTT) sources,
+	 * then XPHB, mirroring the grouping/sorting logic. Also matches dialect names.
+	 * @param {string} name - Language (or dialect) name
+	 * @returns {string|null} Source abbreviation, or null when not found
+	 */
+	_resolveLanguageSource (name) {
+		if (!name || !Array.isArray(this._languagesData)) return null;
+		const prioritySources = this._state.getPrioritySources?.() || [];
+		let best = null;
+		for (const lang of this._languagesData) {
+			const matchesName = lang.name === name || (Array.isArray(lang.dialects) && lang.dialects.includes(name));
+			if (!matchesName) continue;
+			if (!best) { best = lang.source; continue; }
+			if (prioritySources.includes(lang.source) && !prioritySources.includes(best)) best = lang.source;
+			else if (lang.source === Parser.SRC_XPHB && !prioritySources.includes(best)) best = lang.source;
+		}
+		return best;
+	}
+
+	/**
+	 * Build hover-only attributes (mouseover/move/leave + `data-vet-*`) that turn
+	 * any element (a checkbox-pill label, a picker card, …) into a hoverable
+	 * `@language` entity — showing the same tooltip the rest of the sheet uses for
+	 * spells/items. Deliberately omits `onclick`/`href` so the hover never hijacks
+	 * the surrounding selection click (label toggle, card select).
+	 * @param {string} name - Language display name
+	 * @param {string|null} [sourceHint] - Known source (skips resolution when truthy)
+	 * @returns {string} Attribute string, or "" when the language can't be resolved
+	 */
+	getLanguageHoverAttributes (name, sourceHint = null) {
+		try {
+			const source = (sourceHint && sourceHint !== "Unknown") ? sourceHint : this._resolveLanguageSource(name);
+			if (!name || !source) return "";
+			const hash = UrlUtil.encodeForHash([name, source].join(HASH_LIST_SEP));
+			return [
+				`onmouseover="Renderer.hover.pHandleLinkMouseOver(event, this)"`,
+				`onmouseleave="Renderer.hover.handleLinkMouseLeave(event, this)"`,
+				`onmousemove="Renderer.hover.handleLinkMouseMove(event, this)"`,
+				`data-vet-page="${UrlUtil.PG_LANGUAGES.qq()}"`,
+				`data-vet-source="${source.qq()}"`,
+				`data-vet-hash="${hash.qq()}"`,
+				Renderer.hover.getPreventTouchString(),
+			].join(" ");
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] getLanguageHoverAttributes error:", e);
+			return "";
+		}
+	}
+
+	/**
 	 * Show a searchable language picker modal
 	 * @param {*} [opts] - Options
 	 * @returns {Promise<Array|null>} Array of selected language names or null if cancelled
@@ -14753,7 +14805,7 @@ class CharacterSheetPage {
 									gap: 8px;
 								">
 									<span style="font-size: 1.3em;">${info.emoji}</span>
-									<span class="bold">${lang.name}</span>
+									<span class="bold charsheet__language-card-name" ${this.getLanguageHoverAttributes(lang.name)}>${lang.name}</span>
 								</div>
 							`});
 
