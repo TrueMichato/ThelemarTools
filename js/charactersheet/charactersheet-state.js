@@ -4155,6 +4155,11 @@ class CharacterSheetState {
 		// Convert to the toggle model (strip uses, drop the orphan resource).
 		this._migrateHuntersPrey();
 
+		// (S2 #15) Migrate Divine Manifestation: older saves minted a SEPARATE per-option
+		// use pool for each Hochling Channel-Divinity manifestation option. Fold them into
+		// the single shared "Divine Manifestation" pool.
+		this._migrateDivineManifestation();
+
 		// Migrate Star Map (Stars/Zodiac Druid): older saves parsed its recharge as
 		// "short" (the replacement-ceremony sentence) and/or its max from proficiency
 		// bonus. Correct to long-rest recharge and a max of the Wisdom modifier.
@@ -4774,6 +4779,56 @@ class CharacterSheetState {
 
 		// Ensure the toggle state exists
 		this._ensureHuntersPreyInitialized();
+	}
+
+	/**
+	 * (S2 #15) Migrate older saves where each Hochling "Divine Manifestation" Channel-Divinity
+	 * option (Guided Strike, War God's Blessing, …) carried its own `uses` and therefore minted
+	 * a SEPARATE per-option resource pool. They must all draw on ONE shared "Divine Manifestation"
+	 * use. Strip the per-option `uses`, stamp the shared `consumes` tag, drop the stale per-option
+	 * resource rows, and fold their state into a single shared pool (spent if either was spent).
+	 * The Aasimar-transformation option (Celestial Revelation) is left untouched — it is a
+	 * long-rest transformation, never a Channel Divinity use, and never carried a pool.
+	 */
+	_migrateDivineManifestation () {
+		if (!Array.isArray(this._data.features)) return;
+		const poolName = CharacterSheetClassUtils.RACE_MANIFESTATION_POOL_NAME;
+
+		const childIds = new Set();
+		const childNames = new Set();
+		this._data.features.forEach(f => {
+			if (!f || !f._raceManifestation) return;
+			// Only Channel-Divinity options drew on a use pool (they had `uses` or already
+			// carry the shared `consumes`). The Aasimar transformation never did — skip it.
+			if (!f.uses && f.consumes?.name !== poolName) return;
+			if (f.uses) delete f.uses;
+			if (!f.consumes || f.consumes.name !== poolName) f.consumes = {name: poolName, amount: 1};
+			if (f.id) childIds.add(f.id);
+			if (f.name) childNames.add(f.name);
+		});
+
+		if (!childIds.size) return; // no manifestation CD option present — nothing to migrate
+
+		if (Array.isArray(this._data.resources)) {
+			// Carry over a "spent" state: if any stale per-option pool was used up, the shared
+			// pool should start spent too (and never start above the single shared max).
+			const stale = this._data.resources.filter(r =>
+				r.name !== poolName
+				&& ((r.featureId && childIds.has(r.featureId)) || childNames.has(r.name)));
+			const preservedCurrent = stale.length
+				? Math.min(1, ...stale.map(r => r.current ?? 0))
+				: 1;
+			this._data.resources = this._data.resources.filter(r => !stale.includes(r));
+
+			const shared = this._data.resources.find(r => r.name === poolName);
+			if (shared) {
+				shared.max = 1;
+				shared.recharge = "short";
+				shared.current = Math.min(shared.current ?? 1, 1);
+			} else {
+				this.addResource({name: poolName, max: 1, current: Math.max(0, Math.min(preservedCurrent, 1)), recharge: "short"});
+			}
+		}
 	}
 
 	/**
@@ -18989,6 +19044,12 @@ class CharacterSheetState {
 				// =========================================================
 				case "Illrigger": {
 					const chaMod = this.getAbilityMod("cha");
+					// The TGTT port of the Illrigger ("TGTT-IllR") rewrites several features that the
+					// original "IllriggerRevised" balances differently — most notably Invoke Hell, whose
+					// TGTT text reads "You can use Invoke Hell twice ... You gain an additional use when you
+					// reach 11th level," versus the IllriggerRevised "use once, then rest."
+					const illriggerSource = cls.source || "IllriggerRevised";
+					const isTgttIllrigger = illriggerSource === "TGTT-IllR";
 
 					// Interdict Save DC: 8 + proficiency + CHA modifier
 					calculations.interdictDc = 8 + profBonus + chaMod - exhaustionPenalty;
@@ -19063,7 +19124,12 @@ class CharacterSheetState {
 					if (level >= 3) {
 						calculations.hasDiabolicContract = true;
 						calculations.hasInvokeHell = true;
-						calculations.invokeHellUses = 1; // 1/short rest
+						// Uses recharge on a short rest (the pool's `recharge` is "short").
+						// IllriggerRevised grants a single use ("use once, then rest"). The TGTT port
+						// grants two uses, plus a third once you reach 11th Illrigger level.
+						calculations.invokeHellUses = isTgttIllrigger
+							? (level >= 11 ? 3 : 2)
+							: 1;
 					}
 
 					// Level 5: Extra Attack
@@ -26350,6 +26416,21 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Expend `count` seals from the pool WITHOUT placing them on a creature. Used by boons
+	 * whose seal cost is not a creature placement (e.g. Red Cant's "expend a seal to treat a
+	 * d20 of 9 or lower as a 10"). Clamped to the seals currently available.
+	 * @param {number} [count] how many seals to spend (default 1).
+	 * @returns {number} the number of seals actually spent (0 when none were available).
+	 */
+	spendSeal (count = 1) {
+		const avail = this.getSealsAvailable();
+		const n = Math.max(0, Math.min(Math.floor(Number(count) || 0), avail));
+		if (n <= 0) return 0;
+		this._setSealsAvailable(avail - n);
+		return n;
+	}
+
+	/**
 	 * Burn N seals on an interdicted creature. Burned seals are CONSUMED (they do not
 	 * return to the pool until a rest), so `available` is unchanged. Returns the rolled
 	 * damage descriptor for the caller to display/apply.
@@ -27037,20 +27118,29 @@ class CharacterSheetState {
 			actionLabel: "Expend a seal",
 			canApply: (state) => (state.getSealsAvailable?.() || 0) > 0,
 			apply: (state, calcs) => {
-				if ((state.getSealsAvailable?.() || 0) <= 0) return null;
-				state._setSealsAvailable(state.getSealsAvailable() - 1);
+				if (state.spendSeal(1) <= 0) return null;
 				const floor = calcs?.redCantFloor || 10;
 				return {label: `Red Cant: expended a seal — treat a d20 of 9 or lower as a ${floor} on this Charisma check.`};
 			},
 		},
 		"slippery ploy": {
-			actionLabel: "Expend a seal",
+			actionLabel: "Place a seal (reaction)",
 			canApply: (state) => (state.getSealsAvailable?.() || 0) > 0,
-			apply: (state, calcs) => {
+			// Slippery Ploy is a REACTION that PLACES a seal on the triggering creature (it is
+			// not a bare seal-spend). Route through placeSeal so a real, tracked placement is
+			// created — with `force` because a reaction can fire on another creature's turn,
+			// outside the once-per-turn placement gate. The target name (the attacker) comes
+			// from the UI via `opts.target`; default to a generic label for headless callers.
+			apply: (state, calcs, opts = {}) => {
 				if ((state.getSealsAvailable?.() || 0) <= 0) return null;
-				state._setSealsAvailable(state.getSealsAvailable() - 1);
+				const target = (opts.target || "").trim() || "Attacker";
+				const placed = state.placeSeal?.(target, {force: true});
+				if (!placed) return null;
 				const dc = calcs?.slipperyPloyDc;
-				return {label: `Slippery Ploy: placed a seal (reaction) — the attacker must make a DC ${dc != null ? dc : "—"} Charisma save or choose a new target / lose the effect.`};
+				return {
+					label: `Slippery Ploy: placed a seal on ${placed.target} (reaction) — it must make a DC ${dc != null ? dc : "—"} Charisma save or choose a new target / lose the effect.`,
+					placement: placed,
+				};
 			},
 		},
 	};
@@ -27097,11 +27187,13 @@ class CharacterSheetState {
 			const r = c.intransigentRange || 10;
 			// Signal that the charmed-immunity can be EXTENDED to allies you choose — not
 			// just yourself (R22 #10) — and that it is gated on being conscious (R23 #11).
+			// When no allies are chosen yet, spell out the extend option explicitly so the
+			// summary still advertises it rather than burying it in a parenthetical.
 			const allies = self?.getIntransigentAllyCount?.() || 0;
-			const who = allies > 0
-				? `You + ${allies} chosen creature${allies === 1 ? "" : "s"} within ${r} ft`
-				: `You (and chosen creatures within ${r} ft)`;
-			return `${who} are immune to charmed (while conscious)`;
+			if (allies > 0) {
+				return `You + ${allies} chosen creature${allies === 1 ? "" : "s"} within ${r} ft are immune to charmed (while conscious)`;
+			}
+			return `You are immune to charmed (while conscious); may extend to creatures of your choice within ${r} ft`;
 		},
 		"superior interdict": (c) => {
 			if (!c.hasSuperiorInterdict) return null;
@@ -27227,15 +27319,17 @@ class CharacterSheetState {
 	 * No-op (returns null) for boons without one.
 	 * @param {string} boonName
 	 * @param {object} [calculations] - Pre-computed `getFeatureCalculations()` (optional).
+	 * @param {object} [opts] - Boon-specific options forwarded to the activation (e.g. a seal
+	 *   placement target for Slippery Ploy).
 	 * @returns {{label:string}|null}
 	 */
-	applyInterdictBoonActivation (boonName, calculations = null) {
+	applyInterdictBoonActivation (boonName, calculations = null, opts = {}) {
 		const def = CharacterSheetState.INTERDICT_BOON_ACTIVATIONS[
 			CharacterSheetState._normalizeInterdictBoonName(boonName)
 		];
 		if (!def) return null;
 		const calcs = calculations || this.getFeatureCalculations?.() || {};
-		return def.apply(this, calcs) || null;
+		return def.apply(this, calcs, opts) || null;
 	}
 
 	/**
@@ -30933,6 +31027,37 @@ class CharacterSheetState {
 			resource.current = wasFull ? max : Math.min(resource.current ?? 0, max);
 		} else {
 			this.addResource({name: "Invoke Hell", max, current: max, recharge: "short"});
+		}
+	}
+
+	/**
+	 * (S2 #15) Ensure the single shared "Divine Manifestation" pool exists when the
+	 * character has chosen a Hochling manifestation whose options draw on it (each such
+	 * Channel-Divinity option carries `consumes: {name: "Divine Manifestation"}`). The
+	 * wrapper trait + the individual options never mint their own pool — they all spend
+	 * from this one short-rest use (the Hochling trait: "use that Channel Divinity once,
+	 * and regain … when you finish a short or long rest"). getActivatableFeatures() links
+	 * each option's `resourceName` to it, so using EITHER option decrements the SAME pool.
+	 * When no such option exists (manifestation unchosen, or the Aasimar-transformation
+	 * option which is not a Channel Divinity use), any orphaned pool is removed.
+	 */
+	ensureDivineManifestationPool () {
+		const poolName = CharacterSheetClassUtils.RACE_MANIFESTATION_POOL_NAME;
+		const hasOption = (this._data.features || []).some(f => f?.consumes?.name === poolName);
+		const idx = this._data.resources.findIndex(r => r.name === poolName);
+		if (!hasOption) {
+			if (idx !== -1) this._data.resources.splice(idx, 1);
+			return;
+		}
+		const max = 1;
+		if (idx !== -1) {
+			const resource = this._data.resources[idx];
+			const wasFull = (resource.current ?? 0) >= (resource.max ?? 0);
+			resource.max = max;
+			resource.recharge = "short";
+			resource.current = wasFull ? max : Math.min(resource.current ?? 0, max);
+		} else {
+			this.addResource({name: poolName, max, current: max, recharge: "short"});
 		}
 	}
 
@@ -38118,6 +38243,39 @@ class CharacterSheetState {
 			],
 		},
 
+		// TGTT Invisible - You are *Hidden* to sight-reliant creatures (not the generic
+		// "flat advantage/disadvantage" 2014/2024 Invisible). Mirrors hidden_tgtt's combat
+		// benefit but with the TGTT sight/true-seeing caveat. (#13: Illrigger Veil of Lies
+		// and Baleful Interdict reference {@condition invisible}; under Thelemar this must
+		// resolve to the TGTT Invisible, not the generic one.)
+		invisible_tgtt: {
+			name: "Invisible",
+			icon: "👻",
+			source: "TGTT",
+			description: "Hidden to creatures that rely on sight (unless they can see invisible creatures): advantage on attacks, disadvantage on attacks against you",
+			effects: [
+				{type: "advantage", target: "attack"},
+				{type: "disadvantage", target: "attacksAgainst"},
+				{type: "note", value: "You are Hidden to creatures that rely on sight, unless they can see invisible creatures (truesight, blindsight, etc.)"},
+			],
+		},
+
+		// TGTT Prone - Same attack profile as generic Prone, but knocking you prone forces
+		// a concentration check (Concentration Disruption).
+		prone_tgtt: {
+			name: "Prone",
+			icon: "⬇️",
+			source: "TGTT",
+			description: "Disadvantage on attacks; melee attacks against have advantage, ranged attacks against have disadvantage; concentration check when knocked prone",
+			effects: [
+				{type: "disadvantage", target: "attack"},
+				{type: "advantage", target: "meleeAttacksAgainst"},
+				{type: "disadvantage", target: "rangedAttacksAgainst"},
+				{type: "note", value: "Restricted movement: crawl, or spend half your Speed to stand up and end the condition"},
+				{type: "note", value: "When knocked prone, you must make a concentration check if concentrating on a spell"},
+			],
+		},
+
 		// Custom/Homebrew condition placeholder
 		// Homebrew conditions can be added dynamically
 	};
@@ -38488,6 +38646,10 @@ class CharacterSheetState {
 		// (R20 #17) Make sure the shared Invoke Hell pool exists before we read resources,
 		// so its options can link to it below.
 		this.ensureInvokeHellPool();
+		// (S2 #15) Likewise ensure the single shared "Divine Manifestation" pool exists so
+		// every Hochling manifestation option (Guided Strike, War God's Blessing, …) links
+		// to the SAME use rather than each spawning its own.
+		this.ensureDivineManifestationPool();
 		const resources = this.getResources();
 
 		for (const feature of this._data.features) {

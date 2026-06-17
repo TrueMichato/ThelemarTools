@@ -145,3 +145,45 @@ describe("#11 Intransigent ally-chooser control", () => {
 		expect(html).not.toContain("charsheet__intransigent-ally-count");
 	});
 });
+
+describe("#11 Intransigent extend-to-allies signifier", () => {
+	test("renders an explicit 'extend to chosen allies' title + labelled stepper", () => {
+		const {features} = makeFeatures({withApi: true, initialCount: 0});
+		const html = features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
+
+		// An unmistakable heading that names the extend-to-others option.
+		expect(html).toContain("charsheet__intransigent-title");
+		expect(html).toContain("Extend charmed immunity to chosen allies");
+		// The stepper carries an inline label so it reads as a choice, not a stat.
+		expect(html).toContain("charsheet__intransigent-label");
+		expect(html).toContain("Allies you choose to protect:");
+	});
+
+	test("the feature text sets no cap, so the UI signals 'no fixed limit' (no misleading hard cap)", () => {
+		const {features} = makeFeatures({withApi: true, initialCount: 0});
+		const html = features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
+		expect(html).toContain("no fixed limit");
+		// The numeric input keeps only a sanity bound, not a rules cap of 12.
+		expect(Number(attrOf(html, "charsheet__intransigent-ally-count", "max"))).toBeGreaterThan(12);
+	});
+
+	test("the live summary advertises the extend option even when zero allies are chosen", () => {
+		const {features} = makeFeatures({withApi: true, initialCount: 0});
+		const html = features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
+		expect(html).toContain("charsheet__intransigent-live");
+		// Self-immunity stated, and the extend affordance explicitly called out.
+		expect(html).toMatch(/You are immune to charmed \(while conscious\)/);
+		expect(html).toMatch(/protect creatures of your choice within 10 ft/);
+	});
+
+	test("the live summary reflects the chosen ally count (singular/plural)", () => {
+		const one = makeFeatures({withApi: true, initialCount: 1});
+		const many = makeFeatures({withApi: true, initialCount: 3});
+		const htmlOne = one.features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
+		const htmlMany = many.features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
+
+		const live = (html) => (html.match(/charsheet__intransigent-live[^>]*>([^<]*)</) || [])[1] || "";
+		expect(live(htmlOne)).toMatch(/You \+ 1 chosen creature within 10 ft are immune to charmed \(while conscious\)/);
+		expect(live(htmlMany)).toMatch(/You \+ 3 chosen creatures within 10 ft are immune to charmed \(while conscious\)/);
+	});
+});

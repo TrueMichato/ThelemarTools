@@ -238,10 +238,10 @@ describe("R22 #7 — Hellish Avenger is a real once-per-turn weapon damage rider
 });
 
 describe("R22 #10 — Intransigent signals the allied charmed-immunity extension", () => {
-	test("the Intransigent summary mentions chosen creatures within range", () => {
+	test("the Intransigent summary signals the option to extend immunity to creatures within range", () => {
 		const calcs = {hasIntransigent: true, intransigentRange: 10};
 		const summary = CharacterSheetState.ILLRIGGER_FEATURE_SUMMARIES["intransigent"](calcs);
-		expect(summary).toMatch(/chosen creatures within 10 ft/i);
+		expect(summary).toMatch(/creatures of your choice within 10 ft/i);
 		expect(summary).toMatch(/charmed/i);
 	});
 
