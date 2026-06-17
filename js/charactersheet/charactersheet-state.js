@@ -4198,6 +4198,15 @@ class CharacterSheetState {
 		// Migrate old ki backing store into the resource system
 		this._migrateKiToResource();
 
+		// (R23 #6) Drop stale resource pools that should never have been materialised —
+		// redundant "<X> Improvement" passive riders the use-parser mis-tagged with a count.
+		this._migrateRedundantImprovementResources();
+
+		// (R23 #15) Strip base senses an inactive interdict TOGGLE boon (e.g. Hellsight →
+		// truesight) baked in under old code that wrote base senses on invoke and never
+		// removed them on end. The sense is now owned by the toggle's active state.
+		this._migrateInterdictBoonStaleSenses();
+
 		// Migrate legacy Lore Mastery–granted custom skills to the new lore-skill subtype
 		this._migrateLoreSkills();
 
@@ -4501,6 +4510,63 @@ class CharacterSheetState {
 		});
 
 		delete this._data.kiPoints;
+	}
+
+	/**
+	 * (R23 #6) Remove stale tracked resource pools for redundant "<X> Improvement" passive
+	 * riders. Such riders merely enhance an already-owned base feature and are not
+	 * independently usable, but an older use-parser sometimes mis-detected a count in their
+	 * text and materialised a bare resource row (the Overview/Combat duplicate players
+	 * reported, e.g. "Forked Tongue Improvement"). Consumes the S-A
+	 * {@link CharacterSheetState.isRedundantImprovementFeature} predicate, so it stays in
+	 * lock-step with the classification used everywhere else. Idempotent.
+	 */
+	_migrateRedundantImprovementResources () {
+		if (!this._data.resources?.length) return;
+		const allFeatures = this._data.features || [];
+		this._data.resources = this._data.resources.filter(r => {
+			const linked = r.featureId
+				? allFeatures.find(f => f.id === r.featureId)
+				: allFeatures.find(f => (f.name || "") === (r.name || ""));
+			if (!linked) return true;
+			return !CharacterSheetState.isRedundantImprovementFeature?.(linked, allFeatures);
+		});
+	}
+
+	/**
+	 * Interdict TOGGLE boons that grant a SENSE only while their named active state is on.
+	 * Older code wrote the sense straight into base senses on invoke and never removed it on
+	 * end, so saved characters carry a permanent stale sense. Keyed data so the migration is
+	 * generic across present + future sense-granting toggle boons.
+	 * @type {Array<{boon:string, sense:string, value:number, state:string}>}
+	 */
+	static INTERDICT_TOGGLE_BOON_SENSES = [
+		{boon: "hellsight", sense: "truesight", value: 60, state: "hellsight"},
+	];
+
+	/**
+	 * (R23 #15) Strip a stale base sense that an inactive interdict toggle boon baked in.
+	 * For each toggle boon the character knows whose active state is NOT currently on, clear
+	 * the matching base sense if it equals exactly the boon's grant value (the stale-artifact
+	 * signature). The sense is now owned solely by the boon's active state
+	 * ({@link CharacterSheetState.ACTIVE_STATE_TYPES}), so removing it makes invoke→sense and
+	 * end→no-sense behave correctly. Legit permanent senses from races/feats (re-applied via
+	 * setSense during recalculation, and rarely the exact boon value while ALSO knowing the
+	 * boon and having it inactive) are not the target. Idempotent.
+	 */
+	_migrateInterdictBoonStaleSenses () {
+		const senses = this._data.senses;
+		if (!senses) return;
+		const knownBoonNames = new Set([
+			...(this.getInterdictBoons?.() || []),
+			...(this.getMolochInterdictionBoons?.() || []),
+		].map(b => CharacterSheetState._normalizeInterdictBoonName(b.name)));
+		const activeStateIds = new Set((this._data.activeStates || []).filter(s => s.active).map(s => s.stateTypeId || s.id));
+		for (const t of CharacterSheetState.INTERDICT_TOGGLE_BOON_SENSES) {
+			if (!knownBoonNames.has(t.boon)) continue;
+			if (activeStateIds.has(t.state)) continue; // legitimately active — keep the sense
+			if ((senses[t.sense] || 0) === t.value) senses[t.sense] = 0;
+		}
 	}
 
 	/**
@@ -25916,6 +25982,36 @@ class CharacterSheetState {
 	// #region Resources
 	getResources () { return [...this._data.resources]; }
 
+	/**
+	 * (R23 #6) The canonical set of GENERIC resource pools to surface in the bare
+	 * resource lists — the Overview "Resources" panel and the Combat "Combat Resources"
+	 * panel. A resource is excluded when its linked feature is either:
+	 *   - an activatable ability (surfaced in the Abilities area with its own Use control), or
+	 *   - hidden-from-generic-surfaces (interdiction-managed pools like the seal pool / Charm
+	 *     Enemy, or a redundant "<X> Improvement" passive rider).
+	 * Resources with no resolvable linked feature (e.g. "Invoke Hell") are kept.
+	 *
+	 * Both surfaces now derive from this single helper so the two lists are ALWAYS identical
+	 * (previously the Overview rendered the raw list while Combat filtered, so interdiction
+	 * pools + passive riders leaked into the Overview only). Consumes — never edits — the
+	 * S-A classification predicates.
+	 * @returns {Array<object>} the displayable generic resource pools.
+	 */
+	getGenericPoolResources () {
+		const allFeatures = this.getFeatures?.() || [];
+		return (this._data.resources || []).filter(r => {
+			const linked = r.featureId
+				? allFeatures.find(f => f.id === r.featureId)
+				: allFeatures.find(f => (f.name || "") === (r.name || ""));
+			if (!linked) return true;
+			const info = CharacterSheetState.detectActivatableFeature?.(linked);
+			const isAbility = CharacterSheetState.isActivatableAbilityEntry?.({feature: linked, activationInfo: info, interactionMode: info?.interactionMode});
+			if (isAbility) return false;
+			if (CharacterSheetState.isHiddenFromGenericAbilitySurfaces?.(linked, allFeatures)) return false;
+			return true;
+		});
+	}
+
 	addResource (resource) {
 		this._data.resources.push({
 			id: CryptUtil.uid(),
@@ -26350,6 +26446,11 @@ class CharacterSheetState {
 			.filter(b => illLevel >= b.level)
 			.map(b => ({
 				name: b.name,
+				// (R23 #9) Carry the boon's source so the Interdiction panel can build a
+				// hover link (combat.js requires `b.source`). The free boons are the same
+				// IllriggerRevised `ItdBoon` optional features as selectable boons — only the
+				// way you GAIN them differs — so they hover to the same entries.
+				source: b.source,
 				optionalFeatureTypes: ["ItdBoon"],
 				featureType: ["ItdBoon"],
 				entries: Array.isArray(b.entries) ? [...b.entries] : [],
@@ -26851,6 +26952,30 @@ class CharacterSheetState {
 				return {label: `Soul Eater: gained ${amt} temporary HP (now ${next}).`};
 			},
 		},
+		// (R23 #9) Moloch's Interdiction free boons that are seal-expending REACTIONS. Their
+		// passive numeric effect (Red Cant's roll floor, Slippery Ploy's save DC) is already
+		// applied via INTERDICT_BOON_FIELDS; the Use button here is the resource action —
+		// expend a seal to trigger the reaction — so the boon is operable, not a dead row.
+		"red cant": {
+			actionLabel: "Expend a seal",
+			canApply: (state) => (state.getSealsAvailable?.() || 0) > 0,
+			apply: (state, calcs) => {
+				if ((state.getSealsAvailable?.() || 0) <= 0) return null;
+				state._setSealsAvailable(state.getSealsAvailable() - 1);
+				const floor = calcs?.redCantFloor || 10;
+				return {label: `Red Cant: expended a seal — treat a d20 of 9 or lower as a ${floor} on this Charisma check.`};
+			},
+		},
+		"slippery ploy": {
+			actionLabel: "Expend a seal",
+			canApply: (state) => (state.getSealsAvailable?.() || 0) > 0,
+			apply: (state, calcs) => {
+				if ((state.getSealsAvailable?.() || 0) <= 0) return null;
+				state._setSealsAvailable(state.getSealsAvailable() - 1);
+				const dc = calcs?.slipperyPloyDc;
+				return {label: `Slippery Ploy: placed a seal (reaction) — the attacker must make a DC ${dc != null ? dc : "—"} Charisma save or choose a new target / lose the effect.`};
+			},
+		},
 	};
 
 	/**
@@ -26970,9 +27095,9 @@ class CharacterSheetState {
 	 * @type {Array<{level:number, name:string, key:string}>}
 	 */
 	static MOLOCH_INTERDICTION_BOONS = [
-		{level: 7, name: "Red Cant", key: "red cant", entries: ["When you make a Charisma check, you can expend a seal to treat a {@dice d20} roll of 9 or lower as a 10."]},
-		{level: 13, name: "Slippery Ploy", key: "slippery ploy", entries: ["When a creature targets you with an attack, spell, or other magical effect, you can place a seal on them as a reaction and force the creature to make a Charisma saving throw. On a failed save, the creature must choose a new target or lose the attack or effect."]},
-		{level: 18, name: "Incontrovertible", key: "incontrovertible", entries: ["Interdicted creatures have disadvantage on Wisdom and Charisma saving throws."]},
+		{level: 7, name: "Red Cant", key: "red cant", source: "IllriggerRevised", entries: ["When you make a Charisma check, you can expend a seal to treat a {@dice d20} roll of 9 or lower as a 10."]},
+		{level: 13, name: "Slippery Ploy", key: "slippery ploy", source: "IllriggerRevised", entries: ["When a creature targets you with an attack, spell, or other magical effect, you can place a seal on them as a reaction and force the creature to make a Charisma saving throw. On a failed save, the creature must choose a new target or lose the attack or effect."]},
+		{level: 18, name: "Incontrovertible", key: "incontrovertible", source: "IllriggerRevised", entries: ["Interdicted creatures have disadvantage on Wisdom and Charisma saving throws."]},
 	];
 
 	/**
@@ -27023,6 +27148,37 @@ class CharacterSheetState {
 		if (!def) return null;
 		const calcs = calculations || this.getFeatureCalculations?.() || {};
 		return def.apply(this, calcs) || null;
+	}
+
+	/**
+	 * Whether a boon's discrete activation can currently be applied (e.g. a seal-spending
+	 * reaction with no seals left is disabled). Boons with no `canApply` gate are always
+	 * applicable. Lets the UI disable the Use button with an accurate reason.
+	 * @param {string} boonName
+	 * @param {object} [calculations]
+	 * @returns {boolean}
+	 */
+	canApplyInterdictBoonActivation (boonName, calculations = null) {
+		const def = CharacterSheetState.INTERDICT_BOON_ACTIVATIONS[
+			CharacterSheetState._normalizeInterdictBoonName(boonName)
+		];
+		if (!def) return false;
+		if (!def.canApply) return true;
+		const calcs = calculations || this.getFeatureCalculations?.() || {};
+		return !!def.canApply(this, calcs);
+	}
+
+	/**
+	 * The short verb label for a boon's Use button (e.g. "Expend a seal"), or "Apply" when
+	 * the boon defines no custom label.
+	 * @param {string} boonName
+	 * @returns {string}
+	 */
+	getInterdictBoonActivationLabel (boonName) {
+		const def = CharacterSheetState.INTERDICT_BOON_ACTIVATIONS[
+			CharacterSheetState._normalizeInterdictBoonName(boonName)
+		];
+		return def?.actionLabel || "Apply";
 	}
 	// #endregion
 
@@ -27197,9 +27353,15 @@ class CharacterSheetState {
 
 		// Also add to resources section for easy tracking
 		if (uses && uses.max > 0) {
+			// (R23 #6) Never materialise a tracked resource pool for a redundant
+			// "<X> Improvement" passive rider — it merely enhances an already-owned base
+			// feature and is not independently usable. The use-parser sometimes mis-detects
+			// a count in its text; surfacing that as a resource row is the stale-duplicate
+			// players reported. Consumes the S-A isRedundantImprovementFeature predicate.
+			const isRedundantRider = CharacterSheetState.isRedundantImprovementFeature?.(featureData, this._data.features);
 			// Check if resource already exists
 			const existingResource = this._data.resources.find(r => r.name === feature.name);
-			if (!existingResource) {
+			if (!existingResource && !isRedundantRider) {
 				this.addResource({
 					name: feature.name,
 					max: uses.max,
@@ -35817,7 +35979,11 @@ class CharacterSheetState {
 			icon: "👁️",
 			description: "Gain truesight out to 60 feet for 1 hour.",
 			effects: [
-				{type: "note", value: "Truesight out to 60 feet."},
+				// (R23 #15) A real `sense` effect (not a note) so getSenses() picks the
+				// truesight up via getSenseBonusFromStates while the state is active, and it
+				// disappears the instant the state ends — giving Hellsight a proper
+				// invoke→truesight / end→no-truesight lifecycle.
+				{type: "sense", target: "truesight", value: 60},
 			],
 			duration: "1 hour",
 			endConditions: ["Duration expires"],

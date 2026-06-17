@@ -2761,8 +2761,13 @@ class CharacterSheetCombat {
 					? `<span class="badge badge-success charsheet__interdict-boon-effect" title="Computed effect">${summary}</span>`
 					: "";
 				const canActivate = this._state.hasInterdictBoonActivation?.(b.name);
+				const canApplyNow = canActivate ? (this._state.canApplyInterdictBoonActivation?.(b.name, calcs) ?? true) : false;
+				const applyLabel = canActivate ? (this._state.getInterdictBoonActivationLabel?.(b.name) || "Apply") : "Apply";
+				const applyTitle = canActivate
+					? (canApplyNow ? `${applyLabel} — apply this boon's effect to your sheet` : "No seals available")
+					: "";
 				const activateBtn = canActivate
-					? `<button class="ve-btn ve-btn-xxs ve-btn-primary charsheet__interdict-boon-activate ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" title="Apply this boon's effect to your sheet">Apply</button>`
+					? `<button class="ve-btn ve-btn-xxs ve-btn-primary charsheet__interdict-boon-activate ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" ${canApplyNow ? "" : "disabled"} title="${applyTitle}">${applyLabel}</button>`
 					: "";
 				// (R22 #6) Durational boons (Veil of Lies, Shadow Shroud, Hellish Frenzy,
 				// Hellsight) are named toggle states that expend a seal. Surface a one-click
@@ -6227,40 +6232,13 @@ class CharacterSheetCombat {
 
 		container.innerHTML = "";
 
-		// Filter to combat-relevant resources
-		const allFeaturesForRes = this._state.getFeatures?.() || [];
-		const combatResources = (this._state.getResources() || []).filter(r => {
-			const name = r.name.toLowerCase();
-			// (R22 #4) Skip per-ability use pools and interdiction-managed / passive-rider
-			// resources — they surface with their ability (Abilities area) or dedicated panel
-			// (Interdiction), not as bare combat-resource pips. Many were leaking in here via
-			// the catch-all `r.recharge` rule below.
-			const linked = r.featureId
-				? allFeaturesForRes.find(f => f.id === r.featureId)
-				: allFeaturesForRes.find(f => (f.name || "") === (r.name || ""));
-			if (linked) {
-				const info = CharacterSheetState.detectActivatableFeature?.(linked);
-				const isAbility = CharacterSheetState.isActivatableAbilityEntry?.({feature: linked, activationInfo: info, interactionMode: info?.interactionMode});
-				if (isAbility || CharacterSheetState.isHiddenFromGenericAbilitySurfaces?.(linked, allFeaturesForRes)) return false;
-			}
-			// Include combat-relevant resources
-			return name.includes("rage")
-				|| name.includes("ki")
-				|| name.includes("focus")
-				|| name.includes("sorcery")
-				|| name.includes("superiority")
-				|| name.includes("stamina")
-				|| name.includes("channel")
-				|| name.includes("wild shape")
-				|| name.includes("bardic")
-				|| name.includes("action surge")
-				|| name.includes("second wind")
-				|| name.includes("smite")
-				|| name.includes("lay on hands")
-				|| name.includes("arcane recovery")
-				|| name.includes("sneak attack") // Not a resource but might be tracked
-				|| r.recharge; // Any resource with recharge is likely combat-relevant
-		});
+		// (R23 #6) Use the SAME canonical generic-pool set as the Overview "Resources" panel
+		// so the two lists are always identical. Previously this filtered with a name
+		// all-list (+ `r.recharge` catch-all) that both dropped legitimate pools the Overview
+		// showed (e.g. "Invoke Hell") and admitted ones the Overview hid — the mismatch
+		// players reported. getGenericPoolResources() already excludes activatable abilities
+		// (Abilities area) and interdiction-managed / redundant-rider pools (their own panel).
+		const combatResources = this._state.getGenericPoolResources?.() || [];
 
 		for (const resource of combatResources) {
 			// Build pips - filled = available, empty = used. Each pip carries its
