@@ -18989,6 +18989,12 @@ class CharacterSheetState {
 				// =========================================================
 				case "Illrigger": {
 					const chaMod = this.getAbilityMod("cha");
+					// The TGTT port of the Illrigger ("TGTT-IllR") rewrites several features that the
+					// original "IllriggerRevised" balances differently — most notably Invoke Hell, whose
+					// TGTT text reads "You can use Invoke Hell twice ... You gain an additional use when you
+					// reach 11th level," versus the IllriggerRevised "use once, then rest."
+					const illriggerSource = cls.source || "IllriggerRevised";
+					const isTgttIllrigger = illriggerSource === "TGTT-IllR";
 
 					// Interdict Save DC: 8 + proficiency + CHA modifier
 					calculations.interdictDc = 8 + profBonus + chaMod - exhaustionPenalty;
@@ -19063,7 +19069,12 @@ class CharacterSheetState {
 					if (level >= 3) {
 						calculations.hasDiabolicContract = true;
 						calculations.hasInvokeHell = true;
-						calculations.invokeHellUses = 1; // 1/short rest
+						// Uses recharge on a short rest (the pool's `recharge` is "short").
+						// IllriggerRevised grants a single use ("use once, then rest"). The TGTT port
+						// grants two uses, plus a third once you reach 11th Illrigger level.
+						calculations.invokeHellUses = isTgttIllrigger
+							? (level >= 11 ? 3 : 2)
+							: 1;
 					}
 
 					// Level 5: Extra Attack
