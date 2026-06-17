@@ -1830,18 +1830,23 @@ class CharacterSheetFeatures {
 			const intransigentRange = intransigentCalcs.intransigentRange || 10;
 			const allyCount = Math.max(0, Math.min(intransigentMax, Number(this._state.getIntransigentAllyCount()) || 0));
 			const allyNoun = allyCount === 1 ? "creature" : "creatures";
-			const liveSummary = allyCount > 0
+			const hasAllies = allyCount > 0;
+			const liveSummary = hasAllies
 				? `You + ${allyCount} chosen ${allyNoun} within ${intransigentRange} ft are immune to charmed (while conscious).`
-				: `You are immune to charmed (while conscious). Raise the count to also protect creatures of your choice within ${intransigentRange} ft.`;
+				: `You are immune to charmed (while conscious). You may also extend this immunity to creatures of your choice within ${intransigentRange} ft — set how many below.`;
+			// At zero the live line is a call-to-action (advertise the extend option); once
+			// allies are chosen it confirms the active extension. The modifier classes drive a
+			// gold-vs-emerald accent so the state reads at a glance.
+			const liveModifier = hasAllies ? "charsheet__intransigent-live--active" : "charsheet__intransigent-live--extend";
 			intransigentHtml = `
 				<div class="charsheet__intransigent-controls mt-2 p-2">
-					<div class="charsheet__intransigent-title">Extend charmed immunity to chosen allies</div>
+					<div class="charsheet__intransigent-title">🛡️ Charmed immunity — extends to allies you choose</div>
+					<div class="charsheet__intransigent-live ${liveModifier} mb-2" aria-live="polite">${liveSummary}</div>
 					<div class="charsheet__intransigent-row ve-flex-v-center gap-2 mb-1">
-						<label class="charsheet__intransigent-label mb-0">Allies you choose to protect:</label>
+						<label class="charsheet__intransigent-label mb-0">Creatures you choose to protect:</label>
 						<input type="number" class="ve-form-control charsheet__intransigent-ally-count" min="0" max="${intransigentMax}" step="1" value="${allyCount}" title="Number of creatures of your choice within ${intransigentRange} ft that you currently extend your charmed immunity to (while conscious). The feature sets no upper limit.">
-						<span class="ve-muted ve-small">creature(s) within ${intransigentRange} ft, while you are conscious (no fixed limit)</span>
+						<span class="ve-muted ve-small">within ${intransigentRange} ft, while you are conscious (no fixed limit)</span>
 					</div>
-					<div class="charsheet__intransigent-live ve-small mb-1" aria-live="polite">${liveSummary}</div>
 					<em class="ve-muted ve-small">You are always immune to charmed while conscious. This feature also lets you extend that immunity to any creatures of your choice within ${intransigentRange} ft — set how many you are currently protecting.</em>
 				</div>
 			`;
