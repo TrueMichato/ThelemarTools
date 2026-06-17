@@ -353,6 +353,14 @@ class CharacterSheetUpgrades {
 			const availSection = e_({outer: `<div class="charsheet__upgrade-available mb-3"></div>`});
 			availSection.append(e_({outer: `<h5>Available Upgrades</h5>`}));
 			availSection.append(e_({outer: `<p class="ve-small ve-muted">Gold available: <strong>${totalGold.toFixed(1)} gp</strong></p>`}));
+			// Override / escape hatch (#14): apply upgrades the character already owns (migrating /
+			// pre-owned gear) without paying gold or meeting prerequisites.
+			availSection.append(e_({outer: `
+				<label class="charsheet__upgrade-override-label ve-flex-v-center ve-small mb-2" title="Apply upgrades without paying gold or meeting prerequisites — for migrating or already-upgraded gear.">
+					<input type="checkbox" class="charsheet__upgrade-override mr-1">
+					<span>Bypass cost &amp; prerequisites <span class="ve-muted">(already-owned / migrating)</span></span>
+				</label>
+			`}));
 
 			// Group by tier
 			const grouped = {};
@@ -377,7 +385,7 @@ class CharacterSheetUpgrades {
 					const renderedEntries = upgrade.entries?.length
 						? Renderer.get().render({type: "entries", entries: upgrade.entries})
 						: "";
-					const btnAttr = !canAfford ? "disabled title=\"Insufficient gold\"" : `title="Apply for ${gpCost} gp"`;
+					const btnAttr = !canAfford ? "disabled data-cost-locked=\"1\" title=\"Insufficient gold — tick the bypass box above to apply anyway\"" : `title="Apply for ${gpCost} gp"`;
 					const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
 					const baseHint = isBase
 						? `<span class="badge badge-default ve-small ml-1" title="Per-upgrade base cost. The DM may scale this for the specific item per the source's pricing tables.">base</span>`
@@ -424,6 +432,21 @@ class CharacterSheetUpgrades {
 
 		modalInner.append(content);
 
+		// Override toggle (#14): when ticked, enable cost-locked apply buttons so already-owned
+		// upgrades can be applied without paying gold or meeting prerequisites.
+		const overrideCb = content.querySelector(".charsheet__upgrade-override");
+		if (overrideCb) {
+			overrideCb.addEventListener("change", () => {
+				const isOverride = overrideCb.checked;
+				content.querySelectorAll(".charsheet__upgrade-apply[data-cost-locked]").forEach((/** @type {*} */ btn) => {
+					btn.disabled = !isOverride;
+					btn.classList.toggle("ve-btn-primary", isOverride);
+					btn.classList.toggle("ve-btn-default", !isOverride);
+					btn.title = isOverride ? "Apply for free (cost bypassed)" : "Insufficient gold — tick the bypass box above to apply anyway";
+				});
+			});
+		}
+
 		// Footer
 		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			<button class="ve-btn ve-btn-default">Close</button>
@@ -438,7 +461,10 @@ class CharacterSheetUpgrades {
 			if (applyBtn) {
 				const name = applyBtn.dataset.upgradeName;
 				const source = applyBtn.dataset.upgradeSource;
-				const cost = parseFloat(applyBtn.dataset.upgradeCost);
+				const rawCost = parseFloat(applyBtn.dataset.upgradeCost);
+				// When the override box is ticked, bypass gold cost & prerequisites entirely.
+				const isOverride = !!overrideCb?.checked;
+				const cost = isOverride ? 0 : rawCost;
 				const upgrade = (this._page.getItemUpgrades?.() || this._allUpgrades).find(
 					u => u.name === name && u.source === source,
 				);
@@ -460,7 +486,8 @@ class CharacterSheetUpgrades {
 					return;
 				}
 
-				JqueryUtil.doToast({content: `Applied "${upgrade.name}" to ${item.name} for ${cost} gp`, type: "success"});
+				const costMsg = isOverride && rawCost > 0 ? "(cost bypassed)" : `for ${cost} gp`;
+				JqueryUtil.doToast({content: `Applied "${upgrade.name}" to ${item.name} ${costMsg}`, type: "success"});
 				this._page.saveCharacter();
 				doClose(true);
 				this._page._inventory?.render();
@@ -569,7 +596,7 @@ class CharacterSheetUpgrades {
 			<div class="charsheet__empower-header">
 				<span class="ve-small"><strong>Gem Empowerment</strong> ${skillBadge}</span>
 				<span class="ve-small ve-muted">⚠ Failure destroys the gem</span>
-				${!hasGemEmpowerment ? `<div class="charsheet__empower-warning ve-small">Add <strong>Gem Empowerment</strong> as a custom skill first.</div>` : ""}
+				${!hasGemEmpowerment ? `<div class="charsheet__empower-warning ve-small">No <strong>Gem Empowerment</strong> skill — add it as a custom skill to roll, or use <strong>✓ Already empowered</strong> to record a pre-empowered gem (requirements bypassed).</div>` : ""}
 			</div>
 		`}));
 
@@ -625,6 +652,13 @@ class CharacterSheetUpgrades {
 						<div class="ve-flex-v-center">
 							<span class="charsheet__upgrade-name ve-flex-1">${gemLink}${gem.gemName ? ` <span class="ve-muted ve-small">(${gem.gemName})</span>` : ""}${gem.charges ? ` <span class="badge badge-info ve-small">${gem.charges}ch</span>` : ""}</span>
 							<button type="button"
+								class="ve-btn ve-btn-xs ve-btn-default charsheet__empower-force mr-1"
+								data-gem-name="${gem.name}"
+								data-gem-source="${gem.source}"
+								title="Mark as already empowered — bypass the skill check (no roll, no destruction risk)">
+								✓ Already empowered
+							</button>
+							<button type="button"
 								class="ve-btn ve-btn-xs ${hasGemEmpowerment ? "ve-btn-success" : "ve-btn-default"} charsheet__empower-select"
 								data-gem-name="${gem.name}"
 								data-gem-source="${gem.source}"
@@ -650,6 +684,14 @@ class CharacterSheetUpgrades {
 
 		// Event delegation
 		content.addEventListener("click", async (e) => {
+			// Override (#14): mark as already empowered, bypassing the skill check
+			const forceBtn = e.target.closest(".charsheet__empower-force");
+			if (forceBtn) {
+				doClose(false);
+				await this.forceEmpowerGemstone(forceBtn.dataset.gemName, forceBtn.dataset.gemSource, opts);
+				return;
+			}
+
 			const empowerBtn = e.target.closest(".charsheet__empower-select");
 			if (!empowerBtn) return;
 
@@ -712,43 +754,7 @@ class CharacterSheetUpgrades {
 					g => g.name === gemName && g.source === gemSource,
 				);
 
-				if (gemEntity) {
-					const baseGemName = gemEntity.gemName || opts.fromInventoryGem?.name || "Gemstone";
-					const empoweredName = `Empowered ${baseGemName} (${gemEntity.name})`;
-					const gemstoneData = {
-						name: gemEntity.name,
-						source: gemEntity.source,
-						gemName: gemEntity.gemName,
-						rarity: gemEntity.rarity,
-						upgradeType: gemEntity.upgradeType,
-						entries: gemEntity.entries,
-						charges: gemEntity.charges || null,
-						recharge: gemEntity.recharge || null,
-					};
-
-					if (opts.fromInventoryGem) {
-						const existingItems = this._state.getItems();
-						const existingGem = existingItems.find(i => i.id === opts.fromInventoryGem.id);
-						if (existingGem) {
-							existingGem.name = empoweredName;
-							existingGem.rarity = gemEntity.rarity || "common";
-							existingGem.entries = gemEntity.entries || [];
-							existingGem._isEmpoweredGemstone = true;
-							existingGem._gemstoneData = gemstoneData;
-						}
-					} else {
-						this._state.addItem({
-							name: empoweredName,
-							source: gemSource,
-							type: "$G",
-							rarity: gemEntity.rarity || "common",
-							entries: gemEntity.entries || [],
-							weight: 0,
-							_isEmpoweredGemstone: true,
-							_gemstoneData: gemstoneData,
-						});
-					}
-				}
+				this._applyEmpowermentToInventory(gemEntity, opts);
 
 				resultDiv.style.display = "";
 				resultDiv.innerHTML = `
@@ -789,9 +795,138 @@ class CharacterSheetUpgrades {
 	}
 
 	// ==========================================
-	// Gemstone Socket Modal
+	// Empowerment / Upgrade Application (shared core + override escape hatch)
 	// ==========================================
 
+	/**
+	 * Build the persisted gemstone data object from a gemstone power entity.
+	 * Shared by the crafting-roll success path, the "already empowered" override,
+	 * and the custom-item creation flow.
+	 * @param {object} gemEntity - The gemstone power entity (from getGemstoneUpgrades)
+	 * @returns {object} Gemstone data suitable for socketGemstone / _gemstoneData
+	 */
+	static buildGemstoneData (gemEntity) {
+		return {
+			name: gemEntity.name,
+			source: gemEntity.source,
+			gemName: gemEntity.gemName,
+			rarity: gemEntity.rarity,
+			upgradeType: gemEntity.upgradeType,
+			entries: gemEntity.entries,
+			charges: gemEntity.charges || null,
+			recharge: gemEntity.recharge || null,
+		};
+	}
+
+	/**
+	 * Apply a successful empowerment to inventory — either marking an existing base gem as
+	 * empowered (opts.fromInventoryGem) or adding a fresh empowered gemstone item.
+	 * Extracted so the normal crafting-roll success path AND the "already empowered" override
+	 * share one implementation.
+	 * @param {object} gemEntity - The gemstone power entity
+	 * @param {object} [opts] - {fromInventoryGem?: {id, name, source}}
+	 * @returns {{empoweredName: string, gemstoneData: object}|null}
+	 */
+	_applyEmpowermentToInventory (gemEntity, opts = {}) {
+		if (!gemEntity) return null;
+
+		const baseGemName = gemEntity.gemName || opts.fromInventoryGem?.name || "Gemstone";
+		const empoweredName = `Empowered ${baseGemName} (${gemEntity.name})`;
+		const gemstoneData = CharacterSheetUpgrades.buildGemstoneData(gemEntity);
+
+		if (opts.fromInventoryGem) {
+			this._state.markGemstoneEmpowered(opts.fromInventoryGem.id, gemstoneData, {
+				name: empoweredName,
+				rarity: gemEntity.rarity || "common",
+				entries: gemEntity.entries || [],
+			});
+		} else {
+			this._state.addItem({
+				name: empoweredName,
+				source: gemEntity.source,
+				type: "$G",
+				rarity: gemEntity.rarity || "common",
+				entries: gemEntity.entries || [],
+				weight: 0,
+				_isEmpoweredGemstone: true,
+				_gemstoneData: gemstoneData,
+			});
+		}
+
+		return {empoweredName, gemstoneData};
+	}
+
+	/**
+	 * Override / escape hatch (#14): mark a gemstone as already empowered WITHOUT the Gem
+	 * Empowerment skill, crafting roll, or destruction risk. Supports migrating a character or
+	 * recording gear empowered by someone else. The normal skill-check flow is left intact.
+	 * @param {string} gemName - The gemstone power name
+	 * @param {string} gemSource - The gemstone power source
+	 * @param {object} [opts] - {fromInventoryGem?: {id, name, source}}
+	 * @returns {Promise<boolean>} True if applied
+	 */
+	async forceEmpowerGemstone (gemName, gemSource, opts = {}) {
+		const gemEntity = this.getGemstoneUpgrades().find(
+			g => g.name === gemName && g.source === gemSource,
+		);
+		if (!gemEntity) {
+			JqueryUtil.doToast({content: "Gemstone power not found.", type: "danger"});
+			return false;
+		}
+
+		const ok = await InputUiUtil.pGetUserBoolean({
+			title: "Mark as Already Empowered?",
+			htmlDescription: `This bypasses the <strong>Gem Empowerment</strong> skill check and crafting roll — no roll is made and the gem is <strong>not</strong> at risk of being destroyed.<br><br>Use this when migrating a character, or recording gear that was empowered by someone else.`,
+			textYes: "Mark Empowered",
+			textNo: "Cancel",
+		});
+		if (!ok) return false;
+
+		const applied = this._applyEmpowermentToInventory(gemEntity, opts);
+		if (!applied) {
+			JqueryUtil.doToast({content: "Could not empower gemstone.", type: "danger"});
+			return false;
+		}
+
+		const toastGemLabel = gemEntity.gemName || opts.fromInventoryGem?.name || gemName;
+		JqueryUtil.doToast({content: `Marked ${toastGemLabel} as empowered (${gemName}) — requirements bypassed.`, type: "success"});
+		this._page.saveCharacter();
+		this._page._inventory?.render();
+		return true;
+	}
+
+	/**
+	 * Force-apply a set of upgrades and/or socket a gemstone onto an existing item, bypassing
+	 * cost and prerequisites. Used by the custom-item creation flow (#15) and as the shared core
+	 * for any "already owned" application. Upgrades are recorded with costPaid 0.
+	 * @param {string} itemId - Target inventory item id
+	 * @param {object} opts
+	 * @param {Array} [opts.upgrades] - Upgrade entities to apply
+	 * @param {object} [opts.gemstone] - A gemstone power entity to socket (treated as empowered)
+	 * @returns {{appliedUpgrades: number, socketed: boolean}}
+	 */
+	applyUpgradesToItem (itemId, {upgrades = [], gemstone = null} = {}) {
+		let appliedUpgrades = 0;
+		let socketed = false;
+
+		for (const upgrade of upgrades) {
+			if (!upgrade) continue;
+			const res = this._state.applyItemUpgrade(itemId, upgrade, 0);
+			if (res?.success) appliedUpgrades++;
+		}
+
+		if (gemstone) {
+			const gemstoneData = CharacterSheetUpgrades.buildGemstoneData(gemstone);
+			const res = this._state.socketGemstone(itemId, gemstoneData);
+			socketed = !!res?.success;
+		}
+
+		return {appliedUpgrades, socketed};
+	}
+
+	// ==========================================
+	// Gemstone Socket Modal
+	// ==========================================
 	/**
 	 * Show the gemstone socket picker for an item
 	 * @param {string} itemId - The target item ID
