@@ -186,3 +186,75 @@ describe("#13 — Magician (Primal Order) Arcana/Nature bonus equals the LIVE Wi
 		expect(state._getDynamicSkillFeatureBonus("arcana")).toBe(1);
 	});
 });
+
+describe("#13 follow-up — orphaned feature-sourced named modifiers are cleaned up on load", () => {
+	// A real feature that still exists on the character (its modifier must survive).
+	const livingFeature = () => ({name: "Roving", id: "feat-roving", description: "Your walking speed increases.", featureType: "Class", source: "PHB"});
+
+	test("strips a parser-minted modifier whose sourceFeatureId matches no current feature", () => {
+		state.loadFromJson({
+			abilities: {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10},
+			features: [livingFeature()],
+			namedModifiers: [
+				// Orphan: "Forest Sage" feature was removed, but its abilitySwap mod lingers.
+				{id: "m-orphan", name: "Forest Sage", type: "abilitySwap:arcana", newAbility: "wis", enabled: true, sourceFeatureId: "feat-forest-sage-GONE"},
+			],
+		});
+		const names = (state._data.namedModifiers || []).map(m => m.name);
+		expect(names).not.toContain("Forest Sage");
+	});
+
+	test("preserves a modifier whose sourceFeatureId references a feature that still exists", () => {
+		state.loadFromJson({
+			abilities: {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10},
+			features: [livingFeature()],
+			namedModifiers: [
+				{id: "m-roving", name: "Roving", type: "speed:walk", value: 10, enabled: true, sourceFeatureId: "feat-roving"},
+			],
+		});
+		const names = (state._data.namedModifiers || []).map(m => m.name);
+		expect(names).toContain("Roving");
+	});
+
+	test("preserves a modifier that has NO sourceFeatureId (racial/manual/legit)", () => {
+		state.loadFromJson({
+			abilities: {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10},
+			features: [],
+			namedModifiers: [
+				{id: "m-manual", name: "Manual Bonus", type: "skill:stealth", value: 2, enabled: true},
+			],
+		});
+		const names = (state._data.namedModifiers || []).map(m => m.name);
+		expect(names).toContain("Manual Bonus");
+	});
+
+	test("preserves a MANAGED modifier (sourceType set) even when its sourceFeatureId is not a feature", () => {
+		// Custom-ability modifiers legitimately reference a non-feature owner (ca_… ids)
+		// and own their own lifecycle, so the orphan sweep must never touch them.
+		state.loadFromJson({
+			abilities: {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10},
+			features: [],
+			namedModifiers: [
+				{id: "m-ca", name: "Pan's Apostle: ability:wis", type: "ability:wis", value: 2, enabled: true, sourceType: "customAbility", sourceFeatureId: "ca_pans-apostle"},
+			],
+		});
+		const names = (state._data.namedModifiers || []).map(m => m.name);
+		expect(names).toContain("Pan's Apostle: ability:wis");
+	});
+
+	test("an orphaned abilitySwap no longer swaps the skill's ability (Arcana stays INT, not WIS)", () => {
+		state.loadFromJson({
+			abilities: {str: 10, dex: 10, con: 10, int: 8, wis: 20, cha: 10}, // INT -1, WIS +5
+			skillProficiencies: {arcana: 1},
+			features: [],
+			namedModifiers: [
+				// Orphaned Forest Sage swap that would otherwise prefer WIS (+5) over INT (-1).
+				{id: "m-orphan", name: "Forest Sage", type: "abilitySwap:arcana", newAbility: "wis", enabled: true, sourceFeatureId: "feat-forest-sage-GONE"},
+			],
+		});
+		const bd = state.getSkillBreakdown("arcana");
+		expect(bd.ability).toBe("int");
+		const abilityComp = (bd.components || []).find(c => c.type === "ability");
+		expect(abilityComp.name).toBe("INT modifier"); // NOT "INT modifier (swapped from …)"
+	});
+});

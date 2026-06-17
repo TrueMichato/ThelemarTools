@@ -4200,6 +4200,22 @@ class CharacterSheetState {
 		// form contributes nothing until the druid actually transforms into it.
 		this._migrateZodiacFormFeatureModifiers();
 
+		// Migrate ORPHANED feature-sourced named modifiers: a parser-minted named
+		// modifier that carries a `sourceFeatureId` pointing at a feature that no
+		// longer exists on the character (e.g. a respecced/removed subclass feature
+		// such as "Forest Sage", whose abilitySwap mods were never cleaned up) must
+		// not keep applying — it leaks the removed feature's effect permanently and
+		// can corrupt derived values (e.g. an orphaned abilitySwap silently swapping
+		// a skill's ability). This generalises the same "modifiers must follow their
+		// source feature" principle as the zodiac-form migration. Runs AFTER
+		// _migrateFeatures (so the feature id set is finalised) and strips ONLY
+		// modifiers that have a sourceFeatureId matching no current feature AND no
+		// `sourceType` (so managed effects — classFeature/customAbility/feat, which
+		// own their own lifecycle and may legitimately reference non-feature owners —
+		// are left untouched). Modifiers without a sourceFeatureId (racial/manual)
+		// and those whose source feature still exists are preserved.
+		this._migrateOrphanedFeatureModifiers();
+
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
 
@@ -4803,6 +4819,42 @@ class CharacterSheetState {
 		const before = this._data.namedModifiers.length;
 		this._data.namedModifiers = this._data.namedModifiers.filter(
 			mod => !(mod.sourceFeatureId && formFeatureIds.has(mod.sourceFeatureId)),
+		);
+		if (this._data.namedModifiers.length !== before) {
+			this._recalculateCustomModifiers();
+		}
+	}
+
+	/**
+	 * Strip orphaned feature-sourced named modifiers: parser-minted modifiers whose
+	 * `sourceFeatureId` references a feature that no longer exists on the character.
+	 * Such modifiers are residue from a removed/respecced feature (e.g. a "Forest Sage"
+	 * subclass feature that minted abilitySwap:arcana/nature mods, then was removed
+	 * without cleaning up its modifiers) and keep applying their effect permanently —
+	 * including ability swaps that silently corrupt skill calculations. Generalises the
+	 * "modifiers must follow their source feature" rule.
+	 *
+	 * Guarded narrowly: a modifier is dropped ONLY when it BOTH carries a truthy
+	 * `sourceFeatureId` matching no current feature id AND has NO `sourceType`. A
+	 * `sourceType` (e.g. "classFeature", "customAbility", "feat") marks a modifier as
+	 * owned by another effect system that re-applies/clears it on its own lifecycle and
+	 * legitimately points at a non-feature owner (custom abilities use `ca_…` ids), so
+	 * those must never be swept here. Modifiers without a `sourceFeatureId`
+	 * (racial/manual/legit) and those whose source feature still exists are likewise
+	 * preserved. Recalculates derived custom modifiers when anything changed.
+	 */
+	_migrateOrphanedFeatureModifiers () {
+		if (!this._data.namedModifiers?.length) return;
+
+		const featureIds = new Set(
+			(this._data.features || [])
+				.map(f => f.id)
+				.filter(Boolean),
+		);
+
+		const before = this._data.namedModifiers.length;
+		this._data.namedModifiers = this._data.namedModifiers.filter(
+			mod => mod.sourceType || !mod.sourceFeatureId || featureIds.has(mod.sourceFeatureId),
 		);
 		if (this._data.namedModifiers.length !== before) {
 			this._recalculateCustomModifiers();
