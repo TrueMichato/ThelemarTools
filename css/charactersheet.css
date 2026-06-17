@@ -8866,6 +8866,50 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--rgb-text-dim);
 }
 
+/* Intransigent (Hellspeaker L11) extend-to-allies chooser. The card must make the
+   "you may extend your charmed immunity to creatures of your choice" affordance
+   unmistakable, so the control gets a titled, light panel (matching the proven-
+   readable original) with a left accent stripe, a clear inline label, a compact
+   numeric stepper, and a live one-line effect summary. Colours are explicit (rather
+   than theme vars, which resolve empty on this page) so the dark text always reads
+   against the light panel in both site themes. */
+.charsheet__intransigent-controls {
+	background: var(--bs-body-bg-alt, #f8f9fa);
+	border: 1px solid var(--bs-border-color, #dee2e6);
+	border-left: 4px solid #7d2a2a;
+	border-radius: 8px;
+	color: #212529;
+}
+
+.charsheet__intransigent-title {
+	font-weight: 700;
+	color: #7d2a2a;
+	margin-bottom: 0.35em;
+}
+
+.charsheet__intransigent-row {
+	flex-wrap: wrap;
+}
+
+.charsheet__intransigent-label {
+	font-weight: 600;
+	color: #212529;
+}
+
+.charsheet__intransigent-ally-count {
+	width: 5rem;
+}
+
+.charsheet__intransigent-live {
+	font-weight: 600;
+	color: #212529;
+}
+
+.charsheet__intransigent-controls .ve-muted,
+.charsheet__intransigent-controls em {
+	color: #5a6169 !important;
+}
+
 /* Multi-mechanic reminder notes (e.g. Enduring Traveler): each distinct benefit on
    its own compact bullet so they no longer cram into one paragraph. */
 .charsheet__ranger-ability-notes {
