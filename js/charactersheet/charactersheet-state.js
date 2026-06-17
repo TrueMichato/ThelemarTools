@@ -21072,12 +21072,14 @@ class CharacterSheetState {
 
 		// Intransigent (Hellspeaker L11): you (and chosen creatures within 10 ft) are
 		// immune to the charmed condition while you are conscious. The self-immunity is
-		// modeled mechanically; the 10-ft aura for allies is narrative.
+		// modeled mechanically (conscious-gated — see isImmuneToCondition); the 10-ft aura
+		// for chosen allies is surfaced via the feature summary + ally-count chooser.
 		if (calculations.hasIntransigent && !alreadyProcessed("Intransigent")) {
 			effects.push({
 				type: "conditionImmunity",
 				condition: "charmed",
 				source: "Intransigent",
+				conditional: "while conscious",
 			});
 		}
 
@@ -21187,7 +21189,7 @@ class CharacterSheetState {
 			}
 
 			case "conditionImmunity": {
-				this._addClassFeatureConditionImmunity(effect.condition);
+				this._addClassFeatureConditionImmunity(effect.condition, effect.conditional);
 				return `${effect.source}: ${effect.condition} condition immunity`;
 			}
 
@@ -21617,6 +21619,7 @@ class CharacterSheetState {
 			});
 		}
 		this._data._classFeatureConditionImmunities = [];
+		this._data._conditionImmunityMeta = [];
 
 		// Remove class feature save proficiencies
 		if (this._data._classFeatureSaveProficiencies) {
@@ -21741,8 +21744,17 @@ class CharacterSheetState {
 		}
 	}
 
-	_addClassFeatureConditionImmunity (condition) {
+	_addClassFeatureConditionImmunity (condition, conditional = null) {
 		if (!this._data._classFeatureConditionImmunities) this._data._classFeatureConditionImmunities = [];
+		// Track per-grant metadata (source-aware) so conscious-gated immunities can be
+		// evaluated dynamically without being confused by other, ungated sources of the
+		// same immunity (the flat conditionImmunities list dedupes and cannot tell sources
+		// apart). Recorded for EVERY grant, even when the immunity string is already present.
+		if (!this._data._conditionImmunityMeta) this._data._conditionImmunityMeta = [];
+		this._data._conditionImmunityMeta.push({
+			condition: String(condition).toLowerCase(),
+			conditional: conditional || null,
+		});
 		if (!this._data.conditionImmunities.includes(condition)) {
 			this._data.conditionImmunities.push(condition);
 			this._data._classFeatureConditionImmunities.push(condition);
@@ -25231,7 +25243,7 @@ class CharacterSheetState {
 			// Auto-break concentration if the condition causes incapacitation
 			// RAW: Incapacitated creatures can't concentrate (PHB/XPHB)
 			if (this._data.concentrating) {
-				const condDef = CharacterSheetState.getConditionEffects(condObj.name, condObj.source);
+				const condDef = this._resolveConditionEffects(condObj.name, condObj.source);
 				const isIncapacitating = condDef?.effects?.some(e => e.type === "incapacitated" && e.value);
 				if (isIncapacitating) {
 					this.breakConcentration();
@@ -25339,8 +25351,45 @@ class CharacterSheetState {
 	 * @param {string} conditionName - The condition name
 	 * @param {string} source - The condition source
 	 */
+	/**
+	 * Whether this character plays under the Thelemar (TGTT) condition rules, in which
+	 * case the standard conditions (frightened, poisoned, …) resolve to their stronger
+	 * `_tgtt` variants (extra verbal/somatic-spell constraints, concentration-save
+	 * disadvantage, etc.).
+	 *
+	 * Gated on the character actually using TGTT-sourced class/subclass content — NOT on
+	 * `prioritySources` (defaults to ["TGTT"] for everyone) nor on `exhaustionRules`
+	 * (defaults to "thelemar" for everyone in this fork). Either would flip condition
+	 * mechanics for every character, including pure-PHB builds. A TGTT class/subclass is
+	 * the reliable, bug-targeted signal (the Illrigger is a TGTT class).
+	 * @returns {boolean}
+	 */
+	_usesThelemarConditions () {
+		const isTgttSource = (s) => !!s && (s === "TGTT" || s.startsWith("TGTT-"));
+		return (this._data.classes || []).some(c => isTgttSource(c.source) || isTgttSource(c.subclass?.source));
+	}
+
+	/**
+	 * Resolve a condition's mechanical definition, preferring the Thelemar (`_tgtt`)
+	 * variant for characters that use Thelemar conditions. Conditions with no `_tgtt`
+	 * variant (e.g. charmed) fall back to the generic definition automatically, so
+	 * passing "TGTT" is always safe. Non-Thelemar characters keep the source they were
+	 * given (#16: Illrigger features applied generic conditions instead of the Thelemar
+	 * variants because self-conditions are added with the granting feature's name as
+	 * `source`, never "TGTT").
+	 * @param {string} conditionName
+	 * @param {string} source
+	 * @returns {object|null}
+	 */
+	_resolveConditionEffects (conditionName, source) {
+		if (this._usesThelemarConditions()) {
+			return CharacterSheetState.getConditionEffects(conditionName, "TGTT");
+		}
+		return CharacterSheetState.getConditionEffects(conditionName, source);
+	}
+
 	_applyConditionEffects (conditionName, source) {
-		const condDef = CharacterSheetState.getConditionEffects(conditionName, source);
+		const condDef = this._resolveConditionEffects(conditionName, source);
 		if (!condDef) {
 			// Unknown condition - just track it without effects
 			return;
@@ -26437,6 +26486,34 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Intransigent (Hellspeaker L11) lets you extend your charmed immunity to each creature
+	 * of your choice within 10 ft while you are conscious. The sheet tracks a single
+	 * character, so the ally extension is recorded as a count the player chooses; it drives
+	 * the feature-summary signal so the table knows how many allies are currently covered.
+	 * @returns {number} Non-negative count of chosen allies (0 when unset).
+	 */
+	getIntransigentAllyCount () {
+		const n = Number(this._data.illriggerIntransigentAllyCount);
+		return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+	}
+
+	/**
+	 * Set how many allies the Intransigent aura currently extends to. No-op (cleared to 0)
+	 * when the character lacks Intransigent, so a stale choice never lingers after respec.
+	 * @param {number} count
+	 * @returns {number} the value actually stored.
+	 */
+	setIntransigentAllyCount (count) {
+		if (!(this.getFeatureCalculations?.() || {}).hasIntransigent) {
+			this._data.illriggerIntransigentAllyCount = 0;
+			return 0;
+		}
+		const n = Number(count);
+		this._data.illriggerIntransigentAllyCount = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+		return this._data.illriggerIntransigentAllyCount;
+	}
+
+	/**
 	 * Whether an attack matches the Lies mastery weapon-type choice. Matching is a
 	 * case-insensitive containment test on the attack/weapon name (so "Greatsword +1" or
 	 * "Greatsword" both match a choice of "greatsword"). Spell attacks never match.
@@ -26890,12 +26967,16 @@ class CharacterSheetState {
 				? `Spend 1 Hit Die to add to a failed save (${avail} available)`
 				: "Spend 1 Hit Die to add to a failed save";
 		},
-		"intransigent": (c) => {
+		"intransigent": (c, self) => {
 			if (!c.hasIntransigent) return null;
 			const r = c.intransigentRange || 10;
 			// Signal that the charmed-immunity can be EXTENDED to allies you choose — not
-			// just yourself (R22 #10).
-			return `You + chosen creatures within ${r} ft are immune to charmed`;
+			// just yourself (R22 #10) — and that it is gated on being conscious (R23 #11).
+			const allies = self?.getIntransigentAllyCount?.() || 0;
+			const who = allies > 0
+				? `You + ${allies} chosen creature${allies === 1 ? "" : "s"} within ${r} ft`
+				: `You (and chosen creatures within ${r} ft)`;
+			return `${who} are immune to charmed (while conscious)`;
 		},
 		"superior interdict": (c) => {
 			if (!c.hasSuperiorInterdict) return null;
@@ -31440,12 +31521,52 @@ class CharacterSheetState {
 	isImmuneToCondition (condition) {
 		const condName = (typeof condition === "string" ? condition : condition?.name || "").toLowerCase();
 
-		// Check base condition immunities (case-insensitive)
-		const hasBaseImmunity = this._data.conditionImmunities.some(
-			ci => ci.toLowerCase() === condName,
-		);
+		// Check base condition immunities (case-insensitive), honouring "while conscious"
+		// gating (e.g. Intransigent: charmed immunity only while you are conscious).
+		const hasBaseImmunity = this._isStaticConditionImmunityActive(condName);
 
 		return hasBaseImmunity || this.hasConditionImmunityFromStates(condName);
+	}
+
+	/**
+	 * Whether the character's STATIC (non active-state) immunity to a condition is
+	 * currently in effect. Handles "while conscious" conditional immunities source-aware:
+	 * the immunity holds if ANY granting source is unconditional, or if a conscious-gated
+	 * source's predicate currently passes (character not unconscious). Sources without
+	 * recorded metadata (racial/manual/import grants) are treated as unconditional.
+	 * @param {string} condName - Lower-cased condition name
+	 * @returns {boolean}
+	 * @private
+	 */
+	_isStaticConditionImmunityActive (condName) {
+		const inList = this._data.conditionImmunities.some(ci => ci.toLowerCase() === condName);
+		if (!inList) return false;
+
+		const meta = (this._data._conditionImmunityMeta || []).filter(m => m.condition === condName);
+		// A grant present in the flat list but NOT tracked as a class feature came from a
+		// racial/manual/import source with no conditional → always active.
+		const fromClassFeature = (this._data._classFeatureConditionImmunities || [])
+			.some(ci => ci.toLowerCase() === condName);
+		if (!fromClassFeature || !meta.length) return true;
+
+		return meta.some(m => {
+			if (!m.conditional) return true; // unconditional source → always active
+			if (/conscious/i.test(m.conditional)) return !this._isGenuinelyUnconscious();
+			// Any other conditional string keeps prior behaviour (applied unconditionally).
+			return true;
+		});
+	}
+
+	/**
+	 * Distinguishes a character who is actually unconscious — downed to 0 HP, or under the
+	 * Unconscious condition (e.g. from a sleep effect at positive HP) — from one whose HP is
+	 * simply uninitialised (e.g. mid-build, freshly constructed in a test). Only the former
+	 * should suppress "while conscious" condition immunities.
+	 * @private
+	 */
+	_isGenuinelyUnconscious () {
+		if (this.hasCondition?.("unconscious")) return true;
+		return (this._data.hp?.max || 0) > 0 && this.isUnconscious();
 	}
 	// #endregion
 
@@ -33809,6 +33930,20 @@ class CharacterSheetState {
 			// Effective value (per-level / proficiency-bonus rules) via shared helper
 			// so the skill-breakdown itemizer stays in lock-step with these totals.
 			let value = this._getNamedModifierEffectiveValue(mod);
+
+			// Advantage/disadvantage encoded in the modType string (e.g.
+			// "check:cha:advantage", "save:advantage:poisoned", "save:dex:advantage")
+			// carries value:1 as a *presence sentinel*, NOT a flat numeric bonus. Adding
+			// it here leaks a phantom +1 onto the affected ability's checks/saves — e.g.
+			// Forked Tongue Improvement (check:wis:advantage) and Moloch's Blessing
+			// (check:cha:advantage) each bumped WIS/CHA checks by +1 instead of granting
+			// advantage. The advantage effect itself flows through aggregateModifiers()/
+			// getAdvantageState(); the quick-total path must contribute 0. Modifiers that
+			// carry an explicit numeric value alongside a *separate* `advantage` field
+			// (not encoded in the type string) keep their value. Mirrors the `_advFromType`
+			// sentinel handling in aggregateModifiers().
+			const {advantage: _advFromType, disadvantage: _disFromType} = this._parseModifierType(mod.type);
+			if (_advFromType || _disFromType) value = 0;
 
 			switch (mod.type) {
 				case "ac": cm.ac += value; break;

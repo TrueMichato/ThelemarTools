@@ -644,6 +644,14 @@ class CharacterSheetRest {
 			else modalInner.append(forkedTongueSwap.section);
 		}
 
+		// --- Terrorizing Force damage-type re-choice (Illrigger L11) ---
+		const terrorizingForceChoice = this._buildTerrorizingForceDamageTypeSection();
+		if (terrorizingForceChoice) {
+			const tfTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (tfTarget?.parentNode) tfTarget.parentNode.insertBefore(terrorizingForceChoice.section, tfTarget);
+			else modalInner.append(terrorizingForceChoice.section);
+		}
+
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		btnConfirm.onClick(() => {
 			// Full HP recovery
@@ -725,6 +733,9 @@ class CharacterSheetRest {
 			this._state.resetForkedTongueSwap?.();
 			const forkedTongueChanged = forkedTongueSwap?.apply() || false;
 
+			// Apply Terrorizing Force damage-type re-choice (free on a long rest)
+			const terrorizingForceChanged = terrorizingForceChoice?.apply() || false;
+
 			// Save changes
 			this._page.saveCharacter();
 			this._page.renderCharacter();
@@ -734,6 +745,7 @@ class CharacterSheetRest {
 			let message = "🌙 Long rest complete! All resources restored.";
 			if (primalFocusChanged) message += ` Primal Focus set to ${primalFocusChanged}.`;
 			if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
+			if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
 			if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
@@ -866,6 +878,47 @@ class CharacterSheetRest {
 				if (chosen && chosen !== currentMode) {
 					this._state.setPrimalFocusMode?.(chosen);
 					return chosen === "predator" ? "Predator" : "Prey";
+				}
+				return false;
+			},
+		};
+	}
+
+	/**
+	 * Build a Terrorizing Force damage-type selector for the long-rest dialog (Illrigger L11).
+	 * The chosen element (cold/fire/necrotic/poison) for the +1d8 weapon-hit rider is
+	 * changeable on a long rest. Returns null when the character lacks Terrorizing Force.
+	 * @returns {{section: HTMLElement, apply: function}|null}
+	 */
+	_buildTerrorizingForceDamageTypeSection () {
+		if (!this._state.getFeatureCalculations?.()?.hasTerrorizingForce) return null;
+
+		const currentType = this._state.getTerrorizingForceDamageType?.() || "fire";
+		const types = this._state.constructor?.TERRORIZING_FORCE_DAMAGE_TYPES
+			|| ["cold", "fire", "necrotic", "poison"];
+
+		const sel = e_({tag: "select", clazz: "form-control input-sm charsheet__terrorizing-force-rest-select"});
+		types.forEach(t => {
+			const label = t.charAt(0).toUpperCase() + t.slice(1);
+			const opt = e_({tag: "option", val: t, txt: label});
+			if (t === currentType) opt.selected = true;
+			sel.appendChild(opt);
+		});
+
+		const section = e_({outer: `<div class="charsheet__rest-section">
+			<div class="charsheet__rest-section-title">🔥 Terrorizing Force</div>
+			<p class="ve-muted ve-small mb-2">Choose the damage type for your Terrorizing Force weapon rider (free on a long rest):</p>
+		</div>`});
+		section.appendChild(sel);
+
+		return {
+			section,
+			// Returns the new type's label when changed, else false.
+			apply: () => {
+				const chosen = sel.value;
+				if (chosen && chosen !== currentType) {
+					const stored = this._state.setTerrorizingForceDamageType?.(chosen);
+					if (stored === chosen) return chosen.charAt(0).toUpperCase() + chosen.slice(1);
 				}
 				return false;
 			},
