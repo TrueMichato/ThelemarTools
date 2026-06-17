@@ -19096,35 +19096,112 @@ background: rgba(224, 86, 253, 0.08);
 
 /* Interdiction panel (Illrigger Baleful Interdict) ------------------------- */
 
-.charsheet__interdict-panel {
+/* ========================================================================
+   Illrigger combat panels — Interdiction, Infernal Conduit, Combat Masteries
+   (R23 #17). Dark-theme aware: the earlier rules assumed a light surface
+   (black borders / near-transparent fills), which washed the text out on the
+   dark sheet. Rebuilt on the --cs-* design tokens with clear section headers,
+   carded rows, hover affordances, and readable contrast.
+   ======================================================================== */
+.charsheet__interdict-panel,
+.charsheet__conduit-panel,
+.charsheet__mastery-panel {
 display: flex;
 flex-direction: column;
-gap: 0.5rem;
+gap: var(--cs-space-sm, 8px);
+color: var(--cs-text-primary, #f1f5f9);
 }
 
-.charsheet__interdict-summary {
-gap: 0.5rem;
-padding: 0.4rem 0.6rem;
-border: 1px solid rgba(229, 57, 53, 0.45);
-border-left: 3px solid #e53935;
-border-radius: 4px;
-background: rgba(229, 57, 53, 0.08);
+/* --- Summary strips (DC / pool / range) --- */
+.charsheet__interdict-summary,
+.charsheet__conduit-summary {
+gap: var(--cs-space-sm, 8px);
+padding: 0.5rem 0.7rem;
+border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+border-left: 3px solid var(--cs-accent-ruby, #ef4444);
+border-radius: var(--cs-radius-sm, 6px);
+background: var(--cs-accent-ruby-light, rgba(239, 68, 68, 0.15));
+color: var(--cs-text-primary, #f1f5f9);
 }
 
-.charsheet__interdict-dc strong,
-.charsheet__interdict-pool strong {
+.charsheet__conduit-summary {
+border-left-color: var(--cs-accent-ruby, #ef4444);
+}
+
+.charsheet__interdict-summary strong,
+.charsheet__conduit-summary strong {
 font-weight: 700;
+color: var(--cs-text-primary, #f1f5f9);
 }
 
+/* Sub-section labels (Interdicted creatures / Charm Enemy / Known boons …) */
+.charsheet__interdict-seals > .ve-muted:first-child,
+.charsheet__interdict-charm > .ve-muted:first-child,
+.charsheet__interdict-superior > .ve-muted:first-child,
+.charsheet__interdict-boons > .ve-muted:first-child {
+text-transform: uppercase;
+letter-spacing: 0.04em;
+font-weight: 600;
+font-size: 0.7rem;
+color: var(--cs-text-secondary, #94a3b8);
+margin-bottom: 0.35rem;
+}
+
+/* --- Carded rows (seals, boons, charm, superior, mastery) --- */
 .charsheet__interdict-seal-row,
-.charsheet__interdict-boon-row {
+.charsheet__interdict-boon-row,
+.charsheet__interdict-charm-row,
+.charsheet__interdict-superior-row,
+.charsheet__mastery-row {
 gap: 0.4rem;
-padding: 0.3rem 0.5rem;
-border: 1px solid rgba(0, 0, 0, 0.12);
-border-radius: 4px;
-background: rgba(229, 57, 53, 0.04);
+padding: 0.4rem 0.55rem;
+border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+border-radius: var(--cs-radius-sm, 6px);
+background: var(--cs-bg-surface, #1e293b);
+transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.charsheet__interdict-boon-row {
-background: rgba(0, 0, 0, 0.02);
+.charsheet__interdict-seal-row:hover,
+.charsheet__interdict-boon-row:hover,
+.charsheet__interdict-charm-row:hover,
+.charsheet__interdict-superior-row:hover,
+.charsheet__mastery-row:hover {
+border-color: var(--cs-border-hover, rgba(255, 255, 255, 0.2));
+background: var(--cs-bg-elevated, #334155);
+}
+
+/* Moloch-granted free boons get a faint accent so they read as "always known" */
+.charsheet__interdict-boon-row:has(.charsheet__interdict-boon-granted) {
+border-left: 3px solid var(--cs-accent-amethyst, #a855f7);
+}
+
+.charsheet__interdict-boon-granted {
+background: var(--cs-accent-amethyst-light, rgba(168, 85, 247, 0.15)) !important;
+color: var(--cs-text-primary, #f1f5f9) !important;
+}
+
+/* Keep the action button hugging the right edge of every row */
+.charsheet__interdict-boon-row .ml-auto,
+.charsheet__interdict-charm-row .ml-auto,
+.charsheet__interdict-superior-row .ml-auto {
+margin-left: auto;
+}
+
+/* --- Conduit controls --- */
+.charsheet__conduit-controls {
+gap: 0.4rem;
+padding: 0.4rem 0;
+}
+
+.charsheet__conduit-controls label {
+color: var(--cs-text-secondary, #94a3b8);
+}
+
+/* --- Masteries --- */
+.charsheet__mastery-row .bold {
+color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__mastery-panel > .ve-muted {
+color: var(--cs-text-secondary, #94a3b8);
 }

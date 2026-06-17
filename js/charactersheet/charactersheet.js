@@ -5900,7 +5900,7 @@ class CharacterSheetPage {
 		const container = document.getElementById("charsheet-resources");
 		container.innerHTML = "";
 
-		const resources = this._state.getResources();
+		const resources = this._state.getGenericPoolResources();
 		const usesCombatSystem = this._state.usesCombatSystem?.() || false;
 
 		// Bug 3: Custom limited-use abilities are NOT rendered here anymore —
