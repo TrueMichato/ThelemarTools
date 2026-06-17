@@ -4514,7 +4514,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(calcs.magicianSkillBonus).toBe(1);
 			});
 
-			it("should push skillBonus effects for arcana and nature", () => {
+			it("should push LIVE abilityMod skillBonus effects for arcana and nature", () => {
 				state.addClass({name: "Druid", source: "TGTT", level: 1});
 				state.setAbilityBase("wis", 18); // +4 mod
 				state.addFeature({
@@ -4529,10 +4529,20 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				const calcs = state.getFeatureCalculations();
 				const arcanaEffect = calcs._effects.find(e => e.source === "Magician (Primal Order)" && e.skill === "arcana");
 				const natureEffect = calcs._effects.find(e => e.source === "Magician (Primal Order)" && e.skill === "nature");
+				// The bonus must be a LIVE Wisdom-modifier effect (min +1), NOT a baked value,
+				// so it tracks WIS instead of drifting.
 				expect(arcanaEffect).toBeDefined();
-				expect(arcanaEffect.value).toBe(4);
+				expect(arcanaEffect.abilityMod).toBe("wis");
+				expect(arcanaEffect.minValue).toBe(1);
+				expect(arcanaEffect.value).toBeUndefined();
 				expect(natureEffect).toBeDefined();
-				expect(natureEffect.value).toBe(4);
+				expect(natureEffect.abilityMod).toBe("wis");
+				expect(natureEffect.minValue).toBe(1);
+				expect(natureEffect.value).toBeUndefined();
+
+				// The live-resolved contribution equals the current WIS modifier (+4).
+				expect(state._getDynamicSkillFeatureBonus("arcana")).toBe(4);
+				expect(state._getDynamicSkillFeatureBonus("nature")).toBe(4);
 			});
 		});
 	});
