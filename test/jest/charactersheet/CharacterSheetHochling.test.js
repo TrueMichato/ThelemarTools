@@ -198,8 +198,10 @@ describe("Hochling — Divine Manifestation apply: War Domain", () => {
 		const guidedStrike = state.getFeatures().find((/** @type {*} */ f) => f.name === "Guided Strike");
 		expect(guidedStrike).toBeDefined();
 		expect(guidedStrike.source).toBe("TGTT");
-		expect(guidedStrike.uses.max).toBe(1);
-		expect(guidedStrike.uses.recharge).toBe("short");
+		// (S2 #15) Manifestation options draw on the SHARED "Divine Manifestation" pool —
+		// they no longer carry their own per-option `uses`.
+		expect(guidedStrike.uses).toBeUndefined();
+		expect(guidedStrike.consumes).toEqual({name: "Divine Manifestation", amount: 1});
 
 		// War God's Blessing is gated to character level 6.
 		expect(state.getFeatures().some((/** @type {*} */ f) => f.name === "War God's Blessing")).toBe(false);
@@ -214,7 +216,8 @@ describe("Hochling — Divine Manifestation apply: War Domain", () => {
 		expect(state.getFeatures().some((/** @type {*} */ f) => f.name === "Guided Strike")).toBe(true);
 		const blessing = state.getFeatures().find((/** @type {*} */ f) => f.name === "War God's Blessing");
 		expect(blessing).toBeDefined();
-		expect(blessing.uses.recharge).toBe("short");
+		expect(blessing.uses).toBeUndefined();
+		expect(blessing.consumes).toEqual({name: "Divine Manifestation", amount: 1});
 	});
 
 	it("does NOT grant any Aasimar transformation feature", () => {
@@ -287,8 +290,9 @@ describe("Hochling — Divine Manifestation apply: all approved domains", () => 
 			expect(feature).toBeDefined();
 			expect(feature.source).toBe("TGTT");
 			expect(feature.featureType).toBe("Species");
-			expect(feature.uses.max).toBe(1);
-			expect(feature.uses.recharge).toBe("short");
+			// (S2 #15) Shared "Divine Manifestation" pool, not a per-option `uses`.
+			expect(feature.uses).toBeUndefined();
+			expect(feature.consumes).toEqual({name: "Divine Manifestation", amount: 1});
 		});
 
 		// Any higher-tier option is gated above level 1.
@@ -306,7 +310,7 @@ describe("Hochling — Divine Manifestation apply: all approved domains", () => 
 		(def.cd || []).forEach((/** @type {*} */ cd) => {
 			const feature = state.getFeatures().find((/** @type {*} */ f) => f.name === stripCd(cd.cdName));
 			expect(feature).toBeDefined();
-			expect(feature.uses.recharge).toBe("short");
+			expect(feature.consumes).toEqual({name: "Divine Manifestation", amount: 1});
 		});
 	});
 
@@ -482,5 +486,105 @@ describe("Hochling — save/load round-trip", () => {
 		expect(reloaded.getSpellcastingAbilityForSpell(cantrip)).toBe("cha");
 		expect(reloaded.getFeatures().some((/** @type {*} */ f) => f.name === "Guided Strike")).toBe(true);
 		expect(reloaded.getFeatures().some((/** @type {*} */ f) => f.name === "War God's Blessing")).toBe(true);
+	});
+});
+
+// ===========================================================================
+// Trait 3 — Divine Manifestation: ONE shared use pool (#15)
+// ===========================================================================
+describe("Hochling — Divine Manifestation shared resource pool (#15)", () => {
+	it("surfaces exactly ONE 'Divine Manifestation' pool (max 1), not one per option", () => {
+		const state = new CharacterSheetState();
+		setCharacterLevel(state, 6); // both Guided Strike (L1) and War God's Blessing (L6)
+		state.setRaceManifestationChoice("war");
+		CharacterSheetClassUtils.applyRaceManifestation(state);
+
+		// Touch the activatable surface so the shared pool is ensured.
+		state.getActivatableFeatures();
+
+		const pools = state.getResources().filter((/** @type {*} */ r) => r.name === "Divine Manifestation");
+		expect(pools).toHaveLength(1);
+		expect(pools[0].max).toBe(1);
+		expect(pools[0].recharge).toBe("short");
+
+		// No leftover per-option pools.
+		expect(state.getResources().some((/** @type {*} */ r) => r.name === "Guided Strike")).toBe(false);
+		expect(state.getResources().some((/** @type {*} */ r) => r.name === "War God's Blessing")).toBe(false);
+	});
+
+	it("links BOTH options to the SAME shared pool so using either decrements it once", () => {
+		const state = new CharacterSheetState();
+		setCharacterLevel(state, 6);
+		state.setRaceManifestationChoice("war");
+		CharacterSheetClassUtils.applyRaceManifestation(state);
+
+		const activatables = state.getActivatableFeatures();
+		const gs = activatables.find((/** @type {*} */ a) => a.feature?.name === "Guided Strike");
+		const wgb = activatables.find((/** @type {*} */ a) => a.feature?.name === "War God's Blessing");
+		expect(gs?.resource?.name).toBe("Divine Manifestation");
+		expect(wgb?.resource?.name).toBe("Divine Manifestation");
+		// Same underlying pool id.
+		expect(gs.resource.id).toBe(wgb.resource.id);
+
+		const poolId = gs.resource.id;
+		expect(state.getResources().find((/** @type {*} */ r) => r.id === poolId).current).toBe(1);
+
+		// Spend via War God's Blessing; Guided Strike must now read 0 too (shared).
+		state.setResourceCurrent(poolId, 0);
+		const after = state.getActivatableFeatures();
+		const gsAfter = after.find((/** @type {*} */ a) => a.feature?.name === "Guided Strike");
+		expect(gsAfter.resource.current).toBe(0);
+	});
+
+	it("restores the shared pool on a long rest", () => {
+		const state = new CharacterSheetState();
+		setCharacterLevel(state, 6);
+		state.setRaceManifestationChoice("war");
+		CharacterSheetClassUtils.applyRaceManifestation(state);
+		state.getActivatableFeatures();
+
+		const pool = state.getResources().find((/** @type {*} */ r) => r.name === "Divine Manifestation");
+		state.setResourceCurrent(pool.id, 0);
+		expect(state.getResources().find((/** @type {*} */ r) => r.id === pool.id).current).toBe(0);
+
+		state.onLongRest();
+		const restored = state.getResources().find((/** @type {*} */ r) => r.name === "Divine Manifestation");
+		expect(restored.current).toBe(1);
+	});
+
+	it("migrates legacy saves with per-option pools into the single shared pool", () => {
+		// Simulate an old save: two separate per-option pools + features carrying their own `uses`.
+		const legacy = {
+			classes: [{name: "Cleric", source: "PHB", level: 6}],
+			raceManifestationChoice: "war",
+			features: [
+				{id: "gs-id", name: "Guided Strike", source: "TGTT", featureType: "Species", level: 1, _raceManifestation: "war", uses: {current: 1, max: 1, recharge: "short"}, description: "Channel Divinity: +10 to one attack roll."},
+				{id: "wgb-id", name: "War God's Blessing", source: "TGTT", featureType: "Species", level: 6, _raceManifestation: "war", uses: {current: 0, max: 1, recharge: "short"}, description: "Channel Divinity: grant +10 as a reaction."},
+			],
+			resources: [
+				{id: "r-gs", name: "Guided Strike", max: 1, current: 1, recharge: "short", featureId: "gs-id"},
+				{id: "r-wgb", name: "War God's Blessing", max: 1, current: 0, recharge: "short", featureId: "wgb-id"},
+			],
+		};
+		const state = new CharacterSheetState();
+		state.loadFromJson(legacy);
+
+		// Features normalized to the shared `consumes` pool, no stray per-option `uses`.
+		const gs = state.getFeatures().find((/** @type {*} */ f) => f.name === "Guided Strike");
+		const wgb = state.getFeatures().find((/** @type {*} */ f) => f.name === "War God's Blessing");
+		expect(gs.uses).toBeUndefined();
+		expect(wgb.uses).toBeUndefined();
+		expect(gs.consumes).toEqual({name: "Divine Manifestation", amount: 1});
+		expect(wgb.consumes).toEqual({name: "Divine Manifestation", amount: 1});
+
+		// Exactly one shared pool, stale per-option pools removed.
+		const pools = state.getResources().filter((/** @type {*} */ r) => r.name === "Divine Manifestation");
+		expect(pools).toHaveLength(1);
+		expect(state.getResources().some((/** @type {*} */ r) => r.name === "Guided Strike")).toBe(false);
+		expect(state.getResources().some((/** @type {*} */ r) => r.name === "War God's Blessing")).toBe(false);
+
+		// A spent legacy option carries the "spent" state over to the shared pool.
+		expect(pools[0].current).toBe(0);
+		expect(pools[0].max).toBe(1);
 	});
 });
