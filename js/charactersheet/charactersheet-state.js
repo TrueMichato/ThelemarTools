@@ -4221,6 +4221,10 @@ class CharacterSheetState {
 		// Re-register custom ability effects after loading — run after migrations so effects reference up-to-date data
 		this._reapplyCustomAbilityEffects();
 
+		// Recompute modifier-derived resource maxes (custom-ability uses, item charges) so saved
+		// caches reflect the loaded character's current ability modifiers.
+		this.syncDerivedResourceMaxes();
+
 		// Re-register equipped-item custom effects (Bug #8) after loading. Idempotent: clears any
 		// item-sourced modifiers restored verbatim from the save, then re-registers active items.
 		this._reapplyItemEffects();
@@ -32438,11 +32442,28 @@ class CharacterSheetState {
 			const sourceType = opts.resourceSource?.type || "self";
 
 			if (sourceType === "self") {
-				ability.uses = {
-					current: opts.uses?.max || 1,
-					max: opts.uses?.max || 1,
-					recharge: opts.uses?.recharge || "long",
-				};
+				const recharge = opts.uses?.recharge || "long";
+				if (opts.uses?.maxMode === "abilityMod") {
+					// Uses-per-day derived LIVE from an ability modifier (min 1) so the cap follows
+					// ability-score changes / level-ups. The numeric `max` is a cache kept in sync by
+					// syncDerivedResourceMaxes(); `maxMode`/`maxAbility` are the source of truth.
+					const maxAbility = this._normalizeResourceAbility(opts.uses?.maxAbility);
+					const computedMax = this._computeAbilityModResourceMax(maxAbility);
+					ability.uses = {
+						current: computedMax,
+						max: computedMax,
+						recharge,
+						maxMode: "abilityMod",
+						maxAbility,
+					};
+				} else {
+					const fixedMax = opts.uses?.max || 1;
+					ability.uses = {
+						current: fixedMax,
+						max: fixedMax,
+						recharge,
+					};
+				}
 			} else if (sourceType === "new") {
 				// Create a new resource pool for this ability
 				const newResourceName = opts.resourceSource.newResourceName || `${opts.name} Charges`;
@@ -32509,6 +32530,21 @@ class CharacterSheetState {
 				ability.uses = null;
 			} else if (updates.mode === "limited" && !ability.uses) {
 				ability.uses = {current: 1, max: 1, recharge: "long"};
+			}
+		}
+
+		// Normalise modifier-derived uses: recompute the live max when in abilityMod mode, or
+		// strip stale modifier fields when an edit switched back to a fixed number.
+		if (ability.mode === "limited" && ability.uses) {
+			if (ability.uses.maxMode === "abilityMod") {
+				const maxAbility = this._normalizeResourceAbility(ability.uses.maxAbility);
+				ability.uses.maxAbility = maxAbility;
+				const computedMax = this._computeAbilityModResourceMax(maxAbility);
+				ability.uses.max = computedMax;
+				ability.uses.current = Math.min(ability.uses.current ?? computedMax, computedMax);
+			} else {
+				delete ability.uses.maxMode;
+				delete ability.uses.maxAbility;
 			}
 		}
 
@@ -32716,9 +32752,10 @@ class CharacterSheetState {
 
 		// Self-contained uses
 		if (ability.uses) {
+			const max = this._getCustomAbilityUsesMax(ability);
 			return {
-				current: ability.uses.current,
-				max: ability.uses.max,
+				current: Math.min(ability.uses.current ?? max, max),
+				max,
 				recharge: ability.uses.recharge || "long",
 			};
 		}
@@ -32735,7 +32772,7 @@ class CharacterSheetState {
 			if (ability.mode !== "limited" || !ability.uses) continue;
 
 			if (restType === "long" || ability.uses.recharge === restType) {
-				ability.uses.current = ability.uses.max;
+				ability.uses.current = this._getCustomAbilityUsesMax(ability);
 			}
 		}
 	}
@@ -32768,9 +32805,78 @@ class CharacterSheetState {
 		}
 
 		// Self-contained uses
-		if (!ability.uses || ability.uses.current >= ability.uses.max) return false;
+		if (!ability.uses || ability.uses.current >= this._getCustomAbilityUsesMax(ability)) return false;
 		ability.uses.current++;
 		return true;
+	}
+
+	/**
+	 * Normalise an ability abbreviation for a modifier-derived resource max, defaulting to "wis"
+	 * for unknown/missing values.
+	 * @param {string} ability
+	 * @returns {string} A valid ability abbreviation (str/dex/con/int/wis/cha)
+	 */
+	_normalizeResourceAbility (ability) {
+		const valid = Parser.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
+		const lower = (ability || "").toLowerCase();
+		return valid.includes(lower) ? lower : "wis";
+	}
+
+	/**
+	 * Compute the LIVE max for a resource whose uses-per-day equal an ability modifier (min 1),
+	 * mirroring how features parsed as "equal to your <ability> modifier" are sized.
+	 * @param {string} ability - Ability abbreviation
+	 * @returns {number} Effective max (at least 1)
+	 */
+	_computeAbilityModResourceMax (ability) {
+		return Math.max(1, this.getAbilityMod(this._normalizeResourceAbility(ability)));
+	}
+
+	/**
+	 * Resolve the effective max uses for a self-contained limited custom ability. When the ability
+	 * stores `uses.maxMode === "abilityMod"` the value is computed live from the chosen ability
+	 * modifier; otherwise the stored fixed `uses.max` is returned.
+	 * @param {object} ability - The custom ability object
+	 * @returns {number} Effective max uses
+	 */
+	_getCustomAbilityUsesMax (ability) {
+		const uses = ability?.uses;
+		if (!uses) return 0;
+		if (uses.maxMode === "abilityMod" && uses.maxAbility) {
+			return this._computeAbilityModResourceMax(uses.maxAbility);
+		}
+		return uses.max || 0;
+	}
+
+	/**
+	 * Recompute the cached numeric max for every resource whose cap is derived from an ability
+	 * modifier (custom-ability self-contained uses + custom-item charges), clamping the current
+	 * value to the new max. Idempotent and safe to call on every render so modifier-derived caps
+	 * follow ability-score changes and level-ups. Fixed-number resources are left untouched, so
+	 * existing saved characters keep working unchanged (migration-safe).
+	 */
+	syncDerivedResourceMaxes () {
+		if (Array.isArray(this._data.customAbilities)) {
+			for (const ability of this._data.customAbilities) {
+				if (ability.mode !== "limited" || !ability.uses) continue;
+				if (ability.uses.maxMode !== "abilityMod" || !ability.uses.maxAbility) continue;
+				const newMax = this._computeAbilityModResourceMax(ability.uses.maxAbility);
+				ability.uses.max = newMax;
+				if (typeof ability.uses.current !== "number") ability.uses.current = newMax;
+				else ability.uses.current = Math.min(ability.uses.current, newMax);
+			}
+		}
+
+		if (Array.isArray(this._data.inventory)) {
+			for (const invItem of this._data.inventory) {
+				const item = invItem?.item;
+				if (!item || item.chargesMaxMode !== "abilityMod" || !item.chargesMaxAbility) continue;
+				const newMax = this._computeAbilityModResourceMax(item.chargesMaxAbility);
+				item.charges = newMax;
+				if (typeof item.chargesCurrent !== "number") item.chargesCurrent = newMax;
+				else item.chargesCurrent = Math.min(item.chargesCurrent, newMax);
+			}
+		}
 	}
 
 	/**
