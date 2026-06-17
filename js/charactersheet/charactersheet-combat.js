@@ -1597,7 +1597,7 @@ class CharacterSheetCombat {
 				if (oncePerTurn && !this._isRiderAvailableThisTurn(rider.id)) continue;
 				const riderRoll = this._parseDamage(rider.dice, isCrit);
 				riderDamageTotal += riderRoll.total;
-				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total});
+				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total, type: rider.damageType});
 				riderRollsForAnim.push(riderRoll);
 				usedRiderIds.push(rider.id);
 				if (oncePerTurn) this._markRiderUsedThisTurn(rider.id);
@@ -1644,8 +1644,22 @@ class CharacterSheetCombat {
 		// Added as a SEPARATE damage type (its own crit handling + display), like Hand of Harm.
 		const {channelSpell, channelSpellRoll, channelSpellDamage, riderMatched} = this._resolveChannelRiderDamage(attack, attackId, isCrit);
 
-		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderDamageTotal;
-		const total = baseDamageTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
+		// Weapon damage riders carry their own damage type (e.g. Hellish Avenger → fire,
+		// Terrorizing Force → a chosen element). Riders whose type differs from the weapon's
+		// must be reported under THEIR type, not folded into the weapon-typed total (bugs
+		// #10/#12: Terrorizing Force / Hellish Avenger printed the weapon's type). Riders with
+		// no type (Colossus Slayer, Focused Quarry, …) share the weapon's type as before.
+		const weaponDamageType = attack.damageType;
+		let riderSameTypeTotal = 0;
+		const riderTypedParts = [];
+		for (const rp of riderParts) {
+			if (!rp.type || rp.type === weaponDamageType) riderSameTypeTotal += rp.total;
+			else riderTypedParts.push(rp);
+		}
+		const riderDiffTypeTotal = riderDamageTotal - riderSameTypeTotal;
+
+		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal;
+		const total = baseDamageTotal + riderDiffTypeTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
 
 		// Build subtitle with breakdown
 		let subtitle = `${attack.damage}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
@@ -1657,7 +1671,7 @@ class CharacterSheetCombat {
 		if (spellDamageBonus) subtitle += ` + ${spellDamageBonus} (spell item)`;
 		if (sneakAttackDamage) subtitle += ` + ${sneakAttackDamage} (sneak attack ${sneakAttackDice})`;
 		for (const rp of riderParts) {
-			subtitle += ` + ${rp.total} (${rp.name} ${rp.dice})`;
+			subtitle += ` + ${rp.total} (${rp.name} ${rp.dice}${rp.type ? ` ${rp.type}` : ""})`;
 		}
 		for (const ep of extraDamageParts) {
 			subtitle += ` + ${ep.total} (${ep.source}${ep.type ? ` ${ep.type}` : ""})`;
@@ -1678,6 +1692,9 @@ class CharacterSheetCombat {
 
 		// Show result — separate damage types in title when multi-type damage is present
 		const typedExtras = [];
+		// Differently-typed weapon riders (e.g. Terrorizing Force psychic, Hellish Avenger fire)
+		// surface under their own type so the title reflects the real damage breakdown.
+		for (const rp of riderTypedParts) typedExtras.push(`${rp.total} ${rp.type}`);
 		if (handOfHarmDamage) typedExtras.push(`${handOfHarmDamage} necrotic`);
 		if (methodEffectDamage) typedExtras.push(`${methodEffectDamage} ongoing`);
 		if (channelSpellDamage) typedExtras.push(`${channelSpellDamage} ${channelSpell.damageType}`);

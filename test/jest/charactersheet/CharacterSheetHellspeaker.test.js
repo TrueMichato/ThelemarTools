@@ -143,9 +143,18 @@ describe("Illrigger Hellspeaker (Moloch)", () => {
 			expect(state.isImmuneToCondition("charmed")).toBe(false);
 		});
 
-		it("grants charmed immunity at L11", () => {
+		it("grants charmed immunity at L11 while conscious", () => {
 			addHellspeaker(state, 11, {cha: 16});
+			state.setHp(58, 58, 0); // conscious
 			expect(state.isImmuneToCondition("charmed")).toBe(true);
+			expect(state.getConditionImmunities().map(c => c.toLowerCase())).toContain("charmed");
+		});
+
+		it("suppresses charmed immunity while unconscious (Intransigent is conscious-gated)", () => {
+			addHellspeaker(state, 11, {cha: 16});
+			state.setHp(0, 58, 0); // downed → unconscious
+			expect(state.isImmuneToCondition("charmed")).toBe(false);
+			// still listed as a granted immunity, just not currently active
 			expect(state.getConditionImmunities().map(c => c.toLowerCase())).toContain("charmed");
 		});
 	});
