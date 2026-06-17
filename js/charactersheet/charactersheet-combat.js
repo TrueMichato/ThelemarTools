@@ -101,6 +101,27 @@ class CharacterSheetCombat {
 			this._removeAttack(attackId);
 		});
 
+		// (R22 #5) Right-click a weapon attack to apply Guided Strike (+10) to a fresh roll of
+		// it. Only intercepts when the character actually has an available Guided Strike use;
+		// otherwise the normal browser context menu is left untouched.
+		document.addEventListener("contextmenu", (/** @type {*} */ e) => {
+			const item = e.target.closest(".charsheet__attack-item");
+			if (!item) return;
+			if (e.target.closest("a")) return; // keep real link context menus working
+			const attackId = item.dataset.attackId;
+			if (!attackId) return;
+			const gs = this._page?._resolveGuidedStrikeAbility?.();
+			if (!gs || !gs.available) return;
+			e.preventDefault();
+			const menu = ContextUtil.getMenu([
+				new ContextUtil.Action(
+					"⚔️ Guided Strike (+10)",
+					() => this._page?._pUseGuidedStrikeOnAttack?.(attackId),
+				),
+			]);
+			void ContextUtil.pOpenMenu(e, menu);
+		});
+
 		// Attack note
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__attack-note");
@@ -918,7 +939,7 @@ class CharacterSheetCombat {
 		this._page.saveCharacter();
 	}
 
-	_rollAttack (attackId, event) {
+	_rollAttack (attackId, event, opts = {}) {
 		const attacks = this._state.getAttacks();
 		let attack = attacks.find(a => a.id === attackId);
 		if (!attack && this._cachedAttacks?.length) {
@@ -934,7 +955,7 @@ class CharacterSheetCombat {
 			const stateAttacks = this._state.getActiveStateAttacks?.() || [];
 			attack = stateAttacks.find(a => a.id === attackId);
 		}
-		if (!attack) return;
+		if (!attack) return false;
 
 		// A fresh attack roll discards any pending channeled-spell on-hit rider that has
 		// not yet been consumed by a damage roll (Booming/Green-Flame Blade timing: the
@@ -997,7 +1018,13 @@ class CharacterSheetCombat {
 		const localContribution = this._getCombatLocalAttackBonus({isMelee, attack});
 		const localAttackBonus = localContribution.bonus || 0;
 
-		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus + localAttackBonus;
+		// One-shot externally-supplied bonus (e.g. Guided Strike's +10). Generic: any caller
+		// can add a labelled flat bonus to a single attack roll without it being a persistent
+		// modifier/state. Surfaced in the roll title + breakdown so the player sees it.
+		const extraBonus = (opts?.extraBonus && Number.isFinite(opts.extraBonus.value)) ? opts.extraBonus : null;
+		const extraBonusValue = extraBonus ? extraBonus.value : 0;
+
+		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus + localAttackBonus + extraBonusValue;
 
 		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
 		const rollResult = this._page.rollD20({event, mode: stateMode});
@@ -1020,12 +1047,15 @@ class CharacterSheetCombat {
 		const localLabel = localContribution.parts?.length
 			? ` <span class="ve-muted">(${localContribution.parts.map(p => `${p.label} ${p.value >= 0 ? "+" : ""}${p.value}`).join(", ")})</span>`
 			: "";
+		const extraBonusLabel = extraBonus
+			? ` <span class="ve-muted">(${extraBonus.label} ${extraBonusValue >= 0 ? "+" : ""}${extraBonusValue})</span>`
+			: "";
 
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
 		void this._page.pAnimateD20?.(rollResult);
 		this._page.showDiceResult({
-			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}`,
+			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}`,
 			roll: rollResult.roll,
 			modifier: totalBonus,
 			total,
@@ -1078,6 +1108,7 @@ class CharacterSheetCombat {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet Combat] post-attack hook error", e);
 		});
+		return true;
 	}
 
 	/**
@@ -4132,37 +4163,18 @@ class CharacterSheetCombat {
 			`;
 		}
 
-		// Get hover link if possible - try multiple approaches
+		// Get hover link if possible. Delegate to the page's canonical resolver
+		// (`_getFeatureHoverLink`) so every feature type — Species/Race Channel-Divinity
+		// abilities (War God's Blessing, Healing Hands, Guided Strike), class/subclass
+		// features, optional features, and any classified ability carrying its own `entries` —
+		// resolves to the SAME hover the Features panel uses. The previous bespoke logic only
+		// handled optional-feature and Class shapes, so Species abilities silently degraded to
+		// plain text (R22 #4).
 		let nameHtml = feature.name;
-		let hasHoverLink = false;
-
-		if (this._page?.getHoverLink && feature.source) {
+		if (typeof this._page?._getFeatureHoverLink === "function") {
 			try {
-				// Try to get hover link based on feature type
-				if (feature.optionalFeatureTypes?.length) {
-					const isCM = CharacterSheetClassUtils.isCombatMethod(feature);
-					nameHtml = this._page.getHoverLink(isCM ? UrlUtil.PG_COMBAT_METHODS : UrlUtil.PG_OPT_FEATURES, feature.name, feature.source);
-					hasHoverLink = true;
-				} else if (feature.featureType === "Class" && feature.className) {
-					// Class features - use proper page and hash
-					const storedClass = this._state.getClasses()?.find(c => c.name?.toLowerCase() === feature.className?.toLowerCase());
-					const classSource = feature.classSource || feature.source || storedClass?.source || Parser.SRC_XPHB;
-
-					const hashInput = {
-						name: feature.name,
-						className: feature.className,
-						classSource: classSource,
-						level: feature.level || 1,
-						source: feature.source || Parser.SRC_XPHB,
-					};
-					if (feature.subclassName || feature.isSubclassFeature) {
-						hashInput.subclassShortName = feature.subclassShortName || feature.subclassName;
-						hashInput.subclassSource = feature.subclassSource || storedClass?.subclass?.source || feature.source || Parser.SRC_XPHB;
-					}
-					const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES](hashInput);
-					nameHtml = this._page.getHoverLink(UrlUtil.PG_CLASS_SUBCLASS_FEATURES, feature.name, feature.source, hash);
-					hasHoverLink = true;
-				}
+				const link = this._page._getFeatureHoverLink(feature);
+				if (link) nameHtml = link;
 			} catch {
 				// Fallback to plain name
 			}

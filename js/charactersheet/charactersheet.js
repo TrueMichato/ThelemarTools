@@ -1275,13 +1275,25 @@ class CharacterSheetPage {
 			this._state.loadFromJson(character);
 
 			// Backfill any class features missing from `_data.features` (e.g. on
-			// saves migrated from older formats). Idempotent.
-			this._reconcileClassFeatures();
+			// saves migrated from older formats). Idempotent. The result tells us whether
+			// anything changed so we can persist it (below) — without a re-save, backfilled
+			// features/entries would have to be re-derived on every load and any first-load
+			// render that reads persisted state (abilities/active-states) could miss them.
+			const reconcileResult = this._reconcileClassFeatures();
 
 			// Ensure Linguistics skill exists if Thelemar linguistics bonus is enabled
 			this._ensureLinguisticsSkillIfNeeded();
 
 			this._renderCharacter();
+
+			// Persist load-time migrations (reconcile backfill) so they survive to the next
+			// load. Guarded against a concurrent character switch: only save if THIS load is
+			// still the active character (the await above can interleave with another load).
+			if (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0)) {
+				if (this._currentCharacterId === charId) {
+					await this._saveCurrentCharacter();
+				}
+			}
 
 			// Apply saved section layout
 			if (this._layout) {
@@ -7668,6 +7680,18 @@ class CharacterSheetPage {
 			// eslint-disable-next-line no-console
 			console.warn("[CharSheet] Error creating feature hover link:", e);
 		}
+		// (R22 #4) Last-resort generic hover: any feature that reaches here unmatched but
+		// carries its own structured `entries` (e.g. a classified ability whose canonical
+		// page/hash could not be resolved) must still hover its OWN rules text rather than
+		// degrade to plain text. Routed by data shape, not by name, so it generalizes to any
+		// class/species/source. Real, resolvable features return from their branch above and
+		// never reach this fallback.
+		if (Array.isArray(feature?.entries) && feature.entries.length) {
+			try {
+				const localLink = CharacterSheetClassUtils.buildInlineEntriesHoverLink(feature.name, feature.name, feature.entries);
+				if (localLink) return localLink;
+			} catch (e) { /* fall through to plain name */ }
+		}
 		// Fallback: plain name
 		return feature.name;
 	}
@@ -7998,22 +8022,88 @@ class CharacterSheetPage {
 		return true;
 	}
 
-	/** (R20 #6) Apply Guided Strike's +10 to the most recent attack roll (1/short rest). */
-	_pUseGuidedStrike (feature, resource, resourceCost = 1) {
+	/**
+	 * (R20 #6 / R22 #5) Use Guided Strike. Primary path: prompt WHICH weapon attack to roll,
+	 * then roll it fresh with the +10 baked in (so the bonus is shown in the roll and the use
+	 * is consumed only once a roll actually fires). `opts.attackId` rolls a specific attack
+	 * directly (used by the weapon-attack right-click menu). Legacy fallback (no weapon
+	 * attacks defined): add +10 to the most recent attack roll. 1/short rest.
+	 * @param {object} feature
+	 * @param {object} resource
+	 * @param {number} [resourceCost]
+	 * @param {{attackId?: string}} [opts]
+	 * @returns {Promise<boolean>}
+	 */
+	async _pUseGuidedStrike (feature, resource, resourceCost = 1, opts = {}) {
+		// Availability — do NOT consume yet; consume only once a roll is guaranteed.
 		if (resource && resource.current < resourceCost) {
 			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Guided Strike has no uses remaining (recharges on a short rest)."}));
 			return true;
 		}
+		// Re-entrancy guard: the which-attack prompt is async; block a second concurrent use.
+		if (this._guidedStrikeInFlight) return true;
 
+		const {bonus} = CharacterSheetState.buildGuidedStrikeApplication(0);
+		let attackId = opts.attackId || null;
+		const weaponAttacks = this._state.getAttacks?.() || [];
+
+		if (!attackId && weaponAttacks.length) {
+			if (weaponAttacks.length === 1) {
+				attackId = weaponAttacks[0].id;
+			} else {
+				this._guidedStrikeInFlight = true;
+				try {
+					const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+						title: "Guided Strike — Which Attack?",
+						values: weaponAttacks.map(a => a.name),
+						isResolveItem: false,
+					}));
+					if (picked == null) return true; // cancelled — no consume
+					attackId = weaponAttacks[picked]?.id || null;
+				} finally {
+					this._guidedStrikeInFlight = false;
+				}
+			}
+		}
+
+		if (attackId) {
+			// Re-check availability right before commit (a concurrent action may have spent it
+			// while the picker was open) and capture the LIVE resource so the decrement is not
+			// based on a value captured before the async picker.
+			let liveResource = resource;
+			if (resource && !resource.isStamina) {
+				const live = this._state.getResources().find(r => r.id === resource.id);
+				if (live) liveResource = live;
+				if (liveResource && liveResource.current < resourceCost) {
+					JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Guided Strike has no uses remaining."}));
+					return true;
+				}
+			}
+			// Roll the chosen attack with the one-shot +10. Consume the use ONLY if the roll
+			// actually happened (a stale attackId after a re-render makes _rollAttack a no-op).
+			const rolled = this._combat?._rollAttack?.(attackId, null, {extraBonus: {label: "Guided Strike", value: bonus}});
+			if (rolled === false) {
+				JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "That attack is no longer available. Guided Strike was not used."}));
+				return true; // no roll → do NOT consume
+			}
+			if (liveResource) this._state.setResourceCurrent(liveResource.id, liveResource.current - resourceCost);
+			else if (feature?.id) this._state.useFeature?.(feature.id);
+			JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `⚔️ Guided Strike: +${bonus} applied to the attack roll.`}));
+			this._saveCurrentCharacter();
+			this._renderResources();
+			this._renderActiveStates();
+			return true;
+		}
+
+		// Legacy fallback: no weapon attacks defined — add +10 to the most recent attack roll.
 		const rolls = this._rollHistory?.getRolls?.() || [];
 		const lastAttack = rolls.find(r => r.rollType === "ATTACK" || r.rollType === "SPELL_ATTACK");
 		if (!lastAttack) {
-			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Make an attack roll first, then activate Guided Strike to add +10 to it."}));
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Make an attack roll first (or add a weapon attack), then activate Guided Strike to add +10."}));
 			return true; // handled — do NOT consume the use
 		}
 
 		const app = CharacterSheetState.buildGuidedStrikeApplication(Number(lastAttack.total));
-
 		if (resource) this._state.setResourceCurrent(resource.id, resource.current - resourceCost);
 		else if (feature?.id) this._state.useFeature?.(feature.id);
 
@@ -8029,6 +8119,39 @@ class CharacterSheetPage {
 		this._renderResources();
 		this._renderActiveStates();
 		return true;
+	}
+
+	/**
+	 * (R22 #5) Resolve the Guided Strike ability + its use pool for the weapon-attack
+	 * right-click menu. Returns null when the character lacks the feature.
+	 * @returns {{feature: object, resource: object|null, cost: number, available: boolean}|null}
+	 */
+	_resolveGuidedStrikeAbility () {
+		const feature = this._state.getFeatures().find(f => (f.name || "").toLowerCase() === "guided strike");
+		if (!feature) return null;
+		const af = this._getActivatableAbilityForFeature(feature);
+		const resource = af?.resource || null;
+		const cost = af?.resource?.cost || af?.activationInfo?.resourceCost || 1;
+		let available = true;
+		if (resource) available = resource.current >= cost;
+		else if (feature.uses && typeof feature.uses.current === "number") available = feature.uses.current >= cost;
+		return {feature: af?.feature || feature, resource, cost, available};
+	}
+
+	/**
+	 * (R22 #5) Apply Guided Strike to a specific weapon attack (from its right-click menu):
+	 * roll THAT attack with the +10 and consume the use.
+	 * @param {string} attackId
+	 * @returns {Promise<boolean>}
+	 */
+	async _pUseGuidedStrikeOnAttack (attackId) {
+		const gs = this._resolveGuidedStrikeAbility();
+		if (!gs) return false;
+		if (!gs.available) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Guided Strike has no uses remaining (recharges on a short rest)."}));
+			return true;
+		}
+		return this._pUseGuidedStrike(gs.feature, gs.resource, gs.cost, {attackId});
 	}
 
 	/**
@@ -14057,12 +14180,13 @@ class CharacterSheetPage {
 	 * `CharacterSheetClassUtils.reconcileClassFeatures` for full background.
 	 */
 	_reconcileClassFeatures () {
+		let result = {added: 0, backfilled: 0, classesProcessed: 0};
 		try {
-			CharacterSheetClassUtils.reconcileClassFeatures(this._state, {
+			result = CharacterSheetClassUtils.reconcileClassFeatures(this._state, {
 				getClassData: (name, source) => this._classes?.find(c => c.name === name && c.source === source),
 				classFeatures: this._classFeatures || [],
 				subclassFeatures: this._subclassFeatures || [],
-			});
+			}) || result;
 			// Re-hydrate + reconcile auto-granted combat methods (e.g. Ranger Primal Focus
 			// Upgrade's Singular Focus / Groundshatter), now that the class-feature catalog
 			// and combat-method catalog are both available.
@@ -14073,6 +14197,7 @@ class CharacterSheetPage {
 			// eslint-disable-next-line no-console
 			console.warn("[CharacterSheet] Class-feature reconciliation failed:", e);
 		}
+		return result;
 	}
 	getLayout () { return this._layout; }
 	getNotes () { return this._notes; }

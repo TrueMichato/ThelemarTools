@@ -4527,10 +4527,11 @@ class CharacterSheetClassUtils {
 	 * @returns {{added: number, classesProcessed: number}} - Summary for logging/tests.
 	 */
 	static reconcileClassFeatures (/** @type {*} */ state, {getClassData, classFeatures = [], subclassFeatures = []} = /** @type {*} */ ({})) {
-		if (!state || typeof getClassData !== "function") return {added: 0, classesProcessed: 0};
+		if (!state || typeof getClassData !== "function") return {added: 0, backfilled: 0, classesProcessed: 0};
 
 		const classes = state.getClasses?.() || [];
 		let added = 0;
+		let backfilled = 0;
 		let classesProcessed = 0;
 
 		for (const classEntry of classes) {
@@ -4585,10 +4586,28 @@ class CharacterSheetClassUtils {
 					const after = state.getFeatures?.().length || 0;
 					if (after > before) added++;
 				}
+
+				// (R22 #13/#7) Re-attach canonical `entries` to features that ALREADY exist
+				// (so they were skipped by the dedupe above) but were persisted without them
+				// by an older save — e.g. an Illrigger's Forked Tongue stored with only a
+				// rendered description. Generic: scoped by name + class/subclass identity,
+				// lenient on source so a TGTT `_copy` (base-brew-sourced canonical) still
+				// matches the stored copy-sourced feature.
+				if (typeof state.backfillFeatureContentFromCanonical === "function") {
+					for (const lf of levelFeatures) {
+						const didPatch = state.backfillFeatureContentFromCanonical(lf, {
+							className: classEntry.name,
+							level: lf.level || lvl,
+							subclassName: classEntry.subclass?.name,
+							isSubclassFeature: !!(lf.subclassName || lf.isSubclassFeature),
+						});
+						if (didPatch) backfilled++;
+					}
+				}
 			}
 		}
 
-		return {added, classesProcessed};
+		return {added, backfilled, classesProcessed};
 	}
 
 	// ==========================================

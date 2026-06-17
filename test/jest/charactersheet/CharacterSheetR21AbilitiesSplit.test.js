@@ -60,6 +60,12 @@ describe("R21 split — real Hochling Illrigger L10 character", () => {
 	const ABILITY_NAMES = [
 		"Healing Hands", "Guided Strike", "Baleful Interdict", "Forked Tongue",
 		"Charm Enemy", "War God's Blessing", "Forked Tongue Improvement",
+		// (R22 #3) Purge Toxins is a passive poison-resistance PLUS a limited-use cure
+		// ("As an action … spend 2 stamina to end one poison or disease"). It is a
+		// clickable ability, NOT a persistent on/off toggle — classified via the
+		// FEATURE_CLASSIFICATION_OVERRIDES "ability" entry. It must surface in the
+		// abilities area, never the active-states panel.
+		"Purge Toxins",
 	];
 
 	test("classified abilities are NOT in the active-states Available-to-Activate panel", () => {
@@ -81,11 +87,24 @@ describe("R21 split — real Hochling Illrigger L10 character", () => {
 	});
 
 	test("genuine toggles still surface in the active-states panel", () => {
+		// This build (Hochling Illrigger L10) carries no persistent on/off toggle — its
+		// activatable features are all limited-use abilities or interdict boons. Purge Toxins
+		// was previously (wrongly) treated as a toggle here; per R22 #3 it is an ability and is
+		// asserted as such above. The panel filter itself must still ADMIT a genuine toggle, so
+		// assert that with a representative toggle entry (matching the predicate contract).
+		const genuineToggle = {
+			interactionMode: "toggle",
+			activationInfo: {isToggle: true},
+			isActive: false,
+			feature: {name: "Rage"},
+		};
+		expect(activeStatesPanelEntries([genuineToggle]).map(a => a.feature?.name)).toContain("Rage");
+
+		// And Purge Toxins (an ability on this build) is NOT in the panel.
 		const state = loadRealChar();
 		const af = state.getActivatableFeatures();
 		const panelNames = activeStatesPanelEntries(af).map(a => a.feature?.name);
-		// Purge Toxins is a real on/off toggle on this build and must remain in the panel.
-		expect(panelNames).toContain("Purge Toxins");
+		expect(panelNames).not.toContain("Purge Toxins");
 	});
 
 	test("#14 — interdict boon (Veil of Lies) is invoked from the abilities area, never the panel", () => {

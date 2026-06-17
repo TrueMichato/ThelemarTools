@@ -26907,6 +26907,13 @@ class CharacterSheetState {
 			const type = c.terrorizingForceDamageType || "fire";
 			return `+${dice} ${type} on weapon hits (type changeable on a long rest)`;
 		},
+		// (R22 #14) Quid Pro Quo (Hellspeaker L15) forces a save whose DC equals the
+		// Interdict DC. Surface that number on the feature card so the player doesn't have to
+		// cross-reference the Class Statistics panel. Guarded so it never renders "undefined".
+		"quid pro quo": (c) => {
+			if (typeof c.quidProQuoDc !== "number") return null;
+			return `Save DC ${c.quidProQuoDc} (= Interdict DC)`;
+		},
 	};
 
 	/**
@@ -27033,6 +27040,75 @@ class CharacterSheetState {
 			id: f.id || CryptUtil.uid(),
 		}));
 	}
+
+	/**
+	 * (R22 #13/#7) Backfill missing `entries` (and a rendered `description`) onto an
+	 * already-stored feature from a canonical (catalog-resolved) level feature. Older saves
+	 * persisted some features (e.g. an Illrigger's Forked Tongue) with only a rendered
+	 * `description` and no structured `entries`, which left hover/use text empty once the
+	 * feature was classified as an ability. This re-attaches the canonical content WITHOUT
+	 * re-adding the feature, so existing pick state / uses are preserved.
+	 *
+	 * Matching is lenient on `source`: a TGTT `_copy` subclass/class resolves its level
+	 * features from the BASE brew (e.g. IllriggerRevised), so the canonical feature's source
+	 * legitimately differs from the stored feature's source. Collisions are instead avoided by
+	 * scoping on name + className + class/subclass kind (+ level when both carry one).
+	 *
+	 * @param {object} canonical - The catalog level feature (must have name + entries).
+	 * @param {{className?:string, level?:number, subclassName?:string, isSubclassFeature?:boolean}} [scope]
+	 * @returns {boolean} true if a stored feature was patched.
+	 */
+	backfillFeatureContentFromCanonical (canonical, scope = {}) {
+		if (!canonical?.name || !Array.isArray(this._data.features)) return false;
+		const canonEntries = Array.isArray(canonical.entries) ? canonical.entries : null;
+		if (!canonEntries?.length) return false;
+
+		const norm = (/** @type {*} */ s) => (s || "").toString().trim().toLowerCase();
+		const wantName = norm(canonical.name);
+		const canonIsSub = !!(canonical.subclassName || canonical.isSubclassFeature || scope.isSubclassFeature);
+
+		const stored = this._data.features.find(f => {
+			if (norm(f.name) !== wantName) return false;
+			// Only patch class-derived stored features. A same-named race/background/custom
+			// feature (no class lineage) must never inherit a class/subclass feature's entries.
+			const fIsClassDerived = !!(f.className || f.classSource || f.isSubclassFeature || f.subclassName || f.featureType === "Class");
+			if (!fIsClassDerived) return false;
+			// Class scope (lenient when either side omits className).
+			if (scope.className && f.className && norm(f.className) !== norm(scope.className)) return false;
+			// Never cross the class/subclass boundary (prevents a class feature stealing a
+			// same-named subclass feature's entries, and vice versa).
+			const fIsSub = !!(f.subclassName || f.isSubclassFeature);
+			if (fIsSub !== canonIsSub) return false;
+			if (canonIsSub && scope.subclassName && f.subclassName && norm(f.subclassName) !== norm(scope.subclassName)) return false;
+			// Level scope only when BOTH carry one (a backfill source may omit it).
+			if (scope.level && f.level && f.level !== scope.level) return false;
+			return true;
+		});
+		if (!stored) return false;
+
+		let patched = false;
+		if (!(Array.isArray(stored.entries) && stored.entries.length)) {
+			stored.entries = JSON.parse(JSON.stringify(canonEntries));
+			patched = true;
+		}
+		// Render a display description from the entries when the stored feature has none, so
+		// classification (which gates on `description`/`entries`) and the Features panel both
+		// have text to work with.
+		if (!stored.description) {
+			const fromCanon = canonical.description;
+			if (fromCanon) {
+				stored.description = fromCanon;
+				patched = true;
+			} else if (typeof Renderer !== "undefined") {
+				try {
+					stored.description = Renderer.get().render({entries: stored.entries});
+					patched = true;
+				} catch (e) { /* leave description empty on render failure */ }
+			}
+		}
+		return patched;
+	}
+
 	_reapplyHistoryOptionalFeatures () {
 		const history = [...(this._data.levelHistory || [])].sort((a, b) => a.level - b.level);
 		if (!history.length) return;
@@ -36560,6 +36636,12 @@ class CharacterSheetState {
 		// in charactersheet.js `_activateFeatureState` (name-keyed, isolated).
 		"baleful interdict": "ability", // Illrigger L1 — seal mechanics owned by S4 (Combat tab)
 		"forked tongue": "ability", // Illrigger L1 — click opens the language-swap UI (S1)
+		// (R22 #3) Purge Toxins (Illrigger L9) reads as a persistent toggle to the pattern
+		// detector ("you are resistant to poison…"), but the resistance/advantage half is a
+		// PASSIVE applied separately via FeatureEffectRegistry. Its activatable half is a
+		// one-shot ACTION ("spend 2 stamina to end one poison/disease"), so classify it as a
+		// limited-use ability — never an Active-State toggle.
+		"purge toxins": "ability",
 	};
 
 	/**
