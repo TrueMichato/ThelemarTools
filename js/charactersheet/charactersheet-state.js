@@ -26416,6 +26416,21 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Expend `count` seals from the pool WITHOUT placing them on a creature. Used by boons
+	 * whose seal cost is not a creature placement (e.g. Red Cant's "expend a seal to treat a
+	 * d20 of 9 or lower as a 10"). Clamped to the seals currently available.
+	 * @param {number} [count] how many seals to spend (default 1).
+	 * @returns {number} the number of seals actually spent (0 when none were available).
+	 */
+	spendSeal (count = 1) {
+		const avail = this.getSealsAvailable();
+		const n = Math.max(0, Math.min(Math.floor(Number(count) || 0), avail));
+		if (n <= 0) return 0;
+		this._setSealsAvailable(avail - n);
+		return n;
+	}
+
+	/**
 	 * Burn N seals on an interdicted creature. Burned seals are CONSUMED (they do not
 	 * return to the pool until a rest), so `available` is unchanged. Returns the rolled
 	 * damage descriptor for the caller to display/apply.
@@ -27103,20 +27118,29 @@ class CharacterSheetState {
 			actionLabel: "Expend a seal",
 			canApply: (state) => (state.getSealsAvailable?.() || 0) > 0,
 			apply: (state, calcs) => {
-				if ((state.getSealsAvailable?.() || 0) <= 0) return null;
-				state._setSealsAvailable(state.getSealsAvailable() - 1);
+				if (state.spendSeal(1) <= 0) return null;
 				const floor = calcs?.redCantFloor || 10;
 				return {label: `Red Cant: expended a seal — treat a d20 of 9 or lower as a ${floor} on this Charisma check.`};
 			},
 		},
 		"slippery ploy": {
-			actionLabel: "Expend a seal",
+			actionLabel: "Place a seal (reaction)",
 			canApply: (state) => (state.getSealsAvailable?.() || 0) > 0,
-			apply: (state, calcs) => {
+			// Slippery Ploy is a REACTION that PLACES a seal on the triggering creature (it is
+			// not a bare seal-spend). Route through placeSeal so a real, tracked placement is
+			// created — with `force` because a reaction can fire on another creature's turn,
+			// outside the once-per-turn placement gate. The target name (the attacker) comes
+			// from the UI via `opts.target`; default to a generic label for headless callers.
+			apply: (state, calcs, opts = {}) => {
 				if ((state.getSealsAvailable?.() || 0) <= 0) return null;
-				state._setSealsAvailable(state.getSealsAvailable() - 1);
+				const target = (opts.target || "").trim() || "Attacker";
+				const placed = state.placeSeal?.(target, {force: true});
+				if (!placed) return null;
 				const dc = calcs?.slipperyPloyDc;
-				return {label: `Slippery Ploy: placed a seal (reaction) — the attacker must make a DC ${dc != null ? dc : "—"} Charisma save or choose a new target / lose the effect.`};
+				return {
+					label: `Slippery Ploy: placed a seal on ${placed.target} (reaction) — it must make a DC ${dc != null ? dc : "—"} Charisma save or choose a new target / lose the effect.`,
+					placement: placed,
+				};
 			},
 		},
 	};
@@ -27293,15 +27317,17 @@ class CharacterSheetState {
 	 * No-op (returns null) for boons without one.
 	 * @param {string} boonName
 	 * @param {object} [calculations] - Pre-computed `getFeatureCalculations()` (optional).
+	 * @param {object} [opts] - Boon-specific options forwarded to the activation (e.g. a seal
+	 *   placement target for Slippery Ploy).
 	 * @returns {{label:string}|null}
 	 */
-	applyInterdictBoonActivation (boonName, calculations = null) {
+	applyInterdictBoonActivation (boonName, calculations = null, opts = {}) {
 		const def = CharacterSheetState.INTERDICT_BOON_ACTIVATIONS[
 			CharacterSheetState._normalizeInterdictBoonName(boonName)
 		];
 		if (!def) return null;
 		const calcs = calculations || this.getFeatureCalculations?.() || {};
-		return def.apply(this, calcs) || null;
+		return def.apply(this, calcs, opts) || null;
 	}
 
 	/**
