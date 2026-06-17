@@ -3,7 +3,48 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 25 (Illrigger `vaa` + Druid/Ranger `Lunaria` = Centaur Ranger 6 / Druid 4 Circle of the Zodiac) — IN PROGRESS
+
+**7 repeats from R24.** Orchestrator did FIRST-HAND live diagnosis on the **merged** build and found the
+R24 "live-verified" fixes were false greens *again* — and pinpointed WHY: the R24 sessions verified the
+path that works (`_pUseFeatureAbility` / Features-tab `.charsheet__feature-use`) but **the user clicks the
+Abilities-tab card**, whose Use button calls a *different* handler (`_useCombatAction`) that never routes to
+the specialized ability pipeline. **Mandate this round: verify via the EXACT control the user clicks (the
+rendered Abilities-tab card, the real picker, the real popup) on the merged build — never a sibling path.**
+
+Single-owner decomposition (8 focused sessions):
+
+* **S1 — Abilities-tab Use routing (FOUNDATION)** — #1,#2,#3,#5,#8.
+  ROOT: `_useCombatAction` (charactersheet-combat.js) is Monk-centric (parses ki/focus/stamina, hardcodes
+  Patient Defense/Flurry/…) and **never dispatches to `_pHandleR20FeatureActivation`/`_pUseFeatureAbility`**.
+  So from the Abilities tab: #1 Purge Toxins doesn't consume stamina, #2 Guided Strike opens no weapon
+  chooser & does nothing, #3 Forked Tongue opens no swap, #5 Guided Strike/War God's Blessing don't consume
+  Divine Manifestation, #8 Invoke Hell options (Honey-Sweet Blades/Turncoat) don't consume Invoke Hell.
+  Fix: route classified abilities (consumes / R20-dispatch / `_manifestationRequiresSave`) through the
+  shared pipeline while preserving action economy. Also label Invoke Hell option cards as such (#8).
+* **S2 — Thelemar condition resolver** — #7. R24 added `invisible_tgtt`/`prone_tgtt` EFFECT entries but the
+  feature text still references generic `{@condition invisible/poisoned/charmed/prone}` (only
+  `incapacitated|tgtt` was wired). General resolver: when TGTT is loaded and a `_tgtt` variant exists, both
+  the `@condition` hover AND the applied condition state resolve to the tgtt variant (Veil of Lies invisible,
+  Purge Toxins poisoned, Charm Enemy/Intransigent charmed, Follow-Up Topple prone, …).
+* **S3 — Zodiac / Known-Forms subsystem** — #12,#13,#16. ROOT(#12): Circle of the Zodiac form features
+  register **permanent enabled `namedModifiers`** ("From Aurochs" carryCapacity sizeIncrease, "From Octopus"
+  speed:swim) that persist while NOT transformed → stack with racial Equine Build → carry ×4 (640) vs ×2
+  (320). Form-granted modifiers must be gated to the active form. #13: Magician arcana/nature must be a live
+  `=wismod` modifier, not a baked customModifier that drifts (Lunaria's save had stale 3 vs wismod 5). #16:
+  Add-Form picker needs spell-picker-style UX (form info, source, hover).
+* **S4 — Item upgrades & Gem Empowerment** — #14,#15. `charactersheet-upgrades.js` hard-gates apply on
+  `hasGemEmpowerment`/requirements (disabled buttons). #14: allow applying upgrades/gem empowerment WITHOUT
+  meeting requirements (migrating / pre-empowered items). #15: custom-item creation must offer applying any
+  item upgrade + gem empowerment.
+* **S5 — Custom abilities uses→stat modifier** — #11. `charactersheet-customabilities.js`: add a way to set
+  uses-per-day equal to a stat modifier (ability mod), for Custom Abilities AND Custom Item abilities.
+* **S6 — Language picker UI** — #9,#10. #9 Deft Explorer language checkboxes render at inconsistent sizes;
+  #10 languages in race/background/class pickers must be hoverable for more info.
+* **S7 — Red Cant popup UX** — #4. `_pMaybeApplyRedCant` uses a plain boolean prompt; needs a proper themed
+  modal.
+* **S8 — Intransigent signifier clarity** — #6 (repeat). Panel renders but the extend-charmed-immunity-to-
+  others affordance still isn't clear enough; improve prominence/clarity.
 
 ## Closed Bugs
 
