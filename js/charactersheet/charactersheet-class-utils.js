@@ -13,6 +13,14 @@ class CharacterSheetClassUtils {
 	// ==========================================
 
 	/**
+	 * (S2 #15) Canonical name of the single shared resource pool that every Hochling
+	 * "Divine Manifestation" Channel-Divinity option draws on. Kept here so the option
+	 * synthesis (class-utils) and the pool/migration logic (state) agree on one string.
+	 * @type {string}
+	 */
+	static RACE_MANIFESTATION_POOL_NAME = "Divine Manifestation";
+
+	/**
 	 * Check if a source uses 2024 (D&D One) edition rules.
 	 * TGTT homebrew classes replace XPHB and follow the same 2024 mechanics.
 	 * @param {string} source - The source abbreviation (e.g. "XPHB", "TGTT", "PHB")
@@ -5500,7 +5508,12 @@ class CharacterSheetClassUtils {
 					featureType: "Species",
 					level: cd.level,
 					_raceManifestation: id,
-					uses: {max: 1, recharge: "short"},
+					// (S2 #15) Every Channel-Divinity manifestation option draws on the SAME
+					// single "Divine Manifestation" use (1/short rest per the Hochling trait),
+					// so they carry a shared `consumes` pool rather than minting one pool each.
+					// `_isResourceSystemFeature` (consumes.name !== "Stamina") suppresses the
+					// per-feature pool; `ensureDivineManifestationPool()` mints the shared one.
+					consumes: {name: CharacterSheetClassUtils.RACE_MANIFESTATION_POOL_NAME, amount: 1},
 					description: cd.description,
 				};
 

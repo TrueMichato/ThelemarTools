@@ -4155,6 +4155,11 @@ class CharacterSheetState {
 		// Convert to the toggle model (strip uses, drop the orphan resource).
 		this._migrateHuntersPrey();
 
+		// (S2 #15) Migrate Divine Manifestation: older saves minted a SEPARATE per-option
+		// use pool for each Hochling Channel-Divinity manifestation option. Fold them into
+		// the single shared "Divine Manifestation" pool.
+		this._migrateDivineManifestation();
+
 		// Migrate Star Map (Stars/Zodiac Druid): older saves parsed its recharge as
 		// "short" (the replacement-ceremony sentence) and/or its max from proficiency
 		// bonus. Correct to long-rest recharge and a max of the Wisdom modifier.
@@ -4774,6 +4779,56 @@ class CharacterSheetState {
 
 		// Ensure the toggle state exists
 		this._ensureHuntersPreyInitialized();
+	}
+
+	/**
+	 * (S2 #15) Migrate older saves where each Hochling "Divine Manifestation" Channel-Divinity
+	 * option (Guided Strike, War God's Blessing, …) carried its own `uses` and therefore minted
+	 * a SEPARATE per-option resource pool. They must all draw on ONE shared "Divine Manifestation"
+	 * use. Strip the per-option `uses`, stamp the shared `consumes` tag, drop the stale per-option
+	 * resource rows, and fold their state into a single shared pool (spent if either was spent).
+	 * The Aasimar-transformation option (Celestial Revelation) is left untouched — it is a
+	 * long-rest transformation, never a Channel Divinity use, and never carried a pool.
+	 */
+	_migrateDivineManifestation () {
+		if (!Array.isArray(this._data.features)) return;
+		const poolName = CharacterSheetClassUtils.RACE_MANIFESTATION_POOL_NAME;
+
+		const childIds = new Set();
+		const childNames = new Set();
+		this._data.features.forEach(f => {
+			if (!f || !f._raceManifestation) return;
+			// Only Channel-Divinity options drew on a use pool (they had `uses` or already
+			// carry the shared `consumes`). The Aasimar transformation never did — skip it.
+			if (!f.uses && f.consumes?.name !== poolName) return;
+			if (f.uses) delete f.uses;
+			if (!f.consumes || f.consumes.name !== poolName) f.consumes = {name: poolName, amount: 1};
+			if (f.id) childIds.add(f.id);
+			if (f.name) childNames.add(f.name);
+		});
+
+		if (!childIds.size) return; // no manifestation CD option present — nothing to migrate
+
+		if (Array.isArray(this._data.resources)) {
+			// Carry over a "spent" state: if any stale per-option pool was used up, the shared
+			// pool should start spent too (and never start above the single shared max).
+			const stale = this._data.resources.filter(r =>
+				r.name !== poolName
+				&& ((r.featureId && childIds.has(r.featureId)) || childNames.has(r.name)));
+			const preservedCurrent = stale.length
+				? Math.min(1, ...stale.map(r => r.current ?? 0))
+				: 1;
+			this._data.resources = this._data.resources.filter(r => !stale.includes(r));
+
+			const shared = this._data.resources.find(r => r.name === poolName);
+			if (shared) {
+				shared.max = 1;
+				shared.recharge = "short";
+				shared.current = Math.min(shared.current ?? 1, 1);
+			} else {
+				this.addResource({name: poolName, max: 1, current: Math.max(0, Math.min(preservedCurrent, 1)), recharge: "short"});
+			}
+		}
 	}
 
 	/**
@@ -30937,6 +30992,37 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * (S2 #15) Ensure the single shared "Divine Manifestation" pool exists when the
+	 * character has chosen a Hochling manifestation whose options draw on it (each such
+	 * Channel-Divinity option carries `consumes: {name: "Divine Manifestation"}`). The
+	 * wrapper trait + the individual options never mint their own pool — they all spend
+	 * from this one short-rest use (the Hochling trait: "use that Channel Divinity once,
+	 * and regain … when you finish a short or long rest"). getActivatableFeatures() links
+	 * each option's `resourceName` to it, so using EITHER option decrements the SAME pool.
+	 * When no such option exists (manifestation unchosen, or the Aasimar-transformation
+	 * option which is not a Channel Divinity use), any orphaned pool is removed.
+	 */
+	ensureDivineManifestationPool () {
+		const poolName = CharacterSheetClassUtils.RACE_MANIFESTATION_POOL_NAME;
+		const hasOption = (this._data.features || []).some(f => f?.consumes?.name === poolName);
+		const idx = this._data.resources.findIndex(r => r.name === poolName);
+		if (!hasOption) {
+			if (idx !== -1) this._data.resources.splice(idx, 1);
+			return;
+		}
+		const max = 1;
+		if (idx !== -1) {
+			const resource = this._data.resources[idx];
+			const wasFull = (resource.current ?? 0) >= (resource.max ?? 0);
+			resource.max = max;
+			resource.recharge = "short";
+			resource.current = wasFull ? max : Math.min(resource.current ?? 0, max);
+		} else {
+			this.addResource({name: poolName, max, current: max, recharge: "short"});
+		}
+	}
+
+	/**
 	 * (R20 #1) Roll Healing Hands healing: proficiency-bonus d4s. Aasimar/Hochling trait
 	 * that heals a creature you touch for PB×d4 HP (1/long rest). Pure-ish: rolls dice and
 	 * returns the detail object; the controller offers an "apply to self" action that adds
@@ -38488,6 +38574,10 @@ class CharacterSheetState {
 		// (R20 #17) Make sure the shared Invoke Hell pool exists before we read resources,
 		// so its options can link to it below.
 		this.ensureInvokeHellPool();
+		// (S2 #15) Likewise ensure the single shared "Divine Manifestation" pool exists so
+		// every Hochling manifestation option (Guided Strike, War God's Blessing, …) links
+		// to the SAME use rather than each spawning its own.
+		this.ensureDivineManifestationPool();
 		const resources = this.getResources();
 
 		for (const feature of this._data.features) {
