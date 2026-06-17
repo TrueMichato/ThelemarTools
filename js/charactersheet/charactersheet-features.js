@@ -1815,7 +1815,12 @@ class CharacterSheetFeatures {
 		// reads/writes that count and re-renders so the Effect line reflects it. Feature-detect
 		// the API so the control only appears once those mechanics are present.
 		const intransigentCalcs = this._state.getFeatureCalculations?.() || {};
-		const intransigentMax = 12;
+		// The feature text — "You and each creature of your choice within 10 feet of you
+		// are immune to the charmed condition while you are conscious" — sets no upper
+		// limit on how many creatures you protect, so the chooser must not imply a hard
+		// cap. We keep a generous sanity bound for the numeric input while signalling that
+		// the choice is unlimited.
+		const intransigentMax = 99;
 		const isIntransigent = (feature.name || "").trim().toLowerCase() === "intransigent"
 			&& !!intransigentCalcs.hasIntransigent
 			&& typeof this._state.getIntransigentAllyCount === "function"
@@ -1824,14 +1829,20 @@ class CharacterSheetFeatures {
 		if (isIntransigent) {
 			const intransigentRange = intransigentCalcs.intransigentRange || 10;
 			const allyCount = Math.max(0, Math.min(intransigentMax, Number(this._state.getIntransigentAllyCount()) || 0));
+			const allyNoun = allyCount === 1 ? "creature" : "creatures";
+			const liveSummary = allyCount > 0
+				? `You + ${allyCount} chosen ${allyNoun} within ${intransigentRange} ft are immune to charmed (while conscious).`
+				: `You are immune to charmed (while conscious). Raise the count to also protect creatures of your choice within ${intransigentRange} ft.`;
 			intransigentHtml = `
-				<div class="charsheet__intransigent-controls mt-2 p-2" style="background: var(--bs-body-bg-alt, #f8f9fa); border-radius: 8px; border: 1px solid var(--bs-border-color, #dee2e6);">
-					<div class="ve-flex-v-center gap-2 mb-1" style="flex-wrap: wrap;">
-						<strong>Allies covered:</strong>
-						<input type="number" class="ve-form-control charsheet__intransigent-ally-count" min="0" max="${intransigentMax}" step="1" value="${allyCount}" style="width: 5rem;" title="Creatures of your choice within ${intransigentRange} ft that you extend the charmed-immunity aura to (while conscious)">
-						<span class="ve-muted ve-small">within ${intransigentRange} ft (while conscious)</span>
+				<div class="charsheet__intransigent-controls mt-2 p-2">
+					<div class="charsheet__intransigent-title">Extend charmed immunity to chosen allies</div>
+					<div class="charsheet__intransigent-row ve-flex-v-center gap-2 mb-1">
+						<label class="charsheet__intransigent-label mb-0">Allies you choose to protect:</label>
+						<input type="number" class="ve-form-control charsheet__intransigent-ally-count" min="0" max="${intransigentMax}" step="1" value="${allyCount}" title="Number of creatures of your choice within ${intransigentRange} ft that you currently extend your charmed immunity to (while conscious). The feature sets no upper limit.">
+						<span class="ve-muted ve-small">creature(s) within ${intransigentRange} ft, while you are conscious (no fixed limit)</span>
 					</div>
-					<em class="ve-muted ve-small">You are always immune to charmed; choose how many nearby creatures the aura also protects.</em>
+					<div class="charsheet__intransigent-live ve-small mb-1" aria-live="polite">${liveSummary}</div>
+					<em class="ve-muted ve-small">You are always immune to charmed while conscious. This feature also lets you extend that immunity to any creatures of your choice within ${intransigentRange} ft — set how many you are currently protecting.</em>
 				</div>
 			`;
 		}

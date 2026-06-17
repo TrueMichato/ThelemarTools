@@ -27187,11 +27187,13 @@ class CharacterSheetState {
 			const r = c.intransigentRange || 10;
 			// Signal that the charmed-immunity can be EXTENDED to allies you choose — not
 			// just yourself (R22 #10) — and that it is gated on being conscious (R23 #11).
+			// When no allies are chosen yet, spell out the extend option explicitly so the
+			// summary still advertises it rather than burying it in a parenthetical.
 			const allies = self?.getIntransigentAllyCount?.() || 0;
-			const who = allies > 0
-				? `You + ${allies} chosen creature${allies === 1 ? "" : "s"} within ${r} ft`
-				: `You (and chosen creatures within ${r} ft)`;
-			return `${who} are immune to charmed (while conscious)`;
+			if (allies > 0) {
+				return `You + ${allies} chosen creature${allies === 1 ? "" : "s"} within ${r} ft are immune to charmed (while conscious)`;
+			}
+			return `You are immune to charmed (while conscious); may extend to creatures of your choice within ${r} ft`;
 		},
 		"superior interdict": (c) => {
 			if (!c.hasSuperiorInterdict) return null;

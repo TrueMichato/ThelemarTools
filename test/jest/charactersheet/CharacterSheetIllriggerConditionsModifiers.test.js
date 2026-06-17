@@ -300,7 +300,7 @@ describe("#11 Intransigent ally-count chooser drives the feature summary", () =>
 		const summaryFn = CharacterSheetState.ILLRIGGER_FEATURE_SUMMARIES.intransigent;
 
 		const self0 = {getIntransigentAllyCount: () => 0};
-		expect(summaryFn(calcs, self0)).toBe("You (and chosen creatures within 10 ft) are immune to charmed (while conscious)");
+		expect(summaryFn(calcs, self0)).toBe("You are immune to charmed (while conscious); may extend to creatures of your choice within 10 ft");
 
 		const self1 = {getIntransigentAllyCount: () => 1};
 		expect(summaryFn(calcs, self1)).toBe("You + 1 chosen creature within 10 ft are immune to charmed (while conscious)");
