@@ -24147,6 +24147,28 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Mark an existing inventory gemstone as empowered in place (used when a player empowers a raw
+	 * gem they already own). Mutates the stored wrapper so the change persists; returns false when
+	 * the item is missing.
+	 * @param {string} itemId - The inventory item id of the base gem
+	 * @param {object} gemstoneData - The persisted gemstone data ({name, source, gemName, rarity, ...})
+	 * @param {object} display - Display overrides {name, rarity, entries}
+	 * @returns {boolean} Whether the gem was found and updated
+	 */
+	markGemstoneEmpowered (itemId, gemstoneData, display = {}) {
+		const wrapper = this._data.inventory.find(i => i.id === itemId);
+		if (!wrapper) return false;
+
+		if (display.name != null) wrapper.item.name = display.name;
+		wrapper.item.rarity = display.rarity || "common";
+		wrapper.item.entries = display.entries || [];
+		wrapper.item._isEmpoweredGemstone = true;
+		wrapper.item._gemstoneData = gemstoneData;
+
+		return true;
+	}
+
+	/**
 	 * Remove (unsocket) a gemstone from an inventory item
 	 * @param {string} itemId - The item ID
 	 * @param {string} gemstoneName - The gemstone power name

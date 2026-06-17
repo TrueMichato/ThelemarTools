@@ -1471,3 +1471,170 @@ describe("Item Upgrades", () => {
 		});
 	});
 });
+
+// ==========================================================================
+// Override / Escape Hatch (#14) + Creation-time application (#15)
+// ==========================================================================
+describe("Empowerment & Upgrade override (#14/#15)", () => {
+	const GEM_RUBY = {
+		name: "Searing Light",
+		source: "TGTT",
+		gemName: "Ruby",
+		rarity: "uncommon",
+		upgradeType: ["GS:U"],
+		entries: ["Deals fire damage."],
+		charges: 3,
+		recharge: "dawn",
+	};
+	const UPGRADE_BALANCED = {name: "Balanced", source: "TCAH", upgradeType: ["WU:1"], cost: "100 gp (base)"};
+	const UPGRADE_KEEN = {name: "Keen", source: "TCAH", upgradeType: ["WU:2"], cost: "500 gp"};
+
+	let state;
+	let upgrades;
+	let savedCount;
+	let renderedCount;
+
+	const makePage = (allUpgrades) => ({
+		getState: () => state,
+		getItemUpgrades: () => allUpgrades,
+		saveCharacter: () => { savedCount++; },
+		_inventory: {render: () => { renderedCount++; }},
+	});
+
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		state.addClass({name: "Fighter", source: "PHB", level: 5});
+		savedCount = 0;
+		renderedCount = 0;
+		const all = [GEM_RUBY, UPGRADE_BALANCED, UPGRADE_KEEN];
+		upgrades = new CharacterSheetUpgrades(makePage(all));
+		upgrades.setUpgrades(all);
+		// Default the confirm prompt to "yes" for force-empower tests.
+		globalThis.InputUiUtil.pGetUserBoolean = async () => true;
+	});
+
+	describe("buildGemstoneData", () => {
+		it("maps a gem power entity to persisted gemstone data", () => {
+			const data = CharacterSheetUpgrades.buildGemstoneData(GEM_RUBY);
+			expect(data).toMatchObject({
+				name: "Searing Light",
+				source: "TGTT",
+				gemName: "Ruby",
+				rarity: "uncommon",
+				charges: 3,
+				recharge: "dawn",
+			});
+		});
+
+		it("defaults charges/recharge to null when absent", () => {
+			const data = CharacterSheetUpgrades.buildGemstoneData({name: "X", source: "Y", gemName: "Opal", upgradeType: ["GS:C"]});
+			expect(data.charges).toBeNull();
+			expect(data.recharge).toBeNull();
+		});
+	});
+
+	describe("_applyEmpowermentToInventory", () => {
+		it("adds a new empowered gemstone item to inventory", () => {
+			const res = upgrades._applyEmpowermentToInventory(GEM_RUBY, {});
+			expect(res.empoweredName).toBe("Empowered Ruby (Searing Light)");
+
+			const items = state.getItems();
+			expect(items).toHaveLength(1);
+			expect(items[0]._isEmpoweredGemstone).toBe(true);
+			expect(items[0]._gemstoneData.name).toBe("Searing Light");
+			expect(items[0].rarity).toBe("uncommon");
+		});
+
+		it("marks an existing base gem as empowered (fromInventoryGem)", () => {
+			state.addItem({name: "Ruby", source: "TGTT", type: "$G"});
+			const baseGem = state.getItems()[0];
+
+			const res = upgrades._applyEmpowermentToInventory(GEM_RUBY, {
+				fromInventoryGem: {id: baseGem.id, name: "Ruby", source: "TGTT"},
+			});
+			expect(res).not.toBeNull();
+
+			const updated = state.getItems().find(i => i.id === baseGem.id);
+			expect(updated._isEmpoweredGemstone).toBe(true);
+			expect(updated.name).toBe("Empowered Ruby (Searing Light)");
+			// No extra item was added — the base gem was upgraded in place.
+			expect(state.getItems()).toHaveLength(1);
+		});
+
+		it("returns null when the gem entity is missing", () => {
+			expect(upgrades._applyEmpowermentToInventory(null, {})).toBeNull();
+		});
+	});
+
+	describe("forceEmpowerGemstone (override, no skill required)", () => {
+		it("empowers without the Gem Empowerment skill when confirmed", async () => {
+			expect(state.isProficientInSkill("gemempowerment")).toBe(false);
+
+			const ok = await upgrades.forceEmpowerGemstone("Searing Light", "TGTT", {});
+			expect(ok).toBe(true);
+
+			const items = state.getItems();
+			expect(items).toHaveLength(1);
+			expect(items[0]._isEmpoweredGemstone).toBe(true);
+			expect(savedCount).toBeGreaterThan(0);
+			expect(renderedCount).toBeGreaterThan(0);
+		});
+
+		it("does nothing when the confirm is cancelled", async () => {
+			globalThis.InputUiUtil.pGetUserBoolean = async () => false;
+			const ok = await upgrades.forceEmpowerGemstone("Searing Light", "TGTT", {});
+			expect(ok).toBe(false);
+			expect(state.getItems()).toHaveLength(0);
+		});
+
+		it("reports failure for an unknown gem power", async () => {
+			const ok = await upgrades.forceEmpowerGemstone("Nonexistent", "TGTT", {});
+			expect(ok).toBe(false);
+		});
+	});
+
+	describe("applyUpgradesToItem (creation-time, requirements bypassed)", () => {
+		it("applies upgrades at zero cost and sockets a gemstone", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true});
+			const itemId = state.getItems()[0].id;
+			state.setCurrency("gp", 0); // no gold — override must still apply
+
+			const res = upgrades.applyUpgradesToItem(itemId, {
+				upgrades: [UPGRADE_BALANCED, UPGRADE_KEEN],
+				gemstone: GEM_RUBY,
+			});
+
+			expect(res.appliedUpgrades).toBe(2);
+			expect(res.socketed).toBe(true);
+
+			const applied = state.getItemUpgrades(itemId);
+			expect(applied).toHaveLength(2);
+			expect(applied.every(u => u.costPaid === 0)).toBe(true);
+
+			const sockets = state.getSocketedGemstones(itemId);
+			expect(sockets).toHaveLength(1);
+			expect(sockets[0].name).toBe("Searing Light");
+
+			// Gold was never deducted by the override path.
+			expect(state.getTotalGold()).toBe(0);
+		});
+
+		it("handles upgrades-only with no gemstone", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true});
+			const itemId = state.getItems()[0].id;
+
+			const res = upgrades.applyUpgradesToItem(itemId, {upgrades: [UPGRADE_BALANCED]});
+			expect(res.appliedUpgrades).toBe(1);
+			expect(res.socketed).toBe(false);
+			expect(state.getItemUpgrades(itemId)).toHaveLength(1);
+		});
+
+		it("is a no-op with empty input", () => {
+			state.addItem({name: "Longsword", source: "PHB", type: "M", weapon: true});
+			const itemId = state.getItems()[0].id;
+			const res = upgrades.applyUpgradesToItem(itemId, {});
+			expect(res).toEqual({appliedUpgrades: 0, socketed: false});
+			expect(state.getItemUpgrades(itemId)).toHaveLength(0);
+		});
+	});
+});
