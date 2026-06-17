@@ -1507,8 +1507,15 @@ class CharacterSheetInventory {
 			// Charges & recharge. Bare (undefined when absent) so an edit whose form section is
 			// HIDDEN for this item type (charges live in the "magic" section) doesn't clobber the
 			// original via the skip-undefined merge in _saveCustomItem.
-			charges: options.charges,
-			chargesCurrent: options.charges,
+			charges: options.chargesMaxMode === "abilityMod"
+				? Math.max(1, this._state.getAbilityMod?.(options.chargesMaxAbility || "wis") ?? 1)
+				: options.charges,
+			chargesCurrent: options.chargesMaxMode === "abilityMod"
+				? Math.max(1, this._state.getAbilityMod?.(options.chargesMaxAbility || "wis") ?? 1)
+				: options.charges,
+			// Optional modifier-derived charge max (min 1, computed live by syncDerivedResourceMaxes)
+			chargesMaxMode: options.chargesMaxMode,
+			chargesMaxAbility: options.chargesMaxAbility,
 			recharge: options.recharge,
 			rechargeAmount: options.rechargeAmount,
 			// Special properties. Bare for the same hidden-section reason: editing a cursed/focus/
@@ -1725,6 +1732,8 @@ class CharacterSheetInventory {
 		if (item.senses) options.senses = item.senses;
 		if (item.attachedSpells) options.attachedSpells = item.attachedSpells;
 		if (item.charges) options.charges = item.charges;
+		if (item.chargesMaxMode) options.chargesMaxMode = item.chargesMaxMode;
+		if (item.chargesMaxAbility) options.chargesMaxAbility = item.chargesMaxAbility;
 		if (item.recharge) options.recharge = item.recharge;
 		if (item.rechargeAmount) options.rechargeAmount = item.rechargeAmount;
 		if (item.focus) options.focus = true;
@@ -2267,6 +2276,24 @@ class CharacterSheetInventory {
 						<input type="number" id="custom-item-charges" class="ve-form-control" value="0" min="0">
 					</div>
 					<div class="charsheet__custom-item-field">
+						<label>Max Charges Type</label>
+						<select id="custom-item-charges-mode" class="ve-form-control">
+							<option value="fixed" selected>Fixed Number</option>
+							<option value="abilityMod">Ability Modifier (min 1)</option>
+						</select>
+					</div>
+					<div class="charsheet__custom-item-field" id="custom-item-charges-ability-field" style="display: none;">
+						<label>Charges Ability</label>
+						<select id="custom-item-charges-ability" class="ve-form-control">
+							<option value="str">Strength</option>
+							<option value="dex">Dexterity</option>
+							<option value="con">Constitution</option>
+							<option value="int">Intelligence</option>
+							<option value="wis" selected>Wisdom</option>
+							<option value="cha">Charisma</option>
+						</select>
+					</div>
+					<div class="charsheet__custom-item-field">
 						<label>Recharge</label>
 						<select id="custom-item-recharge" class="ve-form-control">
 							${rechargeOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join("")}
@@ -2298,6 +2325,18 @@ class CharacterSheetInventory {
 			</div>
 		`});
 		form.append(magicFields);
+
+		// Toggle the charges-ability picker when the max-charges type is set to "ability modifier".
+		const chargesModeSel = /** @type {*} */ (magicFields.querySelector("#custom-item-charges-mode"));
+		const chargesAbilityField = /** @type {*} */ (magicFields.querySelector("#custom-item-charges-ability-field"));
+		const chargesFixedInput = /** @type {*} */ (magicFields.querySelector("#custom-item-charges"));
+		const updateChargesModeVisibility = () => {
+			const isAbilityMod = chargesModeSel?.value === "abilityMod";
+			if (chargesAbilityField) chargesAbilityField.style.display = isAbilityMod ? "" : "none";
+			if (chargesFixedInput) chargesFixedInput.parentElement.style.display = isAbilityMod ? "none" : "";
+		};
+		chargesModeSel?.addEventListener("change", updateChargesModeVisibility);
+		updateChargesModeVisibility();
 
 		// Bonuses Section (spell, saves, checks)
 		const bonusesSection = e_({outer: `
@@ -3068,13 +3107,29 @@ class CharacterSheetInventory {
 
 			// Magic item properties
 			if (["wondrous", "wand", "ring", "potion", "scroll"].includes(selectedType)) {
-				const charges = parseInt(form.querySelector("#custom-item-charges")?.value);
-				if (charges > 0) {
-					options.charges = charges;
+				const chargesMode = form.querySelector("#custom-item-charges-mode")?.value || "fixed";
+				if (chargesMode === "abilityMod") {
+					// Charges derived LIVE from an ability modifier (min 1). The numeric `charges`
+					// cache is recomputed by state.syncDerivedResourceMaxes(); a placeholder of 1
+					// keeps the item magic until the first sync.
+					options.chargesMaxMode = "abilityMod";
+					options.chargesMaxAbility = form.querySelector("#custom-item-charges-ability")?.value || "wis";
+					options.charges = 1;
 					const recharge = form.querySelector("#custom-item-recharge")?.value;
 					if (recharge) options.recharge = recharge;
 					const rechargeAmount = form.querySelector("#custom-item-recharge-amount")?.value?.trim();
 					if (rechargeAmount) options.rechargeAmount = rechargeAmount;
+				} else {
+					options.chargesMaxMode = null;
+					options.chargesMaxAbility = null;
+					const charges = parseInt(form.querySelector("#custom-item-charges")?.value);
+					if (charges > 0) {
+						options.charges = charges;
+						const recharge = form.querySelector("#custom-item-recharge")?.value;
+						if (recharge) options.recharge = recharge;
+						const rechargeAmount = form.querySelector("#custom-item-recharge-amount")?.value?.trim();
+						if (rechargeAmount) options.rechargeAmount = rechargeAmount;
+					}
 				}
 				// Section is visible for these types, so the checkboxes are authoritative — emit
 				// explicit booleans so a magic item can be toggled OFF (non-magic types leave these
@@ -3395,10 +3450,17 @@ class CharacterSheetInventory {
 		setVal("#custom-item-bonus-save-cha", numOf(o.bonusSavingThrowCha));
 
 		// Charges
-		if (o.charges) {
+		if (o.charges || o.chargesMaxMode === "abilityMod") {
 			setVal("#custom-item-charges", o.charges);
 			setVal("#custom-item-recharge", o.recharge);
 			setVal("#custom-item-recharge-amount", o.rechargeAmount);
+			const chargesMode = o.chargesMaxMode === "abilityMod" ? "abilityMod" : "fixed";
+			setVal("#custom-item-charges-mode", chargesMode);
+			if (o.chargesMaxAbility) setVal("#custom-item-charges-ability", o.chargesMaxAbility);
+			const chargesAbilityField = form.querySelector?.("#custom-item-charges-ability-field");
+			const chargesFixedInput = form.querySelector?.("#custom-item-charges");
+			if (chargesAbilityField) chargesAbilityField.style.display = chargesMode === "abilityMod" ? "" : "none";
+			if (chargesFixedInput?.parentElement) chargesFixedInput.parentElement.style.display = chargesMode === "abilityMod" ? "none" : "";
 		}
 		setChk("#custom-item-focus", o.focus);
 		setChk("#custom-item-cursed", o.curse);

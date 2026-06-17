@@ -2771,6 +2771,10 @@ class CharacterSheetPage {
 		// painting dependent sections, so equipped/attuned item effects are not a render behind.
 		if (this._inventory?.syncItemDerivedState) this._inventory.syncItemDerivedState();
 
+		// Recompute modifier-derived resource maxes (custom-ability uses, item charges) so caps
+		// follow ability-score changes and level-ups before any dependent section is painted.
+		this._state.syncDerivedResourceMaxes?.();
+
 		this._renderBasicInfo();
 		this._renderAbilityScores();
 		this._renderSavingThrows();
