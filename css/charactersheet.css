@@ -19205,3 +19205,242 @@ color: var(--cs-text-primary, #f1f5f9);
 .charsheet__mastery-panel > .ve-muted {
 color: var(--cs-text-secondary, #94a3b8);
 }
+
+/* ========================================================================
+   Illrigger combat panels — S7 modal/panel UI/UX upgrades (bug #14).
+   Dark-theme form controls + clearer hierarchy/affordance for the three
+   interactive surfaces: Infernal Conduit, Interdiction (+ seal modals),
+   and Combat Masteries. Additive over the R23 rebuild above.
+   ======================================================================== */
+
+/* --- Dark-theme form controls (selects + inputs were near-invisible) --- */
+.charsheet__conduit-panel .form-control,
+.charsheet__mastery-panel .form-control,
+.charsheet__interdict-panel .form-control,
+.charsheet__interdict-modal .form-control {
+background: var(--cs-bg-input, rgba(15, 23, 42, 0.6));
+color: var(--cs-text-primary, #f1f5f9);
+border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.2));
+border-radius: var(--cs-radius-sm, 6px);
+box-shadow: none;
+}
+
+.charsheet__conduit-panel .form-control:hover,
+.charsheet__mastery-panel .form-control:hover,
+.charsheet__interdict-panel .form-control:hover,
+.charsheet__interdict-modal .form-control:hover {
+border-color: var(--cs-border-hover, rgba(255, 255, 255, 0.35));
+}
+
+.charsheet__conduit-panel .form-control:focus,
+.charsheet__mastery-panel .form-control:focus,
+.charsheet__interdict-panel .form-control:focus,
+.charsheet__interdict-modal .form-control:focus {
+border-color: var(--cs-primary, #6366f1);
+box-shadow: 0 0 0 2px var(--cs-primary-light, rgba(99, 102, 241, 0.25));
+outline: none;
+}
+
+.charsheet__conduit-panel .form-control::placeholder,
+.charsheet__mastery-panel .form-control::placeholder,
+.charsheet__interdict-panel .form-control::placeholder,
+.charsheet__interdict-modal .form-control::placeholder {
+color: var(--cs-text-muted, #64748b);
+}
+
+/* Make the open <select> dropdown list readable on the dark theme too */
+.charsheet__conduit-panel select.form-control option,
+.charsheet__mastery-panel select.form-control option,
+.charsheet__interdict-panel select.form-control option,
+.charsheet__interdict-modal select.form-control option {
+background: var(--cs-bg-surface, #1e293b);
+color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__conduit-panel .form-control:disabled,
+.charsheet__mastery-panel .form-control:disabled,
+.charsheet__interdict-panel .form-control:disabled,
+.charsheet__interdict-modal .form-control:disabled {
+opacity: 0.55;
+cursor: not-allowed;
+}
+
+/* --- Infernal Conduit: labelled field groups --- */
+.charsheet__conduit-controls {
+gap: var(--cs-space-sm, 8px);
+align-items: flex-end;
+}
+
+.charsheet__conduit-field {
+display: flex;
+flex-direction: column;
+gap: 2px;
+margin-bottom: 0;
+}
+
+.charsheet__conduit-field-label {
+text-transform: uppercase;
+letter-spacing: 0.04em;
+font-weight: 600;
+font-size: 0.65rem;
+color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__conduit-count {
+width: 4.5rem;
+}
+
+.charsheet__conduit-effect {
+min-width: 11.5rem;
+}
+
+.charsheet__conduit-save {
+min-width: 9.5rem;
+}
+
+.charsheet__conduit-spend {
+margin-left: auto;
+}
+
+/* Conduit effect notes — split into two scannable lines with keyed chips */
+.charsheet__conduit-notes {
+display: flex;
+flex-direction: column;
+gap: 0.3rem;
+padding-top: 0.15rem;
+}
+
+.charsheet__conduit-note {
+display: flex;
+align-items: baseline;
+gap: 0.5rem;
+font-size: 0.8rem;
+line-height: 1.35;
+color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__conduit-note-key {
+flex: 0 0 auto;
+text-transform: uppercase;
+letter-spacing: 0.03em;
+font-weight: 700;
+font-size: 0.68rem;
+padding: 0.1rem 0.4rem;
+border-radius: var(--cs-radius-sm, 6px);
+}
+
+.charsheet__conduit-note-key--heal {
+color: var(--cs-accent-emerald, #10b981);
+background: var(--cs-accent-emerald-light, rgba(16, 185, 129, 0.15));
+}
+
+.charsheet__conduit-note-key--drain {
+color: var(--cs-accent-ruby, #ef4444);
+background: var(--cs-accent-ruby-light, rgba(239, 68, 68, 0.15));
+}
+
+/* --- Combat Masteries: align the Lies row controls --- */
+.charsheet__mastery-lies {
+min-width: 12rem;
+}
+
+.charsheet__mastery-lies-custom {
+width: 10rem;
+}
+
+.charsheet__mastery-or {
+padding: 0 0.15rem;
+font-style: italic;
+}
+
+.charsheet__mastery-inexorable {
+width: 4rem;
+}
+
+/* --- Compact status chips so badges stop dominating the rows --- */
+.charsheet__interdict-boon-status,
+.charsheet__interdict-boon-granted,
+.charsheet__interdict-boon-effect,
+.charsheet__interdict-seal-row .badge,
+.charsheet__mastery-row .badge {
+display: inline-flex;
+align-items: center;
+padding: 0.12rem 0.45rem;
+border-radius: var(--cs-radius-sm, 6px);
+font-size: 0.66rem;
+font-weight: 600;
+letter-spacing: 0.02em;
+line-height: 1.3;
+}
+
+/* Active vs always-on status reads at a glance via accent, not bulk */
+.charsheet__interdict-boon-status.badge-primary {
+color: var(--cs-primary, #6366f1);
+background: var(--cs-primary-light, rgba(99, 102, 241, 0.18));
+}
+
+.charsheet__interdict-boon-status.badge-secondary {
+color: var(--cs-text-secondary, #94a3b8);
+background: var(--cs-bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+/* Keep the boon name from being crowded by the status chip */
+.charsheet__interdict-boon-row > .bold {
+margin-right: 0.15rem;
+}
+
+/* --- Seal place / move modals: readable body + structured field --- */
+.charsheet__interdict-modal {
+display: flex;
+flex-direction: column;
+gap: var(--cs-space-sm, 8px);
+color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__interdict-modal-lead {
+margin: 0;
+font-size: 0.9rem;
+line-height: 1.45;
+color: var(--cs-text-secondary, #cbd5e1);
+}
+
+.charsheet__interdict-modal-lead strong {
+color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__interdict-modal-sublabel {
+font-size: 0.78rem;
+color: var(--cs-text-secondary, #94a3b8);
+margin-bottom: 0.1rem;
+}
+
+.charsheet__interdict-modal-field {
+display: flex;
+flex-direction: column;
+gap: 0.3rem;
+margin-bottom: 0;
+}
+
+.charsheet__interdict-modal-label {
+text-transform: uppercase;
+letter-spacing: 0.04em;
+font-weight: 600;
+font-size: 0.68rem;
+color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__interdict-modal-inputrow .charsheet__interdict-target-ipt {
+max-width: 16rem;
+flex: 1 1 auto;
+}
+
+.charsheet__interdict-modal-meta {
+font-size: 0.78rem;
+color: var(--cs-text-secondary, #94a3b8);
+padding-top: 0.1rem;
+border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+}
+
+.charsheet__interdict-modal-meta strong {
+color: var(--cs-text-primary, #f1f5f9);
+}
