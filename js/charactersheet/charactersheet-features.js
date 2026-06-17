@@ -1808,6 +1808,34 @@ class CharacterSheetFeatures {
 			`;
 		}
 
+		// Intransigent (Hellspeaker L11) ally chooser. The charmed-immunity aura can be
+		// EXTENDED to creatures of your choice within 10 ft while you are conscious. S-B owns
+		// the immunity mechanics, the getIntransigentAllyCount/setIntransigentAllyCount state
+		// API, and the feature-effect summary; this is purely the interactive control that
+		// reads/writes that count and re-renders so the Effect line reflects it. Feature-detect
+		// the API so the control only appears once those mechanics are present.
+		const intransigentCalcs = this._state.getFeatureCalculations?.() || {};
+		const intransigentMax = 12;
+		const isIntransigent = (feature.name || "").trim().toLowerCase() === "intransigent"
+			&& !!intransigentCalcs.hasIntransigent
+			&& typeof this._state.getIntransigentAllyCount === "function"
+			&& typeof this._state.setIntransigentAllyCount === "function";
+		let intransigentHtml = "";
+		if (isIntransigent) {
+			const intransigentRange = intransigentCalcs.intransigentRange || 10;
+			const allyCount = Math.max(0, Math.min(intransigentMax, Number(this._state.getIntransigentAllyCount()) || 0));
+			intransigentHtml = `
+				<div class="charsheet__intransigent-controls mt-2 p-2" style="background: var(--bs-body-bg-alt, #f8f9fa); border-radius: 8px; border: 1px solid var(--bs-border-color, #dee2e6);">
+					<div class="ve-flex-v-center gap-2 mb-1" style="flex-wrap: wrap;">
+						<strong>Allies covered:</strong>
+						<input type="number" class="ve-form-control charsheet__intransigent-ally-count" min="0" max="${intransigentMax}" step="1" value="${allyCount}" style="width: 5rem;" title="Creatures of your choice within ${intransigentRange} ft that you extend the charmed-immunity aura to (while conscious)">
+						<span class="ve-muted ve-small">within ${intransigentRange} ft (while conscious)</span>
+					</div>
+					<em class="ve-muted ve-small">You are always immune to charmed; choose how many nearby creatures the aura also protects.</em>
+				</div>
+			`;
+		}
+
 		const featureEl = e_({outer: `
 			<div class="charsheet__feature" data-feature-id="${feature.id}">
 				<div class="charsheet__feature-header">
@@ -1834,6 +1862,7 @@ class CharacterSheetFeatures {
 				<div class="charsheet__feature-body" style="display: ${isExpanded ? "block" : "none"};">
 					${primalFocusHtml}
 					${huntersPreyHtml}
+					${intransigentHtml}
 					${derivedEffectRow}
 					${description}
 				</div>
@@ -1881,6 +1910,20 @@ class CharacterSheetFeatures {
 				this._page.saveCharacter?.();
 				this._page._features?.render?.();
 				JqueryUtil.doToast({type: "success", content: isDesignated ? "Cleared Focused Quarry" : "Designated a Focused Quarry"});
+			});
+		}
+
+		// Intransigent ally-count input — commit on change (blur/enter), clamp, persist, and
+		// re-render so the feature's Effect summary updates to the chosen ally count.
+		if (isIntransigent) {
+			const input = featureEl.querySelector(".charsheet__intransigent-ally-count");
+			input?.addEventListener("change", () => {
+				let n = parseInt(input.value, 10);
+				if (!Number.isFinite(n) || n < 0) n = 0;
+				if (n > intransigentMax) n = intransigentMax;
+				this._state.setIntransigentAllyCount(n);
+				this._page.saveCharacter?.();
+				this._page._features?.render?.();
 			});
 		}
 
