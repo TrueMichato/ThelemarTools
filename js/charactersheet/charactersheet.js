@@ -10672,9 +10672,11 @@ class CharacterSheetPage {
 	 * @param {number} opts.effectiveRoll - the current effective d20 value (after any minimum).
 	 * @param {string} opts.ability - the ability the check resolves against (lower-cased).
 	 * @param {string} opts.rollLabel - human label for the prompt (e.g. "Persuasion Check").
+	 * @param {number} [opts.totalMod] - the flat modifier added to the die (for the total preview).
+	 * @param {number} [opts.exhaustionPenalty] - exhaustion penalty subtracted from the total.
 	 * @returns {Promise<{effectiveRoll:number, applied:boolean, note:string}>}
 	 */
-	async _pMaybeApplyRedCant ({rollResult, effectiveRoll, ability, rollLabel}) {
+	async _pMaybeApplyRedCant ({rollResult, effectiveRoll, ability, rollLabel, totalMod = 0, exhaustionPenalty = 0}) {
 		const noChange = {effectiveRoll, applied: false, note: ""};
 		if ((ability || "").toLowerCase() !== "cha") return noChange;
 		const calcs = this._state.getFeatureCalculations?.() || {};
@@ -10683,15 +10685,21 @@ class CharacterSheetPage {
 		// Only relevant when the chosen die — and the current effective value — is below the
 		// floor (a roll already at/above the floor needs no help).
 		if (rollResult.roll >= floor || effectiveRoll >= floor) return noChange;
-		if ((this._state.getSealsAvailable?.() || 0) <= 0) return noChange;
+		const sealsBefore = this._state.getSealsAvailable?.() || 0;
+		if (sealsBefore <= 0) return noChange;
 		if ((/** @type {*} */ (this._state.getSettings?.() || {})).skipRedCantPrompt) return noChange;
 
-		const ok = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
-			title: "Red Cant",
-			htmlDescription: `Your <strong>${rollLabel}</strong> rolled a natural <strong>${rollResult.roll}</strong>. Expend a seal to treat it as a <strong>${floor}</strong>?<br><span class="ve-muted ve-small">Seals available: ${this._state.getSealsAvailable()}</span>`,
-			textYes: `Expend a seal \u2192 ${floor}`,
-			textNo: "Keep the roll",
-		}));
+		const preview = CharacterSheetPage._getRedCantPreview({
+			naturalRoll: rollResult.roll,
+			effectiveRoll,
+			floor,
+			totalMod,
+			exhaustionPenalty,
+			sealsBefore,
+			rollLabel,
+		});
+
+		const ok = await this._pPromptRedCant(preview);
 		if (!ok) return noChange;
 		if (this._state.spendSeal(1) <= 0) return noChange;
 		// Repaint the Interdiction panel's seal pool and persist the spent seal.
@@ -10702,6 +10710,135 @@ class CharacterSheetPage {
 			applied: true,
 			note: `\u26a1 Red Cant: expended a seal \u2014 treated d20 ${rollResult.roll} as ${floor} (seals left: ${this._state.getSealsAvailable()})`,
 		};
+	}
+
+	/**
+	 * Pure preview math for the Red Cant decision modal. Computes the before/after
+	 * check totals and the seal cost so the modal can show the full consequence of
+	 * spending a seal. Kept static + side-effect-free so it is unit-testable without
+	 * a DOM. The "before" baseline uses the post-minimum effective die (the gating in
+	 * {@link _pMaybeApplyRedCant} guarantees it is below the floor).
+	 * @param {object} opts
+	 * @param {number} opts.naturalRoll - the natural d20 the player rolled.
+	 * @param {number} [opts.effectiveRoll] - the post-minimum die (defaults to naturalRoll).
+	 * @param {number} opts.floor - the Red Cant floor the die is treated as (typically 10).
+	 * @param {number} [opts.totalMod] - flat modifier added to the die.
+	 * @param {number} [opts.exhaustionPenalty] - exhaustion penalty subtracted from the total.
+	 * @param {number} [opts.sealsBefore] - seals available before the spend.
+	 * @param {string} [opts.rollLabel] - human label for the roll.
+	 * @returns {{naturalRoll:number, effectiveRoll:number, floor:number, totalMod:number, exhaustionPenalty:number, rollLabel:string, sealsBefore:number, sealsAfter:number, totalBefore:number, totalAfter:number, delta:number}}
+	 */
+	static _getRedCantPreview ({naturalRoll, effectiveRoll, floor, totalMod = 0, exhaustionPenalty = 0, sealsBefore = 0, rollLabel = ""}) {
+		const base = effectiveRoll != null ? effectiveRoll : naturalRoll;
+		const totalBefore = base + totalMod - exhaustionPenalty;
+		const totalAfter = Math.max(base, floor) + totalMod - exhaustionPenalty;
+		return {
+			naturalRoll,
+			effectiveRoll: base,
+			floor,
+			totalMod,
+			exhaustionPenalty,
+			rollLabel,
+			sealsBefore,
+			sealsAfter: Math.max(0, sealsBefore - 1),
+			totalBefore,
+			totalAfter,
+			delta: totalAfter - totalBefore,
+		};
+	}
+
+	/**
+	 * Polished, dark-themed Red Cant decision modal. Communicates the full
+	 * consequence of expending a seal: the natural die, the floor it is treated as,
+	 * the seal cost (before → after), and the resulting check total (before → after).
+	 * Mirrors the per-roll opt-in pattern of {@link _pPickConditionalModifiers}
+	 * (backdrop/X dismiss == decline). Returns true to confirm the seal spend.
+	 * @param {ReturnType<typeof CharacterSheetPage._getRedCantPreview>} preview
+	 * @returns {Promise<boolean>}
+	 */
+	async _pPromptRedCant (preview) {
+		const {naturalRoll, floor, sealsBefore, sealsAfter, totalBefore, totalAfter, delta, rollLabel} = preview;
+		const safeLabel = (rollLabel || "Charisma check").replace(/[<>]/g, "");
+		const fmtSigned = (/** @type {number} */ n) => `${n >= 0 ? "+" : "\u2212"}${Math.abs(n)}`;
+
+		let resolveOuter = null;
+		let isResolved = false;
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Red Cant",
+			isMinHeight0: true,
+			cbClose: () => {
+				// Backdrop / X dismissal == decline (only if no button already resolved).
+				if (resolveOuter && !isResolved) {
+					isResolved = true;
+					resolveOuter(false);
+				}
+			},
+		});
+
+		return new Promise((resolve) => {
+			resolveOuter = resolve;
+			const finalize = (/** @type {boolean} */ val) => {
+				if (isResolved) return;
+				isResolved = true;
+				resolve(val);
+			};
+
+			modalInner.innerHTML = `
+				<div class="charsheet__red-cant">
+					<p class="charsheet__red-cant__lede">
+						<strong>Moloch's Interdiction \u2014 Red Cant.</strong>
+						Your <strong>${safeLabel}</strong> die landed low. Expend a seal to treat it as a <strong>${floor}</strong>.
+					</p>
+
+					<div class="charsheet__red-cant__dice">
+						<div class="charsheet__red-cant__die charsheet__red-cant__die--from">
+							<span class="charsheet__red-cant__die-label">Natural roll</span>
+							<span class="charsheet__red-cant__die-val">${naturalRoll}</span>
+						</div>
+						<span class="charsheet__red-cant__arrow">\u2192</span>
+						<div class="charsheet__red-cant__die charsheet__red-cant__die--to">
+							<span class="charsheet__red-cant__die-label">Treated as</span>
+							<span class="charsheet__red-cant__die-val">${floor}</span>
+						</div>
+					</div>
+
+					<div class="charsheet__red-cant__rows">
+						<div class="charsheet__red-cant__row">
+							<span class="charsheet__red-cant__row-label">Seal cost</span>
+							<span class="charsheet__red-cant__row-val">
+								<span class="charsheet__red-cant__seals">${sealsBefore}</span>
+								<span class="charsheet__red-cant__row-arrow">\u2192</span>
+								<span class="charsheet__red-cant__seals charsheet__red-cant__seals--after">${sealsAfter}</span>
+								<span class="charsheet__red-cant__row-sub">seal${sealsBefore === 1 ? "" : "s"} remaining</span>
+							</span>
+						</div>
+						<div class="charsheet__red-cant__row">
+							<span class="charsheet__red-cant__row-label">${safeLabel} total</span>
+							<span class="charsheet__red-cant__row-val">
+								<span class="charsheet__red-cant__total charsheet__red-cant__total--before">${totalBefore}</span>
+								<span class="charsheet__red-cant__row-arrow">\u2192</span>
+								<span class="charsheet__red-cant__total charsheet__red-cant__total--after">${totalAfter}</span>
+								<span class="charsheet__red-cant__delta">(${fmtSigned(delta)})</span>
+							</span>
+						</div>
+					</div>
+
+					<div class="charsheet__red-cant__actions">
+						<button class="ve-btn ve-btn-default" data-act="decline">Keep the roll</button>
+						<button class="ve-btn ve-btn-primary" data-act="confirm">Expend a seal \u2192 ${floor}</button>
+					</div>
+				</div>
+			`;
+
+			modalInner.querySelector(`[data-act="decline"]`).addEventListener("click", () => {
+				finalize(false);
+				doClose();
+			});
+			modalInner.querySelector(`[data-act="confirm"]`).addEventListener("click", () => {
+				finalize(true);
+				doClose();
+			});
+		});
 	}
 
 	async _rollAbilityCheck (ability, event) {
@@ -10758,6 +10895,8 @@ class CharacterSheetPage {
 			effectiveRoll,
 			ability,
 			rollLabel: `${Parser.attAbvToFull(ability)} Check`,
+			totalMod,
+			exhaustionPenalty,
 		});
 		effectiveRoll = redCant.effectiveRoll;
 
@@ -11092,6 +11231,8 @@ class CharacterSheetPage {
 			effectiveRoll,
 			ability: overrideAbility || skillAbility,
 			rollLabel: `${skillName} Check`,
+			totalMod: mod,
+			exhaustionPenalty,
 		});
 		effectiveRoll = redCant.effectiveRoll;
 

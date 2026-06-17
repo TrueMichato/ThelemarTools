@@ -19019,6 +19019,139 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	color: #f87171;
 }
 
+/* ==========================================================================
+   Red Cant decision modal (Illrigger Hellspeaker "Moloch's Interdiction" boon).
+   A polished, dark-themed prompt shown when a sub-10 Charisma die can be raised
+   to its floor by expending a seal. Communicates the natural die, the floor, the
+   seal cost (before → after), and the resulting check total (before → after).
+   ========================================================================== */
+.charsheet__red-cant {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	padding: 4px 2px;
+}
+
+.charsheet__red-cant__lede {
+	margin: 0;
+	line-height: 1.45;
+	color: var(--cs-text-primary, #e2e8f0);
+}
+
+.charsheet__red-cant__dice {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+}
+
+.charsheet__red-cant__die {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	min-width: 92px;
+	padding: 10px 14px;
+	border-radius: 10px;
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.12));
+	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.05));
+}
+
+.charsheet__red-cant__die-label {
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__red-cant__die-val {
+	font-size: 1.9rem;
+	font-weight: 700;
+	line-height: 1;
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__red-cant__die--from {
+	opacity: 0.85;
+}
+
+.charsheet__red-cant__die--to {
+	border-color: #dc2626;
+	background: rgba(220, 38, 38, 0.14);
+}
+
+.charsheet__red-cant__die--to .charsheet__red-cant__die-val {
+	color: #f87171;
+}
+
+.charsheet__red-cant__arrow {
+	font-size: 1.5rem;
+	font-weight: 700;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__red-cant__rows {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+	background: var(--cs-bg-surface, #1e293b);
+}
+
+.charsheet__red-cant__row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.charsheet__red-cant__row-label {
+	font-size: 0.85rem;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__red-cant__row-val {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+	font-weight: 600;
+	color: var(--cs-text-primary, #e2e8f0);
+}
+
+.charsheet__red-cant__row-arrow {
+	color: var(--cs-text-secondary, #94a3b8);
+	font-weight: 400;
+}
+
+.charsheet__red-cant__row-sub {
+	font-size: 0.75rem;
+	font-weight: 400;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__red-cant__seals--after {
+	color: #f87171;
+}
+
+.charsheet__red-cant__total--after {
+	color: #4ade80;
+}
+
+.charsheet__red-cant__delta {
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: #4ade80;
+}
+
+.charsheet__red-cant__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 2px;
+}
+
 /* Familiar companion indicator — a gentle pulse so a summoned familiar isn't
    forgotten (bug #14). Additive: the badge's static colours stay inline; this
    only animates the outer glow. Respects reduced-motion preferences. */
