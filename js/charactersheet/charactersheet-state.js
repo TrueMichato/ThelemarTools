@@ -37091,6 +37091,18 @@ class CharacterSheetState {
 		} else if (/as a reaction|use (?:a |your )?reaction/i.test(text)) {
 			activationAction = "reaction";
 		}
+		// (R25 #1) Parse a stamina cost from the description so abilities that spend stamina
+		// but aren't tied to a named pool (e.g. Purge Toxins — "as an action you can spend 2
+		// stamina to end one poison") consume it through the unified activation pipeline. The
+		// legacy combat-tab regex required the literal "stamina point(s)" and so silently
+		// dropped the bare "spend N stamina" phrasing. getActivatableFeatures() prefers a
+		// linked named pool (resourceName) over staminaCost, so this only takes effect for
+		// abilities without one.
+		let staminaCost = null;
+		if (opts.resourceName === undefined || opts.resourceName === null) {
+			const staminaMatch = text.match(/(?:spend|expend|use|costs?)?\s*\(?(\d+)\s*stamina\s*(?:points?)?\)?/i);
+			if (staminaMatch) staminaCost = parseInt(staminaMatch[1], 10);
+		}
 		return {
 			stateTypeId: "custom",
 			isCustom: true,
@@ -37100,6 +37112,7 @@ class CharacterSheetState {
 			effects: this.parseEffectsFromDescription(rawText),
 			isToggle: false,
 			isInstant: true,
+			staminaCost,
 			// isDataDriven lets getActivatableFeatures() link `resourceName` to a shared
 			// pool (e.g. the Invoke Hell short-rest pool for its options). When resourceName
 			// is null (e.g. Forked Tongue), the link is simply skipped.
