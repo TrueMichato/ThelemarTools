@@ -4218,6 +4218,12 @@ class CharacterSheetState {
 		// Migrate: promote origin (race/background) choices out of the level-1 entry into the base node
 		this._migrateBaseChoices();
 
+		// (#7) Thelemar (TGTT) characters: rewrite feature TEXT that references the
+		// GENERIC conditions ({@condition invisible}) to the Thelemar variants so
+		// both the cached descriptions and the entries link/hover the Thelemar
+		// condition. Runs after classes are loaded (needed to detect Thelemar play).
+		this._migrateThelemarConditionTags();
+
 		// Re-register custom ability effects after loading — run after migrations so effects reference up-to-date data
 		this._reapplyCustomAbilityEffects();
 
@@ -4272,6 +4278,60 @@ class CharacterSheetState {
 			const {type, origin} = CharacterSheetState._normalizeCompanionType(c.type, c.origin);
 			c.type = type;
 			if (origin && !c.origin) c.origin = origin;
+		}
+	}
+
+	/**
+	 * (#7) For Thelemar (TGTT) characters, feature TEXT references the GENERIC
+	 * conditions (e.g. the Illrigger's Veil of Lies → "{@condition invisible}"),
+	 * so both the raw `entries` AND any cached, pre-rendered `description` link to
+	 * the 2014/2024 condition instead of the Thelemar one. Promote every bare
+	 * `{@condition X}` tag (no source) that HAS a Thelemar variant to the Thelemar
+	 * source, then refresh the cached description — re-rendering from the rewritten
+	 * entries when possible, else rewriting the pre-rendered condition links in the
+	 * stored HTML for features that no longer carry `entries`. Idempotent (already
+	 * `|TGTT`-tagged text is left untouched) and GENERIC (keyed off the `_tgtt`
+	 * CONDITION_EFFECTS map, not off the Illrigger). Non-Thelemar characters and
+	 * conditions without a Thelemar variant are left untouched.
+	 */
+	_migrateThelemarConditionTags () {
+		this._applyThelemarConditionTags();
+	}
+
+	/**
+	 * Rewrite bare `{@condition X}` tags in feature entries/descriptions to their
+	 * Thelemar (TGTT) variant when the character uses Thelemar conditions and a
+	 * `_tgtt` effect variant exists. Idempotent and safe to call repeatedly — it is
+	 * run both as a load migration and again after class-feature reconciliation
+	 * (which re-syncs entries from brew source data and would otherwise reintroduce
+	 * the generic-sourced tags).
+	 */
+	_applyThelemarConditionTags () {
+		if (!this._usesThelemarConditions()) return;
+		if (!Array.isArray(this._data.features)) return;
+		const canRender = typeof Renderer !== "undefined";
+		for (const feature of this._data.features) {
+			if (!feature) continue;
+
+			let entriesChanged = false;
+			if (Array.isArray(feature.entries)) {
+				const thelemarized = CharacterSheetState.thelemarizeConditionTags(feature.entries);
+				if (JSON.stringify(thelemarized) !== JSON.stringify(feature.entries)) {
+					feature.entries = thelemarized;
+					entriesChanged = true;
+				}
+			}
+
+			let descriptionRefreshed = false;
+			if (entriesChanged && canRender) {
+				try {
+					feature.description = Renderer.get().render({entries: feature.entries});
+					descriptionRefreshed = true;
+				} catch (e) { /* keep the existing description on render failure */ }
+			}
+			if (!descriptionRefreshed && typeof feature.description === "string" && feature.description) {
+				feature.description = CharacterSheetState.thelemarizeConditionLinkHtml(feature.description);
+			}
 		}
 	}
 
@@ -25359,8 +25419,10 @@ class CharacterSheetState {
 	 * @param {string|object} condition - The condition name or {name, source} object
 	 * @returns {boolean} True if condition was added, false if immune or already exists
 	 */
-	addCondition (condition) {
-		const condObj = this._normalizeCondition(condition);
+	addCondition (condition, {resolveThelemarVariant = false} = {}) {
+		const condObj = resolveThelemarVariant
+			? this._resolveAppliedConditionIdentity(condition)
+			: this._normalizeCondition(condition);
 
 		// Check if character is immune to this condition
 		if (this.isImmuneToCondition(condObj.name)) {
@@ -25393,13 +25455,61 @@ class CharacterSheetState {
 	 * @returns {object} {name, source} object
 	 */
 	_normalizeCondition (condition) {
+		let name;
+		let source;
+		let hasExplicitSource;
 		if (typeof condition === "string") {
 			// Legacy format - just a name, default to XPHB
-			return {name: condition, source: Parser.SRC_XPHB};
+			name = condition;
+			source = Parser.SRC_XPHB;
+			hasExplicitSource = false;
+		} else {
+			name = condition.name || condition;
+			hasExplicitSource = !!condition.source;
+			source = condition.source || Parser.SRC_XPHB;
 		}
+
+		// (#7) Thelemar (TGTT) condition resolution. An ability that applies a base
+		// condition BY NAME (no explicit source — strings from `addsConditions`,
+		// spell/play-mode buttons, etc.) must apply the Thelemar VARIANT for a
+		// Thelemar character, so the stored condition, its mechanical effects, the
+		// active state, and removal-by-name all agree on the Thelemar identity.
+		// Callers that pass an explicit source (the Add Condition modal, the
+		// condition chip's remove handler) are respected as-is. Only conditions
+		// that actually HAVE a Thelemar variant are remapped — generic-only
+		// conditions (charmed, blinded, …) and non-Thelemar characters are left
+		// untouched. GENERIC: every class/ability routes through here, not just the
+		// Illrigger.
+		if (!hasExplicitSource && this._usesThelemarConditions()) {
+			const variant = CharacterSheetState.getThelemarConditionVariant(name);
+			if (variant) {
+				name = variant.name || name;
+				source = variant.source || CharacterSheetState.THELEMAR_CONDITION_SOURCE;
+			}
+		}
+
+		return {name, source};
+	}
+
+	/**
+	 * Resolve the IDENTITY (name + source) of a condition an ability applies to
+	 * the character, preferring the Thelemar variant for Thelemar characters. This
+	 * is the explicit-source counterpart to the bare-name resolution in
+	 * {@link _normalizeCondition}: combat actions self-apply conditions tagged with
+	 * the granting feature's NAME as the source (e.g. Instant Step → Invisible),
+	 * which must still resolve to the Thelemar variant when one exists. Conditions
+	 * without a Thelemar variant keep the source they were given.
+	 * @param {string|object} condition
+	 * @returns {object} {name, source}
+	 */
+	_resolveAppliedConditionIdentity (condition) {
+		const condObj = this._normalizeCondition(condition);
+		if (!this._usesThelemarConditions()) return condObj;
+		const variant = CharacterSheetState.getThelemarConditionVariant(condObj.name);
+		if (!variant) return condObj;
 		return {
-			name: condition.name || condition,
-			source: condition.source || Parser.SRC_XPHB,
+			name: variant.name || condObj.name,
+			source: variant.source || CharacterSheetState.THELEMAR_CONDITION_SOURCE,
 		};
 	}
 
@@ -38634,6 +38744,96 @@ class CharacterSheetState {
 		return CharacterSheetState.CONDITION_EFFECTS[key]
 			|| CharacterSheetState._customConditions[key]
 			|| null;
+	}
+
+	/**
+	 * The data source under which the Thelemar (TGTT) condition variants are
+	 * published in the homebrew, e.g. `{@condition Invisible|TGTT}`. Kept as a
+	 * single constant so the resolver, the migration, and the tag/HTML rewriters
+	 * all agree on the source token.
+	 */
+	static THELEMAR_CONDITION_SOURCE = "TGTT";
+
+	/**
+	 * The Thelemar (TGTT) mechanical variant of a condition, or null when none
+	 * exists. The `_tgtt` keys of {@link CharacterSheetState.CONDITION_EFFECTS}
+	 * are the single source of truth for "does a Thelemar variant exist", so the
+	 * display rewrite and the mechanical resolver never disagree and we never
+	 * invent a variant the rules don't define (e.g. there is deliberately no
+	 * `charmed_tgtt` / `exhaustion_tgtt`).
+	 * @param {string} conditionName
+	 * @returns {object|null}
+	 */
+	static getThelemarConditionVariant (conditionName) {
+		if (!conditionName) return null;
+		const key = String(conditionName).toLowerCase().replace(/\s+/g, "_");
+		return CharacterSheetState.CONDITION_EFFECTS[`${key}_tgtt`] || null;
+	}
+
+	/**
+	 * Rewrite a bare condition string-tag — `{@condition X}` with no `|source` —
+	 * to the Thelemar variant `{@condition X|TGTT}` for every condition that HAS a
+	 * Thelemar variant. Tags that already carry a source (`{@condition X|tgtt}`,
+	 * `{@condition X|xphb}`) and conditions without a Thelemar variant (charmed,
+	 * blinded, …) are left untouched.
+	 * @param {string} str
+	 * @returns {string}
+	 */
+	static thelemarizeConditionTagString (str) {
+		if (typeof str !== "string" || !str.includes("{@condition")) return str;
+		return str.replace(/\{@condition ([^|}]+)\}/gi, (full, rawName) => {
+			const name = rawName.trim();
+			const variant = CharacterSheetState.getThelemarConditionVariant(name);
+			if (!variant) return full;
+			return `{@condition ${name}|${variant.source || CharacterSheetState.THELEMAR_CONDITION_SOURCE}}`;
+		});
+	}
+
+	/**
+	 * Deep, non-mutating Thelemar rewrite of an entries structure (string, array,
+	 * or object). Returns a new structure with every bare `{@condition X}` tag
+	 * promoted to its Thelemar variant (see {@link thelemarizeConditionTagString}).
+	 * @param {*} node
+	 * @returns {*}
+	 */
+	static thelemarizeConditionTags (node) {
+		if (typeof node === "string") return CharacterSheetState.thelemarizeConditionTagString(node);
+		if (Array.isArray(node)) return node.map(n => CharacterSheetState.thelemarizeConditionTags(n));
+		if (node && typeof node === "object") {
+			const out = {};
+			for (const k of Object.keys(node)) out[k] = CharacterSheetState.thelemarizeConditionTags(node[k]);
+			return out;
+		}
+		return node;
+	}
+
+	/**
+	 * Rewrite already-rendered condition hover links in a description's HTML so a
+	 * Thelemar character sees the Thelemar condition, not the 2014/2024 one. Used
+	 * for features whose cached `description` was rendered (to PHB/XPHB) from bare
+	 * tags but that no longer carry the source `entries` to re-render from (e.g.
+	 * Baleful Interdict). Only condition links whose name HAS a Thelemar variant
+	 * are repointed; the source/hash/href are swapped to the Thelemar variant.
+	 * @param {string} html
+	 * @returns {string}
+	 */
+	static thelemarizeConditionLinkHtml (html) {
+		if (typeof html !== "string" || !html.includes("conditionsdiseases.html")) return html;
+		return html.replace(/<a\b[^>]*data-vet-page="conditionsdiseases\.html"[^>]*>[^<]*<\/a>/gi, (anchor) => {
+			const hashMatch = anchor.match(/data-vet-hash="([^"]+)"/i);
+			if (!hashMatch) return anchor;
+			const hash = hashMatch[1];
+			const idx = hash.lastIndexOf("_");
+			const namePart = idx >= 0 ? hash.slice(0, idx) : hash;
+			const variant = CharacterSheetState.getThelemarConditionVariant(namePart.replace(/_/g, " "));
+			if (!variant) return anchor;
+			const newSrc = variant.source || CharacterSheetState.THELEMAR_CONDITION_SOURCE;
+			const newHash = `${namePart}_${newSrc.toLowerCase()}`;
+			return anchor
+				.replace(/(conditionsdiseases\.html#)[^"\s]+/i, `$1${newHash}`)
+				.replace(/data-vet-source="[^"]*"/i, `data-vet-source="${newSrc}"`)
+				.replace(/data-vet-hash="[^"]*"/i, `data-vet-hash="${newHash}"`);
+		});
 	}
 
 	/**
