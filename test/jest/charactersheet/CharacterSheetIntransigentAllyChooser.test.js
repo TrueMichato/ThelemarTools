@@ -69,6 +69,12 @@ function makeFeatures ({withApi = true, initialCount = 0} = {}) {
 	if (withApi) {
 		state.getIntransigentAllyCount = () => stored;
 		state.setIntransigentAllyCount = setSpy;
+	} else {
+		// In the integrated tree S-B's ally-count API are real prototype methods on
+		// CharacterSheetState, so "absent" must explicitly shadow them on the instance to
+		// faithfully exercise the feature-detect guard (typeof !== "function").
+		state.getIntransigentAllyCount = undefined;
+		state.setIntransigentAllyCount = undefined;
 	}
 
 	const featuresRenderSpy = jest.fn();
