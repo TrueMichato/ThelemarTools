@@ -10659,6 +10659,51 @@ class CharacterSheetPage {
 		}).join("\n");
 	}
 
+	/**
+	 * (S3 #9) Red Cant (Illrigger Hellspeaker boon): "When you make a Charisma check, you can
+	 * expend a seal to treat a d20 roll of 9 or lower as a 10." Relevant rolls are Charisma
+	 * ABILITY CHECKS and Charisma-based SKILL CHECKS only (not saves or attacks). When such a
+	 * roll's natural d20 lands below the floor, prompt the player to expend a seal to set the
+	 * die to the floor. Opt-in per roll; a no-op (returns the roll unchanged) unless the
+	 * character knows Red Cant, has a seal available, and the (post-minimum) die is below the
+	 * floor. The `settings.skipRedCantPrompt` flag is a fast-play escape hatch.
+	 * @param {object} opts
+	 * @param {object} opts.rollResult - the {@link _rollD20} result (`.roll` is the chosen die).
+	 * @param {number} opts.effectiveRoll - the current effective d20 value (after any minimum).
+	 * @param {string} opts.ability - the ability the check resolves against (lower-cased).
+	 * @param {string} opts.rollLabel - human label for the prompt (e.g. "Persuasion Check").
+	 * @returns {Promise<{effectiveRoll:number, applied:boolean, note:string}>}
+	 */
+	async _pMaybeApplyRedCant ({rollResult, effectiveRoll, ability, rollLabel}) {
+		const noChange = {effectiveRoll, applied: false, note: ""};
+		if ((ability || "").toLowerCase() !== "cha") return noChange;
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		if (!calcs.hasRedCant) return noChange;
+		const floor = calcs.redCantFloor || 10;
+		// Only relevant when the chosen die — and the current effective value — is below the
+		// floor (a roll already at/above the floor needs no help).
+		if (rollResult.roll >= floor || effectiveRoll >= floor) return noChange;
+		if ((this._state.getSealsAvailable?.() || 0) <= 0) return noChange;
+		if ((/** @type {*} */ (this._state.getSettings?.() || {})).skipRedCantPrompt) return noChange;
+
+		const ok = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+			title: "Red Cant",
+			htmlDescription: `Your <strong>${rollLabel}</strong> rolled a natural <strong>${rollResult.roll}</strong>. Expend a seal to treat it as a <strong>${floor}</strong>?<br><span class="ve-muted ve-small">Seals available: ${this._state.getSealsAvailable()}</span>`,
+			textYes: `Expend a seal \u2192 ${floor}`,
+			textNo: "Keep the roll",
+		}));
+		if (!ok) return noChange;
+		if (this._state.spendSeal(1) <= 0) return noChange;
+		// Repaint the Interdiction panel's seal pool and persist the spent seal.
+		this._combat?.renderCombatInterdiction?.();
+		this._saveCurrentCharacter?.();
+		return {
+			effectiveRoll: Math.max(effectiveRoll, floor),
+			applied: true,
+			note: `\u26a1 Red Cant: expended a seal \u2014 treated d20 ${rollResult.roll} as ${floor} (seals left: ${this._state.getSealsAvailable()})`,
+		};
+	}
+
 	async _rollAbilityCheck (ability, event) {
 		const baseMod = this._state.getAbilityMod(ability);
 		const exhaustionPenalty = this._getExhaustionPenalty();
@@ -10707,6 +10752,15 @@ class CharacterSheetPage {
 			minimumApplied = true;
 		}
 
+		// (S3 #9) Red Cant — offer to expend a seal to treat a sub-10 Charisma check as a 10.
+		const redCant = await this._pMaybeApplyRedCant({
+			rollResult,
+			effectiveRoll,
+			ability,
+			rollLabel: `${Parser.attAbvToFull(ability)} Check`,
+		});
+		effectiveRoll = redCant.effectiveRoll;
+
 		let total = effectiveRoll + totalMod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Buff dice (e.g. Guidance's 1d4) rolled into the total.
@@ -10725,6 +10779,9 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${aggregated.minimum} applied` : `Min ${aggregated.minimum} applied (rolled ${rollResult.roll})`;
+		}
+		if (redCant.note) {
+			resultNote = resultNote ? `${resultNote}\n${redCant.note}` : redCant.note;
 		}
 
 		const appliedCondsStr = this._formatAppliedConditionalsNote(appliedConditionals);
@@ -10745,7 +10802,7 @@ class CharacterSheetPage {
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Check${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			total,
-			this._formatD20BreakdownWithCustom(rollResult, baseMod, customBonus, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr + diceBonusStr,
+			this._formatD20BreakdownWithCustom(rollResult, baseMod, customBonus, exhaustionStr, minimumApplied ? aggregated.minimum : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr,
 			resultClass,
 			resultNote,
 		);
@@ -11028,6 +11085,16 @@ class CharacterSheetPage {
 			}
 		}
 
+		// (S3 #9) Red Cant — a Charisma-based skill check counts as a Charisma check, so offer
+		// to expend a seal to treat a sub-10 die as a 10.
+		const redCant = await this._pMaybeApplyRedCant({
+			rollResult,
+			effectiveRoll,
+			ability: overrideAbility || skillAbility,
+			rollLabel: `${skillName} Check`,
+		});
+		effectiveRoll = redCant.effectiveRoll;
+
 		const total = effectiveRoll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Buff dice (e.g. Guidance's 1d4) rolled into the total. Match against the
@@ -11048,6 +11115,9 @@ class CharacterSheetPage {
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${minimumValue} applied` : `Min ${minimumValue} applied (rolled ${rollResult.roll})`;
 		}
+		if (redCant.note) {
+			resultNote = resultNote ? `${resultNote}\n${redCant.note}` : redCant.note;
+		}
 
 		const appliedCondsStr = this._formatAppliedConditionalsNote(appliedConditionals);
 		if (appliedCondsStr) {
@@ -11067,7 +11137,7 @@ class CharacterSheetPage {
 		this._showDiceResult(
 			`${skillName}${abilityLabel} Check${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			totalWithDice,
-			this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : null) + sourcesStr + diceBonusStr,
+			this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr,
 			resultClass,
 			resultNote,
 		);

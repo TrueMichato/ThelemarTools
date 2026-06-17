@@ -2837,7 +2837,7 @@ class CharacterSheetCombat {
 					<div class="charsheet__interdict-boon-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-1">
 						<span class="bold mr-1">${nameHtml}</span>
 						${grantedHtml}
-						<span class="badge ${badgeCls}" title="${activation === "Active" ? "Requires an action/trigger to use" : "Always-on benefit"}">${activation}</span>
+						<span class="badge ${badgeCls} charsheet__interdict-boon-status" title="${activation === "Active" ? "Requires an action/trigger to use" : "Always-on benefit"}">${activation}</span>
 						${summaryHtml}
 						${toggleBtn || activateBtn}
 					</div>`;
@@ -2972,8 +2972,11 @@ class CharacterSheetCombat {
 
 		// --- Apply a boon's discrete on-sheet effect (e.g. Soul Eater temp HP) ---
 		container.querySelectorAll(".charsheet__interdict-boon-activate").forEach((btn) => {
-			btn.addEventListener("click", () => {
+			btn.addEventListener("click", async () => {
 				const boonName = btn.dataset.boonName || "";
+				// (S3 #10) Slippery Ploy is a seal PLACEMENT reaction, not a bare seal-spend —
+				// route it to the target-prompt flow so a real, tracked placement is created.
+				if (/^slippery ploy$/i.test(boonName.trim())) { await this._pSlipperyPloyPlaceSeal(); return; }
 				const result = this._state.applyInterdictBoonActivation?.(boonName);
 				if (!result) { JqueryUtil.doToast({type: "warning", content: `No on-sheet effect to apply for "${boonName || "this boon"}".`}); return; }
 				JqueryUtil.doToast({type: "success", content: result.label});
@@ -3002,6 +3005,11 @@ class CharacterSheetCombat {
 				this._page._renderActiveStates?.();
 				this.renderCombatStates?.();
 				this.renderCombatInterdiction();
+				// (S3 #12) A sense-granting boon (Hellsight → truesight) lives on the boon's
+				// active state, so ending it must repaint the Overview senses display — the
+				// targeted renders above don't touch it, which left a stale "Truesight 60 ft."
+				// row after End. The invoke path already refreshes senses via _renderCharacter.
+				this._page._renderSenses?.();
 				this._page.saveCharacter?.();
 			});
 		});
@@ -3077,8 +3085,8 @@ class CharacterSheetCombat {
 		};
 
 		const existingHtml = existing.length
-			? `<div class="ve-muted ve-small mb-1">Add a seal to an already-interdicted creature:</div>
-				<div class="ve-flex ve-flex-wrap gap-1 mb-2">
+			? `<div class="charsheet__interdict-modal-sublabel">Add a seal to an already-interdicted creature:</div>
+				<div class="charsheet__interdict-modal-chips ve-flex ve-flex-wrap gap-1 mb-2">
 					${existing.map(p => `<button class="ve-btn ve-btn-default ve-btn-xs charsheet__interdict-place-existing" type="button" data-target="${(p.target || "").replace(/"/g, "&quot;")}">${p.target} <span class="ve-muted">(${p.count})</span></button>`).join("")}
 				</div>`
 			: "";
@@ -3089,15 +3097,17 @@ class CharacterSheetCombat {
 		});
 
 		modalInner.innerHTML = `
-			<div class="charsheet__interdict-place">
-				<p class="mb-2">Place a <strong>magical seal</strong> on a creature. The seal lasts 1 minute or until burned for ${calcs.sealDamage || "1d6"} fire or necrotic damage.</p>
+			<div class="charsheet__interdict-place charsheet__interdict-modal">
+				<p class="charsheet__interdict-modal-lead">Place a <strong>magical seal</strong> on a creature. The seal lasts 1 minute or until burned for ${calcs.sealDamage || "1d6"} fire or necrotic damage.</p>
 				${existingHtml}
-				<div class="ve-muted ve-small mb-1">${existing.length ? "…or seal a new creature:" : "Name the creature to seal:"}</div>
-				<div class="ve-flex ve-flex-v-center mb-2">
-					<input type="text" class="form-control input-sm charsheet__interdict-target-ipt" placeholder="creature name" style="max-width: 16rem;">
-					<button class="ve-btn ve-btn-primary ve-btn-sm ml-2 charsheet__interdict-confirm" type="button">Place Seal</button>
-				</div>
-				<div class="ve-muted ve-small">Seals available: <strong>${avail}</strong>${dc != null ? ` &middot; Interdict save DC <strong>${dc}</strong>` : ""}</div>
+				<label class="charsheet__interdict-modal-field">
+					<span class="charsheet__interdict-modal-label">${existing.length ? "…or seal a new creature" : "Name the creature to seal"}</span>
+					<div class="charsheet__interdict-modal-inputrow ve-flex ve-flex-v-center">
+						<input type="text" class="form-control input-sm charsheet__interdict-target-ipt" placeholder="creature name">
+						<button class="ve-btn ve-btn-primary ve-btn-sm ml-2 charsheet__interdict-confirm" type="button">Place Seal</button>
+					</div>
+				</label>
+				<div class="charsheet__interdict-modal-meta">Seals available: <strong>${avail}</strong>${dc != null ? ` &middot; Interdict save DC <strong>${dc}</strong>` : ""}</div>
 			</div>`;
 
 		modalInner.querySelectorAll(".charsheet__interdict-place-existing").forEach((btn) => {
@@ -3141,8 +3151,8 @@ class CharacterSheetCombat {
 		};
 
 		const destHtml = destinations.length
-			? `<div class="ve-muted ve-small mb-1">Move to another interdicted creature:</div>
-				<div class="ve-flex ve-flex-wrap gap-1 mb-2">
+			? `<div class="charsheet__interdict-modal-sublabel">Move to another interdicted creature:</div>
+				<div class="charsheet__interdict-modal-chips ve-flex ve-flex-wrap gap-1 mb-2">
 					${destinations.map(p => `<button class="ve-btn ve-btn-default ve-btn-xs charsheet__interdict-move-existing" type="button" data-target="${(p.target || "").replace(/"/g, "&quot;")}">${p.target} <span class="ve-muted">(${p.count})</span></button>`).join("")}
 				</div>`
 			: "";
@@ -3153,14 +3163,16 @@ class CharacterSheetCombat {
 		});
 
 		modalInner.innerHTML = `
-			<div class="charsheet__interdict-place">
-				<p class="mb-2">Move all <strong>${source.count} seal${source.count === 1 ? "" : "s"}</strong> from <strong>${source.target}</strong> to another creature within 30 ft (a bonus action on that creature's death).</p>
+			<div class="charsheet__interdict-place charsheet__interdict-modal">
+				<p class="charsheet__interdict-modal-lead">Move all <strong>${source.count} seal${source.count === 1 ? "" : "s"}</strong> from <strong>${source.target}</strong> to another creature within 30 ft (a bonus action on that creature's death).</p>
 				${destHtml}
-				<div class="ve-muted ve-small mb-1">${destinations.length ? "…or move to a new creature:" : "Name the new creature:"}</div>
-				<div class="ve-flex ve-flex-v-center mb-2">
-					<input type="text" class="form-control input-sm charsheet__interdict-target-ipt" placeholder="creature name" style="max-width: 16rem;">
-					<button class="ve-btn ve-btn-primary ve-btn-sm ml-2 charsheet__interdict-confirm" type="button">Move Seals</button>
-				</div>
+				<label class="charsheet__interdict-modal-field">
+					<span class="charsheet__interdict-modal-label">${destinations.length ? "…or move to a new creature" : "Name the new creature"}</span>
+					<div class="charsheet__interdict-modal-inputrow ve-flex ve-flex-v-center">
+						<input type="text" class="form-control input-sm charsheet__interdict-target-ipt" placeholder="creature name">
+						<button class="ve-btn ve-btn-primary ve-btn-sm ml-2 charsheet__interdict-confirm" type="button">Move Seals</button>
+					</div>
+				</label>
 			</div>`;
 
 		modalInner.querySelectorAll(".charsheet__interdict-move-existing").forEach((btn) => {
@@ -3171,6 +3183,76 @@ class CharacterSheetCombat {
 			const target = (ipt?.value || "").trim();
 			if (!target) { JqueryUtil.doToast({type: "warning", content: "Enter a creature name (or pick an existing one)."}); return; }
 			move(target);
+			doClose(true);
+		};
+		modalInner.querySelector(".charsheet__interdict-confirm")?.addEventListener("click", confirm);
+		ipt?.addEventListener("keydown", (e) => { if (e.key === "Enter") confirm(); });
+		setTimeout(() => { try { ipt?.focus(); } catch (e) { /* ignore */ } }, 50);
+	}
+
+	/**
+	 * (S3 #10) Slippery Ploy reaction flow: when a creature targets you, place a seal on
+	 * that creature (forcing it to make a Charisma save or retarget / lose the effect). The
+	 * seal is a REAL, tracked placement — routed through the shared
+	 * {@link CharacterSheetState#applyInterdictBoonActivation} → `placeSeal` path so it spends
+	 * a seal AND appears in the interdicted-creatures list. Mirrors the Place-seal modal:
+	 * the attacker can be an already-interdicted creature (stack a seal) or a new one.
+	 * @returns {Promise<void>}
+	 */
+	async _pSlipperyPloyPlaceSeal () {
+		if ((this._state.getSealsAvailable?.() || 0) <= 0) {
+			JqueryUtil.doToast({type: "warning", content: "No seals available — take a short or long rest to recover them."});
+			return;
+		}
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		const dc = calcs.slipperyPloyDc != null ? calcs.slipperyPloyDc : calcs.interdictDc;
+		const avail = this._state.getSealsAvailable?.() || 0;
+		const existing = this._getSealPlaceTargets();
+
+		const place = (target) => {
+			const result = this._state.applyInterdictBoonActivation?.("Slippery Ploy", calcs, {target: (target || "").trim() || "Attacker"});
+			if (result?.placement) {
+				JqueryUtil.doToast({type: "success", content: result.label});
+				this.renderCombatInterdiction();
+				this._page.saveCharacter?.();
+			} else {
+				JqueryUtil.doToast({type: "warning", content: "Could not place a Slippery Ploy seal."});
+			}
+		};
+
+		const existingHtml = existing.length
+			? `<div class="ve-muted ve-small mb-1">Add a seal to an already-interdicted creature:</div>
+				<div class="ve-flex ve-flex-wrap gap-1 mb-2">
+					${existing.map(p => `<button class="ve-btn ve-btn-default ve-btn-xs charsheet__interdict-place-existing" type="button" data-target="${(p.target || "").replace(/"/g, "&quot;")}">${p.target} <span class="ve-muted">(${p.count})</span></button>`).join("")}
+				</div>`
+			: "";
+
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Slippery Ploy — Place a Seal (reaction)",
+			isMinHeight0: true,
+		});
+
+		modalInner.innerHTML = `
+			<div class="charsheet__interdict-place">
+				<p class="mb-2">A creature targeted you with an attack, spell, or other magical effect. As a <strong>reaction</strong>, place a seal on it and force a <strong>DC ${dc != null ? dc : "—"}</strong> Charisma save. On a failed save it must choose a new target or lose the attack or effect.</p>
+				${existingHtml}
+				<div class="ve-muted ve-small mb-1">${existing.length ? "…or seal a new creature:" : "Name the creature to seal:"}</div>
+				<div class="ve-flex ve-flex-v-center mb-2">
+					<input type="text" class="form-control input-sm charsheet__interdict-target-ipt" placeholder="creature name" style="max-width: 16rem;">
+					<button class="ve-btn ve-btn-primary ve-btn-sm ml-2 charsheet__interdict-confirm" type="button">Place Seal</button>
+				</div>
+				<div class="ve-muted ve-small">Seals available: <strong>${avail}</strong></div>
+			</div>`;
+
+		modalInner.querySelectorAll(".charsheet__interdict-place-existing").forEach((btn) => {
+			btn.addEventListener("click", () => { place(btn.dataset.target); doClose(true); });
+		});
+		const ipt = /** @type {HTMLInputElement} */ (modalInner.querySelector(".charsheet__interdict-target-ipt"));
+		const confirm = () => {
+			const target = (ipt?.value || "").trim();
+			if (!target) { JqueryUtil.doToast({type: "warning", content: "Enter a creature name (or pick an existing one)."}); return; }
+			place(target);
 			doClose(true);
 		};
 		modalInner.querySelector(".charsheet__interdict-confirm")?.addEventListener("click", confirm);
@@ -3214,22 +3296,35 @@ class CharacterSheetCombat {
 					<span class="ve-muted ve-small" title="Range to touch/affect a creature">Range: <strong>${range}</strong></span>
 				</div>
 				<div class="charsheet__conduit-controls ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">
-					<label class="ve-small mb-0">Dice
-						<input type="number" class="form-control input-sm charsheet__conduit-count" min="1" max="${Math.max(1, avail)}" value="1" style="width: 4rem;" ${avail > 0 ? "" : "disabled"}>
+					<label class="charsheet__conduit-field">
+						<span class="charsheet__conduit-field-label">Dice</span>
+						<input type="number" class="form-control input-sm charsheet__conduit-count" min="1" max="${Math.max(1, avail)}" value="1" ${avail > 0 ? "" : "disabled"}>
 					</label>
-					<select class="form-control input-sm charsheet__conduit-effect" style="width: 9rem;" title="Choose the conduit effect">
-						<option value="invigorate">Invigorate (heal ally)</option>
-						<option value="devour">Devour (drain enemy)</option>
-					</select>
-					<select class="form-control input-sm charsheet__conduit-save" style="width: 9rem;" title="Target's Constitution save result">
-						<option value="fail">Save failed</option>
-						<option value="success">Save succeeded</option>
-					</select>
+					<label class="charsheet__conduit-field">
+						<span class="charsheet__conduit-field-label">Effect</span>
+						<select class="form-control input-sm charsheet__conduit-effect" title="Choose the conduit effect">
+							<option value="invigorate">Invigorate (heal ally)</option>
+							<option value="devour">Devour (drain enemy)</option>
+						</select>
+					</label>
+					<label class="charsheet__conduit-field">
+						<span class="charsheet__conduit-field-label">Target save</span>
+						<select class="form-control input-sm charsheet__conduit-save" title="Target's Constitution save result">
+							<option value="fail">Save failed</option>
+							<option value="success">Save succeeded</option>
+						</select>
+					</label>
 					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__conduit-spend" type="button" ${avail > 0 ? "" : "disabled"} title="Spend conduit dice and resolve the effect">Spend</button>
 				</div>
-				<div class="ve-muted ve-small">
-					<strong>Invigorate:</strong> target heals (fail: full, success: half); you take that-roll necrotic (unpreventable; 0 HP → unconscious &amp; stabilized).
-					<strong>Devour:</strong> target takes necrotic (fail: full, success: half); you heal the damage dealt${improved ? "; on a failed save the target gains 1 level of exhaustion" : ""}.
+				<div class="charsheet__conduit-notes">
+					<div class="charsheet__conduit-note">
+						<span class="charsheet__conduit-note-key charsheet__conduit-note-key--heal">Invigorate</span>
+						<span>target heals (fail: full, success: half); you take that-roll necrotic (unpreventable; 0 HP &rarr; unconscious &amp; stabilized).</span>
+					</div>
+					<div class="charsheet__conduit-note">
+						<span class="charsheet__conduit-note-key charsheet__conduit-note-key--drain">Devour</span>
+						<span>target takes necrotic (fail: full, success: half); you heal the damage dealt${improved ? "; on a failed save the target gains 1 level of exhaustion" : ""}.</span>
+					</div>
 				</div>
 			</div>`;
 
@@ -3342,8 +3437,9 @@ class CharacterSheetCombat {
 				<div class="charsheet__mastery-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">
 					<span class="bold mr-1">🗡️ Lies</span>
 					<span class="ve-muted ve-small mr-1">use CHA for attack &amp; damage with</span>
-					<select class="form-control input-sm charsheet__mastery-lies" style="width: 12rem;" title="Choose a melee weapon type (changeable on a long rest)">${opts}</select>
-					<input type="text" class="form-control input-sm charsheet__mastery-lies-custom" placeholder="or type a weapon" value="" style="width: 10rem;" title="Free-text weapon type (overrides the dropdown)">
+					<select class="form-control input-sm charsheet__mastery-lies" title="Choose a melee weapon type (changeable on a long rest)">${opts}</select>
+					<span class="charsheet__mastery-or ve-muted ve-small">or</span>
+					<input type="text" class="form-control input-sm charsheet__mastery-lies-custom" placeholder="type a weapon" value="" title="Free-text weapon type (overrides the dropdown)">
 				</div>`);
 		}
 
@@ -3801,6 +3897,25 @@ class CharacterSheetCombat {
 			// are always included regardless of other heuristics
 			const classificationOverride = CharacterSheetState.FEATURE_CLASSIFICATION_OVERRIDES?.[nameLower];
 			if (classificationOverride === "combat" || classificationOverride === "reaction") return true;
+
+			// (S1) Features the sheet classifies as activatable ABILITIES (Healing Hands,
+			// War God's Blessing, Guided Strike, Forked Tongue, Purge Toxins, …) must ALSO
+			// surface in this generic "Abilities" list. The legacy heuristic below keys off a
+			// fragile hardcoded `combatKeywords` roster plus action-economy phrasing, so genuine
+			// one-shot abilities whose name isn't hardcoded (Purge Toxins, Guided Strike, Forked
+			// Tongue) were silently dropped. Key off the REAL classification instead: an
+			// "ability" override, or a resolved limited-use / interdict-boon activatable entry
+			// (_getActivatableAbilityForFeature). The panel-hidden (Interdiction-managed /
+			// redundant-improvement) and Fighter-owned exclusions already ran above, and combat
+			// methods / metamagic are re-checked here, so this surfaces abilities by genuine
+			// classification without flooding the list with passive features.
+			const isClassifiedAbility = classificationOverride === "ability"
+				|| !!this._page?._getActivatableAbilityForFeature?.(f);
+			if (isClassifiedAbility) {
+				if (CharacterSheetClassUtils.isCombatMethod(f)) return false;
+				if (f.optionalFeatureTypes?.includes("MM")) return false;
+				return true;
+			}
 
 			// Get description - render entries as fallback if description missing
 			let desc = f.description;

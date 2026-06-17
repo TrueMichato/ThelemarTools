@@ -13,6 +13,14 @@ class CharacterSheetClassUtils {
 	// ==========================================
 
 	/**
+	 * (S2 #15) Canonical name of the single shared resource pool that every Hochling
+	 * "Divine Manifestation" Channel-Divinity option draws on. Kept here so the option
+	 * synthesis (class-utils) and the pool/migration logic (state) agree on one string.
+	 * @type {string}
+	 */
+	static RACE_MANIFESTATION_POOL_NAME = "Divine Manifestation";
+
+	/**
 	 * Check if a source uses 2024 (D&D One) edition rules.
 	 * TGTT homebrew classes replace XPHB and follow the same 2024 mechanics.
 	 * @param {string} source - The source abbreviation (e.g. "XPHB", "TGTT", "PHB")
@@ -2863,29 +2871,37 @@ class CharacterSheetClassUtils {
 			});
 		}
 
-		// Expand refSubclassFeature entries from wrapper features (e.g., "Thief" feature that references "Fast Hands")
-		// Many subclasses have a wrapper feature at the subclass level that contains references to actual sub-features
+		// Expand refSubclassFeature entries from wrapper features (e.g., "Thief" feature that references "Fast Hands").
+		// Many subclasses have a wrapper feature at the subclass level that contains references to actual
+		// sub-features. Some wrappers nest references SEVERAL layers deep — e.g. the Hellspeaker subclass
+		// wrapper references "Invoke Hell", whose OWN entries reference the actual options ("Honey-Sweet
+		// Blades", "Turncoat"). We therefore recurse into each referenced feature's entries so deeply-nested
+		// options surface, and we keep recursing even when the referenced wrapper itself is skipped (e.g. its
+		// name collides with the class-level "Invoke Hell" feature that is already present — in which case we
+		// still want its child options, just not a duplicate passive wrapper).
 		/** @type {*[]} */ const expandedFeatures = [];
-		for (const feature of features) {
-			if (!(/** @type {*} */ (feature)).isSubclassFeature || !(/** @type {*} */ (feature)).entries) continue;
+		/** @type {Set<string>} */ const expandVisited = new Set();
 
-			// Look for refSubclassFeature entries in the feature's entries
-			const searchEntries = (/** @type {*} */ entries) => {
-				if (!Array.isArray(entries)) return;
-				for (/** @type {*} */ const entry of entries) {
-					if (/** @type {*} */ entry?.type === "refSubclassFeature" && entry.subclassFeature) {
-						// Parse "FeatureName|ClassName|ClassSource|SubclassShortName|SubclassSource|Level"
-						const parts = entry.subclassFeature.split("|");
-						const refFeatureName = parts[0];
-						const refClassName = parts[1] || classData.name;
-						const refClassSource = parts[2] || classData.source;
-						const refSubclassShortName = parts[3] || subclass?.shortName;
-						const refSubclassSource = parts[4] || subclass?.source || classData.source;
-						const refLevelParsed = CharacterSheetClassUtils.getSubclassFeatureRefLevel(parts);
-						const refLevel = Number.isNaN(refLevelParsed) ? level : refLevelParsed;
+		// Look for refSubclassFeature entries in a set of entries, recursing into both nested entries and the
+		// entries of any referenced feature so multi-level wrapper chains are fully resolved.
+		const searchEntriesForRefs = (/** @type {*} */ entries) => {
+			if (!Array.isArray(entries)) return;
+			for (/** @type {*} */ const entry of entries) {
+				if (/** @type {*} */ entry?.type === "refSubclassFeature" && entry.subclassFeature) {
+					// Parse "FeatureName|ClassName|ClassSource|SubclassShortName|SubclassSource|Level"
+					const parts = entry.subclassFeature.split("|");
+					const refFeatureName = parts[0];
+					const refClassName = parts[1] || classData.name;
+					const refClassSource = parts[2] || classData.source;
+					const refSubclassShortName = parts[3] || subclass?.shortName;
+					const refSubclassSource = parts[4] || subclass?.source || classData.source;
+					const refLevelParsed = CharacterSheetClassUtils.getSubclassFeatureRefLevel(parts);
+					const refLevel = Number.isNaN(refLevelParsed) ? level : refLevelParsed;
 
-						// Only expand features at current level
-						if (refLevel !== level) continue;
+					// Only expand features at current level, and guard against re-processing / cycles.
+					const visitKey = `${refFeatureName}|${refLevel}`;
+					if (refLevel === level && !expandVisited.has(visitKey)) {
+						expandVisited.add(visitKey);
 
 						// Look up the referenced subclass feature
 						const refFeature = CharacterSheetClassUtils.getSubclassFeatureData(
@@ -2897,32 +2913,44 @@ class CharacterSheetClassUtils {
 							refLevel,
 						);
 
-						if (refFeature && !features.some((/** @type {*} */ f) => f.name === refFeatureName && f.level === refLevel)) {
-							expandedFeatures.push({
-								name: refFeatureName,
-								className: refClassName,
-								classSource: refClassSource,
-								subclassName: subclass?.name,
-								subclassShortName: refSubclassShortName,
-								subclassSource: refSubclassSource,
-								source: refFeature.source || refSubclassSource,
-								level: refLevel,
-								entries: refFeature.entries,
-								isSubclassFeature: true,
-								// (R20 #17) Preserve activation markers so the option classifies/links
-								// correctly downstream (e.g. Invoke Hell options carry
-								// `consumes: {name: "Invoke Hell"}` and draw on the shared short-rest pool).
-								...(refFeature.consumes ? {consumes: refFeature.consumes} : {}),
-								...(refFeature.uses ? {uses: refFeature.uses} : {}),
-							});
+						if (refFeature) {
+							const alreadyPresent = features.some((/** @type {*} */ f) => f.name === refFeatureName && f.level === refLevel)
+								|| expandedFeatures.some((/** @type {*} */ f) => f.name === refFeatureName && f.level === refLevel);
+							if (!alreadyPresent) {
+								expandedFeatures.push({
+									name: refFeatureName,
+									className: refClassName,
+									classSource: refClassSource,
+									subclassName: subclass?.name,
+									subclassShortName: refSubclassShortName,
+									subclassSource: refSubclassSource,
+									source: refFeature.source || refSubclassSource,
+									level: refLevel,
+									entries: refFeature.entries,
+									isSubclassFeature: true,
+									// (R20 #17) Preserve activation markers so the option classifies/links
+									// correctly downstream (e.g. Invoke Hell options carry
+									// `consumes: {name: "Invoke Hell"}` and draw on the shared short-rest pool).
+									...(refFeature.consumes ? {consumes: refFeature.consumes} : {}),
+									...(refFeature.uses ? {uses: refFeature.uses} : {}),
+								});
+							}
+
+							// Recurse into the referenced feature's OWN entries so nested options
+							// (refSubclassFeature chains) are surfaced even when this wrapper was skipped
+							// as a duplicate (e.g. subclass "Invoke Hell" colliding with class "Invoke Hell").
+							searchEntriesForRefs(refFeature.entries);
 						}
 					}
-					// Recurse into nested entries
-					if (entry?.entries) searchEntries(entry.entries);
 				}
-			};
+				// Recurse into nested entries
+				if (entry?.entries) searchEntriesForRefs(entry.entries);
+			}
+		};
 
-			searchEntries(feature.entries);
+		for (const feature of features) {
+			if (!(/** @type {*} */ (feature)).isSubclassFeature || !(/** @type {*} */ (feature)).entries) continue;
+			searchEntriesForRefs(feature.entries);
 		}
 
 		// Add expanded features
@@ -5500,7 +5528,12 @@ class CharacterSheetClassUtils {
 					featureType: "Species",
 					level: cd.level,
 					_raceManifestation: id,
-					uses: {max: 1, recharge: "short"},
+					// (S2 #15) Every Channel-Divinity manifestation option draws on the SAME
+					// single "Divine Manifestation" use (1/short rest per the Hochling trait),
+					// so they carry a shared `consumes` pool rather than minting one pool each.
+					// `_isResourceSystemFeature` (consumes.name !== "Stamina") suppresses the
+					// per-feature pool; `ensureDivineManifestationPool()` mints the shared one.
+					consumes: {name: CharacterSheetClassUtils.RACE_MANIFESTATION_POOL_NAME, amount: 1},
 					description: cd.description,
 				};
 

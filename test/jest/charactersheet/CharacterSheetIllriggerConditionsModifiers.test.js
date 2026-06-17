@@ -145,6 +145,74 @@ describe("#16 Thelemar characters resolve _tgtt condition variants", () => {
 		state.addCondition({name: "Stunned", source: "Feature"});
 		expect(state._data.concentrating).toBeFalsy();
 	});
+
+	// -------------------------------------------------------------------------
+	// #13 — Missing _tgtt variants for conditions Illrigger abilities reference.
+	// Veil of Lies (self-Invisible) and Telekinetic Seal (target Prone) must
+	// resolve to the TGTT Invisible / Prone, not the generic 2014/2024 ones.
+	// -------------------------------------------------------------------------
+	it("Veil of Lies' Invisible resolves to the TGTT variant (Hidden-to-sight), differing from generic", () => {
+		const tgtt = CharacterSheetState.getConditionEffects("invisible", "TGTT");
+		const generic = CharacterSheetState.getConditionEffects("invisible");
+
+		expect(tgtt).toBeTruthy();
+		expect(tgtt.source).toBe("TGTT");
+		expect(tgtt.name).toBe("Invisible");
+		// VALUES differ from generic: the TGTT variant adds the "Hidden to sight" note.
+		expect(tgtt.effects.length).toBeGreaterThan(generic.effects.length);
+		const tgttNote = tgtt.effects.find(e => e.type === "note" && /hidden/i.test(e.value || ""));
+		expect(tgttNote).toBeTruthy();
+		// Combat benefit preserved (advantage to attack, disadvantage to attacks against).
+		expect(tgtt.effects.some(e => e.type === "advantage" && e.target === "attack")).toBe(true);
+		expect(tgtt.effects.some(e => e.type === "disadvantage" && e.target === "attacksAgainst")).toBe(true);
+	});
+
+	it("a Thelemar character self-applying Invisible (Veil of Lies) gets the TGTT effects, not generic", () => {
+		const state = makeThelemarCharacter();
+		// Veil of Lies adds Invisible to SELF with the feature name as source.
+		state.addCondition({name: "Invisible", source: "Veil of Lies"});
+
+		const active = state._data.activeStates.find(s => s.isCondition && s.conditionName.toLowerCase() === "invisible");
+		expect(active).toBeTruthy();
+		// TGTT-only marker: the "Hidden to sight" note (generic Invisible has no notes).
+		const hasHiddenNote = active.customEffects.some(e => e.type === "note" && /hidden/i.test(e.value || ""));
+		expect(hasHiddenNote).toBe(true);
+
+		const generic = CharacterSheetState.getConditionEffects("invisible");
+		expect(active.customEffects.length).toBeGreaterThan(generic.effects.length);
+	});
+
+	it("non-Thelemar characters self-applying Invisible keep the generic variant (no note)", () => {
+		const state = makeBaseCharacter();
+		state.addCondition({name: "Invisible", source: "Some Spell"});
+
+		const active = state._data.activeStates.find(s => s.isCondition && s.conditionName.toLowerCase() === "invisible");
+		expect(active).toBeTruthy();
+		expect(active.customEffects.some(e => e.type === "note")).toBe(false);
+	});
+
+	it("Telekinetic Seal's Prone resolves to the TGTT variant (concentration disruption note)", () => {
+		const tgtt = CharacterSheetState.getConditionEffects("prone", "TGTT");
+		const generic = CharacterSheetState.getConditionEffects("prone");
+
+		expect(tgtt).toBeTruthy();
+		expect(tgtt.source).toBe("TGTT");
+		expect(tgtt.name).toBe("Prone");
+		// Same attack profile as generic Prone …
+		expect(tgtt.effects.some(e => e.type === "disadvantage" && e.target === "attack")).toBe(true);
+		expect(tgtt.effects.some(e => e.type === "advantage" && e.target === "meleeAttacksAgainst")).toBe(true);
+		expect(tgtt.effects.some(e => e.type === "disadvantage" && e.target === "rangedAttacksAgainst")).toBe(true);
+		// … plus the TGTT-only Concentration Disruption note → strictly more effects.
+		expect(tgtt.effects.length).toBeGreaterThan(generic.effects.length);
+		expect(tgtt.effects.some(e => e.type === "note" && /concentration/i.test(e.value || ""))).toBe(true);
+	});
+
+	it("Exhaustion is deliberately left to the level-penalty system (no _tgtt effects to double-count)", () => {
+		// No exhaustion_tgtt: the dedicated exhaustion-level penalty (subtracted at roll
+		// time) owns the d20 / spell-save-DC math; encoding it here would double-count.
+		expect(CharacterSheetState.CONDITION_EFFECTS.exhaustion_tgtt).toBeUndefined();
+		expect(CharacterSheetState.getConditionEffects("exhaustion", "TGTT").effects).toEqual([]);
+	});
 });
 
 // =============================================================================
@@ -232,7 +300,7 @@ describe("#11 Intransigent ally-count chooser drives the feature summary", () =>
 		const summaryFn = CharacterSheetState.ILLRIGGER_FEATURE_SUMMARIES.intransigent;
 
 		const self0 = {getIntransigentAllyCount: () => 0};
-		expect(summaryFn(calcs, self0)).toBe("You (and chosen creatures within 10 ft) are immune to charmed (while conscious)");
+		expect(summaryFn(calcs, self0)).toBe("You are immune to charmed (while conscious); may extend to creatures of your choice within 10 ft");
 
 		const self1 = {getIntransigentAllyCount: () => 1};
 		expect(summaryFn(calcs, self1)).toBe("You + 1 chosen creature within 10 ft are immune to charmed (while conscious)");

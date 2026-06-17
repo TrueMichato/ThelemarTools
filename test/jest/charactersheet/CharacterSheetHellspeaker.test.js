@@ -65,6 +65,53 @@ describe("Illrigger Hellspeaker (Moloch)", () => {
 	});
 
 	// ----------------------------------------------------------------------
+	// Invoke Hell uses (S4 / bug #16) — source-aware short-rest pool size
+	// ----------------------------------------------------------------------
+	describe("Invoke Hell uses", () => {
+		const addTgttIllrigger = (st, level, {cha = 16} = {}) => {
+			st._data.abilities.cha = cha;
+			st.addClass({
+				name: "Illrigger",
+				source: "TGTT-IllR",
+				level,
+				subclass: {name: "Hellspeaker", shortName: "Hellspeaker", source: "TGTT-IllR"},
+			});
+			st.applyClassFeatureEffects();
+		};
+
+		it("IllriggerRevised grants a single Invoke Hell use (use once, then rest)", () => {
+			addHellspeaker(state, 15, {cha: 16});
+			const calcs = state.getFeatureCalculations();
+			expect(calcs.hasInvokeHell).toBe(true);
+			expect(calcs.invokeHellUses).toBe(1);
+		});
+
+		it("TGTT Illrigger grants two Invoke Hell uses at L3-10", () => {
+			addTgttIllrigger(state, 3);
+			expect(state.getFeatureCalculations().invokeHellUses).toBe(2);
+		});
+
+		it("TGTT Illrigger gains a third Invoke Hell use at 11th level", () => {
+			addTgttIllrigger(state, 11);
+			expect(state.getFeatureCalculations().invokeHellUses).toBe(3);
+		});
+
+		it("TGTT Illrigger has three Invoke Hell uses at L15 (vaa)", () => {
+			addTgttIllrigger(state, 15);
+			expect(state.getFeatureCalculations().invokeHellUses).toBe(3);
+		});
+
+		it("ensureInvokeHellPool sizes the shared short-rest pool to the calc value", () => {
+			addTgttIllrigger(state, 15);
+			state.ensureInvokeHellPool();
+			const pool = state.getResources().find(r => r.name === "Invoke Hell");
+			expect(pool).toBeTruthy();
+			expect(pool.max).toBe(3);
+			expect(pool.recharge).toBe("short");
+		});
+	});
+
+	// ----------------------------------------------------------------------
 	// Curated limited-use pools (_getCuratedFeatureUses)
 	// ----------------------------------------------------------------------
 	describe("Curated limited-use pools", () => {

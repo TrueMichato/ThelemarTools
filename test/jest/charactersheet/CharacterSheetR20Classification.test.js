@@ -225,8 +225,9 @@ describe("R20 — race-manifestation children classify generically (#5/#6, S2 co
 		expect(info).not.toBeNull();
 		expect(info.isToggle).toBe(false);
 		expect(info.interactionMode).toBe("limited");
-		// Has its own 1/short pool.
-		expect(info.resourceName).toBe("Guided Strike");
+		// (S2 #15) Draws on the SHARED "Divine Manifestation" pool (consumes), not a
+		// per-option pool — using Guided Strike or War God's Blessing spends the same use.
+		expect(info.resourceName).toBe("Divine Manifestation");
 	});
 
 	test("a NEW (future S2) manifestation option classifies as an ABILITY with no extra work", () => {
