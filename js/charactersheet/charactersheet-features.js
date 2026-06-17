@@ -23,6 +23,20 @@ class CharacterSheetFeatures {
 	}
 
 	/**
+	 * (#7) For a Thelemar (TGTT) character, promote bare `{@condition X}` tags in a
+	 * feature's entries to their Thelemar variants before rendering, so the
+	 * description links/hovers the Thelemar condition rather than the 2014/2024 one.
+	 * Non-mutating and a no-op for non-Thelemar characters / conditions without a
+	 * Thelemar variant.
+	 * @param {*} entries
+	 * @returns {*}
+	 */
+	_thelemarizeEntries (entries) {
+		if (!this._state?._usesThelemarConditions?.()) return entries;
+		return CharacterSheetState.thelemarizeConditionTags(entries);
+	}
+
+	/**
 	 * Look up a class feature's description from loaded data
 	 */
 	_getClassFeatureDescription (feature) {
@@ -36,7 +50,7 @@ class CharacterSheetFeatures {
 		);
 
 		if (match?.entries) {
-			return Renderer.get().render({entries: match.entries});
+			return Renderer.get().render({entries: this._thelemarizeEntries?.(match.entries) ?? match.entries});
 		}
 		return null;
 	}
@@ -56,7 +70,7 @@ class CharacterSheetFeatures {
 		);
 
 		if (match?.entries) {
-			return Renderer.get().render({entries: match.entries});
+			return Renderer.get().render({entries: this._thelemarizeEntries?.(match.entries) ?? match.entries});
 		}
 		return null;
 	}
@@ -74,7 +88,7 @@ class CharacterSheetFeatures {
 		);
 
 		if (match?.entries) {
-			return Renderer.get().render({type: "entries", entries: match.entries});
+			return Renderer.get().render({type: "entries", entries: this._thelemarizeEntries?.(match.entries) ?? match.entries});
 		}
 		return null;
 	}
@@ -98,7 +112,7 @@ class CharacterSheetFeatures {
 		// `entries` but no rendered `description`; render them so the body isn't blank.
 		if (CharacterSheetClassUtils.isCombatMethod(feature) && Array.isArray(feature.entries) && feature.entries.length) {
 			try {
-				return Renderer.get().render({type: "entries", entries: feature.entries});
+				return Renderer.get().render({type: "entries", entries: this._thelemarizeEntries?.(feature.entries) ?? feature.entries});
 			} catch (e) {
 				// eslint-disable-next-line no-console
 				console.error("[CharSheet Features] Error rendering combat method entries:", e);

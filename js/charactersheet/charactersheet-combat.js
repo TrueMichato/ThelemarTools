@@ -4582,7 +4582,7 @@ class CharacterSheetCombat {
 				const added = this._state.addCondition?.({
 					name: cond.name,
 					source: feature.name,
-				});
+				}, {resolveThelemarVariant: true});
 				if (added) {
 					const durationText = cond.duration ? ` (${cond.duration})` : "";
 					JqueryUtil.doToast({
