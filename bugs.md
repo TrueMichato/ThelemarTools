@@ -3,7 +3,56 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 24 (Illrigger/Hochling — real character `vaa` = Hochling Illrigger 15 Hellspeaker) — IN PROGRESS
+
+**8 of these are REPEATS of Round 23** that recurred because R23 fixes were **false greens**:
+they verified state/logic flags (`isToggle:false`, `activatable:true`, "function exists") instead
+of the **rendered, interactive UI the user actually touches**. Orchestrator re-diagnosed every
+repeat in the live DOM (both brews loaded, real `vaa.json`) and found the true root causes below.
+**Mandatory this round: every fix is verified by driving the real rendered UI** — assert the actual
+`.charsheet__combat-action-item` Abilities list, trigger real hover windows, click the Use button,
+inspect the real active-condition list — never state flags or function existence.
+
+Single-owner decomposition (7 focused sessions, grouped only by shared root cause/subsystem):
+
+**S1 — Abilities surfacing & hover** (owns `renderCombatActions` in charactersheet-combat.js + hover)
+* #1 — Purge Toxins must appear in the Abilities list as an ability. ROOT: `renderCombatActions`
+  only honors `FEATURE_CLASSIFICATION_OVERRIDES === "combat"|"reaction"`; it ignores `"ability"`
+  and `_getActivatableAbilityForFeature`, so ability-classified features never enter the list.
+* #2 — Healing Hands + War God's Blessing must appear hoverable in Abilities (currently Healing
+  Hands only surfaces via a hardcoded `combatKeywords` entry — fragile). Unify on the ability
+  classification so all Hochling/ability features surface with a working inline-entries hover.
+* #4 — Forked Tongue must appear as an ability (same surfacing gap).
+* #3 (surfacing half) — Guided Strike must appear in the Abilities list.
+
+**S2 — Guided Strike interaction + Divine Manifestation** (owns the use-handler + resource model)
+* #3 (interaction half) — Using Guided Strike must prompt which weapon attack to roll (one-shot
+  +10, consume only on a real roll); right-clicking a weapon attack must offer it. Verify by real UI.
+* #15 — Guided Strike and War God's Blessing must share one resource called **Divine Manifestation**.
+
+**S3 — Interdiction boons & lifecycle** (owns the boon panel + activations + roll integration)
+* #9 — Red Cant: when you roll a relevant roll lower than 10, offer to expend it to turn the roll
+  into a 10 (needs a hook into the roll-result pipeline, not just a passive seal-spend).
+* #10 — Slippery Ploy must actually place a seal (R23 left it a no-placement seal-spend).
+* #12 — Hellsight: ending it must remove the truesight. State toggle works (0→60→0); the UI end
+  path never calls `deactivateState("hellsight")` / no end control is rendered.
+
+**S4 — Invoke Hell options & uses**
+* #16 — Hellspeaker's Invoke Hell options must be written as features, given as actions, and
+  actually implemented on the sheet; and Invoke Hell must have **2 uses**, not 1.
+
+**S5 — Thelemar condition variants**
+* #13 — Many Illrigger abilities reference 2014/2024 conditions instead of Thelemar ones (e.g.
+  Veil of Lies → 2024 invisible). ROOT: `CONDITION_EFFECTS` is missing `_tgtt` variants for
+  invisible/undetected/dazed/choked/prone/exhaustion (which DO exist in the TGTT brew), so the
+  resolver falls back to generic. Add the missing variants and audit all Illrigger condition refs.
+
+**S6 — Intransigent signifier**
+* #11 — Intransigent grants charmed immunity; the feature must clearly signify it can also extend
+  that immunity to chosen creatures.
+
+**S7 — Modal UX upgrades**
+* #14 — Infernal Conduit, Interdiction, and Combat Masteries modals need UI/UX upgrades.
 
 ## Closed Bugs
 
