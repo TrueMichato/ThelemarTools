@@ -150,5 +150,63 @@ describe("Builder race/subrace language picker — search + source filter + pill
 		test("legacy `.charsheet__builder-lang-checkbox` is gone", () => {
 			expect(CSS_SRC).not.toMatch(/\.charsheet__builder-lang-checkbox\b/);
 		});
+
+		test("Bug #9: pill checkboxes get a fixed, non-shrinking size (uniform across labels)", () => {
+			// The repro (Deft Explorer) showed checkboxes of differing sizes because
+			// the <input> was an unconstrained flex child. Guard the explicit sizing.
+			const ruleMatch = CSS_SRC.match(
+				/\.charsheet__builder-lang-pill\s*>\s*input\[type="checkbox"\]\s*\{[\s\S]*?\}/,
+			);
+			expect(ruleMatch).not.toBeNull();
+			const rule = ruleMatch[0];
+			expect(rule).toMatch(/flex:\s*0\s+0\s+auto/);
+			expect(rule).toMatch(/width:\s*\d/);
+			expect(rule).toMatch(/height:\s*\d/);
+		});
+
+		test("Bug #10: hoverable language names get a dotted-underline affordance", () => {
+			expect(CSS_SRC).toMatch(/\.charsheet__builder-lang-pill-name\[data-vet-page\]/);
+			expect(CSS_SRC).toMatch(/\.charsheet__language-card-name\[data-vet-page\]/);
+		});
+	});
+
+	describe("Bug #10: language entries are hoverable (data-vet-* @language wiring)", () => {
+		const PAGE_SRC = read("js/charactersheet/charactersheet.js");
+
+		test("page exposes a `getLanguageHoverAttributes` helper that targets languages.html", () => {
+			const startIdx = PAGE_SRC.indexOf("getLanguageHoverAttributes (");
+			expect(startIdx).toBeGreaterThan(-1);
+			const body = PAGE_SRC.slice(startIdx, startIdx + 1200);
+			// Hover-only: mouseover/move/leave + data-vet attrs, NO onclick/href so the
+			// surrounding selection click (label toggle / card select) is never hijacked.
+			expect(body).toMatch(/onmouseover="Renderer\.hover\.pHandleLinkMouseOver/);
+			expect(body).toMatch(/onmousemove="Renderer\.hover\.handleLinkMouseMove/);
+			expect(body).toMatch(/onmouseleave="Renderer\.hover\.handleLinkMouseLeave/);
+			expect(body).toMatch(/data-vet-page="\$\{UrlUtil\.PG_LANGUAGES/);
+			expect(body).not.toMatch(/onclick=/);
+			expect(body).not.toMatch(/href=/);
+		});
+
+		test("`getLanguageHoverAttributes` resolves a source via `_resolveLanguageSource`", () => {
+			expect(PAGE_SRC).toMatch(/_resolveLanguageSource\s*\(name\)\s*\{/);
+			const body = PAGE_SRC.slice(PAGE_SRC.indexOf("getLanguageHoverAttributes ("), PAGE_SRC.indexOf("getLanguageHoverAttributes (") + 1200);
+			expect(body).toMatch(/this\._resolveLanguageSource\(name\)/);
+		});
+
+		test("`_renderLanguageCheckboxGroup` pills wire the name span to the hover helper", () => {
+			const helperMatch = BUILDER_SRC.match(
+				/_renderLanguageCheckboxGroup[\s\S]*?\n\t\}\n/,
+			);
+			const body = helperMatch[0];
+			expect(body).toMatch(/getLanguageHoverAttributes/);
+			expect(body).toMatch(/charsheet__builder-lang-pill-name"\s*\$\{hoverAttrs\}/);
+		});
+
+		test("modal language picker cards wire the name span to the hover helper", () => {
+			const startIdx = PAGE_SRC.indexOf("async showLanguagePicker (");
+			expect(startIdx).toBeGreaterThan(-1);
+			const body = PAGE_SRC.slice(startIdx, startIdx + 8000);
+			expect(body).toMatch(/charsheet__language-card-name"\s*\$\{this\.getLanguageHoverAttributes\(lang\.name\)\}/);
+		});
 	});
 });

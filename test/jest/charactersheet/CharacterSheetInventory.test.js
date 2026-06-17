@@ -460,4 +460,104 @@ describe("Inventory Management", () => {
 			expect(results).toHaveLength(1);
 		});
 	});
+
+	// ==========================================================================
+	// Modifier-derived item charges (charges-per-day = ability modifier)
+	// ==========================================================================
+	describe("Modifier-derived Item Charges", () => {
+		const addChargeItem = (ability) => {
+			const initial = Math.max(1, state.getAbilityMod(ability));
+			state.addItem({
+				name: "Wand of Wisdom",
+				source: "HB",
+				quantity: 1,
+				charges: initial,
+				chargesCurrent: initial,
+				chargesMaxMode: "abilityMod",
+				chargesMaxAbility: ability,
+				recharge: "restLong",
+				_isCustom: true,
+			});
+			return state.getItems().find(i => i.name === "Wand of Wisdom").id;
+		};
+
+		it("syncDerivedResourceMaxes sizes charges from the ability modifier", () => {
+			state.setAbilityBase("wis", 18); // +4
+			const itemId = addChargeItem("wis");
+			state.syncDerivedResourceMaxes();
+			const item = state.getItems().find(i => i.id === itemId);
+			expect(item.charges).toBe(4);
+			expect(item.chargesCurrent).toBe(4);
+		});
+
+		it("charges follow ability-score changes LIVE and clamp current", () => {
+			state.setAbilityBase("wis", 18); // +4
+			const itemId = addChargeItem("wis");
+			state.syncDerivedResourceMaxes();
+			expect(state.getItems().find(i => i.id === itemId).charges).toBe(4);
+
+			// Raise WIS to 20 (+5)
+			state.setAbilityBase("wis", 20);
+			state.syncDerivedResourceMaxes();
+			expect(state.getItems().find(i => i.id === itemId).charges).toBe(5);
+
+			// Drop WIS to 12 (+1) — current clamps down
+			state.setAbilityBase("wis", 12);
+			state.syncDerivedResourceMaxes();
+			const item = state.getItems().find(i => i.id === itemId);
+			expect(item.charges).toBe(1);
+			expect(item.chargesCurrent).toBe(1);
+		});
+
+		it("floors the modifier-derived charge max at 1", () => {
+			state.setAbilityBase("cha", 8); // -1
+			state.addItem({
+				name: "Weak Wand",
+				source: "HB",
+				quantity: 1,
+				charges: 1,
+				chargesCurrent: 1,
+				chargesMaxMode: "abilityMod",
+				chargesMaxAbility: "cha",
+				_isCustom: true,
+			});
+			state.syncDerivedResourceMaxes();
+			const item = state.getItems().find(i => i.name === "Weak Wand");
+			expect(item.charges).toBe(1);
+		});
+
+		it("persists across toJson / loadFromJson and stays live", () => {
+			state.setAbilityBase("wis", 16); // +3
+			addChargeItem("wis");
+			state.syncDerivedResourceMaxes();
+
+			const json = state.toJson();
+			const restored = new CharacterSheetState();
+			restored.loadFromJson(json);
+
+			const item = restored.getItems().find(i => i.name === "Wand of Wisdom");
+			expect(item.chargesMaxMode).toBe("abilityMod");
+			expect(item.chargesMaxAbility).toBe("wis");
+			expect(item.charges).toBe(3);
+
+			restored.setAbilityBase("wis", 20); // +5
+			restored.syncDerivedResourceMaxes();
+			expect(restored.getItems().find(i => i.name === "Wand of Wisdom").charges).toBe(5);
+		});
+
+		it("leaves fixed-charge items untouched (migration-safe)", () => {
+			state.addItem({
+				name: "Fixed Wand",
+				source: "HB",
+				quantity: 1,
+				charges: 7,
+				chargesCurrent: 7,
+				_isCustom: true,
+			});
+			state.setAbilityBase("wis", 20);
+			state.syncDerivedResourceMaxes();
+			const item = state.getItems().find(i => i.name === "Fixed Wand");
+			expect(item.charges).toBe(7);
+		});
+	});
 });

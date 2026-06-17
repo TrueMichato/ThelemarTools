@@ -224,6 +224,7 @@ class CharacterSheetCustomAbilities {
 	 * Build a card for a single ability
 	 */
 	_buildAbilityCard (ability, category) {
+		const state = this._sheet.getState();
 		const card = document.createElement("div");
 		card.className = `custom-abilities__card ${ability.mode === "toggleable" && ability.isActive ? "custom-abilities__card--active" : ""}`;
 		card.dataset.abilityId = ability.id;
@@ -326,13 +327,14 @@ class CharacterSheetCustomAbilities {
 			});
 			leftControls.appendChild(toggleBtn);
 		} else if (ability.mode === "limited" && ability.uses) {
+			const usesDisplay = state.getCustomAbilityUsesDisplay?.(ability.id) || ability.uses;
 			const usesDiv = document.createElement("div");
 			usesDiv.className = "custom-abilities__uses";
 			usesDiv.innerHTML = `
-				<button class="custom-abilities__use-btn" ${ability.uses.current <= 0 ? "disabled" : ""}>Use</button>
-				<span class="custom-abilities__use-counter">${ability.uses.current}/${ability.uses.max}</span>
-				<span class="custom-abilities__recharge" title="${ability.uses.recharge === "short" ? "Recharges on Short Rest" : "Recharges on Long Rest"}">
-					${ability.uses.recharge === "short" ? "⚡SR" : "🌙LR"}
+				<button class="custom-abilities__use-btn" ${usesDisplay.current <= 0 ? "disabled" : ""}>Use</button>
+				<span class="custom-abilities__use-counter">${usesDisplay.current}/${usesDisplay.max}</span>
+				<span class="custom-abilities__recharge" title="${usesDisplay.recharge === "short" ? "Recharges on Short Rest" : "Recharges on Long Rest"}">
+					${usesDisplay.recharge === "short" ? "⚡SR" : "🌙LR"}
 				</span>
 			`;
 			(/** @type {*} */ (usesDiv.querySelector(".custom-abilities__use-btn"))).addEventListener("click", (/** @type {*} */ e) => {
@@ -1245,8 +1247,26 @@ class CharacterSheetCustomAbilities {
 								</div>
 								<div class="custom-abilities__self-uses-options" style="display: ${!existingAbility?.resourceSource?.type || existingAbility?.resourceSource?.type === "self" ? "flex" : "none"};">
 									<div class="custom-abilities__form-field">
+										<label>Max Uses Type</label>
+										<select class="ve-form-control" name="maxUsesMode">
+											<option value="fixed" ${existingAbility?.uses?.maxMode === "abilityMod" ? "" : "selected"}>Fixed Number</option>
+											<option value="abilityMod" ${existingAbility?.uses?.maxMode === "abilityMod" ? "selected" : ""}>Ability Modifier</option>
+										</select>
+									</div>
+									<div class="custom-abilities__form-field custom-abilities__max-uses-fixed" style="display: ${existingAbility?.uses?.maxMode === "abilityMod" ? "none" : "flex"};">
 										<label>Max Uses</label>
 										<input type="number" class="ve-form-control" name="maxUses" min="1" value="${existingAbility?.uses?.max || 1}">
+									</div>
+									<div class="custom-abilities__form-field custom-abilities__max-uses-ability" style="display: ${existingAbility?.uses?.maxMode === "abilityMod" ? "flex" : "none"};">
+										<label>Ability (min 1)</label>
+										<select class="ve-form-control" name="maxUsesAbility">
+											<option value="str" ${existingAbility?.uses?.maxAbility === "str" ? "selected" : ""}>Strength</option>
+											<option value="dex" ${existingAbility?.uses?.maxAbility === "dex" ? "selected" : ""}>Dexterity</option>
+											<option value="con" ${existingAbility?.uses?.maxAbility === "con" ? "selected" : ""}>Constitution</option>
+											<option value="int" ${existingAbility?.uses?.maxAbility === "int" ? "selected" : ""}>Intelligence</option>
+											<option value="wis" ${!existingAbility?.uses?.maxAbility || existingAbility?.uses?.maxAbility === "wis" ? "selected" : ""}>Wisdom</option>
+											<option value="cha" ${existingAbility?.uses?.maxAbility === "cha" ? "selected" : ""}>Charisma</option>
+										</select>
 									</div>
 									<div class="custom-abilities__form-field">
 										<label>Recharges On</label>
@@ -1749,7 +1769,7 @@ class CharacterSheetCustomAbilities {
 										<li><code>icon</code>: String - Emoji icon (default: "⚡")</li>
 										<li><code>category</code>: "homebrew" | "houserule" | "boon" | "curse" | "campaign" | "magicitem"</li>
 										<li><code>mode</code>: "passive" | "toggleable" | "limited" (default: "passive")</li>
-										<li><code>uses</code>: Object for limited mode - { max: number, recharge: "short" | "long" }</li>
+										<li><code>uses</code>: Object for limited mode - <code>{ max: number, recharge: "short" | "long" }</code> for a fixed number, or <code>{ maxMode: "abilityMod", maxAbility: "str"|"dex"|"con"|"int"|"wis"|"cha", recharge }</code> for uses equal to an ability modifier (min 1, updates live)</li>
 										<li><code>effects</code>: Array of effect objects (see below)</li>
 									</ul>
 
@@ -2223,10 +2243,20 @@ class CharacterSheetCustomAbilities {
 				data.resourceSource = { type: resourceSource };
 
 				if (resourceSource === "self") {
-					data.uses = {
-						max: parseInt((/** @type {*} */ (modal.querySelector("input[name='maxUses']"))).value) || 1,
-						recharge: (/** @type {*} */ (modal.querySelector("select[name='recharge']"))).value || "long",
-					};
+					const maxUsesMode = (/** @type {*} */ (modal.querySelector("select[name='maxUsesMode']")))?.value || "fixed";
+					if (maxUsesMode === "abilityMod") {
+						data.uses = {
+							maxMode: "abilityMod",
+							maxAbility: (/** @type {*} */ (modal.querySelector("select[name='maxUsesAbility']")))?.value || "wis",
+							recharge: (/** @type {*} */ (modal.querySelector("select[name='recharge']"))).value || "long",
+						};
+					} else {
+						data.uses = {
+							maxMode: "fixed",
+							max: parseInt((/** @type {*} */ (modal.querySelector("input[name='maxUses']"))).value) || 1,
+							recharge: (/** @type {*} */ (modal.querySelector("select[name='recharge']"))).value || "long",
+						};
+					}
 				} else if (resourceSource === "linked") {
 					data.resourceSource.resourceId = (/** @type {*} */ (modal.querySelector("select[name='linkedResourceId']"))).value;
 					data.resourceSource.cost = parseInt((/** @type {*} */ (modal.querySelector("input[name='linkedResourceCost']"))).value) || 1;
@@ -2301,8 +2331,17 @@ class CharacterSheetCustomAbilities {
 			}
 
 			if (data.uses) {
+				const isAbilityMod = data.uses.maxMode === "abilityMod";
+				const maxUsesModeSel = /** @type {*} */ (modal.querySelector("select[name='maxUsesMode']"));
+				if (maxUsesModeSel) maxUsesModeSel.value = isAbilityMod ? "abilityMod" : "fixed";
 				(/** @type {*} */ (modal.querySelector("input[name='maxUses']"))).value = data.uses.max || 1;
+				const maxUsesAbilitySel = /** @type {*} */ (modal.querySelector("select[name='maxUsesAbility']"));
+				if (maxUsesAbilitySel) maxUsesAbilitySel.value = data.uses.maxAbility || "wis";
 				(/** @type {*} */ (modal.querySelector("select[name='recharge']"))).value = data.uses.recharge || "long";
+				const fixedField = /** @type {*} */ (modal.querySelector(".custom-abilities__max-uses-fixed"));
+				const abilityField = /** @type {*} */ (modal.querySelector(".custom-abilities__max-uses-ability"));
+				if (fixedField) fixedField.style.display = isAbilityMod ? "none" : "flex";
+				if (abilityField) abilityField.style.display = isAbilityMod ? "flex" : "none";
 			}
 
 			// Restore activation action
@@ -2441,9 +2480,19 @@ class CharacterSheetCustomAbilities {
 			(/** @type {*} */ (modal.querySelector(".custom-abilities__toggleable-resource-details"))).style.display = hasResourceCost ? "flex" : "none";
 		};
 
+		// Update max-uses-type visibility (fixed number vs ability modifier, for self-contained uses)
+		const updateMaxUsesModeVisibility = () => {
+			const maxUsesMode = /** @type {*} */ (modal.querySelector("select[name='maxUsesMode']"))?.value || "fixed";
+			const fixedField = /** @type {*} */ (modal.querySelector(".custom-abilities__max-uses-fixed"));
+			const abilityField = /** @type {*} */ (modal.querySelector(".custom-abilities__max-uses-ability"));
+			if (fixedField) fixedField.style.display = maxUsesMode === "abilityMod" ? "none" : "flex";
+			if (abilityField) abilityField.style.display = maxUsesMode === "abilityMod" ? "flex" : "none";
+		};
+
 		// Event handlers
 		modal.querySelectorAll("input[name='mode']").forEach(r => r.addEventListener("change", updateModeVisibility));
 		(/** @type {*} */ (modal.querySelector("select[name='resourceSource']")))?.addEventListener("change", updateResourceSourceVisibility);
+		(/** @type {*} */ (modal.querySelector("select[name='maxUsesMode']")))?.addEventListener("change", updateMaxUsesModeVisibility);
 		(/** @type {*} */ (modal.querySelector("input[name='hasResourceCost']")))?.addEventListener("change", updateToggleableResourceVisibility);
 
 		// Icon picker
