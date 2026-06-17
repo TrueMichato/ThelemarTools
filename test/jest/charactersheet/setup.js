@@ -183,6 +183,15 @@ globalThis.JqueryUtil = globalThis.JqueryUtil || {
 	doToast: () => {},
 };
 
+// Mock InputUiUtil — destructured at load time by some modules (e.g. charactersheet-upgrades.js).
+// Defaults resolve to "confirm"/first-choice; tests can override individual methods (the captured
+// reference is the same object, so mutating its methods after import takes effect).
+globalThis.InputUiUtil = globalThis.InputUiUtil || {
+	pGetUserBoolean: async () => true,
+	pGetUserEnum: async () => 0,
+	pGetUserString: async () => "",
+};
+
 // Mock Renderer if needed
 globalThis.Renderer = globalThis.Renderer || {
 	get: () => ({
