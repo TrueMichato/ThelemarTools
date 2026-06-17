@@ -2457,68 +2457,14 @@ class CharacterSheetPage {
 	 * Generic beast picker from bestiary
 	 */
 	async _pShowBeastPicker (options = {}) {
-		const {maxCr = 1, canSwim = true, canFly = false, type, origin, creatureTypes = ["beast"], minSize = null, onSelectCreature = null} = options;
+		const {maxCr = 1, canFly = false, canSwim = true, origin, type, onSelectCreature = null} = options;
 
-		// Try to load bestiary data
-		let allCreatures = [];
-		try {
-			const bestiaryUrls = [
-				"data/bestiary/bestiary-mm.json",
-				"data/bestiary/bestiary-xmm.json",
-				"data/bestiary/bestiary-mpmm.json",
-			];
-
-			for (const url of bestiaryUrls) {
-				try {
-					const data = await DataUtil.loadJSON(url);
-					if (data?.monster) allCreatures.push(...data.monster);
-				} catch (e) { /* ignore missing files */ }
-			}
-		} catch (e) {
-			JqueryUtil.doToast({type: "warning", content: "Could not load bestiary data."});
-			return;
-		}
-
-		// Filter creatures
-		const sizeOrder = ["T", "S", "M", "L", "H", "G"];
-		const minSizeIdx = minSize ? sizeOrder.indexOf(minSize) : -1;
-
-		const validCreatures = allCreatures.filter(c => {
-			// Check type - handle both string and object formats
-			let cType = typeof c.type === "string" ? c.type : c.type?.type;
-			// Ensure cType is a string before calling toLowerCase
-			if (typeof cType !== "string") return false;
-			if (!creatureTypes.includes(cType.toLowerCase())) return false;
-
-			// Check CR
-			let cr = c.cr;
-			if (typeof cr === "object") cr = cr.cr;
-			const crNum = Parser.crToNumber(cr);
-			if (crNum > maxCr) return false;
-
-			// Check size
-			const size = Array.isArray(c.size) ? c.size[0] : c.size;
-			if (minSizeIdx >= 0 && sizeOrder.indexOf(size) < minSizeIdx) return false;
-
-			// Check movement restrictions
-			if (!canFly && c.speed?.fly) return false;
-			if (!canSwim && c.speed?.swim && !c.speed?.walk) return false; // Aquatic-only
-
-			return true;
-		});
-
+		const validCreatures = await this._pGetWildShapeBeastCandidates(options);
+		if (validCreatures == null) return; // load failed (toast already shown)
 		if (validCreatures.length === 0) {
 			JqueryUtil.doToast({type: "warning", content: "No valid creatures found for this companion type."});
 			return;
 		}
-
-		// Sort by CR then name
-		validCreatures.sort((a, b) => {
-			const crA = Parser.crToNumber(typeof a.cr === "object" ? a.cr.cr : a.cr);
-			const crB = Parser.crToNumber(typeof b.cr === "object" ? b.cr.cr : b.cr);
-			if (crA !== crB) return crA - crB;
-			return a.name.localeCompare(b.name);
-		});
 
 		// Show picker
 		const choice = await InputUiUtil.pGetUserEnum({
@@ -2552,6 +2498,82 @@ class CharacterSheetPage {
 		this._state.addCompanionFromBestiary?.(selectedCreature, type, origin);
 
 		JqueryUtil.doToast({type: "success", content: `Added ${selectedCreature.name} as ${origin || "companion"}!`});
+	}
+
+	/**
+	 * Load and filter the raw bestiary creatures eligible for a Wild Shape /
+	 * companion picker, applying the CR / size / fly / swim gates and sorting by
+	 * CR then name. Shared by the legacy enum picker (`_pShowBeastPicker`) and the
+	 * rich Known-Forms picker (druid-resources `_pAddKnownForm`) so both surface
+	 * exactly the same candidate set.
+	 *
+	 * @param {object} [options]
+	 * @param {number} [options.maxCr=1] - Inclusive CR cap.
+	 * @param {boolean} [options.canFly=false] - Allow creatures with a fly speed.
+	 * @param {boolean} [options.canSwim=true] - Allow aquatic-only (swim, no walk) creatures.
+	 * @param {string[]} [options.creatureTypes=["beast"]] - Eligible creature types.
+	 * @param {?string} [options.minSize=null] - Minimum size (T<S<M<L<H<G).
+	 * @returns {Promise<Array|null>} Sorted raw creatures, or null if loading failed.
+	 */
+	async _pGetWildShapeBeastCandidates (options = {}) {
+		const {maxCr = 1, canFly = false, canSwim = true, creatureTypes = ["beast"], minSize = null} = options;
+
+		// Try to load bestiary data
+		const allCreatures = [];
+		try {
+			const bestiaryUrls = [
+				"data/bestiary/bestiary-mm.json",
+				"data/bestiary/bestiary-xmm.json",
+				"data/bestiary/bestiary-mpmm.json",
+			];
+
+			for (const url of bestiaryUrls) {
+				try {
+					const data = await DataUtil.loadJSON(url);
+					if (data?.monster) allCreatures.push(...data.monster);
+				} catch (e) { /* ignore missing files */ }
+			}
+		} catch (e) {
+			JqueryUtil.doToast({type: "warning", content: "Could not load bestiary data."});
+			return null;
+		}
+
+		// Filter creatures
+		const sizeOrder = ["T", "S", "M", "L", "H", "G"];
+		const minSizeIdx = minSize ? sizeOrder.indexOf(minSize) : -1;
+
+		const validCreatures = allCreatures.filter(c => {
+			// Check type - handle both string and object formats
+			const cType = typeof c.type === "string" ? c.type : c.type?.type;
+			if (typeof cType !== "string") return false;
+			if (!creatureTypes.includes(cType.toLowerCase())) return false;
+
+			// Check CR
+			let cr = c.cr;
+			if (typeof cr === "object") cr = cr.cr;
+			const crNum = Parser.crToNumber(cr);
+			if (crNum > maxCr) return false;
+
+			// Check size
+			const size = Array.isArray(c.size) ? c.size[0] : c.size;
+			if (minSizeIdx >= 0 && sizeOrder.indexOf(size) < minSizeIdx) return false;
+
+			// Check movement restrictions
+			if (!canFly && c.speed?.fly) return false;
+			if (!canSwim && c.speed?.swim && !c.speed?.walk) return false; // Aquatic-only
+
+			return true;
+		});
+
+		// Sort by CR then name
+		validCreatures.sort((a, b) => {
+			const crA = Parser.crToNumber(typeof a.cr === "object" ? a.cr.cr : a.cr);
+			const crB = Parser.crToNumber(typeof b.cr === "object" ? b.cr.cr : b.cr);
+			if (crA !== crB) return crA - crB;
+			return a.name.localeCompare(b.name);
+		});
+
+		return validCreatures;
 	}
 
 	/**

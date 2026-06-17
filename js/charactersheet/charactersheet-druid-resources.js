@@ -535,9 +535,14 @@ class CharacterSheetDruidResources {
 	}
 
 	/**
-	 * Open the beast picker in select-mode to learn a new Known Form. The picker
-	 * is filtered by the current level-gated CR / Fly limits; the chosen creature
-	 * is routed to `addKnownWildShapeForm` (which re-validates legality state-side).
+	 * Open a rich, spell-picker-style modal to learn a new Known Form. Mirrors the
+	 * spell picker UX: each eligible Beast is shown as a card with a hoverable
+	 * name (full bestiary statblock on hover), its source, and an inline info line
+	 * (CR • type • size • AC • HP • speeds • senses • key traits), with a live
+	 * search box and a per-row Learn button. Candidates come from the shared
+	 * `_pGetWildShapeBeastCandidates` loader (same CR / Fly / swim gates the legacy
+	 * picker used); the chosen raw creature is routed to `addKnownWildShapeForm`
+	 * (which re-validates legality and de-dupes state-side).
 	 * @private
 	 */
 	async _pAddKnownForm () {
@@ -549,27 +554,142 @@ class CharacterSheetDruidResources {
 		}
 		const calc = this._state.getFeatureCalculations?.() || {};
 		const druidLevel = this._state.getClassLevel?.("druid") || 0;
+		const options = {
+			maxCr: calc.wildShapeCr || (druidLevel >= 8 ? 1 : druidLevel >= 4 ? 0.5 : 0.25),
+			canSwim: calc.wildShapeCanSwim ?? true,
+			canFly: calc.wildShapeCanFly ?? (druidLevel >= 8),
+			creatureTypes: ["beast"],
+			origin: "Known Form",
+		};
+
 		this._isTransforming = true;
+		let candidates;
 		try {
-			await this._page._pShowBeastPicker?.({
-				maxCr: calc.wildShapeCr || (druidLevel >= 8 ? 1 : druidLevel >= 4 ? 0.5 : 0.25),
-				canSwim: calc.wildShapeCanSwim ?? true,
-				canFly: calc.wildShapeCanFly ?? (druidLevel >= 8),
-				origin: "Known Form",
-				onSelectCreature: (creature) => {
+			candidates = await this._page._pGetWildShapeBeastCandidates?.(options);
+		} finally {
+			this._isTransforming = false;
+		}
+		if (candidates == null) return; // load failed (toast already shown)
+		if (!candidates.length) {
+			JqueryUtil.doToast({type: "warning", content: "No eligible Beast forms found for your current Wild Shape limits."});
+			return;
+		}
+
+		const maxCr = options.maxCr;
+		const {eleModalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Learn a Wild Shape Form",
+			isWidth100: true,
+			isMinHeight0: true,
+			cbClose: () => this._renderModalBody?.(),
+		});
+
+		const limitBits = [`CR \u2264 ${(typeof maxCr === "object" ? maxCr.cr : maxCr)}`];
+		if (!options.canFly) limitBits.push("no fly");
+		if (!options.canSwim) limitBits.push("no swim-only");
+
+		eleModalInner.appendChild(e_({outer: `
+			<div class="ve-flex-col" style="gap: 10px; min-height: 0;">
+				<div class="ve-flex-v-center ve-flex-h-between" style="gap: 8px;">
+					<div class="ve-small ve-muted charsheet__ws-picker-limits">Eligible Beasts \u2014 ${limitBits.join(", ")}</div>
+					<div class="ve-small ve-muted charsheet__ws-picker-count"></div>
+				</div>
+				<input type="text" class="form-control input-sm charsheet__ws-picker-search" placeholder="Search forms by name\u2026" style="background: var(--cs-bg-elevated, #334155); color: var(--cs-text-primary, #f1f5f9); border: 1px solid var(--cs-border, rgba(255,255,255,.1));">
+				<div class="charsheet__ws-picker-list ve-flex-col ve-overflow-y-auto" style="gap: 6px; max-height: 60vh;"></div>
+			</div>
+		`}));
+
+		const list = eleModalInner.querySelector(".charsheet__ws-picker-list");
+		const countEl = eleModalInner.querySelector(".charsheet__ws-picker-count");
+		const searchEl = eleModalInner.querySelector(".charsheet__ws-picker-search");
+
+		const renderList = (filterText = "") => {
+			const needle = filterText.trim().toLowerCase();
+			const knownNames = new Set((this._state.getKnownWildShapeForms?.() || []).map(f => `${(f.name || "").toLowerCase()}|${(f.source || "").toLowerCase()}`));
+			const shown = candidates.filter(c => !needle || (c.name || "").toLowerCase().includes(needle));
+			list.innerHTML = "";
+			if (countEl) countEl.textContent = `${shown.length} form${shown.length === 1 ? "" : "s"}`;
+			if (!shown.length) {
+				list.appendChild(e_({outer: `<div class="ve-small ve-muted ve-italic p-2">No forms match your search.</div>`}));
+				return;
+			}
+			const canAddMore = !!this._state.canAddKnownWildShapeForm?.();
+			for (const creature of shown) {
+				const rec = this._state._parseBestiaryCreatureToBeastRecord?.(creature);
+				const model = this._buildBeastModel(rec);
+				if (!model) continue;
+				const nameHtml = CharacterSheetClassUtils.buildCreatureHoverNameHtml(model, "ve-bold");
+				const sourceAbv = creature.source ? Parser.sourceJsonToAbv(creature.source) : null;
+				const sourceFull = creature.source ? Parser.sourceJsonToFull(creature.source) : null;
+				const sourceHtml = sourceAbv
+					? `<span class="ve-muted ve-small charsheet__ws-picker-source" title="${CharacterSheetClassUtils.escapeHtml(sourceFull || sourceAbv)}">${CharacterSheetClassUtils.escapeHtml(sourceAbv)}</span>`
+					: "";
+				const metaHtml = this._buildKnownFormPickerMeta(creature, rec, model);
+				const isKnown = knownNames.has(`${(creature.name || "").toLowerCase()}|${(creature.source || "").toLowerCase()}`);
+				const card = e_({outer: `
+					<div class="charsheet__ws-picker-card p-2 rounded ve-flex-v-center ve-flex-h-between" style="gap: 8px; background: var(--cs-bg-surface, #1e293b); border: 1px solid var(--cs-border, rgba(255,255,255,.1));">
+						<div class="ve-flex-col" style="min-width: 0; gap: 2px;">
+							<div class="ve-small charsheet__ws-picker-name ve-flex-v-baseline" style="gap: 6px;">${nameHtml}${sourceHtml}</div>
+							${metaHtml}
+						</div>
+						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__ws-picker-learn" ${(isKnown || !canAddMore) ? `disabled title="${isKnown ? "Already learned" : "You already know the maximum number of forms"}"` : "title=\"Learn this form\""}>${isKnown ? "Known" : "Learn"}</button>
+					</div>
+				`});
+				card.querySelector(".charsheet__ws-picker-learn")?.addEventListener("click", (evt) => {
+					if (/** @type {*} */ (evt.target)?.closest?.(".ve-help-subtle")) return;
 					const id = this._state.addKnownWildShapeForm?.(creature);
 					if (id) {
 						JqueryUtil.doToast({type: "success", content: `Learned ${creature.name} as a Wild Shape form.`});
 						this._refreshSheet();
-						this._renderModalBody();
+						if (!this._state.canAddKnownWildShapeForm?.()) {
+							doClose();
+							return;
+						}
+						renderList(searchEl?.value || "");
 					} else {
 						JqueryUtil.doToast({type: "warning", content: `Could not learn ${creature.name} (already known or exceeds your limits).`});
+						renderList(searchEl?.value || "");
 					}
-				},
-			});
-		} finally {
-			this._isTransforming = false;
-		}
+				});
+				list.appendChild(card);
+			}
+		};
+
+		searchEl?.addEventListener("input", () => renderList(searchEl.value));
+		renderList("");
+	}
+
+	/**
+	 * Build the inline meta line(s) for a Known-Form picker card: a primary line of
+	 * CR • type • size and the shared creature stat line (AC • HP • speed • senses •
+	 * ability mods), plus a secondary line listing the form's key trait names. All
+	 * dynamic text is HTML-escaped, so the result is safe to inject via innerHTML.
+	 * @param {*} creature - The raw bestiary creature.
+	 * @param {*} rec - The normalized beast record (`_parseBestiaryCreatureToBeastRecord`).
+	 * @param {*} model - The display model (`_buildBeastModel`).
+	 * @returns {string} Safe HTML.
+	 * @private
+	 */
+	_buildKnownFormPickerMeta (creature, rec, model) {
+		const esc = CharacterSheetClassUtils.escapeHtml;
+		const sizeNames = {T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"};
+		const crDisplay = (rec?.cr != null) ? `CR ${rec.cr}` : null;
+		const typeDisplay = rec?.creatureType ? esc(rec.creatureType.charAt(0).toUpperCase() + rec.creatureType.slice(1)) : null;
+		const sizeDisplay = rec?.size ? esc(sizeNames[rec.size] || rec.size) : null;
+
+		const primaryBits = [crDisplay && `<span class="ve-bold">${esc(crDisplay)}</span>`, typeDisplay, sizeDisplay].filter(Boolean);
+		const statLine = CharacterSheetClassUtils.buildCreatureStatLineHtml(model);
+		const headBits = [primaryBits.join(`<span class="charsheet__beast-sep"> \u2022 </span>`), statLine].filter(Boolean);
+
+		const traitNames = (Array.isArray(rec?.traits) ? rec.traits : [])
+			.map(t => t?.name).filter(Boolean).slice(0, 4).map(esc);
+		const traitLine = traitNames.length
+			? `<div class="ve-small ve-muted charsheet__ws-picker-traits"><span class="ve-bold">Traits</span> ${traitNames.join(", ")}</div>`
+			: "";
+
+		return `
+			<div class="ve-small ve-muted charsheet__ws-picker-stats">${headBits.join(`<span class="charsheet__beast-sep"> \u2022 </span>`)}</div>
+			${traitLine}
+		`;
 	}
 
 	/**
