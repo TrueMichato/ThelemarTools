@@ -3,50 +3,74 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 25 (Illrigger `vaa` + Druid/Ranger `Lunaria` = Centaur Ranger 6 / Druid 4 Circle of the Zodiac) — IN PROGRESS
+## Closed Bugs
+
+### Round 25 (Illrigger `vaa` + Druid/Ranger `Lunaria` = Centaur Ranger 6 / Druid 4 Circle of the Zodiac) — COMPLETE
 
 **7 repeats from R24.** Orchestrator did FIRST-HAND live diagnosis on the **merged** build and found the
 R24 "live-verified" fixes were false greens *again* — and pinpointed WHY: the R24 sessions verified the
 path that works (`_pUseFeatureAbility` / Features-tab `.charsheet__feature-use`) but **the user clicks the
 Abilities-tab card**, whose Use button calls a *different* handler (`_useCombatAction`) that never routes to
-the specialized ability pipeline. **Mandate this round: verify via the EXACT control the user clicks (the
-rendered Abilities-tab card, the real picker, the real popup) on the merged build — never a sibling path.**
+the specialized ability pipeline. Mandate this round — honored: **every fix re-verified by driving the EXACT
+control the user clicks (the rendered Abilities/Combat-tab card, the real picker, the real popup) on the
+merged build, never a sibling path.** Decomposed into 8 single-owner sessions, integrated foundation-first
+with ZERO merge conflicts; full gate green (eslint 0 / stylelint 0 / jest charactersheet **292 suites ·
+10,881 tests**).
 
-Single-owner decomposition (8 focused sessions):
+* #1 — Purge Toxins consumes stamina from the real Combat-tab Use button. ROOT: `_useCombatAction`
+  (charactersheet-combat.js) was Monk-centric and never dispatched classified abilities to the shared
+  `_pUseFeatureAbility` pipeline (S1). Live-verified on merged build: stamina 10→8.
+* #2/#5 — Guided Strike works from the real Use button: prompts which weapon attack, fires the roll, and
+  consumes the shared **Divine Manifestation** pool (shared with War God's Blessing) (S1). Live: Divine
+  Manifestation 1→0 + roll fired. Also fixes the phantom +1 to WIS/CHA rolls (no stray modifier).
+* #3 — Forked Tongue works from the real Use button → opens `_pOpenForkedTongueSwap` swap modal (S1).
+  Live-verified: Use → swap modal.
+* #4 — Red Cant uses a polished dark-themed modal (natural-die → treated-as-floor boxes, seal-cost row,
+  total-with-delta, Keep/Expend buttons) replacing the plain boolean prompt (S7). Live-verified: Persuasion
+  natural 7 → modal "Natural 7 → Treated as 10, Seal 6 → 5, total 27 → 30 (+3)"; STR roll → no modal.
+* #6 — Intransigent clearly signifies the extend-charmed-immunity-to-allies option: bright readable title,
+  accent live-summary pill (gold at 0 allies advertising the CTA, emerald once chosen), reworded effect (S8).
+  Live-verified: count 3 → "You + 3 chosen creatures within 10 ft are immune to charmed".
+* #7 — Illrigger conditions resolve to Thelemar variants. General resolver: when TGTT is loaded and a `_tgtt`
+  variant exists, both the `@condition` hover and the applied condition state resolve to the tgtt variant;
+  variants invented only where a `_tgtt` CONDITION_EFFECTS key exists (charmed/exhaustion correctly stay
+  generic) (S2). Live-verified: Veil of Lies self-applies `{Invisible, TGTT}` (not 2024); display tags
+  invisible/poisoned/prone → `_tgtt`.
+* #8 — Hellspeaker's Invoke Hell options (Honey-Sweet Blades, Turncoat) consume the shared Invoke Hell pool
+  and are labelled as Invoke Hell option cards (S1). Live-verified: Invoke Hell 3→2 + badge.
+* #9 — Deft Explorer / language-picker checkboxes render at a uniform 14×14 (the pill `<input>` was an
+  unconstrained flex child compressed by long labels; fixed size + `flex:0 0 auto`) (S6). Live: 147/147
+  pill checkboxes measured exactly 14×14.
+* #10 — Languages in race/background/class pickers (pills + modal cards) are hoverable → languages.html
+  tooltip, with a dotted-underline affordance; hover-only (no onclick) so selection clicks aren't hijacked
+  (S6). Live-verified: hover produces a `ve-hwin` tooltip; 147/147 pills + 142/143 cards carry the hover data.
+* #11 — Custom-ability uses-per-day and custom-item charges can be set to "Ability Modifier" mode (any of
+  the six, floored at 1), computed live so they follow score/level changes and clamp current; fixed-number
+  resources untouched (migration-safe) (S5). Live: CHA-mode ability → 3 uses = live CHA mod, follows score.
+* #12 — Lunaria carry capacity is **320** (×2), not 640. ROOT: Circle of the Zodiac form features registered
+  permanent enabled `namedModifiers` ("From Aurochs" carry, "From Octopus" swim) that persisted while NOT
+  transformed; now gated to the active form, with a migration that strips stale form modifiers on load (S3).
+  Live-verified: carry 320; stale Aurochs/Octopus form mods gone.
+* #13 — Magician (Circle of the Zodiac) Arcana/Nature bonus = live Wisdom modifier (min +1) on top of an
+  **Intelligence** check. S3 made the Magician bonus a live `skillBonus`/`abilityMod:"wis"`/`minValue:1`; the
+  orchestrator then caught a residual: Lunaria's save carried 4 **orphaned** "Forest Sage" `abilitySwap`
+  namedModifiers (sourceFeatureId of a respecced-away feature) that flipped the check INT→WIS, double-counting
+  WIS (Arcana 10/Nature 14). Fixed generally: `_migrateOrphanedFeatureModifiers()` drops namedModifiers whose
+  `sourceFeatureId` matches no current feature **and** that carry no `sourceType` (preserving managed
+  `customAbility`/`classFeature`/`feat` modifiers like Pan's Apostle) (S3 follow-up). Live-verified on merged
+  build: Arcana 4, Nature 8, breakdown ability = INT + Feature Bonus (+5 = live wisMod); WIS +2 ⇒ Arcana 5 /
+  Nature 9; legit modifiers preserved; carry still 320.
+* #14 — Gem Empowerment / item upgrades can be applied WITHOUT meeting requirements: per-gem "Already
+  empowered" force button (confirm, no roll/skill/destruction) and a "Bypass cost & prerequisites" override
+  in the upgrade picker (applies at costPaid 0) (S4). Live-verified via real clicks.
+* #15 — Custom-item creation offers applying any item upgrade + gem empowerment (type-filtered upgrade
+  checkboxes + gemstone select) wired through the create form (S4). Live-verified: created item carries the
+  upgrade (costPaid 0) + socketed gem.
+* #16 — Add-Form (Known Forms) picker rebuilt with spell-picker-style UX: per-row statblock hover anchor,
+  CR/type/size/AC/HP/speed/abilities/traits info line, visible source tag, search box, dup/cap-aware Learn
+  (S3). Live: rich picker (107 cards) wired on merged build.
 
-* **S1 — Abilities-tab Use routing (FOUNDATION)** — #1,#2,#3,#5,#8.
-  ROOT: `_useCombatAction` (charactersheet-combat.js) is Monk-centric (parses ki/focus/stamina, hardcodes
-  Patient Defense/Flurry/…) and **never dispatches to `_pHandleR20FeatureActivation`/`_pUseFeatureAbility`**.
-  So from the Abilities tab: #1 Purge Toxins doesn't consume stamina, #2 Guided Strike opens no weapon
-  chooser & does nothing, #3 Forked Tongue opens no swap, #5 Guided Strike/War God's Blessing don't consume
-  Divine Manifestation, #8 Invoke Hell options (Honey-Sweet Blades/Turncoat) don't consume Invoke Hell.
-  Fix: route classified abilities (consumes / R20-dispatch / `_manifestationRequiresSave`) through the
-  shared pipeline while preserving action economy. Also label Invoke Hell option cards as such (#8).
-* **S2 — Thelemar condition resolver** — #7. R24 added `invisible_tgtt`/`prone_tgtt` EFFECT entries but the
-  feature text still references generic `{@condition invisible/poisoned/charmed/prone}` (only
-  `incapacitated|tgtt` was wired). General resolver: when TGTT is loaded and a `_tgtt` variant exists, both
-  the `@condition` hover AND the applied condition state resolve to the tgtt variant (Veil of Lies invisible,
-  Purge Toxins poisoned, Charm Enemy/Intransigent charmed, Follow-Up Topple prone, …).
-* **S3 — Zodiac / Known-Forms subsystem** — #12,#13,#16. ROOT(#12): Circle of the Zodiac form features
-  register **permanent enabled `namedModifiers`** ("From Aurochs" carryCapacity sizeIncrease, "From Octopus"
-  speed:swim) that persist while NOT transformed → stack with racial Equine Build → carry ×4 (640) vs ×2
-  (320). Form-granted modifiers must be gated to the active form. #13: Magician arcana/nature must be a live
-  `=wismod` modifier, not a baked customModifier that drifts (Lunaria's save had stale 3 vs wismod 5). #16:
-  Add-Form picker needs spell-picker-style UX (form info, source, hover).
-* **S4 — Item upgrades & Gem Empowerment** — #14,#15. `charactersheet-upgrades.js` hard-gates apply on
-  `hasGemEmpowerment`/requirements (disabled buttons). #14: allow applying upgrades/gem empowerment WITHOUT
-  meeting requirements (migrating / pre-empowered items). #15: custom-item creation must offer applying any
-  item upgrade + gem empowerment.
-* **S5 — Custom abilities uses→stat modifier** — #11. `charactersheet-customabilities.js`: add a way to set
-  uses-per-day equal to a stat modifier (ability mod), for Custom Abilities AND Custom Item abilities.
-* **S6 — Language picker UI** — #9,#10. #9 Deft Explorer language checkboxes render at inconsistent sizes;
-  #10 languages in race/background/class pickers must be hoverable for more info.
-* **S7 — Red Cant popup UX** — #4. `_pMaybeApplyRedCant` uses a plain boolean prompt; needs a proper themed
-  modal.
-* **S8 — Intransigent signifier clarity** — #6 (repeat). Panel renders but the extend-charmed-immunity-to-
-  others affordance still isn't clear enough; improve prominence/clarity.
-
-## Closed Bugs
+### Round 24 (Illrigger/Hochling — real character `vaa` = Hochling Illrigger 15 Hellspeaker) — COMPLETE
 
 ### Round 24 (Illrigger/Hochling — real character `vaa` = Hochling Illrigger 15 Hellspeaker) — COMPLETE
 
