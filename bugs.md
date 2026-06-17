@@ -3,7 +3,54 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-None — all reported bugs are fixed and integrated.
+### Round 23 (Illrigger/Hochling — real character `vaa` = Hochling Illrigger 15 Hellspeaker) — IN PROGRESS
+
+Many of these are **repeat bugs** from Rounds 20–22 that recurred because prior fixes were
+**false greens**: synthetic Jest passed but the LIVE rendered DOM on the real character failed.
+Two structural root causes confirmed this round:
+1. **Parallel code paths, only one patched** (e.g. advantage→+1 fixed in `aggregateModifiers`
+   but NOT in `_recalculateCustomModifiers`).
+2. **The Illrigger class data requires a SECOND homebrew dependency, `IllriggerRevised`**
+   (TGTT `_meta.dependencies`), which the e2e harness never loaded — so Illrigger was tested
+   without its catalog and the granting/catalog bugs stayed invisible. Every session this round
+   MUST load BOTH `TravelersGuidetoThelemar.json` + `IllriggerRevised` and validate against the
+   real `vaa.json` in the live DOM.
+
+Ownership rule (single-owner classification): **S-A owns "what feature exists and where it
+generically surfaces"; S-B/S-C own "what happens when an already-existing feature mechanically
+applies."** S-A's feature-granting fix (#13) is a foundation that #8/#9/#11/#14 depend on.
+
+**S-A — feature granting + classification + abilities surfacing + hover + features tab (FOUNDATION)**
+* #13 — Some subclass abilities (Quid Pro Quo, Let's Make a Deal, Moloch's Interdiction, Intransigent)
+  have NO feature card in the features tab; validate top-level subclass-feature granting across ALL
+  classes/subclasses (real cause: top-level Hellspeaker subclassFeatures at L7/11/15 absent from `vaa.features`).
+* #3 — Purge Toxins should be an ability, not an active state.
+* #4 — Healing Hands + War God's Blessing (and ALL abilities) must be hoverable.
+* #5 — Guided Strike must be an ability; Use should ask which weapon attack to roll; right-clicking a
+  weapon attack should offer it.
+* #7 — Forked Tongue must be an ability.
+* #8 — Let's Make a Deal must be an ability (depends on #13 granting it first).
+* #14 — Quid Pro Quo must be an ability surfaced with its DC (= Interdict DC); depends on #13.
+
+**S-B — modifiers + conditions + damage-type rolls**
+* #2 — Phantom +1 to WIS/CHA rolls (`check:wis:advantage`/`check:cha:advantage` val=1 leak through
+  `_recalculateCustomModifiers`; also `save:advantage:poisoned`).
+* #10 — Terrorizing Force: no long-rest re-choice of damage type; wrong damage type written on rolls.
+* #12 — Hellish Avenger: wrong damage type written on rolls.
+* #16 — Many Illrigger abilities reference 2014/2024 conditions instead of Thelemar conditions.
+* #11 — Intransigent: condition-immunity mechanics + signal/chooser that it can extend to chosen allies
+  (S-A grants+classifies the feature; S-B owns the condition mechanics).
+
+**S-C — interdiction system: resources, Moloch boons, Hellsight, modals UX**
+* #6 — Resource mismatch between overview and combat tab (combat missing some; overview has stale
+  entries that must be deleted, e.g. passive riders persisted as resources).
+* #9 — Moloch's Interdiction doesn't add the free boons at the needed levels; the ones it adds are not
+  hoverable, don't affect the sheet, and have no Use button.
+* #15 — Hellsight boon: no way to remove the granted truesight afterward.
+* #17 — UI/UX upgrades for the Infernal Conduit modal, Interdiction modal, and Combat Masteries modal.
+
+**S-D — quickbuild**
+* #1 — QuickBuild doesn't allow the weapon-mastery choice (at least for Illrigger).
 
 ## Closed Bugs
 
