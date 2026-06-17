@@ -8868,10 +8868,12 @@ body.has-quickbuild-overlay .toast__container {
 
 /* Intransigent (Hellspeaker L11) extend-to-allies chooser. The card must make the
    "you may extend your charmed immunity to creatures of your choice" affordance
-   unmistakable, so the control gets a titled panel with a left accent stripe, a clear
-   inline label, a compact numeric stepper, and a live one-line effect summary. The
-   panel adopts the dark --cs-* design tokens (with literal fallbacks) so it reads as an
-   elevated surface inside the dark feature card rather than a jarring light box. */
+   unmistakable at a glance, so the panel leads with a high-contrast titled heading and
+   a prominent, accent-bordered live summary (the glance affordance), followed by a clear
+   inline label + compact numeric stepper. The live summary's left accent shifts from gold
+   (zero allies — advertises the extend call-to-action) to emerald (allies chosen — the
+   extension is active). The panel adopts the dark --cs-* design tokens (with literal
+   fallbacks) so it reads as an elevated surface inside the dark feature card. */
 .charsheet__intransigent-controls {
 	background: var(--cs-bg-surface, #1e293b);
 	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
@@ -8881,9 +8883,17 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 .charsheet__intransigent-title {
+	display: flex;
+	align-items: center;
+	gap: 0.4em;
+	font-size: 1.05em;
 	font-weight: 700;
-	color: var(--cs-accent-ruby-light, #fca5a5);
-	margin-bottom: 0.35em;
+	letter-spacing: 0.01em;
+	/* Use the SOLID ruby token — the "-light" token is a ~15% transparent background
+	   tint and renders nearly invisible as text, which previously buried this heading
+	   (the very affordance that announces the charmed immunity extends to others). */
+	color: var(--cs-accent-ruby, #ef4444);
+	margin-bottom: 0.4em;
 }
 
 .charsheet__intransigent-row {
@@ -8899,9 +8909,26 @@ body.has-quickbuild-overlay .toast__container {
 	width: 5rem;
 }
 
+/* The live one-line summary is the glance affordance: a prominent, accent-bordered pill
+   that states the current effect (and, at zero allies, advertises the extend option). */
 .charsheet__intransigent-live {
+	padding: 0.4em 0.6em;
+	border-radius: 6px;
+	border-left: 4px solid var(--cs-accent-ruby, #ef4444);
+	background: var(--cs-bg-elevated, #334155);
+	font-size: 0.95em;
 	font-weight: 600;
 	color: var(--cs-text-primary, #f1f5f9);
+}
+
+/* Zero allies → gold call-to-action accent that advertises the extend option. */
+.charsheet__intransigent-live--extend {
+	border-left-color: var(--cs-accent-gold, #f59e0b);
+}
+
+/* Allies chosen → emerald accent confirming the extension is active. */
+.charsheet__intransigent-live--active {
+	border-left-color: var(--cs-accent-emerald, #10b981);
 }
 
 .charsheet__intransigent-controls .ve-muted,
@@ -18058,6 +18085,16 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	transition: background var(--cs-transition-fast, 0.15s ease), border-color var(--cs-transition-fast, 0.15s ease);
 }
 
+/* Keep every checkbox a uniform, fixed size regardless of label length: as a
+   flex child it must not shrink (long names) or stretch (emoji/line-height). */
+.charsheet__builder-lang-pill > input[type="checkbox"] {
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	margin: 0;
+	cursor: pointer;
+}
+
 .charsheet__builder-lang-pill:hover {
 	background: var(--cs-bg-hover, rgba(99, 102, 241, 0.06));
 	border-color: var(--rgb-link, #6366f1);
@@ -18084,6 +18121,16 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .charsheet__builder-lang-pill-name {
 	flex: 1;
+	min-width: 0;
+}
+
+/* Hoverable language entries (wired with data-vet-* attributes) get a subtle
+   dotted underline to hint that hovering reveals the language's info tooltip. */
+.charsheet__builder-lang-pill-name[data-vet-page],
+.charsheet__language-card-name[data-vet-page] {
+	text-decoration: underline dotted var(--rgb-link, #6366f1);
+	text-underline-offset: 2px;
+	text-decoration-thickness: 1px;
 }
 
 .charsheet__builder-lang-source {
@@ -19017,6 +19064,139 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .ve-night-mode .charsheet__cond-pick-chip--dis {
 	color: #f87171;
+}
+
+/* ==========================================================================
+   Red Cant decision modal (Illrigger Hellspeaker "Moloch's Interdiction" boon).
+   A polished, dark-themed prompt shown when a sub-10 Charisma die can be raised
+   to its floor by expending a seal. Communicates the natural die, the floor, the
+   seal cost (before → after), and the resulting check total (before → after).
+   ========================================================================== */
+.charsheet__red-cant {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	padding: 4px 2px;
+}
+
+.charsheet__red-cant__lede {
+	margin: 0;
+	line-height: 1.45;
+	color: var(--cs-text-primary, #e2e8f0);
+}
+
+.charsheet__red-cant__dice {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+}
+
+.charsheet__red-cant__die {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	min-width: 92px;
+	padding: 10px 14px;
+	border-radius: 10px;
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.12));
+	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.05));
+}
+
+.charsheet__red-cant__die-label {
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__red-cant__die-val {
+	font-size: 1.9rem;
+	font-weight: 700;
+	line-height: 1;
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__red-cant__die--from {
+	opacity: 0.85;
+}
+
+.charsheet__red-cant__die--to {
+	border-color: #dc2626;
+	background: rgba(220, 38, 38, 0.14);
+}
+
+.charsheet__red-cant__die--to .charsheet__red-cant__die-val {
+	color: #f87171;
+}
+
+.charsheet__red-cant__arrow {
+	font-size: 1.5rem;
+	font-weight: 700;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__red-cant__rows {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+	background: var(--cs-bg-surface, #1e293b);
+}
+
+.charsheet__red-cant__row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.charsheet__red-cant__row-label {
+	font-size: 0.85rem;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__red-cant__row-val {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+	font-weight: 600;
+	color: var(--cs-text-primary, #e2e8f0);
+}
+
+.charsheet__red-cant__row-arrow {
+	color: var(--cs-text-secondary, #94a3b8);
+	font-weight: 400;
+}
+
+.charsheet__red-cant__row-sub {
+	font-size: 0.75rem;
+	font-weight: 400;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__red-cant__seals--after {
+	color: #f87171;
+}
+
+.charsheet__red-cant__total--after {
+	color: #4ade80;
+}
+
+.charsheet__red-cant__delta {
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: #4ade80;
+}
+
+.charsheet__red-cant__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 2px;
 }
 
 /* Familiar companion indicator — a gentle pulse so a summoned familiar isn't

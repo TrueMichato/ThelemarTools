@@ -4320,6 +4320,16 @@ class CharacterSheetCombat {
 		// If no hover link, show description in a tooltip on click
 		const tooltipDesc = this._cleanDescriptionForTooltip(feature.description);
 
+		// (R25 #8) Label options that draw on a shared named pool (e.g. Invoke Hell options
+		// Honey-Sweet Blades / Turncoat carry `consumes: {name: "Invoke Hell"}`, Divine
+		// Manifestation options carry `consumes: {name: "Divine Manifestation"}`) with a badge
+		// naming the pool, so the card visually communicates which resource the Use button
+		// spends. Generic and data-driven — any option using the `consumes` convention is
+		// labelled automatically. Stamina is excluded (it has its own resource surface).
+		const poolBadge = (feature.consumes?.name && feature.consumes.name !== "Stamina")
+			? `<span class="badge badge-outline-info mr-1 ve-small" title="Consumes ${feature.consumes.name}">${feature.consumes.name}</span>`
+			: "";
+
 		const action = e_({outer: `
 			<div class="charsheet__combat-action-item charsheet__combat-action-clickable" 
 				data-action-id="${featureId}">
@@ -4327,6 +4337,7 @@ class CharacterSheetCombat {
 					<span class="charsheet__combat-action-icon" title="${actionType}">${actionIcon}</span>
 					<span class="charsheet__combat-action-name">${nameHtml}</span>
 					${typeBadge}
+					${poolBadge}
 				</div>
 				<div class="charsheet__combat-action-info">
 					<span class="badge badge-outline-secondary ve-small mr-1">${actionIcon} ${actionType}</span>
@@ -4377,6 +4388,32 @@ class CharacterSheetCombat {
 			if (!this._isActionTypeAvailable(actionType)) {
 				const actionName = actionType === "bonus" ? "Bonus Action" : actionType === "reaction" ? "Reaction" : "Action";
 				JqueryUtil.doToast({type: "warning", content: `${actionName} already used this round.`});
+				return;
+			}
+
+			// (R25) Route classified activatable ABILITIES through the SAME canonical pipeline
+			// the Features tab uses (_pUseFeatureAbility → _pHandleR20FeatureActivation → the
+			// generic limited-use / shared-pool / stamina consumption). This is where the
+			// specialized effects live — Guided Strike's weapon-attack chooser + roll +10,
+			// Forked Tongue's language-swap modal, the shared Divine Manifestation / Invoke Hell
+			// pool decrement, manifestation save prompts, and stamina-spending abilities such as
+			// Purge Toxins. The legacy Monk-centric fall-through below never reached that
+			// pipeline, so those abilities silently no-op'd from the Abilities-tab card. The card
+			// only owns action economy; the pipeline owns the ability's use/resource consumption.
+			// Keyed off the genuine classification (_getActivatableAbilityForFeature), not names,
+			// so every current and future classified ability routes here automatically. Monk
+			// abilities (Patient Defense, Flurry of Blows, Hand of Healing/Harm, Step of the Wind,
+			// Whirlpool Strike) are NOT classified activatable abilities and fall through unchanged.
+			if (this._page?._getActivatableAbilityForFeature?.(feature)) {
+				const handled = await this._page._pUseFeatureAbility(feature);
+				if (handled) {
+					this._consumeActionType(actionType);
+					this.renderCombatActions();
+					this.renderCombatResources();
+					this._page._renderFeatures?.();
+					this._page._renderResources?.();
+					this._page._saveCurrentCharacter?.();
+				}
 				return;
 			}
 
@@ -4545,7 +4582,7 @@ class CharacterSheetCombat {
 				const added = this._state.addCondition?.({
 					name: cond.name,
 					source: feature.name,
-				});
+				}, {resolveThelemarVariant: true});
 				if (added) {
 					const durationText = cond.duration ? ` (${cond.duration})` : "";
 					JqueryUtil.doToast({

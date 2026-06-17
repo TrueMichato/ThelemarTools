@@ -4190,6 +4190,32 @@ class CharacterSheetState {
 		// verbatim). Strip it so the trait contributes nothing until activated.
 		this._migrateShellDefenseModifiers();
 
+		// Migrate Circle of the Zodiac constellation FORM features: older saves
+		// persisted their parsed effects (Aurochs carrying-capacity size bump,
+		// Octopus swim speed, …) as ENABLED always-on named modifiers. These
+		// forms are now modelled by the active Zodiac Form state (effects apply
+		// only while transformed into that form), so any persisted form-sourced
+		// named modifier is a stale always-on leak that survives the load
+		// round-trip (namedModifiers are restored verbatim). Strip them so a
+		// form contributes nothing until the druid actually transforms into it.
+		this._migrateZodiacFormFeatureModifiers();
+
+		// Migrate ORPHANED feature-sourced named modifiers: a parser-minted named
+		// modifier that carries a `sourceFeatureId` pointing at a feature that no
+		// longer exists on the character (e.g. a respecced/removed subclass feature
+		// such as "Forest Sage", whose abilitySwap mods were never cleaned up) must
+		// not keep applying — it leaks the removed feature's effect permanently and
+		// can corrupt derived values (e.g. an orphaned abilitySwap silently swapping
+		// a skill's ability). This generalises the same "modifiers must follow their
+		// source feature" principle as the zodiac-form migration. Runs AFTER
+		// _migrateFeatures (so the feature id set is finalised) and strips ONLY
+		// modifiers that have a sourceFeatureId matching no current feature AND no
+		// `sourceType` (so managed effects — classFeature/customAbility/feat, which
+		// own their own lifecycle and may legitimately reference non-feature owners —
+		// are left untouched). Modifiers without a sourceFeatureId (racial/manual)
+		// and those whose source feature still exists are preserved.
+		this._migrateOrphanedFeatureModifiers();
+
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
 
@@ -4218,8 +4244,18 @@ class CharacterSheetState {
 		// Migrate: promote origin (race/background) choices out of the level-1 entry into the base node
 		this._migrateBaseChoices();
 
+		// (#7) Thelemar (TGTT) characters: rewrite feature TEXT that references the
+		// GENERIC conditions ({@condition invisible}) to the Thelemar variants so
+		// both the cached descriptions and the entries link/hover the Thelemar
+		// condition. Runs after classes are loaded (needed to detect Thelemar play).
+		this._migrateThelemarConditionTags();
+
 		// Re-register custom ability effects after loading — run after migrations so effects reference up-to-date data
 		this._reapplyCustomAbilityEffects();
+
+		// Recompute modifier-derived resource maxes (custom-ability uses, item charges) so saved
+		// caches reflect the loaded character's current ability modifiers.
+		this.syncDerivedResourceMaxes();
 
 		// Re-register equipped-item custom effects (Bug #8) after loading. Idempotent: clears any
 		// item-sourced modifiers restored verbatim from the save, then re-registers active items.
@@ -4272,6 +4308,60 @@ class CharacterSheetState {
 			const {type, origin} = CharacterSheetState._normalizeCompanionType(c.type, c.origin);
 			c.type = type;
 			if (origin && !c.origin) c.origin = origin;
+		}
+	}
+
+	/**
+	 * (#7) For Thelemar (TGTT) characters, feature TEXT references the GENERIC
+	 * conditions (e.g. the Illrigger's Veil of Lies → "{@condition invisible}"),
+	 * so both the raw `entries` AND any cached, pre-rendered `description` link to
+	 * the 2014/2024 condition instead of the Thelemar one. Promote every bare
+	 * `{@condition X}` tag (no source) that HAS a Thelemar variant to the Thelemar
+	 * source, then refresh the cached description — re-rendering from the rewritten
+	 * entries when possible, else rewriting the pre-rendered condition links in the
+	 * stored HTML for features that no longer carry `entries`. Idempotent (already
+	 * `|TGTT`-tagged text is left untouched) and GENERIC (keyed off the `_tgtt`
+	 * CONDITION_EFFECTS map, not off the Illrigger). Non-Thelemar characters and
+	 * conditions without a Thelemar variant are left untouched.
+	 */
+	_migrateThelemarConditionTags () {
+		this._applyThelemarConditionTags();
+	}
+
+	/**
+	 * Rewrite bare `{@condition X}` tags in feature entries/descriptions to their
+	 * Thelemar (TGTT) variant when the character uses Thelemar conditions and a
+	 * `_tgtt` effect variant exists. Idempotent and safe to call repeatedly — it is
+	 * run both as a load migration and again after class-feature reconciliation
+	 * (which re-syncs entries from brew source data and would otherwise reintroduce
+	 * the generic-sourced tags).
+	 */
+	_applyThelemarConditionTags () {
+		if (!this._usesThelemarConditions()) return;
+		if (!Array.isArray(this._data.features)) return;
+		const canRender = typeof Renderer !== "undefined";
+		for (const feature of this._data.features) {
+			if (!feature) continue;
+
+			let entriesChanged = false;
+			if (Array.isArray(feature.entries)) {
+				const thelemarized = CharacterSheetState.thelemarizeConditionTags(feature.entries);
+				if (JSON.stringify(thelemarized) !== JSON.stringify(feature.entries)) {
+					feature.entries = thelemarized;
+					entriesChanged = true;
+				}
+			}
+
+			let descriptionRefreshed = false;
+			if (entriesChanged && canRender) {
+				try {
+					feature.description = Renderer.get().render({entries: feature.entries});
+					descriptionRefreshed = true;
+				} catch (e) { /* keep the existing description on render failure */ }
+			}
+			if (!descriptionRefreshed && typeof feature.description === "string" && feature.description) {
+				feature.description = CharacterSheetState.thelemarizeConditionLinkHtml(feature.description);
+			}
 		}
 	}
 
@@ -4702,6 +4792,73 @@ class CharacterSheetState {
 				|| /\bFrom Shell Defense\b/.test(mod.note || "");
 			return !isShellDefense;
 		});
+	}
+
+	/**
+	 * Strip stale always-on named modifiers sourced from Circle of the Zodiac
+	 * constellation FORM features (Aurochs, Octopus, Griffon, …). These forms'
+	 * effects are owned by the active Zodiac Form state and must apply only
+	 * while the druid is transformed into that specific form; an enabled,
+	 * persisted form-sourced named modifier is a residue from older saves (or
+	 * pre-fix parsing) that leaks the bonus permanently. Identified by the
+	 * modifier's `sourceFeatureId` pointing at a form feature, so it is robust
+	 * to the modifier's own (sometimes annotated) name. Recalculates derived
+	 * custom modifiers afterwards so carrying capacity etc. drop back to base.
+	 */
+	_migrateZodiacFormFeatureModifiers () {
+		if (!this._data.namedModifiers?.length) return;
+
+		const formFeatureIds = new Set(
+			(this._data.features || [])
+				.filter(f => CharacterSheetState.isZodiacFormFeature(f))
+				.map(f => f.id)
+				.filter(Boolean),
+		);
+		if (!formFeatureIds.size) return;
+
+		const before = this._data.namedModifiers.length;
+		this._data.namedModifiers = this._data.namedModifiers.filter(
+			mod => !(mod.sourceFeatureId && formFeatureIds.has(mod.sourceFeatureId)),
+		);
+		if (this._data.namedModifiers.length !== before) {
+			this._recalculateCustomModifiers();
+		}
+	}
+
+	/**
+	 * Strip orphaned feature-sourced named modifiers: parser-minted modifiers whose
+	 * `sourceFeatureId` references a feature that no longer exists on the character.
+	 * Such modifiers are residue from a removed/respecced feature (e.g. a "Forest Sage"
+	 * subclass feature that minted abilitySwap:arcana/nature mods, then was removed
+	 * without cleaning up its modifiers) and keep applying their effect permanently —
+	 * including ability swaps that silently corrupt skill calculations. Generalises the
+	 * "modifiers must follow their source feature" rule.
+	 *
+	 * Guarded narrowly: a modifier is dropped ONLY when it BOTH carries a truthy
+	 * `sourceFeatureId` matching no current feature id AND has NO `sourceType`. A
+	 * `sourceType` (e.g. "classFeature", "customAbility", "feat") marks a modifier as
+	 * owned by another effect system that re-applies/clears it on its own lifecycle and
+	 * legitimately points at a non-feature owner (custom abilities use `ca_…` ids), so
+	 * those must never be swept here. Modifiers without a `sourceFeatureId`
+	 * (racial/manual/legit) and those whose source feature still exists are likewise
+	 * preserved. Recalculates derived custom modifiers when anything changed.
+	 */
+	_migrateOrphanedFeatureModifiers () {
+		if (!this._data.namedModifiers?.length) return;
+
+		const featureIds = new Set(
+			(this._data.features || [])
+				.map(f => f.id)
+				.filter(Boolean),
+		);
+
+		const before = this._data.namedModifiers.length;
+		this._data.namedModifiers = this._data.namedModifiers.filter(
+			mod => mod.sourceType || !mod.sourceFeatureId || featureIds.has(mod.sourceFeatureId),
+		);
+		if (this._data.namedModifiers.length !== before) {
+			this._recalculateCustomModifiers();
+		}
 	}
 
 	_migrateFeatures () {
@@ -8080,7 +8237,10 @@ class CharacterSheetState {
 			// Only handle abilityMod-based effects here
 			// value-based and proficiencyBonus-based are already in customModifiers via _recalculateCustomModifiers
 			if (mod.abilityMod) {
-				total += this.getAbilityMod(mod.abilityMod);
+				let v = this.getAbilityMod(mod.abilityMod);
+				// Optional floor (e.g. Magician grants minimum +1 even at low WIS)
+				if (mod.minValue != null) v = Math.max(mod.minValue, v);
+				total += v;
 			}
 		});
 
@@ -8127,7 +8287,9 @@ class CharacterSheetState {
 			if (mod.proficiencyBonus) {
 				total += this.getProficiencyBonus();
 			} else if (mod.abilityMod) {
-				total += this.getAbilityMod(mod.abilityMod);
+				let v = this.getAbilityMod(mod.abilityMod);
+				if (mod.minValue != null) v = Math.max(mod.minValue, v);
+				total += v;
 			} else {
 				total += mod.value || 0;
 			}
@@ -20875,17 +21037,23 @@ class CharacterSheetState {
 		}
 
 		// Primal Order: Magician (XPHB Druid 1) - Arcana/Nature skill bonus
-		if (calculations.hasMagician && calculations.magicianSkillBonus && !alreadyProcessed("Magician")) {
+		// Grants a bonus equal to the LIVE Wisdom modifier (minimum +1) to Arcana
+		// and Nature checks. Emitted as an abilityMod-based effect (not a baked
+		// numeric value) so the bonus tracks WIS as the score changes instead of
+		// drifting from a value snapshotted at registration time.
+		if (calculations.hasMagician && !alreadyProcessed("Magician")) {
 			effects.push({
 				type: "skillBonus",
 				skill: "arcana",
-				value: calculations.magicianSkillBonus,
+				abilityMod: "wis",
+				minValue: 1,
 				source: "Magician (Primal Order)",
 			});
 			effects.push({
 				type: "skillBonus",
 				skill: "nature",
-				value: calculations.magicianSkillBonus,
+				abilityMod: "wis",
+				minValue: 1,
 				source: "Magician (Primal Order)",
 			});
 		}
@@ -21395,7 +21563,27 @@ class CharacterSheetState {
 					// Jack of All Trades style - handled in skill calculations
 					return `${effect.source}: +half proficiency to unproficient checks`;
 				}
-				// Value-based skill bonuses (e.g., Magician: +WIS to Arcana/Nature)
+				// AbilityMod-based skill bonus (e.g. Magician: +WIS modifier to
+				// Arcana/Nature, minimum +1). Registered as a LIVE abilityMod
+				// modifier (value 0) so it follows the ability score and never
+				// bakes a numeric value that drifts when the score changes. The
+				// live value is summed by _getDynamicSkillFeatureBonus, which
+				// applies the optional `minValue` floor.
+				if (effect.skill && effect.abilityMod) {
+					this._addClassFeatureModifier({
+						name: effect.source,
+						type: `skill:${effect.skill}`,
+						value: 0,
+						abilityMod: effect.abilityMod,
+						minValue: effect.minValue,
+						note: `From ${effect.source}`,
+						enabled: true,
+					});
+					let live = this.getAbilityMod(effect.abilityMod);
+					if (effect.minValue != null) live = Math.max(effect.minValue, live);
+					return `${effect.source}: +${live} (${effect.abilityMod.toUpperCase()} modifier) to ${effect.skill} checks`;
+				}
+				// Value-based skill bonuses
 				if (effect.skill && effect.value) {
 					const skillTarget = `skill:${effect.skill}`;
 					this._addClassFeatureModifier({
@@ -24015,6 +24203,28 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Mark an existing inventory gemstone as empowered in place (used when a player empowers a raw
+	 * gem they already own). Mutates the stored wrapper so the change persists; returns false when
+	 * the item is missing.
+	 * @param {string} itemId - The inventory item id of the base gem
+	 * @param {object} gemstoneData - The persisted gemstone data ({name, source, gemName, rarity, ...})
+	 * @param {object} display - Display overrides {name, rarity, entries}
+	 * @returns {boolean} Whether the gem was found and updated
+	 */
+	markGemstoneEmpowered (itemId, gemstoneData, display = {}) {
+		const wrapper = this._data.inventory.find(i => i.id === itemId);
+		if (!wrapper) return false;
+
+		if (display.name != null) wrapper.item.name = display.name;
+		wrapper.item.rarity = display.rarity || "common";
+		wrapper.item.entries = display.entries || [];
+		wrapper.item._isEmpoweredGemstone = true;
+		wrapper.item._gemstoneData = gemstoneData;
+
+		return true;
+	}
+
+	/**
 	 * Remove (unsocket) a gemstone from an inventory item
 	 * @param {string} itemId - The item ID
 	 * @param {string} gemstoneName - The gemstone power name
@@ -25359,8 +25569,10 @@ class CharacterSheetState {
 	 * @param {string|object} condition - The condition name or {name, source} object
 	 * @returns {boolean} True if condition was added, false if immune or already exists
 	 */
-	addCondition (condition) {
-		const condObj = this._normalizeCondition(condition);
+	addCondition (condition, {resolveThelemarVariant = false} = {}) {
+		const condObj = resolveThelemarVariant
+			? this._resolveAppliedConditionIdentity(condition)
+			: this._normalizeCondition(condition);
 
 		// Check if character is immune to this condition
 		if (this.isImmuneToCondition(condObj.name)) {
@@ -25393,13 +25605,61 @@ class CharacterSheetState {
 	 * @returns {object} {name, source} object
 	 */
 	_normalizeCondition (condition) {
+		let name;
+		let source;
+		let hasExplicitSource;
 		if (typeof condition === "string") {
 			// Legacy format - just a name, default to XPHB
-			return {name: condition, source: Parser.SRC_XPHB};
+			name = condition;
+			source = Parser.SRC_XPHB;
+			hasExplicitSource = false;
+		} else {
+			name = condition.name || condition;
+			hasExplicitSource = !!condition.source;
+			source = condition.source || Parser.SRC_XPHB;
 		}
+
+		// (#7) Thelemar (TGTT) condition resolution. An ability that applies a base
+		// condition BY NAME (no explicit source — strings from `addsConditions`,
+		// spell/play-mode buttons, etc.) must apply the Thelemar VARIANT for a
+		// Thelemar character, so the stored condition, its mechanical effects, the
+		// active state, and removal-by-name all agree on the Thelemar identity.
+		// Callers that pass an explicit source (the Add Condition modal, the
+		// condition chip's remove handler) are respected as-is. Only conditions
+		// that actually HAVE a Thelemar variant are remapped — generic-only
+		// conditions (charmed, blinded, …) and non-Thelemar characters are left
+		// untouched. GENERIC: every class/ability routes through here, not just the
+		// Illrigger.
+		if (!hasExplicitSource && this._usesThelemarConditions()) {
+			const variant = CharacterSheetState.getThelemarConditionVariant(name);
+			if (variant) {
+				name = variant.name || name;
+				source = variant.source || CharacterSheetState.THELEMAR_CONDITION_SOURCE;
+			}
+		}
+
+		return {name, source};
+	}
+
+	/**
+	 * Resolve the IDENTITY (name + source) of a condition an ability applies to
+	 * the character, preferring the Thelemar variant for Thelemar characters. This
+	 * is the explicit-source counterpart to the bare-name resolution in
+	 * {@link _normalizeCondition}: combat actions self-apply conditions tagged with
+	 * the granting feature's NAME as the source (e.g. Instant Step → Invisible),
+	 * which must still resolve to the Thelemar variant when one exists. Conditions
+	 * without a Thelemar variant keep the source they were given.
+	 * @param {string|object} condition
+	 * @returns {object} {name, source}
+	 */
+	_resolveAppliedConditionIdentity (condition) {
+		const condObj = this._normalizeCondition(condition);
+		if (!this._usesThelemarConditions()) return condObj;
+		const variant = CharacterSheetState.getThelemarConditionVariant(condObj.name);
+		if (!variant) return condObj;
 		return {
-			name: condition.name || condition,
-			source: condition.source || Parser.SRC_XPHB,
+			name: variant.name || condObj.name,
+			source: variant.source || CharacterSheetState.THELEMAR_CONDITION_SOURCE,
 		};
 	}
 
@@ -27193,7 +27453,7 @@ class CharacterSheetState {
 			if (allies > 0) {
 				return `You + ${allies} chosen creature${allies === 1 ? "" : "s"} within ${r} ft are immune to charmed (while conscious)`;
 			}
-			return `You are immune to charmed (while conscious); may extend to creatures of your choice within ${r} ft`;
+			return `You are immune to charmed (while conscious); may also extend to creatures of your choice within ${r} ft`;
 		},
 		"superior interdict": (c) => {
 			if (!c.hasSuperiorInterdict) return null;
@@ -28158,6 +28418,18 @@ class CharacterSheetState {
 		// extracts "+4 bonus to AC" without recognizing the "while in your shell" gating). Mirrors the
 		// per-feature skips below (Adept Speed, Unarmored Movement) that avoid double-/passive-counting.
 		if (feature.name === "Shell Defense" || /withdraw into your shell/i.test(feature.description)) {
+			return;
+		}
+
+		// Circle of the Zodiac constellation FORM features (Aurochs, Octopus, …)
+		// are modelled as the active Zodiac Form state: their mechanical effects
+		// apply ONLY while transformed into that specific form (getEffects →
+		// customEffects gated to the active form, removed on revert). Skip the
+		// passive description parser so it never registers always-on named
+		// modifiers — those would leak permanently (e.g. Aurochs counting you as
+		// one size larger for carrying capacity while NOT in form, doubling it).
+		// Mirrors the Shell Defense / combat-method skips above.
+		if (CharacterSheetState.isZodiacFormFeature(feature)) {
 			return;
 		}
 
@@ -32438,11 +32710,28 @@ class CharacterSheetState {
 			const sourceType = opts.resourceSource?.type || "self";
 
 			if (sourceType === "self") {
-				ability.uses = {
-					current: opts.uses?.max || 1,
-					max: opts.uses?.max || 1,
-					recharge: opts.uses?.recharge || "long",
-				};
+				const recharge = opts.uses?.recharge || "long";
+				if (opts.uses?.maxMode === "abilityMod") {
+					// Uses-per-day derived LIVE from an ability modifier (min 1) so the cap follows
+					// ability-score changes / level-ups. The numeric `max` is a cache kept in sync by
+					// syncDerivedResourceMaxes(); `maxMode`/`maxAbility` are the source of truth.
+					const maxAbility = this._normalizeResourceAbility(opts.uses?.maxAbility);
+					const computedMax = this._computeAbilityModResourceMax(maxAbility);
+					ability.uses = {
+						current: computedMax,
+						max: computedMax,
+						recharge,
+						maxMode: "abilityMod",
+						maxAbility,
+					};
+				} else {
+					const fixedMax = opts.uses?.max || 1;
+					ability.uses = {
+						current: fixedMax,
+						max: fixedMax,
+						recharge,
+					};
+				}
 			} else if (sourceType === "new") {
 				// Create a new resource pool for this ability
 				const newResourceName = opts.resourceSource.newResourceName || `${opts.name} Charges`;
@@ -32509,6 +32798,21 @@ class CharacterSheetState {
 				ability.uses = null;
 			} else if (updates.mode === "limited" && !ability.uses) {
 				ability.uses = {current: 1, max: 1, recharge: "long"};
+			}
+		}
+
+		// Normalise modifier-derived uses: recompute the live max when in abilityMod mode, or
+		// strip stale modifier fields when an edit switched back to a fixed number.
+		if (ability.mode === "limited" && ability.uses) {
+			if (ability.uses.maxMode === "abilityMod") {
+				const maxAbility = this._normalizeResourceAbility(ability.uses.maxAbility);
+				ability.uses.maxAbility = maxAbility;
+				const computedMax = this._computeAbilityModResourceMax(maxAbility);
+				ability.uses.max = computedMax;
+				ability.uses.current = Math.min(ability.uses.current ?? computedMax, computedMax);
+			} else {
+				delete ability.uses.maxMode;
+				delete ability.uses.maxAbility;
 			}
 		}
 
@@ -32716,9 +33020,10 @@ class CharacterSheetState {
 
 		// Self-contained uses
 		if (ability.uses) {
+			const max = this._getCustomAbilityUsesMax(ability);
 			return {
-				current: ability.uses.current,
-				max: ability.uses.max,
+				current: Math.min(ability.uses.current ?? max, max),
+				max,
 				recharge: ability.uses.recharge || "long",
 			};
 		}
@@ -32735,7 +33040,7 @@ class CharacterSheetState {
 			if (ability.mode !== "limited" || !ability.uses) continue;
 
 			if (restType === "long" || ability.uses.recharge === restType) {
-				ability.uses.current = ability.uses.max;
+				ability.uses.current = this._getCustomAbilityUsesMax(ability);
 			}
 		}
 	}
@@ -32768,9 +33073,78 @@ class CharacterSheetState {
 		}
 
 		// Self-contained uses
-		if (!ability.uses || ability.uses.current >= ability.uses.max) return false;
+		if (!ability.uses || ability.uses.current >= this._getCustomAbilityUsesMax(ability)) return false;
 		ability.uses.current++;
 		return true;
+	}
+
+	/**
+	 * Normalise an ability abbreviation for a modifier-derived resource max, defaulting to "wis"
+	 * for unknown/missing values.
+	 * @param {string} ability
+	 * @returns {string} A valid ability abbreviation (str/dex/con/int/wis/cha)
+	 */
+	_normalizeResourceAbility (ability) {
+		const valid = Parser.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
+		const lower = (ability || "").toLowerCase();
+		return valid.includes(lower) ? lower : "wis";
+	}
+
+	/**
+	 * Compute the LIVE max for a resource whose uses-per-day equal an ability modifier (min 1),
+	 * mirroring how features parsed as "equal to your <ability> modifier" are sized.
+	 * @param {string} ability - Ability abbreviation
+	 * @returns {number} Effective max (at least 1)
+	 */
+	_computeAbilityModResourceMax (ability) {
+		return Math.max(1, this.getAbilityMod(this._normalizeResourceAbility(ability)));
+	}
+
+	/**
+	 * Resolve the effective max uses for a self-contained limited custom ability. When the ability
+	 * stores `uses.maxMode === "abilityMod"` the value is computed live from the chosen ability
+	 * modifier; otherwise the stored fixed `uses.max` is returned.
+	 * @param {object} ability - The custom ability object
+	 * @returns {number} Effective max uses
+	 */
+	_getCustomAbilityUsesMax (ability) {
+		const uses = ability?.uses;
+		if (!uses) return 0;
+		if (uses.maxMode === "abilityMod" && uses.maxAbility) {
+			return this._computeAbilityModResourceMax(uses.maxAbility);
+		}
+		return uses.max || 0;
+	}
+
+	/**
+	 * Recompute the cached numeric max for every resource whose cap is derived from an ability
+	 * modifier (custom-ability self-contained uses + custom-item charges), clamping the current
+	 * value to the new max. Idempotent and safe to call on every render so modifier-derived caps
+	 * follow ability-score changes and level-ups. Fixed-number resources are left untouched, so
+	 * existing saved characters keep working unchanged (migration-safe).
+	 */
+	syncDerivedResourceMaxes () {
+		if (Array.isArray(this._data.customAbilities)) {
+			for (const ability of this._data.customAbilities) {
+				if (ability.mode !== "limited" || !ability.uses) continue;
+				if (ability.uses.maxMode !== "abilityMod" || !ability.uses.maxAbility) continue;
+				const newMax = this._computeAbilityModResourceMax(ability.uses.maxAbility);
+				ability.uses.max = newMax;
+				if (typeof ability.uses.current !== "number") ability.uses.current = newMax;
+				else ability.uses.current = Math.min(ability.uses.current, newMax);
+			}
+		}
+
+		if (Array.isArray(this._data.inventory)) {
+			for (const invItem of this._data.inventory) {
+				const item = invItem?.item;
+				if (!item || item.chargesMaxMode !== "abilityMod" || !item.chargesMaxAbility) continue;
+				const newMax = this._computeAbilityModResourceMax(item.chargesMaxAbility);
+				item.charges = newMax;
+				if (typeof item.chargesCurrent !== "number") item.chargesCurrent = newMax;
+				else item.chargesCurrent = Math.min(item.chargesCurrent, newMax);
+			}
+		}
 	}
 
 	/**
@@ -34074,6 +34448,8 @@ class CharacterSheetState {
 		if (modifier.perClassLevel) newModifier.perClassLevel = modifier.perClassLevel;
 		if (modifier.multiplier) newModifier.multiplier = modifier.multiplier;
 		if (modifier.abilityMod) newModifier.abilityMod = modifier.abilityMod;
+		// Optional floor for abilityMod-based bonuses (e.g. Magician: min +1)
+		if (modifier.minValue != null) newModifier.minValue = modifier.minValue;
 		// Set/increase mode for ability:* and abilityMax:* modifiers
 		if (modifier.mode) newModifier.mode = modifier.mode;
 		if (hasProfBonus) newModifier.proficiencyBonus = true;
@@ -35767,6 +36143,32 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * True if `feature` is a Circle of the Zodiac constellation FORM feature
+	 * (one of the ZODIAC_FORM_DEFS entries, e.g. Aurochs / Octopus / Griffon),
+	 * as opposed to the subclass's framework features (Circle of the Zodiac,
+	 * Star Map, Zodiac Form: Month).
+	 *
+	 * The mechanical effects of a constellation form (carrying-capacity size
+	 * bump, swim speed, save advantage, …) apply ONLY while the druid is
+	 * transformed into THAT form, and are modelled by the active Zodiac Form
+	 * state (getEffects → customEffects, gated to the active form). The generic
+	 * description parser (_processFeatureModifiers) must therefore NOT register
+	 * always-on named modifiers for these features, or their bonuses would leak
+	 * permanently (e.g. Aurochs doubling carrying capacity while NOT in form).
+	 * Self-maintaining: matches by form name against ZODIAC_FORM_DEFS, so new
+	 * tiers (Star Week / Full Zodiac) are covered as their defs are added.
+	 */
+	static isZodiacFormFeature (feature) {
+		if (!feature) return false;
+		const isZodiacSubclass = /circle of the zodiac/i.test(feature.subclassName || "")
+			|| (feature.subclassShortName || "").toLowerCase() === "zodiac";
+		if (!isZodiacSubclass) return false;
+		const name = (feature.name || "").trim().toLowerCase();
+		if (!name) return false;
+		return CharacterSheetState.ZODIAC_FORM_DEFS.some(def => (def.name || "").toLowerCase() === name);
+	}
+
+	/**
 	 * State type definitions with their effects
 	 * Each state defines what effects it provides when active
 	 */
@@ -37091,6 +37493,18 @@ class CharacterSheetState {
 		} else if (/as a reaction|use (?:a |your )?reaction/i.test(text)) {
 			activationAction = "reaction";
 		}
+		// (R25 #1) Parse a stamina cost from the description so abilities that spend stamina
+		// but aren't tied to a named pool (e.g. Purge Toxins — "as an action you can spend 2
+		// stamina to end one poison") consume it through the unified activation pipeline. The
+		// legacy combat-tab regex required the literal "stamina point(s)" and so silently
+		// dropped the bare "spend N stamina" phrasing. getActivatableFeatures() prefers a
+		// linked named pool (resourceName) over staminaCost, so this only takes effect for
+		// abilities without one.
+		let staminaCost = null;
+		if (opts.resourceName === undefined || opts.resourceName === null) {
+			const staminaMatch = text.match(/(?:spend|expend|use|costs?)?\s*\(?(\d+)\s*stamina\s*(?:points?)?\)?/i);
+			if (staminaMatch) staminaCost = parseInt(staminaMatch[1], 10);
+		}
 		return {
 			stateTypeId: "custom",
 			isCustom: true,
@@ -37100,6 +37514,7 @@ class CharacterSheetState {
 			effects: this.parseEffectsFromDescription(rawText),
 			isToggle: false,
 			isInstant: true,
+			staminaCost,
 			// isDataDriven lets getActivatableFeatures() link `resourceName` to a shared
 			// pool (e.g. the Invoke Hell short-rest pool for its options). When resourceName
 			// is null (e.g. Forked Tongue), the link is simply skipped.
@@ -38634,6 +39049,96 @@ class CharacterSheetState {
 		return CharacterSheetState.CONDITION_EFFECTS[key]
 			|| CharacterSheetState._customConditions[key]
 			|| null;
+	}
+
+	/**
+	 * The data source under which the Thelemar (TGTT) condition variants are
+	 * published in the homebrew, e.g. `{@condition Invisible|TGTT}`. Kept as a
+	 * single constant so the resolver, the migration, and the tag/HTML rewriters
+	 * all agree on the source token.
+	 */
+	static THELEMAR_CONDITION_SOURCE = "TGTT";
+
+	/**
+	 * The Thelemar (TGTT) mechanical variant of a condition, or null when none
+	 * exists. The `_tgtt` keys of {@link CharacterSheetState.CONDITION_EFFECTS}
+	 * are the single source of truth for "does a Thelemar variant exist", so the
+	 * display rewrite and the mechanical resolver never disagree and we never
+	 * invent a variant the rules don't define (e.g. there is deliberately no
+	 * `charmed_tgtt` / `exhaustion_tgtt`).
+	 * @param {string} conditionName
+	 * @returns {object|null}
+	 */
+	static getThelemarConditionVariant (conditionName) {
+		if (!conditionName) return null;
+		const key = String(conditionName).toLowerCase().replace(/\s+/g, "_");
+		return CharacterSheetState.CONDITION_EFFECTS[`${key}_tgtt`] || null;
+	}
+
+	/**
+	 * Rewrite a bare condition string-tag — `{@condition X}` with no `|source` —
+	 * to the Thelemar variant `{@condition X|TGTT}` for every condition that HAS a
+	 * Thelemar variant. Tags that already carry a source (`{@condition X|tgtt}`,
+	 * `{@condition X|xphb}`) and conditions without a Thelemar variant (charmed,
+	 * blinded, …) are left untouched.
+	 * @param {string} str
+	 * @returns {string}
+	 */
+	static thelemarizeConditionTagString (str) {
+		if (typeof str !== "string" || !str.includes("{@condition")) return str;
+		return str.replace(/\{@condition ([^|}]+)\}/gi, (full, rawName) => {
+			const name = rawName.trim();
+			const variant = CharacterSheetState.getThelemarConditionVariant(name);
+			if (!variant) return full;
+			return `{@condition ${name}|${variant.source || CharacterSheetState.THELEMAR_CONDITION_SOURCE}}`;
+		});
+	}
+
+	/**
+	 * Deep, non-mutating Thelemar rewrite of an entries structure (string, array,
+	 * or object). Returns a new structure with every bare `{@condition X}` tag
+	 * promoted to its Thelemar variant (see {@link thelemarizeConditionTagString}).
+	 * @param {*} node
+	 * @returns {*}
+	 */
+	static thelemarizeConditionTags (node) {
+		if (typeof node === "string") return CharacterSheetState.thelemarizeConditionTagString(node);
+		if (Array.isArray(node)) return node.map(n => CharacterSheetState.thelemarizeConditionTags(n));
+		if (node && typeof node === "object") {
+			const out = {};
+			for (const k of Object.keys(node)) out[k] = CharacterSheetState.thelemarizeConditionTags(node[k]);
+			return out;
+		}
+		return node;
+	}
+
+	/**
+	 * Rewrite already-rendered condition hover links in a description's HTML so a
+	 * Thelemar character sees the Thelemar condition, not the 2014/2024 one. Used
+	 * for features whose cached `description` was rendered (to PHB/XPHB) from bare
+	 * tags but that no longer carry the source `entries` to re-render from (e.g.
+	 * Baleful Interdict). Only condition links whose name HAS a Thelemar variant
+	 * are repointed; the source/hash/href are swapped to the Thelemar variant.
+	 * @param {string} html
+	 * @returns {string}
+	 */
+	static thelemarizeConditionLinkHtml (html) {
+		if (typeof html !== "string" || !html.includes("conditionsdiseases.html")) return html;
+		return html.replace(/<a\b[^>]*data-vet-page="conditionsdiseases\.html"[^>]*>[^<]*<\/a>/gi, (anchor) => {
+			const hashMatch = anchor.match(/data-vet-hash="([^"]+)"/i);
+			if (!hashMatch) return anchor;
+			const hash = hashMatch[1];
+			const idx = hash.lastIndexOf("_");
+			const namePart = idx >= 0 ? hash.slice(0, idx) : hash;
+			const variant = CharacterSheetState.getThelemarConditionVariant(namePart.replace(/_/g, " "));
+			if (!variant) return anchor;
+			const newSrc = variant.source || CharacterSheetState.THELEMAR_CONDITION_SOURCE;
+			const newHash = `${namePart}_${newSrc.toLowerCase()}`;
+			return anchor
+				.replace(/(conditionsdiseases\.html#)[^"\s]+/i, `$1${newHash}`)
+				.replace(/data-vet-source="[^"]*"/i, `data-vet-source="${newSrc}"`)
+				.replace(/data-vet-hash="[^"]*"/i, `data-vet-hash="${newHash}"`);
+		});
 	}
 
 	/**

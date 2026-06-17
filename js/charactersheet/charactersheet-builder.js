@@ -3524,11 +3524,12 @@ class CharacterSheetBuilder {
 			for (const lang of langs) {
 				const source = sourceLookup?.get(lang) || "Unknown";
 				const sourceSpan = source ? ` <span class="charsheet__builder-lang-source">(${source})</span>` : "";
+				const hoverAttrs = this._page.getLanguageHoverAttributes?.(lang, source !== "Unknown" ? source : null) || "";
 				const isSelected = selectedArr.includes(lang);
 				const lbl = e_({outer: `
 					<label class="charsheet__builder-lang-pill">
 						<input type="checkbox" value="${lang}" ${isSelected ? "checked" : ""}>
-						<span class="charsheet__builder-lang-pill-name">${lang}</span>${sourceSpan}
+						<span class="charsheet__builder-lang-pill-name" ${hoverAttrs}>${lang}</span>${sourceSpan}
 					</label>
 				`});
 				const input = /** @type {HTMLInputElement} */ (lbl.querySelector("input"));

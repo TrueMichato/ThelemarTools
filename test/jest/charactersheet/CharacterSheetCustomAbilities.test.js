@@ -412,6 +412,180 @@ describe("Character Sheet Custom Abilities", () => {
 	});
 
 	// ===================================================================
+	// Modifier-derived Uses (uses-per-day = ability modifier)
+	// ===================================================================
+	describe("Custom Ability Modifier-derived Uses", () => {
+		test("should size max from the chosen ability modifier", () => {
+			charState.setAbilityBase("wis", 18); // +4
+			const abilityId = charState.addCustomAbility({
+				name: "Wisdom Power",
+				mode: "limited",
+				uses: {maxMode: "abilityMod", maxAbility: "wis", recharge: "long"},
+			});
+
+			const ability = charState.getCustomAbility(abilityId);
+			expect(ability.uses.maxMode).toBe("abilityMod");
+			expect(ability.uses.maxAbility).toBe("wis");
+			expect(ability.uses.max).toBe(4);
+			expect(ability.uses.current).toBe(4);
+
+			const display = charState.getCustomAbilityUsesDisplay(abilityId);
+			expect(display.max).toBe(4);
+			expect(display.current).toBe(4);
+		});
+
+		test("should floor the modifier-derived max at 1 (min 1)", () => {
+			charState.setAbilityBase("cha", 8); // -1
+			const abilityId = charState.addCustomAbility({
+				name: "Weak Charisma Power",
+				mode: "limited",
+				uses: {maxMode: "abilityMod", maxAbility: "cha", recharge: "long"},
+			});
+
+			const display = charState.getCustomAbilityUsesDisplay(abilityId);
+			expect(display.max).toBe(1);
+		});
+
+		test("max should follow ability-score changes LIVE", () => {
+			charState.setAbilityBase("wis", 14); // +2
+			const abilityId = charState.addCustomAbility({
+				name: "Wisdom Power",
+				mode: "limited",
+				uses: {maxMode: "abilityMod", maxAbility: "wis", recharge: "long"},
+			});
+			expect(charState.getCustomAbilityUsesDisplay(abilityId).max).toBe(2);
+
+			// Raise WIS to 20 (+5) and confirm the display max follows immediately
+			charState.setAbilityBase("wis", 20);
+			expect(charState.getCustomAbilityUsesDisplay(abilityId).max).toBe(5);
+
+			// syncDerivedResourceMaxes should update the cached numeric max too
+			charState.syncDerivedResourceMaxes();
+			expect(charState.getCustomAbility(abilityId).uses.max).toBe(5);
+		});
+
+		test("syncDerivedResourceMaxes clamps current to a reduced max", () => {
+			charState.setAbilityBase("wis", 20); // +5
+			const abilityId = charState.addCustomAbility({
+				name: "Wisdom Power",
+				mode: "limited",
+				uses: {maxMode: "abilityMod", maxAbility: "wis", recharge: "long"},
+			});
+			expect(charState.getCustomAbility(abilityId).uses.current).toBe(5);
+
+			// Drop WIS to 12 (+1); current must clamp down to the new max
+			charState.setAbilityBase("wis", 12);
+			charState.syncDerivedResourceMaxes();
+			const ability = charState.getCustomAbility(abilityId);
+			expect(ability.uses.max).toBe(1);
+			expect(ability.uses.current).toBe(1);
+		});
+
+		test("long rest restores current to the live modifier-derived max", () => {
+			charState.setAbilityBase("wis", 18); // +4
+			const abilityId = charState.addCustomAbility({
+				name: "Wisdom Power",
+				mode: "limited",
+				uses: {maxMode: "abilityMod", maxAbility: "wis", recharge: "long"},
+			});
+			charState.useCustomAbility(abilityId);
+			charState.useCustomAbility(abilityId);
+			expect(charState.getCustomAbility(abilityId).uses.current).toBe(2);
+
+			charState.restoreCustomAbilityUses("long");
+			expect(charState.getCustomAbility(abilityId).uses.current).toBe(4);
+		});
+
+		test("normalises an unknown ability to wis", () => {
+			charState.setAbilityBase("wis", 16); // +3
+			const abilityId = charState.addCustomAbility({
+				name: "Bad Ability Power",
+				mode: "limited",
+				uses: {maxMode: "abilityMod", maxAbility: "bogus", recharge: "long"},
+			});
+			const ability = charState.getCustomAbility(abilityId);
+			expect(ability.uses.maxAbility).toBe("wis");
+			expect(ability.uses.max).toBe(3);
+		});
+
+		test("editing from fixed to modifier-derived recomputes the max", () => {
+			charState.setAbilityBase("int", 18); // +4
+			const abilityId = charState.addCustomAbility({
+				name: "Convertible Power",
+				mode: "limited",
+				uses: {max: 2, recharge: "long"},
+			});
+			expect(charState.getCustomAbility(abilityId).uses.max).toBe(2);
+
+			charState.updateCustomAbility(abilityId, {
+				mode: "limited",
+				uses: {maxMode: "abilityMod", maxAbility: "int", recharge: "long"},
+			});
+			const ability = charState.getCustomAbility(abilityId);
+			expect(ability.uses.maxMode).toBe("abilityMod");
+			expect(ability.uses.max).toBe(4);
+		});
+
+		test("editing from modifier-derived back to fixed strips modifier fields", () => {
+			charState.setAbilityBase("int", 18);
+			const abilityId = charState.addCustomAbility({
+				name: "Convertible Power",
+				mode: "limited",
+				uses: {maxMode: "abilityMod", maxAbility: "int", recharge: "long"},
+			});
+
+			charState.updateCustomAbility(abilityId, {
+				mode: "limited",
+				uses: {maxMode: "fixed", max: 7, recharge: "short"},
+			});
+			const ability = charState.getCustomAbility(abilityId);
+			expect(ability.uses.maxMode).toBeUndefined();
+			expect(ability.uses.maxAbility).toBeUndefined();
+			expect(ability.uses.max).toBe(7);
+		});
+
+		test("persists and recomputes across toJson / loadFromJson round-trip", () => {
+			charState.setAbilityBase("wis", 16); // +3
+			const abilityId = charState.addCustomAbility({
+				name: "Wisdom Power",
+				mode: "limited",
+				uses: {maxMode: "abilityMod", maxAbility: "wis", recharge: "long"},
+			});
+			expect(charState.getCustomAbility(abilityId).uses.max).toBe(3);
+
+			const json = charState.toJson();
+			const restored = new CharacterSheetState();
+			restored.loadFromJson(json);
+
+			const reloaded = restored.getCustomAbilities().find(a => a.name === "Wisdom Power");
+			expect(reloaded.uses.maxMode).toBe("abilityMod");
+			expect(reloaded.uses.maxAbility).toBe("wis");
+			expect(reloaded.uses.max).toBe(3);
+
+			// Modifier-derived max stays live after reload
+			restored.setAbilityBase("wis", 20); // +5
+			const display = restored.getCustomAbilityUsesDisplay(reloaded.id);
+			expect(display.max).toBe(5);
+		});
+
+		test("legacy fixed-number abilities keep working (migration-safe)", () => {
+			const abilityId = charState.addCustomAbility({
+				name: "Legacy Power",
+				mode: "limited",
+				uses: {max: 3, recharge: "short"},
+			});
+			const ability = charState.getCustomAbility(abilityId);
+			expect(ability.uses.maxMode).toBeUndefined();
+			expect(ability.uses.max).toBe(3);
+
+			// Changing ability scores must NOT affect a fixed-number ability
+			charState.setAbilityBase("wis", 20);
+			charState.syncDerivedResourceMaxes();
+			expect(charState.getCustomAbility(abilityId).uses.max).toBe(3);
+		});
+	});
+
+	// ===================================================================
 	// Mode Tests (Passive vs Toggle)
 	// ===================================================================
 	describe("Custom Ability Modes", () => {

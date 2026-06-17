@@ -153,10 +153,10 @@ describe("#11 Intransigent extend-to-allies signifier", () => {
 
 		// An unmistakable heading that names the extend-to-others option.
 		expect(html).toContain("charsheet__intransigent-title");
-		expect(html).toContain("Extend charmed immunity to chosen allies");
+		expect(html).toContain("Charmed immunity — extends to allies you choose");
 		// The stepper carries an inline label so it reads as a choice, not a stat.
 		expect(html).toContain("charsheet__intransigent-label");
-		expect(html).toContain("Allies you choose to protect:");
+		expect(html).toContain("Creatures you choose to protect:");
 	});
 
 	test("the feature text sets no cap, so the UI signals 'no fixed limit' (no misleading hard cap)", () => {
@@ -171,9 +171,11 @@ describe("#11 Intransigent extend-to-allies signifier", () => {
 		const {features} = makeFeatures({withApi: true, initialCount: 0});
 		const html = features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
 		expect(html).toContain("charsheet__intransigent-live");
+		// At zero, the live line is a gold call-to-action that advertises the extend option.
+		expect(html).toContain("charsheet__intransigent-live--extend");
 		// Self-immunity stated, and the extend affordance explicitly called out.
 		expect(html).toMatch(/You are immune to charmed \(while conscious\)/);
-		expect(html).toMatch(/protect creatures of your choice within 10 ft/);
+		expect(html).toMatch(/extend this immunity to creatures of your choice within 10 ft/);
 	});
 
 	test("the live summary reflects the chosen ally count (singular/plural)", () => {
@@ -181,6 +183,10 @@ describe("#11 Intransigent extend-to-allies signifier", () => {
 		const many = makeFeatures({withApi: true, initialCount: 3});
 		const htmlOne = one.features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
 		const htmlMany = many.features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
+
+		// A non-zero count flips the accent to the emerald "active" modifier.
+		expect(htmlOne).toContain("charsheet__intransigent-live--active");
+		expect(htmlMany).toContain("charsheet__intransigent-live--active");
 
 		const live = (html) => (html.match(/charsheet__intransigent-live[^>]*>([^<]*)</) || [])[1] || "";
 		expect(live(htmlOne)).toMatch(/You \+ 1 chosen creature within 10 ft are immune to charmed \(while conscious\)/);
