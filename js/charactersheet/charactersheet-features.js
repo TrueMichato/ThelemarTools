@@ -1840,6 +1840,7 @@ class CharacterSheetFeatures {
 			&& typeof this._state.getIntransigentAllyCount === "function"
 			&& typeof this._state.setIntransigentAllyCount === "function";
 		let intransigentHtml = "";
+		let intransigentBadge = "";
 		if (isIntransigent) {
 			const intransigentRange = intransigentCalcs.intransigentRange || 10;
 			const allyCount = Math.max(0, Math.min(intransigentMax, Number(this._state.getIntransigentAllyCount()) || 0));
@@ -1883,6 +1884,19 @@ class CharacterSheetFeatures {
 					</div>
 				</div>
 			`;
+			// (R27 #3) The status badge above lives in the feature BODY, which is collapsed
+			// by default — so on the un-expanded card there was no signal at all that this
+			// immunity can extend to allies. Surface a compact header badge (visible while
+			// collapsed) that flips gold→emerald and states the live share at a glance,
+			// pointing the player at the in-body chooser.
+			const badgeClass = hasAllies ? "badge-success" : "badge-warning";
+			const badgeText = hasAllies
+				? `🛡️ Charmed-immune: You + ${allyCount} ${allyNoun}`
+				: `🛡️ Charmed-immune (extendable)`;
+			const badgeTitle = hasAllies
+				? `You and ${allyCount} chosen ${allyNoun} within ${intransigentRange} ft are immune to the charmed condition while you are conscious. Expand this feature to adjust who you protect.`
+				: `Only you are immune to charmed while conscious — but you can extend it to creatures of your choice within ${intransigentRange} ft. Expand this feature to choose allies.`;
+			intransigentBadge = `<span class="badge ${badgeClass}" title="${badgeTitle.replace(/"/g, "&quot;")}">${badgeText}</span>`;
 		}
 
 		const featureEl = e_({outer: `
@@ -1898,6 +1912,7 @@ class CharacterSheetFeatures {
 					${huntersPreyBadge}
 					${combatMethodBadge}
 					${derivedEffectBadge}
+					${intransigentBadge}
 					<div class="charsheet__feature-actions">
 						${showUseBtn ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="${isAbility ? "Use this ability" : "Use Feature"}">Use</button>` : ""}
 						<button class="ve-btn ve-btn-xs ${this._state.getFeatureNote?.(feature.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feature-note" title="${this._state.getFeatureNote?.(feature.id) ? "Edit Note" : "Add Note"}">

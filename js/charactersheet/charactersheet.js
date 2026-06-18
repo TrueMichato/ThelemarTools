@@ -15636,22 +15636,34 @@ class CharacterSheetPage {
 
 			const updateDisplay = () => {
 				const curBase = this._state.getAbilityBase(abl);
-				const curBonus = this._state.getAbilityBonus(abl);
-				const curItemBonus = (this._state.getItemAbilityOverrides?.()?.bonus?.[abl]) || 0;
-				const curItemStatic = this._state.getItemAbilityOverrides?.()?.static?.[abl];
 				const curTotal = this._state.getAbilityScore(abl);
 				const curMod = this._state.getAbilityMod(abl);
 				const curModStr = curMod >= 0 ? `+${curMod}` : `${curMod}`;
 
 				inputEl.value = curBase;
 
-				const parts = [`Base ${curBase}`];
-				if (curBonus) parts.push(`${curBonus >= 0 ? "+" : ""}${curBonus} bonus`);
-				if (curItemBonus) parts.push(`${curItemBonus >= 0 ? "+" : ""}${curItemBonus} item`);
-				if (curItemStatic && curItemStatic > (curBase + curBonus + curItemBonus)) {
-					parts.push(`→ ${curItemStatic} (item override)`);
-				}
+				// (R27 #1) Itemize the bonus PER SOURCE instead of one flat "+N bonus"
+				// lump, mirroring the ability hero-card / skill-hover breakdowns. Each
+				// contribution is attributed to its origin (Racial, Item, Primal Champion,
+				// named features like "Pan's Apostle", …) so the player can see exactly
+				// what is raising the score. A tooltip repeats the itemization for narrow
+				// displays where the inline text is clipped.
+				const breakdown = this._state.getAbilityBonusBreakdown(abl);
+				const parts = [`Base ${breakdown.base}`];
+				breakdown.contributions.forEach(c => {
+					parts.push(c.isReplacement
+						? `↔ ${c.label}`
+						: `${c.amount >= 0 ? "+" : ""}${c.amount} ${c.label}`);
+				});
 				breakdownEl.textContent = parts.join(" | ");
+				const tipLines = [`🧬 Base: ${breakdown.base}`];
+				breakdown.contributions.forEach(c => {
+					tipLines.push(c.isReplacement
+						? `↔️ ${c.label}`
+						: `➕ ${c.label}: ${c.amount >= 0 ? "+" : ""}${c.amount}`);
+				});
+				tipLines.push(`─────────\n🎯 Total: ${breakdown.total}`);
+				breakdownEl.title = tipLines.join("\n");
 
 				totalEl.textContent = curTotal;
 				modEl.textContent = `(${curModStr})`;
