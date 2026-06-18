@@ -147,16 +147,22 @@ describe("#11 Intransigent ally-chooser control", () => {
 });
 
 describe("#11 Intransigent extend-to-allies signifier", () => {
-	test("renders an explicit 'extend to chosen allies' title + labelled stepper", () => {
+	test("renders an explicit '➕ Extend immunity to allies' title + labelled stepper", () => {
 		const {features} = makeFeatures({withApi: true, initialCount: 0});
 		const html = features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
 
-		// An unmistakable heading that names the extend-to-others option.
+		// An unmistakable heading that names the extend-to-others action.
 		expect(html).toContain("charsheet__intransigent-title");
-		expect(html).toContain("Charmed immunity — extends to allies you choose");
+		expect(html).toContain("➕ Extend immunity to allies");
+		// A dedicated, visually set-off extend action section.
+		expect(html).toContain("charsheet__intransigent-extend");
 		// The stepper carries an inline label so it reads as a choice, not a stat.
 		expect(html).toContain("charsheet__intransigent-label");
 		expect(html).toContain("Creatures you choose to protect:");
+		// ±stepper buttons make the extend action a real control.
+		expect(html).toContain("charsheet__intransigent-step");
+		const stepData = [...html.matchAll(/charsheet__intransigent-step[^>]*data-step="(-?\d)"/g)].map(m => m[1]);
+		expect(stepData).toEqual(expect.arrayContaining(["1", "-1"]));
 	});
 
 	test("the feature text sets no cap, so the UI signals 'no fixed limit' (no misleading hard cap)", () => {
@@ -167,18 +173,22 @@ describe("#11 Intransigent extend-to-allies signifier", () => {
 		expect(Number(attrOf(html, "charsheet__intransigent-ally-count", "max"))).toBeGreaterThan(12);
 	});
 
-	test("the live summary advertises the extend option even when zero allies are chosen", () => {
+	test("at zero allies the status badge reads 'Only you are immune' and advertises the extend option", () => {
 		const {features} = makeFeatures({withApi: true, initialCount: 0});
 		const html = features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
 		expect(html).toContain("charsheet__intransigent-live");
-		// At zero, the live line is a gold call-to-action that advertises the extend option.
+		expect(html).toContain("charsheet__intransigent-status");
+		// At zero, the status is the gold call-to-action variant.
 		expect(html).toContain("charsheet__intransigent-live--extend");
-		// Self-immunity stated, and the extend affordance explicitly called out.
-		expect(html).toMatch(/You are immune to charmed \(while conscious\)/);
-		expect(html).toMatch(/extend this immunity to creatures of your choice within 10 ft/);
+		// The badge distinctly states the self-only scope (while conscious)…
+		expect(html).toContain("Only you are immune to charmed");
+		expect(html).toContain("while you are conscious");
+		// …and the extend section advertises sharing it BEFORE anyone is chosen.
+		expect(html).toMatch(/share this immunity/i);
+		expect(html).toMatch(/haven't extended it to anyone yet/i);
 	});
 
-	test("the live summary reflects the chosen ally count (singular/plural)", () => {
+	test("the status badge reflects the chosen ally count (singular/plural) and flips to the active accent", () => {
 		const one = makeFeatures({withApi: true, initialCount: 1});
 		const many = makeFeatures({withApi: true, initialCount: 3});
 		const htmlOne = one.features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
@@ -188,8 +198,8 @@ describe("#11 Intransigent extend-to-allies signifier", () => {
 		expect(htmlOne).toContain("charsheet__intransigent-live--active");
 		expect(htmlMany).toContain("charsheet__intransigent-live--active");
 
-		const live = (html) => (html.match(/charsheet__intransigent-live[^>]*>([^<]*)</) || [])[1] || "";
-		expect(live(htmlOne)).toMatch(/You \+ 1 chosen creature within 10 ft are immune to charmed \(while conscious\)/);
-		expect(live(htmlMany)).toMatch(/You \+ 3 chosen creatures within 10 ft are immune to charmed \(while conscious\)/);
+		const head = (html) => (html.match(/charsheet__intransigent-status-head[^>]*>([^<]*)</) || [])[1] || "";
+		expect(head(htmlOne)).toMatch(/You \+ 1 chosen ally within 10 ft are immune to charmed/);
+		expect(head(htmlMany)).toMatch(/You \+ 3 chosen allies within 10 ft are immune to charmed/);
 	});
 });

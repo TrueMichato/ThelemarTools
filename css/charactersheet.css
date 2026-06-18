@@ -8866,13 +8866,13 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--rgb-text-dim);
 }
 
-/* Intransigent (Hellspeaker L11) extend-to-allies chooser. The card must make the
-   "you may extend your charmed immunity to creatures of your choice" affordance
-   unmistakable at a glance, so the panel leads with a high-contrast titled heading and
-   a prominent, accent-bordered live summary (the glance affordance), followed by a clear
-   inline label + compact numeric stepper. The live summary's left accent shifts from gold
-   (zero allies — advertises the extend call-to-action) to emerald (allies chosen — the
-   extension is active). The panel adopts the dark --cs-* design tokens (with literal
+/* Intransigent (Hellspeaker L11) extend-to-allies chooser. The user repeatedly reported
+   that it was not obvious the charmed immunity EXTENDS to others. So the panel leads with a
+   high-contrast two-state STATUS badge (a glance signifier reading either "Only you are
+   immune" or "You + N chosen allies …"), followed by an unmistakable "➕ Extend immunity
+   to allies" action section with a ±stepper. The status badge's left accent + icon shift
+   from gold (zero allies — advertises the extend call-to-action) to emerald (allies chosen
+   — the extension is active). The panel adopts the dark --cs-* design tokens (with literal
    fallbacks) so it reads as an elevated surface inside the dark feature card. */
 .charsheet__intransigent-controls {
 	background: var(--cs-bg-surface, #1e293b);
@@ -8906,10 +8906,11 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 .charsheet__intransigent-ally-count {
-	width: 5rem;
+	width: 4rem;
+	text-align: center;
 }
 
-/* The live one-line summary is the glance affordance: a prominent, accent-bordered pill
+/* The status badge is the primary glance affordance: a prominent, accent-bordered pill
    that states the current effect (and, at zero allies, advertises the extend option). */
 .charsheet__intransigent-live {
 	padding: 0.4em 0.6em;
@@ -8921,14 +8922,83 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--cs-text-primary, #f1f5f9);
 }
 
+/* Two-state status badge: a large shield icon beside a stacked head + "while conscious"
+   sub-line so the immunity scope reads instantly. */
+.charsheet__intransigent-status {
+	display: flex;
+	align-items: center;
+	gap: 0.55em;
+}
+
+.charsheet__intransigent-status-icon {
+	font-size: 1.5em;
+	line-height: 1;
+	flex: 0 0 auto;
+}
+
+.charsheet__intransigent-status-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.charsheet__intransigent-status-head {
+	font-weight: 700;
+	font-size: 1.02em;
+}
+
+.charsheet__intransigent-status-sub {
+	font-size: 0.82em;
+	font-weight: 500;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
 /* Zero allies → gold call-to-action accent that advertises the extend option. */
 .charsheet__intransigent-live--extend {
 	border-left-color: var(--cs-accent-gold, #f59e0b);
 }
 
+.charsheet__intransigent-live--extend .charsheet__intransigent-status-head {
+	color: var(--cs-accent-gold, #f59e0b);
+}
+
 /* Allies chosen → emerald accent confirming the extension is active. */
 .charsheet__intransigent-live--active {
 	border-left-color: var(--cs-accent-emerald, #10b981);
+}
+
+.charsheet__intransigent-live--active .charsheet__intransigent-status-head {
+	color: var(--cs-accent-emerald, #10b981);
+}
+
+/* The "➕ Extend immunity to allies" action section — visually set off as the place where
+   you actually share the immunity, so the extend affordance can't be missed. */
+.charsheet__intransigent-extend {
+	margin-top: 0.5em;
+	padding: 0.5em 0.6em;
+	border: 1px dashed var(--cs-accent-gold, #f59e0b);
+	border-radius: 6px;
+	background: var(--cs-bg-elevated, #334155);
+}
+
+.charsheet__intransigent-extend .charsheet__intransigent-title {
+	color: var(--cs-accent-gold, #f59e0b);
+	margin-bottom: 0.25em;
+}
+
+.charsheet__intransigent-extend-hint {
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__intransigent-extend-hint strong {
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+/* The ±stepper buttons sit flush with the numeric input so the extend action reads as a
+   real control, not a bare stat field. */
+.charsheet__intransigent-step {
+	min-width: 2rem;
+	font-weight: 700;
 }
 
 .charsheet__intransigent-controls .ve-muted,
