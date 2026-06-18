@@ -145,6 +145,11 @@ class CharacterSheetInventory {
 				if (itemId) this._restoreCharge(itemId);
 				return;
 			}
+			if (e.target.closest(".charsheet__item-cast-healing")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._pCastHealingStaff(itemId);
+				return;
+			}
 			if (e.target.closest(".charsheet__gem-use-charge")) {
 				const itemId = _getItemId(e.target);
 				const gemName = e.target.closest(".charsheet__gem-use-charge")?.dataset?.gemName;
@@ -1321,6 +1326,10 @@ class CharacterSheetInventory {
 			// Weapon properties
 			weapon: item.weapon || false,
 			weaponCategory: item.weaponCategory,
+			// Base-item reference (e.g. "shortbow|phb") for magic weapons derived from a base
+			// weapon. Drives base-item detection for effects scoped to a weapon TYPE (e.g.
+			// Bracers of Archery → any longbow/shortbow, including a "Frost Shortbow").
+			baseItem: item.baseItem || null,
 			damage: item.dmg1 ? `${item.dmg1} ${Parser.dmgTypeToFull(item.dmgType)}` : null,
 			dmg1: item.dmg1 || null,
 			dmgType: item.dmgType || null,
@@ -3626,6 +3635,177 @@ class CharacterSheetInventory {
 	}
 
 	/**
+	 * Recognize a charged healing staff (Staff of Healing and look-alikes) — an item that
+	 * lets the wielder expend charges to cast healing spells. Data-driven where possible:
+	 *  - exact name match for the well-known Staff of Healing, OR
+	 *  - any charged item whose `attachedSpells.charges` lists a known healing spell.
+	 * @param {object} item - Normalized inventory item.
+	 * @returns {boolean}
+	 */
+	_isHealingStaff (item) {
+		if (!item) return false;
+		const name = String(item.name || "").toLowerCase();
+		if (name === "staff of healing") return true;
+		// Generic: a charged item that attaches a healing spell as a charge-cost option.
+		const charged = item.attachedSpells?.charges;
+		if (charged && typeof charged === "object") {
+			const healingSpells = ["cure wounds", "mass cure wounds", "lesser restoration"];
+			for (const list of Object.values(charged)) {
+				if (Array.isArray(list) && list.some(s => healingSpells.includes(String(s).toLowerCase()))) return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * The wielder's spellcasting ability modifier, used when casting from a healing staff
+	 * ("using your spellcasting ability modifier"). Falls back to 0 when the character has
+	 * no spellcasting ability set.
+	 * @returns {number}
+	 */
+	_getHealingStaffAbilityMod () {
+		const ability = this._state.getSpellcastingAbility?.();
+		if (ability && this._state.getAbilityMod) return this._state.getAbilityMod(ability) || 0;
+		return 0;
+	}
+
+	/**
+	 * Roll a healing formula ("{n}d8") plus a flat modifier. Honors the Thelemar
+	 * "item utilization" house rule (max dice) when enabled, mirroring potion behavior.
+	 * @param {string} diceStr - e.g. "2d8".
+	 * @param {number} flatMod - Flat addition (spellcasting ability mod).
+	 * @returns {{total: number, rolls: number[], formula: string}}
+	 */
+	_rollStaffHealing (diceStr, flatMod) {
+		const m = String(diceStr).match(/(\d+)d(\d+)/);
+		const rolls = [];
+		let total = 0;
+		if (m) {
+			const num = parseInt(m[1], 10);
+			const size = parseInt(m[2], 10);
+			const settings = this._state.getSettings?.() || {};
+			for (let i = 0; i < num; i++) {
+				const r = settings.thelemar_itemUtilization ? size : (Math.floor(Math.random() * size) + 1);
+				rolls.push(r);
+				total += r;
+			}
+		}
+		total += flatMod || 0;
+		return {total: Math.max(0, total), rolls, formula: `${diceStr}${flatMod ? ` + ${flatMod}` : ""}`};
+	}
+
+	/**
+	 * The healing-spell menu a Staff of Healing offers, with charge costs. Returns the
+	 * canonical Staff-of-Healing list; kept here so it can later be data-derived from
+	 * `attachedSpells.charges` for look-alikes.
+	 * @returns {Array<{kind: string, label: string, minCost: number}>}
+	 */
+	_getHealingStaffSpellMenu () {
+		return [
+			{kind: "cureWounds", label: "Cure Wounds (1 charge per spell level, up to 4th)", minCost: 1},
+			{kind: "lesserRestoration", label: "Lesser Restoration (2 charges)", minCost: 2},
+			{kind: "massCureWounds", label: "Mass Cure Wounds (5 charges)", minCost: 5},
+		];
+	}
+
+	/**
+	 * Cast a healing spell from a charged staff: pick a spell (and level, for Cure Wounds),
+	 * spend the charges, roll/apply the healing, and surface the result. Applies healing to
+	 * the wielder by default (single-character sheet); the rolled value is shown so a DM can
+	 * redirect it to an ally. Honors the RAW "expend the last charge" d20 risk: on a 1 the
+	 * staff is destroyed.
+	 * @param {string} itemId - The inventory item id.
+	 */
+	async _pCastHealingStaff (itemId) {
+		const item = this._state.getItems().find(i => i.id === itemId);
+		if (!item) return;
+		const remaining = item.chargesCurrent ?? item.charges ?? 0;
+		if (remaining <= 0) {
+			JqueryUtil.doToast({type: "warning", content: `${item.name} has no charges remaining.`});
+			return;
+		}
+
+		const menu = this._getHealingStaffSpellMenu().filter(o => o.minCost <= remaining);
+		if (!menu.length) {
+			JqueryUtil.doToast({type: "warning", content: `${item.name}: not enough charges (${remaining}) to cast any of its spells.`});
+			return;
+		}
+
+		const pick = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+			title: `${item.name} — Cast Spell (${remaining} charge${remaining === 1 ? "" : "s"})`,
+			values: menu.map(o => o.label),
+			isResolveItem: false,
+			default: 0,
+		}));
+		if (pick == null) return;
+		const opt = menu[pick];
+
+		const abilityMod = this._getHealingStaffAbilityMod();
+		let cost = opt.minCost;
+		let spellLabel = "";
+		let healing = null;
+
+		if (opt.kind === "cureWounds") {
+			const maxLevel = Math.min(4, remaining);
+			const levelValues = [];
+			for (let l = 1; l <= maxLevel; l++) levelValues.push(`Level ${l} — ${l} charge${l === 1 ? "" : "s"} (${l}d8${abilityMod ? ` + ${abilityMod}` : ""})`);
+			const li = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+				title: "Cure Wounds — Cast at Which Level?",
+				values: levelValues,
+				isResolveItem: false,
+				default: 0,
+			}));
+			if (li == null) return;
+			const level = li + 1;
+			cost = level;
+			spellLabel = `Cure Wounds (level ${level})`;
+			healing = this._rollStaffHealing(`${level}d8`, abilityMod);
+		} else if (opt.kind === "massCureWounds") {
+			cost = 5;
+			spellLabel = "Mass Cure Wounds";
+			healing = this._rollStaffHealing("3d8", abilityMod);
+		} else {
+			cost = 2;
+			spellLabel = "Lesser Restoration";
+		}
+
+		if (cost > remaining) {
+			JqueryUtil.doToast({type: "warning", content: `${item.name}: not enough charges (need ${cost}, have ${remaining}).`});
+			return;
+		}
+
+		const after = remaining - cost;
+		this._state.setItemCharges(itemId, after);
+
+		if (healing) {
+			this._state.heal(healing.total);
+			JqueryUtil.doToast({
+				type: "success",
+				content: `${item.name}: cast ${spellLabel} (−${cost} charge${cost === 1 ? "" : "s"}). Healed ${healing.total} HP (${healing.formula}). ${after}/${item.charges} charges left.`,
+			});
+		} else {
+			JqueryUtil.doToast({
+				type: "success",
+				content: `${item.name}: cast ${spellLabel} (−${cost} charges) — ends one disease or one condition (blinded, deafened, paralyzed, or poisoned). ${after}/${item.charges} charges left.`,
+			});
+		}
+
+		// RAW: if you expend the last charge, roll a d20; on a 1 the staff is destroyed.
+		if (after === 0) {
+			const d20 = Math.floor(Math.random() * 20) + 1;
+			if (d20 === 1) {
+				this._state.removeItem(itemId);
+				JqueryUtil.doToast({type: "danger", content: `${item.name} expended its last charge and vanished in a flash of light, lost forever! (rolled a 1)`});
+			} else {
+				JqueryUtil.doToast({type: "info", content: `${item.name} expended its last charge (d20 → ${d20}; survives on anything but a 1).`});
+			}
+		}
+
+		this._renderItemList();
+		this._page.saveCharacter();
+	}
+
+	/**
 	 * Use a consumable item (potion or scroll)
 	 * @param {string} itemId - The item ID
 	 */
@@ -5312,6 +5492,12 @@ class CharacterSheetInventory {
 		const canEquip = CharacterSheetInventory.canEquipItem(item);
 		const canAttune = item.requiresAttunement;
 		const hasCharges = item.charges && item.charges > 0;
+		// Staff of Healing (and similar charged healing staves): a "Cast" affordance lets the
+		// wielder expend charges to cast its healing spells. Gated like attunement effects.
+		const isHealingStaff = this._isHealingStaff(item);
+		const healingStaffActive = isHealingStaff && item.equipped
+			&& (!item.requiresAttunement || item.attuned)
+			&& (item.chargesCurrent ?? item.charges ?? 0) > 0;
 		const hasNote = !!this._state.getItemNote(item.id);
 		const isConsumable = item.type === "P" || item.type === "SC"; // Potion or Scroll
 		const isArtifact = item.rarity === "artifact";
@@ -5424,6 +5610,11 @@ class CharacterSheetInventory {
 							</button>
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-restore-charge" title="Restore 1 charge" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-plus"></span>
+							</button>
+						` : ""}
+						${healingStaffActive ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-success charsheet__item-cast-healing" title="Expend charges to cast a healing spell">
+								<span class="glyphicon glyphicon-heart"></span> Cast
 							</button>
 						` : ""}
 						${gemHasCharges ? `
