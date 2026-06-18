@@ -587,6 +587,40 @@ class CharacterSheetDruidResources {
 		if (!options.canFly) limitBits.push("no fly");
 		if (!options.canSwim) limitBits.push("no swim-only");
 
+		// Precompute a normalized entry per candidate ONCE (rec/model + the
+		// structured fields the filter predicate reads), so live filtering /
+		// searching never re-parses 100+ stat blocks on every keystroke.
+		const entries = [];
+		for (const creature of candidates) {
+			const rec = this._state._parseBestiaryCreatureToBeastRecord?.(creature);
+			const model = this._buildBeastModel(rec);
+			if (!model) continue;
+			entries.push({
+				creature,
+				rec,
+				model,
+				name: creature.name || "",
+				source: creature.source || "",
+				crNumber: Number.isFinite(rec?.crNumber) ? rec.crNumber : 0,
+				size: rec?.size || "",
+				creatureType: rec?.creatureType || "",
+			});
+		}
+
+		const filterOptions = CharacterSheetDruidResources.buildKnownFormFilterOptions(entries);
+		const SIZE_NAMES = {T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"};
+		const esc = CharacterSheetClassUtils.escapeHtml;
+		const optTag = (val, label, sel) => `<option value="${esc(String(val))}"${sel ? " selected" : ""}>${esc(label)}</option>`;
+		const crLabel = (n) => `CR ${(typeof Parser !== "undefined" && Parser.numberToCr) ? Parser.numberToCr(n) : n}`;
+
+		const sourceOpts = [optTag("__all__", "All sources", true), ...filterOptions.sources.map(s => optTag(s, (typeof Parser !== "undefined" && Parser.sourceJsonToAbv) ? Parser.sourceJsonToAbv(s) : s))].join("");
+		const typeOpts = [optTag("__all__", "All types", true), ...filterOptions.types.map(t => optTag(t, t.charAt(0).toUpperCase() + t.slice(1)))].join("");
+		const sizeOpts = [optTag("__all__", "All sizes", true), ...filterOptions.sizes.map(s => optTag(s, SIZE_NAMES[s] || s))].join("");
+		const crMinOpts = [optTag("", "CR min", true), ...filterOptions.crNumbers.map(n => optTag(n, crLabel(n)))].join("");
+		const crMaxOpts = [optTag("", "CR max", true), ...filterOptions.crNumbers.map(n => optTag(n, crLabel(n)))].join("");
+
+		const selStyle = "background: var(--cs-bg-elevated, #334155); color: var(--cs-text-primary, #f1f5f9); border: 1px solid var(--cs-border, rgba(255,255,255,.1)); width: auto; min-width: 0;";
+
 		eleModalInner.appendChild(e_({outer: `
 			<div class="ve-flex-col" style="gap: 10px; min-height: 0;">
 				<div class="ve-flex-v-center ve-flex-h-between" style="gap: 8px;">
@@ -594,6 +628,14 @@ class CharacterSheetDruidResources {
 					<div class="ve-small ve-muted charsheet__ws-picker-count"></div>
 				</div>
 				<input type="text" class="form-control input-sm charsheet__ws-picker-search" placeholder="Search forms by name\u2026" style="background: var(--cs-bg-elevated, #334155); color: var(--cs-text-primary, #f1f5f9); border: 1px solid var(--cs-border, rgba(255,255,255,.1));">
+				<div class="charsheet__ws-picker-filters ve-flex-v-center ve-flex-wrap" style="gap: 6px;">
+					<select class="form-control input-sm charsheet__ws-picker-filter-source" style="${selStyle}" title="Filter by source">${sourceOpts}</select>
+					<select class="form-control input-sm charsheet__ws-picker-filter-type" style="${selStyle}" title="Filter by creature type">${typeOpts}</select>
+					<select class="form-control input-sm charsheet__ws-picker-filter-size" style="${selStyle}" title="Filter by size">${sizeOpts}</select>
+					<select class="form-control input-sm charsheet__ws-picker-filter-crmin" style="${selStyle}" title="Minimum Challenge Rating">${crMinOpts}</select>
+					<select class="form-control input-sm charsheet__ws-picker-filter-crmax" style="${selStyle}" title="Maximum Challenge Rating">${crMaxOpts}</select>
+					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__ws-picker-filter-reset" title="Clear all filters">Reset</button>
+				</div>
 				<div class="charsheet__ws-picker-list ve-flex-col ve-overflow-y-auto" style="gap: 6px; max-height: 60vh;"></div>
 			</div>
 		`}));
@@ -601,22 +643,35 @@ class CharacterSheetDruidResources {
 		const list = eleModalInner.querySelector(".charsheet__ws-picker-list");
 		const countEl = eleModalInner.querySelector(".charsheet__ws-picker-count");
 		const searchEl = eleModalInner.querySelector(".charsheet__ws-picker-search");
+		const sourceEl = eleModalInner.querySelector(".charsheet__ws-picker-filter-source");
+		const typeEl = eleModalInner.querySelector(".charsheet__ws-picker-filter-type");
+		const sizeEl = eleModalInner.querySelector(".charsheet__ws-picker-filter-size");
+		const crMinEl = eleModalInner.querySelector(".charsheet__ws-picker-filter-crmin");
+		const crMaxEl = eleModalInner.querySelector(".charsheet__ws-picker-filter-crmax");
+		const resetEl = eleModalInner.querySelector(".charsheet__ws-picker-filter-reset");
 
-		const renderList = (filterText = "") => {
-			const needle = filterText.trim().toLowerCase();
+		const getFilters = () => ({
+			needle: (searchEl?.value || "").trim().toLowerCase(),
+			source: sourceEl?.value || "__all__",
+			type: typeEl?.value || "__all__",
+			size: sizeEl?.value || "__all__",
+			crMin: (crMinEl?.value ?? "") === "" ? null : Number(crMinEl.value),
+			crMax: (crMaxEl?.value ?? "") === "" ? null : Number(crMaxEl.value),
+		});
+
+		const renderList = () => {
+			const filters = getFilters();
 			const knownNames = new Set((this._state.getKnownWildShapeForms?.() || []).map(f => `${(f.name || "").toLowerCase()}|${(f.source || "").toLowerCase()}`));
-			const shown = candidates.filter(c => !needle || (c.name || "").toLowerCase().includes(needle));
+			const shown = entries.filter(entry => CharacterSheetDruidResources.matchesKnownFormFilters(entry, filters));
 			list.innerHTML = "";
 			if (countEl) countEl.textContent = `${shown.length} form${shown.length === 1 ? "" : "s"}`;
 			if (!shown.length) {
-				list.appendChild(e_({outer: `<div class="ve-small ve-muted ve-italic p-2">No forms match your search.</div>`}));
+				list.appendChild(e_({outer: `<div class="ve-small ve-muted ve-italic p-2">No forms match your filters.</div>`}));
 				return;
 			}
 			const canAddMore = !!this._state.canAddKnownWildShapeForm?.();
-			for (const creature of shown) {
-				const rec = this._state._parseBestiaryCreatureToBeastRecord?.(creature);
-				const model = this._buildBeastModel(rec);
-				if (!model) continue;
+			for (const entry of shown) {
+				const {creature, rec, model} = entry;
 				const nameHtml = CharacterSheetClassUtils.buildCreatureHoverNameHtml(model, "ve-bold");
 				const sourceAbv = creature.source ? Parser.sourceJsonToAbv(creature.source) : null;
 				const sourceFull = creature.source ? Parser.sourceJsonToFull(creature.source) : null;
@@ -644,18 +699,75 @@ class CharacterSheetDruidResources {
 							doClose();
 							return;
 						}
-						renderList(searchEl?.value || "");
+						renderList();
 					} else {
 						JqueryUtil.doToast({type: "warning", content: `Could not learn ${creature.name} (already known or exceeds your limits).`});
-						renderList(searchEl?.value || "");
+						renderList();
 					}
 				});
 				list.appendChild(card);
 			}
 		};
 
-		searchEl?.addEventListener("input", () => renderList(searchEl.value));
-		renderList("");
+		searchEl?.addEventListener("input", () => renderList());
+		[sourceEl, typeEl, sizeEl, crMinEl, crMaxEl].forEach(el => el?.addEventListener("change", () => renderList()));
+		resetEl?.addEventListener("click", () => {
+			if (searchEl) searchEl.value = "";
+			[sourceEl, typeEl, sizeEl].forEach(el => { if (el) el.value = "__all__"; });
+			[crMinEl, crMaxEl].forEach(el => { if (el) el.value = ""; });
+			renderList();
+		});
+		renderList();
+	}
+
+	/**
+	 * Build the structured option lists for the Known-Form picker filters from the
+	 * precomputed candidate entries: unique sources, creature types, sizes (ordered
+	 * T→G), and the sorted set of distinct numeric CRs present. Pure function — no
+	 * DOM, no `this` — so it is unit-testable in isolation.
+	 * @param {Array<{source?: string, creatureType?: string, size?: string, crNumber?: number}>} entries
+	 * @returns {{sources: string[], types: string[], sizes: string[], crNumbers: number[]}}
+	 */
+	static buildKnownFormFilterOptions (entries) {
+		const SIZE_ORDER = {T: 0, S: 1, M: 2, L: 3, H: 4, G: 5};
+		const sources = new Set();
+		const types = new Set();
+		const sizes = new Set();
+		const crNumbers = new Set();
+		for (const entry of (entries || [])) {
+			if (entry?.source) sources.add(entry.source);
+			if (entry?.creatureType) types.add(entry.creatureType);
+			if (entry?.size) sizes.add(entry.size);
+			if (Number.isFinite(entry?.crNumber)) crNumbers.add(entry.crNumber);
+		}
+		return {
+			sources: [...sources].sort((a, b) => a.localeCompare(b)),
+			types: [...types].sort((a, b) => a.localeCompare(b)),
+			sizes: [...sizes].sort((a, b) => (SIZE_ORDER[a] ?? 99) - (SIZE_ORDER[b] ?? 99)),
+			crNumbers: [...crNumbers].sort((a, b) => a - b),
+		};
+	}
+
+	/**
+	 * Pure predicate deciding whether a single Known-Form picker entry survives the
+	 * active filters. Combines free-text name search with structured source / type /
+	 * size / CR-range filters (all AND-ed). Sentinel `"__all__"` (and empty CR
+	 * bounds) mean "no constraint". No DOM / `this` — unit-testable in isolation.
+	 * @param {{name?: string, source?: string, creatureType?: string, size?: string, crNumber?: number}} entry
+	 * @param {{needle?: string, source?: string, type?: string, size?: string, crMin?: number|null, crMax?: number|null}} filters
+	 * @returns {boolean}
+	 */
+	static matchesKnownFormFilters (entry, filters) {
+		if (!entry) return false;
+		const f = filters || {};
+		if (f.needle && !(entry.name || "").toLowerCase().includes(String(f.needle).toLowerCase())) return false;
+		if (f.source && f.source !== "__all__" && (entry.source || "") !== f.source) return false;
+		if (f.type && f.type !== "__all__" && (entry.creatureType || "") !== f.type) return false;
+		if (f.size && f.size !== "__all__" && (entry.size || "") !== f.size) return false;
+		const cr = Number.isFinite(entry.crNumber) ? entry.crNumber : 0;
+		if (f.crMin != null && Number.isFinite(f.crMin) && cr < f.crMin) return false;
+		if (f.crMax != null && Number.isFinite(f.crMax) && cr > f.crMax) return false;
+		return true;
 	}
 
 	/**
