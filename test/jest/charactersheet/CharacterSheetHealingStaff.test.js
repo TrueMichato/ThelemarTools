@@ -149,4 +149,70 @@ describe("R26 #3 — Staff of Healing helpers", () => {
 			expect(res.total).toBe(4 * 8 + 4); // 36, deterministic max
 		});
 	});
+
+	// (R27 #4) Repeat report: the Staff of Healing silently healed the WIELDER, with no way
+	// to direct the healing to an ally (healing SPELLS offer an apply-to-self choice). The
+	// cast must NOT auto-heal: it rolls the amount, spends the charge, and surfaces a
+	// non-blocking "Apply to Self" affordance so the value can go to an ally or to self.
+	describe("R27 #4 — cast does not auto-heal; offers apply-to-self", () => {
+		it("casting Cure Wounds spends a charge but leaves the wielder's HP unchanged", async () => {
+			const state = clericState();
+			state._data.hp = {current: 1, max: 30};
+			state.addItem(healingStaff(), 1, true, true);
+			const id = state.getItems().find((i) => i.name === "Staff of Healing").id;
+			state.setItemCharges(id, 10);
+			const inv = makeInventory(state);
+
+			let toastContent = null;
+			const origToast = globalThis.JqueryUtil.doToast;
+			globalThis.JqueryUtil.doToast = (o) => { toastContent = o?.content; };
+			const origEnum = globalThis.InputUiUtil.pGetUserEnum;
+			globalThis.InputUiUtil.pGetUserEnum = async () => 0; // Cure Wounds, then Level 1
+			try {
+				await inv._pCastHealingStaff(id);
+			} finally {
+				globalThis.JqueryUtil.doToast = origToast;
+				globalThis.InputUiUtil.pGetUserEnum = origEnum;
+			}
+
+			// The crux: HP must be UNCHANGED — the cast no longer auto-heals the wielder.
+			expect(state._data.hp.current).toBe(1);
+			// A Level-1 Cure Wounds costs 1 charge (spent at cast time).
+			const staff = state.getItems().find((i) => i.name === "Staff of Healing");
+			expect(staff.chargesCurrent ?? staff.charges).toBe(9);
+			// The result toast advertises the apply-to-self affordance.
+			const html = typeof toastContent === "string"
+				? toastContent
+				: (toastContent?._html || toastContent?.html?.() || "");
+			expect(html).toMatch(/Apply\b[^<]*HP to Self/i);
+			expect(html).toMatch(/btn-staff-heal-self/);
+		});
+
+		it("Lesser Restoration (no healing roll) does not offer an apply-to-self button", async () => {
+			const state = clericState();
+			state._data.hp = {current: 5, max: 30};
+			state.addItem(healingStaff(), 1, true, true);
+			const id = state.getItems().find((i) => i.name === "Staff of Healing").id;
+			state.setItemCharges(id, 10);
+			const inv = makeInventory(state);
+
+			let toastContent = null;
+			const origToast = globalThis.JqueryUtil.doToast;
+			globalThis.JqueryUtil.doToast = (o) => { toastContent = o?.content; };
+			const origEnum = globalThis.InputUiUtil.pGetUserEnum;
+			globalThis.InputUiUtil.pGetUserEnum = async () => 1; // Lesser Restoration
+			try {
+				await inv._pCastHealingStaff(id);
+			} finally {
+				globalThis.JqueryUtil.doToast = origToast;
+				globalThis.InputUiUtil.pGetUserEnum = origEnum;
+			}
+
+			expect(state._data.hp.current).toBe(5); // unchanged
+			const html = typeof toastContent === "string"
+				? toastContent
+				: (toastContent?._html || toastContent?.html?.() || "");
+			expect(html).not.toMatch(/btn-staff-heal-self/);
+		});
+	});
 });

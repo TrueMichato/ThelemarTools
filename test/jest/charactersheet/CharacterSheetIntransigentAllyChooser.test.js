@@ -203,3 +203,55 @@ describe("#11 Intransigent extend-to-allies signifier", () => {
 		expect(head(htmlMany)).toMatch(/You \+ 3 chosen allies within 10 ft are immune to charmed/);
 	});
 });
+
+// (R27 #3) Repeat report: "Intransigent still has no badge anywhere in the sheet". The R26
+// status badge lives in the feature BODY, which is collapsed by default — so on the
+// un-expanded card there was no visible signal at all. The fix adds a compact badge to the
+// feature HEADER (always rendered, even while the body is collapsed) that flips
+// gold(warning)->emerald(success) and states the live charmed-immunity scope at a glance.
+describe("#11 / R27 #3 — Intransigent collapsed-card header badge", () => {
+	/** Render the Intransigent card with the body COLLAPSED (the default accordion state). */
+	function renderCollapsed (opts) {
+		const {features} = makeFeatures(opts);
+		features._expandedFeatures = new Set(); // collapsed: body is display:none
+		return features._renderFeature({...INTRANSIGENT_FEATURE}).outerHTML || "";
+	}
+
+	/** Extract the feature HEADER markup (everything before the feature body opens). */
+	function headerOf (html) {
+		const bodyIdx = html.indexOf("charsheet__feature-body");
+		return bodyIdx >= 0 ? html.slice(0, bodyIdx) : html;
+	}
+
+	test("emits a header badge even when the feature body is collapsed (no longer buried)", () => {
+		const html = renderCollapsed({withApi: true, initialCount: 0});
+		// Body is collapsed…
+		expect(html).toContain("charsheet__feature-body\" style=\"display: none;\"");
+		// …yet a charmed-immunity badge is present in the HEADER, before the body.
+		const header = headerOf(html);
+		expect(header).toMatch(/Charmed-immune/i);
+		expect(header).toContain("badge");
+	});
+
+	test("at zero allies the header badge is the gold 'extendable' variant", () => {
+		const header = headerOf(renderCollapsed({withApi: true, initialCount: 0}));
+		expect(header).toContain("badge-warning");
+		expect(header).toMatch(/Charmed-immune \(extendable\)/i);
+		expect(header).not.toContain("badge-success");
+	});
+
+	test("with allies chosen the header badge flips to the emerald 'You + N' variant", () => {
+		const headerOne = headerOf(renderCollapsed({withApi: true, initialCount: 1}));
+		expect(headerOne).toContain("badge-success");
+		expect(headerOne).toMatch(/Charmed-immune: You \+ 1 ally/i);
+
+		const headerMany = headerOf(renderCollapsed({withApi: true, initialCount: 3}));
+		expect(headerMany).toContain("badge-success");
+		expect(headerMany).toMatch(/Charmed-immune: You \+ 3 allies/i);
+	});
+
+	test("no header badge when the ally-count API is absent (inert on a non-integrated tree)", () => {
+		const header = headerOf(renderCollapsed({withApi: false}));
+		expect(header).not.toMatch(/Charmed-immune/i);
+	});
+});
