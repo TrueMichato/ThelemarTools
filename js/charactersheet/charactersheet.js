@@ -10925,6 +10925,10 @@ class CharacterSheetPage {
 			exhaustionPenalty,
 		});
 		effectiveRoll = redCant.effectiveRoll;
+		// When Red Cant treats a sub-10 die as a 10, the roll no longer counts as a
+		// natural 1, so clear the Thelemar critical-fumble penalty/visual cues; otherwise
+		// the -5 still hits the total and the result wrongly reads as a fumble.
+		if (redCant.applied) rollResult.thelemar_critBonus = 0;
 
 		let total = effectiveRoll + totalMod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
@@ -11261,6 +11265,10 @@ class CharacterSheetPage {
 			exhaustionPenalty,
 		});
 		effectiveRoll = redCant.effectiveRoll;
+		// When Red Cant treats a sub-10 die as a 10, the roll no longer counts as a
+		// natural 1, so clear the Thelemar critical-fumble penalty/visual cues; otherwise
+		// the -5 still hits the total and the result wrongly reads as a fumble.
+		if (redCant.applied) rollResult.thelemar_critBonus = 0;
 
 		const total = effectiveRoll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
