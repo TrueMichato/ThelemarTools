@@ -5724,6 +5724,19 @@ class CharacterSheetPage {
 			// Get related skills for this ability
 			const relatedSkills = skills.filter(s => s.ability === abl);
 
+			// Per-source bonus breakdown (mirrors the skill-hover breakdown): the
+			// aggregate "+N bonus" now carries a tooltip itemizing each contribution
+			// by its source (Racial, Item, named features like "Pan's Apostle", …).
+			const abilityBreakdown = this._state.getAbilityBonusBreakdown(abl);
+			const abilityTooltipLines = [`🧬 Base: ${abilityBreakdown.base}`];
+			abilityBreakdown.contributions.forEach(c => {
+				abilityTooltipLines.push(c.isReplacement
+					? `↔️ ${c.label}`
+					: `➕ ${c.label}: ${c.amount >= 0 ? "+" : ""}${c.amount}`);
+			});
+			abilityTooltipLines.push(`─────────\n🎯 Total: ${abilityBreakdown.total}`);
+			const abilityTooltip = abilityTooltipLines.join("\n").replace(/"/g, "&quot;");
+
 			const card = e_({outer: `
 				<div class="charsheet__ability-hero-card" data-ability="${abl}" style="--ability-color: ${abilityColors[abl]}">
 					<div class="charsheet__ability-hero-header">
@@ -5737,9 +5750,9 @@ class CharacterSheetPage {
 						<div class="charsheet__ability-hero-total">${total}</div>
 						<div class="charsheet__ability-hero-mod">${modStr}</div>
 					</div>
-					<div class="charsheet__ability-hero-breakdown">
+					<div class="charsheet__ability-hero-breakdown"${bonus !== 0 ? ` title="${abilityTooltip}"` : ""}>
 						<span class="charsheet__ability-hero-base">Base ${base}</span>
-						${bonus !== 0 ? `<span class="charsheet__ability-hero-bonus">${bonus >= 0 ? "+" : ""}${bonus} bonus</span>` : ""}
+						${bonus !== 0 ? `<span class="charsheet__ability-hero-bonus" title="${abilityTooltip}">${bonus >= 0 ? "+" : ""}${bonus} bonus</span>` : ""}
 					</div>
 					<div class="charsheet__ability-hero-save">
 						<span class="charsheet__ability-save-prof ${isProficient ? "active" : ""}">${isProficient ? "●" : "○"}</span>
