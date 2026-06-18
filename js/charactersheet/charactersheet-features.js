@@ -1843,25 +1843,44 @@ class CharacterSheetFeatures {
 		if (isIntransigent) {
 			const intransigentRange = intransigentCalcs.intransigentRange || 10;
 			const allyCount = Math.max(0, Math.min(intransigentMax, Number(this._state.getIntransigentAllyCount()) || 0));
-			const allyNoun = allyCount === 1 ? "creature" : "creatures";
+			const allyNoun = allyCount === 1 ? "ally" : "allies";
 			const hasAllies = allyCount > 0;
-			const liveSummary = hasAllies
-				? `You + ${allyCount} chosen ${allyNoun} within ${intransigentRange} ft are immune to charmed (while conscious).`
-				: `You are immune to charmed (while conscious). You may also extend this immunity to creatures of your choice within ${intransigentRange} ft — set how many below.`;
-			// At zero the live line is a call-to-action (advertise the extend option); once
-			// allies are chosen it confirms the active extension. The modifier classes drive a
-			// gold-vs-emerald accent so the state reads at a glance.
-			const liveModifier = hasAllies ? "charsheet__intransigent-live--active" : "charsheet__intransigent-live--extend";
+			// The hero status badge reads the two states at a glance and is the primary
+			// signifier that this immunity is NOT self-only: at zero it states plainly that
+			// "Only you are immune" (with the gold "extend" accent + an explicit call-to-action
+			// below), and once allies are chosen it flips to the emerald "active" accent and
+			// confirms "You + N chosen allies …". Both halves spell out the "while conscious"
+			// gate (R23 #11) so the player never has to hunt for it.
+			const statusHead = hasAllies
+				? `You + ${allyCount} chosen ${allyNoun} within ${intransigentRange} ft are immune to charmed`
+				: `Only you are immune to charmed`;
+			const statusModifier = hasAllies ? "charsheet__intransigent-live--active" : "charsheet__intransigent-live--extend";
+			// At zero, lead the extend section with a call-to-action so the affordance is
+			// advertised BEFORE the player has chosen anyone; once extended it confirms the
+			// share is live. The feature sets no upper limit on who you protect.
+			const extendHint = hasAllies
+				? `Your charmed immunity is shared with ${allyCount} ${allyNoun} of your choice within ${intransigentRange} ft. Adjust the count below — no fixed limit.`
+				: `You can <strong>share this immunity</strong> with creatures of your choice within ${intransigentRange} ft. You haven't extended it to anyone yet — add allies below (no fixed limit).`;
 			intransigentHtml = `
 				<div class="charsheet__intransigent-controls mt-2 p-2">
-					<div class="charsheet__intransigent-title">🛡️ Charmed immunity — extends to allies you choose</div>
-					<div class="charsheet__intransigent-live ${liveModifier} mb-2" aria-live="polite">${liveSummary}</div>
-					<div class="charsheet__intransigent-row ve-flex-v-center gap-2 mb-1">
-						<label class="charsheet__intransigent-label mb-0">Creatures you choose to protect:</label>
-						<input type="number" class="ve-form-control charsheet__intransigent-ally-count" min="0" max="${intransigentMax}" step="1" value="${allyCount}" title="Number of creatures of your choice within ${intransigentRange} ft that you currently extend your charmed immunity to (while conscious). The feature sets no upper limit.">
-						<span class="ve-muted ve-small">within ${intransigentRange} ft, while you are conscious (no fixed limit)</span>
+					<div class="charsheet__intransigent-live ${statusModifier} charsheet__intransigent-status mb-2" aria-live="polite">
+						<span class="charsheet__intransigent-status-icon">🛡️</span>
+						<span class="charsheet__intransigent-status-text">
+							<span class="charsheet__intransigent-status-head">${statusHead}</span>
+							<span class="charsheet__intransigent-status-sub">while you are conscious</span>
+						</span>
 					</div>
-					<em class="ve-muted ve-small">You are always immune to charmed while conscious. This feature also lets you extend that immunity to any creatures of your choice within ${intransigentRange} ft — set how many you are currently protecting.</em>
+					<div class="charsheet__intransigent-extend">
+						<div class="charsheet__intransigent-title">➕ Extend immunity to allies</div>
+						<div class="charsheet__intransigent-extend-hint ve-small mb-1">${extendHint}</div>
+						<div class="charsheet__intransigent-stepper charsheet__intransigent-row ve-flex-v-center gap-2 mb-1">
+							<label class="charsheet__intransigent-label mb-0">Creatures you choose to protect:</label>
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__intransigent-step" data-step="-1" title="Protect one fewer ally" aria-label="Protect one fewer ally">−</button>
+							<input type="number" class="ve-form-control charsheet__intransigent-ally-count" min="0" max="${intransigentMax}" step="1" value="${allyCount}" title="Number of creatures of your choice within ${intransigentRange} ft that you currently extend your charmed immunity to (while conscious). The feature sets no upper limit." aria-label="Allies your charmed immunity extends to">
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__intransigent-step" data-step="1" title="Extend immunity to one more ally" aria-label="Extend immunity to one more ally">➕ Add ally</button>
+							<span class="ve-muted ve-small">within ${intransigentRange} ft (no fixed limit)</span>
+						</div>
+					</div>
 				</div>
 			`;
 		}
@@ -1943,17 +1962,25 @@ class CharacterSheetFeatures {
 			});
 		}
 
-		// Intransigent ally-count input — commit on change (blur/enter), clamp, persist, and
-		// re-render so the feature's Effect summary updates to the chosen ally count.
+		// Intransigent ally-count controls — commit on change (blur/enter) for the input, plus
+		// the ➕/− stepper buttons that nudge the count by one. All paths clamp, persist, and
+		// re-render so the status badge + the feature's Effect summary update to the new count.
 		if (isIntransigent) {
 			const input = featureEl.querySelector(".charsheet__intransigent-ally-count");
-			input?.addEventListener("change", () => {
-				let n = parseInt(input.value, 10);
+			const commit = (n) => {
 				if (!Number.isFinite(n) || n < 0) n = 0;
 				if (n > intransigentMax) n = intransigentMax;
 				this._state.setIntransigentAllyCount(n);
 				this._page.saveCharacter?.();
 				this._page._features?.render?.();
+			};
+			input?.addEventListener("change", () => commit(parseInt(input.value, 10)));
+			featureEl.querySelectorAll(".charsheet__intransigent-step").forEach(btn => {
+				btn.addEventListener("click", () => {
+					const step = parseInt(btn.dataset.step, 10) || 0;
+					const current = Math.max(0, Math.min(intransigentMax, Number(this._state.getIntransigentAllyCount()) || 0));
+					commit(current + step);
+				});
 			});
 		}
 

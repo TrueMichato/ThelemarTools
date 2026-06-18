@@ -145,6 +145,11 @@ class CharacterSheetInventory {
 				if (itemId) this._restoreCharge(itemId);
 				return;
 			}
+			if (e.target.closest(".charsheet__item-cast-healing")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._pCastHealingStaff(itemId);
+				return;
+			}
 			if (e.target.closest(".charsheet__gem-use-charge")) {
 				const itemId = _getItemId(e.target);
 				const gemName = e.target.closest(".charsheet__gem-use-charge")?.dataset?.gemName;
@@ -1321,6 +1326,10 @@ class CharacterSheetInventory {
 			// Weapon properties
 			weapon: item.weapon || false,
 			weaponCategory: item.weaponCategory,
+			// Base-item reference (e.g. "shortbow|phb") for magic weapons derived from a base
+			// weapon. Drives base-item detection for effects scoped to a weapon TYPE (e.g.
+			// Bracers of Archery → any longbow/shortbow, including a "Frost Shortbow").
+			baseItem: item.baseItem || null,
 			damage: item.dmg1 ? `${item.dmg1} ${Parser.dmgTypeToFull(item.dmgType)}` : null,
 			dmg1: item.dmg1 || null,
 			dmgType: item.dmgType || null,
@@ -1585,6 +1594,10 @@ class CharacterSheetInventory {
 			if (oldChargesCurrent != null && typeof this._state.setItemCharges === "function") {
 				this._state.setItemCharges(editItemId, oldChargesCurrent);
 			}
+			// Apply the upgrades/gemstone delta selected in the edit modal (#6). replaceItem has
+			// already preserved the item's existing appliedUpgrades/socketedGemstones, so this only
+			// adds newly-checked entries and removes un-checked ones — idempotently.
+			this._applyEditUpgrades(editItemId, options);
 			this._syncArmorState();
 			this._page.renderCharacter?.();
 			this._page.saveCharacter?.();
@@ -1625,6 +1638,74 @@ class CharacterSheetInventory {
 		if (socketed) parts.push("1 empowered gemstone");
 		if (parts.length) {
 			JqueryUtil.doToast({type: "success", content: `Applied ${parts.join(" + ")} (requirements bypassed).`});
+		}
+	}
+
+	/**
+	 * Apply the upgrades/gemstone selection from the EDIT modal to an existing item (#6),
+	 * diffing the desired selection against the item's current persisted state so that:
+	 *   - newly-checked upgrades are added (force-apply, no cost; applyItemUpgrade is itself
+	 *     duplicate-guarded so an already-applied upgrade is never recorded twice);
+	 *   - un-checked upgrades that were previously applied are removed;
+	 *   - a newly-chosen gemstone replaces the socketed one (un-socket then socket);
+	 *   - clearing the gemstone select un-sockets the current gem.
+	 * No-op when the upgrades module is unavailable or the upgrades section was not shown (the
+	 * caller only forwards `_pendingUpgrades` in edit mode when the section rendered, so existing
+	 * upgrades are left untouched otherwise).
+	 * @param {string} itemId - The edited inventory item id
+	 * @param {object} options - The custom-item options (carrying _pendingUpgrades / _pendingGemstone)
+	 */
+	_applyEditUpgrades (itemId, options) {
+		// Section not shown / nothing forwarded → leave the item's upgrades exactly as they were.
+		if (options?._pendingUpgrades === undefined && options?._pendingGemstone === undefined) return;
+		const upgradesModule = this._page._upgrades;
+		if (!upgradesModule?.applyUpgradesToItem) return;
+
+		const desiredUpgrades = Array.isArray(options?._pendingUpgrades) ? options._pendingUpgrades : [];
+		const desiredGem = options?._pendingGemstone || null;
+		const same = (a, b) => a && b && a.name === b.name && a.source === b.source;
+
+		let added = 0;
+		let removed = 0;
+		let gemChanged = false;
+
+		// Removals: upgrades currently applied but no longer selected.
+		const currentUpgrades = (this._state.getItemUpgrades?.(itemId) || []).slice();
+		for (const cur of currentUpgrades) {
+			if (!desiredUpgrades.some(d => same(d, cur))) {
+				if (this._state.removeItemUpgrade?.(itemId, cur.name, cur.source)) removed++;
+			}
+		}
+
+		// Additions: selected upgrades not yet applied. applyUpgradesToItem → applyItemUpgrade is
+		// duplicate-guarded, but pre-filtering keeps the success count accurate.
+		const toAdd = desiredUpgrades.filter(d => !currentUpgrades.some(cur => same(cur, d)));
+
+		// Gemstone diff (one socket per item).
+		const currentGem = (this._state.getSocketedGemstones?.(itemId) || [])[0] || null;
+		let gemToSocket = null;
+		if (desiredGem && !same(desiredGem, currentGem)) {
+			if (currentGem && this._state.unsocketGemstone?.(itemId, currentGem.name)) gemChanged = true;
+			gemToSocket = desiredGem;
+		} else if (!desiredGem && currentGem) {
+			if (this._state.unsocketGemstone?.(itemId, currentGem.name)) gemChanged = true;
+		}
+
+		if (toAdd.length || gemToSocket) {
+			const {appliedUpgrades, socketed} = upgradesModule.applyUpgradesToItem(itemId, {
+				upgrades: toAdd,
+				gemstone: gemToSocket,
+			});
+			added += appliedUpgrades;
+			if (socketed) gemChanged = true;
+		}
+
+		const parts = [];
+		if (added) parts.push(`${added} upgrade${added === 1 ? "" : "s"} added`);
+		if (removed) parts.push(`${removed} upgrade${removed === 1 ? "" : "s"} removed`);
+		if (gemChanged) parts.push("gemstone updated");
+		if (parts.length) {
+			JqueryUtil.doToast({type: "success", content: `Item upgrades: ${parts.join(", ")} (requirements bypassed).`});
 		}
 	}
 
@@ -2873,22 +2954,24 @@ class CharacterSheetInventory {
 		form.querySelector("#custom-item-spell-level-filter")?.addEventListener("change", renderSpellList);
 		form.querySelector("#custom-item-spell-school-filter")?.addEventListener("change", renderSpellList);
 
-		// ── Upgrades & Empowerment Section (#15) ───────────────────────────────────────────────
-		// Lets a custom item be created with item upgrades and/or an already-empowered gemstone
-		// applied as part of creation. Requirements (gold, prerequisites, the Gem Empowerment
-		// skill) are bypassed — this is the creation-time counterpart to the #14 escape hatch and
-		// is meant for migrating or pre-owned gear. Only shown when creating (edit uses the
-		// dedicated per-item Upgrade modal) and when upgrade data is loaded.
+		// ── Upgrades & Empowerment Section (#15, edit support #6) ───────────────────────────────
+		// Lets a custom item be created OR edited with item upgrades and/or an already-empowered
+		// gemstone applied. Requirements (gold, prerequisites, the Gem Empowerment skill) are
+		// bypassed — this is the counterpart to the #14 escape hatch and is meant for migrating or
+		// pre-owned gear. In EDIT mode the checkboxes/select open pre-reflecting the upgrades and
+		// socketed gemstone already on the item, and saving applies only the delta (idempotently)
+		// so existing upgrades are never double-applied. Shown whenever upgrade data is loaded.
 		const upgradesModule = this._page._upgrades;
 		const allUpgradesData = this._page.getItemUpgrades?.() || [];
+		const upgradesSectionShown = !!(upgradesModule && allUpgradesData.length);
 		const pendingUpgrades = [];
 		let pendingGemstone = null;
 		let renderUpgradeChoices = () => {};
-		if (!isEdit && upgradesModule && allUpgradesData.length) {
+		if (upgradesSectionShown) {
 			const upgradesSection = e_({outer: `
 				<div class="charsheet__custom-item-section charsheet__custom-item-section--upgrades">
 					<div class="charsheet__custom-item-section-title">🔧 Upgrades &amp; Empowerment (Optional)</div>
-					<div class="ve-muted ve-small mb-2">Apply item upgrades or socket an already-empowered gemstone as part of creation. Requirements (gold, prerequisites, the Gem Empowerment skill) are <b>bypassed</b> — intended for migrating or pre-owned gear.</div>
+					<div class="ve-muted ve-small mb-2">Apply item upgrades or socket an already-empowered gemstone${isEdit ? "" : " as part of creation"}. Requirements (gold, prerequisites, the Gem Empowerment skill) are <b>bypassed</b> — intended for migrating or pre-owned gear.${isEdit ? " Upgrades already on this item are pre-checked; un-check to remove." : ""}</div>
 					<div class="charsheet__custom-item-upgrades-body"></div>
 				</div>
 			`});
@@ -3014,6 +3097,25 @@ class CharacterSheetInventory {
 
 		// Pre-seed for edit mode, or an explicitly supplied base item.
 		if (prefillItem) applySeed(this._seedOptionsFromItem(prefillItem));
+
+		// EDIT mode (#6): now that applySeed has set the correct item type, pre-reflect the
+		// upgrades and socketed gemstone already on the item. Done AFTER applySeed because the
+		// first renderUpgradeChoices (run while the type was still the default "gear") clears any
+		// pending selections for non-socketable types. Resolve each stored record back to its full
+		// upgrade/gemstone entity so checkbox matching (name+source) and the save-time apply path
+		// work unchanged, then re-render the choices so the controls open checked/selected.
+		if (isEdit && prefillItem && upgradesSectionShown) {
+			for (const applied of (prefillItem.appliedUpgrades || [])) {
+				const ent = allUpgradesData.find(u => u.name === applied.name && u.source === applied.source);
+				if (ent && !pendingUpgrades.some(u => u.name === ent.name && u.source === ent.source)) pendingUpgrades.push(ent);
+			}
+			const socketed = (prefillItem.socketedGemstones || [])[0];
+			if (socketed) {
+				const gemEnt = (upgradesModule.getGemstoneUpgrades?.() || []).find(g => g.name === socketed.name && g.source === socketed.source);
+				if (gemEnt) pendingGemstone = gemEnt;
+			}
+			renderUpgradeChoices();
+		}
 
 		// Footer buttons
 		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
@@ -3323,8 +3425,16 @@ class CharacterSheetInventory {
 
 			// Creation-time upgrades & empowerment (#15) — applied AFTER the item is created,
 			// bypassing cost/prerequisites. Only populated when the upgrades section was shown.
-			if (pendingUpgrades.length) options._pendingUpgrades = pendingUpgrades.slice();
-			if (pendingGemstone) options._pendingGemstone = pendingGemstone;
+			// In EDIT mode (#6) ALWAYS forward the (possibly empty) selection when the section was
+			// shown, so the save-time diff can ADD newly-checked upgrades AND REMOVE ones the user
+			// un-checked. `_pendingGemstone: null` is meaningful in edit mode (un-socket request).
+			if (isEdit && upgradesSectionShown) {
+				options._pendingUpgrades = pendingUpgrades.slice();
+				options._pendingGemstone = pendingGemstone || null;
+			} else {
+				if (pendingUpgrades.length) options._pendingUpgrades = pendingUpgrades.slice();
+				if (pendingGemstone) options._pendingGemstone = pendingGemstone;
+			}
 
 			this._saveCustomItem(name, quantity, weight, options, editItemId);
 			JqueryUtil.doToast({type: "success", content: isEdit ? `Updated ${name}!` : `Created ${name}!`});
@@ -3621,6 +3731,177 @@ class CharacterSheetInventory {
 		}
 
 		this._state.setItemCharges(itemId, item.chargesCurrent + 1);
+		this._renderItemList();
+		this._page.saveCharacter();
+	}
+
+	/**
+	 * Recognize a charged healing staff (Staff of Healing and look-alikes) — an item that
+	 * lets the wielder expend charges to cast healing spells. Data-driven where possible:
+	 *  - exact name match for the well-known Staff of Healing, OR
+	 *  - any charged item whose `attachedSpells.charges` lists a known healing spell.
+	 * @param {object} item - Normalized inventory item.
+	 * @returns {boolean}
+	 */
+	_isHealingStaff (item) {
+		if (!item) return false;
+		const name = String(item.name || "").toLowerCase();
+		if (name === "staff of healing") return true;
+		// Generic: a charged item that attaches a healing spell as a charge-cost option.
+		const charged = item.attachedSpells?.charges;
+		if (charged && typeof charged === "object") {
+			const healingSpells = ["cure wounds", "mass cure wounds", "lesser restoration"];
+			for (const list of Object.values(charged)) {
+				if (Array.isArray(list) && list.some(s => healingSpells.includes(String(s).toLowerCase()))) return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * The wielder's spellcasting ability modifier, used when casting from a healing staff
+	 * ("using your spellcasting ability modifier"). Falls back to 0 when the character has
+	 * no spellcasting ability set.
+	 * @returns {number}
+	 */
+	_getHealingStaffAbilityMod () {
+		const ability = this._state.getSpellcastingAbility?.();
+		if (ability && this._state.getAbilityMod) return this._state.getAbilityMod(ability) || 0;
+		return 0;
+	}
+
+	/**
+	 * Roll a healing formula ("{n}d8") plus a flat modifier. Honors the Thelemar
+	 * "item utilization" house rule (max dice) when enabled, mirroring potion behavior.
+	 * @param {string} diceStr - e.g. "2d8".
+	 * @param {number} flatMod - Flat addition (spellcasting ability mod).
+	 * @returns {{total: number, rolls: number[], formula: string}}
+	 */
+	_rollStaffHealing (diceStr, flatMod) {
+		const m = String(diceStr).match(/(\d+)d(\d+)/);
+		const rolls = [];
+		let total = 0;
+		if (m) {
+			const num = parseInt(m[1], 10);
+			const size = parseInt(m[2], 10);
+			const settings = this._state.getSettings?.() || {};
+			for (let i = 0; i < num; i++) {
+				const r = settings.thelemar_itemUtilization ? size : (Math.floor(Math.random() * size) + 1);
+				rolls.push(r);
+				total += r;
+			}
+		}
+		total += flatMod || 0;
+		return {total: Math.max(0, total), rolls, formula: `${diceStr}${flatMod ? ` + ${flatMod}` : ""}`};
+	}
+
+	/**
+	 * The healing-spell menu a Staff of Healing offers, with charge costs. Returns the
+	 * canonical Staff-of-Healing list; kept here so it can later be data-derived from
+	 * `attachedSpells.charges` for look-alikes.
+	 * @returns {Array<{kind: string, label: string, minCost: number}>}
+	 */
+	_getHealingStaffSpellMenu () {
+		return [
+			{kind: "cureWounds", label: "Cure Wounds (1 charge per spell level, up to 4th)", minCost: 1},
+			{kind: "lesserRestoration", label: "Lesser Restoration (2 charges)", minCost: 2},
+			{kind: "massCureWounds", label: "Mass Cure Wounds (5 charges)", minCost: 5},
+		];
+	}
+
+	/**
+	 * Cast a healing spell from a charged staff: pick a spell (and level, for Cure Wounds),
+	 * spend the charges, roll/apply the healing, and surface the result. Applies healing to
+	 * the wielder by default (single-character sheet); the rolled value is shown so a DM can
+	 * redirect it to an ally. Honors the RAW "expend the last charge" d20 risk: on a 1 the
+	 * staff is destroyed.
+	 * @param {string} itemId - The inventory item id.
+	 */
+	async _pCastHealingStaff (itemId) {
+		const item = this._state.getItems().find(i => i.id === itemId);
+		if (!item) return;
+		const remaining = item.chargesCurrent ?? item.charges ?? 0;
+		if (remaining <= 0) {
+			JqueryUtil.doToast({type: "warning", content: `${item.name} has no charges remaining.`});
+			return;
+		}
+
+		const menu = this._getHealingStaffSpellMenu().filter(o => o.minCost <= remaining);
+		if (!menu.length) {
+			JqueryUtil.doToast({type: "warning", content: `${item.name}: not enough charges (${remaining}) to cast any of its spells.`});
+			return;
+		}
+
+		const pick = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+			title: `${item.name} — Cast Spell (${remaining} charge${remaining === 1 ? "" : "s"})`,
+			values: menu.map(o => o.label),
+			isResolveItem: false,
+			default: 0,
+		}));
+		if (pick == null) return;
+		const opt = menu[pick];
+
+		const abilityMod = this._getHealingStaffAbilityMod();
+		let cost = opt.minCost;
+		let spellLabel = "";
+		let healing = null;
+
+		if (opt.kind === "cureWounds") {
+			const maxLevel = Math.min(4, remaining);
+			const levelValues = [];
+			for (let l = 1; l <= maxLevel; l++) levelValues.push(`Level ${l} — ${l} charge${l === 1 ? "" : "s"} (${l}d8${abilityMod ? ` + ${abilityMod}` : ""})`);
+			const li = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+				title: "Cure Wounds — Cast at Which Level?",
+				values: levelValues,
+				isResolveItem: false,
+				default: 0,
+			}));
+			if (li == null) return;
+			const level = li + 1;
+			cost = level;
+			spellLabel = `Cure Wounds (level ${level})`;
+			healing = this._rollStaffHealing(`${level}d8`, abilityMod);
+		} else if (opt.kind === "massCureWounds") {
+			cost = 5;
+			spellLabel = "Mass Cure Wounds";
+			healing = this._rollStaffHealing("3d8", abilityMod);
+		} else {
+			cost = 2;
+			spellLabel = "Lesser Restoration";
+		}
+
+		if (cost > remaining) {
+			JqueryUtil.doToast({type: "warning", content: `${item.name}: not enough charges (need ${cost}, have ${remaining}).`});
+			return;
+		}
+
+		const after = remaining - cost;
+		this._state.setItemCharges(itemId, after);
+
+		if (healing) {
+			this._state.heal(healing.total);
+			JqueryUtil.doToast({
+				type: "success",
+				content: `${item.name}: cast ${spellLabel} (−${cost} charge${cost === 1 ? "" : "s"}). Healed ${healing.total} HP (${healing.formula}). ${after}/${item.charges} charges left.`,
+			});
+		} else {
+			JqueryUtil.doToast({
+				type: "success",
+				content: `${item.name}: cast ${spellLabel} (−${cost} charges) — ends one disease or one condition (blinded, deafened, paralyzed, or poisoned). ${after}/${item.charges} charges left.`,
+			});
+		}
+
+		// RAW: if you expend the last charge, roll a d20; on a 1 the staff is destroyed.
+		if (after === 0) {
+			const d20 = Math.floor(Math.random() * 20) + 1;
+			if (d20 === 1) {
+				this._state.removeItem(itemId);
+				JqueryUtil.doToast({type: "danger", content: `${item.name} expended its last charge and vanished in a flash of light, lost forever! (rolled a 1)`});
+			} else {
+				JqueryUtil.doToast({type: "info", content: `${item.name} expended its last charge (d20 → ${d20}; survives on anything but a 1).`});
+			}
+		}
+
 		this._renderItemList();
 		this._page.saveCharacter();
 	}
@@ -5312,6 +5593,12 @@ class CharacterSheetInventory {
 		const canEquip = CharacterSheetInventory.canEquipItem(item);
 		const canAttune = item.requiresAttunement;
 		const hasCharges = item.charges && item.charges > 0;
+		// Staff of Healing (and similar charged healing staves): a "Cast" affordance lets the
+		// wielder expend charges to cast its healing spells. Gated like attunement effects.
+		const isHealingStaff = this._isHealingStaff(item);
+		const healingStaffActive = isHealingStaff && item.equipped
+			&& (!item.requiresAttunement || item.attuned)
+			&& (item.chargesCurrent ?? item.charges ?? 0) > 0;
 		const hasNote = !!this._state.getItemNote(item.id);
 		const isConsumable = item.type === "P" || item.type === "SC"; // Potion or Scroll
 		const isArtifact = item.rarity === "artifact";
@@ -5424,6 +5711,11 @@ class CharacterSheetInventory {
 							</button>
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-restore-charge" title="Restore 1 charge" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-plus"></span>
+							</button>
+						` : ""}
+						${healingStaffActive ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-success charsheet__item-cast-healing" title="Expend charges to cast a healing spell">
+								<span class="glyphicon glyphicon-heart"></span> Cast
 							</button>
 						` : ""}
 						${gemHasCharges ? `

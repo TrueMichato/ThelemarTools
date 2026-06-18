@@ -6901,7 +6901,17 @@ class CharacterSheetState {
 		const direct = this._data.directAbilityBonuses?.[ability] || 0;
 		const itemBonus = this._data.itemAbilityOverrides?.bonus?.[ability] || 0;
 		push("racial", "Racial", racial);
-		push("custom", "Custom Modifier", feature);
+		// Itemize the additive feature/custom channel by its source feature(s) so each
+		// shows e.g. "Pan's Apostle" instead of one generic "Custom Modifier" lump. A
+		// residual line covers any directly-set remainder (no backing named modifier)
+		// and keeps sum(contributions) === total - base.
+		const featureComps = this._getAbilityNamedModifierComponents(ability);
+		let featureItemized = 0;
+		featureComps.forEach(c => {
+			push("custom", c.name, c.value);
+			featureItemized += c.value;
+		});
+		push("custom", "Custom Modifier", feature - featureItemized);
 		push("feat", "Feat / Feature", direct);
 
 		// Track a running total so each non-additive stage is attributed by its
@@ -8230,8 +8240,25 @@ class CharacterSheetState {
 	 * @returns {number} The dynamic feature bonus
 	 */
 	_getDynamicSkillFeatureBonus (skill) {
+		return this._getDynamicSkillFeatureComponents(skill)
+			.reduce((sum, c) => sum + c.value, 0);
+	}
+
+	/**
+	 * Itemize the dynamic (abilityMod-based) feature bonuses that contribute to a
+	 * skill, carrying each contributing feature's own NAME so a breakdown can show
+	 * e.g. "Magician" instead of a single generic "Feature Bonus" line. Mirrors the
+	 * abilityMod handling of the legacy _getDynamicSkillFeatureBonus so their math can
+	 * never drift apart (that method now sums these components).
+	 * value-based / proficiencyBonus-based skill modifiers are intentionally excluded:
+	 * they are already folded into customModifiers and surface via
+	 * _getSkillNamedModifierComponents.
+	 * @param {string} skill - The skill key (lowercase, no spaces)
+	 * @returns {Array<{name:string, value:number}>}
+	 */
+	_getDynamicSkillFeatureComponents (skill) {
+		const out = [];
 		const skillModifiers = this.getNamedModifiersByType(`skill:${skill}`);
-		let total = 0;
 
 		skillModifiers.forEach(mod => {
 			// Only handle abilityMod-based effects here
@@ -8240,7 +8267,7 @@ class CharacterSheetState {
 				let v = this.getAbilityMod(mod.abilityMod);
 				// Optional floor (e.g. Magician grants minimum +1 even at low WIS)
 				if (mod.minValue != null) v = Math.max(mod.minValue, v);
-				total += v;
+				if (v) out.push({name: mod.name || "Feature Bonus", value: v});
 			}
 		});
 
@@ -8248,10 +8275,10 @@ class CharacterSheetState {
 		if (skill === "linguistics" && this._data.settings?.thelemar_linguisticsBonus) {
 			const languages = this._data.languages || [];
 			const languageBonus = languages.filter(lang => lang.toLowerCase() !== "common").length;
-			total += languageBonus;
+			if (languageBonus) out.push({name: "Linguistics (languages known)", value: languageBonus});
 		}
 
-		return total;
+		return out;
 	}
 
 	/**
@@ -9093,7 +9120,18 @@ class CharacterSheetState {
 		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		const dynamicFeatureBonus = this._getDynamicSkillFeatureBonus(normalizedSkill);
-		if (dynamicFeatureBonus !== 0) components.push({type: "feature", name: "Feature Bonus", value: dynamicFeatureBonus, icon: "📜", isCanonical: true});
+		if (dynamicFeatureBonus !== 0) {
+			// Itemize the dynamic (abilityMod-based) feature bonuses so each shows its
+			// own feature NAME (e.g. "Magician") instead of one generic "Feature Bonus".
+			const dynComps = this._getDynamicSkillFeatureComponents(normalizedSkill);
+			let itemized = 0;
+			dynComps.forEach(c => {
+				components.push({type: "feature", name: c.name, value: c.value, icon: "📜", isCanonical: true});
+				itemized += c.value;
+			});
+			const residual = dynamicFeatureBonus - itemized;
+			if (residual !== 0) components.push({type: "feature", name: "Feature Bonus", value: residual, icon: "📜", isCanonical: true});
+		}
 
 		const abilityCheckBonus = ability ? this.getAbilityCheckCustomMod(ability) : 0;
 		if (abilityCheckBonus !== 0) components.push({type: "custom", name: `${(ability || "").toUpperCase()} Check Modifier`, value: abilityCheckBonus, icon: "⚙️", isCanonical: false});
@@ -31365,6 +31403,23 @@ class CharacterSheetState {
 		return {bonus, previousTotal: prev, newTotal: prev + bonus, used: true};
 	}
 
+	/**
+	 * (R26 #8) Decide whether to surface the NON-BLOCKING post-roll Guided Strike
+	 * offer after an attack roll. Pure so the post-roll hook logic is unit-testable
+	 * without DOM/state. Offer only when the character has Guided Strike with a use
+	 * available, and the roll being decorated is not itself a Guided Strike
+	 * application (avoid recursive offers) nor an already-decorated result.
+	 * @param {{hasGuidedStrike?: boolean, hasUsesAvailable?: boolean, isGuidedStrikeApplication?: boolean, alreadyOffered?: boolean}} [opts]
+	 * @returns {boolean}
+	 */
+	static shouldOfferGuidedStrikePostAttack ({hasGuidedStrike = false, hasUsesAvailable = false, isGuidedStrikeApplication = false, alreadyOffered = false} = {}) {
+		if (!hasGuidedStrike) return false;
+		if (!hasUsesAvailable) return false;
+		if (isGuidedStrikeApplication) return false;
+		if (alreadyOffered) return false;
+		return true;
+	}
+
 	/** Max Second Wind uses for the current level. @returns {number} */
 	getSecondWindUsesMax () {
 		const calcs = this.getFeatureCalculations();
@@ -33684,6 +33739,111 @@ class CharacterSheetState {
 		return this._isItemProficienciesActive(invItem);
 	}
 
+	// =========================================================================
+	// Weapon-type-scoped item damage bonuses (Bracers of Archery — R26 #1)
+	//
+	// Some equipped items grant a flat damage bonus that applies ONLY to attacks made
+	// with a particular BASE weapon (e.g. Bracers of Archery → +2 with any longbow or
+	// shortbow). A plain `damage` named-modifier can't express this (it would buff EVERY
+	// attack), so these are resolved at damage-roll time by matching the attack's weapon
+	// against the item's target base items. Detection is by BASE ITEM, not exact name, so
+	// a magic weapon derived from a shortbow ("Frost Shortbow") still benefits.
+	// =========================================================================
+
+	/**
+	 * Resolve a weapon's normalized base-item name. Prefers the explicit `baseItem`
+	 * reference ("shortbow|phb" → "shortbow"); falls back to the weapon's own name.
+	 * @param {object} weapon - A normalized inventory weapon (or any object with name/baseItem).
+	 * @returns {string} Lowercased base-item name (or "").
+	 * @private
+	 */
+	_resolveWeaponBaseName (weapon) {
+		if (!weapon) return "";
+		const bi = weapon.baseItem;
+		if (typeof bi === "string" && bi.trim()) return bi.split("|")[0].trim().toLowerCase();
+		return String(weapon.name || "").toLowerCase();
+	}
+
+	/**
+	 * Does an attack use a weapon whose BASE ITEM is one of `targets`? Matches on the
+	 * resolved base-item name AND on a whole-word appearance of the target in the attack's
+	 * name / source item (so custom-named or homebrew bows still qualify). Crossbows are
+	 * never swept up because the targets are specific ("longbow"/"shortbow") and matched
+	 * with word boundaries.
+	 * @param {object} attack - An attack object (may carry `sourceItem`).
+	 * @param {string[]} targets - Lowercased base-item names to match.
+	 * @returns {boolean}
+	 * @private
+	 */
+	_attackMatchesWeaponBaseItems (attack, targets) {
+		if (!attack || !Array.isArray(targets) || !targets.length) return false;
+		const baseName = this._resolveWeaponBaseName(attack.sourceItem);
+		const fullName = `${attack.name || ""} ${attack.sourceItem?.name || ""} ${attack.sourceItem?.baseItem || ""}`.toLowerCase();
+		for (const raw of targets) {
+			const t = String(raw).toLowerCase();
+			if (!t) continue;
+			if (baseName === t) return true;
+			const re = new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+			if (re.test(fullName)) return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Collect an item's weapon-type-scoped damage specs. Two sources, both data-driven:
+	 *   1. Generic `effects[]` entries of type `weaponDamageBonus` carrying a numeric
+	 *      `value` and a `weaponBaseItems` array — so any homebrew/custom item can express
+	 *      the same mechanic without code changes.
+	 *   2. Recognition of well-known items by name (Bracers of Archery) so they "just work"
+	 *      from the catalog without hand-authoring effects.
+	 * @param {object} itemData - The normalized item data (`invItem.item`).
+	 * @returns {Array<{value: number, weaponBaseItems: string[]}>}
+	 * @private
+	 */
+	_getItemWeaponScopedDamageSpecs (itemData) {
+		const specs = [];
+		if (Array.isArray(itemData?.effects)) {
+			for (const e of itemData.effects) {
+				if (e?.type !== "weaponDamageBonus") continue;
+				if (!Array.isArray(e.weaponBaseItems) || !e.weaponBaseItems.length) continue;
+				const val = typeof e.value === "number" ? e.value : parseInt(String(e.value).replace("+", ""), 10);
+				if (val) specs.push({value: val, weaponBaseItems: e.weaponBaseItems.map(s => String(s).toLowerCase())});
+			}
+		}
+		// Recognition: Bracers of Archery (DMG/XDMG) — +2 (or its bonusWeaponDamage) damage
+		// with longbows and shortbows. Matched on exact normalized name.
+		const name = String(itemData?.name || "").toLowerCase();
+		if (name === "bracers of archery") {
+			const bwd = itemData?.bonusWeaponDamage;
+			const val = typeof bwd === "number" ? bwd : (parseInt(String(bwd ?? "").replace("+", ""), 10) || 2);
+			specs.push({value: val, weaponBaseItems: ["longbow", "shortbow"]});
+		}
+		return specs;
+	}
+
+	/**
+	 * Per-attack weapon-type-scoped damage contributions from equipped (and attuned, if
+	 * required) items. Returns one entry per matching item so the combat module can both
+	 * sum them and show a labelled breakdown.
+	 * @param {object} attack - The attack being rolled.
+	 * @returns {Array<{name: string, value: number}>}
+	 */
+	getItemWeaponScopedDamageContributions (attack) {
+		if (!attack || attack.isSpell || attack.isUnarmedStrike) return [];
+		const out = [];
+		for (const inv of this._data.inventory || []) {
+			if (!this._isItemEffectsActive(inv)) continue;
+			const specs = this._getItemWeaponScopedDamageSpecs(inv.item);
+			if (!specs.length) continue;
+			let value = 0;
+			for (const spec of specs) {
+				if (this._attackMatchesWeaponBaseItems(attack, spec.weaponBaseItems)) value += spec.value;
+			}
+			if (value) out.push({name: inv.item?.name || "Item", value});
+		}
+		return out;
+	}
+
 	/**
 	 * Register an equipped item's catalog effects as named modifiers / defensive traits.
 	 * Idempotent when paired with `_unregisterItemEffects` (called by `_reapplyItemEffects`).
@@ -34571,6 +34731,30 @@ class CharacterSheetState {
 			value += this.getProficiencyBonus();
 		}
 		return value;
+	}
+
+	/**
+	 * Itemize the enabled named modifiers that contribute an ADDITIVE value to an
+	 * ability score (type `ability:<abl>`, non-`set` mode), so the ability breakdown
+	 * can attribute each to its source feature (e.g. "Pan's Apostle") instead of
+	 * lumping them into one generic "Custom Modifier" line. Mirrors the `ability:`
+	 * additive handling in _recalculateCustomModifiers (which feeds
+	 * customModifiers.abilityScores); `set`-mode overrides contribute via the static
+	 * channel and are surfaced separately, so they are skipped here.
+	 * @param {string} ability - "str"|"dex"|"con"|"int"|"wis"|"cha"
+	 * @returns {Array<{name:string, value:number}>}
+	 */
+	_getAbilityNamedModifierComponents (ability) {
+		const out = [];
+		(this._data.namedModifiers || []).forEach(mod => {
+			if (!mod.enabled) return;
+			if (mod.type !== `ability:${ability}`) return;
+			if (mod.mode === "set") return;
+			const value = this._getNamedModifierEffectiveValue(mod);
+			if (!value) return;
+			out.push({name: mod.name || "Custom Modifier", value});
+		});
+		return out;
 	}
 
 	/**
@@ -39959,6 +40143,16 @@ class CharacterSheetState {
 				state.activatedAt = Date.now();
 				state.activatedAtRound = this._data.inCombat ? this._data.combatRound : null;
 				state.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(state.duration) : null;
+				// Re-apply any conditions this state grants (e.g. Veil of Lies → Invisible)
+				// so a toggle-on through Play Mode restores the boon's condition, mirroring
+				// activateState. No-op for states without `addsConditions`.
+				this._applyStateAddedConditions(state, CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]);
+			} else {
+				// (R26 #7) Toggling a state OFF must strip the conditions it added, exactly
+				// like deactivateState/removeActiveState. Play Mode's "Active States" card
+				// ends boons via this method; without this, ending a condition-granting boon
+				// (e.g. Veil of Lies → Invisible) left the condition stuck on the sheet.
+				this._removeStateAddedConditions(state);
 			}
 			return state.active;
 		}
@@ -40334,6 +40528,11 @@ class CharacterSheetState {
 						this.removeCondition?.(condName);
 					}
 				}
+				// (R26 #7) Also strip conditions added via `_managedConditions` (e.g. an
+				// interdiction boon like Veil of Lies → Invisible). advanceRound previously
+				// only cleaned the spell-effect `grantsConditions` field, so a boon whose
+				// duration expired during combat left its granted condition stuck.
+				this._removeStateAddedConditions(state);
 
 				// If this was a spell effect that matches the concentrated spell, do full cleanup
 				if (state.isSpellEffect && this._data.concentrating?.spellName === state.name) {
