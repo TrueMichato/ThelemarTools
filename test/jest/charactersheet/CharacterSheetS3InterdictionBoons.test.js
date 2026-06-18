@@ -300,3 +300,77 @@ describe("R25 S7 — source-pin: Red Cant uses the polished modal, not a plain c
 		expect(CSS).toMatch(/--cs-text-primary/);
 	});
 });
+
+// ==========================================================================
+// R26 #9 REGRESSION — Red Cant vs Thelemar critical-fumble penalty.
+//
+// With `thelemar_criticalRolls` ON, a natural 1 sets `thelemar_critBonus = -5`
+// and tags the roll as a fumble. Red Cant treats the sub-10 die as a 10, so the
+// roll is no longer a natural 1 — the -5 penalty and the "Natural 1!" fumble
+// class/note must be cleared. Before the fix the floor was applied to the die
+// but the -5 still hit the displayed total (e.g. nat-1 CHA check showed 20, not
+// 25) and the result still read as a fumble, so the user perceived Red Cant as
+// "not triggering". Verified end-to-end in a real headless browser against the
+// `vaa` fixture (Hochling Illrigger 15 Hellspeaker): nat-1 Deception with Red
+// Cant now totals 25 with no fumble cue.
+// ==========================================================================
+
+// Byte-faithful replica of the post-Red-Cant total math in `_rollAbilityCheck` /
+// `_rollSkillCheck` (source-pinned below): once Red Cant is applied the Thelemar
+// crit bonus is neutralized before the total/notes are computed.
+function rollTotalWithRedCant ({naturalRoll, floor = 10, mod = 0, exhaustionPenalty = 0, thelemarCritBonus = 0, redCantApplied = false}) {
+	let effectiveRoll = naturalRoll;
+	let critBonus = thelemarCritBonus;
+	if (redCantApplied) {
+		effectiveRoll = Math.max(naturalRoll, floor);
+		critBonus = 0; // the die now counts as a 10, not a natural 1
+	}
+	return effectiveRoll + mod - exhaustionPenalty + (critBonus || 0);
+}
+
+describe("R26 #9 — Red Cant negates the Thelemar natural-1 penalty", () => {
+	it("a nat-1 Charisma check with Red Cant totals as a 10, dropping the -5 fumble", () => {
+		// vaa-style: +15 Deception mod, natural 1 under thelemar critical rolls.
+		const without = rollTotalWithRedCant({naturalRoll: 1, mod: 15, thelemarCritBonus: -5, redCantApplied: false});
+		const withRedCant = rollTotalWithRedCant({naturalRoll: 1, mod: 15, thelemarCritBonus: -5, redCantApplied: true});
+		expect(without).toBe(11); // 1 + 15 - 5  (the broken "Red Cant didn't help" total)
+		expect(withRedCant).toBe(25); // 10 + 15, -5 cleared
+	});
+
+	it("leaves non-fumble sub-10 rolls unchanged (no crit bonus to clear)", () => {
+		const withRedCant = rollTotalWithRedCant({naturalRoll: 7, mod: 15, thelemarCritBonus: 0, redCantApplied: true});
+		expect(withRedCant).toBe(25); // 10 + 15
+	});
+
+	it("never alters the total when Red Cant is declined", () => {
+		const declined = rollTotalWithRedCant({naturalRoll: 1, mod: 15, thelemarCritBonus: -5, redCantApplied: false});
+		expect(declined).toBe(11); // unchanged: 1 + 15 - 5
+	});
+});
+
+describe("R26 #9 — source-pin: both CHA roll paths clear the crit bonus on Red Cant", () => {
+	const SOURCE = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+
+	const extractBody = (methodName) => {
+		const m = SOURCE.match(new RegExp(`async ${methodName} \\([\\s\\S]*?\\n\\t\\}\\n`));
+		expect(m).not.toBeNull();
+		return m[0];
+	};
+
+	["_rollAbilityCheck", "_rollSkillCheck"].forEach(methodName => {
+		it(`${methodName} neutralizes thelemar_critBonus before computing the total when Red Cant applies`, () => {
+			const body = extractBody(methodName);
+			// The neutralization guard must exist...
+			expect(body).toMatch(/if \(redCant\.applied\) rollResult\.thelemar_critBonus = 0;/);
+			// ...and must run BEFORE the total is summed, so the -5 cannot reach it.
+			const guardIdx = body.indexOf("if (redCant.applied) rollResult.thelemar_critBonus = 0;");
+			const totalIdx = body.search(/(?:let|const) total = effectiveRoll \+/);
+			expect(guardIdx).toBeGreaterThan(-1);
+			expect(totalIdx).toBeGreaterThan(-1);
+			expect(guardIdx).toBeLessThan(totalIdx);
+			// ...and before the fumble class/note block keyed on === -5.
+			const fumbleIdx = body.indexOf("thelemar_critBonus === -5");
+			expect(fumbleIdx).toBeGreaterThan(guardIdx);
+		});
+	});
+});
