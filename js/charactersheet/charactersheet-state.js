@@ -40319,11 +40319,29 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_removeStateAddedConditions (stateInstance) {
-		if (!Array.isArray(stateInstance?._managedConditions) || !stateInstance._managedConditions.length) return;
-		for (const condObj of stateInstance._managedConditions) {
-			this.removeCondition(condObj);
+		if (!stateInstance) return;
+		// Current-version states carry a `_managedConditions` backref recording exactly
+		// which conditions THIS state added (so we never strip a condition the player
+		// applied independently). Remove those and clear the list.
+		if (Array.isArray(stateInstance._managedConditions)) {
+			for (const condObj of stateInstance._managedConditions) {
+				this.removeCondition(condObj);
+			}
+			stateInstance._managedConditions = [];
+			return;
 		}
-		stateInstance._managedConditions = [];
+		// (R27 #2) Legacy/untracked fallback. A state saved BEFORE managed-condition
+		// tracking existed (e.g. an active Veil of Lies → Invisible grant from an older
+		// build) has NO `_managedConditions` backref, so the block above removed nothing
+		// and the granted condition (Invisible) stayed stuck on the sheet after ending the
+		// state. When no backref was ever recorded, fall back to clearing the conditions
+		// the state TYPE declares it adds (resolved to their active variant by
+		// removeCondition's normalization, so "Invisible" → the TGTT variant when present).
+		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateInstance.stateTypeId];
+		if (!Array.isArray(stateType?.addsConditions) || !stateType.addsConditions.length) return;
+		for (const cond of stateType.addsConditions) {
+			this.removeCondition(cond);
+		}
 	}
 
 	/**

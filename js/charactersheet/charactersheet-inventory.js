@@ -3811,9 +3811,10 @@ class CharacterSheetInventory {
 
 	/**
 	 * Cast a healing spell from a charged staff: pick a spell (and level, for Cure Wounds),
-	 * spend the charges, roll/apply the healing, and surface the result. Applies healing to
-	 * the wielder by default (single-character sheet); the rolled value is shown so a DM can
-	 * redirect it to an ally. Honors the RAW "expend the last charge" d20 risk: on a 1 the
+	 * spend the charges, roll the healing, and surface the result. The rolled value is shown
+	 * with a non-blocking "Apply to Self" button (R27 #4) — healing is NOT auto-applied to the
+	 * wielder, so a player can direct it to an ally or apply it to themselves, mirroring the
+	 * healing-spell cast flow. Honors the RAW "expend the last charge" d20 risk: on a 1 the
 	 * staff is destroyed.
 	 * @param {string} itemId - The inventory item id.
 	 */
@@ -3879,11 +3880,27 @@ class CharacterSheetInventory {
 		this._state.setItemCharges(itemId, after);
 
 		if (healing) {
-			this._state.heal(healing.total);
-			JqueryUtil.doToast({
-				type: "success",
-				content: `${item.name}: cast ${spellLabel} (−${cost} charge${cost === 1 ? "" : "s"}). Healed ${healing.total} HP (${healing.formula}). ${after}/${item.charges} charges left.`,
-			});
+			// (R27 #4) Mirror the healing-SPELL flow: do NOT auto-heal the wielder.
+			// A staff of healing can target any creature within reach, so rolling the
+			// amount and silently adding it to the wielder's HP was wrong — it gave the
+			// player no way to direct the healing to an ally. Surface the rolled total
+			// with a non-blocking "Apply to Self" button (heals once, on click) exactly
+			// like beneficial spells, so the value is visible for an ally OR applied to self.
+			const healToast = e_({tag: "span", html: `${item.name}: cast ${spellLabel} (−${cost} charge${cost === 1 ? "" : "s"}). Rolled <strong>${healing.total}</strong> HP of healing (${healing.formula}). ${after}/${item.charges} charges left.<br><button class="ve-btn ve-btn-xs ve-btn-primary btn-staff-heal-self mt-1" type="button">✨ Apply ${healing.total} HP to Self</button>`});
+			const healSelfBtn = healToast.querySelector(".btn-staff-heal-self");
+			if (healSelfBtn) {
+				healSelfBtn.addEventListener("click", (evt) => {
+					evt.stopPropagation();
+					if (healSelfBtn.disabled) return;
+					healSelfBtn.disabled = true;
+					this._state.heal(healing.total);
+					healSelfBtn.textContent = "✓ Applied to Self";
+					this._page?._renderHp?.();
+					this._page?.saveCharacter?.();
+					JqueryUtil.doToast({type: "success", content: `✨ Healed ${healing.total} HP.`});
+				});
+			}
+			JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: healToast, autoHideTime: 12000}));
 		} else {
 			JqueryUtil.doToast({
 				type: "success",
@@ -3902,8 +3919,8 @@ class CharacterSheetInventory {
 			}
 		}
 
-		this._renderItemList();
-		this._page.saveCharacter();
+		this._renderItemList?.();
+		this._page?.saveCharacter?.();
 	}
 
 	/**
