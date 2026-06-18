@@ -31365,6 +31365,23 @@ class CharacterSheetState {
 		return {bonus, previousTotal: prev, newTotal: prev + bonus, used: true};
 	}
 
+	/**
+	 * (R26 #8) Decide whether to surface the NON-BLOCKING post-roll Guided Strike
+	 * offer after an attack roll. Pure so the post-roll hook logic is unit-testable
+	 * without DOM/state. Offer only when the character has Guided Strike with a use
+	 * available, and the roll being decorated is not itself a Guided Strike
+	 * application (avoid recursive offers) nor an already-decorated result.
+	 * @param {{hasGuidedStrike?: boolean, hasUsesAvailable?: boolean, isGuidedStrikeApplication?: boolean, alreadyOffered?: boolean}} [opts]
+	 * @returns {boolean}
+	 */
+	static shouldOfferGuidedStrikePostAttack ({hasGuidedStrike = false, hasUsesAvailable = false, isGuidedStrikeApplication = false, alreadyOffered = false} = {}) {
+		if (!hasGuidedStrike) return false;
+		if (!hasUsesAvailable) return false;
+		if (isGuidedStrikeApplication) return false;
+		if (alreadyOffered) return false;
+		return true;
+	}
+
 	/** Max Second Wind uses for the current level. @returns {number} */
 	getSecondWindUsesMax () {
 		const calcs = this.getFeatureCalculations();
