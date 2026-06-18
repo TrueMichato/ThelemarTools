@@ -141,6 +141,46 @@ describe("Interdict Boon effects — STATE (active-state toggles)", () => {
 		expect(state.hasCondition("Invisible")).toBe(false);
 	});
 
+	// (R26 #7) Ending Veil of Lies must clear the granted Invisible condition through
+	// EVERY deactivation path, not just deactivateState/removeActiveState. The Play Mode
+	// "Active States" card ends boons via toggleActiveState, and combat duration expiry
+	// ends them via advanceRound; both previously left the condition (and its derived
+	// active state) stuck on the sheet.
+	test("Veil of Lies: toggleActiveState OFF removes the Invisible condition (Play Mode path)", () => {
+		const state = buildIllrigger(10);
+		addBoon(state, "Veil of Lies");
+		const stateId = state.activateState("veilOfLies");
+		expect(state.hasCondition("Invisible")).toBe(true);
+
+		// Play Mode's Active-States toggle deactivates via toggleActiveState.
+		const nowActive = state.toggleActiveState(stateId);
+		expect(nowActive).toBe(false);
+		expect(state.hasCondition("Invisible")).toBe(false);
+		// The condition-derived active state must be cleaned up too (no stale "Invisible").
+		expect(state._data.activeStates.some((s) => s.isCondition && /invisible/i.test(s.name || ""))).toBe(false);
+
+		// Toggling back ON re-grants the condition (symmetry).
+		const reActive = state.toggleActiveState(stateId);
+		expect(reActive).toBe(true);
+		expect(state.hasCondition("Invisible")).toBe(true);
+	});
+
+	test("Veil of Lies: combat-round expiry removes the Invisible condition (advanceRound path)", () => {
+		const state = buildIllrigger(10);
+		addBoon(state, "Veil of Lies");
+		state.startCombat();
+		const stateId = state.activateState("veilOfLies");
+		expect(state.hasCondition("Invisible")).toBe(true);
+
+		// Force the boon's active-state to expire on the next round.
+		const inst = state._data.activeStates.find((s) => s.id === stateId);
+		inst.roundsRemaining = 1;
+		const expired = state.advanceRound();
+		expect(expired).toContain("Veil of Lies");
+		expect(state.hasCondition("Invisible")).toBe(false);
+		expect(state._data.activeStates.some((s) => s.isCondition && /invisible/i.test(s.name || ""))).toBe(false);
+	});
+
 	test("Hellsight: truesight range surfaced + state activatable", () => {
 		const state = buildIllrigger(10);
 		addBoon(state, "Hellsight");
