@@ -5,6 +5,64 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Closed Bugs
 
+### Round 26 (Illrigger `vaa` = Hochling Illrigger 15 Hellspeaker + Druid/Ranger `Lunaria` = Centaur Ranger 6 / Druid 4 Circle of the Zodiac) — COMPLETE
+
+**10 bugs (#7/#8/#9/#10 repeats).** Orchestrator did first-hand live diagnosis on the merged build, then
+decomposed into **8 single-owner autopilot sessions**, integrated foundation-first with **ZERO merge
+conflicts**, and **independently re-verified every bug by driving the EXACT UI control the user touches** on
+the integrated tree (the false-green cure). Full gate green: eslint 0 / stylelint 0 / jest charactersheet
+**299 suites · 10,954 tests** (baseline 292 · 10,881; +7 suites, +73 tests).
+
+* #1 — **Bracers of Archery** now grant +2 to ranged-weapon **damage**, detected by **base item** (not name):
+  any longbow/shortbow-derived weapon qualifies (S-items). ROOT: items use an `effects[]` system with no
+  Bracers implementation; added `getItemWeaponScopedDamageContributions` + `_attackMatchesWeaponBaseItems`
+  (reads `attack.sourceItem.baseItem`) folded into `_rollDamage`. Live-verified on merged build via the real
+  `.charsheet__attack-damage` control: Oathbow (longbow base) / Frost Shortbow (shortbow base) / custom bow →
+  +2; Light Crossbow / Dagger → no bonus; unattuned Bracers → bonus disappears.
+* #2 — **Known-Forms add picker** gained source / CR / size / type **filter controls** on top of the R25 rich
+  picker (S-knownforms). Static `buildKnownFormFilterOptions` + `matchesKnownFormFilters` predicate. Live: the
+  filter row renders in the modal and narrows the list (107→87→52→23); predicate verified on the merged build
+  (CR range numeric, source, size, creature-type, name-needle, and combined filters all correct).
+* #3 — **Staff of Healing** implemented: charges + healing-spell menu (Cure Wounds 1/level up to 4th, Lesser
+  Restoration, Mass Cure Wounds), with a green **Cast** button on the equipped+charged staff (S-items).
+  Live-verified end-to-end on merged build: Cure Wounds @ L4 → spent 4 charges (10→6), healed 32 HP (1→33),
+  HP capped at max.
+* #4 — **Magician** (Circle of the Zodiac) skill-hover breakdown shows the **real feature name** instead of a
+  generic "Feature Bonus" line (S-skillability). New `_getDynamicSkillFeatureComponents`. Live-verified on
+  Lunaria merged build: breakdown line reads **"Magician (Primal Order): +5"** (= live Wis mod) in the
+  Arcana/Nature hover and the DOM title.
+* #5 — **Ability hero card** now itemizes its `+N bonus` **per source** in a tooltip (Base / each contribution
+  / Total), mirroring the skill breakdown (S-skillability). New `getAbilityBonusBreakdown` +
+  `_getAbilityNamedModifierComponents`. Live-verified: tooltip reads "Base / Racial +1 / … / Total".
+* #6 — **Editing an existing item** now offers the **Upgrades & Empowerment** section (previously gated
+  `!isEdit`), applying additions/removals **idempotently** without double-applying existing upgrades/gems
+  (S-itemedit). New `_applyEditUpgrades`. Live-verified on merged build via item-info → Modify on a real
+  weapon: "🔧 Upgrades & Empowerment (Optional)" renders with its upgrade checkboxes; session proved
+  add/remove/gem-socket idempotence.
+* #7 — **Ending Veil of Lies** now removes the granted invisibility on EVERY deactivation path (REPEAT).
+  ROOT (the exact failing control the prior rounds missed): the **Play-Mode "Active States" card toggle**
+  routes through `toggleActiveState`, and **combat round expiry** through `advanceRound` — both set
+  `active=false` WITHOUT running `_removeStateAddedConditions`, leaving `{Invisible, TGTT}` stuck (the
+  canonical Active-States "End" path already cleaned up) (S-boon). Both paths now run the cleanup.
+  Live-verified on merged build: grant → Invisible/TGTT; Play-Mode toggle-off (by instance id) → cleared;
+  `advanceRound` expiry → cleared; toggle back on re-grants.
+* #8 — **Guided Strike** is now a **non-blocking post-roll** offer (REPEAT). ROOT: old `_pUseGuidedStrike`
+  showed a blocking which-attack picker then rolled a FRESH attack +10, discarding the player's actual roll.
+  Redesign hooks `_rollAttack`'s result toast and offers "Apply Guided Strike (+10)" on the **just-rolled**
+  attack; declining is free (no consume) (S-guided). Live-verified on merged build via the real
+  `.charsheet__attack-roll` control: attack d20=7 → 14; offer appears; Apply → SAME toast 14→24, resource
+  1→0; "Not now" → no consume.
+* #9 — **Red Cant** floor now applies to the displayed total even on a **natural 1 with Thelemar critical
+  rolls ON** (REGRESSION). ROOT: `_rollAbilityCheck`/`_rollSkillCheck` kept `thelemar_critBonus = -5` and the
+  fumble class/note AFTER Red Cant floored the die to 10, so the −5 still subtracted and "Natural 1!" still
+  rendered — to the user, "Red Cant stopped triggering". Fix: clear `thelemar_critBonus` when Red Cant applies
+  (S-redcant). Live-verified on merged build: nat-1 Deception, thelemar ON, expend seal → total **25** (10
+  floor + 15), no −5, no fumble; matrix (normal/adv/disadv, raw CHA + all four CHA skills) correct.
+* #10 — **Intransigent** now presents a **prominent interactive extend-to-allies affordance** instead of prose
+  (3rd repeat). Two-state status badge + an explicit "➕ Extend immunity to allies" section with a ± stepper
+  (S-intransigent). Live-verified on merged build: 0 allies → gold "Only you are immune to charmed"; set to 2
+  → emerald "You + 2 chosen allies within 10 ft are immune to charmed"; stepper/count API in sync.
+
 ### Round 25 (Illrigger `vaa` + Druid/Ranger `Lunaria` = Centaur Ranger 6 / Druid 4 Circle of the Zodiac) — COMPLETE
 
 **7 repeats from R24.** Orchestrator did FIRST-HAND live diagnosis on the **merged** build and found the
