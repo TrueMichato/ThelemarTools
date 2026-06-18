@@ -9175,6 +9175,22 @@ body.has-quickbuild-overlay .toast__container {
 	opacity: 1;
 }
 
+/* (R26 #8) Non-blocking post-roll Guided Strike offer inside the dice toast */
+.charsheet__dice-result-gs {
+	display: flex;
+	gap: 0.5rem;
+	justify-content: center;
+	margin-top: 0.75rem;
+	padding-top: 0.6rem;
+	border-top: 1px dashed var(--rgb-border-grey);
+}
+
+.charsheet__dice-result-gs-applied {
+	color: var(--rgb-success, #28a745);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
 /* Concentration Check Popup */
 .charsheet__concentration-result {
 	margin-top: 1rem;
