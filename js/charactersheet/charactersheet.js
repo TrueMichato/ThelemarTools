@@ -7961,7 +7961,7 @@ class CharacterSheetPage {
 	 * (R20) Dispatch name-keyed homebrew ability activations. Returns true when the click
 	 * was fully handled here (so the generic activation pipeline is skipped).
 	 *  - Healing Hands (#1): roll PB×d4 healing + offer "Apply to Self".
-	 *  - Guided Strike (#6): add +10 to the most recent attack roll.
+	 *  - Guided Strike (#6 / R26 #8): apply +10 to the most recent attack roll (post-roll).
 	 *  - Forked Tongue (S1 contract): open the long-rest language-swap UI.
 	 *  - Baleful Interdict (S4 contract): point the user to the Combat tab (seals live there).
 	 * @param {object} feature
@@ -8060,81 +8060,135 @@ class CharacterSheetPage {
 	 * @param {{attackId?: string}} [opts]
 	 * @returns {Promise<boolean>}
 	 */
+	/**
+	 * (R20 #6 / R26 #8) Explicit "Use Guided Strike" — canonical post-roll behavior:
+	 * after you SEE an attack roll you choose to add +10 to it. This NEVER rolls a
+	 * fresh/random attack. Behavior:
+	 *  - `opts.attackId` (weapon right-click): roll THAT attack normally; the
+	 *    non-blocking post-roll offer (attached to the dice toast) applies the +10.
+	 *    The use is consumed only when the player applies it.
+	 *  - otherwise (Abilities/Features Use button): apply +10 to the MOST RECENT
+	 *    attack roll. If no attack has been rolled yet, instruct the player to roll
+	 *    first (no use consumed).
+	 * @param {object} feature
+	 * @param {object|null} resource
+	 * @param {number} [resourceCost]
+	 * @param {{attackId?: string}} [opts]
+	 * @returns {Promise<boolean>}
+	 */
 	async _pUseGuidedStrike (feature, resource, resourceCost = 1, opts = {}) {
-		// Availability — do NOT consume yet; consume only once a roll is guaranteed.
-		if (resource && resource.current < resourceCost) {
+		// Availability — do NOT consume yet; consume only when the +10 is actually applied.
+		if (!this._isGuidedStrikeUseAvailable(resource, feature, resourceCost)) {
 			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Guided Strike has no uses remaining (recharges on a short rest)."}));
 			return true;
 		}
-		// Re-entrancy guard: the which-attack prompt is async; block a second concurrent use.
-		if (this._guidedStrikeInFlight) return true;
 
-		const {bonus} = CharacterSheetState.buildGuidedStrikeApplication(0);
-		let attackId = opts.attackId || null;
-		const weaponAttacks = this._state.getAttacks?.() || [];
-
-		if (!attackId && weaponAttacks.length) {
-			if (weaponAttacks.length === 1) {
-				attackId = weaponAttacks[0].id;
-			} else {
-				this._guidedStrikeInFlight = true;
-				try {
-					const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
-						title: "Guided Strike — Which Attack?",
-						values: weaponAttacks.map(a => a.name),
-						isResolveItem: false,
-					}));
-					if (picked == null) return true; // cancelled — no consume
-					attackId = weaponAttacks[picked]?.id || null;
-				} finally {
-					this._guidedStrikeInFlight = false;
-				}
-			}
-		}
-
-		if (attackId) {
-			// Re-check availability right before commit (a concurrent action may have spent it
-			// while the picker was open) and capture the LIVE resource so the decrement is not
-			// based on a value captured before the async picker.
-			let liveResource = resource;
-			if (resource && !resource.isStamina) {
-				const live = this._state.getResources().find(r => r.id === resource.id);
-				if (live) liveResource = live;
-				if (liveResource && liveResource.current < resourceCost) {
-					JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Guided Strike has no uses remaining."}));
-					return true;
-				}
-			}
-			// Roll the chosen attack with the one-shot +10. Consume the use ONLY if the roll
-			// actually happened (a stale attackId after a re-render makes _rollAttack a no-op).
-			const rolled = this._combat?._rollAttack?.(attackId, null, {extraBonus: {label: "Guided Strike", value: bonus}});
+		// Right-click on a specific weapon attack: roll it normally and let the
+		// post-roll offer surface the +10. No fresh "+10 baked in" roll, no picker.
+		if (opts.attackId) {
+			const rolled = this._combat?._rollAttack?.(opts.attackId, null);
 			if (rolled === false) {
-				JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "That attack is no longer available. Guided Strike was not used."}));
-				return true; // no roll → do NOT consume
+				JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "That attack is no longer available."}));
 			}
-			if (liveResource) this._state.setResourceCurrent(liveResource.id, liveResource.current - resourceCost);
-			else if (feature?.id) this._state.useFeature?.(feature.id);
-			JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `⚔️ Guided Strike: +${bonus} applied to the attack roll.`}));
-			this._saveCurrentCharacter();
-			this._renderResources();
-			this._renderActiveStates();
 			return true;
 		}
 
-		// Legacy fallback: no weapon attacks defined — add +10 to the most recent attack roll.
+		// Explicit Use: target the most recent attack roll.
 		const rolls = this._rollHistory?.getRolls?.() || [];
 		const lastAttack = rolls.find(r => r.rollType === "ATTACK" || r.rollType === "SPELL_ATTACK");
 		if (!lastAttack) {
-			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Make an attack roll first (or add a weapon attack), then activate Guided Strike to add +10."}));
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Make an attack roll first, then use Guided Strike to add +10 to it (or right-click a weapon to roll + apply)."}));
 			return true; // handled — do NOT consume the use
 		}
 
-		const app = CharacterSheetState.buildGuidedStrikeApplication(Number(lastAttack.total));
-		if (resource) this._state.setResourceCurrent(resource.id, resource.current - resourceCost);
+		this._applyGuidedStrikeAdjustment({
+			previousTotal: Number(lastAttack.total),
+			title: lastAttack.title,
+			resource,
+			feature,
+			resourceCost,
+			// Update the on-screen toast in place when it still shows this same attack roll.
+			resultEl: this._matchingDiceResultEl(lastAttack),
+		});
+		return true;
+	}
+
+	/**
+	 * (R26 #8) Whether Guided Strike currently has a use available, reading the LIVE
+	 * resource/feature pool (the passed-in objects may be stale after a re-render).
+	 * @param {object|null} resource
+	 * @param {object} [feature]
+	 * @param {number} [cost]
+	 * @returns {boolean}
+	 */
+	_isGuidedStrikeUseAvailable (resource, feature, cost = 1) {
+		if (resource && !resource.isStamina) {
+			const live = this._state.getResources().find(r => r.id === resource.id) || resource;
+			return (live.current || 0) >= cost;
+		}
+		if (resource) return (resource.current || 0) >= cost;
+		if (feature?.uses && typeof feature.uses.current === "number") return feature.uses.current >= cost;
+		return true;
+	}
+
+	/**
+	 * (R26 #8) Spend one Guided Strike use from its live resource (or feature uses).
+	 * @param {object|null} resource
+	 * @param {object} [feature]
+	 * @param {number} [cost]
+	 */
+	_consumeGuidedStrikeUse (resource, feature, cost = 1) {
+		let liveResource = resource;
+		if (resource && !resource.isStamina) {
+			const live = this._state.getResources().find(r => r.id === resource.id);
+			if (live) liveResource = live;
+		}
+		if (liveResource) this._state.setResourceCurrent(liveResource.id, liveResource.current - cost);
 		else if (feature?.id) this._state.useFeature?.(feature.id);
+	}
+
+	/**
+	 * (R26 #8) Locate the on-screen dice-result toast iff it still shows the given
+	 * attack roll (same total, attack header), so an in-place +10 update is safe.
+	 * @param {{total: number|string, title?: string}} roll
+	 * @returns {HTMLElement|null}
+	 */
+	_matchingDiceResultEl (roll) {
+		const el = this._lastDiceResultEl;
+		if (!el || !document.body.contains(el)) return null;
+		if (el.__guidedStrikeApplied) return null;
+		const total = el.querySelector(".charsheet__dice-result-total")?.textContent?.trim();
+		if (total !== String(roll.total)) return null;
+		const header = (el.querySelector(".charsheet__dice-result-header")?.textContent || "").toLowerCase();
+		if (!header.includes("attack")) return null;
+		return el;
+	}
+
+	/**
+	 * (R26 #8) Apply Guided Strike's +10 to an already-rolled attack: compute the new
+	 * total, consume the use, log the adjustment to roll history, toast, and re-render
+	 * resources. When `resultEl` is supplied, the floating dice toast is updated in
+	 * place so the SAME roll's displayed total increases by 10 (non-blocking).
+	 * @param {{previousTotal: number, title?: string, resource: object|null, feature?: object, resourceCost?: number, resultEl?: HTMLElement|null}} args
+	 * @returns {{bonus: number, previousTotal: number, newTotal: number}}
+	 */
+	_applyGuidedStrikeAdjustment ({previousTotal, title = "", resource, feature, resourceCost = 1, resultEl = null}) {
+		const app = CharacterSheetState.buildGuidedStrikeApplication(Number(previousTotal));
+		this._consumeGuidedStrikeUse(resource, feature, resourceCost);
+
+		if (resultEl && document.body.contains(resultEl)) {
+			resultEl.__guidedStrikeApplied = true;
+			const totalEl = resultEl.querySelector(".charsheet__dice-result-total");
+			if (totalEl) totalEl.textContent = String(app.newTotal);
+			const breakdownEl = resultEl.querySelector(".charsheet__dice-result-breakdown");
+			if (breakdownEl) breakdownEl.insertAdjacentHTML("beforeend", ` <span class="charsheet__dice-result-gs-applied">+${app.bonus} Guided Strike</span>`);
+			resultEl.querySelector(".charsheet__dice-result-gs")?.remove();
+			// Give the player a moment to read the updated total before it auto-dismisses.
+			this._scheduleDiceResultDismiss(resultEl, 6000);
+		}
 
 		this._rollHistory?.addRoll({
-			title: `Guided Strike (+${app.bonus}): ${lastAttack.title}`,
+			title: `Guided Strike (+${app.bonus})${title ? `: ${title}` : ""}`,
 			total: app.newTotal,
 			breakdown: `${app.previousTotal} + ${app.bonus}`,
 			resultNote: "Channel Divinity",
@@ -8144,6 +8198,60 @@ class CharacterSheetPage {
 		this._saveCurrentCharacter();
 		this._renderResources();
 		this._renderActiveStates();
+		return app;
+	}
+
+	/**
+	 * (R26 #8) Surface the NON-BLOCKING post-roll Guided Strike offer on a freshly
+	 * shown attack dice-result toast. Adds an "Apply Guided Strike (+10)" button that,
+	 * when clicked, updates THAT roll's total in place and consumes the use. The toast
+	 * stays dismissable and auto-dismisses — it never blocks other interaction. Called
+	 * from the shared `_rollAttack` result path. No-op when Guided Strike is unavailable.
+	 * @param {{resultEl?: HTMLElement|null, total?: number, isGuidedStrikeApplication?: boolean}} [args]
+	 * @returns {boolean} whether an offer was attached
+	 */
+	_offerGuidedStrikePostAttack ({resultEl = null, total = 0, isGuidedStrikeApplication = false} = {}) {
+		if (!resultEl || !document.body.contains(resultEl)) return false;
+		const gs = this._resolveGuidedStrikeAbility?.();
+		const decision = CharacterSheetState.shouldOfferGuidedStrikePostAttack({
+			hasGuidedStrike: !!gs,
+			hasUsesAvailable: !!gs?.available,
+			isGuidedStrikeApplication,
+			alreadyOffered: !!resultEl.__guidedStrikeOffered || !!resultEl.__guidedStrikeApplied,
+		});
+		if (!decision) return false;
+		resultEl.__guidedStrikeOffered = true;
+
+		const offer = e_({outer: `
+			<div class="charsheet__dice-result-gs">
+				<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__dice-result-gs-btn">⚔️ Apply Guided Strike (+10)</button>
+				<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__dice-result-gs-dismiss" title="Dismiss">Not now</button>
+			</div>
+		`});
+		const btnApply = offer.querySelector(".charsheet__dice-result-gs-btn");
+		const btnDismiss = offer.querySelector(".charsheet__dice-result-gs-dismiss");
+
+		btnApply.addEventListener("click", () => {
+			const gsLive = this._resolveGuidedStrikeAbility?.();
+			if (!gsLive || !gsLive.available) {
+				JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Guided Strike has no uses remaining."}));
+				offer.remove();
+				return;
+			}
+			this._applyGuidedStrikeAdjustment({
+				previousTotal: Number(total),
+				title: (resultEl.querySelector(".charsheet__dice-result-header")?.textContent || "").trim(),
+				resource: gsLive.resource,
+				feature: gsLive.feature,
+				resourceCost: gsLive.cost,
+				resultEl,
+			});
+		});
+		btnDismiss.addEventListener("click", () => offer.remove());
+
+		resultEl.appendChild(offer);
+		// Extend the auto-dismiss so the player has time to react to the offer.
+		this._scheduleDiceResultDismiss(resultEl, 15000);
 		return true;
 	}
 
@@ -8165,8 +8273,9 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * (R22 #5) Apply Guided Strike to a specific weapon attack (from its right-click menu):
-	 * roll THAT attack with the +10 and consume the use.
+	 * (R22 #5 / R26 #8) Apply Guided Strike to a specific weapon attack (right-click
+	 * menu): roll THAT attack normally, then the non-blocking post-roll offer lets the
+	 * player add +10 to the result. Never rolls a random/extra attack.
 	 * @param {string} attackId
 	 * @returns {Promise<boolean>}
 	 */
@@ -11596,12 +11705,11 @@ class CharacterSheetPage {
 	showDiceResult (opts) {
 		if (typeof opts === "string") {
 			// Legacy call: showDiceResult(title, total, breakdown)
-			this._showDiceResult(...arguments);
-		} else {
-			// New object format — pure toast.
-			const breakdown = opts.subtitle || `1d20 (${opts.roll}) ${opts.modifier >= 0 ? "+" : ""}${opts.modifier}`;
-			this._showDiceResult(opts.title, opts.total, breakdown, opts.resultClass, opts.resultNote);
+			return this._showDiceResult(...arguments);
 		}
+		// New object format — pure toast.
+		const breakdown = opts.subtitle || `1d20 (${opts.roll}) ${opts.modifier >= 0 ? "+" : ""}${opts.modifier}`;
+		return this._showDiceResult(opts.title, opts.total, breakdown, opts.resultClass, opts.resultNote);
 	}
 
 	/**
@@ -12144,10 +12252,38 @@ class CharacterSheetPage {
 			</div>
 		`});
 
-		resultEl.querySelector(".charsheet__dice-result-close").addEventListener("click", () => resultEl.remove());
+		resultEl.querySelector(".charsheet__dice-result-close").addEventListener("click", () => this._dismissDiceResult(resultEl));
 		document.body.append(resultEl);
+		this._lastDiceResultEl = resultEl;
 
-		setTimeout(() => setTimeout(() => resultEl.remove(), 300), duration);
+		this._scheduleDiceResultDismiss(resultEl, duration);
+		return resultEl;
+	}
+
+	/**
+	 * (R26 #8) Schedule (and re-schedule) the auto-dismiss of a floating dice-result
+	 * toast. Tracked on the element so a post-roll affordance (e.g. the Guided Strike
+	 * offer) can extend the window without leaking the prior timer.
+	 * @param {HTMLElement} el
+	 * @param {number} duration
+	 */
+	_scheduleDiceResultDismiss (el, duration) {
+		if (!el) return;
+		this._clearDiceResultDismiss(el);
+		el.__dismissTimer = setTimeout(() => {
+			el.__dismissTimer = setTimeout(() => el.remove(), 300);
+		}, duration);
+	}
+
+	/** (R26 #8) Cancel any pending auto-dismiss timer on a dice-result toast. */
+	_clearDiceResultDismiss (el) {
+		if (el && el.__dismissTimer) { clearTimeout(el.__dismissTimer); el.__dismissTimer = null; }
+	}
+
+	/** (R26 #8) Immediately dismiss a dice-result toast (clearing its timer first). */
+	_dismissDiceResult (el) {
+		this._clearDiceResultDismiss(el);
+		el?.remove();
 	}
 	// #endregion
 

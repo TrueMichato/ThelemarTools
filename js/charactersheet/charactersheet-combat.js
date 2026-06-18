@@ -1054,7 +1054,7 @@ class CharacterSheetCombat {
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
 		void this._page.pAnimateD20?.(rollResult);
-		this._page.showDiceResult({
+		const resultEl = this._page.showDiceResult({
 			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}`,
 			roll: rollResult.roll,
 			modifier: totalBonus,
@@ -1062,6 +1062,18 @@ class CharacterSheetCombat {
 			resultClass,
 			resultNote: resultNote + ammoNote,
 			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus),
+		});
+
+		// (R26 #8) Non-blocking post-roll Guided Strike offer. FLAG (overlap #9 roll
+		// pipeline): single insertion point on the shared `_rollAttack` result path —
+		// attaches an "Apply Guided Strike (+10)" affordance to the dice toast above so
+		// the player adds +10 to THIS roll after seeing it (never a fresh random roll).
+		// `isGuidedStrikeApplication` guards against offering on a roll that already
+		// baked in the bonus via `extraBonus`.
+		this._page._offerGuidedStrikePostAttack?.({
+			resultEl,
+			total,
+			isGuidedStrikeApplication: extraBonus?.label === "Guided Strike",
 		});
 
 		this._lastAttackContext = {
