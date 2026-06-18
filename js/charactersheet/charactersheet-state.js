@@ -33722,6 +33722,111 @@ class CharacterSheetState {
 		return this._isItemProficienciesActive(invItem);
 	}
 
+	// =========================================================================
+	// Weapon-type-scoped item damage bonuses (Bracers of Archery — R26 #1)
+	//
+	// Some equipped items grant a flat damage bonus that applies ONLY to attacks made
+	// with a particular BASE weapon (e.g. Bracers of Archery → +2 with any longbow or
+	// shortbow). A plain `damage` named-modifier can't express this (it would buff EVERY
+	// attack), so these are resolved at damage-roll time by matching the attack's weapon
+	// against the item's target base items. Detection is by BASE ITEM, not exact name, so
+	// a magic weapon derived from a shortbow ("Frost Shortbow") still benefits.
+	// =========================================================================
+
+	/**
+	 * Resolve a weapon's normalized base-item name. Prefers the explicit `baseItem`
+	 * reference ("shortbow|phb" → "shortbow"); falls back to the weapon's own name.
+	 * @param {object} weapon - A normalized inventory weapon (or any object with name/baseItem).
+	 * @returns {string} Lowercased base-item name (or "").
+	 * @private
+	 */
+	_resolveWeaponBaseName (weapon) {
+		if (!weapon) return "";
+		const bi = weapon.baseItem;
+		if (typeof bi === "string" && bi.trim()) return bi.split("|")[0].trim().toLowerCase();
+		return String(weapon.name || "").toLowerCase();
+	}
+
+	/**
+	 * Does an attack use a weapon whose BASE ITEM is one of `targets`? Matches on the
+	 * resolved base-item name AND on a whole-word appearance of the target in the attack's
+	 * name / source item (so custom-named or homebrew bows still qualify). Crossbows are
+	 * never swept up because the targets are specific ("longbow"/"shortbow") and matched
+	 * with word boundaries.
+	 * @param {object} attack - An attack object (may carry `sourceItem`).
+	 * @param {string[]} targets - Lowercased base-item names to match.
+	 * @returns {boolean}
+	 * @private
+	 */
+	_attackMatchesWeaponBaseItems (attack, targets) {
+		if (!attack || !Array.isArray(targets) || !targets.length) return false;
+		const baseName = this._resolveWeaponBaseName(attack.sourceItem);
+		const fullName = `${attack.name || ""} ${attack.sourceItem?.name || ""} ${attack.sourceItem?.baseItem || ""}`.toLowerCase();
+		for (const raw of targets) {
+			const t = String(raw).toLowerCase();
+			if (!t) continue;
+			if (baseName === t) return true;
+			const re = new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+			if (re.test(fullName)) return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Collect an item's weapon-type-scoped damage specs. Two sources, both data-driven:
+	 *   1. Generic `effects[]` entries of type `weaponDamageBonus` carrying a numeric
+	 *      `value` and a `weaponBaseItems` array — so any homebrew/custom item can express
+	 *      the same mechanic without code changes.
+	 *   2. Recognition of well-known items by name (Bracers of Archery) so they "just work"
+	 *      from the catalog without hand-authoring effects.
+	 * @param {object} itemData - The normalized item data (`invItem.item`).
+	 * @returns {Array<{value: number, weaponBaseItems: string[]}>}
+	 * @private
+	 */
+	_getItemWeaponScopedDamageSpecs (itemData) {
+		const specs = [];
+		if (Array.isArray(itemData?.effects)) {
+			for (const e of itemData.effects) {
+				if (e?.type !== "weaponDamageBonus") continue;
+				if (!Array.isArray(e.weaponBaseItems) || !e.weaponBaseItems.length) continue;
+				const val = typeof e.value === "number" ? e.value : parseInt(String(e.value).replace("+", ""), 10);
+				if (val) specs.push({value: val, weaponBaseItems: e.weaponBaseItems.map(s => String(s).toLowerCase())});
+			}
+		}
+		// Recognition: Bracers of Archery (DMG/XDMG) — +2 (or its bonusWeaponDamage) damage
+		// with longbows and shortbows. Matched on exact normalized name.
+		const name = String(itemData?.name || "").toLowerCase();
+		if (name === "bracers of archery") {
+			const bwd = itemData?.bonusWeaponDamage;
+			const val = typeof bwd === "number" ? bwd : (parseInt(String(bwd ?? "").replace("+", ""), 10) || 2);
+			specs.push({value: val, weaponBaseItems: ["longbow", "shortbow"]});
+		}
+		return specs;
+	}
+
+	/**
+	 * Per-attack weapon-type-scoped damage contributions from equipped (and attuned, if
+	 * required) items. Returns one entry per matching item so the combat module can both
+	 * sum them and show a labelled breakdown.
+	 * @param {object} attack - The attack being rolled.
+	 * @returns {Array<{name: string, value: number}>}
+	 */
+	getItemWeaponScopedDamageContributions (attack) {
+		if (!attack || attack.isSpell || attack.isUnarmedStrike) return [];
+		const out = [];
+		for (const inv of this._data.inventory || []) {
+			if (!this._isItemEffectsActive(inv)) continue;
+			const specs = this._getItemWeaponScopedDamageSpecs(inv.item);
+			if (!specs.length) continue;
+			let value = 0;
+			for (const spec of specs) {
+				if (this._attackMatchesWeaponBaseItems(attack, spec.weaponBaseItems)) value += spec.value;
+			}
+			if (value) out.push({name: inv.item?.name || "Item", value});
+		}
+		return out;
+	}
+
 	/**
 	 * Register an equipped item's catalog effects as named modifiers / defensive traits.
 	 * Idempotent when paired with `_unregisterItemEffects` (called by `_reapplyItemEffects`).
