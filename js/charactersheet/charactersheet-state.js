@@ -40143,6 +40143,16 @@ class CharacterSheetState {
 				state.activatedAt = Date.now();
 				state.activatedAtRound = this._data.inCombat ? this._data.combatRound : null;
 				state.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(state.duration) : null;
+				// Re-apply any conditions this state grants (e.g. Veil of Lies → Invisible)
+				// so a toggle-on through Play Mode restores the boon's condition, mirroring
+				// activateState. No-op for states without `addsConditions`.
+				this._applyStateAddedConditions(state, CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]);
+			} else {
+				// (R26 #7) Toggling a state OFF must strip the conditions it added, exactly
+				// like deactivateState/removeActiveState. Play Mode's "Active States" card
+				// ends boons via this method; without this, ending a condition-granting boon
+				// (e.g. Veil of Lies → Invisible) left the condition stuck on the sheet.
+				this._removeStateAddedConditions(state);
 			}
 			return state.active;
 		}
@@ -40518,6 +40528,11 @@ class CharacterSheetState {
 						this.removeCondition?.(condName);
 					}
 				}
+				// (R26 #7) Also strip conditions added via `_managedConditions` (e.g. an
+				// interdiction boon like Veil of Lies → Invisible). advanceRound previously
+				// only cleaned the spell-effect `grantsConditions` field, so a boon whose
+				// duration expired during combat left its granted condition stuck.
+				this._removeStateAddedConditions(state);
 
 				// If this was a spell effect that matches the concentrated spell, do full cleanup
 				if (state.isSpellEffect && this._data.concentrating?.spellName === state.name) {
