@@ -1562,6 +1562,12 @@ class CharacterSheetCombat {
 		const damageModifiers = this._state.getNamedModifiersByType("damage");
 		const featureDamageBonus = damageModifiers.reduce((sum, mod) => sum + (mod.value || 0), 0);
 
+		// Weapon-type-scoped item damage bonuses (e.g. Bracers of Archery → +2 with any
+		// longbow/shortbow). These apply ONLY to matching weapons, so they can't be a flat
+		// `damage` named-modifier (which would buff every attack); resolved per-attack here.
+		const itemWeaponDamageContribs = this._state.getItemWeaponScopedDamageContributions?.(attack) || [];
+		const itemWeaponDamageBonus = itemWeaponDamageContribs.reduce((sum, c) => sum + (c.value || 0), 0);
+
 		// Get bonus from active states (activated abilities)
 		const stateDamageBonus = this._state.getBonusFromStates?.("damage") || 0;
 
@@ -1647,7 +1653,7 @@ class CharacterSheetCombat {
 			spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 		}
 
-		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + rageBonus + stateDamageBonus + critDamageBonus + spellDamageBonus;
+		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + critDamageBonus + spellDamageBonus;
 
 		// Get extra damage dice from active states (e.g., Hex, Flame Tongue)
 		const extraDamageEntries = this._state.getExtraDamageFromStates?.() || [];
@@ -1696,6 +1702,7 @@ class CharacterSheetCombat {
 		let subtitle = `${attack.damage}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
 		if (attack.damageBonus) subtitle += ` + ${attack.damageBonus} (weapon)`;
 		if (featureDamageBonus) subtitle += ` + ${featureDamageBonus} (features)`;
+		for (const c of itemWeaponDamageContribs) subtitle += ` + ${c.value} (${c.name})`;
 		if (rageBonus) subtitle += ` + ${rageBonus} (rage)`;
 		if (stateDamageBonus) subtitle += ` + ${stateDamageBonus} (states)`;
 		if (critDamageBonus) subtitle += ` + ${critDamageBonus} (crit bonus)`;
