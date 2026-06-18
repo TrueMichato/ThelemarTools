@@ -181,6 +181,43 @@ describe("Interdict Boon effects — STATE (active-state toggles)", () => {
 		expect(state._data.activeStates.some((s) => s.isCondition && /invisible/i.test(s.name || ""))).toBe(false);
 	});
 
+	// (R27 #2) Repeat report: "Veil of Lies still doesn't remove invisibility". On a FRESH
+	// grant every End path already works (the state carries a `_managedConditions` backref).
+	// The recurring real-world failure is a LEGACY active state — a Veil of Lies → Invisible
+	// grant saved by an older build that predates managed-condition tracking — which has NO
+	// `_managedConditions` backref at all. `_removeStateAddedConditions` only cleared tracked
+	// conditions, so ending such a state removed nothing and Invisible stayed stuck.
+	test("Veil of Lies: legacy active state with NO _managedConditions backref still clears Invisible on end", () => {
+		const state = buildIllrigger(10);
+		addBoon(state, "Veil of Lies");
+		// Independently apply the Invisible condition (as the legacy grant once did) …
+		state.addCondition("Invisible");
+		expect(state.hasCondition("Invisible")).toBe(true);
+		// … and stand up a legacy active-state instance with NO managed-condition backref.
+		state._data.activeStates = (state._data.activeStates || []).filter((s) => s.stateTypeId !== "veilOfLies");
+		state._data.activeStates.push({id: "legacy-veil", stateTypeId: "veilOfLies", name: "Veil of Lies", active: true});
+		const legacy = state._data.activeStates.find((s) => s.stateTypeId === "veilOfLies");
+		expect("_managedConditions" in legacy).toBe(false);
+
+		state.deactivateState("veilOfLies");
+		// Fallback to the state type's declared addsConditions clears the stuck condition.
+		expect(state.hasCondition("Invisible")).toBe(false);
+	});
+
+	test("Veil of Lies: tracked-but-empty _managedConditions does NOT strip an independently-applied Invisible", () => {
+		const state = buildIllrigger(10);
+		addBoon(state, "Veil of Lies");
+		// Player has Invisible from some OTHER source (not this state).
+		state.addCondition("Invisible");
+		// A current-version state that added nothing of its own (empty backref) must not
+		// fall back to addsConditions and over-remove the independent condition.
+		state._data.activeStates = (state._data.activeStates || []).filter((s) => s.stateTypeId !== "veilOfLies");
+		state._data.activeStates.push({id: "veil-empty", stateTypeId: "veilOfLies", name: "Veil of Lies", active: true, _managedConditions: []});
+
+		state.deactivateState("veilOfLies");
+		expect(state.hasCondition("Invisible")).toBe(true);
+	});
+
 	test("Hellsight: truesight range surfaced + state activatable", () => {
 		const state = buildIllrigger(10);
 		addBoon(state, "Hellsight");

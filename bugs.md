@@ -5,6 +5,41 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Closed Bugs
 
+### Round 27 (Illrigger `vaa` = Hochling Illrigger 15 Hellspeaker + Druid/Ranger `Lunaria` = Centaur Ranger 6 / Druid 4 Circle of the Zodiac) — COMPLETE
+
+**4 repeat bugs (all reported as still-broken after R26 "fixes" — the false-green pattern again).** Each was
+reproduced through the **REAL UI** (real fixture import + real button clicks + `getBoundingClientRect`
+visibility checks, NOT harness state manipulation) to find the TRUE root cause before touching code. Full gate
+green: eslint 0 / stylelint 0 / jest charactersheet **299 suites · 10,962 tests** (baseline 299 · 10,954; +8
+tests).
+
+* #1 — **Ability breakdown still flat (no per-source breakdown).** ROOT: R26 only itemized the read-only hero
+  card tooltip; the play-mode **"Edit Ability Scores" modal** still rendered a flat `Base N | +N bonus | +N
+  item` line. FIX: `_showEditAbilityScoresModal` (`charactersheet.js`) now consumes the already-tested
+  `getAbilityBonusBreakdown(abl)` to render itemized per-source lines (`Base 17 | +1 Racial | +2 Pan's
+  Apostle…`) plus an itemized tooltip. Live-verified: vaa "Base 17 | +1 Racial"; Lunaria multi-source
+  itemization. Data contract pinned by the existing `getAbilityBonusBreakdown` suite.
+* #2 — **Veil of Lies still leaves the Invisible condition stuck.** ROOT: every FRESH grant works (each carries
+  a `_managedConditions` backref that all End paths clear); the recurring failure is a **LEGACY save** (created
+  before R26's managed-condition tracking) whose `veilOfLies` state has NO `_managedConditions` field at all.
+  `_removeStateAddedConditions` only removed tracked conditions → nothing to remove → Invisible stuck. FIX:
+  added a legacy fallback gated on `Array.isArray(_managedConditions)` — when the field is entirely ABSENT
+  (undefined), fall back to removing the stateType's declared `addsConditions` via `removeCondition` (which
+  normalizes "Invisible" → the TGTT variant); an empty array still means "tracked, nothing of its own" so the
+  no-over-removal guarantee holds. Live-verified: legacy state clears Invisible; empty-array preserves an
+  independent Invisible; fresh grants unaffected.
+* #3 — **Intransigent still has no badge anywhere in the sheet.** ROOT: R26's badge rendered inside
+  `.charsheet__feature-body`, which is `display:none` (feature cards are collapsed by default), so it was
+  invisible until expansion. FIX: added a **feature HEADER badge** (`charactersheet-features.js`, the
+  visible-on-collapsed pattern used by `huntersPreyBadge`/`derivedEffectBadge`): gold "🛡️ Charmed-immune
+  (extendable)" when self-only, emerald "🛡️ Charmed-immune: You + N ally/allies" when extended.
+  Live-verified visible (152×40) on the collapsed card, flips gold→emerald with the ally count.
+* #4 — **Staff of Healing auto-heals the wielder with no "apply to self" choice** (healing SPELLS offer one).
+  ROOT: `_pCastHealingStaff` (`charactersheet-inventory.js`) called `this._state.heal(total)` directly. FIX:
+  mirror the healing-spell flow — roll the amount, spend the charge, and surface a **non-blocking toast with an
+  "✨ Apply N HP to Self" button** (`.btn-staff-heal-self`) that heals once on click, so the value can instead
+  go to an ally. Live-verified: cast spends 1 charge, HP stays put, button → "✓ Applied to Self" heals once.
+
 ### Round 26 (Illrigger `vaa` = Hochling Illrigger 15 Hellspeaker + Druid/Ranger `Lunaria` = Centaur Ranger 6 / Druid 4 Circle of the Zodiac) — COMPLETE
 
 **10 bugs (#7/#8/#9/#10 repeats).** Orchestrator did first-hand live diagnosis on the merged build, then
