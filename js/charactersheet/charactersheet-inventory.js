@@ -1594,6 +1594,10 @@ class CharacterSheetInventory {
 			if (oldChargesCurrent != null && typeof this._state.setItemCharges === "function") {
 				this._state.setItemCharges(editItemId, oldChargesCurrent);
 			}
+			// Apply the upgrades/gemstone delta selected in the edit modal (#6). replaceItem has
+			// already preserved the item's existing appliedUpgrades/socketedGemstones, so this only
+			// adds newly-checked entries and removes un-checked ones — idempotently.
+			this._applyEditUpgrades(editItemId, options);
 			this._syncArmorState();
 			this._page.renderCharacter?.();
 			this._page.saveCharacter?.();
@@ -1634,6 +1638,74 @@ class CharacterSheetInventory {
 		if (socketed) parts.push("1 empowered gemstone");
 		if (parts.length) {
 			JqueryUtil.doToast({type: "success", content: `Applied ${parts.join(" + ")} (requirements bypassed).`});
+		}
+	}
+
+	/**
+	 * Apply the upgrades/gemstone selection from the EDIT modal to an existing item (#6),
+	 * diffing the desired selection against the item's current persisted state so that:
+	 *   - newly-checked upgrades are added (force-apply, no cost; applyItemUpgrade is itself
+	 *     duplicate-guarded so an already-applied upgrade is never recorded twice);
+	 *   - un-checked upgrades that were previously applied are removed;
+	 *   - a newly-chosen gemstone replaces the socketed one (un-socket then socket);
+	 *   - clearing the gemstone select un-sockets the current gem.
+	 * No-op when the upgrades module is unavailable or the upgrades section was not shown (the
+	 * caller only forwards `_pendingUpgrades` in edit mode when the section rendered, so existing
+	 * upgrades are left untouched otherwise).
+	 * @param {string} itemId - The edited inventory item id
+	 * @param {object} options - The custom-item options (carrying _pendingUpgrades / _pendingGemstone)
+	 */
+	_applyEditUpgrades (itemId, options) {
+		// Section not shown / nothing forwarded → leave the item's upgrades exactly as they were.
+		if (options?._pendingUpgrades === undefined && options?._pendingGemstone === undefined) return;
+		const upgradesModule = this._page._upgrades;
+		if (!upgradesModule?.applyUpgradesToItem) return;
+
+		const desiredUpgrades = Array.isArray(options?._pendingUpgrades) ? options._pendingUpgrades : [];
+		const desiredGem = options?._pendingGemstone || null;
+		const same = (a, b) => a && b && a.name === b.name && a.source === b.source;
+
+		let added = 0;
+		let removed = 0;
+		let gemChanged = false;
+
+		// Removals: upgrades currently applied but no longer selected.
+		const currentUpgrades = (this._state.getItemUpgrades?.(itemId) || []).slice();
+		for (const cur of currentUpgrades) {
+			if (!desiredUpgrades.some(d => same(d, cur))) {
+				if (this._state.removeItemUpgrade?.(itemId, cur.name, cur.source)) removed++;
+			}
+		}
+
+		// Additions: selected upgrades not yet applied. applyUpgradesToItem → applyItemUpgrade is
+		// duplicate-guarded, but pre-filtering keeps the success count accurate.
+		const toAdd = desiredUpgrades.filter(d => !currentUpgrades.some(cur => same(cur, d)));
+
+		// Gemstone diff (one socket per item).
+		const currentGem = (this._state.getSocketedGemstones?.(itemId) || [])[0] || null;
+		let gemToSocket = null;
+		if (desiredGem && !same(desiredGem, currentGem)) {
+			if (currentGem && this._state.unsocketGemstone?.(itemId, currentGem.name)) gemChanged = true;
+			gemToSocket = desiredGem;
+		} else if (!desiredGem && currentGem) {
+			if (this._state.unsocketGemstone?.(itemId, currentGem.name)) gemChanged = true;
+		}
+
+		if (toAdd.length || gemToSocket) {
+			const {appliedUpgrades, socketed} = upgradesModule.applyUpgradesToItem(itemId, {
+				upgrades: toAdd,
+				gemstone: gemToSocket,
+			});
+			added += appliedUpgrades;
+			if (socketed) gemChanged = true;
+		}
+
+		const parts = [];
+		if (added) parts.push(`${added} upgrade${added === 1 ? "" : "s"} added`);
+		if (removed) parts.push(`${removed} upgrade${removed === 1 ? "" : "s"} removed`);
+		if (gemChanged) parts.push("gemstone updated");
+		if (parts.length) {
+			JqueryUtil.doToast({type: "success", content: `Item upgrades: ${parts.join(", ")} (requirements bypassed).`});
 		}
 	}
 
@@ -2882,22 +2954,24 @@ class CharacterSheetInventory {
 		form.querySelector("#custom-item-spell-level-filter")?.addEventListener("change", renderSpellList);
 		form.querySelector("#custom-item-spell-school-filter")?.addEventListener("change", renderSpellList);
 
-		// ── Upgrades & Empowerment Section (#15) ───────────────────────────────────────────────
-		// Lets a custom item be created with item upgrades and/or an already-empowered gemstone
-		// applied as part of creation. Requirements (gold, prerequisites, the Gem Empowerment
-		// skill) are bypassed — this is the creation-time counterpart to the #14 escape hatch and
-		// is meant for migrating or pre-owned gear. Only shown when creating (edit uses the
-		// dedicated per-item Upgrade modal) and when upgrade data is loaded.
+		// ── Upgrades & Empowerment Section (#15, edit support #6) ───────────────────────────────
+		// Lets a custom item be created OR edited with item upgrades and/or an already-empowered
+		// gemstone applied. Requirements (gold, prerequisites, the Gem Empowerment skill) are
+		// bypassed — this is the counterpart to the #14 escape hatch and is meant for migrating or
+		// pre-owned gear. In EDIT mode the checkboxes/select open pre-reflecting the upgrades and
+		// socketed gemstone already on the item, and saving applies only the delta (idempotently)
+		// so existing upgrades are never double-applied. Shown whenever upgrade data is loaded.
 		const upgradesModule = this._page._upgrades;
 		const allUpgradesData = this._page.getItemUpgrades?.() || [];
+		const upgradesSectionShown = !!(upgradesModule && allUpgradesData.length);
 		const pendingUpgrades = [];
 		let pendingGemstone = null;
 		let renderUpgradeChoices = () => {};
-		if (!isEdit && upgradesModule && allUpgradesData.length) {
+		if (upgradesSectionShown) {
 			const upgradesSection = e_({outer: `
 				<div class="charsheet__custom-item-section charsheet__custom-item-section--upgrades">
 					<div class="charsheet__custom-item-section-title">🔧 Upgrades &amp; Empowerment (Optional)</div>
-					<div class="ve-muted ve-small mb-2">Apply item upgrades or socket an already-empowered gemstone as part of creation. Requirements (gold, prerequisites, the Gem Empowerment skill) are <b>bypassed</b> — intended for migrating or pre-owned gear.</div>
+					<div class="ve-muted ve-small mb-2">Apply item upgrades or socket an already-empowered gemstone${isEdit ? "" : " as part of creation"}. Requirements (gold, prerequisites, the Gem Empowerment skill) are <b>bypassed</b> — intended for migrating or pre-owned gear.${isEdit ? " Upgrades already on this item are pre-checked; un-check to remove." : ""}</div>
 					<div class="charsheet__custom-item-upgrades-body"></div>
 				</div>
 			`});
@@ -3023,6 +3097,25 @@ class CharacterSheetInventory {
 
 		// Pre-seed for edit mode, or an explicitly supplied base item.
 		if (prefillItem) applySeed(this._seedOptionsFromItem(prefillItem));
+
+		// EDIT mode (#6): now that applySeed has set the correct item type, pre-reflect the
+		// upgrades and socketed gemstone already on the item. Done AFTER applySeed because the
+		// first renderUpgradeChoices (run while the type was still the default "gear") clears any
+		// pending selections for non-socketable types. Resolve each stored record back to its full
+		// upgrade/gemstone entity so checkbox matching (name+source) and the save-time apply path
+		// work unchanged, then re-render the choices so the controls open checked/selected.
+		if (isEdit && prefillItem && upgradesSectionShown) {
+			for (const applied of (prefillItem.appliedUpgrades || [])) {
+				const ent = allUpgradesData.find(u => u.name === applied.name && u.source === applied.source);
+				if (ent && !pendingUpgrades.some(u => u.name === ent.name && u.source === ent.source)) pendingUpgrades.push(ent);
+			}
+			const socketed = (prefillItem.socketedGemstones || [])[0];
+			if (socketed) {
+				const gemEnt = (upgradesModule.getGemstoneUpgrades?.() || []).find(g => g.name === socketed.name && g.source === socketed.source);
+				if (gemEnt) pendingGemstone = gemEnt;
+			}
+			renderUpgradeChoices();
+		}
 
 		// Footer buttons
 		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
@@ -3332,8 +3425,16 @@ class CharacterSheetInventory {
 
 			// Creation-time upgrades & empowerment (#15) — applied AFTER the item is created,
 			// bypassing cost/prerequisites. Only populated when the upgrades section was shown.
-			if (pendingUpgrades.length) options._pendingUpgrades = pendingUpgrades.slice();
-			if (pendingGemstone) options._pendingGemstone = pendingGemstone;
+			// In EDIT mode (#6) ALWAYS forward the (possibly empty) selection when the section was
+			// shown, so the save-time diff can ADD newly-checked upgrades AND REMOVE ones the user
+			// un-checked. `_pendingGemstone: null` is meaningful in edit mode (un-socket request).
+			if (isEdit && upgradesSectionShown) {
+				options._pendingUpgrades = pendingUpgrades.slice();
+				options._pendingGemstone = pendingGemstone || null;
+			} else {
+				if (pendingUpgrades.length) options._pendingUpgrades = pendingUpgrades.slice();
+				if (pendingGemstone) options._pendingGemstone = pendingGemstone;
+			}
 
 			this._saveCustomItem(name, quantity, weight, options, editItemId);
 			JqueryUtil.doToast({type: "success", content: isEdit ? `Updated ${name}!` : `Created ${name}!`});
