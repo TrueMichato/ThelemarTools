@@ -35,27 +35,27 @@
 	"shortcuts": [
 		{
 			"name": "Classes",
-			"url": "/classes.html"
+			"url": "classes.html"
 		},
 		{
 			"name": "Spells",
-			"url": "/spells.html"
+			"url": "spells.html"
 		},
 		{
 			"name": "Bestiary",
-			"url": "/bestiary.html"
+			"url": "bestiary.html"
 		},
 		{
 			"name": "Items",
-			"url": "/items.html"
+			"url": "items.html"
 		},
 		{
 			"name": "Feats",
-			"url": "/feats.html"
+			"url": "feats.html"
 		},
 		{
 			"name": "Species",
-			"url": "/races.html"
+			"url": "races.html"
 		}
 	],
 	"start_url": "index.html",
