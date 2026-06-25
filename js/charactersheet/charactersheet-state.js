@@ -1378,12 +1378,20 @@ class FeatureModifierParser {
 			const bonusPattern1 = new RegExp(`(?:gain\\s+)?(?:a\\s+)?bonus\\s+to\\s+(?:\\w+\\s*\\((?:{@skill\\s*)?)?${skill}(?:\\}?\\))?\\s*checks?\\s+equal\\s+to\\s+(?:your\\s+)?proficiency\\s+bonus`, "gi");
 			// Pattern 2: "gain a bonus to X checks...The bonus equals your proficiency bonus"
 			const bonusPattern2 = new RegExp(`(?:gain\\s+)?(?:a\\s+)?bonus\\s+to[^.]*(?:\\w+\\s*\\((?:{@skill\\s*)?)?${skill}(?:\\}?\\))?[^.]*checks?[^.]*\\.\\s*(?:The\\s+)?bonus\\s+equals\\s+(?:your\\s+)?proficiency\\s+bonus`, "gi");
-			if (bonusPattern1.test(plainText) || bonusPattern2.test(plainText)) {
+			const bonusMatch = bonusPattern1.exec(plainText) || bonusPattern2.exec(plainText);
+			if (bonusMatch) {
+				// A creature-type / tracking restriction (e.g. Whiff of the Beyond's
+				// Perception bonus) gates the bonus to specific foes — capture it so the
+				// modifier is added disabled (per-roll opt-in) rather than always-on.
+				// Without this the bonus leaked as a flat, unconditional skill bonus.
+				const conditional = this._extractCreatureRestriction(plainText)
+					|| this._extractCondition(plainText, bonusMatch.index);
 				modifiers.push({
 					type: `skill:${skillKey}`,
 					value: 0,
 					note: sourceName,
 					proficiencyBonus: true, // Special flag: adds proficiency bonus
+					conditional,
 				});
 			}
 		});
@@ -1988,13 +1996,20 @@ class FeatureModifierParser {
 				let value;
 
 				if (proficiencyBonus) {
-					// "bonus equal to your proficiency bonus" - mark for special handling
+					// "bonus equal to your proficiency bonus" - mark for special handling.
+					// For SKILL bonuses, prefer a creature-type / tracking restriction
+					// (e.g. Whiff of the Beyond's Perception bonus is gated to specific
+					// creature types) over the generic positional condition so the bonus
+					// is correctly gated and labelled rather than applied to every check.
+					const isSkill = typeof type === "string" && type.startsWith("skill:");
+					const conditional = (isSkill ? this._extractCreatureRestriction(text) : null)
+						|| this._extractCondition(text, match.index);
 					modifiers.push({
 						type,
 						value: 0,
 						note: sourceName,
 						proficiencyBonus: true,
-						conditional: this._extractCondition(text, match.index),
+						conditional,
 					});
 					continue;
 				}
@@ -2207,6 +2222,40 @@ class FeatureModifierParser {
 			}
 		}
 
+		return null;
+	}
+
+	/**
+	 * Detect when a bonus is restricted to specific creature types or to a
+	 * tracking/sensing context (e.g. the Warlock "Whiff of the Beyond" specialty:
+	 * "a bonus to Wisdom (Perception) checks equal to your proficiency bonus … to
+	 * track these creature types"). Such bonuses must NOT apply to every check — they
+	 * are conditional and should surface as a per-roll opt-in. Returns a human-readable
+	 * condition string, or null when the text carries no creature/tracking restriction
+	 * (so a genuinely unconditional bonus is left untouched).
+	 *
+	 * Scans the FULL text (not a positional window) because the restricting clause can
+	 * sit in a neighbouring sentence — but only matches high-confidence creature-type
+	 * phrasing, so it never gates an unrelated bonus.
+	 * @param {string} text - The feature description (plain or with {@tag} markup)
+	 * @returns {string|null}
+	 */
+	static _extractCreatureRestriction (text) {
+		if (!text) return null;
+		// Strip {@tag arg|...} markup down to its display arg so "{@skill Perception}"
+		// etc. don't break the creature-type scan.
+		const t = text.toLowerCase().replace(/\{@\w+\s+([^}|]+)(?:\|[^}]*)?\}/g, "$1");
+		const types = "aberrations?|beasts?|celestials?|constructs?|dragons?|elementals?|fey|fiends?|giants?|humanoids?|monstrosities|oozes?|plants?|undead";
+		// "...these / those / such creature(s) (types)" — a restriction to a set of
+		// creature types named (typically) earlier in the feature.
+		if (/\b(?:these|those|such)\s+(?:types?\s+of\s+)?creatures?(?:\s+types?)?\b/.test(t)) {
+			const listMatch = t.match(new RegExp(`(?:${types})(?:\\s*,\\s*(?:${types}))*(?:\\s*,?\\s*(?:or|and)\\s+(?:${types}))?`, "i"));
+			const named = listMatch ? listMatch[0].replace(/\s+/g, " ").trim() : "the listed creature types";
+			return `tracking or perceiving ${named}`;
+		}
+		// "to track / detect / sense / notice / find / locate / perceive ... <creature type>"
+		const verbMatch = t.match(new RegExp(`to\\s+(?:track|detect|sense|notice|find|locate|perceive)\\s+[^.]*?\\b(?:${types})\\b`, "i"));
+		if (verbMatch) return verbMatch[0].replace(/\s+/g, " ").trim();
 		return null;
 	}
 
@@ -4182,6 +4231,13 @@ class CharacterSheetState {
 		// base, which leaked a permanent fly speed. Runs after _migrateModifiers.
 		this._migrateConditionalSpeedModifiers();
 
+		// Migrate conditional skill modifiers: re-gate creature-restricted skill
+		// bonuses (e.g. the Warlock "Whiff of the Beyond" specialty, whose Perception
+		// bonus only applies when tracking/perceiving specific creature types) that
+		// predate the conditional-gating fix and were saved ENABLED at base, leaking a
+		// permanent flat skill bonus. Runs after _migrateConditionalSpeedModifiers.
+		this._migrateConditionalSkillModifiers();
+
 		// Migrate Shell Defense (Tortle): older saves persisted its "+4 bonus to AC"
 		// as an ENABLED passive named modifier. Shell Defense is now a fully
 		// activatable state (ACTIVE_STATE_TYPES.shellDefense) that registers ZERO
@@ -4752,6 +4808,55 @@ class CharacterSheetState {
 			const parsedMod = parsed.find(p => p.type === mod.type);
 			// The current definition gates this speed grant behind a condition
 			// (transformation/while-clause), but it was saved enabled at base → fix.
+			if (parsedMod && parsedMod.conditional) {
+				if (!mod.conditional) mod.conditional = parsedMod.conditional;
+				mod.enabled = false;
+			}
+		});
+	}
+
+	/**
+	 * Re-gate stale conditional skill modifiers on load.
+	 *
+	 * A skill bonus restricted to specific creature types or a tracking context
+	 * (e.g. the Warlock "Whiff of the Beyond" specialty — "a bonus to Wisdom
+	 * (Perception) checks equal to your proficiency bonus … to track these creature
+	 * types") must apply only as a per-roll opt-in, NOT to every check. Characters
+	 * saved BEFORE the conditional-gating fix persisted such a bonus with
+	 * `enabled: true` (and no `conditional`), and because `loadFromJson` restores
+	 * `namedModifiers` verbatim the always-on bonus survived the round-trip.
+	 *
+	 * This re-parses each currently-enabled skill modifier's source feature; if the
+	 * current definition says the bonus is conditional (creature/tracking restricted),
+	 * the saved modifier is disabled and its `conditional` backfilled. Unconditional
+	 * skill bonuses are untouched. Idempotent: disabled modifiers are skipped, so a
+	 * second run is a no-op. Mirrors _migrateConditionalSpeedModifiers.
+	 */
+	_migrateConditionalSkillModifiers () {
+		if (!this._data.namedModifiers?.length) return;
+		if (!this._data.features?.length) return;
+
+		// Only an ENABLED skill modifier can be a stale leak; disabled ones are
+		// already correct (and re-running this migration must be a no-op).
+		const candidates = this._data.namedModifiers.filter(m =>
+			typeof m.type === "string" && m.type.startsWith("skill:") && m.enabled !== false,
+		);
+		if (!candidates.length) return;
+
+		candidates.forEach(mod => {
+			// Locate the source feature (prefer the explicit link, fall back to the
+			// "From <name>" note or a name match — same heuristics as _migrateModifiers).
+			const feature = this._data.features.find(f =>
+				(mod.sourceFeatureId && f.id === mod.sourceFeatureId)
+				|| (f.name && mod.note && mod.note.includes(`From ${f.name}`))
+				|| (f.name && mod.name && f.name === mod.name),
+			);
+			if (!feature?.description) return;
+
+			const parsed = FeatureModifierParser.parseModifiers(feature.description, feature.name);
+			const parsedMod = parsed.find(p => p.type === mod.type);
+			// The current definition gates this skill bonus behind a creature/tracking
+			// restriction, but it was saved enabled at base → re-gate it.
 			if (parsedMod && parsedMod.conditional) {
 				if (!mod.conditional) mod.conditional = parsedMod.conditional;
 				mod.enabled = false;

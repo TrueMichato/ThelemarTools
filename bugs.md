@@ -5,6 +5,33 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Closed Bugs
 
+### Round 28 (TGTT Warlock specialty — Whiff of the Beyond conditional Perception bonus) — COMPLETE
+
+**1 bug:** The "Whiff of the Beyond" specialty's *"bonus to Wisdom (Perception) checks equal to your
+proficiency bonus … to track these creature types"* was being parsed as an ALWAYS-ON flat Perception
+bonus instead of a conditional (per-roll opt-in) one. The restriction "to track these creature types"
+lives in a clause the old positional condition-extractor couldn't reach.
+
+* **ROOT (two redundant emitters in `FeatureModifierParser.parseModifiers`, charactersheet-state.js):**
+  Emitter A (SKILL CHECKS block) attached a condition via `_extractCondition`, but its ±100-char window
+  from the match index does NOT reach the trailing "to track these creature types" clause → it emitted a
+  null/wrong condition. Emitter B (BONUS TO SPECIFIC SKILL CHECKS block) attached **no `conditional` at
+  all** → always unconditional. So the bonus leaked as a flat skill bonus across description variants.
+* **FIX:** New static `FeatureModifierParser._extractCreatureRestriction(text)` scans the FULL text for
+  high-confidence creature-type / tracking restrictions ("these/those/such creature types"; "to
+  track/detect/sense/… <creature-type>") and returns a human-readable condition (or `null` — so generic
+  proficiency-bonus skills are NOT wrongly gated). Emitter A now prefers it for `skill:` types; emitter B
+  switched `.test()` → `.exec()` and attaches `conditional` via it (falling back to `_extractCondition`).
+  Dedupe keeps the first (emitter A) with the correct creature-type label. Result: a single
+  `enabled:false` conditional Perception modifier; `getSkillBonus("perception")` stays 0 until opted in.
+* **Legacy saves:** New `_migrateConditionalSkillModifiers()` (mirrors `_migrateConditionalSpeedModifiers`)
+  re-gates any pre-fix save that persisted the bonus `enabled:true` — re-parses the source feature on
+  load, disables + backfills `conditional` when the current definition is creature/tracking restricted.
+  Idempotent; does not touch genuinely unconditional skill bonuses.
+* Tests: +6 in `CharacterSheetParsers.test.js` (parser + `_extractCreatureRestriction`), +5 new suite
+  `CharacterSheetConditionalSkillMigration.test.js` (fresh-build gating, pre-fix re-gate, idempotency,
+  over-reach guard). Gate: eslint 0 / stylelint 0 / jest charactersheet **300 suites · 10,973 tests**.
+
 ### Round 27 (Illrigger `vaa` = Hochling Illrigger 15 Hellspeaker + Druid/Ranger `Lunaria` = Centaur Ranger 6 / Druid 4 Circle of the Zodiac) — COMPLETE
 
 **4 repeat bugs (all reported as still-broken after R26 "fixes" — the false-green pattern again).** Each was
