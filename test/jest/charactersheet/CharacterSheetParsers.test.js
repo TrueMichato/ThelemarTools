@@ -328,4 +328,60 @@ describe("FeatureModifierParser", () => {
 			expect(spellDcMod).toBeDefined();
 		});
 	});
+
+	// R27 follow-up: a skill bonus restricted to specific creature types (e.g. the
+	// Warlock "Whiff of the Beyond" specialty) must be parsed as CONDITIONAL so it is
+	// gated (per-roll opt-in) instead of applied to every check.
+	describe("creature-restricted skill bonuses are conditional", () => {
+		const findPerception = (result) => result.filter(m => typeof m.type === "string" && m.type.startsWith("skill:perception"));
+
+		const WHIFF_FULL = "You automatically sense when an aberration, celestial, elemental, fey, fiend, or undead has been within 30 feet of you in the past 24 hours. You also gain a bonus to Wisdom ({@skill Perception}) checks equal to your proficiency bonus and have advantage on checks to track these creature types.";
+		const WHIFF_BONUS_ONLY = "You also gain a bonus to Wisdom ({@skill Perception}) checks equal to your proficiency bonus and have advantage on checks to track these creature types.";
+
+		it("gates the Whiff of the Beyond Perception bonus (full text) with a creature-type condition", () => {
+			const result = FeatureModifierParser.parseModifiers(WHIFF_FULL, "Whiff of the Beyond");
+			const perc = findPerception(result);
+			expect(perc.length).toBeGreaterThan(0);
+			// No emitter may leak an unconditional Perception bonus
+			expect(perc.some(m => !m.conditional)).toBe(false);
+			expect(perc.every(m => m.proficiencyBonus === true)).toBe(true);
+			expect(perc.some(m => /aberration|celestial|fey|fiend|undead|creature types/i.test(m.conditional))).toBe(true);
+		});
+
+		it("gates the Whiff bonus even when only the bonus sentence is present", () => {
+			const result = FeatureModifierParser.parseModifiers(WHIFF_BONUS_ONLY, "Whiff of the Beyond");
+			const perc = findPerception(result);
+			expect(perc.length).toBeGreaterThan(0);
+			expect(perc.some(m => !m.conditional)).toBe(false);
+		});
+
+		it("does NOT gate a generic proficiency-bonus skill (no creature restriction)", () => {
+			const text = "You gain a bonus to Dexterity ({@skill Stealth}) checks equal to your proficiency bonus.";
+			const result = FeatureModifierParser.parseModifiers(text, "Generic Skill Feature");
+			const stealth = result.filter(m => typeof m.type === "string" && m.type.startsWith("skill:stealth"));
+			expect(stealth.length).toBeGreaterThan(0);
+			// A genuinely unconditional bonus must stay unconditional (not wrongly gated)
+			expect(stealth.some(m => !m.conditional)).toBe(true);
+		});
+	});
+
+	describe("_extractCreatureRestriction", () => {
+		it("returns a creature-type condition for 'these creature types' phrasing", () => {
+			const out = FeatureModifierParser._extractCreatureRestriction("...advantage on checks to track these creature types.");
+			expect(out).toBeTruthy();
+			expect(out).toMatch(/creature types/i);
+		});
+
+		it("returns a tracking condition for explicit creature types", () => {
+			const out = FeatureModifierParser._extractCreatureRestriction("You have advantage on Wisdom (Survival) checks to track fiends and undead.");
+			expect(out).toBeTruthy();
+			expect(out).toMatch(/track/i);
+		});
+
+		it("returns null when there is no creature/tracking restriction", () => {
+			expect(FeatureModifierParser._extractCreatureRestriction("You gain a bonus to Stealth checks equal to your proficiency bonus.")).toBeNull();
+			expect(FeatureModifierParser._extractCreatureRestriction("")).toBeNull();
+			expect(FeatureModifierParser._extractCreatureRestriction(null)).toBeNull();
+		});
+	});
 });
