@@ -21649,6 +21649,10 @@ class CharacterSheetState {
 		// so it must be re-emitted here on every reapply (load, level-up, focus change).
 		this._syncInexorableModifier();
 
+		// Rebuild gated conditional save-advantage modifiers from learned combat methods
+		// (e.g. Iron Will). Idempotent; surfaces in the conditional-modifier opt-in picker.
+		this._syncCombatMethodConditionalModifiers();
+
 		return appliedEffects;
 	}
 
@@ -27242,6 +27246,47 @@ class CharacterSheetState {
 			});
 		}
 	}
+
+	/**
+	 * Reconcile gated conditional save-advantage named modifiers contributed by combat
+	 * methods (e.g. Iron Will → advantage on saves vs. charmed/frightened).
+	 *
+	 * Combat-method text is deliberately NOT parsed into named modifiers by
+	 * `_processFeatureModifiers` (it skips combat methods so their effects only apply when
+	 * activated). Iron Will, however, is a *conditional* save bonus that the existing
+	 * conditional-modifier opt-in picker already understands: registering it as a
+	 * `save:all` advantage modifier with a truthy `conditional` makes it surface in
+	 * `aggregateModifiers(...).conditionalsAvailable` (default OFF) without touching any
+	 * roll handler.
+	 *
+	 * Idempotent: removes any prior combat-method conditional modifiers (the
+	 * `sourceType:"combatMethod"` marker is owned exclusively by this method — no other code
+	 * emits it), then re-adds one per qualifying learned method. Called from
+	 * applyClassFeatureEffects (load/level/recalc).
+	 */
+	_syncCombatMethodConditionalModifiers () {
+		// `sourceType:"combatMethod"` is a private marker owned solely by this sync method, so
+		// it is safe to strip-and-rebuild the whole set for idempotency.
+		this._data.namedModifiers = (this._data.namedModifiers || []).filter(m => m.sourceType !== "combatMethod");
+
+		const features = this._data.features || [];
+		for (const feature of features) {
+			if (!CharacterSheetClassUtils.isCombatMethod(feature)) continue;
+			const parsed = this._parseCombatMethodEffects(feature);
+			const csa = parsed.conditionalSaveAdvantage;
+			if (!csa) continue;
+			this.addNamedModifier({
+				name: feature.name,
+				type: csa.target || "save:all",
+				value: 0,
+				advantage: csa.advantage !== false,
+				conditional: csa.conditional || "when this method's condition is met",
+				note: `From ${feature.name} (combat method, reaction)`,
+				enabled: true,
+				sourceType: "combatMethod",
+			});
+		}
+	}
 	// #endregion
 
 	// #region Illrigger Infernal Conduit
@@ -29604,6 +29649,38 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Apply a self-heal combat method (e.g. Catch Your Breath): heal for
+	 * `dice + proficiency bonus + ability modifier` clamped to a minimum.
+	 * The die roll is injected so the caller (combat module) owns randomness
+	 * and this stays deterministically testable.
+	 * @param {string} methodName - Name of the combat method.
+	 * @param {object} [opts]
+	 * @param {number} [opts.dieRoll] - Pre-rolled total of the method's healing dice.
+	 * @returns {{amount:number, formulaText:string}|null} Applied healing, or null if the method
+	 *   isn't a self-heal method.
+	 */
+	applyCombatMethodSelfHeal (methodName, {dieRoll = 0} = {}) {
+		const feature = this._findCombatMethodFeature(methodName);
+		if (!feature) return null;
+		const parsed = this._parseCombatMethodEffects(feature);
+		const heal = parsed.selfHeal;
+		if (!heal) return null;
+
+		const profBonus = heal.addProficiency ? this.getProficiencyBonus() : 0;
+		const abilBonus = heal.abilityMod ? this.getAbilityMod(heal.abilityMod) : 0;
+		const minimum = heal.minimum || 0;
+		const amount = Math.max(minimum, (dieRoll || 0) + profBonus + abilBonus);
+
+		this.heal(amount);
+
+		const parts = [heal.dice];
+		if (heal.addProficiency) parts.push("prof");
+		if (heal.abilityMod) parts.push(heal.abilityMod.toUpperCase());
+		const formulaText = `${parts.join(" + ")}${minimum ? ` (min ${minimum})` : ""}`;
+		return {amount, formulaText};
+	}
+
+	/**
 	 * Parse combat action effects from feature description text.
 	 * Extracts structured effects that the combat module can apply when the action is used.
 	 * @param {string} text - Lowercased, tag-stripped description text
@@ -29727,6 +29804,9 @@ class CharacterSheetState {
 			range: null, // {normal, long} for ranged methods like Wind Strike
 			grantsAdvantage: false,
 			bonusDamage: null, // e.g. {die: "1d6", condition: "per subsequent hit"}
+			selfHeal: null, // e.g. {dice:"1d6", addProficiency:true, abilityMod:"con", minimum:0} (Catch Your Breath)
+			pendingRangedExtraDie: false, // one-shot +1 weapon die on next ranged attack (Doubleshot)
+			conditionalSaveAdvantage: null, // e.g. {target:"save:all", advantage:true, conditional:"to resist…"} (Iron Will)
 		};
 
 		// Use structured fields from new combatMethod entity if available
@@ -29836,9 +29916,45 @@ class CharacterSheetState {
 			effects.bonusDamage = {die: "weapon", condition};
 		}
 
+		// Self-heal formula (Catch Your Breath): "regain hit points equal to 1d6 + your
+		// proficiency bonus + your Constitution modifier (minimum 0)". Captured so the
+		// combat module can roll the die and apply the exact healing amount.
+		const selfHealMatch = text.match(/regain\s+hit\s+points\s+equal\s+to\s+(\d+d\d+)([^.]*?)(?:\(minimum\s+(\d+)\))?\s*(?:\.|$)/i);
+		if (selfHealMatch) {
+			const additions = selfHealMatch[2] || "";
+			const abilMatch = additions.match(/(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s+modifier/i);
+			effects.selfHeal = {
+				dice: selfHealMatch[1],
+				addProficiency: /proficiency\s+bonus/i.test(additions),
+				abilityMod: abilMatch ? abilMatch[1].slice(0, 3).toLowerCase() : null,
+				minimum: selfHealMatch[3] != null ? parseInt(selfHealMatch[3], 10) : 0,
+			};
+		}
+
+		// Pending ranged extra die (Doubleshot): "The next ranged weapon attack you make
+		// uses two missiles… On a hit, you deal an additional weapon damage die." A one-shot
+		// rider added to the NEXT ranged weapon attack (see combat module arming/consumer).
+		if (/next\s+ranged\s+weapon\s+attack/i.test(text) && /(?:additional|extra)\s+weapon\s+damage\s+die/i.test(text)) {
+			effects.pendingRangedExtraDie = true;
+		}
+
+		// Reaction conditional save advantage (Iron Will): "When you make a saving throw to
+		// resist being charmed or frightened, you can use your reaction to gain advantage on
+		// the saving throw." Modeled as a gated `save:all` advantage named modifier so it
+		// surfaces in the existing conditional-modifier opt-in picker (default OFF).
+		if (/\breaction\b/i.test(text) && /gain\s+advantage\s+on\s+(?:the\s+)?saving\s+throw/i.test(text)) {
+			let conditional = "when this method's condition is met";
+			const condMatch = text.match(/saving\s+throw\s+(to\s+resist[^.,]*?)\s*,/i)
+				|| text.match(/when\s+you\s+make\s+a\s+saving\s+throw\s+(to\s+[^.,]*?)\s*,/i);
+			if (condMatch) conditional = condMatch[1].replace(/\s+/g, " ").trim();
+			effects.conditionalSaveAdvantage = {target: "save:all", advantage: true, conditional};
+		}
+
 		// Method category classification
 		if (effects.isStance) {
 			effects.methodCategory = "stance";
+		} else if (effects.pendingRangedExtraDie) {
+			effects.methodCategory = "rangedExtraDie";
 		} else if (/(?:next\s+attack\s+roll|if\s+you\s+hit\s+with\s+your\s+next\s+attack|your\s+next\s+attack|hit\s+with\s+(?:the|your)\s+(?:chosen\s+)?weapon)/i.test(text)) {
 			effects.methodCategory = "weaponModifier";
 		} else if (/(?:regain\s+hit\s+points|healing\s+equal)/i.test(text)) {
