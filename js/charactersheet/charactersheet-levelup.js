@@ -748,22 +748,25 @@ class CharacterSheetLevelUp {
 			main.append(createAccordion("optfeatures", "✨", "Class Options", optContent, {required: true}));
 		}
 
-		// ========== 3b. WEAPON MASTERY (bug #12) ==========
+		// ========== 3b. WEAPON MASTERY (bug #4 — optional) ==========
 		if (weaponMasteryGain && weaponMasteryGain.count > 0) {
-			summaryItems.append(createSummaryItem("weaponmastery", "🗡️", "Weapon Mastery", {required: true}));
+			summaryItems.append(createSummaryItem("weaponmastery", "🗡️", "Weapon Mastery", {required: false}));
 
 			const updateWeaponMasteryStatus = () => {
 				if (!summaryItemEls.weaponmastery || !accordions.weaponmastery) return;
-				const complete = selectedWeaponMasteries.length >= weaponMasteryGain.count;
+				// Choosing is optional — the section is always "complete" (never blocks submit).
 				const summary = selectedWeaponMasteries
 					.map((/** @type {*} */ k) => String(k).split("|")[0])
 					.join(", ");
-				summaryItemEls.weaponmastery.setStatus(complete, complete ? summary : `${selectedWeaponMasteries.length}/${weaponMasteryGain.count} chosen`);
-				accordions.weaponmastery.setComplete(complete, complete ? `${selectedWeaponMasteries.length} chosen` : "");
+				const label = selectedWeaponMasteries.length
+					? summary
+					: `Optional — ${selectedWeaponMasteries.length}/${weaponMasteryGain.count}`;
+				summaryItemEls.weaponmastery.setStatus(true, label);
+				accordions.weaponmastery.setComplete(true, `${selectedWeaponMasteries.length}/${weaponMasteryGain.count} chosen`);
 			};
 
 			const masteryContent = this._renderWeaponMasteryLevelUp(weaponMasteryGain, selectedWeaponMasteries, updateWeaponMasteryStatus);
-			main.append(createAccordion("weaponmastery", "🗡️", "Weapon Mastery", masteryContent, {required: true}));
+			main.append(createAccordion("weaponmastery", "🗡️", "Weapon Mastery", masteryContent, {required: false}));
 			updateWeaponMasteryStatus();
 		}
 
@@ -1264,13 +1267,10 @@ class CharacterSheetLevelUp {
 				}
 			}
 
-			// Weapon mastery validation (bug #12)
-			if (weaponMasteryGain && weaponMasteryGain.count > 0 && selectedWeaponMasteries.length < weaponMasteryGain.count) {
-				JqueryUtil.doToast({type: "warning", content: `Please choose ${weaponMasteryGain.count} weapon${weaponMasteryGain.count > 1 ? "s" : ""} to master.`});
-				accordions.weaponmastery?.el.classList.add("expanded");
-				accordions.weaponmastery?.el.scrollIntoView({behavior: "smooth"});
-				return;
-			}
+			// Weapon mastery (bug #4): choosing is OPTIONAL — never block submit when the
+			// user has selected fewer than the available slots. They can pick the rest after
+			// a Long Rest. Existing masteries are pre-seeded and shown checked, and the apply
+			// path persists whatever is selected (including an unchanged/empty set).
 
 			// Feature options validation
 			const existingFeatures = this._state.getFeatures?.() || [];

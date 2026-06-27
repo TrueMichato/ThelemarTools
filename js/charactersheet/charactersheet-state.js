@@ -11465,6 +11465,41 @@ class CharacterSheetState {
 	// #region Subclass Spell Auto-Population
 
 	/**
+	 * Bug #4/#5 dedupe helper: collect the lowercased cantrip names that a feature CHOICE
+	 * (e.g. Arcane Archer Lore's "learn prestidigitation OR druidcraft") claims for a given
+	 * subclass. Scoped to features belonging to THIS subclass (matched on
+	 * subclassShortName/subclassName) so an unrelated subclass that genuinely always-grants a
+	 * cantrip with the same name is never suppressed. Stateless and order-independent — it reads
+	 * the persisted feature list, so it returns the same set whether or not the pending choice
+	 * has been resolved yet.
+	 * @param {object} subclassData - The subclass object (needs shortName/name)
+	 * @returns {Set<string>} Lowercased cantrip names owned by a feature choice of this subclass
+	 */
+	_getCantripNamesClaimedBySubclassFeatureChoices (subclassData) {
+		const out = new Set();
+		if (!subclassData || typeof FeatureChoiceParser === "undefined") return out;
+		const scShort = String(subclassData.shortName || "").toLowerCase();
+		const scName = String(subclassData.name || "").toLowerCase();
+		if (!scShort && !scName) return out;
+
+		for (const f of (this._data.features || [])) {
+			const fShort = String(f.subclassShortName || "").toLowerCase();
+			const fName = String(f.subclassName || "").toLowerCase();
+			const belongs = (fShort && (fShort === scShort || fShort === scName))
+				|| (fName && (fName === scShort || fName === scName));
+			if (!belongs) continue;
+
+			const {cantripChoices} = FeatureChoiceParser.extractChoices(f);
+			for (const choice of (cantripChoices || [])) {
+				for (const opt of (choice.options || [])) {
+					if (opt?.name) out.add(String(opt.name).toLowerCase());
+				}
+			}
+		}
+		return out;
+	}
+
+	/**
 	 * Get the list of always-prepared spells from a subclass's additionalSpells data.
 	 * This handles domain spells (Cleric), oath spells (Paladin), circle spells (Druid),
 	 * expanded spell lists (Warlock), etc.
@@ -11555,6 +11590,16 @@ class CharacterSheetState {
 			}
 		}
 
+		// Bug #5: when a feature CHOICE of this subclass (e.g. Arcane Archer Lore's
+		// "prestidigitation OR druidcraft") owns one of these cantrips, the choice is the sole
+		// grantor — drop the always-prepared copy so the subclass doesn't auto-grant BOTH
+		// options regardless of the player's pick. Scoped to this subclass's own feature
+		// choices, so genuine single-cantrip subclass grants are unaffected.
+		const claimedCantrips = this._getCantripNamesClaimedBySubclassFeatureChoices(subclassData);
+		if (claimedCantrips.size) {
+			return result.filter(s => !(s.isCantrip && claimedCantrips.has(String(s.name).toLowerCase())));
+		}
+
 		return result;
 	}
 
@@ -11629,6 +11674,25 @@ class CharacterSheetState {
 
 		for (const cls of (this._data.classes || [])) {
 			const spells = this.getSubclassAlwaysPreparedSpells(cls);
+
+			// Bug #5: reconcile stale auto-grants. If this subclass previously auto-granted a
+			// cantrip (sourceFeature "<subclass> Spells") that a feature CHOICE of the same
+			// subclass now owns, remove the auto-granted copy. The player's actually-chosen
+			// cantrip (added by fulfillFeatureChoice with sourceFeature = the feature's name)
+			// has a different sourceFeature and is preserved. Handles the ordering where the
+			// subclass granted both options before its choice-bearing feature was added.
+			if (cls.subclass) {
+				const claimedCantrips = this._getCantripNamesClaimedBySubclassFeatureChoices(cls.subclass);
+				if (claimedCantrips.size) {
+					const autoGrantSig = `${cls.subclass.name} Spells`;
+					const kept = this._data.spellcasting.cantripsKnown.filter(c =>
+						!(claimedCantrips.has(String(c.name).toLowerCase()) && c.sourceFeature === autoGrantSig),
+					);
+					if (kept.length !== this._data.spellcasting.cantripsKnown.length) {
+						this._data.spellcasting.cantripsKnown = kept;
+					}
+				}
+			}
 
 			for (const spell of spells) {
 				// Innate cantrips go to cantripsKnown, not spellsKnown
@@ -28049,6 +28113,26 @@ class CharacterSheetState {
 		// cantrip picks) into pending feature choices, and collect the skill/spell
 		// identities they claim so the greedy parsers below don't also grant them.
 		const {claimedSkills, claimedSpells} = this._processFeatureChoices(feature, featureData.id);
+
+		// Bug #5 belt-and-braces: if this feature's prose choice claims cantrips that the
+		// owning subclass already auto-granted (sourceFeature "<subclass> Spells"), strip those
+		// auto-grants now so the choice is authoritative even when no later
+		// populateSubclassSpells() pass runs (e.g. subclass populated before this feature was
+		// added). The player's eventual pick is re-added by fulfillFeatureChoice. Scoped to this
+		// feature's own subclass signatures to avoid touching unrelated subclass cantrips.
+		if (claimedSpells.size && (feature.subclassName || feature.subclassShortName)) {
+			const sigs = new Set();
+			if (feature.subclassName) sigs.add(`${feature.subclassName} Spells`.toLowerCase());
+			if (feature.subclassShortName) sigs.add(`${feature.subclassShortName} Spells`.toLowerCase());
+			const cantrips = this._data.spellcasting?.cantripsKnown;
+			if (Array.isArray(cantrips)) {
+				const kept = cantrips.filter(c =>
+					!(claimedSpells.has(String(c.name).toLowerCase())
+						&& c.sourceFeature && sigs.has(String(c.sourceFeature).toLowerCase())),
+				);
+				if (kept.length !== cantrips.length) this._data.spellcasting.cantripsKnown = kept;
+			}
+		}
 
 		// Check if this feature grants spells (innate or known)
 		this._processFeatureSpells(feature, featureData.id, {allSpells: opts?.allSpells, claimedSpells});
