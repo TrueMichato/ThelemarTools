@@ -87,11 +87,12 @@ describe("Last Ditch Evasion hook (#7) wiring", () => {
 		expect(body).toContain("hasLastDitchEvasion");
 	});
 
-	it("applies the half-damage helper (not a zero-damage path)", () => {
+	it("applies the avoid-all-damage helper (not a half/partial path)", () => {
 		expect(body).toContain("this._state.applyLastDitchEvasion");
-		expect(body).toContain("res.halved");
-		// The fixed mechanic is half, not "avoid all"/zero.
-		expect(body).not.toMatch(/avoid all damage/i);
+		expect(body).toContain("res.full");
+		// The fixed mechanic is avoid-all (take 0), not half.
+		expect(body).not.toMatch(/half/i);
+		expect(body).not.toContain("res.halved");
 	});
 
 	it("is invoked from the saving-throw handler", () => {

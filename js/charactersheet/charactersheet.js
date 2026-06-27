@@ -11448,10 +11448,12 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * Prompt for and apply Last Ditch Evasion (TGTT Battle Tactic) after a FAILED Dex save
-	 * against a half-on-success effect: take HALF damage (not zero) and become Slowed. Asks
-	 * for the incoming damage so the half value can be shown. No-op unless the tactic is
-	 * present, the save was a Dex save, and the player opts in.
+	 * Prompt for and apply Last Ditch Evasion (TGTT Battle Tactic). Surfaced off a Dex
+	 * save (its natural roll-time entry point on the sheet); when the Fighter is hit by
+	 * an attack they may use their reaction to AVOID ALL DAMAGE (take 0) and become
+	 * Slowed until the end of their next turn. Asks for the incoming attack damage purely
+	 * to confirm what is being negated. No-op unless the tactic is present, the roll was a
+	 * Dex save, and the player opts in.
 	 * @private
 	 */
 	async _pMaybeApplyLastDitchEvasion ({ability}) {
@@ -11462,8 +11464,8 @@ class CharacterSheetPage {
 
 		const offer = await InputUiUtil.pGetUserBoolean({
 			title: "Last Ditch Evasion",
-			htmlDescription: `If that Dex save <strong>failed</strong> against an effect that deals half damage on a success, use your reaction for <strong>Last Ditch Evasion</strong>: take <strong>half</strong> damage instead of full and become <strong>Slowed</strong>?`,
-			textYes: "Use reaction (half + Slowed)",
+			htmlDescription: `When you're hit by an attack, use your reaction for <strong>Last Ditch Evasion</strong>: jump aside to take <strong>no damage</strong> (avoid all), then become <strong>Slowed</strong> until the end of your next turn?`,
+			textYes: "Use Last Ditch Evasion (avoid all damage + Slowed)",
 			textNo: "No",
 		});
 		if (!offer) return;
@@ -11471,7 +11473,7 @@ class CharacterSheetPage {
 		let damage = null;
 		try {
 			damage = await InputUiUtil.pGetUserNumber({
-				title: "Last Ditch Evasion — full incoming damage (you take half)",
+				title: "Last Ditch Evasion — incoming attack damage (reduced to 0)",
 				default: 0,
 				min: 0,
 				int: true,
@@ -11481,10 +11483,10 @@ class CharacterSheetPage {
 		const res = this._state.applyLastDitchEvasion?.({damage: damage || 0});
 		if (!res || !res.applied) return;
 
-		const slowedStr = res.slowedApplied ? " You are now Slowed." : " (already Slowed.)";
+		const slowedStr = res.slowedApplied ? " You are now Slowed (until end of your next turn)." : " (already Slowed.)";
 		const dmgStr = res.full > 0
-			? `Last Ditch Evasion: take ${res.halved} damage instead of ${res.full} (half).`
-			: `Last Ditch Evasion: take half damage instead of full.`;
+			? `Last Ditch Evasion: avoid all ${res.full} damage (take 0).`
+			: `Last Ditch Evasion: avoid all damage (take 0).`;
 		JqueryUtil.doToast({type: "success", content: `🛡️ ${dmgStr}${slowedStr}`});
 		this._renderCharacter?.();
 		await this._saveCurrentCharacter?.();
