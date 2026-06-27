@@ -3,6 +3,100 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+### Round 29 — Fighter / Arcane Archer / TGTT combat-methods + items deep-fix (6 parallel sessions)
+
+Ownership boundaries below are integration-critical. The two giant shared files
+(`charactersheet-state.js`, `charactersheet-combat.js`) and the roll handlers in
+`charactersheet.js` get exactly ONE owner per function/region; everyone else consumes.
+
+**S1 — Init & Builder**
+* #1 Loading tip flashes for ~½s then site loads — the tip only appears after
+  `loading-tips.json` finishes fetching (competes with the heavy data load). Make a tip
+  appear instantly (charactersheet.js `_pInitLoadingTip`; data/loading-tips.json).
+* #2 Custom background + "musical instrument" tool proficiency: no way to choose WHICH
+  instrument in the custom-background screen (only after creation). Add an instrument
+  sub-picker (charactersheet-builder.js custom-background flow).
+
+**S2 — Creation pickers**
+* #3 Fighter Battle Tactics picker: quickbuild always offers exactly 2 and ignores
+  level-locked options; regular level-up offers none after the first. Fix the count
+  computation + level-gating in both flows (quickbuild `_getOptionalFeatureGains`/
+  `_renderOptionalFeaturesStep`; levelup `_renderStandardOptionalFeaturesLevelUp`;
+  class-utils `getOptionalFeatureGains`/`getEligibleOptionalFeatures`). This is the
+  PICKER COUNT only — NOT `_getBattleTacticEffects` (S5 owns that).
+* #4 Weapon Masteries picker (level-up + quickbuild): must NOT be enforced (skippable) and
+  must show already-chosen options as marked/selected.
+* #5 Arcane Archer "Arcane Archer Lore" grants BOTH cantrips regardless of the player's
+  choice — `additionalSpells` choose-block names aren't added to `claimedSpells` so the
+  filter at the spell-grant step misses them (state.js `SpellGrantParser` /
+  `_processFeatureChoices` / `_processFeatureSpells`).
+* #6 Arcane Shot options not choosable during quickbuild — subclass selected at L3 isn't
+  available to the L1-2 analysis pass, so the subclass `optionalfeatureProgression` never
+  merges (quickbuild `_analyzeLevels`/`_getSubclassForClass`). This is the SELECTION of
+  arcane shots only; resource display = S3, in-attack use = S5.
+
+**S3 — Fighter resources & roll-handler hooks**
+* #7 Last Ditch Evasion battle tactic: tooltip/roll say half damage but it applies 0;
+  needs a "use & apply Slowed" button after the roll. Implement the post-save in-play
+  application + button, READING the existing `hasLastDitchEvasion` flag — do NOT redefine
+  the tactic (S5 owns `_getBattleTacticEffects`).
+* #8 Tactical Mind: after a FAILED ability check, popup to add 1d10 by expending a Second
+  Wind use, with a clear banner that the use is refunded if the check still fails. Post-roll
+  hook on `_rollAbilityCheck` (mirror `_pMaybeApplyBloodPrice`).
+* #9 Second Wind should be a real combat resource (pip-tracked alongside other combat
+  resources), not only its bespoke Fighter-section UI.
+* #10 Arcane Shots should be a real combat resource (keep `useArcaneShot`/
+  `getArcaneShotRemaining` API stable so S5's in-attack picker keeps working).
+* #17 Indomitable: on a save roll, a small button to spend Indomitable and reroll/modify
+  the save. Post-roll hook on `_rollSavingThrow`.
+* OWNS: post-roll hooks in `charactersheet.js`, Second Wind / Arcane-shot RESOURCE
+  rendering + tracking (`renderCombatFighter`/`renderCombatResources`/
+  `_renderArcaneShotToggle`/`getGenericPoolResources`). MUST NOT touch `_rollAttack`/
+  `_rollDamage` or `_pPickArcaneShot`/`_applyArcaneShot` (S5), the active-states classifier /
+  `FEATURE_CLASSIFICATION_OVERRIDES` / combat-methods (S4), `_getBattleTacticEffects` (S5).
+
+**S4 — Combat methods & active-state toggles**
+* #18 "Catch your Breath" combat method is unimplemented / does nothing — implement it.
+* #19 Stances in the combat-method modal use a one-shot "use" button but should be on/off
+  TOGGLES (active states).
+* #20 Doubleshot combat method should apply to the NEXT damage roll.
+* #21 Iron Will combat method should let you roll with advantage under its conditions.
+* OWNS: combat-methods modal + method-use handlers, `_parseCombatMethodEffects`, and the
+  active-states classifier (`ACTIVE_STATE_TYPES`/`detectActivatableFeature`/
+  `getActivatableFeatures`/`FEATURE_CLASSIFICATION_OVERRIDES`). HARD RULE: implement method
+  effects via GENERIC mechanisms the roll pipelines already consume (pending damage rider,
+  conditional-advantage modifier, active-state toggle) — do NOT edit the bodies of
+  `_rollAttack`/`_rollDamage`/`_rollSavingThrow`/`_rollAbilityCheck`/`_rollSkillCheck`; if a
+  needed generic consumer is missing there, STOP and flag the orchestrator.
+
+**S5 — Attack/damage pipeline, battle-tactic combat effects & quiver**
+* #11 High Ground battle tactic should be an on/off toggle (currently always-on) and apply
+  ONLY to ranged attacks (currently affects melee too).
+* #12 Archery fighting style affects non-ranged attacks (should be ranged-only) and isn't
+  itemized in the combat-tab attack breakdown (shows a lumped +X). Root: attack-bonus
+  retrieval does an exact `type:"attack"` match and ignores `modType:"attack:ranged"`.
+* #13 Rapier of Life Stealing nat-20 rider (extra necrotic + heal) doesn't fire — no
+  on-nat-20 weapon-rider mechanism in `_rollDamage`.
+* #16 Quiver mechanic (NEW): arrows/darts/etc auto-placed in the quiver when a quiver is
+  equipped; dedicated quiver area in the combat tab; on a ranged attack a NON-blocking popup
+  to pick from the quiver and show the effect.
+* OWNS: `_rollAttack`/`_rollDamage`, ranged/melee attack-modifier filtering + itemized
+  breakdown, nat-20 weapon riders, the SOLE ownership of `_getBattleTacticEffects` +
+  battle-tactic calculations region, and the quiver feature (`renderCombatQuiver` + the
+  post-ranged-attack hook + inventory auto-place). Keep `useArcaneShot`/`_pPickArcaneShot`
+  API stable for S3. MUST NOT touch the roll handlers in `charactersheet.js` (S3),
+  combat-methods (S4), or upgrade extraction (S6 — consume its data).
+
+**S6 — Item upgrades**
+* #14 Weapon upgrades don't add their bonuses to attack/damage rolls — fix the upgrade-effect
+  extraction so `getEffectiveItemBonuses` surfaces them (the attack path already consumes
+  `attack.attackBonus`/`damageBonus`).
+* #15 Armor upgrades don't add bonuses to AC/rolls — build the missing armor-upgrade → AC
+  pipeline.
+* OWNS: `getUpgradeEffects`/`getEffectiveItemBonuses`/`_recalculateItemBonuses` + the new
+  armor-AC wiring. MUST NOT edit `_rollAttack`/`_rollDamage` or the attack-bonus breakdown
+  display (expose clean data; S5 consumes/itemizes).
+
 ## Closed Bugs
 
 ### Round 28 (TGTT Warlock specialty — Whiff of the Beyond conditional Perception bonus) — COMPLETE
