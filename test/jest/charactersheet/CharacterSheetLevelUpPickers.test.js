@@ -208,8 +208,13 @@ describe("Bug #12 — level-up render + apply wiring (source guards)", () => {
 		expect(SRC).toMatch(/createSummaryItem\("weaponmastery"/);
 	});
 
-	it("validates the required mastery count before finishing", () => {
-		expect(SRC).toMatch(/selectedWeaponMasteries\.length\s*<\s*weaponMasteryGain\.count/);
+	it("does not block finishing on the mastery count (optional — bug #4)", () => {
+		// Bug #4 made weapon-mastery selection optional: the old blocking validation
+		// (which returned early + toasted when fewer than `count` were chosen) was removed
+		// so a user can submit/skip with fewer masteries and pick the rest after a rest.
+		expect(SRC).not.toMatch(/selectedWeaponMasteries\.length\s*<\s*weaponMasteryGain\.count/);
+		// The picker accordion/summary are now non-blocking (required: false).
+		expect(SRC).toMatch(/createAccordion\("weaponmastery"[\s\S]{0,120}required:\s*false/);
 	});
 
 	it("persists the selection in _applyLevelUp via setWeaponMasteries", () => {
