@@ -85,20 +85,33 @@ describe("#6/#7 standalone Arcane Shot section removed + folded in", () => {
 		expect(m[0]).toContain("this._renderArcaneShotToggle(container)");
 	});
 
-	it("Arcane Shot toggle wires the Use button + a save/render refresh", () => {
+	it("Arcane Shot toggle defers use-tracking to the combat-resource pips", () => {
 		const m = combatSrc.match(/_renderArcaneShotToggle\s*\(container\)\s*\{[\s\S]*?\n\t\}/);
 		expect(m).not.toBeNull();
 		const body = m[0];
 		// gated on the subclass
 		expect(body).toContain("this._state.hasArcaneShot?.()");
-		// Use button selector + state call
-		expect(body).toContain("charsheet__combat-as-use");
-		expect(body).toContain("this._state.useArcaneShot?.()");
-		// refresh persists + re-renders the (folded-in) resources panel
+		// #10: uses are pip-tracked now — the toggle no longer renders its own
+		// Use / +1 / Reset controls (those would double-render the resource).
+		expect(body).not.toContain("charsheet__combat-as-use");
+		expect(body).not.toContain("this._state.useArcaneShot?.()");
+		// it points players at the pips instead
+		expect(body).toContain("track uses with the pips above");
+		// Ever-Ready Shot regain stays wired, and refresh persists + re-renders
+		expect(body).toContain("this._state.regainOneArcaneShot?.()");
 		expect(body).toContain("this._page.saveCharacter?.()");
 		expect(body).toContain("this.renderCombatResources()");
 		// hover link, not inline effect text
 		expect(body).toContain("getHoverLink");
 		expect(body).not.toContain("Renderer.get().render");
+	});
+
+	it("renderCombatResources surfaces Second Wind / Arcane Shot / Indomitable as pips", () => {
+		const m = combatSrc.match(/renderCombatResources\s*\(\)\s*\{[\s\S]*?\n\t\}/);
+		expect(m).not.toBeNull();
+		// #9/#10/#17: Fighter limited-use abilities are pulled from the state's
+		// synthetic-resource descriptors and rendered with the same pip markup.
+		expect(m[0]).toContain("this._state.getSyntheticCombatResources?.()");
+		expect(m[0]).toContain("_bindSyntheticResourcePipClicks");
 	});
 });

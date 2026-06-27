@@ -6440,6 +6440,11 @@ class CharacterSheetCombat {
 		// (Abilities area) and interdiction-managed / redundant-rider pools (their own panel).
 		const combatResources = this._state.getGenericPoolResources?.() || [];
 
+		// Names already shown as real pools — used to defensively dedupe synthetic
+		// rows so a Fighter feature never renders twice if it ever becomes a real
+		// `_data.resources` entry.
+		const shownNames = new Set(combatResources.map(r => (r.name || "").toLowerCase()));
+
 		for (const resource of combatResources) {
 			// Build pips - filled = available, empty = used. Each pip carries its
 			// index so a single delegated listener (see _bindResourcePipClicks) can
@@ -6458,6 +6463,33 @@ class CharacterSheetCombat {
 			`});
 
 			this._bindResourcePipClicks(resourceEl.querySelector(".charsheet__combat-resource-pips"), resource.id);
+
+			container.append(resourceEl);
+		}
+
+		// (S3 #9/#10/#17) Synthetic Fighter resources tracked outside `_data.resources`
+		// (Second Wind, Arcane Shot, Indomitable). Rendered as pips just like the real
+		// pools, but pip clicks route to the kind-specific setters via
+		// `_onSyntheticResourcePipClick` (the generic `setResourceCurrent` path can't
+		// resolve their ids).
+		const syntheticResources = this._state.getSyntheticCombatResources?.() || [];
+		for (const resource of syntheticResources) {
+			if (shownNames.has((resource.name || "").toLowerCase())) continue;
+			const rechargeLabel = resource.recharge === "long" ? "Long Rest" : "Short/Long Rest";
+			const pipsHtml = Array.from({length: resource.max}, (_, i) => {
+				const isFilled = i < resource.current;
+				const title = isFilled ? `Set to ${i} (spend)` : `Set to ${i + 1} (restore)`;
+				return `<span class="charsheet__resource-pip ${isFilled ? "" : "used"}" data-pip-index="${i}" title="${title}"></span>`;
+			}).join("");
+			const resourceEl = e_({outer: `
+				<div class="charsheet__combat-resource-item charsheet__combat-resource-item--synthetic mb-2" data-resource-kind="${resource.kind}">
+					<div class="charsheet__combat-resource-name ve-small font-weight-bold">${resource.name}</div>
+					<div class="charsheet__combat-resource-pips">${pipsHtml}</div>
+					<div class="ve-small ve-muted">${resource.current}/${resource.max} (${rechargeLabel})</div>
+				</div>
+			`});
+
+			this._bindSyntheticResourcePipClicks(resourceEl.querySelector(".charsheet__combat-resource-pips"), resource.kind);
 
 			container.append(resourceEl);
 		}
@@ -6514,6 +6546,44 @@ class CharacterSheetCombat {
 		this._state.setResourceCurrent(resourceId, next);
 		this.renderCombatResources();
 		// Also update the main resources display
+		this._page._renderResources?.();
+		this._page._features?._renderResources?.();
+	}
+
+	/**
+	 * Bind pip clicks for a SYNTHETIC combat resource (Second Wind / Arcane Shot /
+	 * Indomitable). Mirrors {@link _bindResourcePipClicks} but routes by `kind`
+	 * instead of resource id.
+	 * @param {*} pipsEl
+	 * @param {string} kind
+	 */
+	_bindSyntheticResourcePipClicks (pipsEl, kind) {
+		if (!pipsEl) return;
+		pipsEl.addEventListener("click", (/** @type {*} */ e) => {
+			const pip = e.target?.closest?.(".charsheet__resource-pip");
+			if (!pip || (pipsEl.contains && !pipsEl.contains(pip))) return;
+			this._onSyntheticResourcePipClick(kind, Number(pip.dataset?.pipIndex));
+		});
+	}
+
+	/**
+	 * Handle a pip click for a synthetic resource: resolve the current descriptor,
+	 * compute the new remaining via the shared health-bar math, persist it through
+	 * the kind-specific state setter, then refresh every dependent surface (combat
+	 * resources, the Fighter panel whose badges share the same uses, and the Overview
+	 * resource lists) so nothing goes stale.
+	 * @param {string} kind
+	 * @param {number} pipIndex
+	 */
+	_onSyntheticResourcePipClick (kind, pipIndex) {
+		const resource = (this._state.getSyntheticCombatResources?.() || []).find(r => r.kind === kind);
+		if (!resource) return;
+		const next = this._computeResourcePipClickCurrent(resource, pipIndex);
+		if (next === resource.current) return;
+		if (!this._state.setSyntheticCombatResourceRemaining?.(kind, next)) return;
+		this._page.saveCharacter?.();
+		this.renderCombatResources();
+		this.renderCombatFighter?.();
 		this._page._renderResources?.();
 		this._page._features?._renderResources?.();
 	}
@@ -6812,10 +6882,7 @@ class CharacterSheetCombat {
 			<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
 				<strong style="font-size: 1.05em;">🏹 Arcane Shot</strong>
 				${dc != null ? `<span class="badge badge-primary" title="Arcane Shot save DC (${ability})">DC ${dc}</span>` : ""}
-				<span class="badge ${remaining > 0 ? "badge-info" : "badge-danger"}" title="Arcane Shot uses remaining (recharge on short or long rest)">⚡ ${remaining}/${max}</span>
-				<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-as-use" ${remaining > 0 ? "" : "disabled"} title="Spend one Arcane Shot use">Use</button>
-				<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-as-regain" ${remaining < max ? "" : "disabled"} title="Regain one use">+</button>
-				<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-as-reset" ${remaining < max ? "" : "disabled"} title="Restore all uses">Reset</button>
+				<span class="ve-small ve-muted" title="Uses are tracked by the Arcane Shot pips above">⚡ ${remaining}/${max} — track uses with the pips above</span>
 			</div>`);
 
 		if (hasEverReady) {
@@ -6849,21 +6916,6 @@ class CharacterSheetCombat {
 			this.renderCombatResources();
 		};
 
-		section.querySelector(".charsheet__combat-as-use")?.addEventListener("click", () => {
-			if (this._state.useArcaneShot?.()) {
-				refresh();
-				JqueryUtil.doToast({type: "success", content: "Used an Arcane Shot"});
-			} else {
-				JqueryUtil.doToast({type: "warning", content: "No Arcane Shot uses remaining! Rest to regain uses."});
-			}
-		});
-		section.querySelector(".charsheet__combat-as-regain")?.addEventListener("click", () => {
-			if (this._state.adjustArcaneShotRemaining?.(1)) refresh();
-		});
-		section.querySelector(".charsheet__combat-as-reset")?.addEventListener("click", () => {
-			this._state.restoreArcaneShot?.();
-			refresh();
-		});
 		section.querySelector(".charsheet__combat-as-everready")?.addEventListener("click", () => {
 			if (this._state.regainOneArcaneShot?.()) {
 				refresh();
@@ -8139,7 +8191,7 @@ class CharacterSheetCombat {
 						<span class="badge badge-outline-secondary" title="Action economy">⚡ Bonus Action</span>
 						<span class="badge ${swRemaining > 0 ? "badge-info" : "badge-danger"}" title="Uses remaining (recharge on short or long rest)">${swRemaining}/${swMax}</span>
 					</div>
-					<div class="ve-small ve-muted mt-1">Regain <span class="bold">${healing}</span> hit points.</div>
+					<div class="ve-small ve-muted mt-1">Regain <span class="bold">${healing}</span> hit points. <span class="ve-muted">(Uses are pip-tracked under Combat Resources.)</span></div>
 					<div class="ve-flex-v-center gap-1 ve-flex-wrap mt-1">
 						<button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-fighter-sw-heal" ${swRemaining > 0 ? "" : "disabled"} title="Spend a use and regain ${healing} HP">Use (heal ${healing})</button>
 						${hasStaminaEnthusiast ? `<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-fighter-sw-stamina" ${swRemaining > 0 ? "" : "disabled"} title="Stamina Enthusiast: regain ${staminaGain} stamina instead of hit points">Use (regain ${staminaGain} stamina)</button>` : ""}
