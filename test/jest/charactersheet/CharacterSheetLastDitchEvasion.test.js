@@ -73,6 +73,16 @@ describe("Last Ditch Evasion (in-play)", () => {
 		expect(after).toBe(before);
 	});
 
+	it("works as a no-arg reaction (the manual button passes no damage)", () => {
+		makeFighter();
+		flagLastDitchEvasion();
+		const res = state.applyLastDitchEvasion({});
+		expect(res.applied).toBe(true);
+		expect(res.reduced).toBe(0);
+		expect(res.slowedApplied).toBe(true);
+		expect(state.getConditionNames().some(n => /slow/i.test(n))).toBe(true);
+	});
+
 	it("no-ops (and does not apply Slowed) when the tactic is not active", () => {
 		makeFighter();
 		// No flag override → hasLastDitchEvasion is falsy.
