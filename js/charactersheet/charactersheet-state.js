@@ -22859,6 +22859,104 @@ class CharacterSheetState {
 		return this._data.ammunitionConsumed || {};
 	}
 
+	// ==========================================
+	// Quiver (ammunition container)
+	// ==========================================
+
+	/**
+	 * Is this inventory item a quiver (an ammunition container)? Detected by name
+	 * so canonical quivers (Quiver, Quiver of Ehlonna, Efficient Quiver) and
+	 * homebrew quivers all qualify.
+	 * @param {object} item - A flattened item (from getItems) or raw item data
+	 * @returns {boolean}
+	 */
+	isQuiver (item) {
+		if (!item) return false;
+		const name = (item.name || "").toLowerCase();
+		return /quiver/.test(name);
+	}
+
+	/**
+	 * The currently equipped quiver, if any (first match). Returns the flattened
+	 * item (with `id`), or null.
+	 * @returns {object|null}
+	 */
+	getEquippedQuiver () {
+		return this.getItems().find(item => item.equipped && this.isQuiver(item)) || null;
+	}
+
+	/**
+	 * Ammunition currently placed inside a quiver.
+	 * @param {string} [quiverId] - Quiver item ID; defaults to the equipped quiver.
+	 * @returns {Array} Flattened ammunition items contained in the quiver.
+	 */
+	getQuiverAmmunition (quiverId) {
+		const id = quiverId || this.getEquippedQuiver()?.id;
+		if (!id) return [];
+		const container = this._data.inventory.find(i => i.id === id);
+		const contained = new Set(container?.item?.containedItems || []);
+		if (!contained.size) return [];
+		return this.getAmmunitionItems().filter(a => contained.has(a.id));
+	}
+
+	/**
+	 * Quiver ammunition compatible with a given weapon (intersection of the
+	 * weapon's compatible ammo and what's actually in the equipped quiver, with
+	 * stock remaining). Drives the post-attack quiver picker and the decision to
+	 * defer ammo consumption to it.
+	 * @param {string} weaponId
+	 * @returns {Array} Flattened compatible ammunition items in the quiver.
+	 */
+	getQuiverAmmunitionForWeapon (weaponId) {
+		const quiver = this.getEquippedQuiver();
+		if (!quiver) return [];
+		const quiverIds = new Set(this.getQuiverAmmunition(quiver.id).map(a => a.id));
+		if (!quiverIds.size) return [];
+		return this.getAmmunitionForWeapon(weaponId)
+			.filter(a => quiverIds.has(a.id) && (a.quantity || 0) > 0);
+	}
+
+	/**
+	 * Auto-place loose, compatible ammunition into a quiver (called when a quiver
+	 * is equipped). Respects the quiver's allowed ammo types when it declares them
+	 * (`containerCapacity.item`); otherwise accepts all ammunition. Never moves
+	 * ammo that is already inside another container.
+	 * @param {string} [quiverId] - Quiver item ID; defaults to the equipped quiver.
+	 * @returns {number} Count of ammunition stacks placed.
+	 */
+	autoPlaceAmmunitionInQuiver (quiverId) {
+		const id = quiverId || this.getEquippedQuiver()?.id;
+		if (!id) return 0;
+		const container = this._data.inventory.find(i => i.id === id);
+		if (!container?.item) return 0;
+
+		// Allowed ammo types from the quiver's capacity spec (e.g. ["arrow|phb"]).
+		const allowedTypes = [];
+		const capItems = container.item.containerCapacity?.item;
+		if (Array.isArray(capItems)) {
+			for (const entry of capItems) {
+				for (const key of Object.keys(entry || {})) allowedTypes.push(key);
+			}
+		}
+
+		if (!container.item.containedItems) container.item.containedItems = [];
+		const already = new Set(container.item.containedItems);
+
+		let placed = 0;
+		for (const ammo of this.getAmmunitionItems()) {
+			if (ammo.id === id) continue;
+			if (already.has(ammo.id)) continue;
+			// Don't pull ammo out of another container it's already in.
+			if (this.getItemContainer(ammo.id)) continue;
+			// If the quiver restricts types, only place matching ammo.
+			if (allowedTypes.length && !allowedTypes.some(t => this._matchesAmmoType(ammo, t))) continue;
+			container.item.containedItems.push(ammo.id);
+			already.add(ammo.id);
+			placed++;
+		}
+		return placed;
+	}
+
 	addItem (item, quantity = 1, equipped = false, attuned = false) {
 		// Handle flat item structure (from inventory module or tests)
 		// Check for any of the wrapper properties
@@ -30582,6 +30680,65 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Crit / nat-20 weapon riders for an attack: bonus damage and/or temp-HP
+	 * effects that fire when the attack roll is a natural 20 (or, for
+	 * `trigger:"crit"` riders, any critical hit including an expanded crit range).
+	 *
+	 * Two sources, unioned:
+	 *  1. Structured `critRiders` declared on the weapon's `sourceItem` — the
+	 *     general, data-driven path any homebrew item can use.
+	 *  2. Name-based detection of canonical "… of Life Stealing" weapons, so the
+	 *     real magic items work without authoring structured data. Edition-aware:
+	 *     classic (DMG) → +10 necrotic / 10 temp HP; modern (XDMG) → +15 necrotic /
+	 *     temp HP equal to the necrotic dealt. Skipped if the item already declares
+	 *     a Life Stealing rider structurally.
+	 *
+	 * Each rider: {trigger:"nat20"|"crit", name, damageDice, damageAmount,
+	 * damageType, excludesTypes, tempHp:(number|"damage"|null), note}.
+	 * @param {*} attack
+	 * @returns {Array<object>}
+	 */
+	getCritWeaponRiders (attack) {
+		if (!attack || attack.isSpell) return [];
+		const item = attack.sourceItem;
+		const riders = [];
+
+		if (Array.isArray(item?.critRiders)) {
+			for (const r of item.critRiders) {
+				riders.push({
+					trigger: r.trigger === "crit" ? "crit" : "nat20",
+					name: r.name || item?.name || "Weapon effect",
+					damageDice: r.damageDice || r.dice || null,
+					damageAmount: typeof r.damageAmount === "number" ? r.damageAmount
+						: (typeof r.amount === "number" ? r.amount : null),
+					damageType: r.damageType || "necrotic",
+					excludesTypes: r.excludesTypes || null,
+					tempHp: r.tempHp != null ? r.tempHp : null,
+					note: r.note || null,
+				});
+			}
+		}
+
+		const name = (item?.name || attack.name || "").toLowerCase();
+		if (/life stealing/.test(name) && !riders.some(r => /life stealing/i.test(r.name))) {
+			const isModern = item?.source === "XDMG" || item?.edition === "one";
+			const amount = isModern ? 15 : 10;
+			riders.push({
+				trigger: "nat20",
+				name: item?.name || "Life Stealing",
+				damageDice: null,
+				damageAmount: amount,
+				damageType: "necrotic",
+				excludesTypes: ["construct", "undead"],
+				tempHp: "damage", // temp HP equal to the necrotic dealt (matches both editions' amount)
+				note: "No effect on Constructs or Undead.",
+			});
+		}
+
+		return riders;
+	}
+
+	/**
 	 * Get available combat reactions from Battle Tactics
 	 * @returns {Array<object>} Array of reaction abilities
 	 */
@@ -35534,6 +35691,77 @@ class CharacterSheetState {
 	 * @param {string} type - The target type (e.g., "skill:stealth", "save:dex", "attack")
 	 * @returns {Array} Array of matching modifier objects (with advantage/disadvantage flags added)
 	 */
+	/**
+	 * Resolve the numeric contribution of a single named modifier, applying the
+	 * same rules `aggregateModifiers` uses: advantage/disadvantage sentinels
+	 * (encoded in the modType string) contribute 0, per-level / per-class-level
+	 * scaling multiplies, and ability-mod / proficiency riders are added. Shared
+	 * so itemizing callers never drift from the aggregate total.
+	 * @param {object} mod
+	 * @returns {number}
+	 */
+	_resolveNamedModifierNumericValue (mod) {
+		// Advantage/disadvantage modifiers whose effect is encoded in the modType
+		// string (":advantage"/":disadvantage") carry value:1 as a *presence sentinel*
+		// — that sentinel must NOT leak into the numeric total (e.g. Moloch's Blessing
+		// giving +1 instead of advantage). Modifiers that carry an explicit numeric
+		// `value` alongside an `advantage` field (custom abilities) keep it.
+		let value = mod._advFromType ? 0 : (mod.value || 0);
+
+		// Per-level modifiers
+		if (mod.perLevel) {
+			value *= this.getTotalLevel() || 1;
+		} else if (mod.perClassLevel) {
+			value *= this.getClassLevel(mod.perClassLevel) || 0;
+		}
+
+		// Ability modifier addition
+		if (mod.abilityMod) {
+			value += this.getAbilityMod(mod.abilityMod);
+		}
+
+		// Proficiency bonus addition
+		if (mod.proficiencyBonus) {
+			value += this.getProficiencyBonus();
+		} else if (mod.halfProficiency) {
+			value += Math.floor(this.getProficiencyBonus() / 2);
+		} else if (mod.doubleProficiency) {
+			value += this.getProficiencyBonus() * 2;
+		}
+
+		return value;
+	}
+
+	/**
+	 * Itemized, scope-aware attack-roll modifier contributions.
+	 *
+	 * Uses the hierarchical matcher with the 2-part scope string ("attack:melee"
+	 * or "attack:ranged"), so it returns category-level `attack` modifiers PLUS
+	 * the matching scope and EXCLUDES the other scope. This is what makes a
+	 * ranged-only modifier like Archery (`attack:ranged`, +2) apply to ranged
+	 * rolls only and never to melee/unarmed attacks. Conditional (opt-in) mods and
+	 * advantage/disadvantage sentinels are skipped — only flat numeric to-hit
+	 * bonuses are returned, each with its source name for the roll breakdown.
+	 *
+	 * @param {{isMelee?: boolean}} [opts]
+	 * @returns {Array<{name: string, value: number}>}
+	 */
+	getAttackModifierContributions ({isMelee} = {}) {
+		const scope = isMelee ? "attack:melee" : "attack:ranged";
+		const mods = this.getModifiersForType(scope);
+		const contributions = [];
+		for (const mod of mods) {
+			// Conditional mods are opt-in (surfaced via the conditional picker), and
+			// advantage/disadvantage sentinels carry no numeric to-hit value.
+			if (mod.conditional) continue;
+			if (mod._advFromType) continue;
+			const value = this._resolveNamedModifierNumericValue(mod);
+			if (!value) continue;
+			contributions.push({name: mod.name || mod.note || "Bonus", value});
+		}
+		return contributions;
+	}
+
 	getModifiersForType (type) {
 		if (!type) return [];
 		const parts = type.split(":");
@@ -35726,35 +35954,12 @@ class CharacterSheetState {
 				result.conditionals.push(mod.conditional);
 			}
 
-			// Numeric bonus calculation. Advantage/disadvantage modifiers whose effect is
-			// encoded in the modType string (":advantage"/":disadvantage") carry value:1 as a
-			// *presence sentinel* — that sentinel must NOT leak into the numeric total, otherwise
-			// an advantage-only modifier reads as a flat +1 (e.g. Moloch's Blessing / Forked
-			// Tongue Improvement giving +1 instead of advantage). Modifiers that carry an explicit
-			// numeric `value` alongside an `advantage` field (e.g. custom abilities) keep it. The
-			// advantage flag itself is still honoured below and via getAdvantageState().
-			let value = mod._advFromType ? 0 : (mod.value || 0);
-
-			// Per-level modifiers
-			if (mod.perLevel) {
-				value *= this.getTotalLevel() || 1;
-			} else if (mod.perClassLevel) {
-				value *= this.getClassLevel(mod.perClassLevel) || 0;
-			}
-
-			// Ability modifier addition
-			if (mod.abilityMod) {
-				value += this.getAbilityMod(mod.abilityMod);
-			}
-
-			// Proficiency bonus addition
-			if (mod.proficiencyBonus) {
-				value += this.getProficiencyBonus();
-			} else if (mod.halfProficiency) {
-				value += Math.floor(this.getProficiencyBonus() / 2);
-			} else if (mod.doubleProficiency) {
-				value += this.getProficiencyBonus() * 2;
-			}
+			// Numeric bonus calculation. Resolution (sentinel-zeroing, per-level,
+			// ability-mod, proficiency) is centralized in
+			// `_resolveNamedModifierNumericValue` so itemizing callers
+			// (`getAttackModifierContributions`) compute identical numbers and can
+			// never drift from the aggregate total.
+			const value = this._resolveNamedModifierNumericValue(mod);
 
 			result.bonus += value;
 

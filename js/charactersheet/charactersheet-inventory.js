@@ -3662,6 +3662,14 @@ class CharacterSheetInventory {
 		}
 
 		this._state.setItemEquipped(itemId, newEquipped);
+		// Equipping a quiver auto-places loose compatible ammunition into it, so the
+		// player doesn't have to manually fill it before a ranged attack.
+		if (newEquipped && this._state.isQuiver?.(item)) {
+			const placed = this._state.autoPlaceAmmunitionInQuiver?.(itemId) || 0;
+			if (placed > 0 && typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+				JqueryUtil.doToast({type: "success", content: `Placed ${placed} ammunition ${placed === 1 ? "stack" : "stacks"} in ${item.name}.`});
+			}
+		}
 		this._renderItemList();
 		this._renderEquippedItems();
 		this._updateArmorClass();
