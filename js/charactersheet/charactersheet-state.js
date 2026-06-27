@@ -9103,8 +9103,8 @@ class CharacterSheetState {
 				alerts.push({
 					key: "lastDitchEvasion",
 					name: "Last Ditch Evasion",
-					shortLabel: "Reaction: fail → ½ instead of full",
-					summary: "Battle Tactic: when you fail a Dex save against an effect that allows half damage, you can use your reaction to take half damage instead of full.",
+					shortLabel: "Reaction: avoid all damage, become Slowed",
+					summary: "Battle Tactic: when you're hit by an attack, use your reaction to take no damage; you become Slowed until the end of your next turn.",
 					source: "TGTT",
 				});
 			}
@@ -15043,6 +15043,7 @@ class CharacterSheetState {
 
 					// Indomitable uses
 					if (level >= 9) {
+						calculations.hasIndomitable = true;
 						calculations.indomitableUses = level >= 17 ? 3 : level >= 13 ? 2 : 1;
 					}
 
@@ -26705,6 +26706,84 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * (S3 #9/#10/#17) SYNTHETIC combat-resource descriptors for limited-use Fighter
+	 * abilities that are tracked outside `_data.resources` (Second Wind via feature
+	 * uses, Arcane Shot via `_data.arcaneShot`, Indomitable via `_data.indomitable`).
+	 * Shaped exactly like a real resource ({id, name, current, max, recharge}) plus a
+	 * `synthetic` flag and a `kind` discriminator so the Combat "Combat Resources"
+	 * panel can render them as pips with a dedicated spend/restore handler.
+	 *
+	 * Kept SEPARATE from {@link getGenericPoolResources} on purpose: those ids are not
+	 * in `_data.resources`, so the Overview panel's `setResourceCurrent`-based Use
+	 * buttons would no-op on them. The combat panel routes synthetic pip clicks to the
+	 * kind-specific setters instead.
+	 * @returns {Array<{id:string, name:string, current:number, max:number, recharge:string, synthetic:boolean, kind:string}>}
+	 */
+	getSyntheticCombatResources () {
+		const out = [];
+		if (this.hasFeature?.("Second Wind")) {
+			const max = this.getSecondWindUsesMax();
+			if (max > 0) {
+				out.push({
+					id: "__synthetic-second-wind",
+					name: "Second Wind",
+					current: this.getSecondWindUsesRemaining(),
+					max,
+					recharge: "short",
+					synthetic: true,
+					kind: "secondWind",
+				});
+			}
+		}
+		if (this.hasArcaneShot()) {
+			const max = this.getArcaneShotMax();
+			if (max > 0) {
+				out.push({
+					id: "__synthetic-arcane-shot",
+					name: "Arcane Shot",
+					current: this.getArcaneShotRemaining(),
+					max,
+					recharge: "short",
+					synthetic: true,
+					kind: "arcaneShot",
+				});
+			}
+		}
+		if (this.hasIndomitable()) {
+			const max = this.getIndomitableMax();
+			if (max > 0) {
+				out.push({
+					id: "__synthetic-indomitable",
+					name: "Indomitable",
+					current: this.getIndomitableRemaining(),
+					max,
+					recharge: "long",
+					synthetic: true,
+					kind: "indomitable",
+				});
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Set the remaining uses for a synthetic combat resource by its `kind`
+	 * discriminator (see {@link getSyntheticCombatResources}). Single dispatch point
+	 * so the combat-panel pip handler doesn't hard-code per-kind setters.
+	 * @param {string} kind - "secondWind" | "arcaneShot" | "indomitable".
+	 * @param {number} n - desired remaining uses.
+	 * @returns {boolean} True if a matching resource was updated.
+	 */
+	setSyntheticCombatResourceRemaining (kind, n) {
+		switch (kind) {
+			case "secondWind": return this.setSecondWindUsesRemaining(n);
+			case "arcaneShot": return this.setArcaneShotRemaining(n);
+			case "indomitable": return this.setIndomitableRemaining(n);
+			default: return false;
+		}
+	}
+
+	/**
 	 * Get a resource by name
 	 * @param {string} name Resource name to find
 	 * @returns {object|null} Resource object or null
@@ -31680,6 +31759,25 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Set the remaining Arcane Shot uses directly (clamped to [0, max]). Powers the
+	 * combat-resource pip control. Implemented in terms of the canonical `used`
+	 * counter so {@link useArcaneShot} / {@link getArcaneShotRemaining} (the stable
+	 * API the in-attack picker depends on) stay authoritative.
+	 * @param {number} n - desired remaining uses.
+	 * @returns {boolean} True if the character has Arcane Shot and the count changed.
+	 */
+	setArcaneShotRemaining (n) {
+		if (!this.hasArcaneShot()) return false;
+		this._ensureArcaneShotInitialized();
+		const max = this.getArcaneShotMax();
+		const next = Math.max(0, Math.min(Math.floor(Number(n) || 0), max));
+		const prevUsed = this.getArcaneShotUsed();
+		const nextUsed = max - next;
+		this._data.arcaneShot.used = nextUsed;
+		return nextUsed !== prevUsed;
+	}
+
+	/**
 	 * Ever-Ready Shot (level 15): if you roll initiative with no uses remaining,
 	 * regain one use. Gated on the feature and only fires at zero remaining.
 	 * @returns {boolean} True if a use was regained.
@@ -31952,11 +32050,149 @@ class CharacterSheetState {
 		if (f?.uses) this.setFeatureUses(f.id, f.uses.max);
 	}
 
+	/**
+	 * Set the remaining Second Wind uses directly (clamped to [0, max]). Powers the
+	 * combat-resource pip control and the Tactical Mind spend/refund flow (a single
+	 * refund must restore exactly the one spent use, NOT reset to max like
+	 * {@link restoreSecondWind}). Pure use-count mutation — no healing is applied.
+	 * @param {number} n - desired remaining uses.
+	 * @returns {boolean} True if a Second Wind feature exists and was updated.
+	 */
+	setSecondWindUsesRemaining (n) {
+		this.ensureFighterFeatureUses();
+		const f = this.getFeature("Second Wind");
+		if (!f?.uses) return false;
+		const max = Math.max(0, f.uses.max || 0);
+		const next = Math.max(0, Math.min(Math.floor(Number(n) || 0), max));
+		this.setFeatureUses(f.id, next);
+		return true;
+	}
+
 	/** Restore all Action Surge uses (short or long rest). */
 	restoreActionSurge () {
 		this.ensureFighterFeatureUses();
 		const f = this.getFeature("Action Surge");
 		if (f?.uses) this.setFeatureUses(f.id, f.uses.max);
+	}
+	// #endregion
+
+	// =========================================================================
+	// Indomitable (Fighter 9+) — reroll a failed save
+	// =========================================================================
+	// #region Indomitable
+
+	/**
+	 * Whether the character has Indomitable (Fighter level 9+, any edition).
+	 * @returns {boolean}
+	 */
+	hasIndomitable () {
+		return !!this.getFeatureCalculations().hasIndomitable;
+	}
+
+	/** Initialize the Indomitable use tracker if needed. */
+	_ensureIndomitableInitialized () {
+		if (!this._data.indomitable) this._data.indomitable = {used: 0};
+	}
+
+	/**
+	 * Maximum Indomitable uses for the current Fighter level (1 / 2 / 3 at 9 / 13 / 17).
+	 * @returns {number}
+	 */
+	getIndomitableMax () {
+		if (!this.hasIndomitable()) return 0;
+		return Math.max(0, this.getFeatureCalculations().indomitableUses || 0);
+	}
+
+	/** Spent Indomitable uses, clamped to [0, max]. @returns {number} */
+	getIndomitableUsed () {
+		this._ensureIndomitableInitialized();
+		const max = this.getIndomitableMax();
+		return Math.min(Math.max(0, this._data.indomitable.used || 0), max);
+	}
+
+	/** Remaining Indomitable uses (never negative). @returns {number} */
+	getIndomitableRemaining () {
+		return Math.max(0, this.getIndomitableMax() - this.getIndomitableUsed());
+	}
+
+	/**
+	 * Spend one Indomitable use.
+	 * @returns {boolean} True if a use was spent, false if none remained.
+	 */
+	useIndomitable () {
+		this._ensureIndomitableInitialized();
+		if (this.getIndomitableRemaining() <= 0) return false;
+		this._data.indomitable.used = this.getIndomitableUsed() + 1;
+		return true;
+	}
+
+	/**
+	 * Set the remaining Indomitable uses directly (clamped to [0, max]). Powers the
+	 * combat-resource pip control.
+	 * @param {number} n - desired remaining uses.
+	 * @returns {boolean} True if the character has Indomitable and the count changed.
+	 */
+	setIndomitableRemaining (n) {
+		if (!this.hasIndomitable()) return false;
+		this._ensureIndomitableInitialized();
+		const max = this.getIndomitableMax();
+		const next = Math.max(0, Math.min(Math.floor(Number(n) || 0), max));
+		const prevUsed = this.getIndomitableUsed();
+		const nextUsed = max - next;
+		this._data.indomitable.used = nextUsed;
+		return nextUsed !== prevUsed;
+	}
+
+	/** Restore all Indomitable uses (long rest only). */
+	restoreIndomitable () {
+		if (!this.hasIndomitable()) return;
+		this._ensureIndomitableInitialized();
+		this._data.indomitable.used = 0;
+	}
+
+	/**
+	 * Bonus added to the Indomitable reroll. The 2024 (XPHB) Fighter adds its Fighter
+	 * level to the new roll; the 2014 version is a plain reroll (no bonus).
+	 * @returns {number}
+	 */
+	getIndomitableRerollBonus () {
+		if (!this.hasIndomitable()) return 0;
+		const fighter = (this._data.classes || []).find(c => c.name === "Fighter");
+		if (!fighter) return 0;
+		// Indomitable is a CLASS feature, so the 2024 reroll bonus keys off the
+		// Fighter class source/edition — NOT the subclass (which may be a legacy copy).
+		const source = fighter.source || "";
+		const is2024 = /^XPHB$/i.test(source) || /2024/.test(source) || fighter.edition === "one";
+		return is2024 ? (this.getClassLevel("Fighter") || 0) : 0;
+	}
+	// #endregion
+
+	// =========================================================================
+	// Last Ditch Evasion (TGTT Battle Tactic) — in-play application
+	// =========================================================================
+	// #region Last Ditch Evasion
+
+	/**
+	 * Apply Last Ditch Evasion (TGTT Battle Tactic): when you're HIT by an attack you
+	 * may use your reaction to jump aside and take NO damage (avoid all), becoming
+	 * Slowed until the end of your next turn. The triggering attack's damage is reduced
+	 * to zero — not halved.
+	 *
+	 * Side-effect: applies the (Thelemar variant of the) Slowed condition. Reads —
+	 * never redefines — `calculations.hasLastDitchEvasion` (the tactic definition is
+	 * owned elsewhere). No-op result when the character lacks the tactic.
+	 * @param {object} [opts]
+	 * @param {number} [opts.damage=0] - the incoming (pre-reaction) attack damage.
+	 * @returns {{applied: boolean, full: number, reduced: number, slowedApplied: boolean}}
+	 */
+	applyLastDitchEvasion ({damage = 0} = {}) {
+		const full = Math.max(0, Math.floor(Number(damage) || 0));
+		if (!this.getFeatureCalculations().hasLastDitchEvasion) {
+			return {applied: false, full, reduced: full, slowedApplied: false};
+		}
+		// Avoid ALL damage (take 0), then become Slowed.
+		const slowedApplied = this.addCondition("slowed", {resolveThelemarVariant: true});
+		return {applied: true, full, reduced: 0, slowedApplied};
 	}
 	// #endregion
 
