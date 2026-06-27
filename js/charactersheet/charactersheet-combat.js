@@ -4305,27 +4305,52 @@ class CharacterSheetCombat {
 		// itself never triggers a full render(), so a just-armed rider is never lost mid-cast.
 		this._clearPendingSpellRider();
 
-		this.renderAttacks();
-		this.renderCombatQuiver();
-		this.renderDeathSaves();
-		this.renderCombatChanneledSpell();
-		this.renderCombatSpells();
-		this.renderCombatMethods();
-		this.renderCombatRanger();
-		this.renderCombatDruidResources();
-		this.renderCombatFighter();
-		this.renderCombatDefenses();
-		this.renderCombatConditions();
-		this.renderCombatEffects();
-		this.renderCombatResources();
-		this.renderCombatActions();
-		this.renderCombatMetamagic();
-		this.renderCombatStates();
+		this._runRenderSteps([
+			() => this.renderAttacks(),
+			() => this.renderCombatQuiver(),
+			() => this.renderDeathSaves(),
+			() => this.renderCombatChanneledSpell(),
+			() => this.renderCombatSpells(),
+			() => this.renderCombatMethods(),
+			() => this.renderCombatRanger(),
+			() => this.renderCombatDruidResources(),
+			() => this.renderCombatFighter(),
+			() => this.renderCombatDefenses(),
+			() => this.renderCombatConditions(),
+			() => this.renderCombatEffects(),
+			() => this.renderCombatResources(),
+			() => this.renderCombatActions(),
+			() => this.renderCombatMetamagic(),
+			() => this.renderCombatStates(),
+		]);
 
 		// Render combat stats
 		const initiative = this._state.getInitiative();
 		const elInitiative = document.getElementById("charsheet-initiative");
 		if (elInitiative) elInitiative.textContent = `${initiative >= 0 ? "+" : ""}${initiative}`;
+	}
+
+	/**
+	 * Run a sequence of combat sub-render steps with per-step error isolation.
+	 *
+	 * The combat tab paints ~16 independent panels in order. Previously a throw
+	 * in any earlier panel aborted the whole chain, so a later panel (e.g. the
+	 * Arcane Shot section in renderCombatResources) could silently disappear
+	 * because of an unrelated upstream failure. Wrapping each step keeps one
+	 * broken panel from suppressing its siblings; failures are logged, never
+	 * propagated.
+	 * @param {Array<Function>} steps - render methods (called with `this`)
+	 */
+	_runRenderSteps (steps) {
+		for (const step of steps) {
+			if (typeof step !== "function") continue;
+			try {
+				step.call(this);
+			} catch (e) {
+				// eslint-disable-next-line no-console
+				console.error("Combat render step failed:", e);
+			}
+		}
 	}
 
 	/**
@@ -8209,8 +8234,34 @@ class CharacterSheetCombat {
 
 		// Hide sections if no combat methods
 		if (combatMethods.length === 0) {
+			// The main read-only summary stays hidden until something is learned.
 			section.style.display = "none";
-			if (tabSection) tabSection.style.display = "none";
+
+			// But if the character has combat-method ACCESS (a class with a CTM
+			// progression), keep the combat-tab section visible so the "Manage"
+			// button is reachable to learn the first method.
+			if (tabSection) {
+				if (this._hasCombatMethodAccess()) {
+					tabSection.style.display = "";
+
+					const calcs = this._state.getFeatureCalculations();
+					const profBonus = this._state.getProficiencyBonus();
+					const methodDC = calcs.combatMethodDc ??
+						(8 + profBonus + Math.max(this._state.getAbilityMod("str"), this._state.getAbilityMod("dex")));
+					if (tabDcDisplay) tabDcDisplay.textContent = methodDC;
+
+					this._state.ensureStaminaInitialized?.();
+					const staminaMax = this._state.getStaminaMax?.() ?? 0;
+					if (staminaDisplay) staminaDisplay.textContent = staminaMax;
+					this._updateStaminaDisplay();
+
+					if (tabContainer) {
+						tabContainer.innerHTML = `<div class="ve-muted ve-text-center py-2">No combat methods known yet. Click <strong>Manage</strong> to learn your first one.</div>`;
+					}
+				} else {
+					tabSection.style.display = "none";
+				}
+			}
 			return;
 		}
 
@@ -9401,18 +9452,22 @@ class CharacterSheetCombat {
 		const current = this._state.getStaminaCurrent() || 0;
 		const max = this._state.getStaminaMax() || 0;
 
-		document.getElementById("charsheet-stamina-current").textContent = current;
-		document.getElementById("charsheet-stamina-max").textContent = max;
+		const elCurrent = document.getElementById("charsheet-stamina-current");
+		if (elCurrent) elCurrent.textContent = current;
+		const elMax = document.getElementById("charsheet-stamina-max");
+		if (elMax) elMax.textContent = max;
 
 		// Color-code based on remaining stamina
 		const display = document.getElementById("charsheet-stamina-display-tab");
-		display.classList.remove("text-success", "text-warning", "text-danger");
-		if (current === 0) {
-			display.classList.add("text-danger");
-		} else if (current <= max / 2) {
-			display.classList.add("text-warning");
-		} else {
-			display.classList.add("text-success");
+		if (display) {
+			display.classList.remove("text-success", "text-warning", "text-danger");
+			if (current === 0) {
+				display.classList.add("text-danger");
+			} else if (current <= max / 2) {
+				display.classList.add("text-warning");
+			} else {
+				display.classList.add("text-success");
+			}
 		}
 
 		// Update resource pips in the resources section
@@ -9434,8 +9489,10 @@ class CharacterSheetCombat {
 		const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
 
 		// Get all combat method features (both legacy optionalfeatures and new combatMethod entities)
-		const allMethods = [...allOptFeatures, ...combatMethodEntities].filter(opt =>
-			CharacterSheetClassUtils.isCombatMethod(opt),
+		const allMethods = CharacterSheetClassUtils.dedupeCombatMethodCatalog(
+			[...allOptFeatures, ...combatMethodEntities].filter(opt =>
+				CharacterSheetClassUtils.isCombatMethod(opt),
+			),
 		);
 
 		if (allMethods.length === 0) {
@@ -9702,53 +9759,137 @@ class CharacterSheetCombat {
 	}
 
 	/**
+	 * Does the character have access to combat methods at all? True when any
+	 * class has an optionalfeatureProgression that grants combat methods (a
+	 * `CTM:` featureType or a "combat method" progression name). Used so the
+	 * combat-tab Combat Methods section — and its "Manage" button — stays
+	 * reachable even before the first method is learned.
+	 * @returns {boolean}
+	 */
+	_hasCombatMethodAccess () {
+		const classes = this._state.getClasses?.() || [];
+		for (const cls of classes) {
+			const classData = this._page.getClasses?.().find(c => c.name === cls.name && c.source === cls.source);
+			if (!classData?.optionalfeatureProgression) continue;
+			const hasCtm = classData.optionalfeatureProgression.some(prog =>
+				prog.featureType?.some(ft => ft.startsWith("CTM:")) || prog.name?.toLowerCase().includes("combat method"),
+			);
+			if (hasCtm) return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Build the tradition-filter display model for the picker: gather the
+	 * class-restricted available pool (union across method-granting classes),
+	 * the subclass-granted (locked) codes, and the current selection, then hand
+	 * to the pure `buildTraditionSelectionModel`. Falls back to the full
+	 * tradition list if no class pool could be resolved, so the editor never
+	 * becomes a dead end.
+	 * @param {Array<string>} selectedTraditions
+	 * @returns {Array<{code: string, name: string, selected: boolean, locked: boolean, group: string}>}
+	 */
+	_getTraditionSelectionModel (selectedTraditions) {
+		const classes = this._state.getClasses?.() || [];
+		const allOptFeatures = this._page.getOptionalFeatures?.() || [];
+		const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
+		const allMethods = [...allOptFeatures, ...combatMethodEntities];
+		const classFeatures = this._page.getClassFeatures?.() || [];
+
+		const availableMap = new Map();
+		const grantedCodes = new Set();
+
+		for (const cls of classes) {
+			const classData = this._page.getClasses?.().find(c => c.name === cls.name && c.source === cls.source);
+			const cmProg = classData?.optionalfeatureProgression?.find(prog =>
+				prog.featureType?.some(ft => ft.startsWith("CTM:")) || prog.name?.toLowerCase().includes("combat method"),
+			);
+			if (cmProg) {
+				const avail = CharacterSheetClassUtils.getAvailableTraditionsForClass(
+					allMethods, cmProg.featureType || [], cls.name, classFeatures,
+				) || [];
+				for (const t of avail) if (t.code) availableMap.set(t.code, t);
+			}
+
+			const granted = CharacterSheetClassUtils.getSubclassGrantedTraditions(cls.subclass, cls.source) || [];
+			for (const g of granted) if (g.code && !g.choice) grantedCodes.add(g.code);
+		}
+
+		let availableTraditions = Array.from(availableMap.values());
+		if (!availableTraditions.length) availableTraditions = CharacterSheetClassUtils.getAllTraditions();
+
+		return CharacterSheetClassUtils.buildTraditionSelectionModel({
+			availableTraditions,
+			selectedCodes: selectedTraditions || [],
+			grantedCodes: Array.from(grantedCodes),
+		});
+	}
+
+	/**
 	 * Render tradition selection with card-style UI
 	 */
 	_renderTraditionSelection (container, selectedTraditions, onChange) {
 		container.innerHTML = "";
 		Object.assign(container.style, {"display": "flex", "flex-wrap": "wrap", "gap": "0.4rem", "padding": "0.5rem", "background": "var(--rgb-bg-alt)", "border-radius": "4px"});
 
-		const allTraditions = Object.entries(CharacterSheetClassUtils.TRADITION_CODE_TO_NAME)
-			.map(([code, name]) => ({code, name}))
-			.sort((a, b) => a.name.localeCompare(b.name));
-
+		const model = this._getTraditionSelectionModel(selectedTraditions);
 		const tradIcons = this._getTraditionIcons();
 
-		for (const trad of allTraditions) {
-			const isSelected = selectedTraditions.includes(trad.code);
+		// Ensure granted (locked) traditions are reflected in the live selection
+		// array so they persist on save even though their checkbox is disabled.
+		for (const trad of model) {
+			if (trad.locked && !selectedTraditions.includes(trad.code)) selectedTraditions.push(trad.code);
+		}
+
+		const groupLabels = {granted: "Granted by subclass", selected: "Selected", available: "Available"};
+		let lastGroup = null;
+
+		for (const trad of model) {
+			if (trad.group !== lastGroup) {
+				lastGroup = trad.group;
+				const heading = e_({outer: `<div style="flex-basis: 100%; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; margin: 0.15rem 0 0.05rem;">${groupLabels[trad.group] || ""}</div>`});
+				container.append(heading);
+			}
+
+			const isSelected = trad.selected;
+			const isLocked = trad.locked;
 			const chip = e_({outer: `
 				<label class="ve-flex ve-flex-v-center" style="
-					cursor: pointer;
+					cursor: ${isLocked ? "not-allowed" : "pointer"};
 					padding: 0.25rem 0.5rem;
 					border: 1px solid ${isSelected ? "var(--rgb-link)" : "var(--rgb-border-grey)"};
 					border-radius: 4px;
 					background: ${isSelected ? "rgba(51,122,183,0.15)" : "transparent"};
 					font-size: 0.85rem;
+					opacity: ${isLocked ? "0.85" : "1"};
 					transition: all 0.15s;
-				" data-trad="${trad.code}">
-					<input type="checkbox" class="mr-1" style="margin: 0;" ${isSelected ? "checked" : ""}>
+				" data-trad="${trad.code}"${isLocked ? ` title="Granted by your subclass — always active"` : ""}>
+					<input type="checkbox" class="mr-1" style="margin: 0;" ${isSelected ? "checked" : ""}${isLocked ? " disabled" : ""}>
 					<span>${tradIcons[trad.code] || "⚔️"}</span>
 					<span class="ml-1">${trad.name}</span>
+					${isLocked ? `<span class="ml-1" title="Locked">🔒</span>` : ""}
 				</label>
 			`});
 
-			chip.querySelector("input")?.addEventListener("change", function () {
-				const code = chip.dataset.trad;
-				const checked = this.checked;
+			if (!isLocked) {
+				chip.querySelector("input")?.addEventListener("change", function () {
+					const code = chip.dataset.trad;
+					const checked = this.checked;
 
-				if (checked && !selectedTraditions.includes(code)) {
-					selectedTraditions.push(code);
-				} else if (!checked) {
-					const idx = selectedTraditions.indexOf(code);
-					if (idx >= 0) selectedTraditions.splice(idx, 1);
-				}
+					if (checked && !selectedTraditions.includes(code)) {
+						selectedTraditions.push(code);
+					} else if (!checked) {
+						const idx = selectedTraditions.indexOf(code);
+						if (idx >= 0) selectedTraditions.splice(idx, 1);
+					}
 
-				Object.assign(chip.style, {
-					"border-color": checked ? "var(--rgb-link)" : "var(--rgb-border-grey)",
-					"background": checked ? "rgba(51,122,183,0.15)" : "transparent",
+					Object.assign(chip.style, {
+						"border-color": checked ? "var(--rgb-link)" : "var(--rgb-border-grey)",
+						"background": checked ? "rgba(51,122,183,0.15)" : "transparent",
+					});
+					onChange();
 				});
-				onChange();
-			});
+			}
 
 			container.append(chip);
 		}
@@ -9971,14 +10112,29 @@ class CharacterSheetCombat {
 	 * Get character's selected combat traditions
 	 */
 	_getCharacterTraditions () {
-		// Prefer canonical state traditions
-		const stateTraditions = this._state.getCombatTraditions?.() || [];
-		if (stateTraditions.length) return stateTraditions;
-
-		// Infer from known combat methods
-		const knownMethods = this._state.getFeatures().filter(f => CharacterSheetClassUtils.isCombatMethod(f));
-
 		const traditions = new Set();
+
+		// Subclass-granted FIXED traditions always apply (e.g. Arcane Archer,
+		// Warder) — surface them even before any method is learned so the picker
+		// isn't blocked by an empty tradition list.
+		const classes = this._state.getClasses?.() || [];
+		for (const cls of classes) {
+			const granted = CharacterSheetClassUtils.getSubclassGrantedTraditions(cls.subclass, cls.source) || [];
+			for (const t of granted) {
+				if (t.code && !t.choice) traditions.add(t.code);
+			}
+		}
+
+		// Canonical persisted traditions.
+		const stateTraditions = this._state.getCombatTraditions?.() || [];
+		for (const code of stateTraditions) traditions.add(code);
+
+		// Explicit (persisted) or granted traditions win — don't also infer from
+		// known methods (preserves prior "explicit wins" behaviour).
+		if (traditions.size) return Array.from(traditions);
+
+		// Otherwise infer from known combat methods.
+		const knownMethods = this._state.getFeatures().filter(f => CharacterSheetClassUtils.isCombatMethod(f));
 		for (const method of knownMethods) {
 			const tradCode = CharacterSheetClassUtils.getMethodTraditionCode(method);
 			if (tradCode) traditions.add(tradCode);
