@@ -29,6 +29,12 @@ class CharacterSheetCombat {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
 		this._handOfHarmUsedThisTurn = false;
 		this._flankingEnabled = false; // Toggle: add +2 to-hit on melee attacks while flanking (RAW optional rule)
+		// TRANSIENT per-tactic conditional-attack toggles (e.g. High Ground +2 ranged).
+		// Map of tactic name -> bool. Combat-local and never persisted, exactly like
+		// `_flankingEnabled`: the situational condition (elevation, position) is only
+		// known to the player, so each conditional battle-tactic to-hit bonus is opt-in
+		// per combat. Consumed in `_getCombatLocalAttackBonus`, scoped melee/ranged.
+		this._battleTacticToggles = {};
 		// TRANSIENT channeled-spell rider (Booming/Green-Flame Blade). Lives only on the
 		// combat instance — never persisted. Armed by the per-weapon ✨ button AFTER its
 		// attack roll, consumed by the next matching weapon damage roll, and discarded by
@@ -963,21 +969,30 @@ class CharacterSheetCombat {
 		// rider AFTER calling this method, so its own roll is never self-cleared.
 		if (this._pendingSpellRider) this._clearPendingSpellRider();
 
-		// Ammunition consumption (if enabled and weapon uses ammo)
+		// Ammunition consumption (if enabled and weapon uses ammo). When an equipped
+		// quiver holds compatible ammo, defer consumption to the non-blocking
+		// post-attack quiver picker (it spends exactly one — the chosen arrow, or a
+		// default if dismissed) so ammo is never double-spent. Otherwise consume
+		// inline from loose inventory as before.
 		let ammoNote = "";
 		if (this._state.isAmmunitionTrackingEnabled?.() && attack.sourceItem?.ammoType) {
-			const ammoItems = this._state.getAmmunitionForWeapon?.(attack.sourceItem.id) || [];
-			if (ammoItems.length > 0) {
-				// Use first available ammunition
-				const ammo = ammoItems[0];
-				if (this._state.consumeAmmunition?.(ammo.id, 1)) {
-					const remaining = ammo.quantity - 1;
-					ammoNote = ` [${ammo.name}: ${remaining} remaining]`;
-				}
+			const quiverAmmo = this._state.getQuiverAmmunitionForWeapon?.(attack.sourceItem.id) || [];
+			if (quiverAmmo.length > 0) {
+				// Quiver picker (post-attack hook) handles consumption.
 			} else {
-				// No compatible ammunition
-				if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
-					JqueryUtil.doToast({type: "warning", content: `No compatible ammunition for ${attack.name}!`});
+				const ammoItems = this._state.getAmmunitionForWeapon?.(attack.sourceItem.id) || [];
+				if (ammoItems.length > 0) {
+					// Use first available ammunition
+					const ammo = ammoItems[0];
+					if (this._state.consumeAmmunition?.(ammo.id, 1)) {
+						const remaining = ammo.quantity - 1;
+						ammoNote = ` [${ammo.name}: ${remaining} remaining]`;
+					}
+				} else {
+					// No compatible ammunition
+					if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+						JqueryUtil.doToast({type: "warning", content: `No compatible ammunition for ${attack.name}!`});
+					}
 				}
 			}
 		}
@@ -985,10 +1000,7 @@ class CharacterSheetCombat {
 		// Determine attack type for advantage/disadvantage matching.
 		// Honor an explicit ranged flag first (active-state / spell attacks set isRanged:true
 		// with a plain "60 ft." range that the heuristic below would otherwise read as melee).
-		const isMelee = attack.isRanged === true
-			? false
-			: (attack.isMelee || attack.type === "melee" || attack.range === "melee"
-				|| (attack.range && !attack.range.includes("/")));
+		const {isMelee} = this._getAttackRollKind(attack);
 		const abilityUsed = attack.abilityMod || (isMelee ? "str" : "dex");
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
 
@@ -1006,9 +1018,12 @@ class CharacterSheetCombat {
 		const abilityMod = this._state.getWeaponAbilityMod(attack);
 		const profBonus = this._state.getProficiencyBonus();
 
-		// Get attack modifiers from named modifiers (from features like Battle Tactics, magic items, etc.)
-		const attackModifiers = this._state.getNamedModifiersByType("attack");
-		const featureAttackBonus = attackModifiers.reduce((sum, mod) => sum + (mod.value || 0), 0);
+		// Get attack modifiers from named modifiers (features like fighting styles,
+		// magic items, etc.). SCOPE-AWARE: ranged-only modifiers (e.g. Archery +2)
+		// apply to ranged rolls only, melee-only to melee only, and plain `attack`
+		// modifiers to both. Itemized so each source breaks out in the result.
+		const attackContributions = this._state.getAttackModifierContributions?.({isMelee}) || [];
+		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
 
 		// Get bonus from active states (activated abilities like combat stances)
 		const stateAttackBonus = this._state.getBonusFromStates?.("attack") || 0;
@@ -1050,12 +1065,18 @@ class CharacterSheetCombat {
 		const extraBonusLabel = extraBonus
 			? ` <span class="ve-muted">(${extraBonus.label} ${extraBonusValue >= 0 ? "+" : ""}${extraBonusValue})</span>`
 			: "";
+		// Itemize each scoped named attack modifier (e.g. "Archery +2") so the player
+		// sees exactly which feature contributed — and, crucially, that ranged-only
+		// bonuses appear on ranged rolls but not melee.
+		const featureModLabel = attackContributions.length
+			? ` <span class="ve-muted">(${attackContributions.map(c => `${c.name} ${c.value >= 0 ? "+" : ""}${c.value}`).join(", ")})</span>`
+			: "";
 
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
 		void this._page.pAnimateD20?.(rollResult);
 		const resultEl = this._page.showDiceResult({
-			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}`,
+			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}${featureModLabel}`,
 			roll: rollResult.roll,
 			modifier: totalBonus,
 			total,
@@ -1114,6 +1135,7 @@ class CharacterSheetCombat {
 			total,
 			totalBonus,
 			isCrit: rollResult.roll >= critRange,
+			isNat20: rollResult.roll === 20,
 			isFumble: rollResult.roll === 1,
 		};
 		void this._runPostAttackHooks(postCtx).catch(e => {
@@ -1267,6 +1289,32 @@ class CharacterSheetCombat {
 					&& (this._state.getKnownArcaneShots?.()?.length || 0) > 0
 					&& this._isArcaneArcherWeapon(ctx.attack),
 				handler: (ctx) => this._pPickArcaneShot(ctx),
+			},
+			{
+				// Quiver picker: on a ranged weapon attack, if an equipped quiver holds
+				// ammo compatible with the weapon, offer a non-blocking picker so the
+				// player chooses which arrow they loosed (and sees its effect). Consumes
+				// exactly one — the chosen ammo, or a default arrow if dismissed — so the
+				// shot always costs ammunition without ever double-spending.
+				id: "quiver",
+				predicate: (ctx) => ctx.isRanged
+					&& !ctx.attack?.isSpell
+					&& this._state.isAmmunitionTrackingEnabled?.()
+					&& !!ctx.attack?.sourceItem?.ammoType
+					&& (this._state.getQuiverAmmunitionForWeapon?.(ctx.attack.sourceItem.id) || []).length > 0,
+				handler: (ctx) => this._pPickQuiverAmmo(ctx),
+			},
+			{
+				// Crit / nat-20 weapon riders (e.g. Rapier of Life Stealing → extra
+				// necrotic + temp HP on a natural 20). Generic + data-driven via
+				// `getCritWeaponRiders`; the offer is non-blocking and never alters the
+				// already-resolved attack roll. Reusable for any crit-triggered weapon
+				// effect (append-friendly for future combat-method crit riders).
+				id: "critWeaponRider",
+				predicate: (ctx) => !ctx.attack?.isSpell
+					&& (this._state.getCritWeaponRiders?.(ctx.attack) || [])
+						.some(r => (r.trigger === "nat20" ? ctx.isNat20 : ctx.isCrit)),
+				handler: (ctx) => this._pOfferCritWeaponRiders(ctx),
 			},
 			{
 				// Illrigger Baleful Interdict: on a weapon-attack hit, once per turn, offer
@@ -1434,6 +1482,312 @@ class CharacterSheetCombat {
 
 		this._page.saveCharacter?.();
 		this.renderCombatResources();
+	}
+
+	/**
+	 * Apply a single crit / nat-20 weapon rider (e.g. Life Stealing): compute its
+	 * extra damage and grant any temporary hit points. Temp HP uses D&D
+	 * take-higher semantics (never reduces existing temp HP). Pure mechanic +
+	 * display; the offer/confirmation UX lives in `_pOfferCritWeaponRiders`.
+	 *
+	 * Reusable by other crit-triggered weapon effects (and append-friendly for
+	 * future combat-method crit riders). Returns what it applied for testing.
+	 * @param {*} attack
+	 * @param {*} rider
+	 * @returns {{damage: number, damageType: string, tempHpGranted: number}|null}
+	 */
+	_applyCritWeaponRider (attack, rider) {
+		if (!rider) return null;
+
+		// Extra damage: rolled dice or a flat amount.
+		let damage = 0;
+		let diceLabel = "";
+		if (rider.damageDice) {
+			const roll = this._parseDamage(rider.damageDice, false);
+			damage = roll.total || 0;
+			diceLabel = roll.rolls?.length ? `${rider.damageDice} → [${roll.rolls.join(", ")}] = ${damage}` : rider.damageDice;
+		} else if (typeof rider.damageAmount === "number") {
+			damage = rider.damageAmount;
+			diceLabel = `${damage}`;
+		}
+
+		// Temporary hit points (take-higher: never reduce existing temp HP). A
+		// `tempHp` of "damage" mirrors the necrotic dealt; a number is granted flat.
+		let tempHpGranted = 0;
+		if (rider.tempHp != null) {
+			const want = rider.tempHp === "damage" ? damage : (Number(rider.tempHp) || 0);
+			tempHpGranted = Math.max(0, want);
+			if (tempHpGranted > 0) {
+				const cur = this._state.getTempHp?.() || 0;
+				this._state.setTempHp?.(Math.max(cur, tempHpGranted));
+			}
+		}
+
+		const typeWord = rider.damageType ? ` ${rider.damageType}` : "";
+		if (damage > 0) {
+			this._page.showDiceResult?.({
+				title: `${rider.name} (nat 20)`,
+				roll: damage,
+				modifier: 0,
+				total: damage,
+				resultClass: "charsheet__dice-result-total--crit",
+				resultNote: `Extra${typeWord} damage${rider.note ? ` — ${rider.note}` : ""}`,
+				subtitle: diceLabel,
+			});
+		}
+		if (tempHpGranted > 0) {
+			JqueryUtil.doToast({type: "success", content: `${rider.name}: gained ${tempHpGranted} temporary hit points.`});
+		}
+
+		this._page.saveCharacter?.();
+		this._page.renderCharacter?.();
+		return {damage, damageType: rider.damageType, tempHpGranted};
+	}
+
+	/**
+	 * Non-blocking post-attack offer for crit / nat-20 weapon riders. Modeled on
+	 * the Arcane Shot picker: lists each applicable rider with an Apply button so
+	 * the player can opt in (a target may be immune — e.g. Constructs/Undead take
+	 * no necrotic and grant no Life Stealing temp HP), or dismiss. Fire-and-forget.
+	 * @param {*} ctx Post-attack context from `_rollAttack`.
+	 * @returns {Promise<void>}
+	 */
+	async _pOfferCritWeaponRiders (ctx) {
+		const riders = (this._state.getCritWeaponRiders?.(ctx.attack) || [])
+			.filter(r => (r.trigger === "nat20" ? ctx.isNat20 : ctx.isCrit));
+		if (!riders.length) return;
+
+		let resolveOuter = null;
+		let isResolved = false;
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: `Critical Hit Effect — ${ctx.attack?.name || "Weapon"}`,
+			isMinHeight0: true,
+			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
+		});
+
+		await new Promise((resolve) => {
+			resolveOuter = resolve;
+			const finalize = () => { if (isResolved) return false; isResolved = true; resolve(); return true; };
+
+			const rowsHtml = riders.map((r, i) => {
+				const dmgStr = r.damageDice ? r.damageDice : (typeof r.damageAmount === "number" ? `${r.damageAmount}` : "");
+				const dmgBadge = dmgStr
+					? `<span class="badge badge-danger ml-1" title="Extra critical damage">+${dmgStr} ${r.damageType || ""}</span>`
+					: "";
+				const tempBadge = r.tempHp != null
+					? `<span class="badge badge-success ml-1" title="Temporary hit points">temp HP</span>`
+					: "";
+				return `
+					<div class="charsheet__critrider-opt-row ve-flex ve-flex-v-center ve-flex-wrap gap-1" style="margin-bottom:6px;">
+						<span class="bold">${r.name}</span>
+						${dmgBadge}
+						${tempBadge}
+						${r.note ? `<span class="ve-muted ve-small">${r.note}</span>` : ""}
+						<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__critrider-opt ml-auto" data-idx="${i}" title="Apply this critical-hit effect">Apply</button>
+					</div>`;
+			}).join("");
+
+			modalInner.innerHTML = `
+				<div class="charsheet__critrider-pick">
+					<p class="ve-small ve-muted charsheet__critrider-pick__lede">
+						You rolled a natural 20. Apply the weapon's critical-hit effect if the
+						target is a valid target (some creatures are immune).
+					</p>
+					<div class="charsheet__critrider-pick__opts">${rowsHtml}</div>
+					<div class="ve-flex-h-right" style="gap: 8px; margin-top: 12px;">
+						<button class="ve-btn ve-btn-default" data-act="none">None / skip</button>
+					</div>
+				</div>
+			`;
+
+			modalInner.querySelectorAll(".charsheet__critrider-opt").forEach((/** @type {*} */ el) => {
+				el.addEventListener("click", () => {
+					const idx = Number(el.getAttribute("data-idx"));
+					const rider = riders[idx];
+					if (!finalize()) return; // guard against rapid double-click
+					doClose();
+					this._applyCritWeaponRider(ctx.attack, rider);
+				});
+			});
+			modalInner.querySelector(`[data-act="none"]`).addEventListener("click", () => { finalize(); doClose(); });
+		});
+	}
+
+	/**
+	 * Human-readable effect blurb for an ammunition item (magic arrows etc.),
+	 * shown in the quiver picker so the player knows what each arrow does.
+	 * @param {object} ammo - Flattened ammunition item.
+	 * @returns {string} Short effect text, or "" when mundane.
+	 */
+	_getAmmoEffectText (ammo) {
+		if (!ammo) return "";
+		const parts = [];
+		if (ammo.bonusWeapon || ammo.bonusWeaponAttack) {
+			const b = ammo.bonusWeapon || ammo.bonusWeaponAttack;
+			parts.push(`${b} to attack`);
+		}
+		if (ammo.bonusWeaponDamage) parts.push(`${ammo.bonusWeaponDamage} damage`);
+		// First sentence of the item's own description, if present.
+		const entries = ammo.entries || ammo.item?.entries;
+		if (Array.isArray(entries)) {
+			const firstStr = entries.find(e => typeof e === "string");
+			if (firstStr) {
+				let txt = firstStr.replace(/\{@[^}]+\}/g, (m) => m.replace(/^\{@\w+\s+/, "").replace(/\|[^}]*/, "").replace(/\}$/, ""));
+				txt = txt.replace(/\s+/g, " ").trim();
+				const sentence = txt.split(/(?<=\.)\s/)[0];
+				if (sentence) parts.push(sentence);
+			}
+		}
+		return parts.join("; ");
+	}
+
+	/**
+	 * Non-blocking post-ranged-attack quiver picker. Lets the player pick which
+	 * ammunition from the equipped quiver they loosed (with its effect shown),
+	 * then consumes exactly one of it. If dismissed without a choice, the default
+	 * (first) ammo is consumed — so a shot always costs ammunition, and the inline
+	 * consume in `_rollAttack` was deliberately skipped to avoid double-spending.
+	 * @param {*} ctx
+	 */
+	async _pPickQuiverAmmo (ctx) {
+		const weaponId = ctx.attack?.sourceItem?.id;
+		if (!weaponId) return;
+		const ammo = this._state.getQuiverAmmunitionForWeapon?.(weaponId) || [];
+		if (!ammo.length) return;
+
+		const consume = (a) => {
+			if (!a) return;
+			if (this._state.consumeAmmunition?.(a.id, 1)) {
+				const remaining = Math.max(0, (a.quantity || 0) - 1);
+				const eff = this._getAmmoEffectText(a);
+				JqueryUtil.doToast({
+					type: "info",
+					content: `Loosed ${a.name} (${remaining} left in quiver)${eff ? ` — ${eff}` : ""}.`,
+				});
+			}
+			this.renderCombatQuiver?.();
+		};
+
+		let resolveOuter = null;
+		let isResolved = false;
+		let chosen = false;
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: `Quiver — ${ctx.attack?.name || "Ranged Attack"}`,
+			isMinHeight0: true,
+			// Dismissing without an explicit pick spends the default arrow (no free shot).
+			cbClose: () => {
+				if (resolveOuter && !isResolved) {
+					isResolved = true;
+					if (!chosen) consume(ammo[0]);
+					resolveOuter();
+				}
+			},
+		});
+
+		await new Promise((resolve) => {
+			resolveOuter = resolve;
+			const finalize = () => { if (isResolved) return false; isResolved = true; resolve(); return true; };
+
+			const rowsHtml = ammo.map((a, i) => {
+				const eff = this._getAmmoEffectText(a);
+				const srcAbbr = a.source ? Parser.sourceJsonToAbv(a.source) : "";
+				let nameHtml = a.name;
+				if (this._page?.getHoverLink && a.source) {
+					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { nameHtml = a.name; }
+				}
+				return `
+					<div class="charsheet__quiver-opt-row ve-flex ve-flex-v-center ve-flex-wrap gap-1" style="margin-bottom:6px;">
+						<span class="bold">${nameHtml}</span>
+						${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
+						<span class="badge badge-default ml-1" title="Remaining in quiver">×${a.quantity || 0}</span>
+						${eff ? `<span class="ve-muted ve-small charsheet__quiver-opt-eff">${eff}</span>` : ""}
+						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__quiver-opt ml-auto" data-idx="${i}" title="Loose this ammunition">Loose</button>
+					</div>`;
+			}).join("");
+
+			modalInner.innerHTML = `
+				<div class="charsheet__quiver-pick">
+					<p class="ve-small ve-muted charsheet__quiver-pick__lede">
+						Choose which ammunition you loosed from your quiver. Spends one.
+						Dismiss to spend ${ammo[0]?.name || "the default arrow"}.
+					</p>
+					<div class="charsheet__quiver-pick__opts">${rowsHtml}</div>
+					<div class="ve-flex-h-right" style="gap: 8px; margin-top: 12px;">
+						<button class="ve-btn ve-btn-default" data-act="default">Use default</button>
+					</div>
+				</div>
+			`;
+
+			modalInner.querySelectorAll(".charsheet__quiver-opt").forEach((/** @type {*} */ el) => {
+				el.addEventListener("click", () => {
+					const idx = Number(el.getAttribute("data-idx"));
+					const a = ammo[idx];
+					chosen = true;
+					if (!finalize()) return;
+					doClose();
+					consume(a);
+				});
+			});
+			modalInner.querySelector(`[data-act="default"]`).addEventListener("click", () => {
+				chosen = true;
+				consume(ammo[0]);
+				finalize();
+				doClose();
+			});
+		});
+	}
+
+	/**
+	 * Render the combat-tab quiver section: shows the equipped quiver and the
+	 * ammunition it currently holds, with per-stack counts and effect blurbs.
+	 * Hidden entirely when no quiver is equipped.
+	 */
+	renderCombatQuiver () {
+		const section = document.getElementById("charsheet-combat-quiver-section");
+		const container = document.getElementById("charsheet-combat-quiver");
+		if (!container) return;
+
+		const quiver = this._state.getEquippedQuiver?.();
+		if (!quiver) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+
+		const ammo = this._state.getQuiverAmmunition?.(quiver.id) || [];
+		const total = ammo.reduce((sum, a) => sum + (a.quantity || 0), 0);
+
+		let nameHtml = quiver.name;
+		if (this._page?.getHoverLink && quiver.source) {
+			try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, quiver.name, quiver.source); } catch (e) { nameHtml = quiver.name; }
+		}
+
+		const rowsHtml = ammo.length
+			? ammo.map(a => {
+				const eff = this._getAmmoEffectText(a);
+				let aName = a.name;
+				if (this._page?.getHoverLink && a.source) {
+					try { aName = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { aName = a.name; }
+				}
+				return `
+					<div class="charsheet__quiver-row ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+						<span class="bold">${aName}</span>
+						<span class="badge badge-default" title="Remaining">×${a.quantity || 0}</span>
+						${eff ? `<span class="ve-muted ve-small">${eff}</span>` : ""}
+					</div>`;
+			}).join("")
+			: `<div class="ve-muted ve-small">Quiver is empty. Add ammunition from Inventory.</div>`;
+
+		container.innerHTML = `
+			<div class="charsheet__quiver">
+				<div class="charsheet__quiver-head ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+					<span class="bold">${nameHtml}</span>
+					<span class="ve-muted ve-small">${total} ${total === 1 ? "round" : "rounds"} total</span>
+				</div>
+				<div class="charsheet__quiver-list">${rowsHtml}</div>
+			</div>
+		`;
 	}
 
 	/**
@@ -2392,8 +2746,23 @@ class CharacterSheetCombat {
 		const abilityMod = this._state.getWeaponAbilityMod(attack);
 
 		const profBonus = this._state.getProficiencyBonus();
-		const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0);
+		// Scope-aware named attack modifiers (e.g. Archery +2 on ranged weapons only)
+		// so the displayed badge matches the roll. Transient combat-local toggles
+		// (Flanking, High Ground) are intentionally excluded — they're situational
+		// and surface in the roll breakdown, not the static badge.
+		const {isMelee: attackIsMelee} = this._getAttackRollKind(attack);
+		const attackContributions = this._state.getAttackModifierContributions?.({isMelee: attackIsMelee}) || [];
+		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
+		const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus;
 		const totalDamageBonus = abilityMod + (attack.damageBonus || 0);
+		// Itemized tooltip for the to-hit badge so each contributing source is visible.
+		const atkBreakdownParts = [
+			`${abilityMod >= 0 ? "+" : ""}${abilityMod} ability`,
+			`+${profBonus} prof`,
+		];
+		if (attack.attackBonus) atkBreakdownParts.push(`${attack.attackBonus >= 0 ? "+" : ""}${attack.attackBonus} weapon`);
+		attackContributions.forEach(c => atkBreakdownParts.push(`${c.value >= 0 ? "+" : ""}${c.value} ${c.name}`));
+		const atkBadgeTitle = atkBreakdownParts.join(", ");
 		const isAutoGenerated = attack.isAutoGenerated || attack.id?.startsWith?.("auto_");
 		const isNaturalWeapon = attack.isNaturalWeapon;
 
@@ -2507,7 +2876,7 @@ class CharacterSheetCombat {
 					<span class="charsheet__attack-name">${nameHtml}${badgeHtml}</span>
 					<span class="charsheet__attack-details">
 						${rangeDisplayHtml}
-						<span class="badge badge-primary">+${totalAttackBonus}</span>
+						<span class="badge badge-primary" title="${atkBadgeTitle}">+${totalAttackBonus}</span>
 						<span class="badge badge-danger">${attack.damage}${totalDamageBonus >= 0 ? "+" : ""}${totalDamageBonus} ${attack.damageType}</span>
 						${critRangeHtml}
 						${propertiesHtml}
@@ -3863,6 +4232,7 @@ class CharacterSheetCombat {
 		this._clearPendingSpellRider();
 
 		this.renderAttacks();
+		this.renderCombatQuiver();
 		this.renderDeathSaves();
 		this.renderCombatChanneledSpell();
 		this.renderCombatSpells();
@@ -4894,11 +5264,13 @@ class CharacterSheetCombat {
 			return true;
 		}
 
-		// Resolve attack parameters once
+		// Resolve attack parameters once. Unarmed strikes are melee, so use
+		// melee-scoped contributions — a ranged-only modifier (Archery) must never
+		// buff Flurry of Blows.
 		const abilityMod = this._state.getWeaponAbilityMod(unarmedStrike);
 		const profBonus = this._state.getProficiencyBonus();
-		const attackModifiers = this._state.getNamedModifiersByType("attack");
-		const featureAttackBonus = attackModifiers.reduce((sum, mod) => sum + (mod.value || 0), 0);
+		const attackContributions = this._state.getAttackModifierContributions?.({isMelee: true}) || [];
+		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
 		const stateAttackBonus = this._state.getBonusFromStates?.("attack") || 0;
 		const totalBonus = abilityMod + profBonus + (unarmedStrike.attackBonus || 0) + featureAttackBonus + stateAttackBonus;
 
@@ -8078,8 +8450,37 @@ class CharacterSheetCombat {
 		if (this._flankingEnabled && this._isStrictMelee(ctx?.attack)) {
 			parts.push({label: "Flanking", value: 2});
 		}
+		// Conditional Battle-Tactic attack bonuses (TGTT), each an opt-in combat-local
+		// toggle. Scope-correct: a ranged tactic (High Ground) only applies to a strictly
+		// ranged attack; a melee tactic (Sweeping Blows / Hammer and Anvil) only to a
+		// strictly melee attack. Locked tactics (unmet Fighter-level prereq) never apply.
+		const tacticMods = this._state.getConditionalAttackModifiers?.() || [];
+		for (const tm of tacticMods) {
+			if (!this._battleTacticToggles[tm.source]) continue;
+			if (tm.attackType === "ranged" && !this._isStrictRanged(ctx?.attack)) continue;
+			if (tm.attackType === "melee" && !this._isStrictMelee(ctx?.attack)) continue;
+			parts.push({label: tm.source, value: tm.value});
+		}
 		const bonus = parts.reduce((sum, p) => sum + p.value, 0);
 		return {bonus, parts};
+	}
+
+	/**
+	 * Classify an attack as melee or ranged for roll math, scoped modifier
+	 * retrieval, and display. Single source of truth so the roll, the static
+	 * attack badge, scoped named modifiers (Archery), battle-tactic scoping
+	 * (High Ground), and the Flurry path all agree. Mirrors the long-standing
+	 * `_rollAttack` heuristic: an explicit `isRanged` wins, otherwise explicit
+	 * melee signals or a non-thrown range string read as melee.
+	 * @param {*} attack
+	 * @returns {{isMelee: boolean, isRanged: boolean}}
+	 */
+	_getAttackRollKind (attack) {
+		const isMelee = attack?.isRanged === true
+			? false
+			: !!(attack?.isMelee || attack?.type === "melee" || attack?.range === "melee"
+				|| (attack?.range && !String(attack.range).includes("/")));
+		return {isMelee, isRanged: !isMelee};
 	}
 
 	/**
@@ -8096,6 +8497,27 @@ class CharacterSheetCombat {
 		if (attack.type === "melee") return true;
 		const range = typeof attack.range === "string" ? attack.range.toLowerCase() : "";
 		if (range === "melee" || range.includes("reach") || range.includes("touch")) return true;
+		return false;
+	}
+
+	/**
+	 * Strict ranged test for positional modifiers (High Ground). Only EXPLICIT
+	 * ranged signals qualify — an `isRanged` flag, a non-melee `type`, or a
+	 * thrown/ranged "x/y ft." range string — so an ambiguous or melee attack can
+	 * never receive a ranged-only battle-tactic bonus.
+	 * @param {*} attack
+	 * @returns {boolean}
+	 */
+	_isStrictRanged (attack) {
+		if (!attack || attack.isSpell) return false;
+		if (attack.isRanged === true) return true;
+		if (attack.isMelee === true || attack.type === "melee") return false;
+		if (attack.type === "ranged") return true;
+		const range = typeof attack.range === "string" ? attack.range.toLowerCase() : "";
+		if (range === "melee" || range.includes("reach") || range.includes("touch")) return false;
+		// A thrown/ranged weapon carries a "20/60 ft." style range, or a plain numeric
+		// range that the roll heuristic reads as ranged.
+		if (/\d/.test(range)) return true;
 		return false;
 	}
 
@@ -8195,9 +8617,19 @@ class CharacterSheetCombat {
 				const locked = !!tactic.fighterLevel && !this._state.meetsBattleTacticPrerequisite?.(tactic.fighterLevel);
 
 				const badges = [];
+				let toggleBtnHtml = "";
 				if (tactic.attackBonus) {
 					const typeLabel = tactic.attackType ? `${tactic.attackType} ` : "";
 					badges.push(`<span class="badge badge-success" title="Conditional ${typeLabel}attack bonus${tactic.condition ? `: ${tactic.condition}` : ""}">+${tactic.attackBonus} ${typeLabel}atk</span>`);
+					// Opt-in combat-local toggle for the situational +N to-hit. Only the
+					// player knows the positional condition is met, so it's off by default
+					// and applies ONLY to the tactic's attack type (ranged/melee). Locked
+					// tactics (unmet prereq) get no toggle.
+					if (!locked) {
+						const on = !!this._battleTacticToggles[tactic.name];
+						const scopeWord = tactic.attackType ? `${tactic.attackType} ` : "";
+						toggleBtnHtml = `<button class="ve-btn ve-btn-xs ${on ? "ve-btn-success" : "ve-btn-default"} charsheet__combat-fighter-tactic-toggle ml-1" data-tactic="${tactic.name.replace(/"/g, "&quot;")}" title="Toggle the +${tactic.attackBonus} ${scopeWord}to-hit bonus for ${tactic.condition || "this tactic"} — applies to ${tactic.attackType || "all"} attacks only">${on ? `✓ +${tactic.attackBonus} ON` : `+${tactic.attackBonus} off`}</button>`;
+					}
 				}
 				// Crit-range / advantage riders come WITH the (level-gated) reaction, so only
 				// advertise them as active once the Fighter-level prerequisite is met.
@@ -8221,6 +8653,7 @@ class CharacterSheetCombat {
 						<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-1">
 							<span class="bold">${nameHtml}</span>
 							${badges.join(" ")}
+							${toggleBtnHtml}
 						</div>
 						${tactic.condition && !tactic.reaction ? `<div class="ve-small ve-muted mt-1">Condition: ${tactic.condition}</div>` : ""}
 						${reactionHtml}
@@ -8272,6 +8705,19 @@ class CharacterSheetCombat {
 		block.querySelector(".charsheet__combat-fighter-as-reset")?.addEventListener("click", () => {
 			this._state.restoreActionSurge?.();
 			refresh();
+		});
+
+		// Conditional battle-tactic to-hit toggles (e.g. High Ground +2 ranged). These are
+		// combat-local and transient (not saved): flip the in-memory flag and re-render the
+		// Fighter panel + attacks so the badge state and the next roll agree.
+		block.querySelectorAll(".charsheet__combat-fighter-tactic-toggle").forEach((/** @type {*} */ btn) => {
+			btn.addEventListener("click", () => {
+				const name = btn.getAttribute("data-tactic");
+				if (!name) return;
+				this._battleTacticToggles[name] = !this._battleTacticToggles[name];
+				this.renderCombatFighter();
+				this.renderAttacks();
+			});
 		});
 	}
 
