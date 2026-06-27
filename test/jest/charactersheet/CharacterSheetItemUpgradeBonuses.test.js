@@ -181,4 +181,141 @@ describe("Item Upgrade Bonuses (#14 weapon, #15 armor)", () => {
 			expect(state._data.ac.armor.appliedUpgrades.some(u => u.name === "Reinforced")).toBe(true);
 		});
 	});
+
+	// ==========================================================================
+	// #15-A — Conditional ROLL advantages via the existing conditional-modifier mechanism
+	// ==========================================================================
+	describe("#15-A Armor upgrades → gated conditional roll advantages", () => {
+		function addEquippedArmor () {
+			state.addItem({name: "Half Plate", source: "PHB", type: "MA", armor: true, armorType: "medium", ac: 15}, 1, true);
+			return state.getItems().find(i => i.armor).id;
+		}
+
+		function conditionalsFor (type) {
+			return state.aggregateModifiers(type).conditionalsAvailable;
+		}
+
+		it("Breathable surfaces a default-off CON-save advantage that opts in on demand", () => {
+			const id = addEquippedArmor();
+			expect(conditionalsFor("save:con").some(c => c.conditional.includes("extreme heat"))).toBe(false);
+
+			state.applyItemUpgrade(id, {name: "Breathable", source: "TCAH", upgradeType: ["AU"]}, 200);
+
+			// Gated: present in the picker, but NOT applied to the roll by default.
+			const avail = conditionalsFor("save:con");
+			const entry = avail.find(c => c.conditional.includes("extreme heat"));
+			expect(entry).toBeDefined();
+			expect(entry.advantage).toBe(true);
+			const base = state.aggregateModifiers("save:con");
+			expect(base.advantage).toBe(false);
+			expect(base.bonus).toBe(0); // advantage-only: no phantom +1
+
+			// Opt-in for this roll → advantage applies.
+			const optedIn = state.aggregateModifiers("save:con", {appliedConditionalIds: new Set([entry.id])});
+			expect(optedIn.advantage).toBe(true);
+			expect(optedIn.bonus).toBe(0);
+
+			// Removal strips it.
+			state.removeItemUpgrade(id, "Breathable", "TCAH");
+			expect(conditionalsFor("save:con").some(c => c.conditional.includes("extreme heat"))).toBe(false);
+		});
+
+		it("Burnished surfaces a default-off Charisma-check advantage", () => {
+			const id = addEquippedArmor();
+			state.applyItemUpgrade(id, {name: "Burnished", source: "TCAH", upgradeType: ["AU"]}, 200);
+			const entry = conditionalsFor("check:cha").find(c => c.conditional.includes("certain humanoids"));
+			expect(entry).toBeDefined();
+			expect(entry.advantage).toBe(true);
+			expect(state.aggregateModifiers("check:cha").advantage).toBe(false);
+		});
+
+		it("Climbing Harness and Locking Joints both surface as distinct Athletics conditionals", () => {
+			const id = addEquippedArmor();
+			state.applyItemUpgrade(id, {name: "Climbing Harness", source: "TCAH", upgradeType: ["AU"]}, 200);
+			state.applyItemUpgrade(id, {name: "Locking Joints", source: "TCAH", upgradeType: ["AU"]}, 200);
+			const avail = conditionalsFor("skill:athletics");
+			expect(avail.some(c => c.conditional.includes("climb"))).toBe(true);
+			expect(avail.some(c => c.conditional.includes("shoved"))).toBe(true);
+			// Two distinct opt-in ids.
+			const ids = avail.filter(c => c.conditional.includes("climb") || c.conditional.includes("shoved")).map(c => c.id);
+			expect(new Set(ids).size).toBe(2);
+		});
+
+		it("unequipping strips the conditional modifiers; re-equipping restores them", () => {
+			const id = addEquippedArmor();
+			state.applyItemUpgrade(id, {name: "Climbing Harness", source: "TCAH", upgradeType: ["AU"]}, 200);
+			expect(conditionalsFor("skill:athletics").some(c => c.conditional.includes("climb"))).toBe(true);
+
+			state.unequip(id);
+			expect(conditionalsFor("skill:athletics").some(c => c.conditional.includes("climb"))).toBe(false);
+
+			state.equip(id);
+			expect(conditionalsFor("skill:athletics").some(c => c.conditional.includes("climb"))).toBe(true);
+		});
+
+		it("does not register modifiers for non-roll upgrades (e.g. Spiked, Decorated)", () => {
+			const id = addEquippedArmor();
+			state.applyItemUpgrade(id, {name: "Spiked", source: "TCAH", upgradeType: ["AU"]}, 200);
+			state.applyItemUpgrade(id, {name: "Decorated", source: "TCAH", upgradeType: ["AU"]}, 200);
+			expect(state._data.namedModifiers.some(m => m.sourceType === "itemUpgrade")).toBe(false);
+		});
+
+		it("strips ONLY its own modifiers — a coexisting classFeature modifier survives recalculation", () => {
+			const id = addEquippedArmor();
+			const featId = state.addNamedModifier({name: "Bear Totem", type: "save:con", advantage: true, conditional: "while raging", sourceType: "classFeature"});
+			state.applyItemUpgrade(id, {name: "Breathable", source: "TCAH", upgradeType: ["AU"]}, 200);
+			// Both present.
+			expect(state._data.namedModifiers.some(m => m.id === featId)).toBe(true);
+			expect(state._data.namedModifiers.some(m => m.sourceType === "itemUpgrade")).toBe(true);
+
+			// Removing the upgrade must not disturb the classFeature modifier.
+			state.removeItemUpgrade(id, "Breathable", "TCAH");
+			expect(state._data.namedModifiers.some(m => m.id === featId)).toBe(true);
+			expect(state._data.namedModifiers.some(m => m.sourceType === "itemUpgrade")).toBe(false);
+		});
+
+		it("survives a save/load round-trip without duplicating itemUpgrade modifiers", () => {
+			const id = addEquippedArmor();
+			state.applyItemUpgrade(id, {name: "Climbing Harness", source: "TCAH", upgradeType: ["AU"]}, 200);
+			const before = state._data.namedModifiers.filter(m => m.sourceType === "itemUpgrade").length;
+			expect(before).toBe(1);
+
+			const json = state.toJson();
+			const reloaded = new CharacterSheetState();
+			reloaded.loadFromJson(json);
+
+			const after = reloaded._data.namedModifiers.filter(m => m.sourceType === "itemUpgrade").length;
+			expect(after).toBe(1);
+			expect(reloaded.aggregateModifiers("skill:athletics").conditionalsAvailable.some(c => c.conditional.includes("climb"))).toBe(true);
+		});
+
+		it("strips the conditional modifier when the upgraded armor is removed from inventory", () => {
+			const id = addEquippedArmor();
+			state.applyItemUpgrade(id, {name: "Breathable", source: "TCAH", upgradeType: ["AU"]}, 200);
+			expect(state._data.namedModifiers.some(m => m.sourceType === "itemUpgrade")).toBe(true);
+
+			state.removeItem(id);
+			expect(state._data.namedModifiers.some(m => m.sourceType === "itemUpgrade")).toBe(false);
+		});
+
+		it("registers conditionals from a one-shot add of an already-upgraded equipped armor", () => {
+			state.addItem({
+				name: "Climbing Half Plate",
+				source: "PHB",
+				type: "MA",
+				armor: true,
+				armorType: "medium",
+				ac: 15,
+				appliedUpgrades: [{name: "Climbing Harness", source: "TCAH", upgradeType: "AU"}],
+			}, 1, true);
+			expect(state.aggregateModifiers("skill:athletics").conditionalsAvailable.some(c => c.conditional.includes("climb"))).toBe(true);
+		});
+
+		it("covers the AC-snapshot fallback path (Builder/QuickBuild armor without an inventory item)", () => {
+			// Set the armor directly on the AC snapshot, mimicking Builder/QuickBuild.
+			state.setArmor({ac: 15, type: "medium", name: "Half Plate", source: "PHB", appliedUpgrades: [{name: "Burnished", source: "TCAH", upgradeType: "AU"}]});
+			state._recalculateItemUpgradeModifiers();
+			expect(state.aggregateModifiers("check:cha").conditionalsAvailable.some(c => c.conditional.includes("certain humanoids"))).toBe(true);
+		});
+	});
 });
