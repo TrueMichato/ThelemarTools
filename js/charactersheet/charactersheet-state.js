@@ -9874,6 +9874,21 @@ class CharacterSheetState {
 			burnished: {label: "Burnished", type: "check:cha", conditional: "on Charisma checks vs certain humanoids"},
 			climbingHarness: {label: "Climbing Harness", type: "skill:athletics", conditional: "to climb using a rope"},
 			lockingJoints: {label: "Locking Joints", type: "skill:athletics", conditional: "to resist being shoved"},
+			camouflaged: {label: "Camouflaged", type: "skill:stealth", conditional: "if the camouflage reasonably fits the terrain"},
+		};
+	}
+
+	/**
+	 * Map of armor-upgrade effect flags to the FLAT (always-on, non-conditional) roll
+	 * modifier each grants while the armor is worn. Unlike the conditional defs above,
+	 * these carry a numeric `value` and are auto-applied (no per-roll opt-in) — e.g.
+	 * Form Fitted's "+3 bonus to Acrobatics checks".
+	 * @returns {Object<string, {label: string, type: string, value: number}>}
+	 * @private
+	 */
+	static _getArmorUpgradeFlatModifierDefs () {
+		return {
+			formFitted: {label: "Form Fitted", type: "skill:acrobatics", value: 3},
 		};
 	}
 
@@ -9903,6 +9918,7 @@ class CharacterSheetState {
 		let added = false;
 		if (typeof CharacterSheetUpgrades !== "undefined") {
 			const defs = CharacterSheetState._getArmorUpgradeConditionalModifierDefs();
+			const flatDefs = CharacterSheetState._getArmorUpgradeFlatModifierDefs();
 			// Every equipped armor/shield source carrying upgrades contributes (live inventory
 			// item preferred, AC snapshot as fallback — see `_getEquippedArmorUpgradeSources`).
 			const sources = this._getEquippedArmorUpgradeSources().filter(src => src.appliedUpgrades?.length);
@@ -9917,6 +9933,21 @@ class CharacterSheetState {
 						value: 0,
 						advantage: true,
 						conditional: def.conditional,
+						sourceType: "itemUpgrade",
+						sourceLabel: src.name || "",
+						enabled: true,
+					});
+					added = true;
+				}
+				// Flat, always-on roll bonuses (e.g. Form Fitted +3 Acrobatics). No
+				// `conditional`/`advantage` → auto-applied like a normal feature bonus.
+				for (const [flag, def] of Object.entries(flatDefs)) {
+					if (!effects[flag]) continue;
+					this._data.namedModifiers.push({
+						id: CryptUtil.uid(),
+						name: def.label,
+						type: def.type,
+						value: def.value,
 						sourceType: "itemUpgrade",
 						sourceLabel: src.name || "",
 						enabled: true,
@@ -29045,6 +29076,25 @@ class CharacterSheetState {
 			return;
 		}
 
+		// Battle Tactics (TGTT Fighter, optionalFeatureTypes "BT") and Arcane Shots
+		// (Arcane Archer, "AS") are NOT passive character modifiers and must not be
+		// text-parsed into always-on named modifiers:
+		//  - Battle-tactic to-hit bonuses are conditional/positional, surfaced ONLY
+		//    through the toggle-gated getConditionalAttackModifiers system (scoped
+		//    melee/ranged, off by default). Their prose ("you gain a +2 bonus to hit
+		//    with ranged attacks", Flanking's "+2 to hit when flanking") would
+		//    otherwise register an always-on, UN-scoped attack modifier that
+		//    double-applies regardless of the toggle and bleeds onto non-ranged
+		//    attacks (High Ground / Sweeping Blows / Hammer and Anvil / Flanking).
+		//  - Arcane Shot effects (e.g. Grasping Arrow's "its speed is reduced by 10
+		//    feet") apply to the TARGET when the shot is used, not to the character;
+		//    parsing them would permanently slow the archer. Mirrors the
+		//    combat-method / Shell Defense / Zodiac Form skips above.
+		const optTypes = feature.optionalFeatureTypes || (Array.isArray(feature.featureType) ? feature.featureType : []);
+		if (Array.isArray(optTypes) && optTypes.some(ft => ft === "BT" || ft === "AS")) {
+			return;
+		}
+
 		const modifiers = FeatureModifierParser.parseModifiers(feature.description, feature.name);
 		if (!modifiers.length) return;
 
@@ -32324,8 +32374,10 @@ class CharacterSheetState {
 		if (!fighter) return 0;
 		// Indomitable is a CLASS feature, so the 2024 reroll bonus keys off the
 		// Fighter class source/edition — NOT the subclass (which may be a legacy copy).
+		// TGTT is built on the 2024 ruleset (its Fighter grants the XPHB Indomitable
+		// feature), so it adds the Fighter level to the reroll as well.
 		const source = fighter.source || "";
-		const is2024 = /^XPHB$/i.test(source) || /2024/.test(source) || fighter.edition === "one";
+		const is2024 = /^XPHB$/i.test(source) || /^TGTT$/i.test(source) || /2024/.test(source) || fighter.edition === "one";
 		return is2024 ? (this.getClassLevel("Fighter") || 0) : 0;
 	}
 	// #endregion
@@ -40261,6 +40313,12 @@ class CharacterSheetState {
 			// stances are toggled there, not via the generic active-states list. Never surface
 			// them in the GENERIC "Available to Activate" list.
 			if (CharacterSheetClassUtils.isCombatMethod(feature)) continue;
+			// Battle Tactics (TGTT Fighter, "BT") render in their own dedicated combat-tab
+			// battle-tactics section (reaction buttons + per-tactic attack-bonus toggles).
+			// They must never surface as generic active-state toggles — e.g. Last Ditch
+			// Evasion is a one-shot REACTION (avoid all damage + Slowed), not a persistent
+			// state the player flips on/off.
+			if (CharacterSheetClassUtils.isBattleTactic(feature)) continue;
 			// Arcane Shot options + the descriptive "Arcane Shot" feature render in the dedicated
 			// Arcane Archer combat area (getKnownArcaneShots); exclude from the generic list.
 			if (CharacterSheetState.isArcaneShotActivatable(feature)) continue;

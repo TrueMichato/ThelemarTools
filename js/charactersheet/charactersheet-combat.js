@@ -1962,7 +1962,14 @@ class CharacterSheetCombat {
 		let doubleshotDamage = 0;
 		let doubleshotRoll = null;
 		let doubleshotDie = null;
-		if (attack.isRanged && !attack.isSpell) {
+		// Call the consumer for ranged weapon attacks and let the helper decide the die.
+		// Stored weapon attacks don't reliably carry an `isRanged` flag (auto attacks expose
+		// `isMelee`/`range` instead), so gating on `attack.isRanged` here silently skipped real
+		// ranged attacks — Doubleshot never fired. Use the same robust ranged detection the
+		// helper uses (`_isMeleeWeaponAttack` treats a "/"-bearing range as ranged/thrown), so a
+		// melee swing between arming and firing won't consume the pending die, while a ranged
+		// auto-attack that lacks `isRanged` still qualifies.
+		if (!attack.isSpell && !this._isMeleeWeaponAttack(attack)) {
 			doubleshotDie = this._consumePendingWeaponDamageDie?.(attack);
 			if (doubleshotDie) {
 				doubleshotRoll = this._parseDamage(doubleshotDie, isCrit);
@@ -9683,6 +9690,11 @@ class CharacterSheetCombat {
 				if (levels.length > 0) {
 					maxMethods += cmProg.progression[String(levels[0])];
 				}
+			}
+
+			// Add subclass-granted bonus methods (e.g. Arcane Archer's Biting Zephyr = +1)
+			if (cls.subclass) {
+				maxMethods += CharacterSheetClassUtils.getSubclassBonusMethodCount(cls.subclass, cls.source) || 0;
 			}
 		}
 

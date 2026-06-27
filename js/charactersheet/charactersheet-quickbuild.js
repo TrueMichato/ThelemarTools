@@ -2640,14 +2640,20 @@ class CharacterSheetQuickBuild {
 			existingCountMap.set(key, (existingCountMap.get(key) || 0) + 1);
 		}
 
-		// (R22 #2) Evaluate each option's own prerequisites (e.g. Interdict Boons gated
-		// "Illrigger level 7") against the build's level for THIS class so higher-level boons
-		// are not selectable before the character reaches their level — mirroring the
-		// level-up flow, which already gates them. Boon prereqs are class-scoped, so the
-		// gaining class at its build level is the binding context.
+		// (R30 #1) Evaluate each option's own prerequisites against the build's FINAL
+		// level for THIS class — NOT gain.maxClassLevel, which is only the highest level
+		// at which a gain of this feature TYPE happens. When later gains fall above the
+		// build cap (or the final levels grant no new gain of this type), maxClassLevel
+		// is lower than the target, so higher-level options were wrongly locked: e.g. a
+		// level-9 Fighter could not pick a Fighter-9 Battle Tactic because the last
+		// Battle-Tactic gain is at level 7. Use the allocated target class level (and the
+		// build's total target level) so options unlock exactly as they do at level-up.
+		const allocForGain = this._classAllocations.find(a => a.className === gain.className && a.classSource === gain.classSource);
+		const buildClassLevel = allocForGain?.targetLevel || gain.maxClassLevel;
+		const buildTotalLevel = Math.max(this._targetLevel || 0, buildClassLevel);
 		const prereqContext = {
-			classes: [{name: gain.className, source: gain.classSource, level: gain.maxClassLevel}],
-			totalLevel: gain.maxClassLevel,
+			classes: [{name: gain.className, source: gain.classSource, level: buildClassLevel}],
+			totalLevel: buildTotalLevel,
 			existingFeatures: existingOptFeatures,
 			cantrips: this._state.getCantripsKnown?.() || [],
 			spells: this._state.getSpellsKnown?.() || [],
@@ -4771,9 +4777,14 @@ class CharacterSheetQuickBuild {
 
 		// Apply combat traditions (if selected during QB). Merge base picks with
 		// subclass-choice picks before persisting; the state stores them as a
-		// single combined list.
+		// single combined list. Always UNION with the traditions already persisted
+		// on the character so a quickbuild/level-up never clobbers previously-picked
+		// traditions (the pickers exclude already-known traditions from being
+		// re-offered, so they would otherwise be silently dropped).
 		if (this._selections._combatTraditions != null || this._selections._subclassChoiceTraditions != null) {
+			const existing = this._state.getCombatTraditions?.() || [];
 			const merged = [...new Set([
+				...existing,
 				...(this._selections._combatTraditions || []),
 				...(this._selections._subclassChoiceTraditions || []),
 			])];

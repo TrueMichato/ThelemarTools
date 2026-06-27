@@ -1040,6 +1040,8 @@ class CharacterSheetUpgrades {
 			decorated: false,
 			runic: false,
 			burnished: false,
+			camouflaged: false,
+			formFitted: false,
 		};
 
 		if (!item?.appliedUpgrades?.length) return effects;
@@ -1057,6 +1059,8 @@ class CharacterSheetUpgrades {
 			else if (name === "decorated") effects.decorated = true;
 			else if (name === "runic") effects.runic = true;
 			else if (name === "burnished") effects.burnished = true;
+			else if (name === "camouflaged") effects.camouflaged = true;
+			else if (name === "form fitted") effects.formFitted = true;
 			else if (name.startsWith("armor proofing")) {
 				const tierMatch = name.match(/(\d)(?:st|nd|rd)/);
 				if (tierMatch) effects.armorProofingTier = Math.max(effects.armorProofingTier, parseInt(tierMatch[1]));
@@ -1095,6 +1099,8 @@ class CharacterSheetUpgrades {
 		if (flags.decorated) notes.push({label: "Decorated", description: "Usable as spellcasting focus (Cleric/Paladin)", type: "passive"});
 		if (flags.runic) notes.push({label: "Runic", description: "Can be imbued with rune magic", type: "passive"});
 		if (flags.burnished) notes.push({label: "Burnished", description: "Advantage on Charisma checks vs certain humanoids (24h or until combat)", type: "passive"});
+		if (flags.camouflaged) notes.push({label: "Camouflaged", description: "Advantage on Stealth checks if the camouflage fits the terrain", type: "passive"});
+		if (flags.formFitted) notes.push({label: "Form Fitted", description: "+3 bonus to Acrobatics checks", type: "passive"});
 
 		return notes;
 	}
