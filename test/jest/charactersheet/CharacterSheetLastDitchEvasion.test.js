@@ -1,11 +1,11 @@
 /**
  * S3 #7 — Last Ditch Evasion battle tactic (in-play application).
  *
- * The bug: a FAILED Dexterity save against a "half on success" effect was applying
- * ZERO damage (treating LDE like Evasion). RAW it should leave the Fighter at HALF
- * damage, and the tactic also imposes the Slowed condition. These tests assert the
- * pure in-play helper applyLastDitchEvasion():
- *  - halves (floors) the incoming damage instead of negating it,
+ * The bug: the tooltip/roll LABEL said "half damage" while the applied result was 0.
+ * The canonical TGTT rule is AVOID ALL DAMAGE (take 0) + become Slowed until the end
+ * of your next turn — so the 0 is correct and the "half" label was the bug. These tests
+ * assert the pure in-play helper applyLastDitchEvasion():
+ *  - reduces the incoming attack damage to ZERO (not half),
  *  - applies the Slowed condition (TGTT variant resolves for Thelemar tables),
  *  - no-ops cleanly when the tactic is not active.
  */
@@ -36,20 +36,21 @@ describe("Last Ditch Evasion (in-play)", () => {
 		state.getFeatureCalculations = () => ({...origGet(), hasLastDitchEvasion: true});
 	}
 
-	it("yields HALF damage (not zero) on a failed save", () => {
+	it("AVOIDS ALL damage (reduces to 0, not half)", () => {
 		makeFighter();
 		flagLastDitchEvasion();
 		const res = state.applyLastDitchEvasion({damage: 20});
 		expect(res.applied).toBe(true);
 		expect(res.full).toBe(20);
-		expect(res.halved).toBe(10); // NOT 0
+		expect(res.reduced).toBe(0); // NOT 10 (half) and NOT 20 (full)
 	});
 
-	it("floors odd damage", () => {
+	it("reduces to 0 regardless of the incoming amount", () => {
 		makeFighter();
 		flagLastDitchEvasion();
-		expect(state.applyLastDitchEvasion({damage: 21}).halved).toBe(10);
-		expect(state.applyLastDitchEvasion({damage: 1}).halved).toBe(0);
+		expect(state.applyLastDitchEvasion({damage: 21}).reduced).toBe(0);
+		expect(state.applyLastDitchEvasion({damage: 1}).reduced).toBe(0);
+		expect(state.applyLastDitchEvasion({damage: 999}).reduced).toBe(0);
 	});
 
 	it("applies the Slowed condition", () => {
@@ -77,7 +78,7 @@ describe("Last Ditch Evasion (in-play)", () => {
 		// No flag override → hasLastDitchEvasion is falsy.
 		const res = state.applyLastDitchEvasion({damage: 20});
 		expect(res.applied).toBe(false);
-		expect(res.halved).toBe(20); // caller takes full damage
+		expect(res.reduced).toBe(20); // caller takes full damage
 		expect(state.getConditionNames().some(n => /slow/i.test(n))).toBe(false);
 	});
 });

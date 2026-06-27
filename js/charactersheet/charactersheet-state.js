@@ -9103,8 +9103,8 @@ class CharacterSheetState {
 				alerts.push({
 					key: "lastDitchEvasion",
 					name: "Last Ditch Evasion",
-					shortLabel: "Reaction: fail → ½ instead of full",
-					summary: "Battle Tactic: when you fail a Dex save against an effect that allows half damage, you can use your reaction to take half damage instead of full.",
+					shortLabel: "Reaction: avoid all damage, become Slowed",
+					summary: "Battle Tactic: when you're hit by an attack, use your reaction to take no damage; you become Slowed until the end of your next turn.",
 					source: "TGTT",
 				});
 			}
@@ -31816,27 +31816,26 @@ class CharacterSheetState {
 	// #region Last Ditch Evasion
 
 	/**
-	 * Apply Last Ditch Evasion to a FAILED Dexterity save against an effect that
-	 * deals half damage on a success: instead of taking full damage (the normal
-	 * failed-save result), the Fighter takes HALF damage and becomes Slowed. This
-	 * corrects the prior "avoid all damage" framing that yielded zero — the tactic
-	 * trades the reaction + the Slowed condition for half, not nothing.
+	 * Apply Last Ditch Evasion (TGTT Battle Tactic): when you're HIT by an attack you
+	 * may use your reaction to jump aside and take NO damage (avoid all), becoming
+	 * Slowed until the end of your next turn. The triggering attack's damage is reduced
+	 * to zero — not halved.
 	 *
 	 * Side-effect: applies the (Thelemar variant of the) Slowed condition. Reads —
 	 * never redefines — `calculations.hasLastDitchEvasion` (the tactic definition is
 	 * owned elsewhere). No-op result when the character lacks the tactic.
 	 * @param {object} [opts]
-	 * @param {number} [opts.damage=0] - full (failed-save) incoming damage.
-	 * @returns {{applied: boolean, full: number, halved: number, slowedApplied: boolean}}
+	 * @param {number} [opts.damage=0] - the incoming (pre-reaction) attack damage.
+	 * @returns {{applied: boolean, full: number, reduced: number, slowedApplied: boolean}}
 	 */
 	applyLastDitchEvasion ({damage = 0} = {}) {
 		const full = Math.max(0, Math.floor(Number(damage) || 0));
 		if (!this.getFeatureCalculations().hasLastDitchEvasion) {
-			return {applied: false, full, halved: full, slowedApplied: false};
+			return {applied: false, full, reduced: full, slowedApplied: false};
 		}
-		const halved = Math.floor(full / 2);
+		// Avoid ALL damage (take 0), then become Slowed.
 		const slowedApplied = this.addCondition("slowed", {resolveThelemarVariant: true});
-		return {applied: true, full, halved, slowedApplied};
+		return {applied: true, full, reduced: 0, slowedApplied};
 	}
 	// #endregion
 
