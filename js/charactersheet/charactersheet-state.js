@@ -4317,6 +4317,12 @@ class CharacterSheetState {
 		// item-sourced modifiers restored verbatim from the save, then re-registers active items.
 		this._reapplyItemEffects();
 
+		// Re-derive armor/shield-upgrade conditional modifiers (Breathable/Burnished/Climbing
+		// Harness/Locking Joints) from the equipped inventory. Idempotent: strips any persisted
+		// `sourceType:"itemUpgrade"` modifiers restored verbatim, then rebuilds from current
+		// equip state — so old saves pick up the pipeline and no duplicates accrue.
+		this._recalculateItemUpgradeModifiers();
+
 		// Reapply history-backed optional features for saves which persisted history
 		// but did not fully reconstruct runtime feature state.
 		this._reapplyHistoryOptionalFeatures();
@@ -9813,6 +9819,27 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Collect every equipped armor/shield upgrade source, applying the same live-inventory-then-
+	 * snapshot fallback as `_getEquippedArmorUpgradeSource` but for BOTH slots. Used by the
+	 * conditional-roll-modifier pipeline so it stays consistent with the other armor-upgrade
+	 * consumers (and so Builder/QuickBuild snapshot armor is covered too).
+	 * @returns {Array<object>} Upgrade-source objects (each may carry `appliedUpgrades`)
+	 * @private
+	 */
+	_getEquippedArmorUpgradeSources () {
+		const sources = [];
+		const invArmor = this._data.inventory?.find(inv => inv.equipped && inv.item?.armor);
+		if (invArmor?.item) sources.push(invArmor.item);
+		else if (this._data.ac?.armor) sources.push(this._data.ac.armor);
+
+		const invShield = this._data.inventory?.find(inv => inv.equipped && inv.item?.shield);
+		if (invShield?.item) sources.push(invShield.item);
+		else if (this._data.ac?.shield) sources.push(this._data.ac.shield);
+
+		return sources.filter(Boolean);
+	}
+
+	/**
 	 * Get critical damage reduction from armor upgrades (Reinforced)
 	 * @returns {number} Amount to reduce critical hit damage from nonmagical attacks
 	 */
@@ -9829,6 +9856,78 @@ class CharacterSheetState {
 		const src = this._getEquippedArmorUpgradeSource();
 		if (!src) return [];
 		return CharacterSheetUpgrades.getArmorUpgradeNotes(src);
+	}
+
+	/**
+	 * Map of armor-upgrade effect flags (from `getArmorUpgradeEffects`) to the conditional
+	 * roll modifier each one grants. These are SITUATIONAL advantages whose trigger ("vs
+	 * extreme heat", "to climb with a rope", …) is not knowable from roll data, so they are
+	 * registered as gated, default-off conditional modifiers — surfaced in
+	 * `aggregateModifiers().conditionalsAvailable` for the per-roll opt-in picker, never
+	 * auto-applied. Keyed by the effect flag; value carries the modifier shape.
+	 * @returns {Object<string, {type: string, conditional: string}>}
+	 * @private
+	 */
+	static _getArmorUpgradeConditionalModifierDefs () {
+		return {
+			breathable: {label: "Breathable", type: "save:con", conditional: "vs gaining exhaustion from extreme heat"},
+			burnished: {label: "Burnished", type: "check:cha", conditional: "on Charisma checks vs certain humanoids"},
+			climbingHarness: {label: "Climbing Harness", type: "skill:athletics", conditional: "to climb using a rope"},
+			lockingJoints: {label: "Locking Joints", type: "skill:athletics", conditional: "to resist being shoved"},
+		};
+	}
+
+	/**
+	 * Derive gated conditional roll modifiers from equipped armor/shield upgrades.
+	 *
+	 * The conditional ROLL advantages granted by armor upgrades (Breathable, Burnished,
+	 * Climbing Harness, Locking Joints) were previously dead — no pipeline turned them into
+	 * anything a roll could see. This reuses the existing conditional-modifier mechanism: each
+	 * is registered as a named modifier carrying `advantage` + a `conditional` text, so
+	 * `aggregateModifiers()` gates it default-off into `conditionalsAvailable` and the four
+	 * roll handlers' `_pPickConditionalModifiers` opt-in path offers it per roll.
+	 *
+	 * Idempotent and append-only: strips ONLY this module's modifiers (`sourceType:
+	 * "itemUpgrade"`) before re-deriving, so it never clobbers class-feature / combat-method /
+	 * custom-ability modifiers (and they never clobber it). Re-run on every upgrade-apply/
+	 * remove, equip/unequip, and load.
+	 * @private
+	 */
+	_recalculateItemUpgradeModifiers () {
+		if (!Array.isArray(this._data.namedModifiers)) this._data.namedModifiers = [];
+
+		// Strip our own modifiers first (idempotent; also clears any persisted on load).
+		const hadOwn = this._data.namedModifiers.some(m => m.sourceType === "itemUpgrade");
+		this._data.namedModifiers = this._data.namedModifiers.filter(m => m.sourceType !== "itemUpgrade");
+
+		let added = false;
+		if (typeof CharacterSheetUpgrades !== "undefined") {
+			const defs = CharacterSheetState._getArmorUpgradeConditionalModifierDefs();
+			// Every equipped armor/shield source carrying upgrades contributes (live inventory
+			// item preferred, AC snapshot as fallback — see `_getEquippedArmorUpgradeSources`).
+			const sources = this._getEquippedArmorUpgradeSources().filter(src => src.appliedUpgrades?.length);
+			for (const src of sources) {
+				const effects = CharacterSheetUpgrades.getArmorUpgradeEffects(src);
+				for (const [flag, def] of Object.entries(defs)) {
+					if (!effects[flag]) continue;
+					this._data.namedModifiers.push({
+						id: CryptUtil.uid(),
+						name: def.label,
+						type: def.type,
+						value: 0,
+						advantage: true,
+						conditional: def.conditional,
+						sourceType: "itemUpgrade",
+						sourceLabel: src.name || "",
+						enabled: true,
+					});
+					added = true;
+				}
+			}
+		}
+
+		// Only refresh aggregates when something actually changed.
+		if (hadOwn || added) this._recalculateCustomModifiers();
 	}
 
 	/**
@@ -22959,6 +23058,12 @@ class CharacterSheetState {
 					this.setArmor({ac: item.ac, type: armorType, name: item.name, source: item.source, appliedUpgrades: item.appliedUpgrades || []});
 				}
 			}
+
+			// An equipped armor/shield added with upgrades already applied must register its
+			// conditional roll modifiers immediately (covers one-shot add-equipped flows).
+			if (_addedWrapper.equipped && (_addedWrapper.item?.armor || _addedWrapper.item?.shield) && _addedWrapper.item?.appliedUpgrades?.length) {
+				this._recalculateItemUpgradeModifiers();
+			}
 		}
 	}
 
@@ -23447,6 +23552,9 @@ class CharacterSheetState {
 		}
 
 		this._data.inventory = this._data.inventory.filter(i => i.id !== itemId);
+
+		// An equipped upgraded armor/shield leaving inventory must drop its conditional modifiers.
+		this._recalculateItemUpgradeModifiers();
 	}
 
 	/**
@@ -23504,6 +23612,8 @@ class CharacterSheetState {
 		if (this._isItemEffectsActive(wrapper)) this._registerItemEffects(wrapper);
 
 		this._recalculateItemBonuses();
+		// Replacing an equipped armor/shield payload may change its upgrades.
+		this._recalculateItemUpgradeModifiers();
 		return true;
 	}
 
@@ -23532,6 +23642,8 @@ class CharacterSheetState {
 				this._removeItemProficiencies(itemId);
 				this._unregisterItemEffects(itemId);
 			}
+			// Refresh derived armor/shield-upgrade conditional modifiers (equip state changed).
+			this._recalculateItemUpgradeModifiers();
 		}
 	}
 
@@ -23560,6 +23672,8 @@ class CharacterSheetState {
 
 			// Apply item effects now that it is equipped (if attunement gate also satisfied)
 			if (this._isItemEffectsActive(invItem)) this._registerItemEffects(invItem);
+			// Refresh derived armor/shield-upgrade conditional modifiers.
+			this._recalculateItemUpgradeModifiers();
 
 			return true;
 		}
@@ -23577,6 +23691,8 @@ class CharacterSheetState {
 			item.equipped = false;
 			// Remove any effects the item was contributing while equipped
 			this._unregisterItemEffects(itemId);
+			// Refresh derived armor/shield-upgrade conditional modifiers (now unequipped).
+			this._recalculateItemUpgradeModifiers();
 			return true;
 		}
 		return false;
@@ -24287,6 +24403,7 @@ class CharacterSheetState {
 		});
 
 		this._recalculateItemBonuses();
+		this._recalculateItemUpgradeModifiers();
 
 		return {success: true};
 	}
@@ -24309,6 +24426,7 @@ class CharacterSheetState {
 
 		item.item.appliedUpgrades.splice(idx, 1);
 		this._recalculateItemBonuses();
+		this._recalculateItemUpgradeModifiers();
 		return true;
 	}
 
