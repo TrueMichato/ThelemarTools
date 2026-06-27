@@ -679,15 +679,20 @@ describe("#20 Doubleshot consumer fold-in (_rollDamage)", () => {
 // the upgrade's OWN damage type.
 
 describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
-	function mkDamageCombat (attack, effectiveBonuses = null) {
+	// `effectiveBonuses` may be a plain object (returned for ANY item id) OR a function
+	// (id) => bonuses, so a test can prove per-item keying (no leak across weapons).
+	// `featureCalcs` lets a test populate the GLOBAL feature weaponDamageRiders loop to
+	// prove the item-upgrade path is a DISTINCT source (no double-count).
+	function mkDamageCombat (attack, effectiveBonuses = null, featureCalcs = {}) {
 		const captured = [];
-		const PER = {"1d8": 5, "2d6": 7, "1d4": 3, "1d6": 4};
+		const PER = {"1d8": 5, "2d6": 7, "1d4": 3, "1d6": 4, "1d10": 6};
+		const effFor = typeof effectiveBonuses === "function" ? effectiveBonuses : () => effectiveBonuses;
 		const combat = Object.create(CharacterSheetCombat.prototype);
 		combat._weaponRiderEnabled = {};
 		combat._selectedCunningStrikes = [];
 		combat._state = {
 			getAttacks: () => [attack],
-			getFeatureCalculations: () => ({}),
+			getFeatureCalculations: () => featureCalcs,
 			getActiveCombatMethodEffects: () => [],
 			getWeaponAbilityMod: () => 3,
 			getNamedModifiersByType: () => [],
@@ -695,7 +700,7 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 			getBonusFromStates: () => 0,
 			isStateTypeActive: () => false,
 			getExtraDamageFromStates: () => [],
-			getEffectiveItemBonuses: () => effectiveBonuses,
+			getEffectiveItemBonuses: (id) => effFor(id),
 		};
 		combat._page = {
 			pAnimateDamageDice: () => {},
@@ -704,6 +709,8 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 		combat._parseDamage = (dice, isCrit) => ({total: PER[dice] ?? 0, sides: 8, rolls: [PER[dice] ?? 0], _isCrit: !!isCrit});
 		combat._pushDiceGroup = () => {};
 		combat._canApplySneakAttack = () => false;
+		combat._isRiderAvailableThisTurn = () => true;
+		combat._markRiderUsedThisTurn = () => {};
 		combat._resolveChannelRiderDamage = () => ({channelSpell: null, channelSpellRoll: null, channelSpellDamage: 0, riderMatched: false});
 		combat._promptUseCombatMethod = async () => null;
 		return {combat, captured};
@@ -815,6 +822,46 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 		// Same slashing type → folds into the single-type total: 5 + 3 + 3 = 11.
 		expect(captured[0].total).toBe(11);
 		expect(captured[0].subtitle).toContain("Weapon Upgrade 1d4 slashing");
+	});
+
+	// --- Orchestrator's three explicit guarantees (S6 leak warning) ---
+
+	// (1) NO LEAK ACROSS WEAPONS: getEffectiveItemBonuses is keyed by sourceItem.id, so a
+	// DIFFERENT equipped weapon WITHOUT a dice-granting upgrade gets nothing — even though
+	// the very same resolver returns a die for the upgraded weapon's id.
+	it("does NOT leak across weapons — a non-upgraded weapon adds 0 bonus dice (per-item keyed)", async () => {
+		const byId = (id) => (id === "saw-item" ? {bonusDamageDice: "1d4", bonusDamageType: "slashing"} : null);
+		const plain = {id: "plain", name: "Plain Longsword", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing", sourceItem: {id: "plain-item"}};
+		const {combat, captured} = mkDamageCombat(plain, byId);
+		await combat._rollDamage("plain", false);
+		expect(captured[0].total).toBe(8); // 5 + str 3, NO +1d4 from the other item's upgrade
+		expect(captured[0].subtitle).not.toContain("Upgrade");
+	});
+
+	// (2) NO DOUBLE-COUNT / DISTINCT SOURCES: the item-upgrade die rides ONLY the
+	// getEffectiveItemBonuses path; an unrelated ENABLED feature rider in the global
+	// getFeatureCalculations().weaponDamageRiders loop applies independently. Both fire
+	// exactly ONCE — the upgrade die is never also pulled through the feature loop.
+	it("rides ONLY the item path, never the global feature loop — additive, each source once", async () => {
+		const featureCalcs = {weaponDamageRiders: [{id: "colossus", name: "Colossus Slayer", dice: "1d6", damageType: "slashing", perTurn: false}]};
+		const atk = {id: "saw2", name: "Saw-toothed Longsword", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing", sourceItem: {id: "saw-item"}};
+		const {combat, captured} = mkDamageCombat(atk, {bonusDamageDice: "1d4", bonusDamageType: "slashing"}, featureCalcs);
+		combat._weaponRiderEnabled = {colossus: true}; // enable the feature rider
+		await combat._rollDamage("saw2", false);
+		// 5 (1d8) + str 3 + item 1d4=3 + feature 1d6=4 = 15, all slashing → single type.
+		expect(captured[0].total).toBe(15);
+		const sub = captured[0].subtitle;
+		expect((sub.match(/Colossus Slayer/g) || []).length).toBe(1); // feature once
+		expect((sub.match(/Weapon Upgrade/g) || []).length).toBe(1); // item upgrade once (no double)
+	});
+
+	// (3) SCOPING: the upgrade rider is gated by `!attack.isSpell`, so it never bleeds
+	// onto spell attacks even if a stray sourceItem is attached.
+	it("does NOT ride spell attacks (gated by !isSpell)", async () => {
+		const spellAtk = {id: "sp", name: "Booming Blade", isSpell: true, abilityMod: "int", damage: "1d8", damageType: "thunder", sourceItem: {id: "saw-item"}};
+		const {combat, captured} = mkDamageCombat(spellAtk, {bonusDamageDice: "1d4", bonusDamageType: "slashing"});
+		await combat._rollDamage("sp", false);
+		expect((captured[0].subtitle || "")).not.toContain("Upgrade");
 	});
 });
 
