@@ -1207,6 +1207,11 @@ class CharacterSheetRest {
 			this._state.restoreActionSurge?.();
 		}
 
+		// Restore Fighter Indomitable - recharges on a LONG rest only.
+		if (restType === "long" && this._state.hasIndomitable?.()) {
+			this._state.restoreIndomitable?.();
+		}
+
 		// Restore Focus Pool (TGTT Dreamwalker) - only on long rest
 		if (restType === "long" && this._state.hasFocusPool?.()) {
 			this._state.restoreFocusPool?.();

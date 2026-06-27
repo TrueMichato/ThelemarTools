@@ -11090,13 +11090,26 @@ class CharacterSheetPage {
 		// Show animated dice if enabled
 		await this.pAnimateD20(rollResult);
 
+		const acBreakdown = this._formatD20BreakdownWithCustom(rollResult, baseMod, customBonus, exhaustionStr, minimumApplied ? aggregated.minimum : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr;
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Check${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			total,
-			this._formatD20BreakdownWithCustom(rollResult, baseMod, customBonus, exhaustionStr, minimumApplied ? aggregated.minimum : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr,
+			acBreakdown,
 			resultClass,
 			resultNote,
 		);
+
+		// Tactical Mind (XPHB Fighter L2): after a failed ability check, offer to expend a
+		// Second Wind use to add 1d10 (refunded if the check still fails). Player-driven,
+		// post-roll — the sheet has no DC, so the prompt is framed around failure.
+		await this._pMaybeApplyTacticalMind({
+			rollLabel: `${Parser.attAbvToFull(ability)} Check`,
+			mode: rollResult.mode,
+			stateEffectStr,
+			baseTotal: total,
+			breakdown: acBreakdown,
+			resultNote,
+		});
 	}
 
 	/**
@@ -11259,6 +11272,23 @@ class CharacterSheetPage {
 			breakdown: this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr + diceBonusStr,
 			resultNote,
 		});
+
+		// Indomitable (Fighter L9): after a failed save, offer to spend an Indomitable use and
+		// reroll. Player-driven, post-roll (no DC known to the sheet).
+		await this._pMaybeApplyIndomitable({
+			ability,
+			exhaustionPenalty,
+			stateEffectStr,
+			baseTotal: totalWithDice,
+			resultNote,
+		});
+
+		// Last Ditch Evasion (TGTT Battle Tactic): on a FAILED Dex save vs a half-on-success
+		// effect, offer to use the reaction to take HALF damage (not zero) and become Slowed.
+		await this._pMaybeApplyLastDitchEvasion({
+			ability,
+			stateEffectStr,
+		});
 	}
 
 	/**
@@ -11305,6 +11335,157 @@ class CharacterSheetPage {
 			mergedNote,
 		);
 		JqueryUtil.doToast({type: "info", content: bloodNote});
+		this._renderCharacter?.();
+		await this._saveCurrentCharacter?.();
+	}
+
+	/**
+	 * Prompt for and apply Tactical Mind (XPHB Fighter L2) after an ability/skill check.
+	 * Spends one Second Wind use to add 1d10 to the check, then — because the sheet knows
+	 * no DC — asks whether the check still failed and REFUNDS the use if so. No-op unless
+	 * the feature is present, a Second Wind use remains, and the player opts in.
+	 * @private
+	 */
+	async _pMaybeApplyTacticalMind ({rollLabel, mode, stateEffectStr, baseTotal, breakdown, resultNote}) {
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		if (!calcs.hasTacticalMind) return;
+		if ((this._state.getSecondWindUsesRemaining?.() || 0) <= 0) return;
+		if ((/** @type {*} */ (this._state.getSettings?.() || {})).skipTacticalMindPrompt) return;
+
+		const prevRemaining = this._state.getSecondWindUsesRemaining();
+		const offer = await InputUiUtil.pGetUserBoolean({
+			title: "Tactical Mind",
+			htmlDescription: `Your <strong>${rollLabel}</strong> total is <strong>${baseTotal}</strong>. If it failed, expend a use of <strong>Second Wind</strong> to add <strong>1d10</strong>?<br><span class="ve-muted ve-small">The Second Wind use is refunded if the check still fails. (${prevRemaining} use${prevRemaining === 1 ? "" : "s"} left)</span>`,
+			textYes: "Add 1d10 (expend Second Wind)",
+			textNo: "Keep the roll",
+		});
+		if (!offer) return;
+
+		// Spend exactly one use (NOT a heal — this is the Tactical Mind rider).
+		this._state.setSecondWindUsesRemaining(prevRemaining - 1);
+
+		let die = 0;
+		try {
+			const r = Renderer.dice.parseRandomise2("1d10");
+			die = typeof r === "number" ? r : 0;
+		} catch (e) { die = 0; }
+
+		const newTotal = baseTotal + die;
+		const tmNote = `✦ Tactical Mind: expended a Second Wind use, added 1d10 [${die}] → ${rollLabel} total ${newTotal}`;
+		const mergedNote = resultNote ? `${resultNote}\n${tmNote}` : tmNote;
+		this._showDiceResult(
+			`${rollLabel}${this._getModeLabel(mode)}${stateEffectStr}`,
+			newTotal,
+			`${breakdown} + ${die} (Tactical Mind 1d10)`,
+			"",
+			mergedNote,
+		);
+		this._renderCharacter?.();
+		await this._saveCurrentCharacter?.();
+
+		const stillFailed = await InputUiUtil.pGetUserBoolean({
+			title: "Tactical Mind — refund?",
+			htmlDescription: `With the +1d10 your <strong>${rollLabel}</strong> total is <strong>${newTotal}</strong>. Did the check <strong>still fail</strong>?<br><span class="ve-muted ve-small">If it still failed, the Second Wind use is refunded.</span>`,
+			textYes: "Still failed — refund the use",
+			textNo: "It succeeded",
+		});
+		if (stillFailed) {
+			this._state.setSecondWindUsesRemaining(prevRemaining);
+			JqueryUtil.doToast({type: "info", content: "Tactical Mind: check still failed — Second Wind use refunded."});
+			this._renderCharacter?.();
+			await this._saveCurrentCharacter?.();
+		}
+	}
+
+	/**
+	 * Prompt for and apply Indomitable (Fighter L9) after a saving throw. Spends one
+	 * Indomitable use and rerolls the d20, re-displaying the save with the new die (plus
+	 * the Fighter level for 2024 Fighters). No-op unless the feature is present, a use
+	 * remains, and the player opts in.
+	 * @private
+	 */
+	async _pMaybeApplyIndomitable ({ability, exhaustionPenalty = 0, stateEffectStr, baseTotal, resultNote}) {
+		if (!this._state.hasIndomitable?.()) return;
+		if ((this._state.getIndomitableRemaining?.() || 0) <= 0) return;
+		if ((/** @type {*} */ (this._state.getSettings?.() || {})).skipIndomitablePrompt) return;
+
+		const remaining = this._state.getIndomitableRemaining();
+		const offer = await InputUiUtil.pGetUserBoolean({
+			title: "Indomitable",
+			htmlDescription: `Your <strong>${Parser.attAbvToFull(ability)} save</strong> total is <strong>${baseTotal}</strong>. If it failed, spend a use of <strong>Indomitable</strong> to reroll it?<br><span class="ve-muted ve-small">You must use the new roll. (${remaining} use${remaining === 1 ? "" : "s"} left)</span>`,
+			textYes: "Reroll (spend Indomitable)",
+			textNo: "Keep the roll",
+		});
+		if (!offer) return;
+		if (!this._state.useIndomitable()) return;
+
+		const mod = this._state.getSaveMod(ability);
+		const bonus = this._state.getIndomitableRerollBonus?.() || 0;
+		const reroll = this._rollD20({});
+		const newTotal = reroll.roll + mod + bonus - exhaustionPenalty + (reroll.thelemar_critBonus || 0);
+
+		const modStr = mod >= 0 ? `+ ${mod}` : `- ${Math.abs(mod)}`;
+		const bonusStr = bonus ? ` + ${bonus} (Fighter level)` : "";
+		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
+		const thelemarStr = reroll.thelemar_critBonus
+			? (reroll.thelemar_critBonus > 0 ? ` + ${reroll.thelemar_critBonus} [Nat 20]` : ` - ${Math.abs(reroll.thelemar_critBonus)} [Nat 1]`)
+			: "";
+		const left = this._state.getIndomitableRemaining();
+		const indomNote = `🛡️ Indomitable: rerolled d20 [${reroll.roll}]${bonus ? ` + ${bonus}` : ""} → save total ${newTotal} (${left} use${left === 1 ? "" : "s"} left)`;
+		const mergedNote = resultNote ? `${resultNote}\n${indomNote}` : indomNote;
+
+		await this.pAnimateD20(reroll);
+		this._showDiceResult(
+			`${Parser.attAbvToFull(ability)} Save${this._getModeLabel(reroll.mode)}${stateEffectStr} [Indomitable]`,
+			newTotal,
+			`1d20 (${reroll.roll}) ${modStr}${bonusStr}${thelemarStr}${exhaustionStr}`,
+			"",
+			mergedNote,
+		);
+		JqueryUtil.doToast({type: "info", content: indomNote});
+		this._renderCharacter?.();
+		await this._saveCurrentCharacter?.();
+	}
+
+	/**
+	 * Prompt for and apply Last Ditch Evasion (TGTT Battle Tactic) after a FAILED Dex save
+	 * against a half-on-success effect: take HALF damage (not zero) and become Slowed. Asks
+	 * for the incoming damage so the half value can be shown. No-op unless the tactic is
+	 * present, the save was a Dex save, and the player opts in.
+	 * @private
+	 */
+	async _pMaybeApplyLastDitchEvasion ({ability}) {
+		if ((ability || "").toLowerCase() !== "dex") return;
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		if (!calcs.hasLastDitchEvasion) return;
+		if ((/** @type {*} */ (this._state.getSettings?.() || {})).skipLastDitchEvasionPrompt) return;
+
+		const offer = await InputUiUtil.pGetUserBoolean({
+			title: "Last Ditch Evasion",
+			htmlDescription: `If that Dex save <strong>failed</strong> against an effect that deals half damage on a success, use your reaction for <strong>Last Ditch Evasion</strong>: take <strong>half</strong> damage instead of full and become <strong>Slowed</strong>?`,
+			textYes: "Use reaction (half + Slowed)",
+			textNo: "No",
+		});
+		if (!offer) return;
+
+		let damage = null;
+		try {
+			damage = await InputUiUtil.pGetUserNumber({
+				title: "Last Ditch Evasion — full incoming damage (you take half)",
+				default: 0,
+				min: 0,
+				int: true,
+			});
+		} catch (e) { damage = null; }
+
+		const res = this._state.applyLastDitchEvasion?.({damage: damage || 0});
+		if (!res || !res.applied) return;
+
+		const slowedStr = res.slowedApplied ? " You are now Slowed." : " (already Slowed.)";
+		const dmgStr = res.full > 0
+			? `Last Ditch Evasion: take ${res.halved} damage instead of ${res.full} (half).`
+			: `Last Ditch Evasion: take half damage instead of full.`;
+		JqueryUtil.doToast({type: "success", content: `🛡️ ${dmgStr}${slowedStr}`});
 		this._renderCharacter?.();
 		await this._saveCurrentCharacter?.();
 	}
@@ -11431,13 +11612,25 @@ class CharacterSheetPage {
 		// Show animated dice if enabled
 		await this.pAnimateD20(rollResult);
 
+		const skillBreakdown = this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr;
 		this._showDiceResult(
 			`${skillName}${abilityLabel} Check${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			totalWithDice,
-			this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr,
+			skillBreakdown,
 			resultClass,
 			resultNote,
 		);
+
+		// Tactical Mind (XPHB Fighter L2): skill checks are ability checks, so offer the
+		// same Second Wind +1d10 (refunded on continued failure) here too.
+		await this._pMaybeApplyTacticalMind({
+			rollLabel: `${skillName}${abilityLabel} Check`,
+			mode: rollResult.mode,
+			stateEffectStr,
+			baseTotal: totalWithDice,
+			breakdown: skillBreakdown,
+			resultNote,
+		});
 	}
 
 	/**
