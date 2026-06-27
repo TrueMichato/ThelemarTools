@@ -8266,6 +8266,13 @@ class CharacterSheetCombat {
 						? `<span class="badge badge-danger ml-1" title="Requires Fighter level ${tactic.fighterLevel}">🔒 Lvl ${tactic.fighterLevel}</span>`
 						: `<span class="badge badge-outline-secondary ml-1" title="Reaction">🔄 Reaction</span>`;
 					reactionHtml = `<div class="ve-small ${locked ? "ve-muted" : ""} mt-1">${lockBadge} <span class="bold">${tactic.reaction.name}:</span> ${tactic.reaction.trigger} — ${tactic.reaction.effect}</div>`;
+					// Last Ditch Evasion is the one Battle Tactic with an in-play side effect
+					// (it applies the Slowed condition), so it gets a real "use" button. When
+					// hit by an attack you take NO damage and become Slowed — this button is the
+					// reaction trigger (LDE is NOT a Dex-save-for-half effect).
+					if (!locked && this._state.getFeatureCalculations?.().hasLastDitchEvasion && /^last ditch evasion$/i.test(tactic.name)) {
+						reactionHtml += `<div class="mt-1"><button class="ve-btn ve-btn-xs ve-btn-primary charsheet__combat-lde-use" title="When you're hit by an attack: take no damage and become Slowed until the end of your next turn">🛡️ Use Last Ditch Evasion (avoid all damage + Slowed)</button></div>`;
+					}
 				}
 
 				html += `
@@ -8323,6 +8330,15 @@ class CharacterSheetCombat {
 		});
 		block.querySelector(".charsheet__combat-fighter-as-reset")?.addEventListener("click", () => {
 			this._state.restoreActionSurge?.();
+			refresh();
+		});
+		block.querySelector(".charsheet__combat-lde-use")?.addEventListener("click", () => {
+			const res = this._state.applyLastDitchEvasion?.({});
+			if (!res || !res.applied) return;
+			const slowedStr = res.slowedApplied
+				? " You become Slowed until the end of your next turn."
+				: " (Already Slowed.)";
+			JqueryUtil.doToast({type: "success", content: `🛡️ Last Ditch Evasion: you take no damage.${slowedStr}`});
 			refresh();
 		});
 	}

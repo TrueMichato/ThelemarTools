@@ -1,5 +1,5 @@
 /**
- * S3 #8 / #17 / #7 — roll-handler hook WIRING guards.
+ * S3 #8 / #17 / #7 — roll-handler hook + combat-button WIRING guards.
  *
  * The post-roll prompt controllers live on the 6.5K-line CharacterSheetPage, which
  * can't be imported under jsdom (top-level `window.addEventListener("load", …)`).
@@ -10,8 +10,9 @@
  *     NOT restoreSecondWind()/reset-to-max, and is wired into BOTH ability + skill checks.
  *   - Indomitable spends a use (useIndomitable) and adds getIndomitableRerollBonus,
  *     wired into the saving-throw handler.
- *   - Last Ditch Evasion is gated on a Dex save, applies the half-damage helper, and is
- *     wired into the saving-throw handler.
+ *   - Last Ditch Evasion is a MANUAL reaction button in the combat panel (triggered by
+ *     being hit by an attack, NOT a Dex save), applies the avoid-all-damage helper, and
+ *     is NOT wired into the saving-throw handler.
  */
 
 import {readFileSync} from "fs";
@@ -20,6 +21,7 @@ import {fileURLToPath} from "url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const src = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+const combatSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-combat.js"), "utf8");
 
 const bodyOf = (name) => {
 	const m = src.match(new RegExp(`async ${name}\\s*\\([\\s\\S]*?\\n\\t\\}`));
@@ -79,25 +81,33 @@ describe("Indomitable hook (#17) wiring", () => {
 	});
 });
 
-describe("Last Ditch Evasion hook (#7) wiring", () => {
-	const body = bodyOf("_pMaybeApplyLastDitchEvasion");
-
-	it("is gated on a Dex save and the tactic flag", () => {
-		expect(body).toMatch(/\(ability \|\| ""\)\.toLowerCase\(\) !== "dex"/);
-		expect(body).toContain("hasLastDitchEvasion");
-	});
-
-	it("applies the avoid-all-damage helper (not a half/partial path)", () => {
-		expect(body).toContain("this._state.applyLastDitchEvasion");
-		expect(body).toContain("res.full");
-		// The fixed mechanic is avoid-all (take 0), not half.
-		expect(body).not.toMatch(/half/i);
-		expect(body).not.toContain("res.halved");
-	});
-
-	it("is invoked from the saving-throw handler", () => {
+describe("Last Ditch Evasion — manual reaction button (#7) wiring", () => {
+	it("is NOT a Dex-save hook: the removed controller method and its save-handler call are gone", () => {
+		expect(src).not.toContain("_pMaybeApplyLastDitchEvasion");
 		const save = src.match(/async _rollSavingThrow\s*\([\s\S]*?\n\t\}/);
 		expect(save).not.toBeNull();
-		expect(save[0]).toContain("_pMaybeApplyLastDitchEvasion");
+		expect(save[0]).not.toContain("LastDitchEvasion");
+	});
+
+	it("renders a manual 'Use Last Ditch Evasion' reaction button gated on the tactic", () => {
+		const idx = combatSrc.indexOf("charsheet__combat-lde-use\"");
+		expect(idx).toBeGreaterThan(-1);
+		// The button markup block (gating + label) lives just before the class attr.
+		const markup = combatSrc.slice(idx - 400, idx + 200);
+		expect(markup).toContain("hasLastDitchEvasion");
+		expect(markup).toMatch(/avoid all damage \+ Slowed/i);
+		// Triggered by being hit by an attack — must NOT be framed as a Dex save.
+		expect(markup).not.toMatch(/dex save/i);
+	});
+
+	it("the button handler applies the avoid-all helper and surfaces Slowed", () => {
+		const idx = combatSrc.indexOf("charsheet__combat-lde-use\")?.addEventListener");
+		expect(idx).toBeGreaterThan(-1);
+		const handler = combatSrc.slice(idx, idx + 600);
+		expect(handler).toContain("this._state.applyLastDitchEvasion");
+		expect(handler).toMatch(/take no damage/i);
+		expect(handler).toMatch(/Slowed/i);
+		// Not a half-damage path.
+		expect(handler).not.toMatch(/half/i);
 	});
 });
