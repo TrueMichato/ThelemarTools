@@ -672,9 +672,11 @@ describe("#20 Doubleshot consumer fold-in (_rollDamage)", () => {
 // Bug #14: flat weapon-upgrade attack/damage bonuses already flow; the gap is the
 // non-flat DAMAGE DICE rider (e.g. Saw-toothed = +1d4 of a type on every hit). S6
 // surfaces the aggregated `bonusDamageDice`/`bonusDamageType` additively in
-// getEffectiveItemBonuses (EXTRACTION — S6-owned). S5 owns ROLLING it: the
-// auto-attack builder attaches it to `attack.weaponDamageRiders`, and `_rollDamage`
-// rolls it on EVERY hit (no manual toggle), crit-doubled, under its OWN damage type.
+// getEffectiveItemBonuses (EXTRACTION — S6-owned). S5 owns ROLLING it: per the
+// LOCKED contract, `_rollDamage` reads those fields DIRECTLY off the attack's
+// `sourceItem` (no pre-populated per-attack field, and NOT via the global
+// feature-based weaponDamageRiders loop), rolling on EVERY hit, crit-doubled, under
+// the upgrade's OWN damage type.
 
 describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 	function mkDamageCombat (attack, effectiveBonuses = null) {
@@ -707,6 +709,9 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 		return {combat, captured};
 	}
 
+	// The +1d4 is resolved at roll time from S6's effective-bonus fields keyed off
+	// `sourceItem.id` — the weapon itself carries NO per-attack rider field.
+	const SAW_EFF = {bonusDamageDice: "1d4", bonusDamageType: "slashing"};
 	const sawtooth = {
 		id: "saw",
 		name: "Saw-toothed Longsword",
@@ -714,11 +719,11 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 		abilityMod: "str",
 		damage: "1d8",
 		damageType: "slashing",
-		weaponDamageRiders: [{source: "Weapon Upgrade", dice: "1d4", damageType: "slashing"}],
+		sourceItem: {id: "saw-item"},
 	};
 
 	it("rolls the upgrade die into the weapon's OWN damage-type total when the type matches", async () => {
-		const {combat, captured} = mkDamageCombat(sawtooth);
+		const {combat, captured} = mkDamageCombat(sawtooth, SAW_EFF);
 		await combat._rollDamage("saw", false);
 		// weapon 1d8=5 + str +3 + Saw-toothed 1d4=3 (same slashing type) = 11, single type.
 		expect(captured[0].total).toBe(11);
@@ -726,7 +731,7 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 	});
 
 	it("applies on EVERY hit with no manual toggle (auto-applied, fires twice in a row)", async () => {
-		const {combat, captured} = mkDamageCombat(sawtooth);
+		const {combat, captured} = mkDamageCombat(sawtooth, SAW_EFF);
 		await combat._rollDamage("saw", false);
 		await combat._rollDamage("saw", false);
 		expect(captured.length).toBe(2);
@@ -735,7 +740,7 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 	});
 
 	it("crit-doubles the upgrade die via isCrit", async () => {
-		const {combat} = mkDamageCombat(sawtooth);
+		const {combat} = mkDamageCombat(sawtooth, SAW_EFF);
 		let sawCrit = false;
 		const realParse = combat._parseDamage;
 		combat._parseDamage = (dice, isCrit) => { if (dice === "1d4" && isCrit) sawCrit = true; return realParse(dice, isCrit); };
@@ -751,13 +756,13 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 			abilityMod: "str",
 			damage: "1d8",
 			damageType: "slashing",
-			weaponDamageRiders: [{source: "Searing Edge", dice: "1d6", damageType: "fire"}],
+			sourceItem: {id: "fb-item"},
 		};
-		const {combat, captured} = mkDamageCombat(fireBlade);
+		const {combat, captured} = mkDamageCombat(fireBlade, {bonusDamageDice: "1d6", bonusDamageType: "fire"});
 		await combat._rollDamage("fb", false);
 		// 1d8=5 + str 3 = 8 slashing; 1d6=4 fire reported separately → typed-extras title.
 		expect(captured[0].total).toContain("8 slashing + 4 fire = 12");
-		expect(captured[0].subtitle).toContain("Searing Edge 1d6 fire");
+		expect(captured[0].subtitle).toContain("Weapon Upgrade 1d6 fire");
 	});
 
 	it("is inert when the weapon carries no upgrade dice rider", async () => {
@@ -768,9 +773,17 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 		expect(captured[0].subtitle).not.toContain("Upgrade");
 	});
 
-	// --- (a) S6's recommended DIRECT read: an attack with a sourceItem but NO explicit
-	// `weaponDamageRiders` still rolls the +1d4 by reading getEffectiveItemBonuses. ---
-	it("derives the rider from getEffectiveItemBonuses when no explicit list is attached (S6 path a)", async () => {
+	it("is inert when the sourceItem has flat bonuses but no bonusDamageDice", async () => {
+		const attack = {id: "flat", name: "Longsword", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing", sourceItem: {id: "wflat"}};
+		const {combat, captured} = mkDamageCombat(attack, {bonusWeaponDamage: 1}); // flat only
+		await combat._rollDamage("flat", false);
+		// +1 flat is handled by the bonus path, not the dice rider; no extra die rolled.
+		expect(captured[0].subtitle).not.toContain("Upgrade");
+	});
+
+	// --- S6's recommended DIRECT read: the +1d4 is read from getEffectiveItemBonuses
+	// keyed off the attack's sourceItem at roll time. ---
+	it("derives the rider from getEffectiveItemBonuses when the weapon has a sourceItem (S6 path a)", async () => {
 		const attack = {id: "raw", name: "Saw-toothed Longsword", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing", sourceItem: {id: "w9"}};
 		const {combat, captured} = mkDamageCombat(attack, {bonusDamageDice: "1d4", bonusDamageType: "slashing"});
 		await combat._rollDamage("raw", false);
@@ -787,20 +800,10 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 		expect(captured[0].subtitle).toContain("Weapon Upgrade 1d6 fire");
 	});
 
-	it("explicit weaponDamageRiders WIN over the derived fallback (no double-count)", async () => {
-		// Explicit 1d4 present AND effective bonuses would also yield a die — must roll ONCE.
-		const attack = {
-			id: "dup",
-			name: "Saw-toothed",
-			isMelee: true,
-			abilityMod: "str",
-			damage: "1d8",
-			damageType: "slashing",
-			sourceItem: {id: "w11"},
-			weaponDamageRiders: [{source: "Weapon Upgrade", dice: "1d4", damageType: "slashing"}],
-		};
+	it("rolls the upgrade die exactly ONCE per hit (no double-count)", async () => {
+		const attack = {id: "once", name: "Saw-toothed", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing", sourceItem: {id: "w11"}};
 		const {combat, captured} = mkDamageCombat(attack, {bonusDamageDice: "1d4", bonusDamageType: "slashing"});
-		await combat._rollDamage("dup", false);
+		await combat._rollDamage("once", false);
 		// 5 + 3 + ONE 1d4=3 = 11 (NOT 14 from double-counting).
 		expect(captured[0].total).toBe(11);
 	});
@@ -815,7 +818,7 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 	});
 });
 
-describe("#14 auto-attack builder attaches weaponDamageRiders from effective bonuses", () => {
+describe("#14 auto-attack builder keeps sourceItem for the direct getEffectiveItemBonuses read", () => {
 	const weapon = {id: "w1", name: "Saw-toothed Longsword", weapon: true, equipped: true, dmg1: "1d8", damageType: "slashing", property: []};
 
 	function mkBuilderCombat (effectiveBonuses) {
@@ -845,29 +848,21 @@ describe("#14 auto-attack builder attaches weaponDamageRiders from effective bon
 	});
 	afterAll(() => { globalThis.document = savedDoc; });
 
-	it("maps bonusDamageDice/bonusDamageType into the auto-attack's weaponDamageRiders", () => {
+	it("attaches the weapon as sourceItem (with id) so _rollDamage can read getEffectiveItemBonuses directly", () => {
 		const combat = mkBuilderCombat({bonusDamageDice: "1d4", bonusDamageType: "slashing"});
 		combat.renderAttacks();
 		const auto = combat._cachedAttacks.find(a => a.id === "auto_w1");
 		expect(auto).toBeDefined();
-		expect(auto.weaponDamageRiders).toEqual([
-			{source: "Weapon Upgrade", dice: "1d4", damageType: "slashing"},
-		]);
+		expect(auto.sourceItem).toBe(weapon);
+		expect(auto.sourceItem.id).toBe("w1");
 	});
 
-	it("attaches an EMPTY rider list when there is no upgrade die (no false positives)", () => {
-		const combat = mkBuilderCombat({bonusWeaponDamage: 1}); // flat only, no dice rider
+	it("does NOT pre-populate a per-attack weaponDamageRiders field (riders resolved at roll time)", () => {
+		const combat = mkBuilderCombat({bonusDamageDice: "1d4", bonusDamageType: "slashing"});
 		combat.renderAttacks();
 		const auto = combat._cachedAttacks.find(a => a.id === "auto_w1");
-		expect(auto.weaponDamageRiders).toEqual([]);
-	});
-
-	it("falls back to the weapon's own damage type when the upgrade omits a type", () => {
-		const combat = mkBuilderCombat({bonusDamageDice: "1d4"}); // no bonusDamageType
-		combat.renderAttacks();
-		const auto = combat._cachedAttacks.find(a => a.id === "auto_w1");
-		// dmgType absent → falls back to weapon.damageType ("slashing")
-		expect(auto.weaponDamageRiders[0].dice).toBe("1d4");
-		expect(auto.weaponDamageRiders[0].damageType).toBe("slashing");
+		// The locked #14 path reads getEffectiveItemBonuses(sourceItem.id) at roll time;
+		// nothing is smuggled onto the attack at build time.
+		expect(auto.weaponDamageRiders).toBeUndefined();
 	});
 });
