@@ -8346,17 +8346,34 @@ class CharacterSheetCombat {
 					extraBadges.push(`<span class="badge ${focusMismatch ? "badge-danger" : "badge-success"} ml-1" title="Usable only while in ${focusLabel} focus">${focusLabel} only</span>`);
 				}
 
+				// Stances are on/off TOGGLES, not one-shot uses: render an Enter ⇄ End button
+				// reflecting whether THIS stance is the active one. Ending a stance never costs
+				// stamina and must never be focus-blocked, so the active-state button is always
+				// enabled. A single `combatStance` slot enforces mutual exclusion, so entering
+				// another stance auto-replaces the active one (button reverts on re-render).
+				const isStanceMethod = !!parsed.isStance;
+				const stanceActive = isStanceMethod && !!this._state.isStanceActive?.(method.name);
+				let actionBtnHtml;
+				if (isStanceMethod && stanceActive) {
+					actionBtnHtml = `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" data-method-stance="1" data-stance-active="1" title="End ${method.name} (bonus action, no stamina cost)">End Stance</button>`;
+				} else if (isStanceMethod) {
+					actionBtnHtml = `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" data-method-stance="1" ${focusMismatch ? `disabled title="Switch to ${requiresFocus} focus to use this method"` : `title="Enter ${method.name} (costs ${staminaCost} stamina)"`}>Enter Stance</button>`;
+				} else {
+					actionBtnHtml = `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" ${focusMismatch ? `disabled title="Switch to ${requiresFocus} focus to use this method"` : `title="Use this method (costs ${staminaCost} stamina)"`}>Use</button>`;
+				}
+
 				const methodEl = e_({outer: `
 					<div class="charsheet__method-item mb-1 p-1 ve-flex ve-flex-v-center ve-flex-h-space-between" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
 						<div class="ve-flex ve-flex-v-center ve-flex-wrap">
 							<span class="charsheet__method-name" style="font-weight: bold;">${methodNameHtml}</span>
 							<span class="ve-muted ve-small ml-2">(${degree}${this._getOrdinalSuffix(degree)})</span>
 							${staminaCost > 0 ? `<span class="badge badge-secondary ml-2" title="Stamina cost">${staminaCost} EP</span>` : ""}
+							${stanceActive ? `<span class="badge badge-success ml-1" title="Stance is active">Active</span>` : ""}
 							${extraBadges.join("")}
 							${weaponLabel}
 						</div>
 						${showUseButton ? `<div class="ve-flex ve-flex-v-center ml-2">
-							<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" ${focusMismatch ? `disabled title="Switch to ${requiresFocus} focus to use this method"` : `title="Use this method (costs ${staminaCost} stamina)"`}>Use</button>
+							${actionBtnHtml}
 							${isWeaponModifier ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__method-choose-weapon ml-1" data-method-id="${methodId}" title="Choose which weapon to use">🗡️</button>` : ""}
 						</div>` : ""}
 					</div>
@@ -8390,6 +8407,18 @@ class CharacterSheetCombat {
 
 	_useMethod (methodId) {
 		const btn = /** @type {*} */ (document.querySelector(`.charsheet__method-use[data-method-id="${methodId}"]`));
+
+		// Stances are on/off toggles: if THIS stance is already active, END it here — BEFORE
+		// any stamina/focus checks. Exiting a stance is free (a bonus action) and must work
+		// even at 0 stamina or while in a mismatched Primal Focus mode.
+		const clickedMethod = /** @type {*} */ (btn.closest(".charsheet__method-item"))?._methodData;
+		if (clickedMethod && this._state.isStanceActive?.(clickedMethod.name)) {
+			this._exitStance(clickedMethod);
+			btn.classList.add("ve-btn-success");
+			setTimeout(() => btn.classList.remove("ve-btn-success"), 200);
+			return;
+		}
+
 		const cost = parseInt(btn.dataset.cost) || 1;
 		const currentStamina = this._state.getStaminaCurrent();
 
@@ -8500,6 +8529,10 @@ class CharacterSheetCombat {
 				this._page._renderActiveStates?.();
 				this._page._saveCurrentCharacter?.();
 				this._page._renderCharacter?.();
+				// Re-render the methods list so this stance's button flips to "End Stance"
+				// and any previously-active stance's button reverts to "Enter Stance"
+				// (single combatStance slot → mutual exclusion).
+				this.renderCombatMethods();
 
 				JqueryUtil.doToast({type: "success", content: `Activated ${method.name}! (−${cost} ${resourceName})`});
 			} else {
@@ -8512,8 +8545,12 @@ class CharacterSheetCombat {
 
 				if (category === "weaponModifier") {
 					this._activateWeaponModifierMethod(method, parsedEffects, cost, resourceName);
+				} else if (category === "selfHeal") {
+					this._activateSelfHealMethod(method, parsedEffects, cost, resourceName);
+				} else if (category === "rangedExtraDie") {
+					this._activateRangedExtraDieMethod(method, cost, resourceName);
 				} else {
-					// selfHeal, acBuff, reaction, instant — toast for now
+					// acBuff, reaction, instant — toast for now
 					JqueryUtil.doToast({type: "success", content: `Used ${method.name}! (−${cost} ${resourceName})`});
 				}
 			}
@@ -8526,6 +8563,77 @@ class CharacterSheetCombat {
 		// Flash the button to indicate use
 		btn.classList.add("ve-btn-success");
 		setTimeout(() => btn.classList.remove("ve-btn-success"), 200);
+	}
+
+	/**
+	 * Self-heal combat method (e.g. Catch Your Breath). Rolls the method's healing dice and
+	 * applies `dice + proficiency + ability modifier` (clamped to its minimum) via the state.
+	 */
+	_activateSelfHealMethod (method, parsedEffects, cost, resourceName) {
+		const heal = parsedEffects.selfHeal;
+		if (!heal) {
+			JqueryUtil.doToast({type: "success", content: `Used ${method.name}! (−${cost} ${resourceName})`});
+			return;
+		}
+
+		const dieRoll = this._parseDamage(heal.dice).total;
+		const result = this._state.applyCombatMethodSelfHeal(method.name, {dieRoll});
+
+		// Refresh HP UI everywhere it is shown.
+		this._page._renderHp?.();
+		this.renderCombatResources?.();
+		this._page._renderCharacter?.();
+		this._page._saveCurrentCharacter?.();
+
+		if (result) {
+			JqueryUtil.doToast({type: "success", content: `${method.name}: regained ${result.amount} HP (${result.formulaText}; rolled ${dieRoll}). (−${cost} ${resourceName})`});
+		} else {
+			JqueryUtil.doToast({type: "success", content: `Used ${method.name}! (−${cost} ${resourceName})`});
+		}
+	}
+
+	/**
+	 * Ranged extra-die combat method (Doubleshot). Arms a one-shot pending rider that the
+	 * NEXT qualifying ranged weapon attack consumes via `_consumePendingWeaponDamageDie`.
+	 */
+	_activateRangedExtraDieMethod (method, cost, resourceName) {
+		this._pendingDoubleshot = {name: method.name};
+		JqueryUtil.doToast({type: "success", content: `${method.name} armed: your next ranged weapon attack deals an extra weapon damage die. (−${cost} ${resourceName})`});
+	}
+
+	/**
+	 * Pure resolver for a pending Doubleshot rider. Does NOT mutate state, so it is safe to
+	 * call from rendering/decision code and from tests.
+	 * @param {object} attack - The attack about to roll damage.
+	 * @returns {string|null} A single weapon die string (e.g. "1d8") to add to this ranged
+	 *   weapon attack, or null when no Doubleshot is pending / the attack doesn't qualify.
+	 */
+	getDoubleshotRiderForAttack (attack) {
+		if (!this._pendingDoubleshot) return null;
+		if (!attack || attack.isSpell) return null;
+		// A ranged weapon attack = a weapon attack that is not melee. Stored weapon attacks
+		// carry `isMelee` (ranged ones set it false) rather than an explicit `isRanged`, so
+		// reuse the canonical melee predicate; thrown weapons (range "X/Y") count as ranged,
+		// matching Doubleshot's "palm two blades or nock two arrows" text.
+		if (this._isMeleeWeaponAttack(attack)) return null;
+		// Reduce the weapon's damage dice to a SINGLE die of the same size: "2d6+3" → "1d6".
+		const m = (attack.damage || "").match(/\d+d(\d+)/);
+		if (!m) return null;
+		return `1d${m[1]}`;
+	}
+
+	/**
+	 * Consume a pending Doubleshot rider for this attack. Single seam consumed by the
+	 * damage pipeline (S5 hook): returns the extra weapon die string ONCE (clearing the
+	 * pending flag) for a qualifying ranged weapon attack, else null.
+	 * @param {object} attack
+	 * @returns {string|null}
+	 */
+	_consumePendingWeaponDamageDie (attack) {
+		const die = this.getDoubleshotRiderForAttack(attack);
+		if (!die) return null;
+		this._pendingDoubleshot = null;
+		return die;
 	}
 
 	/**
@@ -8666,6 +8774,27 @@ class CharacterSheetCombat {
 		];
 
 		return stanceIndicators.some(indicator => entriesStr.includes(indicator));
+	}
+
+	/**
+	 * Exit the currently active combat stance. Reverses the full activation done in
+	 * `_activateMethodEffect` (both the `combatStance` active-state badge AND the
+	 * `_data.activeStance` mechanical bridge) and mirrors the same refresh path so every
+	 * dependent surface (states, effects, methods buttons, sheet) updates. No stamina is
+	 * spent or refunded — ending a stance is a free bonus action.
+	 */
+	_exitStance (method) {
+		this._state.deactivateStance?.();
+		this._state.deactivateState?.("combatStance");
+
+		this.renderCombatStates();
+		this.renderCombatEffects();
+		this._page._renderActiveStates?.();
+		this._page._saveCurrentCharacter?.();
+		this._page._renderCharacter?.();
+		this.renderCombatMethods();
+
+		JqueryUtil.doToast({type: "info", content: `Ended ${method.name}.`});
 	}
 
 	_modifyStamina (delta) {
