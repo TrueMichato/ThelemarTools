@@ -49,7 +49,7 @@ class CharacterSheetQuickBuild {
 			hpRolls: {}, // {levelKey: rollResult}
 			_combatTraditions: [], // TGTT combat tradition selections (base)
 			_subclassChoiceTraditions: [], // TGTT subclass-choice picks (separate cap)
-			weaponMasteries: [], // XPHB weapon mastery selections
+			weaponMasteries: null, // XPHB weapon mastery selections (null = step not yet seeded; see _renderWeaponMasteryStep)
 		};
 
 		// Modal/overlay reference
@@ -156,7 +156,7 @@ class CharacterSheetQuickBuild {
 			hpRolls: {},
 			_combatTraditions: [],
 			_subclassChoiceTraditions: [],
-			weaponMasteries: [],
+			weaponMasteries: null,
 		};
 		this._levelAnalysis = [];
 		this._steps = [];
@@ -203,8 +203,16 @@ class CharacterSheetQuickBuild {
 				continue;
 			}
 
-			// Get the subclass (may have been selected in an earlier level's choice)
-			const subclass = this._getSubclassForClass(className, classSource, classLevel);
+			// Get the subclass (may have been selected in an earlier level's choice).
+			// Resolve a shallow `{name, source}` ref (from existing state or a fresh
+			// selection) to the canonical full subclass so its
+			// `optionalfeatureProgression` (Arcane Shot "AS", Maneuvers "MV:B") is
+			// visible to `_getOptionalFeatureGains` — without this, picking a subclass
+			// at L3 never surfaces its optional-feature picks in the rebuilt wizard.
+			const subclass = this._resolveSubclassFull(
+				this._getSubclassForClass(className, classSource, classLevel),
+				className, classSource,
+			);
 
 			// Get features for this class level
 			const features = this._getLevelFeatures(classData, classLevel, subclass);
@@ -924,6 +932,48 @@ class CharacterSheetQuickBuild {
 		this._renderCurrentStep();
 	}
 
+	// Canonical wizard step order. Used to navigate by step ID after a rebuild
+	// that may add or remove steps (e.g. selecting a subclass removes the
+	// subclass step and can add a Class Options step once the subclass's
+	// optionalfeatureProgression — Arcane Shot, Maneuvers — merges in).
+	static _STEP_ORDER = ["target", "subclass", "asi", "optfeatures", "classfeats", "featoptions", "weaponmastery", "expertise", "spells", "hp", "review"];
+
+	/**
+	 * After rebuilding `this._steps`, advance to the correct next step by
+	 * canonical ID order rather than raw index. If a step with the same id
+	 * still exists (e.g. more subclasses to pick in a multiclass build), return
+	 * to it; otherwise jump to the first step whose canonical order is greater
+	 * than the just-completed step's.
+	 * @param {string} completedStepId
+	 */
+	_advanceAfterRebuild (completedStepId) {
+		const order = CharacterSheetQuickBuild._STEP_ORDER;
+		const completedIdx = order.indexOf(completedStepId);
+		const sameIdx = this._steps.findIndex(s => s.id === completedStepId);
+		if (sameIdx !== -1) { this._goToStep(sameIdx); return; }
+		let targetIdx = this._steps.findIndex(s => order.indexOf(s.id) > completedIdx);
+		if (targetIdx === -1) targetIdx = this._steps.length - 1;
+		this._goToStep(targetIdx);
+	}
+
+	/**
+	 * Drop optional-feature / feature-option selections whose feature-type key is
+	 * no longer offered by any analysed level. Keeps stale picks from a
+	 * previously-chosen subclass (multiclass back-and-change) out of the apply
+	 * pass and the Review summary.
+	 */
+	_pruneStaleOptionalFeatureSelections () {
+		const offeredKeys = new Set();
+		for (const a of (this._levelAnalysis || [])) {
+			for (const gain of (a.optionalFeatureGains || [])) {
+				offeredKeys.add(gain.featureTypes.join("_"));
+			}
+		}
+		for (const key of Object.keys(this._selections.optionalFeatures || {})) {
+			if (!offeredKeys.has(key)) delete this._selections.optionalFeatures[key];
+		}
+	}
+
 	_prevStep () {
 		if (this._currentStep > 0) {
 			this._goToStep(this._currentStep - 1);
@@ -939,6 +989,19 @@ class CharacterSheetQuickBuild {
 		if (currentStep?.id === "target") {
 			this._buildWizardSteps();
 			this._renderStepIndicators();
+		}
+
+		// After the Subclass step, rebuild so a freshly-selected subclass's
+		// optionalfeatureProgression (Arcane Shot "AS", Maneuvers "MV:B") merges
+		// into the analysis and its Class Options step appears. The subclass step
+		// is removed once all subclasses are chosen, so navigate by canonical
+		// step ID instead of raw index.
+		if (currentStep?.id === "subclass") {
+			this._buildWizardSteps();
+			this._pruneStaleOptionalFeatureSelections();
+			this._renderStepIndicators();
+			this._advanceAfterRebuild("subclass");
+			return;
 		}
 
 		if (this._currentStep >= this._steps.length - 1) {
@@ -3256,15 +3319,11 @@ class CharacterSheetQuickBuild {
 		content.append(step);
 	}
 
-	_validateWeaponMasteryStep (masteryInfo) {
-		const selected = this._selections.weaponMasteries || [];
-		if (selected.length < masteryInfo.targetTotal) {
-			JqueryUtil.doToast({
-				type: "warning",
-				content: `Please select ${masteryInfo.targetTotal} weapon masteries (currently ${selected.length}).`,
-			});
-			return false;
-		}
+	_validateWeaponMasteryStep () {
+		// Bug #4: choosing weapon masteries is OPTIONAL. Never block — the user may submit
+		// with fewer than the available slots (or skip entirely) and fill the rest after a
+		// Long Rest. Pre-seeded existing masteries remain selected; the apply path persists
+		// whatever is currently selected.
 		return true;
 	}
 
@@ -4703,9 +4762,11 @@ class CharacterSheetQuickBuild {
 
 		// Post-loop finalizations
 
-		// Apply weapon masteries
-		if (this._selections.weaponMasteries?.length > 0) {
-			this._state.setWeaponMasteries(this._selections.weaponMasteries);
+		// Apply weapon masteries (bug #4). Persist whenever the mastery step ran (selection is
+		// an array — possibly empty, which legitimately CLEARS prior masteries). A null value
+		// means the step never ran, so existing masteries are left untouched.
+		if (Array.isArray(this._selections.weaponMasteries)) {
+			this._state.setWeaponMasteries([...this._selections.weaponMasteries]);
 		}
 
 		// Apply combat traditions (if selected during QB). Merge base picks with
@@ -4739,8 +4800,11 @@ class CharacterSheetQuickBuild {
 			}
 		}
 
-		const finalWeaponMasteries = this._state.getWeaponMasteries?.() || [];
-		if (finalWeaponMasteries.length > 0) {
+		// Record the final mastery loadout into level history. Run whenever the mastery
+		// step was actually shown (selections is an array, even if emptied) so that a user
+		// clearing all pre-seeded masteries clears stale history too, not just live state.
+		if (Array.isArray(this._selections.weaponMasteries)) {
+			const finalWeaponMasteries = this._state.getWeaponMasteries?.() || [];
 			let lastCount = 0;
 			let lastMasteryGainLevel = null;
 			this._levelAnalysis.forEach(a => {
