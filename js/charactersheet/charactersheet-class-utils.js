@@ -4258,6 +4258,99 @@ class CharacterSheetClassUtils {
 		return Array.from(traditions.values()).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 	}
 
+	/**
+	 * Score how "rich" a combat-method catalog entry is, so de-duplication can
+	 * keep the most informative copy. The new `combatMethod` entity (explicit
+	 * `tradition`/`degree`/`staminaCost`) is preferred over a legacy CTM
+	 * optionalfeature that only encodes those via `featureType` strings.
+	 * @param {*} m
+	 * @returns {number}
+	 */
+	static _combatMethodRichness (/** @type {*} */ m) {
+		if (!m) return -1;
+		let r = 0;
+		if (m._entityType === "combatMethod") r += 4;
+		if (m.tradition !== undefined) r += 2;
+		if (m.degree !== undefined) r += 1;
+		if (m.staminaCost !== undefined) r += 1;
+		if (Array.isArray(m.entries) && m.entries.length) r += 1;
+		return r;
+	}
+
+	/**
+	 * De-duplicate a combat-method picker catalog by `name|source` (case
+	 * insensitive). The method picker concatenates the legacy optionalfeature
+	 * pool with the new combatMethod entity pool; a method present in both
+	 * would otherwise render as twin add/remove rows. When a `name|source`
+	 * collides, the richer entry (see `_combatMethodRichness`) wins.
+	 * @param {Array<*>} methods
+	 * @returns {Array<*>}
+	 */
+	static dedupeCombatMethodCatalog (/** @type {*[]} */ methods = []) {
+		const byKey = new Map();
+		for (/** @type {*} */ const m of methods) {
+			if (!m || !m.name) continue;
+			const key = `${String(m.name).toLowerCase()}|${String(m.source || "").toLowerCase()}`;
+			const existing = byKey.get(key);
+			if (!existing) { byKey.set(key, m); continue; }
+			if (CharacterSheetClassUtils._combatMethodRichness(m) > CharacterSheetClassUtils._combatMethodRichness(existing)) {
+				byKey.set(key, m);
+			}
+		}
+		return Array.from(byKey.values());
+	}
+
+	/**
+	 * Build the display model for the combat-traditions filter UI.
+	 *
+	 * Pure transform consumed by the method-picker's tradition editor: it takes
+	 * the class-restricted pool, the player's current selection, and the
+	 * subclass-granted (locked) traditions, and returns an ordered list of
+	 * `{code, name, selected, locked, group}` rows. Granted traditions are
+	 * always `selected` + `locked` (the player can't toggle them off); rows are
+	 * grouped granted → selected → available and alphabetised within each group.
+	 *
+	 * Already-selected codes that fall outside the available pool are still
+	 * surfaced (so a tradition the character already has is never silently
+	 * dropped). The underlying selection model stays a flat array of codes.
+	 *
+	 * @param {object} opts
+	 * @param {Array<{code: string, name?: string}>} [opts.availableTraditions] - class-restricted pool
+	 * @param {Array<string>} [opts.selectedCodes] - currently selected tradition codes
+	 * @param {Array<string>} [opts.grantedCodes] - subclass-granted (locked) tradition codes
+	 * @returns {Array<{code: string, name: string, selected: boolean, locked: boolean, group: "granted"|"selected"|"available"}>}
+	 */
+	static buildTraditionSelectionModel ({availableTraditions = [], selectedCodes = [], grantedCodes = []} = {}) {
+		const selectedSet = new Set(selectedCodes);
+		const grantedSet = new Set(grantedCodes);
+
+		const byCode = new Map();
+		const add = (/** @type {*} */ code, /** @type {*} */ name) => {
+			if (!code || byCode.has(code)) return;
+			const locked = grantedSet.has(code);
+			byCode.set(code, {
+				code,
+				name: name || CharacterSheetClassUtils.getTraditionName(code),
+				selected: locked || selectedSet.has(code),
+				locked,
+			});
+		};
+
+		for (/** @type {*} */ const t of availableTraditions) add(t.code, t.name);
+		for (/** @type {*} */ const code of grantedCodes) add(code);
+		for (/** @type {*} */ const code of selectedCodes) add(code);
+
+		const all = Array.from(byCode.values());
+		const rank = (/** @type {*} */ m) => m.locked ? 0 : (m.selected ? 1 : 2);
+		all.sort((/** @type {*} */ a, /** @type {*} */ b) => {
+			const r = rank(a) - rank(b);
+			if (r) return r;
+			return a.name.localeCompare(b.name);
+		});
+		for (/** @type {*} */ const m of all) m.group = m.locked ? "granted" : (m.selected ? "selected" : "available");
+		return all;
+	}
+
 	// ==========================================
 	// State Builder Helpers
 	// ==========================================
