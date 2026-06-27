@@ -1924,6 +1924,27 @@ class CharacterSheetCombat {
 		const damageRoll = this._parseDamage(attack.damage, isCrit);
 		const abilityMod = this._state.getWeaponAbilityMod(attack);
 
+		// Doubleshot (#20, S4-owned): a pending one-shot rider that grants +1 weapon
+		// damage die on the NEXT ranged WEAPON attack. S4 owns the pending flag, the
+		// rider lookup, the parse, AND the one-shot consume helper
+		// (`_consumePendingWeaponDamageDie`) — which returns a weapon damage-die STRING
+		// (e.g. "1d8") or null/undefined. S5 owns only this fold-in on the damage path
+		// (S4 must not edit `_rollDamage`'s body), guaranteeing: (a) ranged-weapon
+		// gating, (b) crit-doubling via `isCrit`, (c) the die is added to the weapon's
+		// OWN damage-type total (not a separate fixed type). One-shot consumption lives
+		// in the helper, so on a miss / no call the die is simply never spent. The `?.`
+		// keeps this an inert no-op until S4 ships the helper.
+		let doubleshotDamage = 0;
+		let doubleshotRoll = null;
+		let doubleshotDie = null;
+		if (attack.isRanged && !attack.isSpell) {
+			doubleshotDie = this._consumePendingWeaponDamageDie?.(attack);
+			if (doubleshotDie) {
+				doubleshotRoll = this._parseDamage(doubleshotDie, isCrit);
+				doubleshotDamage = doubleshotRoll.total;
+			}
+		}
+
 		// Get damage modifiers from named modifiers (from features, magic items, etc.)
 		const damageModifiers = this._state.getNamedModifiersByType("damage");
 		const featureDamageBonus = damageModifiers.reduce((sum, mod) => sum + (mod.value || 0), 0);
@@ -2061,7 +2082,7 @@ class CharacterSheetCombat {
 		}
 		const riderDiffTypeTotal = riderDamageTotal - riderSameTypeTotal;
 
-		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal;
+		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal + doubleshotDamage;
 		const total = baseDamageTotal + riderDiffTypeTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
 
 		// Build subtitle with breakdown
@@ -2080,6 +2101,9 @@ class CharacterSheetCombat {
 		for (const ep of extraDamageParts) {
 			subtitle += ` + ${ep.total} (${ep.source}${ep.type ? ` ${ep.type}` : ""})`;
 		}
+		// Doubleshot rides under the weapon's own damage type, so it is itemized BEFORE
+		// the trailing weapon-type word below.
+		if (doubleshotDamage) subtitle += ` + ${doubleshotDamage} (Doubleshot 2nd arrow ${doubleshotDie})`;
 		subtitle += ` ${attack.damageType}`;
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
@@ -2111,6 +2135,7 @@ class CharacterSheetCombat {
 		// single hard-coded d20. Each damage component contributes a group.
 		const diceGroups = [];
 		this._pushDiceGroup(diceGroups, damageRoll);
+		this._pushDiceGroup(diceGroups, doubleshotRoll);
 		this._pushDiceGroup(diceGroups, sneakRollForAnim);
 		for (const rr of riderRollsForAnim) this._pushDiceGroup(diceGroups, rr);
 		for (const er of extraRollsForAnim) this._pushDiceGroup(diceGroups, er);
@@ -2121,7 +2146,7 @@ class CharacterSheetCombat {
 
 		this._page.showDiceResult({
 			title: `${attack.name} Damage`,
-			roll: damageRoll.total + sneakAttackDamage + riderDamageTotal,
+			roll: damageRoll.total + sneakAttackDamage + riderDamageTotal + doubleshotDamage,
 			modifier: totalBonus,
 			total: totalTitle || total,
 			subtitle,
