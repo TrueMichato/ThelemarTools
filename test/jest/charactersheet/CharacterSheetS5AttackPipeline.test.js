@@ -548,3 +548,119 @@ describe("#16 Quiver post-attack picker hook (combat)", () => {
 		expect(hook.predicate({isRanged: true, attack: bow})).toBe(false);
 	});
 });
+
+// ===========================================================================
+// #20 Doubleshot — S5-owned fold-in consumer in `_rollDamage`
+// ===========================================================================
+//
+// Bug #20 (Doubleshot) is S4-owned: a pending one-shot rider grants +1 weapon
+// damage die on the NEXT ranged WEAPON attack. S4 owns the pending flag, the
+// rider lookup, and the one-shot consume helper `_consumePendingWeaponDamageDie`
+// (returns a weapon damage-die STRING e.g. "1d8", or null/undefined). S5 owns
+// the damage path, so S4 must NOT edit `_rollDamage`'s body — instead `_rollDamage`
+// calls the helper and folds the die in. These tests pin the S5 side of that
+// contract against a stubbed helper (S4 ships the helper's own tests):
+//   (a) ranged-weapon gating  (b) crit-doubling via `isCrit`
+//   (c) folded into the weapon's OWN damage-type total  (d) only when a die returns
+
+describe("#20 Doubleshot consumer fold-in (_rollDamage)", () => {
+	function mkDamageCombat ({die = null, attack} = {}) {
+		const parseCalls = [];
+		const captured = [];
+		// Deterministic per-string damage so we can assert the folded total exactly.
+		const PER = {"1d8": 5, "2d6": 7};
+
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._weaponRiderEnabled = {};
+		combat._selectedCunningStrikes = [];
+		combat._state = {
+			getAttacks: () => [attack],
+			getFeatureCalculations: () => ({}),
+			getActiveCombatMethodEffects: () => [],
+			getWeaponAbilityMod: () => 3,
+			getNamedModifiersByType: () => [],
+			getItemWeaponScopedDamageContributions: () => [],
+			getBonusFromStates: () => 0,
+			isStateTypeActive: () => false,
+			getExtraDamageFromStates: () => [],
+		};
+		combat._page = {
+			pAnimateDamageDice: () => {},
+			showDiceResult: (args) => { captured.push(args); },
+		};
+		// Deterministic parse that records (dice, isCrit) so we can assert crit-forwarding.
+		combat._parseDamage = (dice, isCrit) => {
+			parseCalls.push({dice, isCrit: !!isCrit});
+			return {total: PER[dice] ?? 0, sides: 8, rolls: [PER[dice] ?? 0]};
+		};
+		combat._pushDiceGroup = () => {};
+		combat._canApplySneakAttack = () => false;
+		combat._resolveChannelRiderDamage = () => ({channelSpell: null, channelSpellRoll: null, channelSpellDamage: 0, riderMatched: false});
+		combat._promptUseCombatMethod = async () => null;
+		// The S4-owned helper — stubbed here to return a die (or null) on demand,
+		// with a manual call counter (jest global isn't injected in this ESM setup).
+		const consume = Object.assign(
+			() => { consume.calls += 1; return die; },
+			{calls: 0},
+		);
+		combat._consumePendingWeaponDamageDie = consume;
+		return {combat, captured, parseCalls, consume};
+	}
+
+	const rangedBow = {id: "bow", name: "Longbow", isRanged: true, abilityMod: "dex", damage: "1d8", damageType: "piercing"};
+	const meleeSword = {id: "sword", name: "Longsword", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing"};
+
+	it("folds the pending die into the weapon's own damage-type total on a ranged attack", async () => {
+		const {combat, captured, consume} = mkDamageCombat({die: "1d8", attack: rangedBow});
+		await combat._rollDamage("bow", false);
+
+		expect(consume.calls).toBe(1);
+		expect(captured.length).toBe(1);
+		// weapon 1d8=5 + dex +3 + Doubleshot 1d8=5 → 13, single (piercing) type → no typed-extras title.
+		expect(captured[0].total).toBe(13);
+		// dice-only `roll` display includes the extra die (5 weapon + 5 doubleshot).
+		expect(captured[0].roll).toBe(10);
+		expect(captured[0].subtitle).toContain("Doubleshot 2nd arrow 1d8");
+		// It is itemized BEFORE the trailing weapon damage-type word (own-type fold-in).
+		expect(captured[0].subtitle).toContain("(Doubleshot 2nd arrow 1d8) piercing");
+	});
+
+	it("never consumes or folds the die on a MELEE attack (ranged-weapon gating)", async () => {
+		const {combat, captured, consume} = mkDamageCombat({die: "1d8", attack: meleeSword});
+		await combat._rollDamage("sword", false);
+
+		expect(consume.calls).toBe(0);
+		// weapon 1d8=5 + str +3 = 8, no Doubleshot.
+		expect(captured[0].total).toBe(8);
+		expect(captured[0].subtitle).not.toContain("Doubleshot");
+	});
+
+	it("forwards `isCrit` to the pending die so it crit-doubles like the weapon dice", async () => {
+		const {combat, parseCalls} = mkDamageCombat({die: "1d8", attack: rangedBow});
+		await combat._rollDamage("bow", true);
+
+		// The doubleshot die must be parsed with isCrit=true (the old crit path failed to double).
+		const doubleshotParse = parseCalls.find(c => c.dice === "1d8" && c.isCrit === true);
+		expect(doubleshotParse).toBeDefined();
+		// Every parse in this crit roll carries isCrit=true (weapon + doubleshot).
+		expect(parseCalls.every(c => c.isCrit === true)).toBe(true);
+	});
+
+	it("is an inert no-op on a ranged attack when the helper returns no die", async () => {
+		const {combat, captured, consume} = mkDamageCombat({die: null, attack: rangedBow});
+		await combat._rollDamage("bow", false);
+
+		expect(consume.calls).toBe(1); // gating still asks the helper…
+		expect(captured[0].total).toBe(8); // …but nothing is folded when it declines.
+		expect(captured[0].subtitle).not.toContain("Doubleshot");
+	});
+
+	it("stays inert when the helper is absent (S4 has not shipped it yet)", async () => {
+		const {combat, captured} = mkDamageCombat({die: "1d8", attack: rangedBow});
+		delete combat._consumePendingWeaponDamageDie; // optional-chained call → undefined
+		await combat._rollDamage("bow", false);
+
+		expect(captured[0].total).toBe(8);
+		expect(captured[0].subtitle).not.toContain("Doubleshot");
+	});
+});
