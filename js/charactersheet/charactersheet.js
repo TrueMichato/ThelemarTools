@@ -11374,9 +11374,34 @@ class CharacterSheetPage {
 		if ((/** @type {*} */ (this._state.getSettings?.() || {})).skipTacticalMindPrompt) return;
 
 		const prevRemaining = this._state.getSecondWindUsesRemaining();
+		const htmlDescription = `
+			<div class="charsheet__combat-modal charsheet__combat-modal--tactical">
+				<div class="charsheet__combat-modal-hero">
+					<div class="charsheet__combat-modal-hero-icon">✦</div>
+					<div class="charsheet__combat-modal-hero-body">
+						<div class="charsheet__combat-modal-hero-label">${rollLabel} total</div>
+						<div class="charsheet__combat-modal-hero-value">${baseTotal}</div>
+					</div>
+					<div class="charsheet__combat-modal-hero-add">+1d10</div>
+				</div>
+				<div class="charsheet__combat-modal-stats">
+					<div class="charsheet__combat-modal-stat">
+						<div class="charsheet__combat-modal-stat-value">1</div>
+						<div class="charsheet__combat-modal-stat-label">Second Wind cost</div>
+					</div>
+					<div class="charsheet__combat-modal-stat">
+						<div class="charsheet__combat-modal-stat-value">${prevRemaining}</div>
+						<div class="charsheet__combat-modal-stat-label">Use${prevRemaining === 1 ? "" : "s"} left</div>
+					</div>
+				</div>
+				<div class="charsheet__combat-modal-banner charsheet__combat-modal-banner--refund">
+					<span class="charsheet__combat-modal-banner-icon">↩</span>
+					<span>If the check <strong>still fails</strong> with the +1d10, the Second Wind use is <strong>refunded</strong>.</span>
+				</div>
+			</div>`;
 		const offer = await InputUiUtil.pGetUserBoolean({
 			title: "Tactical Mind",
-			htmlDescription: `Your <strong>${rollLabel}</strong> total is <strong>${baseTotal}</strong>. If it failed, expend a use of <strong>Second Wind</strong> to add <strong>1d10</strong>?<br><span class="ve-muted ve-small">The Second Wind use is refunded if the check still fails. (${prevRemaining} use${prevRemaining === 1 ? "" : "s"} left)</span>`,
+			htmlDescription,
 			textYes: "Add 1d10 (expend Second Wind)",
 			textNo: "Keep the roll",
 		});
@@ -11406,7 +11431,20 @@ class CharacterSheetPage {
 
 		const stillFailed = await InputUiUtil.pGetUserBoolean({
 			title: "Tactical Mind — refund?",
-			htmlDescription: `With the +1d10 your <strong>${rollLabel}</strong> total is <strong>${newTotal}</strong>. Did the check <strong>still fail</strong>?<br><span class="ve-muted ve-small">If it still failed, the Second Wind use is refunded.</span>`,
+			htmlDescription: `
+			<div class="charsheet__combat-modal charsheet__combat-modal--tactical">
+				<div class="charsheet__combat-modal-hero">
+					<div class="charsheet__combat-modal-hero-icon">✦</div>
+					<div class="charsheet__combat-modal-hero-body">
+						<div class="charsheet__combat-modal-hero-label">${rollLabel} total (with +1d10)</div>
+						<div class="charsheet__combat-modal-hero-value">${newTotal}</div>
+					</div>
+				</div>
+				<div class="charsheet__combat-modal-banner charsheet__combat-modal-banner--refund">
+					<span class="charsheet__combat-modal-banner-icon">↩</span>
+					<span>Did the check <strong>still fail</strong>? If so, the spent Second Wind use is <strong>refunded</strong>.</span>
+				</div>
+			</div>`,
 			textYes: "Still failed — refund the use",
 			textNo: "It succeeded",
 		});
@@ -11431,9 +11469,31 @@ class CharacterSheetPage {
 		if ((/** @type {*} */ (this._state.getSettings?.() || {})).skipIndomitablePrompt) return;
 
 		const remaining = this._state.getIndomitableRemaining();
+		const displayBonus = this._state.getIndomitableRerollBonus?.() || 0;
+		const htmlDescription = `
+			<div class="charsheet__combat-modal charsheet__combat-modal--indom">
+				<div class="charsheet__combat-modal-hero">
+					<div class="charsheet__combat-modal-hero-icon">🛡️</div>
+					<div class="charsheet__combat-modal-hero-body">
+						<div class="charsheet__combat-modal-hero-label">${Parser.attAbvToFull(ability)} save total</div>
+						<div class="charsheet__combat-modal-hero-value">${baseTotal}</div>
+					</div>
+				</div>
+				<div class="charsheet__combat-modal-stats">
+					<div class="charsheet__combat-modal-stat">
+						<div class="charsheet__combat-modal-stat-value">${remaining}</div>
+						<div class="charsheet__combat-modal-stat-label">Use${remaining === 1 ? "" : "s"} left</div>
+					</div>
+					<div class="charsheet__combat-modal-stat">
+						<div class="charsheet__combat-modal-stat-value">${displayBonus >= 0 ? "+" : ""}${displayBonus}</div>
+						<div class="charsheet__combat-modal-stat-label">Reroll bonus${displayBonus ? " (Fighter level)" : ""}</div>
+					</div>
+				</div>
+				<div class="charsheet__combat-modal-note">If the save <strong>failed</strong>, spend a use of <strong>Indomitable</strong> to reroll the d20. You must use the new roll.</div>
+			</div>`;
 		const offer = await InputUiUtil.pGetUserBoolean({
 			title: "Indomitable",
-			htmlDescription: `Your <strong>${Parser.attAbvToFull(ability)} save</strong> total is <strong>${baseTotal}</strong>. If it failed, spend a use of <strong>Indomitable</strong> to reroll it?<br><span class="ve-muted ve-small">You must use the new roll. (${remaining} use${remaining === 1 ? "" : "s"} left)</span>`,
+			htmlDescription,
 			textYes: "Reroll (spend Indomitable)",
 			textNo: "Keep the roll",
 		});

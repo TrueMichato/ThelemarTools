@@ -14221,6 +14221,163 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 }
 
 /* ========================================================================
+   Fighter combat-resource prompts (Indomitable / Tactical Mind)
+   Body markup injected into the shared InputUiUtil boolean modal. Reuses the
+   sheet's --cs-* design tokens so it matches the rest of the modal styling and
+   stays theme-consistent. Built to flex-wrap and clamp so it never overflows
+   under [data-textsize] scaling.
+   ======================================================================== */
+
+.charsheet__combat-modal {
+	flex: 1 1 auto;
+	width: 100%;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-md, 0.75rem);
+	color: var(--cs-text, #e2e8f0);
+}
+
+/* Hero: the headline effect (current total / +1d10). */
+.charsheet__combat-modal-hero {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--cs-space-md, 0.75rem);
+	padding: var(--cs-space-md, 0.75rem) var(--cs-space-lg, 1rem);
+	background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+	border: 1px solid rgba(99, 102, 241, 0.3);
+	border-radius: var(--cs-radius-lg, 12px);
+}
+
+.charsheet__combat-modal--indom .charsheet__combat-modal-hero {
+	background: linear-gradient(135deg, rgba(59, 130, 246, 0.18) 0%, rgba(99, 102, 241, 0.1) 100%);
+	border-color: rgba(59, 130, 246, 0.35);
+}
+
+.charsheet__combat-modal-hero-icon {
+	font-size: clamp(1.5rem, 5vw, 2.25rem);
+	line-height: 1;
+	flex: 0 0 auto;
+}
+
+.charsheet__combat-modal-hero-body {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.charsheet__combat-modal-hero-label {
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: 600;
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.6));
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.charsheet__combat-modal-hero-value {
+	font-size: clamp(2rem, 8vw, 3rem);
+	font-weight: 800;
+	line-height: 1;
+	color: var(--cs-primary, #6366f1);
+	text-shadow: 0 2px 12px rgba(99, 102, 241, 0.3);
+}
+
+.charsheet__combat-modal--indom .charsheet__combat-modal-hero-value {
+	color: var(--cs-accent-sapphire, #3b82f6);
+	text-shadow: 0 2px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* The "+1d10" add chip pushed to the trailing edge of the hero. */
+.charsheet__combat-modal-hero-add {
+	margin-left: auto;
+	flex: 0 0 auto;
+	font-size: clamp(1rem, 4vw, 1.5rem);
+	font-weight: 800;
+	color: var(--cs-success, #22c55e);
+	background: rgba(34, 197, 94, 0.12);
+	border: 1px solid rgba(34, 197, 94, 0.35);
+	border-radius: var(--cs-radius-md, 8px);
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-md, 0.75rem);
+	white-space: nowrap;
+}
+
+/* Stat chips: uses left, reroll bonus, Second Wind cost. */
+.charsheet__combat-modal-stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__combat-modal-stat {
+	flex: 1 1 8rem;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	gap: 0.1rem;
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.15));
+	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.2));
+	border-radius: var(--cs-radius-md, 8px);
+}
+
+.charsheet__combat-modal-stat-value {
+	font-size: var(--cs-text-xl, 1.25rem);
+	font-weight: 700;
+	line-height: 1.1;
+	color: var(--cs-text, inherit);
+}
+
+.charsheet__combat-modal-stat-label {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.55));
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+/* Prominent refund / info banner. */
+.charsheet__combat-modal-banner {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+	border-radius: var(--cs-radius-md, 8px);
+	font-size: var(--cs-text-sm, 0.875rem);
+	line-height: 1.4;
+	background: var(--cs-info-light, rgba(6, 182, 212, 0.1));
+	border: 1px solid rgba(6, 182, 212, 0.35);
+	color: var(--cs-text, inherit);
+}
+
+.charsheet__combat-modal-banner--refund {
+	background: var(--cs-success-light, rgba(16, 185, 129, 0.1));
+	border-color: rgba(16, 185, 129, 0.4);
+}
+
+.charsheet__combat-modal-banner-icon {
+	font-size: 1.1rem;
+	line-height: 1.3;
+	flex: 0 0 auto;
+}
+
+.charsheet__combat-modal-banner strong {
+	color: var(--cs-success, #22c55e);
+}
+
+/* Muted rules note. */
+.charsheet__combat-modal-note {
+	font-size: var(--cs-text-sm, 0.875rem);
+	line-height: 1.4;
+	color: var(--cs-text-muted, rgba(255, 255, 255, 0.6));
+}
+
+.charsheet__combat-modal-note strong {
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+/* ========================================================================
    Combat Method Picker - Modern Glass Morphism Design
    ======================================================================== */
 
