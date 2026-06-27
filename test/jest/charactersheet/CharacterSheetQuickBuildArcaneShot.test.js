@@ -136,4 +136,79 @@ describe("QuickBuild Arcane Shot surfacing (Bug #6)", () => {
 		// Landed on the optfeatures step (canonical order after "subclass"), NOT skipped.
 		expect(qb._steps[qb._currentStep].id).toBe("optfeatures");
 	});
+
+	// ---- Integration: FULL progression across all qualifying levels ----
+	//
+	// The fix must offer NEW arcane-shot picks at every level the subclass grants more
+	// (not just unlock the L3 pick). `_analyzeLevels` accumulates the running count and
+	// resolves the subclass at every level pass, so the progression delta should yield the
+	// correct cumulative + per-level counts at L3/7/10/15/18 — matching level-up.
+
+	describe("full Arcane Shot progression via the real _analyzeLevels()", () => {
+		// `_analyzeLevels` calls _getLevelFeatures / getSubclassLevel etc., which read
+		// classFeatures — provide empty arrays so they no-op cleanly for this minimal class.
+		const fighterFull = {name: "Fighter", source: "PHB", classFeatures: [], subclasses: [arcaneArcher]};
+
+		function analyzeToLevel (targetLevel) {
+			const qb = Object.create(CharacterSheetQuickBuild.prototype);
+			qb._fromLevel = 0;
+			qb._classAllocations = [{
+				className: "Fighter",
+				classSource: "PHB",
+				currentLevel: 0,
+				targetLevel,
+				classData: fighterFull,
+			}];
+			qb._selections = {subclasses: {Fighter_PHB: arcaneArcher}, optionalFeatures: {}};
+			qb._state = {getFeatures: () => [], getClasses: () => []};
+			qb._page = {getClasses: () => [fighterFull], getClassFeatures: () => [], getSubclassFeatures: () => []};
+			qb._analyzeLevels();
+			return qb._levelAnalysis;
+		}
+
+		function asGainAt (analysis, characterLevel) {
+			const a = analysis.find(x => x.characterLevel === characterLevel);
+			return (a?.optionalFeatureGains || []).find(g => g.featureTypes.includes("AS")) || null;
+		}
+
+		it("cumulative selectable AS count matches the progression at L3/7/10/15/18", () => {
+			const analysis = analyzeToLevel(18);
+			const progression = {3: 2, 7: 3, 10: 4, 15: 5, 18: 6};
+			let cumulative = 0;
+			const cumulativeAt = {};
+			for (const a of analysis) {
+				const as = asGainAt(analysis, a.characterLevel);
+				if (as) cumulative += as.newCount;
+				cumulativeAt[a.characterLevel] = cumulative;
+			}
+			for (const [lvl, total] of Object.entries(progression)) {
+				expect(cumulativeAt[lvl]).toBe(total);
+			}
+		});
+
+		it("offers the correct NEW picks at each level: 2 at L3, then +1 at 7/10/15/18", () => {
+			const analysis = analyzeToLevel(18);
+			expect(asGainAt(analysis, 3).newCount).toBe(2);
+			expect(asGainAt(analysis, 7).newCount).toBe(1);
+			expect(asGainAt(analysis, 10).newCount).toBe(1);
+			expect(asGainAt(analysis, 15).newCount).toBe(1);
+			expect(asGainAt(analysis, 18).newCount).toBe(1);
+		});
+
+		it("offers NO AS pick at non-granting levels (e.g. L4/L5/L8)", () => {
+			const analysis = analyzeToLevel(18);
+			expect(asGainAt(analysis, 4)).toBeNull();
+			expect(asGainAt(analysis, 5)).toBeNull();
+			expect(asGainAt(analysis, 8)).toBeNull();
+		});
+
+		it("reports cumulative totalCount (not just the delta) at each granting level", () => {
+			const analysis = analyzeToLevel(18);
+			expect(asGainAt(analysis, 3).totalCount).toBe(2);
+			expect(asGainAt(analysis, 7).totalCount).toBe(3);
+			expect(asGainAt(analysis, 10).totalCount).toBe(4);
+			expect(asGainAt(analysis, 15).totalCount).toBe(5);
+			expect(asGainAt(analysis, 18).totalCount).toBe(6);
+		});
+	});
 });
