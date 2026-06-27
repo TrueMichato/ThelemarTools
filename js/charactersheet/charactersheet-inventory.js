@@ -4669,10 +4669,12 @@ class CharacterSheetInventory {
 				ac: armorAC,
 				type: armorType,
 				name: equippedArmor.name,
+				source: equippedArmor.source,
 				magicBonus: magicBonus,
 				dexterityMax: dexterityMax ?? null,
 				stealth: stealth || false,
 				strength: strength || null,
+				appliedUpgrades: equippedArmor.appliedUpgrades || [],
 			});
 		} else {
 			// No armor equipped
@@ -4682,7 +4684,7 @@ class CharacterSheetInventory {
 		// Update shield state - track base AC and magic bonus separately
 		const shieldBaseAc = equippedShield?.ac ?? 2;
 		const shieldMagicBonus = equippedShield?.bonusAc || 0;
-		this._state.setShield(equippedShield ? {equipped: true, ac: shieldBaseAc, bonus: shieldMagicBonus, name: equippedShield.name || "Shield"} : false);
+		this._state.setShield(equippedShield ? {equipped: true, ac: shieldBaseAc, bonus: shieldMagicBonus, name: equippedShield.name || "Shield", source: equippedShield.source, appliedUpgrades: equippedShield.appliedUpgrades || []} : false);
 
 		// Calculate AC bonuses from other equipped/attuned items (like Cloak of Protection, Ring of Protection)
 		const otherAcBonus = this._calculateItemBonuses("bonusAc", items, [equippedArmor, equippedShield]);
@@ -6164,10 +6166,12 @@ class CharacterSheetInventory {
 				ac: baseAC + magicBonus,
 				type: armorType,
 				name: equippedArmor.name,
+				source: equippedArmor.source,
 				magicBonus: magicBonus,
 				dexterityMax: dexterityMax ?? null,
 				stealth: stealth || false,
 				strength: strength || null,
+				appliedUpgrades: equippedArmor.appliedUpgrades || [],
 			});
 		} else {
 			this._state.setArmor(null);
@@ -6176,7 +6180,7 @@ class CharacterSheetInventory {
 		// Update shield state - track base AC and magic bonus separately
 		const shieldBaseAc = equippedShield?.ac ?? 2;
 		const shieldMagicBonus = equippedShield?.bonusAc || 0;
-		this._state.setShield(equippedShield ? {equipped: true, ac: shieldBaseAc, bonus: shieldMagicBonus, name: equippedShield.name || "Shield"} : false);
+		this._state.setShield(equippedShield ? {equipped: true, ac: shieldBaseAc, bonus: shieldMagicBonus, name: equippedShield.name || "Shield", source: equippedShield.source, appliedUpgrades: equippedShield.appliedUpgrades || []} : false);
 
 		// Calculate AC bonuses from other equipped/attuned items
 		const otherAcBonus = this._calculateItemBonuses("bonusAc", items, [equippedArmor, equippedShield]);
