@@ -27,6 +27,20 @@ const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlU
  * Orchestrates all character sheet functionality
  */
 class CharacterSheetPage {
+	// Small embedded subset of `data/loading-tips.json`, rendered synchronously so a
+	// helpful tip is visible the instant the loading overlay appears (the async JSON
+	// fetch resolves too late to cover the early part of init — see `_pInitLoadingTip`).
+	static _INLINE_LOADING_TIPS = [
+		"You can choose to fail Strength and Dexterity saves. For Wisdom, Intelligence, and Charisma saves, opt for disadvantage instead. Constitution? That's fate's domain.",
+		"A natural 20 isn't just luck; it's brilliance. On non-attacks, enjoy a +5 bonus. A natural 1? Brace for a -5 penalty and potential disaster.",
+		"Falling in combat is exhausting—literally. Survive death saves, but gain 1 point of exhaustion as the cost.",
+		"Magic items speak through their design. Examine them carefully—shape, weight, and feel could reveal their nature before you roll Arcana.",
+		"Phobias can be paralyzing. Fail a Wisdom save, and fear grips you. Succeed, and you act—but with careful concentration.",
+		"In Thelemar, reaching level 4 means no hard choices—gain both a feat and an ability score improvement. Power up!",
+		"Prayer is more than words. In Thelemar, true devotion requires sacrifice, symbols, and ceremony. Favour grows with effort.",
+		"Tip: hover over almost anything on your sheet—spells, items, conditions—to see its full rules text without leaving the page.",
+	];
+
 	constructor () {
 		this._state = new CharacterSheetState();
 		this._builder = null;
@@ -77,7 +91,8 @@ class CharacterSheetPage {
 	}
 
 	async pInit () {
-		void this._pInitLoadingTip();
+		// eslint-disable-next-line no-console
+		this._pInitLoadingTip().catch(err => console.warn("Failed to init loading tip:", err));
 		await this._pLoadData();
 		this._installHoverNormalizationHook();
 		this._initUi();
@@ -240,14 +255,27 @@ class CharacterSheetPage {
 		const elTip = document.querySelector("#charsheet-loading-tip");
 		if (!elTip) return;
 
+		// Show a tip INSTANTLY using a small embedded fallback list rendered
+		// synchronously (before the first `await`). The async JSON fetch below
+		// tends to resolve right around when the whole sheet finishes loading
+		// and the overlay is removed, so relying on it alone left the tip blank
+		// (the "Loading a helpful tip..." placeholder) for nearly the entire load.
+		const inlineTips = CharacterSheetPage._INLINE_LOADING_TIPS;
+		if (inlineTips.length) {
+			elTip.textContent = inlineTips[Math.floor(Math.random() * inlineTips.length)];
+		}
+
 		try {
 			const tips = await DataUtil.loadJSON("data/loading-tips.json");
 			const tipList = Array.isArray(tips) ? tips.filter(Boolean) : [];
 			if (!tipList.length) return;
 
+			// Swap to a tip from the full set once it loads (more variety). The
+			// inline tip already guaranteed instant, flicker-free content.
 			const tip = tipList[Math.floor(Math.random() * tipList.length)];
 			elTip.textContent = tip;
 		} catch (err) {
+			// Inline tip remains visible on failure.
 			// eslint-disable-next-line no-console
 			console.warn("Failed to load character sheet loading tip:", err);
 		}
