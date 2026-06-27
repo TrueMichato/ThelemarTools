@@ -7671,10 +7671,13 @@ class CharacterSheetBuilder {
 				skills: [],
 				tools: [],
 				languages: [],
+				toolChoices: {},
 				equipment: "",
 				feature: "",
 			};
 		}
+		// Back-compat: older in-progress data may predate the concrete tool sub-pick map.
+		if (!this._customBackgroundData.toolChoices) this._customBackgroundData.toolChoices = {};
 
 		const allSkills = this._page.getSkillsList().map((/** @type {*} */ s) => s.name);
 		const allTools = [
@@ -7800,21 +7803,54 @@ class CharacterSheetBuilder {
 			refreshProfCount();
 		};
 
+		// Category tools ("Musical Instrument", "Gaming Set") don't grant a specific
+		// proficiency on their own — the player must pick WHICH instrument/set. Render
+		// an inline sub-picker under the chip so the concrete choice is made here in the
+		// creator (mirrors the racial tool picker) instead of only after creation.
+		const categorySubPickers = {
+			"musical instrument": {label: "Musical Instrument", options: Renderer.generic.FEATURE__TOOLS_MUSICAL_INSTRUMENTS},
+			"gaming set": {label: "Gaming Set", options: Renderer.generic.FEATURE__TOOLS_GAMING_SETS},
+		};
+
 		const renderToolChips = () => {
 			toolChipsEl.innerHTML = "";
 			this._customBackgroundData.tools.forEach((/** @type {*} */ tool) => {
+				const wrp = e_({outer: `<span class="ve-flex-col mr-1 mb-1"></span>`});
 				const chip = e_({outer: `
-					<span class="ve-pill ve-flex-v-center mr-1 mb-1" style="padding: 2px 8px;">
+					<span class="ve-pill ve-flex-v-center" style="padding: 2px 8px;">
 						${tool}
 						<button class="ve-btn ve-btn-xs ve-btn-default ml-1 custom-bg-tool-remove" data-tool="${tool.replace(/"/g, "&quot;")}" title="Remove">×</button>
 					</span>
 				`});
 				chip.querySelector(".custom-bg-tool-remove")?.addEventListener("click", () => {
 					this._customBackgroundData.tools = this._customBackgroundData.tools.filter((/** @type {*} */ t) => t !== tool);
+					// Drop any concrete sub-pick tied to this category chip.
+					delete this._customBackgroundData.toolChoices[tool];
 					renderToolChips();
 					renderLangPicker();
 				});
-				toolChipsEl.append(chip);
+				wrp.append(chip);
+
+				const subPicker = categorySubPickers[(/** @type {*} */ (tool)).toLowerCase()];
+				if (subPicker) {
+					const selectEl = e_({outer: `
+						<select class="ve-form-control form-control--minimal ve-input-xs mt-1 custom-bg-tool-subpick" data-tool="${tool.replace(/"/g, "&quot;")}">
+							<option value="">-- Choose ${subPicker.label} --</option>
+						</select>
+					`});
+					subPicker.options.forEach((/** @type {*} */ opt) => {
+						selectEl.append(e_({outer: `<option value="${opt}">${(/** @type {*} */ (opt)).toTitleCase()}</option>`}));
+					});
+					const existing = this._customBackgroundData.toolChoices[tool];
+					if (existing) selectEl.value = existing;
+					selectEl.addEventListener("change", (/** @type {*} */ e) => {
+						if (e.target.value) this._customBackgroundData.toolChoices[tool] = e.target.value;
+						else delete this._customBackgroundData.toolChoices[tool];
+					});
+					wrp.append(selectEl);
+				}
+
+				toolChipsEl.append(wrp);
 			});
 		};
 
@@ -7977,13 +8013,19 @@ class CharacterSheetBuilder {
 
 		// Build tool proficiencies - detect choice-based tools vs fixed tools
 		const toolProfs = data.tools.filter((/** @type {*} */ t) => t);
+		const toolChoices = data.toolChoices || {};
 		const choiceToolMap = {
 			"musical instrument": "anyMusicalInstrument",
 			"artisan's tools": "anyArtisansTool",
 			"gaming set": "anyGamingSet",
 		};
-		const fixedTools = toolProfs.filter((/** @type {*} */ t) => !(/** @type {*} */ (choiceToolMap))[t.toLowerCase()]);
-		const choiceTools = toolProfs.filter((/** @type {*} */ t) => (/** @type {*} */ (choiceToolMap))[t.toLowerCase()]);
+		// A category tool with a concrete sub-pick (made in the creator) resolves to a
+		// fixed proficiency for that specific instrument/set; otherwise it stays a
+		// choice key so the post-creation preview picker can still resolve it.
+		const isResolvedCategory = (/** @type {*} */ t) => (/** @type {*} */ (choiceToolMap))[t.toLowerCase()] && toolChoices[t];
+		const fixedTools = toolProfs.filter((/** @type {*} */ t) => !(/** @type {*} */ (choiceToolMap))[t.toLowerCase()] || isResolvedCategory(t))
+			.map((/** @type {*} */ t) => (isResolvedCategory(t) ? toolChoices[t] : t));
+		const choiceTools = toolProfs.filter((/** @type {*} */ t) => (/** @type {*} */ (choiceToolMap))[t.toLowerCase()] && !isResolvedCategory(t));
 
 		// Build toolProficiencies array with correct structure
 		const toolProficiencies = [];
