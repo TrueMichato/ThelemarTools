@@ -9670,6 +9670,13 @@ class CharacterSheetState {
 			bonusSpellSaveDc: item.bonusSpellSaveDc || 0,
 			critThreshold: item.critThreshold || 20,
 			damageDieIncrease: 0,
+			// Non-flat upgrade riders (e.g. Saw-toothed +1d4 slashing). Surfaced here so combat /
+			// roll consumers (S5) can apply them; previously computed by getUpgradeEffects but
+			// silently dropped at this boundary.
+			bonusDamageDice: null,
+			bonusDamageType: null,
+			// Weapon-property tags granted by upgrades (e.g. Silvered, Magical, Runic).
+			tags: [],
 		};
 
 		// Add upgrade effects
@@ -9682,6 +9689,13 @@ class CharacterSheetState {
 			base.damageDieIncrease += effects.damageDieIncrease;
 			if (effects.critThresholdReduction > 0) {
 				base.critThreshold = (base.critThreshold || 20) - effects.critThresholdReduction;
+			}
+			if (effects.bonusDamageDice) {
+				base.bonusDamageDice = effects.bonusDamageDice;
+				base.bonusDamageType = effects.bonusDamageType;
+			}
+			if (Array.isArray(effects.tags) && effects.tags.length) {
+				base.tags = [...effects.tags];
 			}
 		}
 
@@ -9757,13 +9771,45 @@ class CharacterSheetState {
 			if (noStealthDisadv) return false;
 		}
 
-		// Check for "Muffled" armor upgrade (removes stealth disadvantage)
-		if (typeof CharacterSheetUpgrades !== "undefined") {
-			const armorEffects = CharacterSheetUpgrades.getArmorUpgradeEffects(armor);
-			if (armorEffects.muffled) return false;
-		}
+		// Check for "Muffled" armor upgrade (removes stealth disadvantage). Resolved from the
+		// LIVE equipped armor (not the AC snapshot, which can omit/stale appliedUpgrades).
+		const armorEffects = this._getEquippedArmorUpgradeEffects();
+		if (armorEffects?.muffled) return false;
 
 		return true;
+	}
+
+	/**
+	 * Resolve the upgrade-bearing object for the currently equipped armor.
+	 * Single source of truth for armor `appliedUpgrades`: prefer the live equipped inventory
+	 * armor item (never stale when upgrades are applied/removed while equipped, and immune to
+	 * `setArmor` snapshots that omit `appliedUpgrades`). Fall back to the `_data.ac.armor`
+	 * snapshot for Builder/QuickBuild armor set without a backing inventory item.
+	 * @returns {object|null} An object carrying `appliedUpgrades`, or null if no armor is worn
+	 * @private
+	 */
+	_getEquippedArmorUpgradeSource () {
+		// The equipped inventory armor is authoritative for `appliedUpgrades` (apply/remove
+		// mutate it directly). Prefer it whenever it exists — even with an empty upgrade list —
+		// so a stale AC snapshot can never resurrect a removed upgrade. Fall back to the
+		// `_data.ac.armor` snapshot only when no backing inventory armor exists (Builder /
+		// QuickBuild set armor without pushing an inventory item).
+		const invArmor = this._data.inventory?.find(inv => inv.equipped && inv.item?.armor);
+		if (invArmor?.item) return invArmor.item;
+		return this._data.ac.armor || null;
+	}
+
+	/**
+	 * Get the armor-upgrade effect flags for the currently equipped armor, resolving upgrades
+	 * from the live inventory item (see `_getEquippedArmorUpgradeSource`).
+	 * @returns {object|null} Effect flags from `getArmorUpgradeEffects`, or null
+	 * @private
+	 */
+	_getEquippedArmorUpgradeEffects () {
+		if (typeof CharacterSheetUpgrades === "undefined") return null;
+		const src = this._getEquippedArmorUpgradeSource();
+		if (!src) return null;
+		return CharacterSheetUpgrades.getArmorUpgradeEffects(src);
 	}
 
 	/**
@@ -9771,9 +9817,7 @@ class CharacterSheetState {
 	 * @returns {number} Amount to reduce critical hit damage from nonmagical attacks
 	 */
 	getCritDamageReduction () {
-		const armor = this._data.ac.armor;
-		if (!armor || typeof CharacterSheetUpgrades === "undefined") return 0;
-		return CharacterSheetUpgrades.getArmorUpgradeEffects(armor).critDamageReduction || 0;
+		return this._getEquippedArmorUpgradeEffects()?.critDamageReduction || 0;
 	}
 
 	/**
@@ -9781,9 +9825,10 @@ class CharacterSheetState {
 	 * @returns {Array<{label: string, description: string, type: string}>}
 	 */
 	getArmorUpgradeNotes () {
-		const armor = this._data.ac.armor;
-		if (!armor || typeof CharacterSheetUpgrades === "undefined") return [];
-		return CharacterSheetUpgrades.getArmorUpgradeNotes(armor);
+		if (typeof CharacterSheetUpgrades === "undefined") return [];
+		const src = this._getEquippedArmorUpgradeSource();
+		if (!src) return [];
+		return CharacterSheetUpgrades.getArmorUpgradeNotes(src);
 	}
 
 	/**
@@ -22907,11 +22952,11 @@ class CharacterSheetState {
 			if (equipped && item.type === "armor") {
 				if (item.acBonus !== undefined) {
 					// Shield-type item (has bonus instead of base AC)
-					this._data.ac.shield = /** @type {*} */ ({ac: item.ac ?? 2, bonus: item.acBonus, name: item.name});
+					this._data.ac.shield = /** @type {*} */ ({ac: item.ac ?? 2, bonus: item.acBonus, name: item.name, source: item.source, appliedUpgrades: item.appliedUpgrades || []});
 				} else if (item.ac !== undefined) {
 					// Body armor
 					const armorType = item.armorType || this._inferArmorType(item);
-					this.setArmor({ac: item.ac, type: armorType, name: item.name});
+					this.setArmor({ac: item.ac, type: armorType, name: item.name, source: item.source, appliedUpgrades: item.appliedUpgrades || []});
 				}
 			}
 		}
@@ -23505,11 +23550,11 @@ class CharacterSheetState {
 			if (item?.type === "armor" || item?.type === "M" || item?.type === "R" || item?.ac !== undefined || item?.acBonus !== undefined) {
 				if (item.acBonus !== undefined) {
 					// Shield
-					this._data.ac.shield = /** @type {*} */ ({ac: item.ac ?? 2, bonus: item.acBonus, name: item.name});
+					this._data.ac.shield = /** @type {*} */ ({ac: item.ac ?? 2, bonus: item.acBonus, name: item.name, source: item.source, appliedUpgrades: item.appliedUpgrades || []});
 				} else if (item.ac !== undefined) {
 					// Body armor
 					const armorType = item.armorType || this._inferArmorType(item);
-					this.setArmor({ac: item.ac, type: armorType, name: item.name});
+					this.setArmor({ac: item.ac, type: armorType, name: item.name, source: item.source, appliedUpgrades: item.appliedUpgrades || []});
 				}
 			}
 
