@@ -3620,6 +3620,22 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Whether a feature is a TGTT Battle Tactic (optionalFeatureType "BT"). Battle
+	 * tactics render in their own dedicated combat-tab section (with reaction buttons +
+	 * attack-bonus toggles), so they must never be treated as passive modifiers or as
+	 * generic activatable active-states (e.g. Last Ditch Evasion is a reaction, not a
+	 * toggle). Mirrors `isCombatMethod`.
+	 * @param {*} feature
+	 * @returns {boolean}
+	 */
+	static isBattleTactic (/** @type {*} */ feature) {
+		if (!feature) return false;
+		if (feature.optionalFeatureTypes?.some?.((/** @type {*} */ ft) => ft === "BT")) return true;
+		if (Array.isArray(feature.featureType) && feature.featureType.some((/** @type {*} */ ft) => ft === "BT")) return true;
+		return false;
+	}
+
+	/**
 	 * Partition a class-feature display list into the buckets the Features tab renders
 	 * separately: standalone features, parent-feature options (e.g. Specialties),
 	 * auto-granted combat methods (regular features that are combat methods — e.g. the
