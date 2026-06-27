@@ -1862,6 +1862,33 @@ class CharacterSheetCombat {
 		return "";
 	}
 
+	/**
+	 * Resolve the standing weapon-UPGRADE damage-dice riders for an attack (#14).
+	 * Single source of truth for `_rollDamage`, supporting BOTH wirings agreed with S6:
+	 *   (b) explicit `attack.weaponDamageRiders` — populated by the auto-attack builder
+	 *       (`renderAttacks`) from `getEffectiveItemBonuses.bonusDamageDice/Type`; and
+	 *   (a) S6's recommended DIRECT read of `getEffectiveItemBonuses(sourceItem.id)` —
+	 *       used as a fallback so the extra die still rolls for ANY attack that carries a
+	 *       `sourceItem` but did not pass through the builder mapping.
+	 * Explicit riders win when present; otherwise we derive from the effective bonuses —
+	 * never both, so the die is counted exactly once. Each rider keeps the upgrade's
+	 * specified damage type (falling back to the weapon's own type), and is crit-doubled
+	 * by the caller via `_parseDamage(dice, isCrit)`.
+	 * @returns {Array<{source?: string, dice: string, damageType?: string}>}
+	 */
+	_getWeaponUpgradeDamageRiders (attack) {
+		if (attack?.weaponDamageRiders?.length) return attack.weaponDamageRiders;
+		const itemId = attack?.sourceItem?.id;
+		if (!itemId) return [];
+		const eff = this._state.getEffectiveItemBonuses?.(itemId);
+		if (!eff?.bonusDamageDice) return [];
+		return [{
+			source: "Weapon Upgrade",
+			dice: eff.bonusDamageDice,
+			damageType: eff.bonusDamageType || attack.damageType,
+		}];
+	}
+
 	async _rollDamage (attackId, isCrit = false) {
 		const attacks = this._state.getAttacks();
 		let attack = attacks.find(a => a.id === attackId);
@@ -2033,10 +2060,9 @@ class CharacterSheetCombat {
 			// the upgrade is permanent and unconditional, so they are NOT added to
 			// `usedRiderIds` (never disabled) and skip `_weaponRiderEnabled`. They ride the
 			// SAME riderParts pipeline below, so they are crit-doubled (via `isCrit`) and
-			// reported under their OWN damage type (S6 surfaces the aggregated dice/type via
-			// getEffectiveItemBonuses.bonusDamageDice/Type; the auto-attack builder attaches
-			// them per-attack as `attack.weaponDamageRiders`).
-			for (const rider of (attack.weaponDamageRiders || [])) {
+			// reported under their OWN damage type. The rider list is resolved through
+			// `_getWeaponUpgradeDamageRiders` which supports BOTH agreed S6 wirings.
+			for (const rider of this._getWeaponUpgradeDamageRiders(attack)) {
 				if (!rider?.dice) continue;
 				const riderRoll = this._parseDamage(rider.dice, isCrit);
 				riderDamageTotal += riderRoll.total;

@@ -677,7 +677,7 @@ describe("#20 Doubleshot consumer fold-in (_rollDamage)", () => {
 // rolls it on EVERY hit (no manual toggle), crit-doubled, under its OWN damage type.
 
 describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
-	function mkDamageCombat (attack) {
+	function mkDamageCombat (attack, effectiveBonuses = null) {
 		const captured = [];
 		const PER = {"1d8": 5, "2d6": 7, "1d4": 3, "1d6": 4};
 		const combat = Object.create(CharacterSheetCombat.prototype);
@@ -693,6 +693,7 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 			getBonusFromStates: () => 0,
 			isStateTypeActive: () => false,
 			getExtraDamageFromStates: () => [],
+			getEffectiveItemBonuses: () => effectiveBonuses,
 		};
 		combat._page = {
 			pAnimateDamageDice: () => {},
@@ -765,6 +766,52 @@ describe("#14 weapon-upgrade damage-dice rider consumer (_rollDamage)", () => {
 		await combat._rollDamage("p", false);
 		expect(captured[0].total).toBe(8);
 		expect(captured[0].subtitle).not.toContain("Upgrade");
+	});
+
+	// --- (a) S6's recommended DIRECT read: an attack with a sourceItem but NO explicit
+	// `weaponDamageRiders` still rolls the +1d4 by reading getEffectiveItemBonuses. ---
+	it("derives the rider from getEffectiveItemBonuses when no explicit list is attached (S6 path a)", async () => {
+		const attack = {id: "raw", name: "Saw-toothed Longsword", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing", sourceItem: {id: "w9"}};
+		const {combat, captured} = mkDamageCombat(attack, {bonusDamageDice: "1d4", bonusDamageType: "slashing"});
+		await combat._rollDamage("raw", false);
+		// 1d8=5 + str 3 + derived 1d4=3 (slashing) = 11.
+		expect(captured[0].total).toBe(11);
+		expect(captured[0].subtitle).toContain("Weapon Upgrade 1d4 slashing");
+	});
+
+	it("uses the upgrade's OWN type from getEffectiveItemBonuses, not the weapon's (path a)", async () => {
+		const attack = {id: "raw2", name: "Flametongue", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing", sourceItem: {id: "w10"}};
+		const {combat, captured} = mkDamageCombat(attack, {bonusDamageDice: "1d6", bonusDamageType: "fire"});
+		await combat._rollDamage("raw2", false);
+		expect(captured[0].total).toContain("8 slashing + 4 fire = 12");
+		expect(captured[0].subtitle).toContain("Weapon Upgrade 1d6 fire");
+	});
+
+	it("explicit weaponDamageRiders WIN over the derived fallback (no double-count)", async () => {
+		// Explicit 1d4 present AND effective bonuses would also yield a die — must roll ONCE.
+		const attack = {
+			id: "dup",
+			name: "Saw-toothed",
+			isMelee: true,
+			abilityMod: "str",
+			damage: "1d8",
+			damageType: "slashing",
+			sourceItem: {id: "w11"},
+			weaponDamageRiders: [{source: "Weapon Upgrade", dice: "1d4", damageType: "slashing"}],
+		};
+		const {combat, captured} = mkDamageCombat(attack, {bonusDamageDice: "1d4", bonusDamageType: "slashing"});
+		await combat._rollDamage("dup", false);
+		// 5 + 3 + ONE 1d4=3 = 11 (NOT 14 from double-counting).
+		expect(captured[0].total).toBe(11);
+	});
+
+	it("falls back to the weapon's own type when the upgrade omits a type (path a)", async () => {
+		const attack = {id: "raw3", name: "Longsword", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing", sourceItem: {id: "w12"}};
+		const {combat, captured} = mkDamageCombat(attack, {bonusDamageDice: "1d4"}); // no bonusDamageType
+		await combat._rollDamage("raw3", false);
+		// Same slashing type → folds into the single-type total: 5 + 3 + 3 = 11.
+		expect(captured[0].total).toBe(11);
+		expect(captured[0].subtitle).toContain("Weapon Upgrade 1d4 slashing");
 	});
 });
 
