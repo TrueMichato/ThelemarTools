@@ -476,7 +476,7 @@ describe("#16 Quiver auto-place + retrieval (state)", () => {
 		expect(after).toBe(before - 1);
 	});
 
-	it("_rollAttack DEFERS consumption to the quiver picker (no inline double-consume)", () => {
+	it("_rollAttack consumes EXACTLY one round inline (R33 — post-attack picker removed)", () => {
 		const state = mkQuiverState();
 		state.setItemEquipped("quiver1", true);
 		state.autoPlaceAmmunitionInQuiver("quiver1");
@@ -508,20 +508,23 @@ describe("#16 Quiver auto-place + retrieval (state)", () => {
 		};
 		combat._renderSneakAttackToggle = () => {};
 		combat._isSneakAttackAvailableThisTurn = () => false;
-		combat._runPostAttackHooks = async () => {}; // picker would run here
+		combat._runPostAttackHooks = async () => {};
 		combat._consumeOnAttackStates = () => {};
 		combat._clearPendingSpellRider = () => {};
 
-		const before = state.getItems().find(i => i.id === "arrows").quantity;
+		const sumCompatible = () => state.getAmmunitionForWeapon("bow1").reduce((s, a) => s + (a.quantity || 0), 0);
+		const before = sumCompatible();
 		combat._rollAttack("bowAtk", null);
-		const after = state.getItems().find(i => i.id === "arrows").quantity;
-		// The synchronous roll must NOT consume from loose inventory — the post-attack
-		// quiver picker owns consumption, so ammo is spent exactly once (not twice).
-		expect(after).toBe(before);
+		const after = sumCompatible();
+		// R33: the post-attack quiver popup was removed. The synchronous roll now
+		// consumes exactly one round of compatible ammo inline (never zero, never
+		// twice). A specific quiver arrow is spent on-demand via the 🏹 Special
+		// Arrow button on the attack row, not automatically here.
+		expect(after).toBe(before - 1);
 	});
 });
 
-describe("#16 Quiver post-attack picker hook (combat)", () => {
+describe("#16 Special Arrow eligibility gate (combat, R33 — replaces the post-attack picker hook)", () => {
 	function mkQuiverCombat (quiverAmmoForWeapon) {
 		return mkCombat({
 			isAmmunitionTrackingEnabled: () => true,
@@ -529,25 +532,26 @@ describe("#16 Quiver post-attack picker hook (combat)", () => {
 		});
 	}
 
-	const bow = {name: "Longbow", isRanged: true, sourceItem: {id: "bow1", ammoType: "arrow|phb"}};
+	const bow = {name: "Longbow", isMelee: false, isSpell: false, sourceItem: {id: "bow1", ammoType: "arrow|phb"}};
 
-	it("offers the quiver picker on a ranged attack when the quiver holds compatible ammo", () => {
+	it("offers the Special Arrow affordance on a ranged weapon attack when the quiver holds compatible ammo", () => {
 		const combat = mkQuiverCombat([{id: "arrows", name: "Arrows", quantity: 20}]);
-		const hook = combat._getPostAttackHooks().find(h => h.id === "quiver");
-		expect(hook).toBeDefined();
-		expect(hook.predicate({isRanged: true, attack: bow})).toBe(true);
+		// The old `id:"quiver"` post-attack hook is gone (R33 redesign).
+		expect(combat._getPostAttackHooks().some(h => h.id === "quiver")).toBe(false);
+		expect(combat._isSpecialArrowEligible(bow, false)).toBe(true);
+		expect(combat._renderSpecialArrowButton(bow, false)).toMatch(/charsheet__attack-special-arrow/);
 	});
 
-	it("does NOT offer the picker on a melee attack", () => {
+	it("does NOT offer the affordance on a melee attack", () => {
 		const combat = mkQuiverCombat([{id: "arrows", name: "Arrows", quantity: 20}]);
-		const hook = combat._getPostAttackHooks().find(h => h.id === "quiver");
-		expect(hook.predicate({isRanged: false, attack: MELEE_ATTACK})).toBe(false);
+		expect(combat._isSpecialArrowEligible(MELEE_ATTACK, true)).toBe(false);
+		expect(combat._renderSpecialArrowButton(MELEE_ATTACK, true)).toBe("");
 	});
 
-	it("does NOT offer the picker when the quiver has no compatible ammo", () => {
+	it("does NOT offer the affordance when the quiver has no compatible ammo", () => {
 		const combat = mkQuiverCombat([]);
-		const hook = combat._getPostAttackHooks().find(h => h.id === "quiver");
-		expect(hook.predicate({isRanged: true, attack: bow})).toBe(false);
+		expect(combat._isSpecialArrowEligible(bow, false)).toBe(false);
+		expect(combat._renderSpecialArrowButton(bow, false)).toBe("");
 	});
 });
 

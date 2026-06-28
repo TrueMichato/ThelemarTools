@@ -149,16 +149,22 @@ function state_isThrownWeapon (item) {
 }
 
 // =========================================================================
-// Combat-tab render (Task 3) — un-hide + list, with a DOM stub
+// Combat-tab render (Task 3) — compact summary, with a DOM stub
+//
+// R33 UX REDESIGN: `renderCombatQuiver` now renders a COMPACT summary into
+// `#charsheet-combat-quiver-summary` (and shows the 🏹 Quiver header button
+// `#charsheet-combat-quiver-open`) instead of un-hiding the old standalone
+// `#charsheet-combat-quiver-section`. The full rich quiver moved to a modal
+// (`_showQuiverModal`). This test was updated from the old section shape.
 // =========================================================================
 
-describe("renderCombatQuiver", () => {
+describe("renderCombatQuiver (R33 compact summary)", () => {
 	let originalDocument;
 
 	function stubDom () {
 		const els = {
-			"charsheet-combat-quiver-section": {style: {display: "none"}, innerHTML: ""},
-			"charsheet-combat-quiver": {style: {}, innerHTML: ""},
+			"charsheet-combat-quiver-summary": {style: {}, innerHTML: "", dataset: {}},
+			"charsheet-combat-quiver-open": {style: {display: "none"}, dataset: {}, addEventListener: () => {}},
 		};
 		originalDocument = globalThis.document;
 		globalThis.document = {getElementById: (id) => els[id] || null};
@@ -174,16 +180,17 @@ describe("renderCombatQuiver", () => {
 		return combat;
 	}
 
-	it("un-hides the section and lists the backfilled dart when a quiver is equipped", () => {
+	it("shows the 🏹 Quiver button and lists the backfilled dart in the compact summary", () => {
 		const els = stubDom();
 		const state = loadCharacter(loadFixture());
 		const combat = makeCombat(state);
 
 		combat.renderCombatQuiver();
 
-		expect(els["charsheet-combat-quiver-section"].style.display).toBe("");
-		expect(els["charsheet-combat-quiver"].innerHTML).toMatch(/dart/i);
-		// Not the empty-state placeholder.
-		expect(els["charsheet-combat-quiver"].innerHTML).not.toMatch(/Quiver is empty/i);
+		// Header button revealed when a quiver is equipped.
+		expect(els["charsheet-combat-quiver-open"].style.display).toBe("");
+		// Compact summary lists the ammo (the backfilled dart) with counts.
+		expect(els["charsheet-combat-quiver-summary"].innerHTML).toMatch(/dart/i);
+		expect(els["charsheet-combat-quiver-summary"].innerHTML).toMatch(/charsheet__quiver-summary/);
 	});
 });

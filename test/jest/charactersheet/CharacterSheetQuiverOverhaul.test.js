@@ -198,10 +198,17 @@ describe("idempotency — round-trip keeps the quiver clean", () => {
 });
 
 // ===========================================================================
-// Defect #1 — the quiver section lives in Combat + Inventory, NOT Overview
+// Defect #1 — the quiver lives in Combat + Inventory, NOT Overview
+//
+// R33 UX REDESIGN: the standalone combat quiver SECTION
+// (`#charsheet-combat-quiver-section`) was REMOVED. The Combat-tab quiver now
+// surfaces as a compact summary (`#charsheet-combat-quiver-summary`) plus a 🏹
+// Quiver header button (`#charsheet-combat-quiver-open`) inside "Weapons &
+// Attacks". The Inventory-tab section is unchanged. These assertions were
+// updated from the old standalone-section shape to the new compact surfaces.
 // ===========================================================================
 
-describe("quiver section placement in charactersheet.html (defect #1)", () => {
+describe("quiver placement in charactersheet.html (defect #1, R33 redesign)", () => {
 	const html = fs.readFileSync(HTML_PATH, "utf8");
 	const idx = (s) => html.indexOf(s);
 
@@ -210,17 +217,25 @@ describe("quiver section placement in charactersheet.html (defect #1)", () => {
 	const spells = idx(`id="charsheet-tab-spells"`);
 	const inventory = idx(`id="charsheet-tab-inventory"`);
 	const features = idx(`id="charsheet-tab-features"`);
-	const combatQuiver = idx(`id="charsheet-combat-quiver-section"`);
+	const combatSummary = idx(`id="charsheet-combat-quiver-summary"`);
+	const combatOpenBtn = idx(`id="charsheet-combat-quiver-open"`);
 	const invQuiver = idx(`id="charsheet-inventory-quiver-section"`);
 
-	it("the combat quiver section exists and sits INSIDE the Combat tab", () => {
-		expect(combatQuiver).toBeGreaterThan(-1);
-		expect(combatQuiver).toBeGreaterThan(combat);
-		expect(combatQuiver).toBeLessThan(spells);
+	it("the standalone combat quiver SECTION is gone (R33 — replaced by summary + modal)", () => {
+		expect(html.includes(`id="charsheet-combat-quiver-section"`)).toBe(false);
 	});
 
-	it("the combat quiver section is NOT inside the Overview tab", () => {
-		const inOverview = combatQuiver > overview && combatQuiver < combat;
+	it("the combat quiver compact summary + 🏹 Quiver button sit INSIDE the Combat tab", () => {
+		expect(combatSummary).toBeGreaterThan(-1);
+		expect(combatOpenBtn).toBeGreaterThan(-1);
+		expect(combatSummary).toBeGreaterThan(combat);
+		expect(combatSummary).toBeLessThan(spells);
+		expect(combatOpenBtn).toBeGreaterThan(combat);
+		expect(combatOpenBtn).toBeLessThan(spells);
+	});
+
+	it("the combat quiver surfaces are NOT inside the Overview tab", () => {
+		const inOverview = combatSummary > overview && combatSummary < combat;
 		expect(inOverview).toBe(false);
 	});
 
@@ -230,8 +245,8 @@ describe("quiver section placement in charactersheet.html (defect #1)", () => {
 		expect(invQuiver).toBeLessThan(features);
 	});
 
-	it("there is exactly ONE combat-quiver section element (not duplicated across tabs)", () => {
-		const matches = html.split(`id="charsheet-combat-quiver-section"`).length - 1;
+	it("there is exactly ONE combat-quiver compact-summary element (not duplicated across tabs)", () => {
+		const matches = html.split(`id="charsheet-combat-quiver-summary"`).length - 1;
 		expect(matches).toBe(1);
 	});
 });
