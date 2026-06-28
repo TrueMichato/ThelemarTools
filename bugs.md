@@ -7,7 +7,46 @@ _None._
 
 ## Closed Bugs
 
-### Round 33 (quiver UX overhaul + Combat Methods count in Combat tab vs save `D_kaios_Petri_2_v2.json`) — COMPLETE
+### Round 34 (quiver/ammo subsystem sync + Combat Methods persistence vs save `D_kaios_Petri_2_v2.json`) — COMPLETE
+
+Four follow-ups against the same Fighter 9 TGTT Arcane Archer save, fixed by two coordinated
+sessions and integrated in order S-METHODS-PERSIST → S-QUIVER-SYNC (disjoint boundaries:
+combat.js picker methods vs combat.js/state.js quiver region). Each fix LOADS the real save
+through `loadFromJson` and asserts real mechanics + idempotency; an orchestrator integrated
+repro (`CharacterSheetRound34IntegratedRepro.test.js`, 11 tests) proves both coexist under a
+single load and survive a serialize→load round-trip.
+
+* **#4** (S-METHODS-PERSIST) Combat Methods management did not persist — changing which
+  methods you know in the picker, then closing via X / click-outside / ESC, discarded every
+  change. Root cause was UI-only: the picker's per-method add/remove click handlers call
+  `_addCombatMethod` / `_removeCombatMethod` (→ `addFeature` / `removeFeature`) but only the
+  footer "Done" button saved; `cbClose` just removes a body class. Fix:
+  `_addCombatMethod` and `_removeCombatMethod` now call `this._page?.saveCharacter?.()`
+  themselves, so every add/remove durably persists regardless of how the modal closes
+  (`addFeature`'s duplicate guard keeps it idempotent). Note: methods carrying
+  `className`+`level` (e.g. Iron Will) are replayed from level history on load by design, so
+  "forgetting" those is governed by level-history replay, not this handler.
+* **#1** (S-QUIVER-SYNC) Adding/using arrows didn't sync the quiver/inventory. Fixes:
+  (1a) `state.addItem` now calls `autoPlaceAmmunitionInQuiver()` when the added item is
+  recognised ammo and a quiver is equipped (idempotent, narrow — skips ammo already in another
+  container, never pulls non-ammo); (1b) the inline `_rollAttack` consume and
+  `_pApplySpecialArrow` now call `this._page?.saveCharacter?.()` + `this._page?._inventory?.render?.()`
+  after consuming a round, so the stack decrement persists and the Inventory tab re-renders
+  (not re-gated on `ammunitionTracking`).
+* **#2** (S-QUIVER-SYNC) Arrow info wasn't fully shown in the quiver. `_buildQuiverFullHtml`
+  now renders each arrow's complete info — effective count, +X attack/damage (data fields OR
+  parsed extra dice), and the FULL description (every entry via `Renderer` with a plain-text
+  fallback), not just the first sentence.
+* **#3** (S-QUIVER-SYNC) Magic-arrow effects were "wasted" because `_extractAmmoBonusDamage`
+  read only `bonusWeaponDamage` and 0 of 40 site ammo items carry that field. Fix: it now
+  also parses extra-damage dice from `entries` TEXT (`extra/additional NdM <type> damage`,
+  incl. `{@damage}`/`{@dice}` forms) and `_getAmmoEffectText` surfaces the full effect — while
+  both return null/empty for mundane ammo (never invent dice). A coverage test over ALL site
+  ammunition (`data/items.json` + `data/items-base.json`) asserts every non-mundane ammo
+  surfaces an effect/damage (no wasted) and every mundane one surfaces nothing (no fake):
+  22 non-mundane / 18 mundane of 40.
+
+
 
 Two UX follow-ups reported against the same Fighter 9 TGTT Arcane Archer save, fixed by two
 coordinated sessions and integrated in order S-METHODCOUNT → S-QUIVER-UX. Each fix LOADS the
