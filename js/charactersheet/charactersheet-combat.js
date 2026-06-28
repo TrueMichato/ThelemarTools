@@ -10054,10 +10054,16 @@ class CharacterSheetCombat {
 			if (pool && pool.kind === "restricted" && Array.isArray(pool.codes)) {
 				pool.codes.forEach(c => availableSet.add(c));
 				sawRestriction = true;
-				// When the subclass choice fully replaces the base picker, the base
-				// (unrestricted) Fighter list must NOT widen the pool back to "all".
-				if (pool.replacesBase) continue;
 			}
+			// NOTE: the subclass choice pool is ADDITIVE in the post-hoc combat-tab
+			// tradition editor. Even a `replacesBase` Fighter subclass (Arcane Archer /
+			// Champion / Banneret / Battle Master) keeps the base Fighter free tradition
+			// choice available here, so methods learned in another tradition before
+			// subclassing (e.g. the dikaios Arcane Archer's Adamant Mountain / Sanguine
+			// Knot picks) can still be kept and more traditions can still be added. The
+			// `replacesBase` flag only suppresses the DUPLICATE base picker at the moment
+			// the subclass is first chosen in QuickBuild/LevelUp — it must NOT narrow this
+			// management UI. So we always fall through and add the base available list.
 
 			// Base class available traditions.
 			const cmProg = classData?.optionalfeatureProgression?.find(p =>
@@ -10462,6 +10468,17 @@ class CharacterSheetCombat {
 			description: method.entries ? Renderer.get().render({entries: method.entries}) : "",
 			entries: method.entries,
 		};
+		// Persist the structured combat-method markers from the catalog entity so the
+		// learned method stays ATTRIBUTED (tradition/degree/stamina/action) through a
+		// save -> reload. Without these the generic CTM optionalFeatureTypes carry no
+		// tradition letter, so getMethodTraditionCode returns null and the method is
+		// un-attributed forever. The `method` arg IS the catalog combatMethod entity, so
+		// it carries these fields; copy each only when present (never write undefined).
+		featureData._entityType = "combatMethod";
+		if (method.tradition !== undefined) featureData.tradition = method.tradition;
+		if (method.degree !== undefined) featureData.degree = method.degree;
+		if (method.staminaCost !== undefined) featureData.staminaCost = method.staminaCost;
+		if (method.actionType !== undefined) featureData.actionType = method.actionType;
 		this._state.addFeature(featureData);
 		// Persist immediately so the change survives regardless of how the picker
 		// modal is closed (X / click-outside / ESC don't trigger the Done save).
