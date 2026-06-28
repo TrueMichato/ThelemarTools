@@ -2394,6 +2394,10 @@ class CharacterSheetCombat {
 				this._page?.saveCharacter?.();
 				this._page?._inventory?.render?.();
 				this.renderCombatQuiver?.();
+				// Re-render the attack rows so the per-weapon ammo selector reflects the
+				// decremented count (and drops a now-depleted ammo / reverts to Regular).
+				// Without this the <select> keeps a stale count until a full page refresh.
+				this.renderAttacks?.();
 			}
 		}
 	}
@@ -10494,6 +10498,11 @@ class CharacterSheetCombat {
 	 */
 	_removeCombatMethod (method) {
 		this._state.removeFeature(method.name, method.source);
+		// Also strip the method from the level-history optional-feature snapshots so the
+		// load-time replay (_reapplyHistoryOptionalFeatures) does not resurrect it on the
+		// next refresh. Without this, removing a method that was LEARNED at a level (its
+		// snapshot lives in levelHistory) survives in-memory but reappears after reload.
+		this._state.removeOptionalFeatureFromHistory?.(method.name, method.source);
 		// Persist immediately so the removal survives regardless of how the picker
 		// modal is closed (X / click-outside / ESC don't trigger the Done save).
 		this._page?.saveCharacter?.();

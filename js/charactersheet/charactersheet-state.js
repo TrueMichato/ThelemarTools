@@ -28691,6 +28691,49 @@ class CharacterSheetState {
 		}
 	}
 
+	/**
+	 * Purge an optional-feature choice (matched by name + source) from EVERY level-history
+	 * entry's `choices.optionalFeatures` and `choices.replayData.optionalFeatures`.
+	 *
+	 * Combat methods are persisted both as runtime features (`_data.features`) AND as
+	 * level-history optional-feature snapshots (the level at which they were learned). On
+	 * load, `_reapplyHistoryOptionalFeatures` re-adds every history optional feature — so a
+	 * combat method removed via the picker (which only edits `_data.features`) is silently
+	 * RESURRECTED on the next refresh. Stripping it from the history snapshots too keeps the
+	 * removal authoritative across reloads. Matches by source when the snapshot carries one
+	 * (lenient when it doesn't) so we never clobber a same-named feature from another source.
+	 *
+	 * @param {string} name
+	 * @param {string} [source]
+	 * @returns {boolean} whether any history entry was modified
+	 */
+	removeOptionalFeatureFromHistory (name, source) {
+		if (!name || !Array.isArray(this._data.levelHistory)) return false;
+		const nm = String(name).toLowerCase();
+		const src = String(source || "").toLowerCase();
+		const matches = (o) => {
+			if (!o || (o.name || "").toLowerCase() !== nm) return false;
+			const osrc = (o.source || "").toLowerCase();
+			return !src || !osrc || osrc === src;
+		};
+		let changed = false;
+		for (const h of this._data.levelHistory) {
+			const ch = h?.choices;
+			if (!ch) continue;
+			if (Array.isArray(ch.optionalFeatures)) {
+				const before = ch.optionalFeatures.length;
+				ch.optionalFeatures = ch.optionalFeatures.filter(o => !matches(o));
+				if (ch.optionalFeatures.length !== before) changed = true;
+			}
+			if (ch.replayData && Array.isArray(ch.replayData.optionalFeatures)) {
+				const before = ch.replayData.optionalFeatures.length;
+				ch.replayData.optionalFeatures = ch.replayData.optionalFeatures.filter(o => !matches(o));
+				if (ch.replayData.optionalFeatures.length !== before) changed = true;
+			}
+		}
+		return changed;
+	}
+
 	getKnownMetamagicKeys () {
 		const features = this._data.features || [];
 		const knownKeys = new Set();

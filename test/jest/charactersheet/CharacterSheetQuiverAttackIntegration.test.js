@@ -57,6 +57,9 @@ function loadCharacter () {
 function mkCombat (state) {
 	const combat = Object.create(CharacterSheetCombat.prototype);
 	combat._state = state;
+	// The damage-roll ammo-consume block now re-renders the attack rows (R36 #2);
+	// stub it so the DOM-less harness doesn't hit `document` in `renderAttacks`.
+	combat.renderAttacks = () => {};
 	combat._page = {saveCharacter: () => {}};
 	return combat;
 }

@@ -1418,6 +1418,17 @@ class CharacterSheetInventory {
 		this._renderItemList();
 		this._updateEncumbrance();
 		this._page.saveCharacter();
+		// Adding ammunition auto-places it into an equipped quiver (state.addItem hook).
+		// Re-render the combat attack rows + quiver so the per-weapon ammo selector picks
+		// up the new ammo immediately instead of only after a full page refresh.
+		this._refreshCombatAmmoViews();
+	}
+
+	/** Re-render combat attack rows + quiver so ammo selectors reflect inventory changes. */
+	_refreshCombatAmmoViews () {
+		const combat = this._page?._combat;
+		combat?.renderAttacks?.();
+		combat?.renderCombatQuiver?.();
 	}
 
 	_addCustomItem (name, quantity = 1, weight = 0, options = {}) {
@@ -1426,6 +1437,7 @@ class CharacterSheetInventory {
 		this._state.addItem(newItem);
 		this._renderItemList();
 		this._page.saveCharacter();
+		this._refreshCombatAmmoViews();
 	}
 
 	/**

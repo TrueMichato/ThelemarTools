@@ -7,6 +7,44 @@ _None._
 
 ## Closed Bugs
 
+### Round 36 (combat-method removal persistence + ammo-selector live refresh vs save `D_kaios_Petri_2_v2.json`) — COMPLETE
+
+Three follow-ups against the same Fighter 9 TGTT Arcane Archer save. Unlike prior rounds these
+were root-caused with LIVE browser reproduction (the bugs live in the runtime load/render paths
+the unit suites had not exercised — which is exactly why three earlier "fixed" rounds of the
+combat-method persistence bug were false greens) and verified end-to-end in the live sheet.
+Regression: `CharacterSheetRound36IntegratedRepro.test.js` (13 tests) loads the real save,
+removes a level-learned method through the real picker path, runs the full
+`loadFromJson → _reapplyHistoryOptionalFeatures` replay, and asserts it stays gone (RED without
+the fix — Iron Will resurrects), plus the ammo re-render wiring for #2/#3.
+
+* **#1** Combat-method changes still didn't survive a refresh: a method **removed** via the picker
+  reappeared after reload. Root cause (the real vector the Jest suites missed): combat methods are
+  persisted in TWO places — `_data.features` AND a per-level snapshot in
+  `levelHistory[].choices.optionalFeatures` (+ `.replayData.optionalFeatures`) recorded at the
+  level the method was learned. On load, `_reapplyHistoryOptionalFeatures` re-adds every history
+  optional feature, so a method removed only from `_data.features` (what the picker did) was
+  RESURRECTED on the next load. This is why ADDS persisted but REMOVALS of level-learned methods
+  (e.g. Iron Will at Fighter 4) didn't. Fix: new `state.removeOptionalFeatureFromHistory(name,
+  source)` strips the method from every history snapshot (both arrays, matched by name + lenient
+  source); `_removeCombatMethod` calls it after `removeFeature` so the removal is authoritative
+  across reloads. Adds are unaffected (additive/idempotent replay).
+* **#2** After using an arrow, the per-weapon ammo selector's count didn't update (and a depleted
+  last arrow stayed selectable) until a full refresh. Root cause: the `_rollDamage` consume block
+  re-rendered the quiver + Inventory tab + persisted, but NOT the combat attack rows, so the
+  `<select>` kept stale counts. Fix: the consume block now also calls `renderAttacks()`, which
+  rebuilds the attack rows (and reverts a depleted ammo to "Regular").
+* **#3** Ammo added to inventory was auto-placed into the equipped quiver but only appeared in the
+  ammo selector after a refresh. Root cause: the inventory add path (`_addItem` / `_addCustomItem`)
+  re-rendered the inventory + saved, but never re-rendered the combat tab. Fix: new
+  `_refreshCombatAmmoViews()` (re-renders combat attack rows + quiver) is called from both add
+  paths, so new ammo surfaces in the selector immediately.
+
+Boundaries: state.js `removeOptionalFeatureFromHistory` (new) + combat.js `_removeCombatMethod` /
+`_rollDamage` consume block + inventory.js add paths. Three existing quiver/R34 suites re-pointed
+to stub `renderAttacks` (the new consume-path render call) in their DOM-less combat harness — no
+assertions weakened. Full gate: 344 suites / 11465 tests green; eslint clean.
+
 ### Round 35 (combat-method attribution + additive tradition picker + active-ammo selector vs save `D_kaios_Petri_2_v2.json`) — COMPLETE
 
 Three follow-ups against the same Fighter 9 TGTT Arcane Archer save, fixed by two coordinated
