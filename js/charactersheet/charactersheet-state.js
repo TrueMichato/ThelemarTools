@@ -4380,13 +4380,16 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * (#11) Load-time backfill: for every EQUIPPED quiver, auto-place loose,
-	 * recognised ammunition that isn't already contained. Repairs saves whose
-	 * quiver was equipped before the auto-place-on-equip pipeline existed (or
-	 * before darts were recognised as ammo). Idempotent — `autoPlaceAmmunitionInQuiver`
-	 * skips ammo already contained or already in another container, so repeated
-	 * load→save→load cycles never duplicate `containedItems` nor pull in thrown
-	 * weapons. Runs LAST in `loadFromJson` and reports the total placed.
+	 * (#11) Load-time backfill: for every EQUIPPED quiver, PURGE any stale
+	 * non-ammunition `containedItems` (e.g. armor wrongly baked in by an earlier
+	 * over-broad recognition) and auto-place loose, recognised ammunition that
+	 * isn't already contained. Repairs saves whose quiver was equipped before the
+	 * auto-place-on-equip pipeline existed (or before arrows/darts were recognised
+	 * as ammo). Both the purge and the placement live in
+	 * `autoPlaceAmmunitionInQuiver`, which is idempotent — it skips ammo already
+	 * contained or already in another container, so repeated load→save→load cycles
+	 * never duplicate `containedItems`, never re-introduce purged non-ammo, nor
+	 * pull in thrown weapons. Runs LAST in `loadFromJson` and reports total placed.
 	 * @returns {number} Total ammunition stacks placed across all equipped quivers.
 	 */
 	_migrateQuiverBackfill () {
@@ -23138,23 +23141,48 @@ class CharacterSheetState {
 	/**
 	 * Recognise a single item as ammunition (or an ammunition-like throwable that
 	 * belongs in a quiver). Kept deliberately NARROW: a true ammunition `type`
-	 * ("A"/"AF"), an explicit ammo boolean, or a word-boundary dart/needle name —
-	 * so throwable consumables like "Sleep Dart (5)" (stored as generic `gear`
-	 * with no boolean) qualify, but bare `gear`, daggers, javelins and other
-	 * thrown weapons do NOT.
+	 * CODE ("A"/"AF"), an explicit ammo boolean, or a word-boundary ammo name —
+	 * so throwable consumables like "Sleep Dart (5)" and gear-typed magic ammo
+	 * like "Healing Arrow" (stored as generic `gear` with no boolean) qualify,
+	 * but bare `gear`, ARMOR, daggers, javelins, bows and other non-ammo do NOT.
+	 *
+	 * The type check splits on "|" and EXACT-matches the leading code (so a
+	 * source-suffixed "A|XPHB" still counts) — never `startsWith("A")`, which
+	 * wrongly swept in `armor`/`apparatus`/etc.
 	 * @param {object} item - A flattened item (from getItems) or raw item data
 	 * @returns {boolean}
 	 */
 	_isAmmunitionItem (item) {
 		if (!item) return false;
-		// Type "A" or "AF" (ammunition, ammunition for firearms)
-		const itemType = item.type?.toUpperCase() || "";
-		if (itemType.startsWith("A")) return true;
+		// Ammunition TYPE CODE: "A" (ammunition) or "AF" (ammunition, firearm).
+		// Split on "|" so a source-suffixed code (e.g. "A|XPHB") is matched on the
+		// bare code, and EXACT-match — `startsWith("A")` wrongly matched "ARMOR".
+		const [typeCode] = (item.type || "").toUpperCase().split("|");
+		if (typeCode === "A" || typeCode === "AF") return true;
 		if (item.arrow || item.bolt || item.bullet || item.dart || item.needle || item.sling) return true;
-		// Narrow name-based recognition for dart/needle ammo stored as generic gear
-		// (e.g. "Sleep Dart (5)"). Word boundaries avoid matching unrelated names.
+		// Name-based recognition for ammo stored as generic gear (e.g. "Sleep Dart
+		// (5)", "Healing Arrow"). Word boundaries keep weapons that merely launch
+		// ammo (Longbow, Hand Crossbow, Blowgun, Rapier) and unrelated gear OUT.
 		const name = (item.name || "").toLowerCase();
-		return /\b(?:darts?|needles?)\b/.test(name);
+		return /\b(?:arrows?|bolts?|bullets?|darts?|needles?|slings?)\b/.test(name);
+	}
+
+	/**
+	 * Effective number of rounds a single loose ammunition stack represents.
+	 * Some ammo is sold/stored as a BUNDLE whose count is baked into the name
+	 * (e.g. "Sleep Dart (5)" is one inventory entry of quantity 1 that is really
+	 * five darts). Effective rounds = `quantity * bundleSize`, where bundleSize is
+	 * the trailing "(N)" in the name (default 1). Used for DISPLAY so the player
+	 * sees the true round count, not the raw stack quantity.
+	 * @param {object} item - A flattened item (from getItems) or raw item data
+	 * @returns {number}
+	 */
+	getEffectiveAmmoCount (item) {
+		if (!item) return 0;
+		const qty = Number(item.quantity) || 0;
+		const m = /\((\d+)\)\s*$/.exec(item.name || "");
+		const bundle = m ? Math.max(1, parseInt(m[1], 10)) : 1;
+		return qty * bundle;
 	}
 
 	/**
@@ -23352,6 +23380,11 @@ class CharacterSheetState {
 	 * a hard filter, because players expect one quiver to carry their arrows and
 	 * darts together. Never moves ammo that is already inside another container,
 	 * and never re-adds ammo already contained (so it is idempotent).
+	 *
+	 * Before placing, PURGES any stale `containedItems` ids that no longer resolve
+	 * to a recognised ammunition item (e.g. ARMOR wrongly baked in by an earlier
+	 * over-broad recognition, or dangling ids whose item was deleted) so the quiver
+	 * only ever holds real ammo.
 	 * @param {string} [quiverId] - Quiver item ID; defaults to the equipped quiver.
 	 * @returns {number} Count of ammunition stacks placed.
 	 */
@@ -23362,6 +23395,15 @@ class CharacterSheetState {
 		if (!container?.item) return 0;
 
 		if (!container.item.containedItems) container.item.containedItems = [];
+		// Purge stale non-ammunition / dangling ids first (e.g. armor baked in by an
+		// earlier `startsWith("A")` bug). Keep only ids that still resolve to a
+		// recognised ammunition item. Idempotent.
+		container.item.containedItems = container.item.containedItems.filter(cid => {
+			if (cid === id) return false;
+			const inv = this._data.inventory.find(i => i.id === cid);
+			const it = inv?.item || inv;
+			return it ? this._isAmmunitionItem(it) : false;
+		});
 		const already = new Set(container.item.containedItems);
 
 		let placed = 0;

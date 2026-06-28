@@ -5989,9 +5989,63 @@ class CharacterSheetInventory {
 		this._initCurrencyInputs();
 		this._updateEncumbrance();
 		this._renderEquippedItems();
+		this._renderInventoryQuiver();
 		this._renderAttunedItems();
 		// Sync armor state from equipped items (important on character load)
 		this._syncArmorState();
+	}
+
+	/**
+	 * Render the equipped quiver and its contained ammunition in the Inventory
+	 * tab sidebar. Mirrors the Combat-tab quiver (same data, effective bundle
+	 * counts) so a player can see/verify their loadout from Inventory too. Hidden
+	 * entirely when no quiver is equipped.
+	 */
+	_renderInventoryQuiver () {
+		const section = document.getElementById("charsheet-inventory-quiver-section");
+		const container = document.getElementById("charsheet-inventory-quiver");
+		if (!container) return;
+
+		const quiver = this._state.getEquippedQuiver?.();
+		if (!quiver) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+
+		const ammo = this._state.getQuiverAmmunition?.(quiver.id) || [];
+		const total = ammo.reduce((sum, a) => sum + (this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)), 0);
+
+		let nameHtml = quiver.name;
+		if (this._page?.getHoverLink && quiver.source) {
+			try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, quiver.name, quiver.source); } catch (e) { nameHtml = quiver.name; }
+		}
+
+		const rowsHtml = ammo.length
+			? ammo.map(a => {
+				let aName = a.name;
+				if (this._page?.getHoverLink && a.source) {
+					try { aName = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { aName = a.name; }
+				}
+				const count = this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0);
+				return `
+					<div class="charsheet__quiver-row ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+						<span class="bold">${aName}</span>
+						<span class="badge badge-default" title="Remaining">×${count}</span>
+					</div>`;
+			}).join("")
+			: `<div class="ve-muted ve-small">Quiver is empty. Equip ammunition to fill it.</div>`;
+
+		container.innerHTML = `
+			<div class="charsheet__quiver">
+				<div class="charsheet__quiver-head ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+					<span class="bold">${nameHtml}</span>
+					<span class="ve-muted ve-small">${total} ${total === 1 ? "round" : "rounds"} total</span>
+				</div>
+				<div class="charsheet__quiver-list">${rowsHtml}</div>
+			</div>
+		`;
 	}
 
 	/**

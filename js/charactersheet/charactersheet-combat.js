@@ -1295,11 +1295,12 @@ class CharacterSheetCombat {
 				// ammo compatible with the weapon, offer a non-blocking picker so the
 				// player chooses which arrow they loosed (and sees its effect). Consumes
 				// exactly one — the chosen ammo, or a default arrow if dismissed — so the
-				// shot always costs ammunition without ever double-spending.
+				// shot always costs ammunition without ever double-spending. Deliberately
+				// NOT gated on `isAmmunitionTrackingEnabled`: the quiver is its own
+				// always-on feature (players who keep tracking off still want the picker).
 				id: "quiver",
 				predicate: (ctx) => ctx.isRanged
 					&& !ctx.attack?.isSpell
-					&& this._state.isAmmunitionTrackingEnabled?.()
 					&& !!ctx.attack?.sourceItem?.ammoType
 					&& (this._state.getQuiverAmmunitionForWeapon?.(ctx.attack.sourceItem.id) || []).length > 0,
 				handler: (ctx) => this._pPickQuiverAmmo(ctx),
@@ -1699,7 +1700,7 @@ class CharacterSheetCombat {
 					<div class="charsheet__quiver-opt-row ve-flex ve-flex-v-center ve-flex-wrap gap-1" style="margin-bottom:6px;">
 						<span class="bold">${nameHtml}</span>
 						${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
-						<span class="badge badge-default ml-1" title="Remaining in quiver">×${a.quantity || 0}</span>
+						<span class="badge badge-default ml-1" title="Remaining in quiver">×${this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)}</span>
 						${eff ? `<span class="ve-muted ve-small charsheet__quiver-opt-eff">${eff}</span>` : ""}
 						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__quiver-opt ml-auto" data-idx="${i}" title="Loose this ammunition">Loose</button>
 					</div>`;
@@ -1756,7 +1757,7 @@ class CharacterSheetCombat {
 		if (section) section.style.display = "";
 
 		const ammo = this._state.getQuiverAmmunition?.(quiver.id) || [];
-		const total = ammo.reduce((sum, a) => sum + (a.quantity || 0), 0);
+		const total = ammo.reduce((sum, a) => sum + (this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)), 0);
 
 		let nameHtml = quiver.name;
 		if (this._page?.getHoverLink && quiver.source) {
@@ -1770,10 +1771,11 @@ class CharacterSheetCombat {
 				if (this._page?.getHoverLink && a.source) {
 					try { aName = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { aName = a.name; }
 				}
+				const count = this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0);
 				return `
 					<div class="charsheet__quiver-row ve-flex ve-flex-v-center ve-flex-wrap gap-1">
 						<span class="bold">${aName}</span>
-						<span class="badge badge-default" title="Remaining">×${a.quantity || 0}</span>
+						<span class="badge badge-default" title="Remaining">×${count}</span>
 						${eff ? `<span class="ve-muted ve-small">${eff}</span>` : ""}
 					</div>`;
 			}).join("")
