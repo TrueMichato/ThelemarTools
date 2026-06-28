@@ -21783,10 +21783,12 @@ class CharacterSheetState {
 		// Store applied effects for debugging/display
 		this._data.appliedClassFeatureEffects = appliedEffects;
 
-		// Keep auto-granted combat methods (e.g. Primal Focus Upgrade → Singular Focus /
-		// Groundshatter) in sync with the current feature/level set. Idempotent and
-		// no-ops until the combat-method catalog is available, so it is safe to run on
+		// Repair manually-learned combat methods that lost their entity markers (so they
+		// surface in getCombatMethods), THEN reconcile auto-granted combat methods so the
+		// granted pass sees the repaired markers. Both are catalog-gated + idempotent and
+		// no-op until the combat-method catalog is available, so they are safe to run on
 		// every effect application (load, level-up, level-down, focus-mode change).
+		this._repairCombatMethodMarkers();
 		this.reconcileGrantedCombatMethods();
 
 		// Rebuild the Inexorable (IllMastery) save modifier from its persisted adjacent-
@@ -28558,6 +28560,71 @@ class CharacterSheetState {
 	setClassFeatureCatalog (classFeatures, subclassFeatures) {
 		this._classFeatureCatalog = Array.isArray(classFeatures) ? classFeatures : [];
 		this._subclassFeatureCatalog = Array.isArray(subclassFeatures) ? subclassFeatures : [];
+	}
+
+	/**
+	 * Repair manually-learned combat methods whose structured entity markers were lost
+	 * (old saves / a learn path that stored them as a bare `{featureType:"Optional
+	 * Feature"}` with no `_entityType`/`tradition`/`degree`/`staminaCost`). Such features
+	 * fail `CharacterSheetClassUtils.isCombatMethod`, so they are silently dropped from
+	 * `getCombatMethods()` — unmanageable and un-activatable (root cause of the
+	 * "Doubleshot does nothing" report: it can never even be triggered).
+	 *
+	 * This is the manually-learned sibling of `reconcileGrantedCombatMethods()` (which
+	 * re-hydrates *granted* methods). It re-attaches the structured fields from the
+	 * canonical combat-method catalog on an EXACT name|source match to a `combatMethod`
+	 * entity, persisting them onto the stored feature so `toJson()` keeps the repair.
+	 *
+	 * Conservative by design:
+	 *   - Catalog-gated: no-ops until `setCombatMethodCatalog` has run (self-defers on an
+	 *     early load and completes on the next reconcile once the catalog is available).
+	 *   - Idempotent: features already recognised as combat methods are skipped, so a
+	 *     second pass (or a repaired-then-reloaded save) is a no-op.
+	 *   - Never converts a Battle Tactic (`BT`) or Arcane Shot (`AS`) optionalfeature —
+	 *     those are intentionally NOT combat methods.
+	 *   - Only an exact name|source catalog match to a `combatMethod` entity is repaired;
+	 *     anything else is left untouched.
+	 */
+	_repairCombatMethodMarkers () {
+		if (!this._combatMethodCatalog?.length) return;
+		if (!Array.isArray(this._data.features)) return;
+
+		const hasTypePrefix = (feature, prefixes) => {
+			const types = [
+				...(Array.isArray(feature.optionalFeatureTypes) ? feature.optionalFeatureTypes : []),
+				...(Array.isArray(feature.featureType) ? feature.featureType : []),
+			];
+			return types.some(ft => typeof ft === "string" && prefixes.some(p => ft.startsWith(p)));
+		};
+
+		for (const f of this._data.features) {
+			// Already a recognised combat method (correctly stored or already repaired) →
+			// nothing to do. Keeps the pass idempotent and leaves valid data untouched.
+			if (CharacterSheetClassUtils.isCombatMethod(f)) continue;
+			// Never reclassify a Battle Tactic / Arcane Shot optionalfeature as a combat method.
+			if (hasTypePrefix(f, ["BT", "AS"])) continue;
+
+			const name = (f.name || "").toLowerCase();
+			const source = (f.source || "").toLowerCase();
+			if (!name) continue;
+
+			const entity = this._combatMethodCatalog.find(m =>
+				m?._entityType === "combatMethod"
+				&& (m.name || "").toLowerCase() === name
+				&& (m.source || "").toLowerCase() === source);
+			if (!entity) continue;
+
+			// Re-hydrate the structured fields that isCombatMethod / _parseCombatMethodEffects
+			// / getCombatMethods read. Only copy fields the catalog entry actually carries so
+			// we never clobber existing data with undefined. `_entityType` alone satisfies
+			// isCombatMethod, but the rest drive correct tradition/degree/stamina/action output.
+			f._entityType = "combatMethod";
+			if (entity.tradition !== undefined) f.tradition = entity.tradition;
+			if (entity.degree !== undefined) f.degree = entity.degree;
+			if (entity.staminaCost !== undefined) f.staminaCost = entity.staminaCost;
+			if (entity.actionType !== undefined) f.actionType = entity.actionType;
+			if (Array.isArray(entity.optionalFeatureTypes)) f.optionalFeatureTypes = [...entity.optionalFeatureTypes];
+		}
 	}
 
 	/**
