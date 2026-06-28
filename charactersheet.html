@@ -1074,7 +1074,12 @@
 						</div>
 
 						<div class="charsheet__section">
-							<h4 class="charsheet__section-title">Weapons & Attacks</h4>
+							<h4 class="charsheet__section-title charsheet__section-title--flex">
+								<span>Weapons & Attacks</span>
+								<button class="ve-btn ve-btn-default ve-btn-xs charsheet__quiver-open-btn" id="charsheet-combat-quiver-open" style="display: none;" title="Open the full quiver">🏹 Quiver</button>
+							</h4>
+							<!-- Compact quiver summary (equipped quiver name + ammo-with-counts); full quiver opens via the header button -->
+							<div class="charsheet__combat-quiver-summary" id="charsheet-combat-quiver-summary"></div>
 							<!-- Weapon Masteries (folded in — display only; ids preserved for JS bindings) -->
 							<div id="charsheet-masteries-group" class="charsheet__masteries-group" style="display: none;">
 								<div class="charsheet__masteries-header">
@@ -1089,15 +1094,6 @@
 								<!-- Attack list with roll buttons -->
 							</div>
 							<button class="ve-btn ve-btn-default ve-btn-sm mt-2" id="charsheet-btn-add-attack"><span class="glyphicon glyphicon-plus"></span> Add Custom Attack</button>
-						</div>
-
-						<!-- Quiver (ammunition container) -->
-						<div class="charsheet__section charsheet__section--quiver mt-3" id="charsheet-combat-quiver-section" style="display: none;">
-							<h4 class="charsheet__section-title">
-								<span class="charsheet__section-icon">🏹</span>
-								Quiver
-							</h4>
-							<div class="charsheet__combat-quiver" id="charsheet-combat-quiver"></div>
 						</div>
 
 						<div class="charsheet__section mt-3" id="charsheet-combat-channeled-spell-section" style="display: none;">

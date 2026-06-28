@@ -5276,6 +5276,56 @@
 	color: var(--cs-danger, #ef4444);
 }
 
+/* ========================================================================
+   Quiver — Special Arrow button + compact summary (R33)
+   ======================================================================== */
+.charsheet__attack-special-arrow {
+	white-space: nowrap;
+	font-size: var(--cs-text-sm, 0.85rem);
+}
+
+.charsheet__combat-quiver-summary:empty {
+	display: none;
+}
+
+.charsheet__quiver-summary {
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, rgba(127, 127, 127, 0.25));
+	border-radius: var(--cs-radius-md, 8px);
+	background: var(--cs-surface-2, rgba(127, 127, 127, 0.06));
+}
+
+.charsheet__quiver-summary-icon {
+	font-size: 1.05em;
+}
+
+.charsheet__quiver-summary-sep {
+	opacity: 0.5;
+}
+
+.charsheet__quiver-summary-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.05rem 0.4rem;
+	border-radius: var(--cs-radius-sm, 4px);
+	background: var(--cs-surface-3, rgba(127, 127, 127, 0.12));
+	font-size: var(--cs-text-sm, 0.85rem);
+}
+
+.charsheet__quiver-open-btn {
+	white-space: nowrap;
+}
+
+.charsheet__section-title--flex {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+
 .charsheet__attack-btn {
 	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
 	white-space: nowrap;

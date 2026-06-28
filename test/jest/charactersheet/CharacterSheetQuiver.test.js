@@ -12,16 +12,17 @@
  *       real equip path, not just the state helper. Type-restriction and
  *       no-poach-from-another-container are pinned too.
  *
- *   (b) COMBAT-TAB VISIBILITY — `renderCombatQuiver` un-hides the dedicated
- *       combat-tab section (`#charsheet-combat-quiver-section`) ONLY when a quiver
- *       is equipped, and hides it otherwise (the "in overview / not showing in
- *       combat" complaint). There is no overview quiver any more.
+ *   (b) COMBAT-TAB COMPACT SUMMARY (R33) — `renderCombatQuiver` renders a compact
+ *       quiver summary into `#charsheet-combat-quiver-summary` and reveals the 🏹
+ *       Quiver header button (`#charsheet-combat-quiver-open`) ONLY when a quiver is
+ *       equipped, hiding both otherwise (the "not showing in combat" complaint).
+ *       The old standalone `#charsheet-combat-quiver-section` is gone.
  *
- *   (c) NON-BLOCKING, RANGED-ONLY PICKER — the post-attack quiver hook fires for a
- *       ranged weapon attack and NOT for melee/spell; consumption happens exactly
- *       once and is additive (registered alongside Arcane Shot / crit riders, and
- *       deferred out of the synchronous roll so it never double-spends or gates
- *       the resolved attack).
+ *   (c) ON-DEMAND, RANGED-ONLY SPECIAL ARROW (R33) — the post-attack popup is
+ *       replaced by a per-row 🏹 Special Arrow button. Eligibility flows from the
+ *       pure `_isSpecialArrowEligible` gate (ranged weapon, not melee/spell, quiver
+ *       has compatible ammo); choosing an arrow rolls weapon damage and spends
+ *       exactly one round via `_pApplySpecialArrow`.
  *
  *   (d) SAVE/LOAD round-trips the quiver's contents; a legacy save without
  *       `containedItems` loads without error.
@@ -162,21 +163,27 @@ describe("Quiver — equip-time backfill (the 'doesn't take arrows in' complaint
 
 // ===========================================================================
 // (b) COMBAT-TAB VISIBILITY — the "not showing in combat" complaint
+//
+// R33 UX REDESIGN: `renderCombatQuiver` no longer un-hides a standalone
+// `#charsheet-combat-quiver-section`. It renders a COMPACT summary into
+// `#charsheet-combat-quiver-summary` and reveals/hides the 🏹 Quiver header
+// button `#charsheet-combat-quiver-open` (which opens the full quiver modal).
+// Assertions were migrated from the old section shape to the new surfaces.
 // ===========================================================================
 
-describe("Quiver — combat-tab visibility (the 'not showing in combat' complaint)", () => {
+describe("Quiver — combat-tab compact summary (the 'not showing in combat' complaint)", () => {
 	let savedDocument;
-	let section;
-	let container;
+	let openBtn;
+	let summary;
 
 	beforeEach(() => {
 		savedDocument = globalThis.document;
-		section = {style: {display: "PRESET"}, innerHTML: ""};
-		container = {style: {}, innerHTML: "STALE"};
+		openBtn = {style: {display: "PRESET"}, dataset: {}, addEventListener: () => {}};
+		summary = {style: {}, innerHTML: "STALE"};
 		globalThis.document = {
 			getElementById: (id) => {
-				if (id === "charsheet-combat-quiver-section") return section;
-				if (id === "charsheet-combat-quiver") return container;
+				if (id === "charsheet-combat-quiver-open") return openBtn;
+				if (id === "charsheet-combat-quiver-summary") return summary;
 				return null;
 			},
 			querySelector: () => null,
@@ -188,45 +195,52 @@ describe("Quiver — combat-tab visibility (the 'not showing in combat' complain
 
 	afterEach(() => { globalThis.document = savedDocument; });
 
-	it("keeps the quiver section HIDDEN when no quiver is equipped", () => {
+	it("keeps the 🏹 Quiver button hidden + summary empty when no quiver is equipped", () => {
 		const state = mkQuiverState(); // quiver not equipped
 		mkCombat(state).renderCombatQuiver();
-		expect(section.style.display).toBe("none");
-		expect(container.innerHTML).toBe("");
+		expect(openBtn.style.display).toBe("none");
+		expect(summary.innerHTML).toBe("");
 	});
 
-	it("UN-HIDES the quiver section in the COMBAT tab when a quiver is equipped", () => {
+	it("reveals the 🏹 Quiver button + renders the compact summary when a quiver is equipped", () => {
 		const state = mkQuiverState();
 		state.setItemEquipped("quiver1", true);
 		state.autoPlaceAmmunitionInQuiver("quiver1");
 
 		mkCombat(state).renderCombatQuiver();
 
-		expect(section.style.display).toBe(""); // un-hidden
-		expect(container.innerHTML).toContain("Quiver");
-		expect(container.innerHTML).toContain("Arrows");
+		expect(openBtn.style.display).toBe(""); // button revealed
+		expect(summary.innerHTML).toContain("charsheet__quiver-summary");
+		expect(summary.innerHTML).toContain("Quiver");
+		expect(summary.innerHTML).toContain("Arrows");
 	});
 
-	it("re-hides the section if the quiver is later unequipped", () => {
+	it("re-hides the button + clears the summary if the quiver is later unequipped", () => {
 		const state = mkQuiverState();
 		state.setItemEquipped("quiver1", true);
 		const combat = mkCombat(state);
 		combat.renderCombatQuiver();
-		expect(section.style.display).toBe("");
+		expect(openBtn.style.display).toBe("");
 
 		state.setItemEquipped("quiver1", false);
 		combat.renderCombatQuiver();
-		expect(section.style.display).toBe("none");
-		expect(container.innerHTML).toBe("");
+		expect(openBtn.style.display).toBe("none");
+		expect(summary.innerHTML).toBe("");
 	});
 });
 
 // ===========================================================================
-// (c) NON-BLOCKING, RANGED-ONLY PICKER
+// (c) SPECIAL ARROW AFFORDANCE — on-demand, ranged-only (R33 redesign)
+//
+// R33 REPLACED the post-attack quiver popup with an on-demand 🏹 Special Arrow
+// button on each ranged-weapon attack row. Eligibility is decided by the pure
+// `_isSpecialArrowEligible` gate (no DOM); choosing an arrow rolls the weapon's
+// damage and spends one round via `_pApplySpecialArrow`. These tests were
+// migrated from the old `_getPostAttackHooks` `id:"quiver"` hook shape.
 // ===========================================================================
 
-describe("Quiver — non-blocking, ranged-only post-attack picker", () => {
-	const bow = {name: "Longbow", isRanged: true, sourceItem: {id: "bow1", ammoType: "arrow|phb"}};
+describe("Quiver — on-demand, ranged-only Special Arrow affordance (R33)", () => {
+	const bow = {name: "Longbow", isMelee: false, isSpell: false, sourceItem: {id: "bow1", ammoType: "arrow|phb"}};
 
 	function mkPickerCombat (quiverAmmoForWeapon, {tracking = true} = {}) {
 		return mkCombat({
@@ -235,59 +249,56 @@ describe("Quiver — non-blocking, ranged-only post-attack picker", () => {
 		});
 	}
 
-	function quiverHook (combat) {
-		return combat._getPostAttackHooks().find(h => h.id === "quiver");
-	}
-
-	it("FIRES on a ranged weapon attack with compatible quiver ammo", () => {
+	it("is ELIGIBLE on a ranged weapon attack with compatible quiver ammo", () => {
 		const combat = mkPickerCombat([{id: "arrows", name: "Arrows", quantity: 20}]);
-		expect(quiverHook(combat).predicate({isRanged: true, attack: bow})).toBe(true);
+		expect(combat._isSpecialArrowEligible(bow, false)).toBe(true);
+		expect(combat._renderSpecialArrowButton(bow, false)).toMatch(/Special Arrow/);
 	});
 
-	it("does NOT fire on a MELEE attack", () => {
+	it("is NOT eligible on a MELEE attack", () => {
 		const combat = mkPickerCombat([{id: "arrows", name: "Arrows", quantity: 20}]);
-		const melee = {name: "Longsword", isMelee: true, type: "melee", range: "melee"};
-		expect(quiverHook(combat).predicate({isRanged: false, attack: melee})).toBe(false);
+		const melee = {name: "Longsword", isMelee: true, isSpell: false, sourceItem: {id: "sword", ammoType: undefined}};
+		expect(combat._isSpecialArrowEligible(melee, true)).toBe(false);
 	});
 
-	it("does NOT fire on a SPELL attack even when ranged", () => {
+	it("is NOT eligible on a SPELL attack even when ranged", () => {
 		const combat = mkPickerCombat([{id: "arrows", name: "Arrows", quantity: 20}]);
-		const spell = {name: "Fire Bolt", isSpell: true, isRanged: true, sourceItem: {id: "bow1", ammoType: "arrow|phb"}};
-		expect(quiverHook(combat).predicate({isRanged: true, attack: spell})).toBe(false);
+		const spell = {name: "Fire Bolt", isSpell: true, isMelee: false, sourceItem: {id: "bow1", ammoType: "arrow|phb"}};
+		expect(combat._isSpecialArrowEligible(spell, false)).toBe(false);
 	});
 
-	it("does NOT fire when the quiver holds no compatible ammo", () => {
+	it("is NOT eligible when the quiver holds no compatible ammo", () => {
 		const combat = mkPickerCombat([]);
-		expect(quiverHook(combat).predicate({isRanged: true, attack: bow})).toBe(false);
+		expect(combat._isSpecialArrowEligible(bow, false)).toBe(false);
 	});
 
-	it("FIRES even when ammunition tracking is disabled (the quiver is its own always-on feature)", () => {
-		// R32 behaviour change (defect #5): the quiver picker is deliberately NOT
-		// gated on `isAmmunitionTrackingEnabled`. Players who keep loose-ammo
-		// tracking OFF still want the quiver picker on a ranged shot. The previous
-		// assertion (hook suppressed when tracking off) is now obsolete.
+	it("is ELIGIBLE even when ammunition tracking is disabled (the quiver is its own always-on feature)", () => {
+		// Defect #5 carried into R33: the affordance is deliberately NOT gated on
+		// `isAmmunitionTrackingEnabled`. Players who keep loose-ammo tracking OFF
+		// still want the Special Arrow button on a ranged shot.
 		const combat = mkPickerCombat([{id: "arrows", name: "Arrows", quantity: 20}], {tracking: false});
-		expect(quiverHook(combat).predicate({isRanged: true, attack: bow})).toBe(true);
+		expect(combat._isSpecialArrowEligible(bow, false)).toBe(true);
 	});
 
-	it("is ADDITIVE — registered alongside other post-attack riders, not replacing them", () => {
+	it("the OLD post-attack `quiver` hook is GONE; sibling hooks remain", () => {
 		const combat = mkPickerCombat([]);
 		const ids = combat._getPostAttackHooks().map(h => h.id);
-		expect(ids).toContain("quiver");
+		expect(ids).not.toContain("quiver");
 		expect(ids).toContain("arcaneShot");
 		expect(ids).toContain("critWeaponRider");
-		expect(ids.length).toBeGreaterThan(1);
 	});
 
-	it("the picker handler is ASYNC (non-blocking — never gates the resolved roll)", () => {
+	it("the Special Arrow handlers are ASYNC (non-blocking); the old picker is removed", () => {
 		const combat = mkPickerCombat([{id: "arrows", name: "Arrows", quantity: 20}]);
-		expect(combat._pPickQuiverAmmo.constructor.name).toBe("AsyncFunction");
+		expect(combat._pPickSpecialArrowDamage.constructor.name).toBe("AsyncFunction");
+		expect(combat._pApplySpecialArrow.constructor.name).toBe("AsyncFunction");
+		expect(combat._pPickQuiverAmmo).toBeUndefined();
 	});
 
-	it("the picker guards a missing weapon id without opening a modal", async () => {
+	it("the picker guards a missing attack / weapon id without opening a modal", async () => {
 		const combat = mkPickerCombat([{id: "arrows", name: "Arrows", quantity: 20}]);
-		// No sourceItem.id → early return; must resolve, not throw or open UiUtil modal.
-		await expect(combat._pPickQuiverAmmo({attack: {name: "Longbow"}})).resolves.toBeUndefined();
+		// Unknown attackId → no attack resolved → early return; must resolve, not throw.
+		await expect(combat._pPickSpecialArrowDamage("no-such-attack")).resolves.toBeUndefined();
 	});
 
 	it("a shot consumes EXACTLY one round and leaves OTHER ammo stacks untouched", () => {
@@ -304,7 +315,7 @@ describe("Quiver — non-blocking, ranged-only post-attack picker", () => {
 		expect(state.getItems().find(i => i.id === "arrowsP1").quantity).toBe(beforeP1); // untouched
 	});
 
-	it("the synchronous _rollAttack DEFERS ammo consumption to the picker (no double-spend)", () => {
+	it("the synchronous _rollAttack consumes one round inline (R33 — picker removed)", () => {
 		const state = mkQuiverState();
 		state.setItemEquipped("quiver1", true);
 		state.autoPlaceAmmunitionInQuiver("quiver1");
@@ -333,15 +344,17 @@ describe("Quiver — non-blocking, ranged-only post-attack picker", () => {
 		};
 		combat._renderSneakAttackToggle = () => {};
 		combat._isSneakAttackAvailableThisTurn = () => false;
-		combat._runPostAttackHooks = async () => {}; // picker would own consumption here
+		combat._runPostAttackHooks = async () => {};
 		combat._consumeOnAttackStates = () => {};
 		combat._clearPendingSpellRider = () => {};
 
-		const before = state.getItems().find(i => i.id === "arrows").quantity;
+		const sumCompatible = () => state.getAmmunitionForWeapon("bow1").reduce((s, a) => s + (a.quantity || 0), 0);
+		const before = sumCompatible();
 		combat._rollAttack("bowAtk", null);
-		const after = state.getItems().find(i => i.id === "arrows").quantity;
-		// The synchronous roll must NOT consume — the post-attack picker spends exactly one.
-		expect(after).toBe(before);
+		const after = sumCompatible();
+		// R33: the post-attack popup is gone — the synchronous roll spends exactly
+		// one round of compatible ammo inline (never zero, never twice).
+		expect(after).toBe(before - 1);
 	});
 });
 
@@ -364,18 +377,17 @@ describe("Quiver — ranged detection reuses the shared attack-kind helpers", ()
 		expect(combat._isMeleeWeaponAttack({isMelee: true, type: "melee", range: "melee"})).toBe(true);
 	});
 
-	it("the quiver hook gates on the same ctx.isRanged the roll derives from those helpers", () => {
+	it("the Special Arrow gate keys off the same melee/ranged classification the roll derives", () => {
 		const combat = mkCombat({
 			isAmmunitionTrackingEnabled: () => true,
 			getQuiverAmmunitionForWeapon: () => [{id: "arrows", name: "Arrows", quantity: 20}],
 		});
-		const hook = combat._getPostAttackHooks().find(h => h.id === "quiver");
-		const bow = {name: "Longbow", isRanged: true, sourceItem: {id: "bow1", ammoType: "arrow|phb"}};
-		// _getAttackRollKind on the same attack yields isRanged:true → hook fires.
+		const bow = {name: "Longbow", isMelee: false, isSpell: false, sourceItem: {id: "bow1", ammoType: "arrow|phb"}};
+		// _getAttackRollKind on the same attack yields isRanged:true → eligible.
 		expect(combat._getAttackRollKind(bow).isRanged).toBe(true);
-		expect(hook.predicate({isRanged: true, attack: bow})).toBe(true);
+		expect(combat._isSpecialArrowEligible(bow, false)).toBe(true);
 		// And the melee classification turns it off.
-		expect(hook.predicate({isRanged: false, attack: bow})).toBe(false);
+		expect(combat._isSpecialArrowEligible(bow, true)).toBe(false);
 	});
 });
 

@@ -74,6 +74,16 @@ class CharacterSheetCombat {
 			this._rollDamage(attackId);
 		});
 
+		// 🏹 Special Arrow — on a ranged weapon attack whose equipped quiver holds
+		// compatible ammo, open the arrow picker (rolls weapon damage + arrow effect,
+		// spends one round). R33 replacement for the old post-attack quiver popup.
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const target = e.target.closest(".charsheet__attack-special-arrow");
+			if (!target) return;
+			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
+			void this._pPickSpecialArrowDamage(attackId);
+		});
+
 		// Channel a weapon-attack spell (Booming/Green-Flame Blade) into a weapon attack.
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__attack-channel-spell");
@@ -969,30 +979,24 @@ class CharacterSheetCombat {
 		// rider AFTER calling this method, so its own roll is never self-cleared.
 		if (this._pendingSpellRider) this._clearPendingSpellRider();
 
-		// Ammunition consumption (if enabled and weapon uses ammo). When an equipped
-		// quiver holds compatible ammo, defer consumption to the non-blocking
-		// post-attack quiver picker (it spends exactly one — the chosen arrow, or a
-		// default if dismissed) so ammo is never double-spent. Otherwise consume
-		// inline from loose inventory as before.
+		// Ammunition consumption (if enabled and weapon uses ammo). Consume one
+		// round inline from loose inventory. The quiver's own ammunition is spent
+		// on-demand via the 🏹 Special Arrow button on the attack row (R33 redesign),
+		// not automatically here, so a plain to-hit roll never double-spends.
 		let ammoNote = "";
 		if (this._state.isAmmunitionTrackingEnabled?.() && attack.sourceItem?.ammoType) {
-			const quiverAmmo = this._state.getQuiverAmmunitionForWeapon?.(attack.sourceItem.id) || [];
-			if (quiverAmmo.length > 0) {
-				// Quiver picker (post-attack hook) handles consumption.
+			const ammoItems = this._state.getAmmunitionForWeapon?.(attack.sourceItem.id) || [];
+			if (ammoItems.length > 0) {
+				// Use first available ammunition
+				const ammo = ammoItems[0];
+				if (this._state.consumeAmmunition?.(ammo.id, 1)) {
+					const remaining = ammo.quantity - 1;
+					ammoNote = ` [${ammo.name}: ${remaining} remaining]`;
+				}
 			} else {
-				const ammoItems = this._state.getAmmunitionForWeapon?.(attack.sourceItem.id) || [];
-				if (ammoItems.length > 0) {
-					// Use first available ammunition
-					const ammo = ammoItems[0];
-					if (this._state.consumeAmmunition?.(ammo.id, 1)) {
-						const remaining = ammo.quantity - 1;
-						ammoNote = ` [${ammo.name}: ${remaining} remaining]`;
-					}
-				} else {
-					// No compatible ammunition
-					if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
-						JqueryUtil.doToast({type: "warning", content: `No compatible ammunition for ${attack.name}!`});
-					}
+				// No compatible ammunition
+				if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+					JqueryUtil.doToast({type: "warning", content: `No compatible ammunition for ${attack.name}!`});
 				}
 			}
 		}
@@ -1289,21 +1293,6 @@ class CharacterSheetCombat {
 					&& (this._state.getKnownArcaneShots?.()?.length || 0) > 0
 					&& this._isArcaneArcherWeapon(ctx.attack),
 				handler: (ctx) => this._pPickArcaneShot(ctx),
-			},
-			{
-				// Quiver picker: on a ranged weapon attack, if an equipped quiver holds
-				// ammo compatible with the weapon, offer a non-blocking picker so the
-				// player chooses which arrow they loosed (and sees its effect). Consumes
-				// exactly one — the chosen ammo, or a default arrow if dismissed — so the
-				// shot always costs ammunition without ever double-spending. Deliberately
-				// NOT gated on `isAmmunitionTrackingEnabled`: the quiver is its own
-				// always-on feature (players who keep tracking off still want the picker).
-				id: "quiver",
-				predicate: (ctx) => ctx.isRanged
-					&& !ctx.attack?.isSpell
-					&& !!ctx.attack?.sourceItem?.ammoType
-					&& (this._state.getQuiverAmmunitionForWeapon?.(ctx.attack.sourceItem.id) || []).length > 0,
-				handler: (ctx) => this._pPickQuiverAmmo(ctx),
 			},
 			{
 				// Crit / nat-20 weapon riders (e.g. Rapier of Life Stealing → extra
@@ -1643,97 +1632,137 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Non-blocking post-ranged-attack quiver picker. Lets the player pick which
-	 * ammunition from the equipped quiver they loosed (with its effect shown),
-	 * then consumes exactly one of it. If dismissed without a choice, the default
-	 * (first) ammo is consumed — so a shot always costs ammunition, and the inline
-	 * consume in `_rollAttack` was deliberately skipped to avoid double-spending.
-	 * @param {*} ctx
+	 * Resolve an attack object by id across the four sources `_rollAttack` /
+	 * `_rollDamage` consult (configured, cached, temporary, active-state).
+	 * @param {string} attackId
+	 * @returns {*} the attack, or undefined.
 	 */
-	async _pPickQuiverAmmo (ctx) {
-		const weaponId = ctx.attack?.sourceItem?.id;
+	_findAttackById (attackId) {
+		const attacks = this._state.getAttacks?.() || [];
+		let attack = attacks.find(a => a.id === attackId);
+		if (!attack && this._cachedAttacks?.length) attack = this._cachedAttacks.find(a => a.id === attackId);
+		if (!attack) attack = (this._state.getTemporaryAttacks?.() || []).find(a => a.id === attackId);
+		if (!attack) attack = (this._state.getActiveStateAttacks?.() || []).find(a => a.id === attackId);
+		return attack;
+	}
+
+	/**
+	 * Extract an explicit bonus-damage DICE expression carried by an ammunition
+	 * item (e.g. a magic arrow that deals extra dice on a hit). Returns null for
+	 * mundane ammo or flat numeric bonuses — we never invent dice the data lacks.
+	 * @param {object} ammo - Flattened ammunition item.
+	 * @returns {{dice: string, type: string}|null}
+	 */
+	_extractAmmoBonusDamage (ammo) {
+		if (!ammo) return null;
+		const raw = ammo.bonusWeaponDamage;
+		if (typeof raw === "string" && /\dd\d/i.test(raw)) {
+			const m = /([+-]?\d*d\d+(?:[+-]\d+)?)\s*([a-z]+)?/i.exec(raw);
+			if (m) return {dice: m[1].replace(/^\+/, ""), type: (m[2] || "").toLowerCase()};
+		}
+		return null;
+	}
+
+	/**
+	 * Apply a chosen special arrow to a ranged attack (R33). Rolls the WEAPON's
+	 * normal damage via `_rollDamage`, surfaces the arrow's effect text and any
+	 * explicit bonus-damage dice it carries, then consumes EXACTLY ONE round of
+	 * that arrow (stack-based single decrement). Factored out of the picker so the
+	 * mechanics are unit-testable with the page roll/render methods stubbed.
+	 * @param {string} attackId
+	 * @param {object} ammo - The chosen flattened ammunition item.
+	 * @returns {Promise<{consumed: boolean, effect: string, bonusDamage: (number|null)}>}
+	 */
+	async _pApplySpecialArrow (attackId, ammo) {
+		if (!ammo) return {consumed: false, effect: "", bonusDamage: null};
+
+		// Roll the weapon's normal damage through the single source of truth.
+		await this._rollDamage?.(attackId);
+
+		// Surface the arrow's explicit bonus-damage dice (if any) and its effect.
+		const bonus = this._extractAmmoBonusDamage(ammo);
+		let bonusDamage = null;
+		let bonusNote = "";
+		if (bonus) {
+			const roll = this._parseDamage?.(bonus.dice);
+			bonusDamage = roll?.total ?? null;
+			if (bonusDamage != null) bonusNote = ` +${bonusDamage}${bonus.type ? ` ${bonus.type}` : ""} damage`;
+		}
+		const effect = this._getAmmoEffectText(ammo);
+
+		// Consume exactly one round (stack-based single decrement).
+		const before = this._state.getEffectiveAmmoCount?.(ammo) ?? (ammo.quantity || 0);
+		let consumed = false;
+		let remainingNote = "";
+		if (this._state.consumeAmmunition?.(ammo.id, 1)) {
+			consumed = true;
+			const remaining = Math.max(0, before - 1);
+			remainingNote = ` (${remaining} left in quiver)`;
+		}
+
+		if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+			JqueryUtil.doToast({
+				type: "info",
+				content: `Loosed ${ammo.name}${remainingNote}${bonusNote}${effect ? ` — ${effect}` : ""}.`,
+			});
+		}
+		this.renderCombatQuiver?.();
+		return {consumed, effect, bonusDamage};
+	}
+
+	/**
+	 * Non-blocking 🏹 Special Arrow picker (R33). Triggered by the per-attack-row
+	 * button on a ranged weapon whose equipped quiver holds compatible ammo. Lists
+	 * the arrows (name, effective count, effect); choosing one rolls the weapon's
+	 * normal damage, surfaces the arrow's effect/extra damage, and spends one round.
+	 * Deliberately NOT gated on `isAmmunitionTrackingEnabled` — the quiver is its own
+	 * always-on feature. Closing without a pick does NOTHING (no shot, no spend).
+	 * @param {string} attackId
+	 */
+	async _pPickSpecialArrowDamage (attackId) {
+		const attack = this._findAttackById(attackId);
+		const weaponId = attack?.sourceItem?.id;
 		if (!weaponId) return;
 		const ammo = this._state.getQuiverAmmunitionForWeapon?.(weaponId) || [];
 		if (!ammo.length) return;
 
-		const consume = (a) => {
-			if (!a) return;
-			if (this._state.consumeAmmunition?.(a.id, 1)) {
-				const remaining = Math.max(0, (a.quantity || 0) - 1);
-				const eff = this._getAmmoEffectText(a);
-				JqueryUtil.doToast({
-					type: "info",
-					content: `Loosed ${a.name} (${remaining} left in quiver)${eff ? ` — ${eff}` : ""}.`,
-				});
-			}
-			this.renderCombatQuiver?.();
-		};
-
-		let resolveOuter = null;
-		let isResolved = false;
-		let chosen = false;
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: `Quiver — ${ctx.attack?.name || "Ranged Attack"}`,
+			title: `🏹 Special Arrow — ${attack?.name || "Ranged Attack"}`,
 			isMinHeight0: true,
-			// Dismissing without an explicit pick spends the default arrow (no free shot).
-			cbClose: () => {
-				if (resolveOuter && !isResolved) {
-					isResolved = true;
-					if (!chosen) consume(ammo[0]);
-					resolveOuter();
-				}
-			},
 		});
 
-		await new Promise((resolve) => {
-			resolveOuter = resolve;
-			const finalize = () => { if (isResolved) return false; isResolved = true; resolve(); return true; };
+		const rowsHtml = ammo.map((a, i) => {
+			const eff = this._getAmmoEffectText(a);
+			const srcAbbr = a.source ? Parser.sourceJsonToAbv(a.source) : "";
+			let nameHtml = a.name;
+			if (this._page?.getHoverLink && a.source) {
+				try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { nameHtml = a.name; }
+			}
+			return `
+				<div class="charsheet__quiver-opt-row ve-flex ve-flex-v-center ve-flex-wrap gap-1" style="margin-bottom:6px;">
+					<span class="bold">${nameHtml}</span>
+					${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
+					<span class="badge badge-default ml-1" title="Remaining in quiver">×${this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)}</span>
+					${eff ? `<span class="ve-muted ve-small charsheet__quiver-opt-eff">${eff}</span>` : ""}
+					<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__quiver-opt ml-auto" data-idx="${i}" title="Loose this arrow and roll damage">Loose &amp; Damage</button>
+				</div>`;
+		}).join("");
 
-			const rowsHtml = ammo.map((a, i) => {
-				const eff = this._getAmmoEffectText(a);
-				const srcAbbr = a.source ? Parser.sourceJsonToAbv(a.source) : "";
-				let nameHtml = a.name;
-				if (this._page?.getHoverLink && a.source) {
-					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { nameHtml = a.name; }
-				}
-				return `
-					<div class="charsheet__quiver-opt-row ve-flex ve-flex-v-center ve-flex-wrap gap-1" style="margin-bottom:6px;">
-						<span class="bold">${nameHtml}</span>
-						${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
-						<span class="badge badge-default ml-1" title="Remaining in quiver">×${this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)}</span>
-						${eff ? `<span class="ve-muted ve-small charsheet__quiver-opt-eff">${eff}</span>` : ""}
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__quiver-opt ml-auto" data-idx="${i}" title="Loose this ammunition">Loose</button>
-					</div>`;
-			}).join("");
+		modalInner.innerHTML = `
+			<div class="charsheet__quiver-pick">
+				<p class="ve-small ve-muted charsheet__quiver-pick__lede">
+					Choose which arrow you loosed. Rolls the weapon's damage, shows the arrow's effect, and spends one round.
+				</p>
+				<div class="charsheet__quiver-pick__opts">${rowsHtml}</div>
+			</div>
+		`;
 
-			modalInner.innerHTML = `
-				<div class="charsheet__quiver-pick">
-					<p class="ve-small ve-muted charsheet__quiver-pick__lede">
-						Choose which ammunition you loosed from your quiver. Spends one.
-						Dismiss to spend ${ammo[0]?.name || "the default arrow"}.
-					</p>
-					<div class="charsheet__quiver-pick__opts">${rowsHtml}</div>
-					<div class="ve-flex-h-right" style="gap: 8px; margin-top: 12px;">
-						<button class="ve-btn ve-btn-default" data-act="default">Use default</button>
-					</div>
-				</div>
-			`;
-
-			modalInner.querySelectorAll(".charsheet__quiver-opt").forEach((/** @type {*} */ el) => {
-				el.addEventListener("click", () => {
-					const idx = Number(el.getAttribute("data-idx"));
-					const a = ammo[idx];
-					chosen = true;
-					if (!finalize()) return;
-					doClose();
-					consume(a);
-				});
-			});
-			modalInner.querySelector(`[data-act="default"]`).addEventListener("click", () => {
-				chosen = true;
-				consume(ammo[0]);
-				finalize();
+		modalInner.querySelectorAll(".charsheet__quiver-opt").forEach((/** @type {*} */ el) => {
+			el.addEventListener("click", () => {
+				const idx = Number(el.getAttribute("data-idx"));
+				const a = ammo[idx];
 				doClose();
+				void this._pApplySpecialArrow(attackId, a);
 			});
 		});
 	}
@@ -1743,19 +1772,14 @@ class CharacterSheetCombat {
 	 * ammunition it currently holds, with per-stack counts and effect blurbs.
 	 * Hidden entirely when no quiver is equipped.
 	 */
-	renderCombatQuiver () {
-		const section = document.getElementById("charsheet-combat-quiver-section");
-		const container = document.getElementById("charsheet-combat-quiver");
-		if (!container) return;
-
-		const quiver = this._state.getEquippedQuiver?.();
-		if (!quiver) {
-			if (section) section.style.display = "none";
-			container.innerHTML = "";
-			return;
-		}
-		if (section) section.style.display = "";
-
+	/**
+	 * Build the full rich quiver markup (head + per-stack rows with counts and
+	 * effect blurbs). Shared by the compact-summary fallback and the full-quiver
+	 * modal (`_showQuiverModal`).
+	 * @param {object} quiver - The equipped quiver wrapper.
+	 * @returns {string} HTML for the full quiver.
+	 */
+	_buildQuiverFullHtml (quiver) {
 		const ammo = this._state.getQuiverAmmunition?.(quiver.id) || [];
 		const total = ammo.reduce((sum, a) => sum + (this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)), 0);
 
@@ -1781,7 +1805,7 @@ class CharacterSheetCombat {
 			}).join("")
 			: `<div class="ve-muted ve-small">Quiver is empty. Add ammunition from Inventory.</div>`;
 
-		container.innerHTML = `
+		return `
 			<div class="charsheet__quiver">
 				<div class="charsheet__quiver-head ve-flex ve-flex-v-center ve-flex-wrap gap-1">
 					<span class="bold">${nameHtml}</span>
@@ -1790,6 +1814,72 @@ class CharacterSheetCombat {
 				<div class="charsheet__quiver-list">${rowsHtml}</div>
 			</div>
 		`;
+	}
+
+	/**
+	 * Render the COMPACT quiver summary at the top of "Weapons & Attacks": the
+	 * equipped quiver's name plus its ammunition with counts, on one line. The full
+	 * quiver (rich rows + effects) is reachable via the 🏹 Quiver header button
+	 * (`_showQuiverModal`). The summary container is emptied and the header button
+	 * hidden when no quiver is equipped. (R33 — replaces the old standalone section.)
+	 */
+	renderCombatQuiver () {
+		const container = document.getElementById("charsheet-combat-quiver-summary");
+		const openBtn = document.getElementById("charsheet-combat-quiver-open");
+		if (!container) return;
+
+		const quiver = this._state.getEquippedQuiver?.();
+		if (!quiver) {
+			if (openBtn) openBtn.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (openBtn) {
+			openBtn.style.display = "";
+			if (!openBtn.dataset.bound) {
+				openBtn.dataset.bound = "1";
+				openBtn.addEventListener("click", () => { void this._showQuiverModal(); });
+			}
+		}
+
+		const ammo = this._state.getQuiverAmmunition?.(quiver.id) || [];
+		const total = ammo.reduce((sum, a) => sum + (this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)), 0);
+
+		let nameHtml = quiver.name;
+		if (this._page?.getHoverLink && quiver.source) {
+			try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, quiver.name, quiver.source); } catch (e) { nameHtml = quiver.name; }
+		}
+
+		const pillsHtml = ammo.length
+			? ammo.map(a => {
+				const count = this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0);
+				return `<span class="charsheet__quiver-summary-pill" title="${a.name}: ${count} remaining">${a.name} <span class="badge badge-default">×${count}</span></span>`;
+			}).join("")
+			: `<span class="ve-muted ve-small">empty</span>`;
+
+		container.innerHTML = `
+			<div class="charsheet__quiver-summary ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+				<span class="charsheet__quiver-summary-icon" title="Equipped quiver">🏹</span>
+				<span class="bold">${nameHtml}</span>
+				<span class="ve-muted ve-small">${total} ${total === 1 ? "round" : "rounds"}</span>
+				<span class="charsheet__quiver-summary-sep">·</span>
+				${pillsHtml}
+			</div>
+		`;
+	}
+
+	/**
+	 * Open the FULL quiver (rich rows with counts + effect blurbs) in a modal,
+	 * launched from the 🏹 Quiver header button in "Weapons & Attacks" (R33).
+	 */
+	async _showQuiverModal () {
+		const quiver = this._state.getEquippedQuiver?.();
+		if (!quiver) return;
+		const {eleModalInner: modalInner} = await UiUtil.pGetShowModal({
+			title: `🏹 Quiver — ${quiver.name}`,
+			isMinHeight0: true,
+		});
+		modalInner.innerHTML = this._buildQuiverFullHtml(quiver);
 	}
 
 	/**
@@ -2815,6 +2905,36 @@ class CharacterSheetCombat {
 		});
 	}
 
+	/**
+	 * Whether an attack should show the 🏹 Special Arrow affordance: a RANGED
+	 * WEAPON attack (not melee, not a spell) sourced from a weapon that uses
+	 * ammunition, whose equipped quiver currently holds compatible ammo. Pure
+	 * predicate (no DOM) so it's unit-testable. Deliberately NOT gated on
+	 * `isAmmunitionTrackingEnabled` — the quiver is its own always-on feature.
+	 * @param {*} attack
+	 * @param {boolean} [isMelee] - Precomputed melee classification (optional).
+	 * @returns {boolean}
+	 */
+	_isSpecialArrowEligible (attack, isMelee) {
+		if (!attack || attack.isSpell) return false;
+		const melee = isMelee != null ? isMelee : this._getAttackRollKind(attack).isMelee;
+		if (melee) return false;
+		const weaponId = attack.sourceItem?.id;
+		if (!weaponId || !attack.sourceItem?.ammoType) return false;
+		return (this._state.getQuiverAmmunitionForWeapon?.(weaponId) || []).length > 0;
+	}
+
+	/**
+	 * Markup for the per-row 🏹 Special Arrow button, or "" when not eligible.
+	 * @param {*} attack
+	 * @param {boolean} [isMelee]
+	 * @returns {string}
+	 */
+	_renderSpecialArrowButton (attack, isMelee) {
+		if (!this._isSpecialArrowEligible(attack, isMelee)) return "";
+		return `<button class="ve-btn ve-btn-sm ve-btn-success charsheet__attack-special-arrow" title="Loose a special arrow from your quiver (rolls weapon damage + arrow effect)">🏹 Special Arrow</button>`;
+	}
+
 	_renderAttackItem (attack, reachCtx = {}) {
 		// Calculate ability modifier — handles finesse (max STR/DEX), spellcasting
 		// (max INT/WIS/CHA for natural weapons), and Bladesong (max(weapon mod, INT)
@@ -2967,6 +3087,7 @@ class CharacterSheetCombat {
 					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage">
 						<span class="glyphicon glyphicon-fire"></span> Damage
 					</button>
+					${this._renderSpecialArrowButton(attack, attackIsMelee)}
 					${this._renderChannelSpellButton(attack)}
 					<button class="ve-btn ve-btn-sm ${this._state.getAttackNote?.(attack.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__attack-note" title="${this._state.getAttackNote?.(attack.id) ? "Edit Note" : "Add Note"}">
 						<span class="glyphicon glyphicon-comment"></span>
