@@ -4352,6 +4352,31 @@ class CharacterSheetState {
 		// addCompanionFromBestiary arg-order bug) so they re-register under the correct
 		// string type. Idempotent.
 		this._migrateCompanions();
+
+		// (#11) Backfill quiver contents for saves whose quiver was already equipped
+		// before the auto-place pipeline existed (or before dart recognition). Runs
+		// LAST so inventory normalisation/containment is settled. Idempotent.
+		this._migrateQuiverBackfill();
+	}
+
+	/**
+	 * (#11) Load-time backfill: for every EQUIPPED quiver, auto-place loose,
+	 * recognised ammunition that isn't already contained. Repairs saves whose
+	 * quiver was equipped before the auto-place-on-equip pipeline existed (or
+	 * before darts were recognised as ammo). Idempotent — `autoPlaceAmmunitionInQuiver`
+	 * skips ammo already contained or already in another container, so repeated
+	 * load→save→load cycles never duplicate `containedItems` nor pull in thrown
+	 * weapons. Runs LAST in `loadFromJson` and reports the total placed.
+	 * @returns {number} Total ammunition stacks placed across all equipped quivers.
+	 */
+	_migrateQuiverBackfill () {
+		if (!Array.isArray(this._data.inventory)) return 0;
+		let placed = 0;
+		for (const item of this.getItems()) {
+			if (!item.equipped || !this.isQuiver(item)) continue;
+			placed += this.autoPlaceAmmunitionInQuiver(item.id);
+		}
+		return placed;
 	}
 
 	/**
@@ -22871,15 +22896,33 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Recognise a single item as ammunition (or an ammunition-like throwable that
+	 * belongs in a quiver). Kept deliberately NARROW: a true ammunition `type`
+	 * ("A"/"AF"), an explicit ammo boolean, or a word-boundary dart/needle name —
+	 * so throwable consumables like "Sleep Dart (5)" (stored as generic `gear`
+	 * with no boolean) qualify, but bare `gear`, daggers, javelins and other
+	 * thrown weapons do NOT.
+	 * @param {object} item - A flattened item (from getItems) or raw item data
+	 * @returns {boolean}
+	 */
+	_isAmmunitionItem (item) {
+		if (!item) return false;
+		// Type "A" or "AF" (ammunition, ammunition for firearms)
+		const itemType = item.type?.toUpperCase() || "";
+		if (itemType.startsWith("A")) return true;
+		if (item.arrow || item.bolt || item.bullet || item.dart || item.needle || item.sling) return true;
+		// Narrow name-based recognition for dart/needle ammo stored as generic gear
+		// (e.g. "Sleep Dart (5)"). Word boundaries avoid matching unrelated names.
+		const name = (item.name || "").toLowerCase();
+		return /\b(?:darts?|needles?)\b/.test(name);
+	}
+
+	/**
 	 * Get all ammunition items in inventory
 	 * @returns {Array} Ammunition items with id, name, quantity, etc.
 	 */
 	getAmmunitionItems () {
-		return this.getItems().filter(item => {
-			// Type "A" or "AF" (ammunition, ammunition for firearms)
-			const itemType = item.type?.toUpperCase() || "";
-			return itemType.startsWith("A") || item.arrow || item.bolt || item.bullet;
-		});
+		return this.getItems().filter(item => this._isAmmunitionItem(item));
 	}
 
 	/**
@@ -23063,9 +23106,12 @@ class CharacterSheetState {
 
 	/**
 	 * Auto-place loose, compatible ammunition into a quiver (called when a quiver
-	 * is equipped). Respects the quiver's allowed ammo types when it declares them
-	 * (`containerCapacity.item`); otherwise accepts all ammunition. Never moves
-	 * ammo that is already inside another container.
+	 * is equipped, and by the load-time backfill migration). A quiver accepts ANY
+	 * recognised ammunition (arrows, bolts, bullets, darts, needles, slings) — its
+	 * `containerCapacity.item` allowed-types are treated as a default *label*, not
+	 * a hard filter, because players expect one quiver to carry their arrows and
+	 * darts together. Never moves ammo that is already inside another container,
+	 * and never re-adds ammo already contained (so it is idempotent).
 	 * @param {string} [quiverId] - Quiver item ID; defaults to the equipped quiver.
 	 * @returns {number} Count of ammunition stacks placed.
 	 */
@@ -23074,15 +23120,6 @@ class CharacterSheetState {
 		if (!id) return 0;
 		const container = this._data.inventory.find(i => i.id === id);
 		if (!container?.item) return 0;
-
-		// Allowed ammo types from the quiver's capacity spec (e.g. ["arrow|phb"]).
-		const allowedTypes = [];
-		const capItems = container.item.containerCapacity?.item;
-		if (Array.isArray(capItems)) {
-			for (const entry of capItems) {
-				for (const key of Object.keys(entry || {})) allowedTypes.push(key);
-			}
-		}
 
 		if (!container.item.containedItems) container.item.containedItems = [];
 		const already = new Set(container.item.containedItems);
@@ -23093,8 +23130,6 @@ class CharacterSheetState {
 			if (already.has(ammo.id)) continue;
 			// Don't pull ammo out of another container it's already in.
 			if (this.getItemContainer(ammo.id)) continue;
-			// If the quiver restricts types, only place matching ammo.
-			if (allowedTypes.length && !allowedTypes.some(t => this._matchesAmmoType(ammo, t))) continue;
 			container.item.containedItems.push(ammo.id);
 			already.add(ammo.id);
 			placed++;
