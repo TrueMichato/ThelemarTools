@@ -23549,6 +23549,18 @@ class CharacterSheetState {
 				this._recalculateItemUpgradeModifiers();
 			}
 		}
+
+		// Auto-sync ammunition into an equipped quiver (Bug #1a). When a recognised
+		// ammunition item is ADDED while a quiver is equipped, place it into the
+		// quiver so the quiver mirrors inventory. Delegates to the idempotent,
+		// narrow `autoPlaceAmmunitionInQuiver` (which never disturbs ammo already
+		// inside another container, and only adds recognised ammo). Resolving the
+		// "added item" from either the merged-into wrapper or the freshly-pushed one.
+		const _addedAmmoWrapper = existing || this._data.inventory[this._data.inventory.length - 1];
+		const _addedAmmoItem = _addedAmmoWrapper?.item;
+		if (_addedAmmoItem && this._isAmmunitionItem(_addedAmmoItem) && this.getEquippedQuiver()) {
+			this.autoPlaceAmmunitionInQuiver();
+		}
 	}
 
 	/**

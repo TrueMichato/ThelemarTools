@@ -992,6 +992,10 @@ class CharacterSheetCombat {
 				if (this._state.consumeAmmunition?.(ammo.id, 1)) {
 					const remaining = ammo.quantity - 1;
 					ammoNote = ` [${ammo.name}: ${remaining} remaining]`;
+					// Persist the decrement and refresh the Inventory tab so the loose
+					// ammo count doesn't look stale / reset on reload (Bug #1b).
+					this._page?.saveCharacter?.();
+					this._page?._inventory?.render?.();
 				}
 			} else {
 				// No compatible ammunition
@@ -1617,18 +1621,33 @@ class CharacterSheetCombat {
 			parts.push(`${b} to attack`);
 		}
 		if (ammo.bonusWeaponDamage) parts.push(`${ammo.bonusWeaponDamage} damage`);
-		// First sentence of the item's own description, if present.
-		const entries = ammo.entries || ammo.item?.entries;
-		if (Array.isArray(entries)) {
-			const firstStr = entries.find(e => typeof e === "string");
-			if (firstStr) {
-				let txt = firstStr.replace(/\{@[^}]+\}/g, (m) => m.replace(/^\{@\w+\s+/, "").replace(/\|[^}]*/, "").replace(/\}$/, ""));
-				txt = txt.replace(/\s+/g, " ").trim();
-				const sentence = txt.split(/(?<=\.)\s/)[0];
-				if (sentence) parts.push(sentence);
-			}
-		}
+		// The arrow's COMPLETE description (every entry), tags stripped — not just
+		// the first sentence (Bug #2). Mundane ammo has no entries, so this stays
+		// empty and the helper reports no effect (keeps "no fake effect" honest).
+		const desc = this._getAmmoDescriptionText(ammo);
+		if (desc) parts.push(desc);
 		return parts.join("; ");
+	}
+
+	/**
+	 * Full plain-text description of an ammunition item: every string entry
+	 * (recursively), `{@tag ...}`-stripped and whitespace-collapsed. Returns ""
+	 * when the item carries no descriptive entries (mundane ammo).
+	 * @param {object} ammo - Flattened ammunition item.
+	 * @returns {string}
+	 */
+	_getAmmoDescriptionText (ammo) {
+		const entries = ammo.entries || ammo.item?.entries;
+		if (!Array.isArray(entries) || !entries.length) return "";
+		const collect = (e) => {
+			if (typeof e === "string") return e;
+			if (Array.isArray(e)) return e.map(collect).join(" ");
+			if (e && typeof e === "object" && Array.isArray(e.entries)) return e.entries.map(collect).join(" ");
+			return "";
+		};
+		let txt = entries.map(collect).join(" ");
+		txt = txt.replace(/\{@[^}]+\}/g, (m) => m.replace(/^\{@\w+\s+/, "").replace(/\|[^}]*/, "").replace(/\}$/, ""));
+		return txt.replace(/\s+/g, " ").trim();
 	}
 
 	/**
@@ -1660,7 +1679,39 @@ class CharacterSheetCombat {
 			const m = /([+-]?\d*d\d+(?:[+-]\d+)?)\s*([a-z]+)?/i.exec(raw);
 			if (m) return {dice: m[1].replace(/^\+/, ""), type: (m[2] || "").toLowerCase()};
 		}
-		return null;
+		// CRITICAL (Bug #3): real site ammo carries its extra damage in `entries`
+		// TEXT, not `bonusWeaponDamage`. Fall back to parsing an explicit
+		// "extra/additional NdM <type> damage" phrase so magic-arrow dice are never
+		// "wasted". Still returns null for mundane ammo — we never invent dice.
+		return this._extractAmmoEntriesDamage(ammo);
+	}
+
+	/**
+	 * Parse an explicit extra-damage DICE expression from an ammunition item's
+	 * `entries` text — e.g. "deals an extra 1d6 fire damage" / "an additional 2d6
+	 * poison damage" / "an extra {@damage 1d4} cold damage". Returns null when no
+	 * such phrase is present (so save-or-condition arrows and mundane ammo yield
+	 * no dice — we never invent damage the data doesn't state).
+	 * @param {object} ammo - Flattened ammunition item.
+	 * @returns {{dice: string, type: string}|null}
+	 */
+	_extractAmmoEntriesDamage (ammo) {
+		const entries = ammo.entries || ammo.item?.entries;
+		if (!Array.isArray(entries) || !entries.length) return null;
+		const collect = (e) => {
+			if (typeof e === "string") return e;
+			if (Array.isArray(e)) return e.map(collect).join(" ");
+			if (e && typeof e === "object" && Array.isArray(e.entries)) return e.entries.map(collect).join(" ");
+			return "";
+		};
+		const text = entries.map(collect).join(" ");
+		if (!text) return null;
+		// "extra"/"additional" + dice (optionally wrapped in {@damage ...}/{@dice ...})
+		// + optional damage-type word + "damage".
+		const re = /(?:extra|additional)\s+(?:\{@(?:damage|dice)\s+)?(\d+d\d+(?:\s*[+-]\s*\d+)?)(?:\|[^}]*)?\}?\s*([a-z]+)?\s*damage/i;
+		const m = re.exec(text);
+		if (!m) return null;
+		return {dice: m[1].replace(/\s+/g, ""), type: (m[2] || "").toLowerCase()};
 	}
 
 	/**
@@ -1707,6 +1758,12 @@ class CharacterSheetCombat {
 			});
 		}
 		this.renderCombatQuiver?.();
+		// Persist the decrement and refresh the Inventory tab so the count doesn't
+		// look stale / reset on reload (Bug #1b). Only when a round was actually spent.
+		if (consumed) {
+			this._page?.saveCharacter?.();
+			this._page?._inventory?.render?.();
+		}
 		return {consumed, effect, bonusDamage};
 	}
 
@@ -1790,17 +1847,33 @@ class CharacterSheetCombat {
 
 		const rowsHtml = ammo.length
 			? ammo.map(a => {
-				const eff = this._getAmmoEffectText(a);
 				let aName = a.name;
 				if (this._page?.getHoverLink && a.source) {
 					try { aName = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { aName = a.name; }
 				}
 				const count = this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0);
+
+				// Full per-arrow info (Bug #2): effective count, +X attack/damage
+				// bonuses (from data fields or parseable extra-damage dice), and the
+				// COMPLETE description (every entry), not just the first sentence.
+				const bonusBits = [];
+				if (a.bonusWeapon || a.bonusWeaponAttack) bonusBits.push(`${a.bonusWeapon || a.bonusWeaponAttack} attack`);
+				if (a.bonusWeaponDamage) bonusBits.push(`${a.bonusWeaponDamage} damage`);
+				const extra = this._extractAmmoBonusDamage(a);
+				if (extra && !a.bonusWeaponDamage) bonusBits.push(`+${extra.dice}${extra.type ? ` ${extra.type}` : ""} damage`);
+				const bonusHtml = bonusBits.length
+					? `<span class="ve-muted ve-small charsheet__quiver-row-bonus">${bonusBits.join(", ")}</span>`
+					: "";
+				const descHtml = this._getAmmoFullDescriptionHtml(a);
+
 				return `
-					<div class="charsheet__quiver-row ve-flex ve-flex-v-center ve-flex-wrap gap-1">
-						<span class="bold">${aName}</span>
-						<span class="badge badge-default" title="Remaining">×${count}</span>
-						${eff ? `<span class="ve-muted ve-small">${eff}</span>` : ""}
+					<div class="charsheet__quiver-row charsheet__quiver-row--full">
+						<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+							<span class="bold">${aName}</span>
+							<span class="badge badge-default" title="Remaining">×${count}</span>
+							${bonusHtml}
+						</div>
+						${descHtml ? `<div class="ve-muted ve-small charsheet__quiver-row-desc">${descHtml}</div>` : ""}
 					</div>`;
 			}).join("")
 			: `<div class="ve-muted ve-small">Quiver is empty. Add ammunition from Inventory.</div>`;
@@ -1814,6 +1887,27 @@ class CharacterSheetCombat {
 				<div class="charsheet__quiver-list">${rowsHtml}</div>
 			</div>
 		`;
+	}
+
+	/**
+	 * Rich HTML for an ammunition item's COMPLETE description (every entry),
+	 * rendered through the site Renderer when available, with a tag-stripped
+	 * plain-text fallback (so it still works in minimal/test environments).
+	 * Returns "" for mundane ammo (no entries).
+	 * @param {object} ammo - Flattened ammunition item.
+	 * @returns {string}
+	 */
+	_getAmmoFullDescriptionHtml (ammo) {
+		const entries = ammo.entries || ammo.item?.entries;
+		if (!Array.isArray(entries) || !entries.length) return "";
+		try {
+			if (typeof Renderer !== "undefined" && Renderer.get) {
+				const html = Renderer.get().render({entries});
+				if (html) return html;
+			}
+		} catch (e) { /* fall through to the plain-text fallback */ }
+		const txt = this._getAmmoDescriptionText(ammo);
+		return txt ? txt.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
 	}
 
 	/**
