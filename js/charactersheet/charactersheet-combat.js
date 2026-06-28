@@ -1962,14 +1962,14 @@ class CharacterSheetCombat {
 		let doubleshotDamage = 0;
 		let doubleshotRoll = null;
 		let doubleshotDie = null;
-		// Call the consumer for ranged weapon attacks and let the helper decide the die.
-		// Stored weapon attacks don't reliably carry an `isRanged` flag (auto attacks expose
-		// `isMelee`/`range` instead), so gating on `attack.isRanged` here silently skipped real
-		// ranged attacks — Doubleshot never fired. Use the same robust ranged detection the
-		// helper uses (`_isMeleeWeaponAttack` treats a "/"-bearing range as ranged/thrown), so a
-		// melee swing between arming and firing won't consume the pending die, while a ranged
-		// auto-attack that lacks `isRanged` still qualifies.
-		if (!attack.isSpell && !this._isMeleeWeaponAttack(attack)) {
+		// Ranged gating MUST use the canonical classifier, not the raw `attack.isRanged`
+		// flag: auto-generated (renderAttacks) and modal-built weapon attacks only set
+		// `isMelee` (ranged → `isMelee:false`) and never carry an explicit `isRanged`, so
+		// `attack.isRanged` is `undefined` for the very weapons Doubleshot targets. Using
+		// `_getAttackRollKind` keeps this gate in agreement with the rider resolver
+		// (`getDoubleshotRiderForAttack` → `_isMeleeWeaponAttack`); the helper still
+		// self-gates (melee/spell/damage-format) and owns the one-shot consume.
+		if (this._getAttackRollKind(attack).isRanged && !attack.isSpell) {
 			doubleshotDie = this._consumePendingWeaponDamageDie?.(attack);
 			if (doubleshotDie) {
 				doubleshotRoll = this._parseDamage(doubleshotDie, isCrit);
