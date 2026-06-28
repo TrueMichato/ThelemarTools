@@ -78,15 +78,23 @@ describe("S1 #4 _getTraditionSelectionModel (combat module)", () => {
 		return combat;
 	}
 
-	it("restricts an Arcane Archer to the BZ/RE/UW/UH choice pool", () => {
+	// Round 35 — Fighter subclass tradition pools are now ADDITIVE in the combat-tab
+	// picker: the subclass choice pool (BZ/RE/UW/UH) is surfaced ON TOP OF the base
+	// Fighter free tradition choice (all traditions), so an Arcane Archer can keep/add
+	// AM/SK (e.g. methods learned before subclassing). The picker no longer restricts to
+	// the subclass pool; `replacesBase` only suppresses the duplicate base picker at
+	// subclass-selection time in QuickBuild/LevelUp (see CharacterSheetSubclassTraditionSuppression).
+	it("offers an Arcane Archer the additive list (subclass pool + base all-traditions)", () => {
 		const state = new CharacterSheetState();
 		state.addClass({name: "Fighter", source: "TGTT", level: 9, subclass: {name: "Arcane Archer", shortName: "Arcane Archer", source: "TGTT"}});
 		const combat = makeCombat(state);
 		const model = combat._getTraditionSelectionModel(["BZ", "RE"]);
-		expect(model.choosableCodes.sort()).toEqual(["BZ", "RE", "UH", "UW"]);
+		// The subclass pool stays choosable AND the base list widens it to every tradition.
+		expect(model.choosableCodes).toEqual(expect.arrayContaining(["BZ", "RE", "UW", "UH"]));
+		expect(model.choosableCodes.length).toBe(ClassUtils.getAllTraditions().length);
 	});
 
-	it("resolves the pool even when cls.subclass is stale null (via embedded features)", () => {
+	it("resolves the additive list even when cls.subclass is stale null (via embedded features)", () => {
 		const state = new CharacterSheetState();
 		state.addClass({name: "Fighter", source: "TGTT", level: 9});
 		// Stale: subclass null but embedded subclass feature present.
@@ -102,6 +110,8 @@ describe("S1 #4 _getTraditionSelectionModel (combat module)", () => {
 		});
 		const combat = makeCombat(state);
 		const model = combat._getTraditionSelectionModel([]);
-		expect(model.choosableCodes.sort()).toEqual(["BZ", "RE", "UH", "UW"]);
+		// Subclass still resolves (so its pool is surfaced) and the base list is additive.
+		expect(model.choosableCodes).toEqual(expect.arrayContaining(["BZ", "RE", "UW", "UH"]));
+		expect(model.choosableCodes.length).toBe(ClassUtils.getAllTraditions().length);
 	});
 });

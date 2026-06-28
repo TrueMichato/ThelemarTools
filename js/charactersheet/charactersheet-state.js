@@ -28910,8 +28910,10 @@ class CharacterSheetState {
 	 * Conservative by design:
 	 *   - Catalog-gated: no-ops until `setCombatMethodCatalog` has run (self-defers on an
 	 *     early load and completes on the next reconcile once the catalog is available).
-	 *   - Idempotent: features already recognised as combat methods are skipped, so a
-	 *     second pass (or a repaired-then-reloaded save) is a no-op.
+	 *   - Idempotent: only MISSING (undefined/null) structured fields are backfilled and an
+	 *     existing value is never overwritten, so a second pass (or a repaired-then-reloaded
+	 *     save) is a no-op. Recognised-but-incomplete methods (e.g. a CTM optionalfeature that
+	 *     carries no `tradition`) are still repaired rather than skipped.
 	 *   - Never converts a Battle Tactic (`BT`) or Arcane Shot (`AS`) optionalfeature —
 	 *     those are intentionally NOT combat methods.
 	 *   - Only an exact name|source catalog match to a `combatMethod` entity is repaired;
@@ -28930,9 +28932,6 @@ class CharacterSheetState {
 		};
 
 		for (const f of this._data.features) {
-			// Already a recognised combat method (correctly stored or already repaired) →
-			// nothing to do. Keeps the pass idempotent and leaves valid data untouched.
-			if (CharacterSheetClassUtils.isCombatMethod(f)) continue;
 			// Never reclassify a Battle Tactic / Arcane Shot optionalfeature as a combat method.
 			if (hasTypePrefix(f, ["BT", "AS"])) continue;
 
@@ -28947,15 +28946,23 @@ class CharacterSheetState {
 			if (!entity) continue;
 
 			// Re-hydrate the structured fields that isCombatMethod / _parseCombatMethodEffects
-			// / getCombatMethods read. Only copy fields the catalog entry actually carries so
-			// we never clobber existing data with undefined. `_entityType` alone satisfies
-			// isCombatMethod, but the rest drive correct tradition/degree/stamina/action output.
-			f._entityType = "combatMethod";
-			if (entity.tradition !== undefined) f.tradition = entity.tradition;
-			if (entity.degree !== undefined) f.degree = entity.degree;
-			if (entity.staminaCost !== undefined) f.staminaCost = entity.staminaCost;
-			if (entity.actionType !== undefined) f.actionType = entity.actionType;
-			if (Array.isArray(entity.optionalFeatureTypes)) f.optionalFeatureTypes = [...entity.optionalFeatureTypes];
+			// / getCombatMethods read. A feature can be RECOGNISED as a combat method (it has
+			// a CTM optionalfeatureType, so isCombatMethod is already true) yet still be missing
+			// its `tradition` — the generic CTM codes carry no tradition letter, so
+			// getMethodTraditionCode returns null and the method is un-attributed forever. We
+			// therefore do NOT blanket-skip recognised methods; instead we backfill ONLY the
+			// fields that are missing (undefined/null), never overwriting an existing value
+			// (a stored 0 degree/stamina counts as existing). Only copy fields the catalog
+			// entry actually carries, so we never clobber with undefined. This keeps the pass
+			// idempotent (a second run finds the fields present and is a no-op) and repairs
+			// both the marker-less methods AND the recognised-but-tradition-less ones.
+			const isMissing = (/** @type {*} */ v) => v === undefined || v === null;
+			if (isMissing(f._entityType)) f._entityType = "combatMethod";
+			if (isMissing(f.tradition) && entity.tradition !== undefined) f.tradition = entity.tradition;
+			if (isMissing(f.degree) && entity.degree !== undefined) f.degree = entity.degree;
+			if (isMissing(f.staminaCost) && entity.staminaCost !== undefined) f.staminaCost = entity.staminaCost;
+			if (isMissing(f.actionType) && entity.actionType !== undefined) f.actionType = entity.actionType;
+			if (isMissing(f.optionalFeatureTypes) && Array.isArray(entity.optionalFeatureTypes)) f.optionalFeatureTypes = [...entity.optionalFeatureTypes];
 		}
 	}
 
