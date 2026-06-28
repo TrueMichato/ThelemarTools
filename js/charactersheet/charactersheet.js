@@ -14816,6 +14816,11 @@ class CharacterSheetPage {
 			// Upgrade's Singular Focus / Groundshatter), now that the class-feature catalog
 			// and combat-method catalog are both available.
 			this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || []);
+			// Repair manually-learned combat methods whose entity markers were lost so they
+			// resurface in getCombatMethods. Catalog-gated + idempotent; runs here (the
+			// post-catalog reconcile path) because the load-time effect apply happens before
+			// the combat-method catalog is set.
+			this._state._repairCombatMethodMarkers();
 			this._state.reconcileGrantedCombatMethods();
 			// Reconciliation re-syncs feature entries from brew/source data, which
 			// reintroduces generic `{@condition X}` tags. Re-apply the Thelemar
