@@ -7,6 +7,48 @@ _None._
 
 ## Closed Bugs
 
+### Round 35 (combat-method attribution + additive tradition picker + active-ammo selector vs save `D_kaios_Petri_2_v2.json`) — COMPLETE
+
+Three follow-ups against the same Fighter 9 TGTT Arcane Archer save, fixed by two coordinated
+sessions and integrated in order S-METHODS-PICKER → S-AMMO-SELECTOR (disjoint boundaries:
+combat.js picker region + class-utils + state `_repairCombatMethodMarkers` vs combat.js
+attack/damage/ammo region + state ammo region + html/css). Each fix LOADS the real save through
+`loadFromJson` and asserts real mechanics + idempotency; an orchestrator integrated repro
+(`CharacterSheetRound35IntegratedRepro.test.js`, 11 tests) proves all three coexist under a
+single load and survive a serialize→load round-trip.
+
+* **#1** (S-METHODS-PICKER) Combat-method attribution did not persist — after changing methods
+  and reloading, "some methods are not attributed". Root cause (two coupled): `_addCombatMethod`
+  persisted only `name/source/optionalFeatureTypes/description/entries`, **dropping**
+  `tradition/degree/staminaCost/actionType/_entityType`; and `_repairCombatMethodMarkers`
+  early-`continue`d on any feature already recognized by `isCombatMethod`, so a recognized-but-
+  tradition-less CTM method (Lean Into It, Blindshot, Missile Volley, Countershot in the save)
+  was skipped and never backfilled. Fix: `_addCombatMethod` now persists the structured markers
+  (guarded, from the catalog method); `_repairCombatMethodMarkers` no longer blanket-skips — for
+  any name|source catalog match it backfills ONLY the missing fields (never overwriting, incl.
+  stored 0), repairing broken saves on load. Idempotent; BT/AS skip + catalog-gate preserved.
+* **#2** (S-METHODS-PICKER) The combat-tab tradition picker wouldn't let you choose more
+  traditions, and the filter row looked unpolished. Root cause: Fighter subclass tradition pools
+  were treated as EXCLUSIVE (`replacesBase`), so an Arcane Archer was locked to BZ/RE/UW/UH and
+  couldn't keep/add the AM/SK methods chosen before subclassing. Per the user decision the pools
+  are now ADDITIVE: `_getTraditionSelectionModel` always includes the base "all traditions" list
+  alongside the subclass's locked grants + pool. (`replacesBase` /
+  `shouldSuppressBaseTraditionPicker` untouched — they only suppress the duplicate base picker at
+  subclass-selection time in QuickBuild/LevelUp.) Filter row styling polished in
+  `css/charactersheet.css`.
+* **#3** (S-AMMO-SELECTOR) Special/magic ammunition added no bonuses (the R33 "Special Arrow"
+  button only TOASTED a bonus on the damage roll — never folded into the roll, and attack bonuses
+  could never apply). Per the user decision, replaced with a per-weapon **active ammunition
+  selector**: "Regular" (default) + each equipped-quiver ammo (with remaining count). The selected
+  ammo's bonus rides BOTH the attack roll (`bonusWeapon`/`bonusWeaponAttack`, itemized in the
+  to-hit breakdown, no consume) AND the damage roll (`bonusWeapon` flat + `bonusWeaponDamage`
+  flat/dice + entries-text extra dice as a typed, crit-doubled rider), and is consumed EXACTLY
+  ONCE on the damage roll, reverting to Regular on depletion. Selection persists via
+  `_data.selectedAmmo` (`getSelectedAmmoId`/`setSelectedAmmoId`, backward-compatible). Quiver panel
+  kept as the rich info reference. `bonusWeapon` effect text corrected to "+X to attack and
+  damage". This also fixes the user's design question — arrows that bonus both attack and damage
+  (`bonusWeapon`) are handled correctly in one place.
+
 ### Round 34 (quiver/ammo subsystem sync + Combat Methods persistence vs save `D_kaios_Petri_2_v2.json`) — COMPLETE
 
 Four follow-ups against the same Fighter 9 TGTT Arcane Archer save, fixed by two coordinated
