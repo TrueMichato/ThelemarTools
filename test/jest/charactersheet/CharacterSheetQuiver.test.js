@@ -112,15 +112,21 @@ describe("Quiver — equip-time backfill (the 'doesn't take arrows in' complaint
 		const contained = getContained(state, "quiver1").sort();
 		expect(contained).toContain("arrows");
 		expect(contained).toContain("arrowsP1");
-		// And the state-level retrieval surfaces them too.
+		// And the state-level retrieval surfaces them too. A quiver carries ANY
+		// recognised ammunition (arrows + darts/bolts together) — its
+		// containerCapacity allowed-types are a label, not a hard filter (#11) —
+		// so all loose ammo stacks are pulled in on equip.
 		expect(state.getQuiverAmmunition("quiver1").map(a => a.id).sort())
-			.toEqual(["arrows", "arrowsP1"]);
+			.toEqual(["arrows", "arrowsP1", "bolts"]);
 	});
 
-	it("respects the quiver's allowed ammo types — bolts stay OUT of an arrow-only quiver", () => {
+	it("carries arrows AND other ammo together — bolts go INTO the quiver too (#11)", () => {
+		// Players expect one quiver to hold their arrows and darts/bolts together,
+		// so the per-quiver allowed-type list is treated as a default label, not a
+		// hard filter. Loose bolts are pulled in alongside arrows on equip.
 		const state = mkQuiverState();
 		mkInventory(state)._toggleEquipped("quiver1");
-		expect(getContained(state, "quiver1")).not.toContain("bolts");
+		expect(getContained(state, "quiver1")).toContain("bolts");
 	});
 
 	it("NEVER poaches ammo already inside another container", () => {
@@ -390,7 +396,7 @@ describe("Quiver — save/load round-trip preserves contents", () => {
 		expect(restored.getQuiverAmmunition("quiver1").map(a => a.id).sort()).toEqual(before);
 	});
 
-	it("a legacy save with no containedItems loads WITHOUT error (migration default)", () => {
+	it("a legacy save with no containedItems backfills on load (migration) WITHOUT error", () => {
 		const state = mkQuiverState();
 		state.setItemEquipped("quiver1", true);
 
@@ -401,6 +407,9 @@ describe("Quiver — save/load round-trip preserves contents", () => {
 		const restored = new CharacterSheetState();
 		expect(() => restored.loadFromJson(json)).not.toThrow();
 		expect(restored.getEquippedQuiver()?.id).toBe("quiver1");
-		expect(restored.getQuiverAmmunition("quiver1")).toEqual([]);
+		// _migrateQuiverBackfill pulls the loose ammo into the equipped quiver on
+		// load (the missing load-time backfill was the original #11 bug).
+		expect(restored.getQuiverAmmunition("quiver1").map(a => a.id).sort())
+			.toEqual(["arrows", "arrowsP1", "bolts"]);
 	});
 });

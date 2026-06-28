@@ -217,91 +217,13 @@ describe("#6 _getCharacterTraditions — unions subclass-granted fixed codes", (
 // =========================================================================================
 // #4 — tradition filter display model
 // =========================================================================================
-describe("#4 buildTraditionSelectionModel", () => {
-	const available = [
-		{code: "AM", name: "Adamant Mountain"},
-		{code: "BZ", name: "Biting Zephyr"},
-		{code: "GH", name: "Gallant Heart"},
-	];
-
-	test("granted traditions are locked + selected and sorted first", () => {
-		const model = CharacterSheetClassUtils.buildTraditionSelectionModel({
-			availableTraditions: available,
-			selectedCodes: ["BZ"],
-			grantedCodes: ["GH"],
-		});
-		const gh = model.find(m => m.code === "GH");
-		expect(gh).toMatchObject({locked: true, selected: true, group: "granted"});
-		// granted comes first
-		expect(model[0].code).toBe("GH");
-	});
-
-	test("groups granted → selected → available", () => {
-		const model = CharacterSheetClassUtils.buildTraditionSelectionModel({
-			availableTraditions: available,
-			selectedCodes: ["BZ"],
-			grantedCodes: ["GH"],
-		});
-		const groups = model.map(m => m.group);
-		expect(groups).toEqual(["granted", "selected", "available"]);
-		expect(model.map(m => m.code)).toEqual(["GH", "BZ", "AM"]);
-	});
-
-	test("a selected code outside the available pool is still surfaced", () => {
-		const model = CharacterSheetClassUtils.buildTraditionSelectionModel({
-			availableTraditions: available,
-			selectedCodes: ["RE"], // not in pool
-			grantedCodes: [],
-		});
-		const re = model.find(m => m.code === "RE");
-		expect(re).toBeTruthy();
-		expect(re).toMatchObject({selected: true, locked: false, group: "selected"});
-		expect(re.name).toBe("Razor's Edge"); // resolved from code
-	});
-
-	test("unselected available traditions are not auto-selected", () => {
-		const model = CharacterSheetClassUtils.buildTraditionSelectionModel({
-			availableTraditions: available,
-			selectedCodes: [],
-			grantedCodes: [],
-		});
-		expect(model.every(m => !m.selected && !m.locked)).toBe(true);
-		expect(model.map(m => m.code)).toEqual(["AM", "BZ", "GH"]); // alphabetical by name
-	});
-
-	test("empty input yields an empty model", () => {
-		expect(CharacterSheetClassUtils.buildTraditionSelectionModel({})).toEqual([]);
-	});
-});
-
-describe("#4 _getTraditionSelectionModel (combat wiring)", () => {
-	test("locks subclass-granted traditions and includes the class pool", () => {
-		const fighterFeature = {
-			name: "Combat Methods",
-			source: "TGTT",
-			className: "Fighter",
-			classSource: "TGTT",
-			level: 1,
-			entries: ["{@b Choose Traditions.} Gain proficiency in two {@filter combat traditions|combatmethods} of your choice."],
-		};
-		const combat = makeCombat({
-			state: {getClasses: () => [{name: "Fighter", source: "TGTT", level: 5, subclass: {name: "Cavalier", shortName: "Cavalier", source: "TGTT"}}]},
-			page: {
-				getOptionalFeatures: () => [],
-				getCombatMethodEntities: () => [],
-				getClassFeatures: () => [fighterFeature],
-				getClasses: () => [fighterClassData()],
-			},
-		});
-		const model = combat._getTraditionSelectionModel(["GH", "SS"]);
-		const gh = model.find(m => m.code === "GH");
-		const ss = model.find(m => m.code === "SS");
-		expect(gh).toMatchObject({locked: true, group: "granted"});
-		expect(ss).toMatchObject({locked: true, group: "granted"});
-		// Fighter degree-only progression → full tradition pool available to add from.
-		expect(model.length).toBeGreaterThanOrEqual(CharacterSheetClassUtils.getAllTraditions().length);
-	});
-});
+// =========================================================================================
+// NOTE: #4 buildTraditionSelectionModel / _getTraditionSelectionModel coverage moved to
+// CharacterSheetS1TraditionModel.test.js — the model was reworked to a positional
+// signature `buildTraditionSelectionModel(selectedCodes, {grantedCodes, availableCodes})`
+// returning a grouped `{selected, groups, grantedCodes, choosableCodes}` object (Round 31
+// S1), superseding the earlier object-arg/flat-array form these tests pinned.
+// =========================================================================================
 
 // =========================================================================================
 // #15 — render step isolation
