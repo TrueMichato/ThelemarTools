@@ -9749,10 +9749,13 @@ class CharacterSheetCombat {
 				}
 			}
 
-			// Add subclass-granted bonus methods (e.g. Arcane Archer's Biting Zephyr = +1)
-			if (cls.subclass) {
-				maxMethods += CharacterSheetClassUtils.getSubclassBonusMethodCount(cls.subclass, cls.source) || 0;
-			}
+			// Add bonus methods granted by the (effective) subclass. The subclass
+			// reference may be stale `null` on un-migrated saves, so resolve it via
+			// the central resolver (embedded subclass features) rather than reading
+			// cls.subclass directly — otherwise the cap is short by the +1 (or more)
+			// the subclass grants (e.g. Arcane Archer → +1 method).
+			const effectiveSubclass = this._state.getEffectiveSubclassForClass?.(cls) ?? cls.subclass;
+			maxMethods += CharacterSheetClassUtils.getSubclassBonusMethodCount(effectiveSubclass, cls.source);
 		}
 
 		return maxMethods;
@@ -9780,109 +9783,119 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Build the tradition-filter display model for the picker: gather the
-	 * class-restricted available pool (union across method-granting classes),
-	 * the subclass-granted (locked) codes, and the current selection, then hand
-	 * to the pure `buildTraditionSelectionModel`. Falls back to the full
-	 * tradition list if no class pool could be resolved, so the editor never
-	 * becomes a dead end.
-	 * @param {Array<string>} selectedTraditions
-	 * @returns {Array<{code: string, name: string, selected: boolean, locked: boolean, group: string}>}
+	 * Build the grouped tradition-selection model for the current character.
+	 * Gathers the per-class available pool (restricted subclass choice pools take
+	 * precedence over the base class list when they replace it) and the locked
+	 * traditions granted by each (effective) subclass, then delegates the grouping
+	 * to the pure {@link CharacterSheetClassUtils.buildTraditionSelectionModel}.
+	 * @param {string[]} selectedTraditions - Flat array of selected codes.
+	 * @returns {*} The grouped selection model.
 	 */
 	_getTraditionSelectionModel (selectedTraditions) {
-		const classes = this._state.getClasses?.() || [];
-		const allOptFeatures = this._page.getOptionalFeatures?.() || [];
-		const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
-		const allMethods = [...allOptFeatures, ...combatMethodEntities];
-		const classFeatures = this._page.getClassFeatures?.() || [];
+		const state = this._state;
+		const classes = state.getClasses?.() || [];
+		const allOptFeatures = this._page?.getOptionalFeatures?.() || [];
+		const classFeatures = this._page?.getClassFeatures?.() || [];
+		const pageClasses = this._page?.getClasses?.() || [];
 
-		const availableMap = new Map();
-		const grantedCodes = new Set();
+		const availableSet = new Set();
+		const grantedSet = new Set();
+		let sawRestriction = false;
+		const allCount = CharacterSheetClassUtils.getAllTraditions().length;
 
 		for (const cls of classes) {
-			const classData = this._page.getClasses?.().find(c => c.name === cls.name && c.source === cls.source);
-			const cmProg = classData?.optionalfeatureProgression?.find(prog =>
-				prog.featureType?.some(ft => ft.startsWith("CTM:")) || prog.name?.toLowerCase().includes("combat method"),
-			);
-			if (cmProg) {
-				const avail = CharacterSheetClassUtils.getAvailableTraditionsForClass(
-					allMethods, cmProg.featureType || [], cls.name, classFeatures,
-				) || [];
-				for (const t of avail) if (t.code) availableMap.set(t.code, t);
+			const classData = pageClasses.find(c => c.name === cls.name && c.source === cls.source);
+			const effectiveSubclass = state.getEffectiveSubclassForClass?.(cls) ?? cls.subclass;
+
+			// Locked (fixed, non-choice) traditions the subclass always grants.
+			const grants = CharacterSheetClassUtils.getSubclassGrantedTraditions(effectiveSubclass, cls.source) || [];
+			for (const g of grants) if (g.code && !g.choice) grantedSet.add(g.code);
+
+			// Restricted subclass choice pool (e.g. Arcane Archer → BZ/RE/UW/UH).
+			const pool = CharacterSheetClassUtils.getSubclassTraditionChoicePool(effectiveSubclass, cls.source);
+			if (pool && pool.kind === "restricted" && Array.isArray(pool.codes)) {
+				pool.codes.forEach(c => availableSet.add(c));
+				sawRestriction = true;
+				// When the subclass choice fully replaces the base picker, the base
+				// (unrestricted) Fighter list must NOT widen the pool back to "all".
+				if (pool.replacesBase) continue;
 			}
 
-			const granted = CharacterSheetClassUtils.getSubclassGrantedTraditions(cls.subclass, cls.source) || [];
-			for (const g of granted) if (g.code && !g.choice) grantedCodes.add(g.code);
+			// Base class available traditions.
+			const cmProg = classData?.optionalfeatureProgression?.find(p =>
+				p.featureType?.some(ft => ft.startsWith("CTM:")) || p.name?.toLowerCase().includes("combat method"),
+			);
+			const classAllowedTypes = cmProg?.featureType || [];
+			const avail = CharacterSheetClassUtils.getAvailableTraditionsForClass(allOptFeatures, classAllowedTypes, classData?.name, classFeatures) || [];
+			if (avail.length && avail.length < allCount) sawRestriction = true;
+			avail.forEach(t => availableSet.add(t.code));
 		}
 
-		let availableTraditions = Array.from(availableMap.values());
-		if (!availableTraditions.length) availableTraditions = CharacterSheetClassUtils.getAllTraditions();
-
-		return CharacterSheetClassUtils.buildTraditionSelectionModel({
-			availableTraditions,
-			selectedCodes: selectedTraditions || [],
-			grantedCodes: Array.from(grantedCodes),
+		const availableCodes = sawRestriction ? Array.from(availableSet) : [];
+		return CharacterSheetClassUtils.buildTraditionSelectionModel(selectedTraditions, {
+			grantedCodes: Array.from(grantedSet),
+			availableCodes,
 		});
 	}
 
 	/**
-	 * Render tradition selection with card-style UI
+	 * Render tradition selection: grouped (locked granted / available / other),
+	 * with a live name filter. The underlying selection stays a flat code array
+	 * (`selectedTraditions`) — locked traditions are kept checked + disabled so
+	 * `_getSelectedTraditionsFromUI` still includes them, and filtered-out chips
+	 * remain in the DOM (hidden) so a hidden selection is never dropped.
 	 */
 	_renderTraditionSelection (container, selectedTraditions, onChange) {
 		container.innerHTML = "";
-		Object.assign(container.style, {"display": "flex", "flex-wrap": "wrap", "gap": "0.4rem", "padding": "0.5rem", "background": "var(--rgb-bg-alt)", "border-radius": "4px"});
+		Object.assign(container.style, {"display": "flex", "flex-direction": "column", "gap": "0.4rem", "padding": "0.5rem", "background": "var(--rgb-bg-alt)", "border-radius": "4px"});
 
 		const model = this._getTraditionSelectionModel(selectedTraditions);
-		const tradIcons = this._getTraditionIcons();
-
-		// Ensure granted (locked) traditions are reflected in the live selection
-		// array so they persist on save even though their checkbox is disabled.
-		for (const trad of model) {
-			if (trad.locked && !selectedTraditions.includes(trad.code)) selectedTraditions.push(trad.code);
+		// Ensure locked/granted traditions are reflected in the live selection array.
+		for (const code of model.grantedCodes) {
+			if (!selectedTraditions.includes(code)) selectedTraditions.push(code);
 		}
 
-		const groupLabels = {granted: "Granted by subclass", selected: "Selected", available: "Available"};
-		let lastGroup = null;
+		const tradIcons = this._getTraditionIcons();
 
-		for (const trad of model) {
-			if (trad.group !== lastGroup) {
-				lastGroup = trad.group;
-				const heading = e_({outer: `<div style="flex-basis: 100%; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; margin: 0.15rem 0 0.05rem;">${groupLabels[trad.group] || ""}</div>`});
-				container.append(heading);
-			}
+		// --- Filter input ---
+		const filterWrap = e_({outer: `<div class="charsheet__method-picker-trad-filter mb-1"></div>`});
+		const filterInput = e_({outer: `<input type="text" class="ve-form-control ve-input-sm" placeholder="🔍 Filter traditions...">`});
+		filterWrap.append(filterInput);
+		container.append(filterWrap);
 
-			const isSelected = trad.selected;
-			const isLocked = trad.locked;
+		const allChips = [];
+
+		const makeChip = (trad) => {
+			const isSelected = trad.locked || selectedTraditions.includes(trad.code);
+			const lockIcon = trad.locked ? ` <span title="Granted by your subclass" style="opacity:0.7;">🔒</span>` : "";
 			const chip = e_({outer: `
 				<label class="ve-flex ve-flex-v-center" style="
-					cursor: ${isLocked ? "not-allowed" : "pointer"};
+					cursor: ${trad.locked ? "default" : "pointer"};
 					padding: 0.25rem 0.5rem;
 					border: 1px solid ${isSelected ? "var(--rgb-link)" : "var(--rgb-border-grey)"};
 					border-radius: 4px;
 					background: ${isSelected ? "rgba(51,122,183,0.15)" : "transparent"};
+					opacity: ${trad.locked ? "0.85" : "1"};
 					font-size: 0.85rem;
 					opacity: ${isLocked ? "0.85" : "1"};
 					transition: all 0.15s;
-				" data-trad="${trad.code}"${isLocked ? ` title="Granted by your subclass — always active"` : ""}>
-					<input type="checkbox" class="mr-1" style="margin: 0;" ${isSelected ? "checked" : ""}${isLocked ? " disabled" : ""}>
+				" data-trad="${trad.code}">
+					<input type="checkbox" class="mr-1" style="margin: 0;" ${isSelected ? "checked" : ""} ${trad.locked ? "disabled" : ""}>
 					<span>${tradIcons[trad.code] || "⚔️"}</span>
-					<span class="ml-1">${trad.name}</span>
-					${isLocked ? `<span class="ml-1" title="Locked">🔒</span>` : ""}
+					<span class="ml-1">${trad.name}</span>${lockIcon}
 				</label>
 			`});
 
-			if (!isLocked) {
+			if (!trad.locked) {
 				chip.querySelector("input")?.addEventListener("change", function () {
 					const code = chip.dataset.trad;
 					const checked = this.checked;
-
 					if (checked && !selectedTraditions.includes(code)) {
 						selectedTraditions.push(code);
 					} else if (!checked) {
 						const idx = selectedTraditions.indexOf(code);
 						if (idx >= 0) selectedTraditions.splice(idx, 1);
 					}
-
 					Object.assign(chip.style, {
 						"border-color": checked ? "var(--rgb-link)" : "var(--rgb-border-grey)",
 						"background": checked ? "rgba(51,122,183,0.15)" : "transparent",
@@ -9891,8 +9904,26 @@ class CharacterSheetCombat {
 				});
 			}
 
-			container.append(chip);
+			allChips.push({chip, name: trad.name.toLowerCase()});
+			return chip;
+		};
+
+		for (const group of model.groups) {
+			const section = e_({outer: `<div class="charsheet__method-picker-trad-group"></div>`});
+			section.append(e_({outer: `<div class="ve-small ve-muted mb-1" style="font-weight:600;">${group.label}</div>`}));
+			const chipRow = e_({outer: `<div style="display:flex; flex-wrap:wrap; gap:0.4rem;"></div>`});
+			for (const trad of group.traditions) chipRow.append(makeChip(trad));
+			section.append(chipRow);
+			container.append(section);
 		}
+
+		// --- Live filter ---
+		filterInput.addEventListener("input", function () {
+			const q = (this.value || "").trim().toLowerCase();
+			for (const {chip, name} of allChips) {
+				chip.style.display = (!q || name.includes(q)) ? "" : "none";
+			}
+		});
 	}
 
 	/**

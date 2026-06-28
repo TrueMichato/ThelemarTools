@@ -4197,6 +4197,15 @@ class CharacterSheetState {
 			this._data.forkedTongue.swappedSinceLongRest = false;
 		}
 
+		// (S1 #4/#5/#6/#15) Repair stale `cls.subclass === null` BEFORE any
+		// migration or reapply step that keys on the subclass. Some saves/exports
+		// dropped the subclass reference while keeping the subclass features in the
+		// flat `features[]` array, which makes every `cls.subclass`-keyed detector
+		// (hasArcaneShot, getSubclassGrantedTraditions, combat-method cap, …)
+		// silently no-op. This MUST run first so downstream feature/modifier/spell
+		// migrations and the various `_reapply*` passes see the resolved subclass.
+		this._migrateRepairSubclass();
+
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
 
@@ -4969,6 +4978,33 @@ class CharacterSheetState {
 		);
 		if (this._data.namedModifiers.length !== before) {
 			this._recalculateCustomModifiers();
+		}
+	}
+
+	/**
+	 * (S1) Repair stale `cls.subclass === null` from embedded subclass features.
+	 *
+	 * Idempotent: only mutates class entries whose `subclass` is falsy AND whose
+	 * subclass can be unambiguously reconstructed from `features[]` (see
+	 * {@link CharacterSheetClassUtils.getSubclassFromFeatures}). When the embedded
+	 * features reference more than one subclass for a class (ambiguous) the
+	 * resolver returns `null` and we leave the entry untouched.
+	 *
+	 * Must run first in `loadFromJson` (before `_migrateFeatures` and all
+	 * subclass-derived reapply/sync passes).
+	 */
+	_migrateRepairSubclass () {
+		if (!Array.isArray(this._data.classes) || !this._data.classes.length) return;
+		if (!Array.isArray(this._data.features) || !this._data.features.length) return;
+
+		for (const cls of this._data.classes) {
+			if (cls.subclass) continue;
+			const resolved = CharacterSheetClassUtils.getSubclassFromFeatures(cls, this._data.features);
+			if (resolved) {
+				cls.subclass = resolved;
+				// eslint-disable-next-line no-console
+				console.log(`[CharSheet] _migrateRepairSubclass: repaired ${cls.name} subclass → ${resolved.shortName} (${resolved.source})`);
+			}
 		}
 	}
 
@@ -6228,6 +6264,22 @@ class CharacterSheetState {
 	}
 
 	getClasses () { return this._data.classes; }
+
+	/**
+	 * Resolve the effective subclass for a class entry. Returns `cls.subclass`
+	 * when present; otherwise reconstructs it from the character's embedded
+	 * subclass features (see
+	 * {@link CharacterSheetClassUtils.getSubclassFromFeatures}). This is the
+	 * single source of truth that subclass detectors should consult so that
+	 * un-migrated runtime state (where `cls.subclass` is stale `null`) still
+	 * resolves correctly. Returns `null` when no subclass can be resolved or the
+	 * embedded features are ambiguous.
+	 * @param {*} cls - The class entry.
+	 * @returns {*} The effective subclass object, or `null`.
+	 */
+	getEffectiveSubclassForClass (/** @type {*} */ cls) {
+		return CharacterSheetClassUtils.getSubclassFromFeatures(cls, this._data.features);
+	}
 
 	/**
 	 * Set the subclass for a class
@@ -31899,7 +31951,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	hasArcaneShot () {
-		return !!this._data.classes?.some(c => c.subclass?.shortName === "Arcane Archer");
+		return !!this._data.classes?.some(c => this.getEffectiveSubclassForClass(c)?.shortName === "Arcane Archer");
 	}
 
 	/** Initialize Arcane Shot resource data if needed. */

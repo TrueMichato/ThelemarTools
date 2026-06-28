@@ -3463,6 +3463,84 @@ class CharacterSheetClassUtils {
 		return granted.reduce((/** @type {*} */ sum, /** @type {*} */ t) => sum + (t.bonusMethods || 0), 0);
 	}
 
+	/**
+	 * Central resolver for the effective subclass of a class entry.
+	 *
+	 * Some saved characters (and a class of stale exports) carry
+	 * `cls.subclass === null` even though their subclass features are present in
+	 * the character's flat `features[]` array (each `isSubclassFeature: true`,
+	 * with `subclassName`/`subclassShortName`/`subclassSource`). Every detector
+	 * that keys on `cls.subclass` (e.g. `hasArcaneShot`, `getSubclassGrantedTraditions`)
+	 * silently no-ops on such data. This resolver heals the lookup WITHOUT
+	 * mutating state: if `cls.subclass` is already populated it is returned as-is;
+	 * otherwise we reconstruct a normalized `{name, shortName, source}` object from
+	 * the embedded subclass features that belong to this class.
+	 *
+	 * Reconstruction is deliberately conservative:
+	 * - Only features whose `className`/`classSource` match the class entry count.
+	 * - If those features reference MORE THAN ONE distinct subclass (by
+	 *   shortName), we return `null` rather than guess — picking the wrong one
+	 *   could corrupt source-gated TGTT logic.
+	 * - The reconstructed `source` is taken from the LOWEST-level matching
+	 *   subclass feature (the gain-level feature, e.g. an L3 "Arcane Archer"
+	 *   feature sourced to TGTT) rather than a later backfill feature that may be
+	 *   sourced to the official book (e.g. an L7 feature sourced to XGE).
+	 *
+	 * @param {*} cls - The class entry (`{name, source, subclass, ...}`).
+	 * @param {Array<*>} features - The character's flat features array.
+	 * @returns {*} The effective subclass object, or `null` if none/ambiguous.
+	 */
+	static getSubclassFromFeatures (/** @type {*} */ cls, /** @type {Array<*>} */ features) {
+		if (!cls) return null;
+		if (cls.subclass) return cls.subclass;
+		if (!Array.isArray(features) || !features.length) return null;
+
+		const clsName = cls.name;
+		const clsSource = cls.source;
+
+		const matching = features.filter((/** @type {*} */ f) => {
+			if (!f || !f.isSubclassFeature) return false;
+			if (!(f.subclassShortName || f.subclassName)) return false;
+			// Match the feature's owning class. classSource may legitimately differ
+			// (e.g. a TGTT class re-using official subclass features), so require the
+			// class NAME to match and, when both sources are present, the source too.
+			if (f.className && clsName && f.className !== clsName) return false;
+			if (f.classSource && clsSource && f.className === clsName && f.classSource !== clsSource) {
+				// Tolerate source mismatch only when the feature carries no className
+				// disambiguation; here className matched, so a source mismatch means a
+				// different class entry (multiclass) — exclude it.
+				return false;
+			}
+			return true;
+		});
+		if (!matching.length) return null;
+
+		// Collect distinct subclasses keyed by shortName (case-insensitive).
+		const byKey = new Map();
+		for (const f of matching) {
+			const shortName = f.subclassShortName || f.subclassName;
+			const key = String(shortName).toLowerCase();
+			if (!byKey.has(key)) byKey.set(key, []);
+			byKey.get(key).push(f);
+		}
+		// Ambiguous: more than one distinct subclass for this class → do not guess.
+		if (byKey.size !== 1) return null;
+
+		const featuresForSubclass = byKey.values().next().value;
+		// Choose the source from the lowest-level matching feature (gain-level).
+		const sorted = [...featuresForSubclass].sort((/** @type {*} */ a, /** @type {*} */ b) => {
+			const la = Number(a.level) || 0;
+			const lb = Number(b.level) || 0;
+			return la - lb;
+		});
+		const primary = sorted[0];
+		const shortName = primary.subclassShortName || primary.subclassName;
+		const name = primary.subclassName || primary.subclassShortName;
+		const source = primary.subclassSource || primary.source || clsSource;
+
+		return {name, shortName, source};
+	}
+
 	// ==========================================
 	// Combat Method Canonical Maps
 	// ==========================================
@@ -3586,6 +3664,58 @@ class CharacterSheetClassUtils {
 	 */
 	static getTraditionName (/** @type {*} */ tradCode) {
 		return (/** @type {*} */ (CharacterSheetClassUtils.TRADITION_CODE_TO_NAME))[tradCode] || tradCode;
+	}
+
+	/**
+	 * Build a grouped, filter-friendly model for the combat-tradition picker.
+	 *
+	 * The picker's underlying selection stays a FLAT array of two-letter codes
+	 * (`selectedCodes`); this only shapes how those codes are *presented*:
+	 * - `grantedCodes` are auto-included in the selection and rendered as LOCKED
+	 *   (a fixed tradition the subclass always grants — the player can't drop it).
+	 * - `availableCodes` restricts the choosable list (e.g. an Arcane Archer can
+	 *   only pick from BZ/RE/UW/UH). When empty, every tradition is choosable.
+	 * - Any already-selected code that is neither granted nor in the available
+	 *   pool is surfaced in an "Other" group so an out-of-pool legacy pick is
+	 *   never silently hidden (or dropped) by the UI.
+	 *
+	 * @param {string[]} selectedCodes - Currently selected tradition codes (flat).
+	 * @param {{grantedCodes?: string[], availableCodes?: string[]}} [opts]
+	 * @returns {{selected: string[], groups: Array<{key:string,label:string,locked:boolean,traditions:Array<{code:string,name:string,locked:boolean,selected:boolean}>}>, grantedCodes: string[], choosableCodes: string[]}}
+	 */
+	static buildTraditionSelectionModel (/** @type {string[]} */ selectedCodes, {grantedCodes = /** @type {string[]} */ ([]), availableCodes = /** @type {string[]} */ ([])} = {}) {
+		const all = CharacterSheetClassUtils.getAllTraditions();
+		const nameOf = (/** @type {string} */ code) => CharacterSheetClassUtils.getTraditionName(code);
+
+		const granted = [...new Set((grantedCodes || []).filter(Boolean))];
+		const selected = [...new Set((selectedCodes || []).filter(Boolean))];
+		// Granted traditions are always selected (and locked).
+		for (const g of granted) if (!selected.includes(g)) selected.push(g);
+
+		const grantedSet = new Set(granted);
+		const availSet = new Set((availableCodes || []).filter(Boolean));
+
+		const choosableCodes = (availSet.size ? Array.from(availSet) : all.map(t => t.code))
+			.filter(c => !grantedSet.has(c));
+
+		const knownSet = new Set([...grantedSet, ...choosableCodes]);
+		const otherCodes = selected.filter(c => !knownSet.has(c));
+
+		const toEntry = (/** @type {string} */ code) => ({
+			code,
+			name: nameOf(code),
+			locked: grantedSet.has(code),
+			selected: selected.includes(code),
+		});
+		const byName = (/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name);
+
+		const groups = [
+			{key: "granted", label: "Granted by subclass (locked)", locked: true, traditions: granted.map(toEntry).sort(byName)},
+			{key: "available", label: "Available", locked: false, traditions: choosableCodes.map(toEntry).sort(byName)},
+			{key: "other", label: "Other (currently selected)", locked: false, traditions: otherCodes.map(toEntry).sort(byName)},
+		].filter(g => g.traditions.length);
+
+		return {selected, groups, grantedCodes: granted, choosableCodes};
 	}
 
 	/**
@@ -4298,57 +4428,6 @@ class CharacterSheetClassUtils {
 			}
 		}
 		return Array.from(byKey.values());
-	}
-
-	/**
-	 * Build the display model for the combat-traditions filter UI.
-	 *
-	 * Pure transform consumed by the method-picker's tradition editor: it takes
-	 * the class-restricted pool, the player's current selection, and the
-	 * subclass-granted (locked) traditions, and returns an ordered list of
-	 * `{code, name, selected, locked, group}` rows. Granted traditions are
-	 * always `selected` + `locked` (the player can't toggle them off); rows are
-	 * grouped granted → selected → available and alphabetised within each group.
-	 *
-	 * Already-selected codes that fall outside the available pool are still
-	 * surfaced (so a tradition the character already has is never silently
-	 * dropped). The underlying selection model stays a flat array of codes.
-	 *
-	 * @param {object} opts
-	 * @param {Array<{code: string, name?: string}>} [opts.availableTraditions] - class-restricted pool
-	 * @param {Array<string>} [opts.selectedCodes] - currently selected tradition codes
-	 * @param {Array<string>} [opts.grantedCodes] - subclass-granted (locked) tradition codes
-	 * @returns {Array<{code: string, name: string, selected: boolean, locked: boolean, group: "granted"|"selected"|"available"}>}
-	 */
-	static buildTraditionSelectionModel ({availableTraditions = [], selectedCodes = [], grantedCodes = []} = {}) {
-		const selectedSet = new Set(selectedCodes);
-		const grantedSet = new Set(grantedCodes);
-
-		const byCode = new Map();
-		const add = (/** @type {*} */ code, /** @type {*} */ name) => {
-			if (!code || byCode.has(code)) return;
-			const locked = grantedSet.has(code);
-			byCode.set(code, {
-				code,
-				name: name || CharacterSheetClassUtils.getTraditionName(code),
-				selected: locked || selectedSet.has(code),
-				locked,
-			});
-		};
-
-		for (/** @type {*} */ const t of availableTraditions) add(t.code, t.name);
-		for (/** @type {*} */ const code of grantedCodes) add(code);
-		for (/** @type {*} */ const code of selectedCodes) add(code);
-
-		const all = Array.from(byCode.values());
-		const rank = (/** @type {*} */ m) => m.locked ? 0 : (m.selected ? 1 : 2);
-		all.sort((/** @type {*} */ a, /** @type {*} */ b) => {
-			const r = rank(a) - rank(b);
-			if (r) return r;
-			return a.name.localeCompare(b.name);
-		});
-		for (/** @type {*} */ const m of all) m.group = m.locked ? "granted" : (m.selected ? "selected" : "available");
-		return all;
 	}
 
 	// ==========================================
