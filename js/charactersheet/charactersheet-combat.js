@@ -1962,7 +1962,14 @@ class CharacterSheetCombat {
 		let doubleshotDamage = 0;
 		let doubleshotRoll = null;
 		let doubleshotDie = null;
-		if (attack.isRanged && !attack.isSpell) {
+		// Ranged gating MUST use the canonical classifier, not the raw `attack.isRanged`
+		// flag: auto-generated (renderAttacks) and modal-built weapon attacks only set
+		// `isMelee` (ranged → `isMelee:false`) and never carry an explicit `isRanged`, so
+		// `attack.isRanged` is `undefined` for the very weapons Doubleshot targets. Using
+		// `_getAttackRollKind` keeps this gate in agreement with the rider resolver
+		// (`getDoubleshotRiderForAttack` → `_isMeleeWeaponAttack`); the helper still
+		// self-gates (melee/spell/damage-format) and owns the one-shot consume.
+		if (this._getAttackRollKind(attack).isRanged && !attack.isSpell) {
 			doubleshotDie = this._consumePendingWeaponDamageDie?.(attack);
 			if (doubleshotDie) {
 				doubleshotRoll = this._parseDamage(doubleshotDie, isCrit);
