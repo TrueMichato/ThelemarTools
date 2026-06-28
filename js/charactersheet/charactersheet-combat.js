@@ -10369,6 +10369,9 @@ class CharacterSheetCombat {
 			entries: method.entries,
 		};
 		this._state.addFeature(featureData);
+		// Persist immediately so the change survives regardless of how the picker
+		// modal is closed (X / click-outside / ESC don't trigger the Done save).
+		this._page?.saveCharacter?.();
 		JqueryUtil.doToast({type: "success", content: `Learned ${method.name}!`});
 	}
 
@@ -10377,6 +10380,9 @@ class CharacterSheetCombat {
 	 */
 	_removeCombatMethod (method) {
 		this._state.removeFeature(method.name, method.source);
+		// Persist immediately so the removal survives regardless of how the picker
+		// modal is closed (X / click-outside / ESC don't trigger the Done save).
+		this._page?.saveCharacter?.();
 		JqueryUtil.doToast({type: "info", content: `Removed ${method.name}.`});
 	}
 
