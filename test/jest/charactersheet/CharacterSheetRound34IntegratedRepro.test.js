@@ -22,8 +22,8 @@
  *
  * RED proof (each fix independently): strip `saveCharacter` from
  * `_addCombatMethod`/`_removeCombatMethod` → the #4 persistence tests fail; revert
- * the quiver `addItem` auto-place or the `_pApplySpecialArrow` persist hooks → the
- * #1 tests fail. With both fixes in place every test below is GREEN.
+ * the quiver `addItem` auto-place or the active-ammo `_rollDamage` consume hooks →
+ * the #1 tests fail. With both fixes in place every test below is GREEN.
  */
 
 import "./setup.js";
@@ -193,31 +193,47 @@ describe("R34 integrated — #1a add auto-places into equipped quiver", () => {
 });
 
 // ===========================================================================
-// #1b — applying a special arrow persists + re-renders inventory
+// #1b — selecting an ammo: the damage roll persists + re-renders inventory
 // ===========================================================================
 
-describe("R34 integrated — #1b special-arrow use persists + re-renders inventory", () => {
+describe("R34→R35 integrated — #1b active-ammo consume on the damage roll persists + re-renders inventory", () => {
+	// R35 (Bug #3): re-pointed from `_pApplySpecialArrow` (removed) to the active-ammo
+	// `_rollDamage` consume path — the chosen ammo is consumed once on the damage roll,
+	// which persists (saveCharacter) and re-renders the Inventory tab.
 	test("decrements the stack AND saves AND re-renders the Inventory tab", async () => {
 		const state = loadState();
+		state.setSelectedAmmoId(ID.longbow, ID.healingArrow);
 		const combat = makeCombat(state);
-		combat._rollDamage = async () => {};
+		const weapon = state.getItems().find(i => i.id === ID.longbow);
+		combat._cachedAttacks = [{
+			id: `auto_${ID.longbow}`,
+			name: weapon?.name,
+			sourceItem: weapon,
+			isSpell: false,
+			isMelee: false,
+			damage: "1d8",
+			damageType: "piercing",
+			abilityMod: "dex",
+		}];
+		combat._weaponRiderEnabled = {};
+		combat._selectedCunningStrikes = [];
+		combat._parseDamage = (dice, isCrit) => ({total: 3, sides: 8, rolls: [3], dice, isCrit});
+		combat._promptUseCombatMethod = async () => null;
+		combat._promptApplyMethodEffect = async () => false;
 		combat.renderCombatQuiver = () => {};
-		const prevJq = globalThis.JqueryUtil;
-		globalThis.JqueryUtil = {doToast: () => {}};
+		combat._page.pAnimateDamageDice = async () => {};
+		combat._page.showDiceResult = () => ({});
 
 		const arrow = state.getQuiverAmmunitionForWeapon(ID.longbow).find(a => a.id === ID.healingArrow);
 		expect(arrow).toBeTruthy();
 		const before = state.getItems().find(i => i.id === ID.healingArrow).quantity;
 
-		const res = await combat._pApplySpecialArrow(`auto_${ID.longbow}`, arrow);
+		await combat._rollDamage(`auto_${ID.longbow}`);
 
-		expect(res.consumed).toBe(true);
 		const after = state.getItems().find(i => i.id === ID.healingArrow)?.quantity ?? 0;
 		expect(after).toBe(before - 1);
 		expect(combat._page.saveCharacter).toHaveBeenCalledTimes(1);
 		expect(combat._invRenders.length).toBe(1);
-
-		globalThis.JqueryUtil = prevJq;
 	});
 });
 
@@ -257,19 +273,36 @@ describe("R34 integrated — coexistence + round-trip idempotency", () => {
 	test("a single session can change methods AND consume ammo, and both survive reload", async () => {
 		const state = loadState();
 		const combat = makeCombat(state);
-		combat._rollDamage = async () => {};
+		// R35 (Bug #3): ammo consume is now folded into `_rollDamage`. Wire the
+		// damage harness; the #4 method-change assertions below are untouched.
+		const weapon = state.getItems().find(i => i.id === ID.longbow);
+		combat._cachedAttacks = [{
+			id: `auto_${ID.longbow}`,
+			name: weapon?.name,
+			sourceItem: weapon,
+			isSpell: false,
+			isMelee: false,
+			damage: "1d8",
+			damageType: "piercing",
+			abilityMod: "dex",
+		}];
+		combat._weaponRiderEnabled = {};
+		combat._selectedCunningStrikes = [];
+		combat._parseDamage = (dice, isCrit) => ({total: 3, sides: 8, rolls: [3], dice, isCrit});
+		combat._promptUseCombatMethod = async () => null;
+		combat._promptApplyMethodEffect = async () => false;
 		combat.renderCombatQuiver = () => {};
-		const prevJq = globalThis.JqueryUtil;
-		globalThis.JqueryUtil = {doToast: () => {}};
+		combat._page.pAnimateDamageDice = async () => {};
+		combat._page.showDiceResult = () => ({});
 
 		// #4 — learn a method and forget another, on the same instance.
 		combat._addCombatMethod(NEW_METHOD);
 		combat._removeCombatMethod(REMOVE_TARGET);
 
-		// #1b — consume a special arrow on the same instance.
-		const arrow = state.getQuiverAmmunitionForWeapon(ID.longbow).find(a => a.id === ID.healingArrow);
+		// #1b — consume the selected ammo on the damage roll, same instance.
+		state.setSelectedAmmoId(ID.longbow, ID.healingArrow);
 		const beforeAmmo = state.getItems().find(i => i.id === ID.healingArrow).quantity;
-		await combat._pApplySpecialArrow(`auto_${ID.longbow}`, arrow);
+		await combat._rollDamage(`auto_${ID.longbow}`);
 
 		// The last capture reflects every mutation; reload and verify coexistence.
 		const captured = combat._saves[combat._saves.length - 1];
@@ -286,8 +319,6 @@ describe("R34 integrated — coexistence + round-trip idempotency", () => {
 		expect(hasMethod(again, REMOVE_TARGET.name)).toBe(false);
 		expect(again.getItems().find(i => i.id === ID.healingArrow)?.quantity ?? 0).toBe(beforeAmmo - 1);
 		expect(again.getEquippedQuiver()?.id).toBe(ID.quiver);
-
-		globalThis.JqueryUtil = prevJq;
 	});
 
 	test("combat-method markers stay sane (no duplicate Singular Focus) after reload", () => {

@@ -476,7 +476,7 @@ describe("#16 Quiver auto-place + retrieval (state)", () => {
 		expect(after).toBe(before - 1);
 	});
 
-	it("_rollAttack consumes EXACTLY one round inline (R33 — post-attack picker removed)", () => {
+	it("_rollAttack NO LONGER consumes ammo (R35, Bug #3 — consume moved to the damage roll)", () => {
 		const state = mkQuiverState();
 		state.setItemEquipped("quiver1", true);
 		state.autoPlaceAmmunitionInQuiver("quiver1");
@@ -491,6 +491,9 @@ describe("#16 Quiver auto-place + retrieval (state)", () => {
 			damage: "1d8",
 			sourceItem: {id: "bow1", ammoType: "arrow|phb"},
 		});
+		// Select an ammo so an active ammo IS in play — proving the attack roll
+		// still does NOT spend it (the damage roll does).
+		state.setSelectedAmmoId("bow1", "arrows");
 
 		const combat = Object.create(CharacterSheetCombat.prototype);
 		combat._battleTacticToggles = {};
@@ -516,42 +519,42 @@ describe("#16 Quiver auto-place + retrieval (state)", () => {
 		const before = sumCompatible();
 		combat._rollAttack("bowAtk", null);
 		const after = sumCompatible();
-		// R33: the post-attack quiver popup was removed. The synchronous roll now
-		// consumes exactly one round of compatible ammo inline (never zero, never
-		// twice). A specific quiver arrow is spent on-demand via the 🏹 Special
-		// Arrow button on the attack row, not automatically here.
-		expect(after).toBe(before - 1);
+		// R35 (Bug #3): the attack roll NEVER spends a round — consumption is folded
+		// into `_rollDamage` so the chosen ammo's attack AND damage bonuses can both
+		// apply. Restoring the old inline attack-time consume drops this by one (RED).
+		expect(after).toBe(before);
 	});
 });
 
-describe("#16 Special Arrow eligibility gate (combat, R33 — replaces the post-attack picker hook)", () => {
+describe("#16 active-ammo selector gate (combat, R35 — replaces the R33 Special Arrow hook)", () => {
 	function mkQuiverCombat (quiverAmmoForWeapon) {
 		return mkCombat({
 			isAmmunitionTrackingEnabled: () => true,
 			getQuiverAmmunitionForWeapon: () => quiverAmmoForWeapon,
+			getSelectedAmmoId: () => null,
 		});
 	}
 
 	const bow = {name: "Longbow", isMelee: false, isSpell: false, sourceItem: {id: "bow1", ammoType: "arrow|phb"}};
 
-	it("offers the Special Arrow affordance on a ranged weapon attack when the quiver holds compatible ammo", () => {
+	it("offers the active-ammo selector on a ranged weapon attack when the quiver holds compatible ammo", () => {
 		const combat = mkQuiverCombat([{id: "arrows", name: "Arrows", quantity: 20}]);
 		// The old `id:"quiver"` post-attack hook is gone (R33 redesign).
 		expect(combat._getPostAttackHooks().some(h => h.id === "quiver")).toBe(false);
-		expect(combat._isSpecialArrowEligible(bow, false)).toBe(true);
-		expect(combat._renderSpecialArrowButton(bow, false)).toMatch(/charsheet__attack-special-arrow/);
+		expect(combat._isAmmoSelectorEligible(bow, false)).toBe(true);
+		expect(combat._renderAmmoSelector(bow, false)).toMatch(/charsheet__attack-ammo-select/);
 	});
 
 	it("does NOT offer the affordance on a melee attack", () => {
 		const combat = mkQuiverCombat([{id: "arrows", name: "Arrows", quantity: 20}]);
-		expect(combat._isSpecialArrowEligible(MELEE_ATTACK, true)).toBe(false);
-		expect(combat._renderSpecialArrowButton(MELEE_ATTACK, true)).toBe("");
+		expect(combat._isAmmoSelectorEligible(MELEE_ATTACK, true)).toBe(false);
+		expect(combat._renderAmmoSelector(MELEE_ATTACK, true)).toBe("");
 	});
 
 	it("does NOT offer the affordance when the quiver has no compatible ammo", () => {
 		const combat = mkQuiverCombat([]);
-		expect(combat._isSpecialArrowEligible(bow, false)).toBe(false);
-		expect(combat._renderSpecialArrowButton(bow, false)).toBe("");
+		expect(combat._isAmmoSelectorEligible(bow, false)).toBe(false);
+		expect(combat._renderAmmoSelector(bow, false)).toBe("");
 	});
 });
 

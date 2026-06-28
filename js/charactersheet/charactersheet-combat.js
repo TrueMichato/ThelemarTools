@@ -74,14 +74,22 @@ class CharacterSheetCombat {
 			this._rollDamage(attackId);
 		});
 
-		// 🏹 Special Arrow — on a ranged weapon attack whose equipped quiver holds
-		// compatible ammo, open the arrow picker (rolls weapon damage + arrow effect,
-		// spends one round). R33 replacement for the old post-attack quiver popup.
-		document.addEventListener("click", (/** @type {*} */ e) => {
-			const target = e.target.closest(".charsheet__attack-special-arrow");
+		// Active ammunition selector (Bug #3) — on a ranged ammunition weapon, the
+		// per-attack-row <select> chooses which ammo is loaded: "Regular" (no bonus,
+		// no special consumption) or a quiver ammo whose bonuses ride the attack AND
+		// damage rolls (consumed on the damage roll). Persist + re-render on change.
+		document.addEventListener("change", (/** @type {*} */ e) => {
+			const target = e.target.closest?.(".charsheet__attack-ammo-select");
 			if (!target) return;
 			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
-			void this._pPickSpecialArrowDamage(attackId);
+			if (!attackId) return;
+			const attack = this._findAttackById(attackId);
+			const weaponId = attack?.sourceItem?.id;
+			if (!weaponId) return;
+			this._state.setSelectedAmmoId?.(weaponId, target.value || null);
+			this._page?.saveCharacter?.();
+			this.renderAttacks();
+			this.renderCombatQuiver?.();
 		});
 
 		// Channel a weapon-attack spell (Booming/Green-Flame Blade) into a weapon attack.
@@ -979,31 +987,13 @@ class CharacterSheetCombat {
 		// rider AFTER calling this method, so its own roll is never self-cleared.
 		if (this._pendingSpellRider) this._clearPendingSpellRider();
 
-		// Ammunition consumption (if enabled and weapon uses ammo). Consume one
-		// round inline from loose inventory. The quiver's own ammunition is spent
-		// on-demand via the 🏹 Special Arrow button on the attack row (R33 redesign),
-		// not automatically here, so a plain to-hit roll never double-spends.
-		let ammoNote = "";
-		if (this._state.isAmmunitionTrackingEnabled?.() && attack.sourceItem?.ammoType) {
-			const ammoItems = this._state.getAmmunitionForWeapon?.(attack.sourceItem.id) || [];
-			if (ammoItems.length > 0) {
-				// Use first available ammunition
-				const ammo = ammoItems[0];
-				if (this._state.consumeAmmunition?.(ammo.id, 1)) {
-					const remaining = ammo.quantity - 1;
-					ammoNote = ` [${ammo.name}: ${remaining} remaining]`;
-					// Persist the decrement and refresh the Inventory tab so the loose
-					// ammo count doesn't look stale / reset on reload (Bug #1b).
-					this._page?.saveCharacter?.();
-					this._page?._inventory?.render?.();
-				}
-			} else {
-				// No compatible ammunition
-				if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
-					JqueryUtil.doToast({type: "warning", content: `No compatible ammunition for ${attack.name}!`});
-				}
-			}
-		}
+		// Active ammunition (Bug #3). The selected quiver ammo's bonuses ride BOTH
+		// the attack and the damage roll, but ammo is consumed ONLY on the damage
+		// roll — a to-hit roll never spends a round. "Regular" (no selection) adds
+		// nothing here. (The old inline attack-time consume was removed so attacking
+		// no longer spends ammo.)
+		const selectedAmmo = this._getSelectedAmmoForWeapon(attack.sourceItem?.id);
+		const ammoAttackBonus = selectedAmmo ? this._getAmmoAttackBonus(selectedAmmo) : 0;
 
 		// Determine attack type for advantage/disadvantage matching.
 		// Honor an explicit ranged flag first (active-state / spell attacks set isRanged:true
@@ -1047,7 +1037,7 @@ class CharacterSheetCombat {
 		const extraBonus = (opts?.extraBonus && Number.isFinite(opts.extraBonus.value)) ? opts.extraBonus : null;
 		const extraBonusValue = extraBonus ? extraBonus.value : 0;
 
-		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus + localAttackBonus + extraBonusValue;
+		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus + localAttackBonus + extraBonusValue + ammoAttackBonus;
 
 		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
 		const rollResult = this._page.rollD20({event, mode: stateMode});
@@ -1079,17 +1069,22 @@ class CharacterSheetCombat {
 		const featureModLabel = attackContributions.length
 			? ` <span class="ve-muted">(${attackContributions.map(c => `${c.name} ${c.value >= 0 ? "+" : ""}${c.value}`).join(", ")})</span>`
 			: "";
+		// Itemize the active ammunition's to-hit bonus explicitly (the user asked for
+		// attack bonuses to be broken out) — e.g. "(Healing Arrow +1)".
+		const ammoLabel = (selectedAmmo && ammoAttackBonus)
+			? ` <span class="ve-muted">(${selectedAmmo.name} ${ammoAttackBonus >= 0 ? "+" : ""}${ammoAttackBonus})</span>`
+			: "";
 
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
 		void this._page.pAnimateD20?.(rollResult);
 		const resultEl = this._page.showDiceResult({
-			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}${featureModLabel}`,
+			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}${featureModLabel}${ammoLabel}`,
 			roll: rollResult.roll,
 			modifier: totalBonus,
 			total,
 			resultClass,
-			resultNote: resultNote + ammoNote,
+			resultNote: resultNote,
 			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus),
 		});
 
@@ -1616,9 +1611,12 @@ class CharacterSheetCombat {
 	_getAmmoEffectText (ammo) {
 		if (!ammo) return "";
 		const parts = [];
-		if (ammo.bonusWeapon || ammo.bonusWeaponAttack) {
-			const b = ammo.bonusWeapon || ammo.bonusWeaponAttack;
-			parts.push(`${b} to attack`);
+		// `bonusWeapon` is +X to BOTH attack AND damage (e.g. "+1 Arrow"), so it
+		// must NOT be mislabeled "to attack" only. `bonusWeaponAttack` is attack-only.
+		if (ammo.bonusWeapon) {
+			parts.push(`${ammo.bonusWeapon} to attack and damage`);
+		} else if (ammo.bonusWeaponAttack) {
+			parts.push(`${ammo.bonusWeaponAttack} to attack`);
 		}
 		if (ammo.bonusWeaponDamage) parts.push(`${ammo.bonusWeaponDamage} damage`);
 		// The arrow's COMPLETE description (every entry), tags stripped — not just
@@ -1627,6 +1625,61 @@ class CharacterSheetCombat {
 		const desc = this._getAmmoDescriptionText(ammo);
 		if (desc) parts.push(desc);
 		return parts.join("; ");
+	}
+
+	/**
+	 * The to-hit bonus an ammunition item contributes (Bug #3). `bonusWeapon` is
+	 * "+X to attack AND damage"; `bonusWeaponAttack` is attack-only. Both are
+	 * parsed to an integer; mundane ammo (or damage-only ammo) yields 0.
+	 * @param {object} ammo - Flattened ammunition item.
+	 * @returns {number}
+	 */
+	_getAmmoAttackBonus (ammo) {
+		if (!ammo) return 0;
+		const raw = ammo.bonusWeapon ?? ammo.bonusWeaponAttack;
+		const n = parseInt(raw, 10);
+		return Number.isFinite(n) ? n : 0;
+	}
+
+	/**
+	 * The FLAT damage bonus an ammunition item contributes to the weapon's own
+	 * damage type (Bug #3): `bonusWeapon` (the +X also applies to damage) plus a
+	 * `bonusWeaponDamage` that is a flat number (NOT a dice expression — dice are
+	 * handled separately via `_extractAmmoBonusDamage` so they crit-double). Mundane
+	 * ammo yields 0.
+	 * @param {object} ammo - Flattened ammunition item.
+	 * @returns {number}
+	 */
+	_getAmmoFlatDamageBonus (ammo) {
+		if (!ammo) return 0;
+		let total = 0;
+		const wb = parseInt(ammo.bonusWeapon, 10);
+		if (Number.isFinite(wb)) total += wb;
+		const raw = ammo.bonusWeaponDamage;
+		if (raw != null && !/d\d/i.test(String(raw))) {
+			const n = parseInt(raw, 10);
+			if (Number.isFinite(n)) total += n;
+		}
+		return total;
+	}
+
+	/**
+	 * Resolve the ACTIVE ammunition a weapon is set to fire (Bug #3). Reads the
+	 * per-weapon selection and returns the matching flattened quiver ammo object,
+	 * validating it is still in the equipped quiver with stock remaining. Returns
+	 * null for "Regular" (no selection) or a stale/depleted selection.
+	 * @param {string} weaponId - The weapon inventory item ID.
+	 * @returns {object|null}
+	 */
+	_getSelectedAmmoForWeapon (weaponId) {
+		if (!weaponId) return null;
+		const ammoId = this._state.getSelectedAmmoId?.(weaponId);
+		if (!ammoId) return null;
+		const ammo = (this._state.getQuiverAmmunitionForWeapon?.(weaponId) || [])
+			.find(a => a.id === ammoId);
+		if (!ammo) return null;
+		const count = this._state.getEffectiveAmmoCount?.(ammo) ?? (ammo.quantity || 0);
+		return count > 0 ? ammo : null;
 	}
 
 	/**
@@ -1712,116 +1765,6 @@ class CharacterSheetCombat {
 		const m = re.exec(text);
 		if (!m) return null;
 		return {dice: m[1].replace(/\s+/g, ""), type: (m[2] || "").toLowerCase()};
-	}
-
-	/**
-	 * Apply a chosen special arrow to a ranged attack (R33). Rolls the WEAPON's
-	 * normal damage via `_rollDamage`, surfaces the arrow's effect text and any
-	 * explicit bonus-damage dice it carries, then consumes EXACTLY ONE round of
-	 * that arrow (stack-based single decrement). Factored out of the picker so the
-	 * mechanics are unit-testable with the page roll/render methods stubbed.
-	 * @param {string} attackId
-	 * @param {object} ammo - The chosen flattened ammunition item.
-	 * @returns {Promise<{consumed: boolean, effect: string, bonusDamage: (number|null)}>}
-	 */
-	async _pApplySpecialArrow (attackId, ammo) {
-		if (!ammo) return {consumed: false, effect: "", bonusDamage: null};
-
-		// Roll the weapon's normal damage through the single source of truth.
-		await this._rollDamage?.(attackId);
-
-		// Surface the arrow's explicit bonus-damage dice (if any) and its effect.
-		const bonus = this._extractAmmoBonusDamage(ammo);
-		let bonusDamage = null;
-		let bonusNote = "";
-		if (bonus) {
-			const roll = this._parseDamage?.(bonus.dice);
-			bonusDamage = roll?.total ?? null;
-			if (bonusDamage != null) bonusNote = ` +${bonusDamage}${bonus.type ? ` ${bonus.type}` : ""} damage`;
-		}
-		const effect = this._getAmmoEffectText(ammo);
-
-		// Consume exactly one round (stack-based single decrement).
-		const before = this._state.getEffectiveAmmoCount?.(ammo) ?? (ammo.quantity || 0);
-		let consumed = false;
-		let remainingNote = "";
-		if (this._state.consumeAmmunition?.(ammo.id, 1)) {
-			consumed = true;
-			const remaining = Math.max(0, before - 1);
-			remainingNote = ` (${remaining} left in quiver)`;
-		}
-
-		if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
-			JqueryUtil.doToast({
-				type: "info",
-				content: `Loosed ${ammo.name}${remainingNote}${bonusNote}${effect ? ` — ${effect}` : ""}.`,
-			});
-		}
-		this.renderCombatQuiver?.();
-		// Persist the decrement and refresh the Inventory tab so the count doesn't
-		// look stale / reset on reload (Bug #1b). Only when a round was actually spent.
-		if (consumed) {
-			this._page?.saveCharacter?.();
-			this._page?._inventory?.render?.();
-		}
-		return {consumed, effect, bonusDamage};
-	}
-
-	/**
-	 * Non-blocking 🏹 Special Arrow picker (R33). Triggered by the per-attack-row
-	 * button on a ranged weapon whose equipped quiver holds compatible ammo. Lists
-	 * the arrows (name, effective count, effect); choosing one rolls the weapon's
-	 * normal damage, surfaces the arrow's effect/extra damage, and spends one round.
-	 * Deliberately NOT gated on `isAmmunitionTrackingEnabled` — the quiver is its own
-	 * always-on feature. Closing without a pick does NOTHING (no shot, no spend).
-	 * @param {string} attackId
-	 */
-	async _pPickSpecialArrowDamage (attackId) {
-		const attack = this._findAttackById(attackId);
-		const weaponId = attack?.sourceItem?.id;
-		if (!weaponId) return;
-		const ammo = this._state.getQuiverAmmunitionForWeapon?.(weaponId) || [];
-		if (!ammo.length) return;
-
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
-			title: `🏹 Special Arrow — ${attack?.name || "Ranged Attack"}`,
-			isMinHeight0: true,
-		});
-
-		const rowsHtml = ammo.map((a, i) => {
-			const eff = this._getAmmoEffectText(a);
-			const srcAbbr = a.source ? Parser.sourceJsonToAbv(a.source) : "";
-			let nameHtml = a.name;
-			if (this._page?.getHoverLink && a.source) {
-				try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { nameHtml = a.name; }
-			}
-			return `
-				<div class="charsheet__quiver-opt-row ve-flex ve-flex-v-center ve-flex-wrap gap-1" style="margin-bottom:6px;">
-					<span class="bold">${nameHtml}</span>
-					${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
-					<span class="badge badge-default ml-1" title="Remaining in quiver">×${this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)}</span>
-					${eff ? `<span class="ve-muted ve-small charsheet__quiver-opt-eff">${eff}</span>` : ""}
-					<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__quiver-opt ml-auto" data-idx="${i}" title="Loose this arrow and roll damage">Loose &amp; Damage</button>
-				</div>`;
-		}).join("");
-
-		modalInner.innerHTML = `
-			<div class="charsheet__quiver-pick">
-				<p class="ve-small ve-muted charsheet__quiver-pick__lede">
-					Choose which arrow you loosed. Rolls the weapon's damage, shows the arrow's effect, and spends one round.
-				</p>
-				<div class="charsheet__quiver-pick__opts">${rowsHtml}</div>
-			</div>
-		`;
-
-		modalInner.querySelectorAll(".charsheet__quiver-opt").forEach((/** @type {*} */ el) => {
-			el.addEventListener("click", () => {
-				const idx = Number(el.getAttribute("data-idx"));
-				const a = ammo[idx];
-				doClose();
-				void this._pApplySpecialArrow(attackId, a);
-			});
-		});
 	}
 
 	/**
@@ -2229,6 +2172,11 @@ class CharacterSheetCombat {
 		let riderDamageTotal = 0;
 		const riderParts = [];
 		const usedRiderIds = [];
+		// Active ammunition (Bug #3): resolved once so its flat bonus folds into the
+		// weapon-typed total and its dice ride the riderParts pipeline. Null = Regular.
+		const ammoForDamage = !attack.isSpell ? this._getSelectedAmmoForWeapon(attack.sourceItem?.id) : null;
+		const weaponDamageTypeForAmmo = attack.damageType;
+		let ammoFlatDamageBonus = 0;
 		if (!attack.isSpell) {
 			const weaponRiders = this._state.getFeatureCalculations?.()?.weaponDamageRiders || [];
 			for (const rider of weaponRiders) {
@@ -2261,6 +2209,24 @@ class CharacterSheetCombat {
 				riderParts.push({name: rider.source || "Weapon Upgrade", dice: rider.dice, total: riderRoll.total, type: rider.damageType});
 				riderRollsForAnim.push(riderRoll);
 			}
+
+			// Active ammunition damage (Bug #3): the selected quiver ammo's bonuses
+			// ride this weapon's damage. Any DICE it carries (bonusWeaponDamage dice
+			// or an "extra NdM <type> damage" phrase in its entries text) join the
+			// SAME riderParts pipeline so they crit-double (via `isCrit`) and report
+			// under their own type; its FLAT bonus (bonusWeapon's +X, or a flat
+			// bonusWeaponDamage) folds into the weapon's own damage type below. The
+			// round is consumed on this damage roll (after the result), never here.
+			if (ammoForDamage) {
+				ammoFlatDamageBonus = this._getAmmoFlatDamageBonus(ammoForDamage);
+				const ammoDice = this._extractAmmoBonusDamage(ammoForDamage);
+				if (ammoDice?.dice) {
+					const ammoRoll = this._parseDamage(ammoDice.dice, isCrit);
+					riderDamageTotal += ammoRoll.total;
+					riderParts.push({name: ammoForDamage.name, dice: ammoDice.dice, total: ammoRoll.total, type: ammoDice.type || weaponDamageTypeForAmmo});
+					riderRollsForAnim.push(ammoRoll);
+				}
+			}
 		}
 
 		// Magic item crit damage bonus (e.g., bonusWeaponCritDamage on the weapon)
@@ -2275,7 +2241,7 @@ class CharacterSheetCombat {
 			spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 		}
 
-		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + critDamageBonus + spellDamageBonus;
+		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
 
 		// Get extra damage dice from active states (e.g., Hex, Flame Tongue)
 		const extraDamageEntries = this._state.getExtraDamageFromStates?.() || [];
@@ -2329,6 +2295,7 @@ class CharacterSheetCombat {
 		if (stateDamageBonus) subtitle += ` + ${stateDamageBonus} (states)`;
 		if (critDamageBonus) subtitle += ` + ${critDamageBonus} (crit bonus)`;
 		if (spellDamageBonus) subtitle += ` + ${spellDamageBonus} (spell item)`;
+		if (ammoFlatDamageBonus) subtitle += ` + ${ammoFlatDamageBonus} (${ammoForDamage?.name || "ammunition"})`;
 		if (sneakAttackDamage) subtitle += ` + ${sneakAttackDamage} (sneak attack ${sneakAttackDice})`;
 		for (const rp of riderParts) {
 			subtitle += ` + ${rp.total} (${rp.name} ${rp.dice}${rp.type ? ` ${rp.type}` : ""})`;
@@ -2411,6 +2378,24 @@ class CharacterSheetCombat {
 		// Consume the channeled-spell on-hit rider — it rides exactly ONE damage roll for its
 		// weapon. Clear whenever it matched this attack, even below level 5 (no on-hit dice yet).
 		if (riderMatched) this._clearPendingSpellRider();
+
+		// Active ammunition (Bug #3): a selected quiver ammo is consumed EXACTLY ONCE
+		// here — on the damage roll, never on the attack roll. If that empties the
+		// stack, revert the weapon's selection to "Regular" so a depleted ammo isn't
+		// silently re-fired. Persist + refresh the Inventory tab and quiver so counts
+		// don't look stale / reset on reload.
+		if (ammoForDamage) {
+			const weaponId = attack.sourceItem?.id;
+			if (this._state.consumeAmmunition?.(ammoForDamage.id, 1)) {
+				const remaining = this._state.getEffectiveAmmoCount?.(
+					this._state.getItems?.().find(i => i.id === ammoForDamage.id),
+				) ?? 0;
+				if (remaining <= 0) this._state.setSelectedAmmoId?.(weaponId, null);
+				this._page?.saveCharacter?.();
+				this._page?._inventory?.render?.();
+				this.renderCombatQuiver?.();
+			}
+		}
 	}
 
 	_isSneakAttackWeaponEligible (attack) {
@@ -3000,8 +2985,8 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Whether an attack should show the 🏹 Special Arrow affordance: a RANGED
-	 * WEAPON attack (not melee, not a spell) sourced from a weapon that uses
+	 * Whether an attack should show the active ammunition SELECTOR (Bug #3): a
+	 * RANGED WEAPON attack (not melee, not a spell) sourced from a weapon that uses
 	 * ammunition, whose equipped quiver currently holds compatible ammo. Pure
 	 * predicate (no DOM) so it's unit-testable. Deliberately NOT gated on
 	 * `isAmmunitionTrackingEnabled` — the quiver is its own always-on feature.
@@ -3009,7 +2994,7 @@ class CharacterSheetCombat {
 	 * @param {boolean} [isMelee] - Precomputed melee classification (optional).
 	 * @returns {boolean}
 	 */
-	_isSpecialArrowEligible (attack, isMelee) {
+	_isAmmoSelectorEligible (attack, isMelee) {
 		if (!attack || attack.isSpell) return false;
 		const melee = isMelee != null ? isMelee : this._getAttackRollKind(attack).isMelee;
 		if (melee) return false;
@@ -3019,14 +3004,32 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Markup for the per-row 🏹 Special Arrow button, or "" when not eligible.
+	 * Per-weapon active ammunition selector (Bug #3) — a `<select>` listing
+	 * "Regular" (default, no bonus/no consume) plus each ammo in the equipped
+	 * quiver with its remaining count. The current selection reflects state; the
+	 * change handler folds the chosen ammo's bonuses into BOTH the attack and the
+	 * damage roll and consumes one round on the damage roll. Returns "" when the
+	 * weapon isn't an eligible ranged ammunition user.
 	 * @param {*} attack
 	 * @param {boolean} [isMelee]
 	 * @returns {string}
 	 */
-	_renderSpecialArrowButton (attack, isMelee) {
-		if (!this._isSpecialArrowEligible(attack, isMelee)) return "";
-		return `<button class="ve-btn ve-btn-sm ve-btn-success charsheet__attack-special-arrow" title="Loose a special arrow from your quiver (rolls weapon damage + arrow effect)">🏹 Special Arrow</button>`;
+	_renderAmmoSelector (attack, isMelee) {
+		if (!this._isAmmoSelectorEligible(attack, isMelee)) return "";
+		const weaponId = attack.sourceItem?.id;
+		const ammo = this._state.getQuiverAmmunitionForWeapon?.(weaponId) || [];
+		const selectedId = this._state.getSelectedAmmoId?.(weaponId) || "";
+		// Drop a stale/depleted selection back to Regular for display purposes.
+		const selectedValid = ammo.some(a => a.id === selectedId
+			&& (this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)) > 0);
+		const curVal = selectedValid ? selectedId : "";
+		const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+		const opts = [`<option value=""${curVal === "" ? " selected" : ""}>Regular</option>`];
+		for (const a of ammo) {
+			const count = this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0);
+			opts.push(`<option value="${esc(a.id)}"${curVal === a.id ? " selected" : ""}>${esc(a.name)} (×${count})</option>`);
+		}
+		return `<select class="charsheet__attack-ammo-select" title="Active ammunition — its bonuses ride this weapon's attack and damage rolls; one round is spent on the damage roll">${opts.join("")}</select>`;
 	}
 
 	_renderAttackItem (attack, reachCtx = {}) {
@@ -3181,7 +3184,7 @@ class CharacterSheetCombat {
 					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage">
 						<span class="glyphicon glyphicon-fire"></span> Damage
 					</button>
-					${this._renderSpecialArrowButton(attack, attackIsMelee)}
+					${this._renderAmmoSelector(attack, attackIsMelee)}
 					${this._renderChannelSpellButton(attack)}
 					<button class="ve-btn ve-btn-sm ${this._state.getAttackNote?.(attack.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__attack-note" title="${this._state.getAttackNote?.(attack.id) ? "Edit Note" : "Add Note"}">
 						<span class="glyphicon glyphicon-comment"></span>
