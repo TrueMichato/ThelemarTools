@@ -7,6 +7,37 @@ _None._
 
 ## Closed Bugs
 
+### Round 33 (quiver UX overhaul + Combat Methods count in Combat tab vs save `D_kaios_Petri_2_v2.json`) — COMPLETE
+
+Two UX follow-ups reported against the same Fighter 9 TGTT Arcane Archer save, fixed by two
+coordinated sessions and integrated in order S-METHODCOUNT → S-QUIVER-UX. Each fix LOADS the
+real save through `loadFromJson` and asserts real mechanics + idempotency; an orchestrator
+integrated repro (`CharacterSheetRound33IntegratedRepro.test.js`, 12 tests) proves both
+coexist under a single load and survive a serialize→load round-trip.
+
+* **#2** (S-METHODCOUNT) The Combat tab's Combat Methods section showed only Method DC +
+  Stamina — no known/max count. Fix: a `.charsheet__mini-stat` "Methods: N / M" block added
+  to BOTH methods stat rows (`#charsheet-methods-count` and `#charsheet-methods-count-tab`),
+  populated in `renderCombatMethods` (both the access-but-no-methods early-return branch →
+  `0 / max` and the normal branch → `combatMethods.length / max`). `max` via
+  `_getCharacterMaxMethods` counts the Arcane Archer subclass +1 on top of the class CTM
+  progression. Displayed honestly (the fixture shows `14 / 10`, over-quota, NOT clamped;
+  `∞` when max is 0, matching the picker header). The over-quota `14 / 10` reflects a data
+  state in the save, not a display bug — flagged for a future look.
+* **#1** (S-QUIVER-UX) Quiver location/attack-integration reworked. The R32 post-attack
+  `quiver` popup hook + `_pPickQuiverAmmo` + the `_rollAttack` to-hit deferral were REMOVED
+  (plain loose-inventory consume restored). Replaced with an on-demand `🏹 Special Arrow`
+  button per ranged-weapon attack row (`_isSpecialArrowEligible` / `_renderSpecialArrowButton`
+  / `_pPickSpecialArrowDamage` / `_pApplySpecialArrow`) — gated on a ranged weapon with
+  `ammoType` and quiver ammo > 0 (absent for melee/spell or an empty quiver); choosing an
+  arrow rolls the weapon's normal damage via `_rollDamage`, surfaces the arrow effect /
+  explicit bonus dice only, and consumes exactly one round. The standalone
+  `#charsheet-combat-quiver-section` was removed; a compact summary
+  (`#charsheet-combat-quiver-summary`) + a `🏹 Quiver` header button opening a full-quiver
+  modal (`_showQuiverModal`) now live at the top of "Weapons & Attacks". The Inventory-tab
+  quiver section is unchanged. Several Quiver / S5AttackPipeline tests that pinned the removed
+  surfaces were re-pointed to the redesign (each flip commented), not weakened.
+
 ### Round 32 (quiver overhaul + Combat Methods modal crash + Indomitable double counter vs newer save `D_kaios_Petri_2_v2.json`) — COMPLETE
 
 Three bugs reported against the user's CURRENT save (Fighter 9 TGTT Arcane Archer,
