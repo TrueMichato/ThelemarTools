@@ -3,44 +3,72 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 31 (false-green root-cause re-fix vs repro save `D_kaios_Petri_2.json`) — IN PROGRESS
+_None._
+
+## Closed Bugs
+
+### Round 31 (false-green root-cause re-fix vs repro save `D_kaios_Petri_2.json`) — COMPLETE
 
 Prior rounds reported these "fixed" with green tests, but the user still saw all of
 them: the fixes touched helper/calc functions instead of the REAL runtime path, and
 none MIGRATED the stale data already baked into saved characters. This round every fix
-is verified by LOADING the repro character (Fighter 9 TGTT, Arcane Archer, whose
+was verified by LOADING the repro character (Fighter 9 TGTT, Arcane Archer, whose
 `classes[0].subclass` is `null` while the Arcane-Archer subclass features are embedded
-in `features[]`) and asserting real mechanics. 12 bugs across 5 sessions.
+in `features[]`) and asserting real mechanics. 12 bugs across 6 sessions (S1–S6),
+layered on top of the Round 30 work and integrated taking R31 in every conflict.
 
 **Unifying root cause** for #5/#6/#15 (and a contributor to #3): `classes[].subclass`
 is `null` on the save while the subclass features are embedded, so every detector that
-keys on `cls.subclass` silently no-ops — `hasArcaneShot()` returns false (the Arcane
-Shot management area disappears) and `getSubclassBonusMethodCount(cls.subclass)` returns
-0 (the combat-method cap is short). Fixed by reconstructing the subclass from embedded
-features (load migration + creation-path audit + one central resolver).
+keys on `cls.subclass` silently no-ops. Fixed by reconstructing the subclass from
+embedded features via a load migration (`_migrateRepairSubclass`, run FIRST) + a central
+resolver (`getSubclassFromFeatures` / `getEffectiveSubclassForClass`) + creation-path audit.
 
-* **#1** Quickbuild ignores the TARGET level when checking optional-feature prerequisites
-  (a level-9 Fighter can't pick level-9 Battle Tactics; general across features/classes).
-* **#3** Quickbuild/Builder/Level-up clobber already-picked Combat Traditions when a
-  subclass grants a tradition choice (removing them from methods management).
-* **#4** Combat Traditions management filter UI needs upgrades.
-* **#5** Subclass-granted additional combat-method count missing from the cap/management.
-* **#6** Combat Methods management broken (depends on the subclass-null root cause).
-* **#7** High Ground battle tactic applies +2 to ALL attacks regardless of its toggle
-  (stale baked named modifier).
-* **#8** Flanking battle tactic applies a static +2 to attacks (stale baked named
-  modifier; should apply nothing automatically).
-* **#9** Grasping Arrow arcane shot applies a permanent −10 walking speed to the archer
-  (stale baked named modifier; the slow is a target effect on use).
-* **#11** Quiver: relocate to combat tab, auto-collect arrows/darts, non-blocking ammo
-  picker on ranged attacks (currently empty/non-functional for already-equipped quivers;
-  darts not recognized as ammo; no load-time backfill).
-* **#13** Indomitable shows 2 uses before level 13 and must add Fighter level to its
-  reroll (stale duplicate generic resource shadowing the correct synthetic resource).
-* **#14** Doubleshot combat method doesn't apply its extra die to the next damage roll.
-* **#15** Arcane Shot management area disappeared (gated on the subclass-null detector).
+* **#1** (S3) Quickbuild now evaluates optional-feature prerequisites against the build's
+  TARGET class level via `_resolveBuildClassLevelForGain` (not the aggregated max-gain
+  level) — general across features/classes. A level-9 Fighter can pick level-9 Battle Tactics.
+* **#3** (S3) Additive grant sites (quickbuild/level-up) route through a new
+  `mergeCombatTraditions` (union + normalize to code strings) so a subclass-granted
+  tradition choice never clobbers already-picked traditions. Builder keeps replace
+  semantics (full-edit checkbox set).
+* **#4** (S1) Combat Traditions selection reworked to a grouped, locked-granted, filterable
+  model (`buildTraditionSelectionModel(selectedCodes, {grantedCodes, availableCodes})`).
+* **#5/#6** (S1) Subclass-granted bonus combat-method count restored in the cap
+  (`_getCharacterMaxMethods` adds the per-class subclass bonus via the effective subclass).
+* **#7/#8** (S2) `_migrateStalePassiveData` strips the stale baked High Ground / Flanking
+  `attack +2` named modifiers (conservatively — only BT/AS-sourced passive types), so they
+  no longer apply to any attack. Feat-sourced Archery / Crossbow Expert survive.
+* **#9** (S2) Same migration strips the stale Grasping Arrow `speed:walk −10`; walk speed
+  is back to 30 (the slow is a target-only effect applied on use).
+* **#11** (S4) Quiver completion: darts recognized as ammunition; a quiver accepts ANY
+  ammo type (arrows + darts together); load-time `_migrateQuiverBackfill` populates an
+  equipped quiver; idempotent (no duplicate placements).
+* **#13** (S2) Migration removes the duplicate generic Second Wind / Arcane Shot /
+  Indomitable resource rows that shadowed the correct synthetic resources; Indomitable max
+  is 1 (pre-13) and its reroll adds the Fighter level (`getIndomitableRerollBonus` → 9,
+  TGTT treated as 2024).
+* **#14** (S5 + S6) Two-part fix. S6 `_repairCombatMethodMarkers` (catalog-gated,
+  idempotent) re-attaches the combat-method markers to manually-learned methods stored as
+  bare optional features (Doubleshot, Shrug It Off, …) so `getCombatMethods()` surfaces
+  them at all. S5 fixes the `_rollDamage` Doubleshot gate to use the canonical
+  `_getAttackRollKind(attack).isRanged` classifier (auto/modal ranged weapon attacks set
+  only `isMelee:false` and never carry `isRanged`), so the armed extra die actually folds
+  into the next ranged damage roll and clears (one-shot, crit-aware).
+* **#15** (S1) Arcane Shot management area re-appears (gated on the now-repaired subclass);
+  `hasArcaneShot()` true, pool size = proficiency bonus (4 at L9).
 
-## Closed Bugs
+**Integration:** layered on Round 30 in worktree `r31-integration` (base `d32f2bf1`);
+6 `--no-ff` merges S1→S5→S2→S6→S3→S4, taking R31 in every conflict. Resolved the
+double-application traps R30/R31 created by rewriting the same functions: re-inserted
+R30's `_hasCombatMethodAccess`, deleted the duplicate `buildTraditionSelectionModel`,
+hand-resolved the misaligned quickbuild tradition-merge conflict. Final loadFromJson
+migration order: `_migrateRepairSubclass` (FIRST) → `_migrateStalePassiveData` →
+`syncDerivedResourceMaxes` → `applyClassFeatureEffects` (contains `_repairCombatMethodMarkers`
+before `reconcileGrantedCombatMethods`) → `_migrateQuiverBackfill` (LAST). Two superseded
+R30 test suites reconciled to the new behavior. **Definitive anti-false-green proof:**
+`CharacterSheetRound31IntegratedRepro.test.js` loads the real repro and asserts ALL 12
+bugs' mechanics simultaneously + idempotency, including the cross-session Doubleshot
+surfacing→consume chain (asserts it does NOT surface before the catalog repair). Full gate
+green: charactersheet jest **329 suites / 11326 tests**, eslint clean, no stylelint/data deltas.
 
 ### Round 29 (Fighter / Arcane Archer / TGTT combat-methods + items deep-fix) — COMPLETE
 
