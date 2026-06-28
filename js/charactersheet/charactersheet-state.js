@@ -4801,6 +4801,17 @@ class CharacterSheetState {
 	 *     resource becomes the single source of truth (fixing Indomitable showing 2 uses at
 	 *     L9 and the duplicate Second Wind / Arcane Shot trackers).
 	 *
+	 * (c) BAKED `feature.uses` POOLS on the Indomitable / Arcane Shot FEATURE objects. These
+	 *     are a SECOND, INDEPENDENT duplicate from (b): old saves baked a `uses` object onto
+	 *     the feature itself (e.g. Indomitable `{current:2,max:2}` at L9), which the combat
+	 *     features/actions render surfaces as a `2/2` counter NEXT TO the (correct, max-1)
+	 *     synthetic pool. Unlike Second Wind — whose synthetic pool READS `feature.uses`
+	 *     ({@link getSecondWindUsesRemaining}/{@link _ensureFighterFeatureUses}) — the
+	 *     Indomitable and Arcane Shot pools track via `_data.indomitable` / `_data.arcaneShot`
+	 *     and never read `feature.uses`, so it is a pure stale duplicate. Stripped only when
+	 *     the synthetic pool actually owns the feature for this character. Second Wind is
+	 *     NEVER stripped here.
+	 *
 	 * Idempotent: once stripped there is nothing left to match, and a fresh build never
 	 * creates either artifact. Recalculates derived custom modifiers when (a) changed.
 	 */
@@ -4848,6 +4859,23 @@ class CharacterSheetState {
 				if (n === "indomitable") return !(this.hasIndomitable?.() || this.hasFeature?.("Indomitable"));
 				return true;
 			});
+		}
+
+		// (c) Strip baked `feature.uses` from Indomitable / Arcane Shot feature objects.
+		// These are a duplicate of the synthetic pool (which tracks via `_data.indomitable` /
+		// `_data.arcaneShot` and never reads `feature.uses`) and would otherwise render a
+		// spurious counter in the combat features/actions list. Second Wind is EXCLUDED — its
+		// synthetic pool reads `feature.uses` (getSecondWindUsesRemaining / _ensureFighterFeatureUses).
+		if (this._data.features?.length) {
+			for (const f of this._data.features) {
+				if (!f?.uses) continue;
+				const n = (f.name || "").trim().toLowerCase();
+				if (!CharacterSheetState.isSyntheticTrackedResourceFeature(n)) continue;
+				if (n === "second wind") continue; // synthetic pool reads feature.uses — never strip
+				const ownedByPool = (n === "indomitable" && (this.hasIndomitable?.() || this.hasFeature?.("Indomitable")))
+					|| (n === "arcane shot" && (this.hasArcaneShot?.() || this.hasFeature?.("Arcane Shot")));
+				if (ownedByPool) delete f.uses;
+			}
 		}
 	}
 
