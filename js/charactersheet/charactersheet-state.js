@@ -29815,6 +29815,23 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Merge the given traditions into the existing stored list (union), keeping
+	 * any already-known traditions intact. Use this from build/level-up call
+	 * sites that only carry the *newly* selected or subclass-granted picks, so a
+	 * subclass tradition CHOICE does not clobber previously-picked traditions
+	 * (bug #3). The plain `setCombatTraditions` setter intentionally keeps
+	 * replace semantics for explicit remove/rebuild flows.
+	 * @param {Array<string|{code: string, name?: string}>} traditions - Codes or entries to add
+	 * @returns {Array<string>} The resulting tradition codes
+	 */
+	mergeCombatTraditions (traditions) {
+		const existing = this._data.combatTraditions || [];
+		const incoming = Array.isArray(traditions) ? traditions : [];
+		this._data.combatTraditions = this._normalizeCombatTraditions([...existing, ...incoming]);
+		return this.getCombatTraditions();
+	}
+
+	/**
 	 * Add a combat tradition
 	 * @param {string|{code: string, name?: string}} tradCode - Tradition code or tradition entry
 	 */

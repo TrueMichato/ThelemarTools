@@ -15,6 +15,7 @@ describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 			getAbilityMod: jest.fn(() => 2),
 			setWeaponMasteries: jest.fn(),
 			setCombatTraditions: jest.fn(),
+			mergeCombatTraditions: jest.fn(),
 			getCombatTraditions: jest.fn(() => []),
 			getWeaponMasteries: jest.fn(() => []),
 			recordLevelChoice: jest.fn(),

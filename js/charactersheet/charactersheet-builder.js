@@ -1902,7 +1902,12 @@ class CharacterSheetBuilder {
 			});
 		});
 
-		// Store selected combat traditions on the character for level-up reference
+		// Store selected combat traditions on the character. This is the level-1
+		// CREATION picker — a full user-edited checkbox set (the user can DESELECT a
+		// tradition), so it intentionally keeps REPLACE semantics. There are no
+		// pre-existing stored traditions to clobber at creation, and merging here
+		// would resurrect a deliberately-deselected tradition (bug #3 guardrail:
+		// merge only at additive-grant sites, never full-edit pickers).
 		if (this._selectedCombatTraditions != null && this._state.setCombatTraditions) {
 			this._state.setCombatTraditions([...this._selectedCombatTraditions]);
 		}

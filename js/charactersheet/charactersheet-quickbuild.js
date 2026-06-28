@@ -2587,6 +2587,31 @@ class CharacterSheetQuickBuild {
 	}
 
 	/**
+	 * Resolve the FINAL target class level for a gain's class, for prerequisite
+	 * evaluation. The aggregated `gain.maxClassLevel` is only the highest level at
+	 * which a gain of that feature TYPE occurs (e.g. 7 for Battle Tactics on a
+	 * level-9 build) — NOT the character's final class level — so using it wrongly
+	 * locks higher-level options (bug #1). Match the class's allocation by
+	 * className/classSource and return its `targetLevel`; fall back to the build's
+	 * overall target level. Never fall back to `gain.maxClassLevel`.
+	 * @param {*} gain
+	 * @returns {number}
+	 */
+	_resolveBuildClassLevelForGain (gain) {
+		const allocs = this._classAllocations || [];
+		const match = allocs.find(a =>
+			a.className === gain?.className && a.classSource === gain?.classSource,
+		);
+		if (match?.targetLevel) return match.targetLevel;
+		// No exact match: for any single-class build the overall target level IS the
+		// class level (kept in sync with the lone allocation), so prefer it.
+		if (this._targetLevel) return this._targetLevel;
+		if (allocs.length === 1 && allocs[0]?.targetLevel) return allocs[0].targetLevel;
+		// Last resort (should not happen): a sane non-zero level.
+		return gain?.maxClassLevel || 1;
+	}
+
+	/**
 	 * Render a standard (non-Combat-Methods) optional feature gain section.
 	 */
 	_renderStandardOptFeature (step, typeKey, gain) {
@@ -2644,10 +2669,12 @@ class CharacterSheetQuickBuild {
 		// "Illrigger level 7") against the build's level for THIS class so higher-level boons
 		// are not selectable before the character reaches their level — mirroring the
 		// level-up flow, which already gates them. Boon prereqs are class-scoped, so the
-		// gaining class at its build level is the binding context.
+		// gaining class at its FINAL build level is the binding context (bug #1 — must use
+		// the class's target level, not the aggregated max gain level of the feature type).
+		const buildClassLevel = this._resolveBuildClassLevelForGain(gain);
 		const prereqContext = {
-			classes: [{name: gain.className, source: gain.classSource, level: gain.maxClassLevel}],
-			totalLevel: gain.maxClassLevel,
+			classes: [{name: gain.className, source: gain.classSource, level: buildClassLevel}],
+			totalLevel: buildClassLevel,
 			existingFeatures: existingOptFeatures,
 			cantrips: this._state.getCantripsKnown?.() || [],
 			spells: this._state.getSpellsKnown?.() || [],
@@ -4769,15 +4796,17 @@ class CharacterSheetQuickBuild {
 			this._state.setWeaponMasteries([...this._selections.weaponMasteries]);
 		}
 
-		// Apply combat traditions (if selected during QB). Merge base picks with
-		// subclass-choice picks before persisting; the state stores them as a
-		// single combined list.
+		// Apply combat traditions (if selected during QB). Normalize the base picks
+		// and subclass-choice picks to code STRINGS (defensive: avoids any
+		// object/string mix defeating dedup) and union them with any
+		// already-stored traditions so existing picks are never clobbered (bug #3).
 		if (this._selections._combatTraditions != null || this._selections._subclassChoiceTraditions != null) {
+			const toCode = t => (typeof t === "string" ? t : t?.code);
 			const merged = [...new Set([
 				...(this._selections._combatTraditions || []),
 				...(this._selections._subclassChoiceTraditions || []),
-			])];
-			this._state.setCombatTraditions(merged);
+			].map(toCode).filter(Boolean))];
+			this._state.mergeCombatTraditions(merged);
 		}
 
 		// Record level history BEFORE the final HP recalc so _calculateMaxHp sees stored hpRoll values.
