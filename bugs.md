@@ -3,7 +3,42 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 31 (false-green root-cause re-fix vs repro save `D_kaios_Petri_2.json`) — IN PROGRESS
+
+Prior rounds reported these "fixed" with green tests, but the user still saw all of
+them: the fixes touched helper/calc functions instead of the REAL runtime path, and
+none MIGRATED the stale data already baked into saved characters. This round every fix
+is verified by LOADING the repro character (Fighter 9 TGTT, Arcane Archer, whose
+`classes[0].subclass` is `null` while the Arcane-Archer subclass features are embedded
+in `features[]`) and asserting real mechanics. 12 bugs across 5 sessions.
+
+**Unifying root cause** for #5/#6/#15 (and a contributor to #3): `classes[].subclass`
+is `null` on the save while the subclass features are embedded, so every detector that
+keys on `cls.subclass` silently no-ops — `hasArcaneShot()` returns false (the Arcane
+Shot management area disappears) and `getSubclassBonusMethodCount(cls.subclass)` returns
+0 (the combat-method cap is short). Fixed by reconstructing the subclass from embedded
+features (load migration + creation-path audit + one central resolver).
+
+* **#1** Quickbuild ignores the TARGET level when checking optional-feature prerequisites
+  (a level-9 Fighter can't pick level-9 Battle Tactics; general across features/classes).
+* **#3** Quickbuild/Builder/Level-up clobber already-picked Combat Traditions when a
+  subclass grants a tradition choice (removing them from methods management).
+* **#4** Combat Traditions management filter UI needs upgrades.
+* **#5** Subclass-granted additional combat-method count missing from the cap/management.
+* **#6** Combat Methods management broken (depends on the subclass-null root cause).
+* **#7** High Ground battle tactic applies +2 to ALL attacks regardless of its toggle
+  (stale baked named modifier).
+* **#8** Flanking battle tactic applies a static +2 to attacks (stale baked named
+  modifier; should apply nothing automatically).
+* **#9** Grasping Arrow arcane shot applies a permanent −10 walking speed to the archer
+  (stale baked named modifier; the slow is a target effect on use).
+* **#11** Quiver: relocate to combat tab, auto-collect arrows/darts, non-blocking ammo
+  picker on ranged attacks (currently empty/non-functional for already-equipped quivers;
+  darts not recognized as ammo; no load-time backfill).
+* **#13** Indomitable shows 2 uses before level 13 and must add Fighter level to its
+  reroll (stale duplicate generic resource shadowing the correct synthetic resource).
+* **#14** Doubleshot combat method doesn't apply its extra die to the next damage roll.
+* **#15** Arcane Shot management area disappeared (gated on the subclass-null detector).
 
 ## Closed Bugs
 
