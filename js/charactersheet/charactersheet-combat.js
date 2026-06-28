@@ -8239,6 +8239,12 @@ class CharacterSheetCombat {
 		const tabContainer = document.getElementById("charsheet-combat-methods-tab");
 		const tabDcDisplay = document.getElementById("charsheet-method-dc-tab");
 
+		// Methods count mini-stats (current known / max learnable)
+		const methodsCountDisplay = document.getElementById("charsheet-methods-count");
+		const tabMethodsCountDisplay = document.getElementById("charsheet-methods-count-tab");
+		const maxMethods = this._getCharacterMaxMethods();
+		const fmtMethodsCount = (current) => `${current} / ${maxMethods > 0 ? maxMethods : "∞"}`;
+
 		if (!section || !container) return;
 
 		// Hide sections if no combat methods
@@ -8258,6 +8264,9 @@ class CharacterSheetCombat {
 					const methodDC = calcs.combatMethodDc ??
 						(8 + profBonus + Math.max(this._state.getAbilityMod("str"), this._state.getAbilityMod("dex")));
 					if (tabDcDisplay) tabDcDisplay.textContent = methodDC;
+
+					if (methodsCountDisplay) methodsCountDisplay.textContent = fmtMethodsCount(0);
+					if (tabMethodsCountDisplay) tabMethodsCountDisplay.textContent = fmtMethodsCount(0);
 
 					this._state.ensureStaminaInitialized?.();
 					const staminaMax = this._state.getStaminaMax?.() ?? 0;
@@ -8286,6 +8295,11 @@ class CharacterSheetCombat {
 			(8 + profBonus + Math.max(this._state.getAbilityMod("str"), this._state.getAbilityMod("dex")));
 		if (dcDisplay) dcDisplay.textContent = methodDC;
 		if (tabDcDisplay) tabDcDisplay.textContent = methodDC;
+
+		// Methods count (known / max)
+		const methodsCountText = fmtMethodsCount(combatMethods.length);
+		if (methodsCountDisplay) methodsCountDisplay.textContent = methodsCountText;
+		if (tabMethodsCountDisplay) tabMethodsCountDisplay.textContent = methodsCountText;
 
 		// Ensure stamina is initialized, then read from state (single source of truth)
 		this._state.ensureStaminaInitialized();
