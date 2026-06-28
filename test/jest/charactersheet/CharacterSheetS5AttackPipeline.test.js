@@ -392,9 +392,9 @@ describe("#16 Quiver auto-place + retrieval (state)", () => {
 		// 20 mundane arrows + 5 +1 arrows (both arrow-typed), loose in inventory.
 		state.addItem({id: "arrows", name: "Arrows", type: "A", arrow: true}, 20, false);
 		state.addItem({id: "arrowsP1", name: "+1 Arrows", type: "A", arrow: true, bonusWeapon: "+1"}, 5, false);
-		// 10 crossbow bolts (NOT arrow-typed) — must NOT go in an arrow-only quiver.
+		// 10 crossbow bolts (arrow-typed sibling) — now also accepted by a quiver (#11).
 		state.addItem({id: "bolts", name: "Crossbow Bolts", type: "A", bolt: true}, 10, false);
-		// The quiver: arrow-only capacity.
+		// The quiver: declares arrow capacity (a default label, not a hard filter).
 		state.addItem({
 			id: "quiver1",
 			name: "Quiver",
@@ -412,15 +412,17 @@ describe("#16 Quiver auto-place + retrieval (state)", () => {
 		expect(q?.id).toBe("quiver1");
 	});
 
-	it("autoPlaceAmmunitionInQuiver places arrows but NOT bolts (type-restricted)", () => {
+	it("autoPlaceAmmunitionInQuiver places ALL recognised ammo (arrows AND bolts)", () => {
+		// A quiver accepts any recognised ammunition (#11): its containerCapacity
+		// allowed-types are a default label, not a hard filter, so players' arrows
+		// and bolts (and darts) all go in.
 		const state = mkQuiverState();
 		state.setItemEquipped("quiver1", true);
 		const placed = state.autoPlaceAmmunitionInQuiver("quiver1");
-		expect(placed).toBe(2); // two arrow stacks (mundane + +1), bolts excluded
+		expect(placed).toBe(3); // two arrow stacks (mundane + +1) + bolts
 
 		const inQuiver = state.getQuiverAmmunition("quiver1").map(a => a.id).sort();
-		expect(inQuiver).toEqual(["arrows", "arrowsP1"]);
-		expect(inQuiver).not.toContain("bolts");
+		expect(inQuiver).toEqual(["arrows", "arrowsP1", "bolts"]);
 	});
 
 	it("does not poach ammo already inside another container", () => {
