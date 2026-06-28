@@ -7,6 +7,43 @@ _None._
 
 ## Closed Bugs
 
+### Round 32 (quiver overhaul + Combat Methods modal crash + Indomitable double counter vs newer save `D_kaios_Petri_2_v2.json`) — COMPLETE
+
+Three bugs reported against the user's CURRENT save (Fighter 9 TGTT Arcane Archer,
+`ammunitionTracking=false`), fixed by three coordinated sessions and integrated in order
+S-METHODS → S-INDOM → S-QUIVER. Each fix is verified by LOADING the real save through
+`loadFromJson` and asserting real mechanics + idempotency; an orchestrator integrated
+repro (`CharacterSheetRound32IntegratedRepro.test.js`) proves all three coexist under a
+single load.
+
+* **#2** (S-METHODS) Combat Methods Management modal rendered blank with
+  `ReferenceError: isLocked is not defined`. Root cause: a stray duplicate
+  `opacity: ${isLocked ? …}` line in `_renderTraditionSelection`'s `makeChip`
+  (`charactersheet-combat.js`) referencing an undefined variable — the throw aborted the
+  whole chip render. Fix: removed the one stray line (correct `trad.locked` line kept).
+* **#3** (S-INDOM) Indomitable showed a `2/2` counter at Fighter L9 (should be 1). State
+  was already correct (`getIndomitableMax()===1`, synthetic pool max 1); the stray `2`
+  came from a baked `uses:{max:2}` on the Indomitable FEATURE object, surfaced as a
+  duplicate counter. Fix: (a) `_migrateStalePassiveData` part (c) deletes `feature.uses`
+  for Indomitable / Arcane Shot on load (NEVER Second Wind, whose synthetic pool READS
+  `feature.uses`); (b) `_createCombatActionElement` suppresses the per-feature counter for
+  any synthetic-tracked feature (defense-in-depth).
+* **#1** (S-QUIVER) Quiver severely bugged: appeared in the Overview tab, mis-recognised
+  armor as ammo, missed gear-typed arrows, miscounted bundles, and never offered ammo on a
+  ranged attack. Root causes + fixes: `_isAmmunitionItem` matched `"ARMOR".startsWith("A")`
+  → now splits `item.type` on `|` and exact-matches `A`/`AF`; gear-name regex broadened to
+  arrows/bolts/bullets/darts/needles/slings so "Healing Arrow" is recognised;
+  `autoPlaceAmmunitionInQuiver` PURGES non-ammo/dangling ids from `containedItems` before
+  backfill (runs on load via `_migrateQuiverBackfill`, idempotent); new
+  `getEffectiveAmmoCount` parses trailing `(N)` so "Sleep Dart (5)" counts as 5; the
+  post-attack quiver picker no longer requires `ammunitionTracking`; the quiver section was
+  moved out of Overview into the Combat tab and added to the Inventory tab.
+
+Integration: all three sessions branched from `7ebcc91c`, cherry-picked in order with a
+full gate after each (no duplicate methods; `isLocked` fully removed; quiver section under
+Combat + Inventory, absent from Overview). Final gate: 332 charactersheet suites green;
+eslint clean on all changed source files.
+
 ### Round 31 (false-green root-cause re-fix vs repro save `D_kaios_Petri_2.json`) — COMPLETE
 
 Prior rounds reported these "fixed" with green tests, but the user still saw all of
