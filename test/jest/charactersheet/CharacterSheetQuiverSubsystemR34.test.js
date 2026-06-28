@@ -113,10 +113,13 @@ describe("R34 (#1a) — adding ammo auto-places it into the equipped quiver", ()
 });
 
 // ===========================================================================
-// (b) #1b — applying a special arrow persists + re-renders inventory
+// (b) #1b — selecting an ammo: the DAMAGE roll persists + re-renders inventory
 // ===========================================================================
 
-describe("R34 (#1b) — special-arrow use persists and re-renders inventory", () => {
+describe("R34→R35 (#1b) — active-ammo consume on the damage roll persists and re-renders inventory", () => {
+	// R35 (Bug #3): re-pointed from `_pApplySpecialArrow` (removed) to the active-ammo
+	// `_rollDamage` consume path. Selecting an ammo and rolling damage must decrement
+	// the stack by one AND persist (saveCharacter) AND re-render the Inventory tab.
 	it("decrements the stack AND invokes saveCharacter AND inventory.render", async () => {
 		const saveCalls = [];
 		const invRenderCalls = [];
@@ -125,25 +128,38 @@ describe("R34 (#1b) — special-arrow use persists and re-renders inventory", ()
 			_inventory: {render: () => invRenderCalls.push(1)},
 		};
 		const state = loadCharacter();
+		state.setSelectedAmmoId(ID.longbow, ID.healingArrow);
 		const combat = mkCombat(state, page);
-		combat._rollDamage = async () => {};
+		const weapon = state.getItems().find(i => i.id === ID.longbow);
+		combat._cachedAttacks = [{
+			id: `auto_${ID.longbow}`,
+			name: weapon?.name,
+			sourceItem: weapon,
+			isSpell: false,
+			isMelee: false,
+			damage: "1d8",
+			damageType: "piercing",
+			abilityMod: "dex",
+		}];
+		combat._weaponRiderEnabled = {};
+		combat._selectedCunningStrikes = [];
+		combat._parseDamage = (dice, isCrit) => ({total: 3, sides: 8, rolls: [3], dice, isCrit});
+		combat._promptUseCombatMethod = async () => null;
+		combat._promptApplyMethodEffect = async () => false;
 		combat.renderCombatQuiver = () => {};
-		const prevJq = globalThis.JqueryUtil;
-		globalThis.JqueryUtil = {doToast: () => {}};
+		combat._page.pAnimateDamageDice = async () => {};
+		combat._page.showDiceResult = () => ({});
 
 		const arrow = state.getQuiverAmmunitionForWeapon(ID.longbow).find(a => a.id === ID.healingArrow);
 		expect(arrow).toBeTruthy();
 		const before = state.getItems().find(i => i.id === ID.healingArrow).quantity;
 
-		const res = await combat._pApplySpecialArrow(`auto_${ID.longbow}`, arrow);
+		await combat._rollDamage(`auto_${ID.longbow}`);
 
-		expect(res.consumed).toBe(true);
 		const after = state.getItems().find(i => i.id === ID.healingArrow)?.quantity ?? 0;
 		expect(after).toBe(before - 1);
 		expect(saveCalls.length).toBe(1);
 		expect(invRenderCalls.length).toBe(1);
-
-		globalThis.JqueryUtil = prevJq;
 	});
 });
 

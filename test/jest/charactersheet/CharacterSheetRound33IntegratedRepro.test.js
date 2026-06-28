@@ -164,10 +164,10 @@ describe("R33 integrated — #2 methods count present", () => {
 });
 
 // ===========================================================================
-// BUG #1 — quiver UX redesign (Special Arrow replaces post-attack popup)
+// BUG #1 — quiver UX redesign (R35: active-ammo selector replaces Special Arrow)
 // ===========================================================================
 
-describe("R33 integrated — #1 Special Arrow redesign", () => {
+describe("R33→R35 integrated — #1 active-ammo selector", () => {
 	test("the old post-attack `quiver` hook and `_pPickQuiverAmmo` are GONE", () => {
 		const combat = makeCombat(loadState());
 		const ids = combat._getPostAttackHooks().map(h => h.id);
@@ -175,24 +175,29 @@ describe("R33 integrated — #1 Special Arrow redesign", () => {
 		expect(CharacterSheetCombat.prototype._pPickQuiverAmmo).toBeUndefined();
 	});
 
-	test("the replacement Special Arrow handlers ARE present", () => {
-		expect(CharacterSheetCombat.prototype._pPickSpecialArrowDamage.constructor.name).toBe("AsyncFunction");
-		expect(CharacterSheetCombat.prototype._pApplySpecialArrow.constructor.name).toBe("AsyncFunction");
+	test("the R33 Special Arrow handlers are removed; the selector helpers replace them", () => {
+		// R35 (Bug #3): the Special Arrow damage-button surface is gone; the active
+		// ammo selector takes its place.
+		expect(CharacterSheetCombat.prototype._pPickSpecialArrowDamage).toBeUndefined();
+		expect(CharacterSheetCombat.prototype._pApplySpecialArrow).toBeUndefined();
+		expect(CharacterSheetCombat.prototype._renderSpecialArrowButton).toBeUndefined();
+		expect(typeof CharacterSheetCombat.prototype._isAmmoSelectorEligible).toBe("function");
+		expect(typeof CharacterSheetCombat.prototype._renderAmmoSelector).toBe("function");
 	});
 
-	test("Special Arrow is eligible for the ranged Longbow, NOT for the melee Rapier", () => {
+	test("the ammo selector is eligible for the ranged Longbow, NOT for the melee Rapier", () => {
 		const state = loadState();
 		const combat = makeCombat(state);
-		expect(combat._isSpecialArrowEligible(mkWeaponAttack(state, ID.longbow), false)).toBe(true);
-		expect(combat._isSpecialArrowEligible(mkWeaponAttack(state, ID.rapier, {isMelee: true}), true)).toBe(false);
+		expect(combat._isAmmoSelectorEligible(mkWeaponAttack(state, ID.longbow), false)).toBe(true);
+		expect(combat._isAmmoSelectorEligible(mkWeaponAttack(state, ID.rapier, {isMelee: true}), true)).toBe(false);
 	});
 
-	test("the rendered button markup appears only for the eligible weapon", () => {
+	test("the rendered selector markup appears only for the eligible weapon", () => {
 		const state = loadState();
 		const combat = makeCombat(state);
-		expect(combat._renderSpecialArrowButton(mkWeaponAttack(state, ID.longbow), false))
-			.toContain("charsheet__attack-special-arrow");
-		expect(combat._renderSpecialArrowButton(mkWeaponAttack(state, ID.rapier, {isMelee: true}), true))
+		expect(combat._renderAmmoSelector(mkWeaponAttack(state, ID.longbow), false))
+			.toContain("charsheet__attack-ammo-select");
+		expect(combat._renderAmmoSelector(mkWeaponAttack(state, ID.rapier, {isMelee: true}), true))
 			.toBe("");
 	});
 });
@@ -225,7 +230,7 @@ describe("R33 integrated — static HTML coexistence", () => {
 // ===========================================================================
 
 describe("R33 integrated — round-trip idempotency", () => {
-	test("counts + Special Arrow eligibility hold after toJson → load", () => {
+	test("counts + ammo-selector eligibility hold after toJson → load", () => {
 		const first = loadState();
 		const reloaded = loadState(JSON.parse(JSON.stringify(first.toJson())));
 		const combat = makeCombat(reloaded);
@@ -234,7 +239,7 @@ describe("R33 integrated — round-trip idempotency", () => {
 		expect(renderMethodsAndReadCounts(combat).tab).toBe("14 / 10");
 
 		// #1 still eligible for the Longbow, no resurrected popup hook
-		expect(combat._isSpecialArrowEligible(mkWeaponAttack(reloaded, ID.longbow), false)).toBe(true);
+		expect(combat._isAmmoSelectorEligible(mkWeaponAttack(reloaded, ID.longbow), false)).toBe(true);
 		expect(combat._getPostAttackHooks().map(h => h.id)).not.toContain("quiver");
 	});
 });

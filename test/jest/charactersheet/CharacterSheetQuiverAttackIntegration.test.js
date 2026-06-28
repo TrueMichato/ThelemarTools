@@ -85,10 +85,16 @@ describe("R33 — old post-attack quiver popup removed", () => {
 		expect(CharacterSheetCombat.prototype._pPickQuiverAmmo).toBeUndefined();
 	});
 
-	it("the replacement Special Arrow handlers ARE present", () => {
-		expect(CharacterSheetCombat.prototype._pPickSpecialArrowDamage.constructor.name).toBe("AsyncFunction");
-		expect(CharacterSheetCombat.prototype._pApplySpecialArrow.constructor.name).toBe("AsyncFunction");
-		expect(typeof CharacterSheetCombat.prototype._isSpecialArrowEligible).toBe("function");
+	// R35 (Bug #3): the R33 "Special Arrow" damage-time button is REPLACED by a
+	// per-weapon active-ammunition SELECTOR. The old async handlers are gone; the
+	// selector helpers take their place.
+	it("the R33 Special Arrow handlers are GONE and the active-ammo selector helpers are present", () => {
+		expect(CharacterSheetCombat.prototype._pPickSpecialArrowDamage).toBeUndefined();
+		expect(CharacterSheetCombat.prototype._pApplySpecialArrow).toBeUndefined();
+		expect(CharacterSheetCombat.prototype._renderSpecialArrowButton).toBeUndefined();
+		expect(typeof CharacterSheetCombat.prototype._isAmmoSelectorEligible).toBe("function");
+		expect(typeof CharacterSheetCombat.prototype._renderAmmoSelector).toBe("function");
+		expect(typeof CharacterSheetCombat.prototype._getSelectedAmmoForWeapon).toBe("function");
 	});
 });
 
@@ -96,7 +102,10 @@ describe("R33 — old post-attack quiver popup removed", () => {
 // (2) Special Arrow affordance gating (real fixture)
 // ===========================================================================
 
-describe("R33 — Special Arrow affordance gating", () => {
+describe("R33→R35 — active-ammo selector affordance gating", () => {
+	// R35 (Bug #3): re-pointed from `_isSpecialArrowEligible`/`_renderSpecialArrowButton`
+	// to the active-ammo `_isAmmoSelectorEligible`/`_renderAmmoSelector` surface
+	// (same eligibility predicate; selector markup instead of a button).
 	it("RENDERS for the Longbow when the equipped quiver holds compatible ammo (tracking OFF)", () => {
 		const state = loadCharacter();
 		expect(state.isAmmunitionTrackingEnabled()).toBe(false);
@@ -104,18 +113,19 @@ describe("R33 — Special Arrow affordance gating", () => {
 
 		const combat = mkCombat(state);
 		const attack = mkWeaponAttack(state, ID.longbow, {isMelee: false});
-		expect(combat._isSpecialArrowEligible(attack, false)).toBe(true);
-		const html = combat._renderSpecialArrowButton(attack, false);
-		expect(html).toMatch(/charsheet__attack-special-arrow/);
-		expect(html).toMatch(/Special Arrow/);
+		expect(combat._isAmmoSelectorEligible(attack, false)).toBe(true);
+		const html = combat._renderAmmoSelector(attack, false);
+		expect(html).toMatch(/charsheet__attack-ammo-select/);
+		expect(html).toMatch(/<option value="" selected>Regular<\/option>/);
+		expect(html).toMatch(/Healing Arrow/);
 	});
 
 	it("does NOT render for a MELEE weapon (Rapier)", () => {
 		const state = loadCharacter();
 		const combat = mkCombat(state);
 		const attack = mkWeaponAttack(state, ID.rapier, {isMelee: true});
-		expect(combat._isSpecialArrowEligible(attack, true)).toBe(false);
-		expect(combat._renderSpecialArrowButton(attack, true)).toBe("");
+		expect(combat._isAmmoSelectorEligible(attack, true)).toBe(false);
+		expect(combat._renderAmmoSelector(attack, true)).toBe("");
 	});
 
 	it("does NOT render when the quiver holds no compatible ammo (quiver unequipped)", () => {
@@ -125,8 +135,8 @@ describe("R33 — Special Arrow affordance gating", () => {
 
 		const combat = mkCombat(state);
 		const attack = mkWeaponAttack(state, ID.longbow, {isMelee: false});
-		expect(combat._isSpecialArrowEligible(attack, false)).toBe(false);
-		expect(combat._renderSpecialArrowButton(attack, false)).toBe("");
+		expect(combat._isAmmoSelectorEligible(attack, false)).toBe(false);
+		expect(combat._renderAmmoSelector(attack, false)).toBe("");
 	});
 
 	it("does NOT render for a SPELL attack even when ranged with a sourceItem", () => {
@@ -134,7 +144,7 @@ describe("R33 — Special Arrow affordance gating", () => {
 		const combat = mkCombat(state);
 		const weapon = state.getItems().find(i => i.id === ID.longbow);
 		const spellAttack = {name: "Fire Bolt", isSpell: true, isMelee: false, sourceItem: weapon};
-		expect(combat._isSpecialArrowEligible(spellAttack, false)).toBe(false);
+		expect(combat._isAmmoSelectorEligible(spellAttack, false)).toBe(false);
 	});
 });
 
@@ -142,51 +152,48 @@ describe("R33 — Special Arrow affordance gating", () => {
 // (3) Choosing an arrow: weapon damage + single consume + effect surfaced
 // ===========================================================================
 
-describe("R33 — applying a special arrow rolls weapon damage, spends one, surfaces effect", () => {
-	it("rolls the WEAPON damage exactly once, consumes EXACTLY one round, and returns the effect", async () => {
+describe("R33→R35 — selecting an ammo: damage-roll consumes one, persists, re-renders", () => {
+	// R35 (Bug #3): the apply path is no longer a discrete `_pApplySpecialArrow`
+	// button; instead the chosen ammo is consumed (exactly one round) on the
+	// DAMAGE roll, which then persists + re-renders the Inventory tab. Re-pointed
+	// with an equally strong assertion against the real `_rollDamage` path.
+	it("the DAMAGE roll consumes EXACTLY one round of the selected ammo, persists, and re-renders the Inventory tab", async () => {
 		const state = loadCharacter();
-		const combat = mkCombat(state);
+		state.setSelectedAmmoId(ID.longbow, ID.healingArrow);
 
-		// Stub the page roll/animate surface so no real dice UI is exercised.
-		const rollCalls = [];
-		combat._rollDamage = async (attackId) => { rollCalls.push(attackId); };
-		combat.renderCombatQuiver = () => {}; // stub the DOM re-render (no document in node env)
-		// R34 (#1b): the apply path must PERSIST the decrement and RE-RENDER the
-		// Inventory tab so the count doesn't look stale / reset on reload. Spy both.
+		const combat = mkCombat(state);
+		const dmgAttack = mkWeaponAttack(state, ID.longbow, {isMelee: false});
+		dmgAttack.damage = "1d8";
+		dmgAttack.damageType = "piercing";
+		dmgAttack.abilityMod = "dex";
+		combat._cachedAttacks = [dmgAttack];
+		combat._weaponRiderEnabled = {};
+		combat._selectedCunningStrikes = [];
+		combat._parseDamage = (dice, isCrit) => ({total: 3, sides: 8, rolls: [3], dice, isCrit});
+		combat._promptUseCombatMethod = async () => null;
+		combat._promptApplyMethodEffect = async () => false;
+		combat.renderCombatQuiver = () => {};
+		combat._page.pAnimateDamageDice = async () => {};
+		combat._page.showDiceResult = () => ({});
 		const saveCalls = [];
 		const invRenderCalls = [];
-		combat._page = {saveCharacter: () => saveCalls.push(1), _inventory: {render: () => invRenderCalls.push(1)}};
-		const toasts = [];
-		const prevJq = globalThis.JqueryUtil;
-		globalThis.JqueryUtil = {doToast: (o) => toasts.push(o)};
+		combat._page.saveCharacter = () => saveCalls.push(1);
+		combat._page._inventory = {render: () => invRenderCalls.push(1)};
 
-		const arrow = state.getQuiverAmmunitionForWeapon(ID.longbow).find(a => a.id === ID.healingArrow);
-		expect(arrow).toBeTruthy();
-
-		const attackId = `auto_${ID.longbow}`;
 		const before = state.getItems().find(i => i.id === ID.healingArrow).quantity;
 		const consumeArgs = [];
 		const realConsume = state.consumeAmmunition.bind(state);
 		state.consumeAmmunition = (id, n) => { consumeArgs.push([id, n]); return realConsume(id, n); };
 
-		const res = await combat._pApplySpecialArrow(attackId, arrow);
+		await combat._rollDamage(`auto_${ID.longbow}`);
 
-		// (a) weapon damage rolled once, through the normal path, for THIS attack.
-		expect(rollCalls).toEqual([attackId]);
-		// (b) exactly one round consumed (stack-based single decrement).
+		// (a) exactly one round consumed (stack-based single decrement).
 		expect(consumeArgs).toEqual([[ID.healingArrow, 1]]);
 		const after = state.getItems().find(i => i.id === ID.healingArrow)?.quantity ?? 0;
 		expect(after).toBe(before - 1);
-		expect(res.consumed).toBe(true);
-		// (c) the arrow's effect text is surfaced to the player (toast mentions the arrow).
-		expect(typeof res.effect).toBe("string");
-		expect(toasts.length).toBe(1);
-		expect(toasts[0].content).toMatch(/Healing Arrow/);
-		// (d) R34 (#1b): persisted exactly once and re-rendered the Inventory tab.
+		// (b) persisted + re-rendered the Inventory tab.
 		expect(saveCalls.length).toBe(1);
 		expect(invRenderCalls.length).toBe(1);
-
-		globalThis.JqueryUtil = prevJq;
 	});
 
 	it("rolls and adds an arrow's EXPLICIT bonus-damage dice when present", () => {

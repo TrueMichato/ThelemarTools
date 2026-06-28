@@ -5277,11 +5277,17 @@
 }
 
 /* ========================================================================
-   Quiver — Special Arrow button + compact summary (R33)
+   Quiver — active ammunition selector (Bug #3) + compact summary
    ======================================================================== */
-.charsheet__attack-special-arrow {
-	white-space: nowrap;
+.charsheet__attack-ammo-select {
+	max-width: 12rem;
 	font-size: var(--cs-text-sm, 0.85rem);
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, rgba(127, 127, 127, 0.35));
+	border-radius: var(--cs-radius-sm, 4px);
+	background: var(--cs-surface-2, rgba(127, 127, 127, 0.06));
+	color: inherit;
+	cursor: pointer;
 }
 
 .charsheet__combat-quiver-summary:empty {

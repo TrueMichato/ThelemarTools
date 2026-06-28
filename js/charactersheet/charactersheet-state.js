@@ -4051,6 +4051,13 @@ class CharacterSheetState {
 			// Ammunition consumption tracking for current combat
 			ammunitionConsumed: {}, // {ammoId: countConsumed}
 
+			// Per-weapon ACTIVE ammunition selection (Bug #3). Maps a weapon
+			// inventory id → the chosen quiver ammo id whose bonuses ride that
+			// weapon's attack/damage rolls and is consumed on the damage roll. A
+			// missing/empty entry means "Regular" (no bonus, no special consumption),
+			// so old saves that lack this key default to Regular automatically.
+			selectedAmmo: {}, // {weaponId: ammoId}
+
 			// Play Mode (alternative intent-based UI)
 			viewMode: "full", // "full" | "play"
 			favorites: [], // [{id, type, name, icon, detail, ref}] — pinned actions for quick access
@@ -23313,6 +23320,32 @@ class CharacterSheetState {
 	 */
 	getAmmunitionConsumed () {
 		return this._data.ammunitionConsumed || {};
+	}
+
+	/**
+	 * The active ammunition selection for a weapon (Bug #3). Returns the chosen
+	 * quiver ammo id, or null for "Regular" (no bonus, no special consumption).
+	 * Old saves lacking `selectedAmmo` resolve to null (Regular) by default.
+	 * @param {string} weaponId - The weapon inventory item ID.
+	 * @returns {string|null}
+	 */
+	getSelectedAmmoId (weaponId) {
+		if (!weaponId) return null;
+		return this._data.selectedAmmo?.[weaponId] || null;
+	}
+
+	/**
+	 * Set (or clear) the active ammunition selection for a weapon. Passing a
+	 * falsy `ammoId` reverts the weapon to "Regular" by deleting the entry, so a
+	 * cleared selection never lingers in the serialized save.
+	 * @param {string} weaponId - The weapon inventory item ID.
+	 * @param {string|null} ammoId - The chosen quiver ammo id, or null for Regular.
+	 */
+	setSelectedAmmoId (weaponId, ammoId) {
+		if (!weaponId) return;
+		if (!this._data.selectedAmmo) this._data.selectedAmmo = {};
+		if (ammoId) this._data.selectedAmmo[weaponId] = ammoId;
+		else delete this._data.selectedAmmo[weaponId];
 	}
 
 	// ==========================================
