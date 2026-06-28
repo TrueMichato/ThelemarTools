@@ -1,0 +1,3376 @@
+{
+	"fileType": "character",
+	"siteVersion": "2.26.1",
+	"id": "be3eaed3-014a-43d0-b0ae-d265d87d610b",
+	"name": "Dίkaios Petri 2",
+	"xp": 48000,
+	"race": {
+		"name": "Hochling",
+		"source": "TGTT",
+		"page": 0,
+		"creatureTypes": [
+			"humanoid"
+		],
+		"size": [
+			"S",
+			"M"
+		],
+		"speed": 30,
+		"darkvision": 60,
+		"ability": [
+			{
+				"cha": 2,
+				"choose": {
+					"from": [
+						"str",
+						"dex",
+						"con",
+						"int",
+						"wis"
+					],
+					"count": 1,
+					"amount": 1
+				}
+			}
+		],
+		"resist": [
+			"radiant",
+			"necrotic"
+		],
+		"languageProficiencies": [
+			{
+				"common": true,
+				"celestial": true
+			}
+		],
+		"additionalSpells": [
+			{
+				"ability": {
+					"choose": [
+						"wis",
+						"int",
+						"cha"
+					]
+				},
+				"known": {
+					"1": [
+						{
+							"choose": "level=0|class=Cleric"
+						}
+					]
+				}
+			}
+		],
+		"entries": [
+			{
+				"type": "entries",
+				"name": "Mortal Nature",
+				"entries": [
+					"Your creature type is Humanoid."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Darkvision",
+				"entries": [
+					"Blessed by divine power, you can see in dim light within 60 feet of you as if it were bright light and in darkness as if it were dim light."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Age",
+				"entries": [
+					"Hochlings mature at the same rate as Children but often live slightly longer."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Alignment",
+				"entries": [
+					"The blood of the gods does not dictate destiny. Hochlings can be found among every alignment, though many feel pressure to embody the ideals associated with their divine ancestor."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Size",
+				"entries": [
+					"Hochlings are about the same size and build as Children. Your size is Medium or Small."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Speed",
+				"entries": [
+					"Your base walking speed is 30 feet."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Celestial Resistance",
+				"entries": [
+					"You have resistance to radiant and necrotic damage."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Healing Hands",
+				"entries": [
+					"As an action, you can touch a creature and restore a number of d4s equal to your proficiency bonus. The creature regains a number of hit points equal to the total rolled. Once you use this trait, you can't use it again until you finish a long rest."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Divine Spark",
+				"entries": [
+					"Choose one Cleric cantrip. The cantrip should reflect the nature of the deity or divine power from which your bloodline descends. Wisdom, Intelligence, or Charisma (chosen when you gain this trait) is your spellcasting ability for it."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Languages",
+				"entries": [
+					"You can speak, read, and write Common (General and one dialect) and Celestial."
+				]
+			},
+			{
+				"type": "entries",
+				"name": "Divine Manifestation",
+				"entries": [
+					"The divine essence within every Hochling manifests differently. The manifestation reflects the deity, divine domain, or divine power from which your lineage descends.",
+					"You gain one Channel Divinity option from an approved Cleric Domain. You can use that Channel Divinity once, and regain the ability to do so when you finish a short or long rest.",
+					{
+						"type": "list",
+						"items": [
+							"If the Channel Divinity refers to your Cleric level, use your character level instead.",
+							"If the Channel Divinity requires a saving throw, the DC equals: {@b 8 + your proficiency bonus + your choice of Wisdom, Intelligence, or Charisma} (chosen when you gain this trait)."
+						]
+					},
+					"Examples of suitable manifestations include those associated with the Trickery, Light, Grave, War, Peace, Order, Knowledge, Nature, Forge, Death, Beauty, Blood, Time, Madness, Lust, and Darkness domains.",
+					"Alternatively, you may choose the traditional Aasimar transformation feature instead of a Channel Divinity."
+				]
+			}
+		],
+		"__prop": "race"
+	},
+	"subrace": null,
+	"size": "medium",
+	"alignment": null,
+	"classes": [
+		{
+			"name": "Fighter",
+			"source": "TGTT",
+			"level": 9,
+			"subclass": null,
+			"subclassChoice": null,
+			"casterProgression": null,
+			"spellcastingAbility": null
+		}
+	],
+	"background": {
+		"name": "Attican",
+		"source": "Custom",
+		"_isCustom": true,
+		"skillProficiencies": [
+			{
+				"acrobatics": true,
+				"persuasion": true
+			}
+		],
+		"toolProficiencies": [
+			{
+				"horn": true
+			}
+		],
+		"languageProficiencies": [
+			{
+				"olympian": true
+			}
+		],
+		"entries": []
+	},
+	"levelHistory": [
+		{
+			"level": 1,
+			"class": {
+				"name": "Fighter",
+				"source": "TGTT"
+			},
+			"choices": {
+				"skills": [
+					"Perception",
+					"Insight",
+					"Animal Handling"
+				],
+				"optionalFeatures": [
+					{
+						"name": "Catch Your Breath",
+						"source": "TGTT",
+						"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5"
+					},
+					{
+						"name": "Legion Stance",
+						"source": "TGTT",
+						"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5"
+					},
+					{
+						"name": "Lean Into It",
+						"source": "TGTT",
+						"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5"
+					}
+				],
+				"replayData": {
+					"optionalFeatures": [
+						{
+							"name": "Catch Your Breath",
+							"source": "TGTT",
+							"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+							"entries": [
+								"{@b Bonus Action (2 Stamina Points)}. You have a limited well of stamina that you can draw on to protect yourself from harm. You regain hit points equal to {@dice 1d6} + your proficiency bonus + your Constitution modifier (minimum 0)."
+							]
+						},
+						{
+							"name": "Legion Stance",
+							"source": "TGTT",
+							"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+							"entries": [
+								"{@b Bonus Action (1 Stamina Point)}. You strike your foes in such a way as to leave an opening for your allies to follow-up. When you score a critical hit against a creature, an ally within reach of the same creature can use their reaction to make an opportunity attack against it.",
+								"This stance lasts until you are {@condition incapacitated|tgtt} or use a bonus action to end it."
+							]
+						},
+						{
+							"name": "Lean Into It",
+							"source": "TGTT",
+							"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+							"entries": [
+								"{@b Action (2 Stamina Points)}. Not just commiting to an assault, you shoulder into it with all the strength you can bear and deliver hits that resonate in the very bones of your foes. When you activate this method, you take the Attack action and make a weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, when you hit a creature with a melee weapon attack it makes a Strength saving throw or it is knocked {@condition prone}."
+							]
+						}
+					],
+					"featureChoices": [
+						{
+							"name": "Battle Hardened",
+							"source": "TGTT",
+							"type": "classFeature",
+							"parentFeature": "Specialties",
+							"ref": "Battle Hardened|Fighter|TGTT|1",
+							"level": 1,
+							"className": "Fighter"
+						}
+					]
+				},
+				"featureChoices": [
+					{
+						"featureName": "Specialties",
+						"choice": "Battle Hardened",
+						"source": "TGTT"
+					}
+				],
+				"classFeatProgressionFeats": [
+					{
+						"progressionName": "Fighting Style",
+						"name": "Archery",
+						"source": "XPHB",
+						"category": [
+							"FS"
+						]
+					}
+				],
+				"weaponMasteries": [
+					"Hand Crossbow|XPHB",
+					"Longbow|XPHB",
+					"Rapier|XPHB"
+				],
+				"combatTraditions": [
+					"AM",
+					"SK"
+				]
+			},
+			"complete": true,
+			"timestamp": 1782568548180
+		},
+		{
+			"level": 2,
+			"class": {
+				"name": "Fighter",
+				"source": "TGTT"
+			},
+			"choices": {
+				"optionalFeatures": [
+					{
+						"name": "High Ground",
+						"source": "TGTT",
+						"type": "BT"
+					},
+					{
+						"name": "Flanking",
+						"source": "TGTT",
+						"type": "BT"
+					},
+					{
+						"name": "Practiced Roll",
+						"source": "TGTT",
+						"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5"
+					}
+				],
+				"replayData": {
+					"optionalFeatures": [
+						{
+							"name": "High Ground",
+							"source": "TGTT",
+							"type": "BT",
+							"featureType": [
+								"BT"
+							],
+							"optionalFeatureTypes": [
+								"BT"
+							],
+							"entries": [
+								"Knowing your way around combat lets you better take advantage of high ground.",
+								"When standing 5 feet or more above an enemy, you gain a +2 bonus to hit with ranged attacks against said enemy."
+							]
+						},
+						{
+							"name": "Flanking",
+							"source": "TGTT",
+							"type": "BT",
+							"featureType": [
+								"BT"
+							],
+							"optionalFeatureTypes": [
+								"BT"
+							],
+							"entries": [
+								"Your expertise in combat lets you turn every small advantage you gain into a decisive blow.",
+								"When attacking a flanked enemy (not necessarily flanked by you), you can use an opportunity attack against the flanked enemy at the start of their turn.",
+								"{@note This ability relies on the table both using the Flanking optional rule, and having it give a +2 bonus instead of advantage. If either of these assumptions is false, this ability allows the user to benefit from a +2 to hit when flanking in melee.}"
+							]
+						},
+						{
+							"name": "Practiced Roll",
+							"source": "TGTT",
+							"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+							"entries": [
+								"{@b Bonus Action (1 Stamina Point)}. With a series of low steps and somersaults you expertly method around opponents. Move 20 feet. This movement doesn’t provoke opportunity attacks from creatures you can see."
+							]
+						}
+					]
+				},
+				"combatTraditions": [
+					"BZ",
+					"RE"
+				]
+			},
+			"complete": true,
+			"timestamp": 1782568993246
+		},
+		{
+			"level": 3,
+			"class": {
+				"name": "Fighter",
+				"source": "TGTT"
+			},
+			"choices": {
+				"optionalFeatures": [
+					{
+						"name": "Grasping Arrow",
+						"source": "XGE",
+						"type": "AS"
+					},
+					{
+						"name": "Seeking Arrow",
+						"source": "XGE",
+						"type": "AS"
+					}
+				],
+				"replayData": {
+					"optionalFeatures": [
+						{
+							"name": "Grasping Arrow",
+							"source": "XGE",
+							"type": "AS",
+							"featureType": [
+								"AS"
+							],
+							"optionalFeatureTypes": [
+								"AS"
+							],
+							"entries": [
+								"When this arrow strikes its target, conjuration magic creates grasping, poisonous brambles, which wrap around the target. The creature hit by the arrow takes an extra {@damage 2d6} poison damage, its speed is reduced by 10 feet, and it takes {@damage 2d6} slashing damage the first time on each turn it moves 1 foot or more without teleporting. The target or any creature that can reach it can use its action to remove the brambles with a successful Strength ({@skill Athletics}) check against your Arcane Shot save DC. Otherwise, the brambles last for 1 minute or until you use this option again.",
+								"The poison damage and slashing damage both increase to {@damage 4d6} when you reach 18th level in this class."
+							]
+						},
+						{
+							"name": "Seeking Arrow",
+							"source": "XGE",
+							"type": "AS",
+							"featureType": [
+								"AS"
+							],
+							"optionalFeatureTypes": [
+								"AS"
+							],
+							"entries": [
+								"Using divination magic, you grant your arrow the ability to seek out a target. When you use this option, you don't make an attack roll for the attack. Instead, choose one creature you have seen in the past minute. The arrow flies toward that creature, moving around corners if necessary and ignoring {@quickref Cover||3||three-quarters cover} and {@quickref Cover||3||half cover}. If the target is within the weapon's range and there is a path large enough for the arrow to travel to the target, the target must make a Dexterity saving throw. Otherwise, the arrow disappears after traveling as far as it can. On a failed save, the target takes damage as if it were hit by the arrow, plus an extra {@damage 1d6} force damage, and you learn the target's current location. On a successful save, the target takes half as much damage, and you don't learn its location.",
+								"The force damage increases to {@damage 2d6} when you reach 18th level in this class."
+							]
+						}
+					]
+				}
+			},
+			"complete": true,
+			"timestamp": 1782568993228
+		},
+		{
+			"level": 4,
+			"class": {
+				"name": "Fighter",
+				"source": "TGTT"
+			},
+			"choices": {
+				"feat": {
+					"name": "Crossbow Expert",
+					"source": "XPHB"
+				},
+				"asi": {
+					"dex": 2
+				},
+				"optionalFeatures": [
+					{
+						"name": "Iron Will",
+						"source": "TGTT",
+						"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5"
+					}
+				],
+				"replayData": {
+					"optionalFeatures": [
+						{
+							"name": "Iron Will",
+							"source": "TGTT",
+							"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+							"entries": [
+								"{@b Reaction (1 Stamina Point)}. Withdrawing into your mind, you focus and concentrate to steel your nerves. When you make a saving throw to resist being {@condition charmed} or {@condition frightened}, you can use your reaction to gain advantage on the saving throw."
+							]
+						}
+					]
+				},
+				"weaponMasteries": [
+					"Hand Crossbow|XPHB",
+					"Longbow|XPHB",
+					"Rapier|XPHB",
+					"Blowgun|XPHB"
+				]
+			},
+			"complete": true,
+			"timestamp": 1782568993246
+		},
+		{
+			"level": 5,
+			"class": {
+				"name": "Fighter",
+				"source": "TGTT"
+			},
+			"choices": {
+				"optionalFeatures": [
+					{
+						"name": "Blindshot",
+						"source": "TGTT",
+						"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5"
+					}
+				],
+				"replayData": {
+					"optionalFeatures": [
+						{
+							"name": "Blindshot",
+							"source": "TGTT",
+							"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+							"entries": [
+								"{@b Bonus Action (1 Stamina Point)}. By closing your eyes and focusing on the sound of the environment, you target an unseen foe with uncanny accuracy. Make a Perception check against the passive Stealth of a target you cannot see that is within 30 feet. On a success, you know the target’s location and do not have disadvantage on your next ranged attack against it before the end of your turn."
+							]
+						}
+					],
+					"featureChoices": [
+						{
+							"name": "Stamina Enthusiast",
+							"source": "TGTT",
+							"type": "classFeature",
+							"parentFeature": "Specialties",
+							"ref": "Stamina Enthusiast|Fighter|TGTT|1",
+							"level": 1,
+							"className": "Fighter"
+						}
+					]
+				},
+				"featureChoices": [
+					{
+						"featureName": "Specialties",
+						"choice": "Stamina Enthusiast",
+						"source": "TGTT"
+					}
+				]
+			},
+			"complete": true,
+			"timestamp": 1782568993235
+		},
+		{
+			"level": 6,
+			"class": {
+				"name": "Fighter",
+				"source": "TGTT"
+			},
+			"choices": {
+				"asi": {
+					"dex": 2
+				},
+				"optionalFeatures": [
+					{
+						"name": "Missile Volley",
+						"source": "TGTT",
+						"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5"
+					}
+				],
+				"replayData": {
+					"optionalFeatures": [
+						{
+							"name": "Missile Volley",
+							"source": "TGTT",
+							"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+							"entries": [
+								"{@b Action (2 Stamina Points)}. Seizing upon the moment you make the sky rain death, striking at a multitude of creatures in rapid succession. Make a ranged weapon attack against a number of creatures within 10 feet of a point you can see within your weapon’s range. You may only target a number of creatures equal to or less than your proficiency bonus, you must have ammunition for each target, and you make a separate attack roll for each target."
+							]
+						}
+					]
+				}
+			},
+			"complete": true,
+			"timestamp": 1782568993237
+		},
+		{
+			"level": 7,
+			"class": {
+				"name": "Fighter",
+				"source": "TGTT"
+			},
+			"choices": {
+				"optionalFeatures": [
+					{
+						"name": "Last Ditch Evasion",
+						"source": "TGTT",
+						"type": "BT"
+					},
+					{
+						"name": "Shadow Arrow",
+						"source": "XGE",
+						"type": "AS"
+					}
+				],
+				"replayData": {
+					"optionalFeatures": [
+						{
+							"name": "Last Ditch Evasion",
+							"source": "TGTT",
+							"type": "BT",
+							"featureType": [
+								"BT"
+							],
+							"optionalFeatureTypes": [
+								"BT"
+							],
+							"entries": [
+								"Thanks to a combination of skill and luck, you narrowly avoid an attack but leave yourself perilously exposed.",
+								"When you are hit by an attack, you can use a reaction to jump to the side and save yourself from taking damage. If you do, you become {@condition slowed|TGTT} until the end of your next turn."
+							]
+						},
+						{
+							"name": "Shadow Arrow",
+							"source": "XGE",
+							"type": "AS",
+							"featureType": [
+								"AS"
+							],
+							"optionalFeatureTypes": [
+								"AS"
+							],
+							"entries": [
+								"You weave illusion magic into your arrow, causing it to occlude your foe's vision with shadows. The creature hit by the arrow takes an extra {@damage 2d6} psychic damage, and it must succeed on a Wisdom saving throw or be unable to see anything farther than 5 feet away until the start of your next turn.",
+								"The psychic damage increases to {@damage 4d6} when you reach 18th level in this class."
+							]
+						}
+					]
+				}
+			},
+			"complete": true,
+			"timestamp": 1782568993241
+		},
+		{
+			"level": 8,
+			"class": {
+				"name": "Fighter",
+				"source": "TGTT"
+			},
+			"choices": {
+				"asi": {
+					"con": 2
+				},
+				"optionalFeatures": [
+					{
+						"name": "Countershot",
+						"source": "TGTT",
+						"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5"
+					}
+				],
+				"replayData": {
+					"optionalFeatures": [
+						{
+							"name": "Countershot",
+							"source": "TGTT",
+							"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+							"entries": [
+								"{@b Reaction (1 Stamina Point)}. With awe-inspiring skill you unleash a thrown weapon or arrow, knocking a missile out of the air. When you see a missile from a ranged weapon attack enter into the normal range of a weapon you are wielding, you can use your reaction to deflect it. Use a weapon to make a ranged attack against an AC equal to the attack roll of the missile. On a hit, the missile is deflected and misses its target. At the Narrator’s discretion, certain ranged weapon attacks (like a giant’s thrown rock) may be too heavy to be deflected by Countershot."
+							]
+						}
+					]
+				}
+			},
+			"complete": true,
+			"timestamp": 1782568993243
+		},
+		{
+			"level": 9,
+			"class": {
+				"name": "Fighter",
+				"source": "TGTT"
+			},
+			"choices": {
+				"optionalFeatures": [
+					{
+						"name": "Point Blank Shot",
+						"source": "TGTT",
+						"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5"
+					}
+				],
+				"replayData": {
+					"optionalFeatures": [
+						{
+							"name": "Point Blank Shot",
+							"source": "TGTT",
+							"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+							"entries": [
+								"{@b Bonus Action (1 Stamina Point)}. With uncanny swiftness you ready a weapon normally only used at range, compensating for making an attack at an opponent within only a few feet and giving your enemies reason to be wary. Until the end of your next turn, being within 5 feet of a hostile creature who can see you and who isn’t {@condition incapacitated|tgtt} does not give you disadvantage when making a ranged attack using a weapon. In addition, when an adjacent hostile creature that you can see moves 5 feet or more away from you, you can use your reaction to make a ranged weapon attack against it."
+							]
+						}
+					],
+					"featureChoices": [
+						{
+							"name": "Combat Medic",
+							"source": "TGTT",
+							"type": "classFeature",
+							"parentFeature": "Specialties",
+							"ref": "Combat Medic|Fighter|TGTT|1",
+							"level": 1,
+							"className": "Fighter"
+						}
+					]
+				},
+				"featureChoices": [
+					{
+						"featureName": "Specialties",
+						"choice": "Combat Medic",
+						"source": "TGTT"
+					}
+				]
+			},
+			"complete": true,
+			"timestamp": 1782568993246
+		}
+	],
+	"characterBase": {
+		"v": 1,
+		"raceUserChoices": {
+			"selectedAbilityChoices": {
+				"Hochling|TGTT": {
+					"choose_0_0": "dex",
+					"choose_0_0_amount": 1
+				}
+			},
+			"selectedFeatureChoices": {
+				"Divine Manifestation": "war"
+			}
+		},
+		"backgroundUserChoices": {}
+	},
+	"_firstClassStartGrants": {
+		"className": "Fighter",
+		"classSource": "TGTT",
+		"saves": [
+			"str",
+			"con"
+		],
+		"armor": [
+			"light",
+			"medium",
+			"heavy",
+			"shield"
+		],
+		"weapons": [
+			"simple",
+			"martial"
+		]
+	},
+	"abilities": {
+		"str": 8,
+		"dex": 19,
+		"con": 17,
+		"int": 10,
+		"wis": 12,
+		"cha": 13
+	},
+	"abilityBonuses": {
+		"str": 0,
+		"dex": 1,
+		"con": 2,
+		"int": 0,
+		"wis": 0,
+		"cha": 0
+	},
+	"abilityScoreMaximums": {},
+	"hp": {
+		"current": 94,
+		"max": 94,
+		"temp": 0
+	},
+	"hitDice": {
+		"d10": {
+			"current": 9,
+			"max": 9
+		}
+	},
+	"deathSaves": {
+		"successes": 0,
+		"failures": 0
+	},
+	"inspiration": false,
+	"saveProficiencies": [
+		"str",
+		"con"
+	],
+	"skillProficiencies": {
+		"acrobatics": 1,
+		"persuasion": 1,
+		"perception": 1,
+		"insight": 1,
+		"greekmythos": 1,
+		"dik'sbrothers": 1,
+		"arcana": 1
+	},
+	"customSkills": [
+		{
+			"name": "Greek Mythos",
+			"ability": null,
+			"isLoreSkill": true,
+			"bonus": 2
+		},
+		{
+			"name": "Dik's Brothers",
+			"ability": null,
+			"isLoreSkill": true,
+			"bonus": 4
+		},
+		{
+			"name": "Linguistics",
+			"ability": "int"
+		}
+	],
+	"armorProficiencies": [
+		"light",
+		"medium",
+		"heavy",
+		"shield"
+	],
+	"weaponProficiencies": [
+		"simple",
+		"martial"
+	],
+	"toolProficiencies": [
+		"Horn",
+		"Healers Kit"
+	],
+	"languages": [
+		"Common",
+		"Celestial",
+		"Olympian"
+	],
+	"ac": {
+		"base": 10,
+		"armor": {
+			"ac": 12,
+			"type": "light",
+			"name": "Bugbear Black Studded Leather Armor",
+			"source": "Custom",
+			"magicBonus": 0,
+			"dexterityMax": null,
+			"stealth": false,
+			"strength": null,
+			"appliedUpgrades": [
+				{
+					"name": "Camouflaged",
+					"source": "TGTT",
+					"upgradeType": "AU",
+					"costPaid": 0,
+					"appliedAt": 1782569053335
+				},
+				{
+					"name": "Form Fitted",
+					"source": "TGTT",
+					"upgradeType": "AU",
+					"costPaid": 0,
+					"appliedAt": 1782569060956
+				}
+			]
+		},
+		"shield": false,
+		"bonuses": [],
+		"itemBonus": 0
+	},
+	"acFormulas": [],
+	"itemBonuses": {
+		"savingThrow": 0,
+		"spellAttack": 0,
+		"spellSaveDc": 0,
+		"abilityCheck": 0,
+		"savingThrowStr": 0,
+		"savingThrowDex": 0,
+		"savingThrowCon": 0,
+		"savingThrowInt": 0,
+		"savingThrowWis": 0,
+		"savingThrowCha": 0,
+		"proficiencyBonus": 0,
+		"savingThrowConcentration": 0,
+		"spellDamage": 0
+	},
+	"itemDefenses": {
+		"resist": [
+			{
+				"type": "lightning",
+				"source": "Bugbear Black Studded Leather Armor"
+			}
+		],
+		"immune": [],
+		"vulnerable": [],
+		"conditionImmune": []
+	},
+	"itemMentalProtection": {
+		"immuneThoughtReading": false,
+		"immuneLieDetection": false,
+		"immuneTelepathy": false,
+		"immuneAlignmentDetection": false
+	},
+	"itemAbilityOverrides": null,
+	"itemGrantedSpells": [],
+	"speed": {
+		"walk": 30,
+		"fly": null,
+		"swim": null,
+		"climb": null,
+		"burrow": null
+	},
+	"senses": {
+		"darkvision": 60,
+		"blindsight": 0,
+		"tremorsense": 0,
+		"truesight": 0
+	},
+	"spellcasting": {
+		"ability": null,
+		"spellSlots": {},
+		"pactSlots": {
+			"current": 0,
+			"max": 0,
+			"level": 0
+		},
+		"spellsKnown": [],
+		"cantripsKnown": [
+			{
+				"id": "0d7e6be5-bd04-4af1-acb9-a1adce83e042",
+				"name": "Light",
+				"source": "XPHB",
+				"school": "V",
+				"castingTime": "1 action",
+				"range": "Touch",
+				"duration": "1 hour",
+				"concentration": false,
+				"components": "V, M (a firefly or phosphorescent moss)",
+				"sourceFeature": "Hochling",
+				"sourceClass": null,
+				"spellcastingAbility": "cha",
+				"subschools": [
+					"legality:legal",
+					"rarity:common"
+				]
+			},
+			{
+				"id": "3d896b86-bde8-47bc-ac49-6c6262b58912",
+				"name": "Druidcraft",
+				"source": "PHB",
+				"school": "T",
+				"castingTime": "1 action",
+				"range": "30 feet",
+				"duration": "Instantaneous",
+				"concentration": false,
+				"components": "V, S",
+				"sourceFeature": "Arcane Archer Lore",
+				"sourceClass": null,
+				"spellcastingAbility": null,
+				"subschools": [
+					"legality:legal",
+					"rarity:common"
+				]
+			}
+		],
+		"innateSpells": [],
+		"gamblerPreparedRolled": null,
+		"gamblerPreparedRollDetails": null,
+		"gamblerAutoRollTable": false,
+		"gamblerLastBet": null,
+		"gamblerLastTableRoll": null,
+		"gamblerExtraLuckUsed": 0,
+		"gamblerMasterFortuneUsed": 0,
+		"scribingSpellbook": [],
+		"scribingMemorizedSpellId": null,
+		"scribingClass": null,
+		"pendingScribingPicks": 0
+	},
+	"inventory": [
+		{
+			"id": "ad9cca9b-e827-4ca4-b13c-4884ac095698",
+			"item": {
+				"name": "Bugbear Black Studded Leather Armor",
+				"source": "Custom",
+				"page": 219,
+				"srd52": true,
+				"basicRules2024": true,
+				"referenceSources": [
+					"HotB"
+				],
+				"edition": "one",
+				"type": "armor",
+				"rarity": "none",
+				"weight": 13,
+				"value": 4500,
+				"ac": 12,
+				"armor": true,
+				"hasFluffImages": true,
+				"__prop": "baseitem",
+				"_isBaseItem": true,
+				"_category": "Basic",
+				"entries": [],
+				"_isEnhanced": true,
+				"_textTypes": [
+					"light armor"
+				],
+				"_entryType": "light armor",
+				"_entrySubType": "",
+				"_attunement": null,
+				"_attunementCategory": "No Attunement Required",
+				"vestigeTier": null,
+				"itemTierType": null,
+				"maxSpellLevels": null,
+				"kiSaveDcBonus": 0,
+				"resourceRestoration": null,
+				"mentalProtection": null,
+				"activation": [],
+				"conditionalBonuses": [],
+				"shield": false,
+				"armorType": "light",
+				"containedItems": [],
+				"storedSpells": [],
+				"appliedUpgrades": [
+					{
+						"name": "Camouflaged",
+						"source": "TGTT",
+						"upgradeType": "AU",
+						"costPaid": 0,
+						"appliedAt": 1782569053335
+					},
+					{
+						"name": "Form Fitted",
+						"source": "TGTT",
+						"upgradeType": "AU",
+						"costPaid": 0,
+						"appliedAt": 1782569060956
+					}
+				],
+				"socketedGemstones": [],
+				"_isCustom": true,
+				"requiresAttunement": false,
+				"weapon": false,
+				"dexterityMax": null,
+				"bonusAc": 0,
+				"bonusWeapon": 0,
+				"bonusWeaponAttack": 0,
+				"bonusWeaponDamage": 0,
+				"bonusWeaponCritDamage": 0,
+				"bonusSpellAttack": 0,
+				"bonusSpellSaveDc": 0,
+				"bonusSpellDamage": 0,
+				"bonusSavingThrow": 0,
+				"bonusSavingThrowStr": 0,
+				"bonusSavingThrowDex": 0,
+				"bonusSavingThrowCon": 0,
+				"bonusSavingThrowInt": 0,
+				"bonusSavingThrowWis": 0,
+				"bonusSavingThrowCha": 0,
+				"bonusAbilityCheck": 0,
+				"bonusProficiencyBonus": 0,
+				"bonusSavingThrowConcentration": 0,
+				"critThreshold": null,
+				"resist": [
+					"lightning"
+				],
+				"immune": null,
+				"vulnerable": null,
+				"conditionImmune": null,
+				"modifySpeed": null,
+				"ability": null,
+				"senses": null
+			},
+			"quantity": 1,
+			"equipped": true,
+			"attuned": false
+		},
+		{
+			"id": "fdc36263-1226-4643-a92e-5b054371edd2",
+			"item": {
+				"name": "Longbow",
+				"source": "XPHB",
+				"page": 215,
+				"srd52": true,
+				"basicRules2024": true,
+				"edition": "one",
+				"type": "R|XPHB",
+				"rarity": "none",
+				"weight": 2,
+				"value": 5000,
+				"weaponCategory": "martial",
+				"property": [
+					"A|XPHB",
+					"H|XPHB",
+					"2H|XPHB"
+				],
+				"mastery": [
+					"Slow|XPHB"
+				],
+				"range": "150/600",
+				"dmg1": "1d8",
+				"dmgType": "P",
+				"bow": true,
+				"weapon": true,
+				"ammoType": "arrow|xphb",
+				"hasFluffImages": true,
+				"__prop": "baseitem",
+				"_isBaseItem": true,
+				"_category": "Basic",
+				"entries": [],
+				"_isEnhanced": true,
+				"_fullEntries": [
+					{
+						"type": "wrapper",
+						"wrapped": {
+							"type": "entries",
+							"name": "Range",
+							"entries": [
+								"A Range weapon has a range in parentheses after the Ammunition or Thrown property. The range lists two numbers. The first is the weapon's normal range in feet, and the second is the weapon's long range. When attacking a target beyond normal range, you have {@variantrule Disadvantage|XPHB} on the attack roll. You can't attack a target beyond the long range."
+							]
+						},
+						"data": {
+							"item__mergedEntryTag": "type"
+						}
+					},
+					{
+						"type": "wrapper",
+						"wrapped": {
+							"type": "entries",
+							"name": "Ammunition",
+							"entries": [
+								"You can use a weapon that has the Ammunition property to make a ranged attack only if you have ammunition to fire from it. The type of ammunition required is specified with the weapon's range. Each attack expends one piece of ammunition. Drawing the ammunition is part of the attack (you need a free hand to load a one-handed weapon). After a fight, you can spend 1 minute to recover half the ammunition (round down) you used in the fight; the rest is lost."
+							]
+						},
+						"data": {
+							"item__mergedEntryTag": "property"
+						}
+					},
+					{
+						"type": "wrapper",
+						"wrapped": {
+							"type": "entries",
+							"name": "Heavy",
+							"entries": [
+								"You have {@variantrule Disadvantage|XPHB} on attack rolls with a Heavy weapon if it's a Melee weapon and your Strength score isn't at least 13 or if it's a Ranged weapon and your Dexterity score isn't at least 13."
+							]
+						},
+						"data": {
+							"item__mergedEntryTag": "property"
+						}
+					},
+					{
+						"type": "wrapper",
+						"wrapped": {
+							"type": "entries",
+							"name": "Two-Handed",
+							"entries": [
+								"A Two-Handed weapon requires two hands when you attack with it."
+							]
+						},
+						"data": {
+							"item__mergedEntryTag": "property"
+						}
+					},
+					{
+						"type": "wrapper",
+						"wrapped": {
+							"type": "entries",
+							"name": "Mastery: Slow",
+							"source": "XPHB",
+							"page": 214,
+							"entries": [
+								"If you hit a creature with this weapon and deal damage to it, you can reduce its {@variantrule Speed|XPHB} by 10 feet until the start of your next turn. If the creature is hit more than once by weapons that have this property, the {@variantrule Speed|XPHB} reduction doesn't exceed 10 feet."
+							]
+						},
+						"data": {
+							"item__mergedEntryTag": "mastery"
+						}
+					}
+				],
+				"_textTypes": [
+					"martial weapon",
+					"ranged weapon"
+				],
+				"_entryType": "weapon",
+				"_entrySubType": "martial weapon, ranged weapon",
+				"_attunement": null,
+				"_attunementCategory": "No Attunement Required",
+				"vestigeTier": null,
+				"itemTierType": null,
+				"maxSpellLevels": null,
+				"kiSaveDcBonus": 0,
+				"resourceRestoration": null,
+				"mentalProtection": null,
+				"activation": [],
+				"conditionalBonuses": [],
+				"shield": false,
+				"armor": false,
+				"containedItems": [],
+				"storedSpells": [],
+				"appliedUpgrades": [
+					{
+						"name": "Wounding: Oiled String",
+						"source": "TCAH",
+						"upgradeType": "WU:1",
+						"costPaid": 0,
+						"appliedAt": 1782569038245
+					}
+				],
+				"socketedGemstones": []
+			},
+			"quantity": 1,
+			"equipped": true,
+			"attuned": false
+		},
+		{
+			"id": "9fbd39b4-3188-4412-9a6f-a2f9b80e2e21",
+			"item": {
+				"name": "Quiver",
+				"source": "XPHB",
+				"weight": 1,
+				"value": 100,
+				"type": "gear",
+				"requiresAttunement": false,
+				"weapon": false,
+				"baseItem": null,
+				"damage": null,
+				"dmg1": null,
+				"dmgType": null,
+				"properties": [],
+				"mastery": [],
+				"range": null,
+				"bonusWeapon": 0,
+				"bonusWeaponAttack": 0,
+				"bonusWeaponDamage": 0,
+				"armor": false,
+				"armorType": null,
+				"ac": null,
+				"dexterityMax": null,
+				"stealth": false,
+				"strength": null,
+				"shield": false,
+				"bonusAc": 0,
+				"bonusSpellAttack": 0,
+				"bonusSpellSaveDc": 0,
+				"bonusSavingThrow": 0,
+				"bonusSavingThrowStr": 0,
+				"bonusSavingThrowDex": 0,
+				"bonusSavingThrowCon": 0,
+				"bonusSavingThrowInt": 0,
+				"bonusSavingThrowWis": 0,
+				"bonusSavingThrowCha": 0,
+				"bonusAbilityCheck": 0,
+				"bonusProficiencyBonus": 0,
+				"bonusSavingThrowConcentration": 0,
+				"bonusSpellDamage": 0,
+				"bonusWeaponCritDamage": 0,
+				"critThreshold": null,
+				"resist": null,
+				"immune": null,
+				"vulnerable": null,
+				"conditionImmune": null,
+				"modifySpeed": null,
+				"senses": null,
+				"ability": null,
+				"attachedSpells": null,
+				"focus": null,
+				"charges": null,
+				"chargesCurrent": null,
+				"recharge": null,
+				"rechargeAmount": null,
+				"rarity": "none",
+				"curse": false,
+				"sentient": false,
+				"grantsProficiency": false,
+				"containerCapacity": {
+					"item": [
+						{
+							"arrow|xphb": 20
+						}
+					]
+				},
+				"containedItems": [],
+				"vestigeTier": null,
+				"storedSpells": [],
+				"maxSpellLevels": null,
+				"appliedUpgrades": [],
+				"socketedGemstones": [],
+				"variantComponent": null,
+				"entries": [
+					"A Quiver holds up to 20 Arrows."
+				],
+				"itemTierType": null,
+				"kiSaveDcBonus": 0,
+				"resourceRestoration": null,
+				"mentalProtection": null,
+				"activation": [],
+				"conditionalBonuses": []
+			},
+			"quantity": 1,
+			"equipped": true,
+			"attuned": false
+		},
+		{
+			"id": "f954015b-aa53-4630-b6f0-d0006d6f31c8",
+			"item": {
+				"name": "Hand Crossbow",
+				"source": "XPHB",
+				"weight": 3,
+				"value": 7500,
+				"type": "weapon",
+				"requiresAttunement": false,
+				"weapon": true,
+				"weaponCategory": "martial",
+				"baseItem": null,
+				"damage": "1d6 Piercing",
+				"dmg1": "1d6",
+				"dmgType": "P",
+				"properties": [
+					"A|XPHB",
+					"L|XPHB",
+					"LD|XPHB"
+				],
+				"mastery": [
+					"Vex|XPHB"
+				],
+				"range": "30/120",
+				"bonusWeapon": 0,
+				"bonusWeaponAttack": 0,
+				"bonusWeaponDamage": 0,
+				"armor": false,
+				"armorType": null,
+				"ac": null,
+				"dexterityMax": null,
+				"stealth": false,
+				"strength": null,
+				"shield": false,
+				"bonusAc": 0,
+				"bonusSpellAttack": 0,
+				"bonusSpellSaveDc": 0,
+				"bonusSavingThrow": 0,
+				"bonusSavingThrowStr": 0,
+				"bonusSavingThrowDex": 0,
+				"bonusSavingThrowCon": 0,
+				"bonusSavingThrowInt": 0,
+				"bonusSavingThrowWis": 0,
+				"bonusSavingThrowCha": 0,
+				"bonusAbilityCheck": 0,
+				"bonusProficiencyBonus": 0,
+				"bonusSavingThrowConcentration": 0,
+				"bonusSpellDamage": 0,
+				"bonusWeaponCritDamage": 0,
+				"critThreshold": null,
+				"resist": null,
+				"immune": null,
+				"vulnerable": null,
+				"conditionImmune": null,
+				"modifySpeed": null,
+				"senses": null,
+				"ability": null,
+				"attachedSpells": null,
+				"focus": null,
+				"charges": null,
+				"chargesCurrent": null,
+				"recharge": null,
+				"rechargeAmount": null,
+				"rarity": "none",
+				"curse": false,
+				"sentient": false,
+				"grantsProficiency": false,
+				"containerCapacity": null,
+				"containedItems": [],
+				"vestigeTier": null,
+				"storedSpells": [],
+				"maxSpellLevels": null,
+				"appliedUpgrades": [
+					{
+						"name": "Wounding: Oiled String",
+						"source": "TCAH",
+						"upgradeType": "WU:1",
+						"costPaid": 0,
+						"appliedAt": 1782569806183
+					}
+				],
+				"socketedGemstones": [],
+				"variantComponent": null,
+				"entries": [],
+				"itemTierType": null,
+				"kiSaveDcBonus": 0,
+				"resourceRestoration": null,
+				"mentalProtection": null,
+				"activation": [],
+				"conditionalBonuses": []
+			},
+			"quantity": 1,
+			"equipped": true,
+			"attuned": false
+		},
+		{
+			"id": "112bf427-7ea9-40ab-bede-b1f86761fa89",
+			"item": {
+				"name": "Blowgun",
+				"source": "XPHB",
+				"weight": 1,
+				"value": 1000,
+				"type": "weapon",
+				"requiresAttunement": false,
+				"weapon": true,
+				"weaponCategory": "martial",
+				"baseItem": null,
+				"damage": "1 Piercing",
+				"dmg1": "1",
+				"dmgType": "P",
+				"properties": [
+					"A|XPHB",
+					"LD|XPHB"
+				],
+				"mastery": [
+					"Vex|XPHB"
+				],
+				"range": "25/100",
+				"bonusWeapon": 0,
+				"bonusWeaponAttack": 0,
+				"bonusWeaponDamage": 0,
+				"armor": false,
+				"armorType": null,
+				"ac": null,
+				"dexterityMax": null,
+				"stealth": false,
+				"strength": null,
+				"shield": false,
+				"bonusAc": 0,
+				"bonusSpellAttack": 0,
+				"bonusSpellSaveDc": 0,
+				"bonusSavingThrow": 0,
+				"bonusSavingThrowStr": 0,
+				"bonusSavingThrowDex": 0,
+				"bonusSavingThrowCon": 0,
+				"bonusSavingThrowInt": 0,
+				"bonusSavingThrowWis": 0,
+				"bonusSavingThrowCha": 0,
+				"bonusAbilityCheck": 0,
+				"bonusProficiencyBonus": 0,
+				"bonusSavingThrowConcentration": 0,
+				"bonusSpellDamage": 0,
+				"bonusWeaponCritDamage": 0,
+				"critThreshold": null,
+				"resist": null,
+				"immune": null,
+				"vulnerable": null,
+				"conditionImmune": null,
+				"modifySpeed": null,
+				"senses": null,
+				"ability": null,
+				"attachedSpells": null,
+				"focus": null,
+				"charges": null,
+				"chargesCurrent": null,
+				"recharge": null,
+				"rechargeAmount": null,
+				"rarity": "none",
+				"curse": false,
+				"sentient": false,
+				"grantsProficiency": false,
+				"containerCapacity": null,
+				"containedItems": [],
+				"vestigeTier": null,
+				"storedSpells": [],
+				"maxSpellLevels": null,
+				"appliedUpgrades": [],
+				"socketedGemstones": [],
+				"variantComponent": null,
+				"entries": [],
+				"itemTierType": null,
+				"kiSaveDcBonus": 0,
+				"resourceRestoration": null,
+				"mentalProtection": null,
+				"activation": [],
+				"conditionalBonuses": []
+			},
+			"quantity": 1,
+			"equipped": true,
+			"attuned": false
+		},
+		{
+			"id": "e547e8e3-5e04-4756-a750-b8fcdae6191e",
+			"item": {
+				"name": "Sleep Dart (5)",
+				"source": "TCAH",
+				"weight": 0.25,
+				"value": 1500,
+				"type": "gear",
+				"requiresAttunement": false,
+				"weapon": false,
+				"baseItem": null,
+				"damage": null,
+				"dmg1": null,
+				"dmgType": null,
+				"properties": [],
+				"mastery": [],
+				"range": null,
+				"bonusWeapon": 0,
+				"bonusWeaponAttack": 0,
+				"bonusWeaponDamage": 0,
+				"armor": false,
+				"armorType": null,
+				"ac": null,
+				"dexterityMax": null,
+				"stealth": false,
+				"strength": null,
+				"shield": false,
+				"bonusAc": 0,
+				"bonusSpellAttack": 0,
+				"bonusSpellSaveDc": 0,
+				"bonusSavingThrow": 0,
+				"bonusSavingThrowStr": 0,
+				"bonusSavingThrowDex": 0,
+				"bonusSavingThrowCon": 0,
+				"bonusSavingThrowInt": 0,
+				"bonusSavingThrowWis": 0,
+				"bonusSavingThrowCha": 0,
+				"bonusAbilityCheck": 0,
+				"bonusProficiencyBonus": 0,
+				"bonusSavingThrowConcentration": 0,
+				"bonusSpellDamage": 0,
+				"bonusWeaponCritDamage": 0,
+				"critThreshold": null,
+				"resist": null,
+				"immune": null,
+				"vulnerable": null,
+				"conditionImmune": null,
+				"modifySpeed": null,
+				"senses": null,
+				"ability": null,
+				"attachedSpells": null,
+				"focus": null,
+				"charges": null,
+				"chargesCurrent": null,
+				"recharge": null,
+				"rechargeAmount": null,
+				"rarity": "none",
+				"curse": false,
+				"sentient": false,
+				"grantsProficiency": false,
+				"containerCapacity": null,
+				"containedItems": [],
+				"vestigeTier": null,
+				"storedSpells": [],
+				"maxSpellLevels": null,
+				"appliedUpgrades": [],
+				"socketedGemstones": [],
+				"variantComponent": null,
+				"entries": [
+					"This dart contains a dose of a powerful soporific, designed to temporarily incapacitate a target. When you hit a creature with an attack using this ammunition, instead of dealing damage roll {@dice 5d8}; if the target has fewer hit points than the total rolled it falls {@condition unconscious} until one hour has passed, it takes damage, or someone uses and action to shake or slap the target awake. No effect against undead and creatures immune to being {@condition charmed}. Once a sleep dart hits a creature, it loses this property and becomes a normal dart."
+				],
+				"itemTierType": null,
+				"kiSaveDcBonus": 0,
+				"resourceRestoration": null,
+				"mentalProtection": null,
+				"activation": [],
+				"conditionalBonuses": []
+			},
+			"quantity": 1,
+			"equipped": false,
+			"attuned": false
+		},
+		{
+			"id": "3afea0fa-6c63-49e4-b4e9-5187154632d5",
+			"item": {
+				"name": "Rapier of Life Stealing",
+				"source": "XDMG",
+				"weight": 2,
+				"value": 0,
+				"type": "weapon",
+				"requiresAttunement": true,
+				"weapon": true,
+				"weaponCategory": "martial",
+				"baseItem": "rapier|xphb",
+				"damage": "1d8 Piercing",
+				"dmg1": "1d8",
+				"dmgType": "P",
+				"properties": [
+					"F|XPHB"
+				],
+				"mastery": [
+					"Vex|XPHB"
+				],
+				"range": null,
+				"bonusWeapon": 0,
+				"bonusWeaponAttack": 0,
+				"bonusWeaponDamage": 0,
+				"armor": false,
+				"armorType": null,
+				"ac": null,
+				"dexterityMax": null,
+				"stealth": false,
+				"strength": null,
+				"shield": false,
+				"bonusAc": 0,
+				"bonusSpellAttack": 0,
+				"bonusSpellSaveDc": 0,
+				"bonusSavingThrow": 0,
+				"bonusSavingThrowStr": 0,
+				"bonusSavingThrowDex": 0,
+				"bonusSavingThrowCon": 0,
+				"bonusSavingThrowInt": 0,
+				"bonusSavingThrowWis": 0,
+				"bonusSavingThrowCha": 0,
+				"bonusAbilityCheck": 0,
+				"bonusProficiencyBonus": 0,
+				"bonusSavingThrowConcentration": 0,
+				"bonusSpellDamage": 0,
+				"bonusWeaponCritDamage": 0,
+				"critThreshold": null,
+				"resist": null,
+				"immune": null,
+				"vulnerable": null,
+				"conditionImmune": null,
+				"modifySpeed": null,
+				"senses": null,
+				"ability": null,
+				"attachedSpells": null,
+				"focus": null,
+				"charges": null,
+				"chargesCurrent": null,
+				"recharge": null,
+				"rechargeAmount": null,
+				"rarity": "rare",
+				"curse": false,
+				"sentient": false,
+				"grantsProficiency": false,
+				"containerCapacity": null,
+				"containedItems": [],
+				"vestigeTier": null,
+				"storedSpells": [],
+				"maxSpellLevels": null,
+				"appliedUpgrades": [],
+				"socketedGemstones": [],
+				"variantComponent": null,
+				"entries": [],
+				"itemTierType": null,
+				"kiSaveDcBonus": 0,
+				"resourceRestoration": null,
+				"mentalProtection": null,
+				"activation": [],
+				"conditionalBonuses": []
+			},
+			"quantity": 1,
+			"equipped": true,
+			"attuned": true
+		}
+	],
+	"currency": {
+		"cp": 0,
+		"sp": 0,
+		"ep": 0,
+		"gp": 11,
+		"pp": 0
+	},
+	"features": [
+		{
+			"id": "b9d605ab-4c84-4ca4-b20a-2a467254f9c8",
+			"type": "entries",
+			"name": "Mortal Nature",
+			"entries": [
+				"Your creature type is Humanoid."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Your creature type is Humanoid.</p></div>"
+		},
+		{
+			"id": "6dbf90cf-4ae8-4f50-870d-3bf62dff2fe8",
+			"type": "entries",
+			"name": "Darkvision",
+			"entries": [
+				"Blessed by divine power, you can see in dim light within 60 feet of you as if it were bright light and in darkness as if it were dim light."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Blessed by divine power, you can see in dim light within 60 feet of you as if it were bright light and in darkness as if it were dim light.</p></div>"
+		},
+		{
+			"id": "4f10ffdf-c108-4da9-91fe-416493d6f37a",
+			"type": "entries",
+			"name": "Age",
+			"entries": [
+				"Hochlings mature at the same rate as Children but often live slightly longer."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Hochlings mature at the same rate as Children but often live slightly longer.</p></div>"
+		},
+		{
+			"id": "34c64101-e05b-4772-8286-1eea7af8ec5b",
+			"type": "entries",
+			"name": "Alignment",
+			"entries": [
+				"The blood of the gods does not dictate destiny. Hochlings can be found among every alignment, though many feel pressure to embody the ideals associated with their divine ancestor."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>The blood of the gods does not dictate destiny. Hochlings can be found among every alignment, though many feel pressure to embody the ideals associated with their divine ancestor.</p></div>"
+		},
+		{
+			"id": "e942d9d2-bc5f-41ad-ad34-50b491c4c3f0",
+			"type": "entries",
+			"name": "Size",
+			"entries": [
+				"Hochlings are about the same size and build as Children. Your size is Medium or Small."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Hochlings are about the same size and build as Children. Your size is Medium or Small.</p></div>"
+		},
+		{
+			"id": "514798e1-869a-4262-afed-4bb05bf9170e",
+			"type": "entries",
+			"name": "Speed",
+			"entries": [
+				"Your base walking speed is 30 feet."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Your base walking speed is 30 feet.</p></div>"
+		},
+		{
+			"id": "755edad8-d99b-4e26-85d5-a4f9e84cd83d",
+			"type": "entries",
+			"name": "Celestial Resistance",
+			"entries": [
+				"You have resistance to radiant and necrotic damage."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You have resistance to radiant and necrotic damage.</p></div>"
+		},
+		{
+			"id": "6c79d9a8-fe28-4ed6-80f4-d879ea21173f",
+			"type": "entries",
+			"name": "Healing Hands",
+			"entries": [
+				"As an action, you can touch a creature and restore a number of d4s equal to your proficiency bonus. The creature regains a number of hit points equal to the total rolled. Once you use this trait, you can't use it again until you finish a long rest."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>As an action, you can touch a creature and restore a number of d4s equal to your proficiency bonus. The creature regains a number of hit points equal to the total rolled. Once you use this trait, you can't use it again until you finish a long rest.</p></div>",
+			"uses": {
+				"current": 1,
+				"max": 1,
+				"recharge": "long"
+			}
+		},
+		{
+			"id": "5033d1f9-aebd-415a-8d75-0dd8bf3ef717",
+			"type": "entries",
+			"name": "Divine Spark",
+			"entries": [
+				"Choose one Cleric cantrip. The cantrip should reflect the nature of the deity or divine power from which your bloodline descends. Wisdom, Intelligence, or Charisma (chosen when you gain this trait) is your spellcasting ability for it."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Choose one Cleric cantrip. The cantrip should reflect the nature of the deity or divine power from which your bloodline descends. Wisdom, Intelligence, or Charisma (chosen when you gain this trait) is your spellcasting ability for it.</p></div>"
+		},
+		{
+			"id": "c4be96e0-eb6d-4d46-95c5-6ee3a44b6018",
+			"type": "entries",
+			"name": "Languages",
+			"entries": [
+				"You can speak, read, and write Common (General and one dialect) and Celestial."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You can speak, read, and write Common (General and one dialect) and Celestial.</p></div>"
+		},
+		{
+			"id": "d9aaad84-8dc5-4a94-bb4d-809bb0e4207c",
+			"type": "entries",
+			"name": "Divine Manifestation",
+			"entries": [
+				"The divine essence within every Hochling manifests differently. The manifestation reflects the deity, divine domain, or divine power from which your lineage descends.",
+				"You gain one Channel Divinity option from an approved Cleric Domain. You can use that Channel Divinity once, and regain the ability to do so when you finish a short or long rest.",
+				{
+					"type": "list",
+					"items": [
+						"If the Channel Divinity refers to your Cleric level, use your character level instead.",
+						"If the Channel Divinity requires a saving throw, the DC equals: {@b 8 + your proficiency bonus + your choice of Wisdom, Intelligence, or Charisma} (chosen when you gain this trait)."
+					]
+				},
+				"Examples of suitable manifestations include those associated with the Trickery, Light, Grave, War, Peace, Order, Knowledge, Nature, Forge, Death, Beauty, Blood, Time, Madness, Lust, and Darkness domains.",
+				"Alternatively, you may choose the traditional Aasimar transformation feature instead of a Channel Divinity."
+			],
+			"source": "TGTT",
+			"featureType": "Species",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>The divine essence within every Hochling manifests differently. The manifestation reflects the deity, divine domain, or divine power from which your lineage descends.</p><p>You gain one Channel Divinity option from an approved Cleric Domain. You can use that Channel Divinity once, and regain the ability to do so when you finish a short or long rest.</p><ul class=\"ve-rd__list\" ><li class=\"ve-rd__li \">If the Channel Divinity refers to your Cleric level, use your character level instead.</li><li class=\"ve-rd__li \">If the Channel Divinity requires a saving throw, the DC equals: <b>8 + your proficiency bonus + your choice of Wisdom, Intelligence, or Charisma</b> (chosen when you gain this trait).</li></ul><p>Examples of suitable manifestations include those associated with the Trickery, Light, Grave, War, Peace, Order, Knowledge, Nature, Forge, Death, Beauty, Blood, Time, Madness, Lust, and Darkness domains.</p><p>Alternatively, you may choose the traditional Aasimar transformation feature instead of a Channel Divinity.</p></div>"
+		},
+		{
+			"id": "e4fa45e5-ffcd-4750-8847-13f9a21e94de",
+			"name": "Guided Strike",
+			"source": "TGTT",
+			"featureType": "Species",
+			"level": 1,
+			"_raceManifestation": "war",
+			"consumes": {
+				"name": "Divine Manifestation",
+				"amount": 1
+			},
+			"description": "You can use your Channel Divinity to strike with supernatural accuracy. When you make an attack roll, you can use your Channel Divinity to gain a +10 bonus to the roll. You make this choice after you see the roll, but before the DM says whether the attack hits or misses.",
+			"entries": [
+				"Starting at 2nd level, you can use your Channel Divinity to strike with supernatural accuracy. When you make an attack roll, you can use your Channel Divinity to gain a +10 bonus to the roll. You make this choice after you see the roll, but before the DM says whether the attack hits or misses."
+			]
+		},
+		{
+			"id": "e58235e4-8a9c-40ad-a733-6e45fef41ee1",
+			"name": "Fighting Style",
+			"source": "XPHB",
+			"level": 1,
+			"className": "Fighter",
+			"classSource": "XPHB",
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You have honed your martial prowess and gain a <a href=\"feats.html#blankhash,flstcategory:fs=1\"   >Fighting Style feat</a> of your choice. <a href=\"feats.html#defense_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"feats.html\" data-vet-source=\"XPHB\" data-vet-hash=\"defense_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Defense</a> is recommended.</p><p>Whenever you gain a Fighter level, you can replace the feat you chose with a different <a href=\"feats.html#blankhash,flstcategory:fs=1\"   >Fighting Style feat</a>.</p></div>",
+			"entries": [
+				"You have honed your martial prowess and gain a {@filter Fighting Style feat|feats|category=FS} of your choice. {@feat Defense|XPHB} is recommended.",
+				"Whenever you gain a Fighter level, you can replace the feat you chose with a different {@filter Fighting Style feat|feats|category=FS}."
+			]
+		},
+		{
+			"id": "7a46c221-c35b-40ca-9fe7-c505e3789a4c",
+			"name": "Second Wind",
+			"source": "XPHB",
+			"level": 1,
+			"className": "Fighter",
+			"classSource": "XPHB",
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You have a limited well of physical and mental stamina that you can draw on. As a <a href=\"variantrules.html#bonus%20action_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"bonus%20action_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Bonus Action</a>, you can use it to regain <a href=\"variantrules.html#hit%20points_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"hit%20points_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Hit Points</a> equal to <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT/CTRL to roll twice.\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;1d10&quot;,&quot;displayText&quot;:&quot;1d10&quot;}' >1d10</span> plus your Fighter level.</p><p>You can use this feature twice. You regain one expended use when you finish a <a href=\"variantrules.html#short%20rest_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"short%20rest_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Short Rest</a>, and you regain all expended uses when you finish a <a href=\"variantrules.html#long%20rest_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"long%20rest_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Long Rest</a>.</p><p>When you reach certain Fighter levels, you gain more uses of this feature, as shown in the Second Wind column of the Fighter Features table.</p></div>",
+			"uses": {
+				"current": 3,
+				"max": 3,
+				"recharge": "short"
+			},
+			"entries": [
+				"You have a limited well of physical and mental stamina that you can draw on. As a {@variantrule Bonus Action|XPHB}, you can use it to regain {@variantrule Hit Points|XPHB} equal to {@dice 1d10} plus your Fighter level.",
+				"You can use this feature twice. You regain one expended use when you finish a {@variantrule Short Rest|XPHB}, and you regain all expended uses when you finish a {@variantrule Long Rest|XPHB}.",
+				"When you reach certain Fighter levels, you gain more uses of this feature, as shown in the Second Wind column of the Fighter Features table."
+			]
+		},
+		{
+			"id": "7f3e80cd-b952-4425-849b-5aad3142ddf6",
+			"name": "Weapon Mastery",
+			"source": "XPHB",
+			"level": 1,
+			"className": "Fighter",
+			"classSource": "XPHB",
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Your training with weapons allows you to use the <a href=\"variantrules.html#weapon%20mastery%20properties_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"weapon%20mastery%20properties_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >mastery properties</a> of three kinds of <a href=\"items.html#blankhash,flsttype:simple%20weapon=1\"   >Simple</a> or <a href=\"items.html#blankhash,flsttype:martial%20weapon=1\"   >Martial</a> weapons of your choice. Whenever you finish a <a href=\"variantrules.html#long%20rest_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"long%20rest_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Long Rest</a>, you can practice weapon drills and change one of those weapon choices.</p><p>When you reach certain Fighter levels, you gain the ability to use the <a href=\"variantrules.html#weapon%20mastery%20properties_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"weapon%20mastery%20properties_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >mastery properties</a> of more kinds of weapons, as shown in the Weapon Mastery column of the Fighter Features table.</p></div>",
+			"entries": [
+				"Your training with weapons allows you to use the {@variantrule weapon mastery properties|XPHB|mastery properties} of three kinds of {@filter Simple|items|type=simple weapon} or {@filter Martial|items|type=martial weapon} weapons of your choice. Whenever you finish a {@variantrule Long Rest|XPHB}, you can practice weapon drills and change one of those weapon choices.",
+				"When you reach certain Fighter levels, you gain the ability to use the {@variantrule weapon mastery properties|XPHB|mastery properties} of more kinds of weapons, as shown in the Weapon Mastery column of the Fighter Features table."
+			]
+		},
+		{
+			"id": "cac9ea1d-1bf2-4247-9fae-3bdfb24bac1c",
+			"name": "Combat Methods",
+			"source": "TGTT",
+			"level": 1,
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Your 1st-level training unlocks tactical methods—disciplined techniques fueled by stamina.</p><ul class=\"ve-rd__list\" ><li class=\"ve-rd__li \"><b>Choose Traditions.</b> Gain proficiency in two <a href=\"combatmethods.html#blankhash\"   >combat traditions</a> of your choice and learn three methods drawn from traditions you’re proficient with.</li><li class=\"ve-rd__li \"><b>Set the DC.</b> If a method calls for a saving throw, use your Method DC (see below) when determining the target’s difficulty.</li><li class=\"ve-rd__li \"><b>Spend Stamina.</b> When you activate a method, you spend points from your stamina pool (see below). Unless noted otherwise, you can use each method once per turn.</li><li class=\"ve-rd__li \"><b>Learn More.</b> The Methods Known column of the Combat Methods table shows when you gain additional methods, and Method Degree lists the highest degree you can select.</li><li class=\"ve-rd__li \"><b>Refresh and Replace.</b> Whenever you gain a level that grants a new method, you may also replace one method you know with another from a tradition you’re proficient with.</li></ul><div class=\"ve-rd__b-special ve-rd__b-inset\"  data-roll-name-ancestor=\"Stamina Pool\"><h4 class=\"ve-rd__h ve-rd__h--2-inset\" data-title-index=\"34\" > <span class=\"entry-title-inner \">Stamina Pool</span><span class=\"ve-flex-vh-center\"><span class=\"ve-rd__h-toggle ve-ml-2 ve-clickable ve-no-select no-print ve-lst-is-exporting-image__hidden\" data-rd-h-special-toggle-button=\"true\" title=\"Toggle Visibility (CTRL to Toggle All)\">[–]</span></span></h4> <p>Your stamina pool equals twice your proficiency bonus. You regain all spent stamina when you finish a short or long rest.</p><p>See the <a href=\"variantrules.html#stamina_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"TGTT\" data-vet-hash=\"stamina_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Stamina</a> rule for more information.</p></div><div class=\"ve-rd__b-special ve-rd__b-inset\"  data-roll-name-ancestor=\"Method DC\"><h4 class=\"ve-rd__h ve-rd__h--2-inset\" data-title-index=\"35\" > <span class=\"entry-title-inner \">Method DC</span><span class=\"ve-flex-vh-center\"><span class=\"ve-rd__h-toggle ve-ml-2 ve-clickable ve-no-select no-print ve-lst-is-exporting-image__hidden\" data-rd-h-special-toggle-button=\"true\" title=\"Toggle Visibility (CTRL to Toggle All)\">[–]</span></span></h4> <p>Your Method DC equals 8 + your proficiency bonus + your Strength or Dexterity modifier (your choice).</p><p>For complete details and edge cases, consult the <a href=\"variantrules.html#method%20dc_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"TGTT\" data-vet-hash=\"method%20dc_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Method DC</a> rule.</p></div><div class=\"ve-rd__b-special ve-rd__b-inset\"  data-roll-name-ancestor=\"Combat Tradition Rules\"><h4 class=\"ve-rd__h ve-rd__h--2-inset\" data-title-index=\"36\" > <span class=\"entry-title-inner \">Combat Tradition Rules</span><span class=\"ve-flex-vh-center\"><span class=\"ve-rd__h-toggle ve-ml-2 ve-clickable ve-no-select no-print ve-lst-is-exporting-image__hidden\" data-rd-h-special-toggle-button=\"true\" title=\"Toggle Visibility (CTRL to Toggle All)\">[–]</span></span></h4> <p>Combat traditions define which methods you can learn. Review <a href=\"variantrules.html#combat%20traditions_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"TGTT\" data-vet-hash=\"combat%20traditions_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Combat Traditions</a> for  tradition summaries and more information</p></div><div  data-roll-name-ancestor=\"Getting Started\" class=\"ve-rd__b  ve-rd__b--2\"><h3 class=\"ve-rd__h ve-rd__h--2\" data-title-index=\"37\" > <span class=\"entry-title-inner \">Getting Started</span><span class=\"ve-flex-vh-center\"><span class=\"ve-rd__h-toggle ve-ml-2 ve-clickable ve-no-select no-print ve-lst-is-exporting-image__hidden\" data-rd-h-toggle-button=\"true\" title=\"Toggle Visibility (CTRL to Toggle All)\">[–]</span></span></h3> <p><b>Default Traditions.</b> For straightforward play, start with <a href=\"combatmethods.html#blankhash,flsttradition:tempered%20iron=1\"   >Tempered Iron</a> (reliable weapon techniques and defense) and <a href=\"combatmethods.html#blankhash,flsttradition:adamant%20mountain=1\"   >Adamant Mountain</a> (heavy strikes and resilience).</p><p><b>Suggested Methods.</b> From Tempered Iron, consider <a href=\"combatmethods.html#zealous%20stance_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"combatmethods.html\" data-vet-source=\"TGTT\" data-vet-hash=\"zealous%20stance_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Zealous Stance</a> and <a href=\"combatmethods.html#purge%20magic_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"combatmethods.html\" data-vet-source=\"TGTT\" data-vet-hash=\"purge%20magic_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Purge Magic</a>. From Adamant Mountain, <a href=\"combatmethods.html#heavy%20stance_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"combatmethods.html\" data-vet-source=\"TGTT\" data-vet-hash=\"heavy%20stance_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Heavy Stance</a> and <a href=\"combatmethods.html#catch%20your%20breath_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"combatmethods.html\" data-vet-source=\"TGTT\" data-vet-hash=\"catch%20your%20breath_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Catch Your Breath</a> provide immediate battlefield versatility.</p></div></div>",
+			"entries": [
+				"Your 1st-level training unlocks tactical methods—disciplined techniques fueled by stamina.",
+				{
+					"type": "list",
+					"items": [
+						"{@b Choose Traditions.} Gain proficiency in two {@filter combat traditions|combatmethods} of your choice and learn three methods drawn from traditions you’re proficient with.",
+						"{@b Set the DC.} If a method calls for a saving throw, use your Method DC (see below) when determining the target’s difficulty.",
+						"{@b Spend Stamina.} When you activate a method, you spend points from your stamina pool (see below). Unless noted otherwise, you can use each method once per turn.",
+						"{@b Learn More.} The Methods Known column of the Combat Methods table shows when you gain additional methods, and Method Degree lists the highest degree you can select.",
+						"{@b Refresh and Replace.} Whenever you gain a level that grants a new method, you may also replace one method you know with another from a tradition you’re proficient with."
+					]
+				},
+				{
+					"type": "inset",
+					"name": "Stamina Pool",
+					"entries": [
+						"Your stamina pool equals twice your proficiency bonus. You regain all spent stamina when you finish a short or long rest.",
+						"See the {@variantrule Stamina|TGTT} rule for more information."
+					]
+				},
+				{
+					"type": "inset",
+					"name": "Method DC",
+					"entries": [
+						"Your Method DC equals 8 + your proficiency bonus + your Strength or Dexterity modifier (your choice).",
+						"For complete details and edge cases, consult the {@variantrule Method DC|TGTT} rule."
+					]
+				},
+				{
+					"type": "inset",
+					"name": "Combat Tradition Rules",
+					"entries": [
+						"Combat traditions define which methods you can learn. Review {@variantrule Combat Traditions|TGTT} for  tradition summaries and more information"
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Getting Started",
+					"entries": [
+						"{@b Default Traditions.} For straightforward play, start with {@filter Tempered Iron|combatmethods|tradition=Tempered Iron} (reliable weapon techniques and defense) and {@filter Adamant Mountain|combatmethods|tradition=Adamant Mountain} (heavy strikes and resilience).",
+						"{@b Suggested Methods.} From Tempered Iron, consider {@combatmethod Zealous Stance|TGTT} and {@combatmethod Purge Magic|TGTT}. From Adamant Mountain, {@combatmethod Heavy Stance|TGTT} and {@combatmethod Catch Your Breath|TGTT} provide immediate battlefield versatility."
+					]
+				}
+			]
+		},
+		{
+			"id": "2841d514-b031-4802-95c2-8f289b25ea4b",
+			"name": "Specialties",
+			"source": "TGTT",
+			"level": 1,
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You gain a specialty of your choice at 1st level. You gain another specialty at 5th, 9th, 13th, and 17th level.</p><div  class=\"ve-rd__b  ve-rd__b--2\"></div></div>",
+			"entries": [
+				"You gain a specialty of your choice at 1st level. You gain another specialty at 5th, 9th, 13th, and 17th level.",
+				{
+					"type": "options",
+					"count": 1,
+					"entries": [
+						{
+							"type": "refClassFeature",
+							"classFeature": "Amphibious Combatant|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Battle Hardened|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Combat Medic|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Stamina Enthusiast|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Fight Club|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Shield Specialist|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Stronghold Builder|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Sweeping Attacker|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Burst of Strength|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Campaigner|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Clearsight Sentinel|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Extreme Leap|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Mountaineer|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Nightwatch|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Stable Footing|Fighter|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
+							"classFeature": "Weather Beaten|Fighter|TGTT|1"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "dab739d7-dc10-4392-a498-1b6eb68ad407",
+			"name": "Catch Your Breath",
+			"source": "TGTT",
+			"page": 0,
+			"tradition": "Adamant Mountain",
+			"degree": 1,
+			"staminaCost": 2,
+			"actionType": "bonus action",
+			"entries": [
+				"{@b Bonus Action (2 Stamina Points)}. You have a limited well of stamina that you can draw on to protect yourself from harm. You regain hit points equal to {@dice 1d6} + your proficiency bonus + your Constitution modifier (minimum 0)."
+			],
+			"__prop": "combatMethod",
+			"_entityType": "combatMethod",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 1,
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Bonus Action (2 Stamina Points)</b>. You have a limited well of stamina that you can draw on to protect yourself from harm. You regain hit points equal to <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT/CTRL to roll twice.\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;1d6&quot;,&quot;displayText&quot;:&quot;1d6&quot;}' >1d6</span> + your proficiency bonus + your Constitution modifier (minimum 0).</p></div>",
+			"optionalFeatureTypes": [
+				"CTM:1",
+				"CTM:2",
+				"CTM:3",
+				"CTM:4",
+				"CTM:5"
+			]
+		},
+		{
+			"id": "032c753d-6ec6-42b9-8535-5b854343f3bc",
+			"name": "Legion Stance",
+			"source": "TGTT",
+			"page": 0,
+			"tradition": "Sanguine Knot",
+			"degree": 1,
+			"staminaCost": 1,
+			"actionType": "bonus action",
+			"entries": [
+				"{@b Bonus Action (1 Stamina Point)}. You strike your foes in such a way as to leave an opening for your allies to follow-up. When you score a critical hit against a creature, an ally within reach of the same creature can use their reaction to make an opportunity attack against it.",
+				"This stance lasts until you are {@condition incapacitated|tgtt} or use a bonus action to end it."
+			],
+			"isStance": true,
+			"__prop": "combatMethod",
+			"_entityType": "combatMethod",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 1,
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Bonus Action (1 Stamina Point)</b>. You strike your foes in such a way as to leave an opening for your allies to follow-up. When you score a critical hit against a creature, an ally within reach of the same creature can use their reaction to make an opportunity attack against it.</p><p>This stance lasts until you are <a href=\"conditionsdiseases.html#incapacitated_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"conditionsdiseases.html\" data-vet-source=\"TGTT\" data-vet-hash=\"incapacitated_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >incapacitated</a> or use a bonus action to end it.</p></div>",
+			"optionalFeatureTypes": [
+				"CTM:1",
+				"CTM:2",
+				"CTM:3",
+				"CTM:4",
+				"CTM:5"
+			]
+		},
+		{
+			"id": "4a5121e6-cf1f-4f5f-ac9d-e8869d7d6361",
+			"name": "Battle Hardened",
+			"source": "TGTT",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 1,
+			"entries": [
+				"When you are reduced to 0 hit points but not killed outright, you can make a {@dc 10} Constitution Saving Throw. On a success, you are reduced to 1 hit point instead. You can't use this feature again until you finish a long rest."
+			],
+			"__prop": "classFeature",
+			"type": "classFeature",
+			"ref": "Battle Hardened|Fighter|TGTT|1",
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>When you are reduced to 0 hit points but not killed outright, you can make a DC <span class=\"ve-rd__dc\">10</span> Constitution Saving Throw. On a success, you are reduced to 1 hit point instead. You can't use this feature again until you finish a long rest.</p></div>",
+			"isFeatureOption": true,
+			"parentFeature": "Specialties"
+		},
+		{
+			"id": "e1148b6b-9879-4104-95ef-f8a8b1819c52",
+			"name": "High Ground",
+			"source": "TGTT",
+			"featureType": "Optional Feature",
+			"entries": [
+				"Knowing your way around combat lets you better take advantage of high ground.",
+				"When standing 5 feet or more above an enemy, you gain a +2 bonus to hit with ranged attacks against said enemy."
+			],
+			"__prop": "optionalfeature",
+			"_alreadyKnown": false,
+			"_timesKnown": 0,
+			"_meetsPrereqs": true,
+			"_prereqReasons": [],
+			"_selectable": true,
+			"_repeatable": false,
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 2,
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Knowing your way around combat lets you better take advantage of high ground.</p><p>When standing 5 feet or more above an enemy, you gain a +2 bonus to hit with ranged attacks against said enemy.</p></div>",
+			"optionalFeatureTypes": [
+				"BT"
+			]
+		},
+		{
+			"id": "e5364d33-423d-4a38-8c64-94ceefedd268",
+			"name": "Flanking",
+			"source": "TGTT",
+			"featureType": "Optional Feature",
+			"entries": [
+				"Your expertise in combat lets you turn every small advantage you gain into a decisive blow.",
+				"When attacking a flanked enemy (not necessarily flanked by you), you can use an opportunity attack against the flanked enemy at the start of their turn.",
+				"{@note This ability relies on the table both using the Flanking optional rule, and having it give a +2 bonus instead of advantage. If either of these assumptions is false, this ability allows the user to benefit from a +2 to hit when flanking in melee.}"
+			],
+			"__prop": "optionalfeature",
+			"_alreadyKnown": false,
+			"_timesKnown": 0,
+			"_meetsPrereqs": true,
+			"_prereqReasons": [],
+			"_selectable": true,
+			"_repeatable": false,
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 2,
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Your expertise in combat lets you turn every small advantage you gain into a decisive blow.</p><p>When attacking a flanked enemy (not necessarily flanked by you), you can use an opportunity attack against the flanked enemy at the start of their turn.</p><p><i class=\"ve-muted\">This ability relies on the table both using the Flanking optional rule, and having it give a +2 bonus instead of advantage. If either of these assumptions is false, this ability allows the user to benefit from a +2 to hit when flanking in melee.</i></p></div>",
+			"optionalFeatureTypes": [
+				"BT"
+			]
+		},
+		{
+			"id": "fabc887b-85b5-41ca-bc07-54b575d57db7",
+			"name": "Practiced Roll",
+			"source": "TGTT",
+			"page": 0,
+			"tradition": "Razor's Edge",
+			"degree": 2,
+			"staminaCost": 1,
+			"actionType": "bonus action",
+			"entries": [
+				"{@b Bonus Action (1 Stamina Point)}. With a series of low steps and somersaults you expertly method around opponents. Move 20 feet. This movement doesn’t provoke opportunity attacks from creatures you can see."
+			],
+			"__prop": "combatMethod",
+			"_entityType": "combatMethod",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 2,
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Bonus Action (1 Stamina Point)</b>. With a series of low steps and somersaults you expertly method around opponents. Move 20 feet. This movement doesn’t provoke opportunity attacks from creatures you can see.</p></div>",
+			"optionalFeatureTypes": [
+				"CTM:1",
+				"CTM:2",
+				"CTM:3",
+				"CTM:4",
+				"CTM:5"
+			]
+		},
+		{
+			"id": "aa7f19f6-a9a9-4e40-90f9-0cdcc75cc897",
+			"name": "Action Surge",
+			"className": "Fighter",
+			"classSource": "XPHB",
+			"source": "XPHB",
+			"level": 2,
+			"gainSubclassFeature": false,
+			"entries": [
+				"You can push yourself beyond your normal limits for a moment. On your turn, you can take one additional action, except the {@action Magic|XPHB} action.",
+				"Once you use this feature, you can't do so again until you finish a {@variantrule Short Rest|XPHB|Short} or {@variantrule Long Rest|XPHB}. Starting at level 17, you can use it twice before a rest but only once on a turn."
+			],
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You can push yourself beyond your normal limits for a moment. On your turn, you can take one additional action, except the <a href=\"actions.html#magic_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"actions.html\" data-vet-source=\"XPHB\" data-vet-hash=\"magic_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Magic</a> action.</p><p>Once you use this feature, you can't do so again until you finish a <a href=\"variantrules.html#short%20rest_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"short%20rest_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Short</a> or <a href=\"variantrules.html#long%20rest_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"long%20rest_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Long Rest</a>. Starting at level 17, you can use it twice before a rest but only once on a turn.</p></div>",
+			"uses": {
+				"current": 1,
+				"max": 1,
+				"recharge": "short"
+			}
+		},
+		{
+			"id": "edf04e74-e62c-48d8-954a-aa0e5cc8239a",
+			"name": "Tactical Mind",
+			"className": "Fighter",
+			"classSource": "XPHB",
+			"source": "XPHB",
+			"level": 2,
+			"gainSubclassFeature": false,
+			"entries": [
+				"You have a mind for tactics on and off the battlefield. When you fail an ability check, you can expend a use of your Second Wind to push yourself toward success. Rather than regaining {@variantrule Hit Points|XPHB}, you roll {@dice 1d10} and add the number rolled to the ability check, potentially turning it into a success. If the check still fails, this use of Second Wind isn't expended."
+			],
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You have a mind for tactics on and off the battlefield. When you fail an ability check, you can expend a use of your Second Wind to push yourself toward success. Rather than regaining <a href=\"variantrules.html#hit%20points_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"hit%20points_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Hit Points</a>, you roll <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT/CTRL to roll twice.\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;1d10&quot;,&quot;displayText&quot;:&quot;1d10&quot;}' >1d10</span> and add the number rolled to the ability check, potentially turning it into a success. If the check still fails, this use of Second Wind isn't expended.</p></div>"
+		},
+		{
+			"id": "1ebf0fbb-2610-4970-812e-2402cd5876ff",
+			"name": "Battle Tactics",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"source": "TGTT",
+			"level": 2,
+			"gainSubclassFeature": false,
+			"entries": [
+				"You learn how to better use tactics during combat.",
+				"You learn two {@filter Battle Tactics|optionalfeatures|feature type=BT} of your choice. Many tactical moves enable you to gain benefits from certain actions or positions, or perform actions that carry additional effects.",
+				"You learn one additional tactical move of your choice at 7th, 10th, and 15th level. Each time you learn a new tactical move, you can also replace one move you know with a different one."
+			],
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You learn how to better use tactics during combat.</p><p>You learn two <a href=\"optionalfeatures.html#blankhash,flstfeature%20type:bt=1\"   >Battle Tactics</a> of your choice. Many tactical moves enable you to gain benefits from certain actions or positions, or perform actions that carry additional effects.</p><p>You learn one additional tactical move of your choice at 7th, 10th, and 15th level. Each time you learn a new tactical move, you can also replace one move you know with a different one.</p></div>"
+		},
+		{
+			"id": "9ffa0dae-5813-4547-81cf-e51b29fcc2c9",
+			"name": "Battle Tactics Options",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"source": "TGTT",
+			"level": 2,
+			"gainSubclassFeature": false,
+			"entries": [
+				"The following is a list of tactical moves you can choose from. You can learn two of these moves at 2nd level, and one additional move at 7th, 10th, and 15th level.",
+				{
+					"type": "options",
+					"count": 2,
+					"entries": [
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Dying Surge|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Sheathing the Sword|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Daring Feint|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Last Ditch Evasion|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Goading Movement|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Covering Attack|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Back to the Wall|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Hammer and Anvil|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Eye of the Storm|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Flanking|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Charging|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Sweeping Blows|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "High Ground|TGTT",
+							"preserve": {
+								"prerequisite": true
+							}
+						}
+					]
+				}
+			],
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>The following is a list of tactical moves you can choose from. You can learn two of these moves at 2nd level, and one additional move at 7th, 10th, and 15th level.</p></div>"
+		},
+		{
+			"id": "febb1c51-2a6e-43b9-8a5a-a3898bf9bb8e",
+			"name": "Grasping Arrow",
+			"source": "XGE",
+			"page": 29,
+			"featureType": "Optional Feature",
+			"consumes": {
+				"name": "Arcane Shot"
+			},
+			"entries": [
+				"When this arrow strikes its target, conjuration magic creates grasping, poisonous brambles, which wrap around the target. The creature hit by the arrow takes an extra {@damage 2d6} poison damage, its speed is reduced by 10 feet, and it takes {@damage 2d6} slashing damage the first time on each turn it moves 1 foot or more without teleporting. The target or any creature that can reach it can use its action to remove the brambles with a successful Strength ({@skill Athletics}) check against your Arcane Shot save DC. Otherwise, the brambles last for 1 minute or until you use this option again.",
+				"The poison damage and slashing damage both increase to {@damage 4d6} when you reach 18th level in this class."
+			],
+			"__prop": "optionalfeature",
+			"_alreadyKnown": false,
+			"_timesKnown": 0,
+			"_meetsPrereqs": true,
+			"_prereqReasons": [],
+			"_selectable": true,
+			"_repeatable": false,
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 3,
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>When this arrow strikes its target, conjuration magic creates grasping, poisonous brambles, which wrap around the target. The creature hit by the arrow takes an extra <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT to roll a critical hit, CTRL to half damage (rounding down).\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;2d6&quot;,&quot;displayText&quot;:&quot;2d6&quot;,&quot;subType&quot;:&quot;damage&quot;}' >2d6</span> poison damage, its speed is reduced by 10 feet, and it takes <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT to roll a critical hit, CTRL to half damage (rounding down).\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;2d6&quot;,&quot;displayText&quot;:&quot;2d6&quot;,&quot;subType&quot;:&quot;damage&quot;}' >2d6</span> slashing damage the first time on each turn it moves 1 foot or more without teleporting. The target or any creature that can reach it can use its action to remove the brambles with a successful Strength (<span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"skill\" data-vet-source=\"PHB\" data-vet-hash=\"athletics_phb\" data-vet-is-faux-page=\"true\" data-vet-is-allow-redirect=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Athletics</span>) check against your Arcane Shot save DC. Otherwise, the brambles last for 1 minute or until you use this option again.</p><p>The poison damage and slashing damage both increase to <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT to roll a critical hit, CTRL to half damage (rounding down).\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;4d6&quot;,&quot;displayText&quot;:&quot;4d6&quot;,&quot;subType&quot;:&quot;damage&quot;}' >4d6</span> when you reach 18th level in this class.</p></div>",
+			"optionalFeatureTypes": [
+				"AS"
+			]
+		},
+		{
+			"id": "900065ef-31f8-4068-bf1e-35f75fdac10a",
+			"name": "Seeking Arrow",
+			"source": "XGE",
+			"page": 30,
+			"featureType": "Optional Feature",
+			"consumes": {
+				"name": "Arcane Shot"
+			},
+			"entries": [
+				"Using divination magic, you grant your arrow the ability to seek out a target. When you use this option, you don't make an attack roll for the attack. Instead, choose one creature you have seen in the past minute. The arrow flies toward that creature, moving around corners if necessary and ignoring {@quickref Cover||3||three-quarters cover} and {@quickref Cover||3||half cover}. If the target is within the weapon's range and there is a path large enough for the arrow to travel to the target, the target must make a Dexterity saving throw. Otherwise, the arrow disappears after traveling as far as it can. On a failed save, the target takes damage as if it were hit by the arrow, plus an extra {@damage 1d6} force damage, and you learn the target's current location. On a successful save, the target takes half as much damage, and you don't learn its location.",
+				"The force damage increases to {@damage 2d6} when you reach 18th level in this class."
+			],
+			"__prop": "optionalfeature",
+			"_alreadyKnown": false,
+			"_timesKnown": 0,
+			"_meetsPrereqs": true,
+			"_prereqReasons": [],
+			"_selectable": true,
+			"_repeatable": false,
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 3,
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Using divination magic, you grant your arrow the ability to seek out a target. When you use this option, you don't make an attack roll for the attack. Instead, choose one creature you have seen in the past minute. The arrow flies toward that creature, moving around corners if necessary and ignoring <a href=\"quickreference.html#bookref-quick,3,cover\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"quickreference.html\" data-vet-source=\"PHB\" data-vet-hash=\"bookref-quick,3,cover\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >three-quarters cover</a> and <a href=\"quickreference.html#bookref-quick,3,cover\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"quickreference.html\" data-vet-source=\"PHB\" data-vet-hash=\"bookref-quick,3,cover\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >half cover</a>. If the target is within the weapon's range and there is a path large enough for the arrow to travel to the target, the target must make a Dexterity saving throw. Otherwise, the arrow disappears after traveling as far as it can. On a failed save, the target takes damage as if it were hit by the arrow, plus an extra <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT to roll a critical hit, CTRL to half damage (rounding down).\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;1d6&quot;,&quot;displayText&quot;:&quot;1d6&quot;,&quot;subType&quot;:&quot;damage&quot;}' >1d6</span> force damage, and you learn the target's current location. On a successful save, the target takes half as much damage, and you don't learn its location.</p><p>The force damage increases to <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT to roll a critical hit, CTRL to half damage (rounding down).\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;2d6&quot;,&quot;displayText&quot;:&quot;2d6&quot;,&quot;subType&quot;:&quot;damage&quot;}' >2d6</span> when you reach 18th level in this class.</p></div>",
+			"optionalFeatureTypes": [
+				"AS"
+			]
+		},
+		{
+			"id": "dfc8ccc7-f4f2-49ce-af5f-414f029dc791",
+			"name": "Arcane Archer",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"subclassName": "Arcane Archer",
+			"subclassShortName": "Arcane Archer",
+			"subclassSource": "TGTT",
+			"source": "TGTT",
+			"level": 3,
+			"entries": [
+				"An Arcane Archer studies a unique method of archery that weaves magic into attacks to produce supernatural effects. Arcane Archers are some of the most elite archers in existence. They stand watch over the fringes of mortal domains, keeping a keen eye out for trespassers and using magic-infused arrows to defeat monsters and invaders before they can reach settlements.",
+				{
+					"type": "refSubclassFeature",
+					"subclassFeature": "Arcane Archer Lore|Fighter|TGTT|Arcane Archer|TGTT|3"
+				},
+				{
+					"type": "refSubclassFeature",
+					"subclassFeature": "Arcane Shot|Fighter|TGTT|Arcane Archer|TGTT|3"
+				},
+				{
+					"type": "refSubclassFeature",
+					"subclassFeature": "Arcane Shot Options|Fighter|TGTT|Arcane Archer|TGTT|3"
+				}
+			],
+			"isSubclassFeature": true,
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>An Arcane Archer studies a unique method of archery that weaves magic into attacks to produce supernatural effects. Arcane Archers are some of the most elite archers in existence. They stand watch over the fringes of mortal domains, keeping a keen eye out for trespassers and using magic-infused arrows to defeat monsters and invaders before they can reach settlements.</p></div>"
+		},
+		{
+			"id": "babb84d5-0f84-49e4-b78f-8dbaf8bf7e9d",
+			"name": "Combat Methods (Arcane Archer)",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"subclassName": "Arcane Archer",
+			"subclassShortName": "Arcane Archer",
+			"subclassSource": "TGTT",
+			"source": "TGTT",
+			"level": 3,
+			"entries": [
+				"At 3rd level, you gain proficiency in two of the following combat traditions: {@filter Biting Zephyr|combatmethods|tradition=Biting Zephyr}, {@filter Razor’s Edge|combatmethods|tradition=Razor's Edge}, {@filter Unending Wheel|combatmethods|tradition=Unending Wheel}, {@filter Unerring Hawk|combatmethods|tradition=Unerring Hawk}. You learn one additional method from these traditions."
+			],
+			"isSubclassFeature": true,
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>At 3rd level, you gain proficiency in two of the following combat traditions: <a href=\"combatmethods.html#blankhash,flsttradition:biting%20zephyr=1\"   >Biting Zephyr</a>, <a href=\"combatmethods.html#blankhash,flsttradition:razor&apos;s%20edge=1\"   >Razor’s Edge</a>, <a href=\"combatmethods.html#blankhash,flsttradition:unending%20wheel=1\"   >Unending Wheel</a>, <a href=\"combatmethods.html#blankhash,flsttradition:unerring%20hawk=1\"   >Unerring Hawk</a>. You learn one additional method from these traditions.</p></div>"
+		},
+		{
+			"id": "e7fbe9ca-1d81-4172-a689-52083e02b36a",
+			"name": "Arcane Archer Lore",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"subclassName": "Arcane Archer",
+			"subclassShortName": "Arcane Archer",
+			"subclassSource": "TGTT",
+			"source": "TGTT",
+			"level": 3,
+			"entries": [
+				"At 3rd level, you learn magical theory or some of the secrets of nature—typical for practitioners of this elven martial tradition. You choose to gain proficiency in either the {@skill Arcana}, {@skill Religion} or the {@skill Nature} skill, and you choose to learn either the {@spell prestidigitation} or the {@spell druidcraft} cantrip."
+			],
+			"isSubclassFeature": true,
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>At 3rd level, you learn magical theory or some of the secrets of nature—typical for practitioners of this elven martial tradition. You choose to gain proficiency in either the <span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"skill\" data-vet-source=\"PHB\" data-vet-hash=\"arcana_phb\" data-vet-is-faux-page=\"true\" data-vet-is-allow-redirect=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Arcana</span>, <span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"skill\" data-vet-source=\"PHB\" data-vet-hash=\"religion_phb\" data-vet-is-faux-page=\"true\" data-vet-is-allow-redirect=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Religion</span> or the <span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"skill\" data-vet-source=\"PHB\" data-vet-hash=\"nature_phb\" data-vet-is-faux-page=\"true\" data-vet-is-allow-redirect=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Nature</span> skill, and you choose to learn either the <a href=\"spells.html#prestidigitation_phb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"spells.html\" data-vet-source=\"PHB\" data-vet-hash=\"prestidigitation_phb\" data-vet-is-allow-redirect=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >prestidigitation</a> or the <a href=\"spells.html#druidcraft_phb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"spells.html\" data-vet-source=\"PHB\" data-vet-hash=\"druidcraft_phb\" data-vet-is-allow-redirect=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >druidcraft</a> cantrip.</p></div>"
+		},
+		{
+			"id": "88d24a72-01c0-4765-8a84-fe0b483160ce",
+			"name": "Arcane Shot",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"subclassName": "Arcane Archer",
+			"subclassShortName": "Arcane Archer",
+			"subclassSource": "TGTT",
+			"source": "TGTT",
+			"level": 3,
+			"entries": [
+				"At 3rd level, you learn to unleash special magical effects with some of your shots. When you gain this feature, you learn two Arcane Shot options of your choice (see \"Arcane Shot Options\" below).",
+				"Once per turn when you fire a missile from a ranged weapon as part of the {@action Attack} action, you can apply one of your Arcane Shot options to that missile. You decide to use the option when the missile hits a creature, unless the option doesn't involve an attack roll. You can use this ability a number of times equal to your Proficiency Bonus, and you regain all expended uses of it when you finish a short or long rest.",
+				"You gain an additional Arcane Shot option of your choice when you reach certain levels in this class: 7th, 10th, 15th, and 18th level. Each option also improves when you become an 18th-level fighter."
+			],
+			"isSubclassFeature": true,
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>At 3rd level, you learn to unleash special magical effects with some of your shots. When you gain this feature, you learn two Arcane Shot options of your choice (see \"Arcane Shot Options\" below).</p><p>Once per turn when you fire a missile from a ranged weapon as part of the <a href=\"actions.html#attack_phb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"actions.html\" data-vet-source=\"PHB\" data-vet-hash=\"attack_phb\" data-vet-is-allow-redirect=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Attack</a> action, you can apply one of your Arcane Shot options to that missile. You decide to use the option when the missile hits a creature, unless the option doesn't involve an attack roll. You can use this ability a number of times equal to your Proficiency Bonus, and you regain all expended uses of it when you finish a short or long rest.</p><p>You gain an additional Arcane Shot option of your choice when you reach certain levels in this class: 7th, 10th, 15th, and 18th level. Each option also improves when you become an 18th-level fighter.</p></div>",
+			"uses": {
+				"current": 4,
+				"max": 4,
+				"recharge": "short"
+			}
+		},
+		{
+			"id": "05222789-6968-4f04-bb67-225d12f633fc",
+			"name": "Arcane Shot Options",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"subclassName": "Arcane Archer",
+			"subclassShortName": "Arcane Archer",
+			"subclassSource": "TGTT",
+			"source": "TGTT",
+			"level": 3,
+			"entries": [
+				"The Arcane Shot feature lets you choose options for it at certain levels. The options are presented here in alphabetical order. They are all magical effects, and each one is associated with one of the schools of magic.",
+				"If an option requires a saving throw, your Arcane Shot save DC is calculated as follows:",
+				{
+					"type": "abilityDc",
+					"name": "Arcane Shot",
+					"attributes": [
+						"con"
+					]
+				},
+				{
+					"type": "options",
+					"count": 2,
+					"entries": [
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Banishing Arrow|XGE"
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Beguiling Arrow|XGE"
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Bursting Arrow|XGE"
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Enfeebling Arrow|XGE"
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Grasping Arrow|XGE"
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Piercing Arrow|XGE"
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Seeking Arrow|XGE"
+						},
+						{
+							"type": "refOptionalfeature",
+							"optionalfeature": "Shadow Arrow|XGE"
+						}
+					]
+				}
+			],
+			"isSubclassFeature": true,
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>The Arcane Shot feature lets you choose options for it at certain levels. The options are presented here in alphabetical order. They are all magical effects, and each one is associated with one of the schools of magic.</p><p>If an option requires a saving throw, your Arcane Shot save DC is calculated as follows:</p><div class=\"ve-rd__wrp-centered-ability\"><b>Arcane Shot save DC</b> = 8 + Constitution modifier + Proficiency Bonus</div></div>"
+		},
+		{
+			"id": "373ecfaa-57b1-4bee-a861-e5a71b064e8f",
+			"name": "Ability Score Improvement",
+			"source": "TGTT",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 4,
+			"featureType": "Class",
+			"description": "<p><strong>Ability Score Increases:</strong> Dexterity +2</p>",
+			"isAsiChoice": true,
+			"entries": [
+				"You gain the {@feat Ability Score Improvement|XPHB} feat or another {@5etools feat|feats.html} of your choice for which you qualify. You gain this feature again at Fighter levels 6, 8, 12, 14, and 16."
+			]
+		},
+		{
+			"id": "a5e711e3-c159-46bb-a355-6aa428de9c52",
+			"name": "Iron Will",
+			"source": "TGTT",
+			"page": 0,
+			"tradition": "Razor's Edge",
+			"degree": 1,
+			"staminaCost": 1,
+			"actionType": "reaction",
+			"entries": [
+				"{@b Reaction (1 Stamina Point)}. Withdrawing into your mind, you focus and concentrate to steel your nerves. When you make a saving throw to resist being {@condition charmed} or {@condition frightened|TGTT}, you can use your reaction to gain advantage on the saving throw."
+			],
+			"__prop": "combatMethod",
+			"_entityType": "combatMethod",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 4,
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Reaction (1 Stamina Point)</b>. Withdrawing into your mind, you focus and concentrate to steel your nerves. When you make a saving throw to resist being <a href=\"conditionsdiseases.html#charmed_phb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"conditionsdiseases.html\" data-vet-source=\"PHB\" data-vet-hash=\"charmed_phb\" data-vet-is-allow-redirect=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >charmed</a> or <a href=\"conditionsdiseases.html#frightened_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"conditionsdiseases.html\" data-vet-source=\"TGTT\" data-vet-hash=\"frightened_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >frightened</a>, you can use your reaction to gain advantage on the saving throw.</p></div>",
+			"optionalFeatureTypes": [
+				"CTM:1",
+				"CTM:2",
+				"CTM:3",
+				"CTM:4",
+				"CTM:5"
+			]
+		},
+		{
+			"id": "8f549f35-a255-48e8-aaa6-4b15d8dc7e6c",
+			"name": "Stamina Enthusiast",
+			"source": "TGTT",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 5,
+			"entries": [
+				"You gain an additional 2 stamina points. When you use your Second Wind feature, you can choose to regain a number of stamina points equal to your proficiency bonus instead of hit points."
+			],
+			"__prop": "classFeature",
+			"type": "classFeature",
+			"ref": "Stamina Enthusiast|Fighter|TGTT|1",
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You gain an additional 2 stamina points. When you use your Second Wind feature, you can choose to regain a number of stamina points equal to your proficiency bonus instead of hit points.</p></div>",
+			"isFeatureOption": true,
+			"parentFeature": "Specialties"
+		},
+		{
+			"id": "5f5f0b2f-9f7d-4f5e-a452-2f4a149b7745",
+			"name": "Extra Attack",
+			"className": "Fighter",
+			"classSource": "XPHB",
+			"source": "XPHB",
+			"level": 5,
+			"gainSubclassFeature": false,
+			"entries": [
+				"You can attack twice instead of once whenever you take the {@action Attack|XPHB} action on your turn."
+			],
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You can attack twice instead of once whenever you take the <a href=\"actions.html#attack_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"actions.html\" data-vet-source=\"XPHB\" data-vet-hash=\"attack_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Attack</a> action on your turn.</p></div>"
+		},
+		{
+			"id": "f1d08a83-de33-4440-8edd-a28bcbbf3ee1",
+			"name": "Tactical Shift",
+			"className": "Fighter",
+			"classSource": "XPHB",
+			"source": "XPHB",
+			"level": 5,
+			"gainSubclassFeature": false,
+			"entries": [
+				"Whenever you activate your Second Wind with a {@variantrule Bonus Action|XPHB}, you can move up to half your {@variantrule Speed|XPHB} without provoking {@action Opportunity Attack|XPHB|Opportunity Attacks}."
+			],
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Whenever you activate your Second Wind with a <a href=\"variantrules.html#bonus%20action_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"bonus%20action_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Bonus Action</a>, you can move up to half your <a href=\"variantrules.html#speed_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"speed_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Speed</a> without provoking <a href=\"actions.html#opportunity%20attack_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"actions.html\" data-vet-source=\"XPHB\" data-vet-hash=\"opportunity%20attack_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Opportunity Attacks</a>.</p></div>"
+		},
+		{
+			"id": "d04d29d2-1557-4698-97d1-008eca21483d",
+			"name": "Ability Score Improvement",
+			"source": "TGTT",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 6,
+			"featureType": "Class",
+			"description": "<p><strong>Ability Score Increases:</strong> Dexterity +2</p>",
+			"isAsiChoice": true,
+			"entries": [
+				"You gain the {@feat Ability Score Improvement|XPHB} feat or another {@5etools feat|feats.html} of your choice for which you qualify."
+			]
+		},
+		{
+			"id": "131ff60b-42e9-416d-8ce4-d984f91bf8ae",
+			"name": "Last Ditch Evasion",
+			"source": "TGTT",
+			"featureType": "Optional Feature",
+			"entries": [
+				"Thanks to a combination of skill and luck, you narrowly avoid an attack but leave yourself perilously exposed.",
+				"When you are hit by an attack, you can use a reaction to jump to the side and save yourself from taking damage. If you do, you become {@condition slowed|TGTT} until the end of your next turn."
+			],
+			"__prop": "optionalfeature",
+			"_alreadyKnown": false,
+			"_timesKnown": 0,
+			"_meetsPrereqs": true,
+			"_prereqReasons": [],
+			"_selectable": true,
+			"_repeatable": false,
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 7,
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>Thanks to a combination of skill and luck, you narrowly avoid an attack but leave yourself perilously exposed.</p><p>When you are hit by an attack, you can use a reaction to jump to the side and save yourself from taking damage. If you do, you become <a href=\"conditionsdiseases.html#slowed_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"conditionsdiseases.html\" data-vet-source=\"TGTT\" data-vet-hash=\"slowed_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >slowed</a> until the end of your next turn.</p></div>",
+			"optionalFeatureTypes": [
+				"BT"
+			]
+		},
+		{
+			"id": "652d90ba-272e-43b6-9a2d-84f5fe66e0d8",
+			"name": "Shadow Arrow",
+			"source": "XGE",
+			"page": 30,
+			"featureType": "Optional Feature",
+			"consumes": {
+				"name": "Arcane Shot"
+			},
+			"entries": [
+				"You weave illusion magic into your arrow, causing it to occlude your foe's vision with shadows. The creature hit by the arrow takes an extra {@damage 2d6} psychic damage, and it must succeed on a Wisdom saving throw or be unable to see anything farther than 5 feet away until the start of your next turn.",
+				"The psychic damage increases to {@damage 4d6} when you reach 18th level in this class."
+			],
+			"__prop": "optionalfeature",
+			"_alreadyKnown": false,
+			"_timesKnown": 0,
+			"_meetsPrereqs": true,
+			"_prereqReasons": [],
+			"_selectable": true,
+			"_repeatable": false,
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 7,
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You weave illusion magic into your arrow, causing it to occlude your foe's vision with shadows. The creature hit by the arrow takes an extra <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT to roll a critical hit, CTRL to half damage (rounding down).\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;2d6&quot;,&quot;displayText&quot;:&quot;2d6&quot;,&quot;subType&quot;:&quot;damage&quot;}' >2d6</span> psychic damage, and it must succeed on a Wisdom saving throw or be unable to see anything farther than 5 feet away until the start of your next turn.</p><p>The psychic damage increases to <span class=\"ve-roller render-roller\" title=\"Click to roll. SHIFT to roll a critical hit, CTRL to half damage (rounding down).\"  onmousedown=\"event.preventDefault()\" data-packed-dice='{&quot;type&quot;:&quot;dice&quot;,&quot;rollable&quot;:true,&quot;toRoll&quot;:&quot;4d6&quot;,&quot;displayText&quot;:&quot;4d6&quot;,&quot;subType&quot;:&quot;damage&quot;}' >4d6</span> when you reach 18th level in this class.</p></div>",
+			"optionalFeatureTypes": [
+				"AS"
+			]
+		},
+		{
+			"id": "df1d813f-242f-4abc-82ba-570e7e4def3c",
+			"name": "Magic Arrow",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"subclassName": "Arcane Archer",
+			"subclassShortName": "Arcane Archer",
+			"subclassSource": "XGE",
+			"source": "XGE",
+			"level": 7,
+			"entries": [
+				"At 7th level, you gain the ability to infuse arrows with magic. Whenever you fire a nonmagical arrow from a shortbow or longbow, you can make it magical for the purpose of overcoming resistance and immunity to nonmagical attacks and damage. The magic fades from the arrow immediately after it hits or misses its target."
+			],
+			"isSubclassFeature": true,
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>At 7th level, you gain the ability to infuse arrows with magic. Whenever you fire a nonmagical arrow from a shortbow or longbow, you can make it magical for the purpose of overcoming resistance and immunity to nonmagical attacks and damage. The magic fades from the arrow immediately after it hits or misses its target.</p></div>"
+		},
+		{
+			"id": "a5125d36-b7bb-4de5-8b05-bb1cd8a3b696",
+			"name": "Curving Shot",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"subclassName": "Arcane Archer",
+			"subclassShortName": "Arcane Archer",
+			"subclassSource": "XGE",
+			"source": "XGE",
+			"level": 7,
+			"entries": [
+				"At 7th level, you learn how to direct an errant arrow toward a new target. When you make an attack roll with a magic arrow and miss, you can use a bonus action to reroll the attack roll against a different target within 60 feet of the original target."
+			],
+			"isSubclassFeature": true,
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>At 7th level, you learn how to direct an errant arrow toward a new target. When you make an attack roll with a magic arrow and miss, you can use a bonus action to reroll the attack roll against a different target within 60 feet of the original target.</p></div>"
+		},
+		{
+			"id": "405ac2cc-74d2-48d6-afbb-bb8c101dc3fa",
+			"name": "Additional Arcane Shot Option",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"subclassName": "Arcane Archer",
+			"subclassShortName": "Arcane Archer",
+			"subclassSource": "XGE",
+			"source": "XGE",
+			"level": 7,
+			"entries": [
+				"You gain an additional Arcane Shot option of your choice when you reach 7th level."
+			],
+			"isSubclassFeature": true,
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You gain an additional Arcane Shot option of your choice when you reach 7th level.</p></div>"
+		},
+		{
+			"id": "245b71c9-edcc-42dc-be27-4a78b8cb175e",
+			"name": "Ability Score Improvement",
+			"source": "TGTT",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 8,
+			"featureType": "Class",
+			"description": "<p><strong>Ability Score Increases:</strong> Constitution +2</p>",
+			"isAsiChoice": true,
+			"entries": [
+				"You gain the {@feat Ability Score Improvement|XPHB} feat or another {@5etools feat|feats.html} of your choice for which you qualify."
+			]
+		},
+		{
+			"id": "85fb6a2c-f9ad-48c2-94c7-daa00c7b0cb5",
+			"name": "Countershot",
+			"source": "TGTT",
+			"page": 0,
+			"tradition": "Biting Zephyr",
+			"degree": 2,
+			"staminaCost": 1,
+			"actionType": "reaction",
+			"entries": [
+				"{@b Reaction (1 Stamina Point)}. With awe-inspiring skill you unleash a thrown weapon or arrow, knocking a missile out of the air. When you see a missile from a ranged weapon attack enter into the normal range of a weapon you are wielding, you can use your reaction to deflect it. Use a weapon to make a ranged attack against an AC equal to the attack roll of the missile. On a hit, the missile is deflected and misses its target. At the Narrator’s discretion, certain ranged weapon attacks (like a giant’s thrown rock) may be too heavy to be deflected by Countershot."
+			],
+			"__prop": "combatMethod",
+			"_entityType": "combatMethod",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 8,
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Reaction (1 Stamina Point)</b>. With awe-inspiring skill you unleash a thrown weapon or arrow, knocking a missile out of the air. When you see a missile from a ranged weapon attack enter into the normal range of a weapon you are wielding, you can use your reaction to deflect it. Use a weapon to make a ranged attack against an AC equal to the attack roll of the missile. On a hit, the missile is deflected and misses its target. At the Narrator’s discretion, certain ranged weapon attacks (like a giant’s thrown rock) may be too heavy to be deflected by Countershot.</p></div>",
+			"optionalFeatureTypes": [
+				"CTM:1",
+				"CTM:2",
+				"CTM:3",
+				"CTM:4",
+				"CTM:5"
+			]
+		},
+		{
+			"id": "bdedde9e-314f-40fe-98c0-bfb2173bf0e2",
+			"name": "Point Blank Shot",
+			"source": "TGTT",
+			"page": 0,
+			"tradition": "Biting Zephyr",
+			"degree": 1,
+			"staminaCost": 1,
+			"actionType": "bonus action",
+			"entries": [
+				"{@b Bonus Action (1 Stamina Point)}. With uncanny swiftness you ready a weapon normally only used at range, compensating for making an attack at an opponent within only a few feet and giving your enemies reason to be wary. Until the end of your next turn, being within 5 feet of a hostile creature who can see you and who isn’t {@condition incapacitated|tgtt} does not give you disadvantage when making a ranged attack using a weapon. In addition, when an adjacent hostile creature that you can see moves 5 feet or more away from you, you can use your reaction to make a ranged weapon attack against it."
+			],
+			"__prop": "combatMethod",
+			"_entityType": "combatMethod",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 9,
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Bonus Action (1 Stamina Point)</b>. With uncanny swiftness you ready a weapon normally only used at range, compensating for making an attack at an opponent within only a few feet and giving your enemies reason to be wary. Until the end of your next turn, being within 5 feet of a hostile creature who can see you and who isn’t <a href=\"conditionsdiseases.html#incapacitated_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"conditionsdiseases.html\" data-vet-source=\"TGTT\" data-vet-hash=\"incapacitated_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >incapacitated</a> does not give you disadvantage when making a ranged attack using a weapon. In addition, when an adjacent hostile creature that you can see moves 5 feet or more away from you, you can use your reaction to make a ranged weapon attack against it.</p></div>",
+			"optionalFeatureTypes": [
+				"CTM:1",
+				"CTM:2",
+				"CTM:3",
+				"CTM:4",
+				"CTM:5"
+			]
+		},
+		{
+			"id": "e3e0fdf0-0c77-4e96-ab7b-1d2f0338f61f",
+			"name": "Combat Medic",
+			"source": "TGTT",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 9,
+			"entries": [
+				"You gain proficiency with healer's kits. When you use a healer's kit to stabilize a dying creature, that creature also regains 1 hit point. When you use your Second Wind feature, you can choose one creature within 5 feet of you that isn't you. That creature regains hit points equal to half the amount you regain."
+			],
+			"__prop": "classFeature",
+			"type": "classFeature",
+			"ref": "Combat Medic|Fighter|TGTT|1",
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You gain proficiency with healer's kits. When you use a healer's kit to stabilize a dying creature, that creature also regains 1 hit point. When you use your Second Wind feature, you can choose one creature within 5 feet of you that isn't you. That creature regains hit points equal to half the amount you regain.</p></div>",
+			"isFeatureOption": true,
+			"parentFeature": "Specialties"
+		},
+		{
+			"id": "5542d176-43f4-4792-b368-25819f3b65db",
+			"name": "Indomitable",
+			"className": "Fighter",
+			"classSource": "XPHB",
+			"source": "XPHB",
+			"level": 9,
+			"gainSubclassFeature": false,
+			"entries": [
+				"If you fail a saving throw, you can reroll it with a bonus equal to your Fighter level. You must use the new roll, and you can't use this feature again until you finish a {@variantrule Long Rest|XPHB}.",
+				"You can use this feature twice before a {@variantrule Long Rest|XPHB} starting at level 13 and three times before a {@variantrule Long Rest|XPHB} starting at level 17."
+			],
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>If you fail a saving throw, you can reroll it with a bonus equal to your Fighter level. You must use the new roll, and you can't use this feature again until you finish a <a href=\"variantrules.html#long%20rest_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"long%20rest_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Long Rest</a>.</p><p>You can use this feature twice before a <a href=\"variantrules.html#long%20rest_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"long%20rest_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Long Rest</a> starting at level 13 and three times before a <a href=\"variantrules.html#long%20rest_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"long%20rest_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Long Rest</a> starting at level 17.</p></div>",
+			"uses": {
+				"current": 2,
+				"max": 2,
+				"recharge": "long"
+			}
+		},
+		{
+			"id": "4b1a2760-d18f-4822-8e5b-b1a5a5679f60",
+			"name": "Tactical Master",
+			"className": "Fighter",
+			"classSource": "XPHB",
+			"source": "XPHB",
+			"level": 9,
+			"gainSubclassFeature": false,
+			"entries": [
+				"When you attack with a weapon whose mastery property you can use, you can replace that property with the {@itemMastery Push|XPHB}, {@itemMastery Sap|XPHB}, or {@itemMastery Slow|XPHB} property for that attack."
+			],
+			"featureType": "Class",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>When you attack with a weapon whose mastery property you can use, you can replace that property with the <span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"itemMastery\" data-vet-source=\"XPHB\" data-vet-hash=\"push_xphb\" data-vet-is-faux-page=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Push</span>, <span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"itemMastery\" data-vet-source=\"XPHB\" data-vet-hash=\"sap_xphb\" data-vet-is-faux-page=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Sap</span>, or <span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"itemMastery\" data-vet-source=\"XPHB\" data-vet-hash=\"slow_xphb\" data-vet-is-faux-page=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Slow</span> property for that attack.</p></div>"
+		},
+		{
+			"id": "24091d7c-8872-4507-94f2-fb45ce8e998e",
+			"name": "War God's Blessing",
+			"source": "TGTT",
+			"featureType": "Species",
+			"level": 6,
+			"_raceManifestation": "war",
+			"consumes": {
+				"name": "Divine Manifestation",
+				"amount": 1
+			},
+			"description": "When a creature within 30 feet of you makes an attack roll, you can use your reaction to grant a +10 bonus to the roll, using your Channel Divinity. You make this choice after you see the roll, but before the DM says whether the attack hits or misses.",
+			"entries": [
+				"At 6th level, when a creature within 30 feet of you makes an attack roll, you can use your reaction to grant that creature a +10 bonus to the roll, using your Channel Divinity. You make this choice after you see the roll, but before the DM says whether the attack hits or misses."
+			]
+		},
+		{
+			"id": "1eb1c7f8-207e-4cb3-b5a1-20601b43f2e6",
+			"name": "Shrug It Off",
+			"source": "TGTT",
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Reaction (2 Stamina Points)</b>. Girding yourself when your body is assaulted by more than clenched fists or sharp steel, you defy weakness and overcome. When an effect causes you to be <a href=\"conditionsdiseases.html#frightened_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"conditionsdiseases.html\" data-vet-source=\"TGTT\" data-vet-hash=\"frightened_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >frightened</a>, <a href=\"conditionsdiseases.html#poisoned_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"conditionsdiseases.html\" data-vet-source=\"TGTT\" data-vet-hash=\"poisoned_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >poisoned</a>, or <a href=\"conditionsdiseases.html#stunned_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"conditionsdiseases.html\" data-vet-source=\"TGTT\" data-vet-hash=\"stunned_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >stunned</a>, you can use your reaction to prevent it.</p></div>",
+			"entries": [
+				"{@b Reaction (2 Stamina Points)}. Girding yourself when your body is assaulted by more than clenched fists or sharp steel, you defy weakness and overcome. When an effect causes you to be {@condition frightened|TGTT}, {@condition poisoned|TGTT}, or {@condition stunned|tgtt}, you can use your reaction to prevent it."
+			]
+		},
+		{
+			"id": "3a76561e-1ade-40f3-a785-99cb7c28f0a3",
+			"name": "Warding Wield",
+			"source": "TGTT",
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Bonus Action (1 Stamina Point)</b>. With seeming ease you whirl your weapon about your body, weaving it in a threatening pattern that makes your opponents hesitant to attack. Until the start of your next turn, your AC increases by 2.</p></div>",
+			"entries": [
+				"{@b Bonus Action (1 Stamina Point)}. With seeming ease you whirl your weapon about your body, weaving it in a threatening pattern that makes your opponents hesitant to attack. Until the start of your next turn, your AC increases by 2."
+			]
+		},
+		{
+			"id": "d447445d-4a47-45e1-a14d-3b25a64f9966",
+			"name": "Doubleshot",
+			"source": "TGTT",
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Bonus Action (1 Stamina Point)</b>. You palm two blades or nock two arrows, launching both missiles at the same opponent. The next ranged weapon attack you make uses two missiles instead of one. On a hit, you deal an additional weapon damage die.</p></div>",
+			"entries": [
+				"{@b Bonus Action (1 Stamina Point)}. You palm two blades or nock two arrows, launching both missiles at the same opponent. The next ranged weapon attack you make uses two missiles instead of one. On a hit, you deal an additional weapon damage die."
+			]
+		},
+		{
+			"id": "7a046fc3-137e-42fb-9242-fa517ce7ab33",
+			"name": "Covering Fire",
+			"source": "TGTT",
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Action (1 Stamina Point)</b>. Making haphazard shots to dissuade enemies, you force opponents onto the defensive by unleashing death from above so an ally can move into position. Choose a number of creatures equal to your proficiency bonus that you can see within your weapon’s normal range. Until the start of your next turn, a chosen creature’s movement does not provoke opportunity attacks from creatures you can see as you pelt the area nearby with missiles. For each opportunity attack a chosen creature would have otherwise provoked, you expend one piece of ammunition or thrown weapon.</p></div>",
+			"entries": [
+				"{@b Action (1 Stamina Point)}. Making haphazard shots to dissuade enemies, you force opponents onto the defensive by unleashing death from above so an ally can move into position. Choose a number of creatures equal to your proficiency bonus that you can see within your weapon’s normal range. Until the start of your next turn, a chosen creature’s movement does not provoke opportunity attacks from creatures you can see as you pelt the area nearby with missiles. For each opportunity attack a chosen creature would have otherwise provoked, you expend one piece of ammunition or thrown weapon."
+			]
+		},
+		{
+			"id": "41c5f84e-ca64-475c-86b9-e094fc2e2de1",
+			"name": "Quickdraw",
+			"source": "TGTT",
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Reaction (2 Stamina Points)</b>. With incredible swiftness you tear your weapon from its sheath and let fly a reckless attack. As long as you are not surprised, when initiative is rolled you can use your reaction to draw a weapon and make a ranged attack with it.</p></div>",
+			"entries": [
+				"{@b Reaction (2 Stamina Points)}. With incredible swiftness you tear your weapon from its sheath and let fly a reckless attack. As long as you are not surprised, when initiative is rolled you can use your reaction to draw a weapon and make a ranged attack with it."
+			]
+		},
+		{
+			"id": "9ee2a551-f231-480a-9b45-f6c1eb7e2503",
+			"name": "Lean Into It",
+			"source": "TGTT",
+			"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+			"entries": [
+				"{@b Action (2 Stamina Points)}. Not just commiting to an assault, you shoulder into it with all the strength you can bear and deliver hits that resonate in the very bones of your foes. When you activate this method, you take the Attack action and make a weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, when you hit a creature with a melee weapon attack it makes a Strength saving throw or it is knocked {@condition prone|TGTT}."
+			],
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 1,
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Action (2 Stamina Points)</b>. Not just commiting to an assault, you shoulder into it with all the strength you can bear and deliver hits that resonate in the very bones of your foes. When you activate this method, you take the Attack action and make a weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, when you hit a creature with a melee weapon attack it makes a Strength saving throw or it is knocked <a href=\"conditionsdiseases.html#prone_tgtt\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"conditionsdiseases.html\" data-vet-source=\"TGTT\" data-vet-hash=\"prone_tgtt\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >prone</a>.</p></div>",
+			"optionalFeatureTypes": [
+				"CTM:1",
+				"CTM:2",
+				"CTM:3",
+				"CTM:4",
+				"CTM:5"
+			],
+			"_entityType": "combatMethod",
+			"degree": 0,
+			"staminaCost": 0
+		},
+		{
+			"id": "15de11d0-4845-416f-8169-b1a40e0fe35b",
+			"name": "Blindshot",
+			"source": "TGTT",
+			"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+			"entries": [
+				"{@b Bonus Action (1 Stamina Point)}. By closing your eyes and focusing on the sound of the environment, you target an unseen foe with uncanny accuracy. Make a Perception check against the passive Stealth of a target you cannot see that is within 30 feet. On a success, you know the target’s location and do not have disadvantage on your next ranged attack against it before the end of your turn."
+			],
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 5,
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Bonus Action (1 Stamina Point)</b>. By closing your eyes and focusing on the sound of the environment, you target an unseen foe with uncanny accuracy. Make a Perception check against the passive Stealth of a target you cannot see that is within 30 feet. On a success, you know the target’s location and do not have disadvantage on your next ranged attack against it before the end of your turn.</p></div>",
+			"optionalFeatureTypes": [
+				"CTM:1",
+				"CTM:2",
+				"CTM:3",
+				"CTM:4",
+				"CTM:5"
+			],
+			"_entityType": "combatMethod",
+			"degree": 0,
+			"staminaCost": 0
+		},
+		{
+			"id": "3a4d0e8a-e369-4b75-81a1-2f40ddacfd5a",
+			"name": "Missile Volley",
+			"source": "TGTT",
+			"type": "CTM:1_CTM:2_CTM:3_CTM:4_CTM:5",
+			"entries": [
+				"{@b Action (2 Stamina Points)}. Seizing upon the moment you make the sky rain death, striking at a multitude of creatures in rapid succession. Make a ranged weapon attack against a number of creatures within 10 feet of a point you can see within your weapon’s range. You may only target a number of creatures equal to or less than your proficiency bonus, you must have ammunition for each target, and you make a separate attack roll for each target."
+			],
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"level": 6,
+			"featureType": "Optional Feature",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p><b>Action (2 Stamina Points)</b>. Seizing upon the moment you make the sky rain death, striking at a multitude of creatures in rapid succession. Make a ranged weapon attack against a number of creatures within 10 feet of a point you can see within your weapon’s range. You may only target a number of creatures equal to or less than your proficiency bonus, you must have ammunition for each target, and you make a separate attack roll for each target.</p></div>",
+			"optionalFeatureTypes": [
+				"CTM:1",
+				"CTM:2",
+				"CTM:3",
+				"CTM:4",
+				"CTM:5"
+			],
+			"_entityType": "combatMethod",
+			"degree": 0,
+			"staminaCost": 0
+		}
+	],
+	"feats": [
+		{
+			"id": "918bfa8a-f644-4cde-8434-e16df33d8f81",
+			"name": "Archery",
+			"source": "XPHB",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You gain a +2 bonus to attack rolls you make with Ranged weapons.</p></div>",
+			"isOriginFeat": false,
+			"backgroundName": null,
+			"choices": {
+				"skills": [],
+				"languages": [],
+				"ability": null,
+				"tools": [],
+				"expertise": [],
+				"spellList": null,
+				"cantrips": [],
+				"spells": [],
+				"scribingClass": null,
+				"optionalFeatures": []
+			},
+			"classFeatProgression": {
+				"className": "Fighter",
+				"classSource": "TGTT",
+				"level": 1,
+				"progressionName": "Fighting Style"
+			}
+		},
+		{
+			"id": "be1c3512-24c3-43d8-887b-ef444cfc5605",
+			"name": "Crossbow Expert",
+			"source": "XPHB",
+			"description": "<div  class=\"ve-rd__b  ve-rd__b--1\"><p>You gain the following benefits.</p><div  data-roll-name-ancestor=\"Ignore Loading\" class=\"ve-rd__b  ve-rd__b--2\"><h3 class=\"ve-rd__h ve-rd__h--2\" data-title-index=\"63\" > <span class=\"entry-title-inner \">Ignore Loading</span><span class=\"ve-flex-vh-center\"><span class=\"ve-rd__h-toggle ve-ml-2 ve-clickable ve-no-select no-print ve-lst-is-exporting-image__hidden\" data-rd-h-toggle-button=\"true\" title=\"Toggle Visibility (CTRL to Toggle All)\">[–]</span></span></h3> <p>You ignore the <span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"itemProperty\" data-vet-source=\"XPHB\" data-vet-hash=\"ld_xphb\" data-vet-is-faux-page=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Loading</span> property of the <a href=\"items.html#hand%20crossbow_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"items.html\" data-vet-source=\"XPHB\" data-vet-hash=\"hand%20crossbow_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Hand Crossbow</a>, <a href=\"items.html#heavy%20crossbow_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"items.html\" data-vet-source=\"XPHB\" data-vet-hash=\"heavy%20crossbow_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Heavy Crossbow</a>, and <a href=\"items.html#light%20crossbow_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"items.html\" data-vet-source=\"XPHB\" data-vet-hash=\"light%20crossbow_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Light Crossbow</a> (all called crossbows elsewhere in this feat). If you're holding one of them, you can load a piece of ammunition into it even if you lack a free hand.</p></div><div  data-roll-name-ancestor=\"Firing in Melee\" class=\"ve-rd__b  ve-rd__b--2\"><h3 class=\"ve-rd__h ve-rd__h--2\" data-title-index=\"64\" > <span class=\"entry-title-inner \">Firing in Melee</span><span class=\"ve-flex-vh-center\"><span class=\"ve-rd__h-toggle ve-ml-2 ve-clickable ve-no-select no-print ve-lst-is-exporting-image__hidden\" data-rd-h-toggle-button=\"true\" title=\"Toggle Visibility (CTRL to Toggle All)\">[–]</span></span></h3> <p>Being within 5 feet of an enemy doesn't impose <a href=\"variantrules.html#disadvantage_xphb\"  onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this)\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"variantrules.html\" data-vet-source=\"XPHB\" data-vet-hash=\"disadvantage_xphb\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Disadvantage</a> on your attack rolls with crossbows.</p></div><div  data-roll-name-ancestor=\"Dual Wielding\" class=\"ve-rd__b  ve-rd__b--2\"><h3 class=\"ve-rd__h ve-rd__h--2\" data-title-index=\"65\" > <span class=\"entry-title-inner \">Dual Wielding</span><span class=\"ve-flex-vh-center\"><span class=\"ve-rd__h-toggle ve-ml-2 ve-clickable ve-no-select no-print ve-lst-is-exporting-image__hidden\" data-rd-h-toggle-button=\"true\" title=\"Toggle Visibility (CTRL to Toggle All)\">[–]</span></span></h3> <p>When you make the extra attack of the <span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"itemProperty\" data-vet-source=\"XPHB\" data-vet-hash=\"l_xphb\" data-vet-is-faux-page=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Light</span> property, you can add your ability modifier to the damage of the extra attack if that attack is with a crossbow that has the <span class=\"ve-help ve-help--hover\" onmouseover=\"Renderer.hover.pHandleLinkMouseOver(event, this)\" onmouseleave=\"Renderer.hover.handleLinkMouseLeave(event, this)\" onmousemove=\"Renderer.hover.handleLinkMouseMove(event, this)\" onclick=\"Renderer.hover.handleLinkClick(event, this, {isForceOpenPermanent: true})\" onwheel=\"Renderer.hover.handleLinkWheel(event, this)\" ondragstart=\"Renderer.hover.handleLinkDragStart(event, this)\" data-vet-page=\"itemProperty\" data-vet-source=\"XPHB\" data-vet-hash=\"l_xphb\" data-vet-is-faux-page=\"true\" ontouchstart=\"Renderer.hover.handleTouchStart(event, this)\" >Light</span> property and you aren't already adding that modifier to the damage.</p></div></div>",
+			"isOriginFeat": false,
+			"backgroundName": null,
+			"choices": {
+				"skills": [],
+				"languages": [],
+				"tools": [],
+				"ability": null,
+				"expertise": [],
+				"spellList": null,
+				"cantrips": [],
+				"spells": []
+			}
+		}
+	],
+	"weaponMasteries": [
+		"Hand Crossbow|XPHB",
+		"Longbow|XPHB",
+		"Rapier|XPHB",
+		"Blowgun|XPHB"
+	],
+	"weaponMasteryProperties": {},
+	"combatTraditions": [
+		{
+			"code": "AM",
+			"name": "Adamant Mountain"
+		},
+		{
+			"code": "BZ",
+			"name": "Biting Zephyr"
+		},
+		{
+			"code": "RE",
+			"name": "Razor's Edge"
+		},
+		{
+			"code": "SK",
+			"name": "Sanguine Knot"
+		}
+	],
+	"staminaCurrent": 10,
+	"staminaMax": 10,
+	"activeStance": null,
+	"primalFocus": {
+		"mode": "predator",
+		"switchesUsed": 0,
+		"huntersDodgeUsed": 0,
+		"quarryTargetId": null
+	},
+	"huntersPrey": {
+		"option": "colossus"
+	},
+	"forkedTongue": {
+		"swappableLanguages": [],
+		"swappedSinceLongRest": false
+	},
+	"focusPool": {
+		"current": 0,
+		"lucidFocusActive": false
+	},
+	"illriggerSeals": {
+		"available": null,
+		"placements": [],
+		"lastPlacedRound": null
+	},
+	"scholarExpertise": null,
+	"attacks": [
+		{
+			"name": "Unarmed Strike",
+			"isMelee": true,
+			"isUnarmedStrike": true,
+			"isNaturalWeapon": false,
+			"abilityMod": "str",
+			"damage": "1",
+			"damageType": "bludgeoning",
+			"damageBonus": 0,
+			"attackBonus": 0,
+			"range": "5 ft",
+			"properties": [],
+			"isMonkWeapon": false,
+			"id": "10c531c3-45ce-456b-9d0c-2f20bfb2117b"
+		}
+	],
+	"temporaryAttacks": [],
+	"conditions": [],
+	"exhaustion": 0,
+	"resources": [
+		{
+			"id": "e93bd061-5268-4865-aa5d-9df70600f903",
+			"current": 1,
+			"name": "Healing Hands",
+			"max": 1,
+			"recharge": "long",
+			"featureId": "6c79d9a8-fe28-4ed6-80f4-d879ea21173f"
+		},
+		{
+			"id": "a2ebedff-d5e7-4006-8218-ef62d7e7061e",
+			"current": 1,
+			"name": "Divine Manifestation",
+			"max": 1,
+			"recharge": "short"
+		},
+		{
+			"id": "b1e7c570-9fb6-437f-91e9-b361ffd17b5b",
+			"current": 3,
+			"name": "Second Wind",
+			"max": 3,
+			"recharge": "short",
+			"featureId": "7a46c221-c35b-40ca-9fe7-c505e3789a4c"
+		},
+		{
+			"id": "efb2279c-3ba4-41f7-a521-458a080ce2fe",
+			"current": 1,
+			"name": "Action Surge",
+			"max": 1,
+			"recharge": "short",
+			"featureId": "aa7f19f6-a9a9-4e40-90f9-0cdcc75cc897"
+		},
+		{
+			"id": "06f8780b-adc6-4e48-8baf-ed4537778a09",
+			"current": 4,
+			"name": "Arcane Shot",
+			"max": 4,
+			"recharge": "short",
+			"featureId": "88d24a72-01c0-4765-8a84-fe0b483160ce"
+		},
+		{
+			"id": "5a766549-33fb-4683-a272-fb7784bc098a",
+			"current": 2,
+			"name": "Indomitable",
+			"max": 2,
+			"recharge": "long",
+			"featureId": "5542d176-43f4-4792-b368-25819f3b65db"
+		}
+	],
+	"notes": {
+		"personality": "",
+		"ideals": "",
+		"bonds": "",
+		"flaws": "",
+		"backstory": "",
+		"notes": ""
+	},
+	"stickyNotes": [],
+	"customAbilities": [],
+	"activeCombatMethodEffects": [],
+	"combatMethodWeaponChoices": {},
+	"grantedProficiencies": {
+		"skills": {},
+		"tools": {},
+		"weapons": {},
+		"armor": {},
+		"languages": {}
+	},
+	"appearance": {
+		"age": "18",
+		"height": "6.1",
+		"weight": "",
+		"eyes": "Green",
+		"skin": "Olive",
+		"hair": "Curly, Short, Black",
+		"portraitUrl": ""
+	},
+	"resistances": [
+		"radiant",
+		"necrotic"
+	],
+	"immunities": [],
+	"vulnerabilities": [],
+	"conditionImmunities": [],
+	"customModifiers": {
+		"ac": 0,
+		"initiative": 0,
+		"speed": {
+			"walk": -10,
+			"fly": 0,
+			"swim": 0,
+			"climb": 0,
+			"burrow": 0
+		},
+		"savingThrows": {
+			"str": 0,
+			"dex": 0,
+			"con": 0,
+			"int": 0,
+			"wis": 0,
+			"cha": 0
+		},
+		"skills": {
+			"stealth": 0,
+			"acrobatics": 3
+		},
+		"attackBonus": 6,
+		"damageBonus": 0,
+		"spellDc": 0,
+		"spellAttack": 0,
+		"abilityChecks": {},
+		"abilityScores": {},
+		"abilityScoreStatic": {},
+		"abilityScoreMaxIncrease": {},
+		"abilityScoreMaxSet": {},
+		"hp": 0,
+		"hpPerLevel": 0,
+		"proficiencyBonus": 0,
+		"senses": {
+			"darkvision": 0,
+			"blindsight": 0,
+			"tremorsense": 0,
+			"truesight": 0
+		},
+		"carryCapacity": 0,
+		"carryCapacityMultiplier": 1,
+		"passives": {}
+	},
+	"namedModifiers": [
+		{
+			"id": "4370da43-61da-484b-9739-4e7e2a5f7e18",
+			"name": "Archery",
+			"type": "attack:ranged",
+			"value": 2,
+			"note": "",
+			"enabled": true,
+			"sourceFeatureId": "918bfa8a-f644-4cde-8434-e16df33d8f81",
+			"sourceType": "feat"
+		},
+		{
+			"id": "243c6bfc-1105-4795-ada0-1f06b9e167a7",
+			"name": "High Ground",
+			"type": "attack",
+			"value": 2,
+			"note": "From High Ground",
+			"enabled": true,
+			"sourceFeatureId": "e1148b6b-9879-4104-95ef-f8a8b1819c52"
+		},
+		{
+			"id": "fd0f5ff4-c5c5-4743-9536-e09b116c2b21",
+			"name": "Flanking",
+			"type": "attack",
+			"value": 2,
+			"note": "From Flanking",
+			"enabled": true,
+			"sourceFeatureId": "e5364d33-423d-4a38-8c64-94ceefedd268"
+		},
+		{
+			"id": "33cf5f18-e316-4649-b1f5-0ab5279b9a44",
+			"name": "Grasping Arrow",
+			"type": "speed:walk",
+			"value": -10,
+			"note": "From Grasping Arrow",
+			"enabled": true,
+			"sourceFeatureId": "febb1c51-2a6e-43b9-8a5a-a3898bf9bb8e"
+		},
+		{
+			"id": "612c03aa-3953-4b88-b34d-62aee2336ff9",
+			"name": "Crossbow Expert",
+			"type": "ranged:noDisdvantageInMelee",
+			"value": 1,
+			"note": "",
+			"enabled": true,
+			"sourceFeatureId": "be1c3512-24c3-43d8-887b-ef444cfc5605",
+			"sourceType": "feat"
+		},
+		{
+			"id": "9a547f45-8c5f-4908-9792-8212b5e6f626",
+			"name": "Stamina Enthusiast",
+			"type": "resource:stamina",
+			"value": 2,
+			"note": "From Stamina Enthusiast",
+			"enabled": true,
+			"sourceFeatureId": "8f549f35-a255-48e8-aaa6-4b15d8dc7e6c"
+		},
+		{
+			"id": "30a24705-f405-422a-9d43-6862e6e456c8",
+			"name": "Warding Wield: until the start of your next turn",
+			"type": "ac",
+			"value": 2,
+			"note": "From Warding Wield - until the start of your next turn",
+			"enabled": false,
+			"sourceFeatureId": "3a76561e-1ade-40f3-a785-99cb7c28f0a3",
+			"conditional": "until the start of your next turn"
+		},
+		{
+			"id": "25995ecf-ba23-40fc-b910-db837ec07399",
+			"name": "Iron Will",
+			"type": "save:all",
+			"value": 0,
+			"note": "From Iron Will (combat method, reaction)",
+			"enabled": true,
+			"sourceType": "combatMethod",
+			"conditional": "to resist being charmed or frightened",
+			"advantage": true
+		},
+		{
+			"id": "32f64059-45e3-43ad-a370-d9d87d07f131",
+			"name": "Camouflaged",
+			"type": "skill:stealth",
+			"value": 0,
+			"advantage": true,
+			"conditional": "if the camouflage reasonably fits the terrain",
+			"sourceType": "itemUpgrade",
+			"sourceLabel": "Bugbear Black Studded Leather Armor",
+			"enabled": true
+		},
+		{
+			"id": "e827be5e-35c0-47f3-864f-0b5ff9fd4f7e",
+			"name": "Form Fitted",
+			"type": "skill:acrobatics",
+			"value": 3,
+			"sourceType": "itemUpgrade",
+			"sourceLabel": "Bugbear Black Studded Leather Armor",
+			"enabled": true
+		}
+	],
+	"activeStates": [],
+	"companions": [],
+	"wildShapeKnownForms": [],
+	"inCombat": false,
+	"combatRound": 0,
+	"concentrating": null,
+	"pendingSpellChoices": [],
+	"pendingFeatureChoices": [],
+	"tunedMetamagics": [],
+	"settings": {
+		"exhaustionRules": "thelemar",
+		"allowedSources": null,
+		"includeCoreSpellsForHomebrew": true,
+		"allowExoticLanguages": true,
+		"prioritySources": [
+			"TGTT"
+		],
+		"thelemar_carryWeight": true,
+		"thelemar_jumping": true,
+		"thelemar_linguisticsBonus": true,
+		"thelemar_criticalRolls": true,
+		"thelemar_asiFeat": true,
+		"thelemar_itemUtilization": true,
+		"thelemar_spellRarity": true,
+		"enforceAbilityScoreCap": false,
+		"ammunitionTracking": false,
+		"speedEmojiLabels": true,
+		"showAbilitiesTab": false
+	},
+	"ammunitionConsumed": {},
+	"viewMode": "full",
+	"favorites": [],
+	"_manualItemBonuses": {
+		"savingThrow": 0,
+		"spellAttack": 0,
+		"spellSaveDc": 0,
+		"abilityCheck": 0,
+		"savingThrowStr": 0,
+		"savingThrowDex": 0,
+		"savingThrowCon": 0,
+		"savingThrowInt": 0,
+		"savingThrowWis": 0,
+		"savingThrowCha": 0,
+		"proficiencyBonus": 0,
+		"savingThrowConcentration": 0,
+		"spellDamage": 0
+	},
+	"itemSenses": {
+		"darkvision": 0,
+		"blindsight": 0,
+		"tremorsense": 0,
+		"truesight": 0
+	},
+	"itemSenseBonuses": {
+		"darkvision": 0,
+		"blindsight": 0,
+		"tremorsense": 0,
+		"truesight": 0
+	},
+	"raceManifestationChoice": "war",
+	"_classFeatureResistances": [],
+	"_classFeatureImmunities": [],
+	"_classFeatureConditionImmunities": [],
+	"_conditionImmunityMeta": [],
+	"_classFeatureSaveProficiencies": [],
+	"_classFeatureSkillProficiencies": [],
+	"_classFeatureSenses": {},
+	"_classFeatureToolProficiencies": [],
+	"_classFeatureWeaponProficiencies": [],
+	"_classFeatureArmorProficiencies": [],
+	"_classFeatureLanguages": [],
+	"_classFeatureWeaponProperties": [],
+	"_classFeatureMovementProperties": [],
+	"_classFeatureSaveProperties": [],
+	"_classFeatureDamageProperties": [],
+	"_classFeatureSpellcastingProperties": [],
+	"_classFeatureResourceProperties": [],
+	"_classFeatureAttackAbilities": [],
+	"_classFeatureAttackCount": 2,
+	"_classFeatureToolExpertise": false,
+	"_classFeatureAttunementSlots": null,
+	"_classFeatureIgnoreAttunementRequirements": false,
+	"_classFeatureCombatTraditions": [],
+	"rollFloors": {},
+	"appliedClassFeatureEffects": [
+		"Celestial Resistance: necrotic resistance",
+		"Celestial Resistance: radiant resistance",
+		"Extra Attack: 2 attacks per Attack action"
+	],
+	"indomitable": {
+		"used": 0
+	}
+}

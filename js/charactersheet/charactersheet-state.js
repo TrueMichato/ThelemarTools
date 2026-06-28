@@ -4289,6 +4289,17 @@ class CharacterSheetState {
 		// redundant "<X> Improvement" passive riders the use-parser mis-tagged with a count.
 		this._migrateRedundantImprovementResources();
 
+		// (S2 #7/#8/#9/#13) Strip stale passive data baked into old saves that the current
+		// creation path no longer produces but `loadFromJson` restores verbatim: BT/AS
+		// optional-feature passive named modifiers (e.g. High Ground/Flanking minting a
+		// permanent +2 to ALL attacks; Grasping Arrow a permanent -10 walk) and duplicate
+		// generic resource rows for Fighter pools now owned by the synthetic combat-resource
+		// system (Second Wind / Arcane Shot / Indomitable). Runs after _migrateFeatures (so
+		// feature ids + optionalFeatureTypes are finalised) and after the redundant-resource
+		// sweep, but BEFORE syncDerivedResourceMaxes / applyClassFeatureEffects so no derived
+		// pass re-reads the stale rows.
+		this._migrateStalePassiveData();
+
 		// (R23 #15) Strip base senses an inactive interdict TOGGLE boon (e.g. Hellsight →
 		// truesight) baked in under old code that wrote base senses on invoke and never
 		// removed them on end. The sense is now owned by the toggle's active state.
@@ -4688,6 +4699,122 @@ class CharacterSheetState {
 			if (!linked) return true;
 			return !CharacterSheetState.isRedundantImprovementFeature?.(linked, allFeatures);
 		});
+	}
+
+	/**
+	 * Named-modifier `type` prefixes the legacy text parser produced for BT/AS optional
+	 * features as ALWAYS-ON passive modifiers (e.g. a Battle Tactic's "+2 to attack", an
+	 * Arcane Shot's "-10 to walk speed"). A modifier matches when its `type` equals one of
+	 * these exactly or starts with `"<prefix>:"` — covering `attack`/`attack:*`,
+	 * `speed`/`speed:*`, `ac`/`ac:*`, `initiative`, `save:*`, `skill:*`.
+	 * @type {ReadonlyArray<string>}
+	 */
+	static STALE_BT_AS_PASSIVE_MODIFIER_PREFIXES = ["attack", "speed", "ac", "initiative", "save", "skill"];
+
+	/**
+	 * True when `type` is one of the BT/AS passive modifier kinds the legacy parser leaked
+	 * (see {@link STALE_BT_AS_PASSIVE_MODIFIER_PREFIXES}).
+	 * @param {string} type
+	 * @returns {boolean}
+	 */
+	static _isStaleBtAsPassiveModifierType (type) {
+		if (typeof type !== "string" || !type) return false;
+		return CharacterSheetState.STALE_BT_AS_PASSIVE_MODIFIER_PREFIXES
+			.some(p => type === p || type.startsWith(`${p}:`));
+	}
+
+	/**
+	 * Fighter limited-use pools whose tracking now lives EXCLUSIVELY in the synthetic
+	 * combat-resource system ({@link getSyntheticCombatResources}: Second Wind via the
+	 * feature-use store, Arcane Shot via `_data.arcaneShot`, Indomitable via
+	 * `_data.indomitable`). A generic `_data.resources` row by the same name is a stale
+	 * duplicate that SHADOWS the synthetic pool (the combat panel renders the generic row
+	 * first and skips the synthetic one by name), so e.g. Indomitable surfaces 2 uses at
+	 * L9 instead of the correct 1. Single source of truth for the name set, consumed by
+	 * the load migration AND the addFeature creation guard.
+	 * @param {string} name
+	 * @returns {boolean}
+	 */
+	static isSyntheticTrackedResourceFeature (name) {
+		if (typeof name !== "string") return false;
+		const n = name.trim().toLowerCase();
+		return n === "second wind" || n === "arcane shot" || n === "indomitable";
+	}
+
+	/**
+	 * (S2 #7/#8/#9/#13) Strip stale passive data baked into old saves.
+	 *
+	 * Two independent leaks survive the `loadFromJson` round-trip because the loader
+	 * restores `namedModifiers` and `resources` verbatim while the current creation path
+	 * (which already guards BT/AS optional features and Fighter synthetic pools) is only
+	 * exercised on a fresh build:
+	 *
+	 * (a) PASSIVE NAMED MODIFIERS minted from a BT (Battle Tactic) or AS (Arcane Shot)
+	 *     optional feature — e.g. High Ground/Flanking baking a permanent `+2` to ALL
+	 *     attacks, or Grasping Arrow a permanent `-10` walk speed. These are read by the
+	 *     live `getModifiersForType` / `getAttackModifierContributions` paths, so they
+	 *     corrupt every attack roll and the walk speed. Stripped CONSERVATIVELY: only when
+	 *     the modifier has NO `sourceType` (feat / itemUpgrade / combatMethod / classFeature
+	 *     / customAbility own their own lifecycle and are never swept), its source feature
+	 *     still exists AND carries `optionalFeatureTypes` including `'BT'` or `'AS'`, and its
+	 *     `type` is a passive kind the legacy parser produced
+	 *     ({@link _isStaleBtAsPassiveModifierType}). Feat-sourced Archery
+	 *     (`attack:ranged`, `sourceType:'feat'`) and itemUpgrade mods are preserved.
+	 *
+	 * (b) DUPLICATE GENERIC RESOURCE ROWS for Fighter pools now owned by the synthetic
+	 *     combat-resource system ({@link isSyntheticTrackedResourceFeature}). Removed only
+	 *     when the synthetic pool is actually active for this character, so the synthetic
+	 *     resource becomes the single source of truth (fixing Indomitable showing 2 uses at
+	 *     L9 and the duplicate Second Wind / Arcane Shot trackers).
+	 *
+	 * Idempotent: once stripped there is nothing left to match, and a fresh build never
+	 * creates either artifact. Recalculates derived custom modifiers when (a) changed.
+	 */
+	_migrateStalePassiveData () {
+		// (a) Strip stale BT/AS passive named modifiers.
+		if (this._data.namedModifiers?.length) {
+			const features = this._data.features || [];
+			const before = this._data.namedModifiers.length;
+			this._data.namedModifiers = this._data.namedModifiers.filter(mod => {
+				// Effects owned by another lifecycle system (feat/itemUpgrade/combatMethod/…)
+				// are never the BT/AS text-parser leftovers — keep them.
+				if (mod.sourceType) return true;
+				if (!CharacterSheetState._isStaleBtAsPassiveModifierType(mod.type)) return true;
+
+				// Resolve the source feature (explicit link, else the "From <name>" note).
+				const feature = features.find(f =>
+					(mod.sourceFeatureId && f.id === mod.sourceFeatureId)
+					|| (f.name && mod.note === `From ${f.name}`),
+				);
+				if (!feature) return true;
+
+				const types = feature.optionalFeatureTypes;
+				const isBtAs = Array.isArray(types) && types.some(ft => ft === "BT" || ft === "AS");
+				// Drop only genuine BT/AS passive leftovers.
+				return !isBtAs;
+			});
+			if (this._data.namedModifiers.length !== before) {
+				this._recalculateCustomModifiers();
+			}
+		}
+
+		// (b) Remove duplicate generic resource rows owned by the synthetic system.
+		if (this._data.resources?.length) {
+			this._data.resources = this._data.resources.filter(r => {
+				if (!CharacterSheetState.isSyntheticTrackedResourceFeature(r.name)) return true;
+				const n = (r.name || "").trim().toLowerCase();
+				// Only remove when the synthetic pool actually owns this name for this
+				// character; otherwise leave the row so nothing is silently untracked. The
+				// generic row is a stale DUPLICATE of the owning feature, so feature presence
+				// (not just the derived has*() gate) is sufficient — this also keeps Arcane
+				// Shot removal decoupled from subclass-detection repair (S1), whose fix only
+				// affects whether the SYNTHETIC row renders, not whether the duplicate is stale.
+				if (n === "second wind") return !this.hasFeature?.("Second Wind");
+				if (n === "arcane shot") return !(this.hasArcaneShot?.() || this.hasFeature?.("Arcane Shot"));
+				if (n === "indomitable") return !(this.hasIndomitable?.() || this.hasFeature?.("Indomitable"));
+				return true;
+			});
+		}
 	}
 
 	/**
@@ -28462,9 +28589,14 @@ class CharacterSheetState {
 			// a count in its text; surfacing that as a resource row is the stale-duplicate
 			// players reported. Consumes the S-A isRedundantImprovementFeature predicate.
 			const isRedundantRider = CharacterSheetState.isRedundantImprovementFeature?.(featureData, this._data.features);
+			// (S2 #13) Never materialise a generic resource row for a Fighter pool owned by
+			// the synthetic combat-resource system (Second Wind / Arcane Shot / Indomitable) —
+			// such a row SHADOWS the synthetic pool and shows the wrong max (e.g. Indomitable
+			// 2 vs 1 at L9). The synthetic system is the single source of truth.
+			const isSyntheticTracked = CharacterSheetState.isSyntheticTrackedResourceFeature?.(feature.name);
 			// Check if resource already exists
 			const existingResource = this._data.resources.find(r => r.name === feature.name);
-			if (!existingResource && !isRedundantRider) {
+			if (!existingResource && !isRedundantRider && !isSyntheticTracked) {
 				this.addResource({
 					name: feature.name,
 					max: uses.max,
@@ -32314,8 +32446,9 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Bonus added to the Indomitable reroll. The 2024 (XPHB) Fighter adds its Fighter
-	 * level to the new roll; the 2014 version is a plain reroll (no bonus).
+	 * Bonus added to the Indomitable reroll. The 2024 (XPHB) and TGTT Fighter add their
+	 * Fighter level to the new roll; the 2014 version is a plain reroll (no bonus). TGTT is
+	 * a 2024-based homebrew, treated as 2024 across the sheet (`source === "TGTT"`).
 	 * @returns {number}
 	 */
 	getIndomitableRerollBonus () {
@@ -32325,7 +32458,7 @@ class CharacterSheetState {
 		// Indomitable is a CLASS feature, so the 2024 reroll bonus keys off the
 		// Fighter class source/edition — NOT the subclass (which may be a legacy copy).
 		const source = fighter.source || "";
-		const is2024 = /^XPHB$/i.test(source) || /2024/.test(source) || fighter.edition === "one";
+		const is2024 = /^XPHB$/i.test(source) || /2024/.test(source) || source === "TGTT" || fighter.edition === "one";
 		return is2024 ? (this.getClassLevel("Fighter") || 0) : 0;
 	}
 	// #endregion
