@@ -151,6 +151,11 @@ describe("R33 — applying a special arrow rolls weapon damage, spends one, surf
 		const rollCalls = [];
 		combat._rollDamage = async (attackId) => { rollCalls.push(attackId); };
 		combat.renderCombatQuiver = () => {}; // stub the DOM re-render (no document in node env)
+		// R34 (#1b): the apply path must PERSIST the decrement and RE-RENDER the
+		// Inventory tab so the count doesn't look stale / reset on reload. Spy both.
+		const saveCalls = [];
+		const invRenderCalls = [];
+		combat._page = {saveCharacter: () => saveCalls.push(1), _inventory: {render: () => invRenderCalls.push(1)}};
 		const toasts = [];
 		const prevJq = globalThis.JqueryUtil;
 		globalThis.JqueryUtil = {doToast: (o) => toasts.push(o)};
@@ -177,6 +182,9 @@ describe("R33 — applying a special arrow rolls weapon damage, spends one, surf
 		expect(typeof res.effect).toBe("string");
 		expect(toasts.length).toBe(1);
 		expect(toasts[0].content).toMatch(/Healing Arrow/);
+		// (d) R34 (#1b): persisted exactly once and re-rendered the Inventory tab.
+		expect(saveCalls.length).toBe(1);
+		expect(invRenderCalls.length).toBe(1);
 
 		globalThis.JqueryUtil = prevJq;
 	});
