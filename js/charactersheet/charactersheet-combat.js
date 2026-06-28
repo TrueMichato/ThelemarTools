@@ -4750,7 +4750,14 @@ class CharacterSheetCombat {
 	 */
 	_createCombatActionElement (feature) {
 		const featureId = `${feature.name}-${feature.source || ""}`.replace(/\s+/g, "-").toLowerCase();
-		const hasUses = feature.uses && feature.uses.max > 0;
+		// Suppress the per-feature `uses` counter for Fighter pools whose uses are shown
+		// authoritatively as a synthetic combat resource in the Resources section (Second Wind /
+		// Arcane Shot / Indomitable). Rendering `feature.uses` here would duplicate that counter
+		// (and for Second Wind show the same number twice). Defense-in-depth: even if a save's
+		// baked `feature.uses` survived the load migration ((c) in _migrateStalePassiveData),
+		// the runtime render still never double-counts.
+		const isSyntheticTracked = CharacterSheetState.isSyntheticTrackedResourceFeature?.(feature.name);
+		const hasUses = !isSyntheticTracked && feature.uses && feature.uses.max > 0;
 		const actionTypeKey = this._getFeatureActionType(feature);
 		const actionIsAvailable = this._isActionTypeAvailable(actionTypeKey);
 		const usesAvailable = !hasUses || feature.uses.current > 0;
