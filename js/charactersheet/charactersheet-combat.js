@@ -9877,7 +9877,6 @@ class CharacterSheetCombat {
 					background: ${isSelected ? "rgba(51,122,183,0.15)" : "transparent"};
 					opacity: ${trad.locked ? "0.85" : "1"};
 					font-size: 0.85rem;
-					opacity: ${isLocked ? "0.85" : "1"};
 					transition: all 0.15s;
 				" data-trad="${trad.code}">
 					<input type="checkbox" class="mr-1" style="margin: 0;" ${isSelected ? "checked" : ""} ${trad.locked ? "disabled" : ""}>
