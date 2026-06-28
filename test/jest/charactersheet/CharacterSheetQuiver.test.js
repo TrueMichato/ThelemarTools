@@ -261,9 +261,13 @@ describe("Quiver — non-blocking, ranged-only post-attack picker", () => {
 		expect(quiverHook(combat).predicate({isRanged: true, attack: bow})).toBe(false);
 	});
 
-	it("does NOT fire when ammunition tracking is disabled", () => {
+	it("FIRES even when ammunition tracking is disabled (the quiver is its own always-on feature)", () => {
+		// R32 behaviour change (defect #5): the quiver picker is deliberately NOT
+		// gated on `isAmmunitionTrackingEnabled`. Players who keep loose-ammo
+		// tracking OFF still want the quiver picker on a ranged shot. The previous
+		// assertion (hook suppressed when tracking off) is now obsolete.
 		const combat = mkPickerCombat([{id: "arrows", name: "Arrows", quantity: 20}], {tracking: false});
-		expect(quiverHook(combat).predicate({isRanged: true, attack: bow})).toBe(false);
+		expect(quiverHook(combat).predicate({isRanged: true, attack: bow})).toBe(true);
 	});
 
 	it("is ADDITIVE — registered alongside other post-attack riders, not replacing them", () => {
