@@ -107,6 +107,9 @@ function makeCombat (state) {
 	combat._state = state;
 	const saves = [];
 	const invRenders = [];
+	// The damage-roll ammo-consume block now re-renders the attack rows (R36 #2);
+	// stub it so the DOM-less harness doesn't hit `document` in `renderAttacks`.
+	combat.renderAttacks = () => {};
 	combat._page = {
 		saveCharacter: jest.fn(() => { saves.push(JSON.parse(JSON.stringify(state.toJson()))); }),
 		_inventory: {render: jest.fn(() => { invRenders.push(1); })},
