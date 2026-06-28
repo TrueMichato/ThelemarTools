@@ -4526,7 +4526,9 @@ class CharacterSheetLevelUp {
 		}
 
 		if (selectedCombatTraditions != null) {
-			this._state.setCombatTraditions([...selectedCombatTraditions]);
+			// Union with already-stored traditions so a subclass tradition choice
+			// granted/picked this level never clobbers previously-known ones (bug #3).
+			this._state.mergeCombatTraditions([...selectedCombatTraditions]);
 		}
 
 		// Apply weapon-mastery selections (bug #12). The picker pre-seeds with any
