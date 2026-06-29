@@ -274,9 +274,16 @@ describe("Quiver — per-weapon active-ammo selector affordance (R35)", () => {
 		expect(combat._isAmmoSelectorEligible(spell, false)).toBe(false);
 	});
 
-	it("is NOT eligible when the quiver holds no compatible ammo", () => {
+	it("is ELIGIBLE with an empty quiver — shows a Regular-only selector (R37 #1: blowguns / hand crossbows always get a selector)", () => {
+		// R37 change: a ranged weapon that uses ammunition is ALWAYS eligible for
+		// the selector, even with no special ammo in the quiver. The selector then
+		// offers just "Regular" so the affordance is consistent (the user reported
+		// blowgun needles / ammo-less hand crossbows getting no selector at all).
 		const combat = mkPickerCombat([]);
-		expect(combat._isAmmoSelectorEligible(bow, false)).toBe(false);
+		expect(combat._isAmmoSelectorEligible(bow, false)).toBe(true);
+		const html = combat._renderAmmoSelector(bow, false);
+		expect(html).toMatch(/charsheet__attack-ammo-select/);
+		expect(html).toMatch(/Regular/);
 	});
 
 	it("is ELIGIBLE even when ammunition tracking is disabled (the quiver is its own always-on feature)", () => {

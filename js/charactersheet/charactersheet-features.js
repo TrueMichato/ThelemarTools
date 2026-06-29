@@ -2044,12 +2044,25 @@ class CharacterSheetFeatures {
 			// Get description - look it up if not stored
 			const description = feat.description || this._getFeatDescription(feat) || "<em class='ve-muted'>No description available</em>";
 
+			// (R37 #8) Activatable feats (Inspiring Leader) surface a Use button on their card
+			// that spends a per-rest use and applies the effect. Generic by feature flag: any
+			// feat the page exposes an Inspiring-Leader-style handler for + that carries uses.
+			const isActivatableFeat = /^inspiring leader$/i.test(feat.name || "") && feat.uses;
+			const featUsesStr = isActivatableFeat
+				? `<span class="ve-muted ml-2 ve-small">(${feat.uses.current}/${feat.uses.max})</span>`
+				: "";
+			const featActivateBtn = isActivatableFeat
+				? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feat-activate" title="Use ${feat.name}" ${feat.uses.current > 0 ? "" : "disabled"}>Use</button>`
+				: "";
+
 			const featEl = e_({outer: `
 				<div class="charsheet__feat charsheet__feature" data-feat-id="${feat.id}">
 					<div class="charsheet__feat-header charsheet__feature-header">
 						<span class="charsheet__feature-toggle glyphicon ${isExpanded ? "glyphicon-chevron-down" : "glyphicon-chevron-right"}"></span>
 						<span class="charsheet__feat-name charsheet__feature-name">${featNameHtml}</span>
+						${featUsesStr}
 						<div class="charsheet__feature-actions">
+							${featActivateBtn}
 							<button class="ve-btn ve-btn-xs ${this._state.getFeatNote?.(feat.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feat-note" title="${this._state.getFeatNote?.(feat.id) ? "Edit Note" : "Add Note"}">
 								<span class="glyphicon glyphicon-comment"></span>
 							</button>
@@ -2064,6 +2077,17 @@ class CharacterSheetFeatures {
 					</div>
 				</div>
 			`});
+
+			const activateBtnEl = featEl.querySelector(".charsheet__feat-activate");
+			if (activateBtnEl) {
+				activateBtnEl.addEventListener("click", (e) => {
+					e.stopPropagation();
+					Promise.resolve(this._page?._pUseInspiringLeader?.(feat)).catch(err => {
+						// eslint-disable-next-line no-console
+						console.error("[CharSheet Features] Error using Inspiring Leader:", err);
+					});
+				});
+			}
 
 			// Toggle expansion
 			featEl.querySelector(".charsheet__feature-toggle").addEventListener("click", (e) => {

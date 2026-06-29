@@ -2606,6 +2606,34 @@
 			"name": "Amanuensis",
 			"source": "TGTT",
 			"page": 38,
+			"classes": {
+				"fromClassList": [
+					{
+						"name": "Sorcerer",
+						"source": "TGTT"
+					},
+					{
+						"name": "Bard",
+						"source": "TGTT"
+					},
+					{
+						"name": "Wizard",
+						"source": "TGTT"
+					},
+					{
+						"name": "Druid",
+						"source": "TGTT"
+					},
+					{
+						"name": "Cleric",
+						"source": "TGTT"
+					},
+					{
+						"name": "Ranger",
+						"source": "TGTT"
+					}
+				]
+			},
 			"level": 0,
 			"school": "T",
 			"time": [
@@ -2660,6 +2688,34 @@
 			"name": "Transposition",
 			"source": "TGTT",
 			"page": 38,
+			"classes": {
+				"fromClassList": [
+					{
+						"name": "Sorcerer",
+						"source": "TGTT"
+					},
+					{
+						"name": "Bard",
+						"source": "TGTT"
+					},
+					{
+						"name": "Wizard",
+						"source": "TGTT"
+					},
+					{
+						"name": "Druid",
+						"source": "TGTT"
+					},
+					{
+						"name": "Cleric",
+						"source": "TGTT"
+					},
+					{
+						"name": "Ranger",
+						"source": "TGTT"
+					}
+				]
+			},
 			"level": 0,
 			"school": "C",
 			"time": [
@@ -3758,6 +3814,34 @@
 			"name": "Spider Gout",
 			"source": "TGTT",
 			"page": 38,
+			"classes": {
+				"fromClassList": [
+					{
+						"name": "Sorcerer",
+						"source": "TGTT"
+					},
+					{
+						"name": "Bard",
+						"source": "TGTT"
+					},
+					{
+						"name": "Wizard",
+						"source": "TGTT"
+					},
+					{
+						"name": "Druid",
+						"source": "TGTT"
+					},
+					{
+						"name": "Cleric",
+						"source": "TGTT"
+					},
+					{
+						"name": "Ranger",
+						"source": "TGTT"
+					}
+				]
+			},
 			"level": 2,
 			"school": "C",
 			"time": [
@@ -4001,6 +4085,34 @@
 			"name": "Venom Bite",
 			"source": "TGTT",
 			"page": 38,
+			"classes": {
+				"fromClassList": [
+					{
+						"name": "Sorcerer",
+						"source": "TGTT"
+					},
+					{
+						"name": "Bard",
+						"source": "TGTT"
+					},
+					{
+						"name": "Wizard",
+						"source": "TGTT"
+					},
+					{
+						"name": "Druid",
+						"source": "TGTT"
+					},
+					{
+						"name": "Cleric",
+						"source": "TGTT"
+					},
+					{
+						"name": "Ranger",
+						"source": "TGTT"
+					}
+				]
+			},
 			"level": 2,
 			"school": "V",
 			"time": [
@@ -30657,7 +30769,7 @@
 			"languageProficiencies": [
 				{
 					"common": true,
-					"tabaxi|TGTT": true
+					"felis|TGTT": true
 				}
 			]
 		},

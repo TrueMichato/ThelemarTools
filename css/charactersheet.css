@@ -4001,10 +4001,17 @@
 	line-height: 1.2;
 }
 
-/* Keep the reorder bump buttons from being squeezed when the name wraps. The
-   mod / passive / delete controls already declare flex-shrink:0. */
+/* Keep the reorder bump buttons from being squeezed when the name wraps, and
+   keep them SMALL so the user-defined (often long) lore-skill name keeps as much
+   of the row width as possible — the default `ve-btn-xs` is too wide here and
+   forced the name into a sliver that clipped mid-word. */
 .charsheet__lore-skill-bump {
 	flex-shrink: 0;
+	padding: 0 3px;
+	min-width: 16px;
+	height: 16px;
+	line-height: 1;
+	font-size: 0.6em;
 }
 
 .charsheet__lore-skill-mod {
@@ -5329,6 +5336,22 @@
 	align-items: center;
 	justify-content: space-between;
 	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__combat-consumable {
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, rgba(127, 127, 127, 0.25));
+	border-radius: var(--cs-radius-md, 8px);
+	background: var(--cs-surface-2, rgba(127, 127, 127, 0.06));
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__combat-consumable-icon {
+	font-size: 1.05em;
+}
+
+.charsheet__combat-consumable-qty {
+	opacity: 0.8;
 }
 
 

@@ -1844,6 +1844,35 @@ class CharacterSheetClassUtils {
 		return false;
 	}
 
+	/**
+	 * Spell-picker class-filter predicate (Bug 7 / troubleshooting F9).
+	 *
+	 * The picker pool is the FULL spell list (so the class filter can broaden,
+	 * not just narrow). This decides whether a spell is shown for the currently
+	 * selected class names:
+	 *   - "All Classes" (empty `selectedClasses`) → always show.
+	 *   - Fast path: the spell's raw `fromClassList` membership intersects the
+	 *     selection (covers a class's normal list for ANY selected class).
+	 *   - Authoritative fallback (the character's OWN classes only): a spell may
+	 *     be available via a subclass-EXPANDED list (Divine Soul → Cleric,
+	 *     Chronurgy → EGW) that is NOT on the raw `fromClassList`. Without this,
+	 *     the broadened pool would drop those from the DEFAULT view, which only
+	 *     has the character's own classes selected.
+	 *
+	 * @param {*} spell
+	 * @param {Set<string>} selectedClasses Selected class names; empty = "All Classes".
+	 * @param {Array<{className:string}>} ownClassConfigs From `_buildPickerOwnClassConfigs`.
+	 * @param {string[]} spellClasses Cached raw `fromClassList` names for `spell`.
+	 * @returns {boolean}
+	 */
+	static spellMatchesPickerClassFilter (spell, selectedClasses, ownClassConfigs, spellClasses) {
+		if (!selectedClasses || selectedClasses.size === 0) return true; // All Classes
+		if (spellClasses && spellClasses.some(c => selectedClasses.has(c))) return true;
+		if (selectedClasses.has("__NONE__")) return false;
+		if (!ownClassConfigs || !ownClassConfigs.length) return false;
+		return ownClassConfigs.some(own => selectedClasses.has(own.className) && this.spellIsAvailableForClass(spell, own));
+	}
+
 	static isDivineSoulSubclass (/** @type {*} */ subclass) {
 		if (!subclass?.name && !subclass?.shortName) return false;
 		return [subclass.name, subclass.shortName]

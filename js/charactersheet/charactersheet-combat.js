@@ -1920,6 +1920,61 @@ class CharacterSheetCombat {
 	}
 
 	/**
+	 * (R37 #9) Combat-tab consumables quick-use panel. Lists every consumable the
+	 * character carries (potions, scrolls, poisons, & similarly-named items —
+	 * detected by the inventory module's own `_isConsumable` so the two surfaces
+	 * never drift) with a one-click "Use" button that routes through the existing
+	 * inventory `_useConsumable` pipeline (roll healing / cast scroll / decrement
+	 * quantity / persist). Hidden when the character carries no consumables.
+	 */
+	renderCombatConsumables () {
+		const section = document.getElementById("charsheet-combat-consumables-section");
+		const container = document.getElementById("charsheet-combat-consumables");
+		if (!container) return;
+
+		const inv = this._page?._inventory;
+		const items = (this._state.getItems?.() || []).filter(it => inv?._isConsumable?.(it));
+
+		if (!items.length) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+
+		container.innerHTML = "";
+		items.forEach((item) => {
+			const qty = item.quantity || 1;
+			const emoji = inv?._getItemTypeEmoji?.(item) || "🧪";
+			let nameHtml = item.name;
+			if (this._page?.getHoverLink && item.source) {
+				try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, item.name, item.source); } catch (e) { nameHtml = item.name; }
+			}
+			const row = e_({outer: `
+				<div class="charsheet__combat-consumable ve-flex ve-flex-v-center ve-flex-wrap gap-1" data-item-id="${item.id}">
+					<span class="charsheet__combat-consumable-icon" title="Consumable">${emoji}</span>
+					<span class="bold charsheet__combat-consumable-name">${nameHtml}</span>
+					<span class="ve-muted ve-small charsheet__combat-consumable-qty">×${qty}</span>
+					<button class="ve-btn ve-btn-xs ve-btn-primary ml-auto charsheet__combat-consumable-use" title="Use ${item.name}">Use</button>
+				</div>
+			`});
+			const useBtn = row.querySelector(".charsheet__combat-consumable-use");
+			if (useBtn) {
+				useBtn.addEventListener("click", (/** @type {*} */ evt) => {
+					evt.stopPropagation();
+					Promise.resolve(inv?._useConsumable?.(item.id))
+						.then(() => this.renderCombatConsumables())
+						.catch((err) => {
+							// eslint-disable-next-line no-console
+							console.error("[CharSheet Combat] Error using consumable:", err);
+						});
+				});
+			}
+			container.append(row);
+		});
+	}
+
+	/**
 	 * Pull the first `{@damage ...}`/`{@dice ...}` expression from an Arcane Shot
 	 * option's entries/description, plus a trailing damage-type word if present.
 	 * @param {{entries?: *, description?: string}} shot
@@ -2990,9 +3045,11 @@ class CharacterSheetCombat {
 
 	/**
 	 * Whether an attack should show the active ammunition SELECTOR (Bug #3): a
-	 * RANGED WEAPON attack (not melee, not a spell) sourced from a weapon that uses
-	 * ammunition, whose equipped quiver currently holds compatible ammo. Pure
-	 * predicate (no DOM) so it's unit-testable. Deliberately NOT gated on
+	 * RANGED WEAPON attack (not melee, not a spell) sourced from a weapon that
+	 * uses ammunition. Shown for ANY such weapon — even when the quiver holds no
+	 * special ammo, the selector still offers "Regular" as the sole option (so
+	 * blowguns and hand crossbows always get a selector). Pure predicate (no DOM)
+	 * so it's unit-testable. Deliberately NOT gated on
 	 * `isAmmunitionTrackingEnabled` — the quiver is its own always-on feature.
 	 * @param {*} attack
 	 * @param {boolean} [isMelee] - Precomputed melee classification (optional).
@@ -3004,7 +3061,7 @@ class CharacterSheetCombat {
 		if (melee) return false;
 		const weaponId = attack.sourceItem?.id;
 		if (!weaponId || !attack.sourceItem?.ammoType) return false;
-		return (this._state.getQuiverAmmunitionForWeapon?.(weaponId) || []).length > 0;
+		return true;
 	}
 
 	/**
@@ -4532,6 +4589,7 @@ class CharacterSheetCombat {
 		this._runRenderSteps([
 			() => this.renderAttacks(),
 			() => this.renderCombatQuiver(),
+			() => this.renderCombatConsumables(),
 			() => this.renderDeathSaves(),
 			() => this.renderCombatChanneledSpell(),
 			() => this.renderCombatSpells(),
@@ -4604,6 +4662,17 @@ class CharacterSheetCombat {
 			// "passive" riders (Tactical Mind / Stamina Enthusiast) that fall through to the
 			// heuristics.
 			if (CharacterSheetCombat.FIGHTER_OWNED_COMBAT_FEATURES.includes(nameLower)) return false;
+
+			// (R37 #5) Pure TOGGLE active-states (Bladesong, Rage, Wild Shape, combat stances)
+			// belong EXCLUSIVELY to the Active-States panel, where they are flipped on/off and
+			// their resource/uses are tracked. They must not ALSO appear in the generic
+			// "Abilities" list — Bladesong was double-surfaced because it carries a bonus-action
+			// + limited uses, satisfying the action-economy heuristic below. Explicitly
+			// classified abilities / combat / reaction overrides are NOT toggles
+			// (detectActivatableFeature returns isToggle:false for them via the classification
+			// override branch, which runs BEFORE the ACTIVE_STATE_TYPES toggle loop), so the
+			// early-return paths below are unaffected.
+			if (CharacterSheetState.detectActivatableFeature(f)?.isToggle) return false;
 
 			// Features explicitly classified as combat actions or reactions via overrides
 			// are always included regardless of other heuristics

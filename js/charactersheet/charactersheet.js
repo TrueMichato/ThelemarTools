@@ -3637,30 +3637,58 @@ class CharacterSheetPage {
 			name.textContent = "Normal vision";
 			empty.append(icon, name);
 			container.append(empty);
-			return;
+		} else {
+			senses.forEach(sense => {
+				const item = document.createElement("div");
+				item.className = "charsheet__sense-item";
+				item.title = sense.title;
+
+				const icon = document.createElement("span");
+				icon.className = "charsheet__sense-icon";
+				icon.setAttribute("aria-hidden", "true");
+				icon.textContent = sense.emoji;
+
+				const name = document.createElement("span");
+				name.className = "charsheet__sense-name";
+				name.textContent = sense.label;
+
+				const range = document.createElement("span");
+				range.className = "charsheet__sense-range";
+				range.textContent = `${sense.range} ft.`;
+
+				item.append(icon, name, range);
+				container.append(item);
+			});
 		}
 
-		senses.forEach(sense => {
+		// (R37 #10) Reading speed (TGTT "Reading Books"): show it alongside senses on the
+		// Overview when the TGTT homebrew is enabled. Pages/hour = (1 + INTmod×2) × 30.
+		// Reading Books is a TGTT linguistics rule, so gate on the granular
+		// `thelemar_linguisticsBonus` flag (present in real saves) — falling back to the
+		// newer master `enableTgtt` flag for forward-compatibility.
+		const csSettings = this._state._data?.settings || {};
+		if (csSettings.enableTgtt || csSettings.thelemar_linguisticsBonus) {
+			const pages = this._state.getReadingSpeed();
 			const item = document.createElement("div");
 			item.className = "charsheet__sense-item";
-			item.title = sense.title;
+			item.title = "TGTT Reading Books (p.38): (1 + INT modifier ÷ 2) × 30 pages per hour";
 
 			const icon = document.createElement("span");
 			icon.className = "charsheet__sense-icon";
 			icon.setAttribute("aria-hidden", "true");
-			icon.textContent = sense.emoji;
+			icon.textContent = "📖";
 
 			const name = document.createElement("span");
 			name.className = "charsheet__sense-name";
-			name.textContent = sense.label;
+			name.textContent = "Reading speed";
 
 			const range = document.createElement("span");
 			range.className = "charsheet__sense-range";
-			range.textContent = `${sense.range} ft.`;
+			range.textContent = `${pages} pg/hr`;
 
 			item.append(icon, name, range);
 			container.append(item);
-		});
+		}
 	}
 
 	/**
@@ -8017,6 +8045,7 @@ class CharacterSheetPage {
 			case "guided strike": return this._pUseGuidedStrike(feature, resource, resourceCost);
 			case "forked tongue": return this._pOpenForkedTongueSwap(feature);
 			case "baleful interdict": return this._pUseBalefulInterdict(feature);
+			case "song of defense": return this._pUseSongOfDefense(feature);
 		}
 		// (S2 contract) Generic save-prompt for any synthesized Divine Manifestation option that
 		// carries a save (_manifestationRequiresSave). Surfaces the DC + ability so the player
@@ -8044,6 +8073,119 @@ class CharacterSheetPage {
 		this._saveCurrentCharacter();
 		this._renderResources();
 		this._renderActiveStates();
+		return true;
+	}
+
+	/**
+	 * (R37 #6) Use Song of Defense (Bladesinger, level 10): while Bladesong is active, expend
+	 * one spell slot as a reaction to reduce incoming damage by FIVE TIMES the slot's level.
+	 * Surfaces a non-blocking toast listing each available spell-slot level as a button; on
+	 * click it expends that slot, computes the reduction (5 × level), and offers to apply it to
+	 * the character's HP (mirrors Healing Hands' "Apply to Self" affordance — reducing damage
+	 * you already subtracted is equivalent to restoring that many HP). Gated on Bladesong being
+	 * active, per RAW. Spell slots are the resource (the ability itself has no limited uses).
+	 * @param {object} feature
+	 * @returns {boolean} true (handled)
+	 */
+	_pUseSongOfDefense (feature) {
+		// RAW prerequisite: Bladesong must be active.
+		if (!this._state.isStateTypeActive?.("bladesong")) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "🛡️ Song of Defense requires your Bladesong to be active."}));
+			return true;
+		}
+
+		// Collect available spell-slot levels (1–9) with at least one slot remaining.
+		const available = [];
+		for (let level = 1; level <= 9; ++level) {
+			if (this._state.getSpellSlotsCurrent(level) > 0) available.push(level);
+		}
+		if (!available.length) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "🛡️ Song of Defense: no spell slots remaining to expend."}));
+			return true;
+		}
+
+		const btnsHtml = available
+			.map(level => `<button class="ve-btn ve-btn-xs ve-btn-primary btn-song-defense-slot ml-1" data-slot-level="${level}">L${level} (−${level * 5})</button>`)
+			.join("");
+		const toastEl = e_({tag: "span", html: `<span>🛡️ <strong>Song of Defense</strong>: expend a spell slot to reduce the damage by 5× its level:</span> ${btnsHtml}`});
+
+		toastEl.querySelectorAll(".btn-song-defense-slot").forEach((btn) => {
+			btn.addEventListener("click", (/** @type {*} */ evt) => {
+				evt.stopPropagation();
+				if (btn.disabled) return;
+				const level = parseInt(btn.getAttribute("data-slot-level"), 10);
+				if (!this._state.useSpellSlot(level)) {
+					JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: `🛡️ No level ${level} spell slot remaining.`}));
+					return;
+				}
+				// Disable every slot button — the reaction is spent once a slot is chosen.
+				toastEl.querySelectorAll(".btn-song-defense-slot").forEach((b) => { b.disabled = true; });
+				const reduction = level * 5;
+				const hp = this._state.getHp();
+				const newHp = Math.min(hp.max, hp.current + reduction);
+				const restored = newHp - hp.current;
+				this._state.setHp(newHp, hp.max);
+				btn.textContent = `✓ −${reduction} (L${level})`;
+				this._saveCurrentCharacter();
+				this._renderHp?.();
+				this._renderResources?.();
+				this._renderQuickSpells?.();
+				if (this._spells) this._spells.render?.();
+				JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `🛡️ Song of Defense: reduced damage by ${reduction} (restored ${restored} HP).`}));
+			});
+		});
+
+		JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: toastEl, autoHideTime: 15000}));
+		return true;
+	}
+
+	/**
+	 * (R37 #8) Use Inspiring Leader: spend 10 minutes (a per-short/long-rest use) to grant
+	 * temporary hit points (your level + CHA modifier; XPHB: + the higher of WIS/CHA) to up to
+	 * six creatures within 30 ft, including yourself. Spends one use (written through both the
+	 * feat record's `uses` and the linked Resources-panel pool so every surface stays in sync),
+	 * then offers an "Apply to Self" affordance (temp HP doesn't stack — takes the higher).
+	 * @param {object} feat
+	 * @returns {boolean} true (handled)
+	 */
+	_pUseInspiringLeader (feat) {
+		const live = (this._state.getFeats?.() || []).find(f => f.id === feat?.id) || feat;
+		if (live?.uses && live.uses.current <= 0) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "💪 Inspiring Leader: no uses remaining (recharges on a short or long rest)."}));
+			return true;
+		}
+
+		const tempHp = this._state.getInspiringLeaderTempHp(live);
+
+		// Consume one use — write through the live feat record AND the linked resource pool.
+		if (live?.uses) {
+			const newCur = Math.max(0, live.uses.current - 1);
+			const stFeat = (this._state._data.feats || []).find(f => f.id === live.id);
+			if (stFeat?.uses) stFeat.uses.current = newCur;
+			const res = (this._state.getResources?.() || []).find(r => r.featId === live.id || r.name === live.name);
+			if (res) this._state.setResourceCurrent(res.id, newCur);
+		}
+
+		const toastEl = e_({tag: "span", html: `<span>💪 <strong>Inspiring Leader</strong>: choose up to six friendly creatures within 30 ft — each gains <strong>${tempHp}</strong> temporary HP.</span> <button class="ve-btn ve-btn-xs ve-btn-primary btn-apply-to-self ml-2">Apply to Self</button>`});
+		const applyBtn = toastEl.querySelector(".btn-apply-to-self");
+		if (applyBtn) {
+			applyBtn.addEventListener("click", (/** @type {*} */ evt) => {
+				evt.stopPropagation();
+				if (applyBtn.disabled) return;
+				applyBtn.disabled = true;
+				const cur = this._state.getTempHp() || 0;
+				if (tempHp > cur) this._state.setTempHp(tempHp);
+				applyBtn.textContent = "✓ Applied to Self";
+				this._saveCurrentCharacter();
+				this._renderHp?.();
+				JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `💪 Gained ${tempHp} temporary HP.`}));
+			});
+		}
+		JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: toastEl, autoHideTime: 15000}));
+
+		this._saveCurrentCharacter();
+		if (this._features) { this._features._renderFeats?.(); this._features._renderResources?.(); }
+		this._renderResources?.();
 		return true;
 	}
 
@@ -13196,6 +13338,14 @@ class CharacterSheetPage {
 	 */
 	static getHoverLink (page, name, source, hash = null, displayName = null, hrefOverride = null) {
 		try {
+			// Custom items live only in the character's inventory — they are NOT in
+			// the site renderer's data cache, so any hover attempt fails with
+			// "Failed to load renderable content for: ... source=Custom". Render a
+			// plain (non-hover) name instead. Items are the only custom-source
+			// entities the sheet emits links for; scope the guard to PG_ITEMS so
+			// other entity hovers are untouched.
+			if (source === "Custom" && page === UrlUtil.PG_ITEMS) return displayName || name;
+
 			const finalHash = hash || UrlUtil.encodeForHash([name, source].join(HASH_LIST_SEP));
 			const hoverAttrs = Renderer.hover.getHoverElementAttributes({page, source, hash: finalHash});
 			const href = hrefOverride || `${page}#${finalHash}`;

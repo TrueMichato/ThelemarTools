@@ -131,15 +131,22 @@ describe("R33→R35 — active-ammo selector affordance gating", () => {
 		expect(combat._renderAmmoSelector(attack, true)).toBe("");
 	});
 
-	it("does NOT render when the quiver holds no compatible ammo (quiver unequipped)", () => {
+	it("RENDERS a Regular-only selector when the quiver holds no compatible ammo (R37 #1)", () => {
+		// R37 change: a ranged ammunition weapon ALWAYS gets a selector, even with
+		// the quiver unequipped / empty — it just offers "Regular" as the sole
+		// option. Previously the selector vanished entirely, which the user
+		// reported as blowgun needles / ammo-less hand crossbows getting no
+		// ammo-choosing affordance at all.
 		const state = loadCharacter();
 		state.setItemEquipped(ID.quiver, false);
 		expect(state.getQuiverAmmunitionForWeapon(ID.longbow).length).toBe(0);
 
 		const combat = mkCombat(state);
 		const attack = mkWeaponAttack(state, ID.longbow, {isMelee: false});
-		expect(combat._isAmmoSelectorEligible(attack, false)).toBe(false);
-		expect(combat._renderAmmoSelector(attack, false)).toBe("");
+		expect(combat._isAmmoSelectorEligible(attack, false)).toBe(true);
+		const html = combat._renderAmmoSelector(attack, false);
+		expect(html).toMatch(/charsheet__attack-ammo-select/);
+		expect(html).toMatch(/<option value="" selected>Regular<\/option>/);
 	});
 
 	it("does NOT render for a SPELL attack even when ranged with a sourceItem", () => {

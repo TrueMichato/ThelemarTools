@@ -69,6 +69,7 @@ Match the symptom to a category:
 | Subclass spell missing from spell picker | **F6** — picker source filter must include every subclass source |
 | `[object Object]` in picker filter pill | **F7** — use canonical display helper, not `String(value)` |
 | Subclass `_copy` spells missing in picker | **F8** — picker must lazy-merge `_copy` |
+| Spell picker "filter broken" recurs; "all classes" can't find a basic spell | **F9** — candidate pool pre-restricted before the filter; load FULL pool, defer to `spellMatchesPickerClassFilter` |
 | Respec shows wrong race ASI (Tasha's) | **G6** — read user choice from build snapshot, not race default |
 | Single-class LevelUp crashes after a multiclass change | **G7** — hoist branch-local vars to function top |
 | Custom Background lets you pick 3 of 3 | **G8** — checkbox group needs max-selection guard |

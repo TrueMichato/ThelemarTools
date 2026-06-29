@@ -452,7 +452,18 @@ Symptom-level test: a Divine Soul Sorcerer (TGTT class, XGE subclass) opening th
 
 ---
 
-## G. Builder / LevelUp / QuickBuild Errors
+### F9. Spell Picker — Candidate POOL Pre-Restricted Before the Filter UI Runs (SYSTEMIC)
+
+**Symptom**: The spell-picker filter is "broken" in a way that recurs no matter how many times it's "fixed": ticking **all classes** on a Wizard still can't find a basic spell like **Healing Word**, and a subclass-only spell like **Transposition** never appears even with every class/subclass option enabled. Each prior fix touched a different downstream symptom (one class, one subclass, one `_copy` case) and the bug came back from a new angle.
+
+**Root Cause**: The picker pre-restricted its **candidate pool** to the character's OWN class/subclass *before* the user's filter selections were ever applied. The class/subclass filter UI then operated on an already-truncated list, so any spell outside the character's native list was structurally unreachable — the filter could only ever *narrow* a pool that had already excluded the answer. This is why it presented as an endless series of "the filter is wrong again" reports: the real defect was upstream of the filter entirely.
+
+**Fix** (do this once, systemically — do NOT patch another downstream symptom):
+1. Load the **FULL** spell pool into the picker (gated only by source/edition availability), not the character's native class/subclass list.
+2. Defer ALL class/subclass matching to a single helper — `spellMatchesPickerClassFilter(spell, filterState)` — that is driven by the filter UI state, checking `fromClassList`, `fromSubclass`, `fromClassListVariant`, and lazy-merged `_copy` augmentation (see F4/F8) together in one place.
+3. Never re-introduce a pre-filter pool restriction "for performance" — that is the exact regression vector. Filter at match time only.
+
+**Verification**: a Wizard with "all classes" ticked finds Healing Word; Transposition (subclass-only) appears when its subclass/class is enabled. Pinned by `CharacterSheetSpellPickerClassFilter.test.js`. (R37 #7.)
 
 ### G1. Fix in One → Check All Three
 
@@ -844,6 +855,7 @@ UX bonus pattern: buttons, not a dropdown, for short option lists ("Pay 50gp ✓
 | Subclass spell missing from picker | **F6** — picker source filter must include every subclass source on every class. |
 | `[object Object]` in picker filter pill | **F7** — subclass filter entries are objects; use the canonical display helper, never `String(value)`. |
 | Subclass `_copy` spells missing in picker | **F8** — picker must lazy-merge `_copy` the same way the sheet does. |
+| Spell picker "filter broken" recurs; "all classes" can't find Healing Word; subclass spell never appears | **F9** — candidate pool pre-restricted before the filter UI runs. Load FULL pool; defer matching to `spellMatchesPickerClassFilter`. |
 | Respec shows wrong race ASI (Tasha's) | **G6** — read `levelHistory[0].raceAbilityChoices`, not `race.ability`. |
 | `ReferenceError` in single-class LevelUp after a multiclass change | **G7** — hoist multiclass-branch vars to function top with safe defaults. |
 | Custom background lets you choose 3 of 3 | **G8** — checkbox group needs a max-selection guard plus a visible "(X of N chosen)" counter. |
