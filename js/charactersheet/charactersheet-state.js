@@ -7215,6 +7215,36 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * (R37 #10) Reading speed in pages per hour (TGTT "Reading Books", p.38):
+	 *   (1 + Intelligence modifier ÷ 2) × 30 pages/hour.
+	 * Clamped to a sensible floor of 1 so a low-INT reader is "very slow" rather than
+	 * 0/negative (the rule assumes adventuring INT ≥ 10). Pure derived getter — callers
+	 * gate display on the TGTT setting.
+	 * @returns {number} pages per hour
+	 */
+	getReadingSpeed () {
+		const intMod = this.getAbilityMod("int");
+		return Math.max(1, (1 + intMod / 2) * 30);
+	}
+
+	/**
+	 * (R37 #8) Temporary hit points granted by Inspiring Leader to each chosen creature:
+	 * your level + your Charisma modifier (PHB). The XPHB reprint lets you use Wisdom OR
+	 * Charisma (choice at selection); since the per-character choice isn't tracked, the
+	 * XPHB variant uses the HIGHER of the two modifiers. Floored at your level (a creature
+	 * always gains at least its benefactor's level in temp HP when the modifier is ≤ 0).
+	 * @param {object} [feat] - the feat record (used to detect the XPHB variant by source)
+	 * @returns {number} temp HP per creature
+	 */
+	getInspiringLeaderTempHp (feat) {
+		const level = this.getTotalLevel?.() || 1;
+		const chaMod = this.getAbilityMod("cha");
+		const isXphb = (feat?.source === "XPHB");
+		const mod = isXphb ? Math.max(chaMod, this.getAbilityMod("wis")) : chaMod;
+		return Math.max(level, level + mod);
+	}
+
+	/**
 	 * READ-ONLY. Itemized, per-source breakdown of the bonus an ability score
 	 * receives on TOP of its base (the base — `getAbilityBase` — already bakes in
 	 * any ASIs, which are applied via `setAbilityBase`, so ASIs are intentionally
@@ -23166,7 +23196,7 @@ class CharacterSheetState {
 		// bare code, and EXACT-match — `startsWith("A")` wrongly matched "ARMOR".
 		const [typeCode] = (item.type || "").toUpperCase().split("|");
 		if (typeCode === "A" || typeCode === "AF") return true;
-		if (item.arrow || item.bolt || item.bullet || item.dart || item.needle || item.sling) return true;
+		if (item.arrow || item.bolt || item.bullet || item.dart || item.needle || item.needleBlowgun || item.sling) return true;
 		// Name-based recognition for ammo stored as generic gear (e.g. "Sleep Dart
 		// (5)", "Healing Arrow"). Word boundaries keep weapons that merely launch
 		// ammo (Longbow, Hand Crossbow, Blowgun, Rapier) and unrelated gear OUT.
@@ -23237,7 +23267,9 @@ class CharacterSheetState {
 		if ((baseType.includes("bolt") || baseType.includes("crossbow")) && ammoItem.bolt) return true;
 		if (baseType.includes("bullet") && ammoItem.bullet) return true;
 		if (baseType.includes("dart") && ammoItem.dart) return true;
-		if (baseType.includes("needle") && ammoItem.needle) return true;
+		// Blowgun ammo is flagged `needleBlowgun` (not `needle`); 2024 Blowgun's
+		// ammoType is "needle|xphb", 2014's is "blowgun needle|phb".
+		if (baseType.includes("needle") && (ammoItem.needle || ammoItem.needleBlowgun)) return true;
 		if (baseType.includes("sling") && ammoItem.sling) return true;
 
 		// Fallback: check name match
@@ -30019,6 +30051,16 @@ class CharacterSheetState {
 			const getAbilityMod = (ability) => this.getAbilityMod(ability);
 			const getProfBonus = () => this.getProficiencyBonus();
 			uses = FeatureUsesParser.parseUses(feat.description, getAbilityMod, getProfBonus);
+		}
+
+		// (R37 #8) Inspiring Leader is a once-per-short/long-rest activated feat (spend 10 min
+		// to grant temp HP to up to six creatures). Its "a creature can't gain temporary hit
+		// points from this feat again until it has finished a short or long rest" phrasing is
+		// per-RECIPIENT, so the generic uses-parser doesn't model the user's own per-rest
+		// cadence. Synthesize a single short-rest use so the Features-tab feat card can surface
+		// an activation button + the Resources panel tracks it. Keyed by name (any source).
+		if (!uses && /^inspiring leader$/i.test(feat.name || "")) {
+			uses = {max: 1, recharge: "short"};
 		}
 
 		const featData = {
@@ -39058,6 +39100,16 @@ class CharacterSheetState {
 
 		// === Race feature combat actions ===
 		"shapechanger": "combat",
+
+		// === Bladesinger (TGTT/TCE Wizard) ===
+		// (R37 #6) Song of Defense is a REACTION-style ABILITY (expend a spell slot while
+		// Bladesong is active to reduce incoming damage by 5× the slot's level), NOT a
+		// persistent toggle. Without this override its "while your Bladesong is active"
+		// phrasing was caught by the toggle heuristics and it leaked into the Active-States
+		// panel as a meaningless on/off effect. Classifying it "ability" routes it through
+		// _buildAbilityActivationInfo → the generic Abilities list with a Use button, whose
+		// click effect is wired by name in charactersheet.js (_pUseSongOfDefense).
+		"song of defense": "ability",
 
 		// === Reactions wrongly detected as activatable toggle states ===
 		"deflect attacks": "reaction",

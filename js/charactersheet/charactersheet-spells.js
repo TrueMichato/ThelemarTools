@@ -373,65 +373,83 @@ class CharacterSheetSpells {
 			characterClass = classes[0];
 		}
 
-		// Get class spell list, filtered by allowed sources
-		let className = characterClass.name;
-		const classSource = characterClass.source;
-
-		// Gambler uses the Warlock spell list
-		const isGambler = characterClass.subclass?.name === "Gambler";
-		const spellListClassName = isGambler ? "Warlock" : className;
-
-		const filteredSpells = this._page.getFilteredSpellData();
-
-		// Check if we should include core spell lists for homebrew classes
-		const settings = this._state.getSettings?.() || {};
-		const includeCoreSpells = settings.includeCoreSpellsForHomebrew !== false; // Default true
-
-		// Determine if this is a non-standard source (homebrew/third-party)
-		const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE", "TGTT"].includes(classSource);
-
-		// Get character's subclass for subclass spell list checking
-		// Resolve a (possibly shallow) stored `{name, source}` ref to the full
-		// subclass object so `additionalSpells` and other lazy properties are
-		// available — without this, expanded-spell filter blocks (Chronurgy
-		// "source=EGW", Bladesinging, Order Domain, etc.) silently match nothing.
-		const classDataForSubclass = this._page.getClasses?.()?.find(
-			c => c.name === characterClass.name && c.source === characterClass.source,
-		);
-		const characterSubclass = CharacterSheetClassUtils.resolveFullSubclass(characterClass.subclass, classDataForSubclass);
-
-		// Check for subclass-granted additional spell lists (e.g. Divine Soul → Cleric)
-		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
-			className,
-			subclass: characterSubclass,
-			subclassChoice: characterClass.subclassChoice,
-		});
-
-		const classSpells = filteredSpells.filter(spell => {
-			return CharacterSheetClassUtils.spellIsAvailableForClass(spell, {
-				className: spellListClassName,
-				classSource,
-				subclass: characterSubclass,
-				subclassChoice: characterClass.subclassChoice,
-				additionalClassNames,
-				includeCoreSpellsForHomebrew: includeCoreSpells && isNonStandardSource,
-			});
-		});
-
 		// Filter by level
 		const characterLevel = this._state.getTotalLevel();
 		const maxSpellLevel = this._getMaxSpellLevel(characterClass, characterLevel);
 
-		const availableSpells = classSpells
+		// The picker pool is the FULL source-filtered spell list (level-capped),
+		// NOT a single-class subset. Previously the pool was pre-restricted to the
+		// character's own class BEFORE the modal opened, which made the modal's
+		// class/subclass filter purely decorative — it could only ever NARROW
+		// within that one class, never broaden. So selecting "All Classes" (or any
+		// other class) could never surface a spell that wasn't already on the
+		// character's class list (e.g. Healing Word for a Wizard), and a homebrew
+		// spell with no class list at all was invisible everywhere.
+		//
+		// Now the pool is broad and the modal's filter does the gating: the default
+		// filter selection is the character's own class(es)/subclass(es), so the
+		// DEFAULT view still shows exactly that class's available spells (including
+		// subclass-EXPANDED lists), while checking other classes / "All Classes"
+		// genuinely broadens. See `_buildPickerOwnClassConfigs` +
+		// the authoritative own-class fallback in the modal's `renderList`.
+		const filteredSpells = this._page.getFilteredSpellData();
+		const availableSpells = filteredSpells
 			.filter(spell => spell.level <= maxSpellLevel)
 			.sort((a, b) => {
 				if (a.level !== b.level) return a.level - b.level;
 				return a.name.localeCompare(b.name);
 			});
 
+		const ownClassConfigs = this._buildPickerOwnClassConfigs();
+
 		// Show modal using UiUtil. The resolved class is authoritative for
 		// attribution so every add flow stamps the correct sourceClass.
-		await this._pShowSpellPickerModal(availableSpells, {targetClass: characterClass});
+		await this._pShowSpellPickerModal(availableSpells, {targetClass: characterClass, ownClassConfigs});
+	}
+
+	/**
+	 * Build authoritative spell-availability configs for EACH of the character's
+	 * own classes, for the spell picker's class filter.
+	 *
+	 * The picker pool is the full spell list (so the class filter can broaden),
+	 * but the character's OWN class(es) must still surface subclass-EXPANDED
+	 * spells that are not present on a spell's raw `classes.fromClassList`
+	 * (Divine Soul → Cleric list, Chronurgy → EGW list, etc.). These configs are
+	 * fed to `CharacterSheetClassUtils.spellIsAvailableForClass` as an
+	 * authoritative fallback for own-class membership in the modal's filter.
+	 *
+	 * `className` is the spell-LIST class name (Gambler's Rogue subclass casts
+	 * from the Warlock list), matching the default `selectedClasses` entries.
+	 *
+	 * @returns {Array<{className:string, classSource:string, subclass:*, subclassChoice:*, additionalClassNames:string[], includeCoreSpellsForHomebrew:boolean}>}
+	 */
+	_buildPickerOwnClassConfigs () {
+		const settings = this._state.getSettings?.() || {};
+		const includeCoreSpells = settings.includeCoreSpellsForHomebrew !== false; // Default true
+		const classes = this._state.getClasses?.() || [];
+		return classes.map(cls => {
+			const isGambler = cls.subclass?.name === "Gambler";
+			const className = isGambler ? "Warlock" : cls.name;
+			const classSource = cls.source;
+			const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE", "TGTT"].includes(classSource);
+			// Resolve the (possibly shallow) stored subclass ref to the full object
+			// so `additionalSpells` / expanded-list blocks are available.
+			const classData = this._page.getClasses?.()?.find(c => c.name === cls.name && c.source === cls.source);
+			const subclass = CharacterSheetClassUtils.resolveFullSubclass(cls.subclass, classData);
+			const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+				className: cls.name,
+				subclass,
+				subclassChoice: cls.subclassChoice,
+			});
+			return {
+				className,
+				classSource,
+				subclass,
+				subclassChoice: cls.subclassChoice,
+				additionalClassNames,
+				includeCoreSpellsForHomebrew: includeCoreSpells && isNonStandardSource,
+			};
+		});
 	}
 
 	_getMaxSpellLevel (classInfo, characterLevel) {
@@ -491,7 +509,7 @@ class CharacterSheetSpells {
 		return 0;
 	}
 
-	async _pShowSpellPickerModal (spells, {targetClass = null} = {}) {
+	async _pShowSpellPickerModal (spells, {targetClass = null, ownClassConfigs = []} = {}) {
 		const knownSpellIds = this._state.getSpells().map(s => `${s.name}|${s.source}`);
 
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
@@ -1527,8 +1545,10 @@ class CharacterSheetSpells {
 				const spellClasses = fromClassList?.map(c => c.name) || [];
 				const spellSubclasses = fromSubclass?.map(sc => `${sc.class.name}: ${sc.subclass.name}`) || [];
 
-				// Check class filter (if classes are selected)
-				const passesClassFilter = selectedClasses.size === 0 || spellClasses.some(c => selectedClasses.has(c));
+				// Check class filter (if classes are selected). Fast path = raw
+				// class-list membership; authoritative own-class fallback covers
+				// subclass-EXPANDED lists. See spellMatchesPickerClassFilter (F9).
+				const passesClassFilter = CharacterSheetClassUtils.spellMatchesPickerClassFilter(spell, selectedClasses, ownClassConfigs, spellClasses);
 				// Check subclass filter (if subclasses are selected)
 				const passesSubclassFilter = selectedSubclasses.size === 0 || spellSubclasses.some(sc => selectedSubclasses.has(sc));
 

@@ -551,10 +551,20 @@ describe("#16 active-ammo selector gate (combat, R35 — replaces the R33 Specia
 		expect(combat._renderAmmoSelector(MELEE_ATTACK, true)).toBe("");
 	});
 
-	it("does NOT offer the affordance when the quiver has no compatible ammo", () => {
+	it("STILL offers the selector (Regular-only) on a ranged ammo weapon with an empty quiver (R37 #1)", () => {
+		// R37 Bug #1: a ranged ammunition weapon (blowgun, hand crossbow, bow) must show
+		// the ammo selector even when no special ammo is in the quiver — "Regular" is the
+		// sole option. Eligibility keys off the weapon's `ammoType`, not quiver contents.
 		const combat = mkQuiverCombat([]);
-		expect(combat._isAmmoSelectorEligible(bow, false)).toBe(false);
-		expect(combat._renderAmmoSelector(bow, false)).toBe("");
+		expect(combat._isAmmoSelectorEligible(bow, false)).toBe(true);
+		expect(combat._renderAmmoSelector(bow, false)).toMatch(/charsheet__attack-ammo-select/);
+	});
+
+	it("does NOT offer the selector on a ranged weapon that uses no ammunition (no ammoType)", () => {
+		const combat = mkQuiverCombat([]);
+		const thrownNoAmmo = {name: "Dagger (thrown)", isMelee: false, isSpell: false, sourceItem: {id: "dag1"}};
+		expect(combat._isAmmoSelectorEligible(thrownNoAmmo, false)).toBe(false);
+		expect(combat._renderAmmoSelector(thrownNoAmmo, false)).toBe("");
 	});
 });
 

@@ -7,7 +7,59 @@ _None._
 
 ## Closed Bugs
 
-### Round 36 (combat-method removal persistence + ammo-selector live refresh vs save `D_kaios_Petri_2_v2.json`) — COMPLETE
+### Round 37 (10 follow-ups: ammo recognition, spell-filter systemic fix, Bladesinger, reading speed, Inspiring Leader, combat consumables) — COMPLETE
+
+Ten user-reported bugs. Fixed directly (not delegated — recent delegated rounds produced false
+greens), each with a RED-proven Jest regression, and the high-stakes UI fixes verified end-to-end
+in the live sheet (TGTT fixture `D_kaios_Petri_2_v2.json`) with a clean console. Full gate: 347
+suites / 11493 tests green; eslint clean. New tests: `CharacterSheetRound37Fixes.test.js` (#1),
+`CharacterSheetSpellPickerClassFilter.test.js` (#7), `CharacterSheetRound37BcEf.test.js`
+(#5/#6/#8/#10).
+
+* **#1** Blowgun Needles weren't recognised as ammo for a Blowgun (they carry `needleBlowgun:true`,
+  not `needle`), so the weapon got no ammo selector; and a ranged ammunition weapon with no special
+  ammo (Hand Crossbow, Blowgun) should STILL show the selector with "Regular" as the sole option.
+  Fix: `state._matchesAmmoType`/`_isAmmunitionItem` recognise `needleBlowgun`; combat
+  `_isAmmoSelectorEligible` keys off the weapon's `ammoType` (not quiver contents) so any ranged
+  ammo weapon always gets a "Regular"-or-more selector.
+* **#2** Custom items in the quiver threw a hover render error (`Failed to load renderable content
+  for: page="items.html" source="Custom" hash="..._custom"`). Fix: quiver/ammo name rendering no
+  longer builds a hover link for `source === "Custom"` items.
+* **#3** DATA: TGTT Tabaxi gained `felis|TGTT` as their second language (besides Common); four TGTT
+  spells (incl. Transposition) got `classes.fromClassList` so the spell picker can resolve them.
+* **#4** CSS: Lore-skill titles were cut off mid-word; the up/down steppers were shrunk so the label
+  fits.
+* **#5** Bladesong double-surfaced — it is a persistent active-state TOGGLE but also satisfied the
+  Abilities-list action-economy heuristic. Fix: `renderCombatActions` now drops any feature whose
+  `detectActivatableFeature(...).isToggle` is true, so Bladesong shows ONLY in the Active-States
+  panel. (Explicitly classified ability/combat/reaction overrides return `isToggle:false` via the
+  override branch that runs BEFORE the toggle loop, so they're unaffected.)
+* **#6** Song of Defense was detected as a reaction and did nothing. It is an on-demand ability
+  (while Bladesong is active, expend a Wizard spell slot as a reaction to reduce damage by 5× the
+  slot's level). Fix: `"song of defense" → "ability"` classification override; `_pUseSongOfDefense`
+  handler (gated on Bladesong active; lists each available slot level as a button; on click expends
+  the slot and applies the reduction as restored HP).
+* **#7** SYSTEMIC spell-filter failure (recurring): the spell picker pre-restricted its candidate
+  POOL by the character's own class/subclass before the user's filters ever ran, so spells from
+  other classes (Healing Word with "all classes" ticked) and subclass-only spells (Transposition)
+  could never appear regardless of the filter UI. Fix: the picker now loads the FULL spell pool and
+  defers class/subclass matching to a single `spellMatchesPickerClassFilter` helper driven by the
+  filter state. Documented in the troubleshooting reference (§F9).
+* **#8** Inspiring Leader feat had no way to activate it. Fix: `addFeat` synthesizes a per-short/
+  long-rest use for Inspiring Leader; the Features-tab feat card shows a "Use" button + uses count;
+  `_pUseInspiringLeader` spends one use (written through both the feat record and the linked
+  Resources pool) and offers an "Apply to Self" temp-HP affordance. Temp HP = level + CHA mod (PHB)
+  / level + higher of WIS/CHA (XPHB), floored at level (`getInspiringLeaderTempHp`).
+* **#9** NEW combat-tab Consumables quick-use panel (potions/scrolls/etc.) mirroring the quiver
+  summary: `renderCombatConsumables` lists every consumable the character carries (detected via the
+  inventory module's own `_isConsumable`) with a one-click "Use" routed through the existing
+  `_useConsumable` pipeline (roll/cast, decrement, persist). Hidden when no consumables are carried.
+* **#10** TGTT "Reading Books" reading speed wasn't shown anywhere. Fix: `getReadingSpeed()` =
+  `(1 + INT mod × 2) × 30` pages/hour (floored at 1); rendered in the Overview senses section. The
+  display gate uses the granular `thelemar_linguisticsBonus` setting (present in real TGTT saves;
+  Reading Books is a linguistics rule) with a fallback to the master `enableTgtt` flag.
+
+
 
 Three follow-ups against the same Fighter 9 TGTT Arcane Archer save. Unlike prior rounds these
 were root-caused with LIVE browser reproduction (the bugs live in the runtime load/render paths
