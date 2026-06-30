@@ -708,6 +708,28 @@ Two regression smells:
 - The trailing source segment doesn't match the leading `classSource` segment.
 - A `-2014` / `-2024` suffix appears in a source — there's no such source code; this is fake-edition coercion that should be removed.
 
+### J9. `{@scaledice}`/`{@scaledamage}` "Number was out of range! Range was 1-9"
+
+**Symptom**: Rendering a spell (or hovering it in a list/picker) throws
+```
+Error: Number was out of range! Range was 1-9 (inclusive).
+  at MiscUtil.parseNumberRange (utils.js)
+  at Renderer.parseScaleDice (render.js)
+```
+The error fires on every render of any list/page containing the offending spell. On the character sheet, `getSpellHoverLink`'s try/catch swallows it (the link still works) but the console is spammed.
+
+**Root Cause**: A `{@scaledice base|progression|perStep}` / `{@scaledamage ...}` tag whose **progression** segment contains a value outside **1-9**. These tags model spell-**slot** upcasting only, so `parseScaleDice` validates the progression with `parseNumberRange(progression, 1, 9)`. Almost always this is **cantrip character-level scaling** mis-encoded as slot scaling (e.g. `{@scaledamage 1d6|1-4,5-10,11-16,17-20|...}` or `{@scaledice 1d6|5,11,17|1d6}`). Common in homebrew.
+
+**Fix** (DATA — the canonical cantrip pattern, see PHB Fire Bolt):
+1. Add a `scalingLevelDice` block keyed by **character level**: `{"label":"force damage","scaling":{"1":"1d6","5":"2d6","11":"3d6","17":"4d6"}}`.
+2. In the entries text, replace the inline `{@scaledice}`/`{@scaledamage}` tags with plain `{@damage NdM}` tags (base value + the "increases by … at 5th/11th/17th" prose).
+3. Reserve `{@scaledice}`/`{@scaledamage}` strictly for `entriesHigherLevel` slot upcasting, where the progression stays within `1-9` (e.g. `2-9`).
+
+Scan for offenders across all spell data + homebrew before assuming it's one file:
+```
+grep -nE '@scale(dice|damage) [^|]+\|[^|]*(1[0-9]|[1-9][0-9])' data/spells/*.json homebrew/*.json
+```
+
 ---
 
 ## K. Data Loading Errors

@@ -59,6 +59,7 @@ Match the symptom to a category:
 | TGTT features on non-TGTT character | **I1** — Missing source gating |
 | `Unhandled tag` error in renderer | **J1** — Check tag name spelling |
 | `Array passed to renderer!` | **J2** — Wrap array in entries object |
+| `Number was out of range! Range was 1-9` (spell render/hover) | **J9** — cantrip scaling mis-encoded as `{@scaledice}` slot scaling |
 | Hover shows "Failed to load" | **K2** — Reference resolution failure |
 | Part of sheet broken, no crash | **L1** — Module init try-catch isolated |
 | Active state does nothing when toggled | **L4** — State type not in `ACTIVE_STATE_TYPES` |

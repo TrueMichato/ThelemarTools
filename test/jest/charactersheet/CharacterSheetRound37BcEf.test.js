@@ -17,7 +17,7 @@
  *   level + higher of WIS/CHA (XPHB), once per short/long rest. Pins the temp-HP
  *   formula (PHB vs XPHB vs floor) and the addFeat per-rest use synthesis.
  *
- * Bug #10 (Reading Speed): TGTT "Reading Books" — (1 + INT mod × 2) × 30 pages
+ * Bug #10 (Reading Speed): TGTT "Reading Books" — (1 + INT mod ÷ 2) × 30 pages
  *   per hour, floored at 1. Pins the formula + clamp.
  */
 
