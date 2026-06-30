@@ -2018,7 +2018,7 @@ class CharacterSheetSpells {
 		if (spell.level === 0) {
 			const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: 0, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 			if (activeMetamagicChoice?.cancelled) return;
-			if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
+			if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
 			if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
 				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 				return;
@@ -2046,6 +2046,7 @@ class CharacterSheetSpells {
 			});
 
 			await this._showCastResult(spell, 0, false, false, castMeta);
+			await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 			// Set concentration for concentration cantrips (rare but possible)
 			const vcRemovesConc0 = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 			if (requiresConcentration && !vcRemovesConc0) {
@@ -2090,7 +2091,7 @@ class CharacterSheetSpells {
 			if (castAsRitual) {
 				const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: spell.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 				if (activeMetamagicChoice?.cancelled) return;
-				if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
+				if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
 				if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
 					JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 					return;
@@ -2119,6 +2120,7 @@ class CharacterSheetSpells {
 
 				// Ritual cast: no slot consumed
 				await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
+				await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 				const vcRemovesConcR = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 				if (requiresConcentration && !vcRemovesConcR) {
 					this._state.setConcentration?.({name: spell.name, level: spell.level, appliedMetamagic: castMeta?.appliedMetamagic || null});
@@ -2202,7 +2204,7 @@ class CharacterSheetSpells {
 
 		const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 		if (activeMetamagicChoice?.cancelled) return;
-		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null)) return;
+		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
 		if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
 			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 			return;
@@ -2307,6 +2309,9 @@ class CharacterSheetSpells {
 			this._updateConcentrationUI();
 		}
 
+		// Cast is committed (not cancelled / refunded) — consume any gold-cost material component.
+		await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
+
 		this.renderSlots();
 		this._page._renderQuickSpells(); // Update overview spell slots
 		if (selectedSlot.isNoSlotResource) this._page._renderResources?.(); // Refresh resource tracker (e.g. Star Map)
@@ -2345,7 +2350,9 @@ class CharacterSheetSpells {
 		}
 
 		// Cast as ritual — no slot consumed
+		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: true})) return;
 		await this._showCastResult(spell, spell.level, false, true);
+		await this._pConsumeMaterialComponent({spell, spellData, variantUsed: false});
 
 		if (requiresConcentration) {
 			this._state.setConcentration?.(spell.name, spell.level);
@@ -2373,8 +2380,8 @@ class CharacterSheetSpells {
 	 * @param {object|null} appliedMetamagic - Active metamagic
 	 * @returns {Promise<boolean>} true if casting should proceed, false if blocked/cancelled
 	 */
-	async _pHandleCastingConstraints (spell, spellData, appliedMetamagic = null) {
-		const {block, checks} = this._checkCastingConstraints(spell, spellData, appliedMetamagic);
+	async _pHandleCastingConstraints (spell, spellData, appliedMetamagic = null, opts = {}) {
+		const {block, checks} = this._checkCastingConstraints(spell, spellData, appliedMetamagic, opts);
 		if (block) {
 			JqueryUtil.doToast({type: "warning", content: block});
 			return false;
@@ -2398,9 +2405,14 @@ class CharacterSheetSpells {
 	 * @param {object} spell - The spell being cast (from character's spell list)
 	 * @param {object} spellData - Full spell data from the spells database
 	 * @param {object|null} appliedMetamagic - Active metamagic chosen for this cast
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.enforceMaterial] - When true, also gate on material components
+	 *        (gold-cost item possessed / spellcasting focus or pouch for no-cost materials).
+	 *        Off by default so innate / item-granted casting (which ignores material
+	 *        components) is never blocked.
 	 * @returns {{block: string|null, checks: string[]}} block = hard block message, checks = conditions requiring confirmation
 	 */
-	_checkCastingConstraints (spell, spellData, appliedMetamagic = null) {
+	_checkCastingConstraints (spell, spellData, appliedMetamagic = null, opts = {}) {
 		// Advanced opt-in escape hatch: when enabled, skip every condition/component
 		// casting gate (incapacitated, verbal/somatic banned-or-check, wild shape).
 		// This intentionally does NOT affect slot/sorcery-point/charge spending or
@@ -2452,6 +2464,13 @@ class CharacterSheetSpells {
 			}
 		}
 
+		// Material component requirement (only when the caller opts in — i.e. normal/ritual
+		// slot/cantrip casting, never innate/item casting which ignores materials).
+		if (opts.enforceMaterial) {
+			const matBlock = this._getMaterialComponentBlock(spell, spellData);
+			if (matBlock) return {block: matBlock, checks: []};
+		}
+
 		// Check for Wild Shape (can't cast most spells while transformed)
 		const activeStates = this._state.getActiveStates?.() || [];
 		const wildShapeState = activeStates.find(s =>
@@ -2468,6 +2487,101 @@ class CharacterSheetSpells {
 
 		// All checks passed (may have soft checks that need confirmation)
 		return {block: null, checks};
+	}
+
+	/**
+	 * Compute a hard-block message if a spell's MATERIAL component requirement can't
+	 * be met, else null. Implements the three enforcement rules:
+	 *
+	 *   1. Gold-cost material → the character must possess a qualifying item
+	 *      (consumed on cast when the component is consumed — handled separately).
+	 *   2. No-cost material → the character needs a spellcasting focus / component
+	 *      pouch, or a feature that substitutes one (Spellsword Technique, War
+	 *      Caster, Star Map, Gambler's Spellcasting).
+	 *   3. A matching variant spell component supersedes 1 & 2 entirely.
+	 *
+	 * @param {object} spell
+	 * @param {object} spellData
+	 * @returns {string|null}
+	 */
+	_getMaterialComponentBlock (spell, spellData) {
+		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
+			|| this._state.getSpellMaterialComponentInfo?.(spell);
+		if (!info) return null;
+
+		// Rule 3: a matching variant component the player owns waives the requirement.
+		if ((this._state.getMatchingVariantComponents?.(spell, spellData) || []).length) return null;
+
+		if (info.requiresFocus) {
+			const focus = this._state.getSpellcastingFocusStatus?.() || {ok: false};
+			if (focus.ok) return null;
+			return `Cannot cast ${spell.name} — its material components require a spellcasting focus or component pouch (none equipped). Equip one, or enable "Ignore spellcasting restrictions" in settings.`;
+		}
+
+		// Gold-cost component: the character must possess a qualifying item.
+		const candidates = this._state.getGoldComponentCandidates?.(info.cost, info.text) || [];
+		if (candidates.length) return null;
+		const gp = Math.floor(info.cost / 100);
+		return `Cannot cast ${spell.name} — requires a material component worth at least ${gp} gp${info.consume ? " (consumed by the spell)" : ""} that you don't have. Add it to your inventory, or enable "Ignore spellcasting restrictions" in settings.`;
+	}
+
+	/**
+	 * Consume a gold-cost material component on a committed cast, when the spell
+	 * consumes it. No-op when: the escape-hatch setting is on, the material has no
+	 * gold cost (a focus covers it), the component isn't consumed, or a variant
+	 * component was used in its place. Auto-picks the best-ranked candidate; offers
+	 * a picker only when multiple candidates exist and the cast isn't a quick-cast.
+	 *
+	 * @param {object} args
+	 * @param {object} args.spell
+	 * @param {object} args.spellData
+	 * @param {object|null} [args.decision]
+	 * @param {boolean} [args.variantUsed]
+	 * @returns {Promise<{consumed: (null|{id:string, name:string, value:number})}>}
+	 */
+	async _pConsumeMaterialComponent ({spell, spellData, decision = null, variantUsed = false}) {
+		if (variantUsed) return {consumed: null};
+		if (this._state.getSettings?.()?.ignoreSpellcastingRestrictions) return {consumed: null};
+
+		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
+			|| this._state.getSpellMaterialComponentInfo?.(spell);
+		if (!info || info.requiresFocus || !info.consume) return {consumed: null};
+
+		const candidates = this._state.getGoldComponentCandidates?.(info.cost, info.text) || [];
+		if (!candidates.length) return {consumed: null}; // the gate should have blocked; be safe
+
+		const skipPrompt = !!decision?.skipComponentPrompt;
+		let chosen = candidates[0];
+
+		if (!skipPrompt && candidates.length > 1) {
+			const labels = candidates.map(c => `${c.name}${c.value ? ` (${Math.floor(c.value / 100)} gp)` : ""}`);
+			const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+				title: `${spell.name} — Consume Component`,
+				htmlDescription: `<div>Casting <strong>${spell.name}</strong> consumes a material component. Which item should be consumed?</div>`,
+				values: labels,
+				fnDisplay: v => v,
+				isResolveItem: true,
+			}));
+			if (picked == null) return {consumed: null}; // cancelled the picker — leave inventory untouched
+			const idx = labels.indexOf(picked);
+			if (idx >= 0) chosen = candidates[idx];
+		}
+
+		// An "optional" consume is only spent on explicit confirmation (never on a quick-cast).
+		if (info.consume === "optional") {
+			if (skipPrompt) return {consumed: null};
+			const ok = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: `${spell.name} — Consume Component?`,
+				htmlDescription: `<div><strong>${spell.name}</strong> can consume <strong>${chosen.name}</strong> for a lasting effect. Consume it now?</div>`,
+				textYes: "Consume it",
+				textNo: "Keep it",
+			}));
+			if (!ok) return {consumed: null};
+		}
+
+		this._state.consumeItem(chosen.id);
+		JqueryUtil.doToast({type: "info", content: `Consumed ${chosen.name} casting ${spell.name}.`});
+		return {consumed: {id: chosen.id, name: chosen.name, value: chosen.value}};
 	}
 
 	async _showCastResult (spell, slotLevel = null, isPactSlot = false, isRitual = false, castMeta = null) {

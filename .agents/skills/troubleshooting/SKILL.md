@@ -55,6 +55,7 @@ Match the symptom to a category:
 | DM Screen text not showing | **E1** — `.text()` doesn't work |
 | Parser grabs wrong effect | **F1** — Table content not stripped |
 | Spell missing from picker | **F4** — `fromSubclass` not checked |
+| Spell casts without required/consumed material component | **F10** — `enforceMaterial` opt-in gate |
 | Builder bug not in LevelUp | **G1** — Duplicated logic across modules |
 | TGTT features on non-TGTT character | **I1** — Missing source gating |
 | `Unhandled tag` error in renderer | **J1** — Check tag name spelling |
@@ -79,6 +80,7 @@ Match the symptom to a category:
 | `Failed to load renderable content for: page="classfeatures.html"` | **J8** — build hover hash via `UrlUtil.URL_TO_HASH_BUILDER`, never inline |
 | Feat button opens modal, nothing changes on sheet | **L7** — picker confirm must validate → mutate → render → save |
 | Invocation/maneuver grants no feat picker | **L8** — honor `featProgression` on optfeature, not just class |
+| Spell casts without its material component / consumed item not removed | **F10** — `enforceMaterial` gate + `_pConsumeMaterialComponent` |
 
 ### 2. Read the Detailed Fix
 

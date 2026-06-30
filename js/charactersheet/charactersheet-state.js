@@ -24570,6 +24570,147 @@ class CharacterSheetState {
 
 	// endregion
 
+	// region Spellcasting material components
+
+	/**
+	 * Words that carry no signal when matching a gold-cost material component's
+	 * free-text description against inventory item names. Keeping these out of the
+	 * keyword set avoids spurious matches (e.g. "a focus worth at least 100 gp"
+	 * matching an unrelated "Arcane Focus").
+	 */
+	static _COMPONENT_KEYWORD_STOPWORDS = new Set([
+		"the", "and", "for", "with", "you", "your", "that", "this", "least", "worth", "which", "spell",
+		"consumes", "consumed", "each", "must", "have", "from", "made", "into", "such", "either", "all",
+		"one", "two", "three", "four", "five", "more", "than", "least", "value", "total", "together",
+		"worth", "cost", "gold", "silver", "copper", "platinum", "piece", "pieces",
+		"focus", "set", "object", "item", "items", "appropriate", "religion", "creature", "least",
+	]);
+
+	/**
+	 * Normalize a spell's material component (`components.m`) into a descriptor used by
+	 * the casting-component enforcement.
+	 *
+	 * - `m` absent/false → returns null (no material component).
+	 * - `m` is a string → a no-cost material (a spellcasting focus / component pouch covers it).
+	 * - `m` is an object `{text, cost, consume}` → cost (copper) and consume flag preserved.
+	 *
+	 * @param {object} spellData Full spell data (or a character spell carrying `components`).
+	 * @returns {null|{text:string, cost:number, consume:(boolean|"optional"), requiresFocus:boolean}}
+	 *   `requiresFocus` is true when the material carries NO gold cost — i.e. a focus/pouch
+	 *   (or a feature that substitutes one) satisfies it, rather than a specific valuable item.
+	 */
+	getSpellMaterialComponentInfo (spellData) {
+		const m = spellData?.components?.m;
+		if (m == null || m === false) return null;
+		if (typeof m === "string") return {text: m, cost: 0, consume: false, requiresFocus: true};
+		if (typeof m !== "object") return {text: "", cost: 0, consume: false, requiresFocus: true};
+		const cost = Number(m.cost) || 0;
+		return {text: m.text || "", cost, consume: m.consume || false, requiresFocus: cost <= 0};
+	}
+
+	/**
+	 * Extract candidate material-noun keywords from a component description for
+	 * fuzzy matching against inventory item names. Lowercased words of length ≥3
+	 * that aren't generic stopwords.
+	 * @param {string} text
+	 * @returns {string[]}
+	 */
+	_extractComponentKeywords (text) {
+		if (!text) return [];
+		return (String(text).toLowerCase().match(/[a-z]{3,}/g) || [])
+			.filter(w => !CharacterSheetState._COMPONENT_KEYWORD_STOPWORDS.has(w));
+	}
+
+	/**
+	 * Inventory items that could satisfy a gold-cost material component.
+	 *
+	 * A candidate is any possessed item whose name matches a component keyword OR
+	 * whose market value (copper) is at least the required cost — this hybrid keeps
+	 * a player-added "Diamond" (often value-less) usable while still honouring the
+	 * "worth at least X gp" rule for generically-named valuables.
+	 *
+	 * Ranked best-first: name+value, then name-only, then value-only; cheapest first
+	 * within a tier so casting consumes the least-valuable sufficient item.
+	 *
+	 * @param {number} costCp Required component value in copper pieces.
+	 * @param {string} [text] The component description (for keyword matching).
+	 * @returns {Array<{id:string, name:string, value:number, quantity:number, matchByName:boolean, matchByValue:boolean}>}
+	 */
+	getGoldComponentCandidates (costCp, text = "") {
+		if (!(costCp > 0)) return [];
+		const stem = w => (w.endsWith("s") && w.length > 3 ? w.slice(0, -1) : w);
+		const keywords = this._extractComponentKeywords(text).map(stem);
+		const out = [];
+		for (const invItem of this._data.inventory) {
+			const it = invItem.item || {};
+			const value = Number(it.value) || 0;
+			const nameLower = (it.name || invItem.name || "").toLowerCase();
+			// Compare stems both ways so "diamonds" (text) matches "Diamond" (item) and vice versa.
+			const nameWords = this._extractComponentKeywords(nameLower).map(stem);
+			const matchByName = keywords.length > 0
+				&& keywords.some(k => nameWords.some(n => n === k || n.includes(k) || k.includes(n)));
+			const matchByValue = value >= costCp;
+			if (!matchByName && !matchByValue) continue;
+			out.push({id: invItem.id, name: it.name || invItem.name || "Item", value, quantity: invItem.quantity ?? 1, matchByName, matchByValue});
+		}
+		const rank = c => (c.matchByName ? 2 : 0) + (c.matchByValue ? 1 : 0);
+		out.sort((a, b) => (rank(b) - rank(a)) || (a.value - b.value));
+		return out;
+	}
+
+	/**
+	 * Whether a possessed inventory item is a melee weapon (used for the Spellsword
+	 * Technique "weapon as spellcasting focus" substitution).
+	 * @param {object} it An item object.
+	 * @returns {boolean}
+	 */
+	_isMeleeWeaponItem (it) {
+		if (!it) return false;
+		const baseType = typeof it.type === "string" ? it.type.split("|")[0] : "";
+		if (baseType === "M") return true; // explicit melee weapon type
+		// Fall back to weaponCategory + not flagged ranged
+		return !!it.weaponCategory && baseType !== "R" && !it.range;
+	}
+
+	/**
+	 * Determine whether the character has a usable spellcasting focus / component
+	 * pouch — or a feature that substitutes one — for casting spells whose material
+	 * component carries NO gold cost.
+	 *
+	 * Honours the homebrew/feature substitutions the rules allow:
+	 *   - Spellsword Technique (TGTT): a melee weapon counts as a focus.
+	 *   - War Caster (TGTT interpretation): a shield counts as a focus.
+	 *   - Star Map (Circle of the Stars / Zodiac): the map itself is a focus.
+	 *   - Gambler's Spellcasting (TGTT): cards / dice / coins are a focus.
+	 *
+	 * Possession (rather than strict equip state) is sufficient, to avoid
+	 * false-blocking casters who don't toggle their focus "equipped".
+	 *
+	 * @returns {{ok:boolean, source:(string|null)}}
+	 */
+	getSpellcastingFocusStatus () {
+		const inv = this._data.inventory || [];
+		const has = pred => inv.some(i => pred(i, i.item || {}));
+		const baseType = it => (typeof it.type === "string" ? it.type.split("|")[0] : "");
+
+		// 1. A dedicated spellcasting focus item (arcane / druidic / holy).
+		if (has((i, it) => baseType(it) === "SCF" || !!it.scfType)) return {ok: true, source: "spellcasting focus"};
+
+		// 2. A component pouch (matched by name — it is plain adventuring gear).
+		if (has((i, it) => (it.name || i.name || "").toLowerCase().includes("component pouch"))) return {ok: true, source: "component pouch"};
+
+		// 3. Feature/feat substitutions.
+		if (this.hasFeat?.("Spellsword Technique") && has((i, it) => this._isMeleeWeaponItem(it))) return {ok: true, source: "Spellsword Technique (weapon as focus)"};
+		if (this.hasFeat?.("War Caster") && has((i, it) => baseType(it) === "S" || !!it.shield)) return {ok: true, source: "War Caster (shield as focus)"};
+		if (this.hasFeature?.("Star Map")) return {ok: true, source: "Star Map"};
+		if ((this.hasFeature?.("Gambler's Spellcasting") || this.hasFeature?.("Spellcasting Focus"))
+			&& has((i, it) => /\b(cards?|dice|coins?)\b/.test((it.name || i.name || "").toLowerCase()))) return {ok: true, source: "Gambler's Spellcasting"};
+
+		return {ok: false, source: null};
+	}
+
+	// endregion
+
 	/**
 	 * Get healing effect from a potion item
 	 * @param {string} itemId - The item ID

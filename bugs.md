@@ -7,6 +7,46 @@ _None._
 
 ## Closed Bugs
 
+### Round 39 (feature: spellcasting material-component enforcement) — COMPLETE
+
+User request: enforce material components at cast time. Three rules, all gated by the existing
+`ignoreSpellcastingRestrictions` escape-hatch setting (when on, nothing is blocked or consumed).
+Full gate: 349 suites / 11526 tests green; eslint clean; package.json/lockfile untouched. New test:
+`CharacterSheetSpellComponents.test.js` (25 tests). Live-verified in the browser (helpers + gate +
+consume run clean against a freshly-built Wizard; console clean).
+
+* **Rule 1 — gold-cost components.** A spell whose material component carries a gold cost
+  (`components.m.cost`, in copper) is hard-blocked unless the character possesses a qualifying
+  inventory item. Matching is HYBRID (per the user's choice): an item qualifies if its name matches
+  a component keyword (stem-tolerant both ways, so the spell text "diamonds" matches a "Diamond"
+  item and vice-versa) **or** its market value ≥ the required cost. If the component is *consumed*
+  (`components.m.consume === true`), the item is removed from inventory on a committed cast
+  (quantity decremented when stacked, fully removed at the last unit). An `"optional"` consume only
+  spends on explicit confirmation, never on a quick-cast. When multiple candidates exist a cast-time
+  picker chooses which to spend (auto-picks the cheapest sufficient item on a quick-cast).
+* **Rule 2 — no-cost components.** A spell whose material component has no gold cost (a plain
+  string, e.g. `"a pinch of soot"`) is hard-blocked unless the character has a spellcasting focus
+  (any `type:"SCF"` / `scfType` item), a component pouch (matched by name), **or** a feature that
+  substitutes one: **Spellsword Technique** (a melee weapon counts), **War Caster** (a shield
+  counts), **Star Map** (the map itself), **Gambler's Spellcasting** (cards / dice / coins).
+  Possession — not strict equip-state — is sufficient, to avoid false-blocking real casters.
+* **Rule 3 — variant components supersede.** If the character owns a variant spell component that
+  matches the spell (`getMatchingVariantComponents`), the standard requirement is waived entirely
+  (no focus/gold check) and the gold component is NOT double-consumed (the variant's own consume
+  path handles it).
+
+  IMPLEMENTATION. State helpers (charactersheet-state.js): `getSpellMaterialComponentInfo`
+  (string → no-cost/focus; object → `{text, cost, consume, requiresFocus}`),
+  `getGoldComponentCandidates` (stem-tolerant hybrid name|value match, ranked name+value > name >
+  value, cheapest-first), `getSpellcastingFocusStatus` (SCF/pouch + the four substitution features).
+  Spells module (charactersheet-spells.js): the gate folds into `_checkCastingConstraints` behind a
+  new `opts.enforceMaterial` flag (so it inherits the escape-hatch early-return) via
+  `_getMaterialComponentBlock`; `enforceMaterial:true` is passed from all four slot/cantrip/ritual
+  cast paths in `_castSpell` + `_castSpellAsRitual` — and deliberately NOT from `_castInnateSpell`
+  (innate / item casting ignores material components by the rules). Consume runs via
+  `_pConsumeMaterialComponent` at each path's committed point (after the non-cancelled checkpoint, so
+  a cancelled normal-slot cast that refunds the slot never destroys the component).
+
 ### Round 38 (2 follow-ups: spell-hover render crash, stale exhaustion display) — COMPLETE
 
 Two user-reported bugs after R37. Full gate: 348 suites / 11501 tests green; eslint clean. New

@@ -465,6 +465,21 @@ Symptom-level test: a Divine Soul Sorcerer (TGTT class, XGE subclass) opening th
 
 **Verification**: a Wizard with "all classes" ticked finds Healing Word; Transposition (subclass-only) appears when its subclass/class is enabled. Pinned by `CharacterSheetSpellPickerClassFilter.test.js`. (R37 #7.)
 
+### F10. Material-Component Enforcement at Cast Time
+
+**Symptom**: A spell with a gold-cost material component (e.g. Revivify) casts with no item in inventory; a no-cost material spell casts with no focus; or a consumed component (a 300 gp diamond) isn't removed after casting. Conversely: an **innate**/item-granted cast is wrongly blocked for "no focus", or a *cancelled* normal-slot cast (the player backs out of the result modal, slot refunded) still destroyed the material.
+
+**Root Cause / Design**: Material enforcement lives in `_checkCastingConstraints` behind an **opt-in** `opts.enforceMaterial` flag, computed by `_getMaterialComponentBlock`, and consumed by `_pConsumeMaterialComponent`. The three load-bearing rules:
+- **Cost decides the rule.** `components.m.cost` present (copper) → must possess a qualifying item (`getGoldComponentCandidates`, hybrid name-keyword|value match, stem-tolerant). No cost (plain string) → needs a focus/pouch/substitute (`getSpellcastingFocusStatus`). `consume` is independent of cost.
+- **Opt-in only from real casting.** `enforceMaterial:true` is passed from the four `_castSpell` + `_castSpellAsRitual` paths, and deliberately NOT from `_castInnateSpell` — innate/item casting ignores materials by the rules. If you add a new cast entry point, decide explicitly whether it should enforce.
+- **Consume AFTER the commit point.** The normal-slot path can cancel inside `_showCastResult` and refund the slot; the consume call therefore sits *after* that cancelled-return checkpoint (cantrip/ritual paths have no refund, so consume right after the result is fine). Moving consume earlier destroys components on cancelled casts.
+- **Variant supersedes (rule 3).** If `getMatchingVariantComponents` is non-empty the gate returns null AND `_pConsumeMaterialComponent` skips (the variant's own consume path owns it) — guard via the `variantUsed` arg so the gold item isn't double-consumed.
+- **Escape hatch.** All of this is bypassed by the `ignoreSpellcastingRestrictions` setting (the gate early-returns and consume no-ops), the intended "I track components at the table" opt-out.
+
+**Focus substitutions** (`getSpellcastingFocusStatus`): SCF item / `scfType`, component pouch (by name), Spellsword Technique + melee weapon, War Caster + shield, Star Map feature, Gambler's Spellcasting + cards/dice/coins. Possession (not equip-state) is sufficient to avoid false-blocks.
+
+**Verification**: pinned by `CharacterSheetSpellComponents.test.js` (25 tests). (R39.)
+
 ### G1. Fix in One → Check All Three
 
 **Symptom**: Bug fixed in LevelUp but still present in Builder or QuickBuild.
@@ -729,6 +744,8 @@ Scan for offenders across all spell data + homebrew before assuming it's one fil
 ```
 grep -nE '@scale(dice|damage) [^|]+\|[^|]*(1[0-9]|[1-9][0-9])' data/spells/*.json homebrew/*.json
 ```
+
+**Durable runtime fix** (the data fix above can't reach a user's *cached* brew): the character sheet sweeps the merged spell pool at load time via `CharacterSheetPage._sanitizeSpellScaleTags(this._spellsData)` (called right after both `_mergeBrewData` calls in `_pLoadData`). It deep-walks each spell's `entries`/`entriesHigherLevel`, and for any `{@scaledice}`/`{@scaledamage}` whose progression contains a value outside 1-9 it downgrades the tag to the spell's `displayText` (5th `|` segment) if present, else `{@damage <baseRoll>}` (1st segment = the level-1 value). In-range/slot scaling is left untouched. This means a user with a stale brew in IndexedDB / a remote brew repo no longer spams the console even though the repo data is already correct. Regression: `CharacterSheetRound38Fixes.test.js` ("systemic" describe block).
 
 ---
 
