@@ -341,6 +341,17 @@ class CharacterSheetPage {
 		this._mergeBrewData(prereleaseData);
 		this._mergeBrewData(brewData);
 
+		// Defensively repair malformed spell-scaling tags in the merged spell pool.
+		// `{@scaledice}`/`{@scaledamage}` model spell-SLOT upcasting only, so the
+		// renderer validates their progression against levels 1-9 and THROWS on
+		// anything higher (e.g. a cantrip mis-encoding character-level scaling as
+		// `{@scaledamage 1d6|1-4,5-10,11-16,17-20|...}`). One such spell in the
+		// pool throws on every spell-list / hover render. We can't control what
+		// brew a user has loaded from their own storage or a remote repo, so sweep
+		// the loaded data here and downgrade any out-of-range scale tag to a plain
+		// {@damage} tag — see troubleshooting §J9.
+		this._sanitizeSpellScaleTags(this._spellsData);
+
 		// Resolve `_copy` for classes and subclasses that inherit from other entries.
 		// loadRawJSON deliberately skips `_copy` merging to keep classFeature/
 		// subclassFeature arrays separate. Without this step, TGTT (and other
@@ -681,6 +692,90 @@ class CharacterSheetPage {
 		// Languages
 		if (brewData.language?.length) {
 			this._languagesData = [...this._languagesData, ...MiscUtil.copyFast(brewData.language)];
+		}
+	}
+
+	/**
+	 * Repair malformed `{@scaledice}` / `{@scaledamage}` tags in a spell pool so a
+	 * single bad spell can't throw on every render (see troubleshooting §J9).
+	 *
+	 * These tags model spell-SLOT upcasting, so the renderer's `parseScaleDice`
+	 * validates the progression segment against levels 1-9 via
+	 * `MiscUtil.parseNumberRange(progression, 1, 9)` — which THROWS on any value
+	 * outside that range. The most common offender is homebrew that mis-encodes a
+	 * cantrip's CHARACTER-level scaling (up to level 20) as slot scaling, e.g.
+	 * `{@scaledamage 1d6|1-4,5-10,11-16,17-20|...}` or `{@scaledice 2d6|11-16|2d6}`.
+	 *
+	 * We can't control which brew a user loads (their own storage, a remote repo),
+	 * so we sweep the merged pool and downgrade any out-of-range scale tag to a
+	 * plain `{@damage <baseRoll>}` tag (or its `displayText` if present). The base
+	 * roll is the tag's first pipe segment — for cantrip scaling that's the
+	 * level-1 value, which is the correct "at this level" display. Mutates the
+	 * passed spell objects in place.
+	 * @param {Array<object>} spells
+	 */
+	_sanitizeSpellScaleTags (spells) {
+		if (!Array.isArray(spells)) return;
+
+		const SCALE_TAG_RE = /\{@scale(?:dice|damage)\s+([^}]*)\}/g;
+
+		const isProgressionOutOfRange = (progression) => {
+			if (!progression) return false;
+			const nums = progression.match(/\d+/g);
+			if (!nums) return false;
+			return nums.some(n => {
+				const v = Number(n);
+				return v < 1 || v > 9;
+			});
+		};
+
+		const repairString = (str) => {
+			if (typeof str !== "string" || str.indexOf("@scale") === -1) return str;
+			return str.replace(SCALE_TAG_RE, (full, inner) => {
+				const parts = inner.split("|");
+				const baseRoll = (parts[0] || "").trim();
+				const progression = parts[1];
+				const displayText = (parts[4] || "").trim();
+				if (!isProgressionOutOfRange(progression)) return full; // valid slot scaling — leave it
+				if (displayText) return displayText;
+				if (baseRoll) return `{@damage ${baseRoll}}`;
+				return ""; // nothing salvageable
+			});
+		};
+
+		// Deep-walk every string inside an entry tree, repairing in place.
+		const walk = (node) => {
+			if (Array.isArray(node)) {
+				for (let i = 0; i < node.length; ++i) {
+					const child = node[i];
+					if (typeof child === "string") node[i] = repairString(child);
+					else walk(child);
+				}
+				return;
+			}
+			if (node && typeof node === "object") {
+				for (const k of Object.keys(node)) {
+					const child = node[k];
+					if (typeof child === "string") node[k] = repairString(child);
+					else walk(child);
+				}
+			}
+		};
+
+		let repaired = 0;
+		for (const spell of spells) {
+			if (!spell || typeof spell !== "object") continue;
+			const before = JSON.stringify([spell.entries, spell.entriesHigherLevel]);
+			if (before.indexOf("@scale") === -1) continue;
+			if (spell.entries) walk(spell.entries);
+			if (spell.entriesHigherLevel) walk(spell.entriesHigherLevel);
+			const after = JSON.stringify([spell.entries, spell.entriesHigherLevel]);
+			if (after !== before) ++repaired;
+		}
+
+		if (repaired) {
+			// eslint-disable-next-line no-console
+			console.warn(`[CharSheet] Repaired out-of-range spell scaling tags in ${repaired} spell(s) (see troubleshooting §J9).`);
 		}
 	}
 

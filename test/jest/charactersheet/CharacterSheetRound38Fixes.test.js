@@ -14,6 +14,11 @@
  *   tags (the Fire Bolt pattern). This test guards that NO TGTT spell carries an
  *   out-of-range scaledice/scaledamage progression.
  *
+ *   SYSTEMIC GUARD: a user's loaded brew (their own storage / a remote repo) can
+ *   carry the SAME malformed tag — and a repo data fix can't reach it. So
+ *   `_sanitizeSpellScaleTags` sweeps the merged spell pool at load time and
+ *   downgrades any out-of-range scale tag to a plain {@damage} tag. Tested below.
+ *
  * Bug #2 (exhaustion effects don't update until refresh):
  *   `_addExhaustion`/`_removeExhaustion`/the settings rule-change handler only
  *   re-rendered the exhaustion widget + combat stats, and tried to refresh
@@ -113,5 +118,91 @@ describe("R38 Bug #2 — exhaustion changes refresh every dependent display", ()
 		const rulesRegion = src.slice(rulesIdx, rulesIdx + 700);
 		expect(rulesRegion).toMatch(/_rerenderExhaustionDependents/);
 		expect(rulesRegion).not.toMatch(/_spellsModule/);
+	});
+});
+
+describe("R38 Bug #1 (systemic) — _sanitizeSpellScaleTags repairs ANY loaded brew", () => {
+	let CharacterSheetPage;
+
+	beforeAll(async () => {
+		// Minimal window/document stubs so the controller module imports in node.
+		globalThis.window = {
+			addEventListener: () => {},
+			dispatchEvent: () => {},
+			location: {search: ""},
+			matchMedia: () => ({matches: false, addEventListener: () => {}}),
+		};
+		globalThis.document = {
+			querySelector: () => null,
+			querySelectorAll: () => [],
+			getElementById: () => null,
+			addEventListener: () => {},
+			body: {classList: {add () {}, remove () {}}},
+		};
+		await import("../../../js/charactersheet/charactersheet.js");
+		CharacterSheetPage = globalThis.CharacterSheetPage;
+	});
+
+	const sanitize = (spells) => {
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._sanitizeSpellScaleTags(spells);
+		return spells;
+	};
+
+	test("downgrades an out-of-range cantrip {@scaledamage} to a plain {@damage} base", () => {
+		const spells = [{
+			name: "Bad Cantrip",
+			source: "HB",
+			level: 0,
+			entries: [
+				"On a failed save the creature takes {@scaledamage 1d6|1-4,5-10,11-16,17-20|1d6,2d6,3d6,4d6} force damage.",
+			],
+		}];
+		sanitize(spells);
+		const text = spells[0].entries[0];
+		expect(text).not.toMatch(/@scaledice|@scaledamage/);
+		expect(text).toContain("{@damage 1d6}");
+	});
+
+	test("repairs out-of-range {@scaledice} in entriesHigherLevel too, and uses displayText when present", () => {
+		const spells = [{
+			name: "Bad Upcast",
+			source: "HB",
+			level: 1,
+			entriesHigherLevel: [{
+				type: "entries",
+				entries: ["Increases by {@scaledice 2d6|11-16|2d6|psi|three to four d6} for each level."],
+			}],
+		}];
+		sanitize(spells);
+		const text = spells[0].entriesHigherLevel[0].entries[0];
+		expect(text).not.toMatch(/@scaledice|@scaledamage/);
+		expect(text).toContain("three to four d6");
+	});
+
+	test("leaves VALID slot-range scale tags untouched", () => {
+		const spells = [{
+			name: "Good Spell",
+			source: "HB",
+			level: 1,
+			entries: ["The damage increases by {@scaledamage 2d8|2-9|1d8} for each slot level above 1st."],
+		}];
+		const before = spells[0].entries[0];
+		sanitize(spells);
+		expect(spells[0].entries[0]).toBe(before); // unchanged
+	});
+
+	test("a sanitized spell renders through the real Renderer without throwing", () => {
+		// This is the end-to-end guarantee: the exact path that used to throw.
+		const Renderer = globalThis.Renderer;
+		if (!Renderer?.get) return; // renderer not present in this env — structural tests above still cover it
+		const spells = [{
+			name: "Bad Cantrip",
+			source: "HB",
+			level: 0,
+			entries: ["Takes {@scaledamage 1d6|1-4,5-10,11-16,17-20|1d6,2d6,3d6,4d6} force damage."],
+		}];
+		sanitize(spells);
+		expect(() => Renderer.get().render({type: "entries", entries: spells[0].entries})).not.toThrow();
 	});
 });

@@ -9,8 +9,8 @@ _None._
 
 ### Round 38 (2 follow-ups: spell-hover render crash, stale exhaustion display) — COMPLETE
 
-Two user-reported bugs after R37. Full gate: 348 suites / 11497 tests green; eslint clean. New
-test: `CharacterSheetRound38Fixes.test.js` (4 tests). Also corrected the R37 reading-speed formula
+Two user-reported bugs after R37. Full gate: 348 suites / 11501 tests green; eslint clean. New
+test: `CharacterSheetRound38Fixes.test.js` (8 tests). Also corrected the R37 reading-speed formula
 (`÷2`, not `×2`).
 
 * **#1** Opening/refreshing/adding spells spammed the console with
@@ -26,6 +26,14 @@ test: `CharacterSheetRound38Fixes.test.js` (4 tests). Also corrected the R37 rea
   block (`{1:1d6,5:2d6,11:3d6,17:4d6}`, label "force damage") plus plain `{@damage}` tags in the
   entries text. A scan confirmed Transposition was the ONLY offender across all spell data +
   homebrew; the new test guards that no TGTT spell carries an out-of-range scale progression.
+  FOLLOW-UP (systemic): the data fix can't reach a user whose *cached* brew (their own IndexedDB
+  storage or a remote brew repo) still carries the old Transposition. Added a load-time sweep,
+  `_sanitizeSpellScaleTags(this._spellsData)` (called after both `_mergeBrewData` calls in
+  `_pLoadData`), that deep-walks every loaded spell and downgrades any out-of-range
+  `{@scaledice}`/`{@scaledamage}` tag to the tag's `displayText` (if present) or a plain
+  `{@damage <baseRoll>}` — in-range slot scaling untouched. So even a stale cached brew renders
+  cleanly. Live-verified in the browser (repaired output renders through the real `Renderer`
+  without throwing); 4 added regression tests ("systemic" describe block).
 * **#2** Adding/removing exhaustion (and changing the exhaustion rule set) didn't refresh all the
   effects it drives — speed, spell/feature save DCs, and the d20-penalty breakdowns stayed stale
   until a full page refresh. ROOT CAUSE: the handlers only re-rendered the exhaustion widget +
