@@ -7,6 +7,36 @@ _None._
 
 ## Closed Bugs
 
+### Round 38 (2 follow-ups: spell-hover render crash, stale exhaustion display) — COMPLETE
+
+Two user-reported bugs after R37. Full gate: 348 suites / 11497 tests green; eslint clean. New
+test: `CharacterSheetRound38Fixes.test.js` (4 tests). Also corrected the R37 reading-speed formula
+(`÷2`, not `×2`).
+
+* **#1** Opening/refreshing/adding spells spammed the console with
+  `getSpellHoverLink error: Error: Number was out of range! Range was 1-9 (inclusive)` (the filter
+  still worked — the hover try/catch kept the UI alive). ROOT CAUSE (data): the TGTT homebrew
+  cantrip **Transposition** expressed its CHARACTER-LEVEL damage scaling with
+  `{@scaledamage}`/`{@scaledice}` tags whose progression ranges ran up to 20
+  (`1-4,5-10,11-16,17-20`, `5,11,17`, `5-10`, `11-16`, `17-20`). Those tags are ONLY valid for
+  spell-SLOT upcasting — `Renderer.parseScaleDice` passes the progression to
+  `MiscUtil.parseNumberRange(progression, 1, 9)`, which throws on any value > 9. Because
+  Transposition is in every wizard's available-spell list, it threw on every list render. Fix
+  (DATA, the canonical 5etools cantrip pattern, à la Fire Bolt): switched to a `scalingLevelDice`
+  block (`{1:1d6,5:2d6,11:3d6,17:4d6}`, label "force damage") plus plain `{@damage}` tags in the
+  entries text. A scan confirmed Transposition was the ONLY offender across all spell data +
+  homebrew; the new test guards that no TGTT spell carries an out-of-range scale progression.
+* **#2** Adding/removing exhaustion (and changing the exhaustion rule set) didn't refresh all the
+  effects it drives — speed, spell/feature save DCs, and the d20-penalty breakdowns stayed stale
+  until a full page refresh. ROOT CAUSE: the handlers only re-rendered the exhaustion widget +
+  combat stats and tried to refresh spells via `this._spellsModule` — a property that is ALWAYS
+  null (the real handle is `this._spells`), so the spell DC never updated at all (latent dead
+  code). Fix: a single `_rerenderExhaustionDependents()` helper now refreshes every
+  exhaustion-dependent display (exhaustion widget, combat stats/speed/senses, saves, skills,
+  abilities, abilities-detailed, attacks, and the spells/features/combat sub-modules), called from
+  `_addExhaustion`, `_removeExhaustion`, and the settings rule-change handler. Rest-driven
+  exhaustion clears already triggered a full `renderCharacter()`, so they were unaffected.
+
 ### Round 37 (10 follow-ups: ammo recognition, spell-filter systemic fix, Bladesinger, reading speed, Inspiring Leader, combat consumables) — COMPLETE
 
 Ten user-reported bugs. Fixed directly (not delegated — recent delegated rounds produced false

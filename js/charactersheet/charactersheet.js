@@ -4452,12 +4452,7 @@ class CharacterSheetPage {
 		}
 		this._state.addExhaustion();
 		this._saveCurrentCharacter();
-		this._renderExhaustion();
-		this._renderCombatStats();
-		// Re-render spells to update DC (Thelemar rules)
-		if (this._spellsModule && this._state.getExhaustionRules() === "thelemar") {
-			this._spellsModule.render();
-		}
+		this._rerenderExhaustionDependents();
 	}
 
 	_removeExhaustion () {
@@ -4468,12 +4463,32 @@ class CharacterSheetPage {
 		}
 		this._state.removeExhaustion();
 		this._saveCurrentCharacter();
+		this._rerenderExhaustionDependents();
+	}
+
+	/**
+	 * Re-render every display whose value/breakdown depends on the current
+	 * exhaustion level. Exhaustion feeds speed, spell/feature save DCs, and the
+	 * d20 penalty surfaced in ability-check/save/skill/attack/initiative
+	 * breakdowns (and, under Thelemar rules, many more), so a partial re-render
+	 * left those stale until a full page refresh. All of these renders are
+	 * idempotent and cheap, so we refresh them unconditionally (the penalty is 0
+	 * when there is no exhaustion, making this a no-op for unaffected sheets).
+	 * NOTE: the prior implementation re-rendered spells via `this._spellsModule`,
+	 * which is always null (the real handle is `this._spells`) — so the spell DC
+	 * never actually updated. Fixed here.
+	 */
+	_rerenderExhaustionDependents () {
 		this._renderExhaustion();
 		this._renderCombatStats();
-		// Re-render spells to update DC (Thelemar rules)
-		if (this._spellsModule && this._state.getExhaustionRules() === "thelemar") {
-			this._spellsModule.render();
-		}
+		this._renderSavingThrows();
+		this._renderSkills();
+		this._renderAbilities();
+		this._renderAbilitiesDetailed();
+		this._renderAttacks();
+		if (this._spells) this._spells.render();
+		if (this._features) this._features.render();
+		if (this._combat) this._combat.render();
 	}
 
 	_renderCompanions () {
@@ -13906,12 +13921,9 @@ class CharacterSheetPage {
 		// Exhaustion rules handler
 		modalInner.querySelector("#settings-exhaustion-rules").addEventListener("change", (e) => {
 			this._state.setExhaustionRules((/** @type {*} */ (e.target)).value);
-			this._renderExhaustion();
-			this._renderCombatStats();
-			// Re-render spells tab if it exists to update spell save DC
-			if (this._spellsModule) {
-				this._spellsModule.render();
-			}
+			// Changing the rule set changes the exhaustion penalty everywhere, so
+			// refresh every exhaustion-dependent display (speed, DCs, breakdowns).
+			this._rerenderExhaustionDependents();
 			// Update master toggle state since exhaustion is part of Thelemar rules
 			updateMasterToggleState();
 		});
