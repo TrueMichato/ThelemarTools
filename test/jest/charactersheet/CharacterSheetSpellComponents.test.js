@@ -75,23 +75,47 @@ describe("getSpellMaterialComponentInfo", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("getGoldComponentCandidates", () => {
-	it("matches a value-less item by name keyword and a generic item by value", () => {
+	it("matches the named component (even value-less) but NOT a merely-valuable item", () => {
 		const state = makeState();
-		state.addItem({name: "Diamond", source: "Custom", value: 0, _isCustom: true}); // name match, no value
-		state.addItem({name: "Ruby Brooch", source: "Custom", value: 40000, _isCustom: true}); // value >= 300gp
+		state.addItem({name: "Diamond", source: "Custom", value: 0, _isCustom: true}); // name match, no value → trusted
+		state.addItem({name: "Ruby Brooch", source: "Custom", value: 40000, _isCustom: true}); // valuable, but not named
 		state.addItem({name: "Copper Coin", source: "Custom", value: 1, _isCustom: true}); // neither
 
 		const cands = state.getGoldComponentCandidates(30000, "diamonds worth 300 gp, which the spell consumes");
 		const names = cands.map(c => c.name);
-		expect(names).toContain("Diamond"); // by name
-		expect(names).toContain("Ruby Brooch"); // by value
+		expect(names).toContain("Diamond"); // by name — accepted even with no value
+		expect(names).not.toContain("Ruby Brooch"); // valuable but not the named component → rejected
 		expect(names).not.toContain("Copper Coin");
 	});
 
-	it("returns empty when nothing matches by name or value", () => {
+	it("rejects a named component that is explicitly worth less than the cost", () => {
+		const state = makeState();
+		// A real Diamond, but only 200 gp — Revivify needs 300 gp. Must NOT qualify.
+		state.addItem({name: "Diamond", source: "Custom", value: 20000, _isCustom: true});
+		expect(state.getGoldComponentCandidates(30000, "diamonds worth 300 gp")).toHaveLength(0);
+	});
+
+	it("accepts a named component worth exactly the cost, and one with no explicit value", () => {
+		const state = makeState();
+		state.addItem({id: "exact", name: "Diamond", source: "Custom", value: 30000, _isCustom: true}); // exactly 300 gp
+		state.addItem({id: "priceless", name: "Heirloom Diamond", source: "Custom", value: 0, _isCustom: true}); // homebrew, no price
+		const names = state.getGoldComponentCandidates(30000, "diamonds worth 300 gp").map(c => c.name);
+		expect(names).toContain("Diamond");
+		expect(names).toContain("Heirloom Diamond");
+	});
+
+	it("returns empty when nothing matches the component name (a valuable is not a substitute)", () => {
 		const state = makeState();
 		state.addItem({name: "Torch", source: "Custom", value: 1, _isCustom: true});
+		state.addItem({name: "Ruby Brooch", source: "Custom", value: 40000, _isCustom: true}); // worth enough, wrong item
 		expect(state.getGoldComponentCandidates(30000, "diamonds worth 300 gp")).toHaveLength(0);
+	});
+
+	it("returns empty when the component text names nothing to match", () => {
+		const state = makeState();
+		state.addItem({name: "Diamond", source: "Custom", value: 50000, _isCustom: true});
+		// no extractable noun (all stopwords) → cannot name-match anything
+		expect(state.getGoldComponentCandidates(30000, "worth at least 300 gp")).toHaveLength(0);
 	});
 });
 
@@ -107,13 +131,18 @@ describe("getSpellcastingFocusStatus", () => {
 	it("is true with an arcane focus (SCF) item", () => {
 		const state = makeState();
 		state.addItem({name: "Orb", source: "PHB", type: "SCF", scfType: "arcane", _isCustom: true});
-		expect(state.getSpellcastingFocusStatus().ok).toBe(true);
+		const status = state.getSpellcastingFocusStatus();
+		expect(status.ok).toBe(true);
+		expect(status.itemName).toBe("Orb");
+		expect(status.source).toBe("arcane focus");
 	});
 
 	it("is true with a component pouch (matched by name)", () => {
 		const state = makeState();
 		state.addItem({name: "Component Pouch", source: "PHB", type: "G", _isCustom: true});
-		expect(state.getSpellcastingFocusStatus().ok).toBe(true);
+		const status = state.getSpellcastingFocusStatus();
+		expect(status.ok).toBe(true);
+		expect(status.itemName).toBe("Component Pouch");
 	});
 
 	it("is true via Spellsword Technique with a melee weapon possessed", () => {
@@ -142,6 +171,60 @@ describe("getSpellcastingFocusStatus", () => {
 		const state = makeState();
 		state.addFeat({name: "War Caster", source: "PHB"});
 		expect(state.getSpellcastingFocusStatus().ok).toBe(false);
+	});
+});
+
+/* -------------------------------------------------------------------------- */
+/* _getSpellFocusNote — cast-result focus readout                              */
+/* -------------------------------------------------------------------------- */
+
+describe("_getSpellFocusNote", () => {
+	it("names the focus item and its kind for a no-cost material spell", () => {
+		const state = makeState();
+		state.addItem({name: "Crystal", source: "PHB", type: "SCF", scfType: "arcane", _isCustom: true});
+		const spells = makeSpells(state, [SPELL_NO_COST]);
+		expect(spells._getSpellFocusNote(SPELL_NO_COST, SPELL_NO_COST)).toBe("Crystal (arcane focus)");
+	});
+
+	it("does not repeat 'component pouch' when the item name already says it", () => {
+		const state = makeState();
+		state.addItem({name: "Component Pouch", source: "PHB", type: "G", _isCustom: true});
+		const spells = makeSpells(state, [SPELL_NO_COST]);
+		expect(spells._getSpellFocusNote(SPELL_NO_COST, SPELL_NO_COST)).toBe("Component Pouch");
+	});
+
+	it("reports a feature-only substitution with no item (Star Map)", () => {
+		const state = makeState();
+		state.addFeature({name: "Star Map", source: "XPHB"});
+		const spells = makeSpells(state, [SPELL_NO_COST]);
+		expect(spells._getSpellFocusNote(SPELL_NO_COST, SPELL_NO_COST)).toBe("Star Map");
+	});
+
+	it("returns null for a spell with no material component", () => {
+		const state = makeState();
+		state.addItem({name: "Crystal", source: "PHB", type: "SCF", scfType: "arcane", _isCustom: true});
+		const spells = makeSpells(state, [SPELL_NO_MATERIAL]);
+		expect(spells._getSpellFocusNote(SPELL_NO_MATERIAL, SPELL_NO_MATERIAL)).toBeNull();
+	});
+
+	it("returns null for a gold-cost component spell (that uses the component, not a focus)", () => {
+		const state = makeState();
+		state.addItem({name: "Crystal", source: "PHB", type: "SCF", scfType: "arcane", _isCustom: true});
+		const spells = makeSpells(state, [SPELL_GOLD_CONSUME]);
+		expect(spells._getSpellFocusNote(SPELL_GOLD_CONSUME, SPELL_GOLD_CONSUME)).toBeNull();
+	});
+
+	it("returns null when a variant component was used instead", () => {
+		const state = makeState();
+		state.addItem({name: "Crystal", source: "PHB", type: "SCF", scfType: "arcane", _isCustom: true});
+		const spells = makeSpells(state, [SPELL_NO_COST]);
+		expect(spells._getSpellFocusNote(SPELL_NO_COST, SPELL_NO_COST, {variantUsed: true})).toBeNull();
+	});
+
+	it("returns null when no focus is possessed", () => {
+		const state = makeState();
+		const spells = makeSpells(state, [SPELL_NO_COST]);
+		expect(spells._getSpellFocusNote(SPELL_NO_COST, SPELL_NO_COST)).toBeNull();
 	});
 });
 
@@ -178,6 +261,25 @@ describe("_checkCastingConstraints material gate", () => {
 		const spells = makeSpells(state, [SPELL_GOLD_CONSUME]);
 		const {block} = spells._checkCastingConstraints(SPELL_GOLD_CONSUME, SPELL_GOLD_CONSUME, null, {enforceMaterial: true});
 		expect(block).toBeNull();
+	});
+
+	it("still BLOCKS a gold-cost spell when you own a valuable that is NOT the named component", () => {
+		// A 400 gp brooch is worth more than the 300 gp diamond Revivify needs, but it
+		// is not a diamond — you must own the actual named component to cast.
+		const state = makeState();
+		state.addItem({name: "Ruby Brooch", source: "Custom", value: 40000, _isCustom: true});
+		const spells = makeSpells(state, [SPELL_GOLD_CONSUME]);
+		const {block} = spells._checkCastingConstraints(SPELL_GOLD_CONSUME, SPELL_GOLD_CONSUME, null, {enforceMaterial: true});
+		expect(block).toMatch(/worth at least 300 gp/i);
+	});
+
+	it("still BLOCKS a gold-cost spell when the named component is worth too little", () => {
+		// A genuine Diamond, but only 200 gp — under Revivify's 300 gp floor.
+		const state = makeState();
+		state.addItem({name: "Diamond", source: "Custom", value: 20000, _isCustom: true});
+		const spells = makeSpells(state, [SPELL_GOLD_CONSUME]);
+		const {block} = spells._checkCastingConstraints(SPELL_GOLD_CONSUME, SPELL_GOLD_CONSUME, null, {enforceMaterial: true});
+		expect(block).toMatch(/worth at least 300 gp/i);
 	});
 
 	it("does NOT enforce material components when enforceMaterial is off (innate/item casting)", () => {
@@ -219,9 +321,14 @@ describe("_pConsumeMaterialComponent", () => {
 		globalThis.InputUiUtil = globalThis.InputUiUtil || {};
 		globalThis.JqueryUtil = globalThis.JqueryUtil || {};
 		globalThis.JqueryUtil.doToast = globalThis.JqueryUtil.doToast || (() => {});
+		// Default prompt stubs — individual tests override the return value and/or
+		// assert call counts. Defaulting to "Keep it" / "keep all" is the SAFE answer
+		// (nothing destroyed) so an unexpected prompt can't silently pass a test.
+		globalThis.InputUiUtil.pGetUserBoolean = jest.fn(async () => false);
+		globalThis.InputUiUtil.pGetUserEnum = jest.fn(async () => null);
 	});
 
-	it("removes the consumed gold component from inventory on cast", async () => {
+	it("removes the consumed gold component from inventory on cast (single named item, no prompt)", async () => {
 		const state = makeState();
 		const id = "diamond-1";
 		state.addItem({id, name: "Diamond", source: "Custom", value: 30000, quantity: 1, _isCustom: true});
@@ -231,6 +338,9 @@ describe("_pConsumeMaterialComponent", () => {
 
 		expect(res.consumed?.name).toBe("Diamond");
 		expect(state.getItems().find(i => i.id === id)).toBeUndefined(); // removed
+		// A single, explicitly-named component is unambiguous — consumed directly, NO prompt.
+		expect(globalThis.InputUiUtil.pGetUserBoolean).not.toHaveBeenCalled();
+		expect(globalThis.InputUiUtil.pGetUserEnum).not.toHaveBeenCalled();
 	});
 
 	it("does NOT consume a gold component that the spell only requires (not consumed)", async () => {
@@ -283,4 +393,78 @@ describe("_pConsumeMaterialComponent", () => {
 		await spells._pConsumeMaterialComponent({spell: SPELL_GOLD_CONSUME, spellData: SPELL_GOLD_CONSUME, decision: {skipComponentPrompt: true}});
 		expect(state.getItems().find(i => i.id === "d5")?.quantity).toBe(2);
 	});
+
+	// region The reported bug: an item that is merely worth enough (but does NOT
+	// name the component) is not "the component" — it is never consumed, never
+	// prompted, and never silently destroyed. (The gate blocks such a cast; if
+	// consume is somehow reached it must no-op.)
+	it("never touches a merely-valuable item — not the named component, so nothing is spent or prompted", async () => {
+		const state = makeState();
+		// A 400 gp brooch: worth more than Revivify's 300 gp diamond, but NOT a diamond.
+		state.addItem({id: "ruby-1", name: "Ruby Brooch", source: "Custom", value: 40000, quantity: 1, _isCustom: true});
+		const spells = makeSpells(state, [SPELL_GOLD_CONSUME]);
+
+		const res = await spells._pConsumeMaterialComponent({spell: SPELL_GOLD_CONSUME, spellData: SPELL_GOLD_CONSUME, decision: {skipComponentPrompt: true}});
+
+		expect(res.consumed).toBeNull();
+		expect(globalThis.InputUiUtil.pGetUserBoolean).not.toHaveBeenCalled(); // never even asked
+		expect(globalThis.InputUiUtil.pGetUserEnum).not.toHaveBeenCalled();
+		expect(state.getItems().find(i => i.id === "ruby-1")).toBeDefined(); // untouched
+	});
+
+	it("a quick-cast never silently destroys an unnamed valuable (regression guard)", async () => {
+		const state = makeState();
+		state.addItem({id: "ruby-3", name: "Ruby Brooch", source: "Custom", value: 40000, quantity: 1, _isCustom: true});
+		const spells = makeSpells(state, [SPELL_GOLD_CONSUME]);
+
+		// skipComponentPrompt is the DEFAULT for click-to-cast — even so, a valuable
+		// that isn't the named component must survive untouched.
+		const res = await spells._pConsumeMaterialComponent({spell: SPELL_GOLD_CONSUME, spellData: SPELL_GOLD_CONSUME, decision: {skipComponentPrompt: true}});
+		expect(res.consumed).toBeNull();
+		expect(state.getItems().find(i => i.id === "ruby-3")).toBeDefined();
+	});
+
+	it("a single named component with an optional consume prompts before spending", async () => {
+		const state = makeState();
+		state.addItem({id: "dia-opt", name: "Diamond", source: "Custom", value: 30000, quantity: 1, _isCustom: true});
+		const OPTIONAL = {...SPELL_GOLD_CONSUME, name: "Optional Revivify", components: {v: true, s: true, m: {text: "diamonds worth 300 gp", cost: 30000, consume: "optional"}}};
+		const spells = makeSpells(state, [OPTIONAL]);
+		globalThis.InputUiUtil.pGetUserBoolean.mockResolvedValue(false); // "Keep it"
+
+		const res = await spells._pConsumeMaterialComponent({spell: OPTIONAL, spellData: OPTIONAL, decision: {skipComponentPrompt: true}});
+
+		expect(globalThis.InputUiUtil.pGetUserBoolean).toHaveBeenCalledTimes(1); // optional → ask
+		expect(res.consumed).toBeNull();
+		expect(state.getItems().find(i => i.id === "dia-opt")).toBeDefined();
+	});
+
+	it("prompts a picker when several named items match, and consumes only the chosen one", async () => {
+		const state = makeState();
+		state.addItem({id: "dia-a", name: "Diamond", source: "Custom", value: 30000, quantity: 1, _isCustom: true});
+		state.addItem({id: "dia-b", name: "Flawless Diamond", source: "Custom", value: 50000, quantity: 1, _isCustom: true});
+		const spells = makeSpells(state, [SPELL_GOLD_CONSUME]);
+		// Pick the second candidate from whatever list the picker is given.
+		globalThis.InputUiUtil.pGetUserEnum.mockImplementation(async ({values}) => values[1]);
+
+		const res = await spells._pConsumeMaterialComponent({spell: SPELL_GOLD_CONSUME, spellData: SPELL_GOLD_CONSUME, decision: {skipComponentPrompt: true}});
+
+		expect(globalThis.InputUiUtil.pGetUserEnum).toHaveBeenCalledTimes(1);
+		// The two diamonds are the candidates; the chosen id is the one removed, the other kept.
+		const remaining = state.getItems().filter(i => ["dia-a", "dia-b"].includes(i.id));
+		expect(remaining).toHaveLength(1);
+		expect(res.consumed.id).not.toBe(remaining[0].id);
+	});
+
+	it("does not consume when the picker is cancelled (null) on a multi-match", async () => {
+		const state = makeState();
+		state.addItem({id: "dia-c", name: "Diamond", source: "Custom", value: 30000, quantity: 1, _isCustom: true});
+		state.addItem({id: "dia-d", name: "Flawless Diamond", source: "Custom", value: 50000, quantity: 1, _isCustom: true});
+		const spells = makeSpells(state, [SPELL_GOLD_CONSUME]);
+		globalThis.InputUiUtil.pGetUserEnum.mockResolvedValue(null); // cancelled / "keep all"
+
+		const res = await spells._pConsumeMaterialComponent({spell: SPELL_GOLD_CONSUME, spellData: SPELL_GOLD_CONSUME, decision: {skipComponentPrompt: true}});
+		expect(res.consumed).toBeNull();
+		expect(state.getItems().filter(i => ["dia-c", "dia-d"].includes(i.id))).toHaveLength(2);
+	});
+	// endregion
 });
