@@ -24622,15 +24622,23 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Inventory items that could satisfy a gold-cost material component.
+	 * Inventory items that satisfy a gold-cost material component.
 	 *
-	 * A candidate is any possessed item whose name matches a component keyword OR
-	 * whose market value (copper) is at least the required cost — this hybrid keeps
-	 * a player-added "Diamond" (often value-less) usable while still honouring the
-	 * "worth at least X gp" rule for generically-named valuables.
+	 * A candidate is a possessed item whose NAME matches a component keyword
+	 * (stem-tolerant both ways, so the spell text "diamonds" matches a "Diamond"
+	 * item and vice-versa) AND that is worth enough. A merely-valuable item is NOT
+	 * accepted: the rules ask for the *named* component ("a diamond worth 300 gp"),
+	 * not "anything worth 300 gp", and silently treating a random valuable as the
+	 * component is the confusing behaviour we removed. If you don't own the named
+	 * component the cast is blocked (enable "Ignore spellcasting restrictions" to
+	 * override).
 	 *
-	 * Ranked best-first: name+value, then name-only, then value-only; cheapest first
-	 * within a tier so casting consumes the least-valuable sufficient item.
+	 * The value floor is applied only to items that carry an EXPLICIT market value:
+	 * a "Diamond" worth 200 gp does not satisfy a 300 gp requirement. A value-less
+	 * item (0/unset — common for player/homebrew items with no price) is trusted by
+	 * its name rather than false-blocked. Value is otherwise used only as a
+	 * tiebreaker (cheapest matching item consumed first) and as informational
+	 * `matchByValue`.
 	 *
 	 * @param {number} costCp Required component value in copper pieces.
 	 * @param {string} [text] The component description (for keyword matching).
@@ -24640,6 +24648,7 @@ class CharacterSheetState {
 		if (!(costCp > 0)) return [];
 		const stem = w => (w.endsWith("s") && w.length > 3 ? w.slice(0, -1) : w);
 		const keywords = this._extractComponentKeywords(text).map(stem);
+		if (!keywords.length) return []; // nothing names the component → nothing can match
 		const out = [];
 		for (const invItem of this._data.inventory) {
 			const it = invItem.item || {};
@@ -24647,14 +24656,17 @@ class CharacterSheetState {
 			const nameLower = (it.name || invItem.name || "").toLowerCase();
 			// Compare stems both ways so "diamonds" (text) matches "Diamond" (item) and vice versa.
 			const nameWords = this._extractComponentKeywords(nameLower).map(stem);
-			const matchByName = keywords.length > 0
-				&& keywords.some(k => nameWords.some(n => n === k || n.includes(k) || k.includes(n)));
-			const matchByValue = value >= costCp;
-			if (!matchByName && !matchByValue) continue;
-			out.push({id: invItem.id, name: it.name || invItem.name || "Item", value, quantity: invItem.quantity ?? 1, matchByName, matchByValue});
+			const matchByName = keywords.some(k => nameWords.some(n => n === k || n.includes(k) || k.includes(n)));
+			if (!matchByName) continue; // NAME match required — a merely-valuable item is not "the component"
+			// The named item must also be worth enough: a "Diamond" worth 200 gp does
+			// NOT satisfy a 300 gp requirement. A value-less item (0/unset — common for
+			// player/homebrew items with no market price) is trusted by its name rather
+			// than false-blocked.
+			if (value > 0 && value < costCp) continue;
+			out.push({id: invItem.id, name: it.name || invItem.name || "Item", value, quantity: invItem.quantity ?? 1, matchByName: true, matchByValue: value >= costCp});
 		}
-		const rank = c => (c.matchByName ? 2 : 0) + (c.matchByValue ? 1 : 0);
-		out.sort((a, b) => (rank(b) - rank(a)) || (a.value - b.value));
+		// cheapest matching item first, so casting spends the least-valuable one.
+		out.sort((a, b) => (a.value - b.value));
 		return out;
 	}
 
@@ -24690,23 +24702,33 @@ class CharacterSheetState {
 	 */
 	getSpellcastingFocusStatus () {
 		const inv = this._data.inventory || [];
-		const has = pred => inv.some(i => pred(i, i.item || {}));
 		const baseType = it => (typeof it.type === "string" ? it.type.split("|")[0] : "");
+		// Track which inventory item satisfied the focus, so callers can name it.
+		let matched = null;
+		const has = pred => inv.some(i => {
+			const it = i.item || {};
+			if (!pred(i, it)) return false;
+			matched = {it, name: it.name || i.name || null};
+			return true;
+		});
 
 		// 1. A dedicated spellcasting focus item (arcane / druidic / holy).
-		if (has((i, it) => baseType(it) === "SCF" || !!it.scfType)) return {ok: true, source: "spellcasting focus"};
+		if (has((i, it) => baseType(it) === "SCF" || !!it.scfType)) {
+			const source = ({arcane: "arcane focus", druid: "druidic focus", holy: "holy symbol"})[matched.it.scfType] || "spellcasting focus";
+			return {ok: true, source, itemName: matched.name};
+		}
 
 		// 2. A component pouch (matched by name — it is plain adventuring gear).
-		if (has((i, it) => (it.name || i.name || "").toLowerCase().includes("component pouch"))) return {ok: true, source: "component pouch"};
+		if (has((i, it) => (it.name || i.name || "").toLowerCase().includes("component pouch"))) return {ok: true, source: "component pouch", itemName: matched.name};
 
 		// 3. Feature/feat substitutions.
-		if (this.hasFeat?.("Spellsword Technique") && has((i, it) => this._isMeleeWeaponItem(it))) return {ok: true, source: "Spellsword Technique (weapon as focus)"};
-		if (this.hasFeat?.("War Caster") && has((i, it) => baseType(it) === "S" || !!it.shield)) return {ok: true, source: "War Caster (shield as focus)"};
-		if (this.hasFeature?.("Star Map")) return {ok: true, source: "Star Map"};
+		if (this.hasFeat?.("Spellsword Technique") && has((i, it) => this._isMeleeWeaponItem(it))) return {ok: true, source: "Spellsword Technique", itemName: matched.name};
+		if (this.hasFeat?.("War Caster") && has((i, it) => baseType(it) === "S" || !!it.shield)) return {ok: true, source: "War Caster", itemName: matched.name};
+		if (this.hasFeature?.("Star Map")) return {ok: true, source: "Star Map", itemName: null};
 		if ((this.hasFeature?.("Gambler's Spellcasting") || this.hasFeature?.("Spellcasting Focus"))
-			&& has((i, it) => /\b(cards?|dice|coins?)\b/.test((it.name || i.name || "").toLowerCase()))) return {ok: true, source: "Gambler's Spellcasting"};
+			&& has((i, it) => /\b(cards?|dice|coins?)\b/.test((it.name || i.name || "").toLowerCase()))) return {ok: true, source: "Gambler's Spellcasting", itemName: matched.name};
 
-		return {ok: false, source: null};
+		return {ok: false, source: null, itemName: null};
 	}
 
 	// endregion

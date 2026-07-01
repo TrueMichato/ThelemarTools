@@ -2504,6 +2504,34 @@ class CharacterSheetSpells {
 	 * @param {object} spellData
 	 * @returns {string|null}
 	 */
+	/**
+	 * A short human label naming the spellcasting focus (or component pouch /
+	 * substitution feature) used to satisfy a spell's no-cost material component,
+	 * for display in the cast-result readout. Returns null when the spell has no
+	 * focus-satisfiable material component, a variant component was used instead,
+	 * or no focus is possessed.
+	 *
+	 * @param {object} spell
+	 * @param {object} spellData
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.variantUsed] A variant spell component was used (it shows its own line).
+	 * @returns {string|null}
+	 */
+	_getSpellFocusNote (spell, spellData, {variantUsed = false} = {}) {
+		if (variantUsed) return null;
+		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
+			|| this._state.getSpellMaterialComponentInfo?.(spell);
+		// Only a no-cost (focus-satisfiable) material component is "cast using a focus";
+		// gold-cost components use the consumed item, not a focus.
+		if (!info || !info.requiresFocus) return null;
+		const focus = this._state.getSpellcastingFocusStatus?.();
+		if (!focus?.ok) return null;
+		if (!focus.itemName) return focus.source; // feature-only (e.g. Star Map)
+		// Avoid redundant "(component pouch)" when the item name already says it.
+		const showSource = focus.source && !focus.itemName.toLowerCase().includes(focus.source.toLowerCase());
+		return showSource ? `${focus.itemName} (${focus.source})` : focus.itemName;
+	}
+
 	_getMaterialComponentBlock (spell, spellData) {
 		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
 			|| this._state.getSpellMaterialComponentInfo?.(spell);
@@ -2529,8 +2557,17 @@ class CharacterSheetSpells {
 	 * Consume a gold-cost material component on a committed cast, when the spell
 	 * consumes it. No-op when: the escape-hatch setting is on, the material has no
 	 * gold cost (a focus covers it), the component isn't consumed, or a variant
-	 * component was used in its place. Auto-picks the best-ranked candidate; offers
-	 * a picker only when multiple candidates exist and the cast isn't a quick-cast.
+	 * component was used in its place.
+	 *
+	 * Consumption is deliberately CONSERVATIVE — it must never silently destroy a
+	 * valuable the player didn't intend to spend:
+	 *   - A single inventory item whose NAME matches the component (e.g. a literal
+	 *     "Diamond" for Revivify) is unambiguous and consumed directly.
+	 *   - Anything else — multiple name matches, or a "value-only" match where no
+	 *     item names the component but something is merely worth enough — ALWAYS
+	 *     prompts the player to choose which item (if any) to spend, with an
+	 *     explicit "keep them / track manually" option. This holds even on a
+	 *     quick-cast: a wrong-item destruction is worse than a one-tap prompt.
 	 *
 	 * @param {object} args
 	 * @param {object} args.spell
@@ -2550,38 +2587,79 @@ class CharacterSheetSpells {
 		const candidates = this._state.getGoldComponentCandidates?.(info.cost, info.text) || [];
 		if (!candidates.length) return {consumed: null}; // the gate should have blocked; be safe
 
-		const skipPrompt = !!decision?.skipComponentPrompt;
-		let chosen = candidates[0];
+		// Every candidate is a name match now (value-only items are not accepted as
+		// "the component"). Consume a single unambiguous match directly; prompt only
+		// when the player genuinely owns several valid components, or the consume is
+		// optional — never auto-destroy something the player didn't choose.
+		const isOptional = info.consume === "optional";
 
-		if (!skipPrompt && candidates.length > 1) {
-			const labels = candidates.map(c => `${c.name}${c.value ? ` (${Math.floor(c.value / 100)} gp)` : ""}`);
-			const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
-				title: `${spell.name} — Consume Component`,
-				htmlDescription: `<div>Casting <strong>${spell.name}</strong> consumes a material component. Which item should be consumed?</div>`,
-				values: labels,
-				fnDisplay: v => v,
-				isResolveItem: true,
-			}));
-			if (picked == null) return {consumed: null}; // cancelled the picker — leave inventory untouched
-			const idx = labels.indexOf(picked);
-			if (idx >= 0) chosen = candidates[idx];
-		}
-
-		// An "optional" consume is only spent on explicit confirmation (never on a quick-cast).
-		if (info.consume === "optional") {
-			if (skipPrompt) return {consumed: null};
-			const ok = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
-				title: `${spell.name} — Consume Component?`,
-				htmlDescription: `<div><strong>${spell.name}</strong> can consume <strong>${chosen.name}</strong> for a lasting effect. Consume it now?</div>`,
-				textYes: "Consume it",
-				textNo: "Keep it",
-			}));
-			if (!ok) return {consumed: null};
+		let chosen;
+		if (!isOptional && candidates.length === 1) {
+			chosen = candidates[0];
+		} else {
+			chosen = await this._pPromptConsumeComponentChoice({
+				spell,
+				cost: info.cost,
+				candidates,
+				isOptional,
+			});
+			if (!chosen) return {consumed: null};
 		}
 
 		this._state.consumeItem(chosen.id);
-		JqueryUtil.doToast({type: "info", content: `Consumed ${chosen.name} casting ${spell.name}.`});
+		const gpStr = chosen.value ? ` (${Math.floor(chosen.value / 100)} gp)` : "";
+		JqueryUtil.doToast({type: "info", content: `Consumed ${chosen.name}${gpStr} casting ${spell.name}.`});
 		return {consumed: {id: chosen.id, name: chosen.name, value: chosen.value}};
+	}
+
+	/**
+	 * Prompt the player to pick which inventory item to consume as a spell's
+	 * gold-cost material component (or to keep them all and track it manually).
+	 * Only reached when the player owns several valid (name-matched) components, or
+	 * the consume is optional — a single unambiguous component is spent without a
+	 * prompt.
+	 *
+	 * @param {object} args
+	 * @param {object} args.spell
+	 * @param {number} args.cost Required component value, in copper.
+	 * @param {Array<{id:string, name:string, value:number}>} args.candidates
+	 * @param {boolean} args.isOptional The spell only optionally consumes the component.
+	 * @returns {Promise<(null|{id:string, name:string, value:number})>} The chosen item, or null to keep all.
+	 */
+	async _pPromptConsumeComponentChoice ({spell, cost, candidates, isOptional}) {
+		const labelOf = c => `${c.name}${c.value ? ` (${Math.floor(c.value / 100)} gp)` : ""}`;
+		const nm = (typeof Renderer !== "undefined" && Renderer.stripTags) ? Renderer.stripTags(spell.name) : spell.name;
+
+		// A single candidate reads more clearly as a yes/no confirmation than a
+		// one-row dropdown (only reached here when the consume is optional).
+		if (candidates.length === 1) {
+			const c = candidates[0];
+			const why = isOptional
+				? `<strong>${nm}</strong> can consume a material component for a lasting effect.`
+				: `<strong>${nm}</strong> consumes <strong>${c.name}</strong>.`;
+			const ok = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: `${spell.name} — Consume Component?`,
+				htmlDescription: `<div class="ve-mb-2">${why} Consume <strong>${labelOf(c)}</strong>?</div>`,
+				textYes: "Consume it",
+				textNo: "Keep it",
+			}));
+			return ok ? c : null;
+		}
+
+		const note = isOptional
+			? `Casting <strong>${nm}</strong> can optionally consume a material component. Choose one to spend, or keep them all.`
+			: `Casting <strong>${nm}</strong> consumes a material component, and you own more than one that qualifies. Choose which to spend.`;
+
+		const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+			title: `${spell.name} — Consume Component`,
+			values: candidates,
+			isResolveItem: true,
+			isAllowNull: true,
+			elePost: ee`<p class="ve-muted ve-small ve-mt-2 ve-mb-0">${note}</p>`,
+			fnDisplay: (c, ix) => (ix === -1 || c == null) ? "Keep them all — I'll track it manually" : labelOf(c),
+		}));
+		// null = cancelled / "keep all"; a symbol = skipped → all mean "don't consume".
+		return (picked && typeof picked !== "symbol") ? picked : null;
 	}
 
 	async _showCastResult (spell, slotLevel = null, isPactSlot = false, isRitual = false, castMeta = null) {
@@ -3594,6 +3672,13 @@ class CharacterSheetSpells {
 		// Show variant component usage
 		if (normalizedCastMeta.variantComponent) {
 			toastContent += `<br><span class="text-info">🧪 Component: ${normalizedCastMeta.variantComponent.itemName}</span>`;
+		}
+
+		// Detail the spellcasting focus (or component pouch / substitution) used to
+		// satisfy a no-cost material component.
+		const focusNote = this._getSpellFocusNote(spell, spellData, {variantUsed: !!normalizedCastMeta.variantComponent});
+		if (focusNote) {
+			toastContent += `<br><span class="text-info">🔮 Focus: ${focusNote}</span>`;
 		}
 
 		if (deliveredViaFamiliar) {

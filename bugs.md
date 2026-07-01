@@ -16,14 +16,16 @@ Full gate: 349 suites / 11526 tests green; eslint clean; package.json/lockfile u
 consume run clean against a freshly-built Wizard; console clean).
 
 * **Rule 1 — gold-cost components.** A spell whose material component carries a gold cost
-  (`components.m.cost`, in copper) is hard-blocked unless the character possesses a qualifying
-  inventory item. Matching is HYBRID (per the user's choice): an item qualifies if its name matches
-  a component keyword (stem-tolerant both ways, so the spell text "diamonds" matches a "Diamond"
-  item and vice-versa) **or** its market value ≥ the required cost. If the component is *consumed*
-  (`components.m.consume === true`), the item is removed from inventory on a committed cast
-  (quantity decremented when stacked, fully removed at the last unit). An `"optional"` consume only
-  spends on explicit confirmation, never on a quick-cast. When multiple candidates exist a cast-time
-  picker chooses which to spend (auto-picks the cheapest sufficient item on a quick-cast).
+  (`components.m.cost`, in copper) is hard-blocked unless the character possesses the **named**
+  component. Matching is by NAME **and** value: an item must name-match a component keyword
+  (stem-tolerant both ways, so the spell text "diamonds" matches a "Diamond" item and vice-versa)
+  AND — when it carries an explicit market value — be worth at least the required cost. So a
+  "Diamond" worth 200 gp does **not** satisfy a 300 gp requirement, and a merely-valuable item that
+  isn't named (a 400 gp ruby brooch for a diamond) is never a substitute. A value-less item (0/unset,
+  common for player/homebrew items with no price) is trusted by its name rather than false-blocked. If the component is *consumed* (`components.m.consume === true`), the
+  item is removed from inventory on a committed cast (quantity decremented when stacked, fully removed
+  at the last unit). A *single, unambiguous* named component is consumed directly; the player is only
+  prompted when they own **several** qualifying named items, or the consume is `"optional"`.
 * **Rule 2 — no-cost components.** A spell whose material component has no gold cost (a plain
   string, e.g. `"a pinch of soot"`) is hard-blocked unless the character has a spellcasting focus
   (any `type:"SCF"` / `scfType` item), a component pouch (matched by name), **or** a feature that
@@ -46,6 +48,37 @@ consume run clean against a freshly-built Wizard; console clean).
   (innate / item casting ignores material components by the rules). Consume runs via
   `_pConsumeMaterialComponent` at each path's committed point (after the non-cancelled checkpoint, so
   a cancelled normal-slot cast that refunds the slot never destroys the component).
+
+  R39 FOLLOW-UP — require the named component; never consume a random valuable. The first cut
+  matched gold-cost components as a HYBRID (name keyword **or** market value ≥ cost) and, on the
+  default click-to-cast (`decision.skipComponentPrompt: true`), silently auto-consumed the
+  best-ranked candidate. A player who owned a random 400 gp valuable but no "diamond" could both
+  *cast* Revivify (value-only gate pass) and have that unrelated valuable *destroyed* — "chaotic and
+  confusing... it just consumes random items." Fix, in two coordinated parts:
+  (1) `getGoldComponentCandidates` (state) now matches by NAME (plus a value floor for priced items — a "Diamond" worth 200 gp fails a 300 gp cost) — a merely-valuable item is not
+  "the component". So the GATE blocks any gold-cost cast where you don't own the named item, even if
+  you own something worth more. Value is kept only as a cheapest-first tiebreaker among named
+  matches; the method returns `[]` when the component text names nothing extractable.
+  (2) `_pConsumeMaterialComponent` (spells) consumes a *single* named component directly, and only
+  prompts (`_pPromptConsumeComponentChoice`: single → `pGetUserBoolean`, multi → `pGetUserEnum`) when
+  you own **several** valid named items or the consume is `"optional"`. `skipComponentPrompt` no
+  longer authorizes silent destruction. A value-only item is therefore never a candidate — never
+  blocks-through, never prompted, never destroyed. Regression suite grew to 35 tests in
+  `CharacterSheetSpellComponents.test.js`; RED-proven by restoring the old hybrid match (5 tests flip) and by dropping the value floor (2 tests flip).
+
+  R39 FOLLOW-UP 2 — detail the arcane focus in the casting readout. When a spell is cast using a
+  spellcasting focus (rather than a consumed gold-cost component or a variant), the cast-result toast
+  now names it: a `🔮 Focus:` line alongside the existing `🧪 Component:` variant line. New helper
+  `_getSpellFocusNote(spell, spellData, {variantUsed})` (spells) returns the label only for a no-cost
+  (`requiresFocus`) material spell where a focus is possessed and no variant was used — e.g.
+  "Orb (arcane focus)", "Component Pouch" (source suppressed when the name already contains it), or a
+  feature-only substitution with no item ("Star Map"). `getSpellcastingFocusStatus` (state) was
+  enriched to return `{ok, source, itemName}` — `source` now derives a friendly kind from `scfType`
+  ("arcane focus"/"druidic focus"/"holy symbol") and shortens the substitution labels
+  ("Spellsword Technique", "War Caster"). Wired into the `_handleSpellEffects` toast right after the
+  variant-component line; deliberately absent from `_castInnateSpell` (its own toast, no material
+  rules). Suite grew to 42 tests (7 new `_getSpellFocusNote` cases + `itemName` assertions on the
+  focus-status tests). Full gate: 349 suites / 11543 tests green; eslint clean; pkg untouched.
 
 ### Round 38 (2 follow-ups: spell-hover render crash, stale exhaustion display) — COMPLETE
 
