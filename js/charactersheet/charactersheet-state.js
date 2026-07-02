@@ -39803,6 +39803,20 @@ class CharacterSheetState {
 			{pattern: /lay on hands/i, stateTypeId: "custom", isInstant: true},
 			{pattern: /channel divinity/i, stateTypeId: "custom"},
 
+			// Bard abilities
+			// Bug 3 (Session C): Bardic Inspiration is a Charisma-mod-sized use pool
+			// (long rest; short rest from Bard 5 via Font of Inspiration) that must
+			// surface in the generic Resources panel like Channel Divinity / Lay on
+			// Hands. Without a description pattern it fell through to the `featureUses`
+			// fallback (isInstant:true), which isActivatableAbilityEntry() treats as an
+			// activatable ability, so getGenericPoolResources() excluded it. Matching
+			// here (stateTypeId:"custom", no isInstant) classifies it exactly like the
+			// other class resource pools — matchedBy:"description", isInstant:false — so
+			// it appears as a tracked resource. Anchored to the exact feature name so it
+			// never over-matches features that merely reference Bardic Inspiration in
+			// their text (e.g. Font of Inspiration, Jester's Act cost riders).
+			{pattern: /^bardic inspiration$/i, stateTypeId: "custom"},
+
 			// Warlock abilities
 			// (Eldritch Invocation catch-all removed — invocations are routed through
 			// WARLOCK_INVOCATION_REGISTRY and default to passive; toggle/trigger ones
