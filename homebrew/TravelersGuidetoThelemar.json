@@ -19166,6 +19166,10 @@
 						},
 						{
 							"type": "refClassFeature",
+							"classFeature": "Unyielding Might|Barbarian|TGTT|1"
+						},
+						{
+							"type": "refClassFeature",
 							"classFeature": "Lead the Pack|Barbarian|TGTT|6"
 						},
 						{
@@ -19174,6 +19178,16 @@
 						}
 					]
 				}
+			]
+		},
+		{
+			"name": "Unyielding Might",
+			"source": "TGTT",
+			"className": "Barbarian",
+			"classSource": "TGTT",
+			"level": 1,
+			"entries": [
+				"Your might is a force to be reckoned with. You gain a bonus to Strength ({@skill Athletics}) checks made to lift, drag, push, throw, grapple, or shove equal to your proficiency bonus."
 			]
 		},
 		{
@@ -30731,12 +30745,32 @@
 			"source": "TGTT",
 			"_copy": {
 				"name": "Minotaur",
-				"source": "MPMM"
+				"source": "MPMM",
+				"_mod": {
+					"entries": [
+						{
+							"mode": "appendArr",
+							"items": {
+								"name": "Powerful Build",
+								"entries": [
+									"You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift."
+								]
+							}
+						}
+					],
+					"traitTags": [
+						{
+							"mode": "appendArr",
+							"items": "Powerful Build"
+						}
+					]
+				}
 			},
 			"languageProficiencies": [
 				{
 					"common": true,
-					"minotaur|TGTT": true
+					"minotaur|TGTT": true,
+					"anyStandard": 1
 				}
 			]
 		},
