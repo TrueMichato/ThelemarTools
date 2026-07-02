@@ -4070,6 +4070,42 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Extract the source of a weapon-mastery property entry (default XPHB), so the
+	 * hover targets the right `itemMastery` entry for homebrew/reprinted masteries.
+	 * @param {(string|object)} masteryEntry
+	 * @returns {string}
+	 */
+	_getMasterySource (masteryEntry) {
+		if (!masteryEntry) return Parser.SRC_XPHB;
+		const raw = typeof masteryEntry === "string" ? masteryEntry : masteryEntry.uid;
+		return (raw && raw.split("|")[1]) || Parser.SRC_XPHB;
+	}
+
+	/**
+	 * 5etools hover attributes for a weapon-mastery PROPERTY on the `itemMastery`
+	 * faux-page (Sap / Cleave / Vex / …). Mirrors `_getActionHoverAttrs`; falls back
+	 * to a plain title if the hover subsystem is unavailable.
+	 * @param {string} masteryName
+	 * @param {string} [source]
+	 * @returns {string}
+	 */
+	_getMasteryHoverAttrs (masteryName, source = Parser.SRC_XPHB) {
+		try {
+			const hash = UrlUtil.encodeForHash([masteryName, source].join(HASH_LIST_SEP));
+			return Renderer.hover.getHoverElementAttributes({
+				page: "itemMastery",
+				source,
+				hash,
+				isFauxPage: true,
+			});
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] Error getting mastery hover attrs:", e);
+			return `title="Weapon Mastery: ${masteryName}"`;
+		}
+	}
+
+	/**
 	 * Render weapon masteries display in combat section
 	 */
 	_renderWeaponMasteries () {
@@ -4102,11 +4138,13 @@ class CharacterSheetPage {
 					&& (!source || i.source === source),
 				);
 				const masteryProp = this._getMasteryName(weapon?.mastery?.[0]);
+				const masterySource = this._getMasterySource(weapon?.mastery?.[0]);
+				const masteryHoverAttrs = masteryProp ? this._getMasteryHoverAttrs(masteryProp, masterySource) : "";
 
 				const badge = e_({outer: `
-					<span class="charsheet__mastery-badge" title="${masteryProp ? `Mastery: ${masteryProp}` : weaponName}">
+					<span class="charsheet__mastery-badge" title="${weaponName}">
 						<strong>${weaponName}</strong>
-						${masteryProp ? `<span class="charsheet__mastery-prop">${masteryProp}</span>` : ""}
+						${masteryProp ? `<span class="help-subtle charsheet__mastery-prop charsheet__mastery-link" ${masteryHoverAttrs}>${masteryProp}</span>` : ""}
 					</span>
 				`});
 				container.append(badge);

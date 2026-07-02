@@ -12008,6 +12008,27 @@ body.has-quickbuild-overlay .toast__container {
 	margin-top: 0;
 }
 
+/* Hoverable weapon-mastery property (opens the itemMastery 5etools tooltip). */
+.charsheet__mastery-link {
+	cursor: help;
+	text-decoration: underline dotted currentColor;
+	text-underline-offset: 2px;
+}
+
+.charsheet__mastery-link:hover {
+	text-decoration-style: solid;
+}
+
+/* Per-row Reckless Attack roll button (Barbarian). */
+.charsheet__attack-reckless {
+	white-space: nowrap;
+}
+
+.charsheet__attack-reckless.ve-btn-default {
+	color: var(--rgb-name-gold, #d4a700);
+	border-color: rgba(212, 167, 0, 0.5);
+}
+
 /* Calculated Class Statistics Grid */
 .charsheet__calculated-stats {
 	padding-bottom: 0.5rem;
