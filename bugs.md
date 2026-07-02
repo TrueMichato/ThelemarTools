@@ -3,40 +3,61 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 41 — Vitality, Might skill & Bard features (in progress)
-
-Grouped into 4 parallel sessions (rubber-ducked: Bug 4 moved in with Bug 5 to give a single
-choice/picker owner; Bug 3 kept alone). `charactersheet-state.js` is co-edited by A/B/C/D in FOUR
-far-apart, disjoint regions — each session flags its region for union-clean integration.
-
-- **A — Vitality of the Tree (live repro)** (bug 1). Owns `charactersheet-state.js` barbarian
-  subclass calc (~14586–14810) + rage surge (`_applyVitalitySurgeOnRage` ~41853 / `activateState`
-  ~41933) + `charactersheet-combat.js` `renderCombatVitality` (~9370) / rage & next-round handlers /
-  its `render()`-list line + `charactersheet.html` vitality section (~1077).
-  - Bug 1: "Vitality of the Tree" (XPHB World Tree Barbarian) does **nothing live** despite Round 40
-    code existing and unit tests passing. Must **reproduce live** (build a World Tree barbarian L3+,
-    Rage), root-cause the real runtime break (likely subclass detection / render-refresh / a swallowed
-    error — NOT missing code), and add a realistic integration/e2e-style test, not another synthetic
-    unit test.
-- **B — Unyielding Might → Might skill** (bug 2). Owns `homebrew/TravelersGuidetoThelemar.json`
-  Unyielding Might feature (~19184), the `charactersheet-state.js` feature-modifier parser region
-  (~38770), and `CharacterSheetTgttBarbarianSpecialty.test.js`.
-  - Bug 2: the specialty targets Athletics but must target the TGTT custom **"Might"** skill (a STR
-    skill) — emit a `skill:might` modifier, not `check:str:athletics`. Canonical skill key: `might`.
-- **C — Bardic Inspiration resource** (bug 3). Owns the `charactersheet-state.js` resource pipeline
-  for Bardic Inspiration (synthetic-resource / `addFeature` path; calc ~18147).
-  - Bug 3: Bardic Inspiration must be a **tracked resource** — pool = Charisma modifier (min 1),
-    recharges on long rest (and short rest at level 5 via Font of Inspiration).
-- **D — Choice/picker owner** (bugs 4, 5). Owns `_renderFeatureSkillSubChoice` in BOTH
-  `charactersheet-levelup.js` (~3666) and `charactersheet-builder.js` (~6326), the Moon Bard
-  Primal Lore choice/cantrip handlers, and a new `register("Primal Lore", …)` language entry in
-  `charactersheet-state.js` (~2401, append-only).
-  - Bug 4: "Moon Bard" (FRHoF) **Primal Lore** unimplemented — grant Druidic language + one Druid
-    cantrip (replaceable each Bard level) + a choice of one of 6 skills.
-  - Bug 5: "any-proficient" skill choices (bard/TGTT specialties) must list **all** proficient skills
-    including custom/Lore/`Might` skills, not just the 18 standard ones.
+_None._
 
 ## Closed Bugs
+
+### Round 41 — Vitality, Might skill & Bard features — COMPLETE
+
+Five bugs across four parallel sessions, integrated on `character-sheet-wip`. Full gate green:
+370 suites / 11723 tests; eslint + stylelint clean. ~62 new tests added across 5 new suites (one
+pre-existing suite retargeted). Only the TGTT homebrew file and character-sheet JS were touched; no
+other data JSON, `package.json`, or lockfile changed. `charactersheet-state.js` was co-edited by all
+four sessions in four far-apart, disjoint regions and merged union-clean with zero conflicts.
+
+* **Bug 1 — "Vitality of the Tree" (XPHB World Tree Barbarian).** Reported as doing nothing live.
+  Reproduced **live in a real browser** (driving `window.charSheet` / the live `CharacterSheetState`,
+  not synthetic state) across every realistic path — real level-up modal, save/reload, and legacy
+  `subclass:null` saves healed by `_migrateRepairSubclass`: **all work**. Round 40's code is correct;
+  the report was stale. Added defense-in-depth: barbarian subclass detection (`charactersheet-state.js`
+  ~14585) now falls back to `cls.subclass?.shortName` when `.name` is absent, plus a new **realistic**
+  regression suite `CharacterSheetWorldTreeVitalityIntegration.test.js` that drives the real
+  data→load→migrate→detect→rage chain (catches data/switch-case/repair/surge drift that synthetic tests
+  miss). To verify: build a World Tree barbarian to L3, enter Rage → gain temp HP (= Barbarian level)
+  and see the Combat-tab "🎲 Roll Life-Giving Force" section.
+* **Bug 2 — Unyielding Might → Might skill (not Athletics).** The TGTT specialty granted its
+  +proficiency bonus to **Athletics** because the passive-feature parser only knew the 18 standard
+  skills. Retexted the feature to `{@skill Might|TGTT}` (`homebrew/TravelersGuidetoThelemar.json`
+  ~19190) and extended the `FeatureModifierParser` structured skill-bonus block
+  (`charactersheet-state.js` ~1375) to recognize the TGTT custom **`might`** skill, emitting a
+  `skill:might` modifier that flows through `customModifiers.skills.might` → `getSkillMod("might")`.
+  Athletics is left untouched; no carry-size multiplier (no ×4 stacking with Powerful Build). Suite
+  `CharacterSheetTgttBarbarianSpecialty.test.js` retargeted Athletics→Might.
+* **Bug 3 — Bardic Inspiration as a tracked resource.** The generic pipeline already created a
+  use-tracked resource (`FeatureUsesParser` → `max = max(1, chaMod)`, long-rest recharge; `L5` Font of
+  Inspiration flips it to short-rest via `updateClassResources`), but it was **excluded from the
+  Resources panel**: `detectActivatableFeature()` had no `activationPattern` for it, so it fell through
+  to the generic `featureUses` fallback and was filtered out as an activatable ability. Registered
+  Bardic Inspiration in the `activationPatterns` roster (`charactersheet-state.js` ~39805,
+  anchored `/^bardic inspiration$/i`) so it classifies exactly like Channel Divinity and surfaces as a
+  tracked resource with use/restore pips, without regressing the important-features summary or PDF combat
+  section. New suite `CharacterSheetBardicInspirationResource.test.js`.
+* **Bug 4 — Moon Bard "Primal Lore" (FRHoF) implemented.** The L3 feature was inert. Now grants all
+  three effects: **Druidic language** via a single `register("Primal Lore", [{type:"language",
+  language:"Druidic"}])` (`charactersheet-state.js` ~2416, auto-applied by `applyClassFeatureEffects`);
+  a **choice of one of six skills**; and **one Druid-list cantrip** (non-counting, replaceable each Bard
+  level). The generic parser didn't recognize Primal Lore's phrasing, so the skill + cantrip choices are
+  seeded into the existing pending-feature-choice pipeline from the LevelUp and QuickBuild apply paths
+  (new helpers in `charactersheet-class-utils.js`); the cantrip uses `sourceFeature:"Primal Lore"` so it
+  doesn't count against cantrips known. New suite `CharacterSheetMoonBardPrimalLore.test.js`.
+* **Bug 5 — "any-proficient" skill picker dropped custom skills.** `_renderFeatureSkillSubChoice` was
+  duplicated in `charactersheet-levelup.js` (~3666) and `charactersheet-builder.js` (~6326), both
+  hardcoding the 18 standard skills and filtering that fixed list — so custom/TGTT Lore/`Might` skills
+  could never appear. Extracted a shared helper in `charactersheet-class-utils.js`
+  (`getProficientSkillDisplayNames` / `resolveFeatureSkillChoiceOptions`) that derives options from
+  `getSkillProficiencies()` (all proficient keys incl. custom) plus `getCustomSkills()` display names;
+  both picker copies now call it. Display-name↔canonical-key round-trip is unchanged, so a picked custom
+  skill correctly applies to that same skill. New suite `CharacterSheetFeatureSkillPicker.test.js`.
 
 ### Round 40 (barbarian & minotaur bug group) — COMPLETE
 
