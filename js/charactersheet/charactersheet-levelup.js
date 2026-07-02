@@ -5437,6 +5437,41 @@ class CharacterSheetLevelUp {
 	}
 
 	/**
+	 * Compute the selectable skills for a multiclass skill grant, excluding skills
+	 * the character is already proficient in.
+	 *
+	 * `getSkillProficiencies()` returns an OBJECT keyed by canonicalised skill ids
+	 * (e.g. `animalhandling`), while grant lists use spaced/lowercase names
+	 * (e.g. `"animal handling"`, or `Object.keys(Parser.SKILL_TO_ATB_ABV)` for Bard).
+	 * Both sides are reduced to the same canonical form (`lowercase, spaces stripped`
+	 * — matching how skills are stored when applied) before comparing.
+	 *
+	 * @param {*} skillGrant `{count, from: string[]}` or falsy
+	 * @returns {{availableSkills: string[], effectiveCount: number}} available skill
+	 *   names (original grant casing, de-duplicated, non-strings dropped) and the
+	 *   number that can actually be picked (clamped to what remains), never
+	 *   NaN/negative.
+	 */
+	_getMulticlassSkillOptions (/** @type {*} */ skillGrant) {
+		if (!skillGrant || !Array.isArray(skillGrant.from)) return {availableSkills: [], effectiveCount: 0};
+		const norm = (/** @type {*} */ s) => String(s).toLowerCase().replace(/\s+/g, "");
+		const have = new Set(Object.keys(this._state.getSkillProficiencies?.() || {}).map(norm));
+		const seen = new Set();
+		const availableSkills = skillGrant.from.filter((/** @type {*} */ s) => {
+			// Guard against malformed/homebrew grant lists: skip non-strings (they would
+			// later throw on `.split`/`.toLowerCase` in the picker) and de-duplicate by
+			// canonical id so the same skill can't be offered/required twice.
+			if (typeof s !== "string" || !s.trim()) return false;
+			const key = norm(s);
+			if (have.has(key) || seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		});
+		const requestedCount = Math.max(0, Math.floor(Number(skillGrant.count) || 0));
+		return {availableSkills, effectiveCount: Math.min(requestedCount, availableSkills.length)};
+	}
+
+	/**
 	 * Show level 1 choices for multiclassing (Fighting Style, etc.)
 	 * Returns true if class was added, false if cancelled
 	 */
@@ -5460,6 +5495,12 @@ class CharacterSheetLevelUp {
 			"Rogue": {count: 1, from: ["acrobatics", "athletics", "deception", "insight", "intimidation", "investigation", "perception", "performance", "persuasion", "sleight of hand", "stealth"]},
 		};
 		const skillGrant = (/** @type {*} */ (multiclassSkillGrants))[selectedClass.name];
+		// Skills the character can still choose from this grant (already-known skills
+		// are filtered out via canonical normalization). `effectiveCount` is clamped to
+		// what actually remains so an all-known character is never forced to pick more
+		// than is possible.
+		const {availableSkills, effectiveCount: skillChoiceCount} = this._getMulticlassSkillOptions(skillGrant);
+		const hasSkillChoices = skillChoiceCount > 0;
 
 		// Determine spell gains for multiclass level 1
 		const isWizardMulticlass = selectedClass.name === "Wizard";
@@ -5484,7 +5525,7 @@ class CharacterSheetLevelUp {
 		const hasSpellChoices = multiclassSpellGain > 0 || multiclassCantripGain > 0;
 
 		// If no choices needed, add the class directly
-		if (!optionalFeatureGains.length && !featureOptionGroups.length && !skillGrant && !hasSpellChoices) {
+		if (!optionalFeatureGains.length && !featureOptionGroups.length && !hasSkillChoices && !hasSpellChoices) {
 			await this._applyMulticlass(selectedClass, features, {}, {}, [], [], []);
 			return true;
 		}
@@ -5512,8 +5553,8 @@ class CharacterSheetLevelUp {
 		if (featureOptionGroups.length) {
 			featureOptionGroups.forEach((/** @type {*} */ g) => choicesList.push(`${g.count} option(s) for ${g.featureName}`));
 		}
-		if (skillGrant) {
-			choicesList.push(`${skillGrant.count} skill proficiency`);
+		if (hasSkillChoices) {
+			choicesList.push(`${skillChoiceCount} skill proficienc${skillChoiceCount > 1 ? "ies" : "y"}`);
 		}
 		if (multiclassSpellGain > 0) {
 			choicesList.push(`${multiclassSpellGain} spell${multiclassSpellGain !== 1 ? "s" : ""} (optional)`);
@@ -5529,14 +5570,16 @@ class CharacterSheetLevelUp {
 			</div>
 		`);
 
-		// Render skill selection for multiclass (if applicable)
+		// Render skill selection for multiclass (if applicable). `availableSkills` /
+		// `skillChoiceCount` were computed above from a normalized comparison against
+		// the character's existing proficiencies.
 		if (skillGrant) {
-			const currentSkills = this._state.getSkillProficiencies();
-			const availableSkills = skillGrant.from.filter((/** @type {*} */ s) => !currentSkills.includes(s));
-
+			const skillPrompt = hasSkillChoices
+				? `Select ${skillChoiceCount} skill${skillChoiceCount > 1 ? "s" : ""} to gain proficiency in:`
+				: `You are already proficient in every skill this class can grant — no skill choice needed.`;
 			const skillSection = e_({outer: `<div class="charsheet__levelup-section mb-3">
 				<h5>🎓 Skill Proficiency</h5>
-				<p class="ve-small ve-muted">Select ${skillGrant.count} skill${skillGrant.count > 1 ? "s" : ""} to gain proficiency in:</p>
+				<p class="ve-small ve-muted">${skillPrompt}</p>
 				<div class="charsheet__skill-choice-list"></div>
 			</div>`});
 
@@ -5553,11 +5596,11 @@ class CharacterSheetLevelUp {
 					const value = this.value;
 
 					if (isChecked) {
-						if (selectedSkills.length < skillGrant.count) {
+						if (selectedSkills.length < skillChoiceCount) {
 							selectedSkills.push(value);
 						} else {
 							this.checked = false;
-							JqueryUtil.doToast({type: "warning", content: `You can only select ${skillGrant.count} skill${skillGrant.count > 1 ? "s" : ""}.`});
+							JqueryUtil.doToast({type: "warning", content: `You can only select ${skillChoiceCount} skill${skillChoiceCount > 1 ? "s" : ""}.`});
 						}
 					} else {
 						selectedSkills = selectedSkills.filter((/** @type {*} */ s) => s !== value);
@@ -5684,9 +5727,11 @@ class CharacterSheetLevelUp {
 				}
 			}
 
-			// Validate skill selections
-			if (skillGrant && selectedSkills.length < skillGrant.count) {
-				JqueryUtil.doToast({type: "warning", content: `Please select ${skillGrant.count} skill proficiency.`});
+			// Validate skill selections. Gate on the clamped effective count so an
+			// all-known / underflow multiclass (no legal skills left) can still confirm
+			// instead of being stuck on an impossible requirement.
+			if (skillGrant && selectedSkills.length < skillChoiceCount) {
+				JqueryUtil.doToast({type: "warning", content: `Please select ${skillChoiceCount} skill proficienc${skillChoiceCount > 1 ? "ies" : "y"}.`});
 				return;
 			}
 
