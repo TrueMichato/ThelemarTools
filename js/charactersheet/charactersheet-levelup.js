@@ -3664,23 +3664,10 @@ class CharacterSheetLevelUp {
 	 * @returns {*}
 	 */
 	_renderFeatureSkillSubChoice (/** @type {*} */ choice, /** @type {*} */ choiceKey) {
-		const allSkills = [
-			"Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception",
-			"History", "Insight", "Intimidation", "Investigation", "Medicine",
-			"Nature", "Perception", "Performance", "Persuasion", "Religion",
-			"Sleight of Hand", "Stealth", "Survival",
-		];
-
-		let availableSkills;
-		if (choice.from === "any_proficient") {
-			const proficientSkills = allSkills.filter((/** @type {*} */ s) => {
-				const key = s.toLowerCase().replace(/\s+/g, "");
-				return this._state?.getSkillProficiency?.(key) > 0;
-			});
-			availableSkills = proficientSkills.length ? proficientSkills : allSkills;
-		} else {
-			availableSkills = choice.from;
-		}
+		// Derive options from the character's ACTUAL proficiencies for "any_proficient"
+		// choices so custom / Lore / Might skills (all real proficiencies) appear too;
+		// a fixed `choice.from` array is returned unchanged.
+		const availableSkills = CharacterSheetClassUtils.resolveFeatureSkillChoiceOptions(choice, this._state);
 
 		const typeLabel = choice.type === "proficiency" ? "Proficiency"
 			: choice.type === "expertise" ? "Expertise" : "Bonus";
@@ -5145,6 +5132,14 @@ class CharacterSheetLevelUp {
 		// earlier _processFeatSpellChoices calls ran before that loop, so without this
 		// flush the choice would slip to the *next* level-up. Drain it now so it appears
 		// at the level it is gained.
+		//
+		// Subclass features whose prose choices the generic FeatureChoiceParser does not
+		// recognise (fixed-list skill proficiency + bonus off-list cantrip, e.g. Moon
+		// Bard "Primal Lore") are seeded here into the same pending-choice queue so they
+		// are resolved by the drain below in every flow.
+		const seedAllSpells = typeof this._page.getFilteredSpellData === "function" ? this._page.getFilteredSpellData() : [];
+		CharacterSheetClassUtils.seedSubclassFeatureChoices(this._state, newFeatures, {allSpells: seedAllSpells || []});
+
 		await this._processFeatSpellChoices();
 
 		// Save and re-render

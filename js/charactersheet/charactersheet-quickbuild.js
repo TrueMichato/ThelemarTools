@@ -4934,6 +4934,12 @@ class CharacterSheetQuickBuild {
 		// (e.g. Aasimar "Celestial Revelation" at level 3). Mirrors updateRacialSpells.
 		CharacterSheetClassUtils.updateRacialFeatures(this._state, this._page);
 
+		// Seed subclass-feature prose choices the generic FeatureChoiceParser does not
+		// recognise (fixed-list skill proficiency + bonus off-list cantrip, e.g. Moon
+		// Bard "Primal Lore") so they are resolved by the pending-choice drains below.
+		const allSpells = typeof this._page.getFilteredSpellData === "function" ? this._page.getFilteredSpellData() : [];
+		CharacterSheetClassUtils.seedSubclassFeatureChoices(this._state, this._state.getFeatures?.() || [], {allSpells: allSpells || []});
+
 		// Process any pending spell choices from feats or features that grant selectable spells
 		if (this._page._spells?.processPendingSpellChoices) {
 			await this._page._spells.processPendingSpellChoices();
