@@ -4039,6 +4039,12 @@ class CharacterSheetState {
 			// (e.g. Arcane Archer Lore: pick a skill proficiency + a cantrip).
 			// Each choice: {id, featureName, featureId, kind: "skill"|"cantrip", options, count}
 			pendingFeatureChoices: [],
+			// Lower-cased names of features whose seeded fixed-list skill-proficiency
+			// choice has already been fulfilled (e.g. Moon Bard "Primal Lore"). Skill
+			// proficiencies carry no source, so this is the persistent proof that keeps
+			// `seedSubclassFeatureChoices` from re-offering the same skill pick on every
+			// later level-up (the catch-up backfill re-lists earlier subclass features).
+			fulfilledFeatureSkillChoices: [],
 			// TGTT passive metamagic tuning state
 			tunedMetamagics: [],
 
@@ -11966,6 +11972,44 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Flatten one level-value from a subclass `additionalSpells` block (under
+	 * `prepared`/`known`/`innate`) into a flat array of spell references.
+	 *
+	 * The 5etools schema allows a level-value to be EITHER a flat array of refs
+	 * (`["moonbeam|xphb"]`) OR a "frequency object" that buckets refs by how they
+	 * are cast — e.g. `{"daily": {"1e": ["moonbeam|xphb"]}}`, `{"will": [...]}`,
+	 * `{"ritual": [...]}`, `{"rest": {"1": [...]}}`, `{"resource": {"Foo": [...]}}`.
+	 * The `rest`/`daily`/`resource` buckets are themselves count-keyed objects whose
+	 * values are arrays. This collects every leaf ref regardless of shape so the
+	 * always-prepared iteration never chokes on the object form (e.g. College of the
+	 * Moon Bard's L6 `moonbeam`, which previously threw "spells is not iterable").
+	 * @param {*} levelValue A flat array of refs or a frequency object.
+	 * @returns {Array<*>} Flat array of spell references (strings or ref objects).
+	 * @private
+	 */
+	static _flattenAdditionalSpellsLevelValue (levelValue) {
+		if (levelValue == null) return [];
+		if (Array.isArray(levelValue)) return levelValue;
+		if (typeof levelValue !== "object") return [levelValue];
+
+		const out = [];
+		for (const bucket of Object.values(levelValue)) {
+			if (Array.isArray(bucket)) {
+				out.push(...bucket);
+			} else if (bucket && typeof bucket === "object") {
+				// Count-keyed nested buckets (rest/daily/resource): values are arrays of refs.
+				for (const inner of Object.values(bucket)) {
+					if (Array.isArray(inner)) out.push(...inner);
+					else if (inner != null) out.push(inner);
+				}
+			} else if (bucket != null) {
+				out.push(bucket);
+			}
+		}
+		return out;
+	}
+
+	/**
 	 * Get the list of always-prepared spells from a subclass's additionalSpells data.
 	 * This handles domain spells (Cleric), oath spells (Paladin), circle spells (Druid),
 	 * expanded spell lists (Warlock), etc.
@@ -12005,7 +12049,7 @@ class CharacterSheetState {
 					const reqLevel = parseInt(levelKey);
 					if (isNaN(reqLevel) || characterLevel < reqLevel) continue;
 
-					for (const spellRef of spells) {
+					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(spells)) {
 						const parsed = this._parseSpellReference(spellRef);
 						if (parsed) {
 							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls));
@@ -12020,7 +12064,7 @@ class CharacterSheetState {
 					const reqLevel = parseInt(levelKey);
 					if (isNaN(reqLevel) || characterLevel < reqLevel) continue;
 
-					for (const spellRef of spells) {
+					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(spells)) {
 						// Divine Soul's single known affinity spell is swappable — use the
 						// effective (possibly overridden) spell and flag it accordingly.
 						let parsed;
@@ -12046,7 +12090,7 @@ class CharacterSheetState {
 					// Key "0" means always available (no level requirement)
 					if (isNaN(reqLevel) || (reqLevel > 0 && characterLevel < reqLevel)) continue;
 
-					for (const spellRef of spells) {
+					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(spells)) {
 						const parsed = this._parseSpellReference(spellRef);
 						if (parsed) {
 							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls));
@@ -12687,6 +12731,29 @@ class CharacterSheetState {
 		return `${choice.featureId || choice.featureName || ""}|${choice.kind}|${opts}`;
 	}
 
+	/**
+	 * Mark a feature's seeded fixed-list skill-proficiency choice as fulfilled so it
+	 * is never re-offered on a later level-up. Idempotent; keyed by lower-cased name.
+	 * @param {string} [featureName]
+	 * @private
+	 */
+	_recordFulfilledFeatureSkillChoice (featureName) {
+		if (!featureName) return;
+		if (!Array.isArray(this._data.fulfilledFeatureSkillChoices)) this._data.fulfilledFeatureSkillChoices = [];
+		const key = String(featureName).toLowerCase();
+		if (!this._data.fulfilledFeatureSkillChoices.includes(key)) this._data.fulfilledFeatureSkillChoices.push(key);
+	}
+
+	/**
+	 * True when a feature's seeded skill-proficiency choice has already been fulfilled.
+	 * @param {string} [featureName]
+	 * @returns {boolean}
+	 */
+	hasFulfilledFeatureSkillChoice (featureName) {
+		if (!featureName) return false;
+		return (this._data.fulfilledFeatureSkillChoices || []).includes(String(featureName).toLowerCase());
+	}
+
 	removePendingFeatureChoice (choiceId) {
 		if (!this._data.pendingFeatureChoices) return;
 		this._data.pendingFeatureChoices = this._data.pendingFeatureChoices.filter(c => c.id !== choiceId);
@@ -12720,6 +12787,11 @@ class CharacterSheetState {
 			} else {
 				this.addSkillProficiency(skillKey);
 			}
+			// Record that this feature's seeded skill choice is resolved so a later
+			// level-up (which re-lists earlier subclass features via the catch-up
+			// backfill) does not re-offer it. Skill proficiencies carry no source, so
+			// this marker is the only durable proof of fulfillment.
+			this._recordFulfilledFeatureSkillChoice(choice.featureName);
 		} else if (choice.kind === "cantrip") {
 			const sel = typeof selection === "string"
 				? choice.options.find(o => o.name?.toLowerCase() === selection.toLowerCase())
