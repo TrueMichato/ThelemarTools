@@ -4597,6 +4597,7 @@ class CharacterSheetCombat {
 			() => this.renderCombatRanger(),
 			() => this.renderCombatDruidResources(),
 			() => this.renderCombatFighter(),
+			() => this.renderCombatVitality(),
 			() => this.renderCombatDefenses(),
 			() => this.renderCombatConditions(),
 			() => this.renderCombatEffects(),
@@ -8186,6 +8187,7 @@ class CharacterSheetCombat {
 			this.renderCombatStates();
 			this.renderCombatDefenses(); // Rage gives resistances
 			this.renderCombatEffects(); // Rage gives advantage on STR checks/saves
+			this.renderCombatVitality?.(); // World Tree: Vitality Surge temp HP + Life-Giving Force reminder
 			this._page._renderActiveStates?.();
 			this._page._saveCurrentCharacter?.();
 			this._page._renderCharacter?.(); // Re-render to apply/remove effects
@@ -8504,6 +8506,7 @@ class CharacterSheetCombat {
 			this._renderSneakAttackToggle?.();
 			this.renderCombatDefenses();
 			this.renderCombatEffects();
+			this.renderCombatVitality?.(); // World Tree: refresh Life-Giving Force round-start reminder/roller
 			this._page._renderActiveStates?.();
 			this._page._saveCurrentCharacter?.();
 			this._page._renderCharacter?.();
@@ -9226,6 +9229,107 @@ class CharacterSheetCombat {
 			JqueryUtil.doToast({type: "success", content: `🛡️ Last Ditch Evasion: you take no damage.${slowedStr}`});
 			refresh();
 		});
+	}
+
+	/**
+	 * (R40 #8) Render the World Tree Barbarian "Vitality of the Tree" combat panel.
+	 *
+	 * Two sub-features:
+	 *  - Vitality Surge — when you activate Rage you gain Temp HP = your Barbarian level.
+	 *    This is applied automatically in state.js `activateState("rage")`; here we only
+	 *    surface an informational summary so the player understands where the temp HP came from.
+	 *  - Life-Giving Force — at the START of each of your turns while Rage is active you may grant
+	 *    ONE creature within 10 ft Temp HP equal to the sum of X d6, where X is your Rage Damage
+	 *    bonus. Those temp HP vanish when your Rage ends. Ally HP isn't tracked on this
+	 *    single-character sheet, so the "Roll" button rolls + sums the dice and reports the total
+	 *    to hand to the ally. The reminder is only shown while Rage is active (its trigger).
+	 *
+	 * Visible only for a character that actually has Vitality of the Tree (World Tree, L3+).
+	 */
+	renderCombatVitality () {
+		const section = document.getElementById("charsheet-combat-vitality-section");
+		const container = document.getElementById("charsheet-combat-vitality");
+		if (!section || !container) return;
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		if (!calcs.hasVitalityOfTheTree) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const barbLevel = this._state.getClassLevel?.("Barbarian") ?? (calcs.vitalityTempHp || 0);
+		const surge = calcs.vitalityTempHp || barbLevel;
+		const rageDamage = calcs.rageDamage || 2;
+		const rageActive = !!this._state.isStateTypeActive?.("rage");
+
+		const block = e_({tag: "div", clazz: "charsheet__combat-vitality"});
+		let html = "";
+
+		// ===== Vitality Surge (self temp HP on Rage activation) =====
+		html += `
+			<div class="charsheet__combat-vitality-feature mb-3" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+				<div class="ve-flex-v-center gap-2 ve-flex-wrap">
+					<span class="bold">Vitality Surge</span>
+					<span class="badge ${rageActive ? "badge-success" : "badge-outline-secondary"}" title="Applied automatically when you activate your Rage">Temp HP = Barbarian level (${surge})</span>
+				</div>
+				<div class="ve-small ve-muted mt-1">When you activate your Rage you gain <span class="bold">${surge}</span> Temporary Hit Points${rageActive ? " (granted this Rage)." : "."}</div>
+			</div>`;
+
+		// ===== Life-Giving Force (grant an ally temp HP at start of your turns while raging) =====
+		html += `
+			<div class="charsheet__combat-vitality-feature" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+				<div class="ve-flex-v-center gap-2 ve-flex-wrap">
+					<span class="bold">Life-Giving Force</span>
+					<span class="badge badge-info" title="Roll this many d6 and sum them">${rageDamage}d6</span>
+				</div>
+				<div class="ve-small ve-muted mt-1">At the <span class="bold">start of each of your turns</span> while raging, you can give one creature within 10 ft Temp HP equal to <span class="bold">${rageDamage}d6</span> (summed). These temp HP vanish when your Rage ends.</div>`;
+
+		if (rageActive) {
+			html += `
+				<div class="charsheet__combat-vitality-reminder mt-2 mb-1" style="border-radius: 4px; padding: 0.35rem 0.5rem; background: rgba(60, 160, 90, 0.14);">
+					<span title="Life-Giving Force triggers at the start of each of your turns while raging">🌱 <span class="bold">Round-start reminder:</span> grant an ally within 10 ft <span class="bold">${rageDamage}d6</span> Temp HP.</span>
+				</div>
+				<div class="ve-flex-v-center gap-1 ve-flex-wrap mt-1">
+					<button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-vitality-roll" title="Roll ${rageDamage}d6 and total the Temp HP to grant an ally">🎲 Roll Life-Giving Force (${rageDamage}d6)</button>
+				</div>`;
+		} else {
+			html += `<div class="ve-small ve-muted mt-1"><em>Activate Rage to use Life-Giving Force each round.</em></div>`;
+		}
+		html += `</div>`;
+
+		block.innerHTML = html;
+		container.appendChild(block);
+
+		block.querySelector(".charsheet__combat-vitality-roll")?.addEventListener("click", () => {
+			const {total, rolls} = this._rollLifeGivingForce(rageDamage);
+			JqueryUtil.doToast({
+				type: "success",
+				content: `🌱 Life-Giving Force: grant an ally within 10 ft <strong>${total}</strong> Temp HP (${rageDamage}d6 [${rolls.join(", ")}]). These vanish when your Rage ends.`,
+			});
+		});
+	}
+
+	/**
+	 * (R40 #8) Roll Life-Giving Force: sum `rageDamage` d6 (X = the Rage Damage bonus).
+	 * Returned so the caller can surface the total for the player to hand to an ally.
+	 * Kept as a small pure helper so the Xd6 math is unit-testable without a live DOM.
+	 * @param {number} rageDamage Number of d6 to roll (the character's Rage Damage bonus).
+	 * @returns {{total: number, rolls: number[]}}
+	 */
+	_rollLifeGivingForce (rageDamage) {
+		const count = Math.max(0, rageDamage | 0);
+		const rolls = [];
+		let total = 0;
+		for (let i = 0; i < count; i++) {
+			const r = this._page.rollDice?.(1, 6) ?? 0;
+			rolls.push(r);
+			total += r;
+		}
+		return {total, rolls};
 	}
 
 	_renderMethodsToContainer (container, methodsByTradition, {showUseButton = false} = {}) {
