@@ -66,6 +66,15 @@ class CharacterSheetCombat {
 			this._rollAttack(attackId, e);
 		});
 
+		// Roll attack recklessly (Bug #7): activate the recklessAttack state (if needed)
+		// then roll via the normal path. Isolated, append-only delegated handler.
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const target = e.target.closest(".charsheet__attack-reckless");
+			if (!target) return;
+			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
+			this._rollRecklessAttack(attackId, e);
+		});
+
 		// Roll damage
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__attack-damage");
@@ -963,6 +972,26 @@ class CharacterSheetCombat {
 		this._page.saveCharacter();
 	}
 
+	/**
+	 * Resolve the concrete ability key (str/dex/…) used for an attack's to-hit roll,
+	 * so the scoped attack type ("attack:melee:str") reflects reality. A "finesse"
+	 * weapon resolves to the better of STR/DEX (mirrors `getWeaponAbilityMod`);
+	 * "spellcasting" resolves to the best casting ability. Any explicit ability key or
+	 * the melee/ranged default is returned as-is.
+	 * @param {*} attack
+	 * @param {boolean} isMelee
+	 * @returns {string}
+	 */
+	_resolveAttackAbilityKey (attack, isMelee) {
+		const key = attack?.abilityMod || (isMelee ? "str" : "dex");
+		const abilityMod = (a) => this._state.getAbilityMod?.(a) ?? 0;
+		if (key === "finesse") return abilityMod("str") >= abilityMod("dex") ? "str" : "dex";
+		if (key === "spellcasting") {
+			return ["int", "wis", "cha"].reduce((best, a) => (abilityMod(a) > abilityMod(best) ? a : best), "int");
+		}
+		return key;
+	}
+
 	_rollAttack (attackId, event, opts = {}) {
 		const attacks = this._state.getAttacks();
 		let attack = attacks.find(a => a.id === attackId);
@@ -999,15 +1028,21 @@ class CharacterSheetCombat {
 		// Honor an explicit ranged flag first (active-state / spell attacks set isRanged:true
 		// with a plain "60 ft." range that the heuristic below would otherwise read as melee).
 		const {isMelee} = this._getAttackRollKind(attack);
-		const abilityUsed = attack.abilityMod || (isMelee ? "str" : "dex");
+		// Resolve the concrete ability used for the roll so the scoped attack type is
+		// accurate. A "finesse" weapon uses the better of STR/DEX (mirrors
+		// getWeaponAbilityMod); resolving it here lets STR-scoped states (e.g. Reckless
+		// Attack → "attack:melee:str") correctly apply to a STR-used finesse weapon.
+		const abilityUsed = this._resolveAttackAbilityKey(attack, isMelee);
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
 
-		// Check for advantage/disadvantage from active states and conditions
+		// Check for advantage/disadvantage from active states and conditions. The
+		// hierarchical matcher in hasAdvantageFromStates already resolves a generic
+		// "attack" effect from this specific query, so we must NOT also query a bare
+		// "attack" — doing so would wrongly bubble a SPECIFIC effect (e.g. Reckless's
+		// "attack:melee:str") onto every roll, granting advantage to ranged attacks.
 		let stateMode;
-		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType)
-			|| this._state.hasAdvantageFromStates?.("attack");
-		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType)
-			|| this._state.hasDisadvantageFromStates?.("attack");
+		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType);
+		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType);
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
 
@@ -1149,7 +1184,40 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Resolve whether the Combat-tab "Spell Attack" badge can perform a flat
+	 * Roll a weapon attack "recklessly": ensure the persistent `recklessAttack` active
+	 * state is on, then roll through the normal `_rollAttack` path so the state's
+	 * advantage (scoped to melee-STR attacks) resolves via the standard
+	 * advantage/disadvantage pipeline and still cancels with any disadvantage — we
+	 * never force raw advantage. The state is left ON (Reckless Attack lasts until the
+	 * character's next turn), matching the existing quick-toggle behaviour.
+	 * @param {string} attackId
+	 * @param {*} event
+	 * @returns {boolean}
+	 */
+	_rollRecklessAttack (attackId, event) {
+		// Validate the attack first so we never flip the state on without a roll.
+		const attack = this._findAttackById?.(attackId);
+		if (!attack) return this._rollAttack(attackId, event);
+
+		// Activate once (idempotent): only when not already reckless, so repeated
+		// reckless rolls in the same turn don't spam saves/re-renders.
+		if (!this._state.isStateTypeActive?.("recklessAttack")) {
+			this._state.activateState?.("recklessAttack");
+			// Refresh the state-dependent displays + persist, mirroring the dodge/rage
+			// quick-toggle path (Reckless also grants enemies advantage against you).
+			this.renderCombatStates?.();
+			this.renderCombatEffects?.();
+			this.renderCombatDefenses?.();
+			this._page?._renderActiveStates?.();
+			this._page?._saveCurrentCharacter?.();
+			this._updateQuickButtonStates?.();
+		}
+
+		return this._rollAttack(attackId, event);
+	}
+
+	/**
+	 * Determine whether the character has a rollable flat spell-attack bonus for a
 	 * `d20 + bonus` quick roll, and what numeric bonus to use. Mirrors the badge
 	 * display logic in `renderCombatSpells` so the affordance and the roll agree.
 	 *
@@ -1200,13 +1268,13 @@ class CharacterSheetCombat {
 		}
 		if (info.bonus == null) return;
 
-		// Advantage/disadvantage from active states/conditions. "attack:spell" is matched
-		// hierarchically by the state engine, so a generic "attack" effect applies too; the
-		// explicit "attack" query is a harmless belt-and-braces mirror of `_rollAttack`.
-		const hasAdvantage = this._state.hasAdvantageFromStates?.("attack:spell")
-			|| this._state.hasAdvantageFromStates?.("attack");
-		const hasDisadvantage = this._state.hasDisadvantageFromStates?.("attack:spell")
-			|| this._state.hasDisadvantageFromStates?.("attack");
+		// Advantage/disadvantage from active states/conditions. Query ONLY the specific
+		// "attack:spell" type: the hierarchical matcher already resolves a genuinely
+		// generic "attack" effect (e.g. Bless) from this query, so we must NOT also
+		// query a bare "attack" — that would wrongly bubble a SPECIFIC effect (e.g.
+		// Reckless Attack's "attack:melee:str") onto spell-attack rolls.
+		const hasAdvantage = this._state.hasAdvantageFromStates?.("attack:spell");
+		const hasDisadvantage = this._state.hasDisadvantageFromStates?.("attack:spell");
 		let stateMode;
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
@@ -3142,12 +3210,10 @@ class CharacterSheetCombat {
 		// default 5 ft. case and ranged/thrown ranges.
 		const {rangeHtml: rangeDisplayHtml} = this._buildAttackRangeDisplay(attack, reachCtx);
 
-		// Format mastery
-		const masteryNames = (attack.mastery || [])
-			.map(m => this._formatMastery(m))
-			.filter(Boolean);
-		const masteryHtml = masteryNames.length
-			? `<span class="ve-small text-info" title="Mastery">⚔ ${masteryNames.join(", ")}</span>`
+		// Format mastery — each mastery property is a real 5etools hover target on the
+		// `itemMastery` faux-page (Sap / Cleave / Vex / …), not a static title.
+		const masteryHtml = (attack.mastery || []).length
+			? `<span class="ve-small text-info charsheet__attack-mastery">⚔ ${(attack.mastery || []).map(m => this._formatMasteryLink(m)).filter(Boolean).join(", ")}</span>`
 			: "";
 
 		// Create hoverable name for auto-generated attacks
@@ -3224,6 +3290,19 @@ class CharacterSheetCombat {
 			if (summary && !upgradeNotesHtml) upgradeNotesHtml = `<div class="ve-small ve-muted charsheet__attack-upgrade-note">💎 ${summary}</div>`;
 		}
 
+		// Reckless Attack (Barbarian 2+): a one-click "roll recklessly" affordance that
+		// activates the persistent recklessAttack state (if not already on) and then
+		// rolls through the normal path. Only surfaced on weapon attacks — reckless is a
+		// weapon-attack mechanic and only grants advantage on melee Strength attacks
+		// (the roll pipeline scopes that correctly). The existing state toggle remains.
+		const hasReckless = (this._state.getClassLevel?.("Barbarian") || 0) >= 2;
+		const recklessActive = this._state.isStateTypeActive?.("recklessAttack");
+		const recklessBtnHtml = (hasReckless && !attack.isSpell)
+			? `<button class="ve-btn ve-btn-sm ${recklessActive ? "ve-btn-warning" : "ve-btn-default"} charsheet__attack-reckless" title="Reckless Attack: advantage on melee weapon attack rolls using Strength; attack rolls against you have advantage until your next turn. Rolls this attack and keeps Reckless active.">
+						<span>⚡</span> Reckless
+					</button>`
+			: "";
+
 		return e_({outer: `
 			<div class="charsheet__attack-item" data-attack-id="${attack.id}">
 				<div class="charsheet__attack-info">
@@ -3242,6 +3321,7 @@ class CharacterSheetCombat {
 					<button class="ve-btn ve-btn-sm ve-btn-primary charsheet__attack-roll" title="Roll Attack">
 						<span class="glyphicon glyphicon-screenshot"></span> Attack
 					</button>
+					${recklessBtnHtml}
 					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage">
 						<span class="glyphicon glyphicon-fire"></span> Damage
 					</button>
@@ -4314,6 +4394,47 @@ class CharacterSheetCombat {
 		// Extract mastery name (before |source)
 		const name = mastery.split("|")[0];
 		return (/** @type {*} */ (name)).toTitleCase();
+	}
+
+	/**
+	 * 5etools hover attributes targeting a weapon-mastery PROPERTY on the
+	 * `itemMastery` faux-page (e.g. Sap, Cleave, Vex). Mirrors the condition/Dodge
+	 * hover pattern used elsewhere in the sheet. Falls back to a plain `title` if the
+	 * hover subsystem is unavailable so rendering never breaks.
+	 * @param {string} masteryName - Display name of the mastery property (e.g. "Sap").
+	 * @param {string} [source] - Source of the mastery property (default XPHB).
+	 * @returns {string} Attribute string to splice into an element tag.
+	 */
+	_getMasteryHoverAttrs (masteryName, source = Parser.SRC_XPHB) {
+		try {
+			const hash = UrlUtil.encodeForHash([masteryName, source].join(HASH_LIST_SEP));
+			return Renderer.hover.getHoverElementAttributes({
+				page: "itemMastery",
+				source,
+				hash,
+				isFauxPage: true,
+			});
+		} catch (e) {
+			return `title="Weapon Mastery: ${masteryName}"`;
+		}
+	}
+
+	/**
+	 * Render a single weapon-mastery entry ("Name|Source") as a hoverable element
+	 * that opens the mastery property's 5etools tooltip. Default source XPHB.
+	 * @param {string} mastery - Mastery entry string (e.g. "Sap|XPHB").
+	 * @returns {string} HTML for a hoverable mastery span.
+	 */
+	_formatMasteryLink (mastery) {
+		if (!mastery) return "";
+		// Masteries may be plain "Name|Source" strings or object entries ({uid, note}).
+		const uid = (typeof mastery === "object") ? mastery.uid : mastery;
+		if (!uid) return "";
+		const [rawName, rawSource] = String(uid).split("|");
+		const name = (/** @type {*} */ (rawName)).toTitleCase();
+		const source = rawSource || Parser.SRC_XPHB;
+		const attrs = this._getMasteryHoverAttrs(name, source);
+		return `<span class="help-subtle charsheet__mastery-link" ${attrs}>${name}</span>`;
 	}
 
 	renderDeathSaves () {
