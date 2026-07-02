@@ -3,32 +3,70 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 40 — Barbarian & Minotaur (in progress)
-
-Grouped into 4 parallel sessions.
-
-- **S1 — Barbarian active-states & rage** (bugs 5, 6, 8). Owns charactersheet-state.js
-  active-states/classification/rage (`FEATURE_CLASSIFICATION_OVERRIDES`, `detectActivatableFeature`,
-  `ACTIVE_STATE_TYPES`, `activateState`) + combat.js rage/next-round handlers + new
-  `renderCombatVitality` section + render() call-list + charactersheet.html vitality section.
-  - Bug 5: "Path of Drowning Springs" specialty should be a **bonus action**, not an active state.
-  - Bug 6: "Branches of the Tree" (World Tree) should be a **reaction**, not an active state.
-  - Bug 8: "Vitality of the Tree" (World Tree) — grant temp HP = barbarian level on Rage activation;
-    round-start reminder + roller to give an ally within 10 ft `Xd6` temp HP (X = rage damage bonus).
-- **S2 — Combat attack-row UX** (bugs 4, 7). Owns combat.js `_renderAttackItem` / `_rollAttack` /
-  attack event delegation + charactersheet.js `_renderWeaponMasteries`.
-  - Bug 4: weapon masteries should be **hoverable** (real 5etools hover tooltips) in the combat tab.
-  - Bug 7: add a **"Reckless Attack" button** next to normal attack rolls that rolls with advantage
-    and still sets the existing Reckless active state.
-- **S3 — TGTT homebrew data** (bugs 1, 2, 9). Owns homebrew/TravelersGuidetoThelemar.json.
-  - Bug 1: TGTT Minotaur languages should be **Common + Minotaur + one language of choice**.
-  - Bug 2: TGTT Minotaur needs **Powerful Build** (preserve inherited "Natural Weapon" tag).
-  - Bug 9: add a new **Might-related barbarian specialty**.
-- **S4 — Multiclass skill choice fix** (bug 3). Owns charactersheet-levelup.js `_showMulticlassChoices`.
-  - Bug 3: adding a Bard multiclass to a Barbarian throws `currentSkills.includes is not a function`
-    and shows an empty choice modal (`getSkillProficiencies()` returns an object).
+_None._
 
 ## Closed Bugs
+
+### Round 40 (barbarian & minotaur bug group) — COMPLETE
+
+Nine bugs fixed across four parallel sessions, integrated on `character-sheet-wip`. Full gate green:
+366 suites / 11667 tests; eslint + stylelint clean. ~91 new tests added across 8 new suites (plus one
+pre-existing suite updated). No data JSON beyond the TGTT homebrew file was touched; `package.json`/
+lockfile untouched.
+
+* **Bug 1 — TGTT Minotaur languages.** Minotaur now grants **Common + Minotaur + one language of
+  choice**. The fixed Common+Minotaur grant already resolved correctly (`resolveLanguageProficiencyName`
+  strips the `|TGTT` UID); the real gap was the missing free choice, added via `anyStandard:1` on the
+  race's `languageProficiencies`. Secondary fix in `charactersheet-respec.js` (2 lines): respec summary
+  display and `_clearLanguagesFromData` were title-casing the raw UID (`"Minotaur|Tgtt"`) so a race-swap
+  never matched the stored `"Minotaur"` and leaked the exotic language — both routed through
+  `resolveLanguageProficiencyName`. New suite `CharacterSheetTgttMinotaur.test.js`.
+* **Bug 2 — TGTT Minotaur Powerful Build.** Added via `_copy._mod` `appendArr` on **both** `entries`
+  (the Powerful Build feature) and `traitTags`, preserving the inherited `"Natural Weapon"` tag →
+  `["Natural Weapon","Powerful Build"]`. Carry capacity now doubles.
+* **Bug 3 — Multiclass skill-choice empty modal / crash.** `_showMulticlassChoices` called
+  `currentSkills.includes(...)` where `getSkillProficiencies()` returns an **object**, throwing
+  `TypeError` and aborting the render → empty modal. Fixed call-site only via new helper
+  `_getMulticlassSkillOptions` that normalizes both sides (`toLowerCase().replace(/\s+/g,"")`) into a
+  Set and clamps the pick count to available options (all-known shows a muted message, never blocks
+  Confirm). Hardened against homebrew grants (non-string/duplicate/fractional guards). New suite
+  `CharacterSheetMulticlassSkillChoice.test.js`.
+* **Bug 4 — Weapon-mastery hover.** Masteries were plain spans with only a static `title`. Added
+  `_getMasteryHoverAttrs` (real `itemMastery` faux-page hover via `Renderer.hover`, title fallback),
+  `_formatMasteryLink` (handles `"Name|Source"` strings and `{uid}` objects), wired into
+  `_renderAttackItem` and `charactersheet.js` `_renderWeaponMasteries`; help-cursor/dotted-underline CSS.
+  New suite `CharacterSheetWeaponMasteryHover.test.js`.
+* **Bug 5 — Path of Drowning Springs classification.** Leaked into Active-States because
+  `analyzeToggleability` matched the "while swimming … you can" phrasing before the bonus-action clause.
+  Fixed with a `FEATURE_CLASSIFICATION_OVERRIDES` entry → renders in Combat-tab Abilities as ⚡ Bonus
+  Action, absent from Active-States. No TGTT JSON edited.
+* **Bug 6 — Branches of the Tree classification.** Same heuristic mis-fire; override →
+  🔄 Reaction, not a toggle. Code-side only.
+* **Bug 7 — Reckless Attack button.** Added a per-row **Reckless Attack** button (shown on weapon rows
+  when Barbarian ≥ 2) that activates the existing Reckless state and rolls the normal path (advantage
+  still cancels with disadvantage). Root-caused and fixed a real **advantage leak**: `_rollAttack` and
+  `_rollSpellAttack` had a redundant `|| hasAdvantageFromStates("attack")` fallback that bled reckless's
+  `attack:melee:str` advantage onto ranged and spell rolls — removed. Added `_resolveAttackAbilityKey`
+  (finesse→str/dex, spellcasting→best caster stat) so reckless correctly applies to a STR-used finesse
+  weapon. New suite `CharacterSheetRecklessAttack.test.js`; `CharacterSheetSpellAttackRoll.test.js`
+  updated to model hierarchical matching faithfully.
+* **Bug 8 — Vitality of the Tree.** (a) Calc fix: `vitalityTempHp` was proficiency bonus, now
+  **barbarian level**, gated ≥ 3. (b) Vitality Surge: subclass-gated `_applyVitalitySurgeOnRage()`
+  centralized in `activateState`, fires on all rage entry points, only on inactive→active, non-stacking
+  (take-higher), no leak to non-World-Tree barbarians. (c) Life-Giving Force: new Combat-tab
+  `renderCombatVitality()` section — round-start reminder while raging + "Roll (Xd6)" button
+  (X = rage damage) that sums and toasts temp HP for an ally. New suites
+  `CharacterSheetWorldTreeVitality.test.js`, `CharacterSheetWorldTreeVitalityUI.test.js`,
+  `CharacterSheetBarbarianClassification.test.js`.
+* **Bug 9 — Might barbarian specialty.** Added L1 classFeature **"Unyielding Might"** (+proficiency
+  bonus to Strength (Athletics) feats of might: lift/drag/push/throw/grapple/shove), registered in the
+  L1 Specialties wrapper (reused by higher-level wrappers, so selectable at all levels). Deliberately
+  **not** a carry size-increase, to avoid ×4 carry stacking with a Minotaur's Powerful Build. New suite
+  `CharacterSheetTgttBarbarianSpecialty.test.js`.
+
+Known follow-ups (out of scope this round): Bug 5's rage-use expenditure is classification-only (wiring
+would require the shared `_useCombatAction`); the `anyStandard` racial-language picker still offers
+already-granted languages (pre-existing shared behavior for all such races).
 
 ### Round 39 (feature: spellcasting material-component enforcement) — COMPLETE
 
