@@ -3,7 +3,30 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 40 — Barbarian & Minotaur (in progress)
+
+Grouped into 4 parallel sessions.
+
+- **S1 — Barbarian active-states & rage** (bugs 5, 6, 8). Owns charactersheet-state.js
+  active-states/classification/rage (`FEATURE_CLASSIFICATION_OVERRIDES`, `detectActivatableFeature`,
+  `ACTIVE_STATE_TYPES`, `activateState`) + combat.js rage/next-round handlers + new
+  `renderCombatVitality` section + render() call-list + charactersheet.html vitality section.
+  - Bug 5: "Path of Drowning Springs" specialty should be a **bonus action**, not an active state.
+  - Bug 6: "Branches of the Tree" (World Tree) should be a **reaction**, not an active state.
+  - Bug 8: "Vitality of the Tree" (World Tree) — grant temp HP = barbarian level on Rage activation;
+    round-start reminder + roller to give an ally within 10 ft `Xd6` temp HP (X = rage damage bonus).
+- **S2 — Combat attack-row UX** (bugs 4, 7). Owns combat.js `_renderAttackItem` / `_rollAttack` /
+  attack event delegation + charactersheet.js `_renderWeaponMasteries`.
+  - Bug 4: weapon masteries should be **hoverable** (real 5etools hover tooltips) in the combat tab.
+  - Bug 7: add a **"Reckless Attack" button** next to normal attack rolls that rolls with advantage
+    and still sets the existing Reckless active state.
+- **S3 — TGTT homebrew data** (bugs 1, 2, 9). Owns homebrew/TravelersGuidetoThelemar.json.
+  - Bug 1: TGTT Minotaur languages should be **Common + Minotaur + one language of choice**.
+  - Bug 2: TGTT Minotaur needs **Powerful Build** (preserve inherited "Natural Weapon" tag).
+  - Bug 9: add a new **Might-related barbarian specialty**.
+- **S4 — Multiclass skill choice fix** (bug 3). Owns charactersheet-levelup.js `_showMulticlassChoices`.
+  - Bug 3: adding a Bard multiclass to a Barbarian throws `currentSkills.includes is not a function`
+    and shows an empty choice modal (`getSkillProficiencies()` returns an object).
 
 ## Closed Bugs
 
