@@ -3,7 +3,38 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 41 — Vitality, Might skill & Bard features (in progress)
+
+Grouped into 4 parallel sessions (rubber-ducked: Bug 4 moved in with Bug 5 to give a single
+choice/picker owner; Bug 3 kept alone). `charactersheet-state.js` is co-edited by A/B/C/D in FOUR
+far-apart, disjoint regions — each session flags its region for union-clean integration.
+
+- **A — Vitality of the Tree (live repro)** (bug 1). Owns `charactersheet-state.js` barbarian
+  subclass calc (~14586–14810) + rage surge (`_applyVitalitySurgeOnRage` ~41853 / `activateState`
+  ~41933) + `charactersheet-combat.js` `renderCombatVitality` (~9370) / rage & next-round handlers /
+  its `render()`-list line + `charactersheet.html` vitality section (~1077).
+  - Bug 1: "Vitality of the Tree" (XPHB World Tree Barbarian) does **nothing live** despite Round 40
+    code existing and unit tests passing. Must **reproduce live** (build a World Tree barbarian L3+,
+    Rage), root-cause the real runtime break (likely subclass detection / render-refresh / a swallowed
+    error — NOT missing code), and add a realistic integration/e2e-style test, not another synthetic
+    unit test.
+- **B — Unyielding Might → Might skill** (bug 2). Owns `homebrew/TravelersGuidetoThelemar.json`
+  Unyielding Might feature (~19184), the `charactersheet-state.js` feature-modifier parser region
+  (~38770), and `CharacterSheetTgttBarbarianSpecialty.test.js`.
+  - Bug 2: the specialty targets Athletics but must target the TGTT custom **"Might"** skill (a STR
+    skill) — emit a `skill:might` modifier, not `check:str:athletics`. Canonical skill key: `might`.
+- **C — Bardic Inspiration resource** (bug 3). Owns the `charactersheet-state.js` resource pipeline
+  for Bardic Inspiration (synthetic-resource / `addFeature` path; calc ~18147).
+  - Bug 3: Bardic Inspiration must be a **tracked resource** — pool = Charisma modifier (min 1),
+    recharges on long rest (and short rest at level 5 via Font of Inspiration).
+- **D — Choice/picker owner** (bugs 4, 5). Owns `_renderFeatureSkillSubChoice` in BOTH
+  `charactersheet-levelup.js` (~3666) and `charactersheet-builder.js` (~6326), the Moon Bard
+  Primal Lore choice/cantrip handlers, and a new `register("Primal Lore", …)` language entry in
+  `charactersheet-state.js` (~2401, append-only).
+  - Bug 4: "Moon Bard" (FRHoF) **Primal Lore** unimplemented — grant Druidic language + one Druid
+    cantrip (replaceable each Bard level) + a choice of one of 6 skills.
+  - Bug 5: "any-proficient" skill choices (bard/TGTT specialties) must list **all** proficient skills
+    including custom/Lore/`Might` skills, not just the 18 standard ones.
 
 ## Closed Bugs
 
