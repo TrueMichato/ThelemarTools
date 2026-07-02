@@ -734,7 +734,7 @@ class CharacterSheetRespec {
 			if (race.languageProficiencies?.length) {
 				race.languageProficiencies.forEach(lp => {
 					Object.keys(lp).forEach(l => {
-						if (l !== "anyStandard" && l !== "any" && l !== "choose") raceLangs.push((/** @type {*} */ (l)).toTitleCase());
+						if (l !== "anyStandard" && l !== "any" && l !== "choose") raceLangs.push(CharacterSheetClassUtils.resolveLanguageProficiencyName(l));
 					});
 				});
 			}
@@ -3788,7 +3788,7 @@ class CharacterSheetRespec {
 		data.languageProficiencies.forEach(lp => {
 			Object.keys(lp).forEach(lang => {
 				if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-				this._state.removeLanguage((/** @type {*} */ (lang)).toTitleCase());
+				this._state.removeLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(lang));
 			});
 		});
 	}
