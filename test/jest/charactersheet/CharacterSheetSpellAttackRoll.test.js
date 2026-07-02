@@ -126,11 +126,27 @@ describe("Spell-attack quick roll (#3b)", () => {
 
 		it("honors a generic 'attack' advantage state", () => {
 			const page = makePage(15);
+			// A state carrying a generic `attack` advantage effect answers TRUE to any
+			// specific attack query (hierarchical matching: query.startsWith(target)),
+			// including "attack:spell" — so `_rollSpellAttack` need only query the
+			// specific "attack:spell" type (no redundant bare-"attack" fallback, which
+			// would wrongly bubble a SPECIFIC effect like Reckless's "attack:melee:str").
 			const combat = makeCombat(makeState({
-				hasAdvantageFromStates: (t) => t === "attack",
+				hasAdvantageFromStates: (t) => (t || "").startsWith("attack"),
 			}), page);
 			combat._rollSpellAttack({});
 			expect(page.rollD20Calls[0].mode).toBe("advantage");
+		});
+
+		it("does NOT bubble a melee-scoped advantage state (e.g. Reckless) onto spell attacks", () => {
+			const page = makePage(15);
+			// Reckless Attack's effect targets "attack:melee:str"; a spell-attack query
+			// ("attack:spell") must NOT match it, so the roll stays normal.
+			const combat = makeCombat(makeState({
+				hasAdvantageFromStates: (t) => t === "attack:melee:str" || (t || "").startsWith("attack:melee:str"),
+			}), page);
+			combat._rollSpellAttack({});
+			expect(page.rollD20Calls[0].mode).toBe("normal");
 		});
 
 		it("honors disadvantage from active states", () => {
