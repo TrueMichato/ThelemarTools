@@ -14591,7 +14591,13 @@ class CharacterSheetState {
 					}
 
 					// ========== BARBARIAN SUBCLASS (PRIMAL PATH) FEATURES ==========
-					const subclassName = cls.subclass?.name?.toLowerCase();
+					// Defense-in-depth: normally `cls.subclass.name` is always populated
+					// (level-up, QuickBuild, and the _migrateRepairSubclass load migration
+					// all set it). Fall back to `shortName` so detection still fires if a
+					// subclass object ever arrives without a `.name` — the switch cases below
+					// already branch on both the full name ("path of the world tree") and the
+					// shortName ("world tree").
+					const subclassName = cls.subclass?.name?.toLowerCase() || cls.subclass?.shortName?.toLowerCase();
 					if (subclassName) {
 						switch (subclassName) {
 							case "path of the berserker":
