@@ -1372,7 +1372,17 @@ class FeatureModifierParser {
 		// ===================
 		// "bonus to Dexterity (Acrobatics) checks equal to your proficiency bonus"
 		// Also handles: "gain a bonus to X checks. The bonus equals your proficiency bonus"
-		skillNames.forEach(skill => {
+		//
+		// TGTT defines custom ability-scoped skills that aren't in the standard 18 (e.g. the
+		// Strength skill "Might"). A specialty like "Unyielding Might" grants a bonus to Might
+		// checks equal to the proficiency bonus, which must flow onto the Might skill line (via
+		// skill:might → customModifiers.skills.might → getSkillCustomMod), NOT Athletics. We only
+		// extend THIS structured block — which requires the literal "<skill> check(s)" phrasing
+		// plus an "equal to / The bonus equals … proficiency bonus" clause — so the common word
+		// "might" can never false-match ordinary prose the way the looser generic skill loop above
+		// would. Keys are lowercased/space-free to match getSkillAbility()'s custom skillMap.
+		const tgttCustomSkillNames = ["might"];
+		[...skillNames, ...tgttCustomSkillNames].forEach(skill => {
 			const skillKey = skill.replace(/\s+/g, "");
 			// Pattern 1: "bonus to X checks equal to your proficiency bonus" - handles both plain parens and {@skill}
 			const bonusPattern1 = new RegExp(`(?:gain\\s+)?(?:a\\s+)?bonus\\s+to\\s+(?:\\w+\\s*\\((?:{@skill\\s*)?)?${skill}(?:\\}?\\))?\\s*checks?\\s+equal\\s+to\\s+(?:your\\s+)?proficiency\\s+bonus`, "gi");
