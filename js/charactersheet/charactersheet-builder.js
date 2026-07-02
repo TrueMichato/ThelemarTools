@@ -6324,26 +6324,10 @@ class CharacterSheetBuilder {
 	 * @returns {HTMLElement}
 	 */
 	_renderFeatureSkillSubChoice (choice, choiceKey) {
-		const allSkills = [
-			"Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception",
-			"History", "Insight", "Intimidation", "Investigation", "Medicine",
-			"Nature", "Perception", "Performance", "Persuasion", "Religion",
-			"Sleight of Hand", "Stealth", "Survival",
-		];
-
-		// Determine available skills
-		let availableSkills;
-		if (choice.from === "any_proficient") {
-			// Get currently proficient skills
-			const proficientSkills = allSkills.filter((/** @type {*} */ s) => {
-				const key = s.toLowerCase().replace(/\s+/g, "");
-				return this._state?.getSkillProficiency?.(key) > 0;
-			});
-			// If we don't have state yet, show all skills
-			availableSkills = proficientSkills.length ? proficientSkills : allSkills;
-		} else {
-			availableSkills = choice.from;
-		}
+		// Derive options from the character's ACTUAL proficiencies for "any_proficient"
+		// choices so custom / Lore / Might skills (all real proficiencies) appear too;
+		// a fixed `choice.from` array is returned unchanged.
+		const availableSkills = CharacterSheetClassUtils.resolveFeatureSkillChoiceOptions(choice, this._state);
 
 		const typeLabel = choice.type === "proficiency" ? "Proficiency"
 			: choice.type === "expertise" ? "Expertise"
