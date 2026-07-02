@@ -19187,7 +19187,7 @@
 			"classSource": "TGTT",
 			"level": 1,
 			"entries": [
-				"Your might is a force to be reckoned with. You gain a bonus to Strength ({@skill Athletics}) checks made to lift, drag, push, throw, grapple, or shove equal to your proficiency bonus."
+				"Your might is a force to be reckoned with. You gain a bonus to Strength ({@skill Might|TGTT}) checks made to lift, drag, push, throw, grapple, or shove. The bonus equals your proficiency bonus."
 			]
 		},
 		{
