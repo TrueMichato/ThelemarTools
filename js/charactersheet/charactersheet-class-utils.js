@@ -21,6 +21,18 @@ class CharacterSheetClassUtils {
 	static RACE_MANIFESTATION_POOL_NAME = "Divine Manifestation";
 
 	/**
+	 * The 18 standard D&D 5e skills, as proper display names. Shared by the
+	 * feature skill sub-choice pickers so the list lives in exactly one place.
+	 * @type {string[]}
+	 */
+	static STANDARD_SKILLS = Object.freeze([
+		"Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception",
+		"History", "Insight", "Intimidation", "Investigation", "Medicine",
+		"Nature", "Perception", "Performance", "Persuasion", "Religion",
+		"Sleight of Hand", "Stealth", "Survival",
+	]);
+
+	/**
 	 * Check if a source uses 2024 (D&D One) edition rules.
 	 * TGTT homebrew classes replace XPHB and follow the same 2024 mechanics.
 	 * @param {string} source - The source abbreviation (e.g. "XPHB", "TGTT", "PHB")
@@ -2503,6 +2515,13 @@ class CharacterSheetClassUtils {
 			return {type: "proficiency", count: 1, from: skills.length ? skills : "any_proficient"};
 		}
 
+		// "choose one of the following skills: ... You have proficiency in that skill."
+		// (e.g. Moon Bard "Primal Lore"). Fixed list of named skills → single proficiency.
+		if (/choose one of the following skills/i.test(text) && /proficiency in that skill/i.test(text)) {
+			const skills = CharacterSheetClassUtils.extractSkillListFromText(text);
+			return {type: "proficiency", count: 1, from: skills.length ? skills : "any_proficient"};
+		}
+
 		if (text.includes("bonus equal to your proficiency bonus on checks made with one of")) {
 			const skills = CharacterSheetClassUtils.extractSkillListFromText(text);
 			return {type: "bonus", count: 1, from: skills.length ? skills : "any_proficient"};
@@ -2632,6 +2651,216 @@ class CharacterSheetClassUtils {
 		}
 
 		return [...new Set(found)];
+	}
+
+	/**
+	 * Resolve the list of skill options to offer for a feature skill sub-choice
+	 * (proficiency / expertise / bonus).
+	 *
+	 * When `choice.from` is a fixed array (e.g. a subclass feature that names six
+	 * specific skills) it is returned as-is. When it is `"any_proficient"` the
+	 * options are derived from the character's ACTUAL skill proficiencies so that
+	 * custom skills, TGTT Lore skills, and the TGTT `Might` skill (all real
+	 * proficiencies) appear alongside the 18 standard skills — previously the
+	 * picker hardcoded the 18 standard skills and silently dropped everything else.
+	 *
+	 * The returned values are display names; the caller round-trips them back to
+	 * canonical keys via `name.toLowerCase().replace(/\s+/g, "")`, which is exactly
+	 * how custom/Lore skill keys are stored, so a picked custom skill applies to
+	 * that same custom skill.
+	 * @param {{from: (string|string[])}} choice - Parsed skill choice.
+	 * @param {*} state - CharacterSheetState (may be null/undefined during early build steps).
+	 * @returns {string[]} Display names to offer as checkboxes.
+	 */
+	static resolveFeatureSkillChoiceOptions (/** @type {*} */ choice, /** @type {*} */ state) {
+		if (Array.isArray(choice?.from)) return choice.from;
+		const proficient = CharacterSheetClassUtils.getProficientSkillDisplayNames(state);
+		return proficient.length ? proficient : [...CharacterSheetClassUtils.STANDARD_SKILLS];
+	}
+
+	/**
+	 * Build the sorted list of display names for every skill the character is
+	 * proficient in (level >= 1), covering standard, hardcoded-homebrew (e.g.
+	 * `cooking`, `might`), custom, and TGTT Lore skills.
+	 * @param {*} state - CharacterSheetState.
+	 * @returns {string[]} Sorted display names.
+	 */
+	static getProficientSkillDisplayNames (/** @type {*} */ state) {
+		if (!state?.getSkillProficiencies) return [];
+
+		/** @type {Object<string, string>} */ const displayByKey = {};
+		for (const name of CharacterSheetClassUtils.STANDARD_SKILLS) {
+			displayByKey[name.toLowerCase().replace(/\s+/g, "")] = name;
+		}
+		// getCustomSkills() includes Lore skills; both are keyed by their stored name.
+		const customs = state.getCustomSkills?.() || [];
+		for (/** @type {*} */ const cs of customs) {
+			if (!cs?.name) continue;
+			displayByKey[cs.name.toLowerCase().replace(/\s+/g, "")] = cs.name;
+		}
+
+		const profs = state.getSkillProficiencies() || {};
+		/** @type {string[]} */ const out = [];
+		for (const key of Object.keys(profs)) {
+			if ((profs[key] || 0) < 1) continue;
+			out.push(displayByKey[key] || (key.charAt(0).toUpperCase() + key.slice(1)));
+		}
+		return out.sort((a, b) => a.localeCompare(b));
+	}
+
+	// =========================================================================
+	// Subclass-feature prose choices (skill proficiency + bonus off-list cantrip).
+	//
+	// Some subclass features grant a fixed-list skill proficiency AND/OR a "bonus"
+	// cantrip drawn from ANOTHER class's spell list that does NOT count against the
+	// character's cantrips-known (e.g. the College of the Moon Bard's "Primal Lore":
+	// learn Druidic + one Druid cantrip that doesn't count against cantrips known +
+	// one of six skills). The generic FeatureChoiceParser in charactersheet-state.js
+	// only recognises the "either A or B" phrasing, so these are seeded here from the
+	// progression flows (LevelUp / QuickBuild) via the SAME pending-feature-choice
+	// pipeline (state.addPendingFeatureChoice → page.processPendingFeatureChoices →
+	// state.fulfillFeatureChoice) that every flow already drains. Because the cantrip
+	// is fulfilled with `sourceFeature = feature.name` (NOT one of
+	// PLAYER_CHOSEN_SPELL_FEATURES) it is added as a non-counting bonus cantrip.
+	// =========================================================================
+
+	/** Concatenate a feature's string entries for prose scanning (tags intact). */
+	static _getFeatureProseText (/** @type {*} */ feature) {
+		const entries = feature?.entries;
+		if (Array.isArray(entries)) {
+			const strings = entries.filter((/** @type {*} */ e) => typeof e === "string");
+			if (strings.length) return strings.join(" ");
+		}
+		return typeof feature?.description === "string" ? feature.description : "";
+	}
+
+	/**
+	 * Detect a "choose one of the following skills: … You have proficiency in that
+	 * skill." fixed-list proficiency choice on a feature. Returns the normalized skill
+	 * keys (lowercase, no spaces — matching state's `skillProficiencies` keys) or null.
+	 * @param {*} feature
+	 * @returns {{options: string[], count: number}|null}
+	 */
+	static findFixedSkillProficiencyChoiceInFeature (/** @type {*} */ feature) {
+		const text = CharacterSheetClassUtils._getFeatureProseText(feature);
+		if (!text) return null;
+		if (!/choose one of the following skills/i.test(text) || !/proficiency in that skill/i.test(text)) return null;
+
+		const displayNames = CharacterSheetClassUtils.extractSkillListFromText(text);
+		if (displayNames.length < 2) return null;
+		const options = displayNames.map((/** @type {*} */ s) => s.toLowerCase().replace(/\s+/g, ""));
+		return {options, count: 1};
+	}
+
+	/**
+	 * Detect a "one cantrip from the <Class> spell list … doesn't count against the
+	 * number of cantrips you know" bonus off-list cantrip grant on a feature.
+	 * @param {*} feature
+	 * @returns {{className: string, replaceable: boolean}|null}
+	 */
+	static findBonusListCantripGrantInFeature (/** @type {*} */ feature) {
+		const text = CharacterSheetClassUtils._getFeatureProseText(feature);
+		if (!text) return null;
+		if (!/doesn't count against the number of cantrips you know/i.test(text)) return null;
+
+		const m = /one cantrip from the (\w+) spell list/i.exec(text);
+		if (!m) return null;
+		return {
+			className: m[1].toTitleCase(),
+			replaceable: /replace this cantrip/i.test(text),
+		};
+	}
+
+	/**
+	 * Build the {name, source} option list of every cantrip on a class's spell list.
+	 * @param {Array<*>} allSpells - Full spell database.
+	 * @param {string} className - Class whose cantrip list to gather (e.g. "Druid").
+	 * @returns {Array<{name: string, source: string}>}
+	 */
+	static getClassCantripOptions (/** @type {*} */ allSpells, /** @type {*} */ className) {
+		if (!Array.isArray(allSpells) || !className) return [];
+		const out = [];
+		const seen = new Set();
+		for (const spell of allSpells) {
+			if (spell?.level !== 0) continue;
+			if (!CharacterSheetClassUtils.spellIsForClass(spell, className)) continue;
+			const key = `${spell.name}|${spell.source}`.toLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			out.push({name: spell.name, source: spell.source});
+		}
+		return out.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	/**
+	 * Seed pending feature choices (skill proficiency + bonus off-list cantrip) for any
+	 * subclass features in `features` that grant them (e.g. Moon Bard "Primal Lore").
+	 * Idempotent per build run: the cantrip is skipped once a cantrip sourced from the
+	 * feature already exists, and duplicate pending entries are de-duped by
+	 * `state.addPendingFeatureChoice`'s signature check.
+	 * @param {*} state - CharacterSheetState.
+	 * @param {Array<*>} features - Features gained (e.g. this level's new features).
+	 * @param {{allSpells?: Array<*>}} [opts]
+	 * @returns {boolean} True if at least one choice was seeded.
+	 */
+	static seedSubclassFeatureChoices (/** @type {*} */ state, /** @type {*} */ features, {allSpells = /** @type {*[]} */ ([])} = /** @type {*} */ ({})) {
+		if (!state?.addPendingFeatureChoice || !Array.isArray(features)) return false;
+		let seeded = false;
+
+		for (const feature of features) {
+			if (!feature?.name) continue;
+			const featureId = feature.id || feature.name;
+
+			const skillChoice = CharacterSheetClassUtils.findFixedSkillProficiencyChoiceInFeature(feature);
+			if (skillChoice) {
+				if (state.addPendingFeatureChoice({
+					featureName: feature.name,
+					featureId,
+					kind: "skill",
+					options: skillChoice.options,
+					count: skillChoice.count,
+				})) seeded = true;
+			}
+
+			const cantripGrant = CharacterSheetClassUtils.findBonusListCantripGrantInFeature(feature);
+			if (cantripGrant) {
+				const alreadyGranted = (state.getCantripsKnown?.() || [])
+					.some((/** @type {*} */ c) => c.sourceFeature === feature.name);
+				const options = alreadyGranted ? [] : CharacterSheetClassUtils.getClassCantripOptions(allSpells, cantripGrant.className);
+				if (options.length >= 2) {
+					if (state.addPendingFeatureChoice({
+						featureName: feature.name,
+						featureId,
+						kind: "cantrip",
+						options,
+						count: 1,
+					})) seeded = true;
+				}
+			}
+		}
+
+		return seeded;
+	}
+
+	/**
+	 * Replace a feature-sourced bonus cantrip (e.g. Moon Bard "Primal Lore") with a new
+	 * one, preserving its non-counting status. Removes the prior cantrip sourced from
+	 * `featureName` and adds `newSpell` with the same `sourceFeature`. Backs the rules
+	 * allowance to swap the granted cantrip on each level-up.
+	 * @param {*} state - CharacterSheetState.
+	 * @param {string} featureName - Source feature name (e.g. "Primal Lore").
+	 * @param {*} newSpell - Full spell object to add.
+	 * @param {{sourceClass?: string}} [opts]
+	 * @returns {boolean} True if a replacement occurred.
+	 */
+	static replaceBonusFeatureCantrip (/** @type {*} */ state, /** @type {*} */ featureName, /** @type {*} */ newSpell, {sourceClass = null} = /** @type {*} */ ({})) {
+		if (!state?.getCantripsKnown || !featureName || !newSpell?.name) return false;
+		const prior = (state.getCantripsKnown() || []).filter((/** @type {*} */ c) => c.sourceFeature === featureName);
+		for (const c of prior) {
+			state.removeSpell(c.id || `${c.name}|${c.source}`, c.source);
+		}
+		state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(newSpell, {sourceFeature: featureName, sourceClass}));
+		return true;
 	}
 
 	/**
