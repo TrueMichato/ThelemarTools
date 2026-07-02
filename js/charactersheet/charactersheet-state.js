@@ -2407,6 +2407,15 @@ const FeatureEffectRegistry = {
 			{type: "resourceProperty", resource: "wildShape", property: "unlimited"},
 		]);
 
+		// ======= BARD SUBCLASS (College of the Moon, FRHoF) =======
+		// Primal Lore (level 3) grants the Druidic language (plus a Druid cantrip and a
+		// skill choice, both handled by the builder/level-up choice flow). Registered
+		// here by feature NAME so applyClassFeatureEffects() auto-grants the language
+		// whenever the feature is added, in any flow (builder, level-up, respec, load).
+		this.register("Primal Lore", [
+			{type: "language", language: "Druidic"},
+		]);
+
 		// ======= FIGHTER =======
 		this.register("Defense", [ // Fighting Style
 			{type: "acBonus", value: 1, conditional: "while wearing armor"},
