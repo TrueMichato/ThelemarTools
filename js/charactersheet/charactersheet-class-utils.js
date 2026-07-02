@@ -2812,7 +2812,7 @@ class CharacterSheetClassUtils {
 			const featureId = feature.id || feature.name;
 
 			const skillChoice = CharacterSheetClassUtils.findFixedSkillProficiencyChoiceInFeature(feature);
-			if (skillChoice) {
+			if (skillChoice && !(typeof state.hasFulfilledFeatureSkillChoice === "function" && state.hasFulfilledFeatureSkillChoice(feature.name))) {
 				if (state.addPendingFeatureChoice({
 					featureName: feature.name,
 					featureId,
@@ -3756,21 +3756,27 @@ class CharacterSheetClassUtils {
 		const clsName = cls.name;
 		const clsSource = cls.source;
 
-		const matching = features.filter((/** @type {*} */ f) => {
+		// Name-level match: the feature must be a subclass feature that identifies a
+		// subclass and belongs to a class of this name (when a className is present).
+		const nameMatches = features.filter((/** @type {*} */ f) => {
 			if (!f || !f.isSubclassFeature) return false;
 			if (!(f.subclassShortName || f.subclassName)) return false;
-			// Match the feature's owning class. classSource may legitimately differ
-			// (e.g. a TGTT class re-using official subclass features), so require the
-			// class NAME to match and, when both sources are present, the source too.
 			if (f.className && clsName && f.className !== clsName) return false;
-			if (f.classSource && clsSource && f.className === clsName && f.classSource !== clsSource) {
-				// Tolerate source mismatch only when the feature carries no className
-				// disambiguation; here className matched, so a source mismatch means a
-				// different class entry (multiclass) — exclude it.
-				return false;
-			}
 			return true;
 		});
+		if (!nameMatches.length) return null;
+
+		// classSource disambiguation is only meaningful when this class actually owns
+		// some of the name-matching features by source (e.g. a genuine same-name
+		// multiclass: Barbarian|PHB + Barbarian|XPHB, each with its own features). When
+		// NO name-matching feature aligns with this class's source — e.g. a TGTT
+		// Barbarian re-using the official XPHB "World Tree" subclass features — matching
+		// on class name alone is correct; requiring the source to match would wrongly
+		// drop every feature and leave the subclass unrepaired.
+		const hasSourceAligned = nameMatches.some((/** @type {*} */ f) => f.classSource && clsSource && f.classSource === clsSource);
+		const matching = hasSourceAligned
+			? nameMatches.filter((/** @type {*} */ f) => !f.classSource || !clsSource || f.classSource === clsSource)
+			: nameMatches;
 		if (!matching.length) return null;
 
 		// Collect distinct subclasses keyed by shortName (case-insensitive).
