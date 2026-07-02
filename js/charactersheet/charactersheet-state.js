@@ -14785,9 +14785,13 @@ class CharacterSheetState {
 							}
 							case "path of the world tree":
 							case "world tree": {
-								// Vitality of the Tree (level 3) - temp HP when raging
-								calculations.hasVitalityOfTheTree = true;
-								calculations.vitalityTempHp = profBonus;
+								// Vitality of the Tree (level 3) — Vitality Surge grants Temp HP
+								// equal to your BARBARIAN LEVEL (not proficiency bonus) whenever you
+								// activate your Rage. `level` here is the Barbarian class level.
+								if (level >= 3) {
+									calculations.hasVitalityOfTheTree = true;
+									calculations.vitalityTempHp = level;
+								}
 
 								// Branches of the Tree (level 6) - teleport ally
 								if (level >= 6) {
@@ -39299,6 +39303,27 @@ class CharacterSheetState {
 		// one-shot ACTION ("spend 2 stamina to end one poison/disease"), so classify it as a
 		// limited-use ability — never an Active-State toggle.
 		"purge toxins": "ability",
+
+		// === Barbarian: Path of the World Tree (XPHB) & TGTT specialty (R40 #5/#6/#8) ===
+		// (R40 #5) "Path of Drowning Springs" (TGTT Barbarian specialty) is a BONUS-ACTION
+		// swim burst ("While swimming, you can use a bonus action and expend one use of Rage
+		// to move…"), NOT a persistent toggle. Its "while swimming … you can" phrasing tripped
+		// analyzeToggleability before its bonus-action clause was honoured, leaking it into the
+		// Active-States panel. "combat" routes it to the Combat-tab Abilities list where
+		// _createCombatActionElement reads "use a bonus action" → a ⚡ Bonus Action badge.
+		"path of drowning springs": "combat",
+		// (R40 #6) "Branches of the Tree" (World Tree, L6) is a REACTION ("you can take a
+		// Reaction to summon spectral branches…"), not a toggle. "reaction" surfaces it in the
+		// Combat-tab Abilities list as 🔄 Reaction and keeps it OUT of the Active-States panel.
+		"branches of the tree": "reaction",
+		// (R40 #8) "Vitality of the Tree" (World Tree, L3) is a PASSIVE Rage rider. Its mechanics
+		// are implemented directly: Vitality Surge (self Temp HP = Barbarian level) fires from
+		// activateState("rage"), and Life-Giving Force (grant an ally Temp HP = Rage-Damage d6s)
+		// has its own dedicated Combat-tab reminder/roller. It (and its nested sub-features, in
+		// case they ever surface as standalone features) must never appear as toggle states.
+		"vitality of the tree": "passive",
+		"vitality surge": "passive",
+		"life-giving force": "passive",
 	};
 
 	/**
@@ -39389,7 +39414,12 @@ class CharacterSheetState {
 		// even when they only have `entries` (no rendered `description`) — e.g. Invoke Hell
 		// options expanded from refSubclassFeature, or synthesized manifestation children.
 		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation);
-		if (!feature?.description && !feature?.activatable && !hasMarkers) return null;
+		// (R40) A feature named in FEATURE_CLASSIFICATION_OVERRIDES must be processed even when
+		// it arrives entries-only (no rendered `description`), so its override is honoured
+		// rather than dropped by this early return. The override branch below builds its own
+		// text from `entries` via _featureTextFromEntries.
+		const hasClassificationOverride = !!this.FEATURE_CLASSIFICATION_OVERRIDES[feature?.name?.toLowerCase() || ""];
+		if (!feature?.description && !feature?.activatable && !hasMarkers && !hasClassificationOverride) return null;
 
 		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
@@ -41811,6 +41841,23 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * (R40 #8) World Tree Barbarian — Vitality Surge. When you ACTIVATE your Rage you gain
+	 * Temporary Hit Points equal to your Barbarian level. Implemented here (rather than as a
+	 * generic `tempHp` effect on the base `rage` state) so it is strictly subclass-gated and
+	 * never leaks temp HP to every barbarian. Centralized in the single `activateState` entry
+	 * point so it fires on EVERY rage-activation path (Combat-tab button, Active-States panel,
+	 * overview/play mode). Temp HP does not stack — take the higher value (5e rules), matching
+	 * `_applyTempHpFromState`. Only ever called on an inactive→active transition.
+	 * @private
+	 */
+	_applyVitalitySurgeOnRage () {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasVitalityOfTheTree) return;
+		const surge = calcs.vitalityTempHp || 0;
+		if (surge > this.getTempHp()) this.setTempHp(surge);
+	}
+
+	/**
 	 * Activate a state by type ID (creates if not exists)
 	 * @param {string} stateTypeId - The state type ID
 	 * @param {object} options - Options to pass to addActiveState (name, description, customEffects, etc.)
@@ -41850,6 +41897,7 @@ class CharacterSheetState {
 			? (options.sourceFeatureId ? this._data.activeStates.find(s => s.sourceFeatureId === options.sourceFeatureId) : null)
 			: this._data.activeStates.find(s => s.stateTypeId === stateTypeId);
 		if (existing) {
+			const wasActive = !!existing.active;
 			existing.active = true;
 			existing.activatedAt = Date.now();
 			existing.activatedAtRound = this._data.inCombat ? this._data.combatRound : null;
@@ -41879,6 +41927,11 @@ class CharacterSheetState {
 			// Sync max + current HP for any hpMaxIncrease effects on this state.
 			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
 
+			// (R40 #8) Vitality Surge — grant self Temp HP on rage activation, but only when
+			// rage transitions inactive→active (re-activating an already-active rage must not
+			// refresh temp HP without a real activation / rage-use spend).
+			if (stateTypeId === "rage" && !wasActive) this._applyVitalitySurgeOnRage();
+
 			return existing.id;
 		}
 		const stateId = this.addActiveState(stateTypeId, options);
@@ -41892,6 +41945,10 @@ class CharacterSheetState {
 
 		// Sync max + current HP for any hpMaxIncrease effects on this state.
 		if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
+
+		// (R40 #8) Vitality Surge — a freshly-added state is always an inactive→active
+		// transition, so grant self Temp HP = Barbarian level for World Tree barbarians.
+		if (stateTypeId === "rage") this._applyVitalitySurgeOnRage();
 
 		return stateId;
 	}
