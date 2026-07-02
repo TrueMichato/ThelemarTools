@@ -8,11 +8,13 @@
  * force raw advantage. The state is left ON afterwards (Reckless lasts until the
  * character's next turn), matching the existing quick-toggle.
  *
- * Also guards the root-cause scoping fix in `_rollAttack`: Reckless's advantage
- * is scoped to melee-Strength attacks. It must NOT leak onto ranged rolls (the
- * old `|| hasAdvantageFromStates("attack")` fallback wrongly bubbled the
- * specific `attack:melee:str` effect onto every roll), and a "finesse" weapon
- * used with Strength must correctly pick up the melee-STR advantage.
+ * Also guards the root-cause scoping fix in `_rollAttack` AND `_rollSpellAttack`:
+ * Reckless's advantage is scoped to melee-Strength attacks. It must NOT leak onto
+ * ranged rolls or SPELL-attack rolls (the old `|| hasAdvantageFromStates("attack")`
+ * fallback wrongly bubbled the specific `attack:melee:str` effect onto every roll),
+ * and a "finesse" weapon used with Strength must correctly pick up the melee-STR
+ * advantage. Genuinely generic `attack` advantage (e.g. Steady Aim) still reaches
+ * spell attacks via hierarchical matching.
  */
 
 import "./setup.js";
@@ -275,5 +277,59 @@ describe("#7 _renderAttackItem — reckless button gating", () => {
 		const html = renderHtml(mkRenderCombat({barbarianLevel: 2, recklessActive: true}), WEAPON);
 		expect(html).toContain("charsheet__attack-reckless");
 		expect(html).toMatch(/ve-btn-warning[^"]*charsheet__attack-reckless/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Spell-attack scoping — Reckless (melee-STR) must NOT bleed advantage onto
+// spell-attack rolls (`_rollSpellAttack`), while genuinely generic `attack`
+// advantage (Steady Aim) still reaches them via hierarchical matching.
+// ---------------------------------------------------------------------------
+describe("#7 _rollSpellAttack — reckless advantage does NOT leak onto spell attacks", () => {
+	function mkSpellCombat () {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Barbarian", source: "PHB", level: 2});
+		// Non-casters have no spell-attack breakdown; supply a flat bonus so the
+		// quick roll path is exercised (the value itself is irrelevant to the mode).
+		state.getSpellAttackBonus = () => 7;
+
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._state = state;
+		const rollModes = [];
+		combat._page = {
+			rollD20: (opts = {}) => { rollModes.push(opts.mode); return {roll: 10, mode: opts.mode || "normal"}; },
+			getModeLabel: () => "",
+			formatD20Breakdown: () => "",
+			pAnimateD20: () => {},
+			showDiceResult: () => null,
+		};
+		return {state, combat, rollModes};
+	}
+
+	it("root cause: an active Reckless state matches attack:melee:str but NOT attack:spell", () => {
+		const {state} = mkSpellCombat();
+		state.activateState("recklessAttack");
+
+		expect(state.hasAdvantageFromStates("attack:melee:str")).toBe(true);
+		expect(state.hasAdvantageFromStates("attack:spell")).toBe(false);
+	});
+
+	it("_rollSpellAttack rolls NORMALLY while Reckless is active (no advantage bleed)", () => {
+		const {state, combat, rollModes} = mkSpellCombat();
+		state.activateState("recklessAttack");
+
+		combat._rollSpellAttack(null);
+
+		expect(rollModes).toEqual([undefined]); // normal — reckless does not apply to spell attacks
+	});
+
+	it("genuinely generic attack advantage (Steady Aim) STILL reaches spell attacks", () => {
+		const {state, combat, rollModes} = mkSpellCombat();
+		state.activateState("steadyAim"); // {type:"advantage", target:"attack"}
+
+		expect(state.hasAdvantageFromStates("attack:spell")).toBe(true);
+
+		combat._rollSpellAttack(null);
+		expect(rollModes).toEqual(["advantage"]);
 	});
 });

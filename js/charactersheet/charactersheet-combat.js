@@ -1268,13 +1268,13 @@ class CharacterSheetCombat {
 		}
 		if (info.bonus == null) return;
 
-		// Advantage/disadvantage from active states/conditions. "attack:spell" is matched
-		// hierarchically by the state engine, so a generic "attack" effect applies too; the
-		// explicit "attack" query is a harmless belt-and-braces mirror of `_rollAttack`.
-		const hasAdvantage = this._state.hasAdvantageFromStates?.("attack:spell")
-			|| this._state.hasAdvantageFromStates?.("attack");
-		const hasDisadvantage = this._state.hasDisadvantageFromStates?.("attack:spell")
-			|| this._state.hasDisadvantageFromStates?.("attack");
+		// Advantage/disadvantage from active states/conditions. Query ONLY the specific
+		// "attack:spell" type: the hierarchical matcher already resolves a genuinely
+		// generic "attack" effect (e.g. Bless) from this query, so we must NOT also
+		// query a bare "attack" — that would wrongly bubble a SPECIFIC effect (e.g.
+		// Reckless Attack's "attack:melee:str") onto spell-attack rolls.
+		const hasAdvantage = this._state.hasAdvantageFromStates?.("attack:spell");
+		const hasDisadvantage = this._state.hasDisadvantageFromStates?.("attack:spell");
 		let stateMode;
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
