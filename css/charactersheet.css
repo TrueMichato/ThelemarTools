@@ -15480,6 +15480,17 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	color: #f472b6;
 }
 
+/* DM-granted badge — flags an ability that carries an Advanced (DM-permission) feature grant */
+.custom-abilities__dm-badge {
+	font-size: calc(var(--cs-font-base, 14px) * 0.7);
+	padding: 2px 6px;
+	border-radius: 999px;
+	font-weight: 600;
+	background: rgba(234, 179, 8, 0.18);
+	color: #fbbf24;
+	border: 1px solid rgba(234, 179, 8, 0.45);
+}
+
 /* Card description */
 .custom-abilities__card-description {
 	font-size: calc(var(--cs-font-base, 14px) * 0.9);
@@ -16802,6 +16813,44 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
 	border-radius: var(--cs-radius, 6px);
 	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+/* Advanced (DM-gated) feature-grant section — visually distinct so it reads as "power user" */
+.custom-abilities__grants-section--dm {
+	border-color: rgba(234, 179, 8, 0.4);
+	background: rgba(234, 179, 8, 0.06);
+}
+
+.custom-abilities__dm-warning {
+	font-size: calc(var(--cs-font-base, 14px) * 0.82);
+	line-height: 1.4;
+	color: #fde68a;
+	background: rgba(234, 179, 8, 0.12);
+	border: 1px solid rgba(234, 179, 8, 0.45);
+	border-radius: var(--cs-radius, 6px);
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 1rem);
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+.custom-abilities__dm-warning strong {
+	color: #fbbf24;
+}
+
+.custom-abilities__dm-paste {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	margin-top: var(--cs-space-sm, 0.5rem);
+}
+
+.custom-abilities__dm-paste-input {
+	font-family: var(--cs-font-mono, monospace);
+	font-size: calc(var(--cs-font-base, 14px) * 0.8);
+	resize: vertical;
+}
+
+.custom-abilities__grants-selected-item--dm {
+	border-left: 3px solid rgba(234, 179, 8, 0.6);
 }
 
 .custom-abilities__grants-section > summary {

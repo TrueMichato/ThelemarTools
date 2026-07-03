@@ -2474,6 +2474,27 @@ class CharacterSheetBuilder {
 		// Recalculate max HP (CON may have changed since addClass) and fill to full
 		this._state.recalculateHp({syncCurrent: true});
 
+		// Surface racial/subclass fixed feature-choices at creation, matching QuickBuild.
+		// `addFeature` (via `_addFeatureEntries`) already QUEUES the pending choices the
+		// generic FeatureChoiceParser recognises — e.g. the Theocracian subrace's "Pillars
+		// of Society" ("proficiency in one of the following skills: …") racial skill pick —
+		// but the Builder never drained them, so they silently never appeared (they only
+		// surfaced when a QuickBuild target level was set, since QuickBuild drains). Seed the
+		// Moon-Bard-style off-list choices the parser can't detect, then drain the queue
+		// through the SAME pipeline QuickBuild uses. Generic across any race/subclass; the
+		// pending queue de-dupes and `processPendingFeatureChoices` holds a single-owner lock,
+		// so structured in-wizard choices (exact-set-suppressed) are never double-offered.
+		const allSpells = typeof this._page.getFilteredSpellData === "function" ? this._page.getFilteredSpellData() : [];
+		CharacterSheetClassUtils.seedSubclassFeatureChoices(this._state, this._state.getFeatures?.() || [], {allSpells: allSpells || []});
+		// Drain seeded bonus-cantrip picks (spell choices) first, then the fixed-list
+		// skill/feature choices — same order as QuickBuild.
+		if (this._page._spells?.processPendingSpellChoices) {
+			await this._page._spells.processPendingSpellChoices();
+		}
+		if (this._page.processPendingFeatureChoices) {
+			await this._page.processPendingFeatureChoices();
+		}
+
 		// Save the character
 		await this._page.saveCharacter();
 

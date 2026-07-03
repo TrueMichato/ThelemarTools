@@ -35250,9 +35250,39 @@ class CharacterSheetState {
 			}
 		}
 
-		// Grant optional features (invocations, metamagic, fighting styles, etc.)
+		// Grant features. Two shapes share this list:
+		//  - Legacy optional-feature stubs (invocations, metamagic, fighting styles) picked
+		//    from the optional-features browser — applied as "Optional Feature" (default).
+		//  - DM-granted "data features" (grantKind === "dataFeature"): a FULL feature payload
+		//    pulled from ANY data source (class/subclass feature, optional feature, feat, or a
+		//    pasted monster trait / boon / reward). These are applied like a REAL feature so
+		//    `addFeature` auto-parses their uses/resources/resistances/modifiers/choices — we
+		//    deliberately reuse `buildFeatureStateObject` + `addFeature` rather than
+		//    re-implementing the parser. Provenance (`dmGranted`, `origin`) rides along so the
+		//    grant stays badged and auditable; `sourceAbilityId` links it for teardown.
 		if (grants.features?.length) {
 			for (const feature of grants.features) {
+				if (feature.grantKind === "dataFeature") {
+					const payload = feature.data || feature;
+					// Always hand a human-readable string label to the builder — an
+					// optionalfeature payload's own `featureType` is a code ARRAY (e.g.
+					// ["EI"]) which the builder instead captures as optionalFeatureTypes.
+					const featureTypeLabel = feature.featureType
+						|| (typeof payload.featureType === "string" ? payload.featureType : null)
+						|| "Feature";
+					const built = CharacterSheetClassUtils.buildFeatureStateObject(payload, {
+						featureType: featureTypeLabel,
+						level: payload.level || 1,
+					});
+					this.addFeature({
+						...built,
+						sourceAbilityId: ability.id, // Track source custom ability for teardown
+						dmGranted: true,
+						origin: feature.origin || payload.origin || null,
+					});
+					continue;
+				}
+
 				this.addFeature({
 					name: feature.name,
 					source: feature.source,
@@ -35882,7 +35912,13 @@ class CharacterSheetState {
 	 * @param {string} abilityId - The source custom ability ID
 	 */
 	removeFeaturesBySourceAbility (abilityId) {
-		this._data.features = this._data.features.filter(f => f.sourceAbilityId !== abilityId);
+		// Delegate to the canonical single-feature teardown so any side effects the
+		// feature created via `addFeature` (mirrored resource pools, modifiers, innate
+		// spells, pending choices, granted cantrips/feats, natural-weapon attacks) are
+		// also cleaned up. This matters for DM-granted "data features" whose full payload
+		// can materialise those side effects — a plain array filter would orphan them.
+		const toRemove = this._data.features.filter(f => f.sourceAbilityId === abilityId);
+		for (const f of toRemove) this.removeFeature(f.id);
 	}
 
 	/**
