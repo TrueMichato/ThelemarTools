@@ -876,6 +876,8 @@ class CharacterSheetFeatures {
 		this._renderProficiencies();
 		this._renderLanguages();
 		this._renderFeaturesSummary();
+		this._renderDivineFavor();
+		this._renderDivineFavorOverview();
 	}
 
 	_renderClassFeatures () {
@@ -2697,6 +2699,274 @@ class CharacterSheetFeatures {
 	}
 
 	// endregion
+	// #endregion
+
+	// =====================================================================
+	// #region DIVINE FAVOR (TGTT — Relationships with Deities)
+	// Owned by the divine-favor worker. Pure presentation + control wiring for
+	// the Features-tab panel and the Overview readout. All mechanical effects
+	// live in state (`applyDivineFavorEffects`); the setters called here already
+	// reconcile effects, so handlers only need to re-render dependent panels.
+	// =====================================================================
+
+	/** Subsystem is visible only for TGTT characters with a loaded god catalog. */
+	_isDivineFavorEnabled () {
+		const settings = this._state.getSettings?.() || {};
+		if (!settings.enableTgtt) return false;
+		const catalog = this._state.getDivineFavorCatalog?.() || [];
+		return catalog.length > 0;
+	}
+
+	/** Re-render the divine-favor panels and every panel a boon can affect. */
+	_onDivineFavorChanged () {
+		this._renderDivineFavor();
+		this._renderDivineFavorOverview();
+		// Boons can grant spells and change ability scores — refresh dependent UI.
+		this._page?._spells?.render?.();
+		this._page?._renderAbilityScores?.();
+		this._page?._renderAbilitiesDetailed?.();
+		this._page?._renderSavingThrows?.();
+		this._page?._renderSkills?.();
+	}
+
+	_abilityLabel (abbr) {
+		const map = {str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma"};
+		return map[(abbr || "").toLowerCase()] || (abbr || "").toUpperCase();
+	}
+
+	_renderDivineFavor () {
+		const section = document.getElementById("charsheet-divine-favor-section");
+		const container = document.getElementById("charsheet-divine-favor");
+		if (!section || !container) return;
+
+		if (!this._isDivineFavorEnabled()) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const catalog = this._state.getDivineFavorCatalog();
+		const df = this._state.getDivineFavor();
+
+		// --- God picker + favour / malice inputs ---
+		const controls = e_({outer: `
+			<div class="charsheet__divine-favor-controls">
+				<label class="charsheet__divine-favor-field">
+					<span class="charsheet__divine-favor-label">Deity</span>
+					<select class="ve-form-control charsheet__divine-favor-god"></select>
+				</label>
+				<label class="charsheet__divine-favor-field">
+					<span class="charsheet__divine-favor-label">Favour</span>
+					<input type="number" min="0" max="100" class="ve-form-control charsheet__divine-favor-favor" value="${df.favor}">
+				</label>
+				<label class="charsheet__divine-favor-field">
+					<span class="charsheet__divine-favor-label">Malice</span>
+					<input type="number" min="0" max="100" class="ve-form-control charsheet__divine-favor-malice" value="${df.malice}">
+				</label>
+			</div>
+		`});
+
+		const sel = controls.querySelector(".charsheet__divine-favor-god");
+		sel.append(e_({tag: "option", attrs: {value: ""}, text: "— None —"}));
+		catalog.forEach(g => {
+			const uid = `${g.name}|${g.source}`;
+			const opt = e_({tag: "option", attrs: {value: uid}, text: g.name});
+			if (df.god === uid) opt.setAttribute("selected", "selected");
+			sel.append(opt);
+		});
+		sel.value = df.god || "";
+
+		sel.addEventListener("change", () => {
+			this._state.setDivineFavorGod(sel.value || null);
+			this._onDivineFavorChanged();
+		});
+		controls.querySelector(".charsheet__divine-favor-favor").addEventListener("change", (evt) => {
+			this._state.setDivineFavorLevel(evt.target.value);
+			this._onDivineFavorChanged();
+		});
+		controls.querySelector(".charsheet__divine-favor-malice").addEventListener("change", (evt) => {
+			this._state.setDivineFavorMalice(evt.target.value);
+			this._onDivineFavorChanged();
+		});
+		container.append(controls);
+
+		if (!df.god) {
+			container.append(e_({outer: `<p class="ve-muted charsheet__divine-favor-hint">Select a deity to track your favour and unlock its boons.</p>`}));
+			return;
+		}
+
+		const god = this._state.getDivineFavorGodData();
+		if (!god) {
+			container.append(e_({outer: `<p class="ve-muted charsheet__divine-favor-hint">This character's deity is not in the loaded homebrew.</p>`}));
+			return;
+		}
+
+		// --- Current-tier status ---
+		const tier = this._state.getDivineFavorTier();
+		const maliceTier = this._state.getDivineFavorMaliceTier();
+		const status = e_({outer: `
+			<div class="charsheet__divine-favor-status">
+				<span class="charsheet__divine-favor-badge charsheet__divine-favor-badge--favor">Favour ${df.favor}${tier ? ` — ${tier.name}` : ""}</span>
+				<span class="charsheet__divine-favor-badge charsheet__divine-favor-badge--malice">Malice ${df.malice}${maliceTier ? ` — ${maliceTier.name}` : ""}</span>
+			</div>
+		`});
+		container.append(status);
+
+		// --- Devotion / transgression guidance (from the god's data) ---
+		if (god.expectedActs?.length || god.malicedActs?.length) {
+			const acts = e_({outer: `<div class="charsheet__divine-favor-acts"></div>`});
+			if (god.expectedActs?.length) {
+				acts.append(e_({outer: `
+					<div class="charsheet__divine-favor-acts-col">
+						<div class="charsheet__divine-favor-acts-title">Gains favour</div>
+						<ul class="charsheet__divine-favor-acts-list">${god.expectedActs.map(a => `<li>${a}</li>`).join("")}</ul>
+					</div>
+				`}));
+			}
+			if (god.malicedActs?.length) {
+				acts.append(e_({outer: `
+					<div class="charsheet__divine-favor-acts-col">
+						<div class="charsheet__divine-favor-acts-title charsheet__divine-favor-acts-title--malice">Gains malice</div>
+						<ul class="charsheet__divine-favor-acts-list">${god.malicedActs.map(a => `<li>${a}</li>`).join("")}</ul>
+					</div>
+				`}));
+			}
+			container.append(acts);
+		}
+
+		// --- Active boons for the current favour tier ---
+		const boons = this._state.getActiveDivineFavorBoons();
+		const boonsWrap = e_({outer: `<div class="charsheet__divine-favor-boons"></div>`});
+		if (!boons.length) {
+			boonsWrap.append(e_({outer: `<p class="ve-muted charsheet__divine-favor-hint">No boons yet — raise your favour to ${(god.tiers?.[0]?.favor) ?? 3} to reach ${(god.tiers?.[0]?.name) || "the first tier"}.</p>`}));
+		} else {
+			boons.forEach(boon => boonsWrap.append(this._renderDivineFavorBoon(boon)));
+		}
+		container.append(boonsWrap);
+	}
+
+	/** Render a single boon row, dispatching on its `type`. */
+	_renderDivineFavorBoon (boon) {
+		const tierTag = `<span class="charsheet__divine-favor-boon-tier">${boon._tierName || ""}</span>`;
+		const descHtml = boon.desc ? Renderer.get().render(boon.desc) : "";
+
+		if (boon.type === "limitedCastSpell" || boon.type === "grantedSpell") {
+			const sp = boon.spell || {};
+			const innate = (this._state.getInnateSpells() || []).find(
+				s => s.name === sp.name && (s.sourceFeature || "").startsWith("Divine Favor:"),
+			);
+			const uses = innate?.uses;
+			const usesLabel = uses ? `${uses.current} / ${uses.max}` : "";
+			const row = e_({outer: `
+				<div class="charsheet__divine-favor-boon charsheet__divine-favor-boon--spell">
+					<div class="charsheet__divine-favor-boon-head">
+						<span class="charsheet__divine-favor-boon-name">${sp.name || "Spell"}</span>
+						${tierTag}
+						<div class="charsheet__divine-favor-boon-uses ml-auto">
+							<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__divine-favor-cast" ${(!uses || uses.current <= 0) ? "disabled" : ""}>Cast</button>
+							<span class="charsheet__divine-favor-boon-uses-count">${usesLabel}</span>
+							<button class="ve-btn ve-btn-xs ve-btn-success charsheet__divine-favor-restore" ${(!uses || uses.current >= uses.max) ? "disabled" : ""}>+</button>
+						</div>
+					</div>
+					<div class="charsheet__divine-favor-boon-desc ve-small ve-muted">${descHtml}</div>
+				</div>
+			`});
+			if (innate) {
+				row.querySelector(".charsheet__divine-favor-cast").addEventListener("click", () => {
+					this._state.useInnateSpell(innate.id);
+					this._onDivineFavorChanged();
+				});
+				row.querySelector(".charsheet__divine-favor-restore").addEventListener("click", () => {
+					if (innate.uses && innate.uses.current < innate.uses.max) {
+						innate.uses.current += 1;
+						this._onDivineFavorChanged();
+					}
+				});
+			}
+			return row;
+		}
+
+		if (boon.type === "abilityScoreBoost") {
+			const df = this._state.getDivineFavor();
+			const chosen = df.chosenBoons?.[boon._boonKey] || "";
+			const options = Array.isArray(boon.abilities) ? boon.abilities : [];
+			const row = e_({outer: `
+				<div class="charsheet__divine-favor-boon charsheet__divine-favor-boon--asi">
+					<div class="charsheet__divine-favor-boon-head">
+						<span class="charsheet__divine-favor-boon-name">Ability Increase</span>
+						${tierTag}
+						<label class="charsheet__divine-favor-boon-choice ml-auto">
+							<span class="ve-small ve-muted mr-1">Score</span>
+							<select class="ve-form-control ve-form-control--sm charsheet__divine-favor-asi-select"></select>
+						</label>
+					</div>
+					<div class="charsheet__divine-favor-boon-desc ve-small ve-muted">${descHtml}</div>
+				</div>
+			`});
+			const asiSel = row.querySelector(".charsheet__divine-favor-asi-select");
+			asiSel.append(e_({tag: "option", attrs: {value: ""}, text: "— Choose —"}));
+			options.forEach(abl => {
+				const opt = e_({tag: "option", attrs: {value: abl}, text: this._abilityLabel(abl)});
+				if (chosen === abl) opt.setAttribute("selected", "selected");
+				asiSel.append(opt);
+			});
+			asiSel.value = chosen;
+			asiSel.addEventListener("change", () => {
+				this._state.setDivineFavorBoonChoice(boon._boonKey, asiSel.value || null);
+				this._onDivineFavorChanged();
+			});
+			return row;
+		}
+
+		// checkAdvantage / narrative / any future display-only boon
+		const name = boon.type === "checkAdvantage"
+			? `Advantage: ${this._capitalize(boon.skill || "check")}`
+			: (boon.name || "Boon");
+		return e_({outer: `
+			<div class="charsheet__divine-favor-boon">
+				<div class="charsheet__divine-favor-boon-head">
+					<span class="charsheet__divine-favor-boon-name">${name}</span>
+					${tierTag}
+				</div>
+				<div class="charsheet__divine-favor-boon-desc ve-small ve-muted">${descHtml}</div>
+			</div>
+		`});
+	}
+
+	_capitalize (str) {
+		str = String(str || "");
+		return str.charAt(0).toUpperCase() + str.slice(1);
+	}
+
+	/** Compact Overview readout: worshipped god + favour tier. */
+	_renderDivineFavorOverview () {
+		const section = document.getElementById("charsheet-divine-favor-overview-section");
+		const container = document.getElementById("charsheet-divine-favor-overview");
+		if (!section || !container) return;
+
+		const df = this._state.getDivineFavor?.() || {};
+		const god = this._isDivineFavorEnabled?.() ? this._state.getDivineFavorGodData?.() : null;
+
+		if (!this._isDivineFavorEnabled() || !df.god || !god) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		const tier = this._state.getDivineFavorTier();
+		const maliceTier = this._state.getDivineFavorMaliceTier();
+		container.innerHTML = "";
+		container.append(e_({outer: `
+			<div class="charsheet__divine-favor-overview-row">
+				<span class="charsheet__divine-favor-overview-god">${god.name}</span>
+				<span class="charsheet__divine-favor-overview-favor">Favour ${df.favor}${tier ? ` — ${tier.name}` : ""}</span>
+				${df.malice > 0 ? `<span class="charsheet__divine-favor-overview-malice">Malice ${df.malice}${maliceTier ? ` — ${maliceTier.name}` : ""}</span>` : ""}
+			</div>
+		`}));
+	}
+
 	// #endregion
 }
 

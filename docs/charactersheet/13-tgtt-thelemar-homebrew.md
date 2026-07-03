@@ -17,6 +17,7 @@ This document catalogs all Thelemar homebrew content implemented in the characte
 | **Combat Methods** | 17/17 traditions | 0 | ✅ |
 | **Battle Tactics** | 13/13 | 0 | ✅ |
 | **Dreamwalker Abilities** | 11/11 | 0 | ✅ |
+| **Divine Favor** | 1 god (Pan) seeded | Extensible — more gods are data-only | ✅ |
 
 **Total TGTT Tests**: 737 passing
 
@@ -388,7 +389,86 @@ TGTT-specific conditions are auto-registered when Thelemar rules are enabled:
 
 ---
 
+## Divine Favor (Relationships with Deities)
+
+A data-driven adaptation of the official Piety system for Thelemar gods. A
+character picks a deity and tracks a **favour** score (0–100) and a **malice**
+score (0–100); reaching a favour threshold unlocks that tier's boons, which are
+applied automatically. See rules in `homebrew/TravelersGuidetoThelemar.json`
+("Relationships with Deities").
+
+### Favour / Malice tiers
+
+| Track | Thresholds |
+|-------|-----------|
+| **Favour** | Devotee (3) · Votary (10) · Disciple (25) · Apostle (50) · Champion (100) |
+| **Malice** | Divine Disfavour (5) · Divine Displeasure (20) · Divine Ire (45) · Divine Fury (75) · Divine Wrath (100) |
+
+Malice tiers are surfaced for display; malice banes are narrative
+(DM-adjudicated) in this implementation.
+
+### Data format
+
+Gods live in a new top-level `divineFavor` array in the homebrew (loaded like
+`combatMethod` — merged in `_mergeBrewData`, catalog set via
+`setDivineFavorCatalog`). The per-god schema is extensible:
+
+```jsonc
+{
+  "name": "Pan", "source": "TGTT",
+  "alignment": "…", "domains": ["…"],   // optional, display-only
+  "expectedActs": ["…"],                  // raise favour (guidance)
+  "malicedActs": ["…"],                   // raise malice (guidance)
+  "tiers": [
+    { "favor": 3, "name": "Devotee", "boons": [ <boon>, … ] },
+    …
+  ]
+}
+```
+
+Boons use a `type` discriminator (each maps to an existing effect channel, so
+the format scales to many gods):
+
+| Boon `type` | Effect | Channel |
+|-------------|--------|---------|
+| `limitedCastSpell` | Cast a spell `max(1, abilityMod)` / long rest, fixed spellcasting ability, optionally without material components | innate spell (`addInnateSpell`, `recharge:"long"`) |
+| `grantedSpell` | Cast a spell N/long rest (default 1) | innate spell |
+| `checkAdvantage` | Advantage on a skill check under a condition | conditional named modifier (`skill:advantage:<skill>`, opt-in) |
+| `abilityScoreBoost` | +N to a chosen score **and** +N to its maximum | `customModifiers.abilityScores` + `abilityScoreMaxIncrease` |
+| `narrative` | Display-only active/narrative ability | none |
+
+### Effect application
+
+`applyDivineFavorEffects()` (state) is **imperative and idempotent**: it strips
+every prior divine-favor contribution (named modifiers tagged `_divineFavor`,
+reverses the `_applied` ability-score ledger, removes innate spells whose
+`sourceFeature` starts `"Divine Favor:"`), then re-applies the active boons —
+ability boosts first, so limited-cast use counts reflect the boosted modifier.
+Spent uses are preserved across re-application. The controller re-runs it after
+load (`_reconcileClassFeatures`), once the god catalog is available.
+
+### UI
+
+Gated behind `enableTgtt` (+ a loaded god catalog). A **Features-tab** panel
+(`#charsheet-divine-favor`) offers a deity picker, favour/malice inputs, the
+current tier display, devotion/transgression guidance, and the active boons
+(limited-cast spells surface as Cast/restore rows; `abilityScoreBoost` shows a
+score chooser). A compact **Overview** readout (`#charsheet-divine-favor-overview`)
+shows the worshipped god + favour tier. Granted spells also appear in the Spells
+tab as innate spells.
+
+### Seeded gods
+
+- **Pan** — full seed: Devotee (Animal Friendship limited-cast + Persuasion-vs-animals
+  advantage), Votary (Conjure Animals 1/long-rest), Disciple (nature-sense
+  narrative), Apostle (+2 WIS/CHA & +2 to its max).
+
+Additional gods can be added purely as data (no code changes).
+
+---
+
 ## Deferred / Not Yet Implemented
+
 
 ### Low Priority - Narrative Features
 
@@ -418,6 +498,8 @@ These would require broader system changes:
 
 - `CharacterSheetTGTT.test.js` — 737 tests (core TGTT systems)
 - `CharacterSheetCombatMethodsSurvey.test.js` — 81 tests (Phase D: tradition parsing, stance integration, subclass tradition grants, edge cases, degree progression, DC calculation, stamina pool)
+- `CharacterSheetRumorSpell.test.js` — Rumor spell (level/school/components/duration, class availability, `rarity:rare`/`legality:illegal-II` tags, higher-level durations)
+- `CharacterSheetDivineFavor.test.js` — Divine Favor subsystem (Pan load, favour/malice tier computation, boon grants at favour 3/10/25/50, limited/granted casts, conditional advantage, Apostle +2 score & +2 max, save/load round-trip, apply/clear idempotency)
 
 ### Test Categories
 

@@ -6122,6 +6122,98 @@
 					}
 				]
 			}
+		},
+		{
+			"name": "Rumor",
+			"source": "TGTT",
+			"page": 38,
+			"level": 5,
+			"school": "E",
+			"time": [
+				{
+					"number": 1,
+					"unit": "action"
+				}
+			],
+			"range": {
+				"type": "point",
+				"distance": {
+					"type": "touch"
+				}
+			},
+			"components": {
+				"v": true,
+				"s": true
+			},
+			"duration": [
+				{
+					"type": "timed",
+					"duration": {
+						"type": "hour",
+						"amount": 1
+					}
+				}
+			],
+			"entries": [
+				"You whisper into a creature's ear in a language they can hear and understand, uttering \"I heard a rumor...\" followed by a single statement of no more than 5 words (not counting the opening phrase). The target must succeed on a Wisdom saving throw or accept the statement as undeniable truth.",
+				"The statement must concern the target's beliefs, perceptions, memories, emotions, or intended actions; it cannot directly alter perception of objective physical reality, or compel an obviously self-destructive act.",
+				"On a failed save the target behaves consistently with the implanted belief until the spell ends or the belief is removed by magic, rationalizing inconsistencies, but may question it given overwhelming contradictory evidence (DM's discretion).",
+				"Example whispered rumors:",
+				{
+					"type": "list",
+					"items": [
+						"\"I heard a rumor you trust me completely.\"",
+						"\"I heard a rumor your friend died in battle.\"",
+						"\"I heard a rumor you want to surrender.\"",
+						"\"I heard a rumor the vault is already empty.\"",
+						"\"I heard a rumor you've known us for years.\""
+					]
+				}
+			],
+			"entriesHigherLevel": [
+				{
+					"type": "entries",
+					"name": "At Higher Levels",
+					"entries": [
+						"When you cast this spell using a spell slot of a higher level, the duration increases: 24 hours (6th level), 30 days (7th level), 1 year (8th level), and until it is removed by a {@spell greater restoration} spell, {@spell wish} spell, or comparable magic (9th level)."
+					]
+				}
+			],
+			"savingThrow": [
+				"wisdom"
+			],
+			"subschools": [
+				"rarity:rare",
+				"legality:illegal-II"
+			],
+			"classes": {
+				"fromClassList": [
+					{
+						"name": "Artificer",
+						"source": "TGTT"
+					},
+					{
+						"name": "Bard",
+						"source": "TGTT"
+					},
+					{
+						"name": "Paladin",
+						"source": "TGTT"
+					},
+					{
+						"name": "Sorcerer",
+						"source": "TGTT"
+					},
+					{
+						"name": "Warlock",
+						"source": "TGTT"
+					},
+					{
+						"name": "Wizard",
+						"source": "TGTT"
+					}
+				]
+			}
 		}
 	],
 	"class": [
@@ -36892,6 +36984,107 @@
 			"staminaCost": 3,
 			"entries": [
 				"{@b Action (3 Stamina Points)}. While aboard a capital ship, you can use your action to immediately take one of the ship's system actions. Any attack rolls made as part of this action are made with advantage, and any saving throws forced by it are made with disadvantage. Additionally, until the start of your next turn, you and any allies you communicate with can gain a bonus equal to your proficiency bonus to one saving throw, ability check, or attack roll of their choice."
+			]
+		}
+	],
+	"divineFavor": [
+		{
+			"name": "Pan",
+			"source": "TGTT",
+			"page": 38,
+			"alignment": "Chaotic Neutral",
+			"domains": [
+				"Nature",
+				"Wilds",
+				"Beasts",
+				"Freedom"
+			],
+			"expectedActs": [
+				"Protecting natural beauty from outside influence.",
+				"Escaping or defeating a wild animal without harming it.",
+				"Helping someone make a new friend.",
+				"Spreading love for nature.",
+				"Protecting the wilds from abuse.",
+				"Harassing followers of Apollo."
+			],
+			"malicedActs": [
+				"Acting with cruelty or disdain.",
+				"Killing a wild creature unnecessarily.",
+				"Ignoring the plight of the enslaved or imprisoned.",
+				"Harming nature carelessly."
+			],
+			"tiers": [
+				{
+					"favor": 3,
+					"name": "Devotee",
+					"boons": [
+						{
+							"type": "limitedCastSpell",
+							"spell": {
+								"name": "Animal Friendship",
+								"source": "PHB",
+								"level": 1
+							},
+							"ability": "wis",
+							"usesFormula": "abilityMod",
+							"recharge": "long",
+							"noMaterialComponents": true,
+							"desc": "You can cast {@spell Animal Friendship} through your devotion to Pan, without material components, a number of times equal to your Wisdom modifier (minimum of once) per long rest. Wisdom is your spellcasting ability for it."
+						},
+						{
+							"type": "checkAdvantage",
+							"skill": "persuasion",
+							"conditional": "when speaking with animals",
+							"desc": "While devoted to Pan, you have advantage on Persuasion checks made when speaking with animals."
+						}
+					]
+				},
+				{
+					"favor": 10,
+					"name": "Votary",
+					"boons": [
+						{
+							"type": "grantedSpell",
+							"spell": {
+								"name": "Conjure Animals",
+								"source": "PHB",
+								"level": 3
+							},
+							"ability": "wis",
+							"uses": 1,
+							"recharge": "long",
+							"desc": "You can cast {@spell Conjure Animals} through your devotion to Pan once per long rest. Wisdom is your spellcasting ability for it."
+						}
+					]
+				},
+				{
+					"favor": 25,
+					"name": "Disciple",
+					"boons": [
+						{
+							"type": "narrative",
+							"name": "Attunement to Nature",
+							"desc": "As an action, you attune to the natural world around you and become aware of every beast and plant within 30 feet of you, learning their distance, direction, and whether they are hostile toward you. On each subsequent round you may spend another action to widen this awareness by an additional 30 feet, up to a total duration of 1 hour."
+						}
+					]
+				},
+				{
+					"favor": 50,
+					"name": "Apostle",
+					"boons": [
+						{
+							"type": "abilityScoreBoost",
+							"key": "pan-apostle-asi",
+							"abilities": [
+								"wis",
+								"cha"
+							],
+							"amount": 2,
+							"raiseMax": true,
+							"desc": "Your bond with Pan strengthens your spirit: increase your Wisdom or Charisma score by 2, and increase that score's maximum by 2."
+						}
+					]
+				}
 			]
 		}
 	]
