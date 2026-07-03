@@ -84,6 +84,7 @@ class CharacterSheetPage {
 		this._optionalFeaturesData = [];
 		this._combatMethodsData = [];
 		this._itemUpgradesData = [];
+		this._divineFavorData = [];
 		this._skillsData = [];
 		this._conditionsData = [];
 		this._languagesData = [];
@@ -329,6 +330,10 @@ class CharacterSheetPage {
 		this._combatMethodsData = (combatMethods.combatMethod || []).map(m => ({...m, _entityType: "combatMethod"}));
 		this._state.setCombatMethodCatalog(this._combatMethodsData);
 		this._itemUpgradesData = (itemUpgrades.itemUpgrade || []).map(u => ({...u, _entityType: "itemUpgrade"}));
+		// Divine Favor gods are homebrew-only (no site data file); the catalog starts
+		// empty and is populated from brew in _mergeBrewData.
+		this._divineFavorData = [];
+		this._state.setDivineFavorCatalog(this._divineFavorData);
 		this._skillsData = skills.skill || [];
 		this._conditionsData = conditionsData.condition || [];
 		this._languagesData = languagesData.language || [];
@@ -674,6 +679,13 @@ class CharacterSheetPage {
 		if (brewData.itemUpgrade?.length) {
 			const brewUpgrades = MiscUtil.copyFast(brewData.itemUpgrade).map(u => ({...u, _entityType: "itemUpgrade"}));
 			this._itemUpgradesData = [...this._itemUpgradesData, ...brewUpgrades];
+		}
+
+		// Divine Favor gods (TGTT — Relationships with Deities)
+		if (brewData.divineFavor?.length) {
+			const brewGods = MiscUtil.copyFast(brewData.divineFavor).map(g => ({...g, _entityType: "divineFavor"}));
+			this._divineFavorData = [...this._divineFavorData, ...brewGods];
+			this._state.setDivineFavorCatalog(this._divineFavorData);
 		}
 
 		// Skills (rare but possible)
@@ -15121,6 +15133,9 @@ class CharacterSheetPage {
 			// reintroduces generic `{@condition X}` tags. Re-apply the Thelemar
 			// condition rewrite so feature hovers stay on the TGTT variant. Idempotent.
 			this._state._applyThelemarConditionTags();
+			// Reconcile Divine Favor (TGTT) boon effects now that the god catalog is
+			// available and ability scores are settled — idempotent; safe to re-run.
+			this._state.applyDivineFavorEffects();
 		} catch (e) {
 			// Reconciliation is best-effort; never block render on a bad save.
 			// eslint-disable-next-line no-console

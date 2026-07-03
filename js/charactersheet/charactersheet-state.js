@@ -3881,6 +3881,20 @@ class CharacterSheetState {
 				lucidFocusActive: false, // Whether Lucid Focus die is currently active
 			},
 
+			// Divine Favor (TGTT — Relationships with Deities). Player-chosen god +
+			// favour/malice levels; tiered boons are applied imperatively via
+			// applyDivineFavorEffects(). `god` is a "name|source" UID; `chosenBoons`
+			// maps a boon key → player choice (e.g. which ability an ASI boon boosts);
+			// `_applied` records the ability-score deltas currently applied so they can
+			// be reversed exactly on re-apply (see applyDivineFavorEffects).
+			divineFavor: {
+				god: null,
+				favor: 0,
+				malice: 0,
+				chosenBoons: {},
+				_applied: [],
+			},
+
 			// Illrigger Seals (Baleful Interdict, L1) — short/long-rest seal pool.
 			// `available` is the remaining placeable seals (lazy-initialised to the
 			// `sealsMax` calculation on first read so a fresh Illrigger starts full).
@@ -4144,6 +4158,17 @@ class CharacterSheetState {
 		// Ensure nested customModifiers objects exist
 		this._data.customModifiers.speed = {...this._getDefaultState().customModifiers.speed, ...this._data.customModifiers.speed};
 		this._data.customModifiers.senses = {...this._getDefaultState().customModifiers.senses, ...this._data.customModifiers.senses};
+
+		// Divine Favor (TGTT) — backward-compatible nested-merge so old saves get defaults
+		this._data.divineFavor = {...this._getDefaultState().divineFavor, ...this._data.divineFavor};
+		// `_applied` is a runtime reconciliation ledger tracking the exact ability-score
+		// deltas this subsystem pushed onto customModifiers. Those customModifiers ability
+		// caches are rebuilt from registered feature effects on load (divine favour is NOT a
+		// registered feature), so the persisted deltas are wiped out from under us. Reset the
+		// ledger to empty so the post-load applyDivineFavorEffects() re-applies fresh instead
+		// of reversing a delta that no longer exists (which would leave a phantom negative).
+		this._data.divineFavor._applied = [];
+		if (!this._data.divineFavor.chosenBoons || typeof this._data.divineFavor.chosenBoons !== "object") this._data.divineFavor.chosenBoons = {};
 
 		// Ensure namedModifiers array exists
 		if (!Array.isArray(this._data.namedModifiers)) {
@@ -29253,6 +29278,244 @@ class CharacterSheetState {
 	 */
 	setCombatMethodCatalog (combatMethodEntities) {
 		this._combatMethodCatalog = Array.isArray(combatMethodEntities) ? combatMethodEntities : [];
+	}
+
+	// =====================================================================
+	// DIVINE FAVOR (TGTT — "Relationships with Deities"; adaptation of Piety)
+	// ---------------------------------------------------------------------
+	// Self-contained region owned by the divine-favor worker. A character
+	// picks a Thelemar god and sets favour/malice levels; tiered boons are
+	// applied IMPERATIVELY and IDEMPOTENTLY through the generic effect
+	// channels (namedModifiers, customModifiers ability channels, and
+	// innateSpells) rather than the static FeatureEffectRegistry — because
+	// divine favour is a per-character data selection, not a named feature.
+	// This block deliberately touches none of the cleric register / domain
+	// effect / spellcasting-focus / custom-ability code owned elsewhere.
+	// =====================================================================
+
+	/** Malice tiers (thresholds + labels) per the TGTT rules. */
+	static DIVINE_FAVOR_MALICE_TIERS = [
+		{malice: 5, name: "Divine Disfavour"},
+		{malice: 20, name: "Divine Displeasure"},
+		{malice: 45, name: "Divine Ire"},
+		{malice: 75, name: "Divine Fury"},
+		{malice: 100, name: "Divine Wrath"},
+	];
+
+	/** Homebrew-sourced catalog of gods (set by the page after brew merge). */
+	setDivineFavorCatalog (gods) {
+		this._divineFavorCatalog = Array.isArray(gods) ? gods : [];
+	}
+
+	getDivineFavorCatalog () {
+		return [...(this._divineFavorCatalog || [])];
+	}
+
+	/** Current divine-favor selection (defensive copy of the primitive fields). */
+	getDivineFavor () {
+		const df = this._data.divineFavor || {};
+		return {
+			god: df.god || null,
+			favor: df.favor || 0,
+			malice: df.malice || 0,
+			chosenBoons: {...(df.chosenBoons || {})},
+		};
+	}
+
+	/** Resolve the full god data object for the currently-selected god, or null. */
+	getDivineFavorGodData () {
+		const uid = this._data.divineFavor?.god;
+		if (!uid) return null;
+		return (this._divineFavorCatalog || []).find(g => `${g.name}|${g.source}` === uid) || null;
+	}
+
+	_ensureDivineFavor () {
+		if (!this._data.divineFavor) this._data.divineFavor = this._getDefaultState().divineFavor;
+		if (!Array.isArray(this._data.divineFavor._applied)) this._data.divineFavor._applied = [];
+		if (!this._data.divineFavor.chosenBoons) this._data.divineFavor.chosenBoons = {};
+		return this._data.divineFavor;
+	}
+
+	setDivineFavorGod (uid) {
+		const df = this._ensureDivineFavor();
+		if (df.god === (uid || null)) return;
+		df.god = uid || null;
+		df.chosenBoons = {}; // per-god choices reset when switching gods
+		this.applyDivineFavorEffects();
+	}
+
+	setDivineFavorLevel (favor) {
+		const df = this._ensureDivineFavor();
+		df.favor = Math.max(0, Math.min(100, Math.floor(Number(favor) || 0)));
+		this.applyDivineFavorEffects();
+	}
+
+	setDivineFavorMalice (malice) {
+		const df = this._ensureDivineFavor();
+		df.malice = Math.max(0, Math.min(100, Math.floor(Number(malice) || 0)));
+		// Malice banes are narrative (DM-adjudicated) in this implementation, so
+		// there are no mechanical effects to reconcile — but keep state consistent.
+	}
+
+	setDivineFavorBoonChoice (key, value) {
+		if (!key) return;
+		const df = this._ensureDivineFavor();
+		df.chosenBoons[key] = value;
+		this.applyDivineFavorEffects();
+	}
+
+	/** Highest favour tier whose threshold is <= favor, or null. */
+	getDivineFavorTier (favor = this._data.divineFavor?.favor || 0) {
+		const god = this.getDivineFavorGodData();
+		if (!god || !Array.isArray(god.tiers)) return null;
+		const eligible = god.tiers
+			.filter(t => favor >= (t.favor || 0))
+			.sort((a, b) => (b.favor || 0) - (a.favor || 0));
+		return eligible[0] || null;
+	}
+
+	/** Highest malice tier whose threshold is <= malice, or null. */
+	getDivineFavorMaliceTier (malice = this._data.divineFavor?.malice || 0) {
+		const eligible = CharacterSheetState.DIVINE_FAVOR_MALICE_TIERS
+			.filter(t => malice >= t.malice)
+			.sort((a, b) => b.malice - a.malice);
+		return eligible[0] || null;
+	}
+
+	/**
+	 * All boons unlocked at the current favour level, flattened and annotated
+	 * with their tier. Each boon gets a stable `_boonKey` for choice tracking.
+	 */
+	getActiveDivineFavorBoons () {
+		const god = this.getDivineFavorGodData();
+		if (!god || !Array.isArray(god.tiers)) return [];
+		const favor = this._data.divineFavor?.favor || 0;
+		const out = [];
+		god.tiers
+			.filter(t => favor >= (t.favor || 0))
+			.sort((a, b) => (a.favor || 0) - (b.favor || 0))
+			.forEach(t => (t.boons || []).forEach((b, i) => out.push({
+				...b,
+				_tierName: t.name,
+				_tierFavor: t.favor,
+				_boonKey: b.key || `${god.name}|${god.source}|${t.favor}|${i}`,
+			})));
+		return out;
+	}
+
+	/**
+	 * Apply (reconcile) all divine-favor boon effects onto the generic channels.
+	 * Idempotent: strips every previously-applied divine-favor contribution, then
+	 * re-applies from the current god/favour/boon-choice state. Ability-score
+	 * boosts are applied BEFORE granted spells so a limited-cast count based on an
+	 * ability modifier reflects the boosted score. Spent uses of granted spells are
+	 * preserved across re-application.
+	 */
+	applyDivineFavorEffects () {
+		const df = this._ensureDivineFavor();
+
+		// --- 1. Strip prior contributions ------------------------------------
+		// 1a. namedModifiers tagged as divine-favor.
+		if (Array.isArray(this._data.namedModifiers)) {
+			this._data.namedModifiers = this._data.namedModifiers.filter(m => !m._divineFavor);
+		}
+		// 1b. Reverse previously-applied ability score / max deltas.
+		const cm = this._data.customModifiers;
+		(df._applied || []).forEach(prev => {
+			if (!prev || !prev.ability) return;
+			if (cm.abilityScores && prev.scoreDelta) {
+				cm.abilityScores[prev.ability] = (cm.abilityScores[prev.ability] || 0) - prev.scoreDelta;
+				if (!cm.abilityScores[prev.ability]) delete cm.abilityScores[prev.ability];
+			}
+			if (cm.abilityScoreMaxIncrease && prev.maxDelta) {
+				cm.abilityScoreMaxIncrease[prev.ability] = (cm.abilityScoreMaxIncrease[prev.ability] || 0) - prev.maxDelta;
+				if (!cm.abilityScoreMaxIncrease[prev.ability]) delete cm.abilityScoreMaxIncrease[prev.ability];
+			}
+		});
+		df._applied = [];
+		// 1c. Remove divine-favor innate spells, remembering spent uses to preserve them.
+		const priorUses = {};
+		(this._data.spellcasting?.innateSpells || []).forEach(s => {
+			if (s.sourceFeature && s.sourceFeature.startsWith("Divine Favor:")) {
+				priorUses[`${s.name}|${s.source}`] = s.uses ? s.uses.current : null;
+			}
+		});
+		if (this._data.spellcasting?.innateSpells) {
+			this._data.spellcasting.innateSpells = this._data.spellcasting.innateSpells
+				.filter(s => !(s.sourceFeature && s.sourceFeature.startsWith("Divine Favor:")));
+		}
+
+		// --- 2. Re-apply active boons ----------------------------------------
+		const god = this.getDivineFavorGodData();
+		if (!god) return;
+		const boons = this.getActiveDivineFavorBoons();
+
+		// Pass A: ability-score boosts + advantage modifiers.
+		boons.forEach(boon => {
+			if (boon.type === "checkAdvantage") {
+				const skill = (boon.skill || "").toLowerCase();
+				if (!skill) return;
+				this._data.namedModifiers.push({
+					id: CryptUtil.uid(),
+					name: `Divine Favor: ${god.name}`,
+					type: `skill:advantage:${skill}`,
+					value: 1,
+					conditional: boon.conditional || null,
+					note: boon.desc || `Advantage on ${skill} checks`,
+					enabled: true,
+					_divineFavor: true,
+				});
+			} else if (boon.type === "abilityScoreBoost") {
+				const key = boon._boonKey;
+				const options = Array.isArray(boon.abilities) ? boon.abilities : [];
+				const chosen = df.chosenBoons?.[key];
+				const ability = chosen && options.includes(chosen) ? chosen : null;
+				if (!ability) return; // await player choice
+				const amount = Number(boon.amount) || 2;
+				if (!cm.abilityScores) cm.abilityScores = {};
+				cm.abilityScores[ability] = (cm.abilityScores[ability] || 0) + amount;
+				let maxDelta = 0;
+				if (boon.raiseMax) {
+					if (!cm.abilityScoreMaxIncrease) cm.abilityScoreMaxIncrease = {};
+					cm.abilityScoreMaxIncrease[ability] = (cm.abilityScoreMaxIncrease[ability] || 0) + amount;
+					maxDelta = amount;
+				}
+				df._applied.push({ability, scoreDelta: amount, maxDelta});
+			}
+		});
+
+		// Pass B: granted / limited-cast spells (after boosts, so ability-mod
+		// use counts reflect any applied ability-score boost).
+		boons.forEach(boon => {
+			if (boon.type !== "limitedCastSpell" && boon.type !== "grantedSpell") return;
+			const sp = boon.spell || {};
+			if (!sp.name) return;
+			const source = sp.source || Parser.SRC_PHB;
+			let uses;
+			if (boon.type === "limitedCastSpell" && boon.usesFormula === "abilityMod") {
+				uses = Math.max(1, this.getAbilityMod(boon.ability || "wis"));
+			} else {
+				uses = Number(boon.uses) || 1;
+			}
+			const sourceFeature = `Divine Favor: ${god.name} — ${boon._tierName}`;
+			this.addInnateSpell({
+				name: sp.name,
+				source,
+				level: sp.level,
+				uses,
+				recharge: boon.recharge || "long",
+				spellcastingAbility: boon.ability || "wis",
+				sourceFeature,
+			});
+			// Preserve spent uses across re-apply (clamp to the new maximum).
+			const preserved = priorUses[`${sp.name}|${source}`];
+			if (preserved != null) {
+				const added = this._data.spellcasting.innateSpells.find(
+					s => s.name === sp.name && s.source === source && s.sourceFeature === sourceFeature,
+				);
+				if (added && added.uses) added.uses.current = Math.max(0, Math.min(added.uses.max, preserved));
+			}
+		});
 	}
 
 	/**

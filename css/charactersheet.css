@@ -20042,3 +20042,179 @@ border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
 .charsheet__interdict-modal-meta strong {
 color: var(--cs-text-primary, #f1f5f9);
 }
+
+/* =====================================================================
+   DIVINE FAVOR (TGTT — Relationships with Deities)
+   Features-tab panel + compact Overview readout. Reuses the shared card /
+   badge visual language (CSS custom properties with hard-coded fallbacks).
+   ===================================================================== */
+.charsheet__divine-favor-controls {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-md, 0.75rem);
+	margin-bottom: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__divine-favor-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	margin: 0;
+}
+
+.charsheet__divine-favor-field .charsheet__divine-favor-god {
+	min-width: 12rem;
+}
+
+.charsheet__divine-favor-field .charsheet__divine-favor-favor,
+.charsheet__divine-favor-field .charsheet__divine-favor-malice {
+	width: 6rem;
+}
+
+.charsheet__divine-favor-label {
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--cs-text-muted, var(--rgb-text-muted, #94a3b8));
+}
+
+.charsheet__divine-favor-status {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-sm, 0.5rem);
+	margin-bottom: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__divine-favor-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	border-radius: var(--cs-radius-md, 8px);
+	font-size: var(--cs-text-sm, 0.85rem);
+	font-weight: 600;
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+}
+
+.charsheet__divine-favor-badge--favor {
+	color: var(--cs-accent-gold, #f59e0b);
+	border-color: rgba(245, 158, 11, 0.5);
+	background: rgba(245, 158, 11, 0.08);
+}
+
+.charsheet__divine-favor-badge--malice {
+	color: #ef4444;
+	border-color: rgba(239, 68, 68, 0.5);
+	background: rgba(239, 68, 68, 0.08);
+}
+
+.charsheet__divine-favor-acts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-lg, 1rem);
+	margin-bottom: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__divine-favor-acts-col {
+	flex: 1 1 14rem;
+}
+
+.charsheet__divine-favor-acts-title {
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--cs-accent-gold, #f59e0b);
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__divine-favor-acts-title--malice {
+	color: #ef4444;
+}
+
+.charsheet__divine-favor-acts-list {
+	margin: 0;
+	padding-left: 1.1rem;
+	font-size: var(--cs-text-sm, 0.85rem);
+	color: var(--cs-text-secondary, var(--rgb-text, #cbd5e1));
+}
+
+.charsheet__divine-favor-boons {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__divine-favor-boon {
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+	background: var(--cs-bg-base, var(--rgb-bg));
+	border: 2px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-lg, 12px);
+}
+
+.charsheet__divine-favor-boon-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__divine-favor-boon-name {
+	font-weight: 600;
+	font-size: var(--cs-text-sm, 0.85rem);
+	color: var(--cs-text-primary, var(--rgb-text));
+}
+
+.charsheet__divine-favor-boon-tier {
+	font-size: var(--cs-text-xs, 0.7rem);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--cs-accent-gold, #f59e0b);
+	border: 1px solid rgba(245, 158, 11, 0.4);
+	border-radius: var(--cs-radius-sm, 4px);
+	padding: 0 0.35rem;
+}
+
+.charsheet__divine-favor-boon-uses {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__divine-favor-boon-uses-count {
+	min-width: 3rem;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+
+.charsheet__divine-favor-boon-desc {
+	margin-top: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__divine-favor-hint {
+	margin: var(--cs-space-xs, 0.25rem) 0 0;
+}
+
+/* Overview readout */
+.charsheet__divine-favor-overview-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-sm, 0.5rem);
+	align-items: center;
+}
+
+.charsheet__divine-favor-overview-god {
+	font-weight: 700;
+	color: var(--cs-text-primary, var(--rgb-text));
+}
+
+.charsheet__divine-favor-overview-favor {
+	color: var(--cs-accent-gold, #f59e0b);
+	font-weight: 600;
+}
+
+.charsheet__divine-favor-overview-malice {
+	color: #ef4444;
+	font-weight: 600;
+}
