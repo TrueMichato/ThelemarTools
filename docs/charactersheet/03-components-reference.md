@@ -348,6 +348,15 @@ _prevStep()      // Go back to previous step
 _finalize()      // Apply choices and create character
 ```
 
+> **Feature-choice parity (Bug #6):** `_finishCharacter()` runs the SAME
+> `CharacterSheetClassUtils.seedSubclassFeatureChoices(...)` +
+> `processPendingFeatureChoices()` seed/drain pipeline that QuickBuild uses, so
+> racial/subclass FIXED feature-choices queued by `addFeature` (e.g. the
+> Theocracian subrace's prose "Pillars of Society" skill pick) are surfaced during a
+> pure-Builder creation instead of being silently dropped. Generic across any
+> race/subclass; the pending queue de-dupes and the drain holds a single-owner lock,
+> so structured in-wizard choices are never double-offered.
+
 ---
 
 ## CharacterSheetCombat
@@ -784,6 +793,33 @@ Pure helpers, ~170 lines, no DOM dependencies — safe to unit-test.
 ## Lore Skills (TGTT)
 
 Rendered inline in the **Skills** tab via `_renderLoreSkillsSection()` (charactersheet.js ~L2849). See [TGTT Homebrew → Lore Skills](./13-tgtt-thelemar-homebrew.md#lore-skills) for the rule and state methods.
+
+---
+
+## Custom Abilities
+
+**Files**: UI in `js/charactersheet/charactersheet-customabilities.js` (~3.6K lines), state in `charactersheet-state.js` (`addCustomAbility` / `_registerCustomAbilityGrants` / `removeFeaturesBySourceAbility`).
+
+A homebrew authoring surface for passive / toggleable / limited-use abilities with a rich effect + grant catalog (spells, proficiencies, defensive traits, and features). Grants are applied generically through the same engine real features use: `_registerCustomAbilityGrants` iterates `grants.features` and calls `state.addFeature(...)`, tagged `sourceAbilityId` for teardown.
+
+### Advanced DM Feature Grant (Bug #11)
+
+An **Advanced, DM-gated** path in the ability modal's Grants area lets a player grant a **real feature from any data source** — a class feature, subclass feature, optional feature, feat, or a **pasted** statblock trait / boon / reward JSON. It is applied exactly like a normal feature: `_registerCustomAbilityGrants` routes it through `CharacterSheetClassUtils.buildFeatureStateObject(...)` → `state.addFeature(...)`, so its `uses`/resources/modifiers/effects/choices are parsed automatically (no duplicated parser).
+
+- **Grant shape** (stored in `grants.features`, round-trips through save/load):
+  ```javascript
+  {
+    grantKind: "dataFeature",
+    name, source,
+    dmGranted: true,
+    origin: { sourceType, name, source },  // provenance
+    data: { /* full feature payload */ },
+  }
+  ```
+- **UI**: a prominent DM-permission warning banner ("⚠️ Advanced — DM permission required"), a source-type + search picker across the loaded pools (`getClassFeatures` / `getSubclassFeatures` / `getOptionalFeatures` / `getFeats`), and a paste-JSON box for anything not loaded (monster traits, boons, rewards).
+- **Provenance / badge**: granted features carry `dmGranted` + `origin`; ability cards show a **👑 DM-granted** badge so the grant stays visible and auditable.
+- **Teardown**: removing the ability calls `removeFeaturesBySourceAbility`, which delegates to the canonical `removeFeature(id)` so mirrored resources/modifiers are fully cleaned up.
+- **Backward compatible**: legacy optional-feature grants (no `grantKind`) keep their original behavior.
 
 ---
 
