@@ -3633,7 +3633,8 @@ class CharacterSheetState {
 		const matches = this._allSpells.filter(s => s.name?.toLowerCase() === nameLc);
 		if (!matches.length) return null;
 		if (parsed.source) {
-			const srcMatch = matches.find(s => s.source === parsed.source);
+			const srcLc = String(parsed.source).toLowerCase();
+			const srcMatch = matches.find(s => s.source?.toLowerCase() === srcLc);
 			if (srcMatch) return srcMatch;
 		}
 		return matches[0];
