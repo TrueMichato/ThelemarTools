@@ -2837,6 +2837,66 @@ class CharacterSheetClassUtils {
 					})) seeded = true;
 				}
 			}
+
+			// JSON-structured "choose one of the following sub-features" choices — Divine
+			// Order (Protector/Thaumaturge), Blessed Strikes (Divine Strike/Potent
+			// Spellcasting), Principles of Devotion, Specialties, etc. Generic: the state
+			// resolves the option pool (inline `type:"options"` or a cross-referenced pool)
+			// and enriches each option with a short description. Per-instance scoping key is
+			// name+source+level, so a recurring series (Specialties L3/7/11/15/20) re-offers.
+			if (typeof state.getStructuredFeatureChoices === "function") {
+				const groups = state.getStructuredFeatureChoices(feature) || [];
+				for (const group of groups) {
+					// (a) Already resolved for THIS parent-instance (class + level-scoped)?
+					if (typeof state.hasChosenSubfeatureForParent === "function"
+						&& state.hasChosenSubfeatureForParent(feature.name, feature.source, feature.level, feature.className, feature.classSource)) continue;
+
+					// (b) Builder / QuickBuild / LevelUp already applied a sub-feature inline for
+					// this parent+level (feature present with matching parentFeature)? Record
+					// it durably (the inline paths don't) so recurring-series exclusion and
+					// higher-level upgrades (e.g. Improved Blessed Strikes) see the pick, then
+					// skip re-offering.
+					const appliedFeatures = (state._data?.features || []).filter((/** @type {*} */ f) =>
+						String(f?.parentFeature || "").toLowerCase() === String(feature.name || "").toLowerCase()
+						&& (feature.level == null || Number(f?.level) === Number(feature.level)));
+					if (appliedFeatures.length) {
+						if (typeof state._recordChosenSubfeature === "function") {
+							appliedFeatures.forEach((/** @type {*} */ f) => state._recordChosenSubfeature({
+								parent: feature.name,
+								parentSource: feature.source,
+								parentClass: feature.className,
+								parentClassSource: feature.classSource,
+								level: feature.level != null ? feature.level : null,
+								name: f.name,
+								source: f.source,
+							}));
+						}
+						continue;
+					}
+
+					// (c) No-repeat series — exclude every option already chosen across levels
+					// (scoped to this class so a multiclass same-named series stays separate).
+					let options = group.options;
+					if (group.unique && typeof state.getChosenSubfeatureKeysForSeries === "function") {
+						const taken = state.getChosenSubfeatureKeysForSeries(feature.name, feature.source, feature.className, feature.classSource);
+						options = options.filter((/** @type {*} */ o) => !taken.has(`${String(o.name).toLowerCase()}|${String(o.source || "").toLowerCase()}`));
+					}
+					if (!Array.isArray(options) || options.length < 2) continue;
+
+					if (state.addPendingFeatureChoice({
+						featureName: feature.name,
+						featureId,
+						featureSource: feature.source,
+						featureClass: feature.className,
+						featureClassSource: feature.classSource,
+						level: feature.level,
+						kind: "subfeature",
+						options,
+						count: group.count || 1,
+						unique: group.unique,
+					})) seeded = true;
+				}
+			}
 		}
 
 		return seeded;
