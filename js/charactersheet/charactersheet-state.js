@@ -24830,7 +24830,32 @@ class CharacterSheetState {
 		if ((this.hasFeature?.("Gambler's Spellcasting") || this.hasFeature?.("Spellcasting Focus"))
 			&& has((i, it) => /\b(cards?|dice|coins?)\b/.test((it.name || i.name || "").toLowerCase()))) return {ok: true, source: "Gambler's Spellcasting", itemName: matched.name};
 
+		// 4. A Bard's Spellcasting lets a Musical Instrument (item type "INS") serve as a
+		//    focus — in both the 2014 (PHB) and 2024 (XPHB) rules — provided the character
+		//    is proficient with it. Match a carried instrument the bard is proficient with,
+		//    either by the specific instrument's name or the generic "musical instrument"
+		//    tool proficiency.
+		if (this._isBard() && has((i, it) => baseType(it) === "INS" && this._isProficientMusicalInstrument(it.name || i.name))) {
+			return {ok: true, source: "musical instrument", itemName: matched.name};
+		}
+
 		return {ok: false, source: null, itemName: null};
+	}
+
+	/** @returns {boolean} Whether the character has any Bard class level. */
+	_isBard () {
+		return (this._data.classes || []).some(c => (c.name || "").toLowerCase() === "bard");
+	}
+
+	/**
+	 * Whether the character is proficient with a specific musical instrument — either
+	 * via that instrument's name or the generic "musical instrument" tool proficiency.
+	 * @param {string} [instrumentName]
+	 * @returns {boolean}
+	 */
+	_isProficientMusicalInstrument (instrumentName) {
+		if (this.hasToolProficiency("musical instrument")) return true;
+		return !!instrumentName && this.hasToolProficiency(instrumentName);
 	}
 
 	// endregion

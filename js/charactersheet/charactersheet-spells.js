@@ -2652,7 +2652,12 @@ class CharacterSheetSpells {
 		if (info.requiresFocus) {
 			const focus = this._state.getSpellcastingFocusStatus?.() || {ok: false};
 			if (focus.ok) return null;
-			return `Cannot cast ${spell.name} — its material components require a spellcasting focus or component pouch (none equipped). Equip one, or enable "Ignore spellcasting restrictions" in settings.`;
+			// Bards can use a musical instrument as a focus, so surface that option too.
+			const isBard = this._state._isBard?.();
+			const focusOptions = isBard
+				? "a spellcasting focus, musical instrument, or component pouch"
+				: "a spellcasting focus or component pouch";
+			return `Cannot cast ${spell.name} — its material components require ${focusOptions} (none equipped). Equip one, or enable "Ignore spellcasting restrictions" in settings.`;
 		}
 
 		// Gold-cost component: the character must possess a qualifying item.
