@@ -11023,18 +11023,24 @@ class CharacterSheetPage {
 	/**
 	 * Show a small modal asking the player to pick ONE option for a pending feature
 	 * choice. Returns the selection (skill key string for kind "skill", or a
-	 * `{name, source}` spell object for kind "cantrip"), or `null` if deferred.
-	 * @param {{id: string, featureName?: string, kind: "skill"|"cantrip", options: Array}} choice
+	 * `{name, source}` object for kind "cantrip"/"subfeature"), or `null` if deferred.
+	 * @param {{id: string, featureName?: string, kind: "skill"|"cantrip"|"subfeature", options: Array}} choice
 	 * @returns {Promise<string|{name: string, source: string}|null>}
 	 */
 	async _pPickFeatureChoice (choice) {
 		if (!choice || !Array.isArray(choice.options) || !choice.options.length) return null;
 		const isSkill = choice.kind === "skill";
-		const kindLabel = isSkill ? "a Skill Proficiency" : "a Cantrip";
+		const isSubfeature = choice.kind === "subfeature";
+		const kindLabel = isSkill ? "a Skill Proficiency" : isSubfeature ? "an Option" : "a Cantrip";
 
 		const optionLabel = (opt) => {
 			if (isSkill) return this._formatSkillKeyLabel(opt);
 			const src = opt.source ? ` <span class="ve-muted ve-small">(${(Parser.sourceJsonToAbv?.(opt.source) || opt.source)})</span>` : "";
+			// Subfeature options carry a short description (Divine Order roles, specialties,
+			// principles, …) — surface it beneath the name so the pick is informed.
+			if (isSubfeature && opt.description) {
+				return `<span class="bold">${(opt.name || "")}</span>${src}<br><span class="ve-muted ve-small">${opt.description}</span>`;
+			}
 			return `${(opt.name || "")}${src}`;
 		};
 

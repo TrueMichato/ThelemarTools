@@ -629,11 +629,17 @@ globalThis.SpellGrantParser = SpellGrantParser;
 class FeatureChoiceParser {
 	/**
 	 * @param {*} feature A feature-like object with `entries` (preferred, tags intact) and/or `description`.
-	 * @returns {{skillChoices: Array<{options: string[], count: number}>, cantripChoices: Array<{options: Array<{name: string, source: string}>, count: number}>}}
+	 * @returns {{skillChoices: Array<{options: string[], count: number}>, cantripChoices: Array<{options: Array<{name: string, source: string}>, count: number}>, subfeatureChoices: Array<{count: number, options?: Array<object>, fromRef?: {refType: string, ref: string}}>}}
 	 */
 	static extractChoices (feature) {
-		const result = {skillChoices: [], cantripChoices: []};
+		const result = {skillChoices: [], cantripChoices: [], subfeatureChoices: []};
 		if (!feature) return result;
+
+		// JSON-structured "choose one of the following sub-features" choices (encoded as
+		// `type:"options"` groups or Blessed-Strikes-style sibling `refClassFeature`
+		// entries). These are edition-agnostic and independent of the prose scan below.
+		result.subfeatureChoices = this._extractStructuredChoices(feature) || [];
+
 		const text = this._getRawText(feature);
 		if (!text) return result;
 
@@ -644,6 +650,123 @@ class FeatureChoiceParser {
 		if (cantrip) result.cantripChoices.push(cantrip);
 
 		return result;
+	}
+
+	/**
+	 * Extract JSON-structured sub-feature choices from a feature's `entries` tree.
+	 *
+	 * Recognizes two encodings used across official + homebrew data:
+	 *   1. An explicit `{type:"options", count, entries:[refClassFeature, …]}` group
+	 *      (e.g. Divine Order, Principles of Devotion, Specialties L3).
+	 *   2. A bare `{type:"entries", entries:[refClassFeature, refClassFeature]}` block
+	 *      whose siblings are ≥2 feature refs AND whose parent prose says "one of the
+	 *      following" / "choose one" (e.g. Blessed Strikes — no `options` wrapper).
+	 *
+	 * When neither is present but the prose says "gain another/additional … from the
+	 * {@classFeature Ref}" (Specialties L7/11/15/20), a `fromRef` descriptor is emitted so
+	 * the caller can resolve the option pool from the referenced feature at seed time.
+	 *
+	 * @param {*} feature
+	 * @returns {Array<{count:number, options?:Array<object>, fromRef?:{refType:string, ref:string}}>}
+	 */
+	static _extractStructuredChoices (feature) {
+		const groups = [];
+		const entries = Array.isArray(feature?.entries) ? feature.entries : null;
+		const rawText = this._getRawText(feature);
+		const proseAllowsImplicit = /\bone of the following\b|\bchoose one\b/i.test(rawText);
+
+		const visit = (node) => {
+			if (!node || typeof node !== "object") return;
+			const t = String(node.type || "").toLowerCase();
+			if (t === "options") {
+				const options = this._collectRefOptions(node.entries);
+				if (options.length >= 2) groups.push({count: node.count || 1, options});
+				return; // an options node's children are the choices — do not descend further
+			}
+			if (Array.isArray(node.entries)) {
+				// Implicit choice: an un-named `entries` block whose direct children are ≥2
+				// feature refs, permitted only when the feature prose invites a single pick.
+				// (Named `entries` sub-blocks — e.g. Improved Blessed Strikes' scaling text —
+				// carry no refs and are correctly ignored.)
+				if (t === "entries" && !node.name && proseAllowsImplicit) {
+					const refs = this._collectRefOptions(node.entries);
+					if (refs.length >= 2) { groups.push({count: 1, options: refs}); return; }
+				}
+				node.entries.forEach(visit);
+			}
+		};
+		if (entries) entries.forEach(visit);
+
+		// Cross-referenced pool: "You gain another specialty of your choice from the
+		// {@classFeature Specialties|Cleric|TGTT|3}." The options live in the referenced
+		// feature; the caller resolves them (it has catalog access).
+		if (!groups.length) {
+			const m = /\b(?:another|additional)\b[\s\S]*?\{@(classFeature|subclassFeature|optfeature|optionalfeature|feature)\s+([^}]+)\}/i.exec(rawText);
+			if (m) {
+				const ref = this._parseFeatureRef(m[1], m[2]);
+				if (ref) groups.push({count: 1, fromRef: {refType: ref.refType, ref: ref.ref}});
+			}
+		}
+		return groups;
+	}
+
+	/** Map an array of entry nodes to parsed feature-ref option descriptors (ref nodes only). */
+	static _collectRefOptions (entriesArr) {
+		if (!Array.isArray(entriesArr)) return [];
+		const out = [];
+		for (const child of entriesArr) {
+			if (!child || typeof child !== "object") continue;
+			const t = String(child.type || "").toLowerCase();
+			let ref = null;
+			if (t === "refclassfeature" && child.classFeature) ref = this._parseFeatureRef("classFeature", child.classFeature);
+			else if (t === "refsubclassfeature" && child.subclassFeature) ref = this._parseFeatureRef("subclassFeature", child.subclassFeature);
+			else if ((t === "refoptionalfeature" || t === "refoptfeature") && (child.optionalfeature || child.optfeature)) ref = this._parseFeatureRef("optionalfeature", child.optionalfeature || child.optfeature);
+			if (ref && ref.name) out.push(ref);
+		}
+		return out;
+	}
+
+	/**
+	 * Parse a 5etools feature-reference string into a structured descriptor.
+	 *   classFeature:    `name|className|classSource|level|source?`
+	 *   subclassFeature: `name|className|classSource|subclassShortName|subclassSource|level|source?`
+	 *   optionalfeature/feature: `name|source?`
+	 * @param {string} refType
+	 * @param {string} refStr
+	 * @returns {object|null}
+	 */
+	static _parseFeatureRef (refType, refStr) {
+		if (!refStr) return null;
+		const parts = String(refStr).split("|").map(s => s.trim());
+		const t = String(refType || "").toLowerCase();
+		if (t === "classfeature") {
+			const [name, className, classSource, level, source] = parts;
+			return {
+				refType: "classFeature",
+				ref: refStr,
+				name,
+				className: className || "",
+				classSource: classSource || "",
+				level: level != null && level !== "" ? Number(level) : undefined,
+				source: source || classSource || "",
+			};
+		}
+		if (t === "subclassfeature") {
+			const [name, className, classSource, subclassShortName, subclassSource, level, source] = parts;
+			return {
+				refType: "subclassFeature",
+				ref: refStr,
+				name,
+				className: className || "",
+				classSource: classSource || "",
+				subclassShortName: subclassShortName || "",
+				subclassSource: subclassSource || "",
+				level: level != null && level !== "" ? Number(level) : undefined,
+				source: source || classSource || "",
+			};
+		}
+		const [name, source] = parts;
+		return {refType: "optionalfeature", ref: refStr, name, source: source || ""};
 	}
 
 	/** Prefer raw entries (retain {@skill}/{@spell} tags); fall back to rendered description. */
@@ -2323,6 +2446,7 @@ const FeatureEffectRegistry = {
 		this._registerIllriggerMasteryEffects();
 		this._registerInterdictBoonEffects();
 		this._registerIllriggerSpecialtyEffects();
+		this._registerClericFeatureEffects();
 	},
 
 	/**
@@ -3334,6 +3458,38 @@ const FeatureEffectRegistry = {
 		]);
 	},
 
+	// =====================================================================
+	// CLERIC (self-contained block — Divine Order roles + Blessed Strikes
+	// options). Owned by the cleric-features session; unions cleanly with
+	// concurrent sessions because it is a single isolated method. Name-keyed
+	// static effects auto-apply for any PRESENT feature of these names
+	// (Builder / LevelUp / QuickBuild / structured-choice fulfillment alike),
+	// so they fix "no effect" across every flow. Choice-gating ("not offered")
+	// is handled separately by the structured-choice seeder + fulfillment.
+	// =====================================================================
+	_registerClericFeatureEffects () {
+		// --- Divine Order (2024 Cleric L1) ---------------------------------
+		// Protector: "Trained for battle, you gain proficiency with Martial
+		// weapons and Heavy armor." The rules text uses {@filter} tags the
+		// description parser can't read, so emit the proficiencies here.
+		this.register("Protector", [
+			{type: "weaponProficiency", weapon: "Martial Weapons"},
+			{type: "armorProficiency", armor: "Heavy Armor"},
+		]);
+		// Thaumaturge: "You know one extra cantrip … add your Wisdom modifier
+		// to any Intelligence (Arcana or Religion) check you make." The bonus
+		// cantrip is surfaced as a follow-on pending choice
+		// (_seedSubfeatureFollowOnChoices); the WIS-mod skill riders (minimum
+		// +1) are emitted as live abilityMod skill modifiers here.
+		this.register("Thaumaturge", [
+			{type: "skillBonus", skill: "arcana", abilityMod: "wis", minValue: 1},
+			{type: "skillBonus", skill: "religion", abilityMod: "wis", minValue: 1},
+		]);
+		// Blessed Strikes options + Tempest's Divine Strike are handled as
+		// weaponDamageRiders in _applyClericDomainCalculations (they need
+		// die-scaling by level + de-dup across sources), not as static effects.
+	},
+
 	/**
 	 * Register a feature's effects in the registry
 	 * @param {string} featureName - The name of the feature
@@ -4046,6 +4202,12 @@ class CharacterSheetState {
 			// `seedSubclassFeatureChoices` from re-offering the same skill pick on every
 			// later level-up (the catch-up backfill re-lists earlier subclass features).
 			fulfilledFeatureSkillChoices: [],
+			// Durable record of chosen structured sub-features (Divine Order role,
+			// Blessed Strikes option, Principles of Devotion, Specialties, …) so higher-
+			// level upgrades can find earlier picks (e.g. Improved Blessed Strikes L14
+			// scales the L7 choice) and so seeding never re-offers a resolved instance.
+			// Each: {parent, parentSource, level, name, source}
+			chosenSubfeatures: [],
 			// TGTT passive metamagic tuning state
 			tunedMetamagics: [],
 
@@ -4158,6 +4320,11 @@ class CharacterSheetState {
 		// Ensure activeStates array exists
 		if (!Array.isArray(this._data.activeStates)) {
 			this._data.activeStates = [];
+		}
+
+		// Ensure chosenSubfeatures array exists (legacy saves predate structured choices)
+		if (!Array.isArray(this._data.chosenSubfeatures)) {
+			this._data.chosenSubfeatures = [];
 		}
 
 		// Ensure levelHistory array exists (characters without it are legacy)
@@ -12704,7 +12871,7 @@ class CharacterSheetState {
 	/**
 	 * Queue a prose-parsed feature choice. Deduped by featureId + kind + option
 	 * signature so respec/level-up replays don't stack duplicate prompts.
-	 * @param {{featureName?: string, featureId?: string, kind: "skill"|"cantrip", options: Array, count?: number}} choice
+	 * @param {{featureName?: string, featureId?: string, featureSource?: string, level?: number, kind: "skill"|"cantrip"|"subfeature", options: Array, count?: number, unique?: boolean}} choice
 	 * @returns {boolean} True if a new choice was queued.
 	 */
 	addPendingFeatureChoice (choice) {
@@ -12719,9 +12886,14 @@ class CharacterSheetState {
 			id: CryptUtil.uid(),
 			featureName: choice.featureName,
 			featureId: choice.featureId,
+			...(choice.featureSource ? {featureSource: choice.featureSource} : {}),
+			...(choice.featureClass ? {featureClass: choice.featureClass} : {}),
+			...(choice.featureClassSource ? {featureClassSource: choice.featureClassSource} : {}),
+			...(choice.level != null ? {level: choice.level} : {}),
 			kind: choice.kind,
 			options: choice.options,
 			count: choice.count || 1,
+			...(choice.unique ? {unique: true} : {}),
 			...(choice.expertiseIfProficient ? {expertiseIfProficient: true} : {}),
 		});
 		return true;
@@ -12729,7 +12901,12 @@ class CharacterSheetState {
 
 	_featureChoiceSignature (choice) {
 		const opts = (choice.options || []).map(o => (typeof o === "string" ? o : `${o.name}|${o.source}`).toLowerCase()).sort().join(",");
-		return `${choice.featureId || choice.featureName || ""}|${choice.kind}|${opts}`;
+		// Include level so recurring same-named choices (e.g. Specialties at L3/7/11/15/20)
+		// with an identical remaining option pool are still queued as distinct picks, and
+		// class so a same-named choice on a different multiclass class stays distinct.
+		const lvl = choice.level != null ? `@${choice.level}` : "";
+		const cls = choice.featureClass ? `#${String(choice.featureClass).toLowerCase()}` : "";
+		return `${choice.featureId || choice.featureName || ""}${cls}${lvl}|${choice.kind}|${opts}`;
 	}
 
 	/**
@@ -12814,12 +12991,304 @@ class CharacterSheetState {
 					sourceFeature: choice.featureName,
 				});
 			}
+		} else if (choice.kind === "subfeature") {
+			if (!this._fulfillSubfeatureChoice(choice, selection, allSpells)) return false;
 		} else {
 			return false;
 		}
 
 		this.removePendingFeatureChoice(choiceId);
 		return true;
+	}
+
+	/**
+	 * Apply a chosen structured sub-feature (Divine Order role, Blessed Strikes option,
+	 * Principle of Devotion, Specialty, …). Resolves the chosen option's reference against
+	 * the class/subclass feature catalog, adds it as a real feature (so the full parse
+	 * pipeline — proficiencies, resources, spell grants, modifiers — and the name-keyed
+	 * effect registry apply to it), and records the pick durably in `_data.chosenSubfeatures`
+	 * so higher-level upgrades (e.g. Improved Blessed Strikes) can find it and so it is not
+	 * re-offered on later level-ups / reloads. Generic across every structured-choice feature.
+	 * @param {*} choice The pending `kind:"subfeature"` choice.
+	 * @param {string|{name:string, source?:string}} selection The chosen option.
+	 * @param {Array|null} [allSpells]
+	 * @returns {boolean}
+	 * @private
+	 */
+	_fulfillSubfeatureChoice (choice, selection, allSpells = null) {
+		const selName = (typeof selection === "string" ? selection : selection?.name) || "";
+		const selSource = (typeof selection === "object" ? selection?.source : null) || "";
+		if (!selName) return false;
+
+		const opt = (choice.options || []).find(o =>
+			String(o.name || "").toLowerCase() === selName.toLowerCase()
+			&& (!selSource || String(o.source || "").toLowerCase() === selSource.toLowerCase()))
+			|| (choice.options || []).find(o => String(o.name || "").toLowerCase() === selName.toLowerCase());
+		if (!opt) return false;
+
+		const resolved = this.resolveFeatureRef(opt);
+		// Build a feature-state object from the resolved catalog entry (preferred, carries
+		// rules `entries` so effects parse) or a minimal stub if the catalog is unavailable.
+		// The acquired level is the CHOICE's level (e.g. a Specialty picked at L7 from the
+		// L3 pool is acquired at 7), falling back to the option's own definition level.
+		const built = CharacterSheetClassUtils.buildFeatureStateObject(
+			resolved || {name: opt.name, source: opt.source, entries: opt.entries || []},
+			{
+				className: opt.className,
+				classSource: opt.classSource || opt.source,
+				subclassShortName: opt.subclassShortName,
+				subclassSource: opt.subclassSource,
+				level: choice.level != null ? choice.level : opt.level,
+				featureType: opt.subclassShortName ? "Subclass" : "Class",
+				isFeatureOption: true,
+				parentFeature: choice.featureName,
+			},
+		);
+		this.addFeature(built);
+
+		this._recordChosenSubfeature({
+			parent: choice.featureName,
+			parentSource: choice.featureSource || null,
+			parentClass: choice.featureClass || null,
+			parentClassSource: choice.featureClassSource || null,
+			level: choice.level != null ? choice.level : null,
+			name: built.name,
+			source: built.source,
+		});
+
+		// Some chosen sub-features grant a further player choice (e.g. Divine Order:
+		// Thaumaturge — "one extra cantrip from the Cleric spell list"). Seed it into the
+		// same pending-choice queue so the drain surfaces it next.
+		this._seedSubfeatureFollowOnChoices(built, allSpells);
+		return true;
+	}
+
+	/**
+	 * Seed any follow-on player choice a freshly-applied sub-feature grants but that the
+	 * generic parsers do not surface — currently the "know one extra cantrip from the
+	 * <Class> spell list" bonus cantrip (Divine Order: Thaumaturge). Idempotent.
+	 * @param {*} feature The applied sub-feature.
+	 * @param {Array|null} [allSpells]
+	 * @private
+	 */
+	_seedSubfeatureFollowOnChoices (feature, allSpells) {
+		const text = (Array.isArray(feature?.entries) ? feature.entries.filter(e => typeof e === "string").join(" ") : "")
+			|| (typeof feature?.description === "string" ? feature.description : "");
+		if (!text) return;
+		// "You know one extra cantrip from the {@filter Cleric spell list|…|class=Cleric}."
+		const m = /extra cantrip from the (?:\{@filter\s+)?(\w+)\s+spell list/i.exec(text)
+			|| /one extra cantrip from the (\w+)/i.exec(text);
+		if (!m) return;
+		const className = m[1].toTitleCase();
+		const alreadyGranted = (this.getCantripsKnown?.() || []).some(c => c.sourceFeature === feature.name);
+		if (alreadyGranted) return;
+		const options = Array.isArray(allSpells) && allSpells.length
+			? CharacterSheetClassUtils.getClassCantripOptions(allSpells, className)
+			: [];
+		if (options.length >= 2) {
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId: feature.id || feature.name,
+				kind: "cantrip",
+				options,
+				count: 1,
+			});
+		}
+	}
+
+	// =========================================================================
+	// Structured sub-feature choices (Divine Order, Blessed Strikes, Principles of
+	// Devotion, Specialties, …). Generic pipeline for JSON `type:"options"` /
+	// sibling-`refClassFeature` choices, plus durable storage of the resolved pick.
+	// =========================================================================
+
+	/** Chosen structured sub-features (durable). @returns {Array<{parent:string, parentSource:?string, level:?number, name:string, source:string}>} */
+	getChosenSubfeatures () {
+		return [...(this._data.chosenSubfeatures || [])];
+	}
+
+	/**
+	 * Record a chosen structured sub-feature. Deduped by parentClass+parent+level+name+
+	 * source so replays (respec / reload / catch-up) never stack duplicates, and so a
+	 * same-named recurring choice on a DIFFERENT class (e.g. TGTT Cleric vs Paladin
+	 * "Specialties|TGTT|3" in a multiclass build) is tracked independently.
+	 * @param {{parent:string, parentSource:?string, parentClass:?string, parentClassSource:?string, level:?number, name:string, source:string}} rec
+	 * @private
+	 */
+	_recordChosenSubfeature (rec) {
+		if (!rec?.name) return;
+		if (!Array.isArray(this._data.chosenSubfeatures)) this._data.chosenSubfeatures = [];
+		const key = this._chosenSubfeatureKey(rec);
+		if (this._data.chosenSubfeatures.some(r => this._chosenSubfeatureKey(r) === key)) return;
+		this._data.chosenSubfeatures.push({
+			parent: rec.parent || null,
+			parentSource: rec.parentSource || null,
+			parentClass: rec.parentClass || null,
+			parentClassSource: rec.parentClassSource || null,
+			level: rec.level != null ? rec.level : null,
+			name: rec.name,
+			source: rec.source || null,
+		});
+	}
+
+	_chosenSubfeatureKey (rec) {
+		return [
+			String(rec.parentClass || "").toLowerCase(),
+			String(rec.parentClassSource || "").toLowerCase(),
+			String(rec.parent || "").toLowerCase(),
+			String(rec.parentSource || "").toLowerCase(),
+			rec.level != null ? rec.level : "",
+			String(rec.name || "").toLowerCase(),
+			String(rec.source || "").toLowerCase(),
+		].join("|");
+	}
+
+	/**
+	 * True when a structured choice for a specific parent-feature instance (class+name+
+	 * source+level) has already been resolved. Used to guard re-seeding. The optional
+	 * class filter keeps a same-named recurring choice on another class (multiclass)
+	 * from suppressing this one.
+	 * @param {string} parent
+	 * @param {?string} [parentSource]
+	 * @param {?number} [level]
+	 * @param {?string} [parentClass]
+	 * @param {?string} [parentClassSource]
+	 * @returns {boolean}
+	 */
+	hasChosenSubfeatureForParent (parent, parentSource = null, level = null, parentClass = null, parentClassSource = null) {
+		return (this._data.chosenSubfeatures || []).some(r =>
+			String(r.parent || "").toLowerCase() === String(parent || "").toLowerCase()
+			&& (parentSource == null || String(r.parentSource || "").toLowerCase() === String(parentSource || "").toLowerCase())
+			&& (level == null || Number(r.level) === Number(level))
+			&& (parentClass == null || String(r.parentClass || "").toLowerCase() === String(parentClass || "").toLowerCase())
+			&& (parentClassSource == null || String(r.parentClassSource || "").toLowerCase() === String(parentClassSource || "").toLowerCase()));
+	}
+
+	/**
+	 * Names already chosen across every level-instance of a recurring choice series
+	 * (same class + parent name+source, any level) — e.g. every Specialty picked so far.
+	 * Used to exclude already-picked options from a fresh pick so no specialty is taken
+	 * twice. The optional class filter scopes the pool to one class in a multiclass build.
+	 * @param {string} parent
+	 * @param {?string} [parentSource]
+	 * @param {?string} [parentClass]
+	 * @param {?string} [parentClassSource]
+	 * @returns {Set<string>} Lower-cased `name|source` keys.
+	 */
+	getChosenSubfeatureKeysForSeries (parent, parentSource = null, parentClass = null, parentClassSource = null) {
+		const out = new Set();
+		(this._data.chosenSubfeatures || []).forEach(r => {
+			if (String(r.parent || "").toLowerCase() !== String(parent || "").toLowerCase()) return;
+			if (parentSource != null && String(r.parentSource || "").toLowerCase() !== String(parentSource || "").toLowerCase()) return;
+			if (parentClass != null && String(r.parentClass || "").toLowerCase() !== String(parentClass || "").toLowerCase()) return;
+			if (parentClassSource != null && String(r.parentClassSource || "").toLowerCase() !== String(parentClassSource || "").toLowerCase()) return;
+			out.add(`${String(r.name || "").toLowerCase()}|${String(r.source || "").toLowerCase()}`);
+		});
+		return out;
+	}
+
+	/**
+	 * Resolve a parsed feature-ref descriptor to the full feature object from the loaded
+	 * class/subclass feature catalog (set via {@link setClassFeatureCatalog}). Matching is
+	 * case-insensitive on name + className + classSource + level (+ subclass fields for
+	 * subclass refs). Returns null if the catalog is unset or no match is found.
+	 * @param {{refType?:string, name:string, className?:string, classSource?:string, level?:number, subclassShortName?:string, subclassSource?:string, source?:string}} ref
+	 * @returns {object|null}
+	 */
+	resolveFeatureRef (ref) {
+		if (!ref?.name) return null;
+		const eq = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+		const nameMatch = (c) => eq(c.name, ref.name);
+		if (ref.refType === "subclassFeature") {
+			const pool = this._subclassFeatureCatalog || [];
+			return pool.find(c => nameMatch(c)
+				&& (!ref.className || eq(c.className, ref.className))
+				&& (!ref.classSource || eq(c.classSource, ref.classSource))
+				&& (!ref.subclassShortName || eq(c.subclassShortName, ref.subclassShortName))
+				&& (!ref.subclassSource || eq(c.subclassSource, ref.subclassSource))
+				&& (ref.level == null || Number(c.level) === Number(ref.level))) || null;
+		}
+		// classFeature (default) — search class catalog, then subclass as a fallback.
+		const classPool = this._classFeatureCatalog || [];
+		const found = classPool.find(c => nameMatch(c)
+			&& (!ref.className || eq(c.className, ref.className))
+			&& (!ref.classSource || eq(c.classSource, ref.classSource))
+			&& (ref.level == null || Number(c.level) === Number(ref.level)));
+		if (found) return found;
+		// Fallback: match by name (+ level if given) only — covers refs whose source
+		// differs from the loaded variant (e.g. TGTT vs XPHB Cleric).
+		return classPool.find(c => nameMatch(c) && (ref.level == null || Number(c.level) === Number(ref.level)))
+			|| (this._subclassFeatureCatalog || []).find(c => nameMatch(c)) || null;
+	}
+
+	/**
+	 * Resolve the structured sub-feature choices a feature offers into fully-formed option
+	 * groups ready for seeding: cross-references (`fromRef`) are expanded to the referenced
+	 * feature's inline options, every option is enriched with a short description, and the
+	 * group is flagged `unique` when the parent feature recurs across multiple levels (a
+	 * no-repeat pool, e.g. Specialties). Requires the feature catalog to be set for
+	 * `fromRef`/description resolution; inline groups work without it.
+	 * @param {*} feature
+	 * @returns {Array<{count:number, options:Array<object>, unique:boolean}>}
+	 */
+	getStructuredFeatureChoices (feature) {
+		if (typeof FeatureChoiceParser === "undefined" || !feature) return [];
+		const rawGroups = FeatureChoiceParser.extractChoices(feature).subfeatureChoices || [];
+		if (!rawGroups.length) return [];
+
+		// A recurring series (e.g. Specialties at L3/7/11/15/20) is a no-repeat pool: detect
+		// it by ≥2 catalog instances sharing this feature's name+source.
+		const seriesCount = [...(this._classFeatureCatalog || []), ...(this._subclassFeatureCatalog || [])]
+			.filter(c => String(c.name || "").toLowerCase() === String(feature.name || "").toLowerCase()
+				&& String(c.source || "").toLowerCase() === String(feature.source || "").toLowerCase()).length;
+
+		const out = [];
+		for (const g of rawGroups) {
+			let options = g.options;
+			let unique = seriesCount > 1;
+			if (!options && g.fromRef) {
+				const refFeature = this.resolveFeatureRef(FeatureChoiceParser._parseFeatureRef(g.fromRef.refType, g.fromRef.ref));
+				const inner = refFeature ? (FeatureChoiceParser.extractChoices(refFeature).subfeatureChoices || []) : [];
+				options = inner.find(x => Array.isArray(x.options))?.options || [];
+				unique = true; // a "gain another … from X" reference is always a no-repeat pool
+			}
+			if (!Array.isArray(options) || options.length < 2) continue;
+			const enriched = options.map(o => ({...o, description: this._describeFeatureRef(o)}));
+			out.push({count: g.count || 1, options: enriched, unique});
+		}
+		return out;
+	}
+
+	/** Short plain-text description of a referenced sub-feature (first sentence), for pickers. */
+	_describeFeatureRef (ref) {
+		const resolved = this.resolveFeatureRef(ref);
+		const entries = Array.isArray(resolved?.entries) ? resolved.entries.filter(e => typeof e === "string") : [];
+		if (!entries.length) return "";
+		let text = entries.join(" ");
+		text = text.replace(/\{@\w+\s+([^}|]+)(?:\|[^}]*)?\}/g, "$1"); // strip tags, keep display text
+		text = text.replace(/\s+/g, " ").trim();
+		const firstSentence = /^(.*?[.!?])(\s|$)/.exec(text);
+		const out = firstSentence ? firstSentence[1] : text;
+		return out.length > 160 ? `${out.slice(0, 157)}…` : out;
+	}
+
+	/**
+	 * The 2024 Blessed Strikes option the character chose ("Divine Strike" or "Potent
+	 * Spellcasting"), or null. Read from durable `chosenSubfeatures`, falling back to a
+	 * present feature (covers Builder/QuickBuild which add the sub-feature without a
+	 * pending-choice record). Lets Improved Blessed Strikes (L14) scale the SAME choice.
+	 * @returns {?string}
+	 */
+	getChosenBlessedStrikesOption () {
+		const fromChosen = (this._data.chosenSubfeatures || []).find(r =>
+			String(r.parent || "").toLowerCase() === "blessed strikes");
+		if (fromChosen) return fromChosen.name;
+		const feats = this._data.features || [];
+		const has = (nm) => feats.some(f => String(f.name || "").toLowerCase() === nm
+			&& String(f.parentFeature || "").toLowerCase() === "blessed strikes");
+		if (has("divine strike")) return "Divine Strike";
+		if (has("potent spellcasting")) return "Potent Spellcasting";
+		return null;
 	}
 
 	/**
@@ -20712,6 +21181,16 @@ class CharacterSheetState {
 		// =====================================================
 		this._applyIllriggerSpecialtyCalculations(calculations);
 
+		// =====================================================
+		// CLERIC DOMAIN — calc-dependent effects (Divine Strike rider, etc.)
+		// Owned by the cleric-features session. Level-scaling / de-dup logic
+		// the per-feature description parser cannot express. Mirrors the
+		// Illrigger specialty pattern above (pushes onto calculations.* BEFORE
+		// _aggregateFeatureEffects). Proficiency / speed effects are emitted in
+		// the CLERIC section of _aggregateCalculationBasedEffects instead.
+		// =====================================================
+		this._applyClericDomainCalculations(calculations);
+
 		// Attacks per Attack action — single source of truth for the combat tab. Combines
 		// the legacy getNumberOfAttacks() resolver (Fighter 2/3/4 scaling, martial classes,
 		// generic "Extra Attack" feature) with the calc flags so Illrigger (hasExtraAttack
@@ -20806,6 +21285,73 @@ class CharacterSheetState {
 				.filter(f => f && f.name === "Infernal Awareness").length;
 			calculations.hasInfernalAwareness = true;
 			calculations.infernalAwarenessRange = (pickCount >= 2 && illriggerLevel >= 11) ? 30 : 10;
+		}
+	}
+
+	/**
+	 * Apply calc-dependent CLERIC domain effects that cannot be expressed as static
+	 * registry entries or extracted by the per-feature description parser — currently
+	 * the unified Divine Strike / Blessed Strikes weapon-damage rider (needs level die
+	 * scaling + de-dup across sources). Kept in a dedicated method (called once near the
+	 * end of `getFeatureCalculations`, mirroring `_applyIllriggerSpecialtyCalculations`)
+	 * so it stays disjoint from the shared `case "Cleric"` calculation block that sibling
+	 * sessions edit.
+	 *
+	 * Divine Strike sources (only ONE rider is ever emitted — `id:"clericDivineStrike"` —
+	 * so a Tempest + Blessed-Strikes cleric never double-counts):
+	 *   - 2014 domains (Tempest/War/Nature/…): flags `divineStrikeDamage` +
+	 *     `divineStrikeType`/`divineStrikeDamageType` (fixed domain damage type).
+	 *   - 2024 Blessed Strikes (L7) with the "Divine Strike" option chosen: player-chosen
+	 *     necrotic OR radiant, scaling 1d8 → 2d8 at L14 (Improved Blessed Strikes). The
+	 *     stored L7 pick is read via `getChosenBlessedStrikesOption()`.
+	 *
+	 * @param {object} calculations - The in-progress feature-calculations object.
+	 */
+	_applyClericDomainCalculations (calculations) {
+		if (!this.hasFeature) return;
+		const clericLevel = this.getClassLevel?.("Cleric") || 0;
+
+		let dsDice = null;
+		let dsType = null;
+		let dsChoices = null;
+		let dsName = "Divine Strike";
+		let dsNote = "once per turn";
+
+		// (1) 2014 domain-automatic Divine Strike (fixed type). `divineStrikeDamageType`
+		// is a known typo alias for `divineStrikeType` used by one domain branch — honour both.
+		const domainType = calculations.divineStrikeType || calculations.divineStrikeDamageType;
+		if (calculations.divineStrikeDamage && domainType) {
+			dsDice = calculations.divineStrikeDamage; // already 1d8 / 2d8 by level
+			dsType = domainType;
+			dsNote = `${domainType} · once per turn`;
+		}
+
+		// (2) 2024 Blessed Strikes — the "Divine Strike" option (vs "Potent Spellcasting").
+		// Overrides/supersedes any domain rider (single id de-dups), and is player-typed
+		// (necrotic or radiant). Improved Blessed Strikes (L14) scales the SAME choice.
+		// Gated on Cleric level >= 7 so a stale save / respec / level-down (or a dropped
+		// Cleric class) never keeps granting the rider, and the type is forced to a valid
+		// Blessed Strikes damage type (radiant/necrotic) — NOT a superseded 2014 domain type
+		// such as Tempest's thunder.
+		if (clericLevel >= 7 && this.getChosenBlessedStrikesOption?.() === "Divine Strike") {
+			dsDice = clericLevel >= 14 ? "2d8" : "1d8";
+			dsType = "radiant";
+			dsChoices = ["necrotic", "radiant"];
+			dsName = "Divine Strike (Blessed Strikes)";
+			dsNote = "necrotic or radiant · once per turn";
+		}
+
+		if (dsDice && dsType) {
+			(calculations.weaponDamageRiders = calculations.weaponDamageRiders || []).push({
+				id: "clericDivineStrike",
+				name: dsName,
+				dice: dsDice,
+				damageType: dsType,
+				...(dsChoices ? {damageTypeChoices: dsChoices} : {}),
+				perTurn: true,
+				condition: "when you hit a creature with a weapon attack",
+				note: dsNote,
+			});
 		}
 	}
 
@@ -22138,6 +22684,25 @@ class CharacterSheetState {
 				source: "Intransigent",
 				conditional: "while conscious",
 			});
+		}
+
+		// =========================================================
+		// CLERIC DOMAIN — proficiencies & derived speeds (owned block)
+		// Emitted as standard effect objects so `_applyFeatureEffect` applies
+		// them and `_clearClassFeatureEffects` tears them down cleanly. The
+		// weapon/armor add-helpers dedupe by name, so Tempest + Divine Order
+		// Protector (both Martial Weapons / Heavy Armor) never double up.
+		// =========================================================
+		// Tempest Domain L1/L3 "Bonus Proficiencies": Martial weapons + Heavy armor.
+		if (calculations.hasTempestProficiencies) {
+			effects.push({type: "weaponProficiency", weapon: "Martial Weapons", source: "Tempest Domain"});
+			effects.push({type: "armorProficiency", armor: "Heavy Armor", source: "Tempest Domain"});
+		}
+		// Stormborn (Tempest L17): flying speed equal to your walking speed while not
+		// underground / indoors. Emitted as a live equalToWalk speed modifier so it tracks
+		// the walking speed and tears down cleanly.
+		if (calculations.hasStormborn) {
+			effects.push({type: "speed", speedType: "fly", equalToWalk: true, source: "Stormborn"});
 		}
 
 		// =========================================================
