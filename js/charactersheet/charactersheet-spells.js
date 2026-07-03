@@ -222,6 +222,17 @@ class CharacterSheetSpells {
 			this._castSpellAsRitual(spellId);
 		});
 
+		// Cast w/ Blessing of Moonlight button — College of the Moon (Bard, L6) homebrew.
+		// Casts Moonbeam normally, spends the feature's 1/Long-Rest use, reminds the player
+		// of the spell modification, and rolls the ally heal. Only rendered on Moonbeam when
+		// the character has the Blessing of Moonlight feature (see _renderSpellItem).
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const btn = e.target.closest(".charsheet__spell-cast-blessing");
+			if (!btn || btn.hasAttribute("disabled")) return;
+			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
+			this._castSpellWithBlessing(spellId);
+		});
+
 		// Right-click (desktop) cast-options context menu on a spell row.
 		// Long-press (mobile) routes through charactersheet-mobile.js → _openSpellCastMenu.
 		document.addEventListener("contextmenu", (/** @type {*} */ e) => {
@@ -2360,6 +2371,104 @@ class CharacterSheetSpells {
 		}
 
 		this._page.saveCharacter();
+	}
+
+	/* -------------------------------------------------------------------------- */
+	/* College of the Moon — "Blessing of Moonlight" (Bard L6) Moonbeam modifier    */
+	/* -------------------------------------------------------------------------- */
+
+	/**
+	 * Describe the Blessing of Moonlight cast option for a spell row, or null when it
+	 * doesn't apply. Gated to Moonbeam (any edition) AND the character actually having
+	 * the "Blessing of Moonlight" feature, so ordinary Moonbeams / non-Moon-Bards never
+	 * see the button.
+	 * @param {object} spell - the sheet spell entry
+	 * @returns {{feature: object, max: (number|null), usesLeft: number}|null}
+	 */
+	_getMoonbeamBlessingInfo (spell) {
+		if (!spell || !/^moonbeam$/i.test(spell.name || "")) return null;
+		const feature = this._state.getFeature?.("Blessing of Moonlight");
+		if (!feature) return null;
+		const uses = feature.uses || {};
+		const max = uses.max != null ? uses.max : null;
+		const usesLeft = uses.current != null ? uses.current : (max != null ? max : 1);
+		return {feature, max, usesLeft};
+	}
+
+	/**
+	 * Count the spell slots (including a Warlock pact slot) currently usable to cast the
+	 * given spell at its base level or higher. Used to detect whether a cast actually
+	 * consumed a slot, so the 1/Long-Rest Blessing use is only spent on a real cast.
+	 * @param {object} spell
+	 * @returns {number}
+	 */
+	_countUsableSlotsForSpell (spell) {
+		let n = 0;
+		const pact = this._state.getPactSlots?.();
+		if (pact && spell.level <= pact.level) n += pact.current || 0;
+		for (let lvl = spell.level; lvl <= 9; lvl++) n += this._state.getSpellSlotsCurrent?.(lvl) || 0;
+		return n;
+	}
+
+	/**
+	 * Cast Moonbeam with the College of the Moon "Blessing of Moonlight" modification:
+	 * reminds the player of the three effects, casts Moonbeam normally (auto-slot, no
+	 * chained prompts), spends the feature's 1/Long-Rest use, and rolls the 2d4 ally heal.
+	 * The feature use is only spent when the cast actually consumes a slot (so declining
+	 * the concentration-break prompt, or having no slot, costs nothing).
+	 * @param {string} spellId
+	 */
+	async _castSpellWithBlessing (spellId) {
+		const spell = this._state.getSpells().find(s => s.id === spellId);
+		if (!spell) return;
+		const info = this._getMoonbeamBlessingInfo(spell);
+		if (!info) return;
+
+		if (info.usesLeft <= 0) {
+			JqueryUtil.doToast({type: "warning", content: "Blessing of Moonlight is already spent — finish a Long Rest to use it again."});
+			return;
+		}
+
+		const slotsBefore = this._countUsableSlotsForSpell(spell);
+		if (slotsBefore <= 0) {
+			JqueryUtil.doToast({type: "warning", content: "No spell slot available to cast Moonbeam."});
+			return;
+		}
+
+		// Reminder + confirmation. This modal is also where the modification is written out,
+		// addressing "nowhere are the special modifications the ability gives to the spell".
+		const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+			title: "Cast Moonbeam with Blessing of Moonlight",
+			htmlDescription: `
+				<p>Casting <strong>Moonbeam</strong> with <strong>Blessing of Moonlight</strong> (1/Long Rest) modifies the spell:</p>
+				<ul class="pl-3">
+					<li>Moonlight glows from you; you shed <strong>Dim Light in a 5-foot radius</strong> for the spell's duration.</li>
+					<li>When a creature <strong>fails</strong> a save against the Moonbeam, one creature of your choice within 60 feet of you (you may choose yourself) <strong>regains 2d4 Hit Points</strong>.</li>
+				</ul>
+				<p class="ve-muted ve-small">This spends your Blessing of Moonlight use until you finish a Long Rest.</p>`,
+			textYes: "🌙 Cast with Blessing",
+			textNo: "Cancel",
+		}));
+		if (!confirmed) return;
+
+		// Cast Moonbeam normally: auto-slot, no metamagic / component / ritual prompts.
+		await this._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
+
+		// _castSpell doesn't report success; if no slot was consumed the cast was cancelled
+		// (e.g. the player declined the break-concentration prompt) — don't spend the use.
+		const slotsAfter = this._countUsableSlotsForSpell(spell);
+		if (slotsAfter >= slotsBefore) return;
+
+		this._state.useFeature("Blessing of Moonlight");
+
+		const heal = (1 + Math.floor(Math.random() * 4)) + (1 + Math.floor(Math.random() * 4));
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🌙 <strong>Blessing of Moonlight</strong>: you shed Dim Light in a 5-ft radius. On a failed save, a creature within 60 ft regains <strong>${heal}</strong> HP <span class="ve-muted">(2d4)</span>.`,
+		}));
+
+		this._page.saveCharacter();
+		this._renderSpellList();
 	}
 
 	/**
@@ -6949,6 +7058,21 @@ class CharacterSheetSpells {
 			castButtonsHtml += `
 				<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__spell-cast-metamagic" title="Cast with an active Metamagic option">
 					<span class="glyphicon glyphicon-fire mr-1"></span>Cast w/ Metamagic
+				</button>
+			`;
+		}
+
+		// College of the Moon (Bard L6) "Blessing of Moonlight": a dedicated Moonbeam cast
+		// button that spends the feature's 1/Long-Rest use, reminds the player of the
+		// modification, and rolls the ally heal. Only shown on Moonbeam when the feature is
+		// present; disabled (but visible) once the use is spent, so the player still sees why.
+		const blessingInfo = this._getMoonbeamBlessingInfo(spell);
+		if (blessingInfo) {
+			const blessingSpent = blessingInfo.usesLeft <= 0;
+			const usesLabel = blessingInfo.max != null ? ` (${blessingInfo.usesLeft}/${blessingInfo.max})` : "";
+			castButtonsHtml += `
+				<button class="ve-btn ve-btn-xs ve-btn-info charsheet__spell-cast-blessing" ${blessingSpent ? "disabled" : ""} title="${blessingSpent ? "Blessing of Moonlight already used — finish a Long Rest to use it again" : "Cast Moonbeam with Blessing of Moonlight (glow, Dim Light 5 ft, ally 2d4 heal on a failed save)"}">
+					<span class="glyphicon glyphicon-certificate mr-1"></span>Cast w/ Blessing${usesLabel}
 				</button>
 			`;
 		}

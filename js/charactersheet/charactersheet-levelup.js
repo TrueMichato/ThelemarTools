@@ -4362,19 +4362,31 @@ class CharacterSheetLevelUp {
 			// TGTT classes don't grant the subclass until L3). Without this pass those
 			// features are lost forever, because the earlier per-level apply runs saw
 			// `subclass: null` and so the iterator in getLevelFeatures had nothing to
-			// walk. `selectedSubclass` is only truthy on the level where the subclass
-			// is first picked, so this loop is naturally gated to a single apply and
-			// can't create duplicates on subsequent level-ups.
-			for (let earlierLevel = 1; earlierLevel < newLevel; earlierLevel++) {
-				const earlierFeatures = CharacterSheetClassUtils.getLevelFeatures(
-					classData,
-					earlierLevel,
-					selectedSubclass,
-					this._page.getClassFeatures(),
-					this._page.getSubclassFeatures(),
-				);
-				const earlierSubclassFeatures = earlierFeatures.filter((/** @type {*} */ f) => f.isSubclassFeature);
-				if (earlierSubclassFeatures.length) newFeatures.push(...earlierSubclassFeatures);
+			// walk.
+			//
+			// CS-BUG (Round 42): this backfill must run ONLY on the level-up where the
+			// subclass is FIRST gained. The original code assumed `selectedSubclass` was
+			// truthy only on that level, but the wizard seeds it from `fullSubclassData`
+			// (see _pShowLevelUpModal ~L140), so it is truthy on EVERY subsequent
+			// level-up too. That re-listed every earlier subclass feature into
+			// `newFeatures` each level, which made `seedSubclassFeatureChoices` re-offer
+			// fixed-list feature choices (e.g. Moon Bard "Primal Lore" skill) on every
+			// level-up. Gate on the live class NOT already having a subclass so the
+			// backfill fires exactly once, at the moment of subclass acquisition.
+			const liveClassPreLevel = this._state.getClasses().find((/** @type {*} */ c) => c.name === classEntry.name && c.source === classEntry.source);
+			const alreadyHadSubclass = !!(liveClassPreLevel?.subclass?.name || liveClassPreLevel?.subclass?.shortName);
+			if (!alreadyHadSubclass) {
+				for (let earlierLevel = 1; earlierLevel < newLevel; earlierLevel++) {
+					const earlierFeatures = CharacterSheetClassUtils.getLevelFeatures(
+						classData,
+						earlierLevel,
+						selectedSubclass,
+						this._page.getClassFeatures(),
+						this._page.getSubclassFeatures(),
+					);
+					const earlierSubclassFeatures = earlierFeatures.filter((/** @type {*} */ f) => f.isSubclassFeature);
+					if (earlierSubclassFeatures.length) newFeatures.push(...earlierSubclassFeatures);
+				}
 			}
 		}
 
