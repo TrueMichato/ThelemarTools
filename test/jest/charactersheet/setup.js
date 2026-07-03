@@ -224,6 +224,21 @@ if (!globalThis.Renderer.generic) {
 		hasToken: (ent) => !!ent?.hasToken,
 	};
 }
+// Musical-instrument list used by tool-proficiency choice UIs (Builder / multiclass level-up).
+if (!globalThis.Renderer.generic.FEATURE__TOOLS_MUSICAL_INSTRUMENTS) {
+	globalThis.Renderer.generic.FEATURE__TOOLS_MUSICAL_INSTRUMENTS = [
+		"bagpipes",
+		"drum",
+		"dulcimer",
+		"flute",
+		"horn",
+		"lute",
+		"lyre",
+		"pan flute",
+		"shawm",
+		"viol",
+	];
+}
 // Ensure Renderer.spell.getCombinedClasses exists for spell filtering tests
 if (!globalThis.Renderer.spell) {
 	globalThis.Renderer.spell = {
