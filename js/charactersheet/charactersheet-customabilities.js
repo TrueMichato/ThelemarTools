@@ -258,6 +258,14 @@ class CharacterSheetCustomAbilities {
 			badgesHtml.push(`<span class="custom-abilities__concentration-badge">🔮 Concentration</span>`);
 		}
 
+		// DM-granted badge — surfaced whenever this ability carries an Advanced feature
+		// grant (a real feature imported from data under DM permission). Keeps the
+		// provenance visible so players/DMs can tell homebrew flair apart from an
+		// out-of-band feature grant.
+		if (ability.grants?.features?.some(f => f?.grantKind === "dataFeature" || f?.dmGranted)) {
+			badgesHtml.push(`<span class="custom-abilities__dm-badge" title="Includes a feature granted from another source — use only with DM permission">👑 DM-granted</span>`);
+		}
+
 		header.innerHTML = `
 			<span class="custom-abilities__card-icon" style="color: ${category.color}">${ability.icon || category.icon}</span>
 			<span class="custom-abilities__card-name">${ability.name}</span>
@@ -413,9 +421,18 @@ class CharacterSheetCustomAbilities {
 
 		// Features
 		if (grants.features?.length) {
-			const featNames = grants.features.slice(0, 2).map(f => f.name);
-			const featStr = featNames.join(", ") + (grants.features.length > 2 ? ` +${grants.features.length - 2}` : "");
-			parts.push(`<span class="text-warning">⚔️${featStr}</span>`);
+			const optFeatures = grants.features.filter(f => f?.grantKind !== "dataFeature");
+			const dmFeatures = grants.features.filter(f => f?.grantKind === "dataFeature");
+			if (optFeatures.length) {
+				const featNames = optFeatures.slice(0, 2).map(f => f.name);
+				const featStr = featNames.join(", ") + (optFeatures.length > 2 ? ` +${optFeatures.length - 2}` : "");
+				parts.push(`<span class="text-warning">⚔️${featStr}</span>`);
+			}
+			if (dmFeatures.length) {
+				const dmNames = dmFeatures.slice(0, 2).map(f => f.name);
+				const dmStr = dmNames.join(", ") + (dmFeatures.length > 2 ? ` +${dmFeatures.length - 2}` : "");
+				parts.push(`<span class="text-warning">👑${dmStr}</span>`);
+			}
 		}
 
 		// Proficiencies
@@ -1745,6 +1762,37 @@ class CharacterSheetCustomAbilities {
 									</div>
 								</div>
 							</details>
+
+							<!-- Advanced: DM-granted feature from any data source -->
+							<details class="custom-abilities__grants-section custom-abilities__grants-section--dm">
+								<summary><span class="custom-abilities__grants-icon">👑</span> Advanced Feature Grant (DM) <span class="custom-abilities__grants-count" id="grants-datafeature-count"></span></summary>
+								<div class="custom-abilities__grants-content">
+									<div class="custom-abilities__dm-warning" role="alert">
+										<strong>⚠️ Advanced — DM permission required.</strong>
+										Grant a real feature from another class, subclass, optional feature, feat, or a pasted statblock trait / boon / reward. It is applied exactly like a normal feature (its uses, resources, modifiers, and effects are parsed automatically). Only use if your DM has explicitly granted it.
+									</div>
+									<div class="custom-abilities__grants-filters">
+										<select class="ve-form-control custom-abilities__grants-filter" id="grants-datafeature-source-type">
+											<option value="classFeature">Class Features</option>
+											<option value="subclassFeature">Subclass Features</option>
+											<option value="optionalfeature">Optional Features</option>
+											<option value="feat">Feats</option>
+										</select>
+										<input type="text" class="ve-form-control custom-abilities__grants-search" placeholder="Search by name..." id="grants-datafeature-search">
+									</div>
+									<div class="custom-abilities__grants-list" id="grants-datafeature-list">
+										<!-- Populated dynamically -->
+									</div>
+									<div class="custom-abilities__dm-paste">
+										<label class="ve-small ve-muted">Or paste feature JSON (monster trait, boon, reward, homebrew, …):</label>
+										<textarea class="ve-form-control custom-abilities__dm-paste-input" id="grants-datafeature-json" rows="4" placeholder='{ "name": "Ancient Blessing", "source": "Homebrew", "entries": ["..."], "uses": { "max": 3, "recharge": "long" } }'></textarea>
+										<button type="button" class="btn btn-xs btn-primary" id="grants-datafeature-add-json">Add from JSON</button>
+									</div>
+									<div class="custom-abilities__grants-selected" id="grants-datafeature-selected">
+										<!-- Selected DM-granted features -->
+									</div>
+								</div>
+							</details>
 						</div>
 					</div>
 
@@ -1893,6 +1941,16 @@ class CharacterSheetCustomAbilities {
 		const conditionsList = this._getConditionsWithSources();
 		const damageTypesList = this._getDamageTypesList();
 
+		// Advanced (DM) feature-grant pools — real features from every loaded data
+		// source. Keyed by the sourceType the picker exposes so the selected grant can
+		// record accurate provenance.
+		const dmFeaturePools = {
+			classFeature: this._sheet.getClassFeatures?.() || [],
+			subclassFeature: this._sheet.getSubclassFeatures?.() || [],
+			optionalfeature: allOptionalFeatures,
+			feat: this._sheet.getFeats?.() || [],
+		};
+
 		// Helper to render grants UI
 		const renderGrantsUI = () => {
 			this._renderGrantsSpells(modal, grants, allSpells);
@@ -1902,6 +1960,7 @@ class CharacterSheetCustomAbilities {
 			this._renderGrantsWeapons(modal, grants);
 			this._renderGrantsArmor(modal, grants);
 			this._renderGrantsFeatures(modal, grants, allOptionalFeatures);
+			this._renderGrantsDataFeatures(modal, grants, dmFeaturePools);
 		};
 
 		// Helper to render defensive traits UI
@@ -3226,8 +3285,8 @@ class CharacterSheetCustomAbilities {
 				if (typeFilterVal && (!f.featureType || !f.featureType.includes(typeFilterVal))) return false;
 				if (sourceFilterVal && f.source !== sourceFilterVal) return false;
 				if (searchTerm && !f.name.toLowerCase().includes(searchTerm)) return false;
-				// Hide already selected
-				if (grants.features.some(gf => gf.name === f.name && gf.source === f.source)) return false;
+				// Hide already selected (ignore Advanced DM data-feature grants — those live in their own section)
+				if (grants.features.some(gf => gf.grantKind !== "dataFeature" && gf.name === f.name && gf.source === f.source)) return false;
 				return true;
 			}).slice(0, 30);
 
@@ -3276,14 +3335,17 @@ class CharacterSheetCustomAbilities {
 		};
 
 		const renderSelectedFeatures = () => {
-			this._updateGrantCount(modal, "grants-feature-count", grants.features.length);
+			// Only the (legacy) optional-feature grants belong to this section; Advanced
+			// DM-granted data features are rendered separately in `_renderGrantsDataFeatures`.
+			const optFeatures = grants.features.filter(f => f.grantKind !== "dataFeature");
+			this._updateGrantCount(modal, "grants-feature-count", optFeatures.length);
 
-			if (!grants.features.length) {
+			if (!optFeatures.length) {
 				selectedContainer.innerHTML = `<div class="custom-abilities__grants-empty-selected">No features selected</div>`;
 				return;
 			}
 
-			selectedContainer.innerHTML = grants.features.map(f => {
+			selectedContainer.innerHTML = optFeatures.map(f => {
 				const featureData = allOptionalFeatures.find(of => of.name === f.name && of.source === f.source) || f;
 				const typeStr = featureData.featureType?.map(ft => Parser.optFeatureTypeToFull?.(ft) || ft).join(", ") || f.featureType || "";
 				return `
@@ -3304,7 +3366,7 @@ class CharacterSheetCustomAbilities {
 					const item = btn.closest(".custom-abilities__grants-selected-item");
 					const name = item.dataset.name;
 					const source = item.dataset.source;
-					grants.features = grants.features.filter(f => !(f.name === name && f.source === source));
+					grants.features = grants.features.filter(f => f.grantKind === "dataFeature" || !(f.name === name && f.source === source));
 					renderFeatureList();
 					renderSelectedFeatures();
 				});
@@ -3317,6 +3379,178 @@ class CharacterSheetCustomAbilities {
 
 		renderFeatureList();
 		renderSelectedFeatures();
+	}
+
+	/**
+	 * Render the Advanced (DM-gated) feature-grant section. Lets the user grant a REAL
+	 * feature — from any loaded data source (class/subclass feature, optional feature,
+	 * feat) or a pasted statblock trait / boon / reward — that is then applied exactly
+	 * like a normal feature (state-side reuses `buildFeatureStateObject` + `addFeature`
+	 * so uses/resources/modifiers/effects are parsed generically). Selected grants carry
+	 * `grantKind:"dataFeature"`, the full feature payload in `data`, and provenance
+	 * (`dmGranted`, `origin`) so they stay badged and auditable.
+	 * @param {Element} modal - The modal element
+	 * @param {object} grants - The grants object (shares `grants.features` with the legacy picker)
+	 * @param {Record<string, Array<object>>} pools - Feature pools keyed by sourceType
+	 */
+	_renderGrantsDataFeatures (modal, grants, pools) {
+		const sourceTypeSel = /** @type {*} */ (modal.querySelector("#grants-datafeature-source-type"));
+		const searchInput = /** @type {*} */ (modal.querySelector("#grants-datafeature-search"));
+		const listContainer = /** @type {*} */ (modal.querySelector("#grants-datafeature-list"));
+		const selectedContainer = /** @type {*} */ (modal.querySelector("#grants-datafeature-selected"));
+		const jsonInput = /** @type {*} */ (modal.querySelector("#grants-datafeature-json"));
+		const jsonAddBtn = /** @type {*} */ (modal.querySelector("#grants-datafeature-add-json"));
+
+		if (!listContainer || !selectedContainer) return;
+		if (!Array.isArray(grants.features)) grants.features = [];
+
+		const sourceTypeLabels = {
+			classFeature: "Class Feature",
+			subclassFeature: "Subclass Feature",
+			optionalfeature: "Optional Feature",
+			feat: "Feat",
+			json: "Pasted",
+		};
+
+		const cloneFeature = (feature) => {
+			try { return JSON.parse(JSON.stringify(feature)); } catch { return {...feature}; }
+		};
+
+		const featureMeta = (feature, sourceType) => {
+			const parts = [];
+			if (sourceType === "classFeature" || sourceType === "subclassFeature") {
+				if (feature.className) parts.push(feature.className);
+				if (feature.subclassShortName) parts.push(feature.subclassShortName);
+				if (feature.level != null) parts.push(`Lvl ${feature.level}`);
+			} else if (sourceType === "optionalfeature") {
+				const t = (feature.featureType || []).map(ft => Parser.optFeatureTypeToFull?.(ft) || ft).join(", ");
+				if (t) parts.push(t);
+			}
+			return parts.join(" · ");
+		};
+
+		const isSelected = (name, source) => grants.features.some(f => f.grantKind === "dataFeature" && f.name === name && (f.source || "") === (source || ""));
+
+		const addDataFeature = (feature, sourceType) => {
+			const name = feature.name;
+			const source = feature.source || "";
+			if (!name || isSelected(name, source)) return;
+			grants.features.push({
+				grantKind: "dataFeature",
+				name,
+				source,
+				dmGranted: true,
+				featureType: sourceTypeLabels[sourceType] || "Feature",
+				origin: {sourceType, name, source},
+				data: cloneFeature(feature),
+				entries: feature.entries,
+				description: feature.entries ? Renderer.get().render({entries: feature.entries}) : "",
+			});
+			renderList();
+			renderSelected();
+		};
+
+		const renderList = () => {
+			const sourceType = sourceTypeSel?.value || "classFeature";
+			const searchTerm = (searchInput?.value || "").toLowerCase().trim();
+			const pool = pools[sourceType] || [];
+
+			if (!searchTerm) {
+				listContainer.innerHTML = `<div class="custom-abilities__grants-hint">Type to search ${sourceTypeLabels[sourceType] || "feature"}s…</div>`;
+				return;
+			}
+
+			const matches = pool.filter(f => f.name && f.name.toLowerCase().includes(searchTerm) && !isSelected(f.name, f.source || "")).slice(0, 30);
+
+			listContainer.innerHTML = matches.map((f, i) => {
+				const srcStr = Parser.sourceJsonToAbv?.(f.source) || f.source || "";
+				const meta = featureMeta(f, sourceType);
+				return `
+					<div class="custom-abilities__grants-item" data-idx="${i}">
+						<div class="custom-abilities__grants-item-info">
+							<span class="custom-abilities__grants-item-name">${f.name}</span>
+							${meta ? `<span class="custom-abilities__grants-item-meta">${meta}</span>` : ""}
+							<span class="custom-abilities__grants-item-source">[${srcStr}]</span>
+						</div>
+						<button type="button" class="btn btn-xs btn-primary custom-abilities__grants-add-btn">Add</button>
+					</div>
+				`;
+			}).join("") || `<div class="custom-abilities__grants-empty">No matching features</div>`;
+
+			listContainer.querySelectorAll(".custom-abilities__grants-add-btn").forEach((btn, i) => {
+				btn.addEventListener("click", (/** @type {*} */ e) => {
+					e.preventDefault();
+					addDataFeature(matches[i], sourceType);
+				});
+			});
+		};
+
+		const renderSelected = () => {
+			const dmFeatures = grants.features.filter(f => f.grantKind === "dataFeature");
+			this._updateGrantCount(modal, "grants-datafeature-count", dmFeatures.length);
+
+			if (!dmFeatures.length) {
+				selectedContainer.innerHTML = `<div class="custom-abilities__grants-empty-selected">No DM-granted features selected</div>`;
+				return;
+			}
+
+			selectedContainer.innerHTML = dmFeatures.map(f => {
+				const originLabel = sourceTypeLabels[f.origin?.sourceType] || "Feature";
+				const srcStr = Parser.sourceJsonToAbv?.(f.source) || f.source || "";
+				return `
+					<div class="custom-abilities__grants-selected-item custom-abilities__grants-selected-item--dm" data-name="${f.name}" data-source="${f.source || ""}">
+						<div class="custom-abilities__grants-selected-info">
+							<span class="custom-abilities__grants-item-name">👑 ${f.name}</span>
+							<span class="custom-abilities__grants-item-meta">${originLabel}${srcStr ? ` · ${srcStr}` : ""}</span>
+						</div>
+						<button type="button" class="btn btn-xs btn-danger custom-abilities__grants-remove-btn">&times;</button>
+					</div>
+				`;
+			}).join("");
+
+			selectedContainer.querySelectorAll(".custom-abilities__grants-remove-btn").forEach(btn => {
+				btn.addEventListener("click", (/** @type {*} */ e) => {
+					e.preventDefault();
+					const item = btn.closest(".custom-abilities__grants-selected-item");
+					const name = item.dataset.name;
+					const source = item.dataset.source;
+					grants.features = grants.features.filter(f => !(f.grantKind === "dataFeature" && f.name === name && (f.source || "") === (source || "")));
+					renderList();
+					renderSelected();
+				});
+			});
+		};
+
+		const addFromJson = () => {
+			const raw = (jsonInput?.value || "").trim();
+			if (!raw) return;
+			let parsed;
+			try {
+				parsed = JSON.parse(raw);
+			} catch (e) {
+				alert("Invalid JSON — could not parse the pasted feature.");
+				return;
+			}
+			// Accept either a bare feature object or a single-key wrapper (e.g. {"classFeature": [...]}).
+			if (Array.isArray(parsed)) parsed = parsed[0];
+			else if (parsed && !parsed.name && !parsed.entries) {
+				const firstArr = Object.values(parsed).find(v => Array.isArray(v));
+				if (firstArr) parsed = firstArr[0];
+			}
+			if (!parsed || !parsed.name) {
+				alert("Pasted feature must have a \"name\".");
+				return;
+			}
+			addDataFeature(parsed, "json");
+			if (jsonInput) jsonInput.value = "";
+		};
+
+		sourceTypeSel?.addEventListener("change", renderList);
+		searchInput?.addEventListener("input", renderList);
+		jsonAddBtn?.addEventListener("click", (/** @type {*} */ e) => { e.preventDefault(); addFromJson(); });
+
+		renderList();
+		renderSelected();
 	}
 
 	/**
