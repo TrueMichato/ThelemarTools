@@ -5509,6 +5509,13 @@ class CharacterSheetLevelUp {
 		const {availableSkills, effectiveCount: skillChoiceCount} = this._getMulticlassSkillOptions(skillGrant);
 		const hasSkillChoices = skillChoiceCount > 0;
 
+		// Multiclass tool grants (e.g. Bard: one musical instrument of your choice). Read
+		// from the actual class data (`multiclassing.proficienciesGained.toolProficiencies`)
+		// rather than a hardcoded table, so any class whose multiclass entry grants an
+		// instrument choice surfaces one here.
+		const multiclassToolGrant = this._getMulticlassInstrumentGrant(selectedClass);
+		const hasToolChoices = !!multiclassToolGrant;
+
 		// Determine spell gains for multiclass level 1
 		const isWizardMulticlass = selectedClass.name === "Wizard";
 		const isKnownCasterMulticlass = !isWizardMulticlass && !selectedClass.preparedSpellsProgression && selectedClass.spellsKnownProgression;
@@ -5532,8 +5539,8 @@ class CharacterSheetLevelUp {
 		const hasSpellChoices = multiclassSpellGain > 0 || multiclassCantripGain > 0;
 
 		// If no choices needed, add the class directly
-		if (!optionalFeatureGains.length && !featureOptionGroups.length && !hasSkillChoices && !hasSpellChoices) {
-			await this._applyMulticlass(selectedClass, features, {}, {}, [], [], []);
+		if (!optionalFeatureGains.length && !featureOptionGroups.length && !hasSkillChoices && !hasSpellChoices && !hasToolChoices) {
+			await this._applyMulticlass(selectedClass, features, {}, {}, [], [], [], []);
 			return true;
 		}
 
@@ -5547,6 +5554,7 @@ class CharacterSheetLevelUp {
 		/** @type {Object<string, *>} */ let selectedOptionalFeatures = {};
 		/** @type {Object<string, *>} */ let selectedFeatureOptions = {};
 		/** @type {*[]} */ let selectedSkills = [];
+		/** @type {*[]} */ let selectedTools = [];
 		/** @type {*[]} */ let selectedMulticlassSpells = [];
 		/** @type {*[]} */ let selectedMulticlassCantrips = [];
 
@@ -5562,6 +5570,9 @@ class CharacterSheetLevelUp {
 		}
 		if (hasSkillChoices) {
 			choicesList.push(`${skillChoiceCount} skill proficienc${skillChoiceCount > 1 ? "ies" : "y"}`);
+		}
+		if (hasToolChoices) {
+			choicesList.push(`${multiclassToolGrant.count} musical instrument${multiclassToolGrant.count > 1 ? "s" : ""}`);
 		}
 		if (multiclassSpellGain > 0) {
 			choicesList.push(`${multiclassSpellGain} spell${multiclassSpellGain !== 1 ? "s" : ""} (optional)`);
@@ -5618,6 +5629,36 @@ class CharacterSheetLevelUp {
 			});
 
 			content.append(skillSection);
+		}
+
+		// Render musical-instrument selection for multiclass (e.g. Bard). Mirrors the
+		// Builder's "Choose a musical instrument" dropdown so the chosen instrument is
+		// applied as a tool proficiency via addToolProficiency.
+		if (hasToolChoices) {
+			const {count: instrumentCount, options: instrumentOptions} = multiclassToolGrant;
+			selectedTools = new Array(instrumentCount).fill("");
+
+			const toolSection = e_({outer: `<div class="charsheet__levelup-section mb-3">
+				<h5>🎵 Musical Instrument</h5>
+				<p class="ve-small ve-muted">Choose ${instrumentCount} musical instrument${instrumentCount > 1 ? "s" : ""} to gain proficiency in:</p>
+				<div class="charsheet__tool-choice-list"></div>
+			</div>`});
+
+			const toolList = toolSection.querySelector(".charsheet__tool-choice-list");
+			for (let i = 0; i < instrumentCount; ++i) {
+				const selectEl = e_({outer: `<select class="ve-form-control form-control--minimal mb-1">
+					<option value="">-- Select Musical Instrument --</option>
+				</select>`});
+				instrumentOptions.forEach((/** @type {*} */ instrument) => {
+					selectEl.append(e_({outer: `<option value="${instrument}">${(/** @type {*} */ (instrument)).toTitleCase()}</option>`}));
+				});
+				selectEl.addEventListener("change", /** @this {*} */ function () {
+					selectedTools[i] = this.value;
+				});
+				toolList.append(selectEl);
+			}
+
+			content.append(toolSection);
 		}
 
 		// Render optional features selection (Fighting Style, etc.)
@@ -5742,6 +5783,12 @@ class CharacterSheetLevelUp {
 				return;
 			}
 
+			// Validate musical-instrument selections.
+			if (hasToolChoices && selectedTools.filter(Boolean).length < multiclassToolGrant.count) {
+				JqueryUtil.doToast({type: "warning", content: `Please select ${multiclassToolGrant.count} musical instrument${multiclassToolGrant.count > 1 ? "s" : ""}.`});
+				return;
+			}
+
 			// Spell/cantrip selections are intentionally optional, matching the
 			// regular level-up, Builder, and Quick Build flows: whatever the player
 			// picked is applied, and any remaining unspent spell/cantrip slots can be
@@ -5749,7 +5796,7 @@ class CharacterSheetLevelUp {
 			// room). We deliberately do not gate Confirm on under-filled spell pools.
 
 			// Apply multiclass with selections
-			await this._applyMulticlass(selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills, selectedMulticlassSpells, selectedMulticlassCantrips);
+			await this._applyMulticlass(selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills, selectedMulticlassSpells, selectedMulticlassCantrips, selectedTools.filter(Boolean));
 
 			doClose(true);
 		});
@@ -5775,7 +5822,7 @@ class CharacterSheetLevelUp {
 	/**
 	 * Apply multiclass - add class, features, proficiencies, and selected optional features
 	 */
-	async _applyMulticlass (/** @type {*} */ selectedClass, /** @type {*} */ features, /** @type {*} */ selectedOptionalFeatures, /** @type {*} */ selectedFeatureOptions, /** @type {*} */ selectedSkills = [], /** @type {*} */ selectedSpells = [], /** @type {*} */ selectedCantrips = []) {
+	async _applyMulticlass (/** @type {*} */ selectedClass, /** @type {*} */ features, /** @type {*} */ selectedOptionalFeatures, /** @type {*} */ selectedFeatureOptions, /** @type {*} */ selectedSkills = [], /** @type {*} */ selectedSpells = [], /** @type {*} */ selectedCantrips = [], /** @type {*} */ selectedTools = []) {
 		// Add class at level 1 with caster info for multiclass spell slot calculation
 		this._state.addClass({
 			name: selectedClass.name,
@@ -5869,6 +5916,20 @@ class CharacterSheetLevelUp {
 			});
 		}
 
+		// Add selected tool proficiencies (e.g. Bard multiclass instrument). Titlecase to
+		// match the Builder's storage form, and fold the applied tools into the granted
+		// multiclass-prof record so level-removal reverses them (state.js reverses
+		// `choices.multiclassProficiencies.tools` via removeToolProficiency).
+		if (selectedTools && selectedTools.length) {
+			selectedTools.forEach((/** @type {*} */ tool) => {
+				if (!tool) return;
+				const toolName = (/** @type {*} */ (tool)).toTitleCase();
+				this._state.addToolProficiency(toolName);
+				grantedMulticlassProfs.tools = grantedMulticlassProfs.tools || [];
+				grantedMulticlassProfs.tools.push(toolName);
+			});
+		}
+
 		// Add selected spells from multiclass
 		if (selectedSpells && selectedSpells.length) {
 			const isWizard = selectedClass.name === "Wizard";
@@ -5919,6 +5980,7 @@ class CharacterSheetLevelUp {
 		}
 		if (mcFeatureChoices.length) mcHistory.choices.featureChoices = mcFeatureChoices;
 		if (selectedSkills?.length) mcHistory.choices.skills = [...selectedSkills];
+		if (selectedTools?.length) mcHistory.choices.tools = selectedTools.filter(Boolean).map((/** @type {*} */ t) => (/** @type {*} */ (t)).toTitleCase());
 		this._state.recordLevelChoice(mcHistory);
 
 		// Bug #18 (multiclass parity): drain feature choices queued while adding the
@@ -5930,6 +5992,24 @@ class CharacterSheetLevelUp {
 		this._page.renderCharacter();
 
 		JqueryUtil.doToast({type: "success", content: `Added ${selectedClass.name} to your character!`});
+	}
+
+	/**
+	 * Extract a musical-instrument tool grant from a class's multiclassing entry.
+	 * Reads `multiclassing.proficienciesGained.toolProficiencies` (e.g. Bard's
+	 * `[{anyMusicalInstrument: 1}]`) so the choice is data-driven for both editions.
+	 * @param {*} selectedClass
+	 * @returns {{count:number, options:string[]}|null}
+	 */
+	_getMulticlassInstrumentGrant (selectedClass) {
+		const tools = selectedClass?.multiclassing?.proficienciesGained?.toolProficiencies;
+		if (!Array.isArray(tools)) return null;
+		let count = 0;
+		for (const tp of tools) {
+			if (tp?.anyMusicalInstrument) count += tp.anyMusicalInstrument;
+		}
+		if (!count) return null;
+		return {count, options: Renderer.generic.FEATURE__TOOLS_MUSICAL_INSTRUMENTS};
 	}
 
 	/** @param {*} classData */
