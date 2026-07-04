@@ -45,9 +45,9 @@ function buildWarlock ({level = 5, edition = "phb", invocations = [], pact = nul
 		});
 	}
 
-	if (tgtt) {
-		state._data.settings = {...(state._data.settings || {}), enableTgtt: true};
-	}
+	// enableTgtt now defaults ON (TGTT-first fork), so the OFF path must set it
+	// explicitly to exercise the gate.
+	state._data.settings = {...(state._data.settings || {}), enableTgtt: !!tgtt};
 
 	return state;
 }

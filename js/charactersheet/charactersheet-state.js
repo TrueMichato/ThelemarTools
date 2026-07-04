@@ -4232,6 +4232,12 @@ class CharacterSheetState {
 				includeCoreSpellsForHomebrew: true, // Include PHB/XPHB spells for homebrew classes
 				allowExoticLanguages: true, // Allow exotic/rare languages in language selection by default
 				prioritySources: ["TGTT"], // Default priority to TGTT if available
+				// Master TGTT toggle. This TGTT-first fork ships Thelemar content on by
+				// default (prioritySources ["TGTT"], all thelemar_* true), and several
+				// subsystems (e.g. Divine Favor) gate on this flag, so it defaults ON.
+				// Older saves that predate the flag are backfilled by
+				// _migrateEnableTgttDefault() on load.
+				enableTgtt: true,
 				// Thelemar homebrew rules - all enabled by default
 				thelemar_carryWeight: true,
 				thelemar_jumping: true,
@@ -4336,6 +4342,14 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.namedModifiers)) {
 			this._data.namedModifiers = [];
 		}
+
+		// Backfill the master TGTT toggle for saves that predate it. `settings` is
+		// merged shallowly above (no nested default merge), so an old save's settings
+		// object replaces the default wholesale and arrives without `enableTgtt` —
+		// which would hide TGTT-gated subsystems (e.g. Divine Favor). Default it ON
+		// for this TGTT-first fork. Runs before feature/effect reapplication so
+		// enableTgtt-sensitive pipelines (metamagic filtering, etc.) see the value.
+		this._migrateEnableTgttDefault();
 
 		// Ensure acFormulas array exists
 		if (!Array.isArray(this._data.acFormulas)) {
@@ -4479,6 +4493,17 @@ class CharacterSheetState {
 		// leak that survives the load round-trip (namedModifiers are restored
 		// verbatim). Strip it so the trait contributes nothing until activated.
 		this._migrateShellDefenseModifiers();
+
+		// Migrate Bladesong (Wizard Bladesinger): older saves persisted its "your Speed
+		// increases by 10 feet" (and sometimes AC) benefit as an ENABLED passive named
+		// modifier. Bladesong is now modelled exclusively by ACTIVE_STATE_TYPES.bladesong
+		// (its +10 speed / +INT AC apply only while active), and _processFeatureModifiers
+		// now skips its passive parse, so any such persisted ENABLED speed/AC modifier is a
+		// stale always-on leak that double-stacks with the active state (it survives the
+		// load round-trip because namedModifiers are restored verbatim). Strip it so the
+		// feature contributes nothing until the Bladesong is invoked. The correct conditional
+		// AC modifier (enabled:false) is left untouched.
+		this._migrateBladesongPassiveModifiers();
 
 		// Migrate Circle of the Zodiac constellation FORM features: older saves
 		// persisted their parsed effects (Aurochs carrying-capacity size bump,
@@ -5288,6 +5313,31 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Backfill the master TGTT toggle (`settings.enableTgtt`) for saves that predate it.
+	 *
+	 * `enableTgtt` is a newer master flag that gates TGTT-only subsystems (notably
+	 * Divine Favor's `_isDivineFavorEnabled()`). It is absent from older saves, and
+	 * because `loadFromJson` merges the top-level `settings` object shallowly (no
+	 * nested default merge), an old save's settings replace the default wholesale and
+	 * arrive without the key → `undefined` → the subsystem never renders.
+	 *
+	 * This TGTT-first fork ships Thelemar content on by default, so default the flag
+	 * ON when it is missing. Existing TGTT signals (`thelemar_*` rules, a TGTT
+	 * `prioritySources` entry, Thelemar exhaustion) reinforce the intent but are not
+	 * required. Idempotent: an explicit `true`/`false` is left untouched, so a second
+	 * run — and any deliberate opt-out — is preserved.
+	 */
+	_migrateEnableTgttDefault () {
+		if (!this._data.settings || typeof this._data.settings !== "object") {
+			this._data.settings = {};
+		}
+		const s = this._data.settings;
+		if (s.enableTgtt === undefined || s.enableTgtt === null) {
+			s.enableTgtt = true;
+		}
+	}
+
+	/**
 	 * Strip stale passive Shell Defense (Tortle) modifiers on load.
 	 *
 	 * Shell Defense is now modeled exclusively as an activatable state
@@ -5320,6 +5370,55 @@ class CharacterSheetState {
 				|| /\bFrom Shell Defense\b/.test(mod.note || "");
 			return !isShellDefense;
 		});
+	}
+
+	/**
+	 * Strip stale ENABLED passive Bladesong (Wizard Bladesinger) modifiers on load.
+	 *
+	 * Bladesong is now modeled exclusively as an activatable state
+	 * (ACTIVE_STATE_TYPES.bladesong): its +10 Speed and +INT AC apply ONLY while the
+	 * Bladesong is active, and `_processFeatureModifiers` now skips the trait so no
+	 * passive speed/AC modifier is ever registered. Characters saved BEFORE that fix
+	 * persisted the "Agility" sub-block's "your Speed increases by 10 feet" as an
+	 * ENABLED, ungated named modifier (the "While the Bladesong is active" gate sits in
+	 * a separate entry the parser could not associate), and because `loadFromJson`
+	 * restores `namedModifiers` verbatim the always-on +10 speed survived the round-trip
+	 * and double-stacked with the active state's own +10.
+	 *
+	 * Remove every ENABLED speed/AC named modifier originating from the Bladesong feature
+	 * (matched by the feature link, the "From Bladesong" note, or the modifier name). The
+	 * correct conditional AC modifier is stored `enabled:false`, so it is left untouched.
+	 * Idempotent: once the leak is stripped there is nothing left to match, and fresh
+	 * builds never create such a modifier in the first place.
+	 */
+	_migrateBladesongPassiveModifiers () {
+		if (!this._data.namedModifiers?.length) return;
+
+		const bladesongFeatureIds = new Set(
+			(this._data.features || [])
+				.filter(f => f.name === "Bladesong")
+				.map(f => f.id),
+		);
+
+		const before = this._data.namedModifiers.length;
+		this._data.namedModifiers = this._data.namedModifiers.filter(mod => {
+			const isBladesong = (mod.sourceFeatureId && bladesongFeatureIds.has(mod.sourceFeatureId))
+				|| mod.name === "Bladesong"
+				|| /^Bladesong\b/.test(mod.name || "")
+				|| /\bFrom Bladesong\b/.test(mod.note || "");
+			if (!isBladesong) return true;
+			// Only ENABLED speed/AC modifiers are the stale always-on leak. The correct
+			// conditional AC modifier (enabled:false) and any unrelated Bladesong-linked
+			// modifier are preserved.
+			const isSpeedOrAc = typeof mod.type === "string" && (mod.type.startsWith("speed:") || mod.type === "ac");
+			const isEnabled = mod.enabled !== false;
+			return !(isSpeedOrAc && isEnabled);
+		});
+		// Drop the now-removed bonus out of the derived customModifiers caches
+		// (customModifiers.speed.walk etc.) so getWalkSpeed()/AC fall back to base.
+		if (this._data.namedModifiers.length !== before) {
+			this._recalculateCustomModifiers();
+		}
 	}
 
 	/**
@@ -23531,6 +23630,40 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Persist weapon attack overrides onto the backing inventory item.
+	 *
+	 * `getItems()` returns SHALLOW copies of `_data.inventory[].item`, so the combat
+	 * attack editor's writes to the returned weapon object never reach the stored item
+	 * and are lost on save/reload (and unseen by read-sites that re-fetch via getItems()).
+	 * The editor must route override edits through here so they land on the real item.
+	 *
+	 * Any field left `undefined` is untouched; pass `null` to clear a field (used by the
+	 * editor's Reset action). Returns true when the item was found and updated.
+	 *
+	 * @param {string} itemId - The inventory entry id (matches getItems() `id`).
+	 * @param {object} [changes]
+	 * @param {object|null} [changes.attackOverrides] - Override object, or null to clear.
+	 * @param {number|null} [changes.customAttackBonus] - Legacy flat to-hit bonus, or null to clear.
+	 * @param {number|null} [changes.customDamageBonus] - Legacy flat damage bonus, or null to clear.
+	 * @returns {boolean}
+	 */
+	updateInventoryItemAttackOverrides (itemId, {attackOverrides, customAttackBonus, customDamageBonus} = {}) {
+		const invItem = (this._data.inventory || []).find(i => i.id === itemId);
+		if (!invItem || !invItem.item || typeof invItem.item !== "object") return false;
+
+		if (attackOverrides === null) delete invItem.item.attackOverrides;
+		else if (attackOverrides !== undefined) invItem.item.attackOverrides = MiscUtil.copyFast(attackOverrides);
+
+		if (customAttackBonus === null) delete invItem.item.customAttackBonus;
+		else if (customAttackBonus !== undefined) invItem.item.customAttackBonus = customAttackBonus;
+
+		if (customDamageBonus === null) delete invItem.item.customDamageBonus;
+		else if (customDamageBonus !== undefined) invItem.item.customDamageBonus = customDamageBonus;
+
+		return true;
+	}
+
+	/**
 	 * Get all cursed items in inventory
 	 * @param {object} [options] - Options
 	 * @param {boolean} [options.equippedOnly] - Only return equipped cursed items
@@ -30662,6 +30795,19 @@ class CharacterSheetState {
 		// extracts "+4 bonus to AC" without recognizing the "while in your shell" gating). Mirrors the
 		// per-feature skips below (Adept Speed, Unarmored Movement) that avoid double-/passive-counting.
 		if (feature.name === "Shell Defense" || /withdraw into your shell/i.test(feature.description)) {
+			return;
+		}
+
+		// Bladesong (Wizard Bladesinger) is modeled exclusively as an ACTIVATABLE state
+		// (ACTIVE_STATE_TYPES.bladesong): its +10 Speed, +INT AC, Acrobatics advantage and
+		// concentration bonus apply ONLY while the Bladesong is active. The AC/concentration
+		// bonuses are already emitted as conditional (enabled:false) effects by the feature-calc
+		// pipeline. Skip the passive description parser so it never registers an always-on
+		// speed:walk (or AC) modifier — the "your Speed increases by 10 feet" benefit sits in an
+		// "Agility" sub-block whose "While the Bladesong is active" gate is a separate entry too
+		// far away for _extractCondition to catch, so it would otherwise leak a PERMANENT +10
+		// speed that double-stacks with the active state. Mirrors the Shell Defense skip above.
+		if (feature.name === "Bladesong" || /while the bladesong is active/i.test(feature.description)) {
 			return;
 		}
 
