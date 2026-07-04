@@ -7,6 +7,8 @@
 const {e_, ee} = /** @type {*} */ (globalThis);
 
 class CharacterSheetRest {
+	static _UNDO_REST_BTN_ID = "charsheet-btn-undo-rest";
+
 	constructor (page) {
 		this._page = page;
 		this._state = page.getState();
@@ -312,6 +314,10 @@ class CharacterSheetRest {
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✓ Finish Short Rest"});
 		btnConfirm.onClick(() => {
+			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
+			// Captured BEFORE any mutation below; transient and never persisted.
+			this._captureRestSnapshot("short");
+
 			// Apply hit dice spending using spentDice tracker. The healing was
 			// already rolled into `totalHealing` above, so decrement the pools
 			// WITHOUT healing again (useHitDie() would heal a second time).
@@ -388,6 +394,9 @@ class CharacterSheetRest {
 				type: "success",
 				content: message,
 			});
+
+			// Offer a persistent undo for this rest (BUG 8).
+			this._showUndoRestAffordance("short");
 		});
 
 		ee`<div class="charsheet__modal-footer">
@@ -654,6 +663,10 @@ class CharacterSheetRest {
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		btnConfirm.onClick(() => {
+			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
+			// Captured BEFORE any mutation below; transient and never persisted.
+			this._captureRestSnapshot("long");
+
 			// Full HP recovery
 			this._state.setHp(maxHp, maxHp, cbResetTempHp.checked ? 0 : this._state.getHp().temp);
 
@@ -754,6 +767,9 @@ class CharacterSheetRest {
 				type: "success",
 				content: message,
 			});
+
+			// Offer a persistent undo for this rest (BUG 8).
+			this._showUndoRestAffordance("long");
 
 			// Auto-popup Gambler prepared roll modal after long rest
 			if (calcs.hasGamblerSpellcasting) {
@@ -1411,6 +1427,119 @@ class CharacterSheetRest {
 		});
 		footer.append(btnSkip, btnConfirm);
 		modalInner.append(footer);
+	}
+
+	// ==========================================================================
+	// Undo Rest (BUG 8)
+	//
+	// Players sometimes trigger a short or long rest by accident. A rest mutates
+	// ~15 (short) / ~26 (long) pieces of state, so an inverse-ops undo would be
+	// fragile. Instead we take a full snapshot of the character state (a complete
+	// `MiscUtil.copyFast` of `_data` via `toJson()`) BEFORE the rest is applied,
+	// stash it transiently on the page (session-only, NEVER persisted to the saved
+	// character), and restore it verbatim via `loadFromJson()` when the player
+	// clicks the "Undo last rest" affordance. Only one level of undo is retained.
+	// ==========================================================================
+
+	/**
+	 * Capture a full pre-rest state snapshot so the most recent short/long rest can
+	 * be reverted. Stored transiently on the page (`page._lastRestSnapshot`) — it is
+	 * session-only and is never written to the saved character. Overwrites any prior
+	 * snapshot, so only the most recent rest can be undone.
+	 * @param {"short"|"long"} restType
+	 * @returns {?object} the stored snapshot, or null on failure
+	 */
+	_captureRestSnapshot (restType) {
+		try {
+			const snapshot = {
+				restType,
+				json: this._state.toJson(),
+				ts: Date.now(),
+			};
+			if (this._page) this._page._lastRestSnapshot = snapshot;
+			return snapshot;
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet Rest] Failed to capture rest snapshot:", e);
+			if (this._page) this._page._lastRestSnapshot = null;
+			return null;
+		}
+	}
+
+	/**
+	 * Whether an undoable rest snapshot is currently available.
+	 * @returns {boolean}
+	 */
+	hasRestUndoAvailable () {
+		return !!this._page?._lastRestSnapshot;
+	}
+
+	/**
+	 * Restore the character to the state captured before the most recent rest.
+	 * Clears the snapshot and the affordance afterwards (single-level undo), then
+	 * re-saves and re-renders. Safe to call when no snapshot exists (no-op).
+	 * @returns {boolean} true if a rest was undone, false if there was nothing to undo
+	 */
+	_onUndoRest () {
+		const snapshot = this._page?._lastRestSnapshot;
+		if (!snapshot) return false;
+
+		try {
+			this._state.loadFromJson(snapshot.json);
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet Rest] Failed to restore rest snapshot:", e);
+			return false;
+		}
+
+		// One level of undo only — drop the snapshot and remove the affordance.
+		this._page._lastRestSnapshot = null;
+		this._removeUndoRestAffordance();
+
+		this._page.saveCharacter?.();
+		this._page.renderCharacter?.();
+
+		const label = snapshot.restType === "long" ? "Long rest" : "Short rest";
+		JqueryUtil.doToast({
+			type: "info",
+			content: `↩️ ${label} undone — your previous state has been restored.`,
+		});
+		return true;
+	}
+
+	/**
+	 * Show the persistent "Undo last rest" affordance in the Quick Actions grid.
+	 * The grid is static HTML that is never rebuilt by any render pass, so the
+	 * injected button survives re-renders and stays until the next rest replaces it
+	 * or the player clicks it. DOM-guarded so it is a no-op in the node test env.
+	 * @param {"short"|"long"} restType
+	 */
+	_showUndoRestAffordance (restType) {
+		if (typeof document === "undefined") return;
+
+		this._removeUndoRestAffordance();
+
+		const grid = document.querySelector?.(".charsheet__quick-actions-grid");
+		if (!grid) return;
+
+		const label = restType === "long" ? "Long Rest" : "Short Rest";
+		const btn = e_({
+			tag: "button",
+			id: CharacterSheetRest._UNDO_REST_BTN_ID,
+			clazz: "charsheet__quick-action charsheet__quick-action--undo-rest",
+			title: `Undo the ${label.toLowerCase()} you just finished and restore your previous state`,
+			html: `<span class="charsheet__quick-action-icon">↩️</span><span class="charsheet__quick-action-text">Undo ${label}</span>`,
+			click: () => this._onUndoRest(),
+		});
+		grid.appendChild(btn);
+	}
+
+	/**
+	 * Remove the "Undo last rest" affordance if present. DOM-guarded for node env.
+	 */
+	_removeUndoRestAffordance () {
+		if (typeof document === "undefined") return;
+		document.getElementById?.(CharacterSheetRest._UNDO_REST_BTN_ID)?.remove();
 	}
 }
 

@@ -5183,6 +5183,21 @@
 	box-shadow: 0 8px 25px rgba(99, 102, 241, 0.2);
 }
 
+/* "Undo last rest" affordance (BUG 8) — injected into the Quick Actions grid
+   after a short/long rest so an accidental rest can be reverted. */
+.charsheet__quick-action--undo-rest {
+	border-color: rgba(239, 68, 68, 0.35);
+}
+
+.charsheet__quick-action--undo-rest::before {
+	background: linear-gradient(90deg, #ef4444, #b91c1c);
+}
+
+.charsheet__quick-action--undo-rest:hover {
+	border-color: #ef4444;
+	box-shadow: 0 8px 25px rgba(239, 68, 68, 0.2);
+}
+
 .charsheet__quick-action-icon {
 	font-size: 1.75rem;
 	margin-bottom: var(--cs-space-xs, 0.25rem);

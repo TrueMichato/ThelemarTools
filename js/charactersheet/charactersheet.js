@@ -71,6 +71,12 @@ class CharacterSheetPage {
 		this._currentCharacterId = null;
 		this._isLevelUpBannerDismissed = false;
 
+		// Transient, session-only snapshot of character state captured immediately
+		// before the most recent short/long rest, used to undo an accidental rest
+		// (BUG 8). Never persisted to the saved character; cleared on undo/reload.
+		/** @type {?{restType: string, json: *, ts: number}} */
+		this._lastRestSnapshot = null;
+
 		// Data caches
 		this._races = [];
 		this._classes = [];
