@@ -38,8 +38,57 @@ class CharacterSheetSpells {
 		this._filteredSpells = [];
 		this._spellFilter = "";
 		this._spellLevelFilter = "all";
+		// BUG 5: spells-tab view mode (current | prepared | known). Stored purely in this
+		// module + localStorage — no state.js / _data / loadFromJson touch. Defaults to
+		// "current" (today's layout) and is loaded from localStorage below.
+		this._spellViewMode = this._getSpellViewMode();
 
 		this._init();
+	}
+
+	// ========================================================================
+	// BUG 5: Spell view mode (Prepared / Known / Current) — self-contained storage
+	// ========================================================================
+	/**
+	 * Valid spells-tab view modes. "current" = today's existing layout, "prepared" =
+	 * only prepared spells, "known" = all known spells with click-to-prepare toggles.
+	 */
+	static SPELL_VIEW_MODES = ["current", "prepared", "known"];
+
+	static _SPELL_VIEW_MODE_STORAGE_KEY = "charsheet-spell-view-mode";
+
+	/**
+	 * Read the persisted view mode from localStorage, falling back to "current". Guarded so
+	 * it is safe in the Jest node environment (no `localStorage`) and on storage errors.
+	 * @returns {string}
+	 */
+	_getSpellViewMode () {
+		if (this._spellViewMode && CharacterSheetSpells.SPELL_VIEW_MODES.includes(this._spellViewMode)) {
+			return this._spellViewMode;
+		}
+		try {
+			if (typeof localStorage !== "undefined") {
+				const stored = localStorage.getItem(CharacterSheetSpells._SPELL_VIEW_MODE_STORAGE_KEY);
+				if (stored && CharacterSheetSpells.SPELL_VIEW_MODES.includes(stored)) return stored;
+			}
+		} catch (e) { /* ignore storage errors */ }
+		return "current";
+	}
+
+	/**
+	 * Persist and apply a new view mode. Ignores invalid values. Re-renders the spell list
+	 * so the toggle highlight and layout update immediately.
+	 * @param {string} mode
+	 */
+	_setSpellViewMode (mode) {
+		if (!CharacterSheetSpells.SPELL_VIEW_MODES.includes(mode)) return;
+		this._spellViewMode = mode;
+		try {
+			if (typeof localStorage !== "undefined") {
+				localStorage.setItem(CharacterSheetSpells._SPELL_VIEW_MODE_STORAGE_KEY, mode);
+			}
+		} catch (e) { /* ignore storage errors */ }
+		this._renderSpellList();
 	}
 
 	_refreshSorceryPointUI () {
@@ -191,6 +240,16 @@ class CharacterSheetSpells {
 			if (!e.target.matches("#charsheet-spell-level-filter")) return;
 			this._spellLevelFilter = e.target.value;
 			this._renderSpellList();
+		});
+
+		// BUG 5: spells-tab view toggle (Current / Prepared / Known). Delegated so it keeps
+		// working across every _renderSpellList re-render without re-binding.
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const btn = e.target.closest(".charsheet__spell-view-btn");
+			if (!btn) return;
+			const mode = btn.dataset.viewMode;
+			if (!mode || mode === this._spellViewMode) return;
+			this._setSpellViewMode(mode);
 		});
 
 		// Cast spell button = quick auto-cast: no "Choose Slot Level" / component / metamagic
@@ -6369,8 +6428,20 @@ class CharacterSheetSpells {
 	}
 
 	_renderSpellList () {
+		// BUG 5: refresh the Current/Prepared/Known toggle (lives above the list) and the
+		// Arcane Recovery status (BUG 7) every render so both stay in sync after casts,
+		// prepares, and post-rest full re-renders.
+		this._renderSpellViewToggle();
+		this._renderArcaneRecoveryStatus();
+
 		const container = document.getElementById("charsheet-spell-lists");
 		if (!container) return;
+
+		// BUG 5: tag the container with the active view mode so mode-scoped CSS (e.g. the
+		// green outline on prepared spells in "known" mode) can key off it.
+		const viewMode = this._getSpellViewMode();
+		container.classList?.remove("charsheet__spell-lists--current-mode", "charsheet__spell-lists--prepared-mode", "charsheet__spell-lists--known-mode");
+		container.classList?.add(`charsheet__spell-lists--${viewMode}-mode`);
 
 		container.innerHTML = "";
 
@@ -6398,8 +6469,17 @@ class CharacterSheetSpells {
 			filtered = filtered.filter(s => s.level === parseInt(this._spellLevelFilter));
 		}
 
-		// For spellbook casters, separate prepared vs unprepared spells
-		if (hasSpellbook && filtered.some(s => s.level > 0)) {
+		// BUG 5: restrict the visible spells to the active view mode BEFORE layout, so all
+		// downstream layouts (spellbook/standard) render only the intended subset.
+		filtered = this._filterSpellsForViewMode(filtered, viewMode);
+
+		if (viewMode === "known") {
+			// KNOWN view: every known spell, grouped by level, with click-to-prepare toggles
+			// (only where the owner is a prepared caster — enforced by _shouldShowPrepareToggle)
+			// and a green outline on already-prepared spells (mode-scoped CSS on .prepared).
+			this._renderStandardSpellLayout(container, filtered, spellcastingInfo);
+		} else if (hasSpellbook && filtered.some(s => s.level > 0)) {
+			// For spellbook casters, separate prepared vs unprepared spells
 			this._renderSpellbookLayout(container, filtered, spellcastingInfo);
 		} else {
 			// Standard layout for known casters
@@ -6408,7 +6488,10 @@ class CharacterSheetSpells {
 
 		const innateSpells = this._state.getInnateSpells();
 		if (!filtered.length && !innateSpells.length) {
-			container.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center">No spells</p>`);
+			const emptyMsg = viewMode === "prepared"
+				? "No prepared spells"
+				: (viewMode === "known" ? "No known spells" : "No spells");
+			container.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center">${emptyMsg}</p>`);
 		}
 
 		// Keep the cantrip/known/prepared counters in sync with the list. The
@@ -6418,6 +6501,111 @@ class CharacterSheetSpells {
 		// full reload). _renderSpellTrackingUI does not call back into this
 		// method, so there's no recursion.
 		this._renderSpellTrackingUI();
+	}
+
+	/**
+	 * BUG 5: return the subset of spells to display for a given view mode.
+	 *  - "current" / "known": all spells (known view shows everything, with prepare toggles).
+	 *  - "prepared": cantrips (always available) + spells that are prepared or always-prepared.
+	 * DOM-free so it can be unit-tested directly.
+	 * @param {Array} spells
+	 * @param {string} mode
+	 * @returns {Array}
+	 */
+	_filterSpellsForViewMode (spells, mode) {
+		if (!Array.isArray(spells)) return [];
+		if (mode !== "prepared") return spells;
+		return spells.filter(s => s.level === 0 || s.prepared || s.alwaysPrepared);
+	}
+
+	/**
+	 * BUG 5: render the clearly-visible segmented Current / Prepared / Known toggle above the
+	 * spell list. Idempotent — rebuilt on every _renderSpellList so the active highlight tracks
+	 * the persisted mode. Buttons use the delegated .charsheet__spell-view-btn click handler.
+	 */
+	_renderSpellViewToggle () {
+		const host = document.getElementById("charsheet-spell-view-toggle");
+		if (!host) return;
+		const active = this._getSpellViewMode();
+		const modes = [
+			{id: "current", label: "Current", icon: "\u{1F4CB}", title: "Standard view — all spells in the default layout"},
+			{id: "prepared", label: "Prepared", icon: "\u{1F4D6}", title: "Only spells you currently have prepared"},
+			{id: "known", label: "Known", icon: "\u{1F4DA}", title: "All known spells — click to prepare/unprepare (prepared spells are outlined in green)"},
+		];
+		host.innerHTML = "";
+		const seg = e_({outer: `
+			<div class="charsheet__spell-view-toggle" role="group" aria-label="Spell view mode">
+				<span class="charsheet__spell-view-toggle-label ve-muted ve-small mr-2">View:</span>
+			</div>
+		`});
+		modes.forEach(m => {
+			const isActive = m.id === active;
+			const btn = e_({outer: `
+				<button type="button"
+					class="ve-btn ve-btn-xs charsheet__spell-view-btn ${isActive ? "ve-btn-primary active" : "ve-btn-default"}"
+					data-view-mode="${m.id}"
+					aria-pressed="${isActive}"
+					title="${m.title}">
+					<span class="charsheet__spell-view-btn-icon mr-1">${m.icon}</span>${m.label}
+				</button>
+			`});
+			seg.append(btn);
+		});
+		host.append(seg);
+	}
+
+	// ========================================================================
+	// BUG 7: Arcane Recovery / Natural Recovery status indicator (spells tab)
+	// ========================================================================
+	/**
+	 * Resolve the current slot-recovery status (Arcane Recovery for Wizards, Natural Recovery
+	 * for Land Druids). Read-only — mirrors the exact spent-detection logic in
+	 * charactersheet-rest.js (`feature.uses.current <= 0`) without editing or hooking rest.js.
+	 * The status refreshes through the normal post-rest full re-render. DOM-free for testing.
+	 * @returns {{hasFeature: boolean, featureName: (string|null), used: boolean, available: boolean}}
+	 */
+	_getSlotRecoveryStatus () {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		const hasFeature = !!(calc.hasArcaneRecovery || calc.hasNaturalRecovery);
+		if (!hasFeature) return {hasFeature: false, featureName: null, used: false, available: false};
+		const featureName = calc.hasArcaneRecovery ? "Arcane Recovery" : "Natural Recovery";
+		const feature = this._state.getFeature?.(featureName) || null;
+		// Once per long rest. If the feature tracks uses and none remain, it has been spent.
+		const used = !!(feature?.uses && feature.uses.current <= 0);
+		return {hasFeature: true, featureName, used, available: !used};
+	}
+
+	/**
+	 * BUG 7: render the Arcane / Natural Recovery status row into the Spells tab, modeled on the
+	 * features-tab resource-row visual pattern. Clearly labels that slots are recovered via the
+	 * short-rest menu ("Recover slots on a Short Rest") and shows Used vs Available.
+	 */
+	_renderArcaneRecoveryStatus () {
+		const host = document.getElementById("charsheet-arcane-recovery-status");
+		if (!host) return;
+		host.innerHTML = "";
+
+		const status = this._getSlotRecoveryStatus();
+		if (!status.hasFeature) {
+			host.style.display = "none";
+			return;
+		}
+		host.style.display = "";
+
+		const statusBadge = status.used
+			? `<span class="badge badge-secondary charsheet__arcane-recovery-badge" title="Already used since your last long rest">Used</span>`
+			: `<span class="badge badge-success charsheet__arcane-recovery-badge" title="Available to use">Available</span>`;
+
+		const row = e_({outer: `
+			<div class="charsheet__resource-row charsheet__arcane-recovery-row" data-recovery-feature="${status.featureName}">
+				<span class="charsheet__resource-name">\u2728 ${status.featureName}</span>
+				<span class="charsheet__resource-recharge ve-muted ve-small ml-2">Recover slots on a Short Rest</span>
+				<div class="charsheet__resource-uses ml-auto">
+					${statusBadge}
+				</div>
+			</div>
+		`});
+		host.append(row);
 	}
 
 	/**
