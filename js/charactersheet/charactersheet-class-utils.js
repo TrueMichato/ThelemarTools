@@ -2847,6 +2847,14 @@ class CharacterSheetClassUtils {
 			if (typeof state.getStructuredFeatureChoices === "function") {
 				const groups = state.getStructuredFeatureChoices(feature) || [];
 				for (const group of groups) {
+					// ⚠️ MERGE-OVERLAP FLAG (R44 Bug 9): Principles of Devotion (Cleric TGTT) is
+					// OPT-IN and fully Overview-managed — the player chooses / changes / clears
+					// it from the Overview tab, never as a forced level-up choice. Skip
+					// auto-seeding it here so it is never pushed as a mandatory pending choice.
+					// This is the single, deliberately narrow edit to this method's body,
+					// permitted because opt-in Principles cannot be achieved without it.
+					if (String(feature.name || "").trim().toLowerCase() === "principles of devotion") continue;
+
 					// (a) Already resolved for THIS parent-instance (class + level-scoped)?
 					if (typeof state.hasChosenSubfeatureForParent === "function"
 						&& state.hasChosenSubfeatureForParent(feature.name, feature.source, feature.level, feature.className, feature.classSource)) continue;

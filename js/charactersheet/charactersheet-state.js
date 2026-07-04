@@ -13311,6 +13311,144 @@ class CharacterSheetState {
 		return out;
 	}
 
+	// =========================================================================
+	// (R44 Bug 9) Opt-in / changeable / removable structured sub-features.
+	// These power the Overview "Principles of Devotion" manager: a player can pick a
+	// principle when none is set, swap it mid-game, or clear it — none of which the forced
+	// level-up drain supported. Kept generic (parent-scoped) so any opt-in structured choice
+	// can reuse them, but currently only Principles of Devotion is Overview-managed.
+	// =========================================================================
+
+	/**
+	 * Apply a structured sub-feature OPTION outside the forced level-up drain: resolve it to a
+	 * full feature (so its effects parse), add it, and record the pick durably. Mirrors the
+	 * apply half of {@link _fulfillSubfeatureChoice} but takes an explicit parent scope + option
+	 * so it can be driven from the Overview managers.
+	 * @param {{parent:string, parentSource?:?string, parentClass?:?string, parentClassSource?:?string, level?:?number}} parentInfo
+	 * @param {{name:string, source?:string, className?:string, classSource?:string, subclassShortName?:string, subclassSource?:string, entries?:Array, level?:number}} option
+	 * @returns {object|null} The applied feature, or null on failure.
+	 * @private
+	 */
+	_applyChosenSubfeatureOption (parentInfo, option) {
+		if (!parentInfo?.parent || !option?.name) return null;
+		const resolved = this.resolveFeatureRef(option);
+		const built = CharacterSheetClassUtils.buildFeatureStateObject(
+			resolved || {name: option.name, source: option.source, entries: option.entries || []},
+			{
+				className: option.className,
+				classSource: option.classSource || option.source,
+				subclassShortName: option.subclassShortName,
+				subclassSource: option.subclassSource,
+				level: parentInfo.level != null ? parentInfo.level : option.level,
+				featureType: option.subclassShortName ? "Subclass" : "Class",
+				isFeatureOption: true,
+				parentFeature: parentInfo.parent,
+			},
+		);
+		this.addFeature(built);
+		this._recordChosenSubfeature({
+			parent: parentInfo.parent,
+			parentSource: parentInfo.parentSource || null,
+			parentClass: parentInfo.parentClass || null,
+			parentClassSource: parentInfo.parentClassSource || null,
+			level: parentInfo.level != null ? parentInfo.level : null,
+			name: built.name,
+			source: built.source,
+		});
+		return built;
+	}
+
+	/**
+	 * Remove the chosen structured sub-feature(s) for a parent: tears down the applied
+	 * feature (and its auto-added resources/effects, via {@link removeFeature}) AND deletes the
+	 * durable `chosenSubfeatures` record(s) — closing the long-standing gap where `removeFeature`
+	 * left a stale "already chosen" record that blocked re-offering / re-picking. Idempotent.
+	 * @param {string} parent Parent feature name (e.g. "Principles of Devotion").
+	 * @param {{parentSource?:?string, parentClass?:?string, parentClassSource?:?string, level?:?number, name?:?string, source?:?string}} [scope]
+	 * @returns {Array} The removed record(s).
+	 */
+	removeChosenSubfeature (parent, scope = {}) {
+		if (!parent) return [];
+		const {parentSource = null, parentClass = null, parentClassSource = null, level = null, name = null, source = null} = scope;
+		const eq = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+		const recs = (this._data.chosenSubfeatures || []).filter(r =>
+			eq(r.parent, parent)
+			&& (parentSource == null || eq(r.parentSource, parentSource))
+			&& (parentClass == null || eq(r.parentClass, parentClass))
+			&& (parentClassSource == null || eq(r.parentClassSource, parentClassSource))
+			&& (level == null || Number(r.level) === Number(level))
+			&& (name == null || eq(r.name, name))
+			&& (source == null || eq(r.source, source)));
+		if (!recs.length) return [];
+		recs.forEach(r => this.removeFeature(r.name, r.source));
+		this._data.chosenSubfeatures = (this._data.chosenSubfeatures || []).filter(r => !recs.includes(r));
+		// A feature was torn down — re-derive class-feature effects so downstream state agrees.
+		this.applyClassFeatureEffects?.();
+		return recs;
+	}
+
+	/**
+	 * Change the chosen structured sub-feature for a parent to a new option: removes the current
+	 * pick (feature + record) then applies the new one. Used by the Overview manager to let a
+	 * player swap their Principle of Devotion mid-game.
+	 * @param {{parent:string, parentSource?:?string, parentClass?:?string, parentClassSource?:?string, level?:?number}} parentInfo
+	 * @param {{name:string, source?:string, className?:string, classSource?:string, subclassShortName?:string, subclassSource?:string, entries?:Array, level?:number}} newOption
+	 * @returns {object|null} The newly applied feature, or null on failure.
+	 */
+	changeChosenSubfeature (parentInfo, newOption) {
+		if (!parentInfo?.parent || !newOption?.name) return null;
+		this.removeChosenSubfeature(parentInfo.parent, {
+			parentSource: parentInfo.parentSource,
+			parentClass: parentInfo.parentClass,
+			parentClassSource: parentInfo.parentClassSource,
+			level: parentInfo.level,
+		});
+		const built = this._applyChosenSubfeatureOption(parentInfo, newOption);
+		this.applyClassFeatureEffects?.();
+		return built;
+	}
+
+	/**
+	 * Set (opt in to) a chosen structured sub-feature for a parent when none is currently set,
+	 * or swap it if one already is. Thin convenience wrapper around
+	 * {@link changeChosenSubfeature} / {@link _applyChosenSubfeatureOption}.
+	 * @param {{parent:string, parentSource?:?string, parentClass?:?string, parentClassSource?:?string, level?:?number}} parentInfo
+	 * @param {object} option
+	 * @returns {object|null}
+	 */
+	setChosenSubfeature (parentInfo, option) {
+		return this.changeChosenSubfeature(parentInfo, option);
+	}
+
+	/**
+	 * (R44 Bug 9) Overview support for the opt-in Principles of Devotion manager. Locates the
+	 * parent "Principles of Devotion" feature (a stored copy if present, else the class-feature
+	 * catalog), enumerates its principle options, and reports the currently-chosen record.
+	 * Returns null when the character has no Principles of Devotion available (not a TGTT Cleric,
+	 * or below level 2, or the catalog isn't loaded).
+	 * @returns {{parentInfo:object, options:Array, current:?object}|null}
+	 */
+	getPrinciplesOfDevotionState () {
+		const PARENT = "principles of devotion";
+		let feature = (this._data.features || []).find(f => String(f?.name || "").toLowerCase() === PARENT);
+		if (!feature) {
+			feature = (this._classFeatureCatalog || []).find(c => String(c?.name || "").toLowerCase() === PARENT) || null;
+		}
+		if (!feature) return null;
+		const groups = this.getStructuredFeatureChoices(feature) || [];
+		const group = groups.find(g => Array.isArray(g.options) && g.options.length);
+		if (!group) return null;
+		const parentInfo = {
+			parent: feature.name,
+			parentSource: feature.source || null,
+			parentClass: feature.className || null,
+			parentClassSource: feature.classSource || null,
+			level: feature.level != null ? feature.level : null,
+		};
+		const current = (this._data.chosenSubfeatures || []).find(r => String(r.parent || "").toLowerCase() === PARENT) || null;
+		return {parentInfo, options: group.options, current};
+	}
+
 	/**
 	 * Resolve a parsed feature-ref descriptor to the full feature object from the loaded
 	 * class/subclass feature catalog (set via {@link setClassFeatureCatalog}). Matching is
@@ -22828,6 +22966,25 @@ class CharacterSheetState {
 		if (calculations.hasStormborn) {
 			effects.push({type: "speed", speedType: "fly", equalToWalk: true, source: "Stormborn"});
 		}
+
+		// NOTE (R44 Bug 1): Wrath of the Storm, Channel Divinity: Destructive Wrath and
+		// Thunderbolt Strike are NOT emitted here. They are STORED features (added by the
+		// Builder / level-up from class-cleric.json with full description text), and the
+		// generic stored-feature pipeline already surfaces them to the player:
+		//   • Wrath of the Storm → FeatureUsesParser mints a WIS-mod / long-rest use pool
+		//     (addResource) and its "use your reaction" text classifies it as a Reaction in
+		//     getActivatableFeatures().
+		//   • Channel Divinity: Destructive Wrath → surfaces in getActivatableFeatures() as a
+		//     spendable Channel-Divinity option (channelDivinityCost) against the shared
+		//     Channel Divinity resource.
+		//   • Thunderbolt Strike → a passive on-hit rider, shown verbatim in the Features
+		//     panel (full auto-push mechanics live in the Combat attack pipeline, out of the
+		//     cleric-state scope).
+		// The `hasWrathOfTheStorm` / `hasDestructiveWrath` / `hasThunderboltStrike` calc flags
+		// are an alternate representation that nothing consumes; emitting inert effect objects
+		// for them (types with no `_applyFeatureEffect` handler) would only relocate dead code,
+		// not add any player-facing surface — so we deliberately do not. See
+		// CharacterSheetTempestFeatures.test.js for the real-surface assertions.
 
 		// =========================================================
 		// SUBCLASS-GRANTED COMBAT TRADITIONS (TGTT)

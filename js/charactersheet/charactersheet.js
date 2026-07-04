@@ -2930,9 +2930,11 @@ class CharacterSheetPage {
 		this._renderResources();
 		this._renderOverviewMetamagic();
 		this._renderOverviewRanger();
+		this._renderOverviewPrinciples();
 		this._renderActiveStates();
 		this._renderFavouritesOverview();
 		this._renderOverviewActions();
+		this._renderOverviewSpecialtiesFeats();
 		this._renderAttacks();
 		this._renderQuickSpells();
 		this._renderAbilitiesDetailed();
@@ -6488,6 +6490,91 @@ class CharacterSheetPage {
 		}
 	}
 
+	/**
+	 * (R44 Bug 9) Render the opt-in Principles of Devotion manager in the Overview tab.
+	 * Cleric (TGTT) only. Shows the current principle (hoverable), a selector to choose/change
+	 * among the nine principles, and a "None" option to remove the pledge entirely. Modeled on
+	 * `_renderOverviewRanger`. Hidden for any character without a Principles of Devotion feature.
+	 */
+	_renderOverviewPrinciples () {
+		const section = document.getElementById("charsheet-overview-principles-section");
+		const container = document.getElementById("charsheet-overview-principles");
+		if (!section || !container) return;
+
+		const info = this._state.getPrinciplesOfDevotionState?.();
+		if (!info || !Array.isArray(info.options) || !info.options.length) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const {parentInfo, options, current} = info;
+		const currentName = current?.name || null;
+
+		// ----- Current principle (hoverable when its entries resolve) -----
+		const header = document.createElement("div");
+		header.className = "ve-flex-v-center gap-2 mb-2 ve-flex-wrap";
+		let currentBadge;
+		if (currentName) {
+			const feat = this._state.getFeature?.(currentName);
+			const entries = Array.isArray(feat?.entries) && feat.entries.length ? feat.entries : null;
+			const hov = entries ? CharacterSheetClassUtils.buildInlineEntriesHoverLink?.(currentName, currentName, entries) : null;
+			currentBadge = `<span class="badge badge-info" style="font-size: 1em; padding: 5px 10px;">📿 ${hov || currentName}</span>`;
+		} else {
+			currentBadge = `<span class="badge badge-secondary" style="font-size: 1em; padding: 5px 10px;">Not pledged</span>`;
+		}
+		header.innerHTML = `<strong>Current Principle:</strong> ${currentBadge}`;
+		container.appendChild(header);
+
+		// ----- Selector (change / clear) -----
+		const controls = document.createElement("div");
+		controls.className = "ve-flex-v-center gap-2 ve-flex-wrap";
+
+		const select = document.createElement("select");
+		select.className = "form-control input-sm charsheet__principles-select";
+		select.style.maxWidth = "260px";
+		const noneOpt = document.createElement("option");
+		noneOpt.value = "";
+		noneOpt.textContent = "— None / Not pledged —";
+		if (!currentName) noneOpt.selected = true;
+		select.appendChild(noneOpt);
+		options.forEach(o => {
+			const opt = document.createElement("option");
+			opt.value = o.name;
+			opt.textContent = o.name;
+			if (o.description) opt.title = o.description;
+			if (currentName && o.name.toLowerCase() === currentName.toLowerCase()) opt.selected = true;
+			select.appendChild(opt);
+		});
+		controls.appendChild(select);
+		container.appendChild(controls);
+
+		// ----- Description of the current pledge (recall aid) -----
+		const desc = document.createElement("p");
+		desc.className = "ve-small ve-muted mb-0 mt-1 charsheet__principles-desc";
+		const currentOpt = options.find(o => currentName && o.name.toLowerCase() === currentName.toLowerCase());
+		desc.textContent = currentOpt?.description
+			|| "Pledge to uphold a principle for a boon from your greater entity — or leave yourself unpledged.";
+		container.appendChild(desc);
+
+		select.addEventListener("change", () => {
+			const val = select.value;
+			if (!val) {
+				this._state.removeChosenSubfeature?.("Principles of Devotion", {});
+				JqueryUtil.doToast({type: "info", content: "Cleared your Principle of Devotion."});
+			} else {
+				const option = options.find(o => o.name === val);
+				if (!option) return;
+				this._state.setChosenSubfeature?.(parentInfo, option);
+				JqueryUtil.doToast({type: "success", content: `Pledged the ${val} principle.`});
+			}
+			this.saveCharacter();
+			this.renderCharacter();
+		});
+	}
+
 	_useOverviewResource (resource) {
 		if (resource.current <= 0) {
 			JqueryUtil.doToast({type: "warning", content: `No uses remaining for ${resource.name}!`});
@@ -6581,6 +6668,67 @@ class CharacterSheetPage {
 
 			container.append(row);
 		}
+	}
+
+	/**
+	 * (R44 Bug 6) Render an Overview section listing the character's Specialties (feature-options,
+	 * `isFeatureOption === true`) and Feats, each with a hover tooltip for quick recall. Modeled on
+	 * `_renderOverviewActions`. Hidden when the character has neither specialties nor feats.
+	 */
+	_renderOverviewSpecialtiesFeats () {
+		const section = document.getElementById("charsheet-overview-specialties-feats-section");
+		const container = document.getElementById("charsheet-overview-specialties-feats");
+		if (!container) return;
+
+		const feats = this._state.getFeats?.() || [];
+		const specialties = (this._state.getFeatures?.() || []).filter(f => f.isFeatureOption === true);
+
+		if (!feats.length && !specialties.length) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+		container.innerHTML = "";
+
+		const hoverEntriesFor = (entity) => {
+			if (Array.isArray(entity?.entries) && entity.entries.length) return entity.entries;
+			if (typeof entity?.description === "string" && entity.description.trim()) return [entity.description];
+			return null;
+		};
+
+		const buildGroup = (title, icon, items) => {
+			if (!items.length) return;
+			const group = e_({outer: `
+				<div class="charsheet__specialties-feats-group mb-2">
+					<div class="ve-flex-v-center mb-1">
+						<strong class="mr-2">${icon} ${title}</strong>
+						<span class="badge badge-outline-secondary ve-small">${items.length}</span>
+					</div>
+				</div>
+			`});
+
+			for (const item of items) {
+				const entries = hoverEntriesFor(item);
+				const hoverHtml = entries
+					? CharacterSheetClassUtils.buildInlineEntriesHoverLink?.(item.name, item.name, entries)
+					: null;
+				const nameHtml = hoverHtml
+					|| `<span>${(item.name || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>`;
+				const row = e_({outer: `
+					<div class="charsheet__specialty-feat-row ve-flex-v-center py-1 px-2 mb-1 rounded"
+						style="background: var(--cs-bg-surface, var(--rgb-bg-alt, #1e293b));">
+						<span class="mr-2">${icon}</span>
+						<span class="charsheet__specialty-feat-name flex-grow-1" style="min-width: 0;">${nameHtml}</span>
+					</div>
+				`});
+				group.append(row);
+			}
+			container.append(group);
+		};
+
+		buildGroup("Specialties", "🎓", specialties);
+		buildGroup("Feats", "🌟", feats);
 	}
 
 	// #region Favourites (Overview)
