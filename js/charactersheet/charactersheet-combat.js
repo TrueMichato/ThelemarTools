@@ -798,6 +798,13 @@ class CharacterSheetCombat {
 			delete weapon.attackOverrides;
 			delete weapon.customAttackBonus;
 			delete weapon.customDamageBonus;
+			// Persist the clear onto the backing inventory item — `weapon` is a shallow
+			// copy from getItems(), so deleting here alone would not survive save/reload.
+			this._state.updateInventoryItemAttackOverrides?.(weapon.id, {
+				attackOverrides: null,
+				customAttackBonus: null,
+				customDamageBonus: null,
+			});
 			this.renderAttacks();
 			this._page._inventory?.render?.();
 			this._page._saveCurrentCharacter?.();
@@ -820,6 +827,15 @@ class CharacterSheetCombat {
 			// Also update legacy custom bonus fields for backward compatibility
 			weapon.customAttackBonus = parseInt(bonusInput.value) || 0;
 			weapon.customDamageBonus = parseInt(dmgBonusInput.value) || 0;
+
+			// Persist the overrides onto the backing inventory item. `weapon` is a shallow
+			// copy from getItems(), so without this the edits never reach _data.inventory
+			// and are lost on save/reload (and unseen by the auto-attack read-sites).
+			this._state.updateInventoryItemAttackOverrides?.(weapon.id, {
+				attackOverrides: weapon.attackOverrides,
+				customAttackBonus: weapon.customAttackBonus,
+				customDamageBonus: weapon.customDamageBonus,
+			});
 
 			this.renderAttacks();
 			this._page._inventory?.render?.();
