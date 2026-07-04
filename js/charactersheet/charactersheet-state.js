@@ -22868,58 +22868,24 @@ class CharacterSheetState {
 			effects.push({type: "speed", speedType: "fly", equalToWalk: true, source: "Stormborn"});
 		}
 
-		// Tempest Domain reaction / Channel-Divinity option / on-hit rider. These three
-		// calculation flags used to be SET but never consumed, so the features were invisible
-		// to every downstream surface. They are emitted here as standardized, self-describing
-		// effect objects (mirroring the Stormborn emission above). `_applyFeatureEffect` has no
-		// handler for these `type`s, so its `default: return null` leaves them mechanically
-		// inert — they exist purely so reminder/overview/combat surfaces (and tests) can read
-		// them without any of them re-implementing the Tempest rules.
-		//
-		// Wrath of the Storm (Tempest L1): a reaction dealing 2d8 lightning OR thunder to an
-		// attacker within 5 ft, a number of times per long rest equal to your Wisdom modifier.
-		// The actual trackable use pool is minted by the stored-feature `uses` pipeline
-		// (FeatureUsesParser parses the "times equal to your Wisdom modifier … long rest"
-		// text); this effect only surfaces it as a reaction and carries the derived numbers.
-		if (calculations.hasWrathOfTheStorm) {
-			effects.push({
-				type: "reaction",
-				name: "Wrath of the Storm",
-				damage: calculations.wrathOfTheStormDamage || "2d8",
-				damageTypes: ["lightning", "thunder"],
-				uses: calculations.wrathOfTheStormUses || 1,
-				recharge: "long",
-				source: "Tempest Domain",
-				note: "When a creature within 5 ft hits you, use your reaction to force a Dexterity save; it takes lightning or thunder damage (half on a success).",
-			});
-		}
-		// Destructive Wrath (Tempest L2): a Channel Divinity OPTION — spend a use of Channel
-		// Divinity to deal MAXIMUM lightning or thunder damage instead of rolling. Surfaced as
-		// a channel-divinity option (NOT a parallel resource): it consumes the shared Channel
-		// Divinity pool, so no new use pool is minted for it.
-		if (calculations.hasDestructiveWrath) {
-			effects.push({
-				type: "channelDivinityOption",
-				name: "Destructive Wrath",
-				consumes: "Channel Divinity",
-				source: "Tempest Domain",
-				note: "When you roll lightning or thunder damage, spend a use of Channel Divinity to deal maximum damage instead of rolling.",
-			});
-		}
-		// Thunderbolt Strike (Tempest L6): when you deal lightning damage to a Large or smaller
-		// creature you can push it up to 10 ft away. No forced-movement-rider infrastructure
-		// exists, so this is emitted as a push-rider reminder keyed off lightning damage.
-		if (calculations.hasThunderboltStrike) {
-			effects.push({
-				type: "pushRider",
-				name: "Thunderbolt Strike",
-				trigger: "lightning damage",
-				push: 10,
-				targetSize: "Large or smaller",
-				source: "Tempest Domain",
-				note: "When you deal lightning damage to a Large or smaller creature, you can push it up to 10 ft away from you.",
-			});
-		}
+		// NOTE (R44 Bug 1): Wrath of the Storm, Channel Divinity: Destructive Wrath and
+		// Thunderbolt Strike are NOT emitted here. They are STORED features (added by the
+		// Builder / level-up from class-cleric.json with full description text), and the
+		// generic stored-feature pipeline already surfaces them to the player:
+		//   • Wrath of the Storm → FeatureUsesParser mints a WIS-mod / long-rest use pool
+		//     (addResource) and its "use your reaction" text classifies it as a Reaction in
+		//     getActivatableFeatures().
+		//   • Channel Divinity: Destructive Wrath → surfaces in getActivatableFeatures() as a
+		//     spendable Channel-Divinity option (channelDivinityCost) against the shared
+		//     Channel Divinity resource.
+		//   • Thunderbolt Strike → a passive on-hit rider, shown verbatim in the Features
+		//     panel (full auto-push mechanics live in the Combat attack pipeline, out of the
+		//     cleric-state scope).
+		// The `hasWrathOfTheStorm` / `hasDestructiveWrath` / `hasThunderboltStrike` calc flags
+		// are an alternate representation that nothing consumes; emitting inert effect objects
+		// for them (types with no `_applyFeatureEffect` handler) would only relocate dead code,
+		// not add any player-facing surface — so we deliberately do not. See
+		// CharacterSheetTempestFeatures.test.js for the real-surface assertions.
 
 		// =========================================================
 		// SUBCLASS-GRANTED COMBAT TRADITIONS (TGTT)
