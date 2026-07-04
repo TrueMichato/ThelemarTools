@@ -29,14 +29,20 @@ beforeAll(async () => {
 	CharacterSheetRest = (await import("../../../js/charactersheet/charactersheet-rest.js")).CharacterSheetRest;
 });
 
-/** Build a Rest instance WITHOUT running the DOM-wiring constructor. */
+/**
+ * Build a Rest instance WITHOUT running the DOM-wiring constructor. The fake page
+ * records `saveCharacter` calls (with the state's user-visible fields captured at
+ * call time) so tests can assert the undo is PERSISTED, not just restored in memory.
+ */
 function makeRest (state) {
 	const rest = Object.create(CharacterSheetRest.prototype);
 	const page = {
 		_lastRestSnapshot: null,
+		saveCalls: [],
+		renderCalls: 0,
 		getState: () => state,
-		saveCharacter: () => {},
-		renderCharacter: () => {},
+		saveCharacter () { this.saveCalls.push(fields(state)); },
+		renderCharacter () { this.renderCalls++; },
 	};
 	rest._state = state;
 	rest._page = page;
@@ -200,6 +206,45 @@ describe("#8 — Undo rest (full-snapshot capture/restore)", () => {
 
 			// Restores to the SECOND snapshot, not the first.
 			expect(fields(state)).toEqual(afterFirstMutation);
+		});
+	});
+
+	describe("Undo is persisted (guardrail #2)", () => {
+		it("saves the character after restoring, so a reload reflects the undo (save state == pre-rest)", () => {
+			const state = makeWornCaster();
+			const {rest, page} = makeRest(state);
+
+			const before = fields(state);
+
+			// Simulate a long rest (which normally also calls saveCharacter) + its mutations.
+			rest._captureRestSnapshot("long");
+			state.setHp(state.getMaxHp(), state.getMaxHp(), 0);
+			for (let lvl = 1; lvl <= 9; lvl++) {
+				const max = state.getSpellSlotsMax(lvl);
+				if (max > 0) state.setSpellSlots(lvl, max, max);
+			}
+			state.setExhaustion(1);
+			state.removeCondition("poisoned");
+
+			const savesBeforeUndo = page.saveCalls.length;
+
+			expect(rest._onUndoRest()).toBe(true);
+
+			// The undo must persist: saveCharacter was called exactly once more...
+			expect(page.saveCalls.length).toBe(savesBeforeUndo + 1);
+			// ...and the state captured AT SAVE TIME already matches pre-rest (i.e. the
+			// restore happened before the save, so storage receives the pre-rest state).
+			expect(page.saveCalls[page.saveCalls.length - 1]).toEqual(before);
+			// And it re-rendered so the UI reflects the undo.
+			expect(page.renderCalls).toBeGreaterThan(0);
+		});
+
+		it("does NOT save when there is nothing to undo", () => {
+			const state = makeWornCaster();
+			const {rest, page} = makeRest(state);
+
+			expect(rest._onUndoRest()).toBe(false);
+			expect(page.saveCalls.length).toBe(0);
 		});
 	});
 
