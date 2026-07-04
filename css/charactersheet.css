@@ -12189,6 +12189,60 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 /* ========================================================================
+   BUG 5: Spells-tab view toggle (Current / Prepared / Known)
+   ======================================================================== */
+.charsheet__spell-view-toggle {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	padding: 0.35rem 0.5rem;
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.12));
+	border-radius: var(--cs-radius-md, 0.4rem);
+	background: rgba(139, 92, 246, 0.06);
+}
+
+.charsheet__spell-view-toggle-label {
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.charsheet__spell-view-btn.active,
+.charsheet__spell-view-btn[aria-pressed="true"] {
+	font-weight: 700;
+	box-shadow: 0 0 0 1px var(--cs-primary, #6366f1) inset;
+}
+
+/* KNOWN view: highlight prepared spells with a clear green outline so players can
+   see at a glance which known spells are currently prepared. Reuses the .prepared
+   class already applied by _renderSpellItem; scoped to known mode only. */
+.charsheet__spell-lists--known-mode .charsheet__spell-item.prepared {
+	outline: 2px solid var(--cs-success, #10b981);
+	outline-offset: -2px;
+	border-radius: var(--cs-radius-sm, 0.25rem);
+}
+
+/* ========================================================================
+   BUG 7: Arcane / Natural Recovery status row (spells tab)
+   ======================================================================== */
+.charsheet__arcane-recovery-status {
+	margin-bottom: 0.5rem;
+}
+
+.charsheet__arcane-recovery-row {
+	align-items: center;
+	padding: 0.4rem 0.6rem;
+	border: 1px solid rgba(var(--rgb-info-rgb, 23, 162, 184), 0.25);
+	border-radius: var(--cs-radius-md, 0.4rem);
+	background: rgba(var(--rgb-info-rgb, 23, 162, 184), 0.06);
+}
+
+.charsheet__arcane-recovery-row .charsheet__resource-name {
+	font-weight: 600;
+}
+
+/* ========================================================================
    Rest Modal Styles
    ======================================================================== */
 .charsheet__rest-modal {
