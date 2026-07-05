@@ -6523,15 +6523,26 @@ class CharacterSheetSpells {
 	 * spell list. Idempotent — rebuilt on every _renderSpellList so the active highlight tracks
 	 * the persisted mode. Buttons use the delegated .charsheet__spell-view-btn click handler.
 	 */
+	/**
+	 * BUG 5: DOM-free source of truth for the three view-mode toggle buttons (id/label/icon/
+	 * title). Kept separate from _renderSpellViewToggle so the labels/tooltips can be unit-tested
+	 * without a DOM. Internal `id`s (and the persisted localStorage value) are intentionally kept
+	 * as "current"/"prepared"/"known" — only the display labels are user-facing.
+	 * @returns {Array<{id: string, label: string, icon: string, title: string}>}
+	 */
+	_getSpellViewModes () {
+		return [
+			{id: "current", label: "Prepared/known split", icon: "\u{1F4CB}", title: "Default view — prepared spells and known spells shown as separate sections"},
+			{id: "prepared", label: "Prepared", icon: "\u{1F4D6}", title: "Only spells you currently have prepared"},
+			{id: "known", label: "Known", icon: "\u{1F4DA}", title: "All known spells — click to prepare/unprepare (prepared spells are outlined in green)"},
+		];
+	}
+
 	_renderSpellViewToggle () {
 		const host = document.getElementById("charsheet-spell-view-toggle");
 		if (!host) return;
 		const active = this._getSpellViewMode();
-		const modes = [
-			{id: "current", label: "Current", icon: "\u{1F4CB}", title: "Standard view — all spells in the default layout"},
-			{id: "prepared", label: "Prepared", icon: "\u{1F4D6}", title: "Only spells you currently have prepared"},
-			{id: "known", label: "Known", icon: "\u{1F4DA}", title: "All known spells — click to prepare/unprepare (prepared spells are outlined in green)"},
-		];
+		const modes = this._getSpellViewModes();
 		host.innerHTML = "";
 		const seg = e_({outer: `
 			<div class="charsheet__spell-view-toggle" role="group" aria-label="Spell view mode">
@@ -6682,6 +6693,19 @@ class CharacterSheetSpells {
 	}
 
 	/**
+	 * BUG (R45): the browse-all "Spellbook" section (unprepared spells) is only meaningful in
+	 * views that show unprepared spells. In "prepared" view every leveled spell has been filtered
+	 * down to prepared/always-prepared already, so the Spellbook section would only ever show an
+	 * empty "all prepared" placeholder — a dead-end box. Skip it entirely in that mode.
+	 * DOM-free so it can be unit-tested directly.
+	 * @param {string} mode active spell view mode
+	 * @returns {boolean}
+	 */
+	_shouldRenderSpellbookSection (mode) {
+		return mode !== "prepared";
+	}
+
+	/**
 	 * Render spellbook layout - separates prepared spells from unprepared (for Wizards)
 	 */
 	_renderSpellbookLayout (container, spells, spellcastingInfo) {
@@ -6755,6 +6779,10 @@ class CharacterSheetSpells {
 		}
 
 		container.append(preparedSection);
+
+		// R45: in "prepared" view the Spellbook (unprepared spells) section is a dead-end empty
+		// box — every leveled spell here is already prepared — so skip it entirely.
+		if (!this._shouldRenderSpellbookSection(this._getSpellViewMode())) return;
 
 		// Render SPELLBOOK section (unprepared spells)
 		const totalInSpellbook = leveledSpells.length;
