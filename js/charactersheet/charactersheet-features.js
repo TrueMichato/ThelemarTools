@@ -2727,6 +2727,11 @@ class CharacterSheetFeatures {
 		this._page?._renderAbilitiesDetailed?.();
 		this._page?._renderSavingThrows?.();
 		this._page?._renderSkills?.();
+		// (Bug 1) Narrative boons surface as real features in the Features tab — refresh the
+		// feature list + summary so a raised/lowered favour tier adds/removes the ability
+		// immediately, not only after a manual tab switch.
+		this._renderClassFeatures?.();
+		this._renderFeaturesSummary?.();
 		// (Bug 4) Limited/granted-cast boons mint tracked resources (Resources tab) that also
 		// surface as castable Combat resources — refresh both so deity/favor/boon changes are
 		// reflected immediately, not only after a manual tab switch.
