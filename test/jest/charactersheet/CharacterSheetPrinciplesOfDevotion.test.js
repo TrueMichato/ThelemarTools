@@ -109,6 +109,38 @@ describe("Principles of Devotion — Overview state", () => {
 		state.setClassFeatureCatalog([], []);
 		expect(state.getPrinciplesOfDevotionState()).toBeNull();
 	});
+
+	it("(Bug 5a) does NOT leak onto a non-Cleric whose catalog merely contains the feature", () => {
+		// A pure Rogue in a TGTT catalog: the cleric Principles feature is present in the
+		// loaded class-feature catalog, but the character has no Cleric level, so the
+		// Overview manager must stay hidden (getPrinciplesOfDevotionState → null).
+		const state = new CharacterSheetState();
+		state.addClass({name: "Rogue", source: "TGTT", level: 5});
+		state.setClassFeatureCatalog([F_PRINCIPLES, F_CHASTE, F_MERCIFUL], []);
+		expect(state.getClassLevel("Cleric")).toBe(0);
+		expect(state.getPrinciplesOfDevotionState()).toBeNull();
+	});
+
+	it("(Bug 5b) surfaces the already-chosen principle as current even without a resolvable option group", () => {
+		// A Cleric whose STORED Principles parent feature carries no re-resolvable options
+		// (e.g. its option refs point outside the loaded catalog), but a principle was picked
+		// at level-up (stored in chosenSubfeatures). The Overview must still show it as current.
+		const state = new CharacterSheetState();
+		state.addClass({name: "Cleric", source: "TGTT", level: 2});
+		state.addFeature({
+			name: "Principles of Devotion",
+			source: "TGTT",
+			level: 2,
+			className: "Cleric",
+			classSource: "TGTT",
+			description: "You pledge to uphold certain standards of behavior.",
+		});
+		state._recordChosenSubfeature({parent: "Principles of Devotion", parentClass: "Cleric", level: 2, name: "Chaste", source: "TGTT"});
+
+		const info = state.getPrinciplesOfDevotionState();
+		expect(info).toBeTruthy();
+		expect(info.current?.name).toBe("Chaste");
+	});
 });
 
 describe("Principles of Devotion — set / change / remove", () => {
