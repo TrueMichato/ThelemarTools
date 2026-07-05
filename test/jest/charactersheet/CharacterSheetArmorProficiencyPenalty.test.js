@@ -14,8 +14,10 @@
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 
 /** Build a wizard (proficient with NO armor and NO shields) wearing heavy armor. */
 function buildHeavyArmorWizard () {
@@ -83,6 +85,14 @@ describe("Armor Non-Proficiency Penalties (5e RAW)", () => {
 			expect(state.getAdvantageState("attack:melee").disadvantage).toBe(true);
 		});
 
+		it("imposes disadvantage on FINESSE attack rolls (finesse resolves to STR/DEX)", () => {
+			// Finesse weapons (and TGTT natural weapons) encode abilityMod "finesse",
+			// producing attackType "attack:melee:finesse". Since finesse uses STR or DEX
+			// (both penalised), it must also take disadvantage — previously it slipped through.
+			expect(state.getAdvantageState("attack:melee:finesse").disadvantage).toBe(true);
+			expect(state.aggregateModifiers("attack:melee:finesse").disadvantage).toBe(true);
+		});
+
 		it("does NOT impose disadvantage on a non-STR/DEX (spell) attack", () => {
 			expect(state.getAdvantageState("attack:ranged:int").disadvantage).toBe(false);
 			expect(state.getAdvantageState("attack:melee:cha").disadvantage).toBe(false);
@@ -136,6 +146,7 @@ describe("Armor Non-Proficiency Penalties (5e RAW)", () => {
 			expect(state.isSpellcastingBlockedByArmor()).toBe(false);
 			expect(state.getAdvantageState("save:str").disadvantage).toBe(false);
 			expect(state.getAdvantageState("attack:melee:str").disadvantage).toBe(false);
+			expect(state.getAdvantageState("attack:melee:finesse").disadvantage).toBe(false);
 		});
 	});
 
@@ -182,6 +193,57 @@ describe("Armor Non-Proficiency Penalties (5e RAW)", () => {
 				expect(s.getAdvantageState("save:str").disadvantage).toBe(true);
 				expect(s.getAdvantageState("attack:ranged:dex").disadvantage).toBe(true);
 			}
+		});
+	});
+
+	// The state layer only EXPOSES isSpellcastingBlockedByArmor(); the actual refusal
+	// lives in the Spells manager's shared casting-constraint choke point
+	// (_checkCastingConstraints), consumed by every real cast path via
+	// _pHandleCastingConstraints. These tests drive that pure function directly.
+	describe("Casting block enforcement (spells.js _checkCastingConstraints)", () => {
+		const SPELL = {name: "Fireball", source: "PHB", level: 3};
+		const SPELL_DATA = {name: "Fireball", source: "PHB", components: {v: true, s: true}};
+
+		/** Minimal Spells manager with a stubbed state, mirroring CharacterSheetSpellcastingFlow. */
+		const makeSpells = ({blocked = false, ignore = false} = {}) => {
+			const spells = Object.create(CharacterSheetSpells.prototype);
+			spells._page = {saveCharacter () {}};
+			spells._allSpells = [];
+			spells._state = {
+				getSettings: () => ({ignoreSpellcastingRestrictions: ignore}),
+				isIncapacitated: () => false,
+				getConditionNames: () => [],
+				getCastingConstraints: () => ({verbal: [], somatic: []}),
+				getActiveStates: () => [],
+				getFeatures: () => [],
+				isSpellcastingBlockedByArmor: () => blocked,
+			};
+			return spells;
+		};
+
+		it("refuses a slot/cantrip/ritual cast (enforceMaterial) when armor blocks casting", () => {
+			const spells = makeSpells({blocked: true});
+			const {block} = spells._checkCastingConstraints(SPELL, SPELL_DATA, null, {enforceMaterial: true});
+			expect(block).toMatch(/proficiency/i);
+			expect(block).toContain("Fireball");
+		});
+
+		it("does NOT block when the character is proficient (positive guard)", () => {
+			const spells = makeSpells({blocked: false});
+			const result = spells._checkCastingConstraints(SPELL, SPELL_DATA, null, {enforceMaterial: true});
+			expect(result.block).toBeNull();
+		});
+
+		it("does NOT block innate / item casting (no enforceMaterial) even in non-proficient armor", () => {
+			const spells = makeSpells({blocked: true});
+			const result = spells._checkCastingConstraints(SPELL, SPELL_DATA, null);
+			expect(result.block).toBeNull();
+		});
+
+		it("respects the ignoreSpellcastingRestrictions escape hatch", () => {
+			const spells = makeSpells({blocked: true, ignore: true});
+			const result = spells._checkCastingConstraints(SPELL, SPELL_DATA, null, {enforceMaterial: true});
+			expect(result).toEqual({block: null, checks: []});
 		});
 	});
 });
