@@ -2589,6 +2589,17 @@ class CharacterSheetSpells {
 			return {block: null, checks: []};
 		}
 
+		// RAW: wearing armor / wielding a shield you lack proficiency with prevents
+		// spellcasting. Gated on enforceMaterial so it applies to player-initiated
+		// slot/cantrip/ritual casting from the Spells tab (which all pass it) but not
+		// to innate / item-granted casting (which needs no components and never opts in).
+		if (opts.enforceMaterial && this._state.isSpellcastingBlockedByArmor?.()) {
+			return {
+				block: `Cannot cast ${spell.name} — you can't cast spells while wearing armor or wielding a shield you lack proficiency with.`,
+				checks: [],
+			};
+		}
+
 		// Check for incapacitation via active effects (covers all conditions with incapacitated flag)
 		if (this._state.isIncapacitated?.()) {
 			// Find which condition(s) are causing it for a clear message

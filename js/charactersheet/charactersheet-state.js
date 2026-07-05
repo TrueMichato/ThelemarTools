@@ -11098,8 +11098,10 @@ class CharacterSheetState {
 				// abilityUsed is encoded as the 3rd segment (e.g. "attack:melee:str").
 				// Fall back to the melee/ranged default when it is absent. Weapon
 				// attacks always use STR or DEX; spell attacks (cha/int/wis) are excluded.
+				// Finesse weapons (and TGTT natural weapons) encode "finesse" here — those
+				// resolve to STR *or* DEX, both penalised, so they are penalised too.
 				const ability = parts[2] || (parts[1] === "ranged" ? "dex" : "str");
-				return ability === "str" || ability === "dex";
+				return ability === "str" || ability === "dex" || ability === "finesse";
 			}
 			default:
 				return false;
