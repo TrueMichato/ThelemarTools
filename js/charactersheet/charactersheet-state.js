@@ -12964,6 +12964,21 @@ class CharacterSheetState {
 		}
 	}
 
+	// (Bug 4 follow-up) Restore a single innate-spell use (e.g. clicking a "used" pip in the
+	// Spells tab), mirroring the increment onto any linked divine-favor resource so the
+	// Spells/Resources/Combat surfaces never drift out of lockstep.
+	restoreInnateSpell (spellId) {
+		if (!this._data.spellcasting.innateSpells) return;
+		const spell = this._data.spellcasting.innateSpells.find(s => s.id === spellId);
+		if (spell?.uses && spell.uses.current < spell.uses.max) {
+			spell.uses.current = Math.min(spell.uses.current + 1, spell.uses.max);
+			if (spell.linkedResourceId) {
+				const resource = this._data.resources?.find(r => r.id === spell.linkedResourceId);
+				if (resource) resource.current = Math.max(0, Math.min(spell.uses.current, resource.max));
+			}
+		}
+	}
+
 	restoreInnateSpells (restType = "long") {
 		if (!this._data.spellcasting.innateSpells) return;
 		this._data.spellcasting.innateSpells.forEach(spell => {
